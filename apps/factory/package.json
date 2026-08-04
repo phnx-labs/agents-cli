@@ -355,6 +355,10 @@
         "title": "Agents: Detach (Send to Background)"
       },
       {
+        "command": "agents.toggleWatchdogAutoRotate",
+        "title": "Agents: Toggle Watchdog Auto-Rotate"
+      },
+      {
         "command": "agents.attach",
         "title": "Agents: Attach (Bring to Foreground)"
       },
@@ -639,7 +643,7 @@
         "agents.watchdog.autoRotate": {
           "type": "boolean",
           "default": true,
-          "description": "When an agent terminal's pinned version hits its limit (out_of_credits, rate_limited, or >=100% session), automatically spawn a fresh terminal on the best available signed-in version and replay /continue. The old terminal is closed."
+          "description": "When an agent terminal's tail shows an exhausted account (rate-limit / weekly-limit text), automatically spawn a fresh terminal via `agents run auto` — the CLI picks host, harness, and account — and replay /continue. When the CLI reports no healthy account anywhere, rotation is suppressed until the window resets (one skip event is logged). The old terminal is closed on success."
         },
         "agents.watchdog.rotateCooldownSeconds": {
           "type": "number",
@@ -649,7 +653,7 @@
         "agents.watchdog.tickSeconds": {
           "type": "number",
           "default": 120,
-          "description": "How often the extension checks agent terminals for a version that needs auto-rotating."
+          "description": "How often the extension checks agent terminal tails for an account that needs auto-rotating."
         }
       }
     },

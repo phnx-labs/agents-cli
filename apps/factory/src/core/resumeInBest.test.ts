@@ -1,25 +1,11 @@
 import { describe, test, expect } from 'bun:test';
-import * as fs from 'fs';
-import * as path from 'path';
 import {
-  pickBestVersion,
   sessionUsedPercent,
   inlineContinueInstructions,
-  buildLaunchCommand,
-  buildHostLaunchCommand,
-  rotatableVersionOf,
+  buildAgentRunLaunchCommand,
   buildResumeInput,
-  isVersionStillUsable,
-  AgentsViewJsonAgent,
   AgentsViewJsonVersion,
 } from './resumeInBest';
-
-// Real fixture captured from `agents view claude --json` on 2026-04-22.
-// Has 10 Claude versions, mixed states: rate_limited + out_of_credits across
-// 5 accounts, plus 3 not-signed-in entries. Also present: default flag on
-// 2.1.112 at 19% session, and 2.1.111 at 0% session on a different account.
-const FIXTURE_PATH = path.join(__dirname, 'testdata', 'view-claude.json');
-const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, 'utf-8')) as AgentsViewJsonAgent;
 
 function makeVersion(overrides: Partial<AgentsViewJsonVersion> = {}): AgentsViewJsonVersion {
   return {
@@ -39,100 +25,17 @@ function makeVersion(overrides: Partial<AgentsViewJsonVersion> = {}): AgentsView
   };
 }
 
-describe('pickBestVersion — real fixture', () => {
-  test('fixture has the expected shape', () => {
-    expect(fixture.agent).toBe('claude');
-    expect(fixture.versions.length).toBeGreaterThan(5);
-    expect(fixture.versions.some(v => v.isDefault)).toBe(true);
-    expect(fixture.versions.some(v => !v.signedIn)).toBe(true);
-    expect(fixture.versions.some(v => v.usageStatus === 'out_of_credits')).toBe(true);
+describe('sessionUsedPercent', () => {
+  test('returns the session window percent', () => {
+    expect(sessionUsedPercent(makeVersion({
+      windows: [{ key: 'session', usedPercent: 42, resetsAt: null }]
+    }))).toBe(42);
   });
 
-  test('picks the signed-in, not-out-of-credits version with lowest session%', () => {
-    const picked = pickBestVersion(fixture.versions);
-    expect(picked).not.toBeNull();
-    expect(picked!.signedIn).toBe(true);
-    expect(picked!.usageStatus).not.toBe('out_of_credits');
-
-    // Every other usable candidate must have session% >= picked's session%.
-    const usable = fixture.versions.filter(
-      v => v.signedIn && v.usageStatus !== 'out_of_credits'
-    );
-    for (const v of usable) {
-      expect(sessionUsedPercent(v)).toBeGreaterThanOrEqual(sessionUsedPercent(picked!));
-    }
-  });
-
-  test('does NOT pick the default if a better candidate exists', () => {
-    const def = fixture.versions.find(v => v.isDefault)!;
-    const picked = pickBestVersion(fixture.versions);
-    if (sessionUsedPercent(def) > sessionUsedPercent(picked!)) {
-      expect(picked!.version).not.toBe(def.version);
-    }
-  });
-});
-
-describe('pickBestVersion — synthetic cases', () => {
-  test('returns null when no versions are signed in', () => {
-    const versions = [
-      makeVersion({ signedIn: false, email: null }),
-      makeVersion({ signedIn: false, email: null, version: '2.1.100' }),
-    ];
-    expect(pickBestVersion(versions)).toBeNull();
-  });
-
-  test('returns null on empty input', () => {
-    expect(pickBestVersion([])).toBeNull();
-  });
-
-  test('prefers lower session% even when higher% has usageStatus=available', () => {
-    const versions = [
-      makeVersion({ version: 'A', usageStatus: 'available', windows: [{ key: 'session', usedPercent: 80, resetsAt: null }] }),
-      makeVersion({ version: 'B', usageStatus: 'rate_limited', windows: [{ key: 'session', usedPercent: 0, resetsAt: null }] }),
-    ];
-    expect(pickBestVersion(versions)!.version).toBe('B');
-  });
-
-  test('breaks ties on session% using usageStatus (available > rate_limited)', () => {
-    const versions = [
-      makeVersion({ version: 'A', usageStatus: 'rate_limited', windows: [{ key: 'session', usedPercent: 0, resetsAt: null }] }),
-      makeVersion({ version: 'B', usageStatus: 'available',    windows: [{ key: 'session', usedPercent: 0, resetsAt: null }] }),
-    ];
-    expect(pickBestVersion(versions)!.version).toBe('B');
-  });
-
-  test('breaks further ties using lastActive (more recent wins)', () => {
-    const versions = [
-      makeVersion({ version: 'older', lastActive: '2026-04-20T10:00:00Z', windows: [{ key: 'session', usedPercent: 0, resetsAt: null }] }),
-      makeVersion({ version: 'newer', lastActive: '2026-04-22T10:00:00Z', windows: [{ key: 'session', usedPercent: 0, resetsAt: null }] }),
-    ];
-    expect(pickBestVersion(versions)!.version).toBe('newer');
-  });
-
-  test('falls back to out_of_credits when every signed-in version is out_of_credits', () => {
-    const versions = [
-      makeVersion({ version: 'X', usageStatus: 'out_of_credits', windows: [{ key: 'session', usedPercent: 50, resetsAt: null }] }),
-      makeVersion({ version: 'Y', usageStatus: 'out_of_credits', windows: [{ key: 'session', usedPercent: 10, resetsAt: null }] }),
-    ];
-    const picked = pickBestVersion(versions);
-    expect(picked).not.toBeNull();
-    expect(picked!.version).toBe('Y'); // lowest session%
-  });
-
-  test('ignores not-signed-in entries even if they have 0% session', () => {
-    const versions = [
-      makeVersion({ version: 'fresh', signedIn: false, email: null, windows: [{ key: 'session', usedPercent: 0, resetsAt: null }] }),
-      makeVersion({ version: 'used', signedIn: true, windows: [{ key: 'session', usedPercent: 30, resetsAt: null }] }),
-    ];
-    expect(pickBestVersion(versions)!.version).toBe('used');
-  });
-
-  test('treats missing session window as 100% (worst case)', () => {
-    const versions = [
-      makeVersion({ version: 'no-session', windows: [{ key: 'week', usedPercent: 5, resetsAt: null }] }),
-      makeVersion({ version: 'has-session', windows: [{ key: 'session', usedPercent: 50, resetsAt: null }] }),
-    ];
-    expect(pickBestVersion(versions)!.version).toBe('has-session');
+  test('returns 100 when session window is missing', () => {
+    expect(sessionUsedPercent(makeVersion({
+      windows: [{ key: 'week', usedPercent: 5, resetsAt: null }]
+    }))).toBe(100);
   });
 });
 
@@ -174,26 +77,31 @@ Run \`agents sessions $ARGUMENTS\` to load the transcript.`;
   });
 });
 
-describe('buildLaunchCommand', () => {
-  test('claude gets --session-id with the new uuid', () => {
-    const cmd = buildLaunchCommand('claude', '2.1.111', 'claude', 'abc-123');
-    expect(cmd).toBe('claude@2.1.111 --session-id abc-123');
+describe('buildAgentRunLaunchCommand', () => {
+  test('no version pin — balanced rotation picks the account', () => {
+    expect(buildAgentRunLaunchCommand('codex')).toBe('agents run codex --interactive');
   });
 
-  test('claude without a new session id omits the flag', () => {
-    const cmd = buildLaunchCommand('claude', '2.1.111', 'claude', null);
-    expect(cmd).toBe('claude@2.1.111');
+  test('host is shell-quoted', () => {
+    expect(buildAgentRunLaunchCommand('claude', 'yosemite-s0')).toBe(
+      "agents run claude --interactive --host 'yosemite-s0'",
+    );
   });
 
-  test('codex does NOT get --session-id even if one is passed', () => {
-    const cmd = buildLaunchCommand('codex', '0.116.0', 'codex', 'abc-123');
-    expect(cmd).toBe('codex@0.116.0');
+  test('claude gets --session-id; other harnesses do not', () => {
+    expect(buildAgentRunLaunchCommand('claude', undefined, 'new-id')).toBe(
+      'agents run claude --interactive --session-id new-id',
+    );
+    expect(buildAgentRunLaunchCommand('codex', undefined, 'ignored')).toBe(
+      'agents run codex --interactive',
+    );
   });
 
-  test('gemini, cursor, opencode similarly skip the flag', () => {
-    expect(buildLaunchCommand('gemini', '1.0', 'gemini', 'x')).toBe('gemini@1.0');
-    expect(buildLaunchCommand('cursor-agent', '2.0', 'cursor', 'x')).toBe('cursor-agent@2.0');
-    expect(buildLaunchCommand('opencode', '3.0', 'opencode', 'x')).toBe('opencode@3.0');
+  test('quotes a device name so it cannot break out of the command', () => {
+    const hostile = "a'; echo pwned; #";
+    expect(buildAgentRunLaunchCommand('claude', hostile)).toBe(
+      `agents run claude --interactive --host 'a'\\''; echo pwned; #'`,
+    );
   });
 });
 
@@ -223,135 +131,5 @@ describe('buildResumeInput', () => {
     const input = buildResumeInput('OLD-ID', true, null);
     expect(input).toBe('/continue OLD-ID');
     expect(input).not.toContain('NEW');
-  });
-});
-
-describe('isVersionStillUsable', () => {
-  test('returns false for undefined/null (unknown version stays on legacy path)', () => {
-    expect(isVersionStillUsable(undefined)).toBe(false);
-    expect(isVersionStillUsable(null)).toBe(false);
-  });
-
-  test('returns false when the version is not signed in', () => {
-    const v = makeVersion({
-      signedIn: false,
-      email: null,
-      usageStatus: 'available',
-      windows: [{ key: 'session', usedPercent: 0, resetsAt: null }],
-    });
-    expect(isVersionStillUsable(v)).toBe(false);
-  });
-
-  test('returns false when the version is out_of_credits', () => {
-    const v = makeVersion({
-      usageStatus: 'out_of_credits',
-      windows: [{ key: 'session', usedPercent: 10, resetsAt: null }],
-    });
-    expect(isVersionStillUsable(v)).toBe(false);
-  });
-
-  test('returns false when session usage is at 100%', () => {
-    const v = makeVersion({
-      usageStatus: 'rate_limited',
-      windows: [{ key: 'session', usedPercent: 100, resetsAt: null }],
-    });
-    expect(isVersionStillUsable(v)).toBe(false);
-  });
-
-  test('returns true for available version with room', () => {
-    const v = makeVersion({
-      usageStatus: 'available',
-      windows: [{ key: 'session', usedPercent: 42, resetsAt: null }],
-    });
-    expect(isVersionStillUsable(v)).toBe(true);
-  });
-
-  test('returns true for rate_limited version with session room', () => {
-    // rate_limited means the 5-hour window is tight but not spent — still
-    // usable per our rule ("any version with usage is good enough").
-    const v = makeVersion({
-      usageStatus: 'rate_limited',
-      windows: [{ key: 'session', usedPercent: 85, resetsAt: null }],
-    });
-    expect(isVersionStillUsable(v)).toBe(true);
-  });
-
-  test('returns false when session window is missing (treated as 100%)', () => {
-    const v = makeVersion({
-      usageStatus: 'available',
-      windows: [{ key: 'week', usedPercent: 5, resetsAt: null }],
-    });
-    expect(isVersionStillUsable(v)).toBe(false);
-  });
-});
-
-describe('sessionUsedPercent', () => {
-  test('returns the session window percent', () => {
-    expect(sessionUsedPercent(makeVersion({
-      windows: [{ key: 'session', usedPercent: 42, resetsAt: null }]
-    }))).toBe(42);
-  });
-
-  test('returns 100 when session window is missing', () => {
-    expect(sessionUsedPercent(makeVersion({
-      windows: [{ key: 'week', usedPercent: 5, resetsAt: null }]
-    }))).toBe(100);
-  });
-});
-
-describe('rotatableVersionOf', () => {
-  test('uses the pinned version when the launch pinned one', () => {
-    expect(rotatableVersionOf({ agentType: 'claude', version: '2.1.113' })).toBe('2.1.113');
-  });
-
-  test('falls back to the version observed running — the reason the gate went dead', () => {
-    // Launches stopped pinning (balanced rotation picks the account), so a gate
-    // that read only `version` skipped every terminal and an exhausted agent
-    // just sat there. The running version is the one whose quota matters.
-    expect(rotatableVersionOf({ agentType: 'claude', statusVersion: '2.1.187' })).toBe('2.1.187');
-  });
-
-  test('prefers the pin over the observed version when both are known', () => {
-    expect(
-      rotatableVersionOf({ agentType: 'claude', version: '2.1.113', statusVersion: '2.1.187' }),
-    ).toBe('2.1.113');
-  });
-
-  test('declines a terminal whose version is unknown either way', () => {
-    expect(rotatableVersionOf({ agentType: 'claude' })).toBeUndefined();
-    expect(rotatableVersionOf({ agentType: 'claude', version: '', statusVersion: '' })).toBeUndefined();
-  });
-
-  test('declines every non-Claude harness — only Claude can swap accounts mid-session', () => {
-    expect(rotatableVersionOf({ agentType: 'codex', version: '0.124.0' })).toBeUndefined();
-    expect(rotatableVersionOf({ agentType: 'gemini', statusVersion: '1.2.3' })).toBeUndefined();
-    expect(rotatableVersionOf({})).toBeUndefined();
-  });
-});
-
-describe('buildHostLaunchCommand', () => {
-  test('relaunches on the device instead of quietly moving the work to this box', () => {
-    expect(buildHostLaunchCommand('claude', '2.1.187', 'yosemite-s0', 'new-session-id')).toBe(
-      "agents run claude@2.1.187 --interactive --host 'yosemite-s0' --session-id new-session-id",
-    );
-  });
-
-  test('omits --session-id for a harness that coins its own id', () => {
-    expect(buildHostLaunchCommand('codex', '0.124.0', 'zion', 'ignored')).toBe(
-      "agents run codex@0.124.0 --interactive --host 'zion'",
-    );
-  });
-
-  test('omits --session-id when there is none to pin', () => {
-    expect(buildHostLaunchCommand('claude', '2.1.187', 'zion', null)).toBe(
-      "agents run claude@2.1.187 --interactive --host 'zion'",
-    );
-  });
-
-  test('quotes a device name so it cannot break out of the command', () => {
-    const hostile = "a'; echo pwned; #";
-    expect(buildHostLaunchCommand('claude', '2.1.187', hostile, null)).toBe(
-      `agents run claude@2.1.187 --interactive --host 'a'\\''; echo pwned; #'`,
-    );
   });
 });

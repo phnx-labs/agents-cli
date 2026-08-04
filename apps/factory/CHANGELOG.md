@@ -6,6 +6,35 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [0.9.309] - 2026-08-03
 
+- **Watchdog auto-rotate delegates to `agents run auto` — no more rotate loops into exhausted accounts.**
+  The rotate path no longer re-implements account selection (`pickBestVersion`
+  was blind to weekly-limit windows and had a "better somewhere than nowhere"
+  fallback, so on 2026-08-03 it looped a resume-tab into the same exhausted
+  account every 120s, plus a Keychain prompt per tick from the `agents view
+  --json` probe). The watchdog now decides from the terminal's own tail
+  (agent-reported rate-limit text — no probing, no Keychain prompts) and the
+  rotate launches `agents run auto --interactive`, letting the CLI resolve
+  host (affinity) → harness (cross-harness headroom) → account (balanced).
+  When the CLI fails loud with `no healthy … resets <time>` — read off the
+  launch's shell-integration output stream — rotation on that host is
+  suppressed until the parsed reset, one `rotate` skip event is logged per
+  suppression window, and the tick keeps evaluating without spawning. The
+  version/account/harness labels are read back from the CLI session feed
+  (`agents sessions <id> --json`, now including the harness the CLI picked).
+  The dead picker (`pickBestVersion`, `buildLaunchCommand`,
+  `buildHostLaunchCommand`, `isVersionStillUsable`, `rotatableVersionOf`) and
+  the per-tick `agents view` probe are deleted. Requires agents-cli with
+  `agents run auto` (RUSH-2132).
+  Source: `src/vscode/extension.ts`, `src/vscode/watchdog.vscode.ts`,
+  `src/core/autoRotate.ts`, `src/core/resumeInBest.ts`,
+  `src/core/remoteSessions.ts`.
+
+- **`Agents: Toggle Watchdog Auto-Rotate` — the off switch that didn't exist during the incident.**
+  New palette command flipping `agents.watchdog.autoRotate` (global) with a
+  status-bar confirmation; the running loop picks the change up via its
+  configuration listener.
+  Source: `src/vscode/watchdog.vscode.ts`, `package.json`.
+
 - **The `(Pick Host)` host list shows every device instantly, even on a busy machine.**
   The picker's snapshot is now warmed at extension startup (the cheap `devices
   list` registry read, no fleet SSH sweep), so the first `New <Agent> (Pick Host)`

@@ -941,7 +941,7 @@ describe('parseSessionIdentity — the running session\'s real version + account
 
   test('pulls version + account off the LOCAL { session } envelope', () => {
     const parsed = parseSessionIdentity(local({ id: 'abc', version: '2.1.207', account: 'muqsit@trp.so' }));
-    expect(parsed).toEqual({ version: '2.1.207', account: 'muqsit@trp.so' });
+    expect(parsed).toEqual({ version: '2.1.207', account: 'muqsit@trp.so', agent: null });
   });
 
   test('reads them off the REAL remote wire (flat SessionMeta array)', () => {
@@ -952,6 +952,7 @@ describe('parseSessionIdentity — the running session\'s real version + account
     expect(parseSessionIdentity(remoteRaw, 'e2f20244-fbb7-413a-8333-aa1b692851bc')).toEqual({
       version: '2.1.187',
       account: 'muqsit@trp.so',
+      agent: 'claude',
     });
   });
 
@@ -960,14 +961,17 @@ describe('parseSessionIdentity — the running session\'s real version + account
       { id: 'other', version: '9.9.9', account: 'wrong@example.com' },
       { id: 'mine', version: '2.1.207', account: 'muqsit@trp.so' },
     ]);
-    expect(parseSessionIdentity(many, 'mine')).toEqual({ version: '2.1.207', account: 'muqsit@trp.so' });
+    expect(parseSessionIdentity(many, 'mine')).toEqual({ version: '2.1.207', account: 'muqsit@trp.so', agent: null });
     expect(parseSessionIdentity(many, 'absent')).toBeNull();
     expect(parseSessionIdentity(many)).toBeNull();
   });
 
   test('a partial record keeps the field it has and nulls the other', () => {
-    expect(parseSessionIdentity(local({ id: 'v', version: '2.1.207' }))).toEqual({ version: '2.1.207', account: null });
-    expect(parseSessionIdentity(local({ id: 'a', account: 'muqsit@trp.so' }))).toEqual({ version: null, account: 'muqsit@trp.so' });
+    expect(parseSessionIdentity(local({ id: 'v', version: '2.1.207' }))).toEqual({ version: '2.1.207', account: null, agent: null });
+    expect(parseSessionIdentity(local({ id: 'a', account: 'muqsit@trp.so' }))).toEqual({ version: null, account: 'muqsit@trp.so', agent: null });
+    // The harness alone resolves too — an `agents run auto` launch's pick is
+    // knowable from the feed even before version/account are indexed.
+    expect(parseSessionIdentity(local({ id: 'g', agent: 'codex' }))).toEqual({ version: null, account: null, agent: 'codex' });
   });
 
   test('returns null when the session carries neither field', () => {

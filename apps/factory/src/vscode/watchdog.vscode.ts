@@ -3,25 +3,33 @@ import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import {
-  AgentsViewJsonAgent,
-  isVersionStillUsable,
-  sessionUsedPercent,
-  rotatableVersionOf,
-} from '../core/resumeInBest';
-import { getAllTerminals, EditorTerminal } from './terminals.vscode';
+import type { EditorTerminal } from './terminals.vscode';
 import { formatEvent, trimToLast, WatchdogEvent, WATCHDOG_LOG_PATH } from '../core/watchdogLog';
-import { WatchdogVersionsPayload, WatchdogWatch } from '../monitor/protocol';
+import { classifyTailForRotate } from '../core/autoRotate';
 
-// This module is the extension's version auto-rotate loop. It is NOT a nudger:
+// This module is the extension's auto-rotate loop. It is NOT a nudger:
 // autonomous stall detection and nudge injection were retired — the CLI daemon
 // watchdog is the sole injector now and writes the SAME `WatchdogEvent` JSONL
 // feed (core/watchdogLog.ts) the Factory Floor status card reads. The extension
-// keeps ONE capability the CLI lacks: on version exhaustion it rotates an agent
-// terminal to the best signed-in version (rotateTerminalToBestVersion in
-// extension.ts) and records a `rotate` event to that shared log.
+// keeps ONE capability the CLI lacks: when a terminal's account is exhausted it
+// rotates the session into a fresh terminal via `agents run auto` — the CLI
+// owns host affinity, harness headroom, and account balance — and records a
+// `rotate` event to that shared log.
+//
+// Loop suppression (RUSH-2132): the rotate DECIDES from the terminal's tail
+// (agent-reported rate-limit text, or the CLI's fail-loud `no healthy … resets
+// <time>` error). A `no healthy` verdict — from a tail or reported by the
+// rotate path itself (recordNoHealthyRotateFailure) — suppresses ALL rotation
+// on that host until the parsed reset: the tick keeps evaluating but never
+// spawns, and logs ONE skip event per suppression window. The old per-tick
+// `agents view --json` probe is gone — it only fed the deleted picker and was
+// the source of the repeated macOS Keychain prompts during the 2026-08-03
+// incident.
 
 const LOG_MAX_LINES = 500;
+
+// How many transcript tail lines the rotate decision scans per tick.
+const ROTATE_TAIL_LINES = 40;
 
 // User-editable playbook file. It used to hold house rules the (now-retired)
 // nudge decision appended to its prompt; the CLI daemon watchdog owns nudging
@@ -88,6 +96,16 @@ export function getWatchdogPlaybookStatus(): WatchdogPlaybookStatus {
 const LOG_TRIM_EVERY = 100;
 let appendCount = 0;
 
+// Tests point the writer at a temp file; production always uses the shared
+// WATCHDOG_LOG_PATH feed the CLI daemon watchdog writes too.
+let logPathOverride: string | null = null;
+export function __setWatchdogLogPathForTests(p: string | null): void {
+  logPathOverride = p;
+}
+function activeLogPath(): string {
+  return logPathOverride ?? WATCHDOG_LOG_PATH;
+}
+
 async function trimLogToCap(logPath: string, maxLines: number): Promise<void> {
   try {
     const existing = await fs.readFile(logPath, 'utf8');
@@ -101,12 +119,13 @@ async function trimLogToCap(logPath: string, maxLines: number): Promise<void> {
 }
 
 async function appendToLog(ev: WatchdogEvent): Promise<void> {
+  const logPath = activeLogPath();
   try {
     const line = formatEvent(ev) + '\n';
-    await fs.mkdir(path.dirname(WATCHDOG_LOG_PATH), { recursive: true });
-    await fs.appendFile(WATCHDOG_LOG_PATH, line, 'utf8');
+    await fs.mkdir(path.dirname(logPath), { recursive: true });
+    await fs.appendFile(logPath, line, 'utf8');
     if (++appendCount % LOG_TRIM_EVERY === 0) {
-      await trimLogToCap(WATCHDOG_LOG_PATH, LOG_MAX_LINES);
+      await trimLogToCap(logPath, LOG_MAX_LINES);
     }
   } catch (err) {
     console.warn('[WATCHDOG] log write failed:', err);
@@ -116,13 +135,18 @@ async function appendToLog(ev: WatchdogEvent): Promise<void> {
 export type WatchdogRotateOutcome =
   | { status: 'no_session' }
   | { status: 'unsupported_agent' }
-  | { status: 'view_unavailable' }
-  | { status: 'already_usable'; agentKey: string; version: string; usedPercent: number }
-  | { status: 'no_versions'; agentKey: string }
-  | { status: 'rotated'; agentKey: string; oldVersion?: string; newVersion: string; newSessionId: string; email: string | null; usedPercent: number };
+  | { status: 'no_healthy_account'; agentKey?: string }
+  | { status: 'rotated'; newSessionId: string };
 
 export interface WatchdogDeps {
   rotateTerminal: (entry: EditorTerminal) => Promise<WatchdogRotateOutcome>;
+  /**
+   * Tail text the rotate decision scans. Defaults to the session transcript
+   * tail (ROTATE_TAIL_LINES lines); injected by tests.
+   */
+  readTail?: (entry: EditorTerminal) => Promise<string>;
+  /** Tracked terminal listing; defaults to the live registry. */
+  listTerminals?: () => EditorTerminal[];
 }
 
 interface WatchdogConfig {
@@ -142,72 +166,96 @@ function readConfig(): WatchdogConfig {
   };
 }
 
-/** Single-quote a device name so it cannot break out of the `agents view` command. */
-function shellQuoteHost(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
+// --- No-healthy suppression -------------------------------------------------
+//
+// When `agents run auto` reports zero healthy accounts on a machine, EVERY
+// rotate there fails the same way until the earliest window resets — so the
+// suppression is keyed by host (the local machine is 'local'), not by
+// terminal. The tick keeps evaluating but never spawns while suppressed.
+
+const LOCAL_HOST_KEY = 'local';
+const hostKey = (host?: string): string => host ?? LOCAL_HOST_KEY;
+
+/** host key -> suppress rotations on that host until this epoch ms. */
+const noHealthyUntilMs = new Map<string, number>();
+/** host key -> the suppression horizon we already logged a skip event for. */
+const noHealthySkipLoggedUntilMs = new Map<string, number>();
+
+/**
+ * Record a failed rotate whose `agents run auto` exited with the fail-loud
+ * `no healthy` error. Called by the rotate path in extension.ts (which reads
+ * the launch's output stream) — the one place the CLI's stderr is observable,
+ * since pty scrollback is not readable from an extension. Also reachable from
+ * the tick when the error text shows up in a tail.
+ */
+export function recordNoHealthyRotateFailure(
+  host: string | undefined,
+  untilMs: number | undefined,
+  detail?: string,
+): void {
+  const now = Date.now();
+  const until = untilMs && untilMs > now ? untilMs : now + readConfig().rotateCooldownMs;
+  noHealthyUntilMs.set(hostKey(host), until);
+  void logNoHealthySkipOnce(host, until, detail);
 }
 
-async function fetchAgentsViewJsonForWatchdog(
-  agentKey: string,
-  host?: string,
-): Promise<AgentsViewJsonAgent | null> {
+/** ONE skip event per host per suppression window — never per tick. */
+async function logNoHealthySkipOnce(
+  host: string | undefined,
+  untilMs: number,
+  detail?: string,
+): Promise<void> {
+  const key = hostKey(host);
+  if ((noHealthySkipLoggedUntilMs.get(key) ?? 0) >= untilMs) return;
+  noHealthySkipLoggedUntilMs.set(key, untilMs);
+  await appendToLog({
+    ts: Date.now(),
+    kind: 'rotate',
+    message: `skip — no healthy account to rotate into${host ? ` on ${host}` : ''}`,
+    reason: detail ?? `no healthy account — skipping until reset ${new Date(untilMs).toISOString()}`,
+  });
+}
+
+/** Test hook: clear suppression + skip-log state between cases. */
+export function __clearNoHealthyStateForTests(): void {
+  noHealthyUntilMs.clear();
+  noHealthySkipLoggedUntilMs.clear();
+}
+
+// Session transcript tail: the agent's own limit message ("You've hit your
+// weekly limit …") lands in the jsonl the session already writes — no probing,
+// no Keychain prompts. A terminal with no resolvable transcript simply isn't
+// judged this tick. Lazy-imported so this module stays loadable in tests with
+// only the vscode mock.
+async function defaultReadTail(entry: EditorTerminal): Promise<string> {
+  if (!entry.sessionId || !entry.agentType) return '';
   try {
-    const { runAgents } = await import('../core/agentsBin');
-    // A remote probe is an SSH round trip, so it gets a real timeout — the tick
-    // must not wedge behind one unreachable device.
-    const target = host ? ` --host ${shellQuoteHost(host)} --no-tty` : '';
-    const { stdout } = await runAgents(`view ${agentKey}${target} --json`, {
-      maxBuffer: 5 * 1024 * 1024,
-      timeout: host ? 30_000 : undefined,
-    });
-    const parsed = JSON.parse(stdout) as AgentsViewJsonAgent;
-    if (!parsed || !Array.isArray(parsed.versions)) return null;
-    return parsed;
-  } catch (err) {
-    console.warn(`[WATCHDOG] agents view ${agentKey}${host ? ` --host ${host}` : ''} --json failed:`, err);
-    return null;
+    const sessions = await import('./sessions.vscode');
+    const sessionPath = await sessions.getSessionPathBySessionId(
+      entry.sessionId,
+      entry.agentType as Parameters<typeof sessions.getSessionPathBySessionId>[1],
+    );
+    if (!sessionPath) return '';
+    const lines = await sessions.readTailLines(sessionPath, ROTATE_TAIL_LINES);
+    return lines.join('\n');
+  } catch {
+    return '';
   }
 }
 
-// --- Monitor follower routing (#70) ---------------------------------------
-//
-// When this window is connected to the centralized monitor, the leader polls
-// `agents view --json` once machine-wide and broadcasts a `watchdog/versions`
-// fact; this window ARMS the monitor with the agent keys it needs polled and
-// CONSUMES the broadcast for the auto-rotate exhaustion check instead of each
-// window forking `agents view`. When disconnected (election race, leader loss)
-// the window falls back to a local `agents view` spawn — nothing breaks.
-
-let monitorConnected: () => boolean = () => false;
-let monitorArmWatches: ((watches: WatchdogWatch[]) => void) | undefined;
-// agentKey -> latest broadcast `agents view` result, consumed by auto-rotate.
-const broadcastViews = new Map<string, AgentsViewJsonAgent>();
-
-/** Wire the predicate the tick consults to decide local-vs-broadcast polling. */
-export function setWatchdogMonitorConnectivity(fn: () => boolean): void {
-  monitorConnected = fn;
-}
-
-/** Wire the sink that arms the monitor with this window's rotate-watched agents. */
-export function setWatchdogArmSink(
-  fn: ((watches: WatchdogWatch[]) => void) | undefined,
-): void {
-  monitorArmWatches = fn;
-}
-
-/** Apply a broadcast `agents view` fact: cache it for the auto-rotate check. */
-export function ingestWatchdogVersionsFact(payload: WatchdogVersionsPayload): void {
-  broadcastViews.set(payload.agentKey, payload.view);
+async function listTerminalsDefault(): Promise<EditorTerminal[]> {
+  const mod = await import('./terminals.vscode');
+  return mod.getAllTerminals();
 }
 
 let tickInFlight = false;
 // Idle-window gating: when the IDE window has been unfocused for this long,
-// skip ticks. Auto-rotate does network-bound `agents view` calls and spawns a
-// fresh terminal — neither is useful when the user isn't watching.
+// skip ticks. Auto-rotate spawns a fresh terminal — not useful when the user
+// isn't watching.
 const WATCHDOG_IDLE_SKIP_MS = 5 * 60_000;
 let lastFocusedAtMs = Date.now();
 
-async function tick(
+export async function tick(
   lastRotateMs: Map<string, number>,
   deps: WatchdogDeps
 ): Promise<void> {
@@ -217,11 +265,9 @@ async function tick(
     const cfg = readConfig();
     if (!cfg.enabled || !cfg.autoRotate) return;
 
-    // Skip if no agent terminals exist in this window — nothing to rotate.
-    const tracked = getAllTerminals().filter(
-      (e) => !!e.sessionId && !!e.agentType,
-    );
-    if (tracked.length === 0) return;
+    const tracked = deps.listTerminals ? deps.listTerminals() : await listTerminalsDefault();
+    const sessions = tracked.filter((e) => !!e.sessionId && !!e.agentType);
+    if (sessions.length === 0) return;
 
     // Skip when the window has been unfocused long enough that the user is
     // clearly elsewhere. `vscode.window.state.focused` is a live snapshot; we
@@ -231,83 +277,72 @@ async function tick(
     if (Date.now() - lastFocusedAtMs >= WATCHDOG_IDLE_SKIP_MS) return;
 
     const now = Date.now();
-    const useMonitor = monitorConnected();
+    const readTail = deps.readTail ?? defaultReadTail;
 
-    const agentViewCache = new Map<string, AgentsViewJsonAgent | null>();
-    const getAgentView = async (agentKey: string, host?: string): Promise<AgentsViewJsonAgent | null> => {
-      // Account headroom is per machine: an offloaded terminal must be judged
-      // against ITS device, so the cache and the broadcast lane are keyed by
-      // host. The broadcast only ever carries this machine's poll, so a remote
-      // terminal always goes out to its own device.
-      const key = host ? `${agentKey}@${host}` : agentKey;
-      if (agentViewCache.has(key)) return agentViewCache.get(key) ?? null;
-      // Prefer the leader's broadcast poll; fall back to a local spawn only
-      // while disconnected so we never each fork `agents view` per window.
-      const cached = !host && useMonitor ? broadcastViews.get(agentKey) ?? null : null;
-      const data = cached ?? await fetchAgentsViewJsonForWatchdog(agentKey, host);
-      agentViewCache.set(key, data);
-      return data;
-    };
-
-    // Arm the monitor with the agents this window needs `agents view` polled
-    // for. Replaces this window's whole slice each tick, so closed terminals
-    // drop out automatically. Only Claude terminals whose running version we
-    // know can rotate, so only those are armed.
-    if (useMonitor && monitorArmWatches) {
-      const watches: WatchdogWatch[] = [];
-      for (const entry of tracked) {
-        if (!entry.sessionId || !entry.agentType) continue;
-        if (!rotatableVersionOf(entry)) continue;
-        watches.push({ sessionId: entry.sessionId, rotateAgentKey: entry.agentType });
-      }
-      monitorArmWatches(watches);
-    }
-
-    for (const entry of tracked) {
+    for (const entry of sessions) {
       if (!entry.sessionId || !entry.agentType) continue;
-      const agentType = entry.agentType;
-      // Auto-rotate is Claude-only: it swaps a terminal whose account has run
-      // out to the best available signed-in one.
-      const runningVersion = rotatableVersionOf(entry);
-      if (!runningVersion) continue;
+
+      // Host-level suppression: a previous `no healthy` (from a tail or from
+      // the rotate path) holds until the reset — evaluate but never spawn.
+      const suppressedUntil = noHealthyUntilMs.get(hostKey(entry.host)) ?? 0;
+      if (suppressedUntil > now) {
+        await logNoHealthySkipOnce(entry.host, suppressedUntil);
+        continue;
+      }
 
       const lastRotate = lastRotateMs.get(entry.id) ?? 0;
       if (now - lastRotate < cfg.rotateCooldownMs) continue;
 
-      const view = await getAgentView(agentType, entry.host);
-      if (!view) continue;
-      const current = view.versions.find((v) => v.version === runningVersion);
-      if (!current || isVersionStillUsable(current)) continue;
+      const tail = await readTail(entry);
+      if (!tail) continue;
+      const verdict = classifyTailForRotate(tail, now);
+
+      if (verdict.kind === 'no_healthy_account') {
+        // The CLI already told us nothing on this machine can take the
+        // session — suppress every rotate here until the window resets.
+        const until = verdict.resetsAtMs && verdict.resetsAtMs > now
+          ? verdict.resetsAtMs
+          : now + cfg.rotateCooldownMs;
+        noHealthyUntilMs.set(hostKey(entry.host), until);
+        console.log(
+          `[WATCHDOG] ${entry.id}${entry.host ? ` on ${entry.host}` : ''}: no healthy account — suppressing rotation until ${new Date(until).toISOString()}`
+        );
+        await logNoHealthySkipOnce(entry.host, until);
+        continue;
+      }
+
+      if (verdict.kind !== 'rate_limited') continue;
 
       console.log(
-        `[WATCHDOG] auto-rotate triggered for ${entry.id}${entry.host ? ` on ${entry.host}` : ''} — ${agentType}@${runningVersion} status=${current.usageStatus} session=${sessionUsedPercent(current)}%`
+        `[WATCHDOG] auto-rotate triggered for ${entry.id}${entry.host ? ` on ${entry.host}` : ''} — tail shows an exhausted account`
       );
       lastRotateMs.set(entry.id, now);
       try {
         const outcome = await deps.rotateTerminal(entry);
         if (outcome.status === 'rotated') {
-          const acct = outcome.email ? ` (${outcome.email})` : '';
           vscode.window.setStatusBarMessage(
-            `Auto-rotated ${outcome.agentKey} ${outcome.oldVersion ?? '?'} -> ${outcome.newVersion}${acct} · ${outcome.usedPercent}% session`,
+            `Auto-rotated ${entry.agentType} via agents run auto · ${outcome.newSessionId.slice(0, 8)}`,
             8000
           );
-          console.log(`[WATCHDOG] rotated ${entry.id} -> ${outcome.newVersion}`);
-          void appendToLog({
+          console.log(`[WATCHDOG] rotated ${entry.id} -> agents run auto (${outcome.newSessionId.slice(0, 8)})`);
+          await appendToLog({
             ts: now,
             kind: 'rotate',
             terminalId: entry.id,
-            agentType: agentType,
-            message: `${outcome.oldVersion ?? '?'} -> ${outcome.newVersion}`,
-            reason: `session ${outcome.usedPercent}% used${acct}`,
+            agentType: entry.agentType,
+            message: `-> agents run auto · ${outcome.newSessionId.slice(0, 8)}`,
+            reason: 'account exhausted (rate-limited tail)',
           });
           continue;
         }
-        if (outcome.status === 'no_versions') {
+        if (outcome.status === 'no_healthy_account') {
+          // The rotate path already recorded the suppression and its skip
+          // event (it saw the CLI's stderr); just surface it here.
           vscode.window.setStatusBarMessage(
-            `All ${outcome.agentKey} quads exhausted — no rotation target`,
+            'All accounts are at their limit — nothing to rotate to',
             8000
           );
-          console.log(`[WATCHDOG] no available versions to rotate ${entry.id} into`);
+          console.log(`[WATCHDOG] no healthy account to rotate ${entry.id} into`);
         }
       } catch (err) {
         console.error(`[WATCHDOG] rotate failed for ${entry.id}:`, err);
@@ -316,6 +351,25 @@ async function tick(
   } finally {
     tickInFlight = false;
   }
+}
+
+/**
+ * `Agents: Toggle Watchdog Auto-Rotate` — the off switch that did not exist
+ * during the 2026-08-03 loop. Flips `agents.watchdog.autoRotate`; the running
+ * loop picks it up via the configuration-change listener in startWatchdog.
+ */
+export function registerToggleAutoRotateCommand(
+  registerCommand: typeof vscode.commands.registerCommand,
+): vscode.Disposable {
+  return registerCommand('agents.toggleWatchdogAutoRotate', async () => {
+    const cfg = vscode.workspace.getConfiguration('agents.watchdog');
+    const current = cfg.get<boolean>('autoRotate', true);
+    await cfg.update('autoRotate', !current, vscode.ConfigurationTarget.Global);
+    vscode.window.setStatusBarMessage(
+      `Watchdog auto-rotate ${!current ? 'ON' : 'OFF'}`,
+      4000
+    );
+  });
 }
 
 export function startWatchdog(deps: WatchdogDeps): vscode.Disposable {
