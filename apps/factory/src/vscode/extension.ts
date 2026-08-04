@@ -2322,6 +2322,10 @@ async function openSingleAgent(
       sessionId = generateClaudeSessionId();
       console.log(`[SESSION] Claude using on-demand session ID: ${sessionId}${targetHost ? ` (host ${targetHost})` : ''}`);
     }
+    // No remote host → this machine. Pass `local: true` so buildAgentLaunchCommand
+    // does NOT emit `--device auto` (that flag is only for the explicit Auto path
+    // which resolves a host first, or for openSingleAgentWithQueue callers that
+    // set local: false). New Grok/Kimi/… must stay local with balanced strategy.
     command = buildAgentLaunchCommand(
       agentKey,
       sessionId,
@@ -2330,7 +2334,11 @@ async function openSingleAgent(
       pinnedVersion,
       strategy,
       undefined,
-      { host: targetHost, cwd: targetHost ? cwd : undefined },
+      {
+        host: targetHost,
+        local: !targetHost,
+        cwd: targetHost ? cwd : undefined,
+      },
     );
   }
 

@@ -6,6 +6,20 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.310] - 2026-08-04
+
+- **Every New-agent launch is balanced — `agents run <agent> --interactive
+  --strategy balanced --mode auto`, with no per-harness exception (#1908).** Local
+  **Grok, Kimi, and Droid** used to launch as raw binaries (`grok` / `kimi` /
+  `droid`) with no account rotation and no `--mode`, because three disagreeing
+  allowlists (`STRATEGY_LAUNCH_AGENTS`, `LAUNCHABLE`, `usesManagedAgentLaunch`)
+  gated whether an agent got `--strategy balanced` and whether it even routed
+  through `agents run`. Those lists are collapsed into one predicate,
+  `isAgentRunner(key)` = `key !== 'shell'`. Local New-agent launches also pass
+  `local: true` into the launch builder so they do not accidentally emit
+  `--device auto` and leave this Mac. Source: `src/core/agents.ts`,
+  `src/vscode/extension.ts`.
+
 - **grok / kimi / droid / antigravity tabs now restore, reopen, and reload like the prewarm agents (#1747).**
   Resume past the picker was still gated on `supportsPrewarming` (claude/codex/gemini/cursor/opencode),
   so a grok/kimi/droid/antigravity tab did not come back after a window reload, a reopen-last, or a
@@ -23,23 +37,6 @@ All notable changes to the Factory extension are documented here. Format follows
   Removes the two commands, their command-palette menu entries, and the now-unused
   `agents.tmuxEnabled` context key. Source: `src/vscode/extension.ts`,
   `package.json`.
-- **Every New-agent launch is balanced — `agents run <agent> --interactive
-  --strategy balanced --mode auto`, with no per-harness exception.** Local
-  **Grok, Kimi, and Droid** used to launch as raw binaries (`grok` / `kimi` /
-  `droid`) with no account rotation and no `--mode`, because three disagreeing
-  allowlists (`STRATEGY_LAUNCH_AGENTS`, `LAUNCHABLE`, `usesManagedAgentLaunch`)
-  gated whether an agent got `--strategy balanced` and whether it even routed
-  through `agents run`. Those lists are collapsed into one predicate,
-  `isAgentRunner(key)` = `key !== 'shell'`, so every runner — local, `(Auto)`,
-  and `(Pick Host)` alike — now routes through `agents run` with
-  `--strategy balanced --mode auto`. Forks are balanced by the same rule. The
-  contract is recorded in `apps/factory/AGENTS.md` (§ "Launch contract") and
-  pinned by tests in `src/core/agents.test.ts`. `--strategy balanced` is a
-  graceful CLI no-op for a runner with no accounts to rotate (droid), never an
-  error. Shell stays a plain terminal; Resume is unchanged (it reuses the
-  session's already-bound account). Source: `src/core/agents.ts`,
-  `src/vscode/extension.ts`, `src/core/forkSession.ts`.
-
 - **BREAKING (settings): the extension's watchdog loop is deleted — the CLI daemon watchdog is the only watchdog.**
   `agents watchdog enable` (the `agents __daemon-run` routine) now owns
   rotate-on-exhaustion in addition to stall nudging: it injects the harness
