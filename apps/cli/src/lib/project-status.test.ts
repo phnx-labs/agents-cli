@@ -106,6 +106,18 @@ describe('liveDeadSplit', () => {
     ]);
   });
 
+  it('classifies every ActiveStatus, not just the common ones', () => {
+    // abandoned fires on transcript staleness before the liveness check, so it
+    // covers the live-but-forgotten session; unknown cannot be PROVEN dead, and
+    // claiming so would overstate the wreckage row.
+    const s = liveDeadSplit({
+      running: 1, idle: 1, queued: 1, input_required: 1, orphaned: 1, abandoned: 1, unknown: 1,
+      closed: 1, crashed: 1,
+    });
+    expect(s.live).toBe(7);
+    expect(s.dead).toBe(2);
+  });
+
   it('handles an empty or all-live project', () => {
     expect(liveDeadSplit({})).toEqual({ live: 0, dead: 0, deadByStatus: [] });
     expect(liveDeadSplit({ running: 4 })).toEqual({ live: 4, dead: 0, deadByStatus: [] });

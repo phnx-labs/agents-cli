@@ -132,6 +132,25 @@ export function rollupSessionsByProject(
  */
 const DEAD_STATUSES = new Set(['closed', 'crashed']);
 
+/*
+ * Every `ActiveStatus`, and why it lands where it does:
+ *
+ *   running, idle, queued, input_required   live — obviously working or waiting
+ *   orphaned                                live — "alive, but no client is
+ *                                           attached"; the agent outlived its
+ *                                           window and is still running
+ *   abandoned                               live — it fires on transcript
+ *                                           staleness BEFORE the liveness check,
+ *                                           so it also covers the live-but-
+ *                                           forgotten session that asked a
+ *                                           question and sat over a weekend
+ *   unknown                                 live — we cannot prove it is dead,
+ *                                           and claiming so would overstate the
+ *                                           wreckage row
+ *   closed, crashed                         dead — unconditionally, per
+ *                                           commands/sessions.ts
+ */
+
 /** Live vs finished sessions on a project. */
 export interface LiveDeadSplit {
   live: number;
