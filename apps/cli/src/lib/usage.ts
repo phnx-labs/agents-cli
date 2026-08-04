@@ -34,6 +34,7 @@ import {
 } from './usage-backoff.js';
 import { getCacheDir } from './state.js';
 import type { AgentId } from './types.js';
+import { mapBounded } from './concurrency.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -345,7 +346,38 @@ export function agentReportsUsage(agentId: AgentId): boolean {
   return getUsageSource(agentId) !== undefined;
 }
 
-/** Fetch usage info for all unique accounts in parallel, keyed by usage key. */
+/**
+ * Concurrent live usage fetches for a single `agents view` / rotation pass.
+ * High enough to finish a multi-account refresh in one round-trip window; low
+ * enough that a cold cache of 10+ accounts cannot open 10+ HTTP calls at once
+ * (and cannot stack behind delayed responses until the process is pegged).
+ */
+export const USAGE_FETCH_CONCURRENCY = 3;
+
+/**
+ * Concurrent background SWR refreshes. Kept below the blocking concurrency so
+ * a display path that returns cached data immediately does not still flood the
+ * network with N silent refreshes that finish long after the command exits and
+ * pile onto the next invocation.
+ */
+const USAGE_BG_REFRESH_CONCURRENCY = 2;
+
+/**
+ * How long a cached snapshot is treated as fresh enough that we skip the network
+ * entirely. Five minutes balances "still accurate enough to glance at" against
+ * "don't re-hit every account on every `agents view` in a tight loop". Was 2
+ * minutes; that re-fired too often when delayed responses stacked.
+ */
+export const USAGE_CACHE_FRESH_MS = 5 * 60 * 1000;
+
+const USAGE_CACHE_SWR_MS = 24 * 60 * 60 * 1000; // 24 hours — beyond this, block on live fetch.
+
+/**
+ * Unified entry for every multi-account usage lookup (`agents view`, rotation,
+ * JSON export). Deduplicates by usage identity, then fans out through the
+ * shared SWR + timeout path with a hard concurrency cap so delayed calls
+ * cannot pile up.
+ */
 export async function getUsageInfoByIdentity(
   inputs: UsageIdentityInput[],
   opts?: { forceRefresh?: boolean; maxAgeMs?: number }
@@ -354,8 +386,10 @@ export async function getUsageInfoByIdentity(
   usageByKey: Map<string, UsageInfo>;
 }> {
   const { canonicalByUsageKey, usageFetchInputs } = buildCanonicalUsageContext(inputs);
-  const usageResults = await Promise.all(
-    [...usageFetchInputs.entries()].map(async ([key, input]) => ({
+  const entries = [...usageFetchInputs.entries()];
+  const usageResults = await mapBounded(
+    entries,
+    async ([key, input]) => ({
       key,
       usage: await getUsageInfoForIdentity({
         agentId: input.agentId,
@@ -363,7 +397,8 @@ export async function getUsageInfoByIdentity(
         cliVersion: input.cliVersion,
         info: canonicalByUsageKey.get(key)!,
       }, opts),
-    }))
+    }),
+    { concurrency: USAGE_FETCH_CONCURRENCY },
   );
 
   return {
@@ -371,9 +406,6 @@ export async function getUsageInfoByIdentity(
     usageByKey: new Map(usageResults.map(({ key, usage }) => [key, usage])),
   };
 }
-
-const USAGE_CACHE_FRESH_MS = 2 * 60 * 1000; // 2 minutes — fresh window: don't refresh.
-const USAGE_CACHE_SWR_MS = 24 * 60 * 60 * 1000; // 24 hours — beyond this, block on live fetch.
 
 /**
  * How stale a cached snapshot may be before the read stops serving it and blocks
@@ -387,20 +419,31 @@ export function swrWindowMsFor(maxAgeMs?: number): number {
   return Math.min(USAGE_CACHE_SWR_MS, Math.max(0, maxAgeMs));
 }
 
-/** In-process dedup: don't fire concurrent background refreshes for the same identity. */
-const inFlightRefreshes = new Map<string, Promise<void>>();
+/**
+ * In-process dedup for live + background usage work on the same identity.
+ * Covers both the blocking cold-cache path and SWR background refreshes so a
+ * delayed HTTP response cannot be stacked under a second request for the same
+ * key (the pile-up that made consecutive `agents view` runs peg CPU/network).
+ */
+const inFlightLiveFetches = new Map<string, Promise<UsageInfo>>();
+const inFlightBgKeys = new Set<string>();
+const bgRefreshQueue: Array<() => Promise<void>> = [];
+let bgRefreshActive = 0;
 
 /**
  * Fetch usage for a single identity using stale-while-revalidate.
  *
- * - Cache fresh (< 2 min): return cached snapshot, NO network.
- * - Cache stale but < 24h: return cached snapshot instantly, fire background refresh.
- * - Cache too stale or absent: block on live fetch, fall back to cache on error.
+ * - Cache fresh (< 5 min): return cached snapshot, NO network.
+ * - Cache stale but < 24h: return cached snapshot instantly, enqueue a
+ *   concurrency-capped background refresh.
+ * - Cache too stale or absent: block on live fetch (shared in-flight promise),
+ *   fall back to cache on error.
  *
- * This keeps `agents run` startup off the network on the hot path. The first
- * invocation after a cold install or 24h gap still blocks once to seed the
- * cache; every run after that returns instantly while the cache silently
- * refreshes in the background.
+ * This keeps `agents run` / `agents view` off the network on the hot path. The
+ * first invocation after a cold install or 24h gap still blocks once to seed
+ * the cache; every run after that returns instantly while the cache silently
+ * refreshes in the background — never more than {@link USAGE_BG_REFRESH_CONCURRENCY}
+ * at a time.
  */
 export async function getUsageInfoForIdentity(
   input: UsageIdentityInput,
@@ -448,62 +491,146 @@ export async function getUsageInfoForIdentity(
     // full 24h window and stay off the hot path.
     const swrWindowMs = swrWindowMsFor(opts?.maxAgeMs);
     if (cached && ageMs < swrWindowMs) {
-      triggerBackgroundUsageRefresh(input, usageKey);
+      enqueueBackgroundUsageRefresh(input, usageKey);
       return { snapshot: cached, error: null };
     }
   }
 
-  // Cold cache or > 24h old: block on live fetch.
-  const usage = await getUsageInfo(input.agentId, {
-    home: input.home,
-    cliVersion: input.cliVersion,
-    organizationId: input.info.organizationId,
-  });
-
-  if (usage.snapshot?.source === 'live') {
-    writeClaudeUsageCache(usageKey, usage.snapshot);
-    return usage;
-  }
-
-  // Live fetch failed — last-resort fallback to whatever cache we had.
-  if (cached) {
-    return { snapshot: cached, error: usage.error };
-  }
-  return usage;
+  // Cold cache or > 24h old (or forceRefresh): block on a shared live fetch so
+  // concurrent callers for the same identity share one in-flight HTTP call.
+  return fetchLiveUsageDeduped(input, usageKey, cached);
 }
 
 /**
- * Kick off a background refresh of the usage cache. Errors are swallowed —
- * a failed background refresh leaves the existing cache in place for the
- * next invocation. The work is deferred to a future event-loop tick via
- * `setImmediate` because some of the call chain (loadClaudeOauth →
- * getKeychainToken → execFileSync) does synchronous I/O even though the
- * functions are declared `async`. Without the defer, that sync I/O blocks
- * the SWR caller and defeats the whole point of returning the cache instantly.
+ * Single-flight live usage fetch per usage key. Concurrent callers (view +
+ * rotation, or two rows sharing an account) await the same promise rather than
+ * opening duplicate HTTP requests that then time out and pile up.
  */
-function triggerBackgroundUsageRefresh(input: UsageIdentityInput, usageKey: string): void {
-  if (inFlightRefreshes.has(usageKey)) return;
+async function fetchLiveUsageDeduped(
+  input: UsageIdentityInput,
+  usageKey: string,
+  cached: UsageSnapshot | null,
+): Promise<UsageInfo> {
+  const existing = inFlightLiveFetches.get(usageKey);
+  if (existing) return existing;
 
-  const promise = new Promise<void>((resolve) => {
-    setImmediate(async () => {
-      try {
-        const usage = await getUsageInfo(input.agentId, {
-          home: input.home,
-          cliVersion: input.cliVersion,
-          organizationId: input.info.organizationId,
-        });
-        if (usage.snapshot?.source === 'live') {
-          writeClaudeUsageCache(usageKey, usage.snapshot);
-        }
-      } catch {
-        /* background refresh failed — leave existing cache in place */
-      } finally {
-        inFlightRefreshes.delete(usageKey);
-        resolve();
-      }
+  const promise = (async (): Promise<UsageInfo> => {
+    const usage = await getUsageInfo(input.agentId, {
+      home: input.home,
+      cliVersion: input.cliVersion,
+      organizationId: input.info.organizationId,
     });
+
+    if (usage.snapshot?.source === 'live') {
+      writeClaudeUsageCache(usageKey, usage.snapshot);
+      return usage;
+    }
+
+    // Live fetch failed — last-resort fallback to whatever cache we had.
+    if (cached) {
+      return { snapshot: cached, error: usage.error };
+    }
+    return usage;
+  })();
+
+  inFlightLiveFetches.set(usageKey, promise);
+  try {
+    return await promise;
+  } finally {
+    inFlightLiveFetches.delete(usageKey);
+  }
+}
+
+/**
+ * Enqueue a background refresh of the usage cache. Errors are swallowed — a
+ * failed refresh leaves the existing cache in place. Work is deferred via
+ * `setImmediate` (keychain reads do sync I/O) and drained with a hard
+ * concurrency cap so N stale accounts do not open N HTTP calls at once.
+ */
+function enqueueBackgroundUsageRefresh(input: UsageIdentityInput, usageKey: string): void {
+  if (inFlightBgKeys.has(usageKey) || inFlightLiveFetches.has(usageKey)) return;
+  inFlightBgKeys.add(usageKey);
+
+  bgRefreshQueue.push(async () => {
+    try {
+      // Reuse the single-flight live path so a blocking caller that arrives
+      // mid-refresh shares the same HTTP call instead of racing it.
+      const cached = readClaudeUsageCache(usageKey);
+      await fetchLiveUsageDeduped(input, usageKey, cached);
+    } catch {
+      /* background refresh failed — leave existing cache in place */
+    } finally {
+      inFlightBgKeys.delete(usageKey);
+    }
   });
-  inFlightRefreshes.set(usageKey, promise);
+  pumpBackgroundUsageRefreshes();
+}
+
+function pumpBackgroundUsageRefreshes(): void {
+  while (bgRefreshActive < USAGE_BG_REFRESH_CONCURRENCY && bgRefreshQueue.length > 0) {
+    const work = bgRefreshQueue.shift()!;
+    bgRefreshActive++;
+    // setImmediate so the SWR caller returns the cached snapshot before any
+    // keychain/network work starts on this tick.
+    setImmediate(() => {
+      work().finally(() => {
+        bgRefreshActive--;
+        pumpBackgroundUsageRefreshes();
+      });
+    });
+  }
+}
+
+/**
+ * Pick which usage windows to render in a compact one-line summary.
+ *
+ * Overview rows (`agents view` all agents) must stay narrow enough that one
+ * multi-window agent (Antigravity's four model quotas, Droid's three buckets)
+ * does not force every other row to pad to ~200 columns and wrap. Prefer the
+ * canonical session + week windows when present; otherwise take the highest
+ * utilization remaining. Returns the full set when `maxWindows` is unset.
+ */
+export function pickCompactUsageWindows(
+  windows: UsageWindow[],
+  maxWindows?: number,
+): UsageWindow[] {
+  const filtered = windows.filter((window) => window.key !== 'sonnet_week');
+  if (maxWindows === undefined || maxWindows <= 0 || filtered.length <= maxWindows) {
+    return filtered;
+  }
+
+  // Pick by object identity, not by key. Antigravity normalizes every model
+  // quota as key: 'session', so a key-set filter would keep only the first and
+  // drop the rest even when maxWindows > 1.
+  const chosen: UsageWindow[] = [];
+  const take = (w: UsageWindow | undefined): void => {
+    if (!w || chosen.includes(w) || chosen.length >= maxWindows) return;
+    chosen.push(w);
+  };
+
+  take(filtered.find((w) => w.key === 'session'));
+  take(filtered.find((w) => w.key === 'week'));
+
+  const rest = filtered
+    .filter((w) => !chosen.includes(w))
+    .sort((a, b) => b.usedPercent - a.usedPercent);
+  for (const w of rest) {
+    if (chosen.length >= maxWindows) break;
+    chosen.push(w);
+  }
+  return chosen;
+}
+
+/** Options for {@link formatUsageSummary}. */
+export interface FormatUsageSummaryOpts {
+  unavailable?: boolean;
+  unverified?: boolean;
+  /**
+   * Cap how many usage windows render on one line. Overview (`agents view`
+   * with no agent filter) passes 2 so multi-window agents cannot blow out
+   * column width; single-agent and detail views leave this unset.
+   */
+  maxWindows?: number;
 }
 
 /** Format a one-line usage summary with compact bars for inline display. */
@@ -511,7 +638,7 @@ export function formatUsageSummary(
   plan: string | null,
   snapshot: UsageSnapshot | null,
   planWidth = 3,
-  opts?: { unavailable?: boolean; unverified?: boolean }
+  opts?: FormatUsageSummaryOpts
 ): string {
   const parts: string[] = [];
 
@@ -520,23 +647,32 @@ export function formatUsageSummary(
   }
 
   if (snapshot) {
-    // Compact rows show every BLOCKING window — the same set
+    // Compact rows show BLOCKING windows — the same set
     // deriveUsageStatusFromSnapshot uses for the rate-limited badge — so an
     // account throttled by its month window (Droid meters on 5h/week/month)
     // shows the bar that explains why. Claude's Sonnet week is a per-model
     // sub-limit, not a blocking window; it renders only in the full
     // per-version usage section. Each window reads "S: ███░░ 58% (3d)" — the
     // gauge, the exact percentage, and a compact hint of when it resets.
-    const windows = snapshot.windows
-      .filter((window) => window.key !== 'sonnet_week')
-      .map((window) => {
-        const bar = renderCompactUsageBar(window.usedPercent);
-        const pct = colorUsage(`${Math.round(window.usedPercent)}%`, window.usedPercent);
-        const reset = window.resetsAt ? chalk.dim(` (${formatResetHint(window.resetsAt)})`) : '';
-        return `${chalk.gray(`${window.shortLabel}:`)} ${bar} ${pct}${reset}`;
-      });
-    if (windows.length > 0) {
-      parts.push(windows.join('  '));
+    //
+    // Overview caps the window count (see pickCompactUsageWindows) so one
+    // multi-meter agent cannot force the whole table to wrap.
+    const selected = pickCompactUsageWindows(snapshot.windows, opts?.maxWindows);
+    const hidden = Math.max(
+      0,
+      snapshot.windows.filter((w) => w.key !== 'sonnet_week').length - selected.length,
+    );
+    const windowParts = selected.map((window) => {
+      const bar = renderCompactUsageBar(window.usedPercent);
+      const pct = colorUsage(`${Math.round(window.usedPercent)}%`, window.usedPercent);
+      const reset = window.resetsAt ? chalk.dim(` (${formatResetHint(window.resetsAt)})`) : '';
+      return `${chalk.gray(`${window.shortLabel}:`)} ${bar} ${pct}${reset}`;
+    });
+    if (hidden > 0) {
+      windowParts.push(chalk.dim(`+${hidden}`));
+    }
+    if (windowParts.length > 0) {
+      parts.push(windowParts.join('  '));
     }
     // The bars came from the cache and the live read that should have confirmed
     // them failed, so they are the last thing we saw — not the current state.
@@ -1358,9 +1494,9 @@ function parseClaudeOauthPayload(raw: string): ClaudeOauthCredentials | null {
 // The source item `Claude Code-credentials-<hash>` is ACL-bound to Claude Code's
 // own process, so every read agents-cli makes (via `/usr/bin/security`) pops
 // Touch ID. The Factory watchdog polls `agents view --json` every 60s per agent,
-// and each poll that crosses the 2-minute usage cache fires a background refresh
+// and each poll that crosses the 5-minute usage cache fires a background refresh
 // -> loadClaudeOauth -> keychain read -> a biometric prompt. With many agents and
-// accounts that is a prompt every couple of minutes, per account.
+// accounts that is a prompt every few minutes, per account.
 //
 // Fix: after one real (prompting) read, cache the ACCESS token in a device-local
 // NO-ACL keychain item — the same `set-no-acl` mechanism secrets/session-store.ts

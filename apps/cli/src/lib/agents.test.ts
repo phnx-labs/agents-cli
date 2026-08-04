@@ -397,8 +397,9 @@ describe('resolveLastActive', () => {
     const within = new Date(t0.getTime() + 60_000);
     expect(resolveLastActive('claude', home, undefined, cachePath, within)?.getTime()).toBe(5_000_000);
 
-    // Past the fresh window the walk runs again and picks up the newer file.
-    const beyond = new Date(t0.getTime() + 3 * 60_000);
+    // Past the fresh window (5 min, matching USAGE_CACHE_FRESH_MS) the walk
+    // runs again and picks up the newer file.
+    const beyond = new Date(t0.getTime() + 6 * 60_000);
     expect(resolveLastActive('claude', home, undefined, cachePath, beyond)?.getTime()).toBe(9_000_000);
   });
 

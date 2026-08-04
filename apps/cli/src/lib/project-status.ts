@@ -122,10 +122,66 @@ export function rollupSessionsByProject(
   return map;
 }
 
-/** Plan completion percentage (0–100), or undefined when nothing is tracked. */
-export function planPct(plan: { done: number; total: number }): number | undefined {
-  if (plan.total <= 0) return undefined;
-  return Math.round((plan.done / plan.total) * 100);
+/**
+ * Statuses that mean the session is over. Taken from the repo's own rule
+ * (`commands/sessions.ts`): "`closed` and `crashed` are unconditionally dead".
+ * `orphaned` is NOT among them — `session/active.ts` defines it as "Alive, but
+ * no client is attached", i.e. the agent outlived its window and is still
+ * working. Counting it as dead understates the project by exactly the sessions
+ * that are running unattended.
+ */
+const DEAD_STATUSES = new Set(['closed', 'crashed']);
+
+/*
+ * Every `ActiveStatus`, and why it lands where it does:
+ *
+ *   running, idle, queued, input_required   live — obviously working or waiting
+ *   orphaned                                live — "alive, but no client is
+ *                                           attached"; the agent outlived its
+ *                                           window and is still running
+ *   abandoned                               live — it fires on transcript
+ *                                           staleness BEFORE the liveness check,
+ *                                           so it also covers the live-but-
+ *                                           forgotten session that asked a
+ *                                           question and sat over a weekend
+ *   unknown                                 live — we cannot prove it is dead,
+ *                                           and claiming so would overstate the
+ *                                           wreckage row
+ *   closed, crashed                         dead — unconditionally, per
+ *                                           commands/sessions.ts
+ */
+
+/** Live vs finished sessions on a project. */
+export interface LiveDeadSplit {
+  live: number;
+  dead: number;
+  /** Dead broken out by status, for the card's parenthetical. */
+  deadByStatus: Array<{ status: string; n: number }>;
+}
+
+/**
+ * Split a rollup's sessions into what is working and what is wreckage.
+ *
+ * The headline used to be the raw session count, which on a real project read
+ * `39 agents` when 19 of those had crashed. A count that is half corpses is not
+ * a throughput signal — but the corpses are worth their own number, because 19
+ * crashed sessions is itself a thing to go fix.
+ */
+export function liveDeadSplit(byStatus: Partial<Record<ActiveStatus, number>>): LiveDeadSplit {
+  let live = 0;
+  let dead = 0;
+  const deadByStatus: Array<{ status: string; n: number }> = [];
+  for (const [status, n] of Object.entries(byStatus)) {
+    if (!n) continue;
+    if (DEAD_STATUSES.has(status)) {
+      dead += n;
+      deadByStatus.push({ status, n });
+    } else {
+      live += n;
+    }
+  }
+  deadByStatus.sort((a, b) => b.n - a.n || a.status.localeCompare(b.status));
+  return { live, dead, deadByStatus };
 }
 
 /**

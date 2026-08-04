@@ -441,6 +441,15 @@ export class BrowserService {
     await this.saveTaskState(effectiveProfileName, conn.tasks);
 
     emit('browser.launch', { profile: effectiveProfileName, task: taskName, pid: conn.pid });
+    void import('../analytics/usage-db.js').then(({ recordUsage }) => {
+      recordUsage({
+        kind: 'browser',
+        name: effectiveProfileName,
+        event: 'launch',
+        source: 'browser',
+        meta: { task: taskName },
+      });
+    }).catch(() => { /* fail soft */ });
 
     // If URL provided, create tab directly (no about:blank)
     let tabId: string | undefined;
@@ -516,6 +525,15 @@ export class BrowserService {
         await this.saveTaskState(profileName, conn.tasks);
 
         emit('browser.close', { profile: profileName, task: taskName });
+        void import('../analytics/usage-db.js').then(({ recordUsage }) => {
+          recordUsage({
+            kind: 'browser',
+            name: profileName,
+            event: 'close',
+            source: 'browser',
+            meta: { task: taskName },
+          });
+        }).catch(() => { /* fail soft */ });
 
         if (conn.forkedFrom && conn.tasks.size === 0) {
           conn.cdp.close();

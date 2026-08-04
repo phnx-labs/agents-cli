@@ -438,7 +438,7 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
   // These candidates feed a routing decision, so cap how stale their usage may
   // be (see USAGE_DECISION_MAX_AGE_MS). Past that the fetch blocks on a live
   // read instead of serving the cache — one bounded, parallel round trip per
-  // account, and none at all inside the 2-minute fresh window that back-to-back
+  // account, and none at all inside the 5-minute fresh window that back-to-back
   // launches hit. A failed read still falls back to the cache; the pick then
   // routes around it via isUsageVerified rather than trusting the old number.
   const { usageByKey } = await getUsageInfoByIdentity(
