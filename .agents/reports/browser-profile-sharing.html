@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Browser Profile Sharing — Local Client vs Yosemite Agent</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-separator{color:var(--muted);padding:0 5px}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:10px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px}.meta{display:grid;gap:8px;margin-top:20px}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:baseline;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-label{color:var(--muted)}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.meta-row-provenance .chip-value{color:var(--accent-alt)}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value,.meta-row-provenance .chip-value{color:var(--text)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header"><div class="header-label">Phoenix Labs / Engineering</div><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker">agents-cli<span class="kicker-separator" aria-hidden="true">&middot;</span>agents browser profiles<span class="kicker-separator" aria-hidden="true">&middot;</span>report</div>
+<h1>Browser Profile Sharing — Local Client vs Yosemite Agent</h1>
+<p class="summary">One synced profile definition works on both machines at once, but each machine keeps its own cookie jar — log in once per machine, not once per profile.</p>
+<div class="meta" aria-label="Artifact metadata"><ul class="meta-row meta-row-facts"><li class="chip"><span class="chip-value">1 profile name, synced everywhere</span></li><li class="chip"><span class="chip-value">2 separate cookie jars</span></li><li class="chip"><span class="chip-value">0 lock or port conflicts</span></li><li class="chip"><span class="chip-label">status:</span><span class="chip-value">answered</span></li></ul><ul class="meta-row meta-row-provenance"><li class="chip"><span class="chip-label">repo:</span><span class="chip-value"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span></li><li class="chip"><span class="chip-label">branch:</span><span class="chip-value">main</span></li><li class="chip"><span class="chip-label">human:</span><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="4"/><path d="M3.5 21c.8-4.2 4.2-6.5 8.5-6.5s7.7 2.3 8.5 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>Muqsit</span></li><li class="chip"><span class="chip-label">harness:</span><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5 10 12l-6 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 18.5h8" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>kimi</span></li><li class="chip"><span class="chip-label">host:</span><span class="chip-value">yosemite-s1</span></li><li class="chip"><span class="chip-label">session:</span><span class="chip-value">ae51f993</span></li><li class="chip"><span class="chip-value">2026-08-03</span></li></ul></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a href="#findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a href="#evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a href="#recommendations"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Recommendations</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2>
+<p><strong>Yes — the same browser profile can be used locally and by a remote agent on
+Yosemite S1 at the same time.</strong> The profile <em>definition</em> (name, browser,
+endpoint) lives in the central <code>~/.agents/agents.yaml</code> and syncs across the
+fleet with <code>agents repo push/pull</code>, so <code>work</code> resolves on both machines.</p>
+<p><strong>But it is not one shared session.</strong> Each machine launches its own Chrome with
+its own <code>--user-data-dir</code> under <code>~/.agents/.cache/browser/&lt;profile&gt;@&lt;endpoint&gt;/chrome-data/</code>,
+which is gitignored runtime state that never syncs. No new profile needs to be
+created per machine — the same name is correct — but each machine's copy must
+be logged into once.</p>
+<section class="artifact-grid artifact-grid-3">
+  <div class="artifact-stat">
+    <div class="artifact-stat-value">1</div>
+    <div class="artifact-stat-label">Profile definition, synced via agents.yaml</div>
+  </div>
+  <div class="artifact-stat">
+    <div class="artifact-stat-value">2</div>
+    <div class="artifact-stat-label">Independent chrome-data cookie jars</div>
+  </div>
+  <div class="artifact-stat">
+    <div class="artifact-stat-value">0</div>
+    <div class="artifact-stat-label">Lock or port conflicts across machines</div>
+  </div>
+</section><h2 id="findings">Findings</h2>
+<figure class="artifact-figure artifact-figure-wide">
+<svg class="artifact-diagram" viewBox="0 0 960 400" role="img" aria-label="Diagram: one synced profile definition fans out to two machines, each with its own chrome-data cookie jar that never syncs.">
+  
+  <rect x="280" y="20" width="400" height="72" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="480" y="46" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#38bdf8">~/.agents/agents.yaml</text>
+  <text x="480" y="66" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">browser: profile definitions (name, browser, endpoint)</text>
+  <text x="480" y="82" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">syncs with agents repo push/pull</text>
+
+  
+  <line x1="380" y1="92" x2="240" y2="150" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"></line>
+  <line x1="580" y1="92" x2="720" y2="150" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"></line>
+  <text x="270" y="118" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#38bdf8">syncs</text>
+  <text x="690" y="118" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#38bdf8">syncs</text>
+
+  
+  <rect x="40" y="150" width="400" height="96" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="240" y="176" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#f59e0b">LOCAL CLIENT (this laptop)</text>
+  <text x="240" y="196" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">agents browser start --profile work</text>
+  <text x="240" y="214" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">Chrome A · local debug port · local SingletonLock</text>
+  <text x="240" y="232" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">resolves "work" from its own synced agents.yaml</text>
+
+  
+  <rect x="520" y="150" width="400" height="96" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="720" y="176" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">YOSEMITE S1 (remote agent)</text>
+  <text x="720" y="196" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">agents -H yosemite browser start --profile work</text>
+  <text x="720" y="214" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">Chrome B · own debug port · own SingletonLock</text>
+  <text x="720" y="232" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">SSH passthrough — runs entirely on Yosemite</text>
+
+  
+  <rect x="40" y="292" width="400" height="72" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5" opacity="0.85"></rect>
+  <text x="240" y="318" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#f59e0b">.cache/browser/work@…/chrome-data/</text>
+  <text x="240" y="338" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">cookies + logins · gitignored · log in once here</text>
+
+  <rect x="520" y="292" width="400" height="72" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5" opacity="0.85"></rect>
+  <text x="720" y="318" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">.cache/browser/work@…/chrome-data/</text>
+  <text x="720" y="338" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">cookies + logins · gitignored · log in once here too</text>
+
+  
+  <line x1="440" y1="328" x2="520" y2="328" stroke="#f43f5e" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.8"></line>
+  <text x="480" y="318" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#f43f5e">✕ never syncs</text>
+
+  
+  <line x1="240" y1="246" x2="240" y2="288" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"></line>
+  <line x1="720" y1="246" x2="720" y2="288" stroke="#a3e635" stroke-width="1.5" stroke-dasharray="3 3" opacity="0.7"></line>
+</svg>
+<figcaption>Read top-down: one synced definition fans out to two machines; each machine launches its own Chrome into its own chrome-data jar (bottom row), and the jars never sync (red ✕).</figcaption>
+</figure><ul>
+<li><strong>Profile definitions sync; runtime state does not.</strong> <code>browser:</code> profiles are
+portable config in central <code>~/.agents/agents.yaml</code>. The cookie jar lives in
+<code>~/.agents/.cache/browser/</code> — explicitly gitignored, regenerable runtime data.</li>
+<li><strong>Remote runs are SSH passthrough.</strong> <code>agents -H yosemite browser …</code> executes
+on Yosemite, resolving the same profile name against Yosemite's synced config
+and launching Chrome there. Same name, physically separate browser.</li>
+<li><strong>No collisions.</strong> Chromium's <code>SingletonLock</code> is per user-data-dir and debug
+ports are allocated per machine, so both copies run concurrently.</li>
+<li><strong>The default profile is deliberately device-local</strong> — the right profile
+choice is expected to differ per machine.</li>
+<li><strong>The one way to literally share a single browser:</strong> an <code>ssh://</code> endpoint in
+the profile, where the local daemon tunnels to one Chrome on the remote. It
+uses a throwaway <code>/tmp/agents-browser-&lt;port&gt;</code> dir — still not a synced
+profile.</li>
+</ul>
+<h2 id="evidence">Evidence</h2>
+<table>
+<thead>
+<tr>
+<th>Claim</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Profile definitions sync via central agents.yaml</td>
+<td><code>apps/cli/src/lib/types.ts:899-904</code></td>
+</tr>
+<tr>
+<td>chrome-data is per-machine runtime state</td>
+<td><code>apps/cli/src/lib/browser/chrome.ts:262-264</code></td>
+</tr>
+<tr>
+<td><code>.cache/</code> is gitignored, never synced</td>
+<td><code>apps/cli/src/lib/state.ts:14-16</code></td>
+</tr>
+<tr>
+<td><code>browser</code> runs remotely via SSH passthrough</td>
+<td><code>apps/cli/src/lib/hosts/passthrough.ts:113</code></td>
+</tr>
+<tr>
+<td>SingletonLock is per user-data-dir</td>
+<td><code>apps/cli/src/lib/browser/chrome.ts:272-278</code></td>
+</tr>
+<tr>
+<td>Default profile is device-local</td>
+<td><code>apps/cli/src/lib/types.ts:905-914</code></td>
+</tr>
+<tr>
+<td>ssh:// endpoint tunnels one remote Chrome</td>
+<td><code>apps/cli/src/lib/browser/drivers/ssh.ts</code></td>
+</tr>
+</tbody></table>
+<div class="artifact-callout">
+  <span class="artifact-tag artifact-tag-accent">Verified</span>
+  Claims checked directly against the source in this repo, not inferred from
+  docs. One stale doc line found: <code>apps/cli/docs/browser.md:53-55</code>
+  still points profile config at the version-home path instead of
+  <code>~/.agents/agents.yaml</code>.
+</div><h2 id="recommendations">Recommendations</h2>
+<ol>
+<li><strong>Keep one profile name</strong> (e.g. <code>work</code>) synced everywhere — no need to
+create separate local vs remote profiles.</li>
+<li><strong>Log in once per machine.</strong> The Yosemite agent starts logged-out until its
+own chrome-data copy is signed in once; it persists after that
+(<code>session.restore_on_startup</code> is pinned).</li>
+<li><strong>Don't expect a shared live session.</strong> There is no supported mechanism to
+share one logged-in profile between two machines simultaneously; if a single
+browser is truly required, use an <code>ssh://</code> endpoint profile and accept the
+throwaway remote dir.</li>
+</ol>
+</article>
+<footer class="document-footer">agents-cli research artifact</footer>
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0ZW1wbGF0ZTogcmVwb3J0LnYxCnRpdGxlOiBCcm93c2VyIFByb2ZpbGUgU2hhcmluZyDigJQgTG9jYWwgQ2xpZW50IHZzIFlvc2VtaXRlIEFnZW50CnN1bW1hcnk6IE9uZSBzeW5jZWQgcHJvZmlsZSBkZWZpbml0aW9uIHdvcmtzIG9uIGJvdGggbWFjaGluZXMgYXQgb25jZSwgYnV0IGVhY2ggbWFjaGluZSBrZWVwcyBpdHMgb3duIGNvb2tpZSBqYXIg4oCUIGxvZyBpbiBvbmNlIHBlciBtYWNoaW5lLCBub3Qgb25jZSBwZXIgcHJvZmlsZS4KaGVhZGVyOiBQaG9lbml4IExhYnMgLyBFbmdpbmVlcmluZwpmb290ZXI6IGFnZW50cy1jbGkgcmVzZWFyY2ggYXJ0aWZhY3QKcHJvamVjdDogYWdlbnRzLWNsaQpjb250ZXh0OiBhZ2VudHMgYnJvd3NlciBwcm9maWxlcwpyZXBvc2l0b3J5OiBwaG54LWxhYnMvYWdlbnRzLWNsaQpzdGF0dXM6IGFuc3dlcmVkCmhhcm5lc3M6IGtpbWkKaG9zdDogeW9zZW1pdGUtczEKZmFjdHM6CiAgLSAxIHByb2ZpbGUgbmFtZSwgc3luY2VkIGV2ZXJ5d2hlcmUKICAtIDIgc2VwYXJhdGUgY29va2llIGphcnMKICAtIDAgbG9jayBvciBwb3J0IGNvbmZsaWN0cwphc3NldHM6IFtdCi0tLQoKIyMgU3VtbWFyeQoKKipZZXMg4oCUIHRoZSBzYW1lIGJyb3dzZXIgcHJvZmlsZSBjYW4gYmUgdXNlZCBsb2NhbGx5IGFuZCBieSBhIHJlbW90ZSBhZ2VudCBvbgpZb3NlbWl0ZSBTMSBhdCB0aGUgc2FtZSB0aW1lLioqIFRoZSBwcm9maWxlICpkZWZpbml0aW9uKiAobmFtZSwgYnJvd3NlciwKZW5kcG9pbnQpIGxpdmVzIGluIHRoZSBjZW50cmFsIGB+Ly5hZ2VudHMvYWdlbnRzLnlhbWxgIGFuZCBzeW5jcyBhY3Jvc3MgdGhlCmZsZWV0IHdpdGggYGFnZW50cyByZXBvIHB1c2gvcHVsbGAsIHNvIGB3b3JrYCByZXNvbHZlcyBvbiBib3RoIG1hY2hpbmVzLgoKKipCdXQgaXQgaXMgbm90IG9uZSBzaGFyZWQgc2Vzc2lvbi4qKiBFYWNoIG1hY2hpbmUgbGF1bmNoZXMgaXRzIG93biBDaHJvbWUgd2l0aAppdHMgb3duIGAtLXVzZXItZGF0YS1kaXJgIHVuZGVyIGB+Ly5hZ2VudHMvLmNhY2hlL2Jyb3dzZXIvPHByb2ZpbGU+QDxlbmRwb2ludD4vY2hyb21lLWRhdGEvYCwKd2hpY2ggaXMgZ2l0aWdub3JlZCBydW50aW1lIHN0YXRlIHRoYXQgbmV2ZXIgc3luY3MuIE5vIG5ldyBwcm9maWxlIG5lZWRzIHRvIGJlCmNyZWF0ZWQgcGVyIG1hY2hpbmUg4oCUIHRoZSBzYW1lIG5hbWUgaXMgY29ycmVjdCDigJQgYnV0IGVhY2ggbWFjaGluZSdzIGNvcHkgbXVzdApiZSBsb2dnZWQgaW50byBvbmNlLgoKPHNlY3Rpb24gY2xhc3M9ImFydGlmYWN0LWdyaWQgYXJ0aWZhY3QtZ3JpZC0zIj4KICA8ZGl2IGNsYXNzPSJhcnRpZmFjdC1zdGF0Ij4KICAgIDxkaXYgY2xhc3M9ImFydGlmYWN0LXN0YXQtdmFsdWUiPjE8L2Rpdj4KICAgIDxkaXYgY2xhc3M9ImFydGlmYWN0LXN0YXQtbGFiZWwiPlByb2ZpbGUgZGVmaW5pdGlvbiwgc3luY2VkIHZpYSBhZ2VudHMueWFtbDwvZGl2PgogIDwvZGl2PgogIDxkaXYgY2xhc3M9ImFydGlmYWN0LXN0YXQiPgogICAgPGRpdiBjbGFzcz0iYXJ0aWZhY3Qtc3RhdC12YWx1ZSI+MjwvZGl2PgogICAgPGRpdiBjbGFzcz0iYXJ0aWZhY3Qtc3RhdC1sYWJlbCI+SW5kZXBlbmRlbnQgY2hyb21lLWRhdGEgY29va2llIGphcnM8L2Rpdj4KICA8L2Rpdj4KICA8ZGl2IGNsYXNzPSJhcnRpZmFjdC1zdGF0Ij4KICAgIDxkaXYgY2xhc3M9ImFydGlmYWN0LXN0YXQtdmFsdWUiPjA8L2Rpdj4KICAgIDxkaXYgY2xhc3M9ImFydGlmYWN0LXN0YXQtbGFiZWwiPkxvY2sgb3IgcG9ydCBjb25mbGljdHMgYWNyb3NzIG1hY2hpbmVzPC9kaXY+CiAgPC9kaXY+Cjwvc2VjdGlvbj4KCiMjIEZpbmRpbmdzCgo8ZmlndXJlIGNsYXNzPSJhcnRpZmFjdC1maWd1cmUgYXJ0aWZhY3QtZmlndXJlLXdpZGUiPgo8c3ZnIGNsYXNzPSJhcnRpZmFjdC1kaWFncmFtIiB2aWV3Qm94PSIwIDAgOTYwIDQwMCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJEaWFncmFtOiBvbmUgc3luY2VkIHByb2ZpbGUgZGVmaW5pdGlvbiBmYW5zIG91dCB0byB0d28gbWFjaGluZXMsIGVhY2ggd2l0aCBpdHMgb3duIGNocm9tZS1kYXRhIGNvb2tpZSBqYXIgdGhhdCBuZXZlciBzeW5jcy4iPgogIDwhLS0gU2hhcmVkIGxheWVyOiBjZW50cmFsIGFnZW50cy55YW1sIC0tPgogIDxyZWN0IHg9IjI4MCIgeT0iMjAiIHdpZHRoPSI0MDAiIGhlaWdodD0iNzIiIHJ4PSI4IiBmaWxsPSIjMGUxNDE4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNDgwIiB5PSI0NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiMzOGJkZjgiPn4vLmFnZW50cy9hZ2VudHMueWFtbDwvdGV4dD4KICA8dGV4dCB4PSI0ODAiIHk9IjY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2M4YzhjOCI+YnJvd3NlcjogcHJvZmlsZSBkZWZpbml0aW9ucyAobmFtZSwgYnJvd3NlciwgZW5kcG9pbnQpPC90ZXh0PgogIDx0ZXh0IHg9IjQ4MCIgeT0iODIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5zeW5jcyB3aXRoIGFnZW50cyByZXBvIHB1c2gvcHVsbDwvdGV4dD4KCiAgPCEtLSBTeW5jIGFycm93cyAtLT4KICA8bGluZSB4MT0iMzgwIiB5MT0iOTIiIHgyPSIyNDAiIHkyPSIxNTAiIHN0cm9rZT0iIzM4YmRmOCIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1kYXNoYXJyYXk9IjMgMyIgb3BhY2l0eT0iMC43Ii8+CiAgPGxpbmUgeDE9IjU4MCIgeTE9IjkyIiB4Mj0iNzIwIiB5Mj0iMTUwIiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtZGFzaGFycmF5PSIzIDMiIG9wYWNpdHk9IjAuNyIvPgogIDx0ZXh0IHg9IjI3MCIgeT0iMTE4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzM4YmRmOCI+c3luY3M8L3RleHQ+CiAgPHRleHQgeD0iNjkwIiB5PSIxMTgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjMzhiZGY4Ij5zeW5jczwvdGV4dD4KCiAgPCEtLSBMb2NhbCBtYWNoaW5lIC0tPgogIDxyZWN0IHg9IjQwIiB5PSIxNTAiIHdpZHRoPSI0MDAiIGhlaWdodD0iOTYiIHJ4PSI4IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiNmNTllMGIiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMjQwIiB5PSIxNzYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZjU5ZTBiIj5MT0NBTCBDTElFTlQgKHRoaXMgbGFwdG9wKTwvdGV4dD4KICA8dGV4dCB4PSIyNDAiIHk9IjE5NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNjOGM4YzgiPmFnZW50cyBicm93c2VyIHN0YXJ0IC0tcHJvZmlsZSB3b3JrPC90ZXh0PgogIDx0ZXh0IHg9IjI0MCIgeT0iMjE0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+Q2hyb21lIEEgwrcgbG9jYWwgZGVidWcgcG9ydCDCtyBsb2NhbCBTaW5nbGV0b25Mb2NrPC90ZXh0PgogIDx0ZXh0IHg9IjI0MCIgeT0iMjMyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+cmVzb2x2ZXMgIndvcmsiIGZyb20gaXRzIG93biBzeW5jZWQgYWdlbnRzLnlhbWw8L3RleHQ+CgogIDwhLS0gWW9zZW1pdGUgbWFjaGluZSAtLT4KICA8cmVjdCB4PSI1MjAiIHk9IjE1MCIgd2lkdGg9IjQwMCIgaGVpZ2h0PSI5NiIgcng9IjgiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI3MjAiIHk9IjE3NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNhM2U2MzUiPllPU0VNSVRFIFMxIChyZW1vdGUgYWdlbnQpPC90ZXh0PgogIDx0ZXh0IHg9IjcyMCIgeT0iMTk2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2M4YzhjOCI+YWdlbnRzIC1IIHlvc2VtaXRlIGJyb3dzZXIgc3RhcnQgLS1wcm9maWxlIHdvcms8L3RleHQ+CiAgPHRleHQgeD0iNzIwIiB5PSIyMTQiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5DaHJvbWUgQiDCtyBvd24gZGVidWcgcG9ydCDCtyBvd24gU2luZ2xldG9uTG9jazwvdGV4dD4KICA8dGV4dCB4PSI3MjAiIHk9IjIzMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPlNTSCBwYXNzdGhyb3VnaCDigJQgcnVucyBlbnRpcmVseSBvbiBZb3NlbWl0ZTwvdGV4dD4KCiAgPCEtLSBjaHJvbWUtZGF0YSBkaXJzIC0tPgogIDxyZWN0IHg9IjQwIiB5PSIyOTIiIHdpZHRoPSI0MDAiIGhlaWdodD0iNzIiIHJ4PSI4IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiNmNTllMGIiIHN0cm9rZS13aWR0aD0iMS41IiBvcGFjaXR5PSIwLjg1Ii8+CiAgPHRleHQgeD0iMjQwIiB5PSIzMTgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZjU5ZTBiIj4uY2FjaGUvYnJvd3Nlci93b3JrQOKApi9jaHJvbWUtZGF0YS88L3RleHQ+CiAgPHRleHQgeD0iMjQwIiB5PSIzMzgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5jb29raWVzICsgbG9naW5zIMK3IGdpdGlnbm9yZWQgwrcgbG9nIGluIG9uY2UgaGVyZTwvdGV4dD4KCiAgPHJlY3QgeD0iNTIwIiB5PSIyOTIiIHdpZHRoPSI0MDAiIGhlaWdodD0iNzIiIHJ4PSI4IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41IiBvcGFjaXR5PSIwLjg1Ii8+CiAgPHRleHQgeD0iNzIwIiB5PSIzMTgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjYTNlNjM1Ij4uY2FjaGUvYnJvd3Nlci93b3JrQOKApi9jaHJvbWUtZGF0YS88L3RleHQ+CiAgPHRleHQgeD0iNzIwIiB5PSIzMzgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5jb29raWVzICsgbG9naW5zIMK3IGdpdGlnbm9yZWQgwrcgbG9nIGluIG9uY2UgaGVyZSB0b288L3RleHQ+CgogIDwhLS0gbmV2ZXItc3luY2VkIGNvbm5lY3RvciAtLT4KICA8bGluZSB4MT0iNDQwIiB5MT0iMzI4IiB4Mj0iNTIwIiB5Mj0iMzI4IiBzdHJva2U9IiNmNDNmNWUiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtZGFzaGFycmF5PSIzIDMiIG9wYWNpdHk9IjAuOCIvPgogIDx0ZXh0IHg9IjQ4MCIgeT0iMzE4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2Y0M2Y1ZSI+4pyVIG5ldmVyIHN5bmNzPC90ZXh0PgoKICA8IS0tIGxhdW5jaCBhcnJvd3MgLS0+CiAgPGxpbmUgeDE9IjI0MCIgeTE9IjI0NiIgeDI9IjI0MCIgeTI9IjI4OCIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWRhc2hhcnJheT0iMyAzIiBvcGFjaXR5PSIwLjciLz4KICA8bGluZSB4MT0iNzIwIiB5MT0iMjQ2IiB4Mj0iNzIwIiB5Mj0iMjg4IiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtZGFzaGFycmF5PSIzIDMiIG9wYWNpdHk9IjAuNyIvPgo8L3N2Zz4KPGZpZ2NhcHRpb24+UmVhZCB0b3AtZG93bjogb25lIHN5bmNlZCBkZWZpbml0aW9uIGZhbnMgb3V0IHRvIHR3byBtYWNoaW5lczsgZWFjaCBtYWNoaW5lIGxhdW5jaGVzIGl0cyBvd24gQ2hyb21lIGludG8gaXRzIG93biBjaHJvbWUtZGF0YSBqYXIgKGJvdHRvbSByb3cpLCBhbmQgdGhlIGphcnMgbmV2ZXIgc3luYyAocmVkIOKclSkuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCi0gKipQcm9maWxlIGRlZmluaXRpb25zIHN5bmM7IHJ1bnRpbWUgc3RhdGUgZG9lcyBub3QuKiogYGJyb3dzZXI6YCBwcm9maWxlcyBhcmUKICBwb3J0YWJsZSBjb25maWcgaW4gY2VudHJhbCBgfi8uYWdlbnRzL2FnZW50cy55YW1sYC4gVGhlIGNvb2tpZSBqYXIgbGl2ZXMgaW4KICBgfi8uYWdlbnRzLy5jYWNoZS9icm93c2VyL2Ag4oCUIGV4cGxpY2l0bHkgZ2l0aWdub3JlZCwgcmVnZW5lcmFibGUgcnVudGltZSBkYXRhLgotICoqUmVtb3RlIHJ1bnMgYXJlIFNTSCBwYXNzdGhyb3VnaC4qKiBgYWdlbnRzIC1IIHlvc2VtaXRlIGJyb3dzZXIg4oCmYCBleGVjdXRlcwogIG9uIFlvc2VtaXRlLCByZXNvbHZpbmcgdGhlIHNhbWUgcHJvZmlsZSBuYW1lIGFnYWluc3QgWW9zZW1pdGUncyBzeW5jZWQgY29uZmlnCiAgYW5kIGxhdW5jaGluZyBDaHJvbWUgdGhlcmUuIFNhbWUgbmFtZSwgcGh5c2ljYWxseSBzZXBhcmF0ZSBicm93c2VyLgotICoqTm8gY29sbGlzaW9ucy4qKiBDaHJvbWl1bSdzIGBTaW5nbGV0b25Mb2NrYCBpcyBwZXIgdXNlci1kYXRhLWRpciBhbmQgZGVidWcKICBwb3J0cyBhcmUgYWxsb2NhdGVkIHBlciBtYWNoaW5lLCBzbyBib3RoIGNvcGllcyBydW4gY29uY3VycmVudGx5LgotICoqVGhlIGRlZmF1bHQgcHJvZmlsZSBpcyBkZWxpYmVyYXRlbHkgZGV2aWNlLWxvY2FsKiog4oCUIHRoZSByaWdodCBwcm9maWxlCiAgY2hvaWNlIGlzIGV4cGVjdGVkIHRvIGRpZmZlciBwZXIgbWFjaGluZS4KLSAqKlRoZSBvbmUgd2F5IHRvIGxpdGVyYWxseSBzaGFyZSBhIHNpbmdsZSBicm93c2VyOioqIGFuIGBzc2g6Ly9gIGVuZHBvaW50IGluCiAgdGhlIHByb2ZpbGUsIHdoZXJlIHRoZSBsb2NhbCBkYWVtb24gdHVubmVscyB0byBvbmUgQ2hyb21lIG9uIHRoZSByZW1vdGUuIEl0CiAgdXNlcyBhIHRocm93YXdheSBgL3RtcC9hZ2VudHMtYnJvd3Nlci08cG9ydD5gIGRpciDigJQgc3RpbGwgbm90IGEgc3luY2VkCiAgcHJvZmlsZS4KCiMjIEV2aWRlbmNlCgp8IENsYWltIHwgU291cmNlIHwKfCAtLS0gfCAtLS0gfAp8IFByb2ZpbGUgZGVmaW5pdGlvbnMgc3luYyB2aWEgY2VudHJhbCBhZ2VudHMueWFtbCB8IGBhcHBzL2NsaS9zcmMvbGliL3R5cGVzLnRzOjg5OS05MDRgIHwKfCBjaHJvbWUtZGF0YSBpcyBwZXItbWFjaGluZSBydW50aW1lIHN0YXRlIHwgYGFwcHMvY2xpL3NyYy9saWIvYnJvd3Nlci9jaHJvbWUudHM6MjYyLTI2NGAgfAp8IGAuY2FjaGUvYCBpcyBnaXRpZ25vcmVkLCBuZXZlciBzeW5jZWQgfCBgYXBwcy9jbGkvc3JjL2xpYi9zdGF0ZS50czoxNC0xNmAgfAp8IGBicm93c2VyYCBydW5zIHJlbW90ZWx5IHZpYSBTU0ggcGFzc3Rocm91Z2ggfCBgYXBwcy9jbGkvc3JjL2xpYi9ob3N0cy9wYXNzdGhyb3VnaC50czoxMTNgIHwKfCBTaW5nbGV0b25Mb2NrIGlzIHBlciB1c2VyLWRhdGEtZGlyIHwgYGFwcHMvY2xpL3NyYy9saWIvYnJvd3Nlci9jaHJvbWUudHM6MjcyLTI3OGAgfAp8IERlZmF1bHQgcHJvZmlsZSBpcyBkZXZpY2UtbG9jYWwgfCBgYXBwcy9jbGkvc3JjL2xpYi90eXBlcy50czo5MDUtOTE0YCB8Cnwgc3NoOi8vIGVuZHBvaW50IHR1bm5lbHMgb25lIHJlbW90ZSBDaHJvbWUgfCBgYXBwcy9jbGkvc3JjL2xpYi9icm93c2VyL2RyaXZlcnMvc3NoLnRzYCB8Cgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1jYWxsb3V0Ij4KICA8c3BhbiBjbGFzcz0iYXJ0aWZhY3QtdGFnIGFydGlmYWN0LXRhZy1hY2NlbnQiPlZlcmlmaWVkPC9zcGFuPgogIENsYWltcyBjaGVja2VkIGRpcmVjdGx5IGFnYWluc3QgdGhlIHNvdXJjZSBpbiB0aGlzIHJlcG8sIG5vdCBpbmZlcnJlZCBmcm9tCiAgZG9jcy4gT25lIHN0YWxlIGRvYyBsaW5lIGZvdW5kOiA8Y29kZT5hcHBzL2NsaS9kb2NzL2Jyb3dzZXIubWQ6NTMtNTU8L2NvZGU+CiAgc3RpbGwgcG9pbnRzIHByb2ZpbGUgY29uZmlnIGF0IHRoZSB2ZXJzaW9uLWhvbWUgcGF0aCBpbnN0ZWFkIG9mCiAgPGNvZGU+fi8uYWdlbnRzL2FnZW50cy55YW1sPC9jb2RlPi4KPC9kaXY+CgojIyBSZWNvbW1lbmRhdGlvbnMKCjEuICoqS2VlcCBvbmUgcHJvZmlsZSBuYW1lKiogKGUuZy4gYHdvcmtgKSBzeW5jZWQgZXZlcnl3aGVyZSDigJQgbm8gbmVlZCB0bwogICBjcmVhdGUgc2VwYXJhdGUgbG9jYWwgdnMgcmVtb3RlIHByb2ZpbGVzLgoyLiAqKkxvZyBpbiBvbmNlIHBlciBtYWNoaW5lLioqIFRoZSBZb3NlbWl0ZSBhZ2VudCBzdGFydHMgbG9nZ2VkLW91dCB1bnRpbCBpdHMKICAgb3duIGNocm9tZS1kYXRhIGNvcHkgaXMgc2lnbmVkIGluIG9uY2U7IGl0IHBlcnNpc3RzIGFmdGVyIHRoYXQKICAgKGBzZXNzaW9uLnJlc3RvcmVfb25fc3RhcnR1cGAgaXMgcGlubmVkKS4KMy4gKipEb24ndCBleHBlY3QgYSBzaGFyZWQgbGl2ZSBzZXNzaW9uLioqIFRoZXJlIGlzIG5vIHN1cHBvcnRlZCBtZWNoYW5pc20gdG8KICAgc2hhcmUgb25lIGxvZ2dlZC1pbiBwcm9maWxlIGJldHdlZW4gdHdvIG1hY2hpbmVzIHNpbXVsdGFuZW91c2x5OyBpZiBhIHNpbmdsZQogICBicm93c2VyIGlzIHRydWx5IHJlcXVpcmVkLCB1c2UgYW4gYHNzaDovL2AgZW5kcG9pbnQgcHJvZmlsZSBhbmQgYWNjZXB0IHRoZQogICB0aHJvd2F3YXkgcmVtb3RlIGRpci4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
