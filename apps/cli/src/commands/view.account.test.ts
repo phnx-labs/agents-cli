@@ -1,5 +1,72 @@
 import { describe, expect, it } from 'vitest';
-import { accountColumnLabel, pruneGroupKey } from './view.js';
+import { accountColumnLabel, joinViewColumns, pruneGroupKey } from './view.js';
+import { padToWidth, stringWidth } from '../lib/session/width.js';
+
+describe('joinViewColumns — fixed multi-agent layout', () => {
+  it('keeps the auth chip at the same column when status is empty', () => {
+    // The multi-agent misalignment bug: skipping empty status mid-row shifted
+    // lastActive/auth left. Fixed columns pad empties so gutters match.
+    const wVer = 18;
+    const wModel = 8;
+    const wEmail = 10;
+    const wUsage = 22;
+    const wStatus = 12;
+    const wActive = 10;
+
+    const row = (
+      ver: string,
+      model: string,
+      email: string,
+      usage: string,
+      status: string,
+      active: string,
+      auth: string,
+    ) =>
+      joinViewColumns([
+        padToWidth(ver, wVer),
+        padToWidth(model, wModel),
+        padToWidth(email, wEmail),
+        padToWidth(usage, wUsage),
+        padToWidth(status, wStatus),
+        padToWidth(active, wActive),
+        auth,
+      ]);
+
+    const rateLimited = row(
+      '2.1.220 (default)',
+      'default',
+      'a@x.com',
+      'Max  S: 100%',
+      'rate-limited',
+      '8h ago',
+      '○ 1m ago',
+    );
+    const healthy = row(
+      '2.1.219',
+      'default',
+      'b@y.com',
+      'Max  S: 5%',
+      '',
+      '2m ago',
+      '● 1m ago',
+    );
+
+    const authAt = (line: string): number => {
+      const m = line.match(/[●○◐]/);
+      return m?.index ?? -1;
+    };
+    expect(authAt(rateLimited)).toBeGreaterThan(0);
+    expect(authAt(healthy)).toBe(authAt(rateLimited));
+    // Both rows stay within a sane terminal width after the overview meter cap.
+    expect(stringWidth(rateLimited)).toBeLessThanOrEqual(120);
+    expect(stringWidth(healthy)).toBe(stringWidth(rateLimited));
+  });
+
+  it('drops only trailing empty columns', () => {
+    expect(joinViewColumns(['ver', 'model', '', ''])).toBe('ver  model');
+    expect(joinViewColumns(['ver', '', 'acct'])).toBe('ver    acct');
+  });
+});
 
 describe('accountColumnLabel — organization suffix', () => {
   it('appends the org NAME (identity) for a Team seat — the tier shows in the plan column', () => {
