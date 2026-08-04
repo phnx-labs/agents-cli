@@ -33,6 +33,16 @@
   `agents sessions`'s perf sample for `command.end` now carries the session id
   and agent instead of being anonymous. Source: `apps/cli/src/lib/session/prompt.ts`,
   `apps/cli/src/lib/session/parse.ts`, `apps/cli/src/index.ts`.
+- **`agents routines status` no longer reports "stopped" for a live scheduler, and
+  `agents routines start` can't spawn a second one.** The daemon writes its pid file
+  once (on claim/start) but rewrites the heartbeat every tick. If the pid file was lost
+  while the daemon kept ticking — an earlier status check clearing a stale/reused pid, or
+  the file removed out from under a live daemon — `status` read only the pid file and
+  reported `stopped` for a scheduler that was in fact running and firing jobs, while
+  `claimDaemonInstance()` would start a concurrent `JobScheduler` that double-fires every
+  routine. `isDaemonRunning()` and the single-instance claim now also trust a fresh
+  heartbeat whose pid is alive, re-adopting the pid file to heal the desync.
+  Source: `apps/cli/src/lib/daemon.ts`.
 
 ## 1.21.2
 

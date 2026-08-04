@@ -194,6 +194,17 @@ export function removeHeartbeat(): void {
   try { fs.unlinkSync(getHeartbeatPath()); } catch { /* already removed */ }
 }
 
+/**
+ * A heartbeat is "fresh" when its last tick falls inside the wedge window — the
+ * same threshold isDaemonWedged() uses to decide a still-present daemon has gone
+ * unresponsive. A fresh heartbeat whose pid is alive is proof of a live, ticking
+ * daemon even when the pid file has been lost.
+ */
+function isHeartbeatFresh(hb: DaemonHeartbeat): boolean {
+  const elapsed = Date.now() - Date.parse(hb.lastTick);
+  return elapsed <= WEDGE_THRESHOLD_TICKS * MONITOR_TICK_MS;
+}
+
 export function isDaemonWedged(): boolean {
   const pid = readDaemonPid();
   if (!pid) return false;
@@ -201,8 +212,7 @@ export function isDaemonWedged(): boolean {
   const hb = readHeartbeat();
   if (!hb) return false;
   if (hb.pid !== pid) return false;
-  const elapsed = Date.now() - Date.parse(hb.lastTick);
-  return elapsed > WEDGE_THRESHOLD_TICKS * MONITOR_TICK_MS;
+  return !isHeartbeatFresh(hb);
 }
 
 /** How long stopDaemon waits for a SIGTERMed daemon to exit before escalating. */
@@ -210,13 +220,41 @@ const STOP_GRACE_MS = 5000;
 /** How long it waits after the hard tree-kill before giving up. */
 const STOP_KILL_GRACE_MS = 2000;
 
-/** Check if the daemon process is alive by sending signal 0 to the stored PID. */
-export function isDaemonRunning(): boolean {
+/**
+ * Resolve the PID of the live daemon, tolerant of a pid-file/heartbeat desync.
+ *
+ * The daemon writes the pid file once (on claim/start) but rewrites the
+ * heartbeat every tick. If the pid file is lost while the daemon keeps ticking
+ * — e.g. an earlier isDaemonRunning() found a stale/reused/dead pid and cleared
+ * the file, or it was removed out from under a live daemon — the pid file reads
+ * empty even though a daemon is genuinely alive and firing jobs. Reading only
+ * the pid file then reports "stopped" for a running scheduler, and (worse) lets
+ * claimDaemonInstance() start a SECOND daemon that double-fires every routine.
+ *
+ * So: trust the pid file when its pid is alive; otherwise trust a FRESH
+ * heartbeat whose pid is alive, and re-adopt the pid file so the desync heals.
+ * Returns null only when neither points at a live process (clearing a stale pid
+ * file on the way out).
+ */
+function resolveLiveDaemonPid(): number | null {
   const pid = readDaemonPid();
-  if (!pid) return false;
-  if (isAlive(pid)) return true;
-  removeDaemonPid();
-  return false;
+  if (pid !== null && isAlive(pid)) return pid;
+  const hb = readHeartbeat();
+  if (hb && isAlive(hb.pid) && isHeartbeatFresh(hb)) {
+    if (pid !== hb.pid) writeDaemonPid(hb.pid); // heal the pid-file/heartbeat desync
+    return hb.pid;
+  }
+  if (pid !== null) removeDaemonPid();
+  return null;
+}
+
+/**
+ * Check whether a daemon is alive — via the pid file, or a fresh heartbeat when
+ * the pid file has been lost (see resolveLiveDaemonPid). Heals the pid file as a
+ * side effect so a subsequent read is consistent.
+ */
+export function isDaemonRunning(): boolean {
+  return resolveLiveDaemonPid() !== null;
 }
 
 /**
@@ -237,9 +275,13 @@ export function isDaemonRunning(): boolean {
 export function claimDaemonInstance(): boolean {
   const release = acquireStartLock();
   try {
-    const existing = readDaemonPid();
-    if (existing !== null && existing !== process.pid && isAlive(existing)) {
-      return false; // another live daemon already owns the pid file
+    // resolveLiveDaemonPid() also consults a fresh heartbeat, so a live daemon
+    // whose pid file was lost still blocks a second claim — otherwise a missing
+    // pid file would let this instance start a concurrent JobScheduler and
+    // double-fire every routine.
+    const existing = resolveLiveDaemonPid();
+    if (existing !== null && existing !== process.pid) {
+      return false; // another live daemon already owns the instance
     }
     writeDaemonPid(process.pid);
     return true;
