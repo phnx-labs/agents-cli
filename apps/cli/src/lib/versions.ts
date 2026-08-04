@@ -1382,45 +1382,30 @@ export function isVersionIsolated(agent: AgentId, version: string): boolean {
 }
 
 /**
- * Grok's official installer writes into ~/.grok/downloads, which (because we
- * symlink ~/.grok to the active version home) resolves to the PREVIOUS default
- * home during `agents add grok@<new>`. Move the freshly-downloaded binary and
- * its generic platform copy into the target version's isolated home so
- * `listInstalledVersions` and the shim resolve the right binary.
+ * Move any `grok-<installedVersion>-...` binary (and its generic platform
+ * copy) found directly under `sourceDownloads` into `targetDownloads`.
+ * Returns true if the versioned binary was moved.
  */
-function relocateGrokBinaryToVersionHome(installedVersion: string): void {
-  const hostGrokLink = path.join(getHomeDir(), agentConfigDirName('grok'));
-  let sourceDownloads: string;
-  try {
-    sourceDownloads = path.join(fs.readlinkSync(hostGrokLink), 'downloads');
-  } catch {
-    sourceDownloads = path.join(hostGrokLink, 'downloads');
-  }
-  const targetDownloads = path.join(
-    getVersionHomePath('grok', installedVersion),
-    agentConfigDirName('grok'),
-    'downloads'
-  );
-
-  if (!fs.existsSync(sourceDownloads)) return;
-  if (path.resolve(sourceDownloads) === path.resolve(targetDownloads)) return;
+function tryMoveGrokDownloads(sourceDownloads: string, targetDownloads: string, installedVersion: string): boolean {
+  if (!fs.existsSync(sourceDownloads)) return false;
+  if (path.resolve(sourceDownloads) === path.resolve(targetDownloads)) return false;
 
   const entries = fs.readdirSync(sourceDownloads).filter((e) => e.startsWith('grok-'));
-  if (entries.length === 0) return;
-
-  fs.mkdirSync(targetDownloads, { recursive: true });
+  if (entries.length === 0) return false;
 
   const escapedVersion = installedVersion.replace(/\./g, '\\.');
   const versionedPattern = new RegExp(`^grok-${escapedVersion}-`);
   const movedPaths: string[] = [];
 
-  // Move the versioned binary first.
+  // Move the versioned binary first — only create the target dir once we
+  // know there is something to move into it.
   for (const entry of entries) {
     if (!versionedPattern.test(entry)) continue;
     const src = path.join(sourceDownloads, entry);
     const dst = path.join(targetDownloads, entry);
     if (fs.existsSync(dst)) continue;
     try {
+      fs.mkdirSync(targetDownloads, { recursive: true });
       fs.renameSync(src, dst);
       movedPaths.push(dst);
     } catch {
@@ -1428,7 +1413,7 @@ function relocateGrokBinaryToVersionHome(installedVersion: string): void {
     }
   }
 
-  if (movedPaths.length === 0) return;
+  if (movedPaths.length === 0) return false;
 
   // The installer also creates a generic platform binary (e.g. grok-macos-aarch64)
   // that is a copy of the versioned binary. Move it too if its size matches.
@@ -1445,6 +1430,45 @@ function relocateGrokBinaryToVersionHome(installedVersion: string): void {
     } catch {
       /* ignore per-file failures */
     }
+  }
+
+  return true;
+}
+
+/**
+ * Grok's official installer writes into ~/.grok/downloads, which (because we
+ * symlink ~/.grok to the active version home) resolves to the PREVIOUS default
+ * home during `agents add grok@<new>`. Move the freshly-downloaded binary and
+ * its generic platform copy into the target version's isolated home so
+ * `listInstalledVersions` and the shim resolve the right binary.
+ *
+ * Self-healing: if `~/.grok`'s current target has nothing matching (e.g. a
+ * PAST install mislabeled `installedVersion` as the literal string 'latest',
+ * whose regex never matched the real filename, stranding the binary in
+ * whatever version was default at the time), sweep every other installed
+ * grok version home for the missing file before giving up.
+ */
+function relocateGrokBinaryToVersionHome(installedVersion: string): void {
+  const hostGrokLink = path.join(getHomeDir(), agentConfigDirName('grok'));
+  let sourceDownloads: string;
+  try {
+    sourceDownloads = path.join(fs.readlinkSync(hostGrokLink), 'downloads');
+  } catch {
+    sourceDownloads = path.join(hostGrokLink, 'downloads');
+  }
+  const targetDownloads = path.join(
+    getVersionHomePath('grok', installedVersion),
+    agentConfigDirName('grok'),
+    'downloads'
+  );
+
+  if (tryMoveGrokDownloads(sourceDownloads, targetDownloads, installedVersion)) return;
+
+  for (const version of listInstalledVersions('grok')) {
+    if (version === installedVersion) continue;
+    const candidate = path.join(getVersionHomePath('grok', version), agentConfigDirName('grok'), 'downloads');
+    if (path.resolve(candidate) === path.resolve(sourceDownloads)) continue; // already tried
+    if (tryMoveGrokDownloads(candidate, targetDownloads, installedVersion)) return;
   }
 }
 
@@ -1502,7 +1526,28 @@ export async function installVersion(
       }
 
       if (version === 'latest') {
-        installedVersion = await getCliVersionFromPath(agent) || version;
+        // A freshly-installed self-updating binary (grok, …) can take a
+        // moment to become resolvable on PATH right after the installer
+        // exits — retry briefly rather than silently falling back to the
+        // literal string 'latest'. That fallback used to corrupt version
+        // bookkeeping downstream: it creates a bogus `versions/<agent>/latest/`
+        // dir, and for grok specifically defeats relocateGrokBinaryToVersionHome
+        // (its exact-filename regex can never match `grok-latest-...`), which
+        // permanently strands the real downloaded binary in the PREVIOUS
+        // default's downloads dir.
+        let probed = await getCliVersionFromPath(agent);
+        for (let attempt = 0; !probed && attempt < 2; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          probed = await getCliVersionFromPath(agent);
+        }
+        if (!probed) {
+          return {
+            success: false,
+            installedVersion: version,
+            error: `${agentConfig.name} installed but its version could not be determined after several attempts.`,
+          };
+        }
+        installedVersion = probed;
         // Fold any stale literal `latest` dir from an earlier probe-failed
         // install into the real version so it stops shadowing `agents view`.
         await reconcileStaleLatestDir(agent, installedVersion);

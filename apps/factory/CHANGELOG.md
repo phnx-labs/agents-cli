@@ -4,6 +4,17 @@ All notable changes to the Factory extension are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
+## [Unreleased]
+
+- **grok / kimi / droid / antigravity tabs now restore, reopen, and reload like the prewarm agents (#1747).**
+  Resume past the picker was still gated on `supportsPrewarming` (claude/codex/gemini/cursor/opencode),
+  so a grok/kimi/droid/antigravity tab did not come back after a window reload, a reopen-last, or a
+  reload-active-terminal — even though its transcript exists and `agents run --resume` can resume it. The
+  three surfaces now gate on the same registry check the picker uses (`agentKeyFromSession`), reload falls
+  back to a generic Ctrl+C-twice exit sequence for agents without a `PREWARM_CONFIGS` entry, and the
+  `openSingleAgent` launch path now tracks + polls those harnesses too so there is a persisted session to
+  come back to.
+
 ## [0.9.309] - 2026-08-03
 
 - **Watchdog auto-rotate delegates to `agents run auto` — no more rotate loops into exhausted accounts.**

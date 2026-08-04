@@ -174,6 +174,16 @@ enum AgentsCLI {
     static func deviceRegister(_ name: String) { runDetached(argv(["devices", "register", name])) }
     static func deviceIgnore(_ name: String) { runDetached(argv(["devices", "ignore", name])) }
 
+    /// Take the operator to a blocked session: attach its terminal, or open a new
+    /// tab and resume it (`agents focus` decides, and handles a remote host).
+    ///
+    /// Detached on purpose. `focus` opens a Terminal/tmux surface and can block on
+    /// an attach; the menu bar must never wait on that, and there is nothing to
+    /// report back — the operator sees the session appear.
+    static func focusSession(_ sessionId: String) {
+        runDetached(argv(["focus", sessionId]))
+    }
+
     // Surface CLI health in a terminal — `agents doctor` is interactive output.
     static func runDoctor() {
         let cmd = "\(shellQuote(binary)) doctor"

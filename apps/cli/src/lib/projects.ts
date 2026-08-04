@@ -5,8 +5,17 @@
  * directory by pure convention (`<projectRoot>/<slug>`, see `project-root.ts`).
  * This module adds editable definitions on top: one YAML file per project under
  * `~/.agents/projects/<name>.yaml`, sitting beside the existing `routines/`,
- * `monitors/`, and `teams/` dirs in the user repo (so definitions sync across
- * machines for free via `agents push/pull`). A defined project can name itself
+ * `monitors/`, and `teams/` dirs in the user repo.
+ *
+ * That location makes definitions SYNCABLE, not automatically synced: they ride
+ * the user repo only once they are committed to it, via `agents repo push user`
+ * (`agents push` was removed). Until then the directory is untracked, and a
+ * reconcile that cleans the working tree deletes it — observed twice on one
+ * machine, taking four definitions with it each time. The recovery is an
+ * orphaned `chore(local): save …-sync drift` commit, which is not a guarantee:
+ * unreachable objects are collected. Say "commit them" rather than "for free".
+ *
+ * A defined project can name itself
  * independently of its folder, bind more than one repo, pin a monorepo subpath,
  * describe context subdirectories an agent should start from, carry a Linear
  * link and external integrations, and set an explicit default path.

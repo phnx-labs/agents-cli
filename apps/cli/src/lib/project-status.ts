@@ -132,6 +132,16 @@ export function rollupSessionsByProject(
  */
 const DEAD_STATUSES = new Set(['closed', 'crashed']);
 
+/**
+ * True when a session's status means it is over. Exported so the card can keep
+ * the `agents` roster to live sessions: the headline and the `dead` row already
+ * separate the two, and a roster that reads `crashed ×25` beside `23 live`
+ * makes the reader distrust both numbers.
+ */
+export function isDeadStatus(status: string): boolean {
+  return DEAD_STATUSES.has(status);
+}
+
 /*
  * Every `ActiveStatus`, and why it lands where it does:
  *

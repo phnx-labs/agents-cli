@@ -235,6 +235,26 @@ export function supportsPrewarming(agentType: string): agentType is PrewarmAgent
   return agentType === 'claude' || agentType === 'codex' || agentType === 'gemini' || agentType === 'cursor' || agentType === 'opencode';
 }
 
+/**
+ * Ctrl+C twice — the exit sequence for any agent without a {@link PREWARM_CONFIGS}
+ * entry. Four of the five prewarm agents already use exactly this; the fifth
+ * (Claude) needs a leading Esc. A resumable non-prewarm agent (grok/kimi/droid/
+ * antigravity) is a Ctrl+C-to-quit CLI, so this is the safe default.
+ */
+export const DEFAULT_EXIT_SEQUENCE: readonly string[] = ['\x03', '\x03'];
+
+/**
+ * Keystrokes that cleanly exit a running agent before a reload/resume. Prewarm
+ * agents use their tuned sequence; every other resumable harness falls back to
+ * {@link DEFAULT_EXIT_SEQUENCE}. Keeping this beside {@link PREWARM_CONFIGS} means
+ * reload never has to know which agents are prewarm-capable.
+ */
+export function exitSequenceFor(agentType: string): readonly string[] {
+  return agentType in PREWARM_CONFIGS
+    ? PREWARM_CONFIGS[agentType as PrewarmAgentType].exitSequence
+    : DEFAULT_EXIT_SEQUENCE;
+}
+
 // === Blocking Prompt Detection ===
 
 export type BlockedReason = 'trust_prompt' | 'auth_required' | 'rate_limit' | 'unknown_prompt';
