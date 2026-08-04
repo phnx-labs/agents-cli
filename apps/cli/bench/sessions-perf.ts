@@ -7,14 +7,18 @@
 //   C. Picker keystroke (filterSessionsByQuery) — single call
 //   D. Picker keystroke — 10 successive queries (simulates typing)
 //   E. searchContentIndex alone (the per-keystroke bottleneck)
+//   F. one indexed tool-call clause
+//   G. two distinct indexed tool-call clauses in one session
+//   H. exact static program-occurrence count
 //
 // Corpus: the index is whatever $HOME holds, so CI's `HOME="$(mktemp -d)"` run
 // measures an EMPTY index — a floor for A/B, not a real-world number. Set
 // BENCH_CORPUS=real (with BENCH_MODE=warm) to copy this machine's live index
 // into a throwaway HOME and measure B/C/D/E against a populated one.
 //
-// Output: JSON on stdout. Intended to be run before and after the refactor
-// so the numbers can be diffed directly.
+// Output: JSON on stdout, including p50/p95/p99 latency and DB/WAL sizes.
+// Set BENCH_BASELINE=<result.json> to compare p95 tool-query latency; add
+// BENCH_FAIL_REGRESSION=1 to fail when any p95 grows by more than 10%.
 
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -23,7 +27,14 @@ import * as path from 'path';
 import { performance } from 'perf_hooks';
 import { discoverSessions, searchContentIndex } from '../src/lib/session/discover.js';
 import { filterSessionsByQuery } from '../src/commands/sessions.js';
-import { searchToolCalls, type ToolIndexCoverage } from '../src/lib/session/tool-index.js';
+import {
+  countToolProgramOccurrences,
+  ensureToolIndex,
+  readToolIndexCoverage,
+  searchToolCalls,
+  type ToolIndexCoverage,
+} from '../src/lib/session/tool-index.js';
+import { getDB } from '../src/lib/session/db.js';
 import { getSessionsDbPath, getSessionsDir } from '../src/lib/state.js';
 
 // Resolved through the same helpers the CLI itself uses. Re-deriving the path
@@ -38,6 +49,40 @@ async function time<T>(fn: () => Promise<T> | T): Promise<{ ms: number; value: T
   return { ms, value };
 }
 
+interface Distribution {
+  runs: number;
+  minMs: number;
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  maxMs: number;
+  allRunsMs: number[];
+}
+
+function percentile(sorted: number[], p: number): number {
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * p) - 1)];
+}
+
+async function distribution(
+  fn: () => Promise<unknown> | unknown,
+  warmups = 3,
+  runs = 30,
+): Promise<Distribution> {
+  for (let i = 0; i < warmups; i++) await fn();
+  const values: number[] = [];
+  for (let i = 0; i < runs; i++) values.push((await time(fn)).ms);
+  const sorted = [...values].sort((a, b) => a - b);
+  return {
+    runs,
+    minMs: sorted[0],
+    p50Ms: percentile(sorted, 0.50),
+    p95Ms: percentile(sorted, 0.95),
+    p99Ms: percentile(sorted, 0.99),
+    maxMs: sorted.at(-1)!,
+    allRunsMs: values,
+  };
+}
+
 function fileSize(p: string): number {
   try {
     return fs.statSync(p).size;
@@ -46,12 +91,41 @@ function fileSize(p: string): number {
   }
 }
 
+function sqliteStorage(): {
+  sessionsDbBytes: number;
+  walBytes: number;
+  pageSize: number;
+  pageCount: number;
+  freePages: number;
+  usedPageBytes: number;
+} {
+  const db = getDB();
+  const pageSize = (db.prepare(`PRAGMA page_size`).get() as { page_size: number }).page_size;
+  const pageCount = (db.prepare(`PRAGMA page_count`).get() as { page_count: number }).page_count;
+  const freePages = (db.prepare(`PRAGMA freelist_count`).get() as { freelist_count: number }).freelist_count;
+  return {
+    sessionsDbBytes: fileSize(DB_PATH),
+    walBytes: fileSize(DB_PATH + '-wal'),
+    pageSize,
+    pageCount,
+    freePages,
+    usedPageBytes: (pageCount - freePages) * pageSize,
+  };
+}
+
 function removeIfExists(p: string): void {
   try {
     fs.unlinkSync(p);
   } catch {
     // not there
   }
+}
+
+function evenlySample<T>(items: T[], limit: number): T[] {
+  if (items.length <= limit) return items;
+  return Array.from({ length: limit }, (_, index) =>
+    items[Math.floor(index * items.length / limit)]
+  );
 }
 
 // BENCH_CORPUS=real: copy this machine's live index into a throwaway HOME and
@@ -73,7 +147,7 @@ function relaunchAgainstRealCorpusCopy(): never {
 
   let status: number;
   try {
-    const child = spawnSync(process.execPath, [process.argv[1]], {
+    const child = spawnSync(process.execPath, [...process.execArgv, process.argv[1]], {
       stdio: 'inherit',
       env: { ...process.env, HOME: tmpHome, BENCH_CORPUS: 'copied' },
     });
@@ -145,17 +219,11 @@ async function main() {
   // ------------------------------------------------------------------
   // B. Warm discover — runs with the index freshly populated from A
   // ------------------------------------------------------------------
-  const warmRuns: number[] = [];
   let warmSessions: any[] = [];
-  for (let i = 0; i < 3; i++) {
-    const warm = await time(() =>
-      discoverSessions({ all: true, cwd: process.cwd(), limit: 5000 }),
-    );
-    warmRuns.push(warm.ms);
-    warmSessions = warm.value as any[];
-  }
-  const warmMs = Math.min(...warmRuns);
-  console.error(`B. warm discover (best of 3): ${warmMs.toFixed(0)}ms, ${warmSessions.length} sessions`);
+  const warmDistribution = await distribution(async () => {
+    warmSessions = await discoverSessions({ all: true, cwd: process.cwd(), limit: 5000 }) as any[];
+  }, 1, 10);
+  console.error(`B. warm discover: p50 ${warmDistribution.p50Ms.toFixed(0)}ms, p95 ${warmDistribution.p95Ms.toFixed(0)}ms, ${warmSessions.length} sessions`);
 
   // ------------------------------------------------------------------
   // C. Single keystroke (filterSessionsByQuery) — using already-loaded sessions
@@ -187,54 +255,89 @@ async function main() {
   // ------------------------------------------------------------------
   // E. searchContentIndex alone (the heaviest component of D)
   // ------------------------------------------------------------------
-  const contentRuns: number[] = [];
-  for (let i = 0; i < 5; i++) {
-    const r = await time(() => searchContentIndex(warmSessions, 'rush deploy yaml'));
-    contentRuns.push(r.ms);
-  }
-  const contentBest = Math.min(...contentRuns);
-  console.error(`E. searchContentIndex best of 5: ${contentBest.toFixed(1)}ms`);
+  const contentDistribution = await distribution(
+    () => searchContentIndex(warmSessions, 'rush deploy yaml'),
+  );
+  console.error(`E. searchContentIndex: p50 ${contentDistribution.p50Ms.toFixed(1)}ms, p95 ${contentDistribution.p95Ms.toFixed(1)}ms`);
 
   // ------------------------------------------------------------------
   // F/G. Indexed tool-call queries, including same-session distinct calls
   // ------------------------------------------------------------------
-  const toolCoverage: ToolIndexCoverage = {
-    indexedFiles: 0,
-    indexedCalls: 0,
-    skippedFiles: 0,
-    limitedFiles: 0,
-    remainingFiles: 0,
-    complete: true,
-  };
-  const toolSingleRuns: number[] = [];
+  const toolSinceDays = Number(process.env.BENCH_TOOL_SINCE_DAYS ?? 0);
+  const toolSampleLimit = Number(process.env.BENCH_TOOL_SAMPLE ?? warmSessions.length);
+  const toolCutoff = toolSinceDays > 0 ? Date.now() - toolSinceDays * 86_400_000 : 0;
+  const toolCandidates = toolCutoff > 0
+    ? warmSessions.filter((session) => Date.parse(session.timestamp) >= toolCutoff)
+    : warmSessions;
+  const toolSessions = evenlySample(toolCandidates, Math.max(1, toolSampleLimit));
+  console.error(`tool scope: ${toolSessions.length} of ${toolCandidates.length} candidates${toolSinceDays > 0 ? ` from ${toolSinceDays} days` : ''}`);
+  getDB().pragma('wal_checkpoint(TRUNCATE)');
+  const toolStorageBefore = sqliteStorage();
+  let backfillFiles = 0;
+  let backfillCalls = 0;
+  const backfillStart = performance.now();
+  if (process.env.BENCH_SKIP_TOOL_BACKFILL !== '1'
+    && (process.env.BENCH_CORPUS === 'copied' || process.env.BENCH_TOOL_BACKFILL === '1')) {
+    for (;;) {
+      const batch = await ensureToolIndex(toolSessions);
+      backfillFiles += batch.indexedFiles;
+      backfillCalls += batch.indexedCalls;
+      if (batch.remainingFiles === 0 || batch.indexedFiles === 0) break;
+    }
+  }
+  const backfillMs = performance.now() - backfillStart;
+  const toolCoverage: ToolIndexCoverage = readToolIndexCoverage(toolSessions);
+  const peakBackfillWalBytes = fileSize(DB_PATH + '-wal');
+  getDB().pragma('wal_checkpoint(TRUNCATE)');
+  const toolStorageAfter = sqliteStorage();
+  const queryPre = { sessionsDbBytes: fileSize(DB_PATH), walBytes: fileSize(DB_PATH + '-wal') };
   let toolSingleMatches = 0;
-  for (let i = 0; i < 5; i++) {
-    const r = await time(() => searchToolCalls(
-      warmSessions,
+  const toolSingleDistribution = await distribution(() => {
+    const value = searchToolCalls(
+      toolSessions,
       ['program:git input:status'],
       toolCoverage,
       25,
-    ));
-    toolSingleRuns.push(r.ms);
-    toolSingleMatches = r.value.sessions.length;
-  }
-  const toolSingleBest = Math.min(...toolSingleRuns);
-  console.error(`F. one tool-call clause best of 5: ${toolSingleBest.toFixed(1)}ms, ${toolSingleMatches} matches`);
+    );
+    toolSingleMatches = value.sessions.length;
+  });
+  console.error(`F. one tool-call clause: p50 ${toolSingleDistribution.p50Ms.toFixed(1)}ms, p95 ${toolSingleDistribution.p95Ms.toFixed(1)}ms, ${toolSingleMatches} matches`);
 
-  const toolTwoCallRuns: number[] = [];
   let toolTwoCallMatches = 0;
-  for (let i = 0; i < 5; i++) {
-    const r = await time(() => searchToolCalls(
-      warmSessions,
+  const toolTwoCallDistribution = await distribution(() => {
+    const value = searchToolCalls(
+      toolSessions,
       ['program:git input:merge', 'program:gh output:CONFLICT'],
       toolCoverage,
       25,
-    ));
-    toolTwoCallRuns.push(r.ms);
-    toolTwoCallMatches = r.value.sessions.length;
-  }
-  const toolTwoCallBest = Math.min(...toolTwoCallRuns);
-  console.error(`G. two distinct tool-call clauses best of 5: ${toolTwoCallBest.toFixed(1)}ms, ${toolTwoCallMatches} matches`);
+    );
+    toolTwoCallMatches = value.sessions.length;
+  });
+  console.error(`G. two distinct tool-call clauses: p50 ${toolTwoCallDistribution.p50Ms.toFixed(1)}ms, p95 ${toolTwoCallDistribution.p95Ms.toFixed(1)}ms, ${toolTwoCallMatches} matches`);
+
+  let countTotals = { occurrences: 0, toolCalls: 0, sessions: 0 };
+  const countDistribution = await distribution(() => {
+    countTotals = countToolProgramOccurrences(toolSessions, 'git', toolCoverage, os.hostname()).totals;
+  });
+  console.error(`H. exact git count: p50 ${countDistribution.p50Ms.toFixed(1)}ms, p95 ${countDistribution.p95Ms.toFixed(1)}ms, ${countTotals.occurrences} occurrences`);
+
+  const fullCoverage = readToolIndexCoverage(warmSessions);
+  const toolSingleFullDistribution = await distribution(() =>
+    searchToolCalls(warmSessions, ['program:git input:status'], fullCoverage, 25)
+  );
+  const toolTwoCallFullDistribution = await distribution(() =>
+    searchToolCalls(
+      warmSessions,
+      ['program:git input:merge', 'program:gh output:CONFLICT'],
+      fullCoverage,
+      25,
+    )
+  );
+  const programCountFullDistribution = await distribution(() =>
+    countToolProgramOccurrences(warmSessions, 'git', fullCoverage, os.hostname())
+  );
+  console.error(`I. full ${warmSessions.length}-session scope: one-clause p95 ${toolSingleFullDistribution.p95Ms.toFixed(1)}ms, two-call p95 ${toolTwoCallFullDistribution.p95Ms.toFixed(1)}ms, count p95 ${programCountFullDistribution.p95Ms.toFixed(1)}ms`);
+  const queryPost = { sessionsDbBytes: fileSize(DB_PATH), walBytes: fileSize(DB_PATH + '-wal') };
 
   const post = {
     sessionsDbBytes: fileSize(DB_PATH),
@@ -247,25 +350,70 @@ async function main() {
     corpus: process.env.BENCH_CORPUS === 'copied' ? 'real (copied)' : 'whatever $HOME holds',
     sessionsDbPath: DB_PATH,
     sessionsCount: warmSessions.length,
+    toolScope: {
+      candidates: toolCandidates.length,
+      sampledSessions: toolSessions.length,
+      sinceDays: toolSinceDays || null,
+    },
     pre,
     post,
-    A_coldDiscoverMs: (globalThis as any).__A?.ms,
-    B_warmDiscoverMs: warmMs,
-    B_warmDiscoverAllRunsMs: warmRuns,
-    C_singleKeystrokeMs: singleKey.ms,
-    C_singleKeystrokeMatches: singleKey.value.length,
-    D_typingTotalMs: typingTotal,
-    D_typingAvgMsPerKey: typingAvg,
-    D_typingPerKeyMs: perKey,
-    E_searchContentBestMs: contentBest,
-    E_searchContentAllRunsMs: contentRuns,
-    F_toolSingleBestMs: toolSingleBest,
-    F_toolSingleAllRunsMs: toolSingleRuns,
-    F_toolSingleMatches: toolSingleMatches,
-    G_toolTwoCallBestMs: toolTwoCallBest,
-    G_toolTwoCallAllRunsMs: toolTwoCallRuns,
-    G_toolTwoCallMatches: toolTwoCallMatches,
+    coldDiscover: (globalThis as any).__A,
+    picker: {
+      singleKeystrokeMs: singleKey.ms,
+      singleKeystrokeMatches: singleKey.value.length,
+      typingTotalMs: typingTotal,
+      typingAvgMsPerKey: typingAvg,
+      typingPerKeyMs: perKey,
+    },
+    distributions: {
+      warmDiscover: warmDistribution,
+      contentFts: contentDistribution,
+      toolSingle: toolSingleDistribution,
+      toolTwoCall: toolTwoCallDistribution,
+      programCount: countDistribution,
+      toolSingleFullIndex: toolSingleFullDistribution,
+      toolTwoCallFullIndex: toolTwoCallFullDistribution,
+      programCountFullIndex: programCountFullDistribution,
+    },
+    toolBackfill: {
+      ms: backfillMs,
+      indexedFiles: backfillFiles,
+      indexedCalls: backfillCalls,
+      coverage: toolCoverage,
+      before: toolStorageBefore,
+      after: toolStorageAfter,
+      dbBytesAdded: toolStorageAfter.sessionsDbBytes - toolStorageBefore.sessionsDbBytes,
+      usedPageBytesAdded: toolStorageAfter.usedPageBytes - toolStorageBefore.usedPageBytes,
+      peakWalBytes: peakBackfillWalBytes,
+    },
+    queryStorage: {
+      before: queryPre,
+      after: queryPost,
+      dbDeltaBytes: queryPost.sessionsDbBytes - queryPre.sessionsDbBytes,
+      walDeltaBytes: queryPost.walBytes - queryPre.walBytes,
+    },
+    matches: {
+      toolSingle: toolSingleMatches,
+      toolTwoCall: toolTwoCallMatches,
+    },
+    countTotals,
   };
+
+  const baselinePath = process.env.BENCH_BASELINE;
+  if (baselinePath) {
+    const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8')) as typeof result;
+    const latencyKeys = ['toolSingle', 'toolTwoCall', 'programCount'] as const;
+    const regressions = latencyKeys.flatMap((key) => {
+      const prior = baseline.distributions[key]?.p95Ms;
+      const current = result.distributions[key].p95Ms;
+      if (!Number.isFinite(prior) || current <= prior * 1.10) return [];
+      return [{ metric: `${key}.p95Ms`, baselineMs: prior, currentMs: current, ratio: current / prior }];
+    });
+    Object.assign(result, { regressionGate: { baselinePath, maxRatio: 1.10, regressions } });
+    if (regressions.length > 0 && process.env.BENCH_FAIL_REGRESSION === '1') {
+      process.exitCode = 1;
+    }
+  }
 
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
 }
