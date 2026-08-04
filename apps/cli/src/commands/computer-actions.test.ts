@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   pickTarget,
@@ -458,6 +459,41 @@ describe('emitComputerAction — computer.action event (#11)', () => {
     const rec = query({ eventTypes: ['computer.action'] })[0];
     expect(rec.textLength).toBe(secret.length);
     expect(JSON.stringify(rec)).not.toContain(secret);
+  });
+});
+
+// A review found that `describe` (and, separately, computer.ts's `screenshot`
+// and dispatch.ts's run-loop verbs) shipped with NO emitComputerAction() call
+// at all — the daemon call succeeded but usedComputer silently read back
+// false. That bug class (a new/existing verb registered here without its
+// emitComputerAction call) has now slipped through twice. This guard reads
+// this file's own source and pins every registered `.command('<name>')` under
+// registerActionCommands to a matching `emitComputerAction('<name>', ...)`
+// call, so a future verb added (or one whose emit call is deleted/typo'd)
+// fails CI instead of silently regressing usedComputer.
+describe('registerActionCommands — every verb calls emitComputerAction (#11 completeness)', () => {
+  const SOURCE = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), 'computer-actions.ts'),
+    'utf8',
+  );
+
+  function registeredCommandNames(source: string): string[] {
+    const body = source.slice(source.indexOf('export function registerActionCommands('));
+    return [...body.matchAll(/\.command\('([^']+)'\)/g)].map((m) => m[1]);
+  }
+
+  it('finds at least the known verb set (guards against the extraction regex silently matching nothing)', () => {
+    const names = registeredCommandNames(SOURCE);
+    expect(names).toEqual(
+      expect.arrayContaining(['apps', 'describe', 'click', 'right-click', 'type', 'launch']),
+    );
+    expect(names.length).toBeGreaterThanOrEqual(14);
+  });
+
+  it('every registered verb has a matching emitComputerAction(\'<verb>\', ...) call', () => {
+    const names = registeredCommandNames(SOURCE);
+    const uninstrumented = names.filter((name) => !SOURCE.includes(`emitComputerAction('${name}',`));
+    expect(uninstrumented).toEqual([]);
   });
 });
 

@@ -518,6 +518,7 @@ export function registerActionCommands(program: Command): void {
       const params: Record<string, unknown> = { pid };
       if (opts.depth != null) params.max_depth = opts.depth;
       const res = unwrap(await client.call('describe', params));
+      emitComputerAction('describe', pid, opts, { depth: opts.depth });
       // The tree is inherently structured — always JSON, pretty unless --json.
       console.log(JSON.stringify(opts.json ? res : res.tree ?? res, null, 2));
     });
