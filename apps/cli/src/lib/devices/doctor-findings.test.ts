@@ -88,21 +88,23 @@ describe('severity rubric', () => {
     expect(f?.message).toContain("hook 'rm-guard'");
   });
 
-  it('a never-synced version collapses its missing resources to ONE critical', () => {
+  it('a never-synced version collapses its missing resources to ONE warning (not critical)', () => {
     const hooks = Array.from({ length: 20 }, (_, i) => ({ kind: 'hooks' as const, name: `h${i}`, status: 'missing' as const }));
     const findings = buildLocalFindings(localInput({
       reports: [report('opencode', '1.16.0', { hooks })],
       syncRows: [{ agent: 'opencode', version: '1.16.0', status: 'never-synced', isDefault: true }],
     }));
+    // A never-synced version is an old/unused install — WARNING, not a critical.
+    // It must NOT flood the critical section (it used to emit 1+ criticals).
     const crits = findings.filter((f) => f.severity === 'critical');
-    expect(crits).toHaveLength(1);
-    expect(crits[0].kind).toBe('never-synced');
-    expect(crits[0].message).toContain('never synced');
-    expect(crits[0].message).toContain('20 hook');
+    expect(crits).toHaveLength(0);
+    const ns = findings.filter((f) => f.kind === 'never-synced');
+    expect(ns).toHaveLength(1);
+    expect(ns[0].severity).toBe('warning');
+    expect(ns[0].message).toContain('never synced');
+    expect(ns[0].message).toContain('20 hook');
     // A never-synced version's fix is the sync, not a resource-level --fix.
-    expect(crits[0].remediation).toBe('agents sync opencode@1.16.0 --yes');
-    // Exactly one row for the root cause — no duplicate never-synced WARNING.
-    expect(findings.filter((f) => f.kind === 'never-synced')).toHaveLength(1);
+    expect(ns[0].remediation).toBe('agents sync opencode@1.16.0 --yes');
   });
 
   it('a stale version is a WARNING', () => {
@@ -221,7 +223,7 @@ describe('duplicate version-home hooks', () => {
     path: `/h/claude/${version}/hooks/git-guard.sh`, hash: version, active,
   });
 
-  it('differing content across versions is CRITICAL and names the authoritative version', () => {
+  it('differing content across versions is a WARNING (installed but stale) and names the authoritative version', () => {
     const findings = buildLocalFindings(localInput({
       duplicateHooks: [{
         agent: 'claude', name: 'git-guard', kind: 'drift',
@@ -229,7 +231,9 @@ describe('duplicate version-home hooks', () => {
       }],
     }));
     const f = findings.find((x) => x.kind === 'duplicate-hook-drift');
-    expect(f?.severity).toBe('critical');
+    // The hook is installed on every version, just stale on some — sync drift, not
+    // a missing/unfired hook. WARNING, not critical.
+    expect(f?.severity).toBe('warning');
     expect(f?.message).toBe("hook 'git-guard' differs across 2.1.170, 2.1.219 — 2.1.219 is authoritative");
     expect(f?.remediation).toBe('agents sync claude@all --yes');
     // The row spans versions, so it renders `claude (2 versions)`, not one of them.
