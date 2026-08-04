@@ -792,13 +792,17 @@ export async function runDaemon(): Promise<void> {
   const launchHealthInterval = setInterval(() => { void runLaunchHealthCheck(); }, 6 * 60 * 60_000);
   const launchHealthKickoff = setTimeout(() => { void runLaunchHealthCheck(); }, 90_000);
 
-  // Fleet cache warm: keep the caches that `agents devices list`, `fleet status`,
-  // and `agents view` read cache-first actually fresh, so a default read never
-  // has to ssh out. Two cheap refreshes: (1) this host's auth-health verdicts
-  // (also feeds the `doctor --json` Auth rollup other hosts read), and (2) the
-  // fleet resource-stats cache (one bounded parallel probe of the tailnet). Both
-  // best-effort + overlap-guarded like the probes above. ~every 3 min, plus once
-  // ~60s after startup (staggered off launch).
+  // Fleet cache warm: publish THIS host's row for the caches `agents fleet
+  // status` / `agents devices list` read. PUBLISH-OWN / READ-UNION (RUSH-2061):
+  // each daemon probes only ITSELF and never SSHes another box, so the fleet no
+  // longer pays N² SSH resource probes every 3 minutes (N daemons × N devices) —
+  // the source of the fan-out storm AND the orphaned-probe pile-up. Two cheap
+  // self-only refreshes: (1) this host's auth-health verdicts (also feeds the
+  // `doctor --json` Auth rollup other hosts read), and (2) its fleet-status row
+  // (local resource probe + live-agent workload). Cross-host rows are unioned on
+  // demand by the reader (`agents fleet status`), not pushed by every daemon.
+  // Best-effort + overlap-guarded like the probes above; ~every 3 min, once ~60s
+  // after startup.
   let warmingFleetCache = false;
   const runFleetCacheWarm = async () => {
     if (warmingFleetCache) return;
@@ -811,13 +815,9 @@ export async function runDaemon(): Promise<void> {
       const authRows = await probeLocalFleetAuth({ cliVersion: getCliVersion() });
       writeFleetAuthRows(self, authRows);
 
-      const { loadDevices } = await import('./devices/registry.js');
-      const { planFleetTargets } = await import('./devices/fleet.js');
-      const { loadFleetStats } = await import('./devices/stats-cache.js');
-      const reg = await loadDevices();
-      const probeable = planFleetTargets(reg).filter((t) => !t.skip).map((t) => t.device);
-      const res = await loadFleetStats(probeable, { forceRefresh: true, selfName: self });
-      log('INFO', `fleet cache warm: ${authRows.length} auth row(s), ${res.stats.size} device stat(s)`);
+      const { publishLocalFleetStatus } = await import('./fleet-status.js');
+      const row = await publishLocalFleetStatus(self);
+      log('INFO', `fleet cache warm: ${authRows.length} auth row(s), ${row.agents.running} running agent(s) on ${self}`);
     } catch (err) {
       log('ERROR', `fleet cache warm failed: ${(err as Error).message}`);
     } finally {

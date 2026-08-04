@@ -14,6 +14,17 @@
  */
 import { readClaudeUsageCache, type UsageSnapshot } from './usage.js';
 import { readHeadroomEntry } from './usage-refresh.js';
+import { readFleetStatus as readFleetStatusMirror, type FleetStatusRow } from './fleet-status.js';
+
+/**
+ * The fleet-status union the daemon publishes (own row) and the fleet-status
+ * command unions (peer rows) — this host's stats + agent workload for every
+ * known host, keyed by host. Cache-only: a cold mirror yields an empty map.
+ */
+export function readFleetStatus(): Record<string, FleetStatusRow> {
+  return readFleetStatusMirror();
+}
+export type { FleetStatusRow };
 
 /** The last cached usage snapshot for an account, or null. Cache-only. */
 export function readAccountUsage(usageKey: string): UsageSnapshot | null {
