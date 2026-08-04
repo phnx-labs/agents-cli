@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.22.3
+
+- **Menubar home-base self-test accepts `MenubarHelper-universal`.** The
+  signed-helper gate required `executablePath` to end in exactly `MenubarHelper`,
+  but lipo production builds name the binary `MenubarHelper-universal`, so every
+  1.22.2 publish on mac-mini failed after the release PR had already merged and
+  tagged. Source: `menubar/Sources/MenubarHelper/ChildProcessSelfTest.swift`.
+
 ## 1.22.2
 
 - **Menu bar recovers from a stale single-instance lock instead of staying dead.**
