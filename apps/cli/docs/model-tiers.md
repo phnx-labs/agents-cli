@@ -58,10 +58,11 @@ tiers resolve against the installed version's catalog.
 | **Cursor** | Aggregator: re-exposes provider models with effort/speed baked into the id (`claude-opus-5-thinking-high`). Ids are normalized to a base model, then ranked by the provider lineup / price. |
 | **Factory** (Droid) | Aggregator with its own **credit-multiplier** economy (0.55x…4x) and no models list command — so a small curated tier map, capped at 2x (`cheap` GLM-5.2, `default` Kimi K3, `best`/`ultra` Opus 5). |
 
-## Inspecting the map
+## Inspecting the map — the discovery menu
 
-`agents models [agent[@version]]` prints the resolved tier map for a version, with
-`~$/Mtok` where priced, and emits it under `tiers` in `--json`:
+`agents models [agent[@version]]` is the one command an agent (or human) reads to pick a
+model. It prints the resolved tier map — with `~$/Mtok` where priced — and stays compact
+(the raw model list is behind `--all`); `--json` emits `catalog` + `tiers`:
 
 ```
 $ agents models codex@0.146.0
@@ -71,13 +72,30 @@ Codex 0.146.0
     default  gpt-5.6-terra  ~$18/Mtok
     best     gpt-5.6-sol  ~$35/Mtok
     ultra    gpt-5.6-sol  ~$35/Mtok  (clamped)
-  ...
+  8 models · `agents models codex --all` for the full list
 
-$ agents models grok
-  tiers:
-    cheap    grok-4.5 @low   --
-    ultra    grok-4.5 @xhigh --
+$ agents models                    # no arg -> the tier map for every installed harness
+$ agents models codex --all        # + the raw catalog
 ```
+
+## Overriding a tier — when the guess is wrong
+
+The auto-ranking is a best guess; for a subscription harness with no price signal it can
+be wrong. Pin the right model with a command — you never hand-edit config:
+
+```
+$ agents models tier set kimi best kimi-code/k3     # per harness
+$ agents models tier set kimi@0.19.2 best k3-256k   # a specific version wins
+$ agents models tier clear kimi                      # back to the auto guess
+$ agents models tier list
+```
+
+Overrides are stored under `model.tiers` in `agents.yaml` (same selector shape as
+`run.defaults`) and resolve **most-specific-first**: `<agent>:<version>` → `<agent>:*` →
+auto. An overridden id that a given version doesn't ship falls back to auto for that
+version (never a dead id). `agents models` marks an overridden tier `[override]`. Some
+subscription harnesses ship a **curated** default ladder (e.g. Kimi: `k2.7-highspeed` <
+`k2.7-coding` < `k3`), so the common case is right without any override.
 
 ## Source
 
@@ -87,6 +105,7 @@ $ agents models grok
   floor) and per-model pricing.
 - `apps/cli/src/lib/exec.ts` — `buildExecCommand` resolves a tier token to a model
   for both `agents run` and `agents teams`.
-- `apps/cli/src/commands/models.ts` — the `agents models` tier display + `--json`.
+- `apps/cli/src/lib/model-tier-overrides.ts` — user overrides in `agents.yaml` (`tier set/clear/list`).
+- `apps/cli/src/commands/models.ts` — the compact `agents models` menu, `--all`, `--json`, and the `tier` subcommands.
 - `apps/cli/src/lib/pricing/prices.json` — per-token USD table (the ranking
   cross-check and `$/Mtok` display).

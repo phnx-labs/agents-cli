@@ -71,7 +71,7 @@ const CACHE_PATH = getModelsCachePath();
  * Bump when the extractor logic changes shape in an incompatible way so cached
  * catalogs from older agents-cli builds are re-extracted.
  */
-const CACHE_SCHEMA_VERSION = 3;
+const CACHE_SCHEMA_VERSION = 4;
 
 /**
  * How long a cached 0-model extraction is trusted before we retry it. Bounds
@@ -455,7 +455,17 @@ function extractClaudeCatalog(text: string): { models: ModelInfo[]; aliases: Rec
     const idRe = /claude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:-\d+)*(?:-(?:fast|v\d+))?/g;
     let sm: RegExpExecArray | null;
     while ((sm = idRe.exec(text)) !== null) scanned.add(sm[0]);
-    if (scanned.size >= 2) models = build(scanned);
+    // Drop a bare `claude-<family>-<major>` (e.g. `claude-opus-4`) when a more
+    // specific sibling (`claude-opus-4-8`) is present. The bare form is only ever
+    // an internal `.includes("claude-opus-4")` prefix-check string in the binary,
+    // not a submittable id (issue #1892); a bare id with no sibling (e.g.
+    // `claude-sonnet-5`) is a real current model and is kept.
+    const arr = [...scanned];
+    const filtered = arr.filter((id) => {
+      const bareMajor = /^claude-[a-z]+-\d+$/.test(id);
+      return !(bareMajor && arr.some((o) => o !== id && o.startsWith(`${id}-`)));
+    });
+    if (filtered.length >= 2) models = build(filtered);
   }
 
   return { models, aliases };

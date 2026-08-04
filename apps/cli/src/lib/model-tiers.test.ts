@@ -3,6 +3,32 @@ import { isTierToken, tierizeModels, resolveTierMap, resolveTier, MODEL_TIERS } 
 import { getModelCatalog, type ModelInfo } from './models.js';
 import { listInstalledVersions } from './versions.js';
 import { buildExecCommand } from './exec.js';
+import { setTierOverride, clearTierOverride } from './model-tier-overrides.js';
+
+describe('curated Kimi ladder + override application (gated on a Kimi install)', () => {
+  const kimi = listInstalledVersions('kimi');
+  const v = kimi[kimi.length - 1];
+
+  it.runIf(kimi.length > 0)('curated ladder: best=K3, cheap=highspeed, ultra clamps, all [curated]', () => {
+    const m = resolveTierMap('kimi', v);
+    expect(m.best.model).toMatch(/k3/);
+    expect(m.cheap.model).toMatch(/highspeed/);
+    expect(m.ultra.clampedFrom).toBe('best');
+    expect(m.best.source).toBe('curated');
+  });
+
+  it.runIf(kimi.length > 0)('an override present in the catalog is used and marked [override]; clears cleanly', () => {
+    try {
+      setTierOverride('kimi', 'cheap', 'kimi-code/k3');
+      const r = resolveTier('kimi', v, 'cheap');
+      expect(r.model).toBe('kimi-code/k3');
+      expect(r.source).toBe('override');
+    } finally {
+      clearTierOverride('kimi');
+    }
+    expect(resolveTier('kimi', v, 'cheap').source).toBe('curated'); // back to auto
+  });
+});
 
 const m = (ids: string[]): ModelInfo[] => ids.map((id) => ({ id }));
 

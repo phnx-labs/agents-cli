@@ -832,6 +832,16 @@ export interface Meta {
   isolatedAgents?: Partial<Record<AgentId, string>>;
   run?: RunConfig;
   /**
+   * Cost-tier overrides for `--model cheap|default|best|ultra`. Keyed by the same
+   * `<agent>:<version>` selector run.defaults uses (`kimi:*`, `kimi:0.19.2`); each
+   * value maps a tier to a concrete model id. Written by `agents models tier set`,
+   * never hand-edited. Resolution: exact version selector wins over `<agent>:*`,
+   * which wins over the auto-ranking. See lib/model-tier-overrides.ts.
+   */
+  model?: {
+    tiers?: Record<string, Partial<Record<'cheap' | 'default' | 'best' | 'ultra', string>>>;
+  };
+  /**
    * Daemon watchdog config. `rotate` (default `on`) lets the watchdog rotate a
    * rate-limited session IN PLACE onto a healthy account/harness via
    * `agents run auto` — see lib/watchdog/rotate.ts. Set `off` to keep the

@@ -21,6 +21,7 @@
 import type { AgentId } from './types.js';
 import { getModelCatalog, type ModelInfo } from './models.js';
 import { getModelPricing } from './pricing/index.js';
+import { resolveTierOverride } from './model-tier-overrides.js';
 
 /** The four cross-harness cost tiers, cheapest -> most capable. */
 export const MODEL_TIERS = ['cheap', 'default', 'best', 'ultra'] as const;
@@ -42,7 +43,25 @@ export interface TierResolution {
   clampedFrom?: ModelTier;
   /** Human note (e.g. why it clamped, or that it is a curated/subscription mapping). */
   note?: string;
+  /** Where the model came from: 'auto' ranking, a user 'override', or a 'curated' ladder. */
+  source?: 'auto' | 'override' | 'curated';
 }
+
+/**
+ * Curated tier ladders for harnesses the auto-ranker can't order from names/price
+ * (subscription harnesses with no price signal). Each rung is `[tier, matcher]` in
+ * cheap -> best order; the newest catalog id matching each rung fills that tier,
+ * missing tiers clamp. Extend this table rather than adding per-harness branches.
+ */
+const CURATED_LADDERS: Partial<Record<AgentId, Array<{ tier: ModelTier; match: RegExp }>>> = {
+  // Kimi: K2.7 Highspeed < K2.7 Coding < K3 (the 1M-context default; k3-256k folds
+  // into K3). No ultra. The name heuristic can't tell K3 > K2.7, so curate it.
+  kimi: [
+    { tier: 'cheap', match: /highspeed/i },
+    { tier: 'default', match: /for-coding(?!.*highspeed)/i },
+    { tier: 'best', match: /(^|[-/])k3(?![\d-])/i },
+  ],
+};
 
 // --- single-model harnesses: the tier is reasoning effort, not a model ---------
 const TIER_EFFORT: Record<ModelTier, string> = {
@@ -211,31 +230,101 @@ function rungIndexFor(tierIndex: number, n: number): number {
   return n >= 4 ? Math.round((tierIndex / 3) * (n - 1)) : Math.min(tierIndex, n - 1);
 }
 
-/**
- * Resolve all four tiers for an (agent, version). The map is what `agents models`
- * prints and what `resolveTier` indexes into.
- */
-export function resolveTierMap(agent: AgentId, version: string): Record<ModelTier, TierResolution> {
-  // Droid: curated credit-multiplier map (no live catalog).
-  if (agent === 'droid') {
-    return {
-      cheap: { tier: 'cheap', model: DROID_TIERS.cheap, note: 'Droid Core 0.55x' },
-      default: { tier: 'default', model: DROID_TIERS.default, note: 'Droid Core 0.6x' },
-      best: { tier: 'best', model: DROID_TIERS.best, note: '2x' },
-      ultra: { tier: 'ultra', model: DROID_TIERS.ultra, clampedFrom: 'best', note: 'capped at 2x (4x models excluded)' },
-    };
+/** Bucket an ordered (cheap -> dear) rung list onto the four tiers, clamping when < 4. */
+function bucketRungs(rungs: Array<{ id: string }>): Record<ModelTier, TierResolution> {
+  const n = rungs.length;
+  const map = {} as Record<ModelTier, TierResolution>;
+  if (n === 0) {
+    // Fail-safe: no catalog -> every tier null, caller drops the --model flag.
+    for (const t of MODEL_TIERS) map[t] = { tier: t, model: null };
+    return map;
   }
+  // A tier that shares the rung of the tier below has no distinct rung -> mark clamped.
+  for (let i = 0; i < MODEL_TIERS.length; i++) {
+    const t = MODEL_TIERS[i];
+    const idx = rungIndexFor(i, n);
+    const shared = i > 0 && rungIndexFor(i - 1, n) === idx;
+    map[t] = shared
+      ? { tier: t, model: rungs[idx].id, clampedFrom: MODEL_TIERS[i - 1], note: `no distinct ${t} rung; using ${MODEL_TIERS[i - 1]}`, source: 'auto' }
+      : { tier: t, model: rungs[idx].id, source: 'auto' };
+  }
+  return map;
+}
 
-  const catalog = getModelCatalog(agent, version);
-  return tierizeModels(agent, catalog?.models ?? []);
+/** Build a tier map from a curated ladder against a catalog (newest match per rung). */
+function tierizeFromLadder(
+  ladder: Array<{ tier: ModelTier; match: RegExp }>,
+  models: ModelInfo[],
+): Record<ModelTier, TierResolution> {
+  const usable = models.filter((m) => !PSEUDO.test(m.id));
+  const rungs: Array<{ id: string }> = [];
+  for (const rung of ladder) {
+    const matches = usable.filter((m) => rung.match.test(m.id));
+    if (matches.length === 0) continue;
+    rungs.push({ id: matches.reduce((a, b) => (newer(b.id, a.id) > 0 ? b : a)).id });
+  }
+  const map = bucketRungs(rungs);
+  for (const t of MODEL_TIERS) if (map[t].model) map[t].source = 'curated';
+  return map;
 }
 
 /**
- * Map a harness's catalog models onto the four tiers. Pure (no catalog lookup)
- * so it is directly testable with synthetic inputs. Ranks the models, collapses
- * variants, buckets onto cheap/default/best/ultra, and clamps absent tiers down
- * to the nearest lower one. A single-model harness maps the tiers to reasoning
- * effort instead of models.
+ * Resolve all four tiers for an (agent, version) -- what `agents models` prints and
+ * `resolveTier` indexes. Precedence: user override -> curated ladder / auto-ranking.
+ */
+export function resolveTierMap(agent: AgentId, version: string): Record<ModelTier, TierResolution> {
+  let base: Record<ModelTier, TierResolution>;
+  let catalogIds: Set<string> | null;
+
+  if (agent === 'droid') {
+    // Droid: curated credit-multiplier map (no live catalog to validate against).
+    base = {
+      cheap: { tier: 'cheap', model: DROID_TIERS.cheap, note: 'Droid Core 0.55x', source: 'curated' },
+      default: { tier: 'default', model: DROID_TIERS.default, note: 'Droid Core 0.6x', source: 'curated' },
+      best: { tier: 'best', model: DROID_TIERS.best, note: '2x', source: 'curated' },
+      ultra: { tier: 'ultra', model: DROID_TIERS.ultra, clampedFrom: 'best', note: 'capped at 2x (4x excluded)', source: 'curated' },
+    };
+    catalogIds = null;
+  } else {
+    const catalog = getModelCatalog(agent, version);
+    const models = catalog?.models ?? [];
+    const ladder = CURATED_LADDERS[agent];
+    base = ladder ? tierizeFromLadder(ladder, models) : tierizeModels(agent, models);
+    catalogIds = catalog ? new Set(models.map((m) => m.id)) : null;
+  }
+
+  return applyTierOverrides(agent, version, catalogIds, base);
+}
+
+/**
+ * Apply user overrides on top of the auto/curated map. An overridden id is used
+ * only when the version actually ships it (or when there is no catalog to check,
+ * e.g. Droid); otherwise the tier keeps its auto value with a note.
+ */
+function applyTierOverrides(
+  agent: AgentId,
+  version: string | null | undefined,
+  catalogIds: Set<string> | null,
+  base: Record<ModelTier, TierResolution>,
+): Record<ModelTier, TierResolution> {
+  const overrides = resolveTierOverride(agent, version);
+  if (Object.keys(overrides).length === 0) return base;
+  const out = { ...base };
+  for (const t of MODEL_TIERS) {
+    const id = overrides[t];
+    if (!id) continue;
+    if (!catalogIds || catalogIds.has(id)) {
+      out[t] = { tier: t, model: id, source: 'override' };
+    } else {
+      out[t] = { ...base[t], note: `override "${id}" not shipped by ${agent}@${version ?? '?'}; using auto`, source: base[t].source ?? 'auto' };
+    }
+  }
+  return out;
+}
+
+/**
+ * Map a harness's catalog models onto the four tiers. Pure (no catalog lookup) so
+ * it is directly testable. A single-model harness maps the tiers to reasoning effort.
  */
 export function tierizeModels(agent: AgentId, models: ModelInfo[]): Record<ModelTier, TierResolution> {
   const rungs = rankCatalog(agent, models);
@@ -244,28 +333,10 @@ export function tierizeModels(agent: AgentId, models: ModelInfo[]): Record<Model
   if (rungs.length === 1) {
     const only = rungs[0].id;
     const map = {} as Record<ModelTier, TierResolution>;
-    for (const t of MODEL_TIERS) map[t] = { tier: t, model: only, effort: TIER_EFFORT[t], note: 'single model — tier maps to reasoning effort' };
+    for (const t of MODEL_TIERS) map[t] = { tier: t, model: only, effort: TIER_EFFORT[t], note: 'single model — tier maps to reasoning effort', source: 'auto' };
     return map;
   }
-
-  const n = rungs.length;
-  const map = {} as Record<ModelTier, TierResolution>;
-  if (n === 0) {
-    // Fail-safe: no catalog -> every tier null, caller drops the --model flag.
-    for (const t of MODEL_TIERS) map[t] = { tier: t, model: null };
-    return map;
-  }
-  // Map each tier onto a rung; a tier that shares the rung of the tier below it
-  // has no distinct rung of its own, so mark it clamped for an honest display.
-  for (let i = 0; i < MODEL_TIERS.length; i++) {
-    const t = MODEL_TIERS[i];
-    const idx = rungIndexFor(i, n);
-    const shared = i > 0 && rungIndexFor(i - 1, n) === idx;
-    map[t] = shared
-      ? { tier: t, model: rungs[idx].id, clampedFrom: MODEL_TIERS[i - 1], note: `no distinct ${t} rung; using ${MODEL_TIERS[i - 1]}` }
-      : { tier: t, model: rungs[idx].id };
-  }
-  return map;
+  return bucketRungs(rungs);
 }
 
 /** Resolve one tier for an (agent, version). Null model => caller drops the flag. */
