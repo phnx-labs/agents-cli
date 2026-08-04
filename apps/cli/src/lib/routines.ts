@@ -16,7 +16,7 @@ import { safeJoin, isSafeSegmentName } from './paths.js';
 import { isSafeProjectName } from './projects.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import type { AgentId } from './types.js';
-import { ALL_AGENT_IDS } from './agents.js';
+import { ALL_AGENT_IDS, ROUTINE_AGENT_IDS } from './agents.js';
 import type { LoopConfig } from './loop.js';
 import { machineId, normalizeHost } from './machine-id.js';
 import { resolveActor } from './actor.js';
@@ -944,6 +944,7 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   const hasAgent = Boolean(config.agent && typeof config.agent === 'string');
   const hasWorkflow = Boolean(config.workflow && typeof config.workflow === 'string');
   const hasCommand = Boolean(config.command && typeof config.command === 'string');
+  const strategy = resolveHostStrategy(config);
   const set = [hasAgent, hasWorkflow, hasCommand].filter(Boolean).length;
   if (set === 0) {
     errors.push('exactly one of agent, workflow, or command is required');
@@ -955,6 +956,21 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   }
   if (hasAgent && config.agent && !ALL_AGENT_IDS.includes(config.agent as AgentId)) {
     errors.push(`agent must be one of: ${ALL_AGENT_IDS.join(', ')}`);
+  } else if (
+    hasAgent && config.agent && strategy === 'local' &&
+    !ROUTINE_AGENT_IDS.includes(config.agent)
+  ) {
+    // The local daemon only knows how to build a command for the agents in
+    // ROUTINE_AGENT_IDS (runner.ts's AGENT_COMMANDS table) — anything else is a
+    // real, installable agent (it passed the ALL_AGENT_IDS check above) but one
+    // the daemon can't fire itself, so reject it now instead of accepting the
+    // routine and failing at fire time (runner.ts buildJobCommand: "Unsupported
+    // agent for daemon jobs"). host/fleet/cloud placement dispatches through
+    // `agents run`/a cloud provider instead of this table, so they're exempt.
+    errors.push(
+      `agent '${config.agent}' is not supported by the local routine daemon; use one of: ` +
+      `${ROUTINE_AGENT_IDS.join(', ')} (or set hostStrategy: host/fleet/cloud to run it elsewhere)`,
+    );
   }
   if (hasWorkflow && config.workflow) {
     if (!/^[a-z0-9][a-z0-9_-]*$/.test(config.workflow)) {
@@ -1005,7 +1021,6 @@ export function validateJob(config: Partial<JobConfig>): string[] {
       errors.push(`hostStrategy must be one of: ${HOST_STRATEGIES.join(', ')}`);
     }
   }
-  const strategy = resolveHostStrategy(config);
   if (config.host !== undefined) {
     if (typeof config.host !== 'string' || config.host.trim() === '') {
       errors.push('host must be a non-empty machine name (a registered host, device, capability tag, or user@host)');
