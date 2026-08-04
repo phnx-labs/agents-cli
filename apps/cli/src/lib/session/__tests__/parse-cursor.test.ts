@@ -28,7 +28,7 @@ describe('Cursor session parsing and discovery metadata', () => {
 
   test('maps text and tool-use blocks and ignores turn_ended', () => {
     const events = parseCursor(transcriptPath);
-    expect(events).toHaveLength(4);
+    expect(events).toHaveLength(8);
     expect(events[0]).toMatchObject({
       agent: 'cursor', type: 'message', role: 'user',
       content: 'Inspect the public CLI documentation and summarize the session commands.',
@@ -45,6 +45,25 @@ describe('Cursor session parsing and discovery metadata', () => {
     expect(events[3]).toMatchObject({
       agent: 'cursor', type: 'message', role: 'assistant',
       content: 'The sessions command discovers and renders local transcripts.',
+    });
+    expect(events[4]).toMatchObject({
+      agent: 'cursor', type: 'tool_use', tool: 'TodoWrite',
+      args: { todos: [
+        { content: 'Read the docs', status: 'completed' },
+        { content: 'Summarize the commands', status: 'in_progress' },
+      ] },
+    });
+    expect(events[5]).toMatchObject({
+      agent: 'cursor', type: 'tool_use', tool: 'Task',
+      args: { description: 'Audit session commands', subagent_type: 'general-purpose' },
+    });
+    expect(events[6]).toMatchObject({
+      agent: 'cursor', type: 'tool_use', tool: 'Shell',
+      command: 'ls docs/',
+    });
+    expect(events[7]).toMatchObject({
+      agent: 'cursor', type: 'tool_use', tool: 'Write',
+      path: '/tmp/public-project/NOTES.md',
     });
   });
 
@@ -77,6 +96,11 @@ describe('Cursor session parsing and discovery metadata', () => {
       topic: 'Inspect the public CLI documentation and summarize the session commands.',
       messageCount: 3,
     });
+    expect(result!.meta.todos).toMatchObject({
+      done: 1,
+      total: 2,
+      activeForm: 'Summarize the commands',
+    });
     expect(result!.content).toBe('Inspect the public CLI documentation and summarize the session commands.');
   });
 
@@ -96,6 +120,6 @@ describe('Cursor session parsing and discovery metadata', () => {
 
   test('skips malformed JSONL lines without dropping valid events', () => {
     fs.appendFileSync(transcriptPath, '{not json}\n');
-    expect(parseCursor(transcriptPath)).toHaveLength(4);
+    expect(parseCursor(transcriptPath)).toHaveLength(8);
   });
 });

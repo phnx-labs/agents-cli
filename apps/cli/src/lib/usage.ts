@@ -130,6 +130,8 @@ const KIMI_USAGES_URL = 'https://api.kimi.com/coding/v1/usages';
 const DROID_USAGE_URL = 'https://api.factory.ai/api/billing/limits';
 
 const CURSOR_USAGE_URL = 'https://cursor.com/api/usage';
+const CURSOR_PERIOD_USAGE_URL = 'https://cursor.com/api/dashboard/get-current-period-usage';
+const CURSOR_USAGE_SUMMARY_URL = 'https://cursor.com/api/usage-summary';
 
 const COMPACT_BAR_LEN = 5;
 const USAGE_BAR_LEN = 10;
@@ -2134,31 +2136,195 @@ export function normalizeCursorUsage(data: CursorUsageResponse): UsageWindow[] {
   ];
 }
 
-/** Read Cursor's OAuth subject + access token from the local CLI config/auth files. */
-function readCursorCredentials(base: string): { sub: string; accessToken: string } | null {
+/** Per-window plan usage percentages Cursor's dashboard breaks usage into (Auto+Composer / API / Total). */
+interface CursorPlanUsage {
+  autoPercentUsed?: number | null;
+  apiPercentUsed?: number | null;
+  totalPercentUsed?: number | null;
+}
+
+/** Response shape from Cursor's dashboard current-period-usage endpoint (subset we render). */
+export interface CursorPeriodUsageResponse {
+  planUsage?: CursorPlanUsage | null;
+  /** ISO timestamp, or a unix-ms string, marking the end of the current billing cycle. */
+  billingCycleEnd?: string | number | null;
+}
+
+/** Response shape from Cursor's usage-summary endpoint (subset we render). */
+export interface CursorUsageSummaryResponse {
+  /** True on a plan with no consumption cap; only tiered self-serve plans populate the percent fields. */
+  isUnlimited?: boolean | null;
+  individualUsage?: {
+    plan?: CursorPlanUsage | null;
+  } | null;
+  billingCycleEnd?: string | number | null;
+}
+
+/**
+ * Normalize a single Cursor percent-based window (auto/api/total), or null when
+ * the percent is not a finite number — the "no empty gauges" rule.
+ * `windowMinutes` stays null: every window shares one billing-cycle reset
+ * (`resetsAt`, from the explicit `billingCycleEnd`), not an inferred cadence, so
+ * inferring one from the (repurposed) `session`/`week`/`month` key would let the
+ * SWR cache zero the bar out long before the real reset.
+ */
+function normalizeCursorPercentWindow(
+  percent: number | null | undefined,
+  key: UsageWindowKey,
+  label: string,
+  shortLabel: string,
+  resetsAt: Date | null,
+): UsageWindow | null {
+  const usedPercent = normalizePercent(percent);
+  if (usedPercent === null) return null;
+  return { key, label, shortLabel, usedPercent, resetsAt, windowMinutes: null };
+}
+
+/**
+ * Normalize Cursor's dashboard `get-current-period-usage` payload — the
+ * primary usage source, giving the same Auto+Composer / API / Total breakdown
+ * the web dashboard shows.
+ */
+export function normalizeCursorPeriodUsage(data: CursorPeriodUsageResponse): UsageWindow[] {
+  const resetsAt = parseDateValue(data.billingCycleEnd);
+  const plan = data.planUsage;
+  const windows = [
+    normalizeCursorPercentWindow(plan?.autoPercentUsed, 'session', 'Auto + Composer', 'A', resetsAt),
+    normalizeCursorPercentWindow(plan?.apiPercentUsed, 'week', 'API', 'API', resetsAt),
+    normalizeCursorPercentWindow(plan?.totalPercentUsed, 'month', 'Total', 'T', resetsAt),
+  ];
+  return windows.filter((window): window is UsageWindow => window !== null);
+}
+
+/**
+ * Normalize Cursor's `usage-summary` fallback payload — the same Auto/API/Total
+ * breakdown nested under `individualUsage.plan`, used when the primary
+ * dashboard endpoint returns no usable `planUsage` (seen on some
+ * enterprise/team accounts). An unlimited plan (`isUnlimited: true`) with no
+ * usable percent has nothing to draw and returns no windows, rather than a
+ * misleading empty gauge.
+ */
+export function normalizeCursorUsageSummary(data: CursorUsageSummaryResponse): UsageWindow[] {
+  const resetsAt = parseDateValue(data.billingCycleEnd);
+  const plan = data.individualUsage?.plan;
+  const windows = [
+    normalizeCursorPercentWindow(plan?.autoPercentUsed, 'session', 'Auto + Composer', 'A', resetsAt),
+    normalizeCursorPercentWindow(plan?.apiPercentUsed, 'week', 'API', 'API', resetsAt),
+    normalizeCursorPercentWindow(plan?.totalPercentUsed, 'month', 'Total', 'T', resetsAt),
+  ];
+  return windows.filter((window): window is UsageWindow => window !== null);
+}
+
+/** Read Cursor's OAuth access token + config-file subject from the local CLI config/auth files. */
+function readCursorCredentials(base: string): { cfgSub: string | null; accessToken: string } | null {
   try {
     const cfgPath = path.join(base, '.cursor', 'cli-config.json');
     const authPath = path.join(base, '.config', 'cursor', 'auth.json');
     if (!fs.existsSync(cfgPath) || !fs.existsSync(authPath)) return null;
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-    const sub = cfg?.authInfo?.authId;
+    const cfgSub = typeof cfg?.authInfo?.authId === 'string' ? cfg.authInfo.authId : null;
     const auth = JSON.parse(fs.readFileSync(authPath, 'utf-8'));
     const accessToken = auth?.accessToken;
-    if (typeof sub !== 'string' || !sub) return null;
     if (typeof accessToken !== 'string' || !accessToken) return null;
-    return { sub, accessToken };
+    return { cfgSub, accessToken };
   } catch {
     return null;
   }
 }
 
 /**
- * Fetch Cursor usage from the dashboard usage endpoint. Cursor authenticates the
- * request with a `WorkosCursorSessionToken` cookie of the form
- * `<oauth-subject>::<access-token>` (the same pair the web dashboard sends), not a
- * bearer header. Free/legacy plans return a monthly request bar; usage-based plans
- * have no request cap, so they return a live-but-window-less snapshot (the account
- * row still renders, without a misleading empty gauge).
+ * Resolve the OAuth subject Cursor expects in the `WorkosCursorSessionToken`
+ * cookie: the access token's own JWT `sub` claim first (the subject that
+ * actually signed the token in hand), falling back to the subject
+ * `cli-config.json` recorded at login when the token carries no usable `sub`.
+ */
+function resolveCursorSubject(accessToken: string, cfgSub: string | null): string | null {
+  const jwtSub = normalizeString(decodeJwtPayload(accessToken)?.sub);
+  return jwtSub || cfgSub;
+}
+
+/**
+ * POST the dashboard current-period-usage endpoint and normalize its windows.
+ * Returns null on any network/auth failure so the caller falls through to the
+ * next source — only a genuine empty-windows response distinguishes "no usage
+ * to report" from "couldn't reach this source".
+ */
+async function fetchCursorPeriodWindows(cookie: string): Promise<UsageWindow[] | null> {
+  try {
+    const response = await fetch(CURSOR_PERIOD_USAGE_URL, {
+      method: 'POST',
+      headers: {
+        Cookie: cookie,
+        Origin: 'https://cursor.com',
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: '{}',
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) {
+      if (response.status === 429) {
+        noteUsageRateLimited('cursor', response.headers.get('retry-after'));
+      }
+      return null;
+    }
+    const data = (await response.json()) as CursorPeriodUsageResponse;
+    return normalizeCursorPeriodUsage(data);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * GET the usage-summary fallback endpoint and normalize its windows. Same
+ * null-on-failure contract as {@link fetchCursorPeriodWindows}.
+ */
+async function fetchCursorUsageSummaryWindows(cookie: string): Promise<UsageWindow[] | null> {
+  try {
+    const response = await fetch(CURSOR_USAGE_SUMMARY_URL, {
+      method: 'GET',
+      headers: {
+        Cookie: cookie,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) {
+      if (response.status === 429) {
+        noteUsageRateLimited('cursor', response.headers.get('retry-after'));
+      }
+      return null;
+    }
+    const data = (await response.json()) as CursorUsageSummaryResponse;
+    return normalizeCursorUsageSummary(data);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch Cursor usage. Cursor authenticates every one of these requests with a
+ * `WorkosCursorSessionToken` cookie of the form `<oauth-subject>::<access-token>`
+ * (the same pair the web dashboard sends), not a bearer header, so all three
+ * sources below share one resolved cookie.
+ *
+ * Three sources, tried in order, because no single endpoint carries usable data
+ * for every plan shape:
+ *
+ *  1. `get-current-period-usage` — the primary source, and the richest: the
+ *     Auto+Composer / API / Total percent breakdown the dashboard itself shows.
+ *  2. `usage-summary` — some enterprise/team accounts return no usable
+ *     `planUsage` from (1); this nests the same three percentages under
+ *     `individualUsage.plan` instead.
+ *  3. The legacy `/api/usage` request-cap endpoint — the original source,
+ *     kept as the final fallback for free/legacy plans that predate the
+ *     percent-based breakdown above and only ever exposed a monthly request cap.
+ *
+ * The first source to yield a non-empty window list wins; a source that errors
+ * or returns no usable numbers falls through to the next rather than surfacing
+ * an error — only the last resort's own response/error is surfaced when every
+ * source comes up empty, so a plan enrolled in exactly one billing model still
+ * renders instead of reporting three swallowed failures.
  */
 async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
@@ -2171,16 +2337,37 @@ async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       return { snapshot: null, error: usageExpiredCredentialError('Cursor') };
     }
 
-    const url = `${CURSOR_USAGE_URL}?user=${encodeURIComponent(creds.sub)}`;
+    const sub = resolveCursorSubject(creds.accessToken, creds.cfgSub);
+    if (!sub) return { snapshot: null, error: usageNoCredentialError('Cursor') };
+
     const throttledUntil = usageRateLimitedUntil('cursor');
     if (throttledUntil) {
       return { snapshot: null, error: usageThrottledError('Cursor', throttledUntil) };
     }
 
+    const cookie = `WorkosCursorSessionToken=${sub}%3A%3A${creds.accessToken}`;
+
+    const periodWindows = await fetchCursorPeriodWindows(cookie);
+    if (periodWindows && periodWindows.length > 0) {
+      return {
+        snapshot: { source: 'live', sourceLabel: 'live account data', capturedAt: new Date(), windows: periodWindows },
+        error: null,
+      };
+    }
+
+    const summaryWindows = await fetchCursorUsageSummaryWindows(cookie);
+    if (summaryWindows && summaryWindows.length > 0) {
+      return {
+        snapshot: { source: 'live', sourceLabel: 'live account data', capturedAt: new Date(), windows: summaryWindows },
+        error: null,
+      };
+    }
+
+    const url = `${CURSOR_USAGE_URL}?user=${encodeURIComponent(sub)}`;
     const response = await fetch(url, {
       method: 'GET',
       headers: {
-        Cookie: `WorkosCursorSessionToken=${creds.sub}%3A%3A${creds.accessToken}`,
+        Cookie: cookie,
         Accept: 'application/json',
       },
       signal: AbortSignal.timeout(5000),

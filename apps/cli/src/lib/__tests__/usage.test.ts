@@ -23,6 +23,8 @@ import {
   formatKimiPlan,
   normalizeDroidWindows,
   normalizeCursorUsage,
+  normalizeCursorPeriodUsage,
+  normalizeCursorUsageSummary,
   antigravityModelShortLabel,
   antigravityTokenNeedsRefresh,
   normalizeAntigravityWindows,
@@ -187,6 +189,64 @@ describe('usage formatting', () => {
     // Missing premium bucket entirely -> no window, no throw.
     expect(normalizeCursorUsage({ startOfMonth: '2026-07-22T11:35:59.000Z' })).toEqual([]);
     expect(normalizeCursorUsage({})).toEqual([]);
+  });
+
+  it('normalizeCursorPeriodUsage maps the primary Auto/API/Total breakdown to three windows', () => {
+    const windows = normalizeCursorPeriodUsage({
+      billingCycleEnd: '2026-08-22T11:35:59.000Z',
+      planUsage: { autoPercentUsed: 13.21, apiPercentUsed: 3.16, totalPercentUsed: 10.19 },
+    });
+    expect(windows).toHaveLength(3);
+    expect(windows[0]).toMatchObject({ key: 'session', shortLabel: 'A', label: 'Auto + Composer', usedPercent: 13.21 });
+    expect(windows[1]).toMatchObject({ key: 'week', shortLabel: 'API', label: 'API', usedPercent: 3.16 });
+    expect(windows[2]).toMatchObject({ key: 'month', shortLabel: 'T', label: 'Total', usedPercent: 10.19 });
+    for (const window of windows) {
+      expect(window.resetsAt?.toISOString()).toBe(new Date('2026-08-22T11:35:59.000Z').toISOString());
+    }
+  });
+
+  it('normalizeCursorPeriodUsage accepts a unix-ms string billingCycleEnd and drops non-finite percents', () => {
+    const windows = normalizeCursorPeriodUsage({
+      billingCycleEnd: '1771077734000',
+      planUsage: { autoPercentUsed: 0, apiPercentUsed: null, totalPercentUsed: 15.48 },
+    });
+    // apiPercentUsed is missing -> only the two finite windows render, no empty gauge for API.
+    expect(windows).toHaveLength(2);
+    expect(windows.map((w) => w.key)).toEqual(['session', 'month']);
+    expect(windows[0]?.resetsAt?.toISOString()).toBe(new Date(1771077734000).toISOString());
+  });
+
+  it('normalizeCursorPeriodUsage returns no windows for a missing/empty planUsage', () => {
+    expect(normalizeCursorPeriodUsage({ billingCycleEnd: '2026-08-22T11:35:59.000Z' })).toEqual([]);
+    expect(normalizeCursorPeriodUsage({})).toEqual([]);
+  });
+
+  it('normalizeCursorUsageSummary maps the fallback individualUsage.plan breakdown', () => {
+    const windows = normalizeCursorUsageSummary({
+      isUnlimited: false,
+      billingCycleEnd: '2026-05-02T14:11:55.000Z',
+      individualUsage: { plan: { autoPercentUsed: 0, apiPercentUsed: 100, totalPercentUsed: 100 } },
+    });
+    expect(windows).toHaveLength(3);
+    expect(windows[0]).toMatchObject({ key: 'session', shortLabel: 'A', usedPercent: 0 });
+    expect(windows[1]).toMatchObject({ key: 'week', shortLabel: 'API', usedPercent: 100 });
+    expect(windows[2]).toMatchObject({ key: 'month', shortLabel: 'T', usedPercent: 100 });
+    expect(windows[0]?.resetsAt?.toISOString()).toBe(new Date('2026-05-02T14:11:55.000Z').toISOString());
+  });
+
+  it('normalizeCursorUsageSummary returns no windows for an unlimited plan with no usable percents', () => {
+    // Non-tiered unlimited plans omit the percent fields entirely (Cursor's admin
+    // API forum confirms this: undocumented percent fields only populate for
+    // tiered self-serve accounts).
+    expect(
+      normalizeCursorUsageSummary({
+        isUnlimited: true,
+        billingCycleEnd: '2026-05-02T14:11:55.000Z',
+        individualUsage: { plan: {} },
+      })
+    ).toEqual([]);
+    expect(normalizeCursorUsageSummary({ isUnlimited: true })).toEqual([]);
+    expect(normalizeCursorUsageSummary({})).toEqual([]);
   });
 
   it('parseAntigravityOauthPayload reads the raw JSON and the go-keyring-base64 wrapper', () => {

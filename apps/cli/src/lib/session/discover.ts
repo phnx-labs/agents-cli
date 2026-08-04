@@ -4371,6 +4371,7 @@ export function readCursorMeta(
     topic: firstUserText ? extractSessionTopic(firstUserText) : undefined,
     label: title,
     messageCount: events.filter((event) => event.type === 'message').length,
+    todos: extractTodoProgressFromEvents(events),
   };
 
   return { meta, content: userTexts.join('\n') };
