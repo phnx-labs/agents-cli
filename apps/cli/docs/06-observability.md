@@ -337,8 +337,16 @@ of agent-specific formats, no auth to manage.
 Three diagnostics with distinct scopes (RUSH-2027):
 
 - `agents fleet status` — coarse **device** health: online/offline, which agent
-  CLIs are installed, sign-in, agents-cli **version skew**. Not fine-grained
-  resource divergence.
+  CLIs are installed, sign-in, agents-cli **version skew**, and **how many agents
+  are running** on each box. Not fine-grained resource divergence. Device stats and
+  agent counts are **publish-own / read-union** (RUSH-2061): each daemon probes
+  only itself (no ssh) and publishes its own row — resource stats + live-agent
+  workload — to a local mirror (`~/.agents/.cache/.fleet-status.json`,
+  [`src/lib/fleet-status.ts`](../src/lib/fleet-status.ts)); the command unions
+  peers' rows on demand, cache-first, ssh-reading a stale/missing peer via
+  `agents fleet status --local --json` through a bounded, kill-on-timeout fan-out.
+  The daemon no longer force-probes every device every 3 minutes (the old N² ssh
+  fan-out and orphaned-probe pile-up, RUSH-2114).
 - `agents inspect <agent>[@version]` — deep **single-harness** diff between one
   version home and its resolved sources (staleness, orphans).
 - `agents doctor` — the **umbrella**: local diagnostics (CLI presence, sign-in,
@@ -1065,16 +1073,25 @@ a stable per-account key:
   fetches live quota and renders `S:`/`W:` bars + plan. It's **stale-while-revalidate**
   (on-disk cache under `~/.agents/.cache/`, keyed per account: 2-min fresh, 24-h
   block) so `agents view` stays off the network on the hot path.
-- **Routing reads the same cache under a tighter rule.** Displaying a slightly old
-  bar costs nothing; *choosing an account* from one costs the whole run, so the
-  balanced router caps staleness at **5 minutes**
-  (`USAGE_DECISION_MAX_AGE_MS`, [`src/lib/rotate.ts`](../src/lib/rotate.ts)) and
-  blocks on a live read past that — one bounded, parallel round trip per account,
-  and none inside the 2-minute fresh window. When a read fails and the cache is
-  all it has, the router prefers any account whose snapshot IS verified, and
-  reports `usage unverified` in the launch banner rather than presenting a stale
-  number as a fact. The cache is strictly per machine and never synced, so a box
-  whose refresh is failing would otherwise route on day-old numbers indefinitely.
+- **Routing reads the same cache, CACHE-ONLY — never on the hot path's network
+  (RUSH-2061).** Displaying a slightly old bar costs nothing; *choosing an account*
+  from one must not cost a network round trip on `agents run` cold-start.
+  `collectRunCandidates` reads the cache with `readOnly`
+  ([`src/lib/rotate.ts`](../src/lib/rotate.ts), [`src/lib/usage.ts`](../src/lib/usage.ts))
+  and never blocks on a live fetch. A snapshot older than **5 minutes**
+  (`USAGE_DECISION_MAX_AGE_MS`) is still not trusted for the pick — but the guard
+  is `isUsageVerified`, which routes around an unconfirmable number and reports
+  `usage unverified` in the launch banner, NOT a blocking refresh. Keeping the
+  cache warm is the **daemon's** job (`runUsageRefresh`,
+  [`src/lib/usage-refresh.ts`](../src/lib/usage-refresh.ts)): each host refreshes
+  only its own signed-in accounts on an adaptive cadence from the session-window
+  burn rate (90s racing toward the 5h cap, up to 15min idle), capped at ~6 calls
+  per account per hour and skipped under a 429 backoff. Balanced weighting also
+  **deprioritizes an account projected to cap soon** — `deriveUsageHeadroom`
+  projects minutes-to-limit and `capacityWeight` scales the headroom weight down
+  as that projection shortens, so a launch avoids an account racing toward its cap,
+  not just one already 100%-maxed. The cache is strictly per machine and never
+  synced.
 - **A 429 is backed off, not retried through.** The endpoint's `Retry-After` is
   recorded per provider (`usage-backoff.ts`, on disk under
   `~/.agents/.cache/usage-backoff/` because the daemon and every one-shot CLI run

@@ -97,7 +97,7 @@ question, and a new health check goes in the one whose scope it matches.
 
 | Command | Scope | Answers |
 |---|---|---|
-| `agents fleet status` | Coarse **device** health across the fleet | Are devices online, do they have the agent CLIs installed, are they signed in, what is the agents-cli **version skew**. NOT fine-grained resource divergence. |
+| `agents fleet status` | Coarse **device** health across the fleet | Are devices online, do they have the agent CLIs installed, are they signed in, what is the agents-cli **version skew**, how many agents are running on each box. NOT fine-grained resource divergence. Publish-own/read-union: each daemon publishes only its own row (no N² ssh probe, RUSH-2061); the reader unions peers on demand (`--local --json` is the per-host publish endpoint). |
 | `agents inspect <agent>[@version]` | Deep **single-harness** diagnosis | Per-resource diff between one version home and its resolved sources; manifest staleness; orphans. One harness, one machine. |
 | `agents doctor` | **Umbrella** — overall fleet + harness health | Local diagnostics (CLI presence, per-version sign-in, per-version sync, orphans) **and** cross-device divergence, rendered as the prioritized critical-at-top + per-computer hybrid below. The single command a user runs to discover problems before runtime. |
 
