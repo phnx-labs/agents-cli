@@ -512,6 +512,20 @@ healthy `running: yes`. `agents menubar setup` is the recovery path — it ends
 every live helper and re-kickstarts the service so the survivor is always
 launchd's.
 
+**The lock fd is `O_CLOEXEC`, and `acquire` self-heals a stale lock.** The lock is
+opened `O_RDWR | O_CREAT | O_CLOEXEC` so no spawned child can inherit the
+descriptor — a pre-fix `doctor` child that inherited it and orphaned at PPID 1 held
+the flock forever, and every relaunch then read "already running" and exited, so
+the menu bar stayed dead until reboot (`O_CLOEXEC` is the fd-level guarantee across
+*every* spawn path, complementing `ChildProcess`'s `POSIX_SPAWN_CLOEXEC_DEFAULT`).
+The helper never execs itself, so it keeps the fd for life. And when the flock is
+held but **no LIVE `MenubarHelper` owns it** — the lock-file pid is dead, or belongs
+to some other program by reuse (`liveHelperOwnsLock` checks liveness + `proc_pidpath`
+basename) — `acquire` reaps the leaked orphan and retries the lock once, instead of
+surfacing into the deadlock. Only a genuine live incumbent is ever surfaced, so a
+duplicate launch never reaps a live helper's in-flight children (the reap is reached
+only when the holder is provably not a live helper).
+
 **Every CLI child the helper spawns is bounded, group-killable, and reapable.**
 The helper shells `agents` on a timer, and an unbounded `Process` there is not a
 slow menu — it is a machine-killer. `doctor --json` measures **136s on an idle
@@ -558,9 +572,22 @@ the bug.
 Poll intervals must stay well above the call's real cost:
 `StatusItemController.doctorRefreshInterval` is 15 min against a 136s command
 (it was 60s — a >100% duty cycle). `MENUBAR_CHILD_TEST=1 MenubarHelper` exercises
-all of it against real processes, including reaping a real surviving orphan.
+all of it against real processes, including reaping a real surviving orphan and
+proving a spawned child never inherits the single-instance flock fd.
 Separately, **`doctor --json` taking 136s on an idle machine is its own defect**
 — the helper is now safe against it, not a reason to consider it acceptable.
+
+**These self-tests are a build gate now, not just manual modes.** The helper's
+env-gated self-tests (`MENUBAR_SINGLE_TEST`, `MENUBAR_CHILD_TEST`,
+`MENUBAR_GUARD_TEST`, `MENUBAR_ISSUE_TEST`) are headless — they exit before the
+AppKit path (`Guards.enforceForInteractiveLaunch`) so they need no GUI or signing.
+[`menubar/scripts/test-menubar.sh`](menubar/scripts/build.sh) runs all four against
+the just-built binary and [`build.sh`](menubar/scripts/build.sh) invokes it before
+signing, so no helper artifact ships whose invariants regressed. Nothing ran these
+before — PR CI is Linux (can't build Swift) and prepack only checks the shipped
+bundle's signature — which is how the flock fd-inheritance deadlock escaped. Do NOT
+add `MENUBAR_DUMP` / `MENUBAR_PROMPT_PREVIEW` to the gate: those reach AppKit and
+need a GUI session.
 
 **Standalone `agents` binary (#315).** Every release also builds `dist/bin/agents`
 (`bun build --compile`, arm64 Mach-O), signs it (Developer ID + hardened runtime +
