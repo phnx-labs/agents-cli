@@ -786,15 +786,17 @@ export function getDB(): Database.Database {
   if (dbInstance) return dbInstance;
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
   const db = new Database(DB_PATH);
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
-  db.pragma('temp_store = MEMORY');
-  // Wait up to 30s instead of failing immediately on SQLITE_BUSY. Multiple
+  // Wait up to 30s instead of failing immediately on SQLITE_BUSY. Install the
+  // handler before journal_mode: concurrent first opens can race for its schema
+  // lock, before a later busy_timeout would have a chance to wait. Multiple
   // agents (CLIs, skills, hooks) open this DB concurrently. The first scan of
   // a new version home can take longer than 10s; concurrent callers need enough
   // headroom to wait. The ledger-recheck in upsertSessionsBatch makes
   // subsequent writers near-instant, so 30s is a rarely-reached safety net.
   db.pragma('busy_timeout = 30000');
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
+  db.pragma('temp_store = MEMORY');
   db.exec(SCHEMA);
 
   const readSchemaVersion = (): number | undefined => {

@@ -7,7 +7,7 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-tool-store-'
 process.env.HOME = TEST_HOME;
 
 const { closeDB, getDB, querySessions, upsertSession } = await import('./db.js');
-const { persistToolCalls, purgeMissingToolCallsInDirectory } = await import('./tool-store.js');
+const { canonicalToolLedgerPath, persistToolCalls, purgeMissingToolCallsInDirectory } = await import('./tool-store.js');
 type SessionMeta = import('./types.js').SessionMeta;
 
 afterAll(() => {
@@ -68,7 +68,9 @@ describe('persistToolCalls', () => {
 
     expect(db.prepare(`SELECT tool, parse_error FROM tool_calls WHERE session_id = ?`).all(session.id))
       .toEqual([{ tool: 'index_limit', parse_error: 'Additional tool calls were not indexed for this session.' }]);
-    expect((db.prepare(`SELECT evidence_bytes FROM tool_scan_ledger WHERE file_path = ?`).get(filePath) as { evidence_bytes: number }).evidence_bytes)
+    const ledger = db.prepare(`SELECT evidence_bytes FROM tool_scan_ledger WHERE file_path = ?`)
+      .get(canonicalToolLedgerPath(filePath)) as { evidence_bytes: number };
+    expect(ledger.evidence_bytes)
       .toBeLessThanOrEqual(256);
   });
 
@@ -116,7 +118,8 @@ describe('persistToolCalls', () => {
       fileSize: parsedStamp.size,
     });
 
-    expect(db.prepare(`SELECT file_mtime_ms, file_size FROM tool_scan_ledger WHERE file_path = ?`).get(sourcePath))
+    expect(db.prepare(`SELECT file_mtime_ms, file_size FROM tool_scan_ledger WHERE file_path = ?`)
+      .get(canonicalToolLedgerPath(sourcePath)))
       .toEqual({ file_mtime_ms: parsedStamp.mtimeMs, file_size: parsedStamp.size });
     expect(fs.statSync(sourcePath).size).toBeGreaterThan(parsedStamp.size);
   });
@@ -203,10 +206,13 @@ describe('persistToolCalls', () => {
     upsertSession(session, 'symlink');
     const stat = fs.statSync(linkedPath);
     persistToolCalls(db, session, [], { fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
-    expect(db.prepare(`SELECT file_path FROM tool_scan_ledger WHERE file_path = ?`).get(realPath)).toEqual({ file_path: realPath });
+    const canonicalRealPath = canonicalToolLedgerPath(realPath);
+    expect(db.prepare(`SELECT file_path FROM tool_scan_ledger WHERE file_path = ?`).get(canonicalRealPath))
+      .toEqual({ file_path: canonicalRealPath });
     fs.unlinkSync(realPath);
 
     expect(purgeMissingToolCallsInDirectory(db, linkedDir, [])).toBe(1);
-    expect(db.prepare(`SELECT count(*) AS n FROM tool_scan_ledger WHERE file_path = ?`).get(realPath)).toEqual({ n: 0 });
+    expect(db.prepare(`SELECT count(*) AS n FROM tool_scan_ledger WHERE file_path = ?`).get(canonicalRealPath))
+      .toEqual({ n: 0 });
   });
 });

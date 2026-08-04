@@ -353,7 +353,7 @@ describe('B-3 live incremental Codex scan parity', () => {
     legacyState.v = 1;
     delete legacyState.toolCalls;
     db.getDB().prepare('UPDATE scan_ledger SET parser_state = ? WHERE file_path = ?')
-      .run(JSON.stringify(legacyState), fp);
+      .run(JSON.stringify(legacyState), fs.realpathSync(fp));
 
     discover.__resetCodexScanBranchCountsForTest();
     appendRollout(id, [
