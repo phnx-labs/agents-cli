@@ -45,6 +45,7 @@ import {
 } from '../lib/projects.js';
 import {
   rollupSessionsByProject,
+  isDeadStatus,
   liveDeadSplit,
   enrichProjectSignals,
   formatProjectMembers,
@@ -310,6 +311,56 @@ function statusBar(r: ProjectSessionRollup): string {
   return parts.join(' · ') || chalk.gray('no live agents');
 }
 
+/** Everything a project card needs beyond the stored definition. */
+interface ProjectRenderData {
+  roll: Map<string, ProjectSessionRollup>;
+  remote: Map<string, ProjectRemoteSignals>;
+  linear: Map<string, LinearProjectCounts>;
+  focus: Map<string, FocusArea[]>;
+}
+
+/**
+ * Gather the live/remote/Linear/focus signals for the projects about to be
+ * rendered. `status` and `view` share this deliberately: `view` used to build
+ * its own thinner picture, so the command you open to learn everything about
+ * ONE project showed strictly less than the roll-up across all of them — no
+ * agents, no ships, no focus, no schedule verdict. One gatherer means a signal
+ * added for either surface appears on both.
+ *
+ * Only the shown projects are enriched. `skipRemote` still reads the local
+ * artifact log and git focus, and skips just the network calls (`gh`, Linear).
+ */
+async function enrichProjectsForRender(
+  defs: ProjectDef[],
+  all: ProjectDef[],
+  opts: {
+    windowDays: number;
+    nowMs: number;
+    skipRemote: boolean;
+    extraSessions?: Awaited<ReturnType<typeof getActiveSessions>>;
+  },
+): Promise<ProjectRenderData> {
+  const roll = rollupSessionsByProject(all, [...(await getActiveSessions()), ...(opts.extraSessions ?? [])]);
+  const remote = new Map<string, ProjectRemoteSignals>();
+  const linear = new Map<string, LinearProjectCounts>();
+  // Local git, no API, no rate limit — measured 0.23s over a 897-commit week.
+  const focus = new Map<string, FocusArea[]>();
+  await Promise.all(
+    defs.map(async (d) => {
+      const [sig, counts] = await Promise.all([
+        enrichProjectSignals(d, opts.windowDays, opts.nowMs, { skipRemote: opts.skipRemote }),
+        !opts.skipRemote && d.linear?.projectId
+          ? fetchLinearProjectCounts(d.linear.projectId)
+          : Promise.resolve(undefined),
+      ]);
+      remote.set(d.name, sig);
+      if (counts) linear.set(d.name, counts);
+      if (d.root) focus.set(d.name, await readFocusAreas(expandLocalHome(d.root), opts.windowDays));
+    }),
+  );
+  return { roll, remote, linear, focus };
+}
+
 function renderCard(
   def: ProjectDef,
   r: ProjectSessionRollup | undefined,
@@ -321,6 +372,8 @@ function renderCard(
   milestoneLimit: number = 1,
   /** Directories the window's work landed in, from local git. */
   focus: FocusArea[] = [],
+  /** `view` mode: the caller prints the stored definition in full afterwards. */
+  detail: boolean = false,
 ): void {
   // The headline counts LIVE agents. It used to be every matched session, which
   // read `39 agents` on a project where 19 had crashed. `planPct` used to sit
@@ -336,7 +389,11 @@ function renderCard(
     const detail = split.deadByStatus.map((d) => `${d.n} ${d.status}`).join(', ');
     console.log(`  ${chalk.dim('dead')}     ${chalk.yellow(`${split.dead} finished or lost`)} ${chalk.dim(`(${detail})`)}`);
   }
-  if (r && r.members.length) console.log(`  ${chalk.dim('agents')}   ${formatProjectMembers(r.members)}`);
+  // Live only. The roster used to list every matched session, so a card headed
+  // `23 live` went on to show `crashed ×25` — the corpses the `dead` row above
+  // already accounts for, counted twice and contradicting the headline.
+  const liveMembers = r?.members.filter((m) => !isDeadStatus(m.status)) ?? [];
+  if (liveMembers.length) console.log(`  ${chalk.dim('agents')}   ${formatProjectMembers(liveMembers)}`);
   const ships: string[] = [];
   if (remote?.mergedPrs) {
     ships.push(chalk.green(`${remote.mergedPrs}${remote.mergedPrsTruncated ? '+' : ''} merged (${remote.windowDays}d)`));
@@ -385,13 +442,15 @@ function renderCard(
     console.log(`  ${chalk.yellow('!')}        ${chalk.yellow(mismatch.message)}`);
     console.log(`  ${' '.repeat(8)}${chalk.gray(mismatch.remediation)}`);
   }
-  if (def.contexts?.length) {
+  // `view` prints these in full (path + purpose, label + URL) right below, so
+  // the compact one-line summaries would just say the same thing twice.
+  if (!detail && def.contexts?.length) {
     console.log(`  ${chalk.dim('context')}  ${def.contexts.map((c) => c.path).join(' · ')}`);
   }
-  if (def.integrations?.length) {
+  if (!detail && def.integrations?.length) {
     console.log(`  ${chalk.dim('links')}    ${def.integrations.map((i) => i.label ?? i.kind).join(' · ')}`);
   }
-  console.log('');
+  if (!detail) console.log('');
 }
 
 export function registerProjectsCommands(program: Command): void {
@@ -523,52 +582,73 @@ export function registerProjectsCommands(program: Command): void {
   projects
     .command('view <name>')
     .alias('show')
-    .description('Show a project definition, resolved paths, repos, contexts, links, and milestones.')
+    .description('Everything about one project: the full status card, every milestone, and the stored definition.')
     .option('--json', 'Machine-readable output')
-    .option('--no-remote', 'Skip the Linear lookup; definition only')
-    .action(async (name: string, opts: { json?: boolean; remote?: boolean }) => {
+    .option('--window <days>', 'Window for merged PRs, artifacts, and focus areas', '7')
+    .option('--no-remote', 'Skip the GitHub and Linear lookups; definition only')
+    .action(async (name: string, opts: { json?: boolean; window?: string; remote?: boolean }) => {
       const def = loadProjectDef(name);
       if (!def) {
         console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
         process.exit(1);
       }
-      // Every milestone the project declares, not just the next one — the whole
-      // point of opening ONE project is to see the shape of its plan.
-      const counts =
-        opts.remote !== false && def.linear?.projectId
-          ? await fetchLinearProjectCounts(def.linear.projectId)
-          : undefined;
+      // `view` is `status` for one project PLUS the stored definition and every
+      // milestone. It used to render its own short list — root, repos, a raw
+      // Linear id, issues — so opening a single project told you LESS than the
+      // roll-up did: no agents, no ships, no focus, no schedule verdict.
+      const windowDays = Math.max(1, Number.parseInt(opts.window ?? '7', 10) || 7);
+      const nowMs = Date.now();
+      const all = listProjectDefs();
+      const { roll, remote, linear, focus } = await enrichProjectsForRender([def], all, {
+        windowDays,
+        nowMs,
+        skipRemote: opts.remote === false,
+      });
+      const r = roll.get(def.name);
+      const sig = remote.get(def.name);
+      const counts = linear.get(def.name);
       if (opts.json) {
-        console.log(JSON.stringify({ ...def, linear: { ...def.linear, ...(counts ?? {}) } }, null, 2));
+        console.log(
+          JSON.stringify(
+            {
+              ...def,
+              linear: { ...def.linear, ...(counts ?? {}) },
+              schedule: counts?.milestones?.length ? scheduleVerdict(counts.milestones, nowMs) : null,
+              live: r ? liveDeadSplit(r.byStatus).live : 0,
+              dead: r ? liveDeadSplit(r.byStatus).dead : 0,
+              byStatus: r?.byStatus ?? {},
+              members: r?.members ?? [],
+              openPrs: r?.openPrs ?? [],
+              tickets: r?.tickets ?? [],
+              mergedPrs: sig?.mergedPrs ?? 0,
+              latestRelease: sig?.latestRelease ?? null,
+              artifacts: sig?.artifacts ?? 0,
+              focus: focus.get(def.name) ?? [],
+            },
+            null,
+            2,
+          ),
+        );
         return;
       }
-      console.log(chalk.bold(def.name) + (def.description ? chalk.dim(`  — ${def.description}`) : ''));
-      if (def.root) console.log(`  root         ${def.root}`);
-      if (def.defaultPath) console.log(`  defaultPath  ${def.defaultPath}`);
-      const repos = [def.repo, ...(def.repos ?? []).map((r) => (r.subpath ? `${r.slug} (${r.subpath})` : r.slug))].filter(Boolean);
-      if (repos.length) console.log(`  repos        ${repos.join(', ')}`);
-      for (const c of def.contexts ?? []) console.log(`  context      ${chalk.cyan(c.path)} — ${c.purpose}`);
-      for (const i of def.integrations ?? []) console.log(`  ${i.kind.padEnd(12)} ${i.url}${i.label ? chalk.dim(`  (${i.label})`) : ''}`);
-      if (def.linear?.url || def.linear?.projectId) console.log(`  linear       ${def.linear.url ?? def.linear.projectId}`);
-      for (const d of def.docs ?? []) console.log(`  doc          ${d}`);
-      if (counts) {
-        const staleNote = counts.stale ? chalk.dim('  (cached)') : '';
-        console.log(`  issues       ${counts.done}/${counts.total}${counts.truncated ? '+' : ''} done · ${counts.inProgress} in progress${staleNote}`);
+
+      // The same card `status` prints, with every milestone instead of the next.
+      renderCard(def, r, sig, undefined, counts, nowMs, Number.POSITIVE_INFINITY, focus.get(def.name) ?? [], true);
+
+      // Then what only `view` shows: the stored definition, in full.
+      console.log();
+      if (def.root) console.log(`  ${chalk.dim('root')}     ${def.root}`);
+      if (def.defaultPath) console.log(`  ${chalk.dim('path')}     ${def.defaultPath}`);
+      for (const rp of def.repos ?? []) {
+        const where = [rp.subpath ? `subpath ${rp.subpath}` : undefined, rp.path].filter(Boolean).join(' · ');
+        console.log(`  ${chalk.dim('repo')}     ${rp.slug}${where ? chalk.dim(`  (${where})`) : ''}`);
       }
-      const ms = counts?.milestones ?? [];
-      if (ms.length) {
-        console.log(`  ${chalk.bold('milestones')}`);
-        for (const m of ms) {
-          const mark = m.name === counts?.nextMilestone?.name ? chalk.cyan('next') : '';
-          console.log(`    ${mark.padEnd(6)}     ${formatNextMilestone(m, Date.now())}`);
-        }
-        // A milestone nothing is filed against cannot report progress. Say that
-        // once, plainly, rather than printing a row of silent 0%s.
-        const unfiled = ms.filter((m) => m.total === 0).length;
-        if (unfiled === ms.length) {
-          console.log(`    ${chalk.yellow('!')}          ${chalk.yellow(`no issues are assigned to any milestone — progress against them cannot be measured`)}`);
-        }
+      for (const c of def.contexts ?? []) console.log(`  ${chalk.dim('context')}  ${chalk.cyan(c.path)} ${chalk.dim('—')} ${c.purpose}`);
+      for (const ig of def.integrations ?? []) {
+        console.log(`  ${chalk.dim(ig.kind.padEnd(8))} ${ig.url}${ig.label ? chalk.dim(`  (${ig.label})`) : ''}`);
       }
+      if (def.linear?.url || def.linear?.projectId) console.log(`  ${chalk.dim('linear')}   ${def.linear.url ?? def.linear.projectId}`);
+      for (const d of def.docs ?? []) console.log(`  ${chalk.dim('doc')}      ${d}`);
       console.log(chalk.gray(`  ${projectDefPath(name)}`));
     });
 
@@ -641,27 +721,12 @@ export function registerProjectsCommands(program: Command): void {
         fleetSessions = activeRes.sessions;
       }
 
-      const roll = rollupSessionsByProject(all, [...await getActiveSessions(), ...fleetSessions]);
-      // Enrich only the shown projects. --no-remote still reads the local artifact
-      // log but skips the gh calls + Linear counts (both are network).
-      const remote = new Map<string, ProjectRemoteSignals>();
-      const linear = new Map<string, LinearProjectCounts>();
-      // Local git, no API, no rate limit — measured 0.23s over a 897-commit week.
-      const focus = new Map<string, FocusArea[]>();
-      await Promise.all(
-        defs.map(async (d) => {
-          const skipRemote = opts.remote === false;
-          const [sig, counts] = await Promise.all([
-            enrichProjectSignals(d, windowDays, nowMs, { skipRemote }),
-            !skipRemote && d.linear?.projectId
-              ? fetchLinearProjectCounts(d.linear.projectId)
-              : Promise.resolve(undefined),
-          ]);
-          remote.set(d.name, sig);
-          if (counts) linear.set(d.name, counts);
-          if (d.root) focus.set(d.name, await readFocusAreas(expandLocalHome(d.root), windowDays));
-        }),
-      );
+      const { roll, remote, linear, focus } = await enrichProjectsForRender(defs, all, {
+        windowDays,
+        nowMs,
+        skipRemote: opts.remote === false,
+        extraSessions: fleetSessions,
+      });
 
       /** This def's slice of the fleet probe, in its own target order. */
       const fleetFor = (d: ProjectDef): HostWorkspaceStatus[] => {

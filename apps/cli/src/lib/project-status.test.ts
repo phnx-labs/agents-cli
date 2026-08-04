@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   rollupSessionsByProject,
+  isDeadStatus,
   liveDeadSplit,
   enrichProjectSignals,
   sortProjectMembers,
@@ -125,6 +126,32 @@ describe('liveDeadSplit', () => {
 
   it('ignores zero counts rather than emitting empty buckets', () => {
     expect(liveDeadSplit({ running: 2, crashed: 0 }).deadByStatus).toEqual([]);
+  });
+});
+
+describe('isDeadStatus — keeps the agents roster consistent with the headline', () => {
+  // The card prints `N live`, a `dead` row, then the agents roster. The roster
+  // used to list every matched session, so a card headed `23 live` went on to
+  // show `crashed x25` — the same corpses the dead row reports, contradicting
+  // the headline. The roster filter and the headline split must never disagree.
+  const EVERY_STATUS = [
+    'running', 'idle', 'queued', 'input_required',
+    'orphaned', 'abandoned', 'unknown',
+    'closed', 'crashed',
+  ];
+
+  it('agrees with liveDeadSplit on every ActiveStatus', () => {
+    const keptByRoster = EVERY_STATUS.filter((s) => !isDeadStatus(s)).length;
+    const split = liveDeadSplit(Object.fromEntries(EVERY_STATUS.map((s) => [s, 1])));
+    expect(keptByRoster).toBe(split.live);
+  });
+
+  it('drops exactly the statuses the dead row already accounts for', () => {
+    expect(isDeadStatus('crashed')).toBe(true);
+    expect(isDeadStatus('closed')).toBe(true);
+    // orphaned is alive — an agent that outlived its window, still working.
+    expect(isDeadStatus('orphaned')).toBe(false);
+    expect(isDeadStatus('running')).toBe(false);
   });
 });
 
