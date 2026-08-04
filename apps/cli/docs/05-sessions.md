@@ -839,6 +839,71 @@ work-signal columns `pr_url` / `pr_number` / `worktree_slug` / `ticket_id`, the
 a column is derived forces a full rescan so every existing session is re-derived
 (as the pricing columns once did).
 
+## Benchmarks
+
+Two harnesses cover the session-query paths; both live in [`bench/`](../bench):
+
+| Harness | Covers | Gating? |
+|---|---|---|
+| [`bench/sessions-perf.ts`](../bench/sessions-perf.ts) | The local discover/search pipeline: cold/warm `discoverSessions`, a single picker keystroke, 10 successive keystrokes (typing), `searchContentIndex` alone. | No — informational, `continue-on-error` in `bench.yml`. |
+| [`bench/sessions-active-perf.ts`](../bench/sessions-active-perf.ts) | The **distributed** paths: `--active --local` (the RUSH-2118 regression) and `--host <peer>` (the cross-fleet fan-out). | **Yes** for this one step — see below. |
+
+### `--active --local` and `--host` (`sessions-active-perf.ts`)
+
+Two parts, run in one script:
+
+- **A. `--active --local` guard.** Builds N synthetic remote-host teammates
+  (the shape `agents teams add --device` produces) mixing still-RUNNING and
+  already-terminal statuses, then times `AgentManager(..., localOnly=true).listAll()`
+  — the exact call `agents sessions --active --local` makes. A stub `ssh`
+  shadowing the real binary on PATH turns any dial attempt into a recorded
+  violation: RUSH-2118 was exactly this — a `--local` query firing a real ssh
+  round-trip per remote-host teammate, on every poll, whether or not the
+  teammate had already finished (measured at 180 ssh calls / ~4.3s on a
+  30-teammate fixture before the fix). A **positive control** run
+  (`localOnly: false` against one still-RUNNING teammate, which legitimately
+  should dial) asserts the shim actually observes a real call first — without
+  it, a shim that silently stopped intercepting would make the guard pass for
+  the wrong reason.
+- **B. `--host <peer>` distributed fan-out.** No live fleet is reachable in
+  CI, and GitHub-hosted runners don't run sshd, so the SSH boundary is mocked
+  by shimming `ssh` on PATH: it sleeps a configurable per-call latency then
+  returns a canned `--active --json` payload. The bench asserts the fan-out
+  against N synthetic peers stays close to **one** round trip, not N — a
+  regression here means `Promise.all` silently became sequential.
+
+Both assert a threshold and exit 1 on violation:
+
+```bash
+bun bench/sessions-active-perf.ts
+# BENCH_LOCAL_THRESHOLD_MS   (default 500)  — Part A latency ceiling
+# BENCH_REMOTE_TEAMMATES     (default 30)   — synthetic teammate count
+# BENCH_FAN_OUT_PEERS        (default 8)    — synthetic peer count
+# BENCH_PEER_LATENCY_MS      (default 60)   — per-peer shimmed ssh latency
+# BENCH_PARALLELISM_FACTOR   (default 3)    — Part B threshold = latency × factor
+```
+
+Wired into `.github/workflows/bench.yml` as the one **gating** step in that
+workflow (every other bench step is `continue-on-error`) — a lightweight
+threshold assertion, not a full perf suite, so the correctness test
+(`agents.remote-poll.test.ts`, gates every PR) and this latency guard cover
+the regression from two angles.
+
+Measured baseline (this repo, 2026-08-04, `bun v24.3.0`):
+
+```
+A. --active --local (30 synthetic remote-host teammates): best 2.6ms, 0 ssh calls
+   (positive control observed 6 call(s)) — PASS
+B. --host fan-out (8 synthetic peers, 60ms/call): best 68.2ms
+   (parallelism threshold 180ms) — PASS
+```
+
+For comparison, [`scripts/bench-ssh.mjs`](../scripts/bench-ssh.mjs) measures
+the real-network-latency side of the shared SSH transport against a live
+fleet host (see [Optimizations §OPT-02](99-optimizations.md#opt-02-ssh-transport--one-multiplexed-engine));
+`sessions-active-perf.ts` is its CI-safe counterpart for the sessions
+fan-out specifically.
+
 ## Related
 
 - `agents logs [id]` — one viewer over both a run's log **and** its session transcript: resolves a host-dispatch task (`agents run --host`) or a session by id/`--session`, filters by `--host`/`--agent`/`--version`, and `-f` follows a live one (a session tail is `agents sessions tail` under the hood, claude/codex only). See [Hosts](hosts.md).
