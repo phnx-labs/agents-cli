@@ -1,10 +1,12 @@
 /**
  * `agents run --lease` orchestrator.
  *
- * Lease an ephemeral crabbox → provision the picked runtime(s) + their
- * credentials → run the agent on the box (via `crabbox run`, which owns the
- * SSH) → tear the box down. The whole box-side sequence rides a single
- * `--script-stdin` body so the token contents never touch argv.
+ * Acquire a box → provision the picked runtime(s) + their credentials → run the
+ * agent on the box (via `crabbox run`, which owns the SSH) → tear the box down.
+ * Acquisition is reuse-first against the warm profile pool (a ready box carrying
+ * the run's profile + netMode labels is reused and kept; `--fresh` opts out and
+ * always leases a new, torn-down box). The whole box-side sequence rides a
+ * single `--script-stdin` body so the token contents never touch argv.
  *
  * ── Command-layer contract (RUSH-1920/1921/1924) ─────────────────────────────
  * Exports the commands layer (exec.ts / lease.ts / ssh.ts) consumes:
@@ -12,7 +14,9 @@
  *     --bare) gates the `copy-setup` progress sentinel; `opts.netMode`
  *     ('public' | 'tailscale', default 'public') adds the `joined-tailnet` step.
  *   • `LeaseRunOptions.copySetup` / `LeaseRunOptions.netMode` — forwarded by
- *     `leaseAndRun` (netMode → `crabboxWarmup`).
+ *     `leaseAndRun` (netMode → `crabboxWarmup`). `LeaseRunOptions.fresh`
+ *     (`--fresh`) skips the warm profile-pool reuse check and always leases a
+ *     new box, torn down after the run.
  *   • `crabboxWarmup(opts.netMode)` — 'tailscale' leases onto the tailnet
  *     (`--network tailscale -tailscale-tags tag:crabbox`); auth key rides the
  *     child env as `CRABBOX_TAILSCALE_AUTH_KEY` (crabboxEnv, cli.ts).
@@ -26,7 +30,7 @@
  */
 
 import type { AgentId } from '../types.js';
-import { crabboxFind, crabboxWarmup, crabboxWaitReady, crabboxRunScript, crabboxStop, type CrabboxBox } from './cli.js';
+import { crabboxFind, crabboxList, crabboxStatusReady, crabboxWarmup, crabboxWaitReady, crabboxRunScript, crabboxStop, poolReusableBoxes, type CrabboxBox } from './cli.js';
 import * as yaml from 'yaml';
 import { buildCredentialScript, buildHomeFileWriteScript, CLAUDE_TOKEN_REMOTE, type DetectedRuntime } from './runtimes.js';
 import { LEASE_AGENT_MARKER, leasePhaseSentinel } from './progress.js';
@@ -78,6 +82,12 @@ export interface LeaseRunOptions {
   keep?: boolean;
   /** Existing warm crabbox slug to reuse instead of provisioning a new lease. */
   reuseBox?: string;
+  /**
+   * Force a brand-new box: skip the warm profile-pool reuse check and tear the
+   * box down after the run (the pre-pool `--lease` behavior). `--fresh` at the
+   * command layer.
+   */
+  fresh?: boolean;
   /**
    * Raw wrapped Claude OAuth payload (from `resolveClaudeCredentialsBlob`), written
    * to `~/.claude/.credentials.json` on the box. The command layer resolves it
@@ -230,9 +240,32 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
     .join('\n');
 }
 
+/**
+ * The first warm box in this run's profile pool that is actually SSH-ready, or
+ * null. Mirrors scripts/sandbox.sh's `pick_ready_box`: list the running boxes
+ * for the run's profile + netMode, then gate each on `crabbox status`
+ * ready=true — a box whose bootstrap failed still lists as `running` and would
+ * burn the whole SSH wait before hard-failing. A skipped box is left alone
+ * (never stopped): a concurrent run may be mid-boot on it, and crabbox's idle
+ * timeout reaps genuine duds.
+ */
+function pickReadyPoolBox(opts: LeaseRunOptions): CrabboxBox | null {
+  const candidates = poolReusableBoxes(crabboxList({ secretsBundle: opts.secretsBundle }), {
+    profile: opts.profile,
+    netMode: opts.netMode,
+  });
+  for (const b of candidates) {
+    if (crabboxStatusReady(b.slug, { secretsBundle: opts.secretsBundle })) return b;
+  }
+  return null;
+}
+
 export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult> {
   const startedAt = Date.now();
   let box: CrabboxBox;
+  // A box this run did NOT provision — either the caller named it (`--box`) or
+  // it came out of the warm profile pool. Reused boxes are never torn down.
+  let reused = false;
   if (opts.reuseBox) {
     opts.onPhase?.({ kind: 'reuse', slug: opts.reuseBox });
     const found = crabboxFind(opts.reuseBox, { secretsBundle: opts.secretsBundle });
@@ -240,16 +273,27 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
     box = found.ready
       ? found
       : await crabboxWaitReady(opts.reuseBox, { secretsBundle: opts.secretsBundle });
+    reused = true;
   } else {
-    opts.onPhase?.({ kind: 'warmup', backend: opts.backend });
-    box = await crabboxWarmup({
-      class: opts.boxClass,
-      profile: opts.profile,
-      provider: opts.backend,
-      secretsBundle: opts.secretsBundle,
-      netMode: opts.netMode,
-    });
-    await crabboxWaitReady(box.slug, { secretsBundle: opts.secretsBundle });
+    // Reuse-first: before paying for a fresh lease, look for a warm box in this
+    // run's profile pool (same profile label the warmup would use, same netMode).
+    // `--fresh` opts out and always provisions.
+    const pooled = opts.fresh ? null : pickReadyPoolBox(opts);
+    if (pooled) {
+      opts.onPhase?.({ kind: 'reuse', slug: pooled.slug });
+      box = pooled;
+      reused = true;
+    } else {
+      opts.onPhase?.({ kind: 'warmup', backend: opts.backend });
+      box = await crabboxWarmup({
+        class: opts.boxClass,
+        profile: opts.profile,
+        provider: opts.backend,
+        secretsBundle: opts.secretsBundle,
+        netMode: opts.netMode,
+      });
+      await crabboxWaitReady(box.slug, { secretsBundle: opts.secretsBundle });
+    }
   }
   opts.onPhase?.({ kind: 'ready', box, elapsedMs: Date.now() - startedAt });
 
@@ -282,8 +326,9 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
     });
   } finally {
     // Always attempt teardown (bounds credential lifetime to the run) unless the
-    // caller explicitly asked to keep the box or targeted an existing warm box.
-    if (!opts.keep && !opts.reuseBox) {
+    // caller explicitly asked to keep the box or the box was reused (an explicit
+    // --box target or a warm pool box — both outlive this run).
+    if (!opts.keep && !reused) {
       opts.onPhase?.({ kind: 'teardown' });
       toreDown = crabboxStop(box.slug, { secretsBundle: opts.secretsBundle });
     }

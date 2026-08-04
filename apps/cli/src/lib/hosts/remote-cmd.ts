@@ -135,6 +135,7 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   lease: 'local-only',
   box: 'local-only',
   keepBox: 'local-only',
+  fresh: 'local-only', // skips the warm-pool reuse for --lease; the lease path is always local
   reuse: 'local-only', // reuse-picker choice for --lease; the lease path is always local
   bare: 'local-only', // skips the local setup-copy push; lease-only concern
   tailscale: 'local-only', // --tailscale/--no-tailscale gate the lease net mode; never forwarded

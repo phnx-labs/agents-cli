@@ -15,6 +15,7 @@
 import { spawn, spawnSync } from 'child_process';
 import { readAndResolveBundleEnv, isHeadlessSecretsContext, listBundles, bundleExists, type SecretsBundle } from '../secrets/bundles.js';
 import { readMeta, writeMeta } from '../state.js';
+import { DEFAULT_CRABBOX_PROFILE } from './config.js';
 
 /** A crabbox machine as reported by `crabbox list --json`. */
 export interface CrabboxBox {
@@ -294,6 +295,66 @@ export function crabboxList(opts: CrabboxOptions = {}): CrabboxBox[] {
 /** Find one box by slug, or null. */
 export function crabboxFind(slug: string, opts: CrabboxOptions = {}): CrabboxBox | null {
   return crabboxList(opts).find((b) => b.slug === slug) ?? null;
+}
+
+/**
+ * Whether `crabbox status` reports the box SSH-ready (`ready=true`). A box whose
+ * cloud-init bootstrap failed still LISTS as `running` but never becomes ready —
+ * selecting it burns the full SSH wait before hard-failing. `crabbox status`
+ * flips ready=true only once sshd answers, so warm-pool reuse gates on it
+ * (mirrors scripts/sandbox.sh's `box_ready`).
+ */
+export function crabboxStatusReady(slug: string, opts: CrabboxOptions = {}): boolean {
+  findCrabbox();
+  const r = spawnSync('crabbox', ['status', '--id', slug], {
+    encoding: 'utf-8',
+    env: crabboxEnv(opts),
+    timeout: opts.timeoutMs ?? 15000,
+  });
+  if (r.status !== 0 || !r.stdout) return false;
+  return /(^|\s)ready=true(\s|$)/m.test(r.stdout);
+}
+
+export interface PoolMatchOptions {
+  /**
+   * Profile label this run would warm a box with (from the repo's
+   * `.crabbox.yaml`; see config.ts). Both sides normalize an unset profile to
+   * DEFAULT_CRABBOX_PROFILE, so profile-less runs match unlabeled boxes.
+   */
+  profile?: string;
+  /**
+   * Network mode of the run (default 'public'). A tailnet-joined box is never
+   * handed to a public run, nor a public box to a tailnet run — reachability and
+   * exposure differ, so the pool is partitioned by it.
+   */
+  netMode?: 'public' | 'tailscale';
+  /** Injectable clock (unix seconds) for the expiry check. */
+  nowSecs?: number;
+}
+
+/**
+ * Warm boxes in the profile pool this run could reuse: `running`, same profile
+ * label, same network mode, lease unexpired — most-recently-touched first.
+ *
+ * Readiness is NOT required here (deliberately mirrors sandbox.sh's
+ * `running_slugs_for_profile`, which filters on `status` only): the list `state`
+ * label can lag, so the caller gates each candidate on `crabboxStatusReady`
+ * before committing. A not-ready box is skipped, never stopped — a concurrent
+ * run may be mid-boot on it, and crabbox's idle timeout reaps genuine duds.
+ */
+export function poolReusableBoxes(boxes: CrabboxBox[], opts: PoolMatchOptions = {}): CrabboxBox[] {
+  const profile = opts.profile ?? DEFAULT_CRABBOX_PROFILE;
+  const netMode = opts.netMode ?? 'public';
+  const nowSecs = opts.nowSecs ?? Math.floor(Date.now() / 1000);
+  return boxes
+    .filter((b) => {
+      if (b.status !== 'running') return false;
+      if ((b.profile ?? DEFAULT_CRABBOX_PROFILE) !== profile) return false;
+      const boxNet = b.tailscaleIPv4 || b.tailscaleFQDN ? 'tailscale' : 'public';
+      if (boxNet !== netMode) return false;
+      return b.expiresAt === null || b.expiresAt > nowSecs;
+    })
+    .sort((a, b) => (b.lastTouchedAt ?? 0) - (a.lastTouchedAt ?? 0));
 }
 
 export interface WarmupOptions extends CrabboxOptions {

@@ -307,6 +307,12 @@ the profile has no auth env of its own. `--box <slug>` targets an existing warm
 crabbox box instead of provisioning a disposable lease, so the same box can serve
 profile runs from different repositories and remains running after the command.
 
+`--lease` itself is reuse-first against the repo's profile pool: before leasing a
+new box it looks for a warm box carrying the same `profile` label (from the
+repo's `.crabbox.yaml`) and network mode that `crabbox status` reports
+SSH-ready, and reuses it (kept after the run) instead of paying for a fresh
+lease. `--fresh` opts out — always a brand-new box, torn down after the run.
+
 ## Demo
 
 <video autoplay loop muted playsinline width="100%" src="../assets/videos/profiles.mp4"></video>

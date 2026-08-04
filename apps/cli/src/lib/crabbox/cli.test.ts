@@ -9,8 +9,10 @@ import {
   pickLeaseBundleFromList,
   pickTailscaleBundleFromList,
   crabboxList,
+  crabboxStatusReady,
   crabboxWarmup,
   parseCrabboxSshArgv,
+  poolReusableBoxes,
   type CrabboxBox,
 } from './cli.js';
 import type { SecretsBundle } from '../secrets/bundles.js';
@@ -132,6 +134,111 @@ describe('reapSafeOrphans', () => {
 
   it('returns empty when nothing is reap-safe', () => {
     expect(reapSafeOrphans([box({ expiresAt: NOW + 1 })], NOW)).toEqual([]);
+  });
+});
+
+describe('poolReusableBoxes', () => {
+  // A pool-eligible baseline: running, unexpired, public net, no profile label.
+  const warm = (over: Partial<CrabboxBox> = {}): CrabboxBox =>
+    box({ expiresAt: NOW + 3_600, lastTouchedAt: NOW - 60, ...over });
+
+  it('matches a running, unexpired box on the same profile + netMode', () => {
+    const out = poolReusableBoxes([warm({ slug: 'a', profile: 'agents-cli' })], {
+      profile: 'agents-cli',
+      nowSecs: NOW,
+    });
+    expect(out.map((b) => b.slug)).toEqual(['a']);
+  });
+
+  it('normalizes an unset profile to default on BOTH sides (sandbox.sh parity)', () => {
+    // A run with no .crabbox.yaml profile matches a box with no profile label…
+    expect(poolReusableBoxes([warm({ slug: 'a' })], { nowSecs: NOW })).toHaveLength(1);
+    // …and a box crabbox explicitly labeled 'default'.
+    expect(
+      poolReusableBoxes([warm({ slug: 'b', profile: 'default' })], { nowSecs: NOW }),
+    ).toHaveLength(1);
+    // A box labeled 'default' does NOT match a named-profile run.
+    expect(
+      poolReusableBoxes([warm({ slug: 'c', profile: 'default' })], { profile: 'agents-cli', nowSecs: NOW }),
+    ).toHaveLength(0);
+  });
+
+  it('skips a box on a different profile', () => {
+    expect(
+      poolReusableBoxes([warm({ profile: 'other-repo' })], { profile: 'agents-cli', nowSecs: NOW }),
+    ).toEqual([]);
+  });
+
+  it('never hands a tailnet box to a public run, nor a public box to a tailnet run', () => {
+    const tailnet = warm({ slug: 'ts', tailscaleIPv4: '100.64.0.1' });
+    expect(poolReusableBoxes([tailnet], { nowSecs: NOW })).toEqual([]);
+    expect(poolReusableBoxes([tailnet], { netMode: 'tailscale', nowSecs: NOW })).toHaveLength(1);
+    const pub = warm({ slug: 'pub' });
+    expect(poolReusableBoxes([pub], { netMode: 'tailscale', nowSecs: NOW })).toEqual([]);
+  });
+
+  it('skips non-running and expired boxes', () => {
+    expect(poolReusableBoxes([warm({ status: 'off' })], { nowSecs: NOW })).toEqual([]);
+    expect(poolReusableBoxes([warm({ expiresAt: NOW - 1 })], { nowSecs: NOW })).toEqual([]);
+    // An unknown expiry is treated as live (same as reusableBoxes).
+    expect(poolReusableBoxes([warm({ expiresAt: null })], { nowSecs: NOW })).toHaveLength(1);
+  });
+
+  it('does not gate on the list `state` label — sshd readiness is the caller’s check', () => {
+    // sandbox.sh's running_slugs_for_profile filters on status only; a box whose
+    // state label lags is still a candidate, gated later by crabboxStatusReady.
+    const out = poolReusableBoxes([warm({ state: 'booting', ready: false })], { nowSecs: NOW });
+    expect(out).toHaveLength(1);
+  });
+
+  it('sorts most-recently-touched first', () => {
+    const out = poolReusableBoxes(
+      [warm({ slug: 'stale', lastTouchedAt: NOW - 900 }), warm({ slug: 'hot', lastTouchedAt: NOW - 5 })],
+      { nowSecs: NOW },
+    );
+    expect(out.map((b) => b.slug)).toEqual(['hot', 'stale']);
+  });
+});
+
+describePosix('crabboxStatusReady', () => {
+  function withStatusCrabbox(stdout: string, fn: () => void) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crabbox-status-'));
+    fs.writeFileSync(
+      path.join(dir, 'crabbox'),
+      [
+        '#!/bin/sh',
+        'case "$1" in',
+        '  --help) exit 0 ;;',
+        `  status) cat <<'EOF'\n${stdout}\nEOF\n    exit 0 ;;`,
+        '  *) exit 1 ;;',
+        'esac',
+      ].join('\n'),
+      'utf-8',
+    );
+    fs.chmodSync(path.join(dir, 'crabbox'), 0o755);
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${dir}${path.delimiter}${oldPath ?? ''}`;
+    try {
+      fn();
+    } finally {
+      process.env.PATH = oldPath;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('is true only when the status output carries ready=true', () => {
+    withStatusCrabbox('lease cbx_x\nready=true\nssh_port=2222\n', () => {
+      expect(crabboxStatusReady('x')).toBe(true);
+    });
+    withStatusCrabbox('lease cbx_x\nready=false\n', () => {
+      expect(crabboxStatusReady('x')).toBe(false);
+    });
+  });
+
+  it('does not match a ready=true substring inside another token', () => {
+    withStatusCrabbox('bootstrap_ready=true\nready=pending\n', () => {
+      expect(crabboxStatusReady('x')).toBe(false);
+    });
   });
 });
 

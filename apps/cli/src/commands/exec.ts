@@ -96,6 +96,7 @@ interface ExecCommandActionOptions {
   lease?: string | boolean; // --lease [backend]: true when bare, backend string when given
   box?: string; // --box <slug>: reuse an existing warm crabbox box
   keepBox?: boolean; // --keep-box: don't tear down the leased box after the run
+  fresh?: boolean; // --fresh: with --lease, skip the warm profile-pool reuse and always provision a new box
   reuse?: boolean; // --reuse: reuse the most-recently-used warm box if one exists
   bare?: boolean; // --bare: skip copying the local ~/.agents setup onto the box
   tailscale?: boolean; // --tailscale / --no-tailscale: tri-state net-mode override
@@ -818,13 +819,17 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--lease [backend]',
-      'Invent a disposable cloud box for this run and tear it down after (via crabbox). Optional backend selects the cloud (hetzner/aws/do). Unlike --host, no machine is registered.',
+      "Run on a cloud box (via crabbox) and tear it down after — reuses a warm box from the repo's profile pool when one is ready (--fresh forces a new box). Optional backend selects the cloud (hetzner/aws/do). Unlike --host, no machine is registered.",
     )
     .option(
       '--box <slug>',
       'Reuse an existing warm crabbox box for this run instead of provisioning a disposable --lease box.',
     )
     .option('--keep-box', 'With --lease, keep the box after the run instead of stopping it.')
+    .option(
+      '--fresh',
+      "With --lease, always provision a brand-new box (skip the warm profile-pool reuse) and tear it down after the run.",
+    )
     .option(
       '--reuse',
       'With --lease, reuse the most-recently-used warm box if one exists (else provision fresh). The scriptable form of the interactive reuse picker.',
@@ -886,6 +891,14 @@ export function registerRunCommand(program: Command): void {
 
       # Inject a keychain-backed secrets bundle
       agents run claude "deploy the worker" --secrets prod --mode edit
+
+      # Run on a cloud box — reuses a warm box from the repo's profile pool when
+      # one is ready (kept after the run), else leases a fresh box, torn down after
+      agents run claude "fix the failing tests" --lease
+
+      # Force a brand-new box (destroyed after), or target a warm box by slug
+      agents run claude "fix the failing tests" --lease --fresh
+      agents run claude "fix the failing tests" --box warm-one
 
       # Pass arbitrary native flags to the underlying CLI via -- separator
       agents run kimi -- --plan --some-kimi-option value
@@ -1088,6 +1101,14 @@ export function registerRunCommand(program: Command): void {
           console.error(chalk.red('Pass either --lease to provision a disposable box, or --box <slug> to reuse a warm box — not both.'));
           process.exit(1);
         }
+        if (options.fresh && options.box) {
+          console.error(chalk.red('--fresh forces a brand-new box; it cannot be combined with --box <slug> (which reuses one).'));
+          process.exit(1);
+        }
+        if (options.fresh && options.reuse) {
+          console.error(chalk.red('--fresh forces a brand-new box; it cannot be combined with --reuse.'));
+          process.exit(1);
+        }
         const backend = typeof options.lease === 'string' ? options.lease : undefined;
 
         // crabbox syncs this directory to the box via `git ls-files`; outside a
@@ -1119,23 +1140,32 @@ export function registerRunCommand(program: Command): void {
         // ── F3 reuse (RUSH-1922) + F5 net-mode (RUSH-1924) ───────────────────
         // Resolve which box this run targets and how it is networked BEFORE any
         // provisioning. `--box` is an explicit reuse; otherwise, on an
-        // interactive tty, offer the warm boxes as a reuse picker (headless /
-        // --json never blocks — it provisions fresh unless --reuse/--box).
+        // interactive tty, offer the warm boxes as a reuse picker. Headless runs
+        // never block: leaseAndRun itself is reuse-first against the profile
+        // pool (a ready pool box is reused; none ready → warm a fresh one).
+        // `--fresh` opts out of every reuse path.
         const leaseSecretsBundle = process.env.AGENTS_LEASE_SECRETS_BUNDLE;
         const nowSecs = Math.floor(Date.now() / 1000);
         let reuseSlug: string | undefined = options.box;
 
-        if (options.lease && !reuseSlug) {
+        // The profile this run's pool/box carries: the repo's .crabbox.yaml
+        // `profile:` when declared (what crabbox warmup would label a fresh box
+        // with), else crabbox's default. Passing it to leaseAndRun makes the
+        // pool-reuse match interchangeable with a fresh warmup.
+        const repoRoot = gitToplevel(leaseCwd);
+        const { readCrabboxRepoProfile } = await import('../lib/crabbox/config.js');
+        const poolProfile = repoRoot ? readCrabboxRepoProfile(repoRoot) : undefined;
+
+        if (options.lease && !reuseSlug && !options.fresh) {
           const { crabboxList } = await import('../lib/crabbox/cli.js');
           const { reusableBoxes, formatBoxRow } = await import('./lease.js');
           let warm: CrabboxBox[] = [];
           try {
             warm = reusableBoxes(crabboxList({ secretsBundle: leaseSecretsBundle }), nowSecs);
           } catch {
-            warm = []; // crabbox unavailable / no creds → just provision fresh
+            warm = []; // crabbox unavailable / no creds → the pool check in leaseAndRun decides
           }
 
-          const repoRoot = gitToplevel(leaseCwd);
           const alwaysFresh = repoRoot ? isAlwaysFreshRepo(readAlwaysFreshRepos(), repoRoot) : false;
 
           if (warm.length > 0 && !alwaysFresh) {
@@ -1165,7 +1195,8 @@ export function registerRunCommand(program: Command): void {
                 console.error(chalk.yellow('Selection cancelled — provisioning a fresh box.'));
               }
             }
-            // Headless with no --reuse falls through here → provision fresh.
+            // Headless with no --reuse falls through here → leaseAndRun's
+            // profile-pool check decides (reuse a ready pool box, else warm fresh).
           } else if (options.reuse && warm.length > 0) {
             // --reuse still honors a warm box even when the picker is suppressed.
             reuseSlug = warm[0].slug;
@@ -1284,12 +1315,16 @@ export function registerRunCommand(program: Command): void {
               : `${runtime} credentials`;
         const boxLifecycle = reuseSlug
           ? `Reusing crabbox box ${reuseSlug}`
-          : `Leasing a ${backend ?? 'hetzner'} box${netMode === 'tailscale' ? ' on your tailnet' : ''}`;
+          : options.fresh
+            ? `Leasing a fresh ${backend ?? 'hetzner'} box${netMode === 'tailscale' ? ' on your tailnet' : ''}`
+            : `Leasing a ${backend ?? 'hetzner'} box${netMode === 'tailscale' ? ' on your tailnet' : ''} (a ready box from the '${poolProfile ?? 'default'}' pool is reused when one exists)`;
         const boxAfterRun = reuseSlug
           ? 'the box is kept after the run'
           : options.keepBox
             ? 'the box is kept after the run'
-            : 'the box is destroyed after the run';
+            : options.fresh
+              ? 'the box is destroyed after the run'
+              : 'a fresh box is destroyed after the run; a reused pool box is kept';
         console.error(
           chalk.gray(
             `${boxLifecycle} · shipping ${whatShips}${credentialRuntimes.length > 0 && leaseEmail ? ` (${leaseEmail})` : ''}; ${boxAfterRun}.`,
@@ -1370,6 +1405,8 @@ export function registerRunCommand(program: Command): void {
             secretsBundle: leaseSecretsBundle,
             keep: options.keepBox,
             reuseBox: reuseSlug,
+            fresh: options.fresh,
+            profile: poolProfile,
             copySetup,
             netMode,
             onData: (chunk) => router.push(chunk),

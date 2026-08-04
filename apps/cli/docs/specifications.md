@@ -1512,7 +1512,7 @@ resume (`--resume`/`--session-id`/`--name`), tmux (`--raw`/`--no-tmux`/
 `--strategy`), `--acp`, budget (`--yes`), loop (`--loop`/
 `--resume-checkpoint`/`--max-iterations`/`--budget`/`--until`/`--interval`),
 and host/lease dispatch (`--host`/`--device`/`--remote-cwd`/`--no-follow`/
-`--any`/`--copy-creds`/`--lease`/`--box`/`--keep-box`/`--reuse`/`--bare`/
+`--any`/`--copy-creds`/`--lease`/`--box`/`--keep-box`/`--fresh`/`--reuse`/`--bare`/
 `--tailscale`).
 
 #### 4.2 Exit code contract (STABLE)
