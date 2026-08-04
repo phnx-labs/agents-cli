@@ -122,7 +122,20 @@ const CLAUDE_SCOPES = [
   'user:file_upload',
 ];
 const CLAUDE_KEYCHAIN_SERVICE = 'Claude Code-credentials';
-const getClaudeUsageCachePath = () => path.join(getCacheDir(), 'claude-usage.json');
+
+/**
+ * Test seam for the usage cache path, mirroring `setUsageBackoffDirForTest`.
+ * `getCacheDir()` resolves from a module-level constant captured at import, so
+ * overriding `HOME` in a test does NOT redirect this cache — it would write into
+ * the developer's real `~/.agents/.cache/`. Point it at a tmpdir instead.
+ */
+let claudeUsageCachePathOverride: string | null = null;
+export function setClaudeUsageCachePathForTest(cachePath: string | null): string | null {
+  const prev = claudeUsageCachePathOverride;
+  claudeUsageCachePathOverride = cachePath;
+  return prev;
+}
+const getClaudeUsageCachePath = () => claudeUsageCachePathOverride ?? path.join(getCacheDir(), 'claude-usage.json');
 const CACHED_CLAUDE_USAGE_SOURCE_LABEL = 'last seen live account data';
 
 const KIMI_USAGES_URL = 'https://api.kimi.com/coding/v1/usages';
@@ -348,7 +361,7 @@ export function agentReportsUsage(agentId: AgentId): boolean {
 /** Fetch usage info for all unique accounts in parallel, keyed by usage key. */
 export async function getUsageInfoByIdentity(
   inputs: UsageIdentityInput[],
-  opts?: { forceRefresh?: boolean; maxAgeMs?: number }
+  opts?: { forceRefresh?: boolean; maxAgeMs?: number; readOnly?: boolean }
 ): Promise<{
   canonicalByUsageKey: Map<string, AccountInfo>;
   usageByKey: Map<string, UsageInfo>;
@@ -404,10 +417,11 @@ const inFlightRefreshes = new Map<string, Promise<void>>();
  */
 export async function getUsageInfoForIdentity(
   input: UsageIdentityInput,
-  opts?: { forceRefresh?: boolean; maxAgeMs?: number }
+  opts?: { forceRefresh?: boolean; maxAgeMs?: number; readOnly?: boolean }
 ): Promise<UsageInfo> {
   const usageKey = getUsageLookupKey(input.info);
   const forceRefresh = opts?.forceRefresh === true;
+  const readOnly = opts?.readOnly === true;
 
   // Agents whose registered usage source makes a live network call go
   // through the stale-while-revalidate cache below so `agents run`/`agents view`
@@ -427,6 +441,22 @@ export async function getUsageInfoForIdentity(
 
   const cached = readClaudeUsageCache(usageKey);
   const ageMs = cached?.capturedAt ? Date.now() - cached.capturedAt.getTime() : Infinity;
+
+  // `readOnly` (the `agents run` routing hot path): serve the cache and NEVER
+  // touch the network — not even a background refresh. `collectRunCandidates`
+  // used to pass a 5-minute `maxAgeMs`, which made a snapshot older than that
+  // fall through to the blocking live fetch below (getUsageInfo → provider HTTP),
+  // adding one round trip per account to `agents run` cold-start on a box whose
+  // cache had gone stale. The daemon now owns keeping this cache fresh
+  // (`runUsageRefresh`, adaptive + rate-capped), so the router only ever reads
+  // it. A stale-or-absent snapshot is handled downstream by the router's own
+  // freshness guard (`isUsageVerified` in rotate.ts), which routes around a
+  // number it can't confirm rather than trusting an old one — so returning a
+  // stale snapshot here is safe, and an absent one reports `'stale'`.
+  if (readOnly) {
+    if (cached) return { snapshot: cached, error: null };
+    return { snapshot: null, error: 'stale' };
+  }
 
   // `--refresh` (forceRefresh) skips both cache short-circuits and blocks on a
   // live fetch below, so `agents view --refresh` repopulates every account we can

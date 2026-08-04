@@ -435,12 +435,16 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
     })
   );
 
-  // These candidates feed a routing decision, so cap how stale their usage may
-  // be (see USAGE_DECISION_MAX_AGE_MS). Past that the fetch blocks on a live
-  // read instead of serving the cache — one bounded, parallel round trip per
-  // account, and none at all inside the 2-minute fresh window that back-to-back
-  // launches hit. A failed read still falls back to the cache; the pick then
-  // routes around it via isUsageVerified rather than trusting the old number.
+  // These candidates feed a routing decision on the `agents run` hot path, so
+  // this read is CACHE-ONLY (`readOnly`): it never blocks on a live provider
+  // fetch. A snapshot older than USAGE_DECISION_MAX_AGE_MS is not trusted for
+  // the pick — but the guard that enforces that is `isUsageVerified` below, not
+  // a blocking refresh here. Keeping the cache fresh is the daemon's job
+  // (`runUsageRefresh`, adaptive + rate-capped, sole-writer per local account),
+  // so a cold `agents run` reads the last daemon-written snapshot instead of
+  // stalling on N parallel HTTP round trips (the measured cold-start stall this
+  // removes). A stale-or-absent snapshot routes as unverified, exactly as a
+  // failed live read did before.
   const { usageByKey } = await getUsageInfoByIdentity(
     rows.map(({ home, info, version }) => ({
       agentId: agent,
@@ -448,7 +452,7 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
       cliVersion: version,
       info,
     })),
-    { maxAgeMs: USAGE_DECISION_MAX_AGE_MS }
+    { readOnly: true }
   );
 
   return rows.map(({ home: _home, info, ...candidate }) => {
