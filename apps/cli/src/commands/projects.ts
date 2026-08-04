@@ -45,7 +45,7 @@ import {
 } from '../lib/projects.js';
 import {
   rollupSessionsByProject,
-  planPct,
+  liveDeadSplit,
   enrichProjectSignals,
   formatProjectMembers,
   type ProjectSessionRollup,
@@ -223,6 +223,38 @@ export function formatMilestoneDue(targetDate: string, nowMs: number): string | 
   return `due ${label}`;
 }
 
+/**
+ * The milestone block. `status` prints one line — the next checkpoint — because
+ * a roll-up across projects has to stay scannable. `view` prints every declared
+ * milestone, because "how many are there and when are they due" is the shape of
+ * the plan and the reason to open one project.
+ *
+ * Pure (chalk only) so the layout is testable without a Linear account.
+ */
+export function formatMilestoneLines(
+  milestones: LinearMilestone[],
+  next: LinearMilestone | undefined,
+  nowMs: number,
+  limit: number,
+): string[] {
+  if (milestones.length === 0) {
+    // `next` without a list only happens on a cached answer written before the
+    // list existed; render what we have rather than dropping the row.
+    return next ? [`  ${chalk.dim('next')}     ${formatNextMilestone(next, nowMs)}`] : [];
+  }
+  const shown = milestones.slice(0, Math.max(1, limit));
+  const out = shown.map((m, i) => {
+    const isNext = next && m.name === next.name;
+    const label = i === 0 ? (isNext ? 'next' : 'plan') : '';
+    return `  ${chalk.dim(label.padEnd(4))}     ${formatNextMilestone(m, nowMs)}`;
+  });
+  const rest = milestones.length - shown.length;
+  if (rest > 0) {
+    out.push(`  ${' '.repeat(4)}     ${chalk.dim(`+${rest} more milestone${rest === 1 ? '' : 's'} — agents projects view <name>`)}`);
+  }
+  return out;
+}
+
 /** The `next` card line: what this project is due to hit, and how far along it is. */
 export function formatNextMilestone(ms: LinearMilestone, nowMs: number): string {
   const parts = [chalk.bold(ms.name)];
@@ -245,9 +277,12 @@ function statusBar(r: ProjectSessionRollup): string {
   push(r.byStatus.queued, 'queued', chalk.gray);
   const shown =
     (r.byStatus.running ?? 0) + (r.byStatus.idle ?? 0) + (r.byStatus.input_required ?? 0) + (r.byStatus.queued ?? 0);
-  // Sessions in a non-live state (orphaned/crashed/unknown) count toward the
-  // headline — render the remainder so the bar never sums to less than it.
-  if (r.agents > shown) parts.push(chalk.gray(`+${r.agents - shown} other`));
+  // The remainder is the LIVE sessions in a state without its own chip
+  // (orphaned, unknown). Dead ones are on their own row now, so counting them
+  // here made the line disagree with the headline — `19 live` beside
+  // `+24 other`, which invites the reader to trust neither.
+  const live = liveDeadSplit(r.byStatus).live;
+  if (live > shown) parts.push(chalk.gray(`+${live - shown} other`));
   return parts.join(' · ') || chalk.gray('no live agents');
 }
 
@@ -258,13 +293,23 @@ function renderCard(
   fleet?: HostWorkspaceStatus[],
   linear?: LinearProjectCounts,
   nowMs: number = Date.now(),
+  /** How many milestones to print. `status` shows the next one; `view` shows all. */
+  milestoneLimit: number = 1,
 ): void {
-  const agents = r?.agents ?? 0;
-  const pct = r ? planPct(r.plan) : undefined;
-  const planStr = pct === undefined ? '' : `  ·  ${chalk.cyan(`${pct}% plan`)}`;
-  console.log(`${chalk.bold(def.name)}  ${chalk.dim('·')}  ${chalk.bold(`${agents} agents`)}${planStr}`);
+  // The headline counts LIVE agents. It used to be every matched session, which
+  // read `39 agents` on a project where 19 had crashed. `planPct` used to sit
+  // here too and is gone: it summed each session's latest checklist snapshot,
+  // so one agent opening a fresh 40-item plan rendered the whole project `0%`.
+  const split = r ? liveDeadSplit(r.byStatus) : { live: 0, dead: 0, deadByStatus: [] };
+  console.log(`${chalk.bold(def.name)}  ${chalk.dim('·')}  ${chalk.bold(`${split.live} live`)}`);
   if (def.description) console.log(`  ${chalk.dim(def.description)}`);
   console.log(`  ${chalk.dim('live')}     ${r ? statusBar(r) : chalk.gray('no live agents')}`);
+  if (split.dead > 0) {
+    // Wreckage is worth a number of its own — 19 crashed sessions is a thing to
+    // go fix, not a throughput signal to fold into the headline.
+    const detail = split.deadByStatus.map((d) => `${d.n} ${d.status}`).join(', ');
+    console.log(`  ${chalk.dim('dead')}     ${chalk.yellow(`${split.dead} finished or lost`)} ${chalk.dim(`(${detail})`)}`);
+  }
   if (r && r.members.length) console.log(`  ${chalk.dim('agents')}   ${formatProjectMembers(r.members)}`);
   const ships: string[] = [];
   if (remote?.mergedPrs) {
@@ -277,8 +322,8 @@ function renderCard(
   if (linear) {
     console.log(`  ${chalk.dim('linear')}   ${linear.done}/${linear.total}${linear.truncated ? '+' : ''} done · ${linear.inProgress} in progress`);
   }
-  if (linear?.nextMilestone) {
-    console.log(`  ${chalk.dim('next')}     ${formatNextMilestone(linear.nextMilestone, nowMs)}`);
+  for (const line of formatMilestoneLines(linear?.milestones ?? [], linear?.nextMilestone, nowMs, milestoneLimit)) {
+    console.log(line);
   }
   if (r && r.tickets.length) {
     console.log(`  ${chalk.dim('tickets')}  ${r.tickets.slice(0, 8).join(' · ')}${r.tickets.length > 8 ? ' …' : ''}`);
@@ -442,17 +487,25 @@ export function registerProjectsCommands(program: Command): void {
 
   // ---- show ----
   projects
-    .command('show <name>')
-    .description('Show a project definition, resolved paths, repos, contexts, and links.')
+    .command('view <name>')
+    .alias('show')
+    .description('Show a project definition, resolved paths, repos, contexts, links, and milestones.')
     .option('--json', 'Machine-readable output')
-    .action((name: string, opts: { json?: boolean }) => {
+    .option('--no-remote', 'Skip the Linear lookup; definition only')
+    .action(async (name: string, opts: { json?: boolean; remote?: boolean }) => {
       const def = loadProjectDef(name);
       if (!def) {
         console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
         process.exit(1);
       }
+      // Every milestone the project declares, not just the next one — the whole
+      // point of opening ONE project is to see the shape of its plan.
+      const counts =
+        opts.remote !== false && def.linear?.projectId
+          ? await fetchLinearProjectCounts(def.linear.projectId)
+          : undefined;
       if (opts.json) {
-        console.log(JSON.stringify(def, null, 2));
+        console.log(JSON.stringify({ ...def, linear: { ...def.linear, ...(counts ?? {}) } }, null, 2));
         return;
       }
       console.log(chalk.bold(def.name) + (def.description ? chalk.dim(`  — ${def.description}`) : ''));
@@ -464,6 +517,24 @@ export function registerProjectsCommands(program: Command): void {
       for (const i of def.integrations ?? []) console.log(`  ${i.kind.padEnd(12)} ${i.url}${i.label ? chalk.dim(`  (${i.label})`) : ''}`);
       if (def.linear?.url || def.linear?.projectId) console.log(`  linear       ${def.linear.url ?? def.linear.projectId}`);
       for (const d of def.docs ?? []) console.log(`  doc          ${d}`);
+      if (counts) {
+        const staleNote = counts.stale ? chalk.dim('  (cached)') : '';
+        console.log(`  issues       ${counts.done}/${counts.total}${counts.truncated ? '+' : ''} done · ${counts.inProgress} in progress${staleNote}`);
+      }
+      const ms = counts?.milestones ?? [];
+      if (ms.length) {
+        console.log(`  ${chalk.bold('milestones')}`);
+        for (const m of ms) {
+          const mark = m.name === counts?.nextMilestone?.name ? chalk.cyan('next') : '';
+          console.log(`    ${mark.padEnd(6)}     ${formatNextMilestone(m, Date.now())}`);
+        }
+        // A milestone nothing is filed against cannot report progress. Say that
+        // once, plainly, rather than printing a row of silent 0%s.
+        const unfiled = ms.filter((m) => m.total === 0).length;
+        if (unfiled === ms.length) {
+          console.log(`    ${chalk.yellow('!')}          ${chalk.yellow(`no issues are assigned to any milestone — progress against them cannot be measured`)}`);
+        }
+      }
       console.log(chalk.gray(`  ${projectDefPath(name)}`));
     });
 
@@ -574,7 +645,8 @@ export function registerProjectsCommands(program: Command): void {
                 byStatus: r?.byStatus ?? {},
                 members: r?.members ?? [],
                 plan: r?.plan ?? { done: 0, total: 0 },
-                planPct: r ? planPct(r.plan) ?? null : null,
+                live: r ? liveDeadSplit(r.byStatus).live : 0,
+                dead: r ? liveDeadSplit(r.byStatus).dead : 0,
                 openPrs: r?.openPrs ?? [],
                 mergedPrs: rem?.mergedPrs ?? 0,
                 latestRelease: rem?.latestRelease ?? null,
