@@ -1227,11 +1227,25 @@ describe('installVersion', () => {
     }
   });
 
-  it('gracefully redirects a version-pinned external install to the current release (RUSH-1321)', async () => {
+  it.skipIf(IS_WINDOWS)('gracefully redirects a version-pinned external install to the current release (RUSH-1321)', async () => {
     // A self-updating agent (no VERSION token in the installer) can't pin. A
     // network-free `true` installer stands in for the real curl/brew script.
+    // A stub `agy` (antigravity's actual cliCommand — NOT the agent id) on
+    // PATH lets the post-install version probe resolve for real (RUSH-1321's
+    // own follow-up fix: installVersion no longer tolerates an unresolvable
+    // probe by silently falling back to the literal string 'latest' — see
+    // relocateGrokBinaryToVersionHome).
     const original = AGENTS.antigravity.installScript;
     AGENTS.antigravity.installScript = 'true';
+
+    const fakeBinDir = path.join(TEST_ROOT, 'fakebin');
+    fs.mkdirSync(fakeBinDir, { recursive: true });
+    const stub = path.join(fakeBinDir, 'agy');
+    fs.writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "antigravity 1.9.9"; exit 0; fi\nexit 0\n', 'utf-8');
+    fs.chmodSync(stub, 0o755);
+
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${fakeBinDir}${path.delimiter}${originalPath}`;
 
     try {
       const result = await installVersion('antigravity', '1.2.3');
@@ -1239,11 +1253,13 @@ describe('installVersion', () => {
       // No longer a hard `does not support version-pinned installs` error — the
       // pin is redirected to installing the current release.
       expect(result.success).toBe(true);
+      expect(result.installedVersion).toBe('1.9.9'); // the live version, not the ignored pin
       expect(result.error ?? '').not.toContain('does not support version-pinned installs');
       // The ignored `1.2.3` pin did NOT create a fictional `1.2.3` version dir.
       expect(fs.existsSync(path.join(AGENTS_DIR, 'versions', 'antigravity', '1.2.3'))).toBe(false);
     } finally {
       AGENTS.antigravity.installScript = original;
+      process.env.PATH = originalPath;
     }
   });
 });
