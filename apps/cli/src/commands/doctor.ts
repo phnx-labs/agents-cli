@@ -1386,6 +1386,11 @@ export function registerDoctorCommand(program: Command): void {
       # Overview: CLI availability + sync status + orphans across all defaults
       agents doctor
 
+      # Machine-readable overview (served from a ~90s cache for pollers like the
+      # menu-bar helper); --refresh recomputes live and refreshes that cache
+      agents doctor --json
+      agents doctor --json --refresh
+
       # Full per-resource report for the active default
       agents doctor claude@default
 

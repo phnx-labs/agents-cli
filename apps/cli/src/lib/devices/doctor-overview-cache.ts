@@ -14,31 +14,44 @@
  *
  * The fix mirrors the {@link readStatsCache}/`writeStatsCache` mirror-file
  * convention: reads are cache-first, and when a live compute IS needed exactly
- * ONE runs at a time (a lock-directory singleflight). Concurrent callers serve
- * the winner's fresh result — or the last snapshot — instead of each launching
- * their own fan-out. N pollers → 1 compute.
+ * ONE runs at a time. The singleflight is the shared `proper-lockfile` lock (via
+ * `ensureLockTarget` + `lockfile.lock`) — the SAME battle-tested lock the rest of
+ * the CLI uses (fs-atomic.ts) — which owns two things a hand-rolled lock got
+ * wrong: (1) it auto-refreshes the lock's mtime on a timer while held, so a live
+ * computer whose compute runs for minutes is never mistaken for a crashed one
+ * and stolen; (2) `release()` only ever releases the lock THIS caller acquired,
+ * so a slow computer can't delete a successor's lock. Waiters block on the lock
+ * up to a bounded budget, then serve the last snapshot rather than pile on.
  *
- * The lock is a directory (`mkdir` is atomic across processes) with an mtime
- * staleness steal, so a computer that dies without releasing never wedges the
- * gate. The cache write is tmp+rename so a concurrent reader never sees a
- * partial file. All IO is best-effort: a failure degrades to a live compute,
- * never a throw.
+ * The cache write is tmp+rename so a concurrent reader never sees a partial file.
+ * All IO is best-effort: a failure degrades to a live compute, never a throw.
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import lockfile from 'proper-lockfile';
 
 import { getCacheDir } from '../state.js';
+import { ensureLockTarget } from '../fs-atomic.js';
 
 const CACHE_FILE = '.doctor-overview.json';
-const LOCK_DIR = '.doctor-overview.lock';
+const LOCK_TARGET_FILE = '.doctor-overview.lock-target';
 
 /** Serve a cached snapshot without recomputing while it is younger than this. */
 export const DOCTOR_OVERVIEW_FRESH_MS = 90_000;
-/** A lock directory older than this is assumed abandoned and stolen. */
-const LOCK_STALE_MS = 120_000;
-/** A caller that lost the race waits at most this long for the winner's write. */
-const WAIT_TIMEOUT_MS = 12_000;
-const WAIT_POLL_MS = 250;
+/**
+ * A held lock older than this is treated as a crashed computer and broken. The
+ * lock's mtime is auto-refreshed by proper-lockfile every `stale/2` while a live
+ * computer holds it (the event loop turns during the compute's `await`ed
+ * subprocess spawns), so this only ever breaks a genuinely dead holder.
+ */
+const LOCK_STALE_MS = 60_000;
+/**
+ * How long a waiter blocks on the lock before giving up and serving the last
+ * snapshot. Sized to comfortably exceed a slow (multi-second-to-minutes) compute
+ * so a waiter normally gets the winner's fresh write; capped so a truly wedged
+ * holder never hangs the CLI (it serves stale instead).
+ */
+const LOCK_RETRIES = { retries: 240, factor: 1, minTimeout: 500, maxTimeout: 500 } as const;
 
 interface CacheFile {
   version: 1;
@@ -52,15 +65,10 @@ export interface DoctorOverviewCacheDeps {
   dir?: string;
   /** Clock (default: {@link Date.now}). */
   now?: () => number;
-  /** Async sleep (default: real setTimeout). */
-  sleep?: (ms: number) => Promise<void>;
 }
 
 function cachePath(dir: string): string {
   return path.join(dir, CACHE_FILE);
-}
-function lockPath(dir: string): string {
-  return path.join(dir, LOCK_DIR);
 }
 
 /** Read the last snapshot (best-effort; missing/corrupt/wrong-version → null). */
@@ -98,54 +106,13 @@ export function writeDoctorOverviewCache(payload: unknown, deps: DoctorOverviewC
  * Result of {@link enterDoctorOverviewGate}.
  *  - `cached` non-null → the caller MUST print this string and return; no compute.
  *  - `cached` null     → the caller holds the singleflight lock: compute the
- *    overview, call {@link writeDoctorOverviewCache}, and invoke `release()`
- *    exactly on the way out (idempotent; call it in a `finally`).
+ *    overview, call {@link writeDoctorOverviewCache}, and invoke `release()` on
+ *    the way out. Call `release()` in a `finally` so a compute that throws still
+ *    frees the lock promptly (idempotent).
  */
 export interface OverviewGate {
   cached: string | null;
   release?: () => void;
-}
-
-function makeRelease(lp: string): () => void {
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    try {
-      fs.rmdirSync(lp);
-    } catch {
-      // already gone / stolen — nothing to do
-    }
-  };
-}
-
-/** Try to become the sole computer. Steals a lock older than {@link LOCK_STALE_MS}. */
-function tryAcquireLock(lp: string, now: () => number): boolean {
-  try {
-    fs.mkdirSync(lp);
-    return true;
-  } catch {
-    // Lock exists — steal it only if abandoned (stale mtime).
-    try {
-      const age = now() - fs.statSync(lp).mtimeMs;
-      if (age > LOCK_STALE_MS) {
-        try {
-          fs.rmdirSync(lp);
-        } catch {
-          /* raced with another stealer */
-        }
-        try {
-          fs.mkdirSync(lp);
-          return true;
-        } catch {
-          return false;
-        }
-      }
-    } catch {
-      // stat failed (lock vanished under us) — let the caller retry via the loop
-    }
-    return false;
-  }
 }
 
 /**
@@ -154,11 +121,12 @@ function tryAcquireLock(lp: string, now: () => number): boolean {
  *
  * Contract:
  *  - Fresh snapshot present (and not `forceRefresh`) → `{ cached }`, no lock.
- *  - Otherwise exactly one concurrent caller gets `{ cached: null, release }`
- *    and everyone else is served the winner's fresh write (or, if the winner is
- *    slow past {@link WAIT_TIMEOUT_MS}, the last snapshot) rather than launching
- *    their own compute.
- *  - Never throws: any IO failure degrades to a compute token.
+ *  - Otherwise exactly one caller holds the lock and gets `{ cached: null,
+ *    release }`; everyone else blocks on the lock, then (on acquiring it)
+ *    double-checks and serves the winner's fresh write — or, if the winner runs
+ *    past the wait budget, serves the last snapshot — rather than recomputing.
+ *  - Never throws: any IO/lock failure degrades to a compute token or a served
+ *    snapshot.
  */
 export async function enterDoctorOverviewGate(
   opts: { forceRefresh?: boolean; freshMs?: number } = {},
@@ -166,50 +134,65 @@ export async function enterDoctorOverviewGate(
 ): Promise<OverviewGate> {
   const dir = deps.dir ?? getCacheDir();
   const now = deps.now ?? Date.now;
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const freshMs = opts.freshMs ?? DOCTOR_OVERVIEW_FRESH_MS;
-  const lp = lockPath(dir);
+
+  const serveFresh = (): string | null => {
+    if (opts.forceRefresh) return null;
+    const c = readDoctorOverviewCache({ dir });
+    if (c && now() - c.fetchedAt < freshMs) return JSON.stringify(c.payload, null, 2);
+    return null;
+  };
 
   // 1. Fast path: a fresh snapshot serves without any compute or lock.
-  if (!opts.forceRefresh) {
-    const c = readDoctorOverviewCache({ dir });
-    if (c && now() - c.fetchedAt < freshMs) return { cached: JSON.stringify(c.payload, null, 2) };
-  }
+  const fast = serveFresh();
+  if (fast !== null) return { cached: fast };
 
   try {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   } catch {
-    // If we can't even make the cache dir, fall back to an unguarded compute.
+    // Can't even make the cache dir — fall back to an unguarded compute.
     return { cached: null, release: () => {} };
   }
 
-  // 2. Singleflight: win the lock → compute; lose → wait for the winner.
-  if (tryAcquireLock(lp, now)) return { cached: null, release: makeRelease(lp) };
+  const lockTarget = path.join(dir, LOCK_TARGET_FILE);
+  ensureLockTarget(lockTarget);
 
-  const startedAt = now();
-  const deadline = startedAt + WAIT_TIMEOUT_MS;
-  while (now() < deadline) {
-    await sleep(WAIT_POLL_MS);
+  // 2. Singleflight via proper-lockfile: one caller holds the lock and computes;
+  //    the rest block here until it releases.
+  let release: (() => Promise<void>) | null = null;
+  try {
+    release = await lockfile.lock(lockTarget, {
+      stale: LOCK_STALE_MS,
+      retries: LOCK_RETRIES,
+      // A peer broke our lock (only possible if we somehow went stale). Don't
+      // crash on the async callback; we re-check the cache and serve/recompute.
+      onCompromised: () => {},
+    });
+  } catch {
+    // 3. Winner held the lock past our wait budget. Serve the last snapshot
+    //    (even if stale) rather than pile on; only if there is genuinely none do
+    //    we compute unguarded (rare cold-start under sustained load).
     const c = readDoctorOverviewCache({ dir });
-    // Accept only a write the winner made AFTER we began waiting.
-    if (c && c.fetchedAt >= startedAt) return { cached: JSON.stringify(c.payload, null, 2) };
-    // Winner may have died without writing → its lock goes stale → take over.
-    if (tryAcquireLock(lp, now)) return { cached: null, release: makeRelease(lp) };
+    if (c) return { cached: JSON.stringify(c.payload, null, 2) };
+    return { cached: null, release: () => {} };
   }
 
-  // 3. Winner is slow. Serve the last snapshot (stale) rather than pile on; if
-  //    there is genuinely none, force the lock and compute as a last resort.
-  const stale = readDoctorOverviewCache({ dir });
-  if (stale) return { cached: JSON.stringify(stale.payload, null, 2) };
-  try {
-    fs.rmdirSync(lp);
-  } catch {
-    /* already gone */
+  // 4. Acquired. The winner may have written a fresh snapshot while we waited —
+  //    serve it and release, instead of recomputing.
+  const afterWait = serveFresh();
+  if (afterWait !== null) {
+    void release();
+    return { cached: afterWait };
   }
-  try {
-    fs.mkdirSync(lp);
-  } catch {
-    /* someone else grabbed it — compute unguarded rather than hang */
-  }
-  return { cached: null, release: makeRelease(lp) };
+
+  const rel = release;
+  let released = false;
+  return {
+    cached: null,
+    release: () => {
+      if (released) return;
+      released = true;
+      void rel();
+    },
+  };
 }
