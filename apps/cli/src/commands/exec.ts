@@ -664,7 +664,7 @@ export function registerRunCommand(program: Command): void {
     .description('Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively.')
     .option('-m, --mode <mode>', 'How much the agent can do: plan (read-only), edit (can write files), auto (smart classifier auto-approves safe ops, prompts for risky), skip (bypass all permission prompts). \'full\' accepted as alias for skip.', 'plan')
     .option('-e, --effort <effort>', 'Reasoning effort: low | medium | high | xhigh | max | auto (claude and codex only)', 'auto')
-    .option('--model <model>', 'Override the model directly (e.g., claude-opus-4-6)')
+    .option('--model <model>', 'Cost tier (cheap|default|best|ultra) or a concrete model id; tiers resolve per harness+version to a supported model')
     .option(
       '--env <key=value>',
       'Pass environment variable to the agent (repeatable, e.g., --env DEBUG=1 --env API_KEY=xyz)',

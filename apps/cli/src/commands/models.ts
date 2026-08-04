@@ -19,10 +19,12 @@ import {
 import type { AgentId } from '../lib/types.js';
 import { listInstalledVersions, getGlobalDefault, resolveVersion, resolveVersionAlias } from '../lib/versions.js';
 import { getModelCatalog, locateModelSource } from '../lib/models.js';
+import { resolveTierMap, MODEL_TIERS } from '../lib/model-tiers.js';
+import { getModelPricing } from '../lib/pricing/index.js';
 import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 import { wrapJoined } from './inspect.js';
 
-const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'cursor', 'openclaw', 'antigravity', 'kimi', 'grok'];
+const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'cursor', 'openclaw', 'antigravity', 'kimi', 'grok', 'droid'];
 
 /**
  * Agents that don't necessarily install under ~/.agents/versions (cursor ships
@@ -62,6 +64,7 @@ export function registerModelsCommand(program: Command): void {
           agent,
           version,
           catalog: getModelCatalog(agent, version),
+          tiers: resolveTierMap(agent, version),
         }));
         console.log(JSON.stringify(out, null, 2));
         return;
@@ -143,8 +146,17 @@ function printCatalog(agent: AgentId, version: string, isDefault: boolean, optio
   const header = `${agentLabel(agent)} ${chalk.bold(version)}${tag}`;
   console.log(header);
 
+  // Cost tiers first -- the thing an orchestrating agent reads to pick a model.
+  printTiers(agent, version);
+
   const src = locateModelSource(agent, version);
   if (!src) {
+    if (agent === 'droid') {
+      // Droid has no extractable catalog (no models CLI/API/config); the curated
+      // tier map above is the whole surface.
+      console.log(chalk.gray('  (Droid has no model list command; tiers are a curated, credit-multiplier map.)'));
+      return;
+    }
     console.log(chalk.yellow(`  Could not locate model source for ${agent}@${version}.`));
         console.log(chalk.gray(`  Expected the agent's CLI bundle or native binary under ~/.agents/.history/versions/${agent}/${version}/.`));
     return;
@@ -194,6 +206,29 @@ function printCatalog(agent: AgentId, version: string, isDefault: boolean, optio
       console.log(chalk.gray(`      reasoning: `) + levels.join(', '));
     }
   }
+}
+
+/** Rough blended $/Mtok label for a model id, or '' when unpriced. */
+function priceLabel(id: string): string {
+  const p = getModelPricing(id);
+  if (!p) return chalk.gray('  --');
+  const perM = (p.inputPerToken + p.outputPerToken) * 1e6;
+  return chalk.gray(`  ~$${perM.toFixed(0)}/Mtok`);
+}
+
+/** Print the cheap/default/best/ultra tier map for an (agent, version). */
+function printTiers(agent: AgentId, version: string): void {
+  const map = resolveTierMap(agent, version);
+  if (!MODEL_TIERS.some((t) => map[t].model)) return;
+  console.log(chalk.gray('  tiers:'));
+  for (const t of MODEL_TIERS) {
+    const r = map[t];
+    if (!r.model) continue;
+    const eff = r.effort ? chalk.gray(` @${r.effort}`) : '';
+    const clamp = r.clampedFrom ? chalk.gray(' (clamped)') : '';
+    console.log(`    ${chalk.cyan(t.padEnd(8))} ${chalk.bold(r.model)}${eff}${priceLabel(r.model)}${clamp}`);
+  }
+  console.log();
 }
 
 /** Abbreviate a path by replacing the home directory with ~. */

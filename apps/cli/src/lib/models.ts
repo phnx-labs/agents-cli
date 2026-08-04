@@ -17,6 +17,7 @@ import { getVersionDir, getVersionHomePath, getBinaryPath } from './versions.js'
 import { getModelsCachePath } from './state.js';
 import { agentConfigDirName } from './agents.js';
 import { resolveRunDefaults } from './run-defaults.js';
+import { getModelPricing, type ModelPricing } from './pricing/index.js';
 
 /** Model identifiers per cloud provider (used by Claude's multi-cloud routing). */
 export interface ModelPerCloud {
@@ -49,6 +50,8 @@ export interface ModelInfo {
   reasoningLevels?: ReasoningLevel[];
   /** Default reasoning level if applicable */
   defaultReasoningLevel?: string;
+  /** Per-token USD pricing when known (from prices.json); absent for subscription/unpriced models. */
+  pricing?: ModelPricing;
 }
 
 /** The complete model catalog for a specific (agent, version) pair. */
@@ -1011,6 +1014,14 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
     else if (agent === 'antigravity') ({ models, aliases } = extractAntigravityCatalog(src.path));
     else if (agent === 'kimi') ({ models, aliases } = extractKimiCatalog(src.path));
     else if (agent === 'grok') ({ models, aliases } = extractGrokCatalog(src.path));
+  }
+
+  // Attach per-token pricing where the offline table knows the model, so the
+  // catalog carries $/token for the tier display and budgeting. Subscription /
+  // unknown models keep `pricing` undefined (surfaced as "--", never faked).
+  for (const m of models) {
+    const p = getModelPricing(m.id);
+    if (p) m.pricing = p;
   }
 
   const catalog: ModelCatalog = {
