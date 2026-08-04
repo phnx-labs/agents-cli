@@ -8,7 +8,7 @@
 //   D. Picker keystroke — 10 successive queries (simulates typing)
 //   E. searchContentIndex alone (the per-keystroke bottleneck)
 //   F. one indexed tool-call clause
-//   G. two distinct indexed tool-call clauses in one session
+//   G. two distinct indexed git calls in one session
 //   H. exact static program-occurrence count
 //
 // Corpus: the index is whatever $HOME holds, so CI's `HOME="$(mktemp -d)"` run
@@ -272,6 +272,16 @@ async function main() {
   const toolSessions = evenlySample(toolCandidates, Math.max(1, toolSampleLimit));
   console.error(`tool scope: ${toolSessions.length} of ${toolCandidates.length} candidates${toolSinceDays > 0 ? ` from ${toolSinceDays} days` : ''}`);
   getDB().pragma('wal_checkpoint(TRUNCATE)');
+  if (process.env.BENCH_CORPUS === 'copied' && process.env.BENCH_SKIP_TOOL_BACKFILL !== '1') {
+    getDB().exec(`
+      DELETE FROM tool_call_text;
+      DELETE FROM tool_program_occurrences;
+      DELETE FROM tool_call_programs;
+      DELETE FROM tool_calls;
+      DELETE FROM tool_scan_ledger;
+    `);
+    getDB().pragma('wal_checkpoint(TRUNCATE)');
+  }
   const toolStorageBefore = sqliteStorage();
   let backfillFiles = 0;
   let backfillCalls = 0;
@@ -307,7 +317,7 @@ async function main() {
   const toolTwoCallDistribution = await distribution(() => {
     const value = searchToolCalls(
       toolSessions,
-      ['program:git input:merge', 'program:gh output:CONFLICT'],
+      ['program:git', 'program:git'],
       toolCoverage,
       25,
     );
@@ -328,7 +338,7 @@ async function main() {
   const toolTwoCallFullDistribution = await distribution(() =>
     searchToolCalls(
       warmSessions,
-      ['program:git input:merge', 'program:gh output:CONFLICT'],
+      ['program:git', 'program:git'],
       fullCoverage,
       25,
     )

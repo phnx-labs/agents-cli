@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Session tool-call index benchmark</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:#0a0a0a; --panel:#121212; --panel-2:#181818; --line:#333;
+      --text:#f5f5f5; --muted:#a3a3a3; --accent:#a3e635; --blue:#60a5fa;
+      --amber:#fbbf24; --rose:#fb7185; --shadow:rgba(0,0,0,.28);
+    }
+    :root.light {
+      color-scheme: light;
+      --bg:#f7f7f2; --panel:#fff; --panel-2:#f0f0e9; --line:#d4d4cd;
+      --text:#171717; --muted:#666; --accent:#4d7c0f; --blue:#2563eb;
+      --amber:#b45309; --rose:#be123c; --shadow:rgba(0,0,0,.08);
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:15px/1.55 Inter,system-ui,sans-serif; }
+    main { width:min(1180px,calc(100% - 32px)); margin:0 auto; padding:48px 0 72px; }
+    h1,h2,h3,p { margin-top:0; }
+    h1 { max-width:850px; font-size:clamp(36px,6vw,72px); line-height:.98; letter-spacing:-.055em; margin-bottom:22px; }
+    h2 { font-size:24px; letter-spacing:-.025em; margin-bottom:16px; }
+    h3 { font-size:15px; letter-spacing:.01em; margin-bottom:6px; }
+    .mono,code,.kicker,.chip,.metric strong { font-family:"JetBrains Mono",ui-monospace,monospace; }
+    .kicker { color:var(--accent); text-transform:uppercase; letter-spacing:.12em; font-size:12px; }
+    .lede { color:var(--muted); font-size:18px; max-width:780px; }
+    .top { display:flex; justify-content:space-between; gap:24px; align-items:flex-start; }
+    button { border:1px solid var(--line); background:var(--panel); color:var(--text); border-radius:999px; padding:9px 13px; cursor:pointer; }
+    .chips { display:flex; flex-wrap:wrap; gap:8px; margin:24px 0 34px; }
+    .chip { border:1px solid var(--line); border-radius:999px; padding:6px 10px; color:var(--muted); font-size:12px; }
+    .grid { display:grid; grid-template-columns:repeat(12,1fr); gap:16px; margin:16px 0 38px; }
+    .card { grid-column:span 3; background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:18px; box-shadow:0 14px 40px var(--shadow); }
+    .card.wide { grid-column:span 6; }
+    .card.full { grid-column:1/-1; }
+    .metric strong { display:block; font-size:30px; letter-spacing:-.04em; color:var(--accent); }
+    .metric span { color:var(--muted); font-size:13px; }
+    canvas { width:100%; height:300px; display:block; }
+    .chart-note { color:var(--muted); font-size:13px; margin:10px 0 0; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th,td { text-align:right; padding:10px 8px; border-bottom:1px solid var(--line); }
+    th:first-child,td:first-child { text-align:left; }
+    th { color:var(--muted); font-weight:500; }
+    .findings { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+    .finding { background:var(--panel); border-left:3px solid var(--accent); border-radius:4px 12px 12px 4px; padding:16px 18px; }
+    .finding p { color:var(--muted); margin:0; }
+    .caveat { margin-top:18px; border:1px solid color-mix(in srgb,var(--amber) 50%,var(--line)); background:color-mix(in srgb,var(--amber) 8%,var(--panel)); border-radius:12px; padding:15px 18px; }
+    pre { overflow:auto; background:var(--panel-2); border:1px solid var(--line); border-radius:12px; padding:16px; color:var(--text); }
+    footer { color:var(--muted); border-top:1px solid var(--line); margin-top:42px; padding-top:20px; }
+    @media (max-width:820px) { .card,.card.wide { grid-column:1/-1; } .findings { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <div>
+      <p class="kicker">agents-cli · PR #1829 · measured 2026-08-03</p>
+      <h1>Indexed tool queries stay fast and stop touching transcripts.</h1>
+      <p class="lede">A populated-corpus benchmark of static Bash program extraction, one- and two-call evidence search, exact counts, explicit backfill cost, and SQLite/WAL storage.</p>
+    </div>
+    <button id="theme" aria-label="Toggle light and dark theme">◐</button>
+  </div>
+
+  <div class="chips">
+    <span class="chip">host · yosemite-s1</span>
+    <span class="chip">Node · v24.3.0</span>
+    <span class="chip">index · 912 MB</span>
+    <span class="chip">metadata scope · 4,756 sessions</span>
+    <span class="chip">tool sample · 100 / 1,188 sessions in 7 days</span>
+    <span class="chip">30 measured runs · 3 warmups</span>
+    <span class="chip">SQLite + FTS5 · no vectors</span>
+  </div>
+
+  <section class="grid" aria-label="Headline metrics">
+    <article class="card metric"><strong>11.3 ms</strong><span>origin-safe exact count p95 · 4,756 metadata sessions</span></article>
+    <article class="card metric"><strong>9.9 ms</strong><span>one-clause evidence p95 · full metadata scope</span></article>
+    <article class="card metric"><strong>11.0 ms</strong><span>positive two-call evidence p95 · full metadata scope</span></article>
+    <article class="card metric"><strong>0 bytes</strong><span>DB and WAL growth across all query runs</span></article>
+  </section>
+
+  <section class="grid">
+    <article class="card wide">
+      <h2>Evidence query latency</h2>
+      <canvas id="evidence" height="300" role="img" aria-label="p50 p95 p99 evidence query latency for 100 and 4756 metadata session scopes"></canvas>
+      <p class="chart-note">Dithered bars show p50 / p95 / p99. Expanding the metadata scope 47.6× adds 3.5–4.9 ms at p95 with the same 100-session indexed snapshot.</p>
+    </article>
+    <article class="card wide">
+      <h2>Exact count latency</h2>
+      <canvas id="counts" height="300" role="img" aria-label="p50 p95 p99 exact program count latency for 100 and 4756 metadata session scopes"></canvas>
+      <p class="chart-note">The count path is a single relational aggregate over persisted occurrence rows. It does not hydrate call evidence.</p>
+    </article>
+    <article class="card wide">
+      <h2>Backfill storage</h2>
+      <canvas id="storage" height="300" role="img" aria-label="storage used by the representative historical backfill"></canvas>
+      <p class="chart-note">Used pages are logical SQLite occupancy. The physical DB grew less because existing free pages absorbed most rows; WAL is transient and was checkpointed to zero.</p>
+    </article>
+    <article class="card wide">
+      <h2>Backfill shape</h2>
+      <table>
+        <tbody>
+          <tr><th>Elapsed</th><td>2.50 seconds</td></tr>
+          <tr><th>Indexed source files</th><td>96 for 100 sampled sessions</td></tr>
+          <tr><th>Tool calls persisted</th><td>2,389</td></tr>
+          <tr><th>Limited files</th><td>1</td></tr>
+          <tr><th>Remaining files</th><td>0</td></tr>
+          <tr><th>Peak WAL</th><td>18.5 MB</td></tr>
+          <tr><th>Query-time writes</th><td>0 bytes</td></tr>
+        </tbody>
+      </table>
+    </article>
+  </section>
+
+  <section>
+    <h2>Latency table</h2>
+    <div class="card full">
+      <table>
+        <thead><tr><th>Operation</th><th>Scope</th><th>p50</th><th>p95</th><th>p99</th></tr></thead>
+        <tbody>
+          <tr><td>Content FTS</td><td>4,756 metadata</td><td>18.13 ms</td><td>18.67 ms</td><td>18.93 ms</td></tr>
+          <tr><td>One tool clause</td><td>100 indexed</td><td>4.56 ms</td><td>5.03 ms</td><td>6.50 ms</td></tr>
+          <tr><td>Two distinct <code>git</code> calls</td><td>100 indexed</td><td>5.58 ms</td><td>7.47 ms</td><td>7.93 ms</td></tr>
+          <tr><td>Origin-safe program count</td><td>100 indexed</td><td>1.60 ms</td><td>1.76 ms</td><td>1.76 ms</td></tr>
+          <tr><td>One tool clause</td><td>4,756 metadata / 100 indexed</td><td>8.06 ms</td><td>9.90 ms</td><td>10.03 ms</td></tr>
+          <tr><td>Two distinct <code>git</code> calls</td><td>4,756 metadata / 100 indexed</td><td>9.03 ms</td><td>11.00 ms</td><td>11.10 ms</td></tr>
+          <tr><td>Origin-safe program count</td><td>4,756 metadata / 100 indexed</td><td>10.62 ms</td><td>11.34 ms</td><td>11.46 ms</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section style="margin-top:38px">
+    <h2>Interesting patterns</h2>
+    <div class="findings">
+      <article class="finding"><h3>Counting is a different hot path</h3><p>The 100-session count p95 is 1.76 ms because it aggregates persisted occurrences without hydrating calls. At the 4,756-session metadata scope it reaches 11.34 ms while grouping both totals and coverage by true origin machine.</p></article>
+      <article class="finding"><h3>Metadata scope growth stays bounded here</h3><p>Moving from 100 to 4,756 session IDs adds 4.87 ms to one-clause p95 and 3.53 ms to positive two-call p95. The query sends the scope to SQLite once with <code>json_each(?)</code>, instead of issuing one query per 300 IDs.</p></article>
+      <article class="finding"><h3>Two positive clauses do not double latency</h3><p>Both evidence queries return 19 sessions. The two-distinct-<code>git</code>-call p95 is 7.47 ms versus 5.03 ms for one clause; indexed prefilters shrink the candidate set before distinct-call assignment.</p></article>
+      <article class="finding"><h3>Program use is heavily concentrated</h3><p>Within the 100-session sample, 849 static <code>git</code> sites live in 358 calls across 21 sessions: 2.37 sites per containing call and 40.4 sites per containing session.</p></article>
+      <article class="finding"><h3>WAL is not permanent overhead</h3><p>The clean historical backfill peaked at an 18.5 MB WAL, then checkpointed to zero. It occupied 15.2 MB of database pages but did not grow the 912 MB file because existing free pages absorbed every new row.</p></article>
+      <article class="finding"><h3>Queries are read-only</h3><p>After the checkpoint, 180 measured tool-query executions changed both the DB and WAL by exactly zero bytes. Parsing and writes occur during normal incremental scanning or explicit backfill, never during lookup.</p></article>
+    </div>
+    <div class="caveat"><strong>Coverage caveat.</strong> The representative sample produced current ledgers for 96 source files and one explicit index-limit row. No files remained queued, but coverage is marked incomplete and the count is a lower bound. The 4,756-session figures vary the metadata ID scope over the same 100-session indexed snapshot; they do not claim that all 4,756 transcripts were backfilled.</div>
+  </section>
+
+  <section style="margin-top:38px">
+    <h2>Reproduce</h2>
+    <pre><code>cd apps/cli
+BENCH_CORPUS=real BENCH_MODE=warm \
+  BENCH_TOOL_SAMPLE=100 BENCH_TOOL_SINCE_DAYS=7 \
+  bun bench/sessions-perf.ts &gt; session-tool-query-after.json</code></pre>
+  </section>
+
+  <footer>Source: <span class="mono">apps/cli/bench/sessions-perf.ts</span> · result timestamp <span class="mono">2026-08-04T02:09:52.115Z</span> · charts use Dither Kit's monochrome, patterned chart language in a self-contained canvas render.</footer>
+</main>
+<script>
+  const root=document.documentElement;
+  const saved=localStorage.getItem('benchmark-theme');
+  if(saved==='light'||(!saved&&matchMedia('(prefers-color-scheme:light)').matches)) root.classList.add('light');
+  document.querySelector('#theme').onclick=()=>{root.classList.toggle('light');localStorage.setItem('benchmark-theme',root.classList.contains('light')?'light':'dark');drawAll()};
+
+  const charts={
+    evidence:{id:'evidence',unit:'ms',max:12,rows:[
+      ['1 clause · 100',[4.56,5.03,6.50]],['2 calls · 100',[5.58,7.47,7.93]],
+      ['1 clause · 4.8k',[8.06,9.90,10.03]],['2 calls · 4.8k',[9.03,11.00,11.10]]]},
+    counts:{id:'counts',unit:'ms',max:12,rows:[['count · 100',[1.60,1.76,1.76]],['count · 4.8k',[10.62,11.34,11.46]]]},
+    storage:{id:'storage',unit:'MB',max:20,rows:[['used pages',[15.18]],['peak WAL',[18.48]],['DB file growth',[0]],['query writes',[0]]]}
+  };
+  function colors(){const c=getComputedStyle(root);return {text:c.getPropertyValue('--text').trim(),muted:c.getPropertyValue('--muted').trim(),line:c.getPropertyValue('--line').trim(),accent:c.getPropertyValue('--accent').trim(),blue:c.getPropertyValue('--blue').trim(),amber:c.getPropertyValue('--amber').trim()}}
+  function dither(ctx,x,y,w,h,color,step){ctx.fillStyle=color;ctx.globalAlpha=.92;ctx.fillRect(x,y,w,h);ctx.globalAlpha=.25;ctx.fillStyle=getComputedStyle(root).getPropertyValue('--bg');for(let px=x;px<x+w;px+=step)for(let py=y;py<y+h;py+=step)if(((px-x)/step+(py-y)/step)%2===0)ctx.fillRect(px,py,Math.max(1,step/2),Math.max(1,step/2));ctx.globalAlpha=1}
+  function draw(spec){
+    const canvas=document.getElementById(spec.id),dpr=devicePixelRatio||1,w=canvas.clientWidth,h=canvas.clientHeight;
+    canvas.width=w*dpr;canvas.height=h*dpr;const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);const c=colors();ctx.clearRect(0,0,w,h);
+    const left=Math.min(150,w*.34),right=52,top=22,bottom=28,plot=w-left-right,rowH=(h-top-bottom)/spec.rows.length;
+    ctx.font='12px ui-monospace,monospace';ctx.textBaseline='middle';ctx.fillStyle=c.muted;
+    for(let tick=0;tick<=4;tick++){const x=left+plot*tick/4;ctx.strokeStyle=c.line;ctx.beginPath();ctx.moveTo(x,top);ctx.lineTo(x,h-bottom);ctx.stroke();ctx.textAlign='center';ctx.fillText((spec.max*tick/4).toFixed(spec.max<=3?1:0),x,h-10)}
+    spec.rows.forEach((row,i)=>{const y=top+i*rowH;ctx.textAlign='right';ctx.fillStyle=c.text;ctx.fillText(row[0],left-10,y+rowH*.5);const vals=row[1],barH=Math.min(16,rowH/(vals.length+1));vals.forEach((v,j)=>{const by=y+rowH*.5+(j-(vals.length-1)/2)*(barH+3)-barH/2;const color=[c.muted,c.blue,c.accent][j]||c.accent;dither(ctx,left,by,Math.max(v?2:0,plot*v/spec.max),barH,color,4+j);if(j===vals.length-1||vals.length===1){ctx.textAlign='left';ctx.fillStyle=c.text;ctx.fillText(`${v.toFixed(v<10?2:1)} ${spec.unit}`,left+plot*v/spec.max+6,by+barH/2)}})});
+  }
+  function drawAll(){Object.values(charts).forEach(draw)}
+  addEventListener('resize',drawAll);drawAll();
+</script>
+</body>
+</html>

@@ -390,7 +390,7 @@ SSH access (§7); rendering sessions that no harness produced.
   program/status/exit columns and FTS5 MUST prefilter candidates
   before the exact assignment
   (`lib/session/tool-index.ts:30-36,386-578,682-755`).
-- **SES-34 (MUST).** Schema v26's session-id-keyed `tool_scan_ledger` MUST be independent of the
+- **SES-34 (MUST).** Schema v27's session-id-keyed `tool_scan_ledger` MUST be independent of the
   normal session ledgers. Migration MUST clear only the derived tool ledger and
   MUST NOT clear `scan_ledger` or `dir_ledger`. Historical parsing MUST run only
   through explicit `agents sessions backfill tools`, in internal batches bounded

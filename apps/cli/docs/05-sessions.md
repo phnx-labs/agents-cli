@@ -212,7 +212,7 @@ marks coverage partial instead of substituting a mirrored duplicate.
 
 ### Index lifecycle and disk I/O
 
-Schema v26 uses `tool_calls`, the distinct `tool_call_programs` projection,
+Schema v27 uses `tool_calls`, the distinct `tool_call_programs` projection,
 ordered `tool_program_occurrences`, `tool_call_text` (trigram FTS5), and an
 independent `tool_scan_ledger` with aggregate byte accounting. The migration does **not** clear
 `scan_ledger` or `dir_ledger`, so enabling the feature does not invalidate the
