@@ -3,7 +3,7 @@
  * RUSH-1669 / RUSH-1670 / RUSH-1672 / RUSH-1673.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -26,6 +26,22 @@ import { getDaemonDir } from '../state.js';
 import { writeRunMeta, type RunMeta } from '../routines.js';
 import { getRunsDir } from '../state.js';
 import { monitorRunningJobs } from '../runner.js';
+
+// Redirect the daemon scratch dir (heartbeat.json / daemon.pid / the O_EXCL start
+// lock) to a file-private temp so these IN-PROCESS writes never touch a live
+// scheduler daemon's state on a dev machine. File-scoped, NOT global (see the
+// note in tests/setup.ts): a global AGENTS_DAEMON_DIR is inherited by the real
+// daemons that migrate.test.ts / daemon.test.ts spawn (env: {...process.env}) and
+// forces them onto one shared dir, colliding on the single-instance guard.
+let priorDaemonDir: string | undefined;
+beforeAll(() => {
+  priorDaemonDir = process.env.AGENTS_DAEMON_DIR;
+  process.env.AGENTS_DAEMON_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-selfheal-'));
+});
+afterAll(() => {
+  if (priorDaemonDir === undefined) delete process.env.AGENTS_DAEMON_DIR;
+  else process.env.AGENTS_DAEMON_DIR = priorDaemonDir;
+});
 
 // ─── RUSH-1670: Heartbeat + wedged-daemon watchdog ──────────────────────────
 

@@ -43,15 +43,13 @@ process.env.AGENTS_EVENTS_PATH = path.join(tmp, 'events.jsonl');
 // leaves HOME untouched (git and every other HOME consumer behave normally).
 process.env.AGENTS_DEVICES_DIR = path.join(tmp, 'devices');
 
-// Daemon scratch (pid file, heartbeat, start lock, log): redirect to a
-// fork-private temp so daemon self-heal tests — which write pid/heartbeat files
-// and (for the double-start guard) acquire the real O_EXCL start lock and spawn
-// real processes — can never clobber a live scheduler daemon's state on a dev
-// machine. state.ts's getDaemonDir() reads this at call time and daemon.ts
-// resolves every path helper (getPidPath/getHeartbeatPath/getLockPath/
-// getLogPath) through it. Surgical mirror of AGENTS_DEVICES_DIR; leaves HOME
-// untouched.
-process.env.AGENTS_DAEMON_DIR = path.join(tmp, 'daemon');
+// NB: AGENTS_DAEMON_DIR is deliberately NOT set here. Tests that spawn a REAL
+// daemon (migrate.test.ts, daemon.test.ts) isolate it per-test via a unique
+// HOME and read HOME-based daemon paths; a global AGENTS_DAEMON_DIR would be
+// inherited by those spawned children (env: {...process.env}) and force them all
+// onto one shared daemon dir, colliding on the single-instance guard. The only
+// file that writes the daemon dir IN-PROCESS (daemon-self-heal.test.ts) sets
+// AGENTS_DAEMON_DIR itself, file-scoped, so its isolation never leaks here.
 
 // Hook shims/cache/logs + the disposable perf warehouse: every hook now
 // resolves through a generated shim (pass-through timing for matcher-only
