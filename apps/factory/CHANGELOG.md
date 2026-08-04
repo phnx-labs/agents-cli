@@ -4,6 +4,25 @@ All notable changes to the Factory extension are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
+## [Unreleased]
+
+- **Every New-agent launch is balanced — `agents run <agent> --interactive
+  --strategy balanced --mode auto`, with no per-harness exception.** Local
+  **Grok, Kimi, and Droid** used to launch as raw binaries (`grok` / `kimi` /
+  `droid`) with no account rotation and no `--mode`, because three disagreeing
+  allowlists (`STRATEGY_LAUNCH_AGENTS`, `LAUNCHABLE`, `usesManagedAgentLaunch`)
+  gated whether an agent got `--strategy balanced` and whether it even routed
+  through `agents run`. Those lists are collapsed into one predicate,
+  `isAgentRunner(key)` = `key !== 'shell'`, so every runner — local, `(Auto)`,
+  and `(Pick Host)` alike — now routes through `agents run` with
+  `--strategy balanced --mode auto`. Forks are balanced by the same rule. The
+  contract is recorded in `apps/factory/AGENTS.md` (§ "Launch contract") and
+  pinned by tests in `src/core/agents.test.ts`. `--strategy balanced` is a
+  graceful CLI no-op for a runner with no accounts to rotate (droid), never an
+  error. Shell stays a plain terminal; Resume is unchanged (it reuses the
+  session's already-bound account). Source: `src/core/agents.ts`,
+  `src/vscode/extension.ts`, `src/core/forkSession.ts`.
+
 ## [0.9.309] - 2026-08-03
 
 - **Watchdog auto-rotate delegates to `agents run auto` — no more rotate loops into exhausted accounts.**

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, STRATEGY_LAUNCH_AGENTS, usesManagedAgentLaunch, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
+import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, isAgentRunner, usesManagedAgentLaunch, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
 import { loadAutoLaunchPreferences, isAutoLaunchEnabled, isAutoLaunchPreferred, readDeviceMaxConcurrent } from '../core/deviceAutoLaunch';
 import { parseSpawnRequest, resolveSpawnSurface, SpawnRequest } from '../core/spawn';
 import {
@@ -815,8 +815,10 @@ async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOp
     vscode.window.showWarningMessage(`New Agent: ${agentKey} is not available.`);
     return;
   }
-  const strategy: RunStrategy | undefined =
-    (STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(agentKey) ? 'balanced' : undefined;
+  // Balanced account/version rotation for every agent runner, always — the launch
+  // contract has no per-harness exception (apps/factory/AGENTS.md). Shell is not a
+  // runner, so it carries no strategy (it never routes through `agents run`).
+  const strategy: RunStrategy | undefined = isAgentRunner(agentKey) ? 'balanced' : undefined;
 
   let launched = false;
   try {
@@ -2327,11 +2329,12 @@ async function openSingleAgent(
   // (pinnedVersion / strategy) from the per-strategy launch commands. Only
   // Claude's session is generated up-front for the resume flow; other agents
   // detect their session post-spawn.
-  const LAUNCHABLE: ReadonlySet<string> = new Set(['claude', 'codex', 'gemini', 'opencode', 'cursor', 'antigravity']);
-  // Local: only LAUNCHABLE agents route through `agents run`; others use their
-  // raw command. Remote (targetHost): ALL agents route through `agents run
-  // --host` so every agent can be offloaded onto a device.
-  if (agentKey && (LAUNCHABLE.has(agentKey) || targetHost)) {
+  // EVERY agent runner routes through `agents run` — local, auto-host, and
+  // picked-host launches alike — so `--strategy balanced --mode auto` applies
+  // uniformly (grok/kimi/droid included; they used to launch as raw binaries with
+  // no rotation). Shell is the only non-runner and keeps its raw command. This is
+  // the launch contract in apps/factory/AGENTS.md; there is no per-harness list.
+  if (agentKey && isAgentRunner(agentKey)) {
     // Mint Claude's session id up front for LOCAL and REMOTE alike. The id is
     // what every downstream surface keys off: the status bar, the auto-label
     // poller that fills in the tab title, and Session Resume / Trace / Fork.
@@ -4079,11 +4082,11 @@ export async function openSingleAgentWithQueue(
     opencodeSessionsBefore = await listOpencodeSessions(cwd);
   }
 
-  // Route LAUNCHABLE agents through `agents run <agent> --interactive` so the
-  // --mode flag is applied and the CLI resolves the configured strategy. Claude
-  // gets a pre-generated session id for the resume flow; other agents discover
-  // their session post-spawn. opts?.mode defaults to 'auto' (writable-but-gated)
-  // inside buildAgentLaunchCommand when the caller does not supply an explicit mode.
+  // Route every agent runner through `agents run <agent> --interactive` so
+  // `--strategy balanced --mode auto` applies uniformly (shell is the only
+  // non-runner). Claude gets a pre-generated session id for the resume flow; other
+  // agents discover their session post-spawn. opts?.mode defaults to 'auto'
+  // (writable-but-gated) inside buildAgentLaunchCommand when no mode is supplied.
   const targetHost = opts?.host && opts.host !== 'local' ? opts.host : undefined;
   if (agentKey && usesManagedAgentLaunch(agentKey, targetHost)) {
     if (agentKey === 'claude') {

@@ -15,6 +15,54 @@ This file is a **map**, not the territory. Keep it a short paragraph per area pl
 /tests          Real-service tests (no mocks)
 ```
 
+## Launch contract (normative — the reviewer enforces this)
+
+**Every agent runner Factory launches goes through `agents run <agent>
+--interactive --strategy balanced --mode auto`. Always. No per-harness exception,
+no bare command.** There is exactly one non-runner (`shell` — a plain terminal, not
+an `agents run` agent) and exactly one legitimate flag omission (a pinned
+`@version`, which the CLI ignores `--strategy` against — and Factory never pins on a
+New launch, so in practice the flags are always present).
+
+Two invariants, no exceptions:
+
+- **`--strategy balanced` is always emitted.** Balanced account/version rotation
+  spreads load and never launches into a throttled or arbitrarily-pinned account.
+  A bare, strategy-less launch is never what we want. `--strategy balanced` is a
+  graceful no-op for a runner with no accounts to rotate (e.g. droid) — the CLI
+  falls back to the default, never errors (`apps/cli/src/lib/rotate.ts`
+  `selectBalancedVersion`, `apps/cli/src/commands/exec.ts` strategy block) — so it
+  is always safe to emit.
+- **`--mode auto` is always emitted** for interactive New launches, so the agent
+  starts writable-but-gated and can edit files without stalling on plan approval.
+
+There are exactly three New-agent variants per harness, and **all three emit the
+same flags — only host selection differs** (`launchAgent` in
+`src/vscode/extension.ts`):
+
+| Command | `launchAgent` opts | Host selector | Full command |
+|---|---|---|---|
+| `Agents: New X` | `{ agentKey, local: true }` | *(none — this machine)* | `agents run X --interactive --strategy balanced --mode auto` |
+| `Agents: New X (Auto)` | `{ agentKey, autoHost: true }` | `--device auto` | `agents run X --interactive --device auto --strategy balanced --mode auto` |
+| `Agents: New X (Pick Host)` | `{ agentKey, pickHost: true }` | `--host '<device>'` | `agents run X --interactive --host '<device>' --strategy balanced --mode auto` |
+
+Claude alone adds `--session-id <id>` (minted up front for the resume/fork flow);
+that is the only per-agent addition and it never removes a flag. A **fork**
+(`strategyForForkAgent`) starts a fresh sibling session, so it is balanced by the
+same rule. **Resume is out of scope** — `--resume <id>` reattaches to a session
+whose account is already bound, so it reuses that account and carries no
+`--strategy` (`buildVersionedResumeCommand` in `src/core/prewarm.ts`).
+
+**There is no allowlist.** The single source of truth is `isAgentRunner(key)`
+(`src/core/agents.ts`) = `key !== 'shell'`, consumed by `usesManagedAgentLaunch`
+(routing), `launchAgent`/`openSingleAgent` (strategy + routing), and
+`strategyForForkAgent`. Do not reintroduce a per-harness set (the retired
+`STRATEGY_LAUNCH_AGENTS` / `LAUNCHABLE` lists disagreed with each other and left
+local grok/kimi/droid launching as raw binaries with no rotation and no mode).
+Adding a harness that is a real `agents run` agent needs no launch-code change; it
+inherits the contract. Tests pin it in `src/core/agents.test.ts`
+(`describe('launch contract — every runner is balanced')`).
+
 ## Testing the Factory Floor UI
 
 The Factory Floor feed + Dispatch panel are a React webview (`ui/settings`, top component `UnifiedAgentsPane.tsx`). To SEE and verify UI changes, do NOT install the packaged `.vsix` and drive VS Code via accessibility automation (`osascript` / `agents computer`) to open the dashboard — that steals your focus and is slow. Use the committed preview harness, which renders the real components with representative data in a plain browser page you can screenshot:
@@ -113,7 +161,7 @@ Known gotchas:
 |---|---|
 | Agent spawn flow + editor-tab terminals | `src/vscode/extension.ts` (`openSingleAgent`, `openSingleAgentWithQueue`) |
 | `…/spawn` URI verb (how `agents sessions resume --vscodium` reopens a session as a tab) | Pure parse + surface choice: `src/core/spawn.ts` (`parseSpawnRequest`, `resolveSpawnSurface`); VS Code glue: `src/vscode/extension.ts` (`spawnCommandTerminal`). Honours `agents.terminalMode` exactly like `launchAgent`, so a URI-spawned session is tmux-backed and survives a window crash for the reconnect pass to re-attach. A split lands *inside* the parent's tmux session (`tmuxSplitH`/`tmuxSplitV`) rather than splitting the VS Code tab, which would strand the pane outside that session. |
-| The ONE launch engine (every "New agent" command) | `launchAgent(context, {agentKey?, host?, pickHost?, local?})` in `src/vscode/extension.ts` is the single route. It resolves: **host** (explicit / device-first `pickLaunchHost` / auto `resolveBalancedHost`), **harness** (explicit, or `resolveAutoAgentKey` — usable-on-the-chosen-host via `hostHasUsableVersion`, ranked by `pickAgentByUsage`), and **version/account** (ALWAYS balanced via `--strategy balanced`; no pinned/latest/version-picker path exists). Commands are thin: `agents.newAgent` = `launchAgent({})` (auto everything), `agents.newAgentPickHost` = `{pickHost:true}` (device-first, auto harness), `agents.new<Harness>` = `{agentKey, local:true}`, `agents.new<Harness>PickHost` = `{agentKey, pickHost:true}`. Pure ranking: `src/core/launchHost.ts` (`pickBestHost`, `deviceHasUsableVersion`, `resolveBalancePool`) + `src/core/agentUsage.ts` (`pickAgentByUsage`). Health probe: `src/vscode/deviceHealth.vscode.ts` (`fetchDeviceStats`). Auto-launch filtering/bias: `src/core/deviceAutoLaunch.ts` (loaded from CLI-managed `~/.agents/.history/devices/auto-launch.json`). **The host picker is stale-while-revalidate, in two phases**: it renders instantly from a persisted snapshot (`src/core/hostPickerCache.ts`, `globalState` key `agents.hostPicker.v1`) and revalidates in the background, swapping items in place — never block a picker on the fleet SSH sweep. The refresh is split (`refreshHostPickerDevices` — cheap `devices list` registry read — then `sweepHostPickerUsage` — the fleet fan-out): device rows come from the cheap phase so they never wait on the usage sweep, and the device snapshot is warmed at activation (`refreshHostPickerDevicesInBackground`) so even the first open is populated. The usage sweep stays lazy (the 60s prewarm is gated on `hostPickerUsed`). Both phases fold through `mergeHostPickerSnapshot`, which (a) keeps the last-good rows when a registry read comes back empty — a failed read on a loaded box, never a real empty fleet — and (b) tracks TWO timestamps: `fetchedAt` (device rows) and `usageFetchedAt` (the sweep). `isHostPickerStale` gates on `usageFetchedAt`, so the cheap device-only refresh (which carries the old `usageFetchedAt` forward) never masks stale usage scores as fresh and skips the sweep. |
+| The ONE launch engine (every "New agent" command) | `launchAgent(context, {agentKey?, host?, pickHost?, local?})` in `src/vscode/extension.ts` is the single route. It resolves: **host** (explicit / device-first `pickLaunchHost` / auto `resolveBalancedHost`), **harness** (explicit, or `resolveAutoAgentKey` — usable-on-the-chosen-host via `hostHasUsableVersion`, ranked by `pickAgentByUsage`), and **version/account** (ALWAYS balanced via `--strategy balanced` for every runner — the [Launch contract](#launch-contract-normative--the-reviewer-enforces-this); no pinned/latest/version-picker path exists). Commands are thin: `agents.newAgent` = `launchAgent({})` (auto everything), `agents.newAgentPickHost` = `{pickHost:true}` (device-first, auto harness), and per harness `agents.new<Harness>` = `{agentKey, local:true}`, `…PickHost` = `{agentKey, pickHost:true}`, `…Auto` = `{agentKey, autoHost:true}`. Routing + strategy hang off one predicate, `isAgentRunner(key)` (`src/core/agents.ts`) — `key !== 'shell'` — NOT a per-harness allowlist. Pure ranking: `src/core/launchHost.ts` (`pickBestHost`, `deviceHasUsableVersion`, `resolveBalancePool`) + `src/core/agentUsage.ts` (`pickAgentByUsage`). Health probe: `src/vscode/deviceHealth.vscode.ts` (`fetchDeviceStats`). Auto-launch filtering/bias: `src/core/deviceAutoLaunch.ts` (loaded from CLI-managed `~/.agents/.history/devices/auto-launch.json`). **The host picker is stale-while-revalidate, in two phases**: it renders instantly from a persisted snapshot (`src/core/hostPickerCache.ts`, `globalState` key `agents.hostPicker.v1`) and revalidates in the background, swapping items in place — never block a picker on the fleet SSH sweep. The refresh is split (`refreshHostPickerDevices` — cheap `devices list` registry read — then `sweepHostPickerUsage` — the fleet fan-out): device rows come from the cheap phase so they never wait on the usage sweep, and the device snapshot is warmed at activation (`refreshHostPickerDevicesInBackground`) so even the first open is populated. The usage sweep stays lazy (the 60s prewarm is gated on `hostPickerUsed`). Both phases fold through `mergeHostPickerSnapshot`, which (a) keeps the last-good rows when a registry read comes back empty — a failed read on a loaded box, never a real empty fleet — and (b) tracks TWO timestamps: `fetchedAt` (device rows) and `usageFetchedAt` (the sweep). `isHostPickerStale` gates on `usageFetchedAt`, so the cheap device-only refresh (which carries the old `usageFetchedAt` forward) never masks stale usage scores as fresh and skips the sweep. |
 | `Agents: Resume` (batch reopen, detached-first) | Pure join + ranking: `src/core/resumePicker.ts` (`buildResumeCandidates`, `classifyResumeState`, `defaultPickedIds`); VS Code glue: `src/vscode/extension.ts` (`resumeSessionsBatch`, `openResumedSessionTerminal`). It joins the recent listing with `agents sessions --active --json` and ranks by the CLI's `viewingIn` field: `'detached'` means the tmux pane is live with NO client attached — the terminal that showed it died — which is the case the command exists for, so those sort first and open pre-ticked. `presence` (`background`/`parked`) is the *deliberate* detach axis and is ranked below it; a session someone is actively watching sorts last. Two traps: `sessions` has NO `list` subcommand (passing one silently searches for the word and returns nothing — the bug that made every picker report "No sessions found"), and `viewingIn` only exists in the JSON from agents-cli ≥ the release that added `viewingInLabel` — an older CLI reports every session as watched/idle. |
 | Resume variants — `(Pick Session)`, `(Pick Host)`, `(Pick Harness)`, `(Best Profile)` | One QuickPick per axis. `(Pick Session)` is `resumeSessionsBatch({abandonedOnly:true})` — `abandonedCandidates` (`src/core/resumePicker.ts`) drops `watched` sessions, the pick resumes on its origin host; the picker cache stays unfiltered so both pickers share `agents.resumePicker.v1`. `(Pick Host)` reopens the ACTIVE tab's session via `pickLaunchHost` + the existing `buildVersionedResumeCommand(..., host)` path, same harness and pinned version. `(Pick Harness)` (`resumeCurrentPickHarness` → `launchResumeInHarness`) launches `agents run <harness> --interactive` unpinned (balanced picks the account) on the same device and replays the old transcript through `buildResumeInput` — native `--resume` can't cross harnesses. Harness ranking: `buildHarnessOptions` (`src/core/resumeTarget.ts`); launch builder: `buildAgentRunLaunchCommand` (`src/core/resumeInBest.ts`). `(Best Profile)` is the retitled rotate (`agents.resumeCurrentInBestProfile`, ⌘⇧J). |
 | Terminal registry + session IDs | `src/vscode/terminals.vscode.ts` |
