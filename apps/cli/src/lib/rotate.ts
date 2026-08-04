@@ -9,7 +9,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId, RunStrategy } from './types.js';
 import type { FallbackEntry } from './exec.js';
-import { accountDisplayLabel, getAccountInfo, ALL_AGENT_IDS, type AccountInfo } from './agents.js';
+import {
+  accountDisplayLabel,
+  getAccountInfo,
+  credentialPresence,
+  ALL_AGENT_IDS,
+  type AccountInfo,
+  type CredentialPresence,
+} from './agents.js';
 import { readMeta, writeMeta, getHelpersDir } from './state.js';
 import { listInstalledVersions, getVersionHomePath, resolveVersion } from './versions.js';
 import { getProjectRunConfigs } from './run-config.js';
@@ -124,6 +131,29 @@ export function setGlobalRunStrategy(agent: AgentId, strategy: RunStrategy): voi
 
 function isRotationEligible(candidate: RotateCandidate): boolean {
   return candidate.signedIn && hasUsageAvailable(candidate);
+}
+
+/**
+ * Whether a version home can actually authenticate a launch.
+ *
+ * `getAccountInfo` falls back to the active/global HOME when a version home has
+ * no credential of its own, so `agents view` still shows who is logged in. Launch
+ * paths isolate config (GROK_HOME, CODEX_HOME, KIMI_CODE_HOME, CLAUDE_CONFIG_DIR,
+ * …) to the per-version home, so a home that only "inherits" the active login
+ * cannot spawn a signed-in agent — balanced kept picking those empty homes and
+ * the run died on "Not signed in".
+ *
+ * When we know where the credential lives (`knownLocation`), require it under
+ * THIS version home. When we don't (keychain-only / unmapped agents), trust the
+ * existing `signedIn` signal.
+ */
+export function isLaunchableSignedIn(
+  signedIn: boolean,
+  presence: Pick<CredentialPresence, 'knownLocation' | 'perVersion'>,
+): boolean {
+  if (!signedIn) return false;
+  if (!presence.knownLocation) return true;
+  return presence.perVersion;
 }
 
 function isAvailableEligible(candidate: RotateCandidate): boolean {
@@ -630,17 +660,22 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
       // one per installed version, every time `agents run` cold-starts. If
       // claude's stored token has actually expired, the spawned agent detects
       // it at its own startup and re-auths; that's the correct UX.
+      //
+      // Gate signedIn on a real per-version credential when we know where it
+      // lives — see isLaunchableSignedIn. Do not reuse the active-home fallback
+      // identity for routing, or empty version homes look healthy and die at spawn.
+      const launchable = isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
       return {
         agent,
         version,
         home,
         info,
-        accountKey: info.accountKey,
-        accountLabel: accountDisplayLabel(info),
-        email: info.email,
-        usageStatus: info.usageStatus,
-        plan: info.plan,
-        signedIn: info.signedIn,
+        accountKey: launchable ? info.accountKey : null,
+        accountLabel: launchable ? accountDisplayLabel(info) : '',
+        email: launchable ? info.email : null,
+        usageStatus: launchable ? info.usageStatus : null,
+        plan: launchable ? info.plan : null,
+        signedIn: launchable,
         lastActive: info.lastActive,
       };
     })
