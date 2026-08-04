@@ -18,8 +18,25 @@ noise; what matters is the **project**. This subsystem fills both gaps.
 ## The definition — `~/.agents/projects/<name>.yaml`
 
 One hand-editable YAML file per project, beside `routines/` and `monitors/` in the
-user repo, so it syncs across machines via `agents push/pull`. Paths are stored
-home-relative (`~/…`) so a definition re-roots on any machine.
+user repo. Paths are stored home-relative (`~/…`) so a definition re-roots on any
+machine.
+
+> **Commit them, or lose them.** Sitting in the user repo makes a definition
+> *syncable*, not synced. `agents projects add` writes the file; nothing commits it.
+> Until you run `agents repo push user`, `projects/` is an **untracked** directory, and
+> any reconcile that cleans the working tree deletes it — this cost one machine its four
+> definitions twice in a day. The only trace afterwards is a
+> `chore(local): save …-sync drift` commit that is unreachable from `HEAD`, so it is
+> recoverable until git collects it and not after. Recover with:
+>
+> ```bash
+> cd ~/.agents
+> git log --all --oneline --diff-filter=A -- 'projects/*'   # find the drift commit
+> git show <sha>:projects/<name>.yaml > projects/<name>.yaml
+> ```
+>
+> (`agents push` was removed; the command is `agents repo push <alias>`. Note that it
+> stages with `git add -A`, so check `git status` for unrelated drift first.)
 
 ```yaml
 name: rush                      # stable id == filename; what --project takes
@@ -76,6 +93,23 @@ anything else falls back to the repository-level key (`lib/project-key.ts`). Eac
 machine resolves its own cwds against its own (synced) definitions before events
 cross the wire. `agents activity --project <name>` narrows the stream to one
 project, exact-matched on this label.
+
+## `view` is `status` for one project, plus the definition
+
+`status` answers *"is anything off track?"* across projects. `view <name>` answers *"tell me
+everything about this one"* — so it must be a **superset**, never a different, thinner card.
+
+It was thinner. `view` built its own picture (root, repos, a raw Linear id, an issue count,
+milestones) and never called the card renderer, so opening a single project showed strictly
+less than the roll-up across all of them: no agents, no ships, no focus, no schedule verdict.
+The renderer even took a `milestoneLimit` parameter documented as "`status` shows the next one;
+`view` shows all" — the seam was designed and then not connected.
+
+Both commands now gather through one function (`enrichProjectsForRender`) and render through
+one card, so a signal added for either appears on both. `view` differs in exactly two ways:
+every milestone instead of the next one, and the stored definition printed in full underneath
+(each repo with its subpath and checkout, each context with its purpose, each integration with
+its URL, the Linear link, the docs, and the YAML path).
 
 ## The progress card — `agents projects status`
 
@@ -180,7 +214,7 @@ rush  ·  3 agents
 | --- | --- |
 | `agents projects list [--json]` | All projects: root, repo, live agent count. |
 | `agents projects add <name>` | Scaffold `<name>.yaml`; infers `root` + origin slug from the current repo. Flags: `--root`, `--path`, `--repo`, `--context path:purpose`, `--linear`. |
-| `agents projects view <name> [--json] [--no-remote]` (alias `show`) | Full definition + resolved paths + contexts + links + **every** Linear milestone with dates and progress. |
+| `agents projects view <name> [--json] [--window N] [--no-remote]` (alias `show`) | Everything about one project: the whole `status` card (agents, ships, focus, schedule, tickets, proof), **every** Linear milestone, then the stored definition in full. |
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
 | `agents projects status [name] [--json] [--window N] [--no-remote] [--fleet]` | The progress card (all projects, or one). `--fleet` adds per-device workspace drift over SSH. |
 | `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. |
@@ -327,6 +361,12 @@ lost (19 crashed)` — because 19 crashed sessions is a thing to go fix, not thr
 about. `orphaned` counts as **live**: `lib/session/active.ts` defines it as "alive, but no
 client is attached" (the agent outlived its window and is still working), and the repo's own
 dead rule (`commands/sessions.ts`) is `closed` and `crashed` only.
+
+The `agents` roster below the headline is filtered the same way. It used to list every matched
+session, so a card headed `23 live` went on to print `claude · crashed ×25` — the corpses the
+`dead` row already accounts for, shown a second time and contradicting the number above them.
+`isDeadStatus` is the single predicate behind both, and a test pins them to agree across every
+`ActiveStatus` so they cannot drift apart.
 
 **`planPct` measured whichever agent last wrote a todo list.** It summed each matched session's
 most recent checklist snapshot, so:

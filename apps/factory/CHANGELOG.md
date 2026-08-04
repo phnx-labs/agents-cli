@@ -6,6 +6,14 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **grok / kimi / droid / antigravity tabs now restore, reopen, and reload like the prewarm agents (#1747).**
+  Resume past the picker was still gated on `supportsPrewarming` (claude/codex/gemini/cursor/opencode),
+  so a grok/kimi/droid/antigravity tab did not come back after a window reload, a reopen-last, or a
+  reload-active-terminal — even though its transcript exists and `agents run --resume` can resume it. The
+  three surfaces now gate on the same registry check the picker uses (`agentKeyFromSession`), reload falls
+  back to a generic Ctrl+C-twice exit sequence for agents without a `PREWARM_CONFIGS` entry, and the
+  `openSingleAgent` launch path now tracks + polls those harnesses too so there is a persisted session to
+  come back to.
 - **Removed the `Agents: Enable Tmux` / `Agents: Disable Tmux` palette commands.**
   They were back-compat aliases that just flipped the `agents.terminalMode`
   setting, and the extension no longer needs its own tmux "mode" toggle — the
