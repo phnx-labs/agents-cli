@@ -29,30 +29,39 @@
  * without touching SSH; the loop (`reconnectInteractiveSession`) only adds the real
  * preflight + `sshStream` re-attach and the wait.
  *
- * **255 must mean exactly one thing: the ssh link to THIS host dropped.**
+ * **255 from the REMOTE side should never be trusted as "the link dropped."**
  * `reattachRemoteSession`'s `connected` flag is set as soon as the fast preflight
  * probe succeeds — it says nothing about whether the interactive attach that
  * follows actually reattached a live pane. If the REMOTE command (`agents
- * sessions focus <id> --local --attach-only`) itself happens to exit 255 for a
- * reason that has nothing to do with the ssh transport — its `refuseFallback`
- * fallback opening an interactive login shell on a THIRD machine, that shell
- * later closing; a nested remote-tmux hop (`jumpTo`'s "remote tmux" path in
- * commands/go.ts) dropping; any future remote-side path that happens to exit
- * 255 — `sshStream` returns that same 255, `reconnectStep` cannot tell it apart
- * from a genuine drop, and `connected: true` refills the retry budget. The loop
- * reconnects, the remote command does the same wrong thing again, closes again,
- * and repeats forever — "attempt 1/N" printed on every single cycle, the
- * terminal filling with aborted-TTY escape-code garbage, `MAX_ATTEMPTS` never
- * actually bounding anything. This is fixed at the SOURCE, not per producer:
- * {@link wrapRemoteExitCode} wraps the entire remote command so that whatever
- * exit code IT decides on, a 255 is remapped to {@link REMOTE_EXIT_255_REMAPPED}
- * before `sshStream` ever sees it — 255 is reclaimed exclusively for the local
- * ssh transport's own connection-layer failure, regardless of which remote-side
- * path produced the original code, and regardless of the peer's `agents` version
- * (the remap happens in the shell wrapper THIS process sends, not in anything
- * the peer's own binary has to understand). Both hairpin paths above are
- * covered by construction, since the wrapper sees only the whole remote
- * command's final exit code, not which internal branch produced it.
+ * sessions focus <id> --local --attach-only`) itself ever happened to exit 255
+ * for a reason that has nothing to do with the ssh transport, `sshStream` would
+ * return that same 255, `reconnectStep` couldn't tell it apart from a genuine
+ * drop, and `connected: true` would refill the retry budget forever — "attempt
+ * 1/N" printed on every single cycle, the terminal filling with aborted-TTY
+ * escape-code garbage, `MAX_ATTEMPTS` never actually bounding anything.
+ *
+ * Two candidate producers of that scenario were investigated —
+ * `refuseFallback`'s login-shell fallback (commands/go.ts) and `jumpTo`'s
+ * nested remote-tmux hop — and both turned out to be UNREACHABLE through this
+ * exact remote command: under `--local`, `gatherLiveTargets` never sets a
+ * foreign `.machine` (go.ts:61), so `remote` is always `undefined` in both,
+ * and neither branch can fire (the same reasoning that made an earlier,
+ * narrower fix here dead code — see git history). So this fix does not close
+ * a confirmed incident cause; what it closes is the underlying channel-level
+ * flaw that would make *any* future remote-side 255 producer — reachable today
+ * or not — indistinguishable from a real drop. {@link wrapRemoteExitCode} wraps
+ * the entire remote command so that whatever exit code it decides on, a 255 is
+ * remapped to {@link REMOTE_EXIT_255_REMAPPED} before `sshStream` ever sees it,
+ * regardless of which internal branch produced it and regardless of the peer's
+ * `agents` version (the remap happens in the shell wrapper THIS process sends).
+ *
+ * This does NOT close every way `reconnectStep` can loop on a real transport
+ * 255: a genuinely recurring LOCAL ssh failure (a fast-flapping link, an
+ * attach that dies at the TTY stage on every reconnect) still refills the
+ * budget every time by design (see "Why the budget refills on `connected`"
+ * above) and can still print "attempt 1/N" indefinitely. That's an accepted,
+ * pre-existing tradeoff of the original feature, not something this fix
+ * changes either way — tracked separately (agents-cli#1884), not fixed here.
  */
 import { sshExec, sshStream, shellQuote } from '../ssh-exec.js';
 import { sshTargetFor, type Host } from './types.js';
@@ -141,17 +150,18 @@ export function remoteExitNotice(sessionId: string, host: string): string {
 }
 
 /**
- * Wrap `cmd` in `bash -lc` (the same pattern `buildRemoteAgentsInvocation` in
- * remote-cmd.ts uses for every other remote dispatch — see its own doc comment
- * for why a login shell, `bash -lc`, is used at all) with a trailing exit-code
- * remap: whatever `cmd` itself exits with, a 255 becomes
+ * Wrap `cmd` in `bash -lc` (the login-shell pattern `buildRemoteAgentsInvocation`
+ * in remote-cmd.ts uses for its own POSIX callers — see its doc comment for why
+ * a login shell at all; the sibling interactive dispatch in dispatch.ts sends a
+ * bare `agents …` with no shell wrapper, so this is a NEW login-shell hop on the
+ * reattach path specifically, not something already universal here) with a
+ * trailing exit-code remap: whatever `cmd` itself exits with, a 255 becomes
  * {@link REMOTE_EXIT_255_REMAPPED} before the wrapper exits — see the file
- * header for why. Every other code (0, 1, …) passes through unchanged. Unlike
- * `buildRemoteAgentsInvocation`'s callers, this carries no PATH bootstrap of its
- * own — `ensureHostReady`/`readyProbe` already gates every `--host` dispatch on
- * `bash -lc 'agents --version'` succeeding before a run is attempted at all, so
- * the peer's login shell resolving `agents` is an established precondition, not
- * something this wrapper needs to re-derive. Pure string-building, so it is
+ * header for why. Every other code (0, 1, …) passes through unchanged. This
+ * carries no PATH bootstrap of its own — `ensureHostReady`/`readyProbe` already
+ * gates every `--host` dispatch on `bash -lc 'agents --version'` succeeding
+ * before a run is attempted at all, so the peer's login shell resolving `agents`
+ * is an established precondition here too. Pure string-building, so it is
  * unit-tested without SSH (and, since the constructed script is ordinary POSIX,
  * also exercised by actually running it through a real shell in the test — no
  * mock needed).

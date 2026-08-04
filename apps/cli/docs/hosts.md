@@ -264,11 +264,12 @@ agents run <agent> ["<task>"] --host <host>
 >
 > The remote `agents sessions focus --local --attach-only` invocation the reattach
 > drives is wrapped so that whatever exit code it decides on, a 255 is remapped to
-> 254 before this process sees it — 255 stays reserved exclusively for *this*
-> ssh transport's own connection-layer failure, so a remote-side path that happens
-> to exit 255 for its own reasons (its interactive-shell fallback closing when
-> it finds no live pane, a nested remote-tmux hop dropping) is never mistaken for
-> the link dropping again.
+> 254 before this process sees it — so a remote-side path that happened to exit
+> 255 for its own reasons would never be mistaken for the link dropping again.
+> This closes a channel-level flaw (any future remote-side 255 producer would
+> have been indistinguishable from a real drop) rather than a confirmed live
+> bug; a genuinely recurring *local* ssh failure can still refill the retry
+> budget on every attempt by design (that part is unchanged).
 >
 > Pass `--name <slug>` at dispatch to give the run a durable handle instead of an
 > opaque id: `agents hosts ps` shows it under a **NAME** column, and
