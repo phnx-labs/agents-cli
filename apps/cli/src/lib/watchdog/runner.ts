@@ -22,6 +22,8 @@
  *   - flags.json   — { [sessionId]: { reason, host, atMs } } — un-addressable stalls.
  *   - last-tick.json — the full outcome list from the most recent tick.
  *   - policy/<sessionId> — per-session sentinel: off | keep | handsoff.
+ *   - rotate/<sessionId>.json — the in-place rotate state machine (rotate.ts).
+ *   - rotate-skips.json — zero-healthy skip suppression: { [sessionId]: suppressUntilMs }.
  *
  * The pure logic (classifyTerminal / isLikelyTrulyBlocked) is imported and never
  * re-implemented; the runner only supplies its I/O (sessions, tails, clock,
@@ -31,6 +33,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import type { ActiveSession } from '../session/active.js';
 import { getActiveSessions } from '../session/active.js';
 import {
@@ -68,6 +71,26 @@ import { mailboxIdForActiveSession } from '../mailbox-target.js';
 import { readBlock, blockIdForSession, type OpenBlock } from '../feed.js';
 import { summarizeWatchdogTail } from './watchdogTail.js';
 import { appendWatchdogEvents, type WatchdogEvent } from './log.js';
+import {
+  buildRotateLaunchCommand,
+  buildRotateReplayText,
+  classifyTailForRotate,
+  defaultRotateGate,
+  defaultRotateTranscriptLive,
+  exitSequenceFor,
+  isInflightPhase,
+  isWatchdogRotateEnabled,
+  listInflightRotates,
+  readRotateState,
+  recordRotateSkip,
+  shouldLogRotateSkip,
+  writeRotateState,
+  DEFAULT_ROTATE_READINESS_MS,
+  DEFAULT_ROTATE_SKIP_COOLDOWN_MS,
+  type RotateGateResult,
+  type RotatePhase,
+  type RotateState,
+} from './rotate.js';
 
 /** Per-session policy sentinel. `keep` is the default (watchdog may nudge). */
 export type WatchdogPolicy = 'off' | 'keep' | 'handsoff';
@@ -135,9 +158,35 @@ export interface WatchdogTickOptions {
   /** Open feed block for a session (parked-on-question detection). Default reads the feed. */
   openBlockFor?: (s: ActiveSession) => OpenBlock | null;
   /** Inject primitive. Default injectIntoTerminal — tests capture the resolved target. */
-  injectFn?: (target: InjectTarget, text: string, opts: { dryRun?: boolean }) => Promise<InjectResult>;
+  injectFn?: (target: InjectTarget, text: string, opts: { dryRun?: boolean; enter?: boolean }) => Promise<InjectResult>;
   /** Override the canonical watchdog.log path (tests point at a tmp file). */
   logPath?: string;
+
+  // --- rotate seams (watchdog/rotate.ts) ---
+  /**
+   * In-place rotate of rate-limited sessions. Default = `watchdog.rotate` in
+   * agents.yaml (on). Only acts when `nudge` is also set (a dry tick never
+   * rotates).
+   */
+  rotate?: boolean;
+  /** Bounded wait for the relaunched TUI to come live. Default 60s. */
+  rotateReadinessMs?: number;
+  /**
+   * First-party health gate run BEFORE rotating. Default defaultRotateGate()
+   * (collectHarnessCandidates + pickHarnessWeighted — the same selection
+   * `agents run auto` makes). Tests inject a synthetic verdict.
+   */
+  rotateGate?: () => Promise<RotateGateResult>;
+  /** New session id for the relaunch. Default crypto.randomUUID(). Tests pin it. */
+  newSessionIdFor?: () => string;
+  /**
+   * Readiness probe: is the relaunched TUI live? Default: a transcript for the
+   * new session id resolves under a known harness layout, OR a fresh active
+   * session (started after the rotate began) exists in this tick's scan.
+   */
+  tuiLiveFor?: (state: RotateState, sessions: ActiveSession[]) => boolean;
+  /** Delay between exit-sequence keystrokes. Default 300ms; tests set 0. */
+  rotateKeyDelayMs?: number;
 }
 
 /** The smart brain seam: a stalled candidate in, a nudge decision out. */
@@ -155,8 +204,10 @@ export interface SessionOutcome {
   /** stalled duration (ms), when stalled. */
   stalledForMs?: number;
   policy: WatchdogPolicy;
-  decision: 'nudge' | 'skip';
+  decision: 'nudge' | 'skip' | 'rotate';
   reason: string;
+  /** The rotate machine's phase after this tick (decision === 'rotate'). */
+  rotatePhase?: RotatePhase;
   /** The resolved rail, when delivered by injecting into a terminal split. */
   rail?: InjectRail;
   /** How the nudge was (or would be) delivered: inject | mailbox | resume. */
@@ -184,6 +235,8 @@ export interface WatchdogTickResult {
     nudged: number;
     unaddressable: number;
     skipped: number;
+    /** Sessions the tick moved through the rotate machine (any phase). */
+    rotating: number;
   };
   /**
    * RUSH-2007 Layer C: per-session presence reconciled from this tick's active
@@ -445,6 +498,97 @@ async function deliverViaResume(session: ActiveSession, text: string): Promise<{
   }
 }
 
+// --- the rotate machine (watchdog/rotate.ts) ----------------------------------
+
+/** Everything advanceRotate needs from the tick — the runner's seam style. */
+interface RotateAdvanceDeps {
+  dir: string;
+  nowMs: number;
+  sessions: ActiveSession[];
+  /** False on a dry tick (no --nudge): the machine waits, never injects. */
+  mayInject: boolean;
+  injectFn: (target: InjectTarget, text: string, opts: { dryRun?: boolean; enter?: boolean }) => Promise<InjectResult>;
+  tuiLiveFor: (state: RotateState, sessions: ActiveSession[]) => boolean;
+  injectDryRun?: boolean;
+  logEvents: WatchdogEvent[];
+  flags: Record<string, { reason: string; host?: string; atMs: number }>;
+}
+
+/** The one-line reason a rotate outcome carries. */
+function rotateOutcomeReason(s: RotateState): string {
+  switch (s.phase) {
+    case 'awaiting-tui':
+      return `rotate in flight — awaiting new session ${s.newSessionId} TUI (deadline ${new Date(s.deadlineMs).toISOString()})`;
+    case 'done':
+      return `rotated → ${s.newSessionId}; replayed resume`;
+    case 'failed':
+      return `rotate failed: ${s.error ?? 'unknown'}`;
+    default:
+      return `rotate in flight (${s.phase})`;
+  }
+}
+
+/**
+ * Advance ONE in-flight rotate by a single tick. Only `awaiting-tui` normally
+ * spans ticks (the exit sequence kills the old session, so the machine resumes
+ * here on the next pass); `exiting`/`launching`/`replaying` persisted on disk
+ * are crash residue — the first two fall through to the readiness probe (the
+ * launch may or may not have landed; the probe/deadline decides), a `replaying`
+ * residue re-delivers the replay. On the readiness deadline the session is
+ * FAILED + flagged and the machine stops — never blind-type into a dead shell.
+ */
+async function advanceRotate(state: RotateState, deps: RotateAdvanceDeps): Promise<RotateState> {
+  let s = state;
+  const fail = (error: string): RotateState => {
+    s = { ...s, phase: 'failed', error, updatedAtMs: deps.nowMs };
+    writeRotateState(deps.dir, s);
+    deps.flags[s.sessionId] = { reason: `rotate failed: ${error}`, host: s.host, atMs: deps.nowMs };
+    deps.logEvents.push({
+      ts: deps.nowMs, kind: 'rotate', terminalId: s.sessionId, agentType: s.agent,
+      message: `rotate failed: ${s.sessionId} — ${error}`,
+    });
+    return s;
+  };
+
+  if (s.phase === 'exiting' || s.phase === 'launching') {
+    s = { ...s, phase: 'awaiting-tui', updatedAtMs: deps.nowMs };
+    writeRotateState(deps.dir, s);
+  }
+
+  if (s.phase === 'awaiting-tui') {
+    if (!deps.tuiLiveFor(s, deps.sessions)) {
+      if (deps.nowMs > s.deadlineMs) {
+        return fail(`new session ${s.newSessionId} TUI not live within the readiness budget — flagged, nothing typed into a dead shell`);
+      }
+      return s; // still inside the bounded wait
+    }
+    s = { ...s, phase: 'replaying', updatedAtMs: deps.nowMs };
+    writeRotateState(deps.dir, s);
+  }
+
+  if (s.phase === 'replaying') {
+    if (!deps.mayInject) return s; // dry tick: hold, never inject
+    let ok = true;
+    let error: string | undefined;
+    try {
+      const r = await deps.injectFn(s.target, buildRotateReplayText(s.sessionId), { dryRun: deps.injectDryRun });
+      ok = r.ok;
+      error = r.error;
+    } catch (err) {
+      ok = false;
+      error = err instanceof Error ? err.message : String(err);
+    }
+    if (!ok) return fail(`replay inject failed: ${error ?? 'unknown error'}`);
+    s = { ...s, phase: 'done', updatedAtMs: deps.nowMs };
+    writeRotateState(deps.dir, s);
+    deps.logEvents.push({
+      ts: deps.nowMs, kind: 'rotate', terminalId: s.sessionId, agentType: s.agent,
+      message: `rotated ${s.sessionId} → ${s.newSessionId}; replayed resume`,
+    });
+  }
+  return s;
+}
+
 // --- the tick ---------------------------------------------------------------
 
 /**
@@ -464,6 +608,21 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
   const smartDecider = opts.smartDecider ?? makeDefaultSmartDecider(opts.smartAgent ?? 'claude');
   const openBlockFor = opts.openBlockFor ?? defaultOpenBlockFor;
   const injectFn = opts.injectFn ?? injectIntoTerminal;
+
+  // Rotate seams (watchdog/rotate.ts). The config is read fresh per tick
+  // (readMeta is mtime-cached), so a `watchdog.rotate` flip is honored on the
+  // next pass. The default readiness probe accepts a transcript for the new
+  // session id (a claude pick honors --session-id) OR any active session that
+  // started after the rotate began (covers non-claude picks, whose id we can't
+  // know a priori).
+  const rotateEnabled = opts.rotate ?? isWatchdogRotateEnabled();
+  const rotateGate = opts.rotateGate ?? defaultRotateGate;
+  const newSessionIdFor = opts.newSessionIdFor ?? (() => crypto.randomUUID());
+  const rotateReadinessMs = opts.rotateReadinessMs ?? DEFAULT_ROTATE_READINESS_MS;
+  const rotateKeyDelayMs = opts.rotateKeyDelayMs ?? 300;
+  const tuiLiveFor = opts.tuiLiveFor ?? ((state: RotateState, list: ActiveSession[]) =>
+    list.some((x) => !!x.sessionId && x.sessionId !== state.sessionId && (x.startedAtMs ?? 0) >= state.startedAtMs)
+    || defaultRotateTranscriptLive(state.newSessionId));
 
   const sessions = opts.sessions ?? (await getActiveSessions());
 
@@ -491,6 +650,18 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
   const logEvents: WatchdogEvent[] = [];
   const viaLabel = (plan: DeliveryPlan): string =>
     plan.via === 'inject' ? `inject (${plan.rail})` : plan.via;
+
+  // Rotate bookkeeping for this tick: ids the in-loop path already advanced
+  // (the post-loop sweep handles the rest — a session whose exit sequence
+  // killed it drops out of the active list, so only the sweep can finish it).
+  const advancedRotates = new Set<string>();
+  const rotateDeps: RotateAdvanceDeps = {
+    dir, nowMs, sessions,
+    mayInject: opts.nudge === true,
+    injectFn, tuiLiveFor,
+    injectDryRun: opts.injectDryRun,
+    logEvents, flags,
+  };
 
   for (const session of sessions) {
     const policy = policyFor(session);
@@ -557,6 +728,159 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       tailLines,
       stalledForMs: status.stalledForMs,
     };
+
+    // --- rotate path (watchdog/rotate.ts) -----------------------------------
+    // An in-flight rotate OWNS this session: advance the machine, never nudge.
+    // A stalled session whose tail shows a HARD LIMIT rotates in place instead
+    // of nudging — "Continue." cannot unspend a capped account.
+    if (rotateEnabled) {
+      const sid = session.sessionId;
+      const inflight = readRotateState(dir, sid);
+      if (inflight && isInflightPhase(inflight.phase)) {
+        const advanced = await advanceRotate(inflight, rotateDeps);
+        advancedRotates.add(sid);
+        outcomes.push({
+          ...base, decision: 'rotate', rotatePhase: advanced.phase,
+          reason: rotateOutcomeReason(advanced),
+        });
+        continue;
+      }
+
+      const verdict = classifyTailForRotate(tailLines, nowMs);
+      if (verdict.kind === 'rate_limited') {
+        // handsoff = detect + flag, but never rotate (mirrors the nudge path).
+        if (policy === 'handsoff') {
+          flags[sid] = {
+            reason: 'handsoff: rate-limited, would rotate in place but policy is hands-off',
+            host: session.host,
+            atMs: nowMs,
+          };
+          outcomes.push({
+            ...base, decision: 'skip',
+            reason: 'handsoff: rate-limited — flagged, not rotated',
+          });
+          continue;
+        }
+
+        // Dry tick (no --nudge): report what WOULD happen, touch nothing.
+        if (!opts.nudge) {
+          outcomes.push({
+            ...base, decision: 'rotate',
+            reason: 'rate-limited — would rotate in place via `agents run auto` (dry — pass --nudge)',
+          });
+          continue;
+        }
+
+        // First-party health gate — the SAME selection `agents run auto` would
+        // make. Zero healthy → ONE skip event per cooldown window, terminal
+        // untouched. Cooldown = earliestResetAcross (gate) → parsed tail reset
+        // → 30m default, whichever is known first.
+        const gate = await rotateGate();
+        if (!gate.healthy) {
+          const cooldownMs =
+            gate.resetsAtMs !== undefined ? Math.max(60_000, gate.resetsAtMs - nowMs)
+            : verdict.resetsAtMs !== undefined ? Math.max(60_000, verdict.resetsAtMs - nowMs)
+            : DEFAULT_ROTATE_SKIP_COOLDOWN_MS;
+          const suppressUntilMs = nowMs + cooldownMs;
+          if (shouldLogRotateSkip(dir, sid, nowMs)) {
+            recordRotateSkip(dir, sid, suppressUntilMs);
+            logEvents.push({
+              ts: nowMs, kind: 'rotate', terminalId: sid, agentType: candidate.agentType,
+              message: `rotate skipped: no healthy harness — ${gate.detail}; suppressed until ${new Date(suppressUntilMs).toISOString()}`,
+              reason: gate.detail,
+            });
+          }
+          outcomes.push({
+            ...base, decision: 'skip',
+            reason: `rate-limited but no healthy account/harness to rotate into — terminal untouched (suppressed until ${new Date(suppressUntilMs).toISOString()})`,
+          });
+          continue;
+        }
+
+        // The safety gate is the same one the nudge path obeys: an exact
+        // addressable rail or an honest flag — never a guessed target.
+        const resolution = resolveInjectTargetForSession(session, { allowGhosttyFocus: opts.allowGhosttyFocus });
+        if (!resolution.addressable) {
+          flags[sid] = { reason: `rotate: ${resolution.reason}`, host: session.host, atMs: nowMs };
+          outcomes.push({
+            ...base, decision: 'skip', addressable: false,
+            reason: `rate-limited but un-addressable — ${resolution.reason}`,
+          });
+          continue;
+        }
+
+        // Begin: persist exiting → inject the per-harness exit sequence →
+        // launching → inject `agents run auto` → awaiting-tui (bounded).
+        const newSessionId = newSessionIdFor();
+        let state: RotateState = {
+          sessionId: sid,
+          newSessionId,
+          agent: session.kind,
+          phase: 'exiting',
+          target: resolution.target,
+          host: session.provenance?.transport === 'ssh' ? session.provenance.host : undefined,
+          startedAtMs: nowMs,
+          updatedAtMs: nowMs,
+          deadlineMs: nowMs + rotateReadinessMs,
+        };
+        writeRotateState(dir, state);
+        advancedRotates.add(sid);
+
+        let rotateFailed: string | null = null;
+        for (const key of exitSequenceFor(session.kind)) {
+          try {
+            const r = await injectFn(state.target, key, { dryRun: opts.injectDryRun, enter: false });
+            if (!r.ok) { rotateFailed = `exit sequence inject failed: ${r.error ?? 'unknown error'}`; break; }
+          } catch (err) {
+            rotateFailed = `exit sequence inject threw: ${err instanceof Error ? err.message : String(err)}`;
+            break;
+          }
+          // A real TUI needs a beat between Esc and the interrupt pair.
+          if (rotateKeyDelayMs > 0 && !opts.injectDryRun) {
+            await new Promise((resolve) => setTimeout(resolve, rotateKeyDelayMs));
+          }
+        }
+
+        if (!rotateFailed) {
+          state = { ...state, phase: 'launching', updatedAtMs: nowMs };
+          writeRotateState(dir, state);
+          const launch = buildRotateLaunchCommand({ host: state.host, sessionId: newSessionId });
+          try {
+            const r = await injectFn(state.target, launch, { dryRun: opts.injectDryRun });
+            if (!r.ok) rotateFailed = `launch inject failed: ${r.error ?? 'unknown error'}`;
+          } catch (err) {
+            rotateFailed = `launch inject threw: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        }
+
+        if (rotateFailed) {
+          state = { ...state, phase: 'failed', error: rotateFailed, updatedAtMs: nowMs };
+          writeRotateState(dir, state);
+          flags[sid] = { reason: `rotate failed: ${rotateFailed}`, host: session.host, atMs: nowMs };
+          logEvents.push({
+            ts: nowMs, kind: 'rotate', terminalId: sid, agentType: candidate.agentType,
+            message: `rotate failed: ${sid} — ${rotateFailed}`,
+          });
+          outcomes.push({
+            ...base, decision: 'rotate', rotatePhase: 'failed', addressable: true, rail: resolution.rail,
+            reason: `rotate failed: ${rotateFailed}`,
+          });
+          continue;
+        }
+
+        state = { ...state, phase: 'awaiting-tui', updatedAtMs: nowMs };
+        writeRotateState(dir, state);
+        logEvents.push({
+          ts: nowMs, kind: 'rotate', terminalId: sid, agentType: candidate.agentType,
+          message: `rotating ${sid} in place → agents run auto (new session ${newSessionId})`,
+        });
+        outcomes.push({
+          ...base, decision: 'rotate', rotatePhase: 'awaiting-tui', addressable: true, rail: resolution.rail,
+          reason: `rotating in place → agents run auto (new session ${newSessionId})`,
+        });
+        continue;
+      }
+    }
 
     // The brain. The cheap deterministic pre-filter resolves the obvious cases;
     // parked-on-question and ambiguous stalls ESCALATE to the smart brain. `smart`
@@ -678,6 +1002,17 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     }
   }
 
+  // Advance in-flight rotates the in-loop path did NOT touch — critically the
+  // common case where the exit sequence killed the old harness, so the old
+  // session dropped out of the active-session list and only this sweep can
+  // finish the machine (readiness → replay, or deadline → fail + flag). Runs
+  // even when rotate was just disabled so a mid-flight machine is never
+  // stranded; a dry tick advances state but never injects (mayInject).
+  for (const inflight of listInflightRotates(dir)) {
+    if (advancedRotates.has(inflight.sessionId)) continue;
+    await advanceRotate(inflight, rotateDeps);
+  }
+
   // Persist the cooldown ledger under a lock: fresh-read + merge this tick's
   // updates + atomic write, so a concurrent tick's timestamps are never lost
   // (the old unlocked read-at-start / write-at-end was a lost-update race).
@@ -703,6 +1038,7 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     nudged: outcomes.filter((o) => o.injected).length,
     unaddressable: outcomes.filter((o) => o.addressable === false).length,
     skipped: outcomes.filter((o) => o.decision === 'skip').length,
+    rotating: outcomes.filter((o) => o.decision === 'rotate').length,
   };
   const result: WatchdogTickResult = { atMs: nowMs, didNudge: opts.nudge === true, outcomes, counts, presence };
   writeJsonFile(path.join(dir, 'last-tick.json'), result);

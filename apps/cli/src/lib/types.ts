@@ -832,6 +832,16 @@ export interface Meta {
   isolatedAgents?: Partial<Record<AgentId, string>>;
   run?: RunConfig;
   /**
+   * Daemon watchdog config. `rotate` (default `on`) lets the watchdog rotate a
+   * rate-limited session IN PLACE onto a healthy account/harness via
+   * `agents run auto` — see lib/watchdog/rotate.ts. Set `off` to keep the
+   * nudge-only behavior (the Factory `agents.watchdog.autoRotate: false`
+   * migration writes `off` here).
+   */
+  watchdog?: {
+    rotate?: 'on' | 'off';
+  };
+  /**
    * `agents run --lease` config. `secretsBundle` names the keychain secrets bundle
    * whose provider token (e.g. `HCLOUD_TOKEN`) crabbox uses to reach the cloud API.
    * When unset, the bundle is resolved by env (`AGENTS_LEASE_SECRETS_BUNDLE`) then
