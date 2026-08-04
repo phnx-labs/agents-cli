@@ -42,6 +42,7 @@ import {
   isSafeProjectName,
   type ProjectDef,
   type ProjectContext,
+  type ProjectGoal,
 } from '../lib/projects.js';
 import {
   rollupSessionsByProject,
@@ -93,6 +94,16 @@ function parseContextFlag(raw: string): ProjectContext {
   const i = raw.indexOf(':');
   if (i === -1) return { path: raw.trim(), purpose: '' };
   return { path: raw.slice(0, i).trim(), purpose: raw.slice(i + 1).trim() };
+}
+
+/** `objective:measure` → a goal. The measure is optional; the objective may contain colons only after the first is claimed. */
+function parseGoalFlag(raw: string): ProjectGoal {
+  const i = raw.indexOf(':');
+  if (i === -1) return { objective: raw.trim() };
+  const measure = raw.slice(i + 1).trim();
+  const goal: ProjectGoal = { objective: raw.slice(0, i).trim() };
+  if (measure) goal.measure = measure;
+  return goal;
 }
 
 /**
@@ -444,6 +455,9 @@ function renderCard(
   }
   // `view` prints these in full (path + purpose, label + URL) right below, so
   // the compact one-line summaries would just say the same thing twice.
+  if (!detail && def.goals?.length) {
+    console.log(`  ${chalk.dim('goal')}     ${def.goals.map((g) => g.objective).join(' · ')}`);
+  }
   if (!detail && def.contexts?.length) {
     console.log(`  ${chalk.dim('context')}  ${def.contexts.map((c) => c.path).join(' · ')}`);
   }
@@ -538,12 +552,13 @@ export function registerProjectsCommands(program: Command): void {
     .option('--path <subdir>', 'Default cwd for agents (a monorepo subdir)')
     .option('--repo <owner/repo>', 'Primary GitHub slug (defaults to the origin remote)')
     .option('--context <path:purpose...>', 'A described starting point; repeatable')
+    .option('--goal <objective:measure...>', 'An outcome the project serves; repeatable')
     .option('--linear <url-or-id>', 'Linear project URL or id')
     .option('--force', 'Overwrite an existing definition')
     .action(
       async (
         name: string,
-        opts: { root?: string; path?: string; repo?: string; context?: string[]; linear?: string; force?: boolean },
+        opts: { root?: string; path?: string; repo?: string; context?: string[]; goal?: string[]; linear?: string; force?: boolean },
       ) => {
         if (!isSafeProjectName(name)) {
           console.error(chalk.red(`Invalid project name: "${name}" (letters, digits, ., _, - only)`));
@@ -568,6 +583,7 @@ export function registerProjectsCommands(program: Command): void {
         if (opts.path) def.defaultPath = `${root!.replace(/\/$/, '')}/${opts.path.replace(/^\//, '')}`;
         if (repo) def.repo = repo;
         if (opts.context?.length) def.contexts = opts.context.map(parseContextFlag);
+        if (opts.goal?.length) def.goals = opts.goal.map(parseGoalFlag);
         if (opts.linear) {
           def.linear = /^https?:/.test(opts.linear) ? { url: opts.linear } : { projectId: opts.linear };
         }
@@ -643,6 +659,7 @@ export function registerProjectsCommands(program: Command): void {
         const where = [rp.subpath ? `subpath ${rp.subpath}` : undefined, rp.path].filter(Boolean).join(' · ');
         console.log(`  ${chalk.dim('repo')}     ${rp.slug}${where ? chalk.dim(`  (${where})`) : ''}`);
       }
+      for (const g of def.goals ?? []) console.log(`  ${chalk.dim('goal')}     ${g.objective}${g.measure ? chalk.dim(`  · ${g.measure}`) : ''}`);
       for (const c of def.contexts ?? []) console.log(`  ${chalk.dim('context')}  ${chalk.cyan(c.path)} ${chalk.dim('—')} ${c.purpose}`);
       for (const ig of def.integrations ?? []) {
         console.log(`  ${chalk.dim(ig.kind.padEnd(8))} ${ig.url}${ig.label ? chalk.dim(`  (${ig.label})`) : ''}`);
@@ -826,14 +843,15 @@ export function registerProjectsCommands(program: Command): void {
     .option('--root <path>', 'Repo / monorepo root')
     .option('--path <subdir>', 'Default cwd for agents (a monorepo subdir)')
     .option('--description <text>', 'One-line description shown on the card')
-    .action((name: string, opts: { repo?: string; root?: string; path?: string; description?: string }) => {
+    .option('--goal <objective:measure...>', 'Replace the goals this project serves; repeatable')
+    .action((name: string, opts: { repo?: string; root?: string; path?: string; description?: string; goal?: string[] }) => {
       const def = loadProjectDef(name);
       if (!def) {
         console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
         process.exit(1);
       }
       const fields = (['repo', 'root', 'path', 'description'] as const).filter((k) => opts[k] !== undefined);
-      if (fields.length === 0) {
+      if (fields.length === 0 && !opts.goal?.length) {
         console.error(chalk.red('Nothing to set. Pass a field, e.g. --repo <owner/repo>.'));
         process.exit(1);
       }
@@ -843,6 +861,7 @@ export function registerProjectsCommands(program: Command): void {
       if (opts.repo !== undefined) def.repo = opts.repo;
       if (opts.root !== undefined) def.root = opts.root;
       if (opts.description !== undefined) def.description = opts.description;
+      if (opts.goal?.length) def.goals = opts.goal.map(parseGoalFlag);
       if (opts.path !== undefined) {
         // `--path` is a subdir OF the root, so without one there is nothing to
         // hang it off. A def imported with `--from-linear` that found no local
@@ -860,6 +879,7 @@ export function registerProjectsCommands(program: Command): void {
       writeProjectDef(def);
       console.log(chalk.green(`Updated ${def.name}`));
       for (const f of fields) console.log(chalk.gray(`  ${f}  ${f === 'path' ? def.defaultPath : def[f as 'repo' | 'root' | 'description']}`));
+      if (opts.goal?.length) console.log(chalk.gray(`  goals  ${def.goals?.map((g) => g.objective).join(' · ')}`));
     });
 
   // ---- link ----

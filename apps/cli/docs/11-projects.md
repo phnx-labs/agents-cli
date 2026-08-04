@@ -46,6 +46,9 @@ defaultPath: ~/src/github.com/phnx-labs/rush/apps/web   # where an agent's cwd l
 repo: phnx-labs/rush            # primary GitHub slug (PR / merge rollup)
 repos:                          # additional repos, each with an optional monorepo subpath
   - slug: phnx-labs/rush-infra
+goals:                          # the outcomes this project serves (OKR-shaped)
+  - objective: "Ship Rush 2.0"
+    measure: "all tiers migrated"
 contexts:                       # described starting points — an agent reads `purpose`
   - path: apps/web
     purpose: "user-facing Next.js app; funnel + growth surfaces"
@@ -66,6 +69,7 @@ linear:
 | `defaultPath` | Where an agent's cwd lands (a monorepo subdir). Defaults to `root`. |
 | `repo` / `repos[]` | GitHub slug(s), each with an optional `subpath`, for the PR/merge rollup. `repos[].path` (home-relative) names that repo's local checkout and opts it into workspace probing (`status --fleet`). |
 | `contexts[]` | `{path, purpose}` described starting points — indexed anchors for agents. |
+| `goals[]` | `{objective, measure}` the OKR-shaped outcomes a project serves — a project may have several. The objective is the "why"; `measure` is the optional key result. Milestones (pulled from Linear) are the dated checkpoints toward them. |
 | `integrations[]` | `{kind, url, label}` external context sources. |
 | `linear` | `{projectId, url}` — reuses the existing Linear path. |
 
@@ -213,14 +217,14 @@ rush  ·  3 agents
 | Command | Does |
 | --- | --- |
 | `agents projects list [--json]` | All projects: root, repo, live agent count. |
-| `agents projects add <name>` | Scaffold `<name>.yaml`; infers `root` + origin slug from the current repo. Flags: `--root`, `--path`, `--repo`, `--context path:purpose`, `--linear`. |
+| `agents projects add <name>` | Scaffold `<name>.yaml`; infers `root` + origin slug from the current repo. Flags: `--root`, `--path`, `--repo`, `--context path:purpose`, `--goal objective:measure`, `--linear`. |
 | `agents projects view <name> [--json] [--window N] [--no-remote]` (alias `show`) | Everything about one project: the whole `status` card (agents, ships, focus, schedule, tickets, proof), **every** Linear milestone, then the stored definition in full. |
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
 | `agents projects status [name] [--json] [--window N] [--no-remote] [--fleet]` | The progress card (all projects, or one). `--fleet` adds per-device workspace drift over SSH. |
 | `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. |
 | `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--linear-first-factory-gated). |
 | `agents projects import --from-factory [--min-confidence low\|medium\|high] [--all]` | Absorb `~/.agents/factory/projects.json`. Imports only `high`-confidence rows by default. |
-| `agents projects set <name> [--repo\|--root\|--path\|--description]` | Change one field, preserving every other. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
+| `agents projects set <name> [--repo\|--root\|--path\|--description\|--goal objective:measure]` | Change one field, preserving every other. `--goal` (repeatable) replaces the goals list. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
 | `agents projects rm <name>` | Delete the definition (never touches the repo). |
 
 `agents run --project <name>` is unchanged in spelling — it just resolves richer
@@ -246,8 +250,8 @@ with nobody looking. A project with no exact local match still imports, carrying
 `projects set` or by editing the YAML.
 
 Re-importing is safe. An existing def is preserved field-for-field and only
-`linear` is overwritten, so a hand-set `description`, `contexts`, or `integrations`
-survives. A def that already carries `root`/`repo` is skipped unless `--force`,
+`linear` is overwritten, so a hand-set `description`, `goals`, `contexts`, or
+`integrations` survives. A def that already carries `root`/`repo` is skipped unless `--force`,
 so a re-import never re-points a project you have already bound by hand.
 
 **`--from-factory` is a guess, so it is gated.** Factory's registry is
