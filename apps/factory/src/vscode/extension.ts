@@ -1731,26 +1731,6 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agents.enableTmux', async () => {
-      // Back-compat command id: flips terminalMode back to 'auto' (tmux by
-      // default when available). The setting is the source of truth now.
-      const config = vscode.workspace.getConfiguration();
-      await config.update('agents.terminalMode', 'auto', vscode.ConfigurationTarget.Global);
-      vscode.window.showInformationMessage('Tmux mode enabled (auto). New agent terminals will run inside tmux when available.');
-      await updateContextKeys(context);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('agents.disableTmux', async () => {
-      const config = vscode.workspace.getConfiguration();
-      await config.update('agents.terminalMode', 'native', vscode.ConfigurationTarget.Global);
-      vscode.window.showInformationMessage('Tmux mode disabled. New agent terminals will use VS Code editor terminals.');
-      await updateContextKeys(context);
-    })
-  );
-
-  context.subscriptions.push(
     vscode.commands.registerCommand('agents.enableReader', async () => {
       const current = settings.getSettings(context);
       const next: AgentSettings = {
@@ -4992,11 +4972,6 @@ async function reloadActiveTerminal(context: vscode.ExtensionContext) {
 }
 
 async function updateContextKeys(context: vscode.ExtensionContext): Promise<void> {
-  const config = vscode.workspace.getConfiguration('agents');
-  // 'native' hides the "Disable Tmux" toggle; 'auto'/'tmux' show it (tmux is active).
-  const tmuxEnabled = normalizeTerminalMode(config.get('terminalMode')) !== 'native';
-  await vscode.commands.executeCommand('setContext', 'agents.tmuxEnabled', tmuxEnabled);
-
   const readerEnabled = settings.getSettings(context).editor?.markdownViewerEnabled ?? true;
   await vscode.commands.executeCommand('setContext', 'agents.readerEnabled', readerEnabled);
 }

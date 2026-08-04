@@ -275,14 +275,6 @@
         "title": "Agents: Enable Notifications"
       },
       {
-        "command": "agents.enableTmux",
-        "title": "Agents: Enable Tmux"
-      },
-      {
-        "command": "agents.disableTmux",
-        "title": "Agents: Disable Tmux"
-      },
-      {
         "command": "agents.newTask",
         "title": "Agents: New Task"
       },
@@ -702,16 +694,6 @@
           "command": "agents.newDroid",
           "when": "true",
           "group": "navigation@2"
-        },
-        {
-          "command": "agents.enableTmux",
-          "when": "!agents.tmuxEnabled",
-          "group": "navigation@3"
-        },
-        {
-          "command": "agents.disableTmux",
-          "when": "agents.tmuxEnabled",
-          "group": "navigation@3"
         },
         {
           "command": "agents.enableReader",
