@@ -42,6 +42,7 @@ import {
   parseFeedPostLevel,
   planFeedBroadcast,
   runFeedBroadcast,
+  effectiveBroadcastConfig,
   blockBroadcastContext,
   blockDeliveryFailure,
   type FeedPostLevel,
@@ -49,6 +50,7 @@ import {
 } from '../lib/feed-broadcast.js';
 import { getSessionById } from '../lib/session/db.js';
 import { readMeta } from '../lib/state.js';
+import type { Meta } from '../lib/types.js';
 import {
   enrichBlocksFromSessions,
   groupBlocksByOutcome,
@@ -379,7 +381,7 @@ time. No em-dashes in title/body - they are scrubbed on the way out.
 Configure where a post is mirrored under feed.broadcast in agents.yaml - see
 docs/06-observability.md.
 `)
-    .action((
+    .action(async (
       textParts: string[],
       opts: PostCliOpts,
       cmd?: { opts: () => PostCliOpts; parent?: { opts: () => { json?: boolean } } },
@@ -412,6 +414,7 @@ docs/06-observability.md.
           throw new Error('Missing --title. Usage: agents feed post --title "Short subject" "body text"');
         }
         const level = flags.blocked ? 'important' : parseFeedPostLevel(flags.level);
+        const meta = readMeta();
 
         const { event } = postFeedStatus({
           title: flags.title,
@@ -436,14 +439,14 @@ docs/06-observability.md.
             safeDefault: flags.default,
           });
           publishBlock(block);
-          outcomes = broadcastBlock(block, {
+          outcomes = await broadcastBlock(block, {
             project: event.project,
             agent: event.agent,
             title: event.title,
             body: event.detail,
-          });
+          }, meta);
         } else {
-          outcomes = broadcastPostedEvent(event, level);
+          outcomes = await broadcastPostedEvent(event, level, meta);
         }
 
         // Fail loud when a block reached nobody. This is computed BEFORE the
@@ -696,15 +699,21 @@ docs/06-observability.md.
 
 /**
  * Mirror a written post to the configured sinks (`feed.broadcast` in
- * agents.yaml). The ticket is JOINED from the session index rather than asked
- * for as a flag — it is a domain fact about the session, and an agent that has
- * to remember a `--ticket` argument is an agent that will forget it. Returns the
- * per-sink outcomes; an empty array means nothing is configured, which is the
- * default and is not a failure.
+ * agents.yaml, or the implicit `notify.owner` fallback for an important post —
+ * see {@link effectiveBroadcastConfig}). The ticket is JOINED from the session
+ * index rather than asked for as a flag — it is a domain fact about the
+ * session, and an agent that has to remember a `--ticket` argument is an agent
+ * that will forget it. Returns the per-sink outcomes; an empty array means
+ * nothing is configured and no fallback applies, which is not a failure for a
+ * routine post (see `blockDeliveryFailure` for the `--blocked` case).
+ *
+ * `meta` is threaded in rather than read here so the fallback/config decision
+ * and the delivery are pinned to one config snapshot, and so this is testable
+ * against a real in-memory `Meta` without touching `~/.agents/agents.yaml`.
  */
-function broadcastPostedEvent(event: ActivityEvent, level: FeedPostLevel): SinkOutcome[] {
-  const config = readMeta().feed?.broadcast;
-  if (!config || Object.keys(config).length === 0) return [];
+async function broadcastPostedEvent(event: ActivityEvent, level: FeedPostLevel, meta: Meta): Promise<SinkOutcome[]> {
+  const config = effectiveBroadcastConfig(meta.feed?.broadcast, level, meta);
+  if (!config) return [];
   const ticket = getSessionById(event.sessionId)?.ticketId;
   const planned = planFeedBroadcast(config, {
     title: event.title,
@@ -719,25 +728,28 @@ function broadcastPostedEvent(event: ActivityEvent, level: FeedPostLevel): SinkO
       .map((a) => a.href)
       .filter((href) => /^https?:\/\//i.test(href)),
   });
-  return runFeedBroadcast(planned);
+  return runFeedBroadcast(planned, meta);
 }
 
 /**
- * Mirror a declared block to the same sinks a post reaches.
+ * Mirror a declared block to the same sinks a post reaches (plus the implicit
+ * `notify.owner` fallback — a block is always `important`, so it always
+ * qualifies).
  *
  * Blocks previously never broadcast at all: `broadcastPostedEvent` ran only for
  * `feed post`, while every `publishBlock` call wrote to the ledger and stopped
  * there — so a "needs you" record was durable and invisible at the same time.
  */
-function broadcastBlock(
+async function broadcastBlock(
   block: OpenBlock,
   extras: { project?: string; agent?: string; title?: string; body?: string },
-): SinkOutcome[] {
-  const config = readMeta().feed?.broadcast;
-  if (!config || Object.keys(config).length === 0) return [];
+  meta: Meta,
+): Promise<SinkOutcome[]> {
+  const config = effectiveBroadcastConfig(meta.feed?.broadcast, 'important', meta);
+  if (!config) return [];
   const ticket = getSessionById(block.sessionId)?.ticketId;
   const ctx = blockBroadcastContext({ ...block, ticket: block.ticket ?? ticket }, extras);
-  return runFeedBroadcast(planFeedBroadcast(config, ctx));
+  return runFeedBroadcast(planFeedBroadcast(config, ctx), meta);
 }
 
 /** One line per sink that ran. Silent when nothing is configured. */
