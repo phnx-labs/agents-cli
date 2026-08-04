@@ -1074,6 +1074,61 @@ describe('installVersion Grok binary relocation', () => {
     const targetDownloads = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.118', 'home', '.grok', 'downloads');
     expect(fs.existsSync(path.join(targetDownloads, 'grok-0.2.118-linux-x86_64'))).toBe(true);
   }, 10000);
+
+  it.skipIf(process.platform === 'win32')('refuses to update a self-updating agent into a version dir already owned by a different account', () => {
+    const home = makeTempHome();
+
+    // Two accounts already installed as two distinct versions — the state
+    // BOTH accounts self-updating to the SAME upstream release would collide
+    // into. accountA (0.2.118) is the collision target; accountB (0.2.32) is
+    // the currently-default account driving this update.
+    const grokAuth = (email: string, userId: string) => JSON.stringify({
+      'https://auth.x.ai::client-id': {
+        email,
+        user_id: userId,
+        refresh_token: `refresh-${userId}`,
+        create_time: '2026-08-01T00:00:00Z',
+      },
+    });
+    const accountADir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.118', 'home', '.grok');
+    fs.mkdirSync(path.join(accountADir, 'downloads'), { recursive: true });
+    fs.writeFileSync(path.join(accountADir, 'auth.json'), grokAuth('accountA@example.com', 'user-a'), 'utf-8');
+
+    const accountBDir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.32', 'home', '.grok');
+    fs.mkdirSync(path.join(accountBDir, 'downloads'), { recursive: true });
+    fs.writeFileSync(path.join(accountBDir, 'auth.json'), grokAuth('accountB@example.com', 'user-b'), 'utf-8');
+
+    // accountB (0.2.32) is the global default this update runs as.
+    fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.agents', 'agents.yaml'),
+      'agents:\n  grok: "0.2.32"\n',
+      'utf-8'
+    );
+
+    const hostGrok = path.join(home, '.grok');
+    fs.symlinkSync(accountBDir, hostGrok, 'dir');
+
+    const binDir = path.join(home, 'fakebin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const stub = path.join(binDir, 'grok');
+    // The self-updater always reports the SAME upstream release ("0.2.118")
+    // regardless of which account's home invoked it — the real mechanism that
+    // makes two accounts collide on one version directory.
+    fs.writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "grok 0.2.118"; exit 0; fi\nexit 0\n', 'utf-8');
+    fs.chmodSync(stub, 0o755);
+
+    const outcome = runInstallVersionWithScript(home, 'grok', 'latest', 'true', binDir);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result?.success).toBe(false);
+    expect(outcome.result?.error ?? '').toContain('accountA@example.com');
+    expect(outcome.result?.error ?? '').toContain('accountB@example.com');
+
+    // accountA's install must be untouched — refusing the update must not
+    // have written or damaged the file that was already there.
+    const targetAuth = JSON.parse(fs.readFileSync(path.join(accountADir, 'auth.json'), 'utf-8'));
+    expect(targetAuth['https://auth.x.ai::client-id'].email).toBe('accountA@example.com');
+  }, 10000);
 });
 
 // `resolveVersionAlias` is the shared @selector vocabulary (latest / oldest /
