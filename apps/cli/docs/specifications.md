@@ -846,6 +846,19 @@ access control (that is 1Password/Vault; this tool is device-local first).
   caller attests as no-ACL via `silentNoAcl` (bundle metadata per SEC-4,
   `never`-policy bundles per SEC-19, the unlock session store, the usage OAuth
   cache) are prompt-free by construction and MUST NOT be blocked by this guard.
+- **SEC-13a (MUST).** An **agent launch** MUST NOT raise a Touch ID sheet on its
+  own **regardless of tty** — a `--interactive` run is still a launch, not a human
+  asking for a secret. The `agents run --secrets <bundle>` injection and the
+  auto-share read therefore resolve `agentOnly: true` unconditionally
+  (`commands/exec.ts` secrets injection; `lib/share/config.ts` `shareRuntimeEnv`),
+  NOT gated on `isHeadlessSecretsContext()`. Gating the launch read on tty let a
+  watchdog's `agents run auto --interactive` (routine + menu-bar tick, ~2 min)
+  prompt for a `hold` bundle and pile up helper sheets. **Given** an interactive
+  `agents run --secrets <hold-bundle>` whose bundle is not broker-held **When** it
+  launches **Then** it fails fast naming `agents secrets unlock <bundle>`, no sheet.
+  This does NOT cover the explicit `agents share` / `agents share setup` commands —
+  those are user-initiated, not launches, and keep the `isHeadlessSecretsContext()`
+  gate (`readWriteTokenFromBundle`, `readCloudflareCreds`).
 - **SEC-14 (MUST).** A broker `get` for a bundle it does not hold MUST return
   `{ ok:true, hit:false }` — never an error, never a prompt, never a human
   escalation — and the caller MUST fall through to the real store

@@ -1888,7 +1888,7 @@ export function registerRunCommand(program: Command): void {
         { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, headlessPlanStallCommand, nativeResume, resolveInteractive, inferredInteractiveWithoutTty },
         { ALL_AGENT_IDS, ACCOUNT_INSPECTION_AGENT_IDS, agentLabel, supportsAccountInspection },
         { profileExists, resolveProfileForRun },
-        { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported, isHeadlessSecretsContext },
+        { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
         { splitBundleRef, resolveHostSshTarget, remoteResolveEnv },
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES, collectHarnessCandidates, pickHarnessWeighted, classifyHarnessCandidates, formatHarnessPickBanner, formatNoHealthyHarnessError, formatNoHealthyAccountError },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
@@ -2599,11 +2599,13 @@ export function registerRunCommand(program: Command): void {
               agent,
               keys: secretsKeysSubset,
               allowExpired: options.allowExpired,
-              // The harness identity scopes any cached grant. It no longer lets the
-              // requesting agent wait for interactive approval — an agent launch
+              // The harness identity scopes any cached grant. An agent launch
               // resolves broker-only and fails fast naming
-              // `agents secrets unlock <bundle>` (bundles.ts:interactiveUnlock).
-              agentOnly: isHeadlessSecretsContext(),
+              // `agents secrets unlock <bundle>` (bundles.ts:interactiveUnlock) — it
+              // MUST NOT raise a Touch ID sheet regardless of tty (SEC-13). Gating on
+              // isHeadlessSecretsContext() left `--interactive` launches (the watchdog's
+              // `agents run auto --interactive`) able to prompt, piling up helper sheets.
+              agentOnly: true,
             });
             const entries = describeBundle(bundle);
             const counts: Record<string, number> = {};

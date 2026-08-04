@@ -104,6 +104,9 @@ export function storeWriteToken(token: string): void {
 export function readWriteTokenFromBundle(): string {
   const { env } = readAndResolveBundleEnv(SHARE_BUNDLE, {
     caller: 'share',
+    // Explicit `agents share` command (a human published a file): a headless agent
+    // subprocess resolves broker-only, an interactive human may unlock. This is NOT
+    // an agent LAUNCH read (that is exec.ts's --secrets injection, always agentOnly).
     agentOnly: isHeadlessSecretsContext(),
   });
   const token = env[SHARE_TOKEN_KEY];
@@ -165,6 +168,7 @@ export function readCloudflareCreds(
   }
   const { env } = readAndResolveBundleEnv(bundle, {
     caller: 'share',
+    // Explicit `agents share setup` provisioning read — not an agent launch.
     agentOnly: isHeadlessSecretsContext(),
   });
   const find = (re: RegExp): string => {
