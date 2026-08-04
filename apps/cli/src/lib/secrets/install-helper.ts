@@ -145,10 +145,11 @@ export function ensureKeychainHelperInstalled(opts: { forceReinstall?: boolean }
   // atomic swap (and don't each run a redundant `cp`). The re-check inside the
   // lock means a burst of callers copies once, not N times — the stampede that
   // transiently corrupted the bundle and tripped the "damaged" dialog.
-  withInstallLock(dest, () => {
+  withInstallLock(dest, (heartbeat) => {
     if (!opts.forceReinstall && upToDate()) return;
     const src = sourceAppPath();
     copyAppBundle(src, dest);
+    heartbeat(); // cp -R done; keep the lock fresh across the codesign/spctl spawns
     const verify = codesignVerify(dest);
     if (!verify.ok) {
       throw new Error(
@@ -156,6 +157,7 @@ export function ensureKeychainHelperInstalled(opts: { forceReinstall?: boolean }
         'The bundle may be corrupted. Try `agents helper install` to reinstall, or reinstall agents-cli.'
       );
     }
+    heartbeat(); // codesign done; spctl does a network Gatekeeper lookup — refresh again
     const assess = spctlAssess(dest);
     if (!assess.ok) {
       // Warn, do not fail. Gatekeeper ticket lookup needs network; offline

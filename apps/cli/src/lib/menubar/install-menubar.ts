@@ -250,9 +250,10 @@ export function ensureMenubarAppInstalled(opts: { forceReinstall?: boolean } = {
   // on the darwin startup path) don't race the swap or each re-copy — the
   // stampede that transiently corrupted MenubarHelper.app and tripped the
   // "damaged" dialog.
-  withInstallLock(dest, () => {
+  withInstallLock(dest, (heartbeat) => {
     if (!needsInstall()) return;
     copyAppBundle(src, dest);
+    heartbeat(); // cp -R done; keep the lock fresh across lsregister
     // A fresh copy is exactly when the bundle's icon can be new (first install) or
     // superseded (upgrade) — register it so LaunchServices knows the bundle and can
     // resolve its AppIcon for the left-hand slot of daemon notifications.

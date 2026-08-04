@@ -72,6 +72,28 @@ describe('copyAppBundle: atomic install', () => {
     expect(readMarker(dest)).toBe('v1');
     expect(leftovers(dest)).toEqual([]);
   });
+
+  it('rolls back to the original bundle when the swap-into-place rename fails', () => {
+    const dir = tmpDir();
+    const dest = path.join(dir, 'installed', 'Helper.app');
+    copyAppBundle(makeBundle(path.join(dir, 'good'), 'v1'), dest);
+    expect(readMarker(dest)).toBe('v1');
+
+    // Force ONLY the staging->dest rename to fail; the dest->backup move and the
+    // backup->dest restore still succeed, exercising the rollback branch.
+    const failingRename = (from: string, to: string): void => {
+      if (from.includes('.installing')) throw new Error('injected: swap failed');
+      fs.renameSync(from, to);
+    };
+    expect(() =>
+      copyAppBundle(makeBundle(path.join(dir, 'new'), 'v2'), dest, { renameSync: failingRename }),
+    ).toThrow(/injected/);
+
+    // Rolled back: the original v1 bundle is restored intact, nothing left behind.
+    expect(fs.existsSync(dest)).toBe(true);
+    expect(readMarker(dest)).toBe('v1');
+    expect(leftovers(dest)).toEqual([]);
+  });
 });
 
 describe('withInstallLock: serialization', () => {
