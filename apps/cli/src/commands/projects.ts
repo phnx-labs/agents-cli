@@ -666,7 +666,17 @@ export function registerProjectsCommands(program: Command): void {
       if (opts.root !== undefined) def.root = opts.root;
       if (opts.description !== undefined) def.description = opts.description;
       if (opts.path !== undefined) {
+        // `--path` is a subdir OF the root, so without one there is nothing to
+        // hang it off. A def imported with `--from-linear` that found no local
+        // checkout carries name + linear and no root — joining against '' there
+        // would silently write `/apps/cli`, an absolute path at the filesystem
+        // root, and the def would resolve somewhere that does not exist.
         const base = (opts.root ?? def.root ?? '').replace(/\/$/, '');
+        if (!base) {
+          console.error(chalk.red(`"${def.name}" has no root, so --path has nothing to resolve against.`));
+          console.error(chalk.gray(`  Set one first: agents projects set ${def.name} --root <path> --path ${opts.path}`));
+          process.exit(1);
+        }
         def.defaultPath = `${base}/${opts.path.replace(/^\//, '')}`;
       }
       writeProjectDef(def);
