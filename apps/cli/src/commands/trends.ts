@@ -60,7 +60,6 @@ export function registerTrendsCommand(program: Command): void {
     .description('Usage analytics — harness/model mix, token ratios, resource frequency')
     .option('--days <n>', 'Days of history to include', '7')
     .option('--json', 'Emit JSON instead of tables')
-    .option('--limit <n>', 'Max rows for query', '40')
     .action(function summary(this: Command) {
       const opts = this.opts() as TrendsOpts;
       renderDashboard(parseDays(opts.days), Boolean(opts.json));
