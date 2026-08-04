@@ -1,9 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import type { Meta } from './types.js';
+import { mailboxDir, peek } from './mailbox.js';
 import {
   composeBroadcastMessage,
+  effectiveBroadcastConfig,
   parseFeedPostLevel,
   planFeedBroadcast,
   renderSinkArgv,
@@ -28,6 +31,8 @@ const CONFIG: FeedBroadcastConfig = {
   ticket: { command: ['linear', 'update', '{ticket}', '--comment', '{text}'] },
   message: { command: ['rush', 'message', 'send', '--text', '{message}'], minLevel: 'important' },
 };
+
+const metaEmpty = {} as Meta;
 
 describe('feed post level', () => {
   it('defaults to milestone and accepts important', () => {
@@ -158,28 +163,131 @@ describe('broadcast planning', () => {
 });
 
 describe('running sinks', () => {
-  it.skipIf(process.platform === 'win32')('runs a real command and reports success', () => {
+  it.skipIf(process.platform === 'win32')('runs a real command and reports success', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-broadcast-'));
     const out = path.join(dir, 'sink.txt');
     const planned = planFeedBroadcast(
       { file: { command: ['sh', '-c', `printf '%s' "$1" > ${out}`, 'sh', '{text}'] } },
       ctx(),
     );
-    expect(runFeedBroadcast(planned)).toEqual([{ name: 'file', ok: true }]);
+    expect(await runFeedBroadcast(planned, metaEmpty)).toEqual([{ name: 'file', ok: true }]);
     expect(fs.readFileSync(out, 'utf8')).toBe('PR #1690 open, waiting on prix-cloud');
   });
 
-  it.skipIf(process.platform === 'win32')('reports a failing sink without throwing — the post already stands', () => {
-    const [outcome] = runFeedBroadcast([{ name: 'nope', argv: ['sh', '-c', 'echo boom >&2; exit 3'] }]);
+  it.skipIf(process.platform === 'win32')('reports a failing sink without throwing — the post already stands', async () => {
+    const [outcome] = await runFeedBroadcast(
+      [{ name: 'nope', argv: ['sh', '-c', 'echo boom >&2; exit 3'] }],
+      metaEmpty,
+    );
     expect(outcome.ok).toBe(false);
     expect(outcome.error).toBe('boom');
   });
 
-  it('reports a sink whose program is not installed', () => {
-    const [outcome] = runFeedBroadcast([
-      { name: 'missing', argv: ['agents-cli-no-such-binary-42', 'x'] },
-    ]);
+  it('reports a sink whose program is not installed', async () => {
+    const [outcome] = await runFeedBroadcast(
+      [{ name: 'missing', argv: ['agents-cli-no-such-binary-42', 'x'] }],
+      metaEmpty,
+    );
     expect(outcome.ok).toBe(false);
     expect(outcome.error).toMatch(/ENOENT|not found|spawnSync/i);
+  });
+});
+
+describe('channel sink planning', () => {
+  it('plans the owner alias without requiring `to`', () => {
+    const planned = planFeedBroadcast({ owner: { channel: 'owner' } }, ctx());
+    expect(planned).toEqual([
+      { name: 'owner', channel: 'owner', to: undefined, text: composeBroadcastMessage(ctx()) },
+    ]);
+  });
+
+  it('skips a non-owner channel sink with no recipient rather than sending with a hole in it', () => {
+    expect(planFeedBroadcast({ tg: { channel: 'telegram' } }, ctx())).toEqual([]);
+  });
+
+  it('plans an explicit channel + recipient', () => {
+    const planned = planFeedBroadcast({ tg: { channel: 'telegram', to: '12345' } }, ctx());
+    expect(planned).toEqual([
+      { name: 'tg', channel: 'telegram', to: '12345', text: composeBroadcastMessage(ctx()) },
+    ]);
+  });
+
+  it('gates a channel sink by minLevel exactly like a command sink', () => {
+    const config: FeedBroadcastConfig = { owner: { channel: 'owner', minLevel: 'important' } };
+    expect(planFeedBroadcast(config, ctx())).toEqual([]);
+    expect(planFeedBroadcast(config, ctx({ level: 'important' })).map((p) => p.name)).toEqual(['owner']);
+  });
+});
+
+describe('effectiveBroadcastConfig — the implicit owner fallback', () => {
+  const ownerMeta = { notify: { owner: { channel: 'mailbox', to: 'agents-feed-fallback-test' } } } as Meta;
+
+  it('falls back to notify.owner when feed.broadcast is unset/empty and the post is important', () => {
+    expect(effectiveBroadcastConfig(undefined, 'important', ownerMeta)).toEqual({ owner: { channel: 'owner' } });
+    expect(effectiveBroadcastConfig({}, 'important', ownerMeta)).toEqual({ owner: { channel: 'owner' } });
+  });
+
+  it('stays record-only for a routine milestone post even with notify.owner configured', () => {
+    expect(effectiveBroadcastConfig(undefined, 'milestone', ownerMeta)).toBeUndefined();
+  });
+
+  it('does not fall back when notify.owner is not configured either', () => {
+    expect(effectiveBroadcastConfig(undefined, 'important', metaEmpty)).toBeUndefined();
+  });
+
+  it('never layers on top of an operator-declared feed.broadcast — the config always wins outright', () => {
+    expect(effectiveBroadcastConfig(CONFIG, 'important', ownerMeta)).toBe(CONFIG);
+  });
+});
+
+describe('channel delivery — real provider registry, no mocking', () => {
+  // Unique throwaway mailbox box in the real spool (repo rule: real services,
+  // no mocking — same pattern as channels/providers/mailbox.test.ts).
+  const BOX = `agents-feed-broadcast-test-${process.pid}`;
+
+  afterEach(() => {
+    try {
+      fs.rmSync(mailboxDir(BOX), { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  });
+
+  it('delivers an owner-alias channel sink through the real mailbox provider', async () => {
+    const meta = { notify: { owner: { channel: 'mailbox', to: BOX } } } as Meta;
+    const postCtx = ctx({ level: 'important' });
+    const planned = planFeedBroadcast({ owner: { channel: 'owner' } }, postCtx);
+    const outcomes = await runFeedBroadcast(planned, meta);
+    expect(outcomes).toEqual([{ name: 'owner', ok: true }]);
+
+    const pending = peek(mailboxDir(BOX), BOX);
+    expect(pending.map((m) => m.text)).toContain(composeBroadcastMessage(postCtx));
+  });
+
+  // RUSH-2123: before effectiveBroadcastConfig, this exact scenario
+  // (notify.owner set, feed.broadcast never written) returned [] from
+  // broadcastBlock and the block reached nobody, even though blockDeliveryFailure
+  // would have reported it undelivered — nothing in the outbound stack knew
+  // notify.owner existed. Now it delivers.
+  it('was silent before RUSH-2123: --blocked with notify.owner set and no feed.broadcast now delivers', async () => {
+    const meta = { notify: { owner: { channel: 'mailbox', to: BOX } } } as Meta;
+    const postCtx = ctx({ level: 'important' });
+    const config = effectiveBroadcastConfig(undefined, 'important', meta);
+    expect(config).toBeDefined();
+
+    const outcomes = await runFeedBroadcast(planFeedBroadcast(config!, postCtx), meta);
+    expect(outcomes).toEqual([{ name: 'owner', ok: true }]);
+    expect(peek(mailboxDir(BOX), BOX)).toHaveLength(1);
+  });
+
+  it('reports an unregistered channel provider without throwing — a bad config must not kill the fan-out', async () => {
+    const planned = planFeedBroadcast(
+      { tg: { channel: 'not-a-real-channel-42', to: 'x' } },
+      ctx({ level: 'important' }),
+    );
+    const outcomes = await runFeedBroadcast(planned, metaEmpty);
+    expect(outcomes).toEqual([
+      { name: 'tg', ok: false, error: expect.stringContaining('No channel provider') },
+    ]);
   });
 });

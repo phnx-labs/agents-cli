@@ -60,9 +60,30 @@ describe('aggregateHookProfile', () => {
     expect(row.meanMs).toBe(55);
     // p50 (interpolated rank 4.5) → midway between 50 and 60
     expect(row.p50Ms).toBe(55);
+    // p95 (interpolated rank 8.55) → between 90 and 100, above p50 and below p99
+    expect(row.p95Ms).toBeGreaterThan(row.p50Ms);
+    expect(row.p95Ms).toBeLessThanOrEqual(100);
     // p99 (interpolated rank 8.91) → near 99
     expect(row.p99Ms).toBeGreaterThanOrEqual(98);
     expect(row.p99Ms).toBeLessThanOrEqual(100);
+    expect(row.p99Ms).toBeGreaterThanOrEqual(row.p95Ms);
+  });
+
+  it('computes errorRate only when there are errors', () => {
+    const clean = aggregateHookProfile([
+      { event: 'hook.fire', hook: 'ok', ms: 10, cache: 'hit', exit: 0 },
+      { event: 'hook.fire', hook: 'ok', ms: 12, cache: 'hit', exit: 0 },
+    ]);
+    expect(clean[0].errorRate).toBeUndefined();
+
+    const flaky = aggregateHookProfile([
+      { event: 'hook.fire', hook: 'flaky', ms: 10, cache: 'miss', exit: 0 },
+      { event: 'hook.fire', hook: 'flaky', ms: 10, cache: 'miss', exit: 0 },
+      { event: 'hook.fire', hook: 'flaky', ms: 10, cache: 'miss', exit: 0 },
+      { event: 'hook.fire', hook: 'flaky', ms: 10, cache: 'miss', exit: 1 },
+    ]);
+    expect(flaky[0].errorCount).toBe(1);
+    expect(flaky[0].errorRate).toBeCloseTo(0.25, 3);
   });
 
   it('aggregates per-hook and sorts by p99 desc', () => {
@@ -113,10 +134,10 @@ describe('formatMs', () => {
 
 describe('formatCacheColumn', () => {
   it('says n/a when nothing was cached', () => {
-    expect(formatCacheColumn({ hook: 'x', n: 1, p50Ms: 0, p99Ms: 0, meanMs: 0, maxMs: 0, cacheHitPct: 0, cacheStalePct: 0, cacheMissPct: 0, errorCount: 0 })).toBe('n/a');
+    expect(formatCacheColumn({ hook: 'x', n: 1, p50Ms: 0, p95Ms: 0, p99Ms: 0, meanMs: 0, maxMs: 0, cacheHitPct: 0, cacheStalePct: 0, cacheMissPct: 0, errorCount: 0 })).toBe('n/a');
   });
   it('lists only non-zero buckets', () => {
-    expect(formatCacheColumn({ hook: 'x', n: 100, p50Ms: 0, p99Ms: 0, meanMs: 0, maxMs: 0, cacheHitPct: 98, cacheStalePct: 0, cacheMissPct: 2, errorCount: 0 }))
+    expect(formatCacheColumn({ hook: 'x', n: 100, p50Ms: 0, p95Ms: 0, p99Ms: 0, meanMs: 0, maxMs: 0, cacheHitPct: 98, cacheStalePct: 0, cacheMissPct: 2, errorCount: 0 }))
       .toBe('hit:98% miss:2%');
   });
 });

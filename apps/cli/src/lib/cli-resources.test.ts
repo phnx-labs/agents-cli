@@ -11,6 +11,7 @@ import {
   resolveBinDir,
   hasCommand,
   isCliInstalled,
+  isCliInstalledAsync,
   type CliManifest,
   type InstallMethod,
 } from './cli-resources.js';
@@ -265,6 +266,25 @@ describe('host detection', () => {
     const m = manifest([{ npm: 'foo' }]);
     m.check = { kind: 'version', cmd: 'definitely-not-a-real-command-xyz', args: ['--version'] };
     expect(isCliInstalled(m)).toBe(false);
+  });
+
+  it('isCliInstalledAsync (RUSH-2136) matches the sync check on real commands', async () => {
+    // node is guaranteed (it runs this test): a version check exits 0 => installed.
+    const present = manifest([{ npm: 'foo' }]);
+    present.check = { kind: 'version', cmd: 'node', args: ['--version'] };
+    expect(await isCliInstalledAsync(present)).toBe(true);
+    expect(isCliInstalled(present)).toBe(true);
+
+    const missing = manifest([{ npm: 'foo' }]);
+    missing.check = { kind: 'version', cmd: 'definitely-not-a-real-command-xyz', args: ['--version'] };
+    expect(await isCliInstalledAsync(missing)).toBe(false);
+    expect(isCliInstalled(missing)).toBe(false);
+
+    // A present command that exits non-zero is NOT installed (a failed run, not a
+    // missing binary) — same verdict as the sync path.
+    const nonZero = manifest([{ npm: 'foo' }]);
+    nonZero.check = { kind: 'version', cmd: 'node', args: ['--definitely-not-a-flag'] };
+    expect(await isCliInstalledAsync(nonZero)).toBe(false);
   });
 
   describe.runIf(process.platform === 'win32')('win32 .cmd shims', () => {

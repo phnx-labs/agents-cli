@@ -172,6 +172,7 @@ import {
   loadUsage,
   loadCost,
   loadPerf,
+  loadTrends,
   loadOutput,
   loadBudget,
   loadAlias,
@@ -310,6 +311,18 @@ program.hook('postAction', (_thisCommand, actionCommand) => {
       command,
       ...(durationMs !== undefined ? { durationMs } : {}),
     });
+    if (parts[0] === 'run') {
+      const agentName = actionCommand.args?.[0] ? String(actionCommand.args[0]).split('@')[0] : 'run';
+      void import('./lib/analytics/usage-db.js').then(({ recordUsage }) => {
+        recordUsage({
+          kind: 'agent',
+          name: agentName || 'run',
+          event: 'invoke',
+          source: 'cli',
+          meta: durationMs !== undefined ? { durationMs } : undefined,
+        });
+      }).catch(() => { /* fail soft */ });
+    }
     // Disposable perf warehouse — fail-soft spool append (no SQLite on this path).
     if (durationMs !== undefined && parts[0] !== 'perf') {
       void import('./lib/perf/spool.js').then(({ recordSample }) => {
@@ -1087,6 +1100,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadUsage);
   await reg(loadCost);
   await reg(loadPerf);
+  await reg(loadTrends);
   await reg(loadOutput);
   await reg(loadBudget);
   await reg(loadAlias);

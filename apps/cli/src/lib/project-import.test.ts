@@ -255,3 +255,29 @@ describe('buildLinearImportCandidates', () => {
     expect(r.skipped[0].reason).toMatch(/no usable project name/);
   });
 });
+
+describe('buildFactoryImportCandidates — the remote wins over the path guess', () => {
+  const row = { name: 'agents-cli', path: '/tmp/src/github.com/muqsitnawaz/agents-cli', repoSlug: 'muqsitnawaz/agents-cli', confidence: 'high' };
+
+  it('overrides the registry slug with the checkout real origin', () => {
+    // Factory derives repoSlug from the path's last two segments, so a checkout
+    // under ~/src/github.com/<you>/ reads as <you>/repo even when origin is an
+    // org. Both are real repos, so the wrong one silently reports a stranger's
+    // merge counts rather than failing.
+    const r = buildFactoryImportCandidates([row], new Map(), { minConfidence: 'high', force: false },
+      () => 'phnx-labs/agents-cli');
+    expect(r.defs[0].repo).toBe('phnx-labs/agents-cli');
+  });
+
+  it('falls back to the registry slug when there is no remote to ask', () => {
+    const r = buildFactoryImportCandidates([row], new Map(), { minConfidence: 'high', force: false },
+      () => undefined);
+    expect(r.defs[0].repo).toBe('muqsitnawaz/agents-cli');
+  });
+
+  it('leaves repo unset when neither the remote nor the registry offers one', () => {
+    const bare = { name: 'x', path: '/tmp/x', confidence: 'high' };
+    const r = buildFactoryImportCandidates([bare], new Map(), { minConfidence: 'high', force: false }, () => undefined);
+    expect(r.defs[0]).toEqual({ name: 'x', root: '/tmp/x' });
+  });
+});

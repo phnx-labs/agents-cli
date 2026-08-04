@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.21.1
+
+- **Feed posts require a title + body; phone `{message}` ends with a Sent-from footer.** `agents feed post --title "Short subject" "body text"` — title is the phone first line (~4–5 words), body follows after a blank line, then `Sent from <agent>/<session-chunk> on <host>` (like "Sent from my iPhone"). Em/en dashes in title/body are scrubbed to ASCII ` - `. Source: `apps/cli/src/lib/feed-broadcast.ts`, `feed-post.ts`, `commands/feed.ts`.
+
+- **Hook `timeout` in agents.yaml now accepts duration strings, not just bare seconds (#1555).**
+  A hook can be written `timeout: 5s` / `timeout: 2m` / `timeout: 1h30m` instead of only
+  `timeout: 30` — self-documenting at the call site. A bare number still means seconds, so
+  every existing manifest keeps working. `parseHookManifest` normalizes the value to a
+  seconds number once, so all harness serializers keep consuming a number; an unparseable
+  timeout is dropped with a warning rather than silently coerced. Source:
+  `apps/cli/src/lib/hooks.ts` (`normalizeHookTimeoutSeconds`, `parseHookManifest`),
+  `apps/cli/docs/hooks.md`.
+
+- **Owner notifications route through the one channel seam.** The feed urgent-block
+  dispatch and the monitor `notify` action now send through the registered channel
+  provider (`lookupTransport` → `ChannelProvider.send`) instead of shelling out to
+  `openclaw` directly. The recipient comes from `notify.owner` in agents.yaml — the
+  hardcoded owner chat id is gone, so changing `notify.owner` is honoured by every
+  path. A bare `--notify` on a monitor now targets `notify.owner`; `--notify <channel>`
+  overrides the owner channel. The monitor path also gains the provider's missing-binary
+  guard (a clean error instead of a raw ENOENT). A channel name that resolves to no
+  registered provider (a typo in `notify.owner.channel`, or `--notify <channel>`) fails
+  that one send with a clean error — it does not exit the monitor daemon or abort the
+  `agents feed --dispatch` loop. Source: `apps/cli/src/lib/notify.ts`,
+  `apps/cli/src/lib/monitors/dispatch.ts`, `apps/cli/src/lib/channels/resolve.ts`.
+
 ## 1.21.0
 
 - **A clone of your own DotAgents repo no longer hijacks project-layer rule resolution (RUSH-2037).**

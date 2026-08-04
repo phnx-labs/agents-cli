@@ -29,6 +29,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { resolveLinearApiKey } from './auto-dispatch-linear.js';
+import { isRateLimited, noteRateLimited, parseRateLimitReset, readCached, writeCached } from './linear-cache.js';
 
 const LINEAR_API = 'https://api.linear.app/graphql';
 /** Overall budget across all pages — the card must never hang on Linear. */
@@ -56,6 +57,8 @@ export interface LinearMilestone {
    * than printing a meaningless `0/0`.
    */
   total: number;
+  /** True when Linear itself flags this as the project's next milestone. */
+  isNext?: boolean;
 }
 
 /** A milestone as the project declares it, independent of any issue. */
@@ -63,6 +66,13 @@ export interface LinearMilestoneNode {
   id?: string;
   name?: string;
   targetDate?: string | null;
+  /**
+   * Linear's own marker. Observed values: `"next"` (it flags exactly one) and
+   * `"unstarted"`. Treated as an opaque string and only compared to `"next"` —
+   * the enum is not documented as closed, so switching exhaustively on it would
+   * break the day Linear adds a value.
+   */
+  status?: string | null;
 }
 
 /** The counts the card renders. `total` counts every issue in the project. */
@@ -79,10 +89,22 @@ export interface LinearProjectCounts {
    */
   truncated?: boolean;
   /**
-   * The next unfinished milestone, when the project has one. Derived from the
-   * SAME paged issue fetch as the counts — a milestone is only ever a grouping
-   * of these issues, so asking Linear again would spend a second round trip to
-   * learn what the first already said.
+   * True when this answer came from the cache after a failed or skipped fetch.
+   * The card labels it rather than dropping the line — a populated Linear row
+   * that silently vanishes on one timeout is the defect this replaces.
+   */
+  stale?: boolean;
+  /**
+   * Every milestone the project declares, in the order the card shows them:
+   * unfinished first by target date, then the finished ones. A project with
+   * three checkpoints has three; showing only the next one hides the shape of
+   * the plan, which is what `projects view` exists to show.
+   */
+  milestones?: LinearMilestone[];
+  /**
+   * The one the project is working toward — `milestones[0]` when there is an
+   * unfinished one. Kept as its own field because the compact card shows only
+   * this, while `view` shows the whole list.
    */
   nextMilestone?: LinearMilestone;
 }
@@ -118,7 +140,10 @@ export function countsFromIssuesResponse(data: LinearIssuesResponse): LinearProj
     else if (type === 'started') inProgress++;
   }
   const counts: LinearProjectCounts = { done, total: nodes.length, inProgress };
-  const next = nextMilestone(data.project?.projectMilestones?.nodes ?? [], nodes);
+  const declared = data.project?.projectMilestones?.nodes ?? [];
+  const ordered = orderedMilestones(declared, nodes);
+  if (ordered.length) counts.milestones = ordered;
+  const next = nextMilestone(declared, nodes);
   if (next) counts.nextMilestone = next;
   return counts;
 }
@@ -137,10 +162,10 @@ export function countsFromIssuesResponse(data: LinearIssuesResponse): LinearProj
  * issues counts as unfinished (it is upcoming work, not completed work). Undated
  * milestones sort last, ties break by declaration order, so the answer is stable.
  */
-export function nextMilestone(
+export function orderedMilestones(
   declared: LinearMilestoneNode[],
   nodes: LinearIssueNode[],
-): LinearMilestone | undefined {
+): LinearMilestone[] {
   // Progress per milestone id, from whatever issues do carry one.
   const progress = new Map<string, { done: number; total: number }>();
   for (const n of nodes) {
@@ -151,26 +176,45 @@ export function nextMilestone(
     if (n.state?.type === 'completed') p.done++;
     progress.set(id, p);
   }
-  const candidates = declared
+  const all = declared
     .map((d, order) => {
       if (!d?.id || typeof d.name !== 'string' || !d.name) return undefined;
       const p = progress.get(d.id) ?? { done: 0, total: 0 };
       const m: LinearMilestone & { order: number } = { name: d.name, done: p.done, total: p.total, order };
       if (d.targetDate) m.targetDate = d.targetDate;
+      if (d.status === 'next') m.isNext = true;
       return m;
     })
-    .filter((m): m is LinearMilestone & { order: number } => m !== undefined)
-    // total 0 means "declared, nothing filed yet" — unfinished, not done.
-    .filter((m) => m.total === 0 || m.done < m.total);
-  if (candidates.length === 0) return undefined;
-  candidates.sort((a, b) => {
+    .filter((m): m is LinearMilestone & { order: number } => m !== undefined);
+  // total 0 means "declared, nothing filed yet" — unfinished, not done.
+  const open = (m: LinearMilestone) => m.total === 0 || m.done < m.total;
+  all.sort((a, b) => {
+    // Unfinished before finished: what is still ahead is what a reader is
+    // scanning for.
+    if (open(a) !== open(b)) return open(a) ? -1 : 1;
     if (a.targetDate && b.targetDate) return a.targetDate < b.targetDate ? -1 : a.targetDate > b.targetDate ? 1 : a.order - b.order;
     if (a.targetDate) return -1;
     if (b.targetDate) return 1;
     return a.order - b.order;
   });
-  const { order: _order, ...m } = candidates[0];
-  return m;
+  return all.map(({ order: _order, ...m }) => m);
+}
+
+/**
+ * The milestone the project is working toward next.
+ *
+ * Linear flags one itself (`status: "next"`), and that is the answer the user
+ * sees in Linear's own UI, so it wins when present. Only when nothing is
+ * flagged does this fall back to "earliest-dated unfinished", which is a
+ * reasonable guess but still a guess.
+ */
+export function nextMilestone(
+  declared: LinearMilestoneNode[],
+  nodes: LinearIssueNode[],
+): LinearMilestone | undefined {
+  const ordered = orderedMilestones(declared, nodes);
+  const open = ordered.filter((m) => m.total === 0 || m.done < m.total);
+  return open.find((m) => m.isNext) ?? open[0];
 }
 
 /** $LINEAR_API_KEY → macOS Keychain → ~/.linear-cli/config.json. Null if none. */
@@ -197,7 +241,16 @@ function resolveApiKey(): string | null {
 export async function fetchLinearProjectCounts(
   projectId: string,
   fetchPage: (projectId: string, after: string | undefined, signal: AbortSignal) => Promise<LinearIssuesResponse | undefined> = fetchLinearIssuesPage,
+  nowMs: number = Date.now(),
 ): Promise<LinearProjectCounts | undefined> {
+  // Requests are the scarce budget (2500/hr; complexity is untouched), and this
+  // pages up to 10 of them per project per call. Serve a fresh snapshot without
+  // spending any.
+  const cached = readCached<LinearProjectCounts>(projectId, nowMs);
+  if (cached && !cached.stale) return cached.value;
+  // A prior 429 said there is nothing left to spend — don't spend one finding
+  // that out again. Fall through to the stale snapshot rather than no line.
+  if (isRateLimited(nowMs)) return cached ? { ...cached.value, stale: true } : undefined;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
@@ -208,7 +261,11 @@ export async function fetchLinearProjectCounts(
     let truncated = false;
     for (let page = 0; ; page++) {
       const data = await fetchPage(projectId, after, ctrl.signal);
-      if (!data) return undefined;
+      // A failed fetch keeps the last good answer on screen, marked stale,
+      // instead of the line vanishing. One 8s timeout must not blank a chip
+      // that was populated a minute ago — the rule `mergeAuthHealthEntries`
+      // already encodes for account health.
+      if (!data) return cached ? { ...cached.value, stale: true } : undefined;
       if (page === 0) declared = data.project?.projectMilestones?.nodes ?? [];
       all.push(...(data.issues?.nodes ?? []));
       const pi = data.issues?.pageInfo;
@@ -220,15 +277,17 @@ export async function fetchLinearProjectCounts(
       }
       after = pi.endCursor;
     }
-    return {
+    const counts: LinearProjectCounts = {
       ...countsFromIssuesResponse({
         issues: { nodes: all },
         project: { projectMilestones: { nodes: declared } },
       }),
       ...(truncated ? { truncated } : {}),
     };
+    writeCached(projectId, counts, nowMs);
+    return counts;
   } catch {
-    return undefined;
+    return cached ? { ...cached.value, stale: true } : undefined;
   } finally {
     clearTimeout(timer);
   }
@@ -249,7 +308,7 @@ async function fetchLinearIssuesPage(
     'issues(filter:{ project:{ id:{ eq:$p } } }, first:' +
     PAGE_SIZE +
     ', after:$after){ nodes{ state{ type } projectMilestone{ id } } pageInfo{ hasNextPage endCursor } }';
-  const milestonesSelection = 'project(id:$pid){ projectMilestones(first:50){ nodes{ id name targetDate } } }';
+  const milestonesSelection = 'project(id:$pid){ projectMilestones(first:50){ nodes{ id name targetDate status } } }';
   const first = after === undefined;
   const res = await fetch(LINEAR_API, {
     method: 'POST',
@@ -264,6 +323,14 @@ async function fetchLinearIssuesPage(
     }),
     signal,
   });
+  if (res.status === 429) {
+    // Record when the budget refills so later runs skip the call entirely
+    // rather than spending one of the zero remaining requests to be told so.
+    // The header is epoch milliseconds; absent or unparseable, back off a TTL.
+    const now = Date.now();
+    noteRateLimited(parseRateLimitReset(res.headers.get('x-ratelimit-requests-reset'), now), now);
+    return undefined;
+  }
   if (!res.ok) return undefined;
   const json = (await res.json()) as { data?: LinearIssuesResponse; errors?: unknown[] };
   if (json.errors?.length || !json.data) return undefined;

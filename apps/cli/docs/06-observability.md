@@ -13,6 +13,7 @@ whose *consumer* and *axis* match your question, not whichever you remember firs
 |---|---|---|---|
 | **`events`** | **Raw unified event stream = the audit log.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. | `events.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
 | **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
+| **`trends`** | **Usage analytics.** Harness/model mix, tools per session, token ratios, hottest secrets/browser profiles — baked recipes over sessions + a durable resource warehouse. Distinct from quota (`agents usage`) and latency (`agents perf`). | `sessions.db` + `~/.agents/.history/analytics/usage.db` | Humans + `--json` |
 | **`feed`** | **Consolidated cross-agent surface.** Open blocks (decisions agents are waiting on) + `feed post` status updates — "what needs you / what are agents saying." | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
 | **`activity`** | **Human milestone timeline.** Recent plans / PRs / worktrees / sub-agents, plus Bash-driven deliverables (video renders, image upscales, metadata edits), newest-first — a friendly lens on the milestone tier of the event stream. Every Bash call also emits a structured `bash.executed` activity record carrying its tool category. | `activity/*.jsonl` | Human at the terminal |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
@@ -85,21 +86,67 @@ Latency samples for optimization — **not** the audit log. Implementation:
 `apps/cli/src/lib/perf/db.ts`, CLI: `apps/cli/src/commands/perf.ts`.
 
 ```
-agents perf                     # summary: commands + hooks + runs
-agents perf hooks               # same as agents hooks profile (SQLite-first)
-agents perf commands --days 30  # slowest CLI entrypoints
-agents perf run --json          # agent.run / perf.timing labels
+agents perf                              # summary: commands + hooks + runs
+agents perf hooks                        # same as agents hooks profile (SQLite-first)
+agents perf commands --days 30           # slowest CLI entrypoints
+agents perf run --json                   # agent.run / perf.timing labels
+agents perf hooks --project agents-cli   # scope to one repo's samples
+agents perf friction                     # sessions stuck retrying the same guard block
 ```
 
 | Producer | Kind | How it lands |
 |---|---|---|
 | CLI `postAction` | `command.end` | Direct `recordSample` (skips the `perf` command itself) |
-| `createTimer` / `time` / `timeAsync` / `withTiming` | `perf.timing` | Best-effort from `events.ts` |
-| Hook cache/matches shims | `hook.fire` | NDJSON spool → drained into SQLite on open |
+| `createTimer` / `time` / `timeAsync` / `withTiming` | `perf.timing` | Best-effort from `events.ts`; also covers routine fires (`agent.run`) |
+| Every hook | `hook.fire` | Generated shim → NDJSON spool → drained into SQLite on open. `cache:`, `matches:`, or a bare `matcher:` are each enough to opt a hook into a shim — git-guard/rm-guard/git-require-clean-tree (matcher-only) are instrumented like any other hook |
+
+Every row carries `p50Ms`/`p95Ms`/`p99Ms`, and — when the underlying samples
+have them — `errorRate`/`timeoutRate` (fractions 0-1, from a nonzero exit code
+or a `status:'timeout'` sample). `--project <key>` scopes any subcommand to one
+repository: it resolves each sample's recorded `cwd` to a project key
+(`lib/project-key.ts` — a worktree cwd folds to the repo it branched from) and
+filters to samples matching the given key.
+
+`agents perf friction` reads a different sink: the `friction` event kind
+(`emitFriction` in `events.ts`, fed by `agents _internal friction` — the
+hidden command guard hooks self-report a block through before they exit 2,
+since they run before any `agents` process exists to emit in-process). It
+groups by (session, surface, failureId) and flags a session that hits the
+*same* guard block 3+ times — an agent retrying the identical denied action
+instead of adapting.
 
 **Disable:** `AGENTS_DISABLE_PERF=1`. **Redirect (tests):** `AGENTS_PERF_DB`,
-`AGENTS_PERF_SPOOL`. Retention: samples older than 30 days are pruned
-opportunistically on open. Wipe anytime: `rm -rf ~/.agents/.cache/perf`.
+`AGENTS_PERF_SPOOL`, `AGENTS_PERF_DIR` (also covers the hook shim's own
+timing/perf writes), plus `AGENTS_HOOK_SHIMS_DIR` / `AGENTS_HOOK_CACHE_DIR` /
+`AGENTS_LOGS_DIR` for the shim-generation side. Retention: samples older than
+30 days are pruned opportunistically on open. Wipe anytime:
+`rm -rf ~/.agents/.cache/perf`.
+
+## Usage analytics (`agents trends`)
+
+Resource and session frequency — **not** model quota (`agents usage`) and **not**
+latency (`agents perf`). Implementation: `apps/cli/src/lib/analytics/`, CLI:
+`apps/cli/src/commands/trends.ts`.
+
+```
+agents trends                     # auto recipe board (skips empty sections)
+agents trends --days 30           # window
+agents trends harness-mix --json  # one baked recipe
+agents trends query --kind secret # raw warehouse rows
+agents trends recipes             # list recipe ids
+```
+
+| Store | Path | Holds |
+|---|---|---|
+| Session index | `sessions.db` | Harness/model mix, token ratios, `tool_call_count` (Claude scan rollup) |
+| Usage warehouse | `~/.agents/.history/analytics/usage.db` | Value-free `kind`/`name`/`event` rows (secret, agent, browser, …) |
+
+Secrets usage previously lived only in `~/.agents/secrets/secrets.db`; the warehouse
+migrates those rows once (`kind=secret`) and the secrets UI keeps reading through a
+thin adapter. New emitters: secret access paths, `agents run`, browser launch/close.
+
+**Disable:** `AGENTS_NO_USAGE_TRACK=1`. **Redirect (tests):** `AGENTS_USAGE_DB`,
+`AGENTS_SESSIONS_DB`. Retention: usage events older than 90 days are pruned on open.
 
 ## Audit Event Log (`agents events`)
 
@@ -337,8 +384,16 @@ of agent-specific formats, no auth to manage.
 Three diagnostics with distinct scopes (RUSH-2027):
 
 - `agents fleet status` — coarse **device** health: online/offline, which agent
-  CLIs are installed, sign-in, agents-cli **version skew**. Not fine-grained
-  resource divergence.
+  CLIs are installed, sign-in, agents-cli **version skew**, and **how many agents
+  are running** on each box. Not fine-grained resource divergence. Device stats and
+  agent counts are **publish-own / read-union** (RUSH-2061): each daemon probes
+  only itself (no ssh) and publishes its own row — resource stats + live-agent
+  workload — to a local mirror (`~/.agents/.cache/.fleet-status.json`,
+  [`src/lib/fleet-status.ts`](../src/lib/fleet-status.ts)); the command unions
+  peers' rows on demand, cache-first, ssh-reading a stale/missing peer via
+  `agents fleet status --local --json` through a bounded, kill-on-timeout fan-out.
+  The daemon no longer force-probes every device every 3 minutes (the old N² ssh
+  fan-out and orphaned-probe pile-up, RUSH-2114).
 - `agents inspect <agent>[@version]` — deep **single-harness** diff between one
   version home and its resolved sources (staleness, orphans).
 - `agents doctor` — the **umbrella**: local diagnostics (CLI presence, sign-in,
@@ -902,6 +957,44 @@ Delivery is best-effort and reported: each sink that ran prints `→ <name>`, a
 failure prints a warning and a non-zero exit is never propagated. Losing a mirror
 must not cost the operator the post — it is already written.
 
+##### `channel:` sinks — in-process delivery, no argv (RUSH-2123)
+
+A sink can declare `channel:` instead of `command:`. It delivers through the
+same channel-provider registry `agents send` / `agents notify` use
+(`deliverEnvelope()`) — no spawn, no argv template, just the composed
+`{message}` body:
+
+```yaml
+feed:
+  broadcast:
+    owner:
+      channel: owner          # notify.owner.{channel,to} in agents.yaml
+      minLevel: important
+    ops-slack:
+      channel: slack           # any registered channel / notify.transports name
+      to: "#ops"
+```
+
+`channel: owner` is the address alias — same one `agents send --to owner` and
+`agents notify` use — and needs no `to`. Any other channel name needs an
+explicit `to`, or the sink is skipped (same "never fire with a hole in it"
+contract a `command:` sink already follows for a missing placeholder). Gated by
+`minLevel` exactly like a `command:` sink; the two shapes are interchangeable
+per sink.
+
+##### The implicit owner fallback
+
+An operator who sets `notify.owner` (for `agents notify`) but never writes a
+`feed.broadcast` block used to get a `--blocked` post that looked recorded and
+reached nobody — `feed.broadcast` and `notify.owner` were two disconnected
+config blocks. Now, when `feed.broadcast` is unset or empty **and** the post is
+`important` (which `--blocked` always is), the post falls back to
+`notify.owner` automatically, as if `feed.broadcast: { owner: { channel: owner
+} }` had been declared. A routine `milestone` post still stays record-only even
+with the fallback available — the fallback follows the same `minLevel` contract
+every sink already does — and writing an actual `feed.broadcast` block always
+wins outright over the fallback.
+
 ### Activity lane (`agents activity`) — progress at a glance, fleet-wide
 
 `agents activity` reads the same append-only activity stream (never re-parsing
@@ -1065,16 +1158,25 @@ a stable per-account key:
   fetches live quota and renders `S:`/`W:` bars + plan. It's **stale-while-revalidate**
   (on-disk cache under `~/.agents/.cache/`, keyed per account: 2-min fresh, 24-h
   block) so `agents view` stays off the network on the hot path.
-- **Routing reads the same cache under a tighter rule.** Displaying a slightly old
-  bar costs nothing; *choosing an account* from one costs the whole run, so the
-  balanced router caps staleness at **5 minutes**
-  (`USAGE_DECISION_MAX_AGE_MS`, [`src/lib/rotate.ts`](../src/lib/rotate.ts)) and
-  blocks on a live read past that — one bounded, parallel round trip per account,
-  and none inside the 2-minute fresh window. When a read fails and the cache is
-  all it has, the router prefers any account whose snapshot IS verified, and
-  reports `usage unverified` in the launch banner rather than presenting a stale
-  number as a fact. The cache is strictly per machine and never synced, so a box
-  whose refresh is failing would otherwise route on day-old numbers indefinitely.
+- **Routing reads the same cache, CACHE-ONLY — never on the hot path's network
+  (RUSH-2061).** Displaying a slightly old bar costs nothing; *choosing an account*
+  from one must not cost a network round trip on `agents run` cold-start.
+  `collectRunCandidates` reads the cache with `readOnly`
+  ([`src/lib/rotate.ts`](../src/lib/rotate.ts), [`src/lib/usage.ts`](../src/lib/usage.ts))
+  and never blocks on a live fetch. A snapshot older than **5 minutes**
+  (`USAGE_DECISION_MAX_AGE_MS`) is still not trusted for the pick — but the guard
+  is `isUsageVerified`, which routes around an unconfirmable number and reports
+  `usage unverified` in the launch banner, NOT a blocking refresh. Keeping the
+  cache warm is the **daemon's** job (`runUsageRefresh`,
+  [`src/lib/usage-refresh.ts`](../src/lib/usage-refresh.ts)): each host refreshes
+  only its own signed-in accounts on an adaptive cadence from the session-window
+  burn rate (90s racing toward the 5h cap, up to 15min idle), capped at ~6 calls
+  per account per hour and skipped under a 429 backoff. Balanced weighting also
+  **deprioritizes an account projected to cap soon** — `deriveUsageHeadroom`
+  projects minutes-to-limit and `capacityWeight` scales the headroom weight down
+  as that projection shortens, so a launch avoids an account racing toward its cap,
+  not just one already 100%-maxed. The cache is strictly per machine and never
+  synced.
 - **A 429 is backed off, not retried through.** The endpoint's `Retry-After` is
   recorded per provider (`usage-backoff.ts`, on disk under
   `~/.agents/.cache/usage-backoff/` because the daemon and every one-shot CLI run
@@ -1114,7 +1216,7 @@ contains — this is a data-availability limit, not a policy choice:
 | Grok | email + tier | last-seen (`~/.grok/logs/unified.jsonl`) | email from the local auth file; weekly window (`W`) + subscription tier parsed from the newest `billing: fetched credits config` log line, since Grok's network usage endpoints 404 |
 | Droid | email | live (`api.factory.ai`) | `~/.factory/auth.v2.file` is AES-256-GCM (key on disk at `auth.v2.key`); decrypt locally, read the email from the WorkOS access-token JWT. That same token authorizes `GET /api/billing/limits` for the three rolling rate-limit windows (5-hour → `S`, weekly → `W`, monthly, detailed-view only). |
 | Kimi | `id:<user_id>` + tier | live (`api.kimi.com/coding/v1/usages`) | JWT carries no email — only an opaque `user_id`. Quota + membership tier come from the `/usages` endpoint. |
-| Cursor | email | live (`cursor.com/api/usage`) | email/authId from `~/.cursor/cli-config.json`; access token from `~/.config/cursor/auth.json`. The endpoint is authed with a `WorkosCursorSessionToken=<authId>::<token>` cookie and returns a monthly request bar (`M`) for request-capped (free/legacy) plans. Usage-based plans report no request cap, so they render the account row without a bar. |
+| Cursor | email | live (`cursor.com/api/dashboard/get-current-period-usage`, `cursor.com/api/usage-summary`, `cursor.com/api/usage`) | email/authId from `~/.cursor/cli-config.json`; access token from `~/.config/cursor/auth.json`; the cookie subject prefers the access token's own JWT `sub`, falling back to the config file's `authId`. Every request is authed with a `WorkosCursorSessionToken=<sub>::<token>` cookie. Three sources, tried in order: the dashboard's `get-current-period-usage` (primary) maps `planUsage.{auto,api,total}PercentUsed` to three bars — Auto + Composer (`A`), API (`API`), Total (`T`) — reset from `billingCycleEnd`; `usage-summary` (fallback, for accounts the primary endpoint returns no usable `planUsage` for) nests the same three percentages under `individualUsage.plan`; the legacy `/api/usage` request-cap endpoint (last resort) renders a monthly request bar (`M`) for free/legacy request-capped plans. An account on none of these (fully unlimited, no percent fields) renders without a bar rather than a misleading empty gauge. |
 | Antigravity | `signed in` | live (`cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota`) | OAuth grant with no id_token — presence only. File `~/.gemini/antigravity-cli/antigravity-oauth-token`, else macOS keychain / Linux libsecret (`service gemini` + user `antigravity`). The stored Google OAuth token authorizes the Code Assist quota endpoint `agy` itself uses; it returns one bucket per model (`gemini-3.1-pro`, `gemini-2.5-flash`, …) with its own reset time, and each bucket renders as its own bar (compact model tag: `3.1P`, `2.5F`, …). |
 | others | `not signed in` unless a credential exists | — | `default` case: no detector |
 

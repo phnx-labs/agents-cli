@@ -442,6 +442,21 @@ async function localHealthRow(self: string, stats?: DeviceStats): Promise<FleetH
   };
 }
 
+/** SSH into a host and read its already-computed fleet-status row (a cheap
+ *  `fleet status --local --json` on the peer — NOT a fresh remote resource probe;
+ *  the peer's daemon keeps that row warm). Bounded + reaped via sshExecAsync's
+ *  timeout (RUSH-2114). */
+async function probeRemoteFleetStatus(target: FleetStatusTarget): Promise<import('../lib/fleet-status.js').FleetStatusRow> {
+  const isWin = /^win/i.test((target.platform ?? '').trim());
+  const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
+  const cmd = buildRemoteAgentsInvocation(['devices', 'status', '--local', '--json'], undefined, isWin ? 'windows' : undefined, env);
+  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true });
+  if (res.code !== 0) {
+    throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
+  }
+  return JSON.parse(res.stdout) as import('../lib/fleet-status.js').FleetStatusRow;
+}
+
 async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetHealthRow, 'name' | 'platform' | 'stats'>> {
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
@@ -471,10 +486,22 @@ async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetH
   };
 }
 
-async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean; verbose?: boolean }): Promise<void> {
+async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean; local?: boolean; verbose?: boolean }): Promise<void> {
   const reg = await loadDevices();
   const self = machineId();
   const forceRefresh = Boolean(opts.refresh || opts.live);
+
+  // `--local`: the publish endpoint the read-union reads over ssh. Probe THIS
+  // host only (resource stats + live-agent workload, no ssh) and print its row.
+  // Publishes into the local mirror as a side effect so a same-host reader is
+  // instantly warm too.
+  if (opts.local) {
+    const { publishLocalFleetStatus } = await import('../lib/fleet-status.js');
+    const row = await publishLocalFleetStatus(self);
+    if (opts.json) console.log(JSON.stringify(row, null, 2));
+    else console.log(`${self}: ${row.agents.running} running agent(s), ${row.agents.live} live`);
+    return;
+  }
   const planned = planFleetTargets(reg);
   const probeable = planned.filter((t) => !t.skip).map((t) => t.device);
   // Cache-first: serve remote stats from the daemon-warmed cache (instant),
@@ -541,6 +568,42 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
       row.online = deviceOnlineState(profile, statsMap.get(row.name));
       row.lastSeen = profile.tailscale?.lastSeen ?? profile.reachability?.checkedAt;
     }
+  }
+
+  // Live-agent workload (RUSH-2061): publish THIS host's row, then union peers'
+  // rows cache-first. The daemon no longer probes the fleet (publish-own /
+  // read-union), so cross-host counts are gathered HERE, on demand — a mirror row
+  // younger than the freshness window is served without ssh; a missing/stale one
+  // is read over ssh via `fleet status --local --json` (bounded + kill-on-timeout
+  // through sshExecAsync/fanOutDevices, RUSH-2114). Best-effort: agent counts are
+  // additive, so a failed gather never breaks the status render.
+  try {
+    const { publishLocalFleetStatus, readFleetStatus, writeFleetStatusRows } = await import('../lib/fleet-status.js');
+    const selfRow = await publishLocalFleetStatus(self);
+    const mirror = readFleetStatus();
+    const now = Date.now();
+    const AGENT_STATUS_STALE_MS = 3 * 60_000;
+    const toRead = remoteTargets.filter((t) => {
+      if (t.skip) return false;
+      if (forceRefresh) return true;
+      const row = mirror[t.name];
+      return !row || now - row.capturedAt > AGENT_STATUS_STALE_MS;
+    });
+    if (toRead.length > 0) {
+      const gathered = await fanOutDevices(toRead, probeRemoteFleetStatus, { perDeviceTimeoutMs: 20_000 });
+      const updates: Record<string, import('../lib/fleet-status.js').FleetStatusRow> = {};
+      for (const g of gathered) {
+        if (g.status === 'ok' && g.value) updates[g.name] = { ...g.value, host: g.name };
+      }
+      if (Object.keys(updates).length > 0) writeFleetStatusRows(updates);
+    }
+    const union = readFleetStatus();
+    for (const row of rows) {
+      const r = row.name === self ? selfRow : union[row.name];
+      if (r) row.agents = r.agents;
+    }
+  } catch {
+    // best-effort — agent counts are additive to the health view
   }
 
   const report = buildFleetHealthReport(rows, new Date(), { self });
@@ -1215,8 +1278,9 @@ Typical workflow:
     .option('--no-stats', 'skip the live resource probe')
     .option('--refresh', 'force a live probe of every device, bypassing the cache')
     .option('--live', 'alias of --refresh (shorter to type)')
+    .option('--local', "this machine only: print THIS host's status row (resource stats + live-agent workload). The publish endpoint the fleet-status read-union reads over ssh.")
     .option('--verbose', 'show the full per-device auth/CLI/sync/version grid instead of the summary')
-    .action(async (opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean; verbose?: boolean }, cmd: Command) => {
+    .action(async (opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean; local?: boolean; verbose?: boolean }, cmd: Command) => {
       // The root program also defines a global `--verbose`; commander binds a
       // shared long flag to the program, not the leaf. Read the effective value
       // from the merged globals so `fleet status --verbose` works at either level

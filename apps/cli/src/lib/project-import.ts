@@ -101,11 +101,22 @@ export function validateImportOpts(flags: RawImportFlags): ImportOptions {
  * `repoSlug`→`repo`, `linearProjectId`→`linear.projectId`), now gated on the
  * row's `confidence`. A row with no confidence field is a guess with no stated
  * strength, so it ranks below every floor and only `--all` takes it.
+ *
+ * `resolveRemote` reads the checkout's actual `origin` and OVERRIDES the row's
+ * `repoSlug`. Factory derives that slug from the checkout path's last two
+ * segments (`apps/factory/src/core/projectIndex.ts:19-26`), which is only right
+ * when the directory tree happens to mirror the GitHub org. It commonly does
+ * not: a checkout at `~/src/github.com/<you>/agents-cli` whose remote is
+ * `phnx-labs/agents-cli` imported as `<you>/agents-cli` — a real, different
+ * repo — so the card's merged-PR and release lines silently reported a
+ * stranger's repository instead of failing. The remote is the only authority on
+ * which repo a checkout is; the path is a guess about it.
  */
 export function buildFactoryImportCandidates(
   rows: unknown[],
   existing: Map<string, ProjectDef>,
   opts: Pick<ImportOptions, 'minConfidence' | 'force'>,
+  resolveRemote: (root: string) => string | undefined = () => undefined,
 ): ImportPlan {
   const floor = CONFIDENCE_RANK[opts.minConfidence];
   const defs: ProjectDef[] = [];
@@ -140,7 +151,11 @@ export function buildFactoryImportCandidates(
     seen.add(name);
     const def: ProjectDef = { name };
     if (typeof o.path === 'string') def.root = toHomeRelative(o.path);
-    if (typeof o.repoSlug === 'string') def.repo = o.repoSlug;
+    // The checkout's own remote wins over the registry's path-derived guess;
+    // the guess is the fallback for a path with no git remote to ask.
+    const fromRemote = typeof o.path === 'string' ? resolveRemote(o.path) : undefined;
+    const repo = fromRemote ?? (typeof o.repoSlug === 'string' ? o.repoSlug : undefined);
+    if (repo) def.repo = repo;
     if (typeof o.linearProjectId === 'string') def.linear = { projectId: o.linearProjectId };
     defs.push(def);
   }

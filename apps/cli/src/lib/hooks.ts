@@ -16,7 +16,7 @@ import * as yaml from 'yaml';
 import * as TOML from 'smol-toml';
 import { AGENTS, ALL_AGENT_IDS, agentConfigDirName, isAgentHardDeprecated } from './agents.js';
 import { supports, explainSkip, capableAgents } from './capabilities.js';
-import { getAgentsDir, getHooksDir as getSystemHooksDir, getUserHooksDir, getUserAgentsDir, getSystemAgentsDir, getProjectAgentsDir, getTrashHooksDir, getEnabledExtraRepos, getResolvedRulesDir, getUserRulesDir } from './state.js';
+import { getAgentsDir, getHooksDir as getSystemHooksDir, getUserHooksDir, getUserAgentsDir, getSystemAgentsDir, getProjectAgentsDir, getTrashHooksDir, getEnabledExtraRepos, getResolvedRulesDir, getUserRulesDir, getPerfDir } from './state.js';
 import { collectSubruleHooksFromState } from './rules/compose.js';
 
 function getCentralHooksDir(): string { return getUserHooksDir(); }
@@ -292,12 +292,20 @@ export function inspectDuplicateVersionHooks(cwd = process.cwd()): DuplicateVers
 /**
  * Resolve the command path to register for a hook.
  *
- * Returns either the raw script path (neither `cache:` nor `matches:` set,
- * legacy behavior) or the path to a generated wrapper shim. The shim is written
- * as a side effect when `cache:` and/or `matches:` is configured — it enforces
- * the `matches:` gate at fire time and layers the caching/timing machinery when
- * `cache:` is set. The agent-native settings file gets the same shape either
- * way — just a different command path.
+ * Returns either the raw script path (no `cache:`, `matches:`, or `matcher:`
+ * set — a bare lifecycle hook with nothing to gate or time) or the path to a
+ * generated wrapper shim. The shim is written as a side effect when `cache:`
+ * and/or `matches:` is configured — it enforces the `matches:` gate at fire
+ * time and layers the caching/timing machinery when `cache:` is set.
+ *
+ * A hook that declares only `matcher:` (e.g. git-guard/rm-guard scoped to the
+ * `Bash` tool, no `cache:`/`matches:`) also gets a shim now — a pass-through
+ * one with no gate and no cache, whose only job is the trailing timing sample
+ * (see PASSTHROUGH_TAIL in hooks/cache.ts). Before this, a matcher-only hook
+ * took the raw-path branch and fired completely uninstrumented: `agents perf
+ * hooks` showed zero samples for it no matter how often it ran. The agent-
+ * native settings file gets the same shape either way — just a different
+ * command path.
  */
 function resolveHookCommand(
   name: string,
@@ -310,17 +318,20 @@ function resolveHookCommand(
   const cache = parseCacheConfig(hookDef.cache);
   const matches = hookDef.matches;
   const hasMatches = matches != null && Object.keys(matches).length > 0;
-  if (!cache && !hasMatches) {
-    // No caching and no matches: gate opted in — make sure a previously
-    // generated shim from an earlier `cache:`/`matches:` config is gone so the
-    // JSONL doesn't keep claiming hits.
+  const hasMatcher = !!hookDef.matcher;
+  if (!cache && !hasMatches && !hasMatcher) {
+    // Nothing to gate, cache, or time: make sure a previously generated shim
+    // from an earlier cache:/matches:/matcher config is gone so the JSONL
+    // doesn't keep claiming hits.
     removeHookShim(name);
     return toPortableCommand(scriptPath);
   }
-  // A shim is generated when the hook opts into caching and/or declares
-  // `matches:` predicates. The shim enforces the `matches:` gate at fire time
-  // (skipping the script when predicates don't hold) and, when `cache:` is set,
-  // layers the cache/timing machinery on top.
+  // A shim is generated when the hook opts into caching, declares `matches:`
+  // predicates, or declares a `matcher:` (even alone — see the doc comment
+  // above). The shim enforces the `matches:` gate at fire time (skipping the
+  // script when predicates don't hold) and, when `cache:` is set, layers the
+  // cache/timing machinery on top; with neither, it is a pure pass-through
+  // timing wrapper.
   return toPortableCommand(generateHookShim({ name, scriptPath, cache, matches }));
 }
 
@@ -771,7 +782,7 @@ export function checkVersionHookWiring(agent: AgentId, version: string): HookWir
     if (!isValidHookShimName(name)) return null;
     const cache = parseCacheConfig(hookDef.cache);
     const hasMatches = hookDef.matches != null && Object.keys(hookDef.matches).length > 0;
-    if (!cache && !hasMatches) return toPortableCommand(scriptPath);
+    if (!cache && !hasMatches && !hookDef.matcher) return toPortableCommand(scriptPath);
     return toPortableCommand(getHookShimPath(name));
   };
 
@@ -1452,7 +1463,17 @@ export function registerHooksToSettings(
     return resolveHookScriptPath(script);
   };
   const managedPrefixes = overrideRoots
-    ? [path.join(overrideRoots[0], 'hooks') + path.sep]
+    ? [
+        path.join(overrideRoots[0], 'hooks') + path.sep,
+        // The shim dir is one global location regardless of which hooks
+        // source (agentsDirOverride vs the normal user/system dirs) resolved
+        // the underlying script, so it belongs in every managedPrefixes
+        // shape — omitting it here left a shim path unrecognized as managed
+        // under the override branch, so a hook's matcher/event change never
+        // GC'd its stale shim-path entry (only reachable via a caller that
+        // passes agentsDirOverride; no production call site does today).
+        getHookShimsDir() + path.sep,
+      ]
     : [
         ...getManagedHookPrefixes(),
         ...(localHooksDir ? [localHooksDir + path.sep] : []),
@@ -1583,9 +1604,42 @@ function registerHooksForOpenCode(
 
   const serializedDirect = JSON.stringify(Object.fromEntries(direct), null, 2);
   const serializedLifecycle = JSON.stringify(Object.fromEntries(lifecycle), null, 2);
+  // Same disposable perf spool the bash shims (hooks/cache.ts) append to — see
+  // the timedOut branch below for why OpenCode needs its own writer.
+  const perfSpoolPath = path.join(getPerfDir(), 'spool.jsonl');
   const pluginSource = `// Generated by agents-cli. Re-run agents sync to update.
+import fs from "node:fs"
+import os from "node:os"
+
 const directHooks = ${serializedDirect}
 const lifecycleHooks = ${serializedLifecycle}
+const PERF_SPOOL = ${JSON.stringify(perfSpoolPath)}
+
+function recordTimeoutSample(hook, payload) {
+  // hook.command already ran through a generated shim (hooks/cache.ts) that
+  // writes its own hook.fire sample on exit — but Bun.spawn's child.kill()
+  // below (SIGTERM) tears the shim down before it reaches that trailing
+  // printf, so a timed-out fire would otherwise leave ZERO trace in the
+  // warehouse. Write the sample ourselves from the side that knows it timed out.
+  try {
+    fs.mkdirSync(PERF_SPOOL.slice(0, PERF_SPOOL.lastIndexOf("/")), { recursive: true })
+    const line = JSON.stringify({
+      ts_ms: Date.now(),
+      kind: "hook.fire",
+      label: hook.name,
+      duration_ms: hook.timeout * 1000,
+      cache: "none",
+      exit_code: null,
+      status: "timeout",
+      cwd: payload && typeof payload.cwd === "string" ? payload.cwd : undefined,
+      session_id: payload && typeof payload.session_id === "string" ? payload.session_id : undefined,
+      hostname: (() => { try { return os.hostname() } catch { return "unknown" } })(),
+    }) + "\\n"
+    fs.appendFileSync(PERF_SPOOL, line)
+  } catch {
+    // best effort — never let sample recording break the timeout error path
+  }
+}
 
 function matches(hook, tool) {
   if (!hook.matcher) return true
@@ -1625,6 +1679,7 @@ async function runHooks(hooks, payload, $, matchTool = false) {
       const exitCode = await child.exited.finally(() => clearTimeout(timer))
       const stderr = await new Response(child.stderr).text()
       if (timedOut) {
+        recordTimeoutSample(hook, payload)
         throw new Error(\`\${hook.name} timed out after \${hook.timeout} seconds\`)
       }
       if (exitCode !== 0) {

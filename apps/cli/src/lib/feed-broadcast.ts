@@ -23,8 +23,21 @@
  *
  * Delivery is best-effort and reported: a sink that fails prints a warning and
  * the post still stands. Losing a mirror must never cost the operator the post.
+ *
+ * A second sink shape (RUSH-2123) delivers **in-process** through the same
+ * channel-provider registry `agents send` uses (`channel:` instead of
+ * `command:`) — no spawn, no argv templating. `channel: owner` is the address
+ * alias that expands to `notify.owner.{channel,to}`, matching `agents notify`.
+ * When the operator has never written a `feed.broadcast` block at all, an
+ * important-level post falls back to that owner address implicitly
+ * ({@link effectiveBroadcastConfig}) rather than reaching nobody — see that
+ * function's doc for why this was a silent failure before.
  */
 import { spawnSync } from 'child_process';
+import type { Meta } from './types.js';
+import { isOwnerAlias, readOwnerDest, resolveSendEnvelope, deliverEnvelope } from './channels/send.js';
+import { lookupTransport } from './channels/resolve.js';
+import { registerBuiltinProviders } from './channels/providers/index.js';
 
 /** How loudly a post asks to be heard. Ordered — `important` implies milestone. */
 export type FeedPostLevel = 'milestone' | 'important';
@@ -43,9 +56,20 @@ export interface FeedSinkConfig {
   /**
    * argv to run, with `{placeholder}` tokens substituted. First element is the
    * program; it is spawned directly (no shell), so quoting is not a concern and
-   * post text can never become shell syntax.
+   * post text can never become shell syntax. Mutually exclusive with `channel`
+   * — a sink is one shape or the other.
    */
-  command: string[];
+  command?: string[];
+  /**
+   * In-process delivery through the same channel-provider registry `agents
+   * send`/`agents notify` use — the composed `{message}` body, no argv, no
+   * spawn. `'owner'` is the address alias (expands to `notify.owner.{channel,to}`
+   * in agents.yaml, same as `agents notify`); any other value is a registered
+   * channel name (or a `notify.transports` mapping) and requires `to`.
+   */
+  channel?: string;
+  /** Recipient for a `channel` sink. Required unless `channel` is the `owner` alias. */
+  to?: string;
   /** Lowest post level that reaches this sink. Defaults to `milestone` (all posts). */
   minLevel?: FeedPostLevel;
 }
@@ -156,7 +180,14 @@ export function blockDeliveryFailure(
 
 export interface PlannedSink {
   name: string;
-  argv: string[];
+  /** Command sink: argv to spawn (mutually exclusive with `channel`). */
+  argv?: string[];
+  /** Channel sink: provider channel name, or the `owner` alias. */
+  channel?: string;
+  /** Channel sink recipient. Unset for the `owner` alias — resolved at delivery. */
+  to?: string;
+  /** Channel sink body — the composed `{message}` for this post. */
+  text?: string;
 }
 
 export interface SinkOutcome {
@@ -324,6 +355,10 @@ export function renderSinkArgv(
 /**
  * Which sinks this post reaches, in config order. Pure — the dry-run listing and
  * the real fan-out plan through here, so what `--dry-run` shows is what runs.
+ *
+ * A `channel:` sink is gated by the same `minLevel` rule as a `command:` sink —
+ * one level check for both shapes, so a dry-run plan is truthful regardless of
+ * which shape an operator's sink uses.
  */
 export function planFeedBroadcast(
   config: FeedBroadcastConfig | undefined,
@@ -332,9 +367,27 @@ export function planFeedBroadcast(
   if (!config) return [];
   const planned: PlannedSink[] = [];
   for (const [name, sink] of Object.entries(config)) {
-    if (!Array.isArray(sink?.command) || sink.command.length === 0) continue;
+    if (!sink) continue;
     const min = sink.minLevel ?? 'milestone';
     if (LEVEL_RANK[ctx.level] < LEVEL_RANK[min]) continue;
+
+    const channel = sink.channel?.trim();
+    if (channel) {
+      // The owner alias resolves its recipient from notify.owner at delivery
+      // time; any other channel name needs an explicit recipient now, or the
+      // sink can never fire with a hole in it (same contract as a missing argv
+      // placeholder below).
+      if (!isOwnerAlias(channel) && !sink.to?.trim()) continue;
+      planned.push({
+        name,
+        channel,
+        to: isOwnerAlias(channel) ? undefined : sink.to!.trim(),
+        text: composeBroadcastMessage(ctx),
+      });
+      continue;
+    }
+
+    if (!Array.isArray(sink.command) || sink.command.length === 0) continue;
     const argv = renderSinkArgv(sink.command, ctx);
     if (!argv) continue;
     planned.push({ name, argv });
@@ -343,24 +396,107 @@ export function planFeedBroadcast(
 }
 
 /**
- * Run the planned sinks. Each is a direct spawn with a bounded lifetime; a sink
- * that fails or is not installed is reported, never thrown — the post is already
- * written and must not be undone by a mirror that could not be reached.
+ * The effective sink config for a post: the operator's `feed.broadcast`, or —
+ * when that is unset or empty — an implicit fallback straight to
+ * `notify.owner`, for a post worth interrupting someone over.
+ *
+ * Before this, `broadcastPostedEvent`/`broadcastBlock` returned early the
+ * moment `feed.broadcast` was empty, even when `notify.owner` was fully
+ * configured — so the common case (an operator who set up owner notifications
+ * but never wrote a `feed.broadcast` block) produced a `--blocked` post that
+ * looked recorded and reached nobody. `agents notify` already treats
+ * `notify.owner` as the default human destination; this makes an important
+ * feed post/block use that same default instead of requiring a second,
+ * redundant config block that says the same thing.
+ *
+ * The fallback only fires for `important` — a routine `milestone` post stays
+ * record-only, matching the `minLevel` contract every declared sink already
+ * follows. An operator-declared `feed.broadcast` (any non-empty config)
+ * always wins outright; the fallback never layers on top of it.
  */
-export function runFeedBroadcast(planned: PlannedSink[], timeoutMs = 20_000): SinkOutcome[] {
-  return planned.map(({ name, argv }) => {
-    const result = spawnSync(argv[0], argv.slice(1), {
-      encoding: 'utf-8',
-      timeout: timeoutMs,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    if (result.error) {
-      return { name, ok: false, error: result.error.message };
-    }
-    if (result.status !== 0) {
-      const tail = (result.stderr || result.stdout || '').trim().split('\n').slice(-1)[0];
-      return { name, ok: false, error: tail || `exited ${result.status}` };
-    }
-    return { name, ok: true };
+export function effectiveBroadcastConfig(
+  config: FeedBroadcastConfig | undefined,
+  level: FeedPostLevel,
+  meta: Meta,
+): FeedBroadcastConfig | undefined {
+  if (config && Object.keys(config).length > 0) return config;
+  if (level !== 'important') return undefined;
+  if (!readOwnerDest(meta)) return undefined;
+  return { owner: { channel: 'owner' } };
+}
+
+function runCommandSink(name: string, argv: string[], timeoutMs: number): SinkOutcome {
+  const result = spawnSync(argv[0], argv.slice(1), {
+    encoding: 'utf-8',
+    timeout: timeoutMs,
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
+  if (result.error) {
+    return { name, ok: false, error: result.error.message };
+  }
+  if (result.status !== 0) {
+    const tail = (result.stderr || result.stdout || '').trim().split('\n').slice(-1)[0];
+    return { name, ok: false, error: tail || `exited ${result.status}` };
+  }
+  return { name, ok: true };
+}
+
+/**
+ * Deliver one `channel:` sink through the real provider registry —
+ * `resolveSendEnvelope` reuses `agents notify`'s owner-alias expansion, and
+ * `deliverEnvelope` is the same seam `agents send` calls. A bad channel name
+ * is checked with `lookupTransport` (the non-throwing lookup) BEFORE handing
+ * off to `deliverEnvelope`: that function's own resolution `die()`s on an
+ * unregistered provider, which is the right answer for an interactive `agents
+ * send` typo but would take the whole broadcast fan-out down with it here —
+ * one misconfigured sink must report a failure, not kill the process running
+ * every other sink.
+ */
+async function runChannelSink(sink: PlannedSink, meta: Meta): Promise<SinkOutcome> {
+  const name = sink.name;
+  // Registration is idempotent and normally happens inside deliverEnvelope();
+  // it has to happen before the lookupTransport pre-check below too, or the
+  // very first channel sink in a process would report "no channel provider"
+  // for a name that is, in fact, registered.
+  registerBuiltinProviders();
+  const owner = isOwnerAlias(sink.channel);
+  const resolved = resolveSendEnvelope(
+    {
+      text: sink.text ?? '',
+      channel: owner ? undefined : sink.channel,
+      to: owner ? 'owner' : sink.to,
+      ownerMode: owner,
+    },
+    meta,
+  );
+  if (!resolved.ok) return { name, ok: false, error: resolved.error };
+
+  const { provider, error } = lookupTransport(resolved.envelope.channel, meta);
+  if (!provider) return { name, ok: false, error };
+
+  const result = await deliverEnvelope(resolved.envelope, meta);
+  return result.ok ? { name, ok: true } : { name, ok: false, error: result.error };
+}
+
+/**
+ * Run the planned sinks. A `command:` sink is a direct spawn with a bounded
+ * lifetime; a `channel:` sink delivers in-process. Either way a sink that
+ * fails or is not installed/registered is reported, never thrown — the post
+ * is already written and must not be undone by a mirror that could not be
+ * reached.
+ */
+export async function runFeedBroadcast(
+  planned: PlannedSink[],
+  meta: Meta,
+  timeoutMs = 20_000,
+): Promise<SinkOutcome[]> {
+  const outcomes: SinkOutcome[] = [];
+  for (const sink of planned) {
+    if (sink.channel) {
+      outcomes.push(await runChannelSink(sink, meta));
+    } else {
+      outcomes.push(runCommandSink(sink.name, sink.argv ?? [], timeoutMs));
+    }
+  }
+  return outcomes;
 }

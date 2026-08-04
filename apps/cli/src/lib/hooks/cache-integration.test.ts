@@ -169,4 +169,56 @@ echo "call=$count"
     expect(a2.stdout.trim()).toBe('call=1');
     expect(fs.readFileSync(callCounterFile, 'utf-8').trim()).toBe('2');
   });
+
+  it('carries cwd and session_id from the hook stdin JSON into the perf-spool line', () => {
+    const shim = generateHookShim({
+      name: 'attributed-hook',
+      scriptPath,
+      cache: { ttl: 300, key: 'global', prefetch: 'none' },
+      paths,
+    });
+
+    runShim(shim, JSON.stringify({ cwd: '/some/repo/attributed', session_id: 'sess-123' }));
+
+    const spool = path.join(paths.perfDir!, 'spool.jsonl');
+    const [line] = fs.readFileSync(spool, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    expect(line.cwd).toBe('/some/repo/attributed');
+    expect(line.session_id).toBe('sess-123');
+  });
+
+  it('carries cwd/session_id through the pass-through (no-cache, matcher-only) tail too', () => {
+    // No `cache:` — mirrors a matcher-only hook like git-guard, which gets the
+    // gate-only PASSTHROUGH_TAIL, not the CACHE_TAIL exercised above.
+    const shim = generateHookShim({
+      name: 'guard-like-hook',
+      scriptPath,
+      cache: null,
+      matches: { tool_name: 'Bash' },
+      paths,
+    });
+
+    runShim(shim, JSON.stringify({ cwd: '/some/repo/guard', session_id: 'sess-guard', tool_name: 'Bash' }));
+
+    const spool = path.join(paths.perfDir!, 'spool.jsonl');
+    const [line] = fs.readFileSync(spool, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    expect(line.cache).toBe('none');
+    expect(line.cwd).toBe('/some/repo/guard');
+    expect(line.session_id).toBe('sess-guard');
+  });
+
+  it('omits cwd/session_id from the perf-spool line when stdin carries neither', () => {
+    const shim = generateHookShim({
+      name: 'unattributed-hook',
+      scriptPath,
+      cache: { ttl: 300, key: 'global', prefetch: 'none' },
+      paths,
+    });
+
+    runShim(shim, '{}');
+
+    const spool = path.join(paths.perfDir!, 'spool.jsonl');
+    const [line] = fs.readFileSync(spool, 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    expect(line.cwd).toBeUndefined();
+    expect(line.session_id).toBeUndefined();
+  });
 });

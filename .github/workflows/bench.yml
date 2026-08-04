@@ -1,14 +1,22 @@
 name: Bench
 
-# Perf benchmark harnesses (bench/ + tests/bench-*). Deliberately Linux-only
-# and NON-gating:
+# Perf benchmark harnesses (bench/ + tests/bench-*). Deliberately Linux-only,
+# and mostly NON-gating:
 #
 #   * No per-OS bench legs. The correctness matrix (ubuntu/macOS/Windows x
 #     node 22/24) lives in ci.yml — cross-platform bench numbers add noise
 #     without signal right now, so there is no Windows/macOS/Linux bench fan-out.
-#   * The bench steps are `continue-on-error` — a regression or a nonzero exit
+#   * Most bench steps are `continue-on-error` — a regression or a nonzero exit
 #     never fails the job or blocks a merge. Numbers are informational; read
 #     them in the step log. Infra failures (checkout/install) still surface red.
+#   * ONE exception: "Bench — distributed session-query regression guard" is
+#     NOT continue-on-error. It asserts a lightweight threshold (zero ssh calls
+#     during `--active --local`, sub-500ms local-guard latency, a parallel not
+#     serial `--host` fan-out) rather than reporting a full perf suite, so
+#     RUSH-2118 (a `--local` query silently going back to dialing remote-host
+#     teammates over ssh) can't regress unnoticed between the correctness test
+#     (agents.remote-poll.test.ts, gates on every PR) and a real fleet catching
+#     the slowdown in production.
 #
 # Each harness runs against a fresh HOME (mktemp -d) so results depend on the
 # harness, not on leftover runner state. resolve-perf no-ops when no agent
@@ -53,3 +61,7 @@ jobs:
       - name: Bench — concurrent session writes
         continue-on-error: true
         run: HOME="$(mktemp -d)" bun tests/bench-concurrent-writes.ts
+
+      - name: Bench — distributed session-query regression guard (RUSH-2118)
+        # NOT continue-on-error, deliberately — see the file header comment.
+        run: bun bench/sessions-active-perf.ts

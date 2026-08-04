@@ -155,6 +155,7 @@ export interface SessionMeta {
   durationMs?: number;
   /** Underlying LLM model observed in the transcript, when the agent records one. */
   model?: string;
+  toolCallCount?: number;
   version?: string;
   account?: string;
   topic?: string;

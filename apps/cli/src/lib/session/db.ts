@@ -25,7 +25,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/05-sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 26;
+export const SCHEMA_VERSION = 27;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   cost_usd REAL,
   duration_ms INTEGER,
   model TEXT,
+  tool_call_count INTEGER,
   file_path TEXT NOT NULL,
   file_mtime_ms INTEGER,
   file_size INTEGER,
@@ -238,6 +239,7 @@ export interface SessionRow {
   cost_usd: number | null;
   duration_ms: number | null;
   model: string | null;
+  tool_call_count: number | null;
   file_path: string;
   file_mtime_ms: number | null;
   file_size: number | null;
@@ -547,7 +549,14 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 22) {
-    // v21 → v22: tool-call evidence uses an independent ledger. Do not clear
+    // v21 → v22: persist the transcript's aggregate tool-call count.
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'tool_call_count')) db.exec(`ALTER TABLE sessions ADD COLUMN tool_call_count INTEGER`);
+    db.exec(`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`);
+  }
+
+  if (fromVersion < 23) {
+    // v22 → v23: tool-call evidence uses an independent ledger. Do not clear
     // scan_ledger or dir_ledger: normal session listing stays warm, while tool
     // history is filled once on demand.
     db.exec(`
@@ -598,8 +607,8 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     `);
   }
 
-  if (fromVersion < 23) {
-    // v22 → v23: make append accounting O(changed calls), including empty
+  if (fromVersion < 24) {
+    // v23 → v24: make append accounting O(changed calls), including empty
     // deltas, instead of reading every historical evidence row per append.
     const callCols = db.prepare(`PRAGMA table_info(tool_calls)`).all() as Array<{ name: string }>;
     if (!callCols.some((column) => column.name === 'evidence_bytes')) {
@@ -609,13 +618,13 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!ledgerCols.some((column) => column.name === 'evidence_bytes')) {
       db.exec(`ALTER TABLE tool_scan_ledger ADD COLUMN evidence_bytes INTEGER NOT NULL DEFAULT 0`);
     }
-    // v22 existed only in prerelease development builds. Force their tool
+    // v23 existed only in prerelease development builds. Force their tool
     // evidence through one bounded rebuild rather than trusting zeroed totals.
     db.exec(`DELETE FROM tool_scan_ledger`);
   }
 
-  if (fromVersion < 24) {
-    // v23 → v24: the original unicode word tokenizer could not prefilter the
+  if (fromVersion < 25) {
+    // v24 → v25: the original unicode word tokenizer could not prefilter the
     // substring semantics promised by input/output/error queries. Rebuild only
     // the derived FTS table from already-redacted call rows; transcripts and
     // both scan ledgers remain warm.
@@ -635,8 +644,8 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     `);
   }
 
-  if (fromVersion < 25) {
-    // v24 → v25: retain every static program occurrence instead of only the
+  if (fromVersion < 26) {
+    // v25 → v26: retain every static program occurrence instead of only the
     // distinct program set. The source transcript is rebuilt only by the
     // explicit tools backfill; normal session and directory ledgers stay warm.
     db.exec(`
@@ -653,8 +662,8 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     `);
   }
 
-  if (fromVersion < 26) {
-    // v25 → v26: coverage and query planning address the independent tool
+  if (fromVersion < 27) {
+    // v26 → v27: coverage and query planning address the independent tool
     // ledger by session id. Rebuild only this derived ledger so a tool query
     // never has to resolve or stat transcript paths.
     db.exec(`
@@ -1074,7 +1083,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     id, short_id, agent, origin, routine_name, routine_run_id,
     version, account, timestamp, last_activity,
     project, cwd, git_branch, topic, label, message_count, token_count,
-    output_tokens, cost_usd, duration_ms, model,
+    output_tokens, cost_usd, duration_ms, model, tool_call_count,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
     pr_url, pr_number, worktree_slug, ticket_id, spawned_team, plan, todos,
     recent_directories_touched, linear_project, linear_project_url, machine,
@@ -1083,7 +1092,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     @id, @short_id, @agent, @origin, @routine_name, @routine_run_id,
     @version, @account, @timestamp, @last_activity,
     @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
-    @output_tokens, @cost_usd, @duration_ms, @model,
+    @output_tokens, @cost_usd, @duration_ms, @model, @tool_call_count,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
     @pr_url, @pr_number, @worktree_slug, @ticket_id, @spawned_team, @plan, @todos,
     @recent_directories_touched, @linear_project, @linear_project_url, @machine,
@@ -1118,6 +1127,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     cost_usd = excluded.cost_usd,
     duration_ms = excluded.duration_ms,
     model = excluded.model,
+    tool_call_count = excluded.tool_call_count,
     file_path = excluded.file_path,
     file_mtime_ms = excluded.file_mtime_ms,
     file_size = excluded.file_size,
@@ -1247,6 +1257,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     cost_usd: meta.costUsd ?? null,
     duration_ms: meta.durationMs ?? null,
     model: meta.model ?? null,
+    tool_call_count: meta.toolCallCount ?? null,
     file_path: meta.filePath,
     file_mtime_ms: scan?.fileMtimeMs ?? null,
     file_size: scan?.fileSize ?? null,
@@ -1416,6 +1427,7 @@ export function upsertSessionsBatch(
         cost_usd: meta.costUsd ?? null,
         duration_ms: meta.durationMs ?? null,
         model: meta.model ?? null,
+        tool_call_count: meta.toolCallCount ?? null,
         file_path: meta.filePath,
         file_mtime_ms: scan?.fileMtimeMs ?? null,
         file_size: scan?.fileSize ?? null,
@@ -1635,6 +1647,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     costUsd: row.cost_usd ?? undefined,
     durationMs: row.duration_ms ?? undefined,
     model: row.model ?? undefined,
+    toolCallCount: row.tool_call_count ?? undefined,
     version: row.version ?? undefined,
     account: row.account ?? undefined,
     topic: row.topic ?? undefined,

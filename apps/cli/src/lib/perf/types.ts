@@ -29,6 +29,7 @@ export interface PerfAggregateRow {
   label: string;
   n: number;
   p50Ms: number;
+  p95Ms: number;
   p99Ms: number;
   meanMs: number;
   maxMs: number;
@@ -37,6 +38,13 @@ export interface PerfAggregateRow {
   cacheStalePct?: number;
   cacheMissPct?: number;
   errorCount?: number;
+  /** Fraction (0-1) of samples with a nonzero exit code. */
+  errorRate?: number;
+  /** Fraction (0-1) of samples with status:'timeout'. */
+  timeoutRate?: number;
+  /** Project key (see project-key.ts) the row is scoped to — set only when
+   *  the `project` filter narrowed the query to one project. */
+  project?: string;
 }
 
 export interface AggregateOptions {
@@ -46,4 +54,6 @@ export interface AggregateOptions {
   machine?: string;
   agent?: string;
   minN?: number;
+  /** Scope results to samples whose cwd resolves to this project key. */
+  project?: string;
 }
