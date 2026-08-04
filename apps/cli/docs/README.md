@@ -36,6 +36,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 | Doc | What it covers |
 |---|---|
 | [Profiles](profiles.md) | Named (host CLI, endpoint, model, keychain auth) bundles — run Kimi / MiniMax / GLM / DeepSeek / Qwen through Claude Code with no proxy. |
+| [Model tiers](model-tiers.md) | `--model cheap\|default\|best\|ultra` on `run` / `teams` — per-harness cost tiers, the provider ranking mechanism, and the `agents models` tier map. |
 | [Secrets](secrets.md) | Keychain-backed env-var bundles. Inject into runs via `agents run --secrets <name>`. 1Password import/export, encrypted push/pull. |
 | [Secrets-agent process model](08-secrets-agent-process-model.md) | Design decision: fold the secrets broker into a hardened, always-on daemon — make the host reliable enough to carry the critical service rather than routing around it. |
 | [Secrets trust boundaries](../../../docs/design/secrets-trust-boundaries.md) | Design record: the plaintext data-flow — exactly which commands inject into a child process vs materialize a value into the agent's context/transcript. |

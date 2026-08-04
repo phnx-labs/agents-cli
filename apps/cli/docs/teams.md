@@ -130,7 +130,7 @@ remote home for you.
 | `-n, --name <name>` | Friendly name (required when using `--after`) |
 | `-m, --mode <mode>` | `plan` (read-only) \| `edit` (write files) \| `full` (write + skip prompts). Default: `edit` |
 | `-e, --effort <effort>` | `low` \| `medium` \| `high` \| `xhigh` \| `max` \| `auto`. Default: `medium` |
-| `--model <model>` | Override effort tier with a specific model (e.g. `claude-opus-4-6`) |
+| `--model <model>` | Cost tier (`cheap`\|`default`\|`best`\|`ultra`) or a concrete id (e.g. `claude-opus-4-8`); tiers resolve per harness+version to a supported model. See [Model tiers](model-tiers.md). |
 | `--env <key=value>` | Set an env var for this teammate (repeatable) |
 | `--cwd <dir>` | Working directory (default: current directory) |
 | `--worktree <name>` | Run in a dedicated git worktree (requires `--enable-worktrees` on the team) |
