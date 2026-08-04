@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { isTierToken, tierizeModels, resolveTierMap, resolveTier, MODEL_TIERS } from './model-tiers.js';
 import { getModelCatalog, type ModelInfo } from './models.js';
 import { listInstalledVersions } from './versions.js';
+import { buildExecCommand } from './exec.js';
 
 const m = (ids: string[]): ModelInfo[] => ids.map((id) => ({ id }));
 
@@ -25,8 +26,15 @@ describe('tierizeModels — provider lineup (Claude)', () => {
 
   it('clamps ultra down to best when the version has no Fable', () => {
     const map = tierizeModels('claude', m(['claude-haiku-4-5', 'claude-sonnet-4-6', 'claude-opus-4-8']));
-    expect(map.ultra.clampedFrom).toBe('ultra');
+    expect(map.ultra.clampedFrom).toBe('best'); // borrowed best's rung
     expect(map.ultra.model).toBe('claude-opus-4-8');
+  });
+
+  it('picks the dash-separated newer id (sonnet-5 beats sonnet-4-6)', () => {
+    // compareVersions splits only on '.', so it used to rank claude-sonnet-5
+    // *below* claude-sonnet-4-6. default must resolve to the genuinely newer id.
+    const map = tierizeModels('claude', m(['claude-haiku-4-5', 'claude-sonnet-4-6', 'claude-sonnet-5', 'claude-opus-4-8']));
+    expect(map.default.model).toBe('claude-sonnet-5');
   });
 
   it('resolves ultra to Fable when present, without clamping', () => {
@@ -57,6 +65,15 @@ describe('tierizeModels — price path (no lineup) ranks and buckets by $/token'
     const distinct = new Set(MODEL_TIERS.map((t) => map[t].model));
     expect(distinct.size).toBeGreaterThan(1);
   });
+
+  it('does not merge two DIFFERENT models that share the same price', () => {
+    // gpt-5.5 and gpt-5.6-sol are byte-identical in prices.json; collapsing by
+    // price would drop one entirely. Both must remain reachable as distinct rungs.
+    const map = tierizeModels('opencode', m(['gpt-4o-mini', 'gpt-5.4', 'gpt-5.5', 'gpt-5.6-sol']));
+    const picked = new Set(MODEL_TIERS.map((t) => map[t].model));
+    expect(picked.has('gpt-5.5')).toBe(true);
+    expect(picked.has('gpt-5.6-sol')).toBe(true);
+  });
 });
 
 describe('resolveTierMap — Droid curated credit-multiplier map', () => {
@@ -66,7 +83,21 @@ describe('resolveTierMap — Droid curated credit-multiplier map', () => {
     expect(map.default.model).toBe('kimi-k3');
     expect(map.best.model).toBe('claude-opus-5');
     expect(map.ultra.model).toBe('claude-opus-5'); // clamped, avoids 4x
-    expect(map.ultra.clampedFrom).toBe('ultra');
+    expect(map.ultra.clampedFrom).toBe('best');
+  });
+});
+
+describe('buildExecCommand — a tier token reaches the argv (gated on Grok install)', () => {
+  const grok = listInstalledVersions('grok');
+  it.runIf(grok.length > 0)('single-model tier forwards the model AND steers reasoning effort', () => {
+    const argv = buildExecCommand({
+      agent: 'grok', version: grok[grok.length - 1], prompt: 'x', mode: 'auto', effort: 'auto', model: 'best', headless: true,
+    } as Parameters<typeof buildExecCommand>[0]);
+    expect(argv).toContain('grok-4.5'); // concrete model forwarded, not "best"
+    expect(argv).not.toContain('best'); // no literal tier token leaked
+    const i = argv.indexOf('--reasoning-effort');
+    expect(i).toBeGreaterThan(-1); // effort actually wired (Blocker 2 regression)
+    expect(argv[i + 1]).toBe('high'); // best -> high
   });
 });
 

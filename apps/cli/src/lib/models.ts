@@ -448,7 +448,11 @@ function extractClaudeCatalog(text: string): { models: ModelInfo[]; aliases: Rec
   // the opus-5/sonnet-5 line) rather than an empty or single-model one.
   if (models.length < 2) {
     const scanned = new Set<string>();
-    const idRe = /claude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:[.-]\d+)*(?:-(?:fast|v\d+))?/g;
+    // Dash-separated segments only. Real ids are `claude-sonnet-4-6`; the dotted
+    // form `claude-sonnet-4.6` appears only inside the binary's own "Typo in
+    // model ID" troubleshooting text, so a `.`-permitting pattern would scrape a
+    // non-model string as if it were real.
+    const idRe = /claude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:-\d+)*(?:-(?:fast|v\d+))?/g;
     let sm: RegExpExecArray | null;
     while ((sm = idRe.exec(text)) !== null) scanned.add(sm[0]);
     if (scanned.size >= 2) models = build(scanned);
@@ -1254,6 +1258,13 @@ export function buildReasoningFlags(agent: AgentId, level: string): string[] {
     // Droid: `-r off|none|low|medium|high`. xhigh/max clamp to high.
     const droidLevel = (normalized === 'xhigh' || normalized === 'max') ? 'high' : normalized;
     return ['-r', droidLevel];
+  }
+  if (agent === 'grok') {
+    // Grok: `--reasoning-effort <low|medium|high>` (alias --effort). xhigh/max
+    // clamp to high. This is the effort dial cost tiers steer for Grok, whose
+    // catalog exposes a single model.
+    const grokLevel = (normalized === 'xhigh' || normalized === 'max') ? 'high' : normalized;
+    return ['--reasoning-effort', grokLevel];
   }
   return [];
 }

@@ -21,7 +21,6 @@
 import type { AgentId } from './types.js';
 import { getModelCatalog, type ModelInfo } from './models.js';
 import { getModelPricing } from './pricing/index.js';
-import { compareVersions } from './agent-spec/primitives.js';
 
 /** The four cross-harness cost tiers, cheapest -> most capable. */
 export const MODEL_TIERS = ['cheap', 'default', 'best', 'ultra'] as const;
@@ -39,7 +38,7 @@ export interface TierResolution {
   model: string | null;
   /** Reasoning effort to forward, for single-model harnesses where the tier is effort, not model. */
   effort?: string;
-  /** Set when this tier had no rung of its own and borrowed a lower tier's model. */
+  /** Set when this tier has no rung of its own: the lower tier whose model it borrowed. */
   clampedFrom?: ModelTier;
   /** Human note (e.g. why it clamped, or that it is a curated/subscription mapping). */
   note?: string;
@@ -126,8 +125,25 @@ function cleanForCompare(id: string): string {
     .replace(/-v\d+$/, '')
     .replace(/-fast$/, '');
 }
+/** Numeric segments of a (cleaned) id, splitting on BOTH dashes and dots. */
+function versionSegments(id: string): number[] {
+  const m = cleanForCompare(id).match(/\d+/g);
+  return m ? m.map((n) => parseInt(n, 10)) : [];
+}
+/**
+ * Newest concrete id within a family wins. `compareVersions` only splits on `.`,
+ * so it degenerates to a single `[0]` segment for a dash-separated model id and
+ * mis-ranks e.g. `claude-sonnet-5` below `claude-sonnet-4-6`. Compare the numeric
+ * segments directly instead.
+ */
 function newer(a: string, b: string): number {
-  return compareVersions(cleanForCompare(a), cleanForCompare(b));
+  const A = versionSegments(a);
+  const B = versionSegments(b);
+  for (let i = 0; i < Math.max(A.length, B.length); i++) {
+    const d = (A[i] ?? 0) - (B[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
 }
 
 /**
@@ -164,11 +180,14 @@ function rankCatalog(agent: AgentId, models: ModelInfo[]): Ranked[] {
         family = `desc-${desc}-${baseId.replace(/[0-9].*$/, '')}`;
       } else if (price != null) {
         rank = 10 + price * 1e6;
-        // group by price so same-cost variants collapse but distinct prices stay separate
-        family = `price-${(price * 1e6).toFixed(4)}`;
+        // Collapse only true re-releases of ONE model (same base id, differing
+        // date/rebuild suffix). Keying on price would merge two DIFFERENT models
+        // that happen to cost the same (e.g. gpt-5.5 and gpt-5.6-sol), dropping
+        // one from every tier.
+        family = cleanForCompare(baseId);
       } else {
         rank = 20 + sizeTokenRank(lc);
-        family = baseId.replace(/-(highspeed|fast|256k|mini|nano|lite|flash|low|high|xhigh)\b/g, '');
+        family = cleanForCompare(baseId);
       }
     }
     return { id: rawId, baseId, rank, family, price } as Ranked & { baseId: string };
@@ -203,7 +222,7 @@ export function resolveTierMap(agent: AgentId, version: string): Record<ModelTie
       cheap: { tier: 'cheap', model: DROID_TIERS.cheap, note: 'Droid Core 0.55x' },
       default: { tier: 'default', model: DROID_TIERS.default, note: 'Droid Core 0.6x' },
       best: { tier: 'best', model: DROID_TIERS.best, note: '2x' },
-      ultra: { tier: 'ultra', model: DROID_TIERS.ultra, clampedFrom: 'ultra', note: 'capped at 2x (4x models excluded)' },
+      ultra: { tier: 'ultra', model: DROID_TIERS.ultra, clampedFrom: 'best', note: 'capped at 2x (4x models excluded)' },
     };
   }
 
@@ -243,7 +262,7 @@ export function tierizeModels(agent: AgentId, models: ModelInfo[]): Record<Model
     const idx = rungIndexFor(i, n);
     const shared = i > 0 && rungIndexFor(i - 1, n) === idx;
     map[t] = shared
-      ? { tier: t, model: rungs[idx].id, clampedFrom: t, note: `no distinct ${t} rung on this version` }
+      ? { tier: t, model: rungs[idx].id, clampedFrom: MODEL_TIERS[i - 1], note: `no distinct ${t} rung; using ${MODEL_TIERS[i - 1]}` }
       : { tier: t, model: rungs[idx].id };
   }
   return map;

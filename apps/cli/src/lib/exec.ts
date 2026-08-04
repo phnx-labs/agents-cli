@@ -843,10 +843,25 @@ export function buildExecCommand(options: ExecOptions): string[] {
     }
   }
 
+  // Resolve the model up front so the reasoning-flag block can honor a cost tier
+  // that maps to reasoning effort on a single-model harness (e.g. Grok, where the
+  // tier IS the effort dial). `modelVersion` is null when no version resolves;
+  // `tierModel` is the concrete model a tier resolved to (null => drop the flag).
+  const effectiveModel = options.model
+    ?? (options.agent === 'codex' ? readCodexConfiguredModel() : undefined);
+  const modelVersion = effectiveModel && template.modelFlag
+    ? (options.version || resolveVersion(options.agent, options.cwd || process.cwd()))
+    : null;
+  const tierResolved = effectiveModel && modelVersion && isTierToken(effectiveModel)
+    ? resolveTier(options.agent, modelVersion, effectiveModel)
+    : null;
+  // An explicit --effort wins; otherwise a single-model tier's effort applies.
+  const effortLevel = options.effort !== 'auto' ? options.effort : (tierResolved?.effort ?? options.effort);
+
   // Add reasoning effort flags (before mode flags for codex -c positioning)
   // For codex, -c must come before 'exec' subcommand, so we insert at position 1
-  if (options.effort !== 'auto') {
-    const reasoningFlags = buildReasoningFlags(options.agent, options.effort);
+  if (effortLevel !== 'auto') {
+    const reasoningFlags = buildReasoningFlags(options.agent, effortLevel);
     if (reasoningFlags.length > 0) {
       if (options.agent === 'codex') {
         // Insert after 'codex' (or 'codex@version') but before 'exec'
@@ -971,30 +986,30 @@ export function buildExecCommand(options: ExecOptions): string[] {
   // carry that setting, so without this it silently defaults to gpt-5.3-codex,
   // which a ChatGPT-tier account can't use (HTTP 400). Forwarding keeps the
   // user's default model setup for both `agents run` and `agents teams`.
-  const effectiveModel = options.model
-    ?? (options.agent === 'codex' ? readCodexConfiguredModel() : undefined);
   if (effectiveModel && template.modelFlag) {
-    const effectiveVersion = options.version || resolveVersion(options.agent, options.cwd || process.cwd());
-    if (effectiveVersion && isTierToken(effectiveModel)) {
+    if (tierResolved) {
       // Cost tier (cheap|default|best|ultra) -> a concrete model this harness+
-      // version actually ships. An unresolvable tier drops the flag (harness
-      // default) rather than forwarding the literal token, which the CLI would
-      // reject. Covers `agents run` and `agents teams` (both funnel here).
-      const t = resolveTier(options.agent, effectiveVersion, effectiveModel);
-      if (t.model) {
-        cmd.push(template.modelFlag, t.model);
-        if (t.note) process.stderr.write(`[agents] --model ${effectiveModel} -> ${t.model} (${t.note})\n`);
+      // version actually ships. Covers `agents run` and `agents teams` (both
+      // funnel here). A null model means nothing resolved -> drop the flag and
+      // let the harness pick its default.
+      if (tierResolved.model) {
+        cmd.push(template.modelFlag, tierResolved.model);
+        if (tierResolved.note) process.stderr.write(`[agents] --model ${effectiveModel} -> ${tierResolved.model} (${tierResolved.note})\n`);
       } else {
-        process.stderr.write(`[agents] no model for tier "${effectiveModel}" on ${options.agent}@${effectiveVersion}; using harness default\n`);
+        process.stderr.write(`[agents] no model for tier "${effectiveModel}" on ${options.agent}@${modelVersion}; using harness default\n`);
       }
-    } else if (effectiveVersion) {
-      const resolved = resolveModel(options.agent, effectiveVersion, effectiveModel);
+    } else if (modelVersion) {
+      const resolved = resolveModel(options.agent, modelVersion, effectiveModel);
       if (resolved.warning) {
         process.stderr.write(`[agents] ${resolved.warning}\n`);
       }
       cmd.push(template.modelFlag, resolved.forwarded);
-    } else {
+    } else if (!isTierToken(effectiveModel)) {
       cmd.push(template.modelFlag, effectiveModel);
+    } else {
+      // Tier token but no version resolved -> forwarding the literal "best"/etc.
+      // would be rejected by the CLI, so drop the flag (harness default).
+      process.stderr.write(`[agents] cannot resolve tier "${effectiveModel}" without a version; using harness default\n`);
     }
   }
 
