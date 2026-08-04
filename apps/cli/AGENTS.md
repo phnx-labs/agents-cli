@@ -608,8 +608,10 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
   spans three fields (`cwd` + `provenance` + `context`), not one `origin`
   (SES-13); the `--json` shapes and `SessionEvent` union are a stability contract
   (SES-IF-1, SES-IF-4); tool-call evidence is always redacted/bounded, repeated
-  clauses match distinct calls, and its versioned envelope does not replace the
-  list/detail JSON contracts (SES-31..SES-34, SES-IF-4a); `agents sessions
+  clauses match distinct calls, tool queries never parse transcripts, and exact
+  static program counts retain repeated sites with wrapper/effective roles;
+  versioned tool envelopes do not replace the list/detail JSON contracts
+  (SES-31..SES-37, SES-IF-4a); `agents sessions
   export --encrypt` seals every transcript
   body client-side with AES-256-GCM under the shared `r2.backups` bundle key, or
   an ephemeral one when unconfigured (SES-24, SES-25).

@@ -1,7 +1,8 @@
 import { createHash } from 'crypto';
+import { parse, type Node as JavaScriptNode } from 'acorn';
 import { knownSecretValuesFromEnv, redactSecrets, sanitizeForTerminal } from '../redact.js';
 import type { SessionEvent } from './types.js';
-import { extractShellPrograms } from './shell-programs.js';
+import { extractShellPrograms, type ShellProgramOccurrence } from './shell-programs.js';
 
 export const TOOL_INPUT_MAX_BYTES = 16 * 1024;
 export const TOOL_SUCCESS_OUTPUT_MAX_BYTES = 1024;
@@ -13,7 +14,7 @@ export const TOOL_CHANGED_MAX_CALLS = 10_000;
 export const TOOL_INDEX_LIMIT_ORDINAL = Number.MAX_SAFE_INTEGER;
 export const TOOL_TEXT_PROCESSING_MAX_BYTES = 64 * 1024;
 export const TOOL_SHELL_PARSE_MAX_BYTES = 64 * 1024;
-export const TOOL_INDEX_VERSION = 4;
+export const TOOL_INDEX_VERSION = 7;
 
 const SHELL_TOOLS = new Set([
   'bash', 'exec', 'execute', 'exec_command', 'run_command', 'run_shell_command', 'shell',
@@ -30,6 +31,7 @@ export interface IndexedToolCall {
   timestamp: string;
   tool: string;
   programs: string[];
+  programOccurrences: ShellProgramOccurrence[];
   input: string;
   outcome: ToolCallOutcome;
   exitCode?: number;
@@ -205,12 +207,61 @@ function canonicalInput(tool: string, args?: Record<string, unknown>, command?: 
   }
 }
 
+/** Extract literal shell commands from the Codex orchestration tool without evaluating transcript code. */
+function commandsFromCodexExec(source: string): string[] {
+  const commands: string[] = [];
+  let root: JavaScriptNode;
+  try {
+    root = parse(source, { ecmaVersion: 'latest', sourceType: 'module', allowAwaitOutsideFunction: true });
+  } catch {
+    return commands;
+  }
+
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    const node = value as Record<string, any>;
+    if (node.type === 'CallExpression'
+      && node.callee?.type === 'MemberExpression'
+      && node.callee.computed === false
+      && node.callee.object?.type === 'Identifier'
+      && node.callee.object.name === 'tools'
+      && node.callee.property?.type === 'Identifier'
+      && node.callee.property.name === 'exec_command'
+      && node.arguments?.[0]?.type === 'ObjectExpression') {
+      const property = node.arguments[0].properties.find((candidate: Record<string, any>) =>
+        candidate.type === 'Property'
+        && candidate.kind === 'init'
+        && ((candidate.key.type === 'Identifier' && candidate.key.name === 'cmd')
+          || (candidate.key.type === 'Literal' && candidate.key.value === 'cmd')));
+      const commandValue = property?.value;
+      if (commandValue?.type === 'Literal' && typeof commandValue.value === 'string') {
+        commands.push(commandValue.value);
+      } else if (commandValue?.type === 'TemplateLiteral' && commandValue.expressions.length === 0) {
+        commands.push(commandValue.quasis[0]?.value.cooked ?? commandValue.quasis[0]?.value.raw ?? '');
+      }
+    }
+    for (const child of Object.values(node)) visit(child);
+  };
+  visit(root);
+  return commands;
+}
+
 function commandFor(tool: string, args?: Record<string, unknown>, command?: string): string | undefined {
   if (!SHELL_TOOLS.has(tool.toLowerCase())) return undefined;
-  return command
+  const direct = command
     ?? (typeof args?.command === 'string' ? args.command : undefined)
-    ?? (typeof args?.cmd === 'string' ? args.cmd : undefined)
-    ?? (typeof args?.input === 'string' ? args.input : undefined);
+    ?? (typeof args?.cmd === 'string' ? args.cmd : undefined);
+  if (direct !== undefined) return direct;
+  const input = typeof args?.input === 'string' ? args.input : undefined;
+  if (!input || tool.toLowerCase() !== 'exec') return input;
+  const boundedInput = bytePrefix(input, TOOL_SHELL_PARSE_MAX_BYTES);
+  const commands = commandsFromCodexExec(boundedInput);
+  if (commands.length > 0) return commands.join('\n');
+  return /\btools\s*\./.test(input) ? undefined : input;
 }
 
 function resultObject(value: unknown): Record<string, unknown> | undefined {
@@ -281,13 +332,19 @@ function buildCall(
   const shellCommand = rawShellCommand
     ? sanitizeToolEvidenceText(rawShellCommand, TOOL_SHELL_PARSE_MAX_BYTES)
     : undefined;
-  const shell = shellCommand ? extractShellPrograms(shellCommand) : { programs: [], diagnostics: [] };
+  const shell = shellCommand
+    ? extractShellPrograms(shellCommand)
+    : { programs: [], occurrences: [], diagnostics: [] };
   return {
     ordinal,
     sourceCallId: safeIdentifier(sourceCallId),
     timestamp: sanitizeToolEvidenceText(timestamp, 128),
     tool: sanitizeToolEvidenceText(tool, 512),
     programs: shell.programs.map((program) => sanitizeToolEvidenceText(program, 512)),
+    programOccurrences: shell.occurrences.map((occurrence) => ({
+      program: sanitizeToolEvidenceText(occurrence.program, 512),
+      role: occurrence.role,
+    })),
     input: canonicalInput(tool, args, command),
     outcome: 'unknown',
     parseError: shell.diagnostics.length > 0 ? sanitizeToolEvidenceText(shell.diagnostics.join('; '), 1024) : undefined,
@@ -298,6 +355,7 @@ export function toolCallEvidenceBytes(call: IndexedToolCall): number {
   return Buffer.byteLength([
     call.sourceCallId, call.timestamp, call.tool, call.input, call.errorCode,
     call.output, call.error, call.parseError, ...call.programs,
+    ...call.programOccurrences.map((occurrence) => `${occurrence.role}:${occurrence.program}`),
   ].filter((value): value is string => typeof value === 'string').join('\0'));
 }
 
@@ -307,6 +365,7 @@ function collectionLimitCall(timestamp: string): IndexedToolCall {
     timestamp,
     tool: 'index_limit',
     programs: [],
+    programOccurrences: [],
     input: 'Tool evidence collection stopped at the 5 MiB or 10,000-call scan limit.',
     outcome: 'unknown',
     parseError: 'Additional tool calls were not retained during this scan.',

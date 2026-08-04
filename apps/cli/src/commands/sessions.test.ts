@@ -13,6 +13,8 @@ import {
   buildSessionDescription,
   fleetCandidatesByQuery,
   metadataResolveForwardedArgs,
+  mergeToolProgramCountEnvelopes,
+  toolProgramCountOriginSessions,
   toolSearchFleetSortError,
   toolSearchForwardedArgs,
 } from './sessions.js';
@@ -50,6 +52,37 @@ describe('toolSearchFleetSortError', () => {
     expect(toolSearchFleetSortError('duration', true)).toContain('only --sort recent');
     expect(toolSearchFleetSortError('recent', true)).toBeUndefined();
     expect(toolSearchFleetSortError('cost', false)).toBeUndefined();
+  });
+});
+
+describe('mergeToolProgramCountEnvelopes', () => {
+  it('sums occurrences, containing calls, sessions, and coverage across machines', () => {
+    const make = (machine: string, occurrences: number, complete = true) => ({
+      schemaVersion: 1 as const,
+      kind: 'tool-program-count' as const,
+      generatedAt: '2026-08-03T00:00:00Z',
+      query: { program: 'git', semantics: 'static-program-occurrences-v1' as const },
+      coverage: { indexedFiles: 1, indexedCalls: 2, skippedFiles: 0, limitedFiles: 0, remainingFiles: complete ? 0 : 1, complete },
+      totals: { occurrences, toolCalls: occurrences - 1, sessions: 1 },
+      machines: [{
+        machine,
+        coverage: { indexedFiles: 1, indexedCalls: 2, skippedFiles: 0, limitedFiles: 0, remainingFiles: complete ? 0 : 1, complete },
+        totals: { occurrences, toolCalls: occurrences - 1, sessions: 1 },
+      }],
+    });
+    expect(mergeToolProgramCountEnvelopes(make('one', 3), [make('two', 2, false)]))
+      .toMatchObject({
+        coverage: { indexedFiles: 2, complete: false },
+        totals: { occurrences: 5, toolCalls: 3, sessions: 2 },
+        machines: [{ machine: 'one' }, { machine: 'two' }],
+      });
+  });
+
+  it('keeps synced mirrors out of an origin device fleet partition', () => {
+    const local = { id: 'local', machine: 'one' } as SessionMeta;
+    const mirror = { id: 'mirror', machine: 'two' } as SessionMeta;
+    expect(toolProgramCountOriginSessions([local, mirror], 'one', true)).toEqual([local]);
+    expect(toolProgramCountOriginSessions([local, mirror], 'one', false)).toEqual([local, mirror]);
   });
 });
 
@@ -704,12 +737,16 @@ describe('agents sessions', () => {
       fs.mkdirSync(projectDir, { recursive: true });
       const rows = [
         { type: 'user', timestamp: '2026-08-03T00:00:00Z', cwd: repoDir, sessionId, message: { role: 'user', content: 'resolve \x1b[2Jconflicts' } },
-        { type: 'assistant', timestamp: '2026-08-03T00:00:01Z', message: { content: [{ type: 'tool_use', id: 'git-1', name: 'Bash', input: { command: 'git merge topic' } }] } },
+        { type: 'assistant', timestamp: '2026-08-03T00:00:01Z', message: { content: [{ type: 'tool_use', id: 'git-1', name: 'Bash', input: { command: 'git merge topic; git status' } }] } },
         { type: 'user', timestamp: '2026-08-03T00:00:02Z', message: { content: [{ type: 'tool_result', tool_use_id: 'git-1', content: 'merge stopped' }] } },
         { type: 'assistant', timestamp: '2026-08-03T00:00:03Z', message: { content: [{ type: 'tool_use', id: 'gh-1', name: 'Bash', input: { command: 'gh pr view' } }] } },
         { type: 'user', timestamp: '2026-08-03T00:00:04Z', message: { content: [{ type: 'tool_result', tool_use_id: 'gh-1', content: 'CONFLICT in app.ts', is_error: true }] } },
       ];
       fs.writeFileSync(path.join(projectDir, `${sessionId}.jsonl`), rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+
+      // The ordinary incremental scan owns parsing. Tool queries below read
+      // only the SQLite snapshot populated by this pass.
+      expect(runAgents(['sessions', '--all', '--json', '--no-interactive'], repoDir, tempHome).status).toBe(0);
 
       const toolResult = runAgents([
         'sessions', '--include', 'tools',
@@ -723,6 +760,24 @@ describe('agents sessions', () => {
       expect(toolJson.sessions).toEqual([expect.objectContaining({ id: sessionId, calls: expect.any(Array) })]);
       expect(toolJson.sessions[0].calls).toHaveLength(2);
       expect(toolJson.sessions[0].filePath).toBeUndefined();
+
+      const countResult = runAgents([
+        'sessions', '--include', 'tools', '--query', 'program:git', '--count',
+        '--all', '--json', '--no-interactive',
+      ], repoDir, tempHome);
+      expect(countResult.status).toBe(0);
+      expect(JSON.parse(countResult.stdout)).toMatchObject({
+        kind: 'tool-program-count',
+        query: { program: 'git', semantics: 'static-program-occurrences-v1' },
+        totals: { occurrences: 2, toolCalls: 1, sessions: 1 },
+      });
+
+      const invalidCount = runAgents([
+        'sessions', '--include', 'tools', '--query', 'input:git', '--count',
+        '--all', '--json', '--no-interactive',
+      ], repoDir, tempHome);
+      expect(invalidCount.status).toBe(1);
+      expect(invalidCount.stderr).toContain('exactly one --query program:<name>');
 
       const humanResult = runAgents([
         'sessions', '--include', 'tools', '--query', 'program:git',
@@ -744,6 +799,12 @@ describe('agents sessions', () => {
         { type: 'assistant', timestamp: '2026-08-03T00:00:05Z', message: { content: [{ type: 'tool_use', id: 'pwd-1', name: 'Bash', input: { command: 'pwd' } }] } },
         { type: 'user', timestamp: '2026-08-03T00:00:06Z', message: { content: [{ type: 'tool_result', tool_use_id: 'pwd-1', content: repoDir }] } },
       ].map((row) => JSON.stringify(row)).join('\n') + '\n');
+      const staleExactResult = runAgents([
+        'sessions', sessionId, '--include', 'tools', '--all', '--json', '--no-interactive',
+      ], repoDir, tempHome);
+      expect(JSON.parse(staleExactResult.stdout).sessions[0].calls).toHaveLength(2);
+
+      expect(runAgents(['sessions', '--all', '--json', '--no-interactive'], repoDir, tempHome).status).toBe(0);
       const refreshedExactResult = runAgents([
         'sessions', sessionId, '--include', 'tools', '--all', '--json', '--no-interactive',
       ], repoDir, tempHome);

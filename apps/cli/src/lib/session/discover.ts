@@ -343,8 +343,24 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
     }
   }
 
-  const sessions = querySessions(buildQueryOptions(options, agents, { includeLimit: true }));
-  await resolveLinearProjects(sessions);
+  return queryIndexedSessions(options, {
+    skipExistenceCheck: options?.skipExistenceCheck ?? false,
+  });
+}
+
+/** Read the current SQLite snapshot without scanning or parsing transcript files. */
+export async function queryIndexedSessions(
+  options?: DiscoverOptions,
+  indexedOptions: { resolveLinear?: boolean; skipExistenceCheck?: boolean } = {},
+): Promise<SessionMeta[]> {
+  getDB();
+  const agents = options?.agent ? [options.agent] : SESSION_AGENTS;
+  const sessions = querySessions(buildQueryOptions(
+    { ...options, skipExistenceCheck: indexedOptions.skipExistenceCheck ?? true },
+    agents,
+    { includeLimit: true },
+  ));
+  if (indexedOptions.resolveLinear !== false) await resolveLinearProjects(sessions);
   for (const s of sessions) s.machine = machineForSessionFile(s.filePath, s.agent);
   return scopeToManaged(sessions, agents, options);
 }

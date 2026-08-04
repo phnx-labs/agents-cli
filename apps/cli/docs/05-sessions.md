@@ -115,6 +115,12 @@ agents sessions --include tools \
   --query 'program:git input:merge' \
   --query 'program:gh output:CONFLICT' \
   --fleet --json
+
+# Count static git sites, containing tool calls, and distinct sessions
+agents sessions --include tools --query 'program:git' --count --fleet --json
+
+# Populate historical rows once; each device keeps its own SQLite index
+agents sessions backfill tools --fleet
 ```
 
 Terms in one `--query` clause are ANDed against one call. Repeating `--query`
@@ -123,6 +129,17 @@ all clauses can be assigned. Supported prefixes are `tool:`, `program:`, `input:
 `output:`, `status:`, `exit:`, and `error:`. An unprefixed term searches all
 evidence fields. `output:` also searches a command's error result because some
 harnesses expose returned bytes only as an error channel.
+
+`--count` accepts exactly one `program:<name>` clause and cannot be combined
+with `--limit`. It reports three totals over the complete metadata-filtered
+scope: ordered static program occurrences, containing tool calls, and distinct
+sessions. “Occurrence” is deliberately a static-source metric, not a claim
+about runtime executions: a program site inside a loop is stored once, both
+branches of static control flow are stored, and a dynamically expanded command
+name is omitted. Wrapper chains are retained with roles, so
+`sudo env A=1 git status` stores `sudo` and `env` as `wrapper` occurrences and
+`git` as `effective`. The redacted, bounded parent `tool_calls.input` stores the
+complete submitted command once; occurrence rows do not duplicate it.
 
 A query accepts at most 32 clauses and 4 KiB per clause. Distinct assignment is
 polynomial bipartite matching, not permutation backtracking. A listing or broad
@@ -151,6 +168,23 @@ stable `SessionMeta[]` list or `{ session, events }` detail shapes:
 }
 ```
 
+Count JSON is a separate versioned aggregate. `coverage.complete=false` means
+the totals are lower bounds, and human output says “at least”:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "tool-program-count",
+  "query": {
+    "program": "git",
+    "semantics": "static-program-occurrences-v1"
+  },
+  "coverage": { "complete": true },
+  "totals": { "occurrences": 1842, "toolCalls": 1360, "sessions": 417 },
+  "machines": [{ "machine": "mac-mini", "totals": { "occurrences": 820, "toolCalls": 611, "sessions": 190 } }]
+}
+```
+
 Each device owns its transcript files and its `sessions.db`. `--device` queries
 only the named device(s); `--fleet` queries every registered online compute
 device concurrently. A distributed tool query covers each target's whole local
@@ -170,12 +204,22 @@ envelopes are rejected before merging. Fleet tool queries support
 `--sort recent`; `--sort cost` and `--sort duration` remain local-only because
 peer evidence omits those metrics.
 
+Synced mirror transcripts do not inflate fleet counts. A direct local count may
+group rows under several recorded origin machines, but during fleet fan-out each
+peer counts only the sessions that originated on that peer. Those origin
+partitions are disjoint when the coordinator sums totals; an unreachable origin
+marks coverage partial instead of substituting a mirrored duplicate.
+
 ### Index lifecycle and disk I/O
 
-Schema v24 adds `tool_calls`, `tool_call_programs`, `tool_call_text` (trigram FTS5), and
-an independent `tool_scan_ledger` with aggregate byte accounting. The migration does **not** clear
+Schema v26 uses `tool_calls`, the distinct `tool_call_programs` projection,
+ordered `tool_program_occurrences`, `tool_call_text` (trigram FTS5), and an
+independent `tool_scan_ledger` with aggregate byte accounting. The migration does **not** clear
 `scan_ledger` or `dir_ledger`, so enabling the feature does not invalidate the
-normal session cache.
+normal session cache. It clears only `tool_scan_ledger`, so historical occurrence
+rows are rebuilt explicitly without forcing ordinary session history to reparse.
+The ledger is keyed by session id; its source path is retained for maintenance,
+not resolved or checked during a query.
 
 - A changed Claude/Codex transcript derives call rows inside the same resumable
   reducer that already parses the appended bytes. Results that arrive in a later
@@ -190,25 +234,30 @@ normal session cache.
   indexing adds no transcript read to that scan path. Kimi and Grok stamp the
   split `wire.jsonl` / `chat_history.jsonl` source captured before parsing, so
   an append racing the parse forces a retry instead of certifying stale calls.
-- Existing history is backfilled on the first scoped tool query, at most 25 files
-  or 16 MiB per invocation. One larger Claude/Codex JSONL transcript up to
+- Existing history is populated only by `agents sessions backfill tools`. The
+  command is resumable and idempotent, processes bounded internal batches of at
+  most 25 files or 16 MiB, and can fan out with `--fleet` while each device keeps
+  its rows local. A fleet coordinator advances every device by one bounded batch
+  per parallel round, so a slow device does not make the other indexes wait to
+  begin. One larger Claude/Codex JSONL transcript up to
   64 MiB is admitted alone and streamed with a 1 MiB record cap; larger sources
   persist `index_limit` without being read. Non-streaming harness parsers do
   not materialize a source over 16 MiB and persist an explicit `index_limit`
-  row. `coverage.complete=false` names partial results; a rerun advances the
-  independent ledger.
+  row. `coverage.complete=false` names partial results; rerunning the backfill
+  resumes from the independent ledger.
 - Append persistence stores the aggregate evidence bytes in `tool_scan_ledger`
   and reads only changed ordinals. A user-text-only append advances the file
   stamp without reading historical tool rows.
-- A warm broad query reuses the session stamps refreshed by discovery and runs
-  indexed SQL/trigram-FTS matching. An exact-ID fast path re-stats only its small
-  resolved set because it bypasses discovery. An unchanged transcript is not
-  opened or Bash-parsed again.
+- Every tool query reads the current SQLite snapshot through
+  `queryIndexedSessions`; it does not stat, open, or parse transcripts and never
+  calls `ensureToolIndex`. Normal incremental discovery owns new/changed files;
+  the explicit backfill owns historical files.
 - When a transcript directory changes, call rows and tool-ledger rows for files
   no longer present in that directory are removed without statting every indexed
   session.
 - The query evaluates every metadata-filtered session row on each selected
-  device; there is no silent history cap. Trigram FTS and typed indexes prefilter
+  device; there is no silent history cap. One `json_each` scope join replaces
+  per-300-session SQL loops. Trigram FTS and typed indexes prefilter
   call rows before exact distinct-call assignment, and `--limit` bounds only the
   matching sessions returned to the caller. Use `--since`, `--agent`,
   `--project`, or `--device` to narrow the metadata scope when appropriate.
@@ -219,12 +268,17 @@ bounded to 16 KiB, successful output to 1 KiB, and error output to 4 KiB;
 the combined evidence payload is capped at 5 MiB per session with an explicit
 `index_limit` terminal row when more calls are omitted. Base64-like blocks are
 replaced before persistence. Raw strings are clipped to 64 KiB before secret
-scanning or Bash parsing, so one adversarial call cannot force unbounded parser
-or regular-expression work. Outcomes, exit codes, HTTP status codes, and error
+scanning, orchestration parsing, or Bash parsing, so one adversarial call cannot
+force unbounded parser or regular-expression work. Outcomes, exit codes, HTTP status codes, and error
 codes are stored only when the harness supplies structured fields. They are
 never inferred from output prose.
 
-Shell program extraction uses `unbash@4.0.5` and a typed AST walk. It recognizes
+Codex's `exec` surface carries orchestration JavaScript rather than a raw shell
+string. The index first uses `acorn@8.18.0` to statically select literal `cmd`
+values passed to `tools.exec_command`; it never evaluates transcript code and
+leaves computed commands unclassified. Other shell tools provide their command
+field directly. Shell program extraction then uses `unbash@4.0.5` and a typed
+AST walk. It recognizes
 static programs in pipelines, control flow, functions, subshells, command and
 process substitutions, arithmetic expansions, and unquoted heredocs. Dynamic
 program names are left unclassified; malformed Bash records parser diagnostics

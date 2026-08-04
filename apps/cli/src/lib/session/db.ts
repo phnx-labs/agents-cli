@@ -25,7 +25,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/05-sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 24;
+export const SCHEMA_VERSION = 26;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -178,6 +178,19 @@ CREATE TABLE IF NOT EXISTS tool_call_programs (
 );
 CREATE INDEX IF NOT EXISTS idx_tool_call_programs_program ON tool_call_programs(program, call_key);
 
+-- Ordered static program sites retain repeated commands within one Bash call.
+-- The complete redacted command stays on tool_calls.input; these rows contain
+-- only the normalized program and whether it is a wrapper or effective target.
+CREATE TABLE IF NOT EXISTS tool_program_occurrences (
+  call_key TEXT NOT NULL,
+  occurrence_ordinal INTEGER NOT NULL,
+  program TEXT NOT NULL COLLATE NOCASE,
+  role TEXT NOT NULL CHECK(role IN ('wrapper', 'effective')),
+  PRIMARY KEY(call_key, occurrence_ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_tool_program_occurrences_program
+  ON tool_program_occurrences(program, call_key);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS tool_call_text USING fts5(
   call_key UNINDEXED,
   tool,
@@ -188,10 +201,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS tool_call_text USING fts5(
 );
 
 -- Independent of scan_ledger: schema migration never forces the normal
--- session index to reread history. Existing transcripts are backfilled once,
--- in bounded chunks, when tool search is first used.
+-- session index to reread history. Existing transcripts are backfilled only
+-- by the explicit, bounded agents sessions backfill tools command.
 CREATE TABLE IF NOT EXISTS tool_scan_ledger (
-  file_path TEXT PRIMARY KEY,
+  session_id TEXT PRIMARY KEY,
+  file_path TEXT NOT NULL UNIQUE,
   file_mtime_ms INTEGER NOT NULL,
   file_size INTEGER NOT NULL,
   extractor_version INTEGER NOT NULL,
@@ -618,6 +632,43 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
       INSERT INTO tool_call_text (call_key, tool, input, output, error)
       SELECT call_key, tool, input, coalesce(output, ''), coalesce(error, '')
       FROM tool_calls;
+    `);
+  }
+
+  if (fromVersion < 25) {
+    // v24 → v25: retain every static program occurrence instead of only the
+    // distinct program set. The source transcript is rebuilt only by the
+    // explicit tools backfill; normal session and directory ledgers stay warm.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tool_program_occurrences (
+        call_key TEXT NOT NULL,
+        occurrence_ordinal INTEGER NOT NULL,
+        program TEXT NOT NULL COLLATE NOCASE,
+        role TEXT NOT NULL CHECK(role IN ('wrapper', 'effective')),
+        PRIMARY KEY(call_key, occurrence_ordinal)
+      );
+      CREATE INDEX IF NOT EXISTS idx_tool_program_occurrences_program
+        ON tool_program_occurrences(program, call_key);
+      DELETE FROM tool_scan_ledger;
+    `);
+  }
+
+  if (fromVersion < 26) {
+    // v25 → v26: coverage and query planning address the independent tool
+    // ledger by session id. Rebuild only this derived ledger so a tool query
+    // never has to resolve or stat transcript paths.
+    db.exec(`
+      DROP TABLE tool_scan_ledger;
+      CREATE TABLE tool_scan_ledger (
+        session_id TEXT PRIMARY KEY,
+        file_path TEXT NOT NULL UNIQUE,
+        file_mtime_ms INTEGER NOT NULL,
+        file_size INTEGER NOT NULL,
+        extractor_version INTEGER NOT NULL,
+        indexed_at INTEGER NOT NULL,
+        call_count INTEGER NOT NULL,
+        evidence_bytes INTEGER NOT NULL
+      );
     `);
   }
 }
@@ -1779,7 +1830,7 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
   const missing = rows.filter(r => r.file_path && !fs.existsSync(r.file_path));
   if (missing.length > 0) {
     const purge = db.transaction(() => {
-      for (const row of missing) purgeToolCalls(db, row.id, row.file_path, row.agent);
+      for (const row of missing) purgeToolCalls(db, row.id);
     });
     purge();
   }

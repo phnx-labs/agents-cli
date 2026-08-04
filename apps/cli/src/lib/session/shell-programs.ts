@@ -11,12 +11,25 @@ import {
 
 export interface ShellProgramExtraction {
   programs: string[];
+  occurrences: ShellProgramOccurrence[];
   diagnostics: string[];
+}
+
+export type ShellProgramRole = 'wrapper' | 'effective';
+
+export interface ShellProgramOccurrence {
+  program: string;
+  role: ShellProgramRole;
 }
 
 const SHELL_WRAPPERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
 const PROGRAM_WRAPPERS = new Set(['command', 'builtin', 'env', 'nohup', 'sudo']);
 const MAX_NESTED_DEPTH = 3;
+const SUDO_OPTIONS_WITH_VALUE = new Set([
+  '-C', '--close-from', '-D', '--chdir', '-g', '--group', '-h', '--host',
+  '-p', '--prompt', '-R', '--chroot', '-r', '--role', '-t', '--type',
+  '-T', '--command-timeout', '-u', '--user',
+]);
 
 function normalizeProgram(value: string): string | undefined {
   const trimmed = value.trim();
@@ -170,17 +183,77 @@ function nestedPayload(command: Extract<Node, { type: 'Command' }>): string | un
   return undefined;
 }
 
+function wrapperDelegate(words: string[], wrapper: string): string[] | undefined {
+  let index = 0;
+  if (wrapper === 'env') {
+    while (index < words.length) {
+      const word = words[index];
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) {
+        index++;
+        continue;
+      }
+      if (word === '-u' || word === '--unset' || word === '-C' || word === '--chdir') {
+        index += 2;
+        continue;
+      }
+      if (word === '--') {
+        index++;
+        break;
+      }
+      if (word.startsWith('-')) {
+        index++;
+        continue;
+      }
+      break;
+    }
+  } else if (wrapper === 'sudo') {
+    while (index < words.length) {
+      const word = words[index];
+      if (word === '--') {
+        index++;
+        break;
+      }
+      const option = word.includes('=') ? word.slice(0, word.indexOf('=')) : word;
+      if (!word.startsWith('-')) break;
+      index++;
+      if (!word.includes('=') && SUDO_OPTIONS_WITH_VALUE.has(option)) index++;
+    }
+    while (index < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index])) index++;
+  } else {
+    while (index < words.length && words[index].startsWith('-')) {
+      if (words[index++] === '--') break;
+    }
+  }
+  return index < words.length ? words.slice(index) : undefined;
+}
+
 /** Parse Bash without executing it and return every statically identifiable program. */
 export function extractShellPrograms(source: string, depth = 0): ShellProgramExtraction {
   const programs: string[] = [];
+  const occurrences: ShellProgramOccurrence[] = [];
   const diagnostics: string[] = [];
   const seen = new Set<string>();
 
-  const add = (value: string | undefined): void => {
+  const add = (value: string | undefined, role: ShellProgramRole): string | undefined => {
     const program = value ? normalizeProgram(value) : undefined;
-    if (program && !seen.has(program)) {
+    if (!program) return undefined;
+    occurrences.push({ program, role });
+    if (!seen.has(program)) {
       seen.add(program);
       programs.push(program);
+    }
+    return program;
+  };
+
+  const addWrapperDelegates = (wrapper: string, words: string[]): void => {
+    let remaining = wrapperDelegate(words, wrapper);
+    while (remaining) {
+      const program = normalizeProgram(remaining[0]);
+      if (!program) return;
+      const isWrapper = PROGRAM_WRAPPERS.has(program);
+      add(program, isWrapper ? 'wrapper' : 'effective');
+      if (!isWrapper) return;
+      remaining = wrapperDelegate(remaining.slice(1), program);
     }
   };
 
@@ -200,7 +273,9 @@ export function extractShellPrograms(source: string, depth = 0): ShellProgramExt
         break;
       case 'Command': {
         const program = staticShellWord(node.name);
-        add(program);
+        const normalized = normalizeProgram(program ?? '');
+        const payload = nestedPayload(node);
+        add(program, normalized && (PROGRAM_WRAPPERS.has(normalized) || payload) ? 'wrapper' : 'effective');
         node.prefix.forEach((prefix) => {
           walkWord(prefix.value, visitScript);
           prefix.indexParts?.forEach((part) => walkWordPart(part, visitScript));
@@ -213,23 +288,15 @@ export function extractShellPrograms(source: string, depth = 0): ShellProgramExt
           if (!redirect.heredocQuoted) walkWord(redirect.body, visitScript);
         });
 
-        const normalized = normalizeProgram(program ?? '');
         if (normalized && PROGRAM_WRAPPERS.has(normalized)) {
           const words = node.suffix.map(staticShellWord);
           if (words.every((word) => word !== undefined)) {
-            const staticWords = words as string[];
-            if (normalized === 'env') {
-              const delegate = staticWords.find((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
-              if (delegate && !delegate.startsWith('-')) add(delegate);
-            } else if (staticWords[0] && !staticWords[0].startsWith('-')) {
-              add(staticWords[0]);
-            }
+            addWrapperDelegates(normalized, words as string[]);
           }
         }
-        const payload = nestedPayload(node);
         if (payload && depth < MAX_NESTED_DEPTH) {
           const nested = extractShellPrograms(payload, depth + 1);
-          nested.programs.forEach(add);
+          for (const occurrence of nested.occurrences) add(occurrence.program, occurrence.role);
           diagnostics.push(...nested.diagnostics);
         }
         break;
@@ -294,6 +361,7 @@ export function extractShellPrograms(source: string, depth = 0): ShellProgramExt
     if (parsed.errors?.length) {
       return {
         programs: [],
+        occurrences: [],
         diagnostics: parsed.errors.map((error) => `${error.pos}: ${error.message}`),
       };
     }
@@ -302,5 +370,5 @@ export function extractShellPrograms(source: string, depth = 0): ShellProgramExt
     diagnostics.push(error instanceof Error ? error.message : String(error));
   }
 
-  return { programs, diagnostics };
+  return { programs, occurrences, diagnostics };
 }

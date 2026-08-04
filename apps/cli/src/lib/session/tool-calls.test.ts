@@ -3,6 +3,7 @@ import {
   TOOL_PENDING_MAX_BYTES,
   TOOL_PENDING_MAX_CALLS,
   TOOL_CHANGED_MAX_CALLS,
+  TOOL_SHELL_PARSE_MAX_BYTES,
   ToolCallCollector,
   collectClaudeToolCalls,
   collectCodexToolCalls,
@@ -52,6 +53,46 @@ describe('ToolCallCollector', () => {
       args: { input: 'git status' },
     }]);
     expect(calls[0].programs).toEqual(['git']);
+  });
+
+  it('extracts literal shell commands from the Codex orchestration wrapper', () => {
+    const calls = toolCallsFromEvents([{
+      type: 'tool_use', agent: 'codex', timestamp: '2026-08-03T00:00:00Z', tool: 'exec',
+      args: { input: `
+        const label = \`run ${'${mode}'}\`;
+        const first = await tools.exec_command({ cmd: "git status\\nprintf done" });
+        const second = await tools.exec_command({ "cmd": 'gh pr view' });
+        text(first.output + second.output);
+      ` },
+    }]);
+    expect(calls[0].programs).toEqual(['git', 'printf', 'gh']);
+  });
+
+  it('does not parse non-shell Codex orchestration source as Bash', () => {
+    const calls = toolCallsFromEvents([{
+      type: 'tool_use', agent: 'codex', timestamp: '2026-08-03T00:00:00Z', tool: 'exec',
+      args: { input: `
+        const patch = "tools.exec_command({ cmd: 'git status' })";
+        text(await tools.apply_patch(patch));
+      ` },
+    }]);
+    expect(calls[0].programs).toEqual([]);
+  });
+
+  it('ignores computed Codex orchestration commands rather than indexing wrapper tokens', () => {
+    const calls = toolCallsFromEvents([{
+      type: 'tool_use', agent: 'codex', timestamp: '2026-08-03T00:00:00Z', tool: 'exec',
+      args: { input: 'const cmd = chooseCommand(); await tools.exec_command({ cmd });' },
+    }]);
+    expect(calls[0].programs).toEqual([]);
+  });
+
+  it('bounds Codex orchestration parsing before building a JavaScript AST', () => {
+    const calls = toolCallsFromEvents([{
+      type: 'tool_use', agent: 'codex', timestamp: '2026-08-03T00:00:00Z', tool: 'exec',
+      args: { input: `${' '.repeat(TOOL_SHELL_PARSE_MAX_BYTES)}tools.exec_command({ cmd: 'git status' })` },
+    }]);
+    expect(calls[0].programs).toEqual([]);
   });
 
   it('redacts nested secret-shaped argument fields before JSON persistence', () => {

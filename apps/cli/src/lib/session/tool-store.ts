@@ -41,6 +41,7 @@ function deleteSessionCalls(db: Database.Database, sessionId: string): void {
   const keys = db.prepare(`SELECT call_key FROM tool_calls WHERE session_id = ?`).all(sessionId) as Array<{ call_key: string }>;
   for (const { call_key } of keys) {
     db.prepare(`DELETE FROM tool_call_programs WHERE call_key = ?`).run(call_key);
+    db.prepare(`DELETE FROM tool_program_occurrences WHERE call_key = ?`).run(call_key);
     db.prepare(`DELETE FROM tool_call_text WHERE call_key = ?`).run(call_key);
   }
   db.prepare(`DELETE FROM tool_calls WHERE session_id = ?`).run(sessionId);
@@ -50,14 +51,9 @@ function deleteSessionCalls(db: Database.Database, sessionId: string): void {
 export function purgeToolCalls(
   db: Database.Database,
   sessionId: string,
-  filePath?: string,
-  agent?: string,
 ): void {
   deleteSessionCalls(db, sessionId);
-  if (filePath) {
-    const sourcePath = toolEvidenceSourcePath(filePath, agent ?? '');
-    db.prepare(`DELETE FROM tool_scan_ledger WHERE file_path = ?`).run(canonicalToolLedgerPath(sourcePath));
-  }
+  db.prepare(`DELETE FROM tool_scan_ledger WHERE session_id = ?`).run(sessionId);
 }
 
 /** Purge deleted direct children when a transcript directory's stamp changes. */
@@ -78,7 +74,7 @@ export function purgeMissingToolCallsInDirectory(
   for (const row of rows) {
     const filePath = path.normalize(row.file_path);
     if (path.dirname(filePath) !== normalizedDir || present.has(filePath)) continue;
-    purgeToolCalls(db, row.id, row.file_path, row.agent);
+    purgeToolCalls(db, row.id);
     purged++;
   }
   return purged;
@@ -115,16 +111,22 @@ export function persistToolCalls(
       evidence_bytes = excluded.evidence_bytes
   `);
   const insertProgram = db.prepare(`INSERT OR IGNORE INTO tool_call_programs (call_key, program) VALUES (?, ?)`);
+  const insertOccurrence = db.prepare(`
+    INSERT INTO tool_program_occurrences (call_key, occurrence_ordinal, program, role)
+    VALUES (?, ?, ?, ?)
+  `);
   const insertText = db.prepare(`INSERT INTO tool_call_text (call_key, tool, input, output, error) VALUES (?, ?, ?, ?, ?)`);
   const deletePrograms = db.prepare(`DELETE FROM tool_call_programs WHERE call_key = ?`);
+  const deleteOccurrences = db.prepare(`DELETE FROM tool_program_occurrences WHERE call_key = ?`);
   const deleteText = db.prepare(`DELETE FROM tool_call_text WHERE call_key = ?`);
   const deleteCall = db.prepare(`DELETE FROM tool_calls WHERE call_key = ?`);
   const writeLedger = db.prepare(`
     INSERT INTO tool_scan_ledger (
-      file_path, file_mtime_ms, file_size, extractor_version, indexed_at, call_count,
+      session_id, file_path, file_mtime_ms, file_size, extractor_version, indexed_at, call_count,
       evidence_bytes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(file_path) DO UPDATE SET
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(session_id) DO UPDATE SET
+      file_path = excluded.file_path,
       file_mtime_ms = excluded.file_mtime_ms,
       file_size = excluded.file_size,
       extractor_version = excluded.extractor_version,
@@ -137,7 +139,7 @@ export function persistToolCalls(
     if (mode === 'replace') deleteSessionCalls(db, session.id);
     const ledgerPath = canonicalToolLedgerPath(sourcePath);
     const priorLedger = mode === 'append'
-      ? db.prepare(`SELECT call_count, evidence_bytes FROM tool_scan_ledger WHERE file_path = ?`).get(ledgerPath) as {
+      ? db.prepare(`SELECT call_count, evidence_bytes FROM tool_scan_ledger WHERE session_id = ?`).get(session.id) as {
           call_count: number;
           evidence_bytes: number;
         } | undefined
@@ -147,7 +149,7 @@ export function persistToolCalls(
     }
     if (mode === 'append' && calls.length === 0) {
       writeLedger.run(
-        ledgerPath, sourceStamp.fileMtimeMs, sourceStamp.fileSize, TOOL_INDEX_VERSION, Date.now(),
+        session.id, ledgerPath, sourceStamp.fileMtimeMs, sourceStamp.fileSize, TOOL_INDEX_VERSION, Date.now(),
         priorLedger!.call_count, priorLedger!.evidence_bytes,
       );
       return;
@@ -161,6 +163,7 @@ export function persistToolCalls(
       ? existingSize.get(session.id, TOOL_INDEX_LIMIT_ORDINAL) as { evidence_bytes: number } | undefined
       : undefined;
     deletePrograms.run(limitKey);
+    deleteOccurrences.run(limitKey);
     deleteText.run(limitKey);
     deleteCall.run(limitKey);
 
@@ -182,6 +185,7 @@ export function persistToolCalls(
       timestamp: session.timestamp,
       tool: 'index_limit',
       programs: [],
+      programOccurrences: [],
       input: `Tool evidence stopped at the ${Math.floor(maxSessionBytes / 1024 / 1024)} MiB per-session payload limit.`,
       outcome: 'unknown',
       parseError: 'Additional tool calls were not indexed for this session.',
@@ -219,12 +223,16 @@ export function persistToolCalls(
         call.error ?? null, call.parseError ?? null, toolCallEvidenceBytes(call),
       );
       deletePrograms.run(key);
+      deleteOccurrences.run(key);
       deleteText.run(key);
       for (const program of call.programs) insertProgram.run(key, program);
+      call.programOccurrences.forEach((occurrence, occurrenceOrdinal) => {
+        insertOccurrence.run(key, occurrenceOrdinal, occurrence.program, occurrence.role);
+      });
       insertText.run(key, call.tool, call.input, call.output ?? '', call.error ?? '');
     }
     writeLedger.run(
-      ledgerPath, sourceStamp.fileMtimeMs, sourceStamp.fileSize,
+      session.id, ledgerPath, sourceStamp.fileMtimeMs, sourceStamp.fileSize,
       TOOL_INDEX_VERSION, Date.now(), count, storedBytes,
     );
   });

@@ -165,6 +165,13 @@ function toolQueryArgs(options: SampleOptions, devices: string[], local: boolean
   return args;
 }
 
+function toolBackfillArgs(options: SampleOptions, devices: string[], local: boolean): string[] {
+  const args = ['sessions', 'backfill', 'tools', '--since', options.since, '--json'];
+  if (local) args.push('--local');
+  else for (const device of devices) args.push('--device', device);
+  return args;
+}
+
 interface QuerySourceResult {
   envelope?: ToolSearchEnvelope;
   failed: boolean;
@@ -320,6 +327,11 @@ export function loadEnvelope(
     ...(remoteDevices.length > 0 ? [{ devices: remoteDevices, local: false }] : []),
   ];
   for (const source of sources) {
+    try {
+      runAgents(toolBackfillArgs(options, source.devices, source.local));
+    } catch {
+      failedSources++;
+    }
     try {
       const envelope = queryScopeCandidates(options, source.devices, source.local);
       failedQueries += envelope.failedQueries ?? 0;

@@ -122,7 +122,7 @@ describe('tool-call index migration (v22)', () => {
 });
 
 describe('tool-call trigram migration (v24)', () => {
-  it('rebuilds FTS from redacted rows without invalidating session or tool ledgers', () => {
+  it('rebuilds FTS from redacted rows while the later occurrence migration keeps the normal ledger warm', () => {
     const db = getDB();
     db.prepare(
       `INSERT OR REPLACE INTO scan_ledger(file_path, file_mtime_ms, file_size, scanned_at) VALUES (?, ?, ?, ?)`
@@ -134,9 +134,9 @@ describe('tool-call trigram migration (v24)', () => {
     `).run('trigram-call', 'trigram-session', 0, '2026-08-03T00:00:00Z', 'Bash', 'git merge topic', 'unknown', 15);
     db.prepare(`
       INSERT OR REPLACE INTO tool_scan_ledger (
-        file_path, file_mtime_ms, file_size, extractor_version, indexed_at, call_count, evidence_bytes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run('/tmp/trigram/session.jsonl', 1, 1, 1, 1, 1, 15);
+        session_id, file_path, file_mtime_ms, file_size, extractor_version, indexed_at, call_count, evidence_bytes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('trigram-session', '/tmp/trigram/session.jsonl', 1, 1, 1, 1, 1, 15);
     db.exec(`
       DROP TABLE tool_call_text;
       CREATE VIRTUAL TABLE tool_call_text USING fts5(
@@ -154,6 +154,61 @@ describe('tool-call trigram migration (v24)', () => {
     expect(reopened.prepare(`SELECT count(*) AS n FROM scan_ledger WHERE file_path = ?`).get('/tmp/trigram/session.jsonl'))
       .toEqual({ n: 1 });
     expect(reopened.prepare(`SELECT count(*) AS n FROM tool_scan_ledger WHERE file_path = ?`).get('/tmp/trigram/session.jsonl'))
+      .toEqual({ n: 0 });
+  });
+});
+
+describe('tool program occurrence migration (v25)', () => {
+  it('adds ordered occurrences and invalidates only the derived tool ledger', () => {
+    const db = getDB();
+    db.prepare(
+      `INSERT OR REPLACE INTO scan_ledger(file_path, file_mtime_ms, file_size, scanned_at) VALUES (?, ?, ?, ?)`
+    ).run('/tmp/occurrences/session.jsonl', 1, 1, 1);
+    db.prepare(`
+      INSERT OR REPLACE INTO tool_scan_ledger (
+        session_id, file_path, file_mtime_ms, file_size, extractor_version, indexed_at, call_count, evidence_bytes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('occurrence-session', '/tmp/occurrences/session.jsonl', 1, 1, 4, 1, 1, 15);
+    db.exec(`DROP TABLE tool_program_occurrences`);
+    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '24')`).run();
+    closeDB();
+
+    const reopened = getDB();
+    expect((reopened.prepare(`PRAGMA table_info(tool_program_occurrences)`).all() as Array<{ name: string }>).map((column) => column.name))
+      .toEqual(['call_key', 'occurrence_ordinal', 'program', 'role']);
+    expect(reopened.prepare(`SELECT count(*) AS n FROM tool_scan_ledger`).get()).toEqual({ n: 0 });
+    expect(reopened.prepare(`SELECT count(*) AS n FROM scan_ledger WHERE file_path = ?`).get('/tmp/occurrences/session.jsonl'))
+      .toEqual({ n: 1 });
+  });
+});
+
+describe('tool ledger session identity migration (v26)', () => {
+  it('moves coverage lookups to session ids without invalidating normal session ledgers', () => {
+    const db = getDB();
+    db.prepare(
+      `INSERT OR REPLACE INTO scan_ledger(file_path, file_mtime_ms, file_size, scanned_at) VALUES (?, ?, ?, ?)`
+    ).run('/tmp/session-ledger/session.jsonl', 1, 1, 1);
+    db.exec(`
+      DROP TABLE tool_scan_ledger;
+      CREATE TABLE tool_scan_ledger (
+        file_path TEXT PRIMARY KEY,
+        file_mtime_ms INTEGER NOT NULL,
+        file_size INTEGER NOT NULL,
+        extractor_version INTEGER NOT NULL,
+        indexed_at INTEGER NOT NULL,
+        call_count INTEGER NOT NULL,
+        evidence_bytes INTEGER NOT NULL
+      );
+      INSERT INTO tool_scan_ledger VALUES ('/tmp/session-ledger/session.jsonl', 1, 1, 5, 1, 1, 15);
+    `);
+    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '25')`).run();
+    closeDB();
+
+    const reopened = getDB();
+    expect((reopened.prepare(`PRAGMA table_info(tool_scan_ledger)`).all() as Array<{ name: string }>).map((column) => column.name))
+      .toEqual(['session_id', 'file_path', 'file_mtime_ms', 'file_size', 'extractor_version', 'indexed_at', 'call_count', 'evidence_bytes']);
+    expect(reopened.prepare(`SELECT count(*) AS n FROM tool_scan_ledger`).get()).toEqual({ n: 0 });
+    expect(reopened.prepare(`SELECT count(*) AS n FROM scan_ledger WHERE file_path = ?`).get('/tmp/session-ledger/session.jsonl'))
       .toEqual({ n: 1 });
   });
 });

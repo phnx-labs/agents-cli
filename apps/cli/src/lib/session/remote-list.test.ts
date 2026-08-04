@@ -20,6 +20,7 @@ import {
   parseRemoteList,
   parseRemoteListPayload,
   parseRemoteToolSearch,
+  parseRemoteToolProgramCount,
   RemoteUtf8Accumulator,
   isAutomaticSessionPeer,
   remoteListCommand,
@@ -229,7 +230,8 @@ describe('parseRemoteToolSearch', () => {
         id: 'one', shortId: 'one', agent: 'codex', timestamp: '2026-08-03T00:00:00Z',
         filePath: '/peer/one.jsonl', calls: [{
           id: 'call', ordinal: 0, timestamp: '2026-08-03T00:00:01Z', tool: 'exec_command',
-          programs: ['git'], input: `git status\u001b]52;c;payload\u0007 -H "Cookie: sid=${credential}" --proxy-user=user:${credential}`, outcome: 'unknown',
+          programs: ['git'], programOccurrences: [{ program: 'git', role: 'effective' }],
+          input: `git status\u001b]52;c;payload\u0007 -H "Cookie: sid=${credential}" --proxy-user=user:${credential}`, outcome: 'unknown',
         }],
       }],
     });
@@ -285,6 +287,30 @@ describe('parseRemoteToolSearch', () => {
   });
 });
 
+describe('parseRemoteToolProgramCount', () => {
+  it('accepts the versioned aggregate and replaces its machine with the dialed peer', () => {
+    const payload = JSON.stringify({
+      schemaVersion: 1,
+      kind: 'tool-program-count',
+      generatedAt: '2026-08-03T00:00:00Z',
+      query: { program: 'git', semantics: 'static-program-occurrences-v1' },
+      coverage: { indexedFiles: 4, indexedCalls: 8, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
+      totals: { occurrences: 7, toolCalls: 5, sessions: 3 },
+      machines: [{ machine: 'untrusted', coverage: {}, totals: {} }],
+    });
+    const parsed = parseRemoteToolProgramCount(payload, 'peer-one', 'git');
+    expect(parsed).toMatchObject({
+      valid: true,
+      items: [{ machine: 'peer-one', envelope: {
+        totals: { occurrences: 7, toolCalls: 5, sessions: 3 },
+        machines: [{ machine: 'peer-one' }],
+      } }],
+    });
+    expect(parseRemoteToolProgramCount(payload, 'peer-one', 'gh').valid).toBe(false);
+    expect(parseRemoteToolProgramCount('{broken', 'peer-one', 'git').valid).toBe(false);
+  });
+});
+
 describe('fleet tool-result byte budget', () => {
   it('stops retaining peer bytes at the global fleet-query ceiling', () => {
     const budget = { remainingBytes: REMOTE_TOOL_AGGREGATE_MAX_BYTES, exhausted: false };
@@ -303,7 +329,9 @@ describe('fleet tool-result byte budget', () => {
           id: 'one', shortId: 'one', agent: 'codex', timestamp: '2026-08-03T00:00:00Z',
           calls: [{
             id: 'one:0', ordinal: 0, timestamp: '2026-08-03T00:00:00Z',
-            tool: 'exec_command', programs: ['printf'], input: 'printf TOKEN=abcdef', outcome: 'unknown',
+            tool: 'exec_command', programs: ['printf'],
+            programOccurrences: [{ program: 'printf', role: 'effective' }],
+            input: 'printf TOKEN=abcdef', outcome: 'unknown',
           }],
         }],
       }, null, 2) + '\n';

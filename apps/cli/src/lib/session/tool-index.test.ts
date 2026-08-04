@@ -10,6 +10,8 @@ process.env.TEST_API_TOKEN = 'literal-secret-value-789';
 const { closeDB, getDB, upsertSession } = await import('./db.js');
 const {
   ensureToolIndex,
+  countToolProgramOccurrences,
+  readToolIndexCoverage,
   searchToolCalls,
   serializeToolSearchEnvelope,
   toolSearchRemoteReceiveBudget,
@@ -98,6 +100,70 @@ describe('tool-call index', () => {
     await ensureToolIndex([session]);
     const warm = await ensureToolIndex([session]);
     expect(warm).toMatchObject({ indexedFiles: 0, indexedCalls: 0, remainingFiles: 0, complete: true });
+  });
+
+  it('counts repeated static sites from SQLite after the transcript is unavailable', async () => {
+    const filePath = path.join(TEST_HOME, 'repeated-programs.jsonl');
+    const session = {
+      id: 'repeated-programs-session', shortId: 'repeated', agent: 'claude',
+      timestamp: '2026-08-03T00:00:00Z', filePath, machine: 'test-box',
+    } as SessionMeta;
+    fs.writeFileSync(filePath, JSON.stringify({
+      type: 'assistant', timestamp: session.timestamp, message: { content: [{
+        type: 'tool_use', id: 'repeated-call', name: 'Bash',
+        input: { command: 'git status; git diff' },
+      }] },
+    }) + '\n');
+    upsertSession(session, 'repeated programs');
+    await ensureToolIndex([session]);
+    fs.renameSync(filePath, `${filePath}.offline`);
+
+    const coverage = readToolIndexCoverage([session]);
+    expect(coverage.complete).toBe(true);
+    expect(countToolProgramOccurrences([session], 'git', coverage, 'test-box')).toMatchObject({
+      totals: { occurrences: 2, toolCalls: 1, sessions: 1 },
+    });
+    expect(searchToolCalls([session], ['program:git'], coverage).sessions[0].calls[0])
+      .toMatchObject({
+        programs: ['git'],
+        programOccurrences: [
+          { program: 'git', role: 'effective' },
+          { program: 'git', role: 'effective' },
+        ],
+      });
+  });
+
+  it('groups a direct local count by each transcript origin', async () => {
+    const sessions = [
+      { id: 'origin-local', machine: 'local-box', command: 'git status' },
+      { id: 'origin-mirror', machine: 'peer-box', command: 'git diff; git log' },
+    ].map(({ id, machine, command }) => {
+      const filePath = path.join(TEST_HOME, `${id}.jsonl`);
+      const session = {
+        id, shortId: id.slice(0, 8), agent: 'claude', machine,
+        timestamp: '2026-08-03T00:00:00Z', filePath,
+      } as SessionMeta;
+      fs.writeFileSync(filePath, JSON.stringify({
+        type: 'assistant', timestamp: session.timestamp, message: { content: [{
+          type: 'tool_use', id: `${id}-call`, name: 'Bash', input: { command },
+        }] },
+      }) + '\n');
+      upsertSession(session, id);
+      return session;
+    });
+    await ensureToolIndex(sessions);
+
+    const count = countToolProgramOccurrences(
+      sessions,
+      'git',
+      readToolIndexCoverage(sessions),
+      'local-box',
+    );
+    expect(count.totals).toEqual({ occurrences: 3, toolCalls: 2, sessions: 2 });
+    expect(count.machines).toMatchObject([
+      { machine: 'local-box', totals: { occurrences: 1, toolCalls: 1, sessions: 1 } },
+      { machine: 'peer-box', totals: { occurrences: 2, toolCalls: 1, sessions: 1 } },
+    ]);
   });
 
   it('advances only one bounded backfill chunk', async () => {
@@ -244,6 +310,7 @@ describe('tool-call index', () => {
         timestamp: session.timestamp,
         tool: 'exec_command',
         programs: ['printf'],
+        programOccurrences: [{ program: 'printf', role: 'effective' as const }],
         input: `printf ${'x'.repeat(15_500)}`,
         outcome: 'unknown' as const,
       })), { fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
@@ -263,6 +330,7 @@ describe('tool-call index', () => {
         timestamp: '2026-08-03T00:00:00Z',
         tool: 'exec_command',
         programs: ['printf'],
+        programOccurrences: [{ program: 'printf', role: 'effective' as const }],
         input,
         outcome: 'unknown' as const,
       })),
@@ -291,6 +359,7 @@ describe('tool-call index', () => {
           timestamp: '2026-08-03T00:00:00Z',
           tool: 'exec_command',
           programs: ['git'],
+          programOccurrences: [{ program: 'git', role: 'effective' as const }],
           input: `git status ${'x'.repeat(16_000)}`,
           outcome: 'unknown' as const,
         })),

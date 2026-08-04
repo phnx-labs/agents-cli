@@ -27,16 +27,27 @@ describe('persistToolCalls', () => {
     const stamp = { fileMtimeMs: fs.statSync(filePath).mtimeMs, fileSize: fs.statSync(filePath).size };
     persistToolCalls(db, session, [{
       ordinal: 0, timestamp: session.timestamp, tool: 'exec_command', programs: ['git'],
+      programOccurrences: [
+        { program: 'git', role: 'effective' },
+        { program: 'git', role: 'effective' },
+      ],
       input: 'git status', outcome: 'unknown',
     }], stamp, 'replace');
     persistToolCalls(db, session, [{
       ordinal: 0, timestamp: session.timestamp, tool: 'exec_command', programs: ['git'],
+      programOccurrences: [{ program: 'git', role: 'effective' }],
       input: 'git status', outcome: 'error', error: 'failed',
     }], stamp, 'append');
 
     expect(db.prepare(`SELECT outcome, error FROM tool_calls WHERE session_id = ?`).get(session.id))
       .toEqual({ outcome: 'error', error: 'failed' });
     expect(db.prepare(`SELECT program FROM tool_call_programs`).all()).toEqual([{ program: 'git' }]);
+    expect(db.prepare(`
+      SELECT occurrence_ordinal, program, role FROM tool_program_occurrences
+      ORDER BY occurrence_ordinal
+    `).all()).toEqual([
+      { occurrence_ordinal: 0, program: 'git', role: 'effective' },
+    ]);
     expect((db.prepare(`SELECT call_count FROM tool_scan_ledger`).get() as { call_count: number }).call_count).toBe(1);
   });
 
@@ -51,6 +62,7 @@ describe('persistToolCalls', () => {
     const stat = fs.statSync(filePath);
     persistToolCalls(db, session, [{
       ordinal: 0, timestamp: session.timestamp, tool: 'exec_command', programs: ['git'],
+      programOccurrences: [{ program: 'git', role: 'effective' }],
       input: `git status ${'x'.repeat(200)}`, outcome: 'unknown',
     }], { fileMtimeMs: stat.mtimeMs, fileSize: stat.size }, 'replace', 256);
 
@@ -71,6 +83,7 @@ describe('persistToolCalls', () => {
     const first = fs.statSync(filePath);
     persistToolCalls(db, session, [{
       ordinal: 0, timestamp: session.timestamp, tool: 'exec_command', programs: ['git'],
+      programOccurrences: [{ program: 'git', role: 'effective' }],
       input: 'git status', outcome: 'unknown',
     }], { fileMtimeMs: first.mtimeMs, fileSize: first.size });
     const before = db.prepare(`SELECT call_count, evidence_bytes FROM tool_scan_ledger WHERE file_path = ?`).get(filePath);
@@ -120,6 +133,7 @@ describe('persistToolCalls', () => {
     const stat = fs.statSync(filePath);
     persistToolCalls(db, session, [{
       ordinal: 0, timestamp: session.timestamp, tool: 'exec_command', programs: ['git'],
+      programOccurrences: [{ program: 'git', role: 'effective' }],
       input: 'git status', outcome: 'unknown',
     }], { fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
     fs.unlinkSync(filePath);
@@ -143,6 +157,7 @@ describe('persistToolCalls', () => {
       const stat = fs.statSync(filePath);
       persistToolCalls(db, session, [{
         ordinal: 0, timestamp: session.timestamp, tool: 'exec_command', programs: ['git'],
+        programOccurrences: [{ program: 'git', role: 'effective' }],
         input: 'git status', outcome: 'unknown',
       }], { fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
     }

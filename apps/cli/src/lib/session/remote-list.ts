@@ -36,6 +36,7 @@ import {
   TOOL_QUERY_MAX_SERIALIZED_BYTES,
   serializedToolSearchEnvelopeBytes,
   type ToolCallEvidence,
+  type ToolProgramCountEnvelope,
   type ToolSearchEnvelope,
   type ToolSessionEvidence,
 } from './tool-index.js';
@@ -278,6 +279,81 @@ export interface RemoteToolSearchResult {
   truncated: string[];
 }
 
+export interface RemoteToolProgramCountResult {
+  envelopes: Array<{ machine: string; envelope: ToolProgramCountEnvelope }>;
+  deviceCount: number;
+  unreachable: string[];
+}
+
+export function parseRemoteToolProgramCount(
+  stdout: string,
+  machine: string,
+  expectedProgram: string,
+): RemoteAgentsJsonParseResult<{ machine: string; envelope: ToolProgramCountEnvelope }> {
+  try {
+    const parsed = JSON.parse(stdout) as Record<string, unknown>;
+    const query = parsed.query as Record<string, unknown> | undefined;
+    const coverage = parsed.coverage as Record<string, unknown> | undefined;
+    const totals = parsed.totals as Record<string, unknown> | undefined;
+    const machines = parsed.machines;
+    const coverageKeys = ['indexedFiles', 'indexedCalls', 'skippedFiles', 'limitedFiles', 'remainingFiles'] as const;
+    const totalKeys = ['occurrences', 'toolCalls', 'sessions'] as const;
+    if (parsed.schemaVersion !== 1 || parsed.kind !== 'tool-program-count'
+      || !query || query.program !== expectedProgram || query.semantics !== 'static-program-occurrences-v1'
+      || !coverage || typeof coverage.complete !== 'boolean'
+      || coverageKeys.some((key) => !Number.isSafeInteger(coverage[key]) || (coverage[key] as number) < 0)
+      || !totals || totalKeys.some((key) => !Number.isSafeInteger(totals[key]) || (totals[key] as number) < 0)
+      || !Array.isArray(machines) || machines.length !== 1
+      || boundedRemoteString(parsed.generatedAt, 128) === undefined) {
+      return { items: [], valid: false };
+    }
+    return {
+      valid: true,
+      items: [{
+        machine,
+        envelope: {
+          schemaVersion: 1,
+          kind: 'tool-program-count',
+          generatedAt: parsed.generatedAt as string,
+          query: { program: expectedProgram, semantics: 'static-program-occurrences-v1' },
+          coverage: coverage as unknown as ToolProgramCountEnvelope['coverage'],
+          totals: totals as unknown as ToolProgramCountEnvelope['totals'],
+          machines: [{
+            machine,
+            coverage: coverage as unknown as ToolProgramCountEnvelope['coverage'],
+            totals: totals as unknown as ToolProgramCountEnvelope['totals'],
+          }],
+        },
+      }],
+    };
+  } catch {
+    return { items: [], valid: false };
+  }
+}
+
+export async function gatherRemoteToolProgramCounts(
+  forwardedArgs: string[],
+  hosts: string[] | undefined,
+  expectedProgram: string,
+): Promise<RemoteToolProgramCountResult> {
+  const result = await gatherRemoteAgentsJson<{ machine: string; envelope: ToolProgramCountEnvelope }>({
+    args: forwardedArgs,
+    noFanoutEnv: NO_FANOUT_ENV,
+    hosts,
+    timeoutMs: REMOTE_TOOL_TIMEOUT_MS,
+    parse: (stdout, machine) => parseRemoteToolProgramCount(stdout, machine, expectedProgram),
+  });
+  return {
+    envelopes: result.items,
+    deviceCount: result.deviceCount,
+    unreachable: [
+      ...(result.discoveryFailed ? ['device registry'] : []),
+      ...result.skipped,
+      ...result.parseFailed,
+    ],
+  };
+}
+
 function boundedRemoteString(value: unknown, maxBytes: number): string | undefined {
   if (typeof value !== 'string' || Buffer.byteLength(value) > maxBytes) return undefined;
   return sanitizeToolEvidenceText(value, maxBytes);
@@ -305,11 +381,20 @@ function parseRemoteCall(value: unknown): ToolCallEvidence | undefined {
   const programs = Array.isArray(call.programs)
     ? call.programs.map((program) => boundedRemoteString(program, 512))
     : [];
+  if (!Array.isArray(call.programOccurrences) || call.programOccurrences.length > 10_000) return undefined;
+  const programOccurrences = call.programOccurrences.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+    const occurrence = value as Record<string, unknown>;
+    const program = boundedRemoteString(occurrence.program, 512);
+    if (!program || (occurrence.role !== 'wrapper' && occurrence.role !== 'effective')) return undefined;
+    return { program, role: occurrence.role };
+  });
   if (!id || !timestamp || !tool || input === undefined
     || !Number.isSafeInteger(call.ordinal) || (call.ordinal as number) < 0
     || !['ok', 'error', 'unknown'].includes(String(call.outcome))
     || sourceCallId === null || output === null || error === null || errorCode === null || parseError === null
-    || programs.some((program) => program === undefined)) return undefined;
+    || programs.some((program) => program === undefined)
+    || programOccurrences.some((occurrence) => occurrence === undefined)) return undefined;
   for (const code of [call.exitCode, call.statusCode]) {
     if (code !== undefined && (!Number.isSafeInteger(code) || (code as number) < 0)) return undefined;
   }
@@ -320,6 +405,7 @@ function parseRemoteCall(value: unknown): ToolCallEvidence | undefined {
     timestamp,
     tool,
     programs: programs as string[],
+    programOccurrences: programOccurrences as ToolCallEvidence['programOccurrences'],
     input,
     outcome: call.outcome as ToolCallEvidence['outcome'],
     exitCode: call.exitCode as number | undefined,

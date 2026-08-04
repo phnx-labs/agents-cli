@@ -43,16 +43,32 @@ describe('extractShellPrograms', () => {
     expect(result.diagnostics).toEqual([]);
   });
 
-  it('delegates only conservative wrapper forms', () => {
+  it('unwraps static wrapper chains without executing them', () => {
     expect(extractShellPrograms('env A=1 git status').programs).toEqual(['env', 'git']);
     expect(extractShellPrograms('command git status').programs).toEqual(['command', 'git']);
     expect(extractShellPrograms('builtin printf test').programs).toEqual(['builtin', 'printf']);
     expect(extractShellPrograms('nohup git status').programs).toEqual(['nohup', 'git']);
     expect(extractShellPrograms('sudo git status').programs).toEqual(['sudo', 'git']);
     expect(extractShellPrograms('time git status').programs).toEqual(['git']);
-    expect(extractShellPrograms('env -i git status').programs).toEqual(['env']);
-    expect(extractShellPrograms('command -p git status').programs).toEqual(['command']);
-    expect(extractShellPrograms('sudo -u root git status').programs).toEqual(['sudo']);
+    expect(extractShellPrograms('env -i git status').programs).toEqual(['env', 'git']);
+    expect(extractShellPrograms('command -p git status').programs).toEqual(['command', 'git']);
+    expect(extractShellPrograms('sudo -u root git status').programs).toEqual(['sudo', 'git']);
+    expect(extractShellPrograms('sudo -u root env A=1 git status').occurrences).toEqual([
+      { program: 'sudo', role: 'wrapper' },
+      { program: 'env', role: 'wrapper' },
+      { program: 'git', role: 'effective' },
+    ]);
+  });
+
+  it('retains repeated static program sites while preserving the distinct program list', () => {
+    const result = extractShellPrograms('git status; git diff; bash -lc "git log -1"');
+    expect(result.programs).toEqual(['git', 'bash']);
+    expect(result.occurrences).toEqual([
+      { program: 'git', role: 'effective' },
+      { program: 'git', role: 'effective' },
+      { program: 'bash', role: 'wrapper' },
+      { program: 'git', role: 'effective' },
+    ]);
   });
 
   it('walks unquoted heredoc expansions but ignores quoted heredoc content', () => {

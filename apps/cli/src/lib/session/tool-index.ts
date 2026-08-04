@@ -15,7 +15,6 @@ import {
 } from './tool-calls.js';
 import type { SessionMeta } from './types.js';
 import {
-  canonicalToolLedgerPath,
   persistToolCalls,
   purgeToolCalls,
   toolEvidenceSourcePath,
@@ -28,6 +27,7 @@ const BACKFILL_MAX_JSONL_RECORD_BYTES = 1024 * 1024;
 export const BACKFILL_MAX_STREAM_SOURCE_BYTES = 64 * 1024 * 1024;
 
 export const TOOL_SEARCH_SCHEMA_VERSION = 1;
+export const TOOL_PROGRAM_COUNT_SCHEMA_VERSION = 1;
 export const TOOL_QUERY_MAX_CLAUSES = 32;
 export const TOOL_QUERY_MAX_CLAUSE_BYTES = 4096;
 export const TOOL_QUERY_MAX_CALL_ROWS = 50_000;
@@ -69,6 +69,29 @@ export interface ToolSearchEnvelope {
   query: { clauses: string[] };
   coverage: ToolIndexCoverage;
   sessions: ToolSessionEvidence[];
+}
+
+export interface ToolProgramCountTotals {
+  occurrences: number;
+  toolCalls: number;
+  sessions: number;
+}
+
+export interface ToolProgramCountEnvelope {
+  schemaVersion: typeof TOOL_PROGRAM_COUNT_SCHEMA_VERSION;
+  kind: 'tool-program-count';
+  generatedAt: string;
+  query: {
+    program: string;
+    semantics: 'static-program-occurrences-v1';
+  };
+  coverage: ToolIndexCoverage;
+  totals: ToolProgramCountTotals;
+  machines: Array<{
+    machine: string;
+    coverage: ToolIndexCoverage;
+    totals: ToolProgramCountTotals;
+  }>;
 }
 
 /** Serialize once and enforce headroom below the fleet transport's 16 MiB cap. */
@@ -117,13 +140,13 @@ interface StoredCallRow {
 
 function needsIndex(
   db: Database.Database,
-  sourcePath: string,
+  sessionId: string,
   stamp: { fileMtimeMs: number; fileSize: number },
 ): boolean {
   const row = db.prepare(`
     SELECT file_mtime_ms, file_size, extractor_version
-    FROM tool_scan_ledger WHERE file_path = ?
-  `).get(canonicalToolLedgerPath(sourcePath)) as {
+    FROM tool_scan_ledger WHERE session_id = ?
+  `).get(sessionId) as {
     file_mtime_ms: number;
     file_size: number;
     extractor_version: number;
@@ -134,12 +157,46 @@ function needsIndex(
     || row.extractor_version !== TOOL_INDEX_VERSION;
 }
 
+/** Read index completeness from SQLite only; never stat or parse transcripts. */
+export function readToolIndexCoverage(sessions: SessionMeta[]): ToolIndexCoverage {
+  const db = getDB();
+  const sessionIds = [...new Set(sessions
+    .filter((session) => session.filePath)
+    .map((session) => session.id))];
+  const ledgerRows = sessionIds.length === 0 ? [] : db.prepare(`
+    SELECT session_id, extractor_version, call_count
+    FROM tool_scan_ledger
+    WHERE session_id IN (SELECT value FROM json_each(?))
+  `).all(JSON.stringify(sessionIds)) as Array<{
+    session_id: string;
+    extractor_version: number;
+    call_count: number;
+  }>;
+  const currentRows = ledgerRows.filter((row) => row.extractor_version === TOOL_INDEX_VERSION);
+  const limited = sessionIds.length === 0 ? { count: 0 } : db.prepare(`
+    SELECT count(DISTINCT session_id) AS count
+    FROM tool_calls
+    WHERE tool = 'index_limit'
+      AND session_id IN (SELECT value FROM json_each(?))
+  `).get(JSON.stringify(sessionIds)) as { count: number };
+  const remainingFiles = Math.max(0, sessionIds.length - currentRows.length);
+  return {
+    indexedFiles: currentRows.length,
+    indexedCalls: currentRows.reduce((sum, row) => sum + row.call_count, 0),
+    skippedFiles: 0,
+    limitedFiles: limited.count,
+    remainingFiles,
+    complete: remainingFiles === 0 && limited.count === 0,
+  };
+}
+
 function backfillLimitCall(session: SessionMeta, reason: string): IndexedToolCall {
   return {
     ordinal: TOOL_INDEX_LIMIT_ORDINAL,
     timestamp: session.timestamp,
     tool: 'index_limit',
     programs: [],
+    programOccurrences: [],
     input: reason,
     outcome: 'unknown',
     parseError: 'Additional tool calls were not indexed for this session.',
@@ -262,12 +319,12 @@ export async function ensureToolIndex(
         const stat = fs.statSync(sourcePath);
         stamp = { fileMtimeMs: stat.mtimeMs, fileSize: stat.size };
       } catch {
-        purgeToolCalls(db, session.id, session.filePath, session.agent);
+        purgeToolCalls(db, session.id);
         skippedFiles++;
         continue;
       }
     }
-    if (needsIndex(db, sourcePath, stamp)) pending.push({ session, stamp });
+    if (needsIndex(db, session.id, stamp)) pending.push({ session, stamp });
   }
 
   let indexedFiles = 0;
@@ -364,6 +421,15 @@ export function parseToolQueryClause(source: string): QueryTerm[] {
   }).filter((term) => term.value.length > 0);
 }
 
+/** A count has one unambiguous subject: one exact `program:<name>` term. */
+export function parseToolProgramCountClause(source: string): string {
+  const terms = parseToolQueryClause(source);
+  if (terms.length !== 1 || terms[0].field !== 'program') {
+    throw new Error('--count requires exactly one --query program:<name> clause.');
+  }
+  return terms[0].value;
+}
+
 function includes(haystack: string | undefined, needle: string): boolean {
   return (haystack ?? '').toLocaleLowerCase().includes(needle.toLocaleLowerCase());
 }
@@ -434,13 +500,12 @@ function ftsCandidateRows(
   sessionIds: string[],
   expression: string,
 ): Array<{ call_key: string }> {
-  const placeholders = sessionIds.map(() => '?').join(',');
   return db.prepare(`
     SELECT t.call_key FROM tool_call_text t
     JOIN tool_calls c ON c.call_key = t.call_key
-    WHERE c.session_id IN (${placeholders}) AND tool_call_text MATCH ?
+    WHERE c.session_id IN (SELECT value FROM json_each(?)) AND tool_call_text MATCH ?
     LIMIT ?
-  `).all(...sessionIds, expression, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
+  `).all(JSON.stringify(sessionIds), expression, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
 }
 
 /** Use indexed typed columns and trigram FTS; final matching remains exact in JS. */
@@ -450,135 +515,125 @@ function candidateKeysForClause(
   clause: QueryTerm[],
 ): Set<string> {
   let candidates: Set<string> | undefined;
-  const SESSION_CHUNK = 300;
+  const scope = JSON.stringify(sessionIds);
   for (const term of clause) {
     const matches = new Set<string>();
-    for (let offset = 0; offset < sessionIds.length; offset += SESSION_CHUNK) {
-      const ids = sessionIds.slice(offset, offset + SESSION_CHUNK);
-      if (ids.length === 0) continue;
-      const placeholders = ids.map(() => '?').join(',');
-      let rows: Array<{ call_key: string }> = [];
-      switch (term.field) {
-        case 'program':
-          rows = db.prepare(`
-            SELECT p.call_key FROM tool_call_programs p
-            JOIN tool_calls c ON c.call_key = p.call_key
-            WHERE c.session_id IN (${placeholders}) AND p.program = ? COLLATE NOCASE
+    let rows: Array<{ call_key: string }> = [];
+    switch (term.field) {
+      case 'program':
+        rows = db.prepare(`
+          SELECT p.call_key FROM tool_call_programs p
+          JOIN tool_calls c ON c.call_key = p.call_key
+          WHERE c.session_id IN (SELECT value FROM json_each(?)) AND p.program = ? COLLATE NOCASE
+          LIMIT ?
+        `).all(scope, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
+        break;
+      case 'status':
+        rows = db.prepare(`
+          SELECT call_key FROM tool_calls
+          WHERE session_id IN (SELECT value FROM json_each(?))
+            AND (outcome = ? COLLATE NOCASE OR CAST(status_code AS TEXT) = ?)
+          LIMIT ?
+        `).all(scope, term.value, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
+        break;
+      case 'exit':
+        rows = db.prepare(`
+          SELECT call_key FROM tool_calls
+          WHERE session_id IN (SELECT value FROM json_each(?)) AND CAST(exit_code AS TEXT) = ?
+          LIMIT ?
+        `).all(scope, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
+        break;
+      case 'tool':
+      case 'input': {
+        const field = term.field;
+        rows = canUseTrigram(term.value)
+          ? ftsCandidateRows(db, sessionIds, `${field}:${ftsPhrase(term.value)}`)
+          : db.prepare(`
+              SELECT call_key FROM tool_calls
+              WHERE session_id IN (SELECT value FROM json_each(?))
+                AND instr(lower(${field}), lower(?)) > 0
+              LIMIT ?
+            `).all(scope, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
+        break;
+      }
+      case 'output':
+        rows = canUseTrigram(term.value)
+          ? ftsCandidateRows(db, sessionIds, `(output:${ftsPhrase(term.value)} OR error:${ftsPhrase(term.value)})`)
+          : db.prepare(`
+              SELECT call_key FROM tool_calls
+              WHERE session_id IN (SELECT value FROM json_each(?))
+                AND (instr(lower(coalesce(output, '')), lower(?)) > 0
+                  OR instr(lower(coalesce(error, '')), lower(?)) > 0)
+              LIMIT ?
+            `).all(scope, term.value, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
+        break;
+      case 'error':
+        if (canUseTrigram(term.value)) {
+          rows = ftsCandidateRows(db, sessionIds, `error:${ftsPhrase(term.value)}`);
+          rows.push(...db.prepare(`
+            SELECT call_key FROM tool_calls
+            WHERE session_id IN (SELECT value FROM json_each(?))
+              AND instr(lower(coalesce(error_code, '')), lower(?)) > 0
             LIMIT ?
-          `).all(...ids, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
-          break;
-        case 'status':
+          `).all(scope, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>);
+        } else {
           rows = db.prepare(`
             SELECT call_key FROM tool_calls
-            WHERE session_id IN (${placeholders})
-              AND (outcome = ? COLLATE NOCASE OR CAST(status_code AS TEXT) = ?)
+            WHERE session_id IN (SELECT value FROM json_each(?))
+              AND (instr(lower(coalesce(error, '')), lower(?)) > 0
+                OR instr(lower(coalesce(error_code, '')), lower(?)) > 0)
             LIMIT ?
-          `).all(...ids, term.value, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
-          break;
-        case 'exit':
+          `).all(scope, term.value, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
+        }
+        break;
+      default:
+        if (canUseTrigram(term.value)) {
+          rows = ftsCandidateRows(db, sessionIds, ftsPhrase(term.value));
+          rows.push(...db.prepare(`
+            SELECT c.call_key FROM tool_calls c
+            WHERE c.session_id IN (SELECT value FROM json_each(?)) AND (
+              instr(lower(coalesce(c.error_code, '')), lower(?)) > 0
+              OR instr(lower(c.outcome), lower(?)) > 0
+              OR CAST(c.exit_code AS TEXT) = ?
+              OR CAST(c.status_code AS TEXT) = ?
+              OR EXISTS (
+                SELECT 1 FROM tool_call_programs p
+                WHERE p.call_key = c.call_key AND instr(lower(p.program), lower(?)) > 0
+              )
+            ) LIMIT ?
+          `).all(
+            scope, term.value, term.value, term.value, term.value, term.value,
+            TOOL_QUERY_MAX_CALL_ROWS + 1,
+          ) as Array<{ call_key: string }>);
+        } else {
           rows = db.prepare(`
-            SELECT call_key FROM tool_calls
-            WHERE session_id IN (${placeholders}) AND CAST(exit_code AS TEXT) = ?
-            LIMIT ?
-          `).all(...ids, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
-          break;
-        case 'tool':
-          rows = canUseTrigram(term.value)
-            ? ftsCandidateRows(db, ids, `tool:${ftsPhrase(term.value)}`)
-            : db.prepare(`
-                SELECT call_key FROM tool_calls
-                WHERE session_id IN (${placeholders}) AND instr(lower(tool), lower(?)) > 0
-                LIMIT ?
-              `).all(...ids, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
-          break;
-        case 'input':
-          rows = canUseTrigram(term.value)
-            ? ftsCandidateRows(db, ids, `input:${ftsPhrase(term.value)}`)
-            : db.prepare(`
-                SELECT call_key FROM tool_calls
-                WHERE session_id IN (${placeholders}) AND instr(lower(input), lower(?)) > 0
-                LIMIT ?
-              `).all(...ids, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
-          break;
-        case 'output':
-          rows = canUseTrigram(term.value)
-            ? ftsCandidateRows(db, ids, `(output:${ftsPhrase(term.value)} OR error:${ftsPhrase(term.value)})`)
-            : db.prepare(`
-                SELECT call_key FROM tool_calls
-                WHERE session_id IN (${placeholders})
-                  AND (instr(lower(coalesce(output, '')), lower(?)) > 0
-                    OR instr(lower(coalesce(error, '')), lower(?)) > 0)
-                LIMIT ?
-              `).all(...ids, term.value, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
-          break;
-        case 'error':
-          if (canUseTrigram(term.value)) {
-            rows = ftsCandidateRows(db, ids, `error:${ftsPhrase(term.value)}`);
-            rows.push(...db.prepare(`
-              SELECT call_key FROM tool_calls
-              WHERE session_id IN (${placeholders})
-                AND instr(lower(coalesce(error_code, '')), lower(?)) > 0
-              LIMIT ?
-            `).all(...ids, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>);
-          } else {
-            rows = db.prepare(`
-              SELECT call_key FROM tool_calls
-              WHERE session_id IN (${placeholders})
-                AND (instr(lower(coalesce(error, '')), lower(?)) > 0
-                  OR instr(lower(coalesce(error_code, '')), lower(?)) > 0)
-              LIMIT ?
-            `).all(...ids, term.value, term.value, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
-          }
-          break;
-        default:
-          if (canUseTrigram(term.value)) {
-            rows = ftsCandidateRows(db, ids, ftsPhrase(term.value));
-            rows.push(...db.prepare(`
-              SELECT c.call_key FROM tool_calls c
-              WHERE c.session_id IN (${placeholders}) AND (
-                instr(lower(coalesce(c.error_code, '')), lower(?)) > 0
-                OR instr(lower(c.outcome), lower(?)) > 0
-                OR CAST(c.exit_code AS TEXT) = ?
-                OR CAST(c.status_code AS TEXT) = ?
-                OR EXISTS (
-                  SELECT 1 FROM tool_call_programs p
-                  WHERE p.call_key = c.call_key AND instr(lower(p.program), lower(?)) > 0
-                )
-              ) LIMIT ?
-            `).all(
-              ...ids, term.value, term.value, term.value, term.value, term.value,
-              TOOL_QUERY_MAX_CALL_ROWS + 1,
-            ) as Array<{ call_key: string }>);
-          } else {
-            rows = db.prepare(`
-              SELECT c.call_key FROM tool_calls c
-              WHERE c.session_id IN (${placeholders}) AND (
-                instr(lower(c.tool), lower(?)) > 0
-                OR instr(lower(c.input), lower(?)) > 0
-                OR instr(lower(coalesce(c.output, '')), lower(?)) > 0
-                OR instr(lower(coalesce(c.error, '')), lower(?)) > 0
-                OR instr(lower(coalesce(c.error_code, '')), lower(?)) > 0
-                OR instr(lower(c.outcome), lower(?)) > 0
-                OR CAST(c.exit_code AS TEXT) = ?
-                OR CAST(c.status_code AS TEXT) = ?
-                OR EXISTS (
-                  SELECT 1 FROM tool_call_programs p
-                  WHERE p.call_key = c.call_key AND instr(lower(p.program), lower(?)) > 0
-                )
-              ) LIMIT ?
-            `).all(
-              ...ids,
-              term.value, term.value, term.value, term.value, term.value,
-              term.value, term.value, term.value, term.value,
-              TOOL_QUERY_MAX_CALL_ROWS + 1,
-            ) as Array<{ call_key: string }>;
-          }
-          break;
-      }
-      for (const row of rows) matches.add(row.call_key);
-      if (matches.size > TOOL_QUERY_MAX_CALL_ROWS) {
-        throw new Error(`Tool query matched more than ${TOOL_QUERY_MAX_CALL_ROWS.toLocaleString()} call rows; add a more specific term.`);
-      }
+            SELECT c.call_key FROM tool_calls c
+            WHERE c.session_id IN (SELECT value FROM json_each(?)) AND (
+              instr(lower(c.tool), lower(?)) > 0
+              OR instr(lower(c.input), lower(?)) > 0
+              OR instr(lower(coalesce(c.output, '')), lower(?)) > 0
+              OR instr(lower(coalesce(c.error, '')), lower(?)) > 0
+              OR instr(lower(coalesce(c.error_code, '')), lower(?)) > 0
+              OR instr(lower(c.outcome), lower(?)) > 0
+              OR CAST(c.exit_code AS TEXT) = ?
+              OR CAST(c.status_code AS TEXT) = ?
+              OR EXISTS (
+                SELECT 1 FROM tool_call_programs p
+                WHERE p.call_key = c.call_key AND instr(lower(p.program), lower(?)) > 0
+              )
+            ) LIMIT ?
+          `).all(
+            scope,
+            term.value, term.value, term.value, term.value, term.value,
+            term.value, term.value, term.value, term.value,
+            TOOL_QUERY_MAX_CALL_ROWS + 1,
+          ) as Array<{ call_key: string }>;
+        }
+        break;
+    }
+    for (const row of rows) matches.add(row.call_key);
+    if (matches.size > TOOL_QUERY_MAX_CALL_ROWS) {
+      throw new Error(`Tool query matched more than ${TOOL_QUERY_MAX_CALL_ROWS.toLocaleString()} call rows; add a more specific term.`);
     }
     candidates = intersect(candidates, matches);
     if (candidates.size === 0) break;
@@ -588,29 +643,49 @@ function candidateKeysForClause(
 
 function programsForRows(db: Database.Database, rows: StoredCallRow[]): Map<string, string[]> {
   const programs = new Map<string, string[]>();
-  const CHUNK = 300;
   const keys = rows.map((row) => row.call_key);
-  for (let offset = 0; offset < keys.length; offset += CHUNK) {
-    const chunk = keys.slice(offset, offset + CHUNK);
-    if (chunk.length === 0) continue;
-    const placeholders = chunk.map(() => '?').join(',');
-    const programRows = db.prepare(`
-      SELECT call_key, program FROM tool_call_programs
-      WHERE call_key IN (${placeholders}) ORDER BY program
-    `).all(...chunk) as Array<{ call_key: string; program: string }>;
-    for (const row of programRows) {
-      const list = programs.get(row.call_key) ?? [];
-      list.push(row.program);
-      programs.set(row.call_key, list);
-    }
+  if (keys.length === 0) return programs;
+  const programRows = db.prepare(`
+    SELECT call_key, program FROM tool_call_programs
+    WHERE call_key IN (SELECT value FROM json_each(?)) ORDER BY program
+  `).all(JSON.stringify(keys)) as Array<{ call_key: string; program: string }>;
+  for (const row of programRows) {
+    const list = programs.get(row.call_key) ?? [];
+    list.push(row.program);
+    programs.set(row.call_key, list);
   }
   return programs;
+}
+
+function occurrencesForRows(
+  db: Database.Database,
+  rows: StoredCallRow[],
+): Map<string, IndexedToolCall['programOccurrences']> {
+  const occurrences = new Map<string, IndexedToolCall['programOccurrences']>();
+  const keys = rows.map((row) => row.call_key);
+  if (keys.length === 0) return occurrences;
+  const occurrenceRows = db.prepare(`
+    SELECT call_key, program, role FROM tool_program_occurrences
+    WHERE call_key IN (SELECT value FROM json_each(?))
+    ORDER BY call_key, occurrence_ordinal
+  `).all(JSON.stringify(keys)) as Array<{
+    call_key: string;
+    program: string;
+    role: 'wrapper' | 'effective';
+  }>;
+  for (const row of occurrenceRows) {
+    const list = occurrences.get(row.call_key) ?? [];
+    list.push({ program: row.program, role: row.role });
+    occurrences.set(row.call_key, list);
+  }
+  return occurrences;
 }
 
 function appendStoredRows(
   out: Map<string, ToolCallEvidence[]>,
   rows: StoredCallRow[],
   programs: Map<string, string[]>,
+  occurrences: Map<string, IndexedToolCall['programOccurrences']>,
   loadedBytes: number,
 ): number {
   for (const row of rows) {
@@ -621,6 +696,7 @@ function appendStoredRows(
       timestamp: row.timestamp,
       tool: row.tool,
       programs: programs.get(row.call_key) ?? [],
+      programOccurrences: occurrences.get(row.call_key) ?? [],
       input: row.input,
       outcome: row.outcome,
       exitCode: row.exit_code ?? undefined,
@@ -659,7 +735,13 @@ function readCalls(db: Database.Database, sessionIds: string[]): Map<string, Too
       if (totalRows > TOOL_QUERY_MAX_CALL_ROWS) {
         throw new Error(`Tool listing exceeds ${TOOL_QUERY_MAX_CALL_ROWS.toLocaleString()} call rows; reduce --limit or add --query.`);
       }
-      loadedBytes = appendStoredRows(out, rows, programsForRows(db, rows), loadedBytes);
+      loadedBytes = appendStoredRows(
+        out,
+        rows,
+        programsForRows(db, rows),
+        occurrencesForRows(db, rows),
+        loadedBytes,
+      );
       afterOrdinal = rows.at(-1)!.ordinal;
       if (rows.length < PAGE) break;
     }
@@ -671,18 +753,130 @@ function readCallsByKeys(db: Database.Database, keys: Set<string>): Map<string, 
   if (keys.size === 0) return new Map();
   const out = new Map<string, ToolCallEvidence[]>();
   const allKeys = [...keys];
-  const CHUNK = 300;
   let loadedBytes = 0;
-  for (let offset = 0; offset < allKeys.length; offset += CHUNK) {
-    const chunk = allKeys.slice(offset, offset + CHUNK);
-    const placeholders = chunk.map(() => '?').join(',');
-    const rows = db.prepare(`
-      SELECT * FROM tool_calls WHERE call_key IN (${placeholders})
-      ORDER BY session_id, ordinal
-    `).all(...chunk) as StoredCallRow[];
-    loadedBytes = appendStoredRows(out, rows, programsForRows(db, rows), loadedBytes);
-  }
+  const rows = db.prepare(`
+    SELECT * FROM tool_calls
+    WHERE call_key IN (SELECT value FROM json_each(?))
+    ORDER BY session_id, ordinal
+  `).all(JSON.stringify(allKeys)) as StoredCallRow[];
+  loadedBytes = appendStoredRows(
+    out,
+    rows,
+    programsForRows(db, rows),
+    occurrencesForRows(db, rows),
+    loadedBytes,
+  );
   return out;
+}
+
+/** Count exact, pre-indexed static program sites without reading transcripts. */
+export function countToolProgramOccurrences(
+  sessions: SessionMeta[],
+  program: string,
+  coverage: ToolIndexCoverage,
+  machine: string,
+): ToolProgramCountEnvelope {
+  const normalized = program.trim();
+  if (!normalized || Buffer.byteLength(normalized) > 512) {
+    throw new Error('Tool program count requires one program name from 1 to 512 bytes.');
+  }
+  const db = getDB();
+  const ids = sessions.map((session) => session.id);
+  const rows = ids.length === 0 ? [] : db.prepare(`
+    SELECT coalesce(nullif(s.machine, ''), ?) AS machine,
+      count(*) AS occurrences,
+      count(DISTINCT o.call_key) AS toolCalls,
+      count(DISTINCT c.session_id) AS sessions
+    FROM tool_program_occurrences o
+    JOIN tool_calls c ON c.call_key = o.call_key
+    JOIN sessions s ON s.id = c.session_id
+    WHERE c.session_id IN (SELECT value FROM json_each(?))
+      AND o.program = ? COLLATE NOCASE
+    GROUP BY coalesce(nullif(s.machine, ''), ?)
+  `).all(machine, JSON.stringify(ids), normalized, machine) as Array<{
+    machine: string;
+    occurrences: number;
+    toolCalls: number;
+    sessions: number;
+  }>;
+  const totals = rows.reduce<ToolProgramCountTotals>((sum, row) => ({
+    occurrences: sum.occurrences + row.occurrences,
+    toolCalls: sum.toolCalls + row.toolCalls,
+    sessions: sum.sessions + row.sessions,
+  }), { occurrences: 0, toolCalls: 0, sessions: 0 });
+  const sessionsByMachine = new Map<string, SessionMeta[]>();
+  for (const session of sessions) {
+    const origin = session.machine ?? machine;
+    const group = sessionsByMachine.get(origin) ?? [];
+    group.push(session);
+    sessionsByMachine.set(origin, group);
+  }
+  const coverageRows = ids.length === 0 ? [] : db.prepare(`
+    WITH scoped AS (
+      SELECT id, coalesce(nullif(machine, ''), ?) AS machine
+      FROM sessions
+      WHERE file_path <> ''
+        AND id IN (SELECT value FROM json_each(?))
+    )
+    SELECT
+      scoped.machine,
+      count(*) AS scope_files,
+      count(ledger.session_id) AS indexed_files,
+      coalesce(sum(ledger.call_count), 0) AS indexed_calls,
+      count(limited.call_key) AS limited_files
+    FROM scoped
+    LEFT JOIN tool_scan_ledger ledger
+      ON ledger.session_id = scoped.id
+      AND ledger.extractor_version = ?
+    LEFT JOIN tool_calls limited
+      ON limited.session_id = scoped.id
+      AND limited.tool = 'index_limit'
+    GROUP BY scoped.machine
+  `).all(machine, JSON.stringify(ids), TOOL_INDEX_VERSION) as Array<{
+    machine: string;
+    scope_files: number;
+    indexed_files: number;
+    indexed_calls: number;
+    limited_files: number;
+  }>;
+  const coverageByMachine = new Map(coverageRows.map((row) => {
+    const remainingFiles = Math.max(0, row.scope_files - row.indexed_files);
+    return [row.machine, {
+      indexedFiles: row.indexed_files,
+      indexedCalls: row.indexed_calls,
+      skippedFiles: 0,
+      limitedFiles: row.limited_files,
+      remainingFiles,
+      complete: remainingFiles === 0 && row.limited_files === 0,
+    } satisfies ToolIndexCoverage];
+  }));
+  const machineTotals = new Map(rows.map((row) => [row.machine, {
+    occurrences: row.occurrences,
+    toolCalls: row.toolCalls,
+    sessions: row.sessions,
+  }]));
+  const machines = [...sessionsByMachine.keys()].map((origin) => ({
+    machine: origin,
+    coverage: coverageByMachine.get(origin) ?? {
+      indexedFiles: 0,
+      indexedCalls: 0,
+      skippedFiles: 0,
+      limitedFiles: 0,
+      remainingFiles: 0,
+      complete: true,
+    },
+    totals: machineTotals.get(origin) ?? { occurrences: 0, toolCalls: 0, sessions: 0 },
+  }));
+  if (machines.length === 0) machines.push({ machine, coverage, totals });
+  return {
+    schemaVersion: TOOL_PROGRAM_COUNT_SCHEMA_VERSION,
+    kind: 'tool-program-count',
+    generatedAt: new Date().toISOString(),
+    query: { program: normalized, semantics: 'static-program-occurrences-v1' },
+    coverage,
+    totals,
+    machines,
+  };
 }
 
 /** Query cached evidence; every repeated clause must select a distinct call. */

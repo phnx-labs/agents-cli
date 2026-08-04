@@ -149,6 +149,10 @@ describe('session shell-command sampler', () => {
     process.env.AGENTS_NO_USAGE_TRACK = '1';
     try {
       expect(runAgents(['--version']).trim()).toMatch(/^\d+\.\d+\.\d+$/);
+      const backfill = JSON.parse(runAgents([
+        'sessions', 'backfill', 'tools', '--since', '7d', '--json', '--local',
+      ])) as { complete: boolean };
+      expect(backfill.complete).toBe(true);
       const direct = JSON.parse(runAgents([
         'sessions', '--include', 'tools', '--since', '7d', '--query', 'tool:exec',
         '--limit', '500', '--all', '--json', '--no-interactive', '--local',
@@ -199,7 +203,9 @@ describe('session shell-command sampler', () => {
         "try { count = Number.parseInt(fs.readFileSync(counterPath, 'utf8'), 10) || 0; } catch {}",
         "count += 1;",
         "fs.writeFileSync(counterPath, String(count));",
-        "if (count >= 2 && count <= 5) process.exit(1);",
+        // Call 1 is now the explicit tools backfill. Call 2 is the retained
+        // first candidate pass; fail its retry plus the other candidate classes.
+        "if (count >= 3 && count <= 6) process.exit(1);",
         "const child = spawnSync('bun', [cliEntry, ...process.argv.slice(2)], { stdio: 'inherit', env: process.env });",
         "process.exit(Number.isInteger(child.status) ? child.status : 1);",
       ].join('\n') + '\n');

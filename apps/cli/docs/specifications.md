@@ -348,13 +348,14 @@ SSH access (§7); rendering sessions that no harness produced.
   `lib/session/db.ts` — `journal_mode = WAL` ~`:442`, `busy_timeout = 30000`
   ~`:450`; binding selected in `lib/sqlite.ts:23-24`).
 - **SES-29 (MUST).** Schema migrations MUST run on open, land a several-versions-old
-  DB on the current `SCHEMA_VERSION` (**24** at time of writing,
+  DB on the current `SCHEMA_VERSION` (**26** at time of writing,
   `lib/session/db.ts:28` — treat the constant as the source of truth, not this number) in
   one call, MUST NOT drop existing rows, and MUST bump the stamp only after the
   migration succeeds so a mid-migration crash re-enters cleanly
   (`lib/session/db.ts` around the `getDB` migration gate; tests `db.migrate-v10.test.ts:78-93`,
-  `db.migrate-v14.test.ts:98-106`). A migration that changes how a column is
-  derived MUST force a full rescan.
+  `db.migrate-v14.test.ts:98-106`). A migration that changes derived data MUST
+  invalidate the ledger for that data; it MUST NOT invalidate unrelated warm
+  indexes.
 - **SES-30 (MUST).** One malformed row's constraint failure MUST NOT roll back the
   batch and MUST NOT stamp that row's ledger entry, so it is retried next scan
   (self-healing) (`lib/session/db.ts:975-982,1035-1039`).
@@ -389,16 +390,21 @@ SSH access (§7); rendering sessions that no harness produced.
   program/status/exit columns and FTS5 MUST prefilter candidates
   before the exact assignment
   (`lib/session/tool-index.ts:30-36,386-578,682-755`).
-- **SES-34 (MUST).** Schema v24's `tool_scan_ledger` MUST be independent of the
-  normal session ledgers. Migration MUST NOT clear `scan_ledger` or
-  `dir_ledger`; an existing-history backfill is bounded to 25 files or 16 MiB
-  per invocation. Oversized Claude/Codex JSONL MUST stream with a 1 MiB record
+- **SES-34 (MUST).** Schema v26's session-id-keyed `tool_scan_ledger` MUST be independent of the
+  normal session ledgers. Migration MUST clear only the derived tool ledger and
+  MUST NOT clear `scan_ledger` or `dir_ledger`. Historical parsing MUST run only
+  through explicit `agents sessions backfill tools`, in internal batches bounded
+  to 25 files or 16 MiB. Fleet backfill MUST advance devices concurrently in
+  bounded rounds; a peer invocation MUST process at most one batch before
+  returning its coverage. A tool query MUST read the SQLite snapshot and coverage
+  rows without calling `ensureToolIndex`, statting a transcript, or parsing it.
+  Oversized Claude/Codex JSONL MUST stream with a 1 MiB record
   cap up to a 64 MiB source ceiling; larger sources MUST persist an explicit
   limit row without reading the body. Other harness parsers MUST NOT materialize
   a source over 16 MiB. Append
   persistence MUST use ledger byte totals and read only changed ordinals
-  (`lib/session/db.ts:28,535-621`; `lib/session/tool-store.ts:88-231`;
-  `lib/session/tool-index.ts:24-28,212-313`).
+  (`lib/session/db.ts`; `lib/session/tool-store.ts`; `lib/session/tool-index.ts`;
+  `commands/sessions-backfill.ts`; `commands/sessions.ts`).
 - **SES-35 (MUST).** Fleet tool search MUST cap each peer's stdout at 16 MiB,
   query at most six peers concurrently, and subtract the exact encoded local
   envelope plus 64 KiB of coordinator headroom from the 15 MiB aggregate receive
@@ -409,9 +415,12 @@ SSH access (§7); rendering sessions that no harness produced.
   omit transcript paths before merging. A missing transcript MUST purge its call
   rows, program rows, FTS rows, and tool ledger when the source directory changes,
   without statting every indexed session.
-  Fleet tool-call peer queries MUST use a direct SSH connection so terminating
-  the client at its deadline also terminates remote indexing; they have a 60-second
-  deadline after the 64 MiB source ceiling bounds one backfill pass.
+  Fleet evidence queries MUST use a direct SSH connection and have a 60-second
+  deadline. Queries MUST NOT perform remote indexing. Fleet counts MUST transfer
+  only validated aggregate totals and per-machine coverage. During fleet
+  fan-out, every peer MUST count only sessions whose recorded origin is that
+  peer, so synced mirror transcripts cannot duplicate totals. Direct local
+  counts MAY group mirrored rows under their recorded origin machines.
   An unreachable or incompatible peer MUST also mark aggregate coverage partial
   (`lib/session/remote-list.ts:50-53,78-96,193-240,337-541`;
   `lib/devices/resolve-target.ts:120-133`;
@@ -427,6 +436,21 @@ SSH access (§7); rendering sessions that no harness produced.
   JSON artifact at 16 MiB, and record
   `sample_byte_limit` with partial coverage instead of silently dropping evidence
   (`scripts/sample-session-shell-commands.ts:17-25,82-136,149-256,308-402,404-479`).
+- **SES-37 (MUST).** Static Bash extraction MUST retain every statically
+  identifiable program site in transcript order, including repeated programs
+  within one tool call. It MUST classify wrapper chains as `wrapper` and their
+  final static target as `effective`; dynamic program names MUST be omitted.
+  Harness wrappers that carry orchestration code MUST be parsed statically to
+  select literal shell-command fields and MUST NOT be evaluated; unrelated
+  wrapper tokens MUST NOT become program occurrences.
+  `--count` MUST accept exactly one `program:<name>` clause and return occurrence,
+  containing-call, and distinct-session totals over the full filtered scope.
+  It MUST label incomplete coverage as a lower bound. Counting MUST query
+  `tool_program_occurrences` and MUST NOT open or reparse transcripts. The
+  implementation MUST use relational SQLite rows and literal FTS5 only; it MUST
+  NOT use embeddings, a vector database, semantic search, or model calls
+  (`lib/session/shell-programs.ts`; `lib/session/tool-store.ts`;
+  `lib/session/tool-index.ts`; `commands/sessions.ts`).
 
 ---
 
@@ -436,7 +460,7 @@ SSH access (§7); rendering sessions that no harness produced.
 
 The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
 `detach`, `attach`, `inject`, `export`, `import`, `migrate`/`relocate`,
-`migrations`, `fork`) with flags is the reference in
+`migrations`, `backfill tools`, `fork`) with flags is the reference in
 [05-sessions.md](05-sessions.md); this spec governs the guarantees behind it.
 
 #### 4.2 Machine-readable output (STABLE — agents depend on these)
@@ -489,7 +513,10 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   evidence only. A fleet tool query MUST reject cost/duration sorting because
   the compact peer envelope carries no global sort key. `--markdown` and
   `--no-redact` MUST fail when combined with `--include tools` because the
-  indexed evidence schema is always bounded and redacted
+  indexed evidence schema is always bounded and redacted. `--count` MUST emit
+  the versioned `tool-program-count` aggregate with occurrence, call, session,
+  coverage, and per-machine totals; it MUST NOT replace ordinary list/detail or
+  tool-search envelopes
   (`commands/sessions.ts:1432-1463,1551-1559,1824-1879,1937-1984,3929-3970,4006-4013`;
   `lib/session/remote-list.ts:98-115,337-541`).
 
@@ -669,11 +696,16 @@ response contains that session and the two distinct call ids. Repeating the
 `program:git` clause twice with only one matching call returns no session
 (`lib/session/tool-index.test.ts`).
 
-**GWT-12 — Warm tool query does not parse history again.**
-Given a transcript whose file stamp and tool extractor version match
-`tool_scan_ledger`; When the same tool query runs again; Then `indexedFiles=0`,
-`indexedCalls=0`, and cached SQL/FTS evidence answers it
-(`lib/session/tool-index.test.ts`).
+**GWT-12 — Tool query remains DB-only when the transcript is unavailable.**
+Given a transcript was indexed and its source is then moved offline; When a tool
+query runs; Then the ledger reports complete coverage and cached SQL/FTS evidence
+answers it without opening the source (`lib/session/tool-index.test.ts`).
+
+**GWT-13 — Repeated static sites count separately.**
+Given one Bash call contains `git status; git diff`; When
+`--query program:git --count` runs; Then it reports 2 occurrences, 1 containing
+tool call, and 1 distinct session (`lib/session/tool-index.test.ts`;
+`commands/sessions.test.ts`).
 
 ---
 
