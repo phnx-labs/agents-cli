@@ -31,6 +31,7 @@ import {
 import { resolveRemoteOsSync } from './remote-os.js';
 import { machineId } from '../session/sync/config.js';
 import { loadDevices, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
+import { isSelfHost } from '../devices/self-host.js';
 import {
   fanOutDevices,
   planFleetTargets,
@@ -511,11 +512,12 @@ export async function maybeRunOnHost(
   if (!hostName) return false;
 
   // Running against your own machine is just a local run — skip the SSH round-trip.
-  // `machineId()` is the same self-identifier the device registry and session
-  // sync use (lowercased short hostname); compare case-insensitively.
-  // Strip the routing flags from process.argv so the local command never sees
-  // an unregistered `--host`/`--device` and dies with "unknown option".
-  if (hostName.toLowerCase() === machineId()) {
+  // Match EVERY identity the box answers to (short id, loopback, tailscale
+  // dnsName), not just machineId() — a `--host <self-dnsName>` used to slip past a
+  // short-hostname-only check and self-SSH (RUSH-2114). Strip the routing flags
+  // from process.argv so the local command never sees an unregistered
+  // `--host`/`--device` and dies with "unknown option".
+  if (isSelfHost(hostName)) {
     const stripped = stripRoutingFlags(allArgs, STRIP_SPECS);
     process.argv = [process.argv[0], process.argv[1], ...stripped];
     return false;
