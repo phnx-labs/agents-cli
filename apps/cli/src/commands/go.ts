@@ -11,10 +11,7 @@
  *       local Ghostty -> focus its tab (Cmd+<n> via System Events; tab # from ghostty-tabs)
  *       remote tmux   -> ssh -tt + tmux attach (pane->session resolved on the remote)
  *       otherwise     -> hand off to the `UnreachableFallback` (attach-only refuses; focus resumes)
- *   - `refuseFallback` — the attach-only fallback (remote -> login shell; local -> refuse).
- *       The automated reconnect loop opts the remote branch out of the shell via
- *       `NO_SHELL_FALLBACK_ENV` (see lib/hosts/reconnect.ts) since it can't
- *       supervise one.
+ *   - `refuseFallback` — the attach-only fallback (remote -> login shell; local -> refuse)
  */
 
 import type { Command } from 'commander';
@@ -34,7 +31,6 @@ import { attachTmux, runTmux } from '../lib/tmux/binary.js';
 import { getDefaultSocketPath } from '../lib/tmux/paths.js';
 import { sshStream, assertValidSshTarget, shellQuote } from '../lib/ssh-exec.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs } from '../lib/session/ghostty-tabs.js';
-import { NO_SHELL_FALLBACK_ENV, NO_ATTACH_RAIL_EXIT_CODE } from '../lib/hosts/reconnect.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -171,20 +167,9 @@ export function describeWhere(s: ActiveSession, self: string): Where {
  */
 export type UnreachableFallback = (s: ActiveSession, remote: string | undefined) => void | Promise<void>;
 
-/** Default (attach-only): open a login shell on the remote, or refuse locally.
- *  The remote shell is skipped when {@link NO_SHELL_FALLBACK_ENV} is exactly
- *  `'1'` — the automated reconnect loop (lib/hosts/reconnect.ts) sets it because
- *  it can't supervise a shell it opens; it's wasted even though (with
- *  reconnect.ts's exit-code remap) it can no longer loop forever. Strict `'1'`,
- *  not a truthy check, so an unrelated/empty-but-set value never trips this
- *  branch — matches every other env-var guard in the CLI (e.g.
- *  `sessions.ts`'s `AGENTS_SESSIONS_LOCAL === '1'` checks). */
+/** Default (attach-only): open a login shell on the remote, or refuse locally. */
 export async function refuseFallback(s: ActiveSession, remote: string | undefined): Promise<void> {
   if (remote) {
-    if (process.env[NO_SHELL_FALLBACK_ENV] === '1') {
-      console.log(chalk.yellow(`${shortId(s)} on ${remote} isn't inside tmux — no live pane to reattach.`));
-      process.exit(NO_ATTACH_RAIL_EXIT_CODE);
-    }
     console.log(chalk.yellow(`${shortId(s)} on ${remote} isn't inside tmux — opening a shell on ${remote} instead.`));
     assertValidSshTarget(remote);
     process.exit(sshStream(remote, 'exec "${SHELL:-/bin/sh}" -l', { tty: true }));

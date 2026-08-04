@@ -266,13 +266,9 @@ agents run <agent> ["<task>"] --host <host>
 > drives is wrapped so that whatever exit code it decides on, a 255 is remapped to
 > 254 before this process sees it — 255 stays reserved exclusively for *this*
 > ssh transport's own connection-layer failure, so a remote-side path that happens
-> to exit 255 (its interactive-shell fallback closing, a nested remote hop
-> dropping) is never mistaken for the link dropping again. That invocation also
-> carries `AGENTS_FOCUS_NO_SHELL_FALLBACK=1`, which makes the peer's own
-> `sessions focus`/`sessions go` refuse cleanly with exit code 3 ("no live pane to
-> reattach") instead of opening an unsupervised login shell on another machine —
-> a login shell only a human running `sessions go`/`focus --attach-only` by hand
-> should get.
+> to exit 255 for its own reasons (its interactive-shell fallback closing when
+> it finds no live pane, a nested remote-tmux hop dropping) is never mistaken for
+> the link dropping again.
 >
 > Pass `--name <slug>` at dispatch to give the run a durable handle instead of an
 > opaque id: `agents hosts ps` shows it under a **NAME** column, and

@@ -14,14 +14,13 @@ import {
   backoffMs,
   reconnectNotice,
   exhaustedNotice,
+  remoteExitNotice,
   reconnectInteractiveSession,
   reattachRemoteCommand,
   wrapRemoteExitCode,
   initialReconnectState,
   SSH_CONN_FAILURE,
   MAX_ATTEMPTS,
-  NO_SHELL_FALLBACK_ENV,
-  NO_ATTACH_RAIL_EXIT_CODE,
   REMOTE_EXIT_255_REMAPPED,
   type ReconnectOutcome,
 } from './reconnect.js';
@@ -102,8 +101,8 @@ describe('wrapRemoteExitCode — the root-cause fix, exercised with a REAL shell
     }
   }
 
-  test.skipIf(!runsBash)('exit codes other than 255 pass through unchanged (0, 1, 3)', () => {
-    for (const code of [0, 1, NO_ATTACH_RAIL_EXIT_CODE]) {
+  test.skipIf(!runsBash)('exit codes other than 255 pass through unchanged (0, 1, 42)', () => {
+    for (const code of [0, 1, 42]) {
       expect(realBashExitCode(`(exit ${code})`)).toBe(code);
     }
   });
@@ -123,33 +122,62 @@ describe('wrapRemoteExitCode — the root-cause fix, exercised with a REAL shell
   });
 });
 
-describe('reattachRemoteCommand — the remote invocation carries the no-shell-fallback guard, wrapped for the exit-code remap', () => {
-  test('sets NO_SHELL_FALLBACK_ENV before the real `sessions focus` command, inside the bash -lc wrapper', () => {
-    const cmd = reattachRemoteCommand(SID);
-    expect(cmd).toBe(
-      `bash -lc '${NO_SHELL_FALLBACK_ENV}=1 agents sessions focus ${SID} --local --attach-only; rc=$?; [ "$rc" = "255" ] && rc=254; exit "$rc"'`,
-    );
+describe('reattachRemoteCommand — the real remote invocation, exercised through a REAL shell with an argv-echoing "agents" shim (no mock)', () => {
+  const runsBash = process.platform !== 'win32';
+  // Mirrors remote-cmd.test.ts's decodeRemoteArgv/injection-test shim: define
+  // "agents" as a bash FUNCTION (so it runs in-process, not a real binary) that
+  // either echoes its argv one-per-line, or `return`s a chosen status (NOT
+  // `exit`, which would kill the whole script — a function must `return` to
+  // hand a status back to its caller without terminating the shell, the same
+  // way a real subprocess handing back an exit code doesn't kill the wrapper).
+  const argvShim = `agents() { for a in "$@"; do printf '%s\\n' "$a"; done; }; export -f agents; `;
+  const exit255Shim = `agents() { return 255; }; export -f agents; `;
+
+  // A session id is never attacker-controlled in production (Claude mints it,
+  // or it's an existing session's own id), but this proves the composition is
+  // safe regardless: shellQuote is applied to the id AND to the whole wrapper
+  // string, and nested POSIX '\'' escaping must compose correctly under that
+  // double-quoting for the real command to survive.
+  const INJECTION_SID = "a'b; touch /tmp/PWNED-reconnect-test; #";
+
+  test.skipIf(!runsBash)('argv round-trips through bash -lc even for a session id needing quoting — no injection', () => {
+    const res = execFileSync('bash', ['-c', argvShim + reattachRemoteCommand(INJECTION_SID)], { encoding: 'utf8' });
+    expect(res.trimEnd().split('\n')).toEqual(['sessions', 'focus', INJECTION_SID, '--local', '--attach-only']);
   });
 
-  test('the guard exit code is never 255, so reconnectStep always treats a refusal as terminal', () => {
-    // Regression for the "attempt 1/6 forever" bug: refuseFallback's remote branch
-    // used to hairpin into an unsupervised login shell on a THIRD host when the
-    // automated loop couldn't find a live attach rail. That shell's own eventual
-    // close returned 255 — indistinguishable from a genuine network drop — so
-    // `connected: true` (set as soon as the preflight probe succeeds) refilled the
-    // retry budget every cycle and the loop never terminated. With the guard AND
-    // the exit-code remap, the remote refusal (or the pre-fix shell's own eventual
-    // close, wrapped by wrapRemoteExitCode either way) can never surface as 255,
-    // and reconnectStep's own contract (any non-255 code stops) takes over.
-    expect(NO_ATTACH_RAIL_EXIT_CODE).not.toBe(SSH_CONN_FAILURE);
-    expect(reconnectStep(initialReconnectState(), { code: NO_ATTACH_RAIL_EXIT_CODE, connected: true })).toEqual({
-      action: 'stop',
-      code: NO_ATTACH_RAIL_EXIT_CODE,
-    });
+  test.skipIf(!runsBash)('a 255 from the wrapped `agents` command comes back as REMOTE_EXIT_255_REMAPPED (254) — exercised end-to-end through reattachRemoteCommand, not just the wrapRemoteExitCode primitive', () => {
+    // Before this fix: refuseFallback's remote branch (or a nested remote-tmux
+    // hop) exiting 255 for its own reasons rode back up through `sshStream` as
+    // SSH_CONN_FAILURE — indistinguishable from the ssh transport itself
+    // dropping — and kept refilling the reconnect loop's retry budget forever.
+    let status: number | undefined;
+    try {
+      execFileSync('bash', ['-c', exit255Shim + reattachRemoteCommand(SID)]);
+      status = 0;
+    } catch (e) {
+      status = (e as { status?: number }).status;
+    }
+    expect(status).toBe(REMOTE_EXIT_255_REMAPPED);
+    expect(REMOTE_EXIT_255_REMAPPED).not.toBe(SSH_CONN_FAILURE);
     expect(reconnectStep(initialReconnectState(), { code: REMOTE_EXIT_255_REMAPPED, connected: true })).toEqual({
       action: 'stop',
       code: REMOTE_EXIT_255_REMAPPED,
     });
+  });
+
+  test("the plain string, no shell needed: wraps in bash -lc around the peer's own reconnect verb", () => {
+    expect(reattachRemoteCommand(SID)).toBe(
+      `bash -lc 'agents sessions focus ${SID} --local --attach-only; rc=$?; [ "$rc" = "255" ] && rc=254; exit "$rc"'`,
+    );
+  });
+});
+
+describe('remoteExitNotice — human readable', () => {
+  test('names the host and short id, and reads as "not a network drop"', () => {
+    const s = remoteExitNotice(SID, 'zion');
+    expect(s).toContain('zion');
+    expect(s).toContain('94c75686');
+    expect(s).toContain('not a network drop');
   });
 });
 
