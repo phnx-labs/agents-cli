@@ -20,6 +20,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+import { copyAppBundle, withInstallLock } from '../app-bundle-install.js';
+
 const APP_BUNDLE_NAME = 'Agents CLI.app';
 const INSTALL_DIR_NAME = 'agents-cli';
 
@@ -118,19 +120,6 @@ function spctlAssess(appPath: string): { ok: boolean; output: string } {
   return { ok: r.status === 0, output: (r.stderr || r.stdout || '').toString().trim() };
 }
 
-function copyAppBundle(src: string, dest: string): void {
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
-  // `cp -R` preserves the bundle's signature, symlinks, and resource forks.
-  // `fs.cpSync({recursive: true})` works on simple trees but has historically
-  // mishandled extended attributes on `.app` bundles, breaking codesign.
-  const r = spawnSync('cp', ['-R', src, dest], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8' });
-  if (r.status !== 0) {
-    const msg = (r.stderr || r.stdout || '').toString().trim();
-    throw new Error(`Failed to copy ${src} -> ${dest}: ${msg || 'unknown error'}`);
-  }
-}
-
 /**
  * Idempotent install. Copies the bundled `.app` to the stable user path. Skips
  * if the destination already exists, `codesign --verify` passes, AND the
@@ -146,28 +135,37 @@ function copyAppBundle(src: string, dest: string): void {
 export function ensureKeychainHelperInstalled(opts: { forceReinstall?: boolean } = {}): void {
   assertDarwin();
   const dest = installedAppPath();
-  if (!opts.forceReinstall && fs.existsSync(dest)) {
-    const { ok } = codesignVerify(dest);
-    if (ok && !installedHelperIsStale()) return;
-  }
-  const src = sourceAppPath();
-  copyAppBundle(src, dest);
-  const verify = codesignVerify(dest);
-  if (!verify.ok) {
-    throw new Error(
-      `Installed helper failed codesign verification at ${dest}.\n${verify.output}\n` +
-      'The bundle may be corrupted. Try `agents helper install` to reinstall, or reinstall agents-cli.'
-    );
-  }
-  const assess = spctlAssess(dest);
-  if (!assess.ok) {
-    // Warn, do not fail. Gatekeeper ticket lookup needs network; offline
-    // installs and CI runners commonly fail this check. The ACL semantics
-    // we care about depend on codesign, not spctl.
-    process.stderr.write(
-      `agents-cli: notarization check (spctl) did not pass for ${dest}: ${assess.output}\n`
-    );
-  }
+  const upToDate = (): boolean =>
+    fs.existsSync(dest) && codesignVerify(dest).ok && !installedHelperIsStale();
+
+  // Fast path: already installed, valid, and current — no lock, no copy.
+  if (!opts.forceReinstall && upToDate()) return;
+
+  // Serialize the install so concurrent `agents` invocations don't race the
+  // atomic swap (and don't each run a redundant `cp`). The re-check inside the
+  // lock means a burst of callers copies once, not N times — the stampede that
+  // transiently corrupted the bundle and tripped the "damaged" dialog.
+  withInstallLock(dest, () => {
+    if (!opts.forceReinstall && upToDate()) return;
+    const src = sourceAppPath();
+    copyAppBundle(src, dest);
+    const verify = codesignVerify(dest);
+    if (!verify.ok) {
+      throw new Error(
+        `Installed helper failed codesign verification at ${dest}.\n${verify.output}\n` +
+        'The bundle may be corrupted. Try `agents helper install` to reinstall, or reinstall agents-cli.'
+      );
+    }
+    const assess = spctlAssess(dest);
+    if (!assess.ok) {
+      // Warn, do not fail. Gatekeeper ticket lookup needs network; offline
+      // installs and CI runners commonly fail this check. The ACL semantics
+      // we care about depend on codesign, not spctl.
+      process.stderr.write(
+        `agents-cli: notarization check (spctl) did not pass for ${dest}: ${assess.output}\n`
+      );
+    }
+  });
 }
 
 /**
