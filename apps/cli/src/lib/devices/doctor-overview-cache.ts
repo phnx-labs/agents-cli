@@ -181,7 +181,12 @@ export async function enterDoctorOverviewGate(
   //    serve it and release, instead of recomputing.
   const afterWait = serveFresh();
   if (afterWait !== null) {
-    void release();
+    // AWAIT, don't fire-and-forget: returning while the lockfile is still on
+    // disk makes the next caller retry against a lock that is logically free —
+    // the same pile-up this gate exists to prevent, just narrowed to the window
+    // between return and unlink. We are already in an async function, so the
+    // wait costs one unlink.
+    await release().catch(() => {});
     return { cached: afterWait };
   }
 
