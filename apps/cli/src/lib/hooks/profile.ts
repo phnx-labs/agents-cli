@@ -12,6 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getLogsDir } from '../state.js';
+import { percentile } from '../percentile.js';
 
 export interface HookProfileRow {
   hook: string;
@@ -71,18 +72,6 @@ export function loadHookFireEvents(days = 7, logsDir: string = getLogsDir()): Ra
     }
   }
   return events;
-}
-
-/** Percentile of a sorted-ascending array. p in [0,100]. Linear interpolation. */
-function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
-  if (sorted.length === 1) return sorted[0];
-  const rank = (p / 100) * (sorted.length - 1);
-  const lo = Math.floor(rank);
-  const hi = Math.ceil(rank);
-  if (lo === hi) return sorted[lo];
-  const frac = rank - lo;
-  return sorted[lo] * (1 - frac) + sorted[hi] * frac;
 }
 
 /** Aggregate fire events into a per-hook profile, sorted by p99 desc. */

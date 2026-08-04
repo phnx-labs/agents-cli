@@ -1,5 +1,177 @@
 # Changelog
 
+## 1.21.2
+
+- **`agents trends` — resource and session analytics dashboard.** Baked recipes
+  (harness/model mix, tools per session, token ratio, secrets/browser hot lists)
+  read `sessions.db` plus a new value-free warehouse at
+  `~/.agents/.history/analytics/usage.db`. Secrets usage migrates once from
+  `secrets.db`; agent run and browser launch/close emit into the warehouse.
+  Quota stays on `agents usage`, latency on `agents perf`.
+  Source: `apps/cli/src/commands/trends.ts`, `apps/cli/src/lib/analytics/`.
+
+- **The macOS menu bar app is now named AGI Menu in System Settings and
+  Accessibility prompts.** Privacy & Security previously showed the executable
+  name `MenubarHelper` because the bundle had no `CFBundleDisplayName`. The
+  bundle now ships `CFBundleName` / `CFBundleDisplayName` = `AGI Menu`, and
+  `agents menubar` status/enable/disable copy uses the same name. An install
+  that was left ad-hoc-signed by an older heal path is also replaced from the
+  Developer-ID source on the next `agents` run, so Accessibility stops
+  re-prompting for a new identity every upgrade. Source:
+  `apps/cli/menubar/scripts/build.sh`, `apps/cli/src/commands/menubar.ts`,
+  `apps/cli/src/lib/menubar/install-menubar.ts`.
+
+- **Cursor usage bars now show Auto/API/Total, and Cursor sessions carry live todo progress.** `agents view` reads Cursor's dashboard `get-current-period-usage` first for the Auto + Composer (`A`) / API (`API`) / Total (`T`) percent breakdown, falls back to `usage-summary` for accounts without a usable `planUsage`, and only drops to the legacy monthly request bar (`M`) for request-capped free/legacy plans. `agents sessions` also now folds a Cursor session's `TodoWrite` calls into `SessionMeta.todos`, so the checklist progress shown for Claude/Codex/Kimi sessions renders for Cursor too. Source: `apps/cli/src/lib/usage.ts`, `apps/cli/src/lib/session/discover.ts`.
+
+- **`feed.broadcast` gains an in-process `channel:` sink and an implicit owner
+  fallback (RUSH-2123).** A `feed.broadcast` sink can now declare `channel: <name>`
+  (plus `to:` for a non-owner destination) instead of `command: [argv...]` — it
+  delivers through the same channel-provider registry `agents send`/`agents notify`
+  use (`deliverEnvelope()`), no spawn. `channel: owner` is the address alias,
+  expanding to `notify.owner.{channel,to}`. When an operator has `notify.owner`
+  configured but never wrote a `feed.broadcast` block at all, an important-level
+  post (`--level important`, or any `--blocked` post) now falls back to that owner
+  address automatically instead of reaching nobody — previously a `feed post
+  --blocked` with `notify.owner` set and no `feed.broadcast` looked recorded but
+  delivered to no one. A routine milestone post still stays record-only even with
+  the fallback available, and an operator-declared `feed.broadcast` always wins
+  outright. `command:` argv sinks (the tracker/webhook escape hatch) are unchanged.
+  Source: `apps/cli/src/lib/feed-broadcast.ts`, `apps/cli/src/commands/feed.ts`.
+
+- **`agents run` no longer stalls on a live usage fetch, and the daemon keeps the
+  quota cache warm instead (RUSH-2061).** The router's candidate collection
+  (`collectRunCandidates`) used to block on a live provider HTTP read whenever an
+  account's usage snapshot was older than 5 minutes — one round trip per account
+  added to cold-start. It now reads the usage cache **cache-only** (`readOnly`) and
+  never touches the network; an unconfirmable snapshot is simply routed around by
+  the existing freshness guard (`isUsageVerified`). A new daemon refresher
+  (`runUsageRefresh`) keeps that cache fresh in the background: it refreshes only
+  accounts signed in on THIS host (sole-writer, no cross-host coordination), on an
+  adaptive cadence from each account's session-window burn rate (90s when racing
+  toward the 5h cap, up to 15min when idle), capped at ~6 provider calls per
+  account per hour and skipped entirely while a provider is under a 429 backoff.
+  Source: `apps/cli/src/lib/usage.ts`, `apps/cli/src/lib/usage-refresh.ts`,
+  `apps/cli/src/lib/rotate.ts`, `apps/cli/src/lib/daemon.ts`.
+
+- **Balanced routing now deprioritizes an account projected to cap soon, not just
+  one already maxed (RUSH-2061).** `deriveUsageHeadroom` projects minutes-to-limit
+  from the session-window burn rate; balanced weighting scales an account's
+  headroom weight down as that projection shortens (`capacityWeight`), so a launch
+  avoids an account racing toward its 5-hour cap instead of only skipping a
+  100%-maxed one. Source: `apps/cli/src/lib/usage.ts`, `apps/cli/src/lib/rotate.ts`.
+
+- **The daemon no longer SSH-probes the whole fleet every 3 minutes — fleet status
+  is publish-own / read-union now (RUSH-2061, RUSH-2114).** The daemon's fleet-cache
+  warm force-probed every registered device over ssh on every tick; with N daemons
+  each probing N devices that was N² remote resource probes across the fleet every
+  3 minutes, and the source of the orphaned fleet-doctor probe pile-up. Each daemon
+  now probes only **itself** (no ssh) and publishes its own row — resource stats
+  **plus live-agent workload** (running-agent count and a per-context / per-agent
+  breakdown) — to a shared local mirror (`~/.agents/.cache/.fleet-status.json`).
+  Cross-host rows are unioned on demand by the reader: `agents devices status`
+  gathers peers cache-first, ssh-reading a stale/missing peer via
+  `agents devices status --local --json` through a bounded, kill-on-timeout
+  fan-out. `agents devices status` (and `--json`) now shows how many agents are
+  running on each box. Source: `apps/cli/src/lib/fleet-status.ts`,
+  `apps/cli/src/lib/fleet-cache.ts`, `apps/cli/src/lib/daemon.ts`,
+  `apps/cli/src/lib/devices/health-report.ts`, `apps/cli/src/commands/ssh.ts`.
+
+- **`agents doctor --json` is no longer a ~136-second stall (RUSH-2136).** The
+  overview probed every host-CLI manifest with a blocking `spawnSync` (10s timeout
+  each) one after another, so a dozen-plus slow checks summed into minutes. The
+  checks now run concurrently (`listCliStatusAsync`), so total time is the slowest
+  single check, not their sum; the per-check 10s kill-on-timeout is preserved.
+  Source: `apps/cli/src/lib/cli-resources.ts`, `apps/cli/src/commands/doctor.ts`.
+
+- **Metrics foundation: hook/command instrumentation + routine metrics.** Every
+  hook now instruments through a generated shim — `matcher:`-only hooks like
+  git-guard/rm-guard/git-require-clean-tree previously fired with zero perf
+  samples; `agents perf hooks` now reports them. `agents perf` gains
+  `--project <key>` (scope to one repo), a `P95` column alongside P50/P99, and
+  an `ERR/TIMEOUT` rate column. New `agents perf friction` surfaces sessions
+  stuck repeatedly hitting the same guard block instead of adapting. New
+  `agents routines stats [name]` reports run count/failed/missed/avg/p50/p95
+  duration per routine; `agents routines runs --json` now includes `duration`.
+  Routine session transcripts are now archived for gemini/antigravity/droid/
+  kimi/grok routines, not just claude/codex/cursor. Source:
+  `apps/cli/src/lib/hooks.ts`, `apps/cli/src/lib/perf/db.ts`,
+  `apps/cli/src/commands/perf.ts`, `apps/cli/src/lib/routines.ts`,
+  `apps/cli/src/lib/runner.ts`.
+
+- **The Linear line on `agents projects status` is cached, and stops vanishing.** The card
+  paged every issue in a project on every invocation — up to 10 requests per project — against
+  a 2500/hour request budget that an agent running `status` in a loop exhausts. Answers are now
+  cached on disk for 10 minutes (`~/.agents/.cache/linear-projects/`, one file per project written
+  by atomic rename so concurrent agent sessions cannot clobber each other), so a repeated
+  `status` spends zero Linear requests. More importantly, a failed or rate-limited fetch now
+  serves the last good answer marked stale instead of dropping the line: a populated Linear row
+  silently disappearing on one 8s timeout was the observed defect, and it is the same rule
+  `mergeAuthHealthEntries` already keeps for account health. A 429 records its
+  `x-ratelimit-requests-reset` so later runs don't spend a request to be told there are none
+  left. Source: `apps/cli/src/lib/linear-cache.ts`.
+
+- **The compact `projects status` card shows the milestone it calls `next`.** Milestones are
+  listed in date order, and Linear can flag a later-dated one as next — so slicing the front
+  of the list showed an earlier milestone while burying the actual next under `+N more`, which
+  is the one thing that row exists to say. The next milestone now leads, and identity is
+  matched on name plus target date rather than name alone (two milestones can share a name,
+  which put the `next` label on the wrong row). Source: `apps/cli/src/commands/projects.ts`.
+
+- **`agents projects` stops reading the wrong GitHub repository.** Factory derives a
+  project's `owner/repo` from the checkout path's last two segments, so a repo cloned to
+  `~/src/github.com/<you>/agents-cli` whose origin is `phnx-labs/agents-cli` imported as
+  `<you>/agents-cli`. Both are real repositories, so nothing errored — the card's merged-PR
+  and release lines simply reported a stranger's repo (0 merges in 7 days instead of 100).
+  `import --from-factory` now reads the checkout's actual `origin` and only falls back to the
+  path guess when there is no remote to ask, and `status`/`show` print a warning with the fix
+  when a stored slug disagrees with the remote. Source: `apps/cli/src/lib/project-doctor.ts`.
+- **`agents projects set <name>` changes one field without destroying the rest.** Previously
+  the only ways to correct a field were `$EDITOR` on raw YAML or `add --force`, which rebuilds
+  the definition from flags alone and silently drops `linear`, `contexts`, and `description`.
+  `set` loads, patches the named field, and writes back. Flags: `--repo`, `--root`, `--path`,
+  `--description`. Source: `apps/cli/src/commands/projects.ts`.
+- **Merged-PR counts say when they are a lower bound.** The `gh` fetch caps at 100, and a busy
+  repo where all 100 land inside the window has more — the count now renders `100+` rather than
+  presenting the cap as a total, matching the existing Linear `2500+` contract. Source:
+  `apps/cli/src/lib/project-status.ts`.
+
+- **`agents projects view <name>`** replaces `show` (kept as an alias) and now renders the
+  project's full plan: every declared Linear milestone with its date and progress, issue
+  counts, and a warning when no issues are assigned to any milestone — a milestone nothing is
+  filed against cannot report progress, and a row of silent `0%`s hid that. Sixteen other
+  command groups already use `view <name>`; `projects` was the only one that did not. Source:
+  `apps/cli/src/commands/projects.ts`.
+- **The status headline counts live agents, not corpses.** It read `39 agents` on a project
+  where 19 had crashed. It now reads `19 live`, with a separate `dead` row breaking down what
+  finished or was lost — 19 crashed sessions is a thing to go fix, not throughput. `orphaned`
+  counts as **live**: `session/active.ts` defines it as "alive, but no client is attached", and
+  the repo's own dead rule is `closed` + `crashed` only. Source:
+  `apps/cli/src/lib/project-status.ts`.
+- **`planPct` is gone from the card and from `--json`.** It summed each matched session's most
+  recent checklist snapshot, so one agent opening a fresh 40-item plan rendered the whole
+  project `0% plan`, and a project where nobody had written a checklist showed no figure at
+  all. A cross-session sum of ad-hoc checklists does not measure project progress. `live` and
+  `dead` counts replace it in `--json`.
+- **The next milestone comes from Linear's own `status: "next"`** when Linear sets it, falling
+  back to earliest-dated-unfinished only when nothing is flagged — Linear's answer is the one
+  shown in its UI, ours is a guess.
+
+- **A regression guard for the distributed `--active --local` / `--host` session-query paths, wired into CI (#1866).** RUSH-2118 fixed a `--local` query dialing remote-host teammates over real ssh, but nothing bench-guarded the fix's latency, and the `--host` cross-fleet fan-out had no bench at all. `bench/sessions-active-perf.ts` times `AgentManager(..., localOnly=true).listAll()` against N synthetic remote-host teammates (asserting zero ssh calls and sub-500ms latency, with a positive-control run proving the ssh-PATH shim actually intercepts) and the `gatherActiveSessions({ hosts })` fan-out against N synthetic peers (asserting it stays parallel, not sequential). Wired into `.github/workflows/bench.yml` as the one gating step in that workflow — every other bench step stays `continue-on-error`. Documented with measured baselines in `apps/cli/docs/05-sessions.md#benchmarks`. Source: `apps/cli/bench/sessions-active-perf.ts`, `.github/workflows/bench.yml`.
+
+- **`agents view` columns stay aligned across agents, and usage no longer piles up (view-ui-perf).**
+  The multi-agent overview padded every row to the widest usage string — an
+  Antigravity account with four model quotas forced ~194-column lines that
+  wrapped so `rate-limited` and last-active drifted under the version column.
+  Overview now caps compact meters to two windows (`+N` for the rest), always
+  emits fixed account/usage/status/lastActive columns (empty cells space-padded),
+  and measures padding with `stringWidth` so chalk + block bars don't skew
+  gutters. Usage fetches go through one unified core: 5-minute fresh cache
+  (was 2), concurrency-capped live reads (`USAGE_FETCH_CONCURRENCY=3`),
+  single-flight per identity, and a background SWR queue capped at 2 so delayed
+  HTTP responses cannot stack. Spinner stays up through account+usage load.
+  Source: `apps/cli/src/commands/view.ts`, `apps/cli/src/lib/usage.ts`,
+  `apps/cli/src/lib/agents.ts`.
+
 ## 1.21.1
 
 - **Feed posts require a title + body; phone `{message}` ends with a Sent-from footer.** `agents feed post --title "Short subject" "body text"` — title is the phone first line (~4–5 words), body follows after a blank line, then `Sent from <agent>/<session-chunk> on <host>` (like "Sent from my iPhone"). Em/en dashes in title/body are scrubbed to ASCII ` - `. Source: `apps/cli/src/lib/feed-broadcast.ts`, `feed-post.ts`, `commands/feed.ts`.

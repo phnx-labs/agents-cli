@@ -105,7 +105,14 @@ const ROUTINE_TRANSCRIPT_SPECS: Partial<Record<AgentId, Array<{ root: string[]; 
   gemini: [{ root: ['.gemini', 'tmp'], ext: '.json' }],
   antigravity: [{ root: ['.gemini', 'antigravity-cli', 'conversations'], ext: '.db' }],
   droid: [{ root: ['.factory', 'sessions'], ext: '.jsonl' }],
-  kimi: [{ root: ['.kimi-code', 'sessions'], ext: '.json' }],
+  // Kimi splits a session across two files (session/discover.ts:4382-4384):
+  // state.json (title/timestamps) and agents/main/wire.jsonl (the actual
+  // conversation). Both extensions are needed — .json alone archives only
+  // the metadata shell and silently drops every message.
+  kimi: [
+    { root: ['.kimi-code', 'sessions'], ext: '.json' },
+    { root: ['.kimi-code', 'sessions'], ext: '.jsonl' },
+  ],
   grok: [{ root: ['.grok', 'sessions'], ext: '.json' }],
 };
 
