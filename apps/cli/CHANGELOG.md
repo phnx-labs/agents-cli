@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.22.2
+
+- **Menu bar recovers from a stale single-instance lock instead of staying dead.**
+  The helper's lock fd is now opened `O_CLOEXEC`, so a spawned `doctor` child can
+  never inherit it and hold the `menubar.lock` flock after the helper crashes; and
+  `SingleInstance.acquire` now self-heals — when the flock is held but no live
+  `MenubarHelper` owns it (a leaked orphan / dead pid), it reaps the orphan and
+  retries rather than exiting as "already running". Previously a leaked orphan
+  bricked the menu bar until reboot. The headless Swift self-tests (single-instance
+  + child-process) now run as a build gate (`menubar/scripts/test-menubar.sh`),
+  which nothing invoked before. Source: `apps/cli/menubar/Sources/MenubarHelper/SingleInstance.swift`.
+
+- **`agents projects` definitions can now carry goals — the OKR-shaped "why".**
+  A project serves one or more `goals[]`, each an `objective` (the outcome) plus an
+  optional `measure` (the key result). Set them at scaffold time with
+  `agents projects add <name> --goal "objective:measure"` (repeatable), replace them
+  later with `agents projects set <name> --goal …`, or hand-edit the YAML. Goals show
+  on the `status` card (compact) and in `projects view` (in full), and survive a
+  `--from-linear` re-import like every other hand-set field. Milestones (pulled from
+  Linear) remain the dated checkpoints toward these goals. Source:
+  `apps/cli/src/lib/projects.ts`, `apps/cli/src/commands/projects.ts`.
+
+- **Balanced rotation no longer picks version homes that only inherit the active login.**
+  `getAccountInfo` falls back to the active/global HOME credential so `agents view`
+  still shows who is signed in when a version home has no auth file of its own.
+  Launch paths isolate config (`GROK_HOME`, `CODEX_HOME`, …) to the per-version home,
+  so those empty homes died at spawn with "Not signed in" after balanced picked them
+  (observed: `grok@0.2.118` with no `auth.json` looking signed-in via `~/.grok` →
+  `0.2.32`). Rotation now requires a real per-version credential when we know where
+  it lives (`credentialPresence.perVersion`). Source: `src/lib/rotate.ts`
+  (`isLaunchableSignedIn`, `collectRunCandidates`).
+
+- **A `never`-policy secrets bundle now actually stays silent — no more Touch ID for a bundle you set to silent, and no more double prompt.** Two bugs made `agents secrets policy <b> never` a lie. (1) The command rewrote only the bundle *metadata*, never the value items — but macOS gates each read on the item's own ACL, not the tier label, so a bundle created under `hold`/`always` kept its biometry ACL and kept popping Touch ID forever after the switch. `policy` now reconciles the value items to the new tier (`reAclBundleItems`): tightening to `never` re-stores them no-ACL (a single last prompt to read them once), and loosening back re-attaches the gate. (2) The signed keychain helper's just-in-time migration (`migrateInline`/`rehomeOrphan`) re-stamped a biometry ACL onto *every* `agents-cli.*` item it touched on read — including bundle metadata and the HMAC key, which are supposed to be silent — so a metadata/hmackey read in its own helper process raised a *second* Touch ID sheet on top of the value read. The migration now re-adds silent items (metadata, hmackey) without an ACL, so metadata enumeration and the pre-value hmackey read never prompt. Net: unlock/read a `never` bundle once and it stays silent through sleep, reboot, 30+ days, an agents-cli upgrade, and a macOS upgrade — with no Touch ID and no passphrase. The `never` tier's durability and attribution guarantees are now written into the `§Secrets` spec (SEC-19, SEC-27, SEC-28). Source: `apps/cli/src/commands/secrets.ts`, `apps/cli/src/lib/secrets/bundles.ts`, `apps/cli/src/lib/secrets/keychain-helper.swift`, `apps/cli/docs/specifications.md`.
+
+- **The per-run Touch ID storm is fixed: `agents run` no longer pops a sheet to auto-inject the share token.** On every `agents run`, `shareRuntimeEnv` auto-reads the `share` bundle's R2 write token to hand it to the spawned agent — and because `share` is a keychain bundle that is rarely broker-held, an interactive read spawned the helper and raised Touch ID on EVERY launch. Auto-injecting a token on an agent launch is a background convenience, not a user-initiated secret access, so it must never raise a sheet (SEC-13): the read is now always `agentOnly` — it resolves the token from the injected env or an already-held / no-ACL bundle and silently returns nothing otherwise (the agent can still publish via its own explicit `agents share`). And a NEW `share` bundle now defaults to the `never` tier (no biometry ACL) — the write token is low-sensitivity automation infra — so auto-share is silent with no unlock at all; an existing bundle keeps its tier (change it with `agents secrets policy share never`, which now actually strips the ACL). Source: `apps/cli/src/lib/share/config.ts`, `apps/cli/src/commands/exec.ts`.
+
+- **The daemon watchdog now rotates rate-limited sessions in place.** A stalled session whose transcript tail shows a hard account limit ("You've hit your weekly limit · resets …", "usage limit reached", "out of credits") is rotated instead of nudged: the tick gates on the same first-party healthy-account selection `agents run auto` makes (`collectHarnessCandidates` + `pickHarnessWeighted` — zero healthy logs one `rotate` skip event per cooldown window to `watchdog.log` and leaves the terminal untouched), injects the harness's exit sequence (claude: Esc, Ctrl+C, Ctrl+C; codex/gemini/cursor/opencode: Ctrl+C twice), relaunches `agents run auto --interactive --session-id <uuid>` in the SAME tab via the inject rail, then — once the new session's TUI is live — injects the resume replay for the old session. Readiness is the new session's transcript (primary) or a fresh active session correlated by cwd + machine, never an unrelated one; the wait is bounded (60s), and on timeout the session is flagged with a bare-shell message pointing at a manual `agents run auto` and suppressed for 15m before retry — never blind-typed into. The state machine (`exiting → launching → awaiting-tui → replaying → done | failed`) persists at `~/.agents/.cache/state/watchdog/rotate/<sessionId>.json` and spans ticks via a post-loop sweep. Config: **`agents watchdog rotate on|off`** writes `watchdog.rotate` in `~/.agents/agents.yaml` (default on; rotate-only, nudging is unaffected), honored per tick; `agents watchdog status` / `--json` report the rotate config and every persisted rotate state. This replaces the Factory extension's own watchdog rotate loop, which is being deleted in the companion change. Source: `apps/cli/src/lib/watchdog/rotate.ts`, `apps/cli/src/lib/watchdog/runner.ts`, `apps/cli/src/commands/watchdog.ts`.
+
 ## 1.22.1
 
 - **`agents doctor` de-noise: never-synced and cross-version hook drift are warnings, not criticals (RUSH-2162).** The CRITICAL section now holds only "needs you now" problems — a logged-out account, or a hook/plugin missing from a version you keep synced. A version that was never synced (an old/unused install with nothing installed) and a hook that merely *differs* across versions (installed but stale) are surfaced as WARNINGs instead, cutting the critical count on a busy machine from ~11 to the handful that actually need action. Source: `apps/cli/src/lib/devices/doctor-findings.ts`.
