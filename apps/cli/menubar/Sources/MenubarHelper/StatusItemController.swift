@@ -519,7 +519,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                     text += " — \(trim(first.question, rich ? 48 : 34))"
                 }
                 if let since = first.attentionSinceMs { text += "  ·  \(elapsedShort(since))" }
-                rows.append(("⚠", wait, text, first.cwd.map { revealSubmenu($0) }))
+                rows.append(("⚠", wait, text, blockedSubmenu(sessionId: first.sessionId, cwd: first.cwd)))
             } else {
                 // Collapsed: N waiting · oldest elapsed. Submenu lists each session.
                 var text = "\(agentLabel) · \(repo) · \(group.count) waiting"
@@ -576,7 +576,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             if !s.question.isEmpty { text += " — \(trim(s.question, 34))" }
             if let since = s.attentionSinceMs { text += "  ·  \(elapsedShort(since))" }
             let it = statusRow("⚠", wait, text)
-            if let cwd = s.cwd { it.submenu = revealSubmenu(cwd) }
+            it.submenu = blockedSubmenu(sessionId: s.sessionId, cwd: s.cwd)
             sub.addItem(it)
         }
         return sub
@@ -1091,6 +1091,31 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return sub
     }
 
+    /// Submenu for a blocked row. "Focus session" comes FIRST and is the point:
+    /// a NEEDS-YOU row exists because an agent is waiting on the operator, so the
+    /// action that resolves it — land in that session — must be the first thing
+    /// under the cursor. Revealing the working dir does not unblock anything.
+    ///
+    /// `sessionId` is nil for a row the engine could not identify (a cloud task,
+    /// a stale sentinel); the item is simply omitted rather than shown disabled,
+    /// so the menu never offers an action that would do nothing.
+    private func blockedSubmenu(sessionId: String?, cwd: String?) -> NSMenu? {
+        let sub = NSMenu()
+        if let id = sessionId, !id.isEmpty {
+            let focus = NSMenuItem(title: "Focus session", action: #selector(onFocusSession(_:)), keyEquivalent: "")
+            focus.target = self
+            focus.representedObject = id
+            sub.addItem(focus)
+        }
+        if let dir = cwd, !dir.isEmpty {
+            let reveal = NSMenuItem(title: "Reveal working dir", action: #selector(onOpenPath(_:)), keyEquivalent: "")
+            reveal.target = self
+            reveal.representedObject = dir
+            sub.addItem(reveal)
+        }
+        return sub.items.isEmpty ? nil : sub
+    }
+
     private func revealSubmenu(_ cwd: String) -> NSMenu {
         let sub = NSMenu()
         let reveal = NSMenuItem(title: "Reveal working dir", action: #selector(onOpenPath(_:)), keyEquivalent: "")
@@ -1237,6 +1262,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func onRoutineLogs(_ s: NSMenuItem) { withName(s, AgentsCLI.routineLogs) }
     @objc private func onOpenPath(_ s: NSMenuItem) {
         if let p = s.representedObject as? String { AgentsCLI.openPath(p) }
+    }
+    @objc private func onFocusSession(_ s: NSMenuItem) {
+        if let id = s.representedObject as? String { AgentsCLI.focusSession(id) }
     }
     @objc private func onOpenAgentsHome() { AgentsCLI.openPath("\(AgentsCLI.home)/.agents") }
     @objc private func onStartScheduler() { AgentsCLI.startScheduler() }
