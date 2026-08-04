@@ -242,10 +242,18 @@ export function formatMilestoneLines(
     // list existed; render what we have rather than dropping the row.
     return next ? [`  ${chalk.dim('next')}     ${formatNextMilestone(next, nowMs)}`] : [];
   }
-  const shown = milestones.slice(0, Math.max(1, limit));
+  // The next milestone leads, always. Linear can flag a LATER-dated milestone
+  // as next, and `milestones` is date-ordered — so slicing the front would show
+  // an earlier one and hide the actual next behind "+N more", which is the one
+  // thing this row exists to say. Identity is name+targetDate: two milestones
+  // can share a name, and matching on name alone labelled the wrong row.
+  const key = (m: LinearMilestone) => `${m.name} ${m.targetDate ?? ''}`;
+  const lead = next ? milestones.filter((m) => key(m) === key(next)).slice(0, 1) : [];
+  const others = next ? milestones.filter((m) => key(m) !== key(next)) : milestones;
+  const ordered = [...lead, ...others];
+  const shown = ordered.slice(0, Math.max(1, limit));
   const out = shown.map((m, i) => {
-    const isNext = next && m.name === next.name;
-    const label = i === 0 ? (isNext ? 'next' : 'plan') : '';
+    const label = i === 0 && lead.length > 0 ? 'next' : i === 0 ? 'plan' : '';
     return `  ${chalk.dim(label.padEnd(4))}     ${formatNextMilestone(m, nowMs)}`;
   });
   const rest = milestones.length - shown.length;

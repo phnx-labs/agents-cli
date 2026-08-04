@@ -137,9 +137,37 @@ describe('formatMilestoneLines', () => {
     expect(out.join('\n')).not.toContain('more milestone');
   });
 
-  it('labels the first row `plan` when it is not the flagged next one', () => {
-    const out = formatMilestoneLines(ms, ms[1], now, 1).map(stripAnsi);
+  it('labels the first row `plan` when there is no next at all', () => {
+    const out = formatMilestoneLines(ms, undefined, now, 1).map(stripAnsi);
     expect(out[0].trimStart().startsWith('plan')).toBe(true);
+  });
+
+  it('leads with the NEXT milestone even when a different one is dated earlier', () => {
+    // Linear can flag a later milestone as next. Slicing the date-ordered front
+    // would show the earlier one and bury the actual next under "+N more".
+    const out = formatMilestoneLines(ms, ms[2], now, 1).map(stripAnsi);
+    expect(out[0]).toContain('next');
+    expect(out[0]).toContain('Factory onboarding');
+    expect(out[1]).toContain('+2 more');
+  });
+
+  it('does not repeat the next milestone further down the full list', () => {
+    const out = formatMilestoneLines(ms, ms[2], now, 99).map(stripAnsi);
+    expect(out).toHaveLength(3);
+    expect(out.filter((l) => l.includes('Factory onboarding'))).toHaveLength(1);
+    expect(out[0]).toContain('Factory onboarding');
+  });
+
+  it('labels the right row when two milestones share a name', () => {
+    const dup = [
+      { name: 'Cut', targetDate: '2026-09-01', done: 0, total: 0 },
+      { name: 'Cut', targetDate: '2026-10-01', done: 0, total: 0 },
+    ];
+    // Matching on name alone put the label on the Sep row.
+    const out = formatMilestoneLines(dup, dup[1], now, 99).map(stripAnsi);
+    expect(out[0]).toContain('next');
+    expect(out[0]).toContain('Oct 1');
+    expect(out[1]).not.toContain('next');
   });
 
   it('renders nothing when the project declares no milestones', () => {
