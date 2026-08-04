@@ -88,12 +88,13 @@ enum SingleInstance {
         let dir = (path as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
 
-        // O_CLOEXEC so the flock fd is close-on-exec across EVERY spawn path, not
-        // just ChildProcess's POSIX_SPAWN_CLOEXEC_DEFAULT (ChildProcess.swift). A
-        // child that reaches exec() without it — a future bare Process(), or one
-        // spawned before that fix — inherits this fd and holds the flock at PPID 1
-        // forever, deadlocking every later launch as "already running". This holder
-        // never execs itself (main.swift runs straight to app.run()), so
+        // O_CLOEXEC so the flock fd is close-on-exec — no spawned child inherits it,
+        // on ANY path. ChildProcess.spawn sets only POSIX_SPAWN_SETPGROUP
+        // (ChildProcess.swift), not a close-on-exec default, and the bare-Process
+        // one-shots (AgentsCLI.runDetached / runMonitored) are MEANT to outlive the
+        // helper — so without this flag a child inherits this fd and holds the flock
+        // at PPID 1 forever, deadlocking every later launch as "already running".
+        // This holder never execs itself (main.swift runs straight to app.run()), so
         // close-on-exec never drops the lock we mean to keep for the process life.
         let fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
         if fd < 0 {

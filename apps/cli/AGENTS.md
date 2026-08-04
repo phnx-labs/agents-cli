@@ -516,9 +516,12 @@ launchd's.
 opened `O_RDWR | O_CREAT | O_CLOEXEC` so no spawned child can inherit the
 descriptor — a pre-fix `doctor` child that inherited it and orphaned at PPID 1 held
 the flock forever, and every relaunch then read "already running" and exited, so
-the menu bar stayed dead until reboot (`O_CLOEXEC` is the fd-level guarantee across
-*every* spawn path, complementing `ChildProcess`'s `POSIX_SPAWN_CLOEXEC_DEFAULT`).
-The helper never execs itself, so it keeps the fd for life. And when the flock is
+the menu bar stayed dead until reboot. `O_CLOEXEC` is the fd-level guarantee across
+*every* spawn path: `ChildProcess.spawn` sets only `POSIX_SPAWN_SETPGROUP` (no
+close-on-exec default), and the bare-`Process` one-shots (`runDetached` /
+`runMonitored`) are meant to *outlive* the helper — so the flag on the fd, not the
+spawn site, is what keeps the lock out of every child. The helper never execs
+itself, so it keeps the fd for life. And when the flock is
 held but **no LIVE `MenubarHelper` owns it** — the lock-file pid is dead, or belongs
 to some other program by reuse (`liveHelperOwnsLock` checks liveness + `proc_pidpath`
 basename) — `acquire` reaps the leaked orphan and retries the lock once, instead of
@@ -581,7 +584,7 @@ Separately, **`doctor --json` taking 136s on an idle machine is its own defect**
 env-gated self-tests (`MENUBAR_SINGLE_TEST`, `MENUBAR_CHILD_TEST`,
 `MENUBAR_GUARD_TEST`, `MENUBAR_ISSUE_TEST`) are headless — they exit before the
 AppKit path (`Guards.enforceForInteractiveLaunch`) so they need no GUI or signing.
-[`menubar/scripts/test-menubar.sh`](menubar/scripts/build.sh) runs all four against
+[`menubar/scripts/test-menubar.sh`](menubar/scripts/test-menubar.sh) runs all four against
 the just-built binary and [`build.sh`](menubar/scripts/build.sh) invokes it before
 signing, so no helper artifact ships whose invariants regressed. Nothing ran these
 before — PR CI is Linux (can't build Swift) and prepack only checks the shipped

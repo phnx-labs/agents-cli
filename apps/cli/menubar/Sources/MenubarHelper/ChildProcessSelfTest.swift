@@ -162,8 +162,9 @@ enum ChildProcessSelfTest {
     // fd. If it does, an orphaned child (helper crashed) keeps the open-file-
     // description — and its flock — alive at PPID 1, and every later launch
     // deadlocks as "already running". Guarded at the source by O_CLOEXEC on the
-    // lock open (SingleInstance.acquire) plus POSIX_SPAWN_CLOEXEC_DEFAULT here.
-    // Real flock, real child that execs and outlives the parent's fd — no mock.
+    // lock open (SingleInstance.acquire) — the fd is close-on-exec, so no exec'd
+    // child inherits it. Real flock, real child via raw posix_spawn (the leak
+    // vehicle Foundation.Process can't reproduce) — no mock.
     private static func testChildDoesNotInheritSingleInstanceFlock() {
         let path = "\(NSTemporaryDirectory())menubar-flock-inherit-\(getpid()).lock"
         try? FileManager.default.removeItem(atPath: path)
