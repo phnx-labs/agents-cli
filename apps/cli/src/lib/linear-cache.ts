@@ -113,6 +113,19 @@ export function isRateLimited(nowMs: number): boolean {
 }
 
 /**
+ * Read a 429's `x-ratelimit-requests-reset` header into an epoch-ms instant.
+ * Linear sends epoch milliseconds; anything absent, non-numeric, or already in
+ * the past is not usable and the caller backs off a TTL instead. Pure, so the
+ * parsing is testable without a live 429.
+ */
+export function parseRateLimitReset(header: string | null, nowMs: number): number | undefined {
+  if (!header) return undefined;
+  const n = Number(header);
+  if (!Number.isFinite(n) || n <= nowMs) return undefined;
+  return n;
+}
+
+/**
  * Record a 429 so the next runs don't spend a request learning the same thing.
  * `resetAtMs` comes from the response's `x-ratelimit-requests-reset` header
  * (epoch ms); without it, back off for one TTL.

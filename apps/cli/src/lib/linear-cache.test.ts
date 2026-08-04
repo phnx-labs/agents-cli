@@ -7,6 +7,7 @@ import {
   invalidateCached,
   isRateLimited,
   noteRateLimited,
+  parseRateLimitReset,
   readCached,
   writeCached,
 } from './linear-cache.js';
@@ -72,6 +73,16 @@ describe('linear cache', () => {
     // A reset already in the past is not usable either.
     noteRateLimited(T0 - 5, T0);
     expect(isRateLimited(T0 + LINEAR_CACHE_TTL_MS - 1)).toBe(true);
+  });
+
+  it('parses a usable 429 reset header, and rejects the rest', () => {
+    // Linear sends epoch milliseconds on x-ratelimit-requests-reset.
+    expect(parseRateLimitReset(String(T0 + 30 * 60_000), T0)).toBe(T0 + 30 * 60_000);
+    expect(parseRateLimitReset(null, T0)).toBeUndefined();
+    expect(parseRateLimitReset('soon', T0)).toBeUndefined();
+    expect(parseRateLimitReset('', T0)).toBeUndefined();
+    // Already elapsed is not a future window.
+    expect(parseRateLimitReset(String(T0 - 1), T0)).toBeUndefined();
   });
 
   it('invalidates one project without disturbing the rest', () => {

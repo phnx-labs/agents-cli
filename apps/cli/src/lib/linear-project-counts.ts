@@ -29,7 +29,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { resolveLinearApiKey } from './auto-dispatch-linear.js';
-import { isRateLimited, readCached, writeCached } from './linear-cache.js';
+import { isRateLimited, noteRateLimited, parseRateLimitReset, readCached, writeCached } from './linear-cache.js';
 
 const LINEAR_API = 'https://api.linear.app/graphql';
 /** Overall budget across all pages — the card must never hang on Linear. */
@@ -286,6 +286,14 @@ async function fetchLinearIssuesPage(
     }),
     signal,
   });
+  if (res.status === 429) {
+    // Record when the budget refills so later runs skip the call entirely
+    // rather than spending one of the zero remaining requests to be told so.
+    // The header is epoch milliseconds; absent or unparseable, back off a TTL.
+    const now = Date.now();
+    noteRateLimited(parseRateLimitReset(res.headers.get('x-ratelimit-requests-reset'), now), now);
+    return undefined;
+  }
   if (!res.ok) return undefined;
   const json = (await res.json()) as { data?: LinearIssuesResponse; errors?: unknown[] };
   if (json.errors?.length || !json.data) return undefined;
