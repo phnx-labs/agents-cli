@@ -184,6 +184,7 @@ rush  ·  3 agents
 | `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. |
 | `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--linear-first-factory-gated). |
 | `agents projects import --from-factory [--min-confidence low\|medium\|high] [--all]` | Absorb `~/.agents/factory/projects.json`. Imports only `high`-confidence rows by default. |
+| `agents projects set <name> [--repo\|--root\|--path\|--description]` | Change one field, preserving every other. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
 | `agents projects rm <name>` | Delete the definition (never touches the repo). |
 
 `agents run --project <name>` is unchanged in spelling — it just resolves richer
@@ -206,7 +207,7 @@ containment fallback that powers `projects link`'s suggestion is deliberately no
 used on this write path: it would silently bind "Agents CLI" to `agents-cli-web`
 with nobody looking. A project with no exact local match still imports, carrying
 `name` + `linear` and nothing it cannot prove; fill the rest in with
-`projects add --force` or by editing the YAML.
+`projects set` or by editing the YAML.
 
 Re-importing is safe. An existing def is preserved field-for-field and only
 `linear` is overwritten, so a hand-set `description`, `contexts`, or `integrations`
@@ -252,3 +253,31 @@ unlinks the YAML, never the repo.
 - **Re-point `agents factory snapshot`** per-project Linear rollup at defined projects.
 - **Per-repo release lines** — the `ships` release tag is the primary repo only.
 - **Persisted `project_id` session column** — today membership is derived from cwd.
+
+## The stored `repo` must match the checkout's remote
+
+A definition's `repo` is a plain string that nothing used to validate, so it could be
+confidently wrong. That is not hypothetical: Factory seeds the registry with a slug derived
+from the checkout path's last two segments (`repoSlugFromPath`,
+`apps/factory/src/core/projectIndex.ts`), so a repo cloned to
+`~/src/github.com/<you>/agents-cli` whose `origin` is `phnx-labs/agents-cli` was imported as
+`<you>/agents-cli`.
+
+Both slugs resolve to real repositories, so no call failed. The card simply read the merged-PR
+and release counts from a **different repo** — 0 merges in 7 days instead of 100. A wrong
+number that looks right is worse than a missing one, so:
+
+- `import --from-factory` reads the checkout's real `origin` and overrides the registry slug,
+  falling back to the path guess only when there is no remote to ask.
+- `status` and `show` print the disagreement with its fix attached whenever a def's `repo`
+  differs from the remote of its `root`:
+
+  ```
+  repos    muqsitnawaz/agents-cli
+  !        repo is muqsitnawaz/agents-cli but origin is phnx-labs/agents-cli —
+           PR and release counts are being read from the wrong repository
+           agents projects set agents-cli --repo phnx-labs/agents-cli
+  ```
+
+The check is silent when this machine has no checkout to read a remote from — absence of
+evidence is not a finding.
