@@ -1609,6 +1609,59 @@ export function rotateBundleSecret(bundle: SecretsBundle, key: string, opts: Rot
   writeBundle(bundle);
 }
 
+/**
+ * Reconcile a bundle's keychain-backed VALUE items to its CURRENT policy, then
+ * write the (always no-ACL) metadata.
+ *
+ * `writeBundle` only rewrites the metadata item, so a policy change alone leaves
+ * every value item carrying the ACL it was created with — and macOS gates each
+ * read on the ITEM's ACL, not the bundle's declared tier (spec SEC-19). Without
+ * this reconcile, `agents secrets policy <b> never` reports "silent" while the
+ * still-ACL'd value keeps popping Touch ID on every read, forever.
+ *
+ *   hold/always -> never  strips the biometry ACL (helper `set-no-acl`: delete+add)
+ *   never -> hold/always  re-attaches it (helper `set`)
+ *
+ * The current values are read in ONE batch, so the reconcile costs at most a
+ * single Touch ID — the last prompt a hold->never bundle will ever raise (a
+ * never->* flip reads silently, since the items are already no-ACL). No-op on the
+ * ACL to write for non-keychain backends (file/vault have no biometry concept),
+ * and a metadata-only write when the bundle has no keychain-backed values.
+ */
+export function reAclBundleItems(bundle: SecretsBundle): void {
+  if ((bundle.backend ?? 'keychain') !== 'keychain') {
+    // No biometry ACL off the keychain backend — only metadata needs persisting.
+    writeBundle(bundle);
+    return;
+  }
+  const store = itemStore('keychain');
+  // keychainItemsForBundle already returns ONLY keychain-backed value items
+  // (via parseBundleValue), so no extra ref-shape filtering here.
+  const entries = keychainItemsForBundle(bundle);
+  if (entries.length === 0) {
+    // Literal/ref-only bundle: nothing to re-ACL, just refresh metadata.
+    writeBundle(bundle);
+    return;
+  }
+  // One batched read = at most one Touch ID for the whole reconcile.
+  const values = store.getBatch(entries.map((e) => e.item));
+  const rewrite = new Map<string, string>();
+  for (const { item } of entries) {
+    const value = values.get(item);
+    // A key present in metadata but with no readable value item is real
+    // corruption, not something to silently skip (no fallbacks — fail loud).
+    if (value === undefined) {
+      throw new Error(
+        `Cannot change policy for '${bundle.name}': a keychain value is missing or unreadable. Rotate that key, then retry.`,
+      );
+    }
+    rewrite.set(item, value);
+  }
+  // writeBundleWithItems re-stores each value with { noAcl: policy === 'never' }
+  // and the metadata no-ACL (metadata-last), and evicts any broker-held copy.
+  writeBundleWithItems(bundle, rewrite);
+}
+
 /** Options for renameBundle. */
 export interface RenameOptions {
   /** When true, overwrite an existing destination bundle (purges its keychain items first). */

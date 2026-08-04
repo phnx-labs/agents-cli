@@ -754,9 +754,13 @@ access control (that is 1Password/Vault; this tool is device-local first).
   `file` / `exec` (`REF_PATTERN`, `lib/secrets/index.ts:51`).
 - **Backend** — where values physically live: `keychain` | `file` | `vault`
   (`SecretsBackend`, `lib/secrets/bundles.ts:64`).
-- **Policy** — per-bundle prompt tier: `always` | `daily` | `never`
-  (`SecretsPolicy`, `lib/secrets/bundles.ts:234`; persisted under the legacy key
-  `tier`).
+- **Policy (tier)** — per-bundle prompt tier: `always` | `hold` | `never`
+  (`SecretsPolicy`, `lib/secrets/bundles.ts:218`; persisted under the legacy wire
+  key `tier`, where `session`/`daily` ≡ `hold`, `biometry` ≡ `always`, `none` ≡
+  `never`, `lib/secrets/bundles.ts:452-454`). `hold` is the default
+  (`secretsDefaultPolicy`, `lib/secrets/bundles.ts:463-465`): one Touch ID, then
+  held silently for the hold window. `always` prompts every read. `never` is
+  silent forever (SEC-19, SEC-27).
 - **Broker / secrets-agent** — the macOS-only in-memory holder that dedups Touch
   ID across processes (`lib/secrets/agent.ts`).
 - **Materialize** — print a resolved plaintext value to this process's stdout
@@ -877,6 +881,25 @@ access control (that is 1Password/Vault; this tool is device-local first).
   and MUST degrade cleanly (no usage shown) when the DB is unavailable
   (`commands/secrets.ts` `view` / `list` / `activity` actions). The read-model is a
   bounded 90-day history; the full audit trail is `agents events --module secrets`.
+- **SEC-28 (MUST).** **Every secret access is attributable to the session that
+  triggered it — no exceptions.** Every value read and every unlock recorded via
+  `emitSecretAudit` (SEC-26) MUST carry the **requesting** identity intact: agent,
+  `sessionId`, `parentSessionId`, `pid`, and `caller` (provenance-stamped in
+  `lib/secrets/audit.ts` / `lib/secrets/event-provenance.ts`). The requesting
+  session MUST NOT be overwritten by the global-scope sentinel `*`
+  (`GLOBAL_HARNESS`, `lib/secrets/scope.ts:20`): a global-grant read records the
+  scope separately but MUST preserve the session that asked (`lib/secrets/bundles.ts`
+  reader sites, where the `opts.agent || AGENTS_AGENT_NAME || GLOBAL_HARNESS`
+  collapse currently discards it). The usage read-model MUST persist enough to
+  answer "which session read which bundle" — `sessionId` + `bundle`
+  (`lib/secrets/usage-db.ts`) — and `agents events` MUST expose `--session` and
+  `--bundle` filters over secrets events (`commands/events.ts`,
+  `lib/events/event-stream.ts`). A read that hit the ACL-gated (potentially
+  prompting) keychain path SHOULD be distinguishable in the log from a silent broker
+  / no-ACL read, so a Touch ID sheet is traceable to its trigger even though the
+  macOS sheet itself emits no event. **No read path is exempt** from the audit
+  funnel — a code path that resolves a value without an `emitSecretAudit` record is a
+  spec violation.
 
 #### 3.4 Authorization model
 
@@ -890,9 +913,50 @@ access control (that is 1Password/Vault; this tool is device-local first).
   (`--i-understand` or an interactive confirm), because it is the
   on-disk-plaintext-equivalent downgrade (`keychain-helper.swift:557-559`;
   `commands/secrets.ts:2457-2483`). It MUST NOT be settable as a global default.
+  **Enforcement is on the stored item, not the metadata label.** macOS enforces
+  the ACL baked onto the value item at write time on every read, regardless of the
+  bundle's declared tier — so the item's actual ACL MUST match the tier at all
+  times, not only at first write:
+    - Changing a bundle's tier MUST reconcile the stored **value items'** ACL to the
+      new tier (re-store via `set-no-acl` / `set`), not only rewrite the metadata
+      item — a metadata-only tier change that leaves a biometry ACL on a `never`
+      item is a spec violation (`reAclBundleItems` in `lib/secrets/bundles.ts`, from
+      the `policy` command `commands/secrets.ts`).
+    - A read that finds a `never` bundle's item still carrying a biometry ACL (drift
+      from a legacy write or an interrupted change) MUST self-heal it to no-ACL
+      rather than prompt, so the bundle converges to silent instead of prompting
+      forever (`lib/secrets/bundles.ts` read path).
+    - Any just-in-time keychain migration/rehome MUST honor the owning bundle's tier
+      — a `never` key MUST NOT be re-stamped with a biometry ACL on read
+      (`keychain-helper.swift` `migrateInline` / `rehomeOrphan`).
 - **SEC-20 (MUST).** Destructive ops (`delete`) MUST confirm interactively and
   MUST refuse in a non-interactive shell without `--yes`
   (`commands/secrets.ts:1565-1582`).
+- **SEC-27 (MUST).** **Unlock once, stays unlocked — the durability contract.** A
+  bundle on the `never` tier MUST read silently *forever* once set: through process
+  death, system sleep, a full power-off/reboot, an arbitrarily long gap (30+ days),
+  an agents-cli upgrade, **and a macOS upgrade** — with **no Touch ID, no
+  passphrase, and no environment variable** — until the value is rotated, the tier
+  is changed, or the bundle is deleted. This is achievable only because a `never`
+  item carries no biometric ACL (`set-no-acl`,
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`,
+  `keychain-helper.swift:571-577`): it survives reboot (readable after the first
+  post-boot unlock) and an OS upgrade (device-local, not biometry-bound). A
+  biometry-gated tier **cannot** satisfy this — `.biometryCurrentSet`
+  (`keychain-helper.swift:43`) deliberately re-locks when enrolled biometrics change
+  (a common OS-upgrade side effect), and `kSecAttrAccessibleWhenUnlocked` blocks
+  locked-screen reads — so "never re-prompts across an OS upgrade" and
+  "biometry-gated per read" are mutually exclusive by construction. The `hold` tier
+  gives the weaker durability: one prompt, then held silently for the hold window,
+  surviving a broker restart / agents-cli upgrade via the durable no-ACL session
+  store (`lib/secrets/session-store.ts:1-26`) but re-prompting once after the window
+  expires or biometrics are re-enrolled.
+- **SEC-27a (MUST NOT).** The default keychain flow MUST NOT require a passphrase or
+  read one from an environment variable to keep a bundle unlocked. On macOS the
+  Keychain is gated by the OS login only; `AGENTS_SECRETS_PASSPHRASE` applies
+  **exclusively** to the encrypted-file (SEC-2) and age-vault (SEC-3) fallback
+  backends and MUST NOT be introduced into, or required by, the keychain path
+  (SEC-8 already strips it from every injected child env).
 
 #### 3.5 Sharing & sync
 
@@ -1036,6 +1100,26 @@ normative — a change that widens or narrows a cell is a spec change.
 - **SEC-GAP-4.** The broker's per-request capability-token auth (SEC-18) is not
   reflected in `secrets.md` / `08-secrets-agent-process-model.md`, which still
   describe only the same-UID/socket-permission model.
+- **SEC-GAP-5 (closed by this change).** Changing a bundle's tier to `never` rewrote
+  only the metadata item (`writeBundle`), leaving the value items' biometry ACL in
+  place — so a `never` bundle kept prompting forever, violating SEC-19. Fixed by
+  reconciling value-item ACLs on every tier change (`reAclBundleItems` from the
+  `policy` command) and self-healing an ACL-vs-tier mismatch on read.
+- **SEC-GAP-6 (closed by this change).** JIT keychain migration (`migrateInline` /
+  `rehomeOrphan`) re-stamped a biometry ACL onto any item it touched on read,
+  ignoring the owning bundle's tier — resurrecting the prompt on a `never` bundle
+  (and, where it matched the metadata service name, re-ACL'ing metadata too, causing
+  a SECOND prompt: SEC-12). Fixed by honoring the tier in the migration write.
+- **SEC-GAP-7 (closed by this change).** Secret-access events collapsed the
+  requesting session to the global `*` sentinel and the usage DB dropped `sessionId`,
+  so a prompt could not be traced to the agent that caused it (SEC-28). Fixed by
+  preserving session identity on every event and adding `--session`/`--bundle` query
+  filters.
+- **SEC-GAP-8 (closed by this change).** A resolve/unlock could pop TWO Touch ID
+  sheets — one for metadata, one for the value — when the two were read in separate
+  helper processes and/or the metadata item carried a stale ACL, violating SEC-12.
+  Fixed by keeping metadata reads no-ACL and batched with the value read so a bundle
+  costs at most one prompt.
 
 ---
 
@@ -1056,7 +1140,7 @@ is the automation primitive, and its appearance in a transcript is the audit
 signal, not a bug.
 
 **GWT-S3 — `list` is silent and value-free.**
-Given several `daily`/`always` bundles; When the human runs `agents secrets list`;
+Given several `hold`/`always` bundles; When the human runs `agents secrets list`;
 Then only names/counts print and no Touch ID fires, because metadata is written
 no-ACL (`bundles.ts:602-613`; test `bundles.test.ts:476-479`).
 
@@ -1102,6 +1186,30 @@ runs; Then `isLockedCollectionError` fires (`linux.ts:79-82`) and the value
 round-trips through AES-256-GCM keyed by the resolved passphrase
 (`filestore.ts:259-291`) — at no point a biometric/user-presence check, unlike
 macOS.
+
+**GWT-S11 — `never` bundle stays unlocked across reboot and OS upgrade (SEC-27).**
+Given `agents secrets policy share never` ran once (its value item now stored
+no-ACL via `set-no-acl`); When the user powers the Mac off, waits 30 days, upgrades
+macOS, and an agent reads `share`; Then the read returns silently — no Touch ID, no
+passphrase, no env var — because the no-ACL item
+(`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) is not biometry-bound and
+survives the reboot and the upgrade (`keychain-helper.swift:571-577`). A biometry
+tier would have re-prompted after the upgrade re-enrolled biometrics.
+
+**GWT-S12 — changing tier to `never` strips the biometry ACL (SEC-19).**
+Given a bundle created under `hold` (its value item carries the biometry ACL);
+When `agents secrets policy <b> never` runs; Then the command re-stores the value
+items no-ACL (`reAclBundleItems` → `writeBundleWithItems { noAcl:true }`), not just
+the metadata, so the very next read is silent — a metadata-only change that leaves
+the biometry ACL on the item is a bug this scenario pins (`policy.test.ts` asserts
+the item ACL after the flip, not only `bundlePolicy`).
+
+**GWT-S13 — every read traces to the triggering session, never `*` (SEC-28).**
+Given two agent sessions `A` and `B` each read `share`; When the human runs
+`agents events --module secrets --bundle share --session <A>`; Then only session
+`A`'s reads are returned, each carrying `sessionId`/`parentSessionId`/`pid`, and the
+requesting session is never recorded as the global-scope `*` sentinel — so a Touch
+ID sheet is always attributable to the agent that caused it.
 
 ---
 

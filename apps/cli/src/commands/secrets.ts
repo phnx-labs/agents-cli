@@ -43,6 +43,7 @@ import {
   isHeadlessSecretsContext,
   readBundle,
   readBundleIfDecryptable,
+  reAclBundleItems,
   renameBundle,
   rotateBundleSecret,
   sanitizeProcessEnv,
@@ -2885,10 +2886,14 @@ Examples:
           return;
         }
         bundle.policy = next;
-        // writeBundle evicts any broker-held copy, so tightening hold ->
-        // always/never takes effect NOW: the next read re-prompts (`always`)
-        // or reads its no-ACL item directly (`never`).
-        writeBundle(bundle);
+        // Re-store the VALUE items so their keychain ACL matches the new tier —
+        // NOT just the metadata. macOS gates each read on the item's own ACL
+        // (SEC-19); a metadata-only write would leave a hold/always bundle's
+        // biometry ACL in place and keep popping Touch ID forever after a switch
+        // to `never`. reAclBundleItems reads once (the last prompt this bundle
+        // raises when tightening to `never`), rewrites no-ACL, and evicts any
+        // broker-held copy so the change takes effect on the very next read.
+        reAclBundleItems(bundle);
         console.log(chalk.green(`${bundle.name} policy set to ${next}.`));
         if (next === 'hold') {
           console.log(chalk.gray('Held by the secrets-agent for ~7 days after one unlock (auto-cache is on by default; disable with `secrets.agent.auto: false` in agents.yaml).'));
