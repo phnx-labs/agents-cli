@@ -747,6 +747,8 @@ function outputOf(result: { stdout: string; stderr: string }): string {
 }
 
 describe('agents sessions', () => {
+  // Multiple full CLI `runAgents` passes — under ubuntu-22 CI this has hit the
+  // default 30s vitest cap (release 1.22.2/1.22.3 home-base gate). Give it 2m.
   it('queries two distinct tool calls without changing the ordinary list JSON contract', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-tools-'));
     try {
@@ -863,7 +865,7 @@ describe('agents sessions', () => {
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   it('omits a synced mirror when answering a fleet evidence partition', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-tool-mirror-'));
