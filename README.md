@@ -161,7 +161,18 @@ agents run claude@
 agents run codex@ "review this branch"
 ```
 
-`--strategy balanced` spreads work across available versions of the same agent -- useful when you have multiple accounts and want to avoid burning through one.
+`--strategy balanced` spreads work across available versions of the same agent -- useful when you have multiple accounts and want to avoid burning through one. When every account is rate-limited, the run exits nonzero naming each excluded account and the earliest window reset (use `--strategy pinned` to force the default) -- it never launches into an exhausted account.
+
+### Don't care which harness? `agents run auto`
+
+```bash
+# Picks the host (14d usage affinity), the harness (installed CLIs weighted by
+# best-account headroom), and the account (balanced) -- all three layers.
+agents run auto "summarize recent commits"
+agents run auto --host yosemite-s0 "fix the flaky test"   # pin the host layer
+```
+
+`run auto` excludes any harness whose accounts are all rate-limited or signed out, and exits nonzero with the earliest reset time when nothing anywhere is healthy.
 
 A trailing `@` opens an account picker before either an interactive or prompt-based run. Each installed version shows its account identity, exact version, login state, plan, and every available session, weekly, or monthly limit. Logged-out, rate-limited, and out-of-credit accounts remain visible with the reason they cannot be selected; signed-in accounts whose provider does not expose quota data stay selectable and say `limits unavailable`. The choice pins only that run and does not change your default version.
 

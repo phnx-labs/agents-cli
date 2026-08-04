@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId, RunStrategy } from './types.js';
 import type { FallbackEntry } from './exec.js';
-import { accountDisplayLabel, getAccountInfo, type AccountInfo } from './agents.js';
+import { accountDisplayLabel, getAccountInfo, ALL_AGENT_IDS, type AccountInfo } from './agents.js';
 import { readMeta, writeMeta, getHelpersDir } from './state.js';
 import { listInstalledVersions, getVersionHomePath, resolveVersion } from './versions.js';
 import { getProjectRunConfigs } from './run-config.js';
@@ -440,6 +440,183 @@ export function pickAvailableCandidate(
   return { picked: preferred ?? bestVerified, healthy: sorted, excluded, usageUnverified };
 }
 
+/**
+ * Per-harness routing summary for `agents run auto` — the cross-harness layer
+ * that sits above `pickBalancedCandidate` (which is strictly per-harness).
+ */
+export interface HarnessSummary {
+  agent: AgentId;
+  /** Every installed account slot probed for this harness. */
+  candidates: RotateCandidate[];
+  /** Healthy accounts after identity dedupe, sorted by headroom. */
+  healthy: RotateCandidate[];
+  /** The account this harness would route to (best verified headroom). Null when the harness is excluded. */
+  best: RotateCandidate | null;
+  /** Routing used% of `best` (max across non-session windows); null when unknown. */
+  bestUsedPercent: number | null;
+  /** Why the harness was excluded, e.g. ['2 rate_limited', '1 signed_out']. Empty when healthy. */
+  exclusionReasons: string[];
+}
+
+export interface HarnessPickResult {
+  /** The harness picked for this run. */
+  picked: HarnessSummary;
+  /** Harnesses with ≥1 healthy account (including the picked one). */
+  healthy: HarnessSummary[];
+  /** Harnesses with zero healthy accounts — excluded, not down-weighted. */
+  excluded: HarnessSummary[];
+}
+
+/**
+ * Classify every harness's candidates into healthy (with a representative
+ * best account) vs excluded (with per-reason counts). Pure — the pick and the
+ * zero-healthy error message both read this, so they can never disagree.
+ *
+ * Health uses the exact account-layer gate (`isRotationEligible`: signed in
+ * AND not maxed on ANY blocking window, weekly included). The representative
+ * best account honors `preferVerified`: confirmed headroom beats apparent
+ * headroom, the same freshness rule the account layer routes on.
+ */
+export function classifyHarnessCandidates(
+  byHarness: ReadonlyMap<AgentId, RotateCandidate[]>,
+  nowMs: number = Date.now(),
+): HarnessSummary[] {
+  const summaries: HarnessSummary[] = [];
+  for (const [agent, candidates] of byHarness) {
+    const eligible = candidates.filter(isRotationEligible);
+    if (eligible.length === 0) {
+      const counts = new Map<string, number>();
+      for (const c of candidates) {
+        const readiness = readinessFromCandidate(c);
+        const reason = readiness.ready ? 'ineligible' : readiness.reason;
+        counts.set(reason, (counts.get(reason) ?? 0) + 1);
+      }
+      summaries.push({
+        agent,
+        candidates,
+        healthy: [],
+        best: null,
+        bestUsedPercent: null,
+        exclusionReasons: [...counts.entries()].map(([reason, n]) => `${n} ${reason}`),
+      });
+      continue;
+    }
+    const sorted = dedupeAndSortCandidates(eligible);
+    const { picked: best } = preferVerified(sorted, nowMs, (from) => from[0]);
+    summaries.push({
+      agent,
+      candidates,
+      healthy: sorted,
+      best,
+      bestUsedPercent: getRoutingUsedPercent(best.usageSnapshot),
+      exclusionReasons: [],
+    });
+  }
+  return summaries;
+}
+
+/**
+ * Pick a harness for `agents run auto` using weighted random by best-account
+ * headroom (RUSH-2132).
+ *
+ * A harness's capacity is `100 − min(routingUsed% across its healthy accounts)`
+ * — its best account's headroom. The pick reuses `weightedRandomByCapacity` on
+ * the representative best accounts, so host/harness/account layers all share
+ * one sampling behavior. Harnesses with zero healthy accounts are EXCLUDED,
+ * not down-weighted. Returns null when no harness has any healthy account;
+ * call `classifyHarnessCandidates` for the exclusion detail to message with.
+ */
+export function pickHarnessWeighted(
+  byHarness: ReadonlyMap<AgentId, RotateCandidate[]>,
+  nowMs: number = Date.now(),
+): HarnessPickResult | null {
+  const summaries = classifyHarnessCandidates(byHarness, nowMs);
+  const healthy = summaries.filter((s) => s.best !== null);
+  const excluded = summaries.filter((s) => s.best === null);
+  if (healthy.length === 0) return null;
+  const pickedBest = weightedRandomByCapacity(healthy.map((s) => s.best!));
+  const picked = healthy.find((s) => s.best === pickedBest)!;
+  return { picked, healthy, excluded };
+}
+
+/** One-line banner naming the auto-picked harness and why (headroom). */
+export function formatHarnessPickBanner(result: HarnessPickResult): string {
+  const { picked, healthy, excluded } = result;
+  const headroom = picked.bestUsedPercent === null
+    ? 'best account headroom unknown'
+    : `best account ${Math.max(0, Math.round(100 - picked.bestUsedPercent))}% headroom`;
+  const ratio = `${healthy.length} of ${healthy.length + excluded.length} harnesses healthy`;
+  return `[agents] auto picked ${picked.agent} (${headroom}, ${ratio})`;
+}
+
+/**
+ * The earliest FUTURE window reset across these candidates' usage snapshots —
+ * when the first exhausted account becomes usable again. Null when no snapshot
+ * carries a reset timestamp.
+ */
+export function earliestResetAcross(candidates: RotateCandidate[], nowMs: number = Date.now()): Date | null {
+  let earliest: number | null = null;
+  for (const c of candidates) {
+    for (const window of c.usageSnapshot?.windows ?? []) {
+      const t = window.resetsAt?.getTime();
+      if (t != null && t > nowMs && (earliest === null || t < earliest)) {
+        earliest = t;
+      }
+    }
+  }
+  return earliest === null ? null : new Date(earliest);
+}
+
+/**
+ * The `resets <summary>` fragment both zero-healthy errors share. ISO 8601 so
+ * a watchdog can parse the cooldown straight off the line; `unknown` when no
+ * snapshot carries a reset (a parser falls back to its default cooldown).
+ */
+function formatResetSummary(reset: Date | null): string {
+  return reset ? reset.toISOString() : 'unknown (no reset timestamps in any snapshot)';
+}
+
+/**
+ * The zero-healthy-account error (RUSH-2132). EXACT contract — the Factory
+ * watchdog tail-detects this text: it must contain the literal `no healthy`
+ * and `resets <time>` (parsed for the rotate cooldown). Do not deviate.
+ */
+export function formatNoHealthyAccountError(
+  agent: AgentId,
+  strategy: RunStrategy,
+  excluded: RotateCandidate[],
+  nowMs: number = Date.now(),
+): string {
+  const excludedStr = excluded.length === 0
+    ? 'no installed versions'
+    : excluded.map((c) => {
+        const readiness = readinessFromCandidate(c);
+        const reason = readiness.ready ? 'ineligible' : readiness.reason;
+        return `${c.version} (${reason})`;
+      }).join(', ');
+  const resetSummary = formatResetSummary(earliestResetAcross(excluded, nowMs));
+  return `agents: no healthy ${agent} account under strategy '${strategy}' — excluded: ${excludedStr}; earliest window resets ${resetSummary}. Use --strategy pinned to force the default.`;
+}
+
+/**
+ * The zero-healthy-harness error for `agents run auto` — names each harness's
+ * exclusion reason plus the earliest reset across all snapshots.
+ */
+export function formatNoHealthyHarnessError(
+  summaries: HarnessSummary[],
+  nowMs: number = Date.now(),
+): string {
+  const excludedStr = summaries.length === 0
+    ? 'no installed harnesses'
+    : summaries.map((s) => {
+        const n = s.candidates.length;
+        const detail = s.exclusionReasons.length > 0 ? s.exclusionReasons.join(', ') : 'no accounts signed in';
+        return `${s.agent} (${n} account${n === 1 ? '' : 's'}: ${detail})`;
+      }).join(', ');
+  const resetSummary = formatResetSummary(earliestResetAcross(summaries.flatMap((s) => s.candidates), nowMs));
+  return `agents: no healthy harness for 'run auto' — excluded: ${excludedStr}; earliest window resets ${resetSummary}. Sign in an account or wait for a window to reset.`;
+}
+
 export async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> {
   const versions = listInstalledVersions(agent);
   const rows = await Promise.all(
@@ -504,6 +681,28 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
       usageMinutesToLimit: headroom?.minutesToLimit ?? null,
     };
   });
+}
+
+/**
+ * Collect run candidates for every harness with ≥1 installed version — the
+ * probe `agents run auto` routes on (the same per-harness account probe
+ * `agents view` aggregates). Harnesses with nothing installed are absent from
+ * the map: not a candidate at all, rather than an excluded one.
+ */
+export async function collectHarnessCandidates(
+  agentIds: AgentId[] = ALL_AGENT_IDS,
+): Promise<Map<AgentId, RotateCandidate[]>> {
+  const entries = await Promise.all(
+    agentIds.map(async (agent) => {
+      if (listInstalledVersions(agent).length === 0) return null;
+      return [agent, await collectRunCandidates(agent)] as const;
+    }),
+  );
+  const byHarness = new Map<AgentId, RotateCandidate[]>();
+  for (const entry of entries) {
+    if (entry) byHarness.set(entry[0], entry[1]);
+  }
+  return byHarness;
 }
 
 /**
@@ -598,18 +797,33 @@ function readRotationStamp(agent: AgentId): string | null {
   return null;
 }
 
-export async function resolveRunVersion(agent: AgentId, strategy: RunStrategy, cwd: string = process.cwd()): Promise<{
+export async function resolveRunVersion(
+  agent: AgentId,
+  strategy: RunStrategy,
+  cwd: string = process.cwd(),
+  collect: (agent: AgentId) => Promise<RotateCandidate[]> = collectRunCandidates,
+): Promise<{
   version: string | null;
   rotation: RotateResult | null;
+  /**
+   * Set when a non-pinned strategy found ZERO healthy candidates among the
+   * installed versions: the full excluded set, so callers fail loud with
+   * per-account reasons instead of launching the exhausted pinned default
+   * (RUSH-2132). Undefined for pinned, for successful picks, and when no
+   * version is installed at all (the pre-existing not-installed path — there
+   * is no account to be "unhealthy").
+   */
+  exhausted?: RotateCandidate[];
 }> {
   const fallback = resolveVersion(agent, cwd);
   if (strategy === 'pinned') {
     return { version: fallback, rotation: null };
   }
 
+  const candidates = await collect(agent);
   const rotation = strategy === 'available'
-    ? await selectAvailableVersion(agent, fallback)
-    : await selectBalancedVersion(agent);
+    ? pickAvailableCandidate(candidates, fallback)
+    : pickBalancedCandidate(candidates);
 
   if (rotation) {
     // `available` is sticky to the pinned default when healthy. Use the 60s
@@ -628,7 +842,7 @@ export async function resolveRunVersion(agent: AgentId, strategy: RunStrategy, c
     return { version: rotation.picked.version, rotation };
   }
 
-  return { version: fallback, rotation: null };
+  return { version: fallback, rotation: null, exhausted: candidates.length > 0 ? candidates : undefined };
 }
 
 /**

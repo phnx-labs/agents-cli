@@ -32,8 +32,11 @@ import {
   isInsideGitWorkTree,
   parseRunAccountPickerRequest,
   runAccountPickerConflicts,
+  runAutoDefaultsToAffinity,
+  RUN_AUTO_KEYWORD,
 } from './exec.js';
 import { isHostPinned, recordScannedKeys } from '../lib/devices/known-hosts.js';
+import { ALL_AGENT_IDS } from '../lib/agents.js';
 
 describe('degraded run governance mode', () => {
   it('records the resolved writable mode in the audit chain', () => {
@@ -343,5 +346,54 @@ describe('hostTargetGiven — the --host alias family (the --terminal reject gua
       'c',
       'd',
     ]);
+  });
+});
+
+describe('agents run auto — the reserved harness keyword (RUSH-2132)', () => {
+  it('runAutoDefaultsToAffinity: no host flag → affinity default; any host flag pins the host layer', () => {
+    expect(runAutoDefaultsToAffinity({})).toBe(true);
+    expect(runAutoDefaultsToAffinity({ host: 'yosemite-s0' })).toBe(false);
+    expect(runAutoDefaultsToAffinity({ device: 'yosemite-s0' })).toBe(false);
+    expect(runAutoDefaultsToAffinity({ on: 'yosemite-s0' })).toBe(false);
+    expect(runAutoDefaultsToAffinity({ computer: 'yosemite-s0' })).toBe(false);
+  });
+
+  it('runAutoDefaultsToAffinity: a host-dispatched run never re-runs affinity (no chain-hopping)', () => {
+    expect(runAutoDefaultsToAffinity({}, { AGENTS_RUN_AUTO_HOST_RESOLVED: '1' })).toBe(false);
+  });
+
+  it('the keyword does not collide with a real harness id today', () => {
+    expect(RUN_AUTO_KEYWORD).toBe('auto');
+    // If this ever fails, a harness registered the id `auto` and the run-auto
+    // keyword must be renamed — the action fails loud on the collision.
+    expect(ALL_AGENT_IDS).not.toContain('auto');
+  });
+
+  it('agents run auto with zero installed harnesses exits nonzero with the no-healthy contract message', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run-auto-empty-'));
+    try {
+      // Fresh HOME → no installed harness versions → the harness layer finds
+      // zero candidates and must fail loud instead of launching anything. The
+      // .agents/.system fixture gets past the first-run setup gate (same shape
+      // as the governance-mode test above).
+      fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
+      fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), 'agents: {}\n');
+      const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+      const result = spawnSync(
+        'node',
+        ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'auto', 'probe', '--mode', 'plan', '--quiet', '--cwd', root],
+        {
+          cwd: path.resolve(import.meta.dirname, '..', '..'),
+          env: { ...process.env, HOME: root },
+          encoding: 'utf8',
+        },
+      );
+      expect(result.status).toBe(1);
+      // The watchdog contract: literal `no healthy` + `resets` on the error line.
+      expect(result.stderr).toContain('no healthy');
+      expect(result.stderr).toContain('resets');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

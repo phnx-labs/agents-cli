@@ -166,6 +166,30 @@ function isValidAgent(agent: string): agent is AgentId {
   return agent in AGENTS;
 }
 
+/**
+ * Reserved `<agent>` keyword for `agents run auto` — full-auto dispatch:
+ * host (14d launch affinity) → harness (best-account headroom, weighted) →
+ * account (balanced). Validated at run time so a future harness literally
+ * named `auto` fails loud instead of being shadowed.
+ */
+export const RUN_AUTO_KEYWORD = 'auto';
+
+/**
+ * Whether `run auto` should default its host layer to the affinity pick (the
+ * same machinery as `--device auto`). False when the caller pinned any host
+ * flag, and false when this process was itself dispatched by a host run — the
+ * dispatcher forwards AGENTS_RUN_AUTO_HOST_RESOLVED=1 because it already
+ * resolved the host layer, and re-picking here would chain-hop the run across
+ * the fleet. Pure so the pinning matrix is unit-testable.
+ */
+export function runAutoDefaultsToAffinity(
+  options: { host?: string; device?: string; on?: string; computer?: string },
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (hostTargetGiven(options).length > 0) return false;
+  return env.AGENTS_RUN_AUTO_HOST_RESOLVED !== '1';
+}
+
 /** Build a one-line banner describing which version the strategy picked. */
 function formatRotationBanner(result: RotateResult, verb: string = 'balanced'): string {
   const { picked, healthy, excluded } = result;
@@ -827,6 +851,11 @@ export function registerRunCommand(program: Command): void {
       # Pick a signed-in account/version for only this run
       agents run claude@
 
+      # Full-auto: affinity-pick the host, then the harness with the most
+      # account headroom, then a balanced account on it
+      agents run auto "fix the flaky test" --mode edit
+      agents run auto --host yosemite-s0 "fix the flaky test"   # pin the host
+
       # Open the session in a terminal tab — detected from where your sessions
       # already run (Ghostty / iTerm / Terminal.app); force one with a value
       agents run claude --terminal
@@ -865,6 +894,13 @@ export function registerRunCommand(program: Command): void {
         balanced   distribute load across healthy accounts by remaining capacity (default)
         A version/account is skipped when it is rate-limited right now — any usage window (incl. the 5-hour session window) at 100%, matching the 'agents view' badge.
         --balanced is shorthand for --strategy balanced. Ignored when @version is pinned, when a profile is used, or with --fallback.
+        Zero healthy accounts under balanced/available exits nonzero naming each
+        excluded account and the earliest window reset — use --strategy pinned to force.
+
+      'auto' harness (agents run auto): picks the host (14d usage affinity,
+      unless --host is given), the harness (installed CLIs weighted by
+      best-account headroom), and the account (the strategy above). Zero
+      healthy accounts on any harness exits nonzero with the earliest reset.
 
       Account picker: append @ with no version (agents run claude@) to choose one
         installed account for this run. Rows show identity, login state, plan,
@@ -957,6 +993,38 @@ export function registerRunCommand(program: Command): void {
           ));
           process.exit(1);
         }
+      }
+
+      // `agents run auto`: the reserved harness keyword — full-auto dispatch
+      // (host affinity → cross-harness balance → account balance, RUSH-2132).
+      if (normalizedAgentSpec.split('@')[0] === RUN_AUTO_KEYWORD && normalizedAgentSpec !== RUN_AUTO_KEYWORD) {
+        console.error(chalk.red(
+          `agents run auto picks the harness itself — a @version pin does not apply. ` +
+          `Pin a concrete harness instead: agents run <harness>@<version>.`,
+        ));
+        process.exit(1);
+      }
+      const autoHarnessRequested = normalizedAgentSpec === RUN_AUTO_KEYWORD;
+      if (autoHarnessRequested) {
+        // `auto` is reserved. If a future harness registers that id, the
+        // keyword collides — fail loud rather than silently shadow the harness.
+        if (RUN_AUTO_KEYWORD in AGENTS) {
+          console.error(chalk.red(
+            `'${RUN_AUTO_KEYWORD}' is now a registered harness and collides with the reserved 'run auto' keyword. ` +
+            `Run the harness by name instead.`,
+          ));
+          process.exit(1);
+        }
+        if (accountPickerRequested) {
+          console.error(chalk.red(
+            `agents run auto picks the harness and account itself — the trailing-@ account picker needs a concrete harness (agents run <harness>@).`,
+          ));
+          process.exit(1);
+        }
+        // Host layer: with no explicit --host/--device, default to the
+        // affinity pick. Skipped on a host-dispatched run — its dispatcher
+        // already resolved this layer (see runAutoDefaultsToAffinity).
+        if (runAutoDefaultsToAffinity(options)) options.device = 'auto';
       }
 
       // --device auto / --host auto (and deprecated --smart): affinity-pick host.
@@ -1350,6 +1418,11 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         const hostName = hostGiven[0];
+        if (autoHarnessRequested) {
+          // The remote `agents run auto` must NOT re-run host affinity — this
+          // dispatch already resolved that layer; re-picking would chain-hop.
+          options.env = [...options.env, 'AGENTS_RUN_AUTO_HOST_RESOLVED=1'];
+        }
         const { resolveHostRunTarget, resolveHostSessionId, dispatchPromptToHost, HostResolutionError } = await import('../lib/hosts/run-target.js');
         const { runInteractiveOnHost } = await import('../lib/hosts/dispatch.js');
         const { registerInteractiveHostSession } = await import('../lib/hosts/session-index.js');
@@ -1792,7 +1865,7 @@ export function registerRunCommand(program: Command): void {
         { profileExists, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported, isHeadlessSecretsContext },
         { splitBundleRef, resolveHostSshTarget, remoteResolveEnv },
-        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES },
+        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES, collectHarnessCandidates, pickHarnessWeighted, classifyHarnessCandidates, formatHarnessPickBanner, formatNoHealthyHarnessError, formatNoHealthyAccountError },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
         { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents, ensureSubagentDispatchTool },
@@ -1862,7 +1935,27 @@ export function registerRunCommand(program: Command): void {
         }
       }
 
-      if (isValidAgent(rawAgent)) {
+      if (autoHarnessRequested) {
+        // Harness layer (RUSH-2132): weighted pick across installed harnesses
+        // by best-account headroom. Zero healthy accounts anywhere fails loud
+        // — launching a default "because it's there" is how a rotate loop
+        // hammers an exhausted account.
+        const byHarness = await collectHarnessCandidates();
+        const harnessPick = pickHarnessWeighted(byHarness);
+        if (!harnessPick) {
+          console.error(chalk.red(formatNoHealthyHarnessError(classifyHarnessCandidates(byHarness))));
+          process.exit(1);
+        }
+        agent = harnessPick.picked.agent;
+        if (!options.quiet) {
+          process.stderr.write(chalk.gray(formatHarnessPickBanner(harnessPick) + '\n'));
+        }
+        // --session-id keeps its claude-only semantics: honored when auto
+        // picks claude, ignored (loudly) otherwise.
+        if (options.sessionId && agent !== 'claude' && !options.quiet) {
+          process.stderr.write(chalk.yellow(`[agents] --session-id ignored: auto picked ${agent} (only claude accepts a forced session id)\n`));
+        }
+      } else if (isValidAgent(rawAgent)) {
         agent = rawAgent;
       } else if (profileExists(rawAgent)) {
         // Not a known agent id, but a profile by this name exists. Profiles
@@ -2255,6 +2348,15 @@ export function registerRunCommand(program: Command): void {
         } else {
           try {
             const resolved = await resolveRunVersion(agent, strategy, cwd);
+            if (resolved.exhausted) {
+              // Fail loud (RUSH-2132): the old behavior warned "found no
+              // usable version; falling back to defaults" and launched the
+              // pinned default anyway — the exact move that loops a rotate
+              // into an exhausted account. The message text is a contract
+              // the Factory watchdog tail-detects; do not reword it.
+              console.error(chalk.red(formatNoHealthyAccountError(agent, strategy, resolved.exhausted)));
+              process.exit(1);
+            }
             if (resolved.version) {
               version = resolved.version;
               rotationResult = resolved.rotation;
@@ -2263,6 +2365,8 @@ export function registerRunCommand(program: Command): void {
                 process.stderr.write(chalk.gray(banner + '\n'));
               }
             } else if (!options.quiet) {
+              // No installed version at all (not "accounts exhausted" — that
+              // fails loud above): keep the pre-existing default resolution.
               process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} found no usable ${agent} version; falling back to defaults\n`));
             }
           } catch (err) {

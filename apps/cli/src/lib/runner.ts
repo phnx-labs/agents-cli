@@ -58,6 +58,8 @@ import {
   resolveAccountVersion,
   rotationFailoverChain,
   readinessFromCandidate,
+  formatNoHealthyAccountError,
+  type RotateCandidate,
   type RotateResult,
 } from './rotate.js';
 import { readAuthHealth, isDeadVerdict } from './auth-health.js';
@@ -436,10 +438,12 @@ export async function resolveRoutineLaunch(
   const strategy = getConfiguredRunStrategy(agent, cwd);
   let version: string | undefined;
   let rotation: RotateResult | null = null;
+  let exhausted: RotateCandidate[] | undefined;
   try {
     const resolved = await resolveRunVersion(agent, strategy, cwd);
     version = resolved.version ?? undefined;
     rotation = resolved.rotation;
+    exhausted = resolved.exhausted;
     if (rotation) {
       const label = rotation.picked.email
         ? `${rotation.picked.email} · ${agent}@${rotation.picked.version}`
@@ -460,7 +464,7 @@ export async function resolveRoutineLaunch(
           `[agents] routine ${config.name}: skipped ${reasons}\n`,
         );
       }
-    } else if (!version) {
+    } else if (!version && !exhausted) {
       process.stderr.write(
         `[agents] routine ${config.name}: strategy ${strategy} found no usable ${agent} version; ` +
           `falling back to default pin\n`,
@@ -470,6 +474,14 @@ export async function resolveRoutineLaunch(
     process.stderr.write(
       `[agents] routine ${config.name}: strategy ${strategy} skipped: ${(err as Error).message}\n`,
     );
+  }
+
+  // Zero healthy accounts is NOT a "fall back to the default pin" case — that
+  // pin is exactly the exhausted account an unattended routine would hammer
+  // every tick (RUSH-2132). Throwing fails the job run (nonzero), and the
+  // message text is the contract the Factory watchdog tail-detects.
+  if (exhausted) {
+    throw new Error(formatNoHealthyAccountError(agent, strategy, exhausted));
   }
 
   if (!version) {

@@ -8,16 +8,24 @@ import {
   DEFAULT_ROTATION_FAILOVER_LIMIT,
   pickBalancedCandidate,
   pickAvailableCandidate,
+  pickHarnessWeighted,
+  classifyHarnessCandidates,
+  formatHarnessPickBanner,
+  formatNoHealthyAccountError,
+  formatNoHealthyHarnessError,
+  earliestResetAcross,
   readinessFromCandidate,
   matchAccountVersion,
   isUsageVerified,
   capacityWeight,
   PROJECTION_HORIZON_MIN,
+  resolveRunVersion,
   type RotateCandidate,
   type RotateResult,
   type FailoverArmingContext,
 } from './rotate.js';
 import { runWithFallback } from './exec.js';
+import type { AgentId } from './types.js';
 import type { UsageSnapshot, UsageWindowKey } from './usage.js';
 
 /**
@@ -514,5 +522,218 @@ describe('capacityWeight — deprioritizes an account projected to cap soon', ()
     const burningFast = capacityWeight(50, 3);
     const idle = capacityWeight(50, null);
     expect(burningFast).toBeLessThan(idle);
+  });
+});
+
+/** A candidate for a specific harness (the `candidate` helper above is claude-only). */
+function harnessAcct(agent: AgentId, version: string, over: Partial<RotateCandidate> = {}): RotateCandidate {
+  return {
+    ...candidate({ version, ...over }),
+    agent,
+    accountKey: `${agent}:account=${version}`,
+    accountLabel: `${version}@${agent}.example.com`,
+    email: `${version}@${agent}.example.com`,
+    usageKey: `${agent}:org=${version}`,
+  };
+}
+
+describe('pickHarnessWeighted (run auto — the cross-harness layer, RUSH-2132)', () => {
+  const NOW = Date.UTC(2026, 7, 3, 7, 0);
+  const freshSnap = (usedPercent: number): UsageSnapshot =>
+    snapshotAt(new Date(NOW - 60_000), [{ key: 'week', usedPercent }]);
+
+  it('excludes a zero-healthy harness outright — it is never picked, not down-weighted', () => {
+    const byHarness = new Map<AgentId, RotateCandidate[]>([
+      ['claude', [harnessAcct('claude', '2.1.207', { usageStatus: 'rate_limited' })]],
+      ['codex', [harnessAcct('codex', '0.116.0')]],
+    ]);
+    for (let i = 0; i < 50; i++) {
+      const result = pickHarnessWeighted(byHarness, NOW)!;
+      expect(result.picked.agent).toBe('codex');
+    }
+    const result = pickHarnessWeighted(byHarness, NOW)!;
+    expect(result.healthy.map((s) => s.agent)).toEqual(['codex']);
+    expect(result.excluded.map((s) => s.agent)).toEqual(['claude']);
+    expect(result.excluded[0].exclusionReasons).toEqual(['1 rate_limited']);
+  });
+
+  it('weights harnesses by their BEST account headroom, sharing the account layer sampler', () => {
+    // claude's best account is at 0% used (weight 100), codex's at 90% (weight
+    // 10) — claude should win ~91% of rolls. 2000 rolls makes <80% statistically
+    // impossible under the correct weighting.
+    const byHarness = new Map<AgentId, RotateCandidate[]>([
+      ['claude', [harnessAcct('claude', '2.1.207', { usageSnapshot: freshSnap(0) })]],
+      ['codex', [harnessAcct('codex', '0.116.0', { usageSnapshot: freshSnap(90) })]],
+    ]);
+    let claudePicks = 0;
+    const ROLLS = 2000;
+    for (let i = 0; i < ROLLS; i++) {
+      if (pickHarnessWeighted(byHarness, NOW)!.picked.agent === 'claude') claudePicks++;
+    }
+    expect(claudePicks / ROLLS).toBeGreaterThan(0.8);
+  });
+
+  it('capacity comes from the best account (min used), not the average — an exhausted sibling does not drag the harness down', () => {
+    const byHarness = new Map<AgentId, RotateCandidate[]>([
+      ['claude', [
+        harnessAcct('claude', '2.1.207', { usageSnapshot: freshSnap(95) }),
+        harnessAcct('claude', '2.1.186', { usageSnapshot: freshSnap(10) }),
+      ]],
+      ['codex', [harnessAcct('codex', '0.116.0', { usageSnapshot: freshSnap(50) })]],
+    ]);
+    const summaries = classifyHarnessCandidates(byHarness, NOW);
+    const claude = summaries.find((s) => s.agent === 'claude')!;
+    expect(claude.best!.version).toBe('2.1.186');
+    expect(claude.bestUsedPercent).toBe(10);
+    // Weights 90 vs 50 → claude ~64% of rolls.
+    let claudePicks = 0;
+    const ROLLS = 2000;
+    for (let i = 0; i < ROLLS; i++) {
+      if (pickHarnessWeighted(byHarness, NOW)!.picked.agent === 'claude') claudePicks++;
+    }
+    expect(claudePicks / ROLLS).toBeGreaterThan(0.55);
+  });
+
+  it('a stale snapshot never becomes the harness representative while a verified account exists', () => {
+    const stale = snapshotAt(new Date(NOW - 26 * 3600 * 1000), [{ key: 'week', usedPercent: 5 }]);
+    const byHarness = new Map<AgentId, RotateCandidate[]>([
+      ['claude', [
+        harnessAcct('claude', '2.1.181', { usageSnapshot: stale }),
+        harnessAcct('claude', '2.1.219', { usageSnapshot: freshSnap(80) }),
+      ]],
+    ]);
+    const [summary] = classifyHarnessCandidates(byHarness, NOW);
+    // The day-old "5% used" is not evidence; the verified 80% account represents.
+    expect(summary.best!.version).toBe('2.1.219');
+  });
+
+  it('single-harness degenerate case: the only healthy harness is always picked', () => {
+    const byHarness = new Map<AgentId, RotateCandidate[]>([
+      ['claude', [harnessAcct('claude', '2.1.207')]],
+    ]);
+    const result = pickHarnessWeighted(byHarness, NOW)!;
+    expect(result.picked.agent).toBe('claude');
+    expect(result.healthy.length).toBe(1);
+    expect(result.excluded.length).toBe(0);
+    expect(formatHarnessPickBanner(result)).toBe(
+      '[agents] auto picked claude (best account headroom unknown, 1 of 1 harnesses healthy)',
+    );
+  });
+
+  it('returns null when every harness is exhausted; classify carries the exclusion detail', () => {
+    const byHarness = new Map<AgentId, RotateCandidate[]>([
+      ['claude', [
+        harnessAcct('claude', '2.1.207', { usageStatus: 'rate_limited' }),
+        harnessAcct('claude', '2.1.186', { signedIn: false }),
+      ]],
+      ['codex', [harnessAcct('codex', '0.116.0', { usageStatus: 'out_of_credits' })]],
+    ]);
+    expect(pickHarnessWeighted(byHarness, NOW)).toBeNull();
+    const summaries = classifyHarnessCandidates(byHarness, NOW);
+    expect(summaries.every((s) => s.best === null)).toBe(true);
+    const claude = summaries.find((s) => s.agent === 'claude')!;
+    expect(claude.exclusionReasons).toEqual(['1 rate_limited', '1 signed_out']);
+  });
+
+  it('the banner names the picked harness and its best-account headroom', () => {
+    const byHarness = new Map<AgentId, RotateCandidate[]>([
+      ['claude', [harnessAcct('claude', '2.1.207', { usageStatus: 'rate_limited' })]],
+      ['codex', [harnessAcct('codex', '0.116.0', { usageSnapshot: freshSnap(56) })]],
+    ]);
+    const result = pickHarnessWeighted(byHarness, NOW)!;
+    expect(formatHarnessPickBanner(result)).toBe(
+      '[agents] auto picked codex (best account 44% headroom, 1 of 2 harnesses healthy)',
+    );
+  });
+});
+
+describe('formatNoHealthyAccountError — the watchdog contract (RUSH-2132)', () => {
+  const NOW = Date.UTC(2026, 7, 3, 7, 0);
+  const resetAt = new Date(NOW + 2 * 3600 * 1000);
+  const cappedSnap: UsageSnapshot = {
+    source: 'live',
+    sourceLabel: 'live',
+    capturedAt: new Date(NOW - 60_000),
+    windows: [{ key: 'week', label: 'week', shortLabel: 'week', usedPercent: 100, resetsAt: resetAt, windowMinutes: null }],
+  };
+
+  it('matches the exact message contract (literal `no healthy` + `resets <time>` + pinned escape hatch)', () => {
+    const limited = candidate({ version: '2.1.207', usageSnapshot: cappedSnap });
+    const msg = formatNoHealthyAccountError('claude', 'balanced', [limited], NOW);
+    expect(msg).toBe(
+      `agents: no healthy claude account under strategy 'balanced' — excluded: 2.1.207 (rate_limited); ` +
+      `earliest window resets ${resetAt.toISOString()}. Use --strategy pinned to force the default.`,
+    );
+  });
+
+  it('picks the earliest FUTURE reset across candidates and ignores past resets', () => {
+    const later = new Date(NOW + 5 * 3600 * 1000);
+    const past = new Date(NOW - 3600 * 1000);
+    const snap = (resetsAt: Date): UsageSnapshot => ({
+      ...cappedSnap,
+      windows: [{ ...cappedSnap.windows[0], resetsAt }],
+    });
+    const a = candidate({ version: '1.0.0', usageSnapshot: snap(later) });
+    const b = candidate({ version: '2.0.0', usageSnapshot: snap(resetAt) });
+    const c = candidate({ version: '3.0.0', usageSnapshot: snap(past) });
+    expect(earliestResetAcross([a, b, c], NOW)?.toISOString()).toBe(resetAt.toISOString());
+  });
+
+  it('degrades to `resets unknown` when no snapshot carries a reset timestamp', () => {
+    const signedOut = candidate({ version: '2.1.207', signedIn: false });
+    const msg = formatNoHealthyAccountError('claude', 'available', [signedOut], NOW);
+    expect(msg).toContain('no healthy claude account');
+    expect(msg).toContain("strategy 'available'");
+    expect(msg).toContain('excluded: 2.1.207 (signed_out)');
+    expect(msg).toContain('resets unknown');
+  });
+
+  it('names every excluded account with its reason', () => {
+    const msg = formatNoHealthyAccountError('claude', 'balanced', [
+      candidate({ version: '1.0.0', usageStatus: 'rate_limited' }),
+      candidate({ version: '2.0.0', usageStatus: 'out_of_credits' }),
+      candidate({ version: '3.0.0', signedIn: false }),
+    ], NOW);
+    expect(msg).toContain('excluded: 1.0.0 (rate_limited), 2.0.0 (out_of_credits), 3.0.0 (signed_out)');
+  });
+
+  it('formatNoHealthyHarnessError names each harness exclusion + the reset, and stays parseable', () => {
+    const byHarness = new Map<AgentId, RotateCandidate[]>([
+      ['claude', [
+        harnessAcct('claude', '2.1.207', { usageSnapshot: cappedSnap }),
+        harnessAcct('claude', '2.1.186', { signedIn: false }),
+      ]],
+      ['codex', [harnessAcct('codex', '0.116.0', { usageStatus: 'out_of_credits' })]],
+    ]);
+    const msg = formatNoHealthyHarnessError(classifyHarnessCandidates(byHarness, NOW), NOW);
+    expect(msg).toContain('no healthy');
+    expect(msg).toContain('claude (2 accounts: 1 rate_limited, 1 signed_out)');
+    expect(msg).toContain('codex (1 account: 1 out_of_credits)');
+    expect(msg).toContain(`resets ${resetAt.toISOString()}`);
+  });
+});
+
+describe('resolveRunVersion — fail-loud signal on zero healthy (RUSH-2132)', () => {
+  it('zero healthy accounts → rotation null + the full exhausted set (no silent default launch)', async () => {
+    const limited = candidate({ version: '9.9.9', usageStatus: 'rate_limited' });
+    const resolved = await resolveRunVersion('claude', 'balanced', process.cwd(), async () => [limited]);
+    expect(resolved.rotation).toBeNull();
+    expect(resolved.exhausted?.map((c) => c.version)).toEqual(['9.9.9']);
+  });
+
+  it('one healthy account → picked, no exhausted marker', async () => {
+    const healthy = candidate({ version: '9.9.9' });
+    const resolved = await resolveRunVersion('claude', 'balanced', process.cwd(), async () => [healthy]);
+    expect(resolved.rotation?.picked.version).toBe('9.9.9');
+    expect(resolved.version).toBe('9.9.9');
+    expect(resolved.exhausted).toBeUndefined();
+  });
+
+  it('pinned never probes accounts and never reports exhausted — behavior unchanged', async () => {
+    const resolved = await resolveRunVersion('claude', 'pinned', process.cwd(), async () => {
+      throw new Error('pinned must not probe accounts');
+    });
+    expect(resolved.rotation).toBeNull();
+    expect(resolved.exhausted).toBeUndefined();
   });
 });

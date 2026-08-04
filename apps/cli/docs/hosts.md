@@ -33,6 +33,36 @@ affinity (weighted by launch counts on `sessions.db` `machine`; most-used online
 device has highest probability). Harness stays the agent you typed — never
 auto-picked. Affinity failure degrades to local rather than aborting the run.
 
+### `agents run auto` — all three routing layers
+
+`auto` as the AGENT name (`agents run auto "…"`, distinct from `--host auto`)
+composes the full dispatch stack:
+
+1. **Host** — with no `--host`/`--device` flag, the affinity pick above runs
+   (launches^1.3 weighted sample among online devices). A remote pick dispatches
+   `agents run auto …` to that host over the same SSH path, and the harness +
+   account layers resolve THERE (usage is per-machine); the dispatcher marks the
+   host layer resolved (`AGENTS_RUN_AUTO_HOST_RESOLVED=1`) so the remote never
+   re-runs affinity and chain-hops. `--host <name>` pins this layer.
+2. **Harness** — `pickHarnessWeighted` (lib/rotate.ts): installed harnesses with
+   ≥1 healthy account, weighted by best-account headroom
+   (`100 − min routingUsed%`), sampled with the same `weightedRandomByCapacity`
+   the account layer uses. A harness whose accounts are all rate-limited or
+   signed out is excluded outright. Naming a concrete harness (`run claude`)
+   pins this layer.
+3. **Account** — `pickBalancedCandidate` within the chosen harness (or the
+   `--strategy` you passed) — unchanged.
+
+Every layer fails loud when it finds nothing: zero healthy accounts on any
+harness exits nonzero naming each harness's exclusion reason and the earliest
+window reset; zero healthy accounts within the picked harness exits nonzero
+with `agents: no healthy <agent> account under strategy '<strategy>' — excluded:
+…; earliest window resets <iso-time>. Use --strategy pinned to force the
+default.` (the Factory watchdog tail-detects this text for rotate cooldowns).
+`--session-id` keeps its claude-only semantics — honored when auto picks
+claude, ignored with a stderr note otherwise.
+
+
 Pass `all` as the `--host` / `--device` value to fan any fleet-aware command out
 across every registered device. The passthrough runs `agents <cmd> --json` on each
 box concurrently, then renders a grouped-by-OS roster with one row per device
