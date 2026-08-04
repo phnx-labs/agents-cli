@@ -3011,14 +3011,27 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         }
         break;
       case 'getWatchdogStatus': {
-        const enabled = vscode.workspace.getConfiguration('agents.watchdog').get<boolean>('enabled', false);
-        settingsPanel?.webview.postMessage({ type: 'watchdogStatus', enabled });
+        // The enable state lives in the CLI daemon watchdog now (the
+        // extension's `agents.watchdog.*` settings were deleted with the loop).
+        try {
+          const { stdout } = await runAgents('watchdog status --json');
+          const parsed = JSON.parse(stdout) as { enabled?: boolean };
+          settingsPanel?.webview.postMessage({ type: 'watchdogStatus', enabled: !!parsed.enabled });
+        } catch {
+          settingsPanel?.webview.postMessage({ type: 'watchdogStatus', enabled: false });
+        }
         break;
       }
       case 'setWatchdogEnabled': {
         const next = !!message.value;
-        await vscode.workspace.getConfiguration('agents.watchdog').update('enabled', next, vscode.ConfigurationTarget.Global);
-        settingsPanel?.webview.postMessage({ type: 'watchdogStatus', enabled: next });
+        try {
+          await runAgents(`watchdog ${next ? 'enable' : 'disable'}`);
+          settingsPanel?.webview.postMessage({ type: 'watchdogStatus', enabled: next });
+        } catch (err) {
+          vscode.window.showErrorMessage(
+            `agents watchdog ${next ? 'enable' : 'disable'} failed: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
         break;
       }
       case 'getWatchdogLog': {

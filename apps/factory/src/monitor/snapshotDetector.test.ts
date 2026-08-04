@@ -3,8 +3,7 @@
 // `fetchGitInfo`/`fetchWorktrees` are exercised against a REAL temp git repo
 // (the canonical compute the leader and the local fallback both use). The
 // detector's merge + emit + IN-FLIGHT GUARD logic is driven through injected
-// real fetchers (the same DI the WatchdogDetector test uses for `agents view`),
-// so the test never depends on the `agents` binary.
+// real fetchers, so the test never depends on the `agents` binary.
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import { execFileSync } from 'child_process';

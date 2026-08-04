@@ -1,41 +1,27 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { EditorTerminal } from './terminals.vscode';
-import { formatEvent, trimToLast, WatchdogEvent, WATCHDOG_LOG_PATH } from '../core/watchdogLog';
-import { classifyTailForRotate } from '../core/autoRotate';
+import { execFile } from 'child_process';
+import { bootstrapPath, resolveAgentsBin } from '../core/agentsBin';
 
-// This module is the extension's auto-rotate loop. It is NOT a nudger:
-// autonomous stall detection and nudge injection were retired — the CLI daemon
-// watchdog is the sole injector now and writes the SAME `WatchdogEvent` JSONL
-// feed (core/watchdogLog.ts) the Factory Floor status card reads. The extension
-// keeps ONE capability the CLI lacks: when a terminal's account is exhausted it
-// rotates the session into a fresh terminal via `agents run auto` — the CLI
-// owns host affinity, harness headroom, and account balance — and records a
-// `rotate` event to that shared log.
+// The extension holds NO watchdog loop. The CLI daemon watchdog
+// (`agents watchdog enable`, running under `agents __daemon-run`) is the sole
+// watchdog: it owns stall-nudging AND rotate-on-exhaustion, injecting into
+// vscodium tabs through the extension's `/inject` URI verb over
+// live-terminals.json, and writing the shared `~/.agents/.cache/logs/
+// watchdog.log` feed the Factory Floor status card reads (core/watchdogLog.ts).
 //
-// Loop suppression (RUSH-2132): the rotate DECIDES from the terminal's tail
-// (agent-reported rate-limit text, or the CLI's fail-loud `no healthy … resets
-// <time>` error). A `no healthy` verdict — from a tail or reported by the
-// rotate path itself (recordNoHealthyRotateFailure) — suppresses ALL rotation
-// on that host until the parsed reset: the tick keeps evaluating but never
-// spawns, and logs ONE skip event per suppression window. The old per-tick
-// `agents view --json` probe is gone — it only fed the deleted picker and was
-// the source of the repeated macOS Keychain prompts during the 2026-08-03
-// incident.
+// What remains here:
+//   1. The palette on/off — `Agents: Watchdog (Enable|Disable)` shell out to
+//      the CLI's existing `agents watchdog enable|disable` switch.
+//   2. The one-time settings migration (deleted `agents.watchdog.*` settings).
+//   3. The user-editable playbook file scaffold — the CLI daemon owns nudging
+//      now, so this file drives no in-extension behavior; the helpers stay
+//      because the Factory Floor settings panel still surfaces it for editing.
 
-const LOG_MAX_LINES = 500;
+// --- Playbook scaffold (surfaced by the settings panel) ---------------------
 
-// How many transcript tail lines the rotate decision scans per tick.
-const ROTATE_TAIL_LINES = 40;
-
-// User-editable playbook file. It used to hold house rules the (now-retired)
-// nudge decision appended to its prompt; the CLI daemon watchdog owns nudging
-// now, so this file no longer drives any in-extension behavior. The scaffold +
-// status helpers stay because the Factory Floor settings panel still surfaces
-// the file for editing.
 export const WATCHDOG_PLAYBOOK_PATH = path.join(
   os.homedir(),
   '.agents',
@@ -88,327 +74,134 @@ export function getWatchdogPlaybookStatus(): WatchdogPlaybookStatus {
   }
 }
 
-// Hot path: append is O(1) (no read+rewrite of the whole file). The file is
-// trimmed back to LOG_MAX_LINES only once every LOG_TRIM_EVERY appends, so a
-// burst of rotations doesn't rewrite the file each time. Between trims the file
-// may briefly exceed the cap by up to that many lines — acceptable for a
-// diagnostic feed.
-const LOG_TRIM_EVERY = 100;
-let appendCount = 0;
+// --- CLI-backed enable/disable ----------------------------------------------
 
-// Tests point the writer at a temp file; production always uses the shared
-// WATCHDOG_LOG_PATH feed the CLI daemon watchdog writes too.
-let logPathOverride: string | null = null;
-export function __setWatchdogLogPathForTests(p: string | null): void {
-  logPathOverride = p;
-}
-function activeLogPath(): string {
-  return logPathOverride ?? WATCHDOG_LOG_PATH;
+export type WatchdogCliAction = 'enable' | 'disable';
+
+/**
+ * The exec seam (injected by tests): a promisified `child_process.execFile` —
+ * argv array, never a shell string.
+ */
+export type ExecFileAsync = (
+  file: string,
+  args: string[],
+  options: { env: NodeJS.ProcessEnv },
+) => Promise<{ stdout: string; stderr: string }>;
+
+export interface WatchdogCliDeps {
+  execFileAsync?: ExecFileAsync;
+  resolveBin?: () => Promise<string>;
 }
 
-async function trimLogToCap(logPath: string, maxLines: number): Promise<void> {
+const defaultExecFileAsync: ExecFileAsync = (file, args, options) =>
+  new Promise((resolve, reject) => {
+    execFile(file, args, options, (error, stdout, stderr) => {
+      if (error) {
+        (error as { stderr?: string }).stderr = stderr;
+        reject(error);
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+  });
+
+/**
+ * Run `agents watchdog <action>` against the resolved CLI binary. Resolves on
+ * a clean exit; throws an Error whose message quotes the CLI's stderr on a
+ * nonzero exit.
+ */
+export async function runWatchdogCli(
+  action: WatchdogCliAction,
+  deps: WatchdogCliDeps = {},
+): Promise<void> {
+  const bin = await (deps.resolveBin ?? resolveAgentsBin)();
+  const env = {
+    ...process.env,
+    PATH: `${bootstrapPath(bin)}:${process.env.PATH ?? ''}`,
+  };
   try {
-    const existing = await fs.readFile(logPath, 'utf8');
-    const trimmed = trimToLast(existing, maxLines);
-    if (trimmed.length !== existing.length) {
-      await fs.writeFile(logPath, trimmed, 'utf8');
-    }
-  } catch {
-    // file missing or unreadable — nothing to trim
-  }
-}
-
-async function appendToLog(ev: WatchdogEvent): Promise<void> {
-  const logPath = activeLogPath();
-  try {
-    const line = formatEvent(ev) + '\n';
-    await fs.mkdir(path.dirname(logPath), { recursive: true });
-    await fs.appendFile(logPath, line, 'utf8');
-    if (++appendCount % LOG_TRIM_EVERY === 0) {
-      await trimLogToCap(logPath, LOG_MAX_LINES);
-    }
+    await (deps.execFileAsync ?? defaultExecFileAsync)(bin, ['watchdog', action], { env });
   } catch (err) {
-    console.warn('[WATCHDOG] log write failed:', err);
-  }
-}
-
-export type WatchdogRotateOutcome =
-  | { status: 'no_session' }
-  | { status: 'unsupported_agent' }
-  | { status: 'no_healthy_account'; agentKey?: string }
-  | { status: 'rotated'; newSessionId: string };
-
-export interface WatchdogDeps {
-  rotateTerminal: (entry: EditorTerminal) => Promise<WatchdogRotateOutcome>;
-  /**
-   * Tail text the rotate decision scans. Defaults to the session transcript
-   * tail (ROTATE_TAIL_LINES lines); injected by tests.
-   */
-  readTail?: (entry: EditorTerminal) => Promise<string>;
-  /** Tracked terminal listing; defaults to the live registry. */
-  listTerminals?: () => EditorTerminal[];
-}
-
-interface WatchdogConfig {
-  enabled: boolean;
-  autoRotate: boolean;
-  rotateCooldownMs: number;
-  tickMs: number;
-}
-
-function readConfig(): WatchdogConfig {
-  const cfg = vscode.workspace.getConfiguration('agents.watchdog');
-  return {
-    enabled: cfg.get<boolean>('enabled', true),
-    autoRotate: cfg.get<boolean>('autoRotate', true),
-    rotateCooldownMs: cfg.get<number>('rotateCooldownSeconds', 120) * 1000,
-    tickMs: cfg.get<number>('tickSeconds', 120) * 1000,
-  };
-}
-
-// --- No-healthy suppression -------------------------------------------------
-//
-// When `agents run auto` reports zero healthy accounts on a machine, EVERY
-// rotate there fails the same way until the earliest window resets — so the
-// suppression is keyed by host (the local machine is 'local'), not by
-// terminal. The tick keeps evaluating but never spawns while suppressed.
-
-const LOCAL_HOST_KEY = 'local';
-const hostKey = (host?: string): string => host ?? LOCAL_HOST_KEY;
-
-/** host key -> suppress rotations on that host until this epoch ms. */
-const noHealthyUntilMs = new Map<string, number>();
-/** host key -> the suppression horizon we already logged a skip event for. */
-const noHealthySkipLoggedUntilMs = new Map<string, number>();
-
-/**
- * Record a failed rotate whose `agents run auto` exited with the fail-loud
- * `no healthy` error. Called by the rotate path in extension.ts (which reads
- * the launch's output stream) — the one place the CLI's stderr is observable,
- * since pty scrollback is not readable from an extension. Also reachable from
- * the tick when the error text shows up in a tail.
- */
-export function recordNoHealthyRotateFailure(
-  host: string | undefined,
-  untilMs: number | undefined,
-  detail?: string,
-): void {
-  const now = Date.now();
-  const until = untilMs && untilMs > now ? untilMs : now + readConfig().rotateCooldownMs;
-  noHealthyUntilMs.set(hostKey(host), until);
-  void logNoHealthySkipOnce(host, until, detail);
-}
-
-/** ONE skip event per host per suppression window — never per tick. */
-async function logNoHealthySkipOnce(
-  host: string | undefined,
-  untilMs: number,
-  detail?: string,
-): Promise<void> {
-  const key = hostKey(host);
-  if ((noHealthySkipLoggedUntilMs.get(key) ?? 0) >= untilMs) return;
-  noHealthySkipLoggedUntilMs.set(key, untilMs);
-  await appendToLog({
-    ts: Date.now(),
-    kind: 'rotate',
-    message: `skip — no healthy account to rotate into${host ? ` on ${host}` : ''}`,
-    reason: detail ?? `no healthy account — skipping until reset ${new Date(untilMs).toISOString()}`,
-  });
-}
-
-/** Test hook: clear suppression + skip-log state between cases. */
-export function __clearNoHealthyStateForTests(): void {
-  noHealthyUntilMs.clear();
-  noHealthySkipLoggedUntilMs.clear();
-}
-
-// Session transcript tail: the agent's own limit message ("You've hit your
-// weekly limit …") lands in the jsonl the session already writes — no probing,
-// no Keychain prompts. A terminal with no resolvable transcript simply isn't
-// judged this tick. Lazy-imported so this module stays loadable in tests with
-// only the vscode mock.
-async function defaultReadTail(entry: EditorTerminal): Promise<string> {
-  if (!entry.sessionId || !entry.agentType) return '';
-  try {
-    const sessions = await import('./sessions.vscode');
-    const sessionPath = await sessions.getSessionPathBySessionId(
-      entry.sessionId,
-      entry.agentType as Parameters<typeof sessions.getSessionPathBySessionId>[1],
-    );
-    if (!sessionPath) return '';
-    const lines = await sessions.readTailLines(sessionPath, ROTATE_TAIL_LINES);
-    return lines.join('\n');
-  } catch {
-    return '';
-  }
-}
-
-async function listTerminalsDefault(): Promise<EditorTerminal[]> {
-  const mod = await import('./terminals.vscode');
-  return mod.getAllTerminals();
-}
-
-let tickInFlight = false;
-// Idle-window gating: when the IDE window has been unfocused for this long,
-// skip ticks. Auto-rotate spawns a fresh terminal — not useful when the user
-// isn't watching.
-const WATCHDOG_IDLE_SKIP_MS = 5 * 60_000;
-let lastFocusedAtMs = Date.now();
-
-export async function tick(
-  lastRotateMs: Map<string, number>,
-  deps: WatchdogDeps
-): Promise<void> {
-  if (tickInFlight) return;
-  tickInFlight = true;
-  try {
-    const cfg = readConfig();
-    if (!cfg.enabled || !cfg.autoRotate) return;
-
-    const tracked = deps.listTerminals ? deps.listTerminals() : await listTerminalsDefault();
-    const sessions = tracked.filter((e) => !!e.sessionId && !!e.agentType);
-    if (sessions.length === 0) return;
-
-    // Skip when the window has been unfocused long enough that the user is
-    // clearly elsewhere. `vscode.window.state.focused` is a live snapshot; we
-    // keep our own freshness clock so we don't hammer when the user hasn't
-    // touched the window in minutes.
-    if (vscode.window.state.focused) lastFocusedAtMs = Date.now();
-    if (Date.now() - lastFocusedAtMs >= WATCHDOG_IDLE_SKIP_MS) return;
-
-    const now = Date.now();
-    const readTail = deps.readTail ?? defaultReadTail;
-
-    for (const entry of sessions) {
-      if (!entry.sessionId || !entry.agentType) continue;
-
-      // Host-level suppression: a previous `no healthy` (from a tail or from
-      // the rotate path) holds until the reset — evaluate but never spawn.
-      const suppressedUntil = noHealthyUntilMs.get(hostKey(entry.host)) ?? 0;
-      if (suppressedUntil > now) {
-        await logNoHealthySkipOnce(entry.host, suppressedUntil);
-        continue;
-      }
-
-      const lastRotate = lastRotateMs.get(entry.id) ?? 0;
-      if (now - lastRotate < cfg.rotateCooldownMs) continue;
-
-      const tail = await readTail(entry);
-      if (!tail) continue;
-      const verdict = classifyTailForRotate(tail, now);
-
-      if (verdict.kind === 'no_healthy_account') {
-        // The CLI already told us nothing on this machine can take the
-        // session — suppress every rotate here until the window resets.
-        const until = verdict.resetsAtMs && verdict.resetsAtMs > now
-          ? verdict.resetsAtMs
-          : now + cfg.rotateCooldownMs;
-        noHealthyUntilMs.set(hostKey(entry.host), until);
-        console.log(
-          `[WATCHDOG] ${entry.id}${entry.host ? ` on ${entry.host}` : ''}: no healthy account — suppressing rotation until ${new Date(until).toISOString()}`
-        );
-        await logNoHealthySkipOnce(entry.host, until);
-        continue;
-      }
-
-      if (verdict.kind !== 'rate_limited') continue;
-
-      console.log(
-        `[WATCHDOG] auto-rotate triggered for ${entry.id}${entry.host ? ` on ${entry.host}` : ''} — tail shows an exhausted account`
-      );
-      lastRotateMs.set(entry.id, now);
-      try {
-        const outcome = await deps.rotateTerminal(entry);
-        if (outcome.status === 'rotated') {
-          vscode.window.setStatusBarMessage(
-            `Auto-rotated ${entry.agentType} via agents run auto · ${outcome.newSessionId.slice(0, 8)}`,
-            8000
-          );
-          console.log(`[WATCHDOG] rotated ${entry.id} -> agents run auto (${outcome.newSessionId.slice(0, 8)})`);
-          await appendToLog({
-            ts: now,
-            kind: 'rotate',
-            terminalId: entry.id,
-            agentType: entry.agentType,
-            message: `-> agents run auto · ${outcome.newSessionId.slice(0, 8)}`,
-            reason: 'account exhausted (rate-limited tail)',
-          });
-          continue;
-        }
-        if (outcome.status === 'no_healthy_account') {
-          // The rotate path already recorded the suppression and its skip
-          // event (it saw the CLI's stderr); just surface it here.
-          vscode.window.setStatusBarMessage(
-            'All accounts are at their limit — nothing to rotate to',
-            8000
-          );
-          console.log(`[WATCHDOG] no healthy account to rotate ${entry.id} into`);
-        }
-      } catch (err) {
-        console.error(`[WATCHDOG] rotate failed for ${entry.id}:`, err);
-      }
-    }
-  } finally {
-    tickInFlight = false;
+    const stderr = (err as { stderr?: string }).stderr?.trim();
+    throw new Error(stderr || (err instanceof Error ? err.message : String(err)));
   }
 }
 
 /**
- * `Agents: Toggle Watchdog Auto-Rotate` — the off switch that did not exist
- * during the 2026-08-03 loop. Flips `agents.watchdog.autoRotate`; the running
- * loop picks it up via the configuration-change listener in startWatchdog.
+ * `Agents: Watchdog (Enable)` / `Agents: Watchdog (Disable)` — the on/off for
+ * the CLI daemon watchdog (nudging + rotate). Static palette titles can't be
+ * dynamic, so the pair is the honest version of a toggle.
  */
-export function registerToggleAutoRotateCommand(
+export function registerWatchdogPaletteCommands(
   registerCommand: typeof vscode.commands.registerCommand,
-): vscode.Disposable {
-  return registerCommand('agents.toggleWatchdogAutoRotate', async () => {
-    const cfg = vscode.workspace.getConfiguration('agents.watchdog');
-    const current = cfg.get<boolean>('autoRotate', true);
-    await cfg.update('autoRotate', !current, vscode.ConfigurationTarget.Global);
-    vscode.window.setStatusBarMessage(
-      `Watchdog auto-rotate ${!current ? 'ON' : 'OFF'}`,
-      4000
-    );
-  });
+  deps: WatchdogCliDeps = {},
+): vscode.Disposable[] {
+  const handler = (action: WatchdogCliAction) => async () => {
+    try {
+      await runWatchdogCli(action, deps);
+      vscode.window.setStatusBarMessage(`Watchdog ${action}d (CLI daemon)`, 4000);
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `agents watchdog ${action} failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  };
+  return [
+    registerCommand('agents.watchdogEnable', handler('enable')),
+    registerCommand('agents.watchdogDisable', handler('disable')),
+  ];
 }
 
-export function startWatchdog(deps: WatchdogDeps): vscode.Disposable {
-  const lastRotateMs = new Map<string, number>();
-  const disposables: vscode.Disposable[] = [];
-  let intervalId: NodeJS.Timeout | null = null;
+// --- One-time settings migration ----------------------------------------------
 
-  const ensureInterval = () => {
-    const cfg = readConfig();
-    if (intervalId) {
-      clearInterval(intervalId);
-      intervalId = null;
-    }
-    if (!cfg.enabled || !cfg.autoRotate) {
-      console.log('[WATCHDOG] auto-rotate disabled');
-      return;
-    }
-    intervalId = setInterval(() => {
-      tick(lastRotateMs, deps).catch((err) => {
-        console.error('[WATCHDOG] tick error:', err);
-      });
-    }, cfg.tickMs);
-    console.log(`[WATCHDOG] auto-rotate enabled, tick=${cfg.tickMs}ms rotateCooldown=${cfg.rotateCooldownMs}ms`);
-  };
+/** globalState flag: the autoRotate migration runs at most once per user. */
+export const WATCHDOG_ROTATE_MIGRATED_KEY = 'agents.watchdogRotateMigrated';
 
-  ensureInterval();
+interface GlobalStateLike {
+  get<T>(key: string): T | undefined;
+  update(key: string, value: unknown): Thenable<void>;
+}
 
-  disposables.push(
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('agents.watchdog')) {
-        ensureInterval();
-      }
-    })
-  );
+/**
+ * The `agents.watchdog.*` settings were deleted with the in-extension loop. A
+ * user who explicitly set `agents.watchdog.autoRotate: false` opted OUT of
+ * rotate — upgrading must not silently re-enable it now that the CLI daemon
+ * owns rotate. The CLI persists rotate state in its own meta config
+ * (`watchdog.rotate: on|off`) but ships no setter command for it, so the
+ * sanctioned fallback is `agents watchdog disable` (the daemon's one switch
+ * covers nudging + rotate). Runs once per user; on CLI failure the flag stays
+ * unset so the next activation retries.
+ */
+export async function migrateAutoRotateSettingOnce(
+  globalState: GlobalStateLike,
+  deps: WatchdogCliDeps = {},
+): Promise<void> {
+  if (globalState.get<boolean>(WATCHDOG_ROTATE_MIGRATED_KEY)) return;
 
-  return {
-    dispose() {
-      if (intervalId) clearInterval(intervalId);
-      for (const d of disposables) d.dispose();
-    },
-  };
+  const inspect = vscode.workspace
+    .getConfiguration('agents.watchdog')
+    .inspect<boolean>('autoRotate');
+  const explicitOff =
+    inspect?.globalValue === false ||
+    inspect?.workspaceValue === false ||
+    inspect?.workspaceFolderValue === false;
+
+  if (!explicitOff) {
+    await globalState.update(WATCHDOG_ROTATE_MIGRATED_KEY, true);
+    return;
+  }
+
+  try {
+    await runWatchdogCli('disable', deps);
+    await globalState.update(WATCHDOG_ROTATE_MIGRATED_KEY, true);
+    vscode.window.setStatusBarMessage(
+      'Migrated watchdog setting: auto-rotate was off — CLI watchdog disabled (`agents watchdog enable` re-enables)',
+      8000,
+    );
+  } catch (err) {
+    console.warn('[WATCHDOG] autoRotate migration failed (will retry next activation):', err);
+    vscode.window.showErrorMessage(
+      `Could not migrate the removed agents.watchdog.autoRotate setting: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
 }

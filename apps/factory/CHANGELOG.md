@@ -40,6 +40,44 @@ All notable changes to the Factory extension are documented here. Format follows
   session's already-bound account). Source: `src/core/agents.ts`,
   `src/vscode/extension.ts`, `src/core/forkSession.ts`.
 
+- **BREAKING (settings): the extension's watchdog loop is deleted — the CLI daemon watchdog is the only watchdog.**
+  `agents watchdog enable` (the `agents __daemon-run` routine) now owns
+  rotate-on-exhaustion in addition to stall nudging: it injects the harness
+  exit sequence, `agents run auto --interactive`, and the `/continue` replay
+  into the SAME vscodium tab via the extension's `/inject` URI verb over
+  live-terminals.json, and writes `rotate` / `rotate-skip` events to the shared
+  `~/.agents/.cache/logs/watchdog.log` — the Factory Floor status card keeps
+  working unchanged. Deleted: the `startWatchdog` tick + config listener, the
+  no-healthy suppression machinery, `src/core/autoRotate.ts`,
+  `rotateTerminalToBestVersion`/`RotateOutcome`, and the dormant monitor
+  watchdog broadcast lane (`src/monitor/watchdogDetector.ts`, follower
+  `setWatchdogWatches`, host broadcast, the `watchdog-watch` /
+  `watchdog-versions` protocol types). **The `agents.watchdog.enabled`,
+  `agents.watchdog.autoRotate`, `agents.watchdog.rotateCooldownSeconds`, and
+  `agents.watchdog.tickSeconds` settings are removed** — the on/off now lives
+  in the CLI (`agents watchdog enable|disable|status`); an explicit
+  `autoRotate: false` is migrated once per user to the CLI watchdog's off
+  state on activation.
+  Source: `src/vscode/watchdog.vscode.ts`, `src/vscode/extension.ts`,
+  `src/vscode/settings.vscode.ts`, `src/monitor/`, `package.json`.
+
+- **`Agents: Watchdog (Enable)` / `Agents: Watchdog (Disable)` replace `Agents: Toggle Watchdog Auto-Rotate`.**
+  Two honest static palette titles shelling out (execFile argv, no shell
+  string) to the CLI's `agents watchdog enable|disable`, with a status-bar
+  confirmation or an error toast quoting the CLI's stderr. The settings
+  panel's watchdog toggle reads/writes the same CLI state
+  (`agents watchdog status --json`).
+  Source: `src/vscode/watchdog.vscode.ts`, `src/vscode/settings.vscode.ts`,
+  `package.json`.
+
+- **Manual resume commands keep working without the rotate machinery.**
+  `Agents: Resume in Best Profile` now shares the Pick-Harness launch flow
+  (`launchResumeTerminal`) and builds its `agents run auto --interactive
+  --session-id <uuid>` command via `buildAutoRunLaunchCommand` in
+  `src/core/resumeInBest.ts`; a `no healthy` failure surfaces in the fresh
+  terminal itself (the CLI fails loud there).
+  Source: `src/vscode/extension.ts`, `src/core/resumeInBest.ts`.
+
 ## [0.9.309] - 2026-08-03
 
 - **Watchdog auto-rotate delegates to `agents run auto` — no more rotate loops into exhausted accounts.**
