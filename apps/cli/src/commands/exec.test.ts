@@ -33,6 +33,7 @@ import {
   parseRunAccountPickerRequest,
   runAccountPickerConflicts,
   runAutoDefaultsToAffinity,
+  hostInteractiveNeedsCorrelationId,
   RUN_AUTO_KEYWORD,
 } from './exec.js';
 import { isHostPinned, recordScannedKeys } from '../lib/devices/known-hosts.js';
@@ -395,5 +396,26 @@ describe('agents run auto — the reserved harness keyword (RUSH-2132)', () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('interactive host dispatch — run auto session correlation (RUSH-2132 review #5)', () => {
+  it('run auto ALWAYS mints a correlation launch id, even with an explicit --session-id', () => {
+    // The harness is picked on the remote; the explicit id is only adopted by a
+    // claude pick. Pre-registering it would strand a stale index entry when the
+    // pick lands elsewhere — so the launch-id join must resolve the REAL id.
+    expect(hostInteractiveNeedsCorrelationId('auto', 'explicit-id', undefined)).toBe(true);
+    expect(hostInteractiveNeedsCorrelationId('auto', undefined, undefined)).toBe(true);
+  });
+
+  it('resume never mints (the id is already known), for auto and named harnesses alike', () => {
+    expect(hostInteractiveNeedsCorrelationId('auto', 'explicit-id', 'resume-id')).toBe(false);
+    expect(hostInteractiveNeedsCorrelationId('claude', undefined, 'resume-id')).toBe(false);
+  });
+
+  it('named harnesses keep the existing matrix: claude trusts its forced id, tracked agents join, untracked skip', () => {
+    expect(hostInteractiveNeedsCorrelationId('claude', 'forced-id', undefined)).toBe(false);
+    expect(hostInteractiveNeedsCorrelationId('codex', undefined, undefined)).toBe(true);
+    expect(hostInteractiveNeedsCorrelationId('amp', undefined, undefined)).toBe(false);
   });
 });

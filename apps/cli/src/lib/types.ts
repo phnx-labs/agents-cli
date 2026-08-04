@@ -15,6 +15,25 @@ export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'o
 /** How `agents run <agent>` chooses an installed version when none is pinned. */
 export type RunStrategy = 'pinned' | 'available' | 'balanced';
 
+/**
+ * Reserved `<agent>` keyword for `agents run auto` — full-auto dispatch:
+ * host (14d launch affinity) → harness (best-account headroom, weighted) →
+ * account (balanced). Lives in lib (not commands/) because both the run
+ * command (exec.ts) and the host dispatch layer (hosts/dispatch.ts, which
+ * arms the chain-hop guard for remote `run auto`) must agree on it.
+ */
+export const RUN_AUTO_KEYWORD = 'auto';
+
+/**
+ * Env var a host dispatcher exports into the remote SHELL when it dispatches
+ * `agents run auto`: tells the remote CLI its host layer is already resolved,
+ * so it must not re-run affinity and chain-hop to a third host. It rides the
+ * shell-export prelude (hosts/dispatch.ts `remoteRunShellPrelude`) because
+ * `--env` flags only reach the spawned AGENT's env — the remote CLI's own
+ * process.env (which exec.ts `runAutoDefaultsToAffinity` reads) never sees them.
+ */
+export const RUN_AUTO_HOST_RESOLVED_ENV = 'AGENTS_RUN_AUTO_HOST_RESOLVED';
+
 /** Per-agent run strategy config. */
 export interface AgentRunConfig {
   strategy?: RunStrategy;

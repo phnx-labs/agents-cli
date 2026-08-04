@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { archiveRoutineTranscripts, executeJob, executeJobDetached, monitorRunningJobs, routineSpawnCwd } from './runner.js';
+import { archiveRoutineTranscripts, executeJob, executeJobDetached, monitorRunningJobs, resolveRoutineLaunch, routineSpawnCwd } from './runner.js';
 import { getRunDir, writeRunMeta } from './routines.js';
 import type { JobConfig, RunMeta } from './routines.js';
+import type { RotateCandidate, RotateResult } from './rotate.js';
 import { saveTask, hostsCacheDir } from './hosts/tasks.js';
 import { _resetPerfDbForTest, aggregateSamples } from './perf/db.js';
 
@@ -365,5 +366,53 @@ describe('detached routine fires record a perf.timing sample (agent.run)', () =>
     await executeJobDetached(commandConfig('cmd-perf-fail', 'exit 5'));
     const rows = await waitForPerfSample('agent.run');
     expect(rows.length).toBeGreaterThan(0);
+  });
+});
+
+describe('resolveRoutineLaunch — zero-healthy accounts fail the routine loud (RUSH-2132)', () => {
+  function acct(version: string): RotateCandidate {
+    return {
+      agent: 'claude',
+      version,
+      accountKey: `claude:account=${version}`,
+      accountLabel: `${version}@example.com`,
+      email: `${version}@example.com`,
+      usageKey: `claude:org=${version}`,
+      usageStatus: 'rate_limited',
+      usageSnapshot: null,
+      usageError: null,
+      plan: 'Max',
+      signedIn: true,
+      lastActive: null,
+    };
+  }
+
+  it('throws the watchdog contract error (no healthy + resets + pinned escape hatch) when the strategy exhausts', async () => {
+    const err = await resolveRoutineLaunch(baseConfig(), process.cwd(), {
+      resolveRunVersion: async () => ({ version: '2.1.207', rotation: null, exhausted: [acct('2.1.207')] }),
+    }).then(() => null, (e: unknown) => e as Error);
+    expect(err).not.toBeNull();
+    expect(err!.message).toMatch(/no healthy claude account under strategy '\w+'/);
+    expect(err!.message).toContain('excluded: 2.1.207 (rate_limited)');
+    expect(err!.message).toContain('resets');
+    expect(err!.message).toContain('Use --strategy pinned to force the default.');
+  });
+
+  it('a healthy pick proceeds with the rotated version (no throw)', async () => {
+    const healthy = { ...acct('2.1.219'), usageStatus: 'available' as const };
+    const rotation: RotateResult = { picked: healthy, healthy: [healthy], excluded: [] };
+    const plan = await resolveRoutineLaunch(baseConfig(), process.cwd(), {
+      resolveRunVersion: async () => ({ version: '2.1.219', rotation }),
+    });
+    expect(plan.chain[0]).toEqual({ agent: 'claude', version: '2.1.219' });
+    expect(plan.rotation).toBe(rotation);
+  });
+
+  it('a non-exhausted null rotation (pinned-shaped) proceeds with the resolved version — unchanged', async () => {
+    const plan = await resolveRoutineLaunch(baseConfig(), process.cwd(), {
+      resolveRunVersion: async () => ({ version: '2.1.207', rotation: null }),
+    });
+    expect(plan.chain[0]).toEqual({ agent: 'claude', version: '2.1.207' });
+    expect(plan.rotation).toBeNull();
   });
 });

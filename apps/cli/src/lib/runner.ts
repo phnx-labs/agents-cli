@@ -397,6 +397,7 @@ export interface RoutineLaunchPlan {
 export async function resolveRoutineLaunch(
   config: JobConfig,
   cwd: string = process.cwd(),
+  deps: { resolveRunVersion?: typeof resolveRunVersion } = {},
 ): Promise<RoutineLaunchPlan> {
   if (config.workflow) {
     return { chain: [], rotation: null, pinned: false };
@@ -440,7 +441,7 @@ export async function resolveRoutineLaunch(
   let rotation: RotateResult | null = null;
   let exhausted: RotateCandidate[] | undefined;
   try {
-    const resolved = await resolveRunVersion(agent, strategy, cwd);
+    const resolved = await (deps.resolveRunVersion ?? resolveRunVersion)(agent, strategy, cwd);
     version = resolved.version ?? undefined;
     rotation = resolved.rotation;
     exhausted = resolved.exhausted;

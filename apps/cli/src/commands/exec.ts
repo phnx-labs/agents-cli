@@ -10,6 +10,7 @@ import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import type { ExecOptions, ExecMode, ExecEffort, FallbackEntry } from '../lib/exec.js';
 import type { AgentId } from '../lib/types.js';
+import { RUN_AUTO_KEYWORD } from '../lib/types.js';
 import type { DetectedRuntime } from '../lib/crabbox/runtimes.js';
 import type { ResolvedRunDefaults } from '../lib/run-defaults.js';
 import { setHelpSections } from '../lib/help.js';
@@ -166,21 +167,18 @@ function isValidAgent(agent: string): agent is AgentId {
   return agent in AGENTS;
 }
 
-/**
- * Reserved `<agent>` keyword for `agents run auto` — full-auto dispatch:
- * host (14d launch affinity) → harness (best-account headroom, weighted) →
- * account (balanced). Validated at run time so a future harness literally
- * named `auto` fails loud instead of being shadowed.
- */
-export const RUN_AUTO_KEYWORD = 'auto';
+// Reserved `<agent>` keyword for `agents run auto` — canonical definition in
+// lib/types.ts (shared with the host dispatch layer); re-exported here.
+export { RUN_AUTO_KEYWORD };
 
 /**
  * Whether `run auto` should default its host layer to the affinity pick (the
  * same machinery as `--device auto`). False when the caller pinned any host
  * flag, and false when this process was itself dispatched by a host run — the
- * dispatcher forwards AGENTS_RUN_AUTO_HOST_RESOLVED=1 because it already
- * resolved the host layer, and re-picking here would chain-hop the run across
- * the fleet. Pure so the pinning matrix is unit-testable.
+ * dispatcher exports AGENTS_RUN_AUTO_HOST_RESOLVED=1 into the remote SHELL
+ * (hosts/dispatch.ts remoteRunShellPrelude) because it already resolved the
+ * host layer, and re-picking here would chain-hop the run across the fleet.
+ * Pure so the pinning matrix is unit-testable.
  */
 export function runAutoDefaultsToAffinity(
   options: { host?: string; device?: string; on?: string; computer?: string },
@@ -188,6 +186,25 @@ export function runAutoDefaultsToAffinity(
 ): boolean {
   if (hostTargetGiven(options).length > 0) return false;
   return env.AGENTS_RUN_AUTO_HOST_RESOLVED !== '1';
+}
+
+/**
+ * Whether an interactive host dispatch must mint a correlation launch id and
+ * resolve the remote session via the launch-id join (RUSH-2034), rather than
+ * trusting a pre-known session id. `run auto` ALWAYS joins: the harness is
+ * picked on the remote, so an explicit --session-id is only adopted when the
+ * pick lands on claude — pre-registering it would strand a stale session-index
+ * entry naming an id a non-claude pick never used (RUSH-2132). Pure so the
+ * decision matrix is unit-testable.
+ */
+export function hostInteractiveNeedsCorrelationId(
+  runAgent: string,
+  hostSessionId: string | undefined,
+  resumeId: string | undefined,
+): boolean {
+  if (resumeId) return false;
+  if (runAgent === RUN_AUTO_KEYWORD) return true;
+  return !hostSessionId && isSessionTrackedAgent(runAgent);
 }
 
 /** Build a one-line banner describing which version the strategy picked. */
@@ -1418,11 +1435,10 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         const hostName = hostGiven[0];
-        if (autoHarnessRequested) {
-          // The remote `agents run auto` must NOT re-run host affinity — this
-          // dispatch already resolved that layer; re-picking would chain-hop.
-          options.env = [...options.env, 'AGENTS_RUN_AUTO_HOST_RESOLVED=1'];
-        }
+        // Note: a `run auto` dispatch needs no marker forwarded from here — the
+        // dispatch layer (hosts/dispatch.ts remoteRunShellPrelude) exports the
+        // chain-hop guard into the remote shell for BOTH interactive and
+        // headless paths, keyed off the agent name being `auto`.
         const { resolveHostRunTarget, resolveHostSessionId, dispatchPromptToHost, HostResolutionError } = await import('../lib/hosts/run-target.js');
         const { runInteractiveOnHost } = await import('../lib/hosts/dispatch.js');
         const { registerInteractiveHostSession } = await import('../lib/hosts/session-index.js');
@@ -1616,12 +1632,17 @@ export function registerRunCommand(program: Command): void {
             // the stream we resolve the id by one ssh read of the remote hook
             // record — the same launch-id join used locally (RUSH-2034). Not
             // needed for Claude (id forced) or resume (id already known).
+            // `run auto` ALWAYS joins: the remote picks the harness, so an
+            // explicit --session-id is only adopted by a claude pick.
             const correlationLaunchId =
-              !hostSessionId && !resumeId && isSessionTrackedAgent(runAgent) ? randomUUID() : undefined;
+              hostInteractiveNeedsCorrelationId(runAgent, hostSessionId, resumeId) ? randomUUID() : undefined;
             const hostEnv = correlationLaunchId
               ? [...options.env, `AGENT_LAUNCH_ID=${correlationLaunchId}`]
               : options.env;
-            if (hostSessionId) {
+            // `run auto` never pre-registers: the explicit id is only real when
+            // the remote pick lands on claude. The launch-id join below records
+            // the id the remote ACTUALLY used, whatever the pick.
+            if (hostSessionId && runAgent !== RUN_AUTO_KEYWORD) {
               registerInteractiveHostSession({
                 cwd: process.cwd(),
                 host: host.name,
@@ -1690,7 +1711,11 @@ export function registerRunCommand(program: Command): void {
             // re-attach the live pane automatically instead of exiting — the user
             // never has to notice the drop and `agents sessions focus` by hand.
             // `raw` runs aren't tmux wrapped, so there is nothing to reconnect to.
-            const reconnectId = hostSessionId ?? resolvedRemoteId ?? resumeId;
+            // For `run auto` prefer the join-resolved id (the harness the remote
+            // ACTUALLY picked) over the explicit --session-id only claude adopts.
+            const reconnectId = (runAgent === RUN_AUTO_KEYWORD
+              ? resolvedRemoteId ?? hostSessionId
+              : hostSessionId ?? resolvedRemoteId) ?? resumeId;
             if (reconnectId && !isRaw) {
               const { reconnectInteractiveSession, SSH_CONN_FAILURE } = await import('../lib/hosts/reconnect.js');
               if (exitCode === SSH_CONN_FAILURE) {
