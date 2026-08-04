@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { routineOwnerDevice, hasAmbiguousDevicePin, validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, finalizeRunMeta, writeRunMeta, resolveJobPrompt, getLatestCompletedRun, routineStats, type JobConfig, type RunMeta } from './routines.js';
 import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir } from './state.js';
+import { ROUTINE_AGENT_IDS } from './runner.js';
 
 /** Minimal valid schedule-based job. */
 function baseJob(partial: Partial<JobConfig> = {}): Partial<JobConfig> {
@@ -74,6 +75,35 @@ describe('validateJob — resume', () => {
   it('rejects an empty resume session id', () => {
     const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'claude', resume: '  ' }));
     expect(errors.some((e) => /resume must be a non-empty session id/.test(e))).toBe(true);
+  });
+});
+
+describe('validateJob — daemon-supported agent (RUSH-2102)', () => {
+  it('accepts every agent in the daemon-supported table', () => {
+    for (const agent of ROUTINE_AGENT_IDS) {
+      const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: agent as never }));
+      expect(errors).toEqual([]);
+    }
+  });
+
+  it('rejects an installable-but-unschedulable agent (opencode) at add time', () => {
+    // opencode is a real entry in the AGENTS registry but has no AGENT_COMMANDS
+    // template, so the daemon throws "Unsupported agent for daemon jobs" when the
+    // job fires. Validation must catch it up front instead.
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'opencode' as never }));
+    expect(errors.some((e) => /opencode.*not supported for scheduled routines/.test(e))).toBe(true);
+    // the message names the supported set so the user can fix it immediately
+    expect(errors.some((e) => e.includes(ROUTINE_AGENT_IDS.join(', ')))).toBe(true);
+  });
+
+  it('rejects an unknown agent name', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'foobar' as never }));
+    expect(errors.some((e) => /not supported for scheduled routines/.test(e))).toBe(true);
+  });
+
+  it('does not flag agent for workflow or command jobs (no agent field)', () => {
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', agent: undefined, workflow: 'autodev' }))).toEqual([]);
+    expect(validateJob({ name: 'j', schedule: '0 3 * * *', command: 'echo hi' } as Partial<JobConfig>)).toEqual([]);
   });
 });
 

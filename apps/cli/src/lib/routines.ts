@@ -15,7 +15,13 @@ import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir, getP
 import { safeJoin, isSafeSegmentName } from './paths.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import type { AgentId } from './types.js';
-import { ALL_AGENT_IDS } from './agents.js';
+// ROUTINE_AGENT_IDS is the daemon-supported agent table (keys of AGENT_COMMANDS):
+// the only agents buildJobCommand can turn into a runnable argv. Validate against
+// it — not the full AGENTS registry — so an installable-but-unschedulable agent
+// (e.g. opencode) is rejected at add time instead of failing when the job fires
+// (RUSH-2102). runner.ts imports only *types* from routines.ts, so this value
+// import creates no runtime cycle.
+import { ROUTINE_AGENT_IDS } from './runner.js';
 import type { LoopConfig } from './loop.js';
 import { machineId, normalizeHost } from './machine-id.js';
 import { resolveActor } from './actor.js';
@@ -795,8 +801,11 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   if (config.command !== undefined && (typeof config.command !== 'string' || config.command.trim() === '')) {
     errors.push('command must be a non-empty shell command string');
   }
-  if (hasAgent && config.agent && !ALL_AGENT_IDS.includes(config.agent as AgentId)) {
-    errors.push(`agent must be one of: ${ALL_AGENT_IDS.join(', ')}`);
+  if (hasAgent && config.agent && !ROUTINE_AGENT_IDS.includes(config.agent)) {
+    errors.push(
+      `agent "${config.agent}" is not supported for scheduled routines; ` +
+      `must be one of: ${ROUTINE_AGENT_IDS.join(', ')}`,
+    );
   }
   if (hasWorkflow && config.workflow) {
     if (!/^[a-z0-9][a-z0-9_-]*$/.test(config.workflow)) {
