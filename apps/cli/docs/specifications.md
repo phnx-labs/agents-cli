@@ -1121,6 +1121,15 @@ normative — a change that widens or narrows a cell is a spec change.
   helper processes and/or the metadata item carried a stale ACL, violating SEC-12.
   Fixed by keeping metadata reads no-ACL and batched with the value read so a bundle
   costs at most one prompt.
+- **SEC-GAP-9 (closed by this change).** `agents run` auto-injects the `share` R2
+  write token via `shareRuntimeEnv`, which read the `share` bundle with
+  `agentOnly` only in a headless context — so an INTERACTIVE `agents run` popped a
+  Touch ID sheet on every launch (the per-run storm), violating the spirit of
+  SEC-13 (an agent launch never raises a sheet on its own). Fixed two ways: the
+  auto-inject read is now ALWAYS `agentOnly` (broker/no-ACL or silently skip, never
+  prompt), and a new `share` bundle defaults to the `never` tier (the write token is
+  low-sensitivity automation infra), so auto-share is silent with no unlock. An
+  existing `share` bundle keeps its tier (no silent downgrade).
 
 ---
 
@@ -1211,6 +1220,14 @@ Given two agent sessions `A` and `B` each read `share`; When the human runs
 `A`'s reads are returned, each carrying `sessionId`/`parentSessionId`/`pid`, and the
 requesting session is never recorded as the global-scope `*` sentinel — so a Touch
 ID sheet is always attributable to the agent that caused it.
+
+**GWT-S14 — auto-share on `agents run` never prompts (SEC-13, SEC-GAP-9).**
+Given `share:` is configured and the `share` bundle is biometry-gated and not
+broker-held; When a human runs `agents run <agent>` in an interactive terminal;
+Then `shareRuntimeEnv` resolves the token `agentOnly` and returns undefined without
+a Touch ID sheet (`lib/share/config.ts`), so the launch is silent — and a `share`
+bundle created by `agents share setup` is `never`-tier (no-ACL), so the token is
+injected silently with no unlock at all.
 
 ---
 

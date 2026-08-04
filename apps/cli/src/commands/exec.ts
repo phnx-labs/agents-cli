@@ -2621,7 +2621,7 @@ export function registerRunCommand(program: Command): void {
       }
 
       const autoShareEnv = options.autoSecrets !== false
-        ? shareRuntimeEnv({ agentOnly: isHeadlessSecretsContext() })
+        ? shareRuntimeEnv()
         : undefined;
 
       // Merge order (later wins): profile env < auto share token < secrets bundles < --env K=V.

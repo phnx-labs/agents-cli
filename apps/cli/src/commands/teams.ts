@@ -1791,7 +1791,7 @@ export function registerTeamsCommands(program: Command): void {
             repo: opts.repo,
             branch: opts.branch,
             model: a.model ?? undefined,
-            env: shareRuntimeEnv({ agentOnly: true }),
+            env: shareRuntimeEnv(),
           };
           const cloudTask = await prov.dispatch(dispatchOpts);
           return { cloudSessionId: cloudTask.id };
@@ -1810,7 +1810,7 @@ export function registerTeamsCommands(program: Command): void {
           repo: opts.repo,
           branch: opts.branch,
           model: opts.model,
-          env: shareRuntimeEnv({ agentOnly: true }),
+          env: shareRuntimeEnv(),
         };
         try {
           const cloudTask = await prov.dispatch(dispatchOpts);
