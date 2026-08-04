@@ -332,9 +332,19 @@ function firstSimpleCommandTokens(command: string): string[] {
   try {
     return shlexSplit(firstSegment);
   } catch {
-    // shlex can choke on a quote the head-truncation cut mid-string; a plain
-    // whitespace split still yields the leading executable + subcommand.
-    return firstSegment.split(/\s+/).filter(Boolean);
+    // The head cut a quote mid-string (e.g. a long quoted flag value like
+    // `git -c http.extraheader="Authorization: Bearer …" fetch`), so shlex threw
+    // on the unbalanced quote. A whitespace split of the truncated head would
+    // mis-read the value as the subcommand, so re-tokenize the FULL first
+    // segment instead — only the rare throw path pays that cost.
+    const fullFirst = splitOnOperators(unwrapped)[0] ?? firstSegment;
+    try {
+      return shlexSplit(fullFirst);
+    } catch {
+      // Genuinely unbalanced quoting even in the full segment — a whitespace
+      // split of the full segment still yields the leading executable.
+      return fullFirst.split(/\s+/).filter(Boolean);
+    }
   }
 }
 

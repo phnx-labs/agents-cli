@@ -193,6 +193,17 @@ describe('classifyBashCommand', () => {
     expect(classifyBashCommand('agents -H box sessions --active')).toMatchObject({ tool: 'agents', subcommand: 'sessions' });
     expect(classifyBashCommand('rmdir /tmp/x')).toMatchObject({ tool: 'rmdir', category: 'shell' });
   });
+
+  // #1830 review: a long quoted value-flag argument pushes the real subcommand
+  // past the head-truncation limit and cuts a quote mid-string. The classifier
+  // must still resolve the true subcommand (`fetch`), not a fragment of the
+  // quoted value — head-truncation must never change a real command's result.
+  it('resolves the subcommand when a long quoted flag value exceeds the head limit', () => {
+    const token = 'x'.repeat(240);
+    const cmd = `git -c http.extraheader="Authorization: Bearer ${token}" fetch origin`;
+    expect(cmd.length).toBeGreaterThan(200); // past the ~200-char classifier head limit
+    expect(classifyBashCommand(cmd)).toMatchObject({ tool: 'git', subcommand: 'fetch' });
+  });
 });
 
 describe('bucketKey', () => {
