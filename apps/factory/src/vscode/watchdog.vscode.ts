@@ -106,12 +106,12 @@ const defaultExecFileAsync: ExecFileAsync = (file, args, options) =>
   });
 
 /**
- * Run `agents watchdog <action>` against the resolved CLI binary. Resolves on
- * a clean exit; throws an Error whose message quotes the CLI's stderr on a
- * nonzero exit.
+ * Run `agents watchdog <args...>` against the resolved CLI binary (argv array,
+ * never a shell string). Resolves on a clean exit; throws an Error whose
+ * message quotes the CLI's stderr on a nonzero exit.
  */
 export async function runWatchdogCli(
-  action: WatchdogCliAction,
+  args: string[],
   deps: WatchdogCliDeps = {},
 ): Promise<void> {
   const bin = await (deps.resolveBin ?? resolveAgentsBin)();
@@ -120,7 +120,7 @@ export async function runWatchdogCli(
     PATH: `${bootstrapPath(bin)}:${process.env.PATH ?? ''}`,
   };
   try {
-    await (deps.execFileAsync ?? defaultExecFileAsync)(bin, ['watchdog', action], { env });
+    await (deps.execFileAsync ?? defaultExecFileAsync)(bin, ['watchdog', ...args], { env });
   } catch (err) {
     const stderr = (err as { stderr?: string }).stderr?.trim();
     throw new Error(stderr || (err instanceof Error ? err.message : String(err)));
@@ -138,7 +138,7 @@ export function registerWatchdogPaletteCommands(
 ): vscode.Disposable[] {
   const handler = (action: WatchdogCliAction) => async () => {
     try {
-      await runWatchdogCli(action, deps);
+      await runWatchdogCli([action], deps);
       vscode.window.setStatusBarMessage(`Watchdog ${action}d (CLI daemon)`, 4000);
     } catch (err) {
       vscode.window.showErrorMessage(
@@ -166,11 +166,16 @@ interface GlobalStateLike {
  * The `agents.watchdog.*` settings were deleted with the in-extension loop. A
  * user who explicitly set `agents.watchdog.autoRotate: false` opted OUT of
  * rotate — upgrading must not silently re-enable it now that the CLI daemon
- * owns rotate. The CLI persists rotate state in its own meta config
- * (`watchdog.rotate: on|off`) but ships no setter command for it, so the
- * sanctioned fallback is `agents watchdog disable` (the daemon's one switch
- * covers nudging + rotate). Runs once per user; on CLI failure the flag stays
- * unset so the next activation retries.
+ * owns rotate. The migration is the CLI's ROTATE-ONLY switch,
+ * `agents watchdog rotate off` (persists `watchdog.rotate: 'off'` in the CLI
+ * meta config) — never `agents watchdog disable`, which would pause nudging
+ * too for a user who only opted out of rotate.
+ *
+ * Requires an agents-cli new enough to ship the `watchdog rotate` subcommand
+ * (it lands with the CLI half of this change). On an OLDER CLI the subcommand
+ * is unknown and the exit is nonzero: the migration fails, leaves the
+ * globalState flag unset, and retries on the next activation — the honest
+ * failure mode. There is deliberately no fallback to full `disable`.
  */
 export async function migrateAutoRotateSettingOnce(
   globalState: GlobalStateLike,
@@ -192,10 +197,10 @@ export async function migrateAutoRotateSettingOnce(
   }
 
   try {
-    await runWatchdogCli('disable', deps);
+    await runWatchdogCli(['rotate', 'off'], deps);
     await globalState.update(WATCHDOG_ROTATE_MIGRATED_KEY, true);
     vscode.window.setStatusBarMessage(
-      'Migrated watchdog setting: auto-rotate was off — CLI watchdog disabled (`agents watchdog enable` re-enables)',
+      'Migrated watchdog setting: auto-rotate was off — CLI watchdog rotate is off (`agents watchdog rotate on` re-enables)',
       8000,
     );
   } catch (err) {

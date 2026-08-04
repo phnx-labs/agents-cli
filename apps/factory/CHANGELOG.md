@@ -45,8 +45,10 @@ All notable changes to the Factory extension are documented here. Format follows
   rotate-on-exhaustion in addition to stall nudging: it injects the harness
   exit sequence, `agents run auto --interactive`, and the `/continue` replay
   into the SAME vscodium tab via the extension's `/inject` URI verb over
-  live-terminals.json, and writes `rotate` / `rotate-skip` events to the shared
-  `~/.agents/.cache/logs/watchdog.log` — the Factory Floor status card keeps
+  live-terminals.json, and writes `rotate` events to the shared
+  `~/.agents/.cache/logs/watchdog.log` (a skip is a `kind: 'rotate'` entry with
+  a `rotate skipped:` message prefix — there is no separate skip kind) — the
+  Factory Floor status card keeps
   working unchanged. Deleted: the `startWatchdog` tick + config listener, the
   no-healthy suppression machinery, `src/core/autoRotate.ts`,
   `rotateTerminalToBestVersion`/`RotateOutcome`, and the dormant monitor
@@ -56,8 +58,9 @@ All notable changes to the Factory extension are documented here. Format follows
   `agents.watchdog.autoRotate`, `agents.watchdog.rotateCooldownSeconds`, and
   `agents.watchdog.tickSeconds` settings are removed** — the on/off now lives
   in the CLI (`agents watchdog enable|disable|status`); an explicit
-  `autoRotate: false` is migrated once per user to the CLI watchdog's off
-  state on activation.
+  `autoRotate: false` is migrated once per user via the CLI's rotate-only switch
+  (`agents watchdog rotate off`) on activation — nudging is untouched; on an
+  older CLI without the subcommand the migration retries next activation.
   Source: `src/vscode/watchdog.vscode.ts`, `src/vscode/extension.ts`,
   `src/vscode/settings.vscode.ts`, `src/monitor/`, `package.json`.
 

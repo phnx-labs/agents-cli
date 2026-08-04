@@ -156,12 +156,12 @@ describe('migrateAutoRotateSettingOnce', () => {
     expect(state.data.get(watchdog.WATCHDOG_ROTATE_MIGRATED_KEY)).toBe(true);
   });
 
-  test('autoRotate explicitly false → CLI watchdog disabled once + one-time note', async () => {
+  test('autoRotate explicitly false → CLI watchdog rotate off once + one-time note', async () => {
     inspectResult = { globalValue: false };
     const { calls, deps } = makeDeps();
     const state = fakeGlobalState();
     await watchdog.migrateAutoRotateSettingOnce(state, deps);
-    expect(calls).toEqual([{ file: '/fake/bin/agents', args: ['watchdog', 'disable'] }]);
+    expect(calls).toEqual([{ file: '/fake/bin/agents', args: ['watchdog', 'rotate', 'off'] }]);
     expect(state.data.get(watchdog.WATCHDOG_ROTATE_MIGRATED_KEY)).toBe(true);
     expect(statusMessages.some((m) => m.includes('Migrated watchdog setting'))).toBe(true);
 
@@ -174,7 +174,7 @@ describe('migrateAutoRotateSettingOnce', () => {
     inspectResult = { workspaceValue: false };
     const { calls, deps } = makeDeps();
     await watchdog.migrateAutoRotateSettingOnce(fakeGlobalState(), deps);
-    expect(calls).toEqual([{ file: '/fake/bin/agents', args: ['watchdog', 'disable'] }]);
+    expect(calls).toEqual([{ file: '/fake/bin/agents', args: ['watchdog', 'rotate', 'off'] }]);
   });
 
   test('CLI failure → error toast, flag left unset so the next activation retries', async () => {
