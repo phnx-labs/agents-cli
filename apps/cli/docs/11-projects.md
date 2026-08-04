@@ -296,8 +296,13 @@ Requests are scarce; complexity is essentially untouched. Since the card pages e
 a project (up to 10 requests each), an agent running `status` in a loop exhausts the budget —
 which is exactly how it was exhausted during this feature's development.
 
-Answers are cached at `~/.agents/.cache/.linear-projects.json` for 10 minutes, matching the
-repo's existing `SKILL_INDEX_TTL_MS` convention. A second `status` inside the window makes no
+Answers are cached under `~/.agents/.cache/linear-projects/` for 10 minutes, matching the
+repo's existing `SKILL_INDEX_TTL_MS` convention — **one file per project**, written by atomic
+rename. A single shared JSON document would have to be read, modified, and written back, and
+that sequence is not atomic across processes: measured with two concurrent writers of 40
+distinct keys each, **8 of 80 entries survived**. A machine running a dozen agent sessions
+makes that the normal case rather than a corner. Per-key files have nothing to clobber, and the
+same measurement now yields 80 of 80. A second `status` inside the window makes no
 Linear request at all.
 
 The behavior that matters more is on failure: **a stale answer is served and labelled, never

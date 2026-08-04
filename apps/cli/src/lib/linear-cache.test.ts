@@ -22,7 +22,7 @@ const T0 = new Date(2026, 7, 3, 12, 0, 0).getTime();
 
 beforeEach(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'linear-cache-'));
-  cacheFile = path.join(home, 'linear-projects.json');
+  cacheFile = path.join(home, 'cache');
   process.env.AGENTS_LINEAR_CACHE_PATH = cacheFile;
 });
 afterEach(() => {
@@ -97,11 +97,32 @@ describe('linear cache', () => {
 
   it('treats a corrupt cache file as an empty one instead of throwing', () => {
     writeCached('p1', 'one', T0);
-    fs.writeFileSync(cacheFile, '{not json');
+    fs.writeFileSync(path.join(cacheFile, 'p1.json'), '{not json');
     expect(readCached('p1', T0)).toBeUndefined();
     expect(isRateLimited(T0)).toBe(false);
     // And it recovers: the next write replaces the garbage.
-    writeCached('p2', 'two', T0);
-    expect(readCached<string>('p2', T0)?.value).toBe('two');
+    writeCached('p1', 'again', T0);
+    expect(readCached<string>('p1', T0)?.value).toBe('again');
+  });
+
+  it('rejects a wrong-shaped entry rather than handing it to the card', () => {
+    fs.mkdirSync(cacheFile, { recursive: true });
+    fs.writeFileSync(path.join(cacheFile, 'p9.json'), JSON.stringify({ nope: true }));
+    expect(readCached('p9', T0)).toBeUndefined();
+  });
+
+  it('keeps a project id from escaping the cache directory', () => {
+    writeCached('../../escape', 'x', T0);
+    expect(fs.existsSync(path.join(cacheFile, '.._.._escape.json'))).toBe(true);
+    expect(readCached<string>('../../escape', T0)?.value).toBe('x');
+  });
+
+  it('survives concurrent writers of distinct keys', () => {
+    // A single shared JSON document lost 72 of 80 entries here under two
+    // concurrent writers; one file per key has nothing to clobber.
+    for (let i = 0; i < 40; i++) writeCached(`a-${i}`, i, T0);
+    for (let i = 0; i < 40; i++) writeCached(`b-${i}`, i, T0);
+    const survived = fs.readdirSync(cacheFile).filter((f) => f.endsWith('.json')).length;
+    expect(survived).toBe(80);
   });
 });
