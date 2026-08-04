@@ -827,6 +827,39 @@ export async function runDaemon(): Promise<void> {
   const fleetCacheInterval = setInterval(() => { void runFleetCacheWarm(); }, 3 * 60_000);
   const fleetCacheKickoff = setTimeout(() => { void runFleetCacheWarm(); }, 60_000);
 
+  // Adaptive usage refresh: keep the usage cache the `agents run` router reads
+  // (RUSH-2061, readOnly hot path) fresh, WITHOUT the hot path ever fetching.
+  // This host is the sole writer for its own local accounts. The tick wakes at
+  // the 90s floor, but per-account cadence gates the actual live fetches: an
+  // account racing toward its 5h cap is polled sooner (down to 90s), an idle one
+  // rarely (up to 15min), capped at ~6 provider calls/account/hour and skipped
+  // entirely while its provider is under a 429 backoff. Overlap-guarded like the
+  // probes above; a box signed into no networked-usage account is a clean no-op.
+  let refreshingUsage = false;
+  const runUsageRefreshTick = async () => {
+    if (refreshingUsage) return;
+    refreshingUsage = true;
+    try {
+      const { runUsageRefresh, buildLocalUsageAccounts } = await import('./usage-refresh.js');
+      const { writeClaudeUsageCache } = await import('./usage.js');
+      const { usageRateLimitedUntil } = await import('./usage-backoff.js');
+      const r = await runUsageRefresh({
+        listAccounts: buildLocalUsageAccounts,
+        writeUsageCache: writeClaudeUsageCache,
+        backoffUntil: usageRateLimitedUntil,
+      });
+      if (r.refreshed > 0 || r.failed > 0) {
+        log('INFO', `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped`);
+      }
+    } catch (err) {
+      log('ERROR', `usage refresh failed: ${(err as Error).message}`);
+    } finally {
+      refreshingUsage = false;
+    }
+  };
+  const usageRefreshInterval = setInterval(() => { void runUsageRefreshTick(); }, 90_000);
+  const usageRefreshKickoff = setTimeout(() => { void runUsageRefreshTick(); }, 30_000);
+
   // RUSH-1817: the startup host decision above is one-shot. If a standalone
   // broker answered agentPing() at daemon start, the daemon declined to host —
   // but should that standalone later die or crash-loop, nothing takes over and
@@ -910,6 +943,8 @@ export async function runDaemon(): Promise<void> {
     clearTimeout(launchHealthKickoff);
     clearInterval(fleetCacheInterval);
     clearTimeout(fleetCacheKickoff);
+    clearInterval(usageRefreshInterval);
+    clearTimeout(usageRefreshKickoff);
     clearInterval(brokerSelfHealInterval);
     hostedBroker?.close();
     removeDaemonPid();

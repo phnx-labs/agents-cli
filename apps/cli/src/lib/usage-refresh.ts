@@ -33,9 +33,18 @@ import * as path from 'path';
 import { getCacheDir } from './state.js';
 import {
   deriveUsageHeadroom,
+  getUsageInfo,
+  buildCanonicalUsageContext,
+  agentUsesNetworkUsage,
+  USAGE_SOURCE_AGENT_IDS,
   type UsageHeadroom,
   type UsageSnapshot,
+  type UsageInfo,
+  type UsageIdentityInput,
 } from './usage.js';
+import { getAccountInfo } from './agents.js';
+import { listInstalledVersions, getVersionHomePath } from './versions.js';
+import type { AgentId } from './types.js';
 
 /** Floor on the adaptive interval: an account seconds from its cap still isn't
  * polled faster than this. */
@@ -190,14 +199,50 @@ export function nextHeadroomEntry(
 /** An account whose credentials live on THIS host — the only ones we refresh. */
 export interface LocalUsageAccount {
   usageKey: string;
-  agentId: import('./types.js').AgentId;
+  agentId: AgentId;
   /** Live-fetch this account's usage; the daemon passes the real network fetch. */
   fetch: () => Promise<UsageInfo>;
 }
 
-interface UsageInfo {
-  snapshot: UsageSnapshot | null;
-  error: string | null;
+/**
+ * Enumerate the network-usage accounts whose credentials live on THIS host — one
+ * per unique usage key, deduped to the most-recently-active version (the same
+ * canonicalization `getUsageInfoByIdentity` uses). Each carries a closure that
+ * live-fetches its usage. This is the daemon's `listAccounts`; because it only
+ * ever lists local, signed-in accounts, each host is the sole writer for its own
+ * accounts' caches — no cross-host coordination.
+ */
+export async function buildLocalUsageAccounts(): Promise<LocalUsageAccount[]> {
+  const accounts: LocalUsageAccount[] = [];
+  for (const agentId of USAGE_SOURCE_AGENT_IDS) {
+    if (!agentUsesNetworkUsage(agentId)) continue;
+    const versions = listInstalledVersions(agentId);
+    if (versions.length === 0) continue;
+
+    const inputs: UsageIdentityInput[] = await Promise.all(
+      versions.map(async (version) => {
+        const home = getVersionHomePath(agentId, version);
+        return { agentId, info: await getAccountInfo(agentId, home), home, cliVersion: version };
+      }),
+    );
+
+    const { canonicalByUsageKey, usageFetchInputs } = buildCanonicalUsageContext(inputs);
+    for (const [usageKey, fetchInput] of usageFetchInputs) {
+      const canonical = canonicalByUsageKey.get(usageKey);
+      if (!canonical?.signedIn) continue; // only refresh accounts actually usable here
+      accounts.push({
+        usageKey,
+        agentId,
+        fetch: () =>
+          getUsageInfo(agentId, {
+            home: fetchInput.home,
+            cliVersion: fetchInput.cliVersion,
+            organizationId: fetchInput.organizationId,
+          }),
+      });
+    }
+  }
+  return accounts;
 }
 
 /** Injectable side effects, so `runUsageRefresh` is drivable without the daemon. */
@@ -208,7 +253,7 @@ export interface UsageRefreshDeps {
   /** Persist a fresh snapshot to the usage cache (writeClaudeUsageCache). */
   writeUsageCache: (usageKey: string, snapshot: UsageSnapshot) => void;
   /** Epoch ms a provider is backed off until, or null when free (usageRateLimitedUntil). */
-  backoffUntil: (agentId: import('./types.js').AgentId) => number | null;
+  backoffUntil: (agentId: AgentId) => number | null;
 }
 
 export interface UsageRefreshResult {

@@ -358,6 +358,16 @@ export function agentReportsUsage(agentId: AgentId): boolean {
   return getUsageSource(agentId) !== undefined;
 }
 
+/**
+ * Whether an agent's usage source makes a live NETWORK call (Claude/Kimi/Droid/
+ * Cursor/Antigravity) versus reading local session logs (Codex/Grok). Only the
+ * networked ones go through the on-disk cache, and only they need the daemon's
+ * background refresher to keep that cache warm for the routing hot path.
+ */
+export function agentUsesNetworkUsage(agentId: AgentId): boolean {
+  return getUsageSource(agentId)?.network === true;
+}
+
 /** Fetch usage info for all unique accounts in parallel, keyed by usage key. */
 export async function getUsageInfoByIdentity(
   inputs: UsageIdentityInput[],
