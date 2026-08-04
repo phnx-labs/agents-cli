@@ -56,6 +56,7 @@ import {
   getRunDir,
 } from '../src/lib/routines.js';
 import { getRoutinesDir, getRunsDir } from '../src/lib/state.js';
+import { ROUTINE_AGENT_IDS } from '../src/lib/agents.js';
 
 const PREFIX = '_test_jobs_';
 
@@ -142,8 +143,8 @@ describe('validateJob', () => {
     expect(errors).toContain('timeout must be like 10m, 2h, 3d, 1w (max 1w)');
   });
 
-  it('accepts all valid job agents', () => {
-    for (const agent of ['claude', 'codex', 'gemini', 'cursor', 'opencode']) {
+  it('accepts every agent the local routine daemon can fire', () => {
+    for (const agent of ROUTINE_AGENT_IDS) {
       const errors = validateJob({ ...makeConfig(), agent: agent as any });
       expect(errors).toEqual([]);
     }
@@ -152,6 +153,21 @@ describe('validateJob', () => {
   it('rejects invalid agents', () => {
     const errors = validateJob({ ...makeConfig(), agent: 'invalid-agent' as any });
     expect(errors.some((e) => e.includes('agent must be one of'))).toBe(true);
+  });
+
+  // RUSH-2102: opencode is a real, installable agent (ALL_AGENT_IDS) but has no
+  // entry in ROUTINE_AGENT_IDS, so the local daemon can't build a command for
+  // it (runner.ts buildJobCommand throws "Unsupported agent for daemon jobs").
+  // Reject it at add time instead of accepting the routine and failing later
+  // when the scheduled job fires.
+  it('rejects a real agent the local daemon cannot fire, at add time', () => {
+    const errors = validateJob({ ...makeConfig(), agent: 'opencode' as any });
+    expect(errors.some((e) => e.includes("agent 'opencode' is not supported by the local routine daemon"))).toBe(true);
+  });
+
+  it('does not restrict opencode when the routine is placed on a host', () => {
+    const errors = validateJob({ ...makeConfig(), agent: 'opencode' as any, host: 'gpu-box', devices: ['self'] });
+    expect(errors.some((e) => e.includes('not supported by the local routine daemon'))).toBe(false);
   });
 });
 

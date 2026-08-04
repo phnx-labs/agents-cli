@@ -362,6 +362,41 @@ describe('routines add --devices unknown is nonzero/no write', () => {
   });
 });
 
+describe('routines add --agent unsupported by the local daemon (RUSH-2102)', () => {
+  it('rejects a real agent the daemon cannot fire, at add time, and writes no routine file', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, [
+        'add', 'bad-agent-job',
+        '--schedule', '0 3 * * *',
+        '--agent', 'opencode',
+        '--prompt', 'hi',
+      ]);
+      expect(res.status).not.toBe(0);
+      expect(res.stderr).toContain("agent 'opencode' is not supported by the local routine daemon");
+      expect(fs.existsSync(path.join(home, '.agents', 'routines', 'bad-agent-job.yml'))).toBe(false);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('still accepts a daemon-supported agent for a local routine', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, [
+        'add', 'good-agent-job',
+        '--schedule', '0 3 * * *',
+        '--agent', 'claude',
+        '--prompt', 'hi',
+      ]);
+      expect(res.status).toBe(0);
+      expect(fs.existsSync(path.join(home, '.agents', 'routines', 'good-agent-job.yml'))).toBe(true);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('routines add --on aliases', () => {
   it('accepts the pr GitHub alias and writes the canonical trigger event', async () => {
     const home = makeHome({ registry });

@@ -16,6 +16,7 @@ vi.mock('./routine-activation.js', async (importOriginal) => {
 });
 import { routineOwnerDevice, hasAmbiguousDevicePin, validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, finalizeRunMeta, writeRunMeta, resolveJobPrompt, getLatestCompletedRun, routineStats, computeProjectGroup, computeProjectGroupKind, projectGroupKey, projectGroupTitle, normalizeProjects, type JobConfig, type RunMeta } from './routines.js';
 import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir } from './state.js';
+import { ROUTINE_AGENT_IDS } from './agents.js';
 
 /** Minimal valid schedule-based job. */
 function baseJob(partial: Partial<JobConfig> = {}): Partial<JobConfig> {
@@ -85,6 +86,53 @@ describe('validateJob — resume', () => {
   it('rejects an empty resume session id', () => {
     const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'claude', resume: '  ' }));
     expect(errors.some((e) => /resume must be a non-empty session id/.test(e))).toBe(true);
+  });
+});
+
+describe('validateJob — schedule-time agent validation (RUSH-2102)', () => {
+  it('accepts a daemon-supported agent for a local (default placement) routine', () => {
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', agent: 'claude' }))).toEqual([]);
+  });
+
+  it('rejects a real agent the local daemon cannot fire, at add time', () => {
+    // opencode is a real, installable agent (ALL_AGENT_IDS) but has no entry in
+    // ROUTINE_AGENT_IDS/AGENT_COMMANDS, so the daemon can't build a command for
+    // it. Before this fix, validateJob only checked ALL_AGENT_IDS and let this
+    // through, and it would only fail later when the scheduled job fired
+    // (runner.ts buildJobCommand: "Unsupported agent for daemon jobs: opencode").
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'opencode' }));
+    expect(errors.some((e) => e.includes("agent 'opencode' is not supported by the local routine daemon"))).toBe(true);
+    expect(errors.some((e) => e.includes(ROUTINE_AGENT_IDS.join(', ')))).toBe(true);
+  });
+
+  it('still rejects a completely unknown agent name with the existing ALL_AGENT_IDS message', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'not-a-real-agent' }));
+    expect(errors.some((e) => e.startsWith('agent must be one of:'))).toBe(true);
+    expect(errors.some((e) => e.includes('not supported by the local routine daemon'))).toBe(false);
+  });
+
+  it('does not restrict a real agent outside ROUTINE_AGENT_IDS when explicitly host-placed', () => {
+    // hostStrategy: host dispatches via `agents run <agent>` on the remote
+    // machine (hosts/run-target.ts), never through the daemon's AGENT_COMMANDS
+    // table, so opencode is legitimate there — this must not regress.
+    const errors = validateJob(baseJob({
+      schedule: '0 3 * * *', agent: 'opencode', host: 'gpu-box', devices: ['zion'],
+    }));
+    expect(errors).toEqual([]);
+  });
+
+  it('does not restrict a real agent outside ROUTINE_AGENT_IDS under hostStrategy: fleet', () => {
+    const errors = validateJob(baseJob({
+      schedule: '0 3 * * *', agent: 'opencode', hostStrategy: 'fleet', devices: ['zion'],
+    }));
+    expect(errors).toEqual([]);
+  });
+
+  it('does not restrict a real agent outside ROUTINE_AGENT_IDS under hostStrategy: cloud', () => {
+    const errors = validateJob(baseJob({
+      schedule: '0 3 * * *', agent: 'opencode', hostStrategy: 'cloud', devices: ['zion'],
+    }));
+    expect(errors).toEqual([]);
   });
 });
 
