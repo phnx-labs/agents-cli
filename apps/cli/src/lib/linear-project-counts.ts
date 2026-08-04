@@ -29,6 +29,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { resolveLinearApiKey } from './auto-dispatch-linear.js';
+import { isRateLimited, readCached, writeCached } from './linear-cache.js';
 
 const LINEAR_API = 'https://api.linear.app/graphql';
 /** Overall budget across all pages — the card must never hang on Linear. */
@@ -78,6 +79,12 @@ export interface LinearProjectCounts {
    * bound (rendered `2500+`), never presented as the complete count.
    */
   truncated?: boolean;
+  /**
+   * True when this answer came from the cache after a failed or skipped fetch.
+   * The card labels it rather than dropping the line — a populated Linear row
+   * that silently vanishes on one timeout is the defect this replaces.
+   */
+  stale?: boolean;
   /**
    * The next unfinished milestone, when the project has one. Derived from the
    * SAME paged issue fetch as the counts — a milestone is only ever a grouping
@@ -197,7 +204,16 @@ function resolveApiKey(): string | null {
 export async function fetchLinearProjectCounts(
   projectId: string,
   fetchPage: (projectId: string, after: string | undefined, signal: AbortSignal) => Promise<LinearIssuesResponse | undefined> = fetchLinearIssuesPage,
+  nowMs: number = Date.now(),
 ): Promise<LinearProjectCounts | undefined> {
+  // Requests are the scarce budget (2500/hr; complexity is untouched), and this
+  // pages up to 10 of them per project per call. Serve a fresh snapshot without
+  // spending any.
+  const cached = readCached<LinearProjectCounts>(projectId, nowMs);
+  if (cached && !cached.stale) return cached.value;
+  // A prior 429 said there is nothing left to spend — don't spend one finding
+  // that out again. Fall through to the stale snapshot rather than no line.
+  if (isRateLimited(nowMs)) return cached ? { ...cached.value, stale: true } : undefined;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
@@ -208,7 +224,11 @@ export async function fetchLinearProjectCounts(
     let truncated = false;
     for (let page = 0; ; page++) {
       const data = await fetchPage(projectId, after, ctrl.signal);
-      if (!data) return undefined;
+      // A failed fetch keeps the last good answer on screen, marked stale,
+      // instead of the line vanishing. One 8s timeout must not blank a chip
+      // that was populated a minute ago — the rule `mergeAuthHealthEntries`
+      // already encodes for account health.
+      if (!data) return cached ? { ...cached.value, stale: true } : undefined;
       if (page === 0) declared = data.project?.projectMilestones?.nodes ?? [];
       all.push(...(data.issues?.nodes ?? []));
       const pi = data.issues?.pageInfo;
@@ -220,15 +240,17 @@ export async function fetchLinearProjectCounts(
       }
       after = pi.endCursor;
     }
-    return {
+    const counts: LinearProjectCounts = {
       ...countsFromIssuesResponse({
         issues: { nodes: all },
         project: { projectMilestones: { nodes: declared } },
       }),
       ...(truncated ? { truncated } : {}),
     };
+    writeCached(projectId, counts, nowMs);
+    return counts;
   } catch {
-    return undefined;
+    return cached ? { ...cached.value, stale: true } : undefined;
   } finally {
     clearTimeout(timer);
   }
