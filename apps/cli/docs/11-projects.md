@@ -405,3 +405,23 @@ scopeHistory: []   completedScopeHistory: []   inProgressScopeHistory: []
 So the chip would be invented. A blank is bad; a confident wrong answer that gets trusted is
 worse, and it is unfalsifiable from the card. The union has no such member, so it cannot be
 produced by accident later either.
+
+## Monorepo subprojects: which project owns a session
+
+Attribution (`projectNameForCwd`) matches a session's cwd against the paths each project
+claims, longest match winning so a nested project beats its parent. What a project *claims*
+is the part that needed fixing:
+
+- `root` says where the **checkout** is.
+- `defaultPath`, when nested under `root`, says which **work** is this project's — and it
+  then becomes the membership claim *instead of* `root`.
+- each `repos[].path`, and `repos[].path` + `subpath`, anchor as well.
+
+Without this, two definitions sharing one monorepo checkout — an umbrella `rush` at
+`~/src/rush` and a subproject `rush-cli` at `~/src/rush` with `defaultPath ~/src/rush/apps/cli`
+— both anchored at `~/src/rush`. Longest-match had nothing to separate them, so a session in
+`rush/apps/cli` was attributed to whichever definition was listed first, and the answer
+changed with definition order.
+
+A subproject scoped to `apps/cli` deliberately does **not** own `apps/web`; that work falls to
+the umbrella. Set the scope with `agents projects add <name> --root <monorepo> --path <subdir>`.

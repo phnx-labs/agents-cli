@@ -294,16 +294,43 @@ export function projectBasePath(def: ProjectDef, forRemote: boolean): string | u
 /** A project plus its repo root as an absolute local path, for cwd matching. */
 interface ProjectRootAbs {
   name: string;
-  /** Absolute, normalized repo root (`root` preferred, else `defaultPath`). */
+  /**
+   * One absolute, normalized path this project claims. A project contributes
+   * SEVERAL — its root, its monorepo subdir, and each bound repo's checkout and
+   * subpath — so the most specific claim can win over a broader one.
+   */
   abs: string;
 }
 
 function projectRootsAbs(defs: ProjectDef[]): ProjectRootAbs[] {
   const out: ProjectRootAbs[] = [];
+  const push = (name: string, raw: string | undefined) => {
+    if (!raw) return;
+    out.push({ name, abs: path.resolve(expandLocalHome(raw)) });
+  };
   for (const def of defs) {
-    const raw = def.root ?? def.defaultPath;
-    if (!raw) continue;
-    out.push({ name: def.name, abs: path.resolve(expandLocalHome(raw)) });
+    // `root` says where the CHECKOUT is; `defaultPath` says which work is this
+    // project's. For a monorepo subproject those differ, and only the narrower
+    // one is a membership claim — a project scoped to `rush/apps/cli` does not
+    // own `rush/apps/web`.
+    //
+    // The old `root ?? defaultPath` collapsed such a subproject onto the
+    // monorepo root, the same path its umbrella anchors at, so the longest-match
+    // tiebreak below had nothing to separate them and a session in
+    // `rush/apps/cli` counted toward whichever definition was listed first.
+    const rootAbs = def.root ? path.resolve(expandLocalHome(def.root)) : undefined;
+    const defaultAbs = def.defaultPath ? path.resolve(expandLocalHome(def.defaultPath)) : undefined;
+    const narrowed = rootAbs && defaultAbs && defaultAbs !== rootAbs && isUnder(defaultAbs, rootAbs);
+    if (narrowed) out.push({ name: def.name, abs: defaultAbs! });
+    else {
+      if (rootAbs) out.push({ name: def.name, abs: rootAbs });
+      if (defaultAbs && defaultAbs !== rootAbs) out.push({ name: def.name, abs: defaultAbs });
+    }
+    for (const r of def.repos ?? []) {
+      push(def.name, r.path);
+      // A repo pinned to a monorepo subpath anchors at that subpath too.
+      if (r.path && r.subpath) push(def.name, path.join(expandLocalHome(r.path), r.subpath));
+    }
   }
   return out;
 }

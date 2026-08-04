@@ -240,3 +240,46 @@ describe('resolveProjectNameForCwd', () => {
     expect(resolveProjectNameForCwd('', [])).toBeUndefined();
   });
 });
+
+describe('projectNameForCwd — monorepo subprojects', () => {
+  const HOME_ = process.env.HOME ?? os.homedir();
+  const mono = path.join(HOME_, 'src', 'rush');
+  // Two projects sharing ONE checkout: the umbrella and a subdir project.
+  const defs: ProjectDef[] = [
+    { name: 'rush', root: '~/src/rush' },
+    { name: 'rush-cli', root: '~/src/rush', defaultPath: '~/src/rush/apps/cli' },
+  ];
+
+  it('attributes work in the subdir to the SUBPROJECT, not the umbrella', () => {
+    // `root ?? defaultPath` gave both defs the same anchor (~/src/rush), so the
+    // longest-match tiebreak had nothing to separate them and the first listed
+    // def won regardless of where the session actually was.
+    expect(projectNameForCwd(path.join(mono, 'apps', 'cli', 'src'), defs)).toBe('rush-cli');
+    expect(projectNameForCwd(path.join(mono, 'apps', 'cli'), defs)).toBe('rush-cli');
+  });
+
+  it('still attributes work outside the subdir to the umbrella', () => {
+    expect(projectNameForCwd(path.join(mono, 'apps', 'web'), defs)).toBe('rush');
+    expect(projectNameForCwd(mono, defs)).toBe('rush');
+  });
+
+  it('does not depend on definition order', () => {
+    const reversed = [...defs].reverse();
+    expect(projectNameForCwd(path.join(mono, 'apps', 'cli', 'x'), reversed)).toBe('rush-cli');
+    expect(projectNameForCwd(path.join(mono, 'apps', 'web'), reversed)).toBe('rush');
+  });
+
+  it('anchors a bound repo checkout and its subpath too', () => {
+    const withRepos: ProjectDef[] = [
+      { name: 'umbrella', root: '~/src/rush' },
+      { name: 'infra', root: '~/src/rush', repos: [{ slug: 'o/infra', path: '~/src/rush/infra', subpath: 'deploy' }] },
+    ];
+    expect(projectNameForCwd(path.join(mono, 'infra', 'deploy', 'k8s'), withRepos)).toBe('infra');
+    expect(projectNameForCwd(path.join(mono, 'infra'), withRepos)).toBe('infra');
+    expect(projectNameForCwd(path.join(mono, 'docs'), withRepos)).toBe('umbrella');
+  });
+
+  it('matches nothing outside every anchor', () => {
+    expect(projectNameForCwd(path.join(HOME_, 'src', 'elsewhere'), defs)).toBeUndefined();
+  });
+});
