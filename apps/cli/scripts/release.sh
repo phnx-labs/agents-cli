@@ -896,15 +896,13 @@ if [[ "${RELEASE_REQUIRE_WINDOWS:-1}" == "1" ]]; then
 fi
 check_bucket() { jq -r --arg n "$1" 'map(select(.name==$n)) | (.[0].bucket // "missing")' <<<"$2"; }
 wait_for_ci_green() {
-  local pr="$1" ctx b results problem=0
-  # Pin the wait to the PR's CURRENT head sha and poll the check-runs API for
-  # that exact commit. `gh pr checks` right after a force-update briefly still
-  # reports the PREVIOUS commit's all-green checks — an all-pass read then
-  # breaks the wait before the new commit's checks even register, and the
-  # final assertion dies on "missing" (the 1.20.91 release hit this loop four
-  # times). Per-sha check-runs can never serve that stale state.
-  local head_sha
-  head_sha="$(gh pr view "$pr" --json headRefOid -q .headRefOid)" || die "could not read PR #$pr head sha"
+  local pr="$1" head_sha="${2:-}" ctx b results problem=0
+  # The caller passes the exact commit it pushed or fetched. GitHub's PR API can
+  # briefly return the PREVIOUS head after a force-update; resolving headRefOid
+  # here made release.sh inspect that stale commit's failed checks and abort even
+  # while the new commit's matrix was running (1.22.0). Per-sha check-runs pinned
+  # to the caller's known commit cannot serve that stale state.
+  [[ -n "$head_sha" ]] || die "missing CI-tested head sha for PR #$pr"
   bold "Waiting for CI on PR #$pr @ ${head_sha:0:9} (full matrix + test + gitleaks; up to 60m)..."
   local deadline=$(( $(date +%s) + 3600 ))
   while :; do
@@ -957,7 +955,7 @@ if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED; then
   # and abort under `set -u`. That aborted every retry of an unpublished release.
   HISTORICAL_CATCHUP=true
   bold "Re-validating CI from merged release PR #$MERGED_RELEASE_PR before catch-up publish..."
-  wait_for_ci_green "$MERGED_RELEASE_PR"
+  wait_for_ci_green "$MERGED_RELEASE_PR" "$CI_TESTED_HEAD"
 fi
 
 # ----- Tests on a crabbox (before opening the PR) -----
@@ -1048,7 +1046,7 @@ if ! $MAIN_AT_TARGET; then
     green "Opened release PR #$PR_NUMBER"
   fi
 
-  wait_for_ci_green "$PR_NUMBER"
+  wait_for_ci_green "$PR_NUMBER" "$RELEASE_COMMIT"
 
   # Squash-merge. Never --admin: branch protection must hold, and the ruleset has
   # no PR-review rule, so green test+gitleaks is a sufficient, non-bypass merge.
