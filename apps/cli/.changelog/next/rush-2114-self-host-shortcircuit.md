@@ -5,8 +5,9 @@
   the local box over its own name; on a loaded machine that self-SSH'd `doctor
   --json` orphaned on timeout and piled up until the host was crushed. A new
   `isSelfHost()` matches every identity the box answers to (short id, loopback,
-  tailscale dnsName + its short form) and gates the generic `--host` passthrough
-  (`maybeRunOnHost`), `remoteFleetTargets`, and `runFleet` so a self-reference
-  runs locally instead of self-SSHing. Source:
+  tailscale dnsName + its short form) and gates all four self-checks — the
+  generic `--host` passthrough (`maybeRunOnHost`), the `--devices`-all fan-out
+  (`runFleetPassthrough`), `remoteFleetTargets`, and `runFleet` — so a
+  self-reference runs locally instead of self-SSHing. Source:
   `apps/cli/src/lib/devices/self-host.ts`, `apps/cli/src/lib/hosts/passthrough.ts`,
   `apps/cli/src/lib/devices/fleet.ts`.

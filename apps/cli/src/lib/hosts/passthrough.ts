@@ -386,7 +386,7 @@ export async function runFleetPassthrough(
     targets,
     async (target) => {
       const cmd = ['agents', ...forwarded];
-      const isSelf = target.device.name.toLowerCase() === self.toLowerCase();
+      const isSelf = target.device.name.toLowerCase() === self.toLowerCase() || isSelfHost(target.device.name);
       const res = isSelf ? localRunner(cmd) : runner(target.device, cmd);
       if (res.code !== 0) {
         const detail = (res.stderr || res.stdout || 'unreachable').trim().slice(0, 200);
