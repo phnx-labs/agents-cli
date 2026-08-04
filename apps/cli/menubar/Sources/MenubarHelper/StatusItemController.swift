@@ -326,12 +326,47 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     // MARK: - Menu
+    // #region agent log
+    private func debugLog(_ hypothesisId: String, _ location: String, _ message: String, _ data: [String: Any] = [:]) {
+        var payload: [String: Any] = [
+            "sessionId": "fc56f4",
+            "hypothesisId": hypothesisId,
+            "location": location,
+            "message": message,
+            "timestamp": Int(Date().timeIntervalSince1970 * 1000),
+            "data": data,
+        ]
+        guard JSONSerialization.isValidJSONObject(payload),
+              let raw = try? JSONSerialization.data(withJSONObject: payload),
+              var line = String(data: raw, encoding: .utf8) else { return }
+        line += "\n"
+        let path = (NSHomeDirectory() as NSString)
+            .appendingPathComponent(".agents/.cache/helpers/menubar/debug-fc56f4.log")
+        let url = URL(fileURLWithPath: path)
+        if !FileManager.default.fileExists(atPath: path) {
+            FileManager.default.createFile(atPath: path, contents: nil)
+        }
+        guard let handle = try? FileHandle(forWritingTo: url) else { return }
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: Data(line.utf8))
+    }
+    // #endregion
+
     func menuWillOpen(_ menu: NSMenu) {
         // Accordion reopen: rebuild purely from warm caches. No teams history
         // walk, no CLI schedule — expand must stay cheap and not re-shell
         // `sessions --active`.
         if accordionCacheOnlyOpen {
             accordionCacheOnlyOpen = false
+            // #region agent log
+            debugLog("D", "StatusItemController.swift:menuWillOpen", "accordion cache-only reopen", [
+                "expandedCount": expandedProjects.count,
+                "expanded": Array(expandedProjects).sorted(),
+                "itemCount": menu.items.count,
+                "appActive": NSApp.isActive,
+            ])
+            // #endregion
             let sessions = LocalState.sessions(includeTeams: false)
             let browserTasks = LocalState.browserTasks(limit: 3)
             let pending = LocalState.pendingDevices()
@@ -339,8 +374,22 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                     recentSessions: cachedRecentSessions, routines: cachedRoutines,
                     doctor: cachedDoctorOverview, daemonPid: AgentsCLI.daemonPid(),
                     pending: pending)
+            // #region agent log
+            debugLog("D", "StatusItemController.swift:menuWillOpen", "after accordion rebuild", [
+                "itemCount": menu.items.count,
+                "expandedCount": expandedProjects.count,
+            ])
+            // #endregion
             return
         }
+
+        // #region agent log
+        debugLog("C", "StatusItemController.swift:menuWillOpen", "normal menu open", [
+            "pendingReopen": pendingAccordionReopen,
+            "appActive": NSApp.isActive,
+            "itemCount": menu.items.count,
+        ])
+        // #endregion
 
         // Critical path is all cheap disk reads. CLI-backed sections come from
         // warm caches; opening the menu only schedules refreshes for next time.
@@ -362,13 +411,56 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     func menuDidClose(_ menu: NSMenu) {
-        // Accordion click dismissed the menu; reopen only AFTER close so
-        // performClick cannot race and toggle the status item shut again.
+        // #region agent log
+        debugLog("A", "StatusItemController.swift:menuDidClose", "menu closed", [
+            "pendingReopen": pendingAccordionReopen,
+            "expandedCount": expandedProjects.count,
+            "appActive": NSApp.isActive,
+            "hasButton": statusItem.button != nil,
+        ])
+        // #endregion
+        // Accordion click dismissed the menu. On some macOS builds menuDidClose
+        // fires BEFORE the item action, so pending may still be false here —
+        // onToggleProject also schedules scheduleAccordionReopen on the next
+        // turn to cover that order.
+        scheduleAccordionReopen()
+    }
+
+    /// Re-open the status-item menu after a project accordion toggle.
+    /// Idempotent: first caller clears `pendingAccordionReopen`.
+    private func scheduleAccordionReopen() {
         guard pendingAccordionReopen else { return }
         pendingAccordionReopen = false
         accordionCacheOnlyOpen = true
         DispatchQueue.main.async { [weak self] in
-            self?.statusItem.button?.performClick(nil)
+            guard let self else { return }
+            let button = self.statusItem.button
+            // #region agent log
+            self.debugLog("B", "StatusItemController.swift:scheduleAccordionReopen", "performClick scheduled", [
+                "runId": "post-fix",
+                "hasButton": button != nil,
+                "appActive": NSApp.isActive,
+                "activationPolicy": NSApp.activationPolicy().rawValue,
+                "accordionCacheOnly": self.accordionCacheOnlyOpen,
+                "expanded": Array(self.expandedProjects).sorted(),
+            ])
+            // #endregion
+            // Same activate + click path as surface() — .accessory apps do not
+            // show an NSStatusItem menu via performClick alone once focus has
+            // returned to another app after dismiss.
+            NSApp.activate(ignoringOtherApps: true)
+            button?.performClick(nil)
+            // #region agent log
+            DispatchQueue.main.async {
+                self.debugLog("C", "StatusItemController.swift:scheduleAccordionReopen", "after performClick next tick", [
+                    "runId": "post-fix",
+                    "appActive": NSApp.isActive,
+                    "pendingReopen": self.pendingAccordionReopen,
+                    "accordionCacheOnly": self.accordionCacheOnlyOpen,
+                    "expandedCount": self.expandedProjects.count,
+                ])
+            }
+            // #endregion
         }
     }
 
@@ -874,13 +966,29 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func onToggleProject(_ sender: NSMenuItem) {
         guard let repo = sender.representedObject as? String else { return }
-        if expandedProjects.contains(repo) {
+        let wasOpen = expandedProjects.contains(repo)
+        if wasOpen {
             expandedProjects.remove(repo)
         } else {
             expandedProjects.insert(repo)
         }
-        // Defer reopen to menuDidClose so performClick cannot race the dismiss.
         pendingAccordionReopen = true
+        // #region agent log
+        debugLog("A", "StatusItemController.swift:onToggleProject", "toggle project", [
+            "runId": "post-fix",
+            "repo": repo,
+            "wasOpen": wasOpen,
+            "nowOpen": expandedProjects.contains(repo),
+            "pendingReopen": pendingAccordionReopen,
+            "appActive": NSApp.isActive,
+        ])
+        // #endregion
+        // menuDidClose often runs BEFORE this action (macOS tracking order).
+        // Schedule on the next main-queue turn so reopen still fires when
+        // menuDidClose already returned with pendingReopen == false.
+        DispatchQueue.main.async { [weak self] in
+            self?.scheduleAccordionReopen()
+        }
     }
 
     @objc private func onRevealPath(_ sender: NSMenuItem) {

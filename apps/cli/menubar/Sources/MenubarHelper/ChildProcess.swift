@@ -151,12 +151,17 @@ enum ChildProcess {
         posix_spawnattr_init(&attr)
         defer { posix_spawnattr_destroy(&attr) }
         // pgroup 0 == "use the child's own pid as the group id".
-        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETPGROUP))
+        // CLOEXEC_DEFAULT closes every inherited FD (including the single-instance
+        // menubar.lock flock) unless a file action re-opens it — otherwise a killed
+        // helper leaves doctor/sessions children holding the lock at PPID 1 and the
+        // next launch exits as "already running".
+        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
         posix_spawnattr_setpgroup(&attr, 0)
 
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
         defer { posix_spawn_file_actions_destroy(&actions) }
+        posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)
         posix_spawn_file_actions_adddup2(&actions, writeFD, STDOUT_FILENO)
         posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0)
         posix_spawn_file_actions_addclose(&actions, readFD)
