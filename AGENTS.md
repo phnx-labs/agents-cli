@@ -166,6 +166,13 @@ goes in `artifacts/`. Never scatter scratch in `/tmp` or the repo root.
   reviewer reads this file before every review and enforces the conventions in
   [§Code review conventions](#code-review-conventions-the-reviewer-must-enforce-these) —
   that block is what it checks the diff against, not just prose for humans.
+  - **Currently PAUSED (#1767).** Since 2026-08-02 every run crashed on startup and each
+    failure minted + logged a live 1-year Anthropic token, so the trigger in
+    [`.github/rush.yml`](.github/rush.yml) is disabled until the upstream Rush Cloud
+    agent-host capture bug is fixed. **Until it is restored, the non-author review is a
+    subagent reviewer** (spawn one, have it verify the diff and post its verdict as a PR
+    comment, then merge on green) — the documented fallback, not a redundant extra pass.
+    Do not re-enable the trigger until #1767 is resolved.
 - **The default branch is untouchable.** Every change is a git worktree + PR — never
   edit or commit on `main`. Worktrees live under `.agents/worktrees/<slug>/`.
 - **VS Code publish identity is frozen.** `apps/factory` publishes as publisher
