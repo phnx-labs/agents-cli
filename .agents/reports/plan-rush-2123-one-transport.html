@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan · RUSH-2123 · one transport + two axes</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111312; --panel2:#161a18; --ink:#e7ece8; --dim:#8b938c;
+    --line:#26302a; --accent:#a3e635; --amber:#f5c451; --red:#ff6b6b; --cyan:#5ad6c0;
+    --violet:#c4b5fd; --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f6; --panel:#ffffff; --panel2:#f2f4f0; --ink:#1a1c1a; --dim:#5c655c;
+    --line:#e2e6df; --accent:#4d7c0f; --amber:#b45309; --red:#dc2626; --cyan:#0e7490;
+    --violet:#6d28d9;
+  }
+  :root[data-theme="light"] .fig{background:#0e120f;border-color:#26302a}
+  :root[data-theme="light"] .fig figcaption{color:#8b938c}
+  :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1040px;margin:0 auto;padding:56px 28px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:36px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+  h1{font-size:34px;line-height:1.15;margin:0 0 12px;font-weight:700;letter-spacing:-.01em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);font-size:17px;max-width:74ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:4px 11px;background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:500}
+  .prov{margin-top:10px}
+  .prov .chip b{color:var(--cyan)}
+  h2{font-size:23px;margin:52px 0 8px;letter-spacing:-.01em;scroll-margin-top:20px}
+  h2 .n{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:10px;opacity:.85}
+  h3{font-size:16.5px;margin:22px 0 8px}
+  p{margin:10px 0}
+  .lead{color:var(--dim)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--cyan)}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{border-bottom:1px solid var(--accent)}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 18px 14px;margin:20px 0;overflow-x:auto}
+  .fig figcaption{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:12px;text-align:center}
+  .fig figcaption b{color:var(--ink)}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600}
+  .tag.a{background:rgba(163,230,53,.12);color:var(--accent);border:1px solid rgba(163,230,53,.3)}
+  .tag.b{background:rgba(90,214,192,.1);color:var(--cyan);border:1px solid rgba(90,214,192,.28)}
+  .tag.c{background:rgba(245,196,81,.1);color:var(--amber);border:1px solid rgba(245,196,81,.28)}
+  .tag.k{background:rgba(139,147,140,.12);color:var(--dim);border:1px solid var(--line)}
+  ul{margin:10px 0;padding-left:22px}li{margin:6px 0}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 10px 10px 0;padding:14px 18px;margin:18px 0}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:5px}
+  .callout.warn .lbl{color:var(--amber)}
+  .toc{font-family:var(--mono);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:18px}
+  .toc a{color:var(--dim)}.toc a:hover{color:var(--accent)}
+  pre{font-family:var(--mono);font-size:13px;background:#0c0f0d;border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow-x:auto;line-height:1.55;color:#e7ece8}
+  pre .c{color:#8b938c}pre .k{color:#a3e635}pre .s{color:#5ad6c0}pre .r{color:#ff6b6b}
+  .foot{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);font-family:var(--mono);font-size:12px}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--dim);justify-content:center;margin-top:8px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .themebtn{position:fixed;top:16px;right:16px;z-index:9;font-family:var(--mono);font-size:12px;color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:6px 13px;cursor:pointer}
+  .themebtn:hover{color:var(--accent);border-color:var(--accent)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="tt()" id="tb">◐ light</button>
+<script>
+  var r=document.documentElement;
+  function set(t){r.setAttribute('data-theme',t);document.getElementById('tb').textContent=(t==='light'?'◑ dark':'◐ light')}
+  set(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  function tt(){set(r.getAttribute('data-theme')==='light'?'dark':'light')}
+</script>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">agents-cli · outbound + feed post · plan</p>
+  <h1>One channel transport.<br>Two axes on every post — <span class="accent">level × state</span>.</h1>
+  <p class="sub">RUSH-2123. Keep three intents (record / reach human / reach agent). Put human delivery on <code>lib/channels/</code>.
+  Replace the <code>--blocked</code> boolean with <code>--state stuck</code>, Orthogonal to <code>--level</code> — the same split Linear uses for priority vs status.</p>
+  <div class="meta">
+    <span class="chip">ticket: <b>RUSH-2123</b></span>
+    <span class="chip">sibling: <b>RUSH-2110</b></span>
+    <span class="chip">open PR: <b>none</b></span>
+    <span class="chip">figures: <b>6 SVG</b></span>
+    <span class="chip">status: <b>awaiting go</b></span>
+  </div>
+  <div class="meta prov">
+    <span class="chip">harness: <b>grok</b></span>
+    <span class="chip">agent: <b>grok-4.5</b></span>
+    <span class="chip">host: <b>yosemite-s1</b></span>
+    <span class="chip">session: <b>019fc837</b></span>
+    <span class="chip"><b>2026-08-03</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#s1">01 · problem</a>
+    <a href="#s2">02 · three intents</a>
+    <a href="#s3">03 · level × state</a>
+    <a href="#s4">04 · Linear mirror</a>
+    <a href="#s5">05 · target architecture</a>
+    <a href="#s6">06 · land</a>
+    <a href="#s7">07 · success</a>
+  </nav>
+</header>
+
+<!-- 01 -->
+<h2 id="s1"><span class="n">01</span>Problem — four stacks, wrong teaching</h2>
+<p class="lead">Live failure: rule taught <code>rush message send</code> → missing subcommand → notify unconfigured → desktop fallback only.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 980 280" role="img" aria-label="Today: four independent outbound stacks">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#a3e635"/></marker>
+    <marker id="arR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#ff6b6b"/></marker>
+  </defs>
+  <text x="24" y="28" fill="#8b938c" font-size="12" font-family="ui-monospace,monospace">TODAY — four independent send paths</text>
+
+  <!-- verbs -->
+  <rect x="20" y="50" width="130" height="40" rx="8" fill="#161a18" stroke="#5ad6c0"/>
+  <text x="85" y="75" fill="#5ad6c0" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">send/notify</text>
+  <rect x="20" y="105" width="130" height="40" rx="8" fill="#161a18" stroke="#a3e635"/>
+  <text x="85" y="130" fill="#a3e635" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">feed post</text>
+  <rect x="20" y="160" width="130" height="40" rx="8" fill="#161a18" stroke="#f5c451"/>
+  <text x="85" y="185" fill="#f5c451" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">message</text>
+  <rect x="20" y="215" width="130" height="40" rx="8" fill="#1a1212" stroke="#ff6b6b"/>
+  <text x="85" y="240" fill="#ff6b6b" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">rules: rush msg</text>
+
+  <!-- stacks -->
+  <rect x="260" y="48" width="150" height="50" rx="8" fill="#12160f" stroke="#ff6b6b"/>
+  <text x="335" y="70" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">lib/channels</text>
+  <text x="335" y="88" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">send/notify</text>
+
+  <rect x="260" y="110" width="150" height="50" rx="8" fill="#12160f" stroke="#ff6b6b"/>
+  <text x="335" y="132" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">openclaw exec</text>
+  <text x="335" y="150" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">notifyUrgent / monitors</text>
+
+  <rect x="260" y="172" width="150" height="50" rx="8" fill="#12160f" stroke="#ff6b6b"/>
+  <text x="335" y="194" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">notifyDesktop</text>
+  <text x="335" y="212" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">daemon / run --notify</text>
+
+  <rect x="430" y="48" width="150" height="50" rx="8" fill="#12160f" stroke="#ff6b6b"/>
+  <text x="505" y="70" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">rush send CLI</text>
+  <text x="505" y="88" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">which-only preflight</text>
+
+  <rect x="430" y="110" width="150" height="50" rx="8" fill="#12160f" stroke="#26302a"/>
+  <text x="505" y="132" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">activity ledger</text>
+  <text x="505" y="150" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">feed post (record)</text>
+
+  <rect x="430" y="172" width="150" height="50" rx="8" fill="#12160f" stroke="#26302a"/>
+  <text x="505" y="194" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">answer-router</text>
+  <text x="505" y="212" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">message → agent</text>
+
+  <path d="M150 70 L260 70" stroke="#ff6b6b" fill="none" marker-end="url(#arR)"/>
+  <path d="M150 125 L260 130" stroke="#ff6b6b" fill="none" marker-end="url(#arR)"/>
+  <path d="M150 180 L430 195" stroke="#f5c451" fill="none"/>
+  <path d="M150 235 L430 70" stroke="#ff6b6b" fill="none" stroke-dasharray="4 3" marker-end="url(#arR)"/>
+
+  <!-- outcomes -->
+  <rect x="680" y="60" width="260" height="160" rx="12" fill="#1a1212" stroke="#ff6b6b"/>
+  <text x="810" y="95" fill="#ff6b6b" font-size="13" text-anchor="middle" font-family="ui-monospace,monospace">operator experience</text>
+  <text x="700" y="125" fill="#e7ece8" font-size="12" font-family="ui-monospace,monospace">• channel works on path A</text>
+  <text x="700" y="148" fill="#e7ece8" font-size="12" font-family="ui-monospace,monospace">• invisible to path B</text>
+  <text x="700" y="171" fill="#e7ece8" font-size="12" font-family="ui-monospace,monospace">• agent picks dead verb</text>
+  <text x="700" y="194" fill="#e7ece8" font-size="12" font-family="ui-monospace,monospace">• only desktop survives</text>
+</svg>
+<figcaption><b>Fig 1.</b> Four verbs, four stacks, config does not transfer. Red = bypass / broken teaching.</figcaption>
+<div class="legend">
+  <span><i class="sw" style="background:#5ad6c0"></i> human outbound</span>
+  <span><i class="sw" style="background:#a3e635"></i> record</span>
+  <span><i class="sw" style="background:#f5c451"></i> agent control</span>
+  <span><i class="sw" style="background:#ff6b6b"></i> bypass / dead path</span>
+</div>
+</figure>
+
+<table>
+  <thead><tr><th>Check</th><th>Result</th></tr></thead>
+  <tbody>
+    <tr><td>Open PR for 2123</td><td><b>None</b></td></tr>
+    <tr><td>Duplicate ticket</td><td>No exact dup; <b>RUSH-2110</b> is sibling (mostly merged #1803)</td></tr>
+    <tr><td>Stale rule</td><td><code>~/.agents/rules/subrules/notify-owner.md</code> still teaches <code>rush message send</code></td></tr>
+  </tbody>
+</table>
+
+<!-- 02 -->
+<h2 id="s2"><span class="n">02</span>Three intents — do not merge verbs</h2>
+<p class="lead">Collapsing names re-hides distinctions #1417 / #1516 / #1803 already paid for.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 980 320" role="img" aria-label="Three intents decision tree">
+  <text x="24" y="28" fill="#8b938c" font-size="12" font-family="ui-monospace,monospace">AGENT DECISION — what do you want to do?</text>
+
+  <rect x="340" y="50" width="220" height="44" rx="10" fill="#161a18" stroke="#a3e635" stroke-width="1.5"/>
+  <text x="450" y="78" fill="#a3e635" font-size="13" text-anchor="middle" font-family="ui-monospace,monospace">I have something to say</text>
+
+  <!-- branches -->
+  <path d="M450 94 L450 120" stroke="#26302a" fill="none"/>
+  <path d="M150 120 L750 120" stroke="#26302a" fill="none"/>
+  <path d="M150 120 L150 145" stroke="#26302a" fill="none"/>
+  <path d="M450 120 L450 145" stroke="#26302a" fill="none"/>
+  <path d="M750 120 L750 145" stroke="#26302a" fill="none"/>
+
+  <!-- intent 1 -->
+  <rect x="40" y="145" width="220" height="70" rx="10" fill="#12160f" stroke="#a3e635"/>
+  <text x="150" y="172" fill="#a3e635" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">1 · RECORD</text>
+  <text x="150" y="194" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">progress / stuck note</text>
+  <text x="150" y="248" fill="#8b938c" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">agents feed post</text>
+  <rect x="55" y="230" width="190" height="28" rx="6" fill="#161a18" stroke="#26302a"/>
+  <text x="150" y="249" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">feed post [flags]</text>
+
+  <!-- intent 2 -->
+  <rect x="340" y="145" width="220" height="70" rx="10" fill="#12160f" stroke="#5ad6c0"/>
+  <text x="450" y="172" fill="#5ad6c0" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">2 · REACH HUMAN</text>
+  <text x="450" y="194" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">owner or channel</text>
+  <rect x="355" y="230" width="190" height="28" rx="6" fill="#161a18" stroke="#26302a"/>
+  <text x="450" y="249" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">send / notify</text>
+
+  <!-- intent 3 -->
+  <rect x="640" y="145" width="220" height="70" rx="10" fill="#12160f" stroke="#f5c451"/>
+  <text x="750" y="172" fill="#f5c451" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">3 · REACH AGENT</text>
+  <text x="750" y="194" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">answer / nudge / resume</text>
+  <rect x="655" y="230" width="190" height="28" rx="6" fill="#161a18" stroke="#26302a"/>
+  <text x="750" y="249" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">agents message</text>
+
+  <text x="150" y="295" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">ledger + optional mirror</text>
+  <text x="450" y="295" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">lib/channels only</text>
+  <text x="750" y="295" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">answer-router only</text>
+</svg>
+<figcaption><b>Fig 2.</b> One mental model for agents. Three exits — not four synonyms.</figcaption>
+</figure>
+
+<!-- 03 -->
+<h2 id="s3"><span class="n">03</span>Level × state — kill the block boolean</h2>
+<p class="lead">Today <code>--blocked</code> fights <code>--level</code>. Code already says “state, not volume” — surface should match.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 980 360" role="img" aria-label="2D matrix level vs state">
+  <text x="24" y="28" fill="#8b938c" font-size="12" font-family="ui-monospace,monospace">FEED POST MATRIX — volume × agent condition</text>
+
+  <!-- axes labels -->
+  <text x="120" y="70" fill="#5ad6c0" font-size="12" font-family="ui-monospace,monospace">--level →</text>
+  <text x="40" y="200" fill="#a3e635" font-size="12" font-family="ui-monospace,monospace" transform="rotate(-90 40 200)">--state</text>
+
+  <!-- column headers -->
+  <rect x="160" y="80" width="240" height="36" rx="6" fill="#161a18" stroke="#26302a"/>
+  <text x="280" y="103" fill="#e7ece8" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">milestone</text>
+  <rect x="420" y="80" width="240" height="36" rx="6" fill="#161a18" stroke="#26302a"/>
+  <text x="540" y="103" fill="#e7ece8" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">important</text>
+
+  <!-- row working -->
+  <rect x="40" y="130" width="100" height="90" rx="6" fill="#161a18" stroke="#26302a"/>
+  <text x="90" y="180" fill="#a3e635" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">working</text>
+  <text x="90" y="198" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">(default)</text>
+
+  <rect x="160" y="130" width="240" height="90" rx="8" fill="#12160f" stroke="#a3e635"/>
+  <text x="280" y="165" fill="#a3e635" font-size="13" text-anchor="middle" font-family="ui-monospace,monospace">quiet progress</text>
+  <text x="280" y="188" fill="#8b938c" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">"halfway done"</text>
+  <text x="280" y="208" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">no block · best-effort broadcast</text>
+
+  <rect x="420" y="130" width="240" height="90" rx="8" fill="#12160f" stroke="#5ad6c0"/>
+  <text x="540" y="165" fill="#5ad6c0" font-size="13" text-anchor="middle" font-family="ui-monospace,monospace">loud, still moving</text>
+  <text x="540" y="188" fill="#8b938c" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">"ready for review"</text>
+  <text x="540" y="208" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">no block · phone if minLevel</text>
+
+  <!-- row stuck -->
+  <rect x="40" y="240" width="100" height="90" rx="6" fill="#161a18" stroke="#26302a"/>
+  <text x="90" y="290" fill="#ff6b6b" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">stuck</text>
+
+  <rect x="160" y="240" width="240" height="90" rx="8" fill="#1a1212" stroke="#26302a" stroke-dasharray="4 3"/>
+  <text x="280" y="280" fill="#8b938c" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">invalid / auto-lift</text>
+  <text x="280" y="302" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">stuck ⇒ important</text>
+
+  <rect x="420" y="240" width="240" height="90" rx="8" fill="#1a1212" stroke="#ff6b6b" stroke-width="1.5"/>
+  <text x="540" y="275" fill="#ff6b6b" font-size="13" text-anchor="middle" font-family="ui-monospace,monospace">needs human</text>
+  <text x="540" y="297" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">OpenBlock + fail-loud</text>
+  <text x="540" y="315" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">replaces --blocked</text>
+
+  <!-- callout box -->
+  <rect x="700" y="100" width="250" height="220" rx="12" fill="#161a18" stroke="#a3e635"/>
+  <text x="825" y="130" fill="#a3e635" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">implication</text>
+  <text x="720" y="165" fill="#e7ece8" font-size="13" font-family="ui-monospace,monospace">stuck  ⇒  important</text>
+  <text x="720" y="195" fill="#e7ece8" font-size="13" font-family="ui-monospace,monospace">important  ⇏  stuck</text>
+  <text x="720" y="235" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">That is why these are</text>
+  <text x="720" y="255" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">two axes, not a ladder.</text>
+  <text x="720" y="290" fill="#e7ece8" font-size="12" font-family="ui-monospace,monospace">CLI:</text>
+  <text x="720" y="310" fill="#5ad6c0" font-size="11" font-family="ui-monospace,monospace">--state stuck</text>
+</svg>
+<figcaption><b>Fig 3.</b> The only cells that matter. “Ready for review” lives in working×important — not stuck.</figcaption>
+</figure>
+
+<figure class="fig">
+<svg viewBox="0 0 980 220" role="img" aria-label="Before vs after flag surface">
+  <text x="160" y="30" fill="#8b938c" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">BEFORE</text>
+  <text x="700" y="30" fill="#8b938c" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">AFTER</text>
+
+  <rect x="40" y="50" width="280" height="140" rx="12" fill="#1a1212" stroke="#ff6b6b"/>
+  <text x="180" y="85" fill="#ff6b6b" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">two knobs that fight</text>
+  <text x="70" y="120" fill="#e7ece8" font-size="13" font-family="ui-monospace,monospace">--level milestone|important</text>
+  <text x="70" y="148" fill="#e7ece8" font-size="13" font-family="ui-monospace,monospace">--blocked              ← boolean</text>
+  <text x="70" y="172" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">error if both combined</text>
+
+  <path d="M340 120 L420 120" stroke="#a3e635" fill="none" marker-end="url(#ar)"/>
+
+  <rect x="440" y="50" width="500" height="140" rx="12" fill="#12160f" stroke="#a3e635"/>
+  <text x="690" y="85" fill="#a3e635" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">orthogonal, named honestly</text>
+  <text x="470" y="120" fill="#e7ece8" font-size="13" font-family="ui-monospace,monospace">--level  milestone | important     # volume</text>
+  <text x="470" y="148" fill="#e7ece8" font-size="13" font-family="ui-monospace,monospace">--state  working | stuck           # condition</text>
+  <text x="470" y="172" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">working default · stuck implies important + OpenBlock</text>
+</svg>
+<figcaption><b>Fig 4.</b> Surface rename. <b>block</b> stays the ledger object; <b>stuck</b> is what the agent is.</figcaption>
+</figure>
+
+<pre><span class="c"># Agent examples after change</span>
+<span class="k">agents feed post</span> <span class="s">"CHANGELOG pushed; watching CI"</span>
+<span class="k">agents feed post</span> <span class="s">"ready for review"</span> --level important
+<span class="k">agents feed post</span> <span class="s">"force-push denied by git-guard"</span> --state stuck
+<span class="k">agents feed post</span> <span class="s">"publish or wait?"</span> --state stuck --option publish --option wait
+</pre>
+
+<div class="callout">
+  <span class="lbl">v1 vs v2 on state</span>
+  <b>v1 minimal:</b> only non-default value agents pass is <code>stuck</code> (covers both hard wall and answerable needs-you).<br>
+  <b>v2 optional:</b> split <code>waiting</code> (answerable) vs <code>stuck</code> (hard wall) to match Floor moods — only if triage needs the split.
+</div>
+
+<!-- 04 -->
+<h2 id="s4"><span class="n">04</span>Linear mirror — what to copy, what not</h2>
+
+<figure class="fig">
+<svg viewBox="0 0 980 300" role="img" aria-label="Linear workflow types vs feed post states">
+  <text x="24" y="28" fill="#8b938c" font-size="12" font-family="ui-monospace,monospace">LINEAR STATUS TYPES (categories) — no first-class Blocked</text>
+
+  <!-- linear types pipeline -->
+  <rect x="20" y="55" width="100" height="44" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="70" y="82" fill="#8b938c" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">triage</text>
+  <path d="M120 77 L140 77" stroke="#26302a" fill="none"/>
+  <rect x="140" y="55" width="100" height="44" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="190" y="82" fill="#8b938c" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">backlog</text>
+  <path d="M240 77 L260 77" stroke="#26302a" fill="none"/>
+  <rect x="260" y="55" width="100" height="44" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="310" y="82" fill="#8b938c" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">unstarted</text>
+  <path d="M360 77 L380 77" stroke="#26302a" fill="none"/>
+  <rect x="380" y="55" width="100" height="44" rx="8" fill="#12160f" stroke="#a3e635"/>
+  <text x="430" y="82" fill="#a3e635" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">started</text>
+  <path d="M480 77 L500 77" stroke="#26302a" fill="none"/>
+  <rect x="500" y="55" width="100" height="44" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="550" y="82" fill="#8b938c" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">completed</text>
+  <path d="M600 77 L620 77" stroke="#26302a" fill="none"/>
+  <rect x="620" y="55" width="100" height="44" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="670" y="82" fill="#8b938c" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">canceled</text>
+
+  <text x="750" y="70" fill="#5ad6c0" font-size="11" font-family="ui-monospace,monospace">+ priority axis</text>
+  <text x="750" y="88" fill="#8b938c" font-size="10" font-family="ui-monospace,monospace">Urgent…None (separate)</text>
+
+  <!-- Rush team names under started -->
+  <text x="24" y="130" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">Your team under started: Doing · In Review · Plan · Review — still no Blocked type</text>
+
+  <!-- mapping box -->
+  <rect x="20" y="155" width="940" height="120" rx="12" fill="#12160f" stroke="#26302a"/>
+  <text x="40" y="185" fill="#a3e635" font-size="12" font-family="ui-monospace,monospace">Copy from Linear</text>
+  <text x="40" y="210" fill="#e7ece8" font-size="13" font-family="ui-monospace,monospace">1. Two axes (priority vs status) — never one ladder</text>
+  <text x="40" y="235" fill="#e7ece8" font-size="13" font-family="ui-monospace,monospace">2. Few types, many display names</text>
+  <text x="40" y="260" fill="#e7ece8" font-size="13" font-family="ui-monospace,monospace">3. Blocked is not a priority tier</text>
+
+  <text x="520" y="185" fill="#ff6b6b" font-size="12" font-family="ui-monospace,monospace">Do not copy onto feed post</text>
+  <text x="520" y="210" fill="#e7ece8" font-size="13" font-family="ui-monospace,monospace">Backlog / Todo / Doing / In Review / Done</text>
+  <text x="520" y="235" fill="#e7ece8" font-size="13" font-family="ui-monospace,monospace">Those are ticket lifecycle, not live agent condition</text>
+  <text x="520" y="260" fill="#e7ece8" font-size="13" font-family="ui-monospace,monospace">Feed states: working · stuck  (+ waiting later)</text>
+</svg>
+<figcaption><b>Fig 5.</b> Linear’s model justifies two axes — not a full board on every post.</figcaption>
+</figure>
+
+<p>Floor moods already in-repo: <code>working | waiting | blocked | celebrating | done | idle</code>. Map <b>stuck</b> → human-needs-you ledger; keep Floor’s “blocked” for crashed/rate-limit inference.</p>
+
+<!-- 05 -->
+<h2 id="s5"><span class="n">05</span>Target architecture</h2>
+
+<figure class="fig">
+<svg viewBox="0 0 980 400" role="img" aria-label="Target architecture one transport">
+  <defs>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#a3e635"/></marker>
+    <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#5ad6c0"/></marker>
+    <marker id="ay" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#f5c451"/></marker>
+  </defs>
+  <text x="24" y="28" fill="#8b938c" font-size="12" font-family="ui-monospace,monospace">TARGET — one human transport</text>
+
+  <rect x="20" y="50" width="170" height="55" rx="10" fill="#161a18" stroke="#a3e635"/>
+  <text x="105" y="75" fill="#a3e635" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">feed post</text>
+  <text x="105" y="93" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">level × state</text>
+
+  <rect x="20" y="140" width="170" height="55" rx="10" fill="#161a18" stroke="#5ad6c0"/>
+  <text x="105" y="165" fill="#5ad6c0" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">send / notify</text>
+  <text x="105" y="183" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">explicit / owner</text>
+
+  <rect x="20" y="230" width="170" height="55" rx="10" fill="#161a18" stroke="#f5c451"/>
+  <text x="105" y="255" fill="#f5c451" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">message</text>
+  <text x="105" y="273" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">agent control</text>
+
+  <!-- mid -->
+  <rect x="280" y="50" width="200" height="55" rx="10" fill="#12160f" stroke="#26302a"/>
+  <text x="380" y="75" fill="#e7ece8" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">activity + OpenBlock</text>
+  <text x="380" y="93" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">if state=stuck</text>
+
+  <rect x="280" y="130" width="200" height="80" rx="10" fill="#12160f" stroke="#a3e635" stroke-width="1.5"/>
+  <text x="380" y="160" fill="#a3e635" font-size="13" text-anchor="middle" font-family="ui-monospace,monospace">lib/channels/send.ts</text>
+  <text x="380" y="182" fill="#8b938c" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">ONE entry for humans</text>
+  <text x="380" y="198" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">notify.transports</text>
+
+  <rect x="280" y="240" width="200" height="55" rx="10" fill="#12160f" stroke="#f5c451"/>
+  <text x="380" y="265" fill="#f5c451" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">answer-router</text>
+  <text x="380" y="283" fill="#8b938c" font-size="10" text-anchor="middle" font-family="ui-monospace,monospace">mailbox · pty · resume</text>
+
+  <path d="M190 78 L280 78" stroke="#a3e635" fill="none" marker-end="url(#ag)"/>
+  <path d="M190 168 L280 168" stroke="#5ad6c0" fill="none" marker-end="url(#ac)"/>
+  <path d="M190 258 L280 268" stroke="#f5c451" fill="none" marker-end="url(#ay)"/>
+  <path d="M380 105 L380 130" stroke="#a3e635" fill="none" stroke-dasharray="4 3" marker-end="url(#ag)"/>
+  <text x="395" y="122" fill="#8b938c" font-size="10" font-family="ui-monospace,monospace">broadcast → notify</text>
+
+  <!-- providers -->
+  <text x="560" y="50" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">providers</text>
+  <rect x="560" y="65" width="100" height="36" rx="6" fill="#161a18" stroke="#26302a"/>
+  <text x="610" y="88" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">desktop</text>
+  <rect x="680" y="65" width="100" height="36" rx="6" fill="#161a18" stroke="#26302a"/>
+  <text x="730" y="88" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">imessage</text>
+  <rect x="800" y="65" width="100" height="36" rx="6" fill="#161a18" stroke="#26302a"/>
+  <text x="850" y="88" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">telegram</text>
+  <rect x="620" y="115" width="100" height="36" rx="6" fill="#161a18" stroke="#26302a"/>
+  <text x="670" y="138" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">slack/…</text>
+  <rect x="740" y="115" width="100" height="36" rx="6" fill="#161a18" stroke="#26302a"/>
+  <text x="790" y="138" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="ui-monospace,monospace">mailbox</text>
+  <path d="M480 170 L560 100" stroke="#a3e635" fill="none" marker-end="url(#ag)"/>
+
+  <!-- delete -->
+  <rect x="560" y="190" width="380" height="120" rx="12" fill="#1a1212" stroke="#ff6b6b"/>
+  <text x="750" y="220" fill="#ff6b6b" font-size="12" text-anchor="middle" font-family="ui-monospace,monospace">DELETE / REROUTE</text>
+  <text x="580" y="250" fill="#e7ece8" font-size="12" font-family="ui-monospace,monospace">• notifyUrgentBlock → openclaw</text>
+  <text x="580" y="272" fill="#e7ece8" font-size="12" font-family="ui-monospace,monospace">• monitors notify → openclaw</text>
+  <text x="580" y="294" fill="#e7ece8" font-size="12" font-family="ui-monospace,monospace">• rush: which-only (add capability probe)</text>
+
+  <text x="24" y="360" fill="#8b938c" font-size="11" font-family="ui-monospace,monospace">daemon notifyDesktop stays fire-and-forget (crash-safe); desktop provider wraps it with deliverability checks for CLI</text>
+</svg>
+<figcaption><b>Fig 6.</b> Target wiring. Human delivery has one door; agent control stays separate.</figcaption>
+</figure>
+
+<!-- 06 -->
+<h2 id="s6"><span class="n">06</span>Land plan</h2>
+<table>
+  <thead><tr><th></th><th>Phase</th><th>Work</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="tag a">PR1</span></td>
+      <td><b>Taxonomy + transport</b></td>
+      <td><code>--state stuck</code> (replace/alias <code>--blocked</code>); help decision table; rewrite notify-owner rule; extract <code>lib/channels/send.ts</code>; kill openclaw hardcodes</td>
+    </tr>
+    <tr>
+      <td><span class="tag b">PR2</span></td>
+      <td><b>Hardening</b></td>
+      <td>Rush capability probe; structured skew errors; optional <code>agents doctor notify</code></td>
+    </tr>
+    <tr>
+      <td><span class="tag c">PR3</span></td>
+      <td><b>Proof</b></td>
+      <td>E2E: stuck post delivers on Mac, fails loud on Linux; close 2123 with proof</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout warn">
+  <span class="lbl">out of scope</span>
+  Menubar/Cockpit (RUSH-2110) · rename <code>feed post</code> · fold <code>message</code> into channels · full Linear status enum · multi-tenant “who is a post for”
+</div>
+
+<!-- 07 -->
+<h2 id="s7"><span class="n">07</span>Success</h2>
+<ol>
+  <li>Agents pick from three intents via help — not <code>rush message send</code>.</li>
+  <li><code>--state stuck</code> owns OpenBlock + fail-loud; <code>--level important</code> alone does not open a block.</li>
+  <li>Every human openclaw hardcode gone; entry is <code>lib/channels/</code>.</li>
+  <li>Rush skew fails with a named error.</li>
+  <li><code>agents message</code> behavior unchanged.</li>
+</ol>
+
+<div class="callout">
+  <span class="lbl">go / reshape</span>
+  Default: approve PR1 shape (three intents + level×state + one transport).
+  Reshape only if you want v2 <code>waiting|stuck</code> in the first PR, or a single <code>--kind</code> mega-enum instead of two flags.
+</div>
+
+<div class="foot">
+  grok · grok-4.5 · yosemite-s1 · 019fc837 · 2026-08-03 · 6 SVG figures · next: go / reshape
+</div>
+</div>
+</body>
+</html>

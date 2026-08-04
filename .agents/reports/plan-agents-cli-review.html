@@ -1,0 +1,576 @@
+<meta charset="utf-8">
+<title>agents-cli · fleet review · plan</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111311; --panel2:#151815; --ink:#e8ece6; --dim:#8b938a;
+    --line:#242724; --accent:#a3e635; --accent-ink:#0a0a0a;
+    --a:#a3e635; --b:#7dd3fc; --c:#fbbf24; --warn:#f87171; --ok:#4ade80;
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#f7f8f5; --panel:#ffffff; --panel2:#f0f2ec; --ink:#16180f; --dim:#5b6157;
+    --line:#e2e5dc; --accent:#4d7c0f; --accent-ink:#ffffff;
+    --a:#4d7c0f; --b:#0369a1; --c:#b45309; --warn:#b91c1c; --ok:#15803d;
+  }
+  @media (prefers-color-scheme:light){:root:not([data-theme="dark"]){
+    --bg:#f7f8f5; --panel:#ffffff; --panel2:#f0f2ec; --ink:#16180f; --dim:#5b6157;
+    --line:#e2e5dc; --accent:#4d7c0f; --accent-ink:#ffffff;
+    --a:#4d7c0f; --b:#0369a1; --c:#b45309; --warn:#b91c1c; --ok:#15803d;
+  }}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;
+    font-size:16px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:940px;margin:0 auto;padding:48px 24px 96px}
+  a{color:var(--accent);text-decoration:none}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--dim);margin:0 0 14px}
+  h1{font-size:40px;line-height:1.12;margin:0 0 16px;font-weight:800;letter-spacing:-.02em}
+  h1 .accent{color:var(--accent)}
+  .sub{font-size:17px;color:var(--dim);max-width:70ch;margin:0 0 22px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+  .chip{font-family:var(--mono);font-size:11.5px;padding:4px 9px;border:1px solid var(--line);
+    border-radius:999px;color:var(--dim);background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:600}
+  .prov{border-color:transparent;background:var(--panel2)}
+  .toc{margin:26px 0 0;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+  .toc h4{margin:0 0 10px;font-family:var(--mono);font-size:11px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--dim)}
+  .toc ol{margin:0;padding-left:22px;columns:2;column-gap:32px}
+  .toc li{margin:3px 0;font-size:14px}
+  h2{font-size:24px;margin:52px 0 14px;font-weight:750;letter-spacing:-.01em;
+    display:flex;align-items:baseline;gap:12px;border-top:1px solid var(--line);padding-top:26px}
+  h2 .n{font-family:var(--mono);font-size:14px;color:var(--accent);font-weight:700}
+  h3{font-size:18px;margin:26px 0 8px;font-weight:700}
+  p{margin:10px 0}
+  .lead{color:var(--dim)}
+  .card{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:20px 22px;margin:18px 0}
+  .card h3{margin-top:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .card .id{font-family:var(--mono);font-size:12px;color:var(--accent-ink);background:var(--accent);
+    padding:2px 8px;border-radius:6px;font-weight:700}
+  .row{margin:12px 0 0}
+  .row .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--dim);display:block;margin-bottom:3px}
+  code,.mono{font-family:var(--mono);font-size:.9em;background:var(--panel2);padding:1px 5px;border-radius:5px}
+  .card .row code{background:var(--panel2)}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);padding:14px 18px;border-radius:0 10px 10px 0;margin:18px 0}
+  .callout.warn{border-left-color:var(--warn)}
+  .callout.you{border-left-color:var(--c)}
+  .callout p{margin:6px 0}
+  .callout .h{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+  .tag{font-family:var(--mono);font-size:10.5px;padding:2px 7px;border-radius:5px;font-weight:700;white-space:nowrap}
+  .tag.build{background:rgba(163,230,53,.16);color:var(--a)}
+  .tag.ready{background:rgba(125,211,252,.16);color:var(--b)}
+  .tag.you{background:rgba(251,191,36,.18);color:var(--c)}
+  .tag.done{background:rgba(74,222,128,.16);color:var(--ok)}
+  .fig{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:22px;margin:22px 0;overflow-x:auto}
+  .fig .cap{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin:0 0 14px}
+  .foot{margin-top:60px;padding-top:18px;border-top:1px solid var(--line);font-family:var(--mono);
+    font-size:11.5px;color:var(--dim)}
+  .toggle{position:fixed;top:16px;right:16px;font-family:var(--mono);font-size:16px;cursor:pointer;
+    border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;
+    width:38px;height:38px;line-height:1}
+  svg text{font-family:var(--mono);fill:var(--ink)}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:12px}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  ul.tight{margin:8px 0;padding-left:20px}
+  ul.tight li{margin:5px 0}
+  .em{color:var(--ink);font-weight:600}
+</style>
+<button class="toggle" onclick="var r=document.documentElement;var d=r.getAttribute('data-theme')==='dark';r.setAttribute('data-theme',d?'light':'dark')">◐</button>
+<div class="wrap">
+
+  <p class="kicker">agents-cli · fleet review · plan</p>
+  <h1>Twelve fixes from your review, <span class="accent">root-caused</span> and grouped for delivery</h1>
+  <p class="sub">You dumped twelve improvement ideas at agents-cli. Each was investigated by an independent
+  sub-agent (findings cross-checked against the code), and several turned out different from the starting
+  assumption. This is the whole picture: a plain refresher on each, the real root cause with evidence, the
+  approach chosen versus what else was on the table, and the few things that need your call.</p>
+
+  <div class="chips">
+    <span class="chip"><b>12</b> tracks</span>
+    <span class="chip"><b>2</b> PRs already building</span>
+    <span class="chip"><b>5</b> premises corrected</span>
+    <span class="chip">status: <b>awaiting go on the wave</b></span>
+  </div>
+  <div class="chips">
+    <span class="chip prov">harness · <b>claude</b></span>
+    <span class="chip prov">agent · <b>opus-4-8</b></span>
+    <span class="chip prov">host · <b>yosemite-s1</b></span>
+    <span class="chip prov">session · <b>27b5c717</b></span>
+    <span class="chip prov">date · <b>2026-08-03</b></span>
+  </div>
+
+  <div class="toc">
+    <h4>Contents</h4>
+    <ol>
+      <li><a href="#corrections">What changed from your assumptions</a></li>
+      <li><a href="#perf">Cluster A — Performance &amp; hot paths</a></li>
+      <li><a href="#sync">Cluster B — Sync surface cleanup</a></li>
+      <li><a href="#analytics">Cluster C — Session-analytics subsystem</a></li>
+      <li><a href="#standalone">Cluster D — Standalone fixes</a></li>
+      <li><a href="#delivery">Delivery plan &amp; what needs you</a></li>
+    </ol>
+  </div>
+
+  <!-- ============ CORRECTIONS ============ -->
+  <h2 id="corrections"><span class="n">01</span> What changed from your assumptions</h2>
+  <p class="lead">The most useful output of the review: five things you (or I) assumed going in turned out
+  not to be true. Reading these first will make the rest make sense.</p>
+
+  <div class="callout warn">
+    <p class="h">Correction 1 — why <code>agents view</code> is slow</p>
+    <p>We both guessed it was the live per-account usage bars (the S/W/M network calls). <span class="em">Wrong.</span>
+    Those are parallel, cached, and sub-second. The real cost is that <code>agents view</code> re-scans the
+    <span class="em">230–270&nbsp;MB Claude binary on every single call</span> (~7.5s of a ~13s run) because a
+    catalog-cache guard refuses to save a failed extraction. Evidence in Cluster A.</p>
+  </div>
+  <div class="callout warn">
+    <p class="h">Correction 2 — why <code>agents sessions --active</code> is slow (the biggest find)</p>
+    <p>A <code>--local</code> query — which should touch nothing but this machine — actually fires
+    <span class="em">~60 real SSH calls</span> (~4.3s) to poll <span class="em">remote teammates that already
+    finished</span>. This is the answer to the filed ticket RUSH-2118, and a major reason your Mac feels slow.</p>
+  </div>
+  <div class="callout warn">
+    <p class="h">Correction 3 — per-harness rule presets (#7)</p>
+    <p>You asked us to <span class="em">build</span> them. They already exist: <code>agents rules switch
+    codex@ver --preset name</code> ships today, keyed per harness+version. The real gap is small — they only
+    apply after an explicit switch, not automatically when you run the agent.</p>
+  </div>
+  <div class="callout warn">
+    <p class="h">Correction 4 — R2 backups &amp; CRDT (#4)</p>
+    <p>R2 sync <span class="em">exists</span> but is an off-by-default beta that the team already demoted in
+    favour of the live <code>--host</code> query and export/import. "Swap CRDT for object-storage versioning"
+    would actually cause silent data loss on the one case CRDT protects. Your revised call — remove the legacy
+    beta, keep+grow export/import — is the right one.</p>
+  </div>
+  <div class="callout warn">
+    <p class="h">Correction 5 — benchmarks (#5) already partly exist</p>
+    <p>There are session benchmarks (<code>bench/sessions-perf.ts</code>, <code>bench-ssh.mjs</code>) and a
+    <code>docs/05-sessions.md</code>. The gap is the <span class="em">distributed</span> (cross-fleet) query
+    path isn't benchmarked, not wired to CI, and results aren't documented.</p>
+  </div>
+
+  <!-- ============ CLUSTER A: PERF ============ -->
+  <h2 id="perf"><span class="n">02</span> Cluster A — Performance &amp; hot paths</h2>
+  <p class="lead">This is the "why is my Mac slow even though the agents run elsewhere?" cluster. The two
+  marquee fixes (#1, #3) are <span class="em">already building</span> as PRs.</p>
+
+  <div class="fig">
+    <p class="cap">Figure 1 — <code>agents sessions --active --local</code>: before vs after (#3)</p>
+    <svg viewBox="0 0 880 260" width="100%" height="260" role="img" aria-label="before and after of the sessions active SSH leak">
+      <!-- BEFORE -->
+      <text x="20" y="24" font-size="13" font-weight="bold" fill="#f87171">BEFORE — a "local" query dials the fleet</text>
+      <rect x="20" y="38" width="120" height="46" rx="8" fill="none" stroke="#242724"/>
+      <text x="80" y="60" font-size="12" text-anchor="middle">this machine</text>
+      <text x="80" y="76" font-size="10" text-anchor="middle" fill="#8b938a">--local query</text>
+      <!-- ssh arrows to finished teammates -->
+      <g stroke="#f87171" stroke-width="1.5" fill="none">
+        <path d="M140 55 C 220 40, 260 30, 330 34"/>
+        <path d="M140 60 C 220 60, 260 60, 330 62"/>
+        <path d="M140 66 C 220 84, 260 96, 330 92"/>
+      </g>
+      <text x="235" y="20" font-size="10" fill="#f87171">~60 ssh</text>
+      <g font-size="11">
+        <rect x="330" y="20" width="200" height="30" rx="6" fill="none" stroke="#242724"/>
+        <text x="340" y="39">yosemite-s0 · done ✓</text>
+        <rect x="330" y="55" width="200" height="30" rx="6" fill="none" stroke="#242724"/>
+        <text x="340" y="74">mac-mini · done ✓</text>
+        <rect x="330" y="90" width="200" height="30" rx="6" fill="none" stroke="#242724"/>
+        <text x="340" y="109">m1/m3 · done ✓</text>
+      </g>
+      <text x="560" y="60" font-size="13" fill="#f87171" font-weight="bold">≈ 4.3 s</text>
+      <text x="560" y="78" font-size="10" fill="#8b938a">30 finished teammates,</text>
+      <text x="560" y="92" font-size="10" fill="#8b938a">0 running — all polled</text>
+      <!-- AFTER -->
+      <text x="20" y="164" font-size="13" font-weight="bold" fill="#4ade80">AFTER — local stays local</text>
+      <rect x="20" y="178" width="120" height="46" rx="8" fill="none" stroke="#242724"/>
+      <text x="80" y="200" font-size="12" text-anchor="middle">this machine</text>
+      <text x="80" y="216" font-size="10" text-anchor="middle" fill="#8b938a">--local query</text>
+      <path d="M140 201 h 170" stroke="#4ade80" stroke-width="1.5" fill="none"/>
+      <rect x="310" y="184" width="230" height="34" rx="6" fill="none" stroke="#242724"/>
+      <text x="320" y="205" font-size="11">read last-saved meta.json (no ssh)</text>
+      <text x="560" y="205" font-size="13" fill="#4ade80" font-weight="bold">&lt; 0.5 s</text>
+    </svg>
+    <div class="legend"><span><i style="background:#f87171"></i>needless SSH round-trip</span><span><i style="background:#4ade80"></i>local disk read</span></div>
+  </div>
+
+  <div class="card">
+    <h3><span class="id">#1</span> Speed up <code>agents view</code> <span class="tag build">PR building</span></h3>
+    <div class="row"><span class="lbl">Refresher</span><code>agents view</code> lists your installed agent CLIs
+      and their accounts/usage. You screenshotted it taking many seconds to print.</div>
+    <div class="row"><span class="lbl">Root cause (evidence)</span>Each run re-reads the entire 230–270&nbsp;MB
+      Claude binary to extract its model list (<code>extractStrings</code>, <code>models.ts:344</code> — it
+      <code>readFileSync</code>s the whole file). That result is <span class="em">never cached</span> when the
+      extraction comes back empty (<code>models.ts:996</code>: "only persist a non-empty catalog"). The Claude
+      parser's regexes broke for Claude ≥ 2.1.207, so extraction <span class="em">is</span> empty → nothing is
+      cached → the ~1.85s scan reruns × 4 versions = <span class="em">~7.5s of a ~13s run</span>. Profiler:
+      that scan is 31% of all CPU time.</div>
+    <div class="row"><span class="lbl">Approach chosen</span>Cache the empty result too, but with a ~24h TTL
+      (self-heals a transient mid-install failure). Drops the cost from every-call to once-a-day-per-version.</div>
+    <div class="row"><span class="lbl">Alternatives considered</span>
+      <ul class="tight">
+        <li><span class="em">Only fix the broken regexes</span> — helps Claude today but any future format drift
+          silently reintroduces the 7.5s; doesn't fix the whole class. (Kept as a separate correctness PR.)</li>
+        <li><span class="em">Add a <code>--fast</code>/<code>--no-models</code> flag</span> — a band-aid; the same
+          scan still slows <code>status</code>, <code>inspect</code>, <code>models</code>, <code>versions</code>.</li>
+      </ul>Caching wins because it fixes every consumer at the source, which is exactly your "pre-compute, don't
+      re-parse" principle.</div>
+    <div class="row"><span class="lbl">FYI</span>The broken regexes also make the model column show a meaningless
+      <code>default</code> — filed as a separate correctness issue, not mixed into the perf PR.</div>
+  </div>
+
+  <div class="card">
+    <h3><span class="id">#3</span> <code>agents sessions --active</code> SSH leak <span class="tag build">PR building</span> <span class="tag done">RUSH-2118</span></h3>
+    <div class="row"><span class="lbl">Refresher</span><code>agents sessions --active</code> shows what's running
+      right now; <code>--local</code> is meant to answer for this machine only (it's used at every session start).</div>
+    <div class="row"><span class="lbl">Root cause (evidence)</span>For a teammate that runs on another box,
+      status is refreshed by SSHing to that box (<code>teams/agents.ts:1150</code> →
+      <code>syncRemoteMirror</code> → <code>pullRemoteLogDelta</code>). There's no check to skip teammates that
+      already <span class="em">finished</span>, and <code>--local</code> doesn't stop it. A raw
+      <code>strace</code> counted <span class="em">60 ssh calls</span> to 30 already-done teammates, ~4.3s.</div>
+    <div class="row"><span class="lbl">Approach chosen</span>(1) <code>--local</code> never SSHes — read the
+      remote teammate's last-saved state from disk. (2) Even without <code>--local</code>, don't re-poll a
+      teammate whose status is terminal (completed/failed). Target &lt; 500ms.</div>
+    <div class="row"><span class="lbl">Alternatives considered</span>
+      <ul class="tight">
+        <li><span class="em">Parallelize the SSH calls</span> — still does pointless work and still loads the
+          remote boxes; masks the bug instead of removing it.</li>
+        <li><span class="em">Cache remote status with a TTL</span> — helps non-local, but a <code>--local</code>
+          query should make <span class="em">zero</span> network calls by definition.</li>
+      </ul></div>
+    <div class="row"><span class="lbl">FYI</span>This is the single biggest contributor to the "why is zion
+      slow" question, alongside #Cluster-A background timers below.</div>
+  </div>
+
+  <div class="card">
+    <h3><span class="id">#5</span> Distributed-query benchmarks + docs <span class="tag ready">ready</span></h3>
+    <div class="row"><span class="lbl">Refresher</span>You wanted benchmarks for cross-fleet session querying,
+      recorded in a feature-specific doc.</div>
+    <div class="row"><span class="lbl">Root cause / state</span>Benchmarks partly exist
+      (<code>bench/sessions-perf.ts</code>, <code>bench-ssh.mjs</code>, <code>bench/baseline.json</code>) and
+      <code>docs/05-sessions.md</code> exists — but nothing benchmarks the <span class="em">distributed
+      <code>--host</code></span> path, it's not in CI, and results aren't written down.</div>
+    <div class="row"><span class="lbl">Approach chosen</span>Extend the existing bench to cover the distributed
+      query + <code>--active</code>, wire it to CI as a regression guard (so #3 can't silently come back), and
+      document numbers in a benchmarks section linked from <code>docs/05-sessions.md</code>.</div>
+    <div class="row"><span class="lbl">Alternative considered</span>A brand-new perf CI job — heavier and
+      duplicates the existing bench harness; extending is cheaper.</div>
+  </div>
+
+  <div class="callout">
+    <p class="h">Also confirmed in this cluster (background load on zion)</p>
+    <p><span class="em">RUSH-2061</span> — every daemon pings the whole fleet every 3 min with no leader
+    (N² traffic): <span class="em">still unfixed</span>, real contributor to sluggishness.
+    <span class="em">RUSH-2065</span> — remote session gather buffers ~170MB/call unbounded: confirmed.
+    <span class="em">RUSH-2114</span> (doctor probes pile up) — already fixed. I'll fold 2061/2065 into the wave
+    rather than re-file them.</p>
+  </div>
+
+  <!-- ============ CLUSTER B: SYNC ============ -->
+  <h2 id="sync"><span class="n">03</span> Cluster B — Sync surface cleanup</h2>
+  <p class="lead">One theme: retire the old heavy session-sync machinery now that the live <code>--host</code>
+  query and export/import cover the job. You already decided the direction here.</p>
+
+  <div class="card">
+    <h3><span class="id">#4</span> Remove R2/CRDT beta; grow export/import <span class="tag you">needs a flag decision</span></h3>
+    <div class="row"><span class="lbl">Refresher</span>Three ways sessions move between machines exist today:
+      (a) <code>--host</code> — read a peer's sessions live over SSH (the default now); (b) <code>sessions
+      export/import</code> — bundle sessions to carry to a new machine; (c) a background R2 sync that uses a
+      CRDT to merge — an off-by-default beta.</div>
+    <div class="row"><span class="lbl">Root cause / state (evidence)</span>The R2/CRDT background sync is
+      gated behind a beta flag, off by default (<code>daemon.ts:588</code>), and was already demoted in favour
+      of (a) and (b) (changelog RUSH-1714). The CRDT (<code>crdt.ts</code>) is a small grow-only-set union that
+      only matters when the same session is resumed on two offline machines — it prevents losing one side's
+      turns. Separately, <code>agents drive</code> (#9) is an even older rsync-based sync.</div>
+    <div class="row"><span class="lbl">Approach chosen (your call)</span>Delete <code>agents drive</code> and
+      the R2/CRDT background beta. Keep and <span class="em">enhance</span> export/import: tar.gz bundles, and
+      support R2 (or a remote machine) as an export/import <span class="em">destination</span> for backup/restore.</div>
+    <div class="row"><span class="lbl">Alternatives considered</span>
+      <ul class="tight">
+        <li><span class="em">Swap CRDT for "object-storage versioning"</span> — rejected: R2 here uses
+          single-writer prefixes and unconditional overwrite, so bucket versioning protects nothing; plain
+          last-write-wins would silently drop a machine's conversation turns.</li>
+        <li><span class="em">Leave the beta dormant</span> — you rejected this: it's dead weight to carry.</li>
+      </ul></div>
+    <div class="callout you" style="margin-top:14px">
+      <p class="h">Needs you — one small design choice</p>
+      <p>Destination syntax for the enhanced export. Preference?
+      <code>agents sessions export --to r2://bucket/path</code> (URI style, extensible to <code>ssh://host</code>)
+      vs. <code>--dest r2 --bucket …</code> (explicit flags). I lean URI-style — one flag, and a remote machine
+      becomes <code>--to ssh://mac-mini:~/backups</code> naturally.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="id">#9</span> Deprecate <code>agents drive</code> <span class="tag ready">ready</span></h3>
+    <div class="row"><span class="lbl">Refresher</span><code>agents drive</code> is an old rsync-based
+      session-history sync (beta, hidden unless enabled) — superseded by export/import.</div>
+    <div class="row"><span class="lbl">Root cause / state</span>It's a beta command
+      (<code>drive.ts</code>), yet still printed in the static help text (<code>index.ts:405</code>) even though
+      the command itself is hidden — so it looks live when it isn't.</div>
+    <div class="row"><span class="lbl">Approach chosen</span>Remove it from help and code; if someone types
+      <code>drive</code> out of habit, print a one-line deprecation pointing to <code>sessions export/import</code>.</div>
+    <div class="row"><span class="lbl">Alternative considered</span>Hard-remove with no message — worse for
+      anyone with muscle memory; a tombstone message costs one line.</div>
+  </div>
+
+  <div class="card">
+    <h3><span class="id">#10</span> Hide/deprecate <code>agents hq</code> <span class="tag you">needs a usage check</span></h3>
+    <div class="row"><span class="lbl">Refresher</span><code>agents hq</code> ("JSON bridge for the interactive
+      Agents HQ floor") shows in help but reads like an internal/hidden command.</div>
+    <div class="row"><span class="lbl">Root cause / state</span>Same help-hygiene issue as #9 — an internal
+      command surfaced to users.</div>
+    <div class="row"><span class="lbl">Approach chosen</span>Verify whether the Factory extension still calls
+      it; if unused, deprecate; either way, remove it from user-facing help.</div>
+    <div class="callout you" style="margin-top:14px">
+      <p class="h">FYI / I'll check this</p>
+      <p>I'll grep the Factory extension for the <code>hq</code> call before deleting — if Factory <span class="em">does</span>
+      use it, we keep the command but just hide it from help. No action needed from you unless you already know it's dead.</p>
+    </div>
+  </div>
+
+  <!-- ============ CLUSTER C: ANALYTICS ============ -->
+  <h2 id="analytics"><span class="n">04</span> Cluster C — Session-analytics subsystem</h2>
+  <p class="lead">Four of your ideas (#6, #8, #11, #12) are really <span class="em">one subsystem</span>: capture
+  richer signals about what happened in a run, store them in the existing perf/event stores, and surface them in
+  session previews and queries. Building them as one design avoids four PRs fighting over the same files
+  (<code>digest.ts</code>, <code>db.ts</code>, <code>events.ts</code>, <code>perf/</code>).</p>
+
+  <div class="fig">
+    <p class="cap">Figure 2 — the shared machinery these four extend</p>
+    <svg viewBox="0 0 880 300" width="100%" height="300" role="img" aria-label="session analytics subsystem architecture">
+      <!-- producers -->
+      <text x="20" y="24" font-size="11" fill="#8b938a">PRODUCERS</text>
+      <g font-size="11">
+        <rect x="20" y="34" width="150" height="30" rx="6" fill="none" stroke="#7dd3fc"/><text x="30" y="53">hooks (#6)</text>
+        <rect x="20" y="72" width="150" height="30" rx="6" fill="none" stroke="#7dd3fc"/><text x="30" y="91">routines (#8)</text>
+        <rect x="20" y="110" width="150" height="30" rx="6" fill="none" stroke="#7dd3fc"/><text x="30" y="129">browser/computer (#11)</text>
+        <rect x="20" y="148" width="150" height="30" rx="6" fill="none" stroke="#7dd3fc"/><text x="30" y="167">skills/plugins (#12)</text>
+      </g>
+      <!-- unified emit -->
+      <rect x="250" y="78" width="170" height="60" rx="8" fill="none" stroke="#a3e635" stroke-width="2"/>
+      <text x="335" y="103" font-size="12" text-anchor="middle" font-weight="bold">agents events emit</text>
+      <text x="335" y="120" font-size="10" text-anchor="middle" fill="#8b938a">+ provenance floor</text>
+      <g stroke="#7dd3fc" stroke-width="1.3" fill="none" marker-end="url(#ar)">
+        <path d="M170 49 C 210 60, 220 90, 248 96"/>
+        <path d="M170 87 L 248 104"/>
+        <path d="M170 125 L 248 116"/>
+        <path d="M170 163 C 210 150, 220 130, 248 124"/>
+      </g>
+      <!-- stores -->
+      <text x="500" y="24" font-size="11" fill="#8b938a">STORES (already exist)</text>
+      <rect x="500" y="40" width="180" height="50" rx="8" fill="none" stroke="#242724"/>
+      <text x="590" y="62" font-size="12" text-anchor="middle">perf warehouse</text>
+      <text x="590" y="79" font-size="10" text-anchor="middle" fill="#8b938a">latency · errors · timeouts</text>
+      <rect x="500" y="104" width="180" height="50" rx="8" fill="none" stroke="#242724"/>
+      <text x="590" y="126" font-size="12" text-anchor="middle">sessions.db</text>
+      <text x="590" y="143" font-size="10" text-anchor="middle" fill="#8b938a">+ usage table (#12)</text>
+      <g stroke="#a3e635" stroke-width="1.3" fill="none" marker-end="url(#ar)">
+        <path d="M420 100 L 498 75"/>
+        <path d="M420 116 L 498 122"/>
+      </g>
+      <!-- consumers -->
+      <text x="500" y="188" font-size="11" fill="#8b938a">CONSUMERS</text>
+      <rect x="500" y="200" width="180" height="34" rx="6" fill="none" stroke="#fbbf24"/>
+      <text x="590" y="222" font-size="11" text-anchor="middle">agents perf (project-scoped)</text>
+      <rect x="500" y="244" width="180" height="34" rx="6" fill="none" stroke="#fbbf24"/>
+      <text x="590" y="266" font-size="11" text-anchor="middle">session preview + --skill/--plugin</text>
+      <g stroke="#242724" stroke-width="1.3" fill="none" marker-end="url(#ar)">
+        <path d="M590 90 L 590 198"/>
+        <path d="M590 154 L 590 242"/>
+      </g>
+      <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="#8b938a"/></marker></defs>
+    </svg>
+    <div class="legend"><span><i style="background:#7dd3fc"></i>producers (the 4 tracks)</span><span><i style="background:#a3e635"></i>unified emit / write</span><span><i style="background:#fbbf24"></i>where you see it</span></div>
+  </div>
+
+  <div class="callout">
+    <p class="h">The shared foundation already landed upstream</p>
+    <p><code>agents events emit</code> (out-of-process event recording) was merged to <code>origin/main</code>
+    as PR #1781, but this checkout is behind it. So the subsystem builds on real, merged infrastructure — we
+    just rebase onto <code>origin/main</code> first. Every event already auto-carries session + agent + machine
+    provenance, so attribution is largely free.</p>
+  </div>
+
+  <div class="card">
+    <h3><span class="id">#6</span> Hook &amp; command metrics + friction heuristics <span class="tag ready">ready</span></h3>
+    <div class="row"><span class="lbl">Refresher</span>We recently began recording hook execution time. You
+      asked what else to record — failures, timeouts, medians — and scoped per repo (a git hook is slow on a
+      big repo).</div>
+    <div class="row"><span class="lbl">Root cause / gaps (evidence)</span>Only hooks that opt into caching get
+      timed at all — the safety guard hooks (<code>git-guard</code>, <code>rm-guard</code>) record
+      <span class="em">nothing</span>. A timeout kills the process before the timing line is written, so
+      <span class="em">timeouts are invisible</span>. The recorded line has no <code>cwd</code>/session/agent.
+      <code>agents perf</code> computes p50/p99 but <span class="em">not</span> failure rate, timeout rate, or
+      per-project grouping — even though the <code>cwd</code> column already exists, it's never read
+      (<code>perf/db.ts:237</code>).</div>
+    <div class="row"><span class="lbl">Approach chosen</span>Extend <code>agents perf</code>: add project
+      grouping (reuse the existing repo-aware project key), add p95 / errorRate / timeoutRate, instrument the
+      guard hooks, and persist a real "timed out" status. Plus 5 cheap friction heuristics (repeated commands,
+      guard-block loops, idle gaps) computed from data we already log — <span class="em">no</span> paying an
+      agent to re-read whole transcripts.</div>
+    <div class="row"><span class="lbl">Alternatives considered</span>
+      <ul class="tight">
+        <li><span class="em">A new <code>agents insights</code> command</span> — rejected: it would duplicate the
+          perf reader; the concept already lives under <code>perf</code>.</li>
+        <li><span class="em">Fold into <code>agents activity</code></span> — rejected: activity is "what agents
+          did" (milestones), a different data source and charter.</li>
+      </ul></div>
+  </div>
+
+  <div class="card">
+    <h3><span class="id">#8</span> Routine metrics + index routine/headless/team sessions <span class="tag ready">ready</span></h3>
+    <div class="row"><span class="lbl">Refresher</span>You wanted metrics for routines (scheduled runs), and
+      for routine/headless/team sessions to show rich previews in <code>agents sessions</code> like interactive
+      ones do.</div>
+    <div class="row"><span class="lbl">Root cause / gaps (evidence)</span>Routines <span class="em">do</span>
+      save status/exit/duration to disk, but a local routine fire never emits a perf sample
+      (<code>executeJobDetached</code>, <code>runner.ts:1232</code>, skips the timer the other paths use) and
+      duration is dropped from the JSON output. For indexing: interactive, headless, and team sessions all land
+      in <code>sessions.db</code> already — but routine sessions are archived only for claude/codex/cursor
+      (<code>ROUTINE_TRANSCRIPT_SPECS</code>, <code>runner.ts:88</code>), so a routine on gemini/kimi/grok/etc.
+      leaves <span class="em">zero trace</span>.</div>
+    <div class="row"><span class="lbl">Approach chosen</span>Wrap the routine fire path with the same
+      <code>createTimer</code> the other paths use (metrics for free), add a per-routine stats rollup, and
+      extend the transcript-archive list to every agent so all routine runs get indexed + previewed.</div>
+    <div class="row"><span class="lbl">Alternative considered</span>A separate routine-metrics store — rejected;
+      reuse the perf warehouse so it shows up in the same place as everything else.</div>
+  </div>
+
+  <div class="card">
+    <h3><span class="id">#11</span> Browser/computer audit + preview surfacing <span class="tag ready">ready</span></h3>
+    <div class="row"><span class="lbl">Refresher</span>You want to know which agent ran a browser/computer
+      task (session id on the device, for later git-blame-style tracking), see "used browser/computer" in the
+      session preview, and record analytics for these commands.</div>
+    <div class="row"><span class="lbl">Root cause / gaps (evidence)</span>The command files emit
+      <span class="em">nothing</span> directly; two event types (<code>browser.navigate</code>,
+      <code>browser.screenshot</code>) are declared but never fired. <span class="em">However</span> — good news
+      — every browser/computer invocation already gets a <code>command.start/end</code> event stamped with
+      session + agent + machine automatically (the provenance floor). So identity is already there; what's
+      missing is per-action detail. The preview re-scans the transcript on every render to guess "used browser".
+      There is no <code>analytics.db</code>.</div>
+    <div class="row"><span class="lbl">Approach chosen</span>Emit typed per-action events (fill in the two dead
+      types, add <code>computer.action</code>), record perf samples with session/agent, persist
+      <code>usedBrowser</code>/<code>usedComputer</code> on the session row (so the preview reads a field, not a
+      re-scan), and put metrics in the <span class="em">existing</span> perf warehouse.</div>
+    <div class="row"><span class="lbl">Alternative considered</span>A new <code>analytics.db</code> — rejected:
+      the perf warehouse already has session_id/agent/status columns; a second store duplicates it and loses
+      cross-referencing.</div>
+  </div>
+
+  <div class="card">
+    <h3><span class="id">#12</span> Skill/plugin/slash-command usage in sessions <span class="tag ready">ready</span></h3>
+    <div class="row"><span class="lbl">Refresher</span>You want each session to record which skills, plugins,
+      and slash-commands it used (per harness), with provenance (which repo/snapshot the skill came from), and
+      make that queryable — so you can analyse which skills lead to helpful sessions.</div>
+    <div class="row"><span class="lbl">Root cause / gaps (evidence)</span>Skill detection exists but only for
+      Claude/Kimi (coincidental tool naming), is computed at display time, and is <span class="em">never
+      saved</span>. Slash-commands are actively stripped as noise. Plugins have zero detection. The Claude
+      transcript's opening line literally lists every available skill/plugin/command — and the parser drops it.
+      No provenance (which repo/commit a skill came from) is captured anywhere, and there's no
+      <code>--skill</code>/<code>--plugin</code> query flag.</div>
+    <div class="row"><span class="lbl">Approach chosen</span>Capture the skill/plugin source repo + commit
+      snapshot at resolve time; generalize the extractor across harnesses and capture slash-commands; store
+      usage in a new <code>session_resource_usage</code> table (a session uses many skills, so a table not a
+      column); add <code>--skill</code>/<code>--plugin</code> filters.</div>
+    <div class="row"><span class="lbl">Alternative considered</span>Extra columns on the sessions row — rejected;
+      it's many-to-many, which needs its own table to query cleanly.</div>
+  </div>
+
+  <!-- ============ CLUSTER D: STANDALONE ============ -->
+  <h2 id="standalone"><span class="n">05</span> Cluster D — Standalone fixes</h2>
+
+  <div class="card">
+    <h3><span class="id">#2</span> Daemon-down notification <span class="tag ready">ready · needs a Mac to build</span></h3>
+    <div class="row"><span class="lbl">Refresher</span>If the background daemon is down, scheduled routines
+      can't fire. You want the user to still be told — and the "daemon is down" alert must not itself depend on
+      the daemon.</div>
+    <div class="row"><span class="lbl">Root cause (evidence)</span>Desktop notifications themselves are
+      daemon-independent (a direct <code>spawn</code>). But the only proactive "routines overdue / daemon down"
+      signal (<code>notifyOverdue</code>) is called <span class="em">only from inside the daemon</span>
+      (<code>daemon.ts:505</code>) — so it can never fire while the daemon is down. That's exactly the
+      self-defeating loop you flagged, confirmed in code.</div>
+    <div class="row"><span class="lbl">Approach chosen</span>The MenubarHelper is a <span class="em">separate</span>
+      always-on service that already knows how to read daemon liveness — but only when you click the menu open.
+      Move that check into its existing 10-second tick and deliver via the daemon-independent notify path.</div>
+    <div class="row"><span class="lbl">Alternatives considered</span>
+      <ul class="tight">
+        <li><span class="em">A separate cron/launchd watcher</span> — more moving parts than reusing the
+          already-supervised MenubarHelper.</li>
+        <li><span class="em">Rely on launchd auto-restart</span> — doesn't cover a deliberate stop or a crash
+          loop, and only alerts <span class="em">after</span> the daemon is back.</li>
+      </ul></div>
+    <div class="row"><span class="lbl">FYI</span>This one is Swift (the menu-bar app), so it builds/tests on a
+      Mac — I'll route it to an idle Mac (pinnacles), not this Linux box.</div>
+  </div>
+
+  <div class="card">
+    <h3><span class="id">#7</span> Per-harness rule presets — make them apply at run time <span class="tag ready">ready</span></h3>
+    <div class="row"><span class="lbl">Refresher</span>You want different rule sets per harness (Codex vs
+      Claude have different "personalities"), compiled and activated when you run that harness.</div>
+    <div class="row"><span class="lbl">Root cause / state (evidence)</span>This already exists —
+      <code>agents rules switch codex@ver --preset name</code> stores a preset per harness+version
+      (<code>state.ts:1153</code>). The gaps: only one preset is actually defined, and a preset only takes effect
+      after an explicit <code>switch</code> — <code>agents run</code> doesn't re-apply it
+      (<code>exec.ts</code> never recompiles rules at launch).</div>
+    <div class="row"><span class="lbl">Approach chosen</span>Make <code>agents run &lt;harness&gt;</code> apply
+      the active preset at launch (mirror the existing project-rules "compile at shim launch" path, with a
+      fast skip-cache so it costs ~0ms when nothing changed), and author a couple of real example presets.</div>
+    <div class="row"><span class="lbl">Alternative considered</span>Building a preset system from scratch —
+      unnecessary; it exists and works, it just doesn't auto-apply.</div>
+    <div class="callout you" style="margin-top:14px">
+      <p class="h">Needs you — scope</p>
+      <p>Per-<span class="em">model</span> presets (different rules for Opus vs Sonnet) are a small extra
+      (a model-keyed field + a <code>--model</code> flag). Ship version-level now and model-level as a fast
+      follow, or do both together?</p>
+    </div>
+  </div>
+
+  <!-- ============ DELIVERY ============ -->
+  <h2 id="delivery"><span class="n">06</span> Delivery plan &amp; what needs you</h2>
+  <p class="lead">How this lands as PRs, in what order, and the handful of decisions that are yours. Spread across
+  the fleet (Claude + Kimi + grok), each in its own worktree; I drive each to merged, not just opened.</p>
+
+  <table>
+    <thead><tr><th>Wave</th><th>PR</th><th>Tracks</th><th>State</th></tr></thead>
+    <tbody>
+      <tr><td>1 · now</td><td><code>view-perf-cache</code></td><td>#1</td><td><span class="tag build">building</span></td></tr>
+      <tr><td>1 · now</td><td><code>sessions-active-ssh-leak</code></td><td>#3 (RUSH-2118)</td><td><span class="tag build">building</span></td></tr>
+      <tr><td>2</td><td><code>retire-legacy-sync</code></td><td>#4 + #9</td><td><span class="tag you">flag choice</span></td></tr>
+      <tr><td>2</td><td><code>help-hygiene</code></td><td>#10</td><td><span class="tag ready">usage-check first</span></td></tr>
+      <tr><td>2</td><td><code>rules-preset-at-runtime</code></td><td>#7</td><td><span class="tag ready">ready</span></td></tr>
+      <tr><td>2</td><td><code>daemon-down-alert</code></td><td>#2</td><td><span class="tag ready">on a Mac</span></td></tr>
+      <tr><td>3 · one design</td><td><code>session-analytics</code> (rebased on #1781)</td><td>#6 · #8 · #11 · #12</td><td><span class="tag you">confirm scope</span></td></tr>
+      <tr><td>3</td><td><code>distributed-bench</code></td><td>#5</td><td><span class="tag ready">pairs with #3</span></td></tr>
+      <tr><td>backlog</td><td>daemon N² probe / buffers</td><td>RUSH-2061 · 2065</td><td><span class="tag ready">confirmed</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout you">
+    <p class="h">What needs your input (everything else I'll drive autonomously)</p>
+    <p><b>1 · Export destination syntax (#4)</b> — <code>--to r2://bucket</code> URI style (my lean) vs explicit
+    <code>--dest</code> flags?</p>
+    <p><b>2 · Rule presets scope (#7)</b> — ship version-level now and per-model as a follow, or both together?</p>
+    <p><b>3 · Session-analytics wave (#6/#8/#11/#12)</b> — OK to build these as one coordinated PR on top of the
+    already-merged <code>agents events emit</code>? (They share too many files to split safely.)</p>
+    <p><b>4 · Priority</b> — anything here you want pulled forward or dropped? Default order is the table above.</p>
+  </div>
+
+  <div class="callout">
+    <p class="h">FYIs (no action needed)</p>
+    <ul class="tight">
+      <li>#10 <code>hq</code>: I'll confirm the Factory extension doesn't use it before removing (else just hide from help).</li>
+      <li>This checkout is behind <code>origin/main</code>; builds base off <code>origin/main</code> so they're current.</li>
+      <li>RUSH-2114 (doctor pile-up) is already fixed; RUSH-2061 (N² fleet probe) is not — a real zion-slowness item worth doing.</li>
+    </ul>
+  </div>
+
+  <div class="foot">
+    harness claude · agent opus-4-8 · host yosemite-s1 · session 27b5c717 · 2026-08-03 · next: go / reshape
+  </div>
+</div>

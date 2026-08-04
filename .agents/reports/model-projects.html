@@ -1,0 +1,170 @@
+<title>The projects model — goals, milestones, drift</title>
+<style>
+  :root {
+    --bg:#f7f8f4;--panel:#fff;--panel2:#fbfcf8;--ink:#16180f;--dim:#5c6154;--faint:#878d78;
+    --line:#e2e5d8;--line2:#d0d4c4;--accent:#4d7c0f;--accent-soft:#ecf3dc;--code-bg:#f0f2e9;
+    --blue:#2563a8;--blue-soft:#e6eefa;--amber:#b45309;--amber-soft:#fbf0dd;--red:#b91c1c;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){:root{
+    --bg:#0a0a0a;--panel:#131511;--panel2:#0f110d;--ink:#e9ecdf;--dim:#9aa088;--faint:#6d735f;
+    --line:#23261d;--line2:#313528;--accent:#a3e635;--accent-soft:#1c2410;--code-bg:#16180f;
+    --blue:#6bb6ff;--blue-soft:#0f1c2b;--amber:#f2b34d;--amber-soft:#241a0c;--red:#f87171;}}
+  :root[data-theme="light"]{--bg:#f7f8f4;--panel:#fff;--panel2:#fbfcf8;--ink:#16180f;--dim:#5c6154;--faint:#878d78;--line:#e2e5d8;--line2:#d0d4c4;--accent:#4d7c0f;--accent-soft:#ecf3dc;--code-bg:#f0f2e9;--blue:#2563a8;--blue-soft:#e6eefa;--amber:#b45309;--amber-soft:#fbf0dd;--red:#b91c1c;}
+  :root[data-theme="dark"]{--bg:#0a0a0a;--panel:#131511;--panel2:#0f110d;--ink:#e9ecdf;--dim:#9aa088;--faint:#6d735f;--line:#23261d;--line2:#313528;--accent:#a3e635;--accent-soft:#1c2410;--code-bg:#16180f;--blue:#6bb6ff;--blue-soft:#0f1c2b;--amber:#f2b34d;--amber-soft:#241a0c;--red:#f87171;}
+
+  *{box-sizing:border-box;}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;margin:0;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:880px;margin:0 auto;padding:2.6rem 1.5rem 5rem;}
+  .kicker{font-family:var(--mono);font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin:0 0 .7rem;}
+  h1{font-size:2rem;line-height:1.12;margin:0 0 .7rem;letter-spacing:-.015em;text-wrap:balance;}
+  h1 .accent{color:var(--accent);}
+  .sub{color:var(--dim);max-width:64ch;margin:0 0 1.4rem;font-size:1.03rem;}
+  h2{font-size:1.2rem;margin:2.6rem 0 .7rem;letter-spacing:-.01em;display:flex;gap:.6rem;align-items:baseline;}
+  h2 .n{font-family:var(--mono);font-size:.82rem;color:var(--accent);}
+  p{max-width:66ch;color:var(--ink);}
+  .lead{color:var(--dim);}
+  code{font-family:var(--mono);font-size:.85em;background:var(--code-bg);padding:.08em .35em;border-radius:4px;}
+  .themetoggle{position:fixed;top:1rem;right:1rem;font-family:var(--mono);font-size:1rem;cursor:pointer;background:var(--panel);color:var(--dim);border:1px solid var(--line2);border-radius:8px;width:2.2rem;height:2.2rem;z-index:10;}
+  .themetoggle:hover{color:var(--accent);border-color:var(--accent);}
+
+  .fig{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:1.4rem 1.2rem 1rem;margin:1.4rem 0;}
+  .fig svg{width:100%;height:auto;display:block;}
+  .figcap{font-family:var(--mono);font-size:.7rem;color:var(--faint);text-align:center;margin-top:.7rem;}
+  .legend{display:flex;gap:1.2rem;flex-wrap:wrap;justify-content:center;font-family:var(--mono);font-size:.68rem;color:var(--dim);margin-top:.5rem;}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:.35em;vertical-align:middle;}
+
+  .tablescroll{overflow-x:auto;margin:1.2rem 0;}
+  table{width:100%;border-collapse:collapse;font-size:.87rem;min-width:600px;}
+  th{text-align:left;font-family:var(--mono);font-size:.65rem;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);font-weight:600;padding:.6rem .8rem;border-bottom:1px solid var(--line2);}
+  td{padding:.6rem .8rem;border-bottom:1px solid var(--line);vertical-align:top;color:var(--dim);}
+  tr:last-child td{border-bottom:none;}
+  td.concept{font-weight:600;color:var(--ink);}
+  .pill{font-family:var(--mono);font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:.18em .5em;border-radius:4px;white-space:nowrap;}
+  .pill.stored{color:var(--accent);background:var(--accent-soft);border:1px solid var(--line2);}
+  .pill.pulled{color:var(--blue);background:var(--blue-soft);border:1px solid var(--line2);}
+  .pill.na{color:var(--faint);background:var(--code-bg);border:1px solid var(--line);}
+
+  .callout{border:1px solid var(--line2);border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:10px;padding:1rem 1.2rem;margin:1.4rem 0;}
+  .callout p{margin:.3rem 0;font-size:.92rem;color:var(--dim);}
+  .callout strong{color:var(--ink);}
+  .foot{margin-top:3rem;padding-top:1.1rem;border-top:1px solid var(--line);font-family:var(--mono);font-size:.7rem;color:var(--faint);}
+</style>
+
+<button class="themetoggle" id="tt" aria-label="Toggle theme">◐</button>
+<div class="wrap">
+  <p class="kicker">agents-cli · projects · domain model</p>
+  <h1>Companies own <span class="accent">goals</span>. Projects serve them. Milestones measure the drift.</h1>
+  <p class="sub">The hierarchy you were reaching for, and where each layer lives: Linear owns the intent (goals, milestones, owners, dates); agents-cli owns the execution (repos, subdirs, live agents, PRs, artifacts). A project is the seam between them.</p>
+
+  <h2><span class="n">01</span> The hierarchy</h2>
+  <div class="fig">
+    <svg viewBox="0 0 820 430" role="img" aria-label="Hierarchy: company to goals to projects to milestones to issues to people, with drift">
+      <defs>
+        <marker id="d" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="var(--faint)"/></marker>
+      </defs>
+      <!-- rows -->
+      <!-- Company -->
+      <rect x="330" y="14" width="160" height="40" rx="8" fill="var(--panel)" stroke="var(--line2)"/>
+      <text x="410" y="33" text-anchor="middle" font-family="var(--mono)" font-size="12" fill="var(--ink)">Company</text>
+      <text x="410" y="47" text-anchor="middle" font-family="var(--mono)" font-size="9" fill="var(--faint)">the org</text>
+      <line x1="410" y1="54" x2="410" y2="76" stroke="var(--faint)" stroke-width="1.3" marker-end="url(#d)"/>
+
+      <!-- Goals -->
+      <rect x="250" y="78" width="150" height="42" rx="8" fill="var(--amber-soft)" stroke="var(--amber)"/>
+      <text x="325" y="98" text-anchor="middle" font-family="var(--mono)" font-size="11.5" fill="var(--ink)">Goal</text>
+      <text x="325" y="112" text-anchor="middle" font-family="var(--mono)" font-size="8.5" fill="var(--amber)">Linear: Initiative</text>
+      <rect x="420" y="78" width="150" height="42" rx="8" fill="var(--amber-soft)" stroke="var(--amber)"/>
+      <text x="495" y="98" text-anchor="middle" font-family="var(--mono)" font-size="11.5" fill="var(--ink)">Goal</text>
+      <text x="495" y="112" text-anchor="middle" font-family="var(--mono)" font-size="8.5" fill="var(--amber)">strategic outcome</text>
+      <line x1="325" y1="120" x2="245" y2="150" stroke="var(--faint)" stroke-width="1.2" marker-end="url(#d)"/>
+      <line x1="325" y1="120" x2="405" y2="150" stroke="var(--faint)" stroke-width="1.2" marker-end="url(#d)"/>
+      <line x1="495" y1="120" x2="575" y2="150" stroke="var(--faint)" stroke-width="1.2" marker-end="url(#d)"/>
+
+      <!-- Projects -->
+      <rect x="150" y="152" width="140" height="46" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+      <text x="220" y="171" text-anchor="middle" font-family="var(--mono)" font-size="11.5" fill="var(--ink)">Project</text>
+      <text x="220" y="185" text-anchor="middle" font-family="var(--mono)" font-size="8.5" fill="var(--accent)">description + objective</text>
+      <rect x="330" y="152" width="140" height="46" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+      <text x="400" y="171" text-anchor="middle" font-family="var(--mono)" font-size="11.5" fill="var(--ink)">Project</text>
+      <text x="400" y="185" text-anchor="middle" font-family="var(--mono)" font-size="8.5" fill="var(--accent)">serves a goal</text>
+      <rect x="510" y="152" width="140" height="46" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+      <text x="580" y="171" text-anchor="middle" font-family="var(--mono)" font-size="11.5" fill="var(--ink)">Project</text>
+      <text x="580" y="185" text-anchor="middle" font-family="var(--mono)" font-size="8.5" fill="var(--accent)">= subdir of monorepo</text>
+      <line x1="400" y1="198" x2="330" y2="226" stroke="var(--faint)" stroke-width="1.2" marker-end="url(#d)"/>
+      <line x1="400" y1="198" x2="470" y2="226" stroke="var(--faint)" stroke-width="1.2" marker-end="url(#d)"/>
+
+      <!-- Milestones -->
+      <rect x="250" y="228" width="150" height="42" rx="8" fill="var(--blue-soft)" stroke="var(--blue)"/>
+      <text x="325" y="247" text-anchor="middle" font-family="var(--mono)" font-size="11" fill="var(--ink)">Milestone · Beta</text>
+      <text x="325" y="261" text-anchor="middle" font-family="var(--mono)" font-size="8.5" fill="var(--blue)">target date · % done</text>
+      <rect x="420" y="228" width="150" height="42" rx="8" fill="var(--blue-soft)" stroke="var(--blue)"/>
+      <text x="495" y="247" text-anchor="middle" font-family="var(--mono)" font-size="11" fill="var(--ink)">Milestone · GA</text>
+      <text x="495" y="261" text-anchor="middle" font-family="var(--mono)" font-size="8.5" fill="var(--blue)">Linear: milestones</text>
+      <line x1="325" y1="270" x2="325" y2="296" stroke="var(--faint)" stroke-width="1.2" marker-end="url(#d)"/>
+
+      <!-- Issues -->
+      <rect x="250" y="298" width="150" height="40" rx="8" fill="var(--panel)" stroke="var(--line2)"/>
+      <text x="325" y="316" text-anchor="middle" font-family="var(--mono)" font-size="11" fill="var(--ink)">Issue / work</text>
+      <text x="325" y="330" text-anchor="middle" font-family="var(--mono)" font-size="8.5" fill="var(--faint)">RUSH-2114 · a PR · an agent</text>
+      <line x1="325" y1="338" x2="325" y2="362" stroke="var(--faint)" stroke-width="1.2" marker-end="url(#d)"/>
+
+      <!-- People -->
+      <rect x="250" y="364" width="150" height="40" rx="8" fill="var(--panel)" stroke="var(--line2)"/>
+      <text x="325" y="382" text-anchor="middle" font-family="var(--mono)" font-size="11" fill="var(--ink)">Owner</text>
+      <text x="325" y="396" text-anchor="middle" font-family="var(--mono)" font-size="8.5" fill="var(--faint)">person / agent · responsibility</text>
+
+      <!-- drift annotation -->
+      <rect x="470" y="298" width="330" height="106" rx="10" fill="var(--panel)" stroke="var(--line2)" stroke-dasharray="4 3"/>
+      <text x="486" y="318" font-family="var(--mono)" font-size="10" fill="var(--dim)">DRIFT = pace of finished work vs the</text>
+      <text x="486" y="332" font-family="var(--mono)" font-size="10" fill="var(--dim)">milestone's target date.</text>
+      <!-- mini gauge -->
+      <line x1="486" y1="356" x2="784" y2="356" stroke="var(--line2)" stroke-width="2"/>
+      <circle cx="640" cy="356" r="5" fill="var(--blue)"/>
+      <text x="640" y="374" text-anchor="middle" font-family="var(--mono)" font-size="8.5" fill="var(--blue)">target</text>
+      <circle cx="560" cy="356" r="5" fill="var(--accent)"/>
+      <text x="560" y="374" text-anchor="middle" font-family="var(--mono)" font-size="8.5" fill="var(--accent)">on track</text>
+      <circle cx="720" cy="356" r="5" fill="var(--red)"/>
+      <text x="720" y="374" text-anchor="middle" font-family="var(--mono)" font-size="8.5" fill="var(--red)">behind</text>
+      <text x="486" y="398" font-family="var(--mono)" font-size="9" fill="var(--faint)">agents-cli measures this from PRs / plan % vs Linear's date</text>
+    </svg>
+    <div class="legend">
+      <span><i style="background:var(--amber)"></i>company-level (goals)</span>
+      <span><i style="background:var(--accent)"></i>project (the seam)</span>
+      <span><i style="background:var(--blue)"></i>Linear-owned (milestones/dates)</span>
+    </div>
+    <div class="figcap">a project doesn't own a goal — it serves one; it owns milestones, and drift is measured against them</div>
+  </div>
+
+  <h2><span class="n">02</span> Who owns each layer</h2>
+  <p class="lead">The split that keeps the tool honest: store almost nothing, read intent from Linear, compute execution from the fleet. A stored copy of a milestone date goes stale the moment someone retargets it in Linear — so it's pulled, never stored.</p>
+  <div class="tablescroll">
+    <table>
+      <thead><tr><th>Concept</th><th>Linear term</th><th>linear CLI</th><th>In agents-cli</th></tr></thead>
+      <tbody>
+        <tr><td class="concept">Goal</td><td>Initiative</td><td>—</td><td><span class="pill na">not yet</span> best-effort from project detail</td></tr>
+        <tr><td class="concept">Project</td><td>Project</td><td><code>projects show</code></td><td><span class="pill stored">stored</span> name, repo/monorepo+subdir, <code>linear.projectId</code></td></tr>
+        <tr><td class="concept">Description / objective</td><td>Project description</td><td><code>projects show</code></td><td><span class="pill stored">stored</span> on import (fill from Linear)</td></tr>
+        <tr><td class="concept">Milestone + target date</td><td>Project milestone</td><td><code>milestones</code></td><td><span class="pill pulled">pulled</span> current milestone, % , date</td></tr>
+        <tr><td class="concept">Progress vs drift</td><td>Project health</td><td>derived</td><td><span class="pill pulled">pulled</span> + <span class="pill na">computed</span> PRs/plan% vs date</td></tr>
+        <tr><td class="concept">Issue / work</td><td>Issue</td><td><code>tasks</code></td><td><span class="pill na">computed</span> live agents, tickets, PRs, artifacts</td></tr>
+        <tr><td class="concept">Owner</td><td>Assignee</td><td><code>users</code></td><td><span class="pill na">computed</span> agent×person members on the card</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2><span class="n">03</span> The monorepo seam</h2>
+  <p>A company's monorepo hosts many projects, each a subdirectory — Rush CLI and Rush App live side by side under one checkout. So <strong>one Linear project maps to one subdir</strong>, and a project must store the monorepo root <em>plus</em> its subpath. The schema already carries this (<code>root</code> + <code>defaultPath</code>, and <code>add --path &lt;subdir&gt;</code> sets it), but membership resolution currently anchors on <code>root</code> alone — so two subprojects of one monorepo are indistinguishable. That's the load-bearing fix: resolve a session to the <strong>most specific</strong> matching path, so work in <code>rush/apps/cli</code> counts toward Rush CLI, not the parent.</p>
+
+  <div class="callout">
+    <p><strong>The one decision for you:</strong> how far to formalize this in the tool.</p>
+    <p><strong>A — Linear is the source of truth (recommended).</strong> Store the thin def (identity + repo/monorepo+subdir + <code>linear.projectId</code>); pull goal/objective/milestone/drift live onto the card. Nothing to keep in sync by hand.</p>
+    <p><strong>B — also declare goals/milestones locally in YAML.</strong> Projects carry their own objective + milestone list even without Linear. More self-contained, but a second copy that drifts from Linear.</p>
+  </div>
+
+  <div class="foot">claude · opus-4.8 · zion · session a7923c24 · 2026-08-03 · model, not final plan</div>
+</div>
+<script>
+  document.getElementById('tt').addEventListener('click',function(){var c=document.documentElement.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',c==='dark'?'light':'dark');});
+</script>

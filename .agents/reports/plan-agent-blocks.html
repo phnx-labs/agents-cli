@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan · Blocked agents can't reach you</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111312; --panel2:#161a18; --ink:#e7ece8; --dim:#8b938c;
+    --line:#26302a; --accent:#a3e635; --amber:#f5c451; --red:#ff6b6b; --cyan:#5ad6c0;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f6; --panel:#ffffff; --panel2:#f2f4f0; --ink:#1a1c1a; --dim:#5c655c;
+    --line:#e2e6df; --accent:#4d7c0f; --amber:#b45309; --red:#dc2626; --cyan:#0e7490;
+  }
+  :root[data-theme="light"] .fig{background:#0e120f;border-color:#26302a}
+  :root[data-theme="light"] .fig figcaption{color:#8b938c}
+  :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+  :root[data-theme="light"] .legend{color:#8b938c}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:56px 28px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:40px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 14px}
+  h1{font-size:34px;line-height:1.15;margin:0 0 12px;font-weight:700;letter-spacing:-.01em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);font-size:17px;max-width:70ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);
+    border-radius:999px;padding:4px 11px;background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:500}
+  .prov{margin-top:10px}
+  .prov .chip{font-size:11px;opacity:.82}
+  .prov .chip b{color:var(--cyan)}
+  h2{font-size:23px;margin:52px 0 8px;letter-spacing:-.01em;scroll-margin-top:20px}
+  h2 .n{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:10px;opacity:.85}
+  h3{font-size:16.5px;margin:26px 0 8px;color:var(--ink)}
+  p{margin:10px 0}
+  .lead{color:var(--dim)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--panel2);border:1px solid var(--line);
+    border-radius:5px;padding:1.5px 6px;color:var(--cyan)}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent}
+  a:hover{border-bottom-color:var(--accent)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px 22px 18px;margin:22px 0;overflow-x:auto}
+  .fig figcaption{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:14px;text-align:center}
+  .fig figcaption b{color:var(--ink)}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  td code{font-size:.85em}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600}
+  .tag.a{background:rgba(163,230,53,.12);color:var(--accent);border:1px solid rgba(163,230,53,.3)}
+  .tag.b{background:rgba(90,214,192,.1);color:var(--cyan);border:1px solid rgba(90,214,192,.28)}
+  .tag.c{background:rgba(245,196,81,.1);color:var(--amber);border:1px solid rgba(245,196,81,.28)}
+  ul{margin:10px 0;padding-left:22px}li{margin:6px 0}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 10px 10px 0;
+    padding:14px 18px;margin:18px 0}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);display:block;margin-bottom:5px}
+  .callout.warn .lbl{color:var(--amber)}
+  .toc{font-family:var(--mono);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:18px}
+  .toc a{color:var(--dim);border:0}.toc a:hover{color:var(--accent)}
+  pre{font-family:var(--mono);font-size:13px;background:#0c0f0d;border:1px solid var(--line);
+    border-radius:12px;padding:16px 18px;overflow-x:auto;line-height:1.55;color:#e7ece8}
+  pre .c{color:#8b938c}pre .k{color:#a3e635}pre .s{color:#5ad6c0}pre .r{color:#ff6b6b}
+  .foot{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);
+    font-family:var(--mono);font-size:12px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--dim);
+    justify-content:center;margin-top:6px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .themebtn{position:fixed;top:16px;right:16px;z-index:9;font-family:var(--mono);font-size:12px;
+    color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:6px 13px;cursor:pointer}
+  .themebtn:hover{color:var(--accent);border-color:var(--accent)}
+  blockquote{margin:14px 0;padding:2px 0 2px 16px;border-left:2px solid var(--line);color:var(--dim);font-style:italic}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="tt()" id="tb">◐ light</button>
+<script>
+  var r=document.documentElement;
+  function set(t){r.setAttribute('data-theme',t);document.getElementById('tb').textContent=(t==='light'?'◑ dark':'◐ light')}
+  set(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  function tt(){set(r.getAttribute('data-theme')==='light'?'dark':'light')}
+</script>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">agents-cli · feed + escalation · plan</p>
+  <h1>An agent that decides it is blocked has<br>no way to <span class="accent">tell you</span></h1>
+  <p class="sub">Session 74a4893f hit a git-guard force-push denial, wrote a careful explanation
+  of what it needed into the chat window, and stopped. You found out an hour later by reading the
+  terminal. The mechanism to prevent that already exists — it is broken in five places, each of
+  which fails silently.</p>
+  <div class="meta">
+    <span class="chip">ticket <b>RUSH-2110</b></span>
+    <span class="chip"><b>3</b>&nbsp;repos</span>
+    <span class="chip"><b>~10</b>&nbsp;undelivered blocks / 3 days</span>
+    <span class="chip">status: <b>awaiting go</b></span>
+  </div>
+  <div class="meta prov">
+    <span class="chip">harness <b>claude</b></span>
+    <span class="chip">agent <b>opus-5</b></span>
+    <span class="chip">host <b>yosemite-s1</b></span>
+    <span class="chip">session <b>df0ab22d</b></span>
+    <span class="chip">date <b>2026-08-03</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#s1">01 · where the message dies</a>
+    <a href="#s2">02 · how often</a>
+    <a href="#s3">03 · the channels</a>
+    <a href="#s4">04 · the design</a>
+    <a href="#s5">05 · adoption</a>
+    <a href="#s6">06 · sequencing</a>
+    <a href="#s7">07 · verification</a>
+  </nav>
+</header>
+
+<h2 id="s1"><span class="n">01</span>Where the message dies</h2>
+<p class="lead">Nothing here is a rebuild. The block ledger and the sink fan-out were both
+built, on separate tracks, and never joined. Five breaks sit between them.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 940 400" role="img" aria-label="Pipeline from a blocked agent to the owner's devices, showing five breaks">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L7,3 z" fill="#8b938c"/>
+    </marker>
+    <marker id="arg" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L7,3 z" fill="#a3e635"/>
+    </marker>
+  </defs>
+  <text x="16" y="26" fill="#8b938c" font-family="monospace" font-size="12">TODAY</text>
+
+  <rect x="16" y="44" width="150" height="52" rx="9" fill="#161a18" stroke="#26302a"/>
+  <text x="91" y="68" fill="#e7ece8" font-family="monospace" font-size="12" text-anchor="middle">agent is blocked</text>
+  <text x="91" y="84" fill="#8b938c" font-family="monospace" font-size="10.5" text-anchor="middle">guard denies force-push</text>
+
+  <line x1="166" y1="70" x2="222" y2="70" stroke="#8b938c" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="194" y="60" fill="#ff6b6b" font-family="monospace" font-size="15" text-anchor="middle">✕</text>
+  <text x="194" y="104" fill="#ff6b6b" font-family="monospace" font-size="10" text-anchor="middle">1</text>
+
+  <rect x="224" y="44" width="150" height="52" rx="9" fill="#161a18" stroke="#26302a"/>
+  <text x="299" y="68" fill="#e7ece8" font-family="monospace" font-size="12" text-anchor="middle">Notification event</text>
+  <text x="299" y="84" fill="#8b938c" font-family="monospace" font-size="10.5" text-anchor="middle">never fires on a deny</text>
+
+  <line x1="374" y1="70" x2="430" y2="70" stroke="#8b938c" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="402" y="60" fill="#ff6b6b" font-family="monospace" font-size="15" text-anchor="middle">✕</text>
+  <text x="402" y="104" fill="#ff6b6b" font-family="monospace" font-size="10" text-anchor="middle">2</text>
+
+  <rect x="432" y="44" width="150" height="52" rx="9" fill="#161a18" stroke="#26302a"/>
+  <text x="507" y="68" fill="#e7ece8" font-family="monospace" font-size="12" text-anchor="middle">attention sentinel</text>
+  <text x="507" y="84" fill="#8b938c" font-family="monospace" font-size="10.5" text-anchor="middle">Stop clears it</text>
+
+  <line x1="582" y1="70" x2="638" y2="70" stroke="#8b938c" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="610" y="60" fill="#ff6b6b" font-family="monospace" font-size="15" text-anchor="middle">✕</text>
+  <text x="610" y="104" fill="#ff6b6b" font-family="monospace" font-size="10" text-anchor="middle">3</text>
+
+  <rect x="640" y="44" width="150" height="52" rx="9" fill="#161a18" stroke="#26302a"/>
+  <text x="715" y="68" fill="#e7ece8" font-family="monospace" font-size="12" text-anchor="middle">block ledger</text>
+  <text x="715" y="84" fill="#8b938c" font-family="monospace" font-size="10.5" text-anchor="middle">written, never broadcast</text>
+
+  <line x1="790" y1="70" x2="846" y2="70" stroke="#8b938c" stroke-width="1.4" marker-end="url(#ar)"/>
+  <text x="818" y="60" fill="#ff6b6b" font-family="monospace" font-size="15" text-anchor="middle">✕</text>
+  <text x="818" y="104" fill="#ff6b6b" font-family="monospace" font-size="10" text-anchor="middle">4·5</text>
+
+  <rect x="848" y="44" width="78" height="52" rx="9" fill="#161a18" stroke="#3a2020"/>
+  <text x="887" y="74" fill="#ff6b6b" font-family="monospace" font-size="11" text-anchor="middle">you</text>
+
+  <line x1="16" y1="146" x2="926" y2="146" stroke="#26302a" stroke-width="1"/>
+  <text x="16" y="182" fill="#a3e635" font-family="monospace" font-size="12">AFTER</text>
+
+  <rect x="16" y="200" width="150" height="52" rx="9" fill="#141a12" stroke="#3d4d24"/>
+  <text x="91" y="224" fill="#e7ece8" font-family="monospace" font-size="12" text-anchor="middle">agent is blocked</text>
+  <text x="91" y="240" fill="#a3e635" font-family="monospace" font-size="10.5" text-anchor="middle">agents feed block</text>
+
+  <line x1="166" y1="226" x2="326" y2="226" stroke="#a3e635" stroke-width="1.6" marker-end="url(#arg)"/>
+  <text x="246" y="217" fill="#8b938c" font-family="monospace" font-size="10" text-anchor="middle">OpenBlock</text>
+
+  <rect x="328" y="200" width="150" height="52" rx="9" fill="#141a12" stroke="#3d4d24"/>
+  <text x="403" y="224" fill="#e7ece8" font-family="monospace" font-size="12" text-anchor="middle">block ledger</text>
+  <text x="403" y="240" fill="#8b938c" font-family="monospace" font-size="10.5" text-anchor="middle">+ feed-broadcast</text>
+
+  <line x1="478" y1="226" x2="638" y2="200" stroke="#a3e635" stroke-width="1.6" marker-end="url(#arg)"/>
+  <line x1="478" y1="226" x2="638" y2="256" stroke="#a3e635" stroke-width="1.6" marker-end="url(#arg)"/>
+  <line x1="478" y1="226" x2="638" y2="312" stroke="#a3e635" stroke-width="1.6" marker-end="url(#arg)"/>
+
+  <rect x="640" y="176" width="180" height="44" rx="9" fill="#161a18" stroke="#3d4d24"/>
+  <text x="730" y="196" fill="#e7ece8" font-family="monospace" font-size="11.5" text-anchor="middle">desktop · MenubarHelper</text>
+  <text x="730" y="211" fill="#5ad6c0" font-family="monospace" font-size="10" text-anchor="middle">no deps · at the Mac</text>
+
+  <rect x="640" y="234" width="180" height="44" rx="9" fill="#161a18" stroke="#3d4d24"/>
+  <text x="730" y="254" fill="#e7ece8" font-family="monospace" font-size="11.5" text-anchor="middle">iMessage · rush</text>
+  <text x="730" y="269" fill="#5ad6c0" font-family="monospace" font-size="10" text-anchor="middle">away from desk</text>
+
+  <rect x="640" y="292" width="180" height="44" rx="9" fill="#161a18" stroke="#3d4d24"/>
+  <text x="730" y="312" fill="#e7ece8" font-family="monospace" font-size="11.5" text-anchor="middle">Telegram · openclaw</text>
+  <text x="730" y="327" fill="#5ad6c0" font-family="monospace" font-size="10" text-anchor="middle">headless-safe</text>
+
+  <line x1="820" y1="198" x2="866" y2="245" stroke="#a3e635" stroke-width="1.4" marker-end="url(#arg)"/>
+  <line x1="820" y1="256" x2="866" y2="256" stroke="#a3e635" stroke-width="1.4" marker-end="url(#arg)"/>
+  <line x1="820" y1="314" x2="866" y2="268" stroke="#a3e635" stroke-width="1.4" marker-end="url(#arg)"/>
+
+  <rect x="868" y="234" width="58" height="44" rx="9" fill="#141a12" stroke="#3d4d24"/>
+  <text x="897" y="260" fill="#a3e635" font-family="monospace" font-size="11" text-anchor="middle">you</text>
+
+  <text x="403" y="362" fill="#8b938c" font-family="monospace" font-size="10.5" text-anchor="middle">each sink spawns independently — one failing never suppresses the others</text>
+</svg>
+<div class="legend">
+  <span><i class="sw" style="background:#ff6b6b"></i>silent break</span>
+  <span><i class="sw" style="background:#a3e635"></i>working path</span>
+  <span><i class="sw" style="background:#5ad6c0"></i>reaches you when</span>
+</div>
+<figcaption><b>The five breaks, and the path that replaces them.</b> Numbers map to the table below.</figcaption>
+</figure>
+
+<table>
+  <tr><th>#</th><th>Break</th><th>Evidence</th></tr>
+  <tr><td><span class="tag c">1</span></td>
+      <td>A guard denial is a <code>PreToolUse</code> deny — a tool error, not a <code>Notification</code>. No trigger fires.</td>
+      <td><code>git-guard.sh:327-330</code></td></tr>
+  <tr><td><span class="tag c">2</span></td>
+      <td><code>Stop</code> <b>clears</b> the attention sentinel, so explaining the blocker marks the session as not-needing-you.</td>
+      <td><code>06-attention-sentinel.sh</code></td></tr>
+  <tr><td><span class="tag c">3</span></td>
+      <td>Blocks never broadcast. <code>broadcastPostedEvent</code> runs only for <code>feed post</code>; the six <code>publishBlock</code> calls never reach it.</td>
+      <td><code>commands/feed.ts:366</code><br><code>lib/feed.ts:266,314,328…</code></td></tr>
+  <tr><td><span class="tag c">4</span></td>
+      <td>The one block notifier is hardcoded to <code>openclaw</code> plus a hardcoded personal Telegram chat id, and only reachable via <code>feed --dispatch</code>, which no routine schedules.</td>
+      <td><code>lib/notify.ts:46,74-78</code></td></tr>
+  <tr><td><span class="tag c">5</span></td>
+      <td>Both escalation hooks look in the <b>wrong resource layer</b> — they default to the user layer, the skill ships in the system layer.</td>
+      <td><code>12-escalate-on-notification.sh:38</code></td></tr>
+</table>
+
+<div class="callout warn">
+  <span class="lbl">The one that matters most</span>
+  Break 5 is a one-token path bug. <code>SKILL="${ESCALATE_SKILL_DIR:-$HOME/.agents/skills/escalate}"</code>
+  points at the user layer; the skill ships at <code>~/.agents/.system/skills/escalate</code>. The
+  <code>[ -x "$SKILL/escalate.sh" ] || exit 0</code> guard on the next line has therefore exited
+  silently on every box since the day it shipped. The escalation ladder is correct code that has
+  never once run.
+</div>
+
+<h2 id="s2"><span class="n">02</span>How often this bites</h2>
+<p class="lead">Measured across the fleet, last 3 days, by scanning the final assistant
+message of every session transcript for a needs-you signature.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 800 250" role="img" aria-label="Bar chart of sessions ending blocked by machine">
+  <line x1="150" y1="30" x2="150" y2="200" stroke="#26302a"/>
+  <line x1="150" y1="200" x2="760" y2="200" stroke="#26302a"/>
+
+  <text x="140" y="55" fill="#8b938c" font-family="monospace" font-size="12" text-anchor="end">zion</text>
+  <rect x="152" y="40" width="122" height="22" fill="#a3e635" opacity=".85"/>
+  <text x="286" y="56" fill="#e7ece8" font-family="monospace" font-size="12">3 / 15  ·  20%</text>
+
+  <text x="140" y="95" fill="#8b938c" font-family="monospace" font-size="12" text-anchor="end">yosemite-s1</text>
+  <rect x="152" y="80" width="91" height="22" fill="#a3e635" opacity=".85"/>
+  <text x="286" y="96" fill="#e7ece8" font-family="monospace" font-size="12">7 / 47  ·  15%</text>
+
+  <text x="140" y="135" fill="#8b938c" font-family="monospace" font-size="12" text-anchor="end">yosemite-s0</text>
+  <rect x="152" y="120" width="2" height="22" fill="#8b938c" opacity=".5"/>
+  <text x="286" y="136" fill="#8b938c" font-family="monospace" font-size="12">0 / 50  ·  0%   (headless)</text>
+
+  <text x="140" y="175" fill="#8b938c" font-family="monospace" font-size="12" text-anchor="end">yosemite-m0</text>
+  <rect x="152" y="160" width="2" height="22" fill="#8b938c" opacity=".5"/>
+  <text x="286" y="176" fill="#8b938c" font-family="monospace" font-size="12">0 / 23  ·  0%   (headless)</text>
+
+  <text x="455" y="228" fill="#8b938c" font-family="monospace" font-size="11" text-anchor="middle">sessions ending with the agent asking you to unblock or decide · none delivered</text>
+</svg>
+<div class="legend">
+  <span><i class="sw" style="background:#a3e635"></i>interactive box</span>
+  <span><i class="sw" style="background:#8b938c"></i>headless worker</span>
+</div>
+<figcaption><b>Blocking is concentrated where agents drive multi-step work.</b> Routine runs on the
+worker boxes never block; the boxes you actually sit at block 15–20% of the time.</figcaption>
+</figure>
+
+<p>One of them names the failure outright — session <code>277c1709</code>:</p>
+<blockquote>"<code>rush message send</code> doesn't exist either. No Telegram or iMessage reached
+you this session; I fell back to a desktop notification on zion."</blockquote>
+
+<p>And agents are already hand-rolling a block channel out of the status channel. A live
+<code>feed post</code> reads:</p>
+<blockquote>"NEEDS MUQSIT: factory-metrics report is in PR #182 … Muqsit owns the merge — I
+cannot self-approve my own PR. It also needs a one-time decision from him…"</blockquote>
+
+<div class="callout">
+  <span class="lbl">This reframes the work</span>
+  Agents already have the habit and already write good blocked-messages. The instruction layer is
+  largely working. What is missing is a typed channel for it, and delivery that isn't dead.
+</div>
+
+<h2 id="s3"><span class="n">03</span>The channels — three peers, not a primary with fallbacks</h2>
+<p><code>runFeedBroadcast</code> already spawns each sink independently and reports each outcome,
+so the channels are genuinely redundant by construction. <code>rush</code> being unauthenticated
+degrades to Telegram plus desktop rather than losing the message.</p>
+
+<table>
+  <tr><th>Sink</th><th>Reaches you when</th><th>Dependencies</th></tr>
+  <tr><td><span class="tag a">desktop</span> <code>MenubarHelper --notify</code></td><td>at the Mac</td><td><b>none</b> — ships in the package</td></tr>
+  <tr><td><span class="tag b">iMessage</span> <code>rush message send</code></td><td>away from the desk</td><td><code>rush</code> installed + logged in</td></tr>
+  <tr><td><span class="tag b">Telegram</span> <code>openclaw message send</code></td><td>away, headless-safe</td><td><code>openclaw</code> on the box</td></tr>
+</table>
+
+<p><b>Desktop is the most reliable of the three</b> — no network, no login, no external CLI — and
+it is already proven working. The <code>agents-cli · custom harnesses are first-class now · PR
+#1746 merged to main</code> entry in Notification Center is this exact path, branded with the
+agents-cli icon. It ships enabled by default.</p>
+
+<div class="callout warn">
+  <span class="lbl">Gap to close</span>
+  <code>notifyDesktop</code> is internal-only (<code>lib/menubar/notify-desktop.ts:112</code>),
+  called from <code>overdue.ts</code>, <code>heal.ts</code>, <code>run-notify.ts</code>. There is
+  <b>no <code>agents notify</code> command</b>, so the branded notification cannot be an
+  argv-template sink today. PR&nbsp;1 adds a thin wrapper — one mechanism, no special-casing.
+  Separately, notification bodies truncate after roughly two lines, so a block's text must
+  front-load the ask.
+</div>
+
+<h2 id="s4"><span class="n">04</span>The design</h2>
+
+<h3>Layer 1 — the primitive</h3>
+<pre><span class="k">agents feed block</span> <span class="s">"&lt;what you need from the user&gt;"</span>
+    <span class="c">[--option &lt;label&gt;...]</span>     <span class="c"># answerable choices -&gt; BlockOption[]</span>
+    <span class="c">[--default &lt;answer&gt;]</span>      <span class="c"># safe default -&gt; approval class + safeDefault</span>
+    <span class="c">[--timeout &lt;minutes&gt;]</span>     <span class="c"># -&gt; timeoutMinutes, feeds the existing policy engine</span>
+    <span class="c">[--json]</span></pre>
+<ul>
+  <li>Writes an <code>OpenBlock</code> via the existing <code>publishBlock</code>, adding
+      <code>kind: 'declared'</code> to the union at <code>lib/feed.ts:74</code>.</li>
+  <li><b>Post-and-continue, not halt.</b> <code>recordParked</code> / <code>recordContinued</code> /
+      <code>recordDefaulted</code> and <code>feed-policy.ts</code>'s default-on-no-answer already
+      assume non-blocking. Halting would fight the model and idle a whole session on one denial.</li>
+  <li><b>Fails loud only on total failure</b> — non-zero when no sink is configured or every sink
+      failed. One sink failing is a warning: a dead <code>rush</code> login must not mask a
+      delivered notification.</li>
+</ul>
+
+<h3>Layer 2 — delivery: one mechanism, not two</h3>
+<ul>
+  <li><code>blockBroadcastContext(block)</code> in <code>feed-broadcast.ts</code>, adding
+      <code>{blockId}</code>, <code>{class}</code>, <code>{cost}</code> and <code>{focus}</code> —
+      the literal <code>agents focus &lt;id&gt;</code> string, so a phone message carries the exact
+      command that unblocks it.</li>
+  <li><b>Delete <code>notifyUrgentBlock</code>'s openclaw hardcode and the chat id</b>, reimplemented
+      over <code>planFeedBroadcast</code> / <code>runFeedBroadcast</code>. No personal chat id in an
+      Apache-2.0 repo.</li>
+  <li><code>publishBlock</code> stays a pure write; broadcasting fires only where a block
+      <i>newly becomes</i> a needs-you, so stamping a lifecycle field can never re-page you.</li>
+</ul>
+
+<h2 id="s5"><span class="n">05</span>Adoption — how agents learn this</h2>
+<p class="lead">The half that decides whether the feature works. It is mostly rewiring things that
+already exist.</p>
+
+<table>
+  <tr><th></th><th>Mechanism</th><th>Why this one</th></tr>
+  <tr><td><span class="tag a">new</span></td>
+      <td>A rule, <code>rules/subrules/feed-blocks.md</code>, modeled on <code>feed-status-posts.md</code></td>
+      <td>That template produced the 33 posts across 3 harnesses I measured. Rules are always in context.</td></tr>
+  <tr><td><span class="tag b">edit</span></td>
+      <td><code>no-permission-stop-guard.sh</code> files the block from what the agent already wrote, then allows the stop</td>
+      <td>It <b>already</b> regexes the final message for stall phrases and blocks with <code>exit 2</code>. It just routes nowhere.</td></tr>
+  <tr><td><span class="tag b">edit</span></td>
+      <td><code>00-agent-verify-work-complete.sh:698-722</code> — fix a false claim</td>
+      <td>It tells every agent <code>feed post</code> "can be forwarded to their phone". That is untrue today.</td></tr>
+  <tr><td><span class="tag b">edit</span></td>
+      <td>Layer-bug fix in both escalation hooks; <code>report_friction</code> added to the three guards missing it</td>
+      <td>Makes the ladder run at all, and makes every guard denial observable.</td></tr>
+</table>
+
+<div class="callout">
+  <span class="lbl">The breadcrumb already exists</span>
+  <code>git-guard.sh:53-64</code> already fires
+  <code>agents _internal friction --surface guard --id &lt;failureId&gt;</code> on every deny, landing a
+  structured record in <code>~/.agents/events.jsonl</code> via <code>emitFriction</code>
+  (<code>lib/events.ts:760-769</code>). The denial that blocked session 74a4893f almost certainly
+  left a machine-readable trace. Nothing consumes it. The stall guard reads that log, which makes
+  the capture precise rather than heuristic.
+</div>
+
+<div class="callout warn">
+  <span class="lbl">Why a CLI verb, not a hook</span>
+  Hook events are badly non-portable. Only <b>Claude</b> fires <code>Notification</code>; only
+  <b>Codex</b> fires <code>PermissionRequest</code>; <b>Copilot</b> is the only third-party harness
+  covering both. Grok, Antigravity, OpenCode, Kiro, Goose, Cursor and Hermes each cover a different
+  partial subset, and unmapped events are dropped <i>silently</i>. A hook-triggered design can never
+  reach parity. A CLI verb is harness-agnostic by construction.
+</div>
+
+<h2 id="s6"><span class="n">06</span>Sequencing</h2>
+<table>
+  <tr><th></th><th>Repo</th><th>Contents</th></tr>
+  <tr><td><span class="tag a">Day 0</span></td><td><code>muqsitnawaz/.agents</code></td>
+      <td>Sink config (already documented at <code>docs/06-observability.md:704-750</code>, never applied), <code>cli/</code> manifests for rush + openclaw so doctor sees them, <code>owner.md</code> synced fleet-wide. <b>No code.</b></td></tr>
+  <tr><td><span class="tag b">PR 1</span></td><td><code>agents-cli</code> + <code>.agents-system</code></td>
+      <td>Layers 1–3: the verb, <code>agents notify</code>, broadcast wiring, notify.ts de-hardcoded, the rule, the hook fixes, docs, changelog fragment.</td></tr>
+  <tr><td><span class="tag c">PR 2</span></td><td><code>agents-cli</code></td>
+      <td>Menubar: block-sourced triage strip, row action <code>agents focus &lt;id&gt;</code>, a <code>focus:</code> notification click verb.</td></tr>
+  <tr><td><span class="tag c">PR 3</span></td><td><code>agents-cli</code> + <code>apps/ios</code></td>
+      <td>Fleet Cockpit: blocks as a fourth panel over the anchor.</td></tr>
+</table>
+
+<p><b>Deferred deliberately:</b> inbound reply from the phone. The outbound half and
+<code>agents message &lt;target&gt; &lt;text&gt; --surface feed</code> both already exist, so this is a
+real Phase 2 — it needs an inbound transport, reply→blockId mapping, and operator auth for
+high-consequence blocks.</p>
+
+<h2 id="s7"><span class="n">07</span>Verification</h2>
+<p class="lead">Nothing here is done until a block filed by a real agent reaches a real device.</p>
+<ul>
+  <li><b>Unit</b> — <code>bun run test:remote</code>. Real-path tests per the no-mocking rule: a
+      block written to a temp feed dir, planned against a real sink config, with a sink argv that
+      writes a file.</li>
+  <li><b>Fail-loud</b> — unset the sink config, run <code>feed block</code>, assert non-zero and
+      the "recorded but NOT delivered" message. This is the regression test for the bug that
+      started all this.</li>
+  <li><b>Real delivery</b> — confirm the iMessage arrives. A clean exit is not proof; check
+      <code>rush http GET /api/v1/channels/imessage/status</code> returns <code>"linked": true</code>
+      and wait for you to confirm receipt.</li>
+  <li><b>Doctor</b> — <code>agents doctor</code> reports rush/openclaw missing with a runnable
+      remediation on the boxes that lack them.</li>
+  <li><b>The 74a4893f replay</b> — trigger a real git-guard force-push denial in a throwaway
+      worktree, let the agent stop, and confirm the stall guard files a block that reaches both the
+      phone and Notification Center. <b>This is the acceptance test.</b></li>
+</ul>
+
+<h3>Decisions I made — redirect me if any is wrong</h3>
+<ul>
+  <li><b>PR 1 excludes the menubar.</b> It is a Swift surface I cannot build or eyeball from this
+      Linux box; it needs zion or mac-mini. Say so if you'd rather have click-to-focus in one shot
+      and I'll do the whole thing on a Mac.</li>
+  <li><b>The Stop gate captures, it does not block.</b> The agents' explanations are already good;
+      a third <i>blocking</i> Stop gate on top of the two that exist invites loops.</li>
+  <li><b>Blocks always broadcast at <code>important</code>.</b> A block is by definition worth
+      interrupting over, so there is no per-block level flag to get wrong.</li>
+</ul>
+
+<div class="foot">
+  claude · opus-5 · yosemite-s1 · session df0ab22d · 2026-08-03 · RUSH-2110 &nbsp;·&nbsp; next: go / reshape
+</div>
+
+</div>
+</body>
+</html>

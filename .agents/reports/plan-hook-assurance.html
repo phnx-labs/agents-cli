@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan · Hook-layer assurance for the agent factory</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111312; --panel2:#161a18; --ink:#e7ece8; --dim:#8b938c;
+    --line:#26302a; --accent:#a3e635; --amber:#f5c451; --red:#ff6b6b; --cyan:#5ad6c0;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f6; --panel:#ffffff; --panel2:#f2f4f0; --ink:#1a1c1a; --dim:#5c655c;
+    --line:#e2e6df; --accent:#4d7c0f; --amber:#b45309; --red:#dc2626; --cyan:#0e7490;
+  }
+  :root[data-theme="light"] .fig{background:#0e120f;border-color:#26302a}
+  :root[data-theme="light"] .fig figcaption{color:#8b938c}
+  :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:56px 28px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:40px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+  h1{font-size:34px;line-height:1.15;margin:0 0 12px;font-weight:700;letter-spacing:-.01em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);font-size:17px;max-width:70ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:4px 11px;background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:500}
+  .prov{margin-top:10px}.prov .chip{font-size:11px;opacity:.82}.prov .chip b{color:var(--cyan)}
+  h2{font-size:23px;margin:52px 0 8px;letter-spacing:-.01em;scroll-margin-top:20px}
+  h2 .n{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:10px;opacity:.85}
+  h3{font-size:16.5px;margin:26px 0 8px;color:var(--ink)}
+  p{margin:10px 0}.lead{color:var(--dim)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--cyan)}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent}a:hover{border-bottom-color:var(--accent)}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px 22px 18px;margin:22px 0;overflow-x:auto}
+  .fig figcaption{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:14px;text-align:center}
+  .fig figcaption b{color:var(--ink)}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  td code{font-size:.85em}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600}
+  .tag.a{background:rgba(163,230,53,.12);color:var(--accent);border:1px solid rgba(163,230,53,.3)}
+  .tag.b{background:rgba(90,214,192,.1);color:var(--cyan);border:1px solid rgba(90,214,192,.28)}
+  .tag.c{background:rgba(245,196,81,.1);color:var(--amber);border:1px solid rgba(245,196,81,.28)}
+  ul{margin:10px 0;padding-left:22px}li{margin:6px 0}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 10px 10px 0;padding:14px 18px;margin:18px 0}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:5px}
+  .callout.warn .lbl{color:var(--amber)}
+  .toc{font-family:var(--mono);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:18px}
+  .toc a{color:var(--dim);border:0}.toc a:hover{color:var(--accent)}
+  pre{font-family:var(--mono);font-size:13px;background:#0c0f0d;border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow-x:auto;line-height:1.55;color:#e7ece8}
+  pre .c{color:#8b938c}pre .k{color:#a3e635}pre .s{color:#5ad6c0}pre .r{color:#ff6b6b}
+  .foot{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);font-family:var(--mono);font-size:12px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--dim);justify-content:center;margin-top:6px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .themebtn{position:fixed;top:16px;right:16px;z-index:9;font-family:var(--mono);font-size:12px;color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:6px 13px;cursor:pointer}
+  .themebtn:hover{color:var(--accent);border-color:var(--accent)}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="tt()" id="tb">◐ light</button>
+<script>
+  var r=document.documentElement;
+  function set(t){r.setAttribute('data-theme',t);document.getElementById('tb').textContent=(t==='light'?'◑ dark':'◐ light')}
+  set(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  function tt(){set(r.getAttribute('data-theme')==='light'?'dark':'light')}
+</script>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">agents-system · hook layer · plan</p>
+  <h1>The safety layer can switch off<br><span class="accent">and nothing notices</span></h1>
+  <p class="sub">The 22 hooks are what make an agent safe to leave running unattended. Two
+  audit findings show the layer has no assurance: four hooks were dead for months without a
+  single failure, and the three guards that prevent irreversible loss are the untested ones.</p>
+  <div class="meta">
+    <span class="chip"><b>22</b>&nbsp;hooks audited</span>
+    <span class="chip"><b>4</b>&nbsp;were silently dead</span>
+    <span class="chip"><b>3</b>&nbsp;destructive guards untested</span>
+    <span class="chip">status: <b>awaiting go</b></span>
+  </div>
+  <div class="meta prov">
+    <span class="chip">harness: <b>claude</b></span>
+    <span class="chip">agent: <b>opus-5</b></span>
+    <span class="chip">host: <b>yosemite-s1</b></span>
+    <span class="chip">session: <b>b0b06be0</b></span>
+    <span class="chip"><b>2026-08-03</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#s1">01 · what the hooks do</a>
+    <a href="#s2">02 · the assurance gap</a>
+    <a href="#s3">03 · plan</a>
+    <a href="#s4">04 · out of scope</a>
+    <a href="#s5">05 · verification</a>
+  </nav>
+</header>
+
+<h2 id="s1"><span class="n">01</span>What the 22 hooks actually do</h2>
+<p class="lead">Grouped by the job they do for an agent nobody is watching.</p>
+
+<table>
+  <thead><tr><th>Function</th><th>Hooks</th><th>Factory role</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag b">boot</span></td>
+      <td><code>session-identity</code>, <code>inject-device-topology</code>, <code>inject-repo-inflight</code>, <code>session-start-autosync</code>, <code>linear-tasks</code></td>
+      <td>The agent wakes knowing who it is, what fleet exists, what is already in flight, and what is on the board — the precondition for acting without a briefing</td></tr>
+    <tr><td><span class="tag a">anti-idle</span></td>
+      <td><code>verify-work-complete</code> (841 lines), <code>attention-sentinel</code>, <code>escalate-on-notification</code></td>
+      <td>The differentiator. Blocks a false "done", an open PR with no handoff, a hand-back; escalates out-of-band rather than idling in a chat window</td></tr>
+    <tr><td><span class="tag c">guards</span></td>
+      <td><code>git-guard</code>, <code>rm-guard</code>, <code>git-require-clean-tree</code>, <code>large-file-add-guard</code> + rule-owned <code>main-branch-guard</code>, <code>merge-guard</code>, <code>footer-guard</code>, <code>pr-description-reminder</code>, <code>plan-html-reminder</code></td>
+      <td>What makes unattended running acceptable at all</td></tr>
+    <tr><td><span class="tag b">operator</span></td>
+      <td><code>feed-forward</code>, <code>mailbox-inject</code></td>
+      <td>Status reaches the owner's phone; queued instructions reach a running agent</td></tr>
+    <tr><td><span class="tag b">efficiency</span></td>
+      <td><code>mq-read-nudge</code>, <code>expand-promptcuts</code>, <code>expand-bang-commands</code></td>
+      <td>Context cost and typing</td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <span class="lbl">the verdict on the question asked</span>
+  Yes — the design squarely serves the factory goal. Boot-awareness and anti-idle are exactly
+  the two things that let an agent start and finish without a human in the loop, and the guard
+  set is what makes that tolerable. The gap is <b>assurance</b>, not coverage.
+</div>
+
+<h2 id="s2"><span class="n">02</span>The assurance gap</h2>
+
+<figure class="fig">
+<svg viewBox="0 0 900 260" role="img" aria-label="A hook only fires when both its script and its manifest entry exist; the script's own test covers only the script, leaving the registration edge unchecked">
+  <defs>
+    <marker id="ok" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L8 4.5 L0 9 z" fill="#a3e635"/></marker>
+    <marker id="bad" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto"><path d="M0 0 L8 4.5 L0 9 z" fill="#ff6b6b"/></marker>
+  </defs>
+
+  <rect x="40" y="40" width="200" height="58" rx="9" fill="#161a18" stroke="#26302a"/>
+  <text x="140" y="64" fill="#e7ece8" font-size="12.5" text-anchor="middle" font-family="monospace">hooks/rm-guard.sh</text>
+  <text x="140" y="82" fill="#8b938c" font-size="11" text-anchor="middle" font-family="monospace">the script</text>
+
+  <rect x="40" y="150" width="200" height="58" rx="9" fill="#161a18" stroke="#26302a"/>
+  <text x="140" y="174" fill="#e7ece8" font-size="12.5" text-anchor="middle" font-family="monospace">agents.yaml</text>
+  <text x="140" y="192" fill="#8b938c" font-size="11" text-anchor="middle" font-family="monospace">the registration</text>
+
+  <path d="M240 69 L400 105" stroke="#a3e635" fill="none" marker-end="url(#ok)"/>
+  <path d="M240 179 L400 143" stroke="#ff6b6b" stroke-dasharray="6 5" fill="none" marker-end="url(#bad)"/>
+
+  <rect x="402" y="94" width="180" height="58" rx="9" fill="#12160f" stroke="#a3e635"/>
+  <text x="492" y="118" fill="#a3e635" font-size="12.5" text-anchor="middle" font-family="monospace">hook fires</text>
+  <text x="492" y="136" fill="#8b938c" font-size="11" text-anchor="middle" font-family="monospace">needs BOTH</text>
+
+  <rect x="640" y="30" width="220" height="52" rx="9" fill="#12160f" stroke="#a3e635"/>
+  <text x="750" y="51" fill="#a3e635" font-size="12" text-anchor="middle" font-family="monospace">rm-guard_test.sh</text>
+  <text x="750" y="68" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="monospace">covers the script only</text>
+  <path d="M640 56 L245 62" stroke="#a3e635" stroke-width="1" fill="none" opacity="0.5"/>
+
+  <rect x="640" y="150" width="220" height="58" rx="9" fill="#1a1210" stroke="#ff6b6b"/>
+  <text x="750" y="173" fill="#ff6b6b" font-size="12" text-anchor="middle" font-family="monospace">NOTHING checks this</text>
+  <text x="750" y="191" fill="#8b938c" font-size="10.5" text-anchor="middle" font-family="monospace">4 hooks dead for months</text>
+  <path d="M640 179 L245 179" stroke="#ff6b6b" stroke-dasharray="4 4" stroke-width="1" fill="none" opacity="0.6"/>
+
+  <text x="450" y="238" fill="#8b938c" font-size="11" text-anchor="middle" font-family="monospace">a dropped registration is invisible: the script still passes its own test</text>
+</svg>
+<div class="legend">
+  <span><span class="sw" style="background:#a3e635"></span>covered</span>
+  <span><span class="sw" style="background:#ff6b6b"></span>unchecked (dashed)</span>
+</div>
+<figcaption><b>A hook needs two things to fire; only one of them is tested.</b></figcaption>
+</figure>
+
+<h3>Finding 1 — four hooks were dead and nothing failed</h3>
+<table>
+  <thead><tr><th>Commit</th><th>Subject</th><th>Silently dropped</th></tr></thead>
+  <tbody>
+    <tr><td><code>606db6e</code><br>May 13</td><td><i>"fix(hooks): handle missing YAML frontmatter in pre-commit validator"</i></td><td><b>−27 lines</b> from <code>agents.yaml</code>: <code>expand-promptcuts</code>, <code>expand-bang-commands</code>, <code>linear-tasks</code>, <code>stop-completion-gate</code></td></tr>
+    <tr><td><code>8b006a6</code><br>Jun 24</td><td><i>"chore: remove legacy agents hook config"</i></td><td><b>−34 lines</b>: <code>rm-guard</code> <b>and</b> <code>large-file-add-guard</code></td></tr>
+  </tbody>
+</table>
+<p><code>large-file-add-guard</code> — a data-loss guard — was off from June 24 until this week.
+In both commits a sibling was later restored and the rest forgotten.</p>
+
+<h3>Finding 2 — the destructive guards are the untested ones</h3>
+<p>All <b>5</b> rule-owned guards have tests. These three do not:</p>
+<pre><span class="r">UNTESTED</span>  git-guard.sh             <span class="c"># reset --hard, force-push, stash, clean</span>
+<span class="r">UNTESTED</span>  rm-guard.sh              <span class="c"># rm -rf on protected paths</span>
+<span class="r">UNTESTED</span>  large-file-add-guard.sh  <span class="c"># git add of a &gt;5 MiB file</span></pre>
+
+<div class="callout warn">
+  <span class="lbl">why this is the factory risk model</span>
+  For a supervised agent these are annoyances. For a factory they are the whole risk model —
+  an agent running unattended at 3am with a silently-disabled <code>rm-guard</code> is the
+  failure that ends the experiment.
+</div>
+
+<h2 id="s3"><span class="n">03</span>Plan</h2>
+
+<h3>1 — A registration-integrity test</h3>
+<p>New <code>hooks/registration_test.sh</code>. For every <code>*.sh</code>/<code>*.py</code>
+in <code>hooks/</code>, assert one of: it has a <code>hooks:</code> entry in
+<code>../agents.yaml</code>; it is invoked by a script that does (the
+<code>verify-delivery-chain.py</code> case); or it is in an explicit
+<code>INTENTIONALLY_UNREGISTERED</code> allowlist with a one-line reason. Anything else fails.</p>
+<p>This turns "someone dropped a registration in an unrelated commit" from an invisible event
+into a red test. Seed the allowlist with the one genuine case,
+<code>02-expand-prompt-skill-refs.py</code>.</p>
+
+<h3>2 — Tests for the three destructive guards</h3>
+<p>Following the existing <code>_test.sh</code> shape. Each needs three cases:</p>
+<ul>
+  <li><b>blocks the bad input</b> — <code>rc=2</code>, reason on stderr</li>
+  <li><b>allows the benign neighbour</b> — <code>rc=0</code> and <b>empty stdout</b> (a
+      <code>PreToolUse</code> guard writing to stdout on the allow path injects into the prompt)</li>
+  <li><b>fails CLOSED with no JSON parser</b> — the <code>footer-guard</code> precedent: a bare
+      <code>jq</code> call with <code>|| cmd=""</code> silently allowed the exact thing it existed to block</li>
+</ul>
+
+<h3>3 — One runner, wired as the pre-PR gate</h3>
+<p><code>hooks/run_tests.sh</code> over every <code>_test.sh</code> in <code>hooks/</code> and
+<code>rules/subrules/*/</code>, non-zero on any failure. Referenced from
+<code>hooks/AGENTS.md</code>.</p>
+
+<h2 id="s4"><span class="n">04</span>Deliberately out of scope</h2>
+<ul>
+  <li><b>Per-harness scoping.</b> <code>agents:</code> is dead — proven behaviorally:
+      <code>rm-guard</code> declares <code>[claude, codex, gemini]</code> yet is installed in
+      kimi, droid and antigravity homes. Fixing it is an agents-cli feature in a different repo.</li>
+  <li><b>Tests for the 7 other untested hooks.</b> Worth doing, but none can cause irreversible
+      loss — they inject context or expand text. The registration test already covers the
+      "is it wired" half for all of them.</li>
+</ul>
+
+<h2 id="s5"><span class="n">05</span>Verification</h2>
+<div class="callout">
+  <span class="lbl">the standard each test must meet</span>
+  A test that only passes against the fixed state proves nothing. Each must be shown to
+  <b>fail</b> against the broken state first — the same bar applied to
+  <code>02-expand-prompt-user-shortcuts_test.sh</code>, which reported <code>5 passed, 1 failed</code>
+  against the pre-fix script before it was accepted.
+</div>
+<ul>
+  <li>Run <code>registration_test.sh</code> against <code>git show 606db6e:agents.yaml</code>
+      in a scratch tree — it must FAIL, naming the three dropped hooks.</li>
+  <li>Break each guard's parser lookup to an unconditional allow; the fail-closed case must go red.</li>
+  <li><code>bash hooks/run_tests.sh</code> green on this box and on zion.</li>
+  <li>Each guard run with a benign payload produces <b>empty stdout</b>.</li>
+</ul>
+
+<div class="foot">
+  agents-system · hook layer · rendered by plan-render &nbsp;·&nbsp;
+  claude · opus-5 · yosemite-s1 · session b0b06be0 · 2026-08-03 &nbsp;·&nbsp;
+  next: <span style="color:var(--accent)">go / reshape</span>
+</div>
+
+</div>
+</body>
+</html>
