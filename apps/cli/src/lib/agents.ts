@@ -909,6 +909,27 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
 /** All current and legacy agent IDs derived from the AGENTS registry. */
 export const ALL_AGENT_IDS: AgentId[] = Object.keys(AGENTS) as AgentId[];
 
+/**
+ * CLI command templates per agent for daemon-fired routine jobs, with
+ * {prompt} as a placeholder. Lives here (not runner.ts) so routines.ts can
+ * import ROUTINE_AGENT_IDS for schedule-time validation without a circular
+ * import (runner.ts already imports from routines.ts).
+ */
+export const ROUTINE_AGENT_COMMANDS: Record<string, string[]> = {
+  claude: ['claude', '-p', '--verbose', '{prompt}', '--output-format', 'stream-json', '--permission-mode', 'plan'],
+  codex: ['codex', 'exec', '{prompt}', '--json'],
+  gemini: ['gemini', '{prompt}', '--output-format', 'stream-json'],
+  cursor: ['cursor-agent', '-p', '{prompt}', '--output-format', 'stream-json'],
+  kimi: ['kimi', '--prompt', '{prompt}', '--output-format', 'stream-json'],
+  droid: ['droid', 'exec', '{prompt}', '-o', 'stream-json'],
+  muse: ['muse', 'exec', '{prompt}', '--json'],
+};
+
+/** Agents the routine daemon can actually run when firing locally, derived
+ * from the command table above so the `--agent` help and validateJob's
+ * schedule-time check can never drift from it. */
+export const ROUTINE_AGENT_IDS = Object.freeze(Object.keys(ROUTINE_AGENT_COMMANDS));
+
 /** Agents retained only for legacy reads, not install/import/sync targets. */
 export const HARD_DEPRECATED_AGENT_IDS: AgentId[] = ALL_AGENT_IDS.filter((id) => AGENTS[id].deprecated?.hard);
 
