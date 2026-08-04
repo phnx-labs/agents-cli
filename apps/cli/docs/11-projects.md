@@ -413,8 +413,11 @@ claims, longest match winning so a nested project beats its parent. What a proje
 is the part that needed fixing:
 
 - `root` says where the **checkout** is.
-- `defaultPath`, when nested under `root`, says which **work** is this project's — and it
-  then becomes the membership claim *instead of* `root`.
+- `defaultPath`, when nested under `root`, says which **work** is this project's, and takes
+  precedence over `root`.
+- a narrowed `root` still claims the rest of its checkout, but only as a fallback: any other
+  project claiming that path outright wins. So the umbrella takes `apps/web` when one exists,
+  while a lone project keeps attributing work across its own repo.
 - each `repos[].path`, and `repos[].path` + `subpath`, anchor as well.
 
 Without this, two definitions sharing one monorepo checkout — an umbrella `rush` at
@@ -425,3 +428,7 @@ changed with definition order.
 
 A subproject scoped to `apps/cli` deliberately does **not** own `apps/web`; that work falls to
 the umbrella. Set the scope with `agents projects add <name> --root <monorepo> --path <subdir>`.
+
+When the subproject is the *only* definition on that checkout there is no umbrella to fall to,
+so its `root` still covers `apps/web` and the repo root. `--path` chooses where an agent
+starts, and it must not silently shrink which work counts as the project's.

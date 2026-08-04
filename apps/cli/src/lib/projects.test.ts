@@ -282,4 +282,27 @@ describe('projectNameForCwd — monorepo subprojects', () => {
   it('matches nothing outside every anchor', () => {
     expect(projectNameForCwd(path.join(HOME_, 'src', 'elsewhere'), defs)).toBeUndefined();
   });
+
+  it('a lone narrowed project still owns the rest of its own checkout', () => {
+    // The subdir claim must not shrink a project that has no umbrella beside it:
+    // `--path` picks where an agent starts, not which work counts. Narrowing to
+    // the subdir alone silently orphaned every session in the repo root and in
+    // sibling subdirs.
+    const solo: ProjectDef[] = [{ name: 'foo', root: '~/src/foo', defaultPath: '~/src/foo/apps/web' }];
+    const repo = path.join(HOME_, 'src', 'foo');
+    expect(projectNameForCwd(path.join(repo, 'apps', 'web'), solo)).toBe('foo');
+    expect(projectNameForCwd(repo, solo)).toBe('foo');
+    expect(projectNameForCwd(path.join(repo, 'apps', 'api'), solo)).toBe('foo');
+    // Still bounded by the root.
+    expect(projectNameForCwd(path.join(HOME_, 'src', 'bar'), solo)).toBeUndefined();
+  });
+
+  it('the umbrella outranks a subproject root even when listed second', () => {
+    // The fallback must lose to any outright claim, in either definition order.
+    const reversed = [...defs].reverse();
+    expect(projectNameForCwd(path.join(mono, 'apps', 'web'), defs)).toBe('rush');
+    expect(projectNameForCwd(path.join(mono, 'apps', 'web'), reversed)).toBe('rush');
+    expect(projectNameForCwd(mono, defs)).toBe('rush');
+    expect(projectNameForCwd(mono, reversed)).toBe('rush');
+  });
 });

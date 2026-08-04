@@ -300,6 +300,13 @@ interface ProjectRootAbs {
    * subpath — so the most specific claim can win over a broader one.
    */
   abs: string;
+  /**
+   * A fallback claim, used only when no ordinary claim matches. The root of a
+   * project that narrowed itself with `defaultPath` is weak: it should lose the
+   * shared monorepo root to an umbrella project, yet still cover its own repo
+   * when no other project claims it.
+   */
+  weak?: boolean;
 }
 
 function projectRootsAbs(defs: ProjectDef[]): ProjectRootAbs[] {
@@ -320,12 +327,15 @@ function projectRootsAbs(defs: ProjectDef[]): ProjectRootAbs[] {
     // `rush/apps/cli` counted toward whichever definition was listed first.
     const rootAbs = def.root ? path.resolve(expandLocalHome(def.root)) : undefined;
     const defaultAbs = def.defaultPath ? path.resolve(expandLocalHome(def.defaultPath)) : undefined;
-    const narrowed = rootAbs && defaultAbs && defaultAbs !== rootAbs && isUnder(defaultAbs, rootAbs);
-    if (narrowed) out.push({ name: def.name, abs: defaultAbs! });
-    else {
-      if (rootAbs) out.push({ name: def.name, abs: rootAbs });
-      if (defaultAbs && defaultAbs !== rootAbs) out.push({ name: def.name, abs: defaultAbs });
-    }
+    const narrowed = !!(rootAbs && defaultAbs && defaultAbs !== rootAbs && isUnder(defaultAbs, rootAbs));
+    // A narrowed project's root is a WEAK claim: it still covers the rest of the
+    // checkout when nobody else wants it, but yields to any project that claims
+    // a path outright. Dropping it entirely regressed the single-project case —
+    // `add foo --root ~/src/foo --path apps/web` stopped attributing work
+    // anywhere else in its own repo, and `--path` means where agents START, not
+    // which work counts.
+    if (rootAbs) out.push({ name: def.name, abs: rootAbs, weak: narrowed });
+    if (defaultAbs && defaultAbs !== rootAbs) out.push({ name: def.name, abs: defaultAbs });
     for (const r of def.repos ?? []) {
       push(def.name, r.path);
       // A repo pinned to a monorepo subpath anchors at that subpath too.
@@ -360,13 +370,21 @@ export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): 
   const abs = path.resolve(expandLocalHome(cwd));
   let best: string | undefined;
   let bestLen = -1;
-  for (const { name, abs: root } of projectRootsAbs(defs)) {
-    if (isUnder(abs, root) && root.length > bestLen) {
+  let weakBest: string | undefined;
+  let weakLen = -1;
+  for (const { name, abs: root, weak } of projectRootsAbs(defs)) {
+    if (!isUnder(abs, root)) continue;
+    if (weak) {
+      if (root.length > weakLen) {
+        weakBest = name;
+        weakLen = root.length;
+      }
+    } else if (root.length > bestLen) {
       best = name;
       bestLen = root.length;
     }
   }
-  return best;
+  return best ?? weakBest;
 }
 
 /**
