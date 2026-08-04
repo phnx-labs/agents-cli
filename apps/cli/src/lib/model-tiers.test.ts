@@ -1,32 +1,61 @@
 import { describe, it, expect } from 'vitest';
-import { isTierToken, tierizeModels, resolveTierMap, resolveTier, MODEL_TIERS } from './model-tiers.js';
-import { getModelCatalog, type ModelInfo } from './models.js';
+import { isTierToken, tierizeModels, resolveTierMap, resolveTier, MODEL_TIERS, applyTierOverrides, type TierResolution } from './model-tiers.js';
+import { getModelCatalog, dropBareLegacyIds, type ModelInfo } from './models.js';
 import { listInstalledVersions } from './versions.js';
 import { buildExecCommand } from './exec.js';
-import { setTierOverride, clearTierOverride } from './model-tier-overrides.js';
 
-describe('curated Kimi ladder + override application (gated on a Kimi install)', () => {
+describe('curated Kimi ladder (gated on a Kimi install)', () => {
   const kimi = listInstalledVersions('kimi');
   const v = kimi[kimi.length - 1];
-
-  it.runIf(kimi.length > 0)('curated ladder: best=K3, cheap=highspeed, ultra clamps, all [curated]', () => {
+  it.runIf(kimi.length > 0)('best=K3 (plain, folds k3-256k in), cheap=highspeed, ultra clamps, [curated]', () => {
     const m = resolveTierMap('kimi', v);
-    expect(m.best.model).toMatch(/k3/);
+    expect(m.best.model).toBe('kimi-code/k3'); // plain K3, not k3-256k
     expect(m.cheap.model).toMatch(/highspeed/);
     expect(m.ultra.clampedFrom).toBe('best');
     expect(m.best.source).toBe('curated');
   });
+});
 
-  it.runIf(kimi.length > 0)('an override present in the catalog is used and marked [override]; clears cleanly', () => {
-    try {
-      setTierOverride('kimi', 'cheap', 'kimi-code/k3');
-      const r = resolveTier('kimi', v, 'cheap');
-      expect(r.model).toBe('kimi-code/k3');
-      expect(r.source).toBe('override');
-    } finally {
-      clearTierOverride('kimi');
-    }
-    expect(resolveTier('kimi', v, 'cheap').source).toBe('curated'); // back to auto
+describe('applyTierOverrides (pure — no config I/O)', () => {
+  const base = {
+    cheap: { tier: 'cheap', model: 'a', source: 'curated' },
+    default: { tier: 'default', model: 'b', source: 'curated' },
+    best: { tier: 'best', model: 'c', source: 'curated' },
+    ultra: { tier: 'ultra', model: 'c', clampedFrom: 'best', source: 'curated' },
+  } as Record<(typeof MODEL_TIERS)[number], TierResolution>;
+  const ids = new Set(['a', 'b', 'c', 'x']);
+
+  it('uses an override the catalog ships, marked [override], leaving other tiers untouched', () => {
+    const out = applyTierOverrides({ best: 'x' }, 'kimi@1', ids, base);
+    expect(out.best.model).toBe('x');
+    expect(out.best.source).toBe('override');
+    expect(out.cheap.model).toBe('a');
+  });
+
+  it('falls back to the base pick when the overridden id is not shipped', () => {
+    const out = applyTierOverrides({ best: 'nope' }, 'kimi@1', ids, base);
+    expect(out.best.model).toBe('c');
+    expect(out.best.source).toBe('curated');
+    expect(out.best.note).toMatch(/not shipped/);
+  });
+
+  it('trusts an override when there is no catalog to validate against (e.g. Droid)', () => {
+    const out = applyTierOverrides({ best: 'anything' }, 'droid@1', null, base);
+    expect(out.best.model).toBe('anything');
+    expect(out.best.source).toBe('override');
+  });
+});
+
+describe('dropBareLegacyIds (#1892)', () => {
+  it('drops a bare major with a more-specific sibling, keeps a bare id with none', () => {
+    const out = dropBareLegacyIds([
+      'claude-opus-4', 'claude-opus-4-1', 'claude-opus-4-8',
+      'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-haiku-4', 'claude-haiku-4-5',
+    ]);
+    expect(out).not.toContain('claude-opus-4'); // has siblings -> dropped
+    expect(out).not.toContain('claude-haiku-4'); // has sibling -> dropped
+    expect(out).toContain('claude-sonnet-5'); // no sibling -> kept
+    expect(out).toContain('claude-opus-4-8'); // specific -> kept
   });
 });
 

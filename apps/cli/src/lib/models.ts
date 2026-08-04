@@ -380,6 +380,20 @@ function extractStrings(filePath: string, minLen = 6): string {
  *   - per-cloud maps: {firstParty:"claude-opus-4-5-...",bedrock:"...",vertex:"...",...}
  *   - constants: {OPUS_ID:"...",OPUS_NAME:"...",SONNET_ID:"...",...}
  */
+/**
+ * Drop a bare `claude-<family>-<major>` (e.g. `claude-opus-4`) when a more specific
+ * sibling (`claude-opus-4-8`) is present. The bare form is only ever an internal
+ * `.includes("claude-opus-4")` prefix-check string in the binary, not a submittable
+ * id (issue #1892); a bare id with no sibling (e.g. `claude-sonnet-5`) is a real
+ * current model and is kept.
+ */
+export function dropBareLegacyIds(ids: string[]): string[] {
+  return ids.filter((id) => {
+    const bareMajor = /^claude-[a-z]+-\d+$/.test(id);
+    return !(bareMajor && ids.some((o) => o !== id && o.startsWith(`${id}-`)));
+  });
+}
+
 function extractClaudeCatalog(text: string): { models: ModelInfo[]; aliases: Record<string, string> } {
   const aliases: Record<string, string> = {};
 
@@ -455,16 +469,7 @@ function extractClaudeCatalog(text: string): { models: ModelInfo[]; aliases: Rec
     const idRe = /claude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:-\d+)*(?:-(?:fast|v\d+))?/g;
     let sm: RegExpExecArray | null;
     while ((sm = idRe.exec(text)) !== null) scanned.add(sm[0]);
-    // Drop a bare `claude-<family>-<major>` (e.g. `claude-opus-4`) when a more
-    // specific sibling (`claude-opus-4-8`) is present. The bare form is only ever
-    // an internal `.includes("claude-opus-4")` prefix-check string in the binary,
-    // not a submittable id (issue #1892); a bare id with no sibling (e.g.
-    // `claude-sonnet-5`) is a real current model and is kept.
-    const arr = [...scanned];
-    const filtered = arr.filter((id) => {
-      const bareMajor = /^claude-[a-z]+-\d+$/.test(id);
-      return !(bareMajor && arr.some((o) => o !== id && o.startsWith(`${id}-`)));
-    });
+    const filtered = dropBareLegacyIds([...scanned]);
     if (filtered.length >= 2) models = build(filtered);
   }
 

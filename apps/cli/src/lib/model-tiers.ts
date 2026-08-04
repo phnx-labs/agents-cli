@@ -59,7 +59,7 @@ const CURATED_LADDERS: Partial<Record<AgentId, Array<{ tier: ModelTier; match: R
   kimi: [
     { tier: 'cheap', match: /highspeed/i },
     { tier: 'default', match: /for-coding(?!.*highspeed)/i },
-    { tier: 'best', match: /(^|[-/])k3(?![\d-])/i },
+    { tier: 'best', match: /(^|[-/])k3\b/i }, // K3 family incl. k3-256k; the plain id represents it
   ],
 };
 
@@ -261,7 +261,11 @@ function tierizeFromLadder(
   for (const rung of ladder) {
     const matches = usable.filter((m) => rung.match.test(m.id));
     if (matches.length === 0) continue;
-    rungs.push({ id: matches.reduce((a, b) => (newer(b.id, a.id) > 0 ? b : a)).id });
+    // Prefer a plain id over a context-size variant (k3 over k3-256k) -- the
+    // variant folds into the rung but the plain model represents it -- then newest.
+    const plain = matches.filter((m) => !/-\d+[km]\b/i.test(m.id));
+    const pool = plain.length ? plain : matches;
+    rungs.push({ id: pool.reduce((a, b) => (newer(b.id, a.id) > 0 ? b : a)).id });
   }
   const map = bucketRungs(rungs);
   for (const t of MODEL_TIERS) if (map[t].model) map[t].source = 'curated';
@@ -293,21 +297,22 @@ export function resolveTierMap(agent: AgentId, version: string): Record<ModelTie
     catalogIds = catalog ? new Set(models.map((m) => m.id)) : null;
   }
 
-  return applyTierOverrides(agent, version, catalogIds, base);
+  const overrides = resolveTierOverride(agent, version);
+  return applyTierOverrides(overrides, `${agent}@${version}`, catalogIds, base);
 }
 
 /**
- * Apply user overrides on top of the auto/curated map. An overridden id is used
- * only when the version actually ships it (or when there is no catalog to check,
- * e.g. Droid); otherwise the tier keeps its auto value with a note.
+ * Apply user overrides on top of the auto/curated map. Pure (takes the resolved
+ * override map, no config lookup) so it is directly testable. An overridden id is
+ * used only when the version actually ships it (or when there is no catalog to
+ * check, e.g. Droid); otherwise the tier keeps its base value with a note.
  */
-function applyTierOverrides(
-  agent: AgentId,
-  version: string | null | undefined,
+export function applyTierOverrides(
+  overrides: Partial<Record<ModelTier, string>>,
+  label: string,
   catalogIds: Set<string> | null,
   base: Record<ModelTier, TierResolution>,
 ): Record<ModelTier, TierResolution> {
-  const overrides = resolveTierOverride(agent, version);
   if (Object.keys(overrides).length === 0) return base;
   const out = { ...base };
   for (const t of MODEL_TIERS) {
@@ -316,7 +321,7 @@ function applyTierOverrides(
     if (!catalogIds || catalogIds.has(id)) {
       out[t] = { tier: t, model: id, source: 'override' };
     } else {
-      out[t] = { ...base[t], note: `override "${id}" not shipped by ${agent}@${version ?? '?'}; using auto`, source: base[t].source ?? 'auto' };
+      out[t] = { ...base[t], note: `override "${id}" not shipped by ${label}; kept the ${base[t].source ?? 'auto'} pick`, source: base[t].source ?? 'auto' };
     }
   }
   return out;

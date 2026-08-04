@@ -84,9 +84,9 @@ The auto-ranking is a best guess; for a subscription harness with no price signa
 be wrong. Pin the right model with a command — you never hand-edit config:
 
 ```
-$ agents models tier set kimi best kimi-code/k3     # per harness
-$ agents models tier set kimi@0.19.2 best k3-256k   # a specific version wins
-$ agents models tier clear kimi                      # back to the auto guess
+$ agents models tier set kimi best kimi-code/k3                # per harness
+$ agents models tier set kimi@0.19.2 best kimi-code/k3-256k    # a specific version wins
+$ agents models tier clear kimi                                 # back to the auto guess
 $ agents models tier list
 ```
 
