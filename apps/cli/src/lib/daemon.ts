@@ -274,6 +274,13 @@ export function isDaemonRunning(): boolean {
  */
 export function claimDaemonInstance(): boolean {
   const release = acquireStartLock();
+  // acquireStartLock() returns null only when another __daemon-run currently
+  // holds the O_EXCL lock — a dead holder's lock is reclaimed and retried inside
+  // acquireStartLock, so null means a *live* claimer is mid-claim. Bail rather
+  // than run the read-decide-write unlocked: otherwise two first-start processes
+  // could each see no pid file (before either writes one) and both claim,
+  // running the concurrent JobScheduler this guard exists to prevent.
+  if (!release) return false;
   try {
     // resolveLiveDaemonPid() also consults a fresh heartbeat, so a live daemon
     // whose pid file was lost still blocks a second claim — otherwise a missing
@@ -286,7 +293,7 @@ export function claimDaemonInstance(): boolean {
     writeDaemonPid(process.pid);
     return true;
   } finally {
-    release?.();
+    release();
   }
 }
 
