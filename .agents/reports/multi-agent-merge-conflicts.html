@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Multi-agent merge conflicts — fleet audit</title>
+<style>
+:root{--bg:#0a0a0a;--panel:#111312;--panel2:#161a18;--ink:#e7ece8;--dim:#8b938c;--line:#26302a;--accent:#a3e635;--amber:#f5c451;--red:#ff6b6b;--cyan:#5ad6c0;--mono:"JetBrains Mono",ui-monospace,Menlo,monospace;--sans:Inter,-apple-system,sans-serif}
+:root[data-theme="light"]{--bg:#faf9f6;--panel:#fff;--panel2:#f2f4f0;--ink:#1a1c1a;--dim:#5c655c;--line:#e2e6df;--accent:#4d7c0f;--amber:#b45309;--red:#dc2626;--cyan:#0e7490}
+:root[data-theme="light"] .fig{background:#0e120f;border-color:#26302a} :root[data-theme="light"] .fig figcaption{color:#8b938c} :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6}
+.wrap{max-width:1040px;margin:0 auto;padding:48px 28px 100px}
+.theme-btn{position:fixed;top:16px;right:16px;z-index:50;background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:999px;padding:8px 14px;font-family:var(--mono);font-size:13px;cursor:pointer}
+.kicker{font-family:var(--mono);font-size:12px;letter-spacing:.08em;color:var(--accent);text-transform:uppercase;margin:0 0 12px}
+h1{font-size:clamp(1.8rem,4vw,2.55rem);line-height:1.15;margin:0 0 14px;font-weight:650;letter-spacing:-.02em}
+h1 .accent{color:var(--accent)} h1 .strike{color:var(--red);text-decoration:line-through;opacity:.85}
+.sub{color:var(--dim);font-size:1.05rem;max-width:70ch;margin:0 0 22px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 28px}
+.chip{font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel2);color:var(--dim)}
+.chip b{color:var(--ink)} .chip.warn{border-color:var(--amber);color:var(--amber)}
+.toc{display:flex;flex-wrap:wrap;gap:10px 18px;margin:0 0 40px;padding:14px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.toc a{color:var(--dim);text-decoration:none;font-size:13px;font-family:var(--mono)} .toc a:hover{color:var(--accent)}
+h2{font-size:1.35rem;margin:48px 0 14px} h2 .n{font-family:var(--mono);color:var(--accent);margin-right:8px;font-size:.9em}
+p{margin:0 0 14px;max-width:70ch}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:18px 0 28px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.stat .v{font-family:var(--mono);font-size:1.75rem;font-weight:600;color:var(--accent);line-height:1.1}
+.stat .l{font-size:12px;color:var(--dim);margin-top:6px;font-family:var(--mono)}
+.stat.warn .v{color:var(--amber)} .stat.bad .v{color:var(--red)}
+.fig{background:#0e120f;border:1px solid #26302a;border-radius:14px;padding:20px 18px 12px;margin:18px 0 10px;overflow:auto}
+.fig svg{display:block;width:100%;height:auto}
+.fig figcaption{font-family:var(--mono);font-size:12px;color:#8b938c;margin-top:12px;padding-top:10px;border-top:1px solid #26302a}
+.fig figcaption b{color:#e7ece8}
+.callout{border-left:3px solid var(--accent);background:var(--panel2);padding:14px 18px;margin:18px 0;border-radius:0 10px 10px 0}
+.callout.warn{border-left-color:var(--amber)} .callout.bad{border-left-color:var(--red)}
+table{width:100%;border-collapse:collapse;font-size:13.5px;margin:12px 0 20px}
+th{text-align:left;font-family:var(--mono);font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;padding:8px 10px;border-bottom:1px solid var(--line)}
+td{padding:10px;border-bottom:1px solid var(--line);vertical-align:top}
+.mono{font-family:var(--mono);font-size:12.5px} .dim{color:var(--dim)} .num{text-align:right}
+.pill{display:inline-block;font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--dim)}
+.barcell{width:120px} .mini{height:8px;background:var(--accent);border-radius:4px}
+.hbar{display:grid;grid-template-columns:minmax(110px,1fr) 3fr auto;gap:10px;align-items:center;margin:8px 0}
+.hbar-label{font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hbar-track{height:10px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.hbar-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--cyan));border-radius:6px}
+.hbar-fill.red{background:linear-gradient(90deg,var(--amber),var(--red))}
+.hbar-fill.amber{background:linear-gradient(90deg,#f5c451,#ff8c42)}
+.hbar-n{text-align:right;color:var(--ink);white-space:nowrap}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px} @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+.panel h3{margin:0 0 10px;font-size:14px;font-family:var(--mono);color:var(--dim);font-weight:500}
+ul.live{margin:0;padding-left:18px}
+.foot{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--dim)}
+.snip{max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+</style></head><body>
+<button class="theme-btn" id="themeBtn" type="button">◐</button>
+<div class="wrap">
+<p class="kicker">agents-cli · fleet session audit · 14 days · corrected</p>
+<h1>Not <span class="strike">282</span> — <span class="accent">1043</span> unique sessions</h1>
+<p class="sub">The first viz used the <b style="color:var(--ink)">local session index only</b> (287 on yosemite-s1).
+Fan-out across 10 fleet hosts + id-dedupe yields <b style="color:var(--ink)">1043</b> unique sessions in 14 days.
+Conflict evidence re-mined via direct transcript greps on every host.</p>
+<div class="chips">
+<span class="chip warn">was <b>282</b> local-only</span>
+<span class="chip">fleet unique <b>1043</b></span>
+<span class="chip">conflict transcripts <b>111</b></span>
+<span class="chip">open DIRTY <b>3/13</b></span>
+<span class="chip">hosts <b>10</b></span>
+<span class="chip">peak merges <b>103</b> Aug 2</span>
+</div>
+<nav class="toc">
+<a href="#correct">01 correction</a><a href="#funnel">02 funnel</a><a href="#fleet">03 fleet map</a>
+<a href="#signals">04 signals</a><a href="#files">05 hot files</a><a href="#race">06 race</a><a href="#limits">07 limits</a>
+</nav>
+<div class="stats">
+<div class="stat"><div class="v">1043</div><div class="l">unique sessions fleet-wide</div></div>
+<div class="stat warn"><div class="v">287</div><div class="l">local only (yosemite-s1)</div></div>
+<div class="stat bad"><div class="v">111</div><div class="l">transcripts with conflict signal</div></div>
+<div class="stat"><div class="v">10.6%</div><div class="l">hit-files / fleet sessions</div></div>
+</div>
+
+<h2 id="correct"><span class="n">01</span>What was wrong</h2>
+<div class="callout bad"><b>Denominator error.</b> <code>agents sessions --all --since 14d</code> without <code>--host</code> only reads the local machine.
+Multi-host: zion 394 · s0 292 · s1 287 · mac-mini 43 · m-workers remainder · unique = <b>1043</b>.</div>
+<div class="callout warn"><b>Search caveat.</b> On remotes, <code>agents sessions --host X "CONFLICT…"</code> returns nearly every session (unfiltered).
+Fleet conflict evidence uses <b>find + grep of transcript jsonl</b> under <code>~/.agents/.history</code>.</div>
+
+<h2 id="funnel"><span class="n">02</span>Corrected evidence funnel</h2>
+<figure class="fig">
+<svg viewBox="0 0 920 280" xmlns="http://www.w3.org/2000/svg">
+<text x="20" y="28" fill="#8b938c" font-family="ui-monospace,monospace" font-size="12">FLEET INVENTORY → TRANSCRIPT GREP</text>
+<rect x="40" y="50" width="840" height="48" rx="10" fill="#1a221c" stroke="#26302a"/>
+<rect x="40" y="50" width="840" height="48" rx="10" fill="#a3e635" opacity=".15"/>
+<text x="56" y="80" fill="#e7ece8" font-family="ui-monospace,monospace" font-size="14">Fleet unique sessions (10 hosts, id-deduped, 14d)</text>
+<text x="840" y="80" fill="#a3e635" font-family="ui-monospace,monospace" font-size="20" text-anchor="end" font-weight="600">1043</text>
+<rect x="100" y="112" width="720" height="44" rx="10" fill="#2a2210" stroke="#f5c451"/>
+<text x="116" y="140" fill="#e7ece8" font-family="ui-monospace,monospace" font-size="13">Previous wrong denominator (local only)</text>
+<text x="780" y="140" fill="#f5c451" font-family="ui-monospace,monospace" font-size="18" text-anchor="end" font-weight="600">282</text>
+<rect x="160" y="172" width="600" height="48" rx="10" fill="#2a1214" stroke="#ff6b6b"/>
+<text x="176" y="202" fill="#e7ece8" font-family="ui-monospace,monospace" font-size="13">Transcript files with strong conflict tool signals</text>
+<text x="720" y="202" fill="#ff6b6b" font-family="ui-monospace,monospace" font-size="20" text-anchor="end" font-weight="600">111</text>
+<rect x="220" y="236" width="480" height="32" rx="8" fill="#1a221c" stroke="#5ad6c0"/>
+<text x="236" y="257" fill="#e7ece8" font-family="ui-monospace,monospace" font-size="12">s1 45 · s0 32 · zion 27 · mac-mini 6 · m0 1</text>
+</svg>
+<figcaption><b>Correction.</b> Fleet is ~3.7× the local count. Conflict transcripts cluster on the busy boxes (s1/s0/zion), not the light m-workers.</figcaption>
+</figure>
+
+<h2 id="fleet"><span class="n">03</span>Where sessions and conflicts live</h2>
+<div class="grid2">
+<div class="panel"><h3>Sessions per host</h3><div class="hbar"><div class="hbar-label mono">zion</div><div class="hbar-track"><div class="hbar-fill" style="width:100%"></div></div><div class="hbar-n mono">394 <span class="dim">· 27 conf</span></div></div>
+<div class="hbar"><div class="hbar-label mono">yosemite-s0</div><div class="hbar-track"><div class="hbar-fill" style="width:74%"></div></div><div class="hbar-n mono">292 <span class="dim">· 32 conf</span></div></div>
+<div class="hbar"><div class="hbar-label mono">yosemite-s1</div><div class="hbar-track"><div class="hbar-fill" style="width:72%"></div></div><div class="hbar-n mono">287 <span class="dim">· 45 conf</span></div></div>
+<div class="hbar"><div class="hbar-label mono">yosemite-m0</div><div class="hbar-track"><div class="hbar-fill" style="width:13%"></div></div><div class="hbar-n mono">53 <span class="dim">· 1 conf</span></div></div>
+<div class="hbar"><div class="hbar-label mono">mac-mini</div><div class="hbar-track"><div class="hbar-fill" style="width:10%"></div></div><div class="hbar-n mono">43 <span class="dim">· 6 conf</span></div></div>
+<div class="hbar"><div class="hbar-label mono">yosemite-m3</div><div class="hbar-track"><div class="hbar-fill" style="width:3%"></div></div><div class="hbar-n mono">14 <span class="dim">· 0 conf</span></div></div>
+<div class="hbar"><div class="hbar-label mono">yosemite-m2</div><div class="hbar-track"><div class="hbar-fill" style="width:3%"></div></div><div class="hbar-n mono">13 <span class="dim">· 0 conf</span></div></div>
+<div class="hbar"><div class="hbar-label mono">yosemite-m4</div><div class="hbar-track"><div class="hbar-fill" style="width:3%"></div></div><div class="hbar-n mono">12 <span class="dim">· 0 conf</span></div></div>
+<div class="hbar"><div class="hbar-label mono">yosemite-m5</div><div class="hbar-track"><div class="hbar-fill" style="width:2%"></div></div><div class="hbar-n mono">11 <span class="dim">· 0 conf</span></div></div>
+<div class="hbar"><div class="hbar-label mono">yosemite-m6</div><div class="hbar-track"><div class="hbar-fill" style="width:2%"></div></div><div class="hbar-n mono">11 <span class="dim">· 0 conf</span></div></div>
+</div>
+<div class="panel"><h3>Conflict transcripts per host</h3><div class="hbar"><div class="hbar-label mono">yosemite-s1</div><div class="hbar-track"><div class="hbar-fill red" style="width:100%"></div></div><div class="hbar-n mono">45</div></div>
+<div class="hbar"><div class="hbar-label mono">yosemite-s0</div><div class="hbar-track"><div class="hbar-fill red" style="width:71%"></div></div><div class="hbar-n mono">32</div></div>
+<div class="hbar"><div class="hbar-label mono">zion</div><div class="hbar-track"><div class="hbar-fill red" style="width:60%"></div></div><div class="hbar-n mono">27</div></div>
+<div class="hbar"><div class="hbar-label mono">mac-mini</div><div class="hbar-track"><div class="hbar-fill red" style="width:13%"></div></div><div class="hbar-n mono">6</div></div>
+<div class="hbar"><div class="hbar-label mono">yosemite-m0</div><div class="hbar-track"><div class="hbar-fill red" style="width:2%"></div></div><div class="hbar-n mono">1</div></div>
+</div>
+</div>
+
+<h2 id="signals"><span class="n">04</span>Signal types (fleet greps)</h2>
+<table><thead><tr><th>Signal</th><th>Files</th><th></th></tr></thead><tbody><tr><td><b>Other strong signal</b><div class="dim">Matched, subtype not classified</div></td><td class="mono num">53</td><td class="barcell"><div class="mini" style="width:100%"></div></td></tr>
+<tr><td><b>Git content conflict</b><div class="dim">CONFLICT (content) / markers / auto merge failed</div></td><td class="mono num">46</td><td class="barcell"><div class="mini" style="width:86%"></div></td></tr>
+<tr><td><b>Hot-file collision</b><div class="dim">Merge conflict in &lt;path&gt;</div></td><td class="mono num">41</td><td class="barcell"><div class="mini" style="width:77%"></div></td></tr>
+<tr><td><b>PR CONFLICTING</b><div class="dim">mergeable=CONFLICTING</div></td><td class="mono num">11</td><td class="barcell"><div class="mini" style="width:20%"></div></td></tr>
+</tbody></table>
+<div class="callout"><b>Still real under load.</b> 111 transcript files across busy boxes carry hard conflict tool output — CHANGELOG races + sibling merges dominate.</div>
+
+<h2 id="files"><span class="n">05</span>Hot files</h2>
+<div class="grid2">
+<div><p class="dim mono" style="margin-bottom:8px">Merge conflict in …</p><div class="hbar"><div class="hbar-label mono">apps/cli/CHANGELOG.md</div><div class="hbar-track"><div class="hbar-fill amber" style="width:100%"></div></div><div class="hbar-n mono">5</div></div>
+<div class="hbar"><div class="hbar-label mono">apps/factory/CHANGELOG.md</div><div class="hbar-track"><div class="hbar-fill amber" style="width:80%"></div></div><div class="hbar-n mono">4</div></div>
+<div class="hbar"><div class="hbar-label mono">CHANGELOG.md</div><div class="hbar-track"><div class="hbar-fill amber" style="width:60%"></div></div><div class="hbar-n mono">3</div></div>
+<div class="hbar"><div class="hbar-label mono">agents/foreman/CHANGELOG.md</div><div class="hbar-track"><div class="hbar-fill amber" style="width:40%"></div></div><div class="hbar-n mono">2</div></div>
+<div class="hbar"><div class="hbar-label mono">apps/cli/src/lib/agents.ts</div><div class="hbar-track"><div class="hbar-fill amber" style="width:40%"></div></div><div class="hbar-n mono">2</div></div>
+<div class="hbar"><div class="hbar-label mono">agents.yaml</div><div class="hbar-track"><div class="hbar-fill amber" style="width:40%"></div></div><div class="hbar-n mono">2</div></div>
+<div class="hbar"><div class="hbar-label mono">apps/cli/src/lib/versions.ts</div><div class="hbar-track"><div class="hbar-fill amber" style="width:40%"></div></div><div class="hbar-n mono">2</div></div>
+<div class="hbar"><div class="hbar-label mono">apps/factory/src/vscode/extens</div><div class="hbar-track"><div class="hbar-fill amber" style="width:20%"></div></div><div class="hbar-n mono">1</div></div>
+</div>
+<div class="panel"><h3>Open CONFLICTING (3/13)</h3><ul class="live"><li><span class="mono">#1780</span> feat(factory): fork session onto picked device</li><li><span class="mono">#1782</span> feat(factory): host picker SWR cache</li><li><span class="mono">#1751</span> feat(menubar): terminal detect + new task</li></ul></div>
+</div>
+
+<h2 id="race"><span class="n">06</span>The race</h2>
+<figure class="fig">
+<svg viewBox="0 0 920 240" xmlns="http://www.w3.org/2000/svg">
+<text x="20" y="24" fill="#8b938c" font-family="ui-monospace,monospace" font-size="12">SIBLING MERGE RACE · #1780 after #1774</text>
+<line x1="100" y1="70" x2="860" y2="70" stroke="#26302a" stroke-width="2"/>
+<line x1="100" y1="120" x2="860" y2="120" stroke="#26302a" stroke-width="2"/>
+<line x1="100" y1="170" x2="860" y2="170" stroke="#26302a" stroke-width="2"/>
+<text x="24" y="74" fill="#8b938c" font-family="ui-monospace,monospace" font-size="11">Agent A</text>
+<text x="24" y="124" fill="#8b938c" font-family="ui-monospace,monospace" font-size="11">Agent B</text>
+<text x="24" y="174" fill="#8b938c" font-family="ui-monospace,monospace" font-size="11">main</text>
+<circle cx="180" cy="70" r="8" fill="#a3e635"/><text x="180" y="52" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11" text-anchor="middle">open</text>
+<circle cx="320" cy="70" r="8" fill="#5ad6c0"/><text x="320" y="52" fill="#5ad6c0" font-family="ui-monospace,monospace" font-size="11" text-anchor="middle">green</text>
+<circle cx="540" cy="70" r="10" fill="#ff6b6b"/><text x="540" y="48" fill="#ff6b6b" font-family="ui-monospace,monospace" font-size="11" text-anchor="middle">CONFLICTING</text>
+<circle cx="240" cy="120" r="8" fill="#a3e635"/><text x="240" y="102" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11" text-anchor="middle">sibling</text>
+<circle cx="460" cy="120" r="8" fill="#a3e635"/><text x="460" y="102" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11" text-anchor="middle">merge</text>
+<rect x="440" y="158" width="40" height="24" rx="4" fill="#a3e635"/>
+<path d="M460 128 L460 158" stroke="#a3e635" stroke-width="1.5" stroke-dasharray="4 3" fill="none"/>
+<path d="M480 170 C 510 170, 520 70, 530 70" stroke="#ff6b6b" stroke-width="1.5" fill="none"/>
+<text x="680" y="74" fill="#8b938c" font-family="ui-monospace,monospace" font-size="11">CI stops · agent often stops</text>
+</svg>
+<figcaption><b>Worktrees isolate checkouts, not main.</b> s0/s1/zion agents all land into the same GitHub trunk.</figcaption>
+</figure>
+
+<h2>Sample fleet hits</h2>
+<table><thead><tr><th>Host</th><th>Kinds</th><th>Snippet</th></tr></thead><tbody><tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">erging apps/cli/CHANGELOG.md\nCONFLICT (content): Merge conflict in apps/cli/CHANGELOG.md\nerror:  </td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">tory/src/vscode/extension.ts\nCONFLICT (content): Merge conflict in apps/factory/src/vscode/extens </td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">erging apps/cli/CHANGELOG.md\nCONFLICT (content): Merge conflict in apps/cli/CHANGELOG.md\nAuto-me </td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">hot_file_collision</span></td><td class="dim snip mono">.test.ts\nCONFLICT (add/add): Merge conflict in apps/factory/src/core/deviceAutoLaunch.test.ts\nAuto</td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">erging apps/cli/CHANGELOG.md\nCONFLICT (content): Merge conflict in apps/cli/CHANGELOG.md\nAuto-me </td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">apps/cli/src/lib/git.test.ts\nCONFLICT (content): Merge conflict in apps/cli/src/lib/git.test.ts\n </td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">g prix/api/src/rate-limit.ts\nCONFLICT (content): Merge conflict in prix/api/src/rate-limit.ts\nAu </td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">ing .github/workflows/ci.yml\nCONFLICT (content): Merge conflict in .github/workflows/ci.yml\nAuto </td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">pps/cli/docs/architecture.md\nCONFLICT (content): Merge conflict in apps/cli/docs/architecture.md\ </td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">erging apps/cli/CHANGELOG.md\nCONFLICT (content): Merge conflict in apps/cli/CHANGELOG.md\nerror:  </td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content</span></td><td class="dim snip mono">TY, \&quot;became conflicting\&quot;, \&quot;Automatic merge failed\&quot;, \&quot;CONFLICT (content)\&quot;, \&quot;fix conflicts\&quot;, \</td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content</span></td><td class="dim snip mono">\&quot;became conflicting\\\&quot;, \\\&quot;Automatic merge failed\\\&quot;, \\\&quot;CONFLICT (content)\\\&quot;, \\\&quot;fix confli</td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">GELOG.md\nCONFLICT (add/add): Merge conflict in agents/foreman/CHANGELOG.md\nAutomatic merge failed;</td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">GELOG.md\nCONFLICT (add/add): Merge conflict in agents/foreman/CHANGELOG.md\nAutomatic merge failed;</td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">ng apps/factory/CHANGELOG.md\nCONFLICT (content): Merge conflict in apps/factory/CHANGELOG.md\nAut </td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">ng apps/factory/CHANGELOG.md\nCONFLICT (content): Merge conflict in apps/factory/CHANGELOG.md\nAut </td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">g apps/cli/src/lib/agents.ts\nCONFLICT (content): Merge conflict in apps/cli/src/lib/agents.ts\nAu </td></tr>
+<tr><td class="mono">yosemite-s1</td><td><span class="pill">git_conflict_content, hot_file_collision</span></td><td class="dim snip mono">g apps/cli/src/lib/agents.ts\nCONFLICT (content): Merge conflict in apps/cli/src/lib/agents.ts\nAu </td></tr>
+</tbody></table>
+
+<h2 id="limits"><span class="n">07</span>Limits</h2>
+<div class="callout warn"><ul style="margin:0;padding-left:18px">
+<li><b>111 is transcript files</b>, not unique sessions — synced copies may appear on multiple hosts.</li>
+<li>mac-mini scan capped at 4000 recent jsonl.</li>
+<li>yosemite-m1 skipped; m2–m6 have almost no conflict hits (few sessions).</li>
+<li>No full GitHub timeline % of every PR that flipped DIRTY.</li>
+</ul></div>
+<div class="callout"><b>Bottom line.</b> You were right about 282. Fleet is ~<b>1043</b> sessions / 14d.
+Conflict signals on busy boxes: s1 45, s0 32, zion 27 — <b>111</b> transcripts total.
+CHANGELOG/docs races + sibling-merge still the main pattern.</div>
+<p class="foot">fleet audit · as of 2026-08-03 · hosts: yosemite-s1, zion, yosemite-s0, mac-mini, yosemite-m0, yosemite-m2, yosemite-m3, yosemite-m4, yosemite-m5, yosemite-m6 · transcript grep + per-host inventory</p>
+</div>
+<script>
+(function(){const root=document.documentElement,btn=document.getElementById('themeBtn');
+const prefer=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';
+const saved=localStorage.getItem('viz-theme')||prefer;
+if(saved==='light') root.setAttribute('data-theme','light');
+btn.addEventListener('click',()=>{const n=root.getAttribute('data-theme')==='light'?'dark':'light';
+if(n==='light') root.setAttribute('data-theme','light'); else root.removeAttribute('data-theme');
+localStorage.setItem('viz-theme',n==='light'?'light':'dark');});})();
+</script></body></html>

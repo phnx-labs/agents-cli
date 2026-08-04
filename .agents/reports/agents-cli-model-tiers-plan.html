@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Pick a model by cost tier, not by a name that keeps changing</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e8e8e8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e8e8e8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-separator{color:var(--muted);padding:0 5px}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:10px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px}.meta{display:grid;gap:8px;margin-top:20px}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:baseline;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-label{color:var(--muted)}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.meta-row-provenance .chip-value{color:var(--accent-alt)}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value,.meta-row-provenance .chip-value{color:var(--text)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header"><div class="header-label">agents-cli · model selection</div><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker">agents-cli<span class="kicker-separator" aria-hidden="true">&middot;</span>Orchestrating agents must choose a model per teammate across many harnesses, but model ids churn, vary per installed version, and are billed differently per harness — cost is the real axis, and there is no tier concept today.<span class="kicker-separator" aria-hidden="true">&middot;</span>plan</div>
+<h1>Pick a model by cost tier, not by a name that keeps changing</h1>
+<p class="summary">A stable cheap / default / best / ultra vocabulary across every important harness — Claude, Codex, Kimi, Grok, Cursor — resolved per version and ranked by price where it exists, catalog order where it doesn't.</p>
+<div class="meta" aria-label="Artifact metadata"><ul class="meta-row meta-row-facts"><li class="chip"><span class="chip-value">Four tiers — cheap / default / best / ultra — across every harness</span></li><li class="chip"><span class="chip-value">Ranking signal is per-harness — price where it exists, catalog order where it doesn't</span></li><li class="chip"><span class="chip-value">Subscription harnesses (Grok, Kimi, Cursor) often expose 1-2 models — tiers collapse, honestly</span></li><li class="chip"><span class="chip-value">Tiers resolve per (harness, installed version) and clamp when a tier is absent</span></li><li class="chip"><span class="chip-value">agents models becomes the single source — every harness shows its own tier map</span></li><li class="chip"><span class="chip-label">status:</span><span class="chip-value">draft</span></li></ul><ul class="meta-row meta-row-provenance"><li class="chip"><span class="chip-label">repo:</span><span class="chip-value"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span></li><li class="chip"><span class="chip-label">branch:</span><span class="chip-value">feat/model-cost-tiers</span></li><li class="chip"><span class="chip-label">human:</span><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="4"/><path d="M3.5 21c.8-4.2 4.2-6.5 8.5-6.5s7.7 2.3 8.5 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>Muqsit</span></li><li class="chip"><span class="chip-label">harness:</span><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>claude</span></li><li class="chip"><span class="chip-label">agent:</span><span class="chip-value">opus 4.8</span></li><li class="chip"><span class="chip-label">host:</span><span class="chip-value">yosemite-s1</span></li><li class="chip"><span class="chip-label">session:</span><span class="chip-value">ded5f77c</span></li><li class="chip"><span class="chip-value">2026-08-03</span></li></ul></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#proposed-changes"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p>When an agent runs a team (<code>agents teams add &lt;team&gt; &lt;teammate&gt; &lt;task&gt;</code>), it must decide
+which <strong>model</strong> each teammate runs on — for <strong>any</strong> harness it spawns, not just Claude.
+Today the only cost lever is <code>--model &lt;id&gt;</code> (<code>teams.ts:1501</code>), which wants a literal like
+<code>claude-opus-4-8</code> or <code>grok-4.5</code>. That is the wrong ergonomic for an autonomous caller:</p>
+<ul>
+<li><strong>Names churn</strong> and differ per harness — <code>opus-4-8</code>, <code>gpt-5.5</code>, <code>grok-4.5</code>, <code>kimi-code/k3</code>.
+A stale id silently forwards (<code>resolveModel()</code>, <code>models.ts:1030</code>, never blocks).</li>
+<li><strong>Support varies per version.</strong> Each installed build ships a different model set, so the
+answer depends on the exact version the teammate spawns on.</li>
+<li><strong>Cost is the real axis</strong>, but there is no tier concept — and the <em>billing</em> differs per
+harness: Claude/Codex/Gemini are per-token API; Grok/Kimi/Cursor are subscription/quota.</li>
+</ul>
+<p><strong>Goal:</strong> one stable, cost-first vocabulary — <code>--model cheap | default | best | ultra</code> —
+that works across <strong>Claude, Codex, Kimi, Grok, Cursor</strong> (and the rest), resolving per
+<code>(harness, installed version)</code> to a concrete model that harness+version actually ships.
+Names never drift; an absent tier clamps; concrete ids keep working unchanged.</p>
+<blockquote>
+<p><strong>Verified live on this box.</strong> Grok exposes exactly <strong>one</strong> model (<code>grok-4.5</code>); Kimi one
+or two (<code>kimi-code/k3</code>) — both subscription harnesses, so <code>$/token</code> isn't even the right
+axis for them. Claude has a clean 4-rung price ladder, but <code>agents models claude@2.1.219</code>
+extracts <strong>0 models</strong> (the structured regex fails on the newest native binary) while a raw
+id scan of that same binary finds <code>claude-fable-5</code>, <code>opus-5</code>, <code>sonnet-5</code>. So tiering must
+(a) not assume price exists, (b) not assume four rungs exist, (c) not depend on the fragile
+structured catalog.</p>
+</blockquote>
+<h2 id="proposed-changes">Proposed Changes</h2>
+<p><strong>One pipeline, per harness: extract ids → rank → map to tiers → resolve.</strong> Make
+<code>agents models</code> the single source of truth — harden its extraction, rank each harness's
+catalog, and expose the tier map — then have model resolution consume the same computation.</p>
+<h3>Ranking signal is per-harness (not "always price")</h3>
+<p>A harness's models are ranked cheapest → most capable by the <strong>best signal available</strong>, in
+this order:</p>
+<ol>
+<li><strong>Per-token price</strong> from <code>prices.json</code> (<code>getModelPricing</code>, prefix/suffix tolerant) —
+applies to Claude, Codex/OpenAI, Gemini. This is the principled signal and is needed for
+budgeting anyway.</li>
+<li><strong>Catalog order + size tokens</strong> when unpriced — the harness's own model list order, plus
+a name heuristic (<code>nano|mini|lite|flash</code> cheaper; <code>pro|max|opus|ultra|large</code> dearer).
+Applies to subscription harnesses (Grok, Kimi, Cursor) whose models carry no <code>$/token</code>.</li>
+<li>The ranked rungs are <strong>collapsed by family</strong> (one representative per rung, newest id) and
+mapped onto <code>cheap · default · best · ultra</code>. <strong>Fewer than four rungs → tiers collapse</strong>:
+a single-model harness resolves every tier to that one model. <code>agents models</code> prints the
+exact per-harness mapping, so an agent always sees what each tier means for that build.</li>
+</ol>
+<h3>Harness coverage (the five named + the rest)</h3>
+<table>
+<thead>
+<tr>
+<th>Harness</th>
+<th>Billing</th>
+<th>Ranking signal</th>
+<th>Models today</th>
+<th>Tiers resolve to</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Claude</strong></td>
+<td>per-token API</td>
+<td>price</td>
+<td>haiku · sonnet · opus · fable</td>
+<td>4 distinct rungs</td>
+</tr>
+<tr>
+<td><strong>Codex</strong></td>
+<td>per-token API</td>
+<td>price</td>
+<td>gpt-5.4-nano/mini · gpt-5.4 · gpt-5.5</td>
+<td>ranked, ~3-4 rungs</td>
+</tr>
+<tr>
+<td><strong>Kimi</strong></td>
+<td>subscription</td>
+<td>catalog order</td>
+<td>kimi-code/k3 (+ route)</td>
+<td>1-2 rungs → collapse</td>
+</tr>
+<tr>
+<td><strong>Grok</strong></td>
+<td>subscription</td>
+<td>catalog order</td>
+<td>grok-4.5</td>
+<td>1 rung → all tiers = grok-4.5</td>
+</tr>
+<tr>
+<td><strong>Cursor</strong></td>
+<td>subscription</td>
+<td>catalog order</td>
+<td>composer / auto variants</td>
+<td>ranked, collapse as available</td>
+</tr>
+<tr>
+<td><em>others</em> (opencode, antigravity, gemini)</td>
+<td>mixed</td>
+<td>price or order</td>
+<td>via same generic path</td>
+<td>resolve or fail-safe</td>
+</tr>
+</tbody></table>
+<p>Same code path for all — <code>MODEL_CAPABLE_AGENTS</code> (<code>commands/models.ts:25</code>), no per-harness
+<code>if/else</code> arms. A harness with no extractable catalog (droid, copilot, …) hits the fail-safe
+(flag dropped + warning) and still takes concrete ids.</p>
+<h3>Claude is one example of the price path</h3>
+<p>The Claude entries in <code>prices.json</code> already sort into the order you want, so no curated
+capability table is needed for it:</p>
+<table>
+<thead>
+<tr>
+<th>Tier</th>
+<th>Claude family</th>
+<th>Blended $/Mtok</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>cheap</code></td>
+<td>haiku</td>
+<td>~$6</td>
+</tr>
+<tr>
+<td><code>default</code></td>
+<td>sonnet</td>
+<td>~$18</td>
+</tr>
+<tr>
+<td><code>best</code></td>
+<td>opus</td>
+<td>~$30</td>
+</tr>
+<tr>
+<td><code>ultra</code></td>
+<td>fable</td>
+<td>~$60 (newer builds; else clamps to <code>best</code>)</td>
+</tr>
+</tbody></table>
+<h3>Build steps</h3>
+<ol>
+<li><strong>Harden extraction (all catalog kinds).</strong> Fix the Claude native-binary regression: add a
+direct id scan to <code>extractClaudeCatalog</code> (<code>models.ts:380</code>); broaden the keep-filter
+(<code>models.ts:428</code>) to <code>fable|mythos</code>. The <code>cli</code>-kind extractors (Grok/Kimi/Cursor/OpenCode)
+already spawn the harness's own <code>models</code> command — keep, and treat an empty catalog as the
+fail-safe, not a crash.</li>
+<li><strong>Attach pricing where it exists.</strong> Add <code>pricing?</code> to <code>ModelInfo</code>; populate in
+<code>getModelCatalog</code> via <code>getModelPricing()</code>. Unpriced ids (subscription harnesses) carry no
+price — surfaced as <code>—</code>, never faked.</li>
+<li><strong>New <code>lib/model-tiers.ts</code></strong> — <code>MODEL_TIERS</code>, <code>isTierToken</code>, <code>rankModels(agent, version)</code>
+(price → catalog-order fallback → family-collapse), <code>resolveTiers</code> (map rungs onto four,
+collapsing when &lt; 4), <code>resolveTier</code> with downward clamp (<code>ultra → best → default → cheap</code>).</li>
+<li><strong>Wire the choke point.</strong> In <code>resolveModel</code> (<code>models.ts:1030</code>) resolve tier tokens to a
+concrete id — covers <code>run</code> <strong>and</strong> <code>teams</code> (both funnel through <code>buildExecCommand</code>,
+<code>exec.ts:973</code>). Add <code>drop?</code> so an unresolvable tier omits the flag (harness default)
+rather than forwarding a bogus <code>"cheap"</code>.</li>
+<li><strong>Surface it.</strong> <code>agents models</code> prints a per-harness <code>tiers:</code> block (with $/Mtok where
+priced) and emits it in <code>--json</code>; <code>--model</code> help on <code>teams add</code> + <code>run</code> names the tiers.</li>
+</ol>
+<h2 id="public-interface">Public Interface</h2>
+<pre><code># same four words, every harness — the agent never spells a model id
+teams add T claude "fix bug"  --model cheap    # → newest haiku the version ships
+teams add T codex  "port it"  --model best     # → top-priced gpt the version ships
+teams add T grok   "triage"   --model cheap    # → grok-4.5 (only rung; tiers collapse)
+run kimi   "summarize"        --model default  # → kimi-code/k3
+run claude "audit repo"       --model ultra    # → fable; or clamp → opus + a note
+
+# discovery: the exact tier map for the version a teammate will spawn on
+agents models grok --json       # tiers{cheap,default,best,ultra} = grok-4.5, pricing: null
+agents models claude@2.1.219    # tiers block + per-model $/Mtok
+</code></pre>
+<ul>
+<li>Tier tokens accepted anywhere <code>--model</code> is: <code>agents run</code>, <code>agents teams add</code>, profiles.</li>
+<li>Concrete ids behave exactly as today — additive, non-breaking.</li>
+</ul>
+<h2 id="validation">Validation</h2>
+<ul>
+<li><strong><code>model-tiers.test.ts</code></strong> (real path, no mocking):<ul>
+<li>Price path — a priced multi-model catalog ranks into four tiers (<code>cheap</code>=cheapest).</li>
+<li>Collapse — a <strong>single-model</strong> catalog (grok-style) resolves every tier to that one id.</li>
+<li>Unpriced fallback — a subscription catalog ranks by order + size tokens, not price.</li>
+<li>Clamp — a Claude build with no Fable → <code>ultra</code> resolves to opus with <code>clampedFrom</code>.</li>
+<li><code>isTierToken</code>; family-collapse picks the newest id.</li>
+</ul>
+</li>
+<li><strong>Extraction</strong> — the id scan yields a non-empty Claude catalog on a native-binary version;
+gated on <code>isVersionInstalled</code> so CI without an install skips.</li>
+<li><strong>End-to-end</strong> — <code>agents models grok</code> shows all four tiers = <code>grok-4.5</code>;
+<code>agents models claude@2.1.219</code> lists models + tiers; <code>run --model cheap</code> resolves per
+harness; <code>teams add --model best</code> launches on the ranked model; <code>bun run test:remote</code> green.</li>
+</ul>
+<h2 id="risks">Risks</h2>
+<ul>
+<li><strong>Subscription harnesses have no $/token</strong> (Grok, Kimi, Cursor) — tiering ranks by catalog
+order + size tokens instead; with one model, tiers honestly collapse. Documented, not hidden.</li>
+<li><strong>Unpriced new families</strong> (e.g. a fresh <code>opus-5</code>) rank by family order until a <code>prices.json</code>
+entry lands — the same entry budgeting already needs.</li>
+<li><strong>Extractor fragility</strong> — the structured Claude extractor returns 0 models on 2.1.219; the
+id-scan floor both unblocks tiers and repairs that regression. <code>cli</code>-kind harnesses depend on
+their own binary being runnable — an empty catalog degrades to the fail-safe, never a crash.</li>
+</ul>
+<h2 id="tracking">Tracking</h2>
+<ul>
+<li>1 · Harden extraction (Claude id-scan fix + treat empty <code>cli</code> catalogs as fail-safe)</li>
+<li>2 · Attach pricing to the catalog where it exists (<code>—</code> for subscription models)</li>
+<li>3 · Build the per-harness ranker + tier module (<code>model-tiers.ts</code>) — price → order → collapse</li>
+<li>4 · Wire tier tokens into <code>resolveModel</code> + <code>drop</code> fail-safe (covers run + teams)</li>
+<li>5 · Per-harness tiers + pricing in <code>agents models</code> (human + <code>--json</code>)</li>
+<li>6 · Update <code>--model</code> help on <code>teams add</code> / <code>run</code>; add codex/gemini price gaps to <code>prices.json</code></li>
+<li>7 · Tests: price path, single-model collapse, unpriced fallback, clamp</li>
+<li>8 · Docs + CHANGELOG, verify across the five harnesses, open PR</li>
+</ul>
+</article>
+<footer class="document-footer">implementation plan · 2026-08-03 · yosemite-s1</footer>
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGVtcGxhdGU6IHBsYW4udjEKdGl0bGU6IFBpY2sgYSBtb2RlbCBieSBjb3N0IHRpZXIsIG5vdCBieSBhIG5hbWUgdGhhdCBrZWVwcyBjaGFuZ2luZwpzdW1tYXJ5OiBBIHN0YWJsZSBjaGVhcCAvIGRlZmF1bHQgLyBiZXN0IC8gdWx0cmEgdm9jYWJ1bGFyeSBhY3Jvc3MgZXZlcnkgaW1wb3J0YW50IGhhcm5lc3Mg4oCUIENsYXVkZSwgQ29kZXgsIEtpbWksIEdyb2ssIEN1cnNvciDigJQgcmVzb2x2ZWQgcGVyIHZlcnNpb24gYW5kIHJhbmtlZCBieSBwcmljZSB3aGVyZSBpdCBleGlzdHMsIGNhdGFsb2cgb3JkZXIgd2hlcmUgaXQgZG9lc24ndC4KaGVhZGVyOiBhZ2VudHMtY2xpIMK3IG1vZGVsIHNlbGVjdGlvbgpmb290ZXI6IGltcGxlbWVudGF0aW9uIHBsYW4gwrcgMjAyNi0wOC0wMyDCtyB5b3NlbWl0ZS1zMQpwcm9qZWN0OiBhZ2VudHMtY2xpCmNvbnRleHQ6IE9yY2hlc3RyYXRpbmcgYWdlbnRzIG11c3QgY2hvb3NlIGEgbW9kZWwgcGVyIHRlYW1tYXRlIGFjcm9zcyBtYW55IGhhcm5lc3NlcywgYnV0IG1vZGVsIGlkcyBjaHVybiwgdmFyeSBwZXIgaW5zdGFsbGVkIHZlcnNpb24sIGFuZCBhcmUgYmlsbGVkIGRpZmZlcmVudGx5IHBlciBoYXJuZXNzIOKAlCBjb3N0IGlzIHRoZSByZWFsIGF4aXMsIGFuZCB0aGVyZSBpcyBubyB0aWVyIGNvbmNlcHQgdG9kYXkuCnJlcG9zaXRvcnk6IHBobngtbGFicy9hZ2VudHMtY2xpCmJyYW5jaDogZmVhdC9tb2RlbC1jb3N0LXRpZXJzCnRyYWNraW5nOiAnJwpzdGF0dXM6IGRyYWZ0Cmhhcm5lc3M6IGNsYXVkZQphZ2VudDogb3B1cyA0LjgKaHVtYW46IE11cXNpdApob3N0OiB5b3NlbWl0ZS1zMQpzZXNzaW9uOiBkZWQ1Zjc3YwpkYXRlOiAnMjAyNi0wOC0wMycKZmFjdHM6CiAgLSBGb3VyIHRpZXJzIOKAlCBjaGVhcCAvIGRlZmF1bHQgLyBiZXN0IC8gdWx0cmEg4oCUIGFjcm9zcyBldmVyeSBoYXJuZXNzCiAgLSBSYW5raW5nIHNpZ25hbCBpcyBwZXItaGFybmVzcyDigJQgcHJpY2Ugd2hlcmUgaXQgZXhpc3RzLCBjYXRhbG9nIG9yZGVyIHdoZXJlIGl0IGRvZXNuJ3QKICAtIFN1YnNjcmlwdGlvbiBoYXJuZXNzZXMgKEdyb2ssIEtpbWksIEN1cnNvcikgb2Z0ZW4gZXhwb3NlIDEtMiBtb2RlbHMg4oCUIHRpZXJzIGNvbGxhcHNlLCBob25lc3RseQogIC0gVGllcnMgcmVzb2x2ZSBwZXIgKGhhcm5lc3MsIGluc3RhbGxlZCB2ZXJzaW9uKSBhbmQgY2xhbXAgd2hlbiBhIHRpZXIgaXMgYWJzZW50CiAgLSBhZ2VudHMgbW9kZWxzIGJlY29tZXMgdGhlIHNpbmdsZSBzb3VyY2Ug4oCUIGV2ZXJ5IGhhcm5lc3Mgc2hvd3MgaXRzIG93biB0aWVyIG1hcAphc3NldHM6IFtdCi0tLQoKIyMgUHVycG9zZQoKV2hlbiBhbiBhZ2VudCBydW5zIGEgdGVhbSAoYGFnZW50cyB0ZWFtcyBhZGQgPHRlYW0+IDx0ZWFtbWF0ZT4gPHRhc2s+YCksIGl0IG11c3QgZGVjaWRlCndoaWNoICoqbW9kZWwqKiBlYWNoIHRlYW1tYXRlIHJ1bnMgb24g4oCUIGZvciAqKmFueSoqIGhhcm5lc3MgaXQgc3Bhd25zLCBub3QganVzdCBDbGF1ZGUuClRvZGF5IHRoZSBvbmx5IGNvc3QgbGV2ZXIgaXMgYC0tbW9kZWwgPGlkPmAgKGB0ZWFtcy50czoxNTAxYCksIHdoaWNoIHdhbnRzIGEgbGl0ZXJhbCBsaWtlCmBjbGF1ZGUtb3B1cy00LThgIG9yIGBncm9rLTQuNWAuIFRoYXQgaXMgdGhlIHdyb25nIGVyZ29ub21pYyBmb3IgYW4gYXV0b25vbW91cyBjYWxsZXI6CgotICoqTmFtZXMgY2h1cm4qKiBhbmQgZGlmZmVyIHBlciBoYXJuZXNzIOKAlCBgb3B1cy00LThgLCBgZ3B0LTUuNWAsIGBncm9rLTQuNWAsIGBraW1pLWNvZGUvazNgLgogIEEgc3RhbGUgaWQgc2lsZW50bHkgZm9yd2FyZHMgKGByZXNvbHZlTW9kZWwoKWAsIGBtb2RlbHMudHM6MTAzMGAsIG5ldmVyIGJsb2NrcykuCi0gKipTdXBwb3J0IHZhcmllcyBwZXIgdmVyc2lvbi4qKiBFYWNoIGluc3RhbGxlZCBidWlsZCBzaGlwcyBhIGRpZmZlcmVudCBtb2RlbCBzZXQsIHNvIHRoZQogIGFuc3dlciBkZXBlbmRzIG9uIHRoZSBleGFjdCB2ZXJzaW9uIHRoZSB0ZWFtbWF0ZSBzcGF3bnMgb24uCi0gKipDb3N0IGlzIHRoZSByZWFsIGF4aXMqKiwgYnV0IHRoZXJlIGlzIG5vIHRpZXIgY29uY2VwdCDigJQgYW5kIHRoZSAqYmlsbGluZyogZGlmZmVycyBwZXIKICBoYXJuZXNzOiBDbGF1ZGUvQ29kZXgvR2VtaW5pIGFyZSBwZXItdG9rZW4gQVBJOyBHcm9rL0tpbWkvQ3Vyc29yIGFyZSBzdWJzY3JpcHRpb24vcXVvdGEuCgoqKkdvYWw6Kiogb25lIHN0YWJsZSwgY29zdC1maXJzdCB2b2NhYnVsYXJ5IOKAlCBgLS1tb2RlbCBjaGVhcCB8IGRlZmF1bHQgfCBiZXN0IHwgdWx0cmFgIOKAlAp0aGF0IHdvcmtzIGFjcm9zcyAqKkNsYXVkZSwgQ29kZXgsIEtpbWksIEdyb2ssIEN1cnNvcioqIChhbmQgdGhlIHJlc3QpLCByZXNvbHZpbmcgcGVyCmAoaGFybmVzcywgaW5zdGFsbGVkIHZlcnNpb24pYCB0byBhIGNvbmNyZXRlIG1vZGVsIHRoYXQgaGFybmVzcyt2ZXJzaW9uIGFjdHVhbGx5IHNoaXBzLgpOYW1lcyBuZXZlciBkcmlmdDsgYW4gYWJzZW50IHRpZXIgY2xhbXBzOyBjb25jcmV0ZSBpZHMga2VlcCB3b3JraW5nIHVuY2hhbmdlZC4KCj4gKipWZXJpZmllZCBsaXZlIG9uIHRoaXMgYm94LioqIEdyb2sgZXhwb3NlcyBleGFjdGx5ICoqb25lKiogbW9kZWwgKGBncm9rLTQuNWApOyBLaW1pIG9uZQo+IG9yIHR3byAoYGtpbWktY29kZS9rM2ApIOKAlCBib3RoIHN1YnNjcmlwdGlvbiBoYXJuZXNzZXMsIHNvIGAkL3Rva2VuYCBpc24ndCBldmVuIHRoZSByaWdodAo+IGF4aXMgZm9yIHRoZW0uIENsYXVkZSBoYXMgYSBjbGVhbiA0LXJ1bmcgcHJpY2UgbGFkZGVyLCBidXQgYGFnZW50cyBtb2RlbHMgY2xhdWRlQDIuMS4yMTlgCj4gZXh0cmFjdHMgKiowIG1vZGVscyoqICh0aGUgc3RydWN0dXJlZCByZWdleCBmYWlscyBvbiB0aGUgbmV3ZXN0IG5hdGl2ZSBiaW5hcnkpIHdoaWxlIGEgcmF3Cj4gaWQgc2NhbiBvZiB0aGF0IHNhbWUgYmluYXJ5IGZpbmRzIGBjbGF1ZGUtZmFibGUtNWAsIGBvcHVzLTVgLCBgc29ubmV0LTVgLiBTbyB0aWVyaW5nIG11c3QKPiAoYSkgbm90IGFzc3VtZSBwcmljZSBleGlzdHMsIChiKSBub3QgYXNzdW1lIGZvdXIgcnVuZ3MgZXhpc3QsIChjKSBub3QgZGVwZW5kIG9uIHRoZSBmcmFnaWxlCj4gc3RydWN0dXJlZCBjYXRhbG9nLgoKIyMgUHJvcG9zZWQgQ2hhbmdlcwoKKipPbmUgcGlwZWxpbmUsIHBlciBoYXJuZXNzOiBleHRyYWN0IGlkcyDihpIgcmFuayDihpIgbWFwIHRvIHRpZXJzIOKGkiByZXNvbHZlLioqIE1ha2UKYGFnZW50cyBtb2RlbHNgIHRoZSBzaW5nbGUgc291cmNlIG9mIHRydXRoIOKAlCBoYXJkZW4gaXRzIGV4dHJhY3Rpb24sIHJhbmsgZWFjaCBoYXJuZXNzJ3MKY2F0YWxvZywgYW5kIGV4cG9zZSB0aGUgdGllciBtYXAg4oCUIHRoZW4gaGF2ZSBtb2RlbCByZXNvbHV0aW9uIGNvbnN1bWUgdGhlIHNhbWUgY29tcHV0YXRpb24uCgojIyMgUmFua2luZyBzaWduYWwgaXMgcGVyLWhhcm5lc3MgKG5vdCAiYWx3YXlzIHByaWNlIikKCkEgaGFybmVzcydzIG1vZGVscyBhcmUgcmFua2VkIGNoZWFwZXN0IOKGkiBtb3N0IGNhcGFibGUgYnkgdGhlICoqYmVzdCBzaWduYWwgYXZhaWxhYmxlKiosIGluCnRoaXMgb3JkZXI6CgoxLiAqKlBlci10b2tlbiBwcmljZSoqIGZyb20gYHByaWNlcy5qc29uYCAoYGdldE1vZGVsUHJpY2luZ2AsIHByZWZpeC9zdWZmaXggdG9sZXJhbnQpIOKAlAogICBhcHBsaWVzIHRvIENsYXVkZSwgQ29kZXgvT3BlbkFJLCBHZW1pbmkuIFRoaXMgaXMgdGhlIHByaW5jaXBsZWQgc2lnbmFsIGFuZCBpcyBuZWVkZWQgZm9yCiAgIGJ1ZGdldGluZyBhbnl3YXkuCjIuICoqQ2F0YWxvZyBvcmRlciArIHNpemUgdG9rZW5zKiogd2hlbiB1bnByaWNlZCDigJQgdGhlIGhhcm5lc3MncyBvd24gbW9kZWwgbGlzdCBvcmRlciwgcGx1cwogICBhIG5hbWUgaGV1cmlzdGljIChgbmFub3xtaW5pfGxpdGV8Zmxhc2hgIGNoZWFwZXI7IGBwcm98bWF4fG9wdXN8dWx0cmF8bGFyZ2VgIGRlYXJlcikuCiAgIEFwcGxpZXMgdG8gc3Vic2NyaXB0aW9uIGhhcm5lc3NlcyAoR3JvaywgS2ltaSwgQ3Vyc29yKSB3aG9zZSBtb2RlbHMgY2Fycnkgbm8gYCQvdG9rZW5gLgozLiBUaGUgcmFua2VkIHJ1bmdzIGFyZSAqKmNvbGxhcHNlZCBieSBmYW1pbHkqKiAob25lIHJlcHJlc2VudGF0aXZlIHBlciBydW5nLCBuZXdlc3QgaWQpIGFuZAogICBtYXBwZWQgb250byBgY2hlYXAgwrcgZGVmYXVsdCDCtyBiZXN0IMK3IHVsdHJhYC4gKipGZXdlciB0aGFuIGZvdXIgcnVuZ3Mg4oaSIHRpZXJzIGNvbGxhcHNlKio6CiAgIGEgc2luZ2xlLW1vZGVsIGhhcm5lc3MgcmVzb2x2ZXMgZXZlcnkgdGllciB0byB0aGF0IG9uZSBtb2RlbC4gYGFnZW50cyBtb2RlbHNgIHByaW50cyB0aGUKICAgZXhhY3QgcGVyLWhhcm5lc3MgbWFwcGluZywgc28gYW4gYWdlbnQgYWx3YXlzIHNlZXMgd2hhdCBlYWNoIHRpZXIgbWVhbnMgZm9yIHRoYXQgYnVpbGQuCgojIyMgSGFybmVzcyBjb3ZlcmFnZSAodGhlIGZpdmUgbmFtZWQgKyB0aGUgcmVzdCkKCnwgSGFybmVzcyB8IEJpbGxpbmcgfCBSYW5raW5nIHNpZ25hbCB8IE1vZGVscyB0b2RheSB8IFRpZXJzIHJlc29sdmUgdG8gfAp8IC0tLSB8IC0tLSB8IC0tLSB8IC0tLSB8IC0tLSB8CnwgKipDbGF1ZGUqKiB8IHBlci10b2tlbiBBUEkgfCBwcmljZSB8IGhhaWt1IMK3IHNvbm5ldCDCtyBvcHVzIMK3IGZhYmxlIHwgNCBkaXN0aW5jdCBydW5ncyB8CnwgKipDb2RleCoqIHwgcGVyLXRva2VuIEFQSSB8IHByaWNlIHwgZ3B0LTUuNC1uYW5vL21pbmkgwrcgZ3B0LTUuNCDCtyBncHQtNS41IHwgcmFua2VkLCB+My00IHJ1bmdzIHwKfCAqKktpbWkqKiB8IHN1YnNjcmlwdGlvbiB8IGNhdGFsb2cgb3JkZXIgfCBraW1pLWNvZGUvazMgKCsgcm91dGUpIHwgMS0yIHJ1bmdzIOKGkiBjb2xsYXBzZSB8CnwgKipHcm9rKiogfCBzdWJzY3JpcHRpb24gfCBjYXRhbG9nIG9yZGVyIHwgZ3Jvay00LjUgfCAxIHJ1bmcg4oaSIGFsbCB0aWVycyA9IGdyb2stNC41IHwKfCAqKkN1cnNvcioqIHwgc3Vic2NyaXB0aW9uIHwgY2F0YWxvZyBvcmRlciB8IGNvbXBvc2VyIC8gYXV0byB2YXJpYW50cyB8IHJhbmtlZCwgY29sbGFwc2UgYXMgYXZhaWxhYmxlIHwKfCAqb3RoZXJzKiAob3BlbmNvZGUsIGFudGlncmF2aXR5LCBnZW1pbmkpIHwgbWl4ZWQgfCBwcmljZSBvciBvcmRlciB8IHZpYSBzYW1lIGdlbmVyaWMgcGF0aCB8IHJlc29sdmUgb3IgZmFpbC1zYWZlIHwKClNhbWUgY29kZSBwYXRoIGZvciBhbGwg4oCUIGBNT0RFTF9DQVBBQkxFX0FHRU5UU2AgKGBjb21tYW5kcy9tb2RlbHMudHM6MjVgKSwgbm8gcGVyLWhhcm5lc3MKYGlmL2Vsc2VgIGFybXMuIEEgaGFybmVzcyB3aXRoIG5vIGV4dHJhY3RhYmxlIGNhdGFsb2cgKGRyb2lkLCBjb3BpbG90LCDigKYpIGhpdHMgdGhlIGZhaWwtc2FmZQooZmxhZyBkcm9wcGVkICsgd2FybmluZykgYW5kIHN0aWxsIHRha2VzIGNvbmNyZXRlIGlkcy4KCiMjIyBDbGF1ZGUgaXMgb25lIGV4YW1wbGUgb2YgdGhlIHByaWNlIHBhdGgKClRoZSBDbGF1ZGUgZW50cmllcyBpbiBgcHJpY2VzLmpzb25gIGFscmVhZHkgc29ydCBpbnRvIHRoZSBvcmRlciB5b3Ugd2FudCwgc28gbm8gY3VyYXRlZApjYXBhYmlsaXR5IHRhYmxlIGlzIG5lZWRlZCBmb3IgaXQ6Cgp8IFRpZXIgfCBDbGF1ZGUgZmFtaWx5IHwgQmxlbmRlZCAkL010b2sgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgYGNoZWFwYCB8IGhhaWt1IHwgfiQ2IHwKfCBgZGVmYXVsdGAgfCBzb25uZXQgfCB+JDE4IHwKfCBgYmVzdGAgfCBvcHVzIHwgfiQzMCB8CnwgYHVsdHJhYCB8IGZhYmxlIHwgfiQ2MCAobmV3ZXIgYnVpbGRzOyBlbHNlIGNsYW1wcyB0byBgYmVzdGApIHwKCiMjIyBCdWlsZCBzdGVwcwoKMS4gKipIYXJkZW4gZXh0cmFjdGlvbiAoYWxsIGNhdGFsb2cga2luZHMpLioqIEZpeCB0aGUgQ2xhdWRlIG5hdGl2ZS1iaW5hcnkgcmVncmVzc2lvbjogYWRkIGEKICAgZGlyZWN0IGlkIHNjYW4gdG8gYGV4dHJhY3RDbGF1ZGVDYXRhbG9nYCAoYG1vZGVscy50czozODBgKTsgYnJvYWRlbiB0aGUga2VlcC1maWx0ZXIKICAgKGBtb2RlbHMudHM6NDI4YCkgdG8gYGZhYmxlfG15dGhvc2AuIFRoZSBgY2xpYC1raW5kIGV4dHJhY3RvcnMgKEdyb2svS2ltaS9DdXJzb3IvT3BlbkNvZGUpCiAgIGFscmVhZHkgc3Bhd24gdGhlIGhhcm5lc3MncyBvd24gYG1vZGVsc2AgY29tbWFuZCDigJQga2VlcCwgYW5kIHRyZWF0IGFuIGVtcHR5IGNhdGFsb2cgYXMgdGhlCiAgIGZhaWwtc2FmZSwgbm90IGEgY3Jhc2guCjIuICoqQXR0YWNoIHByaWNpbmcgd2hlcmUgaXQgZXhpc3RzLioqIEFkZCBgcHJpY2luZz9gIHRvIGBNb2RlbEluZm9gOyBwb3B1bGF0ZSBpbgogICBgZ2V0TW9kZWxDYXRhbG9nYCB2aWEgYGdldE1vZGVsUHJpY2luZygpYC4gVW5wcmljZWQgaWRzIChzdWJzY3JpcHRpb24gaGFybmVzc2VzKSBjYXJyeSBubwogICBwcmljZSDigJQgc3VyZmFjZWQgYXMgYOKAlGAsIG5ldmVyIGZha2VkLgozLiAqKk5ldyBgbGliL21vZGVsLXRpZXJzLnRzYCoqIOKAlCBgTU9ERUxfVElFUlNgLCBgaXNUaWVyVG9rZW5gLCBgcmFua01vZGVscyhhZ2VudCwgdmVyc2lvbilgCiAgIChwcmljZSDihpIgY2F0YWxvZy1vcmRlciBmYWxsYmFjayDihpIgZmFtaWx5LWNvbGxhcHNlKSwgYHJlc29sdmVUaWVyc2AgKG1hcCBydW5ncyBvbnRvIGZvdXIsCiAgIGNvbGxhcHNpbmcgd2hlbiA8IDQpLCBgcmVzb2x2ZVRpZXJgIHdpdGggZG93bndhcmQgY2xhbXAgKGB1bHRyYSDihpIgYmVzdCDihpIgZGVmYXVsdCDihpIgY2hlYXBgKS4KNC4gKipXaXJlIHRoZSBjaG9rZSBwb2ludC4qKiBJbiBgcmVzb2x2ZU1vZGVsYCAoYG1vZGVscy50czoxMDMwYCkgcmVzb2x2ZSB0aWVyIHRva2VucyB0byBhCiAgIGNvbmNyZXRlIGlkIOKAlCBjb3ZlcnMgYHJ1bmAgKiphbmQqKiBgdGVhbXNgIChib3RoIGZ1bm5lbCB0aHJvdWdoIGBidWlsZEV4ZWNDb21tYW5kYCwKICAgYGV4ZWMudHM6OTczYCkuIEFkZCBgZHJvcD9gIHNvIGFuIHVucmVzb2x2YWJsZSB0aWVyIG9taXRzIHRoZSBmbGFnIChoYXJuZXNzIGRlZmF1bHQpCiAgIHJhdGhlciB0aGFuIGZvcndhcmRpbmcgYSBib2d1cyBgImNoZWFwImAuCjUuICoqU3VyZmFjZSBpdC4qKiBgYWdlbnRzIG1vZGVsc2AgcHJpbnRzIGEgcGVyLWhhcm5lc3MgYHRpZXJzOmAgYmxvY2sgKHdpdGggJC9NdG9rIHdoZXJlCiAgIHByaWNlZCkgYW5kIGVtaXRzIGl0IGluIGAtLWpzb25gOyBgLS1tb2RlbGAgaGVscCBvbiBgdGVhbXMgYWRkYCArIGBydW5gIG5hbWVzIHRoZSB0aWVycy4KCiMjIFB1YmxpYyBJbnRlcmZhY2UKCmBgYGJhc2gKIyBzYW1lIGZvdXIgd29yZHMsIGV2ZXJ5IGhhcm5lc3Mg4oCUIHRoZSBhZ2VudCBuZXZlciBzcGVsbHMgYSBtb2RlbCBpZAp0ZWFtcyBhZGQgVCBjbGF1ZGUgImZpeCBidWciICAtLW1vZGVsIGNoZWFwICAgICMg4oaSIG5ld2VzdCBoYWlrdSB0aGUgdmVyc2lvbiBzaGlwcwp0ZWFtcyBhZGQgVCBjb2RleCAgInBvcnQgaXQiICAtLW1vZGVsIGJlc3QgICAgICMg4oaSIHRvcC1wcmljZWQgZ3B0IHRoZSB2ZXJzaW9uIHNoaXBzCnRlYW1zIGFkZCBUIGdyb2sgICAidHJpYWdlIiAgIC0tbW9kZWwgY2hlYXAgICAgIyDihpIgZ3Jvay00LjUgKG9ubHkgcnVuZzsgdGllcnMgY29sbGFwc2UpCnJ1biBraW1pICAgInN1bW1hcml6ZSIgICAgICAgIC0tbW9kZWwgZGVmYXVsdCAgIyDihpIga2ltaS1jb2RlL2szCnJ1biBjbGF1ZGUgImF1ZGl0IHJlcG8iICAgICAgIC0tbW9kZWwgdWx0cmEgICAgIyDihpIgZmFibGU7IG9yIGNsYW1wIOKGkiBvcHVzICsgYSBub3RlCgojIGRpc2NvdmVyeTogdGhlIGV4YWN0IHRpZXIgbWFwIGZvciB0aGUgdmVyc2lvbiBhIHRlYW1tYXRlIHdpbGwgc3Bhd24gb24KYWdlbnRzIG1vZGVscyBncm9rIC0tanNvbiAgICAgICAjIHRpZXJze2NoZWFwLGRlZmF1bHQsYmVzdCx1bHRyYX0gPSBncm9rLTQuNSwgcHJpY2luZzogbnVsbAphZ2VudHMgbW9kZWxzIGNsYXVkZUAyLjEuMjE5ICAgICMgdGllcnMgYmxvY2sgKyBwZXItbW9kZWwgJC9NdG9rCmBgYAoKLSBUaWVyIHRva2VucyBhY2NlcHRlZCBhbnl3aGVyZSBgLS1tb2RlbGAgaXM6IGBhZ2VudHMgcnVuYCwgYGFnZW50cyB0ZWFtcyBhZGRgLCBwcm9maWxlcy4KLSBDb25jcmV0ZSBpZHMgYmVoYXZlIGV4YWN0bHkgYXMgdG9kYXkg4oCUIGFkZGl0aXZlLCBub24tYnJlYWtpbmcuCgojIyBWYWxpZGF0aW9uCgotICoqYG1vZGVsLXRpZXJzLnRlc3QudHNgKiogKHJlYWwgcGF0aCwgbm8gbW9ja2luZyk6CiAgLSBQcmljZSBwYXRoIOKAlCBhIHByaWNlZCBtdWx0aS1tb2RlbCBjYXRhbG9nIHJhbmtzIGludG8gZm91ciB0aWVycyAoYGNoZWFwYD1jaGVhcGVzdCkuCiAgLSBDb2xsYXBzZSDigJQgYSAqKnNpbmdsZS1tb2RlbCoqIGNhdGFsb2cgKGdyb2stc3R5bGUpIHJlc29sdmVzIGV2ZXJ5IHRpZXIgdG8gdGhhdCBvbmUgaWQuCiAgLSBVbnByaWNlZCBmYWxsYmFjayDigJQgYSBzdWJzY3JpcHRpb24gY2F0YWxvZyByYW5rcyBieSBvcmRlciArIHNpemUgdG9rZW5zLCBub3QgcHJpY2UuCiAgLSBDbGFtcCDigJQgYSBDbGF1ZGUgYnVpbGQgd2l0aCBubyBGYWJsZSDihpIgYHVsdHJhYCByZXNvbHZlcyB0byBvcHVzIHdpdGggYGNsYW1wZWRGcm9tYC4KICAtIGBpc1RpZXJUb2tlbmA7IGZhbWlseS1jb2xsYXBzZSBwaWNrcyB0aGUgbmV3ZXN0IGlkLgotICoqRXh0cmFjdGlvbioqIOKAlCB0aGUgaWQgc2NhbiB5aWVsZHMgYSBub24tZW1wdHkgQ2xhdWRlIGNhdGFsb2cgb24gYSBuYXRpdmUtYmluYXJ5IHZlcnNpb247CiAgZ2F0ZWQgb24gYGlzVmVyc2lvbkluc3RhbGxlZGAgc28gQ0kgd2l0aG91dCBhbiBpbnN0YWxsIHNraXBzLgotICoqRW5kLXRvLWVuZCoqIOKAlCBgYWdlbnRzIG1vZGVscyBncm9rYCBzaG93cyBhbGwgZm91ciB0aWVycyA9IGBncm9rLTQuNWA7CiAgYGFnZW50cyBtb2RlbHMgY2xhdWRlQDIuMS4yMTlgIGxpc3RzIG1vZGVscyArIHRpZXJzOyBgcnVuIC0tbW9kZWwgY2hlYXBgIHJlc29sdmVzIHBlcgogIGhhcm5lc3M7IGB0ZWFtcyBhZGQgLS1tb2RlbCBiZXN0YCBsYXVuY2hlcyBvbiB0aGUgcmFua2VkIG1vZGVsOyBgYnVuIHJ1biB0ZXN0OnJlbW90ZWAgZ3JlZW4uCgojIyBSaXNrcwoKLSAqKlN1YnNjcmlwdGlvbiBoYXJuZXNzZXMgaGF2ZSBubyAkL3Rva2VuKiogKEdyb2ssIEtpbWksIEN1cnNvcikg4oCUIHRpZXJpbmcgcmFua3MgYnkgY2F0YWxvZwogIG9yZGVyICsgc2l6ZSB0b2tlbnMgaW5zdGVhZDsgd2l0aCBvbmUgbW9kZWwsIHRpZXJzIGhvbmVzdGx5IGNvbGxhcHNlLiBEb2N1bWVudGVkLCBub3QgaGlkZGVuLgotICoqVW5wcmljZWQgbmV3IGZhbWlsaWVzKiogKGUuZy4gYSBmcmVzaCBgb3B1cy01YCkgcmFuayBieSBmYW1pbHkgb3JkZXIgdW50aWwgYSBgcHJpY2VzLmpzb25gCiAgZW50cnkgbGFuZHMg4oCUIHRoZSBzYW1lIGVudHJ5IGJ1ZGdldGluZyBhbHJlYWR5IG5lZWRzLgotICoqRXh0cmFjdG9yIGZyYWdpbGl0eSoqIOKAlCB0aGUgc3RydWN0dXJlZCBDbGF1ZGUgZXh0cmFjdG9yIHJldHVybnMgMCBtb2RlbHMgb24gMi4xLjIxOTsgdGhlCiAgaWQtc2NhbiBmbG9vciBib3RoIHVuYmxvY2tzIHRpZXJzIGFuZCByZXBhaXJzIHRoYXQgcmVncmVzc2lvbi4gYGNsaWAta2luZCBoYXJuZXNzZXMgZGVwZW5kIG9uCiAgdGhlaXIgb3duIGJpbmFyeSBiZWluZyBydW5uYWJsZSDigJQgYW4gZW1wdHkgY2F0YWxvZyBkZWdyYWRlcyB0byB0aGUgZmFpbC1zYWZlLCBuZXZlciBhIGNyYXNoLgoKIyMgVHJhY2tpbmcKCi0gMSDCtyBIYXJkZW4gZXh0cmFjdGlvbiAoQ2xhdWRlIGlkLXNjYW4gZml4ICsgdHJlYXQgZW1wdHkgYGNsaWAgY2F0YWxvZ3MgYXMgZmFpbC1zYWZlKQotIDIgwrcgQXR0YWNoIHByaWNpbmcgdG8gdGhlIGNhdGFsb2cgd2hlcmUgaXQgZXhpc3RzIChg4oCUYCBmb3Igc3Vic2NyaXB0aW9uIG1vZGVscykKLSAzIMK3IEJ1aWxkIHRoZSBwZXItaGFybmVzcyByYW5rZXIgKyB0aWVyIG1vZHVsZSAoYG1vZGVsLXRpZXJzLnRzYCkg4oCUIHByaWNlIOKGkiBvcmRlciDihpIgY29sbGFwc2UKLSA0IMK3IFdpcmUgdGllciB0b2tlbnMgaW50byBgcmVzb2x2ZU1vZGVsYCArIGBkcm9wYCBmYWlsLXNhZmUgKGNvdmVycyBydW4gKyB0ZWFtcykKLSA1IMK3IFBlci1oYXJuZXNzIHRpZXJzICsgcHJpY2luZyBpbiBgYWdlbnRzIG1vZGVsc2AgKGh1bWFuICsgYC0tanNvbmApCi0gNiDCtyBVcGRhdGUgYC0tbW9kZWxgIGhlbHAgb24gYHRlYW1zIGFkZGAgLyBgcnVuYDsgYWRkIGNvZGV4L2dlbWluaSBwcmljZSBnYXBzIHRvIGBwcmljZXMuanNvbmAKLSA3IMK3IFRlc3RzOiBwcmljZSBwYXRoLCBzaW5nbGUtbW9kZWwgY29sbGFwc2UsIHVucHJpY2VkIGZhbGxiYWNrLCBjbGFtcAotIDggwrcgRG9jcyArIENIQU5HRUxPRywgdmVyaWZ5IGFjcm9zcyB0aGUgZml2ZSBoYXJuZXNzZXMsIG9wZW4gUFIK"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
