@@ -413,27 +413,43 @@ function extractClaudeCatalog(text: string): { models: ModelInfo[]; aliases: Rec
     };
   }
 
-  const allIds = new Set<string>([
+  const aliasReverse: Record<string, string> = {};
+  for (const [a, id] of Object.entries(aliases)) aliasReverse[id] = a;
+  const defaults = new Set(Object.values(aliases));
+
+  const build = (ids: Iterable<string>): ModelInfo[] =>
+    Array.from(new Set(ids))
+      .filter((id) => /^claude-(opus|sonnet|haiku|fable|mythos)-/.test(id))
+      .sort()
+      .map((id) => ({
+        id,
+        displayName: displayNames[id],
+        alias: aliasReverse[id],
+        isDefault: defaults.has(id),
+        perCloud: perCloud[id],
+      }));
+
+  // The structured maps (alias/perCloud/const) are the curated, accurate
+  // supported set. Prefer them.
+  let models = build([
     ...Object.values(aliases),
     ...Object.keys(displayNames),
     ...Object.keys(perCloud),
   ]);
 
-  const aliasReverse: Record<string, string> = {};
-  for (const [a, id] of Object.entries(aliases)) aliasReverse[id] = a;
-
-  const defaults = new Set(Object.values(aliases));
-
-  const models: ModelInfo[] = Array.from(allIds)
-    .filter((id) => /^claude-(opus|sonnet|haiku)-/.test(id))
-    .sort()
-    .map((id) => ({
-      id,
-      displayName: displayNames[id],
-      alias: aliasReverse[id],
-      isDefault: defaults.has(id),
-      perCloud: perCloud[id],
-    }));
+  // Fallback id scan. The structured maps fail on the newest native-binary
+  // format (verified: claude@2.1.219 leaks only a stray id, so the curated set
+  // is effectively empty). Only when the curated catalog is that thin do we scan
+  // the raw strings for canonical ids -- so an older version keeps its precise
+  // catalog while a newer one still gets a real catalog (incl. fable/mythos and
+  // the opus-5/sonnet-5 line) rather than an empty or single-model one.
+  if (models.length < 2) {
+    const scanned = new Set<string>();
+    const idRe = /claude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:[.-]\d+)*(?:-(?:fast|v\d+))?/g;
+    let sm: RegExpExecArray | null;
+    while ((sm = idRe.exec(text)) !== null) scanned.add(sm[0]);
+    if (scanned.size >= 2) models = build(scanned);
+  }
 
   return { models, aliases };
 }

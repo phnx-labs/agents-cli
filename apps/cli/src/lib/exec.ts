@@ -14,6 +14,7 @@ import { AGENTS } from './agents.js';
 import { parseTimeout } from './routines.js';
 import { getBinaryPath, getVersionHomePath, isVersionInstalled, resolveVersion } from './versions.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
+import { isTierToken, resolveTier } from './model-tiers.js';
 import { emitStart, maybeRotate, createTimer, redactPrompt, redactArgs } from './events.js';
 import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { resolveActor, actorEnv } from './actor.js';
@@ -974,7 +975,19 @@ export function buildExecCommand(options: ExecOptions): string[] {
     ?? (options.agent === 'codex' ? readCodexConfiguredModel() : undefined);
   if (effectiveModel && template.modelFlag) {
     const effectiveVersion = options.version || resolveVersion(options.agent, options.cwd || process.cwd());
-    if (effectiveVersion) {
+    if (effectiveVersion && isTierToken(effectiveModel)) {
+      // Cost tier (cheap|default|best|ultra) -> a concrete model this harness+
+      // version actually ships. An unresolvable tier drops the flag (harness
+      // default) rather than forwarding the literal token, which the CLI would
+      // reject. Covers `agents run` and `agents teams` (both funnel here).
+      const t = resolveTier(options.agent, effectiveVersion, effectiveModel);
+      if (t.model) {
+        cmd.push(template.modelFlag, t.model);
+        if (t.note) process.stderr.write(`[agents] --model ${effectiveModel} -> ${t.model} (${t.note})\n`);
+      } else {
+        process.stderr.write(`[agents] no model for tier "${effectiveModel}" on ${options.agent}@${effectiveVersion}; using harness default\n`);
+      }
+    } else if (effectiveVersion) {
       const resolved = resolveModel(options.agent, effectiveVersion, effectiveModel);
       if (resolved.warning) {
         process.stderr.write(`[agents] ${resolved.warning}\n`);
