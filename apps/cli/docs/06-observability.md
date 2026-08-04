@@ -138,7 +138,7 @@ agents trends recipes             # list recipe ids
 
 | Store | Path | Holds |
 |---|---|---|
-| Session index | `sessions.db` | Harness/model mix, token ratios, `tool_call_count` (Claude scan rollup) |
+| Session index | `sessions.db` | Harness/model mix, token ratios, per-session tool-call counts (`tool_scan_ledger.call_count`, written by the tool indexer) |
 | Usage warehouse | `~/.agents/.history/analytics/usage.db` | Value-free `kind`/`name`/`event` rows (secret, agent, browser, …) |
 
 Secrets usage previously lived only in `~/.agents/secrets/secrets.db`; the warehouse
