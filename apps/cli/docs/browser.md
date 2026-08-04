@@ -50,9 +50,12 @@ an agent run; every subsequent command in that process reads it without
 
 ### 1. Create a profile
 
-A profile names a browser + CDP endpoint pair. The profile config lives in
-`~/.agents/.history/versions/<agent>/<version>/home/` but is addressed by
-name everywhere.
+A profile names a browser + CDP endpoint pair. The profile definition lives in
+the central `~/.agents/agents.yaml` (the `browser:` map) and syncs across the
+fleet with `agents repo push/pull`, so the same name resolves on every machine.
+Runtime state — the Chrome `chrome-data` cookie jar — lives separately under
+`~/.agents/.cache/browser/<profile>@<endpoint>/`, which is gitignored and
+per-machine, so each machine logs in once.
 
 ```bash
 # Minimal: let agents pick a free port and auto-detect the binary
