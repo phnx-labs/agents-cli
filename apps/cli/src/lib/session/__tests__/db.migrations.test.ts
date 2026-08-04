@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -10,6 +11,25 @@ process.env.HOME = TEST_HOME;
 
 const { getDB, closeDB, upsertSession, getSessionById } = await import('../db.js');
 type SessionMeta = import('../types.js').SessionMeta;
+
+function openDBInChild(): Promise<void> {
+  const dbModule = new URL('../db.ts', import.meta.url).href;
+  const script = `import { getDB, closeDB } from ${JSON.stringify(dbModule)}; getDB(); closeDB();`;
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', script], {
+      env: { ...process.env, HOME: TEST_HOME, USERPROFILE: TEST_HOME },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`child database open exited ${code}: ${stderr}`));
+    });
+  });
+}
 
 afterAll(() => {
   closeDB();
@@ -90,7 +110,7 @@ describe('spawned_team column migration (v21)', () => {
 });
 
 describe('prerelease schema collision repair (v30)', () => {
-  it('repairs a v29 index missing tool_call_count and invalidates its scan ledgers', () => {
+  it('atomically repairs concurrent v29 opens and runs only once', async () => {
     const db = getDB();
     db.prepare(
       `INSERT OR REPLACE INTO scan_ledger(file_path, file_mtime_ms, file_size, scanned_at) VALUES (?, ?, ?, ?)`,
@@ -99,16 +119,33 @@ describe('prerelease schema collision repair (v30)', () => {
       `INSERT OR REPLACE INTO dir_ledger(dir_path, dir_mtime_ms, entry_count, scanned_at) VALUES (?, ?, ?, ?)`,
     ).run('/tmp/prerelease', 1, 1, 1);
     db.exec(`ALTER TABLE sessions DROP COLUMN tool_call_count`);
+    db.exec(`ALTER TABLE sessions DROP COLUMN used_browser`);
+    db.exec(`ALTER TABLE sessions DROP COLUMN used_computer`);
     db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '29')`).run();
     closeDB();
+
+    await Promise.all([openDBInChild(), openDBInChild()]);
 
     const reopened = getDB();
     const columns = (reopened.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(
       (column) => column.name,
     );
     expect(columns).toContain('tool_call_count');
+    expect(columns).toContain('used_browser');
+    expect(columns).toContain('used_computer');
     expect(reopened.prepare(`SELECT count(*) AS n FROM scan_ledger`).get()).toEqual({ n: 0 });
     expect(reopened.prepare(`SELECT count(*) AS n FROM dir_ledger`).get()).toEqual({ n: 0 });
+
+    reopened.prepare(
+      `INSERT OR REPLACE INTO scan_ledger(file_path, file_mtime_ms, file_size, scanned_at) VALUES (?, ?, ?, ?)`,
+    ).run('/tmp/warm-after-repair/session.jsonl', 2, 2, 2);
+    reopened.prepare(
+      `INSERT OR REPLACE INTO dir_ledger(dir_path, dir_mtime_ms, entry_count, scanned_at) VALUES (?, ?, ?, ?)`,
+    ).run('/tmp/warm-after-repair', 2, 2, 2);
+    closeDB();
+    const secondOpen = getDB();
+    expect(secondOpen.prepare(`SELECT count(*) AS n FROM scan_ledger`).get()).toEqual({ n: 1 });
+    expect(secondOpen.prepare(`SELECT count(*) AS n FROM dir_ledger`).get()).toEqual({ n: 1 });
 
     upsertSession(
       {

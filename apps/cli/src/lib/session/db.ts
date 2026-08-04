@@ -554,12 +554,11 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
       .prepare(`SELECT id, agent, file_path FROM sessions WHERE machine IS NULL OR machine = ''`)
       .all() as Array<{ id: string; agent: string; file_path: string }>;
     const upd = db.prepare(`UPDATE sessions SET machine = ? WHERE id = ?`);
-    const txn = db.transaction((items: typeof rows) => {
-      for (const r of items) {
-        upd.run(machineForSessionFile(r.file_path, r.agent), r.id);
-      }
-    });
-    txn(rows);
+    // migrateSchema runs inside getDB's schema transaction, so these writes
+    // deliberately share that transaction instead of opening a nested one.
+    for (const row of rows) {
+      upd.run(machineForSessionFile(row.file_path, row.agent), row.id);
+    }
   }
 
   if (fromVersion < 19) {
@@ -798,14 +797,24 @@ export function getDB(): Database.Database {
   db.pragma('busy_timeout = 30000');
   db.exec(SCHEMA);
 
-  const current = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string } | undefined;
-  const currentVersion = current ? parseInt(current.value, 10) : 0;
+  const readSchemaVersion = (): number | undefined => {
+    const row = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string } | undefined;
+    return row ? parseInt(row.value, 10) : undefined;
+  };
+  const currentVersion = readSchemaVersion();
 
-  if (!current) {
+  if (currentVersion === undefined) {
     db.prepare(`INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION));
   } else if (currentVersion < SCHEMA_VERSION) {
-    migrateSchema(db, currentVersion);
-    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION));
+    // Re-read after BEGIN IMMEDIATE acquires the writer lock. A second process
+    // may have completed the migration while this connection was waiting.
+    const migrate = db.transaction(() => {
+      const lockedVersion = readSchemaVersion();
+      if (lockedVersion === undefined || lockedVersion >= SCHEMA_VERSION) return;
+      migrateSchema(db, lockedVersion);
+      db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION));
+    });
+    migrate();
   }
 
   // Index last_activity only after the column is guaranteed to exist — fresh DBs
