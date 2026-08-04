@@ -28,6 +28,22 @@
  * The retry policy is a pure state machine (`reconnectStep`) so it is unit-tested
  * without touching SSH; the loop (`reconnectInteractiveSession`) only adds the real
  * preflight + `sshStream` re-attach and the wait.
+ *
+ * **Why the remote command carries {@link NO_SHELL_FALLBACK_ENV}.** `agents
+ * sessions focus <id> --local --attach-only`'s own fallback (`refuseFallback` in
+ * commands/go.ts), when it can't find a live attach rail for a REMOTE match,
+ * opens an interactive login shell on that other machine as a consolation prize —
+ * the right call for a human running `sessions go` by hand, but wrong here: this
+ * loop can't supervise that shell, and when it eventually closes, its exit code
+ * rides back up through `sshStream` indistinguishable from
+ * {@link SSH_CONN_FAILURE}. Because `connected: true` below is honest only about
+ * the fast preflight probe (see the next doc comment), that stray 255 refills the
+ * retry budget every time — the loop reconnects, hairpins into a fresh unrelated
+ * shell, that closes, and repeats forever, printing "attempt 1/N" on every cycle
+ * and leaving the terminal full of aborted-TTY escape-code garbage. Setting this
+ * env var on the remote invocation makes `refuseFallback` skip the shell and
+ * refuse with {@link NO_ATTACH_RAIL_EXIT_CODE} instead, so `reconnectStep` sees a
+ * real non-255 terminal state and stops.
  */
 import { sshExec, sshStream, shellQuote } from '../ssh-exec.js';
 import { sshTargetFor, type Host } from './types.js';
@@ -35,6 +51,18 @@ import { sshTargetFor, type Host } from './types.js';
 /** ssh's connection-layer failure code — the signal that the link dropped rather
  *  than the remote command exiting on its own. Mirrors ssh-exec.ts `sshStream`. */
 export const SSH_CONN_FAILURE = 255;
+
+/** Set on the remote `agents sessions focus --local --attach-only` invocation so
+ *  its `refuseFallback` (commands/go.ts) refuses cleanly instead of opening an
+ *  unsupervised login shell on a third machine — see the file header. Read only
+ *  by `refuseFallback`; an older peer that predates this guard ignores the
+ *  env var harmlessly and keeps the old (buggy, but at-least-functional-for-a-
+ *  human) shell fallback. */
+export const NO_SHELL_FALLBACK_ENV = 'AGENTS_FOCUS_NO_SHELL_FALLBACK';
+
+/** Distinct from {@link SSH_CONN_FAILURE} so a "no live pane to reattach" refusal
+ *  reads as a real terminal state to surface, never as a network blip to retry. */
+export const NO_ATTACH_RAIL_EXIT_CODE = 3;
 
 /** Consecutive failed-to-connect reattaches before giving up. Backoff is capped at
  *  {@link MAX_BACKOFF_MS}. A reattach that actually reconnected (then dropped again)
@@ -102,6 +130,21 @@ export function exhaustedNotice(sessionId: string, host: string): string {
 }
 
 /**
+ * The remote command a reattach runs — the peer's own reconnect verb, with
+ * {@link NO_SHELL_FALLBACK_ENV} set so its `refuseFallback` refuses cleanly
+ * instead of hairpinning into an unsupervised shell (see the file header). Pure
+ * string-building, split out from {@link reattachRemoteSession} so it is
+ * unit-tested without SSH — mirrors `remoteAgentsJsonCommand` in
+ * lib/remote-agents-json.ts.
+ */
+export function reattachRemoteCommand(sessionId: string): string {
+  const inner = ['agents', 'sessions', 'focus', sessionId, '--local', '--attach-only']
+    .map(shellQuote)
+    .join(' ');
+  return `${NO_SHELL_FALLBACK_ENV}=1 ${inner}`;
+}
+
+/**
  * Re-attach the live remote tmux pane for `sessionId` by driving the peer's own
  * `agents sessions focus`. A fast, un-multiplexed preflight probe (`ssh … true`)
  * first establishes whether the host is actually reachable this attempt — that
@@ -117,10 +160,7 @@ export function reattachRemoteSession(host: Host, sessionId: string): ReconnectO
   // completed, so a hung/failed connect is never mistaken for a live reconnection.
   const probe = sshExec(target, 'true', { multiplex: false });
   if (probe.code !== 0) return { code: SSH_CONN_FAILURE, connected: false };
-  const remoteCmd = ['agents', 'sessions', 'focus', sessionId, '--local', '--attach-only']
-    .map(shellQuote)
-    .join(' ');
-  return { code: sshStream(target, remoteCmd, { tty: true }), connected: true };
+  return { code: sshStream(target, reattachRemoteCommand(sessionId), { tty: true }), connected: true };
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));

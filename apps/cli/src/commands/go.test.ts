@@ -1,6 +1,13 @@
-import { describe, it, expect } from 'vitest';
-import { describeWhere, type Where } from './go.js';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
+import { describeWhere, refuseFallback, type Where } from './go.js';
 import type { ActiveSession } from '../lib/session/active.js';
+import { NO_SHELL_FALLBACK_ENV, NO_ATTACH_RAIL_EXIT_CODE } from '../lib/hosts/reconnect.js';
+
+const sshStreamMock = vi.hoisted(() => vi.fn(() => 0));
+vi.mock('../lib/ssh-exec.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/ssh-exec.js')>();
+  return { ...actual, sshStream: sshStreamMock };
+});
 
 /** Minimal ActiveSession builder — only the fields describeWhere reads. */
 function s(over: Partial<ActiveSession>): ActiveSession {
@@ -42,5 +49,39 @@ describe('describeWhere — which jump path a live session takes', () => {
   it('remote tmux beats the host check (a remote ghostty-hosted session still ssh-attaches)', () => {
     const w = describeWhere(s({ machine: 'box', host: 'ghostty', provenance: { mux: { kind: 'tmux', pane: '%9' } } as never }), self);
     expect(w.action).toContain('ssh');
+  });
+});
+
+describe('refuseFallback — remote, no attach rail', () => {
+  const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+    throw new Error(`exit:${code}`);
+  }) as never);
+
+  beforeEach(() => {
+    sshStreamMock.mockClear();
+    delete process.env[NO_SHELL_FALLBACK_ENV];
+  });
+  afterEach(() => {
+    delete process.env[NO_SHELL_FALLBACK_ENV];
+  });
+
+  it('by default (a human running `sessions go`/`focus --attach-only`) opens a login shell on the remote', async () => {
+    await expect(refuseFallback(s({}), 'yosemite-s1')).rejects.toThrow(/^exit:0$/);
+    expect(sshStreamMock).toHaveBeenCalledTimes(1);
+    expect(sshStreamMock.mock.calls[0][0]).toBe('yosemite-s1');
+  });
+
+  it('the regression this fixes: the automated reconnect loop sets NO_SHELL_FALLBACK_ENV, so no shell opens — reproduces the hairpin-into-a-third-host bug from the "attempt 1/6 forever" incident', async () => {
+    process.env[NO_SHELL_FALLBACK_ENV] = '1';
+    await expect(refuseFallback(s({}), 'yosemite-s1')).rejects.toThrow(`exit:${NO_ATTACH_RAIL_EXIT_CODE}`);
+    // No shell was opened — the whole point: `reconnectStep` never sees this
+    // refusal's exit code as SSH_CONN_FAILURE (255), so it treats a genuinely
+    // unreachable session as a terminal state instead of retrying forever.
+    expect(sshStreamMock).not.toHaveBeenCalled();
+    expect(NO_ATTACH_RAIL_EXIT_CODE).not.toBe(255);
+  });
+
+  afterAll(() => {
+    exitSpy.mockRestore();
   });
 });

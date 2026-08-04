@@ -14,9 +14,12 @@ import {
   reconnectNotice,
   exhaustedNotice,
   reconnectInteractiveSession,
+  reattachRemoteCommand,
   initialReconnectState,
   SSH_CONN_FAILURE,
   MAX_ATTEMPTS,
+  NO_SHELL_FALLBACK_ENV,
+  NO_ATTACH_RAIL_EXIT_CODE,
   type ReconnectOutcome,
 } from './reconnect.js';
 
@@ -68,6 +71,29 @@ describe('backoffMs — capped exponential', () => {
     expect(backoffMs(3)).toBe(16_000);
     expect(backoffMs(4)).toBe(30_000); // 32s clamped
     expect(backoffMs(10)).toBe(30_000);
+  });
+});
+
+describe('reattachRemoteCommand — the remote invocation carries the no-shell-fallback guard', () => {
+  test('sets NO_SHELL_FALLBACK_ENV before the real `sessions focus` command', () => {
+    const cmd = reattachRemoteCommand(SID);
+    expect(cmd).toBe(`${NO_SHELL_FALLBACK_ENV}=1 agents sessions focus ${SID} --local --attach-only`);
+  });
+
+  test('the guard exit code is never 255, so reconnectStep always treats a refusal as terminal', () => {
+    // Regression for the "attempt 1/6 forever" bug: refuseFallback's remote branch
+    // used to hairpin into an unsupervised login shell on a THIRD host when the
+    // automated loop couldn't find a live attach rail. That shell's own eventual
+    // close returned 255 — indistinguishable from a genuine network drop — so
+    // `connected: true` (set as soon as the preflight probe succeeds) refilled the
+    // retry budget every cycle and the loop never terminated. With the guard, the
+    // remote refusal returns NO_ATTACH_RAIL_EXIT_CODE instead, and reconnectStep's
+    // own contract (any non-255 code stops) takes over from there.
+    expect(NO_ATTACH_RAIL_EXIT_CODE).not.toBe(SSH_CONN_FAILURE);
+    expect(reconnectStep(initialReconnectState(), { code: NO_ATTACH_RAIL_EXIT_CODE, connected: true })).toEqual({
+      action: 'stop',
+      code: NO_ATTACH_RAIL_EXIT_CODE,
+    });
   });
 });
 
