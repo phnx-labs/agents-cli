@@ -118,8 +118,14 @@ enum ChildProcessSelfTest {
         let mismatched = recorded.filter { ChildProcess.executablePath($0.pid) != $0.path }
         check(mismatched.count == 1,
               "a live pid whose executable no longer matches is not reapable")
-        check(ChildProcess.executablePath(me)?.hasSuffix("MenubarHelper") == true,
-              "executablePath resolves a live pid (got \(ChildProcess.executablePath(me) ?? "nil"))")
+        // Production builds may name the binary MenubarHelper-universal (lipo
+        // of arm64+x86_64). Match the last path component's prefix, not a hard
+        // suffix of "MenubarHelper" alone — that failed every home-base publish
+        // of 1.22.2 with got …/MenubarHelper-universal.
+        let exe = ChildProcess.executablePath(me) ?? ""
+        let base = (exe as NSString).lastPathComponent
+        check(base.hasPrefix("MenubarHelper"),
+              "executablePath resolves a live pid (got \(exe.isEmpty ? "nil" : exe))")
         try? FileManager.default.removeItem(atPath: file)
     }
 
