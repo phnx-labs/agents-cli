@@ -669,6 +669,20 @@ export interface DiscoveredPlugin {
    * (e.g. workflow-scoped) — those default to the user marketplace on sync.
    */
   marketplace?: string;
+  /**
+   * Absolute path to the DotAgents repo root containing this plugin — the
+   * grandparent of `root` (`<repo>/plugins/<name>` → `<repo>`), true for every
+   * marketplace kind (user/system/extra/project). DotAgents repos are
+   * git-tracked (plugins.ts), so this pairs with {@link snapshotSha}.
+   */
+  repoRoot: string;
+  /**
+   * Short HEAD sha of `repoRoot`'s git checkout, lazily resolved (a getter,
+   * not computed at discovery time) and memoized per repoRoot
+   * (`git.ts` `resolveSnapshotSha`) — see `ResolvedResource.snapshotSha` for
+   * the identical rationale. `undefined` when `repoRoot` isn't a git repo.
+   */
+  readonly snapshotSha: string | undefined;
 }
 
 /**

@@ -11,7 +11,7 @@ import { truncate } from '../format.js';
 import { sanitizeForTerminal } from '../redact.js';
 import * as path from 'path';
 import Database from '../sqlite.js';
-import { isSyntheticUserMessage } from './prompt.js';
+import { isSyntheticUserMessage, extractSlashCommandName, extractSlashCommandFromToolInput } from './prompt.js';
 import type { SessionAgentId, SessionEvent } from './types.js';
 import { structuredToolResult } from './tool-calls.js';
 
@@ -376,6 +376,13 @@ export function parseClaudeContent(content: string): SessionEvent[] {
             command: toolName === 'Bash' ? toolInput.command : undefined,
           };
           if (isLocal) event._local = true;
+          // SlashCommand: the MODEL invoking a slash command programmatically
+          // (distinct from the <command-name> wrapper below, which is the
+          // USER typing one) — see prompt.ts's extractSlashCommandFromToolInput.
+          if (toolName === 'SlashCommand') {
+            const slashCommand = extractSlashCommandFromToolInput(toolInput);
+            if (slashCommand) event.slashCommand = slashCommand;
+          }
           events.push(event);
         }
       }
@@ -400,13 +407,20 @@ export function parseClaudeContent(content: string): SessionEvent[] {
         // Simple user text
         const text = contentBlocks.trim();
         if (text) {
-          events.push({
+          const event: any = {
             type: 'message',
             agent: 'claude',
             timestamp,
             role: 'user',
             content: text,
-          });
+          };
+          // The USER typing a slash command — Claude injects a <command-name>
+          // wrapper as the message content (see prompt.ts's
+          // extractSlashCommandName; distinct from the SlashCommand tool-use
+          // above, which is the model invoking one programmatically).
+          const slashCommand = extractSlashCommandName(text);
+          if (slashCommand) event.slashCommand = slashCommand;
+          events.push(event);
         }
       } else if (Array.isArray(contentBlocks)) {
         for (const block of contentBlocks) {

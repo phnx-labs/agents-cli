@@ -453,6 +453,43 @@ export function readRepoState(repoPath: string): RepoStateSnapshot | null {
   return { branch, head, dirty };
 }
 
+/** Memoized per repoRoot — a resolveResource()/listResources()/plugin-discovery
+ *  call that touches many resources from the SAME DotAgents repo must not shell
+ *  out to git once per resource. */
+const _snapshotShaCache = new Map<string, string | undefined>();
+
+/**
+ * The short HEAD sha of the git repo at `repoRoot` (`git -C <repoRoot>
+ * rev-parse --short HEAD`), for provenance — "which commit of this DotAgents
+ * repo was this resource/plugin resolved from". `undefined` when `repoRoot`
+ * isn't a git repo (or has no commits yet), never a throw.
+ *
+ * Deliberately synchronous + resolved once and cached: callers (resources.ts,
+ * plugins.ts) attach this as a lazy getter on the resolved object, so a
+ * consumer that never inspects provenance never pays for the git shell-out —
+ * see {@link ResolvedResource.snapshotSha} / {@link DiscoveredPlugin.snapshotSha}.
+ */
+export function resolveSnapshotSha(repoRoot: string): string | undefined {
+  const cached = _snapshotShaCache.get(repoRoot);
+  if (cached !== undefined || _snapshotShaCache.has(repoRoot)) return cached;
+  let sha: string | undefined;
+  try {
+    const raw = execFileSync('git', ['-C', repoRoot, 'rev-parse', '--short', 'HEAD'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim();
+    sha = raw || undefined;
+  } catch {
+    sha = undefined;
+  }
+  _snapshotShaCache.set(repoRoot, sha);
+  return sha;
+}
+
+/** Test seam: clear the memoized snapshot-sha cache between test cases. */
+export function _resetSnapshotShaCacheForTest(): void {
+  _snapshotShaCache.clear();
+}
+
 /**
  * Get the current GitHub username using gh CLI.
  * Returns null if gh is not installed or user is not authenticated.

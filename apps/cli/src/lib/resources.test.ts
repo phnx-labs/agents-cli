@@ -177,4 +177,56 @@ describe('resource resolution', () => {
     expect(parsed.listed).toEqual(['AGENTS']);
     expect(parsed.resolved).toMatchObject({ name: 'AGENTS', source: 'user' });
   });
+
+  it('#12: stamps repoRoot + a real snapshotSha when the DotAgents dir is a git repo', () => {
+    const home = makeHome();
+    const project = makeProject();
+
+    const userAgentsDir = path.join(home, '.agents');
+    fs.mkdirSync(path.join(userAgentsDir, 'skills'), { recursive: true });
+    fs.writeFileSync(path.join(userAgentsDir, 'skills', 'deploy.md'), 'user deploy');
+    spawnSync('git', ['init', '-q', userAgentsDir]);
+    spawnSync('git', ['-C', userAgentsDir, 'config', 'user.email', 'test@example.com']);
+    spawnSync('git', ['-C', userAgentsDir, 'config', 'user.name', 'Test']);
+    spawnSync('git', ['-C', userAgentsDir, 'commit', '--allow-empty', '-q', '-m', 'init']);
+    const expectedSha = spawnSync('git', ['-C', userAgentsDir, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf-8' })
+      .stdout.trim();
+
+    const result = runProbe(home, project, `
+      const { resolveResource, listResources } = await import('./src/lib/resources.ts');
+      console.log(JSON.stringify({
+        resolved: resolveResource('skills', 'deploy', ${JSON.stringify(project)}),
+        listed: listResources('skills', ${JSON.stringify(project)}),
+      }));
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.resolved).toMatchObject({ name: 'deploy', source: 'user', repoRoot: userAgentsDir, snapshotSha: expectedSha });
+    expect(parsed.listed[0]).toMatchObject({ repoRoot: userAgentsDir, snapshotSha: expectedSha });
+  });
+
+  it('#12: repoRoot is stamped even when the DotAgents dir is NOT a git repo — snapshotSha is simply absent', () => {
+    const home = makeHome();
+    const project = makeProject();
+
+    const userAgentsDir = path.join(home, '.agents');
+    fs.mkdirSync(path.join(userAgentsDir, 'skills'), { recursive: true });
+    fs.writeFileSync(path.join(userAgentsDir, 'skills', 'deploy.md'), 'user deploy');
+
+    const result = runProbe(home, project, `
+      const { resolveResource } = await import('./src/lib/resources.ts');
+      const resolved = resolveResource('skills', 'deploy', ${JSON.stringify(project)});
+      console.log(JSON.stringify({ resolved }));
+    `);
+
+    expect(result.status, result.stderr).toBe(0);
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.resolved).toMatchObject({ name: 'deploy', repoRoot: userAgentsDir });
+    // JSON.stringify drops an undefined-valued key entirely — asserting its
+    // absence from the SERIALIZED object, not just reading it back as
+    // undefined, is what proves the getter really returned undefined (not a
+    // literal "undefined" string or a thrown-then-caught value).
+    expect(parsed.resolved.snapshotSha).toBeUndefined();
+  });
 });

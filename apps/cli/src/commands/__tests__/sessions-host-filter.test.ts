@@ -76,8 +76,17 @@ describe('hasNoBrowserDisqualifyingFlags (bare interactive --host routing)', () 
   });
 
   it('keeps the raw stream when a render/filter flag is set', () => {
-    for (const flags of [{ flat: true }, { tree: true }, { markdown: true }, { until: '2d' }, { project: 'x' }, { sort: 'cost' }, { artifacts: true }]) {
+    for (const flags of [{ flat: true }, { tree: true }, { markdown: true }, { until: '2d' }, { project: 'x' }, { sort: 'cost' }, { artifacts: true }, { skill: 'design' }, { plugin: 'rush' }]) {
       expect(hasNoBrowserDisqualifyingFlags({ host: ['yosemite-s0'], ...flags } as any, undefined)).toBe(false);
     }
+  });
+
+  it('#12: --skill/--plugin must not silently fall through to the unfiltered browser', () => {
+    // The bug this pins: a bare `agents sessions --skill foo` on a TTY would
+    // otherwise open the interactive browser (a fuzzy-search TUI over the
+    // whole discovered pool) with the filter dropped, instead of showing the
+    // SQL-filtered listing --skill/--plugin actually produce.
+    expect(hasNoBrowserDisqualifyingFlags({ skill: 'design' } as any, undefined)).toBe(false);
+    expect(hasNoBrowserDisqualifyingFlags({ plugin: 'rush' } as any, undefined)).toBe(false);
   });
 });

@@ -26,8 +26,10 @@ import {
   pushOrigin,
   resolveGitHubUsername,
   resolveGitHubUsernameSync,
+  resolveSnapshotSha,
   sameGitRemote,
   syncRepoGit,
+  _resetSnapshotShaCacheForTest,
 } from './git.js';
 
 describe('assertValidBranchName', () => {
@@ -818,5 +820,53 @@ describe('commitsBehindUpstream', () => {
 
   it('returns null for a non-git directory', () => {
     expect(commitsBehindUpstream(root)).toBeNull();
+  });
+});
+
+describe('resolveSnapshotSha (#12 — resource/plugin provenance)', () => {
+  let repoDir: string;
+
+  beforeEach(async () => {
+    repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-git-snapshotsha-'));
+    _resetSnapshotShaCacheForTest();
+    const g = simpleGit(repoDir);
+    await g.init();
+    await g.addConfig('user.email', 'test@example.com');
+    await g.addConfig('user.name', 'Test');
+    await g.addConfig('commit.gpgsign', 'false');
+    await g.raw(['commit', '--allow-empty', '-m', 'init']);
+  });
+
+  afterEach(() => {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+    _resetSnapshotShaCacheForTest();
+  });
+
+  it('returns the real short HEAD sha for a git repo', () => {
+    const expected = execFileSync('git', ['-C', repoDir, 'rev-parse', '--short', 'HEAD']).toString().trim();
+    expect(resolveSnapshotSha(repoDir)).toBe(expected);
+  });
+
+  it('returns undefined (never throws) for a non-git directory', () => {
+    const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-not-a-repo-'));
+    try {
+      expect(resolveSnapshotSha(plainDir)).toBeUndefined();
+    } finally {
+      fs.rmSync(plainDir, { recursive: true, force: true });
+    }
+  });
+
+  it('memoizes per repoRoot — a second commit after the first call is NOT reflected until the cache is cleared', async () => {
+    const first = resolveSnapshotSha(repoDir);
+    expect(first).toBeTruthy();
+    await simpleGit(repoDir).raw(['commit', '--allow-empty', '-m', 'second']);
+    // Still cached — this is the whole point: a caller resolving many resources
+    // from the same repoRoot pays for exactly one git shell-out, not one per resource.
+    expect(resolveSnapshotSha(repoDir)).toBe(first);
+
+    _resetSnapshotShaCacheForTest();
+    const expected = execFileSync('git', ['-C', repoDir, 'rev-parse', '--short', 'HEAD']).toString().trim();
+    expect(resolveSnapshotSha(repoDir)).toBe(expected);
+    expect(resolveSnapshotSha(repoDir)).not.toBe(first);
   });
 });

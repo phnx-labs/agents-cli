@@ -348,7 +348,7 @@ SSH access (§7); rendering sessions that no harness produced.
   `lib/session/db.ts` — `journal_mode = WAL` ~`:442`, `busy_timeout = 30000`
   ~`:450`; binding selected in `lib/sqlite.ts:23-24`).
 - **SES-29 (MUST).** Schema migrations MUST run on open, land a several-versions-old
-  DB on the current `SCHEMA_VERSION` (**26** at time of writing,
+  DB on the current `SCHEMA_VERSION` (**29** at time of writing,
   `lib/session/db.ts:28` — treat the constant as the source of truth, not this number) in
   one call, MUST NOT drop existing rows, and MUST bump the stamp only after the
   migration succeeds so a mid-migration crash re-enters cleanly
@@ -390,7 +390,7 @@ SSH access (§7); rendering sessions that no harness produced.
   program/status/exit columns and FTS5 MUST prefilter candidates
   before the exact assignment
   (`lib/session/tool-index.ts:30-36,386-578,682-755`).
-- **SES-34 (MUST).** Schema v27's session-id-keyed `tool_scan_ledger` MUST be independent of the
+- **SES-34 (MUST).** Schema v29's session-id-keyed `tool_scan_ledger` MUST be independent of the
   normal session ledgers. Migration MUST clear only the derived tool ledger and
   MUST NOT clear `scan_ledger` or `dir_ledger`. Historical parsing MUST run only
   through explicit `agents sessions backfill tools`, in internal batches bounded

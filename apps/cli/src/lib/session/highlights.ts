@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { SessionEvent } from './types.js';
+import type { SessionAgentId, SessionEvent } from './types.js';
 import { isNoisePath, type FileChange } from './digest.js';
 
 // ── Skills ────────────────────────────────────────────────────────────────────
@@ -25,20 +25,75 @@ export interface SkillUse {
 }
 
 /**
- * Skills invoked during the session, from `Skill` tool calls. Claude and Kimi
- * both name the tool `Skill` and carry the skill id in `args.skill` (plugin
- * skills surface here too — a plugin-provided skill is invoked through the
- * same tool). Sorted by count desc, then name.
+ * The tool name a harness uses to invoke a skill, keyed by `SessionAgentId` —
+ * a registry, not a single hardcoded string, so a harness whose transcript
+ * names the tool differently is one table row away from support instead of a
+ * near-identical `if` arm (see CLAUDE.md's registry-over-if-chain convention).
+ *
+ * Verified entries only: Claude and Kimi both empirically name the tool
+ * `Skill` (a plugin-provided skill rides the same tool). No other harness has
+ * a confirmed skill-invocation tool name in this codebase's fixtures — an
+ * absent entry means "we don't know yet", not "this harness has no skills";
+ * extractSkills yields `[]` for it rather than guessing a name and silently
+ * mismatching (or worse, matching a coincidental tool with the same name).
+ */
+const SKILL_TOOL_NAME_BY_AGENT: Partial<Record<SessionAgentId, string>> = {
+  claude: 'Skill',
+  kimi: 'Skill',
+};
+
+/**
+ * True for a tool_use event that is that harness's skill-invocation call (see
+ * {@link SKILL_TOOL_NAME_BY_AGENT}). Exported so an INCREMENTAL parser
+ * (discover.ts's ClaudeParseState/foldDerivedToolState) can select matching
+ * events into a small held array as it streams, then run {@link extractSkills}
+ * over just that subset at finalize — without re-parsing the whole transcript.
+ */
+export function isSkillInvocation(e: SessionEvent): boolean {
+  if (e.type !== 'tool_use' || e._local) return false;
+  const skillTool = SKILL_TOOL_NAME_BY_AGENT[e.agent];
+  return !!skillTool && e.tool === skillTool;
+}
+
+/**
+ * Skills invoked during the session, from that harness's skill-invocation
+ * tool calls (see {@link SKILL_TOOL_NAME_BY_AGENT}). Carries the skill id in
+ * `args.skill` (or `args.name`). Sorted by count desc, then name.
  */
 export function extractSkills(events: SessionEvent[]): SkillUse[] {
   const counts = new Map<string, number>();
   for (const e of events) {
-    if (e.type !== 'tool_use' || e._local) continue;
-    if (e.tool !== 'Skill') continue;
+    if (!isSkillInvocation(e)) continue;
     const name = e.args?.skill ?? e.args?.name;
     if (typeof name !== 'string' || !name.trim()) continue;
     const key = name.trim();
     counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+// ── Slash commands ────────────────────────────────────────────────────────────
+
+export interface SlashCommandUse {
+  /** WITH the leading slash, e.g. `/recap`, `/code:commit` — matches SessionEvent.slashCommand's shape. */
+  name: string;
+  count: number;
+}
+
+/**
+ * Slash commands invoked during the session — either the user typing one
+ * (Claude's `<command-name>` wrapper) or the model invoking one via the
+ * `SlashCommand` tool (`SessionEvent.slashCommand`, populated by
+ * `parseClaudeContent` for both sources — see session/prompt.ts). Sorted by
+ * count desc, then name.
+ */
+export function extractSlashCommands(events: SessionEvent[]): SlashCommandUse[] {
+  const counts = new Map<string, number>();
+  for (const e of events) {
+    if (!e.slashCommand) continue;
+    counts.set(e.slashCommand, (counts.get(e.slashCommand) ?? 0) + 1);
   }
   return [...counts.entries()]
     .map(([name, count]) => ({ name, count }))

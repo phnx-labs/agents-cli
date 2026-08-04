@@ -92,10 +92,24 @@ function parseContextFlag(raw: string): ProjectContext {
   return { path: raw.slice(0, i).trim(), purpose: raw.slice(i + 1).trim() };
 }
 
-/** Best-effort `owner/repo` from a repo's origin remote. */
+/**
+ * Best-effort `owner/repo` from a repo's origin remote.
+ *
+ * `stderr: 'ignore'` is load-bearing, not tidiness. A checkout with no origin
+ * makes git print `error: No such remote 'origin'` on ITS stderr, which is the
+ * terminal's — the catch below never sees it. That was invisible while this was
+ * called once from `add` inside a real repo, and became noise the moment
+ * `import --from-factory` started calling it per row: importing 12 registry
+ * rows printed two raw git errors between the progress lines. Absence of a
+ * remote is an expected answer here (`undefined`), not something to report.
+ */
 export function originSlug(cwd: string): string | undefined {
   try {
-    const url = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8' }).trim();
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
     return parseOwnerRepoFromRemote(url) ?? undefined;
   } catch {
     return undefined;

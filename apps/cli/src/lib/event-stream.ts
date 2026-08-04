@@ -20,6 +20,8 @@ export interface UnifiedQuery {
   eventTypes?: EventType[];
   level?: EventLevel;
   agent?: string;
+  /** Only events stamped with this session id (payload `sessionId`, the provenance floor). */
+  sessionId?: string;
   caller?: string;
   command?: string;
   module?: string;
@@ -41,6 +43,7 @@ function matches(r: EventRecord, q: UnifiedQuery): boolean {
   if (q.eventTypes && !q.eventTypes.includes(r.event)) return false;
   if (q.level && (r.level ?? levelFor(r.event)) !== q.level) return false;
   if (q.agent && r.agent !== q.agent) return false;
+  if (q.sessionId && r.sessionId !== q.sessionId) return false;
   if (q.caller && r.caller !== q.caller) return false;
   if (q.command && r.command !== q.command &&
       !(typeof r.command === 'string' && r.command.startsWith(q.command + ' '))) return false;
@@ -61,6 +64,7 @@ export function readUnifiedEvents(q: UnifiedQuery = {}): EventRecord[] {
     eventTypes: q.eventTypes,
     level: q.level,
     agent: q.agent,
+    sessionId: q.sessionId,
     caller: q.caller,
     command: q.command,
     module: q.module,

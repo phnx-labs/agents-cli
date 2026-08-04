@@ -87,6 +87,27 @@ describe('readUnifiedEvents', () => {
     expect(readUnifiedEvents({ activityRoot, agent: 'codex' }).map((e) => e.event)).toEqual(['commit.created']);
   });
 
+  it('sessionId filters BOTH the operational and activity halves — the scoped read enrichCachedSessionMeta relies on', () => {
+    // browser.navigate/computer.action land in the operational log via emit();
+    // this filter is what lets db.ts read "did session X touch browser/computer"
+    // without re-scanning that session's whole transcript.
+    const { activityRoot } = setup();
+    emit('browser.navigate', { sessionId: 's-target', profile: 'default', url: 'https://x' });
+    emit('browser.navigate', { sessionId: 's-other', profile: 'default', url: 'https://y' });
+    appendActivityEvent(
+      { ts: new Date(Date.now() - 1000).toISOString(), event: 'pr.opened', sessionId: 's-target', mailboxId: 's-target', host: 'h', runtime: 'headless' },
+      activityRoot,
+    );
+    appendActivityEvent(
+      { ts: new Date(Date.now() - 1000).toISOString(), event: 'commit.created', sessionId: 's-other', mailboxId: 's-other', host: 'h', runtime: 'headless' },
+      activityRoot,
+    );
+
+    const events = readUnifiedEvents({ activityRoot, sessionId: 's-target' });
+    expect(events.every((e) => e.sessionId === 's-target')).toBe(true);
+    expect(events.map((e) => e.event).sort()).toEqual(['browser.navigate', 'pr.opened']);
+  });
+
   it('respects the limit across the merged stream', () => {
     const { activityRoot } = setup();
     emit('info', { module: 'test' });

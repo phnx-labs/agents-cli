@@ -31,7 +31,7 @@ import {
 } from '../lib/ssh-tunnel.js';
 import { sshExec } from '../lib/ssh-exec.js';
 import { encodePowershell } from '../lib/hosts/remote-cmd.js';
-import { registerActionCommands, withClient, unwrap, pickTarget, type AppInfo } from './computer-actions.js';
+import { registerActionCommands, withClient, unwrap, pickTarget, emitComputerAction, type AppInfo } from './computer-actions.js';
 import { runComputerLoop, type LoopEvent } from '../lib/computer/loop.js';
 import { makeVerbDispatcher } from '../lib/computer/dispatch.js';
 import { makeClaudeResponder, resolveApiKey, DEFAULT_CLAUDE_MODEL, DEFAULT_CLAUDE_BASE_URL } from '../lib/computer/model.js';
@@ -348,7 +348,7 @@ function registerRunCommand(program: Command): void {
       });
 
       await withClient(async (client) => {
-        const dispatch = makeVerbDispatcher(client);
+        const dispatch = makeVerbDispatcher(client, { host: opts.host });
         const targetInput = opts.bundle ? { bundle: opts.bundle } : {};
 
         const result = await runComputerLoop({
@@ -435,6 +435,7 @@ function registerScreenshotCommand(program: Command): void {
         // --list: enumerate windows, no image.
         if (opts.list) {
           const res = unwrap(await client.call('screenshot', { pid, list: true }));
+          emitComputerAction('screenshot', pid, opts, { list: true });
           const windows = (res.windows as Array<Record<string, unknown>>) || [];
           if (opts.json) {
             console.log(JSON.stringify(res, null, 2));
@@ -460,6 +461,7 @@ function registerScreenshotCommand(program: Command): void {
           console.error('helper returned no image_data');
           process.exit(1);
         }
+        emitComputerAction('screenshot', pid, opts, { display: opts.display, windowId: opts.windowId });
         const buf = Buffer.from(b64, 'base64');
         // Sniff the real format and correct the extension so the filename never
         // lies about its bytes (macOS -> JPEG, Windows helper -> PNG).

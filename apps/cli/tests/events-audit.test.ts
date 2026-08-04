@@ -161,4 +161,33 @@ describe('audit event log', () => {
     expect(typeof end!.durationMs).toBe('number');
     expect(end!.durationMs as number).toBeGreaterThanOrEqual(0);
   });
+
+  it('the generic perf-warehouse sample for command.end carries sessionId + agent, not just cwd/duration', () => {
+    // Regression: the postAction hook's disposable perf-spool write (index.ts)
+    // only ever set kind/label/durationMs/cwd, so every command.end sample was
+    // anonymous even though the command.start/command.end audit records right
+    // next to it carry full session/agent provenance via emit()'s floor.
+    const home = makeTempHome();
+    const spoolPath = path.join(home, 'perf-spool.ndjson');
+    runCli(home, ['secrets', 'list'], {
+      AGENTS_PERF_SPOOL: spoolPath,
+      // AGENT_SESSION_ID (singular) wins over AGENTS_SESSION_ID in
+      // resolveProvenance()'s precedence — set both so this is deterministic
+      // even when the OUTER test-runner session already has one set.
+      AGENT_SESSION_ID: 'sess-perf-test-1',
+      AGENTS_SESSION_ID: 'sess-perf-test-1',
+      AGENTS_AGENT_NAME: 'claude',
+    });
+
+    expect(fs.existsSync(spoolPath)).toBe(true);
+    const samples = fs
+      .readFileSync(spoolPath, 'utf-8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const sample = samples.find((s) => s.kind === 'command.end' && s.label === 'secrets list');
+    expect(sample).toBeTruthy();
+    expect(sample!.session_id).toBe('sess-perf-test-1');
+    expect(sample!.agent).toBe('claude');
+  });
 });

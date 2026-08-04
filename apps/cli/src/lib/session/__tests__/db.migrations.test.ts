@@ -89,7 +89,7 @@ describe('spawned_team column migration (v21)', () => {
   });
 });
 
-describe('tool-call index migration (v23)', () => {
+describe('tool-call index migration (v25)', () => {
   it('adds the independent schema without invalidating warm session ledgers', () => {
     const db = getDB();
     db.prepare(
@@ -104,7 +104,7 @@ describe('tool-call index migration (v23)', () => {
       DROP TABLE tool_calls;
       DROP TABLE tool_scan_ledger;
     `);
-    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '22')`).run();
+    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '24')`).run();
     closeDB();
 
     const reopened = getDB();
@@ -121,7 +121,7 @@ describe('tool-call index migration (v23)', () => {
   });
 });
 
-describe('tool-call trigram migration (v25)', () => {
+describe('tool-call trigram migration (v27)', () => {
   it('rebuilds FTS from redacted rows while the later occurrence migration keeps the normal ledger warm', () => {
     const db = getDB();
     db.prepare(
@@ -145,7 +145,7 @@ describe('tool-call trigram migration (v25)', () => {
       );
       INSERT INTO tool_call_text VALUES ('trigram-call', 'Bash', 'git merge topic', '', '');
     `);
-    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '24')`).run();
+    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '26')`).run();
     closeDB();
 
     const reopened = getDB();
@@ -158,7 +158,7 @@ describe('tool-call trigram migration (v25)', () => {
   });
 });
 
-describe('tool program occurrence migration (v26)', () => {
+describe('tool program occurrence migration (v28)', () => {
   it('adds ordered occurrences and invalidates only the derived tool ledger', () => {
     const db = getDB();
     db.prepare(
@@ -170,7 +170,7 @@ describe('tool program occurrence migration (v26)', () => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run('occurrence-session', '/tmp/occurrences/session.jsonl', 1, 1, 4, 1, 1, 15);
     db.exec(`DROP TABLE tool_program_occurrences`);
-    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '25')`).run();
+    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '27')`).run();
     closeDB();
 
     const reopened = getDB();
@@ -182,7 +182,7 @@ describe('tool program occurrence migration (v26)', () => {
   });
 });
 
-describe('tool ledger session identity migration (v27)', () => {
+describe('tool ledger session identity migration (v29)', () => {
   it('moves coverage lookups to session ids without invalidating normal session ledgers', () => {
     const db = getDB();
     db.prepare(
@@ -201,7 +201,7 @@ describe('tool ledger session identity migration (v27)', () => {
       );
       INSERT INTO tool_scan_ledger VALUES ('/tmp/session-ledger/session.jsonl', 1, 1, 5, 1, 1, 15);
     `);
-    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '26')`).run();
+    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '28')`).run();
     closeDB();
 
     const reopened = getDB();

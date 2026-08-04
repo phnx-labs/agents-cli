@@ -160,6 +160,11 @@ interface SessionsOptions extends SessionFilterOptions {
   printCmd?: boolean;
   /** Print a compact preview of the matched session and exit (no pager). */
   preview?: boolean;
+  /** Only sessions that invoked this skill (#12) — matches a bare name or a
+   * namespaced plugin skill's short name (`--skill design` finds `rush:design`). */
+  skill?: string;
+  /** Only sessions that used a skill/command owned by this plugin (#12). */
+  plugin?: string;
 }
 
 /**
@@ -1336,6 +1341,12 @@ export function hasNoBrowserDisqualifyingFlags(
     !options.markdown &&
     !options.until &&
     !options.project &&
+    // The interactive browser picker is a fuzzy-search TUI over the discovered
+    // pool, not a SQL-filtered listing — it cannot represent a skill/plugin
+    // scope. Falling through to it here would silently drop the filter and
+    // show the unfiltered pool instead (same reasoning as --project/--sort).
+    !options.skill &&
+    !options.plugin &&
     !options.sort &&
     !options.artifacts &&
     options.artifact === undefined &&
@@ -1361,6 +1372,8 @@ function canonicalSessionsCommand(query: string | undefined, options: SessionsOp
   if (options.agent) a.push('-a', options.agent);
   for (const h of options.host ?? []) a.push('--device', h);
   if (options.project) a.push('--project', options.project);
+  if (options.skill) a.push('--skill', options.skill);
+  if (options.plugin) a.push('--plugin', options.plugin);
   if (options.all) a.push('--all');
   if (options.since) a.push('--since', options.since);
   if (options.until) a.push('--until', options.until);
@@ -1964,6 +1977,8 @@ async function sessionsAction(
       origin: options.routine ? 'routine' : undefined,
       skipExistenceCheck: toolEvidenceMode,
       unbounded: toolEvidenceMode,
+      skill: options.skill,
+      plugin: options.plugin,
     };
 
     let hiddenUnmanaged = 0;
@@ -4053,6 +4068,8 @@ export function registerSessionsCommands(program: Command): void {
     .option('--in-team <name>', "Only this team: the session that spawned it plus (with --teams) its teammates. Spans every directory and all time, since a team's worktrees and history sit outside the default window.")
     .option('--routine', 'Show only sessions archived from routine runs')
     .option('-p, --project <name>', 'Filter by project name (searches across all directories)')
+    .option('--skill <name>', 'Only sessions that invoked this skill (matches a bare name or a namespaced plugin skill\'s short name, e.g. --skill design finds rush:design)')
+    .option('--plugin <name>', 'Only sessions that used a skill/command owned by this plugin')
     .option('--since <time>', 'Only sessions newer than this (e.g., 2h, 7d, 4w, or ISO date)')
     .option('--until <time>', 'Only sessions older than this (ISO timestamp)')
     .option('-n, --limit <n>', 'Maximum number of sessions to return', DEFAULT_LIMIT)

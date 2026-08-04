@@ -1,0 +1,24 @@
+- **Sessions now track browser/computer tool use and skill/plugin/slash-command
+  usage, queryable with `agents sessions --skill <name>` / `--plugin <name>`.**
+  `browser.navigate`, `browser.screenshot`, and a new `computer.action` event
+  fire on every `agents browser`/`agents computer` action, carrying session
+  identity for free. The sessions index persists `usedBrowser`/`usedComputer`
+  (from a scoped events-log read, not a transcript re-scan) and a new
+  `session_resource_usage` table records every skill and slash-command
+  invocation with its owning plugin, source repo, and git commit — resolved
+  against `resolveResource()`/`discoverPlugins()` at scan time. The sessions
+  picker preview surfaces both as `browser`/`computer` and `Skills:` tags.
+  Source: `apps/cli/src/lib/browser/service.ts`, `apps/cli/src/commands/computer-actions.ts`,
+  `apps/cli/src/lib/session/db.ts`, `apps/cli/src/lib/session/highlights.ts`,
+  `apps/cli/src/lib/session/discover.ts`, `apps/cli/src/commands/sessions.ts`.
+- **`ResolvedResource` and `DiscoveredPlugin` carry provenance: `repoRoot` and a
+  lazily-resolved `snapshotSha`.** Every resource/plugin resolution can now
+  answer "which DotAgents repo, which commit" without an extra lookup; the git
+  shell-out is memoized per repo root and only runs when a caller actually
+  reads `snapshotSha`. Source: `apps/cli/src/lib/resources.ts`,
+  `apps/cli/src/lib/plugins.ts`, `apps/cli/src/lib/git.ts`.
+- **`SessionEvent.slashCommand` captures a typed or model-invoked slash command**
+  (both the `<command-name>` wrapper and the `SlashCommand` tool call), and
+  `agents sessions`'s perf sample for `command.end` now carries the session id
+  and agent instead of being anonymous. Source: `apps/cli/src/lib/session/prompt.ts`,
+  `apps/cli/src/lib/session/parse.ts`, `apps/cli/src/index.ts`.

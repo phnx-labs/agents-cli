@@ -14,11 +14,13 @@ import {
   appPathIsElectron,
   electronWebviewTip,
   resolveTargetPidDecision,
+  emitComputerAction,
   CHAR_DELAY_MIN_MS,
   CHAR_DELAY_MAX_MS,
   type AppInfo,
 } from './computer-actions.js';
 import { resolveRpcTimeoutMs, RPC_TIMEOUT_MS, type ComputerClient, type RPCResponse } from '../lib/computer-rpc.js';
+import { query, _resetForTest } from '../lib/events.js';
 
 const tempDirs: string[] = [];
 
@@ -407,6 +409,55 @@ describe('electronWebviewTip', () => {
     expect(tip).toContain('Electron');
     expect(tip).toContain('--remote-debugging-port');
     expect(tip).toContain('agents browser --electron');
+  });
+});
+
+describe('emitComputerAction — computer.action event (#11)', () => {
+  afterEach(() => {
+    _resetForTest();
+  });
+
+  function eventsPath(): string {
+    return path.join(makeTempDir(), 'events.jsonl');
+  }
+
+  it('records the verb, target pid, and bundle against the real event log', () => {
+    _resetForTest(eventsPath());
+    emitComputerAction('click', 4242, { bundle: 'com.apple.notes' }, { id: '@e3' });
+
+    const recs = query({ eventTypes: ['computer.action'] });
+    expect(recs).toHaveLength(1);
+    expect(recs[0].command).toBe('click');
+    // `targetPid`, never `pid` — `pid` is the reserved envelope key for the
+    // emitting process's OWN pid, so a payload `pid` field is silently
+    // dropped by events.ts's sanitizePayload() before it can collide.
+    expect(recs[0].targetPid).toBe(4242);
+    expect(recs[0].pid).toBe(process.pid);
+    expect(recs[0].bundle).toBe('com.apple.notes');
+    expect(recs[0].id).toBe('@e3');
+  });
+
+  it('carries a remote --host target and an undefined target pid (e.g. a duration-only wait)', () => {
+    _resetForTest(eventsPath());
+    emitComputerAction('wait', undefined, { host: 'win-mini' }, { durationMs: 500, satisfied: true });
+
+    const recs = query({ eventTypes: ['computer.action'] });
+    expect(recs).toHaveLength(1);
+    expect(recs[0].command).toBe('wait');
+    expect(recs[0].targetPid).toBeUndefined();
+    expect(recs[0].host).toBe('win-mini');
+    expect(recs[0].durationMs).toBe(500);
+    expect(recs[0].satisfied).toBe(true);
+  });
+
+  it('never carries the raw typed text — only its length (type/type-text handle secrets)', () => {
+    _resetForTest(eventsPath());
+    const secret = 'super-secret-password';
+    emitComputerAction('type', 100, {}, { textLength: secret.length, committed: true });
+
+    const rec = query({ eventTypes: ['computer.action'] })[0];
+    expect(rec.textLength).toBe(secret.length);
+    expect(JSON.stringify(rec)).not.toContain(secret);
   });
 });
 

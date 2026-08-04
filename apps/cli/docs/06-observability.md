@@ -161,10 +161,20 @@ file rotates losslessly to `events.1.jsonl.gz`; older archives shift to
 The recording is a single choke point — a commander `preAction`/`postAction`
 hook on the root program ([`src/index.ts`](../src/index.ts)) emits `command.start`
 / `command.end` for *every* subcommand, so coverage is automatic and no per-command
-wiring can drift out of date. Richer typed events (`secrets.get`, `version.install`,
+wiring can drift out of date. `command.end` also feeds the disposable perf
+warehouse (`agents perf`) with the resolved sessionId/agent, not just
+duration — the same provenance floor `emit()` stamps on the audit record.
+Richer typed events (`secrets.get`, `version.install`,
 `teams.create`, `teams.disband`, …) layer on top where the extra payload earns it —
 e.g. team lifecycle events are emitted at the registry source with the team name,
 so they fire for every path (`teams create` and the auto-create in `teams add`).
+`browser.navigate`/`browser.screenshot` (every `agents browser` navigate/
+screenshot) and `computer.action` (every `agents computer` verb — click, type,
+key, drag, scroll, launch, screenshot, …) are two more: `query()`/`readUnifiedEvents()`
+accept a `sessionId` filter so a consumer can ask "did session X touch the
+browser/computer" as a scoped read instead of grepping the whole log — this is
+what the sessions index's `usedBrowser`/`usedComputer` columns are built on
+(see [05-sessions.md](05-sessions.md)).
 
 Every record carries **attribution** computed once per process
 ([`src/lib/events.ts`](../src/lib/events.ts)):

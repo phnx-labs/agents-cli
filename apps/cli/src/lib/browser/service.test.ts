@@ -6,6 +6,7 @@ import { EventEmitter } from 'node:events';
 import * as yaml from 'yaml';
 import * as state from '../state.js';
 import * as profiles from './profiles.js';
+import { query, _resetForTest } from '../events.js';
 
 const TEST_HOME = path.join(tmpdir(), 'agents-cli-browser-service-test');
 const TEST_AGENTS_DIR = path.join(TEST_HOME, '.agents');
@@ -518,5 +519,107 @@ describe('BrowserService.stopProfile — composite-key cleanup (#559)', () => {
     // "winmini2@ep" must NOT match the "winmini" stop (prefix must be `winmini@`).
     expect(otherCleanup).not.toHaveBeenCalled();
     expect(conns.has('winmini2@ep')).toBe(true);
+  });
+});
+
+describe('navigate/screenshot — emit typed events (#11)', () => {
+  afterEach(() => {
+    _resetForTest();
+  });
+
+  function eventsPath(): string {
+    return path.join(
+      TEST_HOME,
+      `events-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`
+    );
+  }
+
+  // Minimal-but-valid PNG header: signature + IHDR length/type + width/height.
+  // readPngDimensions() only inspects these 24 bytes, so this is a real decode,
+  // not a canned dimension value.
+  function fakePngBase64(width: number, height: number): string {
+    const buf = Buffer.alloc(24);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buf, 0);
+    buf.write('IHDR', 12, 'ascii');
+    buf.writeUInt32BE(width, 16);
+    buf.writeUInt32BE(height, 20);
+    return buf.toString('base64');
+  }
+
+  function makeFakeConn(taskName: string, tabId: string) {
+    const tasks = new Map();
+    tasks.set(taskName, {
+      id: taskName,
+      name: taskName,
+      profile: 'evprofile',
+      tabs: { [tabId]: 'cdp-target-1' },
+      currentTabId: tabId,
+      createdAt: Date.now(),
+      pid: 123,
+    });
+    const conn = {
+      cdp: {
+        send: vi.fn(async (method: string) => {
+          switch (method) {
+            case 'Target.attachToTarget':
+              return { sessionId: 'sess-1' };
+            case 'Page.navigate':
+              return {};
+            case 'Target.getTargets':
+              return { targetInfos: [{ targetId: 'cdp-target-1', url: 'https://example.com', title: 'Example' }] };
+            case 'Page.captureScreenshot':
+              return { data: fakePngBase64(10, 5) };
+            default:
+              throw new Error(`unexpected CDP call in test: ${method}`);
+          }
+        }),
+      },
+      port: 9333,
+      pid: 123,
+      tasks,
+      sessionCache: new Map(),
+    };
+    return conn;
+  }
+
+  it('navigate() reusing the current tab emits browser.navigate with profile/task/url', async () => {
+    _resetForTest(eventsPath());
+    const service = new BrowserService();
+    const conn = makeFakeConn('evtask', 'tab0001');
+    (service as unknown as { connections: Map<string, unknown> }).connections.set('evprofile', conn);
+
+    const result = await service.navigate('evtask', 'https://example.com/page');
+
+    expect(result).toEqual({ tabId: 'tab0001', url: 'https://example.com/page', created: false });
+    const recs = query({ eventTypes: ['browser.navigate'] });
+    expect(recs).toHaveLength(1);
+    expect(recs[0].profile).toBe('evprofile');
+    expect(recs[0].task).toBe('evtask');
+    expect(recs[0].url).toBe('https://example.com/page');
+    expect(recs[0].created).toBe(false);
+  });
+
+  it('screenshot() emits browser.screenshot with the real path/bytes/dimensions', async () => {
+    _resetForTest(eventsPath());
+    const service = new BrowserService();
+    const conn = makeFakeConn('evtask2', 'tab0002');
+    (service as unknown as { connections: Map<string, unknown> }).connections.set('evprofile2', conn);
+    (conn as unknown as { tasks: Map<string, { profile: string }> }).tasks.get('evtask2')!.profile = 'evprofile2';
+
+    const result = await service.screenshot('evtask2', undefined, undefined, 'raw');
+
+    expect(result.width).toBe(10);
+    expect(result.height).toBe(5);
+    expect(fs.existsSync(result.path)).toBe(true);
+
+    const recs = query({ eventTypes: ['browser.screenshot'] });
+    expect(recs).toHaveLength(1);
+    expect(recs[0].profile).toBe('evprofile2');
+    expect(recs[0].task).toBe('evtask2');
+    expect(recs[0].path).toBe(result.path);
+    expect(recs[0].bytes).toBe(result.bytes);
+    expect(recs[0].width).toBe(10);
+    expect(recs[0].height).toBe(5);
+    expect(recs[0].quality).toBe('raw');
   });
 });
