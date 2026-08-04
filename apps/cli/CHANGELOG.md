@@ -1,19 +1,5 @@
 # Changelog
 
-## 1.22.5
-
-- **`agents trends tools-per-session` now reports real tool-call counts instead of a
-  p50 of 0.** The recipe read `sessions.tool_call_count`, a column only the teams
-  summarizer ever writes (`apps/cli/src/lib/teams/summarizer.ts`), so every session
-  that did not come from `agents teams` was either scored 0 or excluded — pinning the
-  fleet-wide p50 at 0 no matter how many tools ran. It now reads
-  `tool_scan_ledger.call_count`, the per-session count the tool indexer writes for
-  every session it scans (the same index behind
-  `agents sessions --include tools`), so sessions with genuinely zero tool calls still
-  count as 0 and everything else carries its true count. Run
-  `agents sessions backfill tools` once if historical sessions were never indexed.
-  Source: `apps/cli/src/lib/analytics/recipes.ts`.
-
 ## 1.22.4
 
 - **Background processes no longer storm macOS Touch ID sheets (secrets-touchid-storm).**
