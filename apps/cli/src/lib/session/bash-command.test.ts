@@ -167,6 +167,32 @@ describe('classifyBashCommand', () => {
       signal: 'low',
     });
   });
+
+  // #1830: classification reads only the head, so a multi-KB heredoc tail is
+  // never tokenized — the result depends only on the leading executable.
+  it('classifies a huge heredoc command by its executable, ignoring the body', () => {
+    const huge = `cat > /tmp/f <<'EOF'\n${'x'.repeat(8000)}\nEOF`;
+    expect(classifyBashCommand(huge)).toMatchObject({ tool: 'cat', category: 'probe' });
+  });
+
+  // #1830: a `cd` prefix separated by `;` or a newline (not just `&&`) unwraps
+  // to the real command instead of reading as `cd` — the top `other` token.
+  it('unwraps cd prefixes separated by newline or semicolon', () => {
+    expect(classifyBashCommand('cd /repo\ngit status')).toMatchObject({ tool: 'git', subcommand: 'status' });
+    expect(classifyBashCommand('cd /repo; git commit -m x')).toMatchObject({ tool: 'git', subcommand: 'commit' });
+  });
+
+  // #1830: a path/tilde executable resolves by basename, not the full path.
+  it('reduces a path executable to its basename', () => {
+    expect(classifyBashCommand('~/.agents/skills/linear/scripts/linear list')).toMatchObject({ tool: 'linear' });
+    expect(classifyBashCommand('/usr/bin/git status')).toMatchObject({ tool: 'git', subcommand: 'status' });
+  });
+
+  // #1830: the repo's own toolchain now buckets by subcommand instead of `other`.
+  it('recognizes agents/linear as two-level tools and rmdir as shell', () => {
+    expect(classifyBashCommand('agents -H box sessions --active')).toMatchObject({ tool: 'agents', subcommand: 'sessions' });
+    expect(classifyBashCommand('rmdir /tmp/x')).toMatchObject({ tool: 'rmdir', category: 'shell' });
+  });
 });
 
 describe('bucketKey', () => {
@@ -197,6 +223,13 @@ describe('bucketKey', () => {
     expect(bucketKey('ssh host "git push"')).toBe('ssh→git push');
     expect(bucketKey('ssh host "ls -la"')).toBe('ssh→ls');
     expect(bucketKey('scp a host:/b')).toBe('ssh→scp');
+  });
+
+  // #1830: repo toolchain buckets by subcommand; `ag` stays the silver searcher.
+  it('buckets the repo toolchain by subcommand, without hijacking ag', () => {
+    expect(bucketKey('agents sessions --active')).toBe('agents sessions');
+    expect(bucketKey('linear list')).toBe('linear list');
+    expect(bucketKey('ag -l foo')).toBe('ag');
   });
 });
 

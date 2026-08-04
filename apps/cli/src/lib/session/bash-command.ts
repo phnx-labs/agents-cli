@@ -112,6 +112,7 @@ const TOOL_REGISTRY: Record<string, BashToolInfo> = {
   mv: { category: 'shell', signal: 'low', action: 'moving files' },
   cp: { category: 'shell', signal: 'low', action: 'copying files' },
   mkdir: { category: 'shell', signal: 'low', action: 'making directories' },
+  rmdir: { category: 'shell', signal: 'low', action: 'removing directories' },
   touch: { category: 'shell', signal: 'low', action: 'touching files' },
   echo: { category: 'shell', signal: 'low', action: 'echoing' },
   printf: { category: 'shell', signal: 'low', action: 'printing' },
@@ -167,6 +168,13 @@ const VALUE_FLAGS: Record<string, Set<string>> = {
   kubectl: new Set(['-n', '--namespace', '--kubeconfig', '--context', '--cluster', '--user', '-s', '--server', '--as', '--token', '--cache-dir', '--request-timeout']),
   rush: new Set(),
   openclaw: new Set(),
+  // The repo's own toolchain — heavy in real transcripts (`agents` alone was the
+  // top unrecognized token). Two-level so they bucket by subcommand
+  // (`agents sessions`, `linear list`) instead of one flat `other` pile (#1830).
+  // `ag` is deliberately NOT here — it is the silver searcher in TOOL_REGISTRY,
+  // not the agents alias, in this classifier's world.
+  agents: new Set(['-H', '--host', '--device']),
+  linear: new Set(),
 };
 
 /** Tools whose bucket key includes the second token (subcommand). */
@@ -194,8 +202,8 @@ export function unwrapCommand(cmd: string): string {
   // sudo / time prefix (value-taking flags like `-u user` consume their argument)
   const prefix = s.match(/^(?:sudo|time)(?:\s+(?:-[uUgGhpCrtDR]\s+\S+|-\S+))*\s+(.+)$/);
   if (prefix) return unwrapCommand(prefix[1]);
-  // cd foo && command
-  const cd = s.match(/^cd\s+\S+\s*&&\s*(.+)$/);
+  // cd foo && command  (also `cd foo; command` and newline-separated `cd foo\ncommand`)
+  const cd = s.match(/^cd\s+\S+\s*(?:&&|;|\n)\s*([\s\S]+)$/);
   if (cd) return unwrapCommand(cd[1]);
   // npx / bunx
   const npx = s.match(/^(?:npx|bunx)\s+(?:-\S+\s+)*(.+)$/);
@@ -241,7 +249,11 @@ function splitOnOperators(cmd: string): string[] {
       i += 2;
       continue;
     }
-    if (ch === '|' || ch === ';') {
+    // A newline separates commands the same way `;` does (an unquoted, un-escaped
+    // line break), so `cd X\ncmd` splits into two segments instead of reading as
+    // one `cd` command — the top source of `other` classifications (#1830). A
+    // `\`-continued line never reaches here (handled by the escape branch above).
+    if (ch === '|' || ch === ';' || ch === '\n') {
       if (current.trim()) parts.push(current.trim());
       current = '';
       i += 1;
@@ -296,22 +308,51 @@ function scanSubcommand(tokens: string[], tool: string): string {
 }
 
 /**
+ * The classifier reads only the executable and the first non-flag token, both at
+ * the very head of the first simple command. Tokenizing the *entire* command —
+ * every pipeline segment, multi-KB heredoc bodies included — to reach the first
+ * word cost up to ~1ms per call (a 7.8KB `cat <<HEREDOC …` classified on the word
+ * `cat`). Tokenize only this much of the head instead: enough for the executable
+ * plus a subcommand and its flags, never a heredoc tail (#1830, ~3.3x faster).
+ */
+const CLASSIFY_HEAD_LIMIT = 200;
+
+/**
+ * Tokens of the first simple command only, tokenizing just the head of the
+ * unwrapped string. Mirrors {@link tokenizeBash}'s first-segment result for
+ * short commands but skips the cost of tokenizing the whole command; the full
+ * multi-segment tokenizer stays available for callers that need every segment.
+ */
+function firstSimpleCommandTokens(command: string): string[] {
+  const unwrapped = unwrapCommand(command);
+  const head =
+    unwrapped.length > CLASSIFY_HEAD_LIMIT ? unwrapped.slice(0, CLASSIFY_HEAD_LIMIT) : unwrapped;
+  const firstSegment = splitOnOperators(head)[0] ?? '';
+  if (!firstSegment) return [];
+  try {
+    return shlexSplit(firstSegment);
+  } catch {
+    // shlex can choke on a quote the head-truncation cut mid-string; a plain
+    // whitespace split still yields the leading executable + subcommand.
+    return firstSegment.split(/\s+/).filter(Boolean);
+  }
+}
+
+/**
  * Classify the first simple command in a Bash string. Returns coarse metadata
  * (tool name, category, subcommand, human action) used for summaries and
  * activity logging. Unknown executables fall back to `other`.
  */
 export function classifyBashCommand(command: string): BashCommandInfo {
-  const simpleCommands = tokenizeBash(command);
-  if (!simpleCommands.length) {
-    return { tool: 'other', category: 'other', subcommand: '', action: 'running command', summary: '', signal: 'low' };
-  }
-  const tokens = simpleCommands[0];
+  const tokens = firstSimpleCommandTokens(command);
   if (!tokens.length) {
     return { tool: 'other', category: 'other', subcommand: '', action: 'running command', summary: '', signal: 'low' };
   }
 
   const first = tokens[0];
-  const baseRaw = first.replace(/^[./]+/, '').toLowerCase();
+  // Reduce a path executable to its basename so `~/.agents/skills/linear/scripts/linear`,
+  // `/usr/bin/git`, and `./tool` all resolve by tool name, not the full path (#1830).
+  const baseRaw = first.replace(/^.*\//, '').toLowerCase();
   const base = baseRaw.endsWith('.exe') ? baseRaw.slice(0, -4) : baseRaw;
   const canonical = ALIAS_MAP.get(base);
   const info = canonical ? TOOL_REGISTRY[canonical] : undefined;
