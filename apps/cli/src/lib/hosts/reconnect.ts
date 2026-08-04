@@ -29,21 +29,39 @@
  * without touching SSH; the loop (`reconnectInteractiveSession`) only adds the real
  * preflight + `sshStream` re-attach and the wait.
  *
- * **Why the remote command carries {@link NO_SHELL_FALLBACK_ENV}.** `agents
- * sessions focus <id> --local --attach-only`'s own fallback (`refuseFallback` in
- * commands/go.ts), when it can't find a live attach rail for a REMOTE match,
- * opens an interactive login shell on that other machine as a consolation prize —
- * the right call for a human running `sessions go` by hand, but wrong here: this
- * loop can't supervise that shell, and when it eventually closes, its exit code
- * rides back up through `sshStream` indistinguishable from
- * {@link SSH_CONN_FAILURE}. Because `connected: true` below is honest only about
- * the fast preflight probe (see the next doc comment), that stray 255 refills the
- * retry budget every time — the loop reconnects, hairpins into a fresh unrelated
- * shell, that closes, and repeats forever, printing "attempt 1/N" on every cycle
- * and leaving the terminal full of aborted-TTY escape-code garbage. Setting this
- * env var on the remote invocation makes `refuseFallback` skip the shell and
- * refuse with {@link NO_ATTACH_RAIL_EXIT_CODE} instead, so `reconnectStep` sees a
- * real non-255 terminal state and stops.
+ * **255 must mean exactly one thing: the ssh link to THIS host dropped.**
+ * `reattachRemoteSession`'s `connected` flag is set as soon as the fast preflight
+ * probe succeeds — it says nothing about whether the interactive attach that
+ * follows actually reattached a live pane. If the REMOTE command (`agents
+ * sessions focus <id> --local --attach-only`) itself happens to exit 255 for a
+ * reason that has nothing to do with the ssh transport — its `refuseFallback`
+ * fallback opening an interactive login shell on a THIRD machine, that shell
+ * later closing; a nested remote-tmux hop (`jumpTo`'s "remote tmux" path in
+ * commands/go.ts) dropping; any future remote-side path that happens to exit
+ * 255 — `sshStream` returns that same 255, `reconnectStep` cannot tell it apart
+ * from a genuine drop, and `connected: true` refills the retry budget. The loop
+ * reconnects, the remote command does the same wrong thing again, closes again,
+ * and repeats forever — "attempt 1/N" printed on every single cycle, the
+ * terminal filling with aborted-TTY escape-code garbage, `MAX_ATTEMPTS` never
+ * actually bounding anything. This is fixed at the SOURCE, not per producer:
+ * {@link wrapRemoteExitCode} wraps the entire remote command so that whatever
+ * exit code IT decides on, a 255 is remapped to 254 before `sshStream` ever sees
+ * it — 255 is reclaimed exclusively for the local ssh transport's own
+ * connection-layer failure, regardless of which remote-side path produced the
+ * original code, and regardless of the peer's `agents` version (the remap
+ * happens in the shell wrapper this process sends, not in anything the peer's
+ * own binary has to understand).
+ *
+ * **{@link NO_SHELL_FALLBACK_ENV} is a secondary hygiene fix, not the load-bearing
+ * one.** Even with the remap above making the loop terminate correctly, the
+ * automated loop opening an unsupervised interactive shell on a machine it can't
+ * supervise is still wasted and confusing. Setting this env var on the remote
+ * invocation makes `refuseFallback` (commands/go.ts) skip that shell and refuse
+ * cleanly with {@link NO_ATTACH_RAIL_EXIT_CODE} instead — a nicety layered on top
+ * of the remap, not a substitute for it (an older peer, or a peer whose
+ * `--local` view still somehow surfaces a foreign-machine match, ignores this
+ * var harmlessly and keeps the shell fallback; the remap still keeps that case
+ * from looping).
  */
 import { sshExec, sshStream, shellQuote } from '../ssh-exec.js';
 import { sshTargetFor, type Host } from './types.js';
@@ -52,12 +70,18 @@ import { sshTargetFor, type Host } from './types.js';
  *  than the remote command exiting on its own. Mirrors ssh-exec.ts `sshStream`. */
 export const SSH_CONN_FAILURE = 255;
 
+/** What a would-be-255 remote-origin exit code is remapped to by
+ *  {@link wrapRemoteExitCode} — see the file header. Never produced by the ssh
+ *  transport itself, so it can never be confused with {@link SSH_CONN_FAILURE}. */
+export const REMOTE_EXIT_255_REMAPPED = 254;
+
 /** Set on the remote `agents sessions focus --local --attach-only` invocation so
  *  its `refuseFallback` (commands/go.ts) refuses cleanly instead of opening an
  *  unsupervised login shell on a third machine — see the file header. Read only
  *  by `refuseFallback`; an older peer that predates this guard ignores the
- *  env var harmlessly and keeps the old (buggy, but at-least-functional-for-a-
- *  human) shell fallback. */
+ *  env var harmlessly and keeps the old shell fallback (still safe: the exit-code
+ *  remap below keeps that shell's own eventual 255 from being mistaken for a
+ *  network drop). */
 export const NO_SHELL_FALLBACK_ENV = 'AGENTS_FOCUS_NO_SHELL_FALLBACK';
 
 /** Distinct from {@link SSH_CONN_FAILURE} so a "no live pane to reattach" refusal
@@ -130,18 +154,34 @@ export function exhaustedNotice(sessionId: string, host: string): string {
 }
 
 /**
+ * Wrap `cmd` in `bash -lc` (the same pattern `buildRemoteAgentsInvocation` in
+ * remote-cmd.ts uses for every other remote dispatch, so PATH/login-shell
+ * resolution is identical) with a trailing exit-code remap: whatever `cmd`
+ * itself exits with, a 255 becomes {@link REMOTE_EXIT_255_REMAPPED} before the
+ * wrapper exits — see the file header for why. Every other code (0, 1, 3, …)
+ * passes through unchanged. Pure string-building, so it is unit-tested without
+ * SSH (and, since the constructed script is ordinary POSIX, also exercised by
+ * actually running it through a real shell in the test — no mock needed).
+ */
+export function wrapRemoteExitCode(cmd: string): string {
+  const guarded = `${cmd}; rc=$?; [ "$rc" = "${SSH_CONN_FAILURE}" ] && rc=${REMOTE_EXIT_255_REMAPPED}; exit "$rc"`;
+  return `bash -lc ${shellQuote(guarded)}`;
+}
+
+/**
  * The remote command a reattach runs — the peer's own reconnect verb, with
  * {@link NO_SHELL_FALLBACK_ENV} set so its `refuseFallback` refuses cleanly
- * instead of hairpinning into an unsupervised shell (see the file header). Pure
- * string-building, split out from {@link reattachRemoteSession} so it is
- * unit-tested without SSH — mirrors `remoteAgentsJsonCommand` in
- * lib/remote-agents-json.ts.
+ * instead of hairpinning into an unsupervised shell, and the whole invocation
+ * wrapped by {@link wrapRemoteExitCode} so a stray remote-origin 255 (from that
+ * shell, or any other remote-side path) can never masquerade as a network drop.
+ * Split out from {@link reattachRemoteSession} so it is unit-tested without SSH —
+ * mirrors `remoteAgentsJsonCommand` in lib/remote-agents-json.ts.
  */
 export function reattachRemoteCommand(sessionId: string): string {
   const inner = ['agents', 'sessions', 'focus', sessionId, '--local', '--attach-only']
     .map(shellQuote)
     .join(' ');
-  return `${NO_SHELL_FALLBACK_ENV}=1 ${inner}`;
+  return wrapRemoteExitCode(`${NO_SHELL_FALLBACK_ENV}=1 ${inner}`);
 }
 
 /**

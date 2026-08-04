@@ -71,7 +71,7 @@ describe('refuseFallback — remote, no attach rail', () => {
     expect(sshStreamMock.mock.calls[0][0]).toBe('yosemite-s1');
   });
 
-  it('the regression this fixes: the automated reconnect loop sets NO_SHELL_FALLBACK_ENV, so no shell opens — reproduces the hairpin-into-a-third-host bug from the "attempt 1/6 forever" incident', async () => {
+  it('the regression this fixes: the automated reconnect loop sets NO_SHELL_FALLBACK_ENV=1, so no shell opens — reproduces the hairpin-into-a-third-host bug from the "attempt 1/6 forever" incident', async () => {
     process.env[NO_SHELL_FALLBACK_ENV] = '1';
     await expect(refuseFallback(s({}), 'yosemite-s1')).rejects.toThrow(`exit:${NO_ATTACH_RAIL_EXIT_CODE}`);
     // No shell was opened — the whole point: `reconnectStep` never sees this
@@ -79,6 +79,16 @@ describe('refuseFallback — remote, no attach rail', () => {
     // unreachable session as a terminal state instead of retrying forever.
     expect(sshStreamMock).not.toHaveBeenCalled();
     expect(NO_ATTACH_RAIL_EXIT_CODE).not.toBe(255);
+  });
+
+  it('a strict "1" check, not a truthy one — an unrelated non-empty value (e.g. "0") must NOT trip the guard', async () => {
+    // Every other env-var guard in the CLI compares strictly to '1' (e.g.
+    // sessions.ts's `AGENTS_SESSIONS_LOCAL === '1'`). A bare truthy check on
+    // process.env[VAR] would treat "0"/"false"/any set-but-wrong value as "on",
+    // silently refusing instead of opening the human's shell.
+    process.env[NO_SHELL_FALLBACK_ENV] = '0';
+    await expect(refuseFallback(s({}), 'yosemite-s1')).rejects.toThrow(/^exit:0$/);
+    expect(sshStreamMock).toHaveBeenCalledTimes(1);
   });
 
   afterAll(() => {

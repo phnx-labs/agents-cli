@@ -7,6 +7,7 @@
  * run in CI. No production code path is stubbed.
  */
 import { describe, expect, test } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import type { Host } from './types.js';
 import {
   reconnectStep,
@@ -15,11 +16,13 @@ import {
   exhaustedNotice,
   reconnectInteractiveSession,
   reattachRemoteCommand,
+  wrapRemoteExitCode,
   initialReconnectState,
   SSH_CONN_FAILURE,
   MAX_ATTEMPTS,
   NO_SHELL_FALLBACK_ENV,
   NO_ATTACH_RAIL_EXIT_CODE,
+  REMOTE_EXIT_255_REMAPPED,
   type ReconnectOutcome,
 } from './reconnect.js';
 
@@ -74,10 +77,58 @@ describe('backoffMs — capped exponential', () => {
   });
 });
 
-describe('reattachRemoteCommand — the remote invocation carries the no-shell-fallback guard', () => {
-  test('sets NO_SHELL_FALLBACK_ENV before the real `sessions focus` command', () => {
+describe('wrapRemoteExitCode — the root-cause fix, exercised with a REAL shell (no mock)', () => {
+  // These run the actual returned string through a real `bash`, the same
+  // interpreter ssh hands it to on a POSIX peer. This is what directly
+  // reproduces (and proves fixed) the "attempt 1/6 forever" bug: the loop only
+  // ever looped because a remote-origin 255 was indistinguishable from a real
+  // ssh drop. Skipped on Windows CI, where `bash` isn't guaranteed on PATH —
+  // interactive host dispatch (what this wraps) is already POSIX-only
+  // (dispatch.ts), so there's no Windows behavior to regress.
+  const runsBash = process.platform !== 'win32';
+
+  // `(exit N)` runs in a forked SUBSHELL — it returns control to the wrapper
+  // script with status N (via `$?`), unlike a bare top-level `exit N` builtin,
+  // which would terminate the wrapper script before its own remap logic ever
+  // runs. This is what makes these tests actually exercise the remap, the same
+  // way a real subprocess (`agents sessions focus …`) returning exit code N does
+  // in production — it doesn't terminate the wrapping `bash -lc` script either.
+  function realBashExitCode(cmd: string): number | undefined {
+    try {
+      execFileSync('bash', ['-c', wrapRemoteExitCode(cmd)]);
+      return 0;
+    } catch (e) {
+      return (e as { status?: number }).status;
+    }
+  }
+
+  test.skipIf(!runsBash)('exit codes other than 255 pass through unchanged (0, 1, 3)', () => {
+    for (const code of [0, 1, NO_ATTACH_RAIL_EXIT_CODE]) {
+      expect(realBashExitCode(`(exit ${code})`)).toBe(code);
+    }
+  });
+
+  test.skipIf(!runsBash)('a 255 exit is remapped to REMOTE_EXIT_255_REMAPPED (254), verified via real bash exit status — this is the exact mechanism that let the "attempt 1/6 forever" bug loop', () => {
+    // Before this fix: a remote command (the login-shell fallback, a nested
+    // remote-tmux hop) that happened to exit 255 for its own reasons rode back
+    // up through `sshStream` as SSH_CONN_FAILURE — indistinguishable from the ssh
+    // transport itself dropping — and kept refilling the reconnect loop's retry
+    // budget forever.
+    expect(realBashExitCode('(exit 255)')).toBe(REMOTE_EXIT_255_REMAPPED);
+    expect(REMOTE_EXIT_255_REMAPPED).not.toBe(SSH_CONN_FAILURE);
+  });
+
+  test('wraps in bash -lc, matching buildRemoteAgentsInvocation\'s pattern for every other remote dispatch', () => {
+    expect(wrapRemoteExitCode('true')).toBe(`bash -lc 'true; rc=$?; [ "$rc" = "255" ] && rc=254; exit "$rc"'`);
+  });
+});
+
+describe('reattachRemoteCommand — the remote invocation carries the no-shell-fallback guard, wrapped for the exit-code remap', () => {
+  test('sets NO_SHELL_FALLBACK_ENV before the real `sessions focus` command, inside the bash -lc wrapper', () => {
     const cmd = reattachRemoteCommand(SID);
-    expect(cmd).toBe(`${NO_SHELL_FALLBACK_ENV}=1 agents sessions focus ${SID} --local --attach-only`);
+    expect(cmd).toBe(
+      `bash -lc '${NO_SHELL_FALLBACK_ENV}=1 agents sessions focus ${SID} --local --attach-only; rc=$?; [ "$rc" = "255" ] && rc=254; exit "$rc"'`,
+    );
   });
 
   test('the guard exit code is never 255, so reconnectStep always treats a refusal as terminal', () => {
@@ -86,13 +137,18 @@ describe('reattachRemoteCommand — the remote invocation carries the no-shell-f
     // automated loop couldn't find a live attach rail. That shell's own eventual
     // close returned 255 — indistinguishable from a genuine network drop — so
     // `connected: true` (set as soon as the preflight probe succeeds) refilled the
-    // retry budget every cycle and the loop never terminated. With the guard, the
-    // remote refusal returns NO_ATTACH_RAIL_EXIT_CODE instead, and reconnectStep's
-    // own contract (any non-255 code stops) takes over from there.
+    // retry budget every cycle and the loop never terminated. With the guard AND
+    // the exit-code remap, the remote refusal (or the pre-fix shell's own eventual
+    // close, wrapped by wrapRemoteExitCode either way) can never surface as 255,
+    // and reconnectStep's own contract (any non-255 code stops) takes over.
     expect(NO_ATTACH_RAIL_EXIT_CODE).not.toBe(SSH_CONN_FAILURE);
     expect(reconnectStep(initialReconnectState(), { code: NO_ATTACH_RAIL_EXIT_CODE, connected: true })).toEqual({
       action: 'stop',
       code: NO_ATTACH_RAIL_EXIT_CODE,
+    });
+    expect(reconnectStep(initialReconnectState(), { code: REMOTE_EXIT_255_REMAPPED, connected: true })).toEqual({
+      action: 'stop',
+      code: REMOTE_EXIT_255_REMAPPED,
     });
   });
 });
