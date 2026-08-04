@@ -113,6 +113,7 @@ const PROJECTS_DIR = path.join(USER_AGENTS_DIR, 'projects');
 // History bucket (durable).
 const SESSIONS_DIR = path.join(HISTORY_DIR, 'sessions');
 const SESSIONS_DB_PATH = path.join(SESSIONS_DIR, 'sessions.db');
+const ANALYTICS_DIR = path.join(HISTORY_DIR, 'analytics');
 const VERSIONS_DIR = path.join(HISTORY_DIR, 'versions');
 const RUNS_DIR = path.join(HISTORY_DIR, 'runs');
 // Durable per-monitor state-diff store + fire history (last-seen value/hash,
@@ -136,7 +137,6 @@ const PACKAGES_DIR = path.join(CACHE_DIR, 'packages');
 // They live at the user-root so they're git-tracked as source of truth.
 const PLUGINS_DIR = path.join(USER_AGENTS_DIR, 'plugins');
 const CLOUD_DIR = path.join(CACHE_DIR, 'cloud');
-const DRIVE_DIR = path.join(CACHE_DIR, 'drive');
 const TERMINALS_DIR = path.join(CACHE_DIR, 'terminals');
 const LOGS_DIR = path.join(CACHE_DIR, 'logs');
 /** Disposable performance samples (~/.agents/.cache/perf/) — safe to wipe. */
@@ -418,6 +418,18 @@ export function getUserSecretsDir(): string { return USER_SECRETS_DIR; }
 export function getSecretsDbPath(): string {
   return process.env.AGENTS_SECRETS_DB ?? path.join(USER_SECRETS_DIR, 'secrets.db');
 }
+/**
+ * Path to the durable resource-usage warehouse (~/.agents/.history/analytics/usage.db).
+ * Value-free frequency/lifecycle events (secrets, agents, browser, …). Read at CALL
+ * time so AGENTS_USAGE_DB can redirect tests. Sync shards may also appear as
+ * usage.<machine-id>.db beside this default file.
+ */
+export function getAnalyticsDir(): string {
+  return process.env.AGENTS_ANALYTICS_DIR ?? ANALYTICS_DIR;
+}
+export function getUsageDbPath(): string {
+  return process.env.AGENTS_USAGE_DB ?? path.join(getAnalyticsDir(), 'usage.db');
+}
 export function getUserPromptcutsPath(): string { return USER_PROMPTCUTS_FILE; }
 
 // ─── User operational path getters ────────────────────────────────────────────
@@ -564,9 +576,6 @@ export function getProjectPluginsDir(cwd: string = process.cwd()): string | null
   return path.join(projectAgentsDir, 'plugins');
 }
 
-/** Path to synced remote session data (~/.agents/.cache/drive/). */
-export function getDriveDir(): string { return DRIVE_DIR; }
-
 /** Path to soft-deleted resources (~/.agents/.history/trash/). */
 export function getTrashDir(): string { return TRASH_DIR; }
 
@@ -574,7 +583,9 @@ export function getTrashDir(): string { return TRASH_DIR; }
 export function getSessionsDir(): string { return SESSIONS_DIR; }
 
 /** Path to the session index database (~/.agents/.history/sessions/sessions.db). */
-export function getSessionsDbPath(): string { return SESSIONS_DB_PATH; }
+export function getSessionsDbPath(): string {
+  return process.env.AGENTS_SESSIONS_DB ?? SESSIONS_DB_PATH;
+}
 
 /** Path to teams config + registry (~/.agents/teams/). */
 export function getTeamsDir(): string { return TEAMS_DIR; }

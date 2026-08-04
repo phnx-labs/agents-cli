@@ -416,7 +416,7 @@ export async function runDaemon(): Promise<void> {
   }
 
   // #416: host the secrets broker socket-first — before the scheduler and the
-  // heavy browser/session-sync services — so `agents secrets` resolves within
+  // heavy browser services — so `agents secrets` resolves within
   // ms of daemon start. Only host when no broker is already reachable, so we
   // never orphan a live standalone broker's clients (that broker stays the
   // server until it idle-exits or the daemon restarts). Best-effort: a failure
@@ -545,7 +545,7 @@ export async function runDaemon(): Promise<void> {
   // `catchup: false`, RUN late. Runs on a timer as well as at startup: a startup
   // pass alone misses a fire lost while the daemon stayed up but its event loop
   // was wedged, or one lost across an OS suspend that the process survived.
-  // Overlap guard, same shape as runSessionSync/runHealCheck below. A pass
+  // Overlap guard, same shape as runHealCheck below. A pass
   // awaits executeJobDetached per job and an off-box (host/cloud) dispatch can
   // block for a while, so a slow pass could still be working when the next tick
   // fires. Both passes would then see a job the first has not yet reached as
@@ -633,37 +633,6 @@ export async function runDaemon(): Promise<void> {
     writeHeartbeat();
     monitorRunningJobs();
   }, MONITOR_TICK_MS);
-
-  // Cross-machine session sync: push this machine's transcripts to R2 and pull
-  // every other machine's, ~every 90s. Skipped silently when the r2.backups
-  // bundle is absent. An overlap guard prevents a slow cycle from stacking.
-  let syncing = false;
-  const runSessionSync = async () => {
-    if (syncing) return;
-    syncing = true;
-    try {
-      const { isBetaEnabled } = await import('./beta.js');
-      // Off by default: session sync is an opt-in beta feature. Check the beta
-      // flag FIRST so a machine that hasn't opted in skips the keychain read
-      // (isSyncConfigured) entirely, not just the network cycle.
-      if (!isBetaEnabled('session-sync')) return;
-      const { isSyncConfigured } = await import('./session/sync/config.js');
-      if (!isSyncConfigured()) return;
-      const { syncSessions } = await import('./session/sync/sync.js');
-      const r = await syncSessions();
-      if (r.pushed || r.pulled || r.errors.length) {
-        log('INFO', `sessions sync: pushed ${r.pushed}, pulled ${r.pulled}, merged ${r.merged}` +
-          (r.errors.length ? `, ${r.errors.length} error(s): ${r.errors[0]}` : ''));
-      }
-      if (r.warnings.length) log('WARN', `sessions sync: ${r.warnings[0]}`);
-    } catch (err) {
-      log('ERROR', `sessions sync failed: ${(err as Error).message}`);
-    } finally {
-      syncing = false;
-    }
-  };
-  const syncInterval = setInterval(() => { void runSessionSync(); }, 90_000);
-  void runSessionSync(); // kick once at startup
 
   // Resource safety check: heal gaps between what DotAgents repos define and
   // what's actually installed in each agent home — the slow rot that nothing
@@ -823,13 +792,17 @@ export async function runDaemon(): Promise<void> {
   const launchHealthInterval = setInterval(() => { void runLaunchHealthCheck(); }, 6 * 60 * 60_000);
   const launchHealthKickoff = setTimeout(() => { void runLaunchHealthCheck(); }, 90_000);
 
-  // Fleet cache warm: keep the caches that `agents devices list`, `fleet status`,
-  // and `agents view` read cache-first actually fresh, so a default read never
-  // has to ssh out. Two cheap refreshes: (1) this host's auth-health verdicts
-  // (also feeds the `doctor --json` Auth rollup other hosts read), and (2) the
-  // fleet resource-stats cache (one bounded parallel probe of the tailnet). Both
-  // best-effort + overlap-guarded like the probes above. ~every 3 min, plus once
-  // ~60s after startup (staggered off launch).
+  // Fleet cache warm: publish THIS host's row for the caches `agents fleet
+  // status` / `agents devices list` read. PUBLISH-OWN / READ-UNION (RUSH-2061):
+  // each daemon probes only ITSELF and never SSHes another box, so the fleet no
+  // longer pays N² SSH resource probes every 3 minutes (N daemons × N devices) —
+  // the source of the fan-out storm AND the orphaned-probe pile-up. Two cheap
+  // self-only refreshes: (1) this host's auth-health verdicts (also feeds the
+  // `doctor --json` Auth rollup other hosts read), and (2) its fleet-status row
+  // (local resource probe + live-agent workload). Cross-host rows are unioned on
+  // demand by the reader (`agents fleet status`), not pushed by every daemon.
+  // Best-effort + overlap-guarded like the probes above; ~every 3 min, once ~60s
+  // after startup.
   let warmingFleetCache = false;
   const runFleetCacheWarm = async () => {
     if (warmingFleetCache) return;
@@ -842,13 +815,9 @@ export async function runDaemon(): Promise<void> {
       const authRows = await probeLocalFleetAuth({ cliVersion: getCliVersion() });
       writeFleetAuthRows(self, authRows);
 
-      const { loadDevices } = await import('./devices/registry.js');
-      const { planFleetTargets } = await import('./devices/fleet.js');
-      const { loadFleetStats } = await import('./devices/stats-cache.js');
-      const reg = await loadDevices();
-      const probeable = planFleetTargets(reg).filter((t) => !t.skip).map((t) => t.device);
-      const res = await loadFleetStats(probeable, { forceRefresh: true, selfName: self });
-      log('INFO', `fleet cache warm: ${authRows.length} auth row(s), ${res.stats.size} device stat(s)`);
+      const { publishLocalFleetStatus } = await import('./fleet-status.js');
+      const row = await publishLocalFleetStatus(self);
+      log('INFO', `fleet cache warm: ${authRows.length} auth row(s), ${row.agents.running} running agent(s) on ${self}`);
     } catch (err) {
       log('ERROR', `fleet cache warm failed: ${(err as Error).message}`);
     } finally {
@@ -857,6 +826,39 @@ export async function runDaemon(): Promise<void> {
   };
   const fleetCacheInterval = setInterval(() => { void runFleetCacheWarm(); }, 3 * 60_000);
   const fleetCacheKickoff = setTimeout(() => { void runFleetCacheWarm(); }, 60_000);
+
+  // Adaptive usage refresh: keep the usage cache the `agents run` router reads
+  // (RUSH-2061, readOnly hot path) fresh, WITHOUT the hot path ever fetching.
+  // This host is the sole writer for its own local accounts. The tick wakes at
+  // the 90s floor, but per-account cadence gates the actual live fetches: an
+  // account racing toward its 5h cap is polled sooner (down to 90s), an idle one
+  // rarely (up to 15min), capped at ~6 provider calls/account/hour and skipped
+  // entirely while its provider is under a 429 backoff. Overlap-guarded like the
+  // probes above; a box signed into no networked-usage account is a clean no-op.
+  let refreshingUsage = false;
+  const runUsageRefreshTick = async () => {
+    if (refreshingUsage) return;
+    refreshingUsage = true;
+    try {
+      const { runUsageRefresh, buildLocalUsageAccounts } = await import('./usage-refresh.js');
+      const { writeClaudeUsageCache } = await import('./usage.js');
+      const { usageRateLimitedUntil } = await import('./usage-backoff.js');
+      const r = await runUsageRefresh({
+        listAccounts: buildLocalUsageAccounts,
+        writeUsageCache: writeClaudeUsageCache,
+        backoffUntil: usageRateLimitedUntil,
+      });
+      if (r.refreshed > 0 || r.failed > 0) {
+        log('INFO', `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped`);
+      }
+    } catch (err) {
+      log('ERROR', `usage refresh failed: ${(err as Error).message}`);
+    } finally {
+      refreshingUsage = false;
+    }
+  };
+  const usageRefreshInterval = setInterval(() => { void runUsageRefreshTick(); }, 90_000);
+  const usageRefreshKickoff = setTimeout(() => { void runUsageRefreshTick(); }, 30_000);
 
   // RUSH-1817: the startup host decision above is one-shot. If a standalone
   // broker answered agentPing() at daemon start, the daemon declined to host —
@@ -921,9 +923,6 @@ export async function runDaemon(): Promise<void> {
     } catch (err) {
       log('ERROR', `Monitor engine reload failed: ${(err as Error).message}`);
     }
-    // Drop the memoized R2 config so rotated/added sync credentials are re-read
-    // on the next cycle instead of waiting for a restart.
-    void import('./session/sync/config.js').then(m => m.clearR2ConfigCache());
   };
 
   const handleShutdown = async () => {
@@ -932,7 +931,6 @@ export async function runDaemon(): Promise<void> {
     monitorEngine.stop();
     await browserIPC.stop();
     clearInterval(monitorInterval);
-    clearInterval(syncInterval);
     clearInterval(healInterval);
     clearTimeout(healKickoff);
     clearInterval(autoDispatchInterval);
@@ -945,6 +943,8 @@ export async function runDaemon(): Promise<void> {
     clearTimeout(launchHealthKickoff);
     clearInterval(fleetCacheInterval);
     clearTimeout(fleetCacheKickoff);
+    clearInterval(usageRefreshInterval);
+    clearTimeout(usageRefreshKickoff);
     clearInterval(brokerSelfHealInterval);
     hostedBroker?.close();
     removeDaemonPid();

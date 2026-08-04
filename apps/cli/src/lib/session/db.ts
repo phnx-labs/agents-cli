@@ -23,7 +23,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/05-sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 21;
+export const SCHEMA_VERSION = 22;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   cost_usd REAL,
   duration_ms INTEGER,
   model TEXT,
+  tool_call_count INTEGER,
   file_path TEXT NOT NULL,
   file_mtime_ms INTEGER,
   file_size INTEGER,
@@ -169,6 +170,7 @@ export interface SessionRow {
   cost_usd: number | null;
   duration_ms: number | null;
   model: string | null;
+  tool_call_count: number | null;
   file_path: string;
   file_mtime_ms: number | null;
   file_size: number | null;
@@ -472,6 +474,12 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     // so archived dirs would never be re-parsed and would stay NULL forever.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'spawned_team')) db.exec(`ALTER TABLE sessions ADD COLUMN spawned_team TEXT`);
+    db.exec(`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`);
+  }
+
+  if (fromVersion < 22) {
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'tool_call_count')) db.exec(`ALTER TABLE sessions ADD COLUMN tool_call_count INTEGER`);
     db.exec(`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`);
   }
 }
@@ -877,7 +885,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     id, short_id, agent, origin, routine_name, routine_run_id,
     version, account, timestamp, last_activity,
     project, cwd, git_branch, topic, label, message_count, token_count,
-    output_tokens, cost_usd, duration_ms, model,
+    output_tokens, cost_usd, duration_ms, model, tool_call_count,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
     pr_url, pr_number, worktree_slug, ticket_id, spawned_team, plan, todos,
     recent_directories_touched, linear_project, linear_project_url, machine,
@@ -886,7 +894,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     @id, @short_id, @agent, @origin, @routine_name, @routine_run_id,
     @version, @account, @timestamp, @last_activity,
     @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
-    @output_tokens, @cost_usd, @duration_ms, @model,
+    @output_tokens, @cost_usd, @duration_ms, @model, @tool_call_count,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
     @pr_url, @pr_number, @worktree_slug, @ticket_id, @spawned_team, @plan, @todos,
     @recent_directories_touched, @linear_project, @linear_project_url, @machine,
@@ -921,6 +929,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     cost_usd = excluded.cost_usd,
     duration_ms = excluded.duration_ms,
     model = excluded.model,
+    tool_call_count = excluded.tool_call_count,
     file_path = excluded.file_path,
     file_mtime_ms = excluded.file_mtime_ms,
     file_size = excluded.file_size,
@@ -1050,6 +1059,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     cost_usd: meta.costUsd ?? null,
     duration_ms: meta.durationMs ?? null,
     model: meta.model ?? null,
+    tool_call_count: meta.toolCallCount ?? null,
     file_path: meta.filePath,
     file_mtime_ms: scan?.fileMtimeMs ?? null,
     file_size: scan?.fileSize ?? null,
@@ -1185,6 +1195,7 @@ export function upsertSessionsBatch(
         cost_usd: meta.costUsd ?? null,
         duration_ms: meta.durationMs ?? null,
         model: meta.model ?? null,
+        tool_call_count: meta.toolCallCount ?? null,
         file_path: meta.filePath,
         file_mtime_ms: scan?.fileMtimeMs ?? null,
         file_size: scan?.fileSize ?? null,
@@ -1391,6 +1402,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     costUsd: row.cost_usd ?? undefined,
     durationMs: row.duration_ms ?? undefined,
     model: row.model ?? undefined,
+    toolCallCount: row.tool_call_count ?? undefined,
     version: row.version ?? undefined,
     account: row.account ?? undefined,
     topic: row.topic ?? undefined,

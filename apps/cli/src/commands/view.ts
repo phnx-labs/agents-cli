@@ -9,7 +9,7 @@
 import type { Command } from 'commander';
 import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
-import { visibleWidth, termLink } from '../lib/format.js';
+import { termLink } from '../lib/format.js';
 import ora from 'ora';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -90,10 +90,34 @@ import { renderHarnessDetail } from './harness.js';
 import { loadManifest, isStale } from '../lib/staleness/index.js';
 import { confirm } from '@inquirer/prompts';
 import { formatPath, isInteractiveTerminal, isPromptCancelled } from './utils.js';
-import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
+import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 
 /** Shared account identity formatter, re-exported for the view-specific tests. */
 export const accountColumnLabel = accountDisplayLabel;
+
+/**
+ * Overview (`agents view` with no agent filter) caps compact usage windows so
+ * multi-meter agents (Antigravity's four model quotas, Droid's three buckets)
+ * cannot force every row to pad past the terminal width and wrap. Single-agent
+ * views leave the cap unset and show every blocking window.
+ */
+const OVERVIEW_MAX_USAGE_WINDOWS = 2;
+
+/** Fixed width for the last-active column ("just now", "8h ago", "2d ago"). */
+const LAST_ACTIVE_COL_WIDTH = 10;
+
+/**
+ * Join fixed view columns with a consistent two-space gutter. Empty trailing
+ * columns are dropped so a row without an auth chip does not grow a dangling
+ * gutter, but interior empties stay padded so later columns stay aligned.
+ */
+export function joinViewColumns(cols: string[]): string {
+  // Trim only pure-trailing empty strings so auth/status can be absent without
+  // shifting earlier columns for rows that do carry them.
+  let end = cols.length;
+  while (end > 0 && cols[end - 1] === '') end--;
+  return cols.slice(0, end).join('  ');
+}
 
 /**
  * Custom harnesses (the `~/.agents/profiles/*.yml` bundles), sorted by name and
@@ -337,6 +361,8 @@ async function showInstalledVersions(
   const spinner = ora({ text: spinnerText, isSilent: !process.stdout.isTTY }).start();
 
   const agentsToShow = filterAgentId ? [filterAgentId] : ALL_AGENT_IDS;
+  // Overview caps meter count; single-agent view shows every blocking window.
+  const usageWindowCap = filterAgentId ? undefined : OVERVIEW_MAX_USAGE_WINDOWS;
 
   // A globally-installed CLI is superseded only by a NORMAL managed version — that
   // is when agents-cli owns the launcher and a "global" row would just be our own
@@ -363,7 +389,6 @@ async function showInstalledVersions(
         .map(async (agentId) => [agentId, await getUnmanagedCliState(agentId)] as const)
     )
   ) as Partial<Record<AgentId, CliState>>;
-  spinner.stop();
   const showPaths = !!filterAgentId;
   const harnesses = getHarnesses(filterAgentId);
 
@@ -387,13 +412,16 @@ async function showInstalledVersions(
   }
   // Shim healing is silent — users don't need to know about internal repairs
 
-  console.log(chalk.bold('Installed Agent CLIs\n'));
-
   const selfHost = machineId();
   // Read the auth-health cache once (not per version row — see the batching note above).
   const authCache = readAuthHealthCache();
 
-  // Pre-fetch account info for all versions in parallel
+  // Pre-fetch account info for all versions in parallel. Spinner stays up through
+  // account + usage so a multi-account cold path doesn't leave a blank terminal
+  // after "Checking…" vanishes (the hang the screenshots caught).
+  spinner.text = filterAgentId
+    ? `Loading ${agentLabel(filterAgentId)} accounts...`
+    : 'Loading accounts and usage...';
   const infoFetches: Promise<{ agentId: AgentId; version: string; home: string; info: AccountInfo }>[] = [];
   const globalInfoFetches: Promise<{ agentId: AgentId; cliVersion: string | null; info: AccountInfo }>[] = [];
   for (const agentId of agentsToShow) {
@@ -437,6 +465,7 @@ async function showInstalledVersions(
   // or org scope, not a specific installed version. Version homes cache those
   // values independently, so older installs can show stale values. Reuse the
   // freshest cache entry per stable usage identity and keep lastActive per version.
+  // Goes through the unified usage core (SWR cache + concurrency cap + timeout).
   const { canonicalByUsageKey, usageByKey } = await getUsageInfoByIdentity([
     ...infoResults.map(({ agentId, home, version, info }) => ({
       agentId,
@@ -450,6 +479,9 @@ async function showInstalledVersions(
       info,
     })),
   ], { forceRefresh: viewOpts?.forceRefresh });
+
+  spinner.stop();
+  console.log(chalk.bold('Installed Agent CLIs\n'));
 
   const mergeCanonical = (info: AccountInfo): AccountInfo => {
     const key = getUsageLookupKey(info);
@@ -552,7 +584,8 @@ async function showInstalledVersions(
         }
       }
     }
-    // Second pass: compute max visible usage + status widths (now that maxPlanWidth is settled)
+    // Second pass: compute max visible usage + status widths (now that maxPlanWidth is settled).
+    // stringWidth (not String.length) so chalk + block-bar glyphs pad correctly.
     for (const agentId of versionManaged) {
       const versions = listInstalledVersions(agentId);
       for (const v of versions) {
@@ -562,10 +595,14 @@ async function showInstalledVersions(
         const usageInfo = usageKey ? usageByKey.get(usageKey) : undefined;
         const usageUnavailable = agentReportsUsage(agentId) && !!info?.signedIn && !usageInfo?.snapshot;
         const usageUnverified = !!usageInfo?.snapshot && !!usageInfo.error;
-        const usageStr = formatUsageSummary(info?.plan || null, usageInfo?.snapshot || null, maxPlanWidth, { unavailable: usageUnavailable, unverified: usageUnverified });
-        maxUsageWidth = Math.max(maxUsageWidth, visibleWidth(usageStr));
+        const usageStr = formatUsageSummary(info?.plan || null, usageInfo?.snapshot || null, maxPlanWidth, {
+          unavailable: usageUnavailable,
+          unverified: usageUnverified,
+          maxWindows: usageWindowCap,
+        });
+        maxUsageWidth = Math.max(maxUsageWidth, stringWidth(usageStr));
         const statusStr = formatUsageStatusBadge(info?.usageStatus);
-        maxStatusWidth = Math.max(maxStatusWidth, visibleWidth(statusStr));
+        maxStatusWidth = Math.max(maxStatusWidth, stringWidth(statusStr));
       }
     }
 
@@ -610,18 +647,26 @@ async function showInstalledVersions(
         const usageKey = getUsageLookupKey(vInfo);
         const usageInfo = usageKey ? usageByKey.get(usageKey) : undefined;
 
-        // Build columns, trimming trailing whitespace when columns are empty
+        // Fixed columns for every signed-in row so status / lastActive / auth
+        // stay vertically aligned across agents — even when this row has no
+        // usage bars or no rate-limit badge. Skipping empty columns mid-table
+        // was what made the multi-agent view look unjustified next to
+        // `agents view claude`.
         const parts = [`    ${label}`];
         // Configured model — same priority as the version, right beside it.
         if (maxModelWidth > 0) {
           const model = modelByKey.get(`${agentId}:${version}`) ?? '';
-          parts.push(chalk.yellow(model.padEnd(maxModelWidth)));
+          parts.push(chalk.yellow(padToWidth(model, maxModelWidth)));
         }
         const hasEmail = !!vInfo?.email;
         const signedIn = !!vInfo?.signedIn;
         const usageUnavailable = agentReportsUsage(agentId) && signedIn && !usageInfo?.snapshot;
         const usageUnverified = !!usageInfo?.snapshot && !!usageInfo.error;
-        const usageStr = formatUsageSummary(vInfo?.plan || null, usageInfo?.snapshot || null, maxPlanWidth, { unavailable: usageUnavailable, unverified: usageUnverified });
+        const usageStr = formatUsageSummary(vInfo?.plan || null, usageInfo?.snapshot || null, maxPlanWidth, {
+          unavailable: usageUnavailable,
+          unverified: usageUnverified,
+          maxWindows: usageWindowCap,
+        });
         const hasUsage = usageStr.length > 0;
         // Only show lastActive for versions with an actual logged-in account.
         // Otherwise it reflects install time (misleading "just now" for fresh installs).
@@ -649,24 +694,21 @@ async function showInstalledVersions(
               : '(logged out — log in with: ' + loginHint(agentId) + ')',
           ));
         } else {
-          if (hasEmail || hasUsage || hasActive || signedIn) {
-            // Signed-in agents without a local email show their account id
-            // (Kimi's user_id) or a "signed in" placeholder (Antigravity) so they
-            // read as logged in, not blank.
-            const display = accountColumnLabel(vInfo);
-            const emailCol = display.padEnd(maxEmail);
-            parts.push(display ? chalk.cyan(emailCol) : ' '.repeat(maxEmail));
+          // Always emit account / usage / status / lastActive columns once any
+          // signed-in row exists in the table (widths are global). Empty cells
+          // are space-padded so later columns do not drift left.
+          const display = accountColumnLabel(vInfo);
+          parts.push(display ? chalk.cyan(padToWidth(display, maxEmail)) : ' '.repeat(maxEmail));
+          if (maxUsageWidth > 0) {
+            parts.push(padToWidth(usageStr, maxUsageWidth));
           }
-          if (hasUsage || hasActive) {
-            const usagePad = ' '.repeat(Math.max(0, maxUsageWidth - visibleWidth(usageStr)));
-            parts.push(usageStr + usagePad);
-          }
-          const statusStr = formatUsageStatusBadge(vInfo?.usageStatus);
           if (maxStatusWidth > 0) {
-            const statusPad = ' '.repeat(Math.max(0, maxStatusWidth - visibleWidth(statusStr)));
-            parts.push(statusStr + statusPad);
+            const statusStr = formatUsageStatusBadge(vInfo?.usageStatus);
+            parts.push(padToWidth(statusStr, maxStatusWidth));
           }
-          if (hasActive) parts.push(activeStr);
+          // Fixed-width lastActive so the auth chip (●/○/◐) lines up even when
+          // some rows have no email-derived lastActive.
+          parts.push(hasActive ? padToWidth(activeStr, LAST_ACTIVE_COL_WIDTH) : ' '.repeat(LAST_ACTIVE_COL_WIDTH));
         }
         if (runDefaultBits.length > 0) {
           parts.push(chalk.gray(`run ${runDefaultBits.join(' ')}`));
@@ -674,7 +716,7 @@ async function showInstalledVersions(
         const authChip = liveAuthChip(authCache, selfHost, agentId, version);
         if (authChip) parts.push(authChip);
 
-        console.log(parts.join('  '));
+        console.log(joinViewColumns(parts));
         if (showPaths) {
           const versionDir = getVersionDir(agentId, version);
           console.log(chalk.gray(`      ${versionDir}`));
@@ -707,17 +749,24 @@ async function showInstalledVersions(
         return `${cliState?.version || 'installed'} (global)`.length;
       })
     );
-    // Pre-pass: max badge width so rows with `lastActive` line up whether or
-    // not THIS row carries a throttle badge. Without this, the row that DOES
-    // have "out of credits" shifts every other row's `lastActive` left by
-    // ~16 chars, exactly what the version-managed block at maxStatusWidth
-    // already solves above.
+    // Pre-pass: max badge/usage/email widths so columns line up the same way
+    // the version-managed block does (stringWidth for chalk-aware padding).
     let gMaxStatusWidth = 0;
+    let gMaxUsageWidth = 0;
+    let gMaxEmail = 0;
     for (const agentId of globallyInstalled) {
       const gInfoRaw = globalInfoMap.get(agentId);
       const gInfo = gInfoRaw ? mergeCanonical(gInfoRaw) : undefined;
-      const w = visibleWidth(formatUsageStatusBadge(gInfo?.usageStatus));
-      if (w > gMaxStatusWidth) gMaxStatusWidth = w;
+      gMaxStatusWidth = Math.max(gMaxStatusWidth, stringWidth(formatUsageStatusBadge(gInfo?.usageStatus)));
+      const gUsageKey = getUsageLookupKey(gInfo);
+      const gUsage = gUsageKey ? usageByKey.get(gUsageKey) : undefined;
+      const gUsageStr = formatUsageSummary(gInfo?.plan || null, gUsage?.snapshot || null, 3, {
+        unverified: !!gUsage?.snapshot && !!gUsage.error,
+        maxWindows: usageWindowCap,
+      });
+      gMaxUsageWidth = Math.max(gMaxUsageWidth, stringWidth(gUsageStr));
+      const gDisplay = accountColumnLabel(gInfo);
+      if (gDisplay) gMaxEmail = Math.max(gMaxEmail, gDisplay.length);
     }
 
     for (const agentId of globallyInstalled) {
@@ -735,20 +784,19 @@ async function showInstalledVersions(
       const gUsage = gUsageKey ? usageByKey.get(gUsageKey) : undefined;
       const gUsageStr = formatUsageSummary(gInfo?.plan || null, gUsage?.snapshot || null, 3, {
         unverified: !!gUsage?.snapshot && !!gUsage.error,
+        maxWindows: usageWindowCap,
       });
       const gActiveStr = gInfo ? formatLastActive(gInfo.lastActive) : '';
       if (gInfo?.email || gUsageStr || gActiveStr || gInfo?.signedIn) {
         const gDisplay = accountColumnLabel(gInfo);
-        parts.push(gDisplay ? chalk.cyan(gDisplay) : '');
+        parts.push(gDisplay ? chalk.cyan(padToWidth(gDisplay, gMaxEmail)) : ' '.repeat(gMaxEmail));
       }
-      if (gUsageStr || gActiveStr) parts.push(gUsageStr);
-      const gStatusStr = formatUsageStatusBadge(gInfo?.usageStatus);
+      if (gMaxUsageWidth > 0) parts.push(padToWidth(gUsageStr, gMaxUsageWidth));
       if (gMaxStatusWidth > 0) {
-        const statusPad = ' '.repeat(Math.max(0, gMaxStatusWidth - visibleWidth(gStatusStr)));
-        parts.push(gStatusStr + statusPad);
+        parts.push(padToWidth(formatUsageStatusBadge(gInfo?.usageStatus), gMaxStatusWidth));
       }
-      if (gActiveStr) parts.push(gActiveStr);
-      console.log(parts.join('  '));
+      if (gActiveStr) parts.push(padToWidth(gActiveStr, LAST_ACTIVE_COL_WIDTH));
+      console.log(joinViewColumns(parts));
       if (showPaths && cliState?.path) {
         console.log(chalk.gray(`      ${cliState.path}`));
       }

@@ -11,6 +11,8 @@ import {
   readinessFromCandidate,
   matchAccountVersion,
   isUsageVerified,
+  capacityWeight,
+  PROJECTION_HORIZON_MIN,
   type RotateCandidate,
   type RotateResult,
   type FailoverArmingContext,
@@ -33,6 +35,7 @@ function candidate(over: Partial<RotateCandidate> & { version: string }): Rotate
     usageStatus: 'available',
     usageSnapshot: null,
     usageError: null,
+    usageMinutesToLimit: null,
     plan: 'Max',
     signedIn: true,
     lastActive: null,
@@ -481,5 +484,35 @@ describe('--strategy available applies the same freshness rule as balanced', () 
     const result = pickAvailableCandidate([stale, verified], '2.1.181', NOW)!;
 
     expect(result.picked.version).toBe('2.1.181');
+  });
+});
+
+describe('capacityWeight — deprioritizes an account projected to cap soon', () => {
+  it('is weekly headroom when there is no projection', () => {
+    expect(capacityWeight(null, null)).toBe(100);
+    expect(capacityWeight(50, null)).toBe(50);
+    expect(capacityWeight(90, null)).toBe(10);
+  });
+
+  it('keeps full weight for an account comfortably far from its cap', () => {
+    // >= the horizon (or unknown) => factor 1, weight unchanged.
+    expect(capacityWeight(50, PROJECTION_HORIZON_MIN)).toBe(50);
+    expect(capacityWeight(50, PROJECTION_HORIZON_MIN * 3)).toBe(50);
+  });
+
+  it('scales the weight down as the projected cap approaches', () => {
+    // Half the horizon => half the weight; a few minutes out => near the floor.
+    expect(capacityWeight(50, PROJECTION_HORIZON_MIN / 2)).toBeCloseTo(25, 5);
+    expect(capacityWeight(50, 3)).toBeCloseTo(5, 5);
+    // Projected to cap right now (minutesToLimit 0) => floored at 1, not 0.
+    expect(capacityWeight(50, 0)).toBe(1);
+  });
+
+  it('makes a fast-burning account strictly less likely than an idle one at the SAME usage', () => {
+    // The whole point: two accounts read 50% used, but one is racing toward its
+    // 5h cap. It must weigh less so balanced routing avoids it.
+    const burningFast = capacityWeight(50, 3);
+    const idle = capacityWeight(50, null);
+    expect(burningFast).toBeLessThan(idle);
   });
 });

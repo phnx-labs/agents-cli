@@ -1,18 +1,21 @@
 /**
- * Configuration for cross-machine session sync: R2 credentials and this
- * machine's stable identity. Credentials come from the `r2.backups` secrets
- * bundle (OS keychain on macOS, libsecret on Linux) — never from env or disk.
+ * R2 credential resolution + this machine's stable identity. The only field
+ * `agents sessions export --encrypt` / `import` actually consume is the
+ * shared `R2_SYNC_ENC_KEY` transcript key (`resolveSyncEncKey`); the other R2
+ * fields (account/bucket/access keys) are validated here as a presence gate —
+ * no `r2.backups` bundle configured means no shared key, so export/import
+ * fall back to an ephemeral one. There is no R2 network client in this
+ * codebase today (it moved with the rest of the R2/CRDT background sync this
+ * bundle used to back — see git history for `./r2.ts`); a future R2-backed
+ * feature (an export destination, a fleet cache) would add one where it's
+ * actually wired. Credentials come from the `r2.backups` secrets bundle (OS
+ * keychain on macOS, libsecret on Linux) — never from env or disk.
  */
 
 import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../../secrets/bundles.js';
 
 /** Secrets bundle holding the R2 credentials. */
 export const SYNC_BUNDLE = 'r2.backups';
-
-// Whether the daemon runs automatic cross-machine sync is gated by the
-// `session-sync` beta feature (opt-in, off by default) — see isBetaEnabled()
-// in ../../beta.ts and the gates in daemon.ts / sync-umbrella.ts. This module
-// only owns credential resolution (isSyncConfigured), not the on/off switch.
 
 export interface R2Config {
   accountId: string;
@@ -25,8 +28,8 @@ export interface R2Config {
    * Shared 32-byte key (hex or base64) for client-side transcript encryption,
    * held in the bundle as `R2_SYNC_ENC_KEY`. Optional and deliberately separate
    * from the R2 credentials so rotating the access token never orphans already
-   * encrypted objects. When absent, transcripts upload unencrypted (with a loud
-   * per-cycle warning) — see transcript-crypto.ts + pushOwn.
+   * encrypted bundles. `agents sessions export --encrypt` prefers this key when
+   * present, else mints and prints an ephemeral one — see transcript-crypto.ts.
    */
   syncEncKey?: string;
 }
@@ -37,13 +40,13 @@ export interface R2Config {
  * without real credentials (no silent fallback).
  */
 function resolveR2Config(): R2Config {
-  // The daemon monitor loop is headless by construction (no TTY, ever), so
-  // isHeadlessSecretsContext() is true here and this resolves broker-only — a
-  // broker miss can never pop an unattended Touch ID sheet on the user's screen
-  // (the same broker-only-when-headless rationale the secrets readers use). Using
-  // the shared predicate rather than a literal keeps it consistent with the other callers
-  // and lets any interactive caller of loadR2Config still prompt.
-  const { env } = readAndResolveBundleEnv(SYNC_BUNDLE, { caller: 'sessions-sync', agentOnly: isHeadlessSecretsContext() });
+  // A headless caller (no TTY — e.g. a routine or SSH-dispatched command) must
+  // resolve broker-only: isHeadlessSecretsContext() true means a broker miss
+  // can never pop an unattended Touch ID sheet on the user's screen (the same
+  // broker-only-when-headless rationale the secrets readers use). Using the
+  // shared predicate rather than a literal keeps it consistent with the other
+  // callers and lets any interactive caller of loadR2Config still prompt.
+  const { env } = readAndResolveBundleEnv(SYNC_BUNDLE, { caller: 'session-transport', agentOnly: isHeadlessSecretsContext() });
   const accountId = env.R2_ACCOUNT_ID?.trim();
   const bucket = env.R2_BUCKET_NAME?.trim();
   const accessKeyId = env.R2_ACCESS_KEY_ID?.trim();
@@ -58,7 +61,7 @@ function resolveR2Config(): R2Config {
   ].filter(Boolean);
   if (missing.length > 0) {
     throw new Error(
-      `Sessions sync: bundle '${SYNC_BUNDLE}' is missing ${missing.join(', ')}. ` +
+      `Session R2 transport: bundle '${SYNC_BUNDLE}' is missing ${missing.join(', ')}. ` +
       `Add them with: agents secrets add ${SYNC_BUNDLE} <KEY>`,
     );
   }
@@ -69,8 +72,8 @@ function resolveR2Config(): R2Config {
     accessKeyId: accessKeyId!,
     secretAccessKey: secretAccessKey!,
     // Default to the account's R2 endpoint; an explicit R2_ENDPOINT override
-    // points sync at any S3-compatible store (MinIO, another provider) — which
-    // is also how the feature is verified end-to-end without live R2.
+    // points at any S3-compatible store (MinIO, another provider) — which is
+    // also how the feature is verified end-to-end without live R2.
     endpoint: env.R2_ENDPOINT?.trim() || `https://${accountId}.r2.cloudflarestorage.com`,
     syncEncKey,
   };

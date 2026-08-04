@@ -4,7 +4,7 @@
 
 > **Implementation (#416, steps 1 & 2 — landed):** the daemon hosts the broker
 > socket-first. `runDaemon()` calls `startHostedBroker()` before the scheduler
-> and the heavy browser/session-sync services, so `agents secrets` resolves
+> and the heavy browser services, so `agents secrets` resolves
 > within ms of daemon start; it only hosts when no broker is already reachable,
 > so a live standalone broker is never orphaned.
 >
@@ -41,7 +41,6 @@ into the routines daemon.*
 
 - the cron **scheduler** (`JobScheduler`),
 - `BrowserService` + `BrowserIPCServer` (a socket server),
-- **session-sync** to R2 every 90s,
 - overdue-job detection + native notification on startup,
 - orphan-process reaping,
 - a 60s monitor interval.
@@ -119,7 +118,7 @@ blast radius.
 - The daemon must become **always-on** (start for any background need, not only
   `routines add`) and **single-instance** (the PID-null/duplicate bugs are
   fixed, not tolerated).
-- In `runDaemon()`, **bind the broker socket before** the browser/session-sync
+- In `runDaemon()`, **bind the broker socket before** the browser
   setup, so secrets resolution is available within milliseconds of daemon start
   even while the heavier services initialize.
 - Heavy/crash-prone work stays in child processes so a failure there can't take

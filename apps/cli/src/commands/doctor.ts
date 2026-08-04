@@ -69,7 +69,7 @@ import { isVersionIsolated } from '../lib/versions.js';
 import { computeDrift, checkSyncStatus, countOrphans, computeSourceBehind, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
 import { readAuthHealthCache, summarizeHostAuth } from '../lib/auth-health.js';
 import { unifiedDiff, colorizeUnifiedDiff } from '../lib/diff-text.js';
-import { listCliStatus } from '../lib/cli-resources.js';
+import { listCliStatus, listCliStatusAsync } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
 import { heal, healChangedAnything, type HealResult } from '../lib/heal.js';
 import { getEffectiveExecutionPolicy } from '../lib/platform/winpath.js';
@@ -1508,7 +1508,10 @@ export function registerDoctorCommand(program: Command): void {
         const clis = checkAllClis();
         const syncRows = checkSyncStatus(cwd);
         const orphanRows = countOrphans();
-        const hostClis = listCliStatus(cwd);
+        // Parallel host-CLI probe (RUSH-2136): the serial spawnSync version ran a
+        // dozen+ blocking 10s-timeout checks one after another, which measured
+        // ~136s on an idle box and stalled the menu-bar helper's poll.
+        const hostClis = await listCliStatusAsync(cwd);
         const repoBehindMarkers = readRepoBehindMarkers();
         // The local inventory now carries per-version sign-in (RUSH-2069), so it
         // is the single source for both the accounts line and the logged-out

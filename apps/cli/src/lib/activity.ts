@@ -170,6 +170,12 @@ export interface ActivityEvent {
   tool?: string;
   /** One-line human summary (plan title, PR command, sub-agent role, status text). */
   detail?: string;
+  /**
+   * Short subject for deliberate status posts (`feed post --title`). Phone
+   * broadcasts put this on the first line; `detail` is the body. Optional on
+   * older events that only carried `detail`.
+   */
+  title?: string;
   /** Extracted URL when the event has one (e.g. the opened PR). */
   url?: string;
   /** Auto-stamped process identity for deliberate posts (from pid registry / env). */
@@ -270,6 +276,7 @@ function parseLine(line: string): ActivityEvent | undefined {
       kind: parsed.kind,
       tool: parsed.tool,
       detail: parsed.detail,
+      title: typeof parsed.title === 'string' ? parsed.title : undefined,
       url: parsed.url,
       pid: typeof parsed.pid === 'number' ? parsed.pid : undefined,
       launchId: parsed.launchId,
@@ -569,6 +576,7 @@ export function formatProgressUpdate(ev: ActivityEvent, opts: { joined?: Progres
   ].filter((c): c is string => Boolean(c));
   if (chips.length > 0) lines.push(`    ${chalk.gray(chips.join(' · '))}`);
 
+  if (ev.title) lines.push(`    ${chalk.white.bold(ev.title)}`);
   if (ev.detail) lines.push(`    ${chalk.white(`"${ev.detail}"`)}`);
 
   if (ev.attachments?.length) {

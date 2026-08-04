@@ -436,16 +436,13 @@ so an asleep box would otherwise be indistinguishable from an empty result.
 
 **`--host` is the default cross-machine recall path.** Online machines are the norm,
 so a live pull covers almost all recall with zero storage, zero lag, and no daemon —
-always current, nothing to configure beyond SSH. The two mechanisms below are for the
-cases a live pull can't reach: a machine that is **offline / asleep / decommissioned**.
+always current, nothing to configure beyond SSH. Export/import (below) is the
+mechanism for the case a live pull can't reach: a machine that is
+**offline / asleep / decommissioned**.
 
 - **Export / import (portable bundles)** — user-driven, no daemon. Bundle the sessions
   you want and carry them anywhere, or pull them off a peer in one command. This is the
-  primary durable-archive / hand-off tool (below).
-- **R2 + CRDT background sync** — an **opt-in beta, off by default**. A backup fabric for
-  the "every machine's sessions show up automatically, even offline" case. Prefer
-  on-demand `--host` reads and explicit export/import; reach for sync only when you want
-  a passive always-on mirror (further below).
+  durable-archive / hand-off tool (below).
 
 ### Resolving a session id across the fleet
 
@@ -738,15 +735,23 @@ when `--encrypt` is on. Selection reuses the same flags as `agents sessions`
 (`--since`, `-n/--limit`, `--all`, `-a/--agent`, `--no-redact`); dir-shaped sessions
 (Kimi) carry all their constituent files.
 
-**Import placement reuses the sync mirror model verbatim.** Each session lands at
-`~/.agents/.history/backups/<agent>/<origin-machine>/<subdir>/<relKey>` — the same
-scan root cross-machine sync writes to — so imported sessions show up in
+**Encryption key.** `--encrypt` prefers the shared `R2_SYNC_ENC_KEY` from the
+`r2.backups` secrets bundle (so any machine holding that bundle can decrypt), or
+mints and prints an ephemeral key once — never stored — when the bundle isn't
+configured. `agents sessions import` decrypts with the same bundle key, or an
+explicit `--decrypt <key>` for an ephemeral one. Credentials come from that
+keychain bundle only, never env or disk (`src/lib/session/sync/config.ts`).
+
+**Import placement reuses the same per-agent mirror layout as a live remote
+listing.** Each session lands at
+`~/.agents/.history/backups/<agent>/<origin-machine>/<subdir>/<relKey>`
+(`src/lib/session/sync/agents.ts`), so imported sessions show up in
 `agents sessions` tagged with their origin machine and **never overwrite your own
 local sessions** ("local always wins" falls out of the scanner's live-home-first
 dedup, no extra logic). Dedup is byte-exact: a bundle file identical to one already on
 disk is skipped; a file that differs is a conflict, kept local unless `--overwrite`.
 `--from-host` reuses the exact SSH transport as the cross-machine listing
-(`resolveExplicitTargets` + `ssh-exec`) — no second transport, no R2, no daemon.
+(`resolveExplicitTargets` + `ssh-exec`) — no second transport, no daemon.
 Source: `src/lib/session/bundle.ts`, `src/lib/session/remote-bundle.ts`,
 `src/commands/sessions-export.ts`, `src/commands/sessions-import.ts`.
 
@@ -822,95 +827,6 @@ session's `from → to`, mode, move-vs-copy, and status; a session that hops A�
 three lines, its lineage. Source: `src/commands/sessions-migrate.ts`,
 `src/lib/session/migrate-targets.ts`, `src/lib/session/migrations.ts`.
 
-## Cross-machine sync (R2 + CRDT)
-
-> **Opt-in beta, off by default — a backup fabric, not the primary recall path.**
-> Prefer `--host` (live) and export/import (portable) above. Sync exists for the
-> "sessions from an offline machine show up automatically in plain `agents sessions`"
-> case; enable it only if you want that passive mirror.
-
-`agents sessions sync` copies transcripts between your machines through a single
-Cloudflare R2 bucket, so every machine's `agents sessions` list folds in the others'
-sessions without any of them being reachable at query time (the offline-tolerant
-counterpart to `--host`). Claude and Codex today; adding an agent is one entry in
-`SYNC_AGENTS` (`src/lib/session/sync/agents.ts`).
-
-```bash
-agents sessions sync              # one cycle: push local changes, pull + merge peers'
-agents sessions sync --verbose    # log each pushed / pulled session
-agents sessions sync --status     # is auto-sync opted-in? are credentials configured?
-agents sessions sync --setup      # provision the r2.backups bundle (guided)
-agents sessions sync --enable     # opt in to background auto-sync (beta); --disable to stop
-```
-
-It is an **opt-in beta, off by default**. A bare `agents sessions sync` always forces
-one manual cycle; the daemon only syncs on its own (~90s) once you
-`agents beta enable session-sync` (aliased by `--enable`).
-
-### How it converges
-
-Each machine is the **single writer** of its own R2 prefix — no two machines ever write
-the same object, so remote contention is impossible by construction:
-
-```
-sessions/<machine>/manifest.json               # what this machine holds (sessionId -> hash, size, lastTs)
-sessions/<machine>/<agent>/<sessionId>.jsonl    # one object per transcript
-```
-
-**Push** walks this machine's live transcripts, skips the ones an on-disk ledger shows
-unchanged (size + mtime), uploads the rest, then publishes the manifest.
-**Pull** lists every *other* machine's prefix, reads their manifests, fetches the
-transcripts they hold that this machine doesn't, and writes the result into a mirror
-that is already a scan root:
-
-```
-~/.agents/.history/backups/<agent>/<machine>/<subdir>/<relKey>
-```
-
-The scanner indexes the mirror like any other session dir, and dedups by session id with
-the **live home scanned first** — so a session you also have locally always wins; the
-mirror only ever fills in sessions that originated elsewhere.
-
-When the *same* session exists on more than one machine (you resumed it on two boxes), the
-copies are merged as a **CRDT G-Set union**: a transcript is an append-only log of
-immutable events, each event identified by the SHA-256 of its raw line bytes, so union is
-associative, commutative, and idempotent — every machine derives byte-identical merged
-output regardless of sync order, with zero conflict resolution and zero data loss
-(`src/lib/session/sync/crdt.ts`). Identical/subset copies return verbatim (steady state
-never rewrites unchanged files); only a true fork (each side holds lines the other lacks)
-produces a reordered union, sorted by `(timestamp, hash)` so the result is deterministic
-across machines. A machine that was **offline** re-pulls automatically when it returns: a
-peer's manifest hash for a grown session no longer matches the puller's recorded
-signature, so the session is re-fetched and re-merged.
-
-### Encryption
-
-Transcripts carry secrets, tokens, and absolute paths, so each object **body** is sealed
-client-side with **AES-256-GCM** before it leaves the machine (`transcript-crypto.ts`).
-The 32-byte key (`R2_SYNC_ENC_KEY`) lives in the same `r2.backups` bundle every synced
-machine shares, and never reaches Cloudflare — the bucket only ever stores ciphertext.
-The key is deliberately separate from the R2 access key so rotating the R2 token never
-orphans already-encrypted transcripts. CRDT identity stays over **plaintext**: the
-manifest hash is computed on the cleartext (a fresh random IV makes ciphertext
-non-deterministic), and pull decrypts before the union sees any bytes. If the bundle
-carries no key, sync still runs but uploads unencrypted and warns loudly once per cycle.
-
-### Credentials
-
-Credentials come from the `r2.backups` secrets bundle (OS keychain on macOS, libsecret /
-encrypted file on Linux) — never from env or disk (`config.ts`):
-
-| Key | Purpose |
-|---|---|
-| `R2_ACCOUNT_ID` | Cloudflare account (also derives the S3 endpoint) |
-| `R2_BUCKET_NAME` | Target bucket |
-| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | R2 S3 API token — **Object Read & Write** (a read-only token pushes 403, pulls fine) |
-| `R2_SYNC_ENC_KEY` | Shared 32-byte transcript key (hex or base64); auto-generated by `--setup` |
-
-Resolution is memoized once per process, so the ~90s daemon loop never re-prompts a
-biometry-gated keychain. `agents sessions sync --setup` provisions the bundle end to end,
-generating the encryption key if absent.
-
 ## Schema Version
 
 Schema version is tracked by the `SCHEMA_VERSION` constant in
@@ -922,6 +838,71 @@ work-signal columns `pr_url` / `pr_number` / `worktree_slug` / `ticket_id`, the
 `plan` markdown, `output_tokens`, `is_team_origin`, and `spawned_team`. A migration that changes how
 a column is derived forces a full rescan so every existing session is re-derived
 (as the pricing columns once did).
+
+## Benchmarks
+
+Two harnesses cover the session-query paths; both live in [`bench/`](../bench):
+
+| Harness | Covers | Gating? |
+|---|---|---|
+| [`bench/sessions-perf.ts`](../bench/sessions-perf.ts) | The local discover/search pipeline: cold/warm `discoverSessions`, a single picker keystroke, 10 successive keystrokes (typing), `searchContentIndex` alone. | No — informational, `continue-on-error` in `bench.yml`. |
+| [`bench/sessions-active-perf.ts`](../bench/sessions-active-perf.ts) | The **distributed** paths: `--active --local` (the RUSH-2118 regression) and `--host <peer>` (the cross-fleet fan-out). | **Yes** for this one step — see below. |
+
+### `--active --local` and `--host` (`sessions-active-perf.ts`)
+
+Two parts, run in one script:
+
+- **A. `--active --local` guard.** Builds N synthetic remote-host teammates
+  (the shape `agents teams add --device` produces) mixing still-RUNNING and
+  already-terminal statuses, then times `AgentManager(..., localOnly=true).listAll()`
+  — the exact call `agents sessions --active --local` makes. A stub `ssh`
+  shadowing the real binary on PATH turns any dial attempt into a recorded
+  violation: RUSH-2118 was exactly this — a `--local` query firing a real ssh
+  round-trip per remote-host teammate, on every poll, whether or not the
+  teammate had already finished (measured at 180 ssh calls / ~4.3s on a
+  30-teammate fixture before the fix). A **positive control** run
+  (`localOnly: false` against one still-RUNNING teammate, which legitimately
+  should dial) asserts the shim actually observes a real call first — without
+  it, a shim that silently stopped intercepting would make the guard pass for
+  the wrong reason.
+- **B. `--host <peer>` distributed fan-out.** No live fleet is reachable in
+  CI, and GitHub-hosted runners don't run sshd, so the SSH boundary is mocked
+  by shimming `ssh` on PATH: it sleeps a configurable per-call latency then
+  returns a canned `--active --json` payload. The bench asserts the fan-out
+  against N synthetic peers stays close to **one** round trip, not N — a
+  regression here means `Promise.all` silently became sequential.
+
+Both assert a threshold and exit 1 on violation:
+
+```bash
+bun bench/sessions-active-perf.ts
+# BENCH_LOCAL_THRESHOLD_MS   (default 500)  — Part A latency ceiling
+# BENCH_REMOTE_TEAMMATES     (default 30)   — synthetic teammate count
+# BENCH_FAN_OUT_PEERS        (default 8)    — synthetic peer count
+# BENCH_PEER_LATENCY_MS      (default 60)   — per-peer shimmed ssh latency
+# BENCH_PARALLELISM_FACTOR   (default 3)    — Part B threshold = latency × factor
+```
+
+Wired into `.github/workflows/bench.yml` as the one **gating** step in that
+workflow (every other bench step is `continue-on-error`) — a lightweight
+threshold assertion, not a full perf suite, so the correctness test
+(`agents.remote-poll.test.ts`, gates every PR) and this latency guard cover
+the regression from two angles.
+
+Measured baseline (this repo, 2026-08-04, `bun v24.3.0`):
+
+```
+A. --active --local (30 synthetic remote-host teammates): best 2.6ms, 0 ssh calls
+   (positive control observed 6 call(s)) — PASS
+B. --host fan-out (8 synthetic peers, 60ms/call): best 68.2ms
+   (parallelism threshold 180ms) — PASS
+```
+
+For comparison, [`scripts/bench-ssh.mjs`](../scripts/bench-ssh.mjs) measures
+the real-network-latency side of the shared SSH transport against a live
+fleet host (see [Optimizations §OPT-02](99-optimizations.md#opt-02-ssh-transport--one-multiplexed-engine));
+`sessions-active-perf.ts` is its CI-safe counterpart for the sessions
+fan-out specifically.
 
 ## Related
 

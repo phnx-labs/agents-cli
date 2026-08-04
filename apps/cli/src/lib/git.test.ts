@@ -349,6 +349,49 @@ describe('commitAndPush (clean-but-ahead + dirty)', () => {
     await simpleGit().clone(remote, verify);
     expect(fs.readFileSync(path.join(verify, 'safe-push.txt'), 'utf8')).toBe('ok\n');
   });
+
+  // #1061: `agents publish --branch dev` must land the index on `dev`, not on
+  // the checked-out `main`. commitAndPush(local, msg, 'dev') pushes to origin/dev
+  // and reports branch: 'dev' so the printed raw URL references where it landed.
+  it('pushes to a named target branch, not the checked-out one', async () => {
+    fs.writeFileSync(path.join(local, 'skills-index.json'), '{"skills":[]}\n');
+    const res = await commitAndPush(local, 'publish index', 'dev');
+    expect(res.success).toBe(true);
+    expect(res.pushed).toBe(true);
+    expect(res.branch).toBe('dev');
+
+    // origin/dev carries the index...
+    const onDev = path.join(root, 'verify-dev');
+    await simpleGit().clone(remote, onDev, ['--branch', 'dev']);
+    expect(fs.existsSync(path.join(onDev, 'skills-index.json'))).toBe(true);
+
+    // ...and origin/main does NOT (the bug: index landed on main regardless).
+    const onMain = path.join(root, 'verify-main');
+    await simpleGit().clone(remote, onMain, ['--branch', 'main']);
+    expect(fs.existsSync(path.join(onMain, 'skills-index.json'))).toBe(false);
+  });
+
+  // #1061: a target-branch push must run even from a clean, not-ahead tree —
+  // the `pushedBranch === branch` guard narrows the "already up to date"
+  // short-circuit so it never swallows a push to a new branch. No dirty file
+  // here, so `committed` is false and `ahead` is 0; the push must still land.
+  it('pushes to a new target branch from a clean, not-ahead tree', async () => {
+    const pre = await simpleGit(local).status();
+    expect(pre.isClean()).toBe(true);
+    expect(pre.ahead).toBe(0);
+
+    const res = await commitAndPush(local, 'noop', 'dev');
+    expect(res.success).toBe(true);
+    expect(res.committed).toBe(false);
+    expect(res.pushed).toBe(true);
+    expect(res.branch).toBe('dev');
+    expect(res.detail).not.toBe('already up to date');
+
+    // origin/dev now exists and carries the same tree as main (README.md).
+    const onDev = path.join(root, 'verify-clean-dev');
+    await simpleGit().clone(remote, onDev, ['--branch', 'dev']);
+    expect(fs.existsSync(path.join(onDev, 'README.md'))).toBe(true);
+  });
 });
 
 describe('pullRepo reconciliation', () => {

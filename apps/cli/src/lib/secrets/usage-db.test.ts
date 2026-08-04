@@ -22,19 +22,21 @@ import {
 const tmpDirs: string[] = [];
 let prevNoTrack: string | undefined;
 let prevDbPath: string | undefined;
+let prevSecretsDb: string | undefined;
 
 function pinDb(): string {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-usage-db-'));
   tmpDirs.push(d);
-  const dbPath = path.join(d, 'secrets.db');
-  process.env.AGENTS_SECRETS_DB = dbPath;
+  const dbPath = path.join(d, 'usage.db');
+  process.env.AGENTS_USAGE_DB = dbPath;
+  process.env.AGENTS_SECRETS_DB = path.join(d, 'secrets-legacy.db');
   return dbPath;
 }
 
 beforeEach(() => {
   prevNoTrack = process.env.AGENTS_NO_USAGE_TRACK;
-  prevDbPath = process.env.AGENTS_SECRETS_DB;
-  // Recording is disabled by the hermetic default; opt back in for these tests.
+  prevDbPath = process.env.AGENTS_USAGE_DB;
+  prevSecretsDb = process.env.AGENTS_SECRETS_DB;
   delete process.env.AGENTS_NO_USAGE_TRACK;
   closeSecretsUsageDb();
   pinDb();
@@ -44,8 +46,10 @@ afterEach(() => {
   closeSecretsUsageDb();
   if (prevNoTrack === undefined) delete process.env.AGENTS_NO_USAGE_TRACK;
   else process.env.AGENTS_NO_USAGE_TRACK = prevNoTrack;
-  if (prevDbPath === undefined) delete process.env.AGENTS_SECRETS_DB;
-  else process.env.AGENTS_SECRETS_DB = prevDbPath;
+  if (prevDbPath === undefined) delete process.env.AGENTS_USAGE_DB;
+  else process.env.AGENTS_USAGE_DB = prevDbPath;
+  if (prevSecretsDb === undefined) delete process.env.AGENTS_SECRETS_DB;
+  else process.env.AGENTS_SECRETS_DB = prevSecretsDb;
   for (const d of tmpDirs) {
     try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* ok */ }
   }

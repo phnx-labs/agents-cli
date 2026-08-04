@@ -70,6 +70,7 @@ function cand(overrides: Partial<RotateCandidate>): RotateCandidate {
     usageStatus: 'available',
     usageSnapshot: null,
     usageError: null,
+    usageMinutesToLimit: null,
     plan: 'Max',
     signedIn: true,
     lastActive: new Date('2026-01-01T00:00:00Z'),

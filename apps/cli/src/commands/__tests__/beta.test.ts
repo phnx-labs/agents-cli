@@ -56,12 +56,7 @@ describe('agents beta', () => {
     const home = makeTempHome();
     writeUpdateCache(home);
 
-    const drive = runAgents(['drive', 'status'], home);
     const factory = runAgents(['factory', 'submit', 'EXAMPLE-1'], home);
-
-    expect(drive.status).toBe(1);
-    expect(outputOf(drive)).toContain('agents drive is in beta.');
-    expect(outputOf(drive)).toContain('agents beta enable drive');
 
     expect(factory.status).toBe(1);
     expect(outputOf(factory)).toContain('agents factory is in beta.');
@@ -72,16 +67,13 @@ describe('agents beta', () => {
     const home = makeTempHome();
     writeUpdateCache(home);
 
-    const enable = runAgents(['beta', 'enable', 'drive'], home);
+    const enable = runAgents(['beta', 'enable', 'factory'], home);
     const list = runAgents(['beta', 'list'], home);
-    const drive = runAgents(['drive', 'status'], home);
 
     expect(enable.status).toBe(0);
     expect(fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8')).toContain('beta:');
-    expect(fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8')).toContain('- drive');
+    expect(fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8')).toContain('- factory');
     expect(outputOf(list)).toContain(path.join(home, '.agents', 'agents.yaml'));
-    expect(drive.status).toBe(0);
-    expect(outputOf(drive)).toContain('Drive');
   });
 
   it('stores beta flags in ~/.agents/agents.yaml when a personal repo exists', () => {
@@ -89,43 +81,16 @@ describe('agents beta', () => {
     writeUpdateCache(home);
     fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
 
-    const enable = runAgents(['beta', 'enable', 'drive', 'factory'], home);
+    const enable = runAgents(['beta', 'enable', 'factory', 'projects'], home);
     const list = runAgents(['beta', 'list'], home);
-    const drive = runAgents(['drive', 'status'], home);
     const factory = runAgents(['factory', 'submit', 'EXAMPLE-1'], home);
 
     expect(enable.status).toBe(0);
     expect(fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8')).toContain('beta:');
-    expect(fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8')).toContain('- drive');
     expect(fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8')).toContain('- factory');
+    expect(fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8')).toContain('- projects');
     expect(outputOf(list)).toContain(path.join(home, '.agents', 'agents.yaml'));
-    expect(drive.status).toBe(0);
-    expect(outputOf(drive)).toContain('Drive');
     expect(factory.status).toBe(1);
     expect(outputOf(factory)).toContain('FACTORY_FLOOR_URL is not set.');
-  });
-
-  it('gates session sync behind the session-sync beta feature (off by default)', () => {
-    const home = makeTempHome();
-    writeUpdateCache(home);
-
-    // Fresh home: not opted in -> status is disabled and hints the beta enable.
-    const before = runAgents(['sessions', 'sync', '--status'], home);
-    expect(before.status).toBe(0);
-    expect(outputOf(before)).toContain('disabled');
-    expect(outputOf(before)).toContain('agents beta enable session-sync');
-
-    // --enable delegates to the beta framework (single source of truth).
-    const enable = runAgents(['sessions', 'sync', '--enable'], home);
-    expect(enable.status).toBe(0);
-    expect(fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8')).toContain('- session-sync');
-
-    const after = runAgents(['sessions', 'sync', '--status'], home);
-    expect(outputOf(after)).toContain('enabled (beta)');
-
-    // --disable removes it again — no parallel switch left behind.
-    const disable = runAgents(['sessions', 'sync', '--disable'], home);
-    expect(disable.status).toBe(0);
-    expect(fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8')).not.toContain('- session-sync');
   });
 });
