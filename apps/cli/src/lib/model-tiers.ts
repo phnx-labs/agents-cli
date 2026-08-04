@@ -164,7 +164,8 @@ function rankCatalog(agent: AgentId, models: ModelInfo[]): Ranked[] {
         family = `desc-${desc}-${baseId.replace(/[0-9].*$/, '')}`;
       } else if (price != null) {
         rank = 10 + price * 1e6;
-        family = String(getModelPricing(baseId));
+        // group by price so same-cost variants collapse but distinct prices stay separate
+        family = `price-${(price * 1e6).toFixed(4)}`;
       } else {
         rank = 20 + sizeTokenRank(lc);
         family = baseId.replace(/-(highspeed|fast|256k|mini|nano|lite|flash|low|high|xhigh)\b/g, '');
@@ -186,16 +187,9 @@ function rankCatalog(agent: AgentId, models: ModelInfo[]): Ranked[] {
   return [...byFamily.values()].sort((a, b) => a.rank - b.rank || newer(b.id, a.id));
 }
 
-/** Map N ranked rungs onto the four tiers, collapsing when N < 4. */
-function bucket(rungs: Ranked[]): Record<ModelTier, Ranked | null> {
-  const n = rungs.length;
-  const out: Record<ModelTier, Ranked | null> = { cheap: null, default: null, best: null, ultra: null };
-  if (n === 0) return out;
-  MODEL_TIERS.forEach((t, i) => {
-    const idx = n >= 4 ? Math.round((i / 3) * (n - 1)) : Math.min(i, n - 1);
-    out[t] = rungs[idx];
-  });
-  return out;
+/** Which ranked rung each tier index maps to, collapsing when there are < 4 rungs. */
+function rungIndexFor(tierIndex: number, n: number): number {
+  return n >= 4 ? Math.round((tierIndex / 3) * (n - 1)) : Math.min(tierIndex, n - 1);
 }
 
 /**
@@ -214,7 +208,17 @@ export function resolveTierMap(agent: AgentId, version: string): Record<ModelTie
   }
 
   const catalog = getModelCatalog(agent, version);
-  const models = catalog?.models ?? [];
+  return tierizeModels(agent, catalog?.models ?? []);
+}
+
+/**
+ * Map a harness's catalog models onto the four tiers. Pure (no catalog lookup)
+ * so it is directly testable with synthetic inputs. Ranks the models, collapses
+ * variants, buckets onto cheap/default/best/ultra, and clamps absent tiers down
+ * to the nearest lower one. A single-model harness maps the tiers to reasoning
+ * effort instead of models.
+ */
+export function tierizeModels(agent: AgentId, models: ModelInfo[]): Record<ModelTier, TierResolution> {
   const rungs = rankCatalog(agent, models);
 
   // Single-model harness (e.g. Grok): the tier is reasoning effort, not a model.
@@ -225,19 +229,22 @@ export function resolveTierMap(agent: AgentId, version: string): Record<ModelTie
     return map;
   }
 
-  const b = bucket(rungs);
+  const n = rungs.length;
   const map = {} as Record<ModelTier, TierResolution>;
-  // fill from the highest available rung downward so an absent tier clamps to the next lower one
+  if (n === 0) {
+    // Fail-safe: no catalog -> every tier null, caller drops the --model flag.
+    for (const t of MODEL_TIERS) map[t] = { tier: t, model: null };
+    return map;
+  }
+  // Map each tier onto a rung; a tier that shares the rung of the tier below it
+  // has no distinct rung of its own, so mark it clamped for an honest display.
   for (let i = 0; i < MODEL_TIERS.length; i++) {
     const t = MODEL_TIERS[i];
-    const hit = b[t];
-    if (hit) { map[t] = { tier: t, model: hit.id }; continue; }
-    // clamp: borrow the nearest lower tier that resolved
-    let borrowed: TierResolution | null = null;
-    for (let j = i - 1; j >= 0; j--) { if (map[MODEL_TIERS[j]]?.model) { borrowed = map[MODEL_TIERS[j]]; break; } }
-    map[t] = borrowed
-      ? { tier: t, model: borrowed.model, clampedFrom: t, note: `no ${t} rung; using ${borrowed.tier}` }
-      : { tier: t, model: null };
+    const idx = rungIndexFor(i, n);
+    const shared = i > 0 && rungIndexFor(i - 1, n) === idx;
+    map[t] = shared
+      ? { tier: t, model: rungs[idx].id, clampedFrom: t, note: `no distinct ${t} rung on this version` }
+      : { tier: t, model: rungs[idx].id };
   }
   return map;
 }
