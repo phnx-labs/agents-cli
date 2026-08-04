@@ -22,6 +22,9 @@ export interface UnifiedQuery {
   agent?: string;
   /** Only events stamped with this session id (payload `sessionId`, the provenance floor). */
   sessionId?: string;
+  /** Only events carrying this bundle name in their payload (e.g. secrets events).
+   * Combined with `sessionId`, answers "which session read this secrets bundle". */
+  bundle?: string;
   caller?: string;
   command?: string;
   module?: string;
@@ -44,6 +47,7 @@ function matches(r: EventRecord, q: UnifiedQuery): boolean {
   if (q.level && (r.level ?? levelFor(r.event)) !== q.level) return false;
   if (q.agent && r.agent !== q.agent) return false;
   if (q.sessionId && r.sessionId !== q.sessionId) return false;
+  if (q.bundle && r.bundle !== q.bundle) return false;
   if (q.caller && r.caller !== q.caller) return false;
   if (q.command && r.command !== q.command &&
       !(typeof r.command === 'string' && r.command.startsWith(q.command + ' '))) return false;
@@ -58,7 +62,7 @@ function matches(r: EventRecord, q: UnifiedQuery): boolean {
  * result (each source is fetched up to `limit`, so the top-N is exact).
  */
 export function readUnifiedEvents(q: UnifiedQuery = {}): EventRecord[] {
-  const ops = query({
+  const opsRaw = query({
     startDate: q.startDate,
     endDate: q.endDate,
     eventTypes: q.eventTypes,
@@ -70,6 +74,9 @@ export function readUnifiedEvents(q: UnifiedQuery = {}): EventRecord[] {
     module: q.module,
     limit: q.limit,
   });
+  // `bundle` is a payload field, not one query() indexes, so filter the ops here
+  // (the activity source is filtered by `matches`, which now includes it).
+  const ops = q.bundle ? opsRaw.filter((r) => r.bundle === q.bundle) : opsRaw;
 
   if (q.includeActivity === false) return ops;
 

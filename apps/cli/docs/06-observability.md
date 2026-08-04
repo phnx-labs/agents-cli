@@ -279,6 +279,8 @@ each run, not just *what* is running:
 agents events                          # recent activity across everything
 agents events --module teams           # team lifecycle (create / add / disband)
 agents events --module secrets         # every secret accessed, revealed, or unlocked
+agents events --module secrets --bundle share   # every read of the share bundle (which agent/session)
+agents events --bundle share --session <id>     # trace one session's reads of a bundle
 agents events --command "teams create" # a command path — prefix match
 agents events --event teams.disband    # a semantic event: a team torn down
 agents events --event secrets.get --since 7d --json
@@ -290,7 +292,12 @@ agents events emit --source factory --json < batch.jsonl        # write from out
 
 `--module` filters the top-level group; `--command` matches a command path by
 prefix (`teams` catches `teams create`); `--event` filters a typed event
-(repeatable); `--since` takes `2h`/`7d`/`4w` or an ISO date. `--json` emits the
+(repeatable); `--agent` filters by tagged agent; `--session <id>` filters by the
+provenance session id (every event carries it), and `--bundle <name>` filters by
+the bundle in an event's payload — so `--module secrets --bundle share --session
+<id>` traces exactly which agent/session read a secrets bundle (the answer to
+"which agent triggered that Touch ID sheet"). `--since` takes `2h`/`7d`/`4w` or an
+ISO date. `--json` emits the
 raw records for external consumers.
 
 **`--limit` caps the read at 50 records by default — pass `--limit 0` before you

@@ -52,6 +52,26 @@ describe('readUnifiedEvents', () => {
     expect(ts).toEqual([...ts].sort((a, b) => b - a));
   });
 
+  it('filters secrets events by bundle (the ops audit path)', () => {
+    setup();
+    // secrets.get is an operational event; it carries `bundle` in its payload.
+    emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'share' });
+    emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'prod' });
+    const share = readUnifiedEvents({ bundle: 'share', includeActivity: false, limit: 50 });
+    expect(share.length).toBe(1);
+    expect(share[0].bundle).toBe('share');
+    expect(share.some((r) => r.bundle === 'prod')).toBe(false);
+  });
+
+  it('filters secrets events by sessionId + bundle — trace which session read a bundle', () => {
+    setup();
+    emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'share', sessionId: 'sess-A' });
+    emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'share', sessionId: 'sess-B' });
+    const onlyA = readUnifiedEvents({ sessionId: 'sess-A', bundle: 'share', includeActivity: false, limit: 50 });
+    expect(onlyA.length).toBe(1);
+    expect(onlyA[0].sessionId).toBe('sess-A');
+  });
+
   it('--audit (includeActivity:false) returns operational events only', () => {
     const { activityRoot } = setup();
     emit('secrets.get', { module: 'secrets', command: 'secrets get' });

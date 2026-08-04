@@ -55,6 +55,8 @@ interface EventsOptions {
   command?: string;
   event?: string[];
   agent?: string;
+  session?: string;
+  bundle?: string;
   since?: string;
   limit?: string;
   json?: boolean;
@@ -203,6 +205,8 @@ export function registerEventsCommand(program: Command): void {
     .option('--command <path>', 'Only this command path — prefix match (e.g. "teams create")')
     .option('--event <type>', 'Only this typed event (repeatable, e.g. secrets.get, secrets.unlocked, pr.opened)', collect, [])
     .option('--agent <name>', 'Only events tagged with this agent')
+    .option('--session <id>', 'Only events from this session (the provenance sessionId) — e.g. trace which session read a secret')
+    .option('--bundle <name>', 'Only events carrying this bundle in their payload — e.g. `--module secrets --bundle share` for every read of the share bundle')
     .option('--since <time>', 'Only events newer than this (e.g. 2h, 7d, or ISO date)')
     .option('--audit', 'Operational events only (skip agent activity)')
     .option('--limit <n>', 'Max records to show; 0 for no cap (default 50)', '50')
@@ -215,6 +219,10 @@ Examples:
   agents events --audit                  Operational events only (secrets / teams / ...)
   agents events --event pr.opened --since 7d
   agents events --module secrets         Every secret accessed or revealed
+  agents events --module secrets --bundle share
+                                         Every read of the share bundle (which agent, which session)
+  agents events --bundle share --session <id>
+                                         Trace one session's reads of a bundle
   agents events -f                       Live tail (operational)
   agents events --event pr.opened --since 30d --limit 0 --json
                                          Every match — use --limit 0 whenever you
@@ -240,6 +248,8 @@ Examples:
         startDate,
         eventTypes: options.event && options.event.length ? (options.event as EventType[]) : undefined,
         agent: options.agent,
+        sessionId: options.session,
+        bundle: options.bundle,
         command: options.command,
         module: options.module,
         limit: limit === undefined ? undefined : limit + 1,
