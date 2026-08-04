@@ -1322,6 +1322,55 @@ export function getLatestCompletedRun(jobName: string): RunMeta | null {
   return null;
 }
 
+/** Percentile of a sorted-ascending array (linear interpolation). p in [0,100]. */
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  if (sorted.length === 1) return sorted[0];
+  const rank = (p / 100) * (sorted.length - 1);
+  const lo = Math.floor(rank);
+  const hi = Math.ceil(rank);
+  if (lo === hi) return sorted[lo];
+  const frac = rank - lo;
+  return sorted[lo] * (1 - frac) + sorted[hi] * frac;
+}
+
+/** Duration + outcome rollup for a job's run history. */
+export interface RoutineStats {
+  /** Total run records (any status, including `missed`). */
+  count: number;
+  failed: number;
+  missed: number;
+  avgMs: number;
+  p50: number;
+  p95: number;
+}
+
+/**
+ * Fold a job's run history (`listRuns`) into a duration + outcome summary.
+ * `missed` fires (no process ever ran) carry no `duration` and are excluded
+ * from the latency percentiles but still counted in `count`/`missed`.
+ */
+export function routineStats(jobName: string): RoutineStats {
+  const runs = listRuns(jobName);
+  const failed = runs.filter((r) => r.status === 'failed' || r.status === 'timeout').length;
+  const missed = runs.filter((r) => r.status === 'missed').length;
+  const durations = runs
+    .map((r) => r.duration)
+    .filter((d): d is number => typeof d === 'number' && Number.isFinite(d))
+    .sort((a, b) => a - b);
+  const avgMs = durations.length > 0
+    ? Math.round(durations.reduce((sum, d) => sum + d, 0) / durations.length)
+    : 0;
+  return {
+    count: runs.length,
+    failed,
+    missed,
+    avgMs,
+    p50: Math.round(percentile(durations, 50)),
+    p95: Math.round(percentile(durations, 95)),
+  };
+}
+
 /** Persist run metadata to its run directory as meta.json. */
 export function writeRunMeta(meta: RunMeta): void {
   ensureAgentsDir();

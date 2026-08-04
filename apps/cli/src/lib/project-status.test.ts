@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   rollupSessionsByProject,
-  planPct,
+  liveDeadSplit,
   enrichProjectSignals,
   sortProjectMembers,
   formatProjectMembers,
@@ -79,8 +79,8 @@ describe('rollupSessionsByProject', () => {
       { agent: 'codex', status: 'idle', host: 'mac-mini' },
       { agent: 'gemini', status: 'queued' },
     ]);
-    // planPct is untouched by the members extension
-    expect(planPct(rush.plan)).toBeUndefined();
+    // the raw plan sums are untouched by the members extension
+    expect(rush.plan).toEqual({ done: 0, total: 0 });
   });
 
   it('is empty when no session matches a project', () => {
@@ -89,10 +89,42 @@ describe('rollupSessionsByProject', () => {
   });
 });
 
-describe('planPct', () => {
-  it('rounds a percentage and returns undefined for nothing tracked', () => {
-    expect(planPct({ done: 5, total: 7 })).toBe(71);
-    expect(planPct({ done: 0, total: 0 })).toBeUndefined();
+describe('liveDeadSplit', () => {
+  it('counts orphaned as LIVE — it is an agent that outlived its window', () => {
+    // session/active.ts: "Alive, but no client is attached". The repo's dead
+    // rule (commands/sessions.ts) is closed + crashed only.
+    const s = liveDeadSplit({ running: 13, idle: 2, orphaned: 5, crashed: 19 });
+    expect(s.live).toBe(20);
+    expect(s.dead).toBe(19);
+  });
+
+  it('breaks the dead down, biggest first', () => {
+    const s = liveDeadSplit({ running: 1, crashed: 19, closed: 3 });
+    expect(s.deadByStatus).toEqual([
+      { status: 'crashed', n: 19 },
+      { status: 'closed', n: 3 },
+    ]);
+  });
+
+  it('classifies every ActiveStatus, not just the common ones', () => {
+    // abandoned fires on transcript staleness before the liveness check, so it
+    // covers the live-but-forgotten session; unknown cannot be PROVEN dead, and
+    // claiming so would overstate the wreckage row.
+    const s = liveDeadSplit({
+      running: 1, idle: 1, queued: 1, input_required: 1, orphaned: 1, abandoned: 1, unknown: 1,
+      closed: 1, crashed: 1,
+    });
+    expect(s.live).toBe(7);
+    expect(s.dead).toBe(2);
+  });
+
+  it('handles an empty or all-live project', () => {
+    expect(liveDeadSplit({})).toEqual({ live: 0, dead: 0, deadByStatus: [] });
+    expect(liveDeadSplit({ running: 4 })).toEqual({ live: 4, dead: 0, deadByStatus: [] });
+  });
+
+  it('ignores zero counts rather than emitting empty buckets', () => {
+    expect(liveDeadSplit({ running: 2, crashed: 0 }).deadByStatus).toEqual([]);
   });
 });
 

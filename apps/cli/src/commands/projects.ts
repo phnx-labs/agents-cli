@@ -45,7 +45,7 @@ import {
 } from '../lib/projects.js';
 import {
   rollupSessionsByProject,
-  planPct,
+  liveDeadSplit,
   enrichProjectSignals,
   formatProjectMembers,
   type ProjectSessionRollup,
@@ -53,6 +53,7 @@ import {
 } from '../lib/project-status.js';
 import { fetchLinearProjectCounts, type LinearMilestone, type LinearProjectCounts } from '../lib/linear-project-counts.js';
 import { listLinearProjects, pickLinearProject, type LinearPick, type LinearProjectLite } from '../lib/linear-projects.js';
+import { checkRepoSlug } from '../lib/project-doctor.js';
 import {
   buildFactoryImportCandidates,
   buildLinearImportCandidates,
@@ -92,7 +93,7 @@ function parseContextFlag(raw: string): ProjectContext {
 }
 
 /** Best-effort `owner/repo` from a repo's origin remote. */
-function originSlug(cwd: string): string | undefined {
+export function originSlug(cwd: string): string | undefined {
   try {
     const url = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8' }).trim();
     return parseOwnerRepoFromRemote(url) ?? undefined;
@@ -127,7 +128,9 @@ function runFactoryImport(existing: Map<string, ProjectDef>, opts: ImportOptions
     : Array.isArray((parsed as { projects?: unknown[] })?.projects)
       ? (parsed as { projects: unknown[] }).projects
       : [];
-  return buildFactoryImportCandidates(rows, existing, opts);
+  // The checkout's real `origin` overrides the registry's path-derived slug —
+  // see buildFactoryImportCandidates for why the path guess is not trustworthy.
+  return buildFactoryImportCandidates(rows, existing, opts, (root) => originSlug(expandLocalHome(root)));
 }
 
 /**
@@ -220,6 +223,38 @@ export function formatMilestoneDue(targetDate: string, nowMs: number): string | 
   return `due ${label}`;
 }
 
+/**
+ * The milestone block. `status` prints one line — the next checkpoint — because
+ * a roll-up across projects has to stay scannable. `view` prints every declared
+ * milestone, because "how many are there and when are they due" is the shape of
+ * the plan and the reason to open one project.
+ *
+ * Pure (chalk only) so the layout is testable without a Linear account.
+ */
+export function formatMilestoneLines(
+  milestones: LinearMilestone[],
+  next: LinearMilestone | undefined,
+  nowMs: number,
+  limit: number,
+): string[] {
+  if (milestones.length === 0) {
+    // `next` without a list only happens on a cached answer written before the
+    // list existed; render what we have rather than dropping the row.
+    return next ? [`  ${chalk.dim('next')}     ${formatNextMilestone(next, nowMs)}`] : [];
+  }
+  const shown = milestones.slice(0, Math.max(1, limit));
+  const out = shown.map((m, i) => {
+    const isNext = next && m.name === next.name;
+    const label = i === 0 ? (isNext ? 'next' : 'plan') : '';
+    return `  ${chalk.dim(label.padEnd(4))}     ${formatNextMilestone(m, nowMs)}`;
+  });
+  const rest = milestones.length - shown.length;
+  if (rest > 0) {
+    out.push(`  ${' '.repeat(4)}     ${chalk.dim(`+${rest} more milestone${rest === 1 ? '' : 's'} — agents projects view <name>`)}`);
+  }
+  return out;
+}
+
 /** The `next` card line: what this project is due to hit, and how far along it is. */
 export function formatNextMilestone(ms: LinearMilestone, nowMs: number): string {
   const parts = [chalk.bold(ms.name)];
@@ -242,9 +277,12 @@ function statusBar(r: ProjectSessionRollup): string {
   push(r.byStatus.queued, 'queued', chalk.gray);
   const shown =
     (r.byStatus.running ?? 0) + (r.byStatus.idle ?? 0) + (r.byStatus.input_required ?? 0) + (r.byStatus.queued ?? 0);
-  // Sessions in a non-live state (orphaned/crashed/unknown) count toward the
-  // headline — render the remainder so the bar never sums to less than it.
-  if (r.agents > shown) parts.push(chalk.gray(`+${r.agents - shown} other`));
+  // The remainder is the LIVE sessions in a state without its own chip
+  // (orphaned, unknown). Dead ones are on their own row now, so counting them
+  // here made the line disagree with the headline — `19 live` beside
+  // `+24 other`, which invites the reader to trust neither.
+  const live = liveDeadSplit(r.byStatus).live;
+  if (live > shown) parts.push(chalk.gray(`+${live - shown} other`));
   return parts.join(' · ') || chalk.gray('no live agents');
 }
 
@@ -255,16 +293,28 @@ function renderCard(
   fleet?: HostWorkspaceStatus[],
   linear?: LinearProjectCounts,
   nowMs: number = Date.now(),
+  /** How many milestones to print. `status` shows the next one; `view` shows all. */
+  milestoneLimit: number = 1,
 ): void {
-  const agents = r?.agents ?? 0;
-  const pct = r ? planPct(r.plan) : undefined;
-  const planStr = pct === undefined ? '' : `  ·  ${chalk.cyan(`${pct}% plan`)}`;
-  console.log(`${chalk.bold(def.name)}  ${chalk.dim('·')}  ${chalk.bold(`${agents} agents`)}${planStr}`);
+  // The headline counts LIVE agents. It used to be every matched session, which
+  // read `39 agents` on a project where 19 had crashed. `planPct` used to sit
+  // here too and is gone: it summed each session's latest checklist snapshot,
+  // so one agent opening a fresh 40-item plan rendered the whole project `0%`.
+  const split = r ? liveDeadSplit(r.byStatus) : { live: 0, dead: 0, deadByStatus: [] };
+  console.log(`${chalk.bold(def.name)}  ${chalk.dim('·')}  ${chalk.bold(`${split.live} live`)}`);
   if (def.description) console.log(`  ${chalk.dim(def.description)}`);
   console.log(`  ${chalk.dim('live')}     ${r ? statusBar(r) : chalk.gray('no live agents')}`);
+  if (split.dead > 0) {
+    // Wreckage is worth a number of its own — 19 crashed sessions is a thing to
+    // go fix, not a throughput signal to fold into the headline.
+    const detail = split.deadByStatus.map((d) => `${d.n} ${d.status}`).join(', ');
+    console.log(`  ${chalk.dim('dead')}     ${chalk.yellow(`${split.dead} finished or lost`)} ${chalk.dim(`(${detail})`)}`);
+  }
   if (r && r.members.length) console.log(`  ${chalk.dim('agents')}   ${formatProjectMembers(r.members)}`);
   const ships: string[] = [];
-  if (remote?.mergedPrs) ships.push(chalk.green(`${remote.mergedPrs} merged (${remote.windowDays}d)`));
+  if (remote?.mergedPrs) {
+    ships.push(chalk.green(`${remote.mergedPrs}${remote.mergedPrsTruncated ? '+' : ''} merged (${remote.windowDays}d)`));
+  }
   if (r?.openPrs.length) ships.push(`${r.openPrs.length} open PR${r.openPrs.length === 1 ? '' : 's'}`);
   if (r?.worktrees) ships.push(`${r.worktrees} worktree${r.worktrees === 1 ? '' : 's'}`);
   if (remote?.latestRelease) ships.push(remote.latestRelease.tag);
@@ -272,8 +322,8 @@ function renderCard(
   if (linear) {
     console.log(`  ${chalk.dim('linear')}   ${linear.done}/${linear.total}${linear.truncated ? '+' : ''} done · ${linear.inProgress} in progress`);
   }
-  if (linear?.nextMilestone) {
-    console.log(`  ${chalk.dim('next')}     ${formatNextMilestone(linear.nextMilestone, nowMs)}`);
+  for (const line of formatMilestoneLines(linear?.milestones ?? [], linear?.nextMilestone, nowMs, milestoneLimit)) {
+    console.log(line);
   }
   if (r && r.tickets.length) {
     console.log(`  ${chalk.dim('tickets')}  ${r.tickets.slice(0, 8).join(' · ')}${r.tickets.length > 8 ? ' …' : ''}`);
@@ -293,6 +343,14 @@ function renderCard(
   }
   const repos = [def.repo, ...(def.repos ?? []).map((x) => x.slug)].filter(Boolean) as string[];
   if (repos.length) console.log(`  ${chalk.dim('repos')}    ${[...new Set(repos)].join(' · ')}`);
+  // A def whose `repo` disagrees with the checkout's origin reads PR and release
+  // counts from a DIFFERENT repository — both slugs resolve, so nothing errors
+  // and the wrong numbers look right. Say it here, with the fix attached.
+  const mismatch = def.root ? checkRepoSlug(def, originSlug(expandLocalHome(def.root))) : undefined;
+  if (mismatch) {
+    console.log(`  ${chalk.yellow('!')}        ${chalk.yellow(mismatch.message)}`);
+    console.log(`  ${' '.repeat(8)}${chalk.gray(mismatch.remediation)}`);
+  }
   if (def.contexts?.length) {
     console.log(`  ${chalk.dim('context')}  ${def.contexts.map((c) => c.path).join(' · ')}`);
   }
@@ -429,17 +487,25 @@ export function registerProjectsCommands(program: Command): void {
 
   // ---- show ----
   projects
-    .command('show <name>')
-    .description('Show a project definition, resolved paths, repos, contexts, and links.')
+    .command('view <name>')
+    .alias('show')
+    .description('Show a project definition, resolved paths, repos, contexts, links, and milestones.')
     .option('--json', 'Machine-readable output')
-    .action((name: string, opts: { json?: boolean }) => {
+    .option('--no-remote', 'Skip the Linear lookup; definition only')
+    .action(async (name: string, opts: { json?: boolean; remote?: boolean }) => {
       const def = loadProjectDef(name);
       if (!def) {
         console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
         process.exit(1);
       }
+      // Every milestone the project declares, not just the next one — the whole
+      // point of opening ONE project is to see the shape of its plan.
+      const counts =
+        opts.remote !== false && def.linear?.projectId
+          ? await fetchLinearProjectCounts(def.linear.projectId)
+          : undefined;
       if (opts.json) {
-        console.log(JSON.stringify(def, null, 2));
+        console.log(JSON.stringify({ ...def, linear: { ...def.linear, ...(counts ?? {}) } }, null, 2));
         return;
       }
       console.log(chalk.bold(def.name) + (def.description ? chalk.dim(`  — ${def.description}`) : ''));
@@ -451,6 +517,24 @@ export function registerProjectsCommands(program: Command): void {
       for (const i of def.integrations ?? []) console.log(`  ${i.kind.padEnd(12)} ${i.url}${i.label ? chalk.dim(`  (${i.label})`) : ''}`);
       if (def.linear?.url || def.linear?.projectId) console.log(`  linear       ${def.linear.url ?? def.linear.projectId}`);
       for (const d of def.docs ?? []) console.log(`  doc          ${d}`);
+      if (counts) {
+        const staleNote = counts.stale ? chalk.dim('  (cached)') : '';
+        console.log(`  issues       ${counts.done}/${counts.total}${counts.truncated ? '+' : ''} done · ${counts.inProgress} in progress${staleNote}`);
+      }
+      const ms = counts?.milestones ?? [];
+      if (ms.length) {
+        console.log(`  ${chalk.bold('milestones')}`);
+        for (const m of ms) {
+          const mark = m.name === counts?.nextMilestone?.name ? chalk.cyan('next') : '';
+          console.log(`    ${mark.padEnd(6)}     ${formatNextMilestone(m, Date.now())}`);
+        }
+        // A milestone nothing is filed against cannot report progress. Say that
+        // once, plainly, rather than printing a row of silent 0%s.
+        const unfiled = ms.filter((m) => m.total === 0).length;
+        if (unfiled === ms.length) {
+          console.log(`    ${chalk.yellow('!')}          ${chalk.yellow(`no issues are assigned to any milestone — progress against them cannot be measured`)}`);
+        }
+      }
       console.log(chalk.gray(`  ${projectDefPath(name)}`));
     });
 
@@ -561,7 +645,8 @@ export function registerProjectsCommands(program: Command): void {
                 byStatus: r?.byStatus ?? {},
                 members: r?.members ?? [],
                 plan: r?.plan ?? { done: 0, total: 0 },
-                planPct: r ? planPct(r.plan) ?? null : null,
+                live: r ? liveDeadSplit(r.byStatus).live : 0,
+                dead: r ? liveDeadSplit(r.byStatus).dead : 0,
                 openPrs: r?.openPrs ?? [],
                 mergedPrs: rem?.mergedPrs ?? 0,
                 latestRelease: rem?.latestRelease ?? null,
@@ -625,6 +710,50 @@ export function registerProjectsCommands(program: Command): void {
       if (opts.source === 'factory' && s > 0 && opts.minConfidence === 'high') {
         console.log(chalk.gray('  (widen with --min-confidence medium or --all)'));
       }
+    });
+
+  // ---- set ----
+  projects
+    .command('set <name>')
+    .description('Change one field on a project definition, preserving everything else.')
+    .option('--repo <owner/repo>', 'Primary GitHub slug')
+    .option('--root <path>', 'Repo / monorepo root')
+    .option('--path <subdir>', 'Default cwd for agents (a monorepo subdir)')
+    .option('--description <text>', 'One-line description shown on the card')
+    .action((name: string, opts: { repo?: string; root?: string; path?: string; description?: string }) => {
+      const def = loadProjectDef(name);
+      if (!def) {
+        console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
+        process.exit(1);
+      }
+      const fields = (['repo', 'root', 'path', 'description'] as const).filter((k) => opts[k] !== undefined);
+      if (fields.length === 0) {
+        console.error(chalk.red('Nothing to set. Pass a field, e.g. --repo <owner/repo>.'));
+        process.exit(1);
+      }
+      // Load, mutate the named fields, write back — the `link` pattern. NEVER
+      // the `add --force` pattern, which rebuilds the def from flags alone and
+      // silently drops linear/contexts/integrations that were not re-passed.
+      if (opts.repo !== undefined) def.repo = opts.repo;
+      if (opts.root !== undefined) def.root = opts.root;
+      if (opts.description !== undefined) def.description = opts.description;
+      if (opts.path !== undefined) {
+        // `--path` is a subdir OF the root, so without one there is nothing to
+        // hang it off. A def imported with `--from-linear` that found no local
+        // checkout carries name + linear and no root — joining against '' there
+        // would silently write `/apps/cli`, an absolute path at the filesystem
+        // root, and the def would resolve somewhere that does not exist.
+        const base = (opts.root ?? def.root ?? '').replace(/\/$/, '');
+        if (!base) {
+          console.error(chalk.red(`"${def.name}" has no root, so --path has nothing to resolve against.`));
+          console.error(chalk.gray(`  Set one first: agents projects set ${def.name} --root <path> --path ${opts.path}`));
+          process.exit(1);
+        }
+        def.defaultPath = `${base}/${opts.path.replace(/^\//, '')}`;
+      }
+      writeProjectDef(def);
+      console.log(chalk.green(`Updated ${def.name}`));
+      for (const f of fields) console.log(chalk.gray(`  ${f}  ${f === 'path' ? def.defaultPath : def[f as 'repo' | 'root' | 'description']}`));
     });
 
   // ---- link ----

@@ -13,6 +13,7 @@ whose *consumer* and *axis* match your question, not whichever you remember firs
 |---|---|---|---|
 | **`events`** | **Raw unified event stream = the audit log.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. | `events.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
 | **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
+| **`trends`** | **Usage analytics.** Harness/model mix, tools per session, token ratios, hottest secrets/browser profiles — baked recipes over sessions + a durable resource warehouse. Distinct from quota (`agents usage`) and latency (`agents perf`). | `sessions.db` + `~/.agents/.history/analytics/usage.db` | Humans + `--json` |
 | **`feed`** | **Consolidated cross-agent surface.** Open blocks (decisions agents are waiting on) + `feed post` status updates — "what needs you / what are agents saying." | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
 | **`activity`** | **Human milestone timeline.** Recent plans / PRs / worktrees / sub-agents, plus Bash-driven deliverables (video renders, image upscales, metadata edits), newest-first — a friendly lens on the milestone tier of the event stream. Every Bash call also emits a structured `bash.executed` activity record carrying its tool category. | `activity/*.jsonl` | Human at the terminal |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
@@ -85,21 +86,67 @@ Latency samples for optimization — **not** the audit log. Implementation:
 `apps/cli/src/lib/perf/db.ts`, CLI: `apps/cli/src/commands/perf.ts`.
 
 ```
-agents perf                     # summary: commands + hooks + runs
-agents perf hooks               # same as agents hooks profile (SQLite-first)
-agents perf commands --days 30  # slowest CLI entrypoints
-agents perf run --json          # agent.run / perf.timing labels
+agents perf                              # summary: commands + hooks + runs
+agents perf hooks                        # same as agents hooks profile (SQLite-first)
+agents perf commands --days 30           # slowest CLI entrypoints
+agents perf run --json                   # agent.run / perf.timing labels
+agents perf hooks --project agents-cli   # scope to one repo's samples
+agents perf friction                     # sessions stuck retrying the same guard block
 ```
 
 | Producer | Kind | How it lands |
 |---|---|---|
 | CLI `postAction` | `command.end` | Direct `recordSample` (skips the `perf` command itself) |
-| `createTimer` / `time` / `timeAsync` / `withTiming` | `perf.timing` | Best-effort from `events.ts` |
-| Hook cache/matches shims | `hook.fire` | NDJSON spool → drained into SQLite on open |
+| `createTimer` / `time` / `timeAsync` / `withTiming` | `perf.timing` | Best-effort from `events.ts`; also covers routine fires (`agent.run`) |
+| Every hook | `hook.fire` | Generated shim → NDJSON spool → drained into SQLite on open. `cache:`, `matches:`, or a bare `matcher:` are each enough to opt a hook into a shim — git-guard/rm-guard/git-require-clean-tree (matcher-only) are instrumented like any other hook |
+
+Every row carries `p50Ms`/`p95Ms`/`p99Ms`, and — when the underlying samples
+have them — `errorRate`/`timeoutRate` (fractions 0-1, from a nonzero exit code
+or a `status:'timeout'` sample). `--project <key>` scopes any subcommand to one
+repository: it resolves each sample's recorded `cwd` to a project key
+(`lib/project-key.ts` — a worktree cwd folds to the repo it branched from) and
+filters to samples matching the given key.
+
+`agents perf friction` reads a different sink: the `friction` event kind
+(`emitFriction` in `events.ts`, fed by `agents _internal friction` — the
+hidden command guard hooks self-report a block through before they exit 2,
+since they run before any `agents` process exists to emit in-process). It
+groups by (session, surface, failureId) and flags a session that hits the
+*same* guard block 3+ times — an agent retrying the identical denied action
+instead of adapting.
 
 **Disable:** `AGENTS_DISABLE_PERF=1`. **Redirect (tests):** `AGENTS_PERF_DB`,
-`AGENTS_PERF_SPOOL`. Retention: samples older than 30 days are pruned
-opportunistically on open. Wipe anytime: `rm -rf ~/.agents/.cache/perf`.
+`AGENTS_PERF_SPOOL`, `AGENTS_PERF_DIR` (also covers the hook shim's own
+timing/perf writes), plus `AGENTS_HOOK_SHIMS_DIR` / `AGENTS_HOOK_CACHE_DIR` /
+`AGENTS_LOGS_DIR` for the shim-generation side. Retention: samples older than
+30 days are pruned opportunistically on open. Wipe anytime:
+`rm -rf ~/.agents/.cache/perf`.
+
+## Usage analytics (`agents trends`)
+
+Resource and session frequency — **not** model quota (`agents usage`) and **not**
+latency (`agents perf`). Implementation: `apps/cli/src/lib/analytics/`, CLI:
+`apps/cli/src/commands/trends.ts`.
+
+```
+agents trends                     # auto recipe board (skips empty sections)
+agents trends --days 30           # window
+agents trends harness-mix --json  # one baked recipe
+agents trends query --kind secret # raw warehouse rows
+agents trends recipes             # list recipe ids
+```
+
+| Store | Path | Holds |
+|---|---|---|
+| Session index | `sessions.db` | Harness/model mix, token ratios, `tool_call_count` (Claude scan rollup) |
+| Usage warehouse | `~/.agents/.history/analytics/usage.db` | Value-free `kind`/`name`/`event` rows (secret, agent, browser, …) |
+
+Secrets usage previously lived only in `~/.agents/secrets/secrets.db`; the warehouse
+migrates those rows once (`kind=secret`) and the secrets UI keeps reading through a
+thin adapter. New emitters: secret access paths, `agents run`, browser launch/close.
+
+**Disable:** `AGENTS_NO_USAGE_TRACK=1`. **Redirect (tests):** `AGENTS_USAGE_DB`,
+`AGENTS_SESSIONS_DB`. Retention: usage events older than 90 days are pruned on open.
 
 ## Audit Event Log (`agents events`)
 
@@ -1131,7 +1178,7 @@ contains — this is a data-availability limit, not a policy choice:
 | Grok | email + tier | last-seen (`~/.grok/logs/unified.jsonl`) | email from the local auth file; weekly window (`W`) + subscription tier parsed from the newest `billing: fetched credits config` log line, since Grok's network usage endpoints 404 |
 | Droid | email | live (`api.factory.ai`) | `~/.factory/auth.v2.file` is AES-256-GCM (key on disk at `auth.v2.key`); decrypt locally, read the email from the WorkOS access-token JWT. That same token authorizes `GET /api/billing/limits` for the three rolling rate-limit windows (5-hour → `S`, weekly → `W`, monthly, detailed-view only). |
 | Kimi | `id:<user_id>` + tier | live (`api.kimi.com/coding/v1/usages`) | JWT carries no email — only an opaque `user_id`. Quota + membership tier come from the `/usages` endpoint. |
-| Cursor | email | live (`cursor.com/api/usage`) | email/authId from `~/.cursor/cli-config.json`; access token from `~/.config/cursor/auth.json`. The endpoint is authed with a `WorkosCursorSessionToken=<authId>::<token>` cookie and returns a monthly request bar (`M`) for request-capped (free/legacy) plans. Usage-based plans report no request cap, so they render the account row without a bar. |
+| Cursor | email | live (`cursor.com/api/dashboard/get-current-period-usage`, `cursor.com/api/usage-summary`, `cursor.com/api/usage`) | email/authId from `~/.cursor/cli-config.json`; access token from `~/.config/cursor/auth.json`; the cookie subject prefers the access token's own JWT `sub`, falling back to the config file's `authId`. Every request is authed with a `WorkosCursorSessionToken=<sub>::<token>` cookie. Three sources, tried in order: the dashboard's `get-current-period-usage` (primary) maps `planUsage.{auto,api,total}PercentUsed` to three bars — Auto + Composer (`A`), API (`API`), Total (`T`) — reset from `billingCycleEnd`; `usage-summary` (fallback, for accounts the primary endpoint returns no usable `planUsage` for) nests the same three percentages under `individualUsage.plan`; the legacy `/api/usage` request-cap endpoint (last resort) renders a monthly request bar (`M`) for free/legacy request-capped plans. An account on none of these (fully unlimited, no percent fields) renders without a bar rather than a misleading empty gauge. |
 | Antigravity | `signed in` | live (`cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota`) | OAuth grant with no id_token — presence only. File `~/.gemini/antigravity-cli/antigravity-oauth-token`, else macOS keychain / Linux libsecret (`service gemini` + user `antigravity`). The stored Google OAuth token authorizes the Code Assist quota endpoint `agy` itself uses; it returns one bucket per model (`gemini-3.1-pro`, `gemini-2.5-flash`, …) with its own reset time, and each bucket renders as its own bar (compact model tag: `3.1P`, `2.5F`, …). |
 | others | `not signed in` unless a credential exists | — | `default` case: no detector |
 

@@ -3,6 +3,7 @@ import {
   computeProjectListWidths,
   formatFleetSkippedNote,
   formatMilestoneDue,
+  formatMilestoneLines,
   formatNextMilestone,
   type ProjectListRow,
 } from './projects.js';
@@ -109,5 +110,46 @@ describe('formatNextMilestone', () => {
   it('does not print a raw date when the stored value is unparseable', () => {
     expect(stripAnsi(formatNextMilestone({ name: 'Odd', targetDate: 'not-a-date', done: 1, total: 2 }, now)))
       .toBe('Odd  ·  1/2');
+  });
+});
+
+describe('formatMilestoneLines', () => {
+  const now = new Date(2026, 7, 3, 12, 0, 0).getTime();
+  const ms = [
+    { name: 'Factory converts strategy', targetDate: '2026-09-15', done: 0, total: 0 },
+    { name: 'Factory reliability', targetDate: '2026-09-30', done: 0, total: 0 },
+    { name: 'Factory onboarding', targetDate: '2026-10-15', done: 0, total: 0 },
+  ];
+
+  it('shows one line plus a pointer on the compact card', () => {
+    const out = formatMilestoneLines(ms, ms[0], now, 1).map(stripAnsi);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toContain('next');
+    expect(out[0]).toContain('Factory converts strategy');
+    expect(out[1]).toContain('+2 more milestones');
+    expect(out[1]).toContain('agents projects view');
+  });
+
+  it('shows every milestone when the limit allows, with no pointer', () => {
+    const out = formatMilestoneLines(ms, ms[0], now, 99).map(stripAnsi);
+    expect(out).toHaveLength(3);
+    expect(out.join('\n')).toContain('Factory onboarding');
+    expect(out.join('\n')).not.toContain('more milestone');
+  });
+
+  it('labels the first row `plan` when it is not the flagged next one', () => {
+    const out = formatMilestoneLines(ms, ms[1], now, 1).map(stripAnsi);
+    expect(out[0].trimStart().startsWith('plan')).toBe(true);
+  });
+
+  it('renders nothing when the project declares no milestones', () => {
+    expect(formatMilestoneLines([], undefined, now, 1)).toEqual([]);
+  });
+
+  it('still renders a next carried alone by an older cached answer', () => {
+    // A cache entry written before `milestones` existed has only `nextMilestone`.
+    const out = formatMilestoneLines([], ms[0], now, 1).map(stripAnsi);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain('Factory converts strategy');
   });
 });

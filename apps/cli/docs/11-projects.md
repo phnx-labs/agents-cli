@@ -87,12 +87,14 @@ rollup — SSH fan-out plus home-relative cwd matching so a session recorded on 
 different-home machine still matches — is a deferred follow-up (see below):
 
 ```
-rush  ·  23 agents  ·  68% plan
-  live     14 running · 6 idle · 3 need-input     # active sessions by lifecycle state
+rush  ·  23 live
+  live     14 running · 6 idle · 3 need-input     # LIVE sessions by lifecycle state
+  dead     4 finished or lost (3 crashed, 1 closed)
   agents   claude · running · RUSH-2107 @zion  ·  codex · idle @mac-mini  ·  +21 more
   ships    4 merged (7d) · 2 open PRs · 3 worktrees · v1.20.91  # gh counts + latest release tag
   linear   12/30 done · 5 in progress           # Linear issue counts (needs linear.projectId)
   next     Beta cut  ·  3/8  ·  due in 6 days     # the next unfinished Linear milestone
+           +2 more milestones — agents projects view <name>
   tickets  RUSH-1201 · RUSH-1198 · …              # tickets worked or created
   proof    11 artifacts (7d) · last: plan-x.html  # artifact.created milestones by cwd
   repos    phnx-labs/rush · rush-infra
@@ -178,12 +180,13 @@ rush  ·  3 agents
 | --- | --- |
 | `agents projects list [--json]` | All projects: root, repo, live agent count. |
 | `agents projects add <name>` | Scaffold `<name>.yaml`; infers `root` + origin slug from the current repo. Flags: `--root`, `--path`, `--repo`, `--context path:purpose`, `--linear`. |
-| `agents projects show <name> [--json]` | Full definition + resolved paths + contexts + links. |
+| `agents projects view <name> [--json] [--no-remote]` (alias `show`) | Full definition + resolved paths + contexts + links + **every** Linear milestone with dates and progress. |
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
 | `agents projects status [name] [--json] [--window N] [--no-remote] [--fleet]` | The progress card (all projects, or one). `--fleet` adds per-device workspace drift over SSH. |
 | `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. |
 | `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--linear-first-factory-gated). |
 | `agents projects import --from-factory [--min-confidence low\|medium\|high] [--all]` | Absorb `~/.agents/factory/projects.json`. Imports only `high`-confidence rows by default. |
+| `agents projects set <name> [--repo\|--root\|--path\|--description]` | Change one field, preserving every other. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
 | `agents projects rm <name>` | Delete the definition (never touches the repo). |
 
 `agents run --project <name>` is unchanged in spelling — it just resolves richer
@@ -206,7 +209,7 @@ containment fallback that powers `projects link`'s suggestion is deliberately no
 used on this write path: it would silently bind "Agents CLI" to `agents-cli-web`
 with nobody looking. A project with no exact local match still imports, carrying
 `name` + `linear` and nothing it cannot prove; fill the rest in with
-`projects add --force` or by editing the YAML.
+`projects set` or by editing the YAML.
 
 Re-importing is safe. An existing def is preserved field-for-field and only
 `linear` is overwritten, so a hand-set `description`, `contexts`, or `integrations`
@@ -252,3 +255,102 @@ unlinks the YAML, never the repo.
 - **Re-point `agents factory snapshot`** per-project Linear rollup at defined projects.
 - **Per-repo release lines** — the `ships` release tag is the primary repo only.
 - **Persisted `project_id` session column** — today membership is derived from cwd.
+
+## The stored `repo` must match the checkout's remote
+
+A definition's `repo` is a plain string that nothing used to validate, so it could be
+confidently wrong. That is not hypothetical: Factory seeds the registry with a slug derived
+from the checkout path's last two segments (`repoSlugFromPath`,
+`apps/factory/src/core/projectIndex.ts`), so a repo cloned to
+`~/src/github.com/<you>/agents-cli` whose `origin` is `phnx-labs/agents-cli` was imported as
+`<you>/agents-cli`.
+
+Both slugs resolve to real repositories, so no call failed. The card simply read the merged-PR
+and release counts from a **different repo** — 0 merges in 7 days instead of 100. A wrong
+number that looks right is worse than a missing one, so:
+
+- `import --from-factory` reads the checkout's real `origin` and overrides the registry slug,
+  falling back to the path guess only when there is no remote to ask.
+- `status` and `show` print the disagreement with its fix attached whenever a def's `repo`
+  differs from the remote of its `root`:
+
+  ```
+  repos    muqsitnawaz/agents-cli
+  !        repo is muqsitnawaz/agents-cli but origin is phnx-labs/agents-cli —
+           PR and release counts are being read from the wrong repository
+           agents projects set agents-cli --repo phnx-labs/agents-cli
+  ```
+
+The check is silent when this machine has no checkout to read a remote from — absence of
+evidence is not a finding.
+
+## The Linear line is cached, and degrades to stale rather than absent
+
+Linear meters requests and query complexity separately, and only one of them binds. Measured
+on this workspace's response headers:
+
+```
+x-ratelimit-requests-limit:   2500      remaining: 2
+x-ratelimit-complexity-limit: 3000000   remaining: 2999987
+```
+
+Requests are scarce; complexity is essentially untouched. Since the card pages every issue in
+a project (up to 10 requests each), an agent running `status` in a loop exhausts the budget —
+which is exactly how it was exhausted during this feature's development.
+
+Answers are cached under `~/.agents/.cache/linear-projects/` for 10 minutes, matching the
+repo's existing `SKILL_INDEX_TTL_MS` convention — **one file per project**, written by atomic
+rename. A single shared JSON document would have to be read, modified, and written back, and
+that sequence is not atomic across processes: measured with two concurrent writers of 40
+distinct keys each, **8 of 80 entries survived**. A machine running a dozen agent sessions
+makes that the normal case rather than a corner. Per-key files have nothing to clobber, and the
+same measurement now yields 80 of 80. A second `status` inside the window makes no
+Linear request at all.
+
+The behavior that matters more is on failure: **a stale answer is served and labelled, never
+dropped.** A Linear row that was populated a minute ago must not blank out because one fetch
+timed out — the same invariant `mergeAuthHealthEntries` keeps for account health. A 429 records
+its reset time so subsequent runs skip the call entirely instead of spending a request to learn
+the budget is gone.
+
+`AGENTS_LINEAR_CACHE_PATH` overrides the location (tests use it; `getCacheDir()` resolves
+`HOME` once at module load, so a test swapping `process.env.HOME` would otherwise read and
+write the developer's real cache).
+
+## The headline counts live agents, and `planPct` is gone
+
+Two numbers used to sit on the headline and neither meant what it looked like.
+
+**The agent count included dead sessions.** A real project read `39 agents` while 19 of those
+had crashed. It now reads `19 live`, and the wreckage gets its own row — `dead  19 finished or
+lost (19 crashed)` — because 19 crashed sessions is a thing to go fix, not throughput to brag
+about. `orphaned` counts as **live**: `lib/session/active.ts` defines it as "alive, but no
+client is attached" (the agent outlived its window and is still working), and the repo's own
+dead rule (`commands/sessions.ts`) is `closed` and `crashed` only.
+
+**`planPct` measured whichever agent last wrote a todo list.** It summed each matched session's
+most recent checklist snapshot, so:
+
+- no session had ever called `TodoWrite` → `total = 0` → the figure silently disappeared;
+- one agent opened a fresh 40-item plan → `0/40` → the whole project read **`0% plan`** while
+  everyone else worked.
+
+It also counted crashed sessions' frozen final checklists forever, and summed unrelated
+denominators as though they were one plan. No repair makes a cross-session sum of ad-hoc
+checklists mean project progress, so it is removed from the card and from `--json`, replaced
+there by `live` and `dead`.
+
+## Milestones: all of them, and Linear's own "next"
+
+`status` shows the next checkpoint plus a pointer; `view <name>` shows every declared
+milestone with its date and progress. When Linear itself flags one (`status: "next"`) that is
+the one used — it is the answer showing in Linear's UI, whereas earliest-dated-unfinished is
+only our guess, used when nothing is flagged.
+
+A milestone with no issues assigned reports no progress, and `view` says so once rather than
+printing a column of silent `0%`s:
+
+```
+    !          no issues are assigned to any milestone — progress against them
+               cannot be measured
+```

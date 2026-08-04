@@ -1873,8 +1873,8 @@ export async function getAccountInfo(
 }
 
 // Fresh window for the cached session walk. Matches USAGE_CACHE_FRESH_MS in
-// usage.ts so a launch storm reuses both probes for the same period.
-const LAST_ACTIVE_CACHE_FRESH_MS = 2 * 60 * 1000;
+// usage.ts (5 minutes) so a launch storm reuses both probes for the same period.
+const LAST_ACTIVE_CACHE_FRESH_MS = 5 * 60 * 1000;
 
 const getLastActiveCachePath = () => path.join(getCacheDir(), 'last-active.json');
 

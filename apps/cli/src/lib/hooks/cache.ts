@@ -324,8 +324,8 @@ printf '{"ts":"%s","event":"hook.fire","hook":"%s","ms":%d,"cache":"%s","exit":%
 mkdir -p "$PERF_DIR" 2>/dev/null || true
 TS_MS=$("$PY" -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)
 HOST=$(hostname 2>/dev/null || echo unknown)
-printf '{"ts_ms":%s,"kind":"hook.fire","label":"%s","duration_ms":%d,"cache":"%s","exit_code":%d,"hostname":"%s"}\\n' \\
-  "$TS_MS" "$HOOK_NAME" "$MS" "none" "$EXIT" "$HOST" >>"$PERF_SPOOL" 2>/dev/null || true
+printf '{"ts_ms":%s,"kind":"hook.fire","label":"%s","duration_ms":%d,"cache":"%s","exit_code":%d,"hostname":"%s"%s}\\n' \\
+  "$TS_MS" "$HOOK_NAME" "$MS" "none" "$EXIT" "$HOST" "$HOOK_EXTRA_JSON" >>"$PERF_SPOOL" 2>/dev/null || true
 
 exit "$EXIT"`;
 
@@ -402,6 +402,28 @@ done
 # Read stdin once (Claude/Codex/Gemini pass JSON on stdin to every hook).
 STDIN_PAYLOAD="$(cat || true)"
 
+# cwd + session_id from the hook's own stdin JSON, pre-escaped as a ready-to-
+# splice JSON fragment (e.g. ,"cwd":"/repo","session_id":"abc") so every
+# hook.fire perf-spool line below can carry them without re-parsing stdin per
+# site. This is what lets \`agents perf --project\` (project-key.ts resolves
+# cwd -> project) and session-scoped rollups work for hook.fire samples.
+# Fail-safe: any parse error yields an empty fragment, never breaks the write.
+HOOK_EXTRA_JSON="$(printf '%s' "$STDIN_PAYLOAD" | "$PY" -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    d = {}
+out = {}
+cwd = d.get("cwd")
+if isinstance(cwd, str) and cwd:
+    out["cwd"] = cwd
+sid = d.get("session_id") or d.get("sessionId")
+if isinstance(sid, str) and sid:
+    out["session_id"] = sid
+print("".join("," + json.dumps(k) + ":" + json.dumps(v) for k, v in out.items()))
+' 2>/dev/null || true)"
+
 # --- matches: gate (issue #744 / RUSH-1506) -------------------------------
 # Enforce the hook's declared \`matches:\` predicates at fire time. Mirrors
 # shouldFire() in src/lib/hooks/match.ts: all declared predicates AND together;
@@ -420,8 +442,8 @@ if [ -n "$MATCHES_JSON" ]; then
     mkdir -p "$PERF_DIR" 2>/dev/null || true
     _TS_MS=$("$PY" -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)
     _HOST=$(hostname 2>/dev/null || echo unknown)
-    printf '{"ts_ms":%s,"kind":"hook.fire","label":"%s","duration_ms":0,"cache":"skip","exit_code":0,"hostname":"%s"}\\n' \\
-      "$_TS_MS" "$HOOK_NAME" "$_HOST" >>"$PERF_SPOOL" 2>/dev/null || true
+    printf '{"ts_ms":%s,"kind":"hook.fire","label":"%s","duration_ms":0,"cache":"skip","exit_code":0,"hostname":"%s"%s}\\n' \\
+      "$_TS_MS" "$HOOK_NAME" "$_HOST" "$HOOK_EXTRA_JSON" >>"$PERF_SPOOL" 2>/dev/null || true
     exit 0
   fi
 fi
@@ -523,8 +545,8 @@ printf '{"ts":"%s","event":"hook.fire","hook":"%s","ms":%d,"cache":"%s","exit":%
 # Disposable perf spool → drained into perf.db (see lib/perf/db.ts). Soft keys only.
 TS_MS=$("$PY" -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo 0)
 HOST=$(hostname 2>/dev/null || echo unknown)
-printf '{"ts_ms":%s,"kind":"hook.fire","label":"%s","duration_ms":%d,"cache":"%s","exit_code":%d,"hostname":"%s"}\\n' \\
-  "$TS_MS" "$HOOK_NAME" "$MS" "$CACHE_STATUS" "$EXIT" "$HOST" >>"$PERF_SPOOL" 2>/dev/null || true
+printf '{"ts_ms":%s,"kind":"hook.fire","label":"%s","duration_ms":%d,"cache":"%s","exit_code":%d,"hostname":"%s"%s}\\n' \\
+  "$TS_MS" "$HOOK_NAME" "$MS" "$CACHE_STATUS" "$EXIT" "$HOST" "$HOOK_EXTRA_JSON" >>"$PERF_SPOOL" 2>/dev/null || true
 
 exit "$EXIT"
 `;

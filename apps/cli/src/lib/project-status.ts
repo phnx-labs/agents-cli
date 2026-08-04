@@ -21,6 +21,14 @@ import { readRecentActivity } from './activity.js';
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * How many recent merges `gh` is asked for. A repo busy enough that all of them
+ * land inside the window has more than this — agents-cli itself merged 100 of
+ * its 100 most recent PRs within 7 days — so the count is reported as a lower
+ * bound rather than as a total.
+ */
+const MERGED_PR_LIMIT = 100;
+
 /** One live agent on a project — the WHO behind the byStatus count. */
 export interface ProjectMember {
   /** Harness name (claude / codex / …), from the session's `kind`. */
@@ -114,10 +122,66 @@ export function rollupSessionsByProject(
   return map;
 }
 
-/** Plan completion percentage (0–100), or undefined when nothing is tracked. */
-export function planPct(plan: { done: number; total: number }): number | undefined {
-  if (plan.total <= 0) return undefined;
-  return Math.round((plan.done / plan.total) * 100);
+/**
+ * Statuses that mean the session is over. Taken from the repo's own rule
+ * (`commands/sessions.ts`): "`closed` and `crashed` are unconditionally dead".
+ * `orphaned` is NOT among them — `session/active.ts` defines it as "Alive, but
+ * no client is attached", i.e. the agent outlived its window and is still
+ * working. Counting it as dead understates the project by exactly the sessions
+ * that are running unattended.
+ */
+const DEAD_STATUSES = new Set(['closed', 'crashed']);
+
+/*
+ * Every `ActiveStatus`, and why it lands where it does:
+ *
+ *   running, idle, queued, input_required   live — obviously working or waiting
+ *   orphaned                                live — "alive, but no client is
+ *                                           attached"; the agent outlived its
+ *                                           window and is still running
+ *   abandoned                               live — it fires on transcript
+ *                                           staleness BEFORE the liveness check,
+ *                                           so it also covers the live-but-
+ *                                           forgotten session that asked a
+ *                                           question and sat over a weekend
+ *   unknown                                 live — we cannot prove it is dead,
+ *                                           and claiming so would overstate the
+ *                                           wreckage row
+ *   closed, crashed                         dead — unconditionally, per
+ *                                           commands/sessions.ts
+ */
+
+/** Live vs finished sessions on a project. */
+export interface LiveDeadSplit {
+  live: number;
+  dead: number;
+  /** Dead broken out by status, for the card's parenthetical. */
+  deadByStatus: Array<{ status: string; n: number }>;
+}
+
+/**
+ * Split a rollup's sessions into what is working and what is wreckage.
+ *
+ * The headline used to be the raw session count, which on a real project read
+ * `39 agents` when 19 of those had crashed. A count that is half corpses is not
+ * a throughput signal — but the corpses are worth their own number, because 19
+ * crashed sessions is itself a thing to go fix.
+ */
+export function liveDeadSplit(byStatus: Partial<Record<ActiveStatus, number>>): LiveDeadSplit {
+  let live = 0;
+  let dead = 0;
+  const deadByStatus: Array<{ status: string; n: number }> = [];
+  for (const [status, n] of Object.entries(byStatus)) {
+    if (!n) continue;
+    if (DEAD_STATUSES.has(status)) {
+      dead += n;
+      deadByStatus.push({ status, n });
+    } else {
+      live += n;
+    }
+  }
+  deadByStatus.sort((a, b) => b.n - a.n || a.status.localeCompare(b.status));
+  return { live, dead, deadByStatus };
 }
 
 /**
@@ -176,6 +240,12 @@ export interface ProjectRemoteSignals {
   windowDays: number;
   /** PRs merged into the primary repo within the window (via `gh`). */
   mergedPrs: number;
+  /**
+   * True when the `gh` fetch cap cut the count short — `mergedPrs` is then a
+   * LOWER bound (rendered `100+`), never presented as the complete count. Same
+   * contract `LinearProjectCounts.truncated` keeps for the Linear line.
+   */
+  mergedPrsTruncated?: boolean;
   /** Artifacts agents produced within the window (activity.created milestones). */
   artifacts: number;
   /** Basename of the most recent artifact, when any. */
@@ -213,11 +283,16 @@ export async function enrichProjectSignals(
     try {
       const { stdout } = await execFileAsync(
         'gh',
-        ['pr', 'list', '--repo', def.repo, '--state', 'merged', '--json', 'number,mergedAt', '--limit', '100'],
+        ['pr', 'list', '--repo', def.repo, '--state', 'merged', '--json', 'number,mergedAt', '--limit', String(MERGED_PR_LIMIT)],
         { timeout: 8000, encoding: 'utf8' },
       );
       const rows = JSON.parse(stdout) as { mergedAt?: string }[];
       out.mergedPrs = rows.filter((r) => r.mergedAt && Date.parse(r.mergedAt) >= sinceMs).length;
+      // `--limit 100` caps the fetch, so a busy repo where every one of the 100
+      // most recent merges falls inside the window has MORE than 100 — this repo
+      // really does. Say so (`100+`) rather than presenting a cap as a count,
+      // the same contract `LinearProjectCounts.truncated` already keeps.
+      if (rows.length >= MERGED_PR_LIMIT && out.mergedPrs >= MERGED_PR_LIMIT) out.mergedPrsTruncated = true;
     } catch {
       /* gh missing / unauthenticated / repo not found — skip this signal */
     }
