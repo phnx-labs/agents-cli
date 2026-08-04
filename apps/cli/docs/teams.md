@@ -266,8 +266,8 @@ which case the worktree is kept and reported.
 
 | Teammate | Base of the new worktree branch |
 |---|---|
-| **local** (no `--device`) | your **current local `HEAD`** — no fetch is run first (`createWorktree`). Sync the checkout (`git fetch && git merge --ff-only origin/<default>`) **before** `add`, or every teammate forks off stale code. |
-| **remote** (`--device host`) | the host's **freshly-fetched `origin/<default>`** (`createRemoteWorktree` fetches first) — no manual sync needed. |
+| **local** (no `--device`) | the **freshly-fetched `origin/<default>`** (`createWorktree` runs `git fetch origin` then bases the branch on `origin/<default>` — never local `HEAD`). |
+| **remote** (`--device host`) | the host's **freshly-fetched `origin/<default>`** (`createRemoteWorktree` fetches first) — same base policy as local. |
 
 So the pre-flight for a **local** worktree team is: fast-forward your checkout to
 the default branch first. A remote team handles this itself.
