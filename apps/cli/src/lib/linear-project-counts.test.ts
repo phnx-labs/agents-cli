@@ -6,6 +6,7 @@ import {
   countsFromIssuesResponse,
   fetchLinearProjectCounts,
   nextMilestone,
+  orderedMilestones,
   type LinearIssuesResponse,
 } from './linear-project-counts.js';
 
@@ -170,6 +171,7 @@ describe('countsFromIssuesResponse — milestone', () => {
       done: 1,
       total: 2,
       inProgress: 1,
+      milestones: [{ name: 'Beta cut', targetDate: '2026-08-21', done: 1, total: 2 }],
       nextMilestone: { name: 'Beta cut', targetDate: '2026-08-21', done: 1, total: 2 },
     });
     expect(countsFromIssuesResponse(response(['completed', 'started']))).not.toHaveProperty('nextMilestone');
@@ -225,5 +227,52 @@ describe('fetchLinearProjectCounts — request budget', () => {
     let calls = 0;
     await fetchLinearProjectCounts('p2', async () => { calls++; return onePage(); }, t0);
     expect(calls).toBe(1);
+  });
+});
+
+describe('orderedMilestones', () => {
+  const A = { id: 'a', name: 'Beta cut', targetDate: '2026-09-30' };
+  const B = { id: 'b', name: 'GA', targetDate: '2026-09-15' };
+  const C = { id: 'c', name: 'Done thing', targetDate: '2026-08-01' };
+
+  it('returns every declared milestone, unfinished first by date', () => {
+    // C is complete, so it sorts last despite the earliest date — a reader is
+    // scanning for what is still ahead.
+    const out = orderedMilestones([A, B, C], [issue('completed', 'c')]);
+    expect(out.map((m) => m.name)).toEqual(['GA', 'Beta cut', 'Done thing']);
+  });
+
+  it('shows all three of a project whose milestones carry no issues at all', () => {
+    // The real shape of this repo's Linear project.
+    const out = orderedMilestones([A, B], []);
+    expect(out).toEqual([
+      { name: 'GA', targetDate: '2026-09-15', done: 0, total: 0 },
+      { name: 'Beta cut', targetDate: '2026-09-30', done: 0, total: 0 },
+    ]);
+  });
+
+  it("marks Linear's own next flag", () => {
+    const out = orderedMilestones([{ ...A, status: 'next' }, B], []);
+    expect(out.find((m) => m.name === 'Beta cut')?.isNext).toBe(true);
+    expect(out.find((m) => m.name === 'GA')?.isNext).toBeUndefined();
+  });
+});
+
+describe('nextMilestone — Linear wins over our date guess', () => {
+  const early = { id: 'e', name: 'Earlier', targetDate: '2026-09-01' };
+  const flagged = { id: 'f', name: 'Flagged', targetDate: '2026-12-01', status: 'next' };
+
+  it("prefers Linear's own next marker over the earliest date", () => {
+    // Linear's answer is what the user sees in Linear's UI; ours is a guess.
+    expect(nextMilestone([early, flagged], [])?.name).toBe('Flagged');
+  });
+
+  it('falls back to earliest-dated unfinished when nothing is flagged', () => {
+    expect(nextMilestone([early, { ...flagged, status: 'unstarted' }], [])?.name).toBe('Earlier');
+  });
+
+  it('never returns a finished milestone even if Linear flags it', () => {
+    const doneFlagged = { id: 'f', name: 'Flagged', targetDate: '2026-09-01', status: 'next' };
+    expect(nextMilestone([doneFlagged, early], [issue('completed', 'f')])?.name).toBe('Earlier');
   });
 });
