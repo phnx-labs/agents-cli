@@ -1733,26 +1733,6 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agents.enableTmux', async () => {
-      // Back-compat command id: flips terminalMode back to 'auto' (tmux by
-      // default when available). The setting is the source of truth now.
-      const config = vscode.workspace.getConfiguration();
-      await config.update('agents.terminalMode', 'auto', vscode.ConfigurationTarget.Global);
-      vscode.window.showInformationMessage('Tmux mode enabled (auto). New agent terminals will run inside tmux when available.');
-      await updateContextKeys(context);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('agents.disableTmux', async () => {
-      const config = vscode.workspace.getConfiguration();
-      await config.update('agents.terminalMode', 'native', vscode.ConfigurationTarget.Global);
-      vscode.window.showInformationMessage('Tmux mode disabled. New agent terminals will use VS Code editor terminals.');
-      await updateContextKeys(context);
-    })
-  );
-
-  context.subscriptions.push(
     vscode.commands.registerCommand('agents.enableReader', async () => {
       const current = settings.getSettings(context);
       const next: AgentSettings = {
@@ -5010,11 +4990,6 @@ async function reloadActiveTerminal(context: vscode.ExtensionContext) {
 }
 
 async function updateContextKeys(context: vscode.ExtensionContext): Promise<void> {
-  const config = vscode.workspace.getConfiguration('agents');
-  // 'native' hides the "Disable Tmux" toggle; 'auto'/'tmux' show it (tmux is active).
-  const tmuxEnabled = normalizeTerminalMode(config.get('terminalMode')) !== 'native';
-  await vscode.commands.executeCommand('setContext', 'agents.tmuxEnabled', tmuxEnabled);
-
   const readerEnabled = settings.getSettings(context).editor?.markdownViewerEnabled ?? true;
   await vscode.commands.executeCommand('setContext', 'agents.readerEnabled', readerEnabled);
 }
@@ -5240,7 +5215,9 @@ async function forkCurrentSession(
       ),
       recordFork: (edge) => { void recordFork(context, edge); },
       showRejection: showForkRejection,
-      viewColumn: vscode.ViewColumn.Beside,
+      // Open the fork as a normal full tab in the active group, not a side
+      // split — it is a fresh session, not a pane to sit beside its parent.
+      viewColumn: vscode.ViewColumn.Active,
       now: Date.now,
     });
     return;
@@ -5253,13 +5230,14 @@ async function forkCurrentSession(
     return;
   }
 
-  // Land the fork BESIDE its parent, not on top of it. A fork exists to be
-  // compared with the session it came from, so the two tabs share the screen.
+  // Open the fork as a normal full tab in the active group. A fork is a fresh
+  // sibling session, not a pane to wedge beside its parent — a side split
+  // shrinks both terminals and is not what forking asks for.
   const { terminalId, sessionId } = await openSingleAgentWithQueue(context, entry.agentConfig, [request.prompt], {
     strategy: request.strategy,
     host: request.host,
     local: request.local,
-    viewColumn: vscode.ViewColumn.Beside,
+    viewColumn: vscode.ViewColumn.Active,
   });
 
   void recordFork(context, {
