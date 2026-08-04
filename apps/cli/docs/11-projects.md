@@ -281,3 +281,31 @@ number that looks right is worse than a missing one, so:
 
 The check is silent when this machine has no checkout to read a remote from — absence of
 evidence is not a finding.
+
+## The Linear line is cached, and degrades to stale rather than absent
+
+Linear meters requests and query complexity separately, and only one of them binds. Measured
+on this workspace's response headers:
+
+```
+x-ratelimit-requests-limit:   2500      remaining: 2
+x-ratelimit-complexity-limit: 3000000   remaining: 2999987
+```
+
+Requests are scarce; complexity is essentially untouched. Since the card pages every issue in
+a project (up to 10 requests each), an agent running `status` in a loop exhausts the budget —
+which is exactly how it was exhausted during this feature's development.
+
+Answers are cached at `~/.agents/.cache/.linear-projects.json` for 10 minutes, matching the
+repo's existing `SKILL_INDEX_TTL_MS` convention. A second `status` inside the window makes no
+Linear request at all.
+
+The behavior that matters more is on failure: **a stale answer is served and labelled, never
+dropped.** A Linear row that was populated a minute ago must not blank out because one fetch
+timed out — the same invariant `mergeAuthHealthEntries` keeps for account health. A 429 records
+its reset time so subsequent runs skip the call entirely instead of spending a request to learn
+the budget is gone.
+
+`AGENTS_LINEAR_CACHE_PATH` overrides the location (tests use it; `getCacheDir()` resolves
+`HOME` once at module load, so a test swapping `process.env.HOME` would otherwise read and
+write the developer's real cache).
