@@ -62,7 +62,9 @@ function matches(r: EventRecord, q: UnifiedQuery): boolean {
  * result (each source is fetched up to `limit`, so the top-N is exact).
  */
 export function readUnifiedEvents(q: UnifiedQuery = {}): EventRecord[] {
-  const opsRaw = query({
+  // `bundle` is filtered inside query()'s scan (before its limit cutoff) so a
+  // matching-bundle record older than the newest-`limit` window is not dropped.
+  const ops = query({
     startDate: q.startDate,
     endDate: q.endDate,
     eventTypes: q.eventTypes,
@@ -72,11 +74,9 @@ export function readUnifiedEvents(q: UnifiedQuery = {}): EventRecord[] {
     caller: q.caller,
     command: q.command,
     module: q.module,
+    bundle: q.bundle,
     limit: q.limit,
   });
-  // `bundle` is a payload field, not one query() indexes, so filter the ops here
-  // (the activity source is filtered by `matches`, which now includes it).
-  const ops = q.bundle ? opsRaw.filter((r) => r.bundle === q.bundle) : opsRaw;
 
   if (q.includeActivity === false) return ops;
 

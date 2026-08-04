@@ -72,6 +72,20 @@ describe('readUnifiedEvents', () => {
     expect(onlyA[0].sessionId).toBe('sess-A');
   });
 
+  it('finds a matching-bundle record older than the newest `limit` window (no data loss)', () => {
+    setup();
+    // `share` is the OLDEST read; two NEWER `prod` reads follow. A post-filter
+    // applied AFTER query()'s limit cutoff would let the two `prod` records exhaust
+    // limit:2 and silently drop `share` (the bug). Filtering bundle INSIDE the scan
+    // must still surface `share`.
+    emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'share' });
+    emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'prod' });
+    emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'prod' });
+    const share = readUnifiedEvents({ module: 'secrets', bundle: 'share', includeActivity: false, limit: 2 });
+    expect(share.length).toBe(1);
+    expect(share[0].bundle).toBe('share');
+  });
+
   it('--audit (includeActivity:false) returns operational events only', () => {
     const { activityRoot } = setup();
     emit('secrets.get', { module: 'secrets', command: 'secrets get' });
