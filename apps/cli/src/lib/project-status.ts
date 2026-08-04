@@ -21,6 +21,14 @@ import { readRecentActivity } from './activity.js';
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * How many recent merges `gh` is asked for. A repo busy enough that all of them
+ * land inside the window has more than this — agents-cli itself merged 100 of
+ * its 100 most recent PRs within 7 days — so the count is reported as a lower
+ * bound rather than as a total.
+ */
+const MERGED_PR_LIMIT = 100;
+
 /** One live agent on a project — the WHO behind the byStatus count. */
 export interface ProjectMember {
   /** Harness name (claude / codex / …), from the session's `kind`. */
@@ -176,6 +184,12 @@ export interface ProjectRemoteSignals {
   windowDays: number;
   /** PRs merged into the primary repo within the window (via `gh`). */
   mergedPrs: number;
+  /**
+   * True when the `gh` fetch cap cut the count short — `mergedPrs` is then a
+   * LOWER bound (rendered `100+`), never presented as the complete count. Same
+   * contract `LinearProjectCounts.truncated` keeps for the Linear line.
+   */
+  mergedPrsTruncated?: boolean;
   /** Artifacts agents produced within the window (activity.created milestones). */
   artifacts: number;
   /** Basename of the most recent artifact, when any. */
@@ -213,11 +227,16 @@ export async function enrichProjectSignals(
     try {
       const { stdout } = await execFileAsync(
         'gh',
-        ['pr', 'list', '--repo', def.repo, '--state', 'merged', '--json', 'number,mergedAt', '--limit', '100'],
+        ['pr', 'list', '--repo', def.repo, '--state', 'merged', '--json', 'number,mergedAt', '--limit', String(MERGED_PR_LIMIT)],
         { timeout: 8000, encoding: 'utf8' },
       );
       const rows = JSON.parse(stdout) as { mergedAt?: string }[];
       out.mergedPrs = rows.filter((r) => r.mergedAt && Date.parse(r.mergedAt) >= sinceMs).length;
+      // `--limit 100` caps the fetch, so a busy repo where every one of the 100
+      // most recent merges falls inside the window has MORE than 100 — this repo
+      // really does. Say so (`100+`) rather than presenting a cap as a count,
+      // the same contract `LinearProjectCounts.truncated` already keeps.
+      if (rows.length >= MERGED_PR_LIMIT && out.mergedPrs >= MERGED_PR_LIMIT) out.mergedPrsTruncated = true;
     } catch {
       /* gh missing / unauthenticated / repo not found — skip this signal */
     }

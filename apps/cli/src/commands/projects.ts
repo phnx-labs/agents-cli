@@ -53,6 +53,7 @@ import {
 } from '../lib/project-status.js';
 import { fetchLinearProjectCounts, type LinearMilestone, type LinearProjectCounts } from '../lib/linear-project-counts.js';
 import { listLinearProjects, pickLinearProject, type LinearPick, type LinearProjectLite } from '../lib/linear-projects.js';
+import { checkRepoSlug } from '../lib/project-doctor.js';
 import {
   buildFactoryImportCandidates,
   buildLinearImportCandidates,
@@ -92,7 +93,7 @@ function parseContextFlag(raw: string): ProjectContext {
 }
 
 /** Best-effort `owner/repo` from a repo's origin remote. */
-function originSlug(cwd: string): string | undefined {
+export function originSlug(cwd: string): string | undefined {
   try {
     const url = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, encoding: 'utf8' }).trim();
     return parseOwnerRepoFromRemote(url) ?? undefined;
@@ -127,7 +128,9 @@ function runFactoryImport(existing: Map<string, ProjectDef>, opts: ImportOptions
     : Array.isArray((parsed as { projects?: unknown[] })?.projects)
       ? (parsed as { projects: unknown[] }).projects
       : [];
-  return buildFactoryImportCandidates(rows, existing, opts);
+  // The checkout's real `origin` overrides the registry's path-derived slug —
+  // see buildFactoryImportCandidates for why the path guess is not trustworthy.
+  return buildFactoryImportCandidates(rows, existing, opts, (root) => originSlug(expandLocalHome(root)));
 }
 
 /**
@@ -264,7 +267,9 @@ function renderCard(
   console.log(`  ${chalk.dim('live')}     ${r ? statusBar(r) : chalk.gray('no live agents')}`);
   if (r && r.members.length) console.log(`  ${chalk.dim('agents')}   ${formatProjectMembers(r.members)}`);
   const ships: string[] = [];
-  if (remote?.mergedPrs) ships.push(chalk.green(`${remote.mergedPrs} merged (${remote.windowDays}d)`));
+  if (remote?.mergedPrs) {
+    ships.push(chalk.green(`${remote.mergedPrs}${remote.mergedPrsTruncated ? '+' : ''} merged (${remote.windowDays}d)`));
+  }
   if (r?.openPrs.length) ships.push(`${r.openPrs.length} open PR${r.openPrs.length === 1 ? '' : 's'}`);
   if (r?.worktrees) ships.push(`${r.worktrees} worktree${r.worktrees === 1 ? '' : 's'}`);
   if (remote?.latestRelease) ships.push(remote.latestRelease.tag);
@@ -293,6 +298,14 @@ function renderCard(
   }
   const repos = [def.repo, ...(def.repos ?? []).map((x) => x.slug)].filter(Boolean) as string[];
   if (repos.length) console.log(`  ${chalk.dim('repos')}    ${[...new Set(repos)].join(' · ')}`);
+  // A def whose `repo` disagrees with the checkout's origin reads PR and release
+  // counts from a DIFFERENT repository — both slugs resolve, so nothing errors
+  // and the wrong numbers look right. Say it here, with the fix attached.
+  const mismatch = def.root ? checkRepoSlug(def, originSlug(expandLocalHome(def.root))) : undefined;
+  if (mismatch) {
+    console.log(`  ${chalk.yellow('!')}        ${chalk.yellow(mismatch.message)}`);
+    console.log(`  ${' '.repeat(8)}${chalk.gray(mismatch.remediation)}`);
+  }
   if (def.contexts?.length) {
     console.log(`  ${chalk.dim('context')}  ${def.contexts.map((c) => c.path).join(' · ')}`);
   }
@@ -625,6 +638,40 @@ export function registerProjectsCommands(program: Command): void {
       if (opts.source === 'factory' && s > 0 && opts.minConfidence === 'high') {
         console.log(chalk.gray('  (widen with --min-confidence medium or --all)'));
       }
+    });
+
+  // ---- set ----
+  projects
+    .command('set <name>')
+    .description('Change one field on a project definition, preserving everything else.')
+    .option('--repo <owner/repo>', 'Primary GitHub slug')
+    .option('--root <path>', 'Repo / monorepo root')
+    .option('--path <subdir>', 'Default cwd for agents (a monorepo subdir)')
+    .option('--description <text>', 'One-line description shown on the card')
+    .action((name: string, opts: { repo?: string; root?: string; path?: string; description?: string }) => {
+      const def = loadProjectDef(name);
+      if (!def) {
+        console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
+        process.exit(1);
+      }
+      const fields = (['repo', 'root', 'path', 'description'] as const).filter((k) => opts[k] !== undefined);
+      if (fields.length === 0) {
+        console.error(chalk.red('Nothing to set. Pass a field, e.g. --repo <owner/repo>.'));
+        process.exit(1);
+      }
+      // Load, mutate the named fields, write back — the `link` pattern. NEVER
+      // the `add --force` pattern, which rebuilds the def from flags alone and
+      // silently drops linear/contexts/integrations that were not re-passed.
+      if (opts.repo !== undefined) def.repo = opts.repo;
+      if (opts.root !== undefined) def.root = opts.root;
+      if (opts.description !== undefined) def.description = opts.description;
+      if (opts.path !== undefined) {
+        const base = (opts.root ?? def.root ?? '').replace(/\/$/, '');
+        def.defaultPath = `${base}/${opts.path.replace(/^\//, '')}`;
+      }
+      writeProjectDef(def);
+      console.log(chalk.green(`Updated ${def.name}`));
+      for (const f of fields) console.log(chalk.gray(`  ${f}  ${f === 'path' ? def.defaultPath : def[f as 'repo' | 'root' | 'description']}`));
     });
 
   // ---- link ----
