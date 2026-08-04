@@ -15,7 +15,7 @@ import {
   writeProfile,
   type Profile,
 } from './profiles.js';
-import { setKeychainBackendForTest, type KeychainBackend } from './secrets/index.js';
+import { setKeychainBackendForTest, setKeychainHeadlessDetectorForTest, type KeychainBackend } from './secrets/index.js';
 
 let TEST_ROOT: string;
 let USER_DIR: string;
@@ -182,6 +182,49 @@ describe('resolveProfileEnv honors authOptional', () => {
       auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.no-such-provider-xyz.token' },
     };
     expect(() => resolveProfileEnv(p)).toThrow(/not found/i);
+  });
+});
+
+describe('resolveProfileEnv fails fast in a headless context', () => {
+  // The Touch ID storm fix: `agents run <profile>` beneath a headless/teams/
+  // terminal runtime (or any TTY-less spawn) must throw the actionable error
+  // instead of raising a sheet nobody is watching. The memory backend is
+  // removed for these tests so resolveProfileEnv reaches the REAL raw-read
+  // guard in getKeychainToken; the detector seam stands in for the darwin-only
+  // headless signal so the throw is exercisable on any CI platform.
+  it('throws the actionable headless error instead of attempting a prompting read', () => {
+    setKeychainBackendForTest(null);
+    setKeychainHeadlessDetectorForTest(() => true);
+    try {
+      const p: Profile = {
+        name: 'kimi',
+        host: { agent: 'kimi' as Profile['host']['agent'] },
+        env: {},
+        auth: { envVar: 'KIMI_API_KEY', keychainItem: 'agents-cli.kimi.token' },
+      };
+      expect(() => resolveProfileEnv(p)).toThrow(/non-interactive/);
+      expect(() => resolveProfileEnv(p)).toThrow(/agents-cli\.kimi\.token/);
+    } finally {
+      setKeychainHeadlessDetectorForTest(null);
+    }
+  });
+
+  it('an interactive context is unaffected — the required-auth missing-item error survives', () => {
+    setKeychainBackendForTest(null);
+    setKeychainHeadlessDetectorForTest(() => false);
+    try {
+      const p: Profile = {
+        name: 'corp',
+        host: { agent: 'claude' },
+        env: {},
+        auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.no-such-provider-xyz.token' },
+      };
+      // Past the guard the read reaches the real platform path (helper absent
+      // in a source checkout / item absent on CI) — never the headless error.
+      expect(() => resolveProfileEnv(p)).toThrow(/^(?!.*non-interactive).*$/);
+    } finally {
+      setKeychainHeadlessDetectorForTest(null);
+    }
   });
 });
 

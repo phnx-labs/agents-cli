@@ -831,11 +831,21 @@ access control (that is 1Password/Vault; this tool is device-local first).
 - **SEC-12 (MUST).** Value reads MUST be batched so a bundle costs at most one
   Touch ID prompt, not one per key (`commands/secrets.ts:1073-1076`;
   `lib/secrets/bundles.ts:772-776,1262-1273`).
-- **SEC-13 (MUST).** A headless/detached (no-TTY) context on macOS MUST resolve
+- **SEC-13 (MUST).** A headless/detached (no-TTY or agent-runtime) context on macOS MUST resolve
   broker-only and fail loudly, and MUST NOT pop a Touch ID sheet on the
   interactive user's screen (`isHeadlessSecretsContext`,
-  `lib/secrets/bundles.ts:1245-1260`; `commands/secrets.ts:1172-1175,1925-1929`;
-  `mcp.ts:112-114`).
+  `lib/secrets/headless.ts:37-66`, re-exported from `lib/secrets/bundles.ts`;
+  `commands/secrets.ts:1172-1175,1925-1929`;
+  `mcp.ts:112-114`). This covers raw item reads too, not just bundles:
+  `getKeychainToken`/`getKeychainTokens` consult `assertRawKeychainReadAllowed`
+  (`lib/secrets/index.ts:877-899`) BEFORE any helper process is spawned, and
+  throw an actionable error naming the item (and, for bundle-triggered reads,
+  the `agents secrets unlock <bundle>` fix). **Given** a TTY-less process or
+  any `AGENTS_RUNTIME` launch **When** it attempts a read of an ACL-protected
+  keychain item **Then** the read fails fast and no sheet is raised. Reads the
+  caller attests as no-ACL via `silentNoAcl` (bundle metadata per SEC-4,
+  `never`-policy bundles per SEC-19, the unlock session store, the usage OAuth
+  cache) are prompt-free by construction and MUST NOT be blocked by this guard.
 - **SEC-14 (MUST).** A broker `get` for a bundle it does not hold MUST return
   `{ ok:true, hit:false }` — never an error, never a prompt, never a human
   escalation — and the caller MUST fall through to the real store
@@ -881,6 +891,19 @@ access control (that is 1Password/Vault; this tool is device-local first).
   and MUST degrade cleanly (no usage shown) when the DB is unavailable
   (`commands/secrets.ts` `view` / `list` / `activity` actions). The read-model is a
   bounded 90-day history; the full audit trail is `agents events --module secrets`.
+- **SEC-27 (MUST).** A cancelled or failed interactive keychain read MUST open a
+  short-TTL negative memo (5 minutes, `KEYCHAIN_READ_BACKOFF_TTL_MS`, keyed by
+  the requested item name, under `~/.agents/.cache/keychain-read-backoff/` —
+  `lib/secrets/read-backoff.ts`) so a polling caller cannot re-raise a Touch ID
+  sheet every few seconds; a subsequent read of the same item within the window
+  MUST fail fast with the back-off error instead of prompting
+  (`assertRawKeychainReadAllowed`, `lib/secrets/index.ts:877-899`). Any
+  successful read or write (or delete) of the item MUST clear the memo. A plain
+  miss (helper exit 1, item not found) MUST NOT open the memo — no prompt was
+  raised. The memo is regenerable, best-effort state and MUST carry no secret
+  material (item name + deadline only). **Given** a user cancels a read's
+  prompt **When** a poller retries the read within 5 minutes **Then** the retry
+  throws the back-off error without spawning the helper.
 - **SEC-28 (MUST).** **Every secret access is attributable to the session that
   triggered it — no exceptions.** Every value read and every unlock recorded via
   `emitSecretAudit` (SEC-26) MUST carry the **requesting** identity intact: agent,

@@ -1,16 +1,20 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as bundles from '../secrets/bundles.js';
+import * as stateModule from '../state.js';
 import {
   isReapSafe,
   reapSafeOrphans,
   REAP_MIN_IDLE_SECS,
   pickLeaseBundleFromList,
   pickTailscaleBundleFromList,
+  crabboxEnv,
   crabboxList,
   crabboxWarmup,
   parseCrabboxSshArgv,
+  resetCrabboxSecretsMemosForTest,
   type CrabboxBox,
 } from './cli.js';
 import type { SecretsBundle } from '../secrets/bundles.js';
@@ -70,6 +74,62 @@ describe('pickTailscaleBundleFromList', () => {
   it('returns undefined when no bundle declares one', () => {
     expect(pickTailscaleBundleFromList([bundle('misc', ['HCLOUD_TOKEN'])])).toBeUndefined();
     expect(pickTailscaleBundleFromList([])).toBeUndefined();
+  });
+});
+
+describe('crabboxEnv tailscale value memo', () => {
+  // crabboxEnv runs several times per lease (list/wait/spawn/stop). The
+  // tailscale read is a single-key subset, which canCacheResolvedEnv rejects
+  // for broker auto-cache — so without the process-lifetime value memo every
+  // call re-read the keychain (and, for a non-broker-held bundle, could
+  // re-prompt). One read per process, then the memo serves.
+  const tailscaleBundle = { name: 'tailnet', vars: { TS_AUTHKEY: 'keychain:ts' } } as SecretsBundle;
+  const ENV_KEYS = ['AGENTS_LEASE_SECRETS_BUNDLE', 'CRABBOX_TAILSCALE_AUTH_KEY'] as const;
+  let savedEnv: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+    for (const k of ENV_KEYS) delete process.env[k];
+    resetCrabboxSecretsMemosForTest();
+    // Hermetic lease-bundle resolution: no configured lease.secretsBundle from
+    // the developer's real agents.yaml, and no auto-detectable provider token.
+    vi.spyOn(stateModule, 'readMeta').mockReturnValue({} as ReturnType<typeof stateModule.readMeta>);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetCrabboxSecretsMemosForTest();
+    for (const k of ENV_KEYS) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+  });
+
+  it('reads the tailscale keychain value at most once across repeated crabboxEnv calls', () => {
+    vi.spyOn(bundles, 'listBundles').mockReturnValue([tailscaleBundle]);
+    const readSpy = vi
+      .spyOn(bundles, 'readAndResolveBundleEnv')
+      .mockReturnValue({ bundle: tailscaleBundle, env: { TS_AUTHKEY: 'tskey-once' } });
+
+    const env1 = crabboxEnv({});
+    const env2 = crabboxEnv({});
+    const env3 = crabboxEnv({});
+
+    expect(env1.CRABBOX_TAILSCALE_AUTH_KEY).toBe('tskey-once');
+    expect(env2.CRABBOX_TAILSCALE_AUTH_KEY).toBe('tskey-once');
+    expect(env3.CRABBOX_TAILSCALE_AUTH_KEY).toBe('tskey-once');
+    expect(readSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed tailscale read memoizes as absent — the failure is not retried per call', () => {
+    vi.spyOn(bundles, 'listBundles').mockReturnValue([tailscaleBundle]);
+    const readSpy = vi
+      .spyOn(bundles, 'readAndResolveBundleEnv')
+      .mockImplementation(() => { throw new Error('bundle not unlocked'); });
+
+    expect(crabboxEnv({}).CRABBOX_TAILSCALE_AUTH_KEY).toBeUndefined();
+    expect(crabboxEnv({}).CRABBOX_TAILSCALE_AUTH_KEY).toBeUndefined();
+    expect(readSpy).toHaveBeenCalledTimes(1);
   });
 });
 

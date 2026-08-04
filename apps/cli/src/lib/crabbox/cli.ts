@@ -125,6 +125,43 @@ function resolveTailscaleBundleMemo(): { name: string; key: string } | undefined
   return tailscaleBundleMemo.value;
 }
 
+/**
+ * Process-lifetime memo for the RESOLVED tailscale key value, next to the pick
+ * memo above. `crabboxEnv` runs several times per lease (list/wait/spawn/stop),
+ * and the single-key subset read (`keys: [ts.key]`) is rejected by
+ * `canCacheResolvedEnv` for broker auto-cache — so without this memo a
+ * non-broker-held tailscale bundle re-read the keychain on EVERY call (and,
+ * pre-guard, could pop a Touch ID sheet each time). One read per process,
+ * success or failure (a failed read memoizes as undefined: the catch below
+ * already degrades to a public-network lease, retrying mid-process only
+ * repeats the same failure).
+ */
+let tailscaleValueMemo: { value: string | undefined } | undefined;
+function resolveTailscaleKeyValueMemo(ts: { name: string; key: string }): string | undefined {
+  if (!tailscaleValueMemo) {
+    let value: string | undefined;
+    try {
+      const { env } = readAndResolveBundleEnv(ts.name, {
+        caller: 'agents run --lease (crabbox tailscale)',
+        keys: [ts.key],
+        agentOnly: isHeadlessSecretsContext(),
+      });
+      value = env[ts.key];
+    } catch {
+      /* best-effort — tailscale is opt-in plumbing, never blocks a public lease */
+    }
+    tailscaleValueMemo = { value };
+  }
+  return tailscaleValueMemo.value;
+}
+
+/** Test seam: drop every crabboxEnv secrets memo so each test resolves fresh. */
+export function resetCrabboxSecretsMemosForTest(): void {
+  tailscaleBundleMemo = undefined;
+  tailscaleValueMemo = undefined;
+  leaseBundleMemo = undefined;
+}
+
 /** A resolved lease bundle: its name, plus (auto-detect only) the exact keys to inject. */
 export interface ResolvedLeaseBundle {
   name: string;
@@ -217,21 +254,14 @@ export function crabboxEnv(opts: CrabboxOptions): NodeJS.ProcessEnv {
   // declares a tailscale auth key, when the ambient env doesn't already set one.
   // Best-effort and opt-in — a missing/unreadable tailscale bundle never fails a
   // public-network lease; `crabboxWarmup({ netMode: 'tailscale' })` is what decides
-  // whether the key is actually used.
+  // whether the key is actually used. The resolved value is memoized per process
+  // (see resolveTailscaleKeyValueMemo) so repeated crabboxEnv calls read the
+  // keychain at most once.
   if (!out.CRABBOX_TAILSCALE_AUTH_KEY) {
     const ts = resolveTailscaleBundleMemo();
     if (ts) {
-      try {
-        const { env } = readAndResolveBundleEnv(ts.name, {
-          caller: 'agents run --lease (crabbox tailscale)',
-          keys: [ts.key],
-          agentOnly: isHeadlessSecretsContext(),
-        });
-        const value = env[ts.key];
-        if (value) out.CRABBOX_TAILSCALE_AUTH_KEY = value;
-      } catch {
-        /* best-effort — tailscale is opt-in plumbing, never blocks a public lease */
-      }
+      const value = resolveTailscaleKeyValueMemo(ts);
+      if (value) out.CRABBOX_TAILSCALE_AUTH_KEY = value;
     }
   }
 

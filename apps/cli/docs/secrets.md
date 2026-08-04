@@ -20,6 +20,20 @@ the agent is the caller, not you. It names the requesting
 harness, bundle, reason, and unlock duration. Approved bundles are cached for seven
 days by default.
 
+**The same rule covers raw keychain item reads.** A profile's provider token, the
+Claude OAuth item behind `agents view`, and every other `getKeychainToken` caller
+go through one guard: a non-interactive process (an agent runtime, or no TTY — a
+VS Code extension host, a daemon, cron) gets an actionable error naming the item
+instead of a sheet nobody is watching. Items that are provably prompt-free stay
+silent — their callers attest the no-ACL write (bundle metadata, `never`-policy
+bundles, the unlock session store, the OAuth token cache). And when a context
+that *may* prompt has its read cancelled or fail, the item goes into a 5-minute
+read back-off (`~/.agents/.cache/keychain-read-backoff/`, regenerable) so a
+polling caller can't re-raise the sheet every few seconds; any successful read
+or write of the item clears the back-off. Source: `src/lib/secrets/index.ts`
+(`assertRawKeychainReadAllowed`), `src/lib/secrets/headless.ts`,
+`src/lib/secrets/read-backoff.ts`.
+
 **An unlock is global unless you narrow it.** `agents secrets unlock prod` grants
 every harness and a plain shell access for the whole TTL — one Touch ID covers all
 of them. `--for claude` narrows the grant to that harness alone, and other

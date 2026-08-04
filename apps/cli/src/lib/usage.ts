@@ -1641,7 +1641,9 @@ function claudeOauthCacheActive(): boolean {
  * or the token itself has expired — in which case the stale entry is dropped. */
 function readCachedClaudeOauth(service: string): ClaudeOauthCredentials | null {
   try {
-    const entry = JSON.parse(getKeychainToken(claudeOauthCacheItem(service))) as CachedClaudeOauthEntry;
+    // The cache item is written no-ACL (writeCachedClaudeOauth) — its whole purpose is
+    // serving the token prompt-free, so attest that to the raw-read storm guard.
+    const entry = JSON.parse(getKeychainToken(claudeOauthCacheItem(service), { silentNoAcl: true })) as CachedClaudeOauthEntry;
     if (!entry || typeof entry.accessToken !== 'string' || !entry.accessToken) return null;
     const now = Date.now();
     const tokenExpired = typeof entry.expiresAt === 'number' && entry.expiresAt > 0 && now >= entry.expiresAt;
