@@ -45,7 +45,7 @@ import {
   type WatchdogTickResult,
   type SessionOutcome,
 } from '../lib/watchdog/runner.js';
-import { isWatchdogRotateEnabled, listRotateStates } from '../lib/watchdog/rotate.js';
+import { isWatchdogRotateEnabled, listRotateStates, setWatchdogRotateEnabled } from '../lib/watchdog/rotate.js';
 
 /** Default state dir the runner and these subcommands share. */
 function stateDir(): string {
@@ -228,6 +228,9 @@ export function registerWatchdogCommand(program: Command): void {
 
       # Leave one session detected-but-untouched
       agents watchdog policy <sessionId> handsoff
+
+      # Opt out of in-place rotate only (nudging stays on)
+      agents watchdog rotate off
     `,
     notes: `
       Decision path: a cheap deterministic pre-filter resolves the obvious cases
@@ -256,8 +259,11 @@ export function registerWatchdogCommand(program: Command): void {
       untouched), injects the harness's exit sequence, relaunches
       'agents run auto --interactive --session-id <uuid>' in the SAME tab, waits
       (bounded, 60s) for the new TUI, then injects the resume replay for the old
-      session. On timeout the session is flagged and never blind-typed into.
-      Default ON; disable with 'watchdog.rotate: off' in ~/.agents/agents.yaml.
+      session. On timeout the session is flagged and never blind-typed into; the
+      flag says the terminal may sit at a bare shell and needs a manual
+      'agents run auto'. A failed rotate is suppressed for 15m before retry.
+      Default ON; disable with 'agents watchdog rotate off' (writes
+      'watchdog.rotate: off' to ~/.agents/agents.yaml; nudging stays on).
       State machine: ~/.agents/.cache/state/watchdog/rotate/<sessionId>.json.
 
       Always-on: 'agents watchdog enable' creates + enables a 'watchdog' command
@@ -291,6 +297,25 @@ export function registerWatchdogCommand(program: Command): void {
       setJobEnabled(WATCHDOG_ROUTINE_NAME, false);
       await reloadDaemonForRoutine(false);
       console.log(chalk.yellow('watchdog: DISABLED (routine paused)'));
+    });
+
+  cmd.command('rotate <state>')
+    .description(
+      'Turn in-place rotate of rate-limited sessions on|off (watchdog.rotate in agents.yaml). ' +
+      'Rotate-only: nudging stays on — unlike `watchdog disable`, which pauses the whole watchdog.',
+    )
+    .action((state: string) => {
+      const s = state.toLowerCase();
+      if (s !== 'on' && s !== 'off') {
+        console.error(chalk.red(`invalid state '${state}'. Use: on | off`));
+        process.exitCode = 1;
+        return;
+      }
+      setWatchdogRotateEnabled(s === 'on');
+      console.log(
+        `watchdog: rotate ${s === 'on' ? chalk.green('ON') : chalk.yellow('OFF')} ` +
+        chalk.dim(`(watchdog.rotate: ${s} in agents.yaml)`),
+      );
     });
 
   cmd.command('status')

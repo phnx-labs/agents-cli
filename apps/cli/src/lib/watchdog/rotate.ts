@@ -31,6 +31,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { InjectTarget } from '../terminal/inject.js';
+import type { ActiveSession } from '../session/active.js';
 import { readMeta, writeMeta } from '../state.js';
 import {
   collectHarnessCandidates,
@@ -239,17 +240,36 @@ export interface RotateState {
   target: InjectTarget;
   /** Remote device the terminal lives on, when provenance says ssh. */
   host?: string;
+  /**
+   * The old session's cwd — correlates the readiness fallback: a fresh active
+   * session only counts as the relaunched TUI when it runs in the SAME project.
+   */
+  cwd?: string;
+  /**
+   * The machine the old session runs on (provenance host = os.hostname()) —
+   * the second half of the readiness-fallback correlation, so a fresh session
+   * on ANOTHER box never satisfies it.
+   */
+  machineHost?: string;
   startedAtMs: number;
   updatedAtMs: number;
   /** awaiting-tui deadline: startedAtMs + readiness budget. */
   deadlineMs: number;
   error?: string;
+  /**
+   * Set on the transition to `failed`: the tick will not re-begin a rotate for
+   * this session until then (default +15m). Without it a session whose old TUI
+   * ignored the exit sequence re-enters begin → deadline → failed every tick.
+   */
+  suppressUntilMs?: number;
 }
 
 /** Bounded wait for the relaunched TUI to come live (readiness). */
 export const DEFAULT_ROTATE_READINESS_MS = 60_000;
 /** Zero-healthy skip cooldown when neither the gate nor the tail carries a reset. */
 export const DEFAULT_ROTATE_SKIP_COOLDOWN_MS = 30 * 60_000;
+/** Retry cooldown after a FAILED rotate — honored at begin via the state file. */
+export const DEFAULT_ROTATE_FAILED_COOLDOWN_MS = 15 * 60_000;
 
 function rotateDir(dir: string): string {
   return path.join(dir, 'rotate');
@@ -353,7 +373,12 @@ export function isWatchdogRotateEnabled(): boolean {
   return readMeta().watchdog?.rotate !== 'off';
 }
 
-/** Persist `watchdog.rotate: on|off` (used by the Factory migration path). */
+/**
+ * Persist `watchdog.rotate: on|off`. Called by the `agents watchdog rotate
+ * on|off` subcommand (commands/watchdog.ts) — the rotate-only switch the
+ * Factory migration uses so a user who opted out of autoRotate keeps nudging
+ * (rather than `agents watchdog disable`, which kills the whole watchdog).
+ */
 export function setWatchdogRotateEnabled(on: boolean): void {
   const meta = readMeta();
   meta.watchdog = { ...(meta.watchdog ?? {}), rotate: on ? 'on' : 'off' };
@@ -410,4 +435,45 @@ export function defaultRotateTranscriptLive(newSessionId: string): boolean {
   return ROTATE_TRANSCRIPT_AGENTS.some(
     (agent) => resolveWatchdogSessionPath(newSessionId, agent) !== undefined,
   );
+}
+
+/** Strip trailing slashes so `/repo` and `/repo/` correlate. */
+function normalizeCwd(cwd: string | undefined): string | undefined {
+  if (!cwd) return undefined;
+  const n = cwd.replace(/\/+$/, '');
+  return n === '' ? '/' : n;
+}
+
+/**
+ * The readiness FALLBACK correlation. A fresh active session counts as the
+ * relaunched TUI only when ALL of these hold:
+ *   - it is not the old session and started at/after the rotate began;
+ *   - it runs in the SAME cwd (trailing-slash normalized); and
+ *   - it runs on the SAME machine (provenance host = os.hostname(), the same
+ *     field provenance.ts populates).
+ * An unrelated fresh session — another project, another host, a remote
+ * teammate — must NEVER satisfy readiness: on a busy fleet box an
+ * uncorrelated "any new session" match fires on the first sweep regardless of
+ * whether the relaunch came up, and when `agents run auto` failed loud after
+ * the gate that types the replay into a bare shell. When the state lacks cwd
+ * or host the fallback cannot correlate and only the transcript probe counts.
+ */
+export function isCorrelatedRelaunch(state: RotateState, s: ActiveSession): boolean {
+  if (!s.sessionId || s.sessionId === state.sessionId) return false;
+  if ((s.startedAtMs ?? 0) < state.startedAtMs) return false;
+  const cwd = normalizeCwd(state.cwd);
+  const host = state.machineHost;
+  if (!cwd || !host) return false;
+  return normalizeCwd(s.cwd) === cwd && s.provenance?.host === host;
+}
+
+/**
+ * The default TUI-liveness probe. The new-session-id transcript is PRIMARY (a
+ * claude pick honors `--session-id`); the correlated fresh-session fallback
+ * (isCorrelatedRelaunch) covers non-claude picks whose id we can't know a
+ * priori.
+ */
+export function defaultTuiLiveFor(state: RotateState, sessions: ActiveSession[]): boolean {
+  if (defaultRotateTranscriptLive(state.newSessionId)) return true;
+  return sessions.some((s) => isCorrelatedRelaunch(state, s));
 }

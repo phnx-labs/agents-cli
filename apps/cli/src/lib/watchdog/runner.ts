@@ -76,7 +76,7 @@ import {
   buildRotateReplayText,
   classifyTailForRotate,
   defaultRotateGate,
-  defaultRotateTranscriptLive,
+  defaultTuiLiveFor,
   exitSequenceFor,
   isInflightPhase,
   isWatchdogRotateEnabled,
@@ -87,6 +87,7 @@ import {
   writeRotateState,
   DEFAULT_ROTATE_READINESS_MS,
   DEFAULT_ROTATE_SKIP_COOLDOWN_MS,
+  DEFAULT_ROTATE_FAILED_COOLDOWN_MS,
   type RotateGateResult,
   type RotatePhase,
   type RotateState,
@@ -540,7 +541,13 @@ function rotateOutcomeReason(s: RotateState): string {
 async function advanceRotate(state: RotateState, deps: RotateAdvanceDeps): Promise<RotateState> {
   let s = state;
   const fail = (error: string): RotateState => {
-    s = { ...s, phase: 'failed', error, updatedAtMs: deps.nowMs };
+    s = {
+      ...s, phase: 'failed', error, updatedAtMs: deps.nowMs,
+      // Failed-rotate retry cooldown (honored at begin): without it a session
+      // whose old TUI ignored the exit sequence re-begins and deadline-fails
+      // every tick forever.
+      suppressUntilMs: deps.nowMs + DEFAULT_ROTATE_FAILED_COOLDOWN_MS,
+    };
     writeRotateState(deps.dir, s);
     deps.flags[s.sessionId] = { reason: `rotate failed: ${error}`, host: s.host, atMs: deps.nowMs };
     deps.logEvents.push({
@@ -558,7 +565,11 @@ async function advanceRotate(state: RotateState, deps: RotateAdvanceDeps): Promi
   if (s.phase === 'awaiting-tui') {
     if (!deps.tuiLiveFor(s, deps.sessions)) {
       if (deps.nowMs > s.deadlineMs) {
-        return fail(`new session ${s.newSessionId} TUI not live within the readiness budget — flagged, nothing typed into a dead shell`);
+        return fail(
+          `new session ${s.newSessionId} TUI not live within the readiness budget — nothing was typed ` +
+          `into a possibly-dead shell; the terminal may sit at a BARE SHELL now: relaunch manually with ` +
+          `\`agents run auto\` (there is no automatic recovery)`,
+        );
       }
       return s; // still inside the bounded wait
     }
@@ -611,18 +622,18 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
 
   // Rotate seams (watchdog/rotate.ts). The config is read fresh per tick
   // (readMeta is mtime-cached), so a `watchdog.rotate` flip is honored on the
-  // next pass. The default readiness probe accepts a transcript for the new
-  // session id (a claude pick honors --session-id) OR any active session that
-  // started after the rotate began (covers non-claude picks, whose id we can't
-  // know a priori).
+  // next pass. The default readiness probe (defaultTuiLiveFor) treats the
+  // new-session-id transcript as PRIMARY (a claude pick honors --session-id)
+  // with a CORRELATED fallback: a fresh active session counts only when it
+  // started after the rotate began AND shares the old session's cwd and
+  // machine — an unrelated fresh session on a busy box must never satisfy it
+  // (that would type the replay into a bare shell when the relaunch failed).
   const rotateEnabled = opts.rotate ?? isWatchdogRotateEnabled();
   const rotateGate = opts.rotateGate ?? defaultRotateGate;
   const newSessionIdFor = opts.newSessionIdFor ?? (() => crypto.randomUUID());
   const rotateReadinessMs = opts.rotateReadinessMs ?? DEFAULT_ROTATE_READINESS_MS;
   const rotateKeyDelayMs = opts.rotateKeyDelayMs ?? 300;
-  const tuiLiveFor = opts.tuiLiveFor ?? ((state: RotateState, list: ActiveSession[]) =>
-    list.some((x) => !!x.sessionId && x.sessionId !== state.sessionId && (x.startedAtMs ?? 0) >= state.startedAtMs)
-    || defaultRotateTranscriptLive(state.newSessionId));
+  const tuiLiveFor = opts.tuiLiveFor ?? defaultTuiLiveFor;
 
   const sessions = opts.sessions ?? (await getActiveSessions());
 
@@ -745,6 +756,16 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
         });
         continue;
       }
+      // Failed-rotate retry cooldown: a terminal that already failed (e.g. its
+      // old TUI ignored the exit sequence) is not re-entered until the
+      // suppression recorded at the failure lapses.
+      if (inflight && inflight.phase === 'failed' && (inflight.suppressUntilMs ?? 0) > nowMs) {
+        outcomes.push({
+          ...base, decision: 'skip', rotatePhase: 'failed',
+          reason: `rotate suppressed until ${new Date(inflight.suppressUntilMs!).toISOString()} (failed-rotate cooldown)`,
+        });
+        continue;
+      }
 
       const verdict = classifyTailForRotate(tailLines, nowMs);
       if (verdict.kind === 'rate_limited') {
@@ -774,8 +795,24 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
         // First-party health gate — the SAME selection `agents run auto` would
         // make. Zero healthy → ONE skip event per cooldown window, terminal
         // untouched. Cooldown = earliestResetAcross (gate) → parsed tail reset
-        // → 30m default, whichever is known first.
-        const gate = await rotateGate();
+        // → 30m default, whichever is known first. A gate THROW degrades to a
+        // skip for this session — it must never abort the whole tick (which
+        // would skip last-tick.json and every other session's decision).
+        let gate: RotateGateResult;
+        try {
+          gate = await rotateGate();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logEvents.push({
+            ts: nowMs, kind: 'error', terminalId: sid, agentType: candidate.agentType,
+            message: `rotate gate failed: ${msg}`,
+          });
+          outcomes.push({
+            ...base, decision: 'skip',
+            reason: `rate-limited but the rotate health gate failed — skipped this tick: ${msg}`,
+          });
+          continue;
+        }
         if (!gate.healthy) {
           const cooldownMs =
             gate.resetsAtMs !== undefined ? Math.max(60_000, gate.resetsAtMs - nowMs)
@@ -810,7 +847,8 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
         }
 
         // Begin: persist exiting → inject the per-harness exit sequence →
-        // launching → inject `agents run auto` → awaiting-tui (bounded).
+        // launching → inject `agents run auto` → awaiting-tui (bounded). cwd +
+        // machineHost are stored for the readiness fallback's correlation.
         const newSessionId = newSessionIdFor();
         let state: RotateState = {
           sessionId: sid,
@@ -819,6 +857,8 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
           phase: 'exiting',
           target: resolution.target,
           host: session.provenance?.transport === 'ssh' ? session.provenance.host : undefined,
+          cwd: session.cwd,
+          machineHost: session.provenance?.host,
           startedAtMs: nowMs,
           updatedAtMs: nowMs,
           deadlineMs: nowMs + rotateReadinessMs,
@@ -854,7 +894,10 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
         }
 
         if (rotateFailed) {
-          state = { ...state, phase: 'failed', error: rotateFailed, updatedAtMs: nowMs };
+          state = {
+            ...state, phase: 'failed', error: rotateFailed, updatedAtMs: nowMs,
+            suppressUntilMs: nowMs + DEFAULT_ROTATE_FAILED_COOLDOWN_MS,
+          };
           writeRotateState(dir, state);
           flags[sid] = { reason: `rotate failed: ${rotateFailed}`, host: session.host, atMs: nowMs };
           logEvents.push({

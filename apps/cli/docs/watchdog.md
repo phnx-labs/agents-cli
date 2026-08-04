@@ -105,11 +105,17 @@ capped account. The tick routes it to the **rotate** path instead:
    codex/gemini/cursor/opencode: `Ctrl+C, Ctrl+C` — the table ported from the
    extension's prewarm configs) is injected as raw bytes into the resolved rail, then
    `agents run auto --interactive --session-id <uuid>` is typed into the **same tab**.
-4. **Replay.** When the new session's TUI is live (a transcript for the new id resolves,
-   or a fresh active session appeared), the tick injects the resume replay: "Resume
-   previous work by loading session \<old-id\>. Run `agents sessions <old-id>` …". The
-   readiness wait is bounded (60s default); on timeout the session is **flagged** and
-   the machine stops — never blind-type into a dead shell.
+4. **Replay.** When the new session's TUI is live, the tick injects the resume replay:
+   "Resume previous work by loading session \<old-id\>. Run `agents sessions <old-id>` …".
+   Readiness is a transcript for the new session id (primary — a claude pick honors
+   `--session-id`), with a **correlated** fallback for non-claude picks: a fresh active
+   session counts only when it started after the rotate began AND shares the old
+   session's cwd AND machine (`isCorrelatedRelaunch`) — an unrelated fresh session on a
+   busy box never satisfies it. The readiness wait is bounded (60s default); on timeout
+   the session is **flagged** and the machine stops — never blind-type into a dead shell.
+   The flag says the terminal may sit at a bare shell and needs a manual
+   `agents run auto`; a failed rotate is suppressed for 15m (`suppressUntilMs` in the
+   state file) before the tick will retry it.
 
 The machine spans ticks — the exit sequence kills the old session, so it drops out of
 the active-session list before the new TUI is live — and persists at
@@ -119,8 +125,9 @@ advances in-flight rotates whose session left the active list. All rotate activi
 (rotate start / done / failed / skip) is appended to the shared `watchdog.log` as
 `rotate`-kind events, so the Factory Floor status card keeps working unchanged.
 
-Rotate is **on by default** (`watchdog.rotate: on|off` in `~/.agents/agents.yaml`,
-re-read per tick) and obeys the same gates as a nudge: it acts only on a `--nudge`
+Rotate is **on by default**. `agents watchdog rotate on|off` writes `watchdog.rotate`
+in `~/.agents/agents.yaml` (re-read per tick) and is rotate-only — nudging is
+unaffected. Rotate obeys the same gates as a nudge: it acts only on a `--nudge`
 tick, honors `handsoff` (flag, never rotate), and requires the same addressable-rail
 safety gate — an un-addressable terminal is flagged, never rotated blind.
 `agents watchdog status` (`--json`) reports the rotate config and every persisted

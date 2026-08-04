@@ -9,7 +9,7 @@
  * injectFn), per runner.test.ts's established pattern — no live terminal, no
  * real account probe.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -25,11 +25,14 @@ import {
   buildRotateLaunchCommand,
   buildRotateReplayText,
   classifyTailForRotate,
+  defaultTuiLiveFor,
   exitSequenceFor,
+  isCorrelatedRelaunch,
   parseRotateResetMs,
   readRotateState,
   writeRotateState,
   DEFAULT_ROTATE_EXIT_SEQUENCE,
+  DEFAULT_ROTATE_FAILED_COOLDOWN_MS,
   DEFAULT_ROTATE_SKIP_COOLDOWN_MS,
   ROTATE_EXIT_SEQUENCES,
   type RotateState,
@@ -383,7 +386,13 @@ describe('runWatchdogTick — rotate state machine', () => {
     const state = readRotateState(stateDir, 'sess-tmux');
     expect(state?.phase).toBe('failed');
     expect(state?.error).toMatch(/not live within the readiness budget/i);
-    expect(readFlags()['sess-tmux'].reason).toMatch(/rotate failed/i);
+    // The flag tells the user the terminal may sit at a BARE SHELL and names
+    // the manual recovery — nothing recovers it automatically.
+    const flag = readFlags()['sess-tmux'];
+    expect(flag.reason).toMatch(/rotate failed/i);
+    expect(flag.reason).toMatch(/bare shell/i);
+    expect(flag.reason).toContain('agents run auto');
+    expect(flag.reason).toMatch(/no automatic recovery/i);
     expect(readLogEvents().some((e) => e.kind === 'rotate' && e.message.includes('rotate failed: sess-tmux'))).toBe(true);
   });
 
@@ -472,5 +481,247 @@ describe('rotate state persistence', () => {
     writeRotateState(stateDir, state);
     const read = readRotateState(stateDir, 'sess-x');
     expect(read).toEqual(state);
+  });
+});
+
+// --- readiness fallback correlation (review: never trip on an unrelated fresh session) ---
+
+function freshState(over: Partial<RotateState> = {}): RotateState {
+  return {
+    sessionId: 'sess-old',
+    newSessionId: 'new-sess-1',
+    agent: 'claude',
+    phase: 'awaiting-tui',
+    target: { backend: 'tmux', pane: '%3', socket: '/tmp/s' },
+    cwd: '/repo/a',
+    machineHost: 'zion',
+    startedAtMs: NOW,
+    updatedAtMs: NOW,
+    deadlineMs: NOW + 60_000,
+    ...over,
+  };
+}
+
+/** A fresh active session (started after the rotate began). */
+function freshSession(over: Partial<ActiveSession> = {}): ActiveSession {
+  return {
+    context: 'terminal',
+    kind: 'claude',
+    host: 'iterm',
+    sessionId: 'sess-fresh',
+    status: 'working',
+    cwd: '/repo/a',
+    startedAtMs: NOW + 5_000,
+    provenance: { host: 'zion', transport: 'local', reply: null },
+    ...over,
+  };
+}
+
+describe('isCorrelatedRelaunch — the readiness fallback is correlated', () => {
+  const state = freshState();
+
+  it('a fresh session in the SAME cwd on the SAME machine correlates', () => {
+    expect(isCorrelatedRelaunch(state, freshSession())).toBe(true);
+  });
+
+  it('cwd correlation normalizes trailing slashes', () => {
+    expect(isCorrelatedRelaunch(state, freshSession({ cwd: '/repo/a/' }))).toBe(true);
+    expect(isCorrelatedRelaunch(freshState({ cwd: '/repo/a/' }), freshSession())).toBe(true);
+  });
+
+  it('an unrelated fresh session on another cwd does NOT correlate', () => {
+    expect(isCorrelatedRelaunch(state, freshSession({ cwd: '/repo/b' }))).toBe(false);
+  });
+
+  it('an unrelated fresh session on another host does NOT correlate', () => {
+    const remote = freshSession({
+      provenance: { host: 'mac-mini', transport: 'local', reply: null },
+    });
+    expect(isCorrelatedRelaunch(state, remote)).toBe(false);
+  });
+
+  it('a session started BEFORE the rotate began does NOT correlate', () => {
+    expect(isCorrelatedRelaunch(state, freshSession({ startedAtMs: NOW - 1_000 }))).toBe(false);
+  });
+
+  it('the old session itself never correlates', () => {
+    expect(isCorrelatedRelaunch(state, freshSession({ sessionId: 'sess-old' }))).toBe(false);
+  });
+
+  it('without cwd or host in the state the fallback cannot correlate at all', () => {
+    expect(isCorrelatedRelaunch(freshState({ cwd: undefined }), freshSession())).toBe(false);
+    expect(isCorrelatedRelaunch(freshState({ machineHost: undefined }), freshSession())).toBe(false);
+  });
+});
+
+describe('defaultTuiLiveFor — transcript probe primary, correlated fallback', () => {
+  it('an unrelated fresh session (other cwd) with no transcript does NOT trip readiness', () => {
+    // No transcript for new-sess-1 exists on disk, so only the fallback could
+    // fire — and it must not, for an uncorrelated session.
+    expect(defaultTuiLiveFor(freshState(), [freshSession({ cwd: '/repo/b' })])).toBe(false);
+  });
+
+  it('a correlated fresh session trips readiness even with no transcript yet', () => {
+    expect(defaultTuiLiveFor(freshState(), [freshSession()])).toBe(true);
+  });
+});
+
+describe('runWatchdogTick — readiness correlation through the sweep (default probe)', () => {
+  it('an unrelated fresh session on another cwd does NOT trip readiness; the rotate deadline-fails without typing', async () => {
+    // NOTE: no tuiLiveFor seam — the tick runs the REAL default probe.
+    const { run, calls } = rig({
+      sessions: [tmuxSession({ cwd: '/repo/a' })],
+      tailFor: () => LIMIT_TAIL,
+    });
+    await run(); // tick 1: begin (stores cwd /repo/a + host zion)
+    expect(calls).toHaveLength(4);
+
+    // Tick 2: an UNRELATED fresh session (other cwd) appeared — readiness holds.
+    const r2 = await run({
+      sessions: [tmuxSession({ sessionId: 'sess-other', cwd: '/repo/b', startedAtMs: NOW + 5_000 })],
+      nowMs: NOW + 10_000,
+    });
+    expect(readRotateState(stateDir, 'sess-tmux')?.phase).toBe('awaiting-tui');
+    expect(calls).toHaveLength(4); // no replay typed
+    expect(r2.outcomes.every((o) => o.decision !== 'rotate' || o.sessionId !== 'sess-tmux')).toBe(true);
+
+    // Tick 3 past the deadline: failed — the unrelated session never satisfied readiness.
+    await run({
+      sessions: [tmuxSession({ sessionId: 'sess-other', cwd: '/repo/b', startedAtMs: NOW + 5_000 })],
+      nowMs: NOW + 61_000,
+    });
+    expect(readRotateState(stateDir, 'sess-tmux')?.phase).toBe('failed');
+    expect(calls).toHaveLength(4);
+  });
+
+  it('a fresh session in the SAME cwd on the SAME machine trips readiness and the replay lands', async () => {
+    const { run, calls } = rig({
+      sessions: [tmuxSession({ cwd: '/repo/a' })],
+      tailFor: () => LIMIT_TAIL,
+    });
+    await run(); // begin
+    expect(calls).toHaveLength(4);
+
+    // Tick 2: the relaunch shows up as a fresh session in the same cwd + host.
+    await run({
+      sessions: [tmuxSession({ sessionId: 'sess-new', cwd: '/repo/a', startedAtMs: NOW + 5_000 })],
+      nowMs: NOW + 10_000,
+    });
+    expect(calls).toHaveLength(5);
+    expect(calls[4].text).toContain('Resume previous work by loading session sess-tmux');
+    expect(readRotateState(stateDir, 'sess-tmux')?.phase).toBe('done');
+  });
+});
+
+// --- runner: gate throw degrades to skip + error event ---------------------------
+
+describe('runWatchdogTick — rotate gate throw', () => {
+  it('a throwing gate skips the session, records an error event, and the tick completes', async () => {
+    const { run, calls } = rig({
+      sessions: [tmuxSession()],
+      tailFor: () => LIMIT_TAIL,
+      rotateGate: async () => { throw new Error('usage cache blew up'); },
+    });
+    const result = await run();
+    const o = result.outcomes[0];
+    expect(o.decision).toBe('skip');
+    expect(o.reason).toMatch(/health gate failed/i);
+    expect(o.reason).toContain('usage cache blew up');
+    expect(calls).toHaveLength(0);
+    expect(readRotateState(stateDir, 'sess-tmux')).toBeNull();
+    expect(readLogEvents().some((e) => e.kind === 'error' && e.message.includes('rotate gate failed: usage cache blew up'))).toBe(true);
+    // The tick completed: last-tick.json was persisted (a throw here would skip it).
+    const lastTick = JSON.parse(fs.readFileSync(path.join(stateDir, 'last-tick.json'), 'utf8'));
+    expect(lastTick.counts.total).toBe(1);
+  });
+});
+
+// --- runner: failed-rotate retry cooldown ----------------------------------------
+
+describe('runWatchdogTick — failed rotate is suppressed, then retried', () => {
+  it('a failed rotate suppresses re-begin for 15m and retries after', async () => {
+    let gateCalls = 0;
+    const { run, calls } = rig({
+      sessions: [tmuxSession()],
+      tailFor: () => LIMIT_TAIL,
+      rotateGate: async () => { gateCalls++; return { healthy: true, detail: 'picked claude' }; },
+    });
+    await run(); // tick 1: begin (4 injects)
+    expect(calls).toHaveLength(4);
+
+    // Tick 2 past the readiness deadline → failed, suppression recorded.
+    const failedAt = NOW + 61_000;
+    await run({ sessions: [], nowMs: failedAt, tuiLiveFor: () => false });
+    const failed = readRotateState(stateDir, 'sess-tmux');
+    expect(failed?.phase).toBe('failed');
+    expect(failed?.suppressUntilMs).toBe(failedAt + DEFAULT_ROTATE_FAILED_COOLDOWN_MS);
+
+    // Tick 3 inside the cooldown: suppressed — no gate call, no injects, no churn.
+    const r3 = await run({ sessions: [tmuxSession()], nowMs: failedAt + 60_000, tuiLiveFor: () => false });
+    expect(r3.outcomes[0].decision).toBe('skip');
+    expect(r3.outcomes[0].rotatePhase).toBe('failed');
+    expect(r3.outcomes[0].reason).toMatch(/suppressed until/i);
+    expect(gateCalls).toBe(1);
+    expect(calls).toHaveLength(4);
+
+    // Tick 4 after the cooldown: the rotate re-begins (gate + exit sequence again).
+    const r4 = await run({ sessions: [tmuxSession()], nowMs: failedAt + 16 * 60_000, tuiLiveFor: () => false });
+    expect(r4.outcomes[0].decision).toBe('rotate');
+    expect(gateCalls).toBe(2);
+    expect(calls.length).toBeGreaterThan(4);
+  });
+});
+
+// --- command: agents watchdog rotate on|off ----------------------------------------
+
+describe('agents watchdog rotate on|off (subcommand)', () => {
+  it('persists watchdog.rotate to agents.yaml via the real meta writer', async () => {
+    // state.ts resolves HOME at import time, so point it at a tmpdir and
+    // re-import the command + lib modules fresh (the state.test.ts pattern) —
+    // the real readMeta/writeMeta partition runs against real files.
+    const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'watchdog-rotate-cmd-'));
+    const oldHome = process.env.HOME;
+    const oldExitCode = process.exitCode;
+    process.env.HOME = TMP;
+    vi.resetModules();
+    const origLog = console.log;
+    const origErr = console.error;
+    const logs: string[] = [];
+    const errs: string[] = [];
+    console.log = (...a: unknown[]) => { logs.push(a.map(String).join(' ')); };
+    console.error = (...a: unknown[]) => { errs.push(a.map(String).join(' ')); };
+    try {
+      const { Command } = await import('commander');
+      const { registerWatchdogCommand } = await import('../../commands/watchdog.js');
+      const parse = async (argv: string[]) => {
+        const program = new Command();
+        program.exitOverride();
+        registerWatchdogCommand(program);
+        await program.parseAsync(['node', 'agents', ...argv]);
+      };
+      const metaText = () => fs.readFileSync(path.join(TMP, '.agents', 'agents.yaml'), 'utf8');
+
+      await parse(['watchdog', 'rotate', 'off']);
+      expect(metaText()).toMatch(/watchdog:[\s\S]*rotate: off/);
+      expect(logs.join('\n')).toMatch(/rotate OFF/i);
+      const { isWatchdogRotateEnabled } = await import('./rotate.js');
+      expect(isWatchdogRotateEnabled()).toBe(false);
+
+      await parse(['watchdog', 'rotate', 'on']);
+      expect(metaText()).toMatch(/watchdog:[\s\S]*rotate: on/);
+      expect(isWatchdogRotateEnabled()).toBe(true);
+
+      await parse(['watchdog', 'rotate', 'maybe']);
+      expect(process.exitCode).toBe(1);
+      expect(errs.join('\n')).toMatch(/invalid state/i);
+    } finally {
+      console.log = origLog;
+      console.error = origErr;
+      process.exitCode = oldExitCode;
+      if (oldHome === undefined) delete process.env.HOME;
+      else process.env.HOME = oldHome;
+      vi.resetModules();
+      fs.rmSync(TMP, { recursive: true, force: true });
+    }
   });
 });
