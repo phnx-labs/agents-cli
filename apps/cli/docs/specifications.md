@@ -760,7 +760,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
   `never`, `lib/secrets/bundles.ts:452-454`). `hold` is the default
   (`secretsDefaultPolicy`, `lib/secrets/bundles.ts:463-465`): one Touch ID, then
   held silently for the hold window. `always` prompts every read. `never` is
-  silent forever (SEC-19, SEC-27).
+  silent forever (SEC-19, SEC-29).
 - **Broker / secrets-agent** — the macOS-only in-memory holder that dedups Touch
   ID across processes (`lib/secrets/agent.ts`).
 - **Materialize** — print a resolved plaintext value to this process's stdout
@@ -955,7 +955,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
 - **SEC-20 (MUST).** Destructive ops (`delete`) MUST confirm interactively and
   MUST refuse in a non-interactive shell without `--yes`
   (`commands/secrets.ts:1565-1582`).
-- **SEC-27 (MUST).** **Unlock once, stays unlocked — the durability contract.** A
+- **SEC-29 (MUST).** **Unlock once, stays unlocked — the durability contract.** A
   bundle on the `never` tier MUST read silently *forever* once set: through process
   death, system sleep, a full power-off/reboot, an arbitrarily long gap (30+ days),
   an agents-cli upgrade, **and a macOS upgrade** — with **no Touch ID, no
@@ -974,7 +974,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
   surviving a broker restart / agents-cli upgrade via the durable no-ACL session
   store (`lib/secrets/session-store.ts:1-26`) but re-prompting once after the window
   expires or biometrics are re-enrolled.
-- **SEC-27a (MUST NOT).** The default keychain flow MUST NOT require a passphrase or
+- **SEC-29a (MUST NOT).** The default keychain flow MUST NOT require a passphrase or
   read one from an environment variable to keep a bundle unlocked. On macOS the
   Keychain is gated by the OS login only; `AGENTS_SECRETS_PASSPHRASE` applies
   **exclusively** to the encrypted-file (SEC-2) and age-vault (SEC-3) fallback
@@ -1220,7 +1220,7 @@ round-trips through AES-256-GCM keyed by the resolved passphrase
 (`filestore.ts:259-291`) — at no point a biometric/user-presence check, unlike
 macOS.
 
-**GWT-S11 — `never` bundle stays unlocked across reboot and OS upgrade (SEC-27).**
+**GWT-S11 — `never` bundle stays unlocked across reboot and OS upgrade (SEC-29).**
 Given `agents secrets policy share never` ran once (its value item now stored
 no-ACL via `set-no-acl`); When the user powers the Mac off, waits 30 days, upgrades
 macOS, and an agent reads `share`; Then the read returns silently — no Touch ID, no
