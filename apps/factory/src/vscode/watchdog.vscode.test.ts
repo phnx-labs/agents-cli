@@ -39,10 +39,11 @@ mock.module('vscode', () => ({
 const watchdog = await import('./watchdog.vscode');
 const { parseEvents } = await import('../core/watchdogLog');
 
-// The contract error text the CLI's `agents run auto` fails with (RUSH-2132).
+// Captured-real shape of the CLI's `agents run auto` fail-loud line
+// (RUSH-2132): the reset is `reset.toISOString()` — always milliseconds + Z.
 const CONTRACT_ERROR =
   "agents: no healthy claude account under strategy 'balanced' — excluded: a@x.com (weekly); " +
-  'earliest window resets 7am (America/Los_Angeles). Use --strategy pinned to force the default.';
+  'earliest window resets 2026-08-10T14:00:00.000Z. Use --strategy pinned to force the default.';
 
 function fakeEntry(over: Partial<EditorTerminal> = {}): EditorTerminal {
   return {

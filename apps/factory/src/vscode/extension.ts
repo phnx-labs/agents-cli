@@ -42,7 +42,7 @@ import {
   buildAgentRunLaunchCommand,
   buildResumeInput,
 } from '../core/resumeInBest';
-import { buildAutoRotateLaunchCommand, parseNoHealthyError } from '../core/autoRotate';
+import { buildAutoRotateLaunchCommand, parseNoHealthyError, agentReadyFailureAction } from '../core/autoRotate';
 import * as os from 'os';
 import * as fsSync from 'fs';
 import { randomUUID } from 'crypto';
@@ -3801,13 +3801,16 @@ export async function rotateTerminalToBestVersion(
   // Prefer shell-integration execution: its output stream lets us observe the
   // CLI's fail-loud "no healthy" exit. Without shell integration we launch
   // blind (sendText) and skip failure detection — the watchdog's cooldown and
-  // tail suppression still bound the churn.
+  // tail suppression still bound the churn, and a failed blind launch must not
+  // take the old terminal down with it (see the agentReady failure callback).
+  let launchedBlind = false;
   let noHealthy: Promise<{ agentKey?: string; resetsAtMs?: number } | null> = Promise.resolve(null);
   if (terminal.shellIntegration) {
     const execution = terminal.shellIntegration.executeCommand(launchCmd);
     noHealthy = watchExecutionForNoHealthy(execution);
   } else {
     terminal.sendText(launchCmd);
+    launchedBlind = true;
   }
   // Arm readiness with the claude session-file fast path OPTIMISTICALLY: when
   // the CLI picks claude it honors --session-id, so the jsonl watch fires the
@@ -3877,9 +3880,19 @@ export async function rotateTerminalToBestVersion(
       }
     },
     (err) => {
-      console.warn(`[RESUME-IN-BEST] ${elapsed()} agentReady wait FAILED: ${err} — sending resume input anyway`);
-      submitToTui();
-      if (opts.closeOldTerminal) {
+      // A blind launch can't tell a slow TUI from a CLI that already failed
+      // `no healthy` into a dead shell: typing the resume input there is
+      // garbage, and closing the OLD terminal would lose a session that is
+      // limited but alive — nothing was gained. Only a CONFIRMED agentReady
+      // (the success callback above) may close the old terminal on the blind
+      // path. The observed path already gave the CLI its fail-loud window, so
+      // it keeps the legacy slow-TUI fallback.
+      const action = agentReadyFailureAction(launchedBlind);
+      console.warn(
+        `[RESUME-IN-BEST] ${elapsed()} agentReady wait FAILED: ${err} — ${action.sendResumeInput ? 'sending resume input anyway' : 'blind launch — leaving the old terminal in place'}`
+      );
+      if (action.sendResumeInput) submitToTui();
+      if (opts.closeOldTerminal && action.closeOld) {
         try {
           terminalEntry.terminal.dispose();
         } catch (e) {

@@ -72,10 +72,13 @@ export function classifyTailForRotate(tail: string, nowMs: number): RotateTailVe
 }
 
 /**
- * Parse the CLI's fail-loud error text, e.g.:
- *   agents: no healthy claude account under strategy 'balanced' — excluded: …;
- *   earliest window resets 7am (America/Los_Angeles). Use --strategy pinned …
- * Returns null when the text is not the no-healthy error.
+ * Parse the CLI's fail-loud error text. Captured-real line (RUSH-2132):
+ *   agents: no healthy claude account under strategy 'balanced' — excluded: a@x.com
+ *   (weekly); earliest window resets 2026-08-10T14:00:00.000Z. Use --strategy
+ *   pinned to force the default.
+ * (The reset is `reset.toISOString()` — always milliseconds + Z — or
+ * `unknown (no reset timestamps in any snapshot)`.) Returns null when the text
+ * is not the no-healthy error.
  */
 export function parseNoHealthyError(
   text: string,
@@ -88,13 +91,23 @@ export function parseNoHealthyError(
 
 /**
  * Parse the `resets <time>` clause of a limit error into an epoch-ms cooldown
- * horizon. Handles ISO-ish timestamps (Date.parse), and time-of-day forms like
- * `7am` / `7:30pm` with an optional `(Area/City)` IANA zone — without a zone
- * the local zone is assumed. Returns undefined when no usable reset is present
- * or the parsed time is already in the past (caller falls back to its default
- * cooldown).
+ * horizon. The CLI's `reset.toISOString()` form (milliseconds + Z) is matched
+ * EXPLICITLY and first: a generic "up to the sentence period" capture stops at
+ * the milliseconds dot and drops the Z, which makes Date.parse read LOCAL time
+ * — the suppression would end hours late in UTC− zones and hours EARLY in UTC+
+ * zones (re-rotating into exhausted accounts). Time-of-day forms like `7am` /
+ * `7:30pm` with an optional `(Area/City)` IANA zone are handled for agent
+ * transcript tails (claude's own limit text); the CLI never emits those.
+ * Returns undefined when no usable reset is present or the parsed time is
+ * already in the past (caller falls back to its default cooldown).
  */
 export function parseResetTimeMs(text: string, nowMs: number): number | undefined {
+  const iso = /resets\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z)\b/i.exec(text);
+  if (iso) {
+    const parsedIso = Date.parse(iso[1]);
+    return Number.isNaN(parsedIso) || parsedIso <= nowMs ? undefined : parsedIso;
+  }
+
   const m = /resets\s+([^.;!\n]+)/i.exec(text);
   if (!m) return undefined;
   const segment = m[1].trim();
@@ -112,6 +125,25 @@ export function parseResetTimeMs(text: string, nowMs: number): number | undefine
   if (t[3].toLowerCase() === 'pm') hour += 12;
   const minute = t[2] ? parseInt(t[2], 10) : 0;
   return nextOccurrenceMs(hour, minute, timeZone, nowMs);
+}
+
+/**
+ * What the rotate does when agentReady never fires on the fresh terminal. A
+ * BLIND launch (sendText — no shell-integration output tap) cannot distinguish
+ * a slow TUI from a CLI that already failed `no healthy` into a dead shell, so
+ * the failure callback must NOT type the resume input into that shell and must
+ * NOT close the old terminal: the session there is limited but still alive,
+ * and closing it gains nothing. The observed (shell-integration) path already
+ * gave the CLI a window to fail loud, so a timeout there keeps the legacy
+ * slow-TUI behavior: type the resume input anyway and honor closeOldTerminal.
+ */
+export function agentReadyFailureAction(blind: boolean): {
+  sendResumeInput: boolean;
+  closeOld: boolean;
+} {
+  return blind
+    ? { sendResumeInput: false, closeOld: false }
+    : { sendResumeInput: true, closeOld: true };
 }
 
 /** Next wall-clock occurrence of hour:minute in the given zone after nowMs. */
