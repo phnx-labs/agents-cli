@@ -613,6 +613,65 @@ export function deriveUsageStatusFromSnapshot(
   return maxUsed >= 100 ? 'rate_limited' : 'available';
 }
 
+/** A prior sample of one window's utilization, for burn-rate projection. */
+export interface UsagePriorSample {
+  /** Epoch ms the prior snapshot was captured. */
+  capturedAt: number;
+  /** The session window's `usedPercent` in that prior snapshot. */
+  usedPercent: number;
+}
+
+/**
+ * An account's throttle state PLUS how long until it caps, projected from the
+ * burn rate on its 5-hour `session` window — the window that throttles the next
+ * request soonest. `deriveUsageStatusFromSnapshot` answers only "maxed right
+ * now (100%)?"; this answers "and how close is it getting?", so routing can
+ * deprioritize an account burning toward its cap before it actually hits it,
+ * instead of treating 85%-and-climbing the same as 85%-and-idle.
+ *
+ * `minutesToLimit`:
+ *   - `0`      — already rate-limited (a blocking window at 100%).
+ *   - `n > 0`  — projected minutes until the session window reaches 100%, from
+ *                `(100 - used) / burnRatePerMinute`, where the burn rate is
+ *                measured between `prev` and this snapshot.
+ *   - `null`   — unknown: no snapshot, no session window, no prior sample, or
+ *                usage flat/falling since `prev` (a reset or an idle account is
+ *                not "projected to cap", so it is NOT deprioritized).
+ *
+ * Pure: the daemon's refresher supplies `prev` from the last snapshot it stored
+ * (`usage-refresh.ts`); the routing hot path reads the daemon-computed result
+ * from the headroom cache rather than recomputing (it has no `prev`).
+ */
+export interface UsageHeadroom {
+  status: 'available' | 'rate_limited' | null;
+  minutesToLimit: number | null;
+}
+
+export function deriveUsageHeadroom(
+  snapshot: UsageSnapshot | null | undefined,
+  prev?: UsagePriorSample | null,
+): UsageHeadroom {
+  const status = deriveUsageStatusFromSnapshot(snapshot);
+  if (!snapshot || status === null) return { status, minutesToLimit: null };
+  if (status === 'rate_limited') return { status, minutesToLimit: 0 };
+
+  const session = snapshot.windows.find((window) => window.key === 'session');
+  const capturedAt = snapshot.capturedAt?.getTime();
+  if (!session || capturedAt === undefined || !prev) {
+    return { status, minutesToLimit: null };
+  }
+
+  const deltaPercent = session.usedPercent - prev.usedPercent;
+  const deltaMinutes = (capturedAt - prev.capturedAt) / 60_000;
+  // Flat, falling (a window reset), or a zero/negative time delta: no live burn
+  // to project from, so this account is not "projected to cap".
+  if (deltaPercent <= 0 || deltaMinutes <= 0) return { status, minutesToLimit: null };
+
+  const burnPerMinute = deltaPercent / deltaMinutes;
+  const remaining = Math.max(0, 100 - session.usedPercent);
+  return { status, minutesToLimit: remaining / burnPerMinute };
+}
+
 /**
  * Compact colored badge for the account's overall usage status. Renders only
  * when the account is throttled — `available` and `null` return ''.

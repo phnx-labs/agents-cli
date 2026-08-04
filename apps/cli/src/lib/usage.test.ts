@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, getUsageInfoForIdentity, writeClaudeUsageCache, setClaudeUsageCachePathForTest, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError, probeClaudeStatus, probeKimiStatus, type UsageSnapshot } from './usage.js';
+import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, getUsageInfoForIdentity, writeClaudeUsageCache, setClaudeUsageCachePathForTest, deriveUsageHeadroom, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError, probeClaudeStatus, probeKimiStatus, type UsageSnapshot } from './usage.js';
 import type { AccountInfo } from './agents.js';
 import { noteUsageRateLimited, setUsageBackoffDirForTest } from './usage-backoff.js';
 import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from './secrets/index.js';
@@ -297,6 +297,55 @@ describe('swrWindowMsFor — a routing decision does not get day-old data', () =
 
   it('clamps a negative age to zero — that IS an opinion: never serve the cache', () => {
     expect(swrWindowMsFor(-1)).toBe(0);
+  });
+});
+
+describe('deriveUsageHeadroom — projects minutes-to-cap from the session burn rate', () => {
+  const sessionSnap = (usedPercent: number, capturedAtMs: number): UsageSnapshot => ({
+    source: 'live',
+    sourceLabel: 'live',
+    capturedAt: new Date(capturedAtMs),
+    windows: [
+      { key: 'session', label: '5h', shortLabel: 'S', usedPercent, resetsAt: null, windowMinutes: 300 },
+      { key: 'week', label: 'Week', shortLabel: 'W', usedPercent: 40, resetsAt: null, windowMinutes: 10080 },
+    ],
+  });
+
+  it('projects minutes to the cap from the burn between two samples', () => {
+    // 50% -> 70% over 10 minutes = 2%/min; 30% headroom remains => 15 minutes.
+    const curr = sessionSnap(70, NOW);
+    const headroom = deriveUsageHeadroom(curr, { capturedAt: NOW - 10 * 60_000, usedPercent: 50 });
+    expect(headroom.status).toBe('available');
+    expect(headroom.minutesToLimit).toBeCloseTo(15, 5);
+  });
+
+  it('reports 0 minutes when a blocking window is already maxed', () => {
+    const maxed = sessionSnap(100, NOW);
+    expect(deriveUsageHeadroom(maxed, { capturedAt: NOW - 60_000, usedPercent: 90 })).toEqual({
+      status: 'rate_limited',
+      minutesToLimit: 0,
+    });
+  });
+
+  it('does not project a cap when usage is flat or falling (a reset / idle)', () => {
+    const curr = sessionSnap(50, NOW);
+    // Flat since prev: no burn to project from.
+    expect(deriveUsageHeadroom(curr, { capturedAt: NOW - 10 * 60_000, usedPercent: 50 }).minutesToLimit).toBeNull();
+    // Fell (window reset): also not "projected to cap".
+    expect(deriveUsageHeadroom(curr, { capturedAt: NOW - 10 * 60_000, usedPercent: 80 }).minutesToLimit).toBeNull();
+  });
+
+  it('has no projection without a prior sample or a session window', () => {
+    expect(deriveUsageHeadroom(sessionSnap(60, NOW), null).minutesToLimit).toBeNull();
+    const noSession: UsageSnapshot = {
+      source: 'live', sourceLabel: 'live', capturedAt: new Date(NOW),
+      windows: [{ key: 'week', label: 'Week', shortLabel: 'W', usedPercent: 60, resetsAt: null, windowMinutes: 10080 }],
+    };
+    expect(deriveUsageHeadroom(noSession, { capturedAt: NOW - 60_000, usedPercent: 10 }).minutesToLimit).toBeNull();
+  });
+
+  it('returns a null status for an empty/absent snapshot', () => {
+    expect(deriveUsageHeadroom(null)).toEqual({ status: null, minutesToLimit: null });
   });
 });
 
