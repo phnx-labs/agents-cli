@@ -30,7 +30,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/05-sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 29;
+export const SCHEMA_VERSION = 30;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -760,12 +760,24 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
         evidence_bytes INTEGER NOT NULL
       );
     `);
-    // Tool-index prerelease builds temporarily used schema versions now owned
-    // by main's v23/v24 migrations. Repair those columns when upgrading such a
-    // development DB; released v24 databases already have them.
-    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
-    if (!cols.some(c => c.name === 'used_browser')) db.exec(`ALTER TABLE sessions ADD COLUMN used_browser INTEGER`);
-    if (!cols.some(c => c.name === 'used_computer')) db.exec(`ALTER TABLE sessions ADD COLUMN used_computer INTEGER`);
+  }
+
+  if (fromVersion < 30) {
+    // v29 → v30: prerelease tool-index builds temporarily used schema versions
+    // later owned by independent main migrations. Repair from the physical
+    // schema because a v29 marker alone cannot prove these columns are present.
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((column) => column.name),
+    );
+    if (!cols.has('tool_call_count')) {
+      db.exec(`
+        ALTER TABLE sessions ADD COLUMN tool_call_count INTEGER;
+        DELETE FROM scan_ledger;
+        DELETE FROM dir_ledger;
+      `);
+    }
+    if (!cols.has('used_browser')) db.exec(`ALTER TABLE sessions ADD COLUMN used_browser INTEGER`);
+    if (!cols.has('used_computer')) db.exec(`ALTER TABLE sessions ADD COLUMN used_computer INTEGER`);
   }
 
 }

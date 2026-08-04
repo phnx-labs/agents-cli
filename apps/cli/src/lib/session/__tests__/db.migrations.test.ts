@@ -89,6 +89,42 @@ describe('spawned_team column migration (v21)', () => {
   });
 });
 
+describe('prerelease schema collision repair (v30)', () => {
+  it('repairs a v29 index missing tool_call_count and invalidates its scan ledgers', () => {
+    const db = getDB();
+    db.prepare(
+      `INSERT OR REPLACE INTO scan_ledger(file_path, file_mtime_ms, file_size, scanned_at) VALUES (?, ?, ?, ?)`,
+    ).run('/tmp/prerelease/session.jsonl', 1, 1, 1);
+    db.prepare(
+      `INSERT OR REPLACE INTO dir_ledger(dir_path, dir_mtime_ms, entry_count, scanned_at) VALUES (?, ?, ?, ?)`,
+    ).run('/tmp/prerelease', 1, 1, 1);
+    db.exec(`ALTER TABLE sessions DROP COLUMN tool_call_count`);
+    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '29')`).run();
+    closeDB();
+
+    const reopened = getDB();
+    const columns = (reopened.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    );
+    expect(columns).toContain('tool_call_count');
+    expect(reopened.prepare(`SELECT count(*) AS n FROM scan_ledger`).get()).toEqual({ n: 0 });
+    expect(reopened.prepare(`SELECT count(*) AS n FROM dir_ledger`).get()).toEqual({ n: 0 });
+
+    upsertSession(
+      {
+        id: 'repaired-tool-count',
+        shortId: 'repaired',
+        agent: 'claude',
+        timestamp: '2026-08-04T00:00:00.000Z',
+        filePath: '/tmp/prerelease/session.jsonl',
+        toolCallCount: 3,
+      } as SessionMeta,
+      'three calls',
+    );
+    expect(getSessionById('repaired-tool-count')?.toolCallCount).toBe(3);
+  });
+});
+
 describe('tool-call index migration (v25)', () => {
   it('adds the independent schema without invalidating warm session ledgers', () => {
     const db = getDB();
