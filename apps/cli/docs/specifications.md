@@ -1110,11 +1110,12 @@ normative — a change that widens or narrows a cell is a spec change.
   ignoring the owning bundle's tier — resurrecting the prompt on a `never` bundle
   (and, where it matched the metadata service name, re-ACL'ing metadata too, causing
   a SECOND prompt: SEC-12). Fixed by honoring the tier in the migration write.
-- **SEC-GAP-7 (closed by this change).** Secret-access events collapsed the
-  requesting session to the global `*` sentinel and the usage DB dropped `sessionId`,
-  so a prompt could not be traced to the agent that caused it (SEC-28). Fixed by
+- **SEC-GAP-7 (open — attribution follow-up).** Secret-access events collapse the
+  requesting session to the global `*` sentinel and the usage DB drops `sessionId`,
+  so a prompt cannot yet be traced to the agent that caused it (SEC-28). The fix —
   preserving session identity on every event and adding `--session`/`--bundle` query
-  filters.
+  filters — lands in a dedicated observability change, not this one; SEC-28 is the
+  contract it must satisfy.
 - **SEC-GAP-8 (closed by this change).** A resolve/unlock could pop TWO Touch ID
   sheets — one for metadata, one for the value — when the two were read in separate
   helper processes and/or the metadata item carried a stale ACL, violating SEC-12.
