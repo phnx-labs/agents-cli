@@ -219,7 +219,7 @@ describe('parseRemoteToolSearch', () => {
     expect(decoded.end()).toBe('before 界 after');
   });
 
-  it('accepts only the versioned envelope and stamps the peer machine', () => {
+  it('accepts only the versioned envelope and stamps the peer when origin is absent', () => {
     const credential = 'opaque-session-credential-123456';
     const payload = JSON.stringify({
       schemaVersion: 1,
@@ -245,6 +245,20 @@ describe('parseRemoteToolSearch', () => {
     expect(parseRemoteToolSearch('{broken', 'mac-mini')).toBeUndefined();
     expect(parseRemoteToolSearch(payload, 'mac-mini', ['program:gh'])).toBeUndefined();
     expect(parseRemoteToolSearch(payload, 'mac-mini', ['program:git'])?.sessions).toHaveLength(1);
+  });
+
+  it('preserves the transcript origin machine across a peer hop', () => {
+    const payload = JSON.stringify({
+      schemaVersion: 1,
+      generatedAt: '2026-08-03T00:00:00Z',
+      query: { clauses: ['program:git'] },
+      coverage: { indexedFiles: 1, indexedCalls: 1, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
+      sessions: [{
+        id: 'one', shortId: 'one', agent: 'codex', machine: 'origin-one',
+        timestamp: '2026-08-03T00:00:00Z', calls: [],
+      }],
+    });
+    expect(parseRemoteToolSearch(payload, 'cache-peer')?.sessions[0].machine).toBe('origin-one');
   });
 
   it('rejects oversized or structurally invalid peer evidence before merging', () => {

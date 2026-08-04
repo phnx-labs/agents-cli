@@ -26,7 +26,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { performance } from 'perf_hooks';
 import { discoverSessions, searchContentIndex } from '../src/lib/session/discover.js';
-import { filterSessionsByQuery } from '../src/commands/sessions.js';
+import { filterSessionsByQuery, toolOriginSessions } from '../src/commands/sessions.js';
 import {
   countToolProgramOccurrences,
   ensureToolIndex,
@@ -326,12 +326,21 @@ async function main() {
   console.error(`G. two distinct tool-call clauses: p50 ${toolTwoCallDistribution.p50Ms.toFixed(1)}ms, p95 ${toolTwoCallDistribution.p95Ms.toFixed(1)}ms, ${toolTwoCallMatches} matches`);
 
   let countTotals = { occurrences: 0, toolCalls: 0, sessions: 0 };
+  const originToolSessions = toolOriginSessions(toolSessions, os.hostname(), true);
+  const originToolCoverage = readToolIndexCoverage(originToolSessions);
   const countDistribution = await distribution(() => {
-    countTotals = countToolProgramOccurrences(toolSessions, 'git', toolCoverage, os.hostname()).totals;
+    countTotals = countToolProgramOccurrences(
+      originToolSessions,
+      'git',
+      originToolCoverage,
+      os.hostname(),
+    ).totals;
   });
   console.error(`H. exact git count: p50 ${countDistribution.p50Ms.toFixed(1)}ms, p95 ${countDistribution.p95Ms.toFixed(1)}ms, ${countTotals.occurrences} occurrences`);
 
   const fullCoverage = readToolIndexCoverage(warmSessions);
+  const originWarmSessions = toolOriginSessions(warmSessions, os.hostname(), true);
+  const originFullCoverage = readToolIndexCoverage(originWarmSessions);
   const toolSingleFullDistribution = await distribution(() =>
     searchToolCalls(warmSessions, ['program:git input:status'], fullCoverage, 25)
   );
@@ -344,7 +353,7 @@ async function main() {
     )
   );
   const programCountFullDistribution = await distribution(() =>
-    countToolProgramOccurrences(warmSessions, 'git', fullCoverage, os.hostname())
+    countToolProgramOccurrences(originWarmSessions, 'git', originFullCoverage, os.hostname())
   );
   console.error(`I. full ${warmSessions.length}-session scope: one-clause p95 ${toolSingleFullDistribution.p95Ms.toFixed(1)}ms, two-call p95 ${toolTwoCallFullDistribution.p95Ms.toFixed(1)}ms, count p95 ${programCountFullDistribution.p95Ms.toFixed(1)}ms`);
   const queryPost = { sessionsDbBytes: fileSize(DB_PATH), walBytes: fileSize(DB_PATH + '-wal') };

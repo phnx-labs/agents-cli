@@ -428,12 +428,25 @@ function parseRemoteToolSession(value: unknown, machine: string): ToolSessionEvi
   const cwd = optionalRemoteString(session.cwd, 4096);
   const topic = optionalRemoteString(session.topic, 4096);
   const label = optionalRemoteString(session.label, 4096);
-  const safeMachine = boundedRemoteString(machine, 512);
-  if (!id || !shortId || !agent || !timestamp || !safeMachine || project === null || cwd === null || topic === null || label === null
+  const originMachine = optionalRemoteString(session.machine, 512);
+  const dialedMachine = boundedRemoteString(machine, 512);
+  if (!id || !shortId || !agent || !timestamp || !dialedMachine || originMachine === null
+    || project === null || cwd === null || topic === null || label === null
     || !Array.isArray(session.calls) || session.calls.length > TOOL_QUERY_MAX_CALL_ROWS) return undefined;
   const calls = session.calls.map(parseRemoteCall);
   if (calls.some((call) => call === undefined)) return undefined;
-  return { id, shortId, agent, machine: safeMachine, timestamp, project, cwd, topic, label, calls: calls as ToolCallEvidence[] };
+  return {
+    id,
+    shortId,
+    agent,
+    machine: originMachine ?? dialedMachine,
+    timestamp,
+    project,
+    cwd,
+    topic,
+    label,
+    calls: calls as ToolCallEvidence[],
+  };
 }
 
 export function parseRemoteToolSearch(

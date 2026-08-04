@@ -204,11 +204,14 @@ envelopes are rejected before merging. Fleet tool queries support
 `--sort recent`; `--sort cost` and `--sort duration` remain local-only because
 peer evidence omits those metrics.
 
-Synced mirror transcripts do not inflate fleet counts. A direct local count may
-group rows under several recorded origin machines, but during fleet fan-out each
-peer counts only the sessions that originated on that peer. Those origin
-partitions are disjoint when the coordinator sums totals; an unreachable origin
-marks coverage partial instead of substituting a mirrored duplicate.
+Synced mirror transcripts do not inflate fleet evidence or counts. A direct
+local query may search cached rows from several recorded origin machines, but
+during fleet fan-out each peer searches only sessions that originated on that
+peer. Those origin partitions are disjoint when the coordinator merges evidence
+or sums totals; an unreachable origin marks coverage partial instead of
+substituting a mirrored duplicate. Evidence preserves the recorded transcript
+origin across the SSH hop, so a defensive coordinator merge also collapses the
+same origin/session pair if two peers return it.
 
 ### Index lifecycle and disk I/O
 

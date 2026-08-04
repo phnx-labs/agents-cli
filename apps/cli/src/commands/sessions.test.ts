@@ -13,8 +13,9 @@ import {
   buildSessionDescription,
   fleetCandidatesByQuery,
   metadataResolveForwardedArgs,
+  mergeToolSearchEnvelopes,
   mergeToolProgramCountEnvelopes,
-  toolProgramCountOriginSessions,
+  toolOriginSessions,
   toolSearchFleetSortError,
   toolSearchForwardedArgs,
 } from './sessions.js';
@@ -55,7 +56,7 @@ describe('toolSearchFleetSortError', () => {
   });
 });
 
-describe('mergeToolProgramCountEnvelopes', () => {
+describe('fleet tool query origin partitioning', () => {
   it('sums occurrences, containing calls, sessions, and coverage across machines', () => {
     const make = (machine: string, occurrences: number, complete = true) => ({
       schemaVersion: 1 as const,
@@ -81,8 +82,28 @@ describe('mergeToolProgramCountEnvelopes', () => {
   it('keeps synced mirrors out of an origin device fleet partition', () => {
     const local = { id: 'local', machine: 'one' } as SessionMeta;
     const mirror = { id: 'mirror', machine: 'two' } as SessionMeta;
-    expect(toolProgramCountOriginSessions([local, mirror], 'one', true)).toEqual([local]);
-    expect(toolProgramCountOriginSessions([local, mirror], 'one', false)).toEqual([local, mirror]);
+    expect(toolOriginSessions([local, mirror], 'one', true)).toEqual([local]);
+    expect(toolOriginSessions([local, mirror], 'one', false)).toEqual([local, mirror]);
+  });
+
+  it('deduplicates evidence for the same origin session returned through two peers', () => {
+    const coverage = {
+      indexedFiles: 1, indexedCalls: 1, skippedFiles: 0,
+      limitedFiles: 0, remainingFiles: 0, complete: true,
+    };
+    const make = (timestamp: string) => ({
+      schemaVersion: 1 as const,
+      generatedAt: timestamp,
+      query: { clauses: ['program:git'] },
+      coverage,
+      sessions: [{
+        id: 'same', shortId: 'same', agent: 'codex', machine: 'origin-one', timestamp,
+        calls: [],
+      }],
+    });
+    expect(mergeToolSearchEnvelopes(make('2026-08-03T00:00:00Z'), [
+      make('2026-08-03T00:00:01Z'),
+    ]).sessions).toHaveLength(1);
   });
 });
 
@@ -839,6 +860,50 @@ describe('agents sessions', () => {
       const listResult = runAgents(['sessions', '--all', '--json', '--no-interactive'], repoDir, tempHome);
       expect(listResult.status).toBe(0);
       expect(Array.isArray(JSON.parse(listResult.stdout))).toBe(true);
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('omits a synced mirror when answering a fleet evidence partition', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-tool-mirror-'));
+    try {
+      writeUpdateCache(tempHome);
+      const repoDir = path.join(tempHome, 'work', 'agents-cli');
+      const projectDir = path.join(
+        tempHome,
+        '.agents',
+        '.history',
+        'backups',
+        'claude',
+        'origin-one',
+        'projects',
+        'agents-cli-tools',
+      );
+      const sessionId = '92929292-9292-4929-8929-929292929292';
+      fs.mkdirSync(repoDir, { recursive: true });
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(path.join(projectDir, `${sessionId}.jsonl`), [
+        { type: 'user', timestamp: '2026-08-03T00:00:00Z', cwd: repoDir, sessionId, message: { role: 'user', content: 'mirrored command' } },
+        { type: 'assistant', timestamp: '2026-08-03T00:00:01Z', message: { content: [{ type: 'tool_use', id: 'git-1', name: 'Bash', input: { command: 'git status' } }] } },
+      ].map((row) => JSON.stringify(row)).join('\n') + '\n');
+
+      const indexed = runAgents(['sessions', '--all', '--json', '--no-interactive'], repoDir, tempHome);
+      expect(indexed.status, indexed.stderr).toBe(0);
+
+      const localCache = runAgents([
+        'sessions', '--include', 'tools', '--query', 'program:git',
+        '--all', '--json', '--no-interactive',
+      ], repoDir, tempHome);
+      expect(localCache.status, localCache.stderr).toBe(0);
+      expect(JSON.parse(localCache.stdout).sessions).toHaveLength(1);
+
+      const fleetPartition = runAgents([
+        'sessions', '--include', 'tools', '--query', 'program:git',
+        '--all', '--json', '--no-interactive',
+      ], repoDir, tempHome, { [NO_FANOUT_ENV]: '1' });
+      expect(fleetPartition.status, fleetPartition.stderr).toBe(0);
+      expect(JSON.parse(fleetPartition.stdout).sessions).toEqual([]);
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }

@@ -1493,8 +1493,8 @@ export function mergeToolProgramCountEnvelopes(
   };
 }
 
-/** Partition a fleet count by transcript origin so synced mirrors cannot duplicate totals. */
-export function toolProgramCountOriginSessions(
+/** Partition a fleet query by transcript origin so synced mirrors cannot duplicate results. */
+export function toolOriginSessions(
   sessions: SessionMeta[],
   machine: string,
   originOnly: boolean,
@@ -2031,16 +2031,15 @@ async function sessionsAction(
         ? filterSessionsByQuery(sessions, searchQuery)
         : sessions;
       const localSessions = selectedSessions;
-      const coverage = readToolIndexCoverage(localSessions);
       const mayFanOut = options.local !== true && process.env[NO_FANOUT_ENV] !== '1';
       const hosts = remoteHostsToDial(options.host, self);
+      const originOnly = process.env[NO_FANOUT_ENV] === '1'
+        || (mayFanOut && (options.fleet || (options.host?.length ?? 0) > 0));
+      const querySessions = toolOriginSessions(localSessions, self, originOnly);
 
       if (countProgram) {
-        const originOnly = process.env[NO_FANOUT_ENV] === '1'
-          || (mayFanOut && (options.fleet || (options.host?.length ?? 0) > 0));
-        const countSessions = toolProgramCountOriginSessions(localSessions, self, originOnly);
-        const countCoverage = readToolIndexCoverage(countSessions);
-        let countEnvelope = countToolProgramOccurrences(countSessions, countProgram, countCoverage, self);
+        const countCoverage = readToolIndexCoverage(querySessions);
+        let countEnvelope = countToolProgramOccurrences(querySessions, countProgram, countCoverage, self);
         if (!toolIncludesLocal) countEnvelope.machines = [];
         if (mayFanOut && (options.fleet || (options.host?.length ?? 0) > 0)
           && (!options.host?.length || (hosts && hosts.length > 0))) {
@@ -2061,7 +2060,8 @@ async function sessionsAction(
         return;
       }
 
-      let envelope = searchToolCalls(localSessions, queryClauses, coverage, limit);
+      const coverage = readToolIndexCoverage(querySessions);
+      let envelope = searchToolCalls(querySessions, queryClauses, coverage, limit);
 
       if (mayFanOut && (options.fleet || (options.host?.length ?? 0) > 0)) {
         if (!options.host?.length || (hosts && hosts.length > 0)) {

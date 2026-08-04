@@ -418,9 +418,11 @@ SSH access (§7); rendering sessions that no harness produced.
   Fleet evidence queries MUST use a direct SSH connection and have a 60-second
   deadline. Queries MUST NOT perform remote indexing. Fleet counts MUST transfer
   only validated aggregate totals and per-machine coverage. During fleet
-  fan-out, every peer MUST count only sessions whose recorded origin is that
-  peer, so synced mirror transcripts cannot duplicate totals. Direct local
-  counts MAY group mirrored rows under their recorded origin machines.
+  fan-out, every peer MUST query only sessions whose recorded origin is that
+  peer, so synced mirror transcripts cannot duplicate evidence or totals.
+  Evidence MUST retain the recorded transcript origin across the SSH hop, and
+  the coordinator MUST deduplicate the same origin/session pair. Direct local
+  queries MAY include mirrored rows under their recorded origin machines.
   An unreachable or incompatible peer MUST also mark aggregate coverage partial
   (`lib/session/remote-list.ts:50-53,78-96,193-240,337-541`;
   `lib/devices/resolve-target.ts:120-133`;

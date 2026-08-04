@@ -56,7 +56,7 @@
 <main>
   <div class="top">
     <div>
-      <p class="kicker">agents-cli · PR #1829 · measured 2026-08-03</p>
+      <p class="kicker">agents-cli · PR #1829 · measured 2026-08-03 PDT</p>
       <h1>Indexed tool queries stay fast and stop touching transcripts.</h1>
       <p class="lede">A populated-corpus benchmark of static Bash program extraction, one- and two-call evidence search, exact counts, explicit backfill cost, and SQLite/WAL storage.</p>
     </div>
@@ -68,15 +68,15 @@
     <span class="chip">Node · v24.3.0</span>
     <span class="chip">index · 912 MB</span>
     <span class="chip">metadata scope · 4,756 sessions</span>
-    <span class="chip">tool sample · 100 / 1,188 sessions in 7 days</span>
+    <span class="chip">tool sample · 100 / 1,186 sessions in 7 days</span>
     <span class="chip">30 measured runs · 3 warmups</span>
     <span class="chip">SQLite + FTS5 · no vectors</span>
   </div>
 
   <section class="grid" aria-label="Headline metrics">
-    <article class="card metric"><strong>11.3 ms</strong><span>origin-safe exact count p95 · 4,756 metadata sessions</span></article>
-    <article class="card metric"><strong>9.9 ms</strong><span>one-clause evidence p95 · full metadata scope</span></article>
-    <article class="card metric"><strong>11.0 ms</strong><span>positive two-call evidence p95 · full metadata scope</span></article>
+    <article class="card metric"><strong>13.0 ms</strong><span>origin-safe exact count p95 · 4,756 metadata sessions</span></article>
+    <article class="card metric"><strong>13.2 ms</strong><span>one-clause evidence p95 · full metadata scope</span></article>
+    <article class="card metric"><strong>13.6 ms</strong><span>positive two-call evidence p95 · full metadata scope</span></article>
     <article class="card metric"><strong>0 bytes</strong><span>DB and WAL growth across all query runs</span></article>
   </section>
 
@@ -84,7 +84,7 @@
     <article class="card wide">
       <h2>Evidence query latency</h2>
       <canvas id="evidence" height="300" role="img" aria-label="p50 p95 p99 evidence query latency for 100 and 4756 metadata session scopes"></canvas>
-      <p class="chart-note">Dithered bars show p50 / p95 / p99. Expanding the metadata scope 47.6× adds 3.5–4.9 ms at p95 with the same 100-session indexed snapshot.</p>
+      <p class="chart-note">Dithered bars show p50 / p95 / p99. Expanding the metadata scope 47.6× adds 3.4–4.4 ms at p95 with the same 100-session indexed snapshot.</p>
     </article>
     <article class="card wide">
       <h2>Exact count latency</h2>
@@ -100,12 +100,12 @@
       <h2>Backfill shape</h2>
       <table>
         <tbody>
-          <tr><th>Elapsed</th><td>2.50 seconds</td></tr>
-          <tr><th>Indexed source files</th><td>96 for 100 sampled sessions</td></tr>
-          <tr><th>Tool calls persisted</th><td>2,389</td></tr>
+          <tr><th>Elapsed</th><td>9.21 seconds</td></tr>
+          <tr><th>Indexed source files</th><td>97 for 100 sampled sessions</td></tr>
+          <tr><th>Tool calls persisted</th><td>5,720</td></tr>
           <tr><th>Limited files</th><td>1</td></tr>
           <tr><th>Remaining files</th><td>0</td></tr>
-          <tr><th>Peak WAL</th><td>18.5 MB</td></tr>
+          <tr><th>Peak WAL</th><td>36.2 MB</td></tr>
           <tr><th>Query-time writes</th><td>0 bytes</td></tr>
         </tbody>
       </table>
@@ -118,13 +118,13 @@
       <table>
         <thead><tr><th>Operation</th><th>Scope</th><th>p50</th><th>p95</th><th>p99</th></tr></thead>
         <tbody>
-          <tr><td>Content FTS</td><td>4,756 metadata</td><td>18.13 ms</td><td>18.67 ms</td><td>18.93 ms</td></tr>
-          <tr><td>One tool clause</td><td>100 indexed</td><td>4.56 ms</td><td>5.03 ms</td><td>6.50 ms</td></tr>
-          <tr><td>Two distinct <code>git</code> calls</td><td>100 indexed</td><td>5.58 ms</td><td>7.47 ms</td><td>7.93 ms</td></tr>
-          <tr><td>Origin-safe program count</td><td>100 indexed</td><td>1.60 ms</td><td>1.76 ms</td><td>1.76 ms</td></tr>
-          <tr><td>One tool clause</td><td>4,756 metadata / 100 indexed</td><td>8.06 ms</td><td>9.90 ms</td><td>10.03 ms</td></tr>
-          <tr><td>Two distinct <code>git</code> calls</td><td>4,756 metadata / 100 indexed</td><td>9.03 ms</td><td>11.00 ms</td><td>11.10 ms</td></tr>
-          <tr><td>Origin-safe program count</td><td>4,756 metadata / 100 indexed</td><td>10.62 ms</td><td>11.34 ms</td><td>11.46 ms</td></tr>
+          <tr><td>Content FTS</td><td>4,756 metadata</td><td>17.57 ms</td><td>18.76 ms</td><td>18.97 ms</td></tr>
+          <tr><td>One tool clause</td><td>100 indexed</td><td>7.90 ms</td><td>8.80 ms</td><td>9.31 ms</td></tr>
+          <tr><td>Two distinct <code>git</code> calls</td><td>100 indexed</td><td>7.84 ms</td><td>10.16 ms</td><td>10.58 ms</td></tr>
+          <tr><td>Origin-safe program count</td><td>100 indexed</td><td>3.06 ms</td><td>3.18 ms</td><td>3.20 ms</td></tr>
+          <tr><td>One tool clause</td><td>4,756 metadata / 100 indexed</td><td>11.12 ms</td><td>13.16 ms</td><td>13.34 ms</td></tr>
+          <tr><td>Two distinct <code>git</code> calls</td><td>4,756 metadata / 100 indexed</td><td>11.46 ms</td><td>13.60 ms</td><td>13.64 ms</td></tr>
+          <tr><td>Origin-safe program count</td><td>4,756 metadata / 100 indexed</td><td>12.30 ms</td><td>13.05 ms</td><td>13.45 ms</td></tr>
         </tbody>
       </table>
     </div>
@@ -133,14 +133,14 @@
   <section style="margin-top:38px">
     <h2>Interesting patterns</h2>
     <div class="findings">
-      <article class="finding"><h3>Counting is a different hot path</h3><p>The 100-session count p95 is 1.76 ms because it aggregates persisted occurrences without hydrating calls. At the 4,756-session metadata scope it reaches 11.34 ms while grouping both totals and coverage by true origin machine.</p></article>
-      <article class="finding"><h3>Metadata scope growth stays bounded here</h3><p>Moving from 100 to 4,756 session IDs adds 4.87 ms to one-clause p95 and 3.53 ms to positive two-call p95. The query sends the scope to SQLite once with <code>json_each(?)</code>, instead of issuing one query per 300 IDs.</p></article>
-      <article class="finding"><h3>Two positive clauses do not double latency</h3><p>Both evidence queries return 19 sessions. The two-distinct-<code>git</code>-call p95 is 7.47 ms versus 5.03 ms for one clause; indexed prefilters shrink the candidate set before distinct-call assignment.</p></article>
-      <article class="finding"><h3>Program use is heavily concentrated</h3><p>Within the 100-session sample, 849 static <code>git</code> sites live in 358 calls across 21 sessions: 2.37 sites per containing call and 40.4 sites per containing session.</p></article>
-      <article class="finding"><h3>WAL is not permanent overhead</h3><p>The clean historical backfill peaked at an 18.5 MB WAL, then checkpointed to zero. It occupied 15.2 MB of database pages but did not grow the 912 MB file because existing free pages absorbed every new row.</p></article>
+      <article class="finding"><h3>Counting is a different hot path</h3><p>The origin-partitioned 100-session count p95 is 3.18 ms because it aggregates persisted occurrences without hydrating calls. At the 4,756-session metadata scope it reaches 13.05 ms while grouping both totals and coverage by true origin machine.</p></article>
+      <article class="finding"><h3>Metadata scope growth stays bounded here</h3><p>Moving from 100 to 4,756 session IDs adds 4.37 ms to one-clause p95 and 3.44 ms to positive two-call p95. The query sends the scope to SQLite once with <code>json_each(?)</code>, instead of issuing one query per 300 IDs.</p></article>
+      <article class="finding"><h3>Two positive clauses do not double latency</h3><p>The one-clause query returns 16 sessions and the two-distinct-<code>git</code>-call query returns 17. The latter's p95 is 10.16 ms versus 8.80 ms for one clause; indexed prefilters shrink the candidate set before distinct-call assignment.</p></article>
+      <article class="finding"><h3>Program use is heavily concentrated</h3><p>Within the origin partition of the 100-session sample, 1,075 static <code>git</code> sites live in 554 calls across 18 sessions: 1.94 sites per containing call and 59.7 sites per containing session.</p></article>
+      <article class="finding"><h3>WAL is not permanent overhead</h3><p>The clean historical backfill peaked at a 36.2 MB WAL, then checkpointed to zero. It occupied 25.6 MB of database pages but did not grow the 912 MB file because existing free pages absorbed every new row.</p></article>
       <article class="finding"><h3>Queries are read-only</h3><p>After the checkpoint, 180 measured tool-query executions changed both the DB and WAL by exactly zero bytes. Parsing and writes occur during normal incremental scanning or explicit backfill, never during lookup.</p></article>
     </div>
-    <div class="caveat"><strong>Coverage caveat.</strong> The representative sample produced current ledgers for 96 source files and one explicit index-limit row. No files remained queued, but coverage is marked incomplete and the count is a lower bound. The 4,756-session figures vary the metadata ID scope over the same 100-session indexed snapshot; they do not claim that all 4,756 transcripts were backfilled.</div>
+    <div class="caveat"><strong>Coverage caveat.</strong> The representative sample produced current ledgers for 97 source files and one explicit index-limit row. No files remained queued, but coverage is marked incomplete and the count is a lower bound. The 4,756-session figures vary the metadata ID scope over the same 100-session indexed snapshot; they do not claim that all 4,756 transcripts were backfilled.</div>
   </section>
 
   <section style="margin-top:38px">
@@ -151,7 +151,7 @@ BENCH_CORPUS=real BENCH_MODE=warm \
   bun bench/sessions-perf.ts &gt; session-tool-query-after.json</code></pre>
   </section>
 
-  <footer>Source: <span class="mono">apps/cli/bench/sessions-perf.ts</span> · result timestamp <span class="mono">2026-08-04T02:09:52.115Z</span> · charts use Dither Kit's monochrome, patterned chart language in a self-contained canvas render.</footer>
+  <footer>Source: <span class="mono">apps/cli/bench/sessions-perf.ts</span> · result timestamp <span class="mono">2026-08-04T02:30:48.643Z</span> (UTC) · charts use Dither Kit's monochrome, patterned chart language in a self-contained canvas render.</footer>
 </main>
 <script>
   const root=document.documentElement;
@@ -160,11 +160,11 @@ BENCH_CORPUS=real BENCH_MODE=warm \
   document.querySelector('#theme').onclick=()=>{root.classList.toggle('light');localStorage.setItem('benchmark-theme',root.classList.contains('light')?'light':'dark');drawAll()};
 
   const charts={
-    evidence:{id:'evidence',unit:'ms',max:12,rows:[
-      ['1 clause · 100',[4.56,5.03,6.50]],['2 calls · 100',[5.58,7.47,7.93]],
-      ['1 clause · 4.8k',[8.06,9.90,10.03]],['2 calls · 4.8k',[9.03,11.00,11.10]]]},
-    counts:{id:'counts',unit:'ms',max:12,rows:[['count · 100',[1.60,1.76,1.76]],['count · 4.8k',[10.62,11.34,11.46]]]},
-    storage:{id:'storage',unit:'MB',max:20,rows:[['used pages',[15.18]],['peak WAL',[18.48]],['DB file growth',[0]],['query writes',[0]]]}
+    evidence:{id:'evidence',unit:'ms',max:15,rows:[
+      ['1 clause · 100',[7.90,8.80,9.31]],['2 calls · 100',[7.84,10.16,10.58]],
+      ['1 clause · 4.8k',[11.12,13.16,13.34]],['2 calls · 4.8k',[11.46,13.60,13.64]]]},
+    counts:{id:'counts',unit:'ms',max:15,rows:[['count · 100',[3.06,3.18,3.20]],['count · 4.8k',[12.30,13.05,13.45]]]},
+    storage:{id:'storage',unit:'MB',max:40,rows:[['used pages',[25.60]],['peak WAL',[36.18]],['DB file growth',[0]],['query writes',[0]]]}
   };
   function colors(){const c=getComputedStyle(root);return {text:c.getPropertyValue('--text').trim(),muted:c.getPropertyValue('--muted').trim(),line:c.getPropertyValue('--line').trim(),accent:c.getPropertyValue('--accent').trim(),blue:c.getPropertyValue('--blue').trim(),amber:c.getPropertyValue('--amber').trim()}}
   function dither(ctx,x,y,w,h,color,step){ctx.fillStyle=color;ctx.globalAlpha=.92;ctx.fillRect(x,y,w,h);ctx.globalAlpha=.25;ctx.fillStyle=getComputedStyle(root).getPropertyValue('--bg');for(let px=x;px<x+w;px+=step)for(let py=y;py<y+h;py+=step)if(((px-x)/step+(py-y)/step)%2===0)ctx.fillRect(px,py,Math.max(1,step/2),Math.max(1,step/2));ctx.globalAlpha=1}
