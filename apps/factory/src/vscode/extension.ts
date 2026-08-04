@@ -5222,7 +5222,9 @@ async function forkCurrentSession(
       ),
       recordFork: (edge) => { void recordFork(context, edge); },
       showRejection: showForkRejection,
-      viewColumn: vscode.ViewColumn.Beside,
+      // Open the fork as a normal full tab in the active group, not a side
+      // split — it is a fresh session, not a pane to sit beside its parent.
+      viewColumn: vscode.ViewColumn.Active,
       now: Date.now,
     });
     return;
@@ -5235,13 +5237,14 @@ async function forkCurrentSession(
     return;
   }
 
-  // Land the fork BESIDE its parent, not on top of it. A fork exists to be
-  // compared with the session it came from, so the two tabs share the screen.
+  // Open the fork as a normal full tab in the active group. A fork is a fresh
+  // sibling session, not a pane to wedge beside its parent — a side split
+  // shrinks both terminals and is not what forking asks for.
   const { terminalId, sessionId } = await openSingleAgentWithQueue(context, entry.agentConfig, [request.prompt], {
     strategy: request.strategy,
     host: request.host,
     local: request.local,
-    viewColumn: vscode.ViewColumn.Beside,
+    viewColumn: vscode.ViewColumn.Active,
   });
 
   void recordFork(context, {
