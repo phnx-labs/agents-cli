@@ -37,6 +37,7 @@ import { spawnSync } from 'child_process';
 import type { Meta } from './types.js';
 import { isOwnerAlias, readOwnerDest, resolveSendEnvelope, deliverEnvelope } from './channels/send.js';
 import { lookupTransport } from './channels/resolve.js';
+import { registerBuiltinProviders } from './channels/providers/index.js';
 
 /** How loudly a post asks to be heard. Ordered — `important` implies milestone. */
 export type FeedPostLevel = 'milestone' | 'important';
@@ -453,6 +454,11 @@ function runCommandSink(name: string, argv: string[], timeoutMs: number): SinkOu
  */
 async function runChannelSink(sink: PlannedSink, meta: Meta): Promise<SinkOutcome> {
   const name = sink.name;
+  // Registration is idempotent and normally happens inside deliverEnvelope();
+  // it has to happen before the lookupTransport pre-check below too, or the
+  // very first channel sink in a process would report "no channel provider"
+  // for a name that is, in fact, registered.
+  registerBuiltinProviders();
   const owner = isOwnerAlias(sink.channel);
   const resolved = resolveSendEnvelope(
     {
