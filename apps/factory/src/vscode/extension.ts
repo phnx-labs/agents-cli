@@ -169,7 +169,7 @@ async function ensureAgentsCliInstalled(): Promise<void> {
     }
   }
 }
-import { supportsPrewarming, buildVersionedResumeCommand, exitSequenceFor, PrewarmAgentType } from '../core/prewarm';
+import { supportsPrewarming, buildVersionedResumeCommand, exitSequenceFor } from '../core/prewarm';
 import { generateClaudeSessionId, listOpencodeSessions } from '../core/prewarm.simple';
 import { liveSessionIdForShell } from '../core/liveSession';
 import { getSessionPathBySessionId, getSessionPreviewInfo, getOpenCodeSessionPreviewInfo, getCursorSessionPreviewInfo } from './sessions.vscode';
@@ -4073,7 +4073,7 @@ export async function openSingleAgentWithQueue(
 
   // Determine agent key and handle session ID
   const builtInDef = getBuiltInByPrefix(agentConfig.prefix);
-  const agentKey = builtInDef?.key as 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor' | undefined;
+  const agentKey = builtInDef?.key as keyof AgentSettings['builtIn'] | undefined;
   const defaultModel = agentKey ? settings.getDefaultModel(context, agentKey) : undefined;
 
   let command = agentConfig.command;
@@ -4131,11 +4131,12 @@ export async function openSingleAgentWithQueue(
   // prewarm five (#1747) — this feeds the persistence path that restore/reopen
   // read, so grok/kimi/droid/antigravity tabs must be tracked here too or they
   // have nothing to come back to.
-  if (agentKey && agentKeyFromSession(agentKey)) {
+  const resumeKey = agentKey ? agentKeyFromSession(agentKey) : null;
+  if (resumeKey) {
     // Set agent type unconditionally so the sessionTracker fs watcher can adopt
     // a session id when the CLI writes a fresh rollout/jsonl (Codex 0.124+
     // dropped session id from the TUI banner so this is the only signal).
-    terminals.setAgentType(terminal, agentKey);
+    terminals.setAgentType(terminal, resumeKey);
     if (sessionId) {
       terminals.setSessionId(terminal, sessionId);
     }
@@ -4218,7 +4219,7 @@ async function openAgentTerminals(context: vscode.ExtensionContext) {
 
       // Determine agent key and handle session ID
       const builtInDef = getBuiltInByPrefix(agent.prefix);
-      const agentKey = builtInDef?.key as 'claude' | 'codex' | 'gemini' | 'opencode' | undefined;
+      const agentKey = builtInDef?.key as keyof AgentSettings['builtIn'] | undefined;
       const defaultModel = agentKey ? settings.getDefaultModel(context, agentKey) : undefined;
 
       let command = agent.command;
@@ -4253,10 +4254,11 @@ async function openAgentTerminals(context: vscode.ExtensionContext) {
       // Track session ID for any known harness, not just the prewarm five (#1747):
       // this path also starts the label poller that hydrates the live session id,
       // so a grok/kimi/droid/antigravity tab needs it too to be resumable.
-      if (agentKey && agentKeyFromSession(agentKey)) {
+      const resumeKey = agentKey ? agentKeyFromSession(agentKey) : null;
+      if (resumeKey) {
         // Set agent type unconditionally so sessionTracker fs watcher can adopt
         // a session id from the CLI's rollout file (Codex 0.124+ banner has none).
-        terminals.setAgentType(terminal, agentKey);
+        terminals.setAgentType(terminal, resumeKey);
         if (sessionId) {
           terminals.setSessionId(terminal, sessionId);
         }
