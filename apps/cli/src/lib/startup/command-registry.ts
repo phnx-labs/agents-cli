@@ -118,7 +118,16 @@ export const loadFunnel: ModuleLoader = async () => (await import('../../command
  * inherit the root's custom help formatter rather than getting the per-command
  * recursive pass. Keeping that ordering preserves their `--help` output exactly.
  */
-export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set(['sessions', 'teams', 'cloud', 'message', 'serve']);
+// `roster` is an observe-umbrella alias of `sessions --active` — same module,
+// same SQLite stack, same post-help registration order as sessions.
+export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set([
+  'sessions',
+  'roster',
+  'teams',
+  'cloud',
+  'message',
+  'serve',
+]);
 
 /**
  * User-typed top-level command name -> ordered list of module loaders to run.
@@ -224,12 +233,17 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   setup: [loadSetup],
   uninstall: [loadUninstall],
   sessions: [loadSessions],
+  // Observe-umbrella alias of sessions --active (same lazy module).
+  roster: [loadSessions],
   teams: [loadTeams],
   cloud: [loadCloud],
   message: [loadMessage],
   send: [loadSend],
   notify: [loadSend],
   feed: [loadFeed],
+  // Observe-umbrella aliases of feed / feed --filter updates.
+  inbox: [loadFeed],
+  timeline: [loadFeed],
   mailboxes: [loadMailboxes],
   mailbox: [loadMailboxes],
   serve: [loadServe],

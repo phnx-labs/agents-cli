@@ -425,6 +425,15 @@ Run and dispatch:
   browser                         Automate a browser — navigate, click, screenshot, console, network
   pty                             Drive interactive terminal programs (REPLs, TUIs) via a persistent PTY session
 
+Observe (read the fleet — no store merge; aliases point at the real readers):
+  feed / inbox                    Needs-you inbox (open blocks waiting on you)
+  timeline                        Agent progress stream (= feed --filter updates)
+  roster                          Live agents (= sessions --active)
+  events                          Unified ops + activity event trail
+  audit                           Tamper-evident run-dispatch log (not events)
+  snapshot                        One-process inventory + active sessions poll
+  status                          Sync/drift only (not the live fleet snapshot)
+
 Credentials and profiles:
   profile                         Activate resource profiles across skills, MCP, permissions, and secrets
   profiles                        Bundles of (host CLI, endpoint, model, auth)
@@ -432,8 +441,6 @@ Credentials and profiles:
 
 Diagnostics:
   doctor [agent[@version]]        Diagnose CLI availability, sync status, and resource divergence; --check for the CI drift gate
-  status                          Unified sync status (drift/missing) — not the live fleet snapshot
-  snapshot                        One-process poll: inventory + active sessions (+ optional feed/sync)
   usage [agent]                   Show rate-limit and quota usage per agent
   perf                            Latency rollups (hooks, commands, runs) from the disposable perf warehouse
 

@@ -329,7 +329,9 @@ export function sessionHintsFromActive(
 export function registerFeedCommand(program: Command): void {
   const feed = program
     .command('feed')
-    .description('Open blocks (needs you) + agent status posts (feed post)')
+    .description(
+      'Operator inbox + agent status posts (aliases: inbox = needs-you; timeline = --filter updates)',
+    )
     .option('--json', 'Output as JSON (each block stamped with its outcome + ask class)')
     .option('--filter <view>', 'What to show: needs (default) · updates · all', 'needs')
     .option('--flat', 'List one block per agent instead of grouping by outcome')
@@ -711,6 +713,48 @@ docs/06-observability.md.
       });
       for (const g of groups) renderOutcomeGroup(g, self);
       await renderTrailingActivity();
+    });
+
+  // Observe-umbrella aliases (Phase 3): intentional second names, not deprecations.
+  // Re-parse into `feed` so flags/help stay single-sourced. See lib/observe-aliases.ts.
+  registerFeedObserveAliases(program);
+}
+
+/**
+ * `inbox` / `timeline` → feed. Loaded with the feed module so lazy COMMAND_LOADERS
+ * for those names also get the real `feed` command registered for re-parse.
+ */
+function registerFeedObserveAliases(program: Command): void {
+  const reparse = async (alias: 'inbox' | 'timeline'): Promise<void> => {
+    const { expandObserveAlias } = await import('../lib/observe-aliases.js');
+    const rest = process.argv.slice(3);
+    const expanded = expandObserveAlias(alias, rest);
+    if (!expanded) {
+      console.error(chalk.red(`Unknown observe alias: ${alias}`));
+      process.exit(1);
+    }
+    if (process.stderr.isTTY) process.stderr.write(chalk.gray(`${expanded.note}\n`));
+    await program.parseAsync(['node', 'agents', ...expanded.argv]);
+  };
+
+  program
+    .command('inbox')
+    .description('Needs-you inbox (alias of `agents feed`). Open blocks waiting on you.')
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(async () => {
+      await reparse('inbox');
+    });
+
+  program
+    .command('timeline')
+    .description(
+      'Agent progress stream (alias of `agents feed --filter updates`). What agents posted recently.',
+    )
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(async () => {
+      await reparse('timeline');
     });
 }
 

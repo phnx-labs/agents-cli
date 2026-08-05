@@ -4055,7 +4055,9 @@ export function registerSessionsCommands(program: Command): void {
     .option('--query <clause>', 'Search text; repeat with --include tools to require distinct matching calls', collectQueryClause, [])
     .option('--resolve <selector>', 'Resolve one full ID, unique prefix, or keyword query to safe session metadata (requires --json; searches the fleet unless --local)')
     .addOption(new Option('--resolve-safe-v1 <selector>').hideHelp())
-    .description('Find, browse, and read agent conversation transcripts across Claude, Codex, Gemini, and OpenCode.')
+    .description(
+      'Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active` (alias: `agents roster`).',
+    )
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
     .option('--claude', 'Shorthand for --agent claude')
     .option('--codex', 'Shorthand for --agent codex')
@@ -4214,6 +4216,32 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsMigrationsCommand(sessionsCmd);
   registerSessionsBackfillCommand(sessionsCmd);
   registerSessionsStatsCommand(sessionsCmd);
+
+  // Observe-umbrella alias (Phase 3): roster → sessions --active.
+  registerSessionsObserveAliases(program);
+}
+
+/**
+ * `roster` → sessions --active. Registered with the sessions module so the
+ * lazy loader for `roster` also registers the real `sessions` command for re-parse.
+ */
+function registerSessionsObserveAliases(program: Command): void {
+  program
+    .command('roster')
+    .description('Live agent roster (alias of `agents sessions --active`). Who is running right now.')
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(async () => {
+      const { expandObserveAlias } = await import('../lib/observe-aliases.js');
+      const rest = process.argv.slice(3);
+      const expanded = expandObserveAlias('roster', rest);
+      if (!expanded) {
+        console.error(chalk.red('Unknown observe alias: roster'));
+        process.exit(1);
+      }
+      if (process.stderr.isTTY) process.stderr.write(chalk.gray(`${expanded.note}\n`));
+      await program.parseAsync(['node', 'agents', ...expanded.argv]);
+    });
 }
 
 function formatNoSessionsMessage(

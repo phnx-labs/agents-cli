@@ -11,12 +11,27 @@ whose *consumer* and *axis* match your question, not whichever you remember firs
 
 | Command | Role (one line) | Source | Consumer |
 |---|---|---|---|
-| **`events`** | **Raw unified event stream = the audit log.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. | `events.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
+| **`events`** | **Raw unified event stream = the ops trail.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. | `events.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
+| **`audit`** | **Tamper-evident run-dispatch chain** (hash-chained exec log). Not the same as `events`. | `~/.agents` audit log | Governance / CI verify |
 | **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
 | **`trends`** | **Usage analytics.** Harness/model mix, tools per session, token ratios, hottest secrets/browser profiles — baked recipes over sessions + a durable resource warehouse. Distinct from quota (`agents usage`) and latency (`agents perf`). | `sessions.db` + `~/.agents/.history/analytics/usage.db` | Humans + `--json` |
-| **`feed`** | **Consolidated cross-agent surface.** Open blocks (decisions agents are waiting on) + `feed post` status updates — "what needs you / what are agents saying." Scope to one project with `--project`. | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
+| **`feed`** / **`inbox`** | **Needs-you inbox + status posts.** Open blocks (decisions agents are waiting on) + `feed post` milestones. `inbox` ≡ `feed`. Scope with `--project`. | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
+| **`timeline`** | **Progress stream only.** Alias of `feed --filter updates` — deliberate posts, not tool noise. | same as feed updates lane | Humans + `--json` |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
-| **`sessions`** | **Live agent roster + transcripts.** Which agents are running right now and their state; browse/read past conversation transcripts. A live process probe + transcript index, not an event log. | live pid/transcript probe + `sessions.db` | Human + `--json` |
+| **`sessions`** / **`roster`** | **Live agent roster + transcripts.** `roster` ≡ `sessions --active`. Browse/read past transcripts under `sessions`. | live pid/transcript probe + `sessions.db` | Human + `--json` |
+| **`snapshot`** | **One-process poll.** Inventory + active sessions (+ optional feed/sync). Not `status` (sync-only). | view + active + optional feed | Machines / Factory |
+
+### Observe aliases (Phase 3)
+
+Thin second names for the product jobs — **no store merge**:
+
+| Job | Alias | Real command |
+|---|---|---|
+| What needs me? | `agents inbox` | `agents feed` |
+| What did agents post? | `agents timeline` | `agents feed --filter updates` |
+| Who is live? | `agents roster` | `agents sessions --active` |
+
+Do **not** alias `audit` to `events` — `agents audit` is already the run-dispatch chain.
 
 ### Delivery vs record vs control (RUSH-2123)
 
