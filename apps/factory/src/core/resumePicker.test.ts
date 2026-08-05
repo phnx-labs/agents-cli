@@ -8,7 +8,10 @@ import {
   buildResumeCandidates,
   classifyResumeState,
   defaultPickedIds,
+  distinctiveTopic,
+  sharedTopicPrefixes,
   sortResumeCandidates,
+  stripSharedPrefix,
   type RecentSessionRow,
   type ResumeCandidate,
 } from './resumePicker';
@@ -187,5 +190,56 @@ describe('device id normalization', () => {
   it('still reports a genuinely different machine as a host', () => {
     const out = buildResumeCandidates([recent({ machine: 'yosemite-s0' })], [], 'mac-mini');
     expect(out[0].host).toBe('yosemite-s0');
+  });
+});
+
+// The topic strings below are verbatim from a real 222-session listing on this
+// fleet, where 15 rows led with "Resume previous work:" and 11 with
+// "## Apps (Connectors)" — the boilerplate that made the picker unreadable.
+describe('shared-topic boilerplate stripping', () => {
+  const REAL_TOPICS = [
+    'Resume previous work: zion:/Users/muqsit/Screenshots/CleanShot 2026',
+    'Resume previous work: 4db0440e-d69c-4873-9ef5-56fc350ae9cc',
+    'Resume previous work: agents-cli spec conflicts',
+    'Review OpenPRs and agents-cli spec conflicts',
+    'Agents Doctor Issues Diagnosis Fix Plan',
+  ];
+
+  it('finds the phrase that leads several topics', () => {
+    const prefixes = sharedTopicPrefixes(REAL_TOPICS);
+    expect(prefixes).toContain('Resume previous work:');
+  });
+
+  it('leaves a phrase that leads only one topic alone', () => {
+    const prefixes = sharedTopicPrefixes(REAL_TOPICS);
+    expect(prefixes.some((p) => p.startsWith('Review OpenPRs'))).toBe(false);
+  });
+
+  it('strips the longest match, not a shorter phrase nested in it', () => {
+    const prefixes = sharedTopicPrefixes(REAL_TOPICS);
+    expect(stripSharedPrefix('Resume previous work: agents-cli spec conflicts', prefixes))
+      .toBe('agents-cli spec conflicts');
+  });
+
+  it('never blanks a topic whose every word is shared', () => {
+    // 'New Session' recurred 4x in the real listing; stripping the whole string
+    // would leave an unidentifiable empty row.
+    const topics = ['New Session', 'New Session', 'New Session', 'New Session'];
+    expect(stripSharedPrefix('New Session', sharedTopicPrefixes(topics))).toBe('New Session');
+  });
+
+  it('falls back to the project when the topic was pure boilerplate', () => {
+    const prefixes = ['Resume previous work:'];
+    const c = { topic: 'Resume previous work:', project: 'agents-cli', cwd: '/x/agents-cli' } as ResumeCandidate;
+    expect(distinctiveTopic(c, prefixes)).toBe('agents-cli');
+  });
+
+  it('falls back to the cwd leaf when there is no topic and no project', () => {
+    const c = { cwd: '/home/muqsit/src/github.com/muqsitnawaz' } as ResumeCandidate;
+    expect(distinctiveTopic(c, [])).toBe('muqsitnawaz');
+  });
+
+  it('reports nothing distinctive rather than a misleading fragment', () => {
+    expect(distinctiveTopic({} as ResumeCandidate, [])).toBe('');
   });
 });

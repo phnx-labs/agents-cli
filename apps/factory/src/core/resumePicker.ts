@@ -253,3 +253,77 @@ export function abandonedCandidates(candidates: ResumeCandidate[]): ResumeCandid
 export function defaultPickedIds(candidates: ResumeCandidate[]): string[] {
   return candidates.filter((c) => c.state === 'detached').map((c) => c.id);
 }
+
+/** A phrase must lead this many topics before it counts as boilerplate. */
+const SHARED_PREFIX_MIN_OCCURRENCES = 3;
+/** Longest phrase (in words) considered — beyond this a "prefix" is the topic. */
+const SHARED_PREFIX_MAX_WORDS = 6;
+
+/**
+ * Leading phrases that several topics share carry no signal: they are the
+ * harness's own boilerplate ("Resume previous work: …", "Continue Previous
+ * Session …", "New Session"), not something a human wrote to tell two sessions
+ * apart. A picker showing 122 rows of it is unreadable, so find the phrases
+ * that recur across the visible set and let the label drop them.
+ *
+ * Data-driven on purpose — a hardcoded list of known prefixes would go stale
+ * the moment a harness reworded its own boilerplate.
+ *
+ * Returned longest-first so {@link stripSharedPrefix} strips the most specific
+ * match rather than a shorter phrase nested inside it.
+ */
+export function sharedTopicPrefixes(
+  topics: readonly string[],
+  minOccurrences = SHARED_PREFIX_MIN_OCCURRENCES,
+): string[] {
+  const counts = new Map<string, number>();
+  for (const topic of topics) {
+    const words = topic.trim().split(/\s+/).filter(Boolean);
+    // Stop one word short of the whole topic: a phrase covering every word is
+    // the topic itself, and stripping it would blank a row whose text happens
+    // to repeat rather than one carrying boilerplate.
+    const limit = Math.min(SHARED_PREFIX_MAX_WORDS, words.length - 1);
+    for (let n = 2; n <= limit; n++) {
+      const phrase = words.slice(0, n).join(' ');
+      counts.set(phrase, (counts.get(phrase) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .filter(([, n]) => n >= minOccurrences)
+    .map(([phrase]) => phrase)
+    .sort((a, b) => b.length - a.length);
+}
+
+/**
+ * Remove the longest shared prefix from `topic`, plus the punctuation it left
+ * behind. A topic that is ENTIRELY boilerplate strips to '' on purpose, so
+ * {@link distinctiveTopic} falls through to a field that identifies the row —
+ * a bare "Resume previous work:" names nothing. Nothing is lost when a phrase
+ * recurs but is never extended: {@link sharedTopicPrefixes} does not mint a
+ * phrase covering a topic's every word, so such a topic has no prefix to match.
+ */
+export function stripSharedPrefix(topic: string, prefixes: readonly string[]): string {
+  const trimmed = topic.trim();
+  for (const prefix of prefixes) {
+    if (trimmed.startsWith(prefix)) {
+      return trimmed.slice(prefix.length).replace(/^[\s:\-–—,.]+/, '').trim();
+    }
+  }
+  return trimmed;
+}
+
+/**
+ * The text a row shows for a session, after shared boilerplate is stripped.
+ *
+ * Falls through to the fields that actually identify a session when the topic
+ * is absent or was pure boilerplate — the project, then the working directory's
+ * last segment. Returns '' when nothing distinctive survives, so the caller can
+ * render an explicit placeholder instead of a misleading fragment.
+ */
+export function distinctiveTopic(c: ResumeCandidate, prefixes: readonly string[]): string {
+  const stripped = c.topic ? stripSharedPrefix(c.topic, prefixes) : '';
+  if (stripped) return stripped;
+  if (c.project) return c.project;
+  const leaf = c.cwd ? c.cwd.split('/').filter(Boolean).pop() : undefined;
+  return leaf ?? '';
+}

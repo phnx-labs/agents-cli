@@ -130,6 +130,8 @@ import {
   abandonedCandidates,
   buildResumeCandidates,
   defaultPickedIds,
+  distinctiveTopic,
+  sharedTopicPrefixes,
   RESUME_PICKER_CACHE_KEY,
   STATE_HEADINGS,
   type RecentSessionRow,
@@ -3245,6 +3247,9 @@ interface ResumeCandidateItem extends vscode.QuickPickItem {
 
 function resumeCandidateItems(candidates: ResumeCandidate[], checked: ReadonlySet<string>): ResumeCandidateItem[] {
   const items: ResumeCandidateItem[] = [];
+  // Computed over the whole set, so "shared" means shared by the rows the user
+  // is actually looking at rather than by a fixed list of known phrases.
+  const prefixes = sharedTopicPrefixes(candidates.map((c) => c.topic ?? '').filter(Boolean));
   let group: ResumeState | undefined;
   for (const c of candidates) {
     if (c.state !== group) {
@@ -3252,13 +3257,16 @@ function resumeCandidateItems(candidates: ResumeCandidate[], checked: ReadonlySe
       items.push({ label: STATE_HEADINGS[c.state], kind: vscode.QuickPickItemKind.Separator });
     }
     const agentLabel = c.version ? `${c.agent}@${c.version}` : c.agent;
-    const where = c.host ? ` · ${c.host}` : '';
     const viewing = c.viewingIn ? ` · ${c.viewingIn}` : '';
     const marker = c.state === 'detached' ? '$(debug-disconnect) ' : '';
+    // Device leads the row: it is present on every session and, across a
+    // multi-machine fleet, it is the field that most often decides whether a
+    // row is the one you want. The topic follows with shared boilerplate
+    // removed, so what remains is what differs between rows.
     items.push({
-      label: `${marker}${c.shortId}  ${c.topic || '(no topic)'}`,
-      description: `${agentLabel} · ${formatSessionWhen(new Date(c.lastActivityMs).toISOString())}${where}${viewing}`,
-      detail: `${c.project || '-'}${c.cwd ? `  ${c.cwd}` : ''}`,
+      label: `${marker}[${c.host || 'local'}] ${c.shortId}  ${distinctiveTopic(c, prefixes) || '—'}`,
+      description: `${agentLabel} · ${formatSessionWhen(new Date(c.lastActivityMs).toISOString())}${viewing}`,
+      detail: c.cwd ?? '',
       picked: checked.has(c.id),
       candidate: c,
     });
@@ -3342,20 +3350,32 @@ async function resumeSessionsBatch(
   quickPick.matchOnDescription = true;
   quickPick.matchOnDetail = true;
 
-  // Ids rendered by the previous applyItems call. On a refresh swap, only
-  // detached sessions NOT in this set get pre-ticked — re-applying every
-  // default would re-tick a session the user deliberately unticked.
-  let renderedIds = new Set<string>();
+  // Ids the user has explicitly UNTICKED. A refresh must not re-tick those, but
+  // it must keep every other default ticked. Keying this on "was rendered
+  // before" instead (the previous behavior) cleared the whole selection on the
+  // first background swap: every default was already rendered, so the filter
+  // dropped all of them and the picker went from "122 pre-selected" to none.
+  const unticked = new Set<string>();
+  let rendered: ResumeCandidate[] = [];
   const applyItems = (candidates: ResumeCandidate[]) => {
     // Assigning items resets the checks, so carry the user's current selection
     // across the swap; newly-seen detached sessions still get pre-ticked.
     const checked = new Set(
       quickPick.selectedItems.map((i) => i.candidate?.id).filter((id): id is string => !!id),
     );
+    for (const c of rendered) {
+      if (!checked.has(c.id)) unticked.add(c.id);
+      else unticked.delete(c.id);
+    }
     const defaults = defaultPickedIds(candidates);
-    const preselected = new Set([...defaults.filter((id) => !renderedIds.has(id)), ...checked]);
-    quickPick.items = resumeCandidateItems(candidates, preselected);
-    renderedIds = new Set(candidates.map((c) => c.id));
+    const preselected = new Set([...defaults.filter((id) => !unticked.has(id)), ...checked]);
+    const items = resumeCandidateItems(candidates, preselected);
+    quickPick.items = items;
+    // `picked` alone does not populate `selectedItems`, which is what onDidAccept
+    // reads and what the "N Selected" counter shows — assign it explicitly or the
+    // pre-ticked rows resolve to an empty selection.
+    quickPick.selectedItems = items.filter((i) => i.candidate && preselected.has(i.candidate.id));
+    rendered = candidates;
     const detachedCount = defaults.length;
     quickPick.placeholder = detachedCount > 0
       ? `${detachedCount} detached session${detachedCount === 1 ? '' : 's'} pre-selected — space toggles, enter opens each in a tab`

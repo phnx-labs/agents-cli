@@ -6,6 +6,19 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Resume picker: selection no longer clears, and rows say what differs.** The
+  batch picker announced "N detached sessions pre-selected" while showing `0 Selected`
+  and empty checkboxes. Two causes: the refresh swap filtered defaults by "was rendered
+  before", which on the first background revalidation matched every default and dropped
+  the whole selection; and `picked` on an item does not populate `quickPick.selectedItems`,
+  which is what accept and the counter read. Pre-ticking now tracks the ids the user
+  explicitly unticked, and `selectedItems` is assigned explicitly. Row labels also drop
+  boilerplate that recurs across the visible rows (`Resume previous work: …`, `## Apps`)
+  and fall through to project → cwd leaf when nothing distinctive is left, so a row reads
+  as its device, id, and the part that actually differs instead of `(no topic)`. Measured
+  on a real 222-session listing: 29 rows de-boilerplated, 117 that showed `(no topic)`
+  now name their project.
+
 - **Reader association fix + HTML artifacts + command titles.** Factory wrote
   `workbench.editorAssociations` as a legacy array (`[{ viewType, filenamePattern }]`).
   VS Code only accepts the object map (`{ "*.md": "agents.markdownEditor" }`), so the
