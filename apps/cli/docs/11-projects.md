@@ -98,22 +98,20 @@ machine resolves its own cwds against its own (synced) definitions before events
 cross the wire. `agents activity --project <name>` narrows the stream to one
 project, exact-matched on this label.
 
-## `view` is `status` for one project, plus the definition
+## `status` and `view` are one body
 
-`status` answers *"is anything off track?"* across projects. `view <name>` answers *"tell me
-everything about this one"* — so it must be a **superset**, never a different, thinner card.
+`status`, `view`, and `show` are aliases of a single implementation (`runProjectCard`). There
+is no second renderer to drift.
 
-It was thinner. `view` built its own picture (root, repos, a raw Linear id, an issue count,
-milestones) and never called the card renderer, so opening a single project showed strictly
-less than the roll-up across all of them: no agents, no ships, no focus, no schedule verdict.
-The renderer even took a `milestoneLimit` parameter documented as "`status` shows the next one;
-`view` shows all" — the seam was designed and then not connected.
+- **Unnamed** (`agents projects status`) — the multi-project rollup: next milestone only,
+  scannable across every defined project.
+- **Named** (`agents projects status rush`, `view rush`, `show rush`) — the same card for one
+  project, with **every** milestone and the stored definition underneath (each repo with its
+  subpath and checkout, each context with its purpose, each integration with its URL, the
+  Linear link, the docs, and the YAML path). `--fleet` is available on both forms.
 
-Both commands now gather through one function (`enrichProjectsForRender`) and render through
-one card, so a signal added for either appears on both. `view` differs in exactly two ways:
-every milestone instead of the next one, and the stored definition printed in full underneath
-(each repo with its subpath and checkout, each context with its purpose, each integration with
-its URL, the Linear link, the docs, and the YAML path).
+Gathering still goes through `enrichProjectsForRender` so a signal added for the card appears
+whether you typed `status` or `view`.
 
 ## The progress card — `agents projects status`
 
@@ -218,9 +216,9 @@ rush  ·  3 agents
 | --- | --- |
 | `agents projects list [--json]` | All projects: root, repo, live agent count. |
 | `agents projects add <name>` | Scaffold `<name>.yaml`; infers `root` + origin slug from the current repo. Flags: `--root`, `--path`, `--repo`, `--context path:purpose`, `--goal objective:measure`, `--linear`. |
-| `agents projects view <name> [--json] [--window N] [--no-remote]` (alias `show`) | Everything about one project: the whole `status` card (agents, ships, focus, schedule, tickets, proof), **every** Linear milestone, then the stored definition in full. |
+| `agents projects view <name>` / `show` | Alias of `status <name>`: full card, every milestone, stored definition. |
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
-| `agents projects status [name] [--json] [--window N] [--no-remote] [--fleet]` | The progress card (all projects, or one). `--fleet` adds per-device workspace drift over SSH. |
+| `agents projects status [name] [--json] [--window N] [--no-remote] [--fleet]` (aliases `view`, `show`) | Progress card for every project, or one named project. Named form also prints every milestone and the stored definition. `--fleet` adds per-device workspace drift over SSH. |
 | `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. |
 | `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--linear-first-factory-gated). |
 | `agents projects import --from-factory [--min-confidence low\|medium\|high] [--all]` | Absorb `~/.agents/factory/projects.json`. Imports only `high`-confidence rows by default. |
