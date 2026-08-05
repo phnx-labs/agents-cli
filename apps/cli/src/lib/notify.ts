@@ -98,7 +98,11 @@ export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}
   if (!provider) {
     return { ok: false, channel, id: target, error };
   }
-  return provider.send(text, { target, dryRun: options.dryRun });
+  return provider.send(text, {
+    target,
+    ownerScoped: options.target === undefined,
+    dryRun: options.dryRun,
+  });
 }
 
 export async function notifyUrgentBlock(
