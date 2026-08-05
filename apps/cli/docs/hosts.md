@@ -54,7 +54,9 @@ composes the full dispatch stack:
    `--strategy` you passed). Eligibility excludes an account that is
    rate-limited, out of credits, signed out, or `revoked` (a token the daemon's
    live auth-health probe saw rejected — so rotation never routes into a login
-   that would fail at spawn). Fail-open: a missing or stale probe never blocks.
+   that would fail at spawn). Fail-open: a missing probe or any non-revoked
+   verdict never blocks; a cached `revoked` keeps gating (the conservative choice
+   for a security signal) until the daemon's next probe clears it.
 
 Every layer fails loud when it finds nothing: zero healthy accounts on any
 harness exits nonzero naming each harness's exclusion reason and the earliest
