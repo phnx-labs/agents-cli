@@ -34,7 +34,7 @@ export function registerCostCommand(program: Command): void {
     .description('Roll up $ cost and duration across local agent sessions')
     .option('--json', 'Output the rollup as JSON')
     .option('--since <time>', 'Only sessions newer than this (e.g., 7d, 4w, or ISO date)')
-    .option('--by <dimension>', 'Group the breakdown by: agent (default), project, or day')
+    .option('--by <dimension>', 'Group the breakdown by: agent (default), project, day, or account (the Claude org that produced each session)')
     .addHelpText('after', `
 Examples:
   agents cost                   Daily histogram + top sessions + per-agent breakdown
@@ -52,8 +52,8 @@ Cost is computed offline from a versioned per-model price table (${PRICING_VERSI
 /** Map the --by flag to a rollup group, rejecting unknown values. */
 function resolveGroup(by: string | undefined): UsageRollupGroup {
   if (by === undefined) return 'agent';
-  if (by === 'agent' || by === 'project' || by === 'day') return by;
-  console.error(chalk.red('error: --by must be one of: agent, project, day'));
+  if (by === 'agent' || by === 'project' || by === 'day' || by === 'account') return by;
+  console.error(chalk.red('error: --by must be one of: agent, project, day, account'));
   process.exit(1);
 }
 
@@ -146,7 +146,10 @@ async function costAction(options: CostOptions): Promise<void> {
   }
 
   // Per-agent / per-project / per-day breakdown.
-  const groupLabel = groupBy === 'agent' ? 'agent' : groupBy === 'project' ? 'project' : 'day';
+  const groupLabel = groupBy === 'agent' ? 'agent'
+    : groupBy === 'project' ? 'project'
+    : groupBy === 'account' ? 'account'
+    : 'day';
   out.push(chalk.bold(`By ${groupLabel}`));
   const cols = terminalWidth();
   const costW2 = Math.max(...breakdown.map(r => formatUsd(r.costUsd).length), 4);
@@ -154,13 +157,14 @@ async function costAction(options: CostOptions): Promise<void> {
   const sessionW = Math.max(...breakdown.map(r => `${String(r.sessionCount).padStart(countW)} session${r.sessionCount !== 1 ? 's' : ''}`.length));
   const durationW = Math.max(...breakdown.map(r => r.durationMs > 0 ? stringWidth(formatDuration(r.durationMs)) : 1), 1);
   const fixedW = 2 + 2 + costW2 + 2 + sessionW + 2 + durationW;
-  const keyW = Math.max(8, Math.min(Math.max(...breakdown.map(r => stringWidth(r.key)), groupLabel.length), cols - fixedW));
+  const display = (r: typeof breakdown[number]): string => r.label ?? r.key;
+  const keyW = Math.max(8, Math.min(Math.max(...breakdown.map(r => stringWidth(display(r))), groupLabel.length), cols - fixedW));
   for (const r of breakdown) {
     const cost = formatUsd(r.costUsd).padStart(costW2);
     const dur = r.durationMs > 0 ? formatDuration(r.durationMs) : '—';
     const sessions = `${String(r.sessionCount).padStart(countW)} session${r.sessionCount !== 1 ? 's' : ''}`;
     out.push(
-      `  ${padToWidth(truncateToWidth(r.key, keyW), keyW)}  ${chalk.green(cost)}  ${chalk.gray(padToWidth(sessions, sessionW))}  ${chalk.gray(padToWidth(dur, durationW))}`,
+      `  ${padToWidth(truncateToWidth(display(r), keyW), keyW)}  ${chalk.green(cost)}  ${chalk.gray(padToWidth(sessions, sessionW))}  ${chalk.gray(padToWidth(dur, durationW))}`,
     );
   }
 

@@ -92,7 +92,7 @@ export function registerOutputCommand(program: Command): void {
     .description('Productivity rollup — token burn vs shipped output (PRs, commits) across agents')
     .option('--json', 'Output the rollup as JSON')
     .option('--since <time>', 'Only sessions/commits newer than this: 1h, 24h, 7d, 4w, 1mo, 1y, or ISO date (default 7d)')
-    .option('--by <dimension>', 'Group the burn/output breakdown by: agent (default), project, or day')
+    .option('--by <dimension>', 'Group the burn/output breakdown by: agent (default), project, day, or account (the Claude org that produced each session)')
     .option('--repos-dir <dir>', 'Root scanned for git repos (default ~/src)')
     .option('--author <email...>', 'Count commits by these author emails (default: your git identities)')
     .option('--login <login...>', 'Count PRs for these GitHub logins (default: current gh user)')
@@ -116,8 +116,8 @@ Output tokens are the real generated tokens — NOT the cache-inflated total tok
 
 function resolveGroup(by: string | undefined): UsageRollupGroup {
   if (by === undefined) return 'agent';
-  if (by === 'agent' || by === 'project' || by === 'day') return by;
-  console.error(chalk.red('error: --by must be one of: agent, project, day'));
+  if (by === 'agent' || by === 'project' || by === 'day' || by === 'account') return by;
+  console.error(chalk.red('error: --by must be one of: agent, project, day, account'));
   process.exit(1);
 }
 
