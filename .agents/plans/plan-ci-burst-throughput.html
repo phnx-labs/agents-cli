@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Reduce CI latency during concurrent PR bursts</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e8e8e8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e8e8e8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-implementing">implementing</span></div>
+<h1>Reduce CI latency during concurrent PR bursts</h1>
+<p class="summary">The Free organization has 20 GitHub-hosted runner slots, while each agents-cli PR currently creates about ten jobs. Route checks by changed component, remove runner-only work, and retain the three-way CLI suite so bursts finish without multi-minute shard queues.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">67 successful Tests runs: median 4 minutes 35 seconds, p90 5 minutes 35 seconds, maximum 15 minutes 7 seconds<span class="meta-sep" aria-hidden="true">·</span>One observed CLI shard waited 5 minutes 30 seconds for a runner<span class="meta-sep" aria-hidden="true">·</span>Factory-only PRs currently run all 698 CLI test files</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">ci-burst-throughput</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">#2052</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s1</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">019fd125-4f34-7061-b1c1-dace9ab78803</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-05</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#proposed-changes"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p>Agents frequently open several pull requests within minutes. The repository's GitHub Free organization permits 20 concurrent GitHub-hosted jobs, but a routine PR currently starts about ten. Factory-only and documentation-only changes also run the complete CLI suite. The result is runner contention rather than useful validation.</p>
+<figure>
+<svg viewBox="0 0 960 330" role="img" aria-label="Before and after CI job routing" width="100%">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#a3e635"></path></marker>
+  </defs>
+  <rect x="20" y="35" width="410" height="250" rx="8" fill="#141414" stroke="#333"></rect>
+  <text x="44" y="68" fill="#e8e8e8" font-family="monospace" font-size="18" font-weight="700">BEFORE · every PR</text>
+  <rect x="60" y="100" width="150" height="46" rx="4" fill="#0f0f0f" stroke="#facc15"></rect><text x="82" y="128" fill="#e8e8e8" font-family="monospace" font-size="14">10 runner jobs</text>
+  <path d="M210 123H260" stroke="#a3e635" stroke-width="2" marker-end="url(#arrow)"></path>
+  <rect x="270" y="88" width="120" height="70" rx="4" fill="#0f0f0f" stroke="#f87171"></rect><text x="290" y="116" fill="#e8e8e8" font-family="monospace" font-size="13">20-slot cap</text><text x="288" y="138" fill="#888" font-family="monospace" font-size="12">queues shard</text>
+  <text x="60" y="193" fill="#888" font-family="monospace" font-size="13">Factory → 698 CLI files</text>
+  <text x="60" y="219" fill="#888" font-family="monospace" font-size="13">Docs → 698 CLI files</text>
+  <text x="60" y="245" fill="#888" font-family="monospace" font-size="13">Bench + no-op consume slots</text>
+
+  <rect x="530" y="35" width="410" height="250" rx="8" fill="#141414" stroke="#333"></rect>
+  <text x="554" y="68" fill="#e8e8e8" font-family="monospace" font-size="18" font-weight="700">AFTER · changed components</text>
+  <rect x="565" y="100" width="110" height="42" rx="4" fill="#0f0f0f" stroke="#a3e635"></rect><text x="582" y="126" fill="#e8e8e8" font-family="monospace" font-size="13">path scope</text>
+  <path d="M675 121H715" stroke="#a3e635" stroke-width="2" marker-end="url(#arrow)"></path>
+  <rect x="725" y="84" width="170" height="76" rx="4" fill="#0f0f0f" stroke="#a3e635"></rect><text x="744" y="111" fill="#e8e8e8" font-family="monospace" font-size="13">affected jobs only</text><text x="744" y="136" fill="#888" font-family="monospace" font-size="12">one required gate</text>
+  <text x="565" y="193" fill="#888" font-family="monospace" font-size="13">Factory → compile</text>
+  <text x="565" y="219" fill="#888" font-family="monospace" font-size="13">Docs → link verification</text>
+  <text x="565" y="245" fill="#888" font-family="monospace" font-size="13">CLI → preflight + 3 shards</text>
+  <circle cx="469" cy="160" r="7" fill="#a3e635"><animate attributeName="opacity" values=".35;1;.35" dur="2s" repeatCount="indefinite"></animate></circle>
+</svg>
+<figcaption id="ci-flow-caption">Control-flow comparison. Lime connectors show job routing; yellow/red borders mark runner contention; lime borders mark checks that execute.</figcaption>
+</figure><div class="artifact-callout"><strong>Load-bearing decision:</strong> retain three CLI shards and remove unrelated jobs. A fourth shard can shorten one isolated PR, but under a 20-job account limit it increases queue time for the concurrent PR bursts this change targets.</div><h2 id="proposed-changes">Proposed Changes</h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Change</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>scripts/ci-scope.ts</code></td>
+<td>Classify PR files into CLI, CLI docs, Factory, session-tracker, and Windows-sensitive scopes</td>
+<td>One canonical and tested path policy</td>
+</tr>
+<tr>
+<td><code>.github/workflows/tests.yml</code></td>
+<td>Run only affected component jobs and retain final <code>test</code> aggregate</td>
+<td>Four jobs for docs/Factory; seven for CLI</td>
+</tr>
+<tr>
+<td>CLI preflight</td>
+<td>Combine typecheck, compiled smoke, and distributed-session threshold</td>
+<td>One install and one runner slot</td>
+</tr>
+<tr>
+<td>Bun dependencies</td>
+<td>Remove manual global-cache restoration</td>
+<td>Eliminate slow/corrupt tar restores</td>
+</tr>
+<tr>
+<td>Bench workflow</td>
+<td>Run informational benches after merge; keep the threshold in preflight</td>
+<td>No per-PR informational runner</td>
+</tr>
+<tr>
+<td>Windows checks</td>
+<td>Remove the no-op workflow and run the real suite conditionally</td>
+<td>No empty runner; Windows failures gate <code>test</code></td>
+</tr>
+</tbody></table>
+<h2 id="public-interface">Public Interface</h2>
+<p>No CLI command, configuration, API, or package behavior changes. Branch protection continues to require <code>test</code> and <code>gitleaks</code>; component job names remain workflow details.</p>
+<pre><code>Required checks: test, gitleaks
+CLI execution:   scope -&gt; preflight + shard 1/3 + shard 2/3 + shard 3/3 -&gt; test
+Factory:         scope -&gt; compile -&gt; test
+Docs:            scope -&gt; verify-docs -&gt; test
+</code></pre>
+<h2 id="validation">Validation</h2>
+<ul>
+<li>Unit-test every path category, mixed changes, CI configuration changes, and the executable GitHub-output path.</li>
+<li>Lint the resulting workflows.</li>
+<li>Run CLI build, three shards, compiled smoke, and distributed-session guard.</li>
+<li>Run the Factory extension and both webview production builds.</li>
+<li>Run the session-tracker build and deterministic parser tests; its harness-launching scenarios stay on the fleet.</li>
+<li>Compare the implementation PR's real GitHub Actions job and step timing against the 67-run baseline, then post the table on the PR.</li>
+</ul>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Control</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A changed component is skipped</td>
+<td>Workflow and classifier changes activate every component; classifier tests pin each path family</td>
+</tr>
+<tr>
+<td>Scope job fails but aggregate passes</td>
+<td>Aggregate explicitly requires a successful scope result</td>
+</tr>
+<tr>
+<td>Windows regression becomes advisory</td>
+<td>Conditional Windows result is included in the required <code>test</code> aggregate</td>
+</tr>
+<tr>
+<td>More shards starve concurrent PRs</td>
+<td>Retain three CLI shards under the 20-job organization cap</td>
+</tr>
+<tr>
+<td>Public PR code reaches persistent fleet state</td>
+<td>Continue using isolated GitHub-hosted runners</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2>
+<ul>
+<li><a href="https://github.com/phnx-labs/agents-cli/issues/2052">GitHub issue #2052</a></li>
+<li>Implementation PR: added after the branch is pushed</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6IFJlZHVjZSBDSSBsYXRlbmN5IGR1cmluZyBjb25jdXJyZW50IFBSIGJ1cnN0cwpzdW1tYXJ5OiBUaGUgRnJlZSBvcmdhbml6YXRpb24gaGFzIDIwIEdpdEh1Yi1ob3N0ZWQgcnVubmVyIHNsb3RzLCB3aGlsZSBlYWNoIGFnZW50cy1jbGkgUFIgY3VycmVudGx5IGNyZWF0ZXMgYWJvdXQgdGVuIGpvYnMuIFJvdXRlIGNoZWNrcyBieSBjaGFuZ2VkIGNvbXBvbmVudCwgcmVtb3ZlIHJ1bm5lci1vbmx5IHdvcmssIGFuZCByZXRhaW4gdGhlIHRocmVlLXdheSBDTEkgc3VpdGUgc28gYnVyc3RzIGZpbmlzaCB3aXRob3V0IG11bHRpLW1pbnV0ZSBzaGFyZCBxdWV1ZXMuCnN0YXR1czogaW1wbGVtZW50aW5nCnRyYWNraW5nOiAiIzIwNTIiCnByb2plY3Q6IGFnZW50cy1jbGkKcmVwb3NpdG9yeTogcGhueC1sYWJzL2FnZW50cy1jbGkKaGFybmVzczogQ29kZXgKYWdlbnQ6IENvZGV4Cmhvc3Q6IHlvc2VtaXRlLXMxCnNlc3Npb246IDAxOWZkMTI1LTRmMzQtNzA2MS1iMWMxLWRhY2U5YWI3ODgwMwpkYXRlOiAyMDI2LTA4LTA1CmZhY3RzOgogIC0gIjY3IHN1Y2Nlc3NmdWwgVGVzdHMgcnVuczogbWVkaWFuIDQgbWludXRlcyAzNSBzZWNvbmRzLCBwOTAgNSBtaW51dGVzIDM1IHNlY29uZHMsIG1heGltdW0gMTUgbWludXRlcyA3IHNlY29uZHMiCiAgLSAiT25lIG9ic2VydmVkIENMSSBzaGFyZCB3YWl0ZWQgNSBtaW51dGVzIDMwIHNlY29uZHMgZm9yIGEgcnVubmVyIgogIC0gIkZhY3Rvcnktb25seSBQUnMgY3VycmVudGx5IHJ1biBhbGwgNjk4IENMSSB0ZXN0IGZpbGVzIgotLS0KCiMjIFB1cnBvc2UKCkFnZW50cyBmcmVxdWVudGx5IG9wZW4gc2V2ZXJhbCBwdWxsIHJlcXVlc3RzIHdpdGhpbiBtaW51dGVzLiBUaGUgcmVwb3NpdG9yeSdzIEdpdEh1YiBGcmVlIG9yZ2FuaXphdGlvbiBwZXJtaXRzIDIwIGNvbmN1cnJlbnQgR2l0SHViLWhvc3RlZCBqb2JzLCBidXQgYSByb3V0aW5lIFBSIGN1cnJlbnRseSBzdGFydHMgYWJvdXQgdGVuLiBGYWN0b3J5LW9ubHkgYW5kIGRvY3VtZW50YXRpb24tb25seSBjaGFuZ2VzIGFsc28gcnVuIHRoZSBjb21wbGV0ZSBDTEkgc3VpdGUuIFRoZSByZXN1bHQgaXMgcnVubmVyIGNvbnRlbnRpb24gcmF0aGVyIHRoYW4gdXNlZnVsIHZhbGlkYXRpb24uCgo8ZmlndXJlIGFyaWEtbGFiZWxsZWRieT0iY2ktZmxvdy1jYXB0aW9uIj4KPHN2ZyB2aWV3Qm94PSIwIDAgOTYwIDMzMCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJCZWZvcmUgYW5kIGFmdGVyIENJIGpvYiByb3V0aW5nIiB3aWR0aD0iMTAwJSI+CiAgPGRlZnM+CiAgICA8bWFya2VyIGlkPSJhcnJvdyIgdmlld0JveD0iMCAwIDEwIDEwIiByZWZYPSI5IiByZWZZPSI1IiBtYXJrZXJXaWR0aD0iNyIgbWFya2VySGVpZ2h0PSI3IiBvcmllbnQ9ImF1dG8tc3RhcnQtcmV2ZXJzZSI+PHBhdGggZD0iTTAgMEwxMCA1TDAgMTBaIiBmaWxsPSIjYTNlNjM1Ii8+PC9tYXJrZXI+CiAgPC9kZWZzPgogIDxyZWN0IHg9IjIwIiB5PSIzNSIgd2lkdGg9IjQxMCIgaGVpZ2h0PSIyNTAiIHJ4PSI4IiBmaWxsPSIjMTQxNDE0IiBzdHJva2U9IiMzMzMiLz4KICA8dGV4dCB4PSI0NCIgeT0iNjgiIGZpbGw9IiNlOGU4ZTgiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTgiIGZvbnQtd2VpZ2h0PSI3MDAiPkJFRk9SRSDCtyBldmVyeSBQUjwvdGV4dD4KICA8cmVjdCB4PSI2MCIgeT0iMTAwIiB3aWR0aD0iMTUwIiBoZWlnaHQ9IjQ2IiByeD0iNCIgZmlsbD0iIzBmMGYwZiIgc3Ryb2tlPSIjZmFjYzE1Ii8+PHRleHQgeD0iODIiIHk9IjEyOCIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxNCI+MTAgcnVubmVyIGpvYnM8L3RleHQ+CiAgPHBhdGggZD0iTTIxMCAxMjNIMjYwIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMiIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz4KICA8cmVjdCB4PSIyNzAiIHk9Ijg4IiB3aWR0aD0iMTIwIiBoZWlnaHQ9IjcwIiByeD0iNCIgZmlsbD0iIzBmMGYwZiIgc3Ryb2tlPSIjZjg3MTcxIi8+PHRleHQgeD0iMjkwIiB5PSIxMTYiIGZpbGw9IiNlOGU4ZTgiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPjIwLXNsb3QgY2FwPC90ZXh0Pjx0ZXh0IHg9IjI4OCIgeT0iMTM4IiBmaWxsPSIjODg4IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEyIj5xdWV1ZXMgc2hhcmQ8L3RleHQ+CiAgPHRleHQgeD0iNjAiIHk9IjE5MyIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+RmFjdG9yeSDihpIgNjk4IENMSSBmaWxlczwvdGV4dD4KICA8dGV4dCB4PSI2MCIgeT0iMjE5IiBmaWxsPSIjODg4IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEzIj5Eb2NzIOKGkiA2OTggQ0xJIGZpbGVzPC90ZXh0PgogIDx0ZXh0IHg9IjYwIiB5PSIyNDUiIGZpbGw9IiM4ODgiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPkJlbmNoICsgbm8tb3AgY29uc3VtZSBzbG90czwvdGV4dD4KCiAgPHJlY3QgeD0iNTMwIiB5PSIzNSIgd2lkdGg9IjQxMCIgaGVpZ2h0PSIyNTAiIHJ4PSI4IiBmaWxsPSIjMTQxNDE0IiBzdHJva2U9IiMzMzMiLz4KICA8dGV4dCB4PSI1NTQiIHk9IjY4IiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iNzAwIj5BRlRFUiDCtyBjaGFuZ2VkIGNvbXBvbmVudHM8L3RleHQ+CiAgPHJlY3QgeD0iNTY1IiB5PSIxMDAiIHdpZHRoPSIxMTAiIGhlaWdodD0iNDIiIHJ4PSI0IiBmaWxsPSIjMGYwZjBmIiBzdHJva2U9IiNhM2U2MzUiLz48dGV4dCB4PSI1ODIiIHk9IjEyNiIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+cGF0aCBzY29wZTwvdGV4dD4KICA8cGF0aCBkPSJNNjc1IDEyMUg3MTUiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPgogIDxyZWN0IHg9IjcyNSIgeT0iODQiIHdpZHRoPSIxNzAiIGhlaWdodD0iNzYiIHJ4PSI0IiBmaWxsPSIjMGYwZjBmIiBzdHJva2U9IiNhM2U2MzUiLz48dGV4dCB4PSI3NDQiIHk9IjExMSIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+YWZmZWN0ZWQgam9icyBvbmx5PC90ZXh0Pjx0ZXh0IHg9Ijc0NCIgeT0iMTM2IiBmaWxsPSIjODg4IiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEyIj5vbmUgcmVxdWlyZWQgZ2F0ZTwvdGV4dD4KICA8dGV4dCB4PSI1NjUiIHk9IjE5MyIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+RmFjdG9yeSDihpIgY29tcGlsZTwvdGV4dD4KICA8dGV4dCB4PSI1NjUiIHk9IjIxOSIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+RG9jcyDihpIgbGluayB2ZXJpZmljYXRpb248L3RleHQ+CiAgPHRleHQgeD0iNTY1IiB5PSIyNDUiIGZpbGw9IiM4ODgiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPkNMSSDihpIgcHJlZmxpZ2h0ICsgMyBzaGFyZHM8L3RleHQ+CiAgPGNpcmNsZSBjeD0iNDY5IiBjeT0iMTYwIiByPSI3IiBmaWxsPSIjYTNlNjM1Ij48YW5pbWF0ZSBhdHRyaWJ1dGVOYW1lPSJvcGFjaXR5IiB2YWx1ZXM9Ii4zNTsxOy4zNSIgZHVyPSIycyIgcmVwZWF0Q291bnQ9ImluZGVmaW5pdGUiLz48L2NpcmNsZT4KPC9zdmc+CjxmaWdjYXB0aW9uIGlkPSJjaS1mbG93LWNhcHRpb24iPkNvbnRyb2wtZmxvdyBjb21wYXJpc29uLiBMaW1lIGNvbm5lY3RvcnMgc2hvdyBqb2Igcm91dGluZzsgeWVsbG93L3JlZCBib3JkZXJzIG1hcmsgcnVubmVyIGNvbnRlbnRpb247IGxpbWUgYm9yZGVycyBtYXJrIGNoZWNrcyB0aGF0IGV4ZWN1dGUuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiPjxzdHJvbmc+TG9hZC1iZWFyaW5nIGRlY2lzaW9uOjwvc3Ryb25nPiByZXRhaW4gdGhyZWUgQ0xJIHNoYXJkcyBhbmQgcmVtb3ZlIHVucmVsYXRlZCBqb2JzLiBBIGZvdXJ0aCBzaGFyZCBjYW4gc2hvcnRlbiBvbmUgaXNvbGF0ZWQgUFIsIGJ1dCB1bmRlciBhIDIwLWpvYiBhY2NvdW50IGxpbWl0IGl0IGluY3JlYXNlcyBxdWV1ZSB0aW1lIGZvciB0aGUgY29uY3VycmVudCBQUiBidXJzdHMgdGhpcyBjaGFuZ2UgdGFyZ2V0cy48L2Rpdj4KCiMjIFByb3Bvc2VkIENoYW5nZXMKCnwgQXJlYSB8IENoYW5nZSB8IFJlc3VsdCB8CnwtLS18LS0tfC0tLXwKfCBgc2NyaXB0cy9jaS1zY29wZS50c2AgfCBDbGFzc2lmeSBQUiBmaWxlcyBpbnRvIENMSSwgQ0xJIGRvY3MsIEZhY3RvcnksIHNlc3Npb24tdHJhY2tlciwgYW5kIFdpbmRvd3Mtc2Vuc2l0aXZlIHNjb3BlcyB8IE9uZSBjYW5vbmljYWwgYW5kIHRlc3RlZCBwYXRoIHBvbGljeSB8CnwgYC5naXRodWIvd29ya2Zsb3dzL3Rlc3RzLnltbGAgfCBSdW4gb25seSBhZmZlY3RlZCBjb21wb25lbnQgam9icyBhbmQgcmV0YWluIGZpbmFsIGB0ZXN0YCBhZ2dyZWdhdGUgfCBGb3VyIGpvYnMgZm9yIGRvY3MvRmFjdG9yeTsgc2V2ZW4gZm9yIENMSSB8CnwgQ0xJIHByZWZsaWdodCB8IENvbWJpbmUgdHlwZWNoZWNrLCBjb21waWxlZCBzbW9rZSwgYW5kIGRpc3RyaWJ1dGVkLXNlc3Npb24gdGhyZXNob2xkIHwgT25lIGluc3RhbGwgYW5kIG9uZSBydW5uZXIgc2xvdCB8CnwgQnVuIGRlcGVuZGVuY2llcyB8IFJlbW92ZSBtYW51YWwgZ2xvYmFsLWNhY2hlIHJlc3RvcmF0aW9uIHwgRWxpbWluYXRlIHNsb3cvY29ycnVwdCB0YXIgcmVzdG9yZXMgfAp8IEJlbmNoIHdvcmtmbG93IHwgUnVuIGluZm9ybWF0aW9uYWwgYmVuY2hlcyBhZnRlciBtZXJnZTsga2VlcCB0aGUgdGhyZXNob2xkIGluIHByZWZsaWdodCB8IE5vIHBlci1QUiBpbmZvcm1hdGlvbmFsIHJ1bm5lciB8CnwgV2luZG93cyBjaGVja3MgfCBSZW1vdmUgdGhlIG5vLW9wIHdvcmtmbG93IGFuZCBydW4gdGhlIHJlYWwgc3VpdGUgY29uZGl0aW9uYWxseSB8IE5vIGVtcHR5IHJ1bm5lcjsgV2luZG93cyBmYWlsdXJlcyBnYXRlIGB0ZXN0YCB8CgojIyBQdWJsaWMgSW50ZXJmYWNlCgpObyBDTEkgY29tbWFuZCwgY29uZmlndXJhdGlvbiwgQVBJLCBvciBwYWNrYWdlIGJlaGF2aW9yIGNoYW5nZXMuIEJyYW5jaCBwcm90ZWN0aW9uIGNvbnRpbnVlcyB0byByZXF1aXJlIGB0ZXN0YCBhbmQgYGdpdGxlYWtzYDsgY29tcG9uZW50IGpvYiBuYW1lcyByZW1haW4gd29ya2Zsb3cgZGV0YWlscy4KCmBgYHRleHQKUmVxdWlyZWQgY2hlY2tzOiB0ZXN0LCBnaXRsZWFrcwpDTEkgZXhlY3V0aW9uOiAgIHNjb3BlIC0+IHByZWZsaWdodCArIHNoYXJkIDEvMyArIHNoYXJkIDIvMyArIHNoYXJkIDMvMyAtPiB0ZXN0CkZhY3Rvcnk6ICAgICAgICAgc2NvcGUgLT4gY29tcGlsZSAtPiB0ZXN0CkRvY3M6ICAgICAgICAgICAgc2NvcGUgLT4gdmVyaWZ5LWRvY3MgLT4gdGVzdApgYGAKCiMjIFZhbGlkYXRpb24KCi0gVW5pdC10ZXN0IGV2ZXJ5IHBhdGggY2F0ZWdvcnksIG1peGVkIGNoYW5nZXMsIENJIGNvbmZpZ3VyYXRpb24gY2hhbmdlcywgYW5kIHRoZSBleGVjdXRhYmxlIEdpdEh1Yi1vdXRwdXQgcGF0aC4KLSBMaW50IHRoZSByZXN1bHRpbmcgd29ya2Zsb3dzLgotIFJ1biBDTEkgYnVpbGQsIHRocmVlIHNoYXJkcywgY29tcGlsZWQgc21va2UsIGFuZCBkaXN0cmlidXRlZC1zZXNzaW9uIGd1YXJkLgotIFJ1biB0aGUgRmFjdG9yeSBleHRlbnNpb24gYW5kIGJvdGggd2VidmlldyBwcm9kdWN0aW9uIGJ1aWxkcy4KLSBSdW4gdGhlIHNlc3Npb24tdHJhY2tlciBidWlsZCBhbmQgZGV0ZXJtaW5pc3RpYyBwYXJzZXIgdGVzdHM7IGl0cyBoYXJuZXNzLWxhdW5jaGluZyBzY2VuYXJpb3Mgc3RheSBvbiB0aGUgZmxlZXQuCi0gQ29tcGFyZSB0aGUgaW1wbGVtZW50YXRpb24gUFIncyByZWFsIEdpdEh1YiBBY3Rpb25zIGpvYiBhbmQgc3RlcCB0aW1pbmcgYWdhaW5zdCB0aGUgNjctcnVuIGJhc2VsaW5lLCB0aGVuIHBvc3QgdGhlIHRhYmxlIG9uIHRoZSBQUi4KCiMjIFJpc2tzCgp8IFJpc2sgfCBDb250cm9sIHwKfC0tLXwtLS18CnwgQSBjaGFuZ2VkIGNvbXBvbmVudCBpcyBza2lwcGVkIHwgV29ya2Zsb3cgYW5kIGNsYXNzaWZpZXIgY2hhbmdlcyBhY3RpdmF0ZSBldmVyeSBjb21wb25lbnQ7IGNsYXNzaWZpZXIgdGVzdHMgcGluIGVhY2ggcGF0aCBmYW1pbHkgfAp8IFNjb3BlIGpvYiBmYWlscyBidXQgYWdncmVnYXRlIHBhc3NlcyB8IEFnZ3JlZ2F0ZSBleHBsaWNpdGx5IHJlcXVpcmVzIGEgc3VjY2Vzc2Z1bCBzY29wZSByZXN1bHQgfAp8IFdpbmRvd3MgcmVncmVzc2lvbiBiZWNvbWVzIGFkdmlzb3J5IHwgQ29uZGl0aW9uYWwgV2luZG93cyByZXN1bHQgaXMgaW5jbHVkZWQgaW4gdGhlIHJlcXVpcmVkIGB0ZXN0YCBhZ2dyZWdhdGUgfAp8IE1vcmUgc2hhcmRzIHN0YXJ2ZSBjb25jdXJyZW50IFBScyB8IFJldGFpbiB0aHJlZSBDTEkgc2hhcmRzIHVuZGVyIHRoZSAyMC1qb2Igb3JnYW5pemF0aW9uIGNhcCB8CnwgUHVibGljIFBSIGNvZGUgcmVhY2hlcyBwZXJzaXN0ZW50IGZsZWV0IHN0YXRlIHwgQ29udGludWUgdXNpbmcgaXNvbGF0ZWQgR2l0SHViLWhvc3RlZCBydW5uZXJzIHwKCiMjIFRyYWNraW5nCgotIFtHaXRIdWIgaXNzdWUgIzIwNTJdKGh0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdlbnRzLWNsaS9pc3N1ZXMvMjA1MikKLSBJbXBsZW1lbnRhdGlvbiBQUjogYWRkZWQgYWZ0ZXIgdGhlIGJyYW5jaCBpcyBwdXNoZWQK"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
