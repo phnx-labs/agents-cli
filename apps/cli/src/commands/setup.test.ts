@@ -18,7 +18,7 @@ describe('agents setup command group', () => {
     const setup = program.commands.find((c) => c.name() === 'setup');
     expect(setup).toBeDefined();
     const subs = setup!.commands.map((c) => c.name()).sort();
-    expect(subs).toEqual(['browser', 'computer', 'fleet', 'mine', 'secrets', 'share']);
+    expect(subs).toEqual(['browser', 'computer', 'fleet', 'mine', 'secrets', 'share', 'watchdog']);
   });
 
   it('keeps the bare `setup` command with its force / no-system-repo flags', () => {

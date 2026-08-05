@@ -18,7 +18,6 @@ import type { CloudProvider, CloudProviderId, CloudTarget, CloudTaskStatus, Disp
 import { MissingTargetError, MAX_IMAGES_PER_DISPATCH } from '../lib/cloud/types.js';
 import type { JobConfig, JobTrigger } from '../lib/routines.js';
 import { normalizeTriggerEvent, validateTrigger, writeJob, setJobEnabled, jobExists, GITHUB_TRIGGER_EVENTS } from '../lib/routines.js';
-import { machineId } from '../lib/machine-id.js';
 import { emit } from '../lib/events.js';
 import { shareRuntimeEnv } from '../lib/share/config.js';
 
@@ -348,13 +347,11 @@ Examples:
           prompt,
         };
         if (repoValues[0]) routine.repo = repoValues[0];
-        // --host with --on: the webhook-fired run places on that machine (the
-        // routine carries the placement, and firing pins to THIS device so a
-        // fleet of receivers can't each dispatch a duplicate).
+        // --host controls where the enabled local receiver dispatches the run.
+        // Device activation remains in this receiver's device manifest.
         if (options.host) {
           routine.host = options.host as string;
           if (options.remoteCwd) routine.remoteCwd = options.remoteCwd as string;
-          routine.devices = [machineId()];
         }
         writeJob(routine);
         setJobEnabled(routine.name, true);
