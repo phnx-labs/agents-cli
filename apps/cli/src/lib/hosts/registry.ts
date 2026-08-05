@@ -28,6 +28,8 @@ import { readMeta } from '../state.js';
 import { isSshConfigHost } from './ssh-config.js';
 import { resolveRemoteOsSync } from './remote-os.js';
 import { loadDevices, isControlDevice, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
+import { isDeviceAuto, resolveDeviceAffinity, type DeviceAffinityPlan } from '../smart-launch.js';
+import { localMachineId } from '../session/origin-machine.js';
 
 // Re-export so existing importers (tests, commands) keep their path; the class
 // itself lives in types.ts so providers can throw it without a circular import.
@@ -172,6 +174,9 @@ export interface MatchHostOptions {
    * "Unknown device" verdict reachable).
    */
   allowBareLiteral?: boolean;
+  /** Override the affinity pick for the `auto` sentinel (tests). Defaults to
+   * `resolveDeviceAffinity({})` — the same engine `agents run --device auto` uses. */
+  resolveAuto?: () => DeviceAffinityPlan;
 }
 
 /**
@@ -188,6 +193,21 @@ export interface MatchHostOptions {
  * into a dispatch verdict.
  */
 export async function matchHost(name: string, opts: MatchHostOptions = {}): Promise<ResolvedHost | null> {
+  // `auto` is the same affinity sentinel `agents run --device auto` resolves
+  // (isDeviceAuto / resolveDeviceAffinity in ../smart-launch.js) — shared here so
+  // every caller through this one core (ssh, teams, dispatch/passthrough) picks a
+  // device the SAME way `run` does instead of rejecting it as "Unknown device
+  // 'auto'" (RUSH-2185). A `null` plan.host means the affinity engine picked this
+  // very machine; resolve that as the local device/host entry (if any) rather than
+  // returning nothing — callers that already special-case "target is this
+  // machine" (teams add/create, the passthrough self-host check) then treat it as
+  // local exactly as they would if the user had typed the local name.
+  if (isDeviceAuto(name)) {
+    const plan = (opts.resolveAuto ?? (() => resolveDeviceAffinity({})))();
+    const picked = plan.host ?? normalizeHost(localMachineId());
+    return matchHost(picked, opts);
+  }
+
   try {
     assertValidSshTarget(name);
   } catch {

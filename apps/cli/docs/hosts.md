@@ -401,11 +401,17 @@ merges three directories **per-field**, it does not let one shadow another:
   bare name, so ssh applies the stanza).
 
 One grammar for every caller: `name`, `user@name` (login user overridden, same
-box), a tailnet FQDN, an ssh_config alias, and an ad-hoc `user@host` all resolve
-identically. `dispatchable` follows the device's auth method, so a password-auth
-device can't be made dispatchable by shadowing it with an inline entry. A bare
-unknown name resolves to nothing, which keeps capability-tag routing
-(`--host gpu`) and the `agents ssh` "Unknown device" verdict reachable.
+box), a tailnet FQDN, an ssh_config alias, an ad-hoc `user@host`, and the `auto`
+affinity sentinel (RUSH-2185: `matchHost` resolves it via the same
+`resolveDeviceAffinity` engine `agents run --device auto` uses, so `agents ssh
+auto` and `agents teams add --device auto` pick a device the same way `run`
+does) all resolve identically. `dispatchable` follows the device's auth method,
+so a password-auth device can't be made dispatchable by shadowing it with an
+inline entry. A bare unknown name resolves to nothing, which keeps
+capability-tag routing (`--host gpu`) and the `agents ssh` "Unknown device"
+verdict reachable. `agents ssh` additionally refuses an `auto` pick that lands
+on the machine you're already on — dialing yourself isn't the useful outcome
+`agents ssh auto` exists for — with a clear message instead of self-SSHing.
 
 ### 2. Transport — plain SSH (reuse, don't reinvent)
 

@@ -20,6 +20,7 @@ import ora from 'ora';
 import { getCliVersion } from '../lib/version.js';
 import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../lib/secrets/bundles.js';
 import { machineId } from '../lib/session/sync/config.js';
+import { isDeviceAuto, resolveDeviceAffinity } from '../lib/smart-launch.js';
 import { registerFleetCaptureCommand } from './fleet-capture.js';
 import { registerFleetApplyAlias } from './apply.js';
 import {
@@ -1519,9 +1520,12 @@ Examples:
   agents ssh win-mini                       # interactive login
   agents ssh win-mini hostname              # run a command (PowerShell on Windows)
   agents ssh yosemite-s0 uptime             # run a command (POSIX)
+  agents ssh auto                           # affinity-pick a device (same engine as `agents run --device auto`)
 
 Devices come from 'agents devices'. Password auth pulls the secret from a
 secrets bundle via an askpass shim — the password never touches argv.
+'auto' picks a remote device by 14-day usage; a pick landing on this machine
+is refused with a clear message instead of self-dialing.
 `)
     .action(async (name: string, cmd: string[]) => {
       // Hidden askpass bridge: ssh execs the shim, which re-invokes us here.
@@ -1529,16 +1533,35 @@ secrets bundle via an askpass shim — the password never touches argv.
         await runAskpass();
         return;
       }
+      // `auto` is the same affinity sentinel `agents run --device auto` resolves
+      // (RUSH-2185) — pick the concrete device up front via the SAME engine
+      // (resolveDeviceAffinity), rather than leaning on matchHost's generic
+      // self-resolution (../lib/hosts/registry.js): `agents ssh` connects OUT to
+      // a remote device, so a pick that lands on THIS machine is refused with a
+      // clear message instead of self-SSHing — which also holds when this
+      // machine was never itself enrolled as a device (matchHost would have
+      // nothing to resolve "self" to, and mis-report the pick as "Unknown
+      // device").
+      let target = name;
+      if (isDeviceAuto(name)) {
+        const plan = resolveDeviceAffinity({});
+        if (!plan.host) {
+          console.error(chalk.red(`'auto' picked this machine — 'agents ssh' connects to a remote device. Pass a device name; see 'agents devices list'.`));
+          process.exit(1);
+        }
+        process.stderr.write(chalk.gray(`[agents] device=auto → ${plan.host}\n`));
+        target = plan.host;
+      }
       // Accept the full fleet target grammar: a registered `name`, a
       // `user@device` (same device, login user overridden — dialed via its
       // Tailscale route, not LAN DNS), or an ad-hoc `user@host`/`host` literal.
       // A bare unregistered alias still errors as "Unknown device".
-      const device = await resolveDeviceTarget(name);
+      const device = await resolveDeviceTarget(target);
       if (!device) {
         // Not a registered device — it may be a leased crabbox box slug. ssh into
         // it directly (crabbox@<tailnet|ip>:2222) before giving up.
-        trySshLeasedBox(name, cmd); // exits the process on a match
-        console.error(chalk.red(`Unknown device '${name}'. See 'agents devices list'.`));
+        trySshLeasedBox(target, cmd); // exits the process on a match
+        console.error(chalk.red(`Unknown device '${target}'. See 'agents devices list'.`));
         process.exit(1);
       }
 

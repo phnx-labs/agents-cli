@@ -19,7 +19,7 @@
  */
 import chalk from 'chalk';
 import { sshTargetFor } from '../hosts/types.js';
-import { matchHost, splitUserHost } from '../hosts/registry.js';
+import { matchHost, splitUserHost, type MatchHostOptions } from '../hosts/registry.js';
 import { normalizeHost } from '../machine-id.js';
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { type DeviceProfile } from './registry.js';
@@ -89,10 +89,14 @@ async function toResolvedTarget(token: string): Promise<ResolvedSshTarget | unde
  * `user@host` / IP / FQDN literal yields a synthesized key-auth profile. A bare
  * unregistered alias (no `@`/dot) — or an ssh_config-only alias, which `agents
  * ssh` has never dialed — returns undefined so the caller reports "Unknown
- * device" rather than dialing a literal.
+ * device" rather than dialing a literal. `token` may also be the `auto`
+ * affinity sentinel (RUSH-2185); `opts.resolveAuto` overrides the pick (tests).
  */
-export async function resolveDeviceTarget(token: string): Promise<DeviceProfile | undefined> {
-  const host = await matchHost(token, { allowBareLiteral: true });
+export async function resolveDeviceTarget(
+  token: string,
+  opts: Pick<MatchHostOptions, 'resolveAuto'> = {}
+): Promise<DeviceProfile | undefined> {
+  const host = await matchHost(token, { allowBareLiteral: true, ...opts });
   if (!host) return undefined;
   if (host.device) {
     const { user } = splitUserHost(token);

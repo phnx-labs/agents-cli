@@ -205,6 +205,58 @@ describe('resolveHost — ssh_config grammar', () => {
   });
 });
 
+describe('resolveHost — `auto` affinity sentinel (RUSH-2185)', () => {
+  it('resolves `auto` to the affinity-picked device, same engine as `run --device auto`', async () => {
+    await upsertDevice('mac-mini', {
+      platform: 'macos',
+      user: 'muqsit',
+      address: { via: 'tailscale', dnsName: 'mac-mini.tail1a85a1.ts.net' },
+      auth: { method: 'key' },
+    });
+
+    const { matchHost } = await import('./registry.js');
+    const host = await matchHost('auto', {
+      resolveAuto: () => ({ host: 'mac-mini', deviceCandidates: [], pickedDeviceKey: 'mac-mini' }),
+    });
+    expect(host).not.toBeNull();
+    expect(host!.name).toBe('mac-mini');
+    expect(sshTargetFor(host!)).toBe('muqsit@mac-mini.tail1a85a1.ts.net');
+  });
+
+  it('is case-insensitive, matching `agents run --device Auto`', async () => {
+    await upsertDevice('mac-mini', {
+      platform: 'macos',
+      user: 'muqsit',
+      address: { via: 'tailscale', dnsName: 'mac-mini.tail1a85a1.ts.net' },
+      auth: { method: 'key' },
+    });
+
+    const { matchHost } = await import('./registry.js');
+    const host = await matchHost('AUTO', {
+      resolveAuto: () => ({ host: 'mac-mini', deviceCandidates: [], pickedDeviceKey: 'mac-mini' }),
+    });
+    expect(host?.name).toBe('mac-mini');
+  });
+
+  it('resolves the local-machine pick (plan.host === null) to this box\'s own device entry, not a miss', async () => {
+    const { machineId } = await import('../machine-id.js');
+    const self = machineId();
+    await upsertDevice(self, {
+      platform: 'linux',
+      user: 'muqsit',
+      address: { via: 'tailscale', dnsName: `${self}.tail1a85a1.ts.net` },
+      auth: { method: 'key' },
+    });
+
+    const { matchHost } = await import('./registry.js');
+    const host = await matchHost('auto', {
+      resolveAuto: () => ({ host: null, deviceCandidates: [], pickedDeviceKey: null }),
+    });
+    expect(host).not.toBeNull();
+    expect(host!.name).toBe(self);
+  });
+});
+
 describe('listAllHosts — merge same-name rows (RUSH-1967)', () => {
   it('keeps the device status + dispatchable on an enrolled row instead of dropping them', async () => {
     await upsertDevice('yosemite-s0', {

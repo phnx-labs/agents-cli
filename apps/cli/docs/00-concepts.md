@@ -172,8 +172,13 @@ no remote semantics reject the flag with a clear message rather than commander's
 raw `unknown option`. The target may be a registered host name, a capability tag
 (`--host gpu --any`), a raw `user@host`, or the special value `auto`
 (`--device auto` / `--host auto`) to affinity-pick a host from 14-day session
-usage on `sessions.db` (weighted sample among online devices). Harness is always
-the agent you type — never auto-picked. Affinity failure degrades to local.
+usage on `sessions.db` (weighted sample among online devices). `auto` is resolved
+by the shared `matchHost` core (below), so `agents run --device auto`, `agents
+ssh auto`, and `agents teams add --device auto` all pick the same way — `agents
+ssh` is the one exception that refuses a pick landing on the machine you're
+already on (`agents ssh` dials OUT to a remote box, so self is never the useful
+outcome) rather than silently self-dialing. Harness is always the agent you
+type — never auto-picked. Affinity failure degrades to local.
 
 The two registries feed **one host pool** behind the `HostProvider` seam:
 `local` (agents.yaml overlay ∪ ssh-config) registers first, `devices` (the

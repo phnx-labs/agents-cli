@@ -63,6 +63,7 @@ import {
   removeWorktree,
 } from '../lib/teams/worktree.js';
 import { resolveHost } from '../lib/hosts/registry.js';
+import { isDeviceAuto, resolveDeviceAffinity } from '../lib/smart-launch.js';
 import { sshTargetFor } from '../lib/hosts/types.js';
 import { ensureHostReady } from '../lib/hosts/ready.js';
 import { remoteShellFor } from '../lib/hosts/remote-cmd.js';
@@ -1562,7 +1563,7 @@ export function registerTeamsCommands(program: Command): void {
       // `--device`/`--host` are aliases (addHostOption registers both). For `teams
       // add` the passthrough special-cases them as PLACEMENT, not routing, so the
       // local action reads them here. Reject a conflicting pair.
-      const explicitDevice = (() => {
+      let explicitDevice = (() => {
         const h = opts.host;
         const d = opts.device;
         if (h && d && h !== d) {
@@ -1570,6 +1571,17 @@ export function registerTeamsCommands(program: Command): void {
         }
         return h ?? d ?? null;
       })();
+
+      // `auto` is the same affinity sentinel `agents run --device auto` resolves
+      // (RUSH-2185) — pick the concrete device name up front so the local-machine
+      // check right below (and every dieFriction message further down) sees the
+      // real target instead of the literal string "auto".
+      if (explicitDevice && isDeviceAuto(explicitDevice)) {
+        const plan = resolveDeviceAffinity({});
+        const picked = plan.host ?? machineId();
+        process.stderr.write(chalk.gray(`[teams] device=auto → ${picked === machineId() ? 'local' : picked}\n`));
+        explicitDevice = picked;
+      }
 
       // Distributed teams: --device <name> PINS this teammate to a machine over
       // SSH. Resolve + validate the placement here so a bad target fails at `add`
