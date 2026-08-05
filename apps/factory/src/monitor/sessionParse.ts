@@ -30,8 +30,18 @@ function homeDir(): string {
   return os.homedir();
 }
 
+/**
+ * Session id derived from a transcript path. Codex files are
+ * `rollout-<ts>-<uuid>.jsonl` — return the UUID only (matches the CLI and
+ * Codex `/status`). Claude and other `<uuid>.jsonl` files pass through.
+ */
 export function sessionIdFromFile(file: string): string {
-  return path.basename(file).replace(/\.jsonl$/, '');
+  const base = path.basename(file).replace(/\.jsonl$/, '');
+  // Inline the UUID extract so this module stays free of core/ imports that
+  // pull node-heavy deps into the monitor process graph.
+  const m = base.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  if (m) return m[0];
+  return base;
 }
 
 export function workspaceHash(workspacePath: string): string {

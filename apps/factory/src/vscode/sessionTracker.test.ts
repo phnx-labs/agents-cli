@@ -135,7 +135,7 @@ describe('sessionTracker — Codex rollout adoption (no prior sessionId)', () =>
 
     expect(events.length).toBe(1);
     expect(events[0].oldId).toBeUndefined();
-    expect(events[0].newId).toBe(`rollout-2026-04-26T00-00-00-${existingSessionId}`);
+    expect(events[0].newId).toBe(existingSessionId);
 
     unregisterTerminal(term);
   });
@@ -171,7 +171,7 @@ describe('sessionTracker — Codex rollout adoption (no prior sessionId)', () =>
     expect(events.length).toBe(1);
     expect(events[0].oldId).toBeUndefined();
     // Filename-derived id matches payload id
-    expect(events[0].newId).toBe(`rollout-2026-04-26T00-00-00-${newSessionId}`);
+    expect(events[0].newId).toBe(newSessionId);
 
     unregisterTerminal(term);
   });
@@ -227,7 +227,7 @@ describe('sessionTracker — Codex rollout adoption (no prior sessionId)', () =>
 
     await waitMs(600);
 
-    const matching = events.filter(e => e.newId === `rollout-2026-04-26T00-00-00-${newSessionId}`);
+    const matching = events.filter(e => e.newId === newSessionId);
     expect(matching.length).toBe(1);
     expect(matching[0].terminal).toBe(unbound);
     expect(matching[0].oldId).toBeUndefined();

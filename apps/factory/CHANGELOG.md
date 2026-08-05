@@ -4,6 +4,23 @@ All notable changes to the Factory extension are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
+## [Unreleased]
+
+- **Status bar session id: CLI join by `AGENT_TERMINAL_ID`, no per-tab poll thrash (RUSH-2192).**
+  Grok / Codex / other non-Claude tabs often showed a bare `Agents: Grok` (no id) or a
+  Codex `rollout-<timestamp>-<uuid>` stem instead of the real UUID. Root causes: only
+  Claude mints an id at launch; the file watcher never tracks Grok; offloaded
+  `--device`/`--host` tabs skipped live hydrate entirely; and when a Codex file *was*
+  adopted, the full basename was used as the id.
+  Fix: resolve the id from `agents sessions --active --json` (local: `--local`; offload:
+  `--host <device>` — never `--where`) joined on this tab's `AGENT_TERMINAL_ID`, with
+  **one subprocess per host** shared across all tabs (in-flight coalesce + TTL cache +
+  hard timeout). Same-machine `--device <this-host>` still uses the local SessionStart
+  state path. Status bar / clipboard always show the canonical UUID. Codex file-stem
+  adoption also extracts the UUID only. Source: `src/core/canonicalSessionId.ts`,
+  `src/core/sessionIdJoin.ts`, `src/core/sessionIdHydrate.ts`, `src/vscode/extension.ts`,
+  `src/monitor/sessionParse.ts`, `src/core/remoteSessions.ts`.
+
 ## [0.9.311] - 2026-08-05
 
 - **Extension no longer orchestrates tmux.** The Factory VS Code extension previously

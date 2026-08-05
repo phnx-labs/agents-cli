@@ -162,6 +162,14 @@ async function ensureAgentsCliInstalled(): Promise<void> {
 import { supportsPrewarming, buildVersionedResumeCommand, exitSequenceFor } from '../core/prewarm';
 import { generateClaudeSessionId, listOpencodeSessions } from '../core/prewarm.simple';
 import { liveSessionIdForShell } from '../core/liveSession';
+import { canonicalSessionId } from '../core/canonicalSessionId';
+import {
+  activeMapCacheKey,
+  isLocalActiveMapKey,
+  needsSessionIdHydrate,
+  resolveSessionIdForTerminal,
+  fetchTerminalIdSessionMap,
+} from '../core/sessionIdHydrate';
 import { displayIdentity } from '../core/statusIdentity';
 import { getSessionPathBySessionId, getSessionPreviewInfo, getOpenCodeSessionPreviewInfo, getCursorSessionPreviewInfo } from './sessions.vscode';
 import * as tasksImport from './tasks.vscode';
@@ -2907,17 +2915,12 @@ async function copySessionId() {
     return;
   }
 
-  // The session id stored on terminalEntry is the spawn-time value. It goes
-  // stale when the user exits and reruns the agent in the same terminal, or
-  // after /clear. Prefer the live id captured by the SessionStart hook
-  // (~/.agents/.cache/state/sessions/<agent-pid>.json). An offloaded tab has no
-  // local agent process, so the hook state cannot describe it — its spawn-time
-  // id is the only local truth (see tryHydrateLiveSessionId).
-  const shellPid = await activeTerminal.processId;
-  const liveId = terminalEntry.host
-    ? null
-    : await liveSessionIdForShell(shellPid, terminalEntry.createdAt);
-  const sessionId = liveId || terminalEntry.sessionId;
+  // Prefer a freshly hydrated CLI id (terminalId join / local state) over a
+  // spawn-time stamp. Offloaded tabs use the batched --active map; local tabs
+  // can also read the SessionStart state file.
+  await tryHydrateLiveSessionId(activeTerminal, terminalEntry.agentConfig.prefix || '');
+  const refreshed = terminals.getByTerminal(activeTerminal);
+  const sessionId = canonicalSessionId(refreshed?.sessionId || terminalEntry.sessionId);
 
   if (!sessionId) {
     vscode.window.showInformationMessage('No session ID available');
@@ -4171,8 +4174,10 @@ function formatAgentStatusBarText(
   if (label) {
     text += ` - ${label}`;
   }
-  if (sessionId) {
-    text += ` (${sessionId})`;
+  // Always show the CLI-canonical id (UUID), never a Codex rollout-… stem.
+  const displayId = canonicalSessionId(sessionId);
+  if (displayId) {
+    text += ` (${displayId})`;
   } else if (showTrackingHint) {
     text += ' (tracking session)';
   }
@@ -4253,53 +4258,126 @@ async function tryHydrateSessionIdentity(
 
 const liveSessionInFlight = new Set<string>();
 
+/**
+ * Stamp a resolved session id on the tab, refresh identity + status bar.
+ * Id is always stored in canonical form (UUID, not a rollout-… stem).
+ */
+function applyHydratedSessionId(
+  terminal: vscode.Terminal,
+  entry: terminals.EditorTerminal,
+  prefix: string,
+  rawId: string,
+): void {
+  const liveId = canonicalSessionId(rawId);
+  if (!liveId) return;
+  if (entry.sessionId !== liveId) {
+    terminals.setSessionId(terminal, liveId);
+  }
+  if (entry.identitySessionId !== liveId) {
+    void tryHydrateSessionIdentity(terminal, entry, prefix, liveId);
+  }
+  if (!agentStatusBarItem || vscode.window.activeTerminal !== terminal) return;
+  const rawLabel = entry.label;
+  const displayLabel = rawLabel ? rawLabel.replace(/<[^>]*>/g, '').trim() : null;
+  const { version, account } = displayIdentity(entry, liveId);
+  agentStatusBarItem.text = formatAgentStatusBarText(
+    getExpandedAgentName(prefix),
+    version,
+    account,
+    displayLabel,
+    liveId,
+    entry.agentType === 'codex',
+  );
+}
+
+/**
+ * Resolve the live session id for a tab without per-tab polling thrash.
+ *
+ * Order:
+ *  1. Local pid-tree / SessionStart state file — only when the agent runs on
+ *     THIS machine (no host, or --device targeting this host).
+ *  2. CLI `agents sessions --active` joined on AGENT_TERMINAL_ID — one fetch
+ *     per host, shared across all tabs on that host (TTL + in-flight coalesce,
+ *     hard timeout). Uses `--host <device>` for real offloads; never `--where`.
+ *
+ * Failures leave the id unmapped (blank bar), never invent a wrong id.
+ */
 async function tryHydrateLiveSessionId(
   terminal: vscode.Terminal,
   prefix: string
 ): Promise<void> {
   const entry = terminals.getByTerminal(terminal);
   if (!entry) return;
-  // An offloaded tab's agent runs on another machine, so `terminal.processId` is
-  // the local ssh client and NO local state file can describe it. Reading one
-  // anyway binds the tab to whatever local session last held that pid — a pid the
-  // OS has since recycled — which is how a remote tab ended up displaying an
-  // unrelated 20-day-old session's id and version. The device's own session feed
-  // is the only authority here, and the label/preview/resume paths already route
-  // through it (see EditorTerminal.host).
-  if (entry.host) return;
   const inflightKey = entry.id || `live:${terminal.name}`;
   if (liveSessionInFlight.has(inflightKey)) return;
   liveSessionInFlight.add(inflightKey);
 
   try {
-    const shellPid = await terminal.processId;
-    const liveId = await liveSessionIdForShell(shellPid, entry.createdAt);
-    if (!liveId) return;
-
-    if (entry.sessionId !== liveId) {
-      terminals.setSessionId(terminal, liveId);
+    // Already have a clean id — still fix a dirty rollout stem if present.
+    if (entry.sessionId && !needsSessionIdHydrate(entry.sessionId)) {
+      const cleaned = canonicalSessionId(entry.sessionId);
+      if (cleaned && cleaned !== entry.sessionId) {
+        applyHydratedSessionId(terminal, entry, prefix, cleaned);
+      }
+      return;
     }
 
-    // Now that the real (live) session id is known, resolve its actual
-    // version/account from the session feed. Drive it off the LIVE id, not the
-    // stale entry.sessionId, and re-fetch whenever the cached identity belongs to
-    // a different session (rerun / /clear in the same terminal).
-    if (entry.identitySessionId !== liveId) {
-      void tryHydrateSessionIdentity(terminal, entry, prefix, liveId);
+    const mapKey = activeMapCacheKey(entry.host);
+    const agentIsLocal = isLocalActiveMapKey(mapKey);
+
+    // (1) Local state-file path — only when the agent process is on this box.
+    // A true --device offload's terminal.processId is the local ssh client;
+    // reading state files for that pid would bind a stranger's recycled session.
+    if (agentIsLocal) {
+      const shellPid = await terminal.processId;
+      const liveId = await liveSessionIdForShell(shellPid, entry.createdAt);
+      if (liveId) {
+        applyHydratedSessionId(terminal, entry, prefix, liveId);
+        return;
+      }
     }
 
-    if (!agentStatusBarItem || vscode.window.activeTerminal !== terminal) return;
-    const rawLabel = entry.label;
-    const displayLabel = rawLabel ? rawLabel.replace(/<[^>]*>/g, '').trim() : null;
-    const { version, account } = displayIdentity(entry, liveId);
-    agentStatusBarItem.text = formatAgentStatusBarText(
-      getExpandedAgentName(prefix),
-      version,
-      account,
-      displayLabel,
-      liveId,
-      entry.agentType === 'codex',
-    );
+    // (2) Batched CLI active map joined on this tab's AGENT_TERMINAL_ID.
+    // One subprocess per host services every tab on that host (15 remote tabs
+    // on yosemite-s1 → one `agents sessions --active --json --host yosemite-s1`).
+    const joined = await resolveSessionIdForTerminal(entry.id, entry.host);
+    if (joined) {
+      applyHydratedSessionId(terminal, entry, prefix, joined);
+      // Best-effort: stamp sibling tabs that share this host from the same map
+      // so focusing them does not need another network round-trip inside the TTL.
+      try {
+        const map = await fetchTerminalIdSessionMap(entry.host);
+        for (const other of terminals.getAllTerminals()) {
+          if (other.terminal === terminal) continue;
+          if ((other.host ?? '') !== (entry.host ?? '')) continue;
+          if (!needsSessionIdHydrate(other.sessionId)) continue;
+          const sid = map.get(other.id);
+          if (sid) terminals.setSessionId(other.terminal, sid);
+        }
+      } catch {
+        /* sibling stamp is best-effort */
+      }
+      return;
+    }
+
+    // Still missing: show tracking hint for Codex-style agents if any.
+    if (
+      agentStatusBarItem &&
+      vscode.window.activeTerminal === terminal &&
+      needsSessionIdHydrate(entry.sessionId)
+    ) {
+      const rawLabel = entry.label;
+      const displayLabel = rawLabel ? rawLabel.replace(/<[^>]*>/g, '').trim() : null;
+      const { version, account } = displayIdentity(entry, entry.sessionId);
+      agentStatusBarItem.text = formatAgentStatusBarText(
+        getExpandedAgentName(prefix),
+        version,
+        account,
+        displayLabel,
+        entry.sessionId,
+        entry.agentType === 'codex' || entry.agentType === 'grok',
+      );
+    }
   } finally {
     liveSessionInFlight.delete(inflightKey);
   }

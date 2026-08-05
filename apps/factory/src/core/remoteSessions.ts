@@ -150,6 +150,12 @@ export interface RemoteTodoItem {
 export interface RemoteSession {
   host: string;
   sessionId: string;
+  /**
+   * `AGENT_TERMINAL_ID` from the CLI active payload when present — how a Factory
+   * tab re-identifies its own session on a remote device without inventing ids.
+   * '' when the launch did not inherit a terminal id.
+   */
+  terminalId?: string;
   agentType: string;
   cwd: string;
   project: string;
@@ -362,6 +368,11 @@ export interface RawActiveSession {
    *  `sessions --active --json` — the load-bearing signal for which physical
    *  machine a session runs on. Absent for cloud rows (attributed to the querier). */
   machine?: string;
+  /**
+   * Factory / editor tab id (`AGENT_TERMINAL_ID`) when the launch inherited it.
+   * Join key for "which session is MY tab running?" across `--host`/`--device`.
+   */
+  terminalId?: string;
   /** How the CLI says a reply reaches this session. `reply` is null for raw TTYs
    *  (e.g. bare Ghostty) with no programmatic input channel; a tmux-backed session
    *  carries the socket + pane to drive via `tmux send-keys` (over ssh when remote).
@@ -527,11 +538,12 @@ export function projectFromCwd(cwd: string): string {
   return resolveProject(cwd);
 }
 
-/** Pull the session UUID out of a session-file path (basename minus extension). */
+/** Pull the session UUID out of a session-file path (Codex rollout stem → UUID). */
 function sessionIdFromFile(sessionFile: string | undefined): string {
   if (!sessionFile) return '';
-  const base = sessionFile.split('/').pop() || '';
-  return base.replace(/\.[^.]+$/, '');
+  const base = (sessionFile.split('/').pop() || '').replace(/\.[^.]+$/, '');
+  const m = base.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  return m?.[0] || base;
 }
 
 /**
@@ -546,12 +558,19 @@ export function normalizeActiveSession(
 ): RemoteSession {
   const status = raw.status;
   const phase = mapStatusToPhase(status);
-  const sessionId =
+  let sessionId =
     raw.sessionId ||
     sessionIdFromFile(raw.sessionFile) ||
     raw.agentId ||
     raw.cloudTaskId ||
     '';
+  // Prefer UUID when the payload still carries a Codex rollout stem.
+  if (/^rollout-/i.test(sessionId)) {
+    const uuid = sessionId.match(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+    );
+    if (uuid) sessionId = uuid[0];
+  }
   const cwd = raw.cwd || '';
   const startedAtMs = typeof raw.startedAtMs === 'number' ? raw.startedAtMs : 0;
   // Ticket can arrive as a structured object ({ id }) OR a bare string; read the id
@@ -565,10 +584,12 @@ export function normalizeActiveSession(
   const preview = asStr(raw.preview);
   const worktreeSlug = asStr(raw.worktree?.slug) || worktreeSlugOf(cwd);
   const todos = normalizeTodos(raw.todos);
+  const terminalId = asStr(raw.terminalId);
 
   return {
     host,
     sessionId,
+    terminalId,
     agentType: (raw.kind || '').toLowerCase(),
     cwd,
     project: resolveProject(cwd, projectRules),

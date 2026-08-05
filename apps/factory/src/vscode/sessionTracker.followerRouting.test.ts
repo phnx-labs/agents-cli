@@ -124,7 +124,8 @@ describe('sessionTracker follower routing', () => {
       }),
     );
     await waitMs(50);
-    expect(events).toContain(`rollout-${session1}`);
+    // sessionIdFromFile extracts the UUID from the rollout path (not the full stem).
+    expect(events).toContain(session1);
 
     // Keep it warm via broadcast warmth — a new unrelated session must NOT steal
     // it (still active, not dormant).
@@ -140,6 +141,6 @@ describe('sessionTracker follower routing', () => {
     );
     await waitMs(50);
 
-    expect(events).not.toContain(`rollout-${session2}`);
+    expect(events).not.toContain(session2);
   });
 });
