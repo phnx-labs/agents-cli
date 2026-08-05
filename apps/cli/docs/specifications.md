@@ -521,6 +521,21 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   tool-search envelopes
   (`commands/sessions.ts:1432-1463,1551-1559,1824-1879,1937-1984,3929-3970,4006-4013`;
   `lib/session/remote-list.ts:98-115,337-541`).
+- **SES-IF-4b (MUST).** `sessions stats --json` MUST emit its own versioned
+  `sessions-stats` envelope (`{ schemaVersion, kind: 'sessions-stats', filters,
+  signal, coverage, totals, order, ranked[], zeroInvoked[] }`), never the
+  `SessionMeta[]` list or `{ session, events }` detail shape. `ranked` is the
+  resource rollup ordered by invocation volume (`--bottom` reverses, `--top <n>`
+  caps); `zeroInvoked` is the installed-but-never-invoked set. The rollup MUST
+  count each resource identity (kind + name) once — merging source layers — and
+  MUST record only EXPLICIT invocations (slash commands + `Skill` tool calls), so
+  an auto-triggered skill reads as 0; the envelope's `signal` field states this.
+  `sessions backfill resources --json` MUST emit the versioned
+  `resources-backfill` envelope and populate `session_resource_usage` for
+  historical sessions gated by `resource_scan_ledger`, never silently re-scanning
+  a transcript already current at `RESOURCE_INDEX_VERSION`
+  (`commands/sessions-stats.ts`; `commands/sessions-backfill.ts`;
+  `lib/session/db.ts` `queryResourceUsageStats`/`backfillResourceUsage`).
 
 #### 4.3 stdout / stderr / exit discipline
 

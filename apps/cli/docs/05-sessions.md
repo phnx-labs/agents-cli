@@ -1073,6 +1073,55 @@ same provenance fields `ResolvedResource`/`DiscoveredPlugin` carry —
 [Query Flags](#query-flags)); `--skill` matches a bare name or a namespaced
 plugin skill's short name.
 
+### Reading it back — `agents sessions stats`
+
+`agents sessions stats` rolls this table up into a resource-usage insight:
+"which skills/commands do I actually invoke, and which installed ones are dead
+weight?" It's a cheap SQLite `GROUP BY` (`queryResourceUsageStats` in
+[`src/lib/session/db.ts`](../src/lib/session/db.ts)) — no transcript re-scan —
+joined to `sessions` for attribution, so the usual filters compose:
+
+- `--agent` / `--project` / `--since` / `--machine` narrow **which sessions**
+  count (routed through `buildSessionWhere`, the same clause `agents sessions`
+  uses).
+- `--kind skill|command` / `--plugin <p>` narrow **which resources** are shown
+  (predicates on the resource rows — distinct from the top-level
+  `agents sessions --plugin`, which filters *sessions*).
+
+It's a **both-ends** view by default: the most-invoked resources (`--top <n>`
+caps the list, `--bottom` ranks least-invoked first) **and** the
+installed-but-never-invoked ones, computed by subtracting the invoked set from
+the installed set (`listResources` + `discoverPlugins`, the same union
+`resolveResourceProvenance` reconciles against). `--zero` shows only the dead
+weight; `--json` emits a versioned `sessions-stats` envelope (SES-IF-4b).
+
+Two caveats are surfaced in `--help` and the output, because a `0` is easy to
+misread:
+
+- **Explicit invocations only.** The signal is slash commands + `Skill` tool
+  calls. An **auto-triggered** skill (loaded by description match, never
+  explicitly invoked) emits no event and reads as **0** — that means "never
+  explicitly invoked", not "never loaded".
+- **Claude transcripts only** expose this signal today; other harnesses
+  contribute nothing to the counts.
+
+### Backfilling history — `agents sessions backfill resources`
+
+The normal incremental scan writes resource usage for every session it
+(re)parses, but a session indexed **before** this signal shipped keeps a fresh
+`scan_ledger` row and is never re-derived — so its tallies were never recorded
+(a large historical gap: only the recently-scanned slice of the index carries
+the signal). `agents sessions backfill resources` is the one-shot catch-up: it
+walks the local index, re-parses each transcript **from byte 0** (so
+claude/codex re-derive their tallies from scratch, not from the resumable
+accumulator), writes the usage, and stamps a dedicated `resource_scan_ledger`
+(mtime + size + `RESOURCE_INDEX_VERSION`) so reruns skip completed transcripts —
+the same independent-ledger shape `agents sessions backfill tools` uses. It is
+**local-only** (the signal is derived per machine from its own transcripts); run
+it on each box, or over `agents ssh <host> agents sessions backfill resources`.
+`agents sessions stats` prints a coverage line and, when coverage is low, a hint
+to run this backfill.
+
 **Known gap:** claude/codex sessions found through the routine local batch
 scan (`upsertSessionsBatch`) get their tallies from an incremental
 accumulator threaded through the resumable-parse continuation
@@ -1092,8 +1141,9 @@ Later migrations added, among others, `cost_usd` / `duration_ms` (pricing), the
 work-signal columns `pr_url` / `pr_number` / `worktree_slug` / `ticket_id`, the
 `plan` markdown, `output_tokens`, `is_team_origin`, `spawned_team`, the
 `used_browser`/`used_computer` columns (NULL for a legacy row this scanner
-hasn't computed the field for yet, never a `false` default), and the
-`session_resource_usage` table. A migration that changes how
+hasn't computed the field for yet, never a `false` default), the
+`session_resource_usage` table, and (v31) the `resource_scan_ledger` bookkeeping
+table for `agents sessions backfill resources`. A migration that changes how
 a column is derived forces a full rescan so every existing session is re-derived
 (as the pricing columns once did).
 

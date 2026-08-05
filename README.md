@@ -270,6 +270,11 @@ agents sessions --include tools --query 'program:git' --count --fleet --json
 
 # Populate historical tool rows once on each device
 agents sessions backfill tools --fleet
+
+# Which skills/commands you actually invoke -- and which installed ones are dead weight
+agents sessions stats
+agents sessions stats --zero            # only the never-invoked (dead weight)
+agents sessions backfill resources      # fold historical sessions into the usage index
 ```
 
 Interactive picker when you're in a terminal. Structured output (`--json`, `--markdown`, filtered by role or turn count) when piped.
