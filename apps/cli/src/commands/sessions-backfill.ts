@@ -2,11 +2,12 @@ import chalk from 'chalk';
 import type { Command } from 'commander';
 import { setHelpSections } from '../lib/help.js';
 import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../lib/remote-agents-json.js';
-import { discoverSessions } from '../lib/session/discover.js';
+import { discoverSessions, parseTimeFilter } from '../lib/session/discover.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { SESSION_AGENTS, type SessionAgentId } from '../lib/session/types.js';
 import { ensureToolIndex, readToolIndexCoverage, type ToolIndexCoverage } from '../lib/session/tool-index.js';
 import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
+import { backfillResourceUsage, type QueryOptions } from '../lib/session/db.js';
 
 const BACKFILL_REMOTE_TIMEOUT_MS = 10 * 60_000;
 
@@ -173,6 +174,70 @@ export async function runToolsBackfill(options: ToolBackfillOptions): Promise<To
   };
 }
 
+interface ResourceBackfillOptions {
+  agent?: string;
+  project?: string;
+  since?: string;
+  until?: string;
+  teams?: boolean;
+  json?: boolean;
+}
+
+export interface ResourceBackfillEnvelope {
+  schemaVersion: 1;
+  kind: 'resources-backfill';
+  generatedAt: string;
+  machine: string;
+  /** Sessions considered (matched the filter, had a real transcript). */
+  scanned: number;
+  /** Sessions (re)parsed and written this run. */
+  updated: number;
+  /** Sessions already current at this extractor version, skipped. */
+  skipped: number;
+  /** Sessions whose transcript could not be stat'd or parsed. */
+  failed: number;
+  /** Total session_resource_usage rows written across updated sessions. */
+  resourceRows: number;
+}
+
+/**
+ * Populate session_resource_usage for historical sessions on THIS machine.
+ * Local-only by design: the resource signal is derived from each machine's own
+ * transcripts, and the index is machine-local, so there is no cross-machine
+ * merge to do — run it on each box (or over `agents ssh`). Ensures the session
+ * index is complete first (discoverSessions), then re-derives usage gated by the
+ * resource_scan_ledger so reruns skip completed transcripts.
+ */
+export async function runResourceBackfill(options: ResourceBackfillOptions): Promise<ResourceBackfillEnvelope> {
+  const { agent, version } = parseAgent(options.agent);
+  // Make sure every matching transcript is indexed before we re-derive usage.
+  await discoverSessions({
+    agent,
+    version,
+    project: options.project,
+    since: options.since,
+    until: options.until,
+    all: true,
+    unbounded: true,
+    skipExistenceCheck: true,
+    excludeTeamOrigin: !options.teams,
+  });
+  const filter: QueryOptions = { excludeTeamOrigin: !options.teams };
+  if (agent) filter.agent = agent;
+  if (version) filter.version = version;
+  if (options.project) filter.project = options.project;
+  if (options.since) filter.sinceMs = parseTimeFilter(options.since);
+  if (options.until) filter.untilMs = parseTimeFilter(options.until);
+  const result = backfillResourceUsage(filter);
+  return {
+    schemaVersion: 1,
+    kind: 'resources-backfill',
+    generatedAt: new Date().toISOString(),
+    machine: machineId(),
+    ...result,
+  };
+}
+
 export function registerSessionsBackfillCommand(sessionsCmd: Command): void {
   const backfill = sessionsCmd.command('backfill').description('Populate derived session data explicitly.');
   const tools = backfill.command('tools').description('Parse historical tool calls once into the local SQLite index.');
@@ -209,6 +274,46 @@ export function registerSessionsBackfillCommand(sessionsCmd: Command): void {
         }
         if (!envelope.complete) {
           console.log(chalk.yellow('Backfill is partial; rerun the command after resolving skipped or limited transcripts.'));
+        }
+      }
+    } catch (error) {
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exitCode = 1;
+    }
+  });
+
+  const resources = backfill.command('resources').description('Derive historical skill/slash-command usage once into the local SQLite index.');
+  setHelpSections(resources, {
+    examples: `
+      # Fold every historical session on this machine into the usage index
+      agents sessions backfill resources
+
+      # Narrow the historical work
+      agents sessions backfill resources --agent claude --since 30d
+
+      # Machine-readable summary
+      agents sessions backfill resources --json
+    `,
+    notes: `
+      - Populates session_resource_usage for sessions indexed before the usage signal shipped. New/changed sessions are recorded on their normal scan; this is the one-shot catch-up read by \`agents sessions stats\`.
+      - Local-only: the signal is derived per machine from its own transcripts. Run it on each box (or over \`agents ssh <host> agents sessions backfill resources\`).
+      - Reruns skip transcripts already current (resource_scan_ledger); bump the extractor version to force a full re-derive.
+      - Only slash commands and \`Skill\` tool calls are recorded — auto-triggered skills emit no signal.
+    `,
+  });
+  resources.action(async (_options: unknown, command: Command) => {
+    const options = command.optsWithGlobals() as ResourceBackfillOptions;
+    try {
+      const envelope = await runResourceBackfill(options);
+      if (options.json) process.stdout.write(JSON.stringify(envelope, null, 2) + '\n');
+      else {
+        console.log(
+          `${envelope.machine}: derived usage for ${envelope.updated.toLocaleString()} session${envelope.updated === 1 ? '' : 's'} ` +
+            `(${envelope.resourceRows.toLocaleString()} resource row${envelope.resourceRows === 1 ? '' : 's'}); ` +
+            `${envelope.skipped.toLocaleString()} already current, ${envelope.scanned.toLocaleString()} scanned.`,
+        );
+        if (envelope.failed > 0) {
+          console.log(chalk.yellow(`${envelope.failed.toLocaleString()} transcript${envelope.failed === 1 ? '' : 's'} could not be parsed; rerun to retry.`));
         }
       }
     } catch (error) {
