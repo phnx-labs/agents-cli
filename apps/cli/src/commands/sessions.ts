@@ -154,6 +154,9 @@ interface SessionsOptions extends SessionFilterOptions {
   local?: boolean;
   /** --device <target...> — alias for --host; resolves against the device registry. */
   device?: string[];
+  /** --devices <target...> — plural alias for --device; a bare `all`/`fleet` value
+   * means "search the whole fleet" (already the default), so it never errors. */
+  devices?: string[];
   /** Query every registered online compute device and merge tool evidence. */
   fleet?: boolean;
   /** Aggregate static program sites instead of returning matching call evidence. */
@@ -1729,8 +1732,13 @@ async function sessionsAction(
   // shorthands fold into --agent, and --device is an alias for --host (both
   // resolve against the same device registry).
   applyAgentShorthands(options);
-  if (options.device && options.device.length > 0) {
-    options.host = [...(options.host ?? []), ...options.device];
+  // --device / --devices both alias --host. A bare `all` / `fleet` sentinel means
+  // "search every peer" — which is already the default — so it resolves to no
+  // explicit host set rather than erroring on a device literally named "all".
+  const deviceTargets = [...(options.device ?? []), ...(options.devices ?? [])]
+    .filter(t => t.toLowerCase() !== 'all' && t.toLowerCase() !== 'fleet');
+  if (deviceTargets.length > 0) {
+    options.host = [...(options.host ?? []), ...deviceTargets];
   }
 
   // --print-cmd: echo the canonical `ag sessions …` for the given flags and exit.
@@ -3561,13 +3569,32 @@ function ambiguityHint(byId: boolean, completeId: boolean): string {
 }
 
 /** Explain a complete-id miss, which no local rephrasing can fix. Echoes the
- * normalized id so a pasted, padded argument doesn't produce an unrunnable hint. */
+ * normalized id so a pasted, padded argument doesn't produce an unrunnable hint.
+ * Used only where NO fleet sweep ran (a `--local` lookup, an `--artifacts`
+ * listing, or a peer answering a parent's sweep) — the fleet-swept miss uses
+ * {@link fleetNotFoundMessage}. Never tells the user to pass `--device`: fleet
+ * search is already the default, so a device flag can't find what the id missed. */
 function notFoundByIdMessage(query: string): string[] {
+  return [chalk.red(`No session with id ${query.trim()} on this machine.`)];
+}
+
+/** Honest result of a fleet sweep that found nothing: it says what the sweep
+ * actually did — how many peers answered, which were unreachable — instead of
+ * dead-ending on "search with --device <host>" after the search already ran. */
+export function fleetNotFoundMessage(query: string, deviceCount: number, unreachable: string[]): string[] {
   const id = query.trim();
-  return [
-    chalk.red(`No session with id ${id} on this machine.`),
-    chalk.gray(`Search the fleet with: agents sessions ${id} --device <host>`),
-  ];
+  if (deviceCount === 0) {
+    return [
+      chalk.red(`No session with id ${id} on this machine.`),
+      chalk.gray('No other reachable devices to search.'),
+    ];
+  }
+  const searched = `${deviceCount} device${deviceCount === 1 ? '' : 's'}`;
+  const lines = [chalk.red(`No session with id ${id} on this machine or ${searched} searched.`)];
+  if (unreachable.length > 0) {
+    lines.push(chalk.gray(`Unreachable (not searched): ${unreachable.join(', ')}`));
+  }
+  return lines;
 }
 
 /** Filter and rank sessions by a multi-term search query across metadata and content. */
@@ -3808,9 +3835,13 @@ async function renderOneSession(
         // local not-found message. No FTS fallback either way.
         if (shouldFanOutForId(query, scope.local)) {
           const outcome = await resolveSessionAcrossFleet(query, mode, scope.hosts);
-          if (outcome === 'rendered') return;
-          if (outcome === 'conflict') process.exit(1);
-          // 'not-found' falls through to the local message below.
+          if (outcome.kind === 'rendered') return;
+          if (outcome.kind === 'conflict') process.exit(1);
+          // The fleet sweep already ran and found nothing — report what actually
+          // happened, never "search with --device <host>" (fleet search is the
+          // default, so a device flag would only re-run the same miss).
+          fleetNotFoundMessage(query, outcome.deviceCount, outcome.unreachable).forEach(l => console.error(l));
+          process.exit(1);
         }
         notFoundByIdMessage(query).forEach(l => console.error(l));
         process.exit(1);
@@ -3905,6 +3936,32 @@ export type MetadataResolveOutcome =
 
 const FULL_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * A match unique enough to resolve on first sight and cancel the rest of the
+ * fleet sweep: a full session UUID (globally unique), or an exact,
+ * case-insensitive session-label match. A short-id PREFIX is deliberately NOT
+ * definitive — two peers can each hold a distinct session sharing that prefix,
+ * and that ambiguity is only knowable once every peer has answered.
+ */
+export function isDefinitiveMatch(session: SessionMeta, selector: string): boolean {
+  const sel = selector.trim().toLowerCase();
+  if (FULL_SESSION_ID_RE.test(selector)) return session.id.toLowerCase() === sel;
+  if (looksLikeSessionId(selector)) return false; // short-id prefix: needs the full sweep
+  const label = typeof session.label === 'string' ? session.label.trim().toLowerCase() : '';
+  return label.length > 0 && label === sel;
+}
+
+/**
+ * Whether a selector may enable early-exit on the cancellable fan-out. A full
+ * UUID always may; a keyword is treated as a potential exact label (the
+ * per-item {@link isDefinitiveMatch} only fires on an exact label, so a keyword
+ * that matches no label simply never early-exits and falls back to the full
+ * sweep). A short-id prefix may NOT — its ambiguity needs every peer's answer.
+ */
+export function selectorAllowsEarlyExit(selector: string): boolean {
+  return FULL_SESSION_ID_RE.test(selector) || !looksLikeSessionId(selector);
+}
+
 /** Resolve a fleet sweep through the same canonical full-id / prefix resolver as
  * local lookups, then group copies by logical session id. Synced mirrors of one
  * session therefore stay one candidate even when several machines report them;
@@ -3972,9 +4029,14 @@ export function metadataResolveOutcome(
   selector: string,
 ): MetadataResolveOutcome {
   const candidates = fleetCandidatesByQuery([...localMatches, ...remote.sessions], selector);
-  if (FULL_SESSION_ID_RE.test(selector) && candidates.length === 1 && candidates[0].id.toLowerCase() === selector.toLowerCase()) {
-    return { kind: 'resolved', session: candidates[0].hits[0].session };
-  }
+  // A definitive match (a full UUID, or an exact session label) is unique enough
+  // to resolve and auto-resume even when an unrelated peer was unreachable — the
+  // same globally-unique guarantee that already let a full UUID resolve past an
+  // offline box, now extended to exact labels (RUSH-2203). Two distinct sessions
+  // sharing an exact label is a genuine conflict → surface it, don't guess.
+  const definitive = candidates.filter(c => isDefinitiveMatch(c.hits[0].session, selector));
+  if (definitive.length === 1) return { kind: 'resolved', session: definitive[0].hits[0].session };
+  if (definitive.length > 1) return { kind: 'ambiguous', candidates: definitive };
   if (remote.unreachable.length > 0) return { kind: 'partial', failedPeers: remote.unreachable };
   if (candidates.length === 0) return { kind: 'not-found' };
   if (candidates.length > 1) return { kind: 'ambiguous', candidates };
@@ -3994,15 +4056,28 @@ export async function resolveSessionMetadataValue(
   const localMatches = resolveIndexedMetadataRows(indexed, selector)
     .map(session => ({ ...session, machine: session.machine || localMachine }));
 
-  if (FULL_SESSION_ID_RE.test(selector)) {
-    const localOutcome = metadataResolveOutcome(localMatches, { sessions: [], unreachable: [] }, selector);
-    if (localOutcome.kind === 'resolved') return localOutcome;
-  }
+  // A definitive local hit (full UUID, or exact label) resolves with ZERO SSH:
+  // the session lives on this machine, so no peer is dialed. This is the "local
+  // costs nothing" path — local index lookup is synchronous and completes before
+  // any fan-out would spawn, so a local hit never waits on a peer.
+  const localDefinitive = localMatches.find(session => isDefinitiveMatch(session, selector));
+  if (localDefinitive) return { kind: 'resolved', session: localDefinitive };
+
   if (scope.local === true) return metadataResolveOutcome(localMatches, { sessions: [], unreachable: [] }, selector);
 
   try {
     const forwarded = metadataResolveForwardedArgs(selector, scope);
-    const remote = await deps.gatherRemoteList(forwarded, scope.hosts);
+    // Definitive lookups (full UUID / exact label) opt into early-exit: the
+    // first peer holding the match resolves the sweep and SIGTERMs the rest, so
+    // a fast peer's hit is not bounded by the slowest/unreachable peer. Short-id
+    // prefixes stay all-settle (ambiguity is only known once every peer answers).
+    const remote = await deps.gatherRemoteList(
+      forwarded,
+      scope.hosts,
+      selectorAllowsEarlyExit(selector)
+        ? { isDefinitive: (session) => isDefinitiveMatch(session, selector) }
+        : undefined,
+    );
     return metadataResolveOutcome(localMatches, remote, selector);
   } catch (error: any) {
     return metadataResolveOutcome(localMatches, { sessions: [], unreachable: [error?.message ?? 'fleet fan-out'] }, selector);
@@ -4064,21 +4139,33 @@ async function resolveSessionMetadata(
  *     (its transcript and agent binary live there — a local `--host` hop would
  *     re-discover locally and dead-end), returning `'rendered'`.
  *   - more than one logical session → print every full-id candidate with its
- *     machine labels, returning `'conflict'`.
- *   - none                 → `'not-found'`, letting the caller print the local
- *     "no session on this machine" message.
+ *     machine labels, returning `{ kind: 'conflict' }`.
+ *   - none                 → `{ kind: 'not-found', deviceCount, unreachable }`,
+ *     letting the caller print an honest sweep-aware message.
+ *
+ * A full-UUID query opts into early-exit: the first peer holding it resolves the
+ * sweep and cancels the rest, so a fast peer is not bounded by the slowest one.
+ * A short-id prefix stays all-settle — its ambiguity is only known once every
+ * peer has answered, so it must wait to surface a conflict.
  *
  * No fuzzy/content fallback: the sweep forwards the id selector and every result
  * is resolved through `resolveSessionQuery`, the same id-only resolver used locally.
  */
+export type FleetResolveResult =
+  | { kind: 'rendered' }
+  | { kind: 'conflict' }
+  | { kind: 'not-found'; deviceCount: number; unreachable: string[] };
+
 export async function resolveSessionAcrossFleet(
   query: string,
   mode: ViewMode,
   hosts?: string[],
   deps: FleetResolveDeps = { gatherRemoteList, runOnPeer },
-): Promise<'rendered' | 'conflict' | 'not-found'> {
+): Promise<FleetResolveResult> {
   const spinner = isInteractiveTerminal() ? ora('Searching the fleet...').start() : null;
-  let candidates: FleetSessionCandidate[];
+  let candidates: FleetSessionCandidate[] = [];
+  let deviceCount = 0;
+  let unreachable: string[] = [];
   try {
     // Force whole-index scope (--all): the peer runs in its SSH-login home dir,
     // whose cwd would otherwise silently narrow the lookup and hide the row.
@@ -4086,17 +4173,25 @@ export async function resolveSessionAcrossFleet(
     // itself and never re-fans-out (belt-and-suspenders with the parent's
     // AGENTS_SESSIONS_LOCAL, which remote-list also sets on the peer).
     const forwarded = ['sessions', query, '--json', '--all', '--local'];
-    const { sessions } = await deps.gatherRemoteList(forwarded, hosts);
-    candidates = fleetCandidatesByQuery(sessions, query);
+    const remote = await deps.gatherRemoteList(
+      forwarded,
+      hosts,
+      selectorAllowsEarlyExit(query)
+        ? { isDefinitive: (session) => isDefinitiveMatch(session, query) }
+        : undefined,
+    );
+    candidates = fleetCandidatesByQuery(remote.sessions, query);
+    deviceCount = remote.deviceCount;
+    unreachable = remote.unreachable;
   } catch {
     // A fan-out failure is not an exact resolution — treat as not-found so the
-    // caller prints the honest local message rather than a half-answer.
+    // caller prints the honest message rather than a half-answer.
     candidates = [];
   } finally {
     spinner?.stop();
   }
 
-  if (candidates.length === 0) return 'not-found';
+  if (candidates.length === 0) return { kind: 'not-found', deviceCount, unreachable };
 
   if (candidates.length > 1) {
     console.error(chalk.red(`Multiple sessions match "${query}" across the fleet:`));
@@ -4107,7 +4202,7 @@ export async function resolveSessionAcrossFleet(
       console.error(chalk.cyan(`  ${s.shortId}  ${s.id}`) + chalk.gray(`  ${machines}  ${s.agent}${s.version ? ` ${s.version}` : ''}  ${label}`));
     }
     console.error(chalk.gray('Pass a longer ID to narrow it down.'));
-    return 'conflict';
+    return { kind: 'conflict' };
   }
 
   const candidate = candidates[0];
@@ -4123,9 +4218,9 @@ export async function resolveSessionAcrossFleet(
   if (result === 'no-target') {
     console.error(chalk.red(`Session ${candidate.id} is on ${machine}, but it is not a reachable registered device.`));
     console.error(chalk.gray('Register it with `agents devices` or run the command on that machine.'));
-    return 'conflict'; // a definitive answer (found, un-renderable) — do NOT fall to the local not-found line
+    return { kind: 'conflict' }; // a definitive answer (found, un-renderable) — do NOT fall to the local not-found line
   }
-  return 'rendered';
+  return { kind: 'rendered' };
 }
 
 /** Register the `agents sessions` command with all its options and help text. */
@@ -4186,7 +4281,8 @@ export function registerSessionsCommands(program: Command): void {
     .option('--no-live', 'Do not enrich the listing with live status/preview for running sessions')
     .option('--cloud', 'Source sessions from Rush Cloud (captured runs) instead of local disk')
     .option('-H, --host <target...>', 'Run this query on remote machine(s) over SSH (host alias or user@host; repeatable)')
-    .option('--device <target...>', 'Alias for --host (device alias from `agents devices`; repeatable)')
+    .option('--device <target...>', 'Alias for --host (device alias from `agents devices`; repeatable). `--device all` searches the whole fleet (the default).')
+    .addOption(new Option('--devices <target...>', 'Plural alias for --device (accepts `all`/`fleet`).').hideHelp())
     .option('--fleet', 'With --include tools: query every registered online compute device and merge compact matches')
     .option('--count', 'With one program:<name> tool query: count static occurrences, containing calls, and sessions')
     .option('--browser', 'List browser-profile captures (screenshots, PDFs, recordings, downloads) instead of agent transcripts — alias of `agents browser sessions`')

@@ -27,10 +27,15 @@ interchangeable — pick the verb for the intent:
 
 `focus` is the default “take me there” for a live process. `attach` / `detach` are
 the presence pair (foreground ↔ background). `resume` is the multi-open / history
-path. Top-level `agents resume <id>` is the strict single-session shortcut: a full
-ID checks the local SQLite index first, fans out to registered devices only on a
-local miss, routes to the owning device, and invokes the version that created the
-session with its recorded cwd and launch mode. `agents run auto --resume <id>` is
+path. Top-level `agents resume <id-or-label>` is the strict single-session shortcut:
+a full ID (or an exact session **label**) checks the local SQLite index first and
+resolves with **zero** SSH on a local hit; only on a local miss does it fan out to
+registered devices, and there the fan-out is cancellable and early-exits — the first
+peer holding the definitive match resolves the lookup and SIGTERMs the rest, so a fast
+peer's hit is not bounded by the slowest/unreachable peer's timeout. It then routes to
+the owning device and invokes the version that created the session with its recorded
+cwd and launch mode. An exact-label match auto-resumes the one session; an ambiguous
+short-id prefix still surfaces every candidate. `agents run auto --resume <id>` is
 the adaptive form: it prefers native resume when the original harness/version is
 healthy and otherwise lets the normal router select an available harness/account,
 then hands the transcript over through `/continue`. Detail in **Background &

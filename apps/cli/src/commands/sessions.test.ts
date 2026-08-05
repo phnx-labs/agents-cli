@@ -14,6 +14,9 @@ import {
   fleetCandidatesByQuery,
   metadataResolveOutcome,
   metadataResolveForwardedArgs,
+  isDefinitiveMatch,
+  selectorAllowsEarlyExit,
+  fleetNotFoundMessage,
   mergeToolSearchEnvelopes,
   mergeToolProgramCountEnvelopes,
   toolOriginSessions,
@@ -668,6 +671,46 @@ describe('resolveSessionQuery indexed metadata coverage', () => {
         mention: { ids: [], byId: true, completeId: false },
         prefix: { ids: ['cccc3333-1111-2222-3333-444455556666'], byId: true, completeId: false },
         noFallback: { ids: [], byId: true, completeId: false },
+      });
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('RUSH-2203 local definitive hit skips SSH', () => {
+  it('resolves a full id and an exact label from the local DB without dialing any peer', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-local-hit-'));
+    try {
+      const runner = [
+        "import fs from 'node:fs';",
+        "import path from 'node:path';",
+        "const { upsertSession, closeDB } = await import('./src/lib/session/db.ts');",
+        "const { resolveSessionMetadataValue } = await import('./src/commands/sessions.ts');",
+        "const home = process.env.HOME;",
+        "const id = '019fd0c8-b3e9-77a2-a1a4-444698c4d897';",
+        "const filePath = path.join(home, id + '.jsonl'); fs.writeFileSync(filePath, '');",
+        "upsertSession({ id, shortId: id.slice(0, 8), agent: 'claude', timestamp: new Date().toISOString(), filePath, label: 'ship the resume fix' }, '');",
+        // Any dial throws: a definitive local hit must return before the fan-out.
+        "let dialed = 0;",
+        "const deps = { gatherRemoteList: async () => { dialed++; throw new Error('SSH DIALED'); } };",
+        "const byId = await resolveSessionMetadataValue(id, {}, deps);",
+        "const byLabel = await resolveSessionMetadataValue('ship the resume fix', {}, deps);",
+        "closeDB();",
+        "process.stdout.write(JSON.stringify({ byIdKind: byId.kind, byIdId: byId.session && byId.session.id, byLabelKind: byLabel.kind, byLabelId: byLabel.session && byLabel.session.id, dialed }));",
+      ].join(' ');
+      const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', runner], {
+        cwd: repoRoot,
+        env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome },
+        encoding: 'utf8',
+      });
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        byIdKind: 'resolved',
+        byIdId: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
+        byLabelKind: 'resolved',
+        byLabelId: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
+        dialed: 0, // zero SSH: the local index answered both lookups
       });
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
@@ -1857,5 +1900,79 @@ describe('buildSessionDescription — team target + teammate', () => {
       teamName: 't', assignedTask: 'wire up the auth flow',
     } as any);
     expect(desc).toContain('wire up the auth flow');
+  });
+});
+
+describe('RUSH-2203 definitive-match fleet resolve', () => {
+  const FULL = '019fd0c8-b3e9-77a2-a1a4-444698c4d897';
+  const base: SessionMeta = {
+    id: FULL,
+    shortId: '019fd0c8',
+    agent: 'claude',
+    version: '2.1.0',
+    mode: 'edit',
+    machine: 'yosemite-m0',
+    timestamp: '2026-08-05T09:29:43.616Z',
+    filePath: '/sessions/claude.jsonl',
+  };
+
+  describe('isDefinitiveMatch', () => {
+    it('treats a full UUID exact match as definitive', () => {
+      expect(isDefinitiveMatch(base, FULL)).toBe(true);
+      expect(isDefinitiveMatch(base, FULL.toUpperCase())).toBe(true);
+      expect(isDefinitiveMatch({ ...base, id: 'other' }, FULL)).toBe(false);
+    });
+
+    it('treats an exact label match as definitive (case-insensitive)', () => {
+      const labelled = { ...base, label: 'Fix the flaky ssh test' };
+      expect(isDefinitiveMatch(labelled, 'fix the flaky ssh test')).toBe(true);
+      expect(isDefinitiveMatch(labelled, 'fix the flaky')).toBe(false); // not exact
+    });
+
+    it('is NOT definitive for a short-id prefix — ambiguity needs every peer', () => {
+      expect(isDefinitiveMatch(base, '019fd0c8')).toBe(false);
+    });
+  });
+
+  describe('selectorAllowsEarlyExit', () => {
+    it('enables early-exit for a full UUID and for a keyword (potential exact label)', () => {
+      expect(selectorAllowsEarlyExit(FULL)).toBe(true);
+      expect(selectorAllowsEarlyExit('fix the flaky ssh test')).toBe(true);
+    });
+    it('disables early-exit for a short-id prefix so the sweep can surface a conflict', () => {
+      expect(selectorAllowsEarlyExit('019fd0c8')).toBe(false);
+      expect(selectorAllowsEarlyExit('abcd12')).toBe(false);
+    });
+  });
+
+  describe('metadataResolveOutcome with labels', () => {
+    it('auto-resumes a unique exact-label match even when a peer is unreachable', () => {
+      const labelled = { ...base, label: 'ship the resume fix' };
+      expect(
+        metadataResolveOutcome([], { sessions: [labelled], unreachable: ['offline-box'] }, 'ship the resume fix'),
+      ).toEqual({ kind: 'resolved', session: labelled });
+    });
+
+    it('surfaces a conflict when two distinct sessions share the exact label', () => {
+      const one = { ...base, id: `${'1'.repeat(8)}-b3e9-77a2-a1a4-444698c4d897`, label: 'dup label' };
+      const two = { ...base, id: `${'2'.repeat(8)}-b3e9-77a2-a1a4-444698c4d897`, machine: 'yosemite-m1', label: 'dup label' };
+      const outcome = metadataResolveOutcome([], { sessions: [one, two], unreachable: [] }, 'dup label');
+      expect(outcome.kind).toBe('ambiguous');
+    });
+  });
+
+  describe('fleetNotFoundMessage', () => {
+    it('reports the sweep result and never tells the user to pass --device', () => {
+      const lines = fleetNotFoundMessage(FULL, 5, ['zion', 'box']).join('\n');
+      expect(lines).toContain('5 devices searched');
+      expect(lines).toContain('Unreachable (not searched): zion, box');
+      expect(lines).not.toContain('--device');
+    });
+
+    it('handles a fleet with no reachable peers', () => {
+      const lines = fleetNotFoundMessage(FULL, 0, []).join('\n');
+      expect(lines).toContain('No other reachable devices to search.');
+      expect(lines).not.toContain('--device');
+    });
   });
 });
