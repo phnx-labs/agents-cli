@@ -198,6 +198,22 @@ describe('keychain-helper has / list still probe both keychains', () => {
     expect(block).toContain('if status == errSecInteractionNotAllowed { continue }');
     expect(block).toContain('kSecReturnAttributes');
   });
+
+  it('list DP pass pins UISkip so a kSecMatchLimitAll sweep never pops a sheet (SEC-14)', () => {
+    // The bug: kSecReturnAttributes does NOT stop the DP keychain from evaluating
+    // a biometry-ACL'd value item's ACL during a kSecMatchLimitAll enumeration.
+    // Under the default UIAllow that pops a real Touch ID sheet on EVERY `list` —
+    // the storm, since `secrets list` runs constantly. UISkip returns the no-ACL
+    // metadata (all `secrets list` needs) and silently skips ACL'd items, no UI.
+    const block = caseBlock(helperSource(), 'list');
+    // The file pass keeps UIFail; the DP pass must carry UISkip (per-item skip,
+    // not the wholesale UIFail error that would drop the metadata too).
+    expect(block).toContain('kSecUseAuthenticationUI: kSecUseAuthenticationUIFail'); // file pass
+    expect(block).toContain('kSecUseAuthenticationUI: kSecUseAuthenticationUISkip'); // DP pass
+    // No query in `list` may request the prompting UI policy (the comment naming
+    // the default is fine — match the query-key form only).
+    expect(block).not.toContain('kSecUseAuthenticationUI: kSecUseAuthenticationUIAllow');
+  });
 });
 
 describe('keychain-helper orphaned-access-group recovery', () => {
@@ -294,6 +310,9 @@ describe('keychain-helper synced (iCloud) recovery verbs', () => {
     expect(block).toContain('kSecReturnAttributes: kCFBooleanTrue!');
     expect(block).not.toContain('kSecReturnData'); // attributes only — never decrypts
     expect(block).toContain('errSecInteractionNotAllowed'); // tolerates a locked keybag
+    // Same SEC-14 no-prompt guard as `list`: an attributes-only sweep still
+    // evaluates a synced item's ACL, so pin UISkip instead of the default UIAllow.
+    expect(block).toContain('kSecUseAuthenticationUI: kSecUseAuthenticationUISkip');
   });
 
   it('get-batch-synced reads via syncedBase and emits get-batch V/M records', () => {
