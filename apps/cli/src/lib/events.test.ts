@@ -469,6 +469,28 @@ describe('events', () => {
       );
     });
 
+    it('migrates the interim flat history layout shipped by v14', () => {
+      const userDir = makeTempDir();
+      const interimDir = path.join(userDir, '.history', 'events');
+      fs.mkdirSync(interimDir, { recursive: true });
+      const record = (module: string) => JSON.stringify({
+        ts: new Date().toISOString(), event: 'info', level: 'info', module,
+      }) + '\n';
+      const interimActive = path.join(interimDir, 'events.jsonl');
+      const interimArchive = path.join(interimDir, 'events.1.jsonl.gz');
+      fs.writeFileSync(interimActive, record('interim-active'));
+      fs.writeFileSync(interimArchive, gzipSync(Buffer.from(record('interim-archive'))));
+      _resetForTest(undefined, userDir);
+
+      emit('info', { module: 'new-write' });
+
+      expect(fs.existsSync(interimActive)).toBe(false);
+      expect(fs.existsSync(interimArchive)).toBe(false);
+      expect(query({}).map((entry) => entry.module)).toEqual(
+        expect.arrayContaining(['interim-active', 'interim-archive', 'new-write']),
+      );
+    });
+
     it('removes the oldest files until the total storage ceiling is met', () => {
       const logsDir = setupLogsDir();
       const active = path.join(logsDir, 'events.jsonl');

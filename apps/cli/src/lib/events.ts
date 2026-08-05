@@ -402,7 +402,7 @@ function ensureLogsDir(): void {
 }
 
 /**
- * Move the root-level event family into dated hidden-history directories.
+ * Move root-level and interim flat-history event families into dated directories.
  *
  * The common case is a whole-family rename into an empty destination. A
  * Each segment is assigned to the local calendar day of its filesystem mtime;
@@ -415,71 +415,81 @@ export function migrateLegacyEventLogs(userDir: string = userAgentsDir()): numbe
   if (_eventsPathOverride || _legacyMigrationChecked) return 0;
   _legacyMigrationChecked = true;
 
+  const destinationRoot = path.join(userDir, '.history', 'events');
   const legacyActive = path.join(userDir, 'events.jsonl');
-  let legacyArchives: Array<{ file: string; number: number }> = [];
-  try {
-    legacyArchives = fs.readdirSync(userDir)
+  const interimActive = path.join(destinationRoot, 'events.jsonl');
+  const listArchives = (dir: string): Array<{ file: string; number: number }> => {
+    try {
+      return fs.readdirSync(dir)
       .map((file) => ({ file, match: file.match(/^events\.(\d+)\.jsonl\.gz$/) }))
       .filter((entry): entry is { file: string; match: RegExpMatchArray } => entry.match !== null)
       .map((entry) => ({ file: entry.file, number: Number(entry.match[1]) }))
       .sort((a, b) => a.number - b.number);
-  } catch { /* user dir may not exist yet */ }
+    } catch {
+      return [];
+    }
+  };
+  const hasSourceFiles = fs.existsSync(legacyActive) || fs.existsSync(interimActive) ||
+    listArchives(userDir).length > 0 || listArchives(destinationRoot).length > 0;
 
-  if (!fs.existsSync(legacyActive) && legacyArchives.length === 0) return 0;
+  if (!hasSourceFiles) return 0;
 
-  const destinationRoot = path.join(userDir, '.history', 'events');
   try {
     fs.mkdirSync(destinationRoot, { recursive: true, mode: DIR_MODE });
     ensureLockTarget(legacyActive, '', DIR_MODE);
     return withFileLock(legacyActive, () => {
-      const currentLegacyArchives = fs.readdirSync(userDir)
-        .map((file) => ({ file, match: file.match(/^events\.(\d+)\.jsonl\.gz$/) }))
-        .filter((entry): entry is { file: string; match: RegExpMatchArray } => entry.match !== null)
-        .map((entry) => ({ file: entry.file, number: Number(entry.match[1]) }))
-        .sort((a, b) => a.number - b.number);
-      let moved = 0;
+      ensureLockTarget(interimActive, '', DIR_MODE);
+      return withFileLock(interimActive, () => {
+        const sourceFamilies = [
+          { dir: userDir, active: legacyActive, archives: listArchives(userDir) },
+          { dir: destinationRoot, active: interimActive, archives: listArchives(destinationRoot) },
+        ];
+        let moved = 0;
 
-      const nextArchiveNumber = (dir: string): number => {
-        const numbers = fs.readdirSync(dir)
-          .map((file) => file.match(/^events\.(\d+)\.jsonl\.gz$/))
-          .filter((match): match is RegExpMatchArray => match !== null)
-          .map((match) => Number(match[1]));
-        return (numbers.length ? Math.max(...numbers) : 0) + 1;
-      };
-      const withDestinationLock = <T>(dayDir: string, fn: () => T): T => {
-        const destinationActive = path.join(dayDir, 'events.jsonl');
-        fs.mkdirSync(dayDir, { recursive: true, mode: DIR_MODE });
-        ensureLockTarget(destinationActive, '', DIR_MODE);
-        return withFileLock(destinationActive, fn);
-      };
+        const nextArchiveNumber = (dir: string): number => {
+          const numbers = fs.readdirSync(dir)
+            .map((file) => file.match(/^events\.(\d+)\.jsonl\.gz$/))
+            .filter((match): match is RegExpMatchArray => match !== null)
+            .map((match) => Number(match[1]));
+          return (numbers.length ? Math.max(...numbers) : 0) + 1;
+        };
+        const withDestinationLock = <T>(dayDir: string, fn: () => T): T => {
+          const destinationActive = path.join(dayDir, 'events.jsonl');
+          fs.mkdirSync(dayDir, { recursive: true, mode: DIR_MODE });
+          ensureLockTarget(destinationActive, '', DIR_MODE);
+          return withFileLock(destinationActive, fn);
+        };
 
-      const activeBytes = fs.existsSync(legacyActive) ? fs.statSync(legacyActive).size : 0;
-      if (activeBytes > 0) {
-        const activeStat = fs.statSync(legacyActive);
-        const dayDir = path.join(destinationRoot, localDateKey(activeStat.mtime));
-        withDestinationLock(dayDir, () => {
-          const archivePath = path.join(dayDir, `events.${nextArchiveNumber(dayDir)}.jsonl.gz`);
-          fs.writeFileSync(archivePath, gzipSync(fs.readFileSync(legacyActive)), { mode: FILE_MODE });
-          fs.utimesSync(archivePath, activeStat.atime, activeStat.mtime);
-          fs.truncateSync(legacyActive, 0);
-        });
-        moved++;
-      }
+        for (const family of sourceFamilies) {
+          const activeBytes = fs.existsSync(family.active) ? fs.statSync(family.active).size : 0;
+          if (activeBytes > 0) {
+            const activeStat = fs.statSync(family.active);
+            const dayDir = path.join(destinationRoot, localDateKey(activeStat.mtime));
+            withDestinationLock(dayDir, () => {
+              const archivePath = path.join(dayDir, `events.${nextArchiveNumber(dayDir)}.jsonl.gz`);
+              fs.writeFileSync(archivePath, gzipSync(fs.readFileSync(family.active)), { mode: FILE_MODE });
+              fs.utimesSync(archivePath, activeStat.atime, activeStat.mtime);
+              fs.truncateSync(family.active, 0);
+            });
+            moved++;
+          }
 
-      for (const archive of currentLegacyArchives) {
-        const source = path.join(userDir, archive.file);
-        const dayDir = path.join(destinationRoot, localDateKey(fs.statSync(source).mtime));
-        withDestinationLock(dayDir, () => {
-          const destination = path.join(dayDir, `events.${nextArchiveNumber(dayDir)}.jsonl.gz`);
-          fs.renameSync(source, destination);
-        });
-        moved++;
-      }
+          for (const archive of family.archives) {
+            const source = path.join(family.dir, archive.file);
+            const dayDir = path.join(destinationRoot, localDateKey(fs.statSync(source).mtime));
+            withDestinationLock(dayDir, () => {
+              const destination = path.join(dayDir, `events.${nextArchiveNumber(dayDir)}.jsonl.gz`);
+              fs.renameSync(source, destination);
+            });
+            moved++;
+          }
 
-      try {
-        if (fs.existsSync(legacyActive) && fs.statSync(legacyActive).size === 0) fs.unlinkSync(legacyActive);
-      } catch { /* an older process may have reopened it */ }
-      return moved;
+          try {
+            if (fs.existsSync(family.active) && fs.statSync(family.active).size === 0) fs.unlinkSync(family.active);
+          } catch { /* an older process may have reopened it */ }
+        }
+        return moved;
+      });
     });
   } catch {
     // Audit logging must remain fail-soft. Files stay at the legacy path and a
