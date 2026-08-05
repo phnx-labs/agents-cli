@@ -68,6 +68,7 @@ import { registerSessionsExportCommand } from './sessions-export.js';
 import { registerSessionsImportCommand } from './sessions-import.js';
 import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
 import { registerSessionsBackfillCommand } from './sessions-backfill.js';
+import { registerSessionsStatsCommand } from './sessions-stats.js';
 import { runBrowserSessions } from '../lib/browser/sessions-list.js';
 import {
   countToolProgramOccurrences,
@@ -2464,7 +2465,7 @@ export async function maybeLiveIndex(options: SessionsOptions): Promise<Map<stri
 
 /**
  * Group key for the overview: resolve the cwd through the same canonical
- * resolver the `agents activity` timeline groups by — a defined project's name
+ * resolver the `agents feed` timeline groups by — a defined project's name
  * when `defs` contains the cwd (multi-repo projects read as one group), else
  * the repo-level key, so a monorepo subdir (`<repo>/apps/cli`) reads as
  * `<repo>` in both views. Falls back to the indexed project name (stamped at
@@ -4054,7 +4055,9 @@ export function registerSessionsCommands(program: Command): void {
     .option('--query <clause>', 'Search text; repeat with --include tools to require distinct matching calls', collectQueryClause, [])
     .option('--resolve <selector>', 'Resolve one full ID, unique prefix, or keyword query to safe session metadata (requires --json; searches the fleet unless --local)')
     .addOption(new Option('--resolve-safe-v1 <selector>').hideHelp())
-    .description('Find, browse, and read agent conversation transcripts across Claude, Codex, Gemini, and OpenCode.')
+    .description(
+      'Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active` (alias: `agents roster`).',
+    )
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
     .option('--claude', 'Shorthand for --agent claude')
     .option('--codex', 'Shorthand for --agent codex')
@@ -4115,6 +4118,18 @@ export function registerSessionsCommands(program: Command): void {
       # Show only what's running right now (terminals, teams, cloud, headless)
       agents sessions --active
 
+      # --- Session lifecycle (one verb per intent) ---
+      # Jump to a live session (attach its terminal, or open a tab + resume)
+      agents sessions focus a1b2c3d4
+      # Attach only — never fork a copy (old: sessions go)
+      agents sessions focus a1b2c3d4 --attach-only
+      # Interactive → headless (keep working unattended)
+      agents sessions detach a1b2c3d4
+      # Headless → interactive in this terminal
+      agents sessions attach a1b2c3d4
+      # Multi-select history and open each in a tab
+      agents sessions resume
+
       # The interactive list folds in other online machines automatically,
       # labelled by host with this machine first. Stay local with --local:
       agents sessions --local
@@ -4155,6 +4170,12 @@ export function registerSessionsCommands(program: Command): void {
       agents sessions --all "deploy script" --host box-a --host box-b
     `,
     notes: `
+      Session lifecycle (pick one verb — they are not synonyms):
+        focus [id]              jump to a live session (attach, or open tab + resume)
+        focus [id] --attach-only  attach only; never fork (replaces sessions go)
+        detach <id>             interactive → headless continuation
+        attach <id>             headless → interactive in this terminal
+        resume [query]          multi-select history → open tabs (or run --resume <id>)
       - The interactive listing folds in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; --json and single-id lookups stay local.
       - --host runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.
       - --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.
@@ -4194,6 +4215,33 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsMigrateCommand(sessionsCmd);
   registerSessionsMigrationsCommand(sessionsCmd);
   registerSessionsBackfillCommand(sessionsCmd);
+  registerSessionsStatsCommand(sessionsCmd);
+
+  // Observe-umbrella alias (Phase 3): roster → sessions --active.
+  registerSessionsObserveAliases(program);
+}
+
+/**
+ * `roster` → sessions --active. Registered with the sessions module so the
+ * lazy loader for `roster` also registers the real `sessions` command for re-parse.
+ */
+function registerSessionsObserveAliases(program: Command): void {
+  program
+    .command('roster')
+    .description('Live agent roster (alias of `agents sessions --active`). Who is running right now.')
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(async () => {
+      const { expandObserveAlias } = await import('../lib/observe-aliases.js');
+      const rest = process.argv.slice(3);
+      const expanded = expandObserveAlias('roster', rest);
+      if (!expanded) {
+        console.error(chalk.red('Unknown observe alias: roster'));
+        process.exit(1);
+      }
+      if (process.stderr.isTTY) process.stderr.write(chalk.gray(`${expanded.note}\n`));
+      await program.parseAsync(['node', 'agents', ...expanded.argv]);
+    });
 }
 
 function formatNoSessionsMessage(

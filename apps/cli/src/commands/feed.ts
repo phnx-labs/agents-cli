@@ -13,7 +13,7 @@
  * `agents feed post`: agent-callable free-text progress into the activity
  * stream (milestone `status.posted`). Session/agent/host/runtime/pid identity
  * is auto-stamped from env + the pid registry — no domain-specific flags.
- * Humans watch via the feed activity lane / `agents activity`.
+ * Humans watch via the feed activity lane.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -37,6 +37,7 @@ import {
   type ActivityEvent,
   type EnrichedActivityEvent,
 } from '../lib/activity.js';
+import { projectKeyFromCwd } from '../lib/project-key.js';
 import { postFeedStatus } from '../lib/feed-post.js';
 import {
   parseFeedPostLevel,
@@ -306,6 +307,7 @@ export function sessionHintsFromActive(
   sessions: Array<{
     sessionId?: string;
     agentId?: string;
+    cwd?: string;
     ticket?: { id?: string };
     pr?: { url?: string; number?: number };
     worktree?: { slug?: string };
@@ -320,13 +322,16 @@ export function sessionHintsFromActive(
     prNumber: s.pr?.number,
     prUrl: s.pr?.url,
     worktreeSlug: s.worktree?.slug,
+    project: s.cwd ? projectKeyFromCwd(s.cwd) : undefined,
   }));
 }
 
 export function registerFeedCommand(program: Command): void {
   const feed = program
     .command('feed')
-    .description('Open blocks (needs you) + agent status posts (feed post)')
+    .description(
+      'Operator inbox + agent status posts (aliases: inbox = needs-you; timeline = --filter updates)',
+    )
     .option('--json', 'Output as JSON (each block stamped with its outcome + ask class)')
     .option('--filter <view>', 'What to show: needs (default) · updates · all', 'needs')
     .option('--flat', 'List one block per agent instead of grouping by outcome')
@@ -334,6 +339,7 @@ export function registerFeedCommand(program: Command): void {
     .option('--local', 'Only this machine -- skip the cross-machine SSH fan-out')
     .option('-H, --host <target...>', 'Scope to remote machine(s) over SSH; repeatable')
     .option('--device <target...>', 'Alias for --host; repeatable')
+    .option('--project <name>', 'Scope the feed to one project/repo (matches cwd basename, case-insensitive)')
     .option('--dispatch', 'Run stall suppression + default-on-no-answer policy and urgent notifications')
     .option('--pause <id>', 'Pause a runaway/needy local process (SIGSTOP) or cancel a cloud task')
     .option('--kill <id>', 'Kill a runaway/needy local process (SIGTERM) or cancel a cloud task');
@@ -430,14 +436,23 @@ docs/06-observability.md.
         // it the ask would scroll away like any other update.
         let outcomes: SinkOutcome[];
         if (flags.blocked) {
-          const block = buildDeclaredBlock(event, {
-            // Prefer title as the front-loaded ask on the phone; body is detail.
-            text: event.title
-              ? (event.detail ? `${event.title}: ${event.detail}` : event.title)
-              : (event.detail ?? ''),
-            options: flags.option,
-            safeDefault: flags.default,
-          });
+          const block = buildDeclaredBlock(
+            {
+              sessionId: event.sessionId,
+              mailboxId: event.mailboxId,
+              host: event.host,
+              runtime: event.runtime,
+              cwd: event.cwd,
+            },
+            {
+              // Prefer title as the front-loaded ask on the phone; body is detail.
+              text: event.title
+                ? (event.detail ? `${event.title}: ${event.detail}` : event.title)
+                : (event.detail ?? ''),
+              options: flags.option,
+              safeDefault: flags.default,
+            },
+          );
           publishBlock(block);
           outcomes = await broadcastBlock(block, {
             project: event.project,
@@ -476,6 +491,7 @@ docs/06-observability.md.
   feed.action(async (opts: {
       json?: boolean;
       filter?: string;
+      project?: string;
       flat?: boolean;
       all?: boolean;
       local?: boolean;
@@ -519,11 +535,11 @@ docs/06-observability.md.
         if (filter === 'all') {
           console.log();
           renderUpdatesView(await gatherStatusPosts({
-            limit: UPDATES_VIEW_LIMIT, hosts: opts.host, local: opts.local, includeLocal, self,
-          }));
+            limit: UPDATES_VIEW_LIMIT, hosts: opts.host, local: opts.local, includeLocal, self, project: opts.project,
+          }), opts.project);
           return;
         }
-        if (includeLocal) renderActivityLane();
+        if (includeLocal) renderActivityLane(opts.project);
       };
 
       // Updates view: deliberate progress posts only (blocks are decisions, not
@@ -545,7 +561,7 @@ docs/06-observability.md.
           console.log(JSON.stringify(updates, null, 2));
           return;
         }
-        renderUpdatesView(updates);
+        renderUpdatesView(updates, opts.project);
         return;
       }
 
@@ -617,7 +633,10 @@ docs/06-observability.md.
         }
       }
 
-      blocks = rankFeedBlocks(blocks, localSignals);
+      blocks = rankFeedBlocks(blocks, localSignals).filter((b) => blockMatchesProject(b, opts.project));
+      const dispatchBlocksProject = opts.project
+        ? dispatchBlocks.filter((b) => blockMatchesProject(b, opts.project))
+        : dispatchBlocks;
       const digest = suppressionDigest(preparedLocal.filter);
       if (digest && !opts.json) {
         console.log(chalk.dim(digest));
@@ -626,7 +645,7 @@ docs/06-observability.md.
       if (opts.dispatch) {
         const policy = loadPolicy();
         const now = new Date();
-        for (const b of dispatchBlocks) {
+        for (const b of dispatchBlocksProject) {
           // Wrap per-block policy so one malformed block (e.g. a crafted
           // mailboxId that throws in mailboxDir) can't abort the whole loop and
           // strand every remaining block's dispatch.
@@ -674,7 +693,7 @@ docs/06-observability.md.
       // Shared fleet-comms masthead (same family as `agents mailboxes`).
       console.log(
         masthead({
-          title: 'they need you',
+          title: opts.project ? `${opts.project} needs you` : 'they need you',
           accent: 'amber',
           host: self,
           right: formatFeedMastheadRight(blocks),
@@ -694,6 +713,48 @@ docs/06-observability.md.
       });
       for (const g of groups) renderOutcomeGroup(g, self);
       await renderTrailingActivity();
+    });
+
+  // Observe-umbrella aliases (Phase 3): intentional second names, not deprecations.
+  // Re-parse into `feed` so flags/help stay single-sourced. See lib/observe-aliases.ts.
+  registerFeedObserveAliases(program);
+}
+
+/**
+ * `inbox` / `timeline` → feed. Loaded with the feed module so lazy COMMAND_LOADERS
+ * for those names also get the real `feed` command registered for re-parse.
+ */
+function registerFeedObserveAliases(program: Command): void {
+  const reparse = async (alias: 'inbox' | 'timeline'): Promise<void> => {
+    const { expandObserveAlias } = await import('../lib/observe-aliases.js');
+    const rest = process.argv.slice(3);
+    const expanded = expandObserveAlias(alias, rest);
+    if (!expanded) {
+      console.error(chalk.red(`Unknown observe alias: ${alias}`));
+      process.exit(1);
+    }
+    if (process.stderr.isTTY) process.stderr.write(chalk.gray(`${expanded.note}\n`));
+    await program.parseAsync(['node', 'agents', ...expanded.argv]);
+  };
+
+  program
+    .command('inbox')
+    .description('Needs-you inbox (alias of `agents feed`). Open blocks waiting on you.')
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(async () => {
+      await reparse('inbox');
+    });
+
+  program
+    .command('timeline')
+    .description(
+      'Agent progress stream (alias of `agents feed --filter updates`). What agents posted recently.',
+    )
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(async () => {
+      await reparse('timeline');
     });
 }
 
@@ -771,6 +832,18 @@ export function resolveFeedFilter(raw: string | undefined): FeedFilter {
   return 'needs';
 }
 
+/** True when a block belongs to the requested project (case-insensitive). */
+function blockMatchesProject(block: OpenBlock, project?: string): boolean {
+  if (!project) return true;
+  return (block.project ?? '').toLowerCase() === project.toLowerCase();
+}
+
+/** True when an activity event belongs to the requested project (case-insensitive). */
+function eventMatchesProject(ev: EnrichedActivityEvent, project?: string): boolean {
+  if (!project) return true;
+  return ((ev.project ?? projectKeyFromCwd(ev.cwd) ?? '')).toLowerCase() === project.toLowerCase();
+}
+
 /**
  * Render one activity event in the lane: deliberate progress posts
  * (`status.posted`) use the rich multi-line {@link formatProgressUpdate}; hook
@@ -816,19 +889,23 @@ async function gatherStatusPosts(opts: {
   local?: boolean;
   includeLocal: boolean;
   self: string;
+  project?: string;
 }): Promise<EnrichedActivityEvent[]> {
-  const local: EnrichedActivityEvent[] = opts.includeLocal ? readStatusPosts(opts.limit) : [];
+  const local: EnrichedActivityEvent[] = opts.includeLocal
+    ? readStatusPosts(opts.limit).filter((ev) => eventMatchesProject(ev, opts.project))
+    : [];
   const forceLocal = opts.local === true || process.env[FEED_NO_FANOUT_ENV] === '1';
-  if (forceLocal) return local;
+  if (forceLocal) return local.slice(0, opts.limit);
   const remoteHosts = opts.hosts?.length ? remoteFeedHostsToDial(opts.hosts, opts.self) : undefined;
-  if (opts.hosts?.length && (!remoteHosts || remoteHosts.length === 0)) return local;
+  if (opts.hosts?.length && (!remoteHosts || remoteHosts.length === 0)) return local.slice(0, opts.limit);
   const remote = await gatherRemoteAgentsJson({
     args: ['feed', '--filter', 'updates', '--json'],
     noFanoutEnv: FEED_NO_FANOUT_ENV,
     hosts: remoteHosts,
     parse: parseActivityPayload,
   });
-  return mergeActivityEvents(local, remote.items).slice(0, opts.limit);
+  const merged = mergeActivityEvents(local, remote.items).filter((ev) => eventMatchesProject(ev, opts.project));
+  return merged.slice(0, opts.limit);
 }
 
 /**
@@ -836,11 +913,11 @@ async function gatherStatusPosts(opts: {
  * recency-ordered, with rich identity chips. Pure `file.edited` / git-hook noise
  * is excluded so operators see announcements, not tool churn.
  */
-function renderUpdatesView(updates: ActivityEvent[]): void {
+function renderUpdatesView(updates: ActivityEvent[], project?: string): void {
   const hosts = new Set(updates.map((e) => e.host).filter(Boolean));
   console.log(
     masthead({
-      title: 'updates',
+      title: project ? `${project} updates` : 'updates',
       accent: 'cyan',
       host: hosts.size > 1 ? `${hosts.size} machines` : (updates[0]?.host ?? machineId()),
       right: `${updates.length} post${updates.length === 1 ? '' : 's'}`,
@@ -863,14 +940,14 @@ function renderUpdatesView(updates: ActivityEvent[]): void {
  * activity logs. Read-only tail of the logs -- no transcript re-parsing. Silent
  * when empty.
  */
-function renderActivityLane(limit = 6): void {
+function renderActivityLane(project?: string, limit = 6): void {
   const events = readRecentActivity({
     sinceMs: Date.now() - 24 * 60 * 60 * 1000,
-    limit,
+    limit: limit * (project ? 4 : 1),
     tier: 'milestone',
-  });
+  }).filter((ev) => eventMatchesProject(ev, project));
   if (events.length === 0) return;
-  console.log(chalk.bold('\n  recent activity'));
-  for (const ev of events) renderActivityEntry(ev);
-  console.log(chalk.gray('  → agents activity  for the full stream'));
+  console.log(chalk.bold(project ? `\n  recent activity · ${project}` : '\n  recent activity'));
+  for (const ev of events.slice(0, limit)) renderActivityEntry(ev);
+  console.log(chalk.gray('  → agents feed --project ' + (project ?? '<project>') + '  for the full stream'));
 }

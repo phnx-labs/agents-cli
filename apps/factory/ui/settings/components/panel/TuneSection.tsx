@@ -29,7 +29,7 @@ export function EditorSection({ settings, onSaveSettings }: EditorSectionProps) 
     <div className="sw-panel-section">
       <div className="sw-panel-section-head">Editor</div>
       <div className="sw-rocker-row">
-        <span className="sw-rocker-label">Markdown viewer</span>
+        <span className="sw-rocker-label">Reader (.md + .html)</span>
         <Rocker on={markdownViewerEnabled} onChange={(v) => updateEditor({ markdownViewerEnabled: v })} />
       </div>
     </div>

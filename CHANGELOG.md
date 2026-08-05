@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Scheduled routines no longer overlap or outlive their configured timeout (RUSH-2186).** See
+  `apps/cli/CHANGELOG.md`.
+
 - **Codex hook sync no longer leaves startup warnings after upgrades.** See
   `apps/cli/.changelog/next/codex-hook-sync-warnings.md`.
 

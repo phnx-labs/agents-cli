@@ -892,7 +892,12 @@ async function getFloorTerminalDetailsForWebview(workspacePath?: string): Promis
   return withAttachmentThumbnailUris(await terminals.getFloorTerminalDetails(workspacePath));
 }
 
-async function openPlanPreview(pathValue: string, kind: string | undefined, host: string | undefined): Promise<void> {
+async function openPlanPreview(
+  context: vscode.ExtensionContext,
+  pathValue: string,
+  kind: string | undefined,
+  host: string | undefined,
+): Promise<void> {
   const target = pathValue.trim();
   if (!target) return;
   if (/^https?:\/\//i.test(target)) {
@@ -920,10 +925,30 @@ async function openPlanPreview(pathValue: string, kind: string | undefined, host
   }
   if (!resolvedPath || !fs.existsSync(resolvedPath)) return;
   const uri = vscode.Uri.file(resolvedPath);
+  const readerEnabled = getSettings(context).editor?.markdownViewerEnabled ?? true;
+  // Prefer the Agents Reader for .md (TipTap) and .html (artifact preview under
+  // .agents/artifacts|plans|reports and elsewhere). Fallbacks match the old
+  // behavior when the reader is off.
+  if (readerEnabled) {
+    const {
+      readerViewTypeForPath,
+      AGENTS_HTML_READER,
+      AGENTS_MARKDOWN_EDITOR,
+    } = await import('../core/editorAssociations');
+    const viewType =
+      (kind === 'html' ? AGENTS_HTML_READER : undefined) ||
+      (kind === 'markdown' ? AGENTS_MARKDOWN_EDITOR : undefined) ||
+      readerViewTypeForPath(resolvedPath);
+    if (viewType) {
+      await vscode.commands.executeCommand('vscode.openWith', uri, viewType);
+      return;
+    }
+  }
   if (kind === 'markdown' || resolvedPath.toLowerCase().endsWith('.md')) {
     await vscode.commands.executeCommand('markdown.showPreview', uri);
     return;
   }
+  // HTML (and other previews) without the reader: system browser.
   await vscode.env.openExternal(uri);
 }
 
@@ -948,10 +973,28 @@ async function openAttachmentPreview(pathValue: string, host: string | undefined
 }
 
 
-async function openFileOrDiffInEditor(pathValue: string): Promise<void> {
+async function openFileOrDiffInEditor(
+  context: vscode.ExtensionContext | undefined,
+  pathValue: string,
+): Promise<void> {
   const resolvedPath = resolveEditorPath(pathValue);
   if (!resolvedPath || !fs.existsSync(resolvedPath)) return;
   const fileUri = vscode.Uri.file(resolvedPath);
+
+  // Artifact / plan HTML+MD: open in the Agents Reader when enabled so
+  // .agents/artifacts/*.html renders instead of raw source.
+  if (context) {
+    const readerEnabled = getSettings(context).editor?.markdownViewerEnabled ?? true;
+    if (readerEnabled) {
+      const { readerViewTypeForPath } = await import('../core/editorAssociations');
+      const viewType = readerViewTypeForPath(resolvedPath);
+      if (viewType) {
+        await vscode.commands.executeCommand('vscode.openWith', fileUri, viewType);
+        return;
+      }
+    }
+  }
+
   const previousActiveUri = vscode.window.activeTextEditor?.document.uri;
 
   try {
@@ -2925,12 +2968,17 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         break;
       case 'openTerminalFile':
         if (message.path) {
-          await openFileOrDiffInEditor(message.path);
+          await openFileOrDiffInEditor(context, message.path);
         }
         break;
       case 'openPlanPreview':
         if (typeof message.path === 'string') {
-          await openPlanPreview(message.path, typeof message.kind === 'string' ? message.kind : undefined, typeof message.host === 'string' ? message.host : undefined);
+          await openPlanPreview(
+            context,
+            message.path,
+            typeof message.kind === 'string' ? message.kind : undefined,
+            typeof message.host === 'string' ? message.host : undefined,
+          );
         }
         break;
       case 'openAttachmentPreview':

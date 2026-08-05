@@ -19,7 +19,7 @@
  *
  * The event vocabulary, all audit-level and non-milestone (so they surface in
  * `agents events` and the persisted audit trail, but are NOT required in the
- * curated `agents activity` / `agents feed` surfaces):
+ * curated `agents feed` surface):
  *  - `secrets.get`      — a value was READ (exec inject, export, `view --reveal`,
  *                         raw `get <item>`, remote resolve, sync push,
  *                         `run --secrets`, and every other bundle read).

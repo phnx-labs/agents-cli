@@ -4,6 +4,7 @@ import { classifyBlock } from './ask-classifier.js';
 import { outcomeForBlock } from './feed-outcome.js';
 import type { ActiveSession } from './session/active.js';
 import type { SessionMeta } from './session/types.js';
+import { projectKeyFromCwd } from './project-key.js';
 
 const MINUTES_PER_HOUR = 60;
 const NEEDY_ASKS_PER_HOUR = 6;
@@ -21,6 +22,7 @@ export interface FeedSessionSignal {
   runtime?: string;
   pid?: number;
   cwd?: string;
+  project?: string;
   startedAtMs?: number;
   status?: ActiveSession['status'];
   tokPerSec?: number;
@@ -59,6 +61,7 @@ export function buildSessionSignals(
       runtime: s.context,
       pid: s.pid,
       cwd: s.cwd,
+      project: s.project ?? projectKeyFromCwd(s.cwd),
       startedAtMs: s.startedAtMs,
       status: s.status,
       tokPerSec: s.tokPerSec,
@@ -193,6 +196,7 @@ export function needyControlCards(
       mailboxId: row.mailboxId,
       host: signal?.host ?? 'local',
       runtime: signal?.runtime ?? signal?.context ?? 'unknown',
+      project: signal?.project,
       ts: row.lastAskAt,
       kind: 'control',
       questions: [{
@@ -249,6 +253,7 @@ export function runawayControlCards(
       mailboxId: signal.mailboxId ?? id,
       host: signal.host ?? 'local',
       runtime: signal.runtime ?? signal.context ?? 'unknown',
+      project: signal.project,
       ts: new Date(signal.startedAtMs ?? nowMs).toISOString(),
       kind: 'control',
       questions: [{

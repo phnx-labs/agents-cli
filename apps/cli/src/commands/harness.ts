@@ -30,7 +30,10 @@ import {
   authEnvKeyForHost,
   getProfilePath,
   validateProfileName,
+  editProfile,
+  renameProfile,
   type Profile,
+  type ForkProfileOptions,
 } from '../lib/profiles.js';
 import { listPresets } from '../lib/profiles-presets.js';
 import { AGENTS, ALL_AGENT_IDS, resolveAgentName } from '../lib/agents.js';
@@ -69,7 +72,6 @@ export interface ForkOptions {
   baseUrl?: string;
   authProvider?: string;
   version?: string;
-  label?: string;
   description?: string;
   keyStdin?: boolean;
   force?: boolean;
@@ -90,7 +92,6 @@ export function buildFork(source: string, name: string, opts: ForkOptions): Prof
       baseUrl: opts.baseUrl,
       provider: opts.authProvider,
       version: opts.version,
-      label: opts.label,
       description: opts.description,
     });
   }
@@ -110,7 +111,6 @@ export function buildFork(source: string, name: string, opts: ForkOptions): Prof
     baseUrl: opts.baseUrl,
     provider: opts.authProvider,
     authEnvVar: opts.authProvider ? authEnvKeyForHostOrThrow(host) : undefined,
-    label: opts.label,
     description: opts.description ?? `Forked from ${host}: ${opts.model}`,
   });
 }
@@ -188,7 +188,6 @@ Examples:
     .option('--base-url <url>', 'Custom endpoint base URL (claude/codex hosts)')
     .option('--auth-provider <provider>', 'Attach a keychain-backed API key under this provider')
     .option('--version <version>', 'Pin the host CLI version (e.g., 1.16.0)')
-    .option('--label <text>', 'Human-facing name shown by `agents view` (defaults to <name>)')
     .option('--description <text>', 'One-line description')
     .option('--key-stdin', 'Read the API key from stdin instead of prompting (for scripts/CI)')
     .option('--force', 'Overwrite an existing harness with the same name')
@@ -303,5 +302,70 @@ Examples:
         process.exit(1);
       }
       console.log(chalk.green(`Harness '${name}' removed.`));
+    });
+
+  cmd
+    .command('edit <name>')
+    .description('Edit a custom harness in place (model, endpoint, host version, description).')
+    // Flags mirror ForkProfileOptions exactly — `editProfile` reuses
+    // `forkProfile`'s override logic, so anything it does not accept would be a
+    // flag that parses and does nothing. There is deliberately no --label: the
+    // header `agents view` prints is derived from the harness name.
+    .option('--model <id>', 'Swap the pinned model (e.g., meta/muse-spark-2.0)')
+    .option('--base-url <url>', 'Set or replace the endpoint base URL (claude/codex hosts)')
+    .option('--version <ver>', 'Re-pin the host CLI version. Empty string unpins (tracks latest).')
+    .option('--description <text>', 'Set the one-line description')
+    .addHelpText(
+      'after',
+      `
+Examples:
+  # Upgrade the pinned model
+  agents harness edit spark --model meta/muse-spark-2.0
+
+  # Point to a new private endpoint
+  agents harness edit corp --base-url https://gw.corp/v2
+
+  # Track the host's latest instead of a pinned version
+  agents harness edit spark --version ""
+
+  # The display name is derived from the harness name, so to change it, rename:
+  agents harness rename spark muse-spark
+`,
+    )
+    .action((name: string, opts: ForkProfileOptions) => {
+      try {
+        const edited = editProfile(readProfile(name), opts);
+        writeProfile(edited);
+        console.log(chalk.green(`Harness '${name}' updated.`));
+        console.log(chalk.gray(`Model:  ${profileModelLabel(edited)}`));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  cmd
+    .command('rename <name> <new-name>')
+    .description('Rename a custom harness — updates the file name and its internal name field.')
+    .addHelpText(
+      'after',
+      `
+Examples:
+  # Rename 'spark' to 'muse'
+  agents harness rename spark muse
+
+  # Rename then run under the new name
+  agents harness rename deepseek ds && agents run ds "hello"
+`,
+    )
+    .action((name: string, newName: string) => {
+      try {
+        renameProfile(name, newName);
+        console.log(chalk.green(`Harness '${name}' renamed to '${newName}'.`));
+        console.log(chalk.gray(`Run: agents run ${newName} "hello"`));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
     });
 }

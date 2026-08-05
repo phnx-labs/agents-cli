@@ -31,6 +31,8 @@
   <a href="https://x.ai" title="Grok Build (xAI)"><strong>Grok</strong></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://factory.ai" title="Factory AI Droid"><strong>Droid</strong></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://omp.sh" title="Oh My Pi"><strong>Pi</strong></a>
 </p>
 
 https://agents-cli.sh/demo.mp4
@@ -270,6 +272,11 @@ agents sessions --include tools --query 'program:git' --count --fleet --json
 
 # Populate historical tool rows once on each device
 agents sessions backfill tools --fleet
+
+# Which skills/commands you actually invoke -- and which installed ones are dead weight
+agents sessions stats
+agents sessions stats --zero            # only the never-invoked (dead weight)
+agents sessions backfill resources      # fold historical sessions into the usage index
 ```
 
 Interactive picker when you're in a terminal. Structured output (`--json`, `--markdown`, filtered by role or turn count) when piped.

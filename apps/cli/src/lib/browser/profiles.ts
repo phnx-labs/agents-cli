@@ -106,30 +106,65 @@ export async function getProfile(name: string): Promise<BrowserProfile | null> {
 }
 
 /**
+ * True when `profile` can actually launch or attach on THIS machine.
+ *
+ * A remote (`ssh://`) profile runs its browser on the far host, so a local
+ * binary check doesn't apply — assume launchable. A local profile must have its
+ * configured browser/binary present on disk here; a `default` profile
+ * auto-created on a different OS (e.g. a macOS Chrome path reused on Linux — the
+ * "Custom binary not found" failure) fails this check so the caller re-detects
+ * for the current machine.
+ */
+function isProfileLaunchableHere(profile: BrowserProfile): boolean {
+  const remote = Object.values(getEndpointPresets(profile)).some((preset) =>
+    preset.target.startsWith('ssh://')
+  );
+  if (remote) return true;
+  try {
+    findBrowserPath(profile.browser, profile.binary);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Resolve the profile `agents browser start` uses when no `--profile` is given.
  *
  * Order: (1) the device-local configured default (`agents browser profiles
- * set-default <name>`) when it names an existing profile; (2) an existing
- * `default` profile as-is; (3) auto-pick the first installed Chromium-family
- * browser per the platform priority list in chrome.ts (macOS: chrome > brave >
- * edge > chromium > comet; Linux: chrome > chromium > brave > edge; Windows:
- * edge > chrome > brave > comet) and pin a new `default` profile to it. Throws an
- * actionable error if none of those binaries are installed. A configured default
- * that no longer exists warns and falls through to (2)/(3) — never a hard fail.
+ * set-default <name>`) when it names an existing profile that can launch here;
+ * (2) an existing `default` profile that can launch here; (3) auto-pick the
+ * first installed Chromium-family browser per the platform priority list in
+ * chrome.ts (macOS: chrome > brave > edge > chromium > comet; Linux: chrome >
+ * chromium > brave > edge; Windows: edge > chrome > brave > comet) and pin a
+ * `default` profile to it. Throws an actionable error if none of those binaries
+ * are installed.
+ *
+ * "Can launch here" matters because `agents.yaml` syncs across the fleet: a
+ * `default` auto-created on macOS carries a `/Applications/...` binary path that
+ * doesn't exist on a Linux box. Rather than hand that broken profile back (the
+ * top browser roadblock — "Custom binary not found"), we re-detect and
+ * regenerate the `default` for this machine. A configured or existing default
+ * that no longer exists, or can't launch here, warns and falls through — never a
+ * hard fail.
  */
 export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
   const configured = getConfiguredDefaultProfileName();
   if (configured) {
     const chosen = await getProfile(configured);
-    if (chosen) return chosen;
+    if (chosen && isProfileLaunchableHere(chosen)) return chosen;
     console.warn(
-      `warning: configured default browser profile "${configured}" no longer exists; ` +
-      `falling back to auto-detect. Fix with: agents browser profiles set-default <name>  (or --unset)`
+      chosen
+        ? `warning: configured default browser profile "${configured}" can't launch on this ` +
+          `machine (its browser/binary isn't installed here); falling back to auto-detect. ` +
+          `Fix with: agents browser profiles set-default <name>  (or --unset)`
+        : `warning: configured default browser profile "${configured}" no longer exists; ` +
+          `falling back to auto-detect. Fix with: agents browser profiles set-default <name>  (or --unset)`
     );
   }
 
   const existing = await getProfile(DEFAULT_BROWSER_PROFILE_NAME);
-  if (existing) return existing;
+  if (existing && isProfileLaunchableHere(existing)) return existing;
 
   const detected = findFirstInstalledBrowser();
   if (!detected) {
@@ -154,7 +189,13 @@ export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
       height: DEFAULT_VIEWPORT.height,
     },
   };
-  await createProfile(profile);
+  // A stale `default` (auto-created on another OS, unlaunchable here) is
+  // regenerated in place; otherwise this is the first-run create.
+  if (existing) {
+    await updateProfile(profile);
+  } else {
+    await createProfile(profile);
+  }
   return profile;
 }
 

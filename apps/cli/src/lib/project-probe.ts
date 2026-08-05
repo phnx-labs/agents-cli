@@ -184,3 +184,60 @@ export function formatFleetWorkspaces(statuses: HostWorkspaceStatus[]): string[]
     return multi ? `${chalk.dim(`${p} · `)}${body}` : body;
   });
 }
+
+/** Severity for a workspace/repo warning on the project card. */
+export type WorkspaceWarningSeverity = 'critical' | 'continue';
+
+export interface WorkspaceWarning {
+  severity: WorkspaceWarningSeverity;
+  text: string;
+  remediation?: string;
+}
+
+/**
+ * Turn probed workspace rows into card-footer warnings.
+ *
+ * - missing / unreadable git → critical (agents there cannot share a tree)
+ * - behind upstream → critical when ≥10 commits, continue otherwise
+ * - dirty tree → continue (local work is fine; just note it)
+ * - ahead-only is not a warning (that is progress waiting to push)
+ *
+ * Pure. Caller decides whether the rows came from `--fleet` or a local probe.
+ */
+export function workspaceWarnings(statuses: HostWorkspaceStatus[]): WorkspaceWarning[] {
+  const out: WorkspaceWarning[] = [];
+  for (const s of [...statuses].sort((a, b) => a.host.localeCompare(b.host) || a.path.localeCompare(b.path))) {
+    const where = s.host ? `${s.host}` : 'local';
+    const pathBit = s.path ? ` (${s.path})` : '';
+    if (!s.present) {
+      out.push({
+        severity: 'critical',
+        text: `${where}: checkout missing${pathBit}`,
+        remediation: 'clone or sync the project root on that host before landing agents there',
+      });
+      continue;
+    }
+    if (s.error) {
+      out.push({
+        severity: 'critical',
+        text: `${where}: ${s.error}${pathBit}`,
+      });
+      continue;
+    }
+    if (s.behind !== undefined && s.behind > 0) {
+      out.push({
+        severity: s.behind >= 10 ? 'critical' : 'continue',
+        text: `${where} is ${s.behind} commit${s.behind === 1 ? '' : 's'} behind ${s.upstream ?? 'upstream'}${pathBit}`,
+        remediation: 'pull (or rebase) before agents on this host open PRs against a stale base',
+      });
+    }
+    if (s.dirty !== undefined && s.dirty > 0) {
+      out.push({
+        severity: 'continue',
+        text: `${where} has ${s.dirty} uncommitted change${s.dirty === 1 ? '' : 's'}${pathBit}`,
+      });
+    }
+  }
+  return out;
+}
+

@@ -390,6 +390,7 @@ function throttleWarningLine(
   const reason =
     r.reason === 'out_of_credits' ? 'is out of credits'
     : r.reason === 'signed_out' ? 'is not signed in'
+    : r.reason === 'revoked' ? 'needs re-login (its token was revoked)'
     : 'is rate-limited right now';
   return (
     chalk.yellow(`⚠ ${who}${acct} ${reason}.`) +

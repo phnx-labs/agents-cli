@@ -219,8 +219,8 @@ agents run claude "ship it" --secrets r2.backups@yosemite-s1   # bundle@host suf
 
 - **`--host <target>`** (single) and **`--hosts <a,b,c>`** (comma list) compose on
   `list` / `view` / `export`; **`--device` / `--devices`** are accepted as aliases
-  everywhere `--host` / `--hosts` are (fleet-vocabulary parity with `agents activity`
-  and `agents run --device`), and resolve identically. **`bundle@host`** is the
+  everywhere `--host` / `--hosts` are (fleet-vocabulary parity with `agents run
+  --device` and `agents feed --host`), and resolve identically. **`bundle@host`** is the
   reference form for `run --secrets` and the target for `exec --host`.
 - **Ephemeral.** Remote values cross over ssh stdout (encrypted in transit), are
   parsed in memory, and injected into the run/command env — never written to this

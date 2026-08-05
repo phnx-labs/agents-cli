@@ -9,6 +9,7 @@
 import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import type { ExecOptions, ExecMode, ExecEffort, FallbackEntry } from '../lib/exec.js';
+import { isTierToken } from '../lib/model-tiers.js';
 import type { AgentId } from '../lib/types.js';
 import { RUN_AUTO_KEYWORD } from '../lib/types.js';
 import type { DetectedRuntime } from '../lib/crabbox/runtimes.js';
@@ -85,6 +86,9 @@ interface ExecCommandActionOptions {
   interval?: string;
   // Host dispatch: run on a registered agent host instead of locally.
   // `--host` is canonical; `--on`/`--computer` are hidden aliases.
+  // `--where` is the unified placement alias (lib/placement.ts) — expands into
+  // host/lease before dispatch; do not combine with those flags.
+  where?: string;
   host?: string;
   device?: string;
   on?: string;
@@ -802,12 +806,16 @@ export function registerRunCommand(program: Command): void {
       'Loop delay between iterations ("0" back-to-back, "30m" paces). Loop only.',
     )
     .option(
+      '--where <spec>',
+      'Where this run\'s body executes (one placement door): local | device:<name> | auto | lease[:backend]. Expands to --host/--lease. Do not combine with those flags. See docs/00-concepts.md#placement.',
+    )
+    .option(
       '--host <name>',
-      'Offload this run onto another machine over SSH — a device name, registered host, or user@host. Pass "auto" to pick from 14d usage affinity (most-used online device has highest probability). See `agents devices`.',
+      'Offload this run onto another machine over SSH — a device name, registered host, or user@host. Pass "auto" to pick from 14d usage affinity (most-used online device has highest probability). Same as --where device:<name>. See `agents devices`.',
     )
     .option(
       '--device <name>',
-      'Alias of --host. Pass "auto" for affinity-based device pick (same as --host auto).',
+      'Alias of --host. Pass "auto" for affinity-based device pick (same as --where auto).',
     )
     .option('--remote-cwd <dir>', "Explicit host working directory for --host runs, used VERBATIM (overrides --cwd; usually --cwd suffices — it re-roots a local-home path onto the remote home). Pass a single-quoted '$HOME/…' or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you).")
     .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
@@ -818,7 +826,7 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--lease [backend]',
-      'Invent a disposable cloud box for this run and tear it down after (via crabbox). Optional backend selects the cloud (hetzner/aws/do). Unlike --host, no machine is registered.',
+      'Invent a disposable cloud box for this run and tear it down after (via crabbox). Optional backend selects the cloud (hetzner/aws/do). Same as --where lease[:backend]. Unlike --host, no machine is registered.',
     )
     .option(
       '--box <slug>',
@@ -872,6 +880,11 @@ export function registerRunCommand(program: Command): void {
       # account headroom, then a balanced account on it
       agents run auto "fix the flaky test" --mode edit
       agents run auto --host yosemite-s0 "fix the flaky test"   # pin the host
+
+      # Placement (one door — where the body runs). Old flags still work.
+      agents run claude "…" --where device:yosemite-s0   # = --host yosemite-s0
+      agents run claude "…" --where auto                 # = --device auto
+      agents run claude "fix CI" --where lease --mode edit
 
       # Open the session in a terminal tab — detected from where your sessions
       # already run (Ghostty / iTerm / Terminal.app); force one with a value
@@ -963,6 +976,33 @@ export function registerRunCommand(program: Command): void {
       if (options.terminal) {
         await handleTerminalHandoff(agentSpec, options, prompt);
         return;
+      }
+
+      // Placement: --where expands into --host / --lease before any dispatch.
+      // One door for "where does the body run?" — old flags remain aliases.
+      // See lib/placement.ts and docs/00-concepts.md#placement.
+      {
+        const { placementFromRunFlags, expandPlacementToRunFlags, PlacementError } =
+          await import('../lib/placement.js');
+        try {
+          const placement = placementFromRunFlags(options);
+          if (options.where) {
+            const expanded = expandPlacementToRunFlags(placement);
+            if (expanded.host !== undefined) options.host = expanded.host;
+            if (expanded.device !== undefined) options.device = expanded.device;
+            if (expanded.lease !== undefined) options.lease = expanded.lease;
+            if (expanded.box !== undefined) options.box = expanded.box;
+            // Clear the where flag so remote re-entry (host dispatch) does not
+            // re-expand and conflict with the concrete host we just set.
+            options.where = undefined;
+          }
+        } catch (err) {
+          if (err instanceof PlacementError) {
+            console.error(chalk.red(err.message));
+            process.exit(1);
+          }
+          throw err;
+        }
       }
 
       // --notify: post a desktop notification when this run finishes. Armed on
@@ -1896,7 +1936,7 @@ export function registerRunCommand(program: Command): void {
         { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents, ensureSubagentDispatchTool },
         { resolveRunDefaults },
         { getMcpServersByName, buildWorkflowMcpConfig },
-        { supports },
+        { supports, capableAgents },
         { shareRuntimeEnv },
       ] = await Promise.all([
         import('../lib/exec.js'),
@@ -1948,7 +1988,7 @@ export function registerRunCommand(program: Command): void {
       if (accountPickerRequested && !isValidAgent(rawAgent)) {
         if (profileExists(rawAgent)) {
           console.error(chalk.red(
-            `Account selection is not available for profile '${rawAgent}'. Run its concrete host agent with @ instead.`,
+            `Account selection is not available for custom harness '${rawAgent}'. Run its concrete host agent with @ instead.`,
           ));
           process.exit(1);
         }
@@ -1966,9 +2006,25 @@ export function registerRunCommand(program: Command): void {
         // — launching a default "because it's there" is how a rotate loop
         // hammers an exhausted account.
         const byHarness = await collectHarnessCandidates();
-        const harnessPick = pickHarnessWeighted(byHarness);
+        // F1 (RUSH-2185 / EXEC-23a): a prompt-less run is interactive; only
+        // harnesses that can open a REPL with no argv are valid candidates.
+        // cursor-agent and similar exit immediately without a prompt, which
+        // leaves a silent [detached] pane and an orphan session.
+        const interactive = prompt === undefined && options.headless !== true;
+        const replCapable = interactive ? new Set(capableAgents('interactiveRepl')) : null;
+        const candidateHarness = replCapable
+          ? new Map([...byHarness].filter(([id]) => replCapable.has(id)))
+          : byHarness;
+        const harnessPick = pickHarnessWeighted(candidateHarness);
         if (!harnessPick) {
-          console.error(chalk.red(formatNoHealthyHarnessError(classifyHarnessCandidates(byHarness))));
+          if (replCapable && byHarness.size > 0 && candidateHarness.size === 0) {
+            const installed = [...byHarness.keys()].join(', ');
+            console.error(chalk.red(
+              `No installed harness supports a prompt-less interactive REPL (installed: ${installed}). Pass a prompt (-p) or install claude, codex, or another REPL-capable harness.`,
+            ));
+          } else {
+            console.error(chalk.red(formatNoHealthyHarnessError(classifyHarnessCandidates(candidateHarness))));
+          }
           process.exit(1);
         }
         agent = harnessPick.picked.agent;
@@ -1988,13 +2044,29 @@ export function registerRunCommand(program: Command): void {
         // so Chinese models (Kimi, DeepSeek, Qwen, GLM) can run inside
         // Claude Code without a local proxy.
         try {
-          const resolved = resolveProfileForRun(rawAgent);
+          const resolved = resolveProfileForRun(rawAgent, options.model);
           agent = resolved.agent;
           if (!version) version = resolved.version;
           profileEnv = resolved.env;
           profileFallbackModel = resolved.fallbackModel;
           fromProfile = true;
-          process.stderr.write(chalk.gray(`Resolved profile '${resolved.profileName}' -> ${agent}${version ? `@${version}` : ''}\n`));
+          process.stderr.write(chalk.gray(`Resolved custom harness '${resolved.profileName}' -> ${agent}${version ? `@${version}` : ''}\n`));
+          if (resolved.tierNote) {
+            process.stderr.write(chalk.gray(`[agents] ${resolved.tierNote}\n`));
+          }
+          // A tier token (cheap/default/best/ultra) already resolved against
+          // this PROFILE's own `models:` map above, when the profile opts in.
+          // Replace the raw --model value here so the tier never reaches the
+          // native, HOST-catalog tier block below. When the profile has no
+          // `models:` opt-in at all, resolvedModel stays undefined and
+          // options.model is left as the raw tier token on purpose — the
+          // "cost tiers don't apply to custom harness ..." discard guard further
+          // down this function is the canonical fallback for that case, and
+          // this block must not race it with a second, differently-worded
+          // message.
+          if (resolved.resolvedModel !== undefined) {
+            options.model = resolved.resolvedModel;
+          }
         } catch (err) {
           console.error(chalk.red((err as Error).message));
           process.exit(1);
@@ -2205,7 +2277,7 @@ export function registerRunCommand(program: Command): void {
         } else {
           console.error(chalk.red(`Unknown agent: ${rawAgent}`));
           console.error(chalk.gray(`Available agents: ${ALL_AGENT_IDS.join(', ')}`));
-          console.error(chalk.gray(`Or add a profile: agents profiles add <name>`));
+          console.error(chalk.gray(`Or add a custom harness: agents harness add <name>`));
           process.exit(1);
         }
       }
@@ -2369,7 +2441,7 @@ export function registerRunCommand(program: Command): void {
         if (version) {
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: version ${version} is pinned\n`));
         } else if (fromProfile) {
-          process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: profile pins its own version/auth\n`));
+          process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: custom harness pins its own version/auth\n`));
         } else {
           try {
             const resolved = await resolveRunVersion(agent, strategy, cwd);
@@ -2637,10 +2709,22 @@ export function registerRunCommand(program: Command): void {
         : undefined;
 
       const modelSource = runCmd.getOptionValueSource('model');
-      const model = options.model
+      let model = options.model
         ?? (!fromProfile && modelSource === undefined
           ? (workflowModel ?? (options.fallback ? undefined : runDefaults.model))
           : undefined);
+
+      // Cost tiers (cheap|default|best|ultra) resolve against a harness's own model
+      // catalog. A custom harness's model comes from its endpoint, not the host
+      // harness, so a tier here would forward an incompatible host-harness model to a
+      // different API. Discard it loudly and let the custom harness's own model stand.
+      if (fromProfile && model && isTierToken(model)) {
+        process.stderr.write(chalk.yellow(
+          `[agents] --model ${model}: cost tiers don't apply to custom harness '${rawAgent}' ` +
+          `(its model comes from the endpoint) — ignoring the tier, using the custom harness's configured model\n`,
+        ));
+        model = undefined;
+      }
 
       const execOptions: ExecOptions = {
         agent,

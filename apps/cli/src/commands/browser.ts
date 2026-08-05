@@ -16,6 +16,7 @@ import {
   type BrowserProfile,
 } from '../lib/browser/profiles.js';
 import { readMeta, updateMeta } from '../lib/state.js';
+import { resolveActor } from '../lib/actor.js';
 import {
   loginsForProfile,
   profilesLoggedInto,
@@ -43,6 +44,8 @@ import {
   sendIPCRequest,
 } from '../lib/browser/ipc.js';
 import { browserTaskPicker, type BrowserTask } from './browser-picker.js';
+import { assertRemoteControlAllowed } from '../lib/browser/remote-control.js';
+import { getConfigValue, setConfigValue } from '../lib/device-config.js';
 import { isInteractiveTerminal } from './utils.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { buildHar } from '../lib/browser/har.js';
@@ -110,6 +113,12 @@ export function registerBrowserCommand(program: Command): void {
       # Drive the page
       agents browser navigate https://example.com
       agents browser screenshot
+
+      # Drive another machine's browser (needs its consent — see remote-control)
+      agents browser start --host zion
+
+      # Allow / deny other fleet machines driving THIS machine's browser
+      agents browser remote-control on
 
       # End the session when done
       agents browser done
@@ -661,6 +670,46 @@ function registerProfilesCommands(browser: Command): void {
 
 function registerTaskCommands(browser: Command): void {
   browser
+    .command('remote-control [state]')
+    .description(
+      "Allow or deny other fleet machines driving THIS machine's browser over `browser --host`. " +
+        '`on`/`off` to set (device-local, never synced); no argument prints the current value. Default off.',
+    )
+    .option('--json', 'Output as JSON')
+    .action((state: string | undefined, opts: { json?: boolean }) => {
+      const KEY = 'browser.remote-control';
+      if (state === undefined) {
+        const cur = getConfigValue(KEY).value === true;
+        if (opts.json) {
+          console.log(JSON.stringify({ remoteControl: cur }));
+          return;
+        }
+        console.log(`Remote browser control (this machine): ${cur ? 'on' : 'off'}`);
+        if (!cur) console.log('Enable with: agents browser remote-control on');
+        return;
+      }
+      const norm = state.toLowerCase();
+      const onWords = ['on', 'true', 'yes', 'allow', 'enable'];
+      const offWords = ['off', 'false', 'no', 'deny', 'disable'];
+      if (!onWords.includes(norm) && !offWords.includes(norm)) {
+        console.error(`Expected "on" or "off", got "${state}".`);
+        process.exit(1);
+      }
+      const value = onWords.includes(norm);
+      setConfigValue(KEY, value);
+      if (opts.json) {
+        console.log(JSON.stringify({ remoteControl: value }));
+        return;
+      }
+      console.log(`Remote browser control (this machine) is now ${value ? 'on' : 'off'}.`);
+      console.log(
+        value
+          ? 'Other fleet machines can now drive this browser via `browser --host <this-device>`.'
+          : 'Cross-machine `browser --host` drives to this machine are refused.',
+      );
+    });
+
+  browser
     .command('start')
     .description('Start a browser task. Pass --profile <name>; omit to use your configured default (`agents browser profiles set-default`), else auto-pick an installed Chromium-family browser.')
     .option('-p, --profile <name>', 'Browser profile to use (omit to use the configured default, else auto-pick an installed Chromium-family browser)')
@@ -673,6 +722,16 @@ function registerTaskCommands(browser: Command): void {
     .option('--duration <sec>', 'Recording duration cap in seconds (with --record; default 60)', (v) => parseInt(v, 10))
     .option('--max-mb <mb>', 'Recording size cap in MB (with --record; default 25)', (v) => parseInt(v, 10))
     .action(async (opts) => {
+      // Consent gate: a fleet-remote `browser --host <this-machine> start` may
+      // only open a browser here if the owner opted in. Refuse before we resolve
+      // or auto-create any profile. Local starts are never gated.
+      try {
+        assertRemoteControlAllowed();
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+
       let profileName: string = opts.profile;
       if (!profileName) {
         try {
@@ -755,6 +814,12 @@ function registerTaskCommands(browser: Command): void {
         url: opts.url,
         endpoint: opts.endpoint,
         skipDomainSkill: opts.skills === false,
+        // Forward the caller's identity: the browser daemon is shared, so it
+        // cannot resolve who/which-run called `start`. `resolveActor()` runs
+        // here in the CLI (the caller's process); `$AGENT_LAUNCH_ID` is the
+        // per-run id exec.ts injects for every harness.
+        actor: resolveActor().id,
+        launchId: process.env.AGENT_LAUNCH_ID,
       });
 
       if (!response.ok) {

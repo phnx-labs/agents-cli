@@ -2,7 +2,7 @@
  * Agent status posts — deliberate progress messages into the activity stream.
  *
  * Surface: `agents feed post --title <subject> <body>` (agent-callable; humans
- * watch via `agents feed` / `agents activity` / `agents events --module activity`).
+ * watch via `agents feed` / `agents events --module activity`).
  *
  * Identity is automatic: session id, agent, cwd, launch/pid/tmux provenance
  * are resolved from the process environment and the per-pid launch registry

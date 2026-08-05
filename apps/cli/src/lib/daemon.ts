@@ -876,14 +876,14 @@ export async function runDaemon(): Promise<void> {
   const fleetCacheInterval = setInterval(() => { void runFleetCacheWarm(); }, 3 * 60_000);
   const fleetCacheKickoff = setTimeout(() => { void runFleetCacheWarm(); }, 60_000);
 
-  // Adaptive usage refresh: keep the usage cache the `agents run` router reads
+  // Usage refresh: keep the usage cache the `agents run` router reads
   // (RUSH-2061, readOnly hot path) fresh, WITHOUT the hot path ever fetching.
-  // This host is the sole writer for its own local accounts. The tick wakes at
-  // the 90s floor, but per-account cadence gates the actual live fetches: an
-  // account racing toward its 5h cap is polled sooner (down to 90s), an idle one
-  // rarely (up to 15min), capped at ~6 provider calls/account/hour and skipped
-  // entirely while its provider is under a 429 backoff. Overlap-guarded like the
-  // probes above; a box signed into no networked-usage account is a clean no-op.
+  // This host is the sole writer for its own local accounts. The tick wakes
+  // every 60s (USAGE_REFRESH_TICK_MS) to consider due accounts; each account
+  // is scheduled at a fixed 5-minute cadence (REFRESH_INTERVAL_MS), capped at
+  // ~12 provider calls/account/hour, skipped under 429 backoff, and fetched
+  // with fileOnly credentials so a background tick never pops macOS Touch ID.
+  // Overlap-guarded: a slow pass cannot stack concurrent refresh loops.
   let refreshingUsage = false;
   const runUsageRefreshTick = async () => {
     if (refreshingUsage) return;
@@ -897,16 +897,20 @@ export async function runDaemon(): Promise<void> {
         writeUsageCache: writeClaudeUsageCache,
         backoffUntil: usageRateLimitedUntil,
       });
-      if (r.refreshed > 0 || r.failed > 0) {
-        log('INFO', `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped`);
-      }
+      // Always log a compact summary so "is refresh working?" is greppable even
+      // when every account was not-due (proves the tick ran).
+      log(
+        'INFO',
+        `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped`,
+      );
     } catch (err) {
       log('ERROR', `usage refresh failed: ${(err as Error).message}`);
     } finally {
       refreshingUsage = false;
     }
   };
-  const usageRefreshInterval = setInterval(() => { void runUsageRefreshTick(); }, 90_000);
+  // 60s wake matches USAGE_REFRESH_TICK_MS in usage-refresh.ts (keep in sync).
+  const usageRefreshInterval = setInterval(() => { void runUsageRefreshTick(); }, 60_000);
   const usageRefreshKickoff = setTimeout(() => { void runUsageRefreshTick(); }, 30_000);
 
   // RUSH-1817: the startup host decision above is one-shot. If a standalone

@@ -305,6 +305,25 @@ export interface HealInfo {
   name: string;
 }
 
+/**
+ * Resolve the identity stamped on a task at start: WHO (`owner`) and WHICH run
+ * (`launchId`). The forwarded values come from the caller's own CLI process and
+ * are authoritative — the browser daemon is shared and long-lived, so resolving
+ * the actor daemon-side (the RUSH-2020 bug) mis-attributes every task to the
+ * daemon's owner. `resolveLocalActor` is consulted ONLY when no actor was
+ * forwarded (a CLI that predates the field, mid-rollout) — never to override a
+ * forwarded one.
+ */
+export function resolveTaskIdentity(
+  forwarded: { actor?: string; launchId?: string },
+  resolveLocalActor: () => string
+): { owner: string; launchId?: string } {
+  return {
+    owner: forwarded.actor ?? resolveLocalActor(),
+    launchId: forwarded.launchId,
+  };
+}
+
 export class BrowserService {
   private static readonly SOURCE_PREFIX: Record<string, string> = {
     'rush-app': 'rush-app-',
@@ -323,7 +342,15 @@ export class BrowserService {
 
   async start(
     profileName: string,
-    opts: { taskName?: string; url?: string; endpointName?: string; skipDomainSkill?: boolean } = {}
+    opts: {
+      taskName?: string;
+      url?: string;
+      endpointName?: string;
+      skipDomainSkill?: boolean;
+      /** Caller identity, forwarded from the CLI (see IPCRequest.actor/launchId). */
+      actor?: string;
+      launchId?: string;
+    } = {}
   ): Promise<{ task: string; name: string; tabId?: string; windowId?: string; profile: string; skill?: ResolvedDomainSkill }> {
     const profile = await getProfile(profileName);
     if (!profile) {
@@ -424,7 +451,10 @@ export class BrowserService {
       currentTabId: undefined,
       createdAt: Date.now(),
       pid: conn.pid,
-      owner: resolveActor().id, // who launched this browser task (RUSH-2020)
+      // Identity is forwarded from the caller (see resolveTaskIdentity): WHO
+      // (owner) and WHICH run (launchId). Resolving daemon-side would attribute
+      // every task to the shared daemon's actor (the RUSH-2020 bug).
+      ...resolveTaskIdentity({ actor: opts.actor, launchId: opts.launchId }, () => resolveActor().id),
     };
 
     // For Electron, get the existing window as the tab

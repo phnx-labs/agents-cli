@@ -98,7 +98,8 @@ export interface EditorTerminal {
   account?: string;         // Resolved account email for this terminal when known
   statusVersion?: string;   // Display-only version from agents-cli metadata
   statusAccount?: string;   // Display-only account from agents-cli metadata
-  identitySessionId?: string; // Session id whose version/account are cached above; re-fetch when the live id differs (rerun / /clear in the same terminal)
+  identitySessionId?: string; // Session id whose version/account are cached above AND both fields resolved; retry gate — re-fetch while the live id differs (rerun / /clear, or account not yet indexed)
+  identityAppliedSessionId?: string; // Session id the cached version/account were applied for (even if a field is null); display gate — the status bar shows them only for THIS session, never a prior binding's leftover
   approvalStatus?: 'pending' | 'approved' | 'running' | 'complete'; // Swarm approval status
   autoLabelPollerId?: NodeJS.Timeout; // Poller for auto-label fetch (cleared once label is set)
   detached?: boolean;       // The client tab closed on a live tmux detach (SSH drop) but the
@@ -570,11 +571,15 @@ export function setHost(terminal: vscode.Terminal, host: string): void {
   }
 }
 
-export function setVersion(terminal: vscode.Terminal, version: string): void {
+export function setVersion(terminal: vscode.Terminal, version: string | null | undefined): void {
   const entry = getByTerminal(terminal);
   if (entry) {
-    entry.version = version;
-    entry.statusVersion = version;
+    // A null/empty version CLEARS the cached value rather than being ignored: a
+    // harness the CLI records no version for (Kimi, Grok, …) must not keep a
+    // version left over from a prior binding in the same terminal.
+    const normalized = version?.trim() || undefined;
+    entry.version = normalized;
+    entry.statusVersion = normalized;
     schedulePersist();
   } else {
     console.error(`[TERMINALS] FAILED to set version - terminal "${terminal.name}" not found in registry.`);
