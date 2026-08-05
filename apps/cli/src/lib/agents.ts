@@ -1602,6 +1602,88 @@ export function isClaudeCredentialFileBlank(
   }
 }
 
+/**
+ * Identity of the Claude account a version home is (or was) logged into, read
+ * straight from `.claude.json`'s `oauthAccount`.
+ *
+ * Deliberately independent of whether the credential still works. `getAccountInfo`
+ * applies a credential floor so `agents view` and rotation route around an install
+ * that would die at spawn; attribution of *history* must not. A transcript written
+ * under an org is still that org's work after the token is revoked or the home is
+ * trashed, and on Linux/Windows the floor would otherwise erase the identity of
+ * every retired home (`isClaudeCredentialFileBlank` short-circuits only on darwin).
+ */
+export interface ClaudeHomeIdentity {
+  email: string | null;
+  accountId: string | null;
+  organizationId: string | null;
+  organizationName: string | null;
+  organizationType: string | null;
+  /**
+   * Org-scoped identity — the rate-limit bucket, and the correct key to group by.
+   * Two orgs under one email (a Team seat and a personal Max plan) are separate
+   * buckets and MUST stay distinct; see `candidateIdentity` in lib/rotate.ts.
+   */
+  usageKey: string | null;
+  /** Account+org identity, narrower than `usageKey`. */
+  accountKey: string | null;
+}
+
+/** A version home's `.claude.json` plus the identity derived from it. */
+export interface ClaudeHomeConfig {
+  /** The config file actually read. */
+  path: string;
+  config: Record<string, any>;
+  identity: ClaudeHomeIdentity;
+}
+
+/**
+ * Read a Claude home's config and account identity. Returns null when the home has
+ * no readable `.claude.json`, or has one with no `oauthAccount` (never signed in).
+ *
+ * Sync because the session scanner calls it once per home on a hot path, and the
+ * file is a few KB of local JSON. No Keychain access — see `getAccountInfo`.
+ */
+export function readClaudeHomeConfig(base: string): ClaudeHomeConfig | null {
+  // Claude reads/writes config at $CLAUDE_CONFIG_DIR/.claude.json when set, falling
+  // back to $HOME/.claude.json. Our shim sets CLAUDE_CONFIG_DIR to the per-version
+  // .claude dir, so prefer that file; fall back to home-level for versions ever
+  // launched without the shim (IDE extension, direct binary).
+  const configDirFile = path.join(base, '.claude', '.claude.json');
+  const homeLevelFile = path.join(base, '.claude.json');
+  const activeFile = fs.existsSync(configDirFile) ? configDirFile : homeLevelFile;
+
+  let config: Record<string, any>;
+  try {
+    config = JSON.parse(fs.readFileSync(activeFile, 'utf-8'));
+  } catch {
+    return null;
+  }
+
+  const oa = config.oauthAccount;
+  if (!oa) return null;
+
+  const accountId = normalizeIdentityPart(oa.accountUuid);
+  const organizationId = normalizeIdentityPart(oa.organizationUuid);
+
+  return {
+    path: activeFile,
+    config,
+    identity: {
+      email: oa.emailAddress || null,
+      accountId,
+      organizationId,
+      organizationName: oa.organizationName ?? null,
+      organizationType: oa.organizationType ?? null,
+      usageKey: buildIdentityKey('claude', [['org', organizationId]]),
+      accountKey: buildIdentityKey('claude', [
+        ['account', accountId],
+        ['org', organizationId],
+      ]),
+    },
+  };
+}
+
 export async function getAccountInfo(
   agentId: AgentId,
   home?: string
@@ -1631,18 +1713,15 @@ export async function getAccountInfo(
   try {
     switch (agentId) {
       case 'claude': {
-        // Claude reads/writes config at $CLAUDE_CONFIG_DIR/.claude.json when set,
-        // falling back to $HOME/.claude.json. Our shim sets CLAUDE_CONFIG_DIR to
-        // the per-version .claude dir, so prefer that file; fall back to home-level
-        // for versions ever launched without the shim (IDE extension, direct binary).
-        const configDirFile = path.join(base, '.claude', '.claude.json');
-        const homeLevelFile = path.join(base, '.claude.json');
-        const activeFile = fs.existsSync(configDirFile) ? configDirFile : homeLevelFile;
-        const data = JSON.parse(await fs.promises.readFile(activeFile, 'utf-8'));
+        // Identity extraction is shared with the session scanner's account
+        // attribution — see readClaudeHomeConfig. A home with no readable config or
+        // no oauthAccount is signed out, which is what the pre-refactor code
+        // produced when JSON.parse threw or oauthAccount was absent.
+        const claudeHome = readClaudeHomeConfig(base);
+        if (!claudeHome) return { ...empty, lastActive };
+        const { config: data, identity } = claudeHome;
         const oa = data.oauthAccount;
-        const accountId = normalizeIdentityPart(oa?.accountUuid);
-        const organizationId = normalizeIdentityPart(oa?.organizationUuid);
-        const email = oa?.emailAddress || null;
+        const { accountId, organizationId, email, accountKey, usageKey } = identity;
 
         // Credential floor: a blanked credential file means this home cannot
         // authenticate, whatever `.claude.json` still says. Report it signed out
@@ -1651,12 +1730,6 @@ export async function getAccountInfo(
         if (email && isClaudeCredentialFileBlank(base)) {
           return { ...empty, lastActive };
         }
-
-        const accountKey = buildIdentityKey(agentId, [
-          ['account', accountId],
-          ['org', organizationId],
-        ]);
-        const usageKey = buildIdentityKey(agentId, [['org', organizationId]]);
 
         // Plan tier is derived from .claude.json's organizationType, which carries
         // the TRUE tier (claude_max → "Max", claude_pro → "Pro", claude_team →
