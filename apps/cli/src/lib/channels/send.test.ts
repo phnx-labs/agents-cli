@@ -16,6 +16,16 @@ const metaWithOwner = {
 
 const metaEmpty = {} as Meta;
 
+let isolatedHumansFile: string;
+beforeEach(() => {
+  isolatedHumansFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'send-no-humans-')), 'humans.yaml');
+  process.env.AGENTS_HUMANS_FILE = isolatedHumansFile;
+});
+afterEach(() => {
+  delete process.env.AGENTS_HUMANS_FILE;
+  fs.rmSync(path.dirname(isolatedHumansFile), { recursive: true, force: true });
+});
+
 describe('isOwnerAlias', () => {
   it('matches owner case-insensitively', () => {
     expect(isOwnerAlias('owner')).toBe(true);
@@ -217,7 +227,7 @@ describe('owner destination from humans.yaml', () => {
   function writeOwnerNotify(channel: string, to: string): void {
     fs.writeFileSync(
       humansFile,
-      `version: 1\nowner:\n  notify:\n    channel: ${channel}\n    to: '${to}'\n`,
+      `version: 1\nowner:\n  channels:\n    - id: ${channel}\n      transport: test\n      to: '${to}'\n  policy:\n    normal: [${channel}]\n`,
     );
   }
 
@@ -226,8 +236,7 @@ describe('owner destination from humans.yaml', () => {
     expect(readOwnerDest(metaWithOwner)).toEqual({ channel: 'imessage', to: '+12125550123' });
   });
 
-  it('readOwnerDest falls back to meta.notify.owner when humans.yaml absent', () => {
-    // humansFile not written — getOwnerNotifyFromHumans() returns null
+  it('readOwnerDest retains the migration fallback when humans.yaml is absent', () => {
     expect(readOwnerDest(metaWithOwner)).toEqual({ channel: 'imessage', to: '+18055550100' });
   });
 

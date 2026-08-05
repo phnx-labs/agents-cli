@@ -63,7 +63,8 @@ describe('humans.ts', () => {
       owner: {
         name: 'Test User',
         timezone: 'America/New_York',
-        notify: { channel: 'imessage', to: '+15551234567' },
+        channels: [{ id: 'imessage', transport: 'rush', to: '+15551234567' }],
+        policy: { normal: ['imessage'] },
       },
     });
 
@@ -72,9 +73,9 @@ describe('humans.ts', () => {
     expect(read?.['version']).toBe(1);
     const owner = read?.['owner'] as Record<string, unknown> | undefined;
     expect(owner?.['name']).toBe('Test User');
-    const notify = owner?.['notify'] as Record<string, unknown> | undefined;
-    expect(notify?.['channel']).toBe('imessage');
-    expect(notify?.['to']).toBe('+15551234567');
+    const channels = owner?.['channels'] as Array<Record<string, unknown>> | undefined;
+    expect(channels?.[0]?.['id']).toBe('imessage');
+    expect(channels?.[0]?.['to']).toBe('+15551234567');
   });
 
   it('readHumans returns null for wrong version', () => {
@@ -92,5 +93,30 @@ describe('humans.ts', () => {
     fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
     const result = runHumans(home, 'humans.getOwnerNotifyFromHumans()');
     expect(result).toBeNull();
+  });
+
+  it('getOwnerNotifyFromHumans resolves the normal policy channel', () => {
+    const home = makeTempHome();
+    const agentsDir = path.join(home, '.agents');
+    fs.mkdirSync(agentsDir, { recursive: true });
+    fs.writeFileSync(path.join(agentsDir, 'humans.yaml'), [
+      'version: 1',
+      'owner:',
+      '  channels:',
+      '    - id: call',
+      '      transport: twilio',
+      "      to: '+15550000001'",
+      '    - id: imessage',
+      '      transport: rush',
+      "      to: '+15550000002'",
+      '  policy:',
+      '    normal: [imessage]',
+      '',
+    ].join('\n'));
+
+    expect(runHumans(home, 'humans.getOwnerNotifyFromHumans()')).toEqual({
+      channel: 'imessage',
+      to: '+15550000002',
+    });
   });
 });

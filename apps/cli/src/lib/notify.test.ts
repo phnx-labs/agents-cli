@@ -95,6 +95,7 @@ describe('sendToOwner (owner resolution + provider routing)', () => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'notify-'));
     record = path.join(tmp, 'argv.log');
     process.env.OPENCLAW_RECORD = record;
+    process.env.AGENTS_HUMANS_FILE = path.join(tmp, 'humans.yaml');
   });
 
   afterEach(() => {
@@ -102,6 +103,7 @@ describe('sendToOwner (owner resolution + provider routing)', () => {
     else process.env.PATH = savedPath;
     if (savedRecord === undefined) delete process.env.OPENCLAW_RECORD;
     else process.env.OPENCLAW_RECORD = savedRecord;
+    delete process.env.AGENTS_HUMANS_FILE;
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -196,6 +198,7 @@ describe('notifyUrgentBlock (feed urgent-block dispatch resolves the owner)', ()
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'notify-block-'));
     record = path.join(tmp, 'argv.log');
     process.env.OPENCLAW_RECORD = record;
+    process.env.AGENTS_HUMANS_FILE = path.join(tmp, 'humans.yaml');
     const bin = path.join(tmp, 'openclaw');
     fs.writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' "$*" >> "$OPENCLAW_RECORD"\nexit 0\n`);
     fs.chmodSync(bin, 0o755);
@@ -207,6 +210,7 @@ describe('notifyUrgentBlock (feed urgent-block dispatch resolves the owner)', ()
     else process.env.PATH = savedPath;
     if (savedRecord === undefined) delete process.env.OPENCLAW_RECORD;
     else process.env.OPENCLAW_RECORD = savedRecord;
+    delete process.env.AGENTS_HUMANS_FILE;
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
