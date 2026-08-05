@@ -1517,7 +1517,7 @@ async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks
   meta.pid = child.pid || null;
   writeRunMeta(meta);
 
-  return meta;
+  return { ...meta };
 }
 
 /**
@@ -1606,7 +1606,7 @@ function executeCommandJobDetached(config: JobConfig, hooks?: RoutineHooks): Run
   meta.pid = child.pid || null;
   writeRunMeta(meta);
 
-  return meta;
+  return { ...meta };
 }
 
 function extractAndSaveReport(
