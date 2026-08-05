@@ -60,6 +60,12 @@ describe('agents sessions stats (real CLI parse)', () => {
     expect(res.stderr).toContain('--kind must be one of');
   });
 
+  it('fails loud on a negative --top', () => {
+    const res = run(['sessions', 'stats', '--top', '-3']);
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain('--top must be');
+  });
+
   it('exposes the resources backfill with its own versioned envelope', () => {
     const res = run(['sessions', 'backfill', 'resources', '--json']);
     expect(res.status).toBe(0);

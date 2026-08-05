@@ -529,7 +529,8 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   caps); `zeroInvoked` is the installed-but-never-invoked set. The rollup MUST
   count each resource identity (kind + name) once — merging source layers — and
   MUST record only EXPLICIT invocations (slash commands + `Skill` tool calls), so
-  an auto-triggered skill reads as 0; the envelope's `signal` field states this.
+  an auto-triggered skill reads as 0 (skill invocations come from Claude + Kimi,
+  slash-commands from Claude only); the envelope's `signal` field states this.
   `sessions backfill resources --json` MUST emit the versioned
   `resources-backfill` envelope and populate `session_resource_usage` for
   historical sessions gated by `resource_scan_ledger`, never silently re-scanning

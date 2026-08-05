@@ -2358,7 +2358,8 @@ export interface ResourceStatRow {
  * The signal only captures EXPLICIT invocations (slash commands and `Skill`
  * tool calls). An auto-triggered skill (loaded by description match) emits no
  * event, so it reads as zero here — a 0 means "never explicitly invoked", not
- * "never loaded". Only Claude transcripts expose this signal today.
+ * "never loaded". Skill invocations are recorded for Claude and Kimi (the
+ * `Skill`-tool harnesses); slash-commands are Claude-only.
  *
  * `kind` / `pluginFilter` filter the RESOURCE rows directly (r.kind / r.plugin),
  * distinct from QueryOptions.skill / QueryOptions.plugin, which filter SESSIONS
@@ -2394,23 +2395,27 @@ export function queryResourceUsageStats(
   const whereClause = preds.length ? `WHERE ${preds.join(' AND ')}` : '';
   const direction = options.order === 'bottom' ? 'ASC' : 'DESC';
   const limitClause = options.limit ? `LIMIT ${Math.max(1, Math.floor(options.limit))}` : '';
-  // Group by resource identity (kind + name + plugin); name already embeds the
-  // `plugin:short` prefix for a plugin resource, so plugin is functionally
-  // determined and never splits a row. Source is provenance, not identity —
-  // aggregate it (MAX) so the same resource that resolved to different layers
-  // across sessions stays ONE row instead of splitting into user/system dupes.
+  // Group by resource IDENTITY = (kind, name) only, per SES-IF-4b. name already
+  // embeds the `plugin:short` prefix for a plugin resource, so (kind, name) is
+  // the true identity. plugin and source are PROVENANCE, not identity, and drift
+  // per session — the same `rush:design` resolves plugin='rush' in a session
+  // whose cwd discovered the plugin and plugin=NULL in one that didn't, and the
+  // layer a flat resource resolved to varies (user vs system). Grouping on either
+  // would split one resource into fractional rows. Aggregate both with MAX so the
+  // row carries a representative (non-NULL when any session resolved it) label
+  // while the counts stay whole.
   const sql = `
     SELECT
       r.kind AS kind,
       r.name AS name,
-      r.plugin AS plugin,
+      MAX(r.plugin) AS plugin,
       MAX(r.source) AS source,
       COUNT(DISTINCT r.session_id) AS sessions,
       SUM(r.count) AS invocations
     FROM session_resource_usage r
     JOIN sessions s ON s.id = r.session_id
     ${whereClause}
-    GROUP BY r.kind, r.name, r.plugin
+    GROUP BY r.kind, r.name
     ORDER BY invocations ${direction}, sessions ${direction}, r.name ASC
     ${limitClause}
   `;
@@ -2526,6 +2531,19 @@ export function backfillResourceUsage(
     }
     try {
       const events = parseSession(meta.filePath, meta.agent);
+      // Fail loud on a bad read. writeResourceUsage DELETEs the session's rows
+      // before it re-inserts, so a transcript that parses to ZERO events (a
+      // truncated / mid-sync / corrupt file — parseSession returns [] instead of
+      // throwing) would silently wipe real historical usage and then stamp the
+      // ledger "current", masking the loss. A completed historical transcript
+      // always has turns, so an empty parse is never a legitimate "this session
+      // used nothing" — it is an unreadable file. Skip it (count as failed, leave
+      // the ledger unstamped) so a later good read retries.
+      if (events.length === 0) {
+        result.failed++;
+        done++; onProgress?.(done, sessions.length);
+        continue;
+      }
       writeResourceUsage(meta.id, events, meta.cwd);
       const rows = (db.prepare(`SELECT COUNT(*) AS n FROM session_resource_usage WHERE session_id = ?`).get(meta.id) as { n: number }).n;
       stampResourceLedger(db, meta.id, meta.filePath, stamp, rows);

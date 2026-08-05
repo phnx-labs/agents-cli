@@ -1102,8 +1102,10 @@ misread:
   calls. An **auto-triggered** skill (loaded by description match, never
   explicitly invoked) emits no event and reads as **0** — that means "never
   explicitly invoked", not "never loaded".
-- **Claude transcripts only** expose this signal today; other harnesses
-  contribute nothing to the counts.
+- **Skill invocations come from Claude and Kimi** (the harnesses whose
+  skill-invocation tool is named `Skill`, per `SKILL_TOOL_NAME_BY_AGENT`);
+  **slash-commands are Claude-only** (only `parseClaudeContent` populates
+  `SessionEvent.slashCommand`). Other harnesses contribute nothing to the counts.
 
 ### Backfilling history — `agents sessions backfill resources`
 

@@ -11,8 +11,9 @@
  * Signal caveat, surfaced in help and output: only EXPLICIT invocations count
  * (slash commands + `Skill` tool calls). An auto-triggered skill (loaded by
  * description match) emits no event and reads as zero — "0" means "never
- * explicitly invoked", not "never loaded". Only Claude transcripts expose this
- * signal today; other harnesses contribute nothing.
+ * explicitly invoked", not "never loaded". Skill invocations are recorded for
+ * Claude and Kimi (the `Skill`-tool harnesses); slash-commands are Claude-only;
+ * other harnesses contribute nothing.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -143,7 +144,7 @@ export function registerSessionsStatsCommand(sessionsCmd: Command): void {
     `,
     notes: `
       - The signal captures EXPLICIT invocations only: slash commands and \`Skill\` tool calls. An auto-triggered skill (loaded by description match) emits no event, so it reads as 0 — that means "never explicitly invoked", not "never loaded".
-      - Only Claude transcripts expose this signal today; other harnesses contribute nothing to these counts.
+      - Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.
       - Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run \`agents sessions backfill resources\` once to fold in historical sessions (a low coverage line means it hasn't run).
       - --plugin filters the resource rows (this plugin's skills/commands), distinct from the top-level \`agents sessions --plugin\` which filters SESSIONS.
     `,
@@ -206,7 +207,7 @@ async function statsAction(cmd: Command): Promise<void> {
           },
           signal: {
             explicitOnly: true,
-            note: 'Explicit invocations only (slash commands + Skill tool calls). Auto-triggered skills emit no event and read as 0. Only Claude transcripts expose this signal today.',
+            note: 'Explicit invocations only (slash commands + Skill tool calls). Auto-triggered skills emit no event and read as 0. Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only.',
           },
           coverage: {
             sessionsWithUsage: coverage.covered,
@@ -305,7 +306,7 @@ function renderHuman(args: {
         ? chalk.yellow('  — run `agents sessions backfill resources` to fold in history')
         : ''),
   );
-  out.push(chalk.gray('  signal: explicit invocations only (slash commands + Skill tool); auto-triggered skills read as 0; Claude transcripts only'));
+  out.push(chalk.gray('  signal: explicit invocations only (slash commands + Skill tool); auto-triggered skills read as 0; skills from Claude+Kimi, slash-commands Claude-only'));
   out.push('');
 
   // Ranked section (skipped by --zero).

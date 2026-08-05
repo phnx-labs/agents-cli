@@ -170,33 +170,68 @@ describe('diffZeroInvoked — the both-ends dead-weight set', () => {
   });
 });
 
-describe('backfillResourceUsage — historical one-shot, idempotent via the ledger', () => {
-  it('derives usage from a re-parsed transcript, then skips it on rerun', () => {
-    // Narrow to the bftest project so only session D is touched (A/B/C have empty
-    // transcript files and must not be re-derived to empty).
-    const first = backfillResourceUsage({ project: 'bftest' });
-    expect(first.scanned).toBe(1);
-    expect(first.updated).toBe(1);
-    expect(first.resourceRows).toBe(3); // teams(skill) + recap + code:commit(commands)
+describe('backfillResourceUsage — historical one-shot, idempotent + fail-loud on a truncated read', () => {
+  function rowsFor(id: string): Array<{ kind: string; name: string; count: number }> {
+    return getDB()
+      .prepare(`SELECT kind, name, count FROM session_resource_usage WHERE session_id = ? ORDER BY kind, name`)
+      .all(id) as Array<{ kind: string; name: string; count: number }>;
+  }
 
-    const rows = getDB()
-      .prepare(`SELECT kind, name, count FROM session_resource_usage WHERE session_id = 'sessD' ORDER BY kind, name`)
-      .all() as Array<{ kind: string; name: string; count: number }>;
-    expect(rows).toEqual([
+  it('derives usage from a real transcript, PRESERVES rows behind empty/truncated files, and skips on rerun', () => {
+    // Run over the whole seeded set: D has a real transcript; A/B/C have seeded
+    // usage rows but EMPTY on-disk files (parse to zero events).
+    const first = backfillResourceUsage({});
+    expect(first.scanned).toBe(4);       // A, B, C, D all have a transcript path
+    expect(first.updated).toBe(1);       // only D re-parsed to real events
+    expect(first.resourceRows).toBe(3);  // teams(skill) + recap + code:commit(commands)
+    expect(first.failed).toBe(3);        // A, B, C parse to [] → skipped as failed, NOT wiped
+
+    expect(rowsFor('sessD')).toEqual([
       { kind: 'command', name: 'code:commit', count: 1 },
       { kind: 'command', name: 'recap', count: 1 },
       { kind: 'skill', name: 'teams', count: 2 },
     ]);
 
-    // The ledger recorded coverage at the current extractor version.
-    const ledger = getDB()
-      .prepare(`SELECT resource_count FROM resource_scan_ledger WHERE session_id = 'sessD'`)
-      .get() as { resource_count: number } | undefined;
-    expect(ledger?.resource_count).toBe(3);
+    // The guard's whole point: sessA's seeded usage SURVIVED a backfill pass over
+    // its empty file — writeResourceUsage would have DELETE'd it to nothing.
+    expect(rowsFor('sessA')).toEqual([
+      { kind: 'command', name: 'recap', count: 1 },
+      { kind: 'skill', name: 'teams', count: 2 },
+    ]);
 
-    // Rerun: unchanged transcript → skipped, no re-parse.
-    const second = backfillResourceUsage({ project: 'bftest' });
+    // Ledger stamped for D (a real parse); NOT for A (skipped) so a later good
+    // read of A retries instead of being masked as complete.
+    expect(getDB().prepare(`SELECT resource_count FROM resource_scan_ledger WHERE session_id = 'sessD'`).get())
+      .toEqual({ resource_count: 3 });
+    expect(getDB().prepare(`SELECT resource_count FROM resource_scan_ledger WHERE session_id = 'sessA'`).get())
+      .toBeUndefined();
+
+    // Rerun: D unchanged → skipped via the ledger; A/B/C still empty → failed
+    // again (never stamped, so never falsely "current").
+    const second = backfillResourceUsage({});
     expect(second.updated).toBe(0);
-    expect(second.skipped).toBe(1);
+    expect(second.skipped).toBe(1); // only D is ledger-current
+    expect(second.failed).toBe(3);
+  });
+});
+
+describe('queryResourceUsageStats — plugin/source provenance never splits a resource (SES-IF-4b)', () => {
+  beforeAll(() => {
+    // The exact split the reviewer caught: the SAME resource `plugdup:widget`,
+    // recorded with a resolved plugin in one session and an unresolved (NULL)
+    // plugin in another (its cwd didn't discover the plugin). Grouping on plugin
+    // would fracture it into two rows, each with a partial count.
+    seedSession('sessF', { agent: 'claude', timestamp: '2026-06-15T00:00:00.000Z' });
+    seedSession('sessG', { agent: 'claude', timestamp: '2026-06-16T00:00:00.000Z' });
+    seedUsage('sessF', 'skill', 'plugdup:widget', { plugin: 'plugdup', source: 'plugdup', count: 2 });
+    seedUsage('sessG', 'skill', 'plugdup:widget', { plugin: undefined, source: undefined, count: 3 });
+  });
+
+  it('merges the same (kind, name) across differing plugin/source into ONE whole row', () => {
+    const dup = queryResourceUsageStats({}).filter(r => r.name === 'plugdup:widget');
+    expect(dup).toHaveLength(1);
+    expect(dup[0].sessions).toBe(2);       // F + G, not split
+    expect(dup[0].invocations).toBe(5);    // 2 + 3, whole
+    expect(dup[0].plugin).toBe('plugdup'); // MAX surfaces the resolved label over NULL
   });
 });
