@@ -87,6 +87,14 @@ describe('runCloudConflicts', () => {
     expect(runCloudConflicts({ cwd: '/tmp/x' })).toContain('--cwd');
     expect(runCloudConflicts({ env: ['A=B'] })).toContain('--env');
     expect(runCloudConflicts({ notify: true })).toContain('--notify');
+    expect(runCloudConflicts({ name: 'nightly' })).toContain('--name');
+  });
+
+  it('flags an explicit non-default --effort (no provider consumes it)', () => {
+    expect(runCloudConflicts({ effort: 'xhigh' })).toContain('--effort');
+    // The run default ('auto') is not a conflict — it was never typed.
+    expect(runCloudConflicts({ effort: 'auto' })).toEqual([]);
+    expect(runCloudConflicts({})).toEqual([]);
   });
 
   it('does not flag unset or empty-valued options', () => {

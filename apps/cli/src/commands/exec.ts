@@ -911,7 +911,6 @@ export function registerRunCommand(program: Command): void {
       agents run claude "…" --where device:yosemite-s0   # = --host yosemite-s0
       agents run claude "…" --where auto                 # = --device auto
       agents run claude "fix CI" --where lease --mode edit
-      agents run claude "fix the flaky e2e" --cloud --repo acme/example
 
       # Vendor cloud placement — the agent's own cloud runs the task and
       # agents cloud list/status/logs tracks it. Fire-and-forget: --no-follow

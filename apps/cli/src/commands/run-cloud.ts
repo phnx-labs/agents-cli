@@ -58,6 +58,11 @@ const RUN_CLOUD_CONFLICTS: Array<{ field: string; flag: string; set: (v: unknown
   { field: 'remoteCwd', flag: '--remote-cwd', set: (v) => v !== undefined },
   { field: 'env', flag: '--env', set: (v) => Array.isArray(v) && (v as string[]).length > 0 },
   { field: 'notify', flag: '--notify', set: (v) => v === true },
+  // effort defaults to 'auto' on run; only an explicit non-default value is a
+  // conflict (no provider consumes an effort option — it would be dropped).
+  { field: 'effort', flag: '--effort', set: (v) => v !== undefined && v !== 'auto' },
+  // --name seeds the LOCAL session label; a cloud task has no local session.
+  { field: 'name', flag: '--name', set: (v) => v !== undefined },
 ];
 
 /** Flags that refine a cloud dispatch; meaningless without the placement. */
