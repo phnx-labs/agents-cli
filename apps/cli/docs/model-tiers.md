@@ -15,7 +15,7 @@ cheap    default    best    ultra
 ```
 
 Pass one anywhere `--model` is accepted — `agents run <agent> --model best`,
-`agents teams add <team> <agent> "<task>" --model cheap`, or a profile. Concrete
+`agents teams add <team> <agent> "<task>" --model cheap`, or a custom harness. Concrete
 ids (`claude-opus-4-8`) keep working unchanged; tiers are additive.
 
 A tier resolves **per `(harness, installed version)`** to a concrete model that
@@ -43,11 +43,12 @@ a rung and are marked *clamped*. An empty catalog → the tier is unresolvable a
 the caller drops the `--model` flag (harness default) rather than forwarding a
 bogus token.
 
-**Tiers don't apply to profiles.** A profile (`agents run <profile>`) gets its model
-from its endpoint, not the host harness's catalog — so a tier on a profile run would
-forward an incompatible host-harness model. A tier passed to a profile is ignored with
-a standout warning and the profile's configured model is used; a concrete `--model <id>`
-on a profile still works.
+**Tiers don't apply to a custom harness.** A custom harness (`agents harness add`, run
+via `agents run <name>`) gets its model from its endpoint, not the host harness's
+catalog — so a tier on a custom-harness run would forward an incompatible host-harness
+model. A tier passed to a custom harness is ignored with a standout warning and the
+harness's own configured model is used; a concrete `--model <id>` still works. (These
+are also reachable through the legacy `agents profiles` alias.)
 
 ## Model ranking mechanisms, per provider
 

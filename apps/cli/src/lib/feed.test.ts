@@ -168,6 +168,26 @@ describe('feed store', () => {
     expect(blocks[0].questions[1].multiSelect).toBe(true);
   });
 
+  it('buildDeclaredBlock stamps project from cwd, worktree-aware', () => {
+    const plain = buildDeclaredBlock(
+      { sessionId: 's1', mailboxId: 'm1', host: 'zion', runtime: 'claude', cwd: '/home/muqsit/src/foo' },
+      { text: 'Stuck?' },
+    );
+    expect(plain.project).toBe('foo');
+
+    const worktree = buildDeclaredBlock(
+      { sessionId: 's2', mailboxId: 'm2', host: 'zion', runtime: 'claude', cwd: '/home/muqsit/src/agents-cli/.agents/worktrees/feature-x' },
+      { text: 'Stuck?' },
+    );
+    expect(worktree.project).toBe('agents-cli');
+
+    const noCwd = buildDeclaredBlock(
+      { sessionId: 's3', mailboxId: 'm3', host: 'zion', runtime: 'claude' },
+      { text: 'Stuck?' },
+    );
+    expect(noCwd.project).toBeUndefined();
+  });
+
   it.runIf(hasPython)('real hook publishes every question and runtime into the shared feed', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-hook-'));
     const mailbox = path.join(home, '.agents', '.history', 'mailbox', 'session-123');
@@ -212,6 +232,23 @@ describe('feed store', () => {
       totalAskCount: 2,
     });
     expect(stats[0].recentAskTimestamps).toHaveLength(2);
+  });
+
+  it.runIf(hasPython)('real hook stamps project from cwd, folding worktrees to repo name', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-hook-project-'));
+    const result = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-project',
+        tool_input: { questions: [{ question: 'Which approach?' }] },
+        cwd: '/home/muqsit/src/agents-cli/.agents/worktrees/feature-x',
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(result.status).toBe(0);
+    const blocks = listBlocks(path.join(home, '.agents', '.history', 'feed'));
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].project).toBe('agents-cli');
   });
 
   it.runIf(hasPython)('real hook publishes waiting notifications with routing identity', () => {

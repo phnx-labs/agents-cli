@@ -1023,7 +1023,12 @@ agents routines status    # Check health, PID, binary, heartbeat, and upcoming r
 
 The scheduler **auto-starts on the first `agents routines add`**, so in most cases you never invoke `start` manually. When you `add`, `remove`, `pause`, or `resume` a job, it auto-reloads -- no manual restart needed.
 
-`agents routines status` reports the scheduler as `running`, `wedged`, or `stopped`. A live PID whose heartbeat is more than three monitor ticks old is `wedged`; the status output includes the restart command. Both `routines list` and `routines status` also finalize orphaned `running` records before rendering. Run metadata records process birth time to reject recycled PIDs, and any run still active after 24 hours is finalized as a timeout.
+Scheduled fires are single-flight per routine. If the previous execution is still
+running, the next cron, catchup, or monitor fire exits without spawning another
+process. The claim is shared across CLI processes, so two simultaneous dispatchers
+cannot both pass the running-run check.
+
+`agents routines status` reports the scheduler as `running`, `wedged`, or `stopped`. A live PID whose heartbeat is more than three monitor ticks old is `wedged`; the status output includes the restart command. Both `routines list` and `routines status` also finalize orphaned `running` records before rendering. Run metadata records process birth time to reject recycled PIDs and persists the configured execution deadline. Detached children are killed when that deadline expires, including after a scheduler restart.
 
 The status output includes the resolved daemon binary. Startup rejects bun virtual-filesystem paths and warns when the binary lives under an ephemeral root — a git worktree, or a temporary directory (`/tmp`, `/var/folders`, `/dev/shm`) — because deleting that directory would strand the service. The daemon resolves its own job modules from the launch path, so a direct `agents __daemon-run` from such a build wedges every routine with `ENOENT` once the directory is removed; the warning fires both at spawn time (`validateDaemonBinary`) and at the daemon's own startup (`warnEphemeralDaemonRoot`), so a directly-launched daemon still surfaces the risk. Run it from the globally installed binary to root it at a stable version home.
 

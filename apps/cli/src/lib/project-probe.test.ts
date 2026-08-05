@@ -6,6 +6,7 @@ import { execFileSync } from 'child_process';
 import { stripAnsi } from './session/width.js';
 import {
   formatFleetWorkspaces,
+  workspaceWarnings,
   formatWorkspaceLine,
   parseRemoteProbe,
   probeProjectWorkspaces,
@@ -240,5 +241,25 @@ describe('formatFleetWorkspaces', () => {
       '~/src/rush · zion: ✓ clean · main',
       '~/src/rush-infra · zion: ✗ missing',
     ]);
+  });
+});
+
+describe('workspaceWarnings', () => {
+  it('marks missing checkouts critical and dirty trees continue', () => {
+    const w = workspaceWarnings([
+      { host: 'zion', path: '~/src/x', present: true, dirty: 2, behind: 0, branch: 'main' },
+      { host: 'yosemite-s0', path: '~/src/x', present: true, behind: 40, upstream: 'origin/main', branch: 'main' },
+      { host: 'mac-mini', path: '~/src/x', present: false },
+    ]);
+    expect(w.find((x) => x.text.includes('missing'))?.severity).toBe('critical');
+    expect(w.find((x) => x.text.includes('40'))?.severity).toBe('critical');
+    expect(w.find((x) => x.text.includes('uncommitted'))?.severity).toBe('continue');
+  });
+
+  it('treats small behind as continue', () => {
+    const w = workspaceWarnings([
+      { host: 'zion', path: '~/src/x', present: true, behind: 2, upstream: 'origin/main' },
+    ]);
+    expect(w[0].severity).toBe('continue');
   });
 });

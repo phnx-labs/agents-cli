@@ -222,7 +222,7 @@ the exception.
   not qualify.)
 - **Harness parity for cross-agent features.** The CLI integrates many agent harnesses —
   Claude, Codex, Gemini, Cursor, OpenCode, OpenClaw, Grok, Droid, Copilot, Kiro, Goose,
-  Antigravity, Kimi, Forge. When a change adds or extends a capability that applies across
+  Antigravity, Kimi, Pi (Oh My Pi), Forge. When a change adds or extends a capability that applies across
   harnesses (subagents, hooks, MCP, allowlists, config sync, skills, workflows), it should
   cover **every** harness the capability applies to — or the PR states which are out of
   scope and why. Flag a diff that wires up two or three agents and silently skips the rest.

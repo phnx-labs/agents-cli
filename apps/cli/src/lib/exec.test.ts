@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, formatPaneTail, detectRateLimit, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, type TmuxWrapContext } from './exec.js';
+import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, formatPaneTail, detectRateLimit, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { mailboxDir } from './mailbox.js';
 
@@ -574,5 +574,67 @@ describe('resolveLaunchId', () => {
 
   it('mints a DISTINCT id each call when none is forwarded', () => {
     expect(resolveLaunchId(undefined)).not.toBe(resolveLaunchId(undefined));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// runInTmux exit-classification (RUSH-2185 / EXEC-23a)
+//
+// Three scenarios that must produce the right action.  The functions
+// shouldRecapDeadPane and isPaneKnownAliveFromQueryResult are pure extractions
+// of the decision logic inside runInTmux — testable without a real tmux process.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('shouldRecapDeadPane', () => {
+  // (a) Interactive exit-0 fast-fail — the harness exited cleanly without ever
+  // opening a REPL.  The user sees only a bare `[detached]`; we must surface a
+  // failure banner even though the exit code is 0.
+  it('(a) interactive exit-0 → true (harness never opened a REPL, surface a failure)', () => {
+    expect(shouldRecapDeadPane(0, true)).toBe(true);
+  });
+
+  it('(a) interactive exit-undefined (treated as 0) → true', () => {
+    expect(shouldRecapDeadPane(undefined, true)).toBe(true);
+  });
+
+  // (b) Nonzero exit (headless or interactive) — always recap, same as before.
+  it('(b) nonzero exit, headless → true (crash, must surface)', () => {
+    expect(shouldRecapDeadPane(1, false)).toBe(true);
+  });
+
+  it('(b) nonzero exit, interactive → true', () => {
+    expect(shouldRecapDeadPane(2, true)).toBe(true);
+  });
+
+  // Clean exit in a headless run — not a failure; stay quiet.
+  it('exit-0, headless → false (completed successfully before attach)', () => {
+    expect(shouldRecapDeadPane(0, false)).toBe(false);
+  });
+
+  it('exit-undefined, headless → false', () => {
+    expect(shouldRecapDeadPane(undefined, false)).toBe(false);
+  });
+});
+
+describe('isPaneKnownAliveFromQueryResult', () => {
+  // (c) Positive proof the pane is alive — tmux returned exactly "0".
+  it('(c) code=0 stdout="0" → true (pane is definitively alive)', () => {
+    expect(isPaneKnownAliveFromQueryResult(0, '0')).toBe(true);
+  });
+
+  it('(c) code=0 stdout="0\\n" → true (trailing newline is trimmed)', () => {
+    expect(isPaneKnownAliveFromQueryResult(0, '0\n')).toBe(true);
+  });
+
+  // Query failed (race with pane-died hook) — must NOT be treated as alive.
+  it('(c) code=1 → false (query failed, treat as unreadable/dead — no orphan)', () => {
+    expect(isPaneKnownAliveFromQueryResult(1, '')).toBe(false);
+  });
+
+  it('(c) code=0 stdout="1" → false (pane_dead=1, pane is dead)', () => {
+    expect(isPaneKnownAliveFromQueryResult(0, '1')).toBe(false);
+  });
+
+  it('(c) code=0 stdout="" → false (empty output, inconclusive)', () => {
+    expect(isPaneKnownAliveFromQueryResult(0, '')).toBe(false);
   });
 });

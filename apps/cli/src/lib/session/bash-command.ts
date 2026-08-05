@@ -3,9 +3,8 @@ import { split as shlexSplit } from 'shlex';
 /**
  * Parses the raw command strings agents pass to Bash tool calls into structured
  * metadata: the executable, category, subcommand, and a display summary. Used by
- * session rendering and the activity-log hook so `agents sessions` and
- * `agents activity` can summarize what actually happened instead of printing a
- * wall of shell.
+ * session rendering and the activity-log hook so `agents sessions` can
+ * summarize what actually happened instead of printing a wall of shell.
  */
 
 export type BashCategory =

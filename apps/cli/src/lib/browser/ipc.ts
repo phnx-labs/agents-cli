@@ -201,6 +201,8 @@ export class BrowserIPCServer {
           url: request.url,
           endpointName: request.endpoint,
           skipDomainSkill: request.skipDomainSkill,
+          actor: request.actor,
+          launchId: request.launchId,
         });
         return {
           ok: true,

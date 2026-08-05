@@ -127,7 +127,6 @@ const OWN_HOST_COMMANDS = new Set([
   'harnesses',
   'sessions',
   'feed',
-  'activity', // fans `--host`/`--device`/`--devices-all` out itself (feed-style)
   'computer',
   'secrets',
   'logs',
@@ -362,6 +361,20 @@ function renderFleetRoster(
   }
 }
 
+/**
+ * Prefix a fan-out remote command so the far side sees AGENTS_FLEET_REMOTE=1 —
+ * the same marker the single-target dispatch sets via env. `wrapRemoteCommand`
+ * joins the argv with spaces (POSIX) or base64-encodes it for PowerShell, so a
+ * shell-appropriate leading token rides through both: `env VAR=1 …` on POSIX,
+ * `$env:VAR='1'; …` on PowerShell. Only remote (non-self) targets get it; the
+ * self target runs locally and must stay ungated.
+ */
+export function markFleetRemote(cmd: string[], device: DeviceProfile): string[] {
+  return device.shell === 'powershell'
+    ? [`$env:AGENTS_FLEET_REMOTE='1';`, ...cmd]
+    : ['env', 'AGENTS_FLEET_REMOTE=1', ...cmd];
+}
+
 /** Run `agents <command> …` across every registered device and render the roster. */
 export async function runFleetPassthrough(
   command: string,
@@ -387,7 +400,13 @@ export async function runFleetPassthrough(
     async (target) => {
       const cmd = ['agents', ...forwarded];
       const isSelf = target.device.name.toLowerCase() === self.toLowerCase() || isSelfHost(target.device.name);
-      const res = isSelf ? localRunner(cmd) : runner(target.device, cmd);
+      // Only `browser` consults the fleet-remote marker (its consent gate), and
+      // the fan-out has no separate env channel — the marker must ride the argv.
+      // So scope the env-prefix to a REMOTE browser drive: every other command's
+      // remote argv stays byte-identical, and the self target is never gated.
+      const remoteCmd =
+        !isSelf && command === 'browser' ? markFleetRemote(cmd, target.device) : cmd;
+      const res = isSelf ? localRunner(cmd) : runner(target.device, remoteCmd);
       if (res.code !== 0) {
         const detail = (res.stderr || res.stdout || 'unreachable').trim().slice(0, 200);
         throw new Error(detail || 'unreachable');
@@ -573,7 +592,10 @@ export async function maybeRunOnHost(
   // UNDER the doctor PATH so that PATH still wins — without this the remote
   // re-resolves the actor from THIS box's SSH_CONNECTION and mis-credits it
   // (RUSH-2028). Flows to both POSIX (export) and Windows ($env:) dialects.
-  const env = withActorEnv(doctorPath);
+  // AGENTS_FLEET_REMOTE marks this as a fleet-dispatched `--host` run so the far
+  // side can gate consent-sensitive actions — the browser consent gate
+  // (lib/browser/remote-control.ts) reads it to allow/deny a cross-machine drive.
+  const env = withActorEnv({ ...doctorPath, AGENTS_FLEET_REMOTE: '1' });
   const remoteCmd = buildRemoteAgentsInvocation(forwarded, remoteCwd, remoteOs, env);
   const code = sshStream(target, remoteCmd, { tty: interactive, multiplex: true });
   if (code === 255) {

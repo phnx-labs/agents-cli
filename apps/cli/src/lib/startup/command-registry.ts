@@ -62,6 +62,7 @@ export const loadRestore: ModuleLoader = async () => (await import('../../comman
 export const loadDoctor: ModuleLoader = async () => (await import('../../commands/doctor.js')).registerDoctorCommand;
 export const loadApply: ModuleLoader = async () => (await import('../../commands/apply.js')).registerApplyCommand;
 export const loadStatus: ModuleLoader = async () => (await import('../../commands/status.js')).registerStatusCommand;
+export const loadSnapshot: ModuleLoader = async () => (await import('../../commands/snapshot.js')).registerSnapshotCommand;
 export const loadProfiles: ModuleLoader = async () => (await import('../../commands/profiles.js')).registerProfilesCommands;
 export const loadHarness: ModuleLoader = async () => (await import('../../commands/harness.js')).registerHarnessCommands;
 export const loadSecrets: ModuleLoader = async () => (await import('../../commands/secrets.js')).registerSecretsCommands;
@@ -103,7 +104,6 @@ export const loadCloud: ModuleLoader = async () => (await import('../../commands
 export const loadMessage: ModuleLoader = async () => (await import('../../commands/message.js')).registerMessageCommand;
 export const loadSend: ModuleLoader = async () => (await import('../../commands/send.js')).registerSendCommand;
 export const loadFeed: ModuleLoader = async () => (await import('../../commands/feed.js')).registerFeedCommand;
-export const loadActivity: ModuleLoader = async () => (await import('../../commands/activity.js')).registerActivityCommand;
 export const loadMailboxes: ModuleLoader = async () => (await import('../../commands/mailboxes.js')).registerMailboxesCommand;
 export const loadServe: ModuleLoader = async () => (await import('../../commands/serve.js')).registerServeCommand;
 export const loadShare: ModuleLoader = async () => (await import('../../commands/share.js')).registerShareCommands;
@@ -175,6 +175,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   doctor: [loadDoctor],
   apply: [loadApply],
   status: [loadStatus],
+  snapshot: [loadSnapshot],
   profile: [loadProfiles],
   profiles: [loadProfiles],
   harness: [loadHarness],
@@ -229,7 +230,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   send: [loadSend],
   notify: [loadSend],
   feed: [loadFeed],
-  activity: [loadActivity],
   mailboxes: [loadMailboxes],
   mailbox: [loadMailboxes],
   serve: [loadServe],

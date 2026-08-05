@@ -157,6 +157,7 @@ import {
   loadDoctor,
   loadApply,
   loadStatus,
+  loadSnapshot,
   loadProfiles,
   loadHarness,
   loadSecrets,
@@ -197,7 +198,6 @@ import {
   loadShare,
   loadSend,
   loadFeed,
-  loadActivity,
   loadMailboxes,
   type ModuleLoader,
 } from './lib/startup/command-registry.js';
@@ -432,6 +432,8 @@ Credentials and profiles:
 
 Diagnostics:
   doctor [agent[@version]]        Diagnose CLI availability, sync status, and resource divergence; --check for the CI drift gate
+  status                          Unified sync status (drift/missing) — not the live fleet snapshot
+  snapshot                        One-process poll: inventory + active sessions (+ optional feed/sync)
   usage [agent]                   Show rate-limit and quota usage per agent
   perf                            Latency rollups (hooks, commands, runs) from the disposable perf warehouse
 
@@ -1093,6 +1095,7 @@ async function registerAllEagerCommands(): Promise<void> {
   registerCheckTombstoneCommand(program);
   await reg(loadApply);
   await reg(loadStatus);
+  await reg(loadSnapshot);
   registerExecAliasCommand(program);
   await reg(loadProfiles);
   await reg(loadHarness);
@@ -1127,7 +1130,6 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadFunnel);
   registerHqTombstoneCommand(program);
   await reg(loadFeed);
-  await reg(loadActivity);
   await reg(loadMailboxes);
   await reg(loadSsh);
   registerJobsCronAliasCommand(program, 'jobs');

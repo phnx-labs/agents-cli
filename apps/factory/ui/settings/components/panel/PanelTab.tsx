@@ -534,7 +534,7 @@ export function PanelTab({
                 </label>
               ))}
               <label className="sw-panel-rocker">
-                <span>Markdown Viewer</span>
+                <span>Reader (.md + .html)</span>
                 <button
                   type="button"
                   className="toggle-switch"

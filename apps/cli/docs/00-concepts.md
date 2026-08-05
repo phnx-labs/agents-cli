@@ -216,6 +216,17 @@ contract.
 | Kimi | yes | yes | yes | yes | no | yes | yes | `AGENTS.md` | yes |
 | Droid | yes | yes | >= 0.57.5 | >= 0.26.0 | yes | yes | yes | `AGENTS.md` | no |
 | Hermes | no | yes | yes | yes | no | yes | no | `MEMORY.md` | no |
+| Pi (Oh My Pi) | no | yes | no | yes | yes | no | yes | `AGENTS.md` | no |
+
+Pi (`omp`) is Claude-compatible — it natively reads `.claude/commands`, `.mcp.json`, and
+Claude-shaped subagents, and keeps its own native resources under `~/.omp/agent/`
+(skills, commands, `agents/`, the `AGENTS.md` context file, and `.mcp.json`). Its MCP
+covers stdio + http + headers. Hooks are off (omp hooks are per-tool JS/TS extension
+modules, not event→shell-command registrations); allowlist is off (approval is per-TOOL
+only via `tools.approval`, no command/path patterns); plugins are off (npm/TS modules, not
+the Claude marketplace manifest). Its cross-provider model catalog (OpenRouter, OpenAI,
+Anthropic, xAI, DeepSeek, …) surfaces in `agents view` / `agents models pi` via
+`omp models --json`.
 
 **Gemini is hard-deprecated.** Google retired the Gemini CLI for free/Pro/Ultra
 tiers on June 18, 2026 (announced at Google I/O 2026); Antigravity CLI

@@ -10,6 +10,7 @@ import {
 } from './agents.vscode';
 import * as claudemd from './claudemd.vscode';
 import { AgentsMarkdownEditorProvider, swarmCurrentDocument } from './customEditor';
+import { AgentsHtmlReaderProvider } from './htmlReader';
 import * as git from './git.vscode';
 import { AgentSettings, hasLoginEnabled, PromptEntry, QUICK_LAUNCH_SLOT_KEYS, getQuickLaunchSlot, QuickLaunchSlot, QuickLaunchSlotKey } from '../core/settings';
 import { listRegisteredDevices, countRunningAgents, fetchDeviceStats, resolveSecret } from './deviceHealth.vscode';
@@ -170,6 +171,7 @@ async function ensureAgentsCliInstalled(): Promise<void> {
 import { supportsPrewarming, buildVersionedResumeCommand, exitSequenceFor } from '../core/prewarm';
 import { generateClaudeSessionId, listOpencodeSessions } from '../core/prewarm.simple';
 import { liveSessionIdForShell } from '../core/liveSession';
+import { displayIdentity } from '../core/statusIdentity';
 import { getSessionPathBySessionId, getSessionPreviewInfo, getOpenCodeSessionPreviewInfo, getCursorSessionPreviewInfo } from './sessions.vscode';
 import * as tasksImport from './tasks.vscode';
 import { SOURCE_BADGES } from '../core/tasks';
@@ -1489,14 +1491,19 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Register custom markdown editor
+  // Register custom markdown + HTML readers
   try {
     context.subscriptions.push(
       AgentsMarkdownEditorProvider.register(context)
     );
   } catch (error) {
     // Editor already registered (hot reload) - continue activation
-    console.log('Custom editor already registered, continuing...');
+    console.log('Custom markdown editor already registered, continuing...');
+  }
+  try {
+    context.subscriptions.push(AgentsHtmlReaderProvider.register(context));
+  } catch (error) {
+    console.log('Custom HTML reader already registered, continuing...');
   }
 
   try {
@@ -1729,7 +1736,9 @@ export async function activate(context: vscode.ExtensionContext) {
         editor: { ...(current.editor ?? { markdownViewerEnabled: true }), markdownViewerEnabled: true }
       };
       await settings.saveSettings(context, next);
-      vscode.window.showInformationMessage('Markdown reader enabled. .md files will open in the Agents Markdown Editor.');
+      vscode.window.showInformationMessage(
+        'Agents Reader enabled. .md opens in the Notion-style editor; .html opens as a rendered preview.'
+      );
       await updateContextKeys(context);
     })
   );
@@ -1742,7 +1751,9 @@ export async function activate(context: vscode.ExtensionContext) {
         editor: { ...(current.editor ?? { markdownViewerEnabled: true }), markdownViewerEnabled: false }
       };
       await settings.saveSettings(context, next);
-      vscode.window.showInformationMessage('Markdown reader disabled. .md files will open in the default text editor.');
+      vscode.window.showInformationMessage(
+        'Agents Reader disabled. .md and .html open in the default text editor.'
+      );
       await updateContextKeys(context);
     })
   );
@@ -4321,10 +4332,6 @@ async function tryFetchLabelOnFocus(
   }
 }
 
-function normalizeStatusEmail(email: string | null | undefined): string | undefined {
-  const trimmed = email?.replace(/[<>]/g, '').trim();
-  return trimmed || undefined;
-}
 
 function formatAgentStatusBarText(
   expandedName: string,
@@ -4381,26 +4388,40 @@ async function tryHydrateSessionIdentity(
     // The terminal may have moved on to another session while this was queued;
     // never stamp a stale session's identity over the current one.
     if (entry.sessionId && entry.sessionId !== sessionId) return;
-    if (identity.version) terminals.setVersion(terminal, identity.version);
-    if (identity.account) terminals.setAccount(terminal, identity.account);
+    // Apply the resolved record AUTHORITATIVELY, clearing a field the session does
+    // not carry. A Kimi/Grok session has no version or account, so a value left
+    // over from a prior binding in this terminal (e.g. a stale 2.1.218) must be
+    // cleared, not preserved by an `if (identity.version)` guard. The early return
+    // above protects an already-resolved identity from a transient partial fetch.
+    terminals.setVersion(terminal, identity.version);
+    terminals.setAccount(terminal, identity.account);
     // An `agents run auto` rotate spawns with the harness unknown (the CLI
     // picks it at launch) and the outgoing harness stamped as a prior — the
     // feed's record is the truth, so correct the stamp when they differ.
     if (identity.agent && identity.agent !== entry.agentType) {
       terminals.setAgentType(terminal, identity.agent as SessionAgentType);
     }
-    // Only mark this session's identity resolved once BOTH fields came back, so a
-    // transient partial result (e.g. account not yet indexed) is retried on the
-    // next tick instead of leaving the missing field frozen for the session.
+    // Two distinct markers, because "displayable" and "fully resolved" differ:
+    //   - identityAppliedSessionId: the version/account cached above were applied
+    //     FOR this session (even if a field is null — Grok has a version but no
+    //     account, Kimi has neither). displayIdentity gates on this, so the status
+    //     bar shows only the current session's identity and a prior binding's
+    //     leftover is withheld.
+    //   - identitySessionId: BOTH fields present. The call sites re-invoke this
+    //     function while it differs from the live id, so an account that the CLI
+    //     indexes a beat after the version (Claude/Codex) is still filled by a
+    //     later fetch instead of freezing blank.
+    entry.identityAppliedSessionId = sessionId;
     if (identity.version && identity.account) entry.identitySessionId = sessionId;
 
     if (!agentStatusBarItem || vscode.window.activeTerminal !== terminal) return;
     const rawLabel = entry.label;
     const displayLabel = rawLabel ? rawLabel.replace(/<[^>]*>/g, '').trim() : null;
+    const { version, account } = displayIdentity(entry, entry.sessionId);
     agentStatusBarItem.text = formatAgentStatusBarText(
       getExpandedAgentName(prefix),
-      entry.version,
-      normalizeStatusEmail(entry.account),
+      version,
+      account,
       displayLabel,
       entry.sessionId,
       entry.agentType === 'codex',
@@ -4450,10 +4471,11 @@ async function tryHydrateLiveSessionId(
     if (!agentStatusBarItem || vscode.window.activeTerminal !== terminal) return;
     const rawLabel = entry.label;
     const displayLabel = rawLabel ? rawLabel.replace(/<[^>]*>/g, '').trim() : null;
+    const { version, account } = displayIdentity(entry, liveId);
     agentStatusBarItem.text = formatAgentStatusBarText(
       getExpandedAgentName(prefix),
-      entry.version,
-      normalizeStatusEmail(entry.account),
+      version,
+      account,
       displayLabel,
       liveId,
       entry.agentType === 'codex',
@@ -4478,8 +4500,7 @@ function updateStatusBarForTerminal(terminal: vscode.Terminal, extensionPath: st
     // Show immediate status bar with current data
     const rawLabel = entry?.label;
     const displayLabel = rawLabel ? rawLabel.replace(/<[^>]*>/g, '').trim() : null;
-    const version = entry?.version || entry?.statusVersion;
-    const account = normalizeStatusEmail(entry?.account || entry?.statusAccount);
+    const { version, account } = displayIdentity(entry, sessionId);
     agentStatusBarItem.text = formatAgentStatusBarText(
       expandedName,
       version,
