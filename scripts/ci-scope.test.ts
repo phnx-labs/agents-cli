@@ -1,8 +1,45 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { classifyCiScope, formatGitHubOutputs } from './ci-scope';
+import { dirname, join } from 'node:path';
+import {
+  changedFilesBetween,
+  classifyCiScope,
+  formatGitHubOutputs,
+} from './ci-scope';
+
+function git(cwd: string, ...args: string[]): string {
+  const proc = Bun.spawnSync({
+    cmd: ['git', ...args],
+    cwd,
+    env: {
+      ...process.env,
+      GIT_AUTHOR_EMAIL: 'ci-scope@example.invalid',
+      GIT_AUTHOR_NAME: 'CI Scope Test',
+      GIT_COMMITTER_EMAIL: 'ci-scope@example.invalid',
+      GIT_COMMITTER_NAME: 'CI Scope Test',
+    },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (proc.exitCode !== 0) {
+    throw new Error(Buffer.from(proc.stderr).toString('utf8'));
+  }
+  return Buffer.from(proc.stdout).toString('utf8').trim();
+}
+
+function writeFixture(root: string, file: string): void {
+  const target = join(root, file);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, `${file}\n`);
+}
 
 describe('classifyCiScope', () => {
   test('runs only CLI checks for CLI source', () => {
@@ -104,5 +141,61 @@ test('the executable writes GitHub outputs from NUL-delimited git paths', () => 
     }));
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('changedFilesBetween ignores changes made only on the updated base branch', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agents-ci-merge-base-'));
+  const repo = join(dir, 'repo');
+  const headWorktree = join(dir, 'head');
+  try {
+    mkdirSync(repo);
+    git(repo, 'init', '-b', 'main');
+    writeFixture(repo, 'README.md');
+    git(repo, 'add', 'README.md');
+    git(repo, 'commit', '-m', 'base');
+    const mergeBase = git(repo, 'rev-parse', 'HEAD');
+
+    git(repo, 'worktree', 'add', '-b', 'pr-head', headWorktree, mergeBase);
+    writeFixture(headWorktree, 'apps/factory/src/extension.ts');
+    git(headWorktree, 'add', 'apps/factory/src/extension.ts');
+    git(headWorktree, 'commit', '-m', 'factory change');
+    const head = git(headWorktree, 'rev-parse', 'HEAD');
+
+    writeFixture(repo, 'apps/cli/src/lib/base-only.ts');
+    git(repo, 'add', 'apps/cli/src/lib/base-only.ts');
+    git(repo, 'commit', '-m', 'base-only change');
+    const updatedBase = git(repo, 'rev-parse', 'HEAD');
+
+    expect(changedFilesBetween(updatedBase, head, repo)).toEqual([
+      'apps/factory/src/extension.ts',
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('changedFilesBetween keeps both sides of a cross-component rename', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'agents-ci-rename-'));
+  try {
+    git(repo, 'init', '-b', 'main');
+    const oldPath = 'apps/cli/src/lib/hooks.ts';
+    const newPath = 'website/hooks.ts';
+    writeFixture(repo, oldPath);
+    git(repo, 'add', oldPath);
+    git(repo, 'commit', '-m', 'base');
+    const base = git(repo, 'rev-parse', 'HEAD');
+
+    mkdirSync(join(repo, 'website'), { recursive: true });
+    renameSync(join(repo, oldPath), join(repo, newPath));
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-m', 'move hook');
+    const head = git(repo, 'rev-parse', 'HEAD');
+
+    const files = changedFilesBetween(base, head, repo);
+    expect(files.sort()).toEqual([oldPath, newPath].sort());
+    expect(classifyCiScope(files)).toMatchObject({ cli: true, windows: true });
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
   }
 });
