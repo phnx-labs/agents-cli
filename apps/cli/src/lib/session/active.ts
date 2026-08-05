@@ -120,6 +120,8 @@ export interface ActiveSession {
   pid?: number;
   sessionId?: string;
   cwd?: string;
+  /** Project/repo key derived from cwd, when known. */
+  project?: string | null;
   /** User-given name from /rename command. */
   label?: string;
   /** Durable `agents run --name` launch handle, when the run was named. */

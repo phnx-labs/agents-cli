@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.22.6
+
+- **Cost tiers are ignored (with a clear warning) for profile runs.** A profile's model comes from its endpoint (e.g. Kimi/DeepSeek/GLM via `agents run <profile>`), not the host harness's catalog — so passing `--model cheap|default|best|ultra` to a profile used to resolve against the *host* harness and forward an incompatible model id to the profile's endpoint. Now a tier on a profile run is discarded with a standout warning and the profile's configured model is used. Concrete `--model <id>` on a profile is unchanged. Source: `apps/cli/src/commands/exec.ts`.
+
 ## 1.22.5
 
 - **`agents events` can now filter by `--session <id>` and `--bundle <name>` — trace which agent/session triggered a secret access.** Every event already carries the provenance `sessionId`, and secrets events carry the `bundle` in their payload, but neither was queryable: you could see *that* the `share` bundle was read, not *which session* read it. `--session` (wired to the engine's existing `sessionId` filter) and `--bundle` (a new payload filter across both the operational log and the activity stream) close that gap. `agents events --module secrets --bundle share --session <id>` answers "which agent read the share bundle" — the attribution the Touch ID storm investigation needed, since the macOS biometric sheet itself emits no event. Source: `apps/cli/src/lib/event-stream.ts`, `apps/cli/src/commands/events.ts`, `apps/cli/docs/06-observability.md`.

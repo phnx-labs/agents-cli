@@ -357,17 +357,29 @@ switch cmd {
 
 case "list":
     // list <prefix> — enumerate generic-password items whose service starts
-    // with <prefix> for the current user. Returns attributes only (never
-    // data), so it never decrypts and never prompts.
+    // with <prefix> for the current user. Returns attributes only (never data),
+    // so it never decrypts — but it MUST also never prompt, because `secrets
+    // list` and pre-value bundle resolution run this constantly (menubar polling,
+    // the watchdog, every interactive command), and a Touch ID sheet per call is
+    // the prompt storm this verb caused (SEC-14).
     //
-    // Two passes, because no single query covers both keychains: items written
-    // by `set` carry a biometry ACL, which forces them into the data-protection
-    // keychain, and a query with kSecUseAuthenticationUIFail skips the DP
-    // keychain entirely (it errors with errSecInteractionNotAllowed before
-    // returning anything). The DP pass therefore omits the UI key — safe only
-    // because kSecReturnAttributes without kSecReturnData never evaluates the
-    // ACL. Do NOT drop the explicit return key: with no kSecReturn* at all,
-    // SecItemCopyMatching evaluates the ACL anyway and blocks on Touch ID.
+    // Two passes, because no single query covers both keychains: items written by
+    // `set` carry a biometry ACL, which forces them into the data-protection
+    // keychain, while pre-migration items still live in the file-based one.
+    //
+    // Both passes MUST pin an explicit no-UI policy. The earlier belief that
+    // `kSecReturnAttributes` without `kSecReturnData` never evaluates the ACL is
+    // empirically FALSE on the DP keychain: a kSecMatchLimitAll enumeration that
+    // sweeps past a biometry-ACL'd VALUE item evaluates its ACL and, under the
+    // default kSecUseAuthenticationUIAllow, shows a real sheet — even though the
+    // caller only wants the no-ACL metadata/hmackey items (which are all `secrets
+    // list` needs; bundle names come from the `agents-cli.h.<ns>.m` metadata,
+    // never the value items). The fix is kSecUseAuthenticationUISkip on the DP
+    // pass: it returns the no-ACL items and silently SKIPS the ACL'd ones with no
+    // UI. UIFail is wrong here — it errors the whole DP query wholesale
+    // (errSecInteractionNotAllowed) and drops the metadata too; UISkip is
+    // per-item. The file pass keeps UIFail (a UIFail miss there is a clean
+    // errSecItemNotFound, not a wholesale error).
     guard args.count == 3 else { die(2, "Usage: agents-keychain list <prefix>") }
     let prefix = args[2]
     guard !prefix.isEmpty else { die(2, "list requires non-empty prefix") }
@@ -380,14 +392,15 @@ case "list":
     ]
     // DP pass is UN-pinned (no kSecAttrAccessGroup): it spans the concrete group
     // AND any pre-#279 orphan group, so bundles whose metadata is orphaned still
-    // appear in `secrets list` instead of vanishing. Attributes-only, so it never
-    // decrypts or prompts regardless of group.
+    // appear in `secrets list` instead of vanishing. UISkip keeps it prompt-free
+    // while still returning every no-ACL metadata item.
     let dpQuery: [CFString: Any] = [
         kSecClass: kSecClassGenericPassword,
         kSecMatchLimit: kSecMatchLimitAll,
         kSecReturnAttributes: kCFBooleanTrue!,
         kSecUseDataProtectionKeychain: kCFBooleanTrue!,
         kSecAttrSynchronizable: kCFBooleanFalse!,
+        kSecUseAuthenticationUI: kSecUseAuthenticationUISkip,
     ]
     var items: [[String: Any]] = []
     for query in [fileQuery, dpQuery] {
@@ -661,8 +674,11 @@ case "list-orphans":
     // list-orphans <prefix> <account> — enumerate data-protection items whose
     // service starts with <prefix> for <account> that live under a NON-concrete
     // access group (pre-#279 orphans filed under the implicit default group).
-    // Attributes only — never decrypts, never prompts. Prints one orphaned
-    // service per line; used by `migrate-acl` for its prompt-free dry-run report.
+    // Attributes only — never decrypts. Unlike `list`, this keeps the default
+    // UIAllow: an ACL'd orphan MUST stay visible here so `migrate-acl` can re-home
+    // it, so a kSecMatchLimitAll sweep past a biometry-ACL'd item may pop one sheet
+    // — acceptable because this runs only from the interactive `secrets migrate`
+    // command, never the hot path. Prints one orphaned service per line.
     guard args.count == 4 else { die(2, "Usage: agents-keychain list-orphans <prefix> <account>") }
     let (prefix, account) = (args[2], args[3])
     guard !prefix.isEmpty else { die(2, "list-orphans requires non-empty prefix") }
@@ -797,8 +813,11 @@ case "list-synced":
     // generic-password items whose service starts with <prefix> for the current
     // user. These are pre-biometry-era bundles orphaned by the device-local
     // cutover; every modern query pins kSecAttrSynchronizable false, so this is
-    // the only verb that can see them. Attributes only — never decrypts, never
-    // prompts. Prints one service name per line.
+    // the only verb that can see them. Attributes only — never decrypts, and
+    // never prompts: a synchronizable item cannot carry the biometry ACL
+    // (kSecAttrSynchronizable is mutually exclusive with the ...ThisDeviceOnly
+    // accessibility the ACL requires — see `get-batch-synced`), so this sweep has
+    // no ACL to evaluate. Prints one service name per line.
     guard args.count == 3 else { die(2, "Usage: agents-keychain list-synced <prefix>") }
     let prefix = args[2]
     guard !prefix.isEmpty else { die(2, "list-synced requires non-empty prefix") }

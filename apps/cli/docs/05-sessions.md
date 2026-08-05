@@ -9,6 +9,26 @@ the session-discoverable harnesses — Claude, Codex, Gemini, Antigravity, OpenC
 OpenClaw, Rush, Hermes, Grok, Kimi, Droid, and Cursor (the `SESSION_AGENTS` set in
 `src/lib/session/types.ts`).
 
+## Session lifecycle verbs
+
+These subcommands sit on one axis (get back into a conversation). They are **not**
+interchangeable — pick the verb for the intent:
+
+| Intent | Verb |
+| --- | --- |
+| Jump to a **live** session (attach its terminal, or open a new tab and resume a copy) | `agents sessions focus [id]` |
+| Attach only — never open a new tab / fork a copy | `agents sessions focus [id] --attach-only` |
+| Deprecated alias of focus --attach-only | `agents sessions go` (prints a deprecation notice) |
+| Interactive → **headless** (keep working unattended) | `agents sessions detach <id>` |
+| Headless → **interactive** in this terminal | `agents sessions attach <id>` |
+| Multi-select history and open each in a tab/split | `agents sessions resume [query]` |
+| Continue one session from a script / `run` path | `agents run <agent> --resume <id> …` |
+
+`focus` is the default “take me there” for a live process. `attach` / `detach` are
+the presence pair (foreground ↔ background). `resume` is the multi-open / history
+path. Detail in **Background & foreground (detach / attach)** below, and
+`agents sessions --help`.
+
 ## Architecture
 
 ```

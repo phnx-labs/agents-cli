@@ -328,6 +328,9 @@ export const SUBAGENT_TARGETS: Partial<Record<AgentId, SubagentTarget>> = {
   // Tier 1 -- flat markdown, Claude-compatible flatten.
   claude: flatFile({ subdir: ['.claude', 'agents'], ext: '.md', transform: transformSubagentForClaude }),
   grok: flatFile({ subdir: ['.grok', 'agents'], ext: '.md', transform: transformSubagentForClaude }),
+  // Oh My Pi discovers Claude-shaped agent markdown from ~/.omp/agent/agents/
+  // (`omp agents unpack` writes there); frontmatter name/description + body.
+  pi: flatFile({ subdir: ['.omp', 'agent', 'agents'], ext: '.md', transform: transformSubagentForClaude, readMeta: metaFrontmatterFallback }),
   droid: flatFile({ subdir: ['.factory', 'droids'], ext: '.md', transform: transformSubagentForDroid }),
   // Bespoke frontmatter/format, still one flat file.
   codex: flatFile({ subdir: ['.codex', 'agents'], ext: '.toml', transform: transformSubagentForCodex }),

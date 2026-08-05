@@ -166,6 +166,15 @@ describe('stampBlockOutcomes', () => {
 });
 
 describe('enrichBlockFromSession', () => {
+  it('fills missing project from session meta, never overwrites', () => {
+    const bare = makeBlock('s-project');
+    const filled = enrichBlockFromSession(bare, { project: 'agents-cli' });
+    expect(filled.project).toBe('agents-cli');
+
+    const kept = enrichBlockFromSession(makeBlock('s-project-keep', { project: 'factory' }), { project: 'agents-cli' });
+    expect(kept.project).toBe('factory');
+  });
+
   it('fills missing ticket/PR/worktree from session meta, never overwrites', () => {
     const bare = makeBlock('s1');
     const filled = enrichBlockFromSession(bare, {

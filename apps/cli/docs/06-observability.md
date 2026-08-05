@@ -6,7 +6,7 @@ Using agents-cli as a programmatic observability layer for agent fleets.
 
 ## Command roles at a glance
 
-Six surfaces **read** the fleet's activity; each has one job. Reach for the one
+Five surfaces **read** the fleet's activity; each has one job. Reach for the one
 whose *consumer* and *axis* match your question, not whichever you remember first.
 
 | Command | Role (one line) | Source | Consumer |
@@ -14,8 +14,7 @@ whose *consumer* and *axis* match your question, not whichever you remember firs
 | **`events`** | **Raw unified event stream = the audit log.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. | `events.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
 | **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
 | **`trends`** | **Usage analytics.** Harness/model mix, tools per session, token ratios, hottest secrets/browser profiles — baked recipes over sessions + a durable resource warehouse. Distinct from quota (`agents usage`) and latency (`agents perf`). | `sessions.db` + `~/.agents/.history/analytics/usage.db` | Humans + `--json` |
-| **`feed`** | **Consolidated cross-agent surface.** Open blocks (decisions agents are waiting on) + `feed post` status updates — "what needs you / what are agents saying." | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
-| **`activity`** | **Human milestone timeline.** Recent plans / PRs / worktrees / sub-agents, plus Bash-driven deliverables (video renders, image upscales, metadata edits), newest-first — a friendly lens on the milestone tier of the event stream. Every Bash call also emits a structured `bash.executed` activity record carrying its tool category. | `activity/*.jsonl` | Human at the terminal |
+| **`feed`** | **Consolidated cross-agent surface.** Open blocks (decisions agents are waiting on) + `feed post` status updates — "what needs you / what are agents saying." Scope to one project with `--project`. | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
 | **`sessions`** | **Live agent roster + transcripts.** Which agents are running right now and their state; browse/read past conversation transcripts. A live process probe + transcript index, not an event log. | live pid/transcript probe + `sessions.db` | Human + `--json` |
 
@@ -27,7 +26,7 @@ Outbound names that look interchangeable are three different planes:
 |---|---|---|
 | **Deliver** | `agents send` / `agents notify` | Put a message in front of a recipient (`--to`, `--text`, `--channel`, `--attach`, `--url`). `notify` ≡ `send --to owner` (`notify.owner` in agents.yaml). |
 | **Record** | `agents feed post` | Append a status/milestone (and optional OpenBlock). May **forward** via `feed.broadcast` sinks that call `send`/`notify`. |
-| **Observe** | `agents activity` | **Read** the activity stream — not a send path. |
+| **Observe** | `agents feed --filter updates` / `agents feed --filter all` | **Read** the activity stream — not a send path. |
 | **Control** | `agents message` / `agents sessions inject` | Act on a running agent (mailbox answer vs terminal keystroke). Stay separate from `send`. |
 
 ```bash
@@ -331,8 +330,8 @@ variable is a scripting mistake, not a request for the whole stream.
   not, carrying `ttlMs` and the `agent` scope (`*` = a global grant).
 
 Both are audit-level and **not** milestones, so they land in `agents events` and
-the persisted audit log without cluttering the curated `agents activity` /
-`agents feed`. Every record carries a `source` telling you HOW it was read or
+the persisted audit log without cluttering the curated `agents feed` updates /
+activity lane. Every record carries a `source` telling you HOW it was read or
 granted — `keychain` (real Touch-ID read), `agent` (served from the unlocked
 broker), `session` (durable snapshot after a restart), `reveal`, `raw-item`,
 `sync-push`, `remote` (with the `host`), `broker`/`broker+durable` (an unlock
@@ -770,9 +769,11 @@ irreducibility, so a fresh cheap ask does not outrank an old critical-path block
 `--filter <view>` selects what the surface shows:
 
 ```bash
-agents feed                     # needs (default): open blocks — decisions agents wait on
-agents feed --filter updates    # only deliberate progress posts (see Status posts below)
-agents feed --filter all        # blocks first, then the updates view appended
+agents feed                              # needs (default): open blocks — decisions agents wait on
+agents feed --filter updates             # only deliberate progress posts (see Status posts below)
+agents feed --filter all                 # blocks first, then the updates view appended
+agents feed --project agents-cli         # scope blocks + updates to one repo/project
+agents feed --filter updates --project agents-cli  # project's progress posts only
 ```
 
 `--filter updates` skips the block pipeline (no stall suppression, no dispatch
@@ -781,6 +782,14 @@ whichever box ran it, so the fleet's posts merge into one recency-ordered list.
 `-H/--host` (alias `--device`) scopes it to named machines; `--local` (or
 `AGENTS_FEED_LOCAL=1`) keeps it to this box. Its `--json` emits the raw
 `status.posted` events.
+
+`--project <name>` scopes every part of the feed — open blocks, the updates view,
+and the trailing activity lane — to one repo/project. It matches the worktree-aware
+project key (`lib/project-key.ts`), so a worktree under `<repo>/.agents/worktrees/`
+folds back into `<repo>`. Filtering is done locally after the fleet fan-out, so
+older peers that do not recognize the flag still contribute their full payload and
+the requesting box narrows it. The masthead reads `<project> needs you` / `<project>
+updates` when a project is set.
 
 The `limit` on this view counts **posts**, not raw events: the event filter is
 pushed into `readRecentActivity` (`events` / `tier` options) rather than applied
@@ -842,8 +851,8 @@ agents feed post --title "Manual note" "context for the next agent" --session <s
 ```
 
 Each post appends a `status.posted` **milestone** to
-`~/.agents/.history/activity/<sessionId>.jsonl` — the same activity stream
-`agents activity` and the feed’s recent-activity lane already read. It does
+`~/.agents/.history/activity/<sessionId>.jsonl` — the same activity stream the
+feed’s recent-activity lane reads. It does
 **not** create a feed block. Domain facts (tickets, PRs) are not CLI flags;
 join them from the session index / live session enrichment at read time.
 
@@ -897,8 +906,7 @@ failing among several is only a warning, since the channels are redundant.
 - **Rich render.** A `status.posted` event renders multi-line — `agent · session ·
   host · project` chips, the message, an attachment row with per-kind glyphs, and a
   `↳ ag focus/sessions` hint — in the `feed post` echo, the feed activity lane,
-  `agents feed --filter updates`, and `agents activity`. Other milestones keep the
-  compact one-line form.
+  `agents feed --filter updates`. Other milestones keep the compact one-line form.
 
 Identity resolution order: `--session` → `AGENT_SESSION_ID` /
 `AGENTS_SESSION_ID` / mailbox basename → `AGENT_LAUNCH_ID` match in the pid
@@ -1012,64 +1020,20 @@ with the fallback available — the fallback follows the same `minLevel` contrac
 every sink already does — and writing an actual `feed.broadcast` block always
 wins outright over the fallback.
 
-### Activity lane (`agents activity`) — progress at a glance, fleet-wide
+### Activity lane (inside `agents feed`)
 
-`agents activity` reads the same append-only activity stream (never re-parsing
-transcripts), across the whole fleet, bucketed by project:
+The milestone timeline previously surfaced by the standalone `agents activity` (now a tombstone redirect)
+command is now part of `agents feed`. The same append-only activity stream is
+read, but it is rendered as a compact lane under the block view or in full via
+`--filter updates` / `--filter all`:
 
 ```bash
-agents activity                    # the whole fleet, by project (default)
-agents activity --local            # just this machine
-agents activity --flat             # one newest-first stream
-agents activity --host yosemite-s1 # one box over SSH (--device is an alias)
-agents activity --filter RUSH-2100 # one ticket, fleet-wide
-agents activity --group-by device  # by machine instead of project
-agents activity --milestones       # only plans / PRs / worktrees / sub-agents
+agents feed --filter all     # open blocks, then the milestone/updates lane
+agents feed --filter updates # deliberate status.posted progress posts only
 ```
 
-- **Fleet fan-out is the default.** Agents run on every box, so every invocation
-  runs the same `activity --json` on each reachable device and merges the peers'
-  streams host-tagged (feed-style, via `gatherRemoteAgentsJson`). `--local` scopes
-  to this machine, `-H/--host` / `--device` to named boxes; `--devices-all` /
-  `--hosts-all` remain accepted no-ops. A peer answering the fan-out carries the
-  `AGENTS_ACTIVITY_LOCAL` guard so it never re-fans out. Peers that don't answer
-  are named once in a trailing `· N devices unreachable: …` line — never dropped
-  silently, never a line each above the timeline.
-- **Grouping is by project by default.** `--group-by project|device|agent|none`
-  picks the dimension; `--flat` (or `--group-by none`) restores the single
-  newest-first stream. There is no sub-grouping: one level, and each project
-  header names the machines its work ran on
-  (`▸ agents-cli  12 events · 4 milestones · zion, yosemite-s0`, capped at three
-  names plus a `+N` tail). `--filter <text>` narrows by project / device / agent /
-  event / ticket.
-- **Projects are defined projects first, repositories otherwise.** A cwd inside a
-  defined project (`~/.agents/projects/<name>.yaml`, see docs/11-projects.md)
-  reads as that project's NAME — so a multi-repo project is one bucket, not one
-  per repo. Anything else resolves to the git repository containing it
-  (`resolveProjectKey`, `lib/project-key.ts`), so `<repo>/apps/cli` files under
-  `<repo>` and a worktree under `<repo>/.agents/worktrees/<slug>` folds back into
-  the repo it branched from. A directory in no repo groups as itself, and a
-  dotfiles repo at `$HOME` is deliberately not treated as a project. This one
-  resolver (`resolveProjectNameForCwd`, `lib/projects.ts`) is shared by the
-  activity timeline, `agents feed post`, and the `agents sessions` overview, so
-  a project reads identically in all three. Each machine resolves its own paths
-  — a peer stamps the project before its events cross the wire. `--project
-  <name>` narrows the stream to one project (exact match on this resolved
-  label).
-- **`--limit` caps milestones, not churn.** The default view collapses routine
-  `file.edited` work to a count, so `-n` bounds the milestones shown and the
-  routine events inside that window ride along for the counts
-  (`capActivityEvents`). Without this, one box editing 40 files hid every other
-  device's PRs behind a single `file edited ×40` line. `--all` shows routine work
-  inline and makes `-n` a plain event cap.
-- **Enrichment (the join, not transcript parsing).** Each item is joined to live
-  sessions for the **project**, the **execution host** (`provenance.host` — the box
-  it actually runs on), and the **Linear ticket** (`ActiveSession.ticket`).
-  `--json` is a mergeable per-host payload carrying these enriched fields.
-- **Only failures of its own hooks are reported.** Registering the activity-log
-  hooks surfaces unrelated manifest problems (a missing `inject-session-id`
-  script, a half-installed plugin); those belong to `agents doctor` and are not
-  printed above the timeline.
+The lane still shows plans, PRs, worktrees, sub-agents, and deliberate
+`agents feed post` progress — just through `agents feed`, not a separate command.
 
 ### Live tail (`--watch`, `-f`) — the money shot
 

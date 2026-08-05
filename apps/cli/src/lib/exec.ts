@@ -637,6 +637,25 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     jsonFlags: ['--format', 'json'],
     modelFlag: '--model',
   },
+  // Oh My Pi (`omp`). Headless is the positional MESSAGES arg + `-p/--print`.
+  // Approval modes map to omp's `--approval-mode`: always-ask (read-only tools
+  // auto-approved, writes gated -> our `plan`), write (read + workspace writes
+  // auto-approved -> `edit`), yolo (all tiers auto-approved -> `skip`). JSON is
+  // omp's `--mode json` event stream. `--model` fuzzy-matches a provider/model
+  // selector. Native resume is `-r/--resume <id-prefix>`.
+  pi: {
+    base: ['omp'],
+    promptFlag: 'positional',
+    modeFlags: {
+      plan: ['--approval-mode', 'always-ask'],
+      edit: ['--approval-mode', 'write'],
+      skip: ['--approval-mode', 'yolo'],
+    },
+    jsonFlags: ['--mode', 'json'],
+    modelFlag: '--model',
+    printFlags: ['-p'],
+    resume: { flag: '--resume' },
+  },
   openclaw: {
     base: ['openclaw'],
     promptFlag: 'positional',

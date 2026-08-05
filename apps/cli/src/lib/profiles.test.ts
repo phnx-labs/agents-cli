@@ -7,7 +7,11 @@ import {
   profileModelEnvKey,
   profileFromHostModel,
   forkProfile,
+  editProfile,
+  renameProfile,
   profileSummary,
+  profileLabel,
+  profileExists,
   modelEnvKeyForHost,
   resolveProfileEnv,
   readProfile,
@@ -460,18 +464,16 @@ describe('forkProfile — copy an existing harness under a new name', () => {
     expect(forked.auth).toEqual({ envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.corp.token' });
   });
 
-  it('never inherits the source label — two harnesses must not share one view header', () => {
-    const labelled: Profile = { ...source, label: 'DeepSeek Flash' };
+  it('a stored label field is never read for display, forked or not — the header always derives from name', () => {
+    const labelled: Profile = { ...source, label: 'Something Else Entirely' };
+    // The source itself: label is set but ignored; the header comes from `name`.
+    expect(profileSummary(labelled).label).toBe('DeepSeek');
+
     const forked = forkProfile(labelled, 'deepseek-chat', { model: 'deepseek/deepseek-chat-v3' });
     expect(forked.label).toBeUndefined();
-    expect(profileSummary(forked).label).toBe('deepseek-chat');
-    // A straight copy with no overrides must not inherit it either.
-    expect(forkProfile(labelled, 'twin').label).toBeUndefined();
-  });
-
-  it('carries an explicitly given label onto the fork', () => {
-    const forked = forkProfile(source, 'chat', { label: 'DeepSeek Chat' });
     expect(profileSummary(forked).label).toBe('DeepSeek Chat');
+    // A straight copy with no overrides must not inherit the stored label either.
+    expect(forkProfile(labelled, 'twin').label).toBeUndefined();
   });
 
   it('re-pins the host version when asked', () => {
@@ -489,26 +491,125 @@ describe('forkProfile — copy an existing harness under a new name', () => {
 });
 
 describe('profileSummary — first-class harness fields', () => {
-  it('surfaces the label, host version, description and fork lineage', () => {
+  it('surfaces the derived label, host version, description and fork lineage', () => {
     const summary = profileSummary({
       name: 'spark',
-      label: 'Muse Spark',
       host: { agent: 'opencode', version: '1.16.0' },
       env: { OPENCODE_MODEL: 'meta/muse-spark-1.1' },
       description: 'Muse Spark through OpenCode',
       forkedFrom: 'opencode',
     });
-    expect(summary.label).toBe('Muse Spark');
+    expect(summary.label).toBe('Spark');
     expect(summary.hostVersion).toBe('1.16.0');
     expect(summary.description).toBe('Muse Spark through OpenCode');
     expect(summary.forkedFrom).toBe('opencode');
     expect(summary.model).toBe('meta/muse-spark-1.1');
   });
 
-  it('falls back to the harness name when no label is set', () => {
-    const summary = profileSummary({ name: 'spark', host: { agent: 'opencode' }, env: {} });
-    expect(summary.label).toBe('spark');
+  it('derives the label from name even when a stored label field is set', () => {
+    const summary = profileSummary({ name: 'spark', label: 'Muse Spark', host: { agent: 'opencode' }, env: {} });
+    expect(summary.label).toBe('Spark');
     expect(summary.hostVersion).toBeNull();
     expect(summary.forkedFrom).toBeNull();
+  });
+});
+
+describe('profileLabel — curated vendor/brand title derivation', () => {
+  const p = (name: string): Profile => ({ name, host: { agent: 'claude' }, env: {} });
+
+  it('maps known vendor tokens through the curated table, case-insensitively', () => {
+    expect(profileLabel(p('deepseek-flash'))).toBe('DeepSeek Flash');
+    expect(profileLabel(p('DEEPSEEK'))).toBe('DeepSeek');
+    expect(profileLabel(p('openai-gpt'))).toBe('OpenAI GPT');
+    expect(profileLabel(p('xai-grok'))).toBe('xAI Grok');
+    expect(profileLabel(p('moonshotai-kimi'))).toBe('Moonshot AI Kimi');
+    expect(profileLabel(p('mistralai'))).toBe('Mistral');
+    expect(profileLabel(p('anthropic-claude'))).toBe('Anthropic Claude');
+  });
+
+  it('falls back to capitalize-first-letter for a token with no vendor match', () => {
+    expect(profileLabel(p('spark'))).toBe('Spark');
+  });
+
+  it('splits on both dash and underscore, mixing matched and unmatched tokens', () => {
+    expect(profileLabel(p('deepseek_chat_v3'))).toBe('DeepSeek Chat V3');
+  });
+
+  it('never reads profile.label, even when explicitly set', () => {
+    const withLabel: Profile = { ...p('spark'), label: 'Custom Title' };
+    expect(profileLabel(withLabel)).toBe('Spark');
+  });
+});
+
+describe('editProfile — in-place override that preserves lineage', () => {
+  const source: Profile = {
+    name: 'deepseek-flash',
+    host: { agent: 'claude' },
+    env: { ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731', ANTHROPIC_BASE_URL: 'https://openrouter.ai/api' },
+    provider: 'openrouter',
+  };
+
+  it('applies overrides onto the same name, in place', () => {
+    const edited = editProfile(source, { model: 'deepseek/deepseek-chat-v3' });
+    expect(edited.name).toBe('deepseek-flash');
+    expect(edited.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-chat-v3');
+    expect(edited.env.ANTHROPIC_BASE_URL).toBe('https://openrouter.ai/api');
+  });
+
+  it('does not self-reference — forkedFrom stays whatever the source had, even when unset', () => {
+    expect(source.forkedFrom).toBeUndefined();
+    const edited = editProfile(source, { model: 'deepseek/deepseek-chat-v3' });
+    expect(edited.forkedFrom).toBeUndefined();
+    // A bare forkProfile onto the same name is the bug editProfile exists to avoid:
+    // it unconditionally records the source's own name as the lineage.
+    expect(forkProfile(source, source.name).forkedFrom).toBe('deepseek-flash');
+  });
+
+  it('preserves a real recorded forkedFrom instead of overwriting it with the profile\'s own name', () => {
+    const child: Profile = { ...source, forkedFrom: 'claude' };
+    const edited = editProfile(child, { model: 'deepseek/deepseek-chat-v3' });
+    expect(edited.name).toBe('deepseek-flash');
+    expect(edited.forkedFrom).toBe('claude');
+    expect(edited.forkedFrom).not.toBe('deepseek-flash');
+  });
+});
+
+describe('renameProfile — filename rename with forkedFrom lineage cascade', () => {
+  beforeEach(() => {
+    writeProfile({
+      name: 'deepseek-flash',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731' },
+    });
+  });
+
+  it('renames the file and updates the name field inside it', () => {
+    renameProfile('deepseek-flash', 'deepseek-fast');
+    expect(profileExists('deepseek-flash')).toBe(false);
+    expect(profileExists('deepseek-fast')).toBe(true);
+    expect(readProfile('deepseek-fast').name).toBe('deepseek-fast');
+  });
+
+  it('throws a clear "not found" error when the source does not exist', () => {
+    expect(() => renameProfile('does-not-exist', 'whatever')).toThrow(/not found/i);
+  });
+
+  it('throws a clear "already exists" error and leaves the source untouched (no overwrite path)', () => {
+    writeProfile({ name: 'taken', host: { agent: 'claude' }, env: {} });
+    expect(() => renameProfile('deepseek-flash', 'taken')).toThrow(/already exists/i);
+    expect(profileExists('deepseek-flash')).toBe(true);
+    expect(readProfile('taken').name).toBe('taken');
+  });
+
+  it('rewrites forkedFrom on every child that pointed at the old name, and leaves unrelated ones alone', () => {
+    writeProfile({ name: 'child-a', host: { agent: 'claude' }, env: {}, forkedFrom: 'deepseek-flash' });
+    writeProfile({ name: 'child-b', host: { agent: 'claude' }, env: {}, forkedFrom: 'deepseek-flash' });
+    writeProfile({ name: 'unrelated', host: { agent: 'claude' }, env: {}, forkedFrom: 'other' });
+
+    renameProfile('deepseek-flash', 'deepseek-fast');
+
+    expect(readProfile('child-a').forkedFrom).toBe('deepseek-fast');
+    expect(readProfile('child-b').forkedFrom).toBe('deepseek-fast');
+    expect(readProfile('unrelated').forkedFrom).toBe('other');
   });
 });

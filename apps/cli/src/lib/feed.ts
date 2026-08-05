@@ -26,6 +26,7 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { getFeedDir, getUserAgentsDir } from './state.js';
 import { isAdmin, isHighConsequenceAllowed, isKnownOperator } from './operator.js';
+import { resolveProjectNameForCwd, listProjectDefs } from './projects.js';
 
 export interface BlockOption {
   label: string;
@@ -69,6 +70,8 @@ export interface OpenBlock {
   mailboxId: string;
   host: string;
   runtime: string;
+  /** Project/repo name this block belongs to (derived from cwd, worktree-aware). */
+  project?: string;
   ts: string;
   questions: BlockQuestion[];
   /**
@@ -393,6 +396,7 @@ export interface DeclaringAgent {
   mailboxId: string;
   host: string;
   runtime: string;
+  cwd?: string;
 }
 
 export interface DeclareBlockInput {
@@ -431,6 +435,8 @@ export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInp
     .filter(Boolean)
     .map((label) => ({ label }));
 
+  // Same resolver as feed post / sessions: defined project name wins, else repo key.
+  const project = resolveProjectNameForCwd(agent.cwd, listProjectDefs());
   return {
     blockId: blockIdForSession(agent.sessionId),
     sessionId: agent.sessionId,
@@ -442,6 +448,7 @@ export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInp
     questions: [{ text, header: 'Needs you', ...(options.length ? { options } : {}) }],
     blockClass: input.safeDefault ? 'approval' : 'decision',
     costOfDelay: 'high',
+    ...(project ? { project } : {}),
     ...(input.safeDefault ? { safeDefault: input.safeDefault } : {}),
     ...(input.timeoutMinutes !== undefined ? { timeoutMinutes: input.timeoutMinutes } : {}),
   };
@@ -586,6 +593,24 @@ def write_json(path, value):
             os.unlink(tmp)
         except Exception:
             pass
+
+
+def project_from_cwd(cwd):
+    """Basename of cwd, with worktree paths resolved to their repo name."""
+    if not cwd:
+        return None
+    norm = cwd.replace("\\\\", "/").rstrip("/")
+    if not norm:
+        return None
+    marker = "/.agents/worktrees/"
+    idx = norm.find(marker)
+    if idx > 0:
+        repo_path = norm[:idx]
+        base = repo_path[repo_path.rfind("/") + 1:]
+        if base:
+            return base
+    base = norm[norm.rfind("/") + 1:]
+    return base or None
 
 
 def main():
@@ -797,6 +822,8 @@ def main():
     host = re.sub(r"[^a-z0-9_-]", "-", host) or "unknown"
 
     runtime = os.environ.get("AGENTS_RUNTIME", "headless")
+    cwd = payload.get("cwd") or os.environ.get("AGENTS_CWD")
+    project = project_from_cwd(cwd)
 
     block = {
         "blockId": block_id,
@@ -808,6 +835,8 @@ def main():
         "questions": normalized_questions,
         "kind": kind,
     }
+    if project:
+        block["project"] = project
     if notification_type:
         block["notificationType"] = notification_type
 

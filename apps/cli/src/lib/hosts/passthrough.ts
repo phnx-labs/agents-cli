@@ -127,7 +127,7 @@ const OWN_HOST_COMMANDS = new Set([
   'harnesses',
   'sessions',
   'feed',
-  'activity', // fans `--host`/`--device`/`--devices-all` out itself (feed-style)
+  'activity', // tombstone redirect; keep local so --host does not SSH-passthrough
   'computer',
   'secrets',
   'logs',

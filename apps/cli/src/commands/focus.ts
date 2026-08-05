@@ -30,9 +30,10 @@ import {
   type Backend,
 } from '../lib/terminal/index.js';
 import { isInteractiveTerminal } from './utils.js';
+import { setHelpSections } from '../lib/help.js';
 
 export function registerFocusCommand(program: Command): void {
-  program
+  const cmd = program
     .command('focus')
     .argument('[id]', 'Short/full session id to focus; omit for an interactive picker')
     .option('--local', 'Only this machine (skip the cross-host sweep)')
@@ -41,6 +42,27 @@ export function registerFocusCommand(program: Command): void {
     .action(async (id: string | undefined, opts: { local?: boolean; attachOnly?: boolean }) => {
       await focusAction(id, opts);
     });
+
+  setHelpSections(cmd, {
+    examples: `
+      # Jump to a live session (attach pane/tab, or open a new tab and resume)
+      agents sessions focus a1b2c3d4
+
+      # Attach only — refuse if nothing is joinable (old sessions go)
+      agents sessions focus a1b2c3d4 --attach-only
+
+      # Pick from live sessions on this machine only
+      agents sessions focus --local
+    `,
+    notes: `
+      Lifecycle siblings (not synonyms):
+        focus              live jump (default "take me there")
+        focus --attach-only  attach only; never fork (replaces go)
+        detach / attach    interactive ↔ headless presence
+        resume             multi-select history → tabs
+        run --resume       single scripted continue
+    `,
+  });
 }
 
 /**
