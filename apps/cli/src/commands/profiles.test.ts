@@ -110,4 +110,44 @@ describe('applyFromSecrets — provider precedence and error paths', () => {
     const profile = { name: 'x', host: { agent: 'claude' as const }, env: {} };
     await expect(applyFromSecrets(profile, 'no-such-bundle', 'x')).rejects.toThrow(/not found/i);
   });
+
+  it('allowInheritedAuth: false rejects reusing an inherited auth binding (the fork-clobber gap)', async () => {
+    // Simulates forkProfile's behavior: `auth`/`provider` copied by reference
+    // from the fork's SOURCE harness, not established for this profile.
+    const sourceToken = 'REAL-OPENROUTER-KEY-FOR-SOURCE-HARNESS';
+    const kc = new MemoryKeychain();
+    kc.set(keychainItemName('openrouter'), sourceToken);
+    setKeychainBackendForTest(kc);
+    writeBundleWithItems(
+      { name: 'prod', vars: { OPENROUTER_KEY: keychainRef('OPENROUTER_KEY') } },
+      new Map([[secretsKeychainItem('prod', 'OPENROUTER_KEY'), 'sk-test-secret']]),
+    );
+
+    const forked = {
+      name: 'forked-harness',
+      host: { agent: 'claude' as const },
+      env: {},
+      provider: 'openrouter', // inherited from the source, not this profile's own
+      auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: keychainItemName('openrouter') },
+    };
+
+    await expect(
+      applyFromSecrets(forked, 'prod', undefined, { allowInheritedAuth: false }),
+    ).rejects.toThrow(/inherited its auth binding/i);
+
+    // The source harness's real credential must survive the rejected attempt.
+    expect(getKeychainToken(keychainItemName('openrouter'))).toBe(sourceToken);
+  });
+
+  it('allowInheritedAuth: false still allows an explicit --auth-provider to rotate a fork\'s own credential', async () => {
+    const forked = {
+      name: 'forked-harness',
+      host: { agent: 'claude' as const },
+      env: {},
+      provider: 'openrouter',
+      auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: keychainItemName('openrouter') },
+    };
+    await applyFromSecrets(forked, 'prod', 'openrouter', { allowInheritedAuth: false });
+    expect(getKeychainToken(keychainItemName('openrouter'))).toBe('sk-test-secret');
+  });
 });

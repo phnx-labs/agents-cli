@@ -148,8 +148,23 @@ export interface AddProfileOptions {
  *
  * Attaches `profile.auth` when the profile has none yet (a bare `--host
  * --model` harness, or a native-host fork with no prior auth binding).
+ *
+ * `allowInheritedAuth` (default `true`) gates the "reuse `profile.auth`'s own
+ * provider" branch above. It must be `false` when `profile` came from
+ * **forking** an already-provisioned harness: `forkProfile` copies `auth` by
+ * reference from the source when no `--auth-provider` override is given, so
+ * `profile.auth` being set there means "the SOURCE harness's binding", not
+ * "this harness's own" — trusting it would silently overwrite the source's
+ * shared keychain item. Editing a harness's own already-established auth is
+ * the one case where reuse is genuinely correct, so callers on that path keep
+ * the default.
  */
-export async function applyFromSecrets(profile: Profile, spec: string, explicitAuthProvider?: string): Promise<void> {
+export async function applyFromSecrets(
+  profile: Profile,
+  spec: string,
+  explicitAuthProvider?: string,
+  opts?: { allowInheritedAuth?: boolean },
+): Promise<void> {
   const sep = spec.indexOf(':');
   const bundleName = sep === -1 ? spec : spec.slice(0, sep);
   const requestedKey = sep === -1 ? undefined : spec.slice(sep + 1);
@@ -179,6 +194,13 @@ export async function applyFromSecrets(profile: Profile, spec: string, explicitA
     );
   }
 
+  if (profile.auth && !explicitAuthProvider && opts?.allowInheritedAuth === false) {
+    throw new Error(
+      `Harness '${profile.name}' inherited its auth binding from the harness it was forked from ` +
+        `(provider '${profile.provider}') — pass --auth-provider <name> explicitly with --from-secrets ` +
+        `on a fork, so it never silently overwrites the source harness's shared keychain item.`,
+    );
+  }
   const provider = explicitAuthProvider || (profile.auth ? profile.provider : undefined) || bundleName;
   const item = keychainItemName(provider);
   setKeychainToken(item, value);

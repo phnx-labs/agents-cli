@@ -232,7 +232,10 @@ async function runForkFlow(source: string, name: string, opts: ForkOptions): Pro
   // nothing.
   const forked = buildFork(source, name, opts);
   if (opts.fromSecrets) {
-    await applyFromSecrets(forked, opts.fromSecrets, opts.authProvider);
+    // A fork's `auth` (when present) may just be inherited by reference from
+    // its source, not established for this harness itself -- never trust it
+    // as "safe to rotate" without an explicit --auth-provider.
+    await applyFromSecrets(forked, opts.fromSecrets, opts.authProvider, { allowInheritedAuth: false });
   } else if (opts.authProvider) {
     await ensureProviderToken(opts.authProvider, undefined, opts.keyStdin);
   }
