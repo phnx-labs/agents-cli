@@ -15,7 +15,7 @@ describe('session tracker hook installation', () => {
   it('registers Droid and Kimi SessionStart hooks in their native config formats', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'session-tracker-install-'));
     roots.push(root);
-    const result = spawnSync(process.execPath, ['--import', 'tsx', 'src/install-hook.ts', 'droid', 'kimi'], {
+    const result = spawnSync('bunx', ['tsx', 'src/install-hook.ts', 'droid', 'kimi'], {
       cwd: path.join(import.meta.dirname, '..'),
       env: { ...process.env, HOME: root },
       encoding: 'utf8',
@@ -26,7 +26,7 @@ describe('session tracker hook installation', () => {
     expect(droid.hooks.SessionStart[0].hooks[0].command).toContain('hook.sh droid');
 
     const kimi = TOML.parse(fs.readFileSync(path.join(root, '.kimi-code', 'config.toml'), 'utf8')) as any;
-    expect(kimi.hooks).toContainEqual(expect.objectContaining({ event: 'session.created' }));
+    expect(kimi.hooks).toContainEqual(expect.objectContaining({ event: 'SessionStart' }));
     expect(kimi.hooks[0].command).toContain('hook.sh kimi');
   });
 });

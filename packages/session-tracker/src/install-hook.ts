@@ -165,7 +165,7 @@ async function installKimi(opts: InstallOptions): Promise<InstallResult> {
   const hooks = (Array.isArray(cfg.hooks) ? cfg.hooks : []) as Array<Record<string, unknown>>;
   cfg.hooks = [
     ...hooks.filter((hook) => !(typeof hook.command === 'string' && hook.command.includes('packages/session-tracker/src/hook.sh'))),
-    { event: 'session.created', command, timeout: 5 },
+    { event: 'SessionStart', command, timeout: 5 },
   ];
   await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
   await fs.promises.writeFile(configPath, TOML.stringify(cfg as Parameters<typeof TOML.stringify>[0]), 'utf8');
