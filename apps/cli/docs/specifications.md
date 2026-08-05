@@ -61,11 +61,13 @@ guarantee, the reference for the mechanism.
 ## Coverage inventory
 
 **This document does not cover every command group, and silence here is not a
-guarantee.** The CLI registers ~85 top-level groups
-(`lib/startup/command-registry.ts:146`, `COMMAND_LOADERS` — *"Parity is
-non-negotiable: the name -> loader map below mirrors exactly which module
-registers which top-level command on `main`"*). Five have a normative contract.
-Before relying on a behavior, check which row a surface sits in.
+guarantee.** The CLI registers **100 top-level names** across **81 distinct
+loaders** — the difference is aliases and multi-command modules (`ssh`/`devices`/`fleet`
+share one; `add`/`use`/`remove`/`rm`/`purge` another) — in `COMMAND_LOADERS`
+(`lib/startup/command-registry.ts:146`, *"Parity is non-negotiable: the name -> loader
+map below mirrors exactly which module registers which top-level command on `main`"*).
+Five subsystems have a normative contract. Before relying on a behavior, check which
+row its surface sits in.
 
 | Coverage | Surfaces | What that means |
 |---|---|---|
