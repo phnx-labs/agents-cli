@@ -516,11 +516,11 @@ enum AgentsCLI {
     // Distinct recent working directories from local session history, most-recent
     // first, with the home dir dropped — running an agent straight in $HOME is too
     // broad a permission surface, so the panel offers real repos to scope into.
-    static func recentRepoDirs(limit: Int = 8) -> [String] {
+    static func recentRepoDirs(from sessions: [RecentSession], limit: Int = 8) -> [String] {
         let home = (NSHomeDirectory() as NSString).standardizingPath
         var seen = Set<String>()
         var dirs: [String] = []
-        for s in recentSessions(limit: 40) {
+        for s in sessions {
             guard let cwd = s.cwd, !cwd.isEmpty else { continue }
             let norm = (cwd as NSString).standardizingPath
             if norm == home { continue }

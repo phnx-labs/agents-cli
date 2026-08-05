@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 
 // Spotlight-style quick-dispatch bar (Cmd-Shift-O). A thin capture surface: type
 // a one-line note, optionally attach one or more recent screenshots from clip
@@ -74,7 +75,7 @@ final class ClipThumbView: NSView {
     var onPreview: ((ClipThumbView) -> Void)?
     static let side: CGFloat = 54
 
-    init(path: String) {
+    init(path: String, thumbnail: CGImage?) {
         self.path = path
         super.init(frame: NSRect(x: 0, y: 0, width: Self.side, height: Self.side))
         wantsLayer = true
@@ -85,9 +86,8 @@ final class ClipThumbView: NSView {
         widthAnchor.constraint(equalToConstant: Self.side).isActive = true
         heightAnchor.constraint(equalToConstant: Self.side).isActive = true
         toolTip = (path as NSString).lastPathComponent
-        if let img = NSImage(contentsOfFile: path),
-           let cg = img.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-            layer?.contents = cg
+        if let thumbnail {
+            layer?.contents = thumbnail
             layer?.contentsGravity = .resizeAspectFill
         }
         updateChrome()
@@ -293,6 +293,13 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     private static let lastFilterKey = "menubar.quickDispatch.ticketFilter"
     private static let lastSortKey = "menubar.quickDispatch.ticketSort"
     private var selected: [String] = []   // newest-first order preserved
+    private var recentImagePaths: [String] = []
+    private var thumbnailCache: [String: CGImage] = [:]
+    private var hydrationInFlight = false
+    private var hydratedAt: Date?
+    private var pendingRestoredSelection: [String]?
+    private static let hydrationQueue = DispatchQueue(label: "agents.quick-dispatch.hydration",
+                                                       qos: .userInitiated)
     private var selectedAgents = Set<String>()
     private var roster: [MenuAgent] = []
     private var agentButtons: [NSButton] = []
@@ -310,9 +317,29 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 
     // MARK: Summon / dismiss
 
+    /// Build the static AppKit hierarchy while the helper starts, then hydrate
+    /// disk-backed content off the main thread. The hotkey should only have to
+    /// restore small in-memory controls and order an already-built panel.
+    func prepare() {
+        guard panel == nil else { return }
+        panel = buildPanel()
+        hydrateContent()
+    }
+
+    /// The status controller already refreshes recent sessions off-path for its
+    /// RECENT section. Reuse that warm result for the repo picker instead of
+    /// spawning a second `agents sessions` command from the hotkey path.
+    func updateRecentSessions(_ sessions: [RecentSession]) {
+        let selectedBeforeRefresh = selectedRepo()
+        repoDirs = AgentsCLI.recentRepoDirs(from: sessions)
+        rebuildRepoPicker(selecting: selectedBeforeRefresh)
+        if panel?.isVisible == true { refreshTicketScope() }
+    }
+
     func summon() {
-        let panel = self.panel ?? buildPanel()
-        self.panel = panel
+        let started = DispatchTime.now().uptimeNanoseconds
+        prepare()
+        guard let panel else { return }
 
         // Restore an interrupted capture if another app stole focus last time.
         let restoredDraft = draft
@@ -320,17 +347,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         field.stringValue = restoredDraft?.note ?? ""
         action = restoredDraft?.action ?? .plan
         modeControl.setSelected(true, forSegment: action.rawValue)
-        rebuildAgents(restoring: restoredDraft?.selectedAgents)
-        rebuildThumbs(restoring: restoredDraft?.selectedPaths)
-        rebuildRepos()
-        // Tickets render from the warm cache first (a `linear tasks` round trip
-        // costs seconds), then refresh in the background.
-        linearCache = LinearTickets.loadCache()
-        restoreTicketControls()
-        refreshTicketScope()
-
-        thumbStrip.isHidden = thumbStrip.arrangedSubviews.isEmpty
-        applyContentHeight()
+        selectedAgents = restoredDraft?.selectedAgents ?? defaultAgentSelection()
+        normalizeSelectionForAction()
+        updateAgentButtons()
+        pendingRestoredSelection = restoredDraft?.selectedPaths
 
         dismissArmed = false
         position(panel)
@@ -338,10 +358,26 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         panel.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(field)
+        let visibleMs = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
         waitUntilReadyForTyping(panel)
         if ProcessInfo.processInfo.environment["MENUBAR_PROMPT_DEBUG"] == "1" {
+            let readyMs = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
             FileHandle.standardError.write(Data(
-                "summon: frame=\(panel.frame) visible=\(panel.isVisible) thumbs=\(thumbStrip.arrangedSubviews.count)\n".utf8))
+                "summon: visibleMs=\(String(format: "%.1f", visibleMs)) readyMs=\(String(format: "%.1f", readyMs)) frame=\(panel.frame) visible=\(panel.isVisible) thumbs=\(thumbStrip.arrangedSubviews.count)\n".utf8))
+        }
+        // Cached rows and images fill only after the window is visible and the
+        // field owns the editor. A stale cache is refreshed by the same async path.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if !self.recentImagePaths.isEmpty {
+                self.rebuildThumbs(paths: self.recentImagePaths,
+                                   thumbnails: self.thumbnailCache,
+                                   restoring: self.pendingRestoredSelection)
+                self.pendingRestoredSelection = nil
+            }
+            self.restoreTicketControls()
+            self.refreshTicketScope()
+            self.hydrateContent()
         }
         // Arm click-outside dismissal once the activation race has settled. The
         // preview affordance leaves it disarmed: its whole point is to hold the
@@ -499,10 +535,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 
     // MARK: Repo picker
 
-    // Populate the repo dropdown from recent-session cwds (never $HOME). The last
-    // picked repo is restored; if none is remembered, the most-recent one leads.
-    private func rebuildRepos() {
-        repoDirs = AgentsCLI.recentRepoDirs()
+    // Render the warm recent-session cwds (never $HOME). The status controller
+    // owns the only CLI refresh; this method is deliberately in-memory only.
+    private func rebuildRepoPicker(selecting selectedBeforeRefresh: String? = nil) {
+        let selection = selectedBeforeRefresh ?? selectedRepo()
         repoPicker.removeAllItems()
         guard !repoDirs.isEmpty else {
             repoPicker.addItem(withTitle: "This Mac (no recent repo)")
@@ -514,7 +550,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             repoPicker.addItem(withTitle: "\u{1F4C1} \((dir as NSString).lastPathComponent)")
             repoPicker.lastItem?.toolTip = dir
         }
-        if let last = UserDefaults.standard.string(forKey: Self.lastRepoKey),
+        if let selection,
+           let idx = repoDirs.firstIndex(of: selection) {
+            repoPicker.selectItem(at: idx)
+        } else if let last = UserDefaults.standard.string(forKey: Self.lastRepoKey),
            let idx = repoDirs.firstIndex(of: last) {
             repoPicker.selectItem(at: idx)
         } else {
@@ -804,16 +843,16 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 
     // MARK: Thumbnails
 
-    private func rebuildThumbs(restoring restoredSelection: [String]? = nil) {
+    private func rebuildThumbs(paths: [String], thumbnails: [String: CGImage],
+                               restoring restoredSelection: [String]? = nil) {
         for v in thumbStrip.arrangedSubviews {
             thumbStrip.removeArrangedSubview(v)
             v.removeFromSuperview()
         }
         selected = []
-        let paths = AgentsCLI.recentImageAttachments()
         let restoredSet = Set(restoredSelection ?? [])
         for path in paths {
-            let thumb = ClipThumbView(path: path)
+            let thumb = ClipThumbView(path: path, thumbnail: thumbnails[path])
             if restoredSelection != nil {
                 if restoredSet.contains(path) {
                     thumb.isSelected = true
@@ -829,6 +868,8 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             thumb.onPreview = { [weak self] t in self?.preview(t) }
             thumbStrip.addArrangedSubview(thumb)
         }
+        thumbStrip.isHidden = thumbStrip.arrangedSubviews.isEmpty
+        applyContentHeight()
         updateHint()
     }
 
@@ -849,9 +890,55 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             selected.removeAll { $0 == thumb.path }
         }
         // Keep newest-first order regardless of click order.
-        let ordering = AgentsCLI.recentImageAttachments()
-        selected.sort { (ordering.firstIndex(of: $0) ?? .max) < (ordering.firstIndex(of: $1) ?? .max) }
+        selected.sort {
+            (recentImagePaths.firstIndex(of: $0) ?? .max)
+                < (recentImagePaths.firstIndex(of: $1) ?? .max)
+        }
         updateHint()
+    }
+
+    /// Scan attachment directories, decode bounded thumbnails, and parse the
+    /// Linear cache away from AppKit's main thread. No part of this work gates
+    /// the panel becoming visible or the text field accepting the first key.
+    private func hydrateContent() {
+        if hydrationInFlight { return }
+        if let hydratedAt, Date().timeIntervalSince(hydratedAt) < 30 { return }
+        hydrationInFlight = true
+        Self.hydrationQueue.async { [weak self] in
+            let paths = AgentsCLI.recentImageAttachments()
+            var thumbnails: [String: CGImage] = [:]
+            for path in paths {
+                if let image = Self.thumbnail(at: path) { thumbnails[path] = image }
+            }
+            let cache = LinearTickets.loadCache()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.recentImagePaths = paths
+                self.thumbnailCache = thumbnails
+                self.linearCache = cache
+                self.hydratedAt = Date()
+                self.hydrationInFlight = false
+                let selectionToRestore = self.pendingRestoredSelection
+                    ?? (self.panel?.isVisible == true ? self.selected : nil)
+                self.rebuildThumbs(paths: paths, thumbnails: thumbnails,
+                                   restoring: selectionToRestore)
+                self.pendingRestoredSelection = nil
+                self.restoreTicketControls()
+                if self.panel?.isVisible == true { self.refreshTicketScope() }
+            }
+        }
+    }
+
+    private static func thumbnail(at path: String) -> CGImage? {
+        let url = URL(fileURLWithPath: path) as CFURL
+        guard let source = CGImageSourceCreateWithURL(url, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 108,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
     private func isRecent(_ path: String) -> Bool {
@@ -971,7 +1058,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         repoPicker.font = .systemFont(ofSize: 12)
         repoPicker.target = self
         repoPicker.action = #selector(onRepoChanged(_:))
-        rebuildRepos()
+        rebuildRepoPicker()
 
         hint.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
         hint.textColor = .secondaryLabelColor

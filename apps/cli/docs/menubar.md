@@ -60,6 +60,10 @@ process with its pid; end it and re-run `agents menubar enable`.
 `Cmd-Shift-O` opens the Spotlight-style capture panel. Type a short request,
 optionally attach recent screenshots from the thumbnail strip, pick the repo to
 work in, then pick one agent for **Plan** or one or more agents for **Run**.
+The helper constructs this panel at startup and orders it front with the text
+field focused before refreshing recent repos, decoding thumbnails, or reading
+the Linear cache. Those rows hydrate after the panel accepts typing; the hotkey
+never waits for `agents sessions`, attachment-directory scans, or image decode.
 
 - **Plan** sends the note and selected screenshots to the selected ticket agent,
   which investigates and returns ticket fields as JSON. The helper then runs
@@ -198,6 +202,9 @@ One rule shapes the menu: **attention floats up, context groups down.**
 - **ACTIVE** — **project accordion** + **session detail submenu**. Projects are
   **collapsed by default** as a status strip (`▶ agents-cli  ●8 ◐1  zion`).
   Click `▶`/`▼` to fold the project open **inline** and list its agents.
+  The project header is an embedded menu control, so expanding or collapsing
+  mutates only that project's rows inside the current menu tracking session; it
+  does not dismiss and synthetically reopen the dropdown.
   Focusing an agent row opens a **side submenu (›)** with richer detail and
   **linkable actions**: work title (and open URL if the title contains one),
   local/remote + surface, clickable cwd, Linear ticket, GitHub PR, duration,

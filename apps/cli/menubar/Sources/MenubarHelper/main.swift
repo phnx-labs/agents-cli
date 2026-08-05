@@ -108,6 +108,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var promptController: PromptPanelController { controller.promptController }
     func applicationDidFinishLaunching(_ notification: Notification) {
         controller.install()
+        // Construct the static panel now and prewarm disk-backed content in the
+        // background. Cmd-Shift-O then only orders an existing window and focuses
+        // its text field; it never waits for session history or image decoding.
+        promptController.prepare()
         // A duplicate launch surrenders (SingleInstance) and posts this instead
         // of adding a second status item — so answering it by opening the menu
         // is what makes "launch it again" show the helper the user already has.

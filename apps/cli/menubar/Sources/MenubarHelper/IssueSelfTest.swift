@@ -14,6 +14,7 @@ enum IssueSelfTest {
     static func run() -> Never {
         print("menubar issue-capture self-test")
         testImageFilePick()
+        testRecentRepoDirs()
         testTicketIDParse()
         testPromptContract()
         testTicketCreateArgsAndParsing()
@@ -65,6 +66,24 @@ enum IssueSelfTest {
               detail: got.map { ($0 as NSString).lastPathComponent }.joined(separator: ","))
         check("limit is honored", AgentsCLI.imageFiles(inDirs: [dirA, dirB], limit: 1).count == 1)
         check("no dirs yields empty", AgentsCLI.imageFiles(inDirs: [], limit: 6).isEmpty)
+    }
+
+    // Repo choices must be derived from an already-fetched session snapshot. If
+    // this helper ever shells `agents sessions` itself again, Cmd-Shift-O regains
+    // the measured one-second blocking call that this regression test prevents.
+    private static func testRecentRepoDirs() {
+        func session(_ cwd: String?) -> RecentSession {
+            RecentSession(id: nil, shortId: nil, agent: "codex", timestamp: nil,
+                          project: nil, cwd: cwd, filePath: nil, gitBranch: nil,
+                          topic: nil, version: nil)
+        }
+        let home = NSHomeDirectory()
+        let got = AgentsCLI.recentRepoDirs(from: [
+            session("/work/first"), session(home), session("/work/first"),
+            session(nil), session("/work/second"), session("/work/third"),
+        ], limit: 2)
+        check("recent repo dirs use warm session order", got == ["/work/first", "/work/second"],
+              detail: got.joined(separator: ","))
     }
 
     // parseCreatedTicketID pulls the identifier from the linear CLI success line,

@@ -1,5 +1,58 @@
 import AppKit
 
+/// A project header that handles its click inside the menu's tracking session.
+/// An actionable NSMenuItem ends tracking before its action runs, which made the
+/// status menu disappear on every expand/collapse. A custom item view receives
+/// the click without selecting the NSMenuItem, so rows can change in place.
+private final class ProjectAccordionRowView: NSView {
+    private let button = NSButton()
+    private let summary: String
+    private var expanded: Bool
+    var onToggle: ((Bool) -> Void)?
+
+    init(summary: String, repo: String, sessionCount: Int, expanded: Bool) {
+        self.summary = summary
+        self.expanded = expanded
+        let font = NSFont.menuFont(ofSize: 0)
+        let textWidth = (summary as NSString).size(withAttributes: [.font: font]).width
+        super.init(frame: NSRect(x: 0, y: 0, width: max(320, textWidth + 48), height: 22))
+        autoresizingMask = [.width]
+
+        button.isBordered = false
+        button.font = font
+        button.alignment = .left
+        button.focusRingType = .none
+        button.target = self
+        button.action = #selector(toggle)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(button)
+        NSLayoutConstraint.activate([
+            button.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            button.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            button.topAnchor.constraint(equalTo: topAnchor),
+            button.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
+        button.setAccessibilityLabel("\(repo) project")
+        button.setAccessibilityHelp("Expand or collapse \(sessionCount) session\(sessionCount == 1 ? "" : "s")")
+        updateLabel()
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    @objc private func toggle() {
+        expanded.toggle()
+        updateLabel()
+        onToggle?(expanded)
+    }
+
+    private func updateLabel() {
+        button.title = "  \(expanded ? "▼" : "▶")  \(summary)"
+        button.toolTip = expanded ? "Collapse project" : "Expand project"
+        button.setAccessibilityValue(expanded ? "expanded" : "collapsed")
+    }
+}
+
 // Owns the NSStatusItem. The dropdown is actionable-first: what needs the user
 // now (attention sessions, a stopped scheduler, failing routines) leads; live
 // work follows; setup/health noise collapses into one row. Every health fact
@@ -102,11 +155,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // cache with NO extra CLI calls. Session *detail* lives in a side submenu (›),
     // not a second accordion level.
     private var expandedProjects = Set<String>()
-    /// True after a project accordion toggle until menuDidClose schedules reopen.
-    private var pendingAccordionReopen = false
-    /// True for the menuWillOpen that follows accordion reopen — skip CLI schedule
-    /// and the expensive teams scan; rebuild from warm caches only.
-    private var accordionCacheOnlyOpen = false
+    private var projectSessionItems: [String: [NSMenuItem]] = [:]
     /// Same form as CLI `machineId()` so engine-tagged sessions compare as local.
     private lazy var thisMachine: String = ActiveDisplay.thisMachineId()
 
@@ -247,9 +296,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         routinesLoaded = true
         routinesFetchedAt = Date()
 
-        cachedRecentSessions = AgentsCLI.recentSessions(limit: 6)
+        cachedRecentSessions = AgentsCLI.recentSessions(limit: 40)
         recentSessionsLoaded = true
         recentSessionsFetchedAt = Date()
+        promptController.updateRecentSessions(cachedRecentSessions)
 
         cachedActiveSessions = AgentsCLI.activeSessions()
         activeSessionsLoaded = true
@@ -282,13 +332,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if let t = recentSessionsFetchedAt, Date().timeIntervalSince(t) < 45 { return }
         recentSessionsInFlight = true
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let s = AgentsCLI.recentSessions(limit: 6)
+            let s = AgentsCLI.recentSessions(limit: 40)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.cachedRecentSessions = s
                 self.recentSessionsLoaded = true
                 self.recentSessionsFetchedAt = Date()
                 self.recentSessionsInFlight = false
+                self.promptController.updateRecentSessions(s)
             }
         }
     }
@@ -397,72 +448,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     // MARK: - Menu
-    // #region agent log
-    private func debugLog(_ hypothesisId: String, _ location: String, _ message: String, _ data: [String: Any] = [:]) {
-        var payload: [String: Any] = [
-            "sessionId": "fc56f4",
-            "hypothesisId": hypothesisId,
-            "location": location,
-            "message": message,
-            "timestamp": Int(Date().timeIntervalSince1970 * 1000),
-            "data": data,
-        ]
-        guard JSONSerialization.isValidJSONObject(payload),
-              let raw = try? JSONSerialization.data(withJSONObject: payload),
-              var line = String(data: raw, encoding: .utf8) else { return }
-        line += "\n"
-        let path = (NSHomeDirectory() as NSString)
-            .appendingPathComponent(".agents/.cache/helpers/menubar/debug-fc56f4.log")
-        let url = URL(fileURLWithPath: path)
-        if !FileManager.default.fileExists(atPath: path) {
-            FileManager.default.createFile(atPath: path, contents: nil)
-        }
-        guard let handle = try? FileHandle(forWritingTo: url) else { return }
-        defer { try? handle.close() }
-        _ = try? handle.seekToEnd()
-        try? handle.write(contentsOf: Data(line.utf8))
-    }
-    // #endregion
 
     func menuWillOpen(_ menu: NSMenu) {
-        // Accordion reopen: rebuild purely from warm caches. No teams history
-        // walk, no CLI schedule — expand must stay cheap and not re-shell
-        // `sessions --active`.
-        if accordionCacheOnlyOpen {
-            accordionCacheOnlyOpen = false
-            // #region agent log
-            debugLog("D", "StatusItemController.swift:menuWillOpen", "accordion cache-only reopen", [
-                "expandedCount": expandedProjects.count,
-                "expanded": Array(expandedProjects).sorted(),
-                "itemCount": menu.items.count,
-                "appActive": NSApp.isActive,
-            ])
-            // #endregion
-            let sessions = LocalState.sessions(includeTeams: false)
-            let browserTasks = LocalState.browserTasks(limit: 3)
-            let pending = LocalState.pendingDevices()
-            let loaded = LocalState.loadedDevices()
-            rebuild(menu, sessions: sessions, browserTasks: browserTasks,
-                    recentSessions: cachedRecentSessions, routines: cachedRoutines,
-                    doctor: cachedDoctorOverview, daemonPid: AgentsCLI.daemonPid(),
-                    pending: pending, loaded: loaded)
-            // #region agent log
-            debugLog("D", "StatusItemController.swift:menuWillOpen", "after accordion rebuild", [
-                "itemCount": menu.items.count,
-                "expandedCount": expandedProjects.count,
-            ])
-            // #endregion
-            return
-        }
-
-        // #region agent log
-        debugLog("C", "StatusItemController.swift:menuWillOpen", "normal menu open", [
-            "pendingReopen": pendingAccordionReopen,
-            "appActive": NSApp.isActive,
-            "itemCount": menu.items.count,
-        ])
-        // #endregion
-
         // Critical path is all cheap disk reads. CLI-backed sections come from
         // warm caches; opening the menu only schedules refreshes for next time.
         let sessions = LocalState.sessions(includeTeams: true)
@@ -484,60 +471,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         refreshWatchdog()
     }
 
-    func menuDidClose(_ menu: NSMenu) {
-        // #region agent log
-        debugLog("A", "StatusItemController.swift:menuDidClose", "menu closed", [
-            "pendingReopen": pendingAccordionReopen,
-            "expandedCount": expandedProjects.count,
-            "appActive": NSApp.isActive,
-            "hasButton": statusItem.button != nil,
-        ])
-        // #endregion
-        // Accordion click dismissed the menu. On some macOS builds menuDidClose
-        // fires BEFORE the item action, so pending may still be false here —
-        // onToggleProject also schedules scheduleAccordionReopen on the next
-        // turn to cover that order.
-        scheduleAccordionReopen()
-    }
-
-    /// Re-open the status-item menu after a project accordion toggle.
-    /// Idempotent: first caller clears `pendingAccordionReopen`.
-    private func scheduleAccordionReopen() {
-        guard pendingAccordionReopen else { return }
-        pendingAccordionReopen = false
-        accordionCacheOnlyOpen = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            let button = self.statusItem.button
-            // #region agent log
-            self.debugLog("B", "StatusItemController.swift:scheduleAccordionReopen", "performClick scheduled", [
-                "runId": "post-fix",
-                "hasButton": button != nil,
-                "appActive": NSApp.isActive,
-                "activationPolicy": NSApp.activationPolicy().rawValue,
-                "accordionCacheOnly": self.accordionCacheOnlyOpen,
-                "expanded": Array(self.expandedProjects).sorted(),
-            ])
-            // #endregion
-            // Same activate + click path as surface() — .accessory apps do not
-            // show an NSStatusItem menu via performClick alone once focus has
-            // returned to another app after dismiss.
-            NSApp.activate(ignoringOtherApps: true)
-            button?.performClick(nil)
-            // #region agent log
-            DispatchQueue.main.async {
-                self.debugLog("C", "StatusItemController.swift:scheduleAccordionReopen", "after performClick next tick", [
-                    "runId": "post-fix",
-                    "appActive": NSApp.isActive,
-                    "pendingReopen": self.pendingAccordionReopen,
-                    "accordionCacheOnly": self.accordionCacheOnlyOpen,
-                    "expandedCount": self.expandedProjects.count,
-                ])
-            }
-            // #endregion
-        }
-    }
-
     // The one rule: attention floats to the top triage strip (wait-time sorted,
     // cross-project) and is never nested inside a project group; live work
     // groups by repo below; routines / tickets / recents stay dedicated,
@@ -547,6 +480,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                          doctor: DoctorOverview?, daemonPid: Int?, pending: [PendingDevice],
                          loaded: [LoadedDevice]) {
         menu.removeAllItems()
+        projectSessionItems.removeAll()
 
         // Prefer the engine's active list once the warm cache has it — full
         // coverage (tmux/IDE/headless), correct running/idle. The cheap
@@ -699,7 +633,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         // Devices under high load — this Mac (native getloadavg) first, then fresh
-        // fleet peers. Warn at headroom() 'loaded' (≥75%); ✕ red when critical.
+        // fleet peers. Warn at headroom() 'loaded' (>=75%); X red when critical.
         for d in loaded {
             let glyph = d.severity == .critical ? "✕" : "⚠"
             let color = d.severity == .critical ? fail : wait
@@ -735,8 +669,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // rows from the header count when grouping is in play.
         addSectionTitle(menu, "⚠ NEEDS YOU (\(rows.count))", color: wait)
         for (glyph, color, text, sub) in rows {
-            // Action-required rows are emphasized (bold) so items that need the
-            // user stand out from the informational sections below.
+            // Action-required rows are emphasized so they stand out from the
+            // informational sections below.
             let it = statusRow(glyph, color, text, emphasize: true)
             it.submenu = sub
             menu.addItem(it)
@@ -851,30 +785,25 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             let idle = group.count - running
             let machines = group.compactMap(\.machine)
             let open = expandedProjects.contains(repo)
-            let arrow = open ? "▼" : "▶"
             let summary = ActiveDisplay.projectSummary(repo: repo, running: running,
                                                        idle: idle, machines: machines)
-            let header = NSMenuItem(title: "  \(arrow)  \(summary)",
-                                    action: #selector(onToggleProject(_:)),
-                                    keyEquivalent: "")
-            header.target = self
-            header.representedObject = repo
-            header.toolTip = open
-                ? "Collapse \(repo)"
-                : "Expand \(repo) — \(group.count) session\(group.count == 1 ? "" : "s")"
+            let header = NSMenuItem(title: summary, action: nil, keyEquivalent: "")
+            let headerView = ProjectAccordionRowView(summary: summary, repo: repo,
+                                                     sessionCount: group.count, expanded: open)
+            headerView.onToggle = { [weak self, weak menu, weak header] shouldExpand in
+                guard let self, let menu, let header else { return }
+                self.setProject(repo, expanded: shouldExpand, sessions: group,
+                                rich: rich, in: menu, after: header)
+            }
+            header.view = headerView
             menu.addItem(header)
 
             guard open else { continue }
 
-            let sessions = group.sorted { a, b in
-                let ra = a.status == .running ? 0 : 1
-                let rb = b.status == .running ? 0 : 1
-                if ra != rb { return ra < rb }
-                return (a.lastActivityMs ?? 0) > (b.lastActivityMs ?? 0)
-            }
-            for s in sessions {
-                addSessionRow(menu, session: s, rich: rich)
-            }
+            let sessions = orderedProjectSessions(group)
+            let rows = sessions.map { makeSessionRow(session: $0, rich: rich) }
+            projectSessionItems[repo] = rows
+            for row in rows { menu.addItem(row) }
         }
 
         if !browserTasks.isEmpty {
@@ -890,7 +819,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     /// Agent summary under an expanded project. Detail lives in the › submenu
     /// (linkable ticket/PR/cwd, locality, duration) — not a second accordion.
-    private func addSessionRow(_ menu: NSMenu, session s: Session, rich: Bool) {
+    private func makeSessionRow(session s: Session, rich: Bool) -> NSMenuItem {
         let glyph = s.status == .running ? "●" : (s.status == .attention ? "⚠" : "◐")
         let color = s.status == .running ? run : (s.status == .attention ? wait : idleC)
         let agent = LocalState.agentLabel(s.agent)
@@ -915,7 +844,39 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         row.attributedTitle = sessionRowTitle(glyph: glyph, glyphColor: color, rest: line)
         row.submenu = sessionDetailSubmenu(s)
         row.toolTip = work.isEmpty ? "Session detail" : work
-        menu.addItem(row)
+        return row
+    }
+
+    /// Mutate only the rows under the clicked project. The enclosing status menu
+    /// remains in the same tracking session and no cache refresh or CLI call runs.
+    private func setProject(_ repo: String, expanded: Bool, sessions: [Session],
+                            rich: Bool, in menu: NSMenu, after header: NSMenuItem) {
+        if expanded {
+            expandedProjects.insert(repo)
+            let ordered = orderedProjectSessions(sessions)
+            let rows = ordered.map { makeSessionRow(session: $0, rich: rich) }
+            projectSessionItems[repo] = rows
+            let headerIndex = menu.index(of: header)
+            guard headerIndex >= 0 else { return }
+            for (offset, row) in rows.enumerated() {
+                menu.insertItem(row, at: headerIndex + offset + 1)
+            }
+        } else {
+            expandedProjects.remove(repo)
+            for row in projectSessionItems.removeValue(forKey: repo) ?? [] {
+                menu.removeItem(row)
+            }
+        }
+        menu.update()
+    }
+
+    private func orderedProjectSessions(_ sessions: [Session]) -> [Session] {
+        sessions.sorted { a, b in
+            let ra = a.status == .running ? 0 : 1
+            let rb = b.status == .running ? 0 : 1
+            if ra != rb { return ra < rb }
+            return (a.lastActivityMs ?? 0) > (b.lastActivityMs ?? 0)
+        }
     }
 
     /// Status-colored glyph + label for the agent row.
@@ -1058,33 +1019,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             return "~" + path.dropFirst(home.count)
         }
         return path
-    }
-
-    @objc private func onToggleProject(_ sender: NSMenuItem) {
-        guard let repo = sender.representedObject as? String else { return }
-        let wasOpen = expandedProjects.contains(repo)
-        if wasOpen {
-            expandedProjects.remove(repo)
-        } else {
-            expandedProjects.insert(repo)
-        }
-        pendingAccordionReopen = true
-        // #region agent log
-        debugLog("A", "StatusItemController.swift:onToggleProject", "toggle project", [
-            "runId": "post-fix",
-            "repo": repo,
-            "wasOpen": wasOpen,
-            "nowOpen": expandedProjects.contains(repo),
-            "pendingReopen": pendingAccordionReopen,
-            "appActive": NSApp.isActive,
-        ])
-        // #endregion
-        // menuDidClose often runs BEFORE this action (macOS tracking order).
-        // Schedule on the next main-queue turn so reopen still fires when
-        // menuDidClose already returned with pendingReopen == false.
-        DispatchQueue.main.async { [weak self] in
-            self?.scheduleAccordionReopen()
-        }
     }
 
     @objc private func onRevealPath(_ sender: NSMenuItem) {

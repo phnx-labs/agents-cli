@@ -1072,7 +1072,7 @@ The dropdown surfaces a **NEEDS YOU** queue (agents waiting on a question, a pla
 
 ### Quick-issue bar (⌘⇧O)
 
-Press `Cmd-Shift-O` anywhere for a thin capture surface: type a one-line note, `Cmd-V` to paste, and attach one or more recent screenshots (double-click a thumbnail to preview it in full). Submit, and a headless agent picks the right project from your recent sessions, investigates, and files the Linear ticket itself -- you never leave what you were doing.
+Press `Cmd-Shift-O` anywhere for a thin capture surface: the prepared text field appears immediately while repo, thumbnail, and ticket rows hydrate in the background. Type a one-line note, `Cmd-V` to paste, and attach one or more recent screenshots (double-click a thumbnail to preview it in full). Submit, and a headless agent picks the right project from your recent sessions, investigates, and files the Linear ticket itself -- you never leave what you were doing.
 
 The bar also lists the **open Linear tickets of the repo you picked**, urgent first. Switching the repo switches the Linear project; typing filters the list, so an existing ticket shows up before you file a duplicate; and clicking a row (or `⌘1`-`⌘5`) dispatches that ticket to the selected agents -- **Run** implements it, **Plan** posts a plan as a ticket comment.
 
