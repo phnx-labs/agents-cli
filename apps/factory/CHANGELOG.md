@@ -6,6 +6,15 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Removed the `agents.terminalMode` setting — tmux is always on when available.**
+  The extension no longer exposes an `auto` / `tmux` / `native` "terminal mode".
+  tmux is the default for every agent and shell terminal (giving each a named,
+  reconnectable session), with an automatic fallback to a plain VS Code terminal
+  only when tmux isn't installed (Windows / no binary). The `native` opt-out is
+  gone: it mostly just disabled the extension's crash/SSH-drop reconnect while the
+  `agents` CLI wrapped the agent in tmux anyway. Deletes the setting, the
+  `src/core/terminalMode.ts` module, and the mode reads at the launch / URI-spawn /
+  split sites. Source: `src/vscode/extension.ts`, `package.json`.
 - **Fleet health probes no longer stack duplicate `agents` subprocesses (fixes
   CPU thrash on a loaded box).** `countRunningAgents` — the per-host running-agent
   count behind the Dispatch panel's device health and the launch-health refresh —
