@@ -6,6 +6,13 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Markdown Viewer toggle actually opens the Notion-style editor.** Factory wrote
+  `workbench.editorAssociations` as a legacy array (`[{ viewType, filenamePattern }]`).
+  VS Code only accepts the object map (`{ "*.md": "agents.markdownEditor" }`), so the
+  setting saved but `.md` files kept opening as raw text. Writes the object shape,
+  migrates the old array on read, and pins `*.md` to `default` when disabled.
+  Source: `src/core/editorAssociations.ts`, `src/vscode/workbench.vscode.ts`.
+
 - **Removed the `agents.terminalMode` setting — tmux is always on when available.**
   The extension no longer exposes an `auto` / `tmux` / `native` "terminal mode".
   tmux is the default for every agent and shell terminal (giving each a named,
