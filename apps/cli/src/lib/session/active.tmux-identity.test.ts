@@ -1,6 +1,18 @@
-import { describe, it, expect } from 'vitest';
-import { agentKindFromName, shortIdFromName, resolveNamesToSessionIds, resolvePaneIdentity } from './active.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import {
+  agentKindFromName,
+  shortIdFromName,
+  resolveNamesToSessionIds,
+  resolvePaneIdentity,
+  listTmuxAgentSessions,
+} from './active.js';
 import type { HookSessionIndex } from './hook-sessions.js';
+import { writePidSessionEntry, prunePidSessionRegistry } from './pid-registry.js';
+import { isTmuxInstalled, runTmux } from '../tmux/binary.js';
+import * as tmuxPaths from '../tmux/paths.js';
 
 // These are pure functions — the DB dependency is injected — so no fixtures or
 // tmux are needed. The name-based tier is the recovery that makes a detached
@@ -89,31 +101,82 @@ describe('resolvePaneIdentity — name-based recovery (the fleet fix)', () => {
     expect(id?.sessionId).toBe('abcd1234-0000-0000-0000-000000000001');
   });
 
-  it('live registry entry retains terminalId for the tmux ActiveSession join (RUSH-2192)', () => {
-    // resolvePaneIdentity itself returns agent/sessionId/pid only — the tmux
-    // list path must copy liveEntry.terminalId onto the ActiveSession row.
-    // Guard the registry field so a future PidSessionEntry reshape cannot drop
-    // the Factory join key without a failing test here.
-    const live = {
-      pid: 42,
-      agent: 'grok',
-      sessionId: '019fd1e3-8859-7f03-a47c-49d64653b404',
-      startedAtMs: 1,
-      terminalId: 'GK-mid2-test',
-      launchId: 'LID-mid2-test',
-      tmuxPane: '%9',
-    };
-    const id = resolvePaneIdentity('%9', 'ag-grok-af7d9ff4', null, live, emptyHook, new Map());
-    expect(id).toEqual({
-      agent: 'grok',
-      sessionId: '019fd1e3-8859-7f03-a47c-49d64653b404',
-      pid: 42,
-    });
-    // The field the listTmuxAgentSessions path must forward:
-    expect(live.terminalId).toBe('GK-mid2-test');
-  });
-
   it('still drops a genuinely foreign pane (no name, no meta, no registry)', () => {
     expect(resolvePaneIdentity('%8', 'main', null, undefined, emptyHook, names)).toBeUndefined();
+  });
+});
+
+/**
+ * RUSH-2192 — pins the listTmuxAgentSessions *forward* of terminalId, not just
+ * that PidSessionEntry can hold the field. Removing
+ * `terminalId: liveEntry?.terminalId` from the tmux ActiveSession push must fail
+ * this test. Real tmux + real by-pid entry; socket redirected so we never touch
+ * the fleet's default server.
+ */
+const tmuxSkip = isTmuxInstalled() ? null : 'tmux not installed';
+
+describe.skipIf(tmuxSkip)('listTmuxAgentSessions forwards terminalId (RUSH-2192)', () => {
+  const SHORT = 'af7d9ff4';
+  const SESS = `ag-grok-${SHORT}`;
+  const TERMINAL_ID = 'GK-mid2-test-rush2192';
+  const SESSION_ID = '019fd1e3-8859-7f03-a47c-49d64653b404';
+  // High fake pid range reserved for tests — but isPidAlive needs a LIVE pid, so
+  // we bind the registry entry to the pane's real sleep pid after create.
+  let tempDir: string;
+  let socket: string;
+  let paneId: string;
+  let panePid: number;
+  let socketSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+  beforeEach(async () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-tmux-termid-'));
+    socket = path.join(tempDir, 'server.sock');
+    await runTmux({
+      socket,
+      args: ['new-session', '-d', '-s', SESS, 'sleep', '120'],
+    });
+    const listed = await runTmux({
+      socket,
+      args: ['list-panes', '-a', '-F', '#{pane_id}:#{pane_pid}:#{session_name}'],
+    });
+    const line = listed.stdout.split('\n').filter(Boolean)[0];
+    const [pane, pidRaw, name] = line.split(':');
+    expect(name).toBe(SESS);
+    paneId = pane;
+    panePid = parseInt(pidRaw, 10);
+    expect(paneId).toMatch(/^%/);
+    expect(panePid).toBeGreaterThan(0);
+
+    // Point listTmuxAgentSessions at our throwaway server (not the fleet socket).
+    socketSpy = vi.spyOn(tmuxPaths, 'getDefaultSocketPath').mockReturnValue(socket);
+
+    writePidSessionEntry({
+      pid: panePid,
+      agent: 'grok',
+      sessionId: SESSION_ID,
+      startedAtMs: Date.now() - 60_000,
+      terminalId: TERMINAL_ID,
+      launchId: 'LID-mid2-test-rush2192',
+      tmuxPane: paneId,
+      cwd: tempDir,
+    });
+  });
+
+  afterEach(async () => {
+    socketSpy?.mockRestore();
+    prunePidSessionRegistry((pid) => pid !== panePid);
+    await runTmux({ socket, args: ['kill-server'], throwOnError: false });
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('surfaces terminalId on the tmux ActiveSession row from the by-pid entry', async () => {
+    const rows = await listTmuxAgentSessions();
+    const mine = rows.find((r) => r.sessionId === SESSION_ID || r.kind === 'grok');
+    expect(mine, `expected a grok row; got ${JSON.stringify(rows.map((r) => ({ kind: r.kind, sessionId: r.sessionId, terminalId: r.terminalId })))}`).toBeDefined();
+    // This is the Factory join key. Dropping `terminalId: liveEntry?.terminalId`
+    // from listTmuxAgentSessions makes this assertion fail.
+    expect(mine!.terminalId).toBe(TERMINAL_ID);
+    expect(mine!.kind).toBe('grok');
+    expect(mine!.host).toBe('tmux');
   });
 });
