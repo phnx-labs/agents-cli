@@ -17,15 +17,22 @@
 `agents hosts` lets you run any agent (`claude`, `codex`, `droid`, …) on any of
 *your* machines — a Mac mini, a Windows mini, a couple of DGX Sparks — addressed
 by name from a small local registry, over plain SSH, with no central service to
-run or pay for:
+run or pay for.
+
+**Placement** (where the body runs) is one model shared with lease, cloud, and
+routines — see [00-concepts.md § Placement](00-concepts.md#placement). On
+`agents run`, prefer `--where`; the older flags remain aliases:
 
 ```
-agents run claude "fix the auth bug"   --host mac-mini   # headless: prompt given
-agents run codex  "port this to rust"  --host spark-0    # headless: prompt given
-agents run droid  "triage the inbox"   --host win-mini    # headless: prompt given
-agents run claude                      --host mac-mini   # interactive: TTY forwarded
-agents run claude "…"                  --device auto     # affinity-pick host from 14d usage
-agents run claude "…"                  --host auto       # same (host is the special value auto)
+agents run claude "fix the auth bug"   --where device:mac-mini   # = --host mac-mini
+agents run claude "…"                  --where auto              # = --device auto
+agents run claude "fix CI"            --where lease --mode edit # = --lease
+agents run claude "fix the auth bug"   --host mac-mini           # still works
+agents run codex  "port this to rust"  --host spark-0
+agents run droid  "triage the inbox"   --host win-mini
+agents run claude                      --host mac-mini            # interactive: TTY forwarded
+agents run claude "…"                  --device auto
+agents run claude "…"                  --host auto                # same (host value auto)
 ```
 
 Pass `auto` as the `--host` / `--device` value to pick a host from 14-day session

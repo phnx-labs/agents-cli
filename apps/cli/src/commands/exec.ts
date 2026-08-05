@@ -86,6 +86,9 @@ interface ExecCommandActionOptions {
   interval?: string;
   // Host dispatch: run on a registered agent host instead of locally.
   // `--host` is canonical; `--on`/`--computer` are hidden aliases.
+  // `--where` is the unified placement alias (lib/placement.ts) — expands into
+  // host/lease before dispatch; do not combine with those flags.
+  where?: string;
   host?: string;
   device?: string;
   on?: string;
@@ -803,12 +806,16 @@ export function registerRunCommand(program: Command): void {
       'Loop delay between iterations ("0" back-to-back, "30m" paces). Loop only.',
     )
     .option(
+      '--where <spec>',
+      'Where this run\'s body executes (one placement door): local | device:<name> | auto | lease[:backend]. Expands to --host/--lease. Do not combine with those flags. See docs/00-concepts.md#placement.',
+    )
+    .option(
       '--host <name>',
-      'Offload this run onto another machine over SSH — a device name, registered host, or user@host. Pass "auto" to pick from 14d usage affinity (most-used online device has highest probability). See `agents devices`.',
+      'Offload this run onto another machine over SSH — a device name, registered host, or user@host. Pass "auto" to pick from 14d usage affinity (most-used online device has highest probability). Same as --where device:<name>. See `agents devices`.',
     )
     .option(
       '--device <name>',
-      'Alias of --host. Pass "auto" for affinity-based device pick (same as --host auto).',
+      'Alias of --host. Pass "auto" for affinity-based device pick (same as --where auto).',
     )
     .option('--remote-cwd <dir>', "Explicit host working directory for --host runs, used VERBATIM (overrides --cwd; usually --cwd suffices — it re-roots a local-home path onto the remote home). Pass a single-quoted '$HOME/…' or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you).")
     .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
@@ -819,7 +826,7 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--lease [backend]',
-      'Invent a disposable cloud box for this run and tear it down after (via crabbox). Optional backend selects the cloud (hetzner/aws/do). Unlike --host, no machine is registered.',
+      'Invent a disposable cloud box for this run and tear it down after (via crabbox). Optional backend selects the cloud (hetzner/aws/do). Same as --where lease[:backend]. Unlike --host, no machine is registered.',
     )
     .option(
       '--box <slug>',
@@ -873,6 +880,11 @@ export function registerRunCommand(program: Command): void {
       # account headroom, then a balanced account on it
       agents run auto "fix the flaky test" --mode edit
       agents run auto --host yosemite-s0 "fix the flaky test"   # pin the host
+
+      # Placement (one door — where the body runs). Old flags still work.
+      agents run claude "…" --where device:yosemite-s0   # = --host yosemite-s0
+      agents run claude "…" --where auto                 # = --device auto
+      agents run claude "fix CI" --where lease --mode edit
 
       # Open the session in a terminal tab — detected from where your sessions
       # already run (Ghostty / iTerm / Terminal.app); force one with a value
@@ -964,6 +976,33 @@ export function registerRunCommand(program: Command): void {
       if (options.terminal) {
         await handleTerminalHandoff(agentSpec, options, prompt);
         return;
+      }
+
+      // Placement: --where expands into --host / --lease before any dispatch.
+      // One door for "where does the body run?" — old flags remain aliases.
+      // See lib/placement.ts and docs/00-concepts.md#placement.
+      {
+        const { placementFromRunFlags, expandPlacementToRunFlags, PlacementError } =
+          await import('../lib/placement.js');
+        try {
+          const placement = placementFromRunFlags(options);
+          if (options.where) {
+            const expanded = expandPlacementToRunFlags(placement);
+            if (expanded.host !== undefined) options.host = expanded.host;
+            if (expanded.device !== undefined) options.device = expanded.device;
+            if (expanded.lease !== undefined) options.lease = expanded.lease;
+            if (expanded.box !== undefined) options.box = expanded.box;
+            // Clear the where flag so remote re-entry (host dispatch) does not
+            // re-expand and conflict with the concrete host we just set.
+            options.where = undefined;
+          }
+        } catch (err) {
+          if (err instanceof PlacementError) {
+            console.error(chalk.red(err.message));
+            process.exit(1);
+          }
+          throw err;
+        }
       }
 
       // --notify: post a desktop notification when this run finishes. Armed on

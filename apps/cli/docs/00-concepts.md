@@ -193,6 +193,39 @@ ps`), and routines placement (`agents routines add … --run-on <name>`). See
 [hosts.md](hosts.md) for the `--host` execution model and the option-forwarding
 contract.
 
+## Placement
+
+**One question, one object:** *where does the agent body run?*
+
+```yaml
+where:
+  kind: local | device | fleet | cloud | lease
+  target: yosemite-s0 | auto | hetzner   # optional
+```
+
+The CLI still accepts the historical flags; they all map onto this shape
+(`src/lib/placement.ts`). Prefer **`--where`** on `agents run` when you want
+one door:
+
+| Intent | Placement | Flag / path (aliases still work) |
+|---|---|---|
+| This machine | `kind: local` | (default) · `--where local` |
+| Named fleet / host box | `kind: device, target: <name>` | `--where device:<name>` · `--host` / `--device` |
+| Affinity pick (14d usage) | `kind: device, target: auto` | `--where auto` · `--device auto` |
+| Disposable crabbox | `kind: lease` | `--where lease` · `--lease` |
+| Warm crabbox reuse | `kind: lease, target: <slug>` | `--box <slug>` |
+| Routines: body on one box | `kind: device` | `--run-on <name>` · `--placement host` |
+| Routines: pick any online | `kind: fleet` | `--placement fleet` |
+| Vendor cloud task | `kind: cloud` | `agents cloud run …` |
+
+**Owner is not placement.** On monitors, `--device` pins who *evaluates and
+fires* (exactly-once owner). `--run-on` is where the *action body* runs. Same
+word `--device`, opposite jobs — always say "owner" vs "body placement" in
+docs and help.
+
+Mixing doors fails loud (`--where` + `--host`, `--host` + `--lease`, …). Source
+of truth: [`src/lib/placement.ts`](../src/lib/placement.ts).
+
 ---
 
 ## Capability matrix
