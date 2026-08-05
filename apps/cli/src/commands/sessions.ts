@@ -70,6 +70,7 @@ import { registerSessionsImportCommand } from './sessions-import.js';
 import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
 import { registerSessionsBackfillCommand } from './sessions-backfill.js';
 import { registerSessionsStatsCommand } from './sessions-stats.js';
+import { registerSessionsOptimizeCommand } from './sessions-optimize.js';
 import { runBrowserSessions } from '../lib/browser/sessions-list.js';
 import {
   countToolProgramOccurrences,
@@ -4218,6 +4219,7 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsMigrationsCommand(sessionsCmd);
   registerSessionsBackfillCommand(sessionsCmd);
   registerSessionsStatsCommand(sessionsCmd);
+  registerSessionsOptimizeCommand(sessionsCmd);
 
   // Observe-umbrella alias (Phase 3): roster → sessions --active.
   registerSessionsObserveAliases(program);

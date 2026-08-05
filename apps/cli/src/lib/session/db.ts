@@ -926,6 +926,38 @@ export function closeDB(): void {
   }
 }
 
+export interface FtsOptimizeResult {
+  table: string;
+  segmentsBefore: number;
+  segmentsAfter: number;
+}
+
+/**
+ * Compact the session + tool-call full-text-search indexes.
+ *
+ * FTS5 appends a new segment on every insert and leaves a tombstone on every
+ * delete. The scanner delete+inserts a session's docs on each rescan (and on
+ * every extractor-version bump), and FTS5 never merges those segments on its
+ * own — so `tool_call_text_data` / `session_text_data` accumulate hundreds of
+ * thousands of unmerged segments, gigabytes of index for tens of MB of content,
+ * and `agents sessions` queries slow to a crawl. The FTS5 `'optimize'` command
+ * merges every segment into one and purges tombstones. Non-destructive: no
+ * searchable content is lost. Reclaimed space becomes reusable free pages inside
+ * the DB file; run VACUUM (with the daemon stopped) to return it to the OS.
+ */
+export function optimizeSessionSearchIndex(): FtsOptimizeResult[] {
+  const db = getDB();
+  // Hardcoded literals — never interpolate caller input into an identifier.
+  const tables = ['tool_call_text', 'session_text'];
+  const segments = (table: string): number =>
+    (db.prepare(`SELECT count(*) AS n FROM ${table}_data`).get() as { n: number }).n;
+  return tables.map((table) => {
+    const segmentsBefore = segments(table);
+    db.prepare(`INSERT INTO ${table}(${table}) VALUES('optimize')`).run();
+    return { table, segmentsBefore, segmentsAfter: segments(table) };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Scan coordinator — prevents concurrent full scans across processes
 // ---------------------------------------------------------------------------

@@ -1266,3 +1266,4 @@ fan-out specifically.
 - `agents sessions <id> --artifacts` — list files created/modified in a session
 - `agents teams status` — session state for team-coordinated runs
 - `agents cloud logs <id>` — for remote cloud dispatches (different subsystem)
+- `agents sessions optimize` — compact the FTS5 search index (`tool_call_text` / `session_text`) when it has bloated from repeated re-indexing, which slows or hangs `agents sessions`. FTS5 appends a segment per insert and never self-merges the scanner's delete+insert churn; this runs `'optimize'` to merge segments + purge tombstones, non-destructively. Reclaimed space frees as reusable pages (VACUUM with the daemon stopped returns it to disk). Wireable to a weekly routine so the index never re-bloats.

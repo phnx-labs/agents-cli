@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **`agents sessions optimize` — compact the FTS5 session search index.** The scanner delete+inserts a session's docs into the `tool_call_text` / `session_text` full-text indexes on every rescan, and FTS5 never merges the resulting segments on its own — so over thousands of sessions the `%_data` shadow tables bloat with hundreds of thousands of unmerged segments (observed: 701 MB of index for ~69 MB of content, 196K segments) and `agents sessions` slows to a crawl / hangs. The new command runs FTS5 `'optimize'` (merge all segments, purge tombstones), non-destructively — no searchable content is lost. Reclaimed space becomes reusable free pages inside the DB file; VACUUM (daemon stopped) returns it to disk. Wireable to a weekly routine so the index never re-bloats. Source: `apps/cli/src/lib/session/db.ts` (`optimizeSessionSearchIndex`), `apps/cli/src/commands/sessions-optimize.ts`.
+
 ## 1.22.12
 
 - Store operational events in daily history directories, retain 7 days and at most 50 MiB automatically, and make `agents logs audit` use the `agents events --audit` reader.
