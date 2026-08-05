@@ -34,11 +34,11 @@ import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { inferSessionState } from '../lib/session/state.js';
 import { discoverSessions, queryIndexedSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, scopeToManaged, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
-import { findSessionsById, querySessions } from '../lib/session/db.js';
+import { findSessionsById, querySessions, getSessionById } from '../lib/session/db.js';
 import { filterTeamSessions, safeTeamText } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
-import { formatRelativeTime, sessionAgeParts, type SessionAgeParts } from '../lib/session/relative-time.js';
+import { formatRelativeTime, formatCompactAge, sessionAgeParts, type SessionAgeParts } from '../lib/session/relative-time.js';
 import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkPath, linkUrl, shortenModel, type FilterOptions } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
 import { renderMarkdown } from '../lib/markdown.js';
@@ -521,6 +521,56 @@ export function indexActiveBySessionId(active: ActiveSession[]): Map<string, Act
   return byId;
 }
 
+/** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
+type BackfillMeta = Pick<SessionMeta, 'version' | 'timestamp' | 'label' | 'ticketId' | 'prUrl' | 'prNumber'>;
+
+/**
+ * Backfill display-only fields onto live rows from the indexed SessionMeta, by
+ * full session id (RUSH-2205). A running process reports no agent version, and a
+ * live orphan row usually carries no ticket/PR/label/start-time; the historical
+ * index does. Only a field the live row LACKS is filled — the live signal always
+ * wins when present. Pure (no I/O) so the join is unit-tested against fixtures;
+ * the DB read that builds `metaById` is the caller's concern.
+ */
+export function backfillActiveRowsFromMeta(
+  sessions: ActiveSession[],
+  metaById: Map<string, BackfillMeta>,
+): void {
+  for (const s of sessions) {
+    if (!s.sessionId) continue;
+    const m = metaById.get(s.sessionId);
+    if (!m) continue;
+    if (!s.version && m.version) s.version = m.version;
+    if (!s.label && m.label) s.label = m.label;
+    if (!s.ticket && m.ticketId) s.ticket = { id: m.ticketId, url: linearIssueUrl(m.ticketId) };
+    if (!s.pr && m.prUrl) s.pr = { url: m.prUrl, number: m.prNumber };
+    if (!s.startedAtMs && m.timestamp) {
+      const ts = new Date(m.timestamp).getTime();
+      if (!Number.isNaN(ts)) s.startedAtMs = ts;
+    }
+  }
+}
+
+/**
+ * Build the id→meta index the live-row backfill needs, reading the historical
+ * session DB by full id. Best-effort: a missing or locked DB yields an empty map
+ * so the live view still renders (mirrors {@link maybeLiveIndex}). Deduplicates
+ * ids so N rows in one session cost one query.
+ */
+function loadBackfillMetaFor(sessions: ActiveSession[]): Map<string, BackfillMeta> {
+  const byId = new Map<string, BackfillMeta>();
+  try {
+    for (const s of sessions) {
+      if (!s.sessionId || byId.has(s.sessionId)) continue;
+      const m = getSessionById(s.sessionId);
+      if (m) byId.set(s.sessionId, m);
+    }
+  } catch {
+    /* enrichment is best-effort — an unavailable DB leaves rows un-backfilled */
+  }
+  return byId;
+}
+
 /**
  * The live decoration for a listing row: a status glyph and the latest-turn
  * preview, when the session is still running. `●` running / `◐` waiting on the
@@ -722,30 +772,84 @@ function locatorBadge(s: ActiveSession): string {
 }
 
 /**
- * Render a single agent-session row inside an already-printed group header.
- * Indent is the leading whitespace (2 spaces for flat groups, 4 inside a
- * window sub-group). Leads with the 8-char session id (the address to read or
- * resume it); status, badges, and the live preview fill the rest, sized to the
- * terminal width so the row never wraps.
+ * The `created X · idle Y` time cell for a live row (RUSH-2205). `created` is the
+ * age of the session start ({@link ActiveSession.startedAtMs}); `idle` is the age
+ * of the last transcript write ({@link ActiveSession.lastActivityMs}) — i.e. how
+ * long it has been quiet. Compact ("6d", "3h", "now") so the row stays width-safe;
+ * either half is omitted when its epoch is unknown.
  */
-function printActiveRow(s: ActiveSession, indent: string): void {
-  // shortId (8-char) · agent · host · status · owner · badges · identity+todos+snippet
-  const idCol = chalk.dim(padToWidth((s.sessionId?.slice(0, 8)) ?? '-', 9));
-  const kindCol = colorAgent(s.kind as any)(padToWidth(truncateToWidth(s.kind, 8), 9));
-  const hostCol = chalk.gray(padToWidth(truncateToWidth(s.host ?? '-', 8), 9));
-  const statusCol = statusColor(s.status)(padToWidth(truncateToWidth(activityLabel(s), 8), 9));
-  const ownerCol = chalk.cyan(padToWidth(truncateToWidth(ownerLabel(s), 8), 9));
+function activeTimeCell(s: ActiveSession): string {
+  const parts: string[] = [];
+  if (s.startedAtMs) parts.push(`created ${formatCompactAge(new Date(s.startedAtMs).toISOString())}`);
+  if (s.lastActivityMs) parts.push(`idle ${formatCompactAge(new Date(s.lastActivityMs).toISOString())}`);
+  return parts.join(' · ');
+}
+
+/** Column widths for line 1 of an active row (id · agent · version · status · owner). */
+const ROW_ID_W = 9;
+const ROW_AGENT_W = 8;
+const ROW_VERSION_W = 8;
+const ROW_STATUS_W = 9;
+const ROW_OWNER_W = 9;
+
+/**
+ * Build the (one or two) rendered lines for a single active-session row.
+ * Indent is the leading whitespace (2 spaces for flat groups, 4 inside a window
+ * sub-group). Sized to `termW` so no line ever wraps under tmux/SSH (RUSH-2205):
+ *
+ *   line 1: id · agent version · status · owner · created X · idle Y · ticket/PR
+ *   line 2: └ label/topic (+ checklist) · jump locator (ssh/tmux/detached)
+ *
+ * The label/topic gets its own line so it is no longer buried in a truncated grey
+ * snippet, and the actionable ticket/PR badges ride line 1. Version and the
+ * ticket/PR/label are backfilled onto the {@link ActiveSession} from the indexed
+ * SessionMeta before this renders (a live process reports none of them). Pure +
+ * exported so the row layout is unit-tested for content and width without a
+ * captured stdout.
+ */
+export function renderActiveRowLines(s: ActiveSession, indent: string, termW: number): string[] {
+  const idCol = chalk.dim(padToWidth((s.sessionId?.slice(0, 8)) ?? '-', ROW_ID_W));
+  const kindCol = colorAgent(s.kind as any)(padToWidth(truncateToWidth(s.kind, ROW_AGENT_W), ROW_AGENT_W + 1));
+  const versionCol = chalk.gray(padToWidth(truncateToWidth(s.version ?? '', ROW_VERSION_W), ROW_VERSION_W + 1));
+  const statusCol = statusColor(s.status)(padToWidth(truncateToWidth(activityLabel(s), ROW_STATUS_W - 1), ROW_STATUS_W));
+  const ownerCol = chalk.cyan(padToWidth(truncateToWidth(ownerLabel(s), ROW_OWNER_W - 1), ROW_OWNER_W));
+  const fixedW = stringWidth(indent) + ROW_ID_W + (ROW_AGENT_W + 1) + (ROW_VERSION_W + 1) + ROW_STATUS_W + ROW_OWNER_W;
+
+  // Line 1 right side: time cell + actionable badges (fork count, plan/ask/perm,
+  // ticket, PR, worktree). Badges are the jump-to-work signal, so they win the
+  // width fight — the time cell is truncated to whatever is left before them.
   const fork = s.pidCount && s.pidCount > 1 ? chalk.dim(`×${s.pidCount} `) : '';
-  const badges = (fork ? fork : '') + [signalBadges(s), locatorBadge(s)].filter(Boolean).join(' ');
-  // Identity (label/project/ticket clickable) + checklist + live snippet.
-  // Cross-machine rows use the same path — remote ActiveSession fields arrive
-  // via the SSH fan-out already populated (including todos when the peer has them).
-  const desc = formatActiveRowDescription(s) || '-';
-  // Fill the remaining width with the preview so nothing wraps under tmux/SSH.
-  const fixed = stringWidth(indent) + 9 + 9 + 9 + 9 + 9 + (badges ? stringWidth(badges) + 1 : 0);
-  const room = Math.max(12, terminalWidth() - fixed - 1);
-  const descCol = chalk.white(truncateToWidth(desc, room));
-  console.log(indent + idCol + kindCol + hostCol + statusCol + ownerCol + (badges ? badges + ' ' : '') + descCol);
+  const badges = fork + signalBadges(s);
+  const badgesW = badges ? stringWidth(badges) : 0;
+  const remaining = Math.max(0, termW - fixedW - 1);
+  const timeRoom = Math.max(0, remaining - (badgesW ? badgesW + 2 : 0));
+  const timeCell = chalk.gray(truncateToWidth(activeTimeCell(s), timeRoom));
+  let right = timeCell;
+  if (badges) right += (stringWidth(timeCell) ? '  ' : '') + badges;
+  right = truncateToWidth(right, remaining);
+  // Final whole-line clamp so even a terminal narrower than the fixed columns
+  // truncates rather than wraps (no-wrap guarantee at any width).
+  const lines = [truncateToWidth(indent + idCol + kindCol + versionCol + statusCol + ownerCol + right, termW)];
+
+  // Line 2: label/topic + checklist (the identity, no longer buried) then the
+  // jump locator. Skipped entirely when there is nothing to say.
+  const desc = formatActiveRowDescription(s);
+  const loc = locatorBadge(s);
+  if (!desc && !loc) return lines;
+  const contIndent = indent + ' '.repeat(ROW_ID_W);
+  const room2 = Math.max(8, termW - stringWidth(contIndent) - 2);
+  const locW = loc ? stringWidth(loc) : 0;
+  const descRoom = Math.max(6, room2 - (locW ? locW + 2 : 0));
+  const descCol = chalk.white(truncateToWidth(desc || '-', descRoom));
+  let line2 = contIndent + chalk.dim('└ ') + descCol;
+  if (loc) line2 += '  ' + loc;
+  lines.push(truncateToWidth(line2, termW));
+  return lines;
+}
+
+/** Render a single agent-session row inside an already-printed group header. */
+function printActiveRow(s: ActiveSession, indent: string): void {
+  for (const line of renderActiveRowLines(s, indent, terminalWidth())) console.log(line);
 }
 
 /**
@@ -1258,6 +1362,13 @@ async function renderActiveSessions(
     ? merged.filter((session) => opts.statuses!.some((status) => matchesLiveStatus(session, status)))
     : merged;
   const sessions = statusFiltered;
+
+  // Backfill agent version + ticket/PR/label/created onto the live rows from the
+  // historical index (RUSH-2205) — a running process reports none of these, and
+  // an orphan row usually lacks them. Done before both the JSON and human paths
+  // so every consumer (incl. the SSH fan-out's remote --json) sees enriched rows;
+  // transcripts sync across the fleet, so a remote row resolves from the local DB.
+  backfillActiveRowsFromMeta(sessions, loadBackfillMetaFor(sessions));
 
   if (asJson) {
     // Resolve who is watching each local tmux pane before serializing: `viewingIn`
