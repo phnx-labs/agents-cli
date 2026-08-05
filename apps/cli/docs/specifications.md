@@ -1494,6 +1494,29 @@ schema (`--json` passes through each agent's native stream format).
   non-TTY MUST be refused before spawn rather than hang on dead stdin
   (`inferredInteractiveWithoutTty`, `lib/exec.ts:270-276`; enforced
   `commands/exec.ts:2645-2655`).
+- **EXEC-23a (MUST).** An interactive tmux-wrapped run MUST either attach
+  a confirmed-live pane to the user's terminal OR surface a legible failure
+  banner on stderr, and MUST NEVER leave an orphan session behind (RUSH-2185).
+  Three sub-rules enforce this:
+  - **(F1) Harness gate.** `agents run auto` with no prompt MUST NOT pick a
+    harness whose `capabilities.interactiveRepl` is `false`.  When all
+    installed harnesses lack that capability the run MUST fail with a clear
+    message naming the installed harnesses and instructing the user to pass
+    `-p` or install a REPL-capable one (`commands/exec.ts` auto-picker block;
+    `lib/agents.ts` per-agent capability; `lib/types.ts CapabilityName`).
+  - **(F2) Dead-pane recap.** `surfacePaneFailure` MUST be called whenever a
+    tmux pane is found dead — before or after attach — REGARDLESS of the
+    pane's exit code when the run is interactive.  `shouldRecapDeadPane(status,
+    interactive)` encodes this: `true` when `status !== 0` OR `interactive`
+    (`lib/exec.ts: shouldRecapDeadPane`; applied in `runInTmux`).
+  - **(F3) Positive-proof keep-session.** The "pane still alive → keep session"
+    branch in `runInTmux` MUST only be taken when a direct `tmux
+    display-message #{pane_dead}` query explicitly returns exit-0 with stdout
+    "0".  `paneExitStatus` returning `{dead: false}` is NOT sufficient — it
+    also returns that value on any query error (race with pane death).
+    `isPaneKnownAliveFromQueryResult(code, stdout)` encodes the positive-proof
+    test (`lib/exec.ts: isPaneKnownAliveFromQueryResult`).  An ambiguous
+    result MUST `killSession` rather than keep the orphan.
 - **EXEC-24 (MUST).** A slash-command prompt run headless under the
   implicit default `plan` mode MUST be refused before spawn — it would hang
   forever at `ExitPlanMode` with no TTY to approve it
