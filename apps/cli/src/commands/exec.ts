@@ -2649,7 +2649,7 @@ export function registerRunCommand(program: Command): void {
       // Discard it loudly and let the profile's configured model stand.
       if (fromProfile && model && isTierToken(model)) {
         process.stderr.write(chalk.yellow(
-          `[agents] --model ${model}: cost tiers don't apply to profile '${agentSpec}' ` +
+          `[agents] --model ${model}: cost tiers don't apply to profile '${rawAgent}' ` +
           `(its model comes from the endpoint) — ignoring the tier, using the profile's configured model\n`,
         ));
         model = undefined;
