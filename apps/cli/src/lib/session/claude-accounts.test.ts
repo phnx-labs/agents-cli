@@ -160,7 +160,7 @@ describe('resolveClaudeAccount', () => {
     const unknown = resolveClaudeAccount(index, '');
     const signedOut = resolveClaudeAccount(index, transcript(versionHome('2.1.170'), 'z'));
 
-    expect(backup.key).toBe('unattributed:backup mirror');
+    expect(backup.key).toBe('unattributed:backup mirror');   // no recorded version
     expect(unknown.key).toBe('unattributed:unknown home');
     expect(new Set([backup.key, unknown.key, signedOut.key]).size).toBe(3);
   });
@@ -184,6 +184,26 @@ describe('resolveClaudeAccount', () => {
     const bucket = resolveClaudeAccount(index, transcript(versionHome('2.1.170'), 'q'), '2.1.220');
     expect(bucket.attributed).toBe(false);
     expect(bucket.key).toBe('unattributed:signed-out home 2.1.170');
+  });
+
+  it('stays dark when a recorded version names no home, instead of using the symlink', () => {
+    // Regression guard: an uninstalled version whose trash snapshot was pruned must NOT
+    // fall through to whatever ~/.claude points at now. That would silently move those
+    // rows onto the current default account — the inference tier 2 exists to prevent.
+    const index = buildClaudeAccountIndex();
+    const underSymlink = path.join(TEST_HOME, '.claude', 'projects', '-p', 'gone.jsonl');
+    const bucket = resolveClaudeAccount(index, underSymlink, '9.9.999');
+    expect(bucket.attributed).toBe(false);
+    expect(bucket.key).toBe('unattributed:no home for version 9.9.999');
+  });
+
+  it('resolves a backup mirror by its recorded version, dark only without one', () => {
+    // A mirror has no .claude.json of its own, but the recorded version still names
+    // the home that wrote it.
+    const index = buildClaudeAccountIndex();
+    const mirror = path.join(historyDir(), 'backups', 'claude', '2026-07-01', 'projects', '-p', 'm.jsonl');
+    expect(resolveClaudeAccount(index, mirror, '2.1.220').orgName).toBe('Turing Labs');
+    expect(resolveClaudeAccount(index, mirror).key).toBe('unattributed:backup mirror');
   });
 
   it('never returns null, so no transcript is silently dropped', () => {

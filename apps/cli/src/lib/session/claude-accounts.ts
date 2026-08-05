@@ -257,7 +257,8 @@ function versionFromPath(filePath: string): string | null {
  * Never returns null: a transcript that matches no known home resolves to an
  * explicitly dark bucket rather than being dropped or folded into a real account.
  * Backup mirrors (`<historyDir>/backups/claude/<stamp>/projects/…`) carry no
- * `.claude.json` and so are always dark. That is honest reporting, not a fallback.
+ * `.claude.json` of their own, so they resolve by recorded version like any other
+ * out-of-home path, and go dark only when that version names no home.
  */
 export function resolveClaudeAccount(
   index: ClaudeAccountIndex,
@@ -287,6 +288,11 @@ export function resolveClaudeAccount(
       return unattributed(`ambiguous history for version ${recordedVersion}`);
     }
     if (byVersion) return byVersion;
+    // Recorded but unresolvable — the version was uninstalled and its trash snapshot
+    // pruned. Stay dark. Falling through to the symlink's current target would move
+    // these rows onto whichever account happens to be default now, which is the
+    // inference tier 2 exists to avoid.
+    return unattributed(`no home for version ${recordedVersion}`);
   }
 
   // Tier 3 — under the live symlink with no usable recorded version. Its current
@@ -295,7 +301,6 @@ export function resolveClaudeAccount(
     return index.symlinkBucket;
   }
 
-  if (recordedVersion) return unattributed(`no home for version ${recordedVersion}`);
   const version = versionFromPath(filePath);
   if (version) return unattributed(`signed-out home ${version}`);
   if (filePath.includes(`${path.sep}backups${path.sep}claude${path.sep}`)) {

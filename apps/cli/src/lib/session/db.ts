@@ -871,10 +871,22 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
  * `file_path` and recorded `version`. Used by the v33 migration; idempotent, so it is
  * safe to re-run.
  */
-function backfillClaudeAccounts(db: Database.Database): void {
+function backfillClaudeAccounts(
+  db: Database.Database,
+  scope: 'all' | 'unresolved' = 'all',
+): void {
+  // 'unresolved' exists so the getDB repair touches ONLY rows that are actually
+  // broken. Re-resolving every Claude row on an unrelated trigger would silently
+  // downgrade a correct row whose version home has since been uninstalled and its
+  // trash snapshot pruned — the row would go from attributed to dark for no reason
+  // the user caused. The migration wants 'all'; the repair does not.
+  const where = scope === 'all'
+    ? `agent = 'claude'`
+    : `agent = 'claude' AND (account_key IS NULL
+         OR (account_key LIKE 'unattributed:%' AND account IS NOT NULL))`;
   const index = buildClaudeAccountIndex();
   const rows = db.prepare(
-    `SELECT id, file_path, version FROM sessions WHERE agent = 'claude'`,
+    `SELECT id, file_path, version FROM sessions WHERE ${where}`,
   ).all() as Array<{ id: string; file_path: string; version: string | null }>;
   if (rows.length === 0) return;
 
@@ -944,14 +956,22 @@ export function getDB(): Database.Database {
   // again. Cheap guard first so the common case is one indexed lookup, then repair.
   // Same shape as the `machine` repair below, for the same reason.
   {
-    const needsRepair = db.prepare(`
-      SELECT 1 FROM sessions
-      WHERE agent = 'claude'
-        AND (account_key IS NULL
-             OR (account_key LIKE 'unattributed:%' AND account IS NOT NULL))
-      LIMIT 1
-    `).get();
-    if (needsRepair) backfillClaudeAccounts(db);
+    // Column guard FIRST, like the `machine` repair below. schema_version can be
+    // stamped at SCHEMA_VERSION without the column existing — getDB writes the marker
+    // for any DB whose meta has no row (a hand-built or partially-created index), and
+    // migrateSchema never runs in that path. Querying account_key unguarded would
+    // then throw "no such column" and take down every command that opens the index.
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (cols.some((c) => c.name === 'account_key') && cols.some((c) => c.name === 'account_org')) {
+      const needsRepair = db.prepare(`
+        SELECT 1 FROM sessions
+        WHERE agent = 'claude'
+          AND (account_key IS NULL
+               OR (account_key LIKE 'unattributed:%' AND account IS NOT NULL))
+        LIMIT 1
+      `).get();
+      if (needsRepair) db.transaction(() => backfillClaudeAccounts(db, 'unresolved'))();
+    }
   }
 
   // machine column + indexes: only after the column is guaranteed present.
@@ -1457,6 +1477,23 @@ function detectToolUsage(sessionId: string): { usedBrowser: boolean; usedCompute
 
 const deleteResourceUsageStmt = (db: Database.Database) =>
   db.prepare(`DELETE FROM session_resource_usage WHERE session_id = ?`);
+/**
+ * Named-bind shape for {@link insertResourceUsageStmt}. Declared so the two call sites
+ * are type-checked: bun binds named parameters in strict mode where a MISSING key
+ * throws (node binds NULL), and both call sites sit outside any per-row guard, so a
+ * dropped key would abort the whole batch on the runtime the shipped binary embeds.
+ */
+interface ResourceUsageBind {
+  session_id: string;
+  kind: 'skill' | 'command';
+  name: string;
+  count: number;
+  plugin: string | null;
+  source: string | null;
+  repo_root: string | null;
+  snapshot_sha: string | null;
+}
+
 const insertResourceUsageStmt = (db: Database.Database) => db.prepare(`
   INSERT INTO session_resource_usage (session_id, kind, name, plugin, source, repo_root, snapshot_sha, count)
   VALUES (@session_id, @kind, @name, @plugin, @source, @repo_root, @snapshot_sha, @count)
@@ -1531,20 +1568,22 @@ function writeResourceUsageFromTallies(
   const plugins = discoverPlugins({ cwd });
   for (const { name, count } of skills) {
     const prov = resolveResourceProvenance('skills', name, cwd, plugins);
-    ins.run({
+    const bind: ResourceUsageBind = {
       session_id: sessionId, kind: 'skill', name, count,
       plugin: prov.plugin ?? null, source: prov.source ?? null,
       repo_root: prov.repoRoot ?? null, snapshot_sha: prov.snapshotSha ?? null,
-    });
+    };
+    ins.run(bind);
   }
   for (const { name, count } of commands) {
     const bare = name.replace(/^\//, '');
     const prov = resolveResourceProvenance('commands', bare, cwd, plugins);
-    ins.run({
+    const bind: ResourceUsageBind = {
       session_id: sessionId, kind: 'command', name: bare, count,
       plugin: prov.plugin ?? null, source: prov.source ?? null,
       repo_root: prov.repoRoot ?? null, snapshot_sha: prov.snapshotSha ?? null,
-    });
+    };
+    ins.run(bind);
   }
 }
 

@@ -270,9 +270,11 @@ under one email — a Team seat and a personal Max plan — are separate rate-li
 `agents cost --by account` and any other `queryUsageRollup({ groupBy: 'account' })`
 caller uses it.
 
-What cannot be established is named, not guessed: a signed-out home, a backup mirror
-with no config, and a version whose retired snapshots disagree each get their own
-`unattributed:*` bucket. The v33 migration also clears the pre-v33 `account` email on
+What cannot be established is named, not guessed: a signed-out home, a recorded version
+that names no home (uninstalled, its snapshot pruned), and a version whose retired
+snapshots disagree each get their own `unattributed:*` bucket. A backup mirror carries no
+config of its own, so it resolves by recorded version like any other out-of-home path and
+goes dark only when that version names no home. The v33 migration also clears the pre-v33 `account` email on
 any row it cannot attribute, rather than leaving a known-wrong address on display.
 
 ### Index lifecycle and disk I/O

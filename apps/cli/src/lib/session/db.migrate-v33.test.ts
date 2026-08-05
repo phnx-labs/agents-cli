@@ -244,3 +244,67 @@ describe('v33 self-healing repair on an already-migrated DB', () => {
     expect(refilled.account_org).toBe('ModSquad');
   });
 });
+
+describe('v33 repair safety', () => {
+  it('does not throw when schema_version says 33 but the columns are absent', () => {
+    // getDB stamps schema_version = SCHEMA_VERSION for any DB whose meta has no row,
+    // WITHOUT running migrateSchema. A repair that queried account_key unguarded would
+    // throw "no such column" and take down every command that opens the index.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-v33-noco-'));
+    const dbPath = path.join(dir, 'sessions.db');
+    const seed = new Database(dbPath);
+    seed.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY, short_id TEXT NOT NULL, agent TEXT NOT NULL,
+        timestamp TEXT NOT NULL, file_path TEXT NOT NULL, account TEXT
+      );
+      CREATE VIRTUAL TABLE session_text USING fts5(session_id UNINDEXED, label, topic, project, content);
+      CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+      CREATE TABLE scan_ledger (
+        file_path TEXT PRIMARY KEY, file_mtime_ms INTEGER NOT NULL, file_size INTEGER NOT NULL,
+        scanned_at INTEGER NOT NULL, parser_state TEXT, content_text TEXT
+      );
+    `);
+    seed.close();
+
+    // Re-open through getDB with the DB redirected at this bare file.
+    const prev = process.env.AGENTS_SESSIONS_DB;
+    process.env.AGENTS_SESSIONS_DB = dbPath;
+    closeDB();
+    try {
+      expect(() => getDB()).not.toThrow();
+    } finally {
+      closeDB();
+      if (prev === undefined) delete process.env.AGENTS_SESSIONS_DB;
+      else process.env.AGENTS_SESSIONS_DB = prev;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('repairs only broken rows, leaving an attributed row untouched', () => {
+    // Re-resolving every Claude row on an unrelated trigger would downgrade a correct
+    // row whose version home has since been uninstalled. Scope the repair.
+    closeDB();
+    const db = getDB();
+    // A row attributed to a version that no longer resolves. A full re-resolve would
+    // turn this dark; the scoped repair must not touch it.
+    db.prepare(
+      `UPDATE sessions SET account_key='claude:org=org-gone', account_org='Gone Inc',
+       account='was@here.example', version='9.9.999' WHERE id='tl-1'`,
+    ).run();
+    // And one genuinely broken row to make the repair actually run.
+    db.prepare(`UPDATE sessions SET account_key=NULL, account_org=NULL WHERE id='pe-1'`).run();
+
+    closeDB();
+    const repaired = getDB();
+
+    const untouched = repaired.prepare(`SELECT account_key, account_org FROM sessions WHERE id='tl-1'`)
+      .get() as { account_key: string; account_org: string };
+    expect(untouched.account_key).toBe('claude:org=org-gone');
+    expect(untouched.account_org).toBe('Gone Inc');
+
+    const fixed = repaired.prepare(`SELECT account_key FROM sessions WHERE id='pe-1'`)
+      .get() as { account_key: string };
+    expect(fixed.account_key).toContain('claude:org=');
+  });
+});
