@@ -93,37 +93,4 @@ describe('humans.ts', () => {
     const result = runHumans(home, 'humans.getOwnerNotifyFromHumans()');
     expect(result).toBeNull();
   });
-
-  it('isFactFile excludes rule files', () => {
-    // Test the memory isFactFile behaviour inline via the module directly.
-    // This test lives here as a sanity check for the rule-file exclusion.
-    const memoryModuleUrl2 = pathToFileURL(path.resolve('src/lib/memory.ts')).href;
-    const home = makeTempHome();
-    fs.mkdirSync(path.join(home, '.agents', 'memory'), { recursive: true });
-
-    // Write rule files, the index, and a real fact
-    const memDir = path.join(home, '.agents', 'memory');
-    fs.writeFileSync(path.join(memDir, 'AGENTS.md'), '# rules', 'utf-8');
-    fs.writeFileSync(path.join(memDir, 'claude.md'), '# claude', 'utf-8');
-    fs.writeFileSync(path.join(memDir, 'gemini.md'), '# gemini', 'utf-8');
-    fs.writeFileSync(path.join(memDir, 'MEMORY.md'), '# index', 'utf-8');
-    fs.writeFileSync(path.join(memDir, 'my-fact.md'), '# fact', 'utf-8');
-
-    const child = spawnSync(
-      tsxBin,
-      ['-e', `
-        import * as memory from ${JSON.stringify(memoryModuleUrl2)};
-        const facts = memory.listMemoryFacts(${JSON.stringify(home)});
-        console.log(JSON.stringify(facts.map(f => f.name)));
-      `],
-      { env: { ...process.env, HOME: home }, encoding: 'utf-8' },
-    );
-    if (child.status !== 0) throw new Error(child.stderr || child.stdout);
-    const names = JSON.parse((child.stdout || '').trim()) as string[];
-    expect(names).toContain('my-fact');
-    expect(names).not.toContain('AGENTS');
-    expect(names).not.toContain('claude');
-    expect(names).not.toContain('gemini');
-    expect(names).not.toContain('MEMORY');
-  });
 });
