@@ -411,6 +411,21 @@ describe('feed store', () => {
     expect(listBlocks(feedDir).some(b => b.sessionId === 'session-notif')).toBe(false);
     // The declared block for the other session is still present.
     expect(listBlocks(feedDir).filter(b => b.kind === 'declared')).toHaveLength(1);
+
+    // Once the declared block is ANSWERED, a lifecycle clear DOES remove it AND its
+    // answered marker -- so a later --blocked in the same session is not falsely
+    // locked as already-answered (recordAnswer creates the marker with O_EXCL).
+    const declaredBlockId = blockIdForSession('session-declared');
+    recordAnswer(declaredBlockId, { answeredFrom: 'terminal' }, feedDir);
+    expect(isBlockAnswered(declaredBlockId, feedDir)).toBe(true);
+    const clearAnswered = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({ session_id: 'session-declared', hook_event_name: 'Stop' }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(clearAnswered.status).toBe(0);
+    expect(listBlocks(feedDir).some(b => b.sessionId === 'session-declared')).toBe(false);
+    expect(isBlockAnswered(declaredBlockId, feedDir)).toBe(false);
   });
 
   it.runIf(hasPython)('real hook captures multi-operator control metadata', () => {

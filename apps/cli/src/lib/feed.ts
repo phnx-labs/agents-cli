@@ -616,15 +616,19 @@ def main():
         # A declared block (\`agents feed post --blocked\`) is the agent explicitly
         # saying it is stuck. Unlike a question/notification/approval block -- which
         # tracks an in-flight harness prompt that a lifecycle event resolves -- a
-        # declared block stays open until it is actually ANSWERED (recordAnswer on the
-        # CLI side, or a terminal UserPromptSubmit). Stop/SessionEnd/PostToolUse must
-        # never silently drop it: otherwise the needs-you record vanishes the moment
-        # the agent parks the block and its turn ends -- exactly when the owner still
-        # needs to see and answer it.
+        # declared block stays open until it is actually ANSWERED. So while it is
+        # still UNANSWERED, Stop/SessionEnd/PostToolUse must never silently drop it:
+        # otherwise the needs-you record vanishes the moment the agent parks the block
+        # and its turn ends -- exactly when the owner still needs to see and answer it.
+        # Once it IS answered (an answered marker exists), it clears like any other
+        # block by falling through below -- which frees that marker too, so a later
+        # \`--blocked\` in the same session is not falsely locked as already-answered
+        # (recordAnswer creates the marker with O_EXCL).
         try:
             with open(target) as existing_file:
                 existing = json.load(existing_file)
-            if existing.get("kind") == "declared":
+            answered = os.path.exists(os.path.join(answered_dir, f"{block_id}.json"))
+            if existing.get("kind") == "declared" and not answered:
                 return
         except Exception:
             pass
