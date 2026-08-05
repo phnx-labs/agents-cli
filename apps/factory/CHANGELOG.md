@@ -6,6 +6,8 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.311] - 2026-08-04
+
 - **Removed the `agents.terminalMode` setting — tmux is always on when available.**
   The extension no longer exposes an `auto` / `tmux` / `native` "terminal mode".
   tmux is the default for every agent and shell terminal (giving each a named,
