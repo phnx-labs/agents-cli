@@ -895,13 +895,15 @@ export function registerRoutinesCommands(program: Command): void {
               process.exit(1);
             }
           }
+          // Deduplicate while preserving first-seen order.
+          const deduped = [...new Set(options.project as string[])];
           const knownProjectNames = new Set(listProjectDefs().map((p) => p.name));
-          const unknown = (options.project as string[]).filter((n: string) => !knownProjectNames.has(n));
+          const unknown = deduped.filter((n: string) => !knownProjectNames.has(n));
           if (unknown.length > 0) {
             console.error(chalk.red(`Unknown project(s): ${unknown.join(', ')}. Define them first with: agents projects add`));
             process.exit(1);
           }
-          projects = options.project as string[];
+          projects = deduped;
         }
 
         let hostStrategy: HostStrategy | undefined;

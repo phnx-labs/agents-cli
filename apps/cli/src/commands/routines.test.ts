@@ -1350,6 +1350,27 @@ describe('routines add --project persists to YAML', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it('deduplicates repeated project names, preserving first-seen order', () => {
+    const home = makeHome({ registry });
+    writeProject(home, 'myapp');
+    try {
+      const res = run(home, [
+        'add', 'dedup-job',
+        '--schedule', '0 9 * * *',
+        '--agent', 'claude',
+        '--prompt', 'run tests',
+        '--project', 'myapp',
+        '--project', 'myapp',
+      ], { ...projectsEnv(home), AGENTS_SYNC_MACHINE_ID: 'zion' });
+      expect(res.status, res.stderr).toBe(0);
+      const doc = readRoutineYaml(home, 'dedup-job');
+      expect(doc).not.toBeNull();
+      expect(doc!.projects).toEqual(['myapp']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('routines add --all-projects', () => {
