@@ -30,6 +30,7 @@ function makeHome(opts: {
   jobs?: Record<string, unknown>[];
   projectJobs?: Record<string, unknown>[];
   registry?: Record<string, unknown>;
+  deviceRoutines?: Record<string, string[]>;
 } = {}): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-routines-test-'));
   const agentsDir = path.join(home, '.agents');
@@ -60,6 +61,10 @@ function makeHome(opts: {
     const devicesDir = path.join(agentsDir, '.history', 'devices');
     fs.mkdirSync(devicesDir, { recursive: true });
     fs.writeFileSync(path.join(devicesDir, 'registry.json'), JSON.stringify(opts.registry));
+  }
+
+  for (const [device, routines] of Object.entries(opts.deviceRoutines ?? {})) {
+    writeDeviceRoutines(home, device, routines);
   }
 
   return home;
@@ -212,6 +217,9 @@ const baseJob = {
   schedule: '0 3 * * *',
   agent: 'claude',
   prompt: 'noop',
+  // Legacy fixture state: tests that specifically cover the new manifest model
+  // materialize a device document below.
+  enabled: true,
 };
 
 const registry = {
@@ -220,16 +228,29 @@ const registry = {
   'zion': { name: 'zion', platform: 'macos' },
 };
 
+function readDeviceRoutines(home: string, device: string): string[] {
+  const file = path.join(home, '.agents', 'devices', device, 'agents.yaml');
+  if (!fs.existsSync(file)) return [];
+  return yaml.parse(fs.readFileSync(file, 'utf-8')).routines ?? [];
+}
+
+function writeDeviceRoutines(home: string, device: string, routines: string[]): void {
+  const dir = path.join(home, '.agents', 'devices', device);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'agents.yaml'), yaml.stringify({ routines }));
+}
+
 describe('routines devices --set persists', () => {
-  it('writes a devices allowlist to the routine YAML', () => {
-    const home = makeHome({ jobs: [baseJob], registry });
+  it('writes activation to the target device manifest without changing definition metadata', () => {
+    const home = makeHome({ jobs: [baseJob], registry: { 'yosemite-s0': registry['yosemite-s0'] } });
     try {
-      const res = run(home, ['devices', 'test-job', '--set', 'yosemite-s0']);
-      expect(res.status).toBe(0);
+      const res = run(home, ['devices', 'test-job', '--set', 'yosemite-s0'], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
+      expect(res.status, res.stderr + res.stdout).toBe(0);
 
       const doc = readRoutineYaml(home, 'test-job');
       expect(doc).not.toBeNull();
-      expect(doc!.devices).toEqual(['yosemite-s0']);
+      expect(doc!.devices).toBeUndefined();
+      expect(readDeviceRoutines(home, 'yosemite-s0')).toContain('test-job');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -237,8 +258,8 @@ describe('routines devices --set persists', () => {
 });
 
 describe('routines devices --set on .yaml-only routine', () => {
-  it('updates the .yaml file, creates no .yml sibling, and list --json reports devices+runsHere', () => {
-    const home = makeHome({ registry });
+  it('leaves the .yaml definition untouched and list --json reports enabled devices+runsHere', () => {
+    const home = makeHome({ registry: { 'yosemite-s0': registry['yosemite-s0'] } });
     try {
       const yamlPath = path.join(home, '.agents', 'routines', 'yaml-only.yaml');
       fs.writeFileSync(
@@ -251,7 +272,7 @@ describe('routines devices --set on .yaml-only routine', () => {
 
       expect(fs.existsSync(path.join(home, '.agents', 'routines', 'yaml-only.yml'))).toBe(false);
       const doc = yaml.parse(fs.readFileSync(yamlPath, 'utf-8'));
-      expect(doc.devices).toEqual(['yosemite-s0']);
+      expect(doc.devices).toBeUndefined();
 
       const listRes = run(home, ['list', '--json'], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
       expect(listRes.status).toBe(0);
@@ -269,30 +290,34 @@ describe('routines devices --set on .yaml-only routine', () => {
 describe('routines devices --set normalizes mixed case and FQDN duplicates', () => {
   it('persists one normalized entry per device', () => {
     const job = { ...baseJob, devices: ['yosemite-s0'] };
-    const home = makeHome({ jobs: [job], registry });
+    const home = makeHome({ jobs: [job], registry: { 'yosemite-s0': registry['yosemite-s0'] } });
     try {
-      const res = run(home, ['devices', 'test-job', '--set', 'Yosemite-S0,yosemite-s0.tailnet.ts.net']);
+      const res = run(home, ['devices', 'test-job', '--set', 'Yosemite-S0,yosemite-s0.tailnet.ts.net'], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
       expect(res.status).toBe(0);
 
       const doc = readRoutineYaml(home, 'test-job');
       expect(doc).not.toBeNull();
       expect(doc!.devices).toEqual(['yosemite-s0']);
+      expect(readDeviceRoutines(home, 'yosemite-s0')).toEqual(['test-job']);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
 });
 
-describe('routines devices --clear removes allowlist', () => {
-  it('removes the devices field from the routine YAML', () => {
+describe('routines devices --clear removes activation', () => {
+  it('removes the routine from this device manifest without rewriting YAML', () => {
     const job = { ...baseJob, devices: ['yosemite-s0'] };
-    const home = makeHome({ jobs: [job], registry });
+    const home = makeHome({ jobs: [job], registry: { 'yosemite-s0': registry['yosemite-s0'] } });
     try {
-      const res = run(home, ['devices', 'test-job', '--clear']);
+      writeDeviceRoutines(home, 'yosemite-s0', ['test-job']);
+      const before = fs.readFileSync(path.join(home, '.agents', 'routines', 'test-job.yml'), 'utf-8');
+      const res = run(home, ['devices', 'test-job', '--clear'], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
       expect(res.status).toBe(0);
 
       const raw = fs.readFileSync(path.join(home, '.agents', 'routines', 'test-job.yml'), 'utf-8');
-      expect(raw).not.toMatch(/^devices:/m);
+      expect(raw).toBe(before);
+      expect(readDeviceRoutines(home, 'yosemite-s0')).toEqual([]);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -302,7 +327,7 @@ describe('routines devices --clear removes allowlist', () => {
 describe('routines devices --set unknown is nonzero/no mutation', () => {
   it('rejects unknown device names and does not mutate the YAML', () => {
     const job = { ...baseJob, devices: ['yosemite-s0'] };
-    const home = makeHome({ jobs: [job], registry });
+    const home = makeHome({ jobs: [job], registry, deviceRoutines: { 'yosemite-s0': ['test-job'] } });
     try {
       const before = fs.readFileSync(path.join(home, '.agents', 'routines', 'test-job.yml'), 'utf-8');
 
@@ -453,7 +478,11 @@ describe('routines add one-shot-looking --schedule', () => {
 describe('routines list --json has devices+runsHere, no device', () => {
   it('includes devices array and runsHere, excludes singular device key', () => {
     const job = { ...baseJob, devices: ['yosemite-s0'] };
-    const home = makeHome({ jobs: [job], registry });
+    const home = makeHome({
+      jobs: [job],
+      registry,
+      deviceRoutines: { 'yosemite-s0': ['test-job'] },
+    });
     try {
       const res = run(home, ['list', '--json'], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
       expect(res.status).toBe(0);
@@ -482,7 +511,12 @@ describe('routines list --json has devices+runsHere, no device', () => {
       repo: 'phnx-labs/agents-cli',
       prompt: 'project noop',
     };
-    const home = makeHome({ jobs: [userJob], projectJobs: [projectJob], registry });
+    const home = makeHome({
+      jobs: [userJob],
+      projectJobs: [projectJob],
+      registry,
+      deviceRoutines: { zion: ['test-job'], 'yosemite-s0': [] },
+    });
     const projectDir = path.join(home, 'project');
     try {
       const remoteRes = run(home, ['list', '--json'], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' }, projectDir);
@@ -709,7 +743,16 @@ describe('routines list table has Devices column with bounded ellipsis', () => {
 
   it('long device lists are ellipsized in the table', () => {
     const job = { ...baseJob, devices: ['yosemite-s0', 'yosemite-s1', 'mac-mini', 'zion'] };
-    const home = makeHome({ jobs: [job], registry });
+    const home = makeHome({
+      jobs: [job],
+      registry,
+      deviceRoutines: {
+        'yosemite-s0': ['test-job'],
+        'yosemite-s1': ['test-job'],
+        'mac-mini': ['test-job'],
+        zion: ['test-job'],
+      },
+    });
     try {
       const res = run(home, ['list', '--flat']);
       expect(res.status).toBe(0);
@@ -773,7 +816,15 @@ describe('routines list grouped by device', () => {
       'mac-mini': { ...registry['mac-mini'], tailscale: { online: false, direct: false } },
       'offline-box': { name: 'offline-box', platform: 'linux', tailscale: { online: false, direct: false } },
     };
-    const home = makeHome({ jobs, registry: groupedRegistry });
+    const home = makeHome({
+      jobs,
+      registry: groupedRegistry,
+      deviceRoutines: {
+        zion: ['zion-local', 'fleet-placed', 'cloud-placed', 'host-placed'],
+        'yosemite-s0': ['s0-local'],
+        'offline-box': ['offline-local'],
+      },
+    });
     try {
       const res = run(home, ['list', '--group-by', 'device'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
       expect(res.status).toBe(0);
@@ -802,8 +853,9 @@ describe('routines list grouped by device', () => {
       // zion must be the OWNER (lowest normalized name) so its row carries a
       // status, while a second device still renders a peer group — that peer
       // row having no status is what this test asserts.
-      jobs: [{ ...baseJob, name: 'two-device-job', devices: ['zion', 'zulu-box'] }],
+      jobs: [{ ...baseJob, name: 'two-device-job' }],
       registry: { ...registry, 'zulu-box': { name: 'zulu-box', platform: 'linux' } },
+      deviceRoutines: { zion: ['two-device-job'], 'zulu-box': ['two-device-job'] },
     });
     try {
       writeRunMeta(home, 'two-device-job', '2026-07-25T10-00-00-000Z', {
@@ -838,14 +890,14 @@ describe('routines list grouped by device', () => {
   });
 
   it('keeps the legacy flat table available with --flat', () => {
-    const home = makeHome({ jobs: [baseJob], registry });
+    const home = makeHome({ jobs: [baseJob], registry, deviceRoutines: { zion: ['test-job'] } });
     try {
       const grouped = run(home, ['list'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
       const flat = run(home, ['list', '--flat'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
       expect(grouped.status).toBe(0);
       expect(flat.status).toBe(0);
-      expect(grouped.stdout.replace(/\x1b\[[0-9;]*m/g, '')).toContain('Fleet-wide');
-      expect(flat.stdout.replace(/\x1b\[[0-9;]*m/g, '')).not.toContain('Fleet-wide');
+      expect(grouped.stdout.replace(/\x1b\[[0-9;]*m/g, '')).toContain('This machine (zion)');
+      expect(flat.stdout.replace(/\x1b\[[0-9;]*m/g, '')).not.toContain('This machine (zion)');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -946,7 +998,7 @@ describe('routines devices --set and --clear are mutually exclusive', () => {
 
 describe('routines add --devices empty/whitespace fails closed', () => {
   it('rejects --devices "" and does not create the routine file', () => {
-    const home = makeHome({ registry });
+    const home = makeHome({ registry: { 'yosemite-s0': registry['yosemite-s0'] } });
     try {
       const res = run(home, [
         'add', 'new-job',
@@ -1002,7 +1054,8 @@ describe('routines add --devices empty/whitespace fails closed', () => {
       expect(res.status).toBe(0);
       const doc = readRoutineYaml(home, 'placed-job');
       expect(doc).not.toBeNull();
-      expect(doc!.devices).toEqual(['yosemite-s0']);
+      expect(doc!.devices).toBeUndefined();
+      expect(readDeviceRoutines(home, 'yosemite-s0')).toContain('placed-job');
     } finally {
       if (daemon) await stopIsolatedDaemon(daemon.child);
       if (typeof pid === 'number') expect(isProcessAlive(pid)).toBe(false);
