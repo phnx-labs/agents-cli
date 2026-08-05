@@ -27,7 +27,7 @@ export function isSessionTrackedAgent(agent: string): agent is SessionAgentId {
 
 /** A single normalized event within a session (message, tool call, thinking, etc.). */
 export interface SessionEvent {
-  type: 'message' | 'tool_use' | 'tool_result' | 'thinking' | 'error' | 'init' | 'result' | 'usage' | 'attachment' | 'hook';
+  type: 'message' | 'tool_use' | 'tool_result' | 'thinking' | 'error' | 'init' | 'result' | 'usage' | 'attachment' | 'hook' | 'interrupt';
   agent: SessionAgentId;
   timestamp: string;
   role?: 'user' | 'assistant';

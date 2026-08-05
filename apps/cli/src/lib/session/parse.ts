@@ -444,7 +444,16 @@ export function parseClaudeContent(content: string): SessionEvent[] {
         for (const block of contentBlocks) {
           if (block.type === 'text') {
             const text = (block.text || '').trim();
-            if (text && !text.startsWith('[Request interrupted')) {
+            if (text.startsWith('[Request interrupted')) {
+              // Not a user message — the harness's own marker for a turn the user
+              // cut short. It stays OUT of the message stream (every renderer and
+              // the topic extractor would otherwise show it as something the user
+              // typed), but it is a real friction signal, so emit it as its own
+              // event type instead of dropping it on the floor. Consumers dispatch
+              // on known types with if/else chains, so an added member is inert for
+              // all of them; `agents insights` is the first reader.
+              events.push({ type: 'interrupt', agent: 'claude', timestamp, content: text });
+            } else if (text) {
               events.push({
                 type: 'message',
                 agent: 'claude',

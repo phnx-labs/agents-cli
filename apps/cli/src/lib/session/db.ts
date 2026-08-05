@@ -275,7 +275,30 @@ CREATE TABLE IF NOT EXISTS resource_scan_ledger (
   indexed_at INTEGER NOT NULL,
   resource_count INTEGER NOT NULL
 );
+
+-- Behavioural facets per session, for "agents insights". Deliberately its own table
+-- and deliberately NOT tied to SCHEMA_VERSION: it is created by CREATE TABLE IF NOT
+-- EXISTS and keyed on (file_mtime_ms, file_size), so it self-heals after any future
+-- migration that flushes a ledger, and adding it costs the hot "sessions" table
+-- nothing. Populated lazily by the insights command, never by a normal scan --
+-- parsing every transcript is far too expensive for the common listing path.
+CREATE TABLE IF NOT EXISTS session_insights (
+  session_id TEXT PRIMARY KEY,
+  file_mtime_ms INTEGER NOT NULL,
+  file_size INTEGER NOT NULL,
+  extractor_version INTEGER NOT NULL,
+  computed_at INTEGER NOT NULL,
+  facets TEXT NOT NULL
+);
 `;
+
+/**
+ * Bumping this invalidates every cached facet row without touching the schema
+ * version, so a change to the extraction logic (a new metric, a corrected bucket)
+ * re-derives on the next `agents insights` instead of silently reporting stale
+ * numbers alongside fresh ones. Same role as RESOURCE_INDEX_VERSION.
+ */
+export const INSIGHTS_EXTRACTOR_VERSION = 1;
 
 /** Raw row shape returned from the sessions table. */
 export interface SessionRow {
@@ -2383,6 +2406,74 @@ export interface UsageRollupRow {
 }
 
 /** What to group a usage rollup by. */
+/**
+ * Read cached facets for the given sessions, dropping any row that is stale.
+ *
+ * Staleness is decided in SQL against the session's own `file_mtime_ms` / `file_size`,
+ * the same pair the scanner maintains — so the cache cannot disagree with the index,
+ * and callers need no stat of their own. `IS` rather than `=` so a NULL stat on both
+ * sides still matches (an unstatted source is consistently unstatted).
+ */
+export function readSessionInsights<T>(ids: string[]): Map<string, T> {
+  const db = getDB();
+  const out = new Map<string, T>();
+  if (ids.length === 0) return out;
+  const CHUNK = 400; // two binds per id, well under SQLite's 999-variable limit
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const phs = chunk.map(() => '?').join(',');
+    const rows = db.prepare(`
+      SELECT si.session_id AS id, si.facets AS facets
+      FROM session_insights si
+      JOIN sessions s ON s.id = si.session_id
+      WHERE si.session_id IN (${phs})
+        AND si.extractor_version = ?
+        AND si.file_mtime_ms IS s.file_mtime_ms
+        AND si.file_size IS s.file_size
+    `).all(...chunk, INSIGHTS_EXTRACTOR_VERSION) as Array<{ id: string; facets: string }>;
+    for (const row of rows) {
+      try {
+        out.set(row.id, JSON.parse(row.facets) as T);
+      } catch {
+        // A corrupt cache row is not a reason to fail the report; recompute it.
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Persist freshly computed facets, copying the staleness stamp from the session row so
+ * it is always the value the next read compares against. One transaction per batch.
+ */
+export function writeSessionInsights<T>(entries: Array<{ id: string; facets: T }>): void {
+  if (entries.length === 0) return;
+  const db = getDB();
+  const stmt = db.prepare(`
+    INSERT INTO session_insights
+      (session_id, file_mtime_ms, file_size, extractor_version, computed_at, facets)
+    SELECT s.id, s.file_mtime_ms, s.file_size, ?, ?, ?
+    FROM sessions s WHERE s.id = ?
+    ON CONFLICT(session_id) DO UPDATE SET
+      file_mtime_ms = excluded.file_mtime_ms,
+      file_size = excluded.file_size,
+      extractor_version = excluded.extractor_version,
+      computed_at = excluded.computed_at,
+      facets = excluded.facets
+  `);
+  const now = Date.now();
+  db.transaction(() => {
+    for (const e of entries) {
+      stmt.run(INSIGHTS_EXTRACTOR_VERSION, now, JSON.stringify(e.facets), e.id);
+    }
+  })();
+}
+
+/** Drop every cached facet row. Backs `agents insights --refresh`. */
+export function clearSessionInsights(): void {
+  getDB().exec(`DELETE FROM session_insights`);
+}
+
 export type UsageRollupGroup = 'agent' | 'project' | 'day' | 'account';
 
 /**

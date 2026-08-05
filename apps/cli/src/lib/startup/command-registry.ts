@@ -78,6 +78,7 @@ export const loadRefreshRules: ModuleLoader = async () => (await import('../../c
 export const loadFactory: ModuleLoader = async () => (await import('../../commands/factory.js')).registerFactoryCommands;
 export const loadUsage: ModuleLoader = async () => (await import('../../commands/usage.js')).registerUsageCommand;
 export const loadCost: ModuleLoader = async () => (await import('../../commands/cost.js')).registerCostCommand;
+export const loadInsights: ModuleLoader = async () => (await import('../../commands/insights.js')).registerInsightsCommand;
 export const loadPerf: ModuleLoader = async () => (await import('../../commands/perf.js')).registerPerfCommand;
 export const loadTrends: ModuleLoader = async () => (await import('../../commands/trends.js')).registerTrendsCommand;
 export const loadOutput: ModuleLoader = async () => (await import('../../commands/output.js')).registerOutputCommand;
@@ -207,6 +208,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   factory: [loadFactory],
   usage: [loadUsage],
   cost: [loadCost],
+  insights: [loadInsights],
   perf: [loadPerf],
   trends: [loadTrends],
   output: [loadOutput],

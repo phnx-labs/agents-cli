@@ -18,6 +18,7 @@ whose *consumer* and *axis* match your question, not whichever you remember firs
 | **`feed`** / **`inbox`** | **Needs-you inbox + status posts.** Open blocks (decisions agents are waiting on) + `feed post` milestones. `inbox` ≡ `feed`. Scope with `--project`. | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
 | **`timeline`** | **Progress stream only.** Alias of `feed --filter updates` — deliberate posts, not tool noise. | same as feed updates lane | Humans + `--json` |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
+| **`insights`** | **Behavioural report.** How you work — tool and language mix, friction (interruptions, tool-error classes, your reply latency), what you changed, hour-of-day rhythm — **split by the Claude account that produced each session**. Reads transcript *content*; `trends` reads counters. | `sessions.db` + `session_insights` facet cache | Human + `--json` |
 | **`sessions`** / **`roster`** | **Live agent roster + transcripts.** `roster` ≡ `sessions --active`. Browse/read past transcripts under `sessions`. | live pid/transcript probe + `sessions.db` | Human + `--json` |
 | **`snapshot`** | **One-process poll.** Inventory + active sessions (+ optional feed/sync). Not `status` (sync-only). | view + active + optional feed | Machines / Factory |
 
@@ -1118,6 +1119,71 @@ busiest first — the shape of the fleet's chatter at a glance.
 `{id, label, live, pending, total, messages}` (filters recount when present),
 `<id>` dumps one box, `--between` dumps `{a, b, count, messages}`, `--graph`
 dumps the edge list, and `--watch` streams NDJSON.
+
+## Behavioural report (`agents insights`)
+
+`agents cost` answers what you spent and `agents output` answers what shipped.
+`agents insights` answers **how you work**, and is the only surface that splits any of
+it by the account that did the work.
+
+That split is the reason it exists. `getConfiguredRunStrategy` defaults to `balanced`
+(`lib/rotate.ts`), so sessions are sprayed across every signed-in Claude account. A
+report that reads one account's directory — which is what Claude Code's own `/insights`
+does — describes a fraction of the work and attributes all of it to one org.
+
+```bash
+agents insights                                # last 30d, by account
+agents insights --by project --since 90d       # which repo is eating the time
+agents insights --account "Turing Labs" --since all
+agents insights --json                         # stable contract for dashboards
+agents insights --narrative                    # add a written read on the numbers
+```
+
+### What it reports
+
+| Section | Contents |
+|---|---|
+| By account | sessions, cost, duration per account (or per `--by` dimension) |
+| Top tools / Languages / Models | histograms by name, from transcript content |
+| Friction | interruptions, tool errors bucketed into classes, your own reply latency (p50/p90) |
+| What you changed | line deltas, files created/modified/deleted, git commits and pushes |
+| When you work | 24-slot local-time histogram of your messages |
+| Parallel sessions | overlapping pairs, and how many straddled two accounts |
+
+### How it relates to `agents trends`
+
+Both are analytics, and they overlap in spirit on tool and model mix. The boundary is
+the data path:
+
+- **`trends`** reads *counters* — `tool_scan_ledger` call counts and the analytics
+  warehouse — and reports distributions: how many tool calls per session, harness mix,
+  token ratios.
+- **`insights`** reads transcript *content* through `parseSession` and reports
+  behaviour: which tools, which languages, where things went wrong, when you worked —
+  per account.
+
+### Caching
+
+Parsing every transcript is expensive, so each session's facets are cached in
+`session_insights`, keyed on the session's `(file_mtime_ms, file_size)` — the same
+staleness contract `scan_ledger` uses, compared in SQL against the session row so the
+cache cannot disagree with the index. The first run parses everything once; later runs
+re-read only changed files. `--refresh` discards the cache.
+
+The table is created with `CREATE TABLE IF NOT EXISTS` and is deliberately **not** tied
+to `SCHEMA_VERSION`; `INSIGHTS_EXTRACTOR_VERSION` invalidates it when the extraction
+logic changes, so a new metric never reports stale numbers beside fresh ones.
+
+### Scope and limits
+
+- **Account attribution is Claude-only** (see [05-sessions.md](05-sessions.md)). Other
+  harnesses group under `unattributed:<agent>`.
+- **Sessions under 2 messages or 1 minute are excluded**, matching `/insights` so the
+  two reports count comparable populations. The excluded count is always printed.
+- **No branch collapsing.** `/insights` merges conversation branches; agents-cli is
+  file-per-session throughout, so session counts read slightly higher here.
+- **`--narrative` is the only path that leaves the machine.** It pipes the *aggregate*
+  (never raw transcripts, unlike `/insights`) through a headless `claude -p`.
 
 ## Cost & Duration Rollup (`agents cost`)
 

@@ -172,6 +172,7 @@ import {
   loadFactory,
   loadUsage,
   loadCost,
+  loadInsights,
   loadPerf,
   loadTrends,
   loadOutput,
@@ -443,6 +444,7 @@ Credentials and profiles:
 Diagnostics:
   doctor [agent[@version]]        Diagnose CLI availability, sync status, and resource divergence; --check for the CI drift gate
   usage [agent]                   Show rate-limit and quota usage per agent
+  insights                        How you work — tools, friction, rhythm, split by Claude account
   perf                            Latency rollups (hooks, commands, runs) from the disposable perf warehouse
 
 Config sync:
@@ -1119,6 +1121,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadFactory);
   await reg(loadUsage);
   await reg(loadCost);
+  await reg(loadInsights);
   await reg(loadPerf);
   await reg(loadTrends);
   await reg(loadOutput);

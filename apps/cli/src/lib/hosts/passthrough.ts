@@ -66,6 +66,7 @@ const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   list: {},
   usage: {},
   cost: {},
+  insights: {},
   output: {},
   budget: {},
   // config / resources
