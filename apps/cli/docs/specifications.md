@@ -72,9 +72,9 @@ row its surface sits in.
 | Coverage | Surfaces | What that means |
 |---|---|---|
 | **Specified here** | `sessions`, `secrets`, `run`, the scheduling/executor singularity, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
-| **Governed in part** | `routines`, `monitors` | Bound only by [§Scheduling & execution singularity](#scheduling--execution-singularity) (SING-5, SING-8, SING-9) — who may schedule and execute them. Their own command contracts are unwritten. |
-| **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `pty`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | A design doc describes the mechanism — [hosts.md](hosts.md), [teams.md](teams.md), [cloud.md](cloud.md), [02-resource-sync.md](02-resource-sync.md), [01-version-management.md](01-version-management.md), … — but states **no** requirements. Verified: `hosts.md`, `teams.md`, and `cloud.md` contain zero RFC-2119 keywords. Treat them as explanation, never as a contract. |
-| **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `worktree`, `webhook`, `funnel`, `lease`, `mailboxes`, `feed`, `message`/`send`, `budget`, `audit`, `doctor`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
+| **Governed in part** | `routines`, `monitors`, `doctor` | One requirement reaches them, no command contract does. `routines`/`monitors` are bound by [§Scheduling & execution singularity](#scheduling--execution-singularity) (SING-5, SING-8, SING-9) — who may schedule and execute them. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. Everything else these commands do is unspecified. |
+| **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `pty`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | A design doc describes the mechanism — [hosts.md](hosts.md), [teams.md](teams.md), [cloud.md](cloud.md), [02-resource-sync.md](02-resource-sync.md), [01-version-management.md](01-version-management.md), … — but states **no** requirements. Verified: `hosts.md`, `teams.md` and `cloud.md` contain **zero capitalized RFC-2119 keywords**. `hosts.md` and `teams.md` do use lowercase "must" in prose ("the remote run must be bounded", `hosts.md:124`; "you must declare what each one owns", `teams.md:207`) — which reads normative but is not, per this document's own capitalization rule. That is exactly the trap: treat those docs as explanation, never as a contract. |
+| **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `worktree`, `webhook`, `funnel`, `lease`, `mailboxes`, `feed`, `message`/`send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
 
 **Where the absence bites hardest.** These act on other machines, hold durable
 state, or sit next to credentials, and have no normative contract today:
@@ -1431,7 +1431,7 @@ schema (`--json` passes through each agent's native stream format).
   claude/codex/copilot/kimi ONLY (`CLAUDE_CONFIG_DIR` / `CODEX_HOME` /
   `COPILOT_HOME` / `KIMI_CODE_HOME`) and MUST delete the other three agents'
   vars on every branch, so a config pointer from a different agent's shell
-  never leaks into this invocation (`lib/exec.ts:364-437`).
+  never leaks into this invocation (`buildExecEnv`'s per-agent branch, `lib/exec.ts:402-490`).
 - **EXEC-3 (MUST).** `buildExecEnv` MUST set `AGENTS_MAILBOX_DIR` +
   `AGENT_SESSION_ID` + `AGENTS_SESSION_ID` when a valid session id is present
   (`lib/exec.ts:444-449`), `AGENTS_RUNTIME` to `terminal`/`headless` from
@@ -1491,7 +1491,7 @@ schema (`--json` passes through each agent's native stream format).
 - **EXEC-14 (MUST, scoped).** `buildExecEnv` realizes that isolation ONLY for
   claude/codex/copilot/kimi, by pinning `CLAUDE_CONFIG_DIR` /
   `resolveCodexHome(...)` / `COPILOT_HOME` / `KIMI_CODE_HOME` at
-  `<versionHome>/<configDir>` (`lib/exec.ts:373,396-398,413,427`).
+  `<versionHome>/<configDir>` (`lib/exec.ts:419,451,466,480` — the four assignments inside `buildExecEnv` (`:402`)).
 - **EXEC-15 (clarifying note).** `buildExecEnv` MUST NOT set the raw `HOME`
   var for any agent — no `result.HOME = …` exists anywhere in `lib/exec.ts`.
   Isolation is realized purely through the agent-specific config-dir vars in
@@ -1506,7 +1506,7 @@ schema (`--json` passes through each agent's native stream format).
   droid, hermes, pi — the 16 in `AgentId`, `lib/types.ts:13`, minus the four
   EXEC-14 isolates) get **no** per-version config-dir var from
   `buildExecEnv` itself — its per-agent branch has no arm for them
-  (`lib/exec.ts:364-437`, the `else` branch only deletes the four known vars).
+  (`buildExecEnv`'s per-agent branch, `lib/exec.ts:402-490`; the `else` at `:485-489` only deletes the four known vars).
   A separate mechanism — the generated default-name bash shim
   (`generateShimScript`, `lib/shims.ts:271-330`) and the generated
   version-pinned alias shim (`lib/shims.ts:940-1010`) — additionally exports
@@ -1907,7 +1907,7 @@ versions.
 Given grok versions `1.0.0` and `1.1.0` both installed with no version-pinned
 alias shim materialized on disk; When `agents run grok@1.0.0 "..."` runs;
 Then `buildExecEnv` sets no `GROK_HOME` (its per-agent branch has no grok
-arm, `lib/exec.ts:364-437`) and `buildExecCommand` resolves the spawn target
+arm, `buildExecEnv`, `lib/exec.ts:402-490`) and `buildExecCommand` resolves the spawn target
 straight to the real npm binary (`lib/exec.ts:770-778`) — the run is not
 version-isolated the way EXEC-2 promises for claude (EXEC-GAP-1).
 
