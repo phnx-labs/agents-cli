@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ALL_FINDING_KINDS,
+  FINDING_SEVERITY,
   buildLocalFindings,
   collapseAcrossVersions,
   fleetDivergenceToFindings,
@@ -445,27 +446,104 @@ describe('signInToFindings — provable vs unprovable logout', () => {
   });
 });
 
-describe('the severity rubric is exhaustive (docs cannot silently drift from the kinds)', () => {
-  // Five separate review rounds landed a new FindingKind; three of them left one
-  // of the two prose rubrics behind, each time producing a doc that lied. Pin it:
-  // every kind must be named in BOTH the module docblock and apps/cli/AGENTS.md.
-  const read = (rel: string) =>
-    fs.readFileSync(path.join(__dirname, rel), 'utf8');
+describe('the severity rubric matches the code (docs cannot drift from behavior)', () => {
+  // The earlier version of this suite only checked that each kind was NAMED in
+  // both rubrics. RUSH-2162 then moved never-synced and duplicate-hook-drift from
+  // critical to warning, the rubrics kept saying critical, and the test stayed
+  // green for three days — a kind can be named in the wrong bucket. So assert the
+  // BUCKET, against FINDING_SEVERITY, which the builders themselves read.
+  const read = (rel: string) => fs.readFileSync(path.join(__dirname, rel), 'utf8');
 
-  it('every FindingKind appears in the module docblock rubric', () => {
-    const src = read('./doctor-findings.ts');
-    const rubric = src.slice(src.indexOf(' * Severity rubric'), src.indexOf(' */'));
-    const missing = ALL_FINDING_KINDS.filter((k) => !rubric.includes(k));
-    expect(missing).toEqual([]);
+  /** Split a rubric into its critical and warning halves. */
+  function buckets(text: string, criticalMark: string, warningMark: string) {
+    const c = text.indexOf(criticalMark);
+    const w = text.indexOf(warningMark);
+    expect(c).toBeGreaterThan(-1);
+    expect(w).toBeGreaterThan(c);
+    return { critical: text.slice(c, w), warning: text.slice(w) };
+  }
+
+  /** Kinds named in the wrong half, as `kind: documented-as -> actually`. */
+  function misplaced(critical: string, warning: string): string[] {
+    const out: string[] = [];
+    for (const kind of ALL_FINDING_KINDS) {
+      const actual = FINDING_SEVERITY[kind];
+      const inCritical = critical.includes(kind);
+      const inWarning = warning.includes(kind);
+      if (!inCritical && !inWarning) { out.push(`${kind}: absent -> ${actual}`); continue; }
+      // `duplicate-hook` is a substring of `duplicate-hook-drift`; require the
+      // longer name to be matched on its own before crediting the shorter one.
+      const only = (half: string) =>
+        half.split(kind).length - 1 > (kind === 'duplicate-hook' ? half.split('duplicate-hook-drift').length - 1 : 0);
+      const documented = only(critical) ? 'critical' : only(warning) ? 'warning' : null;
+      if (documented !== actual) out.push(`${kind}: ${documented ?? 'absent'} -> ${actual}`);
+    }
+    return out;
+  }
+
+  it('every builder emits the severity FINDING_SEVERITY declares', () => {
+    // Drive the builders and compare what actually comes out.
+    const emitted = [
+      ...buildLocalFindings(localInput({
+        reports: [report('claude', '2.1.0', {
+          hooks: [{ kind: 'hooks', name: 'h', status: 'missing' }],
+          plugins: [{ kind: 'plugins', name: 'p', status: 'missing' }],
+          commands: [{ kind: 'commands', name: 'c', status: 'missing' }],
+          skills: [{ kind: 'skills', name: 's', status: 'diff' }],
+        })],
+        syncRows: [{ agent: 'codex', version: '1.0', status: 'stale', isDefault: true }],
+        repoBehind: [{ alias: 'user', dir: '/u', ahead: 0, behind: 3, branch: 'origin/main', fetchedAt: 0 }],
+        orphanRows: [{ agent: 'claude', version: '2.1.0', commands: 1, skills: 0, hooks: 0 }],
+        hostClis: { statuses: [{ name: 'mq', installed: false }], errors: [{ file: 'f', reason: 'r' }] },
+        rcSecrets: [{ file: '.zshrc', line: 1, name: 'X_TOKEN', isMasterPassphrase: false }],
+        execPolicy: { platform: 'win32', policy: 'Restricted' },
+        duplicateHooks: [{
+          agent: 'claude', name: 'h', kind: 'drift',
+          authoritative: { agent: 'claude', version: '2', name: 'h', path: '/p', hash: 'x', active: true },
+          copies: [{ agent: 'claude', version: '1', name: 'h', path: '/p', hash: 'y', active: false },
+                   { agent: 'claude', version: '2', name: 'h', path: '/p', hash: 'x', active: true }],
+        }],
+        cliMissing: ['grok'],
+        signIn: { codex: [{ version: '1', signedIn: false, account: null, provable: true }] },
+      })),
+      ...fleetDivergenceToFindings([
+        { kind: 'agent-version-missing-remote', device: 'b', category: 'claude', name: '1', message: 'm' },
+        { kind: 'repo-drift', device: 'b', category: 'agents', name: '.agents', message: 'm' },
+        { kind: 'resource-missing-remote', device: 'b', category: 'skills', name: 's', message: 'm' },
+      ], 'a'),
+    ];
+    expect(emitted.length).toBeGreaterThan(8);
+    const wrong = emitted
+      .filter((f) => f.severity !== FINDING_SEVERITY[f.kind])
+      .map((f) => `${f.kind}: emitted ${f.severity}, declared ${FINDING_SEVERITY[f.kind]}`);
+    expect(wrong).toEqual([]);
   });
 
-  it('every FindingKind appears in the AGENTS.md severity rubric', () => {
+  it('the module docblock rubric puts every kind in the right bucket', () => {
+    const src = read('./doctor-findings.ts');
+    const rubric = src.slice(src.indexOf(' * Severity rubric'), src.indexOf('\n */'));
+    const { critical, warning } = buckets(rubric, 'CRITICAL', 'WARNING');
+    expect(misplaced(critical, warning)).toEqual([]);
+  });
+
+  it('the docs/06-observability.md rubric puts every kind in the right bucket', () => {
+    // A THIRD rubric — missed by the previous version of this test, and stale for
+    // the same three days. Every prose copy of the severities gets pinned.
+    const doc = read('../../../docs/06-observability.md');
+    const start = doc.indexOf('**Severity rubric**');
+    expect(start).toBeGreaterThan(-1);
+    const rubric = doc.slice(start, start + 1400);
+    const { critical, warning } = buckets(rubric, '**CRITICAL**', '**WARNING**');
+    expect(misplaced(critical, warning)).toEqual([]);
+  });
+
+  it('the AGENTS.md rubric puts every kind in the right bucket', () => {
     const doc = read('../../../AGENTS.md');
     const start = doc.indexOf('**critical** is `logged-out`');
     expect(start).toBeGreaterThan(-1);
-    const rubric = doc.slice(start, start + 1400);
-    const missing = ALL_FINDING_KINDS.filter((k) => !rubric.includes(k));
-    expect(missing).toEqual([]);
+    const rubric = doc.slice(start, start + 1600);
+    const { critical, warning } = buckets(rubric, '**critical**', '**warning**');
+    expect(misplaced(critical, warning)).toEqual([]);
   });
 });
 

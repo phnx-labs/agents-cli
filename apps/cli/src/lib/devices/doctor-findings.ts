@@ -18,13 +18,14 @@
  * with. Keep this list exhaustive; a kind missing from it is a doc that lies.
  *   CRITICAL — logged-out (provable) · missing-hook · missing-plugin ·
  *              unwired-hook (a hook on disk that settings.json never fires) ·
- *              never-synced WHEN the version's declared resources are absent ·
- *              duplicate-hook-drift (copies that DIFFER) · cli-missing.
+ *              cli-missing.
  *   WARNING  — logout-unprovable (hedged) · missing-resource · content-drift ·
- *              stale · never-synced when the version declares nothing to miss ·
- *              repo-behind · repo-drift · version-skew · fleet-resource-gap ·
- *              orphan · duplicate-hook (identical copies) · host-cli-missing ·
- *              host-cli-invalid · rc-secret-export · exec-policy · stale-cli.
+ *              never-synced · stale · repo-behind · repo-drift · version-skew ·
+ *              fleet-resource-gap · orphan · duplicate-hook ·
+ *              duplicate-hook-drift · host-cli-missing · host-cli-invalid ·
+ *              rc-secret-export · exec-policy · stale-cli.
+ *   (RUSH-2162 moved never-synced and duplicate-hook-drift to WARNING: both are
+ *   stale-sync states one `agents sync` resolves, not "needs you now".)
  *
  * This module is pure: it maps already-collected signals (drift rows, orphan
  * rows, repo-behind markers, per-version resource diffs, cross-device divergence,
@@ -116,6 +117,46 @@ export const ALL_FINDING_KINDS = [
   'exec-policy',         // Windows execution policy blocks agents.ps1 (WARNING)
   'stale-cli',
 ] as const;
+
+/**
+ * The severity each kind is emitted with - the SINGLE source of truth, read by
+ * the builders below and asserted against both prose rubrics by
+ * `doctor-findings.test.ts`.
+ *
+ * It exists because severity drifted: the rubrics claimed `never-synced` and
+ * `duplicate-hook-drift` were critical for three days after RUSH-2162 downgraded
+ * them, and the exhaustiveness test missed it because it only checked that a kind
+ * was *named* in the rubric, not which bucket it sat in. Change a severity HERE
+ * and the test names the docs that must move with it.
+ */
+export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
+  // Needs you now: the harness cannot do its job until this is fixed.
+  'logged-out': 'critical',
+  'missing-hook': 'critical',
+  'missing-plugin': 'critical',
+  'unwired-hook': 'critical',
+  'cli-missing': 'critical',
+  // Everything else is resolvable by a routine sync/cleanup and does not block
+  // the harness right now. RUSH-2162 moved never-synced and duplicate-hook-drift
+  // here: both are stale-sync states that one `agents sync` resolves.
+  'logout-unprovable': 'warning',
+  'missing-resource': 'warning',
+  'content-drift': 'warning',
+  'never-synced': 'warning',
+  'stale': 'warning',
+  'repo-behind': 'warning',
+  'repo-drift': 'warning',
+  'fleet-resource-gap': 'warning',
+  'version-skew': 'warning',
+  'orphan': 'warning',
+  'duplicate-hook': 'warning',
+  'duplicate-hook-drift': 'warning',
+  'host-cli-missing': 'warning',
+  'host-cli-invalid': 'warning',
+  'rc-secret-export': 'warning',
+  'exec-policy': 'warning',
+  'stale-cli': 'warning',
+};
 
 /** A machine-stable class for a finding. Derived from the runtime list above so
  *  the rubric test can enumerate every kind. */
@@ -350,7 +391,7 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
   // cli-missing (managed agent, binary broken) — critical.
   for (const agent of input.cliMissing ?? []) {
     out.push(finding({
-      severity: 'critical', kind: 'cli-missing', device, agent,
+      severity: FINDING_SEVERITY['cli-missing'], kind: 'cli-missing', device, agent,
       message: `${agentName(agent)} binary not found`,
     }));
   }
@@ -364,18 +405,18 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     if (w?.supported) {
       if (w.settingsMissing) {
         out.push(finding({
-          severity: 'critical', kind: 'unwired-hook', device, agent, version,
+          severity: FINDING_SEVERITY['unwired-hook'], kind: 'unwired-hook', device, agent, version,
           message: `settings.json missing — ${w.expected ?? 0} declared hook${(w.expected ?? 0) === 1 ? '' : 's'} never fire`,
         }));
       } else if (w.settingsUnparseable) {
         out.push(finding({
-          severity: 'critical', kind: 'unwired-hook', device, agent, version,
+          severity: FINDING_SEVERITY['unwired-hook'], kind: 'unwired-hook', device, agent, version,
           message: `settings.json unparseable — hook wiring can't be verified`,
         }));
       } else {
         for (const u of w.unwired) {
           out.push(finding({
-            severity: 'critical', kind: 'unwired-hook', device, agent, version,
+            severity: FINDING_SEVERITY['unwired-hook'], kind: 'unwired-hook', device, agent, version,
             message: `hook '${u.name}' present on disk but not wired into settings.json`,
           }));
         }
@@ -425,16 +466,16 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
           missingPlugins.length ? `${missingPlugins.length} plugin${missingPlugins.length === 1 ? '' : 's'}` : '',
         ].filter(Boolean).join(', ');
         out.push(finding({
-          severity: 'warning', kind: 'never-synced', device, agent, version,
+          severity: FINDING_SEVERITY['never-synced'], kind: 'never-synced', device, agent, version,
           message: `never synced — ${total} resource${total === 1 ? '' : 's'}${breakdown ? ` (incl. ${breakdown})` : ''} not installed`,
         }));
       }
     } else {
       // Synced-but-drifted: one line per kind of gap on this version.
-      emitGroup(out, missingHooks, 'critical', 'missing-hook', device, agent, version, 'hook', 'missing');
-      emitGroup(out, missingPlugins, 'critical', 'missing-plugin', device, agent, version, 'plugin', 'missing');
-      emitGroup(out, missingOther, 'warning', 'missing-resource', device, agent, version, 'resource', 'missing');
-      emitGroup(out, drifted, 'warning', 'content-drift', device, agent, version, 'resource', 'drifted');
+      emitGroup(out, missingHooks, FINDING_SEVERITY['missing-hook'], 'missing-hook', device, agent, version, 'hook', 'missing');
+      emitGroup(out, missingPlugins, FINDING_SEVERITY['missing-plugin'], 'missing-plugin', device, agent, version, 'plugin', 'missing');
+      emitGroup(out, missingOther, FINDING_SEVERITY['missing-resource'], 'missing-resource', device, agent, version, 'resource', 'missing');
+      emitGroup(out, drifted, FINDING_SEVERITY['content-drift'], 'content-drift', device, agent, version, 'resource', 'drifted');
       if (missingHooks.length + missingPlugins.length + missingOther.length + drifted.length > 0) {
         detailedVersions.add(`${agent}@${version}`);
       }
@@ -450,7 +491,7 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     if (row.status === 'stale') {
       if (detailedVersions.has(`${row.agent}@${row.version}`)) continue;
       out.push(finding({
-        severity: 'warning', kind: 'stale', device, agent: row.agent, version: row.version,
+        severity: FINDING_SEVERITY['stale'], kind: 'stale', device, agent: row.agent, version: row.version,
         message: 'sources changed since last sync',
       }));
     } else if (row.status === 'never-synced') {
@@ -463,7 +504,7 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
       );
       if (!hadCritical) {
         out.push(finding({
-          severity: 'warning', kind: 'never-synced', device, agent: row.agent, version: row.version,
+          severity: FINDING_SEVERITY['never-synced'], kind: 'never-synced', device, agent: row.agent, version: row.version,
           message: 'installed but never synced',
         }));
       }
@@ -477,7 +518,7 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     const stales = input.syncRows.filter((r) => r.status === 'stale').length;
     const staleNote = stales > 0 ? ` → stales ${stales} version${stales === 1 ? '' : 's'}` : '';
     out.push(finding({
-      severity: 'warning', kind: 'repo-behind', device, version: m.alias,
+      severity: FINDING_SEVERITY['repo-behind'], kind: 'repo-behind', device, version: m.alias,
       message: `${m.behind} behind ${m.branch}${staleNote}`,
     }));
   }
@@ -493,7 +534,7 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
   const missingClis = (input.hostClis?.statuses ?? []).filter((c) => !c.installed).map((c) => c.name);
   if (missingClis.length > 0) {
     out.push({
-      severity: 'warning', kind: 'host-cli-missing', device,
+      severity: FINDING_SEVERITY['host-cli-missing'], kind: 'host-cli-missing', device,
       message: missingClis.length === 1
         ? `host CLI '${missingClis[0]}' declared but not installed`
         : `${missingClis.length} declared host CLIs not installed (${missingClis.slice(0, 2).join(', ')}${missingClis.length > 2 ? ', …' : ''})`,
@@ -509,7 +550,7 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
   // row per bad file, since each needs its own edit.
   for (const e of input.hostClis?.errors ?? []) {
     out.push(finding({
-      severity: 'warning', kind: 'host-cli-invalid', device,
+      severity: FINDING_SEVERITY['host-cli-invalid'], kind: 'host-cli-invalid', device,
       message: `host-CLI manifest ${e.file} could not be read: ${e.reason}`,
     }));
   }
@@ -545,7 +586,7 @@ function orphanFinding(device: string, rows: OrphanRow[]): DoctorFinding[] {
     ? `${affected[0].agent}@${affected[0].version}`
     : `${affected.length} versions`;
   return [finding({
-    severity: 'warning', kind: 'orphan', device,
+    severity: FINDING_SEVERITY['orphan'], kind: 'orphan', device,
     message: `${total} orphaned resource${total === 1 ? '' : 's'} on ${where} (cleanup only)`,
   })];
 }
@@ -585,7 +626,7 @@ function duplicateHookFindings(device: string, dups: DuplicateVersionHook[]): Do
       // stale/sync drift, not a missing hook. Resolvable by one sync; a WARNING,
       // not a "needs you now" critical. (A genuinely MISSING hook stays critical
       // via the missing-hook path.)
-      severity: 'warning',
+      severity: FINDING_SEVERITY[drift ? 'duplicate-hook-drift' : 'duplicate-hook'],
       kind: drift ? 'duplicate-hook-drift' : 'duplicate-hook',
       device, agent, versions, message,
       remediation: `agents sync ${agent}@all --yes`,
@@ -628,7 +669,7 @@ function rcSecretFindings(device: string, rc: RcSecretFinding[]): DoctorFinding[
         ? 'agents secrets add, then delete the rc line'
         : `agents secrets add once per export (${n}), then delete each rc line`;
     out.push({
-      severity: 'warning', kind: 'rc-secret-export', device,
+      severity: FINDING_SEVERITY['rc-secret-export'], kind: 'rc-secret-export', device,
       message: `${what} (${examples}) — readable by any same-user process`,
       remediation,
     });
@@ -651,7 +692,7 @@ function execPolicyFinding(
   if (!execPolicy || execPolicy.platform !== 'win32') return null;
   if (!blocksLocalScripts(execPolicy.policy)) return null;
   return finding({
-    severity: 'warning', kind: 'exec-policy', device,
+    severity: FINDING_SEVERITY['exec-policy'], kind: 'exec-policy', device,
     message: `PowerShell execution policy is ${execPolicy.policy} — it blocks the generated agents.ps1 launcher (agents.cmd still works)`,
   });
 }
@@ -744,13 +785,13 @@ export function signInToFindings(
       if (row.signedIn) continue;
       if (row.provable) {
         out.push(finding({
-          severity: 'critical', kind: 'logged-out', device, agent, version: row.version,
+          severity: FINDING_SEVERITY['logged-out'], kind: 'logged-out', device, agent, version: row.version,
           account: row.account ?? null,
           message: 'logged out — no account signed in',
         }));
       } else {
         out.push(finding({
-          severity: 'warning', kind: 'logout-unprovable', device, agent, version: row.version,
+          severity: FINDING_SEVERITY['logout-unprovable'], kind: 'logout-unprovable', device, agent, version: row.version,
           account: row.account ?? null,
           message: 'could not verify sign-in',
         }));
@@ -779,14 +820,14 @@ export function fleetDivergenceToFindings(
       case 'agent-version-missing-remote':
       case 'agent-version-missing-local':
         out.push(finding({
-          severity: 'warning', kind: 'version-skew', device: laggingDevice,
+          severity: FINDING_SEVERITY['version-skew'], kind: 'version-skew', device: laggingDevice,
           agent: d.category as AgentId, version: d.name,
           message: 'not installed (present elsewhere in the fleet)',
         }));
         break;
       case 'repo-drift':
         out.push(finding({
-          severity: 'warning', kind: 'repo-drift', device: laggingDevice,
+          severity: FINDING_SEVERITY['repo-drift'], kind: 'repo-drift', device: laggingDevice,
           // `category` is the repo ('agents' | 'system'); carry it as the alias
           // `agents repo pull` expects — ~/.agents is the `user` repo.
           version: d.category === 'system' ? 'system' : 'user',
@@ -796,7 +837,7 @@ export function fleetDivergenceToFindings(
       case 'resource-missing-remote':
       case 'resource-missing-local':
         out.push(finding({
-          severity: 'warning', kind: 'fleet-resource-gap', device: laggingDevice,
+          severity: FINDING_SEVERITY['fleet-resource-gap'], kind: 'fleet-resource-gap', device: laggingDevice,
           message: `${d.category.replace(/s$/, '')} '${d.name}' missing (present elsewhere)`,
         }));
         break;
