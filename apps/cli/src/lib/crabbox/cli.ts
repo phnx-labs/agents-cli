@@ -13,7 +13,7 @@
  */
 
 import { spawn, spawnSync } from 'child_process';
-import { readAndResolveBundleEnv, isHeadlessSecretsContext, listBundles, bundleExists, type SecretsBundle } from '../secrets/bundles.js';
+import { readAndResolveBundleEnv, listBundles, bundleExists, type SecretsBundle } from '../secrets/bundles.js';
 import { readMeta, writeMeta } from '../state.js';
 
 /** A crabbox machine as reported by `crabbox list --json`. */
@@ -131,10 +131,14 @@ function resolveTailscaleBundleMemo(): { name: string; key: string } | undefined
  * and the single-key subset read (`keys: [ts.key]`) is rejected by
  * `canCacheResolvedEnv` for broker auto-cache — so without this memo a
  * non-broker-held tailscale bundle re-read the keychain on EVERY call (and,
- * pre-guard, could pop a Touch ID sheet each time). One read per process,
- * success or failure (a failed read memoizes as undefined: the catch below
- * already degrades to a public-network lease, retrying mid-process only
- * repeats the same failure).
+ * pre-guard, could pop a Touch ID sheet each time). The read is always
+ * `agentOnly: true` (broker-only, SEC-13): tailscale is opt-in plumbing, a
+ * `--lease` run is headless by contract, and even an interactive `--lease`
+ * invocation must never pop an unwatched Touch ID sheet for this best-effort
+ * read — a locked bundle degrades silently to a public-network lease via the
+ * catch below. One read per process, success or failure (a failed read
+ * memoizes as undefined: the catch below already degrades to a public-network
+ * lease, retrying mid-process only repeats the same failure).
  */
 let tailscaleValueMemo: { value: string | undefined } | undefined;
 function resolveTailscaleKeyValueMemo(ts: { name: string; key: string }): string | undefined {
@@ -144,7 +148,7 @@ function resolveTailscaleKeyValueMemo(ts: { name: string; key: string }): string
       const { env } = readAndResolveBundleEnv(ts.name, {
         caller: 'agents run --lease (crabbox tailscale)',
         keys: [ts.key],
-        agentOnly: isHeadlessSecretsContext(),
+        agentOnly: true,
       });
       value = env[ts.key];
     } catch {
