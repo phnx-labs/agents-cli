@@ -502,9 +502,27 @@ async function stopSessionResolverSshPeer(peer: SessionResolverSshPeer): Promise
  * side (an npx'd old agents-cli answering over ssh, plus the ControlPersist
  * master winding down) races into it after stop — a bare rmSync intermittently
  * dies ENOTEMPTY on CI. Retries absorb exactly that window.
+ *
+ * Two hardenings after 8 x 250ms still lost the race on a loaded runner
+ * (`ENOTEMPTY: rmdir '/tmp/sr-46716N/peer-home'`, which failed PRs whose diff
+ * never touched sessions at all):
+ *
+ *  - The window is now 20 x 500ms. `stopSessionResolverSshPeer` awaits the ssh
+ *    exit, but the ControlPersist master and the npx'd peer are separate
+ *    processes that can outlive it, so the tail is bounded by process teardown,
+ *    not by anything this test controls.
+ *  - Cleanup is best-effort. Every assertion has already run by the time this
+ *    is reached in `finally`; a leaked directory under TMPDIR on an ephemeral
+ *    runner is not a test failure, and turning one into a red shard hides which
+ *    PRs are actually broken. The failure is still reported on stderr rather
+ *    than swallowed, so a genuine leak stays visible in the CI log.
  */
 function rmTempHomeWithRetries(tempHome: string): void {
-  fs.rmSync(tempHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
+  try {
+    fs.rmSync(tempHome, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
+  } catch (err) {
+    console.warn(`[sessions.test] temp home cleanup did not complete for ${tempHome}: ${(err as Error).message}`);
+  }
 }
 
 describe('resolveSessionQuery indexed metadata coverage', () => {
