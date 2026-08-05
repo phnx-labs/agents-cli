@@ -31,6 +31,8 @@
   <a href="https://x.ai" title="Grok Build (xAI)"><strong>Grok</strong></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://factory.ai" title="Factory AI Droid"><strong>Droid</strong></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://omp.sh" title="Oh My Pi"><strong>Pi</strong></a>
 </p>
 
 https://agents-cli.sh/demo.mp4
@@ -161,7 +163,18 @@ agents run claude@
 agents run codex@ "review this branch"
 ```
 
-`--strategy balanced` spreads work across available versions of the same agent -- useful when you have multiple accounts and want to avoid burning through one.
+`--strategy balanced` spreads work across available versions of the same agent -- useful when you have multiple accounts and want to avoid burning through one. When every account is rate-limited, the run exits nonzero naming each excluded account and the earliest window reset (use `--strategy pinned` to force the default) -- it never launches into an exhausted account.
+
+### Don't care which harness? `agents run auto`
+
+```bash
+# Picks the host (14d usage affinity), the harness (installed CLIs weighted by
+# best-account headroom), and the account (balanced) -- all three layers.
+agents run auto "summarize recent commits"
+agents run auto --host yosemite-s0 "fix the flaky test"   # pin the host layer
+```
+
+`run auto` excludes any harness whose accounts are all rate-limited or signed out, and exits nonzero with the earliest reset time when nothing anywhere is healthy.
 
 A trailing `@` opens an account picker before either an interactive or prompt-based run. Each installed version shows its account identity, exact version, login state, plan, and every available session, weekly, or monthly limit. Logged-out, rate-limited, and out-of-credit accounts remain visible with the reason they cannot be selected; signed-in accounts whose provider does not expose quota data stay selectable and say `limits unavailable`. The choice pins only that run and does not change your default version.
 
@@ -244,11 +257,31 @@ agents sessions a1b2c3d4 --markdown
 
 # Just the last 3 turns, user messages only
 agents sessions a1b2c3d4 --last 3 --include user
+
+# Calls in recent Codex sessions on one device
+agents sessions --include tools --agent codex --device mac-mini --since 7d
+
+# One session where two different calls match; query every online device
+agents sessions --include tools \
+  --query 'program:git input:merge' \
+  --query 'program:gh output:CONFLICT' \
+  --fleet --json
+
+# Count pre-indexed static git sites, containing calls, and sessions
+agents sessions --include tools --query 'program:git' --count --fleet --json
+
+# Populate historical tool rows once on each device
+agents sessions backfill tools --fleet
+
+# Which skills/commands you actually invoke -- and which installed ones are dead weight
+agents sessions stats
+agents sessions stats --zero            # only the never-invoked (dead weight)
+agents sessions backfill resources      # fold historical sessions into the usage index
 ```
 
 Interactive picker when you're in a terminal. Structured output (`--json`, `--markdown`, filtered by role or turn count) when piped.
 
-Backed by a SQLite + FTS5 index at `~/.agents/.history/sessions/sessions.db` with incremental scanning -- warm reads in ~100ms. External tools can consume `--json` output as a programmatic observability layer; see [docs/05-sessions.md](apps/cli/docs/05-sessions.md) for the schema and [docs/06-observability.md](apps/cli/docs/06-observability.md) for the consumption patterns.
+Backed by a SQLite + FTS5 index at `~/.agents/.history/sessions/sessions.db` with incremental scanning -- warm reads in ~100ms. Tool-call evidence is redacted and bounded before it is cached; repeated `--query` clauses must match distinct calls in one session. Tool queries read SQLite only: `agents sessions backfill tools` performs the one-time historical parse, while normal incremental scans index new and changed sessions. The index stores ordered static Bash program sites, so `--count` reports occurrences, containing tool calls, and distinct sessions without reparsing. `--fleet` executes one origin partition per device, so synced mirrors cannot duplicate compact evidence or counts returned over SSH; transcript bodies stay on their origin machine. This uses relational SQLite rows and literal FTS5 only, with no embeddings, vector database, or model calls. External tools can consume `--json` output as a programmatic observability layer; see [docs/05-sessions.md](apps/cli/docs/05-sessions.md) for the schemas and [docs/06-observability.md](apps/cli/docs/06-observability.md) for the consumption patterns.
 
 ### Live state, and catching up fast
 
@@ -355,6 +388,8 @@ agents watchdog --watch    # daemon loop: a tick every --interval
 ```
 
 `agents watchdog` detects a stalled session, resolves the *exact* terminal split it lives in (tmux, iTerm, VSCodium, or a raw pty), and injects a nudge -- `Continue.` by default, or set `--text`. It's dry by default; `--nudge` acts on a single tick, and `agents watchdog enable` flips global auto-nudge on so `--watch` injects on its own. Steer a single run with `agents watchdog policy <id> off | keep | handsoff`.
+
+A stalled session whose tail shows a hard account limit ("You've hit your weekly limit · resets …") is **rotated in place** instead of nudged: the watchdog gates on the same healthy-account selection `agents run auto` makes (zero healthy → one skip event per cooldown window, terminal untouched), injects the harness's exit sequence, relaunches `agents run auto --interactive --session-id <uuid>` in the *same* tab, then replays the old session's resume once the new TUI is live. Default on; `agents watchdog rotate off` disables it (nudging stays on).
 
 ---
 
@@ -1095,9 +1130,12 @@ Conversations with Claude, Codex, legacy Gemini, and other agents scatter across
 ```bash
 agents sessions "auth middleware"     # Full-text search across all agents
 agents sessions --agent claude --since 7d
+agents sessions --include tools --query 'program:git' --fleet --json
+agents sessions --include tools --query 'program:git' --count --fleet --json
+agents sessions backfill tools --fleet
 ```
 
-The index lives at `~/.agents/.history/sessions/sessions.db` (SQLite + FTS5). Nothing leaves your machine. See [Sessions](#sessions-across-agents) for full usage.
+The index lives at `~/.agents/.history/sessions/sessions.db` (SQLite + FTS5). A local query stays on the machine; an explicit `--fleet` tool query sends only redacted, bounded match evidence or aggregate counts over SSH. Historical tool parsing is explicit via `sessions backfill tools`; queries never parse transcripts. See [Sessions](#sessions-across-agents) for full usage.
 
 ### Secrets
 

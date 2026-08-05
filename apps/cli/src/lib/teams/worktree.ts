@@ -84,7 +84,36 @@ export async function gitDiff(
 }
 
 /**
- * Create a new git worktree for a teammate.
+ * Resolve the repo's default branch name (origin/HEAD → `main`/`master`/…).
+ * Refreshes origin/HEAD first so a repo cloned before the default was set resolves.
+ * Falls back to `main` when origin/HEAD isn't set.
+ */
+export async function localDefaultBranch(gitRoot: string): Promise<string> {
+  try {
+    await execFileAsync('git', ['remote', 'set-head', 'origin', '--auto'], { cwd: gitRoot });
+  } catch {
+    // Offline / no origin — fall through to symbolic-ref or main.
+  }
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'],
+      { cwd: gitRoot },
+    );
+    const base = stdout.trim().replace(/^origin\//, '');
+    if (base) return base;
+  } catch {
+    // no origin/HEAD
+  }
+  return 'main';
+}
+
+/**
+ * Create a new git worktree for a teammate, branched off the freshly-fetched
+ * default branch. Fetches `origin` first and bases the branch on
+ * `origin/<default>` so a stale local checkout cannot fork teammates off old
+ * code. Matches `createRemoteWorktree` — local and remote isolation share one
+ * base policy.
  *
  * @param repoDir - Directory inside the git repository
  * @param worktreeName - Name for the worktree (used in path and branch)
@@ -97,11 +126,29 @@ export async function createWorktree(repoDir: string, worktreeName: string): Pro
   const gitRoot = await getGitRoot(repoDir);
   const worktreePath = safeJoin(path.join(gitRoot, '.agents', 'worktrees'), worktreeName);
   const branchName = `agents/${worktreeName}`;
+  const base = await localDefaultBranch(gitRoot);
 
   await fs.mkdir(path.dirname(worktreePath), { recursive: true });
-  await execFileAsync('git', ['worktree', 'add', '-b', branchName, worktreePath, 'HEAD'], {
-    cwd: gitRoot,
-  });
+
+  // Fetch first so origin/<default> is current. Fail loud on network errors —
+  // silent fallback to HEAD is how swarms write on a days-stale base and only
+  // discover it at merge time.
+  try {
+    await execFileAsync('git', ['fetch', 'origin'], { cwd: gitRoot });
+  } catch (err: any) {
+    const detail = (err?.stderr || err?.message || String(err)).toString().trim();
+    throw new Error(
+      `createWorktree: git fetch origin failed in ${gitRoot}` +
+        (detail ? `: ${detail}` : '') +
+        `. Cannot base a teammate worktree on a stale remote-tracking ref.`,
+    );
+  }
+
+  await execFileAsync(
+    'git',
+    ['worktree', 'add', '-b', branchName, worktreePath, `origin/${base}`],
+    { cwd: gitRoot },
+  );
 
   return worktreePath;
 }

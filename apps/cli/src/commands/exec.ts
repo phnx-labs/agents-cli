@@ -9,7 +9,9 @@
 import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import type { ExecOptions, ExecMode, ExecEffort, FallbackEntry } from '../lib/exec.js';
+import { isTierToken } from '../lib/model-tiers.js';
 import type { AgentId } from '../lib/types.js';
+import { RUN_AUTO_KEYWORD } from '../lib/types.js';
 import type { DetectedRuntime } from '../lib/crabbox/runtimes.js';
 import type { ResolvedRunDefaults } from '../lib/run-defaults.js';
 import { setHelpSections } from '../lib/help.js';
@@ -84,6 +86,9 @@ interface ExecCommandActionOptions {
   interval?: string;
   // Host dispatch: run on a registered agent host instead of locally.
   // `--host` is canonical; `--on`/`--computer` are hidden aliases.
+  // `--where` is the unified placement alias (lib/placement.ts) — expands into
+  // host/lease before dispatch; do not combine with those flags.
+  where?: string;
   host?: string;
   device?: string;
   on?: string;
@@ -164,6 +169,46 @@ export function runAccountPickerConflicts(options: {
 /** Type guard that narrows a string to a known AgentId. */
 function isValidAgent(agent: string): agent is AgentId {
   return agent in AGENTS;
+}
+
+// Reserved `<agent>` keyword for `agents run auto` — canonical definition in
+// lib/types.ts (shared with the host dispatch layer); re-exported here.
+export { RUN_AUTO_KEYWORD };
+
+/**
+ * Whether `run auto` should default its host layer to the affinity pick (the
+ * same machinery as `--device auto`). False when the caller pinned any host
+ * flag, and false when this process was itself dispatched by a host run — the
+ * dispatcher exports AGENTS_RUN_AUTO_HOST_RESOLVED=1 into the remote SHELL
+ * (hosts/dispatch.ts remoteRunShellPrelude) because it already resolved the
+ * host layer, and re-picking here would chain-hop the run across the fleet.
+ * Pure so the pinning matrix is unit-testable.
+ */
+export function runAutoDefaultsToAffinity(
+  options: { host?: string; device?: string; on?: string; computer?: string },
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (hostTargetGiven(options).length > 0) return false;
+  return env.AGENTS_RUN_AUTO_HOST_RESOLVED !== '1';
+}
+
+/**
+ * Whether an interactive host dispatch must mint a correlation launch id and
+ * resolve the remote session via the launch-id join (RUSH-2034), rather than
+ * trusting a pre-known session id. `run auto` ALWAYS joins: the harness is
+ * picked on the remote, so an explicit --session-id is only adopted when the
+ * pick lands on claude — pre-registering it would strand a stale session-index
+ * entry naming an id a non-claude pick never used (RUSH-2132). Pure so the
+ * decision matrix is unit-testable.
+ */
+export function hostInteractiveNeedsCorrelationId(
+  runAgent: string,
+  hostSessionId: string | undefined,
+  resumeId: string | undefined,
+): boolean {
+  if (resumeId) return false;
+  if (runAgent === RUN_AUTO_KEYWORD) return true;
+  return !hostSessionId && isSessionTrackedAgent(runAgent);
 }
 
 /** Build a one-line banner describing which version the strategy picked. */
@@ -664,7 +709,7 @@ export function registerRunCommand(program: Command): void {
     .description('Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively.')
     .option('-m, --mode <mode>', 'How much the agent can do: plan (read-only), edit (can write files), auto (smart classifier auto-approves safe ops, prompts for risky), skip (bypass all permission prompts). \'full\' accepted as alias for skip.', 'plan')
     .option('-e, --effort <effort>', 'Reasoning effort: low | medium | high | xhigh | max | auto (claude and codex only)', 'auto')
-    .option('--model <model>', 'Override the model directly (e.g., claude-opus-4-6)')
+    .option('--model <model>', 'Cost tier (cheap|default|best|ultra) or a concrete model id; tiers resolve per harness+version to a supported model')
     .option(
       '--env <key=value>',
       'Pass environment variable to the agent (repeatable, e.g., --env DEBUG=1 --env API_KEY=xyz)',
@@ -761,12 +806,16 @@ export function registerRunCommand(program: Command): void {
       'Loop delay between iterations ("0" back-to-back, "30m" paces). Loop only.',
     )
     .option(
+      '--where <spec>',
+      'Where this run\'s body executes (one placement door): local | device:<name> | auto | lease[:backend]. Expands to --host/--lease. Do not combine with those flags. See docs/00-concepts.md#placement.',
+    )
+    .option(
       '--host <name>',
-      'Offload this run onto another machine over SSH — a device name, registered host, or user@host. Pass "auto" to pick from 14d usage affinity (most-used online device has highest probability). See `agents devices`.',
+      'Offload this run onto another machine over SSH — a device name, registered host, or user@host. Pass "auto" to pick from 14d usage affinity (most-used online device has highest probability). Same as --where device:<name>. See `agents devices`.',
     )
     .option(
       '--device <name>',
-      'Alias of --host. Pass "auto" for affinity-based device pick (same as --host auto).',
+      'Alias of --host. Pass "auto" for affinity-based device pick (same as --where auto).',
     )
     .option('--remote-cwd <dir>', "Explicit host working directory for --host runs, used VERBATIM (overrides --cwd; usually --cwd suffices — it re-roots a local-home path onto the remote home). Pass a single-quoted '$HOME/…' or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you).")
     .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
@@ -777,7 +826,7 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--lease [backend]',
-      'Invent a disposable cloud box for this run and tear it down after (via crabbox). Optional backend selects the cloud (hetzner/aws/do). Unlike --host, no machine is registered.',
+      'Invent a disposable cloud box for this run and tear it down after (via crabbox). Optional backend selects the cloud (hetzner/aws/do). Same as --where lease[:backend]. Unlike --host, no machine is registered.',
     )
     .option(
       '--box <slug>',
@@ -827,6 +876,16 @@ export function registerRunCommand(program: Command): void {
       # Pick a signed-in account/version for only this run
       agents run claude@
 
+      # Full-auto: affinity-pick the host, then the harness with the most
+      # account headroom, then a balanced account on it
+      agents run auto "fix the flaky test" --mode edit
+      agents run auto --host yosemite-s0 "fix the flaky test"   # pin the host
+
+      # Placement (one door — where the body runs). Old flags still work.
+      agents run claude "…" --where device:yosemite-s0   # = --host yosemite-s0
+      agents run claude "…" --where auto                 # = --device auto
+      agents run claude "fix CI" --where lease --mode edit
+
       # Open the session in a terminal tab — detected from where your sessions
       # already run (Ghostty / iTerm / Terminal.app); force one with a value
       agents run claude --terminal
@@ -865,6 +924,13 @@ export function registerRunCommand(program: Command): void {
         balanced   distribute load across healthy accounts by remaining capacity (default)
         A version/account is skipped when it is rate-limited right now — any usage window (incl. the 5-hour session window) at 100%, matching the 'agents view' badge.
         --balanced is shorthand for --strategy balanced. Ignored when @version is pinned, when a profile is used, or with --fallback.
+        Zero healthy accounts under balanced/available exits nonzero naming each
+        excluded account and the earliest window reset — use --strategy pinned to force.
+
+      'auto' harness (agents run auto): picks the host (14d usage affinity,
+      unless --host is given), the harness (installed CLIs weighted by
+      best-account headroom), and the account (the strategy above). Zero
+      healthy accounts on any harness exits nonzero with the earliest reset.
 
       Account picker: append @ with no version (agents run claude@) to choose one
         installed account for this run. Rows show identity, login state, plan,
@@ -912,6 +978,33 @@ export function registerRunCommand(program: Command): void {
         return;
       }
 
+      // Placement: --where expands into --host / --lease before any dispatch.
+      // One door for "where does the body run?" — old flags remain aliases.
+      // See lib/placement.ts and docs/00-concepts.md#placement.
+      {
+        const { placementFromRunFlags, expandPlacementToRunFlags, PlacementError } =
+          await import('../lib/placement.js');
+        try {
+          const placement = placementFromRunFlags(options);
+          if (options.where) {
+            const expanded = expandPlacementToRunFlags(placement);
+            if (expanded.host !== undefined) options.host = expanded.host;
+            if (expanded.device !== undefined) options.device = expanded.device;
+            if (expanded.lease !== undefined) options.lease = expanded.lease;
+            if (expanded.box !== undefined) options.box = expanded.box;
+            // Clear the where flag so remote re-entry (host dispatch) does not
+            // re-expand and conflict with the concrete host we just set.
+            options.where = undefined;
+          }
+        } catch (err) {
+          if (err instanceof PlacementError) {
+            console.error(chalk.red(err.message));
+            process.exit(1);
+          }
+          throw err;
+        }
+      }
+
       // --notify: post a desktop notification when this run finishes. Armed on
       // process exit so it covers EVERY dispatch path below (local, --host,
       // --lease, the error path) instead of one branch. Only for headless runs
@@ -957,6 +1050,38 @@ export function registerRunCommand(program: Command): void {
           ));
           process.exit(1);
         }
+      }
+
+      // `agents run auto`: the reserved harness keyword — full-auto dispatch
+      // (host affinity → cross-harness balance → account balance, RUSH-2132).
+      if (normalizedAgentSpec.split('@')[0] === RUN_AUTO_KEYWORD && normalizedAgentSpec !== RUN_AUTO_KEYWORD) {
+        console.error(chalk.red(
+          `agents run auto picks the harness itself — a @version pin does not apply. ` +
+          `Pin a concrete harness instead: agents run <harness>@<version>.`,
+        ));
+        process.exit(1);
+      }
+      const autoHarnessRequested = normalizedAgentSpec === RUN_AUTO_KEYWORD;
+      if (autoHarnessRequested) {
+        // `auto` is reserved. If a future harness registers that id, the
+        // keyword collides — fail loud rather than silently shadow the harness.
+        if (RUN_AUTO_KEYWORD in AGENTS) {
+          console.error(chalk.red(
+            `'${RUN_AUTO_KEYWORD}' is now a registered harness and collides with the reserved 'run auto' keyword. ` +
+            `Run the harness by name instead.`,
+          ));
+          process.exit(1);
+        }
+        if (accountPickerRequested) {
+          console.error(chalk.red(
+            `agents run auto picks the harness and account itself — the trailing-@ account picker needs a concrete harness (agents run <harness>@).`,
+          ));
+          process.exit(1);
+        }
+        // Host layer: with no explicit --host/--device, default to the
+        // affinity pick. Skipped on a host-dispatched run — its dispatcher
+        // already resolved this layer (see runAutoDefaultsToAffinity).
+        if (runAutoDefaultsToAffinity(options)) options.device = 'auto';
       }
 
       // --device auto / --host auto (and deprecated --smart): affinity-pick host.
@@ -1350,6 +1475,10 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         const hostName = hostGiven[0];
+        // Note: a `run auto` dispatch needs no marker forwarded from here — the
+        // dispatch layer (hosts/dispatch.ts remoteRunShellPrelude) exports the
+        // chain-hop guard into the remote shell for BOTH interactive and
+        // headless paths, keyed off the agent name being `auto`.
         const { resolveHostRunTarget, resolveHostSessionId, dispatchPromptToHost, HostResolutionError } = await import('../lib/hosts/run-target.js');
         const { runInteractiveOnHost } = await import('../lib/hosts/dispatch.js');
         const { registerInteractiveHostSession } = await import('../lib/hosts/session-index.js');
@@ -1543,12 +1672,17 @@ export function registerRunCommand(program: Command): void {
             // the stream we resolve the id by one ssh read of the remote hook
             // record — the same launch-id join used locally (RUSH-2034). Not
             // needed for Claude (id forced) or resume (id already known).
+            // `run auto` ALWAYS joins: the remote picks the harness, so an
+            // explicit --session-id is only adopted by a claude pick.
             const correlationLaunchId =
-              !hostSessionId && !resumeId && isSessionTrackedAgent(runAgent) ? randomUUID() : undefined;
+              hostInteractiveNeedsCorrelationId(runAgent, hostSessionId, resumeId) ? randomUUID() : undefined;
             const hostEnv = correlationLaunchId
               ? [...options.env, `AGENT_LAUNCH_ID=${correlationLaunchId}`]
               : options.env;
-            if (hostSessionId) {
+            // `run auto` never pre-registers: the explicit id is only real when
+            // the remote pick lands on claude. The launch-id join below records
+            // the id the remote ACTUALLY used, whatever the pick.
+            if (hostSessionId && runAgent !== RUN_AUTO_KEYWORD) {
               registerInteractiveHostSession({
                 cwd: process.cwd(),
                 host: host.name,
@@ -1617,7 +1751,11 @@ export function registerRunCommand(program: Command): void {
             // re-attach the live pane automatically instead of exiting — the user
             // never has to notice the drop and `agents sessions focus` by hand.
             // `raw` runs aren't tmux wrapped, so there is nothing to reconnect to.
-            const reconnectId = hostSessionId ?? resolvedRemoteId ?? resumeId;
+            // For `run auto` prefer the join-resolved id (the harness the remote
+            // ACTUALLY picked) over the explicit --session-id only claude adopts.
+            const reconnectId = (runAgent === RUN_AUTO_KEYWORD
+              ? resolvedRemoteId ?? hostSessionId
+              : hostSessionId ?? resolvedRemoteId) ?? resumeId;
             if (reconnectId && !isRaw) {
               const { reconnectInteractiveSession, SSH_CONN_FAILURE } = await import('../lib/hosts/reconnect.js');
               if (exitCode === SSH_CONN_FAILURE) {
@@ -1790,15 +1928,15 @@ export function registerRunCommand(program: Command): void {
         { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, headlessPlanStallCommand, nativeResume, resolveInteractive, inferredInteractiveWithoutTty },
         { ALL_AGENT_IDS, ACCOUNT_INSPECTION_AGENT_IDS, agentLabel, supportsAccountInspection },
         { profileExists, resolveProfileForRun },
-        { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported, isHeadlessSecretsContext },
+        { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
         { splitBundleRef, resolveHostSshTarget, remoteResolveEnv },
-        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES },
+        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES, collectHarnessCandidates, pickHarnessWeighted, classifyHarnessCandidates, formatHarnessPickBanner, formatNoHealthyHarnessError, formatNoHealthyAccountError },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
         { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents, ensureSubagentDispatchTool },
         { resolveRunDefaults },
         { getMcpServersByName, buildWorkflowMcpConfig },
-        { supports },
+        { supports, capableAgents },
         { shareRuntimeEnv },
       ] = await Promise.all([
         import('../lib/exec.js'),
@@ -1850,7 +1988,7 @@ export function registerRunCommand(program: Command): void {
       if (accountPickerRequested && !isValidAgent(rawAgent)) {
         if (profileExists(rawAgent)) {
           console.error(chalk.red(
-            `Account selection is not available for profile '${rawAgent}'. Run its concrete host agent with @ instead.`,
+            `Account selection is not available for custom harness '${rawAgent}'. Run its concrete host agent with @ instead.`,
           ));
           process.exit(1);
         }
@@ -1862,7 +2000,43 @@ export function registerRunCommand(program: Command): void {
         }
       }
 
-      if (isValidAgent(rawAgent)) {
+      if (autoHarnessRequested) {
+        // Harness layer (RUSH-2132): weighted pick across installed harnesses
+        // by best-account headroom. Zero healthy accounts anywhere fails loud
+        // — launching a default "because it's there" is how a rotate loop
+        // hammers an exhausted account.
+        const byHarness = await collectHarnessCandidates();
+        // F1 (RUSH-2185 / EXEC-23a): a prompt-less run is interactive; only
+        // harnesses that can open a REPL with no argv are valid candidates.
+        // cursor-agent and similar exit immediately without a prompt, which
+        // leaves a silent [detached] pane and an orphan session.
+        const interactive = prompt === undefined && options.headless !== true;
+        const replCapable = interactive ? new Set(capableAgents('interactiveRepl')) : null;
+        const candidateHarness = replCapable
+          ? new Map([...byHarness].filter(([id]) => replCapable.has(id)))
+          : byHarness;
+        const harnessPick = pickHarnessWeighted(candidateHarness);
+        if (!harnessPick) {
+          if (replCapable && byHarness.size > 0 && candidateHarness.size === 0) {
+            const installed = [...byHarness.keys()].join(', ');
+            console.error(chalk.red(
+              `No installed harness supports a prompt-less interactive REPL (installed: ${installed}). Pass a prompt (-p) or install claude, codex, or another REPL-capable harness.`,
+            ));
+          } else {
+            console.error(chalk.red(formatNoHealthyHarnessError(classifyHarnessCandidates(candidateHarness))));
+          }
+          process.exit(1);
+        }
+        agent = harnessPick.picked.agent;
+        if (!options.quiet) {
+          process.stderr.write(chalk.gray(formatHarnessPickBanner(harnessPick) + '\n'));
+        }
+        // --session-id keeps its claude-only semantics: honored when auto
+        // picks claude, ignored (loudly) otherwise.
+        if (options.sessionId && agent !== 'claude' && !options.quiet) {
+          process.stderr.write(chalk.yellow(`[agents] --session-id ignored: auto picked ${agent} (only claude accepts a forced session id)\n`));
+        }
+      } else if (isValidAgent(rawAgent)) {
         agent = rawAgent;
       } else if (profileExists(rawAgent)) {
         // Not a known agent id, but a profile by this name exists. Profiles
@@ -1870,13 +2044,29 @@ export function registerRunCommand(program: Command): void {
         // so Chinese models (Kimi, DeepSeek, Qwen, GLM) can run inside
         // Claude Code without a local proxy.
         try {
-          const resolved = resolveProfileForRun(rawAgent);
+          const resolved = resolveProfileForRun(rawAgent, options.model);
           agent = resolved.agent;
           if (!version) version = resolved.version;
           profileEnv = resolved.env;
           profileFallbackModel = resolved.fallbackModel;
           fromProfile = true;
-          process.stderr.write(chalk.gray(`Resolved profile '${resolved.profileName}' -> ${agent}${version ? `@${version}` : ''}\n`));
+          process.stderr.write(chalk.gray(`Resolved custom harness '${resolved.profileName}' -> ${agent}${version ? `@${version}` : ''}\n`));
+          if (resolved.tierNote) {
+            process.stderr.write(chalk.gray(`[agents] ${resolved.tierNote}\n`));
+          }
+          // A tier token (cheap/default/best/ultra) already resolved against
+          // this PROFILE's own `models:` map above, when the profile opts in.
+          // Replace the raw --model value here so the tier never reaches the
+          // native, HOST-catalog tier block below. When the profile has no
+          // `models:` opt-in at all, resolvedModel stays undefined and
+          // options.model is left as the raw tier token on purpose — the
+          // "cost tiers don't apply to custom harness ..." discard guard further
+          // down this function is the canonical fallback for that case, and
+          // this block must not race it with a second, differently-worded
+          // message.
+          if (resolved.resolvedModel !== undefined) {
+            options.model = resolved.resolvedModel;
+          }
         } catch (err) {
           console.error(chalk.red((err as Error).message));
           process.exit(1);
@@ -2087,7 +2277,7 @@ export function registerRunCommand(program: Command): void {
         } else {
           console.error(chalk.red(`Unknown agent: ${rawAgent}`));
           console.error(chalk.gray(`Available agents: ${ALL_AGENT_IDS.join(', ')}`));
-          console.error(chalk.gray(`Or add a profile: agents profiles add <name>`));
+          console.error(chalk.gray(`Or add a custom harness: agents harness add <name>`));
           process.exit(1);
         }
       }
@@ -2251,10 +2441,19 @@ export function registerRunCommand(program: Command): void {
         if (version) {
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: version ${version} is pinned\n`));
         } else if (fromProfile) {
-          process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: profile pins its own version/auth\n`));
+          process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: custom harness pins its own version/auth\n`));
         } else {
           try {
             const resolved = await resolveRunVersion(agent, strategy, cwd);
+            if (resolved.exhausted) {
+              // Fail loud (RUSH-2132): the old behavior warned "found no
+              // usable version; falling back to defaults" and launched the
+              // pinned default anyway — the exact move that loops a rotate
+              // into an exhausted account. The message text is a contract
+              // the Factory watchdog tail-detects; do not reword it.
+              console.error(chalk.red(formatNoHealthyAccountError(agent, strategy, resolved.exhausted)));
+              process.exit(1);
+            }
             if (resolved.version) {
               version = resolved.version;
               rotationResult = resolved.rotation;
@@ -2263,6 +2462,8 @@ export function registerRunCommand(program: Command): void {
                 process.stderr.write(chalk.gray(banner + '\n'));
               }
             } else if (!options.quiet) {
+              // No installed version at all (not "accounts exhausted" — that
+              // fails loud above): keep the pre-existing default resolution.
               process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} found no usable ${agent} version; falling back to defaults\n`));
             }
           } catch (err) {
@@ -2470,11 +2671,13 @@ export function registerRunCommand(program: Command): void {
               agent,
               keys: secretsKeysSubset,
               allowExpired: options.allowExpired,
-              // The harness identity scopes any cached grant. It no longer lets the
-              // requesting agent wait for interactive approval — an agent launch
+              // The harness identity scopes any cached grant. An agent launch
               // resolves broker-only and fails fast naming
-              // `agents secrets unlock <bundle>` (bundles.ts:interactiveUnlock).
-              agentOnly: isHeadlessSecretsContext(),
+              // `agents secrets unlock <bundle>` (bundles.ts:interactiveUnlock) — it
+              // MUST NOT raise a Touch ID sheet regardless of tty (SEC-13). Gating on
+              // isHeadlessSecretsContext() left `--interactive` launches (the watchdog's
+              // `agents run auto --interactive`) able to prompt, piling up helper sheets.
+              agentOnly: true,
             });
             const entries = describeBundle(bundle);
             const counts: Record<string, number> = {};
@@ -2492,7 +2695,7 @@ export function registerRunCommand(program: Command): void {
       }
 
       const autoShareEnv = options.autoSecrets !== false
-        ? shareRuntimeEnv({ agentOnly: isHeadlessSecretsContext() })
+        ? shareRuntimeEnv()
         : undefined;
 
       // Merge order (later wins): profile env < auto share token < secrets bundles < --env K=V.
@@ -2506,10 +2709,22 @@ export function registerRunCommand(program: Command): void {
         : undefined;
 
       const modelSource = runCmd.getOptionValueSource('model');
-      const model = options.model
+      let model = options.model
         ?? (!fromProfile && modelSource === undefined
           ? (workflowModel ?? (options.fallback ? undefined : runDefaults.model))
           : undefined);
+
+      // Cost tiers (cheap|default|best|ultra) resolve against a harness's own model
+      // catalog. A custom harness's model comes from its endpoint, not the host
+      // harness, so a tier here would forward an incompatible host-harness model to a
+      // different API. Discard it loudly and let the custom harness's own model stand.
+      if (fromProfile && model && isTierToken(model)) {
+        process.stderr.write(chalk.yellow(
+          `[agents] --model ${model}: cost tiers don't apply to custom harness '${rawAgent}' ` +
+          `(its model comes from the endpoint) — ignoring the tier, using the custom harness's configured model\n`,
+        ));
+        model = undefined;
+      }
 
       const execOptions: ExecOptions = {
         agent,

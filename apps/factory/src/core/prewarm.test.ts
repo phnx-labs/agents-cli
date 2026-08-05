@@ -11,6 +11,8 @@ import {
   buildResumeCommand,
   buildVersionedResumeCommand,
   supportsPrewarming,
+  exitSequenceFor,
+  DEFAULT_EXIT_SEQUENCE,
   PrewarmedSession,
 } from './prewarm';
 
@@ -340,6 +342,24 @@ describe('supportsPrewarming', () => {
 
   test('returns false for unsupported agents', () => {
     expect(supportsPrewarming('random')).toBe(false);
+  });
+});
+
+describe('exitSequenceFor', () => {
+  test('prewarm agents use their tuned exit sequence', () => {
+    // Claude needs a leading Esc; the other four use Ctrl+C twice.
+    expect(exitSequenceFor('claude')).toEqual(['\x1b', '\x03', '\x03']);
+    expect(exitSequenceFor('codex')).toEqual(['\x03', '\x03']);
+    expect(exitSequenceFor('opencode')).toEqual(['\x03', '\x03']);
+  });
+
+  test('non-prewarm harnesses fall back to Ctrl+C twice (#1747)', () => {
+    // grok/kimi/droid/antigravity have no PREWARM_CONFIGS entry but must still
+    // be reload-able; the generic exit is the default.
+    for (const agent of ['grok', 'kimi', 'droid', 'antigravity']) {
+      expect(exitSequenceFor(agent)).toEqual([...DEFAULT_EXIT_SEQUENCE]);
+    }
+    expect(DEFAULT_EXIT_SEQUENCE).toEqual(['\x03', '\x03']);
   });
 });
 

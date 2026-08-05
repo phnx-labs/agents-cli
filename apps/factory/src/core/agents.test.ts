@@ -5,7 +5,7 @@ import {
   getBuiltInByPrefix,
   getBuiltInDefByTitle,
   pickLatestVersion,
-  STRATEGY_LAUNCH_AGENTS,
+  isAgentRunner,
   usesManagedAgentLaunch,
   modeFlagForAgent,
   buildAgentLaunchCommand,
@@ -309,26 +309,51 @@ describe('planTextToSteps', () => {
   });
 });
 
-describe('STRATEGY_LAUNCH_AGENTS', () => {
-  test('covers every auto-host harness with account/version health', () => {
-    expect([...STRATEGY_LAUNCH_AGENTS]).toEqual([
-      'claude', 'codex', 'gemini', 'opencode', 'cursor', 'antigravity', 'grok', 'kimi',
-    ]);
+// The launch contract (apps/factory/AGENTS.md § "Launch contract"): every agent
+// runner launches through `agents run <agent> --interactive --strategy balanced
+// --mode auto`, on local / auto-host / picked-host alike. Shell is the sole
+// non-runner. These tests pin that invariant — there is no per-harness allowlist.
+describe('launch contract — every runner is balanced', () => {
+  // Every built-in that is an agent runner (i.e. not the Shell terminal).
+  const RUNNERS = BUILT_IN_AGENTS.map(a => a.key).filter(k => k !== 'shell');
+
+  test('isAgentRunner is true for every runner and false only for shell', () => {
+    for (const key of RUNNERS) expect(isAgentRunner(key)).toBe(true);
+    expect(isAgentRunner('shell')).toBe(false);
+    // Includes the harnesses that used to launch as raw binaries locally.
+    expect(isAgentRunner('grok')).toBe(true);
+    expect(isAgentRunner('kimi')).toBe(true);
+    expect(isAgentRunner('droid')).toBe(true);
   });
 
-  test('every strategy-launch agent is a known built-in', () => {
-    for (const key of STRATEGY_LAUNCH_AGENTS) {
-      expect(getBuiltInByKey(key)).toBeDefined();
-    }
+  test('usesManagedAgentLaunch routes every runner through agents run, never shell', () => {
+    for (const key of RUNNERS) expect(usesManagedAgentLaunch(key)).toBe(true);
+    expect(usesManagedAgentLaunch('shell')).toBe(false);
+    // A host target does not make shell an `agents run` agent (it has none).
+    expect(usesManagedAgentLaunch('shell', 'yosemite-s1')).toBe(false);
   });
 
-  test('Grok and Kimi stay managed when a picked remote source comes back local', () => {
-    for (const agent of ['grok', 'kimi']) {
-      expect(usesManagedAgentLaunch(agent)).toBe(true);
+  test('every runner × {local, auto, pick-host} emits --strategy balanced --mode auto', () => {
+    for (const key of RUNNERS) {
+      // New X — local
       expect(buildAgentLaunchCommand(
-        agent, null, undefined, undefined, undefined, 'balanced', undefined, { local: true },
-      )).toBe(`agents run ${agent} --interactive --strategy balanced --mode auto`);
+        key, null, undefined, undefined, undefined, 'balanced', undefined, { local: true },
+      )).toBe(`agents run ${key} --interactive --strategy balanced --mode auto`);
+      // New X (Auto) — CLI auto-picks the host via --device auto
+      expect(buildAgentLaunchCommand(
+        key, null, undefined, undefined, undefined, 'balanced', undefined, {},
+      )).toBe(`agents run ${key} --interactive --device auto --strategy balanced --mode auto`);
+      // New X (Pick Host) — explicit device
+      expect(buildAgentLaunchCommand(
+        key, null, undefined, undefined, undefined, 'balanced', undefined, { host: 'yosemite-s1' },
+      )).toBe(`agents run ${key} --interactive --host 'yosemite-s1' --strategy balanced --mode auto`);
     }
+  });
+
+  test('a pinned @version is the one launch that omits --strategy (CLI ignores it against a pin)', () => {
+    expect(buildAgentLaunchCommand(
+      'claude', null, undefined, undefined, '1.2.3', 'balanced', undefined, { local: true },
+    )).toBe('agents run claude@1.2.3 --interactive --mode auto');
   });
 });
 

@@ -17,21 +17,63 @@
 `agents hosts` lets you run any agent (`claude`, `codex`, `droid`, …) on any of
 *your* machines — a Mac mini, a Windows mini, a couple of DGX Sparks — addressed
 by name from a small local registry, over plain SSH, with no central service to
-run or pay for:
+run or pay for.
+
+**Placement** (where the body runs) is one model shared with lease, cloud, and
+routines — see [00-concepts.md § Placement](00-concepts.md#placement). On
+`agents run`, prefer `--where`; the older flags remain aliases:
 
 ```
-agents run claude "fix the auth bug"   --host mac-mini   # headless: prompt given
-agents run codex  "port this to rust"  --host spark-0    # headless: prompt given
-agents run droid  "triage the inbox"   --host win-mini    # headless: prompt given
-agents run claude                      --host mac-mini   # interactive: TTY forwarded
-agents run claude "…"                  --device auto     # affinity-pick host from 14d usage
-agents run claude "…"                  --host auto       # same (host is the special value auto)
+agents run claude "fix the auth bug"   --where device:mac-mini   # = --host mac-mini
+agents run claude "…"                  --where auto              # = --device auto
+agents run claude "fix CI"            --where lease --mode edit # = --lease
+agents run claude "fix the auth bug"   --host mac-mini           # still works
+agents run codex  "port this to rust"  --host spark-0
+agents run droid  "triage the inbox"   --host win-mini
+agents run claude                      --host mac-mini            # interactive: TTY forwarded
+agents run claude "…"                  --device auto
+agents run claude "…"                  --host auto                # same (host value auto)
 ```
 
 Pass `auto` as the `--host` / `--device` value to pick a host from 14-day session
 affinity (weighted by launch counts on `sessions.db` `machine`; most-used online
 device has highest probability). Harness stays the agent you typed — never
 auto-picked. Affinity failure degrades to local rather than aborting the run.
+
+### `agents run auto` — all three routing layers
+
+`auto` as the AGENT name (`agents run auto "…"`, distinct from `--host auto`)
+composes the full dispatch stack:
+
+1. **Host** — with no `--host`/`--device` flag, the affinity pick above runs
+   (launches^1.3 weighted sample among online devices). A remote pick dispatches
+   `agents run auto …` to that host over the same SSH path, and the harness +
+   account layers resolve THERE (usage is per-machine); the dispatcher marks the
+   host layer resolved (`AGENTS_RUN_AUTO_HOST_RESOLVED=1`) so the remote never
+   re-runs affinity and chain-hops. `--host <name>` pins this layer.
+2. **Harness** — `pickHarnessWeighted` (lib/rotate.ts): installed harnesses with
+   ≥1 healthy account, weighted by best-account headroom
+   (`100 − min routingUsed%`), sampled with the same `weightedRandomByCapacity`
+   the account layer uses. A harness whose accounts are all rate-limited,
+   signed out, or server-revoked (the live auth-health probe saw a 401/403) is
+   excluded outright. Naming a concrete harness (`run claude`) pins this layer.
+3. **Account** — `pickBalancedCandidate` within the chosen harness (or the
+   `--strategy` you passed). Eligibility excludes an account that is
+   rate-limited, out of credits, signed out, or `revoked` (a token the daemon's
+   live auth-health probe saw rejected — so rotation never routes into a login
+   that would fail at spawn). Fail-open: a missing probe or any non-revoked
+   verdict never blocks; a cached `revoked` keeps gating (the conservative choice
+   for a security signal) until the daemon's next probe clears it.
+
+Every layer fails loud when it finds nothing: zero healthy accounts on any
+harness exits nonzero naming each harness's exclusion reason and the earliest
+window reset; zero healthy accounts within the picked harness exits nonzero
+with `agents: no healthy <agent> account under strategy '<strategy>' — excluded:
+…; earliest window resets <iso-time>. Use --strategy pinned to force the
+default.` (the Factory watchdog tail-detects this text for rotate cooldowns).
+`--session-id` keeps its claude-only semantics — honored when auto picks
+claude, ignored with a stderr note otherwise.
+
 
 Pass `all` as the `--host` / `--device` value to fan any fleet-aware command out
 across every registered device. The passthrough runs `agents <cmd> --json` on each
@@ -261,6 +303,15 @@ agents run <agent> ["<task>"] --host <host>
 > exit 0) or a real agent exit (any non-255 code) is left alone, and `--raw`/no-tmux
 > runs are not retried (they don't survive a drop). If every attempt fails the CLI
 > prints the manual `agents sessions focus <id>` to reconnect once the link is back.
+>
+> The remote `agents sessions focus --local --attach-only` invocation the reattach
+> drives is wrapped so that whatever exit code it decides on, a 255 is remapped to
+> 254 before this process sees it — so a remote-side path that happened to exit
+> 255 for its own reasons would never be mistaken for the link dropping again.
+> This closes a channel-level flaw (any future remote-side 255 producer would
+> have been indistinguishable from a real drop) rather than a confirmed live
+> bug; a genuinely recurring *local* ssh failure can still refill the retry
+> budget on every attempt by design (that part is unchanged).
 >
 > Pass `--name <slug>` at dispatch to give the run a durable handle instead of an
 > opaque id: `agents hosts ps` shows it under a **NAME** column, and

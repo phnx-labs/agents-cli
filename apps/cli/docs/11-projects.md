@@ -18,8 +18,25 @@ noise; what matters is the **project**. This subsystem fills both gaps.
 ## The definition — `~/.agents/projects/<name>.yaml`
 
 One hand-editable YAML file per project, beside `routines/` and `monitors/` in the
-user repo, so it syncs across machines via `agents push/pull`. Paths are stored
-home-relative (`~/…`) so a definition re-roots on any machine.
+user repo. Paths are stored home-relative (`~/…`) so a definition re-roots on any
+machine.
+
+> **Commit them, or lose them.** Sitting in the user repo makes a definition
+> *syncable*, not synced. `agents projects add` writes the file; nothing commits it.
+> Until you run `agents repo push user`, `projects/` is an **untracked** directory, and
+> any reconcile that cleans the working tree deletes it — this cost one machine its four
+> definitions twice in a day. The only trace afterwards is a
+> `chore(local): save …-sync drift` commit that is unreachable from `HEAD`, so it is
+> recoverable until git collects it and not after. Recover with:
+>
+> ```bash
+> cd ~/.agents
+> git log --all --oneline --diff-filter=A -- 'projects/*'   # find the drift commit
+> git show <sha>:projects/<name>.yaml > projects/<name>.yaml
+> ```
+>
+> (`agents push` was removed; the command is `agents repo push <alias>`. Note that it
+> stages with `git add -A`, so check `git status` for unrelated drift first.)
 
 ```yaml
 name: rush                      # stable id == filename; what --project takes
@@ -29,6 +46,9 @@ defaultPath: ~/src/github.com/phnx-labs/rush/apps/web   # where an agent's cwd l
 repo: phnx-labs/rush            # primary GitHub slug (PR / merge rollup)
 repos:                          # additional repos, each with an optional monorepo subpath
   - slug: phnx-labs/rush-infra
+goals:                          # the outcomes this project serves (OKR-shaped)
+  - objective: "Ship Rush 2.0"
+    measure: "all tiers migrated"
 contexts:                       # described starting points — an agent reads `purpose`
   - path: apps/web
     purpose: "user-facing Next.js app; funnel + growth surfaces"
@@ -49,6 +69,7 @@ linear:
 | `defaultPath` | Where an agent's cwd lands (a monorepo subdir). Defaults to `root`. |
 | `repo` / `repos[]` | GitHub slug(s), each with an optional `subpath`, for the PR/merge rollup. `repos[].path` (home-relative) names that repo's local checkout and opts it into workspace probing (`status --fleet`). |
 | `contexts[]` | `{path, purpose}` described starting points — indexed anchors for agents. |
+| `goals[]` | `{objective, measure}` the OKR-shaped outcomes a project serves — a project may have several. The objective is the "why"; `measure` is the optional key result. Milestones (pulled from Linear) are the dated checkpoints toward them. |
 | `integrations[]` | `{kind, url, label}` external context sources. |
 | `linear` | `{projectId, url}` — reuses the existing Linear path. |
 
@@ -68,29 +89,46 @@ resolution is additive and safe; users without any definitions see zero change.
 ## One name everywhere — activity, feed, sessions
 
 Definitions also rename the fleet's activity. `resolveProjectNameForCwd`
-(`lib/projects.ts`) is the single project resolver shared by the `agents activity`
-timeline (buckets and row chips), `agents feed post` (the stamped project), and the
+(`lib/projects.ts`) is the single project resolver shared by `agents feed`
+(buckets and row chips), `agents feed post` (the stamped project), and the
 `agents sessions` overview: a cwd inside a defined project's root reads as the
 project's **name** — a multi-repo project is one bucket, not one per repo — and
 anything else falls back to the repository-level key (`lib/project-key.ts`). Each
 machine resolves its own cwds against its own (synced) definitions before events
-cross the wire. `agents activity --project <name>` narrows the stream to one
-project, exact-matched on this label.
+cross the wire. `agents feed --project <name>` narrows the stream to one project.
+
+## `status` and `view` are one body
+
+`status`, `view`, and `show` are aliases of a single implementation (`runProjectCard`). There
+is no second renderer to drift.
+
+- **Unnamed** (`agents projects status`) — the multi-project rollup: next milestone only,
+  scannable across every defined project.
+- **Named** (`agents projects status rush`, `view rush`, `show rush`) — the same card for one
+  project, with **every** milestone and the stored definition underneath (each repo with its
+  subpath and checkout, each context with its purpose, each integration with its URL, the
+  Linear link, the docs, and the YAML path). `--fleet` is available on both forms.
+
+Gathering still goes through `enrichProjectsForRender` so a signal added for the card appears
+whether you typed `status` or `view`.
 
 ## The progress card — `agents projects status`
 
 The headline. It matches every live session to a project **by cwd** (longest root
-wins) and rolls up the signals already on disk. The live-agent rollup is over this
-machine's active sessions (the same set `agents sessions --active` shows, matched by
-local-home cwd); the **merged-PR count is repo-global** (via `gh`). A fleet-wide live
-rollup — SSH fan-out plus home-relative cwd matching so a session recorded on a
-different-home machine still matches — is a deferred follow-up (see below):
+wins) and rolls up the signals already on disk. The live-agent rollup defaults to this machine's active sessions (the same set
+`agents sessions --active` shows, matched by local-home cwd); the **merged-PR
+count is repo-global** (via `gh`). With `--fleet`, the live line also includes
+sessions fanned out over SSH — but cwd matching is still against the **local**
+home layout, so a peer session whose path uses a different home root may not
+attribute. Full home-relative matching across homes remains deferred (see below):
 
 ```
 rush  ·  23 live
   live     14 running · 6 idle · 3 need-input     # LIVE sessions by lifecycle state
   dead     4 finished or lost (3 crashed, 1 closed)
-  agents   claude · running · RUSH-2107 @zion  ·  codex · idle @mac-mini  ·  +21 more
+  agents   @zion        claude · running · RUSH-2107  ·  claude · running ×8
+           @mac-mini    codex · idle  ·  claude · idle ×2
+           @yosemite-s0 claude · running ×5  ·  +6 more
   ships    4 merged (7d) · 2 open PRs · 3 worktrees · v1.20.91  # gh counts + latest release tag
   linear   12/30 done · 5 in progress           # Linear issue counts (needs linear.projectId)
   next     Beta cut  ·  3/8  ·  due in 6 days     # the next unfinished Linear milestone
@@ -103,9 +141,9 @@ rush  ·  23 live
 
 - **`live`, `agents`, `plan`, open PRs, `tickets`, `worktrees`** come straight from the
   active session list (`rollupSessionsByProject`) — no network. The `agents` line
-  shows WHICH harness is on the project (one cell per session:
-  `agent · status · TICKET @host`), sorted running-first, capped at 6 with a
-  `+N more` tail. Under `--fleet` the remote sessions carry their peer's hostname.
+  groups live agents by host (`@zion  claude · running ×9  ·  …`) so the same
+  harness on two machines is not collapsed into one cell. Within a host, cells
+  collapse identical state (`×N`), sorted running-first, capped with `+N more`. Under `--fleet` the remote sessions carry their peer's hostname.
 - **`ships` merged-count** is a best-effort `gh pr list` on the primary repo
   (`--no-remote` skips it; a missing `gh`/auth degrades to 0). It counts up to the
   100 most recent merges within the window. The trailing tag is the **latest release
@@ -174,19 +212,32 @@ rush  ·  3 agents
   present, branch, upstream, ahead, behind, dirty, lastCommit, error}]`.
 - Default is off — `--fleet` is the opt-in because it dials the fleet.
 
+## Warnings footer
+
+Anything that needs attention lands at the **bottom** of the card, not mid-stream:
+
+| Mark | Severity | Examples |
+| --- | --- | --- |
+| 🔴 | critical | missing checkout, ≥10 commits behind, repo slug mismatch, large crash pile |
+| ⚠️ | continue | dirty tree, small behind, schedule not measurable |
+
+A local workspace probe always feeds this footer (cheap, no SSH). The full per-host
+`fleet` table still requires `--fleet`.
+
+
 ## Command surface
 
 | Command | Does |
 | --- | --- |
 | `agents projects list [--json]` | All projects: root, repo, live agent count. |
-| `agents projects add <name>` | Scaffold `<name>.yaml`; infers `root` + origin slug from the current repo. Flags: `--root`, `--path`, `--repo`, `--context path:purpose`, `--linear`. |
-| `agents projects view <name> [--json] [--no-remote]` (alias `show`) | Full definition + resolved paths + contexts + links + **every** Linear milestone with dates and progress. |
+| `agents projects add <name>` | Scaffold `<name>.yaml`; infers `root` + origin slug from the current repo. Flags: `--root`, `--path`, `--repo`, `--context path:purpose`, `--goal objective:measure`, `--linear`. |
+| `agents projects view <name>` / `show` | Alias of `status <name>`: full card, every milestone, stored definition. |
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
-| `agents projects status [name] [--json] [--window N] [--no-remote] [--fleet]` | The progress card (all projects, or one). `--fleet` adds per-device workspace drift over SSH. |
+| `agents projects status [name] [--json] [--window N] [--no-remote] [--fleet]` (aliases `view`, `show`) | Progress card for every project, or one named project. Named form also prints every milestone and the stored definition. `--fleet` adds per-device workspace drift over SSH. |
 | `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. |
 | `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--linear-first-factory-gated). |
 | `agents projects import --from-factory [--min-confidence low\|medium\|high] [--all]` | Absorb `~/.agents/factory/projects.json`. Imports only `high`-confidence rows by default. |
-| `agents projects set <name> [--repo\|--root\|--path\|--description]` | Change one field, preserving every other. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
+| `agents projects set <name> [--repo\|--root\|--path\|--description\|--goal objective:measure]` | Change one field, preserving every other. `--goal` (repeatable) replaces the goals list. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
 | `agents projects rm <name>` | Delete the definition (never touches the repo). |
 
 `agents run --project <name>` is unchanged in spelling — it just resolves richer
@@ -212,8 +263,8 @@ with nobody looking. A project with no exact local match still imports, carrying
 `projects set` or by editing the YAML.
 
 Re-importing is safe. An existing def is preserved field-for-field and only
-`linear` is overwritten, so a hand-set `description`, `contexts`, or `integrations`
-survives. A def that already carries `root`/`repo` is skipped unless `--force`,
+`linear` is overwritten, so a hand-set `description`, `goals`, `contexts`, or
+`integrations` survives. A def that already carries `root`/`repo` is skipped unless `--force`,
 so a re-import never re-points a project you have already bound by hand.
 
 **`--from-factory` is a guess, so it is gated.** Factory's registry is
@@ -328,6 +379,12 @@ about. `orphaned` counts as **live**: `lib/session/active.ts` defines it as "ali
 client is attached" (the agent outlived its window and is still working), and the repo's own
 dead rule (`commands/sessions.ts`) is `closed` and `crashed` only.
 
+The `agents` roster below the headline is filtered the same way. It used to list every matched
+session, so a card headed `23 live` went on to print `claude · crashed ×25` — the corpses the
+`dead` row already accounts for, shown a second time and contradicting the number above them.
+`isDeadStatus` is the single predicate behind both, and a test pins them to agree across every
+`ActiveStatus` so they cannot drift apart.
+
 **`planPct` measured whichever agent last wrote a todo list.** It summed each matched session's
 most recent checklist snapshot, so:
 
@@ -354,3 +411,81 @@ printing a column of silent `0%`s:
     !          no issues are assigned to any milestone — progress against them
                cannot be measured
 ```
+
+## `focus` — what was actually worked on
+
+The card could say how many agents ran and how many PRs merged, but not *what was worked on*.
+That answer is already in the checkout: every commit names the files it touched. `focus` ranks
+the directories the window's commits landed in, three levels deep so a monorepo reads as
+`apps/cli/src` rather than `apps`:
+
+```
+focus    apps/cli/src 2.3k  ·  apps/cli/docs 302  file-touches (7d)  # git log --name-only buckets
+```
+
+Local `git log --name-only`, no GitHub API, no credential, no rate-limit budget — measured at
+**0.23s** over a 897-commit week, which is why it runs unconditionally rather than behind a flag.
+It reads the local ref and never fetches: a status command must not mutate the repo it describes,
+so the answer is as fresh as your last fetch.
+
+**Changelog fragments and lockfiles are excluded from the ranking, not just the display.** This
+repo files one fragment per PR, so `.changelog` otherwise ranks second by raw file-touches —
+presenting PR count as an engineering focus area.
+
+## `schedule` — only what the dates prove
+
+```
+schedule 3 milestones, no issues filed against any — progress is not measurable
+schedule Beta cut overdue by 6 days
+schedule GA due in 9 days
+```
+
+| Verdict | Fires when |
+| --- | --- |
+| `declared` | a human posted a Linear project health update — relayed and attributed (`per Linear: atRisk`) |
+| `overdue` | a milestone's `targetDate` has passed and it is unfinished |
+| `untracked` | milestones exist but no issue is filed against any of them |
+| `due-soon` | the next dated milestone lands within 14 days |
+| `scheduled` | dated milestones ahead, none due soon, work is filed |
+| `no-dates` | milestones exist, none carries a date |
+| `none` | the project declares no milestones — the line is omitted entirely |
+
+**There is deliberately no `on-track` or `at-risk`.** Producing one requires either project
+start+target dates to interpolate an expected-progress line, or a scope-history series to
+extrapolate a finish date. Probed against a live workspace, every one of those inputs is empty:
+
+```
+health: null       startDate: null        targetDate: null
+scopeHistory: []   completedScopeHistory: []   inProgressScopeHistory: []
+```
+
+So the chip would be invented. A blank is bad; a confident wrong answer that gets trusted is
+worse, and it is unfalsifiable from the card. The union has no such member, so it cannot be
+produced by accident later either.
+
+## Monorepo subprojects: which project owns a session
+
+Attribution (`projectNameForCwd`) matches a session's cwd against the paths each project
+claims, longest match winning so a nested project beats its parent. What a project *claims*
+is the part that needed fixing:
+
+- `root` says where the **checkout** is.
+- `defaultPath`, when nested under `root`, says which **work** is this project's, and takes
+  precedence over `root`.
+- a narrowed `root` still claims the rest of its checkout, but only as a fallback: any other
+  project claiming that path outright wins. So the umbrella takes `apps/web` when one exists,
+  while a lone project keeps attributing work across its own repo.
+- each `repos[].path`, and `repos[].path` + `subpath`, anchor as well.
+
+Without this, two definitions sharing one monorepo checkout — an umbrella `rush` at
+`~/src/rush` and a subproject `rush-cli` at `~/src/rush` with `defaultPath ~/src/rush/apps/cli`
+— both anchored at `~/src/rush`. Longest-match had nothing to separate them, so a session in
+`rush/apps/cli` was attributed to whichever definition was listed first, and the answer
+changed with definition order.
+
+A subproject scoped to `apps/cli` deliberately does **not** own `apps/web`; that work falls to
+the umbrella. Set the scope with `agents projects add <name> --root <monorepo> --path <subdir>`.
+
+When the subproject is the *only* definition on that checkout there is no umbrella to fall to,
+so its `root` still covers `apps/web` and the repo root. `--path` chooses where an agent
+starts, and it must not silently shrink which work counts as the project's.

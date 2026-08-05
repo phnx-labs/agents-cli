@@ -194,6 +194,17 @@ export function removeHeartbeat(): void {
   try { fs.unlinkSync(getHeartbeatPath()); } catch { /* already removed */ }
 }
 
+/**
+ * A heartbeat is "fresh" when its last tick falls inside the wedge window — the
+ * same threshold isDaemonWedged() uses to decide a still-present daemon has gone
+ * unresponsive. A fresh heartbeat whose pid is alive is proof of a live, ticking
+ * daemon even when the pid file has been lost.
+ */
+function isHeartbeatFresh(hb: DaemonHeartbeat): boolean {
+  const elapsed = Date.now() - Date.parse(hb.lastTick);
+  return elapsed <= WEDGE_THRESHOLD_TICKS * MONITOR_TICK_MS;
+}
+
 export function isDaemonWedged(): boolean {
   const pid = readDaemonPid();
   if (!pid) return false;
@@ -201,8 +212,7 @@ export function isDaemonWedged(): boolean {
   const hb = readHeartbeat();
   if (!hb) return false;
   if (hb.pid !== pid) return false;
-  const elapsed = Date.now() - Date.parse(hb.lastTick);
-  return elapsed > WEDGE_THRESHOLD_TICKS * MONITOR_TICK_MS;
+  return !isHeartbeatFresh(hb);
 }
 
 /** How long stopDaemon waits for a SIGTERMed daemon to exit before escalating. */
@@ -210,13 +220,41 @@ const STOP_GRACE_MS = 5000;
 /** How long it waits after the hard tree-kill before giving up. */
 const STOP_KILL_GRACE_MS = 2000;
 
-/** Check if the daemon process is alive by sending signal 0 to the stored PID. */
-export function isDaemonRunning(): boolean {
+/**
+ * Resolve the PID of the live daemon, tolerant of a pid-file/heartbeat desync.
+ *
+ * The daemon writes the pid file once (on claim/start) but rewrites the
+ * heartbeat every tick. If the pid file is lost while the daemon keeps ticking
+ * — e.g. an earlier isDaemonRunning() found a stale/reused/dead pid and cleared
+ * the file, or it was removed out from under a live daemon — the pid file reads
+ * empty even though a daemon is genuinely alive and firing jobs. Reading only
+ * the pid file then reports "stopped" for a running scheduler, and (worse) lets
+ * claimDaemonInstance() start a SECOND daemon that double-fires every routine.
+ *
+ * So: trust the pid file when its pid is alive; otherwise trust a FRESH
+ * heartbeat whose pid is alive, and re-adopt the pid file so the desync heals.
+ * Returns null only when neither points at a live process (clearing a stale pid
+ * file on the way out).
+ */
+function resolveLiveDaemonPid(): number | null {
   const pid = readDaemonPid();
-  if (!pid) return false;
-  if (isAlive(pid)) return true;
-  removeDaemonPid();
-  return false;
+  if (pid !== null && isAlive(pid)) return pid;
+  const hb = readHeartbeat();
+  if (hb && isAlive(hb.pid) && isHeartbeatFresh(hb)) {
+    if (pid !== hb.pid) writeDaemonPid(hb.pid); // heal the pid-file/heartbeat desync
+    return hb.pid;
+  }
+  if (pid !== null) removeDaemonPid();
+  return null;
+}
+
+/**
+ * Check whether a daemon is alive — via the pid file, or a fresh heartbeat when
+ * the pid file has been lost (see resolveLiveDaemonPid). Heals the pid file as a
+ * side effect so a subsequent read is consistent.
+ */
+export function isDaemonRunning(): boolean {
+  return resolveLiveDaemonPid() !== null;
 }
 
 /**
@@ -236,15 +274,26 @@ export function isDaemonRunning(): boolean {
  */
 export function claimDaemonInstance(): boolean {
   const release = acquireStartLock();
+  // acquireStartLock() returns null only when another __daemon-run currently
+  // holds the O_EXCL lock — a dead holder's lock is reclaimed and retried inside
+  // acquireStartLock, so null means a *live* claimer is mid-claim. Bail rather
+  // than run the read-decide-write unlocked: otherwise two first-start processes
+  // could each see no pid file (before either writes one) and both claim,
+  // running the concurrent JobScheduler this guard exists to prevent.
+  if (!release) return false;
   try {
-    const existing = readDaemonPid();
-    if (existing !== null && existing !== process.pid && isAlive(existing)) {
-      return false; // another live daemon already owns the pid file
+    // resolveLiveDaemonPid() also consults a fresh heartbeat, so a live daemon
+    // whose pid file was lost still blocks a second claim — otherwise a missing
+    // pid file would let this instance start a concurrent JobScheduler and
+    // double-fire every routine.
+    const existing = resolveLiveDaemonPid();
+    if (existing !== null && existing !== process.pid) {
+      return false; // another live daemon already owns the instance
     }
     writeDaemonPid(process.pid);
     return true;
   } finally {
-    release?.();
+    release();
   }
 }
 
@@ -827,14 +876,14 @@ export async function runDaemon(): Promise<void> {
   const fleetCacheInterval = setInterval(() => { void runFleetCacheWarm(); }, 3 * 60_000);
   const fleetCacheKickoff = setTimeout(() => { void runFleetCacheWarm(); }, 60_000);
 
-  // Adaptive usage refresh: keep the usage cache the `agents run` router reads
+  // Usage refresh: keep the usage cache the `agents run` router reads
   // (RUSH-2061, readOnly hot path) fresh, WITHOUT the hot path ever fetching.
-  // This host is the sole writer for its own local accounts. The tick wakes at
-  // the 90s floor, but per-account cadence gates the actual live fetches: an
-  // account racing toward its 5h cap is polled sooner (down to 90s), an idle one
-  // rarely (up to 15min), capped at ~6 provider calls/account/hour and skipped
-  // entirely while its provider is under a 429 backoff. Overlap-guarded like the
-  // probes above; a box signed into no networked-usage account is a clean no-op.
+  // This host is the sole writer for its own local accounts. The tick wakes
+  // every 60s (USAGE_REFRESH_TICK_MS) to consider due accounts; each account
+  // is scheduled at a fixed 5-minute cadence (REFRESH_INTERVAL_MS), capped at
+  // ~12 provider calls/account/hour, skipped under 429 backoff, and fetched
+  // with fileOnly credentials so a background tick never pops macOS Touch ID.
+  // Overlap-guarded: a slow pass cannot stack concurrent refresh loops.
   let refreshingUsage = false;
   const runUsageRefreshTick = async () => {
     if (refreshingUsage) return;
@@ -848,16 +897,20 @@ export async function runDaemon(): Promise<void> {
         writeUsageCache: writeClaudeUsageCache,
         backoffUntil: usageRateLimitedUntil,
       });
-      if (r.refreshed > 0 || r.failed > 0) {
-        log('INFO', `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped`);
-      }
+      // Always log a compact summary so "is refresh working?" is greppable even
+      // when every account was not-due (proves the tick ran).
+      log(
+        'INFO',
+        `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped`,
+      );
     } catch (err) {
       log('ERROR', `usage refresh failed: ${(err as Error).message}`);
     } finally {
       refreshingUsage = false;
     }
   };
-  const usageRefreshInterval = setInterval(() => { void runUsageRefreshTick(); }, 90_000);
+  // 60s wake matches USAGE_REFRESH_TICK_MS in usage-refresh.ts (keep in sync).
+  const usageRefreshInterval = setInterval(() => { void runUsageRefreshTick(); }, 60_000);
   const usageRefreshKickoff = setTimeout(() => { void runUsageRefreshTick(); }, 30_000);
 
   // RUSH-1817: the startup host decision above is one-shot. If a standalone

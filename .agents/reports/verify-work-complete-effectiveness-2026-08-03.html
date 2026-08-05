@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>verify-work-complete effectiveness analysis</title>
+<style>
+  :root{
+    --bg:#0a0a0a;--panel:#111312;--panel2:#161a18;--ink:#e7ece8;--dim:#929a93;
+    --line:#29322d;--accent:#a3e635;--amber:#f5c451;--red:#ff7373;--cyan:#5ad6c0;
+    --blue:#56a8ff;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f6;--panel:#fff;--panel2:#f1f4ef;--ink:#1a1c1a;--dim:#5c655c;
+    --line:#e0e5de;--accent:#4d7c0f;--amber:#a64b08;--red:#c92c2c;--cyan:#0e7490;--blue:#1d66b2;
+  }
+  :root[data-theme="light"] .fig{background:#0e120f;border-color:#29322d}
+  :root[data-theme="light"] .fig figcaption{color:#929a93}
+  :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1060px;margin:0 auto;padding:56px 28px 110px}
+  .themebtn{position:fixed;right:16px;top:16px;z-index:10;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--dim);padding:7px 13px;font:12px var(--mono);cursor:pointer}
+  .themebtn:hover{color:var(--accent);border-color:var(--accent)}
+  .hero{border-bottom:1px solid var(--line);padding-bottom:30px;margin-bottom:42px}
+  .kicker{font:12px var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+  h1{font-size:42px;line-height:1.08;letter-spacing:-.028em;margin:0 0 15px;max-width:900px}
+  h1 .accent{color:var(--accent)}
+  .sub{font-size:18px;line-height:1.55;color:var(--dim);max-width:78ch;margin:0}
+  .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}
+  .chip{font:11.5px var(--mono);color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:5px 11px;background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:500}
+  .toc{display:flex;gap:7px 20px;flex-wrap:wrap;margin-top:18px;font:13px var(--mono)}
+  .toc a{color:var(--dim);text-decoration:none}.toc a:hover{color:var(--accent)}
+  h2{font-size:24px;letter-spacing:-.015em;margin:54px 0 8px;scroll-margin-top:20px}
+  h2 .n{font:15px var(--mono);color:var(--accent);margin-right:10px}
+  h3{font-size:17px;margin:24px 0 7px}
+  p{margin:10px 0}.lead{color:var(--dim);max-width:82ch}
+  code{font:13px var(--mono);color:var(--cyan);background:var(--panel2);border:1px solid var(--line);padding:2px 6px;border-radius:5px}
+  a{color:var(--accent);text-decoration:none}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin:20px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:15px}
+  .stat,.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px}
+  .stat{padding:19px 18px;min-height:137px}
+  .stat .v{font:700 33px/1.1 var(--mono);color:var(--accent);letter-spacing:-.035em}
+  .stat.warn .v{color:var(--amber)}.stat.bad .v{color:var(--red)}.stat.info .v{color:var(--cyan)}
+  .stat .l{font:12px var(--mono);color:var(--dim);margin-top:10px;line-height:1.45}
+  .panel{padding:21px 23px;margin:17px 0}
+  .rename{display:flex;align-items:center;gap:17px;flex-wrap:wrap;padding:22px 24px;margin:20px 0;background:var(--panel);border:1px solid var(--line);border-radius:14px}
+  .rename .wrong{font:650 20px var(--mono);color:var(--dim);text-decoration:line-through;text-decoration-color:var(--red);text-decoration-thickness:2px}
+  .rename .arrow{font:20px var(--mono);color:var(--accent)}
+  .rename .right{font:700 22px var(--mono);color:var(--accent)}
+  .rename small{display:block;width:100%;color:var(--dim)}
+  .fig{background:#0e120f;border:1px solid #29322d;border-radius:14px;padding:25px 20px 18px;margin:22px 0;overflow:auto}
+  svg{display:block;max-width:100%;height:auto;margin:0 auto}
+  .fig figcaption{font:12px var(--mono);color:#929a93;text-align:center;margin-top:13px}.fig figcaption b{color:#e7ece8}
+  .legend{display:flex;justify-content:center;gap:18px;flex-wrap:wrap;color:#929a93;font:11.5px var(--mono);margin-top:7px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}.sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 10px 10px 0;padding:15px 18px;margin:18px 0}
+  .callout.warn{border-left-color:var(--amber)}.callout.bad{border-left-color:var(--red)}
+  .callout .lbl{display:block;color:var(--accent);font:11px var(--mono);letter-spacing:.11em;text-transform:uppercase;margin-bottom:5px}
+  .callout.warn .lbl{color:var(--amber)}.callout.bad .lbl{color:var(--red)}
+  table{width:100%;border-collapse:collapse;margin:17px 0;font-size:14.5px}
+  th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font:11.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;font-weight:500}
+  td.num{font-family:var(--mono);white-space:nowrap}
+  .tag{display:inline-flex;align-items:center;font:11px var(--mono);font-weight:650;padding:2px 8px;border-radius:6px}
+  .tag.good{color:var(--accent);background:rgba(163,230,53,.1);border:1px solid rgba(163,230,53,.28)}
+  .tag.mixed{color:var(--amber);background:rgba(245,196,81,.1);border:1px solid rgba(245,196,81,.28)}
+  .tag.bad{color:var(--red);background:rgba(255,115,115,.1);border:1px solid rgba(255,115,115,.28)}
+  .tag.new{color:var(--cyan);background:rgba(90,214,192,.1);border:1px solid rgba(90,214,192,.28)}
+  .steps{counter-reset:item;list-style:none;padding:0;margin:17px 0}
+  .steps li{counter-increment:item;position:relative;padding:14px 15px 14px 58px;margin:9px 0;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+  .steps li:before{content:counter(item);position:absolute;left:17px;top:14px;width:25px;height:25px;border-radius:7px;background:rgba(163,230,53,.11);border:1px solid rgba(163,230,53,.28);color:var(--accent);display:grid;place-items:center;font:12px var(--mono)}
+  .steps b{display:block;margin-bottom:2px}.steps span{color:var(--dim)}
+  .foot{margin-top:62px;padding-top:22px;border-top:1px solid var(--line);font:12px var(--mono);color:var(--dim)}
+  @media(max-width:860px){.grid4{grid-template-columns:1fr 1fr}h1{font-size:35px}.grid2{grid-template-columns:1fr}}
+  @media(max-width:520px){.grid4{grid-template-columns:1fr}.wrap{padding:46px 18px 90px}h1{font-size:31px}}
+</style>
+</head>
+<body>
+<button class="themebtn" id="tb" onclick="toggleTheme()">◐ light</button>
+<script>
+  const root=document.documentElement;
+  function setTheme(theme){root.setAttribute('data-theme',theme);document.getElementById('tb').textContent=theme==='light'?'◑ dark':'◐ light'}
+  const requestedTheme=new URLSearchParams(location.search).get('theme');
+  setTheme(requestedTheme==='light'||requestedTheme==='dark'?requestedTheme:(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark'));
+  function toggleTheme(){setTheme(root.getAttribute('data-theme')==='light'?'dark':'light')}
+</script>
+<main class="wrap">
+<header class="hero">
+  <p class="kicker">agents-cli · completion hooks · effectiveness analysis</p>
+  <h1>The hook gets work toward a terminal state.<br><span class="accent">Its repetition signal is not yet trustworthy.</span></h1>
+  <p class="sub">Across the six-day cohort, cited pull requests usually reached a terminal state and agents usually acted after a gate. But duplicate hook versions inflated the fire count, and the “third repeat” counter crosses genuine user turns. The shipped loop-breaker has not yet received a third-repeat exposure.</p>
+  <div class="meta">
+    <span class="chip"><b>1,594</b>&nbsp;non-trivial sessions in cohort</span>
+    <span class="chip"><b>85</b>&nbsp;pre-fix sessions with a gate</span>
+    <span class="chip"><b>122</b>&nbsp;unique cited PRs checked live</span>
+    <span class="chip">as of&nbsp;<b>2026-08-03 05:07 PT</b></span>
+  </div>
+  <div class="meta">
+    <span class="chip">harness&nbsp;<b>codex</b></span><span class="chip">agent&nbsp;<b>GPT-5</b></span><span class="chip">host&nbsp;<b>yosemite-s1</b></span><span class="chip">session&nbsp;<b>019fc75b</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#meaning">01 · terminology</a><a href="#score">02 · scorecard</a><a href="#signal">03 · signal defects</a><a href="#gates">04 · gates</a><a href="#new">05 · new fix</a><a href="#next">06 · now</a>
+  </nav>
+</header>
+
+<h2 id="meaning"><span class="n">01</span>“De-escalation” was the wrong word</h2>
+<p class="lead">I did not mean “lower the completion standard” or “let the agent give up.” I meant: stop issuing the same instruction once it is no longer adding information, then prompt a strategy change.</p>
+<div class="rename">
+  <span class="wrong">de-escalation</span><span class="arrow">→</span><span class="right">loop-breaker guidance</span>
+  <small>The proof bar stays fixed. The tactic changes: retry differently, inspect the live blocker, coordinate ownership, switch to another useful track, or escalate a genuinely human-only step.</small>
+</div>
+
+<figure class="fig">
+<svg viewBox="0 0 940 420" role="img" aria-label="Flowchart showing how completion guidance should change tactics while preserving the proof standard">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#a3e635"/></marker>
+    <marker id="arr2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8Z" fill="#5ad6c0"/></marker>
+  </defs>
+  <ellipse cx="110" cy="92" rx="82" ry="34" fill="#161a18" stroke="#5ad6c0" stroke-width="2"/>
+  <text x="110" y="87" fill="#e7ece8" font-family="var(--mono)" font-size="12" text-anchor="middle">agent tries</text><text x="110" y="104" fill="#5ad6c0" font-family="var(--mono)" font-size="12" text-anchor="middle">to stop</text>
+  <path d="M192 92H282" stroke="#a3e635" stroke-width="2" marker-end="url(#arr)"/>
+  <polygon points="360,42 438,92 360,142 282,92" fill="#181d1a" stroke="#f5c451" stroke-width="2"/>
+  <text x="360" y="87" fill="#e7ece8" font-family="var(--mono)" font-size="11.5" text-anchor="middle">proof gap</text><text x="360" y="104" fill="#f5c451" font-family="var(--mono)" font-size="11.5" text-anchor="middle">still real?</text>
+  <path d="M438 92H533" stroke="#a3e635" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="484" y="79" fill="#929a93" font-family="var(--mono)" font-size="10.5" text-anchor="middle">yes</text>
+  <rect x="533" y="53" width="178" height="78" rx="10" fill="#161a18" stroke="#a3e635" stroke-width="2"/>
+  <text x="622" y="79" fill="#a3e635" font-family="var(--mono)" font-size="12" text-anchor="middle">surface evidence</text><text x="622" y="99" fill="#e7ece8" font-family="var(--mono)" font-size="11" text-anchor="middle">suggest possible moves</text><text x="622" y="116" fill="#929a93" font-family="var(--mono)" font-size="10.5" text-anchor="middle">agent chooses the tactic</text>
+  <path d="M711 92H795" stroke="#a3e635" stroke-width="2" marker-end="url(#arr)"/>
+  <ellipse cx="855" cy="92" rx="60" ry="34" fill="#161a18" stroke="#a3e635" stroke-width="2"/>
+  <text x="855" y="87" fill="#e7ece8" font-family="var(--mono)" font-size="11.5" text-anchor="middle">act +</text><text x="855" y="104" fill="#a3e635" font-family="var(--mono)" font-size="11.5" text-anchor="middle">verify</text>
+  <path d="M360 142V214H186" stroke="#5ad6c0" stroke-width="2" marker-end="url(#arr2)"/>
+  <text x="374" y="176" fill="#929a93" font-family="var(--mono)" font-size="10.5">no</text>
+  <ellipse cx="112" cy="214" rx="74" ry="32" fill="#161a18" stroke="#5ad6c0" stroke-width="2"/>
+  <text x="112" y="211" fill="#e7ece8" font-family="var(--mono)" font-size="11.5" text-anchor="middle">allow stop</text><text x="112" y="227" fill="#5ad6c0" font-family="var(--mono)" font-size="10.5" text-anchor="middle">reset chain</text>
+  <path d="M855 126V214H764" stroke="#f5c451" stroke-width="2" marker-end="url(#arr)"/>
+  <polygon points="682,164 764,214 682,264 600,214" fill="#181d1a" stroke="#f5c451" stroke-width="2"/>
+  <text x="682" y="209" fill="#e7ece8" font-family="var(--mono)" font-size="11.5" text-anchor="middle">same goal</text><text x="682" y="226" fill="#f5c451" font-family="var(--mono)" font-size="11.5" text-anchor="middle">still blocked?</text>
+  <path d="M600 214H501" stroke="#a3e635" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="551" y="201" fill="#929a93" font-family="var(--mono)" font-size="10.5" text-anchor="middle">yes</text>
+  <rect x="291" y="174" width="210" height="80" rx="10" fill="#161a18" stroke="#ff7373" stroke-width="2"/>
+  <text x="396" y="200" fill="#ff7373" font-family="var(--mono)" font-size="12" text-anchor="middle">loop-breaker</text><text x="396" y="220" fill="#e7ece8" font-family="var(--mono)" font-size="11" text-anchor="middle">change strategy, not standard</text><text x="396" y="238" fill="#929a93" font-family="var(--mono)" font-size="10.5" text-anchor="middle">retry · unblock · coordinate · escalate</text>
+  <path d="M396 174V151H622V131" stroke="#ff7373" stroke-width="1.8" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+  <path d="M682 264V322H211" stroke="#5ad6c0" stroke-width="2" marker-end="url(#arr2)"/>
+  <text x="696" y="289" fill="#929a93" font-family="var(--mono)" font-size="10.5">no</text>
+  <ellipse cx="130" cy="322" rx="81" ry="33" fill="#161a18" stroke="#5ad6c0" stroke-width="2"/>
+  <text x="130" y="318" fill="#e7ece8" font-family="var(--mono)" font-size="11.5" text-anchor="middle">verified result</text><text x="130" y="335" fill="#5ad6c0" font-family="var(--mono)" font-size="10.5" text-anchor="middle">or live ownership</text>
+  <rect x="291" y="298" width="420" height="48" rx="8" fill="#121713" stroke="#29322d"/>
+  <text x="501" y="318" fill="#929a93" font-family="var(--mono)" font-size="10.5" text-anchor="middle">Hard invariant: the user-visible outcome still needs proof.</text><text x="501" y="335" fill="#a3e635" font-family="var(--mono)" font-size="10.5" text-anchor="middle">Only the recommended tactic adapts.</text>
+</svg>
+<div class="legend"><span><i class="sw" style="background:#a3e635"></i>completion action</span><span><i class="sw" style="background:#f5c451"></i>decision</span><span><i class="sw" style="background:#ff7373"></i>strategy shift</span><span><i class="sw" style="background:#5ad6c0"></i>terminal state</span></div>
+<figcaption><b>Desired control flow.</b> “Third” must mean a third unresolved attempt on the same goal, not the third matching string anywhere in the transcript.</figcaption>
+</figure>
+
+<h2 id="score"><span class="n">02</span>Effectiveness scorecard</h2>
+<div class="grid4">
+  <div class="stat"><div class="v">95.9%</div><div class="l">117 of 122 cited PRs are terminal now: 112 merged, 5 closed.</div></div>
+  <div class="stat info"><div class="v">79.9%</div><div class="l">167 of 209 repeat intervals contained a change, verification, or coordination action.</div></div>
+  <div class="stat warn"><div class="v">68.7%</div><div class="l">167 of 243 user-turn gate chains cleared after the first logical attempt.</div></div>
+  <div class="stat bad"><div class="v">62.9%</div><div class="l">22 of 35 chains that reached a third attempt continued to a fourth or later.</div></div>
+</div>
+<div class="callout">
+  <span class="lbl">verdict</span>
+  The hook is useful as a persistence backstop: work usually moved and the cited PRs usually terminated. Its efficiency falls as repetition rises, and this observational dataset cannot prove the hook caused the eventual merges.
+</div>
+<div class="grid2">
+  <div class="panel"><h3>What looks effective</h3><p><b>Agents usually act.</b> After deduplicating simultaneous hook copies, no repeated interval was a pure restatement. Four in five contained a change, verification, or coordination action.</p><p><b>Outcomes usually terminate.</b> Live GitHub checks found 112 merged, 5 deliberately closed, and 5 still open among 122 unique cited PRs.</p></div>
+  <div class="panel"><h3>What looks weak</h3><p><b>Open-PR guidance repeats.</b> Only 83 of 150 open-PR chains cleared after the first attempt. Of 33 reaching a third attempt, 21 continued.</p><p><b>Late repetitions add less.</b> First-attempt clearance was 68.7%; second-attempt clearance among remaining chains was 53.9%; third-attempt clearance was 37.1%.</p></div>
+</div>
+
+<h2 id="signal"><span class="n">03</span>The raw count hid two signal defects</h2>
+<div class="grid4">
+  <div class="stat bad"><div class="v">612</div><div class="l">raw hook-feedback records</div></div>
+  <div class="stat"><div class="v">455</div><div class="l">logical stop attempts after deduplication</div></div>
+  <div class="stat warn"><div class="v">157</div><div class="l">duplicate records emitted by paired Claude hook versions</div></div>
+  <div class="stat bad"><div class="v">52.8%</div><div class="l">149 of 282 simulated “third+” triggers were not third+ in the current user turn</div></div>
+</div>
+<table>
+  <thead><tr><th>Signal</th><th>What the transcript showed</th><th>Effect on interpretation</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag bad">duplicate</span></td><td>157 logical stops emitted two near-simultaneous feedback records from different Claude version homes, always within 4.6 seconds.</td><td>The old 612-fire count overstates logical interventions by 34.5% relative to the 455 actual attempts.</td></tr>
+    <tr><td><span class="tag mixed">session-wide</span></td><td><code>prior_fires</code> counts matching text across the full transcript. It does not reset when the user adds or changes work.</td><td>A later request can inherit “third repeat” treatment from earlier work.</td></tr>
+    <tr><td><span class="tag mixed">raw counter</span></td><td>Retrospective simulation found 282 attempts where the raw session-wide counter was at least three; 149 were not third+ in the current user-turn chain.</td><td>The loop-breaker can activate early or on the wrong task context.</td></tr>
+  </tbody>
+</table>
+<div class="callout bad">
+  <span class="lbl">new finding</span>
+  The previous report’s “loop depth” was partly real open-PR persistence, but it was also inflated by duplicate hook versions and by counting across later user requests. Those two effects must be removed before using fire count as an effectiveness metric.
+</div>
+
+<h2 id="gates"><span class="n">04</span>Effectiveness differs sharply by gate</h2>
+<p class="lead">A chain begins at a genuine user turn and ends when that user speaks again. Duplicate feedback emitted within five seconds is one logical attempt.</p>
+<table>
+  <thead><tr><th>Gate</th><th>Logical attempts</th><th>User-turn chains</th><th>Cleared after first</th><th>Continued after third</th><th>Reading</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag mixed">open PR</span></td><td class="num">346</td><td class="num">150</td><td class="num">83 / 150 · 55.3%</td><td class="num">21 / 33 · 63.6%</td><td>Useful backstop, but external review/CI state makes repeated generic instructions lose value.</td></tr>
+    <tr><td><span class="tag good">self-audit</span></td><td class="num">95</td><td class="num">82</td><td class="num">73 / 82 · 89.0%</td><td class="num">1 / 2</td><td>Usually clears once; third-attempt sample is too small to interpret.</td></tr>
+    <tr><td><span class="tag good">swarm</span></td><td class="num">9</td><td class="num">9</td><td class="num">9 / 9 · 100%</td><td class="num">n/a</td><td>No repeat observed; sample is small.</td></tr>
+    <tr><td><span class="tag good">delivery</span></td><td class="num">2</td><td class="num">2</td><td class="num">2 / 2 · 100%</td><td class="num">n/a</td><td>No repeat observed; sample is too small for a general claim.</td></tr>
+  </tbody>
+</table>
+<div class="callout warn"><span class="lbl">causal limit</span>There was no matched control group with the hook disabled. “The agent acted after the gate” and “the PR eventually merged” are associations, not proof that the gate caused either result.</div>
+
+<h2 id="new"><span class="n">05</span>The shipped loop-breaker has not been tested by real exposure yet</h2>
+<figure class="fig">
+<svg viewBox="0 0 920 170" role="img" aria-label="Timeline from the pre-fix cohort to merge and the small post-ship sample">
+  <line x1="80" y1="82" x2="840" y2="82" stroke="#29322d" stroke-width="4"/>
+  <circle cx="140" cy="82" r="12" fill="#f5c451"/><text x="140" y="48" fill="#f5c451" font-family="var(--mono)" font-size="12" text-anchor="middle">pre-fix cohort</text><text x="140" y="116" fill="#e7ece8" font-family="var(--mono)" font-size="11" text-anchor="middle">452 logical attempts</text><text x="140" y="133" fill="#929a93" font-family="var(--mono)" font-size="10.5" text-anchor="middle">85 sessions</text>
+  <line x1="450" y1="38" x2="450" y2="126" stroke="#a3e635" stroke-width="2"/>
+  <circle cx="450" cy="82" r="13" fill="#a3e635"/><text x="450" y="25" fill="#a3e635" font-family="var(--mono)" font-size="12" text-anchor="middle">PR #158 merged</text><text x="450" y="146" fill="#929a93" font-family="var(--mono)" font-size="10.5" text-anchor="middle">2026-08-03 03:26 PT</text>
+  <circle cx="775" cy="82" r="12" fill="#5ad6c0"/><text x="775" y="48" fill="#5ad6c0" font-family="var(--mono)" font-size="12" text-anchor="middle">post-ship sample</text><text x="775" y="116" fill="#e7ece8" font-family="var(--mono)" font-size="11" text-anchor="middle">3 logical attempts</text><text x="775" y="133" fill="#929a93" font-family="var(--mono)" font-size="10.5" text-anchor="middle">0 third-repeat exposures</text>
+</svg>
+<figcaption><b>Evidence boundary.</b> Three one-off fires across two sessions cannot establish whether the third-repeat guidance works.</figcaption>
+</figure>
+<div class="callout warn"><span class="lbl">current answer</span>The new behavior is <b>not yet measurable</b>. It has seen zero real third-repeat exposures since merge. Calling it effective or ineffective now would be invented.</div>
+
+<h2 id="next"><span class="n">06</span>What is expected to be accomplished now</h2>
+<ol class="steps">
+  <li><b>Fix the measurement unit.</b><span>Ensure one installed hook instance emits one intervention. Deduplicate near-simultaneous feedback defensively.</span></li>
+  <li><b>Key repetition to the active goal.</b><span>Reset on a genuine user turn or use the reconstructed task/checklist identity. A transcript-wide string count is not a task state.</span></li>
+  <li><b>Keep the prompt agentic.</b><span>Show the missing evidence and offer ideas, including retrying differently, inspecting live state, self-unblocking, parallelizing bounded work, coordinating a live owner, or escalating a human-only step. Let the agent choose.</span></li>
+  <li><b>Instrument outcomes.</b><span>Record gate, goal key, logical attempt number, hook version, next action category, terminal result, and time to terminal state. Do not infer these later from prose when the hook can emit them directly.</span></li>
+  <li><b>Evaluate after exposure.</b><span>Compare post-fix third-attempt chains with the pre-fix baseline: continuation after third, action diversity, time to terminal state, and terminal outcome rate.</span></li>
+</ol>
+<div class="grid2">
+  <div class="panel"><h3>Success means</h3><p>No duplicate feedback. “Third” refers to the same unresolved goal. Repeated guidance changes the available tactic or names the live blocker. The current 95.9% observed terminal-PR rate does not regress.</p></div>
+  <div class="panel"><h3>It does not mean</h3><p>More rigid branches, permission-seeking, or lowering the proof standard. The hook should provide state and useful options; the agent remains responsible for choosing and carrying out the next move.</p></div>
+</div>
+
+<div class="foot">agents-cli · verify-work-complete effectiveness · source: 1,635 JSONL paths / 1,594 non-trivial sessions, live GitHub PR state, hook source at merge 52824b1 · analysis scripts and aggregate JSON remain local under /tmp · <a href="https://linear.app/getrush/issue/RUSH-2113/verify-work-complete-hook-keep-moving-redirect-taskqueue-awareness">RUSH-2113</a> · 2026-08-03</div>
+</main>
+</body>
+</html>

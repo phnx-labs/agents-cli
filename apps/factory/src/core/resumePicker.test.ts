@@ -8,7 +8,11 @@ import {
   buildResumeCandidates,
   classifyResumeState,
   defaultPickedIds,
+  distinctiveTopic,
+  nextPreselection,
+  sharedTopicPrefixes,
   sortResumeCandidates,
+  stripSharedPrefix,
   type RecentSessionRow,
   type ResumeCandidate,
 } from './resumePicker';
@@ -187,5 +191,146 @@ describe('device id normalization', () => {
   it('still reports a genuinely different machine as a host', () => {
     const out = buildResumeCandidates([recent({ machine: 'yosemite-s0' })], [], 'mac-mini');
     expect(out[0].host).toBe('yosemite-s0');
+  });
+});
+
+// The topic strings below are verbatim from a real 222-session listing on this
+// fleet, where 15 rows led with "Resume previous work:" and 11 with
+// "## Apps (Connectors)" — the boilerplate that made the picker unreadable.
+describe('shared-topic boilerplate stripping', () => {
+  const REAL_TOPICS = [
+    'Resume previous work: zion:/Users/muqsit/Screenshots/CleanShot 2026',
+    'Resume previous work: 4db0440e-d69c-4873-9ef5-56fc350ae9cc',
+    'Resume previous work: agents-cli spec conflicts',
+    'Review OpenPRs and agents-cli spec conflicts',
+    'Agents Doctor Issues Diagnosis Fix Plan',
+  ];
+
+  it('finds the phrase that leads several topics', () => {
+    const prefixes = sharedTopicPrefixes(REAL_TOPICS);
+    expect(prefixes).toContain('Resume previous work:');
+  });
+
+  it('leaves a phrase that leads only one topic alone', () => {
+    const prefixes = sharedTopicPrefixes(REAL_TOPICS);
+    expect(prefixes.some((p) => p.startsWith('Review OpenPRs'))).toBe(false);
+  });
+
+  it('strips the longest match, not a shorter phrase nested in it', () => {
+    const prefixes = sharedTopicPrefixes(REAL_TOPICS);
+    expect(stripSharedPrefix('Resume previous work: agents-cli spec conflicts', prefixes))
+      .toBe('agents-cli spec conflicts');
+  });
+
+  it('never blanks a topic whose every word is shared', () => {
+    // 'New Session' recurred 4x in the real listing; stripping the whole string
+    // would leave an unidentifiable empty row.
+    const topics = ['New Session', 'New Session', 'New Session', 'New Session'];
+    expect(stripSharedPrefix('New Session', sharedTopicPrefixes(topics))).toBe('New Session');
+  });
+
+  it('keeps a topic that is entirely a shared phrase rather than blanking it', () => {
+    // A longer topic can mint a phrase equal to a shorter topic's whole text.
+    // Three "Fix login bug …" sessions make "Fix login" shared; a fourth session
+    // genuinely called "Fix login" must not lose its only distinguishing text.
+    const topics = ['Fix login bug', 'Fix login bug urgently', 'Fix login bug now', 'Fix login'];
+    const prefixes = sharedTopicPrefixes(topics);
+    expect(prefixes).toContain('Fix login');
+    expect(stripSharedPrefix('Fix login', prefixes)).toBe('Fix login');
+  });
+
+  it('does not fall through to a shorter phrase when the longest covers the whole topic', () => {
+    // Regression: with prefixes ['Resume previous work:', 'Resume previous'],
+    // rejecting the exact match and continuing the loop stripped the SHORTER
+    // phrase and rendered the row as 'work:' — a fragment of the boilerplate.
+    const topics = [
+      'Resume previous work: alpha',
+      'Resume previous work: beta',
+      'Resume previous work: gamma',
+      'Resume previous work:',
+    ];
+    const prefixes = sharedTopicPrefixes(topics);
+    expect(prefixes).toEqual(['Resume previous work:', 'Resume previous']);
+    expect(stripSharedPrefix('Resume previous work:', prefixes)).toBe('Resume previous work:');
+  });
+
+  it('matches per word, not per character, so a plural does not lose its stem', () => {
+    // Prefixes are mined per word; a bare startsWith lands mid-word on a
+    // singular/plural pair and rendered 'Fix bugs reported by QA' as
+    // 's reported by QA'.
+    const topics = ['Fix bug in auth', 'Fix bug in ui', 'Fix bug in db', 'Fix bugs reported by QA'];
+    const prefixes = sharedTopicPrefixes(topics);
+    expect(prefixes).toEqual(['Fix bug in', 'Fix bug']);
+    expect(stripSharedPrefix('Fix bugs reported by QA', prefixes)).toBe('Fix bugs reported by QA');
+    // The genuine members of the family still strip.
+    expect(stripSharedPrefix('Fix bug in auth', prefixes)).toBe('auth');
+  });
+
+  it('does not eat content that legitimately starts with punctuation', () => {
+    const prefixes = ['Resume previous work:'];
+    expect(stripSharedPrefix('Resume previous work: -1 open issue', prefixes)).toBe('-1 open issue');
+    expect(stripSharedPrefix('Resume previous work: --verbose flag broken', prefixes))
+      .toBe('--verbose flag broken');
+  });
+
+  it('falls back to the cwd leaf when there is no topic and no project', () => {
+    const c = { cwd: '/home/muqsit/src/github.com/muqsitnawaz' } as ResumeCandidate;
+    expect(distinctiveTopic(c, [])).toBe('muqsitnawaz');
+  });
+
+  it('reports nothing distinctive rather than a misleading fragment', () => {
+    expect(distinctiveTopic({} as ResumeCandidate, [])).toBe('');
+  });
+});
+
+// The selection bookkeeping behind `Agents: Resume`. These run the real
+// function the picker calls; only `quickPick.selectedItems` is stood in for,
+// since that value is supplied by VS Code and is a plain list of ids.
+// The first case reproduces the fixed bug (it fails against the pre-fix
+// algorithm); the rest pin invariants that must hold either way.
+describe('nextPreselection — selection across list swaps', () => {
+  const c = (id: string, state: ResumeCandidate['state']) => ({ id, state }) as ResumeCandidate;
+
+  it('pre-ticks a session that becomes detached during a refresh', () => {
+    // The regression this picker exists for: a terminal dies while the
+    // background revalidation is in flight, so a session goes idle -> detached
+    // between the two renders. The user touched nothing, so it must be ticked.
+    const unticked = new Set<string>();
+    const first = [c('A', 'detached'), c('X', 'idle')];
+    const p1 = nextPreselection({ previous: [], checked: new Set(), next: first, unticked });
+    expect([...p1]).toEqual(['A']);
+
+    const second = [c('A', 'detached'), c('X', 'detached')];
+    const p2 = nextPreselection({ previous: first, checked: p1, next: second, unticked });
+    expect(p2.has('X')).toBe(true);
+    expect(p2.has('A')).toBe(true);
+  });
+
+  it('remembers a default the user actually unticked', () => {
+    const unticked = new Set<string>();
+    const rows = [c('A', 'detached'), c('B', 'detached')];
+    nextPreselection({ previous: [], checked: new Set(), next: rows, unticked });
+    // The user unticks A, leaving only B checked.
+    const p2 = nextPreselection({ previous: rows, checked: new Set(['B']), next: rows, unticked });
+    expect(p2.has('A')).toBe(false);
+    expect(p2.has('B')).toBe(true);
+  });
+
+  it('keeps an untick sticky across a later swap', () => {
+    const unticked = new Set<string>();
+    const rows = [c('A', 'detached'), c('B', 'detached')];
+    nextPreselection({ previous: [], checked: new Set(), next: rows, unticked });
+    const p2 = nextPreselection({ previous: rows, checked: new Set(['B']), next: rows, unticked });
+    const p3 = nextPreselection({ previous: rows, checked: p2, next: rows, unticked });
+    expect(p3.has('A')).toBe(false);
+  });
+
+  it('re-ticks a default the user turned back on', () => {
+    const unticked = new Set<string>();
+    const rows = [c('A', 'detached')];
+    nextPreselection({ previous: [], checked: new Set(), next: rows, unticked });
+    nextPreselection({ previous: rows, checked: new Set(), next: rows, unticked });
+    const p3 = nextPreselection({ previous: rows, checked: new Set(['A']), next: rows, unticked });
+    expect(p3.has('A')).toBe(true);
   });
 });

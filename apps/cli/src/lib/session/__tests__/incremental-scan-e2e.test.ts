@@ -200,6 +200,13 @@ describe('B-2 live incremental scan parity', () => {
     const inc = db.getSessionById(id)!;
     expect(inc.prUrl).toBe('https://github.com/acme/repo/pull/4242');
     expect(inc.prNumber).toBe(4242);
+    expect(db.getDB().prepare(`
+      SELECT source_call_id, outcome, output FROM tool_calls WHERE session_id = ?
+    `).get(id)).toEqual({
+      source_call_id: `${id}-t1`,
+      outcome: 'ok',
+      output: 'https://github.com/acme/repo/pull/4242',
+    });
 
     // Full-reparse parity.
     const gtId = await groundTruth([
@@ -383,6 +390,101 @@ describe('B-2 live incremental scan parity', () => {
     expect(hits.some(h => h.sessionId === id), 'FTS finds appended-only text').toBe(true);
   });
 
+  it('streams past an oversized appended JSONL record and resumes at the next record', async () => {
+    const id = 'oversized-append';
+    const fp = writeTranscript(id, [
+      { type: 'user', timestamp: '2026-06-28T05:00:00.000Z', message: { role: 'user', content: 'before oversized record' } },
+    ]);
+    await runScan();
+
+    fs.appendFileSync(fp, 'x'.repeat(1024 * 1024 + 1));
+    bumpMtimeToNow(fp, 1);
+    await runScan();
+    let state = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!);
+    expect(state.offset).toBe(fs.statSync(fp).size);
+    expect(state.jsonlDroppingOversizedLine).toBe(true);
+    expect(db.getSessionById(id)?.messageCount).toBe(1);
+    const { ensureToolIndex } = await import('../tool-index.js');
+    const limitedCoverage = await ensureToolIndex([db.getSessionById(id)!]);
+    expect(limitedCoverage).toMatchObject({ limitedFiles: 1, complete: false });
+    expect(db.getDB().prepare(`SELECT tool FROM tool_calls WHERE session_id = ?`).all(id))
+      .toEqual([{ tool: 'index_limit' }]);
+
+    fs.appendFileSync(fp, 'y'.repeat(64 * 1024));
+    bumpMtimeToNow(fp, 2);
+    await runScan();
+    state = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!);
+    expect(state.offset).toBe(fs.statSync(fp).size);
+    expect(state.jsonlDroppingOversizedLine).toBe(true);
+
+    fs.appendFileSync(fp, `\n${line({
+      type: 'user', timestamp: '2026-06-28T05:01:00.000Z',
+      message: { role: 'user', content: 'after oversized record' },
+    })}\n`);
+    bumpMtimeToNow(fp, 3);
+    await runScan();
+
+    expect(discover.__claudeScanBranchCountsForTest().incremental).toBeGreaterThanOrEqual(1);
+    expect(db.getSessionById(id)?.messageCount).toBe(2);
+    state = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!);
+    expect(state.offset).toBe(fs.statSync(fp).size);
+    expect(state.jsonlDroppingOversizedLine).toBeUndefined();
+  });
+
+  it('purges indexed tool evidence when a transcript disappears from a changed directory', async () => {
+    const id = 'deleted-tool-evidence';
+    const fp = writeTranscript(id, [
+      { type: 'assistant', timestamp: '2026-06-28T05:00:00.000Z', message: { role: 'assistant', content: [
+        { type: 'tool_use', id: 'deleted-call', name: 'Bash', input: { command: 'git status' } },
+      ] } },
+    ]);
+    await runScan();
+    const session = db.getSessionById(id)!;
+    const { ensureToolIndex } = await import('../tool-index.js');
+    await ensureToolIndex([session]);
+    expect(db.getDB().prepare('SELECT count(*) AS n FROM tool_calls WHERE session_id = ?').get(id)).toEqual({ n: 1 });
+
+    fs.unlinkSync(fp);
+    bumpMtimeToNow(PROJECT_DIR, 1);
+    await runScan();
+    expect(db.getDB().prepare('SELECT count(*) AS n FROM tool_calls WHERE session_id = ?').get(id)).toEqual({ n: 0 });
+  });
+
+  it('UPGRADE: a pre-tool-call continuation forces one full parse without overwriting ordinal zero', async () => {
+    const id = 'legacy-continuation-tool-calls';
+    const fp = writeTranscript(id, [
+      { type: 'user', timestamp: '2026-06-28T06:00:00.000Z', cwd: '/home/u/repo', message: { role: 'user', content: 'run both checks' } },
+      { type: 'assistant', timestamp: '2026-06-28T06:01:00.000Z', message: { role: 'assistant', content: [
+        { type: 'tool_use', id: 'legacy-call', name: 'Bash', input: { command: 'git status' } },
+      ] } },
+    ]);
+    await runScan();
+
+    const legacyState = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!);
+    legacyState.v = 1;
+    delete legacyState.toolCalls;
+    db.getDB().prepare('UPDATE scan_ledger SET parser_state = ? WHERE file_path = ?')
+      .run(JSON.stringify(legacyState), fs.realpathSync(fp));
+
+    discover.__resetClaudeScanBranchCountsForTest();
+    appendTranscript(id, [
+      { type: 'assistant', timestamp: '2026-06-28T06:02:00.000Z', message: { role: 'assistant', content: [
+        { type: 'tool_use', id: 'new-call', name: 'Bash', input: { command: 'gh pr view' } },
+      ] } },
+    ]);
+    bumpMtimeToNow(fp, 1);
+    await runScan();
+
+    expect(discover.__claudeScanBranchCountsForTest().incremental).toBe(0);
+    expect(discover.__claudeScanBranchCountsForTest().full).toBeGreaterThanOrEqual(1);
+    expect(db.getDB().prepare(`
+      SELECT ordinal, source_call_id FROM tool_calls WHERE session_id = ? ORDER BY ordinal
+    `).all(id)).toEqual([
+      { ordinal: 0, source_call_id: 'legacy-call' },
+      { ordinal: 1, source_call_id: 'new-call' },
+    ]);
+  });
+
   it('LEDGER: parser_state + content_text are persisted after a scan, and rewritten after truncation', async () => {
     const id = 'ledger-persist';
     const fp = writeTranscript(id, baseEvents(id));
@@ -394,7 +496,7 @@ describe('B-2 live incremental scan parity', () => {
     expect(row!.parserState, 'parser_state persisted').not.toBeNull();
     expect(row!.contentText, 'content_text persisted').not.toBeNull();
     const parsed = JSON.parse(row!.parserState!);
-    expect(parsed.v).toBe(1);
+    expect(parsed.v).toBe(2);
     expect(typeof parsed.offset).toBe('number');
     const offsetAfterFirst = parsed.offset;
 

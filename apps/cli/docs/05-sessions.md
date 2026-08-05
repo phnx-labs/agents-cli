@@ -9,6 +9,26 @@ the session-discoverable harnesses — Claude, Codex, Gemini, Antigravity, OpenC
 OpenClaw, Rush, Hermes, Grok, Kimi, Droid, and Cursor (the `SESSION_AGENTS` set in
 `src/lib/session/types.ts`).
 
+## Session lifecycle verbs
+
+These subcommands sit on one axis (get back into a conversation). They are **not**
+interchangeable — pick the verb for the intent:
+
+| Intent | Verb |
+| --- | --- |
+| Jump to a **live** session (attach its terminal, or open a new tab and resume a copy) | `agents sessions focus [id]` |
+| Attach only — never open a new tab / fork a copy | `agents sessions focus [id] --attach-only` |
+| Deprecated alias of focus --attach-only | `agents sessions go` (prints a deprecation notice) |
+| Interactive → **headless** (keep working unattended) | `agents sessions detach <id>` |
+| Headless → **interactive** in this terminal | `agents sessions attach <id>` |
+| Multi-select history and open each in a tab/split | `agents sessions resume [query]` |
+| Continue one session from a script / `run` path | `agents run <agent> --resume <id> …` |
+
+`focus` is the default “take me there” for a live process. `attach` / `detach` are
+the presence pair (foreground ↔ background). `resume` is the multi-open / history
+path. Detail in **Background & foreground (detach / attach)** below, and
+`agents sessions --help`.
+
 ## Architecture
 
 ```
@@ -99,6 +119,217 @@ trailing record to the next pass, so a record written before its `'\n'` is flush
 is never double-counted. Grok is not incremental — it reads a whole `summary.json`,
 not an append-only JSONL; Gemini and Cursor still full-parse each changed file.
 
+## Tool-call search
+
+`--include tools` has two related forms:
+
+```bash
+# Render every tool event from one exact session
+agents sessions a1b2c3d4 --include tools
+
+# Query cached call evidence across sessions on one device
+agents sessions --include tools --agent codex --device mac-mini --since 7d
+
+# Repeated clauses must match distinct calls in the same session
+agents sessions --include tools \
+  --query 'program:git input:merge' \
+  --query 'program:gh output:CONFLICT' \
+  --fleet --json
+
+# Count static git sites, containing tool calls, and distinct sessions
+agents sessions --include tools --query 'program:git' --count --fleet --json
+
+# Populate historical rows once; each device keeps its own SQLite index
+agents sessions backfill tools --fleet
+```
+
+Terms in one `--query` clause are ANDed against one call. Repeating `--query`
+requires a distinct call row for each clause, then returns the session only when
+all clauses can be assigned. Supported prefixes are `tool:`, `program:`, `input:`,
+`output:`, `status:`, `exit:`, and `error:`. An unprefixed term searches all
+evidence fields. `output:` also searches a command's error result because some
+harnesses expose returned bytes only as an error channel.
+
+`--count` accepts exactly one `program:<name>` clause and cannot be combined
+with `--limit`. It reports three totals over the complete metadata-filtered
+scope: ordered static program occurrences, containing tool calls, and distinct
+sessions. “Occurrence” is deliberately a static-source metric, not a claim
+about runtime executions: a program site inside a loop is stored once, both
+branches of static control flow are stored, and a dynamically expanded command
+name is omitted. Wrapper chains are retained with roles, so
+`sudo env A=1 git status` stores `sudo` and `env` as `wrapper` occurrences and
+`git` as `effective`. The redacted, bounded parent `tool_calls.input` stores the
+complete submitted command once; occurrence rows do not duplicate it.
+
+A query accepts at most 32 clauses and 4 KiB per clause. Distinct assignment is
+polynomial bipartite matching, not permutation backtracking. A listing or broad
+query that would materialize more than 50,000 call rows fails with a request to
+narrow the metadata filters or add a term. `--limit` accepts 1–1,000 sessions, a result
+that would materialize more than 8 MiB of evidence fails, and the encoded JSON
+must remain below 15 MiB so it cannot cross the fleet transport's 16 MiB cap.
+
+Tool search has a separate, versioned JSON envelope; it does not change the
+stable `SessionMeta[]` list or `{ session, events }` detail shapes:
+
+```json
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-03T00:00:00.000Z",
+  "query": { "clauses": ["program:git", "program:gh"] },
+  "coverage": {
+    "indexedFiles": 0,
+    "indexedCalls": 0,
+    "skippedFiles": 0,
+    "limitedFiles": 0,
+    "remainingFiles": 0,
+    "complete": true
+  },
+  "sessions": [{ "id": "...", "machine": "mac-mini", "calls": [] }]
+}
+```
+
+Count JSON is a separate versioned aggregate. `coverage.complete=false` means
+the totals are lower bounds, and human output says “at least”:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "tool-program-count",
+  "query": {
+    "program": "git",
+    "semantics": "static-program-occurrences-v1"
+  },
+  "coverage": { "complete": true },
+  "totals": { "occurrences": 1842, "toolCalls": 1360, "sessions": 417 },
+  "machines": [{ "machine": "mac-mini", "totals": { "occurrences": 820, "toolCalls": 611, "sessions": 190 } }]
+}
+```
+
+Each device owns its transcript files and its `sessions.db`. `--device` queries
+only the named device(s); `--fleet` queries every registered online compute
+device concurrently. A distributed tool query covers each target's whole local
+index unless metadata flags such as `--agent`, `--project`, or `--since` narrow
+it; the coordinator's current working directory is not forwarded as a peer-side
+scope. Peers run the same local SQLite query under the recursion
+guard and return only the compact envelope over SSH. Raw transcripts, parser
+continuations, local transcript paths, and unmatched calls do not cross the
+boundary. Peer stdout is capped at 16 MiB and fan-out runs at six devices at a
+time. Before fan-out, the coordinator subtracts the exact encoded local result
+and a 64 KiB merge reserve from the 15 MiB ceiling. Both raw peer bytes and the
+machine-stamped, re-redacted envelopes are charged against that remainder, so
+redaction expansion cannot overflow the final JSON. The receive budget stops
+retaining or starting more peer responses once exhausted;
+`coverage.complete=false` marks the partial fleet result. Malformed or oversized
+envelopes are rejected before merging. Fleet tool queries support
+`--sort recent`; `--sort cost` and `--sort duration` remain local-only because
+peer evidence omits those metrics.
+
+Synced mirror transcripts do not inflate fleet evidence or counts. A direct
+local query may search cached rows from several recorded origin machines, but
+during fleet fan-out each peer searches only sessions that originated on that
+peer. Those origin partitions are disjoint when the coordinator merges evidence
+or sums totals; an unreachable origin marks coverage partial instead of
+substituting a mirrored duplicate. Evidence preserves the recorded transcript
+origin across the SSH hop, so a defensive coordinator merge also collapses the
+same origin/session pair if two peers return it.
+
+### Index lifecycle and disk I/O
+
+Schema v29 uses `tool_calls`, the distinct `tool_call_programs` projection,
+ordered `tool_program_occurrences`, `tool_call_text` (trigram FTS5), and an
+independent `tool_scan_ledger` with aggregate byte accounting. The migration does **not** clear
+`scan_ledger` or `dir_ledger`, so enabling the feature does not invalidate the
+normal session cache. It clears only `tool_scan_ledger`, so historical occurrence
+rows are rebuilt explicitly without forcing ordinary session history to reparse.
+The ledger is keyed by session id; its source path is retained for maintenance,
+not resolved or checked during a query.
+
+- A changed Claude/Codex transcript derives call rows inside the same resumable
+  reducer that already parses the appended bytes. Results that arrive in a later
+  append update the original call ordinal/native id. Appended JSONL is streamed
+  one record at a time; a record over 1 MiB is skipped without buffering the
+  remainder of the transcript.
+- Pending call/result correlation state is capped at 256 calls and 1 MiB. An
+  evicted unmatched call stays indexed as `unknown` with an explicit diagnostic;
+  a later result cannot be attached to a different call.
+- Other file-backed harnesses derive call rows from the normalized event array
+  produced by the pre-existing todo/recent-directory enrichment parse. Tool
+  indexing adds no transcript read to that scan path. Kimi and Grok stamp the
+  split `wire.jsonl` / `chat_history.jsonl` source captured before parsing, so
+  an append racing the parse forces a retry instead of certifying stale calls.
+- Existing history is populated only by `agents sessions backfill tools`. The
+  command is resumable and idempotent, processes bounded internal batches of at
+  most 25 files or 16 MiB, and can fan out with `--fleet` while each device keeps
+  its rows local. A fleet coordinator advances every device by one bounded batch
+  per parallel round, so a slow device does not make the other indexes wait to
+  begin. One larger Claude/Codex JSONL transcript up to
+  64 MiB is admitted alone and streamed with a 1 MiB record cap; larger sources
+  persist `index_limit` without being read. Non-streaming harness parsers do
+  not materialize a source over 16 MiB and persist an explicit `index_limit`
+  row. `coverage.complete=false` names partial results; rerunning the backfill
+  resumes from the independent ledger.
+- Append persistence stores the aggregate evidence bytes in `tool_scan_ledger`
+  and reads only changed ordinals. A user-text-only append advances the file
+  stamp without reading historical tool rows.
+- Every tool query reads the current SQLite snapshot through
+  `queryIndexedSessions`; it does not stat, open, or parse transcripts and never
+  calls `ensureToolIndex`. Normal incremental discovery owns new/changed files;
+  the explicit backfill owns historical files.
+- When a transcript directory changes, call rows and tool-ledger rows for files
+  no longer present in that directory are removed without statting every indexed
+  session.
+- The query evaluates every metadata-filtered session row on each selected
+  device; there is no silent history cap. One `json_each` scope join replaces
+  per-300-session SQL loops. Trigram FTS and typed indexes prefilter
+  call rows before exact distinct-call assignment, and `--limit` bounds only the
+  matching sessions returned to the caller. Use `--since`, `--agent`,
+  `--project`, or `--device` to narrow the metadata scope when appropriate.
+
+`--markdown` and `--no-redact` are rejected with `--include tools`: the indexed
+view has a distinct bounded schema and is always redacted. Inputs are
+bounded to 16 KiB, successful output to 1 KiB, and error output to 4 KiB;
+the combined evidence payload is capped at 5 MiB per session with an explicit
+`index_limit` terminal row when more calls are omitted. Base64-like blocks are
+replaced before persistence. Raw strings are clipped to 64 KiB before secret
+scanning, orchestration parsing, or Bash parsing, so one adversarial call cannot
+force unbounded parser or regular-expression work. Outcomes, exit codes, HTTP status codes, and error
+codes are stored only when the harness supplies structured fields. They are
+never inferred from output prose.
+
+Codex's `exec` surface carries orchestration JavaScript rather than a raw shell
+string. The index first uses `acorn@8.18.0` to statically select literal `cmd`
+values passed to `tools.exec_command`; it never evaluates transcript code and
+leaves computed commands unclassified. Other shell tools provide their command
+field directly. Shell program extraction then uses `unbash@4.0.5` and a typed
+AST walk. It recognizes
+static programs in pipelines, control flow, functions, subshells, command and
+process substitutions, arithmetic expansions, and unquoted heredocs. Dynamic
+program names are left unclassified; malformed Bash records parser diagnostics
+and emits no derived program rows. The parser is an ISC-licensed, zero-dependency
+TypeScript package built for typed AST inspection; its upstream comparison and
+reproducible benchmark are documented in the
+[`unbash` repository](https://github.com/webpro-nl/unbash#benchmarks).
+To inspect a redacted corpus of 50–100 recent
+sessions across the fleet:
+
+```bash
+bun scripts/sample-session-shell-commands.ts \
+  --sessions 100 --since 7d \
+  --output .agents/artifacts/shell-command-sample.json
+```
+
+The sampler reads the current device directly, fans only peers out over SSH,
+round-robins deterministically across machines so every available requested
+device is represented, and retains redacted shell-call origins, program names,
+outcomes, and parser diagnostics. Each candidate query asks for at most twice
+the requested sample size to bound ordinary bulk growth. If one candidate class contains an
+individually oversized session, the sampler retains the successful classes,
+keeps the last successful partial pass if a later pass exceeds the envelope,
+reports `failedQueries`, and marks coverage partial. Its JSON artifact is capped
+at 16 MiB; if the requested corpus does
+not fit, `coverage.complete` is false and `truncation.reason` is
+`sample_byte_limit` instead of silently dropping evidence.
+
 ## SessionMeta (list output)
 
 `agents sessions --json` returns an array of `SessionMeta`:
@@ -154,6 +385,7 @@ Fields:
 | `spawnedTeam` | The team this session CREATED, read off its `agents teams create/add` command at scan time | `null` for the ~everything that never ran one; the inverse of `isTeamOrigin` |
 | `teamOrigin` | For a teammate: its `{team, handle, mode, parentSessionId}`, read from the teammate's `meta.json` | `null` for a non-teammate; `team`/`parentSessionId` absent on records predating their capture, or once the 7-day teams cleanup removes the dir |
 | `plan` | Last `ExitPlanMode` plan markdown (Claude sessions only) | `null` when the session never entered plan-review |
+| `usedBrowser` / `usedComputer` | A sessionId-scoped read of `~/.agents/events.jsonl` for `browser.navigate`/`browser.screenshot` / `computer.action` (never a transcript re-scan) | `undefined` on a legacy row this scanner hasn't computed the field for yet — distinct from a real, computed `false` |
 
 ### Two time fields per row
 
@@ -296,6 +528,12 @@ agents sessions 2026-07-21T10-30-00-000Z
 # Sort the list by cost or duration (default: recent)
 agents sessions --sort cost --limit 10
 agents sessions --sort duration --all
+
+# Only sessions that invoked a skill, or that used anything owned by a plugin —
+# a subquery join against session_resource_usage (see below). --skill matches a
+# bare name or a namespaced plugin skill's short name (design finds rush:design).
+agents sessions --skill design --all
+agents sessions --plugin rush --all
 
 # Replay one session as markdown
 agents sessions c07ec355 --markdown
@@ -827,6 +1065,94 @@ session's `from → to`, mode, move-vs-copy, and status; a session that hops A�
 three lines, its lineage. Source: `src/commands/sessions-migrate.ts`,
 `src/lib/session/migrate-targets.ts`, `src/lib/session/migrations.ts`.
 
+## Skill/plugin/slash-command usage (`session_resource_usage`)
+
+A separate table, `session_resource_usage(session_id, kind, name, plugin,
+source, repo_root, snapshot_sha, count)`, records every skill and
+slash-command a session invoked. `kind` is `'skill'` (from that harness's
+skill-invocation tool call — Claude and Kimi both name it `Skill`; see
+`SKILL_TOOL_NAME_BY_AGENT` in [`src/lib/session/highlights.ts`](../src/lib/session/highlights.ts))
+or `'command'` (a slash command — either the user typing one, captured from
+Claude's `<command-name>` wrapper, or the model invoking one via the
+`SlashCommand` tool; see `SessionEvent.slashCommand`). `name` is the bare
+name without a leading slash, `plugin:name` for a plugin-owned skill/command
+(e.g. `rush:design`).
+
+`plugin`/`source`/`repo_root`/`snapshot_sha` are resolved at write time
+against the *currently installed* resource — `resolveResource()` for a flat
+(non-namespaced) resource, or the discovered plugin list for a namespaced
+one (a plugin's own `skills/`/`commands/` dirs aren't visible to
+`resolveResource()`'s flat scan). A skill/command renamed or uninstalled
+since the session ran leaves these NULL rather than a stale guess; the row
+(name + count) is written regardless. `repo_root`/`snapshot_sha` are the
+same provenance fields `ResolvedResource`/`DiscoveredPlugin` carry —
+"which DotAgents repo, which git commit" (see
+[`src/lib/resources.ts`](../src/lib/resources.ts)/[`src/lib/plugins.ts`](../src/lib/plugins.ts)).
+
+`agents sessions --skill <name>` / `--plugin <name>` query this table (see
+[Query Flags](#query-flags)); `--skill` matches a bare name or a namespaced
+plugin skill's short name.
+
+### Reading it back — `agents sessions stats`
+
+`agents sessions stats` rolls this table up into a resource-usage insight:
+"which skills/commands do I actually invoke, and which installed ones are dead
+weight?" It's a cheap SQLite `GROUP BY` (`queryResourceUsageStats` in
+[`src/lib/session/db.ts`](../src/lib/session/db.ts)) — no transcript re-scan —
+joined to `sessions` for attribution, so the usual filters compose:
+
+- `--agent` / `--project` / `--since` / `--machine` narrow **which sessions**
+  count (routed through `buildSessionWhere`, the same clause `agents sessions`
+  uses).
+- `--kind skill|command` / `--plugin <p>` narrow **which resources** are shown
+  (predicates on the resource rows — distinct from the top-level
+  `agents sessions --plugin`, which filters *sessions*).
+
+It's a **both-ends** view by default: the most-invoked resources (`--top <n>`
+caps the list, `--bottom` ranks least-invoked first) **and** the
+installed-but-never-invoked ones, computed by subtracting the invoked set from
+the installed set (`listResources` + `discoverPlugins`, the same union
+`resolveResourceProvenance` reconciles against). `--zero` shows only the dead
+weight; `--json` emits a versioned `sessions-stats` envelope (SES-IF-4b).
+
+Two caveats are surfaced in `--help` and the output, because a `0` is easy to
+misread:
+
+- **Explicit invocations only.** The signal is slash commands + `Skill` tool
+  calls. An **auto-triggered** skill (loaded by description match, never
+  explicitly invoked) emits no event and reads as **0** — that means "never
+  explicitly invoked", not "never loaded".
+- **Skill invocations come from Claude and Kimi** (the harnesses whose
+  skill-invocation tool is named `Skill`, per `SKILL_TOOL_NAME_BY_AGENT`);
+  **slash-commands are Claude-only** (only `parseClaudeContent` populates
+  `SessionEvent.slashCommand`). Other harnesses contribute nothing to the counts.
+
+### Backfilling history — `agents sessions backfill resources`
+
+The normal incremental scan writes resource usage for every session it
+(re)parses, but a session indexed **before** this signal shipped keeps a fresh
+`scan_ledger` row and is never re-derived — so its tallies were never recorded
+(a large historical gap: only the recently-scanned slice of the index carries
+the signal). `agents sessions backfill resources` is the one-shot catch-up: it
+walks the local index, re-parses each transcript **from byte 0** (so
+claude/codex re-derive their tallies from scratch, not from the resumable
+accumulator), writes the usage, and stamps a dedicated `resource_scan_ledger`
+(mtime + size + `RESOURCE_INDEX_VERSION`) so reruns skip completed transcripts —
+the same independent-ledger shape `agents sessions backfill tools` uses. It is
+**local-only** (the signal is derived per machine from its own transcripts); run
+it on each box, or over `agents ssh <host> agents sessions backfill resources`.
+`agents sessions stats` prints a coverage line and, when coverage is low, a hint
+to run this backfill.
+
+**Known gap:** claude/codex sessions found through the routine local batch
+scan (`upsertSessionsBatch`) get their tallies from an incremental
+accumulator threaded through the resumable-parse continuation
+(`ClaudeParseState.skillEvents`/`slashCommandEvents`) rather than a
+transcript re-scan, to avoid undoing that optimization's whole point. Every
+other harness, and any claude/codex session upserted outside the batch path
+(cross-machine fan-in, forks), derives the tallies directly from the parsed
+transcript.
+
 ## Schema Version
 
 Schema version is tracked by the `SCHEMA_VERSION` constant in
@@ -835,7 +1161,11 @@ of truth — don't hardcode the number here). Migrations run on connection
 open; old DBs get upgraded in place. The `meta` table tracks `schema_version`.
 Later migrations added, among others, `cost_usd` / `duration_ms` (pricing), the
 work-signal columns `pr_url` / `pr_number` / `worktree_slug` / `ticket_id`, the
-`plan` markdown, `output_tokens`, `is_team_origin`, and `spawned_team`. A migration that changes how
+`plan` markdown, `output_tokens`, `is_team_origin`, `spawned_team`, the
+`used_browser`/`used_computer` columns (NULL for a legacy row this scanner
+hasn't computed the field for yet, never a `false` default), the
+`session_resource_usage` table, and (v31) the `resource_scan_ledger` bookkeeping
+table for `agents sessions backfill resources`. A migration that changes how
 a column is derived forces a full rescan so every existing session is re-derived
 (as the pricing columns once did).
 

@@ -19,6 +19,7 @@ import { ALL_AGENT_IDS } from './agents.js';
 import type { LoopConfig } from './loop.js';
 import { machineId, normalizeHost } from './machine-id.js';
 import { resolveActor } from './actor.js';
+import { percentile } from './percentile.js';
 
 /** Tool/site/directory allow-list for sandboxed job execution. */
 export interface JobAllowConfig {
@@ -291,6 +292,8 @@ export interface RunMeta {
   pid: number | null;
   /** Process birth time (epoch ms) recorded at spawn for pid-reuse detection. */
   spawnedAt?: number;
+  /** Configured execution deadline persisted for daemon-restart recovery. */
+  timeoutMs?: number;
   /**
    * `missed` is not an execution outcome — it is the record that a scheduled
    * fire never happened (the daemon was down, asleep, or wedged when it came
@@ -1320,18 +1323,6 @@ export function getLatestCompletedRun(jobName: string): RunMeta | null {
     if (runs[i].status === 'completed') return runs[i];
   }
   return null;
-}
-
-/** Percentile of a sorted-ascending array (linear interpolation). p in [0,100]. */
-function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
-  if (sorted.length === 1) return sorted[0];
-  const rank = (p / 100) * (sorted.length - 1);
-  const lo = Math.floor(rank);
-  const hi = Math.ceil(rank);
-  if (lo === hi) return sorted[lo];
-  const frac = rank - lo;
-  return sorted[lo] * (1 - frac) + sorted[hi] * frac;
 }
 
 /** Duration + outcome rollup for a job's run history. */

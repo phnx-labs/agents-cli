@@ -26,7 +26,7 @@ process.env.HOME = TEST_HOME;
 process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, '.agents', '.history', 'devices');
 process.env.USERPROFILE = TEST_HOME;
 
-const { resolveExplicitTargets, resolveDeviceTarget } = await import('../resolve-target.js');
+const { resolveExplicitTargets, resolveExplicitTargetSet, resolveDeviceTarget } = await import('../resolve-target.js');
 const { resolveHost } = await import('../../hosts/registry.js');
 const { sshTargetFor } = await import('../../hosts/types.js');
 const { upsertDevice } = await import('../registry.js');
@@ -109,6 +109,13 @@ describe('resolveExplicitTargets — fan-out through the unified core', () => {
 
   it('skips a bare unknown word (a typo is not a literal to dial)', async () => {
     expect(await resolveExplicitTargets(['definitely-not-here'])).toEqual([]);
+  });
+
+  it('retains unresolved tokens for coverage-sensitive fan-outs', async () => {
+    await addDevice('known');
+    const resolved = await resolveExplicitTargetSet(['known', 'definitely-not-here']);
+    expect(resolved.targets.map((target) => target.name)).toEqual(['known']);
+    expect(resolved.unresolved).toEqual(['definitely-not-here']);
   });
 
   it('skips an injection-unsafe token', async () => {

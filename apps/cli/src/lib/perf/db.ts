@@ -11,11 +11,13 @@ import Database from '../sqlite.js';
 import { getPerfDbPath, getPerfDir } from '../state.js';
 import { localMachineId } from '../session/origin-machine.js';
 import { resolveProjectKey } from '../project-key.js';
+import { percentile } from '../percentile.js';
 import { resolveSpoolPath, shortSessionId, _resetPerfSpoolForTest } from './spool.js';
 import type { AggregateOptions, PerfAggregateRow } from './types.js';
 
 export type { AggregateOptions, PerfAggregateRow, PerfSample } from './types.js';
 export { recordSample, shortSessionId, resolveSpoolPath } from './spool.js';
+export { percentile } from '../percentile.js';
 
 export const PERF_SCHEMA_VERSION = 1;
 export const DEFAULT_RETENTION_DAYS = 30;
@@ -189,18 +191,6 @@ function maybeRetain(db: Database.Database): void {
   } catch {
     // ignore
   }
-}
-
-/** Percentile of a sorted-ascending array. p in [0,100]. */
-export function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
-  if (sorted.length === 1) return sorted[0];
-  const rank = (p / 100) * (sorted.length - 1);
-  const lo = Math.floor(rank);
-  const hi = Math.ceil(rank);
-  if (lo === hi) return sorted[lo];
-  const frac = rank - lo;
-  return sorted[lo] * (1 - frac) + sorted[hi] * frac;
 }
 
 /**

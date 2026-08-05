@@ -78,6 +78,18 @@ function blank(name: string): ProjectSessionRollup {
  * containing only projects with at least one matched session — callers merge
  * with the full definition list to show zero-agent projects.
  */
+
+/**
+ * Ensure every session carries a host for the card roster. Local
+ * `getActiveSessions()` omits `machine`; remotes already set it. Pure.
+ */
+export function withDefaultMachine<T extends { machine?: string }>(
+  sessions: T[],
+  defaultHost: string,
+): T[] {
+  return sessions.map((s) => (s.machine ? s : { ...s, machine: defaultHost }));
+}
+
 export function rollupSessionsByProject(
   defs: ProjectDef[],
   sessions: ActiveSession[],
@@ -131,6 +143,16 @@ export function rollupSessionsByProject(
  * that are running unattended.
  */
 const DEAD_STATUSES = new Set(['closed', 'crashed']);
+
+/**
+ * True when a session's status means it is over. Exported so the card can keep
+ * the `agents` roster to live sessions: the headline and the `dead` row already
+ * separate the two, and a roster that reads `crashed ×25` beside `23 live`
+ * makes the reader distrust both numbers.
+ */
+export function isDeadStatus(status: string): boolean {
+  return DEAD_STATUSES.has(status);
+}
 
 /*
  * Every `ActiveStatus`, and why it lands where it does:
@@ -205,6 +227,44 @@ export function sortProjectMembers(members: ProjectMember[]): ProjectMember[] {
 /** Cap for the members line before it collapses to `+N more`. */
 export const MEMBERS_LINE_LIMIT = 6;
 
+/** Cap for host groups on the multi-line agents roster. */
+export const MEMBERS_HOST_LIMIT = 8;
+
+/**
+ * Collapse members into distinct state cells (`agent · status · ticket[@host]`),
+ * counting duplicates as `×N`. Pure.
+ */
+export function collapseMemberCells(
+  members: ProjectMember[],
+  opts: { includeHostOnCell?: boolean } = {},
+): Array<{ cell: string; n: number; members: number }> {
+  const includeHost = opts.includeHostOnCell !== false;
+  const counts = new Map<string, { cell: string; n: number }>();
+  for (const m of sortProjectMembers(members)) {
+    const parts = [m.agent, m.status];
+    if (m.ticket) parts.push(m.ticket);
+    const cell = parts.join(' · ') + (includeHost && m.host ? ` @${m.host}` : '');
+    const key = cell.toLowerCase();
+    const entry = counts.get(key);
+    if (entry) entry.n++;
+    else counts.set(key, { cell, n: 1 });
+  }
+  return [...counts.values()].map(({ cell, n }) => ({ cell, n, members: n }));
+}
+
+function formatCollapsedCells(
+  cells: Array<{ cell: string; n: number; members: number }>,
+  memberTotal: number,
+  limit: number,
+): string {
+  if (cells.length === 0) return '';
+  const shown = cells.slice(0, Math.max(1, limit));
+  const shownMembers = shown.reduce((acc, e) => acc + e.members, 0);
+  const more = memberTotal - shownMembers;
+  const parts = shown.map(({ cell, n }) => (n > 1 ? `${cell} ×${n}` : cell));
+  return parts.join(chalk.dim('  ·  ')) + (more > 0 ? chalk.dim(`  ·  +${more} more`) : '');
+}
+
 /**
  * The `agents` line under `live`: one cell per DISTINCT member state —
  * `claude · running · RUSH-2107 @zion` — with identical cells collapsed to a
@@ -212,27 +272,116 @@ export const MEMBERS_LINE_LIMIT = 6;
  * truncated duplicates), capped at {@link MEMBERS_LINE_LIMIT} cells with a
  * `+N more` tail counting members, not cells. Pure (chalk styling only); the
  * caller adds the label.
+ *
+ * Prefer {@link formatProjectMembersByHost} on the card: a flat line hides which
+ * machine is running the work when the same harness×status spans hosts.
  */
 export function formatProjectMembers(members: ProjectMember[], limit = MEMBERS_LINE_LIMIT): string {
   if (members.length === 0) return '';
-  // Collapse identical cells — 35 same-harness sessions in the same state are
-  // one fact (`claude · running ×16`), not six truncated duplicates.
-  const counts = new Map<string, { cell: string; n: number }>();
-  for (const m of sortProjectMembers(members)) {
-    const parts = [m.agent, m.status];
-    if (m.ticket) parts.push(m.ticket);
-    const cell = parts.join(' · ') + (m.host ? ` @${m.host}` : '');
-    const key = cell.toLowerCase();
-    const entry = counts.get(key);
-    if (entry) entry.n++;
-    else counts.set(key, { cell, n: 1 });
+  return formatCollapsedCells(collapseMemberCells(members, { includeHostOnCell: true }), members.length, limit);
+}
+
+/**
+ * Host-grouped agents roster. One content line per host:
+ * `@zion  claude · running ×9  ·  claude · idle ×4`
+ *
+ * When no member carries a host (local-only rollup with no machine stamp), falls
+ * back to a single flat line via {@link formatProjectMembers}. Pure.
+ */
+export function formatProjectMembersByHost(
+  members: ProjectMember[],
+  opts: { cellLimit?: number; hostLimit?: number } = {},
+): string[] {
+  if (members.length === 0) return [];
+  const cellLimit = opts.cellLimit ?? MEMBERS_LINE_LIMIT;
+  const hostLimit = opts.hostLimit ?? MEMBERS_HOST_LIMIT;
+
+  const byHost = new Map<string, ProjectMember[]>();
+  let anyHost = false;
+  for (const m of members) {
+    if (m.host) anyHost = true;
+    const key = m.host ?? '';
+    const list = byHost.get(key);
+    if (list) list.push(m);
+    else byHost.set(key, [m]);
   }
-  const entries = [...counts.values()];
-  const shown = entries.slice(0, Math.max(1, limit));
-  const shownMembers = shown.reduce((acc, e) => acc + e.n, 0);
-  const more = members.length - shownMembers;
-  const cells = shown.map(({ cell, n }) => (n > 1 ? `${cell} ×${n}` : cell));
-  return cells.join(chalk.dim('  ·  ')) + (more > 0 ? chalk.dim(`  ·  +${more} more`) : '');
+
+  // Local-only (no host stamps at all) — keep the compact one-liner.
+  if (!anyHost) {
+    const line = formatProjectMembers(members, cellLimit);
+    return line ? [line] : [];
+  }
+
+  // Hosts with the most members first, then name; unstamped ("") last.
+  const hosts = [...byHost.entries()].sort((a, b) => {
+    if (a[0] === '' && b[0] !== '') return 1;
+    if (b[0] === '' && a[0] !== '') return -1;
+    if (b[1].length !== a[1].length) return b[1].length - a[1].length;
+    return a[0].localeCompare(b[0]);
+  });
+
+  const shownHosts = hosts.slice(0, Math.max(1, hostLimit));
+  const hiddenMembers = hosts.slice(hostLimit).reduce((acc, [, ms]) => acc + ms.length, 0);
+  const hostWidth = Math.max(
+    ...shownHosts.map(([h]) => (h ? `@${h}` : '@local').length),
+    1,
+  );
+
+  const lines = shownHosts.map(([host, ms]) => {
+    const label = (host ? `@${host}` : '@local').padEnd(hostWidth);
+    // Host is the row key — do not repeat @host on every cell.
+    const cells = collapseMemberCells(ms, { includeHostOnCell: false });
+    const body = formatCollapsedCells(cells, ms.length, cellLimit);
+    return `${chalk.cyan(label)}  ${body}`;
+  });
+
+  if (hiddenMembers > 0) {
+    const restHosts = hosts.length - shownHosts.length;
+    lines.push(chalk.dim(`+${hiddenMembers} more on ${restHosts} host${restHosts === 1 ? '' : 's'}`));
+  }
+  return lines;
+}
+
+/** A card-level warning collected for the footer. */
+export type ProjectWarningSeverity = 'critical' | 'continue';
+
+export interface ProjectWarning {
+  severity: ProjectWarningSeverity;
+  /** One human line. */
+  text: string;
+  /** Optional fix or next step. */
+  remediation?: string;
+}
+
+/**
+ * Severity markers for the warnings footer. User-facing by design: critical
+ * stops you (wrong repo, missing checkout, large drift); continue is a soft
+ * nudge (dirty tree, schedule not measurable).
+ */
+export function warningEmoji(severity: ProjectWarningSeverity): string {
+  return severity === 'critical' ? '🔴' : '⚠️';
+}
+
+/** Stable sort: critical first, then continue; stable within a tier. */
+export function sortProjectWarnings(warnings: ProjectWarning[]): ProjectWarning[] {
+  const rank = { critical: 0, continue: 1 };
+  return [...warnings].sort((a, b) => rank[a.severity] - rank[b.severity] || a.text.localeCompare(b.text));
+}
+
+/**
+ * Format one or more warning lines for the card footer. Pure (chalk only).
+ * Returns empty when there is nothing to say.
+ */
+export function formatProjectWarnings(warnings: ProjectWarning[]): string[] {
+  if (warnings.length === 0) return [];
+  const lines: string[] = [];
+  for (const w of sortProjectWarnings(warnings)) {
+    const mark = warningEmoji(w.severity);
+    const color = w.severity === 'critical' ? chalk.red : chalk.yellow;
+    lines.push(`  ${mark}  ${color(w.text)}`);
+    if (w.remediation) lines.push(`      ${chalk.dim(w.remediation)}`);
+  }
+  return lines;
 }
 
 /** Harvested signals not on the session list: repo-global merged PRs + releases, local artifacts, in a time window. */

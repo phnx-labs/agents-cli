@@ -1,11 +1,14 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { archiveRoutineTranscripts, executeJob, executeJobDetached, monitorRunningJobs, routineSpawnCwd } from './runner.js';
+import { spawn } from 'child_process';
+import { archiveRoutineTranscripts, executeJob, executeJobDetached, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd } from './runner.js';
 import { getRunDir, writeRunMeta } from './routines.js';
 import type { JobConfig, RunMeta } from './routines.js';
+import type { RotateCandidate, RotateResult } from './rotate.js';
 import { saveTask, hostsCacheDir } from './hosts/tasks.js';
+import { _resetPerfDbForTest, aggregateSamples } from './perf/db.js';
 
 /** Remove every run directory for a job (its parent dir), best-effort. */
 function cleanupJobRuns(jobName: string): void {
@@ -151,6 +154,38 @@ describe('routine transcript archiving', () => {
     const archived = path.join(runDir, 'sessions', 'claude', 'projects', 'tmp-project', 'sess-archive.jsonl');
     expect(fs.readFileSync(archived, 'utf-8')).toContain('"content":"hi"');
   });
+
+  // Regression: Kimi splits a session across state.json (metadata) and
+  // agents/main/wire.jsonl (the actual conversation) — see
+  // session/discover.ts:4382-4384. A ROUTINE_TRANSCRIPT_SPECS entry that only
+  // matched `.json` archived the metadata shell and silently dropped every
+  // message; both extensions must be captured.
+  it('archives BOTH state.json and wire.jsonl for a kimi routine session', () => {
+    const kimiJobName = 'archive-kimi-test';
+    const kimiRunId = 'run-kimi-1';
+    const overlayHome = path.join(getRunDir(kimiJobName, kimiRunId), 'overlay-home');
+    const sessionDir = path.join(overlayHome, '.kimi-code', 'sessions', 'workdir-hash', 'session_abc123');
+    const runDir = getRunDir(kimiJobName, kimiRunId);
+    fs.mkdirSync(path.join(sessionDir, 'agents', 'main'), { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, 'state.json'), '{"title":"demo"}', 'utf-8');
+    fs.writeFileSync(
+      path.join(sessionDir, 'agents', 'main', 'wire.jsonl'),
+      '{"role":"user","content":"the actual conversation"}\n',
+      'utf-8',
+    );
+
+    try {
+      archiveRoutineTranscripts({ jobName: kimiJobName, runId: kimiRunId, agent: 'kimi' }, runDir, overlayHome);
+
+      const archivedState = path.join(runDir, 'sessions', 'kimi', 'sessions', 'workdir-hash', 'session_abc123', 'state.json');
+      const archivedWire = path.join(runDir, 'sessions', 'kimi', 'sessions', 'workdir-hash', 'session_abc123', 'agents', 'main', 'wire.jsonl');
+      expect(fs.readFileSync(archivedState, 'utf-8')).toContain('demo');
+      expect(fs.readFileSync(archivedWire, 'utf-8')).toContain('the actual conversation');
+    } finally {
+      fs.rmSync(overlayHome, { recursive: true, force: true });
+      cleanupJobRuns(kimiJobName);
+    }
+  });
 });
 
 describe('command-mode routines (executeJob foreground)', () => {
@@ -259,6 +294,7 @@ describe('command-mode routines (executeJobDetached — daemon/cron path)', () =
     expect(final.command).toBe('exit 0');
     expect(final.duration).toBeGreaterThanOrEqual(0);
     expect(final.errorMessage).toBeUndefined();
+    expect(final.timeoutMs).toBe(60_000);
     // exit-code file is the posix restart-recovery source of truth (the sh subshell
     // wrapper writes it). Windows records status via child.on('exit') only — no file.
     if (process.platform !== 'win32') {
@@ -275,5 +311,160 @@ describe('command-mode routines (executeJobDetached — daemon/cron path)', () =
     expect(final.exitCode).toBe(3);
     expect(final.duration).toBeGreaterThanOrEqual(0);
     expect(final.errorMessage).toBeUndefined();
+  });
+
+  it('allows only one detached execution of the same routine at a time', async () => {
+    const command = `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 600)"`;
+    const config = commandConfig('cmd-det-single-flight', command.replace('600)', '5000)'));
+
+    const first = await executeJobDetached(config);
+    await expect(executeJobDetached(config)).rejects.toBeInstanceOf(RoutineAlreadyRunningError);
+
+    const final = await waitTerminal(config.name, first.runId, 7000);
+    expect(final.status).toBe('completed');
+  });
+
+  it('monitorRunningJobs kills a detached process after its persisted deadline', async () => {
+    const jobName = 'cmd-det-restart-timeout';
+    jobs.push(jobName);
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], {
+      stdio: 'ignore',
+      detached: process.platform !== 'win32',
+      windowsHide: true,
+    });
+    const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    const runId = 'restart-timeout-run';
+    const meta: RunMeta = {
+      jobName,
+      runId,
+      command: 'long-running command',
+      pid: child.pid ?? null,
+      spawnedAt: Date.now(),
+      timeoutMs: 25,
+      status: 'running',
+      startedAt: new Date(Date.now() - 100).toISOString(),
+      completedAt: null,
+      exitCode: null,
+    };
+    fs.mkdirSync(getRunDir(jobName, runId), { recursive: true });
+    writeRunMeta(meta);
+
+    monitorRunningJobs();
+
+    const final = JSON.parse(
+      fs.readFileSync(path.join(getRunDir(jobName, runId), 'meta.json'), 'utf-8'),
+    );
+    expect(final.status).toBe('timeout');
+    expect(final.errorMessage).toBe('exceeded configured timeout');
+    await Promise.race([
+      exited,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timed-out child stayed alive')), 1000)),
+    ]);
+    expect(() => process.kill(child.pid!, 0)).toThrow();
+  });
+});
+
+// Regression: executeJobDetached / executeCommandJobDetached (the daemon's
+// normal firing path) never wrapped their settle() with createTimer(...).end(),
+// unlike executeJob/executeJobOnCloud/executeJobOnHost — so every routine that
+// actually fired off the daemon's own schedule emitted ZERO perf.timing
+// samples, and `agents perf run` / `agents routines stats` had nothing to show
+// for the most common firing path. Verifies against the REAL disposable perf
+// warehouse (recordPerfTiming's dynamic import into perf/spool.ts respects the
+// same _resetPerfDbForTest override db.test.ts uses), not a mock.
+describe('detached routine fires record a perf.timing sample (agent.run)', () => {
+  const jobs: string[] = [];
+  let tmp: string;
+
+  function commandConfig(name: string, command: string): JobConfig {
+    jobs.push(name);
+    return {
+      name, schedule: '0 3 * * *', command,
+      mode: 'auto', effort: 'auto', timeout: '1m', enabled: true, prompt: '',
+    } as JobConfig;
+  }
+
+  async function waitForPerfSample(label: string, ms = 4000): Promise<ReturnType<typeof aggregateSamples>> {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const rows = aggregateSamples({ days: 1, kinds: ['perf.timing'], label });
+      if (rows.length > 0 || Date.now() > deadline) return rows;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-perf-'));
+    process.env.AGENTS_PERF_DB = path.join(tmp, 'perf.db');
+    _resetPerfDbForTest(process.env.AGENTS_PERF_DB);
+  });
+
+  afterEach(() => {
+    for (const j of jobs.splice(0)) cleanupJobRuns(j);
+    _resetPerfDbForTest(null);
+    delete process.env.AGENTS_PERF_DB;
+    delete process.env.AGENTS_PERF_SPOOL;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('executeCommandJobDetached records an agent.run sample with status + jobName on success', async () => {
+    await executeJobDetached(commandConfig('cmd-perf-ok', 'exit 0'));
+    const rows = await waitForPerfSample('agent.run');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0].n).toBeGreaterThan(0);
+  });
+
+  it('executeCommandJobDetached records the sample on a FAILED run too (not just success)', async () => {
+    await executeJobDetached(commandConfig('cmd-perf-fail', 'exit 5'));
+    const rows = await waitForPerfSample('agent.run');
+    expect(rows.length).toBeGreaterThan(0);
+  });
+});
+
+describe('resolveRoutineLaunch — zero-healthy accounts fail the routine loud (RUSH-2132)', () => {
+  function acct(version: string): RotateCandidate {
+    return {
+      agent: 'claude',
+      version,
+      accountKey: `claude:account=${version}`,
+      accountLabel: `${version}@example.com`,
+      email: `${version}@example.com`,
+      usageKey: `claude:org=${version}`,
+      usageStatus: 'rate_limited',
+      usageSnapshot: null,
+      usageError: null,
+      plan: 'Max',
+      signedIn: true,
+      lastActive: null,
+    };
+  }
+
+  it('throws the watchdog contract error (no healthy + resets + pinned escape hatch) when the strategy exhausts', async () => {
+    const err = await resolveRoutineLaunch(baseConfig(), process.cwd(), {
+      resolveRunVersion: async () => ({ version: '2.1.207', rotation: null, exhausted: [acct('2.1.207')] }),
+    }).then(() => null, (e: unknown) => e as Error);
+    expect(err).not.toBeNull();
+    expect(err!.message).toMatch(/no healthy claude account under strategy '\w+'/);
+    expect(err!.message).toContain('excluded: 2.1.207 (rate_limited)');
+    expect(err!.message).toContain('resets');
+    expect(err!.message).toContain('Use --strategy pinned to force the default.');
+  });
+
+  it('a healthy pick proceeds with the rotated version (no throw)', async () => {
+    const healthy = { ...acct('2.1.219'), usageStatus: 'available' as const };
+    const rotation: RotateResult = { picked: healthy, healthy: [healthy], excluded: [] };
+    const plan = await resolveRoutineLaunch(baseConfig(), process.cwd(), {
+      resolveRunVersion: async () => ({ version: '2.1.219', rotation }),
+    });
+    expect(plan.chain[0]).toEqual({ agent: 'claude', version: '2.1.219' });
+    expect(plan.rotation).toBe(rotation);
+  });
+
+  it('a non-exhausted null rotation (pinned-shaped) proceeds with the resolved version — unchanged', async () => {
+    const plan = await resolveRoutineLaunch(baseConfig(), process.cwd(), {
+      resolveRunVersion: async () => ({ version: '2.1.207', rotation: null }),
+    });
+    expect(plan.chain[0]).toEqual({ agent: 'claude', version: '2.1.207' });
+    expect(plan.rotation).toBeNull();
   });
 });

@@ -65,7 +65,7 @@ describe('fork command contributions', () => {
       },
       recordFork: (value) => { edge = value; },
       showRejection: (value) => { rejection = value; },
-      viewColumn: 'Beside',
+      viewColumn: 'Active',
       now: () => 123,
     }));
 
@@ -77,7 +77,7 @@ describe('fork command contributions', () => {
       strategy: 'balanced',
       host: 'chosen-host',
       local: false,
-      viewColumn: 'Beside',
+      viewColumn: 'Active',
     });
     expect(queuedCommand).toContain("--host 'chosen-host' --cwd '/Users/muqsit/src/agents-cli'");
     expect(queuedCommand).not.toContain('--remote-cwd');
@@ -110,7 +110,7 @@ describe('fork command contributions', () => {
       },
       recordFork: () => {},
       showRejection: () => {},
-      viewColumn: 'Beside',
+      viewColumn: 'Active',
       now: () => 123,
     });
     expect(launch).toEqual({
@@ -118,7 +118,7 @@ describe('fork command contributions', () => {
       strategy: 'balanced',
       host: undefined,
       local: true,
-      viewColumn: 'Beside',
+      viewColumn: 'Active',
     });
   });
 

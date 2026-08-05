@@ -113,6 +113,8 @@ export type EventType =
   | 'browser.close'
   | 'browser.navigate'
   | 'browser.screenshot'
+  // Computer (native desktop automation via the computer-helper daemon)
+  | 'computer.action'
   // Secrets (no values logged) — the value-free lifecycle vocabulary funnelled
   // through emitSecretAudit (lib/secrets/audit.ts).
   | 'secrets.get'
@@ -207,6 +209,7 @@ const EVENT_TYPE_TABLE: Record<EventType, true> = {
   'version.install': true, 'version.switch': true, 'version.remove': true,
   'skill.install': true, 'skill.remove': true,
   'browser.launch': true, 'browser.close': true, 'browser.navigate': true, 'browser.screenshot': true,
+  'computer.action': true,
   'secrets.get': true, 'secrets.unlocked': true, 'secrets.create': true, 'secrets.import': true, 'secrets.export': true, 'secrets.view': true, 'secrets.set': true, 'secrets.delete': true, 'secrets.rename': true,
   'cloud.dispatch': true, 'cloud.complete': true, 'cloud.cancel': true, 'cloud.message': true,
   'teams.create': true, 'teams.add': true, 'teams.start': true, 'teams.complete': true, 'teams.disband': true,
@@ -543,8 +546,6 @@ export function detectCaller(
 
   return { kind: stdoutIsTTY ? 'terminal' : 'script' };
 }
-
-// ─── Audit attribution ────────────────────────────────────────────────────────
 
 // ─── Core API ─────────────────────────────────────────────────────────────────
 
@@ -1003,12 +1004,16 @@ export function query(options: {
   eventTypes?: EventType[];
   level?: EventLevel;
   agent?: string;
+  /** Only events stamped with this session id (payload `sessionId`, the provenance floor). */
+  sessionId?: string;
   caller?: string;
   command?: string;
   module?: string;
+  /** Only events carrying this bundle name in their payload (e.g. secrets events). */
+  bundle?: string;
   limit?: number;
 }): EventRecord[] {
-  const { startDate, endDate = new Date(), eventTypes, level, agent, caller, command, module, limit } = options;
+  const { startDate, endDate = new Date(), eventTypes, level, agent, sessionId, caller, command, module, bundle, limit } = options;
   const results: EventRecord[] = [];
 
   if (!fs.existsSync(eventsDir())) return results;
@@ -1051,10 +1056,15 @@ export function query(options: {
         if (eventTypes && !eventTypes.includes(record.event)) continue;
         if (level && (record.level ?? levelFor(record.event as EventType)) !== level) continue;
         if (agent && record.agent !== agent) continue;
+        if (sessionId && record.sessionId !== sessionId) continue;
         if (caller && record.caller !== caller) continue;
         if (command && record.command !== command &&
             !(typeof record.command === 'string' && record.command.startsWith(command + ' '))) continue;
         if (module && record.module !== module) continue;
+        // Filter bundle in the SAME scan, before the limit cutoff — a post-filter
+        // on the already-capped result silently drops matching-bundle records that
+        // fell outside the newest-`limit` window (a data-loss bug for an audit query).
+        if (bundle && record.bundle !== bundle) continue;
 
         results.push(record);
 

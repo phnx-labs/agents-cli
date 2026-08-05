@@ -41,8 +41,9 @@ coverage/
 # Generated test reports (session-tracker scenario recorder, run-report aggregator)
 **/tests/reports/
 
-# Internal plans (not shipped)
-.agents/plans/
+# Implementation plans are durable review artifacts; worktrees/scratch stay local.
+!.agents/plans/
+!.agents/plans/*.html
 .agents/worktrees/
 .agents/scratch/
 .agents/artifacts/

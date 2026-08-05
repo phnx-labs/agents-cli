@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, STRATEGY_LAUNCH_AGENTS, usesManagedAgentLaunch, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
+import { BUILT_IN_AGENTS, getBuiltInByKey, getBuiltInDefByTitle, getBuiltInByPrefix, isAgentRunner, usesManagedAgentLaunch, modeFlagForAgent, AgentLaunchMode, RunStrategy, buildAgentLaunchCommand, wrapNativeAgentCommand, shquote } from '../core/agents';
 import { loadAutoLaunchPreferences, isAutoLaunchEnabled, isAutoLaunchPreferred, readDeviceMaxConcurrent } from '../core/deviceAutoLaunch';
 import { parseSpawnRequest, resolveSpawnSurface, SpawnRequest } from '../core/spawn';
 import {
@@ -10,6 +10,7 @@ import {
 } from './agents.vscode';
 import * as claudemd from './claudemd.vscode';
 import { AgentsMarkdownEditorProvider, swarmCurrentDocument } from './customEditor';
+import { AgentsHtmlReaderProvider } from './htmlReader';
 import * as git from './git.vscode';
 import { AgentSettings, hasLoginEnabled, PromptEntry, QUICK_LAUNCH_SLOT_KEYS, getQuickLaunchSlot, QuickLaunchSlot, QuickLaunchSlotKey } from '../core/settings';
 import { listRegisteredDevices, countRunningAgents, fetchDeviceStats, resolveSecret } from './deviceHealth.vscode';
@@ -26,10 +27,8 @@ import {
 import * as settings from './settings.vscode';
 import * as swarm from './swarm.vscode';
 import {
-  startWatchdog,
-  setWatchdogMonitorConnectivity,
-  setWatchdogArmSink,
-  ingestWatchdogVersionsFact,
+  registerWatchdogPaletteCommands,
+  migrateAutoRotateSettingOnce,
 } from './watchdog.vscode';
 import { startWatchdogBridge } from '../mcp/watchdog-bridge';
 import { ensureWatchdogMcpInstalled } from '../mcp/watchdogInstall';
@@ -40,15 +39,9 @@ import * as sessionTracker from './sessionTracker';
 import { runRecapHeadless, isRecapSupported } from './recap.vscode';
 import { buildAgentTerminalEnv } from '../core/terminals';
 import {
-  AgentsViewJsonAgent,
-  AgentsViewJsonVersion,
-  pickBestVersion,
-  sessionUsedPercent,
-  buildLaunchCommand,
-  buildHostLaunchCommand,
   buildAgentRunLaunchCommand,
+  buildAutoRunLaunchCommand,
   buildResumeInput,
-  isVersionStillUsable,
 } from '../core/resumeInBest';
 import * as os from 'os';
 import * as fsSync from 'fs';
@@ -100,7 +93,6 @@ import {
   isTmuxAvailable
 } from './tmux';
 import { registerReconnect, hasTmuxMapping, NonRetryableError, type ReattachTarget, type ReconnectDeps } from './reconnect';
-import { normalizeTerminalMode, resolveTerminalMode } from '../core/terminalMode';
 import { DEFAULT_DISPLAY_PREFERENCES } from '../core/settings';
 import * as readiness from './terminalReadiness';
 import { resolveAlias, isAgentInstalled, checkInstalledAgentsViaCli } from '../core/agentModels';
@@ -138,6 +130,9 @@ import {
   abandonedCandidates,
   buildResumeCandidates,
   defaultPickedIds,
+  distinctiveTopic,
+  nextPreselection,
+  sharedTopicPrefixes,
   RESUME_PICKER_CACHE_KEY,
   STATE_HEADINGS,
   type RecentSessionRow,
@@ -176,9 +171,10 @@ async function ensureAgentsCliInstalled(): Promise<void> {
     }
   }
 }
-import { supportsPrewarming, buildVersionedResumeCommand, PREWARM_CONFIGS, PrewarmAgentType } from '../core/prewarm';
+import { supportsPrewarming, buildVersionedResumeCommand, exitSequenceFor } from '../core/prewarm';
 import { generateClaudeSessionId, listOpencodeSessions } from '../core/prewarm.simple';
 import { liveSessionIdForShell } from '../core/liveSession';
+import { displayIdentity } from '../core/statusIdentity';
 import { getSessionPathBySessionId, getSessionPreviewInfo, getOpenCodeSessionPreviewInfo, getCursorSessionPreviewInfo } from './sessions.vscode';
 import * as tasksImport from './tasks.vscode';
 import { SOURCE_BADGES } from '../core/tasks';
@@ -192,10 +188,6 @@ let agentStatusBarItem: vscode.StatusBarItem | undefined;
 let defaultAgentTitle: string = CLAUDE_TITLE;
 let secondaryAgentTitle: string = CODEX_TITLE;
 let lastFocusedTerminal: vscode.Terminal | null = null;
-const STATUS_BAR_AGENTS_VIEW_TTL_MS = 30_000;
-// Keyed by agent, or `agent@host` for an offloaded terminal — account usage is
-// per machine, so a device's view must never be served from this box's entry.
-const agentsViewCache = new Map<string, { fetchedAtMs: number; data: AgentsViewJsonAgent | null }>();
 const statusIdentityInFlight = new Set<string>();
 
 // BUILT_IN_AGENTS is now imported from ./agents
@@ -826,8 +818,10 @@ async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOp
     vscode.window.showWarningMessage(`New Agent: ${agentKey} is not available.`);
     return;
   }
-  const strategy: RunStrategy | undefined =
-    (STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(agentKey) ? 'balanced' : undefined;
+  // Balanced account/version rotation for every agent runner, always — the launch
+  // contract has no per-harness exception (apps/factory/AGENTS.md). Shell is not a
+  // runner, so it carries no strategy (it never routes through `agents run`).
+  const strategy: RunStrategy | undefined = isAgentRunner(agentKey) ? 'balanced' : undefined;
 
   let launched = false;
   try {
@@ -1266,7 +1260,7 @@ export async function activate(context: vscode.ExtensionContext) {
   // Monitor runtime (#67): the leader runs the broadcast host; EVERY window runs
   // a thin follower that reports its terminal tuples to the monitor and resolves
   // broadcast facts back to its own terminals. Migrations #68-71 move the heavy
-  // probes/watchers/watchdog/panel behind this gate; they are NOT moved here.
+  // probes/watchers/panel behind this gate; they are NOT moved here.
   initMonitorHost(context);
   initMonitorFollower(context);
 
@@ -1395,19 +1389,17 @@ export async function activate(context: vscode.ExtensionContext) {
     console.warn('[WATCHDOG] ensureWatchdogMcpInstalled failed:', err);
   });
 
-  // Version auto-rotate loop. NOT a nudger — autonomous stall detection and
-  // nudge injection were retired; the CLI daemon watchdog is the sole injector.
-  // The extension keeps only the rotate-on-exhaustion capability the CLI lacks.
-  context.subscriptions.push(
-    startWatchdog({
-      rotateTerminal: (entry) =>
-        rotateTerminalToBestVersion(context, entry, {
-          closeOldTerminal: true,
-          focusNewTerminal: false,
-          notifyOnFailure: false,
-        }),
-    })
-  );
+  // The extension holds NO watchdog loop: the CLI daemon watchdog
+  // (`agents watchdog enable`, under `agents __daemon-run`) is the sole
+  // watchdog — stall nudging AND rotate-on-exhaustion, injecting into vscodium
+  // tabs via the `/inject` URI verb over live-terminals.json and writing the
+  // shared watchdog.log the Factory Floor status card reads. What remains here
+  // is the palette on/off and the one-time settings migration.
+  context.subscriptions.push(...registerWatchdogPaletteCommands(vscode.commands.registerCommand));
+
+  // Migrate an explicit `agents.watchdog.autoRotate: false` (a deleted setting)
+  // to the CLI watchdog's off state — once per user.
+  void migrateAutoRotateSettingOnce(context.globalState);
 
   // Ensure CLAUDE.md has Swarm instructions if Swarm is enabled
   claudemd.ensureSwarmInstructions();
@@ -1502,14 +1494,19 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Register custom markdown editor
+  // Register custom markdown + HTML readers
   try {
     context.subscriptions.push(
       AgentsMarkdownEditorProvider.register(context)
     );
   } catch (error) {
     // Editor already registered (hot reload) - continue activation
-    console.log('Custom editor already registered, continuing...');
+    console.log('Custom markdown editor already registered, continuing...');
+  }
+  try {
+    context.subscriptions.push(AgentsHtmlReaderProvider.register(context));
+  } catch (error) {
+    console.log('Custom HTML reader already registered, continuing...');
   }
 
   try {
@@ -1644,11 +1641,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('agents.newAgentHSplit', async () => {
-      const config = vscode.workspace.getConfiguration('agents');
-      const tmuxEnabled = normalizeTerminalMode(config.get('terminalMode')) !== 'native';
       const terminal = vscode.window.activeTerminal;
 
-      if (tmuxEnabled && terminal && isTmuxTerminal(terminal)) {
+      if (terminal && isTmuxTerminal(terminal)) {
         const state = getTmuxState(terminal);
         if (state) {
           const agentDef = getBuiltInByKey(state.agentType);
@@ -1674,11 +1669,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('agents.newAgentVSplit', async () => {
-      const config = vscode.workspace.getConfiguration('agents');
-      const tmuxEnabled = normalizeTerminalMode(config.get('terminalMode')) !== 'native';
       const terminal = vscode.window.activeTerminal;
 
-      if (tmuxEnabled && terminal && isTmuxTerminal(terminal)) {
+      if (terminal && isTmuxTerminal(terminal)) {
         const state = getTmuxState(terminal);
         if (state) {
           const agentDef = getBuiltInByKey(state.agentType);
@@ -1739,26 +1732,6 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agents.enableTmux', async () => {
-      // Back-compat command id: flips terminalMode back to 'auto' (tmux by
-      // default when available). The setting is the source of truth now.
-      const config = vscode.workspace.getConfiguration();
-      await config.update('agents.terminalMode', 'auto', vscode.ConfigurationTarget.Global);
-      vscode.window.showInformationMessage('Tmux mode enabled (auto). New agent terminals will run inside tmux when available.');
-      await updateContextKeys(context);
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('agents.disableTmux', async () => {
-      const config = vscode.workspace.getConfiguration();
-      await config.update('agents.terminalMode', 'native', vscode.ConfigurationTarget.Global);
-      vscode.window.showInformationMessage('Tmux mode disabled. New agent terminals will use VS Code editor terminals.');
-      await updateContextKeys(context);
-    })
-  );
-
-  context.subscriptions.push(
     vscode.commands.registerCommand('agents.enableReader', async () => {
       const current = settings.getSettings(context);
       const next: AgentSettings = {
@@ -1766,7 +1739,9 @@ export async function activate(context: vscode.ExtensionContext) {
         editor: { ...(current.editor ?? { markdownViewerEnabled: true }), markdownViewerEnabled: true }
       };
       await settings.saveSettings(context, next);
-      vscode.window.showInformationMessage('Markdown reader enabled. .md files will open in the Agents Markdown Editor.');
+      vscode.window.showInformationMessage(
+        'Agents Reader enabled. .md opens in the Notion-style editor; .html opens as a rendered preview.'
+      );
       await updateContextKeys(context);
     })
   );
@@ -1779,7 +1754,9 @@ export async function activate(context: vscode.ExtensionContext) {
         editor: { ...(current.editor ?? { markdownViewerEnabled: true }), markdownViewerEnabled: false }
       };
       await settings.saveSettings(context, next);
-      vscode.window.showInformationMessage('Markdown reader disabled. .md files will open in the default text editor.');
+      vscode.window.showInformationMessage(
+        'Agents Reader disabled. .md and .html open in the default text editor.'
+      );
       await updateContextKeys(context);
     })
   );
@@ -2286,15 +2263,11 @@ async function openSingleAgent(
   // `agents run <agent> --host <device>` so the CLI does the SSH offload —
   // including agents that launch as raw binaries locally.
   const targetHost = host && host !== 'local' ? host : undefined;
-  const config = vscode.workspace.getConfiguration('agents');
-  const terminalMode = normalizeTerminalMode(config.get('terminalMode'));
-  // 'auto' (default) and 'tmux' both need the availability probe; 'native' skips it.
-  const tmuxAvailable = terminalMode === 'native' ? false : await isTmuxAvailable();
-  const { useTmux: tmuxOk, warnUnavailable } = resolveTerminalMode(terminalMode, tmuxAvailable);
-
-  if (warnUnavailable) {
-    vscode.window.showWarningMessage('Tmux mode is forced, but tmux is not available on PATH. Falling back to VS Code terminals.');
-  }
+  // Tmux is always on when available: it gives every terminal a named, addressable
+  // session so the reconnect pass can re-attach a live agent/shell after a window
+  // crash or SSH drop. The only fallback is a plain VS Code terminal when tmux
+  // isn't installed (Windows / no binary) — there is no user-facing "terminal mode".
+  const tmuxOk = await isTmuxAvailable();
 
   // Build command with default model if configured
   const builtInDef = getBuiltInDefByTitle(agentConfig.title);
@@ -2335,11 +2308,12 @@ async function openSingleAgent(
   // (pinnedVersion / strategy) from the per-strategy launch commands. Only
   // Claude's session is generated up-front for the resume flow; other agents
   // detect their session post-spawn.
-  const LAUNCHABLE: ReadonlySet<string> = new Set(['claude', 'codex', 'gemini', 'opencode', 'cursor', 'antigravity']);
-  // Local: only LAUNCHABLE agents route through `agents run`; others use their
-  // raw command. Remote (targetHost): ALL agents route through `agents run
-  // --host` so every agent can be offloaded onto a device.
-  if (agentKey && (LAUNCHABLE.has(agentKey) || targetHost)) {
+  // EVERY agent runner routes through `agents run` — local, auto-host, and
+  // picked-host launches alike — so `--strategy balanced --mode auto` applies
+  // uniformly (grok/kimi/droid included; they used to launch as raw binaries with
+  // no rotation). Shell is the only non-runner and keeps its raw command. This is
+  // the launch contract in apps/factory/AGENTS.md; there is no per-harness list.
+  if (agentKey && isAgentRunner(agentKey)) {
     // Mint Claude's session id up front for LOCAL and REMOTE alike. The id is
     // what every downstream surface keys off: the status bar, the auto-label
     // poller that fills in the tab title, and Session Resume / Trace / Fork.
@@ -2353,6 +2327,10 @@ async function openSingleAgent(
       sessionId = generateClaudeSessionId();
       console.log(`[SESSION] Claude using on-demand session ID: ${sessionId}${targetHost ? ` (host ${targetHost})` : ''}`);
     }
+    // No remote host → this machine. Pass `local: true` so buildAgentLaunchCommand
+    // does NOT emit `--device auto` (that flag is only for the explicit Auto path
+    // which resolves a host first, or for openSingleAgentWithQueue callers that
+    // set local: false). New Grok/Kimi/… must stay local with balanced strategy.
     command = buildAgentLaunchCommand(
       agentKey,
       sessionId,
@@ -2361,7 +2339,11 @@ async function openSingleAgent(
       pinnedVersion,
       strategy,
       undefined,
-      { host: targetHost, cwd: targetHost ? cwd : undefined },
+      {
+        host: targetHost,
+        local: !targetHost,
+        cwd: targetHost ? cwd : undefined,
+      },
     );
   }
 
@@ -2389,8 +2371,11 @@ async function openSingleAgent(
         : {});
     }
 
-    if (agentKey && supportsPrewarming(agentKey)) {
-      terminals.setAgentType(terminal, agentKey);
+    // Track + poll any known harness, not just the prewarm five (#1747), so
+    // grok/kimi/droid/antigravity tabs are resumable through restore/reopen/reload.
+    const resumeKey = agentKey ? agentKeyFromSession(agentKey) : null;
+    if (resumeKey) {
+      terminals.setAgentType(terminal, resumeKey);
     }
     // Stamp the host BEFORE the label poller starts: the poller reads the entry
     // to decide whether to look the session up locally or over `--host`.
@@ -2399,7 +2384,7 @@ async function openSingleAgent(
     }
     if (sessionId) {
       terminals.setSessionId(terminal, sessionId);
-      if (agentKey && supportsPrewarming(agentKey)) {
+      if (resumeKey) {
         startAutoLabelPollerForTerminal(terminal, context);
       }
     }
@@ -2439,8 +2424,10 @@ async function openSingleAgent(
   terminals.register(terminal, terminalId, agentConfig, pid, context);
   readiness.registerTerminal(terminal);
 
-  if (agentKey && supportsPrewarming(agentKey)) {
-    terminals.setAgentType(terminal, agentKey);
+  // Track + poll any known harness, not just the prewarm five (#1747).
+  const resumeKey = agentKey ? agentKeyFromSession(agentKey) : null;
+  if (resumeKey) {
+    terminals.setAgentType(terminal, resumeKey);
   }
   // Stamp the host BEFORE the label poller starts: the poller reads the entry
   // to decide whether to look the session up locally or over `--host`.
@@ -2449,7 +2436,7 @@ async function openSingleAgent(
   }
   if (sessionId) {
     terminals.setSessionId(terminal, sessionId);
-    if (agentKey && supportsPrewarming(agentKey)) {
+    if (resumeKey) {
       startAutoLabelPollerForTerminal(terminal, context);
     }
   }
@@ -2517,15 +2504,11 @@ async function spawnCommandTerminal(
   const terminalId = terminals.nextId(agentConfig.prefix);
   const title = buildTerminalTitle(agentConfig.title, undefined, context, null);
 
-  // Honour `agents.terminalMode` here exactly as the Cmd+Shift+J launch path does
-  // (see launchAgent). Without this the URI path was hardwired to a plain VS Code
-  // terminal, so a session spawned by `agents sessions resume --vscodium` died with
-  // the window and left no tmux coords for the reconnect pass to re-attach — the
-  // one launch path that opted out of the crash resilience everything else has.
-  const config = vscode.workspace.getConfiguration('agents');
-  const terminalMode = normalizeTerminalMode(config.get('terminalMode'));
-  const tmuxAvailable = terminalMode === 'native' ? false : await isTmuxAvailable();
-  const { useTmux } = resolveTerminalMode(terminalMode, tmuxAvailable);
+  // Tmux-back the URI-spawned session exactly like the Cmd+Shift+J launch path
+  // (see launchAgent) so a session spawned by `agents sessions resume --vscodium`
+  // survives a window crash for the reconnect pass to re-attach. Plain-terminal
+  // fallback only when tmux isn't installed.
+  const useTmux = await isTmuxAvailable();
 
   const parent = req.split ? aliveSpawnParent() : undefined;
   const surface = resolveSpawnSurface({
@@ -3147,10 +3130,10 @@ async function copySessionId() {
  * a shell tab has no conversation to resume.
  *
  * The OTHER resume surfaces — `restoreAgentTerminals` (reload), the reopen-last
- * command, and reload-active-terminal — still gate on `supportsPrewarming`, so
- * grok/kimi/droid/antigravity do not come back through those. Widening them
- * means touching the crash-restore persistence path, which is deliberately out
- * of scope here; tracked in issue #1747.
+ * command, and reload-active-terminal — now gate on this same registry check
+ * rather than `supportsPrewarming`, so grok/kimi/droid/antigravity come back
+ * through those too (#1747); reload falls back to a generic exit sequence for
+ * agents without a PREWARM_CONFIGS entry.
  */
 function agentKeyFromSession(agent: string): SessionAgentType | null {
   if (!agent || agent === 'shell') return null;
@@ -3265,6 +3248,9 @@ interface ResumeCandidateItem extends vscode.QuickPickItem {
 
 function resumeCandidateItems(candidates: ResumeCandidate[], checked: ReadonlySet<string>): ResumeCandidateItem[] {
   const items: ResumeCandidateItem[] = [];
+  // Computed over the whole set, so "shared" means shared by the rows the user
+  // is actually looking at rather than by a fixed list of known phrases.
+  const prefixes = sharedTopicPrefixes(candidates.map((c) => c.topic ?? '').filter(Boolean));
   let group: ResumeState | undefined;
   for (const c of candidates) {
     if (c.state !== group) {
@@ -3272,13 +3258,16 @@ function resumeCandidateItems(candidates: ResumeCandidate[], checked: ReadonlySe
       items.push({ label: STATE_HEADINGS[c.state], kind: vscode.QuickPickItemKind.Separator });
     }
     const agentLabel = c.version ? `${c.agent}@${c.version}` : c.agent;
-    const where = c.host ? ` · ${c.host}` : '';
     const viewing = c.viewingIn ? ` · ${c.viewingIn}` : '';
     const marker = c.state === 'detached' ? '$(debug-disconnect) ' : '';
+    // Device leads the row: it is present on every session and, across a
+    // multi-machine fleet, it is the field that most often decides whether a
+    // row is the one you want. The topic follows with shared boilerplate
+    // removed, so what remains is what differs between rows.
     items.push({
-      label: `${marker}${c.shortId}  ${c.topic || '(no topic)'}`,
-      description: `${agentLabel} · ${formatSessionWhen(new Date(c.lastActivityMs).toISOString())}${where}${viewing}`,
-      detail: `${c.project || '-'}${c.cwd ? `  ${c.cwd}` : ''}`,
+      label: `${marker}[${c.host || 'local'}] ${c.shortId}  ${distinctiveTopic(c, prefixes) || '—'}`,
+      description: `${agentLabel} · ${formatSessionWhen(new Date(c.lastActivityMs).toISOString())}${viewing}`,
+      detail: c.cwd ?? '',
       picked: checked.has(c.id),
       candidate: c,
     });
@@ -3362,20 +3351,25 @@ async function resumeSessionsBatch(
   quickPick.matchOnDescription = true;
   quickPick.matchOnDetail = true;
 
-  // Ids rendered by the previous applyItems call. On a refresh swap, only
-  // detached sessions NOT in this set get pre-ticked — re-applying every
-  // default would re-tick a session the user deliberately unticked.
-  let renderedIds = new Set<string>();
+  // The picker's memory of what the user turned off, carried across list swaps
+  // by nextPreselection (which owns the rules and is unit-tested).
+  const unticked = new Set<string>();
+  let rendered: ResumeCandidate[] = [];
   const applyItems = (candidates: ResumeCandidate[]) => {
     // Assigning items resets the checks, so carry the user's current selection
     // across the swap; newly-seen detached sessions still get pre-ticked.
     const checked = new Set(
       quickPick.selectedItems.map((i) => i.candidate?.id).filter((id): id is string => !!id),
     );
+    const preselected = nextPreselection({ previous: rendered, checked, next: candidates, unticked });
+    const items = resumeCandidateItems(candidates, preselected);
+    quickPick.items = items;
+    // `picked` alone does not populate `selectedItems`, which is what onDidAccept
+    // reads and what the "N Selected" counter shows — assign it explicitly or the
+    // pre-ticked rows resolve to an empty selection.
+    quickPick.selectedItems = items.filter((i) => i.candidate && preselected.has(i.candidate.id));
+    rendered = candidates;
     const defaults = defaultPickedIds(candidates);
-    const preselected = new Set([...defaults.filter((id) => !renderedIds.has(id)), ...checked]);
-    quickPick.items = resumeCandidateItems(candidates, preselected);
-    renderedIds = new Set(candidates.map((c) => c.id));
     const detachedCount = defaults.length;
     quickPick.placeholder = detachedCount > 0
       ? `${detachedCount} detached session${detachedCount === 1 ? '' : 's'} pre-selected — space toggles, enter opens each in a tab`
@@ -3432,67 +3426,13 @@ async function resumeSessionsBatch(
   );
 }
 
-async function fetchAgentsViewJson(
-  agentKey: PrewarmAgentType,
-  opts: { quiet?: boolean; useCache?: boolean; host?: string } = {}
-): Promise<AgentsViewJsonAgent | null> {
-  // Accounts and their remaining usage are PER MACHINE. A terminal offloaded to
-  // a device must be judged against that device's installs, not this box's, or
-  // the caller reads one machine's quota and acts on another's.
-  const host = opts.host;
-  const cacheKey = host ? `${agentKey}@${host}` : agentKey;
-  const useCache = opts.useCache === true;
-  if (useCache) {
-    const cached = agentsViewCache.get(cacheKey);
-    if (cached && Date.now() - cached.fetchedAtMs < STATUS_BAR_AGENTS_VIEW_TTL_MS) {
-      return cached.data;
-    }
-  }
-
-  const { runAgents } = await import('../core/agentsBin');
-  try {
-    const target = host ? ` --host ${shquote(host)} --no-tty` : '';
-    const { stdout } = await runAgents(`view ${agentKey}${target} --json`, {
-      maxBuffer: 5 * 1024 * 1024,
-      timeout: host ? 30_000 : undefined,
-    });
-    const parsed = JSON.parse(stdout) as AgentsViewJsonAgent;
-    if (!parsed || !Array.isArray(parsed.versions)) {
-      if (useCache) {
-        agentsViewCache.set(cacheKey, { fetchedAtMs: Date.now(), data: null });
-      }
-      return null;
-    }
-    if (useCache) {
-      agentsViewCache.set(cacheKey, { fetchedAtMs: Date.now(), data: parsed });
-    }
-    return parsed;
-  } catch (err: any) {
-    if (useCache) {
-      agentsViewCache.set(cacheKey, { fetchedAtMs: Date.now(), data: null });
-    }
-    if (!opts.quiet) {
-      const msg = err?.stderr || err?.message || String(err);
-      if (msg.includes('unknown option') || msg.includes('--json')) {
-        vscode.window.showInformationMessage(
-          'Needs @swarmify/agents-cli >= 1.13.0. Run: npm i -g @swarmify/agents-cli'
-        );
-      } else {
-        vscode.window.showInformationMessage(`Failed to query agents view: ${msg.slice(0, 120)}`);
-      }
-    }
-    return null;
-  }
-}
-
-export type RotateOutcome =
-  | { status: 'no_session' }
-  | { status: 'unsupported_agent' }
-  | { status: 'view_unavailable' }
-  | { status: 'already_usable'; agentKey: string; version: string; usedPercent: number }
-  | { status: 'no_versions'; agentKey: string }
-  | { status: 'rotated'; agentKey: string; oldVersion?: string; newVersion: string; newSessionId: string; email: string | null; usedPercent: number };
-
+/**
+ * `Agents: Resume in Best Profile` — reopen the ACTIVE tab's session via
+ * `agents run auto`: the CLI resolves host (affinity) → harness (cross-harness
+ * headroom) → account (balanced) and fails loud in the fresh terminal when
+ * nothing is healthy. Same launch→ready→/continue flow as the Pick-Harness
+ * resume (launchResumeTerminal). Fork-style: the original tab is left running.
+ */
 async function resumeCurrentInBestProfile(context: vscode.ExtensionContext) {
   const activeTerminal = vscode.window.activeTerminal;
   if (!activeTerminal) {
@@ -3500,18 +3440,39 @@ async function resumeCurrentInBestProfile(context: vscode.ExtensionContext) {
     return;
   }
   const terminalEntry = terminals.getByTerminal(activeTerminal);
-  if (!terminalEntry) {
+  if (!terminalEntry?.sessionId) {
     vscode.window.showInformationMessage('Active terminal has no session to resume');
     return;
   }
-  const outcome = await rotateTerminalToBestVersion(context, terminalEntry, {
-    closeOldTerminal: false,
-    focusNewTerminal: true,
-    notifyOnFailure: true,
-  });
-  if (outcome.status === 'no_session') {
-    vscode.window.showInformationMessage('Active terminal has no session to resume');
+  const agentKey = terminalEntry.agentType
+    || prefixToAgentType(terminalEntry.agentConfig?.prefix ?? null);
+  if (!agentKey || !supportsPrewarming(agentKey)) {
+    return;
   }
+  const builtIn = BUILT_IN_AGENTS.find(a => a.key === agentKey);
+  if (!builtIn) {
+    vscode.window.showInformationMessage(`No built-in agent config for ${agentKey}`);
+    return;
+  }
+
+  // `--session-id` pins the NEW session id; the CLI honors it only when it
+  // picks claude (claude-only flag) and ignores it otherwise. The harness is
+  // unknown at spawn: stamp the outgoing harness as the prior (the session
+  // feed's read-back corrects it) and arm the claude session-file fast path
+  // optimistically — any other pick simply never fires that watch and the
+  // generic process probe resolves agentReady.
+  const newSessionId = randomUUID();
+  const host = terminalEntry.host;
+  await launchResumeTerminal(context, {
+    builtIn,
+    stampAgentKey: agentKey,
+    armAgentKey: 'claude',
+    launchCmd: buildAutoRunLaunchCommand({ host, sessionId: newSessionId }),
+    newSessionId,
+    oldSessionId: terminalEntry.sessionId,
+    host,
+    statusMessage: `Resumed via agents run auto${host ? ` on ${host}` : ''} · ${newSessionId.slice(0, 8)}`,
+  });
 }
 
 /**
@@ -3618,16 +3579,107 @@ async function resumeCurrentPickHarness(context: vscode.ExtensionContext) {
   });
 }
 
+/** Everything the shared resume launch needs to open and arm the fresh tab. */
+interface ResumeLaunchPlan {
+  /** Built-in agent whose icon/prefix/title the fresh tab borrows. */
+  builtIn: (typeof BUILT_IN_AGENTS)[number];
+  /** Harness stamped on the terminal entry at spawn. */
+  stampAgentKey: string;
+  /** Harness the readiness session-file fast path arms for. */
+  armAgentKey: string;
+  launchCmd: string;
+  newSessionId: string;
+  oldSessionId: string;
+  host?: string;
+  statusMessage: string;
+}
+
 /**
- * Open a fresh tab running `agents run <harness> --interactive` (balanced
- * rotation picks the account — the user is switching harness, not account), on
- * the session's device when offloaded, then feed it the OLD session through
- * the universal continue replay once the TUI is live. The launch→ready→send
- * shape mirrors the proven tail of rotateTerminalToBestVersion.
+ * Open a fresh tab, send the plan's launch command once the prompt is ready,
+ * then feed it the OLD session through the universal continue replay once the
+ * TUI is live. Shared by `Agents: Resume (Pick Harness)` and `Agents: Resume
+ * in Best Profile`.
  *
  * Fork-style contract: the original tab is left running. Non-claude targets
  * reuse the old session id (only Claude can pin a fresh one up front), so two
  * live processes can share one transcript — same contract as `Agents: Fork`.
+ */
+async function launchResumeTerminal(
+  context: vscode.ExtensionContext,
+  plan: ResumeLaunchPlan,
+): Promise<void> {
+  const agentConfig = createAgentConfig(
+    context.extensionPath,
+    plan.builtIn.title,
+    plan.builtIn.command,
+    plan.builtIn.icon,
+    plan.builtIn.prefix,
+  );
+  const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+
+  const terminalId = terminals.nextId(plan.builtIn.prefix);
+  const title = buildTerminalTitle(agentConfig.title, undefined, context, plan.newSessionId);
+  const terminal = vscode.window.createTerminal({
+    iconPath: agentConfig.iconPath,
+    location: { viewColumn: vscode.ViewColumn.Active },
+    name: title,
+    env: buildAgentTerminalEnv(terminalId, plan.newSessionId, workspacePath),
+    isTransient: true,
+  });
+
+  const pid = await terminal.processId;
+  terminals.register(terminal, terminalId, agentConfig, pid, context);
+  readiness.registerTerminal(terminal);
+  terminals.setSessionId(terminal, plan.newSessionId);
+  terminals.setAgentType(terminal, plan.stampAgentKey as SessionAgentType);
+  if (plan.host) terminals.setHost(terminal, plan.host);
+  startAutoLabelPollerForTerminal(terminal, context);
+
+  // Always inline the central continue.md: it works in ANY harness, and we
+  // can't know whether the target version's home has the /continue slash
+  // command synced (for a remote host we can't even check from here).
+  let centralContinueMdBody: string | null = null;
+  try {
+    centralContinueMdBody = fsSync.readFileSync(
+      path.join(os.homedir(), '.agents-system', 'commands', 'continue.md'),
+      'utf-8',
+    );
+  } catch {
+    centralContinueMdBody = null;
+  }
+  const resumeInput = buildResumeInput(plan.oldSessionId, false, centralContinueMdBody);
+
+  try {
+    await readiness.waitFor(terminal, 'promptReady');
+  } catch (err) {
+    console.warn(`[RESUME] promptReady wait FAILED: ${err} — sending launch anyway`);
+  }
+  terminal.sendText(plan.launchCmd);
+  readiness.armAgentReady(terminal, {
+    agentKey: plan.armAgentKey,
+    sessionId: plan.newSessionId,
+    cwd: workspacePath,
+  });
+  terminal.show();
+
+  // Type the payload, then Enter as a separate keystroke — Claude's Ink TUI
+  // needs the explicit `\r`, and multi-line input swallows a same-tick one.
+  const submitToTui = () => {
+    terminal.sendText(resumeInput, false);
+    setTimeout(() => terminal.sendText('\r', false), 300);
+  };
+  readiness.waitFor(terminal, 'agentReady').then(submitToTui, (err) => {
+    console.warn(`[RESUME] agentReady wait FAILED: ${err} — sending resume input anyway`);
+    submitToTui();
+  });
+
+  vscode.window.setStatusBarMessage(plan.statusMessage, 5000);
+}
+
+/**
+ * `Agents: Resume (Pick Harness)` launch: `agents run <harness> --interactive`
+ * (balanced rotation picks the account — the user is switching harness, not
+ * account), on the session's device when offloaded.
  */
 async function launchResumeInHarness(
   context: vscode.ExtensionContext,
@@ -3638,320 +3690,24 @@ async function launchResumeInHarness(
     vscode.window.showInformationMessage(`No built-in agent config for ${opts.agentKey}`);
     return;
   }
-  const agentConfig = createAgentConfig(
-    context.extensionPath,
-    builtIn.title,
-    builtIn.command,
-    builtIn.icon,
-    builtIn.prefix,
-  );
-  const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
-
-  // Same contract as the rotate flow: only Claude can pin its new session id
-  // up front (--session-id), which gives readiness an exact jsonl to watch;
-  // other harnesses reuse the old id and the generic process probe.
+  // Only Claude can pin its new session id up front (--session-id), which
+  // gives readiness an exact jsonl to watch; other harnesses reuse the old id
+  // and the generic process probe.
   const newSessionId = opts.agentKey === 'claude' ? randomUUID() : opts.oldSessionId;
-  const launchCmd = buildAgentRunLaunchCommand(
-    opts.agentKey,
-    opts.host,
-    opts.agentKey === 'claude' ? newSessionId : null,
-  );
-
-  const terminalId = terminals.nextId(builtIn.prefix);
-  const title = buildTerminalTitle(agentConfig.title, undefined, context, newSessionId);
-  const terminal = vscode.window.createTerminal({
-    iconPath: agentConfig.iconPath,
-    location: { viewColumn: vscode.ViewColumn.Active },
-    name: title,
-    env: buildAgentTerminalEnv(terminalId, newSessionId, workspacePath),
-    isTransient: true,
-  });
-
-  const pid = await terminal.processId;
-  terminals.register(terminal, terminalId, agentConfig, pid, context);
-  readiness.registerTerminal(terminal);
-  terminals.setSessionId(terminal, newSessionId);
-  terminals.setAgentType(terminal, opts.agentKey as SessionAgentType);
-  if (opts.host) terminals.setHost(terminal, opts.host);
-  startAutoLabelPollerForTerminal(terminal, context);
-
-  // Always inline the central continue.md: it works in ANY harness, and we
-  // can't know whether the target version's home has the /continue slash
-  // command synced (for a remote host we can't even check from here — same
-  // reasoning as the remote rotate).
-  let centralContinueMdBody: string | null = null;
-  try {
-    centralContinueMdBody = fsSync.readFileSync(
-      path.join(os.homedir(), '.agents-system', 'commands', 'continue.md'),
-      'utf-8',
-    );
-  } catch {
-    centralContinueMdBody = null;
-  }
-  const resumeInput = buildResumeInput(opts.oldSessionId, false, centralContinueMdBody);
-
-  try {
-    await readiness.waitFor(terminal, 'promptReady');
-  } catch (err) {
-    console.warn(`[RESUME-PICK-HARNESS] promptReady wait FAILED: ${err} — sending launch anyway`);
-  }
-  terminal.sendText(launchCmd);
-  readiness.armAgentReady(terminal, {
-    agentKey: opts.agentKey,
-    sessionId: newSessionId,
-    cwd: workspacePath,
-  });
-  terminal.show();
-
-  // Type the payload, then Enter as a separate keystroke — Claude's Ink TUI
-  // needs the explicit `\r`, and multi-line input swallows a same-tick one
-  // (see the rotate flow for the full rationale).
-  const submitToTui = () => {
-    terminal.sendText(resumeInput, false);
-    setTimeout(() => terminal.sendText('\r', false), 300);
-  };
-  readiness.waitFor(terminal, 'agentReady').then(submitToTui, (err) => {
-    console.warn(`[RESUME-PICK-HARNESS] agentReady wait FAILED: ${err} — sending resume input anyway`);
-    submitToTui();
-  });
-
-  vscode.window.setStatusBarMessage(
-    `Resuming in ${opts.agentKey}${opts.host ? ` on ${opts.host}` : ''} · ${opts.oldSessionId.slice(0, 8)}`,
-    5000,
-  );
-}
-
-export async function rotateTerminalToBestVersion(
-  context: vscode.ExtensionContext,
-  terminalEntry: terminals.EditorTerminal,
-  opts: { closeOldTerminal: boolean; focusNewTerminal: boolean; notifyOnFailure: boolean }
-): Promise<RotateOutcome> {
-  if (!terminalEntry.sessionId) {
-    return { status: 'no_session' };
-  }
-
-  const agentKey = terminalEntry.agentType
-    || prefixToAgentType(terminalEntry.agentConfig?.prefix ?? null);
-  if (!agentKey || !supportsPrewarming(agentKey)) {
-    return { status: 'unsupported_agent' };
-  }
-
-  // Read the accounts on the machine this terminal runs on. Rotating a device's
-  // exhausted account against THIS box's quota would pick a version the device
-  // may not even have installed.
-  const host = terminalEntry.host;
-  const data = await fetchAgentsViewJson(agentKey, { host });
-  if (!data) return { status: 'view_unavailable' };
-
-  // If the active terminal already sits on a version that still has usage,
-  // there's nothing to do — "best" is really "any version with usage", so
-  // a usable current version IS the best. Skip the terminal churn and the
-  // /continue round-trip. Undefined version falls through to the legacy
-  // switch path (we can't reason about untagged terminals).
-  const currentVersion = terminalEntry.version ?? terminalEntry.statusVersion;
-  if (currentVersion) {
-    const currentVersionData = data.versions.find(v => v.version === currentVersion);
-    if (isVersionStillUsable(currentVersionData)) {
-      if (opts.focusNewTerminal) {
-        terminalEntry.terminal.show();
-        vscode.window.setStatusBarMessage(
-          `Already on ${agentKey}@${currentVersion} · ${sessionUsedPercent(currentVersionData!)}% session`,
-          3000
-        );
-      }
-      console.log(`[RESUME-IN-BEST] skipping switch — terminal already on usable version ${agentKey}@${currentVersion}`);
-      return {
-        status: 'already_usable',
-        agentKey,
-        version: currentVersion,
-        usedPercent: sessionUsedPercent(currentVersionData!),
-      };
-    }
-  }
-
-  const best = pickBestVersion(data.versions);
-  if (!best) {
-    if (opts.notifyOnFailure) {
-      vscode.window.showInformationMessage(
-        `No signed-in ${agentKey} versions available. Run: agents add ${agentKey}@latest`
-      );
-    }
-    return { status: 'no_versions', agentKey };
-  }
-
-  const builtIn = BUILT_IN_AGENTS.find(a => a.key === agentKey);
-  if (!builtIn) {
-    if (opts.notifyOnFailure) {
-      vscode.window.showInformationMessage(`No built-in agent config for ${agentKey}`);
-    }
-    return { status: 'unsupported_agent' };
-  }
-
-  const agentConfig = createAgentConfig(
-    context.extensionPath,
-    builtIn.title,
-    builtIn.command,
-    builtIn.icon,
-    builtIn.prefix,
-  );
-
-  const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
-
-  // The OLD session id lives in the terminal we're resuming FROM — it
-  // belongs to whatever version's home originally created it. We pass
-  // this to /continue so the new agent loads that transcript.
-  const oldSessionId = terminalEntry.sessionId;
-
-  // Generate a NEW session id for the fresh claude process. Passing it
-  // via `--session-id` does two things:
-  //   1. Claude creates its jsonl at a path readiness can predict, so
-  //      fs.watch fires `agentReady` the moment the TUI is live — much
-  //      more reliable than polling process state, which was firing
-  //      during the shim/node startup window BEFORE Claude was actually
-  //      accepting input (that's why /continue was landing at zsh).
-  //   2. The terminal's AGENT_SESSION_ID stays consistent with the UUID
-  //      Claude actually uses, so session tracking doesn't drift.
-  // Only Claude supports `--session-id` right now; other agents fall
-  // back to reusing the old id and the generic ps/pgrep probe.
-  const supportsSessionIdFlag = agentKey === 'claude';
-  const newSessionId = supportsSessionIdFlag ? randomUUID() : oldSessionId;
-  // An offloaded terminal has to be relaunched ON its device — the raw
-  // `claude@<version>` form would silently move the work to this box, which is
-  // the opposite of what a rotate is for.
-  const launchCmd = host
-    ? buildHostLaunchCommand(agentKey, best.version, host, supportsSessionIdFlag ? newSessionId : null)
-    : buildLaunchCommand(
-        builtIn.command,
-        best.version,
-        agentKey,
-        supportsSessionIdFlag ? newSessionId : null,
-      );
-
-  const terminalId = terminals.nextId(builtIn.prefix);
-  const title = buildTerminalTitle(agentConfig.title, undefined, context, newSessionId);
-  const terminal = vscode.window.createTerminal({
-    iconPath: agentConfig.iconPath,
-    location: { viewColumn: vscode.ViewColumn.Active },
-    name: title,
-    env: buildAgentTerminalEnv(terminalId, newSessionId, workspacePath, best.version),
-    isTransient: true,
-  });
-
-  const pid = await terminal.processId;
-  terminals.register(terminal, terminalId, agentConfig, pid, context);
-  readiness.registerTerminal(terminal);
-  terminals.setSessionId(terminal, newSessionId);
-  terminals.setAgentType(terminal, agentKey);
-  terminals.setVersion(terminal, best.version);
-  terminals.setAccount(terminal, best.email);
-  if (host) terminals.setHost(terminal, host);
-  startAutoLabelPollerForTerminal(terminal, context);
-
-  // /continue takes the OLD session id (the transcript we want to load),
-  // not the new one (which is just the container for the fresh process).
-  // Prefer the /continue slash command if it's synced to this version's
-  // home; otherwise inline the full instructions.
-  // Whether `/continue` is synced into the target version's home is a question
-  // about THAT machine's filesystem. For a remote rotate we cannot answer it
-  // from here, so we inline the instructions instead of gambling on a slash
-  // command the device may not have.
-  const versionHomeCommand = path.join(
-    os.homedir(), '.agents-system', 'versions', agentKey, best.version,
-    'home', '.claude', 'commands', 'continue.md'
-  );
-  const hasContinueCmd = !host && fsSync.existsSync(versionHomeCommand);
-
-  let centralContinueMdBody: string | null = null;
-  if (!hasContinueCmd) {
-    const centralCommand = path.join(os.homedir(), '.agents-system', 'commands', 'continue.md');
-    try {
-      centralContinueMdBody = fsSync.readFileSync(centralCommand, 'utf-8');
-    } catch {
-      centralContinueMdBody = null;
-    }
-  }
-  const resumeInput = buildResumeInput(oldSessionId, hasContinueCmd, centralContinueMdBody);
-
-  const t0 = Date.now();
-  const elapsed = () => `t+${Date.now() - t0}ms`;
-  console.log(`[RESUME-IN-BEST] ${elapsed()} starting — agent=${agentKey}@${best.version} oldSession=${oldSessionId.slice(0, 8)} newSession=${newSessionId.slice(0, 8)} cmdSynced=${hasContinueCmd}`);
-
-  try {
-    await readiness.waitFor(terminal, 'promptReady');
-    console.log(`[RESUME-IN-BEST] ${elapsed()} promptReady — sending launch: ${launchCmd}`);
-  } catch (err) {
-    console.warn(`[RESUME-IN-BEST] ${elapsed()} promptReady wait FAILED: ${err} — sending launch anyway`);
-  }
-  terminal.sendText(launchCmd);
-  // Pass the NEW session id so readiness can watch for its jsonl file
-  // appearing — that's the signal that Claude's TUI is live and accepting
-  // input on the pty.
-  readiness.armAgentReady(terminal, {
-    agentKey,
-    sessionId: newSessionId,
-    cwd: workspacePath,
-  });
-  if (opts.focusNewTerminal) {
-    terminal.show();
-  }
-
-  // Send the resume input only after the agent CLI is actually idle on the
-  // pty. Replaces a hardcoded 6s guess that was unreliable on slow machines
-  // (never enough) and wasteful on fast ones (always too much).
-  // Claude Code's TUI uses Ink (React for CLI) which puts stdin in raw mode
-  // and watches for `\r` as Enter. VS Code's `sendText(text, true)` appends
-  // `\n` on macOS, which types into the input box but does NOT submit.
-  // Explicit two-step: type the payload with shouldExecute=false, then
-  // separately send `\r` to signal Enter. Precedent: tmux.ts:71 uses tmux's
-  // `send-keys … Enter` keyword for the same reason.
-  const submitToTui = () => {
-    terminal.sendText(resumeInput, false);
-    // Same bracketed-paste race as openSingleAgentWithQueue's flushQueued:
-    // multi-line input swallows a same-tick \r, so Enter goes after a beat.
-    setTimeout(() => terminal.sendText('\r', false), 300);
-  };
-  readiness.waitFor(terminal, 'agentReady').then(
-    () => {
-      console.log(`[RESUME-IN-BEST] ${elapsed()} agentReady — sending resume input (${resumeInput.length} chars): ${resumeInput.slice(0, 80)}${resumeInput.length > 80 ? '…' : ''}`);
-      submitToTui();
-      if (opts.closeOldTerminal) {
-        try {
-          terminalEntry.terminal.dispose();
-          console.log(`[RESUME-IN-BEST] ${elapsed()} disposed old terminal ${terminalEntry.id}`);
-        } catch (err) {
-          console.warn(`[RESUME-IN-BEST] failed to dispose old terminal: ${err}`);
-        }
-      }
-    },
-    (err) => {
-      console.warn(`[RESUME-IN-BEST] ${elapsed()} agentReady wait FAILED: ${err} — sending resume input anyway`);
-      submitToTui();
-      if (opts.closeOldTerminal) {
-        try {
-          terminalEntry.terminal.dispose();
-        } catch (e) {
-          console.warn(`[RESUME-IN-BEST] failed to dispose old terminal: ${e}`);
-        }
-      }
-    },
-  );
-
-  const acct = best.email ? ` (${best.email})` : '';
-  const usage = `${sessionUsedPercent(best)}% session`;
-  vscode.window.setStatusBarMessage(
-    `Resumed ${agentKey}@${best.version}${acct} · ${usage} · ${newSessionId.slice(0, 8)}`,
-    5000
-  );
-
-  return {
-    status: 'rotated',
-    agentKey,
-    oldVersion: currentVersion,
-    newVersion: best.version,
+  await launchResumeTerminal(context, {
+    builtIn,
+    stampAgentKey: opts.agentKey,
+    armAgentKey: opts.agentKey,
+    launchCmd: buildAgentRunLaunchCommand(
+      opts.agentKey,
+      opts.host,
+      opts.agentKey === 'claude' ? newSessionId : null,
+    ),
     newSessionId,
-    email: best.email,
-    usedPercent: sessionUsedPercent(best),
-  };
+    oldSessionId: opts.oldSessionId,
+    host: opts.host,
+    statusMessage: `Resuming in ${opts.agentKey}${opts.host ? ` on ${opts.host}` : ''} · ${opts.oldSessionId.slice(0, 8)}`,
+  });
 }
 
 interface TerminalQuickPickItem extends vscode.QuickPickItem {
@@ -4112,7 +3868,7 @@ export async function openSingleAgentWithQueue(
 
   // Determine agent key and handle session ID
   const builtInDef = getBuiltInByPrefix(agentConfig.prefix);
-  const agentKey = builtInDef?.key as 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor' | undefined;
+  const agentKey = builtInDef?.key as keyof AgentSettings['builtIn'] | undefined;
   const defaultModel = agentKey ? settings.getDefaultModel(context, agentKey) : undefined;
 
   let command = agentConfig.command;
@@ -4123,11 +3879,11 @@ export async function openSingleAgentWithQueue(
     opencodeSessionsBefore = await listOpencodeSessions(cwd);
   }
 
-  // Route LAUNCHABLE agents through `agents run <agent> --interactive` so the
-  // --mode flag is applied and the CLI resolves the configured strategy. Claude
-  // gets a pre-generated session id for the resume flow; other agents discover
-  // their session post-spawn. opts?.mode defaults to 'auto' (writable-but-gated)
-  // inside buildAgentLaunchCommand when the caller does not supply an explicit mode.
+  // Route every agent runner through `agents run <agent> --interactive` so
+  // `--strategy balanced --mode auto` applies uniformly (shell is the only
+  // non-runner). Claude gets a pre-generated session id for the resume flow; other
+  // agents discover their session post-spawn. opts?.mode defaults to 'auto'
+  // (writable-but-gated) inside buildAgentLaunchCommand when no mode is supplied.
   const targetHost = opts?.host && opts.host !== 'local' ? opts.host : undefined;
   if (agentKey && usesManagedAgentLaunch(agentKey, targetHost)) {
     if (agentKey === 'claude') {
@@ -4166,12 +3922,16 @@ export async function openSingleAgentWithQueue(
   if (targetHost) terminals.setHost(terminal, targetHost);
   readiness.registerTerminal(terminal);
 
-  // Track session ID and agent type
-  if (agentKey && supportsPrewarming(agentKey)) {
+  // Track session ID and agent type. Any known harness is tracked, not just the
+  // prewarm five (#1747) — this feeds the persistence path that restore/reopen
+  // read, so grok/kimi/droid/antigravity tabs must be tracked here too or they
+  // have nothing to come back to.
+  const resumeKey = agentKey ? agentKeyFromSession(agentKey) : null;
+  if (resumeKey) {
     // Set agent type unconditionally so the sessionTracker fs watcher can adopt
     // a session id when the CLI writes a fresh rollout/jsonl (Codex 0.124+
     // dropped session id from the TUI banner so this is the only signal).
-    terminals.setAgentType(terminal, agentKey);
+    terminals.setAgentType(terminal, resumeKey);
     if (sessionId) {
       terminals.setSessionId(terminal, sessionId);
     }
@@ -4254,7 +4014,7 @@ async function openAgentTerminals(context: vscode.ExtensionContext) {
 
       // Determine agent key and handle session ID
       const builtInDef = getBuiltInByPrefix(agent.prefix);
-      const agentKey = builtInDef?.key as 'claude' | 'codex' | 'gemini' | 'opencode' | undefined;
+      const agentKey = builtInDef?.key as keyof AgentSettings['builtIn'] | undefined;
       const defaultModel = agentKey ? settings.getDefaultModel(context, agentKey) : undefined;
 
       let command = agent.command;
@@ -4286,11 +4046,14 @@ async function openAgentTerminals(context: vscode.ExtensionContext) {
       terminals.register(terminal, terminalId, agent, pid, context);
       readiness.registerTerminal(terminal);
 
-      // Track session ID
-      if (agentKey && supportsPrewarming(agentKey)) {
+      // Track session ID for any known harness, not just the prewarm five (#1747):
+      // this path also starts the label poller that hydrates the live session id,
+      // so a grok/kimi/droid/antigravity tab needs it too to be resumable.
+      const resumeKey = agentKey ? agentKeyFromSession(agentKey) : null;
+      if (resumeKey) {
         // Set agent type unconditionally so sessionTracker fs watcher can adopt
         // a session id from the CLI's rollout file (Codex 0.124+ banner has none).
-        terminals.setAgentType(terminal, agentKey);
+        terminals.setAgentType(terminal, resumeKey);
         if (sessionId) {
           terminals.setSessionId(terminal, sessionId);
         }
@@ -4583,10 +4346,6 @@ async function tryFetchLabelOnFocus(
   }
 }
 
-function normalizeStatusEmail(email: string | null | undefined): string | undefined {
-  const trimmed = email?.replace(/[<>]/g, '').trim();
-  return trimmed || undefined;
-}
 
 function formatAgentStatusBarText(
   expandedName: string,
@@ -4643,20 +4402,40 @@ async function tryHydrateSessionIdentity(
     // The terminal may have moved on to another session while this was queued;
     // never stamp a stale session's identity over the current one.
     if (entry.sessionId && entry.sessionId !== sessionId) return;
-    if (identity.version) terminals.setVersion(terminal, identity.version);
-    if (identity.account) terminals.setAccount(terminal, identity.account);
-    // Only mark this session's identity resolved once BOTH fields came back, so a
-    // transient partial result (e.g. account not yet indexed) is retried on the
-    // next tick instead of leaving the missing field frozen for the session.
+    // Apply the resolved record AUTHORITATIVELY, clearing a field the session does
+    // not carry. A Kimi/Grok session has no version or account, so a value left
+    // over from a prior binding in this terminal (e.g. a stale 2.1.218) must be
+    // cleared, not preserved by an `if (identity.version)` guard. The early return
+    // above protects an already-resolved identity from a transient partial fetch.
+    terminals.setVersion(terminal, identity.version);
+    terminals.setAccount(terminal, identity.account);
+    // An `agents run auto` rotate spawns with the harness unknown (the CLI
+    // picks it at launch) and the outgoing harness stamped as a prior — the
+    // feed's record is the truth, so correct the stamp when they differ.
+    if (identity.agent && identity.agent !== entry.agentType) {
+      terminals.setAgentType(terminal, identity.agent as SessionAgentType);
+    }
+    // Two distinct markers, because "displayable" and "fully resolved" differ:
+    //   - identityAppliedSessionId: the version/account cached above were applied
+    //     FOR this session (even if a field is null — Grok has a version but no
+    //     account, Kimi has neither). displayIdentity gates on this, so the status
+    //     bar shows only the current session's identity and a prior binding's
+    //     leftover is withheld.
+    //   - identitySessionId: BOTH fields present. The call sites re-invoke this
+    //     function while it differs from the live id, so an account that the CLI
+    //     indexes a beat after the version (Claude/Codex) is still filled by a
+    //     later fetch instead of freezing blank.
+    entry.identityAppliedSessionId = sessionId;
     if (identity.version && identity.account) entry.identitySessionId = sessionId;
 
     if (!agentStatusBarItem || vscode.window.activeTerminal !== terminal) return;
     const rawLabel = entry.label;
     const displayLabel = rawLabel ? rawLabel.replace(/<[^>]*>/g, '').trim() : null;
+    const { version, account } = displayIdentity(entry, entry.sessionId);
     agentStatusBarItem.text = formatAgentStatusBarText(
       getExpandedAgentName(prefix),
-      entry.version,
-      normalizeStatusEmail(entry.account),
+      version,
+      account,
       displayLabel,
       entry.sessionId,
       entry.agentType === 'codex',
@@ -4706,10 +4485,11 @@ async function tryHydrateLiveSessionId(
     if (!agentStatusBarItem || vscode.window.activeTerminal !== terminal) return;
     const rawLabel = entry.label;
     const displayLabel = rawLabel ? rawLabel.replace(/<[^>]*>/g, '').trim() : null;
+    const { version, account } = displayIdentity(entry, liveId);
     agentStatusBarItem.text = formatAgentStatusBarText(
       getExpandedAgentName(prefix),
-      entry.version,
-      normalizeStatusEmail(entry.account),
+      version,
+      account,
       displayLabel,
       liveId,
       entry.agentType === 'codex',
@@ -4734,8 +4514,7 @@ function updateStatusBarForTerminal(terminal: vscode.Terminal, extensionPath: st
     // Show immediate status bar with current data
     const rawLabel = entry?.label;
     const displayLabel = rawLabel ? rawLabel.replace(/<[^>]*>/g, '').trim() : null;
-    const version = entry?.version || entry?.statusVersion;
-    const account = normalizeStatusEmail(entry?.account || entry?.statusAccount);
+    const { version, account } = displayIdentity(entry, sessionId);
     agentStatusBarItem.text = formatAgentStatusBarText(
       expandedName,
       version,
@@ -4991,13 +4770,16 @@ async function reloadActiveTerminal(context: vscode.ExtensionContext) {
       return;
     }
 
-    if (!supportsPrewarming(agentType)) {
+    // Any known harness with a transcript can reload, not just the prewarm five —
+    // `agents run --resume` resumes grok/kimi/droid/antigravity too (#1747). Only
+    // a shell / unknown tab has nothing to reload.
+    if (!agentKeyFromSession(agentType)) {
       vscode.window.showErrorMessage('This agent type does not support session reload.');
       return;
     }
 
-    const config = PREWARM_CONFIGS[agentType];
-    const exitSequence = config.exitSequence;
+    // Prewarm agents use their tuned exit keys; the rest fall back to Ctrl+C twice.
+    const exitSequence = exitSequenceFor(agentType);
     const resumeCommand = buildVersionedResumeCommand(agentType, sessionId, entry.version, entry.host);
 
     terminal.show();
@@ -5030,11 +4812,6 @@ async function reloadActiveTerminal(context: vscode.ExtensionContext) {
 }
 
 async function updateContextKeys(context: vscode.ExtensionContext): Promise<void> {
-  const config = vscode.workspace.getConfiguration('agents');
-  // 'native' hides the "Disable Tmux" toggle; 'auto'/'tmux' show it (tmux is active).
-  const tmuxEnabled = normalizeTerminalMode(config.get('terminalMode')) !== 'native';
-  await vscode.commands.executeCommand('setContext', 'agents.tmuxEnabled', tmuxEnabled);
-
   const readerEnabled = settings.getSettings(context).editor?.markdownViewerEnabled ?? true;
   await vscode.commands.executeCommand('setContext', 'agents.readerEnabled', readerEnabled);
 }
@@ -5260,7 +5037,9 @@ async function forkCurrentSession(
       ),
       recordFork: (edge) => { void recordFork(context, edge); },
       showRejection: showForkRejection,
-      viewColumn: vscode.ViewColumn.Beside,
+      // Open the fork as a normal full tab in the active group, not a side
+      // split — it is a fresh session, not a pane to sit beside its parent.
+      viewColumn: vscode.ViewColumn.Active,
       now: Date.now,
     });
     return;
@@ -5273,13 +5052,14 @@ async function forkCurrentSession(
     return;
   }
 
-  // Land the fork BESIDE its parent, not on top of it. A fork exists to be
-  // compared with the session it came from, so the two tabs share the screen.
+  // Open the fork as a normal full tab in the active group. A fork is a fresh
+  // sibling session, not a pane to wedge beside its parent — a side split
+  // shrinks both terminals and is not what forking asks for.
   const { terminalId, sessionId } = await openSingleAgentWithQueue(context, entry.agentConfig, [request.prompt], {
     strategy: request.strategy,
     host: request.host,
     local: request.local,
-    viewColumn: vscode.ViewColumn.Beside,
+    viewColumn: vscode.ViewColumn.Active,
   });
 
   void recordFork(context, {
@@ -5624,8 +5404,10 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
       }
       startAutoLabelPollerForTerminal(terminal, context);
 
-      // Actually resume the session by sending the resume command
-      if (supportsPrewarming(session.agentType)) {
+      // Actually resume the session by sending the resume command. Any known
+      // harness resumes here, not just the prewarm five (#1747) — buildVersioned-
+      // ResumeCommand routes non-prewarm agents through `agents run --resume`.
+      if (agentKeyFromSession(session.agentType)) {
         const resumeCmd = buildVersionedResumeCommand(
           session.agentType,
           session.sessionId,
@@ -5817,7 +5599,8 @@ async function reopenLastClosedSession(context: vscode.ExtensionContext): Promis
     }
     startAutoLabelPollerForTerminal(terminal, context);
 
-    if (supportsPrewarming(closed.agentType)) {
+    // Any known harness reopens, not just the prewarm five (#1747).
+    if (agentKeyFromSession(closed.agentType)) {
       const resumeCmd = buildVersionedResumeCommand(
         closed.agentType,
         closed.sessionId,
@@ -5902,7 +5685,7 @@ function initMonitorHost(context: vscode.ExtensionContext): void {
   const { listTeamsForCwd } = require('./foreman.sources') as typeof import('./foreman.sources');
   const gate = runOnLeaderOnly(() => {
     // detectors enables the centralized readiness probes (#68), the machine-wide
-    // session watcher (#69), the watchdog detector (#70), and the panel/floor
+    // session watcher (#69), and the panel/floor
     // snapshot detector (#71) on the leader only. The snapshot detector's teams
     // fetch is vscode-coupled, so it's injected here (host.ts stays vscode-free).
     const host = new MonitorHost({
@@ -5985,10 +5768,6 @@ function initMonitorFollower(context: vscode.ExtensionContext): void {
     armAgent: (pid, agentKey, sessionId) => { void follower.armAgent(pid, agentKey, sessionId); },
     armShellAdoption: (pid) => { void follower.armShellAdoption(pid); },
   });
-  // Watchdog (#70): the leader detects stalls + polls `agents view` once; this
-  // window arms its sessions and delivers the nudge/rotate locally.
-  setWatchdogMonitorConnectivity(connected);
-  setWatchdogArmSink((watches) => { void follower.setWatchdogWatches(watches); });
   // Snapshot (#71): the leader computes git/worktrees/usage/teams once and
   // broadcasts; the panel/floor render from the fact and arm their watch slice.
   terminals.setSnapshotMonitorConnectivity(connected);
@@ -6009,8 +5788,6 @@ function initMonitorFollower(context: vscode.ExtensionContext): void {
       sessionTracker.ingestSessionFact(event.payload);
     } else if (proto.isSessionWarmth(event)) {
       sessionTracker.ingestSessionWarmth(event.payload.filePath);
-    } else if (proto.isWatchdogVersions(event)) {
-      ingestWatchdogVersionsFact(event.payload);
     } else if (proto.isPanelSnapshot(event)) {
       terminals.ingestPanelSnapshotFact(event.payload);
     }

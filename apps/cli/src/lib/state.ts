@@ -666,8 +666,17 @@ export function getBrowserRuntimeDir(): string { return BROWSER_RUNTIME_DIR; }
 /** Path to helper subprocess scratch (~/.agents/.cache/helpers/). */
 export function getHelpersDir(): string { return HELPERS_DIR; }
 
-/** Path to scheduler daemon scratch (~/.agents/.cache/helpers/daemon/). */
-export function getDaemonDir(): string { return DAEMON_DIR; }
+/**
+ * Path to scheduler daemon scratch (~/.agents/.cache/helpers/daemon/) — holds
+ * the daemon pid file, heartbeat, start lock, and log. AGENTS_DAEMON_DIR
+ * redirects it to a fork-private temp so daemon tests (which write pid/heartbeat
+ * files and acquire the real start lock) can never clobber a live daemon's state
+ * on a dev machine — the surgical mirror of AGENTS_DEVICES_DIR /
+ * AGENTS_HOOK_SHIMS_DIR, leaving HOME untouched. Read at CALL time (daemon.ts
+ * resolves every path helper through this), so tests/setup.ts can set it before
+ * the daemon module is exercised. Never set in production code.
+ */
+export function getDaemonDir(): string { return process.env.AGENTS_DAEMON_DIR ?? DAEMON_DIR; }
 
 /** Path to PTY server scratch (~/.agents/.cache/helpers/pty/). */
 export function getPtyDir(): string { return PTY_DIR; }

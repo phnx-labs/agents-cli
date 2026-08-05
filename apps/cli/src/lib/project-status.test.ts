@@ -4,10 +4,15 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   rollupSessionsByProject,
+  isDeadStatus,
   liveDeadSplit,
   enrichProjectSignals,
   sortProjectMembers,
   formatProjectMembers,
+  withDefaultMachine,
+  formatProjectMembersByHost,
+  formatProjectWarnings,
+  warningEmoji,
   MEMBERS_LINE_LIMIT,
   type ProjectMember,
 } from './project-status.js';
@@ -125,6 +130,32 @@ describe('liveDeadSplit', () => {
 
   it('ignores zero counts rather than emitting empty buckets', () => {
     expect(liveDeadSplit({ running: 2, crashed: 0 }).deadByStatus).toEqual([]);
+  });
+});
+
+describe('isDeadStatus — keeps the agents roster consistent with the headline', () => {
+  // The card prints `N live`, a `dead` row, then the agents roster. The roster
+  // used to list every matched session, so a card headed `23 live` went on to
+  // show `crashed x25` — the same corpses the dead row reports, contradicting
+  // the headline. The roster filter and the headline split must never disagree.
+  const EVERY_STATUS = [
+    'running', 'idle', 'queued', 'input_required',
+    'orphaned', 'abandoned', 'unknown',
+    'closed', 'crashed',
+  ];
+
+  it('agrees with liveDeadSplit on every ActiveStatus', () => {
+    const keptByRoster = EVERY_STATUS.filter((s) => !isDeadStatus(s)).length;
+    const split = liveDeadSplit(Object.fromEntries(EVERY_STATUS.map((s) => [s, 1])));
+    expect(keptByRoster).toBe(split.live);
+  });
+
+  it('drops exactly the statuses the dead row already accounts for', () => {
+    expect(isDeadStatus('crashed')).toBe(true);
+    expect(isDeadStatus('closed')).toBe(true);
+    // orphaned is alive — an agent that outlived its window, still working.
+    expect(isDeadStatus('orphaned')).toBe(false);
+    expect(isDeadStatus('running')).toBe(false);
   });
 });
 
@@ -256,5 +287,88 @@ describe('enrichProjectSignals — artifact counting from the activity log', () 
     });
     expect(sig.artifacts).toBe(0);
     expect(sig.lastArtifact).toBeUndefined();
+  });
+});
+
+describe('formatProjectMembersByHost', () => {
+  it('groups cells under each host without repeating @host on the cell', () => {
+    const lines = formatProjectMembersByHost([
+      { agent: 'claude', status: 'running', host: 'zion' },
+      { agent: 'claude', status: 'running', host: 'zion' },
+      { agent: 'claude', status: 'idle', host: 'zion' },
+      { agent: 'codex', status: 'running', host: 'yosemite-s0' },
+      { agent: 'claude', status: 'running', ticket: 'RUSH-1', host: 'yosemite-s0' },
+    ]).map(stripAnsi);
+    expect(lines[0]).toMatch(/^@zion\s+claude · running ×2  ·  claude · idle$/);
+    expect(lines[1]).toMatch(/^@yosemite-s0\s+claude · running · RUSH-1  ·  codex · running$/);
+  });
+
+  it('falls back to the flat line when no member carries a host', () => {
+    const lines = formatProjectMembersByHost([
+      { agent: 'claude', status: 'running' },
+      { agent: 'claude', status: 'running' },
+    ]).map(stripAnsi);
+    expect(lines).toEqual(['claude · running ×2']);
+  });
+
+  it('ranks hosts by member count so the busiest box is first', () => {
+    const lines = formatProjectMembersByHost([
+      { agent: 'claude', status: 'idle', host: 'mac-mini' },
+      { agent: 'claude', status: 'running', host: 'zion' },
+      { agent: 'claude', status: 'running', host: 'zion' },
+      { agent: 'claude', status: 'running', host: 'zion' },
+    ]).map(stripAnsi);
+    expect(lines[0].startsWith('@zion')).toBe(true);
+    expect(lines[1].startsWith('@mac-mini')).toBe(true);
+  });
+});
+
+describe('formatProjectWarnings', () => {
+  it('prints critical before continue with severity emojis', () => {
+    const lines = formatProjectWarnings([
+      { severity: 'continue', text: 'dirty tree' },
+      { severity: 'critical', text: '40 behind', remediation: 'pull first' },
+    ]).map(stripAnsi);
+    expect(lines[0]).toBe(`  ${warningEmoji('critical')}  40 behind`);
+    expect(lines[1]).toBe('      pull first');
+    expect(lines[2]).toBe(`  ${warningEmoji('continue')}  dirty tree`);
+  });
+
+  it('is empty when there is nothing to say', () => {
+    expect(formatProjectWarnings([])).toEqual([]);
+  });
+});
+
+describe('withDefaultMachine', () => {
+  it('fills only missing machine stamps so local rows match peer host ids', () => {
+    const out = withDefaultMachine(
+      [
+        { id: 'a', machine: undefined },
+        { id: 'b', machine: 'yosemite-s0' },
+        { id: 'c' },
+      ],
+      'zion',
+    );
+    expect(out.map((s) => s.machine)).toEqual(['zion', 'yosemite-s0', 'zion']);
+  });
+
+  it('makes host-grouped roster use the real local name, not @local', () => {
+    const sessions = withDefaultMachine(
+      [
+        { kind: 'claude', status: 'running' as const, cwd: '/x', machine: undefined },
+        { kind: 'claude', status: 'idle' as const, cwd: '/x', machine: 'yosemite-s0' },
+      ],
+      'zion',
+    );
+    // Simulate rollup member mapping
+    const members = sessions.map((s) => ({
+      agent: s.kind,
+      status: s.status,
+      host: s.machine,
+    }));
+    const lines = formatProjectMembersByHost(members).map((l) => l.replace(/\x1b\[[0-9;]*m/g, ''));
+    expect(lines.some((l) => l.startsWith('@zion'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('@yosemite-s0'))).toBe(true);
+    expect(lines.some((l) => l.includes('@local'))).toBe(false);
   });
 });

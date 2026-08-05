@@ -73,8 +73,8 @@ describe('parseDroid', () => {
       expect(events[0]).toMatchObject({ type: 'message', agent: 'droid', role: 'user', content: 'How do I run the tests?' });
       expect(events[1]).toMatchObject({ type: 'thinking', content: 'consider the options' });
       expect(events[2]).toMatchObject({ type: 'message', role: 'assistant', content: 'Run bun test.' });
-      expect(events[3]).toMatchObject({ type: 'tool_use', tool: 'Bash', command: 'bun test' });
-      expect(events[4]).toMatchObject({ type: 'tool_result', tool: 'Bash', success: true, output: 'all green' });
+      expect(events[3]).toMatchObject({ type: 'tool_use', tool: 'Bash', callId: 'tu1', command: 'bun test' });
+      expect(events[4]).toMatchObject({ type: 'tool_result', tool: 'Bash', callId: 'tu1', success: true, output: 'all green' });
     } finally {
       fs.rmSync(path.dirname(p), { recursive: true, force: true });
     }

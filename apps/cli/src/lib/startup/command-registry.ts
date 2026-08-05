@@ -62,6 +62,7 @@ export const loadRestore: ModuleLoader = async () => (await import('../../comman
 export const loadDoctor: ModuleLoader = async () => (await import('../../commands/doctor.js')).registerDoctorCommand;
 export const loadApply: ModuleLoader = async () => (await import('../../commands/apply.js')).registerApplyCommand;
 export const loadStatus: ModuleLoader = async () => (await import('../../commands/status.js')).registerStatusCommand;
+export const loadSnapshot: ModuleLoader = async () => (await import('../../commands/snapshot.js')).registerSnapshotCommand;
 export const loadProfiles: ModuleLoader = async () => (await import('../../commands/profiles.js')).registerProfilesCommands;
 export const loadHarness: ModuleLoader = async () => (await import('../../commands/harness.js')).registerHarnessCommands;
 export const loadSecrets: ModuleLoader = async () => (await import('../../commands/secrets.js')).registerSecretsCommands;
@@ -103,7 +104,6 @@ export const loadCloud: ModuleLoader = async () => (await import('../../commands
 export const loadMessage: ModuleLoader = async () => (await import('../../commands/message.js')).registerMessageCommand;
 export const loadSend: ModuleLoader = async () => (await import('../../commands/send.js')).registerSendCommand;
 export const loadFeed: ModuleLoader = async () => (await import('../../commands/feed.js')).registerFeedCommand;
-export const loadActivity: ModuleLoader = async () => (await import('../../commands/activity.js')).registerActivityCommand;
 export const loadMailboxes: ModuleLoader = async () => (await import('../../commands/mailboxes.js')).registerMailboxesCommand;
 export const loadServe: ModuleLoader = async () => (await import('../../commands/serve.js')).registerServeCommand;
 export const loadShare: ModuleLoader = async () => (await import('../../commands/share.js')).registerShareCommands;
@@ -118,7 +118,16 @@ export const loadFunnel: ModuleLoader = async () => (await import('../../command
  * inherit the root's custom help formatter rather than getting the per-command
  * recursive pass. Keeping that ordering preserves their `--help` output exactly.
  */
-export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set(['sessions', 'teams', 'cloud', 'message', 'serve']);
+// `roster` is an observe-umbrella alias of `sessions --active` — same module,
+// same SQLite stack, same post-help registration order as sessions.
+export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set([
+  'sessions',
+  'roster',
+  'teams',
+  'cloud',
+  'message',
+  'serve',
+]);
 
 /**
  * User-typed top-level command name -> ordered list of module loaders to run.
@@ -175,6 +184,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   doctor: [loadDoctor],
   apply: [loadApply],
   status: [loadStatus],
+  snapshot: [loadSnapshot],
   profile: [loadProfiles],
   profiles: [loadProfiles],
   harness: [loadHarness],
@@ -223,13 +233,17 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   setup: [loadSetup],
   uninstall: [loadUninstall],
   sessions: [loadSessions],
+  // Observe-umbrella alias of sessions --active (same lazy module).
+  roster: [loadSessions],
   teams: [loadTeams],
   cloud: [loadCloud],
   message: [loadMessage],
   send: [loadSend],
   notify: [loadSend],
   feed: [loadFeed],
-  activity: [loadActivity],
+  // Observe-umbrella aliases of feed / feed --filter updates.
+  inbox: [loadFeed],
+  timeline: [loadFeed],
   mailboxes: [loadMailboxes],
   mailbox: [loadMailboxes],
   serve: [loadServe],

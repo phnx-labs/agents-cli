@@ -45,11 +45,14 @@ describe('buildForkSessionRequest', () => {
     expect(command).toContain('--strategy balanced');
   });
 
-  test('uses the harness default when account rotation is unsupported', () => {
+  test('a fork is balanced for every runner, including one with no accounts to rotate', () => {
+    // droid has no account enumeration, but the launch contract still emits
+    // --strategy balanced (a graceful CLI no-op, never an error) so every fork —
+    // like every New launch — is uniform. Only 'shell' would carry no strategy.
     expect(buildForkSessionRequest({ sessionId: 'session-123', agentKey: 'droid' })).toMatchObject({
       ok: true,
       agentKey: 'droid',
-      strategy: undefined,
+      strategy: 'balanced',
     });
   });
 

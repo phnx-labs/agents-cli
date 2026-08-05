@@ -44,6 +44,12 @@ else
     SRC=".build/debug/MenubarHelper"
 fi
 
+# Gate the artifact on the headless self-tests (single-instance flock, bounded
+# children). Runs against the just-built binary, BEFORE signing/notarization, so
+# a regression fails the build instead of shipping — and never wastes a notarize
+# submit. These modes exit before AppKit, so they need no GUI/signing.
+scripts/test-menubar.sh "$SRC"
+
 DEST_DIR="dist"
 mkdir -p "$DEST_DIR"
 

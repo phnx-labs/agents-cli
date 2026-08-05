@@ -57,11 +57,6 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     expect(await maybeRunOnHost('feed', ['feed', '--host', 'mac', '--json'])).toBe(false);
   });
 
-  it('leaves activity host lists to the command-level fleet aggregator', async () => {
-    expect(await maybeRunOnHost('activity', ['activity', '--host', 'mac', '--json'])).toBe(false);
-    expect(await maybeRunOnHost('activity', ['activity', '--device', 'a', '--devices-all'])).toBe(false);
-  });
-
   it('rejects --host on a non-routable, non-OWN_HOST group with a clear error (not unknown option)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     // setup has no remote semantics and no own-host handler — must not fall
@@ -394,5 +389,35 @@ describe('runFleetPassthrough — direct unit tests', () => {
     expect(output).toContain('mac-mini');
     expect(output).toContain('$12.50 burned');
     expect(output).toContain('3.4K output tokens');
+  });
+
+  it('marks a remote fan-out target with AGENTS_FLEET_REMOTE, but never the self target', async () => {
+    console.log = () => {};
+    const registry = fakeRegistry([fakeDevice('zion', 'macos'), fakeDevice('mac-mini', 'macos')]);
+    const remoteCmds: string[][] = [];
+    const selfCmds: string[][] = [];
+    const runner = (_d: DeviceProfile, cmd: string[]) => {
+      remoteCmds.push(cmd);
+      return { code: 0, stdout: '{}', stderr: '' };
+    };
+    const localRunner = (cmd: string[]) => {
+      selfCmds.push(cmd);
+      return { code: 0, stdout: '{}', stderr: '' };
+    };
+
+    await runFleetPassthrough('browser', ['browser', 'start', '--host', 'all'], {}, {
+      self: 'zion',
+      loadDevices: async () => registry,
+      runner,
+      localRunner,
+    });
+
+    // The remote (mac-mini) target is driven WITH the fleet-remote marker so its
+    // consent gate can fire; the self (zion) target runs locally and stays ungated.
+    expect(remoteCmds).toHaveLength(1);
+    expect(remoteCmds[0].slice(0, 3)).toEqual(['env', 'AGENTS_FLEET_REMOTE=1', 'agents']);
+    expect(selfCmds).toHaveLength(1);
+    expect(selfCmds[0][0]).toBe('agents');
+    expect(selfCmds[0]).not.toContain('AGENTS_FLEET_REMOTE=1');
   });
 });

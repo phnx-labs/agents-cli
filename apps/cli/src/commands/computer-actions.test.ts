@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   pickTarget,
@@ -14,11 +15,13 @@ import {
   appPathIsElectron,
   electronWebviewTip,
   resolveTargetPidDecision,
+  emitComputerAction,
   CHAR_DELAY_MIN_MS,
   CHAR_DELAY_MAX_MS,
   type AppInfo,
 } from './computer-actions.js';
 import { resolveRpcTimeoutMs, RPC_TIMEOUT_MS, type ComputerClient, type RPCResponse } from '../lib/computer-rpc.js';
+import { query, _resetForTest } from '../lib/events.js';
 
 const tempDirs: string[] = [];
 
@@ -407,6 +410,90 @@ describe('electronWebviewTip', () => {
     expect(tip).toContain('Electron');
     expect(tip).toContain('--remote-debugging-port');
     expect(tip).toContain('agents browser --electron');
+  });
+});
+
+describe('emitComputerAction — computer.action event (#11)', () => {
+  afterEach(() => {
+    _resetForTest();
+  });
+
+  function eventsPath(): string {
+    return path.join(makeTempDir(), 'events.jsonl');
+  }
+
+  it('records the verb, target pid, and bundle against the real event log', () => {
+    _resetForTest(eventsPath());
+    emitComputerAction('click', 4242, { bundle: 'com.apple.notes' }, { id: '@e3' });
+
+    const recs = query({ eventTypes: ['computer.action'] });
+    expect(recs).toHaveLength(1);
+    expect(recs[0].command).toBe('click');
+    // `targetPid`, never `pid` — `pid` is the reserved envelope key for the
+    // emitting process's OWN pid, so a payload `pid` field is silently
+    // dropped by events.ts's sanitizePayload() before it can collide.
+    expect(recs[0].targetPid).toBe(4242);
+    expect(recs[0].pid).toBe(process.pid);
+    expect(recs[0].bundle).toBe('com.apple.notes');
+    expect(recs[0].id).toBe('@e3');
+  });
+
+  it('carries a remote --host target and an undefined target pid (e.g. a duration-only wait)', () => {
+    _resetForTest(eventsPath());
+    emitComputerAction('wait', undefined, { host: 'win-mini' }, { durationMs: 500, satisfied: true });
+
+    const recs = query({ eventTypes: ['computer.action'] });
+    expect(recs).toHaveLength(1);
+    expect(recs[0].command).toBe('wait');
+    expect(recs[0].targetPid).toBeUndefined();
+    expect(recs[0].host).toBe('win-mini');
+    expect(recs[0].durationMs).toBe(500);
+    expect(recs[0].satisfied).toBe(true);
+  });
+
+  it('never carries the raw typed text — only its length (type/type-text handle secrets)', () => {
+    _resetForTest(eventsPath());
+    const secret = 'super-secret-password';
+    emitComputerAction('type', 100, {}, { textLength: secret.length, committed: true });
+
+    const rec = query({ eventTypes: ['computer.action'] })[0];
+    expect(rec.textLength).toBe(secret.length);
+    expect(JSON.stringify(rec)).not.toContain(secret);
+  });
+});
+
+// A review found that `describe` (and, separately, computer.ts's `screenshot`
+// and dispatch.ts's run-loop verbs) shipped with NO emitComputerAction() call
+// at all — the daemon call succeeded but usedComputer silently read back
+// false. That bug class (a new/existing verb registered here without its
+// emitComputerAction call) has now slipped through twice. This guard reads
+// this file's own source and pins every registered `.command('<name>')` under
+// registerActionCommands to a matching `emitComputerAction('<name>', ...)`
+// call, so a future verb added (or one whose emit call is deleted/typo'd)
+// fails CI instead of silently regressing usedComputer.
+describe('registerActionCommands — every verb calls emitComputerAction (#11 completeness)', () => {
+  const SOURCE = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), 'computer-actions.ts'),
+    'utf8',
+  );
+
+  function registeredCommandNames(source: string): string[] {
+    const body = source.slice(source.indexOf('export function registerActionCommands('));
+    return [...body.matchAll(/\.command\('([^']+)'\)/g)].map((m) => m[1]);
+  }
+
+  it('finds at least the known verb set (guards against the extraction regex silently matching nothing)', () => {
+    const names = registeredCommandNames(SOURCE);
+    expect(names).toEqual(
+      expect.arrayContaining(['apps', 'describe', 'click', 'right-click', 'type', 'launch']),
+    );
+    expect(names.length).toBeGreaterThanOrEqual(14);
+  });
+
+  it('every registered verb has a matching emitComputerAction(\'<verb>\', ...) call', () => {
+    const names = registeredCommandNames(SOURCE);
+    const uninstrumented = names.filter((name) => !SOURCE.includes(`emitComputerAction('${name}',`));
+    expect(uninstrumented).toEqual([]);
   });
 });
 

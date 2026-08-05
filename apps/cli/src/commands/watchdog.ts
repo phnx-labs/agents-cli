@@ -45,6 +45,7 @@ import {
   type WatchdogTickResult,
   type SessionOutcome,
 } from '../lib/watchdog/runner.js';
+import { isWatchdogRotateEnabled, listRotateStates, setWatchdogRotateEnabled } from '../lib/watchdog/rotate.js';
 
 /** Default state dir the runner and these subcommands share. */
 function stateDir(): string {
@@ -97,6 +98,7 @@ async function runMailboxGc(sessions: ActiveSession[]): Promise<void> {
 
 function colorForOutcome(o: SessionOutcome): (s: string) => string {
   if (o.injected) return chalk.green;
+  if (o.decision === 'rotate') return chalk.magenta;
   if (o.addressable === false) return chalk.yellow;
   if (o.stall === 'stalled' && o.decision === 'nudge') return chalk.cyan;
   return chalk.dim;
@@ -110,11 +112,13 @@ function printTick(result: WatchdogTickResult, willInject: boolean): void {
     `${chalk.bold('watchdog')} ${mode}  ` +
       `${counts.total} live · ${counts.stalled} stalled · ` +
       `${chalk.green(String(counts.nudged))} nudged · ` +
-      `${chalk.yellow(String(counts.unaddressable))} un-addressable`,
+      `${chalk.yellow(String(counts.unaddressable))} un-addressable` +
+      (counts.rotating > 0 ? ` · ${chalk.magenta(String(counts.rotating))} rotating` : ''),
   );
   for (const o of result.outcomes) {
     const tag =
       o.injected ? 'NUDGED'
+      : o.decision === 'rotate' ? (o.rotatePhase === 'failed' ? 'ROTATE-FAIL' : 'ROTATE')
       : o.addressable === false ? 'FLAGGED'
       : o.decision === 'nudge' ? 'WOULD-NUDGE'
       : 'skip';
@@ -219,8 +223,14 @@ export function registerWatchdogCommand(program: Command): void {
       # Turn on the ALWAYS-ON watchdog (a daemon-fired routine)
       agents watchdog enable
 
+      # Show the routine, rotate config, and any in-flight in-place rotates
+      agents watchdog status
+
       # Leave one session detected-but-untouched
       agents watchdog policy <sessionId> handsoff
+
+      # Opt out of in-place rotate only (nudging stays on)
+      agents watchdog rotate off
     `,
     notes: `
       Decision path: a cheap deterministic pre-filter resolves the obvious cases
@@ -241,6 +251,20 @@ export function registerWatchdogCommand(program: Command): void {
       via resume when headless. A parked agent with no addressable rail (e.g.
       Ghostty with no tmux) is flagged for the menu-bar and SKIPPED -- never a
       guessed or frontmost target.
+
+      Rotate: a stalled session whose tail shows a HARD account limit ("You've
+      hit your weekly limit - resets ...") is ROTATED IN PLACE instead of nudged:
+      the tick gates on the same healthy-account selection 'agents run auto'
+      makes (zero healthy -> one skip event per cooldown window, terminal
+      untouched), injects the harness's exit sequence, relaunches
+      'agents run auto --interactive --session-id <uuid>' in the SAME tab, waits
+      (bounded, 60s) for the new TUI, then injects the resume replay for the old
+      session. On timeout the session is flagged and never blind-typed into; the
+      flag says the terminal may sit at a bare shell and needs a manual
+      'agents run auto'. A failed rotate is suppressed for 15m before retry.
+      Default ON; disable with 'agents watchdog rotate off' (writes
+      'watchdog.rotate: off' to ~/.agents/agents.yaml; nudging stays on).
+      State machine: ~/.agents/.cache/state/watchdog/rotate/<sessionId>.json.
 
       Always-on: 'agents watchdog enable' creates + enables a 'watchdog' command
       routine ('${WATCHDOG_ROUTINE_SCHEDULE}' -> agents watchdog --nudge) and reloads the
@@ -275,6 +299,25 @@ export function registerWatchdogCommand(program: Command): void {
       console.log(chalk.yellow('watchdog: DISABLED (routine paused)'));
     });
 
+  cmd.command('rotate <state>')
+    .description(
+      'Turn in-place rotate of rate-limited sessions on|off (watchdog.rotate in agents.yaml). ' +
+      'Rotate-only: nudging stays on — unlike `watchdog disable`, which pauses the whole watchdog.',
+    )
+    .action((state: string) => {
+      const s = state.toLowerCase();
+      if (s !== 'on' && s !== 'off') {
+        console.error(chalk.red(`invalid state '${state}'. Use: on | off`));
+        process.exitCode = 1;
+        return;
+      }
+      setWatchdogRotateEnabled(s === 'on');
+      console.log(
+        `watchdog: rotate ${s === 'on' ? chalk.green('ON') : chalk.yellow('OFF')} ` +
+        chalk.dim(`(watchdog.rotate: ${s} in agents.yaml)`),
+      );
+    });
+
   cmd.command('status')
     .description('Show whether the always-on watchdog routine is enabled and where state is written.')
     .option('--json', 'Emit status as JSON (for the menu-bar / scripts)')
@@ -285,11 +328,31 @@ export function registerWatchdogCommand(program: Command): void {
       // read it correctly regardless of which command commander bound it to.
       const json = command.optsWithGlobals().json === true;
       const on = isWatchdogRoutineEnabled();
+      const rotate = isWatchdogRotateEnabled() ? 'on' : 'off';
+      const rotates = listRotateStates(stateDir());
+      const inflight = rotates.filter((r) => r.phase !== 'done' && r.phase !== 'failed');
       if (json) {
-        console.log(JSON.stringify({ enabled: on, routine: WATCHDOG_ROUTINE_NAME, stateDir: stateDir() }));
+        console.log(JSON.stringify({
+          enabled: on,
+          routine: WATCHDOG_ROUTINE_NAME,
+          stateDir: stateDir(),
+          rotate,
+          rotates: rotates.map((r) => ({
+            sessionId: r.sessionId,
+            newSessionId: r.newSessionId,
+            agent: r.agent,
+            phase: r.phase,
+            updatedAtMs: r.updatedAtMs,
+            error: r.error,
+          })),
+        }));
         return;
       }
       console.log(`always-on watchdog: ${on ? chalk.green('ON') : chalk.dim('off')} (routine '${WATCHDOG_ROUTINE_NAME}')`);
+      console.log(`rotate: ${rotate === 'on' ? chalk.green('on') : chalk.yellow('off')} (watchdog.rotate in agents.yaml) · ${inflight.length} in-flight`);
+      for (const r of inflight) {
+        console.log(`  ${chalk.magenta(r.phase.padEnd(12))} ${chalk.bold(r.sessionId.slice(0, 8))} → ${r.newSessionId.slice(0, 8)}${r.error ? chalk.red(`  ${r.error}`) : ''}`);
+      }
       console.log(`state dir: ${chalk.dim(stateDir())}`);
     });
 

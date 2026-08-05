@@ -10,10 +10,11 @@ import {
   extractLinks,
   extractRepos,
   extractSkills,
+  extractSlashCommands,
 } from './highlights.js';
 
-function tool(name: string, args: Record<string, any> = {}, p?: string): SessionEvent {
-  return { type: 'tool_use', agent: 'claude', timestamp: '2026-08-03T10:00:00Z', tool: name, args, path: p };
+function tool(name: string, args: Record<string, any> = {}, p?: string, agent: SessionEvent['agent'] = 'claude'): SessionEvent {
+  return { type: 'tool_use', agent, timestamp: '2026-08-03T10:00:00Z', tool: name, args, path: p };
 }
 function msg(role: 'user' | 'assistant', content: string): SessionEvent {
   return { type: 'message', agent: 'claude', timestamp: '2026-08-03T10:00:00Z', role, content };
@@ -43,6 +44,37 @@ describe('extractSkills', () => {
 
   it('returns [] when no Skill tool ran', () => {
     expect(extractSkills([tool('Read', {}, 'a.ts')])).toEqual([]);
+  });
+
+  it('#12: is harness-aware — kimi matches the same verified "Skill" tool name as claude', () => {
+    expect(extractSkills([tool('Skill', { skill: 'teams' }, undefined, 'kimi')])).toEqual([{ name: 'teams', count: 1 }]);
+  });
+
+  it('#12: does NOT match a coincidentally-named "Skill" tool_use from an unverified harness', () => {
+    // No harness beyond claude/kimi has a confirmed skill-invocation tool
+    // name in this codebase — an absent registry entry must stay a real
+    // miss, not silently fall through to matching any tool literally
+    // named "Skill" regardless of which harness produced it.
+    expect(extractSkills([tool('Skill', { skill: 'teams' }, undefined, 'gemini')])).toEqual([]);
+  });
+});
+
+describe('extractSlashCommands (#12)', () => {
+  it('counts slashCommand occurrences, sorted by count then name', () => {
+    const events: SessionEvent[] = [
+      { ...msg('user', 'x'), slashCommand: '/recap' },
+      { ...msg('user', 'x'), slashCommand: '/recap' },
+      { ...tool('SlashCommand', { command: '/code:commit fix' }), slashCommand: '/code:commit' },
+      msg('assistant', 'no command here'),
+    ];
+    expect(extractSlashCommands(events)).toEqual([
+      { name: '/recap', count: 2 },
+      { name: '/code:commit', count: 1 },
+    ]);
+  });
+
+  it('returns [] when no event carries a slashCommand', () => {
+    expect(extractSlashCommands([msg('user', 'plain text'), tool('Bash', { command: 'ls' })])).toEqual([]);
   });
 });
 

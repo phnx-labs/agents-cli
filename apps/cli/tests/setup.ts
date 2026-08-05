@@ -43,6 +43,14 @@ process.env.AGENTS_EVENTS_PATH = path.join(tmp, 'events.jsonl');
 // leaves HOME untouched (git and every other HOME consumer behave normally).
 process.env.AGENTS_DEVICES_DIR = path.join(tmp, 'devices');
 
+// NB: AGENTS_DAEMON_DIR is deliberately NOT set here. Tests that spawn a REAL
+// daemon (migrate.test.ts, daemon.test.ts) isolate it per-test via a unique
+// HOME and read HOME-based daemon paths; a global AGENTS_DAEMON_DIR would be
+// inherited by those spawned children (env: {...process.env}) and force them all
+// onto one shared daemon dir, colliding on the single-instance guard. The only
+// file that writes the daemon dir IN-PROCESS (daemon-self-heal.test.ts) sets
+// AGENTS_DAEMON_DIR itself, file-scoped, so its isolation never leaks here.
+
 // Hook shims/cache/logs + the disposable perf warehouse: every hook now
 // resolves through a generated shim (pass-through timing for matcher-only
 // hooks, see hooks/cache.ts), so any registrar test that calls

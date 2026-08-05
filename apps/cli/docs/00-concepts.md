@@ -193,6 +193,39 @@ ps`), and routines placement (`agents routines add … --run-on <name>`). See
 [hosts.md](hosts.md) for the `--host` execution model and the option-forwarding
 contract.
 
+## Placement
+
+**One question, one object:** *where does the agent body run?*
+
+```yaml
+where:
+  kind: local | device | fleet | cloud | lease
+  target: yosemite-s0 | auto | hetzner   # optional
+```
+
+The CLI still accepts the historical flags; they all map onto this shape
+(`src/lib/placement.ts`). Prefer **`--where`** on `agents run` when you want
+one door:
+
+| Intent | Placement | Flag / path (aliases still work) |
+|---|---|---|
+| This machine | `kind: local` | (default) · `--where local` |
+| Named fleet / host box | `kind: device, target: <name>` | `--where device:<name>` · `--host` / `--device` |
+| Affinity pick (14d usage) | `kind: device, target: auto` | `--where auto` · `--device auto` |
+| Disposable crabbox | `kind: lease` | `--where lease` · `--lease` |
+| Warm crabbox reuse | `kind: lease, target: <slug>` | `--box <slug>` |
+| Routines: body on one box | `kind: device` | `--run-on <name>` · `--placement host` |
+| Routines: pick any online | `kind: fleet` | `--placement fleet` |
+| Vendor cloud task | `kind: cloud` | `agents cloud run …` |
+
+**Owner is not placement.** On monitors, `--device` pins who *evaluates and
+fires* (exactly-once owner). `--run-on` is where the *action body* runs. Same
+word `--device`, opposite jobs — always say "owner" vs "body placement" in
+docs and help.
+
+Mixing doors fails loud (`--where` + `--host`, `--host` + `--lease`, …). Source
+of truth: [`src/lib/placement.ts`](../src/lib/placement.ts).
+
 ---
 
 ## Capability matrix
@@ -216,6 +249,17 @@ contract.
 | Kimi | yes | yes | yes | yes | no | yes | yes | `AGENTS.md` | yes |
 | Droid | yes | yes | >= 0.57.5 | >= 0.26.0 | yes | yes | yes | `AGENTS.md` | no |
 | Hermes | no | yes | yes | yes | no | yes | no | `MEMORY.md` | no |
+| Pi (Oh My Pi) | no | yes | no | yes | yes | no | yes | `AGENTS.md` | no |
+
+Pi (`omp`) is Claude-compatible — it natively reads `.claude/commands`, `.mcp.json`, and
+Claude-shaped subagents, and keeps its own native resources under `~/.omp/agent/`
+(skills, commands, `agents/`, the `AGENTS.md` context file, and `.mcp.json`). Its MCP
+covers stdio + http + headers. Hooks are off (omp hooks are per-tool JS/TS extension
+modules, not event→shell-command registrations); allowlist is off (approval is per-TOOL
+only via `tools.approval`, no command/path patterns); plugins are off (npm/TS modules, not
+the Claude marketplace manifest). Its cross-provider model catalog (OpenRouter, OpenAI,
+Anthropic, xAI, DeepSeek, …) surfaces in `agents view` / `agents models pi` via
+`omp models --json`.
 
 **Gemini is hard-deprecated.** Google retired the Gemini CLI for free/Pro/Ultra
 tiers on June 18, 2026 (announced at Google I/O 2026); Antigravity CLI

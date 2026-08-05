@@ -116,6 +116,36 @@ describe('resolveSecret (real file store)', () => {
   });
 });
 
+describe('resolveSecret SEC-13: agentOnly, never prompts (an MCP tool call is not a human at a sheet)', () => {
+  // A get_secret MCP tool call is a program asking for a value; on macOS the read
+  // is agentOnly so it can NEVER pop Touch ID. A `never`/no-ACL keychain bundle
+  // resolves silently; a locked `hold`/`always` keychain bundle throws the
+  // actionable "unlock" message, which propagates as the MCP tool error.
+  function createKeychainBundle(name: string, key: string, value: string, policy: SecretsBundle['policy']): void {
+    // A keychain-backed bundle (no `backend: 'file'`) so the agentOnly policy guard
+    // in readAndResolveBundleEnv applies (it is keychain-only).
+    bundleItemStore('keychain', { noAcl: policy === 'never' }).set(secretsKeychainItem(name, key), value);
+    const bundle: SecretsBundle = { name, policy, vars: { [key]: keychainRef(key) } };
+    writeBundle(bundle);
+  }
+
+  it('resolves a never/no-ACL keychain bundle silently', () => {
+    createKeychainBundle('kc-never', 'API_KEY', 'kc-never-val', 'never');
+    expect(resolveSecret('kc-never', 'API_KEY')).toBe('kc-never-val');
+  });
+
+  it('a LOCKED hold keychain bundle throws the actionable "unlock" hint — no silent no-op, no prompt', () => {
+    createKeychainBundle('kc-hold', 'API_KEY', 'kc-hold-val', 'hold');
+    expect(() => resolveSecret('kc-hold', 'API_KEY')).toThrow(/not unlocked in the secrets agent/);
+    expect(() => resolveSecret('kc-hold', 'API_KEY')).toThrow(/agents secrets unlock kc-hold/);
+  });
+
+  it('a LOCKED always keychain bundle also throws (never prompts)', () => {
+    createKeychainBundle('kc-always', 'API_KEY', 'kc-always-val', 'always');
+    expect(() => resolveSecret('kc-always', 'API_KEY')).toThrow(/not unlocked in the secrets agent/);
+  });
+});
+
 describe('tools/call get_secret', () => {
   const call = (bundle: unknown, key: unknown) =>
     handleMcpRequest({

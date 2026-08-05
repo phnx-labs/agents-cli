@@ -412,8 +412,12 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     }
 
     if (neverSynced) {
-      // Everything is "missing" because it was never synced — one line, and a
-      // CRITICAL one: nothing this version declares is actually installed.
+      // Everything is "missing" because it was never synced — collapse to ONE
+      // line. A never-synced version is almost always an old/unused install (you
+      // don't run a version you never synced), so this is a WARNING, not a "needs
+      // you now" critical: it isn't hurting anything until you actually launch it.
+      // The real criticals are a logged-out account or a hook/plugin missing from
+      // a version you DO keep synced (the `else` branch below).
       const total = missingHooks.length + missingPlugins.length + missingOther.length;
       if (total > 0) {
         const breakdown = [
@@ -421,7 +425,7 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
           missingPlugins.length ? `${missingPlugins.length} plugin${missingPlugins.length === 1 ? '' : 's'}` : '',
         ].filter(Boolean).join(', ');
         out.push(finding({
-          severity: 'critical', kind: 'never-synced', device, agent, version,
+          severity: 'warning', kind: 'never-synced', device, agent, version,
           message: `never synced — ${total} resource${total === 1 ? '' : 's'}${breakdown ? ` (incl. ${breakdown})` : ''} not installed`,
         }));
       }
@@ -577,7 +581,11 @@ function duplicateHookFindings(device: string, dups: DuplicateVersionHook[]): Do
         `${versions.length} version${versions.length === 1 ? '' : 's'} ` +
         `(incl. ${group.slice(0, 2).map((d) => `'${d.name}'`).join(', ')}) — ${authority}`;
     out.push({
-      severity: drift ? 'critical' : 'warning',
+      // A hook that DIFFERS across versions is still installed and firing — it's
+      // stale/sync drift, not a missing hook. Resolvable by one sync; a WARNING,
+      // not a "needs you now" critical. (A genuinely MISSING hook stays critical
+      // via the missing-hook path.)
+      severity: 'warning',
       kind: drift ? 'duplicate-hook-drift' : 'duplicate-hook',
       device, agent, versions, message,
       remediation: `agents sync ${agent}@all --yes`,

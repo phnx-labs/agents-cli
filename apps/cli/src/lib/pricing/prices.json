@@ -1,5 +1,5 @@
 {
-  "version": "2026-06-24",
+  "version": "2026-08-03",
   "models": {
     "claude-opus-4": {
       "inputPerToken": 0.000005,
@@ -48,6 +48,21 @@
       "outputPerToken": 0.000075,
       "cacheReadPerToken": 0.0000015,
       "cacheWritePerToken": 0.00001875
+    },
+    "gpt-5.6-sol": {
+      "inputPerToken": 0.000005,
+      "outputPerToken": 0.00003,
+      "cacheReadPerToken": 0.0000005
+    },
+    "gpt-5.6-terra": {
+      "inputPerToken": 0.0000025,
+      "outputPerToken": 0.000015,
+      "cacheReadPerToken": 0.00000025
+    },
+    "gpt-5.6-luna": {
+      "inputPerToken": 0.000001,
+      "outputPerToken": 0.000006,
+      "cacheReadPerToken": 0.0000001
     },
     "gpt-5.5": {
       "inputPerToken": 0.000005,

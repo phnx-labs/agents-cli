@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan · Adopt artifacts-cli for plan rendering</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111312; --panel2:#161a18; --ink:#e7ece8; --dim:#8b938c;
+    --line:#26302a; --accent:#a3e635; --amber:#f5c451; --red:#ff6b6b; --cyan:#5ad6c0;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f6; --panel:#ffffff; --panel2:#f2f4f0; --ink:#1a1c1a; --dim:#5c655c;
+    --line:#e2e6df; --accent:#4d7c0f; --amber:#b45309; --red:#dc2626; --cyan:#0e7490;
+  }
+  :root[data-theme="light"] .fig{background:#0e120f;border-color:#26302a}
+  :root[data-theme="light"] .fig figcaption{color:#8b938c}
+  :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:56px 28px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:40px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 14px}
+  h1{font-size:34px;line-height:1.15;margin:0 0 12px;font-weight:700;letter-spacing:-.01em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);font-size:17px;max-width:70ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);
+    border-radius:999px;padding:4px 11px;background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:500}
+  h2{font-size:23px;margin:52px 0 8px;letter-spacing:-.01em;scroll-margin-top:20px}
+  h2 .n{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:10px;opacity:.85}
+  h3{font-size:16.5px;margin:26px 0 8px;color:var(--ink)}
+  p{margin:10px 0}
+  .lead{color:var(--dim)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--panel2);border:1px solid var(--line);
+    border-radius:5px;padding:1.5px 6px;color:var(--cyan)}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent}
+  a:hover{border-bottom-color:var(--accent)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px 22px 18px;margin:22px 0;overflow-x:auto}
+  .fig figcaption{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:14px;text-align:center}
+  .fig figcaption b{color:var(--ink)}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  td code{font-size:.85em}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600}
+  .tag.a{background:rgba(163,230,53,.12);color:var(--accent);border:1px solid rgba(163,230,53,.3)}
+  .tag.b{background:rgba(90,214,192,.1);color:var(--cyan);border:1px solid rgba(90,214,192,.28)}
+  .tag.c{background:rgba(245,196,81,.1);color:var(--amber);border:1px solid rgba(245,196,81,.28)}
+  ul{margin:10px 0;padding-left:22px}li{margin:6px 0}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 10px 10px 0;
+    padding:14px 18px;margin:18px 0}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);display:block;margin-bottom:5px}
+  .callout.warn .lbl{color:var(--amber)}
+  .toc{font-family:var(--mono);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:18px}
+  .toc a{color:var(--dim);border:0}.toc a:hover{color:var(--accent)}
+  pre{font-family:var(--mono);font-size:13px;background:#0c0f0d;border:1px solid var(--line);
+    border-radius:12px;padding:16px 18px;overflow-x:auto;line-height:1.55;color:#e7ece8}
+  pre .c{color:#8b938c}pre .k{color:#a3e635}pre .s{color:#5ad6c0}pre .r{color:#ff6b6b}
+  .foot{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);
+    font-family:var(--mono);font-size:12px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--dim);
+    justify-content:center;margin-top:6px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .themebtn{position:fixed;top:16px;right:16px;z-index:9;font-family:var(--mono);font-size:12px;
+    color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:6px 13px;cursor:pointer}
+  .themebtn:hover{color:var(--accent);border-color:var(--accent)}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="tt()" id="tb">◐ light</button>
+<script>
+  var r=document.documentElement;
+  function set(t){r.setAttribute('data-theme',t);document.getElementById('tb').textContent=(t==='light'?'◑ dark':'◐ light')}
+  set(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  function tt(){set(r.getAttribute('data-theme')==='light'?'dark':'light')}
+</script>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">agents-cli · plan rendering · plan</p>
+  <h1>Adopt <span class="accent">artifacts-cli</span> for plan-render and visualize</h1>
+  <p class="sub">Stop hand-authoring self-contained HTML for every plan. Author Markdown once and compile it to branded HTML/PDF through the new Phoenix Labs artifacts-cli.</p>
+  <div class="meta">
+    <span class="chip"><b>2</b>&nbsp;skills updated</span>
+    <span class="chip"><b>1</b>&nbsp;new skill added</span>
+    <span class="chip">status: <b>awaiting go</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#s1">01 · finding</a>
+    <a href="#s2">02 · recommendation</a>
+    <a href="#s3">03 · work</a>
+    <a href="#s4">04 · trade-offs</a>
+  </nav>
+</header>
+
+<h2 id="s1"><span class="n">01</span>Finding</h2>
+<p class="lead"><code>artifacts-cli</code> is published at <code>phnx-labs/artifacts-cli</code> as <code>@phnx-labs/artifacts-cli</code> v0.1.0.</p>
+
+<table>
+  <thead><tr><th>Attribute</th><th>Value</th></tr></thead>
+  <tbody>
+    <tr><td>Repository</td><td><code>https://github.com/phnx-labs/artifacts-cli</code></td></tr>
+    <tr><td>Binary</td><td><code>artifacts</code></td></tr>
+    <tr><td>Package</td><td><code>@phnx-labs/artifacts-cli</code> v0.1.0</td></tr>
+    <tr><td>Skill path</td><td><code>skills/artifacts/SKILL.md</code></td></tr>
+  </tbody>
+</table>
+
+<p>The CLI turns Markdown with YAML frontmatter into self-contained HTML, paginated or poster PDFs, and optional shareable links. Provenance fields — project, repository, branch, harness, agent, human, host, session, date — auto-fill at render time.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 960 280" role="img" aria-label="Current workflow hand-writes HTML; proposed workflow authors Markdown and renders through artifacts-cli">
+  <defs>
+    <marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L7 4 L0 8 z" fill="#a3e635"/></marker>
+  </defs>
+
+  <text x="220" y="40" fill="#8b938c" font-size="13" text-anchor="middle" font-family="var(--mono)">current</text>
+  <rect x="40" y="70" width="180" height="70" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="130" y="105" fill="#e7ece8" font-size="13" text-anchor="middle" font-family="var(--mono)">agent writes HTML</text>
+  <text x="130" y="125" fill="#8b938c" font-size="11" text-anchor="middle">Write tool</text>
+  <path d="M220 105 L320 105" stroke="#ff6b6b" fill="none" marker-end="url(#ar)"/>
+  <rect x="320" y="70" width="180" height="70" rx="8" fill="#161a18" stroke="#ff6b6b"/>
+  <text x="410" y="105" fill="#e7ece8" font-size="13" text-anchor="middle" font-family="var(--mono)">self-contained .html</text>
+  <text x="410" y="125" fill="#8b938c" font-size="11" text-anchor="middle">large, repeated</text>
+
+  <text x="700" y="40" fill="#8b938c" font-size="13" text-anchor="middle" font-family="var(--mono)">proposed</text>
+  <rect x="520" y="70" width="180" height="70" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="610" y="105" fill="#e7ece8" font-size="13" text-anchor="middle" font-family="var(--mono)">agent writes Markdown</text>
+  <text x="610" y="125" fill="#8b938c" font-size="11" text-anchor="middle">kind: plan + title</text>
+  <path d="M700 105 L780 105" stroke="#a3e635" fill="none" marker-end="url(#ar)"/>
+  <rect x="780" y="70" width="160" height="70" rx="8" fill="#12160f" stroke="#a3e635"/>
+  <text x="860" y="105" fill="#a3e635" font-size="13" text-anchor="middle" font-family="var(--mono)">artifacts-cli</text>
+  <text x="860" y="125" fill="#8b938c" font-size="11" text-anchor="middle">compile</text>
+
+  <path d="M860 140 L860 180" stroke="#a3e635" fill="none" marker-end="url(#ar)"/>
+  <rect x="780" y="185" width="80" height="45" rx="6" fill="#161a18" stroke="#5ad6c0"/>
+  <text x="820" y="212" fill="#5ad6c0" font-size="12" text-anchor="middle" font-family="var(--mono)">.html</text>
+  <rect x="880" y="185" width="60" height="45" rx="6" fill="#161a18" stroke="#5ad6c0"/>
+  <text x="910" y="212" fill="#5ad6c0" font-size="12" text-anchor="middle" font-family="var(--mono)">.pdf</text>
+
+  <rect x="40" y="185" width="460" height="70" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="70" y="215" fill="#e7ece8" font-size="13" font-family="var(--mono)">example plan</text>
+  <text x="70" y="235" fill="#8b938c" font-size="11">from artifacts-cli README</text>
+  <text x="280" y="215" fill="#a3e635" font-size="14" font-family="var(--mono)">1,274 tokens Markdown</text>
+  <text x="280" y="238" fill="#8b938c" font-size="11">vs 4,763 tokens equivalent HTML</text>
+  <text x="430" y="227" fill="#f5c451" font-size="14" font-family="var(--mono)">73% reduction</text>
+</svg>
+<figcaption><b>Workflow shift.</b> Move the repeated document chrome, theme CSS, and print rules out of the agent and into the compiler.</figcaption>
+</figure>
+
+<h2 id="s2"><span class="n">02</span>Recommendation</h2>
+<p>Yes — update the user-level <code>plan-render</code> skill to author Markdown and call <code>artifacts render</code>. Apply the same change to <code>visualize</code> so both skills share one compiler. Add the <code>artifacts</code> skill to the user repo so agents know the CLI conventions.</p>
+
+<div class="callout">
+  <span class="lbl">the takeaway</span>
+  The source of truth becomes Markdown + <code>DESIGN.md</code>; HTML and PDF are build outputs. This matches artifacts-cli's design and eliminates duplicated rendering logic.
+</div>
+
+<h2 id="s3"><span class="n">03</span>Work</h2>
+
+<table>
+  <thead><tr><th>Step</th><th>What</th><th>Where</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag a">add</span></td><td>Install the <code>artifacts</code> skill from <code>phnx-labs/artifacts-cli</code></td><td><code>~/.agents/skills/artifacts/</code></td></tr>
+    <tr><td><span class="tag b">edit</span></td><td>Rewrite <code>plan-render/SKILL.md</code> to produce Markdown and call <code>artifacts render</code></td><td><code>~/.agents/skills/plan-render/SKILL.md</code></td></tr>
+    <tr><td><span class="tag b">edit</span></td><td>Rewrite <code>visualize/SKILL.md</code> for <code>kind: visual</code> and poster PDFs</td><td><code>~/.agents/skills/visualize/SKILL.md</code></td></tr>
+    <tr><td><span class="tag b">edit</span></td><td>Update <code>share</code> skills to mention <code>artifacts share</code> as an option</td><td><code>~/.agents/skills/share*</code></td></tr>
+    <tr><td><span class="tag c">verify</span></td><td>Render a sample plan end-to-end and run <code>artifacts check</code></td><td>local + viewer Mac</td></tr>
+  </tbody>
+</table>
+
+<h3>Example Markdown source</h3>
+<pre><span class="c">---</span>
+<span class="k">kind</span>: <span class="s">plan</span>
+<span class="k">title</span>: <span class="s">Adopt artifacts-cli for plan rendering</span>
+<span class="k">summary</span>: <span class="s">Move from hand-written HTML to Markdown-first artifact rendering.</span>
+<span class="k">status</span>: <span class="s">draft</span>
+<span class="k">tracking</span>: <span class="s">"#ticket"</span>
+<span class="k">facts</span>:
+  - <span class="s">artifacts-cli is published</span>
+  - <span class="s">73% token reduction on the sample plan</span>
+<span class="c">---</span>
+
+<span class="c">## Context</span>
+...
+
+<span class="c">## Design</span>
+...</pre>
+
+<h3>Render command</h3>
+<pre><span class="c"># HTML + paginated PDF</span>
+<span class="k">artifacts render</span> <span class="s">plan.md</span> <span class="c">--format html,pdf</span>
+
+<span class="c"># Visual / poster</span>
+<span class="k">artifacts render</span> <span class="s">visual.md</span> <span class="c">--format pdf --layout poster</span></pre>
+
+<h2 id="s4"><span class="n">04</span>Trade-offs</h2>
+<div class="grid2">
+  <div class="panel">
+    <h3>Pros</h3>
+    <ul>
+      <li>Single reviewed compiler for HTML/PDF</li>
+      <li>Token-efficient Markdown source</li>
+      <li>Auto-filled provenance</li>
+      <li><code>artifacts check</code> validation</li>
+    </ul>
+  </div>
+  <div class="panel">
+    <h3>Cons</h3>
+    <ul>
+      <li>Requires <code>artifacts</code> binary installed</li>
+      <li>No hand-written HTML fallback if missing</li>
+      <li>Existing templates need rewriting</li>
+    </ul>
+  </div>
+</div>
+
+<div class="callout warn">
+  <span class="lbl">caveat</span>
+  Environments without <code>artifacts</code> will fail rather than fall back to inline HTML. This is consistent with the artifacts skill's own contract, but it makes installation a hard prerequisite.
+</div>
+
+<div class="foot">
+  agents-cli · plan mode · rendered by plan-render &nbsp;·&nbsp; next: <span style="color:var(--accent)">go / reshape</span>
+</div>
+
+</div>
+</body>
+</html>

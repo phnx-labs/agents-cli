@@ -41,6 +41,7 @@ import {
   type BundleValue,
   type SecretRef,
 } from './index.js';
+import { isHeadlessSecretsContext } from './headless.js';
 import { fileStore } from './filestore.js';
 import {
   getVaultSession,
@@ -393,7 +394,14 @@ export function readBundle(name: string): SecretsBundle {
   if (backend === 'vault') assertVaultBackendUsable(name);
   let json: string;
   try {
-    json = itemStore(backend).get(bundleMetaItem(name));
+    // Bundle metadata carries no biometry ACL (SEC-4), so this read is silent
+    // even in a headless context — attest that to the raw-read storm guard so
+    // a headless `readBundle` never trips the fail-fast. (A legacy
+    // pre-metadata-heal ACL'd metadata item can still prompt once; it heals on
+    // the next interactive read.)
+    json = backend === 'keychain'
+      ? getKeychainToken(bundleMetaItem(name), { silentNoAcl: true })
+      : itemStore(backend).get(bundleMetaItem(name));
   } catch (err) {
     // A file-backed bundle whose metadata is on disk but fails to decrypt is a
     // wrong-passphrase error, not a missing bundle — surface that clearly.
@@ -801,7 +809,13 @@ export function listBundles(): SecretsBundle[] {
       if (cached) {
         for (const bundle of cached) out.push(bundle);
       } else {
-        const fetched = getKeychainTokens(keychainServices);
+        // Metadata enumeration must stay silent in ANY context (SEC-11):
+        // bundle metadata items are no-ACL by contract (SEC-4), so attest that
+        // to the raw-read storm guard — a headless `listBundles` (session
+        // start, crabbox env, devices fan-out) must never fail fast on the
+        // guard nor pop a sheet. (A legacy pre-heal ACL'd metadata item can
+        // still prompt once; it heals on the next interactive scan.)
+        const fetched = getKeychainTokens(keychainServices, { silentNoAcl: true });
         const keychainBundles: SecretsBundle[] = [];
         const metaJsonByName = new Map<string, string>();
         for (const service of keychainServices) {
@@ -1170,8 +1184,14 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
   }
 
   const store = itemStore(bundle.backend ?? 'keychain');
+  // keychainStore.getBatch IS getKeychainTokens — call it directly so a
+  // `never`-policy bundle (no biometry ACL on its items) attests `silentNoAcl`
+  // and stays readable in a headless context, while an ACL'd policy hits the
+  // raw-read storm guard and fails fast there.
   const fetched = keychainItemsToFetch.length > 0
-    ? store.getBatch(keychainItemsToFetch)
+    ? (bundle.backend ?? 'keychain') === 'keychain'
+      ? getKeychainTokens(keychainItemsToFetch, { silentNoAcl: bundlePolicy(bundle) === 'never' })
+      : store.getBatch(keychainItemsToFetch)
     : new Map<string, string>();
 
   const env: Record<string, string> = {};
@@ -1212,60 +1232,12 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
 
 /**
  * True when the current process is a background / non-interactive context that
- * must NEVER raise a Keychain biometry prompt on the interactive user's screen —
- * a prompt nobody is watching. Two signals, either sufficient:
- *   - `AGENTS_RUNTIME` is `headless`, `teams`, or `terminal` — i.e. ANY agent
- *     launch, interactive included, and inherited by everything spawned beneath
- *     one (set on the child env by `agents run --headless`, scheduled routines,
- *     teammates, and interactive runs — see exec.ts:430, runner.ts,
- *     teams/agents.ts).
- *   - neither stdin nor stdout is a TTY (a detached/backgrounded task whose
- *     stdio is redirected to a log — e.g. a release script run in the
- *     background as `( ... ) >log 2>&1 </dev/null`).
- * `AGENTS_SECRETS_NO_PROMPT=1` forces headless-safe; `=0` force-allows a prompt
- * even in a non-TTY context. An `eval "$(agents secrets export X)"` typed in a
- * PLAIN shell has no AGENTS_RUNTIME, so it is not classified headless and still
- * prompts. Run beneath an agent it inherits AGENTS_RUNTIME and resolves
- * broker-only — the agent, not the human, is the caller there.
- *
- * Only **macOS keychain** reads pop an interactive Touch ID sheet — the secrets
- * broker itself is a no-op off darwin (see agent.ts), and libsecret (Linux) /
- * the Windows credential store resolve without any prompt. So off-darwin this
- * ALWAYS returns false: forcing broker-only there would break every headless
- * Linux/Windows read (CI, `agents run --headless`, routines, the Linux-driven
- * release flow) for no benefit — there is no prompt to suppress.
- *
- * A read in a macOS headless context resolves broker-only (agentOnly) and fails
- * fast with an actionable error instead of hijacking Touch ID. This generalizes
- * the per-caller broker-only pattern used across the headless secrets readers.
+ * must NEVER raise a Keychain biometry prompt on the interactive user's screen.
+ * Re-exported from ./headless.js — the detector lives there so the raw-read
+ * path in index.ts can share it without a bundles↔index import cycle. See that
+ * module for the full contract.
  */
-export function isHeadlessSecretsContext(
-  env: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform,
-  // Injected so the TTY branch below is testable: it is the branch that decides a
-  // plain human shell still prompts, which is this guard's entire safety argument,
-  // and reading process.* directly made it unreachable from a test.
-  tty: { stdin?: boolean; stdout?: boolean } = { stdin: process.stdin.isTTY, stdout: process.stdout.isTTY },
-): boolean {
-  if (platform !== 'darwin') return false; // no biometry prompt to suppress off-darwin
-  const override = env.AGENTS_SECRETS_NO_PROMPT;
-  if (override === '1') return true;
-  if (override === '0') return false;
-  // Every AGENT-LAUNCH runtime resolves broker-only, interactive included.
-  // `terminal` was missing, which made an agent terminal the one launch path
-  // still allowed to pop Touch ID: exec.ts sets AGENTS_RUNTIME='terminal' for an
-  // interactive run (exec.ts:430), that fell through to the TTY check below, and
-  // a TTY meant "a human is watching, so prompting is fine". It is not fine —
-  // opening a terminal is not a request to authenticate, and a launch that needs
-  // a locked bundle should say so and point at `agents secrets unlock`, not grab
-  // the fingerprint sensor. AGENTS_RUNTIME is INHERITED by everything spawned under
-  // an agent, so `agents secrets export` run beneath one resolves broker-only too —
-  // correctly: there the agent, not the human, is the caller. A plain shell carries
-  // no AGENTS_RUNTIME, so a person running it themselves still gets the sheet.
-  const runtime = env.AGENTS_RUNTIME;
-  if (runtime === 'headless' || runtime === 'teams' || runtime === 'terminal') return true;
-  return !tty.stdin && !tty.stdout;
-}
+export { isHeadlessSecretsContext } from './headless.js';
 
 /**
  * Read a bundle's metadata AND resolve its env in a single Touch ID prompt.
@@ -1363,10 +1335,13 @@ export function readAndResolveBundleEnv(
   // guard never fires, and they still get their prompt. No caller passes this flag;
   // it remains the seam for a future unlock path that wants the sheet on purpose.
   const interactiveUnlock = opts.interactiveUnlock ?? false;
+  // A `never`-policy bundle's items carry no biometry ACL, so once the policy
+  // check below proves that, the batch read is silent even in a headless
+  // context — attest it to the raw-read storm guard via `silentNoAcl`.
+  let verifiedNoAclBundle = false;
   if (opts.agentOnly && backend === 'keychain' && !interactiveUnlock) {
-    let noAclBundle = false;
-    try { noAclBundle = bundlePolicy(readBundle(name)) === 'never'; } catch { /* fail closed */ }
-    if (!noAclBundle) {
+    try { verifiedNoAclBundle = bundlePolicy(readBundle(name)) === 'never'; } catch { /* fail closed */ }
+    if (!verifiedNoAclBundle) {
       throw new Error(
         `Secrets bundle '${name}' is not unlocked in the secrets agent. ` +
         `Run 'agents secrets unlock ${name}' in a terminal first — an agent launch ` +
@@ -1406,6 +1381,7 @@ export function readAndResolveBundleEnv(
         duration: opts.duration || humanUnlockDuration(secretsHoldMs()),
         defaultPolicy: secretsDefaultPolicy(),
         forceDuration: Boolean(opts.duration),
+        silentNoAcl: verifiedNoAclBundle,
       })
     : store.getBatch([...new Set([metaItem, ...secretItems])]);
 
@@ -1607,6 +1583,59 @@ export function rotateBundleSecret(bundle: SecretsBundle, key: string, opts: Rot
     bundle.meta[key] = patched;
   }
   writeBundle(bundle);
+}
+
+/**
+ * Reconcile a bundle's keychain-backed VALUE items to its CURRENT policy, then
+ * write the (always no-ACL) metadata.
+ *
+ * `writeBundle` only rewrites the metadata item, so a policy change alone leaves
+ * every value item carrying the ACL it was created with — and macOS gates each
+ * read on the ITEM's ACL, not the bundle's declared tier (spec SEC-19). Without
+ * this reconcile, `agents secrets policy <b> never` reports "silent" while the
+ * still-ACL'd value keeps popping Touch ID on every read, forever.
+ *
+ *   hold/always -> never  strips the biometry ACL (helper `set-no-acl`: delete+add)
+ *   never -> hold/always  re-attaches it (helper `set`)
+ *
+ * The current values are read in ONE batch, so the reconcile costs at most a
+ * single Touch ID — the last prompt a hold->never bundle will ever raise (a
+ * never->* flip reads silently, since the items are already no-ACL). No-op on the
+ * ACL to write for non-keychain backends (file/vault have no biometry concept),
+ * and a metadata-only write when the bundle has no keychain-backed values.
+ */
+export function reAclBundleItems(bundle: SecretsBundle): void {
+  if ((bundle.backend ?? 'keychain') !== 'keychain') {
+    // No biometry ACL off the keychain backend — only metadata needs persisting.
+    writeBundle(bundle);
+    return;
+  }
+  const store = itemStore('keychain');
+  // keychainItemsForBundle already returns ONLY keychain-backed value items
+  // (via parseBundleValue), so no extra ref-shape filtering here.
+  const entries = keychainItemsForBundle(bundle);
+  if (entries.length === 0) {
+    // Literal/ref-only bundle: nothing to re-ACL, just refresh metadata.
+    writeBundle(bundle);
+    return;
+  }
+  // One batched read = at most one Touch ID for the whole reconcile.
+  const values = store.getBatch(entries.map((e) => e.item));
+  const rewrite = new Map<string, string>();
+  for (const { item } of entries) {
+    const value = values.get(item);
+    // A key present in metadata but with no readable value item is real
+    // corruption, not something to silently skip (no fallbacks — fail loud).
+    if (value === undefined) {
+      throw new Error(
+        `Cannot change policy for '${bundle.name}': a keychain value is missing or unreadable. Rotate that key, then retry.`,
+      );
+    }
+    rewrite.set(item, value);
+  }
+  // writeBundleWithItems re-stores each value with { noAcl: policy === 'never' }
+  // and the metadata no-ACL (metadata-last), and evicts any broker-held copy.
+  writeBundleWithItems(bundle, rewrite);
 }
 
 /** Options for renameBundle. */

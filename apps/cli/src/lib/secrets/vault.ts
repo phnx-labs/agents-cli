@@ -265,7 +265,9 @@ export function clearVaultKey(): void {
 export function getVaultSession(): { loggedIn: true; key: VaultKey; expiresAt: number } | { loggedIn: false; expiresAt?: number } {
   let raw: string;
   try {
-    raw = getKeychainToken(VAULT_SESSION_ITEM);
+    // Written no-ACL (cacheVaultKey) — the vault session probe runs inside bundleBackend
+    // for EVERY bundle op, headless included, so it must stay silent.
+    raw = getKeychainToken(VAULT_SESSION_ITEM, { silentNoAcl: true });
   } catch {
     return { loggedIn: false };
   }

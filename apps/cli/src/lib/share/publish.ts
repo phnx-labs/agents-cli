@@ -122,6 +122,20 @@ function guessContentType(filePath: string): string {
   if (/\.js$/i.test(filePath)) return 'text/javascript; charset=utf-8';
   if (/\.json$/i.test(filePath)) return 'application/json';
   if (/\.svg$/i.test(filePath)) return 'image/svg+xml';
+  // Raster images + video: agents publish screenshots and screen recordings as PR
+  // evidence, and GitHub's image proxy (camo) only renders an inline `![](url)` when
+  // the asset is served with a real image/video content-type — octet-stream is
+  // refused. Type them so the share URL embeds instead of downloading.
+  if (/\.png$/i.test(filePath)) return 'image/png';
+  if (/\.jpe?g$/i.test(filePath)) return 'image/jpeg';
+  if (/\.gif$/i.test(filePath)) return 'image/gif';
+  if (/\.webp$/i.test(filePath)) return 'image/webp';
+  if (/\.avif$/i.test(filePath)) return 'image/avif';
+  if (/\.ico$/i.test(filePath)) return 'image/x-icon';
+  if (/\.mp4$/i.test(filePath)) return 'video/mp4';
+  if (/\.mov$/i.test(filePath)) return 'video/quicktime';
+  if (/\.webm$/i.test(filePath)) return 'video/webm';
+  if (/\.pdf$/i.test(filePath)) return 'application/pdf';
   if (/\.txt$|\.md$/i.test(filePath)) return 'text/plain; charset=utf-8';
   return 'application/octet-stream';
 }

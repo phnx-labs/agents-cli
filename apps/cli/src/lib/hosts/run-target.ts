@@ -104,7 +104,13 @@ export interface HostPromptRun {
 
 /** Resolve the id the remote host will adopt for a fresh Claude session. */
 export function resolveHostSessionId(agent: string, resume?: string, sessionId?: string): string | undefined {
-  return agent === 'claude' && !resume ? sessionId ?? randomUUID() : undefined;
+  if (resume) return undefined;
+  if (agent === 'claude') return sessionId ?? randomUUID();
+  // `run auto`: the harness is picked on the REMOTE. Forward an explicit id so
+  // a claude pick adopts it — but never mint one: minting would suppress the
+  // --emit-session-id marker a non-claude pick needs to register its session.
+  if (agent === 'auto') return sessionId;
+  return undefined;
 }
 
 /**
@@ -127,7 +133,10 @@ export async function dispatchPromptToHost(host: Host, opts: HostPromptRun): Pro
   // Ask the remote to print its resolved id whenever we did NOT force one (every
   // non-Claude agent, and Claude-on-resume where the id is already known). No-op
   // when the run isn't followed — nothing tails the log to catch the marker.
-  const emitSessionId = !forcedSessionId && !opts.resume && opts.follow !== false;
+  // `run auto` with an explicit --session-id is the exception: the id is only
+  // ADOPTED when the remote picks claude, so a non-claude pick must still emit
+  // the marker for its own coined id.
+  const emitSessionId = (!forcedSessionId || opts.agent === 'auto') && !opts.resume && opts.follow !== false;
   const result = await dispatchToHost(host, {
     agent: opts.agent,
     prompt: opts.prompt,

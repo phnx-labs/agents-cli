@@ -24,6 +24,7 @@ enum ChildProcessSelfTest {
         testRegistryRoundTrip()
         testReapSkipsPidWhoseExecutableChanged()
         testReapKillsARealOrphanFromAPreviousLaunch()
+        testChildDoesNotInheritSingleInstanceFlock()
         if failures == 0 {
             print("\nALL PASS")
             exit(0)
@@ -117,8 +118,14 @@ enum ChildProcessSelfTest {
         let mismatched = recorded.filter { ChildProcess.executablePath($0.pid) != $0.path }
         check(mismatched.count == 1,
               "a live pid whose executable no longer matches is not reapable")
-        check(ChildProcess.executablePath(me)?.hasSuffix("MenubarHelper") == true,
-              "executablePath resolves a live pid (got \(ChildProcess.executablePath(me) ?? "nil"))")
+        // Production builds may name the binary MenubarHelper-universal (lipo
+        // of arm64+x86_64). Match the last path component's prefix, not a hard
+        // suffix of "MenubarHelper" alone — that failed every home-base publish
+        // of 1.22.2 with got …/MenubarHelper-universal.
+        let exe = ChildProcess.executablePath(me) ?? ""
+        let base = (exe as NSString).lastPathComponent
+        check(base.hasPrefix("MenubarHelper"),
+              "executablePath resolves a live pid (got \(exe.isEmpty ? "nil" : exe))")
         try? FileManager.default.removeItem(atPath: file)
     }
 
@@ -154,6 +161,57 @@ enum ChildProcessSelfTest {
         check(ChildProcess.Registry.readAll(file: file).isEmpty,
               "registry is cleared so the next launch does not re-reap a dead pid")
         try? FileManager.default.removeItem(atPath: file)
+    }
+
+    // The flock-inheritance leak that bricked the single-instance guard: a child
+    // spawned while the helper holds the menubar.lock flock must NOT inherit that
+    // fd. If it does, an orphaned child (helper crashed) keeps the open-file-
+    // description — and its flock — alive at PPID 1, and every later launch
+    // deadlocks as "already running". Guarded at the source by O_CLOEXEC on the
+    // lock open (SingleInstance.acquire) — the fd is close-on-exec, so no exec'd
+    // child inherits it. Real flock, real child via raw posix_spawn (the leak
+    // vehicle Foundation.Process can't reproduce) — no mock.
+    private static func testChildDoesNotInheritSingleInstanceFlock() {
+        let path = "\(NSTemporaryDirectory())menubar-flock-inherit-\(getpid()).lock"
+        try? FileManager.default.removeItem(atPath: path)
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        // Take the lock exactly as SingleInstance.acquire does — WITH O_CLOEXEC.
+        let held = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
+        guard held >= 0, flock(held, LOCK_EX | LOCK_NB) == 0 else {
+            check(false, "parent could not take the lock (fd \(held))"); return
+        }
+        // Direct invariant: the lock fd is close-on-exec, so no exec'd child keeps it.
+        check((fcntl(held, F_GETFD) & FD_CLOEXEC) != 0,
+              "lock fd is O_CLOEXEC (close-on-exec)")
+
+        // End-to-end: a child spawned via a RAW posix_spawn with NO
+        // CLOEXEC_DEFAULT and no file actions — the exact pre-#1841 spawn shape —
+        // inherits every fd that is not itself close-on-exec. If the lock fd were
+        // not O_CLOEXEC it would ride into /bin/sleep and keep the open-file-
+        // description (and its flock) alive after the parent drops its own. This is
+        // the real leak vehicle: Foundation.Process closes inherited fds itself and
+        // so cannot reproduce the bug, which is why this uses posix_spawn directly.
+        var childPid: pid_t = 0
+        var argv: [UnsafeMutablePointer<CChar>?] = (["/bin/sleep", "300"] as [String]).map { strdup($0) } + [nil]
+        defer { for a in argv where a != nil { free(a) } }
+        let rc = posix_spawn(&childPid, "/bin/sleep", nil, nil, &argv, environ)
+        guard rc == 0 else {
+            check(false, "could not posix_spawn a stand-in child (rc \(rc))"); close(held); return
+        }
+
+        // Parent drops its reference. If the child never inherited the fd, this
+        // closes the last reference to the open-file-description and frees the lock.
+        close(held)
+
+        // A fresh open+flock MUST succeed — proof no child kept the lock alive.
+        let probe = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0o644)
+        let free = probe >= 0 && flock(probe, LOCK_EX | LOCK_NB) == 0
+        if probe >= 0 { close(probe) }
+        kill(childPid, SIGKILL)
+        var st: Int32 = 0
+        while waitpid(childPid, &st, 0) == -1 && errno == EINTR {}
+        check(free, "flock is free after the holder drops its fd (child never inherited it)")
     }
 
     /// `sleep 300` in its own process group, reparented away from this process.

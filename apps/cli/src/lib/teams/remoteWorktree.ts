@@ -96,10 +96,9 @@ export function remoteDefaultBranch(target: string, repoPath: string): string {
  * Create a worktree on the host for a teammate, branched off the freshly-fetched
  * default branch. Returns the absolute worktree path on the host.
  *
- * Mirrors local `createWorktree`, with two deliberate differences: it fetches
- * origin first (the orchestrator can't reach into the host's tree to do it), and
- * it bases the branch on `origin/<default>` rather than local `HEAD` so a stale
- * checkout on the host can't fork the teammate off old code.
+ * Same base policy as local `createWorktree`: fetch origin, then
+ * `worktree add -b … origin/<default>` so a stale checkout can't fork the
+ * teammate off old code.
  */
 export function createRemoteWorktree(target: string, repoPath: string, worktreeName: string): string {
   assertValidSshTarget(target);

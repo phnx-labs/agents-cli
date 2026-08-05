@@ -51,6 +51,7 @@ guarantee, the reference for the mechanism.
 - [Sessions](#sessions) — `agents sessions`: discovery, parsing, preview, metadata, lifecycle, export/import
 - [Secrets](#secrets) — `agents secrets`: storage & materialization boundaries, sharing, no-noise
 - [Agent execution](#agent-execution) — `agents run`: the one execution engine, env, isolation, fallback, dispatch
+- [Scheduling & execution singularity](#scheduling--execution-singularity) — one scheduler, one executor for anything fleet-affecting; UIs are thin wrappers
 - [Watchdog](#watchdog) — `agents watchdog`: detect idle agents, decide nudge/skip, deliver to the exact split
 
 ---
@@ -348,16 +349,111 @@ SSH access (§7); rendering sessions that no harness produced.
   `lib/session/db.ts` — `journal_mode = WAL` ~`:442`, `busy_timeout = 30000`
   ~`:450`; binding selected in `lib/sqlite.ts:23-24`).
 - **SES-29 (MUST).** Schema migrations MUST run on open, land a several-versions-old
-  DB on the current `SCHEMA_VERSION` (**18** at time of writing,
-  `lib/session/db.ts:23` — treat the constant as the source of truth, not this number) in
+  DB on the current `SCHEMA_VERSION` (**29** at time of writing,
+  `lib/session/db.ts:28` — treat the constant as the source of truth, not this number) in
   one call, MUST NOT drop existing rows, and MUST bump the stamp only after the
   migration succeeds so a mid-migration crash re-enters cleanly
   (`lib/session/db.ts` around the `getDB` migration gate; tests `db.migrate-v10.test.ts:78-93`,
-  `db.migrate-v14.test.ts:98-106`). A migration that changes how a column is
-  derived MUST force a full rescan.
+  `db.migrate-v14.test.ts:98-106`). A migration that changes derived data MUST
+  invalidate the ledger for that data; it MUST NOT invalidate unrelated warm
+  indexes.
 - **SES-30 (MUST).** One malformed row's constraint failure MUST NOT roll back the
   batch and MUST NOT stamp that row's ledger entry, so it is retried next scan
   (self-healing) (`lib/session/db.ts:975-982,1035-1039`).
+- **SES-31 (MUST).** Tool-call evidence MUST be redacted before persistence and
+  bounded to 16 KiB input, 1 KiB successful output, or 4 KiB error output.
+  Raw evidence and shell source MUST be bounded to 64 KiB before redaction or
+  AST parsing.
+  The combined evidence payload MUST be capped at 5 MiB per session and MUST
+  leave an explicit terminal row when additional calls are omitted.
+  `--no-redact` MUST NOT disable index redaction. Outcomes and exit/status/error
+  codes MUST come from structured harness fields, never free-text inference
+  (`lib/session/tool-calls.ts:6-16,69-96,177-305,319-408,486-526`).
+- **SES-32 (MUST).** A changed Claude/Codex transcript MUST derive tool calls in
+  the same resumable reducer and preserve pending native call identity across an
+  append. Adding accumulator state MUST bump the continuation version; a prior
+  shape without tool-call state MUST force one full reparse before append-mode
+  persistence. Each appended JSONL record MUST be processed within a fixed
+  bound; a record over 1 MiB MUST be skipped without retaining the rest of the
+  file in memory.
+  Other harnesses MUST derive calls from the same normalized event parse
+  used for metadata. A warm compatible ledger row MUST NOT reopen or Bash-parse
+  the transcript
+  (`lib/session/discover.ts:3042-3044,3270-3364,3434-3468,3568-3573`;
+  `lib/session/discover.ts:3667-3669,3846-3926,3969-3992,4086-4091`;
+  `lib/session/db.ts:1297-1307`; `lib/session/tool-index.ts:211-290`).
+- **SES-33 (MUST).** Repeated tool query clauses MUST be satisfied by distinct
+  call rows in the same session using polynomial bipartite matching. A request
+  MUST be bounded to 32 clauses, 4 KiB per clause, and 50,000 materialized call
+  rows. `--limit` MUST be bounded to 1–1,000 sessions and aggregate materialized
+  call evidence MUST be bounded to 8 MiB. The JSON encoding MUST be bounded to
+  15 MiB so a valid result remains below the fleet transport ceiling. Indexed
+  program/status/exit columns and FTS5 MUST prefilter candidates
+  before the exact assignment
+  (`lib/session/tool-index.ts:30-36,386-578,682-755`).
+- **SES-34 (MUST).** Schema v29's session-id-keyed `tool_scan_ledger` MUST be independent of the
+  normal session ledgers. Migration MUST clear only the derived tool ledger and
+  MUST NOT clear `scan_ledger` or `dir_ledger`. Historical parsing MUST run only
+  through explicit `agents sessions backfill tools`, in internal batches bounded
+  to 25 files or 16 MiB. Fleet backfill MUST advance devices concurrently in
+  bounded rounds; a peer invocation MUST process at most one batch before
+  returning its coverage. A tool query MUST read the SQLite snapshot and coverage
+  rows without calling `ensureToolIndex`, statting a transcript, or parsing it.
+  Oversized Claude/Codex JSONL MUST stream with a 1 MiB record
+  cap up to a 64 MiB source ceiling; larger sources MUST persist an explicit
+  limit row without reading the body. Other harness parsers MUST NOT materialize
+  a source over 16 MiB. Append
+  persistence MUST use ledger byte totals and read only changed ordinals
+  (`lib/session/db.ts`; `lib/session/tool-store.ts`; `lib/session/tool-index.ts`;
+  `commands/sessions-backfill.ts`; `commands/sessions.ts`).
+- **SES-35 (MUST).** Fleet tool search MUST cap each peer's stdout at 16 MiB,
+  query at most six peers concurrently, and subtract the exact encoded local
+  envelope plus 64 KiB of coordinator headroom from the 15 MiB aggregate receive
+  ceiling before retaining peer bytes. Raw peer bytes and the validated,
+  re-redacted envelope MUST each be charged against that remainder, because
+  redaction may expand evidence. It MUST mark partial coverage when exhausted
+  and MUST validate every versioned envelope field, strip terminal controls, and
+  omit transcript paths before merging. A missing transcript MUST purge its call
+  rows, program rows, FTS rows, and tool ledger when the source directory changes,
+  without statting every indexed session.
+  Fleet evidence queries MUST use a direct SSH connection and have a 60-second
+  deadline. Queries MUST NOT perform remote indexing. Fleet counts MUST transfer
+  only validated aggregate totals and per-machine coverage. During fleet
+  fan-out, every peer MUST query only sessions whose recorded origin is that
+  peer, so synced mirror transcripts cannot duplicate evidence or totals.
+  Evidence MUST retain the recorded transcript origin across the SSH hop, and
+  the coordinator MUST deduplicate the same origin/session pair. Direct local
+  queries MAY include mirrored rows under their recorded origin machines.
+  An unreachable or incompatible peer MUST also mark aggregate coverage partial
+  (`lib/session/remote-list.ts:50-53,78-96,193-240,337-541`;
+  `lib/devices/resolve-target.ts:120-133`;
+  `lib/session/tool-index.ts:73-97`; `lib/session/tool-store.ts:40-85`;
+  `commands/sessions.ts:1937-1984`).
+- **SES-36 (MUST).** The shell-command sampling script MUST accept 50–100
+  sessions, read the current device directly, balance deterministic selection
+  across available requested machines, retain only redacted shell-call origins
+  and classifications, bound each candidate query to at most twice the requested
+  sample size, retain successful candidate classes when another class exceeds
+  its evidence envelope, retain the last successful partial pass when a later
+  pass fails, report every failed class and source as partial coverage, cap its
+  JSON artifact at 16 MiB, and record
+  `sample_byte_limit` with partial coverage instead of silently dropping evidence
+  (`scripts/sample-session-shell-commands.ts:17-25,82-136,149-256,308-402,404-479`).
+- **SES-37 (MUST).** Static Bash extraction MUST retain every statically
+  identifiable program site in transcript order, including repeated programs
+  within one tool call. It MUST classify wrapper chains as `wrapper` and their
+  final static target as `effective`; dynamic program names MUST be omitted.
+  Harness wrappers that carry orchestration code MUST be parsed statically to
+  select literal shell-command fields and MUST NOT be evaluated; unrelated
+  wrapper tokens MUST NOT become program occurrences.
+  `--count` MUST accept exactly one `program:<name>` clause and return occurrence,
+  containing-call, and distinct-session totals over the full filtered scope.
+  It MUST label incomplete coverage as a lower bound. Counting MUST query
+  `tool_program_occurrences` and MUST NOT open or reparse transcripts. The
+  implementation MUST use relational SQLite rows and literal FTS5 only; it MUST
+  NOT use embeddings, a vector database, semantic search, or model calls
+  (`lib/session/shell-programs.ts`; `lib/session/tool-store.ts`;
+  `lib/session/tool-index.ts`; `commands/sessions.ts`).
 
 ---
 
@@ -367,7 +463,7 @@ SSH access (§7); rendering sessions that no harness produced.
 
 The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
 `detach`, `attach`, `inject`, `export`, `import`, `migrate`/`relocate`,
-`migrations`, `fork`) with flags is the reference in
+`migrations`, `backfill tools`, `fork`) with flags is the reference in
 [05-sessions.md](05-sessions.md); this spec governs the guarantees behind it.
 
 #### 4.2 Machine-readable output (STABLE — agents depend on these)
@@ -412,6 +508,36 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   bundle files are written `0600` (`lib/session/bundle.ts:28-29,110-113,188-227`).
 - **SES-IF-4 (MUST).** `SessionEvent.type` is a **closed union** of the 9 documented
   types (`lib/session/types.ts:17-41`); a parser MUST NOT introduce a tenth.
+- **SES-IF-4a (MUST).** Broad `sessions --include tools --json` MUST emit the
+  versioned tool-search envelope, while ordinary list JSON remains
+  `SessionMeta[]` and exact-session JSON remains `{ session, events }`. Repeated
+  `--query` clauses require distinct calls. `--fleet` MUST execute the query on
+  each device's local index under the recursion guard and transfer compact
+  evidence only. A fleet tool query MUST reject cost/duration sorting because
+  the compact peer envelope carries no global sort key. `--markdown` and
+  `--no-redact` MUST fail when combined with `--include tools` because the
+  indexed evidence schema is always bounded and redacted. `--count` MUST emit
+  the versioned `tool-program-count` aggregate with occurrence, call, session,
+  coverage, and per-machine totals; it MUST NOT replace ordinary list/detail or
+  tool-search envelopes
+  (`commands/sessions.ts:1432-1463,1551-1559,1824-1879,1937-1984,3929-3970,4006-4013`;
+  `lib/session/remote-list.ts:98-115,337-541`).
+- **SES-IF-4b (MUST).** `sessions stats --json` MUST emit its own versioned
+  `sessions-stats` envelope (`{ schemaVersion, kind: 'sessions-stats', filters,
+  signal, coverage, totals, order, ranked[], zeroInvoked[] }`), never the
+  `SessionMeta[]` list or `{ session, events }` detail shape. `ranked` is the
+  resource rollup ordered by invocation volume (`--bottom` reverses, `--top <n>`
+  caps); `zeroInvoked` is the installed-but-never-invoked set. The rollup MUST
+  count each resource identity (kind + name) once — merging source layers — and
+  MUST record only EXPLICIT invocations (slash commands + `Skill` tool calls), so
+  an auto-triggered skill reads as 0 (skill invocations come from Claude + Kimi,
+  slash-commands from Claude only); the envelope's `signal` field states this.
+  `sessions backfill resources --json` MUST emit the versioned
+  `resources-backfill` envelope and populate `session_resource_usage` for
+  historical sessions gated by `resource_scan_ledger`, never silently re-scanning
+  a transcript already current at `RESOURCE_INDEX_VERSION`
+  (`commands/sessions-stats.ts`; `commands/sessions-backfill.ts`;
+  `lib/session/db.ts` `queryResourceUsageStats`/`backfillResourceUsage`).
 
 #### 4.3 stdout / stderr / exit discipline
 
@@ -483,8 +609,8 @@ normative — a change that widens/narrows a cell is a spec change.
 
 **Known gaps (implemented-vs-intended drift to fix, not to hide):**
 - **SES-GAP-1.** `flatSessionRow` (`--flat`) and the picker's `formatPickerLabel`
-  both feed `renderTopicCell` (~`commands/sessions.ts:1500`, `:2060` →
-  `:1851`) without the `'-'` fallback the other renderers use, so a session with
+  both feed `renderTopicCell` (~`commands/sessions.ts:1500`, `:2071` →
+  `:1862`) without the `'-'` fallback the other renderers use, so a session with
   no live preview, no tag, and an empty `topic` renders a **blank** cell —
   untested. Directly contradicts "always show a preview" (SES-8).
 - **SES-GAP-2.** Metadata coverage is uneven. PR/ticket extractors are agent-agnostic
@@ -582,6 +708,24 @@ Given a v9 `sessions.db` with a `name` column and rows; When `getDB()` opens it;
 Then schema reaches the current version, `name` folds into `label` then drops, and every prior row
 survives searchable (`db.migrate-v10.test.ts:78-93`; `db.migrate-v14.test.ts:98-106`).
 
+**GWT-11 — Two different calls satisfy one session query.**
+Given one session where a `git merge` call ran and a later `gh` call returned
+`CONFLICT`; When two `--query` clauses name those facts; Then the versioned
+response contains that session and the two distinct call ids. Repeating the
+`program:git` clause twice with only one matching call returns no session
+(`lib/session/tool-index.test.ts`).
+
+**GWT-12 — Tool query remains DB-only when the transcript is unavailable.**
+Given a transcript was indexed and its source is then moved offline; When a tool
+query runs; Then the ledger reports complete coverage and cached SQL/FTS evidence
+answers it without opening the source (`lib/session/tool-index.test.ts`).
+
+**GWT-13 — Repeated static sites count separately.**
+Given one Bash call contains `git status; git diff`; When
+`--query program:git --count` runs; Then it reports 2 occurrences, 1 containing
+tool call, and 1 distinct session (`lib/session/tool-index.test.ts`;
+`commands/sessions.test.ts`).
+
 ---
 
 ## Secrets
@@ -627,9 +771,13 @@ access control (that is 1Password/Vault; this tool is device-local first).
   `file` / `exec` (`REF_PATTERN`, `lib/secrets/index.ts:51`).
 - **Backend** — where values physically live: `keychain` | `file` | `vault`
   (`SecretsBackend`, `lib/secrets/bundles.ts:64`).
-- **Policy** — per-bundle prompt tier: `always` | `daily` | `never`
-  (`SecretsPolicy`, `lib/secrets/bundles.ts:234`; persisted under the legacy key
-  `tier`).
+- **Policy (tier)** — per-bundle prompt tier: `always` | `hold` | `never`
+  (`SecretsPolicy`, `lib/secrets/bundles.ts:218`; persisted under the legacy wire
+  key `tier`, where `session`/`daily` ≡ `hold`, `biometry` ≡ `always`, `none` ≡
+  `never`, `lib/secrets/bundles.ts:452-454`). `hold` is the default
+  (`secretsDefaultPolicy`, `lib/secrets/bundles.ts:463-465`): one Touch ID, then
+  held silently for the hold window. `always` prompts every read. `never` is
+  silent forever (SEC-19, SEC-29).
 - **Broker / secrets-agent** — the macOS-only in-memory holder that dedups Touch
   ID across processes (`lib/secrets/agent.ts`).
 - **Materialize** — print a resolved plaintext value to this process's stdout
@@ -665,6 +813,13 @@ access control (that is 1Password/Vault; this tool is device-local first).
   opaque HMAC-SHA256 hashes (`agents-cli.h.*`) so a passive enumerator learns
   only counts/grouping, never bundle/key/provider names
   (`lib/secrets/index.ts:178-217`). See SEC-CROSS-3 for the platform gap.
+- **SEC-5a (MUST).** The HMAC-key item (`agents-cli.hmackey`) MUST be stored
+  no-ACL and its reads MUST stay prompt-free — it is read before every hashed
+  keychain lookup, so a biometry-ACL'd copy makes nearly every secrets-touching
+  command pop a generic Touch ID sheet. It is written no-ACL (`writeHmacKeyRecord`,
+  `lib/secrets/index.ts`), and a copy an older helper re-stamped with an ACL MUST
+  self-heal: on the first read where hashing is active, an un-healed record is
+  re-stored no-ACL exactly once (`healHmacKeyNoAclOnce`, gated by `healedNoAcl`).
 
 #### 3.2 Materialization boundary — the agent never sees plaintext unless a command says so
 
@@ -700,11 +855,34 @@ access control (that is 1Password/Vault; this tool is device-local first).
 - **SEC-12 (MUST).** Value reads MUST be batched so a bundle costs at most one
   Touch ID prompt, not one per key (`commands/secrets.ts:1073-1076`;
   `lib/secrets/bundles.ts:772-776,1262-1273`).
-- **SEC-13 (MUST).** A headless/detached (no-TTY) context on macOS MUST resolve
+- **SEC-13 (MUST).** A headless/detached (no-TTY or agent-runtime) context on macOS MUST resolve
   broker-only and fail loudly, and MUST NOT pop a Touch ID sheet on the
   interactive user's screen (`isHeadlessSecretsContext`,
-  `lib/secrets/bundles.ts:1245-1260`; `commands/secrets.ts:1172-1175,1925-1929`;
-  `mcp.ts:112-114`).
+  `lib/secrets/headless.ts:37-66`, re-exported from `lib/secrets/bundles.ts`;
+  `commands/secrets.ts:1172-1175,1925-1929`;
+  `mcp.ts:112-114`). This covers raw item reads too, not just bundles:
+  `getKeychainToken`/`getKeychainTokens` consult `assertRawKeychainReadAllowed`
+  (`lib/secrets/index.ts:877-899`) BEFORE any helper process is spawned, and
+  throw an actionable error naming the item (and, for bundle-triggered reads,
+  the `agents secrets unlock <bundle>` fix). **Given** a TTY-less process or
+  any `AGENTS_RUNTIME` launch **When** it attempts a read of an ACL-protected
+  keychain item **Then** the read fails fast and no sheet is raised. Reads the
+  caller attests as no-ACL via `silentNoAcl` (bundle metadata per SEC-4,
+  `never`-policy bundles per SEC-19, the unlock session store, the usage OAuth
+  cache) are prompt-free by construction and MUST NOT be blocked by this guard.
+- **SEC-13a (MUST).** An **agent launch** MUST NOT raise a Touch ID sheet on its
+  own **regardless of tty** — a `--interactive` run is still a launch, not a human
+  asking for a secret. The `agents run --secrets <bundle>` injection and the
+  auto-share read therefore resolve `agentOnly: true` unconditionally
+  (`commands/exec.ts` secrets injection; `lib/share/config.ts` `shareRuntimeEnv`),
+  NOT gated on `isHeadlessSecretsContext()`. Gating the launch read on tty let a
+  watchdog's `agents run auto --interactive` (routine + menu-bar tick, ~2 min)
+  prompt for a `hold` bundle and pile up helper sheets. **Given** an interactive
+  `agents run --secrets <hold-bundle>` whose bundle is not broker-held **When** it
+  launches **Then** it fails fast naming `agents secrets unlock <bundle>`, no sheet.
+  This does NOT cover the explicit `agents share` / `agents share setup` commands —
+  those are user-initiated, not launches, and keep the `isHeadlessSecretsContext()`
+  gate (`readWriteTokenFromBundle`, `readCloudflareCreds`).
 - **SEC-14 (MUST).** A broker `get` for a bundle it does not hold MUST return
   `{ ok:true, hit:false }` — never an error, never a prompt, never a human
   escalation — and the caller MUST fall through to the real store
@@ -750,6 +928,38 @@ access control (that is 1Password/Vault; this tool is device-local first).
   and MUST degrade cleanly (no usage shown) when the DB is unavailable
   (`commands/secrets.ts` `view` / `list` / `activity` actions). The read-model is a
   bounded 90-day history; the full audit trail is `agents events --module secrets`.
+- **SEC-27 (MUST).** A cancelled or failed interactive keychain read MUST open a
+  short-TTL negative memo (5 minutes, `KEYCHAIN_READ_BACKOFF_TTL_MS`, keyed by
+  the requested item name, under `~/.agents/.cache/keychain-read-backoff/` —
+  `lib/secrets/read-backoff.ts`) so a polling caller cannot re-raise a Touch ID
+  sheet every few seconds; a subsequent read of the same item within the window
+  MUST fail fast with the back-off error instead of prompting
+  (`assertRawKeychainReadAllowed`, `lib/secrets/index.ts:877-899`). Any
+  successful read or write (or delete) of the item MUST clear the memo. A plain
+  miss (helper exit 1, item not found) MUST NOT open the memo — no prompt was
+  raised. The memo is regenerable, best-effort state and MUST carry no secret
+  material (item name + deadline only). **Given** a user cancels a read's
+  prompt **When** a poller retries the read within 5 minutes **Then** the retry
+  throws the back-off error without spawning the helper.
+- **SEC-28 (MUST).** **Every secret access is attributable to the session that
+  triggered it — no exceptions.** Every value read and every unlock recorded via
+  `emitSecretAudit` (SEC-26) MUST carry the **requesting** identity intact: agent,
+  `sessionId`, `parentSessionId`, `pid`, and `caller` (provenance-stamped in
+  `lib/secrets/audit.ts` / `lib/secrets/event-provenance.ts`). The requesting
+  session MUST NOT be overwritten by the global-scope sentinel `*`
+  (`GLOBAL_HARNESS`, `lib/secrets/scope.ts:20`): a global-grant read records the
+  scope separately but MUST preserve the session that asked (`lib/secrets/bundles.ts`
+  reader sites, where the `opts.agent || AGENTS_AGENT_NAME || GLOBAL_HARNESS`
+  collapse currently discards it). The usage read-model MUST persist enough to
+  answer "which session read which bundle" — `sessionId` + `bundle`
+  (`lib/secrets/usage-db.ts`) — and `agents events` MUST expose `--session` and
+  `--bundle` filters over secrets events (`commands/events.ts`,
+  `lib/events/event-stream.ts`). A read that hit the ACL-gated (potentially
+  prompting) keychain path SHOULD be distinguishable in the log from a silent broker
+  / no-ACL read, so a Touch ID sheet is traceable to its trigger even though the
+  macOS sheet itself emits no event. **No read path is exempt** from the audit
+  funnel — a code path that resolves a value without an `emitSecretAudit` record is a
+  spec violation.
 
 #### 3.4 Authorization model
 
@@ -763,9 +973,50 @@ access control (that is 1Password/Vault; this tool is device-local first).
   (`--i-understand` or an interactive confirm), because it is the
   on-disk-plaintext-equivalent downgrade (`keychain-helper.swift:557-559`;
   `commands/secrets.ts:2457-2483`). It MUST NOT be settable as a global default.
+  **Enforcement is on the stored item, not the metadata label.** macOS enforces
+  the ACL baked onto the value item at write time on every read, regardless of the
+  bundle's declared tier — so the item's actual ACL MUST match the tier at all
+  times, not only at first write:
+    - Changing a bundle's tier MUST reconcile the stored **value items'** ACL to the
+      new tier (re-store via `set-no-acl` / `set`), not only rewrite the metadata
+      item — a metadata-only tier change that leaves a biometry ACL on a `never`
+      item is a spec violation (`reAclBundleItems` in `lib/secrets/bundles.ts`, from
+      the `policy` command `commands/secrets.ts`).
+    - A read that finds a `never` bundle's item still carrying a biometry ACL (drift
+      from a legacy write or an interrupted change) MUST self-heal it to no-ACL
+      rather than prompt, so the bundle converges to silent instead of prompting
+      forever (`lib/secrets/bundles.ts` read path).
+    - Any just-in-time keychain migration/rehome MUST honor the owning bundle's tier
+      — a `never` key MUST NOT be re-stamped with a biometry ACL on read
+      (`keychain-helper.swift` `migrateInline` / `rehomeOrphan`).
 - **SEC-20 (MUST).** Destructive ops (`delete`) MUST confirm interactively and
   MUST refuse in a non-interactive shell without `--yes`
   (`commands/secrets.ts:1565-1582`).
+- **SEC-29 (MUST).** **Unlock once, stays unlocked — the durability contract.** A
+  bundle on the `never` tier MUST read silently *forever* once set: through process
+  death, system sleep, a full power-off/reboot, an arbitrarily long gap (30+ days),
+  an agents-cli upgrade, **and a macOS upgrade** — with **no Touch ID, no
+  passphrase, and no environment variable** — until the value is rotated, the tier
+  is changed, or the bundle is deleted. This is achievable only because a `never`
+  item carries no biometric ACL (`set-no-acl`,
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`,
+  `keychain-helper.swift:571-577`): it survives reboot (readable after the first
+  post-boot unlock) and an OS upgrade (device-local, not biometry-bound). A
+  biometry-gated tier **cannot** satisfy this — `.biometryCurrentSet`
+  (`keychain-helper.swift:43`) deliberately re-locks when enrolled biometrics change
+  (a common OS-upgrade side effect), and `kSecAttrAccessibleWhenUnlocked` blocks
+  locked-screen reads — so "never re-prompts across an OS upgrade" and
+  "biometry-gated per read" are mutually exclusive by construction. The `hold` tier
+  gives the weaker durability: one prompt, then held silently for the hold window,
+  surviving a broker restart / agents-cli upgrade via the durable no-ACL session
+  store (`lib/secrets/session-store.ts:1-26`) but re-prompting once after the window
+  expires or biometrics are re-enrolled.
+- **SEC-29a (MUST NOT).** The default keychain flow MUST NOT require a passphrase or
+  read one from an environment variable to keep a bundle unlocked. On macOS the
+  Keychain is gated by the OS login only; `AGENTS_SECRETS_PASSPHRASE` applies
+  **exclusively** to the encrypted-file (SEC-2) and age-vault (SEC-3) fallback
+  backends and MUST NOT be introduced into, or required by, the keychain path
+  (SEC-8 already strips it from every injected child env).
 
 #### 3.5 Sharing & sync
 
@@ -909,6 +1160,36 @@ normative — a change that widens or narrows a cell is a spec change.
 - **SEC-GAP-4.** The broker's per-request capability-token auth (SEC-18) is not
   reflected in `secrets.md` / `08-secrets-agent-process-model.md`, which still
   describe only the same-UID/socket-permission model.
+- **SEC-GAP-5 (closed by this change).** Changing a bundle's tier to `never` rewrote
+  only the metadata item (`writeBundle`), leaving the value items' biometry ACL in
+  place — so a `never` bundle kept prompting forever, violating SEC-19. Fixed by
+  reconciling value-item ACLs on every tier change (`reAclBundleItems` from the
+  `policy` command) and self-healing an ACL-vs-tier mismatch on read.
+- **SEC-GAP-6 (closed by this change).** JIT keychain migration (`migrateInline` /
+  `rehomeOrphan`) re-stamped a biometry ACL onto any item it touched on read,
+  ignoring the owning bundle's tier — resurrecting the prompt on a `never` bundle
+  (and, where it matched the metadata service name, re-ACL'ing metadata too, causing
+  a SECOND prompt: SEC-12). Fixed by honoring the tier in the migration write.
+- **SEC-GAP-7 (open — attribution follow-up).** Secret-access events collapse the
+  requesting session to the global `*` sentinel and the usage DB drops `sessionId`,
+  so a prompt cannot yet be traced to the agent that caused it (SEC-28). The fix —
+  preserving session identity on every event and adding `--session`/`--bundle` query
+  filters — lands in a dedicated observability change, not this one; SEC-28 is the
+  contract it must satisfy.
+- **SEC-GAP-8 (closed by this change).** A resolve/unlock could pop TWO Touch ID
+  sheets — one for metadata, one for the value — when the two were read in separate
+  helper processes and/or the metadata item carried a stale ACL, violating SEC-12.
+  Fixed by keeping metadata reads no-ACL and batched with the value read so a bundle
+  costs at most one prompt.
+- **SEC-GAP-9 (closed by this change).** `agents run` auto-injects the `share` R2
+  write token via `shareRuntimeEnv`, which read the `share` bundle with
+  `agentOnly` only in a headless context — so an INTERACTIVE `agents run` popped a
+  Touch ID sheet on every launch (the per-run storm), violating the spirit of
+  SEC-13 (an agent launch never raises a sheet on its own). Fixed two ways: the
+  auto-inject read is now ALWAYS `agentOnly` (broker/no-ACL or silently skip, never
+  prompt), and a new `share` bundle defaults to the `never` tier (the write token is
+  low-sensitivity automation infra), so auto-share is silent with no unlock. An
+  existing `share` bundle keeps its tier (no silent downgrade).
 
 ---
 
@@ -929,7 +1210,7 @@ is the automation primitive, and its appearance in a transcript is the audit
 signal, not a bug.
 
 **GWT-S3 — `list` is silent and value-free.**
-Given several `daily`/`always` bundles; When the human runs `agents secrets list`;
+Given several `hold`/`always` bundles; When the human runs `agents secrets list`;
 Then only names/counts print and no Touch ID fires, because metadata is written
 no-ACL (`bundles.ts:602-613`; test `bundles.test.ts:476-479`).
 
@@ -975,6 +1256,38 @@ runs; Then `isLockedCollectionError` fires (`linux.ts:79-82`) and the value
 round-trips through AES-256-GCM keyed by the resolved passphrase
 (`filestore.ts:259-291`) — at no point a biometric/user-presence check, unlike
 macOS.
+
+**GWT-S11 — `never` bundle stays unlocked across reboot and OS upgrade (SEC-29).**
+Given `agents secrets policy share never` ran once (its value item now stored
+no-ACL via `set-no-acl`); When the user powers the Mac off, waits 30 days, upgrades
+macOS, and an agent reads `share`; Then the read returns silently — no Touch ID, no
+passphrase, no env var — because the no-ACL item
+(`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) is not biometry-bound and
+survives the reboot and the upgrade (`keychain-helper.swift:571-577`). A biometry
+tier would have re-prompted after the upgrade re-enrolled biometrics.
+
+**GWT-S12 — changing tier to `never` strips the biometry ACL (SEC-19).**
+Given a bundle created under `hold` (its value item carries the biometry ACL);
+When `agents secrets policy <b> never` runs; Then the command re-stores the value
+items no-ACL (`reAclBundleItems` → `writeBundleWithItems { noAcl:true }`), not just
+the metadata, so the very next read is silent — a metadata-only change that leaves
+the biometry ACL on the item is a bug this scenario pins (`policy.test.ts` asserts
+the item ACL after the flip, not only `bundlePolicy`).
+
+**GWT-S13 — every read traces to the triggering session, never `*` (SEC-28).**
+Given two agent sessions `A` and `B` each read `share`; When the human runs
+`agents events --module secrets --bundle share --session <A>`; Then only session
+`A`'s reads are returned, each carrying `sessionId`/`parentSessionId`/`pid`, and the
+requesting session is never recorded as the global-scope `*` sentinel — so a Touch
+ID sheet is always attributable to the agent that caused it.
+
+**GWT-S14 — auto-share on `agents run` never prompts (SEC-13, SEC-GAP-9).**
+Given `share:` is configured and the `share` bundle is biometry-gated and not
+broker-held; When a human runs `agents run <agent>` in an interactive terminal;
+Then `shareRuntimeEnv` resolves the token `agentOnly` and returns undefined without
+a Touch ID sheet (`lib/share/config.ts`), so the launch is silent — and a `share`
+bundle created by `agents share setup` is `never`-tier (no-ACL), so the token is
+injected silently with no unlock at all.
 
 ---
 
@@ -1197,6 +1510,29 @@ schema (`--json` passes through each agent's native stream format).
   non-TTY MUST be refused before spawn rather than hang on dead stdin
   (`inferredInteractiveWithoutTty`, `lib/exec.ts:270-276`; enforced
   `commands/exec.ts:2645-2655`).
+- **EXEC-23a (MUST).** An interactive tmux-wrapped run MUST either attach
+  a confirmed-live pane to the user's terminal OR surface a legible failure
+  banner on stderr, and MUST NEVER leave an orphan session behind (RUSH-2185).
+  Three sub-rules enforce this:
+  - **(F1) Harness gate.** `agents run auto` with no prompt MUST NOT pick a
+    harness whose `capabilities.interactiveRepl` is `false`.  When all
+    installed harnesses lack that capability the run MUST fail with a clear
+    message naming the installed harnesses and instructing the user to pass
+    `-p` or install a REPL-capable one (`commands/exec.ts` auto-picker block;
+    `lib/agents.ts` per-agent capability; `lib/types.ts CapabilityName`).
+  - **(F2) Dead-pane recap.** `surfacePaneFailure` MUST be called whenever a
+    tmux pane is found dead — before or after attach — REGARDLESS of the
+    pane's exit code when the run is interactive.  `shouldRecapDeadPane(status,
+    interactive)` encodes this: `true` when `status !== 0` OR `interactive`
+    (`lib/exec.ts: shouldRecapDeadPane`; applied in `runInTmux`).
+  - **(F3) Positive-proof keep-session.** The "pane still alive → keep session"
+    branch in `runInTmux` MUST only be taken when a direct `tmux
+    display-message #{pane_dead}` query explicitly returns exit-0 with stdout
+    "0".  `paneExitStatus` returning `{dead: false}` is NOT sufficient — it
+    also returns that value on any query error (race with pane death).
+    `isPaneKnownAliveFromQueryResult(code, stdout)` encodes the positive-proof
+    test (`lib/exec.ts: isPaneKnownAliveFromQueryResult`).  An ambiguous
+    result MUST `killSession` rather than keep the orphan.
 - **EXEC-24 (MUST).** A slash-command prompt run headless under the
   implicit default `plan` mode MUST be refused before spawn — it would hang
   forever at `ExitPlanMode` with no TTY to approve it
@@ -1558,6 +1894,145 @@ overwrites `<versionHome>/.claude/CLAUDE.md` before the agent spawns — the
 harness never launches against the stale `default`-preset file. A THIRD run
 with no further preset or subrule change instead skip-fasts (EXEC-45): the
 file's mtime is left untouched.
+
+---
+
+## Scheduling & execution singularity
+
+The normative contract for **who may schedule and execute work** across the repo:
+the CLI daemon and the commands it drives — never a UI surface. Requirement keywords
+**MUST / MUST NOT / SHOULD / MAY** are per RFC 2119; scenarios are Given/When/Then.
+
+### 1. Purpose & scope
+
+A fleet-affecting feature that runs on a timer or watcher in two places fires twice:
+two resume-tabs for one exhausted session, two executions of one cron job, two
+injected nudges racing the same agent. This section makes that class of bug
+unrepresentable. In scope: every capability that can **act** — launch, resume, kill,
+or rotate a session; fire a routine or monitor; inject into a terminal; dispatch to
+a host or the cloud. Out of scope: read-only polling that renders state for a human
+(panels refreshing, presence heartbeats), which MAY live anywhere provided it writes
+nothing but its own view cache.
+
+### 2. Terminology
+
+- **Fleet-affecting action** — any operation that mutates state on this machine or
+  another fleet device: spawning or killing processes/sessions, injecting keystrokes,
+  writing shared state (sessions.db, the device registry, agents.yaml), firing a
+  scheduled job, SSH dispatch.
+- **Scheduler** — whatever decides *when* to act: a cron routine, a daemon tick, a
+  `setInterval`, a file watcher, an event subscriber acting autonomously.
+- **Executor** — whatever performs the action once decided.
+- **Thin wrapper** — a UI surface whose only relationships to a fleet-affecting
+  capability are (a) rendering its state, and (b) invoking the CLI command that
+  controls it (`apps/factory/AGENTS.md`, the root `AGENTS.md` §Core concepts).
+
+### 3. Requirements
+
+- **SING-1 (MUST).** Every fleet-affecting capability MUST have exactly one scheduler
+  and one executor: the agents-cli daemon (`agents __daemon-run`,
+  `apps/cli/src/lib/daemon.ts`) or a CLI command the daemon or the user drives.
+  Status: **Current** for routines (`lib/scheduler.ts`), the watchdog
+  (`lib/watchdog/routine.ts`, WD-1), and rotate (`lib/watchdog/rotate.ts`).
+- **SING-2 (MUST NOT).** A UI surface (apps/factory, the menubar app, the iOS app)
+  MUST NOT own a timer, watcher, or loop that detects a condition and performs a
+  fleet-affecting action. Detection and decision MUST live in the CLI, which holds
+  the first-party state (sessions.db, usage snapshots, the device registry).
+  Canonical violation: the Factory watchdog rotate loop (2026-08-03) racing the
+  daemon's view of account health; canonical fix: PR #1914, which deleted it.
+- **SING-3 (MUST).** Where an action needs a UI-owned surface (typing into an editor
+  tab, opening a tab), the UI MUST expose a narrow endpoint the CLI drives — the
+  trigger MUST stay in the CLI. Precedent: the extension's `/inject` URI verb over
+  `live-terminals.json`, driven by `apps/cli/src/lib/terminal/inject.ts`; the
+  terminal engine's vscodium launch backend.
+- **SING-4 (MUST).** A control in any UI that turns a fleet-affecting capability on
+  or off MUST flip the CLI's own state (`agents watchdog enable|disable|rotate`,
+  `agents routines`), so every surface observes one truth. A UI-local toggle that
+  gates only the UI's view of an action MUST NOT exist.
+- **SING-5 (MUST).** Routines MUST fire only from the daemon's pid-claimed
+  `JobScheduler` (`lib/daemon.ts` — the pid-file claim exists precisely so a second
+  scheduler cannot double-fire). A UI MAY request an immediate run
+  (`agents routines run <name>` or equivalent) but MUST NOT hold its own cron,
+  countdown, or "run every N" for a routine.
+- **SING-6 (MUST).** A new fleet-affecting feature MUST be implemented in
+  `apps/cli` (daemon routine and/or command) first; the UI PR adds rendering and
+  control wiring only. If the feature seemingly requires UI-side execution, SING-3
+  applies — the UI grows an endpoint, the CLI keeps the trigger.
+- **SING-7 (SHOULD).** Multi-instance safety SHOULD be structural, not by
+  convention: pid-claimed singletons for daemon loops (the daemon's claim), leader
+  election with lease handoff for any remaining UI-side coordination protocol
+  (apps/factory `src/monitor/leader.ts` — presence fan-out only, not task
+  execution), and idempotent effects so a redelivery is a no-op.
+
+#### 3.1 Multi-device — parallel daemons are fine, shared queues are not
+
+Every fleet device runs its own daemon, and that is by design: scheduling fans out
+across devices whenever the *work* is partitioned by device. The duplication hazard
+is not two daemons existing — it is two daemons consuming the **same** input.
+
+- **SING-8 (MUST).** An unrestricted routine (no `devices` allowlist) fires on every
+  device running the scheduler (`lib/routines.ts` `devices` doc) and therefore MUST
+  be per-device in scope: its input MUST be the firing device's own state (its
+  repos, sessions, caches, accounts). `git-hygiene` on each device's own checkout is
+  the canonical legal shape; the watchdog rotating its own machine's sessions is
+  another.
+- **SING-9 (MUST).** A routine or monitor that consumes **shared** input — a ticket
+  tracker, a PR queue, the feed, an R2/sync bucket, another device's sessions —
+  MUST have exactly one executor per work item, achieved one of three ways:
+  (a) **owner pin** — `devices: [<one>]`, so `routineOwnerDevice`
+  (`lib/routines.ts`) names the single daemon allowed to fire (a multi-device pin
+  is a misconfiguration that fires only on the owner with a fix hint,
+  `lib/scheduler.ts`); or (b) **atomic claim** — each item is claimed with an
+  atomic primitive before work begins (precedent: the feed's `O_EXCL` block claim,
+  `lib/feed.ts` — two concurrent claimers cannot both succeed); or
+  (c) **idempotency** — a concurrent second execution of the same item is a
+  verified no-op. `dispatch: fleet` (one online device picked per run,
+  `lib/routines.ts`) satisfies (a) for dispatch targets.
+- **SING-10 (MUST).** Where (b) or (c) is chosen, the claim or idempotency check
+  MUST be part of the implementation, not a comment — shared-queue consumers
+  without an owner pin ship with a test that two concurrent fires cannot process
+  the same item.
+
+### 4. Given/When/Then scenarios
+
+- **GIVEN** a session hits its weekly account limit, **WHEN** the daemon watchdog
+  tick detects it, **THEN** the daemon alone decides and executes the rotate (or the
+  skip) — no UI surface fires a second rotate for the same session.
+- **GIVEN** two daemon processes are alive on one machine, **WHEN** a routine's cron
+  occurrence arrives, **THEN** the pid-file claim ensures exactly one scheduler
+  executes it; the second daemon never runs its own `JobScheduler`
+  (`lib/daemon.ts`).
+- **GIVEN** a user disables a fleet-affecting capability from the Factory palette,
+  **WHEN** the command completes, **THEN** the CLI's config is the state that
+  changed (`agents watchdog rotate off`), and the daemon, the menubar, and every
+  other surface observe the same off state.
+- **GIVEN** a limited session lives in a Factory editor tab, **WHEN** the daemon
+  rotates it, **THEN** the daemon drives the extension's `/inject` endpoint to act
+  in that tab — the extension performs no detection or decision of its own.
+- **GIVEN** a contributor adds a `setInterval` in apps/factory, **WHEN** the
+  callback performs anything beyond read-only rendering, **THEN** code review MUST
+  flag it under the root `AGENTS.md` §Code review conventions ("No second
+  scheduler") and the action MUST move to the CLI before merge.
+- **GIVEN** a routine like `git-hygiene` that sweeps each device's own checkout,
+  **WHEN** it is left unrestricted, **THEN** every device's daemon fires it and
+  each fire touches only its own machine — legal fan-out under SING-8, no
+  coordination needed.
+- **GIVEN** a routine that drains a shared tracker (e.g. `drain-linear-cli`),
+  **WHEN** two devices' daemons both fire it, **THEN** SING-9 requires exactly one
+  executor per item: the routine is owner-pinned to one device (the current
+  configuration), or each ticket is claimed atomically before work, or processing
+  the same ticket twice is a verified no-op — never "both daemons pick the same
+  ticket and run it twice."
+
+### 5. Known gaps
+
+- **SING-GAP-1.** The Factory monitor leader/follower protocol
+  (apps/factory `src/monitor/`) still coordinates presence fan-out inside the
+  extension with its own election. It performs no fleet-affecting action today
+  (post-#1914 it broadcasts read-side snapshots only), so it satisfies SING-2, but
+  it is a second coordination fabric where the daemon's presence tracking
+  (`lib/session/presence.ts`) would be the singular home. Informative; a future
+  consolidation SHOULD retire it in the daemon's favor.
 
 ---
 

@@ -10,12 +10,19 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from '../sqlite.js';
-import type { SessionAgentId, SessionMeta } from './types.js';
+import type { SessionAgentId, SessionEvent, SessionMeta } from './types.js';
 import { parseSession } from './parse.js';
 import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
 import { getSessionsDir, getSessionsDbPath } from '../state.js';
+import { query as queryEvents } from '../events.js';
 import { machineForSessionFile } from './origin-machine.js';
 import { loadSessionActorIndex, readSessionActorRecord } from './actor-sidecar.js';
+import { toolCallsFromEvents, type IndexedToolCall } from './tool-calls.js';
+import { persistToolCalls, purgeToolCalls, toolEvidenceSourcePath } from './tool-store.js';
+import { extractSkills, extractSlashCommands } from './highlights.js';
+import { resolveResource } from '../resources.js';
+import { discoverPlugins } from '../plugins.js';
+import type { DiscoveredPlugin } from '../types.js';
 
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
@@ -23,7 +30,15 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/05-sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 22;
+export const SCHEMA_VERSION = 31;
+
+/**
+ * Bump to force `agents sessions backfill resources` to re-derive every
+ * session's skill/slash-command tallies on its next run (resource_scan_ledger
+ * rows with a lower version are treated as stale — the same mechanism
+ * TOOL_INDEX_VERSION gives the tool backfill).
+ */
+export const RESOURCE_INDEX_VERSION = 1;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -90,7 +105,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   linear_project TEXT,
   linear_project_url TEXT,
   actor TEXT,
-  initiated_by TEXT
+  initiated_by TEXT,
+  used_browser INTEGER,
+  used_computer INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
@@ -145,6 +162,115 @@ CREATE TABLE IF NOT EXISTS dir_ledger (
   entry_count INTEGER NOT NULL,
   scanned_at INTEGER NOT NULL
 );
+
+-- One redacted evidence row per tool call. The ordinal is assigned in
+-- transcript order and is stable across incremental appends.
+CREATE TABLE IF NOT EXISTS tool_calls (
+  call_key TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  source_call_id TEXT,
+  timestamp TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  input TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  exit_code INTEGER,
+  status_code INTEGER,
+  error_code TEXT,
+  output TEXT,
+  error TEXT,
+  parse_error TEXT,
+  evidence_bytes INTEGER NOT NULL,
+  UNIQUE(session_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_tool ON tool_calls(tool COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_tool_calls_outcome ON tool_calls(outcome);
+
+CREATE TABLE IF NOT EXISTS tool_call_programs (
+  call_key TEXT NOT NULL,
+  program TEXT NOT NULL COLLATE NOCASE,
+  PRIMARY KEY(call_key, program)
+);
+CREATE INDEX IF NOT EXISTS idx_tool_call_programs_program ON tool_call_programs(program, call_key);
+
+-- Ordered static program sites retain repeated commands within one Bash call.
+-- The complete redacted command stays on tool_calls.input; these rows contain
+-- only the normalized program and whether it is a wrapper or effective target.
+CREATE TABLE IF NOT EXISTS tool_program_occurrences (
+  call_key TEXT NOT NULL,
+  occurrence_ordinal INTEGER NOT NULL,
+  program TEXT NOT NULL COLLATE NOCASE,
+  role TEXT NOT NULL CHECK(role IN ('wrapper', 'effective')),
+  PRIMARY KEY(call_key, occurrence_ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_tool_program_occurrences_program
+  ON tool_program_occurrences(program, call_key);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS tool_call_text USING fts5(
+  call_key UNINDEXED,
+  tool,
+  input,
+  output,
+  error,
+  tokenize = 'trigram'
+);
+
+-- Independent of scan_ledger: schema migration never forces the normal
+-- session index to reread history. Existing transcripts are backfilled only
+-- by the explicit, bounded agents sessions backfill tools command.
+CREATE TABLE IF NOT EXISTS tool_scan_ledger (
+  session_id TEXT PRIMARY KEY,
+  file_path TEXT NOT NULL UNIQUE,
+  file_mtime_ms INTEGER NOT NULL,
+  file_size INTEGER NOT NULL,
+  extractor_version INTEGER NOT NULL,
+  indexed_at INTEGER NOT NULL,
+  call_count INTEGER NOT NULL,
+  evidence_bytes INTEGER NOT NULL
+);
+
+-- Skill/slash-command usage per session (#12), computed from a session's
+-- parsed transcript (extractSkills / extractSlashCommands, session/highlights.ts)
+-- and joined at write time against the currently-installed resource/plugin
+-- (resolveResource / discoverPlugins) for provenance — repo_root + snapshot_sha
+-- answer "which repo, which commit installed this skill/command", plugin/source
+-- answer "which plugin, which DotAgents layer". A resource renamed or uninstalled
+-- since the session ran leaves plugin/source/repo_root/snapshot_sha NULL rather
+-- than a stale guess. One row per (session, kind, name); count is how many
+-- times that skill/command fired in the session.
+CREATE TABLE IF NOT EXISTS session_resource_usage (
+  session_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  plugin TEXT,
+  source TEXT,
+  repo_root TEXT,
+  snapshot_sha TEXT,
+  count INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (session_id, kind, name)
+);
+CREATE INDEX IF NOT EXISTS idx_session_resource_usage_kind_name ON session_resource_usage(kind, name);
+CREATE INDEX IF NOT EXISTS idx_session_resource_usage_plugin ON session_resource_usage(plugin);
+
+-- One-shot historical backfill bookkeeping for session_resource_usage, mirroring
+-- tool_scan_ledger. The normal incremental scan writes resource usage for every
+-- session it (re)parses, but a session indexed before #12 shipped keeps a fresh
+-- scan_ledger row and is never re-derived — so its skill/slash-command tallies
+-- were never recorded. The "agents sessions backfill resources" command walks
+-- history, re-parses each transcript from byte 0, and stamps coverage here
+-- (mtime + size + extractor_version) so reruns skip completed transcripts. This
+-- is a SCAN LEDGER, not a second copy of the usage data — the usage itself lives
+-- only in session_resource_usage.
+CREATE TABLE IF NOT EXISTS resource_scan_ledger (
+  session_id TEXT PRIMARY KEY,
+  file_path TEXT NOT NULL UNIQUE,
+  file_mtime_ms INTEGER NOT NULL,
+  file_size INTEGER NOT NULL,
+  extractor_version INTEGER NOT NULL,
+  indexed_at INTEGER NOT NULL,
+  resource_count INTEGER NOT NULL
+);
 `;
 
 /** Raw row shape returned from the sessions table. */
@@ -189,6 +315,9 @@ export interface SessionRow {
   linear_project_url: string | null;
   actor: string | null;
   initiated_by: string | null;
+  /** NULL means "not yet computed" (a row scanned before this field existed) — see rowToMeta. */
+  used_browser: number | null;
+  used_computer: number | null;
 }
 
 /** File stat snapshot used to detect changes between scan runs. */
@@ -208,6 +337,8 @@ export interface QueryOptions {
   /** Match any session whose cwd equals this or is a descendant of it. */
   cwdPrefix?: string;
   project?: string;
+  /** Only sessions recorded on this machine (host), case-insensitive. */
+  machine?: string;
   /** Match the full session id or short id, case-insensitively (exact). */
   idExact?: string;
   /** Match sessions whose id or short id begins with this (case-insensitive prefix). */
@@ -225,6 +356,20 @@ export interface QueryOptions {
    * with NULLs sorted last so unpriced rows never crowd out real data.
    */
   sortBy?: 'timestamp' | 'cost' | 'duration';
+  /** Internal warm-cache path; callers must validate the small final result set. */
+  skipExistenceCheck?: boolean;
+  /**
+   * Only sessions that invoked this skill (#12), joined against
+   * session_resource_usage.kind='skill'. Matches either the full stored name
+   * (bare, or `plugin:name` for a plugin skill) or just the short name after
+   * the colon — `--skill design` finds a session that used `rush:design`.
+   */
+  skill?: string;
+  /**
+   * Only sessions that used a skill or slash-command owned by this plugin
+   * (#12), joined against session_resource_usage.plugin.
+   */
+  plugin?: string;
 }
 
 let dbInstance: Database.Database | null = null;
@@ -438,12 +583,11 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
       .prepare(`SELECT id, agent, file_path FROM sessions WHERE machine IS NULL OR machine = ''`)
       .all() as Array<{ id: string; agent: string; file_path: string }>;
     const upd = db.prepare(`UPDATE sessions SET machine = ? WHERE id = ?`);
-    const txn = db.transaction((items: typeof rows) => {
-      for (const r of items) {
-        upd.run(machineForSessionFile(r.file_path, r.agent), r.id);
-      }
-    });
-    txn(rows);
+    // migrateSchema runs inside getDB's schema transaction, so these writes
+    // deliberately share that transaction instead of opening a nested one.
+    for (const row of rows) {
+      upd.run(machineForSessionFile(row.file_path, row.agent), row.id);
+    }
   }
 
   if (fromVersion < 19) {
@@ -478,10 +622,210 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 22) {
+    // v21 → v22: persist the transcript's aggregate tool-call count.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'tool_call_count')) db.exec(`ALTER TABLE sessions ADD COLUMN tool_call_count INTEGER`);
     db.exec(`DELETE FROM scan_ledger; DELETE FROM dir_ledger;`);
   }
+
+  if (fromVersion < 23) {
+    // v22 → v23: persist usedBrowser/usedComputer (#11) so the sessions picker
+    // preview can trust a positive detection instead of re-deriving it from a
+    // transcript regex on every render. Computed from a sessionId-scoped read
+    // of the events log (see detectToolUsage), not from the parsed transcript,
+    // so no ledger wipe is needed here — a rescan re-derives them regardless.
+    //
+    // Deliberately NO DEFAULT (NULL on ALTER, for every pre-existing row):
+    // NULL means "not yet computed by this scanner" (a legacy row), distinct
+    // from a real, computed 0/false.
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'used_browser')) db.exec(`ALTER TABLE sessions ADD COLUMN used_browser INTEGER`);
+    if (!cols.some(c => c.name === 'used_computer')) db.exec(`ALTER TABLE sessions ADD COLUMN used_computer INTEGER`);
+  }
+
+  if (fromVersion < 24) {
+    // v23 → v24: session_resource_usage (#12) — skill/slash-command usage per
+    // session, joined against the currently-installed resource/plugin for
+    // provenance. No ledger wipe: writeResourceUsage() owns this table.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS session_resource_usage (
+        session_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        plugin TEXT,
+        source TEXT,
+        repo_root TEXT,
+        snapshot_sha TEXT,
+        count INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (session_id, kind, name)
+      );
+      CREATE INDEX IF NOT EXISTS idx_session_resource_usage_kind_name ON session_resource_usage(kind, name);
+      CREATE INDEX IF NOT EXISTS idx_session_resource_usage_plugin ON session_resource_usage(plugin);
+    `);
+  }
+
+  if (fromVersion < 25) {
+    // v24 → v25: tool-call evidence uses an independent ledger. Do not clear
+    // scan_ledger or dir_ledger: normal session listing stays warm, while tool
+    // history is filled once on demand.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tool_calls (
+        call_key TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        ordinal INTEGER NOT NULL,
+        source_call_id TEXT,
+        timestamp TEXT NOT NULL,
+        tool TEXT NOT NULL,
+        input TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        exit_code INTEGER,
+        status_code INTEGER,
+        error_code TEXT,
+        output TEXT,
+        error TEXT,
+        parse_error TEXT,
+        evidence_bytes INTEGER NOT NULL,
+        UNIQUE(session_id, ordinal)
+      );
+      CREATE INDEX IF NOT EXISTS idx_tool_calls_session ON tool_calls(session_id, ordinal);
+      CREATE INDEX IF NOT EXISTS idx_tool_calls_tool ON tool_calls(tool COLLATE NOCASE);
+      CREATE INDEX IF NOT EXISTS idx_tool_calls_outcome ON tool_calls(outcome);
+      CREATE TABLE IF NOT EXISTS tool_call_programs (
+        call_key TEXT NOT NULL,
+        program TEXT NOT NULL COLLATE NOCASE,
+        PRIMARY KEY(call_key, program)
+      );
+      CREATE INDEX IF NOT EXISTS idx_tool_call_programs_program ON tool_call_programs(program, call_key);
+      CREATE VIRTUAL TABLE IF NOT EXISTS tool_call_text USING fts5(
+        call_key UNINDEXED,
+        tool,
+        input,
+        output,
+        error,
+        tokenize = 'unicode61 remove_diacritics 2'
+      );
+      CREATE TABLE IF NOT EXISTS tool_scan_ledger (
+        file_path TEXT PRIMARY KEY,
+        file_mtime_ms INTEGER NOT NULL,
+        file_size INTEGER NOT NULL,
+        extractor_version INTEGER NOT NULL,
+        indexed_at INTEGER NOT NULL,
+        call_count INTEGER NOT NULL,
+        evidence_bytes INTEGER NOT NULL
+      );
+    `);
+  }
+
+  if (fromVersion < 26) {
+    // v25 → v26: make append accounting O(changed calls), including empty
+    // deltas, instead of reading every historical evidence row per append.
+    const callCols = db.prepare(`PRAGMA table_info(tool_calls)`).all() as Array<{ name: string }>;
+    if (!callCols.some((column) => column.name === 'evidence_bytes')) {
+      db.exec(`ALTER TABLE tool_calls ADD COLUMN evidence_bytes INTEGER NOT NULL DEFAULT 0`);
+    }
+    const ledgerCols = db.prepare(`PRAGMA table_info(tool_scan_ledger)`).all() as Array<{ name: string }>;
+    if (!ledgerCols.some((column) => column.name === 'evidence_bytes')) {
+      db.exec(`ALTER TABLE tool_scan_ledger ADD COLUMN evidence_bytes INTEGER NOT NULL DEFAULT 0`);
+    }
+    // The first tool schema existed only in prerelease development builds. Force its tool
+    // evidence through one bounded rebuild rather than trusting zeroed totals.
+    db.exec(`DELETE FROM tool_scan_ledger`);
+  }
+
+  if (fromVersion < 27) {
+    // v26 → v27: the original unicode word tokenizer could not prefilter the
+    // substring semantics promised by input/output/error queries. Rebuild only
+    // the derived FTS table from already-redacted call rows; transcripts and
+    // both scan ledgers remain warm.
+    db.exec(`
+      DROP TABLE IF EXISTS tool_call_text;
+      CREATE VIRTUAL TABLE tool_call_text USING fts5(
+        call_key UNINDEXED,
+        tool,
+        input,
+        output,
+        error,
+        tokenize = 'trigram'
+      );
+      INSERT INTO tool_call_text (call_key, tool, input, output, error)
+      SELECT call_key, tool, input, coalesce(output, ''), coalesce(error, '')
+      FROM tool_calls;
+    `);
+  }
+
+  if (fromVersion < 28) {
+    // v27 → v28: retain every static program occurrence instead of only the
+    // distinct program set. The source transcript is rebuilt only by the
+    // explicit tools backfill; normal session and directory ledgers stay warm.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS tool_program_occurrences (
+        call_key TEXT NOT NULL,
+        occurrence_ordinal INTEGER NOT NULL,
+        program TEXT NOT NULL COLLATE NOCASE,
+        role TEXT NOT NULL CHECK(role IN ('wrapper', 'effective')),
+        PRIMARY KEY(call_key, occurrence_ordinal)
+      );
+      CREATE INDEX IF NOT EXISTS idx_tool_program_occurrences_program
+        ON tool_program_occurrences(program, call_key);
+      DELETE FROM tool_scan_ledger;
+    `);
+  }
+
+  if (fromVersion < 29) {
+    // v28 → v29: coverage and query planning address the independent tool
+    // ledger by session id. Rebuild only this derived ledger so a tool query
+    // never has to resolve or stat transcript paths.
+    db.exec(`
+      DROP TABLE tool_scan_ledger;
+      CREATE TABLE tool_scan_ledger (
+        session_id TEXT PRIMARY KEY,
+        file_path TEXT NOT NULL UNIQUE,
+        file_mtime_ms INTEGER NOT NULL,
+        file_size INTEGER NOT NULL,
+        extractor_version INTEGER NOT NULL,
+        indexed_at INTEGER NOT NULL,
+        call_count INTEGER NOT NULL,
+        evidence_bytes INTEGER NOT NULL
+      );
+    `);
+  }
+
+  if (fromVersion < 30) {
+    // v29 → v30: prerelease tool-index builds temporarily used schema versions
+    // later owned by independent main migrations. Repair from the physical
+    // schema because a v29 marker alone cannot prove these columns are present.
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((column) => column.name),
+    );
+    if (!cols.has('tool_call_count')) {
+      db.exec(`
+        ALTER TABLE sessions ADD COLUMN tool_call_count INTEGER;
+        DELETE FROM scan_ledger;
+        DELETE FROM dir_ledger;
+      `);
+    }
+    if (!cols.has('used_browser')) db.exec(`ALTER TABLE sessions ADD COLUMN used_browser INTEGER`);
+    if (!cols.has('used_computer')) db.exec(`ALTER TABLE sessions ADD COLUMN used_computer INTEGER`);
+  }
+
+  if (fromVersion < 31) {
+    // v30 → v31: independent ledger for the explicit resource-usage backfill
+    // (agents sessions backfill resources). Do NOT wipe scan_ledger — normal
+    // session listing stays warm; historical resource rows are filled once on
+    // demand, exactly like the tool-index ledger (v25).
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS resource_scan_ledger (
+        session_id TEXT PRIMARY KEY,
+        file_path TEXT NOT NULL UNIQUE,
+        file_mtime_ms INTEGER NOT NULL,
+        file_size INTEGER NOT NULL,
+        extractor_version INTEGER NOT NULL,
+        indexed_at INTEGER NOT NULL,
+        resource_count INTEGER NOT NULL
+      );
+    `);
+  }
+
 }
 
 /** Open (or return the cached) sessions database, applying migrations as needed. */
@@ -489,25 +833,37 @@ export function getDB(): Database.Database {
   if (dbInstance) return dbInstance;
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
   const db = new Database(DB_PATH);
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
-  db.pragma('temp_store = MEMORY');
-  // Wait up to 30s instead of failing immediately on SQLITE_BUSY. Multiple
+  // Wait up to 30s instead of failing immediately on SQLITE_BUSY. Install the
+  // handler before journal_mode: concurrent first opens can race for its schema
+  // lock, before a later busy_timeout would have a chance to wait. Multiple
   // agents (CLIs, skills, hooks) open this DB concurrently. The first scan of
   // a new version home can take longer than 10s; concurrent callers need enough
   // headroom to wait. The ledger-recheck in upsertSessionsBatch makes
   // subsequent writers near-instant, so 30s is a rarely-reached safety net.
   db.pragma('busy_timeout = 30000');
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
+  db.pragma('temp_store = MEMORY');
   db.exec(SCHEMA);
 
-  const current = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string } | undefined;
-  const currentVersion = current ? parseInt(current.value, 10) : 0;
+  const readSchemaVersion = (): number | undefined => {
+    const row = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string } | undefined;
+    return row ? parseInt(row.value, 10) : undefined;
+  };
+  const currentVersion = readSchemaVersion();
 
-  if (!current) {
+  if (currentVersion === undefined) {
     db.prepare(`INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION));
   } else if (currentVersion < SCHEMA_VERSION) {
-    migrateSchema(db, currentVersion);
-    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION));
+    // Re-read after BEGIN IMMEDIATE acquires the writer lock. A second process
+    // may have completed the migration while this connection was waiting.
+    const migrate = db.transaction(() => {
+      const lockedVersion = readSchemaVersion();
+      if (lockedVersion === undefined || lockedVersion >= SCHEMA_VERSION) return;
+      migrateSchema(db, lockedVersion);
+      db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION));
+    });
+    migrate();
   }
 
   // Index last_activity only after the column is guaranteed to exist — fresh DBs
@@ -889,7 +1245,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
     pr_url, pr_number, worktree_slug, ticket_id, spawned_team, plan, todos,
     recent_directories_touched, linear_project, linear_project_url, machine,
-    actor, initiated_by
+    actor, initiated_by, used_browser, used_computer
   ) VALUES (
     @id, @short_id, @agent, @origin, @routine_name, @routine_run_id,
     @version, @account, @timestamp, @last_activity,
@@ -898,7 +1254,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
     @pr_url, @pr_number, @worktree_slug, @ticket_id, @spawned_team, @plan, @todos,
     @recent_directories_touched, @linear_project, @linear_project_url, @machine,
-    @actor, @initiated_by
+    @actor, @initiated_by, @used_browser, @used_computer
   )
   ON CONFLICT(id) DO UPDATE SET
     short_id = excluded.short_id,
@@ -943,6 +1299,8 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     plan = excluded.plan,
     todos = excluded.todos,
     recent_directories_touched = excluded.recent_directories_touched,
+    used_browser = excluded.used_browser,
+    used_computer = excluded.used_computer,
     linear_project = CASE
       WHEN excluded.ticket_id IS NOT sessions.ticket_id THEN excluded.linear_project
       ELSE COALESCE(excluded.linear_project, sessions.linear_project)
@@ -962,10 +1320,135 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     initiated_by = COALESCE(sessions.initiated_by, excluded.initiated_by)
 `);
 
+/**
+ * Did this session emit at least one browser/computer-automation event?
+ * A scoped, sessionId-filtered read of the events log — NOT a re-scan of the
+ * (potentially huge) transcript — since browser.navigate / browser.screenshot
+ * / computer.action are recorded there via events.ts's emit(), keyed by the
+ * same session id that is this row's `meta.id` (the provenance floor stamps
+ * AGENT_SESSION_ID/AGENTS_SESSION_ID on every such event at emit time).
+ *
+ * Called independently of {@link enrichCachedSessionMeta} (which SKIPS
+ * claude/codex entries in the batch path because their caller already parsed
+ * the transcript for todos/recentDirectoriesTouched) — this never touches the
+ * transcript, so it must run for every agent, every time.
+ */
+function detectToolUsage(sessionId: string): { usedBrowser: boolean; usedComputer: boolean } {
+  const usedBrowser = queryEvents({ sessionId, eventTypes: ['browser.navigate', 'browser.screenshot'], limit: 1 }).length > 0;
+  const usedComputer = queryEvents({ sessionId, eventTypes: ['computer.action'], limit: 1 }).length > 0;
+  return { usedBrowser, usedComputer };
+}
+
+const deleteResourceUsageStmt = (db: Database.Database) =>
+  db.prepare(`DELETE FROM session_resource_usage WHERE session_id = ?`);
+const insertResourceUsageStmt = (db: Database.Database) => db.prepare(`
+  INSERT INTO session_resource_usage (session_id, kind, name, plugin, source, repo_root, snapshot_sha, count)
+  VALUES (@session_id, @kind, @name, @plugin, @source, @repo_root, @snapshot_sha, @count)
+`);
+
+/**
+ * Resolve a skill/slash-command's provenance for `session_resource_usage`
+ * (#12). A flat (non-namespaced) resource resolves via resolveResource()'s
+ * project/user/system/extra-repo scan. A namespaced one (`plugin:name`, e.g.
+ * `rush:design` — the shape both a plugin skill's `args.skill` and a plugin
+ * command's SessionEvent.slashCommand carry) is plugin-owned and lives under
+ * the plugin's own directory, invisible to resolveResource()'s flat scan —
+ * resolved instead against the already-discovered plugin list. Neither found
+ * (renamed or uninstalled since the session ran) returns all-undefined
+ * rather than a stale guess.
+ */
+function resolveResourceProvenance(
+  kind: 'skills' | 'commands',
+  name: string,
+  cwd: string | undefined,
+  plugins: DiscoveredPlugin[],
+): { plugin?: string; source?: string; repoRoot?: string; snapshotSha?: string } {
+  const listOf = (p: DiscoveredPlugin) => (kind === 'skills' ? p.skills : p.commands);
+  const colonIdx = name.indexOf(':');
+  if (colonIdx > 0) {
+    const pluginName = name.slice(0, colonIdx);
+    const shortName = name.slice(colonIdx + 1);
+    const plugin = plugins.find((p) => p.name === pluginName && listOf(p).includes(shortName));
+    if (!plugin) return {};
+    return { plugin: plugin.name, source: plugin.marketplace, repoRoot: plugin.repoRoot, snapshotSha: plugin.snapshotSha };
+  }
+  const resolved = resolveResource(kind, name, cwd);
+  if (resolved) return { source: resolved.source, repoRoot: resolved.repoRoot, snapshotSha: resolved.snapshotSha };
+  const plugin = plugins.find((p) => listOf(p).includes(name));
+  if (!plugin) return {};
+  return { plugin: plugin.name, source: plugin.marketplace, repoRoot: plugin.repoRoot, snapshotSha: plugin.snapshotSha };
+}
+
+/**
+ * Persist already-computed skill/slash-command tallies for a session (#12)
+ * into `session_resource_usage`, replacing any prior rows for it (a rescan's
+ * usage supersedes the old — same replace-on-upsert shape as the FTS text
+ * below). `discoverPlugins()` (real I/O: manifest + directory reads) only
+ * runs when there is actually a skill/command to resolve, so a session with
+ * neither pays nothing beyond the DELETE.
+ *
+ * Split from {@link writeResourceUsage} so a caller that already has the
+ * tallies (claude/codex's incremental accumulator — see
+ * ClaudeParseState.skillEvents/slashCommandEvents, threaded onto
+ * SessionMeta.skillsUsed/slashCommandsUsed) can write without re-parsing the
+ * transcript to re-derive them.
+ *
+ * Deliberately NOT wrapped in its own `db.transaction()`: better-sqlite3
+ * (this repo's wrapper included) does not support nested transactions, and
+ * `upsertSessionsBatch` calls this from INSIDE its own outer transaction. A
+ * standalone caller (enrichCachedSessionMeta, outside any transaction) still
+ * gets each statement committed individually — a crash between the DELETE
+ * and an INSERT self-heals on the next rescan, the same risk profile as any
+ * other un-batched write in this file.
+ */
+function writeResourceUsageFromTallies(
+  sessionId: string,
+  skills: Array<{ name: string; count: number }>,
+  commands: Array<{ name: string; count: number }>,
+  cwd: string | undefined,
+): void {
+  const db = getDB();
+  const del = deleteResourceUsageStmt(db);
+  const ins = insertResourceUsageStmt(db);
+  del.run(sessionId);
+  if (skills.length === 0 && commands.length === 0) return;
+  const plugins = discoverPlugins({ cwd });
+  for (const { name, count } of skills) {
+    const prov = resolveResourceProvenance('skills', name, cwd, plugins);
+    ins.run({
+      session_id: sessionId, kind: 'skill', name, count,
+      plugin: prov.plugin ?? null, source: prov.source ?? null,
+      repo_root: prov.repoRoot ?? null, snapshot_sha: prov.snapshotSha ?? null,
+    });
+  }
+  for (const { name, count } of commands) {
+    const bare = name.replace(/^\//, '');
+    const prov = resolveResourceProvenance('commands', bare, cwd, plugins);
+    ins.run({
+      session_id: sessionId, kind: 'command', name: bare, count,
+      plugin: prov.plugin ?? null, source: prov.source ?? null,
+      repo_root: prov.repoRoot ?? null, snapshot_sha: prov.snapshotSha ?? null,
+    });
+  }
+}
+
+/**
+ * Persist skill/slash-command usage for a session (#12) by deriving the
+ * tallies from a full parsed transcript. Used by {@link enrichCachedSessionMeta}
+ * (every `upsertSession()` call, and `upsertSessionsBatch` for every harness
+ * EXCEPT claude/codex, which pre-compute skillsUsed/slashCommandsUsed via
+ * their incremental accumulator instead — see writeResourceUsageFromTallies
+ * and the call site in upsertSessionsBatch).
+ */
+function writeResourceUsage(sessionId: string, events: SessionEvent[], cwd: string | undefined): void {
+  writeResourceUsageFromTallies(sessionId, extractSkills(events), extractSlashCommands(events), cwd);
+}
+
 function enrichCachedSessionMeta(meta: SessionMeta): SessionMeta {
   if (!meta.filePath) return meta;
   try {
     const events = parseSession(meta.filePath, meta.agent);
+    writeResourceUsage(meta.id, events, meta.cwd);
     return {
       ...meta,
       todos: extractTodoProgressFromEvents(events),
@@ -1035,6 +1518,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
   // row AND backfills one indexed null-first (before its sidecar existed), while a
   // rescan carrying no actor still keeps the stored owner.
   const actorRec = meta.actor ? undefined : readSessionActorRecord(meta.id);
+  const toolUsage = detectToolUsage(meta.id);
   const db = getDB();
   const { upsert, delText, insText, readLabel } = stmts(db);
   const row: SessionRow = {
@@ -1078,6 +1562,8 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     machine: resolveMachine(meta),
     actor: meta.actor ?? actorRec?.actor ?? null,
     initiated_by: meta.initiatedBy ?? actorRec?.initiatedBy ?? null,
+    used_browser: toolUsage.usedBrowser ? 1 : 0,
+    used_computer: toolUsage.usedComputer ? 1 : 0,
   };
 
   const txn = db.transaction(() => {
@@ -1098,7 +1584,16 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
 
 /** Batch-upsert sessions with their FTS5 content and scan stamps in a single transaction. */
 export function upsertSessionsBatch(
-  entries: Array<{ meta: SessionMeta; content: string; scan?: ScanStamp; parserState?: string; contentText?: string }>,
+  entries: Array<{
+    meta: SessionMeta;
+    content: string;
+    scan?: ScanStamp;
+    parserState?: string;
+    contentText?: string;
+    toolCalls?: IndexedToolCall[];
+    toolScan?: ScanStamp;
+    toolIndexMode?: 'replace' | 'append';
+  }>,
 ): void {
   if (entries.length === 0) return;
   const db = getDB();
@@ -1137,11 +1632,36 @@ export function upsertSessionsBatch(
       .filter(e => e.scan && e.meta.filePath)
       .map(e => [canonicalLedgerKey(e.meta.filePath), e]),
   );
-  const enrichedEntries = entries.map(entry =>
-    entry.meta.agent === 'claude' || entry.meta.agent === 'codex'
-      ? entry
-      : { ...entry, meta: enrichCachedSessionMeta(entry.meta) },
-  );
+  const enrichedEntries = entries.map(entry => {
+    if (entry.meta.agent === 'claude' || entry.meta.agent === 'codex' || !entry.meta.filePath) return entry;
+    try {
+      const toolSourcePath = toolEvidenceSourcePath(entry.meta.filePath, entry.meta.agent);
+      const toolScan = toolSourcePath === entry.meta.filePath
+        ? entry.scan
+        : (() => {
+            const stat = fs.statSync(toolSourcePath);
+            return { fileMtimeMs: stat.mtimeMs, fileSize: stat.size };
+          })();
+      // Non-resumable harnesses already parse here for todos/recent dirs. Derive
+      // the tool index from those same in-memory events: no second file read.
+      const events = parseSession(entry.meta.filePath, entry.meta.agent);
+      writeResourceUsage(entry.meta.id, events, entry.meta.cwd);
+      return {
+        ...entry,
+        meta: {
+          ...entry.meta,
+          todos: extractTodoProgressFromEvents(events),
+          recentDirectoriesTouched: extractRecentDirectoriesTouched(events, entry.meta.cwd),
+        },
+        toolCalls: toolCallsFromEvents(events),
+        toolScan,
+        toolIndexMode: 'replace' as const,
+      };
+    } catch {
+      return entry;
+    }
+  });
+  const writtenEntries: typeof enrichedEntries = [];
 
   const txn = db.transaction((items: typeof entries) => {
     // Re-read the ledger now that we hold the write lock. Any file committed
@@ -1163,7 +1683,8 @@ export function upsertSessionsBatch(
       }
     }
 
-    for (const { meta, content, scan, parserState, contentText } of items) {
+    for (const entry of items) {
+      const { meta, content, scan, parserState, contentText } = entry;
       if (alreadyIndexed.has(meta.id)) continue;
       // Per-row guard: one malformed session (e.g. a required field that resolves to
       // NULL) must not abort the whole batch and take down the entire `agents sessions`
@@ -1172,6 +1693,15 @@ export function upsertSessionsBatch(
       // back when the error escapes `fn`, so catching + skipping here leaves the txn valid
       // and committable. We deliberately do NOT stamp the ledger for a skipped row, so the
       // next scan re-tries it (self-healing once the underlying parser is fixed).
+      const toolUsage = detectToolUsage(meta.id);
+      // claude/codex skip enrichCachedSessionMeta above (preserving their
+      // resumable-parse optimization) — write their pre-computed
+      // skillsUsed/slashCommandsUsed (folded incrementally by discover.ts's
+      // accumulator) here instead. Every other harness already got this
+      // write from enrichCachedSessionMeta() in the .map() above.
+      if (meta.agent === 'claude' || meta.agent === 'codex') {
+        writeResourceUsageFromTallies(meta.id, meta.skillsUsed ?? [], meta.slashCommandsUsed ?? [], meta.cwd);
+      }
       try {
       upsert.run({
         id: meta.id,
@@ -1214,6 +1744,8 @@ export function upsertSessionsBatch(
     machine: resolveMachine(meta),
         actor: meta.actor ?? actorIndex.get(meta.id)?.actor ?? null,
         initiated_by: meta.initiatedBy ?? actorIndex.get(meta.id)?.initiatedBy ?? null,
+        used_browser: toolUsage.usedBrowser ? 1 : 0,
+        used_computer: toolUsage.usedComputer ? 1 : 0,
       });
       delText.run(meta.id);
       insText.run(
@@ -1235,6 +1767,7 @@ export function upsertSessionsBatch(
           contentText ?? null,
         );
       }
+      writtenEntries.push(entry);
       } catch (err) {
         if (process.stderr.isTTY) {
           console.error(`Warning: skipped unindexable session ${meta.id}: ${(err as Error).message}`);
@@ -1243,6 +1776,18 @@ export function upsertSessionsBatch(
     }
   });
   txn(enrichedEntries);
+  // Tool evidence shares the transcript parse above but owns an independent
+  // transaction/ledger. If this write fails, the normal session row remains
+  // valid and ensureToolIndex retries from the missing tool ledger later.
+  for (const entry of writtenEntries) {
+    const toolScan = entry.toolScan ?? entry.scan;
+    if (!toolScan || !entry.toolCalls) continue;
+    try {
+      persistToolCalls(db, entry.meta, entry.toolCalls, toolScan, entry.toolIndexMode ?? 'replace');
+    } catch {
+      // Boundary is intentionally retryable via tool_scan_ledger.
+    }
+  }
 }
 
 /**
@@ -1423,6 +1968,11 @@ function rowToMeta(row: SessionRow): SessionMeta {
     // Narrow the free-text column to the known kinds; an unexpected value maps
     // to undefined rather than being asserted as a valid kind.
     initiatedBy: row.initiated_by === 'human' || row.initiated_by === 'agent' ? row.initiated_by : undefined,
+    // NULL = never computed by this scanner (legacy row) — leave undefined so
+    // the sessions picker knows to fall back to the transcript-regex detection
+    // instead of trusting a false "never used browser/computer".
+    usedBrowser: row.used_browser === null ? undefined : row.used_browser === 1,
+    usedComputer: row.used_computer === null ? undefined : row.used_computer === 1,
   };
 }
 
@@ -1530,6 +2080,11 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
     params.push(`%${options.project.toLowerCase()}%`);
   }
 
+  if (options.machine) {
+    where.push('machine = ? COLLATE NOCASE');
+    params.push(options.machine);
+  }
+
   // id lookup. SQLite's LIKE is case-insensitive for ASCII, so a lowercased
   // pattern matches mixed-case ids; the `=` exact compare adds COLLATE NOCASE
   // for the same reason. short_id carries its own index (idx_sessions_short_id);
@@ -1561,6 +2116,22 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
     where.push('IFNULL(is_team_origin, 0) = 1');
   }
 
+  // #12: join against session_resource_usage. A subquery IN, not a real JOIN
+  // on the base SELECT, keeps `SELECT * FROM sessions` untouched for every
+  // other caller of buildSessionWhere() (countSessions, the usage rollup, …)
+  // that never wants a skill/plugin filter.
+  if (options.skill) {
+    where.push(`id IN (
+      SELECT session_id FROM session_resource_usage
+      WHERE kind = 'skill' AND (name = ? COLLATE NOCASE OR name LIKE ? COLLATE NOCASE)
+    )`);
+    params.push(options.skill, `%:${options.skill}`);
+  }
+  if (options.plugin) {
+    where.push(`id IN (SELECT session_id FROM session_resource_usage WHERE plugin = ? COLLATE NOCASE)`);
+    params.push(options.plugin);
+  }
+
   const clause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
   return { clause, params };
 }
@@ -1585,13 +2156,25 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
         : 'ORDER BY IFNULL(last_activity, timestamp) DESC, timestamp DESC';
   const sql = `SELECT * FROM sessions ${clause} ${orderClause} ${limitClause}`;
   const rows = db.prepare(sql).all(...params) as SessionRow[];
+  if (options.skipExistenceCheck) {
+    const trimmed = options.limit ? rows.slice(0, options.limit) : rows;
+    return trimmed.map(rowToMeta);
+  }
   // Belt-and-suspenders: drop rows whose JSONL no longer exists on disk. The
   // authoritative fix is to keep file_path in sync (see updateSessionFilePaths
   // callers), but skipping vanished rows here prevents phantom sessions from
   // surfacing in the Factory UI if any code path forgets to rewrite (#136).
   // Synthetic rows (OpenClaw channels/cron — see scanOpenClawIncremental) carry
   // an empty file_path and are exempt; they're keyed by CLI output, not files.
-  const live = rows.filter(r => !r.file_path || fs.existsSync(r.file_path));
+  const missing = rows.filter(r => r.file_path && !fs.existsSync(r.file_path));
+  if (missing.length > 0) {
+    const purge = db.transaction(() => {
+      for (const row of missing) purgeToolCalls(db, row.id);
+    });
+    purge();
+  }
+  const missingIds = new Set(missing.map((row) => row.id));
+  const live = rows.filter(r => !r.file_path || !missingIds.has(r.id));
   const trimmed = options.limit ? live.slice(0, options.limit) : live;
   return trimmed.map(rowToMeta);
 }
@@ -1745,6 +2328,233 @@ export function queryUsageRollup(
     ORDER BY costUsd DESC, key ASC
   `;
   return db.prepare(sql).all(...params) as UsageRollupRow[];
+}
+
+/** One aggregated resource (skill or slash-command) in a usage-stats rollup. */
+export interface ResourceStatRow {
+  /** 'skill' or 'command' (singular, as stored in session_resource_usage.kind). */
+  kind: string;
+  /** Stored resource name — bare, or `plugin:short` for a plugin-owned resource. */
+  name: string;
+  /** Owning plugin, or null for a flat (non-namespaced) resource. */
+  plugin: string | null;
+  /** DotAgents layer or plugin marketplace the resource resolved to at write time. */
+  source: string | null;
+  /** Distinct sessions that invoked this resource within the filter window. */
+  sessions: number;
+  /** Total invocations (sum of per-session counts) within the window. */
+  invocations: number;
+}
+
+/**
+ * Roll up skill / slash-command usage from session_resource_usage, joined to
+ * `sessions` for attribution so the same filter shape as querySessions
+ * (agent / project / since / machine) narrows WHICH sessions count. Grouped by
+ * resource identity (kind + name + plugin + source) and ordered by invocation
+ * volume — the read side of "which skills/commands do I actually use, and which
+ * are dead weight". `order: 'bottom'` ranks least-used first (the one-time
+ * skills); `limit` caps the returned rows.
+ *
+ * The signal only captures EXPLICIT invocations (slash commands and `Skill`
+ * tool calls). An auto-triggered skill (loaded by description match) emits no
+ * event, so it reads as zero here — a 0 means "never explicitly invoked", not
+ * "never loaded". Skill invocations are recorded for Claude and Kimi (the
+ * `Skill`-tool harnesses); slash-commands are Claude-only.
+ *
+ * `kind` / `pluginFilter` filter the RESOURCE rows directly (r.kind / r.plugin),
+ * distinct from QueryOptions.skill / QueryOptions.plugin, which filter SESSIONS
+ * — deliberately not routed through buildSessionWhere so `--plugin rush` shows
+ * only rush's resources rather than every resource used by a rush-touching
+ * session.
+ */
+export function queryResourceUsageStats(
+  options: QueryOptions & {
+    kind?: 'skill' | 'command';
+    pluginFilter?: string;
+    order?: 'top' | 'bottom';
+    limit?: number;
+  },
+): ResourceStatRow[] {
+  const db = getDB();
+  const { clause, params } = buildSessionWhere(options);
+  // buildSessionWhere emits bare column names (agent, timestamp, machine, …) and
+  // `id IN (…)` subqueries; in this join they resolve unambiguously to `sessions`
+  // (session_resource_usage carries none of those columns, and its key is
+  // session_id, not id). Strip the leading WHERE so resource predicates append.
+  const base = clause.replace(/^WHERE\s+/, '');
+  const preds: string[] = base ? [base] : [];
+  const allParams: any[] = [...params];
+  if (options.kind) {
+    preds.push('r.kind = ?');
+    allParams.push(options.kind);
+  }
+  if (options.pluginFilter) {
+    preds.push('r.plugin = ? COLLATE NOCASE');
+    allParams.push(options.pluginFilter);
+  }
+  const whereClause = preds.length ? `WHERE ${preds.join(' AND ')}` : '';
+  const direction = options.order === 'bottom' ? 'ASC' : 'DESC';
+  const limitClause = options.limit ? `LIMIT ${Math.max(1, Math.floor(options.limit))}` : '';
+  // Group by resource IDENTITY = (kind, name) only, per SES-IF-4b. name already
+  // embeds the `plugin:short` prefix for a plugin resource, so (kind, name) is
+  // the true identity. plugin and source are PROVENANCE, not identity, and drift
+  // per session — the same `rush:design` resolves plugin='rush' in a session
+  // whose cwd discovered the plugin and plugin=NULL in one that didn't, and the
+  // layer a flat resource resolved to varies (user vs system). Grouping on either
+  // would split one resource into fractional rows. Aggregate both with MAX so the
+  // row carries a representative (non-NULL when any session resolved it) label
+  // while the counts stay whole.
+  const sql = `
+    SELECT
+      r.kind AS kind,
+      r.name AS name,
+      MAX(r.plugin) AS plugin,
+      MAX(r.source) AS source,
+      COUNT(DISTINCT r.session_id) AS sessions,
+      SUM(r.count) AS invocations
+    FROM session_resource_usage r
+    JOIN sessions s ON s.id = r.session_id
+    ${whereClause}
+    GROUP BY r.kind, r.name
+    ORDER BY invocations ${direction}, sessions ${direction}, r.name ASC
+    ${limitClause}
+  `;
+  return db.prepare(sql).all(...allParams) as ResourceStatRow[];
+}
+
+/**
+ * Coverage of the resource-usage signal: how many distinct sessions carry any
+ * row in session_resource_usage vs. the total indexed. A low ratio means the
+ * historical backfill (`agents sessions backfill resources`) hasn't run — the
+ * stats surface uses this to tell the user their zero-counts may just be
+ * un-scanned history, not genuine non-use.
+ */
+export function resourceUsageCoverage(): { covered: number; total: number } {
+  const db = getDB();
+  const covered = (db.prepare(`SELECT COUNT(DISTINCT session_id) AS n FROM session_resource_usage`).get() as { n: number }).n;
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM sessions`).get() as { n: number }).n;
+  return { covered, total };
+}
+
+/** Has this session's resource usage been derived at the current extractor version for this exact file? */
+function needsResourceIndex(
+  db: Database.Database,
+  sessionId: string,
+  stamp: { fileMtimeMs: number; fileSize: number },
+): boolean {
+  const row = db
+    .prepare(`SELECT file_mtime_ms, file_size, extractor_version FROM resource_scan_ledger WHERE session_id = ?`)
+    .get(sessionId) as { file_mtime_ms: number; file_size: number; extractor_version: number } | undefined;
+  return !row
+    || row.file_mtime_ms !== stamp.fileMtimeMs
+    || row.file_size !== stamp.fileSize
+    || row.extractor_version !== RESOURCE_INDEX_VERSION;
+}
+
+/** Record that a session's resource usage is current at RESOURCE_INDEX_VERSION for this file stamp. */
+function stampResourceLedger(
+  db: Database.Database,
+  sessionId: string,
+  filePath: string,
+  stamp: { fileMtimeMs: number; fileSize: number },
+  resourceCount: number,
+): void {
+  db.prepare(`
+    INSERT INTO resource_scan_ledger
+      (session_id, file_path, file_mtime_ms, file_size, extractor_version, indexed_at, resource_count)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(session_id) DO UPDATE SET
+      file_path = excluded.file_path,
+      file_mtime_ms = excluded.file_mtime_ms,
+      file_size = excluded.file_size,
+      extractor_version = excluded.extractor_version,
+      indexed_at = excluded.indexed_at,
+      resource_count = excluded.resource_count
+  `).run(sessionId, filePath, stamp.fileMtimeMs, stamp.fileSize, RESOURCE_INDEX_VERSION, Date.now(), resourceCount);
+}
+
+/** Outcome of a resource-usage backfill run. */
+export interface ResourceBackfillResult {
+  /** Sessions considered (matched the filter, had a real transcript). */
+  scanned: number;
+  /** Sessions (re)parsed and written this run. */
+  updated: number;
+  /** Sessions already current at this extractor version, skipped. */
+  skipped: number;
+  /** Sessions whose transcript could not be stat'd or parsed. */
+  failed: number;
+  /** Total session_resource_usage rows written across updated sessions. */
+  resourceRows: number;
+}
+
+/**
+ * One-shot historical backfill of session_resource_usage (#12). The normal
+ * incremental scan writes resource usage only for sessions whose transcript it
+ * (re)parses; a session indexed before this feature shipped keeps a fresh
+ * scan_ledger row and is never re-derived, so its skill/slash-command tallies
+ * were never recorded. This walks the session index, re-parses each transcript
+ * FROM BYTE 0 (parseSession fully materializes — no resumable cursor, so
+ * claude/codex re-derive their tallies from scratch), writes the usage, and
+ * stamps resource_scan_ledger so reruns skip completed transcripts — the same
+ * independent-ledger shape `agents sessions backfill tools` uses.
+ *
+ * Harness-agnostic: parseSession + extractSkills/extractSlashCommands cover
+ * every agent uniformly, so there is no per-harness branch to keep in parity.
+ * Synthetic rows without a transcript (OpenClaw channels/cron) are skipped.
+ */
+export function backfillResourceUsage(
+  filter: QueryOptions = {},
+  onProgress?: (done: number, total: number) => void,
+): ResourceBackfillResult {
+  const db = getDB();
+  // No LIMIT: the backfill covers the whole matching history. skipExistenceCheck
+  // stays off so vanished transcripts are dropped, matching querySessions.
+  const sessions = querySessions({ ...filter, limit: undefined });
+  const result: ResourceBackfillResult = { scanned: 0, updated: 0, skipped: 0, failed: 0, resourceRows: 0 };
+  let done = 0;
+  for (const meta of sessions) {
+    if (!meta.filePath) { done++; onProgress?.(done, sessions.length); continue; }
+    result.scanned++;
+    let stamp: { fileMtimeMs: number; fileSize: number };
+    try {
+      const st = fs.statSync(meta.filePath);
+      stamp = { fileMtimeMs: st.mtimeMs, fileSize: st.size };
+    } catch {
+      result.failed++;
+      done++; onProgress?.(done, sessions.length);
+      continue;
+    }
+    if (!needsResourceIndex(db, meta.id, stamp)) {
+      result.skipped++;
+      done++; onProgress?.(done, sessions.length);
+      continue;
+    }
+    try {
+      const events = parseSession(meta.filePath, meta.agent);
+      // Fail loud on a bad read. writeResourceUsage DELETEs the session's rows
+      // before it re-inserts, so a transcript that parses to ZERO events (a
+      // truncated / mid-sync / corrupt file — parseSession returns [] instead of
+      // throwing) would silently wipe real historical usage and then stamp the
+      // ledger "current", masking the loss. A completed historical transcript
+      // always has turns, so an empty parse is never a legitimate "this session
+      // used nothing" — it is an unreadable file. Skip it (count as failed, leave
+      // the ledger unstamped) so a later good read retries.
+      if (events.length === 0) {
+        result.failed++;
+        done++; onProgress?.(done, sessions.length);
+        continue;
+      }
+      writeResourceUsage(meta.id, events, meta.cwd);
+      const rows = (db.prepare(`SELECT COUNT(*) AS n FROM session_resource_usage WHERE session_id = ?`).get(meta.id) as { n: number }).n;
+      stampResourceLedger(db, meta.id, meta.filePath, stamp, rows);
+      result.updated++;
+      result.resourceRows += rows;
+    } catch {
+      result.failed++;
+    }
+    done++; onProgress?.(done, sessions.length);
+  }
+  return result;
 }
 
 /** Who spawned a team: the orchestrator session, from its transcript. */

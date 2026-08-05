@@ -29,6 +29,8 @@ export interface RemoteAgentsJsonOptions<T> {
    * printing a line per offline box above its output. Never a silent drop.
    */
   quiet?: boolean;
+  /** Per-peer deadline. Long-running maintenance commands override 12 seconds. */
+  timeoutMs?: number;
 }
 
 export interface RemoteAgentsJsonParseResult<T> {
@@ -73,7 +75,7 @@ export function remoteAgentsJsonCommand(args: string[], noFanoutEnv: string, os?
   return `bash -lc ${shellQuote(inner)}`;
 }
 
-function sshCapture(target: string, remoteCmd: string): Promise<{ code: number | null; stdout: string }> {
+function sshCapture(target: string, remoteCmd: string, timeoutMs: number): Promise<{ code: number | null; stdout: string }> {
   assertValidSshTarget(target);
   return new Promise((resolve) => {
     const args = [...SSH_OPTS, ...controlOpts(), target, remoteCmd];
@@ -89,7 +91,7 @@ function sshCapture(target: string, remoteCmd: string): Promise<{ code: number |
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       done(null);
-    }, REMOTE_TIMEOUT_MS);
+    }, timeoutMs);
     child.stdout.on('data', (data) => { stdout += data.toString(); });
     child.on('error', () => done(null));
     child.on('close', (code) => done(code));
@@ -140,7 +142,7 @@ export async function gatherRemoteAgentsJson<T>(
   const parseFailed: string[] = [];
   const results = await Promise.all(targets.map(async (target) => {
     const command = remoteAgentsJsonCommand(options.args, options.noFanoutEnv, target.os);
-    const result = await sshCapture(target.target, command);
+    const result = await sshCapture(target.target, command, options.timeoutMs ?? REMOTE_TIMEOUT_MS);
     if (result.code !== 0) {
       skipped.push(target.name);
       if (!options.quiet) {

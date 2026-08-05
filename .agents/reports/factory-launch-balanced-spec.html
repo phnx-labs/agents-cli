@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Every Factory agent launch is balanced</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-separator{color:var(--muted);padding:0 5px}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:10px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px}.meta{display:grid;gap:8px;margin-top:20px}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:baseline;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-label{color:var(--muted)}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.meta-row-provenance .chip-value{color:var(--accent-alt)}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value,.meta-row-provenance .chip-value{color:var(--text)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker">agents-cli<span class="kicker-separator" aria-hidden="true">&middot;</span>plan</div>
+<h1>Every Factory agent launch is balanced</h1>
+<p class="summary">One launch contract for New &lt;Agent&gt; / (Auto) / (Pick Host) — no bare, strategy-less command, ever.</p>
+<div class="meta" aria-label="Artifact metadata"><ul class="meta-row meta-row-facts"><li class="chip"><span class="chip-label">status:</span><span class="chip-value">proposed</span></li></ul><ul class="meta-row meta-row-provenance"><li class="chip"><span class="chip-label">repo:</span><span class="chip-value">agents-cli</span></li><li class="chip"><span class="chip-label">branch:</span><span class="chip-value">launch-always-balanced</span></li><li class="chip"><span class="chip-label">human:</span><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7.5" r="4"/><path d="M3.5 21c.8-4.2 4.2-6.5 8.5-6.5s7.7 2.3 8.5 6.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>Muqsit</span></li><li class="chip"><span class="chip-label">harness:</span><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>claude</span></li><li class="chip"><span class="chip-label">host:</span><span class="chip-value">yosemite-s1</span></li><li class="chip"><span class="chip-label">session:</span><span class="chip-value">225cb38d</span></li><li class="chip"><span class="chip-value">2026-08-03</span></li></ul></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#public-interface"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#proposed-changes"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p>Every interactive agent Factory launches must use <code>--strategy balanced</code> (account/
+version rotation) and <code>--mode auto</code> (writable-but-gated) — <strong>always, with no
+per-agent exception.</strong> There is no case where you want a bare launch into whatever
+account happens to be pinned, or an agent started with no mode. This plan makes
+that an enforced invariant instead of an accident of allowlist membership.</p>
+<p>Two invariants, no exceptions:</p>
+<ul>
+<li><strong><code>--strategy balanced</code> is always present.</strong> It spreads load and never launches
+into a throttled account.</li>
+<li><strong><code>--mode auto</code> is always present.</strong> The interactive agent starts writable so it
+can edit files without stalling on read-only plan approval.</li>
+</ul>
+<p>The CLI drops <code>--strategy</code> in exactly one situation Factory never triggers: when
+an <code>@version</code> is pinned. Factory never pins on a New launch, so the flag is always
+emitted. <strong>Shell</strong> is not an agent runner (<code>command: ''</code>) and is out of scope — it
+stays a plain terminal.</p>
+<h2 id="public-interface">Public Interface</h2>
+<p>Factory offers exactly three ways to start any agent, and <strong>all three emit the
+same flags</strong> — only the host selection differs. No fourth shape, no bare command.</p>
+<p>For every agent runner <code>X</code> (claude, codex, gemini, opencode, cursor, antigravity,
+grok, kimi, droid):</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Host selector</th>
+<th>Runs on</th>
+<th>Full command</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Agents: New X</strong></td>
+<td><em>(none)</em></td>
+<td>this machine</td>
+<td><code>agents run X --interactive --strategy balanced --mode auto</code></td>
+</tr>
+<tr>
+<td><strong>Agents: New X (Auto)</strong></td>
+<td><code>--device auto</code></td>
+<td>best fleet box (CLI picks)</td>
+<td><code>agents run X --interactive --device auto --strategy balanced --mode auto</code></td>
+</tr>
+<tr>
+<td><strong>Agents: New X (Pick Host)</strong></td>
+<td><code>--host '&lt;device&gt;'</code></td>
+<td>the device you pick</td>
+<td><code>agents run X --interactive --host '&lt;device&gt;' --strategy balanced --mode auto</code></td>
+</tr>
+</tbody></table>
+<p>Claude additionally carries <code>--session-id &lt;id&gt;</code> (minted up front so the tab can
+resume/fork by id). That is the <strong>only</strong> per-agent addition, and it never removes
+a flag.</p>
+<figure class="artifact-figure-diagram">
+<svg viewBox="0 0 880 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Command palette mockup: three New-Claude variants on the left, the exact command each emits on the right">
+  <rect x="20" y="16" width="440" height="288" rx="8" fill="#0e1418" stroke="#26313a" stroke-width="1.5"></rect>
+  <rect x="34" y="30" width="412" height="24" rx="4" fill="#0a0f13" stroke="#26313a"></rect>
+  <text x="44" y="46" font-family="JetBrains Mono, monospace" font-size="11" fill="#8a8a8a">&gt; Agents: New Claude</text>
+
+  <rect x="34" y="62" width="412" height="40" rx="5" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="44" y="80" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">Agents: New Claude</text>
+  <text x="44" y="95" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">launch locally on this machine</text>
+  <text x="434" y="86" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10" fill="#a3e635">LOCAL</text>
+
+  <rect x="34" y="108" width="412" height="40" rx="5" fill="#0e1418" stroke="#26313a"></rect>
+  <text x="44" y="126" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">Agents: New Claude (Auto)</text>
+  <text x="44" y="141" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">CLI auto-picks the best fleet host</text>
+  <text x="434" y="132" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10" fill="#38bdf8">AUTO HOST</text>
+
+  <rect x="34" y="154" width="412" height="40" rx="5" fill="#0e1418" stroke="#26313a"></rect>
+  <text x="44" y="172" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">Agents: New Claude (Pick Host)</text>
+  <text x="44" y="187" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">you choose the device</text>
+  <text x="434" y="178" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10" fill="#f59e0b">PICK HOST</text>
+
+  <text x="44" y="222" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">New Codex …  ·  New Grok …  ·  New Droid …  (same three variants, every agent)</text>
+  <text x="44" y="266" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">Every row, whichever agent, resolves to the</text>
+  <text x="44" y="282" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">same balanced + auto launch. No surprises.</text>
+
+  <rect x="522" y="62" width="336" height="44" rx="6" fill="#0a0f0a" stroke="#2b3327"></rect>
+  <text x="536" y="82" font-family="JetBrains Mono, monospace" font-size="11" fill="#cfe6a8">agents run claude --interactive</text>
+  <text x="536" y="98" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">--strategy balanced --mode auto</text>
+
+  <rect x="522" y="112" width="336" height="44" rx="6" fill="#0a0f0a" stroke="#2b3327"></rect>
+  <text x="536" y="132" font-family="JetBrains Mono, monospace" font-size="11" fill="#cfe6a8">agents run claude --interactive <tspan fill="#38bdf8">--device auto</tspan></text>
+  <text x="536" y="148" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">--strategy balanced --mode auto</text>
+
+  <rect x="522" y="162" width="336" height="44" rx="6" fill="#0a0f0a" stroke="#2b3327"></rect>
+  <text x="536" y="182" font-family="JetBrains Mono, monospace" font-size="11" fill="#cfe6a8">agents run claude --interactive <tspan fill="#f59e0b">--host 'x'</tspan></text>
+  <text x="536" y="198" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">--strategy balanced --mode auto</text>
+
+  <path d="M462 82 L520 84" stroke="#a3e635" stroke-width="1.5" opacity="0.7"></path>
+  <path d="M462 128 L520 134" stroke="#38bdf8" stroke-width="1.5" opacity="0.7"></path>
+  <path d="M462 174 L520 184" stroke="#f59e0b" stroke-width="1.5" opacity="0.7"></path>
+</svg>
+<figcaption>The three New-agent variants (left) and the exact command each emits (right). The lime flags are identical across all three — only the host selector changes.</figcaption>
+</figure><h2 id="proposed-changes">Proposed Changes</h2>
+<h3>Why a bare, strategy-less command ever happened</h3>
+<p>The launch surface had <strong>three overlapping allowlists that disagreed</strong>. Whether a
+launch got <code>--strategy balanced</code> — and whether it even routed through <code>agents run</code>
+at all — depended on which list an agent happened to be on.</p>
+<figure class="artifact-figure-diagram">
+<svg viewBox="0 0 880 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three disagreeing allowlists that gate strategy and routing">
+  <rect x="20" y="20" width="270" height="250" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="34" y="44" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">STRATEGY_LAUNCH_AGENTS</text>
+  <text x="34" y="60" font-family="JetBrains Mono, monospace" font-size="10" fill="#8a8a8a">core/agents.ts:245 — gates --strategy</text>
+  <text x="34" y="90" font-family="JetBrains Mono, monospace" font-size="11" fill="#e6c07a">claude codex gemini opencode</text>
+  <text x="34" y="108" font-family="JetBrains Mono, monospace" font-size="11" fill="#e6c07a">cursor antigravity grok kimi</text>
+  <text x="34" y="140" font-family="JetBrains Mono, monospace" font-size="11" fill="#f87171">— droid MISSING</text>
+  <text x="34" y="176" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">off-list agent →</text>
+  <text x="34" y="192" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">strategy = undefined → bare command</text>
+
+  <rect x="305" y="20" width="270" height="250" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="319" y="44" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">LAUNCHABLE</text>
+  <text x="319" y="60" font-family="JetBrains Mono, monospace" font-size="10" fill="#8a8a8a">extension.ts:2343 — gates agents run</text>
+  <text x="319" y="90" font-family="JetBrains Mono, monospace" font-size="11" fill="#e6c07a">claude codex gemini</text>
+  <text x="319" y="108" font-family="JetBrains Mono, monospace" font-size="11" fill="#e6c07a">opencode cursor antigravity</text>
+  <text x="319" y="140" font-family="JetBrains Mono, monospace" font-size="11" fill="#f87171">— grok kimi droid MISSING</text>
+  <text x="319" y="176" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">off-list, local → raw binary,</text>
+  <text x="319" y="192" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">no agents run, no strategy, no mode</text>
+
+  <rect x="590" y="20" width="270" height="250" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="604" y="44" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#c8c8c8">usesManagedAgentLaunch</text>
+  <text x="604" y="60" font-family="JetBrains Mono, monospace" font-size="10" fill="#8a8a8a">core/agents.ts:250 — reuses list #1</text>
+  <text x="604" y="90" font-family="JetBrains Mono, monospace" font-size="11" fill="#e6c07a">= list #1 OR a target host</text>
+  <text x="604" y="122" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">routing and strategy welded to one</text>
+  <text x="604" y="138" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">list — droid falls through both,</text>
+  <text x="604" y="154" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">grok/kimi through the local one.</text>
+</svg>
+<figcaption>Three lists, three memberships. droid is on none; grok/kimi are on the strategy list but not the local-launch list. So local grok/kimi/droid ran as raw binaries with no rotation and no mode.</figcaption>
+</figure><p>The concrete result, per agent (before):</p>
+<table>
+<thead>
+<tr>
+<th>Agent</th>
+<th>New X (local) via <code>agents run</code>?</th>
+<th>Got <code>--strategy balanced</code>?</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>claude, codex, gemini, opencode, cursor, antigravity</td>
+<td>yes</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>grok, kimi</td>
+<td><strong>no</strong> — raw <code>grok</code> / <code>kimi</code> binary</td>
+<td><strong>no</strong></td>
+</tr>
+<tr>
+<td>droid</td>
+<td><strong>no</strong> — raw <code>droid</code> binary</td>
+<td><strong>no</strong> (not even on the list)</td>
+</tr>
+</tbody></table>
+<h3>The fix — collapse three lists into one rule</h3>
+<p>Replace the allowlists with a single, source-of-truth rule: <strong>every agent runner
+(everything except <code>shell</code>) launches through <code>agents run &lt;agent&gt; --interactive --strategy balanced --mode auto</code>.</strong> Host selection is the only axis that varies.</p>
+<figure class="artifact-figure-diagram">
+<svg viewBox="0 0 880 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Before three lists, after one rule">
+  <rect x="20" y="30" width="360" height="150" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="36" y="56" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#c8c8c8">Before</text>
+  <text x="36" y="84" font-family="JetBrains Mono, monospace" font-size="11" fill="#e6c07a">STRATEGY_LAUNCH_AGENTS (8 agents)</text>
+  <text x="36" y="106" font-family="JetBrains Mono, monospace" font-size="11" fill="#e6c07a">LAUNCHABLE (6 agents)</text>
+  <text x="36" y="128" font-family="JetBrains Mono, monospace" font-size="11" fill="#e6c07a">usesManagedAgentLaunch (list #1 | host)</text>
+  <text x="36" y="160" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#f87171">3 lists · disagree · bare commands</text>
+
+  <path d="M392 105 L470 105" stroke="#38bdf8" stroke-width="2" stroke-dasharray="3 3" opacity="0.8"></path>
+  <polygon points="470,99 486,105 470,111" fill="#38bdf8"></polygon>
+
+  <rect x="500" y="30" width="360" height="150" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="516" y="56" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#c8c8c8">After</text>
+  <text x="516" y="88" font-family="JetBrains Mono, monospace" font-size="11" fill="#cfe6a8">isAgentRunner(key) = key !== 'shell'</text>
+  <text x="516" y="116" font-family="JetBrains Mono, monospace" font-size="11" fill="#cfe6a8">→ agents run X --interactive</text>
+  <text x="516" y="138" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">--strategy balanced --mode auto</text>
+  <text x="516" y="166" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#a3e635">1 rule · no exceptions</text>
+</svg>
+<figcaption>The three allowlists become one predicate. Strategy and mode are constants of the launch, not a per-agent lookup.</figcaption>
+</figure><ul>
+<li><strong><code>src/vscode/extension.ts</code></strong> — <code>launchAgent</code> sets <code>strategy = 'balanced'</code>
+unconditionally (drop the <code>STRATEGY_LAUNCH_AGENTS</code> gate at ~L827).
+<code>openSingleAgent</code> routes <strong>every</strong> non-shell agent through <code>agents run</code> locally
+(retire the <code>LAUNCHABLE</code> set at ~L2343), so local grok/kimi/droid get the same
+command as a remote one.</li>
+<li><strong><code>src/core/agents.ts</code></strong> — replace <code>STRATEGY_LAUNCH_AGENTS</code> and
+<code>usesManagedAgentLaunch</code>'s list dependency with a single <code>isAgentRunner(key)</code>
+predicate (<code>key !== 'shell'</code>). Keep <code>buildAgentLaunchCommand</code>'s existing "skip
+<code>--strategy</code> when <code>@version</code> pinned" guard — the one legitimate omission.</li>
+<li><strong><code>src/core/forkSession.ts</code></strong> — <code>strategyForForkAgent</code> returns <code>'balanced'</code> for
+every runner (drop its allowlist), so a fork is balanced like every other launch.</li>
+<li><strong><code>apps/factory/AGENTS.md</code></strong> — record this contract as the canonical launch
+spec the reviewer enforces.</li>
+</ul>
+<h2 id="validation">Validation</h2>
+<ul>
+<li>Unit: a table test asserting <strong>every</strong> runner × {local, auto, pick-host} emits
+<code>--strategy balanced --mode auto</code>; a negative test that <code>shell</code> never gets
+<code>agents run</code>; a pinned-<code>@version</code> test that still omits <code>--strategy</code>.</li>
+<li>Update the existing <code>agents.test.ts</code>, <code>launchHost</code>, and <code>forkSession.test.ts</code>
+suites to the one-rule model (delete the allowlist-membership assertions).</li>
+<li>End-to-end: launch New Droid locally and confirm the tab runs
+<code>agents run droid --interactive --strategy balanced --mode auto</code>.</li>
+</ul>
+<h2 id="risks">Risks</h2>
+<div class="artifact-callout artifact-callout-warn">
+<p><strong>Behavioral change to see before shipping.</strong> Local <strong>grok / kimi / droid</strong> now launch through <code>agents run &lt;agent&gt;</code> instead of the raw binary. This is the point — it gives them balanced rotation and <code>--mode auto</code> — but it is a real change in how those three start locally. Verified safe against the CLI: <code>agents run &lt;agent&gt; --strategy balanced</code> is accepted for every runner; when there are no accounts to balance across (droid) it is a graceful no-op that falls back to the default, not an error (<code>rotate.ts:588</code>, <code>exec.ts:2094-2110</code>).</p>
+</div><p>Otherwise low risk: the six already-<code>agents run</code> agents are unchanged, and the CLI
+already defaulted to balanced — this makes the flag explicit and universal rather
+than changing what balanced does.</p>
+<h2 id="tracking">Tracking</h2>
+<p>Recorded as the canonical launch contract in <code>apps/factory/AGENTS.md</code> so the spec
+lives with the code and <code>prix/code-reviewer</code> enforces it on every PR.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6ICJFdmVyeSBGYWN0b3J5IGFnZW50IGxhdW5jaCBpcyBiYWxhbmNlZCIKc3VtbWFyeTogIk9uZSBsYXVuY2ggY29udHJhY3QgZm9yIE5ldyA8QWdlbnQ+IC8gKEF1dG8pIC8gKFBpY2sgSG9zdCkg4oCUIG5vIGJhcmUsIHN0cmF0ZWd5LWxlc3MgY29tbWFuZCwgZXZlci4iCnN0YXR1czogcHJvcG9zZWQKcHJvamVjdDogYWdlbnRzLWNsaQpyZXBvc2l0b3J5OiBhZ2VudHMtY2xpCi0tLQoKIyMgUHVycG9zZQoKRXZlcnkgaW50ZXJhY3RpdmUgYWdlbnQgRmFjdG9yeSBsYXVuY2hlcyBtdXN0IHVzZSBgLS1zdHJhdGVneSBiYWxhbmNlZGAgKGFjY291bnQvCnZlcnNpb24gcm90YXRpb24pIGFuZCBgLS1tb2RlIGF1dG9gICh3cml0YWJsZS1idXQtZ2F0ZWQpIOKAlCAqKmFsd2F5cywgd2l0aCBubwpwZXItYWdlbnQgZXhjZXB0aW9uLioqIFRoZXJlIGlzIG5vIGNhc2Ugd2hlcmUgeW91IHdhbnQgYSBiYXJlIGxhdW5jaCBpbnRvIHdoYXRldmVyCmFjY291bnQgaGFwcGVucyB0byBiZSBwaW5uZWQsIG9yIGFuIGFnZW50IHN0YXJ0ZWQgd2l0aCBubyBtb2RlLiBUaGlzIHBsYW4gbWFrZXMKdGhhdCBhbiBlbmZvcmNlZCBpbnZhcmlhbnQgaW5zdGVhZCBvZiBhbiBhY2NpZGVudCBvZiBhbGxvd2xpc3QgbWVtYmVyc2hpcC4KClR3byBpbnZhcmlhbnRzLCBubyBleGNlcHRpb25zOgoKLSAqKmAtLXN0cmF0ZWd5IGJhbGFuY2VkYCBpcyBhbHdheXMgcHJlc2VudC4qKiBJdCBzcHJlYWRzIGxvYWQgYW5kIG5ldmVyIGxhdW5jaGVzCiAgaW50byBhIHRocm90dGxlZCBhY2NvdW50LgotICoqYC0tbW9kZSBhdXRvYCBpcyBhbHdheXMgcHJlc2VudC4qKiBUaGUgaW50ZXJhY3RpdmUgYWdlbnQgc3RhcnRzIHdyaXRhYmxlIHNvIGl0CiAgY2FuIGVkaXQgZmlsZXMgd2l0aG91dCBzdGFsbGluZyBvbiByZWFkLW9ubHkgcGxhbiBhcHByb3ZhbC4KClRoZSBDTEkgZHJvcHMgYC0tc3RyYXRlZ3lgIGluIGV4YWN0bHkgb25lIHNpdHVhdGlvbiBGYWN0b3J5IG5ldmVyIHRyaWdnZXJzOiB3aGVuCmFuIGBAdmVyc2lvbmAgaXMgcGlubmVkLiBGYWN0b3J5IG5ldmVyIHBpbnMgb24gYSBOZXcgbGF1bmNoLCBzbyB0aGUgZmxhZyBpcyBhbHdheXMKZW1pdHRlZC4gKipTaGVsbCoqIGlzIG5vdCBhbiBhZ2VudCBydW5uZXIgKGBjb21tYW5kOiAnJ2ApIGFuZCBpcyBvdXQgb2Ygc2NvcGUg4oCUIGl0CnN0YXlzIGEgcGxhaW4gdGVybWluYWwuCgojIyBQdWJsaWMgSW50ZXJmYWNlCgpGYWN0b3J5IG9mZmVycyBleGFjdGx5IHRocmVlIHdheXMgdG8gc3RhcnQgYW55IGFnZW50LCBhbmQgKiphbGwgdGhyZWUgZW1pdCB0aGUKc2FtZSBmbGFncyoqIOKAlCBvbmx5IHRoZSBob3N0IHNlbGVjdGlvbiBkaWZmZXJzLiBObyBmb3VydGggc2hhcGUsIG5vIGJhcmUgY29tbWFuZC4KCkZvciBldmVyeSBhZ2VudCBydW5uZXIgYFhgIChjbGF1ZGUsIGNvZGV4LCBnZW1pbmksIG9wZW5jb2RlLCBjdXJzb3IsIGFudGlncmF2aXR5LApncm9rLCBraW1pLCBkcm9pZCk6Cgp8IENvbW1hbmQgfCBIb3N0IHNlbGVjdG9yIHwgUnVucyBvbiB8IEZ1bGwgY29tbWFuZCB8CnwgLS0tIHwgLS0tIHwgLS0tIHwgLS0tIHwKfCAqKkFnZW50czogTmV3IFgqKiB8ICoobm9uZSkqIHwgdGhpcyBtYWNoaW5lIHwgYGFnZW50cyBydW4gWCAtLWludGVyYWN0aXZlIC0tc3RyYXRlZ3kgYmFsYW5jZWQgLS1tb2RlIGF1dG9gIHwKfCAqKkFnZW50czogTmV3IFggKEF1dG8pKiogfCBgLS1kZXZpY2UgYXV0b2AgfCBiZXN0IGZsZWV0IGJveCAoQ0xJIHBpY2tzKSB8IGBhZ2VudHMgcnVuIFggLS1pbnRlcmFjdGl2ZSAtLWRldmljZSBhdXRvIC0tc3RyYXRlZ3kgYmFsYW5jZWQgLS1tb2RlIGF1dG9gIHwKfCAqKkFnZW50czogTmV3IFggKFBpY2sgSG9zdCkqKiB8IGAtLWhvc3QgJzxkZXZpY2U+J2AgfCB0aGUgZGV2aWNlIHlvdSBwaWNrIHwgYGFnZW50cyBydW4gWCAtLWludGVyYWN0aXZlIC0taG9zdCAnPGRldmljZT4nIC0tc3RyYXRlZ3kgYmFsYW5jZWQgLS1tb2RlIGF1dG9gIHwKCkNsYXVkZSBhZGRpdGlvbmFsbHkgY2FycmllcyBgLS1zZXNzaW9uLWlkIDxpZD5gIChtaW50ZWQgdXAgZnJvbnQgc28gdGhlIHRhYiBjYW4KcmVzdW1lL2ZvcmsgYnkgaWQpLiBUaGF0IGlzIHRoZSAqKm9ubHkqKiBwZXItYWdlbnQgYWRkaXRpb24sIGFuZCBpdCBuZXZlciByZW1vdmVzCmEgZmxhZy4KCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIj4KPHN2ZyB2aWV3Qm94PSIwIDAgODgwIDMyMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkNvbW1hbmQgcGFsZXR0ZSBtb2NrdXA6IHRocmVlIE5ldy1DbGF1ZGUgdmFyaWFudHMgb24gdGhlIGxlZnQsIHRoZSBleGFjdCBjb21tYW5kIGVhY2ggZW1pdHMgb24gdGhlIHJpZ2h0Ij4KICA8cmVjdCB4PSIyMCIgeT0iMTYiIHdpZHRoPSI0NDAiIGhlaWdodD0iMjg4IiByeD0iOCIgZmlsbD0iIzBlMTQxOCIgc3Ryb2tlPSIjMjYzMTNhIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDxyZWN0IHg9IjM0IiB5PSIzMCIgd2lkdGg9IjQxMiIgaGVpZ2h0PSIyNCIgcng9IjQiIGZpbGw9IiMwYTBmMTMiIHN0cm9rZT0iIzI2MzEzYSIvPgogIDx0ZXh0IHg9IjQ0IiB5PSI0NiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM4YThhOGEiPiZndDsgQWdlbnRzOiBOZXcgQ2xhdWRlPC90ZXh0PgoKICA8cmVjdCB4PSIzNCIgeT0iNjIiIHdpZHRoPSI0MTIiIGhlaWdodD0iNDAiIHJ4PSI1IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNDQiIHk9IjgwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2M4YzhjOCI+QWdlbnRzOiBOZXcgQ2xhdWRlPC90ZXh0PgogIDx0ZXh0IHg9IjQ0IiB5PSI5NSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmxhdW5jaCBsb2NhbGx5IG9uIHRoaXMgbWFjaGluZTwvdGV4dD4KICA8dGV4dCB4PSI0MzQiIHk9Ijg2IiB0ZXh0LWFuY2hvcj0iZW5kIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2EzZTYzNSI+TE9DQUw8L3RleHQ+CgogIDxyZWN0IHg9IjM0IiB5PSIxMDgiIHdpZHRoPSI0MTIiIGhlaWdodD0iNDAiIHJ4PSI1IiBmaWxsPSIjMGUxNDE4IiBzdHJva2U9IiMyNjMxM2EiLz4KICA8dGV4dCB4PSI0NCIgeT0iMTI2IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2M4YzhjOCI+QWdlbnRzOiBOZXcgQ2xhdWRlIChBdXRvKTwvdGV4dD4KICA8dGV4dCB4PSI0NCIgeT0iMTQxIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+Q0xJIGF1dG8tcGlja3MgdGhlIGJlc3QgZmxlZXQgaG9zdDwvdGV4dD4KICA8dGV4dCB4PSI0MzQiIHk9IjEzMiIgdGV4dC1hbmNob3I9ImVuZCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiMzOGJkZjgiPkFVVE8gSE9TVDwvdGV4dD4KCiAgPHJlY3QgeD0iMzQiIHk9IjE1NCIgd2lkdGg9IjQxMiIgaGVpZ2h0PSI0MCIgcng9IjUiIGZpbGw9IiMwZTE0MTgiIHN0cm9rZT0iIzI2MzEzYSIvPgogIDx0ZXh0IHg9IjQ0IiB5PSIxNzIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYzhjOGM4Ij5BZ2VudHM6IE5ldyBDbGF1ZGUgKFBpY2sgSG9zdCk8L3RleHQ+CiAgPHRleHQgeD0iNDQiIHk9IjE4NyIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPnlvdSBjaG9vc2UgdGhlIGRldmljZTwvdGV4dD4KICA8dGV4dCB4PSI0MzQiIHk9IjE3OCIgdGV4dC1hbmNob3I9ImVuZCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiNmNTllMGIiPlBJQ0sgSE9TVDwvdGV4dD4KCiAgPHRleHQgeD0iNDQiIHk9IjIyMiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPk5ldyBDb2RleCDigKYgIMK3ICBOZXcgR3JvayDigKYgIMK3ICBOZXcgRHJvaWQg4oCmICAoc2FtZSB0aHJlZSB2YXJpYW50cywgZXZlcnkgYWdlbnQpPC90ZXh0PgogIDx0ZXh0IHg9IjQ0IiB5PSIyNjYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIiBmaWxsPSIjYzhjOGM4Ij5FdmVyeSByb3csIHdoaWNoZXZlciBhZ2VudCwgcmVzb2x2ZXMgdG8gdGhlPC90ZXh0PgogIDx0ZXh0IHg9IjQ0IiB5PSIyODIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIiBmaWxsPSIjYzhjOGM4Ij5zYW1lIGJhbGFuY2VkICsgYXV0byBsYXVuY2guIE5vIHN1cnByaXNlcy48L3RleHQ+CgogIDxyZWN0IHg9IjUyMiIgeT0iNjIiIHdpZHRoPSIzMzYiIGhlaWdodD0iNDQiIHJ4PSI2IiBmaWxsPSIjMGEwZjBhIiBzdHJva2U9IiMyYjMzMjciLz4KICA8dGV4dCB4PSI1MzYiIHk9IjgyIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2NmZTZhOCI+YWdlbnRzIHJ1biBjbGF1ZGUgLS1pbnRlcmFjdGl2ZTwvdGV4dD4KICA8dGV4dCB4PSI1MzYiIHk9Ijk4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2EzZTYzNSI+LS1zdHJhdGVneSBiYWxhbmNlZCAtLW1vZGUgYXV0bzwvdGV4dD4KCiAgPHJlY3QgeD0iNTIyIiB5PSIxMTIiIHdpZHRoPSIzMzYiIGhlaWdodD0iNDQiIHJ4PSI2IiBmaWxsPSIjMGEwZjBhIiBzdHJva2U9IiMyYjMzMjciLz4KICA8dGV4dCB4PSI1MzYiIHk9IjEzMiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjZmU2YTgiPmFnZW50cyBydW4gY2xhdWRlIC0taW50ZXJhY3RpdmUgPHRzcGFuIGZpbGw9IiMzOGJkZjgiPi0tZGV2aWNlIGF1dG88L3RzcGFuPjwvdGV4dD4KICA8dGV4dCB4PSI1MzYiIHk9IjE0OCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNhM2U2MzUiPi0tc3RyYXRlZ3kgYmFsYW5jZWQgLS1tb2RlIGF1dG88L3RleHQ+CgogIDxyZWN0IHg9IjUyMiIgeT0iMTYyIiB3aWR0aD0iMzM2IiBoZWlnaHQ9IjQ0IiByeD0iNiIgZmlsbD0iIzBhMGYwYSIgc3Ryb2tlPSIjMmIzMzI3Ii8+CiAgPHRleHQgeD0iNTM2IiB5PSIxODIiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjY2ZlNmE4Ij5hZ2VudHMgcnVuIGNsYXVkZSAtLWludGVyYWN0aXZlIDx0c3BhbiBmaWxsPSIjZjU5ZTBiIj4tLWhvc3QgJ3gnPC90c3Bhbj48L3RleHQ+CiAgPHRleHQgeD0iNTM2IiB5PSIxOTgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjYTNlNjM1Ij4tLXN0cmF0ZWd5IGJhbGFuY2VkIC0tbW9kZSBhdXRvPC90ZXh0PgoKICA8cGF0aCBkPSJNNDYyIDgyIEw1MjAgODQiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiIG9wYWNpdHk9IjAuNyIvPgogIDxwYXRoIGQ9Ik00NjIgMTI4IEw1MjAgMTM0IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41IiBvcGFjaXR5PSIwLjciLz4KICA8cGF0aCBkPSJNNDYyIDE3NCBMNTIwIDE4NCIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIgb3BhY2l0eT0iMC43Ii8+Cjwvc3ZnPgo8ZmlnY2FwdGlvbj5UaGUgdGhyZWUgTmV3LWFnZW50IHZhcmlhbnRzIChsZWZ0KSBhbmQgdGhlIGV4YWN0IGNvbW1hbmQgZWFjaCBlbWl0cyAocmlnaHQpLiBUaGUgbGltZSBmbGFncyBhcmUgaWRlbnRpY2FsIGFjcm9zcyBhbGwgdGhyZWUg4oCUIG9ubHkgdGhlIGhvc3Qgc2VsZWN0b3IgY2hhbmdlcy48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKIyMgUHJvcG9zZWQgQ2hhbmdlcwoKIyMjIFdoeSBhIGJhcmUsIHN0cmF0ZWd5LWxlc3MgY29tbWFuZCBldmVyIGhhcHBlbmVkCgpUaGUgbGF1bmNoIHN1cmZhY2UgaGFkICoqdGhyZWUgb3ZlcmxhcHBpbmcgYWxsb3dsaXN0cyB0aGF0IGRpc2FncmVlZCoqLiBXaGV0aGVyIGEKbGF1bmNoIGdvdCBgLS1zdHJhdGVneSBiYWxhbmNlZGAg4oCUIGFuZCB3aGV0aGVyIGl0IGV2ZW4gcm91dGVkIHRocm91Z2ggYGFnZW50cyBydW5gCmF0IGFsbCDigJQgZGVwZW5kZWQgb24gd2hpY2ggbGlzdCBhbiBhZ2VudCBoYXBwZW5lZCB0byBiZSBvbi4KCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIj4KPHN2ZyB2aWV3Qm94PSIwIDAgODgwIDMwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IlRocmVlIGRpc2FncmVlaW5nIGFsbG93bGlzdHMgdGhhdCBnYXRlIHN0cmF0ZWd5IGFuZCByb3V0aW5nIj4KICA8cmVjdCB4PSIyMCIgeT0iMjAiIHdpZHRoPSIyNzAiIGhlaWdodD0iMjUwIiByeD0iOCIgZmlsbD0iIzE2MTIwYSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjM0IiB5PSI0NCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNjOGM4YzgiPlNUUkFURUdZX0xBVU5DSF9BR0VOVFM8L3RleHQ+CiAgPHRleHQgeD0iMzQiIHk9IjYwIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+Y29yZS9hZ2VudHMudHM6MjQ1IOKAlCBnYXRlcyAtLXN0cmF0ZWd5PC90ZXh0PgogIDx0ZXh0IHg9IjM0IiB5PSI5MCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNlNmMwN2EiPmNsYXVkZSBjb2RleCBnZW1pbmkgb3BlbmNvZGU8L3RleHQ+CiAgPHRleHQgeD0iMzQiIHk9IjEwOCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNlNmMwN2EiPmN1cnNvciBhbnRpZ3Jhdml0eSBncm9rIGtpbWk8L3RleHQ+CiAgPHRleHQgeD0iMzQiIHk9IjE0MCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNmODcxNzEiPuKAlCBkcm9pZCBNSVNTSU5HPC90ZXh0PgogIDx0ZXh0IHg9IjM0IiB5PSIxNzYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5vZmYtbGlzdCBhZ2VudCDihpI8L3RleHQ+CiAgPHRleHQgeD0iMzQiIHk9IjE5MiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPnN0cmF0ZWd5ID0gdW5kZWZpbmVkIOKGkiBiYXJlIGNvbW1hbmQ8L3RleHQ+CgogIDxyZWN0IHg9IjMwNSIgeT0iMjAiIHdpZHRoPSIyNzAiIGhlaWdodD0iMjUwIiByeD0iOCIgZmlsbD0iIzE2MTIwYSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjMxOSIgeT0iNDQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYzhjOGM4Ij5MQVVOQ0hBQkxFPC90ZXh0PgogIDx0ZXh0IHg9IjMxOSIgeT0iNjAiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5leHRlbnNpb24udHM6MjM0MyDigJQgZ2F0ZXMgYWdlbnRzIHJ1bjwvdGV4dD4KICA8dGV4dCB4PSIzMTkiIHk9IjkwIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2U2YzA3YSI+Y2xhdWRlIGNvZGV4IGdlbWluaTwvdGV4dD4KICA8dGV4dCB4PSIzMTkiIHk9IjEwOCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNlNmMwN2EiPm9wZW5jb2RlIGN1cnNvciBhbnRpZ3Jhdml0eTwvdGV4dD4KICA8dGV4dCB4PSIzMTkiIHk9IjE0MCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNmODcxNzEiPuKAlCBncm9rIGtpbWkgZHJvaWQgTUlTU0lORzwvdGV4dD4KICA8dGV4dCB4PSIzMTkiIHk9IjE3NiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPm9mZi1saXN0LCBsb2NhbCDihpIgcmF3IGJpbmFyeSw8L3RleHQ+CiAgPHRleHQgeD0iMzE5IiB5PSIxOTIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5ubyBhZ2VudHMgcnVuLCBubyBzdHJhdGVneSwgbm8gbW9kZTwvdGV4dD4KCiAgPHJlY3QgeD0iNTkwIiB5PSIyMCIgd2lkdGg9IjI3MCIgaGVpZ2h0PSIyNTAiIHJ4PSI4IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiNmNTllMGIiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNjA0IiB5PSI0NCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNjOGM4YzgiPnVzZXNNYW5hZ2VkQWdlbnRMYXVuY2g8L3RleHQ+CiAgPHRleHQgeD0iNjA0IiB5PSI2MCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmNvcmUvYWdlbnRzLnRzOjI1MCDigJQgcmV1c2VzIGxpc3QgIzE8L3RleHQ+CiAgPHRleHQgeD0iNjA0IiB5PSI5MCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNlNmMwN2EiPj0gbGlzdCAjMSBPUiBhIHRhcmdldCBob3N0PC90ZXh0PgogIDx0ZXh0IHg9IjYwNCIgeT0iMTIyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+cm91dGluZyBhbmQgc3RyYXRlZ3kgd2VsZGVkIHRvIG9uZTwvdGV4dD4KICA8dGV4dCB4PSI2MDQiIHk9IjEzOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmxpc3Qg4oCUIGRyb2lkIGZhbGxzIHRocm91Z2ggYm90aCw8L3RleHQ+CiAgPHRleHQgeD0iNjA0IiB5PSIxNTQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5ncm9rL2tpbWkgdGhyb3VnaCB0aGUgbG9jYWwgb25lLjwvdGV4dD4KPC9zdmc+CjxmaWdjYXB0aW9uPlRocmVlIGxpc3RzLCB0aHJlZSBtZW1iZXJzaGlwcy4gZHJvaWQgaXMgb24gbm9uZTsgZ3Jvay9raW1pIGFyZSBvbiB0aGUgc3RyYXRlZ3kgbGlzdCBidXQgbm90IHRoZSBsb2NhbC1sYXVuY2ggbGlzdC4gU28gbG9jYWwgZ3Jvay9raW1pL2Ryb2lkIHJhbiBhcyByYXcgYmluYXJpZXMgd2l0aCBubyByb3RhdGlvbiBhbmQgbm8gbW9kZS48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKVGhlIGNvbmNyZXRlIHJlc3VsdCwgcGVyIGFnZW50IChiZWZvcmUpOgoKfCBBZ2VudCB8IE5ldyBYIChsb2NhbCkgdmlhIGBhZ2VudHMgcnVuYD8gfCBHb3QgYC0tc3RyYXRlZ3kgYmFsYW5jZWRgPyB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCBjbGF1ZGUsIGNvZGV4LCBnZW1pbmksIG9wZW5jb2RlLCBjdXJzb3IsIGFudGlncmF2aXR5IHwgeWVzIHwgeWVzIHwKfCBncm9rLCBraW1pIHwgKipubyoqIOKAlCByYXcgYGdyb2tgIC8gYGtpbWlgIGJpbmFyeSB8ICoqbm8qKiB8CnwgZHJvaWQgfCAqKm5vKiog4oCUIHJhdyBgZHJvaWRgIGJpbmFyeSB8ICoqbm8qKiAobm90IGV2ZW4gb24gdGhlIGxpc3QpIHwKCiMjIyBUaGUgZml4IOKAlCBjb2xsYXBzZSB0aHJlZSBsaXN0cyBpbnRvIG9uZSBydWxlCgpSZXBsYWNlIHRoZSBhbGxvd2xpc3RzIHdpdGggYSBzaW5nbGUsIHNvdXJjZS1vZi10cnV0aCBydWxlOiAqKmV2ZXJ5IGFnZW50IHJ1bm5lcgooZXZlcnl0aGluZyBleGNlcHQgYHNoZWxsYCkgbGF1bmNoZXMgdGhyb3VnaCBgYWdlbnRzIHJ1biA8YWdlbnQ+IC0taW50ZXJhY3RpdmUKLS1zdHJhdGVneSBiYWxhbmNlZCAtLW1vZGUgYXV0b2AuKiogSG9zdCBzZWxlY3Rpb24gaXMgdGhlIG9ubHkgYXhpcyB0aGF0IHZhcmllcy4KCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIj4KPHN2ZyB2aWV3Qm94PSIwIDAgODgwIDIxMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkJlZm9yZSB0aHJlZSBsaXN0cywgYWZ0ZXIgb25lIHJ1bGUiPgogIDxyZWN0IHg9IjIwIiB5PSIzMCIgd2lkdGg9IjM2MCIgaGVpZ2h0PSIxNTAiIHJ4PSI4IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiNmNTllMGIiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMzYiIHk9IjU2IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2M4YzhjOCI+QmVmb3JlPC90ZXh0PgogIDx0ZXh0IHg9IjM2IiB5PSI4NCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNlNmMwN2EiPlNUUkFURUdZX0xBVU5DSF9BR0VOVFMgKDggYWdlbnRzKTwvdGV4dD4KICA8dGV4dCB4PSIzNiIgeT0iMTA2IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2U2YzA3YSI+TEFVTkNIQUJMRSAoNiBhZ2VudHMpPC90ZXh0PgogIDx0ZXh0IHg9IjM2IiB5PSIxMjgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZTZjMDdhIj51c2VzTWFuYWdlZEFnZW50TGF1bmNoIChsaXN0ICMxIHwgaG9zdCk8L3RleHQ+CiAgPHRleHQgeD0iMzYiIHk9IjE2MCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNmODcxNzEiPjMgbGlzdHMgwrcgZGlzYWdyZWUgwrcgYmFyZSBjb21tYW5kczwvdGV4dD4KCiAgPHBhdGggZD0iTTM5MiAxMDUgTDQ3MCAxMDUiIHN0cm9rZT0iIzM4YmRmOCIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtZGFzaGFycmF5PSIzIDMiIG9wYWNpdHk9IjAuOCIvPgogIDxwb2x5Z29uIHBvaW50cz0iNDcwLDk5IDQ4NiwxMDUgNDcwLDExMSIgZmlsbD0iIzM4YmRmOCIvPgoKICA8cmVjdCB4PSI1MDAiIHk9IjMwIiB3aWR0aD0iMzYwIiBoZWlnaHQ9IjE1MCIgcng9IjgiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI1MTYiIHk9IjU2IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2M4YzhjOCI+QWZ0ZXI8L3RleHQ+CiAgPHRleHQgeD0iNTE2IiB5PSI4OCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjZmU2YTgiPmlzQWdlbnRSdW5uZXIoa2V5KSA9IGtleSAhPT0gJ3NoZWxsJzwvdGV4dD4KICA8dGV4dCB4PSI1MTYiIHk9IjExNiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjZmU2YTgiPuKGkiBhZ2VudHMgcnVuIFggLS1pbnRlcmFjdGl2ZTwvdGV4dD4KICA8dGV4dCB4PSI1MTYiIHk9IjEzOCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNhM2U2MzUiPi0tc3RyYXRlZ3kgYmFsYW5jZWQgLS1tb2RlIGF1dG88L3RleHQ+CiAgPHRleHQgeD0iNTE2IiB5PSIxNjYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIiBmaWxsPSIjYTNlNjM1Ij4xIHJ1bGUgwrcgbm8gZXhjZXB0aW9uczwvdGV4dD4KPC9zdmc+CjxmaWdjYXB0aW9uPlRoZSB0aHJlZSBhbGxvd2xpc3RzIGJlY29tZSBvbmUgcHJlZGljYXRlLiBTdHJhdGVneSBhbmQgbW9kZSBhcmUgY29uc3RhbnRzIG9mIHRoZSBsYXVuY2gsIG5vdCBhIHBlci1hZ2VudCBsb29rdXAuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCi0gKipgc3JjL3ZzY29kZS9leHRlbnNpb24udHNgKiog4oCUIGBsYXVuY2hBZ2VudGAgc2V0cyBgc3RyYXRlZ3kgPSAnYmFsYW5jZWQnYAogIHVuY29uZGl0aW9uYWxseSAoZHJvcCB0aGUgYFNUUkFURUdZX0xBVU5DSF9BR0VOVFNgIGdhdGUgYXQgfkw4MjcpLgogIGBvcGVuU2luZ2xlQWdlbnRgIHJvdXRlcyAqKmV2ZXJ5Kiogbm9uLXNoZWxsIGFnZW50IHRocm91Z2ggYGFnZW50cyBydW5gIGxvY2FsbHkKICAocmV0aXJlIHRoZSBgTEFVTkNIQUJMRWAgc2V0IGF0IH5MMjM0MyksIHNvIGxvY2FsIGdyb2sva2ltaS9kcm9pZCBnZXQgdGhlIHNhbWUKICBjb21tYW5kIGFzIGEgcmVtb3RlIG9uZS4KLSAqKmBzcmMvY29yZS9hZ2VudHMudHNgKiog4oCUIHJlcGxhY2UgYFNUUkFURUdZX0xBVU5DSF9BR0VOVFNgIGFuZAogIGB1c2VzTWFuYWdlZEFnZW50TGF1bmNoYCdzIGxpc3QgZGVwZW5kZW5jeSB3aXRoIGEgc2luZ2xlIGBpc0FnZW50UnVubmVyKGtleSlgCiAgcHJlZGljYXRlIChga2V5ICE9PSAnc2hlbGwnYCkuIEtlZXAgYGJ1aWxkQWdlbnRMYXVuY2hDb21tYW5kYCdzIGV4aXN0aW5nICJza2lwCiAgYC0tc3RyYXRlZ3lgIHdoZW4gYEB2ZXJzaW9uYCBwaW5uZWQiIGd1YXJkIOKAlCB0aGUgb25lIGxlZ2l0aW1hdGUgb21pc3Npb24uCi0gKipgc3JjL2NvcmUvZm9ya1Nlc3Npb24udHNgKiog4oCUIGBzdHJhdGVneUZvckZvcmtBZ2VudGAgcmV0dXJucyBgJ2JhbGFuY2VkJ2AgZm9yCiAgZXZlcnkgcnVubmVyIChkcm9wIGl0cyBhbGxvd2xpc3QpLCBzbyBhIGZvcmsgaXMgYmFsYW5jZWQgbGlrZSBldmVyeSBvdGhlciBsYXVuY2guCi0gKipgYXBwcy9mYWN0b3J5L0FHRU5UUy5tZGAqKiDigJQgcmVjb3JkIHRoaXMgY29udHJhY3QgYXMgdGhlIGNhbm9uaWNhbCBsYXVuY2gKICBzcGVjIHRoZSByZXZpZXdlciBlbmZvcmNlcy4KCiMjIFZhbGlkYXRpb24KCi0gVW5pdDogYSB0YWJsZSB0ZXN0IGFzc2VydGluZyAqKmV2ZXJ5KiogcnVubmVyIMOXIHtsb2NhbCwgYXV0bywgcGljay1ob3N0fSBlbWl0cwogIGAtLXN0cmF0ZWd5IGJhbGFuY2VkIC0tbW9kZSBhdXRvYDsgYSBuZWdhdGl2ZSB0ZXN0IHRoYXQgYHNoZWxsYCBuZXZlciBnZXRzCiAgYGFnZW50cyBydW5gOyBhIHBpbm5lZC1gQHZlcnNpb25gIHRlc3QgdGhhdCBzdGlsbCBvbWl0cyBgLS1zdHJhdGVneWAuCi0gVXBkYXRlIHRoZSBleGlzdGluZyBgYWdlbnRzLnRlc3QudHNgLCBgbGF1bmNoSG9zdGAsIGFuZCBgZm9ya1Nlc3Npb24udGVzdC50c2AKICBzdWl0ZXMgdG8gdGhlIG9uZS1ydWxlIG1vZGVsIChkZWxldGUgdGhlIGFsbG93bGlzdC1tZW1iZXJzaGlwIGFzc2VydGlvbnMpLgotIEVuZC10by1lbmQ6IGxhdW5jaCBOZXcgRHJvaWQgbG9jYWxseSBhbmQgY29uZmlybSB0aGUgdGFiIHJ1bnMKICBgYWdlbnRzIHJ1biBkcm9pZCAtLWludGVyYWN0aXZlIC0tc3RyYXRlZ3kgYmFsYW5jZWQgLS1tb2RlIGF1dG9gLgoKIyMgUmlza3MKCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQgYXJ0aWZhY3QtY2FsbG91dC13YXJuIj4KPHA+PHN0cm9uZz5CZWhhdmlvcmFsIGNoYW5nZSB0byBzZWUgYmVmb3JlIHNoaXBwaW5nLjwvc3Ryb25nPiBMb2NhbCA8c3Ryb25nPmdyb2sgLyBraW1pIC8gZHJvaWQ8L3N0cm9uZz4gbm93IGxhdW5jaCB0aHJvdWdoIDxjb2RlPmFnZW50cyBydW4gJmx0O2FnZW50Jmd0OzwvY29kZT4gaW5zdGVhZCBvZiB0aGUgcmF3IGJpbmFyeS4gVGhpcyBpcyB0aGUgcG9pbnQg4oCUIGl0IGdpdmVzIHRoZW0gYmFsYW5jZWQgcm90YXRpb24gYW5kIDxjb2RlPi0tbW9kZSBhdXRvPC9jb2RlPiDigJQgYnV0IGl0IGlzIGEgcmVhbCBjaGFuZ2UgaW4gaG93IHRob3NlIHRocmVlIHN0YXJ0IGxvY2FsbHkuIFZlcmlmaWVkIHNhZmUgYWdhaW5zdCB0aGUgQ0xJOiA8Y29kZT5hZ2VudHMgcnVuICZsdDthZ2VudCZndDsgLS1zdHJhdGVneSBiYWxhbmNlZDwvY29kZT4gaXMgYWNjZXB0ZWQgZm9yIGV2ZXJ5IHJ1bm5lcjsgd2hlbiB0aGVyZSBhcmUgbm8gYWNjb3VudHMgdG8gYmFsYW5jZSBhY3Jvc3MgKGRyb2lkKSBpdCBpcyBhIGdyYWNlZnVsIG5vLW9wIHRoYXQgZmFsbHMgYmFjayB0byB0aGUgZGVmYXVsdCwgbm90IGFuIGVycm9yICg8Y29kZT5yb3RhdGUudHM6NTg4PC9jb2RlPiwgPGNvZGU+ZXhlYy50czoyMDk0LTIxMTA8L2NvZGU+KS48L3A+CjwvZGl2PgoKT3RoZXJ3aXNlIGxvdyByaXNrOiB0aGUgc2l4IGFscmVhZHktYGFnZW50cyBydW5gIGFnZW50cyBhcmUgdW5jaGFuZ2VkLCBhbmQgdGhlIENMSQphbHJlYWR5IGRlZmF1bHRlZCB0byBiYWxhbmNlZCDigJQgdGhpcyBtYWtlcyB0aGUgZmxhZyBleHBsaWNpdCBhbmQgdW5pdmVyc2FsIHJhdGhlcgp0aGFuIGNoYW5naW5nIHdoYXQgYmFsYW5jZWQgZG9lcy4KCiMjIFRyYWNraW5nCgpSZWNvcmRlZCBhcyB0aGUgY2Fub25pY2FsIGxhdW5jaCBjb250cmFjdCBpbiBgYXBwcy9mYWN0b3J5L0FHRU5UUy5tZGAgc28gdGhlIHNwZWMKbGl2ZXMgd2l0aCB0aGUgY29kZSBhbmQgYHByaXgvY29kZS1yZXZpZXdlcmAgZW5mb3JjZXMgaXQgb24gZXZlcnkgUFIuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

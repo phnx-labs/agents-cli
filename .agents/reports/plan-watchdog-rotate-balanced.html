@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan · Rotate delegates to --strategy balanced (v2)</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111312; --panel2:#161a18; --ink:#e7ece8; --dim:#8b938c;
+    --line:#26302a; --accent:#a3e635; --amber:#f5c451; --red:#ff6b6b; --cyan:#5ad6c0;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f6; --panel:#ffffff; --panel2:#f2f4f0; --ink:#1a1c1a; --dim:#5c655c;
+    --line:#e2e6df; --accent:#4d7c0f; --amber:#b45309; --red:#dc2626; --cyan:#0e7490;
+  }
+  :root[data-theme="light"] .fig{background:#0e120f;border-color:#26302a}
+  :root[data-theme="light"] .fig figcaption{color:#8b938c}
+  :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:56px 28px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:40px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 14px}
+  h1{font-size:34px;line-height:1.15;margin:0 0 12px;font-weight:700;letter-spacing:-.01em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);font-size:17px;max-width:70ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);
+    border-radius:999px;padding:4px 11px;background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:500}
+  .prov{margin-top:10px}
+  .prov .chip{font-size:11px;opacity:.82}
+  .prov .chip b{color:var(--cyan)}
+  h2{font-size:23px;margin:52px 0 8px;letter-spacing:-.01em;scroll-margin-top:20px}
+  h2 .n{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:10px;opacity:.85}
+  h3{font-size:16.5px;margin:26px 0 8px;color:var(--ink)}
+  p{margin:10px 0}
+  .lead{color:var(--dim)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--panel2);border:1px solid var(--line);
+    border-radius:5px;padding:1.5px 6px;color:var(--cyan)}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px 22px 18px;margin:22px 0;overflow-x:auto}
+  .fig figcaption{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:14px;text-align:center}
+  .fig figcaption b{color:var(--ink)}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  td code{font-size:.85em}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600}
+  .tag.a{background:rgba(163,230,53,.12);color:var(--accent);border:1px solid rgba(163,230,53,.3)}
+  .tag.b{background:rgba(90,214,192,.1);color:var(--cyan);border:1px solid rgba(90,214,192,.28)}
+  .tag.c{background:rgba(245,196,81,.1);color:var(--amber);border:1px solid rgba(245,196,81,.28)}
+  ul{margin:10px 0;padding-left:22px}li{margin:6px 0}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 10px 10px 0;
+    padding:14px 18px;margin:18px 0}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);display:block;margin-bottom:5px}
+  .callout.warn .lbl{color:var(--amber)}
+  .toc{font-family:var(--mono);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:18px}
+  .toc a{color:var(--dim);border:0}.toc a:hover{color:var(--accent)}
+  pre{font-family:var(--mono);font-size:13px;background:#0c0f0d;border:1px solid var(--line);
+    border-radius:12px;padding:16px 18px;overflow-x:auto;line-height:1.55;color:#e7ece8}
+  pre .c{color:#8b938c}pre .k{color:#a3e635}pre .s{color:#5ad6c0}pre .r{color:#ff6b6b}
+  .foot{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);
+    font-family:var(--mono);font-size:12px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--dim);
+    justify-content:center;margin-top:6px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .themebtn{position:fixed;top:16px;right:16px;z-index:9;font-family:var(--mono);font-size:12px;
+    color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:6px 13px;cursor:pointer}
+  .themebtn:hover{color:var(--accent);border-color:var(--accent)}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="tt()" id="tb">◐ light</button>
+<script>
+  var r=document.documentElement;
+  function set(t){r.setAttribute('data-theme',t);document.getElementById('tb').textContent=(t==='light'?'◑ dark':'◐ light')}
+  set(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  function tt(){set(r.getAttribute('data-theme')==='light'?'dark':'light')}
+</script>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">agents-cli · factory watchdog · plan v2 · RUSH-2132</p>
+  <h1>Delete the extension's picker; rotate delegates to<br><span class="accent">agents run --strategy balanced</span></h1>
+  <p class="sub">v2, simplified per review: the CLI's balanced router already excludes accounts maxed on
+  ANY blocking window (weekly included), distrusts stale usage snapshots, and returns null when zero
+  accounts are healthy. The extension's pickBestVersion is a worse re-implementation of it, so it is
+  deleted from the rotate path, not improved. One CLI gap must close first: zero healthy accounts
+  currently falls back to the pinned default instead of failing loudly.</p>
+  <div class="meta">
+    <span class="chip"><b>2</b>&nbsp;packages</span>
+    <span class="chip"><b>~5</b>&nbsp;files edited</span>
+    <span class="chip"><b>1</b>&nbsp;new command</span>
+    <span class="chip">status: <b>awaiting go</b></span>
+  </div>
+  <div class="meta prov">
+    <span class="chip">harness: <b>kimi</b></span>
+    <span class="chip">agent: <b>kimi-code 0.19.2</b></span>
+    <span class="chip">host: <b>zion</b></span>
+    <span class="chip">session: <b>6bdb6da2</b></span>
+    <span class="chip"><b>2026-08-03</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#s1">01 · why the picker dies</a>
+    <a href="#s2">02 · the flow</a>
+    <a href="#s3">03 · steps</a>
+    <a href="#s4">04 · files</a>
+    <a href="#s5">05 · verification</a>
+  </nav>
+</header>
+
+<h2 id="s1"><span class="n">01</span>Why the extension's picker dies</h2>
+<p class="lead">Side by side, the two selection engines. The CLI's is strict where it matters and the
+extension's is blind exactly there:</p>
+<table>
+  <thead><tr><th>Concern</th><th>CLI <code>balanced</code> (rotate.ts)</th><th>Factory <code>pickBestVersion</code></th></tr></thead>
+  <tbody>
+    <tr><td>Weekly window</td><td>excluded when maxed — ANY blocking window counts (<code>hasUsageAvailable</code>, rotate.ts:145)</td><td><span style="color:var(--red)">ignored</span> — ranks on the 5-hour window only (resumeInBest.ts:28)</td></tr>
+    <tr><td>Stale usage data</td><td>distrusted past 5 min (<code>USAGE_DECISION_MAX_AGE_MS</code>, rotate.ts:130)</td><td><span style="color:var(--red)">no freshness check</span></td></tr>
+    <tr><td>Zero healthy accounts</td><td>returns null (rotate.ts:305)</td><td><span style="color:var(--red)">"better somewhere than nowhere"</span> — rotates into the exhausted account (resumeInBest.ts:205-208)</td></tr>
+    <tr><td>Who picks the account</td><td>weighted-random by remaining headroom (<code>pickBalancedCandidate</code>, rotate.ts:291)</td><td><span style="color:var(--red)">pins a binary, CLI never consulted</span></td></tr>
+  </tbody>
+</table>
+<div class="callout warn">
+  <span class="lbl">the one CLI gap</span>
+  Zero healthy accounts under balanced/available currently warns "found no usable version; falling
+  back to defaults" and launches the pinned default anyway (exec.ts:2265-2268), which sits on the
+  same weekly-limited account. With that fallback, even a pure balanced rotate still loops. Step 1
+  makes the CLI fail loudly instead; the rest of the plan stands on it.
+</div>
+
+<h2 id="s2"><span class="n">02</span>The flow, after</h2>
+<figure class="fig">
+<svg viewBox="0 0 900 330" role="img" aria-label="Fixed rotate flow: watchdog detects limit, relaunches via balanced, CLI picks account or fails loudly, one retry on a healthy fleet host.">
+  <defs>
+    <marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L7 4 L0 8 z" fill="#a3e635"/></marker>
+    <marker id="arc" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L7 4 L0 8 z" fill="#5ad6c0"/></marker>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L7 4 L0 8 z" fill="#ff6b6b"/></marker>
+  </defs>
+  <rect x="20" y="30" width="180" height="46" rx="8" fill="#161a18" stroke="#26302a"/>
+  <text x="110" y="50" fill="#e7ece8" font-size="11" text-anchor="middle" font-family="var(--mono)">watchdog tick</text>
+  <text x="110" y="66" fill="#8b938c" font-size="10" text-anchor="middle" font-family="var(--mono)">tail shows weekly limit</text>
+  <path d="M200 53 L235 53" stroke="#a3e635" fill="none" marker-end="url(#ar)"/>
+  <rect x="235" y="30" width="250" height="46" rx="8" fill="#12160f" stroke="#a3e635"/>
+  <text x="360" y="50" fill="#a3e635" font-size="11" text-anchor="middle" font-family="var(--mono)">agents run --strategy balanced</text>
+  <text x="360" y="66" fill="#8b938c" font-size="10" text-anchor="middle" font-family="var(--mono)">[--host] [--session-id newId]</text>
+  <path d="M485 53 L520 53" stroke="#a3e635" fill="none" marker-end="url(#ar)"/>
+  <polygon points="610,18 700,53 610,88 520,53" fill="#12160f" stroke="#a3e635"/>
+  <text x="610" y="50" fill="#a3e635" font-size="10.5" text-anchor="middle" font-family="var(--mono)">healthy account</text>
+  <text x="610" y="64" fill="#a3e635" font-size="10.5" text-anchor="middle" font-family="var(--mono)">exists? (CLI)</text>
+  <path d="M700 53 L735 53" stroke="#a3e635" fill="none" marker-end="url(#ar)"/>
+  <text x="717" y="45" fill="#a3e635" font-size="10" font-family="var(--mono)">yes</text>
+  <rect x="735" y="30" width="150" height="46" rx="8" fill="#12160f" stroke="#a3e635"/>
+  <text x="810" y="50" fill="#a3e635" font-size="10.5" text-anchor="middle" font-family="var(--mono)">CLI picks account</text>
+  <text x="810" y="66" fill="#8b938c" font-size="10" text-anchor="middle" font-family="var(--mono)">/continue replays</text>
+  <path d="M610 88 L610 130" stroke="#ff6b6b" fill="none" marker-end="url(#arr)"/>
+  <text x="622" y="114" fill="#ff6b6b" font-size="10" font-family="var(--mono)">no</text>
+  <rect x="500" y="130" width="220" height="46" rx="8" fill="#1a1212" stroke="#ff6b6b"/>
+  <text x="610" y="149" fill="#ff6b6b" font-size="10.5" text-anchor="middle" font-family="var(--mono)">CLI fails loudly · exit ≠ 0</text>
+  <text x="610" y="165" fill="#8b938c" font-size="10" text-anchor="middle" font-family="var(--mono)">"no healthy account · resets 7am"</text>
+  <path d="M500 153 L465 153" stroke="#5ad6c0" fill="none" marker-end="url(#arc)"/>
+  <rect x="235" y="130" width="230" height="46" rx="8" fill="#12181a" stroke="#5ad6c0"/>
+  <text x="350" y="149" fill="#5ad6c0" font-size="10.5" text-anchor="middle" font-family="var(--mono)">retry once on healthy fleet host</text>
+  <text x="350" y="165" fill="#8b938c" font-size="10" text-anchor="middle" font-family="var(--mono)">resolveCachedAutoHost</text>
+  <path d="M350 176 L350 215" stroke="#5ad6c0" fill="none" marker-end="url(#arc)"/>
+  <rect x="235" y="215" width="230" height="46" rx="8" fill="#12181a" stroke="#5ad6c0"/>
+  <text x="350" y="234" fill="#5ad6c0" font-size="10.5" text-anchor="middle" font-family="var(--mono)">still failing → one skip event</text>
+  <text x="350" y="250" fill="#8b938c" font-size="10" text-anchor="middle" font-family="var(--mono)">cooldown to reset · no churn</text>
+  <path d="M810 76 C810 240 610 240 610 240" stroke="#26302a" fill="none" stroke-dasharray="4 4"/>
+</svg>
+<div class="legend">
+  <span><span class="sw" style="background:#a3e635"></span>rotate path</span>
+  <span><span class="sw" style="background:#5ad6c0"></span>fallback / skip</span>
+  <span><span class="sw" style="background:#ff6b6b"></span>loud failure</span>
+</div>
+<figcaption><b>After.</b> The extension owns detection and terminal mechanics; the CLI owns account selection and the refusal.</figcaption>
+</figure>
+
+<h2 id="s3"><span class="n">03</span>Steps</h2>
+
+<h3>1 · <code>apps/cli</code> — fail loud on zero healthy accounts</h3>
+<ul>
+  <li>Exec run path (exec.ts:2257-2268) and routine runner (runner.ts:415-440): strategy
+  <code>balanced</code>/<code>available</code> + <code>rotation: null</code> → exit nonzero with the
+  agent, excluded accounts + reasons, earliest reset time, and the <code>--strategy pinned</code>
+  escape hatch. <code>pinned</code> untouched.</li>
+</ul>
+
+<h3>2 · <code>apps/factory</code> — rotate delegates</h3>
+<pre><span class="c">// rotate's entire launch command, after (extension.ts:3816-3826)</span>
+<span class="k">agents run</span> &lt;agent&gt; <span class="s">--interactive</span> <span class="k">--strategy balanced</span> \
+  [<span class="s">--host</span> <span class="s">'&lt;device&gt;'</span>] [<span class="s">--session-id</span> &lt;newId&gt;]</pre>
+<ul>
+  <li><code>rotateTerminalToBestVersion</code> drops <code>fetchAgentsViewJson</code>,
+  <code>pickBestVersion</code>, <code>isVersionStillUsable</code>, <code>buildLaunchCommand</code>,
+  <code>buildHostLaunchCommand</code>. <code>buildAgentRunLaunchCommand</code> gains an optional
+  strategy param; its other caller (extension.ts:3654) is unaffected.</li>
+  <li>Readiness, <code>buildResumeInput</code>, two-step TUI submit, close-old-on-success: unchanged.
+  Version/account labels come from the CLI's pick via the existing read-back (extension.ts:4617).</li>
+</ul>
+
+<h3>3 · Loop suppression</h3>
+<ul>
+  <li>The CLI's new zero-healthy error text joins the watchdog's tail detection (watchdog.ts:34):
+  treated as rate-limited with cooldown to the parsed reset → one <code>kind:'rotate'</code> skip
+  event per cooldown, no re-rotate.</li>
+  <li>The per-tick <code>agents view --json</code> probe leaves the rotate path: it only fed the
+  deleted picker, and it caused the repeated Keychain prompts.</li>
+</ul>
+
+<h3>4 · Auto host-pick as second attempt</h3>
+<ul>
+  <li>Local zero-healthy → retry once on <code>resolveCachedAutoHost(context, agentKey)</code> with
+  <code>--host</code>; cache refreshed in background. Remote terminals rotate on their own host.
+  Sessions are fleet-synced, so <code>/continue &lt;old-id&gt;</code> resolves cross-device.</li>
+</ul>
+
+<h3>5 · Palette toggle · 6 · tests · 7 · docs</h3>
+<ul>
+  <li><code>Agents: Toggle Watchdog Auto-Rotate</code> — the off switch that did not exist today.</li>
+  <li>Tests in both packages (zero-healthy fail-loud; command builder; skip-event; toggle).</li>
+  <li>CHANGELOG in both packages; <code>apps/factory/AGENTS.md</code> watchdog section; RUSH-2132 comment.</li>
+</ul>
+
+<h2 id="s4"><span class="n">04</span>Files</h2>
+<table>
+  <thead><tr><th></th><th>File</th><th>Change</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag b">edit</span></td><td><code>apps/cli/src/commands/exec.ts</code> · <code>apps/cli/src/lib/runner.ts</code></td>
+      <td>zero-healthy under balanced/available → loud exit with reset time + pinned escape hatch</td></tr>
+    <tr><td><span class="tag b">edit</span></td><td><code>apps/factory/src/vscode/extension.ts</code></td>
+      <td>rotate sheds the picker, launches balanced, auto-host second attempt, toggle registration</td></tr>
+    <tr><td><span class="tag b">edit</span></td><td><code>apps/factory/src/core/resumeInBest.ts</code></td>
+      <td><code>buildAgentRunLaunchCommand</code> strategy param; picker stays exported for other callers, rotate stops using it</td></tr>
+    <tr><td><span class="tag b">edit</span></td><td><code>apps/factory/src/lib/../vscode/watchdog.vscode.ts</code> · <code>package.json</code></td>
+      <td>zero-healthy tail detection + skip event; <code>agents.toggleWatchdogAutoRotate</code> contribution</td></tr>
+    <tr><td><span class="tag b">edit</span></td><td>tests in both packages</td>
+      <td>fail-loud, command builder, skip-event, toggle</td></tr>
+    <tr><td><span class="tag a">docs</span></td><td>CHANGELOG ×2 · <code>apps/factory/AGENTS.md</code></td>
+      <td>behavior-change entries; watchdog delegation documented</td></tr>
+    <tr><td><span class="tag c">keep</span></td><td>CLI daemon watchdog · readiness / <code>buildResumeInput</code> · <code>agents.watchdog.*</code> defaults</td>
+      <td>proven paths, reused verbatim; defaults stay on because the fix makes them safe</td></tr>
+  </tbody>
+</table>
+
+<h2 id="s5"><span class="n">05</span>Verification before merge</h2>
+<table>
+  <thead><tr><th>#</th><th>Check</th><th>Pass means</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><code>bun test</code> in <code>apps/factory</code> and <code>apps/cli</code></td><td>full suites green incl. new cases</td></tr>
+    <tr><td>2</td><td>Incident repro: all accounts weekly-limited, watchdog ticks</td><td>no new terminals; one skip event per cooldown; no Keychain prompt</td></tr>
+    <tr><td>3</td><td>Two claude accounts, one weekly-limited</td><td>rotate lands on the healthy account via balanced; old terminal closes</td></tr>
+    <tr><td>4</td><td>Local exhausted, fleet device healthy</td><td>second attempt rotates onto that host</td></tr>
+    <tr><td>5</td><td><code>agents run claude --strategy balanced</code> with zero healthy</td><td>nonzero exit, message names earliest reset + pinned escape hatch</td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <span class="lbl">the takeaway</span>
+  One selection engine, in the CLI, where it is already strict about weekly windows and stale data.
+  The extension owns detection and terminal mechanics; <code>--strategy balanced</code> owns "where";
+  and "nowhere" is a loud, logged skip, not a tab that dies in one second.
+</div>
+
+<div class="foot">
+  agents-cli · factory watchdog · plan v2 · rendered by plan-render &nbsp;·&nbsp;
+  kimi · kimi-code 0.19.2 · zion · session 6bdb6da2 · 2026-08-03 &nbsp;·&nbsp;
+  next: <span style="color:var(--accent)">go / reshape</span>
+</div>
+
+</div>
+</body>
+</html>

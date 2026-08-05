@@ -326,6 +326,20 @@ describe('events', () => {
       expect(results[0].module).toBe('secrets');
     });
 
+    it('filters by sessionId — the scoped read enrichCachedSessionMeta uses instead of a transcript re-scan', () => {
+      setupLogsDir();
+      emit('browser.navigate', { sessionId: 'sess-a', url: 'https://x' });
+      emit('browser.navigate', { sessionId: 'sess-b', url: 'https://y' });
+      emit('computer.action', { sessionId: 'sess-a', command: 'click' });
+
+      const forA = query({ sessionId: 'sess-a' });
+      expect(forA).toHaveLength(2);
+      expect(forA.every((r) => r.sessionId === 'sess-a')).toBe(true);
+
+      expect(query({ sessionId: 'sess-b' })).toHaveLength(1);
+      expect(query({ sessionId: 'sess-does-not-exist' })).toHaveLength(0);
+    });
+
     it('filters by environment-derived caller identity', () => {
       setupLogsDir();
       emit('info', { module: 'test' });
@@ -514,6 +528,18 @@ describe('event-kind table (the drift guard for out-of-process producers)', () =
     }
     expect(EVENT_TYPES).toContain('command.start');
     expect(EVENT_TYPES).toContain('status.posted');
+  });
+
+  it('registers browser.navigate, browser.screenshot, and computer.action as real, non-audit kinds (#11)', () => {
+    // browser.navigate/browser.screenshot were declared in the EventType union
+    // but never emitted anywhere — this pins them (and the new computer.action
+    // kind) as accepted, info-level events now that BrowserService and the
+    // computer-actions CLI actually call emit() with them.
+    for (const kind of ['browser.navigate', 'browser.screenshot', 'computer.action']) {
+      expect(EVENT_TYPES).toContain(kind);
+      expect(isEventType(kind)).toBe(true);
+      expect(levelFor(kind as never)).toBe('info');
+    }
   });
 
   it('rejects a near-miss kind rather than accepting a typo', () => {

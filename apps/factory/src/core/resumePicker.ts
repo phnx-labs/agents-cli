@@ -253,3 +253,128 @@ export function abandonedCandidates(candidates: ResumeCandidate[]): ResumeCandid
 export function defaultPickedIds(candidates: ResumeCandidate[]): string[] {
   return candidates.filter((c) => c.state === 'detached').map((c) => c.id);
 }
+
+/**
+ * Which ids should be ticked after a list swap, and which ones the user has
+ * turned off. Assigning a QuickPick's `items` clears its checks, so the picker
+ * recomputes the selection on every render; this is that computation, kept pure
+ * so it can be tested without a VS Code host.
+ *
+ * `unticked` is mutated — it is the picker's memory of what the user turned off,
+ * and it survives across swaps.
+ *
+ * Only an id that was a DEFAULT in the previous render can enter `unticked`.
+ * Marking every previously-rendered id instead conflates "the user turned this
+ * off" with "this was never pre-ticked to begin with", and then silently
+ * refuses to pre-tick it when it later becomes detached — which is exactly the
+ * transition this picker exists to catch, since a terminal can die while the
+ * background revalidation is in flight.
+ */
+export function nextPreselection(args: {
+  previous: readonly ResumeCandidate[];
+  checked: ReadonlySet<string>;
+  next: readonly ResumeCandidate[];
+  unticked: Set<string>;
+}): Set<string> {
+  const { previous, checked, next, unticked } = args;
+  for (const id of defaultPickedIds(previous as ResumeCandidate[])) {
+    if (checked.has(id)) unticked.delete(id);
+    else unticked.add(id);
+  }
+  const defaults = defaultPickedIds(next as ResumeCandidate[]);
+  return new Set([...defaults.filter((id) => !unticked.has(id)), ...checked]);
+}
+
+/** A phrase must lead this many topics before it counts as boilerplate. */
+const SHARED_PREFIX_MIN_OCCURRENCES = 3;
+/** Longest phrase (in words) considered — beyond this a "prefix" is the topic. */
+const SHARED_PREFIX_MAX_WORDS = 6;
+
+/**
+ * Leading phrases that several topics share carry no signal: they are the
+ * harness's own boilerplate ("Resume previous work: …", "Continue Previous
+ * Session …", "New Session"), not something a human wrote to tell two sessions
+ * apart. A picker showing 122 rows of it is unreadable, so find the phrases
+ * that recur across the visible set and let the label drop them.
+ *
+ * Data-driven on purpose — a hardcoded list of known prefixes would go stale
+ * the moment a harness reworded its own boilerplate.
+ *
+ * Returned longest-first so {@link stripSharedPrefix} strips the most specific
+ * match rather than a shorter phrase nested inside it.
+ */
+export function sharedTopicPrefixes(
+  topics: readonly string[],
+  minOccurrences = SHARED_PREFIX_MIN_OCCURRENCES,
+): string[] {
+  const counts = new Map<string, number>();
+  for (const topic of topics) {
+    const words = topic.trim().split(/\s+/).filter(Boolean);
+    // Stop one word short of the whole topic: a phrase covering every word is
+    // the topic itself, and stripping it would blank a row whose text happens
+    // to repeat rather than one carrying boilerplate.
+    const limit = Math.min(SHARED_PREFIX_MAX_WORDS, words.length - 1);
+    for (let n = 2; n <= limit; n++) {
+      const phrase = words.slice(0, n).join(' ');
+      counts.set(phrase, (counts.get(phrase) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .filter(([, n]) => n >= minOccurrences)
+    .map(([phrase]) => phrase)
+    .sort((a, b) => b.length - a.length);
+}
+
+/**
+ * Remove the longest shared prefix from `topic`, keeping whatever follows.
+ *
+ * Two things this deliberately does NOT do:
+ *
+ * It never strips a prefix that covers the whole topic. A longer topic can mint
+ * a phrase equal to a shorter topic's entire text — three sessions named
+ * "Fix login bug …" make "Fix login" a shared prefix, and a fourth session
+ * genuinely called "Fix login" would otherwise be blanked. Losing a real,
+ * differentiating topic is worse than showing a boilerplate one, so a topic
+ * that is entirely a shared phrase keeps its text.
+ *
+ * It only trims whitespace, never punctuation. Prefixes are mined from the real
+ * strings, so a boilerplate phrase already carries its own trailing separator
+ * ("Resume previous work:"); eating a further run of punctuation would corrupt
+ * content that legitimately starts with one ("-1 open issue", "--verbose").
+ */
+export function stripSharedPrefix(topic: string, prefixes: readonly string[]): string {
+  const trimmed = topic.trim();
+  for (const prefix of prefixes) {
+    if (!trimmed.startsWith(prefix)) continue;
+    const rest = trimmed.slice(prefix.length);
+    // Prefixes are mined per WORD, so they must match per word too. A bare
+    // startsWith lands mid-word on a singular/plural pair — "Fix bug" against
+    // "Fix bugs reported by QA" renders the row as "s reported by QA". This is
+    // not that topic's boilerplate; keep looking.
+    if (rest !== '' && !/^\s/.test(rest)) continue;
+    // The first word-boundary match wins, because `prefixes` is longest-first
+    // (the caller's contract). Falling through to a shorter phrase when the
+    // longest one covers the whole topic returns a fragment of the boilerplate
+    // rather than the topic — "Resume previous work:" would strip against
+    // "Resume previous" and render as "work:", naming less than the text does.
+    if (rest === '') return trimmed;
+    return rest.replace(/^\s+/, '');
+  }
+  return trimmed;
+}
+
+/**
+ * The text a row shows for a session, after shared boilerplate is stripped.
+ *
+ * Falls through to the fields that actually identify a session when the topic
+ * is absent or was pure boilerplate — the project, then the working directory's
+ * last segment. Returns '' when nothing distinctive survives, so the caller can
+ * render an explicit placeholder instead of a misleading fragment.
+ */
+export function distinctiveTopic(c: ResumeCandidate, prefixes: readonly string[]): string {
+  const stripped = c.topic ? stripSharedPrefix(c.topic, prefixes) : '';
+  if (stripped) return stripped;
+  if (c.project) return c.project;
+  const leaf = c.cwd ? c.cwd.split('/').filter(Boolean).pop() : undefined;
+  return leaf ?? '';
+}

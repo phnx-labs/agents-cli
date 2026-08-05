@@ -157,6 +157,7 @@ import {
   loadDoctor,
   loadApply,
   loadStatus,
+  loadSnapshot,
   loadProfiles,
   loadHarness,
   loadSecrets,
@@ -197,7 +198,6 @@ import {
   loadShare,
   loadSend,
   loadFeed,
-  loadActivity,
   loadMailboxes,
   type ModuleLoader,
 } from './lib/startup/command-registry.js';
@@ -207,6 +207,7 @@ import type { AgentId } from './lib/types.js';
 import { IS_WINDOWS } from './lib/platform/index.js';
 import { getCliLaunch } from './lib/cli-entry.js';
 import { emit, emitFriction, redactArgs } from './lib/events.js';
+import { stampProvenance } from './lib/event-provenance.js';
 import { die } from './lib/format.js';
 
 // Transparent shim delegate: the generated Windows `.cmd` shims invoke
@@ -325,12 +326,19 @@ program.hook('postAction', (_thisCommand, actionCommand) => {
     }
     // Disposable perf warehouse — fail-soft spool append (no SQLite on this path).
     if (durationMs !== undefined && parts[0] !== 'perf') {
+      // sessionId/agent are resolvable here the same way emit() resolves them
+      // for command.start/command.end above (the shared provenance floor,
+      // event-provenance.ts) — without this, every command.end perf sample
+      // was anonymous, unlike the audit log record right next to it.
+      const { sessionId, agent } = stampProvenance();
       void import('./lib/perf/spool.js').then(({ recordSample }) => {
         recordSample({
           kind: 'command.end',
           label: command,
           durationMs,
           cwd: process.cwd(),
+          sessionId,
+          agent,
         });
       }).catch(() => { /* fail soft */ });
     }
@@ -417,6 +425,15 @@ Run and dispatch:
   browser                         Automate a browser — navigate, click, screenshot, console, network
   pty                             Drive interactive terminal programs (REPLs, TUIs) via a persistent PTY session
 
+Observe (read the fleet — no store merge; aliases point at the real readers):
+  feed / inbox                    Needs-you inbox (open blocks waiting on you)
+  timeline                        Agent progress stream (= feed --filter updates)
+  roster                          Live agents (= sessions --active)
+  events                          Unified ops + activity event trail
+  audit                           Tamper-evident run-dispatch log (not events)
+  snapshot                        One-process inventory + active sessions poll
+  status                          Sync/drift only (not the live fleet snapshot)
+
 Credentials and profiles:
   profile                         Activate resource profiles across skills, MCP, permissions, and secrets
   profiles                        Bundles of (host CLI, endpoint, model, auth)
@@ -428,7 +445,8 @@ Diagnostics:
   perf                            Latency rollups (hooks, commands, runs) from the disposable perf warehouse
 
 Config sync:
-  pull                            Clone or pull the system repo at ~/.agents/.system/
+  repo pull [alias]               Git pull a repo (system | user | <extra>)
+  sync [agent]                    Re-materialize installed version homes; --local to skip fetching
   repo init --path <dir>          Scaffold your own editable repo from a template
   repo add <path|gh:user/repo>    Merge an extra repo after the system repo
   lock [--frozen]                 Write/verify agents.lock (SHA-256 of resolved resources); --frozen fails on drift
@@ -1084,6 +1102,7 @@ async function registerAllEagerCommands(): Promise<void> {
   registerCheckTombstoneCommand(program);
   await reg(loadApply);
   await reg(loadStatus);
+  await reg(loadSnapshot);
   registerExecAliasCommand(program);
   await reg(loadProfiles);
   await reg(loadHarness);
@@ -1118,7 +1137,6 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadFunnel);
   registerHqTombstoneCommand(program);
   await reg(loadFeed);
-  await reg(loadActivity);
   await reg(loadMailboxes);
   await reg(loadSsh);
   registerJobsCronAliasCommand(program, 'jobs');

@@ -319,6 +319,52 @@ describe('buildPreview — usage metadata (RUSH-1994)', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('#11: a computed usedBrowser/usedComputer=true wins even when the transcript has no matching tool_use at all', () => {
+    // The persisted field comes from a real browser.navigate/computer.action
+    // event at scan time — it must not depend on classifySessionTool's
+    // transcript-regex heuristic ever having matched anything.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      fs.writeFileSync(filePath, [
+        JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:00.000Z', cwd: dir, sessionId: 'persisted-true-session', message: { role: 'user', content: 'Do the thing' } }),
+        JSON.stringify({ type: 'assistant', timestamp: '2026-08-01T14:00:10.000Z', message: { role: 'assistant', model: 'claude-sonnet-4-20250514', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'tool_use', id: 'e1', name: 'Edit', input: { file_path: path.join(dir, 'a.ts') } }] } }),
+      ].join('\n') + '\n');
+
+      const preview = stripVTControlCharacters(buildPreview(mk({
+        id: 'persisted-true-session', shortId: 'persist1', filePath, cwd: dir,
+        usedBrowser: true, usedComputer: true,
+      })));
+      expect(preview).toContain('browser');
+      expect(preview).toContain('computer');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('#11: a computed usedBrowser/usedComputer=false suppresses the tag even when the transcript regex would have matched', () => {
+    // Reading the persisted field FIRST means a definite computed negative is
+    // trusted over the fuzzy regex — only session.usedBrowser === undefined
+    // (a legacy, never-scanned row) falls back to classifySessionTool.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      fs.writeFileSync(filePath, [
+        JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:00.000Z', cwd: dir, sessionId: 'persisted-false-session', message: { role: 'user', content: 'Do the thing' } }),
+        JSON.stringify({ type: 'assistant', timestamp: '2026-08-01T14:00:10.000Z', message: { role: 'assistant', model: 'claude-sonnet-4-20250514', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'agents browser list' } }, { type: 'tool_use', id: 'c1', name: 'Bash', input: { command: 'agents computer screenshot' } }] } }),
+      ].join('\n') + '\n');
+
+      const preview = stripVTControlCharacters(buildPreview(mk({
+        id: 'persisted-false-session', shortId: 'persist0', filePath, cwd: dir,
+        usedBrowser: false, usedComputer: false,
+      })));
+      expect(preview).not.toContain('browser');
+      expect(preview).not.toContain('computer');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('remote preview body — richer, and sanitized', () => {

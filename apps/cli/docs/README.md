@@ -25,17 +25,20 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [Self-healing installs](self-healing.md) | Detect, surface, and repair a broken agent binary (gutted install / `ENOENT`) instead of dying cryptically. |
 | [Resource sync](02-resource-sync.md) | How rules, commands, skills, hooks, etc. land in each version home. |
 | [**Specifications**](specifications.md) | **The normative contract** (MUST/SHOULD + Given/When/Then, cited to `file:line`) for the major subsystems — [Sessions](specifications.md#sessions), [Secrets](specifications.md#secrets), [Agent execution](specifications.md#agent-execution). Read the spec for the guarantee; the per-feature docs below for the how-to. |
-| [Sessions](05-sessions.md) | Unified transcript discovery across all 12 `SESSION_AGENTS` harnesses (Claude, Codex, Gemini, Antigravity, OpenCode, OpenClaw, Rush, Hermes, Grok, Kimi, Droid, Cursor); resume, export/import, and migrate a live session across machines. See its [Benchmarks](05-sessions.md#benchmarks) for the local-discover and distributed `--active`/`--host` bench harnesses. |
+| [Sessions](05-sessions.md) | Unified transcript and tool-call search across all 12 `SESSION_AGENTS` harnesses; distinct-call queries, fleet fan-out, resume, export/import, live-session migration, and local/distributed benchmarks. |
 | [Observability](06-observability.md) | The three `--json` sources (sessions / cloud / teams) as a fleet view, plus `agents mailboxes` fleet comms. |
 | [SSH transport](09-ssh-transport.md) | The one multiplexed engine every `--host` command rides — default connection reuse, keepalive, one-round-trip follow. |
 | [Optimizations](99-optimizations.md) | Sync manifest, SSH transport, startup profiling, hot-path notes. |
 | [Landscape](04-landscape.md) | Where agents-cli sits next to similar tools. |
+| [Product acceptance](product-acceptance.md) | User stories + Product cards: stop product regressions when agents write the code. |
+| [vs Gas Town](vs-gastown.md) | How agents-cli differs from Gas Town (multi-agent factory): parallels, glossary, what users like/dislike. |
 
 ## Credentials and model routing
 
 | Doc | What it covers |
 |---|---|
 | [Profiles](profiles.md) | Named (host CLI, endpoint, model, keychain auth) bundles — run Kimi / MiniMax / GLM / DeepSeek / Qwen through Claude Code with no proxy. |
+| [Model tiers](model-tiers.md) | `--model cheap\|default\|best\|ultra` on `run` / `teams` — per-harness cost tiers, the provider ranking mechanism, and the `agents models` tier map. |
 | [Secrets](secrets.md) | Keychain-backed env-var bundles. Inject into runs via `agents run --secrets <name>`. 1Password import/export, encrypted push/pull. |
 | [Secrets-agent process model](08-secrets-agent-process-model.md) | Design decision: fold the secrets broker into a hardened, always-on daemon — make the host reliable enough to carry the critical service rather than routing around it. |
 | [Secrets trust boundaries](../../../docs/design/secrets-trust-boundaries.md) | Design record: the plaintext data-flow — exactly which commands inject into a child process vs materialize a value into the agent's context/transcript. |
