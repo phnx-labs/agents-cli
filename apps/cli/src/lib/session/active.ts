@@ -36,7 +36,8 @@ import { readSessionTailWithRaw } from './tail.js';
 import { parseSession } from './parse.js';
 import { computeTokPerSec } from './throughput.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
-import { isSessionTrackedAgent, type SessionAgentId, type SessionAttachment, type SessionEvent } from './types.js';
+import { isSessionTrackedAgent, SESSION_AGENTS, type SessionAgentId, type SessionAttachment, type SessionEvent } from './types.js';
+import { AGENTS } from '../agents.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { loadDevices, type DeviceRegistry } from '../devices/registry.js';
 import { presenceFromStore, type Presence } from './detached.js';
@@ -173,6 +174,13 @@ export interface ActiveSession {
   attachments?: SessionAttachment[];
   sessionFile?: string;
   startedAtMs?: number;
+  /**
+   * Agent version (e.g. `2.1.207`) for the row's `agent version` cell. Not a
+   * live-scan signal — a running process does not report its own semver — so it
+   * is backfilled at render time from the indexed {@link SessionMeta} by session
+   * id (RUSH-2205), never asserted by a source.
+   */
+  version?: string;
   /**
    * Last-activity epoch — the transcript's last write (mtime). Distinct from
    * {@link startedAtMs} (session START): a session begun 3h ago but last touched
@@ -405,15 +413,46 @@ export const ABANDONED_STALE_MS = 2 * 24 * 60 * 60_000;
  */
 const TMUX_FIELD_SEP = ':';
 
-/** Executables we recognize as agent CLIs when scanning the process table. */
-const AGENT_CLI_NAMES: Record<string, string> = {
-  claude: 'claude',
-  codex: 'codex',
-  gemini: 'gemini',
-  'cursor-agent': 'cursor',
-  opencode: 'opencode',
-  droid: 'droid',
+/**
+ * Process comm names that are NOT derivable from the AGENTS registry's
+ * `cliCommand`. `rush` is a {@link SESSION_AGENTS} member with no AGENTS registry
+ * row (it is the Rush app, not a managed harness), so its executable name is
+ * mapped explicitly here. Everything else flows from the registry below.
+ */
+const EXTRA_SESSION_AGENT_COMMS: Partial<Record<SessionAgentId, string[]>> = {
+  rush: ['rush'],
 };
+
+/**
+ * Every process executable ("comm") name that identifies a given session-agent
+ * kind in the headless `ps`-scan. Driven off the AGENTS registry's `cliCommand`
+ * (the real executable name — e.g. `agy` for antigravity, `cursor-agent` for
+ * cursor) plus {@link EXTRA_SESSION_AGENT_COMMS} for members with no registry
+ * row. Exported so the completeness test can assert every {@link SESSION_AGENTS}
+ * member resolves — the fix for the harness-parity gap where bare-headless
+ * grok/kimi/antigravity/openclaw/hermes/rush were silently dropped.
+ */
+export function sessionAgentComms(id: SessionAgentId): string[] {
+  const comms = new Set<string>();
+  const cli = (AGENTS as Record<string, { cliCommand?: string }>)[id]?.cliCommand;
+  if (cli) comms.add(cli);
+  for (const extra of EXTRA_SESSION_AGENT_COMMS[id] ?? []) comms.add(extra);
+  return [...comms];
+}
+
+/**
+ * Executables we recognize as agent CLIs when scanning the process table. Built
+ * once from {@link sessionAgentComms} across {@link SESSION_AGENTS} — a single
+ * derived source, not a second hand-maintained allowlist that drifts from the
+ * discovery surface (the harness-parity code-review rule).
+ */
+const AGENT_CLI_NAMES: Record<string, SessionAgentId> = (() => {
+  const map: Record<string, SessionAgentId> = {};
+  for (const id of SESSION_AGENTS) {
+    for (const comm of sessionAgentComms(id)) map[comm] = id;
+  }
+  return map;
+})();
 
 /**
  * Resolve an agent kind from a process's reported executable. `comm` may be an

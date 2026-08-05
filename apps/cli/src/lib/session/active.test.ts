@@ -2,7 +2,8 @@ import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission } from './active.js';
+import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission } from './active.js';
+import { SESSION_AGENTS } from './types.js';
 import type { HookSessionIndex } from './hook-sessions.js';
 import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
 
@@ -179,6 +180,32 @@ describe('agentKindFromComm', () => {
 
   it('does NOT match the Claude desktop app (named Claude, not the CLI claude)', () => {
     expect(agentKindFromComm('/Applications/Claude.app/Contents/MacOS/Claude')).toBeUndefined();
+  });
+
+  // Harness-parity regression guard (RUSH-2205): every SESSION_AGENTS member must
+  // resolve from at least one process comm name, so a bare-headless run of any
+  // discoverable harness (grok/kimi/antigravity/openclaw/hermes/rush) is never
+  // silently dropped by the ps-scan. Asserted off the registry-derived source so
+  // adding a SESSION_AGENT without a comm fails here instead of at runtime.
+  it('resolves every SESSION_AGENTS member to its id via at least one comm', () => {
+    for (const id of SESSION_AGENTS) {
+      const comms = sessionAgentComms(id);
+      expect(comms.length, `${id} has no process comm name`).toBeGreaterThan(0);
+      for (const comm of comms) {
+        expect(agentKindFromComm(comm), `${id} comm '${comm}' unresolved`).toBe(id);
+      }
+    }
+  });
+
+  it('recognizes the previously-dropped headless harnesses', () => {
+    // These six were the AGENT_CLI_NAMES gap before RUSH-2205 — `if (!kind) continue`
+    // silently dropped their headless processes from --orphan/--active.
+    expect(agentKindFromComm('grok')).toBe('grok');
+    expect(agentKindFromComm('kimi')).toBe('kimi');
+    expect(agentKindFromComm('agy')).toBe('antigravity');
+    expect(agentKindFromComm('openclaw')).toBe('openclaw');
+    expect(agentKindFromComm('hermes')).toBe('hermes');
+    expect(agentKindFromComm('rush')).toBe('rush');
   });
 });
 
