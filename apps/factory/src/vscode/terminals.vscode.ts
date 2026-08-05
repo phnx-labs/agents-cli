@@ -570,11 +570,15 @@ export function setHost(terminal: vscode.Terminal, host: string): void {
   }
 }
 
-export function setVersion(terminal: vscode.Terminal, version: string): void {
+export function setVersion(terminal: vscode.Terminal, version: string | null | undefined): void {
   const entry = getByTerminal(terminal);
   if (entry) {
-    entry.version = version;
-    entry.statusVersion = version;
+    // A null/empty version CLEARS the cached value rather than being ignored: a
+    // harness the CLI records no version for (Kimi, Grok, …) must not keep a
+    // version left over from a prior binding in the same terminal.
+    const normalized = version?.trim() || undefined;
+    entry.version = normalized;
+    entry.statusVersion = normalized;
     schedulePersist();
   } else {
     console.error(`[TERMINALS] FAILED to set version - terminal "${terminal.name}" not found in registry.`);
