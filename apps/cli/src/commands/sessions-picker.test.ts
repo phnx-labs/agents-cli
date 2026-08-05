@@ -13,6 +13,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { buildPreview, extractTiming, formatTodoCompact, githubRepoUrlFromCwd, relativizeDir } from './sessions-picker.js';
+import { limitPreviewHeight, pickerPageSize, PREVIEW_MIN_ROWS } from '../lib/picker.js';
 import { _resetLinearWorkspaceCache } from '../lib/session/linear.js';
 import type { SessionEvent, SessionMeta, TodoProgress } from '../lib/session/types.js';
 
@@ -477,5 +478,42 @@ describe('buildPreview — timing for a session with no local transcript', () =>
     expect(preview).toContain('created 3d ago');
     expect(preview).toContain('last active 2h ago');
     expect(preview).toContain('lasted 2d 22h');
+  });
+});
+
+/**
+ * RUSH-2198: the detailed preview collapsed to empty in the picker. This ties the
+ * real buildPreview output (parsed from a transcript on disk) to the picker's row
+ * budget at the default 24-row height with PICKER_RECENT_COUNT (15) list rows —
+ * the exact shape that used to leave the preview slot empty. No mocking: a real
+ * jsonl is written and parsed.
+ */
+describe('buildPreview fits the picker preview slot at default height (RUSH-2198)', () => {
+  it('is non-empty in the picker slot with a 15-row list on a 24-row terminal', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-budget-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      fs.writeFileSync(filePath, [
+        JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:00.000Z', cwd: dir, sessionId: 'budget-session', version: '2.1.112', message: { role: 'user', content: 'Fix the picker preview pane so it renders' } }),
+        JSON.stringify({ type: 'assistant', timestamp: '2026-08-01T14:00:10.000Z', message: { role: 'assistant', model: 'claude-sonnet-4-20250514', usage: { input_tokens: 1, output_tokens: 1 }, content: [{ type: 'tool_use', id: 'e1', name: 'Edit', input: { file_path: path.join(dir, 'picker.ts') } }] } }),
+      ].join('\n') + '\n');
+
+      const preview = buildPreview(mk({ id: 'budget-session', shortId: 'budget01', filePath, cwd: dir }));
+      // The transcript really parsed into a preview with the user's prompt.
+      expect(stripVTControlCharacters(preview)).toContain('Fix the picker preview pane');
+
+      // The picker caps the list so the preview keeps its floor; feed that budget
+      // through limitPreviewHeight exactly as itemPicker does.
+      const width = 80;
+      const page = pickerPageSize({ requestedPageSize: 15, terminalRows: 24, chromeRows: 3, previewOpen: true });
+      const availablePreviewRows = 24 - (1 /*header*/ + 1 /*subtitle*/ + page + 1 /*separator*/ + 1 /*help*/);
+      expect(availablePreviewRows).toBeGreaterThanOrEqual(PREVIEW_MIN_ROWS);
+
+      const slot = limitPreviewHeight(preview, availablePreviewRows, width);
+      expect(slot).not.toBe('');
+      expect(stripVTControlCharacters(slot)).toContain('Fix the picker preview pane');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

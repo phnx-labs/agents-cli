@@ -3,7 +3,13 @@ import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawn } from '@homebridge/node-pty-prebuilt-multiarch';
 import { describe, expect, it } from 'vitest';
-import { hotkeyToken, limitPreviewHeight } from './picker.js';
+import {
+  hotkeyToken,
+  limitPreviewHeight,
+  pickerPageSize,
+  PREVIEW_MIN_ROWS,
+  PICKER_MIN_LIST_ROWS,
+} from './picker.js';
 
 function renderedRows(text: string, width: number): number {
   return text.split('\n').reduce((rows, line) => {
@@ -34,6 +40,126 @@ describe('limitPreviewHeight', () => {
 
     expect(renderedRows(clipped, 20)).toBeLessThanOrEqual(3);
     expect(stripVTControlCharacters(clipped)).toContain('truncated');
+  });
+});
+
+/**
+ * The row-budget math behind RUSH-2198: PICKER_RECENT_COUNT = 15 list rows on a
+ * default 24-row terminal left `availablePreviewRows <= 0`, so `limitPreviewHeight`
+ * returned '' and the preview collapsed to nothing. pickerPageSize caps the list so
+ * the preview always keeps its PREVIEW_MIN_ROWS floor.
+ */
+describe('pickerPageSize', () => {
+  // Mirror of the itemPicker fixedRows math: header + subtitle + page + separator + help.
+  const availablePreview = (page: number, termRows: number, linesAbove = 0): number =>
+    termRows - linesAbove - (1 /*header*/ + 1 /*subtitle*/ + page + 1 /*separator*/ + 1 /*help*/);
+
+  it('caps a 15-row list so the preview keeps its floor at the default 24-row height', () => {
+    const page = pickerPageSize({
+      requestedPageSize: 15,
+      terminalRows: 24,
+      chromeRows: 3, // header + subtitle + help
+      previewOpen: true,
+    });
+    expect(page).toBeLessThan(15);
+    expect(page).toBeGreaterThanOrEqual(PICKER_MIN_LIST_ROWS);
+    // The whole point: with the capped page, the preview slot is >= its floor.
+    expect(availablePreview(page, 24)).toBeGreaterThanOrEqual(PREVIEW_MIN_ROWS);
+  });
+
+  it('reproduces the collapse without the cap and fixes it with it', () => {
+    // Uncapped on a common 20-row pane, the raw 15-row page leaves the preview a
+    // 1-row budget — limitPreviewHeight then returns only the truncation marker (or
+    // '' outright at <= 0), which is the empty pane users reported.
+    expect(availablePreview(15, 20)).toBeLessThanOrEqual(1);
+    // And it goes fully non-positive (preview === '') once the terminal is a hair shorter.
+    expect(availablePreview(15, 19)).toBeLessThanOrEqual(0);
+    // Capped: positive, at least the floor, at the same 20-row height.
+    const page = pickerPageSize({ requestedPageSize: 15, terminalRows: 20, chromeRows: 3, previewOpen: true });
+    expect(availablePreview(page, 20)).toBeGreaterThanOrEqual(PREVIEW_MIN_ROWS);
+  });
+
+  it('subtracts lines already printed above the prompt from the budget', () => {
+    const withFooter = pickerPageSize({
+      requestedPageSize: 15,
+      terminalRows: 24,
+      chromeRows: 3,
+      previewOpen: true,
+      linesAbovePrompt: 3,
+    });
+    const withoutFooter = pickerPageSize({
+      requestedPageSize: 15,
+      terminalRows: 24,
+      chromeRows: 3,
+      previewOpen: true,
+    });
+    expect(withFooter).toBeLessThan(withoutFooter);
+    // Even with the footer eating rows, the preview keeps its floor.
+    expect(availablePreview(withFooter, 24, 3)).toBeGreaterThanOrEqual(PREVIEW_MIN_ROWS);
+  });
+
+  it('never shrinks the list below its floor on a tiny terminal', () => {
+    const page = pickerPageSize({ requestedPageSize: 15, terminalRows: 10, chromeRows: 3, previewOpen: true });
+    expect(page).toBe(PICKER_MIN_LIST_ROWS);
+  });
+
+  it('honours the full requested page when the preview is closed and there is room', () => {
+    const page = pickerPageSize({ requestedPageSize: 15, terminalRows: 50, chromeRows: 3, previewOpen: false });
+    expect(page).toBe(15);
+  });
+
+  it('grows the list back to the request once the terminal is tall enough', () => {
+    const page = pickerPageSize({ requestedPageSize: 15, terminalRows: 60, chromeRows: 3, previewOpen: true });
+    expect(page).toBe(15);
+  });
+});
+
+describe('itemPicker preview at default height (RUSH-2198 regression)', () => {
+  it('renders the detailed preview with a full 15-row list on a default-height terminal', async () => {
+    const pickerUrl = pathToFileURL(path.resolve('src/lib/picker.ts')).href;
+    // 20 rows, pageSize 15 (PICKER_RECENT_COUNT), preview open by default, plus
+    // lines printed above the prompt — the exact shape that used to collapse.
+    const program = `
+      import { itemPicker } from ${JSON.stringify(pickerUrl)};
+      const items = Array.from({ length: 20 }, (_, i) => ({ id: 's' + i }));
+      await itemPicker({
+        message: 'Search sessions:',
+        subtitle: 'Tip: type to filter',
+        items,
+        filter: () => items,
+        labelFor: (it) => 'session row ' + it.id,
+        buildPreview: () => 'PREVIEW_VISIBLE\\nprompt: do the thing\\nfiles: a.ts\\nlast: done',
+        pageSize: 15,
+        linesAbovePrompt: 3,
+      });
+    `;
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', program], {
+      cols: 120,
+      rows: 24,
+      cwd: process.cwd(),
+      env: { ...process.env, TERM: 'xterm-256color' },
+    });
+
+    const output = await new Promise<string>((resolve, reject) => {
+      let captured = '';
+      const timeout = setTimeout(() => {
+        child.kill();
+        reject(new Error(`picker preview did not render:\n${stripVTControlCharacters(captured)}`));
+      }, 10_000);
+      child.onData((data) => {
+        captured += data;
+        if (!captured.includes('PREVIEW_VISIBLE')) return;
+        clearTimeout(timeout);
+        child.kill();
+        resolve(captured);
+      });
+    });
+
+    const clean = stripVTControlCharacters(output);
+    expect(clean).toContain('PREVIEW_VISIBLE');
+    // The list still shows and the separator still divides it from the preview.
+    expect(clean).toContain('session row s0');
+    expect(clean).toContain('─');
   });
 });
 
