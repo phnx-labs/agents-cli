@@ -3096,8 +3096,13 @@ export async function pickSessionInteractive(
   hiddenCount = 0,
   enterHint?: string,
 ): Promise<PickedSession | null> {
+  // The hidden-session footer is console.log'd above the Inquirer prompt, so it
+  // scrolls the viewport the picker can't measure; tell the picker to reserve for
+  // it (see pickerPageSize) so the preview and the footer stay on screen together.
+  let linesAbovePrompt = 0;
   if (hiddenCount > 0) {
     console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
+    linesAbovePrompt += 1;
   }
   const cols = pickerColumnsFor(sessions);
   try {
@@ -3115,6 +3120,7 @@ export async function pickSessionInteractive(
       pageSize: PICKER_RECENT_COUNT,
       initialSearch,
       enterHint,
+      linesAbovePrompt,
     });
   } catch (err) {
     if (isPromptCancelled(err)) return null;

@@ -114,6 +114,8 @@ export interface SessionPickerConfig {
   initialSearch?: string;
   /** Verb shown on the Enter key in the footer (default 'resume'). */
   enterHint?: string;
+  /** Lines the caller printed above the prompt (hidden-session footer). */
+  linesAbovePrompt?: number;
 }
 
 const previewCache = new Map<string, string>();
@@ -847,6 +849,7 @@ export async function sessionPicker(config: SessionPickerConfig): Promise<Picked
     initialSearch: config.initialSearch,
     emptyMessage: 'No sessions match.',
     enterHint: config.enterHint ?? 'resume',
+    linesAbovePrompt: config.linesAbovePrompt,
   });
   if (!picked) return null;
   return { session: picked.item, action: 'resume' };
