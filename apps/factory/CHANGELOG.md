@@ -18,7 +18,9 @@ All notable changes to the Factory extension are documented here. Format follows
   was written. (2) The status bar rendered whatever version/account were cached on
   the entry even when they were resolved for a *different* session left over in the
   same terminal; it now shows only the identity resolved for the session id it
-  displays (`displayIdentity`, gated on `identitySessionId`), and clears a field
+  displays (`displayIdentity`, gated on a new `identityAppliedSessionId` distinct
+  from the both-fields retry gate so a version-only harness still shows its
+  version), and clears a field
   the current session doesn't carry (Grok/Cursor/Droid have a version but no
   account; Kimi has neither). Source: `src/core/liveSession.ts`,
   `src/core/statusIdentity.ts`, `src/vscode/extension.ts`,
