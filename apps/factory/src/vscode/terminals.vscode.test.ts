@@ -233,3 +233,32 @@ describe('BUG I: setLabel immediately stops autoLabelPoller', () => {
     t.stopAutoLabelPoller(term);
   });
 });
+
+// Half of the status-bar identity fix (Defect 2): a harness the CLI records no
+// version for (Kimi) must not keep a version left over from a prior binding in the
+// same terminal. setVersion(null) has to CLEAR, not be ignored.
+describe('setVersion clears the cached version on null/empty', () => {
+  test('a null version wipes both version and statusVersion', () => {
+    const term = fakeTerm('CC-setver');
+    t.register(term, 'CC-ver-1', fakeAgentConfig(), undefined);
+
+    t.setVersion(term, '2.1.218');
+    const set = t.getByTerminal(term);
+    expect(set?.version).toBe('2.1.218');
+    expect(set?.statusVersion).toBe('2.1.218');
+
+    // Re-hydration for a session the CLI has no version for must clear it.
+    t.setVersion(term, null);
+    const cleared = t.getByTerminal(term);
+    expect(cleared?.version).toBeUndefined();
+    expect(cleared?.statusVersion).toBeUndefined();
+  });
+
+  test('an empty/whitespace version is treated as clear, not a literal value', () => {
+    const term = fakeTerm('CC-setver2');
+    t.register(term, 'CC-ver-2', fakeAgentConfig(), undefined);
+    t.setVersion(term, '2.1.218');
+    t.setVersion(term, '   ');
+    expect(t.getByTerminal(term)?.version).toBeUndefined();
+  });
+});

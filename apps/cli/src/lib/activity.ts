@@ -460,7 +460,7 @@ export function readActivityAsEventRecords(opts: RecentActivityOptions = {}): Ev
 }
 
 // ---------------------------------------------------------------------------
-// Rendering (shared by `agents activity` and `agents feed`)
+// Rendering (shared by the feed activity lane and `agents feed --filter updates`)
 // ---------------------------------------------------------------------------
 
 /** Glyph + color + human label per event, so the lane reads at a glance. */
@@ -592,9 +592,9 @@ export function formatProgressUpdate(ev: ActivityEvent, opts: { joined?: Progres
 // ---------------------------------------------------------------------------
 // Fleet fan-out, session enrichment, grouping (the "activity bar")
 //
-// `agents activity --json` is a mergeable per-host payload, so a feed-style
-// fan-out (`gatherRemoteAgentsJson`) collects every peer's own stream and
-// merges them host-tagged. Each item is then enriched by JOINING to live
+// The activity stream is a mergeable per-host payload, so a feed-style fan-out
+// (`gatherRemoteAgentsJson`) collects every peer's own stream and merges them
+// host-tagged. Each item is then enriched by JOINING to live
 // sessions (project / ticket / execution host) — NOT by re-parsing transcripts
 // — and can be grouped by project, device, or agent so progress reads at a
 // glance across the whole fleet.
@@ -901,7 +901,7 @@ export function formatActivityGroupMeta(
  * a logging hiccup never blocks a tool call.
  */
 export const ACTIVITY_LOG_HOOK_SCRIPT = String.raw`#!/usr/bin/env python3
-"""Append agent-activity events for 'agents feed' / 'agents activity'.
+"""Append agent-activity events for 'agents feed'.
 
 Bound to PreToolUse (ExitPlanMode, Task) and PostToolUse (Bash, Write, Edit,
 MultiEdit, TodoWrite, update_plan, TaskUpdate, todo_write, TaskCreate). One

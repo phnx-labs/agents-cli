@@ -255,13 +255,14 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 | Goose | `goose` | ≥1.34 | ✓ | ✓ | ≥1.25 | — | ✓ | — | ✓ |
 | Droid | `droid` | ✓ | ✓ | ≥0.57.5 | ≥0.26 | ✓ | ✓ | ✓ | — |
 | Hermes | `hermes` | ≥0.11 | ✓ | — | ✓ | — | — | — | — |
+| Pi (Oh My Pi) | `pi` | — | ✓ | — | ✓ | ✓ | — | ✓ | — |
 
 ✓ = supported · — = not · version cell = only within that range (out-of-range =
 skipped silently). [`src/lib/agents.ts`](src/lib/agents.ts) is canonical — keep this
 snapshot in sync. `workflows` is `claude`/`kimi`/`goose`/`antigravity` (≥1.0.6, written to the
 shared HOME-global `~/.gemini/config/global_workflows/`, not a per-version home), `openclaw` (Lobster `.lobster` files under `.openclaw/workflows/`), and `grok` (≥0.2.111, native Rhai under `.grok/workflows/`); `mcp` is universal; `allowlist` is
 `claude`/`cursor`/`opencode`/`antigravity`/`grok`/`kimi`/`kiro`/`droid`/`goose`/`openclaw`/`copilot` (Copilot writes per-location approvals to `~/.copilot/permissions-config.json`; OpenClaw is tool-level only —
-blanket rules map to `~/.openclaw/openclaw.json` `tools.alsoAllow`/`tools.deny`, sub-command patterns skipped); `subagents` is `claude`/`codex`/`kiro`/`kimi`/`grok`/`openclaw`/`droid`/`copilot`/`antigravity`/`cursor` (≥2026.1.22).
+blanket rules map to `~/.openclaw/openclaw.json` `tools.alsoAllow`/`tools.deny`, sub-command patterns skipped); `subagents` is `claude`/`codex`/`kiro`/`kimi`/`grok`/`openclaw`/`droid`/`copilot`/`antigravity`/`cursor` (≥2026.1.22)/`pi`. **Pi (Oh My Pi, `omp`)** is Claude-compatible: it natively reads `.claude/commands`, `.mcp.json`, and Claude-shaped subagents, and keeps its own native resources under `~/.omp/agent/` (skills, commands, subagents `agents/`, `AGENTS.md` context, `.mcp.json`). `mcp` covers stdio + http + headers. `hooks`/`allowlist`/`plugins` are OFF: omp hooks are per-tool JS/TS extension modules (not event->shell-command registrations), approval is per-TOOL only (`tools.approval`, no command/path patterns), and plugins are npm/TS modules (not the Claude marketplace manifest). Its cross-provider model catalog (OpenRouter/OpenAI/Anthropic/xAI/DeepSeek/…) surfaces in `agents view` / `agents models pi` via `omp models --json`.
 **Gemini is hard-deprecated.** Keep the legacy `gemini` id only for parsing old
 sessions/config; `agents add gemini`, `agents import gemini`, and
 `agents sync gemini` fail and point users to Antigravity.
@@ -285,7 +286,7 @@ src/
     monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/10-monitors.md
     projects.ts        # `agents projects` — named multi-repo project defs (~/.agents/projects/*.yaml) layered above the --project convention (resolveProjectRef in project-root.ts); project-status.ts rolls live sessions + merged PRs + artifacts into the progress card. Beta-gated. See docs/11-projects.md
     migrate.ts         # One-shot idempotent migrations
-    session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer)
+    session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents sessions stats` + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger)
     terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux/Terminal.app, local or --host;
                        #   preferred.ts resolves WHICH terminal for a GUI caller (from live sessions' host app)
     cloud/             # Provider registry (Rush / Codex / Factory / Antigravity)
@@ -641,7 +642,9 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
   clauses match distinct calls, tool queries never parse transcripts, and exact
   static program counts retain repeated sites with wrapper/effective roles;
   versioned tool envelopes do not replace the list/detail JSON contracts
-  (SES-31..SES-37, SES-IF-4a); `agents sessions
+  (SES-31..SES-37, SES-IF-4a); `agents sessions stats` emits its own versioned
+  `sessions-stats` rollup of skill/command usage and never the list/detail shape
+  (SES-IF-4b); `agents sessions
   export --encrypt` seals every transcript
   body client-side with AES-256-GCM under the shared `r2.backups` bundle key, or
   an ephemeral one when unconfigured (SES-24, SES-25).

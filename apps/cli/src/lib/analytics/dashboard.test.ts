@@ -34,6 +34,16 @@ function pin(): { usage: string; sessions: string } {
       tool_call_count INTEGER,
       file_path TEXT NOT NULL
     );
+    CREATE TABLE tool_scan_ledger (
+      session_id TEXT PRIMARY KEY,
+      file_path TEXT NOT NULL UNIQUE,
+      file_mtime_ms INTEGER NOT NULL,
+      file_size INTEGER NOT NULL,
+      extractor_version INTEGER NOT NULL,
+      indexed_at INTEGER NOT NULL,
+      call_count INTEGER NOT NULL,
+      evidence_bytes INTEGER NOT NULL
+    );
   `);
   const now = new Date().toISOString();
   const insert = db.prepare(
@@ -43,6 +53,16 @@ function pin(): { usage: string; sessions: string } {
   insert.run('s1', 's1', 'claude', now, 'claude-opus-4', 1000, 200, 60000, 'box-a', 12, '/tmp/a.jsonl');
   insert.run('s2', 's2', 'claude', now, 'claude-sonnet-4', 800, 100, 30000, 'box-a', 4, '/tmp/b.jsonl');
   insert.run('s3', 's3', 'codex', now, 'gpt-5', 500, 50, 120000, 'box-b', null, '/tmp/c.jsonl');
+  // The tool indexer's ledger — the real per-session call counts. s3 carries a
+  // NULL sessions.tool_call_count (nothing but the teams summarizer writes that
+  // column), so it is the regression case: the old recipe dropped it entirely.
+  const ledger = db.prepare(
+    `INSERT INTO tool_scan_ledger (session_id, file_path, file_mtime_ms, file_size, extractor_version, indexed_at, call_count, evidence_bytes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  ledger.run('s1', '/tmp/a.jsonl', 1, 10, 1, 1, 12, 100);
+  ledger.run('s2', '/tmp/b.jsonl', 1, 10, 1, 1, 4, 100);
+  ledger.run('s3', '/tmp/c.jsonl', 1, 10, 1, 1, 30, 100);
   db.close();
   return { usage, sessions };
 }
@@ -81,8 +101,27 @@ describe('trends recipes + dashboard', () => {
     const tools = recipeToolsPerSession(win);
     expect(tools.empty).toBe(false);
     const all = tools.rows.find((r) => r.scope === '(all)');
-    expect(all?.n).toBe(2);
-    expect(all?.avg).toBe(8);
+    // Every scanned session counts — 12, 4, 30 — not just the ones the teams
+    // summarizer happened to stamp a tool_call_count on.
+    expect(all?.n).toBe(3);
+    expect(all?.avg).toBe(15);
+    expect(all?.p50).toBe(12);
+  });
+
+  it('counts sessions the teams summarizer never stamped (sessions.tool_call_count IS NULL)', () => {
+    const tools = recipeToolsPerSession(trendsWindow(7));
+    // s3 is codex with a NULL tool_call_count but 30 indexed calls. Reading the
+    // column dropped it and pinned the fleet-wide p50 at 0; the ledger has it.
+    const codex = tools.rows.find((r) => r.scope === 'codex');
+    expect(codex?.n).toBe(1);
+    expect(codex?.avg).toBe(30);
+  });
+
+  it('is empty when the tool index has never been built', () => {
+    const db = new Database(process.env.AGENTS_SESSIONS_DB as string);
+    db.exec('DROP TABLE tool_scan_ledger');
+    db.close();
+    expect(recipeToolsPerSession(trendsWindow(7)).empty).toBe(true);
   });
 
   it('dashboard skips empty recipes and stays under the compute budget', () => {

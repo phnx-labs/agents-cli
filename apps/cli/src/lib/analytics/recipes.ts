@@ -104,14 +104,22 @@ export function recipeToolsPerSession(win: TrendsWindow): RecipeSection {
   const title = 'Tools per session';
   if (!db) return { id, title, store: 'sessions', rows: [], empty: true };
   try {
-    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
-    if (!cols.some((c) => c.name === 'tool_call_count')) {
+    // Counts come from tool_scan_ledger — one row per session the tool indexer
+    // has scanned, carrying that session's true call_count (0 included). The
+    // sessions.tool_call_count column is NOT the source: only the teams
+    // summarizer ever writes it (lib/teams/summarizer.ts), so reading it scored
+    // every non-teams session as 0 and pinned p50 at 0 fleet-wide.
+    const tables = db.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'tool_scan_ledger'`,
+    ).all() as Array<{ name: string }>;
+    if (tables.length === 0) {
       return { id, title, store: 'sessions', rows: [], empty: true };
     }
     const byAgent = db.prepare(
-      `SELECT agent, tool_call_count AS n
-         FROM sessions
-        WHERE timestamp >= ? AND tool_call_count IS NOT NULL`,
+      `SELECT s.agent AS agent, l.call_count AS n
+         FROM tool_scan_ledger l
+         JOIN sessions s ON s.id = l.session_id
+        WHERE s.timestamp >= ?`,
     ).all(win.sinceIso) as Array<{ agent: string; n: number }>;
     if (byAgent.length === 0) return { id, title, store: 'sessions', rows: [], empty: true };
 

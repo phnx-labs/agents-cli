@@ -306,6 +306,17 @@ export function locateModelSource(
     return null;
   }
 
+  if (agent === 'pi') {
+    // omp (Oh My Pi) installs via `bun install -g`; a version-managed install
+    // exposes it under node_modules/.bin/omp, otherwise it lives on PATH. We let
+    // the CLI produce its own catalog via `omp models --json` (extractPiCatalog).
+    const cli = path.join(versionDir, 'node_modules', '.bin', 'omp');
+    if (fs.existsSync(cli)) return { path: cli, kind: 'cli' };
+    const pathBin = findOnPath('omp');
+    if (pathBin) return { path: pathBin, kind: 'cli' };
+    return null;
+  }
+
   return null;
 }
 
@@ -985,6 +996,55 @@ function extractKimiCatalog(binaryPath: string): { models: ModelInfo[]; aliases:
 }
 
 /**
+ * Extract Oh My Pi's catalog via `omp models --json`. omp is a cross-provider
+ * aggregator: its catalog is the union of every provider it has a key for, so
+ * ids are provider-qualified selectors (`anthropic/claude-opus-4-8`,
+ * `openai/gpt-5.2`, `xai/grok-4`, `deepseek/deepseek-chat`, …) — exactly the
+ * `provider/model` convention `ModelInfo.id` already uses. Output shape:
+ *   {"models":[{"provider":"anthropic","id":"claude-opus-4-8",
+ *               "selector":"anthropic/claude-opus-4-8","name":"Claude Opus 4.8",
+ *               "cost":{...}}, ...]}
+ * The catalog is gated per-provider by key presence (no key -> that provider's
+ * models are absent, and an empty env yields `{"models":[]}`). That is truthful:
+ * the extractor surfaces exactly the providers the user has authenticated.
+ * Pricing is attached uniformly by getModelCatalog via getModelPricing(id),
+ * which strips the `provider/` prefix — so no per-catalog price shape here.
+ */
+function extractPiCatalog(binaryPath: string): { models: ModelInfo[]; aliases: Record<string, string> } {
+  let stdout: string;
+  try {
+    stdout = execFileSync(binaryPath, ['models', '--json'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 15_000,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch {
+    return { models: [], aliases: {} };
+  }
+
+  let parsed: { models?: Array<{ id?: string; selector?: string; provider?: string; name?: string }> };
+  try {
+    parsed = JSON.parse(stdout.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''));
+  } catch {
+    return { models: [], aliases: {} };
+  }
+  if (!parsed || !Array.isArray(parsed.models)) return { models: [], aliases: {} };
+
+  const models: ModelInfo[] = [];
+  const seen = new Set<string>();
+  for (const m of parsed.models) {
+    // Prefer the provider-qualified selector; fall back to provider/id.
+    const id = m.selector || (m.provider && m.id ? `${m.provider}/${m.id}` : m.id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    models.push({ id, displayName: typeof m.name === 'string' ? m.name : undefined });
+  }
+
+  return { models, aliases: {} };
+}
+
+/**
  * Build (or load from cache) the model catalog for a specific (agent, version).
  * Cache is keyed on source-file mtime (binary or js module), so re-extracts
  * automatically when the user upgrades or reinstalls a version.
@@ -1033,6 +1093,7 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
     else if (agent === 'antigravity') ({ models, aliases } = extractAntigravityCatalog(src.path));
     else if (agent === 'kimi') ({ models, aliases } = extractKimiCatalog(src.path));
     else if (agent === 'grok') ({ models, aliases } = extractGrokCatalog(src.path));
+    else if (agent === 'pi') ({ models, aliases } = extractPiCatalog(src.path));
   }
 
   // Attach per-token pricing where the offline table knows the model, so the

@@ -73,15 +73,23 @@ If you skip `--profile` on `agents browser start`, the profile is resolved in
 this order:
 
 1. **Your configured default** — the profile set via
-   `agents browser profiles set-default <name>` on THIS machine. This also
-   re-points an explicit `--profile default`, so an agent that hardcodes
-   `default` still lands on your chosen profile (e.g. a logged-in Comet).
-2. **An existing `default` profile**, if one has already been created.
+   `agents browser profiles set-default <name>` on THIS machine, when it can
+   launch here. This also re-points an explicit `--profile default`, so an agent
+   that hardcodes `default` still lands on your chosen profile (e.g. a logged-in
+   Comet). If its browser/binary isn't installed on this machine, it warns and
+   falls through to auto-detect.
+2. **An existing `default` profile**, if one exists and its browser is installed
+   on this machine.
 3. **Auto-detect** — the first installed Chromium-family browser, saved as the
    `default` profile. Detection priority:
    - macOS: Chrome > Brave > Edge > Chromium > Comet
    - Linux: Chrome > Chromium > Brave > Edge
    - Windows: Edge > Chrome > Brave > Comet
+
+   A `default` profile that came from another OS whose binary is missing here — a
+   `/Applications/...` Chrome path resolved on Linux, say — is **regenerated for
+   this machine** rather than failing with "Custom binary not found". Remote
+   (`ssh://`) defaults skip this check: their browser lives on the far host.
 
 The configured default is **device-local**: it lives in
 `~/.agents/devices/<machine>/agents.yaml` and never syncs to your other

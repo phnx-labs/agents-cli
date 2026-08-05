@@ -2207,7 +2207,7 @@ Examples:
     }) => {
       try {
         // `--device` is an alias for `--host` (fleet vocabulary parity with
-        // `agents activity`/`run --device`); fold it into the host list up front so
+        // `agents run --device`); fold it into the host list up front so
         // every downstream branch sees one resolved target list.
         if (opts.device?.length) opts.host = [...(opts.host ?? []), ...opts.device];
         const { readAndResolveBundleEnv, bundleToEnvPrefix, isReservedEnvName } = await import('../lib/secrets/bundles.js');

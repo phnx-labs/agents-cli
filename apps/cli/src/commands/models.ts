@@ -25,14 +25,14 @@ import { getModelPricing } from '../lib/pricing/index.js';
 import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 import { wrapJoined } from './inspect.js';
 
-const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'cursor', 'openclaw', 'antigravity', 'kimi', 'grok', 'droid'];
+const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'cursor', 'openclaw', 'antigravity', 'kimi', 'grok', 'droid', 'pi'];
 
 /**
  * Agents that don't necessarily install under ~/.agents/versions (cursor ships
  * via a curl script). For these, fall back to the PATH binary and synthesize
  * a version label from the install path so cache keys stay stable.
  */
-const PATH_ONLY_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>(['cursor']);
+const PATH_ONLY_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>(['cursor', 'pi']);
 
 /** Derive a version label from the PATH-installed binary location for agents without managed versions. */
 function fallbackPathVersion(agent: AgentId): string | null {

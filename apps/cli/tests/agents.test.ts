@@ -113,6 +113,69 @@ describe('droid (Factory AI)', () => {
   });
 });
 
+describe('pi (Oh My Pi)', () => {
+  it('is registered with its supported resource capabilities', () => {
+    expect(ALL_AGENT_IDS).toContain('pi');
+    // Claude-compatible surfaces omp reads natively from ~/.omp/agent/.
+    expect(capableAgents('mcp')).toContain('pi');
+    expect(capableAgents('commands')).toContain('pi');
+    expect(capableAgents('skills')).toContain('pi');
+    expect(capableAgents('subagents')).toContain('pi');
+    // HTTP MCP + headers are honored (MCPHttpServerConfig).
+    expect(capableAgents('mcpHttp')).toContain('pi');
+    expect(capableAgents('mcpHeaders')).toContain('pi');
+    // omp hooks are per-tool JS/TS extension modules, not event->shell-command
+    // registrations; approval is per-TOOL only (no command/path allowlist);
+    // plugins are npm/TS modules, not the Claude marketplace manifest. All off.
+    expect(capableAgents('hooks')).not.toContain('pi');
+    expect(capableAgents('allowlist')).not.toContain('pi');
+    expect(capableAgents('plugins')).not.toContain('pi');
+    expect(capableAgents('workflows')).not.toContain('pi');
+    expect(AGENTS.pi.capabilities.hooks).toBe(false);
+    expect(AGENTS.pi.instructionsFile).toBe('AGENTS.md');
+    expect(AGENTS.pi.capabilities.rules).toEqual({ file: 'AGENTS.md' });
+  });
+
+  it('resolves MCP config to ~/.omp/agent/.mcp.json and round-trips the mcpServers shape', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-pi-mcp-'));
+    try {
+      const configPath = getMcpConfigPathForHome('pi', home);
+      expect(configPath).toBe(path.join(home, '.omp', 'agent', '.mcp.json'));
+
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(
+        configPath,
+        JSON.stringify({ mcpServers: { ctx: { command: 'ctx-server', args: ['--stdio'], env: {} } } })
+      );
+
+      const parsed = parseMcpConfig('pi', configPath);
+      expect(Object.keys(parsed)).toContain('ctx');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('installSubagentToAgent writes ~/.omp/agent/agents/<name>.md (Claude-shaped)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-pi-sub-'));
+    const subDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-pi-subsrc-'));
+    try {
+      fs.writeFileSync(
+        path.join(subDir, 'AGENT.md'),
+        `---\nname: explorer\ndescription: Explores the codebase\n---\n\nYou explore code.\n`
+      );
+      installSubagentToAgent(subDir, 'explorer', 'pi', home);
+      const dest = path.join(home, '.omp', 'agent', 'agents', 'explorer.md');
+      expect(fs.existsSync(dest)).toBe(true);
+      const body = fs.readFileSync(dest, 'utf-8');
+      expect(body).toContain('name: explorer');
+      expect(body).toContain('You explore code.');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(subDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('Hermes install targets', () => {
   it('registers Hermes with skills, MCP, plugins, and MEMORY.md rules', () => {
     expect(ALL_AGENT_IDS).toContain('hermes');

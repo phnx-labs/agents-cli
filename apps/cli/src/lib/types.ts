@@ -10,7 +10,7 @@ import type { CloudProviderId } from './cloud/types.js';
 import type { FeedBroadcastConfig } from './feed-broadcast.js';
 
 /** Unique identifier for a current or legacy AI coding agent. */
-export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'kiro' | 'goose' | 'antigravity' | 'grok' | 'kimi' | 'droid' | 'hermes';
+export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'kiro' | 'goose' | 'antigravity' | 'grok' | 'kimi' | 'droid' | 'hermes' | 'pi';
 
 /** How `agents run <agent>` chooses an installed version when none is pinned. */
 export type RunStrategy = 'pinned' | 'available' | 'balanced';
@@ -209,6 +209,15 @@ export interface AgentConfig {
      * rules file (inline all @-imports) when syncing it into the version home.
      */
     rulesImports?: boolean;
+    /**
+     * Whether the agent can open an interactive REPL session when launched with
+     * NO prompt (bare invocation). Agents whose CLI exits immediately without a
+     * prompt (e.g. cursor-agent) must declare `false` here; agents that open a
+     * TUI/REPL with no args declare `true`. Used by the `auto` harness picker
+     * to avoid routing a prompt-less interactive run to a harness that would
+     * exit silently (RUSH-2185, EXEC-23a).
+     */
+    interactiveRepl?: Capability;
   };
 }
 
@@ -224,7 +233,7 @@ export type Capability = boolean | { since?: string; until?: string };
 export type RulesCapability = false | { file: string };
 
 /** Names of every gateable capability on AgentConfig. */
-export type CapabilityName = 'hooks' | 'mcp' | 'mcpHttp' | 'mcpHeaders' | 'allowlist' | 'skills' | 'commands' | 'plugins' | 'subagents' | 'rules' | 'workflows' | 'memory';
+export type CapabilityName = 'hooks' | 'mcp' | 'mcpHttp' | 'mcpHeaders' | 'allowlist' | 'skills' | 'commands' | 'plugins' | 'subagents' | 'rules' | 'workflows' | 'memory' | 'interactiveRepl';
 /**
  * Permission modes controlling agent autonomy.
  *   plan  read-only investigation; no writes, no shell side-effects

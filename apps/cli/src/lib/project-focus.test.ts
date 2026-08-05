@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { FOCUS_LIMIT, focusBucket, rankFocusAreas } from './project-focus.js';
+import { FOCUS_LIMIT, focusBucket, rankFocusAreas, formatFocusCount, formatFocusAreas } from './project-focus.js';
 
 describe('focusBucket', () => {
   it('buckets to three levels, which is where a monorepo becomes legible', () => {
@@ -61,5 +61,26 @@ describe('rankFocusAreas', () => {
 
   it('returns nothing for an empty window', () => {
     expect(rankFocusAreas([])).toEqual([]);
+  });
+});
+
+describe('formatFocusCount', () => {
+  it('keeps small counts exact and compactifies thousands', () => {
+    expect(formatFocusCount(302)).toBe('302');
+    expect(formatFocusCount(2329)).toBe('2.3k');
+    expect(formatFocusCount(10000)).toBe('10k');
+  });
+});
+
+describe('formatFocusAreas', () => {
+  it('labels the unit once so the integer is not ambiguous', () => {
+    const line = formatFocusAreas(
+      [
+        { path: 'apps/cli/src', touches: 2329 },
+        { path: 'apps/cli/docs', touches: 302 },
+      ],
+      7,
+    );
+    expect(line).toBe('apps/cli/src 2.3k  ·  apps/cli/docs 302  file-touches (7d)');
   });
 });

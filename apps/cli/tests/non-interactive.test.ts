@@ -707,8 +707,8 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     expect(combined).toMatch(/^ {2}Test Proxy \(custom\)$/m);
     expect(combined).toMatch(/^ {2}Ollama \(custom\)$/m);
     // The model + the host that executes it sit on the harness's own row.
-    expect(combined).toMatch(/truefoundry\/qwen3-coder\s.*via claude/);
-    expect(combined).toMatch(/qwen3-coder:30b\s.*via codex/);
+    expect(combined).toMatch(/truefoundry\/qwen3-coder\s.*forked from claude/);
+    expect(combined).toMatch(/qwen3-coder:30b\s.*forked from codex/);
   }, 30_000);
 
   it('describes a custom harness in `agents view <harness>` instead of rejecting the name', () => {

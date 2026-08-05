@@ -397,6 +397,80 @@ describe('ensureDefaultBrowserProfile', () => {
     expect(writeSpy).not.toHaveBeenCalled();
   });
 
+  it('regenerates a stale default whose binary is missing on this machine', async () => {
+    // A `default` auto-created on macOS carries a /Applications/... binary that
+    // doesn't exist on this (Linux) box — the top browser roadblock.
+    const stale: BrowserProfileConfig = {
+      browser: 'custom',
+      binary: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      endpoints: ['cdp://127.0.0.1:9222'],
+    };
+    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: { default: stale } };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+    // The stale binary isn't launchable here → findBrowserPath throws for it.
+    vi.mocked(findBrowserPath).mockImplementationOnce(() => {
+      throw new Error('Custom binary not found: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+    });
+
+    const profile = await ensureDefaultBrowserProfile();
+
+    // Re-detected and regenerated in place for THIS machine, not handed back broken.
+    expect(profile.name).toBe('default');
+    expect(profile.browser).toBe('chrome');
+    expect(findFirstInstalledBrowser).toHaveBeenCalled();
+    expect(store.browser.default.browser).toBe('chrome');
+  });
+
+  it("falls back to auto-detect when the configured default can't launch here", async () => {
+    const store: { browser: Record<string, BrowserProfileConfig>; defaultBrowserProfile?: string } = {
+      browser: {
+        'mac-chrome': {
+          browser: 'custom',
+          binary: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+          endpoints: ['cdp://127.0.0.1:9333'],
+        },
+      },
+      defaultBrowserProfile: 'mac-chrome',
+    };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.mocked(findBrowserPath).mockImplementationOnce(() => {
+      throw new Error('Custom binary not found');
+    });
+
+    const profile = await ensureDefaultBrowserProfile();
+
+    expect(profile.name).toBe('default');
+    expect(profile.browser).toBe('chrome');
+    expect(findFirstInstalledBrowser).toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("can't launch on this"));
+    warn.mockRestore();
+  });
+
+  it('reuses a remote (ssh://) configured default without a local binary check', async () => {
+    // The browser lives on the far host; there is no local binary to validate.
+    const store: { browser: Record<string, BrowserProfileConfig>; defaultBrowserProfile?: string } = {
+      browser: {
+        'zion-comet': { browser: 'comet', endpoints: ['ssh://muqsit@zion?port=9344'] },
+      },
+      defaultBrowserProfile: 'zion-comet',
+    };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+
+    const profile = await ensureDefaultBrowserProfile();
+
+    expect(profile.name).toBe('zion-comet');
+    // Remote profiles short-circuit the local binary check entirely.
+    expect(findBrowserPath).not.toHaveBeenCalled();
+    expect(findFirstInstalledBrowser).not.toHaveBeenCalled();
+  });
+
   it('throws an actionable error when no Chromium-family browser is installed', async () => {
     vi.mocked(readMeta).mockImplementation(() => ({ browser: {} }) as any);
     vi.mocked(findFirstInstalledBrowser).mockReturnValueOnce(null);
