@@ -1988,13 +1988,25 @@ export function registerRunCommand(program: Command): void {
         // so Chinese models (Kimi, DeepSeek, Qwen, GLM) can run inside
         // Claude Code without a local proxy.
         try {
-          const resolved = resolveProfileForRun(rawAgent);
+          const resolved = resolveProfileForRun(rawAgent, options.model);
           agent = resolved.agent;
           if (!version) version = resolved.version;
           profileEnv = resolved.env;
           profileFallbackModel = resolved.fallbackModel;
           fromProfile = true;
           process.stderr.write(chalk.gray(`Resolved profile '${resolved.profileName}' -> ${agent}${version ? `@${version}` : ''}\n`));
+          if (resolved.tierNote) {
+            process.stderr.write(chalk.gray(`[agents] ${resolved.tierNote}\n`));
+          }
+          // A tier token (cheap/default/best/ultra) already resolved against
+          // this PROFILE's own catalog above (or degraded gracefully, in
+          // which case resolvedModel stays undefined). Replace the raw
+          // --model value here so exec.ts's native tier block — which only
+          // knows the HOST agent's catalog — never sees the original tier
+          // token for a profile-based run.
+          if (resolved.resolvedModel !== undefined || resolved.tierNote !== undefined) {
+            options.model = resolved.resolvedModel;
+          }
         } catch (err) {
           console.error(chalk.red((err as Error).message));
           process.exit(1);

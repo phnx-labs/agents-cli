@@ -13,6 +13,7 @@ import type { AgentId } from './types.js';
 import { getUserAgentsDir } from './state.js';
 import { getKeychainToken, hasKeychainToken, keychainItemName } from './secrets/profiles.js';
 import { getPreset, type Preset } from './profiles-presets.js';
+import { MODEL_TIERS, isTierToken, type ModelTier } from './model-tiers.js';
 
 /** A named profile binding an agent host, env vars, and optional keychain auth. */
 export interface Profile {
@@ -56,6 +57,19 @@ export interface Profile {
    * changes; auth, base URL, and every other profile env value are preserved.
    */
   fallback_model?: string;
+  /**
+   * Per-tier model ids for this harness's OWN catalog, keyed by the same cost
+   * tiers `agents run --model cheap|default|best|ultra` uses for a native
+   * agent. Lets a custom harness (which runs through a host agent's binary,
+   * e.g. `deepseek-flash` hosted on `claude`) resolve a tier against its own
+   * models instead of colliding with the host agent's native catalog
+   * (`resolveTier` in model-tiers.ts, which only knows native agents).
+   * An unset tier clamps to the next CHEAPER tier that IS set (see
+   * `resolveProfileTierModel`). Omitted entirely -> tiers are not supported
+   * for this profile and a requested tier falls back to the harness's single
+   * pinned model, unchanged from before this field existed.
+   */
+  models?: Partial<Record<ModelTier, string>>;
 }
 
 /**
@@ -508,25 +522,84 @@ export interface ResolvedProfileRun {
    * `model` is the value to write on the retry attempt.
    */
   fallbackModel?: { envKey: string; model: string };
+  /**
+   * Set when the caller requested a cost tier (`--model cheap|default|...`)
+   * but this profile has no `models:` entry to resolve it against (not even a
+   * cheaper tier to clamp to). `env` is returned unmodified — the harness's
+   * single pinned model — and this note is informational only, matching the
+   * "using harness default" convention exec.ts's native tier block already
+   * uses; the caller prints it, it never throws.
+   */
+  tierNote?: string;
+  /**
+   * Set when `requestedModel` was a tier token AND this profile resolved it
+   * against its own `models:` map. Callers that forward a `--model` value
+   * downstream (e.g. as `ExecOptions.model`) should substitute this in place
+   * of the original tier token — exec.ts's native tier block only knows how
+   * to resolve a tier against the HOST agent's own catalog, which is the
+   * wrong catalog for a profile's own harness identity. Undefined both when
+   * no tier was requested and when tier resolution degraded (see `tierNote`).
+   */
+  resolvedModel?: string;
+}
+
+/**
+ * Resolve a requested cost tier against a profile's `models:` map. An unset
+ * tier clamps to the next CHEAPER tier that IS set (ultra -> best -> default
+ * -> cheap), mirroring the clamp semantics of `bucketRungs` in
+ * model-tiers.ts. Returns null when the profile declares no `models:` at all,
+ * or none of the tiers at-or-below the request are set.
+ */
+function resolveProfileTierModel(
+  profile: Profile,
+  tier: ModelTier,
+): { model: string; clampedFrom?: ModelTier } | null {
+  if (!profile.models) return null;
+  const idx = MODEL_TIERS.indexOf(tier);
+  for (let i = idx; i >= 0; i--) {
+    const rung = MODEL_TIERS[i];
+    const model = profile.models[rung];
+    if (model) return { model, clampedFrom: rung === tier ? undefined : rung };
+  }
+  return null;
 }
 
 /**
  * Resolve a name into (agent, version, env). Throws if the name is not a
  * profile. Callers are expected to try agent-id resolution first and fall
  * back to this when that fails, so we don't need a "isProfile" probe.
+ *
+ * `requestedModel` is the caller's raw `--model` value. When it is a cost-tier
+ * token (`cheap`/`default`/`best`/`ultra`), it is resolved against the
+ * profile's OWN `models:` map (see `resolveProfileTierModel`) and substituted
+ * into `env` as a concrete model id BEFORE returning — so exec.ts's native
+ * tier-resolution block (which indexes the HOST agent's catalog, e.g. Claude's
+ * own models) never sees a tier token for a profile-based run, and can't
+ * collide the profile's harness identity with its host's catalog.
  */
-export function resolveProfileForRun(name: string): ResolvedProfileRun {
+export function resolveProfileForRun(name: string, requestedModel?: string): ResolvedProfileRun {
   const profile = readProfile(name);
+  const env = resolveProfileEnv(profile);
   const resolved: ResolvedProfileRun = {
     agent: profile.host.agent,
     version: profile.host.version,
-    env: resolveProfileEnv(profile),
+    env,
     profileName: profile.name,
   };
   if (profile.fallback_model) {
     const envKey = profileModelEnvKey(profile);
     if (envKey) {
       resolved.fallbackModel = { envKey, model: profile.fallback_model };
+    }
+  }
+  if (isTierToken(requestedModel)) {
+    const tierPick = resolveProfileTierModel(profile, requestedModel);
+    if (tierPick) {
+      const envKey = profileModelEnvKey(profile) ?? modelEnvKeyForHost(profile.host.agent);
+      env[envKey] = tierPick.model;
+      resolved.resolvedModel = tierPick.model;
+    } else {
+      resolved.tierNote = `no model configured for tier "${requestedModel}" on profile '${profile.name}'; using harness default`;
     }
   }
   return resolved;

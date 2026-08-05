@@ -270,6 +270,132 @@ describe('resolveProfileForRun surfaces fallback_model as an env-swap', () => {
   });
 });
 
+describe("resolveProfileForRun resolves cost tiers against the profile's OWN models", () => {
+  it('resolves a tier token to the model configured under profile.models', () => {
+    writeProfile({
+      name: 'deepseek-flash',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731' },
+      models: {
+        cheap: 'deepseek/deepseek-chat-v3',
+        default: 'deepseek/deepseek-v4-flash-0731',
+        best: 'deepseek/deepseek-r1',
+      },
+    });
+
+    const resolved = resolveProfileForRun('deepseek-flash', 'best');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-r1');
+    expect(resolved.resolvedModel).toBe('deepseek/deepseek-r1');
+    expect(resolved.tierNote).toBeUndefined();
+  });
+
+  it('clamps an unset tier to the next cheaper tier that IS set', () => {
+    writeProfile({
+      name: 'deepseek-flash',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731' },
+      // default and ultra are unset: ultra clamps down to best, default
+      // clamps down to cheap.
+      models: {
+        cheap: 'deepseek/deepseek-chat-v3',
+        best: 'deepseek/deepseek-r1',
+      },
+    });
+
+    const ultra = resolveProfileForRun('deepseek-flash', 'ultra');
+    expect(ultra.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-r1');
+    expect(ultra.resolvedModel).toBe('deepseek/deepseek-r1');
+
+    const def = resolveProfileForRun('deepseek-flash', 'default');
+    expect(def.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-chat-v3');
+    expect(def.resolvedModel).toBe('deepseek/deepseek-chat-v3');
+  });
+
+  it('degrades gracefully (no throw, env unchanged) when the profile has no models: at all', () => {
+    writeProfile({
+      name: 'kimi',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5' },
+    });
+
+    const resolved = resolveProfileForRun('kimi', 'best');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('moonshotai/kimi-k2.5');
+    expect(resolved.resolvedModel).toBeUndefined();
+    expect(resolved.tierNote).toBe(
+      `no model configured for tier "best" on profile 'kimi'; using harness default`,
+    );
+  });
+
+  it('degrades gracefully when models: is set but nothing at-or-below the requested tier is', () => {
+    writeProfile({
+      name: 'partial',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'some/pinned-model' },
+      // Only `best` is configured; requesting `cheap` has nothing cheaper to
+      // clamp to.
+      models: { best: 'deepseek/deepseek-r1' },
+    });
+
+    const resolved = resolveProfileForRun('partial', 'cheap');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('some/pinned-model');
+    expect(resolved.resolvedModel).toBeUndefined();
+    expect(resolved.tierNote).toContain('no model configured for tier "cheap"');
+  });
+
+  it('regression: tier resolution is NOT affected by the HOST agent\'s own catalog (the collision this fix closes)', () => {
+    // The host is claude, but this profile pins its own deepseek models per
+    // tier. Before this fix, resolveProfileForRun ignored the requested
+    // model entirely and exec.ts's native tier block resolved "best" by
+    // calling resolveTier(options.agent, ...) with options.agent already
+    // overwritten to the HOST id ('claude') -- so a real claude-* id landing
+    // in ANTHROPIC_MODEL here would reproduce that exact collision.
+    writeProfile({
+      name: 'deepseek-flash',
+      host: { agent: 'claude', version: '2.1.219' },
+      env: { ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731' },
+      models: {
+        cheap: 'deepseek/deepseek-chat-v3',
+        default: 'deepseek/deepseek-v4-flash-0731',
+        best: 'deepseek/deepseek-r1',
+      },
+    });
+
+    const resolved = resolveProfileForRun('deepseek-flash', 'best');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-r1');
+    // Never a native Claude catalog id -- proves the substitution came from
+    // the profile's own `models:` map, not from resolving "best" against
+    // claude's catalog.
+    expect(resolved.env.ANTHROPIC_MODEL.startsWith('claude')).toBe(false);
+  });
+
+  it('leaves env untouched when --model is a concrete id, not a tier token', () => {
+    writeProfile({
+      name: 'kimi',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5' },
+      models: { best: 'moonshotai/kimi-k3' },
+    });
+
+    const resolved = resolveProfileForRun('kimi', 'moonshotai/kimi-k2-0905');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('moonshotai/kimi-k2.5');
+    expect(resolved.resolvedModel).toBeUndefined();
+    expect(resolved.tierNote).toBeUndefined();
+  });
+
+  it("leaves env unchanged when no --model is requested at all (today's default behavior)", () => {
+    writeProfile({
+      name: 'kimi',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5' },
+      models: { best: 'moonshotai/kimi-k3' },
+    });
+
+    const resolved = resolveProfileForRun('kimi');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('moonshotai/kimi-k2.5');
+    expect(resolved.resolvedModel).toBeUndefined();
+  });
+});
+
 describe('forkProfile — copy an existing harness under a new name', () => {
   const source: Profile = {
     name: 'deepseek',
