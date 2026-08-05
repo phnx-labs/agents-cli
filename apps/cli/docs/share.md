@@ -66,6 +66,13 @@ agent makes plan.html
   Chromium via the CLI's browser detector, with a managed-Chromium fallback), so there's
   no central render service and no extra cost. No headless browser available → the cover
   is skipped and the plain link still publishes. Opt out with `--no-cover`.
+- **Static media, not just HTML.** `agents share <file>` publishes any static asset —
+  a PNG/JPEG/GIF/WebP/AVIF screenshot, an MP4/MOV/WebM screen recording, a PDF — and
+  serves it with the matching `content-type` (not `application/octet-stream`). That is
+  what lets an agent embed visual PR evidence: GitHub's image proxy (camo) only renders
+  an inline `![](url)` when the asset is served as a real image/video type, so a shared
+  screenshot or recording drops straight into a PR body. Media publishes carry no OG
+  cover (that is an HTML-only step).
 - **Plan-render automation.** Hooks that render plans can run
   `agents share <plan.html> --json` after writing the HTML and read the returned
   `{ "url", "coverUrl", "expiresAt" }` object. The human output still prints the URL on

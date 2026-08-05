@@ -205,9 +205,20 @@ preset: kimi                   # string, optional — preset this profile was cr
 
 provider: openrouter           # string, optional — provider name for display
                                # Set automatically by `profiles add`; informational only.
+
+models:                        # Partial<Record<ModelTier, string>>, optional
+  cheap: deepseek/deepseek-chat-v3        # per-tier model ids for THIS harness's
+  default: deepseek/deepseek-v4-flash-0731 # own catalog — resolves `agents run
+  best: deepseek/deepseek-r1               # <profile> --model cheap|default|best|ultra`
+                               # against the harness's own models instead of the host
+                               # agent's (claude/codex/...) native catalog. An unset
+                               # tier clamps to the next CHEAPER tier that IS set
+                               # (ultra -> best -> default -> cheap). Omit entirely to
+                               # keep today's behavior: a requested tier falls back to
+                               # the single pinned model in `env`, unchanged.
 ```
 
-Fields sourced from `Profile` interface at `src/lib/profiles.ts:18-32`.
+Fields sourced from `Profile` interface at `src/lib/profiles.ts:19-73`.
 
 ## Recipes
 

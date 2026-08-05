@@ -57,13 +57,6 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     expect(await maybeRunOnHost('feed', ['feed', '--host', 'mac', '--json'])).toBe(false);
   });
 
-  it('keeps activity tombstone local (does not SSH-passthrough --host)', async () => {
-    // activity is a removed-command redirect; OWN_HOST so the tombstone runs
-    // locally instead of being forwarded to a peer that also lacks the command.
-    expect(await maybeRunOnHost('activity', ['activity', '--host', 'mac', '--json'])).toBe(false);
-    expect(await maybeRunOnHost('activity', ['activity', '--device', 'a', '--devices-all'])).toBe(false);
-  });
-
   it('rejects --host on a non-routable, non-OWN_HOST group with a clear error (not unknown option)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     // setup has no remote semantics and no own-host handler — must not fall

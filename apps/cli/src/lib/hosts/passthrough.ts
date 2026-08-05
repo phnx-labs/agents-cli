@@ -127,7 +127,6 @@ const OWN_HOST_COMMANDS = new Set([
   'harnesses',
   'sessions',
   'feed',
-  'activity', // tombstone redirect; keep local so --host does not SSH-passthrough
   'computer',
   'secrets',
   'logs',

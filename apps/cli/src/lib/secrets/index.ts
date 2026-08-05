@@ -321,7 +321,7 @@ function parseHmacKeyRecord(raw: string): HmacKeyRecord | null {
   return null;
 }
 
-function readHmacKeyRecord(): HmacKeyRecord | null {
+export function readHmacKeyRecord(): HmacKeyRecord | null {
   // HMAC_KEY_ITEM is exempt from the transform, so this routes to the helper
   // (or the test backend) under its literal name. The item is no-ACL, so the
   // read is silent — attest that to the storm guard so a headless hashed-name
@@ -332,7 +332,29 @@ function readHmacKeyRecord(): HmacKeyRecord | null {
   } catch {
     return null;
   }
-  return parseHmacKeyRecord(raw);
+  const record = parseHmacKeyRecord(raw);
+  // Converge a stale-ACL'd hmackey to silent, on the HOT read path. An old helper
+  // (pre the metadata/hmackey no-ACL migration fix) re-stamped this
+  // contractually-no-ACL item with a biometry ACL, so the read just above pops the
+  // generic "Agents CLI needs to authenticate" sheet on EVERY hashed lookup — the
+  // `agents devices list` stats probe the SessionStart hook runs, and every other
+  // background hashed read. `maybeAutoRekey`'s one-shot heal only fires on a
+  // cleartext-bundle resolve and is bypassed for the hmackey/hashed-name path
+  // (prepareServiceName returns early for HMAC_KEY_ITEM before maybeAutoRekey), so
+  // it never converged exactly these reads and the machine prompted forever.
+  // Re-store the record no-ACL once per machine here (the read that produced it has
+  // already happened — and already prompted if the item was ACL'd); every
+  // subsequent read, in this process and all future ones, is silent.
+  if (record && !record.healedNoAcl) {
+    try {
+      healHmacKeyNoAclOnce(record);
+      record.healedNoAcl = true;
+    } catch {
+      // A failed no-ACL re-store leaves the item still ACL'd (a still-prompting
+      // read) rather than a silent wrong state; the next process retries.
+    }
+  }
+  return record;
 }
 
 function writeHmacKeyRecord(rec: HmacKeyRecord): void {
@@ -508,18 +530,10 @@ function maybeAutoRekey(): void {
   if (process.env.AGENTS_SECRETS_HASH_NAMES === '0') return;
   const st = resolveHashState();
   if (st.active) {
-    // Heal an already-active machine whose hmackey was re-stamped ACL'd by an old
-    // helper (its read popped the generic Touch ID sheet on every hashed lookup).
-    // Runs once per machine; mutate the local so a later finishPendingDeletes write
-    // preserves the healed flag.
-    if (st.record && !st.record.healedNoAcl) {
-      try {
-        healHmacKeyNoAclOnce(st.record);
-        st.record.healedNoAcl = true;
-      } catch {
-        /* next process retries */
-      }
-    }
+    // The stale-ACL'd-hmackey heal now runs on the hot read path
+    // (readHmacKeyRecord), which the resolveHashState() above just went through —
+    // so st.record is already healed here regardless of how this machine reached
+    // "hashing active". Nothing to do but finish any pending deletes.
     if (st.record?.pendingDeletes?.length) {
       try {
         finishPendingDeletes(st.record);
