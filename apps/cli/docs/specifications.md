@@ -1925,6 +1925,35 @@ nothing but its own view cache.
   (apps/factory `src/monitor/leader.ts` — presence fan-out only, not task
   execution), and idempotent effects so a redelivery is a no-op.
 
+#### 3.1 Multi-device — parallel daemons are fine, shared queues are not
+
+Every fleet device runs its own daemon, and that is by design: scheduling fans out
+across devices whenever the *work* is partitioned by device. The duplication hazard
+is not two daemons existing — it is two daemons consuming the **same** input.
+
+- **SING-8 (MUST).** An unrestricted routine (no `devices` allowlist) fires on every
+  device running the scheduler (`lib/routines.ts` `devices` doc) and therefore MUST
+  be per-device in scope: its input MUST be the firing device's own state (its
+  repos, sessions, caches, accounts). `git-hygiene` on each device's own checkout is
+  the canonical legal shape; the watchdog rotating its own machine's sessions is
+  another.
+- **SING-9 (MUST).** A routine or monitor that consumes **shared** input — a ticket
+  tracker, a PR queue, the feed, an R2/sync bucket, another device's sessions —
+  MUST have exactly one executor per work item, achieved one of three ways:
+  (a) **owner pin** — `devices: [<one>]`, so `routineOwnerDevice`
+  (`lib/routines.ts`) names the single daemon allowed to fire (a multi-device pin
+  is a misconfiguration that fires only on the owner with a fix hint,
+  `lib/scheduler.ts`); or (b) **atomic claim** — each item is claimed with an
+  atomic primitive before work begins (precedent: the feed's `O_EXCL` block claim,
+  `lib/feed.ts` — two concurrent claimers cannot both succeed); or
+  (c) **idempotency** — a concurrent second execution of the same item is a
+  verified no-op. `dispatch: fleet` (one online device picked per run,
+  `lib/routines.ts`) satisfies (a) for dispatch targets.
+- **SING-10 (MUST).** Where (b) or (c) is chosen, the claim or idempotency check
+  MUST be part of the implementation, not a comment — shared-queue consumers
+  without an owner pin ship with a test that two concurrent fires cannot process
+  the same item.
+
 ### 4. Given/When/Then scenarios
 
 - **GIVEN** a session hits its weekly account limit, **WHEN** the daemon watchdog
@@ -1945,6 +1974,16 @@ nothing but its own view cache.
   callback performs anything beyond read-only rendering, **THEN** code review MUST
   flag it under the root `AGENTS.md` §Code review conventions ("No second
   scheduler") and the action MUST move to the CLI before merge.
+- **GIVEN** a routine like `git-hygiene` that sweeps each device's own checkout,
+  **WHEN** it is left unrestricted, **THEN** every device's daemon fires it and
+  each fire touches only its own machine — legal fan-out under SING-8, no
+  coordination needed.
+- **GIVEN** a routine that drains a shared tracker (e.g. `drain-linear-cli`),
+  **WHEN** two devices' daemons both fire it, **THEN** SING-9 requires exactly one
+  executor per item: the routine is owner-pinned to one device (the current
+  configuration), or each ticket is claimed atomically before work, or processing
+  the same ticket twice is a verified no-op — never "both daemons pick the same
+  ticket and run it twice."
 
 ### 5. Known gaps
 
