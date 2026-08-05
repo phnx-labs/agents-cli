@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.22.8
+
+- **`agents browser` now gates cross-machine drives behind per-device consent.** `agents browser <cmd> --host <device>` already routes a browser command to another fleet machine over SSH and drives its browser — but nothing asked that machine's permission, so any box you could SSH to, you could drive. A new device-local `browser.remote-control` setting (off by default, never synced) fixes that: a fleet-remote `browser --host <this-machine> start` is refused with an actionable message until the owner runs `agents browser remote-control on` here. Local starts (no `--host`) are never gated. The fleet passthrough marks every `--host` dispatch with `AGENTS_FLEET_REMOTE` so the far side can tell a cross-machine drive from a local one. New command: `agents browser remote-control [on|off]` (no arg prints status; `--json` supported). Source: `apps/cli/src/lib/browser/remote-control.ts`, `apps/cli/src/commands/browser.ts`, `apps/cli/src/lib/hosts/passthrough.ts`, `apps/cli/src/lib/device-config.ts`, `apps/cli/docs/browser.md`.
+
+- **`agents browser` tasks are now attributed to the caller that ran `start`, not
+  to the browser daemon.** `Task.owner` (RUSH-2020) was resolved with
+  `resolveActor()` *inside* the shared, long-lived browser daemon, so every task —
+  no matter which agent or person opened it — was stamped with the identity of
+  whoever happened to start the daemon. The caller's identity is now forwarded over
+  IPC: the CLI (the caller's own process) puts `actor` (`resolveActor().id`) and
+  `launchId` (`$AGENT_LAUNCH_ID`, the per-run id `exec.ts` injects for every harness)
+  on the `start` request, and the daemon stamps exactly those. Adds `Task.launchId` —
+  which run created a task — the scope a later `browser status --mine` and the
+  no-flag current-task default will filter on. Source:
+  `apps/cli/src/lib/browser/types.ts`, `apps/cli/src/lib/browser/service.ts`,
+  `apps/cli/src/lib/browser/ipc.ts`, `apps/cli/src/commands/browser.ts`.
+
+- **`agents harness edit` and `agents harness rename` are now real commands.** `editProfile` and `renameProfile` already existed in `lib/profiles.ts` but nothing on the CLI surface reached them, so changing a custom harness meant hand-editing its YAML. `agents harness edit <name>` applies `--model`, `--base-url`, `--version`, and `--description` in place, preserving fork lineage (an edit never marks a harness as forked from itself). `agents harness rename <name> <new-name>` renames the YAML file and its `name` field, and rewrites `forkedFrom` on every harness that pointed at the old name so the fork graph stays accurate. There is deliberately no `--label`: the header `agents view` prints is derived from the harness name, so renaming is how you change it.
+
+- **Run-time messages call a custom harness a "custom harness", not a "profile".** When you `agents run <name>` a custom harness (created with `agents harness add`), the CLI now says `Resolved custom harness '<name>'` and, for a discarded cost tier, `cost tiers don't apply to custom harness '<name>'` — instead of the legacy internal noun "profile". The `--strategy` and account-picker notices on a custom-harness run are aligned too. Behavior is unchanged; the legacy `agents profiles` alias still works. Source: `apps/cli/src/commands/exec.ts`.
+
+- **Placement model + `agents run --where` (Phase 2 surface consolidation).**
+  "Where does the body run?" is one shared object (`local | device | fleet | cloud | lease`)
+  in `src/lib/placement.ts`. `agents run --where device:<name>|auto|lease[:backend]|local`
+  expands into the existing `--host` / `--lease` paths; mixing doors fails loud. Docs
+  (`00-concepts.md` § Placement, `hosts.md`) and help on run / routines / monitors teach
+  the matrix — including that monitors `--device` is **owner**, not body placement.
+  Old flags remain aliases. Source: `apps/cli/src/lib/placement.ts`, `apps/cli/src/commands/exec.ts`.
+
+- **`agents harness fork` no longer accepts `--label` (breaking change).** The `--label` flag was used to set a human-facing display name for a custom harness. Display names are now always derived from the profile's `name` via a curated vendor/brand table (`deepseek-flash` → `DeepSeek Flash`, `spark` → `Spark`), so the flag is superfluous. Any script that passes `--label` to `agents harness fork` will receive a CLI error; remove the flag to migrate.
+
+- **`agents run` no longer auto-picks an account whose token the server has already rejected.** Account rotation judged an account "signed in" from a local heuristic — a credential file is present and its email decodes — which cannot tell a good token from a revoked-but-unexpired one, so `balanced`/`available`/`run auto` could route into a `revoked` account and die at spawn ("session expired"). Eligibility now also reads the daemon's live auth-health probe (`auth-health.ts`): a `revoked` (401/403) account is excluded from the pick, reported as `revoked` by the pre-flight readiness check, shown as "needs re-login" in the account picker, and named in the teams throttle warning. Fail-open: a missing probe or any non-revoked verdict never blocks a launch (a cached `revoked` keeps gating until the daemon's next probe clears it). Source: `apps/cli/src/lib/rotate.ts`, `apps/cli/src/commands/run-account-picker.ts`, `apps/cli/src/commands/teams.ts`, `apps/cli/docs/hosts.md`.
+
+- **Scheduled routines no longer overlap or outlive their configured timeout (RUSH-2186).** Detached cron, catchup, and monitor launches now take a cross-process per-routine claim and refuse a second fire while the prior run is alive. The configured deadline is persisted in run metadata; both the live runner and the restart-recovery monitor kill the owned process tree and record `timeout` when it expires. Source: `apps/cli/src/lib/runner.ts`, `apps/cli/src/lib/routines.ts`, `apps/cli/docs/03-routines.md`.
+
+- **`agents snapshot` — one-process poll for inventory + active sessions (Phase 4 surface consolidation).**
+  Consumers (Factory, scripts, menubar) were forking `view --json` × N harnesses plus
+  `sessions --active --json` (and sometimes feed) on every tick. `agents snapshot --json`
+  returns the same shapes in one invocation: `inventory` (view), `sessions` (active rows),
+  optional `--with-feed` / `--with-sync`. Default sessions scope is this machine; `--all-hosts`
+  matches full `sessions --active` fan-out. Does **not** redefine `agents status`, which stays
+  the UnifiedSyncStatus sync contract. Source: `apps/cli/src/commands/snapshot.ts`,
+  `apps/cli/src/lib/snapshot.ts`.
+
 ## 1.22.7
 
 - **`agents feed --project <name>` scopes the whole feed to one project.** Open
