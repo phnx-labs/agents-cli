@@ -171,6 +171,27 @@ automatically.
 | `--duration <sec>` | Recording duration cap (default 60s) |
 | `--max-mb <mb>` | Recording size cap (default 25 MB) |
 
+### Driving another machine's browser (`--host`) and consent
+
+Any `agents browser` command takes the fleet `--host <device>` flag (same as
+`agents sessions`/`teams`/`run`): it runs the command on that device over SSH and
+drives *its* browser, streaming the output back. No hand-built `ssh://` profile
+needed — `agents browser start --host zion` starts a task on `zion`'s own daemon.
+
+Because that lets one machine open a browser on another, the **target decides**
+whether it allows it:
+
+| Command | Description |
+|---------|-------------|
+| `agents browser remote-control` | Print whether this machine accepts remote drives |
+| `agents browser remote-control on` | Allow other fleet machines to drive this browser |
+| `agents browser remote-control off` | Refuse remote drives (the default) |
+
+Consent is **device-local** (stored in `~/.agents/devices/<machine>/agents.yaml`,
+never synced) and **off by default**: a `browser --host <this-machine> start` from
+elsewhere is refused with a message naming how to enable it, until the owner runs
+`agents browser remote-control on` here. Local starts (no `--host`) are never gated.
+
 ### Navigation
 
 | Command | Description |

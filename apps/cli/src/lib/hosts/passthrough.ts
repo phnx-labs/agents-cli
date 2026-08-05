@@ -573,7 +573,10 @@ export async function maybeRunOnHost(
   // UNDER the doctor PATH so that PATH still wins — without this the remote
   // re-resolves the actor from THIS box's SSH_CONNECTION and mis-credits it
   // (RUSH-2028). Flows to both POSIX (export) and Windows ($env:) dialects.
-  const env = withActorEnv(doctorPath);
+  // AGENTS_FLEET_REMOTE marks this as a fleet-dispatched `--host` run so the far
+  // side can gate consent-sensitive actions — the browser consent gate
+  // (lib/browser/remote-control.ts) reads it to allow/deny a cross-machine drive.
+  const env = withActorEnv({ ...doctorPath, AGENTS_FLEET_REMOTE: '1' });
   const remoteCmd = buildRemoteAgentsInvocation(forwarded, remoteCwd, remoteOs, env);
   const code = sshStream(target, remoteCmd, { tty: interactive, multiplex: true });
   if (code === 255) {
