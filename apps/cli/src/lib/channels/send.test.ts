@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Meta } from '../types.js';
 import {
   composeSendText,
@@ -6,6 +6,11 @@ import {
   readOwnerDest,
   resolveSendEnvelope,
 } from './send.js';
+import { getOwnerNotifyFromHumans } from '../humans.js';
+
+vi.mock('../humans.js', () => ({
+  getOwnerNotifyFromHumans: vi.fn(() => null),
+}));
 
 const metaWithOwner = {
   notify: { owner: { channel: 'imessage', to: '+18055550100' } },
@@ -195,5 +200,58 @@ describe('resolveSendEnvelope', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.envelope.text).toBe('https://x.test');
+  });
+});
+
+describe('owner destination from humans.yaml', () => {
+  afterEach(() => {
+    vi.mocked(getOwnerNotifyFromHumans).mockReturnValue(null);
+  });
+
+  it('readOwnerDest prefers humans.yaml over meta.notify.owner', () => {
+    vi.mocked(getOwnerNotifyFromHumans).mockReturnValueOnce({ channel: 'imessage', to: '+12125550123' });
+    expect(readOwnerDest(metaWithOwner)).toEqual({ channel: 'imessage', to: '+12125550123' });
+  });
+
+  it('readOwnerDest falls back to meta.notify.owner when humans.yaml absent', () => {
+    expect(readOwnerDest(metaWithOwner)).toEqual({ channel: 'imessage', to: '+18055550100' });
+  });
+
+  it('resolveSendEnvelope uses humans.yaml for --to owner with no notify.owner', () => {
+    vi.mocked(getOwnerNotifyFromHumans).mockReturnValueOnce({ channel: 'imessage', to: '+12125550123' });
+    const r = resolveSendEnvelope({ text: 'ping', to: 'owner' }, metaEmpty);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.envelope.channel).toBe('imessage');
+    expect(r.envelope.to).toBe('+12125550123');
+  });
+
+  it('resolveSendEnvelope ownerMode uses humans.yaml with no notify.owner', () => {
+    vi.mocked(getOwnerNotifyFromHumans).mockReturnValueOnce({ channel: 'imessage', to: '+12125550123' });
+    const r = resolveSendEnvelope({ text: 'ping', ownerMode: true }, metaEmpty);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.envelope).toMatchObject({ channel: 'imessage', to: '+12125550123' });
+  });
+
+  it('explicit --channel/--to override humans.yaml', () => {
+    vi.mocked(getOwnerNotifyFromHumans).mockReturnValueOnce({ channel: 'imessage', to: '+12125550123' });
+    const r = resolveSendEnvelope(
+      { text: 'ping', ownerMode: true, channel: 'desktop', to: 'local' },
+      metaEmpty,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.envelope.channel).toBe('desktop');
+    expect(r.envelope.to).toBe('local');
+  });
+
+  it('humans.yaml takes precedence over meta.notify.owner', () => {
+    vi.mocked(getOwnerNotifyFromHumans).mockReturnValueOnce({ channel: 'slack', to: 'U123' });
+    const r = resolveSendEnvelope({ text: 'ping', to: 'owner' }, metaWithOwner);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.envelope.channel).toBe('slack');
+    expect(r.envelope.to).toBe('U123');
   });
 });
