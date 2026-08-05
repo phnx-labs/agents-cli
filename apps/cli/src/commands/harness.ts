@@ -69,7 +69,6 @@ export interface ForkOptions {
   baseUrl?: string;
   authProvider?: string;
   version?: string;
-  label?: string;
   description?: string;
   keyStdin?: boolean;
   force?: boolean;
@@ -186,7 +185,6 @@ Examples:
     .option('--base-url <url>', 'Custom endpoint base URL (claude/codex hosts)')
     .option('--auth-provider <provider>', 'Attach a keychain-backed API key under this provider')
     .option('--version <version>', 'Pin the host CLI version (e.g., 1.16.0)')
-    .option('--label <text>', 'Human-facing name shown by `agents view` (defaults to <name>)')
     .option('--description <text>', 'One-line description')
     .option('--key-stdin', 'Read the API key from stdin instead of prompting (for scripts/CI)')
     .option('--force', 'Overwrite an existing harness with the same name')

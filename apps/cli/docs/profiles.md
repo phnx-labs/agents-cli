@@ -47,7 +47,7 @@ agents harness fork claude corp --model gpt-x --base-url https://gw.corp/v1 --au
 agents harness fork deepseek deepseek-chat --model deepseek/deepseek-chat-v3
 ```
 
-Forking a **native** harness requires `--model` — there is no model to inherit. Forking a **custom** harness copies everything (env, endpoint, auth binding, `fallback_model`, host version pin) and applies only the flags you pass; the two diverge from that point, so removing the source never affects the fork. `--label` sets the name `agents view` prints, `--force` overwrites an existing harness of the same name. The fork records its parent as `forkedFrom:` in the YAML — display-only lineage.
+Forking a **native** harness requires `--model` — there is no model to inherit. Forking a **custom** harness copies everything (env, endpoint, auth binding, `fallback_model`, host version pin) and applies only the flags you pass; the two diverge from that point, so removing the source never affects the fork. `--force` overwrites an existing harness of the same name. The name `agents view` prints is derived from the harness `name` — `deepseek-flash` renders as `DeepSeek Flash` — so there is no flag to set it. The fork records its parent as `forkedFrom:` in the YAML — display-only lineage.
 
 ### Custom harnesses are their own agent type
 
