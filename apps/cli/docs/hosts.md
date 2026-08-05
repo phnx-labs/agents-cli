@@ -47,11 +47,14 @@ composes the full dispatch stack:
 2. **Harness** — `pickHarnessWeighted` (lib/rotate.ts): installed harnesses with
    ≥1 healthy account, weighted by best-account headroom
    (`100 − min routingUsed%`), sampled with the same `weightedRandomByCapacity`
-   the account layer uses. A harness whose accounts are all rate-limited or
-   signed out is excluded outright. Naming a concrete harness (`run claude`)
-   pins this layer.
+   the account layer uses. A harness whose accounts are all rate-limited,
+   signed out, or server-revoked (the live auth-health probe saw a 401/403) is
+   excluded outright. Naming a concrete harness (`run claude`) pins this layer.
 3. **Account** — `pickBalancedCandidate` within the chosen harness (or the
-   `--strategy` you passed) — unchanged.
+   `--strategy` you passed). Eligibility excludes an account that is
+   rate-limited, out of credits, signed out, or `revoked` (a token the daemon's
+   live auth-health probe saw rejected — so rotation never routes into a login
+   that would fail at spawn). Fail-open: a missing or stale probe never blocks.
 
 Every layer fails loud when it finds nothing: zero healthy accounts on any
 harness exits nonzero naming each harness's exclusion reason and the earliest

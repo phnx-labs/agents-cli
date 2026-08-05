@@ -47,6 +47,7 @@ function candidate(over: Partial<RotateCandidate> & { version: string }): Rotate
     usageMinutesToLimit: null,
     plan: 'Max',
     signedIn: true,
+    authVerdict: null,
     lastActive: null,
     ...over,
   };
