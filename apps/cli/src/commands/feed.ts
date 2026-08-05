@@ -97,6 +97,41 @@ interface PostCliOpts {
   json?: boolean;
 }
 
+export const FEED_POST_HELP = `
+Examples:
+  # Title (subject) + body. Phone broadcasts put title first, body after a
+  # blank line, then a "Sent from agent/session on host" footer.
+  agents feed post --title "CHANGELOG pushed" "Watching CI and mac-mini E2E"
+  agents feed post --title "Cover ready" "render at ./out/cover.png" --attach ./out/cover.png
+  agents feed post --title "Ready for review" "PR opened, waiting on prix-cloud" --json
+
+  # Worth interrupting someone over - reaches sinks gated on minLevel: important:
+  agents feed post --title "npm token expired" "Cannot publish the release" --level important
+
+  # Stuck: opens a needs-you block and always broadcasts at important:
+  agents feed post --title "Force-push denied" "git-guard blocked PR #1749" --blocked
+  agents feed post --title "Publish or wait?" "npm publish now or after review" --blocked --option publish --option wait
+  agents feed post --title "Delete preview env?" "stale preview still running" --blocked --default "leave it"
+
+  # Exhaust self-serve FIRST. A block is for what you genuinely cannot do:
+  # a credential only the user holds, a decision only they can make, an
+  # approval only they can give. Not "should I do the obvious next step?".
+
+  # Outside a run, pass the session explicitly:
+  agents feed post --title "Manual note" "context for the next agent" --session 00998b0e-2d15-4d2f-a58b-974a886c9b47
+
+Identity (session, agent, host, runtime, pid, launchId) is stamped automatically
+and rides the phone footer of feed.broadcast {message}. Domain facts (tickets,
+PRs) are not CLI flags - the ticket is joined from the session index at post
+time. No em-dashes in title/body - they are scrubbed on the way out.
+
+Configure where a post is mirrored under feed.broadcast in agents.yaml - see
+docs/06-observability.md. A milestone is always recorded, but it does not text
+the owner when the sink has minLevel: important. Add --level important for a
+phone-worthy successful update. Use --blocked only when work cannot continue.
+The owner destination comes from humans.yaml; do not duplicate it in agents.yaml.
+`;
+
 export const FEED_NO_FANOUT_ENV = 'AGENTS_FEED_LOCAL';
 
 /** Right-hand masthead summary: `N blocks · M agents`. */
@@ -349,44 +384,14 @@ export function registerFeedCommand(program: Command): void {
     .description('Post a status update to the fleet activity stream (for agents)')
     .argument('<text...>', 'Body: what just happened (after --title)')
     .requiredOption('--title <title>', 'Short subject, ~4-5 words (phone first line)')
-    .option('--session <id>', 'Session id escape hatch (default: auto from env / pid registry)')
+    .option('--session <id>', 'Session id escape hatch (default: auto from env / launch activity / pid registry)')
     .option('--attach <path-or-url...>', 'Attach an artifact (local file or URL); repeatable')
     .option('--level <level>', 'How loudly to broadcast: milestone (default) or important. Configured sinks with minLevel: important only fire on the latter.', 'milestone')
     .option('--blocked', 'You are STUCK and need the user. Opens an answerable block and always broadcasts at important - do not also pass --level.')
     .option('--option <label...>', 'With --blocked: an answer the user can pick; repeatable')
     .option('--default <answer>', 'With --blocked: a safe default policy may apply if nobody answers in time')
     .option('--json', 'Emit the written event as JSON')
-    .addHelpText('after', `
-Examples:
-  # Title (subject) + body. Phone broadcasts put title first, body after a
-  # blank line, then a "Sent from agent/session on host" footer.
-  agents feed post --title "CHANGELOG pushed" "Watching CI and mac-mini E2E"
-  agents feed post --title "Cover ready" "render at ./out/cover.png" --attach ./out/cover.png
-  agents feed post --title "Ready for review" "PR opened, waiting on prix-cloud" --json
-
-  # Worth interrupting someone over - reaches sinks gated on minLevel: important:
-  agents feed post --title "npm token expired" "Cannot publish the release" --level important
-
-  # Stuck: opens a needs-you block and always broadcasts at important:
-  agents feed post --title "Force-push denied" "git-guard blocked PR #1749" --blocked
-  agents feed post --title "Publish or wait?" "npm publish now or after review" --blocked --option publish --option wait
-  agents feed post --title "Delete preview env?" "stale preview still running" --blocked --default "leave it"
-
-  # Exhaust self-serve FIRST. A block is for what you genuinely cannot do:
-  # a credential only the user holds, a decision only they can make, an
-  # approval only they can give. Not "should I do the obvious next step?".
-
-  # Outside a run, pass the session explicitly:
-  agents feed post --title "Manual note" "context for the next agent" --session 00998b0e-2d15-4d2f-a58b-974a886c9b47
-
-Identity (session, agent, host, runtime, pid, launchId) is stamped automatically
-and rides the phone footer of feed.broadcast {message}. Domain facts (tickets,
-PRs) are not CLI flags - the ticket is joined from the session index at post
-time. No em-dashes in title/body - they are scrubbed on the way out.
-
-Configure where a post is mirrored under feed.broadcast in agents.yaml - see
-docs/06-observability.md.
-`)
+    .addHelpText('after', FEED_POST_HELP)
     .action(async (
       textParts: string[],
       opts: PostCliOpts,

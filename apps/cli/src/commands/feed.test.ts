@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
+import { Command } from 'commander';
 import type { OpenBlock } from '../lib/feed.js';
 import {
   controlFeedSession,
@@ -13,6 +14,8 @@ import {
   resolveFeedFilter,
   sessionHintsFromActive,
   shouldIncludeLocalFeed,
+  registerFeedCommand,
+  FEED_POST_HELP,
 } from './feed.js';
 import { groupBlocksByOutcome } from '../lib/feed-outcome.js';
 import { GLYPH } from '../lib/comms-render.js';
@@ -27,6 +30,21 @@ describe('resolveFeedFilter', () => {
     expect(resolveFeedFilter('Updates')).toBe('updates');
     expect(resolveFeedFilter('update')).toBe('updates');
     expect(resolveFeedFilter('ALL')).toBe('all');
+  });
+});
+
+describe('feed post help', () => {
+  it('explains session recovery and the milestone-versus-important delivery policy', () => {
+    const program = new Command();
+    registerFeedCommand(program);
+    const feed = program.commands.find((command) => command.name() === 'feed');
+    const post = feed?.commands.find((command) => command.name() === 'post');
+    const help = post?.helpInformation() ?? '';
+
+    expect(help).toContain('launch activity / pid registry');
+    expect(FEED_POST_HELP).toContain('A milestone is always recorded, but it does not text');
+    expect(FEED_POST_HELP).toContain('Add --level important for a');
+    expect(FEED_POST_HELP).toContain('The owner destination comes from humans.yaml');
   });
 });
 
