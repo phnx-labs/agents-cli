@@ -30,7 +30,10 @@ import {
   authEnvKeyForHost,
   getProfilePath,
   validateProfileName,
+  editProfile,
+  renameProfile,
   type Profile,
+  type EditProfileOptions,
 } from '../lib/profiles.js';
 import { listPresets } from '../lib/profiles-presets.js';
 import { AGENTS, ALL_AGENT_IDS, resolveAgentName } from '../lib/agents.js';
@@ -303,5 +306,71 @@ Examples:
         process.exit(1);
       }
       console.log(chalk.green(`Harness '${name}' removed.`));
+    });
+
+  cmd
+    .command('edit <name>')
+    .description('Edit a custom harness in place (model, label, description, base-url, version, fallback).')
+    .option('--model <id>', 'Swap the pinned model (e.g., meta/muse-spark-2.0)')
+    .option('--base-url <url>', 'Set or replace the endpoint base URL (claude/codex hosts). Empty string clears it.')
+    .option('--label <text>', 'Set the display label shown by `agents view`. Empty string clears it (falls back to name).')
+    .option('--description <text>', 'Set the description. Empty string clears it.')
+    .option('--version <ver>', 'Pin the host CLI version. Empty string unpins (tracks latest).')
+    .option('--fallback-model <id>', 'Set the fallback model. Empty string clears it.')
+    .addHelpText(
+      'after',
+      `
+Examples:
+  # Upgrade the pinned model
+  agents harness edit spark --model meta/muse-spark-2.0
+
+  # Rename the display label without renaming the harness
+  agents harness edit spark --label "Muse Spark 2.0"
+
+  # Clear the display label (falls back to harness name)
+  agents harness edit spark --label ""
+
+  # Point to a new private endpoint
+  agents harness edit corp --base-url https://gw.corp/v2
+
+  # Set a fallback model for rate-limit resilience
+  agents harness edit spark --fallback-model meta/muse-spark-lite
+`,
+    )
+    .action((name: string, opts: EditProfileOptions) => {
+      try {
+        const changed = editProfile(name, opts);
+        console.log(chalk.green(`Harness '${name}' updated.`));
+        console.log(chalk.gray(`Model:  ${profileModelLabel(changed)}`));
+        if (changed.label) console.log(chalk.gray(`Label:  ${changed.label}`));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  cmd
+    .command('rename <name> <new-name>')
+    .description('Rename a custom harness — updates the file name and its internal name field.')
+    .addHelpText(
+      'after',
+      `
+Examples:
+  # Rename 'spark' to 'muse'
+  agents harness rename spark muse
+
+  # Rename then run under the new name
+  agents harness rename deepseek ds && agents run ds "hello"
+`,
+    )
+    .action((name: string, newName: string) => {
+      try {
+        renameProfile(name, newName);
+        console.log(chalk.green(`Harness '${name}' renamed to '${newName}'.`));
+        console.log(chalk.gray(`Run: agents run ${newName} "hello"`));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
     });
 }

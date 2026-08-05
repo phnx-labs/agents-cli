@@ -539,3 +539,95 @@ export function resolveProfileForRun(name: string): ResolvedProfileRun {
 export function getPresetForProfile(profile: Profile): Preset | undefined {
   return profile.preset ? getPreset(profile.preset) : undefined;
 }
+
+/** Fields that can be changed in-place by {@link editProfile}. */
+export interface EditProfileOptions {
+  /** Swap the pinned model. Written onto the profile's own model env key, falling back to the host default. */
+  model?: string;
+  /** Set or replace the base URL for OpenAI/Anthropic-compatible hosts. Empty string clears it. */
+  baseUrl?: string;
+  /** Set the human-facing display label. Empty string clears it (falls back to profile name). */
+  label?: string;
+  /** Set the description. Empty string clears it. */
+  description?: string;
+  /** Re-pin the host CLI version. Empty string unpins (tracks the latest). */
+  version?: string;
+  /** Set the fallback model. Empty string clears it. */
+  fallbackModel?: string;
+}
+
+/**
+ * Edit a profile's fields in place and write it back to disk.
+ * Only keys present in `opts` are changed; every other field is preserved.
+ * Returns the updated profile.
+ */
+export function editProfile(name: string, opts: EditProfileOptions): Profile {
+  const profile = readProfile(name);
+
+  if (opts.model !== undefined) {
+    const envKey = profileModelEnvKey(profile) ?? modelEnvKeyForHost(profile.host.agent);
+    if (opts.model) {
+      profile.env[envKey] = opts.model;
+    } else {
+      delete profile.env[envKey];
+    }
+  }
+
+  if (opts.baseUrl !== undefined) {
+    const key = baseUrlEnvKeyForHost(profile.host.agent);
+    if (!key) {
+      throw new Error(`Host '${profile.host.agent}' has no known base-URL env var; --base-url is not supported for this host.`);
+    }
+    if (opts.baseUrl) {
+      profile.env[key] = opts.baseUrl;
+    } else {
+      delete profile.env[key];
+    }
+  }
+
+  if (opts.label !== undefined) {
+    if (opts.label) profile.label = opts.label;
+    else delete profile.label;
+  }
+
+  if (opts.description !== undefined) {
+    if (opts.description) profile.description = opts.description;
+    else delete profile.description;
+  }
+
+  if (opts.version !== undefined) {
+    if (opts.version) {
+      profile.host = { ...profile.host, version: opts.version };
+    } else {
+      const { version: _v, ...rest } = profile.host;
+      profile.host = rest;
+    }
+  }
+
+  if (opts.fallbackModel !== undefined) {
+    if (opts.fallbackModel) {
+      profile.fallback_model = opts.fallbackModel;
+    } else {
+      delete profile.fallback_model;
+    }
+  }
+
+  writeProfile(profile);
+  return profile;
+}
+
+/**
+ * Rename a profile: writes a new YAML file under `newName` and deletes the old one.
+ * The `name` field inside the YAML is updated to match. Throws when `newName`
+ * already exists or either name fails validation.
+ */
+export function renameProfile(oldName: string, newName: string): void {
+  validateProfileName(newName);
+  if (profileExists(newName)) {
+    throw new Error(`Harness '${newName}' already exists.`);
+  }
+  const profile = readProfile(oldName); // throws if oldName not found
+  profile.name = newName;
+  writeProfile(profile);
+  deleteProfile(oldName);
+}

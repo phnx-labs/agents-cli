@@ -13,6 +13,9 @@ import {
   readProfile,
   resolveProfileForRun,
   writeProfile,
+  editProfile,
+  renameProfile,
+  profileExists,
   type Profile,
 } from './profiles.js';
 import { setKeychainBackendForTest, setKeychainHeadlessDetectorForTest, type KeychainBackend } from './secrets/index.js';
@@ -376,5 +379,137 @@ describe('profileSummary — first-class harness fields', () => {
     expect(summary.label).toBe('spark');
     expect(summary.hostVersion).toBeNull();
     expect(summary.forkedFrom).toBeNull();
+  });
+});
+
+describe('editProfile — in-place field edits', () => {
+  function seedProfile(p: Profile): void {
+    writeProfile(p);
+  }
+
+  it('swaps the model onto the existing model env key', () => {
+    seedProfile({ name: 'spark', host: { agent: 'opencode' }, env: { OPENCODE_MODEL: 'meta/muse-spark-1.1' } });
+    const updated = editProfile('spark', { model: 'meta/muse-spark-2.0' });
+    expect(updated.env.OPENCODE_MODEL).toBe('meta/muse-spark-2.0');
+    expect(readProfile('spark').env.OPENCODE_MODEL).toBe('meta/muse-spark-2.0');
+  });
+
+  it('falls back to the host model env key when no key is already present', () => {
+    seedProfile({ name: 'bare', host: { agent: 'claude' }, env: {} });
+    editProfile('bare', { model: 'claude-opus-5' });
+    expect(readProfile('bare').env.ANTHROPIC_MODEL).toBe('claude-opus-5');
+  });
+
+  it('sets the label', () => {
+    seedProfile({ name: 'spark', host: { agent: 'opencode' }, env: {} });
+    editProfile('spark', { label: 'Muse Spark 2.0' });
+    expect(readProfile('spark').label).toBe('Muse Spark 2.0');
+  });
+
+  it('clears the label when passed as empty string', () => {
+    seedProfile({ name: 'spark', host: { agent: 'opencode' }, env: {}, label: 'Old Label' });
+    editProfile('spark', { label: '' });
+    expect(readProfile('spark').label).toBeUndefined();
+  });
+
+  it('sets the description', () => {
+    seedProfile({ name: 'spark', host: { agent: 'opencode' }, env: {} });
+    editProfile('spark', { description: 'fast coding assistant' });
+    expect(readProfile('spark').description).toBe('fast coding assistant');
+  });
+
+  it('clears the description when passed as empty string', () => {
+    seedProfile({ name: 'spark', host: { agent: 'opencode' }, env: {}, description: 'old' });
+    editProfile('spark', { description: '' });
+    expect(readProfile('spark').description).toBeUndefined();
+  });
+
+  it('sets the base URL for a claude host', () => {
+    seedProfile({ name: 'corp', host: { agent: 'claude' }, env: {} });
+    editProfile('corp', { baseUrl: 'https://gw.corp/v1' });
+    expect(readProfile('corp').env.ANTHROPIC_BASE_URL).toBe('https://gw.corp/v1');
+  });
+
+  it('clears the base URL when passed as empty string', () => {
+    seedProfile({ name: 'corp', host: { agent: 'claude' }, env: { ANTHROPIC_BASE_URL: 'https://old.corp' } });
+    editProfile('corp', { baseUrl: '' });
+    expect(readProfile('corp').env.ANTHROPIC_BASE_URL).toBeUndefined();
+  });
+
+  it('rejects --base-url on a host with no known base-URL env var', () => {
+    seedProfile({ name: 'grok-h', host: { agent: 'grok' }, env: {} });
+    expect(() => editProfile('grok-h', { baseUrl: 'https://x.ai' })).toThrow(/no known base-URL env var/i);
+  });
+
+  it('pins the host version', () => {
+    seedProfile({ name: 'spark', host: { agent: 'opencode' }, env: {} });
+    editProfile('spark', { version: '1.2.0' });
+    expect(readProfile('spark').host.version).toBe('1.2.0');
+  });
+
+  it('unpins the host version when passed as empty string', () => {
+    seedProfile({ name: 'spark', host: { agent: 'opencode', version: '1.1.0' }, env: {} });
+    editProfile('spark', { version: '' });
+    expect(readProfile('spark').host.version).toBeUndefined();
+  });
+
+  it('sets the fallback model', () => {
+    seedProfile({ name: 'spark', host: { agent: 'opencode' }, env: { OPENCODE_MODEL: 'meta/muse-spark-1.1' } });
+    editProfile('spark', { fallbackModel: 'meta/muse-spark-lite' });
+    expect(readProfile('spark').fallback_model).toBe('meta/muse-spark-lite');
+  });
+
+  it('clears the fallback model when passed as empty string', () => {
+    seedProfile({ name: 'spark', host: { agent: 'opencode' }, env: {}, fallback_model: 'old-fallback' });
+    editProfile('spark', { fallbackModel: '' });
+    expect(readProfile('spark').fallback_model).toBeUndefined();
+  });
+
+  it('leaves untouched fields unchanged', () => {
+    seedProfile({ name: 'spark', host: { agent: 'opencode' }, env: { OPENCODE_MODEL: 'meta/muse-spark-1.1' }, label: 'Spark', description: 'fast' });
+    editProfile('spark', { model: 'meta/muse-spark-2.0' });
+    const updated = readProfile('spark');
+    expect(updated.label).toBe('Spark');
+    expect(updated.description).toBe('fast');
+  });
+
+  it('throws when the profile does not exist', () => {
+    expect(() => editProfile('nosuch', { model: 'x' })).toThrow(/not found/i);
+  });
+});
+
+describe('renameProfile — rename file and name field', () => {
+  it('creates the new file, updates name, and removes the old file', () => {
+    writeProfile({ name: 'spark', host: { agent: 'opencode' }, env: { OPENCODE_MODEL: 'meta/muse-spark-1.1' } });
+    renameProfile('spark', 'muse');
+    expect(profileExists('spark')).toBe(false);
+    expect(profileExists('muse')).toBe(true);
+    const renamed = readProfile('muse');
+    expect(renamed.name).toBe('muse');
+    expect(renamed.env.OPENCODE_MODEL).toBe('meta/muse-spark-1.1');
+  });
+
+  it('preserves all other fields across the rename', () => {
+    writeProfile({ name: 'spark', host: { agent: 'opencode' }, env: {}, label: 'Spark', description: 'fast', forkedFrom: 'opencode' });
+    renameProfile('spark', 'muse');
+    const renamed = readProfile('muse');
+    expect(renamed.label).toBe('Spark');
+    expect(renamed.description).toBe('fast');
+    expect(renamed.forkedFrom).toBe('opencode');
+  });
+
+  it('throws when new name already exists', () => {
+    writeProfile({ name: 'spark', host: { agent: 'opencode' }, env: {} });
+    writeProfile({ name: 'muse', host: { agent: 'opencode' }, env: {} });
+    expect(() => renameProfile('spark', 'muse')).toThrow(/already exists/i);
+  });
+
+  it('throws when old name does not exist', () => {
+    expect(() => renameProfile('nosuch', 'newname')).toThrow(/not found/i);
+  });
+
+  it('rejects an invalid new name', () => {
+    writeProfile({ name: 'spark', host: { agent: 'opencode' }, env: {} });
+    expect(() => renameProfile('spark', 'bad name!')).toThrow(/invalid profile name/i);
   });
 });
