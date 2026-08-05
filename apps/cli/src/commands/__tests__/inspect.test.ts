@@ -34,6 +34,13 @@ function makeFixture(): string {
   // Suppress the update-check network call.
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf-8')) as { version: string };
   mkdir(path.join(home, '.agents', '.cache'));
+  // A normal (non-isolated) install owns the bare shim. The fixture omitted it, so
+  // it described a state that cannot occur — and `inspect` now reports the shim only
+  // when it is really there, since printing a phantom path told isolated users their
+  // copy sat on PATH when it did not.
+  mkdir(path.join(home, '.agents', '.cache', 'shims'));
+  writeFile(path.join(home, '.agents', '.cache', 'shims', 'claude'), '#!/bin/sh\nexit 0\n');
+  fs.chmodSync(path.join(home, '.agents', '.cache', 'shims', 'claude'), 0o755);
   writeFile(
     path.join(home, '.agents', '.cache', '.update-check'),
     JSON.stringify({ lastCheck: Date.now(), latestVersion: pkg.version })

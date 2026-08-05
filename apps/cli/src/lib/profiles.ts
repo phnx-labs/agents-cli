@@ -13,6 +13,7 @@ import type { AgentId } from './types.js';
 import { getUserAgentsDir } from './state.js';
 import { getKeychainToken, hasKeychainToken, keychainItemName } from './secrets/profiles.js';
 import { getPreset, type Preset } from './profiles-presets.js';
+import { MODEL_TIERS, isTierToken, type ModelTier } from './model-tiers.js';
 
 /** A named profile binding an agent host, env vars, and optional keychain auth. */
 export interface Profile {
@@ -37,9 +38,10 @@ export interface Profile {
   preset?: string;
   provider?: string;
   /**
-   * Human-facing label for the harness — what `agents view` prints as the
-   * agent-type header, the same slot `AGENTS[id].name` fills for a native
-   * harness. Defaults to the profile name when unset.
+   * Stored for backward-compatible YAML parsing only — no longer read for
+   * display. `profileLabel()` always derives the display name from `name` via
+   * the vendor/brand table. Old YAML files that carry this key still parse
+   * correctly; it is simply ignored.
    */
   label?: string;
   /**
@@ -56,6 +58,19 @@ export interface Profile {
    * changes; auth, base URL, and every other profile env value are preserved.
    */
   fallback_model?: string;
+  /**
+   * Per-tier model ids for this harness's OWN catalog, keyed by the same cost
+   * tiers `agents run --model cheap|default|best|ultra` uses for a native
+   * agent. Lets a custom harness (which runs through a host agent's binary,
+   * e.g. `deepseek-flash` hosted on `claude`) resolve a tier against its own
+   * models instead of colliding with the host agent's native catalog
+   * (`resolveTier` in model-tiers.ts, which only knows native agents).
+   * An unset tier clamps to the next CHEAPER tier that IS set (see
+   * `resolveProfileTierModel`). Omitted entirely -> tiers are not supported
+   * for this profile and a requested tier falls back to the harness's single
+   * pinned model, unchanged from before this field existed.
+   */
+  models?: Partial<Record<ModelTier, string>>;
 }
 
 /**
@@ -65,7 +80,7 @@ export interface Profile {
  */
 export interface ProfileSummary {
   name: string;
-  /** Human-facing header label — `label` when set, else the profile name. */
+  /** Human-facing header label — always derived from `name` via the vendor/brand table. */
   label: string;
   agent: AgentId;
   host: string;
@@ -277,11 +292,47 @@ export function profileAuthLabel(profile: Profile): string {
 }
 
 /**
- * Header label for the harness — the slot `AGENTS[id].name` fills for a native
- * harness, so `agents view` can print custom and native harnesses the same way.
+ * Curated vendor/brand display names, matched case-insensitively per token.
+ * Entries with a space (e.g. 'Moonshot AI') are single-token → multi-word expansions.
+ */
+const VENDOR_TABLE: ReadonlyArray<readonly [string, string]> = [
+  ['deepseek', 'DeepSeek'],
+  ['openai', 'OpenAI'],
+  ['anthropic', 'Anthropic'],
+  ['claude', 'Claude'],
+  ['grok', 'Grok'],
+  ['xai', 'xAI'],
+  ['gpt', 'GPT'],
+  ['meta', 'Meta'],
+  ['mistral', 'Mistral'],
+  ['mistralai', 'Mistral'],
+  ['qwen', 'Qwen'],
+  ['gemini', 'Gemini'],
+  ['moonshot', 'Moonshot AI'],
+  ['moonshotai', 'Moonshot AI'],
+  ['kimi', 'Kimi'],
+  ['cohere', 'Cohere'],
+  ['perplexity', 'Perplexity'],
+];
+
+function tokenToDisplayName(token: string): string {
+  const lower = token.toLowerCase();
+  for (const [key, display] of VENDOR_TABLE) {
+    if (lower === key) return display;
+  }
+  return token.charAt(0).toUpperCase() + token.slice(1);
+}
+
+/**
+ * Header label for the harness — derived from `profile.name` by splitting on
+ * `[-_]` and mapping each token through the vendor/brand table. Never reads
+ * the stored `label` field; old YAML files with a `label:` key are unaffected.
+ *
+ * Examples: `deepseek-flash` → `'DeepSeek Flash'`, `spark` → `'Spark'`,
+ * `deepseek_chat_v3` → `'DeepSeek Chat V3'`.
  */
 export function profileLabel(profile: Profile): string {
-  return profile.label || profile.name;
+  return profile.name.split(/[-_]/).map(tokenToDisplayName).join(' ');
 }
 
 /** Build a stable, machine-readable summary for list and view surfaces. */
@@ -376,8 +427,6 @@ export interface HostModelOptions {
   /** Env var the host reads its auth token from; pair with `provider` to attach keychain auth. */
   authEnvVar?: string;
   description?: string;
-  /** Human-facing header label; defaults to the harness name. */
-  label?: string;
 }
 
 /**
@@ -400,7 +449,6 @@ export function profileFromHostModel(name: string, host: AgentId, model: string,
     provider: opts.provider ?? host,
     forkedFrom: host,
   };
-  if (opts.label) profile.label = opts.label;
   if (opts.provider && opts.authEnvVar) {
     profile.auth = { envVar: opts.authEnvVar, keychainItem: keychainItemName(opts.provider) };
     profile.authOptional = false;
@@ -421,7 +469,6 @@ export interface ForkProfileOptions {
   authEnvVar?: string;
   /** Re-pin (or unpin, with an empty string) the host CLI version. */
   version?: string;
-  label?: string;
   description?: string;
 }
 
@@ -454,12 +501,6 @@ export function forkProfile(source: Profile, name: string, opts: ForkProfileOpti
     description: opts.description ?? (opts.model ? `Forked from ${source.name}: ${opts.model}` : source.description),
     forkedFrom: source.name,
   };
-  // `label` is the header `agents view` prints, so an inherited one would make
-  // the fork and its source visually identical — the ambiguity a per-harness
-  // block exists to remove. A fork carries a label only when it is given one;
-  // otherwise `profileLabel` falls back to the fork's own name.
-  if (opts.label) forked.label = opts.label;
-  else delete forked.label;
   // A fork that repoints the model or endpoint is no longer that preset — keep
   // the preset link only while the fork still matches what the preset defines.
   if (opts.model || opts.baseUrl) delete forked.preset;
@@ -473,6 +514,53 @@ export function forkProfile(source: Profile, name: string, opts: ForkProfileOpti
     forked.authOptional = source.authOptional ?? false;
   }
   return forked;
+}
+
+/**
+ * Edit an existing profile in-place, applying overrides without changing its
+ * name or lineage. Reuses {@link forkProfile}'s validation and override logic
+ * (model swap, base-URL validation, auth repoint), then restores the original
+ * `forkedFrom` so an edit never self-references the profile.
+ *
+ * Note: this returns the updated `Profile` object but does NOT write it to
+ * disk — callers should follow up with `writeProfile(result)` if persistence
+ * is needed.
+ */
+export function editProfile(source: Profile, opts: ForkProfileOptions = {}): Profile {
+  const edited = forkProfile(source, source.name, opts);
+  // forkProfile sets forkedFrom = source.name; for an in-place edit that would
+  // be a self-reference. Restore the original lineage instead.
+  edited.forkedFrom = source.forkedFrom;
+  return edited;
+}
+
+/**
+ * Rename a profile on disk, then rewrite `forkedFrom` in every other profile
+ * that pointed at the old name so lineage display never goes stale.
+ *
+ * Throws if `oldName` does not exist or `newName` already exists. There is no
+ * `--force` / overwrite path — a collision is a hard error directing the user
+ * to remove the target first.
+ */
+export function renameProfile(oldName: string, newName: string): void {
+  validateProfileName(newName);
+  if (!profileExists(oldName)) {
+    throw new Error(`Profile '${oldName}' not found.`);
+  }
+  if (profileExists(newName)) {
+    throw new Error(`Profile '${newName}' already exists; remove it first.`);
+  }
+  const profile = readProfile(oldName);
+  profile.name = newName;
+  writeProfile(profile);
+  deleteProfile(oldName);
+  // Rewrite forkedFrom in every other profile that referenced the old name.
+  for (const other of listProfiles()) {
+    if (other.name !== newName && other.forkedFrom === oldName) {
+      other.forkedFrom = newName;
+      writeProfile(other);
+    }
+  }
 }
 
 /**
@@ -508,19 +596,68 @@ export interface ResolvedProfileRun {
    * `model` is the value to write on the retry attempt.
    */
   fallbackModel?: { envKey: string; model: string };
+  /**
+   * Set when the caller requested a cost tier (`--model cheap|default|...`)
+   * but this profile has no `models:` entry to resolve it against (not even a
+   * cheaper tier to clamp to). `env` is returned unmodified — the harness's
+   * single pinned model — and this note is informational only, matching the
+   * "using harness default" convention exec.ts's native tier block already
+   * uses; the caller prints it, it never throws.
+   */
+  tierNote?: string;
+  /**
+   * Set when `requestedModel` was a tier token AND this profile resolved it
+   * against its own `models:` map. Callers that forward a `--model` value
+   * downstream (e.g. as `ExecOptions.model`) should substitute this in place
+   * of the original tier token — exec.ts's native tier block only knows how
+   * to resolve a tier against the HOST agent's own catalog, which is the
+   * wrong catalog for a profile's own harness identity. Undefined both when
+   * no tier was requested and when tier resolution degraded (see `tierNote`).
+   */
+  resolvedModel?: string;
+}
+
+/**
+ * Resolve a requested cost tier against a profile's `models:` map. An unset
+ * tier clamps to the next CHEAPER tier that IS set (ultra -> best -> default
+ * -> cheap), mirroring the clamp semantics of `bucketRungs` in
+ * model-tiers.ts. Returns null when the profile declares no `models:` at all,
+ * or none of the tiers at-or-below the request are set.
+ */
+function resolveProfileTierModel(
+  profile: Profile,
+  tier: ModelTier,
+): { model: string; clampedFrom?: ModelTier } | null {
+  if (!profile.models) return null;
+  const idx = MODEL_TIERS.indexOf(tier);
+  for (let i = idx; i >= 0; i--) {
+    const rung = MODEL_TIERS[i];
+    const model = profile.models[rung];
+    if (model) return { model, clampedFrom: rung === tier ? undefined : rung };
+  }
+  return null;
 }
 
 /**
  * Resolve a name into (agent, version, env). Throws if the name is not a
  * profile. Callers are expected to try agent-id resolution first and fall
  * back to this when that fails, so we don't need a "isProfile" probe.
+ *
+ * `requestedModel` is the caller's raw `--model` value. When it is a cost-tier
+ * token (`cheap`/`default`/`best`/`ultra`), it is resolved against the
+ * profile's OWN `models:` map (see `resolveProfileTierModel`) and substituted
+ * into `env` as a concrete model id BEFORE returning — so exec.ts's native
+ * tier-resolution block (which indexes the HOST agent's catalog, e.g. Claude's
+ * own models) never sees a tier token for a profile-based run, and can't
+ * collide the profile's harness identity with its host's catalog.
  */
-export function resolveProfileForRun(name: string): ResolvedProfileRun {
+export function resolveProfileForRun(name: string, requestedModel?: string): ResolvedProfileRun {
   const profile = readProfile(name);
+  const env = resolveProfileEnv(profile);
   const resolved: ResolvedProfileRun = {
     agent: profile.host.agent,
     version: profile.host.version,
-    env: resolveProfileEnv(profile),
+    env,
     profileName: profile.name,
   };
   if (profile.fallback_model) {
@@ -528,6 +665,25 @@ export function resolveProfileForRun(name: string): ResolvedProfileRun {
     if (envKey) {
       resolved.fallbackModel = { envKey, model: profile.fallback_model };
     }
+  }
+  if (isTierToken(requestedModel)) {
+    const tierPick = resolveProfileTierModel(profile, requestedModel);
+    if (tierPick) {
+      const envKey = profileModelEnvKey(profile) ?? modelEnvKeyForHost(profile.host.agent);
+      env[envKey] = tierPick.model;
+      resolved.resolvedModel = tierPick.model;
+      // Mirror the native-harness tier block (lib/exec.ts's resolveTier callers):
+      // a clamp is always announced, never silent, so a user asking for "ultra"
+      // on a harness that only configures "best" knows what it actually got.
+      if (tierPick.clampedFrom) {
+        resolved.tierNote = `no "${requestedModel}" model configured on profile '${profile.name}'; using its "${tierPick.clampedFrom}" tier (${tierPick.model})`;
+      }
+    }
+    // No `models:` opt-in at all, or no rung to clamp to: leave `env` and
+    // `requestedModel` untouched. `agents commands/exec.ts`'s own profile-tier
+    // guard (the "cost tiers don't apply to profile ..." discard) still sees
+    // the raw tier token downstream and handles the message -- this function
+    // doesn't compete with that canonical fallback for the no-opt-in case.
   }
   return resolved;
 }

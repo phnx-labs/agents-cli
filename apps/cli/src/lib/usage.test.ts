@@ -267,6 +267,18 @@ describe('loadClaudeOauth — file-based `auth` setup-token (Touch-ID-free usage
     const oauth = await loadClaudeOauth(home);
     expect(oauth).toBeNull();
   });
+
+  it('fileOnly never opens the ACL keychain even without a setup-token', async () => {
+    // Strip the email so resolveClaudeSetupToken cannot map home -> setup-token KEY.
+    fs.writeFileSync(path.join(home, '.claude', '.claude.json'), JSON.stringify({}));
+    fs.writeFileSync(
+      path.join(home, '.claude', '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'file-only-token', expiresAt: Date.now() + 3_600_000 } }),
+    );
+    // makeThrowingKeychain is installed — if fileOnly fell through to ACL keychain, this throws.
+    const oauth = await loadClaudeOauth(home, { accessTokenCache: true, fileOnly: true });
+    expect(oauth?.accessToken).toBe('file-only-token');
+  });
 });
 
 describe('swrWindowMsFor — a routing decision does not get day-old data', () => {

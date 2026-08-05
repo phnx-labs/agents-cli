@@ -90,3 +90,26 @@ export async function readFocusAreas(root: string, windowDays: number): Promise<
     return [];
   }
 }
+
+/** Compact count: 2329 → "2.3k", under 1000 stays exact. */
+export function formatFocusCount(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '0';
+  if (n < 1000) return String(Math.round(n));
+  const k = n / 1000;
+  const s = k >= 10 ? String(Math.round(k)) : k.toFixed(1).replace(/\.0$/, '');
+  return `${s}k`;
+}
+
+/**
+ * One scannable focus line: path + count, with a single unit trailer so the
+ * bare integer is never mistaken for commits or minutes.
+ *
+ *   apps/cli/src 2.3k  ·  apps/cli/docs 302  ·  apps/factory/src 245  file-touches (7d)
+ */
+export function formatFocusAreas(areas: FocusArea[], windowDays: number): string {
+  if (areas.length === 0) return '';
+  const body = areas.map((a) => `${a.path} ${formatFocusCount(a.touches)}`).join('  ·  ');
+  const unit = `file-touches (${windowDays}d)`;
+  return `${body}  ${unit}`;
+}
+

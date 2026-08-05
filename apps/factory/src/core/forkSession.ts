@@ -1,4 +1,4 @@
-import { STRATEGY_LAUNCH_AGENTS, type RunStrategy } from './agents';
+import { isAgentRunner, type RunStrategy } from './agents';
 
 export interface ForkSessionSource {
   sessionId?: string;
@@ -36,7 +36,9 @@ export type ForkSessionRequest =
   | { ok: false; reason: 'no_session' | 'no_agent' };
 
 export function strategyForForkAgent(agentKey: string): RunStrategy | undefined {
-  return (STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(agentKey) ? 'balanced' : undefined;
+  // A fork is balanced like every other launch (apps/factory/AGENTS.md § "Launch
+  // contract"). Only 'shell' — not an agent runner — carries no strategy.
+  return isAgentRunner(agentKey) ? 'balanced' : undefined;
 }
 
 function sameMachine(a: string | undefined, b: string | undefined): boolean {

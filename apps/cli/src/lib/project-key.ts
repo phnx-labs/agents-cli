@@ -2,7 +2,7 @@
  * The one worktree-aware cwd -> project fold.
  *
  * Several surfaces bucket work "by project": the `agents sessions` overview,
- * the `agents activity` timeline, and anything else that has a cwd and needs a
+ * the `agents feed` timeline, and anything else that has a cwd and needs a
  * stable repo-level key. They must agree, or the same session shows up under
  * `agents-cli` in one view and `my-branch-slug` in another — so the rule lives
  * here and every caller delegates.

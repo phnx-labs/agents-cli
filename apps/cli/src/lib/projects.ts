@@ -5,8 +5,17 @@
  * directory by pure convention (`<projectRoot>/<slug>`, see `project-root.ts`).
  * This module adds editable definitions on top: one YAML file per project under
  * `~/.agents/projects/<name>.yaml`, sitting beside the existing `routines/`,
- * `monitors/`, and `teams/` dirs in the user repo (so definitions sync across
- * machines for free via `agents push/pull`). A defined project can name itself
+ * `monitors/`, and `teams/` dirs in the user repo.
+ *
+ * That location makes definitions SYNCABLE, not automatically synced: they ride
+ * the user repo only once they are committed to it, via `agents repo push user`
+ * (`agents push` was removed). Until then the directory is untracked, and a
+ * reconcile that cleans the working tree deletes it — observed twice on one
+ * machine, taking four definitions with it each time. The recovery is an
+ * orphaned `chore(local): save …-sync drift` commit, which is not a guarantee:
+ * unreachable objects are collected. Say "commit them" rather than "for free".
+ *
+ * A defined project can name itself
  * independently of its folder, bind more than one repo, pin a monorepo subpath,
  * describe context subdirectories an agent should start from, carry a Linear
  * link and external integrations, and set an explicit default path.
@@ -53,6 +62,20 @@ export interface ProjectContext {
   purpose: string;
 }
 
+/**
+ * A project goal — the OKR-shaped "why". A project serves one or more goals: a
+ * qualitative `objective` ("Ship agents-cli 2.0") and an optional `measure`, the
+ * key result that says whether it's landing ("fleet on 2.x", "p95 < 200ms"). The
+ * goal is the outcome the work is chasing; milestones (dated checkpoints, pulled
+ * from Linear) and live work (agents / PRs / artifacts) are how far along it is.
+ */
+export interface ProjectGoal {
+  /** The outcome, in a line. */
+  objective: string;
+  /** Optional key result — how success is measured. */
+  measure?: string;
+}
+
 /** An external context source hung off the project (surfaced in `projects show`). */
 export interface ProjectIntegration {
   /** e.g. `gdrive`, `notion`, `figma`, `url`. */
@@ -76,6 +99,8 @@ export interface ProjectDef {
   repos?: ProjectRepo[];
   /** Described starting points inside the project. */
   contexts?: ProjectContext[];
+  /** The outcomes this project serves (OKR-shaped); a project may have several. */
+  goals?: ProjectGoal[];
   /** External context sources (Drive, docs, …). */
   integrations?: ProjectIntegration[];
   /** Linear project link — reuses the existing GraphQL path. */
@@ -167,6 +192,17 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
       ) {
         const cc = c as Record<string, unknown>;
         return [{ path: cc.path as string, purpose: cc.purpose as string }];
+      }
+      return [];
+    });
+  }
+  if (Array.isArray(o.goals)) {
+    def.goals = o.goals.flatMap((g) => {
+      if (g && typeof g === 'object' && typeof (g as Record<string, unknown>).objective === 'string') {
+        const gg = g as Record<string, unknown>;
+        const goal: ProjectGoal = { objective: gg.objective as string };
+        if (typeof gg.measure === 'string') goal.measure = gg.measure;
+        return [goal];
       }
       return [];
     });

@@ -3,6 +3,7 @@ import {
   sessionUsedPercent,
   inlineContinueInstructions,
   buildAgentRunLaunchCommand,
+  buildAutoRunLaunchCommand,
   buildResumeInput,
   AgentsViewJsonVersion,
 } from './resumeInBest';
@@ -101,6 +102,27 @@ describe('buildAgentRunLaunchCommand', () => {
     const hostile = "a'; echo pwned; #";
     expect(buildAgentRunLaunchCommand('claude', hostile)).toBe(
       `agents run claude --interactive --host 'a'\\''; echo pwned; #'`,
+    );
+  });
+});
+
+describe('buildAutoRunLaunchCommand', () => {
+  test('full auto — the CLI resolves host, harness, and account', () => {
+    expect(buildAutoRunLaunchCommand({ sessionId: 'new-id' })).toBe(
+      'agents run auto --interactive --session-id new-id',
+    );
+  });
+
+  test('host is shell-quoted; --session-id is always passed (claude-only on the CLI side)', () => {
+    expect(buildAutoRunLaunchCommand({ host: 'yosemite-s0', sessionId: 'new-id' })).toBe(
+      "agents run auto --interactive --host 'yosemite-s0' --session-id new-id",
+    );
+  });
+
+  test('quotes a device name so it cannot break out of the command', () => {
+    const hostile = "a'; echo pwned; #";
+    expect(buildAutoRunLaunchCommand({ host: hostile, sessionId: 'new-id' })).toBe(
+      `agents run auto --interactive --host 'a'\\''; echo pwned; #' --session-id new-id`,
     );
   });
 });

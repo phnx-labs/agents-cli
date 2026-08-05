@@ -419,3 +419,69 @@ describe('interactive host dispatch — run auto session correlation (RUSH-2132 
     expect(hostInteractiveNeedsCorrelationId('amp', undefined, undefined)).toBe(false);
   });
 });
+
+describe('cost tier on a profile run is discarded, not resolved against the host harness', () => {
+  it('warns loud and drops the tier so the host-harness catalog model never reaches the profile endpoint', () => {
+    // A profile's model comes from its endpoint (ANTHROPIC_MODEL), not the host
+    // harness catalog. `--model cheap` used to resolve against the HOST harness
+    // (claude -> claude-haiku-*) and forward that id to the profile's endpoint,
+    // which doesn't ship it. The guard must discard the tier with a standout
+    // warning BEFORE the host binary is spawned, leaving the profile's own model.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'exec-profile-tier-'));
+    const binDir = path.join(root, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', 'profiles'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), 'agents: {}\n');
+    fs.writeFileSync(
+      path.join(root, '.agents', 'profiles', 'kimiprofile.yml'),
+      [
+        'name: kimiprofile',
+        'host:',
+        '  agent: claude',
+        'env:',
+        '  ANTHROPIC_MODEL: kimi-k2-thinking',
+        '  ANTHROPIC_BASE_URL: https://example.invalid',
+        'provider: claude',
+        'forkedFrom: claude',
+        '',
+      ].join('\n'),
+    );
+    // Fake `claude` host binary: record the model-bearing env + argv it was spawned
+    // with (into $HOME/spawn.json), then emit a benign success line so the run ends.
+    const spawnLog = path.join(root, 'spawn.json');
+    const claudeBin = path.join(binDir, process.platform === 'win32' ? 'claude.cmd' : 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      process.platform === 'win32'
+        ? '@echo {"type":"result","subtype":"success","is_error":false,"result":"OK"}\r\n'
+        : '#!/bin/sh\n'
+          + 'node -e \'require("fs").writeFileSync(process.env.HOME + "/spawn.json", JSON.stringify({argv: process.argv.slice(2), model: process.env.ANTHROPIC_MODEL}))\'\n'
+          + 'printf \'{"type":"result","subtype":"success","is_error":false,"result":"OK"}\\n\'\n',
+      { mode: 0o755 },
+    );
+    try {
+      const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+      const result = spawnSync(
+        'node',
+        ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'kimiprofile', 'probe', '--model', 'cheap', '--mode', 'plan', '--cwd', root],
+        {
+          cwd: path.resolve(import.meta.dirname, '..', '..'),
+          env: { ...process.env, HOME: root, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` },
+          encoding: 'utf8',
+        },
+      );
+      // The guard runs before any spawn, so the standout warning is the invariant.
+      expect(result.stderr).toContain("cost tiers don't apply to custom harness 'kimiprofile'");
+      // When the host binary is reached, it must carry the profile's own model, never
+      // a claude tier id resolved from the host harness catalog.
+      if (fs.existsSync(spawnLog)) {
+        const spawned = JSON.parse(fs.readFileSync(spawnLog, 'utf8')) as { argv: string[]; model?: string };
+        expect(spawned.model).toBe('kimi-k2-thinking');
+        expect(JSON.stringify(spawned.argv)).not.toMatch(/claude-(haiku|sonnet|opus)/);
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

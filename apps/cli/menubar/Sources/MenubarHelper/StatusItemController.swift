@@ -25,6 +25,28 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // New tailnet devices awaiting Register/Ignore (cheap sentinel-dir read).
     private var badgePending: [PendingDevice] = []
 
+    // Daemon-down watchdog. The only other proactive "routines won't run"
+    // signal is `notifyOverdue` (src/lib/overdue.ts), fired from INSIDE
+    // `runDaemon()` on startup — so it can never fire while the daemon itself
+    // is down, the exact circularity this closes. This helper is a SEPARATE
+    // launchd KeepAlive service that stays alive when the daemon dies, so it
+    // is the one thing that can notice and say so. Polled every `tick()`
+    // (independent of menu-open) via the cheap, synchronous `daemonPid()`
+    // (a pid-file read + `kill(pid, 0)` — no CLI spawn), and delivered through
+    // this process's own `Notifier`, not a spawned `--notify` child, so the
+    // alert cannot depend on anything the dead daemon would have provided.
+    private var daemonDeadTicks = 0
+    private var daemonDownNotified = false
+    /// True once `daemonDeadTicks` has crossed the threshold; drives the
+    /// always-visible badge (see `refreshBadge`), independent of whether the
+    /// dropdown is ever opened.
+    private var schedulerDown = false
+    /// Consecutive dead ticks (~10s apart) required before alerting. A daemon
+    /// restart — a version upgrade, `agents doctor` self-heal, a crash the
+    /// launchd-equivalent auto-relaunches — is down for a few seconds; this
+    /// debounce absorbs that blip instead of paging the user for a non-event.
+    private static let daemonDownTickThreshold = 3
+
     // These three reads shell the CLI or touch the sessions DB. They are kept
     // off the click path and rendered from warm caches when the menu opens.
     private var cachedRoutines: [Routine] = []
@@ -172,11 +194,48 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 self.refreshBadge()
             }
         }
+        checkDaemonLiveness()
         refreshRoutines()
         refreshRecentSessions()
         refreshActiveSessions()
         refreshDoctorOverview()
         refreshWatchdog()
+    }
+
+    /// Poll the scheduler's liveness on every tick — the one check that must
+    /// NOT depend on the menu ever being opened. `daemonPid()` is a plain
+    /// pid-file read + signal-0 probe (no subprocess), so it is safe to call
+    /// on the main thread here just like `menuWillOpen` already does.
+    ///
+    /// Fires once per outage, only after `daemonDownTickThreshold` consecutive
+    /// dead ticks — covers both a daemon that dies mid-session (an
+    /// alive→dead transition) and one that is already down when the helper
+    /// itself (re)launches (a reboot, a crash before the helper started).
+    /// Resets the moment the daemon comes back, so the next real outage
+    /// alerts again.
+    private func checkDaemonLiveness() {
+        let alive = AgentsCLI.daemonPid() != nil
+        if alive {
+            daemonDeadTicks = 0
+            daemonDownNotified = false
+            if schedulerDown {
+                schedulerDown = false
+                refreshBadge()
+            }
+            return
+        }
+        daemonDeadTicks += 1
+        if daemonDeadTicks >= Self.daemonDownTickThreshold && !schedulerDown {
+            schedulerDown = true
+            refreshBadge()
+        }
+        guard daemonDeadTicks == Self.daemonDownTickThreshold, !daemonDownNotified else { return }
+        daemonDownNotified = true
+        Notifier.post(
+            title: "Scheduler stopped — routines won't run",
+            body: "Restart it from the menu bar, or run: agents routines start",
+            url: URL(fileURLWithPath: "\(NSHomeDirectory())/.agents/.history/runs").absoluteString
+        )
     }
 
     private func loadDumpCaches() {
@@ -308,6 +367,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let pending = badgePending.count
         if attention > 0 {
             button.attributedTitle = badge("⚠", wait)
+        } else if schedulerDown {
+            // A dead scheduler means every routine silently stops firing — that
+            // outranks a device-registration nudge or a running-session count,
+            // so it is glanceable without opening the dropdown at all.
+            button.attributedTitle = badge(" ⏻", fail)
         } else if pending > 0 {
             // New devices to review — a blue count (◆) distinct from run/attention.
             button.attributedTitle = badge(" ◆\(pending)", info)

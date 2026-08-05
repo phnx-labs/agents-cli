@@ -343,6 +343,7 @@ describe('AGENTS capability matrix', () => {
       'subagents',
       'rules',
       'workflows',
+      'interactiveRepl',
     ];
 
     for (const [agentId, config] of Object.entries(AGENTS)) {

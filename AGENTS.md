@@ -81,6 +81,31 @@ and [`architecture.md`](apps/cli/docs/architecture.md).
   is a **consumer**: the VS Code UI layer that shells out to
   `agents sessions --active --json`, holding no data models of its own — not a separate
   codebase. Fix a mechanism in the CLI and every consumer benefits.
+- **One scheduler, one executor — fleet-affecting features never run twice.** Anything
+  that can *act* on this machine or another fleet device — launch/resume/kill a session,
+  fire a routine or monitor, inject into a terminal, rotate an account — has exactly ONE
+  scheduler and ONE executor: the agents-cli daemon (`agents __daemon-run`) or a CLI
+  command it drives. UI surfaces (Factory, the menubar, the iOS app) are **thin
+  wrappers**: they render state and offer controls that call the CLI; they MUST NOT own
+  a timer, watcher, or loop that detects a condition and acts on it. Detection and
+  decision live in the CLI, which holds the first-party state (sessions.db, usage
+  snapshots, the device registry). Where an action needs a UI-owned surface, the UI
+  exposes a narrow endpoint the CLI drives (the `/inject` verb is the precedent) — the
+  trigger stays in the CLI. Routines are covered by the same rule: `agents routines` +
+  the daemon's pid-claimed scheduler (`apps/cli/src/lib/daemon.ts`) are the only cron
+  that fires them; a UI button may *request* a run, never *schedule* one. **Multiple
+  devices are fine — shared queues are not.** Every device runs its own daemon, and
+  an unrestricted routine MAY fire on all of them when its input is the firing
+  device's own state (its repos, sessions, caches). But a job that consumes *shared*
+  input (a ticket tracker, a PR queue, the feed, a sync bucket) MUST have exactly
+  one executor per work item: an owner pin (`agents routines devices <name> --set
+  <one>`), an atomic claim per item (the feed's `O_EXCL` precedent), or verified
+  idempotency — otherwise two daemons pick the same task and run it twice.
+  Violations are
+  the double-fire bug class — the 2026-08-03 incident (Factory's watchdog rotate loop
+  racing the daemon, spawning resume-tabs every 120s into exhausted accounts) is the
+  canonical example; the consolidation (PR #1914) is the canonical fix. The normative
+  contract is [§Scheduling & execution singularity](apps/cli/docs/specifications.md#scheduling--execution-singularity).
 
 ## CLI surface conventions
 
@@ -166,6 +191,13 @@ goes in `artifacts/`. Never scatter scratch in `/tmp` or the repo root.
   reviewer reads this file before every review and enforces the conventions in
   [§Code review conventions](#code-review-conventions-the-reviewer-must-enforce-these) —
   that block is what it checks the diff against, not just prose for humans.
+  - **Currently PAUSED (#1767).** Since 2026-08-02 every run crashed on startup and each
+    failure minted + logged a live 1-year Anthropic token, so the trigger in
+    [`.github/rush.yml`](.github/rush.yml) is disabled until the upstream Rush Cloud
+    agent-host capture bug is fixed. **Until it is restored, the non-author review is a
+    subagent reviewer** (spawn one, have it verify the diff and post its verdict as a PR
+    comment, then merge on green) — the documented fallback, not a redundant extra pass.
+    Do not re-enable the trigger until #1767 is resolved.
 - **The default branch is untouchable.** Every change is a git worktree + PR — never
   edit or commit on `main`. Worktrees live under `.agents/worktrees/<slug>/`.
 - **VS Code publish identity is frozen.** `apps/factory` publishes as publisher
@@ -190,7 +222,7 @@ the exception.
   not qualify.)
 - **Harness parity for cross-agent features.** The CLI integrates many agent harnesses —
   Claude, Codex, Gemini, Cursor, OpenCode, OpenClaw, Grok, Droid, Copilot, Kiro, Goose,
-  Antigravity, Kimi, Forge. When a change adds or extends a capability that applies across
+  Antigravity, Kimi, Pi (Oh My Pi), Forge. When a change adds or extends a capability that applies across
   harnesses (subagents, hooks, MCP, allowlists, config sync, skills, workflows), it should
   cover **every** harness the capability applies to — or the PR states which are out of
   scope and why. Flag a diff that wires up two or three agents and silently skips the rest.
@@ -237,6 +269,14 @@ the exception.
   new or changed command that flattens a verb colliding with an owned noun, leans on flag
   soup where an object-in-path reads clearer, or ships a non-trivial tool on commander's
   default help instead of a workflow-first `setHelpSections` block.
+- **No second scheduler.** A PR that adds a timer, watcher, or polling loop in
+  `apps/factory` (or any UI surface) that *acts* — spawns, resumes, kills, injects,
+  dispatches, rotates, fires a routine — rather than polling read-only state for
+  rendering is a double-fire bug in waiting. Flag it with `file:line`. The action
+  belongs in the CLI daemon or a CLI command; the UI may only render the state and wire
+  controls to CLI calls. (Canonical incident: the Factory watchdog rotate loop,
+  2026-08-03; canonical fix: PR #1914. See
+  [§Scheduling & execution singularity](apps/cli/docs/specifications.md#scheduling--execution-singularity).)
 - **No dead or commented-out code.** Removed logic is deleted, not commented out "for
   later." git history is the archive.
 - **Tests exercise the real path.** New behavior ships with a test that hits the actual

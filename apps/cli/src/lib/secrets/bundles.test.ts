@@ -8,6 +8,8 @@ import {
   listBundles,
   readAndResolveBundleEnv,
   readBundle,
+  reAclBundleItems,
+  bundlePolicy,
   shouldEvictAfterBundleWrite,
   writeBundle,
   writeBundleWithItems,
@@ -599,5 +601,53 @@ describe('metadata is stored no-ACL at every tier (RUSH-1759)', () => {
     expect(healed).toBe(2);
     expect(mem.noAcl.get(META('old1'))).toBe(true);
     expect(mem.noAcl.get(META('old2'))).toBe(true);
+  });
+
+  // The bug (SEC-19 / SEC-GAP-5): `secrets policy <b> never` used to call
+  // writeBundle (metadata only), leaving the VALUE item's biometry ACL in place —
+  // so macOS kept prompting on every read even though `view` reported "silent".
+  // reAclBundleItems is what the policy command now calls: it MUST re-store the
+  // value item so its ACL matches the new tier. This test flips the item ACL, not
+  // just the metadata label — the assertion the old code path could never pass.
+  // Neutral bundle name (the reserved `share` bundle rewrites its var key, which
+  // would confound the item-name assertions). On macOS these bundles are
+  // keychain-backed; we force b.backend='keychain' because the Linux CI env
+  // resolves the default backend to `file` (which has no ACL to reconcile).
+  it('reAclBundleItems strips the value-item biometry ACL when a bundle switches to never', () => {
+    writeBundleWithItems(
+      { name: 'billing', policy: 'hold', vars: { API_KEY: 'keychain:API_KEY' } },
+      new Map([[secretsKeychainItem('billing', 'API_KEY'), 'sk-live-1']]),
+    );
+    // Created under hold: the value item is ACL'd (would pop Touch ID).
+    expect(mem.noAcl.get(secretsKeychainItem('billing', 'API_KEY'))).toBe(false);
+
+    const b = readBundle('billing');
+    b.backend = 'keychain';
+    b.policy = 'never';
+    reAclBundleItems(b);
+
+    // The VALUE item is now no-ACL (silent forever), value preserved, tier persisted.
+    expect(mem.noAcl.get(secretsKeychainItem('billing', 'API_KEY'))).toBe(true);
+    expect(mem.get(secretsKeychainItem('billing', 'API_KEY'))).toBe('sk-live-1');
+    expect(bundlePolicy(readBundle('billing'))).toBe('never');
+    expect(mem.noAcl.get(META('billing'))).toBe(true); // metadata stays no-ACL
+  });
+
+  it('reAclBundleItems re-attaches the value-item ACL when a never bundle switches to hold', () => {
+    writeBundleWithItems(
+      { name: 'billing', policy: 'never', vars: { API_KEY: 'keychain:API_KEY' } },
+      new Map([[secretsKeychainItem('billing', 'API_KEY'), 'sk-live-1']]),
+    );
+    expect(mem.noAcl.get(secretsKeychainItem('billing', 'API_KEY'))).toBe(true); // no-ACL
+
+    const b = readBundle('billing');
+    b.backend = 'keychain';
+    b.policy = 'hold';
+    reAclBundleItems(b);
+
+    // Tightening back to a gated tier re-attaches the biometry ACL, value intact.
+    expect(mem.noAcl.get(secretsKeychainItem('billing', 'API_KEY'))).toBe(false);
+    expect(mem.get(secretsKeychainItem('billing', 'API_KEY'))).toBe('sk-live-1');
+    expect(bundlePolicy(readBundle('billing'))).toBe('hold');
   });
 });

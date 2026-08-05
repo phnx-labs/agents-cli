@@ -47,7 +47,8 @@
     "onStartupFinished",
     "onUri",
     "onLanguage:markdown",
-    "onCustomEditor:agents.markdownEditor"
+    "onCustomEditor:agents.markdownEditor",
+    "onCustomEditor:agents.htmlReader"
   ],
   "main": "./out/vscode/extension.js",
   "contributes": {
@@ -61,10 +62,23 @@
     "customEditors": [
       {
         "viewType": "agents.markdownEditor",
-        "displayName": "Agents Markdown Editor",
+        "displayName": "Agents Reader (Markdown)",
         "selector": [
           {
             "filenamePattern": "*.md"
+          }
+        ],
+        "priority": "option"
+      },
+      {
+        "viewType": "agents.htmlReader",
+        "displayName": "Agents Reader (HTML)",
+        "selector": [
+          {
+            "filenamePattern": "*.html"
+          },
+          {
+            "filenamePattern": "*.htm"
           }
         ],
         "priority": "option"
@@ -275,14 +289,6 @@
         "title": "Agents: Enable Notifications"
       },
       {
-        "command": "agents.enableTmux",
-        "title": "Agents: Enable Tmux"
-      },
-      {
-        "command": "agents.disableTmux",
-        "title": "Agents: Disable Tmux"
-      },
-      {
         "command": "agents.newTask",
         "title": "Agents: New Task"
       },
@@ -332,11 +338,11 @@
       },
       {
         "command": "agents.enableReader",
-        "title": "Agents: Enable Reader"
+        "title": "Agents: Reader (Enable)"
       },
       {
         "command": "agents.disableReader",
-        "title": "Agents: Disable Reader"
+        "title": "Agents: Reader (Disable)"
       },
       {
         "command": "agents.init",
@@ -355,8 +361,12 @@
         "title": "Agents: Detach (Send to Background)"
       },
       {
-        "command": "agents.toggleWatchdogAutoRotate",
-        "title": "Agents: Toggle Watchdog Auto-Rotate"
+        "command": "agents.watchdogEnable",
+        "title": "Agents: Watchdog (Enable)"
+      },
+      {
+        "command": "agents.watchdogDisable",
+        "title": "Agents: Watchdog (Disable)"
       },
       {
         "command": "agents.attach",
@@ -595,21 +605,6 @@
           "default": ".assets",
           "description": "Folder for storing images and attachments from the markdown editor"
         },
-        "agents.terminalMode": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "tmux",
-            "native"
-          ],
-          "enumDescriptions": [
-            "Use tmux when available (macOS/Linux with tmux on PATH), otherwise a native VS Code terminal.",
-            "Always run agents inside tmux; warn and fall back to native when tmux is unavailable.",
-            "Never use tmux; always use a native VS Code editor terminal."
-          ],
-          "default": "auto",
-          "description": "How agent terminals are launched. 'auto' (default) runs agents inside a tmux session on macOS/Linux for uniform addressing, resume, and tracking \u2014 falling back to a native terminal on Windows or when tmux is missing. Cmd+Shift+H/V create tmux panes instead of VS Code editor splits when tmux is active."
-        },
         "agents.worktreePerTerminal": {
           "type": "boolean",
           "default": false,
@@ -634,26 +629,6 @@
           "type": "number",
           "default": 60000,
           "description": "Timeout (ms) for the `agents run claude --model haiku` call that generates commit messages. Increase if commits are slow to generate."
-        },
-        "agents.watchdog.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Master switch for the version auto-rotate loop. When on, the extension polls active agent terminals on an interval to auto-rotate exhausted versions. (Stall nudging was retired \u2014 the agents-cli daemon watchdog owns that now.)"
-        },
-        "agents.watchdog.autoRotate": {
-          "type": "boolean",
-          "default": true,
-          "description": "When an agent terminal's tail shows an exhausted account (rate-limit / weekly-limit text), automatically spawn a fresh terminal via `agents run auto` — the CLI picks host, harness, and account — and replay /continue. When the CLI reports no healthy account anywhere, rotation is suppressed until the window resets (one skip event is logged). The old terminal is closed on success."
-        },
-        "agents.watchdog.rotateCooldownSeconds": {
-          "type": "number",
-          "default": 120,
-          "description": "Minimum seconds between auto-rotate attempts for the same terminal."
-        },
-        "agents.watchdog.tickSeconds": {
-          "type": "number",
-          "default": 120,
-          "description": "How often the extension checks agent terminal tails for an account that needs auto-rotating."
         }
       }
     },
@@ -702,16 +677,6 @@
           "command": "agents.newDroid",
           "when": "true",
           "group": "navigation@2"
-        },
-        {
-          "command": "agents.enableTmux",
-          "when": "!agents.tmuxEnabled",
-          "group": "navigation@3"
-        },
-        {
-          "command": "agents.disableTmux",
-          "when": "agents.tmuxEnabled",
-          "group": "navigation@3"
         },
         {
           "command": "agents.enableReader",

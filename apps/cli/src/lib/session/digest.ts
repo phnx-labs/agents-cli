@@ -123,7 +123,7 @@ export function toolHistogram(toolCounts: Record<string, number>, top = 8): Arra
 /**
  * Aggregate recognized external tools invoked via Bash across a session.
  * Unknown one-off commands are bucketed as `other` so the ranking surface
- * (e.g. `agents activity --tools`) only surfaces repeatable tools.
+ * only surfaces repeatable tools.
  */
 export function bashToolCounts(events: SessionEvent[]): Record<string, number> {
   const counts: Record<string, number> = {};

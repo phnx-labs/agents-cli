@@ -9,7 +9,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId, RunStrategy } from './types.js';
 import type { FallbackEntry } from './exec.js';
-import { accountDisplayLabel, getAccountInfo, ALL_AGENT_IDS, type AccountInfo } from './agents.js';
+import {
+  accountDisplayLabel,
+  getAccountInfo,
+  credentialPresence,
+  ALL_AGENT_IDS,
+  type AccountInfo,
+  type CredentialPresence,
+} from './agents.js';
 import { readMeta, writeMeta, getHelpersDir } from './state.js';
 import { listInstalledVersions, getVersionHomePath, resolveVersion } from './versions.js';
 import { getProjectRunConfigs } from './run-config.js';
@@ -21,6 +28,8 @@ import {
   type UsageSnapshot,
 } from './usage.js';
 import { readAccountHeadroom } from './fleet-cache.js';
+import { machineId } from './machine-id.js';
+import { readAuthHealthCache, authCacheKey, isDeadVerdict, type AuthVerdict } from './auth-health.js';
 
 function getRotateDir(): string {
   const dir = path.join(getHelpersDir(), 'rotate');
@@ -55,6 +64,18 @@ export interface RotateCandidate {
   usageMinutesToLimit: number | null;
   plan: string | null;
   signedIn: boolean;
+  /**
+   * Live auth-health verdict for this (agent, version) from the daemon's probe
+   * cache (`auth-health.ts`), or null when no probe row exists (cold cache, or a
+   * harness with no live-probe endpoint). `signedIn` only means "a credential
+   * file is present and its email decodes" — it cannot tell a good token from a
+   * revoked-but-unexpired one, so a server-rejected account reads
+   * `signedIn: true` but `authVerdict: 'revoked'`. Eligibility excludes a
+   * revoked account so rotation never launches into a doomed auth (see
+   * {@link readinessFromCandidate}). Fail-open: any non-revoked or null verdict
+   * does not gate — a stale/absent probe never blocks a launch.
+   */
+  authVerdict: AuthVerdict | null;
   lastActive: Date | null;
 }
 
@@ -122,8 +143,37 @@ export function setGlobalRunStrategy(agent: AgentId, strategy: RunStrategy): voi
   writeMeta(meta);
 }
 
+/**
+ * Whether an account may be rotated INTO right now. Defined in terms of
+ * {@link readinessFromCandidate} so the router's pick gate and the pre-flight
+ * warning can never disagree: an account is eligible iff its readiness is
+ * `ready` — signed in, not server-revoked, and not out of usage.
+ */
 function isRotationEligible(candidate: RotateCandidate): boolean {
-  return candidate.signedIn && hasUsageAvailable(candidate);
+  return readinessFromCandidate(candidate).ready;
+}
+
+/**
+ * Whether a version home can actually authenticate a launch.
+ *
+ * `getAccountInfo` falls back to the active/global HOME when a version home has
+ * no credential of its own, so `agents view` still shows who is logged in. Launch
+ * paths isolate config (GROK_HOME, CODEX_HOME, KIMI_CODE_HOME, CLAUDE_CONFIG_DIR,
+ * …) to the per-version home, so a home that only "inherits" the active login
+ * cannot spawn a signed-in agent — balanced kept picking those empty homes and
+ * the run died on "Not signed in".
+ *
+ * When we know where the credential lives (`knownLocation`), require it under
+ * THIS version home. When we don't (keychain-only / unmapped agents), trust the
+ * existing `signedIn` signal.
+ */
+export function isLaunchableSignedIn(
+  signedIn: boolean,
+  presence: Pick<CredentialPresence, 'knownLocation' | 'perVersion'>,
+): boolean {
+  if (!signedIn) return false;
+  if (!presence.knownLocation) return true;
+  return presence.perVersion;
 }
 
 function isAvailableEligible(candidate: RotateCandidate): boolean {
@@ -176,13 +226,15 @@ function hasUsageAvailable(candidate: RotateCandidate): boolean {
 
 /**
  * Whether a specific account can serve a run right now, and — when it can't —
- * why. `signed_out` covers a missing usable credential; `rate_limited` and
- * `out_of_credits` name the throttle. Used to pre-warn on a version-pinned
- * teammate whose account rotation won't route around (a pin IS the target).
+ * why. `signed_out` covers a missing usable credential; `revoked` is a token the
+ * server has actually rejected (401/403, from the live auth-health probe);
+ * `rate_limited` and `out_of_credits` name the throttle. Used to pre-warn on a
+ * version-pinned teammate whose account rotation won't route around (a pin IS
+ * the target).
  */
 export type AccountReadiness =
   | { ready: true }
-  | { ready: false; reason: 'rate_limited' | 'out_of_credits' | 'signed_out'; email: string | null };
+  | { ready: false; reason: 'rate_limited' | 'out_of_credits' | 'signed_out' | 'revoked'; email: string | null };
 
 /**
  * Pure decision reusing the router's own eligibility gate (`hasUsageAvailable`
@@ -197,6 +249,13 @@ export type AccountReadiness =
 export function readinessFromCandidate(candidate: RotateCandidate): AccountReadiness {
   if (!candidate.signedIn) {
     return { ready: false, reason: 'signed_out', email: candidate.email };
+  }
+  // A token the daemon's live probe saw rejected (401/403 -> `revoked`) will fail
+  // auth at spawn no matter how much usage headroom it has. Exclude it BEFORE the
+  // usage gate so rotation never routes into a doomed login. Fail-open: any other
+  // (or null) verdict does not gate — see `RotateCandidate.authVerdict`.
+  if (candidate.authVerdict !== null && isDeadVerdict(candidate.authVerdict)) {
+    return { ready: false, reason: 'revoked', email: candidate.email };
   }
   if (hasUsageAvailable(candidate)) {
     return { ready: true };
@@ -619,6 +678,12 @@ export function formatNoHealthyHarnessError(
 
 export async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> {
   const versions = listInstalledVersions(agent);
+  // Read the local auth-health probe cache once (cache-only, no network — the
+  // daemon is the sole writer). A `revoked` verdict for a (host, agent, version)
+  // excludes that account from the pick; a missing row is fail-open. Keyed by the
+  // LOCAL host — routing decides which local version to launch.
+  const authCache = readAuthHealthCache();
+  const localHost = machineId();
   const rows = await Promise.all(
     versions.map(async (version) => {
       const home = getVersionHomePath(agent, version);
@@ -630,17 +695,24 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
       // one per installed version, every time `agents run` cold-starts. If
       // claude's stored token has actually expired, the spawned agent detects
       // it at its own startup and re-auths; that's the correct UX.
+      //
+      // Gate signedIn on a real per-version credential when we know where it
+      // lives — see isLaunchableSignedIn. Do not reuse the active-home fallback
+      // identity for routing, or empty version homes look healthy and die at spawn.
+      const launchable = isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
+      const authVerdict = authCache[authCacheKey(localHost, agent, version)]?.verdict ?? null;
       return {
         agent,
         version,
         home,
         info,
-        accountKey: info.accountKey,
-        accountLabel: accountDisplayLabel(info),
-        email: info.email,
-        usageStatus: info.usageStatus,
-        plan: info.plan,
-        signedIn: info.signedIn,
+        accountKey: launchable ? info.accountKey : null,
+        accountLabel: launchable ? accountDisplayLabel(info) : '',
+        email: launchable ? info.email : null,
+        usageStatus: launchable ? info.usageStatus : null,
+        plan: launchable ? info.plan : null,
+        signedIn: launchable,
+        authVerdict,
         lastActive: info.lastActive,
       };
     })

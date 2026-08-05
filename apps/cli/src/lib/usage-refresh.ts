@@ -1,36 +1,54 @@
 /**
- * Daemon-owned adaptive usage refresher.
+ * Daemon-owned usage refresher (per host).
  *
  * The routing hot path (`agents run` → collectRunCandidates) reads usage
  * CACHE-ONLY (`getUsageInfoForIdentity` `readOnly`, RUSH-2061) and never blocks
  * on a provider fetch. Something still has to keep that cache fresh — this
- * module is that something, running inside the daemon.
+ * module is that something, running inside the daemon on **each machine**.
  *
- * Design (per account, this host is the SOLE writer — the refresher only ever
- * touches accounts whose credentials live locally, so no cross-host
- * coordination and no shared-token contention):
+ * Design:
  *
- *  - **Adaptive cadence from burn rate.** Each refresh stores the session
- *    window's `usedPercent` + `capturedAt`. The next refresh is scheduled from
- *    `deriveUsageHeadroom`'s projected `minutesToLimit`: an account racing
- *    toward its cap is polled more often (down to 90s), an idle one rarely (up
- *    to 15min). `computeNextRefreshDelayMs` is the pure clamp.
- *  - **Hard hourly cap.** Regardless of cadence, at most `HOURLY_CALL_CAP` live
- *    fetches per account per rolling hour, so a fast burn can't turn the 90s
- *    floor into a hammering loop.
- *  - **Respects the existing 429 backoff.** A provider under
- *    `usageRateLimitedUntil` is skipped entirely — the whole point of the
- *    backoff is to stop poking an endpoint that just said no.
+ *  - **Per-host sole writer.** Only accounts whose credentials live on THIS
+ *    box are listed; no fleet-wide usage sync.
+ *  - **Fixed 5-minute cadence** (`REFRESH_INTERVAL_MS`). Enough to keep
+ *    balanced/`agents view` off multi-hour stale data without thrashing
+ *    provider APIs when the user runs agents frequently. The delay helpers
+ *    still accept a burn projection for tests/future tuning, but the default
+ *    floor and ceiling are both 5 minutes.
+ *  - **Hard hourly cap** (`HOURLY_CALL_CAP`) so a stuck "due" loop cannot
+ *    hammer an endpoint past ~12 calls/account/hour.
+ *  - **429 backoff.** A provider under `usageRateLimitedUntil` is skipped
+ *    entirely — no live fetch, no Touch ID, no re-armed penalty.
+ *  - **File-only credentials on the daemon path.** Refresh never opens the
+ *    ACL-bound macOS keychain item (Touch ID storm). It uses the no-ACL
+ *    access-token cache / setup-token / `.credentials.json` only
+ *    (`fileOnly: true` on `getUsageInfo`).
+ *  - **Concurrency-safe cache writes.** Usage + headroom files are updated
+ *    under `withFileLock` + atomic rename so a concurrent `agents view`
+ *    background refresh cannot tear or drop another account's row.
  *
- * It also publishes the projected headroom (`minutesToLimit` + status) to a
- * small cache keyed by usage key, so the routing hot path can deprioritize an
- * account projected to cap without recomputing a burn rate it has no prior
- * sample for. `fleet-cache.ts` is the sync reader.
+ * Scenarios (what this path must survive):
+ *
+ *  1. **Daemon tick overlaps a slow tick** — overlap guard in daemon.ts;
+ *     second tick is a no-op.
+ *  2. **`agents view` writes cache while daemon refreshes** — file lock
+ *     serializes read-modify-write; no lost updates.
+ *  3. **macOS keychain ACL / Touch ID** — fileOnly refresh never calls
+ *     `security find-generic-password` on Claude's ACL item.
+ *  4. **Provider 429** — whole provider skipped until Retry-After; cache
+ *     freezes (visible as aged `capturedAt`) rather than hammering.
+ *  5. **Expired access token (no refresh)** — usage path never rotates
+ *     single-use refresh tokens; counts as `failed`, reschedules 5m later.
+ *  6. **No file credential on this host** — account skipped / failed; no
+ *     keychain fallback from the daemon refresher.
+ *  7. **Grok/Codex (network:false)** — not listed by `buildLocalUsageAccounts`;
+ *     their "cache" is local logs, not this HTTP refresher.
  */
 import * as fs from 'fs';
 import * as path from 'path';
 
 import { getCacheDir } from './state.js';
+import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
 import {
   deriveUsageHeadroom,
   getUsageInfo,
@@ -46,17 +64,24 @@ import { getAccountInfo } from './agents.js';
 import { listInstalledVersions, getVersionHomePath } from './versions.js';
 import type { AgentId } from './types.js';
 
-/** Floor on the adaptive interval: an account seconds from its cap still isn't
- * polled faster than this. */
-export const REFRESH_MIN_MS = 90 * 1000;
-/** Ceiling on the adaptive interval: an idle account is still re-checked at
- * least this often so a cache never silently rots. */
-export const REFRESH_MAX_MS = 15 * 60 * 1000;
-/** Schedule the next refresh at `minutesToLimit / K` — poll well before the cap,
- * not exactly at it. */
+/**
+ * Default schedule between successful (or attempted) live usage fetches for one
+ * account. Floor and ceiling of the delay helper are pinned to this so the
+ * daemon does not poll faster than 5 minutes even under high burn, and does not
+ * let an idle account rot longer than 5 minutes between attempts.
+ */
+export const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+/** @deprecated alias — use {@link REFRESH_INTERVAL_MS}. Kept for test imports. */
+export const REFRESH_MIN_MS = REFRESH_INTERVAL_MS;
+/** @deprecated alias — use {@link REFRESH_INTERVAL_MS}. Kept for test imports. */
+export const REFRESH_MAX_MS = REFRESH_INTERVAL_MS;
+/** Burn-rate divisor retained for the pure delay helper / tests; with min=max
+ * the divisor does not change the scheduled interval. */
 export const REFRESH_BURN_DIVISOR = 4;
-/** At most this many live fetches per account per rolling hour. */
-export const HOURLY_CALL_CAP = 6;
+/** At most this many live fetches per account per rolling hour (5m cadence ⇒ 12). */
+export const HOURLY_CALL_CAP = 12;
+/** How often the daemon wakes to *consider* a refresh pass (due accounts only). */
+export const USAGE_REFRESH_TICK_MS = 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
 /**
@@ -114,29 +139,33 @@ export function readHeadroomEntry(usageKey: string): HeadroomEntry | null {
 /** Merge entries into the cache (best-effort; preserves other accounts' rows). */
 export function writeHeadroomEntries(entries: Record<string, HeadroomEntry>): void {
   try {
-    const dir = getCacheDir();
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const merged: HeadroomCacheFile = {
-      version: 1,
-      entries: { ...readHeadroomCache(), ...entries },
-    };
-    fs.writeFileSync(headroomCachePath(), JSON.stringify(merged, null, 2));
+    const cachePath = headroomCachePath();
+    ensureLockTarget(cachePath, JSON.stringify({ version: 1, entries: {} }, null, 2));
+    withFileLock(cachePath, () => {
+      // Re-read under the lock so a concurrent tick/view cannot drop rows.
+      const merged: HeadroomCacheFile = {
+        version: 1,
+        entries: { ...readHeadroomCache(), ...entries },
+      };
+      atomicWriteFileSync(cachePath, JSON.stringify(merged, null, 2));
+    });
   } catch {
     // best-effort; a failed write just means the router sees no projection
   }
 }
 
 /**
- * The adaptive interval until the next refresh, clamped to [MIN, MAX]. A
- * shorter `minutesToLimit` (closer to the cap) polls sooner; `null` (unknown /
- * idle / not burning) waits the full ceiling.
+ * Interval until the next refresh attempt, clamped to [minMs, maxMs].
+ * Defaults pin both ends to {@link REFRESH_INTERVAL_MS} (5 minutes) so the
+ * live daemon path is a fixed schedule. Tests may pass a wider range to
+ * exercise burn-aware scheduling without changing production cadence.
  */
 export function computeNextRefreshDelayMs(
   minutesToLimit: number | null,
   opts: { minMs?: number; maxMs?: number; divisor?: number } = {},
 ): number {
-  const minMs = opts.minMs ?? REFRESH_MIN_MS;
-  const maxMs = opts.maxMs ?? REFRESH_MAX_MS;
+  const minMs = opts.minMs ?? REFRESH_INTERVAL_MS;
+  const maxMs = opts.maxMs ?? REFRESH_INTERVAL_MS;
   const divisor = opts.divisor ?? REFRESH_BURN_DIVISOR;
   if (minutesToLimit === null || !Number.isFinite(minutesToLimit)) return maxMs;
   const targetMs = (minutesToLimit / divisor) * 60_000;
@@ -233,11 +262,15 @@ export async function buildLocalUsageAccounts(): Promise<LocalUsageAccount[]> {
       accounts.push({
         usageKey,
         agentId,
+        // fileOnly: never open the ACL-bound keychain item from the daemon —
+        // that path is the Touch ID storm. Usage reads setup-token /
+        // no-ACL cache / .credentials.json only (see loadClaudeOauth).
         fetch: () =>
           getUsageInfo(agentId, {
             home: fetchInput.home,
             cliVersion: fetchInput.cliVersion,
             organizationId: fetchInput.organizationId,
+            fileOnly: true,
           }),
       });
     }

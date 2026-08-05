@@ -1,21 +1,49 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as bundles from '../secrets/bundles.js';
+import { writeBundle } from '../secrets/bundles.js';
+import { setKeychainBackendForTest, type KeychainBackend } from '../secrets/index.js';
+import * as stateModule from '../state.js';
 import {
   isReapSafe,
   reapSafeOrphans,
   REAP_MIN_IDLE_SECS,
   pickLeaseBundleFromList,
   pickTailscaleBundleFromList,
+  crabboxEnv,
   crabboxList,
   crabboxStatusReady,
   crabboxWarmup,
   parseCrabboxSshArgv,
   poolReusableBoxes,
+  resetCrabboxSecretsMemosForTest,
   type CrabboxBox,
 } from './cli.js';
 import type { SecretsBundle } from '../secrets/bundles.js';
+
+/**
+ * In-memory keychain backend so the REAL readAndResolveBundleEnv path runs
+ * without a real keychain (mirrors config.test.ts / chrome.secrets.test.ts).
+ * `gets` counts backend value reads — the seam that proves the process-lifetime
+ * lease-env memo (one keychain read across the many crabboxEnv calls a poll loop
+ * makes), WITHOUT mocking the function under test's dependency.
+ */
+class CountingKeychainBackend implements KeychainBackend {
+  store = new Map<string, string>();
+  gets = 0;
+  has(item: string) { return this.store.has(item); }
+  get(item: string) {
+    this.gets++;
+    const v = this.store.get(item);
+    if (v === undefined) throw new Error(`missing ${item}`);
+    return v;
+  }
+  set(item: string, value: string) { this.store.set(item, value); }
+  delete(item: string) { return this.store.delete(item); }
+  list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+}
 
 // Suites that stand up a fake `crabbox` on PATH are POSIX-only: the fake is a
 // `#!/bin/sh` script with no .cmd/.exe extension, which Windows can neither
@@ -23,6 +51,29 @@ import type { SecretsBundle } from '../secrets/bundles.js';
 // installed or not on PATH" before the behavior under test runs. The
 // pure-function suites in this file still run everywhere.
 const describePosix = describe.skipIf(process.platform === 'win32');
+// Same POSIX-only guard for a single test that stands up a fake `crabbox` on PATH.
+const itPosix = it.skipIf(process.platform === 'win32');
+
+/**
+ * Hermetic lease-bundle resolution for suites that call crabboxList / crabboxWarmup
+ * / crabboxEnv but do not care about secrets. Without this, crabboxEnv auto-detects
+ * the DEVELOPER's real provider-token bundle (e.g. a locked `hetzner.com`), and the
+ * agentOnly read throws "not unlocked" (SEC-13) — a dev-machine-only failure that
+ * has nothing to do with the box parsing / warmup argv under test. Pinning readMeta
+ * → {} and listBundles → [] makes resolveLeaseBundle find nothing, so crabboxEnv
+ * injects no lease token; resetting the memos keeps it isolated per test.
+ */
+function installHermeticLease(): void {
+  beforeEach(() => {
+    resetCrabboxSecretsMemosForTest();
+    vi.spyOn(stateModule, 'readMeta').mockReturnValue({} as ReturnType<typeof stateModule.readMeta>);
+    vi.spyOn(bundles, 'listBundles').mockReturnValue([]);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetCrabboxSecretsMemosForTest();
+  });
+}
 
 describe('pickLeaseBundleFromList', () => {
   const bundle = (name: string, keys: string[]): SecretsBundle =>
@@ -72,6 +123,190 @@ describe('pickTailscaleBundleFromList', () => {
   it('returns undefined when no bundle declares one', () => {
     expect(pickTailscaleBundleFromList([bundle('misc', ['HCLOUD_TOKEN'])])).toBeUndefined();
     expect(pickTailscaleBundleFromList([])).toBeUndefined();
+  });
+});
+
+describe('crabboxEnv tailscale value memo', () => {
+  // crabboxEnv runs several times per lease (list/wait/spawn/stop). The
+  // tailscale read is a single-key subset, which canCacheResolvedEnv rejects
+  // for broker auto-cache — so without the process-lifetime value memo every
+  // call re-read the keychain (and, for a non-broker-held bundle, could
+  // re-prompt). One read per process, then the memo serves.
+  const tailscaleBundle = { name: 'tailnet', vars: { TS_AUTHKEY: 'keychain:ts' } } as SecretsBundle;
+  const ENV_KEYS = ['AGENTS_LEASE_SECRETS_BUNDLE', 'CRABBOX_TAILSCALE_AUTH_KEY'] as const;
+  let savedEnv: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+    for (const k of ENV_KEYS) delete process.env[k];
+    resetCrabboxSecretsMemosForTest();
+    // Hermetic lease-bundle resolution: no configured lease.secretsBundle from
+    // the developer's real agents.yaml, and no auto-detectable provider token.
+    vi.spyOn(stateModule, 'readMeta').mockReturnValue({} as ReturnType<typeof stateModule.readMeta>);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetCrabboxSecretsMemosForTest();
+    for (const k of ENV_KEYS) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+  });
+
+  it('reads the tailscale keychain value at most once across repeated crabboxEnv calls', () => {
+    vi.spyOn(bundles, 'listBundles').mockReturnValue([tailscaleBundle]);
+    const readSpy = vi
+      .spyOn(bundles, 'readAndResolveBundleEnv')
+      .mockReturnValue({ bundle: tailscaleBundle, env: { TS_AUTHKEY: 'tskey-once' } });
+
+    const env1 = crabboxEnv({});
+    const env2 = crabboxEnv({});
+    const env3 = crabboxEnv({});
+
+    expect(env1.CRABBOX_TAILSCALE_AUTH_KEY).toBe('tskey-once');
+    expect(env2.CRABBOX_TAILSCALE_AUTH_KEY).toBe('tskey-once');
+    expect(env3.CRABBOX_TAILSCALE_AUTH_KEY).toBe('tskey-once');
+    expect(readSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed tailscale read memoizes as absent — the failure is not retried per call', () => {
+    vi.spyOn(bundles, 'listBundles').mockReturnValue([tailscaleBundle]);
+    const readSpy = vi
+      .spyOn(bundles, 'readAndResolveBundleEnv')
+      .mockImplementation(() => { throw new Error('bundle not unlocked'); });
+
+    expect(crabboxEnv({}).CRABBOX_TAILSCALE_AUTH_KEY).toBeUndefined();
+    expect(crabboxEnv({}).CRABBOX_TAILSCALE_AUTH_KEY).toBeUndefined();
+    expect(readSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('crabboxEnv lease-token read: agentOnly, resolved ONCE, throws loud without looping', () => {
+  // SEC-13: `--lease` is headless by contract, so the provider-token read is
+  // agentOnly (never a Touch ID sheet). crabboxEnv runs on EVERY crabboxWaitReady
+  // poll iteration (crabboxWaitReady → crabboxFind → crabboxList → crabboxEnv), so
+  // the read is resolved ONCE up front and memoized (env or thrown error). A
+  // locked bundle re-raises the memoized "unlock <name>" error on every call — so
+  // the failure surfaces loud on the FIRST crabboxEnv (before any poll loop) and
+  // the loop never re-issues the read (the per-poll storm this fix kills).
+  //
+  // Exercises the REAL readAndResolveBundleEnv path over an in-memory keychain
+  // backend (no mocking of the function under test's dependency — repo rule
+  // "Tests exercise the real path"). A `never`-policy bundle resolves silently
+  // under agentOnly; a `hold`-policy bundle hits the real agentOnly guard
+  // (bundles.ts:1345) and throws the "not unlocked" message. The backend `.get`
+  // count is what proves the memo — the real read is issued once, then served.
+  const BUNDLE = 'hetzner.com';
+  const ENV_KEYS = ['AGENTS_LEASE_SECRETS_BUNDLE', 'CRABBOX_TAILSCALE_AUTH_KEY'] as const;
+  const SIDE_ENV = ['AGENTS_SECRETS_NO_AGENT', 'AGENTS_NO_USAGE_TRACK'] as const;
+  let savedEnv: Record<string, string | undefined>;
+  let savedSide: Record<string, string | undefined>;
+  let be: CountingKeychainBackend;
+  let prevBackend: KeychainBackend | null;
+
+  /** Seed a real bundle carrying HCLOUD_TOKEN under the given prompt policy. */
+  function seedLeaseBundle(policy: SecretsBundle['policy']): void {
+    writeBundle({ name: BUNDLE, policy, vars: { HCLOUD_TOKEN: 'tok-once' } });
+  }
+
+  beforeEach(() => {
+    savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+    for (const k of ENV_KEYS) delete process.env[k];
+    savedSide = Object.fromEntries(SIDE_ENV.map((k) => [k, process.env[k]]));
+    process.env.AGENTS_SECRETS_NO_AGENT = '1'; // force keychain path, skip secrets-agent broker
+    process.env.AGENTS_NO_USAGE_TRACK = '1';
+    be = new CountingKeychainBackend();
+    prevBackend = setKeychainBackendForTest(be);
+    resetCrabboxSecretsMemosForTest();
+    // Hermetic lease-bundle resolution: no configured lease.secretsBundle. The
+    // tailscale path scans listBundles() over the SAME real backend — the seeded
+    // hetzner bundle declares no tailscale key, so pickTailscaleBundleFromList
+    // finds nothing and only the lease read is exercised.
+    vi.spyOn(stateModule, 'readMeta').mockReturnValue({} as ReturnType<typeof stateModule.readMeta>);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setKeychainBackendForTest(prevBackend);
+    resetCrabboxSecretsMemosForTest();
+    for (const k of ENV_KEYS) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+    for (const k of SIDE_ENV) {
+      if (savedSide[k] === undefined) delete process.env[k];
+      else process.env[k] = savedSide[k];
+    }
+  });
+
+  it('resolves the provider token once and injects it, re-reading the keychain at most once', () => {
+    seedLeaseBundle('never'); // no biometry ACL — the agentOnly read resolves silently
+    const seedReads = be.gets; // reads done by writeBundle setup, if any
+
+    const env1 = crabboxEnv({ secretsBundle: BUNDLE });
+    const afterFirst = be.gets; // the ONE resolving keychain read
+    const env2 = crabboxEnv({ secretsBundle: BUNDLE });
+    const env3 = crabboxEnv({ secretsBundle: BUNDLE });
+
+    expect(env1.HCLOUD_TOKEN).toBe('tok-once');
+    expect(env2.HCLOUD_TOKEN).toBe('tok-once');
+    expect(env3.HCLOUD_TOKEN).toBe('tok-once');
+    // The real keychain read ran (proves we exercised the genuine path, not a memo
+    // hit that never touched the backend)...
+    expect(afterFirst).toBeGreaterThan(seedReads);
+    // ...and it ran ONCE: the loop-repeated crabboxEnv calls serve the memo, so the
+    // backend read count does not climb across env2/env3.
+    expect(be.gets).toBe(afterFirst);
+  });
+
+  it('a LOCKED bundle throws the real "not unlocked" hint on the FIRST call — read issued once, not per call', () => {
+    seedLeaseBundle('hold'); // biometry-ACL'd — the real agentOnly guard throws
+    const seedReads = be.gets;
+
+    // First call: the REAL readAndResolveBundleEnv agentOnly guard (bundles.ts:1345)
+    // throws, wrapped by resolveLeaseEnvMemo's "Could not load" message.
+    expect(() => crabboxEnv({ secretsBundle: BUNDLE })).toThrow(/not unlocked in the secrets agent/);
+    const afterFirst = be.gets;
+    // The memoized error is re-raised on repeat calls WITHOUT re-reading, so a poll
+    // loop cannot re-storm it.
+    expect(() => crabboxEnv({ secretsBundle: BUNDLE })).toThrow(/agents secrets unlock hetzner\.com/);
+    expect(() => crabboxEnv({ secretsBundle: BUNDLE })).toThrow(/Could not load secrets bundle "hetzner\.com" for crabbox/);
+    // The guard's readBundle metadata read happened at most once — repeat calls do
+    // not touch the backend again (the memoized error short-circuits).
+    expect(be.gets).toBe(afterFirst);
+    expect(afterFirst).toBeGreaterThanOrEqual(seedReads);
+  });
+
+  itPosix('the throw propagates out of crabboxWaitReady before its poll loop runs (fails loud, never polls)', async () => {
+    // crabboxWaitReady's first action is crabboxFind → crabboxList → crabboxEnv,
+    // which throws synchronously for a locked bundle. A fake `crabbox` is put on
+    // PATH so findCrabbox() passes and crabboxEnv is the thing that throws (via the
+    // REAL agentOnly guard over a seeded `hold` bundle). The injected `sleep`
+    // records any poll iteration; assert it is NEVER called — the wait loop is not
+    // entered, so there is no per-second re-read storm.
+    seedLeaseBundle('hold');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crabbox-lease-lock-'));
+    fs.writeFileSync(
+      path.join(dir, 'crabbox'),
+      ['#!/bin/sh', 'case "$1" in', '  --help) exit 0 ;;', '  *) echo "[]" ; exit 0 ;;', 'esac'].join('\n'),
+      'utf-8',
+    );
+    fs.chmodSync(path.join(dir, 'crabbox'), 0o755);
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${dir}${path.delimiter}${oldPath ?? ''}`;
+    const { crabboxWaitReady } = await import('./cli.js');
+    let polls = 0;
+    const sleep = async () => { polls++; };
+    try {
+      await expect(
+        crabboxWaitReady('some-slug', { secretsBundle: BUNDLE, timeoutMs: 60_000, intervalMs: 5_000, sleep }),
+      ).rejects.toThrow(/not unlocked in the secrets agent/);
+      expect(polls).toBe(0); // never entered the poll/sleep loop
+    } finally {
+      process.env.PATH = oldPath;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -243,6 +478,7 @@ describePosix('crabboxStatusReady', () => {
 });
 
 describePosix('normalizeBox tailscale fields (via crabboxList)', () => {
+  installHermeticLease();
   function withFakeCrabbox(listJson: unknown, fn: (dir: string) => void) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crabbox-ts-'));
     const listPath = path.join(dir, 'boxes.json');
@@ -306,6 +542,7 @@ describePosix('normalizeBox tailscale fields (via crabboxList)', () => {
 });
 
 describePosix('crabboxList timeout — a slow provider never hangs an ambient command', () => {
+  installHermeticLease();
   it('throws (does not hang) when `crabbox list` exceeds timeoutMs', () => {
     // Fake crabbox: --help is instant (findCrabbox passes), `list` blocks 30s.
     // With timeoutMs=400 the spawn is killed and we throw a clear message fast —
@@ -332,6 +569,7 @@ describePosix('crabboxList timeout — a slow provider never hangs an ambient co
 });
 
 describePosix('crabboxWarmup netMode', () => {
+  installHermeticLease();
   // A fake crabbox that records argv for `warmup` and returns a fresh box on `list`.
   function withRecordingCrabbox(fn: (log: string) => Promise<void>): Promise<void> {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crabbox-warm-'));

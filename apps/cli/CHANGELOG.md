@@ -1,5 +1,302 @@
 # Changelog
 
+## 1.22.8
+
+- **`agents browser` now gates cross-machine drives behind per-device consent.** `agents browser <cmd> --host <device>` already routes a browser command to another fleet machine over SSH and drives its browser — but nothing asked that machine's permission, so any box you could SSH to, you could drive. A new device-local `browser.remote-control` setting (off by default, never synced) fixes that: a fleet-remote `browser --host <this-machine> start` is refused with an actionable message until the owner runs `agents browser remote-control on` here. Local starts (no `--host`) are never gated. The fleet passthrough marks every `--host` dispatch with `AGENTS_FLEET_REMOTE` so the far side can tell a cross-machine drive from a local one. New command: `agents browser remote-control [on|off]` (no arg prints status; `--json` supported). Source: `apps/cli/src/lib/browser/remote-control.ts`, `apps/cli/src/commands/browser.ts`, `apps/cli/src/lib/hosts/passthrough.ts`, `apps/cli/src/lib/device-config.ts`, `apps/cli/docs/browser.md`.
+
+- **`agents browser` tasks are now attributed to the caller that ran `start`, not
+  to the browser daemon.** `Task.owner` (RUSH-2020) was resolved with
+  `resolveActor()` *inside* the shared, long-lived browser daemon, so every task —
+  no matter which agent or person opened it — was stamped with the identity of
+  whoever happened to start the daemon. The caller's identity is now forwarded over
+  IPC: the CLI (the caller's own process) puts `actor` (`resolveActor().id`) and
+  `launchId` (`$AGENT_LAUNCH_ID`, the per-run id `exec.ts` injects for every harness)
+  on the `start` request, and the daemon stamps exactly those. Adds `Task.launchId` —
+  which run created a task — the scope a later `browser status --mine` and the
+  no-flag current-task default will filter on. Source:
+  `apps/cli/src/lib/browser/types.ts`, `apps/cli/src/lib/browser/service.ts`,
+  `apps/cli/src/lib/browser/ipc.ts`, `apps/cli/src/commands/browser.ts`.
+
+- **`agents harness edit` and `agents harness rename` are now real commands.** `editProfile` and `renameProfile` already existed in `lib/profiles.ts` but nothing on the CLI surface reached them, so changing a custom harness meant hand-editing its YAML. `agents harness edit <name>` applies `--model`, `--base-url`, `--version`, and `--description` in place, preserving fork lineage (an edit never marks a harness as forked from itself). `agents harness rename <name> <new-name>` renames the YAML file and its `name` field, and rewrites `forkedFrom` on every harness that pointed at the old name so the fork graph stays accurate. There is deliberately no `--label`: the header `agents view` prints is derived from the harness name, so renaming is how you change it.
+
+- **Run-time messages call a custom harness a "custom harness", not a "profile".** When you `agents run <name>` a custom harness (created with `agents harness add`), the CLI now says `Resolved custom harness '<name>'` and, for a discarded cost tier, `cost tiers don't apply to custom harness '<name>'` — instead of the legacy internal noun "profile". The `--strategy` and account-picker notices on a custom-harness run are aligned too. Behavior is unchanged; the legacy `agents profiles` alias still works. Source: `apps/cli/src/commands/exec.ts`.
+
+- **Placement model + `agents run --where` (Phase 2 surface consolidation).**
+  "Where does the body run?" is one shared object (`local | device | fleet | cloud | lease`)
+  in `src/lib/placement.ts`. `agents run --where device:<name>|auto|lease[:backend]|local`
+  expands into the existing `--host` / `--lease` paths; mixing doors fails loud. Docs
+  (`00-concepts.md` § Placement, `hosts.md`) and help on run / routines / monitors teach
+  the matrix — including that monitors `--device` is **owner**, not body placement.
+  Old flags remain aliases. Source: `apps/cli/src/lib/placement.ts`, `apps/cli/src/commands/exec.ts`.
+
+- **`agents harness fork` no longer accepts `--label` (breaking change).** The `--label` flag was used to set a human-facing display name for a custom harness. Display names are now always derived from the profile's `name` via a curated vendor/brand table (`deepseek-flash` → `DeepSeek Flash`, `spark` → `Spark`), so the flag is superfluous. Any script that passes `--label` to `agents harness fork` will receive a CLI error; remove the flag to migrate.
+
+- **`agents run` no longer auto-picks an account whose token the server has already rejected.** Account rotation judged an account "signed in" from a local heuristic — a credential file is present and its email decodes — which cannot tell a good token from a revoked-but-unexpired one, so `balanced`/`available`/`run auto` could route into a `revoked` account and die at spawn ("session expired"). Eligibility now also reads the daemon's live auth-health probe (`auth-health.ts`): a `revoked` (401/403) account is excluded from the pick, reported as `revoked` by the pre-flight readiness check, shown as "needs re-login" in the account picker, and named in the teams throttle warning. Fail-open: a missing probe or any non-revoked verdict never blocks a launch (a cached `revoked` keeps gating until the daemon's next probe clears it). Source: `apps/cli/src/lib/rotate.ts`, `apps/cli/src/commands/run-account-picker.ts`, `apps/cli/src/commands/teams.ts`, `apps/cli/docs/hosts.md`.
+
+- **Scheduled routines no longer overlap or outlive their configured timeout (RUSH-2186).** Detached cron, catchup, and monitor launches now take a cross-process per-routine claim and refuse a second fire while the prior run is alive. The configured deadline is persisted in run metadata; both the live runner and the restart-recovery monitor kill the owned process tree and record `timeout` when it expires. Source: `apps/cli/src/lib/runner.ts`, `apps/cli/src/lib/routines.ts`, `apps/cli/docs/03-routines.md`.
+
+- **`agents snapshot` — one-process poll for inventory + active sessions (Phase 4 surface consolidation).**
+  Consumers (Factory, scripts, menubar) were forking `view --json` × N harnesses plus
+  `sessions --active --json` (and sometimes feed) on every tick. `agents snapshot --json`
+  returns the same shapes in one invocation: `inventory` (view), `sessions` (active rows),
+  optional `--with-feed` / `--with-sync`. Default sessions scope is this machine; `--all-hosts`
+  matches full `sessions --active` fan-out. Does **not** redefine `agents status`, which stays
+  the UnifiedSyncStatus sync contract. Source: `apps/cli/src/commands/snapshot.ts`,
+  `apps/cli/src/lib/snapshot.ts`.
+
+## 1.22.7
+
+- **`agents feed --project <name>` scopes the whole feed to one project.** Open
+  blocks, the updates view (`--filter updates`), and the trailing activity lane
+  are all filtered to the requested repo/project using the same worktree-aware
+  project key as `agents perf` (`lib/project-key.ts`). The masthead becomes
+  `<project> needs you` / `<project> updates`. Filtering is applied locally after
+  the fleet fan-out, so older peers that do not recognize `--project` still
+  contribute correctly. Source: `apps/cli/src/commands/feed.ts`,
+  `apps/cli/src/lib/feed-ranking.ts`.
+
+- **Feed blocks are now stamped with their project.** The `feed-publish` hook
+  derives project from the session cwd, and `agents feed post --blocked` stamps it
+  on the declared block. Live-session enrichment backfills `project` onto older
+  blocks that lack it. Source: `apps/cli/src/lib/feed.ts`,
+  `apps/cli/src/lib/feed-outcome.ts`, `apps/cli/src/lib/session/active.ts`.
+
+- **`agents activity` is removed.** The standalone milestone timeline is gone;
+  its stream is now read through `agents feed --filter all` (blocks + updates) or
+  `agents feed --filter updates` (updates only). `activity --project <name>` is
+  replaced by `feed --project <name>`. Source: `apps/cli/src/index.ts`,
+  `apps/cli/src/startup/command-registry.ts`, `apps/cli/src/commands/activity.ts`
+  (deleted), `apps/cli/docs/06-observability.md`,
+  `apps/cli/docs/11-projects.md`.
+
+- **`agents browser start` no longer fails with "Custom binary not found" when the `default` profile came from another OS.** `~/.agents/agents.yaml` syncs across the fleet, so a `default` profile auto-created on macOS carried a `/Applications/Google Chrome.app/...` binary path that doesn't exist on a Linux box — a bare `browser start` there died with `Custom binary not found`, the top browser roadblock (one session burned six commands working around it). `ensureDefaultBrowserProfile` now validates that the resolved default can actually launch on THIS machine and, if its browser/binary is missing, regenerates the `default` from the installed-browser auto-detect instead of handing back the broken profile. A configured default (`profiles set-default`) that can't launch here warns and falls through to auto-detect; remote (`ssh://`) defaults skip the local binary check since their browser lives on the far host. Source: `apps/cli/src/lib/browser/profiles.ts`, `apps/cli/docs/browser.md`.
+
+- **The stray "Agents CLI needs to authenticate to continue" Touch ID sheet now actually heals on an already-hashed machine (SEC-13/#1938 follow-up).** 1.22.5 added a one-time no-ACL re-store for a stale-ACL'd `agents-cli.hmackey` item — the internal HMAC key read *before every hashed keychain lookup*, whose damaged copy pops a generic, context-less Touch ID sheet on nearly any command that touches secrets. But it wired the heal only into `maybeAutoRekey`, which is bypassed for the hmackey and hashed-name lookups themselves (`prepareServiceName` returns early for `HMAC_KEY_ITEM` before `maybeAutoRekey` runs). So the exact hot paths that read the key — the `agents devices list` stats probe a SessionStart hook runs, and every background hashed read — never triggered the heal, and an already-migrated machine prompted forever. The documented `agents secrets rekey` remedy is also a no-op on such a machine: with no cleartext names left to re-key, it returns without re-storing the key. The heal now runs on the read path itself (`readHmacKeyRecord`): the first hashed lookup in the first process re-stores the record no-ACL exactly once (guarded by `healedNoAcl`, so it never churns the keychain afterward) — one last prompt on the read that heals it, then silent forever, on every path. Source: `apps/cli/src/lib/secrets/index.ts`.
+
+- **Add Pi (Oh My Pi, `omp`) as a native harness.** agents-cli now installs, runs, and
+  syncs resources for [Oh My Pi](https://omp.sh) (`@oh-my-pi/pi-coding-agent`, binary
+  `omp`) under id `pi`. Pi is a Bun-based, terminal-first, multi-provider coding agent;
+  its cross-provider model catalog (OpenRouter, OpenAI, Anthropic, xAI, DeepSeek, …)
+  surfaces in `agents view` and `agents models pi` via `omp models --json`. It is
+  Claude-compatible: MCP (`.mcp.json`, stdio + http + headers), skills, file commands, and
+  Claude-shaped subagents all sync into `~/.omp/agent/`. Hooks, allowlist, and plugins are
+  intentionally off (omp's hook/approval/plugin models don't map to agents-cli's).
+  Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/exec.ts`, `apps/cli/src/lib/models.ts`.
+
+- **`agents run <profile> --model <tier>` now resolves the cost tier against the profile's own harness, not its host's.** A custom-harness profile (e.g. a DeepSeek model routed through the `claude` host binary) resolved a tier token (`cheap|default|best|ultra`) by calling `resolveTier(options.agent, ...)` with `options.agent` already overwritten to the HOST agent's id — so `best` resolved against Claude's own catalog and could push a real Claude model id as the `--model` flag, clobbering the profile's own `ANTHROPIC_MODEL` env value. Profiles can now declare a `models:` block (per-tier model ids for the harness's own catalog); a requested tier resolves against it first — clamping an unset tier down to the next cheaper one that IS set — and the concrete id is substituted into both the env and the forwarded `--model` value before exec.ts's native (host-catalog) tier logic ever runs. A profile with no `models:` configured degrades gracefully to today's behavior — the harness's single pinned model, with an informational note instead of an error. Source: `apps/cli/src/lib/profiles.ts`, `apps/cli/src/commands/exec.ts`.
+
+- **`agents projects status` card: host-grouped agents, focus units, and a warnings footer.** Live agents render under `@host` rows so the same harness on two machines is not collapsed into one cell. Focus counts are labeled `file-touches (Nd)` instead of bare integers. Repo drift, dirty trees, missing checkouts, slug mismatch, unmeasurable schedule, and crash piles land at the bottom with 🔴 critical / ⚠️ continue. Local workspace probe always feeds the footer (full fleet table still requires `--fleet`). Source: `apps/cli/src/lib/project-status.ts`, `project-focus.ts`, `project-probe.ts`, `commands/projects.ts`.
+
+- **`agents projects status` and `view`/`show` share one body.** Named form is the full card (every milestone + definition); unnamed is the multi-project rollup. No second implementation to drift. Source: `apps/cli/src/commands/projects.ts`.
+
+- **`agents sessions --help` and `05-sessions.md` now teach one session-lifecycle
+  matrix.** `focus` / `focus --attach-only` / `detach` / `attach` / `resume` are
+  listed as distinct intents (not synonyms), so operators stop guessing among
+  `go` / `focus` / `attach` / `resume`. Source: `apps/cli/src/commands/sessions.ts`,
+  `apps/cli/src/commands/focus.ts`, `apps/cli/docs/05-sessions.md`.
+
+- **Cost tiers are ignored (with a clear warning) for profile runs.** A profile's model comes from its endpoint (e.g. Kimi/DeepSeek/GLM via `agents run <profile>`), not the host harness's catalog — so passing `--model cheap|default|best|ultra` to a profile used to resolve against the *host* harness and forward an incompatible model id to the profile's endpoint. Now a tier on a profile run is discarded with a standout warning and the profile's configured model is used. Concrete `--model <id>` on a profile is unchanged. Source: `apps/cli/src/commands/exec.ts`.
+
+- **`agents view` harness rows now lead with the version number.** Custom harness rows previously showed `via <host> <version>` — the host CLI name came first, which buried the version in the middle of the line. The format is now `<version> (forked from <host>)` for pinned harnesses and `<version> (forked from <host>, tracks default)` for unpinned ones that follow the host's global default. The `tracks default` label is shown in green so it stands out at a glance.
+
+- **Chained fork lineage in harness headers.** When a custom harness is itself a fork of another custom harness (which in turn forks a native host), the block header now shows the full two-hop chain: `custom · forked from <intermediate> -> <native-host>`. Single-hop forks continue to show `custom · forked from <parent>`.
+
+- **BYOK budget bar in `agents view`.** Custom harnesses backed by an OpenRouter key now show a live spend bar (amount used, remaining, and limit) inline on the model/auth row. Keys are deduplicated so multiple harnesses sharing the same keychain entry trigger exactly one API call. The bar is rendered only when a budget is available; harnesses without a BYOK key are unaffected. Source: `apps/cli/src/lib/byok-usage.ts`, `apps/cli/src/commands/view.ts`.
+
+- **`agents run auto` with no prompt no longer silently attaches a dead pane or leaves an orphan session (RUSH-2185 / EXEC-23a).** Three latent bugs combined to produce this failure when `auto` picked a harness like `cursor-agent` that exits immediately without a prompt: (F1) the auto-picker had no gate for whether a harness can open a bare interactive REPL — `cursor-agent` was a valid candidate even though its CLI requires a prompt and exits on `argv = []`; (F2) `surfacePaneFailure` was guarded by `status !== 0`, so a clean exit-0 death produced only a bare `[detached]` line with no diagnostic; (F3) the "pane still alive → keep session" fall-through relied on `paneExitStatus` returning `{dead:false}`, which it also returns on any query error (a race right after the pane-died hook), leaving the session alive as an orphan. Fixed: (F1) a new `interactiveRepl` capability bit in `AgentConfig.capabilities` marks every harness; `auto` now filters to REPL-capable candidates before picking, and fails loud naming the installed harnesses when none qualify; (F2) `shouldRecapDeadPane(status, interactive)` surfaces the pane tail any time the run is interactive, regardless of exit code; (F3) `isPaneKnownAliveFromQueryResult(code, stdout)` is now required as positive proof before keeping a session — an ambiguous result tears the session down via `killSession` instead. Source: `apps/cli/src/lib/exec.ts`, `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/types.ts`, `apps/cli/src/lib/capabilities.ts`, `apps/cli/src/commands/exec.ts`, `apps/cli/docs/specifications.md` (EXEC-23a).
+
+- **`agents run auto` can pick the Pi (`omp`) harness for prompt-less interactive runs again, and `main` builds green.** The `interactiveRepl` capability bit added by the RUSH-2185 / EXEC-23a fix landed at the same time as the new Pi harness, and neither change saw the other — so `pi` was the one agent in `AGENTS` that never declared the bit, and the completeness test that pins the registry to the capability list went red on `main` (`pi missing interactiveRepl`). Pi now declares `interactiveRepl: true`: bare `omp` runs the TUI, and `omp -p` is the one-shot form that answers a prompt and exits.
+
+- **`projects status --fleet` no longer labels this box `@local`.** Local sessions from `getActiveSessions()` lacked `machine`; host-grouped agents stamped remotes only. Locals are now filled with `machineId()` before rollup so the agents roster and fleet lines agree. Source: `apps/cli/src/lib/project-status.ts`, `commands/projects.ts`.
+
+- **`agents sessions stats` — which skills/commands you actually invoke, and which are dead weight.** A cheap, db-backed rollup of `session_resource_usage` (the skill/`Skill`-tool + slash-command tallies already recorded at index time), joined to `sessions` for attribution so `--agent`/`--project`/`--since`/`--machine` narrow the window and `--kind`/`--plugin` narrow the resources. A both-ends view: the most-invoked resources (`--bottom` flips to least-invoked, `--top <n>` caps), and the installed-but-never-invoked ones (cross-referenced against `listResources`/`discoverPlugins`) — the productized form of a manual transcript-scan audit. `--json` emits a versioned `sessions-stats` envelope. The signal captures EXPLICIT invocations only (slash commands + `Skill` tool calls) — an auto-triggered skill emits no event and reads as 0, and only Claude transcripts expose the signal today; both caveats are surfaced in help and output. A new `agents sessions backfill resources` folds historical sessions (indexed before the signal shipped) into the usage index, re-parsing each transcript from byte 0, gated by a new `resource_scan_ledger` (schema v31) so reruns skip completed transcripts — mirroring `agents sessions backfill tools`. Source: `apps/cli/src/commands/sessions-stats.ts`, `apps/cli/src/commands/sessions-backfill.ts`, `apps/cli/src/lib/session/db.ts`, `apps/cli/docs/05-sessions.md`, `apps/cli/docs/specifications.md` (SES-IF-4b).
+
+- **`agents share` serves screenshots and recordings with a real content-type.**
+  Publishing a PNG/JPEG/GIF/WebP/AVIF image, an MP4/MOV/WebM video, or a PDF now
+  sets the matching `content-type` instead of `application/octet-stream`. GitHub's
+  image proxy (camo) only renders an inline `![](url)` when the asset is served as
+  a real image/video type, so this is what lets an agent drop a screenshot or a
+  screen recording straight into a PR body via `agents share <file>`. HTML, SVG,
+  CSS, JS, JSON, and text were already typed correctly. Source:
+  `apps/cli/src/lib/share/publish.ts`.
+
+- **`agents trends tools-per-session` now counts every scanned session, not just `agents teams`
+  runs.** The recipe read `sessions.tool_call_count`, a column nothing populates except the
+  teams summarizer (`apps/cli/src/lib/teams/summarizer.ts`) — the general session indexer never
+  computes it. So every session that did not come from a team was scored 0 or excluded outright
+  by `WHERE tool_call_count IS NOT NULL`, pinning the fleet-wide p50 at 0 however many tools ran
+  and leaving only `claude` in the table. It now reads `tool_scan_ledger.call_count`, the
+  per-session count the tool indexer writes for every session it scans — the same index behind
+  `agents sessions --include tools`, so the two surfaces stop disagreeing. Sessions with
+  genuinely zero tool calls still count as 0 instead of vanishing. On a real 7-day window this
+  took the sample from 400 to 570 sessions and surfaced `grok`, `rush`, `codex`, `kimi`,
+  `droid` and `antigravity`, none of which had ever appeared. Run `agents sessions backfill
+  tools` once if historical sessions were never indexed. Source:
+  `apps/cli/src/lib/analytics/recipes.ts`.
+
+## 1.22.5
+
+- **`agents events` can now filter by `--session <id>` and `--bundle <name>` — trace which agent/session triggered a secret access.** Every event already carries the provenance `sessionId`, and secrets events carry the `bundle` in their payload, but neither was queryable: you could see *that* the `share` bundle was read, not *which session* read it. `--session` (wired to the engine's existing `sessionId` filter) and `--bundle` (a new payload filter across both the operational log and the activity stream) close that gap. `agents events --module secrets --bundle share --session <id>` answers "which agent read the share bundle" — the attribution the Touch ID storm investigation needed, since the macOS biometric sheet itself emits no event. Source: `apps/cli/src/lib/event-stream.ts`, `apps/cli/src/commands/events.ts`, `apps/cli/docs/06-observability.md`.
+
+- **`agents feed post --blocked` records now survive the agent's next Stop.** The feed-publish hook cleared the per-session block file on every `Stop`/`SessionEnd`/`PostToolUse`, which silently dropped a declared (`--blocked`) block the moment the agent parked it and its turn ended — exactly when the owner still needs to see and answer it. Declared blocks are now exempt from the lifecycle clear and stay in `agents feed` until they are actually answered (a terminal reply or `recordAnswer`); question/notification/approval blocks still clear as before. Source: `apps/cli/src/lib/feed.ts`.
+
+- **`agents add grok@latest` no longer lets a second grok account silently displace a first account's install.** Grok's version directories are keyed by upstream release number alone, not by account — so two different grok accounts that both self-update to the same identical release ("latest") were landing on the SAME on-disk `versions/grok/<version>/` directory. The second account's credentials would overwrite the first's in that shared directory, even though `agents view grok` still listed both accounts as separately installed. `installVersion` now detects this before finalizing the install: if the target version's home already has a signed-in account whose identity differs from the account driving the current update, it refuses with a clear error instead of silently corrupting the first account's install. Source: `apps/cli/src/lib/versions.ts`.
+
+- **The stray "Agents CLI needs to authenticate to continue" Touch ID sheet now heals itself.** An old keychain helper (before the metadata/hmackey no-ACL migration fix) could re-stamp the internal HMAC-key item (`agents-cli.hmackey`) with a biometry ACL. That item is read *before every hashed keychain lookup*, so a damaged copy popped a generic, context-less Touch ID sheet on nearly any command that touched secrets — `agents devices list`, a background agent, a session hook — at seemingly random times. The migration fix stopped the re-stamping but never un-stamped an already-damaged item, and once hashed naming is active nothing re-stored it, so it prompted forever. Now, on the first read where hashing is active, an un-healed HMAC-key record is re-stored no-ACL exactly once (`healHmacKeyNoAclOnce`, gated by a `healedNoAcl` flag so it never churns the keychain afterward) — one last prompt on the read that heals it, then silent. Existing damaged machines can also fix it immediately with `agents secrets rekey`. Source: `apps/cli/src/lib/secrets/index.ts`.
+
+- **`agents inspect` and `view --json` now report isolation honestly.** Found by diffing
+  every command's output between an isolated-only and a normal install. `inspect` printed
+  the bare-shim path unconditionally, so an isolated copy — which deliberately has no
+  shim, that being the guarantee — was shown sitting on the user's PATH; it now reports
+  `(none — isolated installs stay off PATH)` and `shim: null` in JSON. `inspect` also
+  showed only `default: false` for an isolated copy, hiding that it *was* the selected
+  one; it now carries `isolated` and `isolatedDefault`, and the header reads
+  `[isolated default]`. `view --json` had no isolation signal at all, so tooling could not
+  distinguish a sandboxed copy from one that owns the launcher and real config — its
+  version entries gain `isolated` and `isIsolatedDefault`. Source:
+  `apps/cli/src/commands/inspect.ts`, `apps/cli/src/commands/view.ts`.
+
+- **`agents models` is now a scannable tier menu, and you can override a tier with a command.** The tier map (`cheap|default|best|ultra` → model + `~$/Mtok`) prints for every installed harness by default; the raw model list moved behind `--all`. When the auto-guess is wrong (subscription harnesses with no price signal), pin the right model without hand-editing YAML: `agents models tier set <agent[@version]> <tier> <model>` (e.g. `agents models tier set kimi best kimi-code/k3`), `tier clear`, `tier list`. Overrides live under `model.tiers` in `agents.yaml` (same selector shape as `run.defaults`) and resolve most-specific-first — `<agent>:<version>` → `<agent>:*` → auto; an overridden id a version doesn't ship falls back to auto, and `agents models` marks a pinned tier `[override]`. Ships a curated Kimi ladder (`k2.7-highspeed` < `k2.7-coding` < `k3`) so it's right by default. Also fixes two extraction bugs: bumps the model-catalog cache schema so a freshly-upgraded box re-extracts instead of serving a stale "No models extracted" for 24h, and stops the id-scan from listing bare legacy ids like `claude-opus-4` (#1892). Source: `apps/cli/src/lib/model-tier-overrides.ts`, `apps/cli/src/lib/model-tiers.ts`, `apps/cli/src/commands/models.ts`, `apps/cli/src/lib/models.ts`, `apps/cli/docs/model-tiers.md`.
+
+- **`agents run --secrets <bundle>` never raises a Touch ID sheet on launch — even with a tty (a second storm source).** The `--secrets` injection read gated on `isHeadlessSecretsContext()`, which is FALSE for an interactive run — so an `agents run … --interactive` launch (the watchdog fires `agents run auto --interactive` every ~2 min via routine + menu-bar tick) could pop Touch ID for a keychain `hold` bundle, piling up helper sheets. An agent launch must never prompt regardless of tty (SEC-13): the read is now always `agentOnly` — it resolves from the broker (or a no-ACL bundle) and otherwise fails fast naming `agents secrets unlock <bundle>`, matching the behavior the code's own comment already described. Unchanged: the explicit `agents share` / `agents share setup` commands (`readWriteTokenFromBundle`, `readCloudflareCreds`) still honor the interactive/headless gate — those are user-initiated, not agent launches. Source: `apps/cli/src/commands/exec.ts`.
+
+- **Background and read-only secret reads never raise Touch ID (SEC-13).** Every non-user-initiated secret read now resolves `agentOnly` — from the secrets broker or a no-ACL bundle — and, on a locked `hold`/`always` keychain bundle, fails fast naming `agents secrets unlock <bundle>` instead of popping a Touch ID sheet on the interactive launcher. This closes the rest of the per-launch prompt storm that #1905 fixed only for `--secrets` injection. Covered: session-sync (`r2.backups`, read on every daemon cycle — degrades to no-transport when locked, re-checked each cycle for fast pickup once unlocked), the `--lease` crabbox provider token (resolved once up front and memoized, so a locked bundle fails loud once and the ready-wait poll never re-issues the read), browser-profile secrets on launch (skipped silently, launch proceeds), cloud dispatch (`cloud:antigravity`, fails loud with the unlock hint), the `webhook serve` receiver, and the `get_secret` MCP tool (throws as the tool error). Unchanged and still interactive-gated: the user-initiated `agents secrets get/export`, `agents browser type`, `agents exec --secrets`, the `ssh` askpass, and the explicit `agents share` / `agents share setup` provisioning reads — a human running those in a plain terminal still gets a prompt. Source: `apps/cli/src/lib/session/sync/config.ts`, `apps/cli/src/lib/crabbox/cli.ts`, `apps/cli/src/lib/browser/chrome.ts`, `apps/cli/src/lib/cloud/antigravity.ts`, `apps/cli/src/lib/secrets/mcp.ts`, `apps/cli/src/commands/webhook.ts`.
+
+## 1.22.4
+
+- **Background processes no longer storm macOS Touch ID sheets (secrets-touchid-storm).**
+  Raw keychain item reads — a profile's provider token on `agents run <profile>`,
+  the Claude OAuth read behind `agents view`, any `getKeychainToken` caller — now
+  fail fast with an actionable error naming the item when the process is
+  non-interactive (an agent runtime, or a TTY-less background spawn like the
+  Factory extension host's `agents view` poll), instead of raising a sheet nobody
+  is watching. A cancelled or failed interactive read opens a 5-minute back-off
+  memo (`~/.agents/.cache/keychain-read-backoff/`) so a polling caller can't
+  re-prompt every few seconds; any successful read or write clears it. Reads that
+  are prompt-free by construction (bundle metadata, `never`-policy bundles, the
+  unlock session store, the OAuth token cache) attest their no-ACL write and are
+  unaffected. crabbox's tailscale key is now read at most once per process
+  instead of on every `crabboxEnv` call (list/wait/spawn/stop). Source:
+  `apps/cli/src/lib/secrets/index.ts`, `apps/cli/src/lib/secrets/headless.ts`,
+  `apps/cli/src/lib/secrets/read-backoff.ts`,
+  `apps/cli/src/lib/secrets/bundles.ts`, `apps/cli/src/lib/crabbox/cli.ts`,
+  `apps/cli/docs/specifications.md` (SEC-13, SEC-27).
+
+## 1.22.3
+
+- **Menubar home-base self-test accepts `MenubarHelper-universal`.** The
+  signed-helper gate required `executablePath` to end in exactly `MenubarHelper`,
+  but lipo production builds name the binary `MenubarHelper-universal`, so every
+  1.22.2 publish on mac-mini failed after the release PR had already merged and
+  tagged. Source: `menubar/Sources/MenubarHelper/ChildProcessSelfTest.swift`.
+
+## 1.22.2
+
+- **Menu bar recovers from a stale single-instance lock instead of staying dead.**
+  The helper's lock fd is now opened `O_CLOEXEC`, so a spawned `doctor` child can
+  never inherit it and hold the `menubar.lock` flock after the helper crashes; and
+  `SingleInstance.acquire` now self-heals — when the flock is held but no live
+  `MenubarHelper` owns it (a leaked orphan / dead pid), it reaps the orphan and
+  retries rather than exiting as "already running". Previously a leaked orphan
+  bricked the menu bar until reboot. The headless Swift self-tests (single-instance
+  + child-process) now run as a build gate (`menubar/scripts/test-menubar.sh`),
+  which nothing invoked before. Source: `apps/cli/menubar/Sources/MenubarHelper/SingleInstance.swift`.
+
+- **`agents projects` definitions can now carry goals — the OKR-shaped "why".**
+  A project serves one or more `goals[]`, each an `objective` (the outcome) plus an
+  optional `measure` (the key result). Set them at scaffold time with
+  `agents projects add <name> --goal "objective:measure"` (repeatable), replace them
+  later with `agents projects set <name> --goal …`, or hand-edit the YAML. Goals show
+  on the `status` card (compact) and in `projects view` (in full), and survive a
+  `--from-linear` re-import like every other hand-set field. Milestones (pulled from
+  Linear) remain the dated checkpoints toward these goals. Source:
+  `apps/cli/src/lib/projects.ts`, `apps/cli/src/commands/projects.ts`.
+
+- **Balanced rotation no longer picks version homes that only inherit the active login.**
+  `getAccountInfo` falls back to the active/global HOME credential so `agents view`
+  still shows who is signed in when a version home has no auth file of its own.
+  Launch paths isolate config (`GROK_HOME`, `CODEX_HOME`, …) to the per-version home,
+  so those empty homes died at spawn with "Not signed in" after balanced picked them
+  (observed: `grok@0.2.118` with no `auth.json` looking signed-in via `~/.grok` →
+  `0.2.32`). Rotation now requires a real per-version credential when we know where
+  it lives (`credentialPresence.perVersion`). Source: `src/lib/rotate.ts`
+  (`isLaunchableSignedIn`, `collectRunCandidates`).
+
+- **A `never`-policy secrets bundle now actually stays silent — no more Touch ID for a bundle you set to silent, and no more double prompt.** Two bugs made `agents secrets policy <b> never` a lie. (1) The command rewrote only the bundle *metadata*, never the value items — but macOS gates each read on the item's own ACL, not the tier label, so a bundle created under `hold`/`always` kept its biometry ACL and kept popping Touch ID forever after the switch. `policy` now reconciles the value items to the new tier (`reAclBundleItems`): tightening to `never` re-stores them no-ACL (a single last prompt to read them once), and loosening back re-attaches the gate. (2) The signed keychain helper's just-in-time migration (`migrateInline`/`rehomeOrphan`) re-stamped a biometry ACL onto *every* `agents-cli.*` item it touched on read — including bundle metadata and the HMAC key, which are supposed to be silent — so a metadata/hmackey read in its own helper process raised a *second* Touch ID sheet on top of the value read. The migration now re-adds silent items (metadata, hmackey) without an ACL, so metadata enumeration and the pre-value hmackey read never prompt. Net: unlock/read a `never` bundle once and it stays silent through sleep, reboot, 30+ days, an agents-cli upgrade, and a macOS upgrade — with no Touch ID and no passphrase. The `never` tier's durability and attribution guarantees are now written into the `§Secrets` spec (SEC-19, SEC-27, SEC-28). Source: `apps/cli/src/commands/secrets.ts`, `apps/cli/src/lib/secrets/bundles.ts`, `apps/cli/src/lib/secrets/keychain-helper.swift`, `apps/cli/docs/specifications.md`.
+
+- **The per-run Touch ID storm is fixed: `agents run` no longer pops a sheet to auto-inject the share token.** On every `agents run`, `shareRuntimeEnv` auto-reads the `share` bundle's R2 write token to hand it to the spawned agent — and because `share` is a keychain bundle that is rarely broker-held, an interactive read spawned the helper and raised Touch ID on EVERY launch. Auto-injecting a token on an agent launch is a background convenience, not a user-initiated secret access, so it must never raise a sheet (SEC-13): the read is now always `agentOnly` — it resolves the token from the injected env or an already-held / no-ACL bundle and silently returns nothing otherwise (the agent can still publish via its own explicit `agents share`). And a NEW `share` bundle now defaults to the `never` tier (no biometry ACL) — the write token is low-sensitivity automation infra — so auto-share is silent with no unlock at all; an existing bundle keeps its tier (change it with `agents secrets policy share never`, which now actually strips the ACL). Source: `apps/cli/src/lib/share/config.ts`, `apps/cli/src/commands/exec.ts`.
+
+- **The daemon watchdog now rotates rate-limited sessions in place.** A stalled session whose transcript tail shows a hard account limit ("You've hit your weekly limit · resets …", "usage limit reached", "out of credits") is rotated instead of nudged: the tick gates on the same first-party healthy-account selection `agents run auto` makes (`collectHarnessCandidates` + `pickHarnessWeighted` — zero healthy logs one `rotate` skip event per cooldown window to `watchdog.log` and leaves the terminal untouched), injects the harness's exit sequence (claude: Esc, Ctrl+C, Ctrl+C; codex/gemini/cursor/opencode: Ctrl+C twice), relaunches `agents run auto --interactive --session-id <uuid>` in the SAME tab via the inject rail, then — once the new session's TUI is live — injects the resume replay for the old session. Readiness is the new session's transcript (primary) or a fresh active session correlated by cwd + machine, never an unrelated one; the wait is bounded (60s), and on timeout the session is flagged with a bare-shell message pointing at a manual `agents run auto` and suppressed for 15m before retry — never blind-typed into. The state machine (`exiting → launching → awaiting-tui → replaying → done | failed`) persists at `~/.agents/.cache/state/watchdog/rotate/<sessionId>.json` and spans ticks via a post-loop sweep. Config: **`agents watchdog rotate on|off`** writes `watchdog.rotate` in `~/.agents/agents.yaml` (default on; rotate-only, nudging is unaffected), honored per tick; `agents watchdog status` / `--json` report the rotate config and every persisted rotate state. This replaces the Factory extension's own watchdog rotate loop, which is being deleted in the companion change. Source: `apps/cli/src/lib/watchdog/rotate.ts`, `apps/cli/src/lib/watchdog/runner.ts`, `apps/cli/src/commands/watchdog.ts`.
+
+## 1.22.1
+
+- **`agents doctor` de-noise: never-synced and cross-version hook drift are warnings, not criticals (RUSH-2162).** The CRITICAL section now holds only "needs you now" problems — a logged-out account, or a hook/plugin missing from a version you keep synced. A version that was never synced (an old/unused install with nothing installed) and a hook that merely *differs* across versions (installed but stale) are surfaced as WARNINGs instead, cutting the critical count on a busy machine from ~11 to the handful that actually need action. Source: `apps/cli/src/lib/devices/doctor-findings.ts`.
+
+- **The "… is damaged and can't be opened" dialog stops — both helper `.app` bundles now install atomically and serialized.** The secrets keychain helper (`Agents CLI.app`) and the menu-bar helper (`MenubarHelper.app`) are each (re)installed on the hot path of ordinary `agents` invocations, and both did a non-atomic `rm -rf dest` + `cp -R src dest` straight onto the live bundle. On a busy box dozens of concurrent invocations raced that path, so a reader (Gatekeeper, or an exec of the bundle) could see a half-written `.app` — a truncated Mach-O / mismatched code signature — which macOS reports as damaged. A new shared installer (`lib/app-bundle-install.ts`, replacing the two duplicated copy functions) stages the copy in a sibling dir and swaps it in with renames (the live bundle is only ever a complete, signed `.app`, and a failed copy never touches it), and serializes concurrent installers behind the shared `withFileLock` with a double-checked skip so a burst copies once instead of stampeding. Source: `apps/cli/src/lib/app-bundle-install.ts`, `apps/cli/src/lib/secrets/install-helper.ts`, `apps/cli/src/lib/menubar/install-menubar.ts`.
+
+- **`agents doctor --json` no longer stampedes into dozens of concurrent runs — the overview is singleflighted and cached, with a new `--refresh` to force a live recompute.** The bare `doctor --json` overview probes every host CLI, every agent's sign-in, and every agent×version diff — seconds on an idle box, minutes on a loaded one. The menu-bar helper polls it on a timer with only a per-*process* in-flight guard, so a helper relaunch (or any second poller) each launched its own live compute, and a helper killed mid-run orphaned a `doctor --json` that kept spinning — stacking to dozens of concurrent runs pinning the CPU. Now a fresh snapshot (< 90s) serves instantly from a disk cache, and when a live compute IS needed exactly one runs while every other caller serves its result (a lock-directory singleflight that self-heals if the computer dies). `agents doctor --json --refresh` bypasses the cache. Source: `apps/cli/src/lib/devices/doctor-overview-cache.ts`, `apps/cli/src/commands/doctor.ts`.
+
+- **`doctor --json` releases its singleflight lock before it returns.** The overview gate
+  fired the lock release without awaiting it on the path where a waiter serves the winner's
+  fresh snapshot, so the call returned with the lockfile still on disk. The next caller then
+  retried against a lock that was already logically free — the pile-up the gate exists to
+  prevent, narrowed to the window between return and unlink. The release is now awaited.
+  The existing coalescing test failed 5 times in 15 runs before this and 0 in 15 after.
+  Source: `apps/cli/src/lib/devices/doctor-overview-cache.ts`.
+
+- **`agents add grok@latest` no longer strands the freshly-downloaded binary in the old version's home.** When the post-install version probe (`<cli> --version`) transiently failed right after grok's self-updating installer exited, `installVersion` silently fell back to the literal string `'latest'` as the resolved version — creating a bogus `versions/grok/latest/` directory and defeating `relocateGrokBinaryToVersionHome`'s exact-filename match (its regex could never match `grok-latest-...`, since the real file is named `grok-<semver>-<platform>`). The real multi-hundred-MB binary was left behind in the PREVIOUS default's downloads dir, and `agents view grok` never listed the new version as installed even though `agents add` reported success. The probe now retries briefly instead of silently falling back, and fails loudly if it still can't resolve a version rather than corrupting the version bookkeeping. Relocation also now self-heals: if the current `~/.grok` symlink target has nothing matching, it sweeps every other installed grok version home for a binary stranded by a past occurrence of this bug. Source: `apps/cli/src/lib/versions.ts`.
+
+- **A blocked menu-bar row now takes you to the session (RUSH-2110).** A NEEDS-YOU row
+  exists because an agent is waiting on you, but its only action was "Reveal working
+  dir", which unblocks nothing — you still had to go find the session by hand. Blocked
+  rows now lead with **Focus session**, which runs `agents focus <id>`: attach the live
+  terminal, or open a new tab and resume, cross-host. Reveal stays underneath. Both
+  render paths are covered — the single inline row and each entry inside a collapsed
+  multi-waiter group. A row the engine could not identify (a cloud task, a stale
+  sentinel) simply omits the item rather than offering an action that would do nothing.
+  Source: `apps/cli/menubar/Sources/MenubarHelper/StatusItemController.swift`,
+  `AgentsCLI.swift`.
+
+- **Two projects sharing one monorepo checkout are no longer indistinguishable.** Session,
+  activity, and feed attribution anchored a project on `root ?? defaultPath`, so a subproject
+  whose `root` is the monorepo and whose `defaultPath` is a subdir collapsed onto the same
+  path as its umbrella — the longest-match tiebreak had nothing to separate them, and work in
+  `rush/apps/cli` counted toward whichever definition happened to be listed first. A
+  `defaultPath` nested under `root` now takes precedence over that `root` (the root says where
+  the checkout is; `defaultPath` says which work is this project's), and each bound repo's
+  checkout and subpath anchor too. A narrowed `root` still covers the rest of its checkout as
+  a fallback, so a lone project defined with `--path` keeps attributing work across its own
+  repo instead of only inside the subdir. Source: `apps/cli/src/lib/projects.ts`.
+
+- **`agents projects view <name>` now shows more than `status`, not less.** The command you
+  open to learn everything about one project built its own short list — root, repos, a raw
+  Linear project id, an issue count, milestones — and never called the card renderer, so it
+  omitted the agents roster, merged PRs and release, focus areas, the schedule verdict,
+  tickets, and artifacts that `status` had shown all along. `view` and `status` now gather
+  through one function and render through one card; `view` adds every milestone (instead of
+  just the next) and the stored definition in full underneath — each repo with its subpath and
+  checkout, each context with its purpose, each integration with its URL. It also takes
+  `--window <days>` to match `status`. Source: `apps/cli/src/commands/projects.ts`.
+- **The `agents` roster on the card lists live sessions only.** It included every matched
+  session, so a card headed `23 live` went on to print `claude · crashed ×25` — the corpses the
+  `dead` row already reports, counted twice and contradicting the headline. Both now derive
+  from one `isDeadStatus` predicate, pinned by a test across every `ActiveStatus`. Source:
+  `apps/cli/src/lib/project-status.ts`.
+
+- **`--host <self>` and the fleet-health fan-out now short-circuit ALL of the
+  local machine's names, not just its short hostname (RUSH-2114).** A `--host`
+  target or fleet probe that referenced this box by its **tailscale dnsName**
+  (`zion.tail1a85a1.ts.net`) slipped past a `=== machineId()` check and SSH'd to
+  the local box over its own name; on a loaded machine that self-SSH'd `doctor
+  --json` orphaned on timeout and piled up until the host was crushed. A new
+  `isSelfHost()` matches every identity the box answers to (short id, loopback,
+  tailscale dnsName + its short form) and gates all four self-checks — the
+  generic `--host` passthrough (`maybeRunOnHost`), the `--devices`-all fan-out
+  (`runFleetPassthrough`), `remoteFleetTargets`, and `runFleet` — so a
+  self-reference runs locally instead of self-SSHing. Source:
+  `apps/cli/src/lib/devices/self-host.ts`, `apps/cli/src/lib/hosts/passthrough.ts`,
+  `apps/cli/src/lib/devices/fleet.ts`.
+
 ## 1.22.0
 
 - **`agents run auto` — full-auto dispatch (RUSH-2132).** `run auto` composes all three routing layers: host (14d launch affinity, unless `--host` is given), harness (installed CLIs weighted by best-account headroom), and account (the configured strategy). `balanced`/`available` now exit nonzero when every installed account is unhealthy — naming each excluded account, the earliest window reset, and the `--strategy pinned` escape hatch — instead of warning "falling back to defaults" and launching the exhausted pinned default. The error text is a machine-readable contract (`no healthy` + `resets <iso-time>`) the Factory watchdog tail-detects for rotate cooldowns. Source: `apps/cli/src/lib/rotate.ts`, `apps/cli/src/commands/exec.ts`, `apps/cli/src/lib/runner.ts`.

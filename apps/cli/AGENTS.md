@@ -255,13 +255,14 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 | Goose | `goose` | ≥1.34 | ✓ | ✓ | ≥1.25 | — | ✓ | — | ✓ |
 | Droid | `droid` | ✓ | ✓ | ≥0.57.5 | ≥0.26 | ✓ | ✓ | ✓ | — |
 | Hermes | `hermes` | ≥0.11 | ✓ | — | ✓ | — | — | — | — |
+| Pi (Oh My Pi) | `pi` | — | ✓ | — | ✓ | ✓ | — | ✓ | — |
 
 ✓ = supported · — = not · version cell = only within that range (out-of-range =
 skipped silently). [`src/lib/agents.ts`](src/lib/agents.ts) is canonical — keep this
 snapshot in sync. `workflows` is `claude`/`kimi`/`goose`/`antigravity` (≥1.0.6, written to the
 shared HOME-global `~/.gemini/config/global_workflows/`, not a per-version home), `openclaw` (Lobster `.lobster` files under `.openclaw/workflows/`), and `grok` (≥0.2.111, native Rhai under `.grok/workflows/`); `mcp` is universal; `allowlist` is
 `claude`/`cursor`/`opencode`/`antigravity`/`grok`/`kimi`/`kiro`/`droid`/`goose`/`openclaw`/`copilot` (Copilot writes per-location approvals to `~/.copilot/permissions-config.json`; OpenClaw is tool-level only —
-blanket rules map to `~/.openclaw/openclaw.json` `tools.alsoAllow`/`tools.deny`, sub-command patterns skipped); `subagents` is `claude`/`codex`/`kiro`/`kimi`/`grok`/`openclaw`/`droid`/`copilot`/`antigravity`/`cursor` (≥2026.1.22).
+blanket rules map to `~/.openclaw/openclaw.json` `tools.alsoAllow`/`tools.deny`, sub-command patterns skipped); `subagents` is `claude`/`codex`/`kiro`/`kimi`/`grok`/`openclaw`/`droid`/`copilot`/`antigravity`/`cursor` (≥2026.1.22)/`pi`. **Pi (Oh My Pi, `omp`)** is Claude-compatible: it natively reads `.claude/commands`, `.mcp.json`, and Claude-shaped subagents, and keeps its own native resources under `~/.omp/agent/` (skills, commands, subagents `agents/`, `AGENTS.md` context, `.mcp.json`). `mcp` covers stdio + http + headers. `hooks`/`allowlist`/`plugins` are OFF: omp hooks are per-tool JS/TS extension modules (not event->shell-command registrations), approval is per-TOOL only (`tools.approval`, no command/path patterns), and plugins are npm/TS modules (not the Claude marketplace manifest). Its cross-provider model catalog (OpenRouter/OpenAI/Anthropic/xAI/DeepSeek/…) surfaces in `agents view` / `agents models pi` via `omp models --json`.
 **Gemini is hard-deprecated.** Keep the legacy `gemini` id only for parsing old
 sessions/config; `agents add gemini`, `agents import gemini`, and
 `agents sync gemini` fail and point users to Antigravity.
@@ -285,7 +286,7 @@ src/
     monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/10-monitors.md
     projects.ts        # `agents projects` — named multi-repo project defs (~/.agents/projects/*.yaml) layered above the --project convention (resolveProjectRef in project-root.ts); project-status.ts rolls live sessions + merged PRs + artifacts into the progress card. Beta-gated. See docs/11-projects.md
     migrate.ts         # One-shot idempotent migrations
-    session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer)
+    session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents sessions stats` + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger)
     terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux/Terminal.app, local or --host;
                        #   preferred.ts resolves WHICH terminal for a GUI caller (from live sessions' host app)
     cloud/             # Provider registry (Rush / Codex / Factory / Antigravity)
@@ -512,6 +513,23 @@ healthy `running: yes`. `agents menubar setup` is the recovery path — it ends
 every live helper and re-kickstarts the service so the survivor is always
 launchd's.
 
+**The lock fd is `O_CLOEXEC`, and `acquire` self-heals a stale lock.** The lock is
+opened `O_RDWR | O_CREAT | O_CLOEXEC` so no spawned child can inherit the
+descriptor — a pre-fix `doctor` child that inherited it and orphaned at PPID 1 held
+the flock forever, and every relaunch then read "already running" and exited, so
+the menu bar stayed dead until reboot. `O_CLOEXEC` is the fd-level guarantee across
+*every* spawn path: `ChildProcess.spawn` sets only `POSIX_SPAWN_SETPGROUP` (no
+close-on-exec default), and the bare-`Process` one-shots (`runDetached` /
+`runMonitored`) are meant to *outlive* the helper — so the flag on the fd, not the
+spawn site, is what keeps the lock out of every child. The helper never execs
+itself, so it keeps the fd for life. And when the flock is
+held but **no LIVE `MenubarHelper` owns it** — the lock-file pid is dead, or belongs
+to some other program by reuse (`liveHelperOwnsLock` checks liveness + `proc_pidpath`
+basename) — `acquire` reaps the leaked orphan and retries the lock once, instead of
+surfacing into the deadlock. Only a genuine live incumbent is ever surfaced, so a
+duplicate launch never reaps a live helper's in-flight children (the reap is reached
+only when the holder is provably not a live helper).
+
 **Every CLI child the helper spawns is bounded, group-killable, and reapable.**
 The helper shells `agents` on a timer, and an unbounded `Process` there is not a
 slow menu — it is a machine-killer. `doctor --json` measures **136s on an idle
@@ -558,9 +576,22 @@ the bug.
 Poll intervals must stay well above the call's real cost:
 `StatusItemController.doctorRefreshInterval` is 15 min against a 136s command
 (it was 60s — a >100% duty cycle). `MENUBAR_CHILD_TEST=1 MenubarHelper` exercises
-all of it against real processes, including reaping a real surviving orphan.
+all of it against real processes, including reaping a real surviving orphan and
+proving a spawned child never inherits the single-instance flock fd.
 Separately, **`doctor --json` taking 136s on an idle machine is its own defect**
 — the helper is now safe against it, not a reason to consider it acceptable.
+
+**These self-tests are a build gate now, not just manual modes.** The helper's
+env-gated self-tests (`MENUBAR_SINGLE_TEST`, `MENUBAR_CHILD_TEST`,
+`MENUBAR_GUARD_TEST`, `MENUBAR_ISSUE_TEST`) are headless — they exit before the
+AppKit path (`Guards.enforceForInteractiveLaunch`) so they need no GUI or signing.
+[`menubar/scripts/test-menubar.sh`](menubar/scripts/test-menubar.sh) runs all four against
+the just-built binary and [`build.sh`](menubar/scripts/build.sh) invokes it before
+signing, so no helper artifact ships whose invariants regressed. Nothing ran these
+before — PR CI is Linux (can't build Swift) and prepack only checks the shipped
+bundle's signature — which is how the flock fd-inheritance deadlock escaped. Do NOT
+add `MENUBAR_DUMP` / `MENUBAR_PROMPT_PREVIEW` to the gate: those reach AppKit and
+need a GUI session.
 
 **Standalone `agents` binary (#315).** Every release also builds `dist/bin/agents`
 (`bun build --compile`, arm64 Mach-O), signs it (Developer ID + hardened runtime +
@@ -611,7 +642,9 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
   clauses match distinct calls, tool queries never parse transcripts, and exact
   static program counts retain repeated sites with wrapper/effective roles;
   versioned tool envelopes do not replace the list/detail JSON contracts
-  (SES-31..SES-37, SES-IF-4a); `agents sessions
+  (SES-31..SES-37, SES-IF-4a); `agents sessions stats` emits its own versioned
+  `sessions-stats` rollup of skill/command usage and never the list/detail shape
+  (SES-IF-4b); `agents sessions
   export --encrypt` seals every transcript
   body client-side with AES-256-GCM under the shared `r2.backups` bundle key, or
   an ephemeral one when unconfigured (SES-24, SES-25).

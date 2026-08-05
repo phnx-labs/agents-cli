@@ -169,6 +169,40 @@ describe('publishToEndpoint', () => {
     }
   });
 
+  it('serves static media with a real content-type so it renders inline (not octet-stream)', async () => {
+    // GitHub's camo image proxy only renders an inline `![](url)` when the asset is
+    // served with an image/video content-type; octet-stream is refused. Screenshots
+    // and recordings uploaded as PR evidence must therefore carry the right type.
+    const dir = mkdtempSync(join(tmpdir(), 'agents-share-media-'));
+    const cases: Array<[string, string]> = [
+      ['shot.png', 'image/png'],
+      ['before.jpg', 'image/jpeg'],
+      ['flow.gif', 'image/gif'],
+      ['ui.webp', 'image/webp'],
+      ['demo.mp4', 'video/mp4'],
+      ['capture.mov', 'video/quicktime'],
+    ];
+    for (const [name, expected] of cases) {
+      const filePath = join(dir, name);
+      writeFileSync(filePath, Buffer.from([0x00, 0x01, 0x02]));
+      let contentType = '';
+      await publishToEndpoint(
+        filePath,
+        { baseUrl: 'https://share.example', token: 'secret-token' },
+        {
+          slug: 'media',
+          githubUser: 'octocat',
+          cover: false,
+          uploader: async (_url, _body, headers) => {
+            contentType = headers['content-type'];
+            return { ok: true, status: 200 };
+          },
+        },
+      );
+      expect(contentType, name).toBe(expected);
+    }
+  });
+
   it('injects the analytics beacon when a token is provided', async () => {
     const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-analytics-')), 'plan.html');
     writeFileSync(htmlPath, '<!doctype html><html><head></head><body>hi</body></html>');

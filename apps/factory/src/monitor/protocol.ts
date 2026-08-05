@@ -49,16 +49,6 @@ export const MONITOR_OP = {
    */
   armShellAdoption: 'arm-shell-adoption',
   /**
-   * Follower -> monitor: replace this window's watchdog watch slice (#70). The
-   * monitor's watchdog detector runs ONE machine-wide `agents view --json` poll
-   * per armed agent key and broadcasts a `watchdog/versions` fact; windows
-   * consume it for the auto-rotate exhaustion check instead of each forking the
-   * CLI. (Autonomous stall detection + nudge injection were retired — the CLI
-   * daemon watchdog owns nudging now — so this lane carries only the rotate
-   * version poll.)
-   */
-  watchdogWatch: 'watchdog-watch',
-  /**
    * Follower -> monitor: replace this window's panel-snapshot watch slice (#71).
    * The monitor's snapshot detector runs ONE machine-wide tick that computes the
    * GLOBAL per-tick work every visible panel/floor used to fork on its own 4s
@@ -97,20 +87,6 @@ export interface ArmShellAdoptionRequest {
   pid: number;
 }
 
-/** One agent session the owning window asks the monitor to poll versions for (#70). */
-export interface WatchdogWatch {
-  /** CLI session UUID — dedupes the watch across windows owning the same session. */
-  sessionId: string;
-  /** When set, the detector polls `agents view <agentKey> --json` for auto-rotate. */
-  rotateAgentKey?: string;
-}
-
-export interface WatchdogWatchRequest {
-  op: typeof MONITOR_OP.watchdogWatch;
-  windowId: string;
-  watches: WatchdogWatch[];
-}
-
 /** One workspace/agent tuple a window asks the monitor to snapshot (#71). */
 export interface SnapshotWatch {
   /** Workspace root — `git branch`/`git diff --numstat` + worktree list keyed here. */
@@ -132,7 +108,6 @@ export type MonitorRequest =
   | SnapshotRequest
   | ArmAgentRequest
   | ArmShellAdoptionRequest
-  | WatchdogWatchRequest
   | SnapshotWatchRequest;
 
 export interface ReportTuplesAck {
@@ -168,8 +143,6 @@ export const MONITOR_FACT = {
   session: 'monitor.session',
   /** A tracked session file was written (warmth signal for kill/restart). */
   sessionWarmth: 'monitor.session-warmth',
-  /** `agents view <agentKey> --json` polled once machine-wide (#70). */
-  watchdogVersions: 'monitor.watchdog-versions',
   /** The merged panel/floor snapshot computed once machine-wide (#71). */
   panelSnapshot: 'monitor.panel-snapshot',
 } as const;
@@ -221,16 +194,6 @@ export interface SessionFactPayload {
 export interface SessionWarmthPayload {
   filePath: string;
   ts: number;
-}
-
-/**
- * The parsed result of one machine-wide `agents view <agentKey> --json` poll
- * (#70). Windows consume this for the auto-rotate exhaustion check instead of
- * each spawning the CLI; they fall back to a local fetch while disconnected.
- */
-export interface WatchdogVersionsPayload {
-  agentKey: string;
-  view: AgentsViewJsonAgent;
 }
 
 /** Per-workspace git facts (`git branch --show-current` + `git diff --numstat HEAD`). */
@@ -333,19 +296,5 @@ export function isPanelSnapshot(
     typeof p.gitByRoot === 'object' &&
     typeof p.worktreesByRoot === 'object' &&
     typeof p.usageByAgent === 'object'
-  );
-}
-
-/** Narrow a raw broadcast event to a watchdog versions fact (#70). */
-export function isWatchdogVersions(
-  event: MonitorEvent,
-): event is MonitorEvent & { payload: WatchdogVersionsPayload } {
-  const p = event.payload as WatchdogVersionsPayload | undefined;
-  return (
-    event.type === MONITOR_FACT.watchdogVersions &&
-    !!p &&
-    typeof p.agentKey === 'string' &&
-    !!p.view &&
-    Array.isArray((p.view as AgentsViewJsonAgent).versions)
   );
 }

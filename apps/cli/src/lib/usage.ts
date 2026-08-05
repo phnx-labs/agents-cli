@@ -35,6 +35,7 @@ import {
 import { getCacheDir } from './state.js';
 import type { AgentId } from './types.js';
 import { mapBounded } from './concurrency.js';
+import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -197,6 +198,13 @@ interface UsageOptions {
   home?: string;
   cliVersion?: string | null;
   organizationId?: string | null;
+  /**
+   * When true, never open the ACL-bound OS keychain item (macOS Touch ID).
+   * Daemon usage refresh sets this so a background tick cannot pop biometrics.
+   * Credentials come from the no-ACL access-token cache, a file-based
+   * setup-token, or `<home>/.claude/.credentials.json` only.
+   */
+  fileOnly?: boolean;
 }
 
 /** Canonical input for a single usage fetch operation. */
@@ -395,7 +403,7 @@ const USAGE_BG_REFRESH_CONCURRENCY = 2;
  */
 export const USAGE_CACHE_FRESH_MS = 5 * 60 * 1000;
 
-const USAGE_CACHE_SWR_MS = 24 * 60 * 60 * 1000; // 24 hours — beyond this, block on live fetch.
+export const USAGE_CACHE_SWR_MS = 24 * 60 * 60 * 1000; // 24 hours — beyond this, block on live fetch.
 
 /**
  * Unified entry for every multi-account usage lookup (`agents view`, rotation,
@@ -938,7 +946,12 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
     // Opt into the no-ACL access-token cache: this is the every-60s watchdog hot
     // path and usage needs only the access token, so it kills the Touch ID storm.
-    const oauth = await loadClaudeOauth(options?.home, { accessTokenCache: true });
+    // Daemon refresh also sets fileOnly so we never fall through to the ACL
+    // keychain item (that path is the Touch ID prompt).
+    const oauth = await loadClaudeOauth(options?.home, {
+      accessTokenCache: true,
+      fileOnly: options?.fileOnly === true,
+    });
     if (!oauth?.accessToken) {
       return { snapshot: null, error: usageNoCredentialError('Claude') };
     }
@@ -1641,7 +1654,9 @@ function claudeOauthCacheActive(): boolean {
  * or the token itself has expired — in which case the stale entry is dropped. */
 function readCachedClaudeOauth(service: string): ClaudeOauthCredentials | null {
   try {
-    const entry = JSON.parse(getKeychainToken(claudeOauthCacheItem(service))) as CachedClaudeOauthEntry;
+    // The cache item is written no-ACL (writeCachedClaudeOauth) — its whole purpose is
+    // serving the token prompt-free, so attest that to the raw-read storm guard.
+    const entry = JSON.parse(getKeychainToken(claudeOauthCacheItem(service), { silentNoAcl: true })) as CachedClaudeOauthEntry;
     if (!entry || typeof entry.accessToken !== 'string' || !entry.accessToken) return null;
     const now = Date.now();
     const tokenExpired = typeof entry.expiresAt === 'number' && entry.expiresAt > 0 && now >= entry.expiresAt;
@@ -1724,10 +1739,14 @@ function deleteCachedClaudeOauth(service: string): void {
  * `getClaudeAccessToken`) or export the full blob (`readClaudeCredentialsBlob`
  * for Rush Cloud dispatch) must NOT pass it. Only the read-only, high-frequency
  * access-token-only consumers (the usage fetch and the auth-health probe) opt in.
+ *
+ * `opts.fileOnly` (implies access-token-only consumers) skips the ACL keychain
+ * read entirely — setup-token, no-ACL cache, and `.credentials.json` only. Used
+ * by the daemon usage refresher so a background tick can never pop Touch ID.
  */
 export async function loadClaudeOauth(
   home?: string,
-  opts?: { accessTokenCache?: boolean }
+  opts?: { accessTokenCache?: boolean; fileOnly?: boolean }
 ): Promise<ClaudeOauthCredentials | null> {
   // Read-only usage/probe callers (accessTokenCache) authenticate with a
   // file-based setup-token when one is provisioned: the usage endpoint accepts
@@ -1754,7 +1773,13 @@ export async function loadClaudeOauth(
   // anywhere, so the platform check must yield to it exactly as the inner
   // claudeOauthCacheActive() gate does — otherwise this whole block is dead on
   // a Windows runner and the tests below it read an empty home.
-  if (process.platform === 'darwin' || process.platform === 'linux' || isKeychainBackendOverridden()) {
+  //
+  // fileOnly: daemon refresh must never open the ACL-bound item (Touch ID).
+  // It may still read the no-ACL cache item (set-no-acl — prompt-free).
+  if (
+    !opts?.fileOnly
+    && (process.platform === 'darwin' || process.platform === 'linux' || isKeychainBackendOverridden())
+  ) {
     const service = getClaudeKeychainService(home);
     // Serve the no-ACL cache first (opt-in, macOS/test only) so the ACL-gated read
     // below — the one that pops Touch ID — happens at most once per token lifetime
@@ -1776,6 +1801,11 @@ export async function loadClaudeOauth(
       // Evict any stale no-ACL cache so a sign-out/deletion isn't masked.
       if (cacheActive) deleteCachedClaudeOauth(service);
     }
+  } else if (opts?.fileOnly === true && opts?.accessTokenCache === true && claudeOauthCacheActive()) {
+    // fileOnly + accessTokenCache: still allow the no-ACL cache (never Touch ID).
+    const service = getClaudeKeychainService(home);
+    const cached = readCachedClaudeOauth(service);
+    if (cached) return cached;
   }
 
   const credsPath = path.join(home ?? os.homedir(), '.claude', '.credentials.json');
@@ -1902,9 +1932,18 @@ export function writeClaudeUsageCache(
   snapshot: UsageSnapshot,
   cachePath = getClaudeUsageCachePath()
 ): void {
-  const cache = readClaudeUsageCacheFile(cachePath);
-  cache[usageKey] = serializeClaudeUsageSnapshot(snapshot);
-  writeClaudeUsageCacheFile(cache, cachePath);
+  try {
+    ensureLockTarget(cachePath, '{}');
+    withFileLock(cachePath, () => {
+      // Re-read under the lock so a concurrent daemon tick / agents view
+      // refresh cannot drop another account's row (lost update).
+      const cache = readClaudeUsageCacheFile(cachePath);
+      cache[usageKey] = serializeClaudeUsageSnapshot(snapshot);
+      atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
+    });
+  } catch {
+    /* best-effort cache write — lock busy or disk full */
+  }
 }
 
 /** Read the entire usage cache file from disk. */
@@ -1928,7 +1967,7 @@ function writeClaudeUsageCacheFile(
 ): void {
   try {
     fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-    fs.writeFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
+    atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
   } catch {
     /* best-effort cache write */
   }
@@ -2148,7 +2187,7 @@ function renderCompactUsageBar(usedPercent: number): string {
 }
 
 /** Render a colored block-character progress bar. */
-function renderBar(usedPercent: number, length: number, minimumVisible = 0): string {
+export function renderBar(usedPercent: number, length: number, minimumVisible = 0): string {
   const rounded = Math.round((usedPercent / 100) * length);
   const filled = Math.max(minimumVisible, Math.max(0, Math.min(length, rounded)));
   const color = getUsageColor(usedPercent);
@@ -2161,7 +2200,7 @@ function colorUsage(text: string, usedPercent: number): string {
 }
 
 /** Return a chalk color function based on the usage percentage threshold. */
-function getUsageColor(usedPercent: number): (text: string) => string {
+export function getUsageColor(usedPercent: number): (text: string) => string {
   if (usedPercent >= 100) return chalk.red;
   if (usedPercent >= 80) return chalk.yellow;
   return chalk.cyan;

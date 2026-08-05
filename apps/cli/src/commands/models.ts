@@ -20,18 +20,19 @@ import type { AgentId } from '../lib/types.js';
 import { listInstalledVersions, getGlobalDefault, resolveVersion, resolveVersionAlias } from '../lib/versions.js';
 import { getModelCatalog, locateModelSource } from '../lib/models.js';
 import { resolveTierMap, MODEL_TIERS } from '../lib/model-tiers.js';
+import { setTierOverride, clearTierOverride, listTierOverrides } from '../lib/model-tier-overrides.js';
 import { getModelPricing } from '../lib/pricing/index.js';
 import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 import { wrapJoined } from './inspect.js';
 
-const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'cursor', 'openclaw', 'antigravity', 'kimi', 'grok', 'droid'];
+const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'cursor', 'openclaw', 'antigravity', 'kimi', 'grok', 'droid', 'pi'];
 
 /**
  * Agents that don't necessarily install under ~/.agents/versions (cursor ships
  * via a curl script). For these, fall back to the PATH binary and synthesize
  * a version label from the install path so cache keys stay stable.
  */
-const PATH_ONLY_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>(['cursor']);
+const PATH_ONLY_AGENTS: ReadonlySet<AgentId> = new Set<AgentId>(['cursor', 'pi']);
 
 /** Derive a version label from the PATH-installed binary location for agents without managed versions. */
 function fallbackPathVersion(agent: AgentId): string | null {
@@ -47,15 +48,16 @@ function fallbackPathVersion(agent: AgentId): string | null {
   return m ? m[1] : 'installed';
 }
 
-/** Register the hidden `agents models` command. */
+/** Register the `agents models` command + its `tier` override subcommands. */
 export function registerModelsCommand(program: Command): void {
-  program
-    .command('models [agentSpec]', { hidden: true })
-    .description('List models supported by an installed agent version (internal/debug)')
-    .option('--cloud', 'Show per-cloud IDs (Claude only)')
-    .option('--reasoning', 'Show reasoning levels per model (Codex only)')
-    .option('--json', 'Output catalog as JSON')
-    .action(async (agentSpec: string | undefined, options: { cloud?: boolean; reasoning?: boolean; json?: boolean }) => {
+  const models = program
+    .command('models [agentSpec]')
+    .description('Show the cost-tier map (cheap|default|best|ultra) for installed harnesses; pin overrides with `tier set`.')
+    .option('--all', 'Show the full raw model catalog, not just the tier map')
+    .option('--cloud', 'Show per-cloud IDs (Claude only; implies --all)')
+    .option('--reasoning', 'Show reasoning levels per model (Codex only; implies --all)')
+    .option('--json', 'Output catalog + tiers as JSON')
+    .action(async (agentSpec: string | undefined, options: PrintOptions & { json?: boolean }) => {
       const targets = await resolveTargets(agentSpec);
       if (targets.length === 0) process.exit(1);
 
@@ -70,13 +72,71 @@ export function registerModelsCommand(program: Command): void {
         return;
       }
 
+      const all = options.all || options.cloud || options.reasoning;
       let printed = 0;
       for (const { agent, version, isDefault } of targets) {
         if (printed > 0) console.log();
-        printCatalog(agent, version, isDefault, options);
+        printCatalog(agent, version, isDefault, { ...options, all });
         printed++;
       }
+      if (!agentSpec && !all) {
+        console.log(chalk.gray('\n  `agents models <agent>` for one harness · `--all` for the full model list'));
+        console.log(chalk.gray('  `agents models tier set <agent> <tier> <model>` to override a tier'));
+      }
     });
+
+  // Override subcommands. These WRITE agents.yaml so the user never hand-edits it;
+  // resolution is exact `<agent>@<version>` over `<agent>` over the auto guess.
+  const tier = models
+    .command('tier')
+    .description('Override which model a cost tier resolves to (per harness, or per agent@version).');
+
+  tier
+    .command('set <selector> <tier> <model>')
+    .description('Pin a tier to a model. selector: <agent> or <agent>@<version> (e.g. kimi, kimi@0.19.2).')
+    .action((selector: string, tierName: string, model: string) => {
+      try {
+        const entry = setTierOverride(selector, tierName, model);
+        console.log(chalk.green(`✓ ${entry.selector}  ${chalk.cyan(tierName.toLowerCase())} → ${chalk.bold(model)}`));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  tier
+    .command('clear <selector> [tier]')
+    .description('Clear one tier (or all tiers) back to the auto guess.')
+    .action((selector: string, tierName: string | undefined) => {
+      try {
+        const changed = clearTierOverride(selector, tierName);
+        console.log(changed ? chalk.green(`✓ cleared ${selector}${tierName ? ` ${tierName}` : ''}`) : chalk.gray('nothing to clear'));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  tier
+    .command('list')
+    .description('List all configured tier overrides.')
+    .action(() => {
+      const entries = listTierOverrides();
+      if (entries.length === 0) {
+        console.log(chalk.gray('No tier overrides — every tier uses the auto guess. Set one with `agents models tier set`.'));
+        return;
+      }
+      for (const e of entries) {
+        const parts = Object.entries(e.tiers).map(([t, m]) => `${chalk.cyan(t)}=${m}`);
+        console.log(`${chalk.bold(e.selector.padEnd(18))} ${parts.join('  ')}`);
+      }
+    });
+}
+
+interface PrintOptions {
+  all?: boolean;
+  cloud?: boolean;
+  reasoning?: boolean;
 }
 
 interface Target {
@@ -141,7 +201,7 @@ async function resolveTargets(agentSpec: string | undefined): Promise<Target[]> 
 }
 
 /** Print the model catalog for a single agent version with optional cloud/reasoning details. */
-function printCatalog(agent: AgentId, version: string, isDefault: boolean, options: { cloud?: boolean; reasoning?: boolean }): void {
+function printCatalog(agent: AgentId, version: string, isDefault: boolean, options: PrintOptions): void {
   const tag = isDefault ? chalk.gray(' (default)') : '';
   const header = `${agentLabel(agent)} ${chalk.bold(version)}${tag}`;
   console.log(header);
@@ -165,6 +225,13 @@ function printCatalog(agent: AgentId, version: string, isDefault: boolean, optio
   const catalog = getModelCatalog(agent, version);
   if (!catalog || catalog.models.length === 0) {
     console.log(chalk.yellow(`  No models extracted from ${src.kind} at ${src.path}.`));
+    return;
+  }
+
+  // The tier map above is what an agent reads. Keep the raw catalog behind --all
+  // so `agents models` stays a scannable menu instead of a 30-id dump.
+  if (!options.all) {
+    console.log(chalk.gray(`  ${catalog.models.length} models · \`agents models ${agent} --all\` for the full list`));
     return;
   }
 
@@ -226,7 +293,8 @@ function printTiers(agent: AgentId, version: string): void {
     if (!r.model) continue;
     const eff = r.effort ? chalk.gray(` @${r.effort}`) : '';
     const clamp = r.clampedFrom ? chalk.gray(' (clamped)') : '';
-    console.log(`    ${chalk.cyan(t.padEnd(8))} ${chalk.bold(r.model)}${eff}${priceLabel(r.model)}${clamp}`);
+    const over = r.source === 'override' ? chalk.yellow(' [override]') : '';
+    console.log(`    ${chalk.cyan(t.padEnd(8))} ${chalk.bold(r.model)}${eff}${priceLabel(r.model)}${clamp}${over}`);
   }
   console.log();
 }

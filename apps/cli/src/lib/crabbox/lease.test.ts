@@ -1,8 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as bundles from '../secrets/bundles.js';
+import * as stateModule from '../state.js';
 import { buildBootstrapScript, leaseAndRun } from './lease.js';
+import { resetCrabboxSecretsMemosForTest } from './cli.js';
 import { LEASE_AGENT_MARKER, leasePhaseSentinel } from './progress.js';
 import type { DetectedRuntime } from './runtimes.js';
 
@@ -231,6 +234,21 @@ describe('buildBootstrapScript', () => {
 // POSIX-only: stands up a `#!/bin/sh` fake crabbox on PATH, which Windows can
 // neither resolve nor execute (see crabbox/cli.test.ts for the same pattern).
 describe.skipIf(process.platform === 'win32')('leaseAndRun reused crabbox boxes', () => {
+  // Hermetic lease-bundle resolution: leaseAndRun → crabboxFind → crabboxEnv would
+  // otherwise auto-detect the DEVELOPER's real provider-token bundle (e.g. a locked
+  // `hetzner.com`), whose agentOnly read throws "not unlocked" (SEC-13) — a
+  // dev-machine-only failure unrelated to the reuse/bootstrap flow under test. Pin
+  // readMeta → {} and listBundles → [] so no lease bundle is found.
+  beforeEach(() => {
+    resetCrabboxSecretsMemosForTest();
+    vi.spyOn(stateModule, 'readMeta').mockReturnValue({} as ReturnType<typeof stateModule.readMeta>);
+    vi.spyOn(bundles, 'listBundles').mockReturnValue([]);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetCrabboxSecretsMemosForTest();
+  });
+
   const detected: DetectedRuntime[] = [
     { id: 'claude', label: 'Claude Code', email: 'a@b.com', signedIn: true, credPath: null },
   ];

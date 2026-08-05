@@ -26,6 +26,7 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { getFeedDir, getUserAgentsDir } from './state.js';
 import { isAdmin, isHighConsequenceAllowed, isKnownOperator } from './operator.js';
+import { projectKeyFromCwd } from './project-key.js';
 
 export interface BlockOption {
   label: string;
@@ -69,6 +70,8 @@ export interface OpenBlock {
   mailboxId: string;
   host: string;
   runtime: string;
+  /** Project/repo name this block belongs to (derived from cwd, worktree-aware). */
+  project?: string;
   ts: string;
   questions: BlockQuestion[];
   /**
@@ -393,6 +396,7 @@ export interface DeclaringAgent {
   mailboxId: string;
   host: string;
   runtime: string;
+  cwd?: string;
 }
 
 export interface DeclareBlockInput {
@@ -431,6 +435,7 @@ export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInp
     .filter(Boolean)
     .map((label) => ({ label }));
 
+  const project = projectKeyFromCwd(agent.cwd);
   return {
     blockId: blockIdForSession(agent.sessionId),
     sessionId: agent.sessionId,
@@ -442,6 +447,7 @@ export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInp
     questions: [{ text, header: 'Needs you', ...(options.length ? { options } : {}) }],
     blockClass: input.safeDefault ? 'approval' : 'decision',
     costOfDelay: 'high',
+    ...(project ? { project } : {}),
     ...(input.safeDefault ? { safeDefault: input.safeDefault } : {}),
     ...(input.timeoutMinutes !== undefined ? { timeoutMinutes: input.timeoutMinutes } : {}),
   };
@@ -588,6 +594,24 @@ def write_json(path, value):
             pass
 
 
+def project_from_cwd(cwd):
+    """Basename of cwd, with worktree paths resolved to their repo name."""
+    if not cwd:
+        return None
+    norm = cwd.replace("\\\\", "/").rstrip("/")
+    if not norm:
+        return None
+    marker = "/.agents/worktrees/"
+    idx = norm.find(marker)
+    if idx > 0:
+        repo_path = norm[:idx]
+        base = repo_path[repo_path.rfind("/") + 1:]
+        if base:
+            return base
+    base = norm[norm.rfind("/") + 1:]
+    return base or None
+
+
 def main():
     raw = sys.stdin.read()
     try:
@@ -613,6 +637,25 @@ def main():
     hook_event = payload.get("hook_event_name", "PreToolUse")
 
     if hook_event in CLEAR_EVENTS:
+        # A declared block (\`agents feed post --blocked\`) is the agent explicitly
+        # saying it is stuck. Unlike a question/notification/approval block -- which
+        # tracks an in-flight harness prompt that a lifecycle event resolves -- a
+        # declared block stays open until it is actually ANSWERED. So while it is
+        # still UNANSWERED, Stop/SessionEnd/PostToolUse must never silently drop it:
+        # otherwise the needs-you record vanishes the moment the agent parks the block
+        # and its turn ends -- exactly when the owner still needs to see and answer it.
+        # Once it IS answered (an answered marker exists), it clears like any other
+        # block by falling through below -- which frees that marker too, so a later
+        # \`--blocked\` in the same session is not falsely locked as already-answered
+        # (recordAnswer creates the marker with O_EXCL).
+        try:
+            with open(target) as existing_file:
+                existing = json.load(existing_file)
+            answered = os.path.exists(os.path.join(answered_dir, f"{block_id}.json"))
+            if existing.get("kind") == "declared" and not answered:
+                return
+        except Exception:
+            pass
         # A matcher-less PostToolUse clear (registered for Codex so an approved
         # tool clears its approval card) must NOT wipe an open AskUserQuestion
         # while an unrelated tool runs mid-question -- those are cleared only by
@@ -778,6 +821,8 @@ def main():
     host = re.sub(r"[^a-z0-9_-]", "-", host) or "unknown"
 
     runtime = os.environ.get("AGENTS_RUNTIME", "headless")
+    cwd = payload.get("cwd") or os.environ.get("AGENTS_CWD")
+    project = project_from_cwd(cwd)
 
     block = {
         "blockId": block_id,
@@ -789,6 +834,8 @@ def main():
         "questions": normalized_questions,
         "kind": kind,
     }
+    if project:
+        block["project"] = project
     if notification_type:
         block["notificationType"] = notification_type
 

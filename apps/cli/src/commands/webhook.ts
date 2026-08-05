@@ -9,7 +9,7 @@ import type { Command } from 'commander';
 import type { Server } from 'http';
 import * as path from 'path';
 import chalk from 'chalk';
-import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../lib/secrets/bundles.js';
+import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { createFileDeliveryStore, startWebhookServer, type WebhookSecrets } from '../lib/triggers/webhook.js';
 import type { FiredHandler } from '../lib/triggers/handlers.js';
 import { getRuntimeStateDir } from '../lib/state.js';
@@ -25,9 +25,13 @@ function positiveInt(value: string | undefined, fallback: number): number {
 function readWebhookSecrets(bundleName: string): WebhookSecrets {
   const { env } = readAndResolveBundleEnv(bundleName, {
     caller: 'webhook serve',
-    // `webhook serve` is a long-running background server; when started detached
-    // (no TTY) it must resolve broker-only rather than pop an unanswerable prompt.
-    agentOnly: isHeadlessSecretsContext(),
+    // `webhook serve` is a long-running background server started to receive
+    // signed webhooks, not a human at a Touch ID sheet — so the read is always
+    // `agentOnly` (SEC-13: never pop biometry on its own). A `never`/no-ACL or
+    // broker-held bundle resolves silently; a locked bundle THROWS the actionable
+    // "unlock <name>" message, which propagates and fails the start LOUD rather
+    // than popping an unanswerable prompt.
+    agentOnly: true,
   });
   const secrets: WebhookSecrets = {};
   if (env.GITHUB_WEBHOOK_SECRET) secrets.github = env.GITHUB_WEBHOOK_SECRET;
