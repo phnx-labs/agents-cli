@@ -305,6 +305,25 @@ export interface HealInfo {
   name: string;
 }
 
+/**
+ * Resolve the identity stamped on a task at start: WHO (`owner`) and WHICH run
+ * (`launchId`). The forwarded values come from the caller's own CLI process and
+ * are authoritative — the browser daemon is shared and long-lived, so resolving
+ * the actor daemon-side (the RUSH-2020 bug) mis-attributes every task to the
+ * daemon's owner. `resolveLocalActor` is consulted ONLY when no actor was
+ * forwarded (a CLI that predates the field, mid-rollout) — never to override a
+ * forwarded one.
+ */
+export function resolveTaskIdentity(
+  forwarded: { actor?: string; launchId?: string },
+  resolveLocalActor: () => string
+): { owner: string; launchId?: string } {
+  return {
+    owner: forwarded.actor ?? resolveLocalActor(),
+    launchId: forwarded.launchId,
+  };
+}
+
 export class BrowserService {
   private static readonly SOURCE_PREFIX: Record<string, string> = {
     'rush-app': 'rush-app-',
@@ -432,12 +451,10 @@ export class BrowserService {
       currentTabId: undefined,
       createdAt: Date.now(),
       pid: conn.pid,
-      // Identity is forwarded from the caller. The browser daemon is shared and
-      // long-lived, so a daemon-side resolveActor() would mis-attribute every
-      // task to the daemon's own actor (RUSH-2020 shipped that bug). Prefer the
-      // forwarded actor; resolve locally only for a pre-field CLI mid-rollout.
-      owner: opts.actor ?? resolveActor().id,
-      launchId: opts.launchId, // WHICH run created this (scopes status --mine)
+      // Identity is forwarded from the caller (see resolveTaskIdentity): WHO
+      // (owner) and WHICH run (launchId). Resolving daemon-side would attribute
+      // every task to the shared daemon's actor (the RUSH-2020 bug).
+      ...resolveTaskIdentity({ actor: opts.actor, launchId: opts.launchId }, () => resolveActor().id),
     };
 
     // For Electron, get the existing window as the tab
