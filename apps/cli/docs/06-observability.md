@@ -39,7 +39,7 @@ Outbound names that look interchangeable are three different planes:
 
 | Plane | Command | Job |
 |---|---|---|
-| **Deliver** | `agents send` / `agents notify` | Put a message in front of a recipient (`--to`, `--text`, `--channel`, `--attach`, `--url`). `notify` ≡ `send --to owner` (`notify.owner` in agents.yaml). |
+| **Deliver** | `agents send` / `agents notify` | Put a message in front of a recipient (`--to`, `--text`, `--channel`, `--attach`, `--url`). `notify` ≡ `send --to owner`; the owner destination is selected from `humans.yaml`. |
 | **Record** | `agents feed post` | Append a status/milestone (and optional OpenBlock). May **forward** via `feed.broadcast` sinks that call `send`/`notify`. |
 | **Observe** | `agents feed --filter updates` / `agents feed --filter all` | **Read** the activity stream — not a send path. |
 | **Control** | `agents message` / `agents sessions inject` | Act on a running agent (mailbox answer vs terminal keystroke). Stay separate from `send`. |
@@ -870,8 +870,9 @@ agents feed --kill <id>    # SIGTERM a local process; cloud tasks are cancelled
 Agents can deliberately announce progress without opening a feed block. Every
 post has a **title** (short subject, ~4–5 words — the phone first line) and a
 **body** (what happened / the ask). Session/agent/host/runtime/pid identity is
-stamped automatically from the process env and the per-pid launch registry
-(`lib/session/pid-registry.ts`), and rides the outbound `{message}` footer.
+stamped automatically from the process env, launch-matched activity, and the
+per-pid launch registry (`lib/session/pid-registry.ts`), and rides the outbound
+`{message}` footer.
 
 Em/en dashes in title or body are scrubbed to ASCII ` - ` on the way out (phone
 and plain-text clients render them poorly).
@@ -946,7 +947,7 @@ failing among several is only a warning, since the channels are redundant.
 
 Identity resolution order: `--session` → `AGENT_SESSION_ID` /
 `AGENTS_SESSION_ID` / mailbox basename → `AGENT_LAUNCH_ID` match in the pid
-registry → parent-pid walk through `by-pid/<pid>.json`.
+registry or activity index → parent-pid walk through `by-pid/<pid>.json`.
 
 #### Broadcasting a post outward (`feed.broadcast`)
 
@@ -1029,7 +1030,7 @@ same channel-provider registry `agents send` / `agents notify` use
 feed:
   broadcast:
     owner:
-      channel: owner          # notify.owner.{channel,to} in agents.yaml
+      channel: owner          # normal owner channel selected from humans.yaml
       minLevel: important
     ops-slack:
       channel: slack           # any registered channel / notify.transports name
@@ -1045,12 +1046,12 @@ per sink.
 
 ##### The implicit owner fallback
 
-An operator who sets `notify.owner` (for `agents notify`) but never writes a
+An operator who configures an addressable owner channel in `humans.yaml` but never writes a
 `feed.broadcast` block used to get a `--blocked` post that looked recorded and
-reached nobody — `feed.broadcast` and `notify.owner` were two disconnected
+reached nobody — `feed.broadcast` and owner delivery were two disconnected
 config blocks. Now, when `feed.broadcast` is unset or empty **and** the post is
 `important` (which `--blocked` always is), the post falls back to
-`notify.owner` automatically, as if `feed.broadcast: { owner: { channel: owner
+the normal owner channel automatically, as if `feed.broadcast: { owner: { channel: owner
 } }` had been declared. A routine `milestone` post still stays record-only even
 with the fallback available — the fallback follows the same `minLevel` contract
 every sink already does — and writing an actual `feed.broadcast` block always
