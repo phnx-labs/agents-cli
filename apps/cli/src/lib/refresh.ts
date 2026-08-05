@@ -183,7 +183,11 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
     }
   }
 
-  // 3. Sync resources to default version homes
+  // 3. Sync resources into version homes.
+  // Unattended (`skipPrompts` / `agents sync --yes --local`): every installed
+  // version — otherwise non-default homes keep stale hooks after a system
+  // update (fleet multi-harness: only the default version was refreshed).
+  // Interactive: default only; re-run `agents sync <agent>@all` for the rest.
   const cliStates = await getAllCliStates();
   const agentsToSync = agentFilter ? [agentFilter] : MANAGED_AGENT_IDS;
   const available = getAvailableResources();
@@ -192,6 +196,10 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
     if (!cliStates[agentId]?.installed && listInstalledVersions(agentId).length === 0) continue;
     const defaultVer = getGlobalDefault(agentId);
     if (!defaultVer) continue;
+
+    const versionsToSync = skipPrompts
+      ? listInstalledVersions(agentId)
+      : [defaultVer];
 
     const actuallySynced = getActuallySyncedResources(agentId, defaultVer);
     const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources());
@@ -223,23 +231,28 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
       }
 
       if (forceFullSync || (selection && Object.keys(selection).length > 0)) {
-        const syncResult = syncResourcesToVersion(
-          agentId,
-          defaultVer,
-          selection,
-          forceFullSync ? { force: true } : undefined,
-        );
-        const synced: string[] = [];
-        if (syncResult.commands) synced.push('commands');
-        if (syncResult.skills) synced.push('skills');
-        if (syncResult.hooks) synced.push('hooks');
-        if (syncResult.memory.length > 0) synced.push('memory');
-        if (syncResult.permissions) synced.push('permissions');
-        if (syncResult.mcp.length > 0) synced.push('mcp');
-        if (syncResult.plugins.length > 0) synced.push('plugins');
+        const kinds = new Set<string>();
+        for (const ver of versionsToSync) {
+          const syncResult = syncResourcesToVersion(
+            agentId,
+            ver,
+            selection,
+            forceFullSync ? { force: true } : undefined,
+          );
+          if (syncResult.commands) kinds.add('commands');
+          if (syncResult.skills) kinds.add('skills');
+          if (syncResult.hooks) kinds.add('hooks');
+          if (syncResult.memory.length > 0) kinds.add('memory');
+          if (syncResult.permissions) kinds.add('permissions');
+          if (syncResult.mcp.length > 0) kinds.add('mcp');
+          if (syncResult.plugins.length > 0) kinds.add('plugins');
+        }
 
-        if (synced.length > 0) {
-          console.log(chalk.green(`  Synced: ${synced.join(', ')}`));
+        if (kinds.size > 0) {
+          const verNote = versionsToSync.length > 1
+            ? chalk.gray(` (${versionsToSync.length} versions)`)
+            : '';
+          console.log(chalk.green(`  Synced: ${[...kinds].join(', ')}`) + verNote);
         }
       }
     } catch (err) {
@@ -251,7 +264,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
     }
   }
 
-  // 4. Register hooks as lifecycle events
+  // 4. Register hooks as lifecycle events (same version set as resource sync)
   const hookManifest = parseHookManifest();
   if (Object.keys(hookManifest).length > 0) {
     let hookRegistered = 0;
@@ -260,7 +273,9 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
       if (!hookAgents.has(agentId)) continue;
       const versions = listInstalledVersions(agentId);
       const defaultVer = getGlobalDefault(agentId);
-      const targetVersions = defaultVer ? [defaultVer] : versions.slice(-1);
+      const targetVersions = skipPrompts
+        ? versions
+        : (defaultVer ? [defaultVer] : versions.slice(-1));
 
       for (const ver of targetVersions) {
         const home = getVersionHomePath(agentId, ver);
