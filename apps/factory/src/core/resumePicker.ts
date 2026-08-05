@@ -346,13 +346,19 @@ export function stripSharedPrefix(topic: string, prefixes: readonly string[]): s
   const trimmed = topic.trim();
   for (const prefix of prefixes) {
     if (!trimmed.startsWith(prefix)) continue;
-    // The first match wins, because `prefixes` is longest-first. Falling
-    // through to a shorter phrase when the longest one covers the whole topic
-    // returns a fragment of the boilerplate rather than the topic —
-    // "Resume previous work:" would strip against "Resume previous" and render
-    // as "work:", which names even less than the untouched text does.
-    if (trimmed.length === prefix.length) return trimmed;
-    return trimmed.slice(prefix.length).replace(/^\s+/, '');
+    const rest = trimmed.slice(prefix.length);
+    // Prefixes are mined per WORD, so they must match per word too. A bare
+    // startsWith lands mid-word on a singular/plural pair — "Fix bug" against
+    // "Fix bugs reported by QA" renders the row as "s reported by QA". This is
+    // not that topic's boilerplate; keep looking.
+    if (rest !== '' && !/^\s/.test(rest)) continue;
+    // The first word-boundary match wins, because `prefixes` is longest-first
+    // (the caller's contract). Falling through to a shorter phrase when the
+    // longest one covers the whole topic returns a fragment of the boilerplate
+    // rather than the topic — "Resume previous work:" would strip against
+    // "Resume previous" and render as "work:", naming less than the text does.
+    if (rest === '') return trimmed;
+    return rest.replace(/^\s+/, '');
   }
   return trimmed;
 }

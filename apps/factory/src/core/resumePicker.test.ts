@@ -254,6 +254,18 @@ describe('shared-topic boilerplate stripping', () => {
     expect(stripSharedPrefix('Resume previous work:', prefixes)).toBe('Resume previous work:');
   });
 
+  it('matches per word, not per character, so a plural does not lose its stem', () => {
+    // Prefixes are mined per word; a bare startsWith lands mid-word on a
+    // singular/plural pair and rendered 'Fix bugs reported by QA' as
+    // 's reported by QA'.
+    const topics = ['Fix bug in auth', 'Fix bug in ui', 'Fix bug in db', 'Fix bugs reported by QA'];
+    const prefixes = sharedTopicPrefixes(topics);
+    expect(prefixes).toEqual(['Fix bug in', 'Fix bug']);
+    expect(stripSharedPrefix('Fix bugs reported by QA', prefixes)).toBe('Fix bugs reported by QA');
+    // The genuine members of the family still strip.
+    expect(stripSharedPrefix('Fix bug in auth', prefixes)).toBe('auth');
+  });
+
   it('does not eat content that legitimately starts with punctuation', () => {
     const prefixes = ['Resume previous work:'];
     expect(stripSharedPrefix('Resume previous work: -1 open issue', prefixes)).toBe('-1 open issue');
@@ -274,6 +286,8 @@ describe('shared-topic boilerplate stripping', () => {
 // The selection bookkeeping behind `Agents: Resume`. These run the real
 // function the picker calls; only `quickPick.selectedItems` is stood in for,
 // since that value is supplied by VS Code and is a plain list of ids.
+// The first case reproduces the fixed bug (it fails against the pre-fix
+// algorithm); the rest pin invariants that must hold either way.
 describe('nextPreselection — selection across list swaps', () => {
   const c = (id: string, state: ResumeCandidate['state']) => ({ id, state }) as ResumeCandidate;
 
