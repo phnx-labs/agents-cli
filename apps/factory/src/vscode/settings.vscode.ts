@@ -19,7 +19,7 @@ import { getBuiltInByTitle, configFromDef } from './agents.vscode';
 import { openSingleAgentWithQueue, runHeadlessAgent, focusSessionInTerminal } from './extension';
 import { generateClaudeSessionId } from '../core/prewarm.simple';
 import { nudgeSession } from '../mcp/watchdog-bridge';
-import { runAgents } from '../core/agentsBin';
+import { runAgents, resolveAgentsBin, bootstrapPath } from '../core/agentsBin';
 import { AgentLaunchMode, extractPlanFromSessionJson, planTextToSteps } from '../core/agents';
 import { CLAUDE_TITLE } from '../core/utils';
 import { discoverRecentSessions, getSessionPathBySessionId } from './sessions.vscode';
@@ -63,7 +63,7 @@ import { startForemanAudio, ForemanAudioSession } from './foreman.audio';
 import { runSmartTurn, capHistory } from './foreman.smart';
 import { buildTaskDispatchPrompt } from '../core/tasks';
 import { draftDispatchPrompt, type DraftTicket } from '../core/draftPrompt';
-import { listRegisteredDevices, fetchDeviceStats, countRunningAgents, resolveSecret, getDeviceSyncStatus } from './deviceHealth.vscode';
+import { listRegisteredDevices, fetchDeviceStats, countRunningAgents, getDeviceSyncStatus } from './deviceHealth.vscode';
 import { inferProjectCandidates } from '../core/projectIndex';
 import { normalizeHost, buildRemoteFocusCommand } from '../core/remoteSessions';
 import { rankRepos } from '../core/repoIndex';
@@ -345,14 +345,21 @@ function buildDeviceSyncShell(policy: 'off' | 'safe' | 'aggressive'): string {
 
 const deviceExecFileAsync = promisify(execFile);
 
-// Spawn a coding agent on a registered device over SSH, honoring the resolved
-// credentials (identity file / user) and the auto-sync policy. Fire-and-forget:
+async function runAgentsSsh(host: string, remote: string, timeout: number): Promise<void> {
+  const bin = await resolveAgentsBin();
+  await deviceExecFileAsync(bin, ['ssh', host, '--', remote], {
+    timeout,
+    env: { ...process.env, PATH: `${bootstrapPath(bin)}:${process.env.PATH ?? ''}` },
+  });
+}
+
+// Spawn a coding agent on a registered device through agents-cli's SSH broker,
+// honoring the auto-sync policy. Fire-and-forget:
 // the remote agent is backgrounded (nohup) so the ssh call returns promptly.
 // Returns an error string to surface inline, or null on success.
 async function dispatchToDevice(input: {
   agentType: string;
   host: string;
-  secretRef?: string;
   projectPath: string;
   repoSlug?: string;
   syncPolicy: 'off' | 'safe' | 'aggressive';
@@ -361,10 +368,9 @@ async function dispatchToDevice(input: {
   /** Device registry platform (windows/macos/linux) — selects remote shell. */
   platform?: string;
 }): Promise<string | null> {
-  const { agentType, host, secretRef, projectPath, repoSlug, syncPolicy, mode, prompt, platform } = input;
+  const { agentType, host, projectPath, repoSlug, syncPolicy, mode, prompt, platform } = input;
   if (!projectPath) return 'Device dispatch: no project path resolved — pick a repo/project first.';
 
-  const creds = secretRef ? await resolveSecret(secretRef) : {};
   const windows = isWindowsDevicePlatform(platform);
 
   // Windows remotes: PowerShell script (no bash). POSIX: bash snippet (unchanged).
@@ -426,13 +432,8 @@ async function dispatchToDevice(input: {
     }
   }
 
-  const target = creds.user ? `${creds.user}@${host}` : host;
-  const args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=accept-new'];
-  if (creds.identityFile) args.push('-i', creds.identityFile);
-  // `--` stops ssh option parsing; shell dialect follows device platform (RUSH-1481).
-  args.push('--', target, buildDeviceDispatchRemoteCmd(remote, platform));
   try {
-    await deviceExecFileAsync('ssh', args, { timeout: 60_000 });
+    await runAgentsSsh(host, buildDeviceDispatchRemoteCmd(remote, platform), 60_000);
     return null;
   } catch (err) {
     const e = err as { stderr?: string; message?: string };
@@ -1982,9 +1983,8 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
                 return { device, stats: { host: device.host, reachable: false, runningAgents: 0, fetchedAt: Date.now() } };
               }
               const isLocal = isLocalDeviceHost(device.host);
-              const creds = device.secretRef ? await resolveSecret(device.secretRef) : {};
               const [stats, runningAgents] = await Promise.all([
-                fetchDeviceStats(device.host, { isLocal, identityFile: creds.identityFile, user: creds.user || device.user }),
+                fetchDeviceStats(device.host, { isLocal }),
                 countRunningAgents(device.host, { isLocal }),
               ]);
               return { device, stats: { ...stats, reachable: true, runningAgents } };
@@ -2021,7 +2021,6 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
       case 'repoSync': {
         const root = typeof message.root === 'string' ? message.root : '';
         const syncHost = typeof message.host === 'string' ? message.host : '';
-        const syncSecretRef = typeof message.secretRef === 'string' ? message.secretRef : undefined;
         if (!root) {
           settingsPanel?.webview.postMessage({ type: 'repoSyncData', root: '', status: null });
           break;
@@ -2031,8 +2030,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
           // not on the local mac. Falls back to the local repo for this-mac.
           let status;
           if (syncHost && !isLocalDeviceHost(syncHost)) {
-            const creds = syncSecretRef ? await resolveSecret(syncSecretRef) : {};
-            status = await getDeviceSyncStatus(syncHost, root, { isLocal: false, identityFile: creds.identityFile, user: creds.user });
+            status = await getDeviceSyncStatus(syncHost, root, { isLocal: false });
           } else {
             status = await getSyncStatus(root, { fetch: true });
           }
@@ -2375,12 +2373,11 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
       case 'dispatchTask': {
         const agentType = typeof message.agentType === 'string' ? message.agentType : 'claude';
         // Device target: spawn the agent on a registered machine over SSH, in the
-        // resolved project path, honoring the auto-sync policy + resolved creds.
+        // resolved project path, honoring the auto-sync policy.
         // Kept separate from the local/cloud branches below (which are unchanged).
         if (message.target === 'device') {
           const deviceHost = typeof message.host === 'string' ? message.host : '';
           const projectPath = typeof message.projectPath === 'string' ? message.projectPath : '';
-          const secretRef = typeof message.secretRef === 'string' ? message.secretRef : undefined;
           const syncPolicy: 'off' | 'safe' | 'aggressive' =
             message.syncPolicy === 'off' || message.syncPolicy === 'aggressive' ? message.syncPolicy : 'safe';
           const deviceMode: DispatchModeMsg =
@@ -2412,7 +2409,6 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
           const err = await dispatchToDevice({
             agentType,
             host: deviceHost,
-            secretRef,
             projectPath,
             repoSlug: typeof message.repoSlug === 'string' ? message.repoSlug : undefined,
             syncPolicy,
@@ -3252,7 +3248,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
               if (replyHost) {
                 const remote = ['tmux', '-S', reply.muxSocket!, 'send-keys', '-t', reply.muxTarget!, ...keyArgs]
                   .map(shq).join(' ');
-                await execFileAsync('ssh', [replyHost, remote], { timeout: 20_000 });
+                await runAgentsSsh(replyHost, remote, 20_000);
               } else {
                 await execFileAsync('tmux', ['-S', reply.muxSocket!, 'send-keys', '-t', reply.muxTarget!, ...keyArgs], { timeout: 20_000 });
               }
@@ -3274,12 +3270,12 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
           } else if (reply.kind === 'cloud') {
             if (!reply.cloudTaskId) { postReplyResult(false, 'Missing cloud task id'); break; }
             const args = `cloud message ${shq(reply.cloudTaskId)} ${shq(replyText)}`;
-            if (replyHost) await execFileAsync('ssh', [replyHost, 'agents', 'cloud', 'message', reply.cloudTaskId, replyText], { timeout: 30_000 });
+            if (replyHost) await runAgentsSsh(replyHost, `agents cloud message ${shq(reply.cloudTaskId)} ${shq(replyText)}`, 30_000);
             else await runAgents(args);
             postReplyResult(true);
           } else if (reply.kind === 'team') {
             if (!reply.teamName) { postReplyResult(false, 'Missing team name'); break; }
-            if (replyHost) await execFileAsync('ssh', [replyHost, 'agents', 'factory', 'answer', reply.teamName, replyText], { timeout: 30_000 });
+            if (replyHost) await runAgentsSsh(replyHost, `agents factory answer ${shq(reply.teamName)} ${shq(replyText)}`, 30_000);
             else await runAgents(`factory answer ${shq(reply.teamName)} ${shq(replyText)}`);
             postReplyResult(true);
           } else {

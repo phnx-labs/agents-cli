@@ -455,11 +455,16 @@ describe('runWatchdogTick — watchdog.rotate: off', () => {
     });
     const result = await run();
     expect(gateCalled).toBe(false);
-    expect(calls).toHaveLength(0);
     expect(readRotateState(stateDir, 'sess-tmux')).toBeNull();
     // The brain decided skip (synthetic decider) — crucially NOT a rotate outcome.
     expect(result.outcomes[0].decision).toBe('skip');
     expect(result.outcomes[0].reason).toBe('synthetic decider');
+    // The synthetic decider returns nudge:false → needsHuman. The session is
+    // tmux-addressable, so the ONE inject is the self-file reminder (NOT a rotate
+    // keystroke sequence). That the single call is the reminder — not the two-write
+    // rotate exit+relaunch — is the "not a rotate outcome" proof this test cares about.
+    expect(calls).toHaveLength(1);
+    expect(calls[0].text).toMatch(/agents feed post/i);
   });
 });
 

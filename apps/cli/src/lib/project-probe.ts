@@ -1,5 +1,5 @@
 /**
- * Project workspace probing — the drift signal behind `projects status --fleet`.
+ * Project workspace probing — the drift signal behind `projects status`.
  *
  * Projects are natively multi-device: the same definition (home-relative paths)
  * re-roots on every fleet machine, and the question is whether the project's

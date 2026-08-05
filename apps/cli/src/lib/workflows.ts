@@ -18,6 +18,9 @@ import {
   getUserWorkflowsDir,
   getTrashWorkflowsDir,
   getEnabledExtraRepos,
+  getPluginsDir,
+  getSystemPluginsDir,
+  getProjectPluginsDir,
 } from './state.js';
 import { listInstalledVersions, getVersionHomePath } from './versions.js';
 
@@ -722,26 +725,150 @@ function resolveWorkflowPath(ref: string, cwd: string): string | null {
   return isWorkflowDir(candidate) ? candidate : null;
 }
 
+/** Plugin-root marketplace dirs in project → user → system → extra order. */
+function pluginMarketplaceDirs(cwd: string): string[] {
+  const pluginsDirs: string[] = [];
+  const projectPlugins = getProjectPluginsDir(cwd);
+  if (projectPlugins) pluginsDirs.push(projectPlugins);
+  pluginsDirs.push(getPluginsDir(), getSystemPluginsDir());
+  for (const extra of getEnabledExtraRepos()) {
+    pluginsDirs.push(path.join(extra.dir, 'plugins'));
+  }
+  return pluginsDirs;
+}
+
+function isPluginDirectory(pluginRoot: string, entry: fs.Dirent): boolean {
+  if (entry.name.startsWith('.')) return false;
+  let isDir = entry.isDirectory();
+  if (!isDir && entry.isSymbolicLink()) {
+    try {
+      isDir = fs.statSync(pluginRoot).isDirectory();
+    } catch {
+      isDir = false;
+    }
+  }
+  return isDir;
+}
+
+/**
+ * Plugin `workflows/` directories in discovery order (project → user → system →
+ * extra). Used by name resolution and listing so a plugin-packaged workflow is
+ * runnable via `agents run <name>` without a separate install into
+ * ~/.agents/workflows/ (Phase 5 packaging). Within the plugin band, project
+ * plugins beat user/system plugins (same first-hit-wins as other layers).
+ *
+ * Pass `pluginName` to restrict to one plugin (for `name@plugin` resolution).
+ */
+export function listPluginWorkflowDirs(
+  cwd: string = process.cwd(),
+  pluginName?: string,
+): string[] {
+  const pluginRoots: string[] = [];
+
+  for (const pluginsDir of pluginMarketplaceDirs(cwd)) {
+    if (!fs.existsSync(pluginsDir)) continue;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(pluginsDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (pluginName !== undefined && entry.name !== pluginName) continue;
+      const pluginRoot = path.join(pluginsDir, entry.name);
+      if (!isPluginDirectory(pluginRoot, entry)) continue;
+      const workflowsDir = path.join(pluginRoot, 'workflows');
+      if (fs.existsSync(workflowsDir)) pluginRoots.push(workflowsDir);
+    }
+  }
+  return pluginRoots;
+}
+
+/**
+ * True when `ref` is a single bare workflow / source identifier (no path
+ * separators, no `..`, no `@`). Name lookup must not path-join multi-segment
+ * or traversal refs into search roots. `name@source` is parsed separately.
+ */
+export function isBareWorkflowName(ref: string): boolean {
+  if (!ref || ref === '.' || ref === '..') return false;
+  if (ref.includes('/') || ref.includes('\\')) return false;
+  if (ref.includes('..')) return false;
+  if (ref.includes('@')) return false;
+  // Reject absolute paths (posix or Windows).
+  if (path.isAbsolute(ref)) return false;
+  return path.basename(ref) === ref;
+}
+
+/** Parsed `agents run` workflow reference (docs/07-entrypoints). */
+export interface ParsedWorkflowRef {
+  /** Workflow directory name (WORKFLOW.md parent). */
+  name: string;
+  /**
+   * When set (`name@source`), pin resolution to that source only:
+   * a plugin name, or an enabled extra-repo alias.
+   */
+  source?: string;
+}
+
+/**
+ * Parse a workflow run target: optional `workflow:` type prefix and optional
+ * `@source` pin. Returns null when the form is not a valid name lookup.
+ */
+export function parseWorkflowRef(ref: string): ParsedWorkflowRef | null {
+  let r = ref.trim();
+  if (r.startsWith('workflow:')) r = r.slice('workflow:'.length);
+  if (!r) return null;
+
+  const at = r.lastIndexOf('@');
+  if (at > 0) {
+    const name = r.slice(0, at);
+    const source = r.slice(at + 1);
+    if (!isBareWorkflowName(name) || !isBareWorkflowName(source)) return null;
+    return { name, source };
+  }
+  if (!isBareWorkflowName(r)) return null;
+  return { name: r };
+}
+
 /**
  * Resolve an `agents run <workflow>` reference.
  *
  * Directories are accepted anywhere on disk when they contain WORKFLOW.md.
- * Name lookup keeps the normal resource precedence: project > user > system > extras.
+ * Name lookup precedence (docs/07-entrypoints): project > user > plugin > extra > system.
+ * Pin a source with `name@plugin` or `name@extra-alias` (optional `workflow:` prefix).
  */
 export function resolveWorkflowRef(ref: string, cwd: string = process.cwd()): string | null {
   const direct = resolveWorkflowPath(ref, cwd);
   if (direct) return direct;
 
+  const parsed = parseWorkflowRef(ref);
+  if (!parsed) return null;
+
+  // Source-qualified: only that plugin or extra-repo workflows/ (no layered fallback).
+  if (parsed.source) {
+    for (const dir of listPluginWorkflowDirs(cwd, parsed.source)) {
+      const workflowPath = path.join(dir, parsed.name);
+      if (isWorkflowDir(workflowPath)) return workflowPath;
+    }
+    for (const extra of getEnabledExtraRepos()) {
+      if (extra.alias !== parsed.source) continue;
+      const workflowPath = path.join(extra.dir, 'workflows', parsed.name);
+      if (isWorkflowDir(workflowPath)) return workflowPath;
+    }
+    return null;
+  }
+
   const projectAgentsDir = getProjectAgentsDir(cwd);
   const searchDirs = [
     ...(projectAgentsDir ? [path.join(projectAgentsDir, 'workflows')] : []),
     getUserWorkflowsDir(),
-    getSystemWorkflowsDir(),
+    ...listPluginWorkflowDirs(cwd),
     ...getEnabledExtraRepos().map(r => path.join(r.dir, 'workflows')),
+    getSystemWorkflowsDir(),
   ];
 
   for (const dir of searchDirs) {
-    const workflowPath = path.join(dir, ref);
+    const workflowPath = path.join(dir, parsed.name);
     if (isWorkflowDir(workflowPath)) return workflowPath;
   }
   return null;
@@ -797,17 +924,19 @@ export function discoverWorkflowsFromRepo(repoPath: string): DiscoveredWorkflow[
 }
 
 /**
- * List all workflows in central storage.
- * User layer (~/.agents/workflows/) wins over system (~/.agents/.system/workflows/).
+ * List all workflows in central storage + plugin packages.
+ * Precedence: user > plugin > extra > system (first writer wins; project is
+ * cwd-scoped and handled by resolveWorkflowRef / the resource handler).
  */
-export function listInstalledWorkflows(): Map<string, InstalledWorkflow> {
+export function listInstalledWorkflows(cwd: string = process.cwd()): Map<string, InstalledWorkflow> {
   const result = new Map<string, InstalledWorkflow>();
   const extraRepos = getEnabledExtraRepos();
 
   const searchDirs = [
     getUserWorkflowsDir(),
-    getSystemWorkflowsDir(),
+    ...listPluginWorkflowDirs(cwd),
     ...extraRepos.map(r => path.join(r.dir, 'workflows')),
+    getSystemWorkflowsDir(),
   ];
 
   for (const dir of searchDirs) {

@@ -154,7 +154,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   memory: [loadMemory],
   permissions: [loadPermissions],
   mcp: [loadMcp],
-  cli: [loadCli],
+  clis: [loadCli],
   subagents: [loadSubagents],
   plugins: [loadPlugins],
   workflows: [loadWorkflows],

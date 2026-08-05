@@ -17,6 +17,7 @@ import type { ActiveSession } from '../session/active.js';
 import type { SessionProvenance, MuxLocation } from '../session/provenance.js';
 import type { InjectTarget } from '../terminal/inject.js';
 import type { WatchdogCandidate } from './watchdog.js';
+import type { OpenBlock } from '../feed.js';
 import {
   runWatchdogTick,
   DEFAULT_THRESHOLDS,
@@ -193,7 +194,8 @@ describe('runWatchdogTick — parked-on-question escalates to the brain', () => 
     expect(o.decision).toBe('skip');
     expect(o.injected).toBeUndefined();
     expect(o.reason).toMatch(/human/i);
-    expect(readLedger()['sess-tmux']).toBeUndefined();
+    // Brain said "needs human" → reminder is injected → cooldown is recorded.
+    expect(readLedger()['sess-tmux']).toBe(NOW);
   });
 
   it('an ambiguous stall (no promise, no completion, not waiting) also escalates', async () => {
@@ -240,10 +242,14 @@ describe('runWatchdogTick — skips (no nudge)', () => {
     expect(readLedger()['sess-tmux']).toBeUndefined();
   });
 
-  it('SKIPS and FLAGS an un-addressable stall (ghostty, no tmux) — never injects a guessed target', async () => {
+  it('SKIPS and FLAGS an un-addressable NUDGE-WORTHY stall (ghostty, no tmux) — flag only, NEVER pages the owner', async () => {
+    // PROMISE_TAIL → isLikelyTrulyBlocked → deterministic `nudge` (a drive-forward
+    // poke, NOT needsHuman). An un-addressable poke must NOT page Muqsit's phone —
+    // it flags for the tray only. No block published, no cooldown recorded.
+    const blocks: OpenBlock[] = [];
     const result = await run({
       sessions: [ghosttySession()], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
-      tailFor: () => PROMISE_TAIL,
+      tailFor: () => PROMISE_TAIL, publishBlockFn: (b) => blocks.push(b),
     });
     const o = result.outcomes[0];
     expect(o.decision).toBe('skip');
@@ -255,7 +261,8 @@ describe('runWatchdogTick — skips (no nudge)', () => {
     const flags = readFlags();
     expect(flags['sess-ghostty']).toBeDefined();
     expect(flags['sess-ghostty'].host).toBe('ghostty');
-    // Nothing delivered → no cooldown entry.
+    // A drive-forward poke is NOT a page: no block, no cooldown write.
+    expect(blocks).toHaveLength(0);
     expect(readLedger()['sess-ghostty']).toBeUndefined();
   });
 
@@ -274,11 +281,15 @@ describe('runWatchdogTick — skips (no nudge)', () => {
     expect(readLedger()['sess-tmux']).toBe(NOW - 60_000);
   });
 
-  it('handsoff policy: detects + flags a nudge-worthy stall but NEVER injects', async () => {
+  it('handsoff policy: detects + flags a nudge-worthy stall but NEVER injects or pages', async () => {
+    // PROMISE_TAIL → deterministic `nudge` (drive-forward poke, NOT needsHuman).
+    // Hands-off means "don't nudge it forward" — it must NOT page Muqsit for a poke.
+    // Flag only: no block published, no cooldown recorded.
     const policyFor = (): WatchdogPolicy => 'handsoff';
+    const blocks: OpenBlock[] = [];
     const result = await run({
       sessions: [tmuxSession()], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
-      tailFor: () => PROMISE_TAIL, policyFor,
+      tailFor: () => PROMISE_TAIL, policyFor, publishBlockFn: (b) => blocks.push(b),
     });
     const o = result.outcomes[0];
     expect(o.policy).toBe('handsoff');
@@ -286,6 +297,8 @@ describe('runWatchdogTick — skips (no nudge)', () => {
     expect(o.addressable).toBe(true);
     expect(o.injected).toBe(false);          // ...but never does
     expect(o.reason).toMatch(/handsoff/i);
+    // A drive-forward poke under hands-off is NOT a page: no block, no cooldown write.
+    expect(blocks).toHaveLength(0);
     expect(readLedger()['sess-tmux']).toBeUndefined();
     // Flagged for the tray to surface "would-nudge but hands-off".
     const flags = readFlags();
@@ -397,5 +410,169 @@ describe('runWatchdogTick — the cooldown ledger is lock-serialized (no lost up
     expect(ledger['sess-a']).toBe(NOW);
     expect(ledger['sess-b']).toBe(NOW);
     fs.rmSync(shared, { recursive: true, force: true });
+  });
+});
+
+describe('runWatchdogTick — brain says needs-human → wires the owner feed', () => {
+  // The brain marks a session "leave for human" (decision.nudge === false →
+  // needsHuman === true). The watchdog must surface that signal on the owner's feed —
+  // not drop it silently in a menubar-only flag. Two paths depending on addressability:
+  //   A. Addressable (tmux): inject a self-file reminder into the agent's terminal.
+  //   B. Un-addressable (ghostty, no tmux): file a declared block on the agent's behalf.
+  // Both paths are gated by the same cooldown ledger as a nudge (at most once per
+  // cooldown window) and are no-ops when a block already exists for the session.
+  //
+  // Owner-paging fires ONLY on this confirmed-needsHuman path. A nudge-worthy
+  // drive-forward poke (decision.nudge === true) that is un-addressable or under a
+  // hands-off policy is NEVER paged — see section C, which pins that no-page.
+
+  const needsHumanDecider: SmartDecider = async () => ({ nudge: false, reason: 'credentials required — needs the human' });
+
+  describe('A. addressable session (tmux) — inject a self-file reminder', () => {
+    it('injects the reminder text and records the cooldown', async () => {
+      let capturedText: string | null = null;
+      const injectFn = async (_target: InjectTarget, text: string, _o: { dryRun?: boolean }) => {
+        capturedText = text;
+        return { ok: true as const, backend: 'tmux' as const, writes: 2 };
+      };
+      const result = await run({
+        sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => ASK_TAIL, smartDecider: needsHumanDecider, injectFn,
+        openBlockFor: () => null,
+      });
+      const o = result.outcomes[0];
+      expect(o.decision).toBe('skip');
+      expect(o.reason).toMatch(/credentials/i);
+      // The reminder text must mention agents feed post --blocked.
+      expect(capturedText).not.toBeNull();
+      expect(capturedText).toMatch(/agents feed post/i);
+      expect(capturedText).toMatch(/--blocked/i);
+      // Cooldown is recorded so the next tick within cooldownMs is rate-limited.
+      expect(readLedger()['sess-tmux']).toBe(NOW);
+    });
+
+    it('does NOT inject when a block already exists for the session', async () => {
+      let injected = false;
+      const injectFn = async () => { injected = true; return { ok: true as const, backend: 'tmux' as const, writes: 2 }; };
+      const existingBlock = { blockId: 'block-sess-tmux', sessionId: 'sess-tmux', mailboxId: 'sess-tmux' } as OpenBlock;
+      await run({
+        sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => ASK_TAIL, smartDecider: needsHumanDecider, injectFn,
+        openBlockFor: () => existingBlock,
+      });
+      expect(injected).toBe(false);
+      expect(readLedger()['sess-tmux']).toBeUndefined();
+    });
+
+    it('does NOT inject a second time within the cooldown window', async () => {
+      // Seed a ledger entry 1 minute ago — inside the default 20m cooldown.
+      fs.writeFileSync(path.join(stateDir, 'nudges.json'), JSON.stringify({ 'sess-tmux': NOW - 60_000 }));
+      let injected = false;
+      const injectFn = async () => { injected = true; return { ok: true as const, backend: 'tmux' as const, writes: 2 }; };
+      await run({
+        sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => ASK_TAIL, smartDecider: needsHumanDecider, injectFn,
+        openBlockFor: () => null,
+      });
+      // Reminder is suppressed by the cooldown — no inject, timestamp untouched.
+      expect(injected).toBe(false);
+      expect(readLedger()['sess-tmux']).toBe(NOW - 60_000);
+    });
+  });
+
+  describe('B. un-addressable session (ghostty, no tmux) — file a declared block', () => {
+    // The MOST important case: the session genuinely needs the human AND the watchdog
+    // cannot even reach its terminal to remind it. It must NOT silently vanish — the
+    // only way to reach Muqsit is to file a declared block on the agent's behalf.
+    // A waiting_input ghostty session deterministically escalates to the brain, which
+    // returns nudge:false (needsHuman), and the resolver reports it un-addressable.
+    const unaddressableNeedsHuman = () => ghosttySession({ activity: 'waiting_input', awaitingReason: 'question' });
+
+    it('publishes a declared block and records the cooldown', async () => {
+      const published: OpenBlock[] = [];
+      const publishBlockFn = (b: OpenBlock) => { published.push(b); };
+      const result = await run({
+        sessions: [unaddressableNeedsHuman()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => ASK_TAIL, smartDecider: needsHumanDecider, publishBlockFn,
+        openBlockFor: () => null,
+      });
+      const o = result.outcomes[0];
+      expect(o.decision).toBe('skip');
+      // One block published with the session's id, phone-urgent.
+      expect(published).toHaveLength(1);
+      expect(published[0].sessionId).toBe('sess-ghostty');
+      expect(published[0].costOfDelay).toBe('high');
+      // Cooldown is recorded.
+      expect(readLedger()['sess-ghostty']).toBe(NOW);
+    });
+
+    it('does NOT publish when a block already exists', async () => {
+      const published: OpenBlock[] = [];
+      const existingBlock = { blockId: 'block-sess-ghostty', sessionId: 'sess-ghostty', mailboxId: 'sess-ghostty' } as OpenBlock;
+      await run({
+        sessions: [unaddressableNeedsHuman()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => ASK_TAIL, smartDecider: needsHumanDecider,
+        publishBlockFn: (b) => published.push(b),
+        openBlockFor: () => existingBlock,
+      });
+      expect(published).toHaveLength(0);
+      expect(readLedger()['sess-ghostty']).toBeUndefined();
+    });
+
+    it('does NOT publish a second time within the cooldown window', async () => {
+      fs.writeFileSync(path.join(stateDir, 'nudges.json'), JSON.stringify({ 'sess-ghostty': NOW - 60_000 }));
+      const published: OpenBlock[] = [];
+      await run({
+        sessions: [unaddressableNeedsHuman()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => ASK_TAIL, smartDecider: needsHumanDecider,
+        publishBlockFn: (b) => published.push(b),
+        openBlockFor: () => null,
+      });
+      expect(published).toHaveLength(0);
+      expect(readLedger()['sess-ghostty']).toBe(NOW - 60_000);
+    });
+  });
+
+  describe('C. a nudge-worthy (NOT needsHuman) session is NEVER paged', () => {
+    // The over-paging guard: the refuse and handsoff branches are reached only for a
+    // drive-forward poke (decision.nudge === true), which is NEVER needsHuman. Those
+    // sessions "just need a poke" — they must not text Muqsit's phone. This pins the
+    // fix: neither an un-addressable poke nor a hands-off poke publishes a block.
+
+    it('un-addressable NUDGE-worthy poke → flag only, no block, no cooldown write', async () => {
+      // PROMISE_TAIL → isLikelyTrulyBlocked → deterministic nudge (drive-forward).
+      const published: OpenBlock[] = [];
+      const result = await run({
+        sessions: [ghosttySession()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => PROMISE_TAIL, publishBlockFn: (b) => published.push(b),
+        openBlockFor: () => null,
+      });
+      const o = result.outcomes[0];
+      expect(o.decision).toBe('skip');
+      expect(o.addressable).toBe(false);
+      // Flagged for the tray, but the owner is NOT paged.
+      expect(readFlags()['sess-ghostty']).toBeDefined();
+      expect(published).toHaveLength(0);
+      expect(readLedger()['sess-ghostty']).toBeUndefined();
+    });
+
+    it('handsoff NUDGE-worthy poke → flag only, never injects, no block, no cooldown write', async () => {
+      const published: OpenBlock[] = [];
+      let injected = false;
+      const injectFn = async () => { injected = true; return { ok: true as const, backend: 'tmux' as const, writes: 2 }; };
+      const result = await run({
+        sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => PROMISE_TAIL, policyFor: () => 'handsoff',
+        publishBlockFn: (b) => published.push(b), injectFn, openBlockFor: () => null,
+      });
+      const o = result.outcomes[0];
+      expect(o.policy).toBe('handsoff');
+      expect(o.injected).toBe(false);  // handsoff never injects
+      expect(injected).toBe(false);
+      // Flagged for the tray, but the owner is NOT paged for a poke.
+      expect(readFlags()['sess-tmux']).toBeDefined();
+      expect(published).toHaveLength(0);
+      expect(readLedger()['sess-tmux']).toBeUndefined();
+    });
   });
 });

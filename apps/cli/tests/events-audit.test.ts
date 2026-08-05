@@ -46,9 +46,15 @@ function runCli(home: string, args: string[], extraEnv: Record<string, string> =
   });
 }
 
+function currentEventsPath(home: string): string {
+  const now = new Date();
+  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  return path.join(home, '.agents', '.history', 'events', day, 'events.jsonl');
+}
+
 /** Read every event record written to the canonical log under a temp HOME. */
 function readEvents(home: string): Array<Record<string, unknown>> {
-  const eventsPath = path.join(home, '.agents', 'events.jsonl');
+  const eventsPath = currentEventsPath(home);
   if (!fs.existsSync(eventsPath)) return [];
   const out: Array<Record<string, unknown>> = [];
   for (const line of fs.readFileSync(eventsPath, 'utf-8').split('\n').filter(Boolean)) {
@@ -136,7 +142,7 @@ describe('audit event log', () => {
     // the invocation; the token-shaped positional must be masked, not stored.
     runCli(home, ['secrets', 'get', 'ghp_FAKETOKENVALUE123'], { SSH_CONNECTION: '' });
 
-    const raw = fs.readFileSync(path.join(home, '.agents', 'events.jsonl'), 'utf-8');
+    const raw = fs.readFileSync(currentEventsPath(home), 'utf-8');
     expect(raw).not.toContain('ghp_FAKETOKENVALUE123');
     expect(raw).toContain('[REDACTED]');
   });

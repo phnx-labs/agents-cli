@@ -294,7 +294,7 @@ export function listCliManifests(cwd?: string): {
   manifests: CliManifest[];
   errors: CliManifestError[];
 } {
-  const resolved = listResources('cli', cwd);
+  const resolved = listResources('clis', cwd);
   const manifests: CliManifest[] = [];
   const errors: CliManifestError[] = [];
 
@@ -318,7 +318,7 @@ export function listCliManifests(cwd?: string): {
 
 /** Resolve a single CLI manifest by name. Returns null when not declared. */
 export function resolveCliManifest(name: string, cwd?: string): CliManifest | null {
-  const resolved = resolveResource('cli', name, cwd);
+  const resolved = resolveResource('clis', name, cwd);
   if (!resolved) return null;
   if (!resolved.path.endsWith('.yaml') && !resolved.path.endsWith('.yml')) return null;
   const contents = fs.readFileSync(resolved.path, 'utf-8');

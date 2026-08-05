@@ -50,7 +50,7 @@ function discoveredPlugin(root: string, name: string): DiscoveredPlugin {
   return {
     name, root,
     manifest: { name, version: '1.0.0', description: `desc-${name}` },
-    skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], bin: [],
+    skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], workflows: [], bin: [],
     mcpServers: [], lspServers: [], monitors: [],
     hasMcp: false, hasSettings: false,
   };

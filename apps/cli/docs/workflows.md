@@ -13,10 +13,19 @@ For the layered resolution model that governs `project > user > system` preceden
 ## Architecture
 
 ```
-Source locations (project > user > system):
+Source locations (project > user > plugin > extra > system):
   .agents/workflows/<name>/            Project-scoped (repo-local)
   ~/.agents/workflows/<name>/          User-scoped (global)
+  <plugin>/workflows/<name>/           Packaged inside a plugin (Phase 5)
   ~/.agents-system/workflows/<name>/   System-shipped defaults
+
+Run with a bare name for layered precedence, or pin the source when names collide:
+
+```bash
+agents run deploy                    # project > user > plugin > extra > system
+agents run deploy@ship-tools         # only plugin "ship-tools"
+agents run workflow:deploy@social    # type + extra-repo alias
+```
 
   Each workflow directory:
     WORKFLOW.md          Required: frontmatter + orchestrator system prompt

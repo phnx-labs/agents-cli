@@ -1,5 +1,135 @@
 # Changelog
 
+## 1.22.13
+
+- **`agents sessions` accepts direct live-state flags and remains fleet-wide by default.** `--working`, `--idle`, `--waiting`, `--orphan`/`--orphaned`, `--crashed`, `--closed`, `--abandoned`, `--queued`, and `--unknown` each imply the live scan; multiple flags form a union. `--working` is narrower than `--active`: it excludes idle, waiting, and lifecycle-failure rows. Cross-device collection was already the default and stays that way; `--local` opts out, while `--all` continues to widen historical directory and time scope. Source: `apps/cli/src/commands/sessions.ts`, `apps/cli/src/commands/sessions.test.ts`.
+
+- **Workflows: `name@source` disambiguation (Phase 5 packaging).** When two plugins (or a plugin and an extra repo) ship the same workflow name, pin the source: `agents run deploy@ship-tools` or `agents run workflow:deploy@social`. Bare names keep layered precedence (project > user > plugin > extra > system); a missing source returns no match instead of silently falling back. Source: `apps/cli/src/lib/workflows.ts`, `apps/cli/src/lib/resources/workflows.ts`.
+
+## 1.22.12
+
+- Store operational events in daily history directories, retain 7 days and at most 50 MiB automatically, and make `agents logs audit` use the `agents events --audit` reader.
+
+- **`agents cli` renamed to `agents clis`; resource directory `cli/` renamed to `clis/`.** The CLI resource kind and its subdirectory are now plural throughout: `ResourceKind` changes from `'cli'` to `'clis'`, manifests live at `clis/<name>.yaml`, `agents clis` is the only command surface (no `agents cli` alias), and `agents view --clis` replaces `--cli`. A startup migration renames any existing `cli/` directory to `clis/` in the user, system, and project `.agents/` layers; if both `cli/` and `clis/` are present the migration fails with a clear error rather than silently merging. Source: `apps/cli/src/lib/resources.ts`, `apps/cli/src/lib/cli-resources.ts`, `apps/cli/src/commands/cli.ts`, `apps/cli/src/lib/startup/command-registry.ts`, `apps/cli/src/commands/repo.ts`, `apps/cli/src/commands/view.ts`, `apps/cli/src/lib/migrate.ts`.
+
+- **`agents.yaml` no longer silently loses top-level keys across a version-skewed
+  fleet.** `serializeCentral` (`lib/state.ts`) rewrote the synced `agents.yaml`
+  with a delete-any-key-not-in-the-in-memory-object pass. An **older CLI version
+  whose `Meta` type predated a key** (`beta:`, `notify.owner`, `feed:`, imported
+  `projects`) would parse the file, never surface that key, delete it on the next
+  write, and sync the deletion to every machine — the recurring "my config
+  vanished" data-loss (see the restore in commit `04295e3`). The delete pass now
+  consults a `Record<keyof Meta, 'central' | 'device'>` scope map (compile-time
+  exhaustive — a new `Meta` field that isn't classified fails the build) and
+  deletes **only keys this version knows** (a cleared central key, or a device
+  key that is legacy cruft in the synced file); a key it doesn't know is
+  preserved verbatim. Once a machine runs a CLI carrying this fix, it can never
+  drop a newer version's key again. Source: `apps/cli/src/lib/state.ts`,
+  `apps/cli/src/lib/__tests__/state.test.ts`.
+
+- **Watchdog files a feed block only when a session genuinely needs the human.**
+  When the smart brain concludes a stalled session must be left for the human
+  (`needsHuman`), the watchdog now surfaces that on the owner's feed instead of
+  dropping it in a menubar-only flag. Two cases: if the session is addressable it
+  injects a self-file reminder into the agent ("You appear stuck. File it: `agents
+  feed post … --blocked`") so the agent declares its own block; if it is
+  un-addressable — the case where the watchdog can't even reach the terminal to
+  remind it — the watchdog files a declared block on the agent's behalf so the owner
+  is still paged. Paging fires **only** on this confirmed-needs-human path: a plain
+  nudge-worthy drive-forward poke (un-addressable or under a hands-off policy) is
+  flagged for the tray but never texts the owner. Both paths are gated by the
+  existing cooldown ledger (at most once per `WATCHDOG_COOLDOWN_MS` window) and are
+  no-ops when a block for the session already exists, so no double-paging. Source:
+  `apps/cli/src/lib/watchdog/runner.ts` (`NudgeDecision.needsHuman`,
+  `WatchdogTickOptions.publishBlockFn`, the needs-human skip branch),
+  `apps/cli/src/lib/watchdog/runner.test.ts`.
+
+## 1.22.11
+
+- **`--blocked` iMessage notifications are now phone-actionable.** The forwarded message dropped the block's `--option`s, `--default`, and timeout and instead showed `agents focus <id>` — a CLI command that is useless on a phone. It now shows the choices (`Options: publish / wait`) and the safe-default fallback (`Default in 15 min: wait`) and omits the `agents focus` line, so a `--blocked` post that carries a `--default` self-resolves when the owner can't reply. Source: `apps/cli/src/lib/feed-broadcast.ts`.
+
+- Move operational event logs from the git-backed `~/.agents/` root into `~/.agents/.history/events/`, including existing numbered gzip archives.
+
+- **`agents projects` is out of beta — no `agents beta enable projects` needed.**
+  The command tree (list / add / import / status / link / …) is always registered
+  now; `projects` is dropped from the beta registry (`ALL_BETA_FEATURES`,
+  `BetaFeatureName`) and the `preAction` beta gate is removed. Any lingering
+  `beta.enabled: [projects]` entry is harmlessly ignored, and `agents beta
+  enable/disable projects` prints a friendly "graduated out of beta" note and
+  no-ops instead of erroring (so old scripts survive). Source:
+  `apps/cli/src/lib/beta.ts`, `apps/cli/src/lib/types.ts`,
+  `apps/cli/src/commands/beta.ts`, `apps/cli/src/commands/projects.ts`.
+
+- **`agents projects status` shows every project across the whole fleet by default;
+  scope it with `--device`/`--devices`.** The old `--fleet` flag is gone — status
+  now dials every registered device's workspace (presence, branch, drift) in one
+  parallel SSH round without being asked. `--device <name...>` (repeatable) or
+  `--devices a,b,c` narrows the fan-out to a subset; with no filter the whole fleet
+  is dialled. Reuses the shared `--host`/`--device` target resolution. Source:
+  `apps/cli/src/commands/projects.ts`.
+
+- **`scripts/release.sh` home-base hop: pass a single remote argv to `agents ssh`.** Multi-arg forms (`bash -lc '…'`) are joined without re-quoting by `wrapRemoteCommand`, so the remote `cd` never ran and publish failed with `fatal: not a git repository`. One shell string keeps the command intact. Source: `apps/cli/scripts/release.sh`.
+
+## 1.22.10
+
+- **Plugins package workflows (Phase 5 packaging slice).** A plugin’s `workflows/<name>/WORKFLOW.md` is discovered and resolved by `agents run <name>` with precedence project > user > plugin > extra > system — no separate install into `~/.agents/workflows/` required. Plugin inventory / resource groups list `workflows`. Source: `apps/cli/src/lib/workflows.ts`, `apps/cli/src/lib/plugins.ts`, `apps/cli/src/lib/resources/workflows.ts`.
+
+- **`scripts/release.sh` routes the home-base publish hop via `agents ssh`.** Plain `ssh mac-mini` fails host-key checks on headless Linux workers; `agents ssh` uses the devices registry and brokered credentials. Falls back to plain ssh only when `agents` is not on PATH. Source: `apps/cli/scripts/release.sh`.
+
+- **Touch ID is now raised in exactly one place — `agents secrets unlock`.** `agents secrets list`, `agents run <agent>`, `secrets get`/`export`/`view`, and every background read resolve from the secrets broker / durable session / no-ACL layer and never raise a biometric sheet; a locked keychain bundle fails with an actionable "run `agents secrets unlock <bundle>`" hint instead of prompting. The `AGENTS_SECRETS_NO_PROMPT` environment override and the "a human at a TTY, so prompting is fine" heuristic are deleted — the prompt decision is structural, not an ambient env var. The macOS keychain `list`/`list-synced` enumeration queries now pass `kSecUseAuthenticationUISkip` (enumeration itself was evaluating the biometry ACL, so `agents secrets list` prompted and silently dropped keychain bundles when the sheet was cancelled), and the one-time hash-rekey + metadata-ACL heal run only inside the single `unlock` sheet so nothing on the run/list path can storm. Source: `apps/cli/src/lib/secrets/keychain-helper.swift`, `apps/cli/src/lib/secrets/index.ts`, `apps/cli/src/lib/secrets/bundles.ts`, `apps/cli/src/lib/secrets/headless.ts`, `apps/cli/src/commands/secrets.ts`.
+- **The Factory VS Code extension (`swarm-ext`) no longer decrypts secrets or shells raw `ssh`.** Device health, reachability, and sync route every remote command through `agents ssh <host>` (broker-owned credentials, no prompt); the extension's own secret-resolution path (`resolveSecret`/`discoverSecretsReadCmd`/`extractCredentials`) is removed, so rendering the devices list never raises Touch ID. Source: `apps/factory/src/vscode/deviceHealth.vscode.ts`, `apps/factory/src/vscode/settings.vscode.ts`, `apps/factory/src/vscode/extension.ts`.
+
+## 1.22.9
+
+- **`agents ssh auto` and `agents teams add --device auto` no longer reject with "Unknown device 'auto'" (RUSH-2185).** The `auto` affinity sentinel was a `run`-only preprocessing step (`applyDeviceAutoToOptions` in `smart-launch.ts`, wired only from `agents run`'s exec path) — every other `--host`/`--device` caller went straight to the shared resolver, which had no idea what `auto` meant and reported it as an unregistered device. `matchHost` (the one core every `--host`/`--device` caller shares) now resolves `auto` directly via the same `resolveDeviceAffinity` engine `run` uses, so `agents ssh`, `agents teams add`, and anything else routed through `matchHost`/`resolveHost` (including the generic `--host`/`--device` passthrough) pick a device the same way. `agents teams add --device auto` landing on the local machine now just runs the teammate locally, matching `run`'s "null pick = local" outcome; `agents ssh auto` refuses a local pick with a clear message instead of self-SSHing, since `agents ssh` exists to dial OUT to a remote box. Source: `apps/cli/src/lib/hosts/registry.ts`, `apps/cli/src/lib/devices/resolve-target.ts`, `apps/cli/src/commands/ssh.ts`, `apps/cli/src/commands/teams.ts`, `apps/cli/docs/00-concepts.md`, `apps/cli/docs/hosts.md`, `apps/cli/docs/teams.md`.
+
+- **`agents harness edit` gains `--auth-provider`, `--fallback-model`, and `--from-secrets`; `add`/`fork` gain an interactive wizard and `--from-secrets`.** `edit` (already shipped with `--model`/`--base-url`/`--version`/`--description`) now also repoints auth at a different keychain-backed provider, sets or clears (`--fallback-model ""`) the same-host fallback model retried on a rate limit, and — like `add`/`fork` — accepts `--from-secrets <bundle>[:<key>]` to copy a value out of an existing `agents secrets` bundle into the harness's own keychain item once, instead of retyping a key already stored elsewhere (the item it writes to, `agents-cli.<provider>.token`, is never gated behind the biometry-required prefixes, so later reads stay silent). `agents harness add`/`fork` now accept `[name]`/`[source] [name]` as optional positionals — run either with insufficient flags in an interactive terminal and a picker (fork from a native host or existing harness → a built-in preset or "build custom" → the harness's name, pre-filled with the preset's own name → how to get the key) replaces the old hard error; flags remain fully supported for scripts, and a non-interactive shell still gets the original error. Source: `apps/cli/src/commands/harness.ts`, `apps/cli/src/commands/profiles.ts`, `apps/cli/docs/profiles.md`.
+
+- **`agents run --lease` is reuse-first against the crabbox profile pool, with a
+  `--fresh` opt-out.** A bare `--lease` used to always lease a brand-new box, so
+  bursts of runs (e.g. resumed sessions) stacked up idle `keep=true` boxes at
+  full monthly cost. Now, before warming a new box, the run looks for a warm box
+  carrying the same `profile` label the warmup would use (read from the repo's
+  `.crabbox.yaml`, matching `scripts/sandbox.sh`'s `pick_ready_box`) and the same
+  network mode — a tailnet box is never handed to a public run or vice versa —
+  and reuses the first one `crabbox status` reports SSH-ready, keeping it after
+  the run. A not-ready pool box is skipped, never stopped. `--fresh` forces the
+  old behavior (brand-new box, torn down after the run); `--box <slug>` is
+  unchanged. Source: `apps/cli/src/lib/crabbox/lease.ts`,
+  `apps/cli/src/lib/crabbox/cli.ts`, `apps/cli/src/lib/crabbox/config.ts`,
+  `apps/cli/src/commands/exec.ts`.
+
+- **The menu bar now notices and reports when the scheduler dies — instead of
+  staying silent forever.** The only proactive "routines overdue / scheduler
+  down" signal was `notifyOverdue` (`src/lib/overdue.ts`), fired from inside
+  `runDaemon()` — so it could never fire while the daemon itself was down, the
+  exact outage it exists to report. `MenubarHelper` is a separate launchd
+  KeepAlive service that stays alive when the daemon dies, so its 10s tick now
+  polls daemon liveness independently of the dropdown ever being opened; once
+  it has been continuously unreachable for ~30s (debounced past a routine
+  restart blip), it fires one native notification ("Scheduler stopped —
+  routines won't run") through its own `NSUserNotificationCenter` delivery —
+  no daemon, no CLI spawn required — and lights the always-visible menu-bar
+  badge (`⏻`) until the scheduler comes back. Source:
+  `apps/cli/menubar/Sources/MenubarHelper/StatusItemController.swift`.
+
+- **Observe umbrella aliases: `inbox`, `timeline`, `roster` (Phase 3 surface consolidation).**
+  Thin doors onto existing readers (no store merge): `agents inbox` ≡ `feed`,
+  `agents timeline` ≡ `feed --filter updates`, `agents roster` ≡ `sessions --active`.
+  Root help gains an Observe section; `agents audit` stays the tamper-evident run
+  log (not an events alias). Source: `apps/cli/src/lib/observe-aliases.ts`,
+  `apps/cli/src/commands/feed.ts`, `apps/cli/src/commands/sessions.ts`.
+
+- **Daemon usage refresh is a fixed 5-minute per-host schedule, concurrency-safe, and Touch-ID-free.**
+  Each machine's daemon still owns its own usage cache (no fleet-wide store). Account live
+  fetches are now scheduled every **5 minutes** (was adaptive 90s–15m), with a 60s wake to
+  notice due accounts after backoff ends. Cache writes use a file lock + atomic rename so a
+  concurrent `agents view` background refresh cannot tear or drop rows. The daemon path
+  loads Claude credentials with **`fileOnly`** (setup-token / no-ACL cache / `.credentials.json`
+  only) and never opens the ACL-bound macOS keychain item, so a background tick cannot pop
+  Touch ID. Refresh still skips a provider under 429 backoff and still never rotates
+  single-use Claude refresh tokens.
+
 ## 1.22.8
 
 - **`agents browser` now gates cross-machine drives behind per-device consent.** `agents browser <cmd> --host <device>` already routes a browser command to another fleet machine over SSH and drives its browser — but nothing asked that machine's permission, so any box you could SSH to, you could drive. A new device-local `browser.remote-control` setting (off by default, never synced) fixes that: a fleet-remote `browser --host <this-machine> start` is refused with an actionable message until the owner runs `agents browser remote-control on` here. Local starts (no `--host`) are never gated. The fleet passthrough marks every `--host` dispatch with `AGENTS_FLEET_REMOTE` so the far side can tell a cross-machine drive from a local one. New command: `agents browser remote-control [on|off]` (no arg prints status; `--json` supported). Source: `apps/cli/src/lib/browser/remote-control.ts`, `apps/cli/src/commands/browser.ts`, `apps/cli/src/lib/hosts/passthrough.ts`, `apps/cli/src/lib/device-config.ts`, `apps/cli/docs/browser.md`.
@@ -2857,10 +2987,8 @@
   `agentOnly` guard; and `isHeadlessSecretsContext` recognized the `headless` and
   `teams` runtimes but not `terminal`, which is what an interactive run sets. Agent
   launches now resolve broker-only and a locked bundle fails fast naming
-  `agents secrets unlock <bundle>`; `AGENTS_SECRETS_NO_PROMPT=1` is no longer needed
-  as a workaround. `agents secrets get/export/exec` typed in a **plain shell** still
-  prompts — it carries no `AGENTS_RUNTIME`, so the guard does not apply. Run beneath
-  an agent it refuses, because there the agent is the caller. This narrows the
+  `agents secrets unlock <bundle>`. Direct read commands use the same broker-only
+  path even from a plain shell; only an explicit unlock may authenticate. This narrows the
   agent-triggered approval added in RUSH-2032, which is unreleased.
 
 - **`release.sh` now borrows the npm token from a primary device when the local box

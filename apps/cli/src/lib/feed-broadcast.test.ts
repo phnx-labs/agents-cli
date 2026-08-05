@@ -114,7 +114,7 @@ describe('message composition', () => {
     expect(msg).not.toContain('Sent from agent/');
   });
 
-  it('appends focus after the Sent from footer for blocks', () => {
+  it('does NOT put the focus CLI command in the phone message (unusable from a phone)', () => {
     const msg = composeBroadcastMessage(
       ctx({
         focus: 'agents focus c854ae60',
@@ -127,9 +127,18 @@ describe('message composition', () => {
         'PR #1690 open, waiting on prix-cloud\n' +
         '\n' +
         'Sent from claude/c854ae60 on yosemite-s1\n' +
-        'agents focus c854ae60\n' +
         'https://example.com/p',
     );
+    expect(msg).not.toContain('agents focus');
+  });
+
+  it('renders options + default as the phone-actionable reply for a block', () => {
+    const msg = composeBroadcastMessage(
+      ctx({ options: ['publish', 'wait'], safeDefault: 'wait', timeoutMinutes: 15 }),
+    );
+    expect(msg).toContain('Options: publish / wait');
+    expect(msg).toContain('Default in 15 min: wait');
+    expect(msg).not.toContain('agents focus');
   });
 });
 

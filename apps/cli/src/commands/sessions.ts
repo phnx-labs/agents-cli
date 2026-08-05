@@ -70,6 +70,7 @@ import { registerSessionsImportCommand } from './sessions-import.js';
 import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
 import { registerSessionsBackfillCommand } from './sessions-backfill.js';
 import { registerSessionsStatsCommand } from './sessions-stats.js';
+import { registerSessionsOptimizeCommand } from './sessions-optimize.js';
 import { runBrowserSessions } from '../lib/browser/sessions-list.js';
 import {
   countToolProgramOccurrences,
@@ -133,6 +134,16 @@ interface SessionsOptions extends SessionFilterOptions {
   flat?: boolean;
   /** With --active: show only sessions waiting on user input; exit 1 if any. */
   waiting?: boolean;
+  /** Live-state shorthand filters. Any one implies --active; several compose as OR. */
+  working?: boolean;
+  idle?: boolean;
+  orphan?: boolean;
+  orphaned?: boolean;
+  crashed?: boolean;
+  closed?: boolean;
+  abandoned?: boolean;
+  queued?: boolean;
+  unknown?: boolean;
   /** Show only favorited (starred) sessions — the `f` key's flag twin. */
   favorites?: boolean;
   /** Enrich the listing with live glyphs/preview for running rows. Default on;
@@ -1226,7 +1237,7 @@ export async function gatherActiveSessions(
 async function renderActiveSessions(
   asJson: boolean,
   waitingOnly = false,
-  opts: { local?: boolean; hosts?: string[]; favoritesOnly?: boolean } = {},
+  opts: { local?: boolean; hosts?: string[]; favoritesOnly?: boolean; statuses?: LiveStatusFilter[] } = {},
 ): Promise<void> {
   const self = machineId();
   const gathered = await gatherActiveSessions(opts);
@@ -1240,9 +1251,12 @@ async function renderActiveSessions(
     ? gathered.sessions.filter((s) => !!s.sessionId && listFavorites().has(s.sessionId))
     : gathered.sessions;
 
-  // --waiting: only sessions blocked on the user. Exits non-zero when any are
-  // present so a supervising agent or hook can poll it as a gate.
-  const sessions = waitingOnly ? merged.filter(isAwaitingUser) : merged;
+  // Status flags form a union. --waiting additionally retains its scriptable
+  // gate: exit non-zero when the union contains a session awaiting the user.
+  const statusFiltered = opts.statuses?.length
+    ? merged.filter((session) => opts.statuses!.some((status) => matchesLiveStatus(session, status)))
+    : merged;
+  const sessions = statusFiltered;
 
   if (asJson) {
     // Resolve who is watching each local tmux pane before serializing: `viewingIn`
@@ -1251,7 +1265,7 @@ async function renderActiveSessions(
     // scriptable path stays cheap — see enrichTmuxLocators.
     await enrichTmuxLocators(sessions.filter(s => !s.machine || s.machine === self));
     process.stdout.write(JSON.stringify(serializeActiveSessionsForJson(sessions), null, 2) + '\n');
-    if (waitingOnly && sessions.length > 0) process.exitCode = 1;
+    if (waitingOnly && sessions.some(isAwaitingUser)) process.exitCode = 1;
     return;
   }
 
@@ -1288,7 +1302,40 @@ async function renderActiveSessions(
   if (!opts.local && !opts.hosts?.length && remoteDeviceCount === 0) printCrossMachineTip();
 
   // Scriptable gate: a non-zero exit when anything is waiting on the user.
-  if (waitingOnly && sessions.length > 0) process.exitCode = 1;
+  if (waitingOnly && sessions.some(isAwaitingUser)) process.exitCode = 1;
+}
+
+export type LiveStatusFilter =
+  | 'working'
+  | 'idle'
+  | 'waiting'
+  | 'orphaned'
+  | 'crashed'
+  | 'closed'
+  | 'abandoned'
+  | 'queued'
+  | 'unknown';
+
+/** Match the status words users see, preserving activity's richer working signal. */
+export function matchesLiveStatus(session: ActiveSession, status: LiveStatusFilter): boolean {
+  if (status === 'working') return session.activity === 'working' || (!session.activity && session.status === 'running');
+  if (status === 'waiting') return isAwaitingUser(session);
+  return session.status === status;
+}
+
+/** Resolve convenience flags once. Multiple flags intentionally form a union. */
+export function requestedLiveStatuses(options: SessionsOptions): LiveStatusFilter[] {
+  const statuses: LiveStatusFilter[] = [];
+  if (options.working) statuses.push('working');
+  if (options.idle) statuses.push('idle');
+  if (options.waiting) statuses.push('waiting');
+  if (options.orphan || options.orphaned) statuses.push('orphaned');
+  if (options.crashed) statuses.push('crashed');
+  if (options.closed) statuses.push('closed');
+  if (options.abandoned) statuses.push('abandoned');
+  if (options.queued) statuses.push('queued');
+  if (options.unknown) statuses.push('unknown');
+  return [...new Set(statuses)];
 }
 
 /** Nudge shown when `--active` has no other machines to fold in. */
@@ -1368,6 +1415,14 @@ export function hasNoBrowserDisqualifyingFlags(
 function canonicalSessionsCommand(query: string | undefined, options: SessionsOptions): string {
   const a = ['sessions'];
   if (options.active) a.push('--active');
+  if (options.working) a.push('--working');
+  if (options.idle) a.push('--idle');
+  if (options.orphan || options.orphaned) a.push('--orphan');
+  if (options.crashed) a.push('--crashed');
+  if (options.closed) a.push('--closed');
+  if (options.abandoned) a.push('--abandoned');
+  if (options.queued) a.push('--queued');
+  if (options.unknown) a.push('--unknown');
   if (options.teams) a.push('--teams');
   if (options.inTeam) a.push('--in-team', options.inTeam);
   if (options.routine) a.push('--routine');
@@ -1604,6 +1659,8 @@ async function sessionsAction(
   limitSource?: string
 ): Promise<void> {
   const queryClauses = options.query ?? [];
+  const liveStatuses = requestedLiveStatuses(options);
+  const liveOnly = options.active === true || liveStatuses.length > 0;
   const toolOnly = options.include?.split(',').map((role) => role.trim()).filter(Boolean).join(',') === 'tools';
   const toolEvidenceMode = toolOnly;
   if (options.count && !toolOnly) {
@@ -1739,7 +1796,7 @@ async function sessionsAction(
   // keeps the legacy per-host stream (each remote's raw stdout under a
   // `── host ──` banner). With --active, the hosts are folded into the merged
   // machine-grouped view instead (handled below).
-  if (options.host && options.host.length > 0 && !options.active && !toolEvidenceMode) {
+  if (options.host && options.host.length > 0 && !liveOnly && !toolEvidenceMode) {
     // --local means "skip the SSH fan-out"; --host means "look only over there".
     // Together they ask for a peer's sessions without dialing the peer, which can
     // only ever be empty — so say that instead of rendering a blank list.
@@ -1782,7 +1839,7 @@ async function sessionsAction(
     return;
   }
 
-  if (options.active) {
+  if (liveOnly) {
     // The running view is built from the live scan, which carries no team lineage
     // (that comes off the transcript index and the teams meta dir), so --in-team
     // has nothing to match on here. Say so rather than ignoring the flag.
@@ -1799,7 +1856,7 @@ async function sessionsAction(
     // multi-host scope fall through to the static dump that already honors them.
     if (
       useInteractiveBrowser(options) &&
-      !options.waiting &&
+      liveStatuses.length === 0 &&
       !options.until &&
       !options.project &&
       !options.sort &&
@@ -1827,6 +1884,7 @@ async function sessionsAction(
       local: forceLocal,
       hosts: options.host,
       favoritesOnly: options.favorites === true,
+      statuses: liveStatuses,
     });
     return;
   }
@@ -4090,7 +4148,16 @@ export function registerSessionsCommands(program: Command): void {
     .option('--active', 'Show only sessions running right now across terminals, teams, cloud, and headless agents')
     .option('--roots', 'With --json: emit the on-disk directories scanned for session transcripts, per agent (for external watchers)')
     .option('--local', 'Only this machine — skip the cross-machine SSH fan-out (default listing and --active)')
-    .option('--waiting', 'With --active: show only sessions waiting on your input (exits non-zero if any)')
+    .option('--working', 'Show live sessions currently doing work (implies --active)')
+    .option('--idle', 'Show live sessions that have stopped between turns (implies --active)')
+    .option('--waiting', 'Show live sessions waiting on your input; exits non-zero if any (implies --active)')
+    .option('--orphan', 'Show live sessions whose process outlived its terminal client (implies --active)')
+    .option('--orphaned', 'Alias for --orphan')
+    .option('--crashed', 'Show sessions whose terminal disappeared with the process (implies --active)')
+    .option('--closed', 'Show recently observed sessions whose process exited normally (implies --active)')
+    .option('--abandoned', 'Show sessions with no transcript progress for the abandonment window (implies --active)')
+    .option('--queued', 'Show queued sessions that have not started running (implies --active)')
+    .option('--unknown', 'Show sessions whose live state cannot be determined (implies --active)')
     .option('--favorites', 'Show only favorited (starred) sessions — star them with `*` in the browser or `agents sessions favorite <id>`')
     .option('--tree', 'Group the listing by directory; drops the id/version columns for readability')
     .option('--flat', 'Plain flat table (one row per session) instead of the grouped project overview')
@@ -4118,6 +4185,12 @@ export function registerSessionsCommands(program: Command): void {
 
       # Show only what's running right now (terminals, teams, cloud, headless)
       agents sessions --active
+
+      # Filter the live fleet by the status word shown in the roster
+      agents sessions --working
+      agents sessions --idle
+      agents sessions --orphan
+      agents sessions --crashed
 
       # --- Session lifecycle (one verb per intent) ---
       # Jump to a live session (attach its terminal, or open a tab + resume)
@@ -4177,7 +4250,8 @@ export function registerSessionsCommands(program: Command): void {
         detach <id>             interactive → headless continuation
         attach <id>             headless → interactive in this terminal
         resume [query]          multi-select history → open tabs (or run --resume <id>)
-      - The interactive listing folds in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; --json and single-id lookups stay local.
+      - The interactive listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local.
+      - --all is not a device flag: it widens historical directory and time filters. Fleet collection is already the default. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.
       - --host runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.
       - --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.
       - --include and --exclude are mutually exclusive.
@@ -4218,6 +4292,7 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsMigrationsCommand(sessionsCmd);
   registerSessionsBackfillCommand(sessionsCmd);
   registerSessionsStatsCommand(sessionsCmd);
+  registerSessionsOptimizeCommand(sessionsCmd);
 
   // Observe-umbrella alias (Phase 3): roster → sessions --active.
   registerSessionsObserveAliases(program);

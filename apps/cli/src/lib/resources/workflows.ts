@@ -3,7 +3,7 @@
  *
  * Workflows are directory bundles with a WORKFLOW.md containing YAML frontmatter.
  * They optionally contain subagents/, skills/, and plugins/ subdirectories.
- * Resolution order: project > user > system.
+ * Resolution order (docs/07-entrypoints): project > user > plugin > extra > system.
  */
 
 import * as fs from 'fs';
@@ -15,7 +15,13 @@ import {
   getSystemWorkflowsDir,
   getEnabledExtraRepos,
 } from '../state.js';
-import { parseWorkflowFrontmatter, countWorkflowSubagents } from '../workflows.js';
+import {
+  parseWorkflowFrontmatter,
+  countWorkflowSubagents,
+  listPluginWorkflowDirs,
+  resolveWorkflowRef,
+  parseWorkflowRef,
+} from '../workflows.js';
 
 export interface WorkflowItem {
   name: string;
@@ -47,21 +53,46 @@ function listWorkflowsInDir(dir: string): Array<{ name: string; path: string }> 
   }
 }
 
+/** Precedence-ordered (dir, layer) pairs for name lookup / listing. */
+function orderedWorkflowSearchDirs(cwd?: string): Array<{ dir: string; layer: Layer }> {
+  const dirs = getLayerDirs(cwd);
+  const out: Array<{ dir: string; layer: Layer }> = [];
+  if (dirs.project) out.push({ dir: dirs.project, layer: 'project' });
+  out.push({ dir: dirs.user, layer: 'user' });
+  for (const pluginDir of listPluginWorkflowDirs(cwd ?? process.cwd())) {
+    out.push({ dir: pluginDir, layer: 'plugin' });
+  }
+  for (const extraDir of dirs.extra) out.push({ dir: extraDir, layer: 'system' });
+  out.push({ dir: dirs.system, layer: 'system' });
+  return out;
+}
+
+/** Map a resolved absolute workflow dir to its origin layer (best-effort). */
+function layerForWorkflowPath(workflowPath: string, cwd?: string): Layer {
+  const abs = path.resolve(workflowPath);
+  const under = (root: string) => {
+    const r = path.resolve(root);
+    return abs === r || abs.startsWith(r + path.sep);
+  };
+  const projectDir = getProjectAgentsDir(cwd);
+  if (projectDir && under(path.join(projectDir, 'workflows'))) return 'project';
+  if (under(getUserWorkflowsDir())) return 'user';
+  if (under(getSystemWorkflowsDir())) return 'system';
+  for (const extra of getEnabledExtraRepos()) {
+    if (under(path.join(extra.dir, 'workflows'))) return 'system';
+  }
+  // Plugin marketplaces (and anything else plugin-shaped).
+  return 'plugin';
+}
+
 class WorkflowsHandlerImpl implements ResourceHandler<WorkflowItem> {
   readonly kind = 'workflow' as const;
 
   listAll(_agent: AgentId, cwd?: string): ResolvedItem<WorkflowItem>[] {
-    const dirs = getLayerDirs(cwd);
     const seen = new Set<string>();
     const results: ResolvedItem<WorkflowItem>[] = [];
-    const layerDirs: Array<{ dir: string; layer: Layer }> = [];
 
-    if (dirs.project) layerDirs.push({ dir: dirs.project, layer: 'project' });
-    layerDirs.push({ dir: dirs.user, layer: 'user' });
-    layerDirs.push({ dir: dirs.system, layer: 'system' });
-    for (const extraDir of dirs.extra) layerDirs.push({ dir: extraDir, layer: 'system' });
-
-    for (const { dir, layer } of layerDirs) {
+    for (const { dir, layer } of orderedWorkflowSearchDirs(cwd)) {
       for (const { name, path: workflowPath } of listWorkflowsInDir(dir)) {
         if (seen.has(name)) continue;
         const fm = parseWorkflowFrontmatter(workflowPath);
@@ -85,31 +116,24 @@ class WorkflowsHandlerImpl implements ResourceHandler<WorkflowItem> {
   }
 
   resolve(_agent: AgentId, name: string, cwd?: string): ResolvedItem<WorkflowItem> | null {
-    const dirs = getLayerDirs(cwd);
-    const searchDirs: Array<{ dir: string; layer: Layer }> = [];
-    if (dirs.project) searchDirs.push({ dir: dirs.project, layer: 'project' });
-    searchDirs.push({ dir: dirs.user, layer: 'user' });
-    searchDirs.push({ dir: dirs.system, layer: 'system' });
-    for (const extraDir of dirs.extra) searchDirs.push({ dir: extraDir, layer: 'system' });
-
-    for (const { dir, layer } of searchDirs) {
-      const workflowPath = path.join(dir, name);
-      const fm = parseWorkflowFrontmatter(workflowPath);
-      if (fm) {
-        return {
-          name,
-          item: {
-            name: fm.name || name,
-            description: fm.description,
-            model: fm.model,
-            subagentCount: countWorkflowSubagents(workflowPath),
-          },
-          layer,
-          path: workflowPath,
-        };
-      }
-    }
-    return null;
+    // Delegate to resolveWorkflowRef so bare, workflow:, and name@source share one path.
+    const workflowPath = resolveWorkflowRef(name, cwd ?? process.cwd());
+    if (!workflowPath) return null;
+    const fm = parseWorkflowFrontmatter(workflowPath);
+    if (!fm) return null;
+    const parsed = parseWorkflowRef(name);
+    const displayName = parsed?.name ?? path.basename(workflowPath);
+    return {
+      name: displayName,
+      item: {
+        name: fm.name || displayName,
+        description: fm.description,
+        model: fm.model,
+        subagentCount: countWorkflowSubagents(workflowPath),
+      },
+      layer: layerForWorkflowPath(workflowPath, cwd),
+      path: workflowPath,
+    };
   }
 
   sync(_agent: AgentId, _versionHome: string, _cwd?: string): void {

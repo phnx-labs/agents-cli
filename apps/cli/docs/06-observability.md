@@ -11,7 +11,7 @@ whose *consumer* and *axis* match your question, not whichever you remember firs
 
 | Command | Role (one line) | Source | Consumer |
 |---|---|---|---|
-| **`events`** | **Raw unified event stream = the ops trail.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. | `events.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
+| **`events`** | **Raw unified event stream = the ops trail.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. `agents logs audit` is a compatibility alias backed by this same reader. | dated `events/*.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
 | **`audit`** | **Tamper-evident run-dispatch chain** (hash-chained exec log). Not the same as `events`. | `~/.agents` audit log | Governance / CI verify |
 | **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
 | **`trends`** | **Usage analytics.** Harness/model mix, tools per session, token ratios, hottest secrets/browser profiles — baked recipes over sessions + a durable resource warehouse. Distinct from quota (`agents usage`) and latency (`agents perf`). | `sessions.db` + `~/.agents/.history/analytics/usage.db` | Humans + `--json` |
@@ -54,7 +54,8 @@ agents notify --text "same as send --to owner"
 agents feed post --title "CHANGELOG pushed" "Watching CI and mac-mini E2E"
 ```
 
-The write-stores: `~/.agents/events.jsonl` (operational audit), per-session
+The write-stores: `~/.agents/.history/events/YYYY-MM-DD/events.jsonl`
+(operational audit), per-session
 `~/.agents/.history/activity/<id>.jsonl` (agent milestones), and the disposable
 perf warehouse `~/.agents/.cache/perf/perf.db` (latency samples). Audit + activity
 are merged at read time by `event-stream.ts::readUnifiedEvents`. Perf is a
@@ -168,9 +169,16 @@ Separate from the fleet-state sources below (which answer "what's running *now*"
 the **audit event log** answers "who did what, and from where". Every
 `agents <module> <command>` invocation is recorded — team create/disband, agent
 run, secrets access, version installs — as a structured JSONL line at
-`~/.agents/events.jsonl` (directory `0700`, file `0600`). At 10 MB the active
-file rotates losslessly to `events.1.jsonl.gz`; older archives shift to
-`events.2.jsonl.gz`, `events.3.jsonl.gz`, and so on.
+`~/.agents/.history/events/YYYY-MM-DD/events.jsonl` (directories `0700`, files
+`0600`). Each local calendar day has its own directory. At 10 MiB that day's
+active file rotates losslessly to `events.1.jsonl.gz`; older segments shift to
+`events.2.jsonl.gz`, `events.3.jsonl.gz`, and so on. Automatic cleanup keeps at
+most seven days and 50 MiB per machine. `agents logs rotate --days <n>
+--max-mb <n>` applies both limits immediately.
+
+`agents events` is the canonical reader. `agents logs audit` registers the same
+options and invokes the same handler with audit-only mode forced, preserving the
+older spelling without a second query, renderer, or follow implementation.
 
 The recording is a single choke point — a commander `preAction`/`postAction`
 hook on the root program ([`src/index.ts`](../src/index.ts)) emits `command.start`
@@ -358,11 +366,12 @@ long-term records.
 
 ### Audit Viewer (`agents logs audit`)
 
-While `agents events` is a convenience alias, the full audit surface lives under
-`agents logs`:
+`agents events --audit` is the canonical operational-audit reader. `agents logs
+audit` is a compatibility alias wired to that same option registration and
+handler, so the two spellings cannot drift:
 
 ```bash
-agents logs audit                          # recent activity (last 100)
+agents logs audit                          # recent operational events (newest 50)
 agents logs audit --level audit            # security-relevant only
 agents logs audit --module teams           # team lifecycle events
 agents logs audit --command "secrets get"  # by command path prefix
@@ -395,15 +404,17 @@ agents logs stats --json           # machine-readable
 
 #### Log Rotation
 
-Files exceeding 10 MB rotate to numbered gzip archives without overwriting an
-earlier archive. Archives older than 7 days can be pruned explicitly with:
+Each local day writes beneath `~/.agents/.history/events/YYYY-MM-DD/`. Files
+exceeding 10 MiB rotate to numbered gzip segments without overwriting an earlier
+segment. Cleanup runs automatically, retaining at most seven days and 50 MiB per
+machine. Apply different limits immediately with:
 
 ```bash
-agents logs rotate                 # prune archives older than 7 days
-agents logs rotate --days 7        # prune files older than 7 days
+agents logs rotate                           # seven days and 50 MiB
+agents logs rotate --days 3 --max-mb 25      # explicit age and size limits
 ```
 
-The `query()` API reads the active JSONL and every numbered gzip archive
+The `query()` API reads every dated active JSONL file and numbered gzip segment
 transparently.
 
 External tools (dashboards, voice assistants, CI runners, monitoring) can read

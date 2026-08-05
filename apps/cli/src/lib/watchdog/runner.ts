@@ -68,7 +68,7 @@ import { withFileLock, atomicWriteFileSync, ensureLockTarget } from '../fs-atomi
 import { resolveAnswerRoute, isOpenQuestionBlock } from '../answer-router.js';
 import { enqueue, mailboxDir } from '../mailbox.js';
 import { mailboxIdForActiveSession } from '../mailbox-target.js';
-import { readBlock, blockIdForSession, type OpenBlock } from '../feed.js';
+import { readBlock, blockIdForSession, buildDeclaredBlock, publishBlock, type OpenBlock } from '../feed.js';
 import { summarizeWatchdogTail } from './watchdogTail.js';
 import { appendWatchdogEvents, type WatchdogEvent } from './log.js';
 import {
@@ -160,6 +160,11 @@ export interface WatchdogTickOptions {
   openBlockFor?: (s: ActiveSession) => OpenBlock | null;
   /** Inject primitive. Default injectIntoTerminal — tests capture the resolved target. */
   injectFn?: (target: InjectTarget, text: string, opts: { dryRun?: boolean; enter?: boolean }) => Promise<InjectResult>;
+  /**
+   * Publish a declared block on the owner's feed. Default publishBlock() — tests
+   * inject a collector so no real feed dir is touched.
+   */
+  publishBlockFn?: (block: OpenBlock) => void;
   /** Override the canonical watchdog.log path (tests point at a tmp file). */
   logPath?: string;
 
@@ -321,6 +326,14 @@ export interface NudgeDecision {
   nudge: boolean;
   reason: string;
   text?: string;
+  /**
+   * Set to `true` when the brain (smart decider) explicitly concluded the session
+   * needs the human — as opposed to a cheap deterministic skip (session is done,
+   * not stalled, etc.). Only `true` when the brain escalation path ran and returned
+   * `nudge: false`. The watchdog uses this to gate the self-file reminder: a
+   * "session is done" skip does NOT trigger a reminder.
+   */
+  needsHuman?: boolean;
 }
 
 /**
@@ -619,6 +632,7 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
   const smartDecider = opts.smartDecider ?? makeDefaultSmartDecider(opts.smartAgent ?? 'claude');
   const openBlockFor = opts.openBlockFor ?? defaultOpenBlockFor;
   const injectFn = opts.injectFn ?? injectIntoTerminal;
+  const publishBlockFn = opts.publishBlockFn ?? publishBlock;
 
   // Rotate seams (watchdog/rotate.ts). The config is read fresh per tick
   // (readMeta is mtime-cached), so a `watchdog.rotate` flip is honored on the
@@ -930,12 +944,19 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     // forces every stalled candidate through the brain.
     let decision: NudgeDecision;
     if (opts.smart) {
-      decision = await smartDecider(session, candidate);
+      const d = await smartDecider(session, candidate);
+      // Mark needsHuman when the brain explicitly concluded "leave for human".
+      decision = d.nudge ? d : { ...d, needsHuman: true };
     } else {
       const det = deterministicDecision(session, candidate);
-      decision = det.kind === 'escalate'
-        ? await smartDecider(session, candidate)
-        : { nudge: det.kind === 'nudge', reason: det.reason };
+      if (det.kind === 'escalate') {
+        const d = await smartDecider(session, candidate);
+        // Mark needsHuman when the brain escalation path concluded "leave for human".
+        decision = d.nudge ? d : { ...d, needsHuman: true };
+      } else {
+        // Cheap deterministic path — completion or clear stall. Never "needs human".
+        decision = { nudge: det.kind === 'nudge', reason: det.reason };
+      }
     }
     const chosenText = decision.text ?? nudgeText;
 
@@ -956,6 +977,54 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     });
 
     if (!decision.nudge) {
+      // Brain explicitly concluded "leave for human" (needsHuman === true). Inject a
+      // self-file reminder into the agent's terminal so it knows to post a feed block.
+      // Cheap deterministic skips (session done, no stall) are NOT reminder-worthy —
+      // guard on needsHuman so a finished session is never poked.
+      // Gated by the same cooldown as a nudge to prevent re-firing every 2-minute tick.
+      if (decision.needsHuman) {
+        const lastNudgeMs = ledger[session.sessionId ?? ''] ?? 0;
+        const cooldownMs = thresholds.cooldownMs;
+        const withinCooldown = nowMs - lastNudgeMs < cooldownMs;
+        if (opts.nudge && session.sessionId && !withinCooldown) {
+          const existingBlock = openBlockFor(session);
+          if (existingBlock === null) {
+            // Determine addressability without planning the full nudge (no text needed).
+            const resolution = resolveInjectTargetForSession(session, { allowGhosttyFocus: opts.allowGhosttyFocus });
+            if (resolution.addressable) {
+              // Addressable → inject a reminder asking the agent to self-file a feed block.
+              const reminderText =
+                'You appear stuck. If you genuinely need Muqsit, file it: ' +
+                'agents feed post "<one-line ask>" --blocked --default "<safe default>". ' +
+                'Otherwise keep going.';
+              try {
+                await injectFn(resolution.target, reminderText, { dryRun: opts.injectDryRun });
+              } catch {
+                // Swallow inject errors — reminder is best-effort; flag set below.
+              }
+              ledgerUpdates[session.sessionId] = nowMs;
+            } else {
+              // Un-addressable → we can't reach the terminal to remind it, so the ONLY
+              // way to reach Muqsit is to file a declared block on the agent's behalf.
+              // This is the most important case: the session genuinely needs the human
+              // AND the watchdog can't even nudge it. Never let it silently vanish.
+              const mailboxId = mailboxIdForActiveSession(session) ?? session.sessionId;
+              const machineHost = session.provenance?.host ?? 'unknown';
+              const runtime = session.kind;
+              try {
+                const declaredBlock = buildDeclaredBlock(
+                  { sessionId: session.sessionId, mailboxId, host: machineHost, runtime, cwd: session.cwd },
+                  { text: `Session genuinely needs Muqsit and is un-addressable — ${decision.reason}. Needs attention.` },
+                );
+                publishBlockFn(declaredBlock);
+                ledgerUpdates[session.sessionId] = nowMs;
+              } catch {
+                // publishBlock failure is non-fatal — best-effort owner page.
+              }
+            }
+          }
+        }
+      }
       outcomes.push({ ...base, decision: 'skip', reason: decision.reason });
       continue;
     }
@@ -970,6 +1039,12 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
 
     if (plan.via === 'refuse') {
       // No addressable rail and not headless-resumable — flag, NEVER guess.
+      // This branch is reached ONLY for a nudge-worthy (decision.nudge === true)
+      // drive-forward poke, which is NEVER needsHuman (needsHuman is set only when
+      // decision.nudge === false). So we do NOT page the owner here — a short "just
+      // needs a poke" stall must not text Muqsit's phone. Owner-paging for an
+      // un-addressable session happens only on the confirmed needsHuman skip path
+      // above. Here we only flag it for the tray.
       flags[session.sessionId] = { reason: plan.reason, host: session.host, atMs: nowMs };
       outcomes.push({
         ...base, decision: 'skip', addressable: false,
@@ -979,7 +1054,14 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       continue;
     }
 
-    // handsoff = detect + flag, but never deliver.
+    // handsoff = detect + flag, but never deliver via inject/mailbox.
+    // This branch is reached ONLY for a nudge-worthy (decision.nudge === true)
+    // drive-forward poke, which is NEVER needsHuman. A hands-off policy means "don't
+    // nudge it forward" — it must NOT translate into paging Muqsit for a poke. So we
+    // only flag it for the tray, no owner page. A genuinely needs-human session (even
+    // under hands-off) is paged by the confirmed-needsHuman skip path above, which
+    // does not consult policy — hands-off silences the forward nudge, not the
+    // "it's actually stuck" signal.
     if (policy === 'handsoff') {
       flags[session.sessionId] = {
         reason: `handsoff: would nudge via ${viaLabel(plan)} but policy is hands-off`,

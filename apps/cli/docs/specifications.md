@@ -276,6 +276,16 @@ SSH access (§7); rendering sessions that no harness produced.
   an export bundle or the import mirror (`lib/session/sync/agents.ts` defines
   the `.history/backups/` layout those write into), and any doc claiming
   otherwise is drift.
+- **SES-18c (MUST).** Each user-visible live state MUST have a direct
+  `agents sessions` flag: `working`, `idle`, `waiting`, `orphaned`, `crashed`,
+  `closed`, `abandoned`, `queued`, and `unknown`. These flags MUST imply the live
+  scan, MUST compose as a union, and MUST use the same predicates as the rendered
+  status (`requestedLiveStatuses` / `matchesLiveStatus`,
+  `commands/sessions.ts`; test `commands/sessions.test.ts`). `--orphan` is the
+  human-facing spelling and `--orphaned` remains its accepted alias. The live
+  scan MUST fan out to registered online devices unless `--local` is present;
+  `--all` MUST remain the historical directory/time widening flag, not a device
+  switch.
 - **SES-19 (MUST).** Detach/attach presence MUST be **derived, never asserted**:
   the record only says "this session was detached"; `background` vs `parked` is
   decided live from the recorded pid + start-time fingerprint
@@ -917,7 +927,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
 - **SEC-26 (MUST).** `emitSecretAudit` (`lib/secrets/audit.ts`) MUST be the single
   write path for every secret lifecycle/access event — create, import, export,
   view, access (read), unlock. One call writes to BOTH the append-only
-  `~/.agents/events.jsonl` audit log (via `emit()`) AND the derived per-bundle
+  `~/.agents/.history/events/YYYY-MM-DD/events.jsonl` audit log (via `emit()`) AND the derived per-bundle
   usage read-model DB (`~/.agents/secrets/secrets.db`, `lib/secrets/usage-db.ts`);
   there MUST be no standalone write path parallel to it. **Given** an access is
   recorded **When** it flows through `emitSecretAudit` **Then** it appears exactly

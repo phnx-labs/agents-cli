@@ -33,7 +33,7 @@ export type ResourceKind =
   | 'hooks'
   | 'rules'
   | 'mcp'
-  | 'cli'
+  | 'clis'
   | 'permissions'
   | 'subagents'
   | 'workflows'

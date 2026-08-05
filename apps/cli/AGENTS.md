@@ -170,7 +170,7 @@ testable without a shell, PowerShell, or an installed CLI):
 exists.** Three separate rounds of review here found remediations naming a command
 form that does not do what the row claims — `agents sync <agent>` (default version
 only), `agents repo pull` (skips the system repo), `agents prune cleanup` (default
-versions only), `agents cli install <a> <b>` (takes one name), and
+versions only), `agents clis install <a> <b>` (takes one name), and
 `agents run <agent>@<v>, then <cli> login` (the second command resolves through the
 shim to the *default* version, not the one that is logged out — use
 `agents run <agent>@<v> -- login`, since `--` forwards verbatim into that version

@@ -37,10 +37,11 @@ import {
   keychainItemsForBundle,
   keychainRef,
   listBundles,
+  healKeychainBundleMetadataAclOnce,
+  isHeadlessSecretsContext,
   migrateLegacyBundles,
   parseDotenv,
   readAndResolveBundleEnv,
-  isHeadlessSecretsContext,
   readBundle,
   readBundleIfDecryptable,
   reAclBundleItems,
@@ -77,10 +78,10 @@ import {
 import { encryptForFallback, decryptForFallback, type EncFile } from '../lib/secrets/filestore.js';
 import {
   getKeychainToken,
-  getKeychainTokens,
   hasKeychainToken,
   secretsKeychainItem,
   setKeychainToken,
+  maybeAutoRekey,
 } from '../lib/secrets/index.js';
 import {
   assertOpAvailable,
@@ -1374,13 +1375,18 @@ export function registerSecretsCommands(program: Command): void {
           }
           const revealed = new Map<string, string>();
           if (reveal) {
-            const items = entries
-              .filter((e) => e.kind === 'keychain')
-              .map((e) => secretsKeychainItem(bundle.name, e.detail));
-            try {
-              for (const [item, value] of getKeychainTokens(items)) revealed.set(item, value);
-            } catch {
-              /* cancelled / batch failure — fall through to masked (null) values */
+            const { env } = readAndResolveBundleEnv(bundle.name, {
+              caller: 'view --reveal --json',
+              keyMode: 'storage',
+              // An explicit human `--reveal` at a terminal is a deliberate value
+              // access → resolve interactively (one Touch ID). Under an agent
+              // (AGENTS_RUNTIME) or headless (no TTY) it stays broker-only.
+              agentOnly: isHeadlessSecretsContext() || !isInteractiveTerminal(),
+            });
+            for (const entry of entries) {
+              if (entry.kind === 'keychain' && env[entry.key] !== undefined) {
+                revealed.set(secretsKeychainItem(bundle.name, entry.detail), env[entry.key]);
+              }
             }
             const exposed = revealed.size + entries.filter((e) => e.kind === 'literal').length;
             if (exposed > 0) {
@@ -1482,21 +1488,21 @@ export function registerSecretsCommands(program: Command): void {
           console.error(chalk.red('--reveal in a non-TTY requires --plaintext.'));
           process.exit(1);
         }
-        // Batch every backend read into one helper call where supported, so
-        // keychain --reveal pops Touch ID once and synced/file bundles use
-        // their declared storage.
+        // An explicit human `view --reveal` at a terminal is a deliberate value
+        // access: resolve interactively (one Touch ID) so a locked bundle shows
+        // its values. Under an agent (AGENTS_RUNTIME) or headless (no TTY) it
+        // stays broker-only and errors with the unlock hint — never a sheet.
         const revealedValues = new Map<string, string>();
         if (reveal) {
-          const items = entries
-            .filter((e) => e.kind === 'keychain')
-            .map((e) => secretsKeychainItem(bundle.name, e.detail));
-          try {
-            const fetched = bundle.backend
-              ? new Map(items.map((item) => [item, bundleItemStore(bundle.backend).get(item)]))
-              : getKeychainTokens(items);
-            for (const [item, value] of fetched) revealedValues.set(item, value);
-          } catch {
-            // Fall through to masked output on cancellation / batch failure.
+          const { env } = readAndResolveBundleEnv(bundle.name, {
+            caller: 'view --reveal',
+            keyMode: 'storage',
+            agentOnly: isHeadlessSecretsContext() || !isInteractiveTerminal(),
+          });
+          for (const entry of entries) {
+            if (entry.kind === 'keychain' && env[entry.key] !== undefined) {
+              revealedValues.set(secretsKeychainItem(bundle.name, entry.detail), env[entry.key]);
+            }
           }
           // Revealing plaintext bypasses readAndResolveBundleEnv (the usual
           // audit chokepoint), so emit here — a `--reveal` exposes real values
@@ -1582,10 +1588,9 @@ export function registerSecretsCommands(program: Command): void {
           process.exit(1);
         }
         // `secrets get` is the scriptable automation primitive ($(agents secrets
-        // get bundle KEY)); when embedded in a headless routine/CI script — or run
-        // beneath any agent, which inherits AGENTS_RUNTIME — it must not pop an
-        // unwatched Touch ID prompt. Typed in a plain shell it still prompts.
-        const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key], keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
+        // get bundle KEY)). Every read is broker-only; a locked bundle points at
+        // the explicit unlock command instead of raising Touch ID.
+        const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key], keyMode: 'storage', agentOnly: true });
         if (!(key in env)) {
           console.error(chalk.red(`Key '${key}' not in bundle '${item}'.`));
           process.exit(1);
@@ -2221,7 +2226,7 @@ Examples:
               'Set it for this command, then supply the same value when importing.'
             );
           }
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: 'export --to-file', keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: 'export --to-file', keyMode: 'storage', agentOnly: true });
           exportBundleToFile(env, opts.toFile, passphrase);
           emitSecretAudit({ event: 'secrets.export', bundle: resolvedBundleName, operation: 'export --to-file', source: 'file', status: 'success', keyCount: Object.keys(env).length });
           console.log(chalk.green(`Exported ${Object.keys(env).length} key(s) to ${opts.toFile}`));
@@ -2251,7 +2256,7 @@ Examples:
               );
             }
           }
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export`, keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export`, keyMode: 'storage', agentOnly: true });
           const dotenv = bundleEnvToDotenv(env);
           const keyCount = Object.keys(env).length;
           // Drive the remote's own `agents secrets import --from -` so the values
@@ -2342,7 +2347,7 @@ Examples:
         if (opts.to1password) {
           assertOpAvailable();
           const vault = await resolveVault(opts.vault);
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `1Password vault ${vault}`, keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `1Password vault ${vault}`, keyMode: 'storage', agentOnly: true });
           let created = 0;
           let overwritten = 0;
           let skipped = 0;
@@ -2379,14 +2384,12 @@ Examples:
           process.exit(1);
         }
         // `agents secrets export --plaintext` is what release/CI scripts eval.
-        // When it runs detached (both stdio non-TTY) or beneath ANY agent — which
-        // inherits AGENTS_RUNTIME — resolve broker-only so it can never pop a Touch
-        // ID sheet on the interactive user's screen. An `eval "$(...)"` typed in a
-        // plain shell carries no AGENTS_RUNTIME, so it is not headless and still prompts.
+        // Every caller is broker-only, including a plain shell, so export never
+        // raises Touch ID on the interactive user's screen.
         const { env } = readAndResolveBundleEnv(resolvedBundleName, {
           caller: `export to shell`,
           keyMode: 'process',
-          agentOnly: isHeadlessSecretsContext(),
+          agentOnly: true,
         });
         if (opts.format === 'json') {
           // Machine-readable form consumed by `remoteResolveEnv` over SSH.
@@ -2451,7 +2454,7 @@ Examples:
             caller: `command ${cmd}`,
             keys: keysSubset,
             allowExpired: execOpts.allowExpired,
-            agentOnly: isHeadlessSecretsContext(),
+            agentOnly: true,
           }).env;
         }
         const { spawn } = await import('child_process');
@@ -2724,6 +2727,11 @@ Examples:
             duration: humanRemaining(Date.now() + ttlMs),
             keyMode: 'storage',
           });
+          // Migrations are authorized only by this explicit unlock. The bundle
+          // metadata was included in the successful authenticated batch, so the
+          // ACL heal can rewrite that already-read value without another read.
+          maybeAutoRekey();
+          healKeychainBundleMetadataAclOnce(new Map([[bundle.name, JSON.stringify(bundle)]]));
           if (await agentLoad(name, bundle, env, ttlMs, harness)) {
             loaded++;
             // Persist a durable session snapshot so the unlock survives a daemon

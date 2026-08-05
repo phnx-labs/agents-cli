@@ -332,29 +332,7 @@ export function readHmacKeyRecord(): HmacKeyRecord | null {
   } catch {
     return null;
   }
-  const record = parseHmacKeyRecord(raw);
-  // Converge a stale-ACL'd hmackey to silent, on the HOT read path. An old helper
-  // (pre the metadata/hmackey no-ACL migration fix) re-stamped this
-  // contractually-no-ACL item with a biometry ACL, so the read just above pops the
-  // generic "Agents CLI needs to authenticate" sheet on EVERY hashed lookup — the
-  // `agents devices list` stats probe the SessionStart hook runs, and every other
-  // background hashed read. `maybeAutoRekey`'s one-shot heal only fires on a
-  // cleartext-bundle resolve and is bypassed for the hmackey/hashed-name path
-  // (prepareServiceName returns early for HMAC_KEY_ITEM before maybeAutoRekey), so
-  // it never converged exactly these reads and the machine prompted forever.
-  // Re-store the record no-ACL once per machine here (the read that produced it has
-  // already happened — and already prompted if the item was ACL'd); every
-  // subsequent read, in this process and all future ones, is silent.
-  if (record && !record.healedNoAcl) {
-    try {
-      healHmacKeyNoAclOnce(record);
-      record.healedNoAcl = true;
-    } catch {
-      // A failed no-ACL re-store leaves the item still ACL'd (a still-prompting
-      // read) rather than a silent wrong state; the next process retries.
-    }
-  }
-  return record;
+  return parseHmacKeyRecord(raw);
 }
 
 function writeHmacKeyRecord(rec: HmacKeyRecord): void {
@@ -411,11 +389,10 @@ export function keychainServiceAlias(item: string): string {
   return prepareServiceName(item);
 }
 
-function prepareServiceName(item: string, opts?: { autoRekey?: boolean }): string {
+function prepareServiceName(item: string): string {
   if (rawScopeDepth > 0) return item;
   if (!isOurItem(item)) return item;
   if (item === HMAC_KEY_ITEM || item.startsWith(HASHED_SERVICE_PREFIX)) return item;
-  if (opts?.autoRekey) maybeAutoRekey();
   const st = resolveHashState();
   if (!st.active || !st.key) return item;
   return hashedServiceName(item, st.key);
@@ -438,7 +415,6 @@ function prepareListPrefix(prefix: string): MappedListPrefix {
   if (rawScopeDepth > 0) return { prefix };
   if (!prefix.startsWith(`${SERVICE_PREFIX}.`)) return { prefix };
   if (prefix.startsWith(HASHED_SERVICE_PREFIX)) return { prefix };
-  maybeAutoRekey();
   const st = resolveHashState();
   if (!st.active || !st.key) return { prefix };
   if (prefix === BUNDLES_ITEM_PREFIX) {
@@ -519,7 +495,7 @@ function finishPendingDeletes(rec: HmacKeyRecord): void {
  * Never throws — a failed attempt leaves the process on cleartext names
  * (exact pre-#316 behavior) and the next process retries.
  */
-function maybeAutoRekey(): void {
+export function maybeAutoRekey(): void {
   if (autoRekeyAttempted || rekeyRunning || rawScopeDepth > 0) return;
   autoRekeyAttempted = true;
   if (forcedTestKey || backend) return;
@@ -530,10 +506,13 @@ function maybeAutoRekey(): void {
   if (process.env.AGENTS_SECRETS_HASH_NAMES === '0') return;
   const st = resolveHashState();
   if (st.active) {
-    // The stale-ACL'd-hmackey heal now runs on the hot read path
-    // (readHmacKeyRecord), which the resolveHashState() above just went through —
-    // so st.record is already healed here regardless of how this machine reached
-    // "hashing active". Nothing to do but finish any pending deletes.
+    if (st.record && !st.record.healedNoAcl) {
+      try {
+        healHmacKeyNoAclOnce(st.record);
+      } catch {
+        /* the next explicit unlock retries */
+      }
+    }
     if (st.record?.pendingDeletes?.length) {
       try {
         finishPendingDeletes(st.record);
@@ -961,7 +940,7 @@ export function getKeychainToken(item: string, context: KeychainReadContext = {}
   // Errors keep the requested (human-readable) name; the storage name may be
   // an opaque hash.
   const requested = item;
-  item = prepareServiceName(item, { autoRekey: true });
+  item = prepareServiceName(item);
   if (backend) return backend.get(item);
   assertRawKeychainReadAllowed(requested, context);
   assertSupportedPlatform();
@@ -986,6 +965,7 @@ export function getKeychainToken(item: string, context: KeychainReadContext = {}
       ...process.env,
       AGENTS_KEYCHAIN_PROMPT: keychainOperationPrompt(context),
       AGENTS_KEYCHAIN_PROMPT_BASE: keychainOperationPrompt({ ...context, duration: undefined }),
+      AGENTS_KEYCHAIN_SKIP_AUTH_UI: context.silentNoAcl ? '1' : '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -1024,7 +1004,7 @@ export function getKeychainTokens(items: string[], context: KeychainReadContext 
   // whether those were cleartext (hashed here) or already-hashed (enumerated).
   const requestedByStorage = new Map<string, string>();
   const storageItems = items.map((item) => {
-    const storage = prepareServiceName(item, { autoRekey: true });
+    const storage = prepareServiceName(item);
     if (!requestedByStorage.has(storage)) requestedByStorage.set(storage, item);
     return storage;
   });
@@ -1063,6 +1043,7 @@ export function getKeychainTokens(items: string[], context: KeychainReadContext 
       ...process.env,
       AGENTS_KEYCHAIN_PROMPT: keychainOperationPrompt(context),
       AGENTS_KEYCHAIN_PROMPT_BASE: keychainOperationPrompt({ ...context, duration: undefined }),
+      AGENTS_KEYCHAIN_SKIP_AUTH_UI: context.silentNoAcl ? '1' : '0',
       // The signed helper's own vocabulary is unchanged (it predates the rename
       // and ships as a separately-versioned binary), so map to its legacy token.
       AGENTS_KEYCHAIN_DEFAULT_POLICY: (context.defaultPolicy ?? 'hold') === 'hold' ? 'daily' : (context.defaultPolicy as string),
@@ -1161,7 +1142,7 @@ export function setKeychainToken(item: string, value: string, opts?: { noAcl?: b
   // resolve the storage name.
   if (/[\x00=\r\n]/.test(item)) throw new Error('Secret item name contains invalid characters.');
   const requested = item;
-  item = prepareServiceName(item, { autoRekey: true });
+  item = prepareServiceName(item);
   if (backend) { backend.set(item, value, opts); return; }
   assertSupportedPlatform();
   assertValueStorable(value);

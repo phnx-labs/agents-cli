@@ -1,8 +1,8 @@
 /**
  * Centralized event logging for agents-cli.
  *
- * Structured JSONL audit log at ~/.agents/events.jsonl with lossless numbered
- * gzip rotation at 10 MB and rich metadata for debugging/auditing.
+ * Structured JSONL audit logs at ~/.agents/.history/events/YYYY-MM-DD/events.jsonl with
+ * lossless numbered gzip rotation at 10 MiB and bounded retention.
  *
  * Features:
  * - Rich metadata: hostname, platform, arch, pid, timezone
@@ -59,16 +59,46 @@ function recordPerfTiming(payload: {
 // unlike _resetForTest it survives a bare reset AND propagates to CLI subprocesses
 // a test spawns, so fixture events can never land in the user's real log (#910).
 let _eventsPath: string | undefined;
-function eventsPath(): string {
-  return (_eventsPath ??= process.env.AGENTS_EVENTS_PATH || path.join(getUserAgentsDir(), 'events.jsonl'));
+let _eventsPathOverride = false;
+let _legacyMigrationChecked = false;
+let _userAgentsDirOverride: string | undefined;
+function userAgentsDir(): string {
+  return _userAgentsDirOverride ?? getUserAgentsDir();
+}
+function localDateKey(date: Date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
-function eventsDir(): string {
-  return path.dirname(eventsPath());
+function eventsRoot(): string {
+  if (_eventsPathOverride && _eventsPath) return path.dirname(_eventsPath);
+  return path.join(userAgentsDir(), '.history', 'events');
+}
+
+function eventsPath(date: Date = new Date()): string {
+  if (_eventsPathOverride && _eventsPath) return _eventsPath;
+  const override = _userAgentsDirOverride ? undefined : process.env.AGENTS_EVENTS_PATH;
+  if (override) {
+    _eventsPathOverride = true;
+    return (_eventsPath = override);
+  }
+  return path.join(eventsRoot(), localDateKey(date), 'events.jsonl');
+}
+
+function eventsDir(date: Date = new Date()): string {
+  return path.dirname(eventsPath(date));
 }
 
 /** Default retention period in days. */
 const DEFAULT_RETENTION_DAYS = 7;
+
+/** Default total footprint for the active log plus gzip archives (50 MiB). */
+const DEFAULT_MAX_STORAGE_BYTES = 50 * 1024 * 1024;
+
+/** Cross-process marker used to avoid a full archive scan on every append. */
+const PRUNE_MARKER = '.last-prune';
 
 /** Default max length for truncated strings. */
 const DEFAULT_TRUNCATE_LENGTH = 500;
@@ -357,6 +387,8 @@ function getTimezoneName(): string {
 }
 
 function ensureLogsDir(): void {
+  eventsPath(); // Resolve an explicit AGENTS_EVENTS_PATH before migration checks.
+  migrateLegacyEventLogs();
   if (!fs.existsSync(eventsDir())) {
     fs.mkdirSync(eventsDir(), { recursive: true, mode: DIR_MODE });
   } else {
@@ -366,6 +398,104 @@ function ensureLogsDir(): void {
     } catch {
       // May fail if not owner
     }
+  }
+}
+
+/**
+ * Move root-level and interim flat-history event families into dated directories.
+ *
+ * The common case is a whole-family rename into an empty destination. A
+ * Each segment is assigned to the local calendar day of its filesystem mtime;
+ * new writes are split by day at source. A partially completed migration keeps
+ * the destination active file authoritative and assigns a fresh archive number,
+ * so no record is overwritten or silently discarded. The legacy active-file
+ * lock serializes this with older installed processes that still append there.
+ */
+export function migrateLegacyEventLogs(userDir: string = userAgentsDir()): number {
+  if (_eventsPathOverride || _legacyMigrationChecked) return 0;
+  _legacyMigrationChecked = true;
+
+  const destinationRoot = path.join(userDir, '.history', 'events');
+  const legacyActive = path.join(userDir, 'events.jsonl');
+  const interimActive = path.join(destinationRoot, 'events.jsonl');
+  const listArchives = (dir: string): Array<{ file: string; number: number }> => {
+    try {
+      return fs.readdirSync(dir)
+      .map((file) => ({ file, match: file.match(/^events\.(\d+)\.jsonl\.gz$/) }))
+      .filter((entry): entry is { file: string; match: RegExpMatchArray } => entry.match !== null)
+      .map((entry) => ({ file: entry.file, number: Number(entry.match[1]) }))
+      .sort((a, b) => a.number - b.number);
+    } catch {
+      return [];
+    }
+  };
+  const hasSourceFiles = fs.existsSync(legacyActive) || fs.existsSync(interimActive) ||
+    listArchives(userDir).length > 0 || listArchives(destinationRoot).length > 0;
+
+  if (!hasSourceFiles) return 0;
+
+  try {
+    fs.mkdirSync(destinationRoot, { recursive: true, mode: DIR_MODE });
+    ensureLockTarget(legacyActive, '', DIR_MODE);
+    return withFileLock(legacyActive, () => {
+      ensureLockTarget(interimActive, '', DIR_MODE);
+      return withFileLock(interimActive, () => {
+        const sourceFamilies = [
+          { dir: userDir, active: legacyActive, archives: listArchives(userDir) },
+          { dir: destinationRoot, active: interimActive, archives: listArchives(destinationRoot) },
+        ];
+        let moved = 0;
+
+        const nextArchiveNumber = (dir: string): number => {
+          const numbers = fs.readdirSync(dir)
+            .map((file) => file.match(/^events\.(\d+)\.jsonl\.gz$/))
+            .filter((match): match is RegExpMatchArray => match !== null)
+            .map((match) => Number(match[1]));
+          return (numbers.length ? Math.max(...numbers) : 0) + 1;
+        };
+        const withDestinationLock = <T>(dayDir: string, fn: () => T): T => {
+          const destinationActive = path.join(dayDir, 'events.jsonl');
+          fs.mkdirSync(dayDir, { recursive: true, mode: DIR_MODE });
+          ensureLockTarget(destinationActive, '', DIR_MODE);
+          return withFileLock(destinationActive, fn);
+        };
+
+        for (const family of sourceFamilies) {
+          const activeBytes = fs.existsSync(family.active) ? fs.statSync(family.active).size : 0;
+          if (activeBytes > 0) {
+            const activeStat = fs.statSync(family.active);
+            const dayDir = path.join(destinationRoot, localDateKey(activeStat.mtime));
+            withDestinationLock(dayDir, () => {
+              const archivePath = path.join(dayDir, `events.${nextArchiveNumber(dayDir)}.jsonl.gz`);
+              fs.writeFileSync(archivePath, gzipSync(fs.readFileSync(family.active)), { mode: FILE_MODE });
+              fs.utimesSync(archivePath, activeStat.atime, activeStat.mtime);
+              fs.truncateSync(family.active, 0);
+            });
+            moved++;
+          }
+
+          for (const archive of family.archives) {
+            const source = path.join(family.dir, archive.file);
+            const dayDir = path.join(destinationRoot, localDateKey(fs.statSync(source).mtime));
+            withDestinationLock(dayDir, () => {
+              const destination = path.join(dayDir, `events.${nextArchiveNumber(dayDir)}.jsonl.gz`);
+              fs.renameSync(source, destination);
+            });
+            moved++;
+          }
+
+          try {
+            if (fs.existsSync(family.active) && fs.statSync(family.active).size === 0) fs.unlinkSync(family.active);
+          } catch { /* an older process may have reopened it */ }
+        }
+        return moved;
+      });
+    });
+  } catch {
+    // Audit logging must remain fail-soft. Files stay at the legacy path and a
+    // later process retries because this guard is process-local.
+    _legacyMigrationChecked = false;
+    return 0;
   }
 }
 
@@ -603,7 +733,8 @@ export function emit(event: EventType, payload: EventPayload = {}, overrides: { 
         }
       }
 
-      maybeGzipRotateLocked(logPath);
+      const rotated = maybeGzipRotateLocked(logPath);
+      maybePruneLocked(rotated);
     });
   } catch {
     // Silent failure - logging should never break the CLI
@@ -916,9 +1047,9 @@ export function emitFriction(
 // ─── Gzip rotation ──────────────────────────────────────────────────────────
 
 /** Rotate the active file while its append lock is held. */
-function maybeGzipRotateLocked(logPath: string): void {
+function maybeGzipRotateLocked(logPath: string): boolean {
   const stat = fs.statSync(logPath);
-  if (stat.size < GZIP_ROTATION_BYTES) return;
+  if (stat.size < GZIP_ROTATION_BYTES) return false;
 
   const raw = fs.readFileSync(logPath);
   const tmpArchive = path.join(eventsDir(), `.events.1.jsonl.gz.${process.pid}.tmp`);
@@ -939,6 +1070,7 @@ function maybeGzipRotateLocked(logPath: string): void {
     }
     fs.renameSync(tmpArchive, path.join(eventsDir(), 'events.1.jsonl.gz'));
     fs.truncateSync(logPath, 0);
+    return true;
   } catch (err) {
     try { fs.unlinkSync(tmpArchive); } catch { /* best-effort cleanup */ }
     throw err;
@@ -947,47 +1079,163 @@ function maybeGzipRotateLocked(logPath: string): void {
 
 // ─── Rotation ─────────────────────────────────────────────────────────────────
 
-/**
- * Remove log files older than the retention period.
- * Removes numbered gzip archives whose filesystem mtime exceeds retention.
- *
- * @param retentionDays - Number of days to keep (default 7, from DEFAULT_RETENTION_DAYS)
- * @returns Number of files removed
- */
-export function rotate(retentionDays: number = DEFAULT_RETENTION_DAYS): number {
-  try {
-    if (!fs.existsSync(eventsDir())) return 0;
+interface EventLogFile {
+  path: string;
+  gzip: boolean;
+  currentActive: boolean;
+  mtimeMs: number;
+  size: number;
+}
 
-    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
-    const files = fs.readdirSync(eventsDir()).filter(f => /^events\.\d+\.jsonl\.gz$/.test(f));
-    let removed = 0;
-
-    for (const file of files) {
-      const filePath = path.join(eventsDir(), file);
-      if (fs.statSync(filePath).mtimeMs < cutoff) {
-        fs.unlinkSync(filePath);
-        removed++;
-      }
+function listEventLogFiles(): EventLogFile[] {
+  const current = eventsPath();
+  const files: EventLogFile[] = [];
+  const addFile = (filePath: string, gzip: boolean) => {
+    try {
+      const stat = fs.statSync(filePath);
+      files.push({
+        path: filePath,
+        gzip,
+        currentActive: filePath === current,
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+      });
+    } catch { /* file may rotate while an unlocked reader enumerates */ }
+  };
+  const addDirectory = (dir: string) => {
+    let names: string[] = [];
+    try { names = fs.readdirSync(dir); } catch { return; }
+    for (const name of names) {
+      if (name !== 'events.jsonl' && !/^events\.\d+\.jsonl\.gz$/.test(name)) continue;
+      addFile(path.join(dir, name), name.endsWith('.gz'));
     }
+  };
 
-    return removed;
-  } catch {
-    return 0;
+  if (_eventsPathOverride) {
+    if (path.basename(current) !== 'events.jsonl') {
+      addFile(current, false);
+      let names: string[] = [];
+      try { names = fs.readdirSync(eventsDir()); } catch { return files; }
+      for (const name of names) {
+        if (/^events\.\d+\.jsonl\.gz$/.test(name)) addFile(path.join(eventsDir(), name), true);
+      }
+      return files;
+    }
+    addDirectory(eventsDir());
+    return files;
+  }
+
+  let days: string[] = [];
+  try { days = fs.readdirSync(eventsRoot()).filter((name) => /^\d{4}-\d{2}-\d{2}$/.test(name)); } catch { return files; }
+  for (const day of days) addDirectory(path.join(eventsRoot(), day));
+  return files;
+}
+
+function removeEmptyDayDirectories(): void {
+  if (_eventsPathOverride) return;
+  let days: string[] = [];
+  try { days = fs.readdirSync(eventsRoot()).filter((name) => /^\d{4}-\d{2}-\d{2}$/.test(name)); } catch { return; }
+  for (const day of days) {
+    const dir = path.join(eventsRoot(), day);
+    try { if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir); } catch { /* best effort */ }
   }
 }
 
-/**
- * Lazy rotation - runs at most once per day per process.
- */
-let lastRotationCheck = 0;
-export function maybeRotate(): void {
-  const now = Date.now();
-  const oneDayMs = 24 * 60 * 60 * 1000;
-
-  if (now - lastRotationCheck > oneDayMs) {
-    lastRotationCheck = now;
-    rotate();
+function finalizePastDayLogs(): void {
+  if (_eventsPathOverride) return;
+  const currentDay = localDateKey();
+  for (const file of listEventLogFiles()) {
+    if (path.basename(file.path) !== 'events.jsonl') continue;
+    if (path.basename(path.dirname(file.path)) === currentDay) continue;
+    try {
+      withFileLock(file.path, () => {
+        const dir = path.dirname(file.path);
+        const numbers = fs.readdirSync(dir)
+          .map((name) => name.match(/^events\.(\d+)\.jsonl\.gz$/))
+          .filter((match): match is RegExpMatchArray => match !== null)
+          .map((match) => Number(match[1]));
+        const next = (numbers.length ? Math.max(...numbers) : 0) + 1;
+        const target = path.join(dir, `events.${next}.jsonl.gz`);
+        const sourceStat = fs.statSync(file.path);
+        fs.writeFileSync(target, gzipSync(fs.readFileSync(file.path)), { mode: FILE_MODE });
+        fs.utimesSync(target, sourceStat.atime, sourceStat.mtime);
+        fs.unlinkSync(file.path);
+      });
+    } catch { /* retry on the next prune */ }
   }
+}
+
+export interface RotationResult {
+  removedByAge: number;
+  removedBySize: number;
+  bytesReclaimed: number;
+}
+
+function pruneEventLogsLocked(
+  retentionDays: number = DEFAULT_RETENTION_DAYS,
+  maxStorageBytes: number = DEFAULT_MAX_STORAGE_BYTES,
+): RotationResult {
+  finalizePastDayLogs();
+  const result: RotationResult = { removedByAge: 0, removedBySize: 0, bytesReclaimed: 0 };
+  const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+  let files = listEventLogFiles();
+
+  for (const file of files) {
+    if (file.currentActive || file.mtimeMs >= cutoff) continue;
+    try {
+      fs.unlinkSync(file.path);
+      result.removedByAge++;
+      result.bytesReclaimed += file.size;
+    } catch { /* another process may already have removed it */ }
+  }
+
+  files = listEventLogFiles();
+  let totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+  const oldestFirst = files
+    .filter((file) => !file.currentActive)
+    .sort((a, b) => a.mtimeMs - b.mtimeMs || a.path.localeCompare(b.path));
+  for (const file of oldestFirst) {
+    if (totalBytes <= maxStorageBytes) break;
+    try {
+      fs.unlinkSync(file.path);
+      totalBytes -= file.size;
+      result.removedBySize++;
+      result.bytesReclaimed += file.size;
+    } catch { /* another process may already have removed it */ }
+  }
+
+  removeEmptyDayDirectories();
+  return result;
+}
+
+/** Apply age retention and the total-size ceiling immediately. */
+export function rotate(
+  retentionDays: number = DEFAULT_RETENTION_DAYS,
+  maxStorageBytes: number = DEFAULT_MAX_STORAGE_BYTES,
+): RotationResult {
+  try {
+    ensureLogsDir();
+    const active = eventsPath();
+    ensureLockTarget(active, '', DIR_MODE);
+    return withFileLock(active, () => pruneEventLogsLocked(retentionDays, maxStorageBytes));
+  } catch {
+    return { removedByAge: 0, removedBySize: 0, bytesReclaimed: 0 };
+  }
+}
+
+/** Prune daily across processes, and immediately after a size rotation. */
+function maybePruneLocked(force: boolean): void {
+  const marker = path.join(eventsRoot(), PRUNE_MARKER);
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  let due = force;
+  try { due ||= Date.now() - fs.statSync(marker).mtimeMs > oneDayMs; } catch { due = true; }
+  if (!due) return;
+
+  const maxBytes = force
+    ? DEFAULT_MAX_STORAGE_BYTES - GZIP_ROTATION_BYTES
+    : DEFAULT_MAX_STORAGE_BYTES;
+  pruneEventLogsLocked(DEFAULT_RETENTION_DAYS, maxBytes);
+  try { fs.writeFileSync(marker, '', { mode: FILE_MODE }); } catch { /* retry next append */ }
 }
 
 // ─── Query ────────────────────────────────────────────────────────────────────
@@ -1016,18 +1264,11 @@ export function query(options: {
   const { startDate, endDate = new Date(), eventTypes, level, agent, sessionId, caller, command, module, bundle, limit } = options;
   const results: EventRecord[] = [];
 
-  if (!fs.existsSync(eventsDir())) return results;
-
-  const files: Array<{ path: string; gzip: boolean }> = [];
-  if (fs.existsSync(eventsPath())) files.push({ path: eventsPath(), gzip: false });
-  const archives = fs.readdirSync(eventsDir())
-    .map((file) => ({ file, match: file.match(/^events\.(\d+)\.jsonl\.gz$/) }))
-    .filter((entry): entry is { file: string; match: RegExpMatchArray } => entry.match !== null)
-    .map((entry) => ({ file: entry.file, number: Number(entry.match[1]) }))
-    .sort((a, b) => a.number - b.number);
-  for (const archive of archives) {
-    files.push({ path: path.join(eventsDir(), archive.file), gzip: true });
-  }
+  eventsPath(); // Resolve AGENTS_EVENTS_PATH before deciding whether to migrate.
+  migrateLegacyEventLogs();
+  const files = listEventLogFiles().sort((a, b) =>
+    Number(b.currentActive) - Number(a.currentActive) || b.mtimeMs - a.mtimeMs || b.path.localeCompare(a.path)
+  );
 
   const startMs = startDate?.getTime();
   const endMs = endDate?.getTime();
@@ -1157,17 +1398,9 @@ export function stats(options: { days?: number } = {}): EventStats {
   let fileCount = 0;
   let totalBytes = 0;
   try {
-    if (fs.existsSync(eventsDir())) {
-      const files = fs.readdirSync(eventsDir()).filter(f =>
-        f === 'events.jsonl' || /^events\.\d+\.jsonl\.gz$/.test(f)
-      );
-      fileCount = files.length;
-      for (const f of files) {
-        try {
-          totalBytes += fs.statSync(path.join(eventsDir(), f)).size;
-        } catch { /* skip */ }
-      }
-    }
+    const files = listEventLogFiles();
+    fileCount = files.length;
+    totalBytes = files.reduce((sum, file) => sum + file.size, 0);
   } catch { /* skip */ }
 
   return {
@@ -1188,9 +1421,11 @@ export function getLogsPath(): string {
   return eventsPath();
 }
 
-export function _resetForTest(overrideEventsPath?: string): void {
+export function _resetForTest(overrideEventsPath?: string, overrideUserAgentsDir?: string): void {
   _eventsPath = overrideEventsPath;
+  _eventsPathOverride = Boolean(overrideEventsPath);
+  _userAgentsDirOverride = overrideUserAgentsDir;
+  _legacyMigrationChecked = false;
   resetEventProvenanceForTest();
   _chmoddedPath = undefined;
-  lastRotationCheck = 0;
 }

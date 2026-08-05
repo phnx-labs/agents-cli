@@ -18,12 +18,15 @@ import {
   toolOriginSessions,
   toolSearchFleetSortError,
   toolSearchForwardedArgs,
+  matchesLiveStatus,
+  requestedLiveStatuses,
 } from './sessions.js';
 import { remoteAgentsJsonCommand } from '../lib/remote-agents-json.js';
 import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { parseRemoteList } from '../lib/session/remote-list.js';
 import { needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
 import type { SessionMeta } from '../lib/session/types.js';
+import type { ActiveSession } from '../lib/session/active.js';
 
 const repoRoot = process.cwd();
 const cliEntry = path.join(repoRoot, 'src', 'index.ts');
@@ -34,6 +37,111 @@ const cliEntry = path.join(repoRoot, 'src', 'index.ts');
 // problem and shell:true arg-concatenation (which would split multi-word query
 // args like "prompt text").
 const tsxLoaderUrl = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+
+describe('live session status flags', () => {
+  const row = (over: Partial<ActiveSession>): ActiveSession => ({
+    context: 'terminal', kind: 'codex', status: 'running', ...over,
+  });
+
+  it('maps every convenience flag and deduplicates --orphan/--orphaned', () => {
+    expect(requestedLiveStatuses({
+      working: true, idle: true, waiting: true, orphan: true, orphaned: true,
+      crashed: true, closed: true, abandoned: true, queued: true, unknown: true,
+    })).toEqual([
+      'working', 'idle', 'waiting', 'orphaned', 'crashed', 'closed', 'abandoned', 'queued', 'unknown',
+    ]);
+  });
+
+  it('distinguishes working from idle and waiting activity', () => {
+    expect(matchesLiveStatus(row({ activity: 'working' }), 'working')).toBe(true);
+    expect(matchesLiveStatus(row({ status: 'idle', activity: 'idle' }), 'working')).toBe(false);
+    expect(matchesLiveStatus(row({ status: 'input_required', activity: 'waiting_input' }), 'waiting')).toBe(true);
+  });
+
+  it('matches lifecycle states exactly', () => {
+    for (const status of ['idle', 'orphaned', 'crashed', 'closed', 'abandoned', 'queued', 'unknown'] as const) {
+      expect(matchesLiveStatus(row({ status }), status)).toBe(true);
+    }
+  });
+
+  it('routes aliases, unions, and the waiting exit gate through the real CLI', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-status-flags-'));
+    const cwd = path.join(tempHome, 'work', 'status-fixture');
+    const liveSessionId = 'abcd1111-1111-4111-8111-111111111111';
+    const crashedSessionId = 'abcd2222-2222-4222-8222-222222222222';
+    const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)'], { stdio: 'ignore' });
+    try {
+      writeUpdateCache(tempHome);
+      const projectKey = cwd.replace(/[/.]/g, '-');
+      writeClaudeSession(
+        tempHome,
+        projectKey,
+        liveSessionId,
+        cwd,
+        'Waiting for the user to choose',
+        new Date(Date.now() - 15 * 60_000).toISOString(),
+      );
+      fs.appendFileSync(
+        path.join(tempHome, '.claude', 'projects', projectKey, `${liveSessionId}.jsonl`),
+        JSON.stringify({
+          type: 'assistant',
+          timestamp: new Date(Date.now() - 15 * 60_000).toISOString(),
+          sessionId: liveSessionId,
+          message: {
+            role: 'assistant',
+            content: [{
+              type: 'tool_use',
+              id: 'ask-status-filter',
+              name: 'AskUserQuestion',
+              input: {
+                questions: [{
+                  question: 'Choose the next step',
+                  header: 'Scope',
+                  options: [
+                    { label: 'Continue', description: 'Keep working' },
+                    { label: 'Stop', description: 'End the session' },
+                  ],
+                }],
+              },
+            }],
+          },
+        }) + '\n',
+        'utf-8',
+      );
+      const registry = path.join(tempHome, '.agents', '.cache', 'terminals', 'live-terminals.json');
+      fs.mkdirSync(path.dirname(registry), { recursive: true });
+      fs.writeFileSync(registry, JSON.stringify({
+        'stale-window': {
+          at: new Date(Date.now() - 11 * 60_000).toISOString(),
+          entries: [
+            { sessionId: liveSessionId, pid: sleeper.pid, kind: 'claude', cwd, startedAtMs: Date.now() },
+            { sessionId: crashedSessionId, pid: 2_000_000_003, kind: 'claude', cwd, startedAtMs: Date.now() },
+          ],
+        },
+      }));
+
+      const orphan = runAgents(['sessions', '--orphan', '--json', '--local'], cwd, tempHome);
+      const orphaned = runAgents(['sessions', '--orphaned', '--json', '--local'], cwd, tempHome);
+      expect(orphan.status, orphan.stderr).toBe(0);
+      expect(orphaned.status, orphaned.stderr).toBe(0);
+      expect(JSON.parse(orphan.stdout).map((row: ActiveSession) => row.sessionId)).toContain(liveSessionId);
+      expect(JSON.parse(orphaned.stdout)).toEqual(JSON.parse(orphan.stdout));
+
+      const union = runAgents(['sessions', '--orphan', '--crashed', '--json', '--local'], cwd, tempHome);
+      expect(union.status, union.stderr).toBe(0);
+      const unionIds = JSON.parse(union.stdout).map((row: ActiveSession) => row.sessionId);
+      expect(unionIds).toContain(liveSessionId);
+      expect(unionIds).toContain(crashedSessionId);
+
+      const waitingUnion = runAgents(['sessions', '--waiting', '--orphan', '--json', '--local'], cwd, tempHome);
+      expect(waitingUnion.status).toBe(1);
+      expect(JSON.parse(waitingUnion.stdout).map((row: ActiveSession) => row.sessionId)).toContain(liveSessionId);
+    } finally {
+      sleeper.kill('SIGTERM');
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('toolSearchForwardedArgs', () => {
   it('removes coordinator device flags and forces a whole-index local peer query', () => {
@@ -348,7 +456,7 @@ exit 1
 }
 
 function runAgents(args: string[], cwd: string, home: string, envOverrides: Record<string, string> = {}) {
-  return spawnSync(process.execPath, ['--import', tsxLoaderUrl, cliEntry, ...args], {
+  return spawnSync('node', ['--import', tsxLoaderUrl, cliEntry, ...args], {
     cwd,
     env: {
       ...process.env,

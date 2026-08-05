@@ -135,6 +135,13 @@ const vaultStore: ItemStore = {
   list: vaultListItems,
 };
 
+let keychainAgentOnlyBypassForTest = false;
+
+/** Disable the broker-only guard for in-memory keychain tests. */
+export function setKeychainAgentOnlyBypassForTest(bypass: boolean): void {
+  keychainAgentOnlyBypassForTest = bypass;
+}
+
 function itemStore(backend: SecretsBackend): ItemStore {
   if (backend === 'file') return fileItemStore;
   if (backend === 'vault') return vaultStore;
@@ -745,7 +752,7 @@ export function healKeychainBundleMetadata(metaJsonByName: Map<string, string>):
  * backend has no real keychain — and gated by a sentinel so it runs at most
  * once. Best-effort: a heal failure never breaks bundle listing.
  */
-function healKeychainBundleMetadataAclOnce(metaJsonByName: Map<string, string>): void {
+export function healKeychainBundleMetadataAclOnce(metaJsonByName: Map<string, string>): void {
   if (metaJsonByName.size === 0) return;
   if (process.platform !== 'darwin') return;
   if (isKeychainBackendOverridden()) return;
@@ -817,7 +824,6 @@ export function listBundles(): SecretsBundle[] {
         // still prompt once; it heals on the next interactive scan.)
         const fetched = getKeychainTokens(keychainServices, { silentNoAcl: true });
         const keychainBundles: SecretsBundle[] = [];
-        const metaJsonByName = new Map<string, string>();
         for (const service of keychainServices) {
           const json = fetched.get(service);
           if (json === undefined) continue;
@@ -827,7 +833,6 @@ export function listBundles(): SecretsBundle[] {
           const bundle = parseBundleMeta(nameHint, json, 'keychain');
           if (bundle) {
             keychainBundles.push(bundle);
-            metaJsonByName.set(bundle.name, json);
           }
         }
         for (const bundle of keychainBundles) out.push(bundle);
@@ -838,13 +843,6 @@ export function listBundles(): SecretsBundle[] {
         if (useAgent && keychainBundles.length > 0) {
           agentAutoLoadMetaSync(nameSetHash, keychainBundles, secretsHoldMs());
         }
-        // One-time RUSH-1759 heal: bundles written before the metadata-no-ACL
-        // change carry an ACL'd metadata item, so this fresh read (a broker miss)
-        // popped Touch ID just to enumerate them. Re-home each metadata item
-        // no-ACL now — reusing the JSON we just read, so the heal adds no extra
-        // prompt — and every later enumeration is silent. Runs at most once (a
-        // sentinel under the regenerable helpers dir).
-        healKeychainBundleMetadataAclOnce(metaJsonByName);
       }
     }
   }
@@ -1322,24 +1320,14 @@ export function readAndResolveBundleEnv(
     }
   }
 
-  // Never/no-ACL bundles remain prompt-free regardless. No agent launch — harness,
-  // teammate, routine, or the always-on daemon — may raise the sheet itself.
-  // Explicit opt-in ONLY — a deliberate NARROWING of the agent-triggered approval
-  // added in RUSH-2032 (b99796f8 removed this throw so an agent could raise the
-  // sheet itself; 4eeada68 generalized the daemon rule into `!interactiveUnlock`).
-  // That default — true whenever an agent name was present — was the spec, not a
-  // bug. It is unwanted: each keychain read runs in its own helper process, so the
-  // biometric assertion never reuses and one agent launch meant one sheet per
-  // bundle. `agentOnly` decides alone now; a human in a plain shell carries no
-  // AGENTS_RUNTIME, so isHeadlessSecretsContext() is false, agentOnly is false, the
-  // guard never fires, and they still get their prompt. No caller passes this flag;
-  // it remains the seam for a future unlock path that wants the sheet on purpose.
+  // Never/no-ACL bundles remain prompt-free regardless. Every ordinary caller
+  // sets agentOnly; only the unlock handler opts into interactive authentication.
   const interactiveUnlock = opts.interactiveUnlock ?? false;
   // A `never`-policy bundle's items carry no biometry ACL, so once the policy
   // check below proves that, the batch read is silent even in a headless
   // context — attest it to the raw-read storm guard via `silentNoAcl`.
   let verifiedNoAclBundle = false;
-  if (opts.agentOnly && backend === 'keychain' && !interactiveUnlock) {
+  if (opts.agentOnly && backend === 'keychain' && !interactiveUnlock && !keychainAgentOnlyBypassForTest) {
     try { verifiedNoAclBundle = bundlePolicy(readBundle(name)) === 'never'; } catch { /* fail closed */ }
     if (!verifiedNoAclBundle) {
       throw new Error(

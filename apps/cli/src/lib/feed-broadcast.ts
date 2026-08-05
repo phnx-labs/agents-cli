@@ -99,8 +99,14 @@ export interface FeedBroadcastContext {
   class?: string;
   /** Block-only: cost-of-delay tag used by the urgency filter. */
   cost?: string;
-  /** Block-only: the literal `agents focus <id>` command that unblocks it. */
+  /** Block-only: the literal `agents focus <id>` command (for a `{focus}` sink). */
   focus?: string;
+  /** Block-only: the answer choices the operator can pick, in order. */
+  options?: string[];
+  /** Block-only: the fallback applied if nobody answers in time. */
+  safeDefault?: string;
+  /** Block-only: minutes before `safeDefault` applies. */
+  timeoutMinutes?: number;
 }
 
 /**
@@ -120,9 +126,11 @@ export function blockBroadcastContext(
     blockId: string;
     sessionId: string;
     host?: string;
-    questions?: Array<{ text?: string }>;
+    questions?: Array<{ text?: string; options?: Array<{ label?: string }> }>;
     blockClass?: string;
     costOfDelay?: string;
+    safeDefault?: string;
+    timeoutMinutes?: number;
     ticket?: string;
     pr?: string;
   },
@@ -130,6 +138,12 @@ export function blockBroadcastContext(
 ): FeedBroadcastContext {
   const ask = block.questions?.[0]?.text?.trim() || 'agent is blocked';
   const links = [block.pr].filter((l): l is string => !!l && /^https?:\/\//i.test(l));
+  // The answer choices + the safe default are what make the phone message
+  // actionable: the operator sees the options and what happens if they do not
+  // reply, instead of a `agents focus <id>` CLI command they cannot run from a phone.
+  const options = (block.questions?.[0]?.options ?? [])
+    .map((o) => o?.label?.trim())
+    .filter((l): l is string => !!l);
   // Prefer explicit title/body from the feed post; fall back to the ask as body.
   const title = extras.title?.trim() || undefined;
   const text = extras.body?.trim() || ask;
@@ -146,8 +160,12 @@ export function blockBroadcastContext(
     class: block.blockClass,
     cost: block.costOfDelay,
     // Short id: `agents focus` matches on a prefix, and a full uuid in a phone
-    // message is noise the operator has to skip past to reach the verb.
+    // message is noise. Kept for a `{focus}` sink; the human message no longer
+    // shows it (a CLI command is unusable from a phone).
     focus: `agents focus ${block.sessionId.slice(0, 8)}`,
+    ...(options.length ? { options } : {}),
+    ...(block.safeDefault ? { safeDefault: block.safeDefault } : {}),
+    ...(block.timeoutMinutes ? { timeoutMinutes: block.timeoutMinutes } : {}),
     ...(links.length ? { links } : {}),
   };
 }
@@ -267,14 +285,17 @@ export function composeBroadcastFooter(ctx: FeedBroadcastContext): string | unde
  * Title in a few words
  *
  * Body of what happened or the ask.
+ * Options: publish / wait          (blocks with choices)
+ * Default in 15 min: wait          (blocks with a safe default)
  *
  * Sent from grok/a02da0e2 on mac-mini
- * agents focus a02da0e2          (blocks only)
- * https://…                      (optional attach URL)
+ * https://…                        (optional attach URL)
  * ```
  *
- * Title first (scannable subject). Blank line. Body. Footer provenance so a
- * fleet of agents is attributable without crowding the ask. Prefer `{message}`
+ * Title first (scannable subject). Blank line. Body. Then the phone-actionable
+ * choices + default (a block that has stopped for the human), then footer
+ * provenance. No `agents focus <id>` line: a CLI command is unusable from a phone,
+ * so the safe default is the fallback and the message carries it. Prefer `{message}`
  * over bare `{text}` in messaging sinks.
  */
 export function composeBroadcastMessage(ctx: FeedBroadcastContext): string {
@@ -285,9 +306,23 @@ export function composeBroadcastMessage(ctx: FeedBroadcastContext): string {
   const mid = title && body && title !== body ? body : undefined;
   const footer = composeBroadcastFooter(ctx);
   const link = ctx.links?.find((l) => /^https?:\/\//i.test(l));
-  // Block focus and link trail after the "Sent from" footer so the human
-  // sentence stays at the top and the action/link are still one glance away.
-  const trail = [footer, ctx.focus, link].filter(Boolean) as string[];
+
+  // The action block: the one thing the operator can act on from a phone. Show the
+  // choices, then what happens if they do not answer. Deliberately NOT a CLI command
+  // (`agents focus <id>` is unusable from a phone) -- the safe default is the real
+  // fallback, so a block meant for a phone should always carry one.
+  const choices = ctx.options?.length
+    ? `Options: ${ctx.options.map((o) => scrubOutboundDashes(o)).join(' / ')}`
+    : undefined;
+  const fallback = ctx.safeDefault
+    ? (ctx.timeoutMinutes && ctx.timeoutMinutes > 0
+        ? `Default in ${ctx.timeoutMinutes} min: ${scrubOutboundDashes(ctx.safeDefault)}`
+        : `Default: ${scrubOutboundDashes(ctx.safeDefault)}`)
+    : undefined;
+  const action = [choices, fallback].filter(Boolean).join('\n') || undefined;
+
+  // Link trail after the "Sent from" footer so the human sentence stays at the top.
+  const trail = [footer, link].filter(Boolean) as string[];
 
   const parts: string[] = [];
   if (head) parts.push(head);
@@ -295,6 +330,11 @@ export function composeBroadcastMessage(ctx: FeedBroadcastContext): string {
     // Blank line between subject and body (title, then space, then message).
     parts.push('');
     parts.push(mid);
+  }
+  if (action) {
+    // The choices/default hug the ask under a blank line so they read as the reply.
+    if (parts.length) parts.push('');
+    parts.push(action);
   }
   if (trail.length) {
     // Blank line before the footer block (iPhone "Sent from my iPhone" spacing).
@@ -321,6 +361,8 @@ function templateVars(ctx: FeedBroadcastContext): Record<string, string | undefi
     class: ctx.class,
     cost: ctx.cost,
     focus: ctx.focus,
+    options: ctx.options?.length ? ctx.options.join(' / ') : undefined,
+    default: ctx.safeDefault,
   };
 }
 

@@ -45,7 +45,7 @@ export interface ProjectRepo {
   /**
    * Optional home-relative local checkout of this repo. The def's `root` only
    * knows the primary repo on disk; `path` opts an additional repo into
-   * workspace probing (`projects status --fleet`).
+   * workspace probing (`projects status`).
    */
   path?: string;
 }

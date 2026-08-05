@@ -122,14 +122,14 @@ function deriveAlias(source: string): string {
 type RepoResourceKind =
   | 'skill' | 'command' | 'plugin' | 'hook' | 'mcp' | 'subagent'
   | 'rule' | 'workflow' | 'routine' | 'profile' | 'permission'
-  | 'cli' | 'config' | 'other';
+  | 'clis' | 'config' | 'other';
 
 /** Top-level dir -> resource kind. Directory-based resources collapse to one unit. */
 const RESOURCE_DIRS: Record<string, RepoResourceKind> = {
   skills: 'skill', commands: 'command', prompts: 'command', plugins: 'plugin',
   hooks: 'hook', mcp: 'mcp', subagents: 'subagent', rules: 'rule',
   workflows: 'workflow', routines: 'routine', profiles: 'profile',
-  permissions: 'permission', cli: 'cli',
+  permissions: 'permission', clis: 'clis',
 };
 
 /** [singular, plural] display labels per kind. */
@@ -139,14 +139,14 @@ const RESOURCE_LABELS: Record<RepoResourceKind, [string, string]> = {
   subagent: ['subagent', 'subagents'], rule: ['rule', 'rules'],
   workflow: ['workflow', 'workflows'], routine: ['routine', 'routines'],
   profile: ['profile', 'profiles'], permission: ['permission', 'permissions'],
-  cli: ['CLI', 'CLIs'], config: ['config file', 'config files'],
+  clis: ['CLI', 'CLIs'], config: ['config file', 'config files'],
   other: ['other file', 'other files'],
 };
 
 /** Display order — the resources a user cares about most come first. */
 const RESOURCE_ORDER: RepoResourceKind[] = [
   'skill', 'command', 'plugin', 'hook', 'mcp', 'subagent', 'rule',
-  'workflow', 'routine', 'profile', 'permission', 'cli', 'config', 'other',
+  'workflow', 'routine', 'profile', 'permission', 'clis', 'config', 'other',
 ];
 
 export type ChangeAction = 'new' | 'changed' | 'removed';

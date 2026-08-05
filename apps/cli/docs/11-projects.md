@@ -67,7 +67,7 @@ linear:
 | `name` | Stable id, == filename. What `--project` takes. |
 | `root` | Repo / monorepo root, home-relative → portable. |
 | `defaultPath` | Where an agent's cwd lands (a monorepo subdir). Defaults to `root`. |
-| `repo` / `repos[]` | GitHub slug(s), each with an optional `subpath`, for the PR/merge rollup. `repos[].path` (home-relative) names that repo's local checkout and opts it into workspace probing (`status --fleet`). |
+| `repo` / `repos[]` | GitHub slug(s), each with an optional `subpath`, for the PR/merge rollup. `repos[].path` (home-relative) names that repo's local checkout and opts it into workspace probing (`status`). |
 | `contexts[]` | `{path, purpose}` described starting points — indexed anchors for agents. |
 | `goals[]` | `{objective, measure}` the OKR-shaped outcomes a project serves — a project may have several. The objective is the "why"; `measure` is the optional key result. Milestones (pulled from Linear) are the dated checkpoints toward them. |
 | `integrations[]` | `{kind, url, label}` external context sources. |
@@ -107,7 +107,8 @@ is no second renderer to drift.
 - **Named** (`agents projects status rush`, `view rush`, `show rush`) — the same card for one
   project, with **every** milestone and the stored definition underneath (each repo with its
   subpath and checkout, each context with its purpose, each integration with its URL, the
-  Linear link, the docs, and the YAML path). `--fleet` is available on both forms.
+  Linear link, the docs, and the YAML path). The fleet fan-out — and its
+  `--device`/`--devices` scoping — applies to both forms.
 
 Gathering still goes through `enrichProjectsForRender` so a signal added for the card appears
 whether you typed `status` or `view`.
@@ -117,8 +118,8 @@ whether you typed `status` or `view`.
 The headline. It matches every live session to a project **by cwd** (longest root
 wins) and rolls up the signals already on disk. The live-agent rollup defaults to this machine's active sessions (the same set
 `agents sessions --active` shows, matched by local-home cwd); the **merged-PR
-count is repo-global** (via `gh`). With `--fleet`, the live line also includes
-sessions fanned out over SSH — but cwd matching is still against the **local**
+count is repo-global** (via `gh`). The live line also includes sessions fanned
+out over SSH across the fleet — but cwd matching is still against the **local**
 home layout, so a peer session whose path uses a different home root may not
 attribute. Full home-relative matching across homes remains deferred (see below):
 
@@ -143,7 +144,7 @@ rush  ·  23 live
   active session list (`rollupSessionsByProject`) — no network. The `agents` line
   groups live agents by host (`@zion  claude · running ×9  ·  …`) so the same
   harness on two machines is not collapsed into one cell. Within a host, cells
-  collapse identical state (`×N`), sorted running-first, capped with `+N more`. Under `--fleet` the remote sessions carry their peer's hostname.
+  collapse identical state (`×N`), sorted running-first, capped with `+N more`. Remote sessions carry their peer's hostname.
 - **`ships` merged-count** is a best-effort `gh pr list` on the primary repo
   (`--no-remote` skips it; a missing `gh`/auth degrades to 0). It counts up to the
   100 most recent merges within the window. The trailing tag is the **latest release
@@ -178,11 +179,12 @@ rush  ·  23 live
   project (`lib/project-status.ts`).
 - `--window <days>` sets the merged-PR / artifact window (default 7).
 
-### `--fleet` — per-device workspace drift
+### Fleet workspace drift (default)
 
-Projects are natively multi-device, so `status --fleet` adds a `fleet` line per
-project showing the state of its workspace repos on every fleet device — present
-or missing, on which branch, ahead/behind the upstream, and uncommitted changes:
+Projects are natively multi-device, so `status` adds a `fleet` line per project
+by default, showing the state of its workspace repos on every fleet device —
+present or missing, on which branch, ahead/behind the upstream, and uncommitted
+changes:
 
 ```
 rush  ·  3 agents
@@ -206,11 +208,13 @@ rush  ·  3 agents
 - **Unreachable or older peers are named once** in a trailing note
   (`· N devices didn't answer (unreachable, older agents-cli, or timed out): …`)
   — a peer whose CLI predates the probe subcommand lands in the same skipped
-  list, never a silent gap. The `probe` subcommand itself is not beta-gated, so
-  peers answer whenever their binary carries it.
+  list, never a silent gap. Peers answer whenever their binary carries the
+  `probe` subcommand.
 - `--json` includes the fleet data: per project `workspaces: [{host, path,
   present, branch, upstream, ahead, behind, dirty, lastCommit, error}]`.
-- Default is off — `--fleet` is the opt-in because it dials the fleet.
+- **Dialed by default.** Scope it to a subset with `--device <name...>`
+  (repeatable) or `--devices a,b,c` (comma-separated); with no filter every
+  registered online device is dialed.
 
 ## Warnings footer
 
@@ -222,7 +226,7 @@ Anything that needs attention lands at the **bottom** of the card, not mid-strea
 | ⚠️ | continue | dirty tree, small behind, schedule not measurable |
 
 A local workspace probe always feeds this footer (cheap, no SSH). The full per-host
-`fleet` table still requires `--fleet`.
+`fleet` table is shown by default — scope it with `--device`/`--devices`.
 
 
 ## Command surface
@@ -233,7 +237,7 @@ A local workspace probe always feeds this footer (cheap, no SSH). The full per-h
 | `agents projects add <name>` | Scaffold `<name>.yaml`; infers `root` + origin slug from the current repo. Flags: `--root`, `--path`, `--repo`, `--context path:purpose`, `--goal objective:measure`, `--linear`. |
 | `agents projects view <name>` / `show` | Alias of `status <name>`: full card, every milestone, stored definition. |
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
-| `agents projects status [name] [--json] [--window N] [--no-remote] [--fleet]` (aliases `view`, `show`) | Progress card for every project, or one named project. Named form also prints every milestone and the stored definition. `--fleet` adds per-device workspace drift over SSH. |
+| `agents projects status [name] [--json] [--window N] [--no-remote] [--device name...] [--devices a,b,c]` (aliases `view`, `show`) | Progress card for every project across the whole fleet (per-device workspace drift over SSH), or one named project. Named form also prints every milestone and the stored definition. `--device`/`--devices` scopes the fan-out to a subset. |
 | `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. |
 | `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--linear-first-factory-gated). |
 | `agents projects import --from-factory [--min-confidence low\|medium\|high] [--all]` | Absorb `~/.agents/factory/projects.json`. Imports only `high`-confidence rows by default. |
@@ -298,11 +302,10 @@ unlinks the YAML, never the repo.
 
 ## Not yet (fast-follow)
 
-- **Fleet-wide live rollup by default.** `status --fleet` already widens the
-  live-agent count to the whole fleet (via the sessions fan-out) and adds
-  per-device workspace drift, but fleet remains opt-in, and cwd matching is
-  still local-home — a session recorded on a different-home machine only matches
-  once home-relative cwd matching lands.
+- **Home-relative cwd matching across machines.** `status` now dials the whole
+  fleet by default (live-agent count via the sessions fan-out + per-device
+  workspace drift), but cwd matching is still local-home — a session recorded on
+  a different-home machine only matches once home-relative cwd matching lands.
 - **Re-point `agents factory snapshot`** per-project Linear rollup at defined projects.
 - **Per-repo release lines** — the `ships` release tag is the primary repo only.
 - **Persisted `project_id` session column** — today membership is derived from cwd.

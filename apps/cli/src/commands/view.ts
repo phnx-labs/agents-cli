@@ -234,10 +234,10 @@ export interface ViewSectionFilter {
   rules?: boolean;
   hooks?: boolean;
   promptcuts?: boolean;
-  cli?: boolean;
+  clis?: boolean;
 }
 
-const SECTION_KEYS = ['commands', 'skills', 'mcp', 'workflows', 'plugins', 'rules', 'hooks', 'promptcuts', 'cli'] as const;
+const SECTION_KEYS = ['commands', 'skills', 'mcp', 'workflows', 'plugins', 'rules', 'hooks', 'promptcuts', 'clis'] as const;
 type SectionKey = (typeof SECTION_KEYS)[number];
 
 /**
@@ -321,7 +321,7 @@ function hostCliSourceTag(source: string): string {
 
 /**
  * Render the host-CLI section. Host CLIs are host-global: declared in any
- * DotAgents repo's `cli/` (project > user > system > extras), installed to PATH
+ * DotAgents repo's `clis/` (project > user > system > extras), installed to PATH
  * rather than copied into a version home. They render identically in the overview
  * and in a per-agent detail view because every agent on the host shares them.
  * The source tag shows which repo layer declared each — so user-level and
@@ -331,7 +331,7 @@ function renderHostClisSection(cwd: string): void {
   const { statuses, errors } = listCliStatus(cwd);
   console.log(chalk.bold('\nHost CLIs\n'));
   if (statuses.length === 0) {
-    console.log(`  ${chalk.gray('none declared')} ${chalk.gray('— add one with `agents cli add <name>`')}`);
+    console.log(`  ${chalk.gray('none declared')} ${chalk.gray('— add one with `agents clis add <name>`')}`);
   } else {
     const nameWidth = Math.max(...statuses.map((s) => s.manifest.name.length));
     let anyMissing = false;
@@ -346,7 +346,7 @@ function renderHostClisSection(cwd: string): void {
       console.log(prefix + desc);
     }
     if (anyMissing) {
-      console.log(chalk.gray('  Install missing with `agents cli install`'));
+      console.log(chalk.gray('  Install missing with `agents clis install`'));
     }
   }
   for (const err of errors) {
@@ -1246,7 +1246,7 @@ async function showAgentResources(
   if (shouldRenderSection('promptcuts', filter)) {
     renderPromptcuts();
   }
-  if (shouldRenderSection('cli', filter)) {
+  if (shouldRenderSection('clis', filter)) {
     renderHostClisSection(cwd);
   }
 
@@ -1895,7 +1895,7 @@ export async function viewAction(
     rules: options?.rules,
     hooks: options?.hooks,
     promptcuts: options?.promptcuts,
-    cli: options?.cli,
+    clis: options?.clis,
   };
   const filterIsSet = SECTION_KEYS.some((k) => filter[k]);
 
@@ -2018,7 +2018,7 @@ export function registerViewCommand(program: Command): void {
     .option('--rules', 'Show only rules in the detail view.')
     .option('--hooks', 'Show only hooks in the detail view.')
     .option('--promptcuts', 'Show only promptcuts in the detail view.')
-    .option('--cli', 'Show only host CLIs (declared in cli/, installed to PATH).')
+    .option('--clis', 'Show only host CLIs (declared in clis/, installed to PATH).')
     .option('--merged', 'Show the merged, first-wins resource surface across all layers (project, user, extras, system) in one table with the winning layer per row.')
     .addHelpText('after', `
 Examples:

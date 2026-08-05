@@ -49,9 +49,15 @@ same flags — only host selection differs** (`launchAgent` in
 Claude alone adds `--session-id <id>` (minted up front for the resume/fork flow);
 that is the only per-agent addition and it never removes a flag. A **fork**
 (`strategyForForkAgent`) starts a fresh sibling session, so it is balanced by the
-same rule. **Resume is out of scope** — `--resume <id>` reattaches to a session
-whose account is already bound, so it reuses that account and carries no
-`--strategy` (`buildVersionedResumeCommand` in `src/core/prewarm.ts`).
+same rule.
+
+**Resume is also unified:** every resumed session — local, offloaded, or
+picked-host — goes through `agents run <agent> --interactive --resume <id>`,
+with `--host '<device>'` appended when the transcript lives on another machine.
+`agents run --resume` resumes under the version that started the session, so
+Factory never emits a per-harness raw binary (`claude -r`, `codex resume`,
+`cursor-agent --resume=`, etc.). The single source for resume command
+construction is `buildVersionedResumeCommand` in `src/core/prewarm.ts`.
 
 **There is no allowlist.** The single source of truth is `isAgentRunner(key)`
 (`src/core/agents.ts`) = `key !== 'shell'`, consumed by `usesManagedAgentLaunch`

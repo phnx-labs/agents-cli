@@ -14,7 +14,6 @@ import {
   bundleExists,
   bundleItemStore,
   bundlePolicy,
-  isHeadlessSecretsContext,
   keychainRef,
   readAndResolveBundleEnv,
   readBundle,
@@ -104,10 +103,8 @@ export function storeWriteToken(token: string): void {
 export function readWriteTokenFromBundle(): string {
   const { env } = readAndResolveBundleEnv(SHARE_BUNDLE, {
     caller: 'share',
-    // Explicit `agents share` command (a human published a file): a headless agent
-    // subprocess resolves broker-only, an interactive human may unlock. This is NOT
-    // an agent LAUNCH read (that is exec.ts's --secrets injection, always agentOnly).
-    agentOnly: isHeadlessSecretsContext(),
+    // Explicit share commands are reads, not authorization to authenticate.
+    agentOnly: true,
   });
   const token = env[SHARE_TOKEN_KEY];
   if (!token) {
@@ -168,8 +165,8 @@ export function readCloudflareCreds(
   }
   const { env } = readAndResolveBundleEnv(bundle, {
     caller: 'share',
-    // Explicit `agents share setup` provisioning read — not an agent launch.
-    agentOnly: isHeadlessSecretsContext(),
+    // Setup is still a read; only `agents secrets unlock` may authenticate.
+    agentOnly: true,
   });
   const find = (re: RegExp): string => {
     for (const [k, v] of Object.entries(env)) if (re.test(k) && v) return v;

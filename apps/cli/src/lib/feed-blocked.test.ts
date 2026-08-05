@@ -91,7 +91,7 @@ describe('blockBroadcastContext', () => {
 
   // A sink gated on minLevel:important must actually receive a block. Before this
   // wiring, publishBlock never reached the broadcast layer at all.
-  it('reaches an important-gated sink, with the ask and the fix in the message', () => {
+  it('reaches an important-gated sink, with the ask in the message', () => {
     const planned = planFeedBroadcast(
       { owner: { command: ['agents', 'notify', '{message}'], minLevel: 'important' } },
       blockBroadcastContext(block, { project: 'agents-cli' }),
@@ -102,7 +102,31 @@ describe('blockBroadcastContext', () => {
     expect(message).toContain('npm token expired, cannot publish');
     expect(message).toContain('Sent from');
     expect(message).toContain('yosemite-s1');
-    expect(message).toContain('agents focus 74a4893f');
+  });
+
+  // The phone message must be actionable WITHOUT a CLI: it shows the choices and
+  // the default-on-timeout, and never `agents focus <id>` (unusable from a phone).
+  it('renders options + default-on-timeout, and NOT a CLI reply command', () => {
+    const withChoices = buildDeclaredBlock(AGENT, {
+      text: 'publish now or wait for review?',
+      options: ['publish', 'wait'],
+      safeDefault: 'wait',
+      timeoutMinutes: 15,
+    });
+    const message = renderSinkArgv(['{message}'], blockBroadcastContext(withChoices))![0];
+    expect(message).toContain('publish now or wait for review?');
+    expect(message).toContain('Options: publish / wait');
+    expect(message).toContain('Default in 15 min: wait');
+    expect(message).not.toContain('agents focus');
+  });
+
+  // A decision block with no default still shows its choices, but no default line.
+  it('shows choices without a default line when the block has no safe default', () => {
+    const noDefault = buildDeclaredBlock(AGENT, { text: 'which config?', options: ['a', 'b'] });
+    const message = renderSinkArgv(['{message}'], blockBroadcastContext(noDefault))![0];
+    expect(message).toContain('Options: a / b');
+    expect(message).not.toContain('Default');
+    expect(message).not.toContain('agents focus');
   });
 
   // The placeholder regex is /\{([a-z]+)\}/g — lowercase only. A camelCase name

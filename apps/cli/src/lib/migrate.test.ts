@@ -5,7 +5,7 @@ import { spawnSync, spawn } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'url';
 
-import { migrateExtrasExtrasToAgentsExtras, migrateRoutineDeviceToDevices, migrateWatchdogSentinelToRoutine, repairSelfReferentialBinShims } from './migrate.js';
+import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateRoutineDeviceToDevices, migrateWatchdogSentinelToRoutine, repairSelfReferentialBinShims } from './migrate.js';
 import { toPosix } from './platform/index.js';
 import * as yaml from 'yaml';
 
@@ -626,5 +626,70 @@ describe('migrateWatchdogSentinelToRoutine', () => {
     migrateWatchdogSentinelToRoutine(sentinel, () => { throw new Error('routines dir unwritable'); });
     // Never silently lose the opt-in — the sentinel survives for a later attempt.
     expect(fs.existsSync(sentinel)).toBe(true);
+  });
+});
+
+describe('migrateCliDirToClis', () => {
+  function makeTempAgentsDir(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migrate-clis-'));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  it('renames cli/ to clis/ when only cli/ is present', () => {
+    const agentsDir = makeTempAgentsDir();
+    const cliDir = path.join(agentsDir, 'cli');
+    fs.mkdirSync(cliDir, { recursive: true });
+    fs.writeFileSync(path.join(cliDir, 'gh.yaml'), 'name: gh\n');
+
+    migrateCliDirToClis([agentsDir]);
+
+    expect(fs.existsSync(path.join(agentsDir, 'cli'))).toBe(false);
+    expect(fs.existsSync(path.join(agentsDir, 'clis'))).toBe(true);
+    expect(fs.existsSync(path.join(agentsDir, 'clis', 'gh.yaml'))).toBe(true);
+  });
+
+  it('is a no-op when cli/ is absent', () => {
+    const agentsDir = makeTempAgentsDir();
+    const clisDir = path.join(agentsDir, 'clis');
+    fs.mkdirSync(clisDir, { recursive: true });
+
+    migrateCliDirToClis([agentsDir]);
+
+    expect(fs.existsSync(clisDir)).toBe(true);
+  });
+
+  it('is idempotent — safe to call twice when cli/ is already gone', () => {
+    const agentsDir = makeTempAgentsDir();
+    const cliDir = path.join(agentsDir, 'cli');
+    fs.mkdirSync(cliDir, { recursive: true });
+
+    migrateCliDirToClis([agentsDir]);
+    // Second call: cli/ is gone, clis/ is present — should not throw.
+    expect(() => migrateCliDirToClis([agentsDir])).not.toThrow();
+  });
+
+  it('throws on conflict when both cli/ and clis/ exist', () => {
+    const agentsDir = makeTempAgentsDir();
+    fs.mkdirSync(path.join(agentsDir, 'cli'), { recursive: true });
+    fs.mkdirSync(path.join(agentsDir, 'clis'), { recursive: true });
+
+    expect(() => migrateCliDirToClis([agentsDir])).toThrow('Migration conflict');
+    // Both dirs must still be present — no silent data loss.
+    expect(fs.existsSync(path.join(agentsDir, 'cli'))).toBe(true);
+    expect(fs.existsSync(path.join(agentsDir, 'clis'))).toBe(true);
+  });
+
+  it('processes multiple dirs independently', () => {
+    const dir1 = makeTempAgentsDir();
+    const dir2 = makeTempAgentsDir();
+    fs.mkdirSync(path.join(dir1, 'cli'), { recursive: true });
+    // dir2 has no cli/ — should be a no-op
+
+    migrateCliDirToClis([dir1, dir2]);
+
+    expect(fs.existsSync(path.join(dir1, 'clis'))).toBe(true);
+    expect(fs.existsSync(path.join(dir1, 'cli'))).toBe(false);
+    expect(fs.existsSync(path.join(dir2, 'clis'))).toBe(false);
   });
 });

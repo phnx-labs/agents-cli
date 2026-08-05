@@ -34,7 +34,7 @@ import { getRunsDir } from './state.js';
 import type { AgentId } from './types.js';
 import { prepareJobHome, buildSpawnEnv, getJobHomePath } from './sandbox.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
-import { createTimer, maybeRotate, redactPrompt } from './events.js';
+import { createTimer, redactPrompt } from './events.js';
 import {
   normalizeMode,
   resolveHeadlessMode,
@@ -801,8 +801,6 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   if (config.command) {
     return executeCommandJobForeground(config);
   }
-
-  maybeRotate();
 
   const launch = await resolveRoutineLaunch(config);
   const primaryVersion = launch.chain[0]?.version ?? config.version;

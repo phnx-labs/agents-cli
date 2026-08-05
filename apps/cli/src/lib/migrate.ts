@@ -1491,7 +1491,7 @@ function containsOnlyDsStore(dir: string): boolean {
 function warnSystemOrphans(): void {
   const SHIPPED_ALLOWLIST = new Set<string>([
     // resource directories shipped by the npm package
-    'commands', 'hooks', 'skills', 'rules', 'mcp', 'cli', 'permissions', 'subagents', 'profiles', 'agents', 'routines',
+    'commands', 'hooks', 'skills', 'rules', 'mcp', 'clis', 'permissions', 'subagents', 'profiles', 'agents', 'routines',
     // top-level metadata files
     'agents.yaml', 'hooks.yaml', 'README.md', 'CHANGELOG.md',
     // git + repo metadata
@@ -1867,10 +1867,36 @@ export function migrateWatchdogSentinelToRoutine(
   console.error('Migrated watchdog: legacy enable sentinel → watchdog routine (kept enabled)');
 }
 
+/**
+ * Rename cli/ → clis/ in each of the given `.agents/` directories.
+ *
+ * One-way, idempotent: no-op when src is absent. Throws when both
+ * `<dir>/cli` and `<dir>/clis` exist — the user must resolve the conflict
+ * manually before proceeding. Exported for unit-testing with temp dirs.
+ */
+export function migrateCliDirToClis(agentsDirs: string[]): void {
+  for (const agentsDir of agentsDirs) {
+    const src = path.join(agentsDir, 'cli');
+    const dest = path.join(agentsDir, 'clis');
+    if (!fs.existsSync(src)) continue;
+    if (fs.existsSync(dest)) {
+      throw new Error(
+        `Migration conflict: both ${src} and ${dest} exist. ` +
+        `Remove or merge the old cli/ directory into clis/ manually.`,
+      );
+    }
+    fs.renameSync(src, dest);
+  }
+}
+
 /** Run all idempotent migrations. Safe to call multiple times. */
 export async function runMigration(): Promise<void> {
   // MUST run first: every other migrator reads SYSTEM_DIR (the new path).
   foldLegacySystemRepo();
+  const cliMigrateDirs = [USER_DIR, SYSTEM_DIR];
+  const projectDotAgents = path.join(process.cwd(), '.agents');
+  if (fs.existsSync(projectDotAgents)) cliMigrateDirs.push(projectDotAgents);
+  migrateCliDirToClis(cliMigrateDirs);
   migrateAgentsYaml();
   deleteSystemPromptsJson();
   migrateSystemConfigJson();

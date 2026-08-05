@@ -27,7 +27,7 @@ import {
   AUTH_SIGNATURES,
 } from '../lib/browser/login-detection.js';
 import { parseSecretRef } from '../lib/browser/secret-ref.js';
-import { readAndResolveBundleEnv, isHeadlessSecretsContext, bundleExists, readBundle, describeBundle } from '../lib/secrets/bundles.js';
+import { readAndResolveBundleEnv, bundleExists, readBundle, describeBundle } from '../lib/secrets/bundles.js';
 import { findBrowserPath, getPortOccupant, isLauncherScript } from '../lib/browser/chrome.js';
 import {
   listProfileCacheDirs,
@@ -1622,7 +1622,7 @@ function registerTaskCommands(browser: Command): void {
           process.exit(1);
         }
         try {
-          const { env } = readAndResolveBundleEnv(parsed.bundle, { caller: 'browser type', keys: [parsed.key], keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
+          const { env } = readAndResolveBundleEnv(parsed.bundle, { caller: 'browser type', keys: [parsed.key], keyMode: 'storage', agentOnly: true });
           if (!(parsed.key in env)) {
             console.error(`Key "${parsed.key}" not in bundle "${parsed.bundle}".`);
             process.exit(1);

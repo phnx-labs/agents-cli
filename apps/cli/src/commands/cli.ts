@@ -31,14 +31,14 @@ import { getUserAgentsDir } from '../lib/state.js';
 import { isPromptCancelled } from './utils.js';
 
 function userCliDir(): string {
-  return path.join(getUserAgentsDir(), 'cli');
+  return path.join(getUserAgentsDir(), 'clis');
 }
 
 /** Render the status table — one row per declared CLI. */
 function printStatus(rows: { manifest: CliManifest; installed: boolean }[]): void {
   if (rows.length === 0) {
     console.log(chalk.gray('No CLIs declared.'));
-    console.log(chalk.gray(`Create one with: agents cli add <name>`));
+    console.log(chalk.gray(`Create one with: agents clis add <name>`));
     return;
   }
   const nameWidth = Math.max(4, ...rows.map((r) => r.manifest.name.length));
@@ -55,32 +55,32 @@ function printStatus(rows: { manifest: CliManifest; installed: boolean }[]): voi
 
 export function registerCliCommands(program: Command): void {
   const cliCmd = program
-    .command('cli')
+    .command('clis')
     .description('Declare and install host CLI binaries (gh, higgsfield, glab, ...)')
     .addHelpText('after', `
-CLI manifests live in <repo>/cli/<name>.yaml and declare how to install a
-binary on the host. On a fresh machine, 'agents cli install' runs the first
+CLI manifests live in <repo>/clis/<name>.yaml and declare how to install a
+binary on the host. On a fresh machine, 'agents clis install' runs the first
 compatible method (npm > brew > script > binary) for every declared entry.
 
 Examples:
   # See which declared CLIs are installed on this host
-  agents cli list
+  agents clis list
 
   # Install everything that's missing
-  agents cli install
+  agents clis install
 
   # Install one
-  agents cli install higgsfield
+  agents clis install higgsfield
 
   # Show the manifest detail
-  agents cli view higgsfield
+  agents clis view higgsfield
 
   # Exit 0 if all declared CLIs are installed (use in CI / setup scripts)
-  agents cli check
+  agents clis check
 
 When to use:
   - After 'agents sync' on a new machine, to materialize host binaries
-  - In a team setup: commit cli/ entries so teammates get the same toolchain
+  - In a team setup: commit clis/ entries so teammates get the same toolchain
 `);
 
   cliCmd
@@ -234,7 +234,7 @@ When to use:
 
   cliCmd
     .command('add <name>')
-    .description('Scaffold a new manifest at ~/.agents/cli/<name>.yaml')
+    .description('Scaffold a new manifest at ~/.agents/clis/<name>.yaml')
     .option('--npm <pkg>', 'declare an npm install method')
     .option('--brew <formula>', 'declare a brew install method')
     .option('--script <url>', 'declare a curl|sh install method')
