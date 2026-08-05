@@ -255,9 +255,14 @@ with no per-file I/O:
 | Evidence | When | Strength |
 |---|---|---|
 | `version-home` | the path names a live or retired (`trash/`) home | strongest — the file lives there |
-| `recorded-version` | the path is under the `~/.claude` symlink and the row has a `version` | strong — the symlink moves, the recorded version does not |
+| `none` (signed-out home) | the path names a home that exists but has no `oauthAccount` | dark, named after that home — location beats any recorded version |
+| `recorded-version` | the path is outside every known home and the row has a `version` | strong — covers the `~/.claude` symlink and `runs/` archives; the symlink moves, the recorded version does not |
 | `symlink-target` | under `~/.claude` with no recorded version | weakest — current target is the only signal |
 | `none` | nothing matches | reported as `unattributed:<reason>` |
+
+Attribution is **Claude-only** today: it depends on the per-version home carrying an
+`oauthAccount`. A non-Claude session has a NULL `account_key` and rolls up under
+`unattributed:<agent>`.
 
 Rows carry `account_key` (the org-scoped identity, e.g. `claude:org=<uuid>`),
 `account_org`, and `account` (email, display-only). **Group on `account_key`**: two orgs
@@ -266,8 +271,9 @@ under one email — a Team seat and a personal Max plan — are separate rate-li
 caller uses it.
 
 What cannot be established is named, not guessed: a signed-out home, a backup mirror
-with no config, a version whose retired snapshots disagree, and rows indexed before
-schema v33 each get their own `unattributed:*` bucket.
+with no config, and a version whose retired snapshots disagree each get their own
+`unattributed:*` bucket. The v33 migration also clears the pre-v33 `account` email on
+any row it cannot attribute, rather than leaving a known-wrong address on display.
 
 ### Index lifecycle and disk I/O
 

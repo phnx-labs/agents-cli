@@ -23,16 +23,38 @@
  * I/O and does not need the transcript to still exist, which is what lets the v33
  * migration backfill already-indexed rows without re-parsing anything.
  *
- * 1. **The path names a version home.** Strongest: the file physically lives in that
- *    home, including a retired `trash/` snapshot, which keeps its `.claude.json`.
- * 2. **The path is under the `~/.claude` symlink, and the row records a version.**
- *    The symlink's target moves with `agents use`, so "whatever it points at now" is
- *    weak evidence for old rows — on the machine this was developed against, only 684
- *    of 1,334 such rows were written by the version the symlink currently names, and
- *    322 came from versions belonging to a *different* org. The recorded version is
- *    resolved to its own home instead.
- * 3. **Neither.** An explicitly dark bucket, labelled with why. Never folded into a
- *    real account and never dropped.
+ * 1. **The path names a home we can identify.** Strongest: the file physically lives in
+ *    that home, including a retired `trash/` snapshot, which keeps its `.claude.json`.
+ * 1b. **The path names a home that exists but is signed out.** Dark, named after that
+ *    home. The location proves which config dir Claude used, so this deliberately beats
+ *    a recorded version — attributing it to some other version's account would be a
+ *    guess dressed as evidence.
+ * 2. **The path is outside every known home, and the row records a version.** Resolve
+ *    that version's own home. Covers the mutable `~/.claude` symlink and the routine
+ *    archives under `<historyDir>/runs` that `readRoutineArchiveMeta` feeds in. The
+ *    symlink's target moves with `agents use`, so "whatever it points at now" is weak
+ *    evidence for old rows: on the machine this was developed against only 684 of 1,334
+ *    such rows came from the version the symlink currently names, and 322 came from
+ *    versions belonging to a *different* org.
+ * 3. **Under the symlink with no usable recorded version.** Its current target is the
+ *    only evidence there is, and the bucket says so via `evidence`.
+ * 4. **None of the above.** An explicitly dark bucket, labelled with why. Never folded
+ *    into a real account and never dropped.
+ *
+ * ## Harness scope: Claude only, deliberately
+ *
+ * Attribution is implemented for Claude and no other harness. It depends on the
+ * per-version home carrying an `oauthAccount` in `.claude.json`, which is what makes a
+ * home equal an account. The other harnesses do have per-version credential files
+ * (`CREDENTIAL_FILE_SEGMENTS` in lib/agents.ts), so the mechanism generalizes — codex
+ * stores an `auth.json` JWT, gemini a `google_accounts.json` — but each needs its own
+ * identity extractor and its own notion of a quota bucket, and none of them has the
+ * two-orgs-one-email problem that motivated keying on the org here.
+ *
+ * Until that lands, a non-Claude session has a NULL `account_key` and rolls up under
+ * `unattributed:<agent>` — named after its harness rather than implying we tried and
+ * failed. `--by account` on `agents cost` / `agents output` therefore reports Claude
+ * accounts plus one bucket per other harness.
  */
 
 import * as os from 'os';
@@ -74,6 +96,13 @@ interface HomeEntry {
 export interface ClaudeAccountIndex {
   /** Version- and trash-home prefixes, longest first. Excludes the `~/.claude` symlink. */
   entries: HomeEntry[];
+  /**
+   * Config-dir prefixes of homes that exist but carry no `oauthAccount`. Kept
+   * separately from `entries` so a transcript living in a signed-out home is reported
+   * against THAT home rather than falling through to its recorded version: the file's
+   * location is what proves which config dir Claude was pointed at.
+   */
+  darkHomes: Array<{ prefix: string; version: string | null }>;
   /**
    * Claude CLI version → the account that version ran as. `'ambiguous'` when retired
    * snapshots of one version disagree and no live home settles it, which is reported
@@ -146,12 +175,20 @@ function listDirs(dir: string): string[] {
  */
 export function buildClaudeAccountIndex(): ClaudeAccountIndex {
   const entries: HomeEntry[] = [];
+  const darkHomes: Array<{ prefix: string; version: string | null }> = [];
   const liveByVersion = new Map<string, ClaudeAccountBucket>();
   const trashByVersion = new Map<string, ClaudeAccountBucket[]>();
 
   const addHome = (home: string, version: string | null, retired: boolean): void => {
     const bucket = bucketForHome(home, 'version-home');
-    if (!bucket) return;
+    if (!bucket) {
+      // The home exists on disk but has no usable identity. Record its prefix so
+      // resolution can name it instead of guessing from a recorded version.
+      if (fs.existsSync(path.join(home, '.claude'))) {
+        darkHomes.push({ prefix: path.join(home, '.claude'), version });
+      }
+      return;
+    }
     entries.push({ prefix: path.join(home, '.claude'), bucket });
     if (!version) return;
     if (retired) {
@@ -195,8 +232,11 @@ export function buildClaudeAccountIndex(): ClaudeAccountIndex {
   // Longest prefix first so a nested home beats a shorter ancestor.
   entries.sort((a, b) => b.prefix.length - a.prefix.length);
 
+  darkHomes.sort((a, b) => b.prefix.length - a.prefix.length);
+
   return {
     entries,
+    darkHomes,
     byVersion,
     symlinkBucket: bucketForHome(HOME, 'symlink-target'),
     symlinkPrefix: path.join(HOME, '.claude'),
@@ -224,25 +264,38 @@ export function resolveClaudeAccount(
   filePath: string,
   recordedVersion?: string | null,
 ): ClaudeAccountBucket {
-  // Tier 1 — the file physically lives in a known home.
+  // Tier 1 — the file physically lives in a home we can identify.
   for (const entry of index.entries) {
     if (filePath.startsWith(entry.prefix + path.sep)) return entry.bucket;
   }
 
-  if (filePath.startsWith(index.symlinkPrefix + path.sep)) {
-    // Tier 2 — the symlink's target moves; the recorded version does not.
-    if (recordedVersion) {
-      const byVersion = index.byVersion.get(recordedVersion);
-      if (byVersion === 'ambiguous') {
-        return unattributed(`ambiguous history for version ${recordedVersion}`);
-      }
-      if (byVersion) return byVersion;
-      return unattributed(`no home for version ${recordedVersion}`);
+  // Tier 1b — it lives in a home that exists but is signed out. The location proves
+  // which config dir Claude used, so this beats any recorded version: reporting it
+  // against a *different* version's account would be a guess dressed as evidence.
+  for (const dark of index.darkHomes) {
+    if (filePath.startsWith(dark.prefix + path.sep)) {
+      return unattributed(dark.version ? `signed-out home ${dark.version}` : 'signed-out home');
     }
-    // Tier 3 — no recorded version. The current target is the only evidence there is.
-    if (index.symlinkBucket) return index.symlinkBucket;
   }
 
+  // Tier 2 — outside every known home. The recorded version names the home that ran,
+  // which covers both the mutable ~/.claude symlink and the routine/run archives under
+  // <historyDir>/runs that readRoutineArchiveMeta feeds through this same path.
+  if (recordedVersion) {
+    const byVersion = index.byVersion.get(recordedVersion);
+    if (byVersion === 'ambiguous') {
+      return unattributed(`ambiguous history for version ${recordedVersion}`);
+    }
+    if (byVersion) return byVersion;
+  }
+
+  // Tier 3 — under the live symlink with no usable recorded version. Its current
+  // target is the only evidence that exists.
+  if (filePath.startsWith(index.symlinkPrefix + path.sep) && index.symlinkBucket) {
+    return index.symlinkBucket;
+  }
+
+  if (recordedVersion) return unattributed(`no home for version ${recordedVersion}`);
   const version = versionFromPath(filePath);
   if (version) return unattributed(`signed-out home ${version}`);
   if (filePath.includes(`${path.sep}backups${path.sep}claude${path.sep}`)) {

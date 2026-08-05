@@ -878,8 +878,13 @@ function backfillClaudeAccounts(db: Database.Database): void {
   ).all() as Array<{ id: string; file_path: string; version: string | null }>;
   if (rows.length === 0) return;
 
+  // `account` is overwritten, not COALESCEd. Every pre-v33 row carries the wrong
+  // globally-resolved email; keeping it on a row we could not attribute would leave a
+  // known-false address on display (commands/sessions.ts prints it, and its fuzzy
+  // matcher scores on it) and would disagree with the scan path, which writes
+  // `account = excluded.account` unconditionally. A dark row reads NULL.
   const update = db.prepare(
-    `UPDATE sessions SET account_key = ?, account_org = ?, account = COALESCE(?, account) WHERE id = ?`,
+    `UPDATE sessions SET account_key = ?, account_org = ?, account = ? WHERE id = ?`,
   );
   for (const row of rows) {
     const bucket = resolveClaudeAccount(index, row.file_path ?? '', row.version);
@@ -932,6 +937,23 @@ export function getDB(): Database.Database {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity DESC)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_origin ON sessions(origin)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_routine_run_id ON sessions(routine_run_id)`);
+  // Account attribution repair. Two ways a Claude row ends up wrong even at v33:
+  // an older CLI (whose INSERT does not name the column) writes NULL, and a DB
+  // migrated by a build that predates the "clear the stale email on a dark row" fix
+  // keeps a known-wrong address. The v33 migration cannot fix either — it never runs
+  // again. Cheap guard first so the common case is one indexed lookup, then repair.
+  // Same shape as the `machine` repair below, for the same reason.
+  {
+    const needsRepair = db.prepare(`
+      SELECT 1 FROM sessions
+      WHERE agent = 'claude'
+        AND (account_key IS NULL
+             OR (account_key LIKE 'unattributed:%' AND account IS NOT NULL))
+      LIMIT 1
+    `).get();
+    if (needsRepair) backfillClaudeAccounts(db);
+  }
+
   // machine column + indexes: only after the column is guaranteed present.
   // Fresh SCHEMA (v17) includes the column; older DBs get it from migrate v17.
   // If a partial upgrade left schema_version ahead of the column, repair here.
@@ -1800,7 +1822,12 @@ export function upsertSessionsBatch(
         writeResourceUsageFromTallies(meta.id, meta.skillsUsed ?? [], meta.slashCommandsUsed ?? [], meta.cwd);
       }
       try {
-      upsert.run({
+      // Typed, not a bare literal: bun binds named parameters in strict mode, where a
+      // MISSING key throws (node binds NULL instead). A silently dropped key therefore
+      // breaks only the shipped binary's runtime, and the per-row catch below swallows
+      // it — the exact shape of the bug that shipped account_key unbound. Annotating
+      // against SessionRow makes tsc reject the next omission.
+      const row: SessionRow = {
         id: meta.id,
         short_id: meta.shortId,
         agent: meta.agent,
@@ -1809,6 +1836,8 @@ export function upsertSessionsBatch(
         routine_run_id: meta.routineRunId ?? null,
         version: meta.version ?? null,
         account: meta.account ?? null,
+        account_key: meta.accountKey ?? null,
+        account_org: meta.accountOrg ?? null,
         mode: meta.mode ?? actorIndex.get(meta.id)?.mode ?? null,
         timestamp: meta.timestamp,
         last_activity: resolveLastActivity(meta, scan),
@@ -1844,7 +1873,8 @@ export function upsertSessionsBatch(
         initiated_by: meta.initiatedBy ?? actorIndex.get(meta.id)?.initiatedBy ?? null,
         used_browser: toolUsage.usedBrowser ? 1 : 0,
         used_computer: toolUsage.usedComputer ? 1 : 0,
-      });
+      };
+      upsert.run(row);
       delText.run(meta.id);
       insText.run(
         meta.id,
@@ -2424,10 +2454,11 @@ export function queryUsageRollup(
       : options.groupBy === 'project'
         ? `IFNULL(NULLIF(project, ''), '(no project)')`
         : options.groupBy === 'account'
-          // Rows predating the v33 backfill, and non-Claude agents, have no
-          // account_key. Name that explicitly rather than folding them into a
-          // real account's total.
-          ? `IFNULL(NULLIF(account_key, ''), 'unattributed:not-indexed')`
+          // A NULL account_key means this harness has no account attribution yet —
+          // the mechanism is Claude-only today (see lib/session/claude-accounts.ts).
+          // Bucket per agent so the rows are named honestly instead of being called
+          // "not indexed", which they are not, and instead of joining a real account.
+          ? `IFNULL(NULLIF(account_key, ''), 'unattributed:' || agent)`
           // ISO timestamps are lexicographically date-sortable; the date is the
           // first 10 chars (YYYY-MM-DD).
           : `substr(timestamp, 1, 10)`;

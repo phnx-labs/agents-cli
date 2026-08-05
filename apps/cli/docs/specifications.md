@@ -275,7 +275,12 @@ SSH access (§7); rendering sessions that no harness produced.
   (`lib/session/discover.ts`). Evidence tiers, strongest first: the path names a
   version home (including a retired `trash/` snapshot, which keeps its
   `.claude.json`); the path is under the mutable `~/.claude` symlink and the row
-  records a version, which resolves to that version's own home; neither.
+  records a version, which resolves to that version's own home (this covers the
+  `runs/` routine archives too); neither. A path naming a home that exists but is
+  signed out MUST resolve dark against that home rather than fall through to its
+  recorded version — the file's location is what proves which config dir was used.
+  Attribution is implemented for Claude only; other harnesses MUST report a NULL
+  `account_key` rather than a guessed one.
 - **SES-39 (MUST).** Grouping MUST key on the org-scoped `account_key`
   (`claude:org=<uuid>`), never on the email: two orgs under one email (a Team seat
   and a personal Max plan) are separate rate-limit buckets, the same invariant
@@ -284,8 +289,9 @@ SSH access (§7); rendering sessions that no harness produced.
   `unattributed:<reason>`, with distinct reasons in distinct buckets, and MUST NOT
   be dropped or folded into a real account. This includes retired homes that are
   signed out, backup mirrors (no `.claude.json`), versions whose retired snapshots
-  disagree, and — in `--by account` rollups — rows indexed before schema v33
-  (`unattributed:not-indexed`).
+  disagree, and — in `--by account` rollups — harnesses with no attribution support
+  (`unattributed:<agent>`). The v33 backfill MUST also clear the pre-v33 `account`
+  email on a row it cannot attribute, since that value is known-wrong.
 
 #### 3.4 Lifecycle
 

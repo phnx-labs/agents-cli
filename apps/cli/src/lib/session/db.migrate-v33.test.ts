@@ -122,7 +122,7 @@ const SEED: Array<{ id: string; file_path: string; version: string | null; expec
   seed.close();
 }
 
-const { getDB, SCHEMA_VERSION, queryUsageRollup } = await import('./db.js');
+const { getDB, SCHEMA_VERSION, queryUsageRollup, closeDB } = await import('./db.js');
 
 describe('schema migration v32 -> v33 (per-account attribution)', () => {
   it('adds account_key / account_org and its index', () => {
@@ -150,6 +150,9 @@ describe('schema migration v32 -> v33 (per-account attribution)', () => {
       expect(row.account_org, `${seed.id} org`).toBe(seed.expectOrg);
       if (seed.expectOrg === null) {
         expect(row.account_key, `${seed.id} dark`).toContain('unattributed:');
+        // The pre-v33 email was resolved globally and is known-wrong. A row we could
+        // not attribute must not keep displaying it.
+        expect(row.account, `${seed.id} stale email cleared`).toBeNull();
       } else {
         expect(row.account_key, `${seed.id} key`).toContain('claude:org=');
       }
@@ -191,8 +194,9 @@ describe('schema migration v32 -> v33 (per-account attribution)', () => {
   it('rolls up by account, naming un-indexed rows instead of merging them', () => {
     const rows = queryUsageRollup({ groupBy: 'account' });
     const keys = rows.map((r) => r.key);
-    // The codex row has no account_key and must surface under its own explicit key.
-    expect(keys).toContain('unattributed:not-indexed');
+    // The codex row has no account_key. Attribution is Claude-only today, so it is
+    // named after its harness — calling it "not indexed" would be false.
+    expect(keys).toContain('unattributed:codex');
     // Every seeded Claude row is accounted for exactly once.
     const total = rows.reduce((s, r) => s + r.sessionCount, 0);
     expect(total).toBe(SEED.length + 1);
@@ -204,7 +208,7 @@ describe('schema migration v32 -> v33 (per-account attribution)', () => {
     expect(org.label).toMatch(/^.+ <.+@.+>$/);
 
     // Dark buckets already read as prose, so they carry no separate label.
-    const dark = rows.find((r) => r.key === 'unattributed:not-indexed')!;
+    const dark = rows.find((r) => r.key === 'unattributed:codex')!;
     expect(dark.label ?? null).toBeNull();
   });
 
@@ -212,5 +216,31 @@ describe('schema migration v32 -> v33 (per-account attribution)', () => {
     const rows = queryUsageRollup({ groupBy: 'account' })
       .filter((r) => r.label?.includes('dev@turing.example'));
     expect(rows).toHaveLength(2);
+  });
+});
+
+describe('v33 self-healing repair on an already-migrated DB', () => {
+  it('clears a stale email left on a dark row and fills a NULL account_key', () => {
+    // Two ways a v33 DB still goes wrong: an older CLI writes NULL (its INSERT does
+    // not name the column), and a DB migrated by a build predating the "clear the
+    // stale email" fix keeps a known-wrong address. The migration cannot fix either —
+    // it never runs again — so getDB() repairs on open.
+    const db = getDB();
+    db.prepare(`UPDATE sessions SET account = 'stale@wrong.example' WHERE id = 'out-1'`).run();
+    db.prepare(`UPDATE sessions SET account_key = NULL, account_org = NULL WHERE id = 'ms-1'`).run();
+
+    // Force a fresh open so the repair guard runs.
+    closeDB();
+    const repaired = getDB();
+
+    const dark = repaired.prepare(`SELECT account, account_key FROM sessions WHERE id='out-1'`)
+      .get() as { account: string | null; account_key: string };
+    expect(dark.account).toBeNull();
+    expect(dark.account_key).toContain('unattributed:');
+
+    const refilled = repaired.prepare(`SELECT account_key, account_org FROM sessions WHERE id='ms-1'`)
+      .get() as { account_key: string | null; account_org: string | null };
+    expect(refilled.account_key).toContain('claude:org=');
+    expect(refilled.account_org).toBe('ModSquad');
   });
 });

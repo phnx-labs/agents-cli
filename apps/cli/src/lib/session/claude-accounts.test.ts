@@ -165,6 +165,27 @@ describe('resolveClaudeAccount', () => {
     expect(new Set([backup.key, unknown.key, signedOut.key]).size).toBe(3);
   });
 
+  it('attributes a routine archive outside every home by its recorded version', () => {
+    // readRoutineArchiveMeta feeds paths under <historyDir>/runs through the same
+    // resolver. They match no home prefix, so only the recorded version can place them.
+    const index = buildClaudeAccountIndex();
+    const archive = path.join(historyDir(), 'runs', 'job-1', 'transcript.jsonl');
+    const bucket = resolveClaudeAccount(index, archive, '2.1.220');
+    expect(bucket.attributed).toBe(true);
+    expect(bucket.orgName).toBe('Turing Labs');
+    expect(bucket.evidence).toBe('recorded-version');
+  });
+
+  it('prefers a signed-out home over the recorded version, since location is proof', () => {
+    // The file lives in 2.1.170's signed-out home but records version 2.1.220, which IS
+    // signed in. The location proves which config dir Claude used, so this stays dark
+    // rather than borrowing another version's account.
+    const index = buildClaudeAccountIndex();
+    const bucket = resolveClaudeAccount(index, transcript(versionHome('2.1.170'), 'q'), '2.1.220');
+    expect(bucket.attributed).toBe(false);
+    expect(bucket.key).toBe('unattributed:signed-out home 2.1.170');
+  });
+
   it('never returns null, so no transcript is silently dropped', () => {
     const index = buildClaudeAccountIndex();
     for (const p of ['', '/nowhere/at/all.jsonl', 'relative.jsonl']) {

@@ -23,7 +23,21 @@
   the version the symlink currently names.
 
   Retired (`trash/`) version homes keep their `.claude.json`, so their transcripts stay
-  attributable instead of going dark.
+  attributable instead of going dark. A transcript sitting in a home that exists but is
+  signed out stays dark and is named after that home: its location proves which config
+  dir Claude used, so borrowing another version's account would be a guess.
+
+  **Harness scope: Claude only.** Attribution depends on the per-version home carrying
+  an `oauthAccount`. The other harnesses have their own per-version credential files, so
+  the mechanism generalizes, but each needs its own identity extractor and quota-bucket
+  notion. Until then a non-Claude session has no `account_key` and rolls up under
+  `unattributed:<agent>`, named after its harness rather than implying a failed attempt.
+
+- **`upsertSessionsBatch` bound its named parameters from an untyped literal.** bun binds
+  named parameters in strict mode, where a MISSING key throws, while node binds NULL — so
+  a key omitted from that literal broke only the shipped standalone binary, and the
+  per-row guard swallowed it into a silently skipped session. The literal is now typed
+  against `SessionRow`, so the compiler rejects the next omission.
 
 ### Added
 
