@@ -1,14 +1,16 @@
-- **Watchdog files a feed block when a session genuinely needs the human.**
-  Three paths now route the "needs human" signal to the owner's feed instead of
-  silently dropping it. (1) Brain says stuck + session is addressable: the watchdog
+- **Watchdog files a feed block only when a session genuinely needs the human.**
+  When the smart brain concludes a stalled session must be left for the human
+  (`needsHuman`), the watchdog now surfaces that on the owner's feed instead of
+  dropping it in a menubar-only flag. Two cases: if the session is addressable it
   injects a self-file reminder into the agent ("You appear stuck. File it: `agents
-  feed post … --blocked`") so the agent can declare its own block. (2) Session is
-  un-addressable (refuse branch): the watchdog publishes a declared block on the
-  agent's behalf. (3) Hands-off policy — would nudge but policy prevents it: same
-  as (2). All three paths are gated by the existing cooldown ledger (at most once per
-  `WATCHDOG_COOLDOWN_MS` window) and are no-ops when a block for the session already
-  exists, preventing double-paging. Deterministic skips (session completed, no stall)
-  never trigger the block path. Source:
+  feed post … --blocked`") so the agent declares its own block; if it is
+  un-addressable — the case where the watchdog can't even reach the terminal to
+  remind it — the watchdog files a declared block on the agent's behalf so the owner
+  is still paged. Paging fires **only** on this confirmed-needs-human path: a plain
+  nudge-worthy drive-forward poke (un-addressable or under a hands-off policy) is
+  flagged for the tray but never texts the owner. Both paths are gated by the
+  existing cooldown ledger (at most once per `WATCHDOG_COOLDOWN_MS` window) and are
+  no-ops when a block for the session already exists, so no double-paging. Source:
   `apps/cli/src/lib/watchdog/runner.ts` (`NudgeDecision.needsHuman`,
-  `WatchdogTickOptions.publishBlockFn`, skip/refuse/handsoff branches),
+  `WatchdogTickOptions.publishBlockFn`, the needs-human skip branch),
   `apps/cli/src/lib/watchdog/runner.test.ts`.

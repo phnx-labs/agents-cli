@@ -992,7 +992,7 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
             // Determine addressability without planning the full nudge (no text needed).
             const resolution = resolveInjectTargetForSession(session, { allowGhosttyFocus: opts.allowGhosttyFocus });
             if (resolution.addressable) {
-              // Inject a reminder asking the agent to self-file a feed block.
+              // Addressable → inject a reminder asking the agent to self-file a feed block.
               const reminderText =
                 'You appear stuck. If you genuinely need Muqsit, file it: ' +
                 'agents feed post "<one-line ask>" --blocked --default "<safe default>". ' +
@@ -1003,6 +1003,24 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
                 // Swallow inject errors — reminder is best-effort; flag set below.
               }
               ledgerUpdates[session.sessionId] = nowMs;
+            } else {
+              // Un-addressable → we can't reach the terminal to remind it, so the ONLY
+              // way to reach Muqsit is to file a declared block on the agent's behalf.
+              // This is the most important case: the session genuinely needs the human
+              // AND the watchdog can't even nudge it. Never let it silently vanish.
+              const mailboxId = mailboxIdForActiveSession(session) ?? session.sessionId;
+              const machineHost = session.provenance?.host ?? 'unknown';
+              const runtime = session.kind;
+              try {
+                const declaredBlock = buildDeclaredBlock(
+                  { sessionId: session.sessionId, mailboxId, host: machineHost, runtime, cwd: session.cwd },
+                  { text: `Session genuinely needs Muqsit and is un-addressable — ${decision.reason}. Needs attention.` },
+                );
+                publishBlockFn(declaredBlock);
+                ledgerUpdates[session.sessionId] = nowMs;
+              } catch {
+                // publishBlock failure is non-fatal — best-effort owner page.
+              }
             }
           }
         }
@@ -1021,31 +1039,13 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
 
     if (plan.via === 'refuse') {
       // No addressable rail and not headless-resumable — flag, NEVER guess.
-      // File a declared block on the agent's behalf so the owner sees it on the feed.
-      // Gated by the same cooldown as a nudge — at most once per cooldown window.
+      // This branch is reached ONLY for a nudge-worthy (decision.nudge === true)
+      // drive-forward poke, which is NEVER needsHuman (needsHuman is set only when
+      // decision.nudge === false). So we do NOT page the owner here — a short "just
+      // needs a poke" stall must not text Muqsit's phone. Owner-paging for an
+      // un-addressable session happens only on the confirmed needsHuman skip path
+      // above. Here we only flag it for the tray.
       flags[session.sessionId] = { reason: plan.reason, host: session.host, atMs: nowMs };
-      if (opts.nudge && session.sessionId) {
-        const lastNudgeMs = ledger[session.sessionId] ?? 0;
-        const withinCooldown = nowMs - lastNudgeMs < thresholds.cooldownMs;
-        if (!withinCooldown) {
-          const existingBlock = openBlockFor(session);
-          if (existingBlock === null) {
-            const mailboxId = mailboxIdForActiveSession(session) ?? session.sessionId;
-            const machineHost = session.provenance?.host ?? 'unknown';
-            const runtime = session.kind;
-            try {
-              const declaredBlock = buildDeclaredBlock(
-                { sessionId: session.sessionId, mailboxId, host: machineHost, runtime, cwd: session.cwd },
-                { text: `Session stalled and un-addressable — ${plan.reason}. Needs attention.` },
-              );
-              publishBlockFn(declaredBlock);
-              ledgerUpdates[session.sessionId] = nowMs;
-            } catch {
-              // publishBlock failure is non-fatal — the flag is already set for the tray.
-            }
-          }
-        }
-      }
       outcomes.push({
         ...base, decision: 'skip', addressable: false,
         reason: `nudge-worthy but un-addressable — ${plan.reason}`,
@@ -1055,36 +1055,19 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     }
 
     // handsoff = detect + flag, but never deliver via inject/mailbox.
-    // File a declared block on the agent's behalf so the owner sees it on the feed.
-    // Gated by the same cooldown as a nudge — at most once per cooldown window.
+    // This branch is reached ONLY for a nudge-worthy (decision.nudge === true)
+    // drive-forward poke, which is NEVER needsHuman. A hands-off policy means "don't
+    // nudge it forward" — it must NOT translate into paging Muqsit for a poke. So we
+    // only flag it for the tray, no owner page. A genuinely needs-human session (even
+    // under hands-off) is paged by the confirmed-needsHuman skip path above, which
+    // does not consult policy — hands-off silences the forward nudge, not the
+    // "it's actually stuck" signal.
     if (policy === 'handsoff') {
       flags[session.sessionId] = {
         reason: `handsoff: would nudge via ${viaLabel(plan)} but policy is hands-off`,
         host: session.host,
         atMs: nowMs,
       };
-      if (opts.nudge && session.sessionId) {
-        const lastNudgeMs = ledger[session.sessionId] ?? 0;
-        const withinCooldown = nowMs - lastNudgeMs < thresholds.cooldownMs;
-        if (!withinCooldown) {
-          const existingBlock = openBlockFor(session);
-          if (existingBlock === null) {
-            const mailboxId = mailboxIdForActiveSession(session) ?? session.sessionId;
-            const machineHost = session.provenance?.host ?? 'unknown';
-            const runtime = session.kind;
-            try {
-              const declaredBlock = buildDeclaredBlock(
-                { sessionId: session.sessionId, mailboxId, host: machineHost, runtime, cwd: session.cwd },
-                { text: `Session stalled (hands-off policy) — would nudge via ${viaLabel(plan)}. Needs attention.` },
-              );
-              publishBlockFn(declaredBlock);
-              ledgerUpdates[session.sessionId] = nowMs;
-            } catch {
-              // publishBlock failure is non-fatal — the flag is already set for the tray.
-            }
-          }
-        }
-      }
       outcomes.push({
         ...base, decision: 'nudge', addressable, rail, via: plan.via, injected: false,
         reason: `handsoff: flagged, not delivered (would nudge via ${viaLabel(plan)})`,
