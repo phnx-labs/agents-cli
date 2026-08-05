@@ -1,0 +1,1 @@
+- **`projects status --fleet` no longer labels this box `@local`.** Local sessions from `getActiveSessions()` lacked `machine`; host-grouped agents stamped remotes only. Locals are now filled with `machineId()` before rollup so the agents roster and fleet lines agree. Source: `apps/cli/src/lib/project-status.ts`, `commands/projects.ts`.
