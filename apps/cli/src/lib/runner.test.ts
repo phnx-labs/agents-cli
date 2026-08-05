@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { archiveRoutineTranscripts, executeJob, executeJobDetached, monitorRunningJobs, resolveRoutineLaunch, routineSpawnCwd } from './runner.js';
+import { spawn } from 'child_process';
+import { archiveRoutineTranscripts, executeJob, executeJobDetached, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd } from './runner.js';
 import { getRunDir, writeRunMeta } from './routines.js';
 import type { JobConfig, RunMeta } from './routines.js';
 import type { RotateCandidate, RotateResult } from './rotate.js';
@@ -293,6 +294,7 @@ describe('command-mode routines (executeJobDetached — daemon/cron path)', () =
     expect(final.command).toBe('exit 0');
     expect(final.duration).toBeGreaterThanOrEqual(0);
     expect(final.errorMessage).toBeUndefined();
+    expect(final.timeoutMs).toBe(60_000);
     // exit-code file is the posix restart-recovery source of truth (the sh subshell
     // wrapper writes it). Windows records status via child.on('exit') only — no file.
     if (process.platform !== 'win32') {
@@ -309,6 +311,56 @@ describe('command-mode routines (executeJobDetached — daemon/cron path)', () =
     expect(final.exitCode).toBe(3);
     expect(final.duration).toBeGreaterThanOrEqual(0);
     expect(final.errorMessage).toBeUndefined();
+  });
+
+  it('allows only one detached execution of the same routine at a time', async () => {
+    const command = `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 600)"`;
+    const config = commandConfig('cmd-det-single-flight', command);
+
+    const first = await executeJobDetached(config);
+    await expect(executeJobDetached(config)).rejects.toBeInstanceOf(RoutineAlreadyRunningError);
+
+    const final = await waitTerminal(config.name, first.runId);
+    expect(final.status).toBe('completed');
+  });
+
+  it('monitorRunningJobs kills a detached process after its persisted deadline', async () => {
+    const jobName = 'cmd-det-restart-timeout';
+    jobs.push(jobName);
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], {
+      stdio: 'ignore',
+      detached: process.platform !== 'win32',
+      windowsHide: true,
+    });
+    const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    const runId = 'restart-timeout-run';
+    const meta: RunMeta = {
+      jobName,
+      runId,
+      command: 'long-running command',
+      pid: child.pid ?? null,
+      spawnedAt: Date.now(),
+      timeoutMs: 25,
+      status: 'running',
+      startedAt: new Date(Date.now() - 100).toISOString(),
+      completedAt: null,
+      exitCode: null,
+    };
+    fs.mkdirSync(getRunDir(jobName, runId), { recursive: true });
+    writeRunMeta(meta);
+
+    monitorRunningJobs();
+
+    const final = JSON.parse(
+      fs.readFileSync(path.join(getRunDir(jobName, runId), 'meta.json'), 'utf-8'),
+    );
+    expect(final.status).toBe('timeout');
+    expect(final.errorMessage).toBe('exceeded configured timeout');
+    await Promise.race([
+      exited,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timed-out child stayed alive')), 1000)),
+    ]);
+    expect(() => process.kill(child.pid!, 0)).toThrow();
   });
 });
 
