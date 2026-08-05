@@ -208,6 +208,37 @@ describe('forkNeedsWizard / addNeedsWizard — when the interactive wizard shoul
   });
 });
 
+describe('the wizard-vs-error gate uses isInteractiveTerminal(), not a stdout-only check', () => {
+  // Regression test: the `add`/`fork` actions originally gated the wizard on
+  // `process.stdout.isTTY` alone. That hangs for real — piped stdin with a
+  // forced/inherited stdout TTY (e.g. `agents harness add < /dev/null` under a
+  // process-substitution or captured-stdout runner) reads as "interactive",
+  // launches the wizard, and @inquirer/prompts' select() then blocks forever
+  // reading a stdin that never delivers a keypress. `isInteractiveTerminal()`
+  // (../commands/utils.ts) requires BOTH stdin and stdout to be a TTY, closing
+  // that gap. This test pins the split-TTY case the hang was found in.
+  const origIn = process.stdin.isTTY;
+  const origOut = process.stdout.isTTY;
+  afterEach(() => {
+    (process.stdin as { isTTY?: boolean }).isTTY = origIn;
+    (process.stdout as { isTTY?: boolean }).isTTY = origOut;
+  });
+
+  it('is false when stdout is a TTY but stdin is piped (the hang scenario)', async () => {
+    (process.stdout as { isTTY?: boolean }).isTTY = true;
+    (process.stdin as { isTTY?: boolean }).isTTY = false;
+    const { isInteractiveTerminal } = await import('./utils.js');
+    expect(isInteractiveTerminal()).toBe(false);
+  });
+
+  it('is true only when both stdin and stdout are a TTY', async () => {
+    (process.stdout as { isTTY?: boolean }).isTTY = true;
+    (process.stdin as { isTTY?: boolean }).isTTY = true;
+    const { isInteractiveTerminal } = await import('./utils.js');
+    expect(isInteractiveTerminal()).toBe(true);
+  });
+});
+
 describe('applyFromSecrets — copy a value out of an agents secrets bundle', () => {
   class MemoryKeychain implements KeychainBackend {
     store = new Map<string, string>();

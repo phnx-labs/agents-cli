@@ -14,6 +14,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { addProfile, ensureProviderToken, applyFromSecrets, type AddProfileOptions } from './profiles.js';
+import { isInteractiveTerminal } from './utils.js';
 import {
   listProfiles,
   readProfile,
@@ -410,7 +411,7 @@ Examples:
     .action(async (name: string | undefined, opts: AddProfileOptions & ForkOptions) => {
       try {
         if (addNeedsWizard(name, opts)) {
-          if (!process.stdout.isTTY) {
+          if (!isInteractiveTerminal()) {
             throw new Error(
               "'agents harness add' needs --preset or --host + --model (or a name and an interactive terminal for the wizard).",
             );
@@ -460,7 +461,7 @@ Examples:
     .action(async (source: string | undefined, name: string | undefined, opts: ForkOptions) => {
       try {
         if (forkNeedsWizard(source, name, opts)) {
-          if (!process.stdout.isTTY) {
+          if (!isInteractiveTerminal()) {
             throw new Error("'agents harness fork' needs <source> and <name> (or an interactive terminal for the wizard).");
           }
           const wiz = await runHarnessWizard();
@@ -525,6 +526,17 @@ Examples:
   cmd
     .command('rename <old-name> <new-name>')
     .description('Rename a custom harness (updates forkedFrom lineage on any harness forked from it). Errors on a name collision.')
+    .addHelpText(
+      'after',
+      `
+Examples:
+  # Rename 'spark' to 'muse'
+  agents harness rename spark muse
+
+  # Rename then run under the new name
+  agents harness rename deepseek ds && agents run ds "hello"
+`,
+    )
     .action((oldName: string, newName: string) => {
       try {
         renameProfile(oldName, newName);

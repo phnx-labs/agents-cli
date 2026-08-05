@@ -136,9 +136,15 @@ export interface AddProfileOptions {
  * silent — no repeat Touch ID prompt.
  *
  * Provider precedence: an explicit `--auth-provider` on the same call always
- * wins (freshest intent); otherwise the profile's own `provider` (so editing an
+ * wins (freshest intent); otherwise, only when the profile already has a real
+ * auth binding (`profile.auth` is set), its own `provider` (so editing an
  * already-provisioned harness rotates its existing key without repeating
- * `--auth-provider`); otherwise the bundle's own name.
+ * `--auth-provider`); otherwise the bundle's own name. The `profile.auth`
+ * gate matters because `profileFromHostModel`/`forkProfile` default
+ * `profile.provider` to the *host* id (e.g. `claude`) even when no auth is
+ * attached yet — trusting that default here would silently overwrite the
+ * host's own keychain item (`agents-cli.claude.token`) on a bare `--host
+ * --model --from-secrets` add with no `--auth-provider`.
  *
  * Attaches `profile.auth` when the profile has none yet (a bare `--host
  * --model` harness, or a native-host fork with no prior auth binding).
@@ -173,7 +179,7 @@ export async function applyFromSecrets(profile: Profile, spec: string, explicitA
     );
   }
 
-  const provider = explicitAuthProvider || profile.provider || bundleName;
+  const provider = explicitAuthProvider || (profile.auth ? profile.provider : undefined) || bundleName;
   const item = keychainItemName(provider);
   setKeychainToken(item, value);
 

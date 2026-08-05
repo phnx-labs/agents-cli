@@ -53,6 +53,30 @@ describe('addProfile — --from-secrets threading (host + model path)', () => {
     expect(p.auth).toEqual({ envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.corp.token' });
     expect(getKeychainToken(keychainItemName('corp'))).toBe('sk-test-secret');
   });
+
+  it('does not clobber the host\'s own keychain item when --from-secrets is given without --auth-provider', async () => {
+    // profileFromHostModel defaults profile.provider to the *host* id ('claude')
+    // even though no auth is attached yet — applyFromSecrets must not trust
+    // that default, or it would overwrite the host's own keychain slot instead
+    // of falling through to the bundle name.
+    const preExisting = 'pre-existing-claude-host-token';
+    const kc = new MemoryKeychain();
+    kc.set(keychainItemName('claude'), preExisting);
+    setKeychainBackendForTest(kc);
+    writeBundleWithItems(
+      { name: 'prod', vars: { OPENROUTER_KEY: keychainRef('OPENROUTER_KEY') } },
+      new Map([[secretsKeychainItem('prod', 'OPENROUTER_KEY'), 'sk-test-secret']]),
+    );
+
+    await addProfile('corp', { host: 'claude', model: 'gpt-x', fromSecrets: 'prod' }, 'Harness');
+
+    // The host's pre-existing token is untouched...
+    expect(getKeychainToken(keychainItemName('claude'))).toBe(preExisting);
+    // ...and the harness's own auth was attached under the bundle's name instead.
+    const p = readProfile('corp');
+    expect(p.provider).toBe('prod');
+    expect(getKeychainToken(keychainItemName('prod'))).toBe('sk-test-secret');
+  });
 });
 
 describe('addProfile — --from-secrets threading (preset path)', () => {
