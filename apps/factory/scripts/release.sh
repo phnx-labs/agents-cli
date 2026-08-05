@@ -29,6 +29,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$PROJECT_ROOT/scripts/release-registry-plan.sh"
 cd "$PROJECT_ROOT"
 
 # --- Args ----------------------------------------------------------------
@@ -271,9 +272,8 @@ fi
 
 # --- Pre-flight: marketplace version collision ---------------------------
 
-# Source of truth = marketplace, not git. If the version is already published
-# we abort — re-running with the same version would 409 on the publish step
-# anyway, but failing here is faster.
+# Source of truth = each marketplace, not git. Registries that already serve
+# the version are skipped so a partial publish can resume at the missing one.
 if command -v bun >/dev/null 2>&1; then
     # Both publishing CLIs are tools, not credentials. Install whichever is
     # missing so a local publish reaches both registries — the routed path
@@ -298,13 +298,13 @@ echo "Checking marketplace for existing $EXT_FQN@$VERSION..."
 PUBLISHED_VSCE="$(vsce show "$EXT_FQN" --json 2>/dev/null \
     | python3 -c "import json,sys; d=json.load(sys.stdin); print('\n'.join(v['version'] for v in d.get('versions',[])))" \
     2>/dev/null || true)"
-PUBLISH_VSCE=1
+MARKETPLACE_HAS_VERSION=0
 if printf '%s\n' "$PUBLISHED_VSCE" | grep -qx "$VERSION"; then
     echo "$VERSION already published on VS Code Marketplace; skipping that registry."
-    PUBLISH_VSCE=0
+    MARKETPLACE_HAS_VERSION=1
 fi
 
-PUBLISH_OVSX=0
+OPEN_VSX_HAS_VERSION=0
 if command -v ovsx >/dev/null 2>&1; then
     echo "Checking Open VSX for existing $EXT_FQN@$VERSION..."
     # `ovsx get <ext> <version> --metadata` ignores the version arg and
@@ -315,11 +315,18 @@ if command -v ovsx >/dev/null 2>&1; then
         2>/dev/null || true)"
     if [ "$OVSX_HIT" = "hit" ]; then
         echo "$VERSION already published on Open VSX; skipping that registry."
-    else
-        PUBLISH_OVSX=1
+        OPEN_VSX_HAS_VERSION=1
     fi
 else
     echo "Warning: ovsx not installed; skipping Open VSX publish." >&2
+fi
+
+PUBLISH_PLAN="$(registry_publish_plan "$MARKETPLACE_HAS_VERSION" "$OPEN_VSX_HAS_VERSION")"
+PUBLISH_VSCE=0
+PUBLISH_OVSX=0
+printf '%s\n' "$PUBLISH_PLAN" | grep -qx vsce && PUBLISH_VSCE=1
+if command -v ovsx >/dev/null 2>&1 && printf '%s\n' "$PUBLISH_PLAN" | grep -qx ovsx; then
+    PUBLISH_OVSX=1
 fi
 
 # --- Pre-flight: tokens --------------------------------------------------
