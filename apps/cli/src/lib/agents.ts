@@ -384,7 +384,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     // only (`tools.approval` record: allow|prompt|deny) with no command/path/domain
     // patterns, so agents-cli's granular permission format has nothing to map to.
     // plugins are npm packages / TS modules, not the Claude marketplace manifest.
-    capabilities: { hooks: false, mcp: true, mcpHttp: true, mcpHeaders: true, allowlist: false, skills: true, commands: true, plugins: false, subagents: true, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'] },
+    // interactiveRepl: true — bare `omp` runs the TUI; `omp -p` is the one-shot
+    // form that answers a prompt and exits (upstream README, "Four entry points").
+    capabilities: { hooks: false, mcp: true, mcpHttp: true, mcpHeaders: true, allowlist: false, skills: true, commands: true, plugins: false, subagents: true, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'], interactiveRepl: true },
   },
   openclaw: {
     id: 'openclaw',
