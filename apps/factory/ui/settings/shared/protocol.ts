@@ -22,7 +22,12 @@ export type FloorInbound =
   | { type: 'fetchUnifiedTasks' }
   | { type: 'detectTaskSources' }
   | { type: 'getFloorThroughput' }
-  | { type: 'fetchHostSessions' }
+  /**
+   * Fleet host sessions. `force: true` runs one bare fleet refresh (PR #2031).
+   * Omit force (or false) for last-good / cache-only. Manual freshness chip must
+   * pass force:true; the panelVisible one-shot seed must omit it.
+   */
+  | { type: 'fetchHostSessions'; force?: boolean }
   | { type: 'fetchHostSessionDetail'; host: string; sessionId: string }
   | { type: 'fetchDispatchData' }
   | { type: 'dismissTask'; taskId: string }

@@ -965,9 +965,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   }, [])
 
   // Registered-device data for the Dispatch panel's device path. Fetched when the
-  // panel opens (device health SSH-probes every host, so we don't probe on every
-  // mount). deviceHealth returns ALL registered devices folded with live stats
-  // (reachable flag included) so offline devices still list as disabled rows.
+  // panel opens. deviceHealth is activation-cache backed (PR #2031) — registry
+  // online/offline only, no per-host SSH CPU/memory fan-out — so this is cheap
+  // enough to request when Dispatch opens. Offline devices still list as rows.
   useEffect(() => {
     if (!dispatchOpen) return
     postMessage({ type: 'deviceHealth' })
@@ -2215,7 +2215,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
           title={remoteSyncError
             ? `Last sync failed: ${remoteSyncError}. Click to retry (cached rows stay visible).`
             : 'Last cross-host sync. Click to refresh remote hosts now.'}
-          onClick={() => { if (!syncingHosts) { setSyncingHosts(true); setRemoteSyncError(null); postMessage({ type: 'fetchHostSessions' }) } }}
+          onClick={() => { if (!syncingHosts) { setSyncingHosts(true); setRemoteSyncError(null); postMessage({ type: 'fetchHostSessions', force: true }) } }}
           role="button"
           data-testid="host-freshness-chip"
         >

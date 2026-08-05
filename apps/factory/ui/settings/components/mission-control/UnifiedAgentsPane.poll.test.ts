@@ -32,11 +32,29 @@ describe('Floor poll / timer budget (no recurring probes)', () => {
   })
 
   test('seeds hosts once on visibility; remote refresh is manual', () => {
-    expect(source).toContain("postMessage({ type: 'fetchHostSessions' })")
     expect(source).toContain("postMessage({ type: 'fetchLocalSessions' })")
     expect(source).toContain('data-testid="host-freshness-chip"')
     // One-shot seed on panelVisible — no setInterval around fetchHostSessions.
     expect(source).toMatch(/if \(!panelVisible\) return[\s\S]*?fetchLocalSessions[\s\S]*?fetchHostSessions/)
+  })
+
+  test('mount seed is cache-only; freshness chip passes force:true', () => {
+    // panelVisible one-shot seed must omit force so the host serves last-good
+    // without a fleet CLI fan-out (PR #2031 / #2033 seam).
+    const mountSeed = source.match(
+      /if \(!panelVisible\) return[\s\S]*?postMessage\(\{\s*type:\s*'fetchLocalSessions'\s*\}\)[\s\S]*?postMessage\(\{\s*type:\s*'fetchHostSessions'\s*\}\)/,
+    )
+    expect(mountSeed).not.toBeNull()
+    expect(mountSeed![0]).not.toMatch(/force\s*:/)
+
+    // Manual freshness chip is the only path that may force a fleet refresh.
+    // onClick sits above data-testid on the same span (JSX attribute order).
+    expect(source).toMatch(
+      /onClick=\{\(\) => \{ if \(!syncingHosts\) \{[\s\S]*?postMessage\(\{\s*type:\s*'fetchHostSessions',\s*force:\s*true\s*\}\)[\s\S]*?\}\s*\}\}[\s\S]*?data-testid="host-freshness-chip"/,
+    )
+    // Exactly one forced fetchHostSessions in the pane source.
+    const forced = source.match(/postMessage\(\{\s*type:\s*'fetchHostSessions',\s*force:\s*true\s*\}\)/g)
+    expect(forced?.length).toBe(1)
   })
 
   test('retains last-good remote rows on hostSessions failure', () => {
