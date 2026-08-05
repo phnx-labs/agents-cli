@@ -305,10 +305,18 @@ describe("resolveProfileForRun resolves cost tiers against the profile's OWN mod
     const ultra = resolveProfileForRun('deepseek-flash', 'ultra');
     expect(ultra.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-r1');
     expect(ultra.resolvedModel).toBe('deepseek/deepseek-r1');
+    // A clamp is never silent -- mirrors the native-harness tier block, which
+    // always announces when it substitutes a cheaper rung.
+    expect(ultra.tierNote).toBe(
+      `no "ultra" model configured on profile 'deepseek-flash'; using its "best" tier (deepseek/deepseek-r1)`,
+    );
 
     const def = resolveProfileForRun('deepseek-flash', 'default');
     expect(def.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-chat-v3');
     expect(def.resolvedModel).toBe('deepseek/deepseek-chat-v3');
+    expect(def.tierNote).toBe(
+      `no "default" model configured on profile 'deepseek-flash'; using its "cheap" tier (deepseek/deepseek-chat-v3)`,
+    );
   });
 
   it('degrades gracefully (no throw, env unchanged) when the profile has no models: at all', () => {

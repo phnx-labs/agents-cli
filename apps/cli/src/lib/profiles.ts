@@ -598,6 +598,12 @@ export function resolveProfileForRun(name: string, requestedModel?: string): Res
       const envKey = profileModelEnvKey(profile) ?? modelEnvKeyForHost(profile.host.agent);
       env[envKey] = tierPick.model;
       resolved.resolvedModel = tierPick.model;
+      // Mirror the native-harness tier block (lib/exec.ts's resolveTier callers):
+      // a clamp is always announced, never silent, so a user asking for "ultra"
+      // on a harness that only configures "best" knows what it actually got.
+      if (tierPick.clampedFrom) {
+        resolved.tierNote = `no "${requestedModel}" model configured on profile '${profile.name}'; using its "${tierPick.clampedFrom}" tier (${tierPick.model})`;
+      }
     } else {
       resolved.tierNote = `no model configured for tier "${requestedModel}" on profile '${profile.name}'; using harness default`;
     }
