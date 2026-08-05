@@ -849,20 +849,21 @@ agents sessions d3470b57-2af6-4c11-b1de-3fab94f43603
 
 ## Forking (branch a conversation)
 
-`agents fork <session>` branches an existing conversation into a NEW, independent
-session. Where `resume` continues the *same* thread (same id, same file — it
-appends), `fork` copies the transcript under a fresh id, so continuing the fork
-diverges instead of mutating the original. It is the "git branch" of
+`agents sessions fork <session>` branches an existing conversation into a NEW,
+independent session. Where `resume` continues the *same* thread (same id, same
+file — it appends), `fork` copies the transcript under a fresh id, so continuing
+the fork diverges instead of mutating the original. It is the "git branch" of
 conversations — useful for exploring an alternative approach from a point you
-already reached, or fanning a promising session into two directions.
+already reached, or fanning a promising session into two directions. (`agents
+fork <session>` is kept as a hidden alias for back-compat.)
 
 ```bash
 # Fork by (partial) id, then continue the copy — the original is untouched
-agents fork 4f3a9c21
-agents resume <new-id>
+agents sessions fork 4f3a9c21
+agents sessions resume <new-id>
 
 # Name the fork
-agents fork 4f3a9c21 --name "try redis instead"
+agents sessions fork 4f3a9c21 --name "try redis instead"
 ```
 
 Mechanics (`lib/session/fork.ts`): a Claude session id *is* its `<id>.jsonl`
@@ -874,8 +875,9 @@ run-name sidecar as `agents run --name`). The fork resolves immediately by
 
 Scope: v1 supports **Claude** (single-file transcript, native `--resume`). Codex
 (single-file) is a natural next step; multi-file agents (grok, kimi) and DB-only
-agents (opencode) need per-agent handling and are refused up front with a clear
-message.
+agents (opencode) need per-agent handling. For an unsupported harness the command
+fails loud and names the manual branch — start a fresh agent and seed it with
+`/continue <id>` (the source stays put) — rather than a silent no-op or fake copy.
 
 ## Background & foreground (detach / attach)
 
