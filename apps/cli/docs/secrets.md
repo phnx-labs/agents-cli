@@ -20,6 +20,20 @@ the agent is the caller, not you. It names the requesting
 harness, bundle, reason, and unlock duration. Approved bundles are cached for seven
 days by default.
 
+**The same rule covers raw keychain item reads.** A profile's provider token, the
+Claude OAuth item behind `agents view`, and every other `getKeychainToken` caller
+go through one guard: a non-interactive process (an agent runtime, or no TTY — a
+VS Code extension host, a daemon, cron) gets an actionable error naming the item
+instead of a sheet nobody is watching. Items that are provably prompt-free stay
+silent — their callers attest the no-ACL write (bundle metadata, `never`-policy
+bundles, the unlock session store, the OAuth token cache). And when a context
+that *may* prompt has its read cancelled or fail, the item goes into a 5-minute
+read back-off (`~/.agents/.cache/keychain-read-backoff/`, regenerable) so a
+polling caller can't re-raise the sheet every few seconds; any successful read
+or write of the item clears the back-off. Source: `src/lib/secrets/index.ts`
+(`assertRawKeychainReadAllowed`), `src/lib/secrets/headless.ts`,
+`src/lib/secrets/read-backoff.ts`.
+
 **An unlock is global unless you narrow it.** `agents secrets unlock prod` grants
 every harness and a plain shell access for the whole TTL — one Touch ID covers all
 of them. `--for claude` narrows the grant to that harness alone, and other
@@ -111,6 +125,36 @@ Source: `src/lib/secrets/index.ts:43` (`REF_PATTERN`), `src/lib/secrets/bundles.
 
 Bundle metadata (names, descriptions, variable names + references, and any non-sensitive `--value` literals) is stored WITHOUT the biometry ACL — it is non-sensitive by contract, since real secret values live in the separate `agents-cli.secrets.*` items that keep the bundle's policy ACL. So enumerating bundles is fully silent: `agents secrets list` — and every internal metadata scan, including crabbox's `agents devices list` at session start — reads with no Touch ID prompt. Only reading a bundle's actual values (injection, `view --reveal`) pops the prompt. Source: `src/lib/secrets/bundles.ts` (`writeBundle` / `writeBundleWithItems`).
 
+## Usage tracking (value-free)
+
+Every secret lifecycle/access event — create, import, export, view, access (a
+value read for injection), unlock — funnels through one chokepoint,
+`emitSecretAudit` (`src/lib/secrets/audit.ts`). That single call writes to **both**
+sinks: the append-only `~/.agents/events.jsonl` audit log (surfaced by
+`agents events --module secrets`) and a **derived per-bundle read-model** at
+`~/.agents/secrets/secrets.db` (`src/lib/secrets/usage-db.ts`). There is no second
+write path — the read-model is an index fed off the real access flow, the way
+`sessions.db` indexes session metadata. Both sinks are **value-free**: bundle name,
+event kind, key count, resolving agent/host, and a status only — never a secret
+value.
+
+The read-model answers "how often / how recently / by whom was this bundle used?"
+without scanning the whole event stream, and powers:
+
+- `agents secrets view <bundle>` — a usage summary (`accessed 42× (last 2h ago) ·
+  exported 3× (last 1d ago)`), per-agent attribution, and held/unlock state.
+- `agents secrets list --sort used` / `--sort uses` — order bundles by recency /
+  access frequency; the `--json` payload carries `uses`, `usage`, and `heldExpiresAt`.
+- `agents secrets activity [bundle]` — the recent event timeline (bounded to the
+  last 90 days; the full trail is `agents events --module secrets`).
+
+Recording is best-effort — a failure never breaks secret resolution — and
+`AGENTS_NO_USAGE_TRACK=1` disables it entirely (used by tests). Name a bundle after
+what it holds so an agent can guess it: a website by its domain (`stripe.com`,
+`openai.ai`), a desktop app by its binary suffix (`slack.app`, `photoshop.exe`), and
+always pass `--description`; an undescribed bundle prints a "No description found"
+nudge in `list` / `view` / `create`.
+
 ## File-backed bundles (headless / remote)
 
 The keychain backend is biometry-gated, so it can't be read on a headless Mac
@@ -175,8 +219,8 @@ agents run claude "ship it" --secrets r2.backups@yosemite-s1   # bundle@host suf
 
 - **`--host <target>`** (single) and **`--hosts <a,b,c>`** (comma list) compose on
   `list` / `view` / `export`; **`--device` / `--devices`** are accepted as aliases
-  everywhere `--host` / `--hosts` are (fleet-vocabulary parity with `agents activity`
-  and `agents run --device`), and resolve identically. **`bundle@host`** is the
+  everywhere `--host` / `--hosts` are (fleet-vocabulary parity with `agents run
+  --device` and `agents feed --host`), and resolve identically. **`bundle@host`** is the
   reference form for `run --secrets` and the target for `exec --host`.
 - **Ephemeral.** Remote values cross over ssh stdout (encrypted in transit), are
   parsed in memory, and injected into the run/command env — never written to this
@@ -268,11 +312,12 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets list --expired` | Only bundles with a key whose expiry has already passed | `agents secrets list --expired` |
 | `secrets list --expiring [days]` | Only bundles with a key due within N days (default 30) | `agents secrets list --expiring 7` |
 | `secrets list --unused <duration>` | Not read since this far back; never-used bundles always match | `agents secrets list --unused 3mo` |
-| `secrets list --sort <field>` · `-n` | Sort by `name`/`used`/`created`/`updated`/`expiry`, and cap the count | `agents secrets list --sort expiry -n 10` |
-| `secrets view [name]` | Show keys in a bundle (values masked by default) | `agents secrets view prod` |
+| `secrets list --sort <field>` · `-n` | Sort by `name`/`used`/`uses`/`created`/`updated`/`expiry`, and cap the count. `used` = most recently used, `uses` = most frequently accessed (both from the usage read-model) | `agents secrets list --sort uses -n 10` |
+| `secrets view [name]` | Show keys in a bundle (values masked); also shows held state + a value-free usage summary | `agents secrets view prod` |
 | `secrets view [name] --reveal` | Print keychain values in the clear (TTY only) | `agents secrets view prod --reveal` |
 | `secrets view [name] --reveal --plaintext` | Allow `--reveal` in non-interactive shells | `agents secrets view prod --reveal --plaintext` |
-| `secrets create [name]` | Create an empty bundle | `agents secrets create prod` |
+| `secrets activity [name]` · `-n` · `--json` | Recent value-free usage timeline (create/import/export/view/access/unlock), one bundle or all | `agents secrets activity prod --limit 20` |
+| `secrets create [name]` | Create an empty bundle (name it after what it holds; pass `--description`) | `agents secrets create stripe.com` |
 | `secrets create [name] --description <text>` | Create with a description | `agents secrets create prod --description "Live API keys"` |
 | `secrets create [name] --allow-exec` | Enable exec: refs in this bundle | `agents secrets create tools --allow-exec` |
 | `secrets create [name] --backend <keychain\|file>` | Storage backend; `file` is passphrase-encrypted and headless-readable (see [File-backed bundles](#file-backed-bundles-headless--remote)) | `agents secrets create rush.releases --backend file` |

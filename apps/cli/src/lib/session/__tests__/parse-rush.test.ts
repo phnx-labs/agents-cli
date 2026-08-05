@@ -65,8 +65,8 @@ describe('parseRush', () => {
       expect(events).toHaveLength(4);
       expect(events[0]).toMatchObject({ type: 'message', agent: 'rush', role: 'user', content: 'Hello' });
       expect(events[1]).toMatchObject({ type: 'message', role: 'assistant', content: 'Working on it' });
-      expect(events[2]).toMatchObject({ type: 'tool_use', tool: 'Grep', args: { pattern: 'foo' } });
-      expect(events[3]).toMatchObject({ type: 'tool_result', tool: 'Grep', success: true });
+      expect(events[2]).toMatchObject({ type: 'tool_use', tool: 'Grep', callId: 'call_1', args: { pattern: 'foo' } });
+      expect(events[3]).toMatchObject({ type: 'tool_result', tool: 'Grep', callId: 'call_1', success: true });
     } finally {
       fs.unlinkSync(p);
     }
@@ -114,6 +114,28 @@ describe('parseRush', () => {
       const events = parseRush(p);
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({ type: 'error', tool: 'Bash', success: false });
+    } finally {
+      fs.unlinkSync(p);
+    }
+  });
+
+  test('ignores non-string tool call ids', () => {
+    const jsonl = [
+      {
+        type: 'tool_call', content: { input: ['malformed'] },
+        created_at: 42, tool_call_id: 42, name: { malformed: true },
+      },
+      {
+        type: 'tool_result', content: { output: { success: true } },
+        created_at: '2026-04-22T10:00:01Z', tool_call_id: { malformed: true }, name: 'Bash',
+      },
+    ].map((row) => JSON.stringify(row)).join('\n');
+    const p = writeTmp(jsonl);
+    try {
+      const events = parseRush(p);
+      expect(events.map((event) => event.callId)).toEqual([undefined, undefined]);
+      expect(events[0]).toMatchObject({ tool: 'unknown', args: {} });
+      expect(typeof events[0].timestamp).toBe('string');
     } finally {
       fs.unlinkSync(p);
     }

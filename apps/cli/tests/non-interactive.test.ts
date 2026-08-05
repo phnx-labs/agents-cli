@@ -702,11 +702,13 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     // No separate "Profiles" section header — a harness gets a name header of
     // its own, exactly like Claude/Codex above it.
     expect(combined).not.toMatch(/^Profiles\s*$/m);
-    expect(combined).toMatch(/^ {2}test-proxy \(custom\)$/m);
-    expect(combined).toMatch(/^ {2}ollama \(custom\)$/m);
+    // The header is derived from the harness name via the vendor/brand table:
+    // 'test-proxy' -> 'Test Proxy', 'ollama' -> 'Ollama'.
+    expect(combined).toMatch(/^ {2}Test Proxy \(custom\)$/m);
+    expect(combined).toMatch(/^ {2}Ollama \(custom\)$/m);
     // The model + the host that executes it sit on the harness's own row.
-    expect(combined).toMatch(/truefoundry\/qwen3-coder\s.*via claude/);
-    expect(combined).toMatch(/qwen3-coder:30b\s.*via codex/);
+    expect(combined).toMatch(/truefoundry\/qwen3-coder\s.*forked from claude/);
+    expect(combined).toMatch(/qwen3-coder:30b\s.*forked from codex/);
   }, 30_000);
 
   it('describes a custom harness in `agents view <harness>` instead of rejecting the name', () => {

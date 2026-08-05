@@ -34,7 +34,7 @@ import {
   verifySkillIntegrity,
   parseOwnerRepoFromRemote,
 } from '../lib/registry.js';
-import { cloneRepo, commitAndPush, getRemoteUrl, isGitRepo } from '../lib/git.js';
+import { cloneRepo, commitAndPush, getCurrentBranch, getRemoteUrl, isGitRepo } from '../lib/git.js';
 import {
   discoverCommands,
   resolveCommandSource,
@@ -435,7 +435,7 @@ When to use:
     .description('Generate a skills-index.json for a git repo and push it, making its skills discoverable via agents search/install')
     .option('--repo <alias>', 'Publish an extra repo added via `agents repo add` (default: your ~/.agents repo)')
     .option('--name <name>', 'Registry name to suggest in the output (default: the repo name)')
-    .option('--branch <branch>', 'Branch the raw URL should reference', 'main')
+    .option('--branch <branch>', 'Branch to push the index to and reference in the raw URL (default: the repo\'s current branch)')
     .option('--dry-run', 'Write the index and print the URL without committing or pushing')
     .addHelpText('after', `
 Publish walks a repo's skills/ directory, records a sha256 of every SKILL.md,
@@ -457,7 +457,7 @@ After publishing, share the printed 'agents registry add skill ...' command so
 others can search and install your skills. Installs verify each SKILL.md against
 the sha256 in the index and abort on mismatch.
 `)
-    .action(async (options: { repo?: string; name?: string; branch: string; dryRun?: boolean }) => {
+    .action(async (options: { repo?: string; name?: string; branch?: string; dryRun?: boolean }) => {
       // Resolve the target repo: an extra repo by alias, else the primary ~/.agents repo.
       let repoDir: string;
       if (options.repo) {
@@ -504,20 +504,29 @@ the sha256 in the index and abort on mismatch.
         console.log(`  ${chalk.cyan(s.name)} ${chalk.gray(`sha256:${s.sha256?.slice(0, 12)}…`)}`);
       }
 
+      // The branch the URL references must be the branch the index actually
+      // lands on. In a real push that's whatever commitAndPush reports back
+      // (the requested --branch, else the checked-out branch); in a dry run we
+      // resolve it the same way without pushing.
+      let urlBranch: string;
       if (options.dryRun) {
+        urlBranch = options.branch || (await getCurrentBranch(repoDir));
         console.log(chalk.gray(`\nDry run — wrote ${indexPath} but did not commit or push.`));
       } else {
         const pushSpinner = ora('Committing and pushing skills-index.json...').start();
-        const result = await commitAndPush(repoDir, 'chore: update skills-index.json (agents publish)');
+        const result = await commitAndPush(repoDir, 'chore: update skills-index.json (agents publish)', options.branch);
         if (!result.success) {
           pushSpinner.fail(`Push failed: ${result.error}`);
           console.log(chalk.gray('The index was written locally — commit and push it manually to publish.'));
           process.exit(1);
         }
-        pushSpinner.succeed('Pushed skills-index.json');
+        // commitAndPush always reports the pushed branch on success; the `??`
+        // only satisfies the optional return type, it is not a behavior path.
+        urlBranch = result.branch ?? (await getCurrentBranch(repoDir));
+        pushSpinner.succeed(`Pushed skills-index.json to ${urlBranch}`);
       }
 
-      const rawUrl = `https://raw.githubusercontent.com/${repoSlug}/${options.branch}/skills-index.json`;
+      const rawUrl = `https://raw.githubusercontent.com/${repoSlug}/${urlBranch}/skills-index.json`;
       const registryName = options.name || repoSlug.split('/')[1] || 'my-skills';
 
       console.log(chalk.bold('\nPublished. Share these with anyone who wants your skills:\n'));

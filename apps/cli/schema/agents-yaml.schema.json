@@ -1,0 +1,184 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/phnx-labs/agents-cli/main/apps/cli/schema/agents-yaml.schema.json",
+  "title": "agents-cli agents.yaml",
+  "description": "agents-cli metadata file. Two tiers share this shape: the central (synced) ~/.agents/agents.yaml and each per-device ~/.agents/devices/<host>/agents.yaml. Device-local fields (agents, isolatedAgents, defaultBrowserProfile, device-scope config) belong in the device doc; everything else is portable user config. Source of truth: apps/cli/src/lib/types.ts (Meta).",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "agents": {
+      "type": "object",
+      "description": "Per-device global version pins (agent id → version). Device doc only.",
+      "additionalProperties": { "type": "string" }
+    },
+    "isolatedAgents": {
+      "type": "object",
+      "description": "Per-device preferred isolated version per agent. Device doc only.",
+      "additionalProperties": { "type": "string" }
+    },
+    "defaultBrowserProfile": {
+      "type": "string",
+      "description": "Browser profile `agents browser start` resolves to without --profile. Device doc only (config key: browser.profile)."
+    },
+    "config": {
+      "type": "object",
+      "description": "Typed config keys (registry: apps/cli/src/lib/device-config.ts). In the central file this holds user-scope keys (interactiveHost); in a device doc it holds device-scope keys (maxAgents, schedulerEnabled, notes). Unset keys keep default behavior.",
+      "additionalProperties": true,
+      "properties": {
+        "interactiveHost": {
+          "type": "string",
+          "description": "User scope. Device that shows the user artifacts (browser opens, dashboards). Set via `agents devices set-interactive`."
+        },
+        "maxAgents": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Device scope. Cap on concurrent agents (agents.max-concurrent). Factory auto-launch counts device-wide running agents; teams placement counts the team's roster on the device."
+        },
+        "schedulerEnabled": {
+          "type": "boolean",
+          "description": "Device scope. Whether the routines scheduler may fire here (scheduler.enabled)."
+        },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Device scope. Free-form operator notes (`agents devices note`)."
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "description": "`agents run` defaults (mode, effort, fallback chains)."
+    },
+    "lease": {
+      "type": "object",
+      "properties": {
+        "secretsBundle": { "type": "string" }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "description": "macOS secrets-agent defaults (backend, prompt policy, hold window).",
+      "properties": {
+        "backend": { "type": "string", "enum": ["keychain", "file", "vault"] },
+        "policy": { "type": "string", "enum": ["always", "hold", "daily"] },
+        "agent": {
+          "type": "object",
+          "properties": {
+            "auto": { "type": "boolean" },
+            "holdMs": { "type": "integer" },
+            "durable": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "description": "Spend guardrails (user-global caps; project agents.yaml overrides)."
+    },
+    "feed": {
+      "type": "object",
+      "properties": {
+        "broadcast": { "type": "object" }
+      }
+    },
+    "beta": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "registries": {
+      "type": "object",
+      "description": "Resource registries by type (commands, skills, hooks, mcp, …)."
+    },
+    "profiles": {
+      "type": "object",
+      "description": "Top-level resource profiles filtering the resolved resource set."
+    },
+    "versions": {
+      "type": "object",
+      "description": "Per-version resource tracking. Machine-local — partitioned to ~/.agents/.history/version-resources.json on write."
+    },
+    "source": {
+      "type": "string",
+      "description": "Git remote source URL of the system repo."
+    },
+    "projectRoot": {
+      "type": "string",
+      "description": "Projects root for `agents run --project <slug>` (home-relative)."
+    },
+    "extraRepos": {
+      "type": "object",
+      "description": "Extra DotAgent repos merged after ~/.agents/."
+    },
+    "brands": {
+      "type": "object",
+      "description": "White-label brands keyed by name."
+    },
+    "actors": {
+      "type": "object",
+      "description": "Actors keyed by slug — who is behind a run."
+    },
+    "seededPresets": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Removal tombstones for seeded registry presets."
+    },
+    "hooks": {
+      "type": "object",
+      "description": "Hook manifest entries keyed by hook name."
+    },
+    "browser": {
+      "type": "object",
+      "description": "Browser profile definitions keyed by profile name (portable; syncs)."
+    },
+    "hosts": {
+      "type": "object",
+      "description": "Agent-host registry (`agents hosts`) keyed by host name."
+    },
+    "fleet": {
+      "type": "object",
+      "description": "Declarative fleet profile (`agents apply`). Shape: lib/fleet/types.ts FleetManifest."
+    },
+    "share": {
+      "type": "object",
+      "description": "`agents share` endpoint (Cloudflare R2 + Worker).",
+      "properties": {
+        "baseUrl": { "type": "string" },
+        "accountId": { "type": "string" },
+        "workerName": { "type": "string" },
+        "bucketName": { "type": "string" },
+        "domain": { "type": "string" },
+        "analyticsToken": { "type": "string" }
+      }
+    },
+    "notify": {
+      "type": "object",
+      "description": "Owner/channel notification config for `agents send` / `agents notify`.",
+      "properties": {
+        "owner": {
+          "type": "object",
+          "properties": {
+            "channel": { "type": "string" },
+            "to": { "type": "string" }
+          }
+        },
+        "transports": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "routines": {
+      "type": "object",
+      "description": "Routines daemon settings.",
+      "properties": {
+        "projects": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Allowlist of project roots whose .agents/routines may fire."
+        }
+      }
+    }
+  }
+}

@@ -5,18 +5,17 @@
  * action goes through the *same* detached spawn cron and webhook fires use
  * (executeJobDetached, lib/runner.ts) — a monitor never duplicates spawn logic,
  * it synthesizes a JobConfig and hands it to the one dispatch seam. `notify`
- * reuses the openclaw Telegram path (lib/notify.ts); `webhook-out` POSTs the event.
+ * routes the owner through the one channel seam (sendToOwner → lookupTransport,
+ * lib/notify.ts) — recipient from notify.owner, no hardcoded chat id, and an
+ * unresolvable channel comes back as `ok: false` instead of exiting the daemon;
+ * `webhook-out` POSTs the event.
  */
 
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { executeJobDetached } from '../runner.js';
 import { readJob, type JobConfig } from '../routines.js';
-import { buildOpenClawNotifyArgs } from '../notify.js';
-import type { AgentId } from '../types.js';
+import { sendToOwner } from '../notify.js';
+import type { AgentId, Meta } from '../types.js';
 import type { ActionConfig, MonitorConfig, MonitorEvent } from './config.js';
-
-const execFileAsync = promisify(execFile);
 
 /** Outcome of a dispatched action. */
 export interface DispatchResult {
@@ -42,6 +41,7 @@ export function injectEvent(prompt: string, event: MonitorEvent): string {
 export async function dispatchAction(
   monitor: MonitorConfig,
   event: MonitorEvent,
+  meta?: Meta,
 ): Promise<DispatchResult> {
   const action = monitor.action;
 
@@ -82,15 +82,11 @@ export async function dispatchAction(
   }
 
   if (action.type === 'notify') {
-    const args = buildOpenClawNotifyArgs(event.summary, {
-      channel: action.notifyChannel ?? 'telegram',
+    const result = await sendToOwner(event.summary, {
+      ...(meta ? { meta } : {}),
+      ...(action.notifyChannel ? { channel: action.notifyChannel } : {}),
     });
-    try {
-      await execFileAsync('openclaw', args);
-      return { kind: 'notify', ok: true };
-    } catch (err) {
-      return { kind: 'notify', ok: false, error: (err as Error).message };
-    }
+    return { kind: 'notify', ok: result.ok, ...(result.ok ? {} : { error: result.error }) };
   }
 
   // webhook-out

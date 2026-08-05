@@ -21,7 +21,7 @@ export interface RemoteAgentsJsonOptions<T> {
   args: string[];
   noFanoutEnv: string;
   hosts?: string[];
-  parse: (stdout: string, machine: string) => T[];
+  parse: (stdout: string, machine: string) => T[] | RemoteAgentsJsonParseResult<T>;
   /**
    * Suppress the per-device "unreachable — skipped" stderr line. The skipped
    * names still come back in {@link RemoteAgentsJsonResult.skipped}, so a caller
@@ -29,6 +29,13 @@ export interface RemoteAgentsJsonOptions<T> {
    * printing a line per offline box above its output. Never a silent drop.
    */
   quiet?: boolean;
+  /** Per-peer deadline. Long-running maintenance commands override 12 seconds. */
+  timeoutMs?: number;
+}
+
+export interface RemoteAgentsJsonParseResult<T> {
+  items: T[];
+  valid: boolean;
 }
 
 export interface RemoteAgentsJsonResult<T> {
@@ -36,6 +43,27 @@ export interface RemoteAgentsJsonResult<T> {
   deviceCount: number;
   /** Devices that were dialed but answered with an error / no CLI / a timeout. */
   skipped: string[];
+  /** Devices that exited successfully but returned invalid JSON for this command. */
+  parseFailed: string[];
+  /** Whether automatic target discovery failed before any peer could be dialed. */
+  discoveryFailed: boolean;
+}
+
+export function normalizeRemoteAgentsJsonParse<T>(
+  parsed: T[] | RemoteAgentsJsonParseResult<T>,
+): RemoteAgentsJsonParseResult<T> {
+  return Array.isArray(parsed) ? { items: parsed, valid: true } : parsed;
+}
+
+export function parseRemoteAgentsJsonPayload<T>(
+  stdout: string,
+  machine: string,
+  parse: RemoteAgentsJsonOptions<T>['parse'],
+): { items: T[]; parseFailed: boolean } {
+  const parsed = normalizeRemoteAgentsJsonParse(parse(stdout, machine));
+  return parsed.valid
+    ? { items: parsed.items, parseFailed: false }
+    : { items: [], parseFailed: true };
 }
 
 /** Build the command one peer runs, with a guard that prevents recursive fan-out. */
@@ -47,7 +75,7 @@ export function remoteAgentsJsonCommand(args: string[], noFanoutEnv: string, os?
   return `bash -lc ${shellQuote(inner)}`;
 }
 
-function sshCapture(target: string, remoteCmd: string): Promise<{ code: number | null; stdout: string }> {
+function sshCapture(target: string, remoteCmd: string, timeoutMs: number): Promise<{ code: number | null; stdout: string }> {
   assertValidSshTarget(target);
   return new Promise((resolve) => {
     const args = [...SSH_OPTS, ...controlOpts(), target, remoteCmd];
@@ -63,7 +91,7 @@ function sshCapture(target: string, remoteCmd: string): Promise<{ code: number |
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
       done(null);
-    }, REMOTE_TIMEOUT_MS);
+    }, timeoutMs);
     child.stdout.on('data', (data) => { stdout += data.toString(); });
     child.on('error', () => done(null));
     child.on('close', (code) => done(code));
@@ -84,7 +112,7 @@ export async function gatherRemoteAgentsJson<T>(
     try {
       devices = await loadDevices();
     } catch {
-      return { items: [], deviceCount: 0, skipped: [] };
+      return { items: [], deviceCount: 0, skipped: [], parseFailed: [], discoveryFailed: true };
     }
     for (const device of Object.values(devices)) {
       // Live SSH-probe verdict first, cached tailscale snapshot only as a
@@ -111,9 +139,10 @@ export async function gatherRemoteAgentsJson<T>(
   }
 
   const skipped: string[] = [];
+  const parseFailed: string[] = [];
   const results = await Promise.all(targets.map(async (target) => {
     const command = remoteAgentsJsonCommand(options.args, options.noFanoutEnv, target.os);
-    const result = await sshCapture(target.target, command);
+    const result = await sshCapture(target.target, command, options.timeoutMs ?? REMOTE_TIMEOUT_MS);
     if (result.code !== 0) {
       skipped.push(target.name);
       if (!options.quiet) {
@@ -121,8 +150,16 @@ export async function gatherRemoteAgentsJson<T>(
       }
       return [] as T[];
     }
-    return options.parse(result.stdout, target.machine);
+    const parsed = parseRemoteAgentsJsonPayload(result.stdout, target.machine, options.parse);
+    if (parsed.parseFailed) {
+      parseFailed.push(target.name);
+      if (!options.quiet) {
+        process.stderr.write(chalk.gray(`  ${target.name}: unreachable or no agents CLI — skipped\n`));
+      }
+      return [] as T[];
+    }
+    return parsed.items;
   }));
 
-  return { items: results.flat(), deviceCount: targets.length, skipped };
+  return { items: results.flat(), deviceCount: targets.length, skipped, parseFailed, discoveryFailed: false };
 }

@@ -5,8 +5,17 @@
  * directory by pure convention (`<projectRoot>/<slug>`, see `project-root.ts`).
  * This module adds editable definitions on top: one YAML file per project under
  * `~/.agents/projects/<name>.yaml`, sitting beside the existing `routines/`,
- * `monitors/`, and `teams/` dirs in the user repo (so definitions sync across
- * machines for free via `agents push/pull`). A defined project can name itself
+ * `monitors/`, and `teams/` dirs in the user repo.
+ *
+ * That location makes definitions SYNCABLE, not automatically synced: they ride
+ * the user repo only once they are committed to it, via `agents repo push user`
+ * (`agents push` was removed). Until then the directory is untracked, and a
+ * reconcile that cleans the working tree deletes it — observed twice on one
+ * machine, taking four definitions with it each time. The recovery is an
+ * orphaned `chore(local): save …-sync drift` commit, which is not a guarantee:
+ * unreachable objects are collected. Say "commit them" rather than "for free".
+ *
+ * A defined project can name itself
  * independently of its folder, bind more than one repo, pin a monorepo subpath,
  * describe context subdirectories an agent should start from, carry a Linear
  * link and external integrations, and set an explicit default path.
@@ -33,6 +42,12 @@ export interface ProjectRepo {
   slug: string;
   /** Optional path within the repo an agent working this project cares about. */
   subpath?: string;
+  /**
+   * Optional home-relative local checkout of this repo. The def's `root` only
+   * knows the primary repo on disk; `path` opts an additional repo into
+   * workspace probing (`projects status --fleet`).
+   */
+  path?: string;
 }
 
 /**
@@ -45,6 +60,20 @@ export interface ProjectContext {
   path: string;
   /** One line on how this subtree relates to the project. */
   purpose: string;
+}
+
+/**
+ * A project goal — the OKR-shaped "why". A project serves one or more goals: a
+ * qualitative `objective` ("Ship agents-cli 2.0") and an optional `measure`, the
+ * key result that says whether it's landing ("fleet on 2.x", "p95 < 200ms"). The
+ * goal is the outcome the work is chasing; milestones (dated checkpoints, pulled
+ * from Linear) and live work (agents / PRs / artifacts) are how far along it is.
+ */
+export interface ProjectGoal {
+  /** The outcome, in a line. */
+  objective: string;
+  /** Optional key result — how success is measured. */
+  measure?: string;
 }
 
 /** An external context source hung off the project (surfaced in `projects show`). */
@@ -70,6 +99,8 @@ export interface ProjectDef {
   repos?: ProjectRepo[];
   /** Described starting points inside the project. */
   contexts?: ProjectContext[];
+  /** The outcomes this project serves (OKR-shaped); a project may have several. */
+  goals?: ProjectGoal[];
   /** External context sources (Drive, docs, …). */
   integrations?: ProjectIntegration[];
   /** Linear project link — reuses the existing GraphQL path. */
@@ -140,8 +171,12 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
     def.repos = o.repos.flatMap((r) => {
       if (r && typeof r === 'object' && typeof (r as Record<string, unknown>).slug === 'string') {
         const rr = r as Record<string, unknown>;
+        // A malformed `path` sinks the whole entry, like any other malformed
+        // list row — a half-valid repo must not probe a surprising location.
+        if (rr.path !== undefined && typeof rr.path !== 'string') return [];
         const repo: ProjectRepo = { slug: rr.slug as string };
         if (typeof rr.subpath === 'string') repo.subpath = rr.subpath;
+        if (typeof rr.path === 'string') repo.path = rr.path;
         return [repo];
       }
       return [];
@@ -157,6 +192,17 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
       ) {
         const cc = c as Record<string, unknown>;
         return [{ path: cc.path as string, purpose: cc.purpose as string }];
+      }
+      return [];
+    });
+  }
+  if (Array.isArray(o.goals)) {
+    def.goals = o.goals.flatMap((g) => {
+      if (g && typeof g === 'object' && typeof (g as Record<string, unknown>).objective === 'string') {
+        const gg = g as Record<string, unknown>;
+        const goal: ProjectGoal = { objective: gg.objective as string };
+        if (typeof gg.measure === 'string') goal.measure = gg.measure;
+        return [goal];
       }
       return [];
     });
@@ -244,6 +290,11 @@ export function writeProjectDef(def: ProjectDef): string {
     defaultPath: validated.defaultPath
       ? toHomeRelative(expandLocalHome(validated.defaultPath))
       : undefined,
+    repos: validated.repos?.map((r) => {
+      const repo: ProjectRepo = { ...r };
+      if (r.path) repo.path = toHomeRelative(expandLocalHome(r.path));
+      return repo;
+    }),
   };
   // Drop undefined keys so the YAML stays clean.
   const clean = Object.fromEntries(
@@ -279,16 +330,53 @@ export function projectBasePath(def: ProjectDef, forRemote: boolean): string | u
 /** A project plus its repo root as an absolute local path, for cwd matching. */
 interface ProjectRootAbs {
   name: string;
-  /** Absolute, normalized repo root (`root` preferred, else `defaultPath`). */
+  /**
+   * One absolute, normalized path this project claims. A project contributes
+   * SEVERAL — its root, its monorepo subdir, and each bound repo's checkout and
+   * subpath — so the most specific claim can win over a broader one.
+   */
   abs: string;
+  /**
+   * A fallback claim, used only when no ordinary claim matches. The root of a
+   * project that narrowed itself with `defaultPath` is weak: it should lose the
+   * shared monorepo root to an umbrella project, yet still cover its own repo
+   * when no other project claims it.
+   */
+  weak?: boolean;
 }
 
 function projectRootsAbs(defs: ProjectDef[]): ProjectRootAbs[] {
   const out: ProjectRootAbs[] = [];
+  const push = (name: string, raw: string | undefined) => {
+    if (!raw) return;
+    out.push({ name, abs: path.resolve(expandLocalHome(raw)) });
+  };
   for (const def of defs) {
-    const raw = def.root ?? def.defaultPath;
-    if (!raw) continue;
-    out.push({ name: def.name, abs: path.resolve(expandLocalHome(raw)) });
+    // `root` says where the CHECKOUT is; `defaultPath` says which work is this
+    // project's. For a monorepo subproject those differ, and only the narrower
+    // one is a membership claim — a project scoped to `rush/apps/cli` does not
+    // own `rush/apps/web`.
+    //
+    // The old `root ?? defaultPath` collapsed such a subproject onto the
+    // monorepo root, the same path its umbrella anchors at, so the longest-match
+    // tiebreak below had nothing to separate them and a session in
+    // `rush/apps/cli` counted toward whichever definition was listed first.
+    const rootAbs = def.root ? path.resolve(expandLocalHome(def.root)) : undefined;
+    const defaultAbs = def.defaultPath ? path.resolve(expandLocalHome(def.defaultPath)) : undefined;
+    const narrowed = !!(rootAbs && defaultAbs && defaultAbs !== rootAbs && isUnder(defaultAbs, rootAbs));
+    // A narrowed project's root is a WEAK claim: it still covers the rest of the
+    // checkout when nobody else wants it, but yields to any project that claims
+    // a path outright. Dropping it entirely regressed the single-project case —
+    // `add foo --root ~/src/foo --path apps/web` stopped attributing work
+    // anywhere else in its own repo, and `--path` means where agents START, not
+    // which work counts.
+    if (rootAbs) out.push({ name: def.name, abs: rootAbs, weak: narrowed });
+    if (defaultAbs && defaultAbs !== rootAbs) out.push({ name: def.name, abs: defaultAbs });
+    for (const r of def.repos ?? []) {
+      push(def.name, r.path);
+      // A repo pinned to a monorepo subpath anchors at that subpath too.
+      if (r.path && r.subpath) push(def.name, path.join(expandLocalHome(r.path), r.subpath));
+    }
   }
   return out;
 }
@@ -318,13 +406,21 @@ export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): 
   const abs = path.resolve(expandLocalHome(cwd));
   let best: string | undefined;
   let bestLen = -1;
-  for (const { name, abs: root } of projectRootsAbs(defs)) {
-    if (isUnder(abs, root) && root.length > bestLen) {
+  let weakBest: string | undefined;
+  let weakLen = -1;
+  for (const { name, abs: root, weak } of projectRootsAbs(defs)) {
+    if (!isUnder(abs, root)) continue;
+    if (weak) {
+      if (root.length > weakLen) {
+        weakBest = name;
+        weakLen = root.length;
+      }
+    } else if (root.length > bestLen) {
       best = name;
       bestLen = root.length;
     }
   }
-  return best;
+  return best ?? weakBest;
 }
 
 /**

@@ -27,8 +27,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'yaml';
+import { execFileSync } from 'child_process';
 import { ensureLockTarget, atomicWriteFileSync, withFileLock } from './fs-atomic.js';
 import type { Meta, RegistryType } from './types.js';
+import { DEFAULT_SYSTEM_REPO, systemRepoSlug } from './types.js';
 import { machineId } from './machine-id.js';
 
 const HOME = process.env.HOME ?? os.homedir();
@@ -111,6 +113,7 @@ const PROJECTS_DIR = path.join(USER_AGENTS_DIR, 'projects');
 // History bucket (durable).
 const SESSIONS_DIR = path.join(HISTORY_DIR, 'sessions');
 const SESSIONS_DB_PATH = path.join(SESSIONS_DIR, 'sessions.db');
+const ANALYTICS_DIR = path.join(HISTORY_DIR, 'analytics');
 const VERSIONS_DIR = path.join(HISTORY_DIR, 'versions');
 const RUNS_DIR = path.join(HISTORY_DIR, 'runs');
 // Durable per-monitor state-diff store + fire history (last-seen value/hash,
@@ -134,7 +137,6 @@ const PACKAGES_DIR = path.join(CACHE_DIR, 'packages');
 // They live at the user-root so they're git-tracked as source of truth.
 const PLUGINS_DIR = path.join(USER_AGENTS_DIR, 'plugins');
 const CLOUD_DIR = path.join(CACHE_DIR, 'cloud');
-const DRIVE_DIR = path.join(CACHE_DIR, 'drive');
 const TERMINALS_DIR = path.join(CACHE_DIR, 'terminals');
 const LOGS_DIR = path.join(CACHE_DIR, 'logs');
 /** Disposable performance samples (~/.agents/.cache/perf/) — safe to wipe. */
@@ -165,9 +167,16 @@ const USER_WORKFLOWS_DIR = path.join(USER_AGENTS_DIR, 'workflows');
 const USER_SECRETS_DIR = path.join(USER_AGENTS_DIR, 'secrets');
 const USER_PROMPTCUTS_FILE = path.join(USER_AGENTS_DIR, 'hooks', 'promptcuts.yaml');
 
-const META_HEADER = `# agents-cli metadata
+/**
+ * Header prepended to every agents.yaml the CLI writes (central and per-device
+ * docs). Carries the yaml-language-server schema hint so editors validate the
+ * file against `schema/agents-yaml.schema.json`. Exported so
+ * `lib/device-config.ts` writes a sibling device's doc with the same header.
+ */
+export const META_HEADER = `# agents-cli metadata
 # Auto-generated - do not edit manually
 # https://github.com/phnx-labs/agents-cli
+# yaml-language-server: $schema=https://raw.githubusercontent.com/phnx-labs/agents-cli/main/apps/cli/schema/agents-yaml.schema.json
 
 `;
 
@@ -213,6 +222,59 @@ export function getOptionalUserAgentsDir(): string | null {
   return USER_AGENTS_DIR;
 }
 
+/**
+ * Origin `owner/repo` slug (lowercased, `.git` stripped) of a git checkout, or
+ * null when `dir` isn't a git repo / has no origin. Extracts the slug from any
+ * remote URL form: `git@host:owner/repo.git`, `https://host/owner/repo.git`,
+ * `ssh://git@host/owner/repo`. Sync (mirrors readGitConfigUser in git.ts) so it
+ * can be used from the synchronous getProjectAgentsDir walk.
+ */
+function gitOriginSlug(dir: string): string | null {
+  let url: string;
+  try {
+    url = execFileSync('git', ['-C', dir, 'config', '--get', 'remote.origin.url'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim();
+  } catch {
+    return null;
+  }
+  if (!url) return null;
+  const m = url.replace(/\.git$/i, '').match(/[:/]([^/:]+\/[^/]+)$/);
+  return m ? m[1].toLowerCase() : null;
+}
+
+/** Slugs of the user + system DotAgents repos — a checkout of any of these is not a project layer. */
+function canonicalDotAgentsRepoSlugs(): Set<string> {
+  const slugs = new Set<string>([systemRepoSlug(DEFAULT_SYSTEM_REPO).toLowerCase()]);
+  for (const dir of [USER_AGENTS_DIR, SYSTEM_AGENTS_DIR]) {
+    const slug = gitOriginSlug(dir);
+    if (slug) slugs.add(slug);
+  }
+  return slugs;
+}
+
+/**
+ * True when `agentsPath` is itself a git checkout of the user's or system's
+ * DotAgents repo — i.e. a *clone* of the very repo whose rules already load as
+ * the user/system layer (e.g. `git clone …/.agents.git ~/src/github.com/<you>/.agents`).
+ * Such a clone must NOT also be treated as a *project* layer: because project
+ * outranks user, a stale clone would silently shadow the live user rules by
+ * filename and plant a compiled AGENTS.md in an ancestor dir (RUSH-2037).
+ *
+ * A legitimate project layer is a plain subdirectory of a project and is never
+ * itself a git-repo root, so the cheap `.git` gate skips the (git-spawning)
+ * origin comparison for the common case — only a `.agents/` that is its own
+ * checkout pays it, and even then it's kept unless its origin matches the
+ * user/system DotAgents repo (an unrelated repo checked out at `.agents/`,
+ * or a project's own versioned `.agents/`, stays a valid project layer).
+ */
+function isUserOrSystemRepoCheckout(agentsPath: string): boolean {
+  if (!fs.existsSync(path.join(agentsPath, '.git'))) return false;
+  const origin = gitOriginSlug(agentsPath);
+  if (!origin) return false;
+  return canonicalDotAgentsRepoSlugs().has(origin);
+}
+
 /** Walk up from startPath to find a project-scoped .agents/ directory (skipping both roots). */
 export function getProjectAgentsDir(startPath: string = process.cwd()): string | null {
   let dir = path.resolve(startPath);
@@ -220,7 +282,8 @@ export function getProjectAgentsDir(startPath: string = process.cwd()): string |
   while (true) {
     const agentsPath = path.join(dir, '.agents');
     if (fs.existsSync(agentsPath) && fs.statSync(agentsPath).isDirectory()) {
-      if (!isSamePath(agentsPath, SYSTEM_AGENTS_DIR) && !isSamePath(agentsPath, USER_AGENTS_DIR)) {
+      if (!isSamePath(agentsPath, SYSTEM_AGENTS_DIR) && !isSamePath(agentsPath, USER_AGENTS_DIR)
+          && !isUserOrSystemRepoCheckout(agentsPath)) {
         return agentsPath;
       }
     }
@@ -341,6 +404,32 @@ export function getUserSubagentsDir(): string { return USER_SUBAGENTS_DIR; }
 export function getSystemWorkflowsDir(): string { return SYSTEM_WORKFLOWS_DIR; }
 export function getUserWorkflowsDir(): string { return USER_WORKFLOWS_DIR; }
 export function getUserSecretsDir(): string { return USER_SECRETS_DIR; }
+/**
+ * Path to the secrets usage read-model database (~/.agents/secrets/secrets.db).
+ * Read at CALL time so a test can redirect it to a temp file via
+ * AGENTS_SECRETS_DB without racing the module-load capture of USER_SECRETS_DIR —
+ * mirrors the AGENTS_EVENTS_PATH / AGENTS_DEVICES_DIR escape hatches. Holds only
+ * value-free usage telemetry (which bundle was created/imported/exported/viewed/
+ * accessed/unlocked, when, by whom), never a secret value. It is a derived index
+ * fed FROM the emitSecretAudit chokepoint alongside the append-only
+ * ~/.agents/events.jsonl audit log — the same way sessions.db indexes session
+ * metadata off the real session flow — not a second write path.
+ */
+export function getSecretsDbPath(): string {
+  return process.env.AGENTS_SECRETS_DB ?? path.join(USER_SECRETS_DIR, 'secrets.db');
+}
+/**
+ * Path to the durable resource-usage warehouse (~/.agents/.history/analytics/usage.db).
+ * Value-free frequency/lifecycle events (secrets, agents, browser, …). Read at CALL
+ * time so AGENTS_USAGE_DB can redirect tests. Sync shards may also appear as
+ * usage.<machine-id>.db beside this default file.
+ */
+export function getAnalyticsDir(): string {
+  return process.env.AGENTS_ANALYTICS_DIR ?? ANALYTICS_DIR;
+}
+export function getUsageDbPath(): string {
+  return process.env.AGENTS_USAGE_DB ?? path.join(getAnalyticsDir(), 'usage.db');
+}
 export function getUserPromptcutsPath(): string { return USER_PROMPTCUTS_FILE; }
 
 // ─── User operational path getters ────────────────────────────────────────────
@@ -442,11 +531,26 @@ export function getVersionsDir(): string { return VERSIONS_DIR; }
 /** Path to version-switching shim scripts (~/.agents/.cache/shims/). */
 export function getShimsDir(): string { return SHIMS_DIR; }
 
-/** Path to generated per-hook caching/timing shims (~/.agents/.cache/shims/hooks/). */
-export function getHookShimsDir(): string { return HOOK_SHIMS_DIR; }
+/**
+ * Path to generated per-hook caching/timing shims (~/.agents/.cache/shims/hooks/).
+ * Read at CALL time — since every hook now resolves through a shim (RUSH-2xxx,
+ * pass-through timing for matcher-only hooks), a test that registers hooks
+ * in-process (no subprocess HOME override) would otherwise write real shim
+ * files into the user's actual ~/.agents/.cache. AGENTS_HOOK_SHIMS_DIR mirrors
+ * the AGENTS_EVENTS_PATH / AGENTS_DEVICES_DIR test-isolation escape hatches;
+ * never set in production code.
+ */
+export function getHookShimsDir(): string {
+  return process.env.AGENTS_HOOK_SHIMS_DIR ?? HOOK_SHIMS_DIR;
+}
 
-/** Path to per-hook stdout cache files (~/.agents/.cache/state/hooks/). */
-export function getHookCacheDir(): string { return HOOK_CACHE_DIR; }
+/**
+ * Path to per-hook stdout cache files (~/.agents/.cache/state/hooks/). Read at
+ * CALL time for the same reason as {@link getHookShimsDir} — see its doc.
+ */
+export function getHookCacheDir(): string {
+  return process.env.AGENTS_HOOK_CACHE_DIR ?? HOOK_CACHE_DIR;
+}
 
 /** Path to per-agent installed CLI binaries (~/.agents/.cache/bin/). */
 export function getBinDir(): string { return BIN_DIR; }
@@ -472,9 +576,6 @@ export function getProjectPluginsDir(cwd: string = process.cwd()): string | null
   return path.join(projectAgentsDir, 'plugins');
 }
 
-/** Path to synced remote session data (~/.agents/.cache/drive/). */
-export function getDriveDir(): string { return DRIVE_DIR; }
-
 /** Path to soft-deleted resources (~/.agents/.history/trash/). */
 export function getTrashDir(): string { return TRASH_DIR; }
 
@@ -482,7 +583,9 @@ export function getTrashDir(): string { return TRASH_DIR; }
 export function getSessionsDir(): string { return SESSIONS_DIR; }
 
 /** Path to the session index database (~/.agents/.history/sessions/sessions.db). */
-export function getSessionsDbPath(): string { return SESSIONS_DB_PATH; }
+export function getSessionsDbPath(): string {
+  return process.env.AGENTS_SESSIONS_DB ?? SESSIONS_DB_PATH;
+}
 
 /** Path to teams config + registry (~/.agents/teams/). */
 export function getTeamsDir(): string { return TEAMS_DIR; }
@@ -523,20 +626,33 @@ export function getCloudDir(): string { return CLOUD_DIR; }
 /** Path to terminal session metadata (~/.agents/.cache/terminals/). */
 export function getTerminalsDir(): string { return TERMINALS_DIR; }
 
-/** Path to runtime logs (~/.agents/.cache/logs/). */
-export function getLogsDir(): string { return LOGS_DIR; }
+/**
+ * Path to runtime logs (~/.agents/.cache/logs/). Read at CALL time so
+ * AGENTS_LOGS_DIR can redirect it in tests — same test-isolation escape hatch
+ * as {@link getHookShimsDir}; never set in production code.
+ */
+export function getLogsDir(): string {
+  return process.env.AGENTS_LOGS_DIR ?? LOGS_DIR;
+}
 
 /**
  * Path to disposable performance samples (~/.agents/.cache/perf/).
  * Holds `perf.db` + a hook-shim spool. Loss is acceptable — wipe freely.
+ * Read at CALL time: AGENTS_PERF_DIR (the same override perf/db.ts and
+ * perf/spool.ts already honor for their own internal resolution) redirects
+ * this canonical getter too, so a caller that goes through it directly
+ * (hooks/cache.ts's shim generator, the OpenCode timeout sample writer in
+ * hooks.ts) doesn't leak samples into the user's real perf warehouse either.
  */
-export function getPerfDir(): string { return PERF_DIR; }
+export function getPerfDir(): string {
+  return process.env.AGENTS_PERF_DIR ?? PERF_DIR;
+}
 
 /** Path to the perf SQLite warehouse (~/.agents/.cache/perf/perf.db). */
-export function getPerfDbPath(): string { return path.join(PERF_DIR, 'perf.db'); }
+export function getPerfDbPath(): string { return path.join(getPerfDir(), 'perf.db'); }
 
 /** Path to the hook-shim NDJSON spool drained into perf.db on open. */
-export function getPerfSpoolPath(): string { return path.join(PERF_DIR, 'spool.jsonl'); }
+export function getPerfSpoolPath(): string { return path.join(getPerfDir(), 'spool.jsonl'); }
 
 /** Path to per-process runtime state (~/.agents/.cache/state/). */
 export function getRuntimeStateDir(): string { return RUNTIME_STATE_DIR; }
@@ -550,8 +666,17 @@ export function getBrowserRuntimeDir(): string { return BROWSER_RUNTIME_DIR; }
 /** Path to helper subprocess scratch (~/.agents/.cache/helpers/). */
 export function getHelpersDir(): string { return HELPERS_DIR; }
 
-/** Path to scheduler daemon scratch (~/.agents/.cache/helpers/daemon/). */
-export function getDaemonDir(): string { return DAEMON_DIR; }
+/**
+ * Path to scheduler daemon scratch (~/.agents/.cache/helpers/daemon/) — holds
+ * the daemon pid file, heartbeat, start lock, and log. AGENTS_DAEMON_DIR
+ * redirects it to a fork-private temp so daemon tests (which write pid/heartbeat
+ * files and acquire the real start lock) can never clobber a live daemon's state
+ * on a dev machine — the surgical mirror of AGENTS_DEVICES_DIR /
+ * AGENTS_HOOK_SHIMS_DIR, leaving HOME untouched. Read at CALL time (daemon.ts
+ * resolves every path helper through this), so tests/setup.ts can set it before
+ * the daemon module is exercised. Never set in production code.
+ */
+export function getDaemonDir(): string { return process.env.AGENTS_DAEMON_DIR ?? DAEMON_DIR; }
 
 /** Path to PTY server scratch (~/.agents/.cache/helpers/pty/). */
 export function getPtyDir(): string { return PTY_DIR; }
@@ -750,8 +875,9 @@ function writeIfChanged(filePath: string, content: string): void {
 /**
  * Partition the in-memory Meta across three files by sync-domain:
  *   - central  `~/.agents/agents.yaml`             — portable, everything else
+ *              (including the user-scope `config:` block)
  *   - device   `~/.agents/devices/<machine>/agents.yaml` — `agents:` pins +
- *              `defaultBrowserProfile:` (both per-device)
+ *              `defaultBrowserProfile:` + device-scope `config:` (all per-device)
  *   - history  `~/.agents/.history/version-resources.json` — `versions:` (machine-local)
  * All callers funnel through writeMeta → here, so nothing else changes. Empty
  * `agents:` / `versions:` are not written (no empty committed files).
@@ -812,7 +938,7 @@ function serializeCentral(central: Record<string, unknown>): string {
 }
 
 function writeMetaUnlocked(meta: Meta): void {
-  const { agents, isolatedAgents, versions, defaultBrowserProfile, ...central } = meta;
+  const { agents, isolatedAgents, versions, defaultBrowserProfile, deviceConfig, ...central } = meta;
 
   // Write the machine-local files FIRST, then strip central — so a crash mid-write
   // never removes pins/versions from central before they're persisted elsewhere.
@@ -824,13 +950,18 @@ function writeMetaUnlocked(meta: Meta): void {
   // it does not have.
   const hasIsolatedAgents = !!isolatedAgents && Object.keys(isolatedAgents).length > 0;
   const hasDefaultBrowser = !!defaultBrowserProfile;
-  if (hasAgents || hasIsolatedAgents || hasDefaultBrowser) {
-    // Device-local doc carries `agents:` pins and `defaultBrowserProfile:` — both
-    // are per-machine and must never land in central agents.yaml (which syncs).
+  // Device-scope config (`maxAgents`, `schedulerEnabled`, …) is per-machine, so it
+  // rides the device doc under `config:` — never the central doc that syncs.
+  const hasDeviceConfig = !!deviceConfig && Object.keys(deviceConfig).length > 0;
+  if (hasAgents || hasIsolatedAgents || hasDefaultBrowser || hasDeviceConfig) {
+    // Device-local doc carries `agents:` pins, `defaultBrowserProfile:`, and the
+    // device-scope `config:` — all per-machine and must never land in central
+    // agents.yaml (which syncs).
     const deviceDoc: Partial<Meta> = {};
     if (hasAgents) deviceDoc.agents = agents;
     if (hasIsolatedAgents) deviceDoc.isolatedAgents = isolatedAgents;
     if (hasDefaultBrowser) deviceDoc.defaultBrowserProfile = defaultBrowserProfile;
+    if (hasDeviceConfig) deviceDoc.config = deviceConfig;
     fs.mkdirSync(path.dirname(devicePath), { recursive: true });
     writeIfChanged(devicePath, META_HEADER + yaml.stringify(deviceDoc));
   } else if (fs.existsSync(devicePath)) {
@@ -858,6 +989,10 @@ function writeMetaUnlocked(meta: Meta): void {
  *     still has pins)
  *   - `defaultBrowserProfile:` from the device file (device is the sole source;
  *     the field is stripped from central on write, so nothing to merge against)
+ *   - `config:` from the device file into `deviceConfig` (device is the sole
+ *     source for device-scope config, same routing as `defaultBrowserProfile`;
+ *     the in-memory field is named `deviceConfig` so it can never collide with
+ *     the user-scope `config:` central carries)
  *   - `versions:` from the history JSON (wholesale replace; falls back to
  *     whatever central carried when the history file doesn't exist yet)
  */
@@ -869,6 +1004,7 @@ function overlayMachineLocal(meta: Meta): Meta {
       if (dm?.agents) meta.agents = { ...meta.agents, ...dm.agents };
       if (dm?.isolatedAgents) meta.isolatedAgents = { ...meta.isolatedAgents, ...dm.isolatedAgents };
       if (dm?.defaultBrowserProfile) meta.defaultBrowserProfile = dm.defaultBrowserProfile;
+      if (dm?.config) meta.deviceConfig = dm.config;
     } catch { /* ignore malformed device file */ }
   }
   const vrPath = getVersionResourcesPath();

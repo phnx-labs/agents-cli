@@ -34,6 +34,8 @@ import {
 } from './usage-backoff.js';
 import { getCacheDir } from './state.js';
 import type { AgentId } from './types.js';
+import { mapBounded } from './concurrency.js';
+import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -122,7 +124,20 @@ const CLAUDE_SCOPES = [
   'user:file_upload',
 ];
 const CLAUDE_KEYCHAIN_SERVICE = 'Claude Code-credentials';
-const getClaudeUsageCachePath = () => path.join(getCacheDir(), 'claude-usage.json');
+
+/**
+ * Test seam for the usage cache path, mirroring `setUsageBackoffDirForTest`.
+ * `getCacheDir()` resolves from a module-level constant captured at import, so
+ * overriding `HOME` in a test does NOT redirect this cache — it would write into
+ * the developer's real `~/.agents/.cache/`. Point it at a tmpdir instead.
+ */
+let claudeUsageCachePathOverride: string | null = null;
+export function setClaudeUsageCachePathForTest(cachePath: string | null): string | null {
+  const prev = claudeUsageCachePathOverride;
+  claudeUsageCachePathOverride = cachePath;
+  return prev;
+}
+const getClaudeUsageCachePath = () => claudeUsageCachePathOverride ?? path.join(getCacheDir(), 'claude-usage.json');
 const CACHED_CLAUDE_USAGE_SOURCE_LABEL = 'last seen live account data';
 
 const KIMI_USAGES_URL = 'https://api.kimi.com/coding/v1/usages';
@@ -130,6 +145,8 @@ const KIMI_USAGES_URL = 'https://api.kimi.com/coding/v1/usages';
 const DROID_USAGE_URL = 'https://api.factory.ai/api/billing/limits';
 
 const CURSOR_USAGE_URL = 'https://cursor.com/api/usage';
+const CURSOR_PERIOD_USAGE_URL = 'https://cursor.com/api/dashboard/get-current-period-usage';
+const CURSOR_USAGE_SUMMARY_URL = 'https://cursor.com/api/usage-summary';
 
 const COMPACT_BAR_LEN = 5;
 const USAGE_BAR_LEN = 10;
@@ -181,6 +198,13 @@ interface UsageOptions {
   home?: string;
   cliVersion?: string | null;
   organizationId?: string | null;
+  /**
+   * When true, never open the ACL-bound OS keychain item (macOS Touch ID).
+   * Daemon usage refresh sets this so a background tick cannot pop biometrics.
+   * Credentials come from the no-ACL access-token cache, a file-based
+   * setup-token, or `<home>/.claude/.credentials.json` only.
+   */
+  fileOnly?: boolean;
 }
 
 /** Canonical input for a single usage fetch operation. */
@@ -345,17 +369,60 @@ export function agentReportsUsage(agentId: AgentId): boolean {
   return getUsageSource(agentId) !== undefined;
 }
 
-/** Fetch usage info for all unique accounts in parallel, keyed by usage key. */
+/**
+ * Whether an agent's usage source makes a live NETWORK call (Claude/Kimi/Droid/
+ * Cursor/Antigravity) versus reading local session logs (Codex/Grok). Only the
+ * networked ones go through the on-disk cache, and only they need the daemon's
+ * background refresher to keep that cache warm for the routing hot path.
+ */
+export function agentUsesNetworkUsage(agentId: AgentId): boolean {
+  return getUsageSource(agentId)?.network === true;
+}
+
+/**
+ * Concurrent live usage fetches for a single `agents view` / rotation pass.
+ * High enough to finish a multi-account refresh in one round-trip window; low
+ * enough that a cold cache of 10+ accounts cannot open 10+ HTTP calls at once
+ * (and cannot stack behind delayed responses until the process is pegged).
+ */
+export const USAGE_FETCH_CONCURRENCY = 3;
+
+/**
+ * Concurrent background SWR refreshes. Kept below the blocking concurrency so
+ * a display path that returns cached data immediately does not still flood the
+ * network with N silent refreshes that finish long after the command exits and
+ * pile onto the next invocation.
+ */
+const USAGE_BG_REFRESH_CONCURRENCY = 2;
+
+/**
+ * How long a cached snapshot is treated as fresh enough that we skip the network
+ * entirely. Five minutes balances "still accurate enough to glance at" against
+ * "don't re-hit every account on every `agents view` in a tight loop". Was 2
+ * minutes; that re-fired too often when delayed responses stacked.
+ */
+export const USAGE_CACHE_FRESH_MS = 5 * 60 * 1000;
+
+export const USAGE_CACHE_SWR_MS = 24 * 60 * 60 * 1000; // 24 hours — beyond this, block on live fetch.
+
+/**
+ * Unified entry for every multi-account usage lookup (`agents view`, rotation,
+ * JSON export). Deduplicates by usage identity, then fans out through the
+ * shared SWR + timeout path with a hard concurrency cap so delayed calls
+ * cannot pile up.
+ */
 export async function getUsageInfoByIdentity(
   inputs: UsageIdentityInput[],
-  opts?: { forceRefresh?: boolean; maxAgeMs?: number }
+  opts?: { forceRefresh?: boolean; maxAgeMs?: number; readOnly?: boolean }
 ): Promise<{
   canonicalByUsageKey: Map<string, AccountInfo>;
   usageByKey: Map<string, UsageInfo>;
 }> {
   const { canonicalByUsageKey, usageFetchInputs } = buildCanonicalUsageContext(inputs);
-  const usageResults = await Promise.all(
-    [...usageFetchInputs.entries()].map(async ([key, input]) => ({
+  const entries = [...usageFetchInputs.entries()];
+  const usageResults = await mapBounded(
+    entries,
+    async ([key, input]) => ({
       key,
       usage: await getUsageInfoForIdentity({
         agentId: input.agentId,
@@ -363,7 +430,8 @@ export async function getUsageInfoByIdentity(
         cliVersion: input.cliVersion,
         info: canonicalByUsageKey.get(key)!,
       }, opts),
-    }))
+    }),
+    { concurrency: USAGE_FETCH_CONCURRENCY },
   );
 
   return {
@@ -371,9 +439,6 @@ export async function getUsageInfoByIdentity(
     usageByKey: new Map(usageResults.map(({ key, usage }) => [key, usage])),
   };
 }
-
-const USAGE_CACHE_FRESH_MS = 2 * 60 * 1000; // 2 minutes — fresh window: don't refresh.
-const USAGE_CACHE_SWR_MS = 24 * 60 * 60 * 1000; // 24 hours — beyond this, block on live fetch.
 
 /**
  * How stale a cached snapshot may be before the read stops serving it and blocks
@@ -387,27 +452,39 @@ export function swrWindowMsFor(maxAgeMs?: number): number {
   return Math.min(USAGE_CACHE_SWR_MS, Math.max(0, maxAgeMs));
 }
 
-/** In-process dedup: don't fire concurrent background refreshes for the same identity. */
-const inFlightRefreshes = new Map<string, Promise<void>>();
+/**
+ * In-process dedup for live + background usage work on the same identity.
+ * Covers both the blocking cold-cache path and SWR background refreshes so a
+ * delayed HTTP response cannot be stacked under a second request for the same
+ * key (the pile-up that made consecutive `agents view` runs peg CPU/network).
+ */
+const inFlightLiveFetches = new Map<string, Promise<UsageInfo>>();
+const inFlightBgKeys = new Set<string>();
+const bgRefreshQueue: Array<() => Promise<void>> = [];
+let bgRefreshActive = 0;
 
 /**
  * Fetch usage for a single identity using stale-while-revalidate.
  *
- * - Cache fresh (< 2 min): return cached snapshot, NO network.
- * - Cache stale but < 24h: return cached snapshot instantly, fire background refresh.
- * - Cache too stale or absent: block on live fetch, fall back to cache on error.
+ * - Cache fresh (< 5 min): return cached snapshot, NO network.
+ * - Cache stale but < 24h: return cached snapshot instantly, enqueue a
+ *   concurrency-capped background refresh.
+ * - Cache too stale or absent: block on live fetch (shared in-flight promise),
+ *   fall back to cache on error.
  *
- * This keeps `agents run` startup off the network on the hot path. The first
- * invocation after a cold install or 24h gap still blocks once to seed the
- * cache; every run after that returns instantly while the cache silently
- * refreshes in the background.
+ * This keeps `agents run` / `agents view` off the network on the hot path. The
+ * first invocation after a cold install or 24h gap still blocks once to seed
+ * the cache; every run after that returns instantly while the cache silently
+ * refreshes in the background — never more than {@link USAGE_BG_REFRESH_CONCURRENCY}
+ * at a time.
  */
 export async function getUsageInfoForIdentity(
   input: UsageIdentityInput,
-  opts?: { forceRefresh?: boolean; maxAgeMs?: number }
+  opts?: { forceRefresh?: boolean; maxAgeMs?: number; readOnly?: boolean }
 ): Promise<UsageInfo> {
   const usageKey = getUsageLookupKey(input.info);
   const forceRefresh = opts?.forceRefresh === true;
+  const readOnly = opts?.readOnly === true;
 
   // Agents whose registered usage source makes a live network call go
   // through the stale-while-revalidate cache below so `agents run`/`agents view`
@@ -427,6 +504,22 @@ export async function getUsageInfoForIdentity(
 
   const cached = readClaudeUsageCache(usageKey);
   const ageMs = cached?.capturedAt ? Date.now() - cached.capturedAt.getTime() : Infinity;
+
+  // `readOnly` (the `agents run` routing hot path): serve the cache and NEVER
+  // touch the network — not even a background refresh. `collectRunCandidates`
+  // used to pass a 5-minute `maxAgeMs`, which made a snapshot older than that
+  // fall through to the blocking live fetch below (getUsageInfo → provider HTTP),
+  // adding one round trip per account to `agents run` cold-start on a box whose
+  // cache had gone stale. The daemon now owns keeping this cache fresh
+  // (`runUsageRefresh`, adaptive + rate-capped), so the router only ever reads
+  // it. A stale-or-absent snapshot is handled downstream by the router's own
+  // freshness guard (`isUsageVerified` in rotate.ts), which routes around a
+  // number it can't confirm rather than trusting an old one — so returning a
+  // stale snapshot here is safe, and an absent one reports `'stale'`.
+  if (readOnly) {
+    if (cached) return { snapshot: cached, error: null };
+    return { snapshot: null, error: 'stale' };
+  }
 
   // `--refresh` (forceRefresh) skips both cache short-circuits and blocks on a
   // live fetch below, so `agents view --refresh` repopulates every account we can
@@ -448,62 +541,146 @@ export async function getUsageInfoForIdentity(
     // full 24h window and stay off the hot path.
     const swrWindowMs = swrWindowMsFor(opts?.maxAgeMs);
     if (cached && ageMs < swrWindowMs) {
-      triggerBackgroundUsageRefresh(input, usageKey);
+      enqueueBackgroundUsageRefresh(input, usageKey);
       return { snapshot: cached, error: null };
     }
   }
 
-  // Cold cache or > 24h old: block on live fetch.
-  const usage = await getUsageInfo(input.agentId, {
-    home: input.home,
-    cliVersion: input.cliVersion,
-    organizationId: input.info.organizationId,
-  });
-
-  if (usage.snapshot?.source === 'live') {
-    writeClaudeUsageCache(usageKey, usage.snapshot);
-    return usage;
-  }
-
-  // Live fetch failed — last-resort fallback to whatever cache we had.
-  if (cached) {
-    return { snapshot: cached, error: usage.error };
-  }
-  return usage;
+  // Cold cache or > 24h old (or forceRefresh): block on a shared live fetch so
+  // concurrent callers for the same identity share one in-flight HTTP call.
+  return fetchLiveUsageDeduped(input, usageKey, cached);
 }
 
 /**
- * Kick off a background refresh of the usage cache. Errors are swallowed —
- * a failed background refresh leaves the existing cache in place for the
- * next invocation. The work is deferred to a future event-loop tick via
- * `setImmediate` because some of the call chain (loadClaudeOauth →
- * getKeychainToken → execFileSync) does synchronous I/O even though the
- * functions are declared `async`. Without the defer, that sync I/O blocks
- * the SWR caller and defeats the whole point of returning the cache instantly.
+ * Single-flight live usage fetch per usage key. Concurrent callers (view +
+ * rotation, or two rows sharing an account) await the same promise rather than
+ * opening duplicate HTTP requests that then time out and pile up.
  */
-function triggerBackgroundUsageRefresh(input: UsageIdentityInput, usageKey: string): void {
-  if (inFlightRefreshes.has(usageKey)) return;
+async function fetchLiveUsageDeduped(
+  input: UsageIdentityInput,
+  usageKey: string,
+  cached: UsageSnapshot | null,
+): Promise<UsageInfo> {
+  const existing = inFlightLiveFetches.get(usageKey);
+  if (existing) return existing;
 
-  const promise = new Promise<void>((resolve) => {
-    setImmediate(async () => {
-      try {
-        const usage = await getUsageInfo(input.agentId, {
-          home: input.home,
-          cliVersion: input.cliVersion,
-          organizationId: input.info.organizationId,
-        });
-        if (usage.snapshot?.source === 'live') {
-          writeClaudeUsageCache(usageKey, usage.snapshot);
-        }
-      } catch {
-        /* background refresh failed — leave existing cache in place */
-      } finally {
-        inFlightRefreshes.delete(usageKey);
-        resolve();
-      }
+  const promise = (async (): Promise<UsageInfo> => {
+    const usage = await getUsageInfo(input.agentId, {
+      home: input.home,
+      cliVersion: input.cliVersion,
+      organizationId: input.info.organizationId,
     });
+
+    if (usage.snapshot?.source === 'live') {
+      writeClaudeUsageCache(usageKey, usage.snapshot);
+      return usage;
+    }
+
+    // Live fetch failed — last-resort fallback to whatever cache we had.
+    if (cached) {
+      return { snapshot: cached, error: usage.error };
+    }
+    return usage;
+  })();
+
+  inFlightLiveFetches.set(usageKey, promise);
+  try {
+    return await promise;
+  } finally {
+    inFlightLiveFetches.delete(usageKey);
+  }
+}
+
+/**
+ * Enqueue a background refresh of the usage cache. Errors are swallowed — a
+ * failed refresh leaves the existing cache in place. Work is deferred via
+ * `setImmediate` (keychain reads do sync I/O) and drained with a hard
+ * concurrency cap so N stale accounts do not open N HTTP calls at once.
+ */
+function enqueueBackgroundUsageRefresh(input: UsageIdentityInput, usageKey: string): void {
+  if (inFlightBgKeys.has(usageKey) || inFlightLiveFetches.has(usageKey)) return;
+  inFlightBgKeys.add(usageKey);
+
+  bgRefreshQueue.push(async () => {
+    try {
+      // Reuse the single-flight live path so a blocking caller that arrives
+      // mid-refresh shares the same HTTP call instead of racing it.
+      const cached = readClaudeUsageCache(usageKey);
+      await fetchLiveUsageDeduped(input, usageKey, cached);
+    } catch {
+      /* background refresh failed — leave existing cache in place */
+    } finally {
+      inFlightBgKeys.delete(usageKey);
+    }
   });
-  inFlightRefreshes.set(usageKey, promise);
+  pumpBackgroundUsageRefreshes();
+}
+
+function pumpBackgroundUsageRefreshes(): void {
+  while (bgRefreshActive < USAGE_BG_REFRESH_CONCURRENCY && bgRefreshQueue.length > 0) {
+    const work = bgRefreshQueue.shift()!;
+    bgRefreshActive++;
+    // setImmediate so the SWR caller returns the cached snapshot before any
+    // keychain/network work starts on this tick.
+    setImmediate(() => {
+      work().finally(() => {
+        bgRefreshActive--;
+        pumpBackgroundUsageRefreshes();
+      });
+    });
+  }
+}
+
+/**
+ * Pick which usage windows to render in a compact one-line summary.
+ *
+ * Overview rows (`agents view` all agents) must stay narrow enough that one
+ * multi-window agent (Antigravity's four model quotas, Droid's three buckets)
+ * does not force every other row to pad to ~200 columns and wrap. Prefer the
+ * canonical session + week windows when present; otherwise take the highest
+ * utilization remaining. Returns the full set when `maxWindows` is unset.
+ */
+export function pickCompactUsageWindows(
+  windows: UsageWindow[],
+  maxWindows?: number,
+): UsageWindow[] {
+  const filtered = windows.filter((window) => window.key !== 'sonnet_week');
+  if (maxWindows === undefined || maxWindows <= 0 || filtered.length <= maxWindows) {
+    return filtered;
+  }
+
+  // Pick by object identity, not by key. Antigravity normalizes every model
+  // quota as key: 'session', so a key-set filter would keep only the first and
+  // drop the rest even when maxWindows > 1.
+  const chosen: UsageWindow[] = [];
+  const take = (w: UsageWindow | undefined): void => {
+    if (!w || chosen.includes(w) || chosen.length >= maxWindows) return;
+    chosen.push(w);
+  };
+
+  take(filtered.find((w) => w.key === 'session'));
+  take(filtered.find((w) => w.key === 'week'));
+
+  const rest = filtered
+    .filter((w) => !chosen.includes(w))
+    .sort((a, b) => b.usedPercent - a.usedPercent);
+  for (const w of rest) {
+    if (chosen.length >= maxWindows) break;
+    chosen.push(w);
+  }
+  return chosen;
+}
+
+/** Options for {@link formatUsageSummary}. */
+export interface FormatUsageSummaryOpts {
+  unavailable?: boolean;
+  unverified?: boolean;
+  /**
+   * Cap how many usage windows render on one line. Overview (`agents view`
+   * with no agent filter) passes 2 so multi-window agents cannot blow out
+   * column width; single-agent and detail views leave this unset.
+   */
+  maxWindows?: number;
 }
 
 /** Format a one-line usage summary with compact bars for inline display. */
@@ -511,7 +688,7 @@ export function formatUsageSummary(
   plan: string | null,
   snapshot: UsageSnapshot | null,
   planWidth = 3,
-  opts?: { unavailable?: boolean; unverified?: boolean }
+  opts?: FormatUsageSummaryOpts
 ): string {
   const parts: string[] = [];
 
@@ -520,23 +697,32 @@ export function formatUsageSummary(
   }
 
   if (snapshot) {
-    // Compact rows show every BLOCKING window — the same set
+    // Compact rows show BLOCKING windows — the same set
     // deriveUsageStatusFromSnapshot uses for the rate-limited badge — so an
     // account throttled by its month window (Droid meters on 5h/week/month)
     // shows the bar that explains why. Claude's Sonnet week is a per-model
     // sub-limit, not a blocking window; it renders only in the full
     // per-version usage section. Each window reads "S: ███░░ 58% (3d)" — the
     // gauge, the exact percentage, and a compact hint of when it resets.
-    const windows = snapshot.windows
-      .filter((window) => window.key !== 'sonnet_week')
-      .map((window) => {
-        const bar = renderCompactUsageBar(window.usedPercent);
-        const pct = colorUsage(`${Math.round(window.usedPercent)}%`, window.usedPercent);
-        const reset = window.resetsAt ? chalk.dim(` (${formatResetHint(window.resetsAt)})`) : '';
-        return `${chalk.gray(`${window.shortLabel}:`)} ${bar} ${pct}${reset}`;
-      });
-    if (windows.length > 0) {
-      parts.push(windows.join('  '));
+    //
+    // Overview caps the window count (see pickCompactUsageWindows) so one
+    // multi-meter agent cannot force the whole table to wrap.
+    const selected = pickCompactUsageWindows(snapshot.windows, opts?.maxWindows);
+    const hidden = Math.max(
+      0,
+      snapshot.windows.filter((w) => w.key !== 'sonnet_week').length - selected.length,
+    );
+    const windowParts = selected.map((window) => {
+      const bar = renderCompactUsageBar(window.usedPercent);
+      const pct = colorUsage(`${Math.round(window.usedPercent)}%`, window.usedPercent);
+      const reset = window.resetsAt ? chalk.dim(` (${formatResetHint(window.resetsAt)})`) : '';
+      return `${chalk.gray(`${window.shortLabel}:`)} ${bar} ${pct}${reset}`;
+    });
+    if (hidden > 0) {
+      windowParts.push(chalk.dim(`+${hidden}`));
+    }
+    if (windowParts.length > 0) {
+      parts.push(windowParts.join('  '));
     }
     // The bars came from the cache and the live read that should have confirmed
     // them failed, so they are the last thing we saw — not the current state.
@@ -581,6 +767,65 @@ export function deriveUsageStatusFromSnapshot(
   const windows = blocking.length > 0 ? blocking : snapshot.windows;
   const maxUsed = Math.max(...windows.map((window) => window.usedPercent));
   return maxUsed >= 100 ? 'rate_limited' : 'available';
+}
+
+/** A prior sample of one window's utilization, for burn-rate projection. */
+export interface UsagePriorSample {
+  /** Epoch ms the prior snapshot was captured. */
+  capturedAt: number;
+  /** The session window's `usedPercent` in that prior snapshot. */
+  usedPercent: number;
+}
+
+/**
+ * An account's throttle state PLUS how long until it caps, projected from the
+ * burn rate on its 5-hour `session` window — the window that throttles the next
+ * request soonest. `deriveUsageStatusFromSnapshot` answers only "maxed right
+ * now (100%)?"; this answers "and how close is it getting?", so routing can
+ * deprioritize an account burning toward its cap before it actually hits it,
+ * instead of treating 85%-and-climbing the same as 85%-and-idle.
+ *
+ * `minutesToLimit`:
+ *   - `0`      — already rate-limited (a blocking window at 100%).
+ *   - `n > 0`  — projected minutes until the session window reaches 100%, from
+ *                `(100 - used) / burnRatePerMinute`, where the burn rate is
+ *                measured between `prev` and this snapshot.
+ *   - `null`   — unknown: no snapshot, no session window, no prior sample, or
+ *                usage flat/falling since `prev` (a reset or an idle account is
+ *                not "projected to cap", so it is NOT deprioritized).
+ *
+ * Pure: the daemon's refresher supplies `prev` from the last snapshot it stored
+ * (`usage-refresh.ts`); the routing hot path reads the daemon-computed result
+ * from the headroom cache rather than recomputing (it has no `prev`).
+ */
+export interface UsageHeadroom {
+  status: 'available' | 'rate_limited' | null;
+  minutesToLimit: number | null;
+}
+
+export function deriveUsageHeadroom(
+  snapshot: UsageSnapshot | null | undefined,
+  prev?: UsagePriorSample | null,
+): UsageHeadroom {
+  const status = deriveUsageStatusFromSnapshot(snapshot);
+  if (!snapshot || status === null) return { status, minutesToLimit: null };
+  if (status === 'rate_limited') return { status, minutesToLimit: 0 };
+
+  const session = snapshot.windows.find((window) => window.key === 'session');
+  const capturedAt = snapshot.capturedAt?.getTime();
+  if (!session || capturedAt === undefined || !prev) {
+    return { status, minutesToLimit: null };
+  }
+
+  const deltaPercent = session.usedPercent - prev.usedPercent;
+  const deltaMinutes = (capturedAt - prev.capturedAt) / 60_000;
+  // Flat, falling (a window reset), or a zero/negative time delta: no live burn
+  // to project from, so this account is not "projected to cap".
+  if (deltaPercent <= 0 || deltaMinutes <= 0) return { status, minutesToLimit: null };
+
+  const burnPerMinute = deltaPercent / deltaMinutes;
+  const remaining = Math.max(0, 100 - session.usedPercent);
+  return { status, minutesToLimit: remaining / burnPerMinute };
 }
 
 /**
@@ -701,7 +946,12 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
     // Opt into the no-ACL access-token cache: this is the every-60s watchdog hot
     // path and usage needs only the access token, so it kills the Touch ID storm.
-    const oauth = await loadClaudeOauth(options?.home, { accessTokenCache: true });
+    // Daemon refresh also sets fileOnly so we never fall through to the ACL
+    // keychain item (that path is the Touch ID prompt).
+    const oauth = await loadClaudeOauth(options?.home, {
+      accessTokenCache: true,
+      fileOnly: options?.fileOnly === true,
+    });
     if (!oauth?.accessToken) {
       return { snapshot: null, error: usageNoCredentialError('Claude') };
     }
@@ -1358,9 +1608,9 @@ function parseClaudeOauthPayload(raw: string): ClaudeOauthCredentials | null {
 // The source item `Claude Code-credentials-<hash>` is ACL-bound to Claude Code's
 // own process, so every read agents-cli makes (via `/usr/bin/security`) pops
 // Touch ID. The Factory watchdog polls `agents view --json` every 60s per agent,
-// and each poll that crosses the 2-minute usage cache fires a background refresh
+// and each poll that crosses the 5-minute usage cache fires a background refresh
 // -> loadClaudeOauth -> keychain read -> a biometric prompt. With many agents and
-// accounts that is a prompt every couple of minutes, per account.
+// accounts that is a prompt every few minutes, per account.
 //
 // Fix: after one real (prompting) read, cache the ACCESS token in a device-local
 // NO-ACL keychain item — the same `set-no-acl` mechanism secrets/session-store.ts
@@ -1404,7 +1654,9 @@ function claudeOauthCacheActive(): boolean {
  * or the token itself has expired — in which case the stale entry is dropped. */
 function readCachedClaudeOauth(service: string): ClaudeOauthCredentials | null {
   try {
-    const entry = JSON.parse(getKeychainToken(claudeOauthCacheItem(service))) as CachedClaudeOauthEntry;
+    // The cache item is written no-ACL (writeCachedClaudeOauth) — its whole purpose is
+    // serving the token prompt-free, so attest that to the raw-read storm guard.
+    const entry = JSON.parse(getKeychainToken(claudeOauthCacheItem(service), { silentNoAcl: true })) as CachedClaudeOauthEntry;
     if (!entry || typeof entry.accessToken !== 'string' || !entry.accessToken) return null;
     const now = Date.now();
     const tokenExpired = typeof entry.expiresAt === 'number' && entry.expiresAt > 0 && now >= entry.expiresAt;
@@ -1487,10 +1739,14 @@ function deleteCachedClaudeOauth(service: string): void {
  * `getClaudeAccessToken`) or export the full blob (`readClaudeCredentialsBlob`
  * for Rush Cloud dispatch) must NOT pass it. Only the read-only, high-frequency
  * access-token-only consumers (the usage fetch and the auth-health probe) opt in.
+ *
+ * `opts.fileOnly` (implies access-token-only consumers) skips the ACL keychain
+ * read entirely — setup-token, no-ACL cache, and `.credentials.json` only. Used
+ * by the daemon usage refresher so a background tick can never pop Touch ID.
  */
 export async function loadClaudeOauth(
   home?: string,
-  opts?: { accessTokenCache?: boolean }
+  opts?: { accessTokenCache?: boolean; fileOnly?: boolean }
 ): Promise<ClaudeOauthCredentials | null> {
   // Read-only usage/probe callers (accessTokenCache) authenticate with a
   // file-based setup-token when one is provisioned: the usage endpoint accepts
@@ -1517,7 +1773,13 @@ export async function loadClaudeOauth(
   // anywhere, so the platform check must yield to it exactly as the inner
   // claudeOauthCacheActive() gate does — otherwise this whole block is dead on
   // a Windows runner and the tests below it read an empty home.
-  if (process.platform === 'darwin' || process.platform === 'linux' || isKeychainBackendOverridden()) {
+  //
+  // fileOnly: daemon refresh must never open the ACL-bound item (Touch ID).
+  // It may still read the no-ACL cache item (set-no-acl — prompt-free).
+  if (
+    !opts?.fileOnly
+    && (process.platform === 'darwin' || process.platform === 'linux' || isKeychainBackendOverridden())
+  ) {
     const service = getClaudeKeychainService(home);
     // Serve the no-ACL cache first (opt-in, macOS/test only) so the ACL-gated read
     // below — the one that pops Touch ID — happens at most once per token lifetime
@@ -1539,6 +1801,11 @@ export async function loadClaudeOauth(
       // Evict any stale no-ACL cache so a sign-out/deletion isn't masked.
       if (cacheActive) deleteCachedClaudeOauth(service);
     }
+  } else if (opts?.fileOnly === true && opts?.accessTokenCache === true && claudeOauthCacheActive()) {
+    // fileOnly + accessTokenCache: still allow the no-ACL cache (never Touch ID).
+    const service = getClaudeKeychainService(home);
+    const cached = readCachedClaudeOauth(service);
+    if (cached) return cached;
   }
 
   const credsPath = path.join(home ?? os.homedir(), '.claude', '.credentials.json');
@@ -1665,9 +1932,18 @@ export function writeClaudeUsageCache(
   snapshot: UsageSnapshot,
   cachePath = getClaudeUsageCachePath()
 ): void {
-  const cache = readClaudeUsageCacheFile(cachePath);
-  cache[usageKey] = serializeClaudeUsageSnapshot(snapshot);
-  writeClaudeUsageCacheFile(cache, cachePath);
+  try {
+    ensureLockTarget(cachePath, '{}');
+    withFileLock(cachePath, () => {
+      // Re-read under the lock so a concurrent daemon tick / agents view
+      // refresh cannot drop another account's row (lost update).
+      const cache = readClaudeUsageCacheFile(cachePath);
+      cache[usageKey] = serializeClaudeUsageSnapshot(snapshot);
+      atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
+    });
+  } catch {
+    /* best-effort cache write — lock busy or disk full */
+  }
 }
 
 /** Read the entire usage cache file from disk. */
@@ -1691,7 +1967,7 @@ function writeClaudeUsageCacheFile(
 ): void {
   try {
     fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-    fs.writeFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
+    atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
   } catch {
     /* best-effort cache write */
   }
@@ -1911,7 +2187,7 @@ function renderCompactUsageBar(usedPercent: number): string {
 }
 
 /** Render a colored block-character progress bar. */
-function renderBar(usedPercent: number, length: number, minimumVisible = 0): string {
+export function renderBar(usedPercent: number, length: number, minimumVisible = 0): string {
   const rounded = Math.round((usedPercent / 100) * length);
   const filled = Math.max(minimumVisible, Math.max(0, Math.min(length, rounded)));
   const color = getUsageColor(usedPercent);
@@ -1924,7 +2200,7 @@ function colorUsage(text: string, usedPercent: number): string {
 }
 
 /** Return a chalk color function based on the usage percentage threshold. */
-function getUsageColor(usedPercent: number): (text: string) => string {
+export function getUsageColor(usedPercent: number): (text: string) => string {
   if (usedPercent >= 100) return chalk.red;
   if (usedPercent >= 80) return chalk.yellow;
   return chalk.cyan;
@@ -2134,31 +2410,195 @@ export function normalizeCursorUsage(data: CursorUsageResponse): UsageWindow[] {
   ];
 }
 
-/** Read Cursor's OAuth subject + access token from the local CLI config/auth files. */
-function readCursorCredentials(base: string): { sub: string; accessToken: string } | null {
+/** Per-window plan usage percentages Cursor's dashboard breaks usage into (Auto+Composer / API / Total). */
+interface CursorPlanUsage {
+  autoPercentUsed?: number | null;
+  apiPercentUsed?: number | null;
+  totalPercentUsed?: number | null;
+}
+
+/** Response shape from Cursor's dashboard current-period-usage endpoint (subset we render). */
+export interface CursorPeriodUsageResponse {
+  planUsage?: CursorPlanUsage | null;
+  /** ISO timestamp, or a unix-ms string, marking the end of the current billing cycle. */
+  billingCycleEnd?: string | number | null;
+}
+
+/** Response shape from Cursor's usage-summary endpoint (subset we render). */
+export interface CursorUsageSummaryResponse {
+  /** True on a plan with no consumption cap; only tiered self-serve plans populate the percent fields. */
+  isUnlimited?: boolean | null;
+  individualUsage?: {
+    plan?: CursorPlanUsage | null;
+  } | null;
+  billingCycleEnd?: string | number | null;
+}
+
+/**
+ * Normalize a single Cursor percent-based window (auto/api/total), or null when
+ * the percent is not a finite number — the "no empty gauges" rule.
+ * `windowMinutes` stays null: every window shares one billing-cycle reset
+ * (`resetsAt`, from the explicit `billingCycleEnd`), not an inferred cadence, so
+ * inferring one from the (repurposed) `session`/`week`/`month` key would let the
+ * SWR cache zero the bar out long before the real reset.
+ */
+function normalizeCursorPercentWindow(
+  percent: number | null | undefined,
+  key: UsageWindowKey,
+  label: string,
+  shortLabel: string,
+  resetsAt: Date | null,
+): UsageWindow | null {
+  const usedPercent = normalizePercent(percent);
+  if (usedPercent === null) return null;
+  return { key, label, shortLabel, usedPercent, resetsAt, windowMinutes: null };
+}
+
+/**
+ * Normalize Cursor's dashboard `get-current-period-usage` payload — the
+ * primary usage source, giving the same Auto+Composer / API / Total breakdown
+ * the web dashboard shows.
+ */
+export function normalizeCursorPeriodUsage(data: CursorPeriodUsageResponse): UsageWindow[] {
+  const resetsAt = parseDateValue(data.billingCycleEnd);
+  const plan = data.planUsage;
+  const windows = [
+    normalizeCursorPercentWindow(plan?.autoPercentUsed, 'session', 'Auto + Composer', 'A', resetsAt),
+    normalizeCursorPercentWindow(plan?.apiPercentUsed, 'week', 'API', 'API', resetsAt),
+    normalizeCursorPercentWindow(plan?.totalPercentUsed, 'month', 'Total', 'T', resetsAt),
+  ];
+  return windows.filter((window): window is UsageWindow => window !== null);
+}
+
+/**
+ * Normalize Cursor's `usage-summary` fallback payload — the same Auto/API/Total
+ * breakdown nested under `individualUsage.plan`, used when the primary
+ * dashboard endpoint returns no usable `planUsage` (seen on some
+ * enterprise/team accounts). An unlimited plan (`isUnlimited: true`) with no
+ * usable percent has nothing to draw and returns no windows, rather than a
+ * misleading empty gauge.
+ */
+export function normalizeCursorUsageSummary(data: CursorUsageSummaryResponse): UsageWindow[] {
+  const resetsAt = parseDateValue(data.billingCycleEnd);
+  const plan = data.individualUsage?.plan;
+  const windows = [
+    normalizeCursorPercentWindow(plan?.autoPercentUsed, 'session', 'Auto + Composer', 'A', resetsAt),
+    normalizeCursorPercentWindow(plan?.apiPercentUsed, 'week', 'API', 'API', resetsAt),
+    normalizeCursorPercentWindow(plan?.totalPercentUsed, 'month', 'Total', 'T', resetsAt),
+  ];
+  return windows.filter((window): window is UsageWindow => window !== null);
+}
+
+/** Read Cursor's OAuth access token + config-file subject from the local CLI config/auth files. */
+function readCursorCredentials(base: string): { cfgSub: string | null; accessToken: string } | null {
   try {
     const cfgPath = path.join(base, '.cursor', 'cli-config.json');
     const authPath = path.join(base, '.config', 'cursor', 'auth.json');
     if (!fs.existsSync(cfgPath) || !fs.existsSync(authPath)) return null;
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
-    const sub = cfg?.authInfo?.authId;
+    const cfgSub = typeof cfg?.authInfo?.authId === 'string' ? cfg.authInfo.authId : null;
     const auth = JSON.parse(fs.readFileSync(authPath, 'utf-8'));
     const accessToken = auth?.accessToken;
-    if (typeof sub !== 'string' || !sub) return null;
     if (typeof accessToken !== 'string' || !accessToken) return null;
-    return { sub, accessToken };
+    return { cfgSub, accessToken };
   } catch {
     return null;
   }
 }
 
 /**
- * Fetch Cursor usage from the dashboard usage endpoint. Cursor authenticates the
- * request with a `WorkosCursorSessionToken` cookie of the form
- * `<oauth-subject>::<access-token>` (the same pair the web dashboard sends), not a
- * bearer header. Free/legacy plans return a monthly request bar; usage-based plans
- * have no request cap, so they return a live-but-window-less snapshot (the account
- * row still renders, without a misleading empty gauge).
+ * Resolve the OAuth subject Cursor expects in the `WorkosCursorSessionToken`
+ * cookie: the access token's own JWT `sub` claim first (the subject that
+ * actually signed the token in hand), falling back to the subject
+ * `cli-config.json` recorded at login when the token carries no usable `sub`.
+ */
+function resolveCursorSubject(accessToken: string, cfgSub: string | null): string | null {
+  const jwtSub = normalizeString(decodeJwtPayload(accessToken)?.sub);
+  return jwtSub || cfgSub;
+}
+
+/**
+ * POST the dashboard current-period-usage endpoint and normalize its windows.
+ * Returns null on any network/auth failure so the caller falls through to the
+ * next source — only a genuine empty-windows response distinguishes "no usage
+ * to report" from "couldn't reach this source".
+ */
+async function fetchCursorPeriodWindows(cookie: string): Promise<UsageWindow[] | null> {
+  try {
+    const response = await fetch(CURSOR_PERIOD_USAGE_URL, {
+      method: 'POST',
+      headers: {
+        Cookie: cookie,
+        Origin: 'https://cursor.com',
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: '{}',
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) {
+      if (response.status === 429) {
+        noteUsageRateLimited('cursor', response.headers.get('retry-after'));
+      }
+      return null;
+    }
+    const data = (await response.json()) as CursorPeriodUsageResponse;
+    return normalizeCursorPeriodUsage(data);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * GET the usage-summary fallback endpoint and normalize its windows. Same
+ * null-on-failure contract as {@link fetchCursorPeriodWindows}.
+ */
+async function fetchCursorUsageSummaryWindows(cookie: string): Promise<UsageWindow[] | null> {
+  try {
+    const response = await fetch(CURSOR_USAGE_SUMMARY_URL, {
+      method: 'GET',
+      headers: {
+        Cookie: cookie,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) {
+      if (response.status === 429) {
+        noteUsageRateLimited('cursor', response.headers.get('retry-after'));
+      }
+      return null;
+    }
+    const data = (await response.json()) as CursorUsageSummaryResponse;
+    return normalizeCursorUsageSummary(data);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch Cursor usage. Cursor authenticates every one of these requests with a
+ * `WorkosCursorSessionToken` cookie of the form `<oauth-subject>::<access-token>`
+ * (the same pair the web dashboard sends), not a bearer header, so all three
+ * sources below share one resolved cookie.
+ *
+ * Three sources, tried in order, because no single endpoint carries usable data
+ * for every plan shape:
+ *
+ *  1. `get-current-period-usage` — the primary source, and the richest: the
+ *     Auto+Composer / API / Total percent breakdown the dashboard itself shows.
+ *  2. `usage-summary` — some enterprise/team accounts return no usable
+ *     `planUsage` from (1); this nests the same three percentages under
+ *     `individualUsage.plan` instead.
+ *  3. The legacy `/api/usage` request-cap endpoint — the original source,
+ *     kept as the final fallback for free/legacy plans that predate the
+ *     percent-based breakdown above and only ever exposed a monthly request cap.
+ *
+ * The first source to yield a non-empty window list wins; a source that errors
+ * or returns no usable numbers falls through to the next rather than surfacing
+ * an error — only the last resort's own response/error is surfaced when every
+ * source comes up empty, so a plan enrolled in exactly one billing model still
+ * renders instead of reporting three swallowed failures.
  */
 async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
@@ -2171,16 +2611,37 @@ async function getCursorUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       return { snapshot: null, error: usageExpiredCredentialError('Cursor') };
     }
 
-    const url = `${CURSOR_USAGE_URL}?user=${encodeURIComponent(creds.sub)}`;
+    const sub = resolveCursorSubject(creds.accessToken, creds.cfgSub);
+    if (!sub) return { snapshot: null, error: usageNoCredentialError('Cursor') };
+
     const throttledUntil = usageRateLimitedUntil('cursor');
     if (throttledUntil) {
       return { snapshot: null, error: usageThrottledError('Cursor', throttledUntil) };
     }
 
+    const cookie = `WorkosCursorSessionToken=${sub}%3A%3A${creds.accessToken}`;
+
+    const periodWindows = await fetchCursorPeriodWindows(cookie);
+    if (periodWindows && periodWindows.length > 0) {
+      return {
+        snapshot: { source: 'live', sourceLabel: 'live account data', capturedAt: new Date(), windows: periodWindows },
+        error: null,
+      };
+    }
+
+    const summaryWindows = await fetchCursorUsageSummaryWindows(cookie);
+    if (summaryWindows && summaryWindows.length > 0) {
+      return {
+        snapshot: { source: 'live', sourceLabel: 'live account data', capturedAt: new Date(), windows: summaryWindows },
+        error: null,
+      };
+    }
+
+    const url = `${CURSOR_USAGE_URL}?user=${encodeURIComponent(sub)}`;
     const response = await fetch(url, {
       method: 'GET',
       headers: {
-        Cookie: `WorkosCursorSessionToken=${creds.sub}%3A%3A${creds.accessToken}`,
+        Cookie: cookie,
         Accept: 'application/json',
       },
       signal: AbortSignal.timeout(5000),

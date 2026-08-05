@@ -103,7 +103,7 @@ export interface ActionConfig {
   timeout?: string;
   /** routine: name of an existing routine to fire. */
   routine?: string;
-  /** notify: channel for the notification (default `telegram`). */
+  /** notify: override the owner channel (defaults to `notify.owner.channel`). */
   notifyChannel?: string;
   /** webhook-out: URL to POST the event to. */
   url?: string;

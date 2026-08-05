@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { parseGrok, detectAgent } from '../parse.js';
+import { toolCallsFromEvents } from '../tool-calls.js';
 
 /**
  * Build a Grok session dir (summary.json + chat_history.jsonl) and return the
@@ -57,13 +58,16 @@ describe('parseGrok', () => {
 
     const toolUse = events.find(e => e.type === 'tool_use');
     expect(toolUse?.tool).toBe('bash');
+    expect(toolUse?.callId).toBe('call_1');
     expect(toolUse?.args?.command).toBe('ls -la');
     expect(toolUse?.command).toBe('ls -la');
 
     const toolResult = events.find(e => e.type === 'tool_result');
     // tool name is correlated back from the earlier tool_call id.
     expect(toolResult?.tool).toBe('bash');
-    expect(toolResult?.success).toBe(true);
+    expect(toolResult?.callId).toBe('call_1');
+    expect(toolResult?.success).toBeUndefined();
+    expect(toolResult?.outcome).toBe('unknown');
     expect(toolResult?.output).toBe('file_a\nfile_b');
 
     // Every event carries the session's created_at timestamp.
@@ -85,7 +89,11 @@ describe('parseGrok', () => {
     const events = parseGrok(summaryPath);
     const errored = events.find(e => e.type === 'error');
     expect(errored?.tool).toBe('read_file');
-    expect(errored?.success).toBe(false);
+    expect(errored?.success).toBeUndefined();
+    expect(errored?.outcome).toBe('unknown');
+    expect(toolCallsFromEvents(events)).toEqual([
+      expect.objectContaining({ outcome: 'unknown', output: 'Error: no such file' }),
+    ]);
     // An assistant turn with empty text emits only the tool_use, no empty message.
     expect(events.some(e => e.type === 'message')).toBe(false);
     const toolUse = events.find(e => e.type === 'tool_use');

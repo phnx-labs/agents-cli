@@ -14,6 +14,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { emitSecretAudit, resolveAuditAgent } from './audit.js';
+import { getBundleUsage, getUsageHistory, closeSecretsUsageDb } from './usage-db.js';
 import { query, levelFor, _resetForTest } from '../events.js';
 import { readUnifiedEvents } from '../event-stream.js';
 import { MILESTONE_EVENTS } from '../activity.js';
@@ -126,6 +127,101 @@ describe('emitSecretAudit', () => {
     emitSecretAudit({ event: 'secrets.get', bundle: 'b', keyCount: 0 });
     const r = query({ eventTypes: ['secrets.get'] })[0];
     expect(r).not.toHaveProperty('agent');
+  });
+});
+
+/**
+ * The single-write-path contract: emitSecretAudit is the ONE chokepoint, and a
+ * secret event flows through it into BOTH sinks — the append-only events.jsonl
+ * audit log AND the derived usage read-model DB — from one call, recorded once.
+ * This is the invariant the whole consolidation exists to guarantee: no
+ * standalone activity write path parallel to the audit emitter.
+ */
+describe('emitSecretAudit feeds events.jsonl AND the usage read-model from one call', () => {
+  let prevNoTrack: string | undefined;
+  let prevSecretsDb: string | undefined;
+  let prevUsageDb: string | undefined;
+  let dbDir: string;
+
+  beforeEach(() => {
+    setupEvents();
+    prevNoTrack = process.env.AGENTS_NO_USAGE_TRACK;
+    prevSecretsDb = process.env.AGENTS_SECRETS_DB;
+    prevUsageDb = process.env.AGENTS_USAGE_DB;
+    delete process.env.AGENTS_NO_USAGE_TRACK;
+    closeSecretsUsageDb();
+    dbDir = tempDir();
+    process.env.AGENTS_SECRETS_DB = path.join(dbDir, 'secrets-legacy.db');
+    process.env.AGENTS_USAGE_DB = path.join(dbDir, 'usage.db');
+  });
+
+  afterEach(() => {
+    closeSecretsUsageDb();
+    if (prevNoTrack === undefined) delete process.env.AGENTS_NO_USAGE_TRACK;
+    else process.env.AGENTS_NO_USAGE_TRACK = prevNoTrack;
+    if (prevSecretsDb === undefined) delete process.env.AGENTS_SECRETS_DB;
+    else process.env.AGENTS_SECRETS_DB = prevSecretsDb;
+    if (prevUsageDb === undefined) delete process.env.AGENTS_USAGE_DB;
+    else process.env.AGENTS_USAGE_DB = prevUsageDb;
+  });
+
+  it('records ONE access in the audit log AND one row in the read-model DB', () => {
+    process.env.AGENTS_AGENT_NAME = 'claude';
+    emitSecretAudit({
+      event: 'secrets.get',
+      bundle: 'prod',
+      operation: 'run --secrets',
+      source: 'agent',
+      status: 'success',
+      keyCount: 2,
+      keys: ['API_KEY', 'DB_URL'],
+    });
+
+    // events.jsonl side: exactly one secrets.get, value-free, agent-tagged.
+    const recs = query({ eventTypes: ['secrets.get'] });
+    expect(recs).toHaveLength(1);
+    expect(recs[0].bundle).toBe('prod');
+    expect(recs[0].agent).toBe('claude');
+
+    // read-model side: exactly one access, counted once, same bundle + agent,
+    // and no value anywhere.
+    const usage = getBundleUsage('prod');
+    expect(usage).toBeDefined();
+    expect(usage!.total).toBe(1);
+    expect(usage!.events.access.count).toBe(1);
+    expect(usage!.byAgent).toEqual([{ agent: 'claude', count: 1 }]);
+    const history = getUsageHistory('prod', 10);
+    expect(history).toHaveLength(1);
+    expect(history[0].event).toBe('access');
+    expect(JSON.stringify(history[0])).not.toContain('API_KEY=');
+  });
+
+  it('maps each lifecycle event onto its usage kind (create/import/export/view)', () => {
+    emitSecretAudit({ event: 'secrets.create', bundle: 'life', source: 'create' });
+    emitSecretAudit({ event: 'secrets.import', bundle: 'life', source: 'file', keyCount: 3 });
+    emitSecretAudit({ event: 'secrets.export', bundle: 'life', source: 'shell', keyCount: 3 });
+    emitSecretAudit({ event: 'secrets.view', bundle: 'life', source: 'view' });
+
+    // All four surfaced in the raw event stream through the one emitter.
+    expect(query({ eventTypes: ['secrets.create'] })).toHaveLength(1);
+    expect(query({ eventTypes: ['secrets.import'] })).toHaveLength(1);
+    expect(query({ eventTypes: ['secrets.export'] })).toHaveLength(1);
+    expect(query({ eventTypes: ['secrets.view'] })).toHaveLength(1);
+
+    // And mirrored into the read-model under the mapped kinds.
+    const u = getBundleUsage('life')!;
+    expect(u.events.create.count).toBe(1);
+    expect(u.events.import.count).toBe(1);
+    expect(u.events.export.count).toBe(1);
+    expect(u.events.view.count).toBe(1);
+    expect(u.events.access.count).toBe(0);
+  });
+
+  it('a raw `secrets get <item>` (no bundle) audits but records no bundle usage', () => {
+    emitSecretAudit({ event: 'secrets.get', item: 'raw-item', source: 'raw-item', status: 'success' });
+    expect(query({ eventTypes: ['secrets.get'] })).toHaveLength(1);
+    expect(getBundleUsage('raw-item')).toBeUndefined();
+    expect(getUsageHistory('raw-item', 10)).toHaveLength(0);
   });
 });
 

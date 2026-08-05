@@ -3,7 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError, probeClaudeStatus, probeKimiStatus } from './usage.js';
+import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, getUsageInfoForIdentity, writeClaudeUsageCache, setClaudeUsageCachePathForTest, deriveUsageHeadroom, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError, probeClaudeStatus, probeKimiStatus, type UsageSnapshot } from './usage.js';
+import type { AccountInfo } from './agents.js';
 import { noteUsageRateLimited, setUsageBackoffDirForTest } from './usage-backoff.js';
 import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from './secrets/index.js';
 import { writeBundle, keychainRef, bundleItemStore } from './secrets/bundles.js';
@@ -266,6 +267,18 @@ describe('loadClaudeOauth — file-based `auth` setup-token (Touch-ID-free usage
     const oauth = await loadClaudeOauth(home);
     expect(oauth).toBeNull();
   });
+
+  it('fileOnly never opens the ACL keychain even without a setup-token', async () => {
+    // Strip the email so resolveClaudeSetupToken cannot map home -> setup-token KEY.
+    fs.writeFileSync(path.join(home, '.claude', '.claude.json'), JSON.stringify({}));
+    fs.writeFileSync(
+      path.join(home, '.claude', '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'file-only-token', expiresAt: Date.now() + 3_600_000 } }),
+    );
+    // makeThrowingKeychain is installed — if fileOnly fell through to ACL keychain, this throws.
+    const oauth = await loadClaudeOauth(home, { accessTokenCache: true, fileOnly: true });
+    expect(oauth?.accessToken).toBe('file-only-token');
+  });
 });
 
 describe('swrWindowMsFor — a routing decision does not get day-old data', () => {
@@ -296,6 +309,122 @@ describe('swrWindowMsFor — a routing decision does not get day-old data', () =
 
   it('clamps a negative age to zero — that IS an opinion: never serve the cache', () => {
     expect(swrWindowMsFor(-1)).toBe(0);
+  });
+});
+
+describe('deriveUsageHeadroom — projects minutes-to-cap from the session burn rate', () => {
+  const sessionSnap = (usedPercent: number, capturedAtMs: number): UsageSnapshot => ({
+    source: 'live',
+    sourceLabel: 'live',
+    capturedAt: new Date(capturedAtMs),
+    windows: [
+      { key: 'session', label: '5h', shortLabel: 'S', usedPercent, resetsAt: null, windowMinutes: 300 },
+      { key: 'week', label: 'Week', shortLabel: 'W', usedPercent: 40, resetsAt: null, windowMinutes: 10080 },
+    ],
+  });
+
+  it('projects minutes to the cap from the burn between two samples', () => {
+    // 50% -> 70% over 10 minutes = 2%/min; 30% headroom remains => 15 minutes.
+    const curr = sessionSnap(70, NOW);
+    const headroom = deriveUsageHeadroom(curr, { capturedAt: NOW - 10 * 60_000, usedPercent: 50 });
+    expect(headroom.status).toBe('available');
+    expect(headroom.minutesToLimit).toBeCloseTo(15, 5);
+  });
+
+  it('reports 0 minutes when a blocking window is already maxed', () => {
+    const maxed = sessionSnap(100, NOW);
+    expect(deriveUsageHeadroom(maxed, { capturedAt: NOW - 60_000, usedPercent: 90 })).toEqual({
+      status: 'rate_limited',
+      minutesToLimit: 0,
+    });
+  });
+
+  it('does not project a cap when usage is flat or falling (a reset / idle)', () => {
+    const curr = sessionSnap(50, NOW);
+    // Flat since prev: no burn to project from.
+    expect(deriveUsageHeadroom(curr, { capturedAt: NOW - 10 * 60_000, usedPercent: 50 }).minutesToLimit).toBeNull();
+    // Fell (window reset): also not "projected to cap".
+    expect(deriveUsageHeadroom(curr, { capturedAt: NOW - 10 * 60_000, usedPercent: 80 }).minutesToLimit).toBeNull();
+  });
+
+  it('has no projection without a prior sample or a session window', () => {
+    expect(deriveUsageHeadroom(sessionSnap(60, NOW), null).minutesToLimit).toBeNull();
+    const noSession: UsageSnapshot = {
+      source: 'live', sourceLabel: 'live', capturedAt: new Date(NOW),
+      windows: [{ key: 'week', label: 'Week', shortLabel: 'W', usedPercent: 60, resetsAt: null, windowMinutes: 10080 }],
+    };
+    expect(deriveUsageHeadroom(noSession, { capturedAt: NOW - 60_000, usedPercent: 10 }).minutesToLimit).toBeNull();
+  });
+
+  it('returns a null status for an empty/absent snapshot', () => {
+    expect(deriveUsageHeadroom(null)).toEqual({ status: null, minutesToLimit: null });
+  });
+});
+
+describe('readOnly — the `agents run` routing hot path never blocks on the network', () => {
+  // The measured cold-start stall: collectRunCandidates passed maxAgeMs=5min, so
+  // a snapshot older than that fell through to a blocking live provider fetch —
+  // one HTTP round trip per account added to `agents run` startup. readOnly
+  // serves the cache and NEVER fetches. Deterministic + no network: the seam
+  // points the cache at a tmpdir and no live call is made on any assertion.
+  let cacheDir: string;
+  let prevPath: string | null;
+  const usageKey = 'claude:org=readonly-test';
+
+  const staleButUnexpired = (): UsageSnapshot => ({
+    // Captured 30 minutes ago: far past USAGE_DECISION_MAX_AGE_MS (5min) so the
+    // router will treat it as unverified — but the week window has not expired,
+    // so deserialization keeps the number rather than zeroing it.
+    source: 'live',
+    sourceLabel: 'live',
+    capturedAt: new Date(Date.now() - 30 * 60 * 1000),
+    windows: [
+      {
+        key: 'week',
+        label: 'Current week',
+        shortLabel: 'W',
+        usedPercent: 91,
+        resetsAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+        windowMinutes: 10080,
+      },
+    ],
+  });
+
+  const claudeInput = () => ({
+    agentId: 'claude' as const,
+    // A network provider (claude) with a usage key but no reachable token here —
+    // so if readOnly wrongly fell through to getUsageInfo it would hit the
+    // keychain, fail, and stamp an error; error===null proves the short-circuit.
+    info: { usageKey } as unknown as AccountInfo,
+  });
+
+  beforeEach(() => {
+    cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-usage-ro-'));
+    prevPath = setClaudeUsageCachePathForTest(path.join(cacheDir, 'claude-usage.json'));
+  });
+
+  afterEach(() => {
+    setClaudeUsageCachePathForTest(prevPath);
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  });
+
+  it('serves a STALE cached snapshot without a live fetch', async () => {
+    writeClaudeUsageCache(usageKey, staleButUnexpired());
+
+    const usage = await getUsageInfoForIdentity(claudeInput(), { readOnly: true });
+
+    // The cache is returned verbatim (no network refetch, no error), even though
+    // it is well past the routing freshness bar — routing around it is
+    // isUsageVerified's job, not a blocking refresh's.
+    expect(usage.snapshot?.windows[0]?.usedPercent).toBe(91);
+    expect(usage.error).toBeNull();
+  });
+
+  it('reports "stale" for an absent snapshot instead of dialing the provider', async () => {
+    const usage = await getUsageInfoForIdentity(claudeInput(), { readOnly: true });
+
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toBe('stale');
   });
 });
 

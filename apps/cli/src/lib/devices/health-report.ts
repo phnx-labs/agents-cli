@@ -4,6 +4,7 @@ import { fmtBytes, headroom, type DeviceStats } from './health.js';
 import { formatCheckedAge, type HostAuthSummary } from '../auth-health.js';
 import type { OnlineState } from './reachability.js';
 import { compareFleetInventories, type FleetInventory } from './fleet-divergence.js';
+import type { FleetAgentCounts } from '../fleet-status.js';
 
 export interface FleetCliStatus {
   installed: boolean;
@@ -52,6 +53,10 @@ export interface FleetHealthRow {
    *  divergence detection (RUSH-2027). Undefined for an unreachable box or an
    *  older CLI that doesn't emit it. */
   inventory?: FleetInventory;
+  /** This host's live agent workload (running-agent count + per-context / per-
+   *  agent breakdown), from the fleet-status mirror / read-union (RUSH-2061).
+   *  Undefined when no row has been published for the host yet. */
+  agents?: FleetAgentCounts;
 }
 
 export interface FleetWarning {
@@ -530,6 +535,9 @@ export function renderFleetSummary(
         if (stark) marks.push(chalk.yellow(`⚠ CLIs ${stark.installed}/${stark.total}`));
       } else if (isGenuinelyOffline(row) && row.lastSeen) {
         marks.push(chalk.gray(`last seen ${formatCheckedAge(Date.parse(row.lastSeen), now)}`));
+      }
+      if (row.agents && row.agents.running > 0) {
+        marks.push(chalk.cyan(`${row.agents.running} agent${row.agents.running === 1 ? '' : 's'}`));
       }
       if (isSelf) marks.push(chalk.cyan('← this machine'));
       const note = marks.length ? `   ${marks.join('   ')}` : '';

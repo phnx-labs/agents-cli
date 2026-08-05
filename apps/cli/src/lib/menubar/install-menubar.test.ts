@@ -6,7 +6,9 @@ import * as path from 'path';
 import {
   classifyMenubarProcesses,
   codesignVerifies,
-  ensureValidSignature,
+  gatekeeperAssesses,
+  generateServicePlist,
+  hasDeveloperIdSignature,
   isMenubarStale,
   menubarPlistNeedsRepoint,
   processesToEnd,
@@ -208,38 +210,84 @@ describe('restartMenubarLaunchAgent', () => {
   });
 });
 
-// Regression guard for the crash loop: npm strips the ad-hoc signature the
-// release bakes into MenubarHelper.app, leaving it "not signed at all" — which
-// macOS 26+ SIGKILLs on launch, spinning the launchd KeepAlive service forever.
-// ensureValidSignature must re-sign the copied bundle so codesign verifies.
-// Exercises the real `codesign` binary (no mocking), so it only runs on macOS.
+// Regression guard for the "damaged app" bug (RUSH-2134): the shipped helper is
+// Developer-ID signed AND notarized (menubar/scripts/build.sh + the
+// verify-menubar-helper.sh prepack gate). A signature alone is NOT enough —
+// Gatekeeper rejects an un-notarized bundle as "damaged" on macOS 26+ — so the
+// launch guards require BOTH `codesign --verify` (codesignVerifies) and
+// Gatekeeper acceptance (gatekeeperAssesses). This pins the reason both are
+// checked: an ad-hoc / un-notarized bundle passes codesign but fails Gatekeeper,
+// and must be refused, never re-signed. Real codesign/spctl (no mocking) → macOS.
 const darwinOnly = process.platform === 'darwin' ? describe : describe.skip;
-darwinOnly('ensureValidSignature (real codesign)', () => {
-  function makeUnsignedBundle(): string {
+darwinOnly('menubar launch guard requires notarization (real codesign/spctl)', () => {
+  function makeAdHocBundle(): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-sig-'));
     const app = path.join(dir, 'MenubarHelper.app');
     fs.mkdirSync(path.join(app, 'Contents', 'MacOS'), { recursive: true });
     // A real Mach-O so codesign has something to sign; /bin/echo is stable.
     fs.copyFileSync('/bin/echo', path.join(app, 'Contents', 'MacOS', 'MenubarHelper'));
-    // Strip the inherited system signature -> "not signed at all", the exact
-    // state npm's tarball round-trip leaves the shipped ad-hoc bundle in.
-    spawnSync('codesign', ['--remove-signature', app], { stdio: 'ignore' });
+    // Ad-hoc sign it: the signature is valid, but it is NOT notarized — the exact
+    // state a non-Developer-ID / un-notarized cut leaves the bundle in.
+    spawnSync('codesign', ['--force', '--sign', '-', '--identifier', 'com.phnx-labs.agents-menubar', app], { stdio: 'ignore' });
     return app;
   }
 
-  it('heals an unsigned bundle so it passes codesign --verify', () => {
-    const app = makeUnsignedBundle();
-    expect(codesignVerifies(app)).toBe(false);
-    expect(ensureValidSignature(app)).toBe(true);
+  it('an ad-hoc-signed (un-notarized) bundle passes codesign but FAILS Gatekeeper', () => {
+    const app = makeAdHocBundle();
+    // Signature is valid on its own...
     expect(codesignVerifies(app)).toBe(true);
+    // ...but Gatekeeper rejects it because it is not notarized. The guard's AND
+    // of the two is therefore false, so the helper is refused, not launched.
+    expect(gatekeeperAssesses(app)).toBe(false);
     fs.rmSync(path.dirname(app), { recursive: true, force: true });
   });
 
-  it('leaves an already-valid signature untouched (idempotent)', () => {
-    const app = makeUnsignedBundle();
-    ensureValidSignature(app);
-    expect(ensureValidSignature(app)).toBe(true);
-    expect(codesignVerifies(app)).toBe(true);
+  it('hasDeveloperIdSignature is false for an ad-hoc bundle', () => {
+    const app = makeAdHocBundle();
+    expect(hasDeveloperIdSignature(app)).toBe(false);
     fs.rmSync(path.dirname(app), { recursive: true, force: true });
+  });
+});
+
+// Regression guard for the ORPHAN-STORM incident. The helper can crash at
+// startup on a loaded machine — `NSApplication.shared` segfaults inside
+// `SLSNewConnection` when WindowServer is too starved to hand out a connection.
+// With `KeepAlive` and no `ThrottleInterval`, launchd relaunched on its ~10s
+// default and every attempt spawned another `agents doctor --json` before dying,
+// so a starved box got hit harder the worse it got: 38 orphaned doctors, ~13 of
+// 18 cores, load average 490. The throttle paces the respawn; ChildProcess.swift
+// bounds and reaps the children.
+describe('generateServicePlist — launchd crash-loop throttle', () => {
+  const plist = generateServicePlist('/Users/x/Library/Application Support/agents-cli/MenubarHelper.app/Contents/MacOS/MenubarHelper');
+
+  it('sets a ThrottleInterval so a startup crash-loop cannot respawn every 10s', () => {
+    expect(plist).toContain('<key>ThrottleInterval</key>');
+    const seconds = Number(/<key>ThrottleInterval<\/key>\s*<integer>(\d+)<\/integer>/.exec(plist)?.[1]);
+    expect(seconds).toBeGreaterThanOrEqual(30);
+  });
+
+  it('still keeps the helper alive and starts it at load', () => {
+    expect(plist).toContain('<key>KeepAlive</key>');
+    expect(plist).toContain('<key>RunAtLoad</key>');
+  });
+
+  // `plutil` is macOS-only and the CI test shards run on Linux, where spawnSync
+  // returns status null (ENOENT) rather than a non-zero exit — so gate on the
+  // tool actually being present instead of asserting against a missing binary.
+  const hasPlutil = spawnSync('plutil', ['-help'], { encoding: 'utf8' }).error === undefined;
+
+  it.skipIf(!hasPlutil)('emits a plist that plutil accepts', () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-plist-')), 'x.plist');
+    fs.writeFileSync(file, plist);
+    expect(spawnSync('plutil', ['-lint', file], { encoding: 'utf8' }).status).toBe(0);
+  });
+
+  // Runs everywhere, so the structural contract is still pinned on Linux CI:
+  // a plist launchd will reject is a helper that never starts.
+  it('is well-formed XML with a single top-level dict', () => {
+    expect(plist.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
+    expect(plist).toContain('<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"');
+    expect(plist.match(/<dict>/g)?.length).toBe(plist.match(/<\/dict>/g)?.length);
+    expect(plist.trimEnd().endsWith('</plist>')).toBe(true);
   });
 });

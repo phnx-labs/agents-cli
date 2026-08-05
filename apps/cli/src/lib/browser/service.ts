@@ -305,6 +305,25 @@ export interface HealInfo {
   name: string;
 }
 
+/**
+ * Resolve the identity stamped on a task at start: WHO (`owner`) and WHICH run
+ * (`launchId`). The forwarded values come from the caller's own CLI process and
+ * are authoritative — the browser daemon is shared and long-lived, so resolving
+ * the actor daemon-side (the RUSH-2020 bug) mis-attributes every task to the
+ * daemon's owner. `resolveLocalActor` is consulted ONLY when no actor was
+ * forwarded (a CLI that predates the field, mid-rollout) — never to override a
+ * forwarded one.
+ */
+export function resolveTaskIdentity(
+  forwarded: { actor?: string; launchId?: string },
+  resolveLocalActor: () => string
+): { owner: string; launchId?: string } {
+  return {
+    owner: forwarded.actor ?? resolveLocalActor(),
+    launchId: forwarded.launchId,
+  };
+}
+
 export class BrowserService {
   private static readonly SOURCE_PREFIX: Record<string, string> = {
     'rush-app': 'rush-app-',
@@ -323,7 +342,15 @@ export class BrowserService {
 
   async start(
     profileName: string,
-    opts: { taskName?: string; url?: string; endpointName?: string; skipDomainSkill?: boolean } = {}
+    opts: {
+      taskName?: string;
+      url?: string;
+      endpointName?: string;
+      skipDomainSkill?: boolean;
+      /** Caller identity, forwarded from the CLI (see IPCRequest.actor/launchId). */
+      actor?: string;
+      launchId?: string;
+    } = {}
   ): Promise<{ task: string; name: string; tabId?: string; windowId?: string; profile: string; skill?: ResolvedDomainSkill }> {
     const profile = await getProfile(profileName);
     if (!profile) {
@@ -424,7 +451,10 @@ export class BrowserService {
       currentTabId: undefined,
       createdAt: Date.now(),
       pid: conn.pid,
-      owner: resolveActor().id, // who launched this browser task (RUSH-2020)
+      // Identity is forwarded from the caller (see resolveTaskIdentity): WHO
+      // (owner) and WHICH run (launchId). Resolving daemon-side would attribute
+      // every task to the shared daemon's actor (the RUSH-2020 bug).
+      ...resolveTaskIdentity({ actor: opts.actor, launchId: opts.launchId }, () => resolveActor().id),
     };
 
     // For Electron, get the existing window as the tab
@@ -441,6 +471,15 @@ export class BrowserService {
     await this.saveTaskState(effectiveProfileName, conn.tasks);
 
     emit('browser.launch', { profile: effectiveProfileName, task: taskName, pid: conn.pid });
+    void import('../analytics/usage-db.js').then(({ recordUsage }) => {
+      recordUsage({
+        kind: 'browser',
+        name: effectiveProfileName,
+        event: 'launch',
+        source: 'browser',
+        meta: { task: taskName },
+      });
+    }).catch(() => { /* fail soft */ });
 
     // If URL provided, create tab directly (no about:blank)
     let tabId: string | undefined;
@@ -516,6 +555,15 @@ export class BrowserService {
         await this.saveTaskState(profileName, conn.tasks);
 
         emit('browser.close', { profile: profileName, task: taskName });
+        void import('../analytics/usage-db.js').then(({ recordUsage }) => {
+          recordUsage({
+            kind: 'browser',
+            name: profileName,
+            event: 'close',
+            source: 'browser',
+            meta: { task: taskName },
+          });
+        }).catch(() => { /* fail soft */ });
 
         if (conn.forkedFrom && conn.tasks.size === 0) {
           conn.cdp.close();
@@ -585,6 +633,7 @@ export class BrowserService {
       const sessionId = await this.getSessionId(conn, cdpTargetId);
       await conn.cdp.send('Page.navigate', { url }, sessionId);
       await this.saveTaskState(task.profile, conn.tasks);
+      emit('browser.navigate', { profile: task.profile, task: task.name, url, tabId: currentShortId, created: false });
       return { tabId: currentShortId, url, created: false };
     }
 
@@ -600,6 +649,7 @@ export class BrowserService {
       task.tabs[shortId] = cdpTargetId;
       task.currentTabId = shortId;
       await this.saveTaskState(task.profile, conn.tasks);
+      emit('browser.navigate', { profile: task.profile, task: task.name, url, tabId: shortId, created: true });
       return { tabId: shortId, url, created: true };
     }
 
@@ -614,6 +664,7 @@ export class BrowserService {
     this.invalidateTargetCache(conn);
     await this.saveTaskState(task.profile, conn.tasks);
 
+    emit('browser.navigate', { profile: task.profile, task: task.name, url, tabId: shortId, created: true });
     return { tabId: shortId, url, created: true };
   }
 
@@ -878,6 +929,16 @@ export class BrowserService {
     const dims =
       (extension === 'png' ? readPngDimensions(buffer) : readJpegDimensions(buffer)) ??
       { width: 0, height: 0 };
+    emit('browser.screenshot', {
+      profile: profileName,
+      task: task.name,
+      tabId: shortId,
+      path: finalPath,
+      bytes: buffer.length,
+      width: dims.width,
+      height: dims.height,
+      quality,
+    });
     return { path: finalPath, bytes: buffer.length, width: dims.width, height: dims.height };
   }
 

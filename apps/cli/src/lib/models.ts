@@ -17,6 +17,7 @@ import { getVersionDir, getVersionHomePath, getBinaryPath } from './versions.js'
 import { getModelsCachePath } from './state.js';
 import { agentConfigDirName } from './agents.js';
 import { resolveRunDefaults } from './run-defaults.js';
+import { getModelPricing, type ModelPricing } from './pricing/index.js';
 
 /** Model identifiers per cloud provider (used by Claude's multi-cloud routing). */
 export interface ModelPerCloud {
@@ -49,6 +50,8 @@ export interface ModelInfo {
   reasoningLevels?: ReasoningLevel[];
   /** Default reasoning level if applicable */
   defaultReasoningLevel?: string;
+  /** Per-token USD pricing when known (from prices.json); absent for subscription/unpriced models. */
+  pricing?: ModelPricing;
 }
 
 /** The complete model catalog for a specific (agent, version) pair. */
@@ -68,13 +71,23 @@ const CACHE_PATH = getModelsCachePath();
  * Bump when the extractor logic changes shape in an incompatible way so cached
  * catalogs from older agents-cli builds are re-extracted.
  */
-const CACHE_SCHEMA_VERSION = 2;
+const CACHE_SCHEMA_VERSION = 4;
+
+/**
+ * How long a cached 0-model extraction is trusted before we retry it. Bounds
+ * the self-healing window for a transient failure (mid-install, a broken
+ * extractor regex fixed in a later agents-cli release) without falling back
+ * to re-extracting -- and re-scanning the whole binary -- on every call.
+ */
+const EMPTY_CATALOG_RETRY_MS = 24 * 60 * 60 * 1000;
 
 /** A single cached model catalog entry keyed by source path and mtime. */
 interface CacheEntry {
   sourcePath: string;
   mtime: number;
   catalog: ModelCatalog;
+  /** When this entry was extracted. Only checked for a 0-model catalog, to bound its retry window. */
+  attemptedAt?: number;
 }
 
 /** On-disk shape of the model catalog cache file. */
@@ -293,6 +306,17 @@ export function locateModelSource(
     return null;
   }
 
+  if (agent === 'pi') {
+    // omp (Oh My Pi) installs via `bun install -g`; a version-managed install
+    // exposes it under node_modules/.bin/omp, otherwise it lives on PATH. We let
+    // the CLI produce its own catalog via `omp models --json` (extractPiCatalog).
+    const cli = path.join(versionDir, 'node_modules', '.bin', 'omp');
+    if (fs.existsSync(cli)) return { path: cli, kind: 'cli' };
+    const pathBin = findOnPath('omp');
+    if (pathBin) return { path: pathBin, kind: 'cli' };
+    return null;
+  }
+
   return null;
 }
 
@@ -367,6 +391,20 @@ function extractStrings(filePath: string, minLen = 6): string {
  *   - per-cloud maps: {firstParty:"claude-opus-4-5-...",bedrock:"...",vertex:"...",...}
  *   - constants: {OPUS_ID:"...",OPUS_NAME:"...",SONNET_ID:"...",...}
  */
+/**
+ * Drop a bare `claude-<family>-<major>` (e.g. `claude-opus-4`) when a more specific
+ * sibling (`claude-opus-4-8`) is present. The bare form is only ever an internal
+ * `.includes("claude-opus-4")` prefix-check string in the binary, not a submittable
+ * id (issue #1892); a bare id with no sibling (e.g. `claude-sonnet-5`) is a real
+ * current model and is kept.
+ */
+export function dropBareLegacyIds(ids: string[]): string[] {
+  return ids.filter((id) => {
+    const bareMajor = /^claude-[a-z]+-\d+$/.test(id);
+    return !(bareMajor && ids.some((o) => o !== id && o.startsWith(`${id}-`)));
+  });
+}
+
 function extractClaudeCatalog(text: string): { models: ModelInfo[]; aliases: Record<string, string> } {
   const aliases: Record<string, string> = {};
 
@@ -403,27 +441,48 @@ function extractClaudeCatalog(text: string): { models: ModelInfo[]; aliases: Rec
     };
   }
 
-  const allIds = new Set<string>([
+  const aliasReverse: Record<string, string> = {};
+  for (const [a, id] of Object.entries(aliases)) aliasReverse[id] = a;
+  const defaults = new Set(Object.values(aliases));
+
+  const build = (ids: Iterable<string>): ModelInfo[] =>
+    Array.from(new Set(ids))
+      .filter((id) => /^claude-(opus|sonnet|haiku|fable|mythos)-/.test(id))
+      .sort()
+      .map((id) => ({
+        id,
+        displayName: displayNames[id],
+        alias: aliasReverse[id],
+        isDefault: defaults.has(id),
+        perCloud: perCloud[id],
+      }));
+
+  // The structured maps (alias/perCloud/const) are the curated, accurate
+  // supported set. Prefer them.
+  let models = build([
     ...Object.values(aliases),
     ...Object.keys(displayNames),
     ...Object.keys(perCloud),
   ]);
 
-  const aliasReverse: Record<string, string> = {};
-  for (const [a, id] of Object.entries(aliases)) aliasReverse[id] = a;
-
-  const defaults = new Set(Object.values(aliases));
-
-  const models: ModelInfo[] = Array.from(allIds)
-    .filter((id) => /^claude-(opus|sonnet|haiku)-/.test(id))
-    .sort()
-    .map((id) => ({
-      id,
-      displayName: displayNames[id],
-      alias: aliasReverse[id],
-      isDefault: defaults.has(id),
-      perCloud: perCloud[id],
-    }));
+  // Fallback id scan. The structured maps fail on the newest native-binary
+  // format (verified: claude@2.1.219 leaks only a stray id, so the curated set
+  // is effectively empty). Only when the curated catalog is that thin do we scan
+  // the raw strings for canonical ids -- so an older version keeps its precise
+  // catalog while a newer one still gets a real catalog (incl. fable/mythos and
+  // the opus-5/sonnet-5 line) rather than an empty or single-model one.
+  if (models.length < 2) {
+    const scanned = new Set<string>();
+    // Dash-separated segments only. Real ids are `claude-sonnet-4-6`; the dotted
+    // form `claude-sonnet-4.6` appears only inside the binary's own "Typo in
+    // model ID" troubleshooting text, so a `.`-permitting pattern would scrape a
+    // non-model string as if it were real.
+    const idRe = /claude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:-\d+)*(?:-(?:fast|v\d+))?/g;
+    let sm: RegExpExecArray | null;
+    while ((sm = idRe.exec(text)) !== null) scanned.add(sm[0]);
+    const filtered = dropBareLegacyIds([...scanned]);
+    if (filtered.length >= 2) models = build(filtered);
+  }
 
   return { models, aliases };
 }
@@ -937,6 +996,55 @@ function extractKimiCatalog(binaryPath: string): { models: ModelInfo[]; aliases:
 }
 
 /**
+ * Extract Oh My Pi's catalog via `omp models --json`. omp is a cross-provider
+ * aggregator: its catalog is the union of every provider it has a key for, so
+ * ids are provider-qualified selectors (`anthropic/claude-opus-4-8`,
+ * `openai/gpt-5.2`, `xai/grok-4`, `deepseek/deepseek-chat`, …) — exactly the
+ * `provider/model` convention `ModelInfo.id` already uses. Output shape:
+ *   {"models":[{"provider":"anthropic","id":"claude-opus-4-8",
+ *               "selector":"anthropic/claude-opus-4-8","name":"Claude Opus 4.8",
+ *               "cost":{...}}, ...]}
+ * The catalog is gated per-provider by key presence (no key -> that provider's
+ * models are absent, and an empty env yields `{"models":[]}`). That is truthful:
+ * the extractor surfaces exactly the providers the user has authenticated.
+ * Pricing is attached uniformly by getModelCatalog via getModelPricing(id),
+ * which strips the `provider/` prefix — so no per-catalog price shape here.
+ */
+function extractPiCatalog(binaryPath: string): { models: ModelInfo[]; aliases: Record<string, string> } {
+  let stdout: string;
+  try {
+    stdout = execFileSync(binaryPath, ['models', '--json'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 15_000,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+  } catch {
+    return { models: [], aliases: {} };
+  }
+
+  let parsed: { models?: Array<{ id?: string; selector?: string; provider?: string; name?: string }> };
+  try {
+    parsed = JSON.parse(stdout.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''));
+  } catch {
+    return { models: [], aliases: {} };
+  }
+  if (!parsed || !Array.isArray(parsed.models)) return { models: [], aliases: {} };
+
+  const models: ModelInfo[] = [];
+  const seen = new Set<string>();
+  for (const m of parsed.models) {
+    // Prefer the provider-qualified selector; fall back to provider/id.
+    const id = m.selector || (m.provider && m.id ? `${m.provider}/${m.id}` : m.id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    models.push({ id, displayName: typeof m.name === 'string' ? m.name : undefined });
+  }
+
+  return { models, aliases: {} };
+}
+
+/**
  * Build (or load from cache) the model catalog for a specific (agent, version).
  * Cache is keyed on source-file mtime (binary or js module), so re-extracts
  * automatically when the user upgrades or reinstalls a version.
@@ -956,7 +1064,10 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
   const key = cacheKey(agent, version);
   const cached = cache.entries[key];
   if (cached && cached.sourcePath === src.path && cached.mtime === mtime) {
-    return cached.catalog;
+    const isFresh =
+      cached.catalog.models.length > 0 ||
+      Date.now() - (cached.attemptedAt ?? 0) < EMPTY_CATALOG_RETRY_MS;
+    if (isFresh) return cached.catalog;
   }
 
   let models: ModelInfo[] = [];
@@ -982,6 +1093,15 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
     else if (agent === 'antigravity') ({ models, aliases } = extractAntigravityCatalog(src.path));
     else if (agent === 'kimi') ({ models, aliases } = extractKimiCatalog(src.path));
     else if (agent === 'grok') ({ models, aliases } = extractGrokCatalog(src.path));
+    else if (agent === 'pi') ({ models, aliases } = extractPiCatalog(src.path));
+  }
+
+  // Attach per-token pricing where the offline table knows the model, so the
+  // catalog carries $/token for the tier display and budgeting. Subscription /
+  // unknown models keep `pricing` undefined (surfaced as "--", never faked).
+  for (const m of models) {
+    const p = getModelPricing(m.id);
+    if (p) m.pricing = p;
   }
 
   const catalog: ModelCatalog = {
@@ -993,15 +1113,15 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
     aliases,
   };
 
-  // Never cache an empty extraction, regardless of source kind. A 0-model
-  // result is always suspect: the CLI may have been mid-install, network-
-  // dependent, or transiently failing, and a js/bundle/binary extractor that
-  // regex-misses would otherwise pin an empty catalog forever (mtime won't
-  // change until the source file does). Only persist a non-empty catalog.
-  if (models.length > 0) {
-    cache.entries[key] = { sourcePath: src.path, mtime, catalog };
-    saveCache();
-  }
+  // Cache a 0-model extraction too, stamped with when it was attempted, so a
+  // broken/mid-install extractor doesn't force a full re-scan of the source
+  // binary (up to ~1.85s each for a 230-270MB Claude binary) on every call --
+  // `getModelCatalog` runs once per installed version per invocation of
+  // commands like `agents view`. It self-heals: the read site above re-tries
+  // extraction once EMPTY_CATALOG_RETRY_MS has elapsed, or immediately once
+  // the source file's mtime changes (an upgrade/reinstall).
+  cache.entries[key] = { sourcePath: src.path, mtime, catalog, attemptedAt: Date.now() };
+  saveCache();
   return catalog;
 }
 
@@ -1214,6 +1334,13 @@ export function buildReasoningFlags(agent: AgentId, level: string): string[] {
     // Droid: `-r off|none|low|medium|high`. xhigh/max clamp to high.
     const droidLevel = (normalized === 'xhigh' || normalized === 'max') ? 'high' : normalized;
     return ['-r', droidLevel];
+  }
+  if (agent === 'grok') {
+    // Grok: `--reasoning-effort <low|medium|high>` (alias --effort). xhigh/max
+    // clamp to high. This is the effort dial cost tiers steer for Grok, whose
+    // catalog exposes a single model.
+    const grokLevel = (normalized === 'xhigh' || normalized === 'max') ? 'high' : normalized;
+    return ['--reasoning-effort', grokLevel];
   }
   return [];
 }

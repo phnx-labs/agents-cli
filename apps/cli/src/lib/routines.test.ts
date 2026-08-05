@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, finalizeRunMeta, writeRunMeta, resolveJobPrompt, getLatestCompletedRun, type JobConfig, type RunMeta } from './routines.js';
+import { routineOwnerDevice, hasAmbiguousDevicePin, validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, finalizeRunMeta, writeRunMeta, resolveJobPrompt, getLatestCompletedRun, routineStats, type JobConfig, type RunMeta } from './routines.js';
 import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir } from './state.js';
 
 /** Minimal valid schedule-based job. */
@@ -323,8 +323,16 @@ describe('validateJob — devices', () => {
     expect(validateJob(baseJob({ schedule: '0 3 * * *', devices: ['yosemite-s0'] }))).toEqual([]);
   });
 
-  it('accepts a job with multiple devices', () => {
-    expect(validateJob(baseJob({ schedule: '0 3 * * *', devices: ['yosemite-s0', 'mac-mini'] }))).toEqual([]);
+  // Was 'accepts a job with multiple devices'. A multi-device pin fired the
+  // routine once per listed device — duplicate agent runs on every schedule —
+  // so it is now a validation error, not an accepted config.
+  it('rejects a job with multiple devices', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', devices: ['yosemite-s0', 'mac-mini'] }));
+    expect(errors.some((e) => e.includes('runs on exactly one'))).toBe(true);
+  });
+
+  it('accepts a job pinned to a single device', () => {
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', devices: ['yosemite-s0'] }))).toEqual([]);
   });
 
   it('rejects a non-array devices', () => {
@@ -341,6 +349,71 @@ describe('validateJob — devices', () => {
     const config = { ...baseJob({ schedule: '0 3 * * *' }), device: 'yosemite-s0' } as Record<string, unknown>;
     const errors = validateJob(config as Partial<JobConfig>);
     expect(errors.some((e) => /singular "device" key is no longer supported/.test(e) && /devices:/.test(e))).toBe(true);
+  });
+});
+
+// A routine pinned to several devices used to fire once PER device: on the live
+// fleet `security-sweep` ran at 15:30:02 on one box and 15:30:03 on the other,
+// two full agent sessions doing identical work. Ownership is now singular and
+// derived from config alone, so every daemon agrees without coordination.
+describe('routineOwnerDevice / single-device ownership', () => {
+  it('picks one owner deterministically, whatever the list order', () => {
+    expect(routineOwnerDevice({ devices: ['yosemite-s1', 'yosemite-s0'] })).toBe('yosemite-s0');
+    expect(routineOwnerDevice({ devices: ['yosemite-s0', 'yosemite-s1'] })).toBe('yosemite-s0');
+    expect(routineOwnerDevice({ devices: ['Yosemite-S1', 'yosemite-s0.tailnet.ts.net'] })).toBe('yosemite-s0');
+  });
+
+  it('returns null for an unrestricted routine, which still fires fleet-wide', () => {
+    expect(routineOwnerDevice({})).toBeNull();
+    expect(routineOwnerDevice({ devices: [] })).toBeNull();
+  });
+
+  it('fires on exactly one of a multi-device pin — never both', () => {
+    const pinned = { devices: ['yosemite-s0', 'yosemite-s1'] };
+    process.env.AGENTS_SYNC_MACHINE_ID = 'yosemite-s0';
+    expect(jobRunsOnThisDevice(pinned)).toBe(true);
+    process.env.AGENTS_SYNC_MACHINE_ID = 'yosemite-s1';
+    expect(jobRunsOnThisDevice(pinned)).toBe(false);
+  });
+
+  it('flags a multi-device pin, ignoring case and domain duplicates', () => {
+    expect(hasAmbiguousDevicePin({ devices: ['yosemite-s0', 'yosemite-s1'] })).toBe(true);
+    expect(hasAmbiguousDevicePin({ devices: ['yosemite-s0'] })).toBe(false);
+    expect(hasAmbiguousDevicePin({ devices: [] })).toBe(false);
+    // Same machine spelled two ways is one device, not an ambiguous pin.
+    expect(hasAmbiguousDevicePin({ devices: ['Yosemite-S0', 'yosemite-s0.tailnet.ts.net'] })).toBe(false);
+  });
+
+  // The daemon's load path never calls validateJob, and ownership treats a
+  // non-array `devices` as "no pin" — so without a guard a YAML typo
+  // (`devices: yosemite-s0`, a scalar) would silently promote the routine to
+  // fleet-wide and fire it on EVERY box. Inert-and-loud beats unrestricted.
+  it('refuses to load a routine whose devices is not a list', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-malformed-'));
+    const prevHome = process.env.HOME;
+    try {
+      process.env.HOME = dir;
+      process.env.AGENTS_ROUTINES_DIR = path.join(dir, 'routines');
+      fs.mkdirSync(path.join(dir, 'routines'), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, 'routines', 'typo.yml'),
+        'name: typo\nschedule: "0 3 * * *"\nagent: claude\nprompt: noop\ndevices: yosemite-s0\n',
+      );
+      expect(readJob('typo')).toBeNull();
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+      delete process.env.AGENTS_ROUTINES_DIR;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to create a new multi-device routine', () => {
+    const errors = validateJob({
+      name: 'two-boxes', schedule: '0 3 * * *', agent: 'claude',
+      mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: 'noop',
+      devices: ['yosemite-s0', 'yosemite-s1'],
+    });
+    expect(errors.some((e) => e.includes('runs on exactly one'))).toBe(true);
   });
 });
 
@@ -361,7 +434,10 @@ describe('jobRunsOnThisDevice', () => {
   it('matches when the allowlist includes this machine', () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'yosemite-s0';
     expect(jobRunsOnThisDevice({ devices: ['yosemite-s0'] })).toBe(true);
-    expect(jobRunsOnThisDevice({ devices: ['mac-mini', 'yosemite-s0'] })).toBe(true);
+    // A multi-device pin no longer matches every listed device — only its owner
+    // (lowest normalized name) fires, so the routine runs once, not once per box.
+    expect(jobRunsOnThisDevice({ devices: ['mac-mini', 'yosemite-s0'] })).toBe(false);
+    expect(jobRunsOnThisDevice({ devices: ['yosemite-s0', 'zion'] })).toBe(true);
   });
 
   it('normalizes case and domain suffix', () => {
@@ -401,8 +477,11 @@ describe('checkJobDeviceEligibility', () => {
     expect(result).not.toBeNull();
     expect(result!.message).toBe("Job 'backup' can only run on: yosemite-s0, mac-mini");
     expect(result!.allowedLabel).toBe('yosemite-s0, mac-mini');
-    expect(result!.firstHost).toBe('yosemite-s0');
-    expect(result!.suggestion).toBe("agents routines run backup --host yosemite-s0");
+    // The suggested host is the OWNER (lowest normalized name), not the first
+    // entry as written. Suggesting yosemite-s0 here would send the operator to
+    // a box that refuses the run for exactly the same reason.
+    expect(result!.firstHost).toBe('mac-mini');
+    expect(result!.suggestion).toBe("agents routines run backup --host mac-mini");
   });
 });
 
@@ -698,5 +777,64 @@ describe('getLatestCompletedRun / {last_report} poison-stop', () => {
       updatedFrom: { state: { name: 'Triage' } },
     });
     expect(resolved).toBe('Issue RUSH-42: Fix it (from Triage)');
+  });
+});
+
+describe('routineStats', () => {
+  const jobName = `__stats_test_${process.pid}`;
+
+  function seedRun(runId: string, status: RunMeta['status'], duration?: number): void {
+    const meta: RunMeta = {
+      jobName,
+      runId,
+      agent: 'claude',
+      pid: null,
+      status,
+      startedAt: new Date().toISOString(),
+      completedAt: status === 'missed' ? null : new Date().toISOString(),
+      exitCode: status === 'completed' ? 0 : status === 'missed' ? null : 1,
+      ...(duration !== undefined ? { duration } : {}),
+    };
+    writeRunMeta(meta);
+  }
+
+  afterEach(() => {
+    fs.rmSync(getJobRunsDir(jobName), { recursive: true, force: true });
+  });
+
+  it('returns all-zero stats for a job with no runs', () => {
+    expect(routineStats(jobName)).toEqual({ count: 0, failed: 0, missed: 0, avgMs: 0, p50: 0, p95: 0 });
+  });
+
+  it('counts failed and missed runs separately from count, and folds duration into avg/p50/p95', () => {
+    seedRun('r1', 'completed', 10);
+    seedRun('r2', 'completed', 20);
+    seedRun('r3', 'completed', 30);
+    seedRun('r4', 'failed', 40);
+    seedRun('r5', 'timeout', 50);
+    seedRun('r6', 'missed'); // no duration — a fire that never ran
+
+    const stats = routineStats(jobName);
+    expect(stats.count).toBe(6);
+    expect(stats.failed).toBe(2); // failed + timeout
+    expect(stats.missed).toBe(1);
+    // avg of the 5 durations that have one (10+20+30+40+50)/5 = 30
+    expect(stats.avgMs).toBe(30);
+    expect(stats.p50).toBeGreaterThan(0);
+    expect(stats.p95).toBeGreaterThanOrEqual(stats.p50);
+  });
+
+  it('excludes the missed run (no duration) from the percentile set entirely', () => {
+    seedRun('r1', 'completed', 100);
+    seedRun('r2', 'missed');
+
+    const stats = routineStats(jobName);
+    expect(stats.count).toBe(2);
+    expect(stats.missed).toBe(1);
+    // Only one real duration sample (100ms) — p50/p95 both collapse to it,
+    // not diluted by the missed run's absent duration.
+    expect(stats.avgMs).toBe(100);
+    expect(stats.p50).toBe(100);
+    expect(stats.p95).toBe(100);
   });
 });

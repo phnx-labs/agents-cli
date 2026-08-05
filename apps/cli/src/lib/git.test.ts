@@ -26,8 +26,10 @@ import {
   pushOrigin,
   resolveGitHubUsername,
   resolveGitHubUsernameSync,
+  resolveSnapshotSha,
   sameGitRemote,
   syncRepoGit,
+  _resetSnapshotShaCacheForTest,
 } from './git.js';
 
 describe('assertValidBranchName', () => {
@@ -348,6 +350,49 @@ describe('commitAndPush (clean-but-ahead + dirty)', () => {
     const verify = path.join(root, 'verify-safe-push');
     await simpleGit().clone(remote, verify);
     expect(fs.readFileSync(path.join(verify, 'safe-push.txt'), 'utf8')).toBe('ok\n');
+  });
+
+  // #1061: `agents publish --branch dev` must land the index on `dev`, not on
+  // the checked-out `main`. commitAndPush(local, msg, 'dev') pushes to origin/dev
+  // and reports branch: 'dev' so the printed raw URL references where it landed.
+  it('pushes to a named target branch, not the checked-out one', async () => {
+    fs.writeFileSync(path.join(local, 'skills-index.json'), '{"skills":[]}\n');
+    const res = await commitAndPush(local, 'publish index', 'dev');
+    expect(res.success).toBe(true);
+    expect(res.pushed).toBe(true);
+    expect(res.branch).toBe('dev');
+
+    // origin/dev carries the index...
+    const onDev = path.join(root, 'verify-dev');
+    await simpleGit().clone(remote, onDev, ['--branch', 'dev']);
+    expect(fs.existsSync(path.join(onDev, 'skills-index.json'))).toBe(true);
+
+    // ...and origin/main does NOT (the bug: index landed on main regardless).
+    const onMain = path.join(root, 'verify-main');
+    await simpleGit().clone(remote, onMain, ['--branch', 'main']);
+    expect(fs.existsSync(path.join(onMain, 'skills-index.json'))).toBe(false);
+  });
+
+  // #1061: a target-branch push must run even from a clean, not-ahead tree —
+  // the `pushedBranch === branch` guard narrows the "already up to date"
+  // short-circuit so it never swallows a push to a new branch. No dirty file
+  // here, so `committed` is false and `ahead` is 0; the push must still land.
+  it('pushes to a new target branch from a clean, not-ahead tree', async () => {
+    const pre = await simpleGit(local).status();
+    expect(pre.isClean()).toBe(true);
+    expect(pre.ahead).toBe(0);
+
+    const res = await commitAndPush(local, 'noop', 'dev');
+    expect(res.success).toBe(true);
+    expect(res.committed).toBe(false);
+    expect(res.pushed).toBe(true);
+    expect(res.branch).toBe('dev');
+    expect(res.detail).not.toBe('already up to date');
+
+    // origin/dev now exists and carries the same tree as main (README.md).
+    const onDev = path.join(root, 'verify-clean-dev');
+    await simpleGit().clone(remote, onDev, ['--branch', 'dev']);
+    expect(fs.existsSync(path.join(onDev, 'README.md'))).toBe(true);
   });
 });
 
@@ -775,5 +820,53 @@ describe('commitsBehindUpstream', () => {
 
   it('returns null for a non-git directory', () => {
     expect(commitsBehindUpstream(root)).toBeNull();
+  });
+});
+
+describe('resolveSnapshotSha (#12 — resource/plugin provenance)', () => {
+  let repoDir: string;
+
+  beforeEach(async () => {
+    repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-git-snapshotsha-'));
+    _resetSnapshotShaCacheForTest();
+    const g = simpleGit(repoDir);
+    await g.init();
+    await g.addConfig('user.email', 'test@example.com');
+    await g.addConfig('user.name', 'Test');
+    await g.addConfig('commit.gpgsign', 'false');
+    await g.raw(['commit', '--allow-empty', '-m', 'init']);
+  });
+
+  afterEach(() => {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+    _resetSnapshotShaCacheForTest();
+  });
+
+  it('returns the real short HEAD sha for a git repo', () => {
+    const expected = execFileSync('git', ['-C', repoDir, 'rev-parse', '--short', 'HEAD']).toString().trim();
+    expect(resolveSnapshotSha(repoDir)).toBe(expected);
+  });
+
+  it('returns undefined (never throws) for a non-git directory', () => {
+    const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-not-a-repo-'));
+    try {
+      expect(resolveSnapshotSha(plainDir)).toBeUndefined();
+    } finally {
+      fs.rmSync(plainDir, { recursive: true, force: true });
+    }
+  });
+
+  it('memoizes per repoRoot — a second commit after the first call is NOT reflected until the cache is cleared', async () => {
+    const first = resolveSnapshotSha(repoDir);
+    expect(first).toBeTruthy();
+    await simpleGit(repoDir).raw(['commit', '--allow-empty', '-m', 'second']);
+    // Still cached — this is the whole point: a caller resolving many resources
+    // from the same repoRoot pays for exactly one git shell-out, not one per resource.
+    expect(resolveSnapshotSha(repoDir)).toBe(first);
+
+    _resetSnapshotShaCacheForTest();
+    const expected = execFileSync('git', ['-C', repoDir, 'rev-parse', '--short', 'HEAD']).toString().trim();
+    expect(resolveSnapshotSha(repoDir)).toBe(expected);
+    expect(resolveSnapshotSha(repoDir)).not.toBe(first);
   });
 });

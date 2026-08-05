@@ -65,6 +65,10 @@ function makeDiscoveredPlugin(root: string, manifest: PluginManifest): Discovere
     monitors: [],
     hasMcp: false,
     hasSettings: false,
+    // Fixture roots here are synthetic paths, not real plugin/repo layouts —
+    // repoRoot is unused by these tests, so a plain non-git value is fine.
+    repoRoot: path.dirname(path.dirname(root)),
+    snapshotSha: undefined,
   };
 }
 
@@ -275,6 +279,42 @@ describe('discoverPlugins', () => {
       expect(plugins[0]?.root).toBe(path.join(pluginsDir, 'linked-plugin'));
       // Provenance: a user-repo plugin is stamped with the canonical marketplace.
       expect(plugins[0]?.marketplace).toBe('agents-cli');
+      // #12: repoRoot is the DotAgents repo containing plugins/ (its
+      // grandparent), and snapshotSha is undefined for this plain (non-git) temp dir.
+      expect(plugins[0]?.repoRoot).toBe(tmpDir);
+      expect(plugins[0]?.snapshotSha).toBeUndefined();
+    } finally {
+      vi.doUnmock('./state.js');
+      vi.resetModules();
+    }
+  });
+
+  it('#12: repoRoot/snapshotSha resolve to the real DotAgents repo commit when tmpDir IS a git repo', async () => {
+    const { execFileSync } = await import('node:child_process');
+    execFileSync('git', ['init', '-q', tmpDir]);
+    execFileSync('git', ['-C', tmpDir, 'config', 'user.email', 'test@example.com']);
+    execFileSync('git', ['-C', tmpDir, 'config', 'user.name', 'Test']);
+    execFileSync('git', ['-C', tmpDir, 'commit', '--allow-empty', '-q', '-m', 'init']);
+    const expectedSha = execFileSync('git', ['-C', tmpDir, 'rev-parse', '--short', 'HEAD']).toString().trim();
+
+    makePluginRoot(tmpDir, { name: 'git-tracked-plugin' });
+    fs.renameSync(path.join(tmpDir, 'test-plugin'), path.join(pluginsDir, 'git-tracked-plugin'));
+
+    vi.resetModules();
+    vi.doMock('./state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./state.js')>();
+      return { ...actual, getPluginsDir: () => pluginsDir, getEnabledExtraRepos: () => [], getProjectPluginsDir: () => null, getSystemPluginsDir: () => path.join(tmpDir, 'no-system') };
+    });
+
+    try {
+      const { discoverPlugins: discover } = await import('./plugins.js');
+      const { _resetSnapshotShaCacheForTest } = await import('./git.js');
+      _resetSnapshotShaCacheForTest();
+      const plugins = discover();
+      expect(plugins.map((plugin) => plugin.name)).toEqual(['git-tracked-plugin']);
+      expect(plugins[0]?.repoRoot).toBe(tmpDir);
+      expect(plugins[0]?.snapshotSha).toBe(expectedSha);
+      _resetSnapshotShaCacheForTest();
     } finally {
       vi.doUnmock('./state.js');
       vi.resetModules();

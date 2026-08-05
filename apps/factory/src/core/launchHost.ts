@@ -26,6 +26,11 @@ export interface DeviceLoad {
   // caller so EVERY ranking path — the warm-cache pick and the balanced pool
   // pick both route through hostScore — honors the preference identically.
   preferred?: boolean;
+  // Operator cap from `agents devices configure <name> --max-agents N` (read
+  // from the synced device doc). A device at its cap is EXCLUDED from the
+  // auto-pick entirely — it never reaches hostScore. undefined = uncapped
+  // (the default).
+  maxConcurrent?: number;
 }
 
 // How much a `prefer`red device is favored, in hostScore points. Two running
@@ -80,16 +85,51 @@ export function hostScore(d: DeviceLoad): number {
   return running + load + mem - preference;
 }
 
+// A device is capped out when it carries an agents.max-concurrent cap and its
+// running-agent count has reached it. Capped devices are excluded from
+// auto-pick (never scored) — an operator cap is a hard boundary, not a tie-break.
+export function isCappedOut(d: DeviceLoad): boolean {
+  return d.maxConcurrent !== undefined && d.running >= d.maxConcurrent;
+}
+
+// Online candidates excluded from the auto-pick by their agents.max-concurrent
+// cap, so callers can STATE the reason (a device silently never winning reads
+// as a ranking bug). Only meaningful alongside a pick call on the same pool.
+export function cappedOutDevices(candidates: DeviceLoad[]): DeviceLoad[] {
+  return candidates.filter((c) => c.online && isCappedOut(c));
+}
+
+// Why a pick produced no host, for the fallback warning. Caps are checked
+// FIRST: an all-capped pool is an operator boundary to raise, and reporting
+// "go sign in" (the usable-version reason) when the devices were really capped
+// sends the user down the wrong fix. Returns null when there is nothing to say
+// (the pool itself was empty — the caller already said "no online device").
+export function noHostReason(loaded: DeviceLoad[], agentKey?: string): string | null {
+  const capped = cappedOutDevices(loaded);
+  if (capped.length > 0) {
+    const detail = capped.map((c) => `${c.name} (${c.running}/${c.maxConcurrent})`).join(', ');
+    return (
+      `every online device is at its agents.max-concurrent cap: ${detail} — ` +
+      `raise with: agents devices configure <name> --max-agents N`
+    );
+  }
+  if (agentKey && loaded.length > 0) {
+    return `no fleet device has a usable ${agentKey} version (signed in and not rate-limited)`;
+  }
+  return null;
+}
+
 // Pick the best online host for a launch: drop devices with no usable version of
-// the target agent (when that signal was probed), then rank the rest by the
-// composite hostScore (running agents + hardware load/memory). Ties break by
-// input order (first declared wins). Returns null when no candidate survives, so
-// the caller falls back to the local machine with a warning.
+// the target agent (when that signal was probed) and devices at their
+// agents.max-concurrent cap, then rank the rest by the composite hostScore
+// (running agents + hardware load/memory). Ties break by input order (first
+// declared wins). Returns null when no candidate survives, so the caller falls
+// back to the local machine with a warning.
 export function pickBestHost(candidates: DeviceLoad[]): string | null {
   // usableVersion === false is an explicit "no signed-in version here" — filter
   // it out. undefined (unprobed) stays eligible so agent-unaware callers keep
   // the old behavior.
-  const eligible = candidates.filter((c) => c.online && c.usableVersion !== false);
+  const eligible = candidates.filter((c) => c.online && c.usableVersion !== false && !isCappedOut(c));
   if (eligible.length === 0) return null;
   let best = eligible[0];
   let bestScore = hostScore(best);

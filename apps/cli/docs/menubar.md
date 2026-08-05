@@ -220,8 +220,11 @@ One rule shapes the menu: **attention floats up, context groups down.**
   to one-liners and tucks Routines / Recent behind submenus. Auto is rich while
   something needs you, compact on a calm machine.
 
-The icon badges **red `!`** when anything needs you and **green with a count**
-when sessions are running; otherwise it is the bare mark.
+The icon badges **red `!`** when anything needs you, **red `⏻`** when the
+scheduler has been unreachable for ~30s (see
+[Daemon-down watchdog](#daemon-down-watchdog) below — independent of the
+dropdown ever opening), and **green with a count** when sessions are running;
+otherwise it is the bare mark.
 
 ## Commands
 
@@ -344,6 +347,40 @@ The helper is a launchd user service (`com.phnx-labs.agents-menubar`,
 The helper doubles as the branded desktop-notification channel for the daemon
 (RUSH-2030) and for any `agents run --notify`. The caller fires a notification by
 spawning the installed bundle in a one-shot mode:
+
+### Daemon-down watchdog
+
+The daemon's own overdue check (`notifyOverdue`, `src/lib/overdue.ts`) can only
+ever fire from **inside** `runDaemon()` — so it is structurally blind to the one
+outage that matters most: the daemon itself being down, at which point no
+routine fires and nothing says so. `MenubarHelper` closes that gap because it is
+a **separate** launchd `KeepAlive` service — it stays alive exactly when the
+daemon dies.
+
+`StatusItemController.tick()` (the same 10s timer that refreshes the badge)
+calls `checkDaemonLiveness()` on every fire, independent of whether the dropdown
+is ever opened:
+
+- Liveness is the same cheap, synchronous `AgentsCLI.daemonPid()` probe
+  `menuWillOpen` already uses (a pid-file read + `kill(pid, 0)`; no CLI spawn).
+- A debounce of `daemonDownTickThreshold` (3) consecutive dead ticks — about
+  30 seconds — must elapse before alerting, so a routine restart (a version
+  upgrade, an `agents doctor` self-heal, a crash-relaunch) never pages the user
+  for a blip.
+- Once past the threshold it fires **one** notification per outage —
+  `"Scheduler stopped — routines won't run"` — via `Notifier.post` directly
+  (this persistent process's own `NSUserNotificationCenter` delivery, the same
+  call site `AgentsCLI.swift`'s ticket-flow notices already use), not a spawned
+  `--notify` child process. It also lights the always-visible menu-bar badge
+  (`⏻`, ranked just under NEEDS-YOU attention) so the outage is glanceable
+  without opening the dropdown at all. Both the notification flag and the badge
+  clear the moment the daemon is observed alive again, so the next real outage
+  alerts fresh.
+
+The dropdown's own "Scheduler stopped" row (`addNeedsAttention`, rendered only
+while the menu is open and only when routines exist) is unchanged and
+complementary — the tick-driven watchdog is what makes the outage visible
+*before* you think to open the menu.
 
 ```bash
 MenubarHelper --notify --title T --body B [--subtitle S] [--action A] [--agent claude]

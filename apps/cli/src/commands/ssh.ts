@@ -111,10 +111,13 @@ import {
   type VerdictSummary,
 } from '../lib/auth-health.js';
 import { runFleetLogin, type LoginStatus } from '../lib/fleet/remote-login.js';
+import { getConfigValue, listConfig, setConfigValue, unsetConfigValue } from '../lib/device-config.js';
+import { setHelpSections } from '../lib/help.js';
 
 /** One-line summary of a device for `list`. `isSelf` marks the machine this
- * command is running on so it stands out from the rest of the tailnet. */
-function deviceSummary(d: DeviceProfile, isSelf = false, stats?: DeviceStats): string {
+ * command is running on so it stands out from the rest of the tailnet.
+ * `isInteractive` marks the configured interactive host (`devices set-interactive`). */
+function deviceSummary(d: DeviceProfile, isSelf = false, stats?: DeviceStats, isInteractive = false): string {
   const addr = hostNameFor(d) ?? chalk.gray('no address');
   // Prefer a fresh live verdict (this run's probe, else the written-back
   // reachability) over the stale tailscale.online snapshot (RUSH-1965).
@@ -129,7 +132,8 @@ function deviceSummary(d: DeviceProfile, isSelf = false, stats?: DeviceStats): s
   const marker = isSelf ? chalk.cyan('▸ ') : '  ';
   const name = isSelf ? chalk.bold.cyan(d.name.padEnd(16)) : chalk.bold(d.name.padEnd(16));
   const here = isSelf ? chalk.cyan('  ← this machine') : '';
-  return `${marker}${name} ${String(d.platform).padEnd(8)} ${(d.user ? d.user + '@' : '') + addr}  ${online}${reach}${here}`;
+  const interactive = isInteractive ? chalk.yellow('  ★ interactive') : '';
+  return `${marker}${name} ${String(d.platform).padEnd(8)} ${(d.user ? d.user + '@' : '') + addr}  ${online}${reach}${here}${interactive}`;
 }
 
 const HEADROOM_BADGE: Record<Headroom, string> = {
@@ -162,8 +166,9 @@ function renderDeviceTable(
   self: string | undefined,
   statsMap?: Map<string, DeviceStats>,
   full = false,
+  interactiveHost?: string,
 ): string[] {
-  if (!statsMap) return names.map((n) => deviceSummary(reg[n], n === self));
+  if (!statsMap) return names.map((n) => deviceSummary(reg[n], n === self, undefined, n === interactiveHost));
 
   const lines: string[] = [];
   const head =
@@ -206,7 +211,8 @@ function renderDeviceTable(
       : '';
     const badge = HEADROOM_BADGE[headroom(stats)];
     const here = isSelf ? chalk.cyan('  ← this machine') : '';
-    lines.push(`${marker}${label}${plat} ${cores}${load}${mem}${freeTotal}  ${badge}${relay}${here}`);
+    const interactive = name === interactiveHost ? chalk.yellow('  ★ interactive') : '';
+    lines.push(`${marker}${label}${plat} ${cores}${load}${mem}${freeTotal}  ${badge}${relay}${here}${interactive}`);
   }
 
   // Fleet capacity summary — total cores + how much RAM is free right now.
@@ -436,6 +442,21 @@ async function localHealthRow(self: string, stats?: DeviceStats): Promise<FleetH
   };
 }
 
+/** SSH into a host and read its already-computed fleet-status row (a cheap
+ *  `fleet status --local --json` on the peer — NOT a fresh remote resource probe;
+ *  the peer's daemon keeps that row warm). Bounded + reaped via sshExecAsync's
+ *  timeout (RUSH-2114). */
+async function probeRemoteFleetStatus(target: FleetStatusTarget): Promise<import('../lib/fleet-status.js').FleetStatusRow> {
+  const isWin = /^win/i.test((target.platform ?? '').trim());
+  const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
+  const cmd = buildRemoteAgentsInvocation(['devices', 'status', '--local', '--json'], undefined, isWin ? 'windows' : undefined, env);
+  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true });
+  if (res.code !== 0) {
+    throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
+  }
+  return JSON.parse(res.stdout) as import('../lib/fleet-status.js').FleetStatusRow;
+}
+
 async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetHealthRow, 'name' | 'platform' | 'stats'>> {
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
@@ -465,10 +486,22 @@ async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetH
   };
 }
 
-async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean; verbose?: boolean }): Promise<void> {
+async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean; local?: boolean; verbose?: boolean }): Promise<void> {
   const reg = await loadDevices();
   const self = machineId();
   const forceRefresh = Boolean(opts.refresh || opts.live);
+
+  // `--local`: the publish endpoint the read-union reads over ssh. Probe THIS
+  // host only (resource stats + live-agent workload, no ssh) and print its row.
+  // Publishes into the local mirror as a side effect so a same-host reader is
+  // instantly warm too.
+  if (opts.local) {
+    const { publishLocalFleetStatus } = await import('../lib/fleet-status.js');
+    const row = await publishLocalFleetStatus(self);
+    if (opts.json) console.log(JSON.stringify(row, null, 2));
+    else console.log(`${self}: ${row.agents.running} running agent(s), ${row.agents.live} live`);
+    return;
+  }
   const planned = planFleetTargets(reg);
   const probeable = planned.filter((t) => !t.skip).map((t) => t.device);
   // Cache-first: serve remote stats from the daemon-warmed cache (instant),
@@ -535,6 +568,42 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
       row.online = deviceOnlineState(profile, statsMap.get(row.name));
       row.lastSeen = profile.tailscale?.lastSeen ?? profile.reachability?.checkedAt;
     }
+  }
+
+  // Live-agent workload (RUSH-2061): publish THIS host's row, then union peers'
+  // rows cache-first. The daemon no longer probes the fleet (publish-own /
+  // read-union), so cross-host counts are gathered HERE, on demand — a mirror row
+  // younger than the freshness window is served without ssh; a missing/stale one
+  // is read over ssh via `fleet status --local --json` (bounded + kill-on-timeout
+  // through sshExecAsync/fanOutDevices, RUSH-2114). Best-effort: agent counts are
+  // additive, so a failed gather never breaks the status render.
+  try {
+    const { publishLocalFleetStatus, readFleetStatus, writeFleetStatusRows } = await import('../lib/fleet-status.js');
+    const selfRow = await publishLocalFleetStatus(self);
+    const mirror = readFleetStatus();
+    const now = Date.now();
+    const AGENT_STATUS_STALE_MS = 3 * 60_000;
+    const toRead = remoteTargets.filter((t) => {
+      if (t.skip) return false;
+      if (forceRefresh) return true;
+      const row = mirror[t.name];
+      return !row || now - row.capturedAt > AGENT_STATUS_STALE_MS;
+    });
+    if (toRead.length > 0) {
+      const gathered = await fanOutDevices(toRead, probeRemoteFleetStatus, { perDeviceTimeoutMs: 20_000 });
+      const updates: Record<string, import('../lib/fleet-status.js').FleetStatusRow> = {};
+      for (const g of gathered) {
+        if (g.status === 'ok' && g.value) updates[g.name] = { ...g.value, host: g.name };
+      }
+      if (Object.keys(updates).length > 0) writeFleetStatusRows(updates);
+    }
+    const union = readFleetStatus();
+    for (const row of rows) {
+      const r = row.name === self ? selfRow : union[row.name];
+      if (r) row.agents = r.agents;
+    }
+  } catch {
+    // best-effort — agent counts are additive to the health view
   }
 
   const report = buildFleetHealthReport(rows, new Date(), { self });
@@ -797,10 +866,13 @@ function registerDevicesCommands(program: Command): void {
 Typical workflow:
   agents devices sync            # curate: pick which tailscale nodes to keep (TTY)
   agents devices sync --yes      # non-interactive: register all non-ignored nodes
-  agents devices list            # see what's registered
+  agents devices list            # see what's registered (★ = interactive host)
   agents devices ignore ipad165  # dismiss a node so it's never re-suggested
   agents devices disable zion    # exclude a device from Factory auto-launch
   agents devices prefer mac-mini # boost a device in Factory auto-launch ranking
+  agents devices set-interactive zion        # where agents show YOU artifacts
+  agents devices configure mac-mini --max-agents 4 --scheduler off
+  agents devices note mac-mini "runs the releases — don't reboot"
   agents devices set win-mini --auth password --bundle muqsit
   agents devices render --write  # write ~/.ssh/config.d/agents include
   agents fleet update            # roll out latest agents-cli to every online device
@@ -940,12 +1012,201 @@ Typical workflow:
       }
     });
 
+  const setInteractiveCmd = devicesCmd
+    .command('set-interactive [name]')
+    .description('Get or set the interactive host — the one device that shows YOU artifacts (browser opens, dashboards, rendered plans). Stored fleet-wide as config.interactiveHost in central agents.yaml.')
+    .option('--unset', 'clear the interactive host')
+    .option('--json', 'output machine-readable JSON')
+    .action(async (name: string | undefined, opts: { unset?: boolean; json?: boolean }) => {
+      try {
+        if (opts.unset) {
+          unsetConfigValue('interactive.host');
+          if (opts.json) process.stdout.write(JSON.stringify({ interactiveHost: null }, null, 2) + '\n');
+          else console.log(chalk.green('Cleared the interactive host.'));
+          return;
+        }
+        if (name) {
+          await mustGetDevice(name);
+          setConfigValue('interactive.host', name);
+          if (opts.json) process.stdout.write(JSON.stringify({ interactiveHost: name }, null, 2) + '\n');
+          else console.log(chalk.green(`Interactive host: '${name}'`) + chalk.gray(' — agents show you artifacts there. Clear with --unset.'));
+          return;
+        }
+        const current = getConfigValue('interactive.host').value as string | undefined;
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ interactiveHost: current ?? null }, null, 2) + '\n');
+        } else if (current) {
+          console.log(`${chalk.bold('Interactive host:')} ${chalk.cyan(current)}`);
+        } else {
+          console.log(chalk.gray("No interactive host set. Set one with 'agents devices set-interactive <name>'."));
+        }
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+  setHelpSections(setInteractiveCmd, {
+    examples: `
+      agents devices set-interactive zion      # zion is where artifacts open for you
+      agents devices set-interactive           # print the current interactive host
+      agents devices set-interactive --unset   # back to no interactive host
+      agents devices set-interactive --json    # machine-readable (for skills)
+    `,
+    notes: `
+      The interactive host answers "which online macOS device do I show this on?"
+      so skills stop guessing. It is marked ★ interactive in 'agents devices list'.
+      The value syncs fleet-wide (central agents.yaml, config.interactiveHost);
+      per-device settings live under 'agents devices configure' instead.
+    `,
+  });
+
+  const configureCmd = devicesCmd
+    .command('configure <name>')
+    .description('Get or set per-device config: --max-agents, --scheduler. Written to ~/.agents/devices/<name>/agents.yaml (works for any device — the devices/ tree syncs). Unset = default behavior.')
+    .option('--max-agents <n>', 'cap concurrent agents (Factory auto-launch counts device-wide; teams placement counts the team’s roster on the device)')
+    .option('--scheduler <on|off>', 'allow the routines scheduler (daemon) to fire on this device (takes effect on daemon reload/restart)')
+    .option('--json', 'output machine-readable JSON')
+    .action(async (name: string, opts: { maxAgents?: string; scheduler?: string; json?: boolean }) => {
+      try {
+        await mustGetDevice(name);
+        const parseOnOff = (flag: string, raw: string): boolean => {
+          if (raw === 'on') return true;
+          if (raw === 'off') return false;
+          throw new Error(`--${flag} expects 'on' or 'off', got '${raw}'.`);
+        };
+        const writes: Array<[string, unknown]> = [];
+        if (opts.maxAgents !== undefined) {
+          const n = Number(opts.maxAgents);
+          if (!Number.isInteger(n)) throw new Error(`--max-agents expects an integer, got '${opts.maxAgents}'.`);
+          writes.push(['agents.max-concurrent', n]);
+        }
+        if (opts.scheduler !== undefined) writes.push(['scheduler.enabled', parseOnOff('scheduler', opts.scheduler)]);
+
+        if (writes.length > 0) {
+          for (const [key, value] of writes) setConfigValue(key, value, { device: name });
+          if (!opts.json) {
+            for (const [key, value] of writes) {
+              console.log(chalk.green(`Set ${key} = ${JSON.stringify(value)}`) + chalk.gray(` on '${name}'.`));
+            }
+          }
+        }
+
+        if (opts.json || writes.length === 0) {
+          const entries = listConfig({ device: name }).filter((e) => e.spec.scope === 'device');
+          if (opts.json) {
+            const config: Record<string, unknown> = {};
+            for (const e of entries) if (e.value !== undefined) config[e.spec.name] = e.value;
+            process.stdout.write(JSON.stringify({ device: name, config }, null, 2) + '\n');
+          } else {
+            console.log(chalk.bold(`Config for '${name}'`));
+            for (const e of entries) {
+              const value = e.value === undefined ? chalk.gray('— (default)') : chalk.cyan(JSON.stringify(e.value));
+              console.log(`  ${e.spec.name.padEnd(24)} ${value}${chalk.gray(`  ${e.spec.description}`)}`);
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+  setHelpSections(configureCmd, {
+    examples: `
+      agents devices configure mac-mini --max-agents 4      # cap concurrent agents
+      agents devices configure mac-mini --scheduler off     # no routines firing there
+      agents devices configure mac-mini                     # print its current config
+      agents devices configure mac-mini --json              # machine-readable
+    `,
+    notes: `
+      Run it on any machine for any device: the value lands in
+      ~/.agents/devices/<name>/agents.yaml locally and reaches the device on the
+      next 'agents repo push/pull'. Unset keys keep today's behavior.
+      --scheduler takes effect when the daemon reloads or restarts on that
+      device ('agents routines start' / the reload a 'routines add' sends).
+      For the default browser profile use 'agents browser profiles set-default
+      <name>'; for free-form text use 'agents devices note'.
+    `,
+  });
+
+  const noteCmd = devicesCmd
+    .command('note <name> [text...]')
+    .description('Append a free-form note to a device (repeat to append more). No text prints the notes; --clear empties them.')
+    .option('--clear', 'remove all notes from the device')
+    .option('--json', 'output machine-readable JSON')
+    .action(async (name: string, text: string[], opts: { clear?: boolean; json?: boolean }) => {
+      try {
+        await mustGetDevice(name);
+        if (opts.clear) {
+          unsetConfigValue('notes', { device: name });
+          if (opts.json) process.stdout.write(JSON.stringify({ device: name, notes: [] }, null, 2) + '\n');
+          else console.log(chalk.green(`Cleared notes on '${name}'.`));
+          return;
+        }
+        if (text.length > 0) {
+          const existing = (getConfigValue('notes', { device: name }).value as string[] | undefined) ?? [];
+          const notes = [...existing, text.join(' ')];
+          setConfigValue('notes', notes, { device: name });
+          if (opts.json) process.stdout.write(JSON.stringify({ device: name, notes }, null, 2) + '\n');
+          else console.log(chalk.green(`Noted on '${name}':`) + ` ${text.join(' ')}`);
+          return;
+        }
+        const notes = (getConfigValue('notes', { device: name }).value as string[] | undefined) ?? [];
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ device: name, notes }, null, 2) + '\n');
+        } else if (notes.length > 0) {
+          console.log(chalk.bold(`Notes for '${name}'`));
+          for (const n of notes) console.log(`  ${chalk.gray('•')} ${n}`);
+        } else {
+          console.log(chalk.gray(`No notes on '${name}'. Add one with 'agents devices note ${name} "..."'.`));
+        }
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+  setHelpSections(noteCmd, {
+    examples: `
+      agents devices note mac-mini "runs the releases — don't reboot"
+      agents devices note mac-mini "4 displays attached"   # appends a second note
+      agents devices note mac-mini                         # print its notes
+      agents devices note mac-mini --clear                 # drop them all
+    `,
+    notes: `
+      Notes are operator memory for a box (why it exists, what to never do to
+      it). They sync like every other device doc; 'agents devices list --json'
+      carries them under config.notes.
+    `,
+  });
+
+  /** Device-scope config block for `list --json`, keyed by yamlKey (set keys only). */
+  const deviceConfigJson = (name: string): Record<string, unknown> | undefined => {
+    const config: Record<string, unknown> = {};
+    for (const entry of listConfig({ device: name })) {
+      if (entry.spec.scope !== 'device' || entry.value === undefined) continue;
+      config[entry.spec.yamlKey] = entry.value;
+    }
+    return Object.keys(config).length > 0 ? config : undefined;
+  };
+
   const runList = async (opts: { json?: boolean; stats?: boolean; full?: boolean; refresh?: boolean; live?: boolean } = {}) => {
     const reg = await loadDevices();
     const names = Object.keys(reg).sort();
+    const interactiveHost = getConfigValue('interactive.host').value as string | undefined;
     if (opts.json) {
-      // Registry-only, always fast — the Factory extension polls this path.
-      process.stdout.write(JSON.stringify(names.map((n) => reg[n]), null, 2) + '\n');
+      // Registry + local device docs, always fast — the Factory extension polls
+      // this path. Each row carries its device-scope `config` (maxAgents,
+      // schedulerEnabled, notes, defaultBrowserProfile — set keys
+      // only) and an `interactive` flag for the configured interactive host.
+      process.stdout.write(
+        JSON.stringify(
+          names.map((n) => {
+            const config = deviceConfigJson(n);
+            return { ...reg[n], interactive: n === interactiveHost, ...(config ? { config } : {}) };
+          }),
+          null,
+          2,
+        ) + '\n',
+      );
       return;
     }
     if (names.length === 0) {
@@ -983,7 +1244,7 @@ Typical workflow:
     }
 
     console.log(chalk.bold(`Devices (${names.length})`));
-    for (const line of renderDeviceTable(reg, names, self, statsMap, opts.full)) console.log(line);
+    for (const line of renderDeviceTable(reg, names, self, statsMap, opts.full, interactiveHost)) console.log(line);
     if (freshness?.servedFromCache && freshness.oldestFetchedAt != null) {
       console.log(chalk.gray(`  updated ${formatCheckedAge(freshness.oldestFetchedAt)} — pass --refresh (--live) for a live probe`));
     }
@@ -1017,8 +1278,9 @@ Typical workflow:
     .option('--no-stats', 'skip the live resource probe')
     .option('--refresh', 'force a live probe of every device, bypassing the cache')
     .option('--live', 'alias of --refresh (shorter to type)')
+    .option('--local', "this machine only: print THIS host's status row (resource stats + live-agent workload). The publish endpoint the fleet-status read-union reads over ssh.")
     .option('--verbose', 'show the full per-device auth/CLI/sync/version grid instead of the summary')
-    .action(async (opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean; verbose?: boolean }, cmd: Command) => {
+    .action(async (opts: { json?: boolean; strict?: boolean; stats?: boolean; refresh?: boolean; live?: boolean; local?: boolean; verbose?: boolean }, cmd: Command) => {
       // The root program also defines a global `--verbose`; commander binds a
       // shared long flag to the program, not the leaf. Read the effective value
       // from the merged globals so `fleet status --verbose` works at either level

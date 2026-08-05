@@ -25,6 +25,8 @@ import { relTime, truncate } from './format.js';
 import { getActivityDir, getUserAgentsDir } from './state.js';
 import { normalizeHost } from './machine-id.js';
 import { projectKeyFromCwd } from './project-key.js';
+import { stampProvenance } from './event-provenance.js';
+import type { ActorKind } from './actor.js';
 // Type-only import: no runtime dependency on events.ts, so no import cycle
 // (events.ts / event-stream.ts import THIS module at runtime).
 import type { EventRecord } from './events.js';
@@ -160,16 +162,28 @@ export interface ActivityEvent {
   project?: string;
   /** Agent that produced the event (claude, codex, ...). */
   agent?: string;
+  /** Resolved actor id shared with the operational event stream. */
+  actor?: string;
+  /** Resolved actor kind shared with the operational event stream. */
+  kind?: ActorKind | 'unknown';
   /** Tool that triggered the event (Bash, Task, ExitPlanMode, feed.post, ...). */
   tool?: string;
   /** One-line human summary (plan title, PR command, sub-agent role, status text). */
   detail?: string;
+  /**
+   * Short subject for deliberate status posts (`feed post --title`). Phone
+   * broadcasts put this on the first line; `detail` is the body. Optional on
+   * older events that only carried `detail`.
+   */
+  title?: string;
   /** Extracted URL when the event has one (e.g. the opened PR). */
   url?: string;
   /** Auto-stamped process identity for deliberate posts (from pid registry / env). */
   pid?: number;
   /** Spawn-time join key (`AGENT_LAUNCH_ID`) when known. */
   launchId?: string;
+  /** Session that spawned this session (`AGENTS_PARENT_SESSION_ID`) when known. */
+  parentSessionId?: string;
   /** Factory terminal id when the launch inherited one. */
   terminalId?: string;
   /** `$TMUX_PANE` at launch when recorded. */
@@ -232,6 +246,7 @@ export function appendActivityEvent(
   const dir = root ?? getActivityDir();
   fs.mkdirSync(dir, { recursive: true });
   const record: ActivityEvent = {
+    ...stampProvenance(),
     v: event.v ?? 1,
     tier: event.tier ?? tierForEvent(event.event),
     ...event,
@@ -257,11 +272,15 @@ function parseLine(line: string): ActivityEvent | undefined {
       cwd: parsed.cwd,
       project: parsed.project,
       agent: parsed.agent,
+      actor: parsed.actor,
+      kind: parsed.kind,
       tool: parsed.tool,
       detail: parsed.detail,
+      title: typeof parsed.title === 'string' ? parsed.title : undefined,
       url: parsed.url,
       pid: typeof parsed.pid === 'number' ? parsed.pid : undefined,
       launchId: parsed.launchId,
+      parentSessionId: parsed.parentSessionId,
       terminalId: parsed.terminalId,
       tmuxPane: parsed.tmuxPane,
       category: typeof parsed.category === 'string' ? parsed.category : undefined,
@@ -413,10 +432,12 @@ export function activityEventToRecord(ev: ActivityEvent): EventRecord {
     level: 'info',
     caller: ev.tool === 'feed.post' ? 'agent' : 'hook',
     session: ev.sessionId,
-    osUser: ev.agent ?? 'agent',
+    osUser: 'unknown',
     transport: 'local',
     // payload
     agent: ev.agent,
+    actor: ev.actor ?? 'unknown',
+    kind: ev.kind ?? 'unknown',
     sessionId: ev.sessionId,
     cwd: ev.cwd,
     module: 'activity',
@@ -426,6 +447,7 @@ export function activityEventToRecord(ev: ActivityEvent): EventRecord {
     tier: ev.tier,
     ...(ev.project ? { project: ev.project } : {}),
     ...(ev.launchId ? { launchId: ev.launchId } : {}),
+    ...(ev.parentSessionId ? { parentSessionId: ev.parentSessionId } : {}),
     ...(ev.terminalId ? { terminalId: ev.terminalId } : {}),
     ...(ev.tmuxPane ? { tmuxPane: ev.tmuxPane } : {}),
     ...(ev.attachments?.length ? { attachments: ev.attachments } : {}),
@@ -438,7 +460,7 @@ export function readActivityAsEventRecords(opts: RecentActivityOptions = {}): Ev
 }
 
 // ---------------------------------------------------------------------------
-// Rendering (shared by `agents activity` and `agents feed`)
+// Rendering (shared by the feed activity lane and `agents feed --filter updates`)
 // ---------------------------------------------------------------------------
 
 /** Glyph + color + human label per event, so the lane reads at a glance. */
@@ -554,6 +576,7 @@ export function formatProgressUpdate(ev: ActivityEvent, opts: { joined?: Progres
   ].filter((c): c is string => Boolean(c));
   if (chips.length > 0) lines.push(`    ${chalk.gray(chips.join(' · '))}`);
 
+  if (ev.title) lines.push(`    ${chalk.white.bold(ev.title)}`);
   if (ev.detail) lines.push(`    ${chalk.white(`"${ev.detail}"`)}`);
 
   if (ev.attachments?.length) {
@@ -569,9 +592,9 @@ export function formatProgressUpdate(ev: ActivityEvent, opts: { joined?: Progres
 // ---------------------------------------------------------------------------
 // Fleet fan-out, session enrichment, grouping (the "activity bar")
 //
-// `agents activity --json` is a mergeable per-host payload, so a feed-style
-// fan-out (`gatherRemoteAgentsJson`) collects every peer's own stream and
-// merges them host-tagged. Each item is then enriched by JOINING to live
+// The activity stream is a mergeable per-host payload, so a feed-style fan-out
+// (`gatherRemoteAgentsJson`) collects every peer's own stream and merges them
+// host-tagged. Each item is then enriched by JOINING to live
 // sessions (project / ticket / execution host) — NOT by re-parsing transcripts
 // — and can be grouped by project, device, or agent so progress reads at a
 // glance across the whole fleet.
@@ -878,7 +901,7 @@ export function formatActivityGroupMeta(
  * a logging hiccup never blocks a tool call.
  */
 export const ACTIVITY_LOG_HOOK_SCRIPT = String.raw`#!/usr/bin/env python3
-"""Append agent-activity events for 'agents feed' / 'agents activity'.
+"""Append agent-activity events for 'agents feed'.
 
 Bound to PreToolUse (ExitPlanMode, Task) and PostToolUse (Bash, Write, Edit,
 MultiEdit, TodoWrite, update_plan, TaskUpdate, todo_write, TaskCreate). One
@@ -1741,8 +1764,17 @@ def main():
         cwd = payload.get("cwd") or os.environ.get("AGENTS_CWD")
         if cwd:
             record["cwd"] = cwd
-        agent = os.environ.get("AGENTS_AGENT_NAME") or "claude"
+        agent = os.environ.get("AGENTS_AGENT_NAME") or "unknown"
         record["agent"] = agent
+        record["actor"] = os.environ.get("AGENTS_ACTOR") or "unknown"
+        actor_kind = os.environ.get("AGENTS_ACTOR_KIND")
+        record["kind"] = actor_kind if actor_kind in ("human", "agent") else "unknown"
+        launch_id = os.environ.get("AGENT_LAUNCH_ID")
+        if launch_id:
+            record["launchId"] = launch_id
+        parent_session_id = os.environ.get("AGENTS_PARENT_SESSION_ID")
+        if parent_session_id:
+            record["parentSessionId"] = parent_session_id
 
     try:
         os.makedirs(activity_dir, exist_ok=True)

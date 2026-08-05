@@ -410,6 +410,13 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   let latestTodos: TodoProgress | undefined;
   let subAgentCount = 0;
   const toolTags = new Set<string>();
+  // usedBrowser/usedComputer are computed at scan time from a sessionId-scoped
+  // events-log read (session/db.ts detectToolUsage), NOT a transcript regex —
+  // undefined means a legacy row this scanner hasn't computed the field for
+  // yet, so only THEN does classifySessionTool's transcript-derived guess run
+  // below (mirrors directoriesTouched's prefer-persisted/fall-back-to-derived
+  // pattern for recentDirectoriesTouched).
+  const knownToolUsage = session.usedBrowser !== undefined;
 
   for (const event of events) {
     if (event.type === 'message') {
@@ -424,7 +431,9 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
     } else if (event.type === 'tool_use' && !event._local) {
       const tool = event.tool || '';
       const command = event.command || '';
-      for (const tag of classifySessionTool(tool, command)) toolTags.add(tag);
+      if (!knownToolUsage) {
+        for (const tag of classifySessionTool(tool, command)) toolTags.add(tag);
+      }
       if (isSubAgentTool(tool, command)) subAgentCount++;
       const p = event.path || event.args?.file_path || event.args?.path || '';
       if (['Read', 'read_file', 'view_file', 'cat_file', 'get_file'].includes(tool) && p) {
@@ -444,6 +453,11 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
       toolCalls++;
     }
   }
+
+  // Persisted field wins when computed — it comes from real browser.navigate/
+  // browser.screenshot/computer.action events, not a fuzzy tool-name regex.
+  if (session.usedBrowser) toolTags.add('browser');
+  if (session.usedComputer) toolTags.add('computer');
 
   // Prefer the transcript-derived list when we just re-parsed the file (freshest
   // checklist write); fall back to SessionMeta.todos for rows where the scan/

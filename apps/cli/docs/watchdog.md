@@ -85,6 +85,54 @@ to a mailbox enqueue or a headless `--resume`, and refuses (flags for the menu-b
 when nothing can reach the session. `agents sessions inject` shares this same resolver, so
 the manual unblock path and the watchdog agree.
 
+## Rotate (in-place, same tab)
+
+A stalled session whose tail shows a **hard account limit** — "You've hit your weekly
+limit · resets …", "usage limit reached", "out of credits" (`ROTATE_LIMIT_PATTERNS`,
+`lib/watchdog/rotate.ts`) — cannot be un-stuck by a nudge: "Continue." cannot unspend a
+capped account. The tick routes it to the **rotate** path instead:
+
+1. **Detect.** `classifyTailForRotate` matches the transcript tail and parses the
+   `resets <time>` clause when present (ISO, or claude's `7am (America/Los_Angeles)`
+   time-of-day form).
+2. **Gate (first-party).** Before touching the terminal, the tick runs the *same*
+   selection `agents run auto` would — `collectHarnessCandidates` +
+   `pickHarnessWeighted` (`lib/rotate.ts`, cache-only; no `agents view` subprocess, no
+   Keychain probe). Zero healthy → ONE `rotate` skip event per cooldown window in
+   `watchdog.log` (cooldown = `earliestResetAcross` from the candidates, else the parsed
+   tail reset, else 30m) and the terminal is left untouched.
+3. **Relaunch in place.** The harness's exit sequence (claude: `Esc, Ctrl+C, Ctrl+C`;
+   codex/gemini/cursor/opencode: `Ctrl+C, Ctrl+C` — the table ported from the
+   extension's prewarm configs) is injected as raw bytes into the resolved rail, then
+   `agents run auto --interactive --session-id <uuid>` is typed into the **same tab**.
+4. **Replay.** When the new session's TUI is live, the tick injects the resume replay:
+   "Resume previous work by loading session \<old-id\>. Run `agents sessions <old-id>` …".
+   Readiness is a transcript for the new session id (primary — a claude pick honors
+   `--session-id`), with a **correlated** fallback for non-claude picks: a fresh active
+   session counts only when it started after the rotate began AND shares the old
+   session's cwd AND machine (`isCorrelatedRelaunch`) — an unrelated fresh session on a
+   busy box never satisfies it. The readiness wait is bounded (60s default); on timeout
+   the session is **flagged** and the machine stops — never blind-type into a dead shell.
+   The flag says the terminal may sit at a bare shell and needs a manual
+   `agents run auto`; a failed rotate is suppressed for 15m (`suppressUntilMs` in the
+   state file) before the tick will retry it.
+
+The machine spans ticks — the exit sequence kills the old session, so it drops out of
+the active-session list before the new TUI is live — and persists at
+`~/.agents/.cache/state/watchdog/rotate/<sessionId>.json` as
+`exiting → launching → awaiting-tui → replaying → done | failed`. A post-loop sweep
+advances in-flight rotates whose session left the active list. All rotate activity
+(rotate start / done / failed / skip) is appended to the shared `watchdog.log` as
+`rotate`-kind events, so the Factory Floor status card keeps working unchanged.
+
+Rotate is **on by default**. `agents watchdog rotate on|off` writes `watchdog.rotate`
+in `~/.agents/agents.yaml` (re-read per tick) and is rotate-only — nudging is
+unaffected. Rotate obeys the same gates as a nudge: it acts only on a `--nudge`
+tick, honors `handsoff` (flag, never rotate), and requires the same addressable-rail
+safety gate — an un-addressable terminal is flagged, never rotated blind.
+`agents watchdog status` (`--json`) reports the rotate config and every persisted
+rotate state.
+
 ## Fleet model
 
 The watchdog reads the **whole fleet** (`agents sessions --active --json` fans out to every
@@ -109,6 +157,7 @@ distributed on every box against its own local sessions — see
 | `lib/watchdog/watchdog.ts` | `WATCHDOG_SYSTEM_PROMPT`, playbook composition, prompt render, response parse. |
 | `lib/watchdog/read.ts` | Locate a transcript and read its tail; stall thresholds. |
 | `lib/watchdog/watchdogTail.ts` | Summarize a tail into last-user / last-assistant for the brain + log. |
+| `lib/watchdog/rotate.ts` | In-place rotate: limit detection, exit-sequence table, state machine, health gate. |
 | `lib/watchdog/log.ts` | Append decisions to `watchdog.log` for the Factory activity card. |
 | `commands/watchdog.ts` | `agents watchdog` — `enable`/`disable`/`status`/`policy`/`--nudge`/`--watch`. |
 | `lib/session/state.ts`, `active.ts` | Status inference (`working`/`waiting_input`/`idle`) the watchdog reads. |

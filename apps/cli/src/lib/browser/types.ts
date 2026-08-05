@@ -74,10 +74,20 @@ export interface Task {
   createdAt: number;
   pid: number;
   /**
-   * Resolved actor id (`resolveActor().id`) stamped at task start — who launched
-   * this browser task. Optional: tasks persisted before RUSH-2020 carry none.
+   * Resolved actor id (`resolveActor().id`) stamped at task start — WHO launched
+   * this browser task (a person/agent identity, stable across runs). Forwarded
+   * from the caller over IPC — the daemon is shared, so it cannot resolve the
+   * caller's actor itself. Optional: tasks persisted before RUSH-2020 carry none.
    */
   owner?: string;
+  /**
+   * The caller's per-run launch id (`$AGENT_LAUNCH_ID`, minted by exec.ts for
+   * every harness) stamped at task start — WHICH run created this task. Distinct
+   * from `owner`: two runs by the same actor get different launchIds, which is
+   * the scope the current-task default and `status --mine` filter on. Forwarded
+   * from the caller over IPC. Optional: tasks from before this shipped carry none.
+   */
+  launchId?: string;
   /**
    * Per-tab snapshot of the last ref listing captured for that tab
    * (shortId -> {descriptors, opts}). Persisted to tasks.json so a later
@@ -225,6 +235,13 @@ export interface IPCRequest {
   appLevel?: string;
   // Browser start: opt out of domain-skill discovery.
   skipDomainSkill?: boolean;
+  // Caller identity, forwarded from the CLI process. The browser daemon is
+  // shared and long-lived, so it cannot resolve the caller's actor/run itself
+  // (resolveActor() there yields the daemon's identity, not the caller's).
+  // `actor` is stamped onto the task at `start`; `launchId` is stamped too AND,
+  // on `status`, scopes the listing to the caller's run.
+  actor?: string;
+  launchId?: string;
 }
 
 /** Subset of IPCResponse describing a recording start result. */

@@ -157,6 +157,7 @@ import {
   loadDoctor,
   loadApply,
   loadStatus,
+  loadSnapshot,
   loadProfiles,
   loadHarness,
   loadSecrets,
@@ -168,11 +169,11 @@ import {
   loadSync,
   loadLock,
   loadRefreshRules,
-  loadDrive,
   loadFactory,
   loadUsage,
   loadCost,
   loadPerf,
+  loadTrends,
   loadOutput,
   loadBudget,
   loadAlias,
@@ -196,9 +197,7 @@ import {
   loadUninstall,
   loadShare,
   loadSend,
-  loadHq,
   loadFeed,
-  loadActivity,
   loadMailboxes,
   type ModuleLoader,
 } from './lib/startup/command-registry.js';
@@ -208,6 +207,8 @@ import type { AgentId } from './lib/types.js';
 import { IS_WINDOWS } from './lib/platform/index.js';
 import { getCliLaunch } from './lib/cli-entry.js';
 import { emit, emitFriction, redactArgs } from './lib/events.js';
+import { stampProvenance } from './lib/event-provenance.js';
+import { die } from './lib/format.js';
 
 // Transparent shim delegate: the generated Windows `.cmd` shims invoke
 // `agents __shim <agent>[@version] <raw args>`. Intercept here, before commander
@@ -311,14 +312,33 @@ program.hook('postAction', (_thisCommand, actionCommand) => {
       command,
       ...(durationMs !== undefined ? { durationMs } : {}),
     });
+    if (parts[0] === 'run') {
+      const agentName = actionCommand.args?.[0] ? String(actionCommand.args[0]).split('@')[0] : 'run';
+      void import('./lib/analytics/usage-db.js').then(({ recordUsage }) => {
+        recordUsage({
+          kind: 'agent',
+          name: agentName || 'run',
+          event: 'invoke',
+          source: 'cli',
+          meta: durationMs !== undefined ? { durationMs } : undefined,
+        });
+      }).catch(() => { /* fail soft */ });
+    }
     // Disposable perf warehouse — fail-soft spool append (no SQLite on this path).
     if (durationMs !== undefined && parts[0] !== 'perf') {
+      // sessionId/agent are resolvable here the same way emit() resolves them
+      // for command.start/command.end above (the shared provenance floor,
+      // event-provenance.ts) — without this, every command.end perf sample
+      // was anonymous, unlike the audit log record right next to it.
+      const { sessionId, agent } = stampProvenance();
       void import('./lib/perf/spool.js').then(({ recordSample }) => {
         recordSample({
           kind: 'command.end',
           label: command,
           durationMs,
           cwd: process.cwd(),
+          sessionId,
+          agent,
         });
       }).catch(() => { /* fail soft */ });
     }
@@ -397,7 +417,6 @@ Run and dispatch:
   run <agent|profile> [prompt]    Run an agent. Omit prompt for interactive mode.
   defaults                        Configure run defaults by agent/version selector
   teams                           Coordinate multiple agents on shared work
-  hq                              JSON bridge for the interactive Agents HQ floor
   routines                        Run agents on a cron schedule (scheduler auto-starts)
   webhook                         Receive signed GitHub/Linear webhooks for trigger routines
   funnel                          Expose a webhook receiver through Tailscale Funnel
@@ -405,6 +424,15 @@ Run and dispatch:
   logs [id]                       Show a run's log — host-dispatch task or session; -f to follow
   browser                         Automate a browser — navigate, click, screenshot, console, network
   pty                             Drive interactive terminal programs (REPLs, TUIs) via a persistent PTY session
+
+Observe (read the fleet — no store merge; aliases point at the real readers):
+  feed / inbox                    Needs-you inbox (open blocks waiting on you)
+  timeline                        Agent progress stream (= feed --filter updates)
+  roster                          Live agents (= sessions --active)
+  events                          Unified ops + activity event trail
+  audit                           Tamper-evident run-dispatch log (not events)
+  snapshot                        One-process inventory + active sessions poll
+  status                          Sync/drift only (not the live fleet snapshot)
 
 Credentials and profiles:
   profile                         Activate resource profiles across skills, MCP, permissions, and secrets
@@ -417,14 +445,14 @@ Diagnostics:
   perf                            Latency rollups (hooks, commands, runs) from the disposable perf warehouse
 
 Config sync:
-  drive                           Sync session history across machines via rsync
-  pull                            Clone or pull the system repo at ~/.agents/.system/
+  repo pull [alias]               Git pull a repo (system | user | <extra>)
+  sync [agent]                    Re-materialize installed version homes; --local to skip fetching
   repo init --path <dir>          Scaffold your own editable repo from a template
   repo add <path|gh:user/repo>    Merge an extra repo after the system repo
   lock [--frozen]                 Write/verify agents.lock (SHA-256 of resolved resources); --frozen fails on drift
 
 Beta features:
-  beta                            Enable preview features (factory, drive, and more)
+  beta                            Enable preview features (factory and more)
 
 Automation tips:
   Pass explicit names/IDs         Avoid pickers: agents sessions <id> --markdown
@@ -871,6 +899,22 @@ function registerResourcesTombstoneCommand(p: Command): void {
 }
 
 /**
+ * Removed `hq` command — the JSON bridge for the interactive Agents HQ floor
+ * (`agents hq floor --json`). No UI ever consumed it (apps/factory has zero
+ * references) and it had no external users, so it is gone with no replacement.
+ * Kept as a hidden tombstone so a stale invocation gets a clear message and a
+ * non-zero exit instead of commander's raw "unknown command".
+ */
+function registerHqTombstoneCommand(p: Command): void {
+  p.command('hq', { hidden: true })
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(() => {
+      die('"agents hq" was removed (internal Agents HQ floor bridge, no longer used).');
+    });
+}
+
+/**
  * Hidden `agents _internal <sub>` namespace for machine-to-machine calls that
  * are not user-facing. The first subcommand is `friction`, used by shell guard
  * hooks (git-guard, rm-guard, …) to self-report a block into the event log
@@ -995,6 +1039,9 @@ async function registerEagerForRequest(name: string): Promise<boolean> {
       registerResourcesTombstoneCommand(program);
       await reg(loadView);
       return true;
+    case 'hq':
+      registerHqTombstoneCommand(program);
+      return true;
     case '_internal':
       registerInternalCommand(program);
       return true;
@@ -1055,6 +1102,7 @@ async function registerAllEagerCommands(): Promise<void> {
   registerCheckTombstoneCommand(program);
   await reg(loadApply);
   await reg(loadStatus);
+  await reg(loadSnapshot);
   registerExecAliasCommand(program);
   await reg(loadProfiles);
   await reg(loadHarness);
@@ -1067,11 +1115,11 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadSync);
   await reg(loadLock);
   await reg(loadRefreshRules);
-  await reg(loadDrive);
   await reg(loadFactory);
   await reg(loadUsage);
   await reg(loadCost);
   await reg(loadPerf);
+  await reg(loadTrends);
   await reg(loadOutput);
   await reg(loadBudget);
   await reg(loadAlias);
@@ -1087,9 +1135,8 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadAudit);
   await reg(loadWebhook);
   await reg(loadFunnel);
-  await reg(loadHq);
+  registerHqTombstoneCommand(program);
   await reg(loadFeed);
-  await reg(loadActivity);
   await reg(loadMailboxes);
   await reg(loadSsh);
   registerJobsCronAliasCommand(program, 'jobs');

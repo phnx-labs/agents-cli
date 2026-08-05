@@ -130,7 +130,7 @@ remote home for you.
 | `-n, --name <name>` | Friendly name (required when using `--after`) |
 | `-m, --mode <mode>` | `plan` (read-only) \| `edit` (write files) \| `full` (write + skip prompts). Default: `edit` |
 | `-e, --effort <effort>` | `low` \| `medium` \| `high` \| `xhigh` \| `max` \| `auto`. Default: `medium` |
-| `--model <model>` | Override effort tier with a specific model (e.g. `claude-opus-4-6`) |
+| `--model <model>` | Cost tier (`cheap`\|`default`\|`best`\|`ultra`) or a concrete id (e.g. `claude-opus-4-8`); tiers resolve per harness+version to a supported model. See [Model tiers](model-tiers.md). |
 | `--env <key=value>` | Set an env var for this teammate (repeatable) |
 | `--cwd <dir>` | Working directory (default: current directory) |
 | `--worktree <name>` | Run in a dedicated git worktree (requires `--enable-worktrees` on the team) |
@@ -266,8 +266,8 @@ which case the worktree is kept and reported.
 
 | Teammate | Base of the new worktree branch |
 |---|---|
-| **local** (no `--device`) | your **current local `HEAD`** — no fetch is run first (`createWorktree`). Sync the checkout (`git fetch && git merge --ff-only origin/<default>`) **before** `add`, or every teammate forks off stale code. |
-| **remote** (`--device host`) | the host's **freshly-fetched `origin/<default>`** (`createRemoteWorktree` fetches first) — no manual sync needed. |
+| **local** (no `--device`) | the **freshly-fetched `origin/<default>`** (`createWorktree` runs `git fetch origin` then bases the branch on `origin/<default>` — never local `HEAD`). |
+| **remote** (`--device host`) | the host's **freshly-fetched `origin/<default>`** (`createRemoteWorktree` fetches first) — same base policy as local. |
 
 So the pre-flight for a **local** worktree team is: fast-forward your checkout to
 the default branch first. A remote team handles this itself.

@@ -143,3 +143,21 @@ describe('resolveHostSessionId', () => {
     expect(resolveHostSessionId('codex', undefined, explicitId)).toBeUndefined();
   });
 });
+
+describe('resolveHostSessionId — run auto session-id forwarding (RUSH-2132)', () => {
+  it('forwards an explicit id for a remote claude pick, but never mints one', () => {
+    // The harness is picked on the REMOTE — an explicit --session-id must cross
+    // so a claude pick adopts it, while a non-claude pick ignores it (and the
+    // dispatch keeps --emit-session-id armed because nothing was minted).
+    expect(resolveHostSessionId('auto', undefined, 'fixed-id')).toBe('fixed-id');
+    expect(resolveHostSessionId('auto')).toBeUndefined();
+    expect(resolveHostSessionId('auto', 'resume-id', 'fixed-id')).toBeUndefined();
+  });
+
+  it('claude semantics unchanged: adopt explicit, mint when absent, never on resume', () => {
+    expect(resolveHostSessionId('claude', undefined, 'fixed-id')).toBe('fixed-id');
+    expect(typeof resolveHostSessionId('claude')).toBe('string');
+    expect(resolveHostSessionId('claude', 'resume-id', 'fixed-id')).toBeUndefined();
+    expect(resolveHostSessionId('codex', undefined, 'fixed-id')).toBeUndefined();
+  });
+});

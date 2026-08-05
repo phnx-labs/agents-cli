@@ -22,6 +22,7 @@ import {
 } from '../lib/browser/profiles.js';
 import { DEFAULT_VIEWPORT } from '../lib/browser/devices.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
+import { defaultBrowserChoice } from './setup-preferences.js';
 
 const INSTALL_HINT =
   'Install one of: Google Chrome, Brave, Microsoft Edge, Chromium, or Comet, then re-run `agents setup browser`.\n' +
@@ -78,11 +79,14 @@ export async function runBrowserWizard(): Promise<boolean> {
     await deleteProfile(existing.name);
   }
 
-  // Pick which installed browser to pin (auto-select if only one).
+  // Pick which installed browser to pin (auto-select if only one). The picker
+  // highlights the same browser auto-detect would win — choosing is an
+  // override of the default, never a guess.
   let chosen = installed[0];
   if (installed.length > 1) {
     const value = await select({
       message: 'Which browser should the default profile use?',
+      default: defaultBrowserChoice(installed) ?? undefined,
       choices: installed.map((b) => ({ name: `${b.browserType}  ${chalk.dim(b.binary)}`, value: b.browserType })),
     });
     chosen = installed.find((b) => b.browserType === value) ?? installed[0];

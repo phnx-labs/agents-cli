@@ -8,10 +8,12 @@
 
 import * as fs from 'fs';
 import { truncate } from '../format.js';
+import { sanitizeForTerminal } from '../redact.js';
 import * as path from 'path';
 import Database from '../sqlite.js';
-import { isSyntheticUserMessage } from './prompt.js';
+import { isSyntheticUserMessage, extractSlashCommandName, extractSlashCommandFromToolInput } from './prompt.js';
 import type { SessionAgentId, SessionEvent } from './types.js';
+import { structuredToolResult } from './tool-calls.js';
 
 /**
  * Largest session file we will load into memory. Above this we throw a clean
@@ -27,12 +29,7 @@ export const SESSION_FILE_MAX_BYTES = 200_000_000;
  * carriage return (0x0d). Everything else in the C0/C1 range and every CSI/OSC
  * escape is dropped.
  */
-const TERMINAL_ESCAPE_REGEX = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g;
-
-export function sanitizeForTerminal(s: string): string {
-  if (typeof s !== 'string' || !s) return s;
-  return s.replace(TERMINAL_ESCAPE_REGEX, '');
-}
+export { sanitizeForTerminal } from '../redact.js';
 
 /** Recursively sanitize every string value within a tool-args object. */
 function sanitizeArgsDeep(value: any): any {
@@ -391,11 +388,19 @@ export function parseClaudeContent(content: string): SessionEvent[] {
             agent: 'claude' as const,
             timestamp,
             tool: toolName,
+            callId: toolId,
             args: toolInput,
             path: toolInput.file_path || undefined,
             command: toolName === 'Bash' ? toolInput.command : undefined,
           };
           if (isLocal) event._local = true;
+          // SlashCommand: the MODEL invoking a slash command programmatically
+          // (distinct from the <command-name> wrapper below, which is the
+          // USER typing one) — see prompt.ts's extractSlashCommandFromToolInput.
+          if (toolName === 'SlashCommand') {
+            const slashCommand = extractSlashCommandFromToolInput(toolInput);
+            if (slashCommand) event.slashCommand = slashCommand;
+          }
           events.push(event);
         }
       }
@@ -420,13 +425,20 @@ export function parseClaudeContent(content: string): SessionEvent[] {
         // Simple user text
         const text = contentBlocks.trim();
         if (text) {
-          events.push({
+          const event: any = {
             type: 'message',
             agent: 'claude',
             timestamp,
             role: 'user',
             content: text,
-          });
+          };
+          // The USER typing a slash command — Claude injects a <command-name>
+          // wrapper as the message content (see prompt.ts's
+          // extractSlashCommandName; distinct from the SlashCommand tool-use
+          // above, which is the model invoking one programmatically).
+          const slashCommand = extractSlashCommandName(text);
+          if (slashCommand) event.slashCommand = slashCommand;
+          events.push(event);
         }
       } else if (Array.isArray(contentBlocks)) {
         for (const block of contentBlocks) {
@@ -456,6 +468,7 @@ export function parseClaudeContent(content: string): SessionEvent[] {
             const toolId = block.tool_use_id;
             const toolInfo = toolId ? toolUseMap.get(toolId) : undefined;
             const isError = block.is_error === true;
+            const structured = structuredToolResult(block);
 
             // Extract output text from tool result
             let output = '';
@@ -474,6 +487,11 @@ export function parseClaudeContent(content: string): SessionEvent[] {
                 agent: 'claude',
                 timestamp,
                 tool: toolInfo?.tool,
+                callId: toolId,
+                outcome: 'error',
+                exitCode: structured.exitCode,
+                statusCode: structured.statusCode,
+                errorCode: structured.errorCode,
                 content: output || 'Tool execution failed',
               });
             } else {
@@ -482,7 +500,16 @@ export function parseClaudeContent(content: string): SessionEvent[] {
                 agent: 'claude',
                 timestamp,
                 tool: toolInfo?.tool,
+                callId: toolId,
                 success: true,
+                outcome: 'ok',
+                exitCode: structured.exitCode,
+                statusCode: structured.statusCode,
+                errorCode: structured.errorCode,
+                // Not truncated here: `parseSession` caps every event's `output`
+                // centrally via `maxToolOutputChars` (default 500, the same
+                // bound this site used to hardcode), so the render path can ask
+                // for the full text with `Infinity`.
                 output,
               });
             }
@@ -661,6 +688,7 @@ export function parseCodexContent(content: string): SessionEvent[] {
           agent: 'codex',
           timestamp,
           tool: name,
+          callId,
           args,
           command: name === 'exec_command' ? (args.command || args.cmd) : undefined,
           path: args.file_path || args.path || undefined,
@@ -668,15 +696,20 @@ export function parseCodexContent(content: string): SessionEvent[] {
       } else if (ptype === 'function_call_output') {
         const callId = payload.call_id || payload.id;
         const callInfo = callId ? callMap.get(callId) : undefined;
-        const output = String(payload.output || '');
+        const result = structuredToolResult(payload.output);
 
         events.push({
           type: 'tool_result',
           agent: 'codex',
           timestamp,
           tool: callInfo?.name,
-          success: true,
-          output,
+          callId,
+          success: result.outcome === 'error' ? false : true,
+          outcome: result.outcome,
+          exitCode: result.exitCode,
+          statusCode: result.statusCode,
+          errorCode: result.errorCode,
+          output: result.text,
         });
 
         if (callId) callMap.delete(callId);
@@ -701,6 +734,7 @@ export function parseCodexContent(content: string): SessionEvent[] {
             agent: 'codex',
             timestamp,
             tool,
+            callId,
             args,
             path: patchPath,
           });
@@ -714,15 +748,20 @@ export function parseCodexContent(content: string): SessionEvent[] {
       } else if (ptype === 'custom_tool_call_output') {
         const callId = payload.call_id || payload.id;
         const callInfo = callId ? callMap.get(callId) : undefined;
-        const output = String(payload.output || '');
+        const result = structuredToolResult(payload.output);
 
         events.push({
           type: 'tool_result',
           agent: 'codex',
           timestamp,
           tool: callInfo?.name,
-          success: true,
-          output,
+          callId,
+          success: result.outcome === 'error' ? false : true,
+          outcome: result.outcome,
+          exitCode: result.exitCode,
+          statusCode: result.statusCode,
+          errorCode: result.errorCode,
+          output: result.text,
         });
 
         if (callId) callMap.delete(callId);
@@ -822,12 +861,13 @@ export function parseGemini(filePath: string): SessionEvent[] {
           const toolName = tc.name || 'unknown';
           const args = tc.args || {};
 
-          events.push({
-            type: 'tool_use',
-            agent: 'gemini',
-            timestamp: tc.timestamp || timestamp,
-            tool: toolName,
-            args,
+        events.push({
+          type: 'tool_use',
+          agent: 'gemini',
+          timestamp: tc.timestamp || timestamp,
+          tool: toolName,
+          callId: typeof tc.id === 'string' ? tc.id : undefined,
+          args,
             command: ['run_shell_command', 'shell', 'bash'].includes(toolName) ? args.command : undefined,
             path: args.file_path || args.path || undefined,
           });
@@ -851,6 +891,7 @@ export function parseGemini(filePath: string): SessionEvent[] {
               agent: 'gemini',
               timestamp: tc.timestamp || timestamp,
               tool: toolName,
+              callId: typeof tc.id === 'string' ? tc.id : undefined,
               success: tc.status === 'success',
               output,
             });
@@ -1093,6 +1134,7 @@ export function parseAntigravity(dbPath: string): SessionEvent[] {
       agent: 'antigravity',
       timestamp,
       tool: norm,
+      callId: call.id,
       args: a,
       command: norm === 'Bash' ? a.CommandLine : undefined,
       // Antigravity uses PascalCase arg keys; probe the known path-bearing ones.
@@ -1210,6 +1252,7 @@ export function parseGrok(filePath: string): SessionEvent[] {
           agent: 'grok',
           timestamp,
           tool: toolName,
+          callId: typeof call?.id === 'string' ? call.id : undefined,
           args,
           path: args.path || args.file_path || undefined,
           command: typeof args.command === 'string' ? args.command : undefined,
@@ -1222,14 +1265,18 @@ export function parseGrok(filePath: string): SessionEvent[] {
       const callId = typeof msg.tool_call_id === 'string' ? msg.tool_call_id : undefined;
       const toolName = (callId && toolCallMap.get(callId)) || 'unknown';
       const output = typeof msg.content === 'string' ? msg.content : extractText(msg.content);
-      const isError = typeof output === 'string' && output.startsWith('Error:');
+      const structuredError = msg.is_error === true;
+      const structuredSuccess = msg.is_error === false;
+      const displayAsError = structuredError || (typeof output === 'string' && output.startsWith('Error:'));
       events.push({
-        type: isError ? 'error' : 'tool_result',
+        type: displayAsError ? 'error' : 'tool_result',
         agent: 'grok',
         timestamp,
         tool: toolName,
-        success: !isError,
-        output,
+        callId,
+        success: structuredError ? false : structuredSuccess ? true : undefined,
+        outcome: structuredError ? 'error' : structuredSuccess ? 'ok' : 'unknown',
+        output: output,
       });
       if (callId) toolCallMap.delete(callId);
     }
@@ -1335,12 +1382,14 @@ export function parseOpenCode(filePath: string): SessionEvent[] {
           const state = partData.state || {};
           const input = state.input || {};
           const output = state.output || '';
+          const callId = typeof partData.callID === 'string' ? partData.callID : undefined;
 
           events.push({
             type: 'tool_use',
             agent: 'opencode',
             timestamp,
             tool: toolName,
+            callId,
             args: input,
             command: toolName === 'shell' ? input.command : undefined,
             path: input.filePath || input.path || undefined,
@@ -1353,6 +1402,7 @@ export function parseOpenCode(filePath: string): SessionEvent[] {
               agent: 'opencode',
               timestamp,
               tool: toolName,
+              callId,
               success: state.status === 'completed',
               output: outputStr,
             });
@@ -1400,8 +1450,10 @@ export function parseRush(filePath: string): SessionEvent[] {
     }
 
     const type = raw.type;
-    const timestamp = raw.created_at || new Date().toISOString();
-    const content = raw.content || {};
+    const timestamp = typeof raw.created_at === 'string' ? raw.created_at : new Date().toISOString();
+    const content = raw.content && typeof raw.content === 'object' && !Array.isArray(raw.content)
+      ? raw.content
+      : {};
 
     if (type === 'message') {
       const text = typeof content.text === 'string' ? content.text.trim() : '';
@@ -1425,9 +1477,11 @@ export function parseRush(filePath: string): SessionEvent[] {
         content: cleaned,
       });
     } else if (type === 'tool_call') {
-      const toolName = raw.name || 'unknown';
-      const args = content.input || {};
-      const callId = raw.tool_call_id;
+      const toolName = typeof raw.name === 'string' && raw.name.length > 0 ? raw.name : 'unknown';
+      const args = content.input && typeof content.input === 'object' && !Array.isArray(content.input)
+        ? content.input
+        : {};
+      const callId = typeof raw.tool_call_id === 'string' ? raw.tool_call_id : undefined;
       if (callId) toolCallMap.set(callId, { tool: toolName, args });
 
       events.push({
@@ -1435,12 +1489,13 @@ export function parseRush(filePath: string): SessionEvent[] {
         agent: 'rush',
         timestamp,
         tool: toolName,
+        callId,
         args,
         path: args.file_path || args.path || undefined,
         command: (toolName === 'Bash' || toolName === 'shell') ? args.command : undefined,
       });
     } else if (type === 'tool_result') {
-      const callId = raw.tool_call_id;
+      const callId = typeof raw.tool_call_id === 'string' ? raw.tool_call_id : undefined;
       const info = callId ? toolCallMap.get(callId) : undefined;
       const output = content.output;
 
@@ -1460,7 +1515,8 @@ export function parseRush(filePath: string): SessionEvent[] {
         type: success ? 'tool_result' : 'error',
         agent: 'rush',
         timestamp,
-        tool: info?.tool ?? raw.name,
+        tool: info?.tool ?? (typeof raw.name === 'string' ? raw.name : 'unknown'),
+        callId,
         success,
         output: outputStr,
       });
@@ -1628,9 +1684,11 @@ export function parseKimi(filePath: string): SessionEvent[] {
         }
       } else if (eventType === 'tool.call') {
         const fn = event.function || {};
-        const toolName = typeof event.name === 'string' ? event.name : (fn.name || 'unknown');
+        const toolName = typeof event.name === 'string'
+          ? event.name
+          : typeof fn.name === 'string' ? fn.name : 'unknown';
         let args: Record<string, any> = {};
-        if (event.args && typeof event.args === 'object') {
+        if (event.args && typeof event.args === 'object' && !Array.isArray(event.args)) {
           args = event.args;
         } else if (typeof fn.arguments === 'string') {
           try {
@@ -1638,11 +1696,12 @@ export function parseKimi(filePath: string): SessionEvent[] {
           } catch {
             args = { _raw: fn.arguments };
           }
-        } else if (fn.arguments && typeof fn.arguments === 'object') {
+        } else if (fn.arguments && typeof fn.arguments === 'object' && !Array.isArray(fn.arguments)) {
           args = fn.arguments;
         }
 
-        const callId = event.toolCallId || event.uuid;
+        const rawCallId = event.toolCallId || event.uuid;
+        const callId = typeof rawCallId === 'string' ? rawCallId : undefined;
         if (callId) {
           toolCallMap.set(callId, toolName);
         }
@@ -1652,24 +1711,30 @@ export function parseKimi(filePath: string): SessionEvent[] {
           agent: 'kimi',
           timestamp,
           tool: toolName,
+          callId,
           args,
           path: args.path || args.file_path || undefined,
           command: toolName === 'Bash' ? args.command : undefined,
         });
       } else if (eventType === 'tool.result') {
-        const callId = event.toolCallId || event.parentUuid;
+        const rawCallId = event.toolCallId || event.parentUuid;
+        const callId = typeof rawCallId === 'string' ? rawCallId : undefined;
         const toolName = (callId && toolCallMap.get(callId)) || 'unknown';
         const result = event.result || {};
         const output = typeof result.output === 'string' ? result.output : '';
-        const isError = result.isError === true || (output && output.startsWith('Error:'));
+        const structuredError = result.isError === true;
+        const structuredSuccess = result.isError === false;
+        const displayAsError = structuredError || (output && output.startsWith('Error:'));
 
         events.push({
-          type: isError ? 'error' : 'tool_result',
+          type: displayAsError ? 'error' : 'tool_result',
           agent: 'kimi',
           timestamp,
           tool: toolName,
-          success: !isError,
-          output,
+          callId,
+          success: structuredError ? false : structuredSuccess ? true : undefined,
+          outcome: structuredError ? 'error' : structuredSuccess ? 'ok' : 'unknown',
+          output: output,
         });
 
         if (callId) {
@@ -1791,6 +1856,7 @@ function parseAnthropicMessageJsonl(filePath: string, agent: 'cursor' | 'droid')
           agent,
           timestamp,
           tool: toolName,
+          callId: typeof block.id === 'string' ? block.id : undefined,
           args: toolInput,
           path: toolInput.file_path || toolInput.path || undefined,
           command: (toolName === 'Bash' || toolName === 'Execute' || toolName === 'Shell') ? toolInput.command : undefined,
@@ -1806,11 +1872,14 @@ function parseAnthropicMessageJsonl(filePath: string, agent: 'cursor' | 'droid')
             : '';
 
         if (isError) {
-          events.push({ type: 'error', agent, timestamp, tool: toolInfo?.tool, content: output || 'Tool execution failed' });
+          events.push({
+            type: 'error', agent, timestamp, tool: toolInfo?.tool,
+            callId: toolId, outcome: 'error', content: output || 'Tool execution failed',
+          });
         } else {
           events.push({
-            type: 'tool_result', agent, timestamp, tool: toolInfo?.tool, success: true,
-            output,
+            type: 'tool_result', agent, timestamp, tool: toolInfo?.tool, callId: toolId, success: true,
+            output: output,
           });
         }
         if (toolId) toolUseMap.delete(toolId);

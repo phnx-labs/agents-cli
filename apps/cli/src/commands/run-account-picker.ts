@@ -51,6 +51,7 @@ function disabledReason(candidate: RotateCandidate): string | undefined {
   const readiness = readinessFromCandidate(candidate);
   if (readiness.ready) return undefined;
   if (readiness.reason === 'signed_out') return 'logged out';
+  if (readiness.reason === 'revoked') return 'needs re-login';
   if (readiness.reason === 'out_of_credits') return 'out of credits';
 
   const windows = candidate.usageSnapshot?.windows ?? [];

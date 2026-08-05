@@ -5,6 +5,7 @@ import * as os from 'os';
 import { execFileSync } from 'child_process';
 
 import { deduplicateVersionHookCommands, registerHooksToSettings, selectHookManifest, unmanagedHookNames, computeCodexHookTrustHash, toPortableCommand, pruneVersionHomeHookEntriesFromSettings } from '../hooks.js';
+import { getHookShimPath } from '../hooks/cache.js';
 import * as TOML from 'smol-toml';
 import * as yaml from 'yaml';
 import { CODEX_HOOKS_MIN_VERSION } from '../agents.js';
@@ -120,7 +121,7 @@ describe('registerHooksToSettings - Codex', () => {
 
   it('writes PreToolUse hook with matcher field', () => {
     const versionHome = makeVersionHome();
-    const scriptPath = makeScript('bash-tool-hook.sh');
+    makeScript('bash-tool-hook.sh');
 
     const manifest: Record<string, ManifestHook> = {
       'bash-hook': {
@@ -141,7 +142,9 @@ describe('registerHooksToSettings - Codex', () => {
     const groups = hooksJson.hooks.PreToolUse;
     expect(groups).toHaveLength(1);
     expect(groups[0].matcher).toBe('Bash');
-    expect(resolvedCommand(groups[0].hooks[0].command)).toBe(toPosix(scriptPath));
+    // Matcher-only hook (no cache/matches) — resolves through the generated
+    // pass-through-timing shim (resolveHookCommand), not the raw script path.
+    expect(resolvedCommand(groups[0].hooks[0].command)).toBe(resolvedCommand(getHookShimPath('bash-hook')));
   });
 
   it('writes [features] hooks = true to config.toml', () => {
@@ -314,7 +317,7 @@ describe('registerHooksToSettings - Codex', () => {
       },
     }, null, 2));
 
-    const scriptPath = makeScript('git-guard.sh');
+    makeScript('git-guard.sh');
     const manifest: Record<string, ManifestHook> = {
       'git-guard': {
         script: 'git-guard.sh',
@@ -332,7 +335,9 @@ describe('registerHooksToSettings - Codex', () => {
     expect(commands).not.toContain(oldVersionHook.command);
     expect(commands).toContain(currentVersionHook.command);
     expect(commands).toContain(customHook.command);
-    expect(commands.map((c: string) => resolvedCommand(c))).toContain(toPosix(scriptPath));
+    // git-guard is matcher-only (no cache/matches) — the freshly resolved
+    // command is the generated pass-through-timing shim, not the raw script.
+    expect(commands.map((c: string) => resolvedCommand(c))).toContain(resolvedCommand(getHookShimPath('git-guard')));
   });
 
   it('ignores the deprecated agents: field — capability table decides registration', () => {
@@ -1813,7 +1818,7 @@ describe('registerHooksToSettings - Claude', () => {
       }, null, 2)
     );
 
-    const scriptPath = makeScript('pre-tool.sh');
+    makeScript('pre-tool.sh');
     const manifest: Record<string, ManifestHook> = {
       'pre-tool': { script: 'pre-tool.sh', events: ['PreToolUse'], matcher: 'Bash' },
     };
@@ -1835,7 +1840,9 @@ describe('registerHooksToSettings - Claude', () => {
     expect(settings.hooks.PreToolUse).toHaveLength(1);
     expect(settings.hooks.PreToolUse[0].matcher).toBe('Bash');
     expect(settings.hooks.PreToolUse[0].hooks).toHaveLength(1);
-    expect(resolvedCommand(settings.hooks.PreToolUse[0].hooks[0].command)).toBe(toPosix(scriptPath));
+    // Matcher-only hook (no cache/matches) — resolves through the generated
+    // pass-through-timing shim (resolveHookCommand), not the raw script path.
+    expect(resolvedCommand(settings.hooks.PreToolUse[0].hooks[0].command)).toBe(resolvedCommand(getHookShimPath('pre-tool')));
     expect(settings.hooks.PreToolUse[0].hooks[0].type).toBe('command');
   });
 
@@ -1897,7 +1904,7 @@ describe('registerHooksToSettings - Droid', () => {
 
   it('writes Claude-shaped matcher groups into .factory/settings.json', () => {
     const versionHome = makeDroidVersionHome();
-    const scriptPath = makeScript('pre-tool.sh');
+    makeScript('pre-tool.sh');
 
     const manifest: Record<string, ManifestHook> = {
       'pre-tool': { script: 'pre-tool.sh', events: ['PreToolUse'], matcher: 'Bash', timeout: 45 },
@@ -1913,7 +1920,9 @@ describe('registerHooksToSettings - Droid', () => {
     expect(settings.hooks.PreToolUse[0].hooks).toHaveLength(1);
     expect(settings.hooks.PreToolUse[0].hooks[0].type).toBe('command');
     expect(settings.hooks.PreToolUse[0].hooks[0].timeout).toBe(45);
-    expect(resolvedCommand(settings.hooks.PreToolUse[0].hooks[0].command)).toBe(toPosix(scriptPath));
+    // Matcher-only hook (no cache/matches) — resolves through the generated
+    // pass-through-timing shim (resolveHookCommand), not the raw script path.
+    expect(resolvedCommand(settings.hooks.PreToolUse[0].hooks[0].command)).toBe(resolvedCommand(getHookShimPath('pre-tool')));
   });
 
   it('registers the events droid supports natively (SessionStart, UserPromptSubmit, Stop)', () => {

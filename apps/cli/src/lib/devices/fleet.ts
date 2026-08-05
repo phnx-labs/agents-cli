@@ -10,6 +10,7 @@
 
 import { spawnSync } from 'child_process';
 import { isControlDevice, type DeviceProfile, type DeviceRegistry } from './registry.js';
+import { isSelfHost } from './self-host.js';
 import { buildSshInvocation, sshTargetFor, writeAskpassShim } from './connect.js';
 import type { DeviceStats } from './health.js';
 
@@ -86,7 +87,11 @@ export function planFleetTargets(reg: DeviceRegistry): FleetTarget[] {
  * surface — so their `skip` reason still flows through as an `unreachable` row.
  */
 export function remoteFleetTargets(planned: FleetTarget[], self: string): FleetTarget[] {
-  return planned.filter((t) => t.device.name !== self && t.skip !== 'control');
+  // Exclude self by name AND by full identity (tailscale dnsName, loopback): a
+  // device referenced by its dnsName slipped past the bare name check and got a
+  // remote version+doctor dial back to THIS box, which orphaned on timeout and
+  // piled up (RUSH-2114). `isSelfHost` matches every alias the box answers to.
+  return planned.filter((t) => t.device.name !== self && !isSelfHost(t.device.name) && t.skip !== 'control');
 }
 
 /**
@@ -254,7 +259,7 @@ export function runFleet(
       continue;
     }
     try {
-      const isSelf = opts.self !== undefined && t.device.name === opts.self;
+      const isSelf = (opts.self !== undefined && t.device.name === opts.self) || isSelfHost(t.device.name);
       const res = isSelf ? localRunner(cmd) : runner(t.device, cmd);
       const ok = res.code === 0;
       const detail = (res.stderr || res.stdout).trim().slice(0, 200);

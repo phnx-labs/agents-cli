@@ -724,25 +724,16 @@ Examples:
 A hook whose p99 exceeds --warn-ms gets flagged in the cache column. Add
 'cache: 5m' or 'cache: 5m-bg' to its hooks.yaml entry to fix it.
 `)
-    .action(async (options: { days: string; warnMs: string; json?: boolean }) => {
-      const { aggregateHookProfile, loadHookFireEvents, formatMs, formatCacheColumn, DEFAULT_SLOW_HOOK_WARN_MS } = await import('../lib/hooks/profile.js');
-      const { aggregateSamples } = await import('../lib/perf/db.js');
+    .option('--project <key>', 'Scope to one project (see agents perf --help)')
+    .action(async (options: { days: string; warnMs: string; json?: boolean; project?: string }) => {
+      const { DEFAULT_SLOW_HOOK_WARN_MS } = await import('../lib/hooks/profile.js');
+      // Same rollup as `agents perf hooks` — this command predates the `perf`
+      // surface and is kept as a documented alias; delegate instead of
+      // duplicating the SQLite-vs-legacy-JSONL fallback and table rendering.
+      const { loadHookProfile, renderHookTable } = await import('./perf.js');
       const days = Math.max(1, parseInt(options.days, 10) || 7);
       const warnMs = Math.max(0, parseInt(options.warnMs, 10) || DEFAULT_SLOW_HOOK_WARN_MS);
-      // Prefer the indexed warehouse; fall back to legacy JSONL for pre-warehouse shims.
-      const fromDb = aggregateSamples({ days, kinds: ['hook.fire'] }).map((r) => ({
-        hook: r.label,
-        n: r.n,
-        p50Ms: r.p50Ms,
-        p99Ms: r.p99Ms,
-        meanMs: r.meanMs,
-        maxMs: r.maxMs,
-        cacheHitPct: r.cacheHitPct ?? 0,
-        cacheStalePct: r.cacheStalePct ?? 0,
-        cacheMissPct: r.cacheMissPct ?? 0,
-        errorCount: r.errorCount ?? 0,
-      }));
-      const rows = fromDb.length > 0 ? fromDb : aggregateHookProfile(loadHookFireEvents(days));
+      const rows = loadHookProfile(days, options.project);
 
       if (options.json) {
         console.log(JSON.stringify(rows, null, 2));
@@ -751,37 +742,10 @@ A hook whose p99 exceeds --warn-ms gets flagged in the cache column. Add
 
       if (rows.length === 0) {
         console.log(chalk.gray(`No hook.fire samples in the last ${days} day${days === 1 ? '' : 's'}.`));
-        console.log(chalk.gray('Add \'cache: 5m\' to a hook (or matches:) so a shim instruments it, then resync.'));
+        console.log(chalk.gray('Every hook now instruments via a generated shim (cache:, matches:, or a bare matcher:) — resync hooks if this is unexpectedly empty.'));
         return;
       }
 
-      const widths = { hook: 36, n: 5, p50: 7, p99: 7, mean: 7, max: 7, cache: 30 };
-      const pad = (s: string, w: number) => (s.length >= w ? s.slice(0, w) : s + ' '.repeat(w - s.length));
-      const header = [
-        pad('HOOK', widths.hook),
-        pad('N', widths.n),
-        pad('P50', widths.p50),
-        pad('P99', widths.p99),
-        pad('MEAN', widths.mean),
-        pad('MAX', widths.max),
-        pad('CACHE', widths.cache),
-      ].join(' ');
-      console.log(chalk.bold(header));
-      console.log(chalk.gray('─'.repeat(header.length)));
-      for (const r of rows) {
-        const slow = r.p99Ms > warnMs;
-        const cacheCol = formatCacheColumn(r);
-        const warning = slow && r.cacheHitPct + r.cacheStalePct === 0 ? '  ← add cache: 5m' : '';
-        const line = [
-          pad(r.hook, widths.hook),
-          pad(String(r.n), widths.n),
-          pad(formatMs(r.p50Ms), widths.p50),
-          pad(formatMs(r.p99Ms), widths.p99),
-          pad(formatMs(r.meanMs), widths.mean),
-          pad(formatMs(r.maxMs), widths.max),
-          pad(cacheCol, widths.cache),
-        ].join(' ') + warning;
-        console.log(slow ? chalk.yellow(line) : line);
-      }
+      renderHookTable(rows, warnMs);
     });
 }

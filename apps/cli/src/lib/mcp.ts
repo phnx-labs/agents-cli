@@ -700,6 +700,7 @@ function writeMcpConfigSupportsAgent(agentId: AgentId): boolean {
     case 'grok':
     case 'opencode':
     case 'hermes':
+    case 'pi':
       return true;
     default:
       return false;
@@ -728,7 +729,11 @@ export function writeMcpConfig(
     case 'claude':
     case 'cursor':
     case 'kimi':
-    case 'droid': {
+    case 'droid':
+    // omp reads the same Claude `{ "mcpServers": {...} }` schema from .mcp.json
+    // (stdio: command/args/env; http/sse: url/headers — transport inferred from
+    // command/url presence).
+    case 'pi': {
       let config: Record<string, unknown> = {};
       if (fs.existsSync(configPath)) {
         try {

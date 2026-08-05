@@ -128,6 +128,36 @@ password from a Keychain bundle via an askpass shim. `agents devices render --wr
 emits a `~/.ssh/config.d/agents` include so plain `ssh`/`scp`/`rsync` resolve the
 same logical names.
 
+**Per-device and fleet-wide settings** live in the same two-tier agents.yaml
+store as version pins. `agents devices configure <name>` sets device-scope keys
+(`--max-agents`, `--scheduler on|off`) and `agents devices
+note <name> "…"` appends free-form operator notes — both land under `config:` in
+`~/.agents/devices/<name>/agents.yaml`, so they are per-machine by default and
+can be written for a peer from any box (the `devices/` tree syncs, each machine
+reads only its own). `agents devices set-interactive <name>` sets the one
+user-scope key, `config.interactiveHost` in the *central* agents.yaml: the
+device agents show YOU artifacts on (browser opens, dashboards), so skills stop
+guessing "the online macOS box". The interactive host is marked `★ interactive`
+in `agents devices list`; `list --json` carries each row's `config` and an
+`interactive` flag. The default browser profile is likewise device-local config
+(`browser.profile` → `agents browser profiles set-default`). Unset keys always
+mean today's behavior. The key registry is `src/lib/device-config.ts`.
+
+The keys are consumed, not just stored. `scheduler.enabled=false` keeps the
+routines scheduler from starting on that device — `routines add` skips the
+auto-start with the reason, `routines start` refuses, and a running daemon
+re-evaluates the gate on every SIGHUP reload, so flipping the key never needs a
+daemon restart. `agents.max-concurrent` feeds host ranking, and what counts
+toward it depends on the consumer: Factory auto-launch counts device-wide
+running agents, while teams placement counts the team's own roster on the
+device (local teammates included); a capped device is excluded from auto-pick
+with a stated reason, and an all-capped pool fails loud. Setup asks instead of
+guessing: bare `agents setup` ends with a skippable preferences step (which
+machine you sit at → `interactive.host`; which browser agents drive here →
+`browser.profile`), `agents setup fleet` offers the interactive host after a
+sync, and `agents setup browser` highlights the auto-detect winner in its
+picker.
+
 **Hosts** — machines you dispatch agent work to. `agents hosts add` enrolls a
 target either from an existing `~/.ssh/config` stanza (connection details stay in
 ssh config; agents-cli stores only a caps/os overlay) or *inline* (with its own
@@ -163,6 +193,39 @@ ps`), and routines placement (`agents routines add … --run-on <name>`). See
 [hosts.md](hosts.md) for the `--host` execution model and the option-forwarding
 contract.
 
+## Placement
+
+**One question, one object:** *where does the agent body run?*
+
+```yaml
+where:
+  kind: local | device | fleet | cloud | lease
+  target: yosemite-s0 | auto | hetzner   # optional
+```
+
+The CLI still accepts the historical flags; they all map onto this shape
+(`src/lib/placement.ts`). Prefer **`--where`** on `agents run` when you want
+one door:
+
+| Intent | Placement | Flag / path (aliases still work) |
+|---|---|---|
+| This machine | `kind: local` | (default) · `--where local` |
+| Named fleet / host box | `kind: device, target: <name>` | `--where device:<name>` · `--host` / `--device` |
+| Affinity pick (14d usage) | `kind: device, target: auto` | `--where auto` · `--device auto` |
+| Disposable crabbox | `kind: lease` | `--where lease` · `--lease` |
+| Warm crabbox reuse | `kind: lease, target: <slug>` | `--box <slug>` |
+| Routines: body on one box | `kind: device` | `--run-on <name>` · `--placement host` |
+| Routines: pick any online | `kind: fleet` | `--placement fleet` |
+| Vendor cloud task | `kind: cloud` | `agents cloud run …` |
+
+**Owner is not placement.** On monitors, `--device` pins who *evaluates and
+fires* (exactly-once owner). `--run-on` is where the *action body* runs. Same
+word `--device`, opposite jobs — always say "owner" vs "body placement" in
+docs and help.
+
+Mixing doors fails loud (`--where` + `--host`, `--host` + `--lease`, …). Source
+of truth: [`src/lib/placement.ts`](../src/lib/placement.ts).
+
 ---
 
 ## Capability matrix
@@ -186,6 +249,17 @@ contract.
 | Kimi | yes | yes | yes | yes | no | yes | yes | `AGENTS.md` | yes |
 | Droid | yes | yes | >= 0.57.5 | >= 0.26.0 | yes | yes | yes | `AGENTS.md` | no |
 | Hermes | no | yes | yes | yes | no | yes | no | `MEMORY.md` | no |
+| Pi (Oh My Pi) | no | yes | no | yes | yes | no | yes | `AGENTS.md` | no |
+
+Pi (`omp`) is Claude-compatible — it natively reads `.claude/commands`, `.mcp.json`, and
+Claude-shaped subagents, and keeps its own native resources under `~/.omp/agent/`
+(skills, commands, `agents/`, the `AGENTS.md` context file, and `.mcp.json`). Its MCP
+covers stdio + http + headers. Hooks are off (omp hooks are per-tool JS/TS extension
+modules, not event→shell-command registrations); allowlist is off (approval is per-TOOL
+only via `tools.approval`, no command/path patterns); plugins are off (npm/TS modules, not
+the Claude marketplace manifest). Its cross-provider model catalog (OpenRouter, OpenAI,
+Anthropic, xAI, DeepSeek, …) surfaces in `agents view` / `agents models pi` via
+`omp models --json`.
 
 **Gemini is hard-deprecated.** Google retired the Gemini CLI for free/Pro/Ultra
 tiers on June 18, 2026 (announced at Google I/O 2026); Antigravity CLI

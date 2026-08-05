@@ -22,6 +22,7 @@ import { followHostTask } from './progress.js';
 import { wrapHostCommandWithCredentials, type HostCredentials } from './credentials.js';
 import { hostKeyCheckingOpts } from '../devices/known-hosts.js';
 import { toRemotePortable } from '../project-root.js';
+import { RUN_AUTO_KEYWORD, RUN_AUTO_HOST_RESOLVED_ENV } from '../types.js';
 
 // Use $HOME (not ~) so the path is correct whether or not it's quoted and
 // regardless of the run's cwd. Task ids are 8 hex chars, so these paths are
@@ -96,6 +97,23 @@ export function remoteCdPrefix(remoteCwd?: string, opts: { mirror?: boolean } = 
  */
 export function withActorEnv(env?: Record<string, string>): Record<string, string> {
   return { ...actorEnv(resolveActor()), ...terminalIdEnv(), ...(env ?? {}) };
+}
+
+/**
+ * The shell-export prelude prepended to EVERY remote `agents run` dispatch —
+ * actor provenance plus, for a `run auto` dispatch, the chain-hop guard
+ * (RUN_AUTO_HOST_RESOLVED_ENV): this dispatch already IS the affinity pick, so
+ * the remote CLI must not re-run host affinity and hop to a third host. The
+ * guard MUST be a shell export (landing in the remote CLI's own process.env,
+ * which `runAutoDefaultsToAffinity` reads) — a forwarded `--env` flag would
+ * only reach the spawned agent's env and the remote `run auto` would re-pick.
+ * Shared by the interactive (runInteractiveOnHost) and detached
+ * (launchDetached) paths so both behave identically.
+ */
+export function remoteRunShellPrelude(agent: string): string {
+  const guard: Record<string, string> = agent === RUN_AUTO_KEYWORD ? { [RUN_AUTO_HOST_RESOLVED_ENV]: '1' } : {};
+  const exports = posixEnvExports(withActorEnv(guard));
+  return exports ? `${exports}; ` : '';
 }
 
 /**
@@ -277,11 +295,11 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
 
   // Inner command run under a login shell so PATH resolves `agents`. Export the
   // resolved actor provenance first so the detached remote run inherits it
-  // instead of re-resolving from this box's SSH_CONNECTION (RUSH-2028).
+  // instead of re-resolving from this box's SSH_CONNECTION (RUSH-2028); a
+  // `run auto` dispatch also gets the chain-hop guard (remoteRunShellPrelude).
   const invocation = ['agents', ...opts.forwardedArgs].map(shellQuote).join(' ');
   const cwd = remoteCdPrefix(opts.remoteCwd, { mirror: opts.mirrorCwd });
-  const actorExports = posixEnvExports(withActorEnv());
-  const prelude = actorExports ? `${actorExports}; ` : '';
+  const prelude = remoteRunShellPrelude(opts.agentLabel);
   let inner = `${prelude}${cwd}${invocation} > ${remoteLog} 2>&1; echo $? > ${remoteExit}`;
   if (opts.copyCreds) {
     inner = wrapHostCommandWithCredentials(inner, opts.copyCreds);
@@ -550,9 +568,9 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   const invocation = ['agents', ...buildInteractiveRunForwardedArgs(opts)].map(shellQuote).join(' ');
   const cwd = remoteCdPrefix(opts.remoteCwd, { mirror: opts.mirrorCwd });
   // Forward actor provenance so the interactive remote run inherits it rather
-  // than re-resolving from this box's SSH_CONNECTION (RUSH-2028).
-  const actorExports = posixEnvExports(withActorEnv());
-  const prelude = actorExports ? `${actorExports}; ` : '';
+  // than re-resolving from this box's SSH_CONNECTION (RUSH-2028); a `run auto`
+  // dispatch also gets the chain-hop guard (remoteRunShellPrelude).
+  const prelude = remoteRunShellPrelude(opts.agent);
   let remoteCmd = `${prelude}${cwd}${invocation}`;
   if (opts.copyCreds) {
     remoteCmd = wrapHostCommandWithCredentials(remoteCmd, opts.copyCreds);

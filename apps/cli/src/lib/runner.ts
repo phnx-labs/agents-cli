@@ -23,6 +23,8 @@ import {
   resolveJobPrompt,
   parseTimeout,
   writeRunMeta,
+  listRuns,
+  getJobRunsDir,
   getRunDir,
   jobRunsOnThisDevice,
   checkJobDeviceEligibility,
@@ -49,7 +51,9 @@ import { resolveActor } from './actor.js';
 import type { LoopDeps } from './loop.js';
 import { loadTask as loadHostTask } from './hosts/tasks.js';
 import { reconcileTask as reconcileHostTask } from './hosts/reconcile.js';
-import { backgroundSpawnOptions } from './platform/process.js';
+import { backgroundSpawnOptions, killTree } from './platform/process.js';
+import lockfile from 'proper-lockfile';
+import { ensureLockTarget } from './fs-atomic.js';
 import { walkForFiles } from './fs-walk.js';
 import { getBinaryPath, isVersionInstalled, resolveVersion } from './versions.js';
 import {
@@ -58,6 +62,8 @@ import {
   resolveAccountVersion,
   rotationFailoverChain,
   readinessFromCandidate,
+  formatNoHealthyAccountError,
+  type RotateCandidate,
   type RotateResult,
 } from './rotate.js';
 import { readAuthHealth, isDeadVerdict } from './auth-health.js';
@@ -69,6 +75,64 @@ import { expandLocalHome, getProjectRoot } from './project-root.js';
 export interface RunResult {
   meta: RunMeta;
   reportPath: string | null;
+}
+
+export class RoutineAlreadyRunningError extends Error {
+  constructor(jobName: string, runId: string) {
+    super(`Routine '${jobName}' already has a running execution (${runId})`);
+    this.name = 'RoutineAlreadyRunningError';
+  }
+}
+
+const ROUTINE_LAUNCH_LOCK_STALE_MS = 30_000;
+const ROUTINE_LAUNCH_LOCK_WAIT_MS = 10_000;
+
+function activeRoutineRun(config: Pick<JobConfig, 'name' | 'timeout'>): RunMeta | null {
+  const timeoutMs = parseTimeout(config.timeout) || 10 * 60 * 1000;
+  const now = Date.now();
+  const runs = listRuns(config.name);
+  for (let i = runs.length - 1; i >= 0; i--) {
+    const run = runs[i];
+    if (run.status !== 'running') continue;
+    if (run.pid && isPidOurs(run.pid, run.spawnedAt)) return run;
+    if (!run.pid) {
+      const startedAt = Date.parse(run.startedAt);
+      if (Number.isFinite(startedAt) && now - startedAt < (run.timeoutMs ?? timeoutMs)) return run;
+    }
+  }
+  return null;
+}
+
+async function withRoutineLaunchClaim<T>(config: JobConfig, launch: () => Promise<T>): Promise<T> {
+  const target = path.join(getJobRunsDir(config.name), '.launch-claim');
+  ensureLockTarget(target, '', 0o700);
+  const release = await lockfile.lock(target, {
+    stale: ROUTINE_LAUNCH_LOCK_STALE_MS,
+    retries: {
+      retries: Math.ceil(ROUTINE_LAUNCH_LOCK_WAIT_MS / 100),
+      factor: 1,
+      minTimeout: 100,
+      maxTimeout: 100,
+    },
+  });
+  try {
+    const active = activeRoutineRun(config);
+    if (active) throw new RoutineAlreadyRunningError(config.name, active.runId);
+    return await launch();
+  } finally {
+    await release();
+  }
+}
+
+function terminateRoutineTree(pid: number | null): void {
+  if (!pid) return;
+  if (process.platform === 'win32') {
+    killTree(pid);
+    return;
+  }
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch { /* already exited */ }
 }
 
 /** CLI command templates per agent, with {prompt} as a placeholder. */
@@ -85,10 +149,35 @@ const AGENT_COMMANDS: Record<string, string[]> = {
  * so the `--agent` help and any validation can never drift from it. */
 export const ROUTINE_AGENT_IDS = Object.freeze(Object.keys(AGENT_COMMANDS));
 
+/**
+ * Where each agent's transcript files live under an overlay HOME, mirroring
+ * `SESSION_ROOT_SPECS` (session/discover.ts) — the CLI's own source of truth
+ * for which on-disk trees hold live session files. Kept in this shape (not a
+ * shared import) because `archiveRoutineTranscripts` only needs a flat
+ * root+ext pair to `walkForFiles`, not the version-home/backup fan-out
+ * `getAgentSessionDirs` does for live discovery.
+ *
+ * `opencode` is deliberately absent: `SESSION_ROOT_SPECS` itself has no entry
+ * for it — its transcripts live in one incrementally-scanned SQLite db
+ * (`scanOpenCodeIncremental`), not a per-session file tree — so there is
+ * nothing here to mirror without inventing a new discovery path.
+ */
 const ROUTINE_TRANSCRIPT_SPECS: Partial<Record<AgentId, Array<{ root: string[]; ext: string }>>> = {
   claude: [{ root: ['.claude', 'projects'], ext: '.jsonl' }],
   codex: [{ root: ['.codex', 'sessions'], ext: '.jsonl' }],
   cursor: [{ root: ['.cursor', 'projects'], ext: '.jsonl' }],
+  gemini: [{ root: ['.gemini', 'tmp'], ext: '.json' }],
+  antigravity: [{ root: ['.gemini', 'antigravity-cli', 'conversations'], ext: '.db' }],
+  droid: [{ root: ['.factory', 'sessions'], ext: '.jsonl' }],
+  // Kimi splits a session across two files (session/discover.ts:4382-4384):
+  // state.json (title/timestamps) and agents/main/wire.jsonl (the actual
+  // conversation). Both extensions are needed — .json alone archives only
+  // the metadata shell and silently drops every message.
+  kimi: [
+    { root: ['.kimi-code', 'sessions'], ext: '.json' },
+    { root: ['.kimi-code', 'sessions'], ext: '.jsonl' },
+  ],
+  grok: [{ root: ['.grok', 'sessions'], ext: '.json' }],
 };
 
 /** Stable working directory for routine children, independent of the daemon's launch cwd. */
@@ -370,6 +459,7 @@ export interface RoutineLaunchPlan {
 export async function resolveRoutineLaunch(
   config: JobConfig,
   cwd: string = process.cwd(),
+  deps: { resolveRunVersion?: typeof resolveRunVersion } = {},
 ): Promise<RoutineLaunchPlan> {
   if (config.workflow) {
     return { chain: [], rotation: null, pinned: false };
@@ -411,10 +501,12 @@ export async function resolveRoutineLaunch(
   const strategy = getConfiguredRunStrategy(agent, cwd);
   let version: string | undefined;
   let rotation: RotateResult | null = null;
+  let exhausted: RotateCandidate[] | undefined;
   try {
-    const resolved = await resolveRunVersion(agent, strategy, cwd);
+    const resolved = await (deps.resolveRunVersion ?? resolveRunVersion)(agent, strategy, cwd);
     version = resolved.version ?? undefined;
     rotation = resolved.rotation;
+    exhausted = resolved.exhausted;
     if (rotation) {
       const label = rotation.picked.email
         ? `${rotation.picked.email} · ${agent}@${rotation.picked.version}`
@@ -435,7 +527,7 @@ export async function resolveRoutineLaunch(
           `[agents] routine ${config.name}: skipped ${reasons}\n`,
         );
       }
-    } else if (!version) {
+    } else if (!version && !exhausted) {
       process.stderr.write(
         `[agents] routine ${config.name}: strategy ${strategy} found no usable ${agent} version; ` +
           `falling back to default pin\n`,
@@ -445,6 +537,14 @@ export async function resolveRoutineLaunch(
     process.stderr.write(
       `[agents] routine ${config.name}: strategy ${strategy} skipped: ${(err as Error).message}\n`,
     );
+  }
+
+  // Zero healthy accounts is NOT a "fall back to the default pin" case — that
+  // pin is exactly the exhausted account an unattended routine would hammer
+  // every tick (RUSH-2132). Throwing fails the job run (nonzero), and the
+  // message text is the contract the Factory watchdog tail-detects.
+  if (exhausted) {
+    throw new Error(formatNoHealthyAccountError(agent, strategy, exhausted));
   }
 
   if (!version) {
@@ -1235,6 +1335,10 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
     process.stderr.write(`[agents] daemon: skipping '${config.name}' — ${eligibility.message}\n`);
     throw new Error(eligibility.message);
   }
+  return withRoutineLaunchClaim(config, () => executeJobDetachedClaimed(config, hooks));
+}
+
+async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks): Promise<RunMeta> {
   // Placement (hostStrategy / bare host:) — dispatch off-box and return; the
   // monitor finalizes host: runs, cloud runs stay terminal when dispatch ends.
   // Either way the in-process onFinish hook does not fire for off-box routines
@@ -1265,6 +1369,15 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
   // wait); the next schedule tick re-selects if this attempt still fails.
   const launch = await resolveRoutineLaunch(config);
   const version = launch.chain[0]?.version ?? config.version;
+
+  const timer = createTimer('agent.run', {
+    agent: config.agent,
+    version,
+    jobName: config.name,
+    mode: config.mode,
+    ...redactPrompt(config.prompt),
+    schedule: config.schedule,
+  });
 
   const resolvedPrompt = resolveJobPrompt(config);
   let cmd = buildJobCommand(config, resolvedPrompt);
@@ -1313,6 +1426,7 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
     ...(config.workflow ? { workflow: config.workflow } : {}),
     pid: null,
     spawnedAt: Date.now(),
+    timeoutMs: parseTimeout(config.timeout) || 10 * 60 * 1000,
     status: 'running',
     startedAt: new Date().toISOString(),
     completedAt: null,
@@ -1337,6 +1451,7 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
       finalizeRunMeta(meta, 'failed', 1, { errorMessage: reason });
       writeRunMeta(meta);
       archiveRoutineTranscripts(meta, runDir, overlayHome);
+      timer.end({ status: 'failed', exitCode: 1, runId, error: reason });
       return meta;
     }
   }
@@ -1348,9 +1463,11 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
   });
 
   let settled = false;
+  let timeoutTimer: NodeJS.Timeout | undefined;
   const settle = (status: RunMeta['status'], exitCode: number | null, errorMessage?: string) => {
     if (settled) return;
     settled = true;
+    if (timeoutTimer) clearTimeout(timeoutTimer);
     finalizeRunMeta(meta, status, exitCode, errorMessage ? { errorMessage } : undefined);
     writeRunMeta(meta);
     archiveRoutineTranscripts(meta, runDir, overlayHome);
@@ -1358,10 +1475,16 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
     // the login error, which would poison the next run's {last_report} prompt.
     const isAuthFailure = !!errorMessage && errorMessage.startsWith('auth_failed:');
     if (status !== 'timeout' && !isAuthFailure) extractAndSaveReport(stdoutPath, effectiveAgent, runDir);
+    timer.end({ status, exitCode: exitCode ?? undefined, runId, ...(errorMessage ? { error: errorMessage } : {}) });
     // Fire the finish/output notification AFTER the report is written so the hook
     // can read report.md (RUSH-2030). Best-effort; never breaks finalization.
     safeHook(hooks?.onFinish ? () => hooks.onFinish!(meta) : undefined);
   };
+
+  timeoutTimer = setTimeout(() => {
+    terminateRoutineTree(child.pid ?? null);
+    settle('timeout', null, 'exceeded configured timeout');
+  }, meta.timeoutMs);
 
   child.on('exit', (code) => {
     let logText = '';
@@ -1394,7 +1517,7 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
   meta.pid = child.pid || null;
   writeRunMeta(meta);
 
-  return meta;
+  return { ...meta };
 }
 
 /**
@@ -1404,6 +1527,12 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
  * `monitorRunningJobs` reaps the record on the next tick.
  */
 function executeCommandJobDetached(config: JobConfig, hooks?: RoutineHooks): RunMeta {
+  const timer = createTimer('agent.run', {
+    jobName: config.name,
+    mode: config.mode,
+    schedule: config.schedule,
+  });
+
   const runId = generateRunId();
   const runDir = getRunDir(config.name, runId);
   fs.mkdirSync(runDir, { recursive: true });
@@ -1432,6 +1561,7 @@ function executeCommandJobDetached(config: JobConfig, hooks?: RoutineHooks): Run
     command: config.command,
     pid: null,
     spawnedAt: Date.now(),
+    timeoutMs: parseTimeout(config.timeout) || 10 * 60 * 1000,
     status: 'running',
     startedAt: new Date().toISOString(),
     completedAt: null,
@@ -1448,15 +1578,22 @@ function executeCommandJobDetached(config: JobConfig, hooks?: RoutineHooks): Run
   // fire-and-forget call, so the exit event fires here. (monitorRunningJobs no
   // longer force-fails command jobs; it reads exit-code only on the restart edge.)
   let settled = false;
-  const settle = (status: RunMeta['status'], exitCode: number, errorMessage?: string) => {
+  let timeoutTimer: NodeJS.Timeout | undefined;
+  const settle = (status: RunMeta['status'], exitCode: number | null, errorMessage?: string) => {
     if (settled) return;
     settled = true;
+    if (timeoutTimer) clearTimeout(timeoutTimer);
     finalizeRunMeta(meta, status, exitCode, errorMessage ? { errorMessage } : undefined);
     writeRunMeta(meta);
+    timer.end({ status, exitCode: exitCode ?? undefined, runId, ...(errorMessage ? { error: errorMessage } : {}) });
     // Finish notification (RUSH-2030). For command routines the threshold only
     // surfaces failures, decided in routine-notify.ts. Best-effort.
     safeHook(hooks?.onFinish ? () => hooks.onFinish!(meta) : undefined);
   };
+  timeoutTimer = setTimeout(() => {
+    terminateRoutineTree(child.pid ?? null);
+    settle('timeout', null, 'exceeded configured timeout');
+  }, meta.timeoutMs);
   child.on('exit', (code) => settle(code === 0 ? 'completed' : 'failed', code ?? 1));
   child.on('error', (err) => {
     settle('failed', 1, err.message);
@@ -1469,7 +1606,7 @@ function executeCommandJobDetached(config: JobConfig, hooks?: RoutineHooks): Run
   meta.pid = child.pid || null;
   writeRunMeta(meta);
 
-  return meta;
+  return { ...meta };
 }
 
 function extractAndSaveReport(
@@ -1665,8 +1802,10 @@ export function monitorRunningJobs(): void {
         const isCommandRun = Boolean(meta.command) || !meta.agent;
 
         const wallClockMs = Date.now() - Date.parse(meta.startedAt);
-        if (Number.isFinite(wallClockMs) && wallClockMs > MAX_WALL_CLOCK_MS) {
-          finalizeRunMeta(meta, 'timeout', null, { errorMessage: 'exceeded max wall clock' });
+        const timeoutMs = meta.timeoutMs ?? MAX_WALL_CLOCK_MS;
+        if (Number.isFinite(wallClockMs) && wallClockMs > timeoutMs) {
+          terminateRoutineTree(meta.pid);
+          finalizeRunMeta(meta, 'timeout', null, { errorMessage: 'exceeded configured timeout' });
           writeRunMeta(meta);
           if (!isCommandRun) {
             extractAndSaveReport(stdoutPath, meta.agent!, runDirPath);

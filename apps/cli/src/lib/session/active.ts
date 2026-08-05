@@ -120,6 +120,8 @@ export interface ActiveSession {
   pid?: number;
   sessionId?: string;
   cwd?: string;
+  /** Project/repo key derived from cwd, when known. */
+  project?: string | null;
   /** User-given name from /rename command. */
   label?: string;
   /** Durable `agents run --name` launch handle, when the run was named. */
@@ -337,6 +339,14 @@ export function activeStatusFromCloudStatus(status: CloudTaskStatus): ActiveStat
 export interface ActiveQueryOptions {
   /** Skip the `ps` scan for ad-hoc headless agents. */
   skipHeadless?: boolean;
+  /**
+   * A `--local` query: this machine only. Never dial a remote-host teammate
+   * (one dispatched via `agents teams add --device`) over ssh — report its
+   * last-persisted meta.json state instead of polling it. RUSH-2118: without
+   * this, `agents sessions --active --local` still fired one ssh round-trip
+   * per remote-host teammate (finished or not) on every call.
+   */
+  localOnly?: boolean;
 }
 
 const LIVE_TERMINALS_FILE = path.join(getTerminalsDir(), 'live-terminals.json');
@@ -985,9 +995,13 @@ export function summarizeMission(prompt: string | null | undefined): string | un
   return cleaned.length > 80 ? `${cleaned.slice(0, 79)}…` : cleaned;
 }
 
-/** Live teams teammates. Reuses AgentManager which already polls PIDs via `kill -0`. */
-export async function listTeamsActive(): Promise<ActiveSession[]> {
-  const mgr = new AgentManager();
+/**
+ * Live teams teammates. Reuses AgentManager which already polls PIDs via
+ * `kill -0`. `localOnly` (RUSH-2118) skips the ssh round-trip AgentManager
+ * would otherwise issue for every distributed (remote-host) teammate.
+ */
+export async function listTeamsActive(opts: { localOnly?: boolean } = {}): Promise<ActiveSession[]> {
+  const mgr = new AgentManager(undefined, undefined, undefined, undefined, undefined, opts.localOnly ?? false);
   const running = await mgr.listRunning();
   return running.map((a): ActiveSession => {
     // The teammate's OWN transcript is `remoteSessionId` (captured from its first
@@ -1751,7 +1765,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
 export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<ActiveSession[]> {
   const [tmuxAgents, teams, terminals, cloud] = await Promise.all([
     listTmuxAgentSessions().catch(() => [] as ActiveSession[]),
-    listTeamsActive().catch(() => [] as ActiveSession[]),
+    listTeamsActive({ localOnly: opts.localOnly }).catch(() => [] as ActiveSession[]),
     listTerminalsActive().catch(() => [] as ActiveSession[]),
     Promise.resolve(listCloudActive()),
   ]);

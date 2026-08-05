@@ -3,19 +3,22 @@
  * generated shims (see `cache.ts`) emit on every invocation, and aggregates
  * per-hook timing + cache stats.
  *
- * Only hooks declared with `cache:` get instrumented today, because only those
- * are wrapped by a generated shim. Hooks without `cache:` are not in the
- * profile output — that's deliberate: opting into the primitive is what
- * surfaces the data.
+ * Every hook gets a generated shim now (resolveHookCommand in hooks.ts) —
+ * `cache:`, `matches:`, or a bare `matcher:` (e.g. git-guard/rm-guard) are all
+ * enough to opt in. The only hooks NOT in this profile are ones with none of
+ * the three, since a pure lifecycle hook with nothing to gate/cache/match runs
+ * the raw script path with no timing wrapper at all.
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import { getLogsDir } from '../state.js';
+import { percentile } from '../percentile.js';
 
 export interface HookProfileRow {
   hook: string;
   n: number;
   p50Ms: number;
+  p95Ms: number;
   p99Ms: number;
   meanMs: number;
   maxMs: number;
@@ -23,6 +26,13 @@ export interface HookProfileRow {
   cacheStalePct: number;
   cacheMissPct: number;
   errorCount: number;
+  /** Fraction (0-1) of fires with a nonzero exit code. */
+  errorRate?: number;
+  /** Fraction (0-1) of fires that hit their configured timeout. */
+  timeoutRate?: number;
+  /** Project key the row is scoped to (see project-key.ts) — set only when
+   *  a `--project` filter narrowed the underlying query. */
+  project?: string;
 }
 
 interface RawFireEvent {
@@ -64,18 +74,6 @@ export function loadHookFireEvents(days = 7, logsDir: string = getLogsDir()): Ra
   return events;
 }
 
-/** Percentile of a sorted-ascending array. p in [0,100]. Linear interpolation. */
-function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
-  if (sorted.length === 1) return sorted[0];
-  const rank = (p / 100) * (sorted.length - 1);
-  const lo = Math.floor(rank);
-  const hi = Math.ceil(rank);
-  if (lo === hi) return sorted[lo];
-  const frac = rank - lo;
-  return sorted[lo] * (1 - frac) + sorted[hi] * frac;
-}
-
 /** Aggregate fire events into a per-hook profile, sorted by p99 desc. */
 export function aggregateHookProfile(events: RawFireEvent[]): HookProfileRow[] {
   const byHook = new Map<string, RawFireEvent[]>();
@@ -98,6 +96,7 @@ export function aggregateHookProfile(events: RawFireEvent[]): HookProfileRow[] {
       hook,
       n,
       p50Ms: Math.round(percentile(sortedMs, 50)),
+      p95Ms: Math.round(percentile(sortedMs, 95)),
       p99Ms: Math.round(percentile(sortedMs, 99)),
       meanMs: Math.round(sum / n),
       maxMs: sortedMs[sortedMs.length - 1],
@@ -105,6 +104,14 @@ export function aggregateHookProfile(events: RawFireEvent[]): HookProfileRow[] {
       cacheStalePct: Math.round((stale / n) * 100),
       cacheMissPct: Math.round((misses / n) * 100),
       errorCount: errors,
+      ...(errors > 0 ? { errorRate: Math.round((errors / n) * 1000) / 1000 } : {}),
+      // timeoutRate is not derivable here: the daily JSONL a shim writes only
+      // covers fires that reached their own trailing printf — an externally
+      // enforced timeout (the agent harness killing the process) never gets
+      // that far, so this log has no timeout signal at all. The warehouse
+      // path (asHookRows in commands/perf.ts) is the one that can see it,
+      // via the perf-spool `status:"timeout"` sample OpenCode's generated
+      // plugin writes directly (hooks.ts's recordTimeoutSample).
     });
   }
 

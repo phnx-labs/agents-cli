@@ -97,7 +97,7 @@ question, and a new health check goes in the one whose scope it matches.
 
 | Command | Scope | Answers |
 |---|---|---|
-| `agents fleet status` | Coarse **device** health across the fleet | Are devices online, do they have the agent CLIs installed, are they signed in, what is the agents-cli **version skew**. NOT fine-grained resource divergence. |
+| `agents fleet status` | Coarse **device** health across the fleet | Are devices online, do they have the agent CLIs installed, are they signed in, what is the agents-cli **version skew**, how many agents are running on each box. NOT fine-grained resource divergence. Publish-own/read-union: each daemon publishes only its own row (no N² ssh probe, RUSH-2061); the reader unions peers on demand (`--local --json` is the per-host publish endpoint). |
 | `agents inspect <agent>[@version]` | Deep **single-harness** diagnosis | Per-resource diff between one version home and its resolved sources; manifest staleness; orphans. One harness, one machine. |
 | `agents doctor` | **Umbrella** — overall fleet + harness health | Local diagnostics (CLI presence, per-version sign-in, per-version sync, orphans) **and** cross-device divergence, rendered as the prioritized critical-at-top + per-computer hybrid below. The single command a user runs to discover problems before runtime. |
 
@@ -255,13 +255,14 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 | Goose | `goose` | ≥1.34 | ✓ | ✓ | ≥1.25 | — | ✓ | — | ✓ |
 | Droid | `droid` | ✓ | ✓ | ≥0.57.5 | ≥0.26 | ✓ | ✓ | ✓ | — |
 | Hermes | `hermes` | ≥0.11 | ✓ | — | ✓ | — | — | — | — |
+| Pi (Oh My Pi) | `pi` | — | ✓ | — | ✓ | ✓ | — | ✓ | — |
 
 ✓ = supported · — = not · version cell = only within that range (out-of-range =
 skipped silently). [`src/lib/agents.ts`](src/lib/agents.ts) is canonical — keep this
 snapshot in sync. `workflows` is `claude`/`kimi`/`goose`/`antigravity` (≥1.0.6, written to the
 shared HOME-global `~/.gemini/config/global_workflows/`, not a per-version home), `openclaw` (Lobster `.lobster` files under `.openclaw/workflows/`), and `grok` (≥0.2.111, native Rhai under `.grok/workflows/`); `mcp` is universal; `allowlist` is
 `claude`/`cursor`/`opencode`/`antigravity`/`grok`/`kimi`/`kiro`/`droid`/`goose`/`openclaw`/`copilot` (Copilot writes per-location approvals to `~/.copilot/permissions-config.json`; OpenClaw is tool-level only —
-blanket rules map to `~/.openclaw/openclaw.json` `tools.alsoAllow`/`tools.deny`, sub-command patterns skipped); `subagents` is `claude`/`codex`/`kiro`/`kimi`/`grok`/`openclaw`/`droid`/`copilot`/`antigravity`/`cursor` (≥2026.1.22).
+blanket rules map to `~/.openclaw/openclaw.json` `tools.alsoAllow`/`tools.deny`, sub-command patterns skipped); `subagents` is `claude`/`codex`/`kiro`/`kimi`/`grok`/`openclaw`/`droid`/`copilot`/`antigravity`/`cursor` (≥2026.1.22)/`pi`. **Pi (Oh My Pi, `omp`)** is Claude-compatible: it natively reads `.claude/commands`, `.mcp.json`, and Claude-shaped subagents, and keeps its own native resources under `~/.omp/agent/` (skills, commands, subagents `agents/`, `AGENTS.md` context, `.mcp.json`). `mcp` covers stdio + http + headers. `hooks`/`allowlist`/`plugins` are OFF: omp hooks are per-tool JS/TS extension modules (not event->shell-command registrations), approval is per-TOOL only (`tools.approval`, no command/path patterns), and plugins are npm/TS modules (not the Claude marketplace manifest). Its cross-provider model catalog (OpenRouter/OpenAI/Anthropic/xAI/DeepSeek/…) surfaces in `agents view` / `agents models pi` via `omp models --json`.
 **Gemini is hard-deprecated.** Keep the legacy `gemini` id only for parsing old
 sessions/config; `agents add gemini`, `agents import gemini`, and
 `agents sync gemini` fail and point users to Antigravity.
@@ -285,7 +286,7 @@ src/
     monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/10-monitors.md
     projects.ts        # `agents projects` — named multi-repo project defs (~/.agents/projects/*.yaml) layered above the --project convention (resolveProjectRef in project-root.ts); project-status.ts rolls live sessions + merged PRs + artifacts into the progress card. Beta-gated. See docs/11-projects.md
     migrate.ts         # One-shot idempotent migrations
-    session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer)
+    session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents sessions stats` + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger)
     terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux/Terminal.app, local or --host;
                        #   preferred.ts resolves WHICH terminal for a GUI caller (from live sessions' host app)
     cloud/             # Provider registry (Rush / Codex / Factory / Antigravity)
@@ -308,7 +309,7 @@ package's npm tarball; two more helpers are dev-only and live at repo-root `nati
 | Helper | Source | Ships in tarball? | Resolver |
 |---|---|---|---|
 | Keychain broker | `src/lib/secrets/keychain-helper.swift` → `bin/Agents CLI.app` | **Yes** (signed + notarized) | `src/lib/secrets/` |
-| Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **Yes** (signed, no notarization) | `src/lib/menubar/install-menubar.ts` |
+| Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **Yes** (signed + notarized) | `src/lib/menubar/install-menubar.ts` |
 | Standalone CLI binary | `src/` → `bun build --compile` → `bin/agents-macos` | **Yes** (signed + notarized, arm64 Mach-O at `dist/bin/agents`) | `scripts/postinstall.js` |
 | computer-mac | [`../../native/computer-mac`](../../native/computer-mac) | No — signed + notarized GitHub **release asset**, downloaded on demand | `src/lib/computer-rpc.ts`, `src/lib/computer/download.ts` |
 | computer-win | [`../../native/computer-win`](../../native/computer-win) | No (staged at release) | `src/lib/ssh-tunnel.ts` |
@@ -483,10 +484,19 @@ the helper only when `src/lib/secrets/keychain-helper.swift` changes.
 **Menu-bar helper** ([`menubar/`](menubar) → `bin/MenubarHelper.app`) ships the same
 way — built into `bin/`, copied to `dist/lib/menubar/` by `build`, gated in `prepack`
 by [`scripts/verify-menubar-helper.sh`](scripts/verify-menubar-helper.sh) (presence +
-`codesign --verify`). No notarization (a status item has no Keychain ACL / TCC
-grant). Keep it a **separate bundle** from the keychain app — a menu-bar crash must
-never take down the secret broker. Stage a freshly-built `bin/MenubarHelper.app`
-before any release or the menu bar ships code-only (the 1.20.22 bug the gate prevents).
+`codesign --verify` + a **stapled notarization ticket**). It is Developer-ID signed
+**and notarized + stapled** ([`menubar/scripts/build.sh`](menubar/scripts/build.sh),
+run inside the release's `agents secrets exec apple.com` context): Gatekeeper on
+macOS 26+ rejects an un-notarized `.app` as "damaged" (crashing AppKit at launch),
+and the stapled ticket rides inside the bundle so it survives npm's tarball
+round-trip — so the installed helper launches with **no per-machine re-signing**
+(the old `install-menubar.ts` ad-hoc re-sign band-aid is gone; the launch guards now
+verify Gatekeeper acceptance and fail loud instead — RUSH-2134). Notarization is
+mandatory for any real (Developer-ID) build; an ad-hoc dev build can't be notarized
+and the prepack gate refuses to pack it. Keep it a **separate bundle** from the
+keychain app — a menu-bar crash must never take down the secret broker. Stage a
+freshly-built `bin/MenubarHelper.app` before any release or the menu bar ships
+code-only (the 1.20.22 bug the gate prevents).
 
 **Exactly one status item is an invariant, enforced in the helper.** The bundle
 can be started from more than one place — launchd's `KeepAlive` service, a
@@ -502,6 +512,86 @@ process list cannot say which copy launchd will keep alive. On the CLI side,
 healthy `running: yes`. `agents menubar setup` is the recovery path — it ends
 every live helper and re-kickstarts the service so the survivor is always
 launchd's.
+
+**The lock fd is `O_CLOEXEC`, and `acquire` self-heals a stale lock.** The lock is
+opened `O_RDWR | O_CREAT | O_CLOEXEC` so no spawned child can inherit the
+descriptor — a pre-fix `doctor` child that inherited it and orphaned at PPID 1 held
+the flock forever, and every relaunch then read "already running" and exited, so
+the menu bar stayed dead until reboot. `O_CLOEXEC` is the fd-level guarantee across
+*every* spawn path: `ChildProcess.spawn` sets only `POSIX_SPAWN_SETPGROUP` (no
+close-on-exec default), and the bare-`Process` one-shots (`runDetached` /
+`runMonitored`) are meant to *outlive* the helper — so the flag on the fd, not the
+spawn site, is what keeps the lock out of every child. The helper never execs
+itself, so it keeps the fd for life. And when the flock is
+held but **no LIVE `MenubarHelper` owns it** — the lock-file pid is dead, or belongs
+to some other program by reuse (`liveHelperOwnsLock` checks liveness + `proc_pidpath`
+basename) — `acquire` reaps the leaked orphan and retries the lock once, instead of
+surfacing into the deadlock. Only a genuine live incumbent is ever surfaced, so a
+duplicate launch never reaps a live helper's in-flight children (the reap is reached
+only when the holder is provably not a live helper).
+
+**Every CLI child the helper spawns is bounded, group-killable, and reapable.**
+The helper shells `agents` on a timer, and an unbounded `Process` there is not a
+slow menu — it is a machine-killer. `doctor --json` measures **136s on an idle
+box**, the poll asked for it every 60s, and a helper that dies mid-call leaves the
+child reparented to launchd with nothing to reap it (plus the `node -e` probes
+that child forked). The deaths are not preventable from inside the app:
+`NSApplication.shared` segfaults in `SLSNewConnection` when WindowServer is too
+starved to hand out a connection, and `KeepAlive` restarts into another doctor.
+Observed: 38 orphaned doctors + 92 orphaned probes, ~13 of 18 cores, load 490.
+**The property that made this fatal is accumulation, so the rule is scoped to
+what accumulates: every TIMER-DRIVEN, repeating CLI call MUST go through
+[`ChildProcess`](menubar/Sources/MenubarHelper/ChildProcess.swift)** — that is the
+`capture()` path behind the cached refreshers (`routines`, `recentSessions`,
+`activeSessions`, `doctorOverview`, `watchdog`). A poller is the only thing that
+can stack 38 copies of itself.
+
+**User-initiated one-shots deliberately do NOT** — `runDetached`,
+`runMonitored`, and `runMonitoredWithInput` keep a bare `Process` on purpose,
+because every one of their callers is a menu click (`routines run/pause`,
+`devices register`, `open <url>`, and the ticket-agent / quick-fix dispatches).
+Two reasons, and both would be violated by "bound everything": a deadline there
+would **kill the user's headless `agents run` mid-work**, and a fire-and-forget
+`open`/dispatch is *supposed* to outlive the helper. One click cannot stack, so
+there is nothing to accumulate. Do not "fix" these by routing them through
+`ChildProcess` — if a future caller makes one of them repeating, that caller is
+the bug.
+
+`ChildProcess` holds three invariants:
+
+- **Bounded.** Every spawn carries a deadline (30s; `ChildProcess.doctorTimeout`
+  180s for `doctor --json`, above its real measured cost — a ceiling set *below*
+  the true cost just makes every poll fail while still paying full CPU).
+- **Killed as a group.** The child is spawned as its own process-group leader
+  (`POSIX_SPAWN_SETPGROUP`) so a timeout `kill(-pgid)`s the subtree. Signalling
+  the pid alone is what left 92 probes running. Foundation's `Process` cannot set
+  a process group — that is why this is `posix_spawn` and not `Process`.
+- **Reaped by the NEXT launch.** Live children are recorded in
+  `~/.agents/.cache/state/menubar-children`; `reapOrphansFromPreviousLaunch()`
+  runs in `main.swift` **before** the first AppKit call, since the crash being
+  recovered from happens *inside* that call. Do NOT move it after, and do NOT
+  replace it with an exit handler — SIGSEGV runs none. Pid reuse is guarded by
+  re-checking the executable path (`proc_pidpath`) before killing.
+
+Poll intervals must stay well above the call's real cost:
+`StatusItemController.doctorRefreshInterval` is 15 min against a 136s command
+(it was 60s — a >100% duty cycle). `MENUBAR_CHILD_TEST=1 MenubarHelper` exercises
+all of it against real processes, including reaping a real surviving orphan and
+proving a spawned child never inherits the single-instance flock fd.
+Separately, **`doctor --json` taking 136s on an idle machine is its own defect**
+— the helper is now safe against it, not a reason to consider it acceptable.
+
+**These self-tests are a build gate now, not just manual modes.** The helper's
+env-gated self-tests (`MENUBAR_SINGLE_TEST`, `MENUBAR_CHILD_TEST`,
+`MENUBAR_GUARD_TEST`, `MENUBAR_ISSUE_TEST`) are headless — they exit before the
+AppKit path (`Guards.enforceForInteractiveLaunch`) so they need no GUI or signing.
+[`menubar/scripts/test-menubar.sh`](menubar/scripts/test-menubar.sh) runs all four against
+the just-built binary and [`build.sh`](menubar/scripts/build.sh) invokes it before
+signing, so no helper artifact ships whose invariants regressed. Nothing ran these
+before — PR CI is Linux (can't build Swift) and prepack only checks the shipped
+bundle's signature — which is how the flock fd-inheritance deadlock escaped. Do NOT
+add `MENUBAR_DUMP` / `MENUBAR_PROMPT_PREVIEW` to the gate: those reach AppKit and
+need a GUI session.
 
 **Standalone `agents` binary (#315).** Every release also builds `dist/bin/agents`
 (`bun build --compile`, arm64 Mach-O), signs it (Developer ID + hardened runtime +
@@ -548,8 +638,16 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
   picker share the one unguarded renderer, SES-GAP-1); "where a session started"
   spans three fields (`cwd` + `provenance` + `context`), not one `origin`
   (SES-13); the `--json` shapes and `SessionEvent` union are a stability contract
-  (SES-IF-1, SES-IF-4); R2 sync is a CRDT G-Set union, zero-knowledge whenever an
-  encryption key is configured (SES-24, SES-25).
+  (SES-IF-1, SES-IF-4); tool-call evidence is always redacted/bounded, repeated
+  clauses match distinct calls, tool queries never parse transcripts, and exact
+  static program counts retain repeated sites with wrapper/effective roles;
+  versioned tool envelopes do not replace the list/detail JSON contracts
+  (SES-31..SES-37, SES-IF-4a); `agents sessions stats` emits its own versioned
+  `sessions-stats` rollup of skill/command usage and never the list/detail shape
+  (SES-IF-4b); `agents sessions
+  export --encrypt` seals every transcript
+  body client-side with AES-256-GCM under the shared `r2.backups` bundle key, or
+  an ephemeral one when unconfigured (SES-24, SES-25).
 - **[`docs/specifications.md` §Secrets](docs/specifications.md#secrets)** — the `agents secrets`
   contract. Load-bearing invariants: **inject into the child, never materialize
   to the agent** — every command is on one side of the boundary by construction

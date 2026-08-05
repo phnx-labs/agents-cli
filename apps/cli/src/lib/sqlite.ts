@@ -17,11 +17,37 @@ import { createRequire } from 'module';
 const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined';
 const require = createRequire(import.meta.url);
 
+// node:sqlite emits a process-level ExperimentalWarning the first time it loads.
+// The packaged CLI launches Node with --no-warnings=ExperimentalWarning, but a
+// direct `node dist/...` run (and vitest's subprocesses) does not, so the warning
+// would leak onto stderr and break any command whose --json output is asserted to
+// be clean. Suppress only that single warning for the duration of the load; every
+// other warning passes through untouched.
+function loadNodeSqlite(): unknown {
+  const original = process.emitWarning;
+  const filtered = ((warning: string | Error, ...rest: unknown[]): void => {
+    const name = warning instanceof Error
+      ? warning.name
+      : typeof rest[0] === 'string'
+        ? rest[0]
+        : (rest[0] as { type?: string } | undefined)?.type;
+    const message = warning instanceof Error ? warning.message : warning;
+    if (name === 'ExperimentalWarning' && /SQLite/i.test(String(message ?? ''))) return;
+    (original as (...a: unknown[]) => void).call(process, warning, ...rest);
+  }) as typeof process.emitWarning;
+  process.emitWarning = filtered;
+  try {
+    return require('node:sqlite');
+  } finally {
+    process.emitWarning = original;
+  }
+}
+
 // Keep Node on createRequire() so Vitest doesn't try to prebundle the built-in
 // sqlite module as a userland package during test collection.
 const sqliteMod = isBun
   ? await import('bun:sqlite' as string)
-  : require('node:sqlite');
+  : loadNodeSqlite();
 
 // bun:sqlite exports `Database`; node:sqlite exports `DatabaseSync`.
 const NativeDatabase: new (filename: string, options?: { strict: boolean }) => NativeDb =

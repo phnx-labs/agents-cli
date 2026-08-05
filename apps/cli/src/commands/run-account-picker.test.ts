@@ -31,8 +31,10 @@ function candidate(overrides: Partial<RotateCandidate> = {}): RotateCandidate {
     usageStatus: 'available',
     usageSnapshot: snapshot([['session', 25], ['week', 60], ['month', 90]]),
     usageError: null,
+    usageMinutesToLimit: null,
     plan: 'Max',
     signedIn: true,
+    authVerdict: null,
     lastActive: null,
     ...overrides,
   };
@@ -84,6 +86,13 @@ describe('buildRunAccountChoices', () => {
     });
     expect(choice.name).toContain('Session exhausted');
     expect(choice.name).toContain('Week exhausted');
+  });
+
+  it('disables a server-revoked account (token rejected) with a re-login reason, even at full quota', () => {
+    const [choice] = buildRunAccountChoices([
+      candidate({ authVerdict: 'revoked', usageSnapshot: snapshot([['session', 0], ['week', 0]]) }),
+    ], null);
+    expect(choice).toMatchObject({ ready: false, disabled: 'needs re-login' });
   });
 
   it('keeps a signed-in account selectable when quota data is unavailable', () => {

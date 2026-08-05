@@ -23,10 +23,27 @@ import * as path from 'path';
 import { sleepSync } from '../fs-atomic.js';
 import { getRuntimeStateDir, getHelpersDir } from '../state.js';
 import { getCliVersion, resolveAgentsBin, resolveInstalledLayout } from '../version.js';
+import { copyAppBundle, withInstallLock } from '../app-bundle-install.js';
 
 const APP_BUNDLE_NAME = 'MenubarHelper.app';
 const INSTALL_DIR_NAME = 'agents-cli';
 const SERVICE_LABEL = 'com.phnx-labs.agents-menubar';
+
+/**
+ * Minimum seconds between launchd restarts of the helper (`ThrottleInterval`).
+ *
+ * The helper can crash at startup on a loaded machine: `NSApplication.shared`
+ * segfaults inside `SLSNewConnection` when WindowServer is too starved to hand
+ * out a connection. With `KeepAlive` and no throttle, launchd relaunches on its
+ * 10s default, and each attempt spawns a fresh `agents doctor --json` before
+ * dying — so a starved box gets hit harder the worse it gets. 30s bounds that
+ * respawn rate while staying well inside "the menu bar came back on its own".
+ *
+ * This only paces the restarts. What actually stops the pile-up is the helper
+ * bounding and group-killing its own children (menubar/Sources/MenubarHelper/
+ * ChildProcess.swift); the two are complementary, not alternatives.
+ */
+const MENUBAR_THROTTLE_SECONDS = 30;
 
 function onDarwin(): boolean {
   return process.platform === 'darwin';
@@ -150,17 +167,6 @@ function resolveCliEntry(): string | null {
   return null;
 }
 
-function copyAppBundle(src: string, dest: string): void {
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
-  // `cp -R` preserves the bundle's signature and resource forks (see install-helper.ts).
-  const r = spawnSync('cp', ['-R', src, dest], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8' });
-  if (r.status !== 0) {
-    const msg = (r.stderr || r.stdout || '').toString().trim();
-    throw new Error(`Failed to copy ${src} -> ${dest}: ${msg || 'unknown error'}`);
-  }
-}
-
 /**
  * Register the freshly-installed bundle with LaunchServices.
  *
@@ -195,68 +201,64 @@ export function codesignVerifies(appPath: string): boolean {
  * A Developer-ID-signed but un-notarized app is rejected by `spctl --assess`,
  * which macOS surfaces as "the app is damaged" and can crash AppKit during
  * launch. This is separate from `codesign --verify`: a signature can be valid
- * while Gatekeeper still refuses to run it.
+ * while Gatekeeper still refuses to run it. The release notarizes + staples the
+ * helper (menubar/scripts/build.sh, gated by verify-menubar-helper.sh), so a
+ * shipped bundle passes this; the launch guards use it to fail loud rather than
+ * bootstrap a helper macOS would reject.
  */
 export function gatekeeperAssesses(appPath: string): boolean {
   const r = spawnSync('spctl', ['--assess', '--type', 'exec', appPath], { stdio: ['ignore', 'ignore', 'ignore'] });
   return r.status === 0;
 }
 
-/**
- * Guarantee the installed bundle has a signature Gatekeeper will accept on THIS
- * machine.
- *
- * npm's pack/extract strips the ad-hoc/linker signature the release baked into
- * the helper, leaving `code object is not signed at all`. On macOS 26+ the
- * kernel's code-signing monitor SIGKILLs an unsigned/invalid binary at launch
- * (`SIGKILL (Code Signature Invalid)`), so under the launchd `KeepAlive` service
- * an ad-hoc release helper crash-loops forever and its unstable identity makes
- * the Accessibility grant (needed for the clip→paste keystroke in Clip.swift)
- * re-prompt every time. A fresh ad-hoc re-sign gives the on-disk bytes a
- * matching cdhash, which the kernel accepts.
- *
- * A Developer-ID-signed helper survives npm untouched — its embedded signature
- * still verifies — but if the release was not notarized, Gatekeeper rejects it.
- * In that case we strip the quarantine xattr and re-sign ad-hoc so the helper
- * can launch locally. The stable fix is to notarize the release build; this
- * fallback just prevents a crash-loop while the user is on an un-notarized cut.
- */
-export function ensureValidSignature(appPath: string): boolean {
-  if (codesignVerifies(appPath) && gatekeeperAssesses(appPath)) return true;
-  // Drop any quarantine/xattrs the tarball round-trip added (they can break
-  // both codesign and Gatekeeper), then re-sign ad-hoc under the helper's
-  // stable bundle identifier.
-  spawnSync('xattr', ['-cr', appPath], { stdio: ['ignore', 'ignore', 'ignore'] });
-  spawnSync(
-    'codesign',
-    ['--force', '--sign', '-', '--identifier', SERVICE_LABEL, appPath],
-    { stdio: ['ignore', 'ignore', 'ignore'] }
-  );
-  return codesignVerifies(appPath);
+/** True when the bundle carries a Developer ID TeamIdentifier (not ad-hoc). */
+export function hasDeveloperIdSignature(appPath: string): boolean {
+  const r = spawnSync('codesign', ['-dv', '--verbose=4', appPath], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf-8',
+  });
+  const out = `${r.stderr || ''}${r.stdout || ''}`;
+  const team = out.match(/TeamIdentifier=([A-Z0-9]+)/)?.[1];
+  return Boolean(team && team !== 'not set');
 }
 
 /**
  * Copy the bundled `.app` to the stable user path (idempotent unless forced).
  * Returns the installed executable path, or null if no source bundle ships
  * with this install (e.g. Linux package, or a build without the helper).
+ *
+ * Also heals an older install that was ad-hoc re-signed over a Developer ID
+ * source: that unstable identity made Accessibility re-prompt on every upgrade.
+ * When the shipped source is Developer ID and the installed copy is only
+ * ad-hoc, replace it — even without forceReinstall.
  */
 export function ensureMenubarAppInstalled(opts: { forceReinstall?: boolean } = {}): string | null {
   if (!onDarwin()) return null;
   const src = sourceAppPath();
   if (!src) return null;
   const dest = installedAppPath();
-  if (!opts.forceReinstall && fs.existsSync(dest)) {
-    // Self-heal an already-installed bundle whose signature npm stripped on a
-    // prior upgrade (macOS 26+ SIGKILLs it otherwise) without a forced recopy.
-    ensureValidSignature(dest);
-    return installedExecutablePath();
-  }
-  copyAppBundle(src, dest);
-  ensureValidSignature(dest);
-  // A fresh copy is exactly when the bundle's icon can be new (first install) or
-  // superseded (upgrade) — register it so LaunchServices knows the bundle and can
-  // resolve its AppIcon for the left-hand slot of daemon notifications.
-  refreshBundleIconRegistration(dest);
+  // Heal an older install that was ad-hoc re-signed over a Developer ID source:
+  // that unstable identity made Accessibility re-prompt on every upgrade.
+  const needsInstall = (): boolean => {
+    if (opts.forceReinstall) return true;
+    if (!fs.existsSync(dest)) return true;
+    return hasDeveloperIdSignature(src) && !hasDeveloperIdSignature(dest);
+  };
+  // Fast path: nothing to do.
+  if (!needsInstall()) return installedExecutablePath();
+  // Serialize the atomic install so concurrent `agents` invocations (this runs
+  // on the darwin startup path) don't race the swap or each re-copy — the
+  // stampede that transiently corrupted MenubarHelper.app and tripped the
+  // "damaged" dialog.
+  withInstallLock(dest, (heartbeat) => {
+    if (!needsInstall()) return;
+    copyAppBundle(src, dest);
+    heartbeat(); // cp -R done; keep the lock fresh across lsregister
+    // A fresh copy is exactly when the bundle's icon can be new (first install) or
+    // superseded (upgrade) — register it so LaunchServices knows the bundle and can
+    // resolve its AppIcon for the left-hand slot of daemon notifications.
+    refreshBundleIconRegistration(dest);
+  });
   return installedExecutablePath();
 }
 
@@ -264,7 +266,7 @@ function xmlEscape(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function generateServicePlist(execPath: string): string {
+export function generateServicePlist(execPath: string): string {
   const home = os.homedir();
   const logPath = path.join(getHelpersDir(), 'menubar', 'menubar.log');
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
@@ -302,6 +304,8 @@ function generateServicePlist(execPath: string): string {
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>${MENUBAR_THROTTLE_SECONDS}</integer>
   <key>ProcessType</key>
   <string>Interactive</string>
   <key>StandardOutPath</key>
@@ -348,13 +352,16 @@ export function enableMenubarService(opts: { clearOptOut?: boolean } = { clearOp
   const exec = ensureMenubarAppInstalled({ forceReinstall: true });
   if (!exec) return false;
 
-  // Never bootstrap a helper the kernel will kill on launch: an invalid
-  // signature under launchd KeepAlive is an infinite crash loop. If the bundle
-  // can't be made valid (re-sign already attempted in ensureMenubarAppInstalled),
-  // skip the service rather than spin the loop.
-  if (!codesignVerifies(installedAppPath())) {
+  // Never bootstrap a helper macOS will reject at launch: an invalid signature
+  // under launchd KeepAlive crash-loops forever, and an un-notarized bundle is
+  // rejected by Gatekeeper as "damaged". A shipped helper is Developer-ID signed
+  // AND notarized (release build + the verify-menubar-helper.sh prepack gate), so
+  // this passes; if it ever doesn't, skip the service and point at the upgrade
+  // rather than re-signing over it (an ad-hoc re-sign never satisfies Gatekeeper).
+  if (!(codesignVerifies(installedAppPath()) && gatekeeperAssesses(installedAppPath()))) {
     process.stderr.write(
-      'agents: menu-bar helper has no valid code signature; skipping launch to avoid a crash loop.\n'
+      'agents: AGI Menu is not notarized/valid on this machine; skipping launch. ' +
+      'Upgrade to a notarized build (npm i -g @phnx-labs/agents-cli), then `agents menubar setup`.\n'
     );
     return false;
   }
@@ -493,13 +500,23 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
     }
     // Re-enable (recopy helper + rewrite plist) when the version drifted OR the
     // plist's baked interpreter/entry no longer point at the install now running
-    // `agents` — the dual-install skew a version bump alone can't catch.
-    if (menubarSetupStale() || menubarSetupNeedsRepoint()) {
+    // `agents` — the dual-install skew a version bump alone can't catch — OR the
+    // installed copy is still ad-hoc while the shipped source is Developer ID
+    // (older heal path; Accessibility re-prompts until the identity is restored).
+    if (menubarSetupStale() || menubarSetupNeedsRepoint() || installedNeedsDevIdHeal()) {
       enableMenubarService({ clearOptOut: false });
     }
   } catch {
     /* never block startup on the menu bar */
   }
+}
+
+/** True when App Support still has an ad-hoc copy but the npm bundle is Developer ID. */
+function installedNeedsDevIdHeal(): boolean {
+  const src = sourceAppPath();
+  if (!src || !fs.existsSync(installedAppPath())) return false;
+  if (hasDeveloperIdSignature(installedAppPath())) return false;
+  return hasDeveloperIdSignature(src);
 }
 
 /** One step of `agents menubar setup`, and how it came out. */
@@ -559,14 +576,14 @@ export function runMenubarSetup(): SetupResult {
   };
 
   if (!onDarwin()) {
-    step('platform', 'failed', `the menu bar helper is macOS only (this is ${process.platform})`);
+    step('platform', 'failed', `AGI Menu is macOS only (this is ${process.platform})`);
     return { steps, configured: false, status: getMenubarStatus() };
   }
 
   const before = getMenubarStatus();
 
   if (!sourceAppPath()) {
-    step('bundle', 'failed', 'no menu-bar helper bundle ships with this install');
+    step('bundle', 'failed', 'no AGI Menu bundle ships with this install');
     return { steps, configured: false, status: before };
   }
 
@@ -592,12 +609,13 @@ export function runMenubarSetup(): SetupResult {
   step('bundle', before.installedVersion === getCliVersion() ? 'ok' : 'changed',
     `${installedAppPath()} (${getCliVersion()})`);
 
-  if (!codesignVerifies(installedAppPath())) {
+  if (!(codesignVerifies(installedAppPath()) && gatekeeperAssesses(installedAppPath()))) {
     step('signature', 'failed',
-      'no valid code signature — refusing to start it (launchd KeepAlive would crash-loop)');
+      'not notarized/valid on this machine — refusing to start it (Gatekeeper rejects an ' +
+      'un-notarized helper as "damaged"). Upgrade to a notarized build of agents-cli.');
     return { steps, configured: false, status: getMenubarStatus() };
   }
-  step('signature', 'ok', 'valid');
+  step('signature', 'ok', 'valid + notarized');
 
   // Clear the sticky opt-out: running `setup` is an explicit request for the
   // menu bar, so a stale `menubar disable` must not silently win.

@@ -10,11 +10,14 @@ import * as path from 'path';
 import Database from '../sqlite.js';
 import { getPerfDbPath, getPerfDir } from '../state.js';
 import { localMachineId } from '../session/origin-machine.js';
+import { resolveProjectKey } from '../project-key.js';
+import { percentile } from '../percentile.js';
 import { resolveSpoolPath, shortSessionId, _resetPerfSpoolForTest } from './spool.js';
 import type { AggregateOptions, PerfAggregateRow } from './types.js';
 
 export type { AggregateOptions, PerfAggregateRow, PerfSample } from './types.js';
 export { recordSample, shortSessionId, resolveSpoolPath } from './spool.js';
+export { percentile } from '../percentile.js';
 
 export const PERF_SCHEMA_VERSION = 1;
 export const DEFAULT_RETENTION_DAYS = 30;
@@ -190,20 +193,13 @@ function maybeRetain(db: Database.Database): void {
   }
 }
 
-/** Percentile of a sorted-ascending array. p in [0,100]. */
-export function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
-  if (sorted.length === 1) return sorted[0];
-  const rank = (p / 100) * (sorted.length - 1);
-  const lo = Math.floor(rank);
-  const hi = Math.ceil(rank);
-  if (lo === hi) return sorted[lo];
-  const frac = rank - lo;
-  return sorted[lo] * (1 - frac) + sorted[hi] * frac;
-}
-
 /**
- * Aggregate samples by (kind, label) with p50/p99. Drains the spool first.
+ * Aggregate samples by (kind, label) with p50/p95/p99. Drains the spool first.
+ *
+ * `opts.project` scopes the query to samples whose recorded `cwd` resolves to
+ * that project key (see project-key.ts) — resolution runs per unique cwd
+ * (memoized) rather than per row, since `resolveProjectKey` does a filesystem
+ * walk and a warehouse query can carry many rows sharing the same cwd.
  */
 export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[] {
   const db = openDb();
@@ -234,7 +230,7 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
   }
 
   const rows = db.prepare(
-    `SELECT kind, label, duration_ms, cache, exit_code
+    `SELECT kind, label, duration_ms, cache, exit_code, status, cwd
      FROM samples WHERE ${clauses.join(' AND ')}`
   ).all(...params) as Array<{
     kind: string;
@@ -242,7 +238,22 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
     duration_ms: number;
     cache: string | null;
     exit_code: number | null;
+    status: string | null;
+    cwd: string | null;
   }>;
+
+  // Memoize cwd -> project key: resolveProjectKey walks the filesystem for
+  // a repo root, and many rows in one warehouse query share the same cwd.
+  const projectCache = new Map<string, string | undefined>();
+  const projectForCwd = (cwd: string | null): string | undefined => {
+    if (!cwd) return undefined;
+    let key = projectCache.get(cwd);
+    if (key === undefined && !projectCache.has(cwd)) {
+      key = resolveProjectKey(cwd);
+      projectCache.set(cwd, key);
+    }
+    return key;
+  };
 
   type Bucket = {
     kind: string;
@@ -252,20 +263,23 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
     stale: number;
     misses: number;
     errors: number;
+    timeouts: number;
   };
   const map = new Map<string, Bucket>();
   for (const r of rows) {
+    if (opts.project && projectForCwd(r.cwd) !== opts.project) continue;
     const key = `${r.kind}\0${r.label}`;
     let b = map.get(key);
     if (!b) {
-      b = { kind: r.kind, label: r.label, durations: [], hits: 0, stale: 0, misses: 0, errors: 0 };
+      b = { kind: r.kind, label: r.label, durations: [], hits: 0, stale: 0, misses: 0, errors: 0, timeouts: 0 };
       map.set(key, b);
     }
     b.durations.push(Number(r.duration_ms));
     if (r.cache === 'hit') b.hits++;
     else if (r.cache === 'stale-prefetch') b.stale++;
     else if (r.cache === 'miss' || r.cache === 'none') b.misses++;
-    if (typeof r.exit_code === 'number' && r.exit_code !== 0) b.errors++;
+    if (r.status === 'timeout') b.timeouts++;
+    else if (typeof r.exit_code === 'number' && r.exit_code !== 0) b.errors++;
   }
 
   const out: PerfAggregateRow[] = [];
@@ -279,6 +293,7 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
       label: b.label,
       n,
       p50Ms: Math.round(percentile(sorted, 50)),
+      p95Ms: Math.round(percentile(sorted, 95)),
       p99Ms: Math.round(percentile(sorted, 99)),
       meanMs: Math.round(sum / n),
       maxMs: sorted[n - 1],
@@ -289,7 +304,12 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
       row.cacheStalePct = Math.round((b.stale / n) * 100);
       row.cacheMissPct = Math.round((b.misses / n) * 100);
     }
-    if (b.errors > 0) row.errorCount = b.errors;
+    if (b.errors > 0) {
+      row.errorCount = b.errors;
+      row.errorRate = Math.round((b.errors / n) * 1000) / 1000;
+    }
+    if (b.timeouts > 0) row.timeoutRate = Math.round((b.timeouts / n) * 1000) / 1000;
+    if (opts.project) row.project = opts.project;
     out.push(row);
   }
   out.sort((a, b) => b.p99Ms - a.p99Ms);

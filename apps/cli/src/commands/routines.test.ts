@@ -224,12 +224,12 @@ describe('routines devices --set persists', () => {
   it('writes a devices allowlist to the routine YAML', () => {
     const home = makeHome({ jobs: [baseJob], registry });
     try {
-      const res = run(home, ['devices', 'test-job', '--set', 'yosemite-s0,mac-mini']);
+      const res = run(home, ['devices', 'test-job', '--set', 'yosemite-s0']);
       expect(res.status).toBe(0);
 
       const doc = readRoutineYaml(home, 'test-job');
       expect(doc).not.toBeNull();
-      expect(doc!.devices).toEqual(['yosemite-s0', 'mac-mini']);
+      expect(doc!.devices).toEqual(['yosemite-s0']);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -271,12 +271,12 @@ describe('routines devices --set normalizes mixed case and FQDN duplicates', () 
     const job = { ...baseJob, devices: ['yosemite-s0'] };
     const home = makeHome({ jobs: [job], registry });
     try {
-      const res = run(home, ['devices', 'test-job', '--set', 'Yosemite-S0,yosemite-s0.tailnet.ts.net,MAC-MINI']);
+      const res = run(home, ['devices', 'test-job', '--set', 'Yosemite-S0,yosemite-s0.tailnet.ts.net']);
       expect(res.status).toBe(0);
 
       const doc = readRoutineYaml(home, 'test-job');
       expect(doc).not.toBeNull();
-      expect(doc!.devices).toEqual(['yosemite-s0', 'mac-mini']);
+      expect(doc!.devices).toEqual(['yosemite-s0']);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -452,7 +452,7 @@ describe('routines add one-shot-looking --schedule', () => {
 
 describe('routines list --json has devices+runsHere, no device', () => {
   it('includes devices array and runsHere, excludes singular device key', () => {
-    const job = { ...baseJob, devices: ['yosemite-s0', 'mac-mini'] };
+    const job = { ...baseJob, devices: ['yosemite-s0'] };
     const home = makeHome({ jobs: [job], registry });
     try {
       const res = run(home, ['list', '--json'], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
@@ -461,7 +461,7 @@ describe('routines list --json has devices+runsHere, no device', () => {
       const parsed = JSON.parse(res.stdout.trim());
       const entry = parsed.find((j: Record<string, unknown>) => j.name === 'test-job');
       expect(entry).toBeDefined();
-      expect(entry.devices).toEqual(['yosemite-s0', 'mac-mini']);
+      expect(entry.devices).toEqual(['yosemite-s0']);
       expect(typeof entry.runsHere).toBe('boolean');
       expect(entry.runsHere).toBe(true);
       expect('device' in entry).toBe(false);
@@ -795,8 +795,15 @@ describe('routines list grouped by device', () => {
   // repeated our local record, which is how a green routine showed up red.
   it('shows Last Status only under this machine, not under a peer device', () => {
     const home = makeHome({
-      jobs: [{ ...baseJob, name: 'two-device-job', devices: ['zion', 'yosemite-s0'] }],
-      registry,
+      // Deliberately a two-device pin: the point here is that the listing still
+      // renders a row under EACH device group, and only the This-machine row
+      // carries a status. (Ownership means only zion fires it; the peer row
+      // existing is what this test is about.)
+      // zion must be the OWNER (lowest normalized name) so its row carries a
+      // status, while a second device still renders a peer group — that peer
+      // row having no status is what this test asserts.
+      jobs: [{ ...baseJob, name: 'two-device-job', devices: ['zion', 'zulu-box'] }],
+      registry: { ...registry, 'zulu-box': { name: 'zulu-box', platform: 'linux' } },
     });
     try {
       writeRunMeta(home, 'two-device-job', '2026-07-25T10-00-00-000Z', {
@@ -816,7 +823,7 @@ describe('routines list grouped by device', () => {
 
       const lines = stripped.split('\n');
       const mineIdx = lines.findIndex((l) => l.includes('This machine (zion)'));
-      const peerIdx = lines.findIndex((l) => l.includes('Device: yosemite-s0'));
+      const peerIdx = lines.findIndex((l) => l.includes('Device: zulu-box'));
       expect(mineIdx).toBeGreaterThanOrEqual(0);
       expect(peerIdx).toBeGreaterThanOrEqual(0);
 
@@ -990,12 +997,12 @@ describe('routines add --devices empty/whitespace fails closed', () => {
         '--schedule', '0 3 * * *',
         '--agent', 'claude',
         '--prompt', 'hi',
-        '--devices', 'yosemite-s0,mac-mini',
+        '--devices', 'yosemite-s0',
       ]);
       expect(res.status).toBe(0);
       const doc = readRoutineYaml(home, 'placed-job');
       expect(doc).not.toBeNull();
-      expect(doc!.devices).toEqual(['yosemite-s0', 'mac-mini']);
+      expect(doc!.devices).toEqual(['yosemite-s0']);
     } finally {
       if (daemon) await stopIsolatedDaemon(daemon.child);
       if (typeof pid === 'number') expect(isProcessAlive(pid)).toBe(false);
@@ -1047,7 +1054,10 @@ describe('routines run wrong-host exact output', () => {
       expect(res.status).not.toBe(0);
       const output = res.stdout + res.stderr;
       expect(output).toContain("Job 'test-job' can only run on: yosemite-s0, mac-mini");
-      expect(output).toContain('  agents routines run test-job --host yosemite-s0');
+      // The suggested host is the OWNER (lowest normalized name), not the first
+      // entry as written — the old suggestion pointed at a box that would refuse
+      // the run for exactly the same reason.
+      expect(output).toContain('  agents routines run test-job --host mac-mini');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -1200,6 +1210,7 @@ describe('buildRunsJson', () => {
         completedAt: null,
         exitCode: null,
         errorMessage: null,
+        duration: null,
       },
       {
         jobId: 'test-job',
@@ -1210,6 +1221,7 @@ describe('buildRunsJson', () => {
         completedAt: null,
         exitCode: null,
         errorMessage: null,
+        duration: null,
       },
     ]);
   });

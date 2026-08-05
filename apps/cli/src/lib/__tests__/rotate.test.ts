@@ -3,6 +3,7 @@ import {
   normalizeRunStrategy,
   pickAvailableCandidate,
   pickBalancedCandidate,
+  readinessFromCandidate,
   type RotateCandidate,
 } from '../rotate.js';
 import type { UsageSnapshot } from '../usage.js';
@@ -70,8 +71,10 @@ function cand(overrides: Partial<RotateCandidate>): RotateCandidate {
     usageStatus: 'available',
     usageSnapshot: null,
     usageError: null,
+    usageMinutesToLimit: null,
     plan: 'Max',
     signedIn: true,
+    authVerdict: null,
     lastActive: new Date('2026-01-01T00:00:00Z'),
     ...overrides,
   };
@@ -308,6 +311,58 @@ describe('pickBalancedCandidate', () => {
     const result = pickBalancedCandidate([sessionMaxed, healthy]);
     expect(result!.picked.version).toBe('2.1.181');
     expect(result!.excluded.map((c) => c.version)).toContain('2.1.187');
+  });
+
+  it('excludes a server-revoked account even at full headroom, routing to the live one', () => {
+    // signedIn only means "a credential file exists"; a token the daemon's live
+    // probe saw rejected (401/403 -> authVerdict 'revoked') will fail auth at
+    // spawn. It must be excluded BEFORE usage weighting, however empty it looks —
+    // otherwise `agents run` auto-picks a dead account (the RUSH audit's #1 bug).
+    const revoked = cand({
+      version: '2.1.220',
+      email: 'revoked@example.com',
+      authVerdict: 'revoked',
+      usageSnapshot: claudeUsage(0, 0, 0), // full headroom — the most tempting pick
+      lastActive: new Date('2026-04-20T10:00:00Z'),
+    });
+    const live = cand({
+      version: '2.1.219',
+      email: 'live@example.com',
+      authVerdict: 'live',
+      usageSnapshot: claudeUsage(60, 40, 0),
+      lastActive: new Date('2026-04-19T10:00:00Z'),
+    });
+
+    const result = pickBalancedCandidate([revoked, live]);
+    expect(result!.picked.version).toBe('2.1.219');
+    expect(result!.excluded.map((c) => c.version)).toContain('2.1.220');
+  });
+
+  it('returns null when the only signed-in account is revoked — fail loud, never launch it', () => {
+    const revoked = cand({ version: '2.1.220', authVerdict: 'revoked', usageSnapshot: claudeUsage(0, 0, 0) });
+    expect(pickBalancedCandidate([revoked])).toBeNull();
+  });
+
+  it('fail-open: a null or non-revoked auth verdict never gates on its own', () => {
+    // Only `revoked` (isDeadVerdict) excludes. A cold cache (null), a benign
+    // `unverified` (harness with no live probe), a self-healing `expired`, `live`,
+    // or an indeterminate `error` must all stay eligible — usage is a separate gate.
+    for (const v of [null, 'unverified', 'expired', 'live', 'error'] as const) {
+      const c = cand({ version: '2.1.219', authVerdict: v, usageSnapshot: claudeUsage(10, 10, 0) });
+      const result = pickBalancedCandidate([c]);
+      expect(result, `authVerdict=${v} should be eligible`).not.toBeNull();
+      expect(result!.picked.version).toBe('2.1.219');
+    }
+  });
+
+  it('readinessFromCandidate reports `revoked` in lockstep with the pick gate', () => {
+    // The pick gate (isRotationEligible) is defined in terms of this function, so
+    // the two can never disagree: what rotation excludes, the pre-flight warning
+    // names with the same reason.
+    const r = readinessFromCandidate(
+      cand({ version: '2.1.220', authVerdict: 'revoked', usageSnapshot: claudeUsage(0, 0, 0) }),
+    );
+    expect(r).toMatchObject({ ready: false, reason: 'revoked' });
   });
 
   it('keeps a sonnet-week-maxed account eligible (router mirrors the `ag view` badge)', () => {

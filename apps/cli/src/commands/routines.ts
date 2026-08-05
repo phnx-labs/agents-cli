@@ -23,6 +23,7 @@ import {
   readDaemonLog,
   getDaemonStatus,
 } from '../lib/daemon.js';
+import { assertSchedulerEnabled } from '../lib/device-config.js';
 import { resolveAgentName, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
 import { humanizeCron, humanizeNextRun, formatRepoLink, REPO_DISPLAY_MAX } from '../lib/routines-format.js';
 import {
@@ -33,6 +34,7 @@ import {
   writeJob,
   setJobEnabled,
   listRuns,
+  routineStats,
   getLatestRun,
   getRunDir,
   getJobPath,
@@ -368,9 +370,20 @@ function parseRoutineTrigger(options: Record<string, unknown>): JobTrigger | und
 /**
  * Start or reload the background scheduler so newly-added jobs fire on time.
  * `quiet` suppresses human status lines for JSON callers.
+ *
+ * When this device has `scheduler.enabled=false` the auto-start is skipped with
+ * the stated reason (the add itself already succeeded — the job is config and
+ * stays valid fleet-wide); the refusal message names the setting and the fix.
  */
 function ensureSchedulerRunning(opts: { quiet?: boolean; stderr?: boolean } = {}): void {
   const log = opts.stderr ? console.error : console.log;
+  try {
+    assertSchedulerEnabled();
+  } catch (err) {
+    // Loud stated skip, on stderr so --json stdout stays clean.
+    console.error(chalk.yellow((err as Error).message));
+    return;
+  }
   if (isDaemonRunning()) {
     signalDaemonReload();
     if (!opts.quiet) log(chalk.gray('Scheduler reloaded'));
@@ -425,6 +438,7 @@ function runMetaJson(run: RunMeta): Record<string, unknown> {
     completedAt: run.completedAt,
     exitCode: run.exitCode,
     errorMessage: run.errorMessage ?? null,
+    duration: run.duration ?? null,
   };
 }
 
@@ -713,8 +727,8 @@ export function registerRoutinesCommands(program: Command): void {
     .option('-t, --timeout <timeout>', 'Kill the agent if it runs longer than this (e.g., 10m, 2h, 3d, 1w; max 1w)', '10m')
     .option('--timezone <tz>', 'Interpret schedule in this timezone (e.g., America/Los_Angeles)')
     .option('--devices <names>', 'Fleet allowlist (comma-separated): only listed devices schedule and fire this routine. Omit for unrestricted.')
-    .option('--run-on <name>', 'Execute the job body on this machine over SSH (a registered host, device, capability tag, or user@host). Sets hostStrategy=host. Placement, not eligibility — see --devices. Auto-pins devices to THIS machine unless --devices is given.')
-    .option('--placement <strategy>', `Where the job body runs: ${HOST_STRATEGIES.join('|')} (default: local, or host when --run-on is set). Not the same as --host (which manages routines on a remote machine).`)
+    .option('--run-on <name>', 'BODY placement: execute the job body on this machine over SSH (registered host, device, capability tag, or user@host). Sets hostStrategy=host. Not eligibility — see --devices. Auto-pins devices to THIS machine unless --devices is given. Same model as agents run --where device:<name> (docs/00-concepts.md#placement).')
+    .option('--placement <strategy>', `BODY placement strategy: ${HOST_STRATEGIES.join('|')} (default: local, or host when --run-on is set). Maps to the shared Placement model (local|device|fleet|cloud). Not the same as --host (which manages routines on a remote machine).`)
     .option('--run-cwd <dir>', 'Working directory on the --run-on host (--remote-cwd is taken by the remote-management passthrough)')
     .option('--at <time>', 'One-shot mode: run once at this time (e.g., "14:30" or "2026-02-24 09:00"), then disable')
     .option('--on <source:event>', 'Webhook trigger instead of/in addition to a schedule: github:pull_request or linear:Issue')
@@ -1155,6 +1169,52 @@ export function registerRoutinesCommands(program: Command): void {
             : chalk.yellow(run.status);
         console.log(`  ${run.runId}  ${status}  ${run.startedAt}`);
       }
+    });
+
+  routinesCmd
+    .command('stats [name]')
+    .description('Duration + outcome rollup per job: run count, failed, missed, avg/p50/p95 duration')
+    .option('--json', 'Emit machine-readable JSON')
+    .action(async (name: string | undefined, options: { json?: boolean }) => {
+      // No name: summarize every job (like `routines list`). A name narrows to
+      // one job's rollup — no interactive picker, since a bare `stats` already
+      // has a useful all-jobs default.
+      if (!name) {
+        const jobs = listAllJobs();
+        const rows = jobs.map((j) => ({ name: j.name, ...routineStats(j.name) }));
+        if (options.json) {
+          writeJson({ jobs: rows });
+          return;
+        }
+        if (rows.length === 0) {
+          console.log(chalk.gray('No jobs configured'));
+          return;
+        }
+        console.log(chalk.bold('Routine stats\n'));
+        const pad = (s: string, w: number) => (s.length >= w ? s.slice(0, w) : s + ' '.repeat(w - s.length));
+        console.log(chalk.gray(`  ${pad('JOB', 28)} ${pad('N', 5)} ${pad('FAILED', 7)} ${pad('MISSED', 7)} ${pad('AVG', 7)} ${pad('P50', 7)} P95`));
+        for (const r of rows) {
+          console.log(`  ${pad(r.name, 28)} ${pad(String(r.count), 5)} ${pad(String(r.failed), 7)} ${pad(String(r.missed), 7)} ${pad(`${r.avgMs}ms`, 7)} ${pad(`${r.p50}ms`, 7)} ${r.p95}ms`);
+        }
+        return;
+      }
+
+      const stats = routineStats(name);
+      if (options.json) {
+        writeJson({ jobId: name, name, ...stats });
+        return;
+      }
+      if (stats.count === 0) {
+        console.log(chalk.yellow(`No runs found for job '${name}'`));
+        return;
+      }
+      console.log(chalk.bold(`Stats: ${name}\n`));
+      console.log(`  Runs:     ${stats.count}`);
+      console.log(`  Failed:   ${stats.failed}`);
+      console.log(`  Missed:   ${stats.missed}`);
+      console.log(`  Avg:      ${stats.avgMs}ms`);
+      console.log(`  P50:      ${stats.p50}ms`);
+      console.log(`  P95:      ${stats.p95}ms`);
     });
 
   routinesCmd
@@ -1638,9 +1698,21 @@ export function registerRoutinesCommands(program: Command): void {
     .command('start')
     .description('Start the background scheduler. Usually unnecessary — it auto-starts when you add your first routine.')
     .action(() => {
+      try {
+        // A manual start on a scheduler-disabled device refuses with the same
+        // message the auto-start surfaces give.
+        assertSchedulerEnabled();
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
       const result = startDaemon();
       if (result.method === 'already-running') {
-        console.log(chalk.yellow(`Scheduler already running (PID: ${result.pid})`));
+        // Signal a reload even here: if the daemon booted while this device had
+        // scheduler.enabled=false, the reload re-evaluates the gate and boots
+        // the scheduler — a manual start heals a scheduler-less daemon.
+        signalDaemonReload();
+        console.log(chalk.yellow(`Scheduler already running (PID: ${result.pid}) — reloaded`));
       } else if (result.pid) {
         console.log(chalk.green(`Scheduler started (PID: ${result.pid})`));
       } else {

@@ -78,7 +78,7 @@ export async function resolveHostSshTarget(nameOrAlias: string): Promise<string>
  * Merge `--host <single>` / `--hosts <a,b,c>` (and their `--device` / `--devices`
  * aliases) into an ordered, de-duplicated list. All four flags compose; any alone
  * works. `--device`/`--devices` resolve identically to `--host`/`--hosts` so the
- * fleet-wide `--device` vocabulary (see `agents activity`, `agents run --device`)
+ * fleet-wide `--device` vocabulary (see `agents run --device`, `agents feed --host`)
  * works on the secrets remote commands too. Empty when none is set.
  */
 export function parseHostsOption(opts: {

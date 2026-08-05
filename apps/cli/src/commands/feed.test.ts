@@ -221,6 +221,22 @@ describe('sessionHintsFromActive', () => {
       worktreeSlug: 'rush-9-fix',
     });
   });
+
+  it('maps session cwd into project hint, worktree-aware', () => {
+    const hints = sessionHintsFromActive([
+      {
+        sessionId: 'sess-wt',
+        agentId: 'agent-wt',
+        cwd: '/home/muqsit/src/agents-cli/.agents/worktrees/feature-x',
+      },
+      {
+        sessionId: 'sess-plain',
+        cwd: '/home/muqsit/src/sidecar',
+      },
+    ]);
+    expect(hints[0].project).toBe('agents-cli');
+    expect(hints[1].project).toBe('sidecar');
+  });
 });
 
 describe('formatActivityLine', () => {

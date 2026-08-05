@@ -43,6 +43,7 @@ import {
   isHeadlessSecretsContext,
   readBundle,
   readBundleIfDecryptable,
+  reAclBundleItems,
   renameBundle,
   rotateBundleSecret,
   sanitizeProcessEnv,
@@ -110,6 +111,14 @@ import { readMeta } from '../lib/state.js';
 import { parseDuration } from '../lib/hooks/cache.js';
 import { emit, query } from '../lib/events.js';
 import { emitSecretAudit } from '../lib/secrets/audit.js';
+import {
+  getBundleUsage,
+  getAllBundleUsage,
+  getUsageHistory,
+  SECRET_USAGE_EVENTS,
+  type BundleUsageSummary,
+  type SecretUsageEvent,
+} from '../lib/secrets/usage-db.js';
 import { frequentlyPromptedBundles } from '../lib/secrets/unlock-hints.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
@@ -846,6 +855,52 @@ function countExpiringSoon(meta: Record<string, VarMeta> | undefined): number {
   return n;
 }
 
+/** Human labels for the usage events, in the order `view` prints them. */
+const USAGE_EVENT_LABELS: Record<SecretUsageEvent, string> = {
+  access: 'accessed',
+  unlock: 'unlocked',
+  import: 'imported',
+  export: 'exported',
+  create: 'created',
+  view: 'viewed',
+};
+
+/**
+ * Compact one-line usage summary for `secrets view` — each recorded event with
+ * its count and how long ago it last happened ("accessed 42× (last 2h ago) ·
+ * exported 3× (last 1d ago)"). Empty string when nothing has been recorded yet.
+ * Pure — unit-tested.
+ */
+export function formatUsageLine(summary: BundleUsageSummary | undefined): string {
+  if (!summary || summary.total === 0) return '';
+  const parts: string[] = [];
+  for (const ev of SECRET_USAGE_EVENTS) {
+    const stat = summary.events[ev];
+    if (stat.count === 0) continue;
+    const age = stat.last ? relativeAge(stat.last) : null;
+    parts.push(`${USAGE_EVENT_LABELS[ev]} ${stat.count}×${age ? ` (last ${age})` : ''}`);
+  }
+  return parts.join(' · ');
+}
+
+/**
+ * The held-state line for `secrets view`: whether the secrets-agent currently
+ * holds this bundle (so reads are prompt-free) and for how long, or that Touch
+ * ID is required on the next read. Only meaningful for keychain bundles on macOS
+ * — file/vault backends have no broker to hold, and a `never`-policy bundle is
+ * always readable — so both return an empty line and the caller skips it.
+ * `heldExpiresAt` is the max expiry across every held scope.
+ */
+export function renderViewStatusLine(b: SecretsBundle, heldExpiresAt: number | null): string {
+  if (process.platform !== 'darwin') return '';
+  if ((b.backend ?? 'keychain') !== 'keychain') return '';
+  if (bundlePolicy(b) === 'never') return '';
+  if (heldExpiresAt && heldExpiresAt > Date.now()) {
+    return chalk.green(`status:     unlocked (held ${compactRemaining(heldExpiresAt)}; reads are prompt-free until it locks)`);
+  }
+  return chalk.gray('status:     locked (Touch ID required on the next read; `agents secrets unlock` holds it)');
+}
+
 /**
  * The EXPIRING cell. Counts keys needing attention — already expired plus due
  * within 30 days — and colours by the worst of the two: red once anything has
@@ -936,8 +991,12 @@ export function registerSecretsCommands(program: Command): void {
       # Inject the bundle into an agent run
       agents run claude "deploy the worker" --secrets prod
 
-      # See what's in the bundle (values masked); shows its prompt policy
+      # See what's in the bundle (values masked); shows its policy, held state, and usage
       agents secrets view prod
+
+      # Order the list by how recently / how often each bundle is used
+      agents secrets list --sort used
+      agents secrets list --sort uses
 
       # Stop a noisy automation bundle from prompting every run: ask once a week
       agents secrets policy prod hold
@@ -955,6 +1014,17 @@ export function registerSecretsCommands(program: Command): void {
       Bundles are containers; secrets are the variables inside them. Keychain values
       never touch disk in plaintext. Every item is device-local and gated by Touch ID
       or device passcode; cross-machine sync is handled by 'agents secrets push/pull'.
+
+      Naming: name a bundle after the thing it holds credentials for, so an agent can
+      guess it without listing. For a website, use its domain WITH the real suffix —
+      'stripe.com', 'openai.ai', 'github.com'. For a desktop app, use the app's binary
+      suffix — 'slack.app' (macOS) or 'photoshop.exe' (Windows). Always pass
+      '--description' so 'list' / 'view' explain the bundle without opening it; an
+      undescribed bundle prints a "No description found" nudge. 'view' also shows
+      whether the bundle is currently unlocked (held by the agent) and how often / how
+      recently it has been created, imported, exported, viewed, and accessed;
+      'list --sort used|uses' orders by recency / frequency, and
+      'agents secrets activity [bundle]' prints the recent value-free event timeline.
 
       Touch ID noise: macOS pops a prompt per bundle per process. Each bundle has
       a prompt policy, shown in the POLICY column of 'agents secrets list':
@@ -986,7 +1056,7 @@ export function registerSecretsCommands(program: Command): void {
   });
 
   registerCommandGroups(cmd, [
-    { title: 'Bundle commands', names: ['list', 'view', 'create', 'rename', 'describe', 'delete'] },
+    { title: 'Bundle commands', names: ['list', 'view', 'activity', 'create', 'rename', 'describe', 'delete'] },
     { title: 'Secret commands', names: ['add', 'rotate', 'remove', 'import', 'export'] },
     { title: 'Agent commands', names: ['start', 'stop', 'unlock', 'lock', 'status', 'policy'] },
     { title: 'Raw item commands', names: ['get', 'set'] },
@@ -1012,7 +1082,7 @@ export function registerSecretsCommands(program: Command): void {
     .option('--expired', 'Only bundles with at least one key whose expiry has already passed')
     .option('--expiring [days]', `Only bundles with a key falling due within N days (default ${DEFAULT_EXPIRING_DAYS})`)
     .option('--unused <duration>', 'Only bundles not read since this far back (e.g. 30d, 4w, 3mo). Never-used bundles always match')
-    .addOption(new Option('--sort <field>', 'Sort by: name (default), used, created, updated, expiry').choices([...SORT_FIELDS]))
+    .addOption(new Option('--sort <field>', 'Sort by: name (default), used (most recently used), uses (most frequently accessed), created, updated, expiry').choices([...SORT_FIELDS]))
     .option('-n, --limit <n>', 'Show at most this many bundles (after filtering and sorting)')
     .action(async (query: string | undefined, opts: SecretsListFilterOpts & {
       host?: string; hosts?: string; device?: string; devices?: string;
@@ -1061,11 +1131,19 @@ export function registerSecretsCommands(program: Command): void {
           /* broker not running — render policy without the countdown */
         }
       }
+      // Value-free usage read-model backs `--sort used|uses` and the --json
+      // `uses`/`usage` fields. Open the DB only when a caller actually needs it
+      // (a machine payload, or a usage-ranked sort) so a plain human `list`
+      // stays a pure keychain read.
+      const needUsage = Boolean(opts.json) || sortField === 'used' || sortField === 'uses';
+      const usage = needUsage ? getAllBundleUsage() : new Map<string, BundleUsageSummary>();
+      const usageHints = new Map<string, { lastUsedAt: string | null; uses: number }>();
+      for (const [name, s] of usage) usageHints.set(name, { lastUsedAt: s.lastUsedAt, uses: s.events.access.count });
       // Filter, sort, then cap — before the --json branch, so the machine
       // payload is the exact twin of the table (the sessions ordering rule).
       const now = Date.now();
       const matched = all.filter((b) => bundleMatchesFilter(b, filter, { held, now }));
-      const sorted = sortBundles(matched, sortField);
+      const sorted = sortBundles(matched, sortField, usageHints);
       const bundles = limit === undefined ? sorted : sorted.slice(0, limit);
       if (opts.json) {
         // Discovery payload for agents: metadata only, no secret values. Gated on
@@ -1093,6 +1171,11 @@ export function registerSecretsCommands(program: Command): void {
           // stale past timestamp as if the bundle were still warm, disagreeing
           // with the table and the filter about the very same bundle.
           heldExpiresAt: liveHold(held.get(b.name), now),
+          // Value-free usage from the read-model: `uses` is the recorded access
+          // (read/inject) count; `usage` is the full per-kind rollup. Null when
+          // nothing has been recorded yet.
+          uses: usage.get(b.name)?.events.access.count ?? 0,
+          usage: usage.get(b.name) ?? null,
         }));
         process.stdout.write(JSON.stringify(payload) + '\n');
         return;
@@ -1130,6 +1213,9 @@ export function registerSecretsCommands(program: Command): void {
       # Everything, newest-used first
       agents secrets list --sort used
 
+      # Order by how often each bundle is read (most-accessed first)
+      agents secrets list --sort uses
+
       # Find one by name or description
       agents secrets list github
 
@@ -1164,6 +1250,53 @@ export function registerSecretsCommands(program: Command): void {
       - --unused matches bundles never read at all, not just old ones.
       - Filters apply before --json, so the JSON is the exact twin of the table.
       - Filters are forwarded over --host, so a remote list narrows the same way.
+      - --sort used|uses read the value-free usage read-model (~/.agents/secrets/secrets.db); see 'agents secrets activity'.
+    `,
+  });
+
+  const activityCmd = cmd
+    .command('activity [name]')
+    .description('Show the recent value-free usage timeline (created / imported / exported / viewed / accessed / unlocked) for one bundle, or across all bundles')
+    .option('-n, --limit <n>', 'Show at most this many events (default 20)')
+    .option('--json', 'Emit machine-readable JSON (metadata only — never secret values)')
+    .action((name: string | undefined, opts: { limit?: string; json?: boolean }) => {
+      let limit = opts.limit === undefined ? 20 : Number(opts.limit);
+      if (!Number.isInteger(limit) || limit < 1) {
+        console.error(chalk.red(`Invalid --limit '${opts.limit}'. Use a whole number of events, e.g. --limit 50.`));
+        process.exit(1);
+      }
+      const events = getUsageHistory(name, limit);
+      if (opts.json) {
+        process.stdout.write(JSON.stringify(events) + '\n');
+        return;
+      }
+      if (events.length === 0) {
+        console.log(chalk.gray(name ? `No recorded activity for '${name}'.` : 'No recorded secrets activity yet.'));
+        return;
+      }
+      for (const e of events) {
+        const who = e.agent ? chalk.gray(` by ${e.agent}`) : '';
+        const where = e.source ? chalk.gray(` (${e.source}${e.host ? ` ${e.host}` : ''})`) : '';
+        const bundleTag = name ? '' : chalk.cyan(` ${e.bundle}`);
+        console.log(`${chalk.gray(relativeAge(e.ts).padEnd(10))} ${chalk.bold(e.event.padEnd(8))}${bundleTag}${who}${where}`);
+      }
+    });
+
+  setHelpSections(activityCmd, {
+    examples: `
+      # The recent value-free event timeline across every bundle
+      agents secrets activity
+
+      # Just one bundle, more history
+      agents secrets activity anthropic.com --limit 50
+
+      # Machine-readable
+      agents secrets activity anthropic.com --json
+    `,
+    notes: `
+      - Reads the value-free usage read-model (~/.agents/secrets/secrets.db), fed off the
+        same emitSecretAudit chokepoint as 'agents events'. Never a secret value.
+      - History is bounded to the last 90 days; the full audit trail is 'agents events --module secrets'.
     `,
   });
 
@@ -1207,6 +1340,28 @@ export function registerSecretsCommands(program: Command): void {
           process.exit(1);
         }
         const entries = describeBundle(bundle);
+        // Value-free usage read-model (per-kind counts + recency + per-agent) for
+        // both the human and --json views. Read before recording this view so the
+        // just-happened view isn't counted in its own summary.
+        const usage = getBundleUsage(bundle.name);
+        // Is the secrets-agent currently holding this bundle? A held bundle reads
+        // prompt-free. macOS keychain only; take the max expiry across every scope
+        // it's held under. Soft-fails to "not held" if the broker is down.
+        let heldExpiresAt: number | null = null;
+        if (process.platform === 'darwin' && (bundle.backend ?? 'keychain') === 'keychain') {
+          try {
+            for (const e of await agentStatus()) {
+              if (e.name === bundle.name && (heldExpiresAt === null || e.expiresAt > heldExpiresAt)) {
+                heldExpiresAt = e.expiresAt;
+              }
+            }
+          } catch {
+            /* broker not running — render as not held */
+          }
+        }
+        // Record the inspection through the ONE chokepoint (events.jsonl + the
+        // usage read-model). Value-free; a masked `view` is metadata only.
+        emitSecretAudit({ event: 'secrets.view', bundle: bundle.name, operation: opts.json ? 'view --json' : 'view', source: 'view', status: 'success' });
         if (opts.json) {
           // Machine-readable discovery for agents. Values are null unless --reveal
           // (which still routes through the same non-TTY/plaintext gate + audit
@@ -1272,6 +1427,11 @@ export function registerSecretsCommands(program: Command): void {
               createdAt: bundle.created_at ?? null,
               updatedAt: bundle.updated_at ?? null,
               lastUsed: bundle.last_used ?? null,
+              // Held state + value-free usage rollup, same data the human view
+              // shows. `heldExpiresAt` is null when the bundle is not held.
+              heldExpiresAt,
+              usage: usage ?? null,
+              uses: usage?.events.access.count ?? 0,
               revealed: reveal,
               keys,
             }) + '\n',
@@ -1279,7 +1439,13 @@ export function registerSecretsCommands(program: Command): void {
           return;
         }
         console.log(chalk.bold(bundle.name));
-        if (bundle.description) console.log(chalk.gray(safePrint(bundle.description)));
+        if (bundle.description) {
+          console.log(chalk.gray(safePrint(bundle.description)));
+        } else {
+          // A described bundle is self-documenting for the next agent/human that
+          // reads it. Nudge — never block — toward adding one.
+          console.log(chalk.yellow(`No description found. Add one: agents secrets describe ${bundle.name} "what this bundle is for"`));
+        }
         if (bundle.allow_exec) console.log(chalk.yellow('allow_exec: true'));
         if (bundle.backend === 'file') console.log(chalk.gray('backend: file (passphrase-encrypted; reads need AGENTS_SECRETS_PASSPHRASE, no Touch ID)'));
         if (bundle.backend === 'vault') console.log(chalk.gray('storage: synced (age-encrypted ~/.agents/vault.age; needs agents login)'));
@@ -1295,9 +1461,17 @@ export function registerSecretsCommands(program: Command): void {
               : chalk.gray('policy: always (asks for Touch ID every time — never auto-held)'),
           );
         }
+        const statusLine = renderViewStatusLine(bundle, heldExpiresAt);
+        if (statusLine) console.log(statusLine);
         if (bundle.created_at) console.log(chalk.gray(`created_at: ${bundle.created_at} (${humanAge(bundle.created_at)})`));
         if (bundle.updated_at) console.log(chalk.gray(`updated_at: ${bundle.updated_at} (${humanAge(bundle.updated_at)})`));
         if (bundle.last_used) console.log(chalk.gray(`last_used:  ${bundle.last_used} (${humanAge(bundle.last_used)})`));
+        const usageLine = formatUsageLine(usage);
+        if (usageLine) console.log(chalk.gray(`usage:      ${usageLine}`));
+        if (usage && usage.byAgent.length > 0) {
+          const top = usage.byAgent.slice(0, 3).map((a) => `${a.agent} ${a.count}×`).join(', ');
+          console.log(chalk.gray(`by:         ${top}`));
+        }
         console.log();
         if (entries.length === 0) {
           console.log(chalk.gray('(no keys)'));
@@ -1456,8 +1630,8 @@ export function registerSecretsCommands(program: Command): void {
 
   cmd
     .command('create [name]')
-    .description('Create an empty bundle')
-    .option('--description <text>', 'Free-form description')
+    .description('Create an empty bundle. Name it after what it holds — a website by domain (stripe.com, openai.ai), a desktop app by its binary suffix (slack.app, photoshop.exe) — and pass --description.')
+    .option('--description <text>', 'Free-form description (recommended — an undescribed bundle prints a "No description found" nudge)')
     .option('--allow-exec', 'Allow exec: refs in this bundle (off by default)')
     .option('--policy <policy>', "prompt policy: hold (default, ask once per hold window — secrets.agent.holdMs, 7d by default), always (ask every time), or never (silent, NO biometry ACL — needs --i-understand). 'daily'/'session' are accepted aliases for 'hold'.")
     .addOption(new Option('--tier <policy>', 'deprecated alias for --policy').hideHelp())
@@ -1494,6 +1668,9 @@ export function registerSecretsCommands(program: Command): void {
           vars: {},
         };
         writeBundle(bundle);
+        // Record the create through the ONE chokepoint (events.jsonl + the usage
+        // read-model). Value-free — bundle name only.
+        emitSecretAudit({ event: 'secrets.create', bundle: resolvedName, operation: 'create', source: 'create', status: 'success' });
         const policyTag = bundlePolicy(bundle) === 'hold'
           ? 'policy: hold'
           : bundlePolicy(bundle) === 'always'
@@ -1505,6 +1682,11 @@ export function registerSecretsCommands(program: Command): void {
           backend === 'vault' ? 'synced' : null,
         ].filter(Boolean);
         console.log(chalk.green(`Bundle '${resolvedName}' created (${tags.join(', ')}).`));
+        if (!bundle.description) {
+          // A described bundle is self-documenting for the next agent that reads
+          // `list` / `view`. Nudge toward one at create time — never blocking.
+          console.log(chalk.yellow(`No description found. Add one: agents secrets describe ${resolvedName} "what this bundle is for"`));
+        }
         if (bundlePolicy(bundle) === 'never') {
           console.log(chalk.red('Stored without biometry protection — reads are silent. Automation-only; rotate anything sensitive out of it.'));
         }
@@ -1927,6 +2109,7 @@ Examples:
           const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
           const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced);
           const { added, skipped } = applyEnvToBundle(bundle, env, opts);
+          emitSecretAudit({ event: 'secrets.import', bundle: bundle.name, operation: 'import --from-file', source: 'file', status: 'success', keyCount: added });
           console.log(chalk.green(`Imported ${added} key(s) from file${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
           return;
         }
@@ -1941,6 +2124,7 @@ Examples:
           const env = await remoteResolveEnv(target, resolvedBundleName, { osLookupName: opts.host });
           const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced);
           const { added, skipped } = applyEnvToBundle(bundle, env, opts);
+          emitSecretAudit({ event: 'secrets.import', bundle: bundle.name, operation: 'import --from-ssh', source: 'ssh', host: opts.host, status: 'success', keyCount: added });
           console.log(chalk.green(`Imported ${added} key(s) from ${opts.host}${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
           return;
         }
@@ -1979,6 +2163,7 @@ Examples:
           const env: Record<string, string> = {};
           for (const { envKey, value } of secrets) env[envKey] = value;
           const { added, skipped } = applyEnvToBundle(bundle, env, opts);
+          emitSecretAudit({ event: 'secrets.import', bundle: bundle.name, operation: `import --from 1password:${vault}`, source: '1password', status: 'success', keyCount: added });
           if (opSkipped.length) {
             console.log(chalk.yellow(`Skipped ${opSkipped.length} item(s) with no importable fields.`));
           }
@@ -1987,6 +2172,7 @@ Examples:
           const raw = readImportDotenv(source.path);
           const pairs = parseDotenv(raw);
           const { added, skipped } = applyEnvToBundle(bundle, pairs, opts);
+          emitSecretAudit({ event: 'secrets.import', bundle: bundle.name, operation: 'import --from env-file', source: 'env-file', status: 'success', keyCount: added });
           console.log(chalk.green(`Imported ${added} key(s)${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
         }
       } catch (err) {
@@ -2021,7 +2207,7 @@ Examples:
     }) => {
       try {
         // `--device` is an alias for `--host` (fleet vocabulary parity with
-        // `agents activity`/`run --device`); fold it into the host list up front so
+        // `agents run --device`); fold it into the host list up front so
         // every downstream branch sees one resolved target list.
         if (opts.device?.length) opts.host = [...(opts.host ?? []), ...opts.device];
         const { readAndResolveBundleEnv, bundleToEnvPrefix, isReservedEnvName } = await import('../lib/secrets/bundles.js');
@@ -2037,6 +2223,7 @@ Examples:
           }
           const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: 'export --to-file', keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
           exportBundleToFile(env, opts.toFile, passphrase);
+          emitSecretAudit({ event: 'secrets.export', bundle: resolvedBundleName, operation: 'export --to-file', source: 'file', status: 'success', keyCount: Object.keys(env).length });
           console.log(chalk.green(`Exported ${Object.keys(env).length} key(s) to ${opts.toFile}`));
           return;
         }
@@ -2147,6 +2334,7 @@ Examples:
             const remoteMsg = (res.stdout || '').trim().split('\n').map((l) => l.trim()).filter(Boolean).pop();
             console.log(chalk.green(`${host} -> '${resolvedBundleName}': ${remoteMsg || `${keyCount} key(s) exported`}`));
           }
+          emitSecretAudit({ event: 'secrets.export', bundle: resolvedBundleName, operation: `export --host ${hosts.join(',')}`, source: 'ssh', host: hosts.join(','), status: failures > 0 ? 'error' : 'success', keyCount });
           if (failures > 0) process.exit(1);
           return;
         }
@@ -2177,6 +2365,7 @@ Examples:
           if (created) parts.push(`${created} created`);
           if (overwritten) parts.push(`${overwritten} overwritten`);
           if (skipped) parts.push(`${skipped} skipped (already exist, pass --force)`);
+          emitSecretAudit({ event: 'secrets.export', bundle: resolvedBundleName, operation: `export --to-1password ${vault}`, source: '1password', status: 'success', keyCount: created + overwritten });
           console.log(chalk.green(`Exported to 1Password vault '${vault}': ${parts.join(', ')}.`));
           return;
         }
@@ -2212,6 +2401,12 @@ Examples:
           const output = needsQuotes ? `'${v.replace(/'/g, `'\\''`)}'` : v;
           process.stdout.write(`export ${exportKey}=${output}\n`);
         }
+        // Record the shell export (the `eval "$(...)"` path). The `--format json`
+        // branch above is the machine-to-machine remote-resolve transport (already
+        // counted as an access on this machine by the resolve above), so it is
+        // deliberately not counted here as an export — that would tally every peer
+        // pull as an export.
+        emitSecretAudit({ event: 'secrets.export', bundle: resolvedBundleName, operation: 'export --plaintext', source: 'shell', status: 'success', keyCount: Object.keys(env).length });
       } catch (err) {
         if (isPromptCancelled(err)) return;
         console.error(chalk.red((err as Error).message));
@@ -2691,10 +2886,14 @@ Examples:
           return;
         }
         bundle.policy = next;
-        // writeBundle evicts any broker-held copy, so tightening hold ->
-        // always/never takes effect NOW: the next read re-prompts (`always`)
-        // or reads its no-ACL item directly (`never`).
-        writeBundle(bundle);
+        // Re-store the VALUE items so their keychain ACL matches the new tier —
+        // NOT just the metadata. macOS gates each read on the item's own ACL
+        // (SEC-19); a metadata-only write would leave a hold/always bundle's
+        // biometry ACL in place and keep popping Touch ID forever after a switch
+        // to `never`. reAclBundleItems reads once (the last prompt this bundle
+        // raises when tightening to `never`), rewrites no-ACL, and evicts any
+        // broker-held copy so the change takes effect on the very next read.
+        reAclBundleItems(bundle);
         console.log(chalk.green(`${bundle.name} policy set to ${next}.`));
         if (next === 'hold') {
           console.log(chalk.gray('Held by the secrets-agent for ~7 days after one unlock (auto-cache is on by default; disable with `secrets.agent.auto: false` in agents.yaml).'));

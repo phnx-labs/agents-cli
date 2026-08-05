@@ -22,6 +22,7 @@ import {
   getEnabledExtraRepos,
 } from './state.js';
 import { isNameActiveInResourceProfile, type ProfiledResourceKind } from './resource-profiles.js';
+import { resolveSnapshotSha } from './git.js';
 
 // ─── Resource resolver ────────────────────────────────────────────────────────
 
@@ -49,6 +50,32 @@ export interface ResolvedResource {
    * or the alias name (e.g. 'rush') for extra repos registered in agents.yaml.
    */
   source: string;
+  /**
+   * Absolute path to the DotAgents repo root this resource resolved from (the
+   * project/user/system/extra-repo dir — one level above the `kind`
+   * subdirectory). DotAgents repos are git-tracked (plugins.ts), so this pairs
+   * with {@link snapshotSha} to answer "which commit of which repo".
+   */
+  repoRoot: string;
+  /**
+   * Short HEAD sha of `repoRoot`'s git checkout, lazily resolved (a getter,
+   * not computed at construction) and memoized per repoRoot
+   * (`git.ts` `resolveSnapshotSha`) — a caller that never inspects provenance
+   * never pays for the git shell-out, and resolving many resources from the
+   * same repo pays for exactly one. `undefined` when `repoRoot` isn't a git
+   * repo (or has no commits).
+   */
+  readonly snapshotSha: string | undefined;
+}
+
+/** Build a ResolvedResource with a lazy, memoized `snapshotSha` getter. */
+function withProvenance(base: { name: string; path: string; source: string; repoRoot: string }): ResolvedResource {
+  return {
+    ...base,
+    get snapshotSha() {
+      return resolveSnapshotSha(base.repoRoot);
+    },
+  };
 }
 
 function profiledKind(kind: ResourceKind): ProfiledResourceKind | null {
@@ -113,21 +140,21 @@ export function resolveResource(
   const projectDir = getProjectAgentsDir(cwd);
   const extraRepos = getEnabledExtraRepos();
 
-  const candidates: Array<[string, string]> = [
-    ...(projectDir ? [[path.join(projectDir, kind), 'project'] as [string, string]] : []),
-    [path.join(getUserAgentsDir(), kind), 'user'],
-    [path.join(getSystemAgentsDir(), kind), 'system'],
-    ...extraRepos.map((e): [string, string] => [path.join(e.dir, kind), e.alias]),
+  const candidates: Array<[string, string, string]> = [
+    ...(projectDir ? [[path.join(projectDir, kind), 'project', projectDir] as [string, string, string]] : []),
+    [path.join(getUserAgentsDir(), kind), 'user', getUserAgentsDir()],
+    [path.join(getSystemAgentsDir(), kind), 'system', getSystemAgentsDir()],
+    ...extraRepos.map((e): [string, string, string] => [path.join(e.dir, kind), e.alias, e.dir]),
   ];
 
-  for (const [dir, source] of candidates) {
+  for (const [dir, source, repoRoot] of candidates) {
     if (!fs.existsSync(dir)) continue;
 
     // Try exact name (for directories like skills/subagents)
     const exactPath = path.join(dir, name);
     if (fs.existsSync(exactPath)) {
       if (resourceIsActive(kind, name, source)) {
-        return { name, path: exactPath, source };
+        return withProvenance({ name, path: exactPath, source, repoRoot });
       }
       continue;
     }
@@ -139,7 +166,7 @@ export function resolveResource(
       const withExt = exactPath + ext;
       if (fs.existsSync(withExt)) {
         if (resourceIsActive(kind, name, source)) {
-          return { name, path: withExt, source };
+          return withProvenance({ name, path: withExt, source, repoRoot });
         }
         continue;
       }
@@ -163,14 +190,14 @@ export function listResources(
   const projectDir = getProjectAgentsDir(cwd);
   const extraRepos = getEnabledExtraRepos();
 
-  const roots: Array<[string, string]> = [
-    ...(projectDir ? [[path.join(projectDir, kind), 'project'] as [string, string]] : []),
-    [path.join(getUserAgentsDir(), kind), 'user'],
-    [path.join(getSystemAgentsDir(), kind), 'system'],
-    ...extraRepos.map((e): [string, string] => [path.join(e.dir, kind), e.alias]),
+  const roots: Array<[string, string, string]> = [
+    ...(projectDir ? [[path.join(projectDir, kind), 'project', projectDir] as [string, string, string]] : []),
+    [path.join(getUserAgentsDir(), kind), 'user', getUserAgentsDir()],
+    [path.join(getSystemAgentsDir(), kind), 'system', getSystemAgentsDir()],
+    ...extraRepos.map((e): [string, string, string] => [path.join(e.dir, kind), e.alias, e.dir]),
   ];
 
-  for (const [dir, source] of roots) {
+  for (const [dir, source, repoRoot] of roots) {
     if (!fs.existsSync(dir)) continue;
     let entries: fs.Dirent[];
     try {
@@ -188,11 +215,12 @@ export function listResources(
       if (seen.has(rawName)) continue;
       if (!resourceIsActive(kind, rawName, source)) continue;
       seen.add(rawName);
-      results.push({
+      results.push(withProvenance({
         name: rawName,
         path: path.join(dir, entry.name),
         source,
-      });
+        repoRoot,
+      }));
     }
   }
 

@@ -5,17 +5,23 @@ import {
   loadR2Config,
   isSyncConfigured,
   clearR2ConfigCache,
-  RESOLVE_RETRY_COOLDOWN_MS,
   SYNC_BUNDLE,
 } from './config.js';
 
 /**
- * Guards the resolution cache that stops the daemon's ~90s session-sync from
- * re-reading the biometry-gated `r2.backups` keychain bundle every cycle (the
- * Touch ID storm). Uses the in-memory keychain backend seam (same as
- * tier.test.ts) so the real readAndResolveBundleEnv path runs without a real
- * keychain — `gets` counts how often the backend is actually read, which is the
- * proxy for "would this prompt for Touch ID again?".
+ * Guards the session-transport secret read. Two invariants:
+ *   1. The resolution cache stops the daemon's ~90s cycle from re-reading the
+ *      `r2.backups` keychain bundle every cycle (the read-frequency storm).
+ *   2. SEC-13: the read is `agentOnly` — it NEVER pops Touch ID. A `never`/no-ACL
+ *      bundle resolves silently; a locked `hold`/`always` bundle throws the
+ *      "unlock" error, which isSyncConfigured catches and degrades to
+ *      no-transport (sync disabled) with no prompt and no crash.
+ *
+ * Uses the in-memory keychain backend seam so the real readAndResolveBundleEnv
+ * path runs without a real keychain. `gets` counts backend reads. Note a locked
+ * bundle still does ONE no-ACL metadata read (the policy guard's readBundle) and
+ * then THROWS before the biometry-gated batch read — so a locked-bundle read can
+ * never prompt, and "no prompt" is proven by the throw firing, not by gets===0.
  */
 class CountingBackend implements KeychainBackend {
   store = new Map<string, string>();
@@ -39,24 +45,20 @@ beforeEach(() => {
   be = new CountingBackend();
   prev = setKeychainBackendForTest(be);
   process.env.AGENTS_SECRETS_NO_AGENT = '1'; // force keychain path, skip secrets-agent
-  // The bun/vitest runner has no TTY, so isHeadlessSecretsContext() would treat
-  // resolveR2Config as headless (agentOnly → broker-only) and skip the simulated
-  // keychain backend. Force the interactive/direct-read path so `gets` still
-  // counts real backend reads — the daemon itself has no such override, so in
-  // production this resolves broker-only as intended.
-  process.env.AGENTS_SECRETS_NO_PROMPT = '0';
   clearR2ConfigCache();
 });
 afterEach(() => {
   setKeychainBackendForTest(prev);
   delete process.env.AGENTS_SECRETS_NO_AGENT;
-  delete process.env.AGENTS_SECRETS_NO_PROMPT;
   clearR2ConfigCache();
 });
 
-function writeValidBundle(): void {
+/** A complete, VALID r2.backups bundle. `policy` decides whether the agentOnly
+ *  read resolves silently (`never`, no-ACL) or throws (`hold`/`always`, locked). */
+function writeValidBundle(policy: SecretsBundle['policy'] = 'never'): void {
   const b: SecretsBundle = {
     name: SYNC_BUNDLE,
+    policy,
     vars: {
       R2_ACCOUNT_ID: 'acct123',
       R2_BUCKET_NAME: 'agents-sessions',
@@ -68,20 +70,21 @@ function writeValidBundle(): void {
 }
 
 describe('R2 config resolution cache', () => {
-  it('reads the keychain once across many loadR2Config calls', () => {
-    writeValidBundle();
+  it('reads the keychain once across many loadR2Config calls (never/no-ACL bundle resolves silently)', () => {
+    writeValidBundle('never');
     const a = loadR2Config();
+    const afterFirst = be.gets; // the one resolving read (meta + batch)
     const b1 = loadR2Config();
     const c = loadR2Config();
     expect(a.bucket).toBe('agents-sessions');
     expect(a.endpoint).toBe('https://acct123.r2.cloudflarestorage.com');
     expect(b1).toBe(a); // memoized: same object
     expect(c).toBe(a);
-    expect(be.gets).toBe(1); // only the first call touched the backend
+    expect(be.gets).toBe(afterFirst); // memoized: no further backend reads
   });
 
   it('lets isSyncConfigured short-circuit once resolved (no re-read)', () => {
-    writeValidBundle();
+    writeValidBundle('never');
     expect(isSyncConfigured()).toBe(true);
     const after = be.gets;
     expect(isSyncConfigured()).toBe(true);
@@ -90,45 +93,88 @@ describe('R2 config resolution cache', () => {
   });
 
   it('clearR2ConfigCache forces a fresh read (credential rotation / SIGHUP)', () => {
-    writeValidBundle();
+    writeValidBundle('never');
     loadR2Config();
-    expect(be.gets).toBe(1);
+    const afterFirst = be.gets;
+    expect(afterFirst).toBeGreaterThan(0);
     clearR2ConfigCache();
     loadR2Config();
-    expect(be.gets).toBe(2);
+    expect(be.gets).toBeGreaterThan(afterFirst); // re-read after cache cleared
   });
 
   it('re-checks an ABSENT bundle every cycle (never prompts, fast pickup)', () => {
     // No bundle written → "not found" → must keep polling so a later
     // `agents secrets add` is picked up promptly. A missing item never prompts.
     expect(isSyncConfigured(1_000)).toBe(false);
+    const afterOne = be.gets;
     expect(isSyncConfigured(2_000)).toBe(false);
-    expect(be.gets).toBe(2); // re-read each call, no backoff
+    expect(be.gets).toBeGreaterThan(afterOne); // re-read each call, no backoff
+  });
+});
+
+describe('session-sync SEC-13: agentOnly read never prompts, degrades on a locked bundle', () => {
+  it('a LOCKED hold bundle degrades to no-transport: isSyncConfigured false, NO throw propagates', () => {
+    // A biometry-gated (`hold`) bundle that the broker does not hold. With the
+    // agentOnly read, the policy guard throws "unlock r2.backups"; isSyncConfigured
+    // swallows the throw and reports the transport as unconfigured (sync disabled).
+    writeValidBundle('hold');
+    expect(() => isSyncConfigured()).not.toThrow();
+    expect(isSyncConfigured()).toBe(false);
   });
 
-  it('backs off after a prompt-bearing failure so it does not re-storm', () => {
-    // A present-but-incomplete bundle resolves the meta (a real keychain read
-    // that would prompt) then fails validation — exactly the case we must not
-    // retry every 90s.
-    writeBundle({ name: SYNC_BUNDLE, vars: { R2_ACCOUNT_ID: 'acct123' } });
+  it('the LOCKED read throws BEFORE the biometry-gated batch read — it can never prompt', () => {
+    // The only prompting read is the batch getKeychainTokens; the policy guard
+    // throws before it. The batch read would read the 4 R2 secret items on top of
+    // the meta item — a silent `never` bundle reads meta + batch (>=2). A locked
+    // bundle stops at the guard's single no-ACL meta read, so it reads strictly
+    // fewer items and never reaches the gated batch. Proven by comparing counts.
+    const beSilent = new CountingBackend();
+    setKeychainBackendForTest(beSilent);
+    clearR2ConfigCache();
+    writeValidBundle('never');
+    loadR2Config();
+    const silentGets = beSilent.gets; // meta + gated batch
 
-    const t0 = 1_000_000;
-    expect(isSyncConfigured(t0)).toBe(false);
-    expect(be.gets).toBe(1); // read once (the failing attempt)
-
-    // Within the cooldown: do NOT re-read (would re-prompt).
-    expect(isSyncConfigured(t0 + RESOLVE_RETRY_COOLDOWN_MS - 1)).toBe(false);
-    expect(be.gets).toBe(1);
-
-    // After the cooldown: allowed to try again.
-    expect(isSyncConfigured(t0 + RESOLVE_RETRY_COOLDOWN_MS + 1)).toBe(false);
-    expect(be.gets).toBe(2);
+    const beLocked = new CountingBackend();
+    setKeychainBackendForTest(beLocked);
+    clearR2ConfigCache();
+    writeValidBundle('hold');
+    expect(() => loadR2Config()).toThrow();
+    // Restore the shared backend for afterEach.
+    setKeychainBackendForTest(be);
+    // The locked read stopped before the gated batch → strictly fewer reads.
+    expect(beLocked.gets).toBeLessThan(silentGets);
   });
 
-  it('recovers immediately once the bundle becomes valid after a cooldown', () => {
+  it('loadR2Config on a LOCKED hold bundle throws the actionable "unlock" hint (not a silent no-op)', () => {
+    writeValidBundle('hold');
+    expect(() => loadR2Config()).toThrow(/not unlocked in the secrets agent/);
+    expect(() => loadR2Config()).toThrow(/agents secrets unlock r2\.backups/);
+  });
+
+  it('a LOCKED bundle is re-checked each cycle (no cooldown) and recovers once made no-ACL', () => {
+    writeValidBundle('hold');
+    expect(isSyncConfigured(1_000)).toBe(false);
+    const afterOne = be.gets;
+    expect(isSyncConfigured(2_000)).toBe(false); // no backoff — re-checked
+    expect(be.gets).toBeGreaterThan(afterOne);
+    // User runs `agents secrets policy r2.backups never` → now readable silently.
+    writeValidBundle('never');
+    expect(isSyncConfigured(3_000)).toBe(true);
+    expect(loadR2Config().bucket).toBe('agents-sessions');
+  });
+
+  it('an always-policy (prompt-every-time) bundle also degrades, never throws through isSyncConfigured', () => {
+    writeValidBundle('always');
+    expect(() => isSyncConfigured()).not.toThrow();
+    expect(isSyncConfigured()).toBe(false);
+    expect(() => loadR2Config()).toThrow(/not unlocked in the secrets agent/);
+  });
+
+  it('recovers immediately once an absent bundle becomes valid (no-ACL)', () => {
     const t0 = 5_000_000;
     expect(isSyncConfigured(t0)).toBe(false); // absent
-    writeValidBundle();
+    writeValidBundle('never');
     // absent path does not back off, so the very next check resolves
     expect(isSyncConfigured(t0 + 1)).toBe(true);
     expect(loadR2Config().bucket).toBe('agents-sessions');

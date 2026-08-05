@@ -32,8 +32,12 @@ import {
   isInsideGitWorkTree,
   parseRunAccountPickerRequest,
   runAccountPickerConflicts,
+  runAutoDefaultsToAffinity,
+  hostInteractiveNeedsCorrelationId,
+  RUN_AUTO_KEYWORD,
 } from './exec.js';
 import { isHostPinned, recordScannedKeys } from '../lib/devices/known-hosts.js';
+import { ALL_AGENT_IDS } from '../lib/agents.js';
 
 describe('degraded run governance mode', () => {
   it('records the resolved writable mode in the audit chain', () => {
@@ -343,5 +347,141 @@ describe('hostTargetGiven — the --host alias family (the --terminal reject gua
       'c',
       'd',
     ]);
+  });
+});
+
+describe('agents run auto — the reserved harness keyword (RUSH-2132)', () => {
+  it('runAutoDefaultsToAffinity: no host flag → affinity default; any host flag pins the host layer', () => {
+    expect(runAutoDefaultsToAffinity({})).toBe(true);
+    expect(runAutoDefaultsToAffinity({ host: 'yosemite-s0' })).toBe(false);
+    expect(runAutoDefaultsToAffinity({ device: 'yosemite-s0' })).toBe(false);
+    expect(runAutoDefaultsToAffinity({ on: 'yosemite-s0' })).toBe(false);
+    expect(runAutoDefaultsToAffinity({ computer: 'yosemite-s0' })).toBe(false);
+  });
+
+  it('runAutoDefaultsToAffinity: a host-dispatched run never re-runs affinity (no chain-hopping)', () => {
+    expect(runAutoDefaultsToAffinity({}, { AGENTS_RUN_AUTO_HOST_RESOLVED: '1' })).toBe(false);
+  });
+
+  it('the keyword does not collide with a real harness id today', () => {
+    expect(RUN_AUTO_KEYWORD).toBe('auto');
+    // If this ever fails, a harness registered the id `auto` and the run-auto
+    // keyword must be renamed — the action fails loud on the collision.
+    expect(ALL_AGENT_IDS).not.toContain('auto');
+  });
+
+  it('agents run auto with zero installed harnesses exits nonzero with the no-healthy contract message', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'run-auto-empty-'));
+    try {
+      // Fresh HOME → no installed harness versions → the harness layer finds
+      // zero candidates and must fail loud instead of launching anything. The
+      // .agents/.system fixture gets past the first-run setup gate (same shape
+      // as the governance-mode test above).
+      fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
+      fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), 'agents: {}\n');
+      const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+      const result = spawnSync(
+        'node',
+        ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'auto', 'probe', '--mode', 'plan', '--quiet', '--cwd', root],
+        {
+          cwd: path.resolve(import.meta.dirname, '..', '..'),
+          env: { ...process.env, HOME: root },
+          encoding: 'utf8',
+        },
+      );
+      expect(result.status).toBe(1);
+      // The watchdog contract: literal `no healthy` + `resets` on the error line.
+      expect(result.stderr).toContain('no healthy');
+      expect(result.stderr).toContain('resets');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('interactive host dispatch — run auto session correlation (RUSH-2132 review #5)', () => {
+  it('run auto ALWAYS mints a correlation launch id, even with an explicit --session-id', () => {
+    // The harness is picked on the remote; the explicit id is only adopted by a
+    // claude pick. Pre-registering it would strand a stale index entry when the
+    // pick lands elsewhere — so the launch-id join must resolve the REAL id.
+    expect(hostInteractiveNeedsCorrelationId('auto', 'explicit-id', undefined)).toBe(true);
+    expect(hostInteractiveNeedsCorrelationId('auto', undefined, undefined)).toBe(true);
+  });
+
+  it('resume never mints (the id is already known), for auto and named harnesses alike', () => {
+    expect(hostInteractiveNeedsCorrelationId('auto', 'explicit-id', 'resume-id')).toBe(false);
+    expect(hostInteractiveNeedsCorrelationId('claude', undefined, 'resume-id')).toBe(false);
+  });
+
+  it('named harnesses keep the existing matrix: claude trusts its forced id, tracked agents join, untracked skip', () => {
+    expect(hostInteractiveNeedsCorrelationId('claude', 'forced-id', undefined)).toBe(false);
+    expect(hostInteractiveNeedsCorrelationId('codex', undefined, undefined)).toBe(true);
+    expect(hostInteractiveNeedsCorrelationId('amp', undefined, undefined)).toBe(false);
+  });
+});
+
+describe('cost tier on a profile run is discarded, not resolved against the host harness', () => {
+  it('warns loud and drops the tier so the host-harness catalog model never reaches the profile endpoint', () => {
+    // A profile's model comes from its endpoint (ANTHROPIC_MODEL), not the host
+    // harness catalog. `--model cheap` used to resolve against the HOST harness
+    // (claude -> claude-haiku-*) and forward that id to the profile's endpoint,
+    // which doesn't ship it. The guard must discard the tier with a standout
+    // warning BEFORE the host binary is spawned, leaving the profile's own model.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'exec-profile-tier-'));
+    const binDir = path.join(root, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', 'profiles'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), 'agents: {}\n');
+    fs.writeFileSync(
+      path.join(root, '.agents', 'profiles', 'kimiprofile.yml'),
+      [
+        'name: kimiprofile',
+        'host:',
+        '  agent: claude',
+        'env:',
+        '  ANTHROPIC_MODEL: kimi-k2-thinking',
+        '  ANTHROPIC_BASE_URL: https://example.invalid',
+        'provider: claude',
+        'forkedFrom: claude',
+        '',
+      ].join('\n'),
+    );
+    // Fake `claude` host binary: record the model-bearing env + argv it was spawned
+    // with (into $HOME/spawn.json), then emit a benign success line so the run ends.
+    const spawnLog = path.join(root, 'spawn.json');
+    const claudeBin = path.join(binDir, process.platform === 'win32' ? 'claude.cmd' : 'claude');
+    fs.writeFileSync(
+      claudeBin,
+      process.platform === 'win32'
+        ? '@echo {"type":"result","subtype":"success","is_error":false,"result":"OK"}\r\n'
+        : '#!/bin/sh\n'
+          + 'node -e \'require("fs").writeFileSync(process.env.HOME + "/spawn.json", JSON.stringify({argv: process.argv.slice(2), model: process.env.ANTHROPIC_MODEL}))\'\n'
+          + 'printf \'{"type":"result","subtype":"success","is_error":false,"result":"OK"}\\n\'\n',
+      { mode: 0o755 },
+    );
+    try {
+      const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+      const result = spawnSync(
+        'node',
+        ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'kimiprofile', 'probe', '--model', 'cheap', '--mode', 'plan', '--cwd', root],
+        {
+          cwd: path.resolve(import.meta.dirname, '..', '..'),
+          env: { ...process.env, HOME: root, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` },
+          encoding: 'utf8',
+        },
+      );
+      // The guard runs before any spawn, so the standout warning is the invariant.
+      expect(result.stderr).toContain("cost tiers don't apply to custom harness 'kimiprofile'");
+      // When the host binary is reached, it must carry the profile's own model, never
+      // a claude tier id resolved from the host harness catalog.
+      if (fs.existsSync(spawnLog)) {
+        const spawned = JSON.parse(fs.readFileSync(spawnLog, 'utf8')) as { argv: string[]; model?: string };
+        expect(spawned.model).toBe('kimi-k2-thinking');
+        expect(JSON.stringify(spawned.argv)).not.toMatch(/claude-(haiku|sonnet|opus)/);
+      }
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

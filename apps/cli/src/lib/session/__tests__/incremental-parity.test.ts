@@ -355,3 +355,44 @@ describe('incremental parity — partial trailing line', () => {
     expectScanParity(step3.scan, full);
   });
 });
+
+describe('incremental parity — skill/slash-command usage (#12)', () => {
+  // A Skill tool_use, a user-typed <command-name> wrapper, and a model-invoked
+  // SlashCommand tool_use — the three sources session_resource_usage draws on.
+  function skillAndCommandLines(): object[] {
+    return [
+      { type: 'user', timestamp: '2026-06-28T00:00:00.000Z', cwd: '/home/u/repo', message: { role: 'user', content: 'run the teams skill' } },
+      { type: 'assistant', timestamp: '2026-06-28T00:00:10.000Z', uuid: 'a-1', message: { id: 'msg_1', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: 'sk-1', name: 'Skill', input: { skill: 'teams' } }], usage: { input_tokens: 5, output_tokens: 5 } } },
+      { type: 'user', timestamp: '2026-06-28T00:00:20.000Z', message: { role: 'user', content: '<command-message>recap</command-message>\n<command-name>/recap</command-name>' } },
+      { type: 'assistant', timestamp: '2026-06-28T00:00:30.000Z', uuid: 'a-2', message: { id: 'msg_2', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: 'sk-2', name: 'Skill', input: { skill: 'teams' } }], usage: { input_tokens: 5, output_tokens: 5 } } },
+      { type: 'assistant', timestamp: '2026-06-28T00:00:40.000Z', uuid: 'a-3', message: { id: 'msg_3', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: 'sc-1', name: 'SlashCommand', input: { command: '/code:commit fix the bug' } }], usage: { input_tokens: 5, output_tokens: 5 } } },
+    ];
+  }
+
+  it('replaying across a split at EVERY line index equals a full parse, including skillsUsed/slashCommandsUsed', async () => {
+    const lines = skillAndCommandLines();
+    const fullSerialized = lines.map((l) => JSON.stringify(l));
+    for (let k = 1; k < fullSerialized.length; k++) {
+      const chunkA = fullSerialized.slice(0, k).join('\n');
+      const chunkB = fullSerialized.slice(k).join('\n');
+      const { inc, full } = await replay([chunkA, chunkB]);
+      expectScanParity(inc, full);
+      expect(inc.skillsUsed, `split at ${k}`).toEqual(full.skillsUsed);
+      expect(inc.slashCommandsUsed, `split at ${k}`).toEqual(full.slashCommandsUsed);
+    }
+  });
+
+  it('a full parse tallies both skills and both slash-command sources correctly', async () => {
+    const full = await scanClaudeSession(await (async () => {
+      const fp = path.join(dir, 'skills-full.jsonl');
+      fs.writeFileSync(fp, jsonl(skillAndCommandLines()));
+      return fp;
+    })());
+    expect(full.skillsUsed).toEqual([{ name: 'teams', count: 2 }]);
+    // Both have count 1, so tie-broken alphabetically: '/code:commit' < '/recap'.
+    expect(full.slashCommandsUsed).toEqual([
+      { name: '/code:commit', count: 1 },
+      { name: '/recap', count: 1 },
+    ]);
+  });
+});

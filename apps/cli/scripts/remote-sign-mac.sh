@@ -14,8 +14,8 @@
 #   - bin/Agents CLI.app   — the keychain helper (swiftc universal → codesign
 #                            with entitlements + embedded provisioning profile →
 #                            notarize → staple). See build-keychain-helper.sh.
-#   - bin/MenubarHelper.app — the menu-bar status item (swift build → codesign,
-#                            NO notarization). See menubar/scripts/build.sh.
+#   - bin/MenubarHelper.app — the menu-bar status item (swift build → codesign →
+#                            notarize → staple). See menubar/scripts/build.sh.
 #
 # This script rsyncs the exact build INPUTS from THIS worktree to the home base,
 # runs the two Mac build scripts there under its headless signing creds, then
@@ -118,7 +118,7 @@ trap 'rm -f "$BUILD_SCRIPT"' EXIT
 . scripts/headless-sign-context.sh
 agents secrets exec apple.com -- bash -c '
   set -euo pipefail
-  echo "== menu-bar helper: swift build + codesign =="
+  echo "== menu-bar helper: swift build + codesign + notarize + staple =="
   menubar/scripts/build.sh release
   # rm -rf first so a re-run does not nest the new .app INSIDE a stale
   # bin/MenubarHelper.app (cp -R into an existing dir), which corrupts the

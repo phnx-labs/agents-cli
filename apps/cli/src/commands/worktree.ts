@@ -11,9 +11,9 @@
  *   agents worktree prune                     -> removes every clean+merged one
  *
  * Worktrees live at <repo>/.agents/worktrees/<terminal-id>, on a branch
- * named agents/<terminal-id>. The branch starts at HEAD of the parent repo.
- * This matches the agent-system rule that keeps all coding-agent worktrees
- * under the repo-local .agents/ state directory.
+ * named agents/<terminal-id>. New branches start at the freshly-fetched
+ * origin/<default> (not local HEAD), matching lib/teams/worktree.ts and the
+ * agent-system rule that keeps coding-agent worktrees under .agents/.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -106,6 +106,27 @@ async function inspect(root: string, terminalId: string): Promise<SafetyReport> 
   return { exists, dirty, aheadOfUpstream, hasUpstream, branchMerged };
 }
 
+/** Resolve origin/HEAD → default branch name; falls back to `main`. */
+async function defaultBranch(root: string): Promise<string> {
+  try {
+    await execFileAsync('git', ['remote', 'set-head', 'origin', '--auto'], { cwd: root });
+  } catch {
+    // offline / no origin
+  }
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'],
+      { cwd: root },
+    );
+    const base = stdout.trim().replace(/^origin\//, '');
+    if (base) return base;
+  } catch {
+    // no origin/HEAD
+  }
+  return 'main';
+}
+
 async function provision(root: string, terminalId: string): Promise<string> {
   const wt = worktreePathFor(root, terminalId);
   const branch = branchNameFor(terminalId);
@@ -125,11 +146,28 @@ async function provision(root: string, terminalId: string): Promise<string> {
     branchExists = false;
   }
 
-  const args = branchExists
-    ? ['worktree', 'add', wt, branch]
-    : ['worktree', 'add', '-b', branch, wt, 'HEAD'];
+  if (branchExists) {
+    await execFileAsync('git', ['worktree', 'add', wt, branch], { cwd: root });
+    return wt;
+  }
 
-  await execFileAsync('git', args, { cwd: root });
+  // New branch: fetch + base on origin/<default>, never local HEAD (stale trap).
+  const base = await defaultBranch(root);
+  try {
+    await execFileAsync('git', ['fetch', 'origin'], { cwd: root });
+  } catch (err: any) {
+    const detail = (err?.stderr || err?.message || String(err)).toString().trim();
+    die(
+      `git fetch origin failed in ${root}` +
+        (detail ? `: ${detail}` : '') +
+        `. Cannot provision a worktree from a stale remote-tracking ref.`,
+    );
+  }
+  await execFileAsync(
+    'git',
+    ['worktree', 'add', '-b', branch, wt, `origin/${base}`],
+    { cwd: root },
+  );
   return wt;
 }
 

@@ -43,6 +43,27 @@ process.env.AGENTS_EVENTS_PATH = path.join(tmp, 'events.jsonl');
 // leaves HOME untouched (git and every other HOME consumer behave normally).
 process.env.AGENTS_DEVICES_DIR = path.join(tmp, 'devices');
 
+// NB: AGENTS_DAEMON_DIR is deliberately NOT set here. Tests that spawn a REAL
+// daemon (migrate.test.ts, daemon.test.ts) isolate it per-test via a unique
+// HOME and read HOME-based daemon paths; a global AGENTS_DAEMON_DIR would be
+// inherited by those spawned children (env: {...process.env}) and force them all
+// onto one shared daemon dir, colliding on the single-instance guard. The only
+// file that writes the daemon dir IN-PROCESS (daemon-self-heal.test.ts) sets
+// AGENTS_DAEMON_DIR itself, file-scoped, so its isolation never leaks here.
+
+// Hook shims/cache/logs + the disposable perf warehouse: every hook now
+// resolves through a generated shim (pass-through timing for matcher-only
+// hooks, see hooks/cache.ts), so any registrar test that calls
+// registerHooksToSettings(...) in-process — most of hooks.test.ts, no
+// subprocess HOME override — would otherwise write real shim scripts, cache
+// files, JSONL logs, and perf samples into the user's actual ~/.agents/.cache.
+// state.ts's getHookShimsDir/getHookCacheDir/getLogsDir/getPerfDir all read
+// these at call time; never set in production code.
+process.env.AGENTS_HOOK_SHIMS_DIR = path.join(tmp, 'hook-shims');
+process.env.AGENTS_HOOK_CACHE_DIR = path.join(tmp, 'hook-cache');
+process.env.AGENTS_LOGS_DIR = path.join(tmp, 'logs');
+process.env.AGENTS_PERF_DIR = path.join(tmp, 'perf');
+
 // Leak tripwire: the REAL events log must not grow while this fork runs.
 // CI-only — on a dev machine live agents append to it concurrently, so the
 // check would false-positive locally; CI homes are quiet.

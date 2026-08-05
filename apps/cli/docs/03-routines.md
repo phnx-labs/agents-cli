@@ -111,9 +111,8 @@ timeout: 10m
 runOnce: false                # true for one-shot jobs (--at)
 endAt: "2026-12-31T23:59:00Z" # optional: auto-disable on/after this time
 hostStrategy: local           # local | host | fleet | cloud (see Host placement strategy)
-devices:                      # optional: allowlist — each listed device fires independently
-  - yosemite-s0               # omit entirely (or --clear) for unrestricted
-  - mac-mini
+devices:                      # optional: the ONE device that owns this routine
+  - yosemite-s0               # omit entirely (or --clear) to run on every device
 # source:                     # set by `agents routines enable-project` / sync
 #   kind: project
 #   projectPath: /path/to/repo
@@ -415,12 +414,14 @@ schedule: "0 3 * * *"
 agent: claude
 devices:
   - yosemite-s0
-  - mac-mini
 prompt: "Drain the local work queue"
 ```
 
-Each listed machine fires the job **independently** on its own schedule — both
-`yosemite-s0` and `mac-mini` run their own copy, with their own run history.
+Only the **owner** fires the job — one copy, one run history. Ownership is the
+first device in normalized sort order, computed from the config alone, so every
+daemon agrees without coordination. Listing several devices is a misconfiguration
+(it used to fire the routine once per device) and is refused at creation; omit
+`devices:` entirely for a routine that genuinely belongs on every machine.
 A single-entry list is equivalent to an exclusive pin: `devices: [yosemite-s0]`
 restricts the job to one machine.
 
@@ -428,7 +429,7 @@ Or set the allowlist at creation with `--devices`:
 
 ```bash
 agents routines add drain --schedule "0 3 * * *" --agent claude \
-  --devices yosemite-s0,mac-mini --prompt "Drain the local work queue"
+  --devices yosemite-s0 --prompt "Drain the local work queue"
 ```
 
 `--devices` is validated against the registered fleet (`agents devices sync`).
@@ -447,8 +448,16 @@ Device names are compared against the local `machineId()` (normalized hostname, 
 shown by `agents devices`), so `Yosemite-S0` and `yosemite-s0.tailnet.ts.net` both
 match `yosemite-s0`.
 
+**A routine runs on exactly one device.** `devices:` is an allowlist, but only its
+**owner** fires — the first entry in normalized sort order. Ownership is derived from
+the config alone, so every daemon independently reaches the same answer with no lease
+and no coordination. Listing several devices is a misconfiguration: it used to fire the
+routine once per listed device (duplicate work, duplicate spend), so `add`/`devices --set`
+now reject it and `agents doctor` reports any that remain on disk.
+
 **Omitting `devices:` means unrestricted** — the job fires on every device running
-the scheduler. `--clear` restores unrestricted behavior (see below).
+the scheduler. That is the genuine fleet-wide case (`watchdog`, `check-updates`).
+`--clear` restores it (see below).
 
 On a device not in the allowlist the job is fully inert:
 
@@ -505,7 +514,7 @@ The picker starts with the current allowlist pre-checked. Confirm to overwrite.
 For scripting:
 
 ```bash
-agents routines devices drain --set yosemite-s0,mac-mini  # replace allowlist
+agents routines devices drain --set yosemite-s0            # set the owning device
 agents routines devices drain --clear                      # remove allowlist (unrestricted)
 ```
 
@@ -524,7 +533,7 @@ agents routines run drain --host yosemite-s0
 
 # Create a job pre-assigned to two hosts, then confirm it looks right on one
 agents routines add drain --schedule "0 3 * * *" --agent claude \
-  --devices yosemite-s0,mac-mini --prompt "Drain queue" --host yosemite-s0
+  --devices yosemite-s0 --prompt "Drain queue" --host yosemite-s0
 ```
 
 When you try to run a job on a host outside its allowlist, the CLI prints:
@@ -562,6 +571,13 @@ Those archives are indexed by `agents sessions` with `origin: "routine"`,
 `routineName`, and `routineRunId`. Use `agents sessions --routine --all` to list
 them, or `agents sessions <run-id>` to render the existing session summary view
 for a specific routine run.
+
+Archiving is per-agent (`ROUTINE_TRANSCRIPT_SPECS` in `runner.ts`, mirroring
+`SESSION_ROOT_SPECS` in `session/discover.ts`) and covers every on-disk session
+agent: claude, codex, cursor, gemini, antigravity, droid, kimi, grok. `opencode`
+is the one exception — its transcripts live in one incrementally-scanned SQLite
+db (`~/.local/share/opencode/opencode.db`), not a per-session file tree, so
+there's nothing for this mechanism to copy out.
 
 ### Claude auth for routines
 
@@ -779,6 +795,15 @@ and every 5 minutes** — a startup-only pass would miss a fire lost while the
 daemon stayed up but its event loop was wedged, or one lost across an OS suspend
 the process survived.
 
+Detection looks back far enough to see the routine's own period. The window widens
+week → month → quarter → year, and only when the narrower one finds nothing, so a
+dense schedule never walks more than a week of occurrences. A fixed one-week
+lookback silently skipped anything sparser: `0 9 1,13,25 * *` has 12-day gaps, so on
+10 of every 28 days it could not be evaluated at all.
+
+A routine past its `endAt`, and a one-shot (by flag *or* by schedule shape), is never
+caught up — catch-up replays a missed fire, it does not resurrect a retired routine.
+
 Catch-up is idempotent without a ledger: the `missed` record advances the overdue
 comparison, so the same missed fire is never reconsidered — across ticks, a daemon
 restart, or a restart storm.
@@ -895,7 +920,7 @@ Each execution creates a run directory with structured output:
         stderr.log                    # Error output
         exit-code                     # Exit status (0, 1, etc.)
         report.md                     # Extracted report
-        meta.json                     # { agent, version, mode, status, durationMs }
+        meta.json                     # RunMeta: { agent, version, mode, status, duration, ... }
 ```
 
 ### Desktop notifications
@@ -918,6 +943,13 @@ installed (Linux, or a machine that disabled it), delivery degrades to
 | **Finish** | The run reaches a terminal state | Always for agent/workflow; command routines notify only on **failure** |
 | **Overdue** | Daemon startup finds a missed recurring routine | Any overdue routine (`src/lib/overdue.ts`) |
 
+All three of the above fire from **inside** `runDaemon()`, so none of them can
+ever notice that the daemon itself has died — the exact outage that means no
+routine will fire again until someone restarts it. That gap is closed by a
+separate, daemon-independent watchdog in the menu-bar helper (which runs as its
+own launchd `KeepAlive` service): see
+[menubar.md → Daemon-down watchdog](menubar.md#daemon-down-watchdog).
+
 "Notable output" is folded into the single **Finish** notification, not sent as
 a third message: on success the body is the first line of `report.md` (the
 routine's user-facing result), on failure it is the error reason. So a normal
@@ -935,7 +967,7 @@ runs are finalized by the monitor sweep and do not emit one.
 agents routines list                  # List all jobs with next run + status
 agents routines list --host yosemite-s0  # List another device's routines
 agents routines add <name> --schedule "0 9 * * *" --agent claude --prompt "..."  # Inline
-agents routines add <name> --devices yosemite-s0,mac-mini --schedule "0 3 * * *" \
+agents routines add <name> --devices yosemite-s0 --schedule "0 3 * * *" \
   --agent claude --prompt "..."       # Add with device allowlist
 agents routines add <path.yml>        # Add from YAML file
 agents routines add <name> --at "14:30" --agent claude --prompt "..."            # One-shot
@@ -946,7 +978,7 @@ agents routines resume <name>         # Re-enable a paused job
 
 # Device allowlist management
 agents routines devices <name>                         # Interactive multi-select picker
-agents routines devices <name> --set yosemite-s0,mac-mini  # Replace allowlist
+agents routines devices <name> --set yosemite-s0           # Set the owning device
 agents routines devices <name> --clear                 # Remove allowlist (unrestricted)
 
 # Execution
@@ -954,6 +986,8 @@ agents routines run <name>            # Run immediately in foreground
 agents routines run <name> --host yosemite-s0  # Run on a specific remote device
 agents routines view <name>           # Show job config
 agents routines runs <name>           # View execution history (last 10)
+agents routines stats                 # Run count/failed/missed/avg/p50/p95 duration, every job
+agents routines stats <name>          # Same rollup, scoped to one job
 agents routines logs <name>           # Show concise summary from latest run
 agents routines logs <name> --run <id>  # Show specific run
 agents routines logs <name> --full    # Show raw stdout from latest run
@@ -996,7 +1030,12 @@ agents routines status    # Check health, PID, binary, heartbeat, and upcoming r
 
 The scheduler **auto-starts on the first `agents routines add`**, so in most cases you never invoke `start` manually. When you `add`, `remove`, `pause`, or `resume` a job, it auto-reloads -- no manual restart needed.
 
-`agents routines status` reports the scheduler as `running`, `wedged`, or `stopped`. A live PID whose heartbeat is more than three monitor ticks old is `wedged`; the status output includes the restart command. Both `routines list` and `routines status` also finalize orphaned `running` records before rendering. Run metadata records process birth time to reject recycled PIDs, and any run still active after 24 hours is finalized as a timeout.
+Scheduled fires are single-flight per routine. If the previous execution is still
+running, the next cron, catchup, or monitor fire exits without spawning another
+process. The claim is shared across CLI processes, so two simultaneous dispatchers
+cannot both pass the running-run check.
+
+`agents routines status` reports the scheduler as `running`, `wedged`, or `stopped`. A live PID whose heartbeat is more than three monitor ticks old is `wedged`; the status output includes the restart command. Both `routines list` and `routines status` also finalize orphaned `running` records before rendering. Run metadata records process birth time to reject recycled PIDs and persists the configured execution deadline. Detached children are killed when that deadline expires, including after a scheduler restart.
 
 The status output includes the resolved daemon binary. Startup rejects bun virtual-filesystem paths and warns when the binary lives under an ephemeral root — a git worktree, or a temporary directory (`/tmp`, `/var/folders`, `/dev/shm`) — because deleting that directory would strand the service. The daemon resolves its own job modules from the launch path, so a direct `agents __daemon-run` from such a build wedges every routine with `ENOENT` once the directory is removed; the warning fires both at spawn time (`validateDaemonBinary`) and at the daemon's own startup (`warnEphemeralDaemonRoot`), so a directly-launched daemon still surfaces the risk. Run it from the globally installed binary to root it at a stable version home.
 
@@ -1013,3 +1052,4 @@ The status output includes the resolved daemon binary. Startup rejects bun virtu
 | `parseAtTime()` | routines.ts | Parse --at time strings to cron |
 | `getLatestRun()` / `listRuns()` | routines.ts | Query execution history |
 | `jobRunsOnThisDevice()` | routines.ts | Check if job is eligible on current machine |
+| `routineStats()` | routines.ts | Fold `listRuns()` into `{count, failed, missed, avgMs, p50, p95}` — `agents routines stats` |

@@ -93,9 +93,22 @@ export function assertValidBranchName(branch: string): void {
  *
  * Prefer this over `git.push(remote, branch)` whenever the branch comes from
  * repo state rather than a hard-coded literal.
+ *
+ * Pass `targetBranch` to push the local `branch` to a differently-named remote
+ * branch (`git push origin <branch>:<targetBranch>`) — used when publishing the
+ * working tree to a branch other than the checked-out one.
  */
-export async function pushOrigin(git: SimpleGit, branch: string): Promise<void> {
+export async function pushOrigin(
+  git: SimpleGit,
+  branch: string,
+  targetBranch?: string,
+): Promise<void> {
   assertValidBranchName(branch);
+  if (targetBranch && targetBranch !== branch) {
+    assertValidBranchName(targetBranch);
+    await git.raw(['push', '--', 'origin', `${branch}:${targetBranch}`]);
+    return;
+  }
   await git.raw(['push', '--', 'origin', branch]);
 }
 
@@ -440,6 +453,43 @@ export function readRepoState(repoPath: string): RepoStateSnapshot | null {
   return { branch, head, dirty };
 }
 
+/** Memoized per repoRoot — a resolveResource()/listResources()/plugin-discovery
+ *  call that touches many resources from the SAME DotAgents repo must not shell
+ *  out to git once per resource. */
+const _snapshotShaCache = new Map<string, string | undefined>();
+
+/**
+ * The short HEAD sha of the git repo at `repoRoot` (`git -C <repoRoot>
+ * rev-parse --short HEAD`), for provenance — "which commit of this DotAgents
+ * repo was this resource/plugin resolved from". `undefined` when `repoRoot`
+ * isn't a git repo (or has no commits yet), never a throw.
+ *
+ * Deliberately synchronous + resolved once and cached: callers (resources.ts,
+ * plugins.ts) attach this as a lazy getter on the resolved object, so a
+ * consumer that never inspects provenance never pays for the git shell-out —
+ * see {@link ResolvedResource.snapshotSha} / {@link DiscoveredPlugin.snapshotSha}.
+ */
+export function resolveSnapshotSha(repoRoot: string): string | undefined {
+  const cached = _snapshotShaCache.get(repoRoot);
+  if (cached !== undefined || _snapshotShaCache.has(repoRoot)) return cached;
+  let sha: string | undefined;
+  try {
+    const raw = execFileSync('git', ['-C', repoRoot, 'rev-parse', '--short', 'HEAD'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim();
+    sha = raw || undefined;
+  } catch {
+    sha = undefined;
+  }
+  _snapshotShaCache.set(repoRoot, sha);
+  return sha;
+}
+
+/** Test seam: clear the memoized snapshot-sha cache between test cases. */
+export function _resetSnapshotShaCacheForTest(): void {
+  _snapshotShaCache.clear();
+}
+
 /**
  * Get the current GitHub username using gh CLI.
  * Returns null if gh is not installed or user is not authenticated.
@@ -510,6 +560,16 @@ export async function getRemoteUrl(repoPath: string): Promise<string | null> {
   } catch {
     /* not a git repo or no remotes */
     return null;
+  }
+}
+
+/** The repo's checked-out branch, or 'main' on a detached HEAD / read failure. */
+export async function getCurrentBranch(repoPath: string): Promise<string> {
+  try {
+    const status = await simpleGit(repoPath).status();
+    return status.current || 'main';
+  } catch {
+    return 'main';
   }
 }
 
@@ -585,13 +645,26 @@ export type CommitAndPushResult = {
  * Clean tree + local ahead of origin still pushes — "nothing to commit" is not
  * "nothing to push". Reports "already up to date" only when `ahead === 0` and
  * there is nothing to commit.
+ *
+ * `targetBranch` pushes the working tree to a differently-named remote branch
+ * (`<current>:<targetBranch>`) and is reported back as the result `branch`, so
+ * callers that print a branch-scoped URL reference where the commit actually
+ * landed — not the checked-out branch.
  */
-export async function commitAndPush(repoPath: string, message: string): Promise<CommitAndPushResult> {
+export async function commitAndPush(
+  repoPath: string,
+  message: string,
+  targetBranch?: string,
+): Promise<CommitAndPushResult> {
   try {
     const git = simpleGit(repoPath);
     let status = await git.status();
     const branch = status.current || 'main';
     assertValidBranchName(branch);
+    if (targetBranch) assertValidBranchName(targetBranch);
+    // The branch the commit ends up on remotely — the checked-out branch unless
+    // an explicit target was requested.
+    const pushedBranch = targetBranch || branch;
 
     let committed = false;
     if (status.files.length > 0) {
@@ -602,7 +675,10 @@ export async function commitAndPush(repoPath: string, message: string): Promise<
     }
 
     const ahead = status.ahead ?? 0;
-    if (!committed && ahead === 0) {
+    // A same-branch push short-circuits when there is nothing new; a push to a
+    // different target branch must still run even from a clean, non-ahead tree,
+    // since the target may not carry these commits yet.
+    if (!committed && ahead === 0 && pushedBranch === branch) {
       return {
         success: true,
         detail: 'already up to date',
@@ -615,12 +691,12 @@ export async function commitAndPush(repoPath: string, message: string): Promise<
     // Capture remote tip before push for a real ref range in the detail string.
     let before = '';
     try {
-      before = (await git.raw(['rev-parse', '--short=8', `origin/${branch}`])).trim();
+      before = (await git.raw(['rev-parse', '--short=8', `origin/${pushedBranch}`])).trim();
     } catch {
       /* origin/<branch> may not exist yet (first push) */
     }
 
-    await pushOrigin(git, branch);
+    await pushOrigin(git, branch, targetBranch);
 
     let after = '';
     try {
@@ -644,7 +720,7 @@ export async function commitAndPush(repoPath: string, message: string): Promise<
     return {
       success: true,
       detail,
-      branch,
+      branch: pushedBranch,
       committed,
       pushed: true,
     };

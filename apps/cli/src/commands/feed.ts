@@ -13,7 +13,7 @@
  * `agents feed post`: agent-callable free-text progress into the activity
  * stream (milestone `status.posted`). Session/agent/host/runtime/pid identity
  * is auto-stamped from env + the pid registry — no domain-specific flags.
- * Humans watch via the feed activity lane / `agents activity`.
+ * Humans watch via the feed activity lane.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -37,11 +37,13 @@ import {
   type ActivityEvent,
   type EnrichedActivityEvent,
 } from '../lib/activity.js';
+import { projectKeyFromCwd } from '../lib/project-key.js';
 import { postFeedStatus } from '../lib/feed-post.js';
 import {
   parseFeedPostLevel,
   planFeedBroadcast,
   runFeedBroadcast,
+  effectiveBroadcastConfig,
   blockBroadcastContext,
   blockDeliveryFailure,
   type FeedPostLevel,
@@ -49,6 +51,7 @@ import {
 } from '../lib/feed-broadcast.js';
 import { getSessionById } from '../lib/session/db.js';
 import { readMeta } from '../lib/state.js';
+import type { Meta } from '../lib/types.js';
 import {
   enrichBlocksFromSessions,
   groupBlocksByOutcome,
@@ -84,6 +87,7 @@ import {
 
 /** Flags for `feed post`. Declared once — the action reads them off both the child and the parent. */
 interface PostCliOpts {
+  title?: string;
   session?: string;
   attach?: string[];
   level?: string;
@@ -303,6 +307,7 @@ export function sessionHintsFromActive(
   sessions: Array<{
     sessionId?: string;
     agentId?: string;
+    cwd?: string;
     ticket?: { id?: string };
     pr?: { url?: string; number?: number };
     worktree?: { slug?: string };
@@ -317,13 +322,16 @@ export function sessionHintsFromActive(
     prNumber: s.pr?.number,
     prUrl: s.pr?.url,
     worktreeSlug: s.worktree?.slug,
+    project: s.cwd ? projectKeyFromCwd(s.cwd) : undefined,
   }));
 }
 
 export function registerFeedCommand(program: Command): void {
   const feed = program
     .command('feed')
-    .description('Open blocks (needs you) + agent status posts (feed post)')
+    .description(
+      'Operator inbox + agent status posts (aliases: inbox = needs-you; timeline = --filter updates)',
+    )
     .option('--json', 'Output as JSON (each block stamped with its outcome + ask class)')
     .option('--filter <view>', 'What to show: needs (default) · updates · all', 'needs')
     .option('--flat', 'List one block per agent instead of grouping by outcome')
@@ -331,6 +339,7 @@ export function registerFeedCommand(program: Command): void {
     .option('--local', 'Only this machine -- skip the cross-machine SSH fan-out')
     .option('-H, --host <target...>', 'Scope to remote machine(s) over SSH; repeatable')
     .option('--device <target...>', 'Alias for --host; repeatable')
+    .option('--project <name>', 'Scope the feed to one project/repo (matches cwd basename, case-insensitive)')
     .option('--dispatch', 'Run stall suppression + default-on-no-answer policy and urgent notifications')
     .option('--pause <id>', 'Pause a runaway/needy local process (SIGSTOP) or cancel a cloud task')
     .option('--kill <id>', 'Kill a runaway/needy local process (SIGTERM) or cancel a cloud task');
@@ -338,47 +347,47 @@ export function registerFeedCommand(program: Command): void {
   feed
     .command('post')
     .description('Post a status update to the fleet activity stream (for agents)')
-    .argument('<text...>', 'What just happened — one short human line')
+    .argument('<text...>', 'Body: what just happened (after --title)')
+    .requiredOption('--title <title>', 'Short subject, ~4-5 words (phone first line)')
     .option('--session <id>', 'Session id escape hatch (default: auto from env / pid registry)')
     .option('--attach <path-or-url...>', 'Attach an artifact (local file or URL); repeatable')
     .option('--level <level>', 'How loudly to broadcast: milestone (default) or important. Configured sinks with minLevel: important only fire on the latter.', 'milestone')
-    .option('--blocked', 'You are STUCK and need the user. Opens an answerable block and always broadcasts at important — do not also pass --level.')
+    .option('--blocked', 'You are STUCK and need the user. Opens an answerable block and always broadcasts at important - do not also pass --level.')
     .option('--option <label...>', 'With --blocked: an answer the user can pick; repeatable')
     .option('--default <answer>', 'With --blocked: a safe default policy may apply if nobody answers in time')
     .option('--json', 'Emit the written event as JSON')
     .addHelpText('after', `
 Examples:
-  # Inside an agents-cli run (session identity is already in the env):
-  agents feed post "CHANGELOG pushed; watching CI and mac-mini E2E"
-  agents feed post "cover render ready" --attach ./out/cover.png
-  agents feed post "ready for review" --json
+  # Title (subject) + body. Phone broadcasts put title first, body after a
+  # blank line, then a "Sent from agent/session on host" footer.
+  agents feed post --title "CHANGELOG pushed" "Watching CI and mac-mini E2E"
+  agents feed post --title "Cover ready" "render at ./out/cover.png" --attach ./out/cover.png
+  agents feed post --title "Ready for review" "PR opened, waiting on prix-cloud" --json
 
-  # Worth interrupting someone over — reaches sinks gated on minLevel: important:
-  agents feed post "release blocked: npm token expired" --level important
+  # Worth interrupting someone over - reaches sinks gated on minLevel: important:
+  agents feed post --title "npm token expired" "Cannot publish the release" --level important
 
-  # You are STUCK and cannot proceed. Opens an answerable block that stays in
-  # 'agents feed' until someone resolves it, and always reaches the owner —
-  # do NOT also pass --level:
-  agents feed post "force-push denied by git-guard on PR #1749" --blocked
-  agents feed post "publish to npm or wait for review?" --blocked --option publish --option wait
-  agents feed post "delete the stale preview env?" --blocked --default "leave it"
+  # Stuck: opens a needs-you block and always broadcasts at important:
+  agents feed post --title "Force-push denied" "git-guard blocked PR #1749" --blocked
+  agents feed post --title "Publish or wait?" "npm publish now or after review" --blocked --option publish --option wait
+  agents feed post --title "Delete preview env?" "stale preview still running" --blocked --default "leave it"
 
   # Exhaust self-serve FIRST. A block is for what you genuinely cannot do:
   # a credential only the user holds, a decision only they can make, an
   # approval only they can give. Not "should I do the obvious next step?".
 
   # Outside a run, pass the session explicitly:
-  agents feed post "manual note" --session 00998b0e-2d15-4d2f-a58b-974a886c9b47
+  agents feed post --title "Manual note" "context for the next agent" --session 00998b0e-2d15-4d2f-a58b-974a886c9b47
 
-Identity (session, agent, host, runtime, pid, launchId) is stamped automatically.
-Domain facts (tickets, PRs) are not CLI flags — the ticket is joined from the
-session index at post time, so a broadcast sink can comment on it without the
-agent having to remember it.
+Identity (session, agent, host, runtime, pid, launchId) is stamped automatically
+and rides the phone footer of feed.broadcast {message}. Domain facts (tickets,
+PRs) are not CLI flags - the ticket is joined from the session index at post
+time. No em-dashes in title/body - they are scrubbed on the way out.
 
-Configure where a post is mirrored under feed.broadcast in agents.yaml — see
+Configure where a post is mirrored under feed.broadcast in agents.yaml - see
 docs/06-observability.md.
 `)
-    .action((
+    .action(async (
       textParts: string[],
       opts: PostCliOpts,
       cmd?: { opts: () => PostCliOpts; parent?: { opts: () => { json?: boolean } } },
@@ -387,6 +396,7 @@ docs/06-observability.md.
       // binds the flag on the parent, so a `feed post … --json` lands on
       // parent.opts().json — not the child. Read both.
       const flags = {
+        title: opts?.title ?? cmd?.opts?.()?.title,
         session: opts?.session ?? cmd?.opts?.()?.session,
         attach: opts?.attach ?? cmd?.opts?.()?.attach,
         level: opts?.level ?? cmd?.opts?.()?.level,
@@ -406,9 +416,14 @@ docs/06-observability.md.
         if (!flags.blocked && (flags.option?.length || flags.default)) {
           throw new Error('--option/--default only apply with --blocked.');
         }
+        if (!flags.title?.trim()) {
+          throw new Error('Missing --title. Usage: agents feed post --title "Short subject" "body text"');
+        }
         const level = flags.blocked ? 'important' : parseFeedPostLevel(flags.level);
+        const meta = readMeta();
 
         const { event } = postFeedStatus({
+          title: flags.title,
           text: Array.isArray(textParts) ? textParts.join(' ') : String(textParts ?? ''),
           sessionId: flags.session,
           attach: flags.attach,
@@ -421,15 +436,32 @@ docs/06-observability.md.
         // it the ask would scroll away like any other update.
         let outcomes: SinkOutcome[];
         if (flags.blocked) {
-          const block = buildDeclaredBlock(event, {
-            text: event.detail ?? '',
-            options: flags.option,
-            safeDefault: flags.default,
-          });
+          const block = buildDeclaredBlock(
+            {
+              sessionId: event.sessionId,
+              mailboxId: event.mailboxId,
+              host: event.host,
+              runtime: event.runtime,
+              cwd: event.cwd,
+            },
+            {
+              // Prefer title as the front-loaded ask on the phone; body is detail.
+              text: event.title
+                ? (event.detail ? `${event.title}: ${event.detail}` : event.title)
+                : (event.detail ?? ''),
+              options: flags.option,
+              safeDefault: flags.default,
+            },
+          );
           publishBlock(block);
-          outcomes = broadcastBlock(block, { project: event.project, agent: event.agent });
+          outcomes = await broadcastBlock(block, {
+            project: event.project,
+            agent: event.agent,
+            title: event.title,
+            body: event.detail,
+          }, meta);
         } else {
-          outcomes = broadcastPostedEvent(event, level);
+          outcomes = await broadcastPostedEvent(event, level, meta);
         }
 
         // Fail loud when a block reached nobody. This is computed BEFORE the
@@ -459,6 +491,7 @@ docs/06-observability.md.
   feed.action(async (opts: {
       json?: boolean;
       filter?: string;
+      project?: string;
       flat?: boolean;
       all?: boolean;
       local?: boolean;
@@ -502,11 +535,11 @@ docs/06-observability.md.
         if (filter === 'all') {
           console.log();
           renderUpdatesView(await gatherStatusPosts({
-            limit: UPDATES_VIEW_LIMIT, hosts: opts.host, local: opts.local, includeLocal, self,
-          }));
+            limit: UPDATES_VIEW_LIMIT, hosts: opts.host, local: opts.local, includeLocal, self, project: opts.project,
+          }), opts.project);
           return;
         }
-        if (includeLocal) renderActivityLane();
+        if (includeLocal) renderActivityLane(opts.project);
       };
 
       // Updates view: deliberate progress posts only (blocks are decisions, not
@@ -528,7 +561,7 @@ docs/06-observability.md.
           console.log(JSON.stringify(updates, null, 2));
           return;
         }
-        renderUpdatesView(updates);
+        renderUpdatesView(updates, opts.project);
         return;
       }
 
@@ -600,7 +633,10 @@ docs/06-observability.md.
         }
       }
 
-      blocks = rankFeedBlocks(blocks, localSignals);
+      blocks = rankFeedBlocks(blocks, localSignals).filter((b) => blockMatchesProject(b, opts.project));
+      const dispatchBlocksProject = opts.project
+        ? dispatchBlocks.filter((b) => blockMatchesProject(b, opts.project))
+        : dispatchBlocks;
       const digest = suppressionDigest(preparedLocal.filter);
       if (digest && !opts.json) {
         console.log(chalk.dim(digest));
@@ -609,7 +645,7 @@ docs/06-observability.md.
       if (opts.dispatch) {
         const policy = loadPolicy();
         const now = new Date();
-        for (const b of dispatchBlocks) {
+        for (const b of dispatchBlocksProject) {
           // Wrap per-block policy so one malformed block (e.g. a crafted
           // mailboxId that throws in mailboxDir) can't abort the whole loop and
           // strand every remaining block's dispatch.
@@ -657,7 +693,7 @@ docs/06-observability.md.
       // Shared fleet-comms masthead (same family as `agents mailboxes`).
       console.log(
         masthead({
-          title: 'they need you',
+          title: opts.project ? `${opts.project} needs you` : 'they need you',
           accent: 'amber',
           host: self,
           right: formatFeedMastheadRight(blocks),
@@ -678,21 +714,70 @@ docs/06-observability.md.
       for (const g of groups) renderOutcomeGroup(g, self);
       await renderTrailingActivity();
     });
+
+  // Observe-umbrella aliases (Phase 3): intentional second names, not deprecations.
+  // Re-parse into `feed` so flags/help stay single-sourced. See lib/observe-aliases.ts.
+  registerFeedObserveAliases(program);
+}
+
+/**
+ * `inbox` / `timeline` → feed. Loaded with the feed module so lazy COMMAND_LOADERS
+ * for those names also get the real `feed` command registered for re-parse.
+ */
+function registerFeedObserveAliases(program: Command): void {
+  const reparse = async (alias: 'inbox' | 'timeline'): Promise<void> => {
+    const { expandObserveAlias } = await import('../lib/observe-aliases.js');
+    const rest = process.argv.slice(3);
+    const expanded = expandObserveAlias(alias, rest);
+    if (!expanded) {
+      console.error(chalk.red(`Unknown observe alias: ${alias}`));
+      process.exit(1);
+    }
+    if (process.stderr.isTTY) process.stderr.write(chalk.gray(`${expanded.note}\n`));
+    await program.parseAsync(['node', 'agents', ...expanded.argv]);
+  };
+
+  program
+    .command('inbox')
+    .description('Needs-you inbox (alias of `agents feed`). Open blocks waiting on you.')
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(async () => {
+      await reparse('inbox');
+    });
+
+  program
+    .command('timeline')
+    .description(
+      'Agent progress stream (alias of `agents feed --filter updates`). What agents posted recently.',
+    )
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(async () => {
+      await reparse('timeline');
+    });
 }
 
 /**
  * Mirror a written post to the configured sinks (`feed.broadcast` in
- * agents.yaml). The ticket is JOINED from the session index rather than asked
- * for as a flag — it is a domain fact about the session, and an agent that has
- * to remember a `--ticket` argument is an agent that will forget it. Returns the
- * per-sink outcomes; an empty array means nothing is configured, which is the
- * default and is not a failure.
+ * agents.yaml, or the implicit `notify.owner` fallback for an important post —
+ * see {@link effectiveBroadcastConfig}). The ticket is JOINED from the session
+ * index rather than asked for as a flag — it is a domain fact about the
+ * session, and an agent that has to remember a `--ticket` argument is an agent
+ * that will forget it. Returns the per-sink outcomes; an empty array means
+ * nothing is configured and no fallback applies, which is not a failure for a
+ * routine post (see `blockDeliveryFailure` for the `--blocked` case).
+ *
+ * `meta` is threaded in rather than read here so the fallback/config decision
+ * and the delivery are pinned to one config snapshot, and so this is testable
+ * against a real in-memory `Meta` without touching `~/.agents/agents.yaml`.
  */
-function broadcastPostedEvent(event: ActivityEvent, level: FeedPostLevel): SinkOutcome[] {
-  const config = readMeta().feed?.broadcast;
-  if (!config || Object.keys(config).length === 0) return [];
+async function broadcastPostedEvent(event: ActivityEvent, level: FeedPostLevel, meta: Meta): Promise<SinkOutcome[]> {
+  const config = effectiveBroadcastConfig(meta.feed?.broadcast, level, meta);
+  if (!config) return [];
   const ticket = getSessionById(event.sessionId)?.ticketId;
   const planned = planFeedBroadcast(config, {
+    title: event.title,
     text: event.detail ?? '',
     level,
     ticket,
@@ -704,25 +789,28 @@ function broadcastPostedEvent(event: ActivityEvent, level: FeedPostLevel): SinkO
       .map((a) => a.href)
       .filter((href) => /^https?:\/\//i.test(href)),
   });
-  return runFeedBroadcast(planned);
+  return runFeedBroadcast(planned, meta);
 }
 
 /**
- * Mirror a declared block to the same sinks a post reaches.
+ * Mirror a declared block to the same sinks a post reaches (plus the implicit
+ * `notify.owner` fallback — a block is always `important`, so it always
+ * qualifies).
  *
  * Blocks previously never broadcast at all: `broadcastPostedEvent` ran only for
  * `feed post`, while every `publishBlock` call wrote to the ledger and stopped
  * there — so a "needs you" record was durable and invisible at the same time.
  */
-function broadcastBlock(
+async function broadcastBlock(
   block: OpenBlock,
-  extras: { project?: string; agent?: string },
-): SinkOutcome[] {
-  const config = readMeta().feed?.broadcast;
-  if (!config || Object.keys(config).length === 0) return [];
+  extras: { project?: string; agent?: string; title?: string; body?: string },
+  meta: Meta,
+): Promise<SinkOutcome[]> {
+  const config = effectiveBroadcastConfig(meta.feed?.broadcast, 'important', meta);
+  if (!config) return [];
   const ticket = getSessionById(block.sessionId)?.ticketId;
   const ctx = blockBroadcastContext({ ...block, ticket: block.ticket ?? ticket }, extras);
-  return runFeedBroadcast(planFeedBroadcast(config, ctx));
+  return runFeedBroadcast(planFeedBroadcast(config, ctx), meta);
 }
 
 /** One line per sink that ran. Silent when nothing is configured. */
@@ -742,6 +830,18 @@ export function resolveFeedFilter(raw: string | undefined): FeedFilter {
   if (v === 'updates' || v === 'update') return 'updates';
   if (v === 'all') return 'all';
   return 'needs';
+}
+
+/** True when a block belongs to the requested project (case-insensitive). */
+function blockMatchesProject(block: OpenBlock, project?: string): boolean {
+  if (!project) return true;
+  return (block.project ?? '').toLowerCase() === project.toLowerCase();
+}
+
+/** True when an activity event belongs to the requested project (case-insensitive). */
+function eventMatchesProject(ev: EnrichedActivityEvent, project?: string): boolean {
+  if (!project) return true;
+  return ((ev.project ?? projectKeyFromCwd(ev.cwd) ?? '')).toLowerCase() === project.toLowerCase();
 }
 
 /**
@@ -789,19 +889,23 @@ async function gatherStatusPosts(opts: {
   local?: boolean;
   includeLocal: boolean;
   self: string;
+  project?: string;
 }): Promise<EnrichedActivityEvent[]> {
-  const local: EnrichedActivityEvent[] = opts.includeLocal ? readStatusPosts(opts.limit) : [];
+  const local: EnrichedActivityEvent[] = opts.includeLocal
+    ? readStatusPosts(opts.limit).filter((ev) => eventMatchesProject(ev, opts.project))
+    : [];
   const forceLocal = opts.local === true || process.env[FEED_NO_FANOUT_ENV] === '1';
-  if (forceLocal) return local;
+  if (forceLocal) return local.slice(0, opts.limit);
   const remoteHosts = opts.hosts?.length ? remoteFeedHostsToDial(opts.hosts, opts.self) : undefined;
-  if (opts.hosts?.length && (!remoteHosts || remoteHosts.length === 0)) return local;
+  if (opts.hosts?.length && (!remoteHosts || remoteHosts.length === 0)) return local.slice(0, opts.limit);
   const remote = await gatherRemoteAgentsJson({
     args: ['feed', '--filter', 'updates', '--json'],
     noFanoutEnv: FEED_NO_FANOUT_ENV,
     hosts: remoteHosts,
     parse: parseActivityPayload,
   });
-  return mergeActivityEvents(local, remote.items).slice(0, opts.limit);
+  const merged = mergeActivityEvents(local, remote.items).filter((ev) => eventMatchesProject(ev, opts.project));
+  return merged.slice(0, opts.limit);
 }
 
 /**
@@ -809,11 +913,11 @@ async function gatherStatusPosts(opts: {
  * recency-ordered, with rich identity chips. Pure `file.edited` / git-hook noise
  * is excluded so operators see announcements, not tool churn.
  */
-function renderUpdatesView(updates: ActivityEvent[]): void {
+function renderUpdatesView(updates: ActivityEvent[], project?: string): void {
   const hosts = new Set(updates.map((e) => e.host).filter(Boolean));
   console.log(
     masthead({
-      title: 'updates',
+      title: project ? `${project} updates` : 'updates',
       accent: 'cyan',
       host: hosts.size > 1 ? `${hosts.size} machines` : (updates[0]?.host ?? machineId()),
       right: `${updates.length} post${updates.length === 1 ? '' : 's'}`,
@@ -821,7 +925,7 @@ function renderUpdatesView(updates: ActivityEvent[]): void {
   );
   console.log();
   if (updates.length === 0) {
-    console.log(chalk.gray('  No progress updates yet. Agents post them with `agents feed post "…"`.'));
+    console.log(chalk.gray('  No progress updates yet. Agents post them with `agents feed post --title "…" "…"`.'));
     return;
   }
   for (const ev of updates) {
@@ -836,14 +940,14 @@ function renderUpdatesView(updates: ActivityEvent[]): void {
  * activity logs. Read-only tail of the logs -- no transcript re-parsing. Silent
  * when empty.
  */
-function renderActivityLane(limit = 6): void {
+function renderActivityLane(project?: string, limit = 6): void {
   const events = readRecentActivity({
     sinceMs: Date.now() - 24 * 60 * 60 * 1000,
-    limit,
+    limit: limit * (project ? 4 : 1),
     tier: 'milestone',
-  });
+  }).filter((ev) => eventMatchesProject(ev, project));
   if (events.length === 0) return;
-  console.log(chalk.bold('\n  recent activity'));
-  for (const ev of events) renderActivityEntry(ev);
-  console.log(chalk.gray('  → agents activity  for the full stream'));
+  console.log(chalk.bold(project ? `\n  recent activity · ${project}` : '\n  recent activity'));
+  for (const ev of events.slice(0, limit)) renderActivityEntry(ev);
+  console.log(chalk.gray('  → agents feed --project ' + (project ?? '<project>') + '  for the full stream'));
 }

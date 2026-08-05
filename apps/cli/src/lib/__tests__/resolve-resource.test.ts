@@ -39,10 +39,13 @@ describe('resolveResource', () => {
 
     const resolved = resolveResource('commands', 'shared', tmpDir);
 
+    // repoRoot is always present (#12 — provenance); snapshotSha is undefined
+    // for these plain (non-git) temp dirs, and toEqual ignores undefined keys.
     expect(resolved).toEqual({
       name: 'shared',
       path: path.join(projectAgentsDir, 'commands', 'shared.md'),
       source: 'project',
+      repoRoot: projectAgentsDir,
     });
   });
 
@@ -54,12 +57,14 @@ describe('resolveResource', () => {
       name: 'user-only',
       path: path.join(userAgentsDir, 'commands', 'user-only.md'),
       source: 'user',
+      repoRoot: userAgentsDir,
     });
 
     expect(resolveResource('commands', 'system-only', tmpDir)).toEqual({
       name: 'system-only',
       path: path.join(systemAgentsDir, 'commands', 'system-only.md'),
       source: 'system',
+      repoRoot: systemAgentsDir,
     });
 
     expect(resolveResource('commands', 'missing', tmpDir)).toBeNull();
@@ -82,6 +87,7 @@ describe('resolveResource with extra repos', () => {
       name: 'rush-cmd',
       path: path.join(rushDir, 'commands', 'rush-cmd.md'),
       source: 'rush',
+      repoRoot: rushDir,
     });
   });
 });
@@ -101,16 +107,19 @@ describe('listResources', () => {
         name: 'shared',
         path: path.join(projectAgentsDir, 'commands', 'shared.md'),
         source: 'project',
+        repoRoot: projectAgentsDir,
       },
       {
         name: 'user-only',
         path: path.join(userAgentsDir, 'commands', 'user-only.md'),
         source: 'user',
+        repoRoot: userAgentsDir,
       },
       {
         name: 'system-only',
         path: path.join(systemAgentsDir, 'commands', 'system-only.md'),
         source: 'system',
+        repoRoot: systemAgentsDir,
       },
     ]);
   });

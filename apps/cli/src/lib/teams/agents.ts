@@ -35,7 +35,9 @@ import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { pullRemoteLogDelta, REMOTE_MIRROR_MAX_BYTES } from '../hosts/progress.js';
 import { createRemoteWorktree, ensureRemoteRepo } from './remoteWorktree.js';
 import { getTeam } from './registry.js';
-import { resolvePlacement } from './scheduler.js';
+import { resolvePlacement, cappedDevices } from './scheduler.js';
+import { readMaxConcurrentCaps } from '../device-config.js';
+import chalk from 'chalk';
 
 let lastMemoryWarnAt = 0;
 
@@ -794,9 +796,19 @@ export class AgentProcess {
    * Uses a per-wave batched snapshot (remotePollSnapshot) when the supervisor's
    * one-ssh-per-host pre-pass populated it; otherwise falls back to its own
    * round-trips so a bare `teams status`/`teams logs` is still correct.
+   *
+   * Only polls a teammate that is plausibly still RUNNING (RUSH-2118). Once a
+   * remote teammate reaches a terminal status, the poll that resolved it already
+   * mirrored the final log bytes and read the `.exit` sentinel in this SAME
+   * function (delta pulled before the exit check below) — the underlying process
+   * is gone and can never write more, so there is nothing left to fetch. Without
+   * this guard every finished remote teammate still cost one ssh round-trip on
+   * EVERY `--active`/`listAll` poll forever, which is what made `agents sessions
+   * --active --local` take ~4.3s on a box with 30 completed teammates.
    */
   private async syncRemoteMirror(): Promise<void> {
     if (!this.hostName || !this.hostTarget || !this.remoteLog) return;
+    if (this.status !== AgentStatus.RUNNING) return;
 
     // Pull the new remote bytes and append them to the local mirror the parser
     // reads. One offset-tail round-trip; nothing to write when the log is quiet.
@@ -855,7 +867,14 @@ export class AgentProcess {
     this.lastReadPos = position;
   }
 
-  async readNewEvents(): Promise<void> {
+  /**
+   * @param opts.skipRemote A `--local` caller (RUSH-2118): never dial a
+   *   remote-host teammate, not even a still-RUNNING one — report its
+   *   last-persisted meta.json state as-is. A local-only query is by definition
+   *   this-machine-only, so it must not issue an ssh round-trip at all.
+   */
+  async readNewEvents(opts: { skipRemote?: boolean } = {}): Promise<void> {
+    if (this.hostName && opts.skipRemote) return;
     // Distributed teammate: mirror the host's new log bytes locally first, then
     // fall through to the identical local read+parse below.
     if (this.hostName) {
@@ -1147,7 +1166,12 @@ export class AgentProcess {
     return true;
   }
 
-  async updateStatusFromProcess(): Promise<void> {
+  /**
+   * @param opts.skipRemote A `--local` caller (RUSH-2118): a distributed
+   *   teammate is never dialed — its in-memory state (already loaded from
+   *   meta.json) stands as-is, no ssh, no re-save.
+   */
+  async updateStatusFromProcess(opts: { skipRemote?: boolean } = {}): Promise<void> {
     if (!this.pid) {
       // Distributed (remote-host) teammates have no local PID by design; their
       // lifecycle lives on the host. readNewEvents() mirrors the remote log and
@@ -1155,6 +1179,7 @@ export class AgentProcess {
       // syncRemoteMirror), so we just persist and return — never the local
       // "RUNNING without a PID is impossible" fail path below.
       if (this.hostName) {
+        if (opts.skipRemote) return;
         await this.readNewEvents();
         if (this.status !== AgentStatus.RUNNING && !this.completedAt) {
           this.completedAt = this.getLatestEventTime() || this.startedAt || new Date();
@@ -1353,6 +1378,14 @@ export class AgentManager {
   private defaultMode: Mode;
   private initPromise: Promise<void> | null = null;
   private cloudDispatcher: CloudDispatchFn | null = null;
+  /**
+   * A `--local` caller (RUSH-2118): every poll this manager issues skips the
+   * ssh round-trip for a distributed (remote-host) teammate, reporting its
+   * last-persisted meta.json state instead. Set once at construction so the
+   * INITIAL load in doInitialize()/loadExistingAgents() — which polls every
+   * teammate before listRunning()/listAll() ever run — honors it too.
+   */
+  private localOnly: boolean;
 
   private constructorAgentsDir: string | null = null;
 
@@ -1362,11 +1395,13 @@ export class AgentManager {
     defaultMode: Mode | null = null,
     filterByCwd: string | null = null,
     cleanupAgeDays: number = 7,
+    localOnly: boolean = false,
   ) {
     this.maxAgents = maxAgents;
     this.constructorAgentsDir = agentsDir;
     this.filterByCwd = filterByCwd;
     this.cleanupAgeDays = cleanupAgeDays;
+    this.localOnly = localOnly;
     const resolvedDefaultMode = defaultMode ? normalizeModeValue(defaultMode) : defaultModeFromEnv();
     if (!resolvedDefaultMode) {
       throw new Error(`Invalid default_mode '${defaultMode}'. Use plan, edit, auto, or skip.`);
@@ -1479,7 +1514,7 @@ export class AgentManager {
         }
       }
 
-      await agent.updateStatusFromProcess();
+      await agent.updateStatusFromProcess({ skipRemote: this.localOnly });
       this.agents.set(agentId, agent);
       loadedCount++;
     }
@@ -2049,7 +2084,16 @@ export class AgentManager {
     const teamMeta = await getTeam(taskName);
     if (!teamMeta) return;
     const roster = await this.listByTask(taskName);
-    const { device } = resolvePlacement(teamMeta, null, roster);
+    const pool = teamMeta.devices ?? [];
+    const maxConcurrent = pool.length > 1 ? readMaxConcurrentCaps(pool) : undefined;
+    if (maxConcurrent) {
+      for (const c of cappedDevices(pool, roster, maxConcurrent)) {
+        console.error(chalk.dim(
+          `[placement] '${c.device}' excluded from auto-pick — at its agents.max-concurrent cap (${c.running}/${c.cap} running)`,
+        ));
+      }
+    }
+    const { device } = resolvePlacement(teamMeta, null, roster, { maxConcurrent });
     if (device) await this.resolveScheduledPlacement(agent, device, taskName);
   }
 
@@ -2355,8 +2399,8 @@ export class AgentManager {
     await this.initialize();
     const agents = Array.from(this.agents.values());
     for (const agent of agents) {
-      await agent.readNewEvents();
-      await agent.updateStatusFromProcess();
+      await agent.readNewEvents({ skipRemote: this.localOnly });
+      await agent.updateStatusFromProcess({ skipRemote: this.localOnly });
     }
     return agents;
   }

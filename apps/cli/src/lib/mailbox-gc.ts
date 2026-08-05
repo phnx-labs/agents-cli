@@ -8,14 +8,14 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { getMailboxRootDir } from './state.js';
+import { getFeedDir, getMailboxRootDir } from './state.js';
 import {
   mailboxDir,
   isValidMailboxId,
   readMessage,
   sweepExpired,
 } from './mailbox.js';
-import { listBlocks, removeBlock } from './feed.js';
+import { listBlocks, removeBlock, recordMessageReceipt } from './feed.js';
 
 export interface GcResult {
   boxesScanned: number;
@@ -56,7 +56,7 @@ function jsonFiles(dir: string): string[] {
   return names.filter((n) => n.endsWith('.json')).sort();
 }
 
-function archiveAllPending(boxDir: string, reason: string): number {
+function archiveAllPending(boxDir: string, reason: string, feedRoot?: string): number {
   let n = 0;
   for (const dir of [path.join(boxDir, 'inbox'), path.join(boxDir, 'processing')]) {
     for (const name of jsonFiles(dir)) {
@@ -70,6 +70,17 @@ function archiveAllPending(boxDir: string, reason: string): number {
           fs.writeFileSync(tmp, JSON.stringify(msg, null, 2), 'utf-8');
           fs.renameSync(tmp, dest);
           fs.unlinkSync(src);
+          if (msg.blockId) {
+            try {
+              recordMessageReceipt(
+                msg.blockId,
+                { msgId: msg.msgId, status: reason === 'expired' ? 'expired' : 'dropped', at: new Date().toISOString(), from: msg.from },
+                feedRoot,
+              );
+            } catch {
+              // Receipt surfacing is best-effort; never stall GC.
+            }
+          }
         } else {
           fs.renameSync(src, dest);
         }
@@ -80,6 +91,16 @@ function archiveAllPending(boxDir: string, reason: string): number {
     }
   }
   return n;
+}
+
+function blockAgeMinutes(blockId: string, feedRoot: string | undefined, now: Date): number {
+  const file = path.join(feedRoot ?? getFeedDir(), `${blockId}.json`);
+  try {
+    const stat = fs.statSync(file);
+    return (now.getTime() - stat.mtimeMs) / 60_000;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
 }
 
 function pruneConsumed(boxDir: string, maxAgeMinutes: number, now: Date): number {
@@ -145,7 +166,7 @@ export function gcMailbox(
 
     if (!activeBoxIds.has(name)) {
       result.deadBoxes++;
-      result.messagesDroppedDead += archiveAllPending(boxDir, 'dead');
+      result.messagesDroppedDead += archiveAllPending(boxDir, 'dead', feedRoot);
       result.consumedPruned += pruneConsumed(boxDir, maxConsumedAgeMinutes, now);
       // Also prune the empty box dir if it is now empty.
       try {
@@ -164,14 +185,19 @@ export function gcMailbox(
     } else {
       // Live box: archive expired messages (same path as drain/peek) so GC does
       // not leave expired files in inbox/processing while only bumping metrics.
-      result.messagesDroppedExpired += sweepExpired(boxDir, name, now);
+      result.messagesDroppedExpired += sweepExpired(boxDir, name, now, feedRoot);
       result.consumedPruned += pruneConsumed(boxDir, maxConsumedAgeMinutes, now);
     }
   }
 
   for (const blockId of blocksToRemove) {
-    if (removeBlock(blockId, feedRoot)) {
-      result.blocksRemoved++;
+    // A dead box's block is kept for up to maxConsumedAgeMinutes after a bounce
+    // receipt is written so the operator/sender can see the failure. Stale blocks
+    // (older than the prune window) are removed.
+    if (blockAgeMinutes(blockId, feedRoot, now) >= maxConsumedAgeMinutes) {
+      if (removeBlock(blockId, feedRoot)) {
+        result.blocksRemoved++;
+      }
     }
   }
 

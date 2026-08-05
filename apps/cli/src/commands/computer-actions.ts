@@ -22,6 +22,7 @@ import {
   COMPUTER_INPUT_GATED_VERBS,
   formatComputerPermissionGrantHint,
 } from '../lib/permissions.js';
+import { emit as emitEvent } from '../lib/events.js';
 
 export interface AppInfo {
   pid: number;
@@ -438,6 +439,28 @@ function emit(result: Record<string, unknown>, json: boolean, human: () => strin
   }
 }
 
+// Record one `computer.action` per verb invocation, one call site per command
+// below. Session/agent/machine identity is stamped for free by emitEvent's
+// provenance floor (events.ts resolveProvenance) — this only carries the
+// action-specific facts: which verb, against which target pid/bundle/host.
+// NOTE: the field is `targetPid`, never `pid` — `pid` is a reserved envelope
+// key (the emitting process's OWN pid, events.ts RESERVED_META_KEYS) that
+// sanitizePayload() silently strips from the payload before it can collide.
+export function emitComputerAction(
+  verb: string,
+  targetPid: number | undefined,
+  opts: { bundle?: string; host?: string },
+  extra: Record<string, unknown> = {},
+): void {
+  emitEvent('computer.action', {
+    command: verb,
+    targetPid,
+    bundle: opts.bundle,
+    host: opts.host,
+    ...extra,
+  });
+}
+
 // Add the shared --pid/--bundle/--host target options to a verb. `--host` routes
 // the verb at a remote Windows device: the `computer` preAction hook hydrates
 // COMPUTER_HELPER_TCP from the tunnel `start --host` recorded, so withClient's
@@ -471,6 +494,7 @@ export function registerActionCommands(program: Command): void {
     await withClient(async (client) => {
       const res = unwrap(await client.call('list_apps'));
       const list = (res.apps as AppInfo[]) || [];
+      emitComputerAction('apps', undefined, opts);
       emit(res, Boolean(opts.json), () =>
         list.length === 0
           ? '(no allow-listed apps running)'
@@ -494,6 +518,7 @@ export function registerActionCommands(program: Command): void {
       const params: Record<string, unknown> = { pid };
       if (opts.depth != null) params.max_depth = opts.depth;
       const res = unwrap(await client.call('describe', params));
+      emitComputerAction('describe', pid, opts, { depth: opts.depth });
       // The tree is inherently structured — always JSON, pretty unless --json.
       console.log(JSON.stringify(opts.json ? res : res.tree ?? res, null, 2));
     });
@@ -524,6 +549,7 @@ export function registerActionCommands(program: Command): void {
       if (opts.count != null) params.count = opts.count;
       if (opts.background) params.background = true;
       const res = unwrap(await client.call('click', params));
+      emitComputerAction('click', pid, opts, { id: opts.id, count: opts.count });
       emit(res, Boolean(opts.json), () => `clicked (${res.action ?? 'ok'})`);
     });
   });
@@ -547,6 +573,7 @@ export function registerActionCommands(program: Command): void {
       }
       await applyFocusPolicy(client, pid, opts);
       const res = unwrap(await client.call('right_click', { pid, ...spec.params }));
+      emitComputerAction('right-click', pid, opts, { id: opts.id });
       emit(res, Boolean(opts.json), () => `right-clicked (${res.method ?? 'ok'})`);
     });
   });
@@ -576,6 +603,8 @@ export function registerActionCommands(program: Command): void {
       if (opts.commit) params.commit = true;
       if (opts.allowSecureField) params.allow_secure_field = true;
       const res = unwrap(await client.call('type', params));
+      // textLength, never the text itself — users type passwords/secrets into fields.
+      emitComputerAction('type', pid, opts, { id: opts.id, textLength: opts.text.length, committed: Boolean(res.committed) });
       emit(res, Boolean(opts.json), () => `typed ${opts.text.length} char(s)${res.committed ? ' (committed)' : ''}`);
     });
   });
@@ -603,6 +632,7 @@ export function registerActionCommands(program: Command): void {
       if (charDelay !== undefined) params.char_delay_ms = charDelay;
       const res = unwrap(await client.call('type_text', params));
       warnIfNotFrontmost(res);
+      emitComputerAction('type-text', pid, opts, { textLength: opts.text.length, committed: Boolean(opts.commit) });
       emit(res, Boolean(opts.json), () => `typed ${res.chars ?? opts.text.length} char(s)`);
     });
   });
@@ -625,6 +655,7 @@ export function registerActionCommands(program: Command): void {
       if (opts.requireFrontmost) params.require_frontmost = true;
       const res = unwrap(await client.call('key', params));
       warnIfNotFrontmost(res);
+      emitComputerAction('key', pid, opts, { keys: opts.keys });
       emit(res, Boolean(opts.json), () => `sent ${opts.keys}`);
     });
   });
@@ -661,6 +692,7 @@ export function registerActionCommands(program: Command): void {
       };
       if (opts.background) params.background = true;
       const res = unwrap(await client.call('drag', params));
+      emitComputerAction('drag', pid, opts, { from: opts.from, to: opts.to });
       emit(res, Boolean(opts.json), () => `dragged ${opts.from} -> ${opts.to} (${res.method ?? 'ok'})`);
     });
   });
@@ -687,6 +719,7 @@ export function registerActionCommands(program: Command): void {
       if (opts.dy != null) params.dy = opts.dy;
       if (opts.dx != null) params.dx = opts.dx;
       const res = unwrap(await client.call('scroll', params));
+      emitComputerAction('scroll', pid, opts, { id: opts.id, dx: opts.dx, dy: opts.dy });
       emit(res, Boolean(opts.json), () => `scrolled (${res.method ?? 'ok'})`);
     });
   });
@@ -703,6 +736,7 @@ export function registerActionCommands(program: Command): void {
     await withClient(async (client) => {
       const pid = await resolveTargetPid(client, opts, { verb: 'ax-action' });
       const res = unwrap(await client.call('ax_action', { pid, element_id: opts.id, action: opts.action }));
+      emitComputerAction('ax-action', pid, opts, { id: opts.id, action: opts.action });
       emit(res, Boolean(opts.json), () => `performed ${opts.action}`);
     });
   });
@@ -718,6 +752,7 @@ export function registerActionCommands(program: Command): void {
     await withClient(async (client) => {
       const pid = await resolveTargetPid(client, opts, { verb: 'focus' });
       const res = unwrap(await client.call('set_focus', { pid, element_id: opts.id }));
+      emitComputerAction('focus', pid, opts, { id: opts.id });
       emit(res, Boolean(opts.json), () => `focused ${opts.id}`);
     });
   });
@@ -737,6 +772,7 @@ export function registerActionCommands(program: Command): void {
     await withClient(async (client) => {
       const pid = await resolveTargetPid(client, opts, { verb: 'raise' });
       const res = unwrap(await client.call('focus_window', { pid, ...buildRaiseParams(opts) }));
+      emitComputerAction('raise', pid, opts, { windowId: opts.windowId, title: opts.title });
       emit(res, Boolean(opts.json), () => {
         const scope = res.raised_window ? `window ${res.title ?? res.window_id ?? ''}`.trim() : 'app';
         return `raised ${scope} (${res.focus_elapsed_ms ?? 0}ms)`;
@@ -768,6 +804,9 @@ export function registerActionCommands(program: Command): void {
       // duration-only waits don't need a target pid
       if (params.duration_ms == null) params.pid = await resolveTargetPid(client, opts, { verb: 'wait' });
       const res = unwrap(await client.call('wait', params));
+      emitComputerAction('wait', params.pid as number | undefined, opts, {
+        until: opts.until, durationMs: opts.duration, satisfied: Boolean(res.satisfied),
+      });
       emit(res, Boolean(opts.json), () =>
         res.satisfied ? `satisfied (${res.waited_ms}ms)` : `timed out (${res.waited_ms}ms)`,
       );
@@ -789,6 +828,7 @@ export function registerActionCommands(program: Command): void {
       if (opts.id) params.element_id = opts.id;
       if (opts.maxChars != null) params.max_chars = opts.maxChars;
       const res = unwrap(await client.call('get_text', params));
+      emitComputerAction('get-text', pid, opts, { id: opts.id });
       emit(res, Boolean(opts.json), () => String(res.text ?? ''));
     });
   });
@@ -813,6 +853,7 @@ export function registerActionCommands(program: Command): void {
         if (opts.path) params.path = opts.path;
         if (opts.name) params.name = opts.name;
         const res = unwrap(await client.call('launch_app', params));
+        emitComputerAction('launch', res.pid as number | undefined, opts, { path: opts.path, name: opts.name });
         emit(res, Boolean(opts.json), () => `launched ${res.name} (pid ${res.pid})`);
       });
     });

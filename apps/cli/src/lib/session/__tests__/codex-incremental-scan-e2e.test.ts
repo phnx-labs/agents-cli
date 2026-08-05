@@ -184,6 +184,13 @@ describe('B-3 live incremental Codex scan parity', () => {
     const inc = db.getSessionById(id)!;
     expect(inc.prUrl).toBe('https://github.com/acme/repo/pull/4242');
     expect(inc.prNumber).toBe(4242);
+    expect(db.getDB().prepare(`
+      SELECT source_call_id, outcome, output FROM tool_calls WHERE session_id = ?
+    `).get(id)).toEqual({
+      source_call_id: 't1',
+      outcome: 'unknown',
+      output: 'https://github.com/acme/repo/pull/4242',
+    });
   });
 
   it('STRADDLED ticket: gh issue create first, its ref in the append → correct createdTickets', async () => {
@@ -298,6 +305,75 @@ describe('B-3 live incremental Codex scan parity', () => {
     assertRowParity(idB, gtId);
   });
 
+  it('streams past an oversized appended JSONL record and resumes at the next record', async () => {
+    const id = 'oversized-append';
+    const fp = writeRollout(id, baseEvents(id));
+    await runScan();
+
+    fs.appendFileSync(fp, 'x'.repeat(1024 * 1024 + 1));
+    bumpMtimeToNow(fp, 1);
+    await runScan();
+    let state = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!);
+    expect(state.offset).toBe(fs.statSync(fp).size);
+    expect(state.jsonlDroppingOversizedLine).toBe(true);
+    expect(db.getSessionById(id)?.messageCount).toBe(1);
+
+    fs.appendFileSync(fp, 'y'.repeat(64 * 1024));
+    bumpMtimeToNow(fp, 2);
+    await runScan();
+    state = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!);
+    expect(state.offset).toBe(fs.statSync(fp).size);
+    expect(state.jsonlDroppingOversizedLine).toBe(true);
+
+    fs.appendFileSync(fp, `\n${line({
+      type: 'response_item', timestamp: '2026-06-28T00:03:00.000Z',
+      payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'after oversized record' }] },
+    })}\n`);
+    bumpMtimeToNow(fp, 3);
+    await runScan();
+
+    expect(discover.__codexScanBranchCountsForTest().incremental).toBeGreaterThanOrEqual(1);
+    expect(db.getSessionById(id)?.messageCount).toBe(2);
+    state = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!);
+    expect(state.offset).toBe(fs.statSync(fp).size);
+    expect(state.jsonlDroppingOversizedLine).toBeUndefined();
+  });
+
+  it('UPGRADE: a pre-tool-call continuation forces one full parse without overwriting ordinal zero', async () => {
+    const id = 'legacy-continuation-tool-calls';
+    const fp = writeRollout(id, [
+      ...baseEvents(id),
+      { type: 'response_item', timestamp: '2026-06-28T06:01:00.000Z', payload: {
+        type: 'function_call', name: 'exec_command', call_id: 'legacy-call', arguments: JSON.stringify({ cmd: 'git status' }),
+      } },
+    ]);
+    await runScan();
+
+    const legacyState = JSON.parse(db.getParserStatesForPaths([fp]).get(fp)!.parserState!);
+    legacyState.v = 1;
+    delete legacyState.toolCalls;
+    db.getDB().prepare('UPDATE scan_ledger SET parser_state = ? WHERE file_path = ?')
+      .run(JSON.stringify(legacyState), fs.realpathSync(fp));
+
+    discover.__resetCodexScanBranchCountsForTest();
+    appendRollout(id, [
+      { type: 'response_item', timestamp: '2026-06-28T06:02:00.000Z', payload: {
+        type: 'function_call', name: 'exec_command', call_id: 'new-call', arguments: JSON.stringify({ cmd: 'gh pr view' }),
+      } },
+    ]);
+    bumpMtimeToNow(fp, 1);
+    await runScan();
+
+    expect(discover.__codexScanBranchCountsForTest().incremental).toBe(0);
+    expect(discover.__codexScanBranchCountsForTest().full).toBeGreaterThanOrEqual(1);
+    expect(db.getDB().prepare(`
+      SELECT ordinal, source_call_id FROM tool_calls WHERE session_id = ? ORDER BY ordinal
+    `).all(id)).toEqual([
+      { ordinal: 0, source_call_id: 'legacy-call' },
+      { ordinal: 1, source_call_id: 'new-call' },
+    ]);
+  });
+
   it('LEDGER: parser_state is persisted after a scan, and its offset advances on append', async () => {
     const id = 'ledger-persist';
     const fp = writeRollout(id, baseEvents(id));
@@ -307,7 +383,7 @@ describe('B-3 live incremental Codex scan parity', () => {
     expect(row, 'ledger row exists').toBeDefined();
     expect(row!.parserState, 'parser_state persisted').not.toBeNull();
     const parsed = JSON.parse(row!.parserState!);
-    expect(parsed.v).toBe(1);
+    expect(parsed.v).toBe(2);
     expect(typeof parsed.offset).toBe('number');
     const offsetAfterFirst = parsed.offset;
 

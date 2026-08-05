@@ -7,6 +7,7 @@ import { promisify } from 'util';
 import { DeviceStats, parseUptime, parseVmStat, parseLinuxMemInfo, isDeviceOnline } from '../core/deviceHealth';
 import { RepoSyncStatus, classifySync } from '../core/repoSync';
 import { resolveAgentsBin, bootstrapPath } from '../core/agentsBin';
+import { createTimedCache, cachedInFlight } from '../core/cachedInFlight';
 
 const execFileAsync = promisify(execFile);
 
@@ -75,8 +76,12 @@ export async function listRegisteredDevices(): Promise<Device[]> {
 const CACHE_TTL_MS = 6_000;
 const PROBE_TIMEOUT_MS = 4_000;
 
-const cache = new Map<string, { stats: DeviceStats; fetchedAt: number }>();
-const inFlight = new Map<string, Promise<DeviceStats>>();
+// Both fleet probes coalesce concurrent + repeated calls per host through the
+// shared cachedInFlight guard, so N uncoordinated callers (the launch-health
+// timer, the Dispatch panel, each launch) never each spawn a full-fleet fan-out
+// of `agents` subprocesses for the same host.
+const statsStore = createTimedCache<DeviceStats>();
+const agentCountStore = createTimedCache<number>();
 
 type SecretsFormat = 'json' | 'shell' | 'unknown';
 
@@ -114,20 +119,7 @@ export async function fetchDeviceStats(
   host: string,
   opts: { isLocal: boolean; identityFile?: string; user?: string },
 ): Promise<DeviceStats> {
-  const now = Date.now();
-  const cached = cache.get(host);
-  if (cached && now - cached.fetchedAt < CACHE_TTL_MS) return cached.stats;
-  const existing = inFlight.get(host);
-  if (existing) return existing;
-  const promise = fetchDeviceStatsOnce(host, opts);
-  inFlight.set(host, promise);
-  try {
-    const stats = await promise;
-    cache.set(host, { stats, fetchedAt: stats.fetchedAt });
-    return stats;
-  } finally {
-    inFlight.delete(host);
-  }
+  return cachedInFlight(statsStore, host, CACHE_TTL_MS, () => fetchDeviceStatsOnce(host, opts));
 }
 
 async function fetchDeviceStatsOnce(
@@ -164,6 +156,10 @@ async function fetchDeviceStatsOnce(
 }
 
 export async function countRunningAgents(host: string, opts: { isLocal: boolean }): Promise<number> {
+  return cachedInFlight(agentCountStore, host, CACHE_TTL_MS, () => countRunningAgentsOnce(host, opts));
+}
+
+async function countRunningAgentsOnce(host: string, opts: { isLocal: boolean }): Promise<number> {
   try {
     const bin = await resolveAgentsBin();
     const args = ['sessions', '--active', '--json'];
