@@ -110,6 +110,7 @@ export const loadShare: ModuleLoader = async () => (await import('../../commands
 export const loadAudit: ModuleLoader = async () => (await import('../../commands/audit.js')).registerAuditCommands;
 export const loadWebhook: ModuleLoader = async () => (await import('../../commands/webhook.js')).registerWebhookCommand;
 export const loadFunnel: ModuleLoader = async () => (await import('../../commands/funnel.js')).registerFunnelCommand;
+export const loadHumans: ModuleLoader = async () => (await import('../../commands/humans.js')).registerHumansCommands;
 
 /**
  * Commands whose modules pull in the SQLite-backed session/cloud stack. They are
@@ -251,4 +252,5 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   audit: [loadAudit],
   webhook: [loadWebhook],
   funnel: [loadFunnel],
+  humans: [loadHumans],
 };

@@ -71,6 +71,12 @@ const META_FILE = path.join(USER_AGENTS_DIR, 'agents.yaml');
 /** Legacy location — used only for one-shot migration in readMeta(). */
 const SYSTEM_META_FILE = path.join(SYSTEM_AGENTS_DIR, 'agents.yaml');
 
+/** Canonical path for the humans.yaml owner-identity/channel config. */
+const HUMANS_FILE = path.join(USER_AGENTS_DIR, 'humans.yaml');
+
+/** Return the absolute path to the humans.yaml file. */
+export function getHumansFilePath(): string { return HUMANS_FILE; }
+
 // ─── System resource dirs ─────────────────────────────────────────────────────
 
 const SYSTEM_COMMANDS_DIR = path.join(SYSTEM_AGENTS_DIR, 'commands');
@@ -772,7 +778,6 @@ export function ensureAgentsDir(): void {
   if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, opts);
   if (!fs.existsSync(PACKAGES_DIR)) fs.mkdirSync(PACKAGES_DIR, opts);
   if (!fs.existsSync(ROUTINES_DIR)) fs.mkdirSync(ROUTINES_DIR, opts);
-  if (!fs.existsSync(WEBHOOKS_DIR)) fs.mkdirSync(WEBHOOKS_DIR, opts);
   if (!fs.existsSync(RUNS_DIR)) fs.mkdirSync(RUNS_DIR, opts);
   if (!fs.existsSync(VERSIONS_DIR)) fs.mkdirSync(VERSIONS_DIR, opts);
   if (!fs.existsSync(SHIMS_DIR)) fs.mkdirSync(SHIMS_DIR, opts);
@@ -782,7 +787,6 @@ export function ensureAgentsDir(): void {
   if (!fs.existsSync(SYSTEM_RULES_DIR)) fs.mkdirSync(SYSTEM_RULES_DIR, opts);
   if (!fs.existsSync(SYSTEM_PERMISSIONS_DIR)) fs.mkdirSync(SYSTEM_PERMISSIONS_DIR, opts);
   if (!fs.existsSync(SYSTEM_SUBAGENTS_DIR)) fs.mkdirSync(SYSTEM_SUBAGENTS_DIR, opts);
-  if (!fs.existsSync(SYSTEM_WEBHOOKS_DIR)) fs.mkdirSync(SYSTEM_WEBHOOKS_DIR, opts);
   try { fs.chmodSync(SYSTEM_AGENTS_DIR, 0o700); } catch {}
 }
 

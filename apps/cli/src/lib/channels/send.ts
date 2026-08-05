@@ -9,6 +9,7 @@
  * Agent control (`agents message`, `sessions inject`) stays outside this module.
  */
 import type { Meta } from '../types.js';
+import { getOwnerNotifyFromHumans } from '../humans.js';
 import { registerBuiltinProviders } from './providers/index.js';
 import { resolveTransport } from './resolve.js';
 import type { SendResult } from './registry.js';
@@ -75,8 +76,13 @@ export function composeSendText(text: string, urls?: string[]): string {
   return body ? `${body}\n${extra.join('\n')}` : extra.join('\n');
 }
 
-/** Read notify.owner; null when either field is missing. */
+/**
+ * Read the owner destination; humans.yaml is the primary source, agents.yaml
+ * notify.owner is the fallback. Returns null when neither is set.
+ */
 export function readOwnerDest(meta: Meta): { channel: string; to: string } | null {
+  const humansOwner = getOwnerNotifyFromHumans();
+  if (humansOwner) return humansOwner;
   const owner = meta.notify?.owner;
   const channel = owner?.channel?.trim();
   const to = owner?.to?.trim();

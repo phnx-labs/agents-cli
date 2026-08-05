@@ -1020,9 +1020,7 @@ function migrateRuntimeToCache(): void {
   // releases moved into ~/.agents/.cache/plugins/. See issue #20.
   moveDirOnce(path.join(USER_DIR, 'cloud'), path.join(CACHE_DIR, 'cloud'));
   moveDirOnce(path.join(USER_DIR, 'drive'), path.join(CACHE_DIR, 'drive'));
-  // terminals/ stays at the top level: the agents-cli IDE extension publishes
-  // ~/.agents/terminals/live-terminals.json and would race with the move on
-  // VS Code restart. Leave the path where the extension expects it.
+  moveDirOnce(path.join(USER_DIR, 'terminals'), path.join(CACHE_DIR, 'terminals'));
   moveDirOnce(path.join(USER_DIR, 'logs'), path.join(CACHE_DIR, 'logs'));
   moveDirOnce(path.join(USER_DIR, 'companion'), path.join(CACHE_DIR, 'companion'));
   moveDirOnce(path.join(USER_DIR, 'runtime'), path.join(CACHE_DIR, 'state'));
@@ -1889,6 +1887,104 @@ export function migrateCliDirToClis(agentsDirs: string[]): void {
   }
 }
 
+/**
+ * Migrate owner identity into humans.yaml.
+ *
+ * Sources (both are optional; migration is a no-op when neither exists):
+ *   1. ~/.agents/agents.yaml notify.owner.{channel,to} — short-form notify config.
+ *   2. ~/.agents/owner.md  — YAML frontmatter with name/timezone/quiet_hours/channels/policy.
+ *
+ * Writes ~/.agents/humans.yaml (version: 1) when at least one source is
+ * present, then removes the migrated keys. Idempotent: exits immediately when
+ * humans.yaml already exists.
+ */
+function migrateHumans(): void {
+  const humansFile = path.join(USER_DIR, 'humans.yaml');
+  if (fs.existsSync(humansFile)) return;
+
+  const agentsYamlPath = path.join(USER_DIR, 'agents.yaml');
+  const ownerMdPath = path.join(USER_DIR, 'owner.md');
+
+  let notifyOwner: { channel: string; to: string } | undefined;
+  let ownerName: string | undefined;
+  let ownerTimezone: string | undefined;
+  let ownerQuietHours: string | undefined;
+  let ownerDefaultSeverity: string | undefined;
+  let ownerChannels: unknown[] | undefined;
+  let ownerPolicy: unknown | undefined;
+
+  // 1. Read notify.owner from agents.yaml.
+  if (fs.existsSync(agentsYamlPath)) {
+    try {
+      const raw = fs.readFileSync(agentsYamlPath, 'utf-8');
+      const doc = yaml.parse(raw) as Record<string, unknown> | null;
+      const notify = doc?.['notify'] as Record<string, unknown> | undefined;
+      const owner = notify?.['owner'] as Record<string, unknown> | undefined;
+      const channel = typeof owner?.['channel'] === 'string' ? owner['channel'] : undefined;
+      const to = typeof owner?.['to'] === 'string' ? owner['to'] : undefined;
+      if (channel && to) {
+        notifyOwner = { channel, to };
+      }
+    } catch { /* best-effort */ }
+  }
+
+  // 2. Read YAML frontmatter from owner.md.
+  if (fs.existsSync(ownerMdPath)) {
+    try {
+      const raw = fs.readFileSync(ownerMdPath, 'utf-8');
+      const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      if (fmMatch) {
+        const fm = yaml.parse(fmMatch[1]) as Record<string, unknown> | null;
+        if (fm && typeof fm === 'object') {
+          if (typeof fm['name'] === 'string') ownerName = fm['name'];
+          if (typeof fm['timezone'] === 'string') ownerTimezone = fm['timezone'];
+          if (typeof fm['quiet_hours'] === 'string') ownerQuietHours = fm['quiet_hours'];
+          if (typeof fm['default_severity'] === 'string') ownerDefaultSeverity = fm['default_severity'];
+          if (Array.isArray(fm['channels'])) ownerChannels = fm['channels'] as unknown[];
+          if (fm['policy'] && typeof fm['policy'] === 'object') ownerPolicy = fm['policy'];
+        }
+      }
+    } catch { /* best-effort */ }
+  }
+
+  // Only write if we have at least one piece of owner data.
+  if (!notifyOwner && !ownerName) return;
+
+  const humansDoc: Record<string, unknown> = { version: 1 };
+  const ownerDoc: Record<string, unknown> = {};
+  if (ownerName) ownerDoc['name'] = ownerName;
+  if (ownerTimezone) ownerDoc['timezone'] = ownerTimezone;
+  if (ownerQuietHours) ownerDoc['quiet_hours'] = ownerQuietHours;
+  if (ownerDefaultSeverity) ownerDoc['default_severity'] = ownerDefaultSeverity;
+  if (notifyOwner) ownerDoc['notify'] = notifyOwner;
+  if (ownerChannels) ownerDoc['channels'] = ownerChannels;
+  if (ownerPolicy) ownerDoc['policy'] = ownerPolicy;
+  humansDoc['owner'] = ownerDoc;
+
+  try {
+    const header = '# humans.yaml — owner identity and notification channels\n# Managed by agents-cli. See: agents humans --help\n';
+    fs.writeFileSync(humansFile, header + yaml.stringify(humansDoc, { lineWidth: 120 }), { encoding: 'utf-8', mode: 0o600 });
+    console.error('Migrated owner config to humans.yaml');
+  } catch (err) {
+    console.error(`humans.yaml migration: could not write (${(err as Error).message})`);
+    return;
+  }
+
+  // Remove notify.owner from agents.yaml after successful migration.
+  if (notifyOwner && fs.existsSync(agentsYamlPath)) {
+    try {
+      const raw = fs.readFileSync(agentsYamlPath, 'utf-8');
+      const doc = yaml.parseDocument(raw);
+      const notifyNode = doc.get('notify') as yaml.YAMLMap | null;
+      if (notifyNode instanceof yaml.YAMLMap) {
+        notifyNode.delete('owner');
+        if (notifyNode.items.length === 0) doc.delete('notify');
+      }
+      fs.writeFileSync(agentsYamlPath, String(doc), 'utf-8');
+    } catch { /* best-effort — leave the old key if we can't rewrite */ }
+  }
+}
+
 /** Run all idempotent migrations. Safe to call multiple times. */
 export async function runMigration(): Promise<void> {
   // MUST run first: every other migrator reads SYSTEM_DIR (the new path).
@@ -1898,6 +1994,7 @@ export async function runMigration(): Promise<void> {
   if (fs.existsSync(projectDotAgents)) cliMigrateDirs.push(projectDotAgents);
   migrateCliDirToClis(cliMigrateDirs);
   migrateAgentsYaml();
+  migrateHumans();
   deleteSystemPromptsJson();
   migrateSystemConfigJson();
   migratePromptcutsIntoHooks();
