@@ -5,8 +5,11 @@
 
 /** The subset of a terminal registry entry the status bar reads for identity. */
 export interface StatusIdentitySource {
-  /** Session id whose version/account the fields below were resolved for. */
-  identitySessionId?: string;
+  /** Session id the version/account below were APPLIED for (the display gate).
+   * Distinct from the entry's retry gate (`identitySessionId`, which requires both
+   * fields present): a version-only harness (Grok/Cursor/Droid) has this set with
+   * a null account, so its version still shows. */
+  identityAppliedSessionId?: string;
   version?: string;
   statusVersion?: string;
   account?: string;
@@ -33,7 +36,7 @@ export function displayIdentity(
   entry: StatusIdentitySource | undefined,
   sessionId: string | undefined,
 ): { version?: string; account?: string } {
-  const fresh = !!sessionId && entry?.identitySessionId === sessionId;
+  const fresh = !!sessionId && entry?.identityAppliedSessionId === sessionId;
   if (!fresh) return {};
   return {
     version: entry?.version || entry?.statusVersion || undefined,

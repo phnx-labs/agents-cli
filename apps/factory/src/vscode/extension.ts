@@ -4391,13 +4391,18 @@ async function tryHydrateSessionIdentity(
     if (identity.agent && identity.agent !== entry.agentType) {
       terminals.setAgentType(terminal, identity.agent as SessionAgentType);
     }
-    // Mark this session's identity resolved now that the authoritative record has
-    // been applied — even when a field is null, that IS this session's truth (Grok
-    // has a version but no account; Kimi has neither). This is what lets the status
-    // bar show only the identity resolved FOR THE CURRENT session and blank out a
-    // prior binding's leftover. Account-lag still retries: the early return at the
-    // top of this function requires both fields, so a partial fetch re-runs.
-    entry.identitySessionId = sessionId;
+    // Two distinct markers, because "displayable" and "fully resolved" differ:
+    //   - identityAppliedSessionId: the version/account cached above were applied
+    //     FOR this session (even if a field is null — Grok has a version but no
+    //     account, Kimi has neither). displayIdentity gates on this, so the status
+    //     bar shows only the current session's identity and a prior binding's
+    //     leftover is withheld.
+    //   - identitySessionId: BOTH fields present. The call sites re-invoke this
+    //     function while it differs from the live id, so an account that the CLI
+    //     indexes a beat after the version (Claude/Codex) is still filled by a
+    //     later fetch instead of freezing blank.
+    entry.identityAppliedSessionId = sessionId;
+    if (identity.version && identity.account) entry.identitySessionId = sessionId;
 
     if (!agentStatusBarItem || vscode.window.activeTerminal !== terminal) return;
     const rawLabel = entry.label;

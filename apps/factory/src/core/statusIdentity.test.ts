@@ -16,7 +16,7 @@ describe('normalizeStatusEmail', () => {
 // when they were resolved for the session id now displayed.
 describe('displayIdentity — only the current session\'s identity', () => {
   const claude: StatusIdentitySource = {
-    identitySessionId: 'sess-A',
+    identityAppliedSessionId: 'sess-A',
     version: '2.1.218',
     account: 'tech@prix.dev',
   };
@@ -35,23 +35,23 @@ describe('displayIdentity — only the current session\'s identity', () => {
     expect(displayIdentity(claude, undefined)).toEqual({});
   });
 
-  it('withholds identity that was never resolved (no identitySessionId)', () => {
+  it('withholds identity that was never applied (no identityAppliedSessionId)', () => {
     const leftover: StatusIdentitySource = { version: '2.1.218' }; // e.g. a restore-match leftover
     expect(displayIdentity(leftover, 'sess-K')).toEqual({});
   });
 
   it('shows a version-only harness (Grok/Cursor/Droid: version, no account)', () => {
-    const grok: StatusIdentitySource = { identitySessionId: 'sess-G', version: '1.4.0' };
+    const grok: StatusIdentitySource = { identityAppliedSessionId: 'sess-G', version: '1.4.0' };
     expect(displayIdentity(grok, 'sess-G')).toEqual({ version: '1.4.0', account: undefined });
   });
 
   it('shows blank for an identity-less harness (Kimi: no version, no account) once resolved', () => {
-    const kimi: StatusIdentitySource = { identitySessionId: 'sess-K' };
+    const kimi: StatusIdentitySource = { identityAppliedSessionId: 'sess-K' };
     expect(displayIdentity(kimi, 'sess-K')).toEqual({ version: undefined, account: undefined });
   });
 
   it('prefers the live version over the display-only statusVersion', () => {
-    const entry: StatusIdentitySource = { identitySessionId: 's', version: '2.1.218', statusVersion: '2.0.0' };
+    const entry: StatusIdentitySource = { identityAppliedSessionId: 's', version: '2.1.218', statusVersion: '2.0.0' };
     expect(displayIdentity(entry, 's').version).toBe('2.1.218');
   });
 });
