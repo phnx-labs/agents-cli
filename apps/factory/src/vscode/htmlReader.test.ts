@@ -25,7 +25,8 @@ describe('rewriteRelativeResources', () => {
 
   test('rewrites relative src and href to webview URIs', () => {
     const html = `<img src="./cover.png"><link href="style.css" rel="stylesheet">`;
-    const out = rewriteRelativeResources(html, docDir, webview as any);
+    const fileUri = (fsPath: string) => ({ fsPath } as unknown as ReturnType<typeof import('vscode')['Uri']['file']>);
+    const out = rewriteRelativeResources(html, docDir, webview as any, fileUri);
     expect(out).toContain(`src="webview-uri://${path.resolve(docDir, './cover.png')}"`);
     expect(out).toContain(`href="webview-uri://${path.resolve(docDir, 'style.css')}"`);
   });
