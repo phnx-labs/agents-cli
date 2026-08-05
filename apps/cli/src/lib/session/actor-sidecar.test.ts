@@ -85,11 +85,22 @@ describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
   }
 
   it('fills actor/initiatedBy from the sidecar when the scanned meta has none', () => {
-    writeSessionActorRecord({ sessionId: 'joined-1', actor: 'grace@example.com', initiatedBy: 'human', startedAtMs: 1 });
+    writeSessionActorRecord({ sessionId: 'joined-1', actor: 'grace@example.com', initiatedBy: 'human', mode: 'edit', startedAtMs: 1 });
     upsertSession(scanMeta('joined-1'), '');
     const meta = getSessionById('joined-1');
     expect(meta?.actor).toBe('grace@example.com');
     expect(meta?.initiatedBy).toBe('human');
+    expect(meta?.mode).toBe('edit');
+  });
+
+  it('updates the persisted mode when a later native resume uses an explicit override', () => {
+    writeSessionActorRecord({ sessionId: 'mode-1', mode: 'plan', startedAtMs: 1 });
+    upsertSession(scanMeta('mode-1'), '');
+    expect(getSessionById('mode-1')?.mode).toBe('plan');
+
+    writeSessionActorRecord({ sessionId: 'mode-1', mode: 'auto', startedAtMs: 2 });
+    upsertSession(scanMeta('mode-1'), '');
+    expect(getSessionById('mode-1')?.mode).toBe('auto');
   });
 
   it('leaves actor null when no sidecar record exists (honest unattributed row)', () => {

@@ -12,6 +12,7 @@ import {
   resolveSessionQuery,
   buildSessionDescription,
   fleetCandidatesByQuery,
+  metadataResolveOutcome,
   metadataResolveForwardedArgs,
   mergeToolSearchEnvelopes,
   mergeToolProgramCountEnvelopes,
@@ -694,7 +695,8 @@ describe('agents sessions --resolve local-peer critical path', () => {
         expect(rows[0]).not.toHaveProperty('plan');
         expect(rows[0].origin).toBe('cli');
         expect(rows[0]).not.toHaveProperty('account');
-        expect(rows[0]).not.toHaveProperty('cwd');
+        expect(rows[0].cwd).toBe(repoDir);
+        expect(rows[0]).not.toHaveProperty('mode');
         expect(rows[0]).not.toHaveProperty('recentDirectoriesTouched');
       }
     } finally {
@@ -784,6 +786,28 @@ describe('agents sessions --resolve local-peer critical path', () => {
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
+  });
+
+  it('resolves one exact UUID even when unrelated fleet peers are unavailable', () => {
+    const id = '019fd0c8-b3e9-77a2-a1a4-444698c4d897';
+    const session: SessionMeta = {
+      id,
+      shortId: '019fd0c8',
+      agent: 'codex',
+      version: '0.146.0',
+      mode: 'edit',
+      machine: 'yosemite-s0',
+      timestamp: '2026-08-05T09:29:43.616Z',
+      filePath: '/sessions/codex.jsonl',
+    };
+    expect(metadataResolveOutcome([session], { sessions: [], unreachable: ['offline-box'] }, id)).toEqual({
+      kind: 'resolved',
+      session,
+    });
+    expect(metadataResolveOutcome([session], { sessions: [], unreachable: ['offline-box'] }, '019fd0c8')).toEqual({
+      kind: 'partial',
+      failedPeers: ['offline-box'],
+    });
   });
 
   it('returns a partial fleet result when a real old peer rejects the safe resolver protocol', async () => {

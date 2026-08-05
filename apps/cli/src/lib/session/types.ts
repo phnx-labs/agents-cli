@@ -10,6 +10,9 @@
 /** Agents that store session data on disk and can be discovered by `agents sessions`. */
 export type SessionAgentId = 'claude' | 'codex' | 'gemini' | 'antigravity' | 'opencode' | 'openclaw' | 'rush' | 'hermes' | 'grok' | 'kimi' | 'droid' | 'cursor';
 
+/** Effective permissions mode used to launch a managed agent session. */
+export type SessionRunMode = 'plan' | 'edit' | 'auto' | 'skip';
+
 /** All agents with session discovery support, in display order. */
 export const SESSION_AGENTS: SessionAgentId[] = ['claude', 'codex', 'gemini', 'antigravity', 'opencode', 'openclaw', 'rush', 'hermes', 'grok', 'kimi', 'droid', 'cursor'];
 
@@ -167,6 +170,8 @@ export interface SessionMeta {
   toolCallCount?: number;
   version?: string;
   account?: string;
+  /** Effective normalized launch mode captured by the SessionStart hook. */
+  mode?: SessionRunMode;
   topic?: string;
   /**
    * The session's human-readable name — one field, several sources with a plain

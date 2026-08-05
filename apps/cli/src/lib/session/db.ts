@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import Database from '../sqlite.js';
-import type { SessionAgentId, SessionEvent, SessionMeta } from './types.js';
+import type { SessionAgentId, SessionEvent, SessionMeta, SessionRunMode } from './types.js';
 import { parseSession } from './parse.js';
 import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
 import { getSessionsDir, getSessionsDbPath } from '../state.js';
@@ -30,7 +30,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/05-sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 31;
+export const SCHEMA_VERSION = 32;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every
@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   routine_run_id TEXT,
   version TEXT,
   account TEXT,
+  mode TEXT,
   timestamp TEXT NOT NULL,
   last_activity TEXT,
   project TEXT,
@@ -283,6 +284,7 @@ export interface SessionRow {
   routine_run_id: string | null;
   version: string | null;
   account: string | null;
+  mode: string | null;
   timestamp: string;
   last_activity: string | null;
   project: string | null;
@@ -826,6 +828,16 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     `);
   }
 
+  if (fromVersion < 32) {
+    // v31 → v32: persist the effective managed launch mode so resume can
+    // restore the same permission boundary instead of falling back to a CLI
+    // default that may be more or less permissive.
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((column) => column.name),
+    );
+    if (!cols.has('mode')) db.exec(`ALTER TABLE sessions ADD COLUMN mode TEXT`);
+  }
+
 }
 
 /** Open (or return the cached) sessions database, applying migrations as needed. */
@@ -1271,7 +1283,7 @@ export function recordDirScans(
 const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   INSERT INTO sessions (
     id, short_id, agent, origin, routine_name, routine_run_id,
-    version, account, timestamp, last_activity,
+    version, account, mode, timestamp, last_activity,
     project, cwd, git_branch, topic, label, message_count, token_count,
     output_tokens, cost_usd, duration_ms, model, tool_call_count,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
@@ -1280,7 +1292,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     actor, initiated_by, used_browser, used_computer
   ) VALUES (
     @id, @short_id, @agent, @origin, @routine_name, @routine_run_id,
-    @version, @account, @timestamp, @last_activity,
+    @version, @account, @mode, @timestamp, @last_activity,
     @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
     @output_tokens, @cost_usd, @duration_ms, @model, @tool_call_count,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
@@ -1296,6 +1308,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     routine_run_id = excluded.routine_run_id,
     version = excluded.version,
     account = excluded.account,
+    mode = COALESCE(excluded.mode, sessions.mode),
     timestamp = excluded.timestamp,
     last_activity = excluded.last_activity,
     project = excluded.project,
@@ -1562,6 +1575,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     routine_run_id: meta.routineRunId ?? null,
     version: meta.version ?? null,
     account: meta.account ?? null,
+    mode: meta.mode ?? actorRec?.mode ?? null,
     timestamp: meta.timestamp,
     last_activity: resolveLastActivity(meta, scan),
     project: meta.project ?? null,
@@ -1744,6 +1758,7 @@ export function upsertSessionsBatch(
         routine_run_id: meta.routineRunId ?? null,
         version: meta.version ?? null,
         account: meta.account ?? null,
+        mode: meta.mode ?? actorIndex.get(meta.id)?.mode ?? null,
         timestamp: meta.timestamp,
         last_activity: resolveLastActivity(meta, scan),
         project: meta.project ?? null,
@@ -1982,6 +1997,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     toolCallCount: row.tool_call_count ?? undefined,
     version: row.version ?? undefined,
     account: row.account ?? undefined,
+    mode: isSessionRunMode(row.mode) ? row.mode : undefined,
     topic: row.topic ?? undefined,
     label: row.label ?? undefined,
     isTeamOrigin: row.is_team_origin === 1,
@@ -2006,6 +2022,10 @@ function rowToMeta(row: SessionRow): SessionMeta {
     usedBrowser: row.used_browser === null ? undefined : row.used_browser === 1,
     usedComputer: row.used_computer === null ? undefined : row.used_computer === 1,
   };
+}
+
+function isSessionRunMode(value: string | null): value is SessionRunMode {
+  return value === 'plan' || value === 'edit' || value === 'auto' || value === 'skip';
 }
 
 function parseJsonColumn<T>(value: string | null): T | undefined {

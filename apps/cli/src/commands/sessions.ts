@@ -973,8 +973,8 @@ export function serializeSessionsJson(sessions: SessionMeta[]): string {
 }
 
 /** The intentionally small metadata contract emitted by `sessions --resolve`.
- * Transcript locations, extracted plans, account data, costs, and other indexed
- * payload stay local to the machine that owns them. */
+ * It includes only launch identity needed to route/resume. Transcript paths,
+ * extracted plans, costs, and content stay on the machine that owns them. */
 export function serializeResolvedSessionsJson(sessions: SessionMeta[]): string {
   const safe = sessions.map((session) => ({
     id: session.id,
@@ -984,7 +984,10 @@ export function serializeResolvedSessionsJson(sessions: SessionMeta[]): string {
     timestamp: session.timestamp,
     lastActivity: session.lastActivity,
     project: session.project,
+    cwd: session.cwd,
     version: session.version,
+    account: session.account,
+    mode: session.mode,
     label: session.label,
     topic: session.topic,
     machine: session.machine,
@@ -3902,6 +3905,8 @@ export type MetadataResolveOutcome =
   | { kind: 'ambiguous'; candidates: FleetSessionCandidate[] }
   | { kind: 'partial'; failedPeers: string[] };
 
+const FULL_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Resolve a fleet sweep through the same canonical full-id / prefix resolver as
  * local lookups, then group copies by logical session id. Synced mirrors of one
  * session therefore stay one candidate even when several machines report them;
@@ -3960,20 +3965,50 @@ export function toolSearchForwardedArgs(argv: string[], hosts: string[]): string
   return args;
 }
 
-/** Resolution must fail closed when any selected peer did not answer. Choosing
- * from a partial fleet can turn an unseen candidate into a false unique match. */
+/** Resolution fails closed for prefixes/keywords when a peer did not answer.
+ * A full UUID is globally unique, so one exact hit is sufficient even when an
+ * unrelated registered device is offline. */
 export function metadataResolveOutcome(
   localMatches: SessionMeta[],
   remote: { sessions: SessionMeta[]; unreachable: string[] },
   selector: string,
 ): MetadataResolveOutcome {
-  if (remote.unreachable.length > 0) {
-    return { kind: 'partial', failedPeers: remote.unreachable };
-  }
   const candidates = fleetCandidatesByQuery([...localMatches, ...remote.sessions], selector);
+  if (FULL_SESSION_ID_RE.test(selector) && candidates.length === 1 && candidates[0].id.toLowerCase() === selector.toLowerCase()) {
+    return { kind: 'resolved', session: candidates[0].hits[0].session };
+  }
+  if (remote.unreachable.length > 0) return { kind: 'partial', failedPeers: remote.unreachable };
   if (candidates.length === 0) return { kind: 'not-found' };
   if (candidates.length > 1) return { kind: 'ambiguous', candidates };
   return { kind: 'resolved', session: candidates[0].hits[0].session };
+}
+
+/** Reusable local-first resolver for `agents run --resume` and `agents resume`.
+ * Full UUIDs hit the local SQLite index without any SSH fan-out. */
+export async function resolveSessionMetadataValue(
+  selector: string,
+  scope: { agent?: string; project?: string; local?: boolean; hosts?: string[] } = {},
+  deps: Pick<FleetResolveDeps, 'gatherRemoteList'> = { gatherRemoteList },
+): Promise<MetadataResolveOutcome> {
+  const localMachine = machineId();
+  const includeLocal = !scope.hosts?.length || shouldIncludeLocal(scope.hosts, localMachine);
+  const indexed = includeLocal ? applyScopeFilters(querySessions(), scope) : [];
+  const localMatches = resolveIndexedMetadataRows(indexed, selector)
+    .map(session => ({ ...session, machine: session.machine || localMachine }));
+
+  if (FULL_SESSION_ID_RE.test(selector)) {
+    const localOutcome = metadataResolveOutcome(localMatches, { sessions: [], unreachable: [] }, selector);
+    if (localOutcome.kind === 'resolved') return localOutcome;
+  }
+  if (scope.local === true) return metadataResolveOutcome(localMatches, { sessions: [], unreachable: [] }, selector);
+
+  try {
+    const forwarded = metadataResolveForwardedArgs(selector, scope);
+    const remote = await deps.gatherRemoteList(forwarded, scope.hosts);
+    return metadataResolveOutcome(localMatches, remote, selector);
+  } catch (error: any) {
+    return metadataResolveOutcome(localMatches, { sessions: [], unreachable: [error?.message ?? 'fleet fan-out'] }, selector);
+  }
 }
 
 /** Resolve one selector to indexed metadata across the fleet without reading or
@@ -3997,18 +4032,7 @@ async function resolveSessionMetadata(
     return;
   }
 
-  let remoteResult = { sessions: [] as SessionMeta[], unreachable: [] as string[] };
-  if (scope.local !== true) {
-    try {
-      const forwarded = metadataResolveForwardedArgs(selector, scope);
-      const result = await deps.gatherRemoteList(forwarded, scope.hosts);
-      remoteResult = { sessions: result.sessions, unreachable: result.unreachable };
-    } catch (error: any) {
-      remoteResult = { sessions: [], unreachable: [error?.message ?? 'fleet fan-out'] };
-    }
-  }
-
-  const outcome = metadataResolveOutcome(localMatches, remoteResult, selector);
+  const outcome = await resolveSessionMetadataValue(selector, scope, deps);
   if (outcome.kind === 'partial') {
     console.error(chalk.red(`Partial session resolution: ${outcome.failedPeers.join(', ')} did not answer.`));
     console.error(chalk.gray('No unique/no-match decision was made. Upgrade or reconnect every peer, then retry.'));
