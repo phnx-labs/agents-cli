@@ -239,6 +239,21 @@ describe('shared-topic boilerplate stripping', () => {
     expect(stripSharedPrefix('Fix login', prefixes)).toBe('Fix login');
   });
 
+  it('does not fall through to a shorter phrase when the longest covers the whole topic', () => {
+    // Regression: with prefixes ['Resume previous work:', 'Resume previous'],
+    // rejecting the exact match and continuing the loop stripped the SHORTER
+    // phrase and rendered the row as 'work:' — a fragment of the boilerplate.
+    const topics = [
+      'Resume previous work: alpha',
+      'Resume previous work: beta',
+      'Resume previous work: gamma',
+      'Resume previous work:',
+    ];
+    const prefixes = sharedTopicPrefixes(topics);
+    expect(prefixes).toEqual(['Resume previous work:', 'Resume previous']);
+    expect(stripSharedPrefix('Resume previous work:', prefixes)).toBe('Resume previous work:');
+  });
+
   it('does not eat content that legitimately starts with punctuation', () => {
     const prefixes = ['Resume previous work:'];
     expect(stripSharedPrefix('Resume previous work: -1 open issue', prefixes)).toBe('-1 open issue');

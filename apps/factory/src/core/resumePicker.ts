@@ -345,9 +345,14 @@ export function sharedTopicPrefixes(
 export function stripSharedPrefix(topic: string, prefixes: readonly string[]): string {
   const trimmed = topic.trim();
   for (const prefix of prefixes) {
-    if (trimmed.length > prefix.length && trimmed.startsWith(prefix)) {
-      return trimmed.slice(prefix.length).replace(/^\s+/, '');
-    }
+    if (!trimmed.startsWith(prefix)) continue;
+    // The first match wins, because `prefixes` is longest-first. Falling
+    // through to a shorter phrase when the longest one covers the whole topic
+    // returns a fragment of the boilerplate rather than the topic —
+    // "Resume previous work:" would strip against "Resume previous" and render
+    // as "work:", which names even less than the untouched text does.
+    if (trimmed.length === prefix.length) return trimmed;
+    return trimmed.slice(prefix.length).replace(/^\s+/, '');
   }
   return trimmed;
 }
