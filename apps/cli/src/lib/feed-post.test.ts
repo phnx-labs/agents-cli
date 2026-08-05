@@ -14,7 +14,7 @@ import {
   STATUS_POST_MAX_CHARS,
   STATUS_TITLE_MAX_CHARS,
 } from './feed-post.js';
-import { readSessionActivity, tierForEvent } from './activity.js';
+import { appendActivityEvent, readSessionActivity, tierForEvent } from './activity.js';
 import type { PidSessionEntry } from './session/pid-registry.js';
 
 function tmpActivityDir(): string {
@@ -113,6 +113,40 @@ describe('resolvePostIdentity', () => {
     expect(id?.launchId).toBe('launch-abc');
     expect(id?.tmuxPane).toBe('%3');
     expect(id?.cwd).toBe('/repo');
+  });
+
+  it('recovers the session from activity when AGENT_SESSION_ID is empty', () => {
+    const activityRoot = tmpActivityDir();
+    appendActivityEvent({
+      ts: '2026-08-05T10:00:00.000Z',
+      event: 'bash.executed',
+      sessionId: 'sess-from-activity',
+      mailboxId: 'sess-from-activity',
+      host: 'zion',
+      runtime: 'codex',
+      agent: 'codex',
+      cwd: '/repo/from-activity',
+      launchId: 'launch-from-activity',
+      terminalId: 'term-1',
+    }, activityRoot);
+
+    const id = resolvePostIdentity({
+      env: { AGENT_SESSION_ID: '', AGENT_LAUNCH_ID: 'launch-from-activity' },
+      activityRoot,
+      listEntries: () => [],
+      readEntry: () => undefined,
+      startPid: 1,
+    });
+
+    expect(id).toMatchObject({
+      sessionId: 'sess-from-activity',
+      launchId: 'launch-from-activity',
+      host: 'zion',
+      runtime: 'codex',
+      agent: 'codex',
+      cwd: '/repo/from-activity',
+      terminalId: 'term-1',
+    });
   });
 
   it('walks parent pids to find a registry entry', () => {
