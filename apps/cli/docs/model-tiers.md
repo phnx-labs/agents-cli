@@ -15,7 +15,7 @@ cheap    default    best    ultra
 ```
 
 Pass one anywhere `--model` is accepted — `agents run <agent> --model best`,
-`agents teams add <team> <agent> "<task>" --model cheap`, or a profile. Concrete
+`agents teams add <team> <agent> "<task>" --model cheap`, or a custom harness. Concrete
 ids (`claude-opus-4-8`) keep working unchanged; tiers are additive.
 
 A tier resolves **per `(harness, installed version)`** to a concrete model that

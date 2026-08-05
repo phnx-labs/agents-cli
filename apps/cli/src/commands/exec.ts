@@ -2222,7 +2222,7 @@ export function registerRunCommand(program: Command): void {
         } else {
           console.error(chalk.red(`Unknown agent: ${rawAgent}`));
           console.error(chalk.gray(`Available agents: ${ALL_AGENT_IDS.join(', ')}`));
-          console.error(chalk.gray(`Or add a profile: agents profiles add <name>`));
+          console.error(chalk.gray(`Or add a custom harness: agents harness add <name>`));
           process.exit(1);
         }
       }
