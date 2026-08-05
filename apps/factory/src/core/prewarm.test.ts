@@ -329,6 +329,16 @@ describe('buildVersionedResumeCommand', () => {
       `agents run claude --interactive --host 'a'\\''; rm -rf /; #' --resume abc123`,
     );
   });
+
+  test('resume launches with the original session id and sends zero tmux wrapper', () => {
+    const sessionId = '7b1cf038-8761-4e46-af43-5336e7e5a776';
+    const cmd = buildVersionedResumeCommand('claude', sessionId);
+    expect(cmd).toContain(sessionId);
+    expect(cmd).toMatch(/^(claude|agents run claude)/);
+    expect(cmd).not.toContain('tmux');
+    expect(cmd).not.toContain('agents tmux');
+    expect(cmd).not.toContain('\n');
+  });
 });
 
 describe('supportsPrewarming', () => {

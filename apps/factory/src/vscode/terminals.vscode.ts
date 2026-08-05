@@ -30,7 +30,6 @@ import {
   SessionAgentType
 } from '../core/utils';
 import { registerTerminal as registerSessionTracker } from './sessionTracker';
-import { relabelTmuxPane, getTmuxCoords } from './tmux';
 
 // getTerminalsByAgentType runs 5x (one per agent type) on every 10s floor poll
 // and again on every terminal open/close. Its per-terminal/per-session debug
@@ -102,16 +101,6 @@ export interface EditorTerminal {
   identityAppliedSessionId?: string; // Session id the cached version/account were applied for (even if a field is null); display gate — the status bar shows them only for THIS session, never a prior binding's leftover
   approvalStatus?: 'pending' | 'approved' | 'running' | 'complete'; // Swarm approval status
   autoLabelPollerId?: NodeJS.Timeout; // Poller for auto-label fetch (cleared once label is set)
-  detached?: boolean;       // The client tab closed on a live tmux detach (SSH drop) but the
-                            // agent is still running detached. The entry is KEPT (so its durable
-                            // tmux mapping survives persistence) but is no longer a live tab —
-                            // the reconnect pass excludes detached ids from "tracked" so it can
-                            // re-attach. Cleared when a fresh terminal re-registers this id.
-  tmuxCoords?: { session: string; socket: string; pane?: string }; // Durable snapshot of the
-                            // terminal's tmux coordinates, stamped at detach time. The live
-                            // coords live in tmux.ts's tmuxTerminals map, which is cleared the
-                            // instant the tab closes — so once detached, buildPersistedSessions
-                            // reads them from here to keep the mapping intact across persistence.
 }
 
 const STATUS_BAR_LABELS_KEY = 'agentStatusBarLabels';
@@ -342,36 +331,6 @@ export function unregister(terminal: vscode.Terminal): void {
   }
 }
 
-// The client tab closed on a LIVE tmux detach (SSH drop), not an agent exit. The
-// agent is still running detached, so we KEEP the registry entry — that's what
-// keeps its durable tmux mapping in every buildPersistedSessions() snapshot, so
-// the reconnect pass can find and re-attach it. We only: (1) mark it detached so
-// the reconnect pass's tracked-id guard no longer treats it as an open tab, (2)
-// stamp the tmux coords onto the entry (the live tmux map is already cleared by
-// the time this runs), and (3) stop the auto-label poller (no live tab to label).
-// The dead vscode.Terminal object is dropped from the reverse lookup, but the
-// entry stays under its id until a fresh terminal re-registers (reattach) or the
-// agent truly exits.
-export function markDetached(
-  terminal: vscode.Terminal,
-  coords: { session: string; socket: string; pane?: string } | undefined
-): void {
-  const id = terminalToId.get(terminal);
-  if (!id) return;
-  const entry = editorTerminals.get(id);
-  if (!entry) return;
-  if (entry.autoLabelPollerId) {
-    clearInterval(entry.autoLabelPollerId);
-    entry.autoLabelPollerId = undefined;
-  }
-  entry.detached = true;
-  if (coords) entry.tmuxCoords = coords;
-  terminalToId.delete(terminal);
-  // Persist so the detach mapping (now sourced from entry.tmuxCoords) lands on
-  // disk immediately, surviving a subsequent extension reload.
-  schedulePersist();
-}
-
 export async function setLabel(
   terminal: vscode.Terminal,
   label: string | undefined,
@@ -391,11 +350,6 @@ export async function setLabel(
     schedulePersist();
 
     stopAutoLabelPoller(terminal);
-
-    // Keep the tmux pane border in sync with the tab. A manual label wins over
-    // the auto-label; clearing it (label=undefined) falls back to the auto-label.
-    // Fire-and-forget — tmux styling is best-effort, never load-bearing.
-    void relabelTmuxPane(terminal, label ?? entry.autoLabel).catch(() => { /* ignore */ });
   } else {
     console.log(`[DEBUG setLabel] No entry found for terminal - label NOT saved!`);
   }
@@ -410,10 +364,6 @@ export function setAutoLabel(terminal: vscode.Terminal, autoLabel: string | unde
       entry.autoLabelPollerId = undefined;
       console.log(`[TERMINALS] Cleared auto-label poller for terminal "${terminal.name}" - label set: "${autoLabel}"`);
     }
-    // Surface the resolved topic in the tmux pane border (a manual label, if
-    // set, still takes precedence). This fires even when the terminal isn't
-    // focused — unlike the tab rename, which must briefly activate it.
-    void relabelTmuxPane(terminal, entry.label ?? autoLabel).catch(() => { /* ignore */ });
   }
 }
 
@@ -1391,19 +1341,6 @@ export function buildPersistedSessions(): sessionsPersist.PersistedSession[] {
     // Only persist agent terminals (not regular terminals)
     if (!entry.agentConfig) continue;
 
-    // Durable terminal↔tmux mapping: when this terminal was spawned inside
-    // tmux, persist its session/socket/pane so the reconnect scanner can
-    // re-attach to the still-live detached session after a reload rather than
-    // resuming from the CLI session file. Synchronous read — deactivate can't
-    // await. Undefined for the native (non-tmux) terminal path.
-    //
-    // The live coords come from tmux.ts's tmuxTerminals map, which is cleared
-    // the moment the tab closes. For a DETACHED-but-live entry that map is
-    // already empty, so read the snapshot stamped onto the entry at detach time
-    // (markDetached) — this is what keeps the reconnect mapping intact after an
-    // SSH drop.
-    const coords = getTmuxCoords(entry.terminal) ?? entry.tmuxCoords;
-
     sessions.push({
       terminalId: entry.id,
       prefix: entry.agentConfig.prefix,
@@ -1413,9 +1350,6 @@ export function buildPersistedSessions(): sessionsPersist.PersistedSession[] {
       agentType: entry.agentType,
       version: entry.version,
       createdAt: entry.createdAt,
-      tmuxSession: coords?.session,
-      tmuxSocket: coords?.socket,
-      tmuxPane: coords?.pane,
       agentPid: entry.pid,
     });
   }
@@ -1437,19 +1371,6 @@ export function loadPersistedSessions(workspacePath: string): sessionsPersist.Pe
 // Clear persisted sessions after successful restore
 export function clearPersistedSessions(workspacePath: string): void {
   sessionsPersist.clearWorkspaceSessions(workspacePath);
-}
-
-// After restore, keep ONLY the tmux-backed mappings on disk. The plain (non-tmux)
-// sessions have been recreated by restoreAgentTerminals and can be dropped, but the
-// tmux-backed ones are still LIVE in detached tmux and are owned by the reconnect
-// pass — clearing them would orphan the live agents and destroy the durable map a
-// second reload needs. `tmuxBacked` must already be filtered to sessions carrying
-// a tmuxSession + tmuxSocket (see reconnect.hasTmuxMapping).
-export function saveOnlyTmuxPersistedSessions(
-  workspacePath: string,
-  tmuxBacked: sessionsPersist.PersistedSession[]
-): void {
-  sessionsPersist.saveWorkspaceSessions(workspacePath, tmuxBacked, true);
 }
 
 // Update a session's metadata (e.g., when CLI sessionId is captured)

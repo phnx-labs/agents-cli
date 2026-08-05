@@ -6,6 +6,20 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Extension no longer orchestrates tmux.** The Factory VS Code extension previously
+  wrapped agent terminals in a local tmux session so it could reattach after window
+  crashes or SSH drops. That layer is removed: every agent now opens in a plain
+  native VS Code terminal running `agents run <agent> --interactive` directly. This
+  fixes the long tmux init chain that could overflow the tty input queue and leave
+  the agent unstarted. Reconnect/reattach responsibility moves entirely to the
+  agents CLI. Deletes `src/vscode/tmux.ts`, `src/vscode/reconnect.ts`, tmux
+  coordinate tracking in `src/vscode/terminals.vscode.ts`, and the tmux fields in
+  `src/core/sessions.persist.ts`. Tests in `src/core/agents.test.ts` and
+  `src/core/prewarm.test.ts` assert a new spawn sends only the `agents run`
+  command and that a Claude resume with the original session id sends no tmux
+  wrapper or extra input. Source: `src/vscode/extension.ts`, `src/core/spawn.ts`,
+  `src/vscode/terminals.vscode.ts`, `src/core/sessions.persist.ts`.
+
 - **Panel snapshot poll: one `agents view --json` for every harness per tick.** The
   centralized SnapshotDetector used to fork `agents view <type> --json` once per
   watched agent type every 4s. It now loads the full inventory in a single process
@@ -63,15 +77,11 @@ All notable changes to the Factory extension are documented here. Format follows
   account; Kimi has neither). Source: `src/core/liveSession.ts`,
   `src/core/statusIdentity.ts`, `src/vscode/extension.ts`,
   `src/vscode/terminals.vscode.ts`.
-- **Removed the `agents.terminalMode` setting — tmux is always on when available.**
+- **Removed the `agents.terminalMode` setting.**
   The extension no longer exposes an `auto` / `tmux` / `native` "terminal mode".
-  tmux is the default for every agent and shell terminal (giving each a named,
-  reconnectable session), with an automatic fallback to a plain VS Code terminal
-  only when tmux isn't installed (Windows / no binary). The `native` opt-out is
-  gone: it mostly just disabled the extension's crash/SSH-drop reconnect while the
-  `agents` CLI wrapped the agent in tmux anyway. Deletes the setting, the
-  `src/core/terminalMode.ts` module, and the mode reads at the launch / URI-spawn /
-  split sites. Source: `src/vscode/extension.ts`, `package.json`.
+  The setting and the `src/core/terminalMode.ts` module are deleted, along with
+  the mode reads at the launch / URI-spawn / split sites. Source:
+  `src/vscode/extension.ts`, `package.json`.
 - **Fleet health probes no longer stack duplicate `agents` subprocesses (fixes
   CPU thrash on a loaded box).** `countRunningAgents` — the per-host running-agent
   count behind the Dispatch panel's device health and the launch-health refresh —
