@@ -19,7 +19,8 @@ import {
   parseWorkflowFrontmatter,
   countWorkflowSubagents,
   listPluginWorkflowDirs,
-  isBareWorkflowName,
+  resolveWorkflowRef,
+  parseWorkflowRef,
 } from '../workflows.js';
 
 export interface WorkflowItem {
@@ -66,6 +67,24 @@ function orderedWorkflowSearchDirs(cwd?: string): Array<{ dir: string; layer: La
   return out;
 }
 
+/** Map a resolved absolute workflow dir to its origin layer (best-effort). */
+function layerForWorkflowPath(workflowPath: string, cwd?: string): Layer {
+  const abs = path.resolve(workflowPath);
+  const under = (root: string) => {
+    const r = path.resolve(root);
+    return abs === r || abs.startsWith(r + path.sep);
+  };
+  const projectDir = getProjectAgentsDir(cwd);
+  if (projectDir && under(path.join(projectDir, 'workflows'))) return 'project';
+  if (under(getUserWorkflowsDir())) return 'user';
+  if (under(getSystemWorkflowsDir())) return 'system';
+  for (const extra of getEnabledExtraRepos()) {
+    if (under(path.join(extra.dir, 'workflows'))) return 'system';
+  }
+  // Plugin marketplaces (and anything else plugin-shaped).
+  return 'plugin';
+}
+
 class WorkflowsHandlerImpl implements ResourceHandler<WorkflowItem> {
   readonly kind = 'workflow' as const;
 
@@ -97,26 +116,24 @@ class WorkflowsHandlerImpl implements ResourceHandler<WorkflowItem> {
   }
 
   resolve(_agent: AgentId, name: string, cwd?: string): ResolvedItem<WorkflowItem> | null {
-    // Same bare-name gate as resolveWorkflowRef — never path-join traversal refs.
-    if (!isBareWorkflowName(name)) return null;
-    for (const { dir, layer } of orderedWorkflowSearchDirs(cwd)) {
-      const workflowPath = path.join(dir, name);
-      const fm = parseWorkflowFrontmatter(workflowPath);
-      if (fm) {
-        return {
-          name,
-          item: {
-            name: fm.name || name,
-            description: fm.description,
-            model: fm.model,
-            subagentCount: countWorkflowSubagents(workflowPath),
-          },
-          layer,
-          path: workflowPath,
-        };
-      }
-    }
-    return null;
+    // Delegate to resolveWorkflowRef so bare, workflow:, and name@source share one path.
+    const workflowPath = resolveWorkflowRef(name, cwd ?? process.cwd());
+    if (!workflowPath) return null;
+    const fm = parseWorkflowFrontmatter(workflowPath);
+    if (!fm) return null;
+    const parsed = parseWorkflowRef(name);
+    const displayName = parsed?.name ?? path.basename(workflowPath);
+    return {
+      name: displayName,
+      item: {
+        name: fm.name || displayName,
+        description: fm.description,
+        model: fm.model,
+        subagentCount: countWorkflowSubagents(workflowPath),
+      },
+      layer: layerForWorkflowPath(workflowPath, cwd),
+      path: workflowPath,
+    };
   }
 
   sync(_agent: AgentId, _versionHome: string, _cwd?: string): void {

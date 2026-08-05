@@ -72,6 +72,7 @@ Structure:
     plugins/           optional: plugin bundles scoped to this workflow
 
 Resolution: project > user > plugin (plugins/*/workflows/) > extra > system.
+Pin a source with name@plugin or name@extra-alias (optional workflow: prefix).
 
 Note: agents run defaults to --mode plan (read-only). For workflows that
 write files, post comments, or otherwise mutate state, pass --mode edit or

@@ -153,7 +153,7 @@ Resume reuses the checkpoint's loop config but lets the resume command **raise**
 | Capability | Today | Proposed |
 |------------|-------|----------|
 | Plugin packages skills / commands / subagents / mcp / hooks | yes | — |
-| Plugin packages workflows | **partial** — `workflows/` under a plugin is discovered and resolved by `agents run <name>` (project > user > plugin > extra > system); inspect/resource groups list them | full — install path no longer requires a separate central copy; `@source` disambiguation |
+| Plugin packages workflows | **partial** — `workflows/` under a plugin is discovered and resolved by `agents run <name>` (project > user > plugin > extra > system); `name@plugin` / `name@extra-alias` (optional `workflow:` prefix) pins the source; inspect/resource groups list them | full — install path no longer requires a separate central copy; unified `run:` for all entrypoint kinds |
 | `agents run <workflow>` | yes | — |
 | `agents run <subagent>` / `<command>` as the top-level target | no — only agent / profile / workflow | yes — unified entrypoint dispatch |
 | Routine target | `agent` or `workflow` | any entrypoint via `run:` |

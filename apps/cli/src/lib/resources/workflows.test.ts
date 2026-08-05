@@ -265,4 +265,23 @@ describe('WorkflowsHandler', () => {
       expect(hit!.layer).toBe('plugin');
     });
   });
+
+  describe('resolve name@source', () => {
+    it('pins a plugin even when user owns the bare name', () => {
+      writeWorkflow(userWorkflowsDir, 'deploy', { description: 'user' });
+      writeWorkflow(path.join(userPluginsDir, 'ship-tools', 'workflows'), 'deploy', {
+        description: 'from plugin',
+      });
+
+      const bare = WorkflowsHandler.resolve('claude', 'deploy', tmpDir);
+      expect(bare!.layer).toBe('user');
+      expect(bare!.item.description).toBe('user');
+
+      const pinned = WorkflowsHandler.resolve('claude', 'deploy@ship-tools', tmpDir);
+      expect(pinned).not.toBeNull();
+      expect(pinned!.layer).toBe('plugin');
+      expect(pinned!.item.description).toBe('from plugin');
+      expect(pinned!.name).toBe('deploy');
+    });
+  });
 });

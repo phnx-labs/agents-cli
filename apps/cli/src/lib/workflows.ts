@@ -725,15 +725,8 @@ function resolveWorkflowPath(ref: string, cwd: string): string | null {
   return isWorkflowDir(candidate) ? candidate : null;
 }
 
-/**
- * Plugin `workflows/` directories in discovery order (project → user → system →
- * extra). Used by name resolution and listing so a plugin-packaged workflow is
- * runnable via `agents run <name>` without a separate install into
- * ~/.agents/workflows/ (Phase 5 packaging). Within the plugin band, project
- * plugins beat user/system plugins (same first-hit-wins as other layers).
- */
-export function listPluginWorkflowDirs(cwd: string = process.cwd()): string[] {
-  const pluginRoots: string[] = [];
+/** Plugin-root marketplace dirs in project → user → system → extra order. */
+function pluginMarketplaceDirs(cwd: string): string[] {
   const pluginsDirs: string[] = [];
   const projectPlugins = getProjectPluginsDir(cwd);
   if (projectPlugins) pluginsDirs.push(projectPlugins);
@@ -741,8 +734,38 @@ export function listPluginWorkflowDirs(cwd: string = process.cwd()): string[] {
   for (const extra of getEnabledExtraRepos()) {
     pluginsDirs.push(path.join(extra.dir, 'plugins'));
   }
+  return pluginsDirs;
+}
 
-  for (const pluginsDir of pluginsDirs) {
+function isPluginDirectory(pluginRoot: string, entry: fs.Dirent): boolean {
+  if (entry.name.startsWith('.')) return false;
+  let isDir = entry.isDirectory();
+  if (!isDir && entry.isSymbolicLink()) {
+    try {
+      isDir = fs.statSync(pluginRoot).isDirectory();
+    } catch {
+      isDir = false;
+    }
+  }
+  return isDir;
+}
+
+/**
+ * Plugin `workflows/` directories in discovery order (project → user → system →
+ * extra). Used by name resolution and listing so a plugin-packaged workflow is
+ * runnable via `agents run <name>` without a separate install into
+ * ~/.agents/workflows/ (Phase 5 packaging). Within the plugin band, project
+ * plugins beat user/system plugins (same first-hit-wins as other layers).
+ *
+ * Pass `pluginName` to restrict to one plugin (for `name@plugin` resolution).
+ */
+export function listPluginWorkflowDirs(
+  cwd: string = process.cwd(),
+  pluginName?: string,
+): string[] {
+  const pluginRoots: string[] = [];
+
+  for (const pluginsDir of pluginMarketplaceDirs(cwd)) {
     if (!fs.existsSync(pluginsDir)) continue;
     let entries: fs.Dirent[];
     try {
@@ -751,18 +774,9 @@ export function listPluginWorkflowDirs(cwd: string = process.cwd()): string[] {
       continue;
     }
     for (const entry of entries) {
-      if (entry.name.startsWith('.')) continue;
-      // Directories and symlinks-to-directories (plugin marketplaces often symlink).
+      if (pluginName !== undefined && entry.name !== pluginName) continue;
       const pluginRoot = path.join(pluginsDir, entry.name);
-      let isDir = entry.isDirectory();
-      if (!isDir && entry.isSymbolicLink()) {
-        try {
-          isDir = fs.statSync(pluginRoot).isDirectory();
-        } catch {
-          isDir = false;
-        }
-      }
-      if (!isDir) continue;
+      if (!isPluginDirectory(pluginRoot, entry)) continue;
       const workflowsDir = path.join(pluginRoot, 'workflows');
       if (fs.existsSync(workflowsDir)) pluginRoots.push(workflowsDir);
     }
@@ -771,16 +785,49 @@ export function listPluginWorkflowDirs(cwd: string = process.cwd()): string[] {
 }
 
 /**
- * True when `ref` is a single bare workflow name (no path separators, no `..`).
- * Name lookup must not path-join multi-segment or traversal refs into search roots.
+ * True when `ref` is a single bare workflow / source identifier (no path
+ * separators, no `..`, no `@`). Name lookup must not path-join multi-segment
+ * or traversal refs into search roots. `name@source` is parsed separately.
  */
 export function isBareWorkflowName(ref: string): boolean {
   if (!ref || ref === '.' || ref === '..') return false;
   if (ref.includes('/') || ref.includes('\\')) return false;
   if (ref.includes('..')) return false;
+  if (ref.includes('@')) return false;
   // Reject absolute paths (posix or Windows).
   if (path.isAbsolute(ref)) return false;
   return path.basename(ref) === ref;
+}
+
+/** Parsed `agents run` workflow reference (docs/07-entrypoints). */
+export interface ParsedWorkflowRef {
+  /** Workflow directory name (WORKFLOW.md parent). */
+  name: string;
+  /**
+   * When set (`name@source`), pin resolution to that source only:
+   * a plugin name, or an enabled extra-repo alias.
+   */
+  source?: string;
+}
+
+/**
+ * Parse a workflow run target: optional `workflow:` type prefix and optional
+ * `@source` pin. Returns null when the form is not a valid name lookup.
+ */
+export function parseWorkflowRef(ref: string): ParsedWorkflowRef | null {
+  let r = ref.trim();
+  if (r.startsWith('workflow:')) r = r.slice('workflow:'.length);
+  if (!r) return null;
+
+  const at = r.lastIndexOf('@');
+  if (at > 0) {
+    const name = r.slice(0, at);
+    const source = r.slice(at + 1);
+    if (!isBareWorkflowName(name) || !isBareWorkflowName(source)) return null;
+    return { name, source };
+  }
+  if (!isBareWorkflowName(r)) return null;
+  return { name: r };
 }
 
 /**
@@ -788,15 +835,28 @@ export function isBareWorkflowName(ref: string): boolean {
  *
  * Directories are accepted anywhere on disk when they contain WORKFLOW.md.
  * Name lookup precedence (docs/07-entrypoints): project > user > plugin > extra > system.
- * Bare name only; `name@plugin` disambiguation is a follow-up.
+ * Pin a source with `name@plugin` or `name@extra-alias` (optional `workflow:` prefix).
  */
 export function resolveWorkflowRef(ref: string, cwd: string = process.cwd()): string | null {
   const direct = resolveWorkflowPath(ref, cwd);
   if (direct) return direct;
 
-  // Name lookup only — reject traversal / multi-segment so path.join(dir, ref)
-  // cannot escape a workflows root (absolute paths already handled above).
-  if (!isBareWorkflowName(ref)) return null;
+  const parsed = parseWorkflowRef(ref);
+  if (!parsed) return null;
+
+  // Source-qualified: only that plugin or extra-repo workflows/ (no layered fallback).
+  if (parsed.source) {
+    for (const dir of listPluginWorkflowDirs(cwd, parsed.source)) {
+      const workflowPath = path.join(dir, parsed.name);
+      if (isWorkflowDir(workflowPath)) return workflowPath;
+    }
+    for (const extra of getEnabledExtraRepos()) {
+      if (extra.alias !== parsed.source) continue;
+      const workflowPath = path.join(extra.dir, 'workflows', parsed.name);
+      if (isWorkflowDir(workflowPath)) return workflowPath;
+    }
+    return null;
+  }
 
   const projectAgentsDir = getProjectAgentsDir(cwd);
   const searchDirs = [
@@ -808,7 +868,7 @@ export function resolveWorkflowRef(ref: string, cwd: string = process.cwd()): st
   ];
 
   for (const dir of searchDirs) {
-    const workflowPath = path.join(dir, ref);
+    const workflowPath = path.join(dir, parsed.name);
     if (isWorkflowDir(workflowPath)) return workflowPath;
   }
   return null;
