@@ -671,8 +671,17 @@ Requirement ids are section-namespaced — `SES-*` / `SEC-*` / `EXEC-*`, with th
 `-GAP-` (known gap) families — and a requirement the code does not yet fully meet
 carries a trailing `Status: [Intended]` or `[Drift]` line naming its `-GAP-`.
 
-Both specs also enumerate **known gaps** (implemented-vs-intended drift) — a new
-feature MUST NOT widen them and SHOULD close the one it touches.
+Beyond the two above, the document also specifies **§Agent execution**,
+**§Scheduling & execution singularity**, and **§Watchdog**. It does **not** cover
+every command group — `hosts`, `teams`, and `cloud` have design docs but zero
+RFC-2119 requirements, and surfaces like `wallet`, `worktree`, and `sync`/`apply`
+have neither. The
+[coverage inventory](docs/specifications.md#coverage-inventory) says which row a
+surface sits in; check it before treating a behavior as guaranteed.
+
+Every section enumerates **known gaps** (implemented-vs-intended drift) — a new
+feature MUST NOT widen them and SHOULD close the one it touches. A gap that has
+been closed stays as a `(resolved)` entry so references never dangle.
 
 ## Detailed design
 
