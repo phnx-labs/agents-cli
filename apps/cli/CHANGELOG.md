@@ -1,19 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **`agents humans show owner [--json]`** — new command to display the owner config from `~/.agents/humans.yaml`. The file is written automatically on first run when `notify.owner` exists in `agents.yaml` or when `owner.md` carries YAML frontmatter.
-
-- **`humans.yaml` — typed, versioned owner config.** `~/.agents/humans.yaml` (`version: 1`) now stores owner identity (name, timezone, quiet hours, severity), notification channels, and escalation policy. `notify.owner` in `agents.yaml` and `owner.md` frontmatter are both migrated into it on first run and removed. `agents send --to owner` / `agents notify` prefer this file with a fallback to `agents.yaml` during the migration window. Source: `apps/cli/src/lib/humans.ts`, `apps/cli/src/commands/humans.ts`, `apps/cli/src/lib/migrate.ts`.
-
-- **`agents memory` ignores `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `MEMORY.md`.** These rule/index files lived in `~/.agents/memory/` but were incorrectly surfaced as memory facts. `isFactFile()` now excludes them by name (case-insensitive). Source: `apps/cli/src/lib/memory.ts`.
-
-- **Permissions write path fixed — `groups/` subdirectory.** `installPermissionSet`, `removePermissionSet`, and `savePermissionSet` now all write to the `groups/` subdirectory (matching `discoverPermissionGroups()` which already reads from `groups/`). Source: `apps/cli/src/lib/permissions.ts`.
-
-- **Stop eagerly creating webhooks directories.** `ensureAgentsDir()` no longer creates `~/.agents/webhooks/` or `~/.agents/.system/webhooks/` on startup — both dirs are created on first actual use. Source: `apps/cli/src/lib/state.ts`.
-
-- **Terminals canonically under `.cache/`.** The stale migration comment that blocked `terminals/` from moving to `~/.agents/.cache/terminals/` is replaced by the actual move. Factory already writes to `.cache/terminals/` (`foreman.registry.ts:9`), so no app-level change is needed. Source: `apps/cli/src/lib/migrate.ts`.
-
 ## 1.22.11
 
 - **`--blocked` iMessage notifications are now phone-actionable.** The forwarded message dropped the block's `--option`s, `--default`, and timeout and instead showed `agents focus <id>` — a CLI command that is useless on a phone. It now shows the choices (`Options: publish / wait`) and the safe-default fallback (`Default in 15 min: wait`) and omits the `agents focus` line, so a `--blocked` post that carries a `--default` self-resolves when the owner can't reply. Source: `apps/cli/src/lib/feed-broadcast.ts`.
