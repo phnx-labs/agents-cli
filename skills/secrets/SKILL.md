@@ -156,13 +156,28 @@ agents secrets add prod LOG_LEVEL --env LOG_LEVEL
 macOS prompts Touch ID **per bundle, per process**, so running several agents at once (`agents teams`, parallel `agents run --secrets`) re-prompts once each. There's no OS setting to quiet it — but the **secrets-agent** does (macOS only):
 
 ```bash
-agents secrets unlock prod        # one Touch ID; held for 24h
+agents secrets unlock prod        # one Touch ID; held ~7 days (default)
 agents teams start my-feature     # every teammate reads prod silently
 agents secrets status             # what's held, and when it locks
 agents secrets lock               # wipe it; next read re-prompts
 ```
 
-`unlock` reads the bundle once and keeps the resolved values in a local broker behind a user-only socket; later runs read from memory with no prompt. The hold ends on its TTL (default 24h, `--ttl 30m`), when you `lock`, or when the screen locks / the machine sleeps. Nothing is written to disk.
+`unlock` reads the bundle once and keeps the resolved values in a local broker behind a user-only socket; later runs read from memory with no prompt. The hold ends on its TTL (**default 7 days**, `--ttl 30m` to shorten), when you `lock`, or when the machine **sleeps / you log out**. A bare **screen-lock does NOT drop the hold** (it's already gated by the login session). Nothing is written to disk.
+
+### When does Touch ID actually appear?
+
+On a **locked** keychain bundle:
+
+| You run | Touch ID? |
+|---|---|
+| `secrets list`, `secrets view` (no `--reveal`) | never — metadata / masked values only |
+| `secrets view --reveal`, `secrets exec` **at your terminal** | one sheet, then reveals / runs (a deliberate human reveal/run) |
+| `secrets get`, `secrets export` (any variant) | **never** — automation primitives for `$(…)` / `eval`; they fail fast to `agents secrets unlock` instead |
+| `secrets unlock` | one sheet — the deliberate unlock |
+| anything an **agent** launches (`AGENTS_RUNTIME`) or any no-TTY context | never — resolves broker-only, fails fast if not held |
+| anything on an **already-unlocked** bundle | never — served from the broker |
+
+So a sheet only ever appears for a deliberate human action (`unlock`, or a `view --reveal` / `exec` you type) on a *locked* bundle. `get`/`export` stay silent so they never block a script mid-pipeline.
 
 For a machine running lots of agents, run `agents secrets start` once — it installs the broker as a persistent background service (launchd) that stays up across the session, so a cold-started broker can't get starved under load. It self-heals onto new code after `npm i -g` upgrades. `agents secrets status` shows whether it's installed.
 

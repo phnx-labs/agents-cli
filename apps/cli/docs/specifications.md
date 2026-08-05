@@ -946,7 +946,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
 - **SEC-13 (MUST).** A headless/detached (no-TTY or agent-runtime) context on macOS MUST resolve
   broker-only and fail loudly, and MUST NOT pop a Touch ID sheet on the
   interactive user's screen (`isHeadlessSecretsContext`,
-  `lib/secrets/headless.ts:37-66`, re-exported from `lib/secrets/bundles.ts`;
+  `lib/secrets/headless.ts:28-37`, re-exported from `lib/secrets/bundles.ts`;
   `commands/secrets.ts:1172-1175,1925-1929`;
   `mcp.ts:112-114`). This covers raw item reads too, not just bundles:
   `getKeychainToken`/`getKeychainTokens` consult `assertRawKeychainReadAllowed`
@@ -971,6 +971,27 @@ access control (that is 1Password/Vault; this tool is device-local first).
   This does NOT cover the explicit `agents share` / `agents share setup` commands —
   those are user-initiated, not launches, and keep the `isHeadlessSecretsContext()`
   gate (`readWriteTokenFromBundle`, `readCloudflareCreds`).
+- **SEC-13b (MUST).** A **deliberate human reveal/run** at a real interactive
+  terminal on a **locked** keychain bundle MUST resolve with **exactly one** Touch
+  ID sheet, then reveal the value / run the command. This covers exactly two
+  commands: `agents secrets view --reveal` and `agents secrets exec` — both gate
+  `agentOnly` on `isHeadlessSecretsContext() || !isInteractiveTerminal()`
+  (`commands/secrets.ts:1384`, `:1500`, `:2463`). Conversely, the **automation
+  primitives** `agents secrets get` and every `agents secrets export` variant
+  (`--plaintext`, `--to-file`, `--host`, `--to-1password`) MUST stay `agentOnly:
+  true` **unconditionally** and MUST NOT prompt even at an interactive terminal
+  (`commands/secrets.ts:1593`, `:2229`, `:2259`, `:2350`, `:2392`) — prompting there
+  would either dump plaintext onto a visible screen (`export`, which prints) or
+  block a `$(…)` capture mid-pipeline (`get`). Under an agent (`AGENTS_RUNTIME`) or
+  no TTY, **all** of these stay broker-only and fail closed per SEC-13. **Given** a
+  human at a TTY (no `AGENTS_RUNTIME`) runs `agents secrets view --reveal <locked>`
+  or `agents secrets exec <locked> -- <cmd>` **When** the bundle is not
+  broker-held **Then** exactly one Touch ID sheet is raised and the value is
+  revealed / command run; whereas the same `get`/`export` on the same locked bundle
+  fails fast naming `agents secrets unlock <bundle>`, no sheet. This is the
+  reveal-vs-automation split — `view --reveal`/`exec` are the only interactive
+  biometric surfaces besides `unlock` (SEC-13a governs the separate `agents run
+  --secrets` launch-injection path, which is always `agentOnly`).
 - **SEC-14 (MUST).** A broker `get` for a bundle it does not hold MUST return
   `{ ok:true, hit:false }` — never an error, never a prompt, never a human
   escalation — and the caller MUST fall through to the real store
@@ -1143,17 +1164,23 @@ flags and examples; this spec governs the **guarantees** behind them.
 
 #### 4.2 Materialization classification (normative)
 
-| Command | Boundary side | Evidence |
-|---|---|---|
-| `secrets exec <b> -- <cmd>` | **Inject** (child env) | `commands/secrets.ts:2006-2009` |
-| `run --secrets <b>` | **Inject** (run child env) | `commands/exec.ts:2181` |
-| `secrets export --host` (SSH push) | **Inject** (over ssh stdin) | `commands/secrets.ts:1850` |
-| `secrets export --to-1password` / `--to-file` | **Neither** (to `op` argv / AES file) | `commands/secrets.ts:1905,1794` |
-| `secrets mcp` (`get_secret`) | **JIT, per-request** — never `process.env`, names-only in `tools/list` | `lib/secrets/mcp.ts:83-91,173-188` |
-| `secrets export --plaintext` | **Materialize** | `commands/secrets.ts:1946` |
-| `secrets view --reveal` | **Materialize** | `commands/secrets.ts:1117-1126` |
-| `secrets get [b] [KEY]` | **Materialize** (automation primitive, ungated) | `commands/secrets.ts:1156,1181` |
-| `list` / `view` (default) / all CRUD / `unlock` / `lock` / `status` / `push` / `pull` | **Neither** (metadata/status/counts only) | e.g. `commands/secrets.ts:1115,2262` |
+Two orthogonal axes: **Boundary side** (does a plaintext value cross into the
+agent's process / a child / stdout?) and **Prompts (locked)?** (can this raise a
+Touch ID sheet on a *locked* bundle — see SEC-13b). They are independent: `exec`
+injects yet CAN prompt interactively, while `export --plaintext` materializes yet
+NEVER prompts.
+
+| Command | Boundary side | Prompts (locked)? | Evidence |
+|---|---|---|---|
+| `secrets exec <b> -- <cmd>` | **Inject** (child env) | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:2454,2463` |
+| `run --secrets <b>` | **Inject** (run child env) | never (SEC-13a) | `commands/exec.ts` secrets injection |
+| `secrets export --host` (SSH push) | **Inject** (over ssh stdin) | never | `commands/secrets.ts:2259` |
+| `secrets export --to-1password` / `--to-file` | **Neither** (to `op` argv / AES file) | never | `commands/secrets.ts:2350,2229` |
+| `secrets mcp` (`get_secret`) | **JIT, per-request** — never `process.env`, names-only in `tools/list` | never | `lib/secrets/mcp.ts` |
+| `secrets export --plaintext` | **Materialize** | never (automation primitive) | `commands/secrets.ts:2390,2392` |
+| `secrets view --reveal` | **Materialize** | **interactive TTY only** (SEC-13b) | `commands/secrets.ts:1498,1500` |
+| `secrets get [b] [KEY]` | **Materialize** (automation primitive, ungated) | never | `commands/secrets.ts:1593` |
+| `list` / `view` (default) / all CRUD / `unlock` / `lock` / `status` / `push` / `pull` | **Neither** (metadata/status/counts only) | only `unlock` prompts | e.g. `commands/secrets.ts` list/view/unlock |
 
 Rule of thumb (normative): **if `--plaintext`, `--reveal`, or `get` appears in an
 agent's transcript, a key entered the agent's context there.** Injection and MCP
@@ -1294,9 +1321,23 @@ tool-call output or the session `.jsonl`.
 **GWT-S2 — `get` always materializes, by design.**
 Given the same bundle; When an agent runs `agents secrets get prod STRIPE_API_KEY`;
 Then the plaintext is written to stdout with no TTY gate
-(`commands/secrets.ts:1181`) and lands in the agent's context + transcript — this
+(`commands/secrets.ts:1593`) and lands in the agent's context + transcript — this
 is the automation primitive, and its appearance in a transcript is the audit
-signal, not a bug.
+signal, not a bug. It never raises a Touch ID sheet, even run directly at a
+terminal on a locked bundle (`agentOnly: true` unconditionally) — a locked bundle
+fails fast to `agents secrets unlock`.
+
+**GWT-S2b — `view --reveal` / `exec` prompt once, interactively, by design (SEC-13b).**
+Given a locked `hold` bundle `prod` not held by the broker; When a **human** at a
+real terminal (no `AGENTS_RUNTIME`) runs `agents secrets view --reveal prod` or
+`agents secrets exec prod -- ./deploy.sh`; Then exactly **one** Touch ID sheet is
+raised and the value is revealed / the command runs
+(`agentOnly: isHeadlessSecretsContext() || !isInteractiveTerminal()` →
+`false` for a TTY human, `commands/secrets.ts:1500,2463`). Whereas the same command
+under an agent runtime or with no TTY resolves broker-only and fails fast naming
+`agents secrets unlock prod`, no sheet — so release/CI scripts never prompt. This
+is the sole difference between the two deliberate reveal/run commands and the
+`get`/`export` automation primitives (GWT-S2).
 
 **GWT-S3 — `list` is silent and value-free.**
 Given several `hold`/`always` bundles; When the human runs `agents secrets list`;
