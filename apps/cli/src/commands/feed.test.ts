@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'child_process';
 import type { OpenBlock } from '../lib/feed.js';
 import {
+  blockMatchesProject,
   controlFeedSession,
+  eventMatchesProject,
   formatFeedMastheadRight,
   formatFeedReplyHint,
   formatOutcomeHeader,
@@ -14,6 +16,7 @@ import {
   sessionHintsFromActive,
   shouldIncludeLocalFeed,
 } from './feed.js';
+import type { EnrichedActivityEvent } from '../lib/activity.js';
 import { groupBlocksByOutcome } from '../lib/feed-outcome.js';
 import { GLYPH } from '../lib/comms-render.js';
 import { formatActivityLine } from '../lib/activity.js';
@@ -27,6 +30,49 @@ describe('resolveFeedFilter', () => {
     expect(resolveFeedFilter('Updates')).toBe('updates');
     expect(resolveFeedFilter('update')).toBe('updates');
     expect(resolveFeedFilter('ALL')).toBe('all');
+  });
+});
+
+describe('project matchers (feed --project)', () => {
+  it('blockMatchesProject is case-insensitive and drops unstamped blocks under a filter', () => {
+    expect(blockMatchesProject(block('a', 'h', '2026-08-05T00:00:00Z', { project: 'Rush' }), 'rush')).toBe(true);
+    expect(blockMatchesProject(block('b', 'h', '2026-08-05T00:00:00Z', { project: 'other' }), 'rush')).toBe(false);
+    expect(blockMatchesProject(block('c', 'h', '2026-08-05T00:00:00Z'), 'rush')).toBe(false);
+    expect(blockMatchesProject(block('d', 'h', '2026-08-05T00:00:00Z', { project: 'rush' }), undefined)).toBe(true);
+  });
+
+  it('eventMatchesProject uses stamped project or cwd key, and scopes updates-style posts', () => {
+    const keep: EnrichedActivityEvent = {
+      v: 1,
+      ts: '2026-08-05T00:00:00Z',
+      event: 'status.posted',
+      tier: 'milestone',
+      sessionId: 's1',
+      mailboxId: 's1',
+      host: 'zion',
+      runtime: 'terminal',
+      project: 'agents-cli',
+      detail: 'shipped',
+    };
+    const drop: EnrichedActivityEvent = {
+      ...keep,
+      sessionId: 's2',
+      mailboxId: 's2',
+      project: 'rush',
+      detail: 'other',
+    };
+    const viaCwd: EnrichedActivityEvent = {
+      ...keep,
+      sessionId: 's3',
+      mailboxId: 's3',
+      project: undefined,
+      cwd: '/home/muqsit/src/github.com/phnx-labs/agents-cli',
+    };
+    // Filtering for agents-cli keeps stamped + cwd-keyed posts, drops other projects.
+    const filtered = [keep, drop, viaCwd].filter((ev) => eventMatchesProject(ev, 'agents-cli'));
+    expect(filtered.map((e) => e.sessionId)).toEqual(['s1', 's3']);
+    // Without a project filter, nothing is dropped.
+    expect([keep, drop].filter((ev) => eventMatchesProject(ev, undefined))).toHaveLength(2);
   });
 });
 

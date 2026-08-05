@@ -330,8 +330,8 @@ variable is a scripting mistake, not a request for the whole stream.
   not, carrying `ttlMs` and the `agent` scope (`*` = a global grant).
 
 Both are audit-level and **not** milestones, so they land in `agents events` and
-the persisted audit log without cluttering the curated `agents activity` /
-`agents feed`. Every record carries a `source` telling you HOW it was read or
+the persisted audit log without cluttering the curated `agents feed` updates /
+activity lane. Every record carries a `source` telling you HOW it was read or
 granted — `keychain` (real Touch-ID read), `agent` (served from the unlocked
 broker), `session` (durable snapshot after a restart), `reveal`, `raw-item`,
 `sync-push`, `remote` (with the `host`), `broker`/`broker+durable` (an unlock
@@ -1029,7 +1029,7 @@ read, but it is rendered as a compact lane under the block view or in full via
 
 ```bash
 agents feed --filter all     # open blocks, then the milestone/updates lane
-agents feed --filter updates # progress posts + milestones, recency-first
+agents feed --filter updates # deliberate status.posted progress posts only
 ```
 
 The lane still shows plans, PRs, worktrees, sub-agents, and deliberate
