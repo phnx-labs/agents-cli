@@ -13,7 +13,8 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
-import { buildRunsJson } from './routines.js';
+import { buildRunsJson, groupRoutineJobsByProject } from './routines.js';
+import type { JobConfig } from '../lib/routines.js';
 import type { RunMeta } from '../lib/routines.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -1435,6 +1436,67 @@ describe('routines add --project unknown project rejection', () => {
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
+  });
+});
+
+describe('groupRoutineJobsByProject — named projects never collide with special buckets', () => {
+  const mk = (name: string, projects?: string[]): JobConfig =>
+    ({ ...baseJob, name, ...(projects ? { projects } : {}) }) as unknown as JobConfig;
+
+  it('keeps a project named "Operations" separate from the no-project Operations special', () => {
+    const known = new Set(['Operations']);
+    const jobs = [
+      mk('in-operations-project', ['Operations']), // named project literally "Operations"
+      mk('no-project'),                             // untagged -> special Operations bucket
+    ];
+    const groups = groupRoutineJobsByProject(jobs, known);
+    const named = groups.find((g) => g.key === 'named:Operations');
+    const special = groups.find((g) => g.key === 'special:operations');
+    // Two distinct buckets, both titled "Operations", never merged.
+    expect(named).toBeDefined();
+    expect(special).toBeDefined();
+    expect(named!.jobs.map((j) => j.name)).toEqual(['in-operations-project']);
+    expect(special!.jobs.map((j) => j.name)).toEqual(['no-project']);
+    // The named project sorts before the special that shares its title.
+    expect(groups.indexOf(named!)).toBeLessThan(groups.indexOf(special!));
+  });
+
+  it('keeps a project named "Cross-project" separate from the multi-project span special', () => {
+    const known = new Set(['Cross-project', 'a', 'b']);
+    const jobs = [
+      mk('in-crossproject-project', ['Cross-project']), // named project literally "Cross-project"
+      mk('spans-two', ['a', 'b']),                       // multiple names -> special Cross-project bucket
+    ];
+    const groups = groupRoutineJobsByProject(jobs, known);
+    const named = groups.find((g) => g.key === 'named:Cross-project');
+    const special = groups.find((g) => g.key === 'special:cross');
+    expect(named).toBeDefined();
+    expect(special).toBeDefined();
+    expect(named!.jobs.map((j) => j.name)).toEqual(['in-crossproject-project']);
+    expect(special!.jobs.map((j) => j.name)).toEqual(['spans-two']);
+    expect(groups.indexOf(named!)).toBeLessThan(groups.indexOf(special!));
+  });
+
+  it('orders named projects (alphabetically) before All projects, Cross-project, Operations, Unknown projects', () => {
+    const known = new Set(['zeta', 'alpha', 'a', 'b']);
+    const jobs = [
+      mk('op'),                       // Operations special
+      mk('unknown', ['ghost']),       // Unknown projects special
+      mk('all', ['*']),               // All projects special
+      mk('cross', ['a', 'b']),        // Cross-project special
+      mk('named-z', ['zeta']),        // named
+      mk('named-a', ['alpha']),       // named
+    ];
+    const titles = groupRoutineJobsByProject(jobs, known).map((g) => g.title);
+    expect(titles).toEqual(['alpha', 'zeta', 'All projects', 'Cross-project', 'Operations', 'Unknown projects']);
+  });
+
+  it('groups a file-style duplicate-name routine (projects: [myapp, myapp]) as the single named project', () => {
+    const known = new Set(['myapp']);
+    const groups = groupRoutineJobsByProject([mk('dup', ['myapp', 'myapp'])], known);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].key).toBe('named:myapp');
+    expect(groups[0].title).toBe('myapp');
   });
 });
 

@@ -50,6 +50,11 @@ import {
   resolveHostStrategy,
   HOST_STRATEGIES,
   computeProjectGroup,
+  computeProjectGroupKind,
+  projectGroupKey,
+  projectGroupTitle,
+  projectGroupOrder,
+  normalizeProjects,
 } from '../lib/routines.js';
 import type { JobConfig, JobTrigger, LinearTriggerEvent, RunMeta, HostStrategy } from '../lib/routines.js';
 import { listProjectDefs, isSafeProjectName } from '../lib/projects.js';
@@ -293,16 +298,20 @@ export function groupRoutineJobsByProject(
     groups.set(key, { key, title, jobs: [job], local: true });
   };
 
+  const orderByKey = new Map<string, number>();
   for (const job of jobs) {
-    const groupTitle = computeProjectGroup(job.projects, knownProjectNames);
-    add(`project:${groupTitle}`, groupTitle, job);
+    const group = computeProjectGroupKind(job.projects, knownProjectNames);
+    const key = projectGroupKey(group);
+    orderByKey.set(key, projectGroupOrder(group));
+    add(key, projectGroupTitle(group), job);
   }
 
-  const SPECIAL = ['All projects', 'Cross-project', 'Operations', 'Unknown projects'];
-  const order = (group: RoutineListGroup): number => {
-    const idx = SPECIAL.indexOf(group.title);
-    return idx === -1 ? 0 : idx + 1; // named projects first (0), then specials in order
-  };
+  // Order by the discriminated group rank (named first, then All projects,
+  // Cross-project, Operations, Unknown projects), then alphabetically by title
+  // within a rank. Buckets are keyed on the discriminant, never the label, so a
+  // project named "Operations" sorts among the named projects — not with the
+  // no-project special that shares its title.
+  const order = (group: RoutineListGroup): number => orderByKey.get(group.key) ?? 0;
   return [...groups.values()].sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title));
 }
 
@@ -895,8 +904,9 @@ export function registerRoutinesCommands(program: Command): void {
               process.exit(1);
             }
           }
-          // Deduplicate while preserving first-seen order.
-          const deduped = [...new Set(options.project as string[])];
+          // Deduplicate at the same canonical boundary writeJob uses, so the
+          // add path and a hand-authored YAML land identical persisted forms.
+          const deduped = normalizeProjects(options.project as string[]) ?? [];
           const knownProjectNames = new Set(listProjectDefs().map((p) => p.name));
           const unknown = deduped.filter((n: string) => !knownProjectNames.has(n));
           if (unknown.length > 0) {
