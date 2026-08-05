@@ -1,8 +1,7 @@
 /**
  * `agents projects` — named, multi-repo projects and the progress
  * rollup. Definitions live in `~/.agents/projects/<name>.yaml` (see
- * `lib/projects.ts`); this registers the command tree over them. Beta-gated on
- * `isBetaEnabled('projects')`, mirroring `agents factory`.
+ * `lib/projects.ts`); this registers the command tree over them.
  *
  * The headline is `status`: instead of the vague per-agent activity line, it
  * rolls every session up by project (matched on cwd) into one card — agents by
@@ -15,7 +14,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 
-import { betaEnableHint, isBetaEnabled } from '../lib/beta.js';
 import { setHelpSections } from '../lib/help.js';
 import { getMainRepoRoot } from '../lib/git.js';
 import { parseOwnerRepoFromRemote } from '../lib/registry.js';
@@ -504,9 +502,8 @@ function renderCard(
 }
 
 export function registerProjectsCommands(program: Command): void {
-  const enabled = isBetaEnabled('projects');
   const projects = program
-    .command('projects', { hidden: !enabled })
+    .command('projects')
     .description('Named multi-repo projects with a progress rollup.');
 
   setHelpSections(projects, {
@@ -514,33 +511,22 @@ export function registerProjectsCommands(program: Command): void {
       agents projects import --from-linear  # the projects you actually track
       agents projects add rush --repo phnx-labs/rush --path apps/web
       agents projects list
-      agents projects status              # progress card for every project
+      agents projects status              # every project, across the whole fleet
       agents projects status rush         # one project (same body as view/show)
       agents projects view rush           # alias of status <name>
-      agents projects status --fleet      # + per-device workspace drift over SSH
+      agents projects status --device s0  # scope to one device (or --devices a,b,c)
       agents projects link rush --linear  # bind the Linear project (auto-suggest)
       agents run --project rush           # land an agent in the project
     `,
     notes: `
       Definitions are hand-editable YAML in ~/.agents/projects/ and sync across
-      machines with 'agents push/pull'. Enable with: agents beta enable projects.
+      machines with 'agents push/pull'.
 
       'import --from-factory' reads Factory's auto-detected registry, which
       guesses from checkouts on disk — it imports only 'high' confidence rows by
       default. Widen with --min-confidence medium or --all, and drop a bad guess
       with 'agents projects rm <name>'.
     `,
-  });
-
-  projects.hook('preAction', (_thisCommand, actionCommand) => {
-    if (enabled) return;
-    // `probe` is the peer half of `status --fleet`: it must answer whenever the
-    // binary carries it, even where the beta flag is off — a gated peer would
-    // look unreachable to every fleet member on a newer CLI.
-    if (actionCommand.name() === 'probe') return;
-    console.error(chalk.red('agents projects is in beta.'));
-    console.error(chalk.gray(betaEnableHint('projects')));
-    process.exit(1);
   });
 
   // ---- list ----
@@ -642,8 +628,19 @@ export function registerProjectsCommands(program: Command): void {
     json?: boolean;
     window?: string;
     remote?: boolean;
-    fleet?: boolean;
+    // Scope the fleet fan-out to specific devices; undefined = the whole fleet.
+    deviceFilter?: string[];
   };
+
+  /** Merge `--device a b` (variadic) and `--devices a,b,c` (comma list) into one
+   *  deduped device filter; undefined when neither was given (= whole fleet). */
+  function resolveDeviceFilter(device?: string[], devices?: string): string[] | undefined {
+    const merged = [
+      ...(device ?? []),
+      ...(devices ? devices.split(',').map((s) => s.trim()).filter(Boolean) : []),
+    ];
+    return merged.length ? [...new Set(merged)] : undefined;
+  }
 
   /** Print the YAML-side fields that sit under the shared card in `view` mode. */
   function printProjectDefinition(def: ProjectDef, name: string): void {
@@ -692,16 +689,16 @@ export function registerProjectsCommands(program: Command): void {
     const windowDays = Math.max(1, Number.parseInt(opts.window ?? '7', 10) || 7);
     const nowMs = Date.now();
 
-    // --fleet: probe each shown def's workspace paths (root + repos[].path)
-    // locally and on every peer in one parallel SSH round, and widen the
-    // live-session rollup to the whole fleet via the existing sessions
-    // fan-out. Both are opt-in — they dial the fleet. `view` accepts the flag
-    // too so the two verbs stay interchangeable once a name is given.
-    const fleetTargets = opts.fleet ? [...new Set(defs.flatMap(workspaceTargetsForDef))] : [];
+    // Fleet is the default: probe each shown def's workspace paths (root +
+    // repos[].path) locally AND on every peer in one parallel SSH round, and
+    // widen the live-session rollup to the fleet via the sessions fan-out.
+    // `--device`/`--devices` scopes the remote fan-out to a subset; with no
+    // filter every registered device is dialled.
+    const fleetTargets = [...new Set(defs.flatMap(workspaceTargetsForDef))];
     let fleetWs: HostWorkspaceStatus[] = [];
     let fleetSkipped: string[] = [];
     let fleetSessions: Awaited<ReturnType<typeof getActiveSessions>> = [];
-    if (opts.fleet) {
+    {
       const self = machineId();
       fleetWs.push(...probeProjectWorkspaces(fleetTargets).map((s) => ({ ...s, host: self })));
       const [probeRes, activeRes] = await Promise.all([
@@ -709,11 +706,12 @@ export function registerProjectsCommands(program: Command): void {
           ? gatherRemoteAgentsJson({
               args: ['projects', 'probe', '--json', ...fleetTargets],
               noFanoutEnv: PROJECTS_NO_FANOUT_ENV,
+              hosts: opts.deviceFilter,
               parse: parseRemoteProbe,
               quiet: true,
             })
           : Promise.resolve({ items: [] as HostWorkspaceStatus[], deviceCount: 0, skipped: [] as string[] }),
-        gatherRemoteActive(undefined, { quiet: true }),
+        gatherRemoteActive(opts.deviceFilter, { quiet: true }),
       ]);
       fleetWs.push(...probeRes.items);
       fleetSkipped = probeRes.skipped;
@@ -731,17 +729,6 @@ export function registerProjectsCommands(program: Command): void {
     const fleetFor = (d: ProjectDef): HostWorkspaceStatus[] => {
       const targets = new Set(workspaceTargetsForDef(d));
       return fleetWs.filter((s) => targets.has(s.path));
-    };
-
-    /** Local-only workspace probe for the warnings footer when --fleet is off. */
-    const localWsCache = new Map<string, HostWorkspaceStatus[]>();
-    const localWsFor = (d: ProjectDef): HostWorkspaceStatus[] => {
-      const cached = localWsCache.get(d.name);
-      if (cached) return cached;
-      const self = machineId();
-      const rows = probeProjectWorkspaces(workspaceTargetsForDef(d)).map((s) => ({ ...s, host: self }));
-      localWsCache.set(d.name, rows);
-      return rows;
     };
 
     if (opts.json) {
@@ -775,7 +762,7 @@ export function registerProjectsCommands(program: Command): void {
               lastArtifact: rem?.lastArtifact ?? null,
               windowDays,
               repos: [d.repo, ...(d.repos ?? []).map((r2) => r2.slug)].filter(Boolean),
-              ...(opts.fleet ? { workspaces: fleetFor(d) } : {}),
+              workspaces: fleetFor(d),
             };
           }),
           null,
@@ -792,15 +779,15 @@ export function registerProjectsCommands(program: Command): void {
         d,
         roll.get(d.name),
         remote.get(d.name),
-        opts.fleet ? fleetFor(d) : undefined,
+        fleetFor(d),
         linear.get(d.name),
         nowMs,
         milestoneLimit,
         focus.get(d.name) ?? [],
         detail,
-        // Always feed workspace rows into the warnings footer — full fleet when
-        // --fleet, otherwise a local-only probe so behind/dirty is never silent.
-        opts.fleet ? fleetFor(d) : localWsFor(d),
+        // Always feed workspace rows into the warnings footer so behind/dirty
+        // is never silent.
+        fleetFor(d),
       );
       if (detail) printProjectDefinition(d, d.name);
     }
@@ -811,15 +798,23 @@ export function registerProjectsCommands(program: Command): void {
     .command('status [name]')
     .alias('view')
     .alias('show')
-    .description('Progress card for every project, or one named project (aliases: view, show). Named form also prints every milestone and the stored definition.')
+    .description('Progress card for every project across the whole fleet, or one named project (aliases: view, show). Named form also prints every milestone and the stored definition.')
     .option('--json', 'Machine-readable output')
     .option('--window <days>', 'Window for merged PRs, artifacts, and focus areas', '7')
     .option('--no-remote', 'Skip the GitHub and Linear lookups; faster, offline')
-    .option('--fleet', 'Also dial every fleet device for workspace presence, branch, and drift (one SSH per peer)')
-    .action(async (name: string | undefined, opts: ProjectCardOpts) => {
+    .option('--device <name...>', 'Scope fleet status to one or more devices (repeatable)')
+    .option('--devices <names>', 'Scope fleet status to a comma-separated list of devices')
+    .action(async (name: string | undefined, rawOpts: ProjectCardOpts & { device?: string[]; devices?: string }) => {
       // Named invocation = `view` depth (all milestones + definition). Unnamed
       // stays the scannable multi-project rollup. `view`/`show` are commander
       // aliases of this same command, so there is only one implementation.
+      // Fleet is dialled by default; --device/--devices narrows it to a subset.
+      const opts: ProjectCardOpts = {
+        json: rawOpts.json,
+        window: rawOpts.window,
+        remote: rawOpts.remote,
+        deviceFilter: resolveDeviceFilter(rawOpts.device, rawOpts.devices),
+      };
       const mode: 'status' | 'view' = name ? 'view' : 'status';
       await runProjectCard(name, opts, mode);
     });
