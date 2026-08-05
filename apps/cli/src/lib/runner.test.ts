@@ -315,12 +315,12 @@ describe('command-mode routines (executeJobDetached — daemon/cron path)', () =
 
   it('allows only one detached execution of the same routine at a time', async () => {
     const command = `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 600)"`;
-    const config = commandConfig('cmd-det-single-flight', command);
+    const config = commandConfig('cmd-det-single-flight', command.replace('600)', '5000)'));
 
     const first = await executeJobDetached(config);
     await expect(executeJobDetached(config)).rejects.toBeInstanceOf(RoutineAlreadyRunningError);
 
-    const final = await waitTerminal(config.name, first.runId);
+    const final = await waitTerminal(config.name, first.runId, 7000);
     expect(final.status).toBe('completed');
   });
 
