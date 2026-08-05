@@ -85,7 +85,8 @@ import { composeRulesFromState, type ComposedSubrule } from '../lib/rules/compos
 import { getConfiguredRunStrategy } from '../lib/rotate.js';
 import { resolveRunDefaults } from '../lib/run-defaults.js';
 import { resolveConfiguredModel, type ConfiguredModelSource } from '../lib/models.js';
-import { listProfiles, profileExists, profileSummary, readProfile, type ProfileSummary } from '../lib/profiles.js';
+import { listProfiles, profileExists, profileSummary, readProfile, type Profile, type ProfileSummary } from '../lib/profiles.js';
+import { getByokUsageForHarness, hasByokProvider, renderByokBar, type ByokUsageResult } from '../lib/byok-usage.js';
 import { renderHarnessDetail } from './harness.js';
 import { loadManifest, isStale } from '../lib/staleness/index.js';
 import { confirm } from '@inquirer/prompts';
@@ -131,9 +132,28 @@ function getHarnesses(filterAgentId?: AgentId): ProfileSummary[] {
     .map(profileSummary);
 }
 
-/** "via <host> <version>" — which native harness actually executes this one. */
-function harnessHostTag(harness: ProfileSummary): string {
-  return harness.hostVersion ? `via ${harness.agent} ${harness.hostVersion}` : `via ${harness.agent}`;
+/** Version-first label: "<version> (forked from <host>[, tracks default])" */
+function harnessVersionLabel(harness: ProfileSummary, globalDefault: string | null): string {
+  const version = harness.hostVersion ?? globalDefault;
+  if (version) {
+    const trailer = harness.hostVersion
+      ? chalk.gray(` (forked from ${harness.agent})`)
+      : chalk.gray(` (forked from ${harness.agent}, `) +
+        chalk.green(`tracks default`) +
+        chalk.gray(`)`);
+    return `${version}${trailer}`;
+  }
+  return chalk.gray(`(forked from ${harness.agent})`);
+}
+
+/** One-hop or two-hop fork origin label for the harness block header. */
+function buildHarnessOrigin(harness: ProfileSummary, allHarnesses: ProfileSummary[]): string {
+  if (!harness.forkedFrom || harness.forkedFrom === harness.agent) return 'custom';
+  const parent = allHarnesses.find((h) => h.name === harness.forkedFrom);
+  if (parent?.forkedFrom) {
+    return `custom · forked from ${harness.forkedFrom} -> ${parent.forkedFrom}`;
+  }
+  return `custom · forked from ${harness.forkedFrom}`;
 }
 
 /**
@@ -260,6 +280,7 @@ export function renderHarnessBlocks(
   harnesses: ProfileSummary[],
   installedHosts: Set<AgentId>,
   showPaths: boolean,
+  byokMap?: Map<string, ByokUsageResult>,
 ): void {
   if (harnesses.length === 0) return;
 
@@ -267,20 +288,18 @@ export function renderHarnessBlocks(
   const authWidth = Math.max(...harnesses.map((h) => h.auth.length));
 
   for (const harness of harnesses) {
-    // The `via <host>` tag on the row already names a native fork parent, so
-    // only a fork of another custom harness adds lineage worth printing.
-    const origin =
-      harness.forkedFrom && harness.forkedFrom !== harness.agent
-        ? `custom · forked from ${harness.forkedFrom}`
-        : 'custom';
+    const origin = buildHarnessOrigin(harness, harnesses);
     const missingHost = installedHosts.has(harness.agent)
       ? ''
       : chalk.yellow(` (host ${harness.agent} not installed)`);
     console.log(`  ${chalk.bold(harness.label)}${chalk.gray(` (${origin})`)}${missingHost}`);
+    const versionTag = harnessVersionLabel(harness, getGlobalDefault(harness.agent));
+    const byokEntry = byokMap?.get(harness.name);
+    const byokBar = byokEntry ? `  ${renderByokBar(byokEntry)}` : '';
     console.log(
       `    ${chalk.yellow(harness.model.padEnd(modelWidth))}  ` +
         `${chalk.cyan(harness.auth.padEnd(authWidth))}  ` +
-        chalk.gray(harnessHostTag(harness)),
+        versionTag + byokBar,
     );
     if (showPaths) console.log(chalk.gray(`      ${harness.path}`));
     console.log();
@@ -736,7 +755,30 @@ async function showInstalledVersions(
   // Custom harnesses sit in the same list as the native ones — they are run the
   // same way (`agents run <name>`), so they read as their own agent type rather
   // than as an indented row under whichever host CLI executes them.
-  renderHarnessBlocks(harnesses, installedHosts, showPaths);
+  const byokMap = new Map<string, ByokUsageResult>();
+  const byKeychainItem = new Map<string, { profile: Profile; names: string[] }>();
+  for (const h of harnesses) {
+    if (!h.provider || !hasByokProvider(h.provider)) continue;
+    let prof: Profile | null = null;
+    try { prof = readProfile(h.name); } catch { continue; }
+    if (!prof.auth) continue;
+    const item = prof.auth.keychainItem;
+    const existing = byKeychainItem.get(item);
+    if (existing) { existing.names.push(h.name); }
+    else { byKeychainItem.set(item, { profile: prof, names: [h.name] }); }
+  }
+  if (byKeychainItem.size > 0) {
+    const fetched = await Promise.all(
+      [...byKeychainItem.values()].map(({ profile, names }) =>
+        getByokUsageForHarness(profile, { forceRefresh: viewOpts?.forceRefresh }).then((result) => ({ result, names }))
+      )
+    );
+    for (const { result, names } of fetched) {
+      if (!result?.budget) continue;
+      for (const name of names) byokMap.set(name, result);
+    }
+  }
+  renderHarnessBlocks(harnesses, installedHosts, showPaths, byokMap.size > 0 ? byokMap : undefined);
 
   // Show globally installed (not managed) agents
   if (globallyInstalled.length > 0) {
