@@ -92,7 +92,6 @@ import {
   isTmuxAvailable
 } from './tmux';
 import { registerReconnect, hasTmuxMapping, NonRetryableError, type ReattachTarget, type ReconnectDeps } from './reconnect';
-import { normalizeTerminalMode, resolveTerminalMode } from '../core/terminalMode';
 import { DEFAULT_DISPLAY_PREFERENCES } from '../core/settings';
 import * as readiness from './terminalReadiness';
 import { resolveAlias, isAgentInstalled, checkInstalledAgentsViaCli } from '../core/agentModels';
@@ -1632,11 +1631,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('agents.newAgentHSplit', async () => {
-      const config = vscode.workspace.getConfiguration('agents');
-      const tmuxEnabled = normalizeTerminalMode(config.get('terminalMode')) !== 'native';
       const terminal = vscode.window.activeTerminal;
 
-      if (tmuxEnabled && terminal && isTmuxTerminal(terminal)) {
+      if (terminal && isTmuxTerminal(terminal)) {
         const state = getTmuxState(terminal);
         if (state) {
           const agentDef = getBuiltInByKey(state.agentType);
@@ -1662,11 +1659,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('agents.newAgentVSplit', async () => {
-      const config = vscode.workspace.getConfiguration('agents');
-      const tmuxEnabled = normalizeTerminalMode(config.get('terminalMode')) !== 'native';
       const terminal = vscode.window.activeTerminal;
 
-      if (tmuxEnabled && terminal && isTmuxTerminal(terminal)) {
+      if (terminal && isTmuxTerminal(terminal)) {
         const state = getTmuxState(terminal);
         if (state) {
           const agentDef = getBuiltInByKey(state.agentType);
@@ -2254,15 +2249,11 @@ async function openSingleAgent(
   // `agents run <agent> --host <device>` so the CLI does the SSH offload —
   // including agents that launch as raw binaries locally.
   const targetHost = host && host !== 'local' ? host : undefined;
-  const config = vscode.workspace.getConfiguration('agents');
-  const terminalMode = normalizeTerminalMode(config.get('terminalMode'));
-  // 'auto' (default) and 'tmux' both need the availability probe; 'native' skips it.
-  const tmuxAvailable = terminalMode === 'native' ? false : await isTmuxAvailable();
-  const { useTmux: tmuxOk, warnUnavailable } = resolveTerminalMode(terminalMode, tmuxAvailable);
-
-  if (warnUnavailable) {
-    vscode.window.showWarningMessage('Tmux mode is forced, but tmux is not available on PATH. Falling back to VS Code terminals.');
-  }
+  // Tmux is always on when available: it gives every terminal a named, addressable
+  // session so the reconnect pass can re-attach a live agent/shell after a window
+  // crash or SSH drop. The only fallback is a plain VS Code terminal when tmux
+  // isn't installed (Windows / no binary) — there is no user-facing "terminal mode".
+  const tmuxOk = await isTmuxAvailable();
 
   // Build command with default model if configured
   const builtInDef = getBuiltInDefByTitle(agentConfig.title);
@@ -2499,15 +2490,11 @@ async function spawnCommandTerminal(
   const terminalId = terminals.nextId(agentConfig.prefix);
   const title = buildTerminalTitle(agentConfig.title, undefined, context, null);
 
-  // Honour `agents.terminalMode` here exactly as the Cmd+Shift+J launch path does
-  // (see launchAgent). Without this the URI path was hardwired to a plain VS Code
-  // terminal, so a session spawned by `agents sessions resume --vscodium` died with
-  // the window and left no tmux coords for the reconnect pass to re-attach — the
-  // one launch path that opted out of the crash resilience everything else has.
-  const config = vscode.workspace.getConfiguration('agents');
-  const terminalMode = normalizeTerminalMode(config.get('terminalMode'));
-  const tmuxAvailable = terminalMode === 'native' ? false : await isTmuxAvailable();
-  const { useTmux } = resolveTerminalMode(terminalMode, tmuxAvailable);
+  // Tmux-back the URI-spawned session exactly like the Cmd+Shift+J launch path
+  // (see launchAgent) so a session spawned by `agents sessions resume --vscodium`
+  // survives a window crash for the reconnect pass to re-attach. Plain-terminal
+  // fallback only when tmux isn't installed.
+  const useTmux = await isTmuxAvailable();
 
   const parent = req.split ? aliveSpawnParent() : undefined;
   const surface = resolveSpawnSurface({
