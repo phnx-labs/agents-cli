@@ -266,6 +266,26 @@ SSH access (§7); rendering sessions that no harness produced.
   Status: `[Intended]` — coverage is uneven today (the live path forces
   non-Codex→Claude, and no harness populates `costUsd`); the shortfall is
   SES-GAP-2.
+- **SES-38 (MUST).** A Claude session MUST be attributed to the account that
+  produced *it*, never to one account resolved once per process. Attribution is a
+  pure function of the transcript's `file_path` and its recorded `version` — no
+  per-file I/O, no dependence on the transcript still existing — resolved in
+  `lib/session/claude-accounts.ts` (`buildClaudeAccountIndex`,
+  `resolveClaudeAccount`) and stamped by `readClaudeMeta`
+  (`lib/session/discover.ts`). Evidence tiers, strongest first: the path names a
+  version home (including a retired `trash/` snapshot, which keeps its
+  `.claude.json`); the path is under the mutable `~/.claude` symlink and the row
+  records a version, which resolves to that version's own home; neither.
+- **SES-39 (MUST).** Grouping MUST key on the org-scoped `account_key`
+  (`claude:org=<uuid>`), never on the email: two orgs under one email (a Team seat
+  and a personal Max plan) are separate rate-limit buckets, the same invariant
+  `candidateIdentity` enforces in `lib/rotate.ts`. `account` is display-only.
+- **SES-40 (MUST).** A session whose account cannot be established MUST surface as
+  `unattributed:<reason>`, with distinct reasons in distinct buckets, and MUST NOT
+  be dropped or folded into a real account. This includes retired homes that are
+  signed out, backup mirrors (no `.claude.json`), versions whose retired snapshots
+  disagree, and — in `--by account` rollups — rows indexed before schema v33
+  (`unattributed:not-indexed`).
 
 #### 3.4 Lifecycle
 

@@ -241,6 +241,34 @@ substituting a mirrored duplicate. Evidence preserves the recorded transcript
 origin across the SSH hop, so a defensive coordinator merge also collapses the
 same origin/session pair if two peers return it.
 
+### Which account produced a session
+
+A Claude transcript records no account identity — no `accountUuid`, no
+`organizationUuid`, no email. What identifies an account is the version home the file
+sits in: each installed version gets its own `.claude.json` (`CLAUDE_CONFIG_DIR` is
+swapped per version). Because the default run strategy is `balanced`, sessions are
+sprayed across every signed-in account, so attribution has to be per transcript.
+
+`lib/session/claude-accounts.ts` resolves it from the path plus the recorded version,
+with no per-file I/O:
+
+| Evidence | When | Strength |
+|---|---|---|
+| `version-home` | the path names a live or retired (`trash/`) home | strongest — the file lives there |
+| `recorded-version` | the path is under the `~/.claude` symlink and the row has a `version` | strong — the symlink moves, the recorded version does not |
+| `symlink-target` | under `~/.claude` with no recorded version | weakest — current target is the only signal |
+| `none` | nothing matches | reported as `unattributed:<reason>` |
+
+Rows carry `account_key` (the org-scoped identity, e.g. `claude:org=<uuid>`),
+`account_org`, and `account` (email, display-only). **Group on `account_key`**: two orgs
+under one email — a Team seat and a personal Max plan — are separate rate-limit buckets.
+`agents cost --by account` and any other `queryUsageRollup({ groupBy: 'account' })`
+caller uses it.
+
+What cannot be established is named, not guessed: a signed-out home, a backup mirror
+with no config, a version whose retired snapshots disagree, and rows indexed before
+schema v33 each get their own `unattributed:*` bucket.
+
 ### Index lifecycle and disk I/O
 
 Schema v29 uses `tool_calls`, the distinct `tool_call_programs` projection,
@@ -251,6 +279,12 @@ normal session cache. It clears only `tool_scan_ledger`, so historical occurrenc
 rows are rebuilt explicitly without forcing ordinary session history to reparse.
 The ledger is keyed by session id; its source path is retained for maintenance,
 not resolved or checked during a query.
+
+Schema v33 adds `account_key` / `account_org` and `idx_sessions_account_key`. Its
+migration also leaves `scan_ledger` alone: attribution derives from `file_path` and
+`version`, both already stored, so existing rows are repaired in place with no
+transcript re-parsed — a 2,736-row index migrates in roughly 200ms with every ledger
+entry still warm.
 
 - A changed Claude/Codex transcript derives call rows inside the same resumable
   reducer that already parses the appended bytes. Results that arrive in a later
@@ -352,6 +386,8 @@ not fit, `coverage.complete` is false and `truncation.reason` is
   "routineRunId": null,
   "version": "2.1.112",
   "account": "you@example.com",
+  "accountKey": "claude:org=e7ca5c72-e79d-4845-b324-29ce28c40207",
+  "accountOrg": "ModSquad",
   "timestamp": "2026-04-22T13:37:14.047Z",
   "lastActivity": "2026-04-22T13:49:36.121Z",
   "project": "agents",
