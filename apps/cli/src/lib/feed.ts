@@ -613,6 +613,21 @@ def main():
     hook_event = payload.get("hook_event_name", "PreToolUse")
 
     if hook_event in CLEAR_EVENTS:
+        # A declared block (\`agents feed post --blocked\`) is the agent explicitly
+        # saying it is stuck. Unlike a question/notification/approval block -- which
+        # tracks an in-flight harness prompt that a lifecycle event resolves -- a
+        # declared block stays open until it is actually ANSWERED (recordAnswer on the
+        # CLI side, or a terminal UserPromptSubmit). Stop/SessionEnd/PostToolUse must
+        # never silently drop it: otherwise the needs-you record vanishes the moment
+        # the agent parks the block and its turn ends -- exactly when the owner still
+        # needs to see and answer it.
+        try:
+            with open(target) as existing_file:
+                existing = json.load(existing_file)
+            if existing.get("kind") == "declared":
+                return
+        except Exception:
+            pass
         # A matcher-less PostToolUse clear (registered for Codex so an approved
         # tool clears its approval card) must NOT wipe an open AskUserQuestion
         # while an unrelated tool runs mid-question -- those are cleared only by
