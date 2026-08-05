@@ -78,6 +78,18 @@ function blank(name: string): ProjectSessionRollup {
  * containing only projects with at least one matched session — callers merge
  * with the full definition list to show zero-agent projects.
  */
+
+/**
+ * Ensure every session carries a host for the card roster. Local
+ * `getActiveSessions()` omits `machine`; remotes already set it. Pure.
+ */
+export function withDefaultMachine<T extends { machine?: string }>(
+  sessions: T[],
+  defaultHost: string,
+): T[] {
+  return sessions.map((s) => (s.machine ? s : { ...s, machine: defaultHost }));
+}
+
 export function rollupSessionsByProject(
   defs: ProjectDef[],
   sessions: ActiveSession[],

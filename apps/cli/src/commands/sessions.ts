@@ -68,6 +68,7 @@ import { registerSessionsExportCommand } from './sessions-export.js';
 import { registerSessionsImportCommand } from './sessions-import.js';
 import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
 import { registerSessionsBackfillCommand } from './sessions-backfill.js';
+import { registerSessionsStatsCommand } from './sessions-stats.js';
 import { runBrowserSessions } from '../lib/browser/sessions-list.js';
 import {
   countToolProgramOccurrences,
@@ -4212,6 +4213,7 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsMigrateCommand(sessionsCmd);
   registerSessionsMigrationsCommand(sessionsCmd);
   registerSessionsBackfillCommand(sessionsCmd);
+  registerSessionsStatsCommand(sessionsCmd);
 }
 
 function formatNoSessionsMessage(
