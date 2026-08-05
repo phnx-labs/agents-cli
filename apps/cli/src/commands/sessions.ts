@@ -57,6 +57,7 @@ import {
 import { setHelpSections } from '../lib/help.js';
 import { registerSessionsTailCommand } from './sessions-tail.js';
 import { registerSessionsResumeCommand } from './sessions-resume.js';
+import { registerSessionsForkCommand } from './fork.js';
 import { registerSessionsFavoriteCommand } from './sessions-favorite.js';
 import { isFavorite, listFavorites } from '../lib/session/favorites.js';
 import { registerGoCommand } from './go.js';
@@ -4410,6 +4411,7 @@ export function registerSessionsCommands(program: Command): void {
 
   registerSessionsTailCommand(sessionsCmd);
   registerSessionsResumeCommand(sessionsCmd);
+  registerSessionsForkCommand(sessionsCmd);
   registerSessionsFavoriteCommand(sessionsCmd);
   registerGoCommand(sessionsCmd);
   registerFocusCommand(sessionsCmd);
