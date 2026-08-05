@@ -21,4 +21,16 @@ describe('release.sh PR-head synchronization', () => {
       'wait_for_ci_green "$MERGED_RELEASE_PR" "$CI_TESTED_HEAD"',
     );
   });
+
+  it('waits on the stable aggregate test context, not internal CLI job names', () => {
+    const expectedChecks = RELEASE_SH.match(
+      /EXPECTED_CHECKS=\((?<checks>[\s\S]*?)\)\n# The Windows/,
+    )?.groups?.checks;
+
+    expect(expectedChecks).toBeDefined();
+    expect(expectedChecks).toContain('test gitleaks');
+    expect(expectedChecks).not.toContain('test-shard');
+    expect(expectedChecks).not.toContain('typecheck');
+    expect(expectedChecks).not.toContain('compiled-smoke');
+  });
 });

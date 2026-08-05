@@ -888,14 +888,11 @@ fi
 # `test` job hanging -- would hang the release forever) and it can
 # exit 0 on a partial set. This loop waits until every expected context is
 # present AND terminal (capped at 60m), then re-asserts each is a pass and dies
-# otherwise. NOTE: these names are the job/matrix labels of ci.yml (the build
-# matrix), tests.yml (test-shard 1..3 + typecheck + compiled-smoke), and
-# secret-scan.yml (gitleaks) -- a rename/reshard there must be mirrored here, or
-# the release times out (fail-closed, never publishes). tests.yml was resharded
-# from a single `test` job into `test-shard (N)` + `typecheck` + `compiled-smoke`;
-# the stale `test` name here hung every release for the full 60m before failing
-# (found + fixed 2026-07-29 cutting 1.20.73).
-EXPECTED_CHECKS=("test-shard (1)" "test-shard (2)" "test-shard (3)" typecheck compiled-smoke gitleaks \
+# otherwise. tests.yml's final `test` job gates every component selected by the
+# scope classifier, so the release waiter follows that stable aggregate instead
+# of duplicating internal job names that change when CI is regrouped or resharded.
+# The build matrix and secret scan remain direct release gates.
+EXPECTED_CHECKS=(test gitleaks \
   "build (ubuntu-latest, 22)"  "build (ubuntu-latest, 24)" \
   "build (macos-latest, 22)"   "build (macos-latest, 24)")
 # The Windows build jobs gate the release by default. Set RELEASE_REQUIRE_WINDOWS=0 to
