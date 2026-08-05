@@ -13,7 +13,7 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { addProfile, ensureProviderToken, type AddProfileOptions } from './profiles.js';
+import { addProfile, ensureProviderToken, applyFromSecrets, type AddProfileOptions } from './profiles.js';
 import {
   listProfiles,
   readProfile,
@@ -26,6 +26,8 @@ import {
   profileAuthLabel,
   profileLabel,
   forkProfile,
+  editProfile,
+  renameProfile,
   profileFromHostModel,
   authEnvKeyForHost,
   getProfilePath,
@@ -35,7 +37,8 @@ import {
   type Profile,
   type ForkProfileOptions,
 } from '../lib/profiles.js';
-import { listPresets } from '../lib/profiles-presets.js';
+import { listPresets, getPreset } from '../lib/profiles-presets.js';
+import { listBundles } from '../lib/secrets/bundles.js';
 import { AGENTS, ALL_AGENT_IDS, resolveAgentName } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 
@@ -73,8 +76,25 @@ export interface ForkOptions {
   authProvider?: string;
   version?: string;
   description?: string;
+  /** `<bundle>` or `<bundle>:<key>` — see {@link applyFromSecrets} in ./profiles.js. */
+  fromSecrets?: string;
   keyStdin?: boolean;
   force?: boolean;
+}
+
+/** Options accepted by `agents harness edit`. */
+export interface EditOptions {
+  model?: string;
+  baseUrl?: string;
+  authProvider?: string;
+  /** Empty string ('') unpins the host CLI version. */
+  version?: string;
+  description?: string;
+  /** Empty string ('') clears the fallback model. */
+  fallbackModel?: string;
+  /** `<bundle>` or `<bundle>:<key>` — see {@link applyFromSecrets} in ./profiles.js. */
+  fromSecrets?: string;
+  keyStdin?: boolean;
 }
 
 /**
@@ -124,6 +144,215 @@ function authEnvKeyForHostOrThrow(host: AgentId): string {
   return key;
 }
 
+/** Map `agents harness edit` flags onto {@link ForkProfileOptions} — the same
+ * override shape `editProfile`/`forkProfile` apply. `--version ''` (unpin) is
+ * handled by the caller ({@link buildEdit}), not here: `forkProfile`'s own
+ * ternary treats an empty string as "no override" and would otherwise inherit
+ * the source's version instead of clearing it. */
+export function buildEditOverrides(opts: EditOptions): ForkProfileOptions {
+  const overrides: ForkProfileOptions = {};
+  if (opts.model !== undefined) overrides.model = opts.model;
+  if (opts.baseUrl !== undefined) overrides.baseUrl = opts.baseUrl;
+  if (opts.authProvider !== undefined) overrides.provider = opts.authProvider;
+  if (opts.version) overrides.version = opts.version;
+  if (opts.description !== undefined) overrides.description = opts.description;
+  return overrides;
+}
+
+/** True when at least one recognized edit flag was given. */
+export function hasEditFlags(opts: EditOptions): boolean {
+  return (
+    opts.model !== undefined ||
+    opts.baseUrl !== undefined ||
+    opts.authProvider !== undefined ||
+    opts.version !== undefined ||
+    opts.description !== undefined ||
+    opts.fallbackModel !== undefined ||
+    opts.fromSecrets !== undefined
+  );
+}
+
+const EDIT_FLAGS_HELP =
+  'No changes given. Available flags: --model, --base-url, --auth-provider, --version, --description, --fallback-model, --from-secrets.';
+
+/**
+ * Build the edited harness for `agents harness edit <name>` — the profile-shape
+ * transform only; the caller applies `--from-secrets`/`--auth-provider` (async
+ * keychain side effects) and persists with `writeProfile`. Mirrors
+ * {@link buildFork}'s split between a pure builder and the action's IO.
+ */
+export function buildEdit(name: string, opts: EditOptions): Profile {
+  if (!profileExists(name)) {
+    throw new Error(`Harness '${name}' not found. Create it first: agents harness add ${name} ...`);
+  }
+  if (!hasEditFlags(opts)) {
+    throw new Error(EDIT_FLAGS_HELP);
+  }
+  const source = readProfile(name);
+  const edited = editProfile(source, buildEditOverrides(opts));
+  if (opts.version === '') delete edited.host.version;
+  if (opts.fallbackModel !== undefined) {
+    if (opts.fallbackModel === '') delete edited.fallback_model;
+    else edited.fallback_model = opts.fallbackModel;
+  }
+  return edited;
+}
+
+/** True when `agents harness fork` was given too little to proceed without the wizard. */
+export function forkNeedsWizard(source: string | undefined, name: string | undefined, opts: ForkOptions): boolean {
+  if (!source || !name) return true;
+  if (!profileExists(source) && resolveAgentName(source) && !opts.model) return true;
+  return false;
+}
+
+/** True when `agents harness add` was given too little to proceed without the wizard.
+ * Mirrors {@link addProfile}'s own error condition in ./profiles.js so a bare
+ * `agents harness add <preset-name>` (no flags) still resolves via the preset
+ * fallback instead of being routed into the wizard. */
+export function addNeedsWizard(name: string | undefined, opts: AddProfileOptions): boolean {
+  if (!name) return true;
+  if (opts.preset) return false;
+  if (opts.host && opts.model) return false;
+  if (opts.host || opts.model) return true;
+  return !getPreset(name);
+}
+
+/**
+ * Shared build+persist flow for a fork — used by `agents harness fork`'s
+ * flag-driven path AND by the wizard (both for `fork` and, when it falls back
+ * to the wizard, `add`), so a wizard run and a hand-written `fork` call build an
+ * identical profile.
+ */
+async function runForkFlow(source: string, name: string, opts: ForkOptions): Promise<void> {
+  validateProfileName(name);
+  if (profileExists(name) && !opts.force) {
+    throw new Error(`Harness '${name}' already exists. Use --force to overwrite.`);
+  }
+  // Build first so a bad source/flag combination fails before prompting for a
+  // key (or copying one from a bundle) the user would then have stored for
+  // nothing.
+  const forked = buildFork(source, name, opts);
+  if (opts.fromSecrets) {
+    await applyFromSecrets(forked, opts.fromSecrets, opts.authProvider);
+  } else if (opts.authProvider) {
+    await ensureProviderToken(opts.authProvider, undefined, opts.keyStdin);
+  }
+  writeProfile(forked);
+  console.log(chalk.green(`Harness '${name}' forked from ${source}.`));
+  console.log(chalk.gray(`Try: agents run ${name} "hello"`));
+}
+
+/** The first `_MODEL`-suffixed env var in a preset's static env block, if any. */
+function presetModel(preset: ReturnType<typeof listPresets>[number]): string | undefined {
+  return Object.entries(preset.env).find(([k]) => k.endsWith('_MODEL'))?.[1];
+}
+
+/**
+ * Interactive `agents harness add`/`fork` wizard — runs when required info is
+ * missing and stdout is a TTY (see {@link forkNeedsWizard}, {@link addNeedsWizard}).
+ * Always resolves to the same `(source, name, opts)` shape {@link buildFork}
+ * accepts via {@link runForkFlow}, so a wizard run and a hand-written fork call
+ * build an identical profile.
+ */
+async function runHarnessWizard(): Promise<{ source: string; name: string; opts: ForkOptions }> {
+  const { select, input } = await import('@inquirer/prompts');
+
+  const customNames = listProfiles().map((p) => p.name);
+  const source = await select<string>({
+    message: 'Fork from',
+    choices: [
+      ...ALL_AGENT_IDS.map((id) => ({ name: `${AGENTS[id].name}  ${chalk.gray('(native)')}`, value: id as string })),
+      ...customNames.map((n) => ({ name: `${n}  ${chalk.gray('(custom harness)')}`, value: n })),
+    ],
+  });
+
+  const presets = listPresets();
+  const CUSTOM = '__custom__';
+  const presetChoice = await select<string>({
+    message: 'Preset',
+    choices: [
+      ...presets.map((p) => ({ name: `${p.name}  ${chalk.gray(p.description.slice(0, 60))}`, value: p.name })),
+      { name: 'Build custom (host + model + provider)', value: CUSTOM },
+    ],
+  });
+
+  let model: string | undefined;
+  let baseUrl: string | undefined;
+  let authProvider: string | undefined;
+  let defaultName = source;
+
+  if (presetChoice === CUSTOM) {
+    model = await input({ message: 'Model id' });
+    const NO_AUTH = '__none__';
+    const providers = [...new Set(presets.map((p) => p.provider))];
+    const providerChoice = await select<string>({
+      message: 'Provider',
+      choices: [
+        ...providers.map((p) => ({ name: p, value: p })),
+        { name: 'no auth / host manages its own login', value: NO_AUTH },
+      ],
+    });
+    authProvider = providerChoice === NO_AUTH ? undefined : providerChoice;
+    const baseUrlInput = await input({ message: 'Base URL (optional)', default: '' });
+    baseUrl = baseUrlInput || undefined;
+  } else {
+    const preset = getPreset(presetChoice)!;
+    model = presetModel(preset);
+    baseUrl = preset.env.ANTHROPIC_BASE_URL || preset.env.OPENAI_BASE_URL;
+    authProvider = preset.authOptional ? undefined : preset.provider;
+    // Pre-fill with the preset's own name (e.g. 'deepseek'), not a model
+    // detail, so users aren't nudged toward baking one into the identity name.
+    defaultName = preset.name;
+  }
+
+  const name = await input({
+    message: 'Harness name',
+    default: defaultName,
+    validate: (v) => {
+      try {
+        validateProfileName(v);
+        return true;
+      } catch (err) {
+        return (err as Error).message;
+      }
+    },
+  });
+
+  const opts: ForkOptions = { model, baseUrl, authProvider };
+
+  if (authProvider) {
+    const bundles = listBundles();
+    const TYPE_NOW = 'type';
+    const FROM_SECRETS = 'secrets';
+    const keySource = bundles.length > 0
+      ? await select<string>({
+          message: `How should '${authProvider}' get its key?`,
+          choices: [
+            { name: 'Type a key now', value: TYPE_NOW },
+            { name: 'Use an existing agents secrets bundle', value: FROM_SECRETS },
+          ],
+        })
+      : TYPE_NOW;
+    if (keySource === FROM_SECRETS) {
+      const bundleName = await select<string>({
+        message: 'Bundle',
+        choices: bundles.map((b) => ({
+          name: b.description ? `${b.name}  ${chalk.gray(b.description)}` : b.name,
+          value: b.name,
+        })),
+      });
+      const bundle = bundles.find((b) => b.name === bundleName)!;
+      const keys = Object.keys(bundle.vars);
+      const key = keys.length === 1
+        ? keys[0]
+        : await select<string>({ message: 'Key', choices: keys.map((k) => ({ name: k, value: k })) });
+      opts.fromSecrets = `${bundleName}:${key}`;
+    }
+  }
+
+  return { source, name, opts };
+}
+
 export function registerHarnessCommands(program: Command): void {
   const cmd = program
     .command('harness')
@@ -151,6 +380,13 @@ Examples:
   # Per-run model override still wins
   agents run spark --model opencode/big-pickle "quick pass"
 
+  # Edit a harness in place, or give it a new name
+  agents harness edit deepseek --fallback-model deepseek/deepseek-chat-v3
+  agents harness rename deepseek deepseek-classic
+
+  # No args, in an interactive terminal: a wizard walks you through host, model, provider, key
+  agents harness add
+
   # See custom harnesses, addable presets, and native harnesses
   agents harness list
 
@@ -162,19 +398,30 @@ Examples:
     );
 
   cmd
-    .command('add <name>')
-    .description('Create a custom harness from a host + model (or apply a built-in preset).')
+    .command('add [name]')
+    .description('Create a custom harness from a host + model (or apply a built-in preset). Omit flags in a terminal for the interactive wizard.')
     .option('--host <agent>', 'Host CLI to run under (opencode, claude, codex, grok, antigravity, ...) — pair with --model')
     .option('--model <id>', 'Model id to pin on the host (e.g., meta/muse-spark-1.1) — pair with --host')
     .option('--base-url <url>', 'Custom endpoint base URL (claude/codex hosts)')
     .option('--auth-provider <provider>', 'Attach a keychain-backed API key under this provider (for private endpoints)')
     .option('--preset <preset>', 'Apply a built-in preset instead of --host/--model')
     .option('--version <version>', 'Pin the host CLI version (e.g., 1.16.0)')
+    .option('--from-secrets <bundle>[:<key>]', "Copy a value from an agents secrets bundle into this harness's own keychain item, once (not a live link)")
     .option('--key-stdin', 'Read API key from stdin instead of prompting (for scripts/CI)')
     .option('--force', 'Overwrite an existing harness with the same name')
-    .action(async (name: string, opts: AddProfileOptions) => {
+    .action(async (name: string | undefined, opts: AddProfileOptions & ForkOptions) => {
       try {
-        await addProfile(name, opts, 'Harness');
+        if (addNeedsWizard(name, opts)) {
+          if (!process.stdout.isTTY) {
+            throw new Error(
+              "'agents harness add' needs --preset or --host + --model (or a name and an interactive terminal for the wizard).",
+            );
+          }
+          const wiz = await runHarnessWizard();
+          await runForkFlow(wiz.source, wiz.name, { ...wiz.opts, force: opts.force, keyStdin: opts.keyStdin });
+          return;
+        }
+        await addProfile(name!, opts, 'Harness');
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);
@@ -182,13 +429,14 @@ Examples:
     });
 
   cmd
-    .command('fork <source> <name>')
-    .description('Fork a native harness (claude, opencode, ...) or an existing custom one into a new named harness.')
+    .command('fork [source] [name]')
+    .description('Fork a native harness (claude, opencode, ...) or an existing custom one into a new named harness. Omit args in a terminal for the interactive wizard.')
     .option('--model <id>', 'Model to pin on the fork (required when forking a native harness)')
     .option('--base-url <url>', 'Custom endpoint base URL (claude/codex hosts)')
     .option('--auth-provider <provider>', 'Attach a keychain-backed API key under this provider')
     .option('--version <version>', 'Pin the host CLI version (e.g., 1.16.0)')
     .option('--description <text>', 'One-line description')
+    .option('--from-secrets <bundle>[:<key>]', "Copy a value from an agents secrets bundle into this harness's own keychain item, once (not a live link)")
     .option('--key-stdin', 'Read the API key from stdin instead of prompting (for scripts/CI)')
     .option('--force', 'Overwrite an existing harness with the same name')
     .addHelpText(
@@ -203,21 +451,87 @@ Examples:
 
   # Copy an existing harness and swap only the model
   agents harness fork deepseek deepseek-chat --model deepseek/deepseek-chat-v3
+
+  # Copy a key out of an existing secrets bundle instead of typing it
+  agents harness fork claude corp --model gpt-x --auth-provider corp --from-secrets prod:OPENROUTER_KEY
+
+  # No args, in an interactive terminal: walks through source, preset/model, name, key
+  agents harness fork
 `,
     )
-    .action(async (source: string, name: string, opts: ForkOptions) => {
+    .action(async (source: string | undefined, name: string | undefined, opts: ForkOptions) => {
       try {
-        validateProfileName(name);
-        if (profileExists(name) && !opts.force) {
-          throw new Error(`Harness '${name}' already exists. Use --force to overwrite.`);
+        if (forkNeedsWizard(source, name, opts)) {
+          if (!process.stdout.isTTY) {
+            throw new Error("'agents harness fork' needs <source> and <name> (or an interactive terminal for the wizard).");
+          }
+          const wiz = await runHarnessWizard();
+          await runForkFlow(wiz.source, wiz.name, { ...wiz.opts, force: opts.force, keyStdin: opts.keyStdin });
+          return;
         }
-        // Build first so a bad source/flag combination fails before prompting
-        // for a key the user would then have stored for nothing.
-        const forked = buildFork(source, name, opts);
-        if (opts.authProvider) await ensureProviderToken(opts.authProvider, undefined, opts.keyStdin);
-        writeProfile(forked);
-        console.log(chalk.green(`Harness '${name}' forked from ${source}.`));
+        await runForkFlow(source!, name!, opts);
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  cmd
+    .command('edit <name>')
+    .description('Edit an existing custom harness in place — model, endpoint, auth, version, description, fallback.')
+    .option('--model <id>', 'Swap the pinned model')
+    .option('--base-url <url>', 'Swap the custom endpoint base URL')
+    .option('--auth-provider <provider>', 'Repoint auth at a different provider (keychain-backed)')
+    .option('--version <version>', 'Re-pin the host CLI version (pass an empty string to unpin)')
+    .option('--description <text>', 'Update the one-line description')
+    .option('--fallback-model <id>', 'Secondary model retried on the same host on a rate limit (pass an empty string to clear it)')
+    .option('--from-secrets <bundle>[:<key>]', "Copy a value from an agents secrets bundle into this harness's own keychain item, once (not a live link)")
+    .option('--key-stdin', 'Read the API key from stdin instead of prompting (for scripts/CI)')
+    .addHelpText(
+      'after',
+      `
+Examples:
+  # Swap the pinned model
+  agents harness edit deepseek --model deepseek/deepseek-v3.2
+
+  # Repoint auth at a different provider and re-enter the key
+  agents harness edit corp --auth-provider corp2
+
+  # Unpin the host CLI version
+  agents harness edit spark --version ""
+
+  # Add a same-host fallback model for rate-limit retries
+  agents harness edit deepseek --fallback-model deepseek/deepseek-chat-v3
+
+  # Copy a key out of an existing secrets bundle instead of typing it
+  agents harness edit corp --from-secrets prod:OPENROUTER_KEY
+`,
+    )
+    .action(async (name: string, opts: EditOptions) => {
+      try {
+        const edited = buildEdit(name, opts);
+        if (opts.fromSecrets) {
+          await applyFromSecrets(edited, opts.fromSecrets, opts.authProvider);
+        } else if (opts.authProvider) {
+          await ensureProviderToken(opts.authProvider, undefined, opts.keyStdin);
+        }
+        writeProfile(edited);
+        console.log(chalk.green(`Harness '${name}' updated.`));
         console.log(chalk.gray(`Try: agents run ${name} "hello"`));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  cmd
+    .command('rename <old-name> <new-name>')
+    .description('Rename a custom harness (updates forkedFrom lineage on any harness forked from it). Errors on a name collision.')
+    .action((oldName: string, newName: string) => {
+      try {
+        renameProfile(oldName, newName);
+        console.log(chalk.green(`Harness '${oldName}' renamed to '${newName}'.`));
+        console.log(chalk.gray(`Try: agents run ${newName} "hello"`));
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);

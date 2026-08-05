@@ -32,7 +32,10 @@ import {
   keychainItemName,
   setKeychainToken,
   deleteKeychainToken,
+  getKeychainToken,
 } from '../lib/secrets/profiles.js';
+import { parseBundleValue, secretsKeychainItem } from '../lib/secrets/index.js';
+import { readBundle } from '../lib/secrets/bundles.js';
 import { isInteractiveTerminal } from './utils.js';
 import { getAgentsInvocation } from '../lib/daemon.js';
 import {
@@ -115,6 +118,74 @@ export interface AddProfileOptions {
   version?: string;
   keyStdin?: boolean;
   force?: boolean;
+  /** `<bundle>` or `<bundle>:<key>` — see {@link applyFromSecrets}. */
+  fromSecrets?: string;
+}
+
+/**
+ * Copy a value from an `agents secrets` bundle into a profile's own keychain
+ * item — a one-time copy, not a live link. `spec` is `<bundle>` or
+ * `<bundle>:<key>`; the key is required only when the bundle has more than one.
+ *
+ * Reads the bundle value via {@link getKeychainToken} — this pops Touch ID on
+ * macOS once, for that bundle-namespaced item (`agents-cli.secrets.*`, gated by
+ * `keychainItemRequiresUserPresence` in `../lib/secrets/index.ts`) — then writes
+ * it to `keychainItemName(provider)`, a plain `agents-cli.<provider>.token`
+ * item. That item matches neither the `agents-cli.secrets.` nor
+ * `agents-cli.bundles.` prefix, so every later read of the harness's own key is
+ * silent — no repeat Touch ID prompt.
+ *
+ * Provider precedence: an explicit `--auth-provider` on the same call always
+ * wins (freshest intent); otherwise the profile's own `provider` (so editing an
+ * already-provisioned harness rotates its existing key without repeating
+ * `--auth-provider`); otherwise the bundle's own name.
+ *
+ * Attaches `profile.auth` when the profile has none yet (a bare `--host
+ * --model` harness, or a native-host fork with no prior auth binding).
+ */
+export async function applyFromSecrets(profile: Profile, spec: string, explicitAuthProvider?: string): Promise<void> {
+  const sep = spec.indexOf(':');
+  const bundleName = sep === -1 ? spec : spec.slice(0, sep);
+  const requestedKey = sep === -1 ? undefined : spec.slice(sep + 1);
+  const bundle = readBundle(bundleName);
+  const keys = Object.keys(bundle.vars);
+  const key = requestedKey ?? (keys.length === 1 ? keys[0] : undefined);
+  if (!key) {
+    throw new Error(
+      keys.length === 0
+        ? `Bundle '${bundleName}' has no keys.`
+        : `Bundle '${bundleName}' has ${keys.length} keys (${keys.join(', ')}); pick one with --from-secrets ${bundleName}:<key>.`,
+    );
+  }
+  if (!(key in bundle.vars)) {
+    throw new Error(`Bundle '${bundleName}' has no key '${key}'. Available: ${keys.join(', ') || '(none)'}.`);
+  }
+
+  const parsed = parseBundleValue(bundle.vars[key]);
+  let value: string;
+  if ('literal' in parsed) {
+    value = parsed.literal;
+  } else if (parsed.ref.provider === 'keychain') {
+    value = getKeychainToken(secretsKeychainItem(bundle.name, parsed.ref.value));
+  } else {
+    throw new Error(
+      `Bundle '${bundleName}' key '${key}' is a '${parsed.ref.provider}:' reference, not a keychain-backed secret — --from-secrets only copies keychain-backed values.`,
+    );
+  }
+
+  const provider = explicitAuthProvider || profile.provider || bundleName;
+  const item = keychainItemName(provider);
+  setKeychainToken(item, value);
+
+  if (!profile.auth) {
+    const envVar = authEnvKeyForHost(profile.host.agent);
+    if (!envVar) {
+      throw new Error(`Host '${profile.host.agent}' has no known auth env var; --from-secrets cannot attach auth to this harness.`);
+    }
+    profile.provider = provider;
+    profile.auth = { envVar, keychainItem: item };
+    profile.authOptional = false;
+  }
 }
 
 /**
@@ -151,7 +222,7 @@ export async function addProfile(name: string, opts: AddProfileOptions, label: '
         throw new Error(`--auth-provider is set but host '${host}' has no known auth env var. Use a preset or a hand-written profile YAML.`);
       }
       authEnvVar = key;
-      await ensureProviderToken(opts.authProvider, undefined, opts.keyStdin);
+      if (!opts.fromSecrets) await ensureProviderToken(opts.authProvider, undefined, opts.keyStdin);
     }
 
     const profile = profileFromHostModel(name, host, opts.model, {
@@ -160,6 +231,7 @@ export async function addProfile(name: string, opts: AddProfileOptions, label: '
       provider: opts.authProvider,
       authEnvVar,
     });
+    if (opts.fromSecrets) await applyFromSecrets(profile, opts.fromSecrets, opts.authProvider);
     writeProfile(profile);
     console.log(chalk.green(`${label} '${name}' added — ${host} + ${opts.model}.`));
     console.log(chalk.gray(`Try: agents run ${name} "hello"`));
@@ -175,10 +247,11 @@ export async function addProfile(name: string, opts: AddProfileOptions, label: '
         'Or build a custom harness: --host <agent> --model <id>.',
     );
   }
-  if (!preset.authOptional) {
+  if (!opts.fromSecrets && !preset.authOptional) {
     await ensureProviderToken(preset.provider, preset.signupUrl, opts.keyStdin);
   }
   const profile = profileFromPreset(name, preset, opts.version);
+  if (opts.fromSecrets) await applyFromSecrets(profile, opts.fromSecrets, opts.authProvider);
   writeProfile(profile);
   console.log(chalk.green(`${label} '${name}' added.`));
   console.log(chalk.gray(`Try: agents run ${name} "hello"`));
