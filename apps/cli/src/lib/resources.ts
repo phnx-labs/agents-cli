@@ -200,21 +200,97 @@ export function listResources(
   // Hooks use a one-level event-group layout (hooks/pre-tool-use/git-guard.sh).
   // A flat readdir treats `pre-tool-use` as the resource name, so `system:*`
   // pattern expansion never includes nested scripts — and `agents sync --force`
-  // leaves stale flat copies in version homes forever. Enumerate via
-  // listHookEntriesFromDir (same discovery as the writer / doctor) and use the
-  // file basename WITH extension so names match getAvailableResources.
+  // leaves stale flat copies in version homes forever. Enumerate the same way as
+  // getAvailableResources: expand group dirs that hold scripts (install name =
+  // file basename with extension), and keep fixture-only dirs as directory
+  // bundles (e.g. hooks/tests/fixtures).
   if (kind === 'hooks') {
+    const HOOK_SCRIPT_EXTS = new Set([
+      '.sh', '.bash', '.zsh', '.py', '.js', '.ts', '.mjs', '.cjs', '.rb', '.pl', '.ps1', '.cmd', '.bat',
+    ]);
+    const HOOK_GROUP_SKIP = new Set(['node_modules', '.git', '.cache']);
     for (const [dir, source, repoRoot] of roots) {
       if (!fs.existsSync(dir)) continue;
+      let top: string[];
+      try {
+        top = fs.readdirSync(dir);
+      } catch {
+        continue;
+      }
+      for (const name of top) {
+        if (name.startsWith('.')) continue;
+        const full = path.join(dir, name);
+        let stat: fs.Stats;
+        try {
+          stat = fs.lstatSync(full);
+        } catch {
+          continue;
+        }
+        if (stat.isSymbolicLink()) continue;
+        if (stat.isFile()) {
+          // Top-level scripts only (not README/promptcuts — listHookEntriesFromDir
+          // is the gate for what is a real hook script).
+          continue;
+        }
+        if (!stat.isDirectory() || HOOK_GROUP_SKIP.has(name)) continue;
+        let nested: string[];
+        try {
+          nested = fs.readdirSync(full);
+        } catch {
+          continue;
+        }
+        const scripts: string[] = [];
+        for (const nestedName of nested) {
+          if (nestedName.startsWith('.')) continue;
+          const nfull = path.join(full, nestedName);
+          let nstat: fs.Stats;
+          try {
+            nstat = fs.lstatSync(nfull);
+          } catch {
+            continue;
+          }
+          if (nstat.isSymbolicLink() || !nstat.isFile()) continue;
+          if (HOOK_SCRIPT_EXTS.has(path.extname(nestedName).toLowerCase())) {
+            scripts.push(nestedName);
+          }
+        }
+        if (scripts.length > 0) {
+          // Event group: each script is its own resource (name = basename w/ ext).
+          for (const script of scripts) {
+            if (seen.has(script)) continue;
+            if (!resourceIsActive(kind, script, source)) continue;
+            seen.add(script);
+            results.push(withProvenance({
+              name: script,
+              path: path.join(full, script),
+              source,
+              repoRoot,
+            }));
+          }
+        } else {
+          // Fixture-only directory bundle (hooks/tests/fixtures/…).
+          if (seen.has(name)) continue;
+          if (!resourceIsActive(kind, name, source)) continue;
+          seen.add(name);
+          results.push(withProvenance({
+            name,
+            path: full,
+            source,
+            repoRoot,
+          }));
+        }
+      }
+      // Top-level hook scripts via the shared grouper (also drops docs/data files).
       for (const entry of listHookEntriesFromDir(dir)) {
-        // Install / available name is the script filename (git-guard.sh), not
-        // the extension-stripped HookEntry.name (git-guard).
-        const name = path.basename(entry.scriptPath);
-        if (seen.has(name)) continue;
-        if (!resourceIsActive(kind, name, source)) continue;
-        seen.add(name);
+        // Only top-level winners here — nested were already expanded above.
+        // listHookEntriesFromDir also returns nested; skip if already seen.
+        const scriptName = path.basename(entry.scriptPath);
+        if (seen.has(scriptName)) continue;
+        if (path.dirname(entry.scriptPath) !== path.resolve(dir)) continue;
+        if (!resourceIsActive(kind, scriptName, source)) continue;
+        seen.add(scriptName);
         results.push(withProvenance({
-          name,
+          name: scriptName,
           path: entry.scriptPath,
           source,
           repoRoot,
