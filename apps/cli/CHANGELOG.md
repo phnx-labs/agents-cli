@@ -1,9 +1,5 @@
 # Changelog
 
-## 1.22.13
-
-- **`agents sessions` accepts direct live-state flags and remains fleet-wide by default.** `--working`, `--idle`, `--waiting`, `--orphan`/`--orphaned`, `--crashed`, `--closed`, `--abandoned`, `--queued`, and `--unknown` each imply the live scan; multiple flags form a union. `--working` is narrower than `--active`: it excludes idle, waiting, and lifecycle-failure rows. Cross-device collection was already the default and stays that way; `--local` opts out, while `--all` continues to widen historical directory and time scope. Source: `apps/cli/src/commands/sessions.ts`, `apps/cli/src/commands/sessions.test.ts`.
-
 ## 1.22.12
 
 - Store operational events in daily history directories, retain 7 days and at most 50 MiB automatically, and make `agents logs audit` use the `agents events --audit` reader.
