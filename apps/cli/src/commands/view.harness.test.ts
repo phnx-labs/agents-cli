@@ -39,18 +39,20 @@ describe('renderHarnessBlocks — a custom harness is its own agent type', () =>
   it('prints the harness name as a block header, not as a row under its host', () => {
     renderHarnessBlocks([deepseek], installed, false);
     const out = plain();
-    expect(out).toMatch(/^ {2}deepseek-flash \(custom\)$/m);
+    expect(out).toMatch(/^ {2}DeepSeek Flash \(custom\)$/m);
     expect(out).toMatch(/deepseek\/deepseek-v4-flash-0731/);
     expect(out).toMatch(/via claude/);
   });
 
-  it('prefers the harness label over the file name for the header', () => {
+  it('derives the header from the name and ignores a stored label field', () => {
+    // `label` is inert legacy data kept only so old profile YAML still parses —
+    // the header always comes from `name` via the vendor/brand table.
     renderHarnessBlocks(
       [profileSummary({ name: 'spark', label: 'Muse Spark', host: { agent: 'opencode' }, env: { OPENCODE_MODEL: 'meta/muse-spark-1.1' } })],
       new Set<AgentId>(['opencode']),
       false,
     );
-    expect(plain()).toMatch(/^ {2}Muse Spark \(custom\)$/m);
+    expect(plain()).toMatch(/^ {2}Spark \(custom\)$/m);
   });
 
   it('names the host version when the harness pins one', () => {
