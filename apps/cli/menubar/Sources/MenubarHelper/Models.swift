@@ -7,6 +7,9 @@ struct Routine: Decodable {
     let agent: String?
     let workflow: String?
     let repo: String?
+    // project membership decoded from CLI JSON; absent keys decode as nil for both fields.
+    let projects: [String]?    // repos this routine belongs to
+    let projectGroup: String?  // menu display grouping label; nil = cross-project / ungrouped
     let schedule: String
     let scheduleHuman: String?
     let enabled: Bool

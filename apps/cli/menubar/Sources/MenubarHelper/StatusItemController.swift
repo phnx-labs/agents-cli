@@ -1135,6 +1135,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // Routines stay a dedicated, glanceable section. Compact: one summary row
     // (submenu = all). Rich: a section with the next few upcoming + any failing
     // routine inline, then "All routines…" for the rest.
+    // When any routine carries a `projectGroup`, both the inline rows and the
+    // "All routines…" submenu are grouped by that label (ungrouped routines last).
     private func addRoutines(_ menu: NSMenu, routines: [Routine], rich: Bool) {
         let summary: String
         if routines.isEmpty {
@@ -1160,20 +1162,44 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             .filter { r in r.enabled && !failing.contains(where: { $0.name == r.name }) && r.nextRun != nil }
             .sorted { ($0.nextRun ?? "") < ($1.nextRun ?? "") }
             .prefix(3)
-        for r in upcoming {
-            let row = statusRow("◔", idleC, "\(r.name)  \(r.nextRunHuman ?? r.schedule)")
-            row.submenu = routineSubmenu(r)
-            menu.addItem(row)
-        }
-        for r in failing {
-            let why = routineFailureSummary(r, max: 48)
-            let row = statusRow(routineIsMiss(r) ? "⃠" : "✕", routineIsMiss(r) ? wait : fail, "\(r.name)  \(why)")
-            row.submenu = routineSubmenu(r)
-            menu.addItem(row)
+
+        let hasGroups = routines.contains { $0.projectGroup != nil }
+        if hasGroups {
+            let (grouped, ungrouped) = groupedRoutines(Array(upcoming) + failing)
+            for (label, group) in grouped {
+                menu.addItem(disabled("  \(label)"))
+                for r in group { menu.addItem(inlineRoutineRow(r)) }
+            }
+            for r in ungrouped { menu.addItem(inlineRoutineRow(r)) }
+        } else {
+            for r in upcoming {
+                let row = statusRow("◔", idleC, "\(r.name)  \(r.nextRunHuman ?? r.schedule)")
+                row.submenu = routineSubmenu(r)
+                menu.addItem(row)
+            }
+            for r in failing {
+                let why = routineFailureSummary(r, max: 48)
+                let row = statusRow(routineIsMiss(r) ? "⃠" : "✕", routineIsMiss(r) ? wait : fail, "\(r.name)  \(why)")
+                row.submenu = routineSubmenu(r)
+                menu.addItem(row)
+            }
         }
         let all = NSMenuItem(title: "  All routines…", action: nil, keyEquivalent: "")
         all.submenu = allRoutinesSubmenu(routines)
         menu.addItem(all)
+    }
+
+    // One colored inline row for the ROUTINES section (upcoming or failing).
+    private func inlineRoutineRow(_ r: Routine) -> NSMenuItem {
+        let row: NSMenuItem
+        if routineNeedsAttention(r) {
+            let why = routineFailureSummary(r, max: 48)
+            row = statusRow(routineIsMiss(r) ? "⃠" : "✕", routineIsMiss(r) ? wait : fail, "\(r.name)  \(why)")
+        } else {
+            row = statusRow("◔", idleC, "\(r.name)  \(r.nextRunHuman ?? r.schedule)")
+        }
+        row.submenu = routineSubmenu(r)
+        return row
     }
 
     // Setup + watchdog collapsed into one System row — the health noise lives in
@@ -1317,15 +1343,33 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private func allRoutinesSubmenu(_ routines: [Routine]) -> NSMenu {
         let sub = NSMenu()
-        for r in routines {
-            let mark = routineNeedsAttention(r) ? "! "
-                : (r.enabled ? "  " : "· ")
-            let when = routineFailureDetail(r, max: 52) ?? (r.enabled ? (r.nextRunHuman ?? r.schedule) : "paused")
-            let item = NSMenuItem(title: "\(mark)\(r.name)  \(when)", action: nil, keyEquivalent: "")
-            item.submenu = routineSubmenu(r)
-            sub.addItem(item)
+        let hasGroups = routines.contains { $0.projectGroup != nil }
+        if hasGroups {
+            let (grouped, ungrouped) = groupedRoutines(routines)
+            for i in grouped.indices {
+                if i > 0 { sub.addItem(.separator()) }
+                let (label, group) = grouped[i]
+                sub.addItem(disabled("  \(label)"))
+                for r in group { sub.addItem(routineListRow(r)) }
+            }
+            if !ungrouped.isEmpty {
+                if !grouped.isEmpty { sub.addItem(.separator()) }
+                for r in ungrouped { sub.addItem(routineListRow(r)) }
+            }
+        } else {
+            for r in routines { sub.addItem(routineListRow(r)) }
         }
         return sub
+    }
+
+    // One flat row for the "All routines…" submenu.
+    private func routineListRow(_ r: Routine) -> NSMenuItem {
+        let mark = routineNeedsAttention(r) ? "! "
+            : (r.enabled ? "  " : "· ")
+        let when = routineFailureDetail(r, max: 52) ?? (r.enabled ? (r.nextRunHuman ?? r.schedule) : "paused")
+        let item = NSMenuItem(title: "\(mark)\(r.name)  \(when)", action: nil, keyEquivalent: "")
+        item.submenu = routineSubmenu(r)
+        return item
     }
 
     private func setupSummary(_ doctor: DoctorOverview?) -> String {
@@ -1579,4 +1623,22 @@ func routineFailureDetail(_ r: Routine, max: Int) -> String? {
 private func trimText(_ value: String, _ max: Int) -> String {
     if value.count <= max { return value }
     return String(value.prefix(max - 1)) + "…"
+}
+
+/// Partitions routines by `projectGroup`, preserving the order of first occurrence.
+/// Returns ordered (label, routines) pairs and an ungrouped tail for routines whose
+/// `projectGroup` is nil (cross-project / not associated with a single project).
+func groupedRoutines(_ routines: [Routine]) -> (grouped: [(String, [Routine])], ungrouped: [Routine]) {
+    var order: [String] = []
+    var byGroup: [String: [Routine]] = [:]
+    var ungrouped: [Routine] = []
+    for r in routines {
+        if let g = r.projectGroup {
+            if byGroup[g] == nil { order.append(g) }
+            byGroup[g, default: []].append(r)
+        } else {
+            ungrouped.append(r)
+        }
+    }
+    return (order.map { ($0, byGroup[$0]!) }, ungrouped)
 }

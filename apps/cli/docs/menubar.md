@@ -211,6 +211,10 @@ One rule shapes the menu: **attention floats up, context groups down.**
   failure reason when available; overdue routines are labeled `overdue` even when
   their previous run succeeded. Each submenu has Run now / Pause / Logs, and Logs
   opens the concise routine summary in a text viewer.
+  When routines carry a `projectGroup` field (from `agents routines list --json`),
+  both the inline rows and the "All routines…" submenu are grouped by that label.
+  Routines with no `projectGroup` (cross-project or unassigned) appear last,
+  ungrouped. Compact mode remains one summary row regardless of grouping.
 - **RECENT TICKETS / RECENT** — tickets filed via quick dispatch and recent
   sessions, unchanged dedicated sections.
 - **System** — setup staleness + the auto-nudge watchdog collapsed into one row;

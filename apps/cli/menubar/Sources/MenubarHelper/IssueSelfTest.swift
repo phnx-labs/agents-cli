@@ -22,6 +22,7 @@ enum IssueSelfTest {
         testRecentTicketsMerge()
         testDraftPreservation()
         testRoutineFailureReason()
+        testRoutineGrouping()
         testLinearProjectResolution()
         testLinearTicketRanking()
         testLinearTicketFilter()
@@ -321,6 +322,41 @@ enum IssueSelfTest {
         check("failed routine still falls back to exit code",
               routineFailureDetail(failed, max: 72) == "exit 2",
               detail: routineFailureDetail(failed, max: 72) ?? "nil")
+    }
+
+    // groupedRoutines preserves first-occurrence order, groups correctly, and puts
+    // nil-projectGroup routines into the ungrouped tail.
+    private static func testRoutineGrouping() {
+        let cli1  = routine(name: "nightly-cli", projectGroup: "agents-cli")
+        let web   = routine(name: "standup",     projectGroup: "rush-app")
+        let cli2  = routine(name: "ci-check", lastStatus: "failed", exitCode: 1, overdue: false,
+                            projectGroup: "agents-cli")
+        let cross = routine(name: "healthcheck", projectGroup: nil)
+
+        let (grouped, ungrouped) = groupedRoutines([cli1, web, cli2, cross])
+        check("two project groups present", grouped.count == 2,
+              detail: grouped.map { $0.0 }.joined(separator: ","))
+        check("first group is agents-cli (first occurrence)",
+              grouped.first.map { $0.0 } == "agents-cli",
+              detail: grouped.first.map { $0.0 } ?? "nil")
+        check("agents-cli group has both routines", grouped[0].1.count == 2,
+              detail: "\(grouped[0].1.count)")
+        check("rush-app group has one routine", grouped[1].1.count == 1)
+        check("nil projectGroup lands in ungrouped",
+              ungrouped.count == 1 && ungrouped[0].name == "healthcheck",
+              detail: ungrouped.map { $0.name }.joined(separator: ","))
+
+        // Within a group, insertion order (upcoming-first) is preserved.
+        check("first agents-cli entry is the one that appeared first",
+              grouped[0].1[0].name == "nightly-cli")
+
+        // All-ungrouped: no groups, everything in the tail.
+        let (g2, u2) = groupedRoutines([cross])
+        check("no projectGroup means all ungrouped", g2.isEmpty && u2.count == 1)
+
+        // Empty input.
+        let (g3, u3) = groupedRoutines([])
+        check("empty input yields empty output", g3.isEmpty && u3.isEmpty)
     }
 
     // The repo picker drives the ticket scope, so `agents-cli` has to land on the
@@ -685,16 +721,21 @@ enum IssueSelfTest {
     }
 
     private static func routine(
-        lastStatus: String?,
-        exitCode: Int?,
-        failureReason: String?,
-        overdue: Bool
+        name: String = "nightly",
+        lastStatus: String? = nil,
+        exitCode: Int? = nil,
+        failureReason: String? = nil,
+        overdue: Bool = false,
+        projects: [String]? = nil,
+        projectGroup: String? = nil
     ) -> Routine {
         Routine(
-            name: "nightly",
+            name: name,
             agent: "claude",
             workflow: nil,
             repo: nil,
+            projects: projects,
+            projectGroup: projectGroup,
             schedule: "0 3 * * *",
             scheduleHuman: nil,
             enabled: true,
