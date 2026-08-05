@@ -1146,7 +1146,7 @@ agents insights --narrative                    # add a written read on the numbe
 | By account | sessions, cost, duration per account (or per `--by` dimension) |
 | Top tools / Languages / Models | histograms by name, from transcript content |
 | Friction | interruptions, tool errors bucketed into classes, your own reply latency (p50/p90) |
-| What you changed | line deltas, files created/modified/deleted, git commits and pushes |
+| What you changed | lines touched, files created/modified/deleted, git commits and pushes |
 | When you work | 24-slot local-time histogram of your messages |
 | Parallel sessions | overlapping pairs, and how many straddled two accounts |
 
@@ -1182,8 +1182,26 @@ logic changes, so a new metric never reports stale numbers beside fresh ones.
   two reports count comparable populations. The excluded count is always printed.
 - **No branch collapsing.** `/insights` merges conversation branches; agents-cli is
   file-per-session throughout, so session counts read slightly higher here.
-- **`--narrative` is the only path that leaves the machine.** It pipes the *aggregate*
-  (never raw transcripts, unlike `/insights`) through a headless `claude -p`.
+- **`--narrative` is the only path that sends your data to a model.** It pipes the
+  *aggregate* (never raw transcripts, unlike `/insights`) through a headless
+  `claude -p`, and writes to stderr so `--json` stays parseable. Two other things do
+  reach the network and are not that: `-H/--host` runs the command on a peer over SSH,
+  and the index refresh resolves Linear project names when a Linear key is configured.
+- **"Lines touched" is not a diffstat.** It sums the before/after line counts of each
+  edit, so an `Edit` whose `old_string` includes unchanged context counts those lines on
+  both sides. Measured against a real commit the written figure ran ~19% high and the
+  replaced figure ~475% high versus `git --numstat`. Use `agents output` for real
+  shipped-code numbers; this one is about editing behaviour.
+- **Facet coverage is per harness.** Line counts come from structured edit arguments, so
+  they work for Claude and droid but not codex, which patches through shell `exec`.
+  Unmeasurable is rendered as "not measurable", never as `0`.
+- **Commits and pushes are substring-matched from shell commands**, so they disagree
+  with `agents output`, which counts real commits by deduped SHA from `git log`. Labelled
+  "seen in shell commands" for that reason.
+- **Reply-time percentiles exclude gaps over an hour** (someone left and came back). The
+  excluded count is printed. There is deliberately no lower bound: `/insights` drops
+  sub-2-second replies, which censors ~28% of the sample and inflates the median by
+  ~63%.
 
 ## Cost & Duration Rollup (`agents cost`)
 

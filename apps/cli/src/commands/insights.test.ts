@@ -137,7 +137,7 @@ describe('agents insights', () => {
     expect(alpha.interruptions).toBe(2);
     expect(alpha.gitCommits).toBe(3);
     expect(alpha.languages.TypeScript).toBe(2);
-    expect(alpha.models['claude-opus-5']).toBeGreaterThan(0);
+    expect(alpha.models['opus-5']).toBeGreaterThan(0);   // shortened, like every renderer
     expect(alpha.messageHours).toHaveLength(24);
     // The raw gap sample is dropped from JSON in favour of percentiles + buckets.
     expect(alpha.responseGaps).toBeUndefined();
@@ -162,6 +162,14 @@ describe('agents insights', () => {
     const payload = JSON.parse(await runInsights(['--json', '--since', 'all', '--account', 'Beta']));
     expect(payload.groups).toHaveLength(1);
     expect(payload.groups[0].label).toContain('Beta Ltd');
+  });
+
+  it('marks facets unmeasurable rather than zero for an unknown harness vocabulary', async () => {
+    const payload = JSON.parse(await runInsights(['--json', '--since', 'all']));
+    // Every fixture uses Claude's Write, so editingToolCalls proves the signal exists
+    // and is non-zero here; the renderer keys "not measurable" off it being 0.
+    const alpha = payload.groups.find((g: { label: string }) => g.label.startsWith('Alpha Inc'));
+    expect(alpha.editingToolCalls).toBeGreaterThan(0);
   });
 
   it('serves the second run from cache without re-reading transcripts', async () => {

@@ -22,8 +22,8 @@
  */
 
 import type { SessionEvent } from './types.js';
-import { computeSummaryStats } from './render.js';
-import { classifyFileChanges } from './digest.js';
+import { computeSummaryStats, shortenModel } from './render.js';
+import { classifyFileChanges, EDIT_TOOLS, WRITE_TOOLS } from './digest.js';
 
 /** File extension → language label. Mirrors the set `/insights` attributes by. */
 const LANGUAGE_BY_EXT: Record<string, string> = {
@@ -51,10 +51,16 @@ const ERROR_CATEGORIES: ReadonlyArray<readonly [readonly string[], string]> = [
   [['exit code', 'command failed', 'error:'], 'Command Failed'],
 ];
 
+/**
+ * Gaps longer than this are someone leaving and coming back, not a reply latency.
+ * Counted separately rather than silently dropped.
+ */
+const GAP_CEILING_SECONDS = 3600;
+
 /** Response-gap buckets, in ascending order. Upper bound is exclusive. */
 const GAP_BUCKETS: ReadonlyArray<readonly [string, number]> = [
-  ['2-10s', 10], ['10-30s', 30], ['30s-1m', 60], ['1-2m', 120],
-  ['2-5m', 300], ['5-15m', 900], ['>15m', Infinity],
+  ['<10s', 10], ['10-30s', 30], ['30s-1m', 60], ['1-2m', 120],
+  ['2-5m', 300], ['5-15m', 900], ['15-60m', Infinity],
 ];
 
 /** Behavioural facets of one session. Serialized as JSON into `session_insights`. */
@@ -70,8 +76,20 @@ export interface InsightFacets {
   interruptions: number;
   /** Seconds between an assistant's last event and the user's next message. */
   responseGaps: number[];
-  linesAdded: number;
-  linesRemoved: number;
+  /** Gaps excluded for exceeding the ceiling — reported, never silently dropped. */
+  gapsOverCeiling: number;
+  /**
+   * Lines in the BEFORE and AFTER text of every edit and write — "lines touched", not
+   * a diff. An Edit whose old_string is three unchanged context lines counts them in
+   * both; git counts them zero times. Measured against a real commit the added figure
+   * ran 19% high and the removed figure 475% high, so this must never be rendered as
+   * a diffstat. Computing a true delta needs a line-level diff per edit, which is a
+   * different feature.
+   */
+  linesTouchedBefore: number;
+  linesTouchedAfter: number;
+  /** Edit/write calls in a vocabulary we recognise — 0 means the numbers above are not measurable. */
+  editingToolCalls: number;
   filesCreated: number;
   filesModified: number;
   filesDeleted: number;
@@ -88,7 +106,8 @@ export interface InsightFacets {
 function emptyFacets(): InsightFacets {
   return {
     toolCounts: {}, models: {}, languages: {}, slashCommands: {}, errorCategories: {},
-    interruptions: 0, responseGaps: [], linesAdded: 0, linesRemoved: 0,
+    interruptions: 0, responseGaps: [], gapsOverCeiling: 0,
+    linesTouchedBefore: 0, linesTouchedAfter: 0, editingToolCalls: 0,
     filesCreated: 0, filesModified: 0, filesDeleted: 0, gitCommits: 0, gitPushes: 0,
     messageHours: new Array(24).fill(0), userTurns: 0, assistantTurns: 0,
     toolCount: 0, errorCount: 0,
@@ -99,10 +118,15 @@ function bump(map: Record<string, number>, key: string, by = 1): void {
   map[key] = (map[key] ?? 0) + by;
 }
 
-/** Newline count of a string, 0 for empty. Used for Edit/Write line deltas. */
+/**
+ * Lines in a string, 0 for empty. A trailing newline terminates the last line rather
+ * than starting a new one, so `"a\nb\n"` is 2 — `split('\n').length` would say 3 and
+ * over-count every newline-terminated Write by one.
+ */
 function lineCount(text: unknown): number {
   if (typeof text !== 'string' || text === '') return 0;
-  return text.split('\n').length;
+  const trimmed = text.endsWith('\n') ? text.slice(0, -1) : text;
+  return trimmed.split('\n').length;
 }
 
 function categorizeError(text: string): string {
@@ -160,8 +184,16 @@ export function computeInsightFacets(
     }
   }
 
-  // Response gap: assistant goes quiet, user speaks again. Bounded below to skip
-  // same-instant turn pairs and above to skip an overnight break, matching /insights.
+  // Response gap: assistant goes quiet, user speaks again.
+  //
+  // No lower bound. /insights drops gaps under 2s, which sounds harmless and is not:
+  // measured over 782 real transcripts it censors 28.4% of the sample and inflates the
+  // reported p50 by 63% (143s against a true 88s), because fast replies are common and
+  // dropping them all shifts the median right. A 0-second reply is a real reply.
+  //
+  // The upper bound stays: past an hour the user went away and came back, which is not
+  // a reply latency. It censors 5.5% of gaps, and `gapsOverCeiling` reports how many so
+  // the number is never quietly truncated.
   let lastAssistantTs: number | null = null;
 
   for (const e of events) {
@@ -174,7 +206,9 @@ export function computeInsightFacets(
         break;
 
       case 'usage':
-        if (e.model) bump(f.models, e.model);
+        // shortenModel so the label matches `agents sessions <id>` and `trends`
+        // rather than printing the raw id beside their shortened one.
+        if (e.model) bump(f.models, shortenModel(e.model));
         break;
 
       case 'error':
@@ -195,7 +229,8 @@ export function computeInsightFacets(
           f.messageHours[local.getUTCHours()]++;
           if (lastAssistantTs !== null) {
             const gap = (ts - lastAssistantTs) / 1000;
-            if (gap > 2 && gap < 3600) f.responseGaps.push(gap);
+            if (gap < GAP_CEILING_SECONDS) f.responseGaps.push(gap);
+            else f.gapsOverCeiling++;
           }
         }
         lastAssistantTs = null;
@@ -206,15 +241,22 @@ export function computeInsightFacets(
         if (e._local) break;
         if (hasTs) lastAssistantTs = ts;
         const args = e.args ?? {};
-        if (e.tool === 'Edit' || e.tool === 'MultiEdit') {
-          f.linesRemoved += lineCount(args.old_string);
-          f.linesAdded += lineCount(args.new_string);
+        const toolName = e.tool ?? '';
+        // Keyed on the SHARED cross-harness vocabulary, not Claude's literals. Keying
+        // on 'Edit'|'MultiEdit'|'Write' meant codex (whose vocabulary is exec /
+        // exec_command / write_stdin) reported 5,197 tool calls and exactly zero lines
+        // touched, rendered under the same column heading as a real number.
+        if (EDIT_TOOLS.has(toolName)) {
+          f.linesTouchedBefore += lineCount(args.old_string);
+          f.linesTouchedAfter += lineCount(args.new_string);
           for (const edit of Array.isArray(args.edits) ? args.edits : []) {
-            f.linesRemoved += lineCount(edit?.old_string);
-            f.linesAdded += lineCount(edit?.new_string);
+            f.linesTouchedBefore += lineCount(edit?.old_string);
+            f.linesTouchedAfter += lineCount(edit?.new_string);
           }
-        } else if (e.tool === 'Write') {
-          f.linesAdded += lineCount(args.content);
+          f.editingToolCalls++;
+        } else if (WRITE_TOOLS.has(toolName)) {
+          f.linesTouchedAfter += lineCount(args.content);
+          f.editingToolCalls++;
         }
         if (e.command) {
           f.gitCommits += countGitOp(e.command, 'commit');
@@ -316,8 +358,10 @@ export function mergeFacets(into: InsightFacets, add: InsightFacets): void {
   for (const [k, v] of Object.entries(add.errorCategories)) bump(into.errorCategories, k, v);
   into.interruptions += add.interruptions;
   into.responseGaps.push(...add.responseGaps);
-  into.linesAdded += add.linesAdded;
-  into.linesRemoved += add.linesRemoved;
+  into.gapsOverCeiling += add.gapsOverCeiling;
+  into.linesTouchedBefore += add.linesTouchedBefore;
+  into.linesTouchedAfter += add.linesTouchedAfter;
+  into.editingToolCalls += add.editingToolCalls;
   into.filesCreated += add.filesCreated;
   into.filesModified += add.filesModified;
   into.filesDeleted += add.filesDeleted;

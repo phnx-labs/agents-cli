@@ -66,8 +66,8 @@ describe('computeInsightFacets', () => {
       tool(0, 'Edit', { file_path: '/r/a.ts', old_string: 'one\ntwo', new_string: 'one\ntwo\nthree\nfour' }),
       tool(1, 'Write', { file_path: '/r/b.ts', content: 'a\nb\nc' }),
     ], 0);
-    expect(f.linesRemoved).toBe(2);
-    expect(f.linesAdded).toBe(4 + 3);
+    expect(f.linesTouchedBefore).toBe(2);
+    expect(f.linesTouchedAfter).toBe(4 + 3);
   });
 
   it('sums every edit of a MultiEdit', () => {
@@ -80,8 +80,8 @@ describe('computeInsightFacets', () => {
         ],
       }),
     ], 0);
-    expect(f.linesAdded).toBe(2 + 1);
-    expect(f.linesRemoved).toBe(1 + 2);
+    expect(f.linesTouchedAfter).toBe(2 + 1);
+    expect(f.linesTouchedBefore).toBe(1 + 2);
   });
 
   it('attributes languages by file extension', () => {
@@ -111,13 +111,15 @@ describe('computeInsightFacets', () => {
     const f = computeInsightFacets([
       userMsg(0, 'go'),
       asstMsg(10),
-      userMsg(70, 'next'),      // 60s gap — counted
+      userMsg(70, 'next'),      // 60s
       asstMsg(80),
-      userMsg(81, 'quick'),     // 1s gap — under the 2s floor, dropped
+      userMsg(81, 'quick'),     // 1s — a fast reply is still a reply, and censoring
+                                //      these inflated the reported p50 by 63%
       asstMsg(90),
-      userMsg(90 + 7200, 'back tomorrow'), // 2h — over the 1h ceiling, dropped
+      userMsg(90 + 7200, 'back tomorrow'), // 2h — over the ceiling, counted separately
     ], 0);
-    expect(f.responseGaps).toEqual([60]);
+    expect(f.responseGaps).toEqual([60, 1]);
+    expect(f.gapsOverCeiling).toBe(1);
   });
 
   it('bins user messages by local hour', () => {
@@ -135,7 +137,8 @@ describe('computeInsightFacets', () => {
       { type: 'usage', agent: 'claude', timestamp: at(2), model: 'claude-sonnet-5', outputTokens: 1 },
       userMsg(3, '/commit', 'commit'),
     ], 0);
-    expect(f.models).toEqual({ 'claude-opus-5': 2, 'claude-sonnet-5': 1 });
+    // Normalized with shortenModel so the label matches every other renderer.
+    expect(f.models).toEqual({ 'opus-5': 2, 'sonnet-5': 1 });
     expect(f.slashCommands).toEqual({ commit: 1 });
   });
 
@@ -144,6 +147,31 @@ describe('computeInsightFacets', () => {
     const f = computeInsightFacets([local], 0);
     expect(f.gitCommits).toBe(0);
     expect(f.toolCount).toBe(0);
+  });
+});
+
+describe('cross-harness tool vocabulary', () => {
+  it('counts line deltas for a non-Claude write tool', () => {
+    // Keying on the literals 'Edit'|'Write' meant codex reported 5,197 tool calls and
+    // exactly zero lines touched, rendered under the same heading as a real number.
+    const f = computeInsightFacets([tool(0, 'write_file', { file_path: '/r/a.py', content: 'a\nb' })], 0);
+    expect(f.linesTouchedAfter).toBe(2);
+    expect(f.editingToolCalls).toBe(1);
+  });
+
+  it('reports zero editing calls when the harness vocabulary is unknown', () => {
+    // The signal the renderer uses to print "not measurable" instead of a false 0.
+    const f = computeInsightFacets([tool(0, 'exec', { cmd: 'ls' })], 0);
+    expect(f.editingToolCalls).toBe(0);
+    expect(f.linesTouchedAfter).toBe(0);
+  });
+});
+
+describe('lineCount via facets', () => {
+  it('does not over-count newline-terminated content', () => {
+    // "a\nb\n" is two lines. split('\n').length says three.
+    const f = computeInsightFacets([tool(0, 'Write', { file_path: '/r/a.ts', content: 'a\nb\n' })], 0);
+    expect(f.linesTouchedAfter).toBe(2);
   });
 });
 
@@ -217,7 +245,7 @@ describe('mergeFacets', () => {
     mergeFacets(total, a);
     mergeFacets(total, b);
 
-    expect(total.linesAdded).toBe(3);
+    expect(total.linesTouchedAfter).toBe(3);
     expect(total.interruptions).toBe(1);
     expect(total.gitPushes).toBe(1);
     expect(total.languages).toEqual({ TypeScript: 1, Python: 1 });

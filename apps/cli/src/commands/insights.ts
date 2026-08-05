@@ -30,6 +30,7 @@
  */
 
 import type { Command } from 'commander';
+import * as fs from 'fs';
 import chalk from 'chalk';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -129,22 +130,29 @@ function groupLabelFor(m: SessionMeta, dim: GroupDim, key: string): string {
 async function collectFacets(
   rows: SessionMeta[],
   onProgress: (done: number, total: number) => void,
-): Promise<Map<string, InsightFacets>> {
+): Promise<{ facets: Map<string, InsightFacets>; unreadable: number }> {
+  let unreadable = 0;
   const cached = readSessionInsights<InsightFacets>(rows.map((r) => r.id));
   const stale = rows.filter((r) => !cached.has(r.id) && r.filePath);
-  if (stale.length === 0) return cached;
+  if (stale.length === 0) return { facets: cached, unreadable };
 
-  const fresh: Array<{ id: string; facets: InsightFacets }> = [];
+  const fresh: Array<{ id: string; fileMtimeMs: number | null; fileSize: number | null; facets: InsightFacets }> = [];
   let done = 0;
   for (const row of stale) {
     try {
-      const events = parseSession(row.filePath!, row.agent);
+      // Stat BEFORE reading, so the stamp we persist describes bytes no newer than the
+      // ones parsed: a rescan landing mid-read then reads as stale, not as a hit.
+      const st = fs.statSync(row.filePath!);
+      // includeInterrupts: the default event array is a versioned contract, so the
+      // marker is opt-in and this is the reader that opts in.
+      const events = parseSession(row.filePath!, row.agent, { includeInterrupts: true });
       const facets = computeInsightFacets(events);
       cached.set(row.id, facets);
-      fresh.push({ id: row.id, facets });
+      fresh.push({ id: row.id, fileMtimeMs: Math.floor(st.mtimeMs), fileSize: st.size, facets });
     } catch {
-      // A transcript that has been deleted or is unreadable contributes nothing.
-      // It is still counted in the session totals from its indexed row.
+      // Deleted or corrupt since it was indexed. Counted and reported below, never
+      // silently contributing zero.
+      unreadable++;
     }
     done++;
     if (done % 25 === 0) onProgress(done, stale.length);
@@ -155,7 +163,7 @@ async function collectFacets(
   }
   if (fresh.length > 0) writeSessionInsights(fresh);
   onProgress(stale.length, stale.length);
-  return cached;
+  return { facets: cached, unreadable };
 }
 
 function buildGroups(
@@ -288,9 +296,25 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta): v
   // Output
   out.push('');
   out.push(chalk.bold('What you changed'));
-  out.push(`  ${chalk.green('+' + all.linesAdded)} ${chalk.red('-' + all.linesRemoved)} ${chalk.gray('lines')}  ·  ` +
-    chalk.gray(`${all.filesCreated} created, ${all.filesModified} modified, ${all.filesDeleted} deleted`));
-  out.push(`  ${chalk.gray(`${all.gitCommits} commits · ${all.gitPushes} pushes`)}`);
+  // Gate on whether anything was actually measured, not on whether an edit-shaped call
+  // was seen. Codex patches through `exec`, so it can log edit-class calls and still
+  // expose no line arguments to count — rendering that as "0 lines" would read as "wrote
+  // nothing" for a harness that wrote plenty.
+  if (all.linesTouchedAfter > 0 || all.linesTouchedBefore > 0) {
+    // "touched", not "+/-": these are the before/after line counts of each edit, so an
+    // Edit with unchanged context lines counts them on both sides. Not a diffstat, and
+    // labelled so nobody reads it as one.
+    out.push(`  ${chalk.cyan(String(all.linesTouchedAfter))} ${chalk.gray('lines written,')} ` +
+      `${chalk.cyan(String(all.linesTouchedBefore))} ${chalk.gray('replaced')}  ` +
+      chalk.gray('(lines touched, not a diff)'));
+  } else {
+    out.push(`  ${chalk.gray('lines touched  —  not measurable for this harness (edits go through the shell)')}`);
+  }
+  out.push(`  ${chalk.gray(`${all.filesCreated} created, ${all.filesModified} modified, ${all.filesDeleted} deleted`)}`);
+  // Substring-matched from shell commands, so it disagrees with `agents output`, which
+  // counts real commits by deduped SHA from git log. Named so the difference is not a
+  // mystery.
+  out.push(`  ${chalk.gray(`${all.gitCommits} commits · ${all.gitPushes} pushes (seen in shell commands)`)}`);
 
   renderHours(all.messageHours, out);
 
@@ -311,6 +335,13 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta): v
     out.push('');
     out.push(chalk.gray(`  ${meta.filteredOut} sessions excluded as too short (under ${meta.minMessages} messages or 1 minute).`));
   }
+  if (meta.unreadable > 0) {
+    if (meta.filteredOut === 0) out.push('');
+    out.push(chalk.yellow(`  ${meta.unreadable} transcripts could not be read; their behaviour is missing from these totals.`));
+  }
+  if (all.gapsOverCeiling > 0) {
+    out.push(chalk.gray(`  ${all.gapsOverCeiling} reply gaps over an hour excluded from the percentiles.`));
+  }
   out.push('');
   out.push(chalk.gray('  `agents insights --by project` to see it per repo'));
   out.push(chalk.gray('  `agents insights --narrative` for a written read on what to change'));
@@ -322,6 +353,8 @@ interface ReportMeta {
   scanned: number;
   analyzed: number;
   filteredOut: number;
+  /** Transcripts that could not be read; reported, never silently zeroed. */
+  unreadable: number;
   minMessages: number;
   overlap: ReturnType<typeof detectOverlap>;
 }
@@ -349,9 +382,11 @@ async function renderNarrative(payload: unknown): Promise<void> {
       timeout: 180_000,
       maxBuffer: 8 * 1024 * 1024,
     });
-    console.log('');
-    console.log(chalk.bold('Narrative'));
-    console.log(stdout.trim().split('\n').map((l) => `  ${l}`).join('\n'));
+    // stderr, always. Under --json stdout is a machine contract, and prose appended
+    // after the closing brace makes the payload unparseable; on a TTY stderr renders
+    // identically, so there is nothing to special-case.
+    process.stderr.write('\n' + chalk.bold('Narrative') + '\n');
+    process.stderr.write(stdout.trim().split('\n').map((l) => `  ${l}`).join('\n') + '\n');
   } catch (err) {
     const msg = (err as { code?: string }).code === 'ENOENT'
       ? 'claude is not on PATH'
@@ -359,6 +394,9 @@ async function renderNarrative(payload: unknown): Promise<void> {
     console.error('');
     console.error(chalk.red(`✗ narrative unavailable: ${msg}`));
     console.error(chalk.gray('  The report above is complete; only the written section was skipped.'));
+    // A scripted caller asked for this section and did not get it. Say so in the exit
+    // code rather than reporting success for a partial result.
+    process.exitCode = 1;
   }
 }
 
@@ -392,7 +430,7 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
   const filteredOut = inScope.length - substantive.length;
 
   const isTty = process.stdout.isTTY && !options.json;
-  const facetsById = await collectFacets(substantive, (done, total) => {
+  const { facets: facetsById, unreadable } = await collectFacets(substantive, (done, total) => {
     if (isTty && done < total) process.stderr.write(`\rReading transcripts ${done}/${total}…`);
     else if (isTty) process.stderr.write('\r'.padEnd(40) + '\r');
   });
@@ -416,6 +454,7 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
       scanned: inScope.length,
       analyzed: substantive.length,
       filteredOut,
+      unreadable,
       minMessages,
       by: dim,
       overlap,
@@ -444,6 +483,7 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
     scanned: inScope.length,
     analyzed: substantive.length,
     filteredOut,
+    unreadable,
     minMessages,
     overlap,
   });
@@ -455,7 +495,7 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
       languages: topEntries(g.facets.languages, 6),
       errorCategories: topEntries(g.facets.errorCategories, 6),
       interruptions: g.facets.interruptions,
-      linesAdded: g.facets.linesAdded, linesRemoved: g.facets.linesRemoved,
+      linesTouchedAfter: g.facets.linesTouchedAfter, linesTouchedBefore: g.facets.linesTouchedBefore,
       gitCommits: g.facets.gitCommits,
       replyP50s: Math.round(percentile(g.facets.responseGaps, 50)),
     })));

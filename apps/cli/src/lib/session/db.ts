@@ -282,10 +282,14 @@ CREATE TABLE IF NOT EXISTS resource_scan_ledger (
 -- migration that flushes a ledger, and adding it costs the hot "sessions" table
 -- nothing. Populated lazily by the insights command, never by a normal scan --
 -- parsing every transcript is far too expensive for the common listing path.
+-- file_mtime_ms / file_size are NULLABLE because they are nullable on the sessions
+-- table too (a source with no statable file indexes them as NULL). NOT NULL here made
+-- a legitimate null-stat session throw a constraint error that took the whole batch
+-- transaction down with it.
 CREATE TABLE IF NOT EXISTS session_insights (
   session_id TEXT PRIMARY KEY,
-  file_mtime_ms INTEGER NOT NULL,
-  file_size INTEGER NOT NULL,
+  file_mtime_ms INTEGER,
+  file_size INTEGER,
   extractor_version INTEGER NOT NULL,
   computed_at INTEGER NOT NULL,
   facets TEXT NOT NULL
@@ -298,7 +302,7 @@ CREATE TABLE IF NOT EXISTS session_insights (
  * re-derives on the next `agents insights` instead of silently reporting stale
  * numbers alongside fresh ones. Same role as RESOURCE_INDEX_VERSION.
  */
-export const INSIGHTS_EXTRACTOR_VERSION = 1;
+export const INSIGHTS_EXTRACTOR_VERSION = 2;
 
 /** Raw row shape returned from the sessions table. */
 export interface SessionRow {
@@ -2411,14 +2415,14 @@ export interface UsageRollupRow {
  *
  * Staleness is decided in SQL against the session's own `file_mtime_ms` / `file_size`,
  * the same pair the scanner maintains — so the cache cannot disagree with the index,
- * and callers need no stat of their own. `IS` rather than `=` so a NULL stat on both
- * sides still matches (an unstatted source is consistently unstatted).
+ * `IS` rather than `=` so a source with no statable file — NULL on both sides — is a
+ * cache HIT rather than a permanent miss that re-parses it on every run.
  */
 export function readSessionInsights<T>(ids: string[]): Map<string, T> {
   const db = getDB();
   const out = new Map<string, T>();
   if (ids.length === 0) return out;
-  const CHUNK = 400; // two binds per id, well under SQLite's 999-variable limit
+  const CHUNK = 400; // chunk.length + 1 binds, well under SQLite's 999-variable limit
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);
     const phs = chunk.map(() => '?').join(',');
@@ -2443,17 +2447,24 @@ export function readSessionInsights<T>(ids: string[]): Map<string, T> {
 }
 
 /**
- * Persist freshly computed facets, copying the staleness stamp from the session row so
- * it is always the value the next read compares against. One transaction per batch.
+ * Persist freshly computed facets against the stamp of the bytes actually parsed.
+ *
+ * The caller passes the stat it observed when it read the file. Re-reading the stamp
+ * from the sessions table inside this INSERT would race: a concurrent rescan between
+ * the parse and the write (the cold path flushes in batches, so the window is minutes
+ * wide, and this module treats concurrent access as a design assumption) stamps NEW
+ * bytes onto OLD facets — a permanent false cache hit until the file changes again.
+ * tool-index.ts sets the precedent: stat at parse time, carry the stamp into the write.
  */
-export function writeSessionInsights<T>(entries: Array<{ id: string; facets: T }>): void {
+export function writeSessionInsights<T>(
+  entries: Array<{ id: string; fileMtimeMs: number | null; fileSize: number | null; facets: T }>,
+): void {
   if (entries.length === 0) return;
   const db = getDB();
   const stmt = db.prepare(`
     INSERT INTO session_insights
       (session_id, file_mtime_ms, file_size, extractor_version, computed_at, facets)
-    SELECT s.id, s.file_mtime_ms, s.file_size, ?, ?, ?
-    FROM sessions s WHERE s.id = ?
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(session_id) DO UPDATE SET
       file_mtime_ms = excluded.file_mtime_ms,
       file_size = excluded.file_size,
@@ -2464,7 +2475,7 @@ export function writeSessionInsights<T>(entries: Array<{ id: string; facets: T }
   const now = Date.now();
   db.transaction(() => {
     for (const e of entries) {
-      stmt.run(INSIGHTS_EXTRACTOR_VERSION, now, JSON.stringify(e.facets), e.id);
+      stmt.run(e.id, e.fileMtimeMs, e.fileSize, INSIGHTS_EXTRACTOR_VERSION, now, JSON.stringify(e.facets));
     }
   })();
 }

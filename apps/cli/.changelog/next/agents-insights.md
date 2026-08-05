@@ -13,8 +13,15 @@
   keyed on `(file_mtime_ms, file_size)`, so the first run parses every transcript once
   and later runs re-read only what changed.
 
-- **The Claude parser no longer discards interruption markers.** `[Request interrupted`
-  text was dropped outright, so the signal was unrecoverable downstream. It now emits a
-  dedicated `interrupt` SessionEvent — kept out of the message stream, where every
-  renderer and the topic extractor would have shown it as something the user typed.
+- **The Claude parser can surface interruption markers on request.** `[Request
+  interrupted` text was dropped outright, so the signal was unrecoverable downstream.
+  `parseSession(..., { includeInterrupts: true })` now emits a dedicated `interrupt`
+  event. It stays OFF by default because the event array is a versioned consumer
+  contract: `agents sessions <id> --json` serializes it verbatim, `computeSummaryStats`
+  folds every timestamp into the session duration, and the live-state reader inspects a
+  fixed window of trailing events. `agents insights` is the only caller that opts in.
   Source: `apps/cli/src/lib/session/parse.ts`.
+
+- **`digest.ts` now classifies droid's `Create` as a file write.** Its tool-vocabulary
+  set claimed cross-harness coverage but omitted it, so droid file creations classified
+  as nothing. Source: `apps/cli/src/lib/session/digest.ts`.

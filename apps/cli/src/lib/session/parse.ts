@@ -143,6 +143,23 @@ export function safeReadSessionFile(filePath: string, maxBytes: number = SESSION
 export interface ParseSessionOptions {
   /** Keep normalized tool results compact by default; renderers can request full output. */
   maxToolOutputChars?: number;
+  /**
+   * Emit an `interrupt` event where the transcript records `[Request interrupted`.
+   *
+   * OFF by default, deliberately. That marker is not a user message, and the default
+   * event array is a versioned consumer contract: `agents sessions <id> --json`
+   * serializes it verbatim (see render.ts, issue #743), `computeSummaryStats` folds
+   * every event's timestamp into the session duration, and the live-state reader and
+   * tail renderer inspect fixed-size windows of the last N events. Emitting it
+   * unconditionally changed all four — a measured 12x duration swing on one real
+   * transcript, a new object in a published payload, and an eviction from the
+   * 12-event rate-limit window whose trigger shape (a trailing interrupt) is exactly
+   * a session the user just cancelled.
+   *
+   * `agents insights` opts in: an interruption is a real friction signal, and dropping
+   * it outright is what made it unrecoverable.
+   */
+  includeInterrupts?: boolean;
 }
 
 function truncateNormalizedToolOutput(output: string, maxChars: number): string {
@@ -162,7 +179,7 @@ export function parseSession(
 
   let events: SessionEvent[];
   switch (detected) {
-    case 'claude': events = parseClaude(filePath); break;
+    case 'claude': events = parseClaude(filePath, opts); break;
     case 'codex': events = parseCodex(filePath); break;
     case 'gemini': events = parseGemini(filePath); break;
     case 'antigravity': events = parseAntigravity(filePath); break;
@@ -319,8 +336,8 @@ function shortenPath(p: string): string {
 // ---------------------------------------------------------------------------
 
 /** Parse a Claude JSONL session file into normalized events. */
-export function parseClaude(filePath: string): SessionEvent[] {
-  return parseClaudeContent(safeReadSessionFile(filePath));
+export function parseClaude(filePath: string, opts: ParseSessionOptions = {}): SessionEvent[] {
+  return parseClaudeContent(safeReadSessionFile(filePath), opts);
 }
 
 /**
@@ -329,7 +346,10 @@ export function parseClaude(filePath: string): SessionEvent[] {
  * chunk of a file without re-reading the whole thing. Malformed leading lines
  * (a tail that starts mid-line) are skipped by the per-line try/catch below.
  */
-export function parseClaudeContent(content: string): SessionEvent[] {
+export function parseClaudeContent(
+  content: string,
+  opts: ParseSessionOptions = {},
+): SessionEvent[] {
   const lines = content.split('\n').filter(l => l.trim());
   const events: SessionEvent[] = [];
 
@@ -445,14 +465,12 @@ export function parseClaudeContent(content: string): SessionEvent[] {
           if (block.type === 'text') {
             const text = (block.text || '').trim();
             if (text.startsWith('[Request interrupted')) {
-              // Not a user message — the harness's own marker for a turn the user
-              // cut short. It stays OUT of the message stream (every renderer and
-              // the topic extractor would otherwise show it as something the user
-              // typed), but it is a real friction signal, so emit it as its own
-              // event type instead of dropping it on the floor. Consumers dispatch
-              // on known types with if/else chains, so an added member is inert for
-              // all of them; `agents insights` is the first reader.
-              events.push({ type: 'interrupt', agent: 'claude', timestamp, content: text });
+              // The harness's marker for a turn the user cut short, not a user
+              // message. Surfaced only on request — see includeInterrupts for why
+              // the default stream must stay byte-identical.
+              if (opts.includeInterrupts) {
+                events.push({ type: 'interrupt', agent: 'claude', timestamp, content: text });
+              }
             } else if (text) {
               events.push({
                 type: 'message',

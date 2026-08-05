@@ -19,9 +19,9 @@ export interface FileChange {
 
 // Tool vocab mirrors parse.ts / render.ts so classification matches what those
 // modules already recognize across Claude/Codex/others.
-const READ_TOOLS = new Set(['Read', 'read_file', 'view_file', 'cat_file', 'get_file']);
-const WRITE_TOOLS = new Set(['Write', 'write_file', 'create_file']);
-const EDIT_TOOLS = new Set(['Edit', 'edit_file', 'replace', 'patch', 'MultiEdit', 'apply_patch']);
+export const READ_TOOLS = new Set(['Read', 'read_file', 'view_file', 'cat_file', 'get_file']);
+export const WRITE_TOOLS = new Set(['Write', 'write_file', 'create_file', 'Create']);
+export const EDIT_TOOLS = new Set(['Edit', 'edit_file', 'replace', 'patch', 'MultiEdit', 'apply_patch']);
 
 /**
  * Path-shaped noise that must never surface as a session "change": shell
