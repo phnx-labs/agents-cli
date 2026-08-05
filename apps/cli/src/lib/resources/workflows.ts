@@ -19,6 +19,7 @@ import {
   parseWorkflowFrontmatter,
   countWorkflowSubagents,
   listPluginWorkflowDirs,
+  isBareWorkflowName,
 } from '../workflows.js';
 
 export interface WorkflowItem {
@@ -96,6 +97,8 @@ class WorkflowsHandlerImpl implements ResourceHandler<WorkflowItem> {
   }
 
   resolve(_agent: AgentId, name: string, cwd?: string): ResolvedItem<WorkflowItem> | null {
+    // Same bare-name gate as resolveWorkflowRef — never path-join traversal refs.
+    if (!isBareWorkflowName(name)) return null;
     for (const { dir, layer } of orderedWorkflowSearchDirs(cwd)) {
       const workflowPath = path.join(dir, name);
       const fm = parseWorkflowFrontmatter(workflowPath);

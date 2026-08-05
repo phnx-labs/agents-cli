@@ -726,16 +726,18 @@ function resolveWorkflowPath(ref: string, cwd: string): string | null {
 }
 
 /**
- * Plugin `workflows/` directories in discovery order (user plugins, then project,
- * then system, then extra repos). Used by name resolution and listing so a
- * plugin-packaged workflow is runnable via `agents run <name>` without a
- * separate install into ~/.agents/workflows/ (Phase 5 packaging).
+ * Plugin `workflows/` directories in discovery order (project → user → system →
+ * extra). Used by name resolution and listing so a plugin-packaged workflow is
+ * runnable via `agents run <name>` without a separate install into
+ * ~/.agents/workflows/ (Phase 5 packaging). Within the plugin band, project
+ * plugins beat user/system plugins (same first-hit-wins as other layers).
  */
 export function listPluginWorkflowDirs(cwd: string = process.cwd()): string[] {
   const pluginRoots: string[] = [];
-  const pluginsDirs: string[] = [getPluginsDir(), getSystemPluginsDir()];
+  const pluginsDirs: string[] = [];
   const projectPlugins = getProjectPluginsDir(cwd);
   if (projectPlugins) pluginsDirs.push(projectPlugins);
+  pluginsDirs.push(getPluginsDir(), getSystemPluginsDir());
   for (const extra of getEnabledExtraRepos()) {
     pluginsDirs.push(path.join(extra.dir, 'plugins'));
   }
@@ -769,6 +771,19 @@ export function listPluginWorkflowDirs(cwd: string = process.cwd()): string[] {
 }
 
 /**
+ * True when `ref` is a single bare workflow name (no path separators, no `..`).
+ * Name lookup must not path-join multi-segment or traversal refs into search roots.
+ */
+export function isBareWorkflowName(ref: string): boolean {
+  if (!ref || ref === '.' || ref === '..') return false;
+  if (ref.includes('/') || ref.includes('\\')) return false;
+  if (ref.includes('..')) return false;
+  // Reject absolute paths (posix or Windows).
+  if (path.isAbsolute(ref)) return false;
+  return path.basename(ref) === ref;
+}
+
+/**
  * Resolve an `agents run <workflow>` reference.
  *
  * Directories are accepted anywhere on disk when they contain WORKFLOW.md.
@@ -778,6 +793,10 @@ export function listPluginWorkflowDirs(cwd: string = process.cwd()): string[] {
 export function resolveWorkflowRef(ref: string, cwd: string = process.cwd()): string | null {
   const direct = resolveWorkflowPath(ref, cwd);
   if (direct) return direct;
+
+  // Name lookup only — reject traversal / multi-segment so path.join(dir, ref)
+  // cannot escape a workflows root (absolute paths already handled above).
+  if (!isBareWorkflowName(ref)) return null;
 
   const projectAgentsDir = getProjectAgentsDir(cwd);
   const searchDirs = [

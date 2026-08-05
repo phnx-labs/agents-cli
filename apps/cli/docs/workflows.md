@@ -13,9 +13,10 @@ For the layered resolution model that governs `project > user > system` preceden
 ## Architecture
 
 ```
-Source locations (project > user > system):
+Source locations (project > user > plugin > extra > system):
   .agents/workflows/<name>/            Project-scoped (repo-local)
   ~/.agents/workflows/<name>/          User-scoped (global)
+  <plugin>/workflows/<name>/           Packaged inside a plugin (Phase 5)
   ~/.agents-system/workflows/<name>/   System-shipped defaults
 
   Each workflow directory:

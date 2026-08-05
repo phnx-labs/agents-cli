@@ -19,6 +19,7 @@ import {
   GROK_WORKFLOW_MARKER,
   resolveWorkflowRef,
   listPluginWorkflowDirs,
+  isBareWorkflowName,
 } from './workflows.js';
 import * as state from './state.js';
 
@@ -539,5 +540,83 @@ describe('resolveWorkflowRef — plugin packaging (Phase 5)', () => {
     const plugin = writeWf(path.join(userPluginsDir, 'tools', 'workflows'), 'deploy', 'plugin');
     writeWf(systemWorkflowsDir, 'deploy', 'system');
     expect(resolveWorkflowRef('deploy', tmpDir)).toBe(plugin);
+  });
+});
+
+describe('isBareWorkflowName', () => {
+  it('accepts a single segment name', () => {
+    expect(isBareWorkflowName('deploy')).toBe(true);
+    expect(isBareWorkflowName('ship-it')).toBe(true);
+  });
+
+  it('rejects path separators and traversal', () => {
+    expect(isBareWorkflowName('../etc')).toBe(false);
+    expect(isBareWorkflowName('foo/bar')).toBe(false);
+    expect(isBareWorkflowName('foo\\bar')).toBe(false);
+    expect(isBareWorkflowName('..')).toBe(false);
+    expect(isBareWorkflowName('')).toBe(false);
+  });
+});
+
+describe('resolveWorkflowRef — project plugin beats system plugin', () => {
+  let tmpDir = '';
+  let userPluginsDir = '';
+  let systemPluginsDir = '';
+  let projectPluginsDir = '';
+  let projectAgentsDir = '';
+  let userWorkflowsDir = '';
+  let systemWorkflowsDir = '';
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-wf-plugin-order-'));
+    userPluginsDir = path.join(tmpDir, 'user-plugins');
+    systemPluginsDir = path.join(tmpDir, 'system-plugins');
+    projectPluginsDir = path.join(tmpDir, 'project-plugins');
+    projectAgentsDir = path.join(tmpDir, 'project', '.agents');
+    userWorkflowsDir = path.join(tmpDir, 'user-workflows');
+    systemWorkflowsDir = path.join(tmpDir, 'system-workflows');
+    for (const d of [userPluginsDir, systemPluginsDir, projectPluginsDir, userWorkflowsDir, systemWorkflowsDir]) {
+      fs.mkdirSync(d, { recursive: true });
+    }
+    fs.mkdirSync(path.join(projectAgentsDir, 'workflows'), { recursive: true });
+
+    vi.spyOn(state, 'getProjectAgentsDir').mockReturnValue(projectAgentsDir);
+    vi.spyOn(state, 'getUserWorkflowsDir').mockReturnValue(userWorkflowsDir);
+    vi.spyOn(state, 'getSystemWorkflowsDir').mockReturnValue(systemWorkflowsDir);
+    vi.spyOn(state, 'getEnabledExtraRepos').mockReturnValue([]);
+    vi.spyOn(state, 'getPluginsDir').mockReturnValue(userPluginsDir);
+    vi.spyOn(state, 'getSystemPluginsDir').mockReturnValue(systemPluginsDir);
+    vi.spyOn(state, 'getProjectPluginsDir').mockReturnValue(projectPluginsDir);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function writeWf(dir: string, name: string, description: string): string {
+    const wf = path.join(dir, name);
+    fs.mkdirSync(wf, { recursive: true });
+    fs.writeFileSync(path.join(wf, 'WORKFLOW.md'), `---\ndescription: ${description}\n---\n`);
+    return wf;
+  }
+
+  it('project plugin beats system plugin on name collision', () => {
+    const project = writeWf(path.join(projectPluginsDir, 'local', 'workflows'), 'deploy', 'project-plugin');
+    writeWf(path.join(systemPluginsDir, 'shipped', 'workflows'), 'deploy', 'system-plugin');
+    expect(resolveWorkflowRef('deploy', tmpDir)).toBe(project);
+  });
+
+  it('project workflow (central) beats any plugin', () => {
+    const project = writeWf(path.join(projectAgentsDir, 'workflows'), 'deploy', 'project-central');
+    writeWf(path.join(projectPluginsDir, 'local', 'workflows'), 'deploy', 'project-plugin');
+    writeWf(path.join(userPluginsDir, 'tools', 'workflows'), 'deploy', 'user-plugin');
+    expect(resolveWorkflowRef('deploy', tmpDir)).toBe(project);
+  });
+
+  it('rejects bare-name traversal', () => {
+    writeWf(path.join(userPluginsDir, 'tools', 'workflows'), 'deploy', 'plugin');
+    expect(resolveWorkflowRef('../deploy', tmpDir)).toBeNull();
+    expect(resolveWorkflowRef('tools/workflows/deploy', tmpDir)).toBeNull();
   });
 });
