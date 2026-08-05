@@ -5,6 +5,19 @@
  * and is imported with a `type: json` attribute so it survives `tsc` emit AND
  * Node ESM's import-attribute requirement at runtime (the package is ESM).
  *
+ * ## Keeping it current
+ *
+ * A model missing from `prices.json` prices to NOTHING — `getModelPricing` returns
+ * null and the session contributes $0, silently. That is how 478 `claude-opus-5`
+ * sessions read as free: matching is dash-bounded, so `claude-opus-5` cannot fall back
+ * to the `claude-opus-4` entry. When a new model ships, add it here in the same change.
+ *
+ * **Dated rate: Claude Sonnet 5 is priced at its introductory $2/$10 per MTok, which
+ * ends 2026-08-31.** From 2026-09-01 the standard rate is $3/$15 (cache write $3.75,
+ * cache read $0.30). This table has no notion of an effective date — every row is a
+ * single current rate — so that entry MUST be updated then, or Sonnet 5 spend will
+ * read ~33% low. Source: https://platform.claude.com/docs/en/about-claude/pricing
+ *
  * `getModelPricing` is prefix/suffix-tolerant: real model identifiers carry
  * vendor prefixes (`us.anthropic.`), version dashes (`claude-opus-4-8`), and
  * date suffixes (`-20250514`), none of which appear in the canonical keys. We
