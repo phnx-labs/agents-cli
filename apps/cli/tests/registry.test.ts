@@ -36,6 +36,18 @@ describe('parsePackageIdentifier', () => {
     expect(result).toEqual({ type: 'skill', name: 'user/repo' });
   });
 
+  it('parses plugin: prefix (Phase 5 install umbrella)', () => {
+    expect(parsePackageIdentifier('plugin:my-plugin@https://github.com/user/my-plugin.git')).toEqual({
+      type: 'plugin',
+      name: 'my-plugin@https://github.com/user/my-plugin.git',
+    });
+    expect(parsePackageIdentifier('plugin:~/Projects/rush-toolkit')).toEqual({
+      type: 'plugin',
+      name: '~/Projects/rush-toolkit',
+    });
+    expect(parsePackageIdentifier('plugin:')).toEqual({ type: 'plugin', name: '' });
+  });
+
   it('parses gh: prefix as git', () => {
     const result = parsePackageIdentifier('gh:example-user/.agents');
     expect(result).toEqual({ type: 'git', name: 'gh:example-user/.agents' });
@@ -167,6 +179,20 @@ describe('resolvePackage', () => {
   it('resolves skill: prefix to git fallback', async () => {
     const result = await resolvePackage('skill:user/repo');
     expect(result).toEqual({ type: 'git', source: 'gh:user/repo' });
+  });
+
+  it('resolves plugin: to plugin package (does not hit registries)', async () => {
+    const result = await resolvePackage('plugin:my-plugin@https://github.com/user/p.git');
+    expect(result).toEqual({
+      type: 'plugin',
+      source: 'my-plugin@https://github.com/user/p.git',
+      pluginSpec: 'my-plugin@https://github.com/user/p.git',
+    });
+  });
+
+  it('returns null for empty plugin: spec', async () => {
+    expect(await resolvePackage('plugin:')).toBeNull();
+    expect(await resolvePackage('plugin:   ')).toBeNull();
   });
 
   it('resolves unknown user/repo to git fallback', async () => {

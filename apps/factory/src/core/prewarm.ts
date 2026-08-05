@@ -10,7 +10,6 @@ export interface PrewarmConfig {
   statusCommand: string;        // Command to get session info (e.g., '/status', '/stats')
   sessionIdPattern: RegExp;     // Pattern to extract session ID from output
   exitSequence: string[];       // Key sequences to cleanly exit
-  resumeCommand: (sessionId: string) => string;
 }
 
 /** A pre-warmed session ready for hand-off */
@@ -45,7 +44,6 @@ export const PREWARM_CONFIGS: Record<PrewarmAgentType, PrewarmConfig> = {
     // Matches: "Session ID: 01J9..."/"Session: 01J9..."
     sessionIdPattern: /Session(?:\s+ID)?:\s*([a-zA-Z0-9_-]+)/i,
     exitSequence: ['\x1b', '\x03', '\x03'],  // Esc, Ctrl+C, Ctrl+C (need Esc first for Claude)
-    resumeCommand: (id) => `claude -r ${id}`
   },
   codex: {
     agentType: 'codex',
@@ -54,7 +52,6 @@ export const PREWARM_CONFIGS: Record<PrewarmAgentType, PrewarmConfig> = {
     // Matches: "Session: 01J9..." or "Session ID: 01J9..."
     sessionIdPattern: /Session(?:\s+ID)?:\s*([a-zA-Z0-9_-]+)/i,
     exitSequence: ['\x03', '\x03'],  // Ctrl+C twice
-    resumeCommand: (id) => `codex resume ${id}`
   },
   gemini: {
     agentType: 'gemini',
@@ -63,7 +60,6 @@ export const PREWARM_CONFIGS: Record<PrewarmAgentType, PrewarmConfig> = {
     // Matches session ID pattern
     sessionIdPattern: /Session(?:\s+ID)?:\s*([a-zA-Z0-9_-]+)/i,
     exitSequence: ['\x03', '\x03'],  // Ctrl+C twice
-    resumeCommand: (id) => `gemini --resume ${id}`
   },
   cursor: {
     agentType: 'cursor',
@@ -72,7 +68,6 @@ export const PREWARM_CONFIGS: Record<PrewarmAgentType, PrewarmConfig> = {
     // Matches session ID pattern
     sessionIdPattern: /Session(?:\s+ID)?:\s*([a-zA-Z0-9_-]+)/i,
     exitSequence: ['\x03', '\x03'],  // Ctrl+C twice
-    resumeCommand: (id) => `cursor-agent --resume=${id}`
   },
   opencode: {
     agentType: 'opencode',
@@ -81,7 +76,6 @@ export const PREWARM_CONFIGS: Record<PrewarmAgentType, PrewarmConfig> = {
     // Matches OpenCode session ID format: ses_xxx
     sessionIdPattern: /ses_[a-zA-Z0-9]+/i,
     exitSequence: ['\x03', '\x03'],  // Ctrl+C twice
-    resumeCommand: (id) => `opencode -s ${id}`
   }
 };
 
@@ -171,49 +165,45 @@ export function selectBestSession(
 }
 
 /**
- * Build resume command for a pre-warmed session
+ * Build resume command for a pre-warmed session.
+ *
+ * Every resume goes through `agents run <agent> --interactive --resume <id>`;
+ * the CLI resolves the version that started the session and handles remote
+ * hosts via `--host`. No per-harness raw binary resume is ever emitted.
  */
 export function buildResumeCommand(session: PrewarmedSession): string {
-  const config = PREWARM_CONFIGS[session.agentType];
-  return config.resumeCommand(session.sessionId);
+  return buildVersionedResumeCommand(session.agentType, session.sessionId);
 }
 
 /**
- * Build a resume command pinned to a specific installed agent version when one
- * is known. This is required for multi-profile setups where a session only
- * exists inside one version's home directory.
+ * Build the unified resume command for any harness.
+ *
+ * `agents run --resume` resumes under the version that started the session
+ * (verified in the CLI: `apps/cli/src/commands/exec.ts` forwards `version:
+ * undefined` when `resume` is set, and the remote/local CLI resolves the
+ * originating version from its session index). Therefore we never pin an
+ * explicit `@version` here.
  *
  * `host` is the device the session was offloaded to. Its transcript lives on
- * THAT machine, so the raw `claude -r <id>` form would start a brand-new local
- * agent against an id this box has never seen; route through
- * `agents run --host … --resume` so the resume happens where the session is.
+ * THAT machine, so a local raw resume would start a brand-new agent against an
+ * id this box has never seen; route through `agents run --host … --resume` so
+ * the resume happens where the session is.
  *
  * `agentType` widens past {@link PrewarmAgentType} because resume is not a
  * prewarm-only capability: the CLI records transcripts for every harness it can
  * run (grok, kimi, droid, antigravity, …) and `agents run --resume` resumes any
- * of them under the version that started the session. Only the five agents with
- * a {@link PREWARM_CONFIGS} entry get their native one-liner; the rest go
- * through `agents run`, which is the same path the `--host` form already used.
+ * of them under the version that started the session.
  */
 export function buildVersionedResumeCommand(
   agentType: PrewarmAgentType | string,
   sessionId: string,
-  version?: string,
+  _version?: string,
   host?: string,
 ): string {
-  const spec = version ? `${agentType}@${version}` : agentType;
   if (host) {
-    return `agents run ${spec} --interactive --host ${shellQuoteArg(host)} --resume ${sessionId}`;
+    return `agents run ${agentType} --interactive --host ${shellQuoteArg(host)} --resume ${sessionId}`;
   }
-  if (!(agentType in PREWARM_CONFIGS)) {
-    return `agents run ${spec} --interactive --resume ${sessionId}`;
-  }
-  const config = PREWARM_CONFIGS[agentType as PrewarmAgentType];
-  const baseCmd = config.resumeCommand(sessionId);
-  if (!version) return baseCmd;
-  const cmdName = config.command;
-  const prefix = new RegExp(`^${cmdName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
-  return baseCmd.replace(prefix, `${cmdName}@${version}`);
+  return `agents run ${agentType} --interactive --resume ${sessionId}`;
 }
 
 /** Single-quote a device name so it can never break out of the built command. */

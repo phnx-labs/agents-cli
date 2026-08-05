@@ -7,17 +7,17 @@ import type { JobConfig, RunMeta } from '../src/lib/routines.js';
 // Mutable override state lives on globalThis so vitest's hoist of vi.mock
 // above the local const (TDZ error) and Bun's missing vi.hoisted both
 // remain non-issues. globalThis is always initialized.
-interface JobsHoistedState { TEST_DIR: string }
+interface JobsHoistedState { TEST_DIR: string; META: Record<string, unknown> }
 const JOBS_HOISTED_KEY = '__agents_cli_jobs_test_state__';
 const hoistedState: JobsHoistedState =
   ((globalThis as Record<string, unknown>)[JOBS_HOISTED_KEY] as JobsHoistedState | undefined)
-  ?? (((globalThis as Record<string, unknown>)[JOBS_HOISTED_KEY] = { TEST_DIR: '' }) as JobsHoistedState);
+  ?? (((globalThis as Record<string, unknown>)[JOBS_HOISTED_KEY] = { TEST_DIR: '', META: {} }) as JobsHoistedState);
 
 vi.mock('../src/lib/state.js', () => {
   const nodePath = require('node:path') as typeof import('path');
   const gt = globalThis as Record<string, unknown>;
   if (!gt.__agents_cli_jobs_test_state__) {
-    gt.__agents_cli_jobs_test_state__ = { TEST_DIR: '' };
+    gt.__agents_cli_jobs_test_state__ = { TEST_DIR: '', META: {} };
   }
   const state = () => gt.__agents_cli_jobs_test_state__ as JobsHoistedState;
   return {
@@ -29,6 +29,12 @@ vi.mock('../src/lib/state.js', () => {
     get getUserAgentsDir() { return () => state().TEST_DIR; },
     get getCliVersionCachePath() { return () => nodePath.join(state().TEST_DIR, '.cli-version-cache.json'); },
     get ensureAgentsDir() { return () => {}; },
+    get readMeta() { return () => state().META; },
+    get updateMeta() {
+      return (mutate: (meta: Record<string, unknown>) => Record<string, unknown>) => {
+        state().META = mutate(state().META);
+      };
+    },
   };
 });
 
@@ -69,6 +75,7 @@ function makeConfig(overrides: Partial<JobConfig> = {}): JobConfig {
 
 beforeEach(() => {
   hoistedState.TEST_DIR = mkdtempSync(join(tmpdir(), 'agents-cli-jobs-'));
+  hoistedState.META = {};
   mkdirSync(join(hoistedState.TEST_DIR, 'routines'), { recursive: true });
   mkdirSync(join(hoistedState.TEST_DIR, 'runs'), { recursive: true });
 });
@@ -260,7 +267,7 @@ describe('job CRUD', () => {
     expect(job.mode).toBe('auto');
     expect(job.effort).toBe('auto');
     expect(job.timeout).toBe('10m');
-    expect(job.enabled).toBe(true);
+    expect(job.enabled).toBe(false);
   });
 
   it('preserves config and version fields', () => {

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.22.14
+
+- **`agents secrets view <bundle> --reveal` now resolves a locked keychain bundle
+  interactively at a real terminal.** The command hardcoded `agentOnly: true` on
+  both reveal call sites (`commands/secrets.ts`), so an explicit human `--reveal`
+  on a locked bundle went through the broker-only path and errored with an unlock
+  hint instead of raising the one Touch ID sheet the human just asked for. The
+  `agentOnly` flag is now `isHeadlessSecretsContext() || !isInteractiveTerminal()`
+  — under an agent (`AGENTS_RUNTIME`) or with no TTY it stays broker-only and
+  never prompts, but a deliberate `--reveal` typed at an interactive terminal
+  resolves the value with a single biometric sheet. This mirrors the existing
+  `reveal && !isInteractiveTerminal()` guard a few lines up. `export --plaintext`
+  and `exec` are untouched — they stay intentionally silent for release/CI
+  scripts. Source: `apps/cli/src/commands/secrets.ts`.
+
+- **`agents sessions optimize` — compact the FTS5 session search index.** The scanner delete+inserts a session's docs into the `tool_call_text` / `session_text` full-text indexes on every rescan, and FTS5 never merges the resulting segments on its own — so over thousands of sessions the `%_data` shadow tables bloat with hundreds of thousands of unmerged segments (observed on a real fleet box: 701 MB of index for ~69 MB of content, 196K segments) and `agents sessions` slows to a crawl / hangs. The new command runs FTS5 `'optimize'` (merge all segments, purge tombstones), non-destructively — no searchable content is lost. Reclaimed space frees as reusable pages inside the DB file (VACUUM with the daemon stopped returns it to disk); wireable to a weekly routine so the index never re-bloats. Source: `apps/cli/src/lib/session/db.ts` (`optimizeSessionSearchIndex`), `apps/cli/src/commands/sessions-optimize.ts`.
+
 ## 1.22.13
 
 - **`agents sessions` accepts direct live-state flags and remains fleet-wide by default.** `--working`, `--idle`, `--waiting`, `--orphan`/`--orphaned`, `--crashed`, `--closed`, `--abandoned`, `--queued`, and `--unknown` each imply the live scan; multiple flags form a union. `--working` is narrower than `--active`: it excludes idle, waiting, and lifecycle-failure rows. Cross-device collection was already the default and stays that way; `--local` opts out, while `--all` continues to widen historical directory and time scope. Source: `apps/cli/src/commands/sessions.ts`, `apps/cli/src/commands/sessions.test.ts`.

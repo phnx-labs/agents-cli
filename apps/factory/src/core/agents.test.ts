@@ -495,3 +495,19 @@ describe('wrapNativeAgentCommand (RUSH-2026)', () => {
     expect(wrapNativeAgentCommand('', true)).toBe('');
   });
 });
+
+describe('extension tmux removal — spawn command contract', () => {
+  test('a new spawn sends only agents run, with no tmux wrapper', () => {
+    for (const key of ['claude', 'codex', 'gemini', 'cursor', 'opencode', 'antigravity', 'grok', 'kimi', 'droid'] as const) {
+      const cmd = wrapNativeAgentCommand(
+        buildAgentLaunchCommand(key, null, undefined, undefined, undefined, 'balanced', undefined, { local: true }),
+        false,
+      );
+      expect(cmd).toMatch(/^exec agents run /);
+      expect(cmd).toContain('--interactive');
+      expect(cmd).not.toContain('tmux');
+      expect(cmd).not.toContain('agents tmux');
+      expect(cmd).not.toContain('\n');
+    }
+  });
+});

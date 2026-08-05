@@ -15,7 +15,7 @@ import type { AgentId } from './types.js';
 import { machineId } from './machine-id.js';
 import { AGENTS, agentConfigDirName, findInPath } from './agents.js';
 import { createLink } from './platform/index.js';
-import { ensureWatchdogRoutine } from './watchdog/routine.js';
+import { migrateLegacyRoutineActivation, setJobEnabled } from './routines.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 const USER_DIR = path.join(HOME, '.agents');
@@ -1852,11 +1852,11 @@ export function migrateRoutineDeviceToDevices(routinesDir?: string): void {
  */
 export function migrateWatchdogSentinelToRoutine(
   sentinelPath: string = path.join(CACHE_DIR, 'state', 'watchdog', 'enabled'),
-  ensure: (enabled: boolean) => void = ensureWatchdogRoutine,
+  enable: (name: string, enabled: boolean) => void = setJobEnabled,
 ): void {
   if (!fs.existsSync(sentinelPath)) return;
   try {
-    ensure(true);
+    enable('watchdog', true);
   } catch (err) {
     console.error(
       `watchdog sentinel migration: could not create the routine (${(err as Error).message}); leaving the sentinel for a later retry`,
@@ -1954,6 +1954,7 @@ export async function runMigration(): Promise<void> {
 
   // Rewrite routine YAML files: singular `device:` -> plural `devices: []`.
   migrateRoutineDeviceToDevices();
+  migrateLegacyRoutineActivation();
 
   // Fold the legacy watchdog enable sentinel into the watchdog routine so a user
   // who opted in under the old build stays opted in after upgrading. After the

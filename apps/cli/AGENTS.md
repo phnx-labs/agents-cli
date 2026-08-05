@@ -73,7 +73,16 @@ DAG-style, boundary contracts, `--watch` supervisor, `--worktree` isolation, opt
 `--cloud` dispatch. The old `mcp__Swarm__*` surface was folded into teams
 (`migrateLegacySwarmToTeams()` in `src/lib/migrate.ts`). Don't reach for Swarm — gone.
 
-### 7. Self-updating agents are ONE binary, not fictional version-homes
+### 7. Routine definitions and device activation are separate
+
+Routine YAML under project, user, or system `routines/` describes what runs and
+when. Whether it runs on one host is membership in that host's top-level
+`devices/<hostname>/agents.yaml` `routines:` list. Pause/resume and setup MUST
+write only the target host's device file; they MUST NOT rewrite a definition with
+`enabled`, `devices`, or runtime metadata. Run history belongs in
+`.history/runs/<routine>/<run>/`.
+
+### 8. Self-updating agents are ONE binary, not fictional version-homes
 
 Some harnesses (droid, grok, antigravity, cursor, hermes, kiro, goose) install
 via an official `curl … | sh` / `brew install` script that carries no version token —
@@ -90,7 +99,7 @@ stale dirs into the survivor, `agents view` shows the live `--version`, and
 grok is self-updating but stores a real per-version binary under each version-home, so
 it is NOT a global-binary agent and is left uncollapsed. (RUSH-1321)
 
-### 8. Diagnostic command taxonomy — `doctor` is the umbrella (RUSH-2027)
+### 9. Diagnostic command taxonomy — `doctor` is the umbrella (RUSH-2027)
 
 Three diagnostics, distinct scopes. Don't blur them — each answers a different
 question, and a new health check goes in the one whose scope it matches.

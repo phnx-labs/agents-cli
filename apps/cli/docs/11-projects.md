@@ -60,6 +60,12 @@ integrations:                   # external context, surfaced in `projects show`
     label: "design docs"
 linear:
   projectId: a1b2c3d4-…
+  name: "Rush"                  # display name (used by Factory Floor / feeds)
+dispatch:
+  enabled: true                 # opt into auto-dispatch from Linear
+  maxAgents: 3                  # cap on concurrent auto-dispatched agents
+  provider: codex               # harness for dispatched sessions (default: claude)
+  host: mac-mini                # pin dispatch to a specific fleet device
 ```
 
 | Field | Purpose |
@@ -71,7 +77,8 @@ linear:
 | `contexts[]` | `{path, purpose}` described starting points — indexed anchors for agents. |
 | `goals[]` | `{objective, measure}` the OKR-shaped outcomes a project serves — a project may have several. The objective is the "why"; `measure` is the optional key result. Milestones (pulled from Linear) are the dated checkpoints toward them. |
 | `integrations[]` | `{kind, url, label}` external context sources. |
-| `linear` | `{projectId, url}` — reuses the existing Linear path. |
+| `linear` | `{projectId, url, name}` — reuses the existing Linear path. `name` is a display label (shown in Factory Floor and the activity feed); the other two are set by `agents projects link`. |
+| `dispatch` | `{enabled, maxAgents, provider, host}` — auto-dispatch settings read by `agents __auto-dispatch` and by the Factory Floor dispatch panel. All subfields are optional. `enabled: true` opts the project into auto-dispatch; `provider` defaults to `claude`; `host` pins dispatch to a named fleet device. |
 
 ## Resolution — definition first, convention fallback
 
@@ -233,29 +240,26 @@ A local workspace probe always feeds this footer (cheap, no SSH). The full per-h
 
 | Command | Does |
 | --- | --- |
-| `agents projects list [--json]` | All projects: root, repo, live agent count. |
+| `agents projects list [--json] [--with-agents]` | All defined projects (root, repo, …). Definitions only by default — zero session scan / SSH. `--with-agents` is an explicit opt-in for **local** active counts only. |
 | `agents projects add <name>` | Scaffold `<name>.yaml`; infers `root` + origin slug from the current repo. Flags: `--root`, `--path`, `--repo`, `--context path:purpose`, `--goal objective:measure`, `--linear`. |
+| `agents projects save --json` | Create or update one project from a complete `ProjectDef` JSON object on stdin; validates against the canonical schema, writes atomically under `~/.agents/projects/`, prints the saved definition as JSON. Used by Factory (and any other machine client). |
 | `agents projects view <name>` / `show` | Alias of `status <name>`: full card, every milestone, stored definition. |
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
 | `agents projects status [name] [--json] [--window N] [--no-remote] [--device name...] [--devices a,b,c]` (aliases `view`, `show`) | Progress card for every project across the whole fleet (per-device workspace drift over SSH), or one named project. Named form also prints every milestone and the stored definition. `--device`/`--devices` scopes the fan-out to a subset. |
 | `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. |
-| `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--linear-first-factory-gated). |
-| `agents projects import --from-factory [--min-confidence low\|medium\|high] [--all]` | Absorb `~/.agents/factory/projects.json`. Imports only `high`-confidence rows by default. |
+| `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--from-linear). There is no Factory import path — `~/.agents/factory/projects.json` is never read. |
 | `agents projects set <name> [--repo\|--root\|--path\|--description\|--goal objective:measure]` | Change one field, preserving every other. `--goal` (repeatable) replaces the goals list. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
-| `agents projects rm <name>` | Delete the definition (never touches the repo). |
+| `agents projects rm <name> [--json]` | Delete the definition (never touches the repo). `--json` prints `{ ok, name, removed }` (or `{ ok: false, name, error }` on failure). |
 
 `agents run --project <name>` is unchanged in spelling — it just resolves richer
 definitions now.
 
-## Importing — Linear first, Factory gated
+## Importing — from Linear
 
-Both sources write the **same** `ProjectDef` schema through `writeProjectDef`, and
-neither invents a field. What differs is how much each source knows.
-
-**`--from-linear` is the preferred source.** A Linear project exists because someone
-deliberately created it, so the name and the link are trustworthy. Each project
-becomes a def carrying `linear.projectId` (+ `url` when the CLI reports one), and
-the `show` backlink lights up immediately.
+`--from-linear` imports the workspace's Linear projects through the `linear` CLI.
+Each project becomes a def carrying `linear.projectId` (+ `url` when the CLI reports one),
+and the `show` backlink lights up immediately. A Linear project exists because someone
+deliberately created it, so the name and the link are trustworthy.
 
 The local checkout is bound **only on an exact normalized-name match** against the
 directories under the configured projects root (`matchLocalCheckoutExact`,
@@ -271,34 +275,7 @@ Re-importing is safe. An existing def is preserved field-for-field and only
 `integrations` survives. A def that already carries `root`/`repo` is skipped unless `--force`,
 so a re-import never re-points a project you have already bound by hand.
 
-**`--from-factory` is a guess, so it is gated.** Factory's registry is
-auto-detected from checkouts on disk and stamps each row with a
-`confidence` — `high`, `medium`, `low`, or nothing at all. Importing every row is
-what buried two real projects under a dozen stale clones and someone else's repo,
-so the import takes only `high` rows by default:
-
-```
-agents projects import --from-factory                      # high only (default)
-agents projects import --from-factory --min-confidence medium
-agents projects import --from-factory --all                # every row, even unranked
-```
-
-`--all` is the only floor that takes a row stating **no** confidence — an unranked
-guess sits below `low`. An unrecognized `--min-confidence` value is an error, never
-a quiet fall back to the default. Every declined row prints its reason:
-
-```
-Imported 2 projects (3 skipped)
-  skip swarmify: confidence "medium" is below the "high" floor
-  skip inflow: confidence "low" is below the "high" floor
-  skip agents-cleaned-stale2: no confidence field is below the "high" floor
-  (widen with --min-confidence medium or --all)
-```
-
-The two sources are mutually exclusive in one invocation, and `--min-confidence` /
-`--all` are rejected on `--from-linear` (Linear rows carry no confidence) rather
-than silently ignored. Drop a bad import with `agents projects rm <name>` — it only
-unlinks the YAML, never the repo.
+Drop a bad import with `agents projects rm <name>` — it only unlinks the YAML, never the repo.
 
 ## Not yet (fast-follow)
 
@@ -312,21 +289,14 @@ unlinks the YAML, never the repo.
 
 ## The stored `repo` must match the checkout's remote
 
-A definition's `repo` is a plain string that nothing used to validate, so it could be
-confidently wrong. That is not hypothetical: Factory seeds the registry with a slug derived
-from the checkout path's last two segments (`repoSlugFromPath`,
-`apps/factory/src/core/projectIndex.ts`), so a repo cloned to
-`~/src/github.com/<you>/agents-cli` whose `origin` is `phnx-labs/agents-cli` was imported as
-`<you>/agents-cli`.
+A definition's `repo` is a plain string, so it can be confidently wrong — a repo cloned to
+`~/src/github.com/<you>/agents-cli` whose `origin` is `phnx-labs/agents-cli` might carry
+`<you>/agents-cli` when hand-authored or imported from a path-only heuristic.
 
-Both slugs resolve to real repositories, so no call failed. The card simply read the merged-PR
+Both slugs resolve to real repositories, so no call fails. The card simply reads the merged-PR
 and release counts from a **different repo** — 0 merges in 7 days instead of 100. A wrong
-number that looks right is worse than a missing one, so:
-
-- `import --from-factory` reads the checkout's real `origin` and overrides the registry slug,
-  falling back to the path guess only when there is no remote to ask.
-- `status` and `show` print the disagreement with its fix attached whenever a def's `repo`
-  differs from the remote of its `root`:
+number that looks right is worse than a missing one. `status` and `show` print the disagreement
+with its fix attached whenever a def's `repo` differs from the remote of its `root`:
 
   ```
   repos    muqsitnawaz/agents-cli

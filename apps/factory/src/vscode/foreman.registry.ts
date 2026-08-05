@@ -22,7 +22,6 @@ import { createHash } from 'crypto';
 import { computeWindowId } from '../core/foreman.windowId';
 import { isPidAlive } from '../core/liveness';
 import { resolveTabIndex, type TabView } from '../core/tabIndex';
-import { getTmuxInfo } from './tmux';
 import { resolveStartedAtMs } from '../core/processStartTime';
 
 const REGISTRY_DIR = path.join(os.homedir(), '.agents', '.cache', 'terminals');
@@ -43,8 +42,6 @@ export interface LiveTerminal {
   startedAtMs: number;
   // Richer tracking so the CLI can address + display this terminal precisely.
   // DATA CONTRACT with the CLI (src/lib/session): field names are load-bearing.
-  tmuxSession?: string;      // tmux session name when the agent runs inside tmux.
-  tmuxPane?: string;         // tmux `%N` pane id (unique addressing) when known.
   tabIndex?: number;         // 1-based editor-tab index within its group ("Codium tab N").
 }
 
@@ -113,7 +110,7 @@ function hashEntries(entries: LiveTerminal[]): string {
   // `at` timestamp is excluded — it changes every call and would make every
   // hash unique.
   const stable = entries
-    .map((e) => `${e.sessionId}|${e.pid}|${e.kind}|${e.label ?? ''}|${e.cwd ?? ''}|${e.tmuxPane ?? ''}|${e.tabIndex ?? ''}`)
+    .map((e) => `${e.sessionId}|${e.pid}|${e.kind}|${e.label ?? ''}|${e.cwd ?? ''}|${e.tabIndex ?? ''}`)
     .sort()
     .join('\n');
   return createHash('sha1').update(stable).digest('hex');
@@ -194,9 +191,6 @@ export async function snapshotOwnTerminals(): Promise<LiveTerminal[]> {
     const pid = await t.processId;
     if (!pid) continue;
     const kind = tid ? kindFromTerminalId(tid) : kindFromName(t.name);
-    // tmux coordinates (session + %pane) when this terminal was spawned inside
-    // tmux; undefined for the native path. Best-effort pane read off the socket.
-    const tmux = await getTmuxInfo(t);
     // Editor-tab position, matched by the terminal's name against its tab label.
     const tabIndex = resolveTabIndex(tabGroups, t.name);
     out.push({
@@ -206,8 +200,6 @@ export async function snapshotOwnTerminals(): Promise<LiveTerminal[]> {
       label: deriveLabel(t.name),
       cwd: env?.AGENT_WORKSPACE_DIR ?? null,
       startedAtMs: await resolveStartedAtMs(pid),
-      tmuxSession: tmux?.session,
-      tmuxPane: tmux?.pane,
       tabIndex,
     });
   }

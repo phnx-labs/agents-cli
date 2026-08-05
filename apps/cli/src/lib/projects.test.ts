@@ -68,6 +68,40 @@ describe('validateProjectDef', () => {
     expect(def.linear).toEqual({ projectId: 'abc', url: 'https://linear' });
   });
 
+  it('parses linear.name alongside existing linear fields', () => {
+    const def = validateProjectDef({
+      name: 'rush',
+      linear: { projectId: 'lin_1', url: 'https://linear.app/x', name: 'Rush' },
+    });
+    expect(def.linear).toEqual({ projectId: 'lin_1', url: 'https://linear.app/x', name: 'Rush' });
+  });
+
+  it('parses dispatch block with all optional subfields', () => {
+    const def = validateProjectDef({
+      name: 'rush',
+      dispatch: { enabled: true, maxAgents: 3, provider: 'codex', host: 'mac-mini' },
+    });
+    expect(def.dispatch).toEqual({ enabled: true, maxAgents: 3, provider: 'codex', host: 'mac-mini' });
+  });
+
+  it('accepts a partial dispatch block', () => {
+    const def = validateProjectDef({ name: 'rush', dispatch: { enabled: false } });
+    expect(def.dispatch).toEqual({ enabled: false });
+    expect(def.dispatch?.maxAgents).toBeUndefined();
+  });
+
+  it('ignores a non-finite or non-number maxAgents', () => {
+    const def1 = validateProjectDef({ name: 'rush', dispatch: { maxAgents: 'five' } });
+    expect(def1.dispatch?.maxAgents).toBeUndefined();
+    const def2 = validateProjectDef({ name: 'rush', dispatch: { maxAgents: Infinity } });
+    expect(def2.dispatch?.maxAgents).toBeUndefined();
+  });
+
+  it('omits dispatch entirely when the field is absent', () => {
+    const def = validateProjectDef({ name: 'rush' });
+    expect(def.dispatch).toBeUndefined();
+  });
+
   it('accepts repos[].path (string) and drops an entry whose path is malformed', () => {
     const def = validateProjectDef({
       name: 'rush',

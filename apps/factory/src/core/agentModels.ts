@@ -101,7 +101,12 @@ export async function resolveAlias(agent: string, alias: string): Promise<string
   const direct = catalog.aliases?.[alias];
   if (direct) return direct;
   const byMarker = catalog.models.find((m) => m.alias === alias);
-  return byMarker?.id ?? null;
+  if (byMarker) return byMarker.id;
+  // Fallback: some catalogs no longer publish explicit aliases but still use
+  // family names (e.g. "opus", "haiku") in model ids.
+  const lowerAlias = alias.toLowerCase();
+  const byId = catalog.models.find((m) => m.id.toLowerCase().includes(lowerAlias));
+  return byId?.id ?? null;
 }
 
 export function clearAgentModelsCache(): void {

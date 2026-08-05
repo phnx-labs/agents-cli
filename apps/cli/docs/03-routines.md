@@ -401,7 +401,47 @@ Then point Linear/GitHub at `https://mac-mini.<tailnet>.ts.net/hooks/<source>`.
 The handler's `devices: [mac-mini]` pin ensures only that machine dispatches the
 one-off agent run.
 
-### Device Allowlist
+### Device activation
+
+Routine YAML files are immutable definitions: they describe what runs and when.
+Enablement is device-owned metadata in
+`~/.agents/devices/<hostname>/agents.yaml`:
+
+```yaml
+routines:
+  - check-updates
+  - drain
+  - watchdog
+```
+
+Membership means enabled; absence means disabled. Each host writes only its own
+file, so toggles on different devices do not conflict when the DotAgents repo
+syncs. The same definition can be active on several devices; each daemon runs it
+against that device's local state.
+
+```bash
+agents routines resume drain
+agents routines resume drain --host yosemite-s0
+agents routines pause drain --host mac-mini
+agents routines devices drain --set yosemite-s0,mac-mini
+agents routines devices drain --clear   # disable everywhere
+```
+
+`agents routines devices` reads the synced manifests and executes each mutation
+on its target host. `routines list --json` exposes `enabledDevices` and
+`runsHere`. Run history remains under
+`~/.agents/.history/runs/<routine>/<run>/`; definitions are never rewritten with
+activation or last-run metadata.
+
+On upgrade, explicit legacy `enabled:` and `devices:` values are materialized
+once into the current host's routine membership. Subsequent toggles edit only the
+device manifest.
+
+### Legacy device allowlists
+
+> Historical format only. `enabled:` and `devices:` in definition YAML are read
+> during migration but are no longer written or used after a host has a
+> `routines:` manifest. Use the device-activation commands above.
 
 `~/.agents/routines/` rides the user repo, so every routine syncs to every machine —
 and without a restriction, an enabled routine fires on **every** device running the

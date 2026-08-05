@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import * as os from 'os';
-import * as path from 'path';
 import {
-  buildFactoryImportCandidates,
   buildLinearImportCandidates,
   slugifyProjectName,
   validateImportOpts,
@@ -11,116 +8,12 @@ import {
 import { matchLocalCheckoutExact } from './linear-projects.js';
 import type { ProjectDef } from './projects.js';
 
-const HOME = process.env.HOME ?? os.homedir();
-
-/** The real registry's shape — the rows that buried the user's actual projects. */
-const FACTORY_ROWS = [
-  { name: 'agents-cli', path: path.join(HOME, 'src/agents-cli'), repoSlug: 'muqsitnawaz/agents-cli', confidence: 'high' },
-  { name: 'agents', path: path.join(HOME, 'src/agents'), repoSlug: 'muqsitnawaz/agents', confidence: 'high' },
-  { name: 'swarmify', path: path.join(HOME, 'src/swarmify'), repoSlug: 'muqsitnawaz/swarmify', confidence: 'medium' },
-  { name: 'inflow', path: path.join(HOME, 'src/inflow'), repoSlug: 'grinich/inflow', confidence: 'low' },
-  { name: 'agents-cleaned-stale2', path: path.join(HOME, 'src/agents-cleaned-stale2'), confidence: 'low' },
-  { name: 'nameless-confidence', path: path.join(HOME, 'src/x') },
-];
-
 const names = (r: { defs: ProjectDef[] }) => r.defs.map((d) => d.name);
 
 describe('validateImportOpts', () => {
-  it('requires exactly one source', () => {
+  it('requires --from-linear', () => {
     expect(() => validateImportOpts({})).toThrow(/Pick an import source/);
-    expect(() => validateImportOpts({ fromFactory: true, fromLinear: true })).toThrow(/mutually exclusive/);
     expect(validateImportOpts({ fromLinear: true }).source).toBe('linear');
-  });
-
-  it('defaults the factory floor to high and lowers it with --all', () => {
-    expect(validateImportOpts({ fromFactory: true }).minConfidence).toBe('high');
-    expect(validateImportOpts({ fromFactory: true, all: true }).minConfidence).toBe('any');
-    expect(validateImportOpts({ fromFactory: true, minConfidence: 'MEDIUM' }).minConfidence).toBe('medium');
-  });
-
-  it('errors loudly on an unknown confidence instead of falling back', () => {
-    expect(() => validateImportOpts({ fromFactory: true, minConfidence: 'kinda' })).toThrow(/Invalid --min-confidence/);
-  });
-
-  it('rejects confidence flags that do not apply, and contradictory ones', () => {
-    expect(() => validateImportOpts({ fromLinear: true, all: true })).toThrow(/--from-factory only/);
-    expect(() => validateImportOpts({ fromLinear: true, minConfidence: 'low' })).toThrow(/--from-factory only/);
-    expect(() => validateImportOpts({ fromFactory: true, all: true, minConfidence: 'high' })).toThrow(/mutually exclusive/);
-  });
-});
-
-describe('buildFactoryImportCandidates', () => {
-  it('imports only high-confidence rows by default', () => {
-    const r = buildFactoryImportCandidates(FACTORY_ROWS, new Map(), { minConfidence: 'high', force: false });
-    expect(names(r)).toEqual(['agents-cli', 'agents']);
-    expect(r.skipped.map((s) => s.name)).toEqual(['swarmify', 'inflow', 'agents-cleaned-stale2', 'nameless-confidence']);
-    expect(r.skipped[0].reason).toBe('confidence "medium" is below the "high" floor');
-  });
-
-  it('widens to medium, and to everything under --all', () => {
-    const med = buildFactoryImportCandidates(FACTORY_ROWS, new Map(), { minConfidence: 'medium', force: false });
-    expect(names(med)).toEqual(['agents-cli', 'agents', 'swarmify']);
-    const low = buildFactoryImportCandidates(FACTORY_ROWS, new Map(), { minConfidence: 'low', force: false });
-    expect(names(low)).toEqual(['agents-cli', 'agents', 'swarmify', 'inflow', 'agents-cleaned-stale2']);
-    const all = buildFactoryImportCandidates(FACTORY_ROWS, new Map(), { minConfidence: 'any', force: false });
-    expect(names(all)).toEqual(['agents-cli', 'agents', 'swarmify', 'inflow', 'agents-cleaned-stale2', 'nameless-confidence']);
-  });
-
-  it('treats a missing confidence field as below every stated floor — only --all takes it', () => {
-    const r = buildFactoryImportCandidates(FACTORY_ROWS, new Map(), { minConfidence: 'any', force: false });
-    expect(names(r)).toContain('nameless-confidence');
-    const low = buildFactoryImportCandidates(FACTORY_ROWS, new Map(), { minConfidence: 'low', force: false });
-    expect(names(low)).not.toContain('nameless-confidence');
-    const strict = buildFactoryImportCandidates(FACTORY_ROWS, new Map(), { minConfidence: 'medium', force: false });
-    expect(strict.skipped.find((s) => s.name === 'nameless-confidence')?.reason)
-      .toBe('no confidence field is below the "medium" floor');
-  });
-
-  it('stores the root home-relative and maps repo + linear id', () => {
-    const r = buildFactoryImportCandidates(
-      [{ name: 'rush', path: path.join(HOME, 'src/rush'), repoSlug: 'phnx-labs/rush', linearProjectId: 'lin_1', confidence: 'high' }],
-      new Map(),
-      { minConfidence: 'high', force: false },
-    );
-    expect(r.defs[0]).toEqual({ name: 'rush', root: '~/src/rush', repo: 'phnx-labs/rush', linear: { projectId: 'lin_1' } });
-  });
-
-  it('keeps an existing def unless --force', () => {
-    const existing = new Map<string, ProjectDef>([['agents-cli', { name: 'agents-cli', description: 'mine' }]]);
-    const keep = buildFactoryImportCandidates(FACTORY_ROWS, existing, { minConfidence: 'high', force: false });
-    expect(names(keep)).toEqual(['agents']);
-    expect(keep.skipped[0]).toEqual({ name: 'agents-cli', reason: 'already defined — pass --force to overwrite' });
-    const forced = buildFactoryImportCandidates(FACTORY_ROWS, existing, { minConfidence: 'high', force: true });
-    expect(names(forced)).toEqual(['agents-cli', 'agents']);
-  });
-
-  it('skips a duplicate name in the same registry instead of silently clobbering the first', () => {
-    // The registry keys by owner/repo but names by basename, so two orgs with
-    // the same repo name arrive as two rows called `inflow`.
-    const r = buildFactoryImportCandidates(
-      [
-        { name: 'inflow', path: '/tmp/a/inflow', repoSlug: 'grinich/inflow', confidence: 'high' },
-        { name: 'inflow', path: '/tmp/b/inflow', repoSlug: 'me/inflow', confidence: 'high' },
-      ],
-      new Map(),
-      { minConfidence: 'high', force: false },
-    );
-    expect(r.defs).toHaveLength(1);
-    expect(r.defs[0].repo).toBe('grinich/inflow');
-    expect(r.skipped).toEqual([{ name: 'inflow', reason: 'another row in this registry already claimed the name' }]);
-  });
-
-  it('skips rows with an unusable name rather than writing a bad filename', () => {
-    const r = buildFactoryImportCandidates(
-      [{ name: '../escape', confidence: 'high' }, { confidence: 'high' }],
-      new Map(),
-      { minConfidence: 'high', force: false },
-    );
-    expect(r.defs).toEqual([]);
-    expect(r.skipped).toEqual([
-      { name: '../escape', reason: 'not a usable project name' },
-      { name: '(unnamed)', reason: 'not a usable project name' },
-    ]);
   });
 });
 
@@ -197,9 +90,6 @@ describe('buildLinearImportCandidates', () => {
   });
 
   it('does NOT bind a slashed display name to the checkout after the slash', () => {
-    // Regression: "Rush / Web" once bound `~/src/web` because the match key
-    // kept only the last path segment. The def name and the match key must be
-    // derived from the same reading of the string.
     const r = buildLinearImportCandidates(
       [{ id: 'lin_rw', name: 'Rush / Web' }],
       new Map(),
@@ -253,31 +143,5 @@ describe('buildLinearImportCandidates', () => {
     const r = buildLinearImportCandidates([{ id: 'a', name: '!!!' }], new Map(), noLocal, { force: false });
     expect(r.defs).toEqual([]);
     expect(r.skipped[0].reason).toMatch(/no usable project name/);
-  });
-});
-
-describe('buildFactoryImportCandidates — the remote wins over the path guess', () => {
-  const row = { name: 'agents-cli', path: '/tmp/src/github.com/muqsitnawaz/agents-cli', repoSlug: 'muqsitnawaz/agents-cli', confidence: 'high' };
-
-  it('overrides the registry slug with the checkout real origin', () => {
-    // Factory derives repoSlug from the path's last two segments, so a checkout
-    // under ~/src/github.com/<you>/ reads as <you>/repo even when origin is an
-    // org. Both are real repos, so the wrong one silently reports a stranger's
-    // merge counts rather than failing.
-    const r = buildFactoryImportCandidates([row], new Map(), { minConfidence: 'high', force: false },
-      () => 'phnx-labs/agents-cli');
-    expect(r.defs[0].repo).toBe('phnx-labs/agents-cli');
-  });
-
-  it('falls back to the registry slug when there is no remote to ask', () => {
-    const r = buildFactoryImportCandidates([row], new Map(), { minConfidence: 'high', force: false },
-      () => undefined);
-    expect(r.defs[0].repo).toBe('muqsitnawaz/agents-cli');
-  });
-
-  it('leaves repo unset when neither the remote nor the registry offers one', () => {
-    const bare = { name: 'x', path: '/tmp/x', confidence: 'high' };
-    const r = buildFactoryImportCandidates([bare], new Map(), { minConfidence: 'high', force: false }, () => undefined);
-    expect(r.defs[0]).toEqual({ name: 'x', root: '/tmp/x' });
   });
 });

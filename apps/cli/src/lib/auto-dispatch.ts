@@ -8,17 +8,16 @@
  *
  * The dispatch goes through the same provider layer as `agents cloud run`, so Rush
  * (Prix) is just one provider among rush/codex/factory — NOT a hidden requirement.
- * A project may pin its provider via `provider` in ~/.agents/factory/projects.json.
+ * A project pins its provider via `dispatch.provider` in its
+ * ~/.agents/projects/<name>.yaml definition.
  *
- * OPT-IN: a project auto-dispatches ONLY when `autoDispatch: true` AND `maxAgents > 0`.
- * Nothing global is on by default.
+ * OPT-IN: a project auto-dispatches ONLY when `dispatch.enabled: true` AND
+ * `dispatch.maxAgents > 0` AND it has a `linear.projectId`. Nothing is on by default.
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
-import { homedir } from 'os';
+import { listProjectDefs } from './projects.js';
 
-/** The subset of a managed project this module needs (mirror of the shared JSON). */
+/** The subset of a project definition this module needs. */
 export interface AutoDispatchProject {
   id: string;
   name: string;
@@ -52,41 +51,23 @@ export interface PlannedDispatch {
 }
 
 /**
- * Path to the shared factory project registry (written by the factory UI).
- * `AGENTS_FACTORY_PROJECTS_PATH` overrides it, mirroring `AGENTS_PROJECTS_DIR`
- * (`state.ts`) — that seam is what lets `projects import --from-factory` be
- * tested end-to-end against a real fixture file instead of a mock.
+ * Read auto-dispatch candidates from canonical project YAML definitions
+ * (~/.agents/projects/<name>.yaml). Only projects with `dispatch.enabled: true`
+ * are returned; the caller's `isEligible` gate then checks the cap and Linear id.
  */
-export function factoryProjectsPath(): string {
-  return process.env.AGENTS_FACTORY_PROJECTS_PATH ?? path.join(homedir(), '.agents', 'factory', 'projects.json');
-}
-
-/** Read the project registry rows this module cares about. */
 export function readAutoDispatchProjects(): AutoDispatchProject[] {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(fs.readFileSync(factoryProjectsPath(), 'utf-8'));
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(raw)) return [];
-  const out: AutoDispatchProject[] = [];
-  for (const r of raw) {
-    if (!r || typeof r !== 'object') continue;
-    const o = r as Record<string, unknown>;
-    if (typeof o.id !== 'string' || typeof o.name !== 'string') continue;
-    out.push({
-      id: o.id,
-      name: o.name,
-      linearProjectId: typeof o.linearProjectId === 'string' ? o.linearProjectId : undefined,
-      repoSlug: typeof o.repoSlug === 'string' ? o.repoSlug : undefined,
-      autoDispatch: o.autoDispatch === true,
-      maxAgents: typeof o.maxAgents === 'number' ? o.maxAgents : undefined,
-      provider: typeof o.provider === 'string' ? o.provider : undefined,
-      host: typeof o.host === 'string' ? o.host : undefined,
-    });
-  }
-  return out;
+  return listProjectDefs()
+    .filter((d) => d.dispatch?.enabled === true)
+    .map((d): AutoDispatchProject => ({
+      id: d.name,
+      name: d.name,
+      linearProjectId: d.linear?.projectId,
+      repoSlug: d.repo ?? d.repos?.[0]?.slug,
+      autoDispatch: d.dispatch?.enabled ?? false,
+      maxAgents: d.dispatch?.maxAgents,
+      provider: d.dispatch?.provider,
+      host: d.dispatch?.host,
+    }));
 }
 
 /** A project is eligible only when it has explicitly opted in with a positive cap. */

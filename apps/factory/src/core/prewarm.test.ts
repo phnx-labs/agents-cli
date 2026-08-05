@@ -234,99 +234,93 @@ describe('selectBestSession', () => {
 });
 
 describe('buildResumeCommand', () => {
-  test('builds Claude resume command', () => {
-    const session: PrewarmedSession = {
-      agentType: 'claude',
-      sessionId: 'abc123',
-      createdAt: Date.now(),
-      workingDirectory: '/test',
-    };
-    expect(buildResumeCommand(session)).toBe('claude -r abc123');
-  });
-
-  test('builds Codex resume command', () => {
-    const session: PrewarmedSession = {
-      agentType: 'codex',
-      sessionId: 'def456',
-      createdAt: Date.now(),
-      workingDirectory: '/test',
-    };
-    expect(buildResumeCommand(session)).toBe('codex resume def456');
-  });
-
-  test('builds Gemini resume command', () => {
-    const session: PrewarmedSession = {
-      agentType: 'gemini',
-      sessionId: 'ghi789',
-      createdAt: Date.now(),
-      workingDirectory: '/test',
-    };
-    expect(buildResumeCommand(session)).toBe('gemini --resume ghi789');
-  });
-
-  test('builds Cursor resume command', () => {
-    const session: PrewarmedSession = {
-      agentType: 'cursor',
-      sessionId: '874384ec-7236-4887-aa1c-f627754ce0c0',
-      createdAt: Date.now(),
-      workingDirectory: '/test',
-    };
-    expect(buildResumeCommand(session)).toBe('cursor-agent --resume=874384ec-7236-4887-aa1c-f627754ce0c0');
+  test('every prewarm agent resumes through agents run', () => {
+    const cases: PrewarmedSession['agentType'][] = ['claude', 'codex', 'gemini', 'cursor', 'opencode'];
+    for (const agentType of cases) {
+      const session: PrewarmedSession = {
+        agentType,
+        sessionId: 'abc123',
+        createdAt: Date.now(),
+        workingDirectory: '/test',
+      };
+      const cmd = buildResumeCommand(session);
+      expect(cmd).toBe(`agents run ${agentType} --interactive --resume abc123`);
+      expect(cmd).not.toMatch(/\b(claude -r|codex resume|gemini --resume|cursor-agent --resume|opencode -s)\b/);
+    }
   });
 });
 
 describe('buildVersionedResumeCommand', () => {
-  test('pins Claude resume to the requested version', () => {
-    expect(buildVersionedResumeCommand('claude', 'abc123', '2.1.113')).toBe('claude@2.1.113 -r abc123');
+  const FLEET_AGENTS = ['claude', 'codex', 'gemini', 'cursor', 'opencode', 'grok', 'kimi', 'droid', 'antigravity'];
+
+  test('every fleet agent resumes through `agents run --interactive --resume`', () => {
+    for (const agent of FLEET_AGENTS) {
+      expect(buildVersionedResumeCommand(agent, 'abc123')).toBe(
+        `agents run ${agent} --interactive --resume abc123`,
+      );
+    }
   });
 
-  test('leaves Claude unpinned when version is missing', () => {
-    expect(buildVersionedResumeCommand('claude', 'abc123')).toBe('claude -r abc123');
+  test('every fleet agent carries `--host` when offloaded', () => {
+    for (const agent of FLEET_AGENTS) {
+      expect(buildVersionedResumeCommand(agent, 'abc123', undefined, 'yosemite-s1')).toBe(
+        `agents run ${agent} --interactive --host 'yosemite-s1' --resume abc123`,
+      );
+    }
   });
 
-  test('pins non-Claude resume commands too', () => {
-    expect(buildVersionedResumeCommand('codex', 'def456', '0.124.0')).toBe('codex@0.124.0 resume def456');
-    expect(buildVersionedResumeCommand('cursor', 'ghi789', '1.2.3')).toBe('cursor-agent@1.2.3 --resume=ghi789');
+  test('no raw harness-binary resume command is ever emitted', () => {
+    const rawPatterns = [
+      /^claude(@[^ ]+)? -r /,
+      /^codex(@[^ ]+)? resume /,
+      /^gemini(@[^ ]+)? --resume /,
+      /^cursor-agent(@[^ ]+)? --resume=/,
+      /^opencode(@[^ ]+)? -s /,
+    ];
+    for (const agent of FLEET_AGENTS) {
+      const localCmd = buildVersionedResumeCommand(agent, 'abc123');
+      const hostCmd = buildVersionedResumeCommand(agent, 'abc123', undefined, 'zion');
+      const versionCmd = buildVersionedResumeCommand(agent, 'abc123', '1.2.3');
+      for (const cmd of [localCmd, hostCmd, versionCmd]) {
+        for (const pattern of rawPatterns) {
+          expect(cmd).not.toMatch(pattern);
+        }
+        expect(cmd).toMatch(/^agents run /);
+        expect(cmd).toMatch(/--resume abc123$/);
+      }
+    }
   });
 
-  test('routes an offloaded session back to its own host instead of resuming locally', () => {
-    // The transcript lives on the device; `claude -r <id>` here would start a
-    // fresh LOCAL agent against an id this machine has never seen.
-    expect(buildVersionedResumeCommand('claude', 'abc123', undefined, 'yosemite-s1')).toBe(
-      "agents run claude --interactive --host 'yosemite-s1' --resume abc123",
-    );
-  });
-
-  test('keeps the version pin on a host-routed resume', () => {
-    expect(buildVersionedResumeCommand('claude', 'abc123', '2.1.113', 'yosemite-s0')).toBe(
-      "agents run claude@2.1.113 --interactive --host 'yosemite-s0' --resume abc123",
-    );
-  });
-
-  test('host-routes every prewarmable agent, not just Claude', () => {
-    expect(buildVersionedResumeCommand('codex', 'def456', undefined, 'zion')).toBe(
-      "agents run codex --interactive --host 'zion' --resume def456",
-    );
-    expect(buildVersionedResumeCommand('gemini', 'ghi789', undefined, 'zion')).toBe(
-      "agents run gemini --interactive --host 'zion' --resume ghi789",
-    );
-  });
-
-  test('resumes a harness with no prewarm config through `agents run`', () => {
-    // grok / kimi / droid / antigravity have transcripts but no native resume
-    // one-liner in PREWARM_CONFIGS; `agents run --resume` is their path.
-    expect(buildVersionedResumeCommand('grok', 'abc123')).toBe('agents run grok --interactive --resume abc123');
-    expect(buildVersionedResumeCommand('kimi', 'abc123', '1.4.0')).toBe(
-      'agents run kimi@1.4.0 --interactive --resume abc123',
-    );
-    expect(buildVersionedResumeCommand('droid', 'abc123', undefined, 'mac-mini')).toBe(
-      "agents run droid --interactive --host 'mac-mini' --resume abc123",
+  test('version argument is ignored (CLI resolves originating version)', () => {
+    // `agents run --resume` resumes under the version that started the session;
+    // the command must not pin an explicit @version (exec.ts:1734).
+    expect(buildVersionedResumeCommand('claude', 'abc123', '2.1.113')).toBe(
+      'agents run claude --interactive --resume abc123',
     );
   });
 
   test('quotes a device name so it cannot break out of the command', () => {
     expect(buildVersionedResumeCommand('claude', 'abc123', undefined, "a'; rm -rf /; #")).toBe(
       `agents run claude --interactive --host 'a'\\''; rm -rf /; #' --resume abc123`,
+    );
+  });
+
+  test('resume launches with the original session id and zero tmux wrapper', () => {
+    const sessionId = '7b1cf038-8761-4e46-af43-5336e7e5a776';
+    const cmd = buildVersionedResumeCommand('claude', sessionId);
+    expect(cmd).toBe(`agents run claude --interactive --resume ${sessionId}`);
+    expect(cmd).not.toContain('tmux');
+    expect(cmd).not.toContain('agents tmux');
+    expect(cmd).not.toContain('\n');
+  });
+
+  test('persisted remote session restores with `--host` present', () => {
+    // This is the restore path that failed: a remote session was resumed as
+    // `claude@2.1.187 -r <id>` because its host did not survive the window
+    // restart. buildVersionedResumeCommand must include --host when one is
+    // passed (rehydrated from sessions.persist.ts in scanExisting).
+    expect(buildVersionedResumeCommand('claude', '8a7b8d22-c741-4a51-91e7-2112948547dd', undefined, 'yosemite-s1')).toBe(
+      "agents run claude --interactive --host 'yosemite-s1' --resume 8a7b8d22-c741-4a51-91e7-2112948547dd",
     );
   });
 });
@@ -383,6 +377,5 @@ describe('PREWARM_CONFIGS', () => {
   test('cursor config has correct settings', () => {
     expect(PREWARM_CONFIGS.cursor.command).toBe('cursor-agent');
     expect(PREWARM_CONFIGS.cursor.exitSequence).toEqual(['\x03', '\x03']);
-    expect(PREWARM_CONFIGS.cursor.resumeCommand('abc123')).toBe('cursor-agent --resume=abc123');
   });
 });

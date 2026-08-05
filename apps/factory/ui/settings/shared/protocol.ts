@@ -23,11 +23,14 @@ export type FloorInbound =
   | { type: 'detectTaskSources' }
   | { type: 'getFloorThroughput' }
   /**
-   * Fleet host sessions. `force: true` runs one bare fleet refresh (PR #2031).
-   * Omit force (or false) for last-good / cache-only. Manual freshness chip must
-   * pass force:true; the panelVisible one-shot seed must omit it.
+   * Fleet host sessions. `force: true` runs one bare `agents sessions --active
+   * --json`. Omit force (or false) to receive last-good immediately without a
+   * fleet CLI call once a snapshot exists. The manual freshness chip passes
+   * force:true; the panel-visible one-shot seed omits it.
    */
   | { type: 'fetchHostSessions'; force?: boolean }
+  /** Local sessions only. `force` bypasses the 60s local-only backstop. */
+  | { type: 'fetchLocalSessions'; force?: boolean }
   | { type: 'fetchHostSessionDetail'; host: string; sessionId: string }
   | { type: 'fetchDispatchData' }
   | { type: 'dismissTask'; taskId: string }
@@ -54,7 +57,23 @@ export type FloorOutbound =
   | { type: 'taskSourcesData'; sources: { linear: boolean; github: boolean } }
   | { type: 'floorThroughputData'; tokensPerSec: number }
   | { type: 'cloudSummaryUpdate'; executionId: string; summary: string; status: string }
-  | { type: 'hostSessions'; hosts: unknown; sessions: unknown; groups: unknown; fetchedAt: unknown }
+  | {
+      type: 'hostSessions'
+      hosts: unknown
+      sessions: unknown
+      groups: unknown
+      fetchedAt: unknown
+      /** Per-host last successful fetch epoch ms (optional freshness). */
+      hostFreshness?: Record<string, number>
+      /** True when served from last-good without a fresh fleet CLI call. */
+      fromCache?: boolean
+    }
+  | {
+      type: 'localSessions'
+      sessions: unknown
+      fetchedAt: unknown
+      fromCache?: boolean
+    }
   | { type: 'hostSessionDetail'; host: string; sessionId: string; markdown?: string; error?: string }
   | { type: 'dispatchData'; agents: unknown[]; hosts: unknown[]; targets: unknown[] }
   | { type: 'updateRunningCounts'; counts: unknown }

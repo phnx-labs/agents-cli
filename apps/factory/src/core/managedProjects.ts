@@ -1,22 +1,25 @@
-// The curated project store.
+// Curated project store — Factory is a thin shell over `agents projects`.
 //
-// Both the floor sidebar and the dispatch dropdown read this ONE list instead of
-// deriving "projects" from whichever agents happen to be running. Detection only
-// SEEDS it (first run); after that the user curates. Persisted as readable JSON at
-// ~/.agents/factory/projects.json (own file, not folded into config.json — so it
-// can be hand-edited/synced without the config sanitizer dropping unknown keys).
+// Reads, saves, and deletes go ONLY through the CLI:
+//   agents projects list --json
+//   agents projects save --json   (one complete ProjectDef on stdin)
+//   agents projects rm <name> --json
+//
+// Never read or write ~/.agents/projects/*.yaml directly. Never read or migrate
+// ~/.agents/factory/projects.json — that legacy registry stays unread and
+// untouched. Errors propagate so the VS Code host can show them inline.
 
-import * as fs from 'fs';
-import * as path from 'path';
 import { homedir } from 'os';
-import { inferProjectCandidates, repoSlugFromPath, type ProjectCandidate } from './projectIndex';
+import * as path from 'path';
+import { spawn } from 'child_process';
+import { resolveAgentsBin, bootstrapPath, runAgents, AgentsBinNotFoundError } from './agentsBin';
 
 /**
  * A curated project. The webview mirrors this shape field-for-field in
  * ui/settings/components/mission-control/floorModel.ts — keep them in sync.
  */
 export interface ManagedProject {
-  id: string;                                 // stable local id
+  id: string;                                 // stable local id (= the project YAML slug)
   name: string;                               // label in sidebar + dispatch
   path: string;                               // absolute local folder
   repoSlug?: string;                          // "owner/repo"
@@ -28,111 +31,215 @@ export interface ManagedProject {
   source: 'detected' | 'manual';
 }
 
-/** How many detected candidates to seed on first run. */
-const SEED_LIMIT = 12;
-
-export function managedProjectsFilePath(): string {
-  return path.join(homedir(), '.agents', 'factory', 'projects.json');
+/** Mirror of cli/src/lib/projects.ts isSafeProjectName — no path separators or dot-escapes. */
+function isSafeId(id: string): boolean {
+  return (
+    typeof id === 'string' &&
+    id.length > 0 &&
+    id.length <= 64 &&
+    /^[a-z0-9][a-z0-9._-]*$/i.test(id) &&
+    id !== '.' &&
+    id !== '..'
+  );
 }
 
-/** Basename of a path, with any trailing slash ignored. */
+/** Basename of a path, with any trailing slash ignored. Used by settings.vscode.ts. */
 export function projectNameFromPath(p: string): string {
   const parts = p.split('/').filter(Boolean);
   return parts[parts.length - 1] ?? p;
 }
 
-/** Bucket a detection frequency into a confidence band. */
-export function bucketConfidence(freq: number): ManagedProject['confidence'] {
-  if (freq >= 10) return 'high';
-  if (freq >= 3) return 'medium';
-  return 'low';
-}
-
-/** Map a detected candidate to a seeded managed project (pure — unit-tested). */
-export function candidateToManaged(c: ProjectCandidate): ManagedProject {
-  const repoSlug = c.repo ?? repoSlugFromPath(c.path);
-  const name = projectNameFromPath(c.path);
+/** Map a ProjectDef JSON shape (from `agents projects list --json`) to a ManagedProject. */
+export function defToManaged(def: Record<string, unknown>): ManagedProject {
+  const name = typeof def.name === 'string' ? def.name : '';
+  const rootRaw =
+    typeof def.root === 'string' ? def.root : typeof def.defaultPath === 'string' ? def.defaultPath : '';
+  const expandedPath = rootRaw.startsWith('~/')
+    ? path.join(homedir(), rootRaw.slice(2))
+    : rootRaw;
+  const linear =
+    def.linear && typeof def.linear === 'object' && !Array.isArray(def.linear)
+      ? (def.linear as Record<string, unknown>)
+      : undefined;
+  const dispatch =
+    def.dispatch && typeof def.dispatch === 'object' && !Array.isArray(def.dispatch)
+      ? (def.dispatch as Record<string, unknown>)
+      : undefined;
+  const repos = Array.isArray(def.repos) ? (def.repos as Array<Record<string, unknown>>) : [];
+  const repoSlug =
+    typeof def.repo === 'string'
+      ? def.repo
+      : typeof repos[0]?.slug === 'string'
+        ? repos[0].slug
+        : undefined;
   return {
-    id: repoSlug ?? c.path,
+    id: name,
     name,
-    path: c.path,
+    path: expandedPath,
     repoSlug,
-    confidence: bucketConfidence(c.freq),
-    source: 'detected',
+    linearProjectId: typeof linear?.projectId === 'string' ? linear.projectId : undefined,
+    linearProjectName: typeof linear?.name === 'string' ? linear.name : undefined,
+    autoDispatch: dispatch?.enabled === true,
+    maxAgents: typeof dispatch?.maxAgents === 'number' ? dispatch.maxAgents : undefined,
+    confidence: 'high',
+    source: 'manual',
   };
 }
 
-/** Coerce arbitrary JSON into a valid ManagedProject[] (drops malformed rows). */
-export function sanitizeManagedProjects(raw: unknown): ManagedProject[] {
-  if (!Array.isArray(raw)) return [];
-  const out: ManagedProject[] = [];
-  for (const r of raw) {
-    if (!r || typeof r !== 'object') continue;
-    const o = r as Record<string, unknown>;
-    if (typeof o.id !== 'string' || typeof o.name !== 'string' || typeof o.path !== 'string') continue;
-    const confidence = o.confidence === 'high' || o.confidence === 'medium' || o.confidence === 'low' ? o.confidence : 'low';
-    const source = o.source === 'manual' ? 'manual' : 'detected';
-    out.push({
-      id: o.id,
-      name: o.name,
-      path: o.path,
-      repoSlug: typeof o.repoSlug === 'string' ? o.repoSlug : undefined,
-      linearProjectId: typeof o.linearProjectId === 'string' ? o.linearProjectId : undefined,
-      linearProjectName: typeof o.linearProjectName === 'string' ? o.linearProjectName : undefined,
-      autoDispatch: o.autoDispatch === true,
-      maxAgents: typeof o.maxAgents === 'number' ? o.maxAgents : undefined,
-      confidence,
-      source,
+/**
+ * Build a complete ProjectDef JSON object for `agents projects save --json`.
+ * Merges Factory-managed fields onto any prior definition so unmanaged fields
+ * (goals, contexts, integrations, docs, …) survive an edit from the Floor.
+ */
+export function managedToProjectDef(
+  project: ManagedProject,
+  prior?: Record<string, unknown>,
+): Record<string, unknown> {
+  const def: Record<string, unknown> = prior ? { ...prior } : {};
+  def.name = project.id;
+
+  const h = homedir();
+  const homeRelPath =
+    project.path && project.path.startsWith(h + '/')
+      ? `~/${project.path.slice(h.length + 1)}`
+      : project.path;
+  if (homeRelPath) def.root = homeRelPath;
+  else delete def.root;
+
+  if (project.repoSlug) def.repo = project.repoSlug;
+  else delete def.repo;
+
+  const prevLinear =
+    def.linear && typeof def.linear === 'object' && !Array.isArray(def.linear)
+      ? { ...(def.linear as Record<string, unknown>) }
+      : {};
+  if (project.linearProjectId) prevLinear.projectId = project.linearProjectId;
+  else delete prevLinear.projectId;
+  if (project.linearProjectName) prevLinear.name = project.linearProjectName;
+  else delete prevLinear.name;
+  if (Object.keys(prevLinear).length > 0) def.linear = prevLinear;
+  else delete def.linear;
+
+  const prevDispatch =
+    def.dispatch && typeof def.dispatch === 'object' && !Array.isArray(def.dispatch)
+      ? { ...(def.dispatch as Record<string, unknown>) }
+      : {};
+  if (project.autoDispatch === true) prevDispatch.enabled = true;
+  else delete prevDispatch.enabled;
+  if (project.maxAgents !== undefined) prevDispatch.maxAgents = project.maxAgents;
+  else delete prevDispatch.maxAgents;
+  if (Object.keys(prevDispatch).length > 0) def.dispatch = prevDispatch;
+  else delete def.dispatch;
+
+  // list --json may stamp a local `agents` count; never write it back into the def.
+  delete def.agents;
+
+  return def;
+}
+
+/** Run `agents <argv…>` with optional stdin. Surfaces CLI stderr on non-zero exit. */
+async function runAgentsArgv(
+  argv: string[],
+  input?: string,
+): Promise<{ stdout: string; stderr: string }> {
+  const bin = await resolveAgentsBin();
+  const augmented = bootstrapPath(bin);
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, argv, {
+      env: { ...process.env, PATH: `${augmented}:${process.env.PATH ?? ''}` },
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
-  }
-  return out;
-}
-
-async function writeManagedProjects(list: ManagedProject[]): Promise<void> {
-  const p = managedProjectsFilePath();
-  await fs.promises.mkdir(path.dirname(p), { recursive: true });
-  await fs.promises.writeFile(p, JSON.stringify(list, null, 2));
-}
-
-/** Build the seed list from detection (top SEED_LIMIT candidates). */
-export async function seedManagedProjects(): Promise<ManagedProject[]> {
-  const candidates = await inferProjectCandidates();
-  return candidates.slice(0, SEED_LIMIT).map(candidateToManaged);
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (d: string) => {
+      stdout += d;
+    });
+    child.stderr.on('data', (d: string) => {
+      stderr += d;
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      const detail = (stderr || stdout || `exit ${code}`).trim();
+      reject(new Error(detail || `agents ${argv.join(' ')} failed`));
+    });
+    if (input !== undefined) {
+      child.stdin.write(input);
+    }
+    child.stdin.end();
+  });
 }
 
 /**
- * Read the curated list. On first run (no file yet) seed it from detection and
- * persist, so the sidebar/dispatch have real projects immediately — then the user
- * curates.
+ * Read the project list by shelling out to `agents projects list --json`.
+ * Throws when the CLI is unavailable or returns unparseable output — callers
+ * surface the message for inline UI display. Never reads YAML or the legacy
+ * factory projects.json.
  */
 export async function readManagedProjects(): Promise<ManagedProject[]> {
+  const { stdout } = await runAgents('projects list --json');
+  let parsed: unknown;
   try {
-    const raw = await fs.promises.readFile(managedProjectsFilePath(), 'utf-8');
-    return sanitizeManagedProjects(JSON.parse(raw));
-  } catch {
-    const seeded = await seedManagedProjects();
-    try {
-      await writeManagedProjects(seeded);
-    } catch {
-      // Non-fatal: return the seed even if persistence fails.
-    }
-    return seeded;
+    parsed = JSON.parse(stdout);
+  } catch (e) {
+    throw new Error(
+      `agents projects list --json returned invalid JSON: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
+  if (!Array.isArray(parsed)) {
+    throw new Error('agents projects list --json: expected a JSON array of ProjectDef objects');
+  }
+  return parsed
+    .filter((d) => d && typeof d === 'object' && typeof (d as Record<string, unknown>).name === 'string')
+    .map((d) => defToManaged(d as Record<string, unknown>));
 }
 
-/** Add a new project or replace an existing one (matched by id). Returns the new list. */
+/** Load raw ProjectDef objects from `agents projects list --json` (for merge-on-save). */
+async function listRawDefs(): Promise<Record<string, unknown>[]> {
+  const { stdout } = await runAgents('projects list --json');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch (e) {
+    throw new Error(
+      `agents projects list --json returned invalid JSON: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error('agents projects list --json: expected a JSON array of ProjectDef objects');
+  }
+  return parsed.filter(
+    (d): d is Record<string, unknown> =>
+      !!d && typeof d === 'object' && !Array.isArray(d) && typeof (d as Record<string, unknown>).name === 'string',
+  );
+}
+
+/**
+ * Add a new project or update an existing one (matched by id) via
+ * `agents projects save --json`. Returns the refreshed list.
+ */
 export async function upsertManagedProject(project: ManagedProject): Promise<ManagedProject[]> {
-  const list = await readManagedProjects();
-  const idx = list.findIndex((p) => p.id === project.id);
-  if (idx >= 0) list[idx] = project;
-  else list.push(project);
-  await writeManagedProjects(list);
-  return list;
+  if (!isSafeId(project.id)) throw new Error(`Unsafe project id: ${JSON.stringify(project.id)}`);
+  const existing = await listRawDefs();
+  const prior = existing.find((d) => d.name === project.id);
+  const def = managedToProjectDef(project, prior);
+  await runAgentsArgv(['projects', 'save', '--json'], JSON.stringify(def));
+  return readManagedProjects();
 }
 
-/** Remove a project by id. Returns the new list. */
+/**
+ * Remove a project by id via `agents projects rm <id> --json`. Returns the
+ * refreshed list. Throws when the CLI reports failure.
+ */
 export async function deleteManagedProject(id: string): Promise<ManagedProject[]> {
-  const list = (await readManagedProjects()).filter((p) => p.id !== id);
-  await writeManagedProjects(list);
-  return list;
+  if (!isSafeId(id)) throw new Error(`Unsafe project id: ${JSON.stringify(id)}`);
+  await runAgentsArgv(['projects', 'rm', id, '--json']);
+  return readManagedProjects();
 }
+
+export { AgentsBinNotFoundError };
