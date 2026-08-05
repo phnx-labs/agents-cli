@@ -316,6 +316,7 @@ function seedHome(versions: string[], defaultVersion?: string): void {
 function runDoctor(...args: string[]): { status: number | null; stdout: string; stderr: string } {
   const r = spawnSync('bun', [INDEX, 'doctor', ...args, '--cwd', projectDir], {
     encoding: 'utf-8',
+    timeout: 15_000,
     env: {
       ...process.env,
       HOME: testHome,
@@ -331,6 +332,7 @@ describe('doctor qualifier resolution via subprocess (issue #2058)', () => {
   it('@latest resolves to the newest installed version, not a literal string', () => {
     seedHome(['2.0.0', '2.1.0'], '2.0.0');
     const r = runDoctor('claude@latest', '--json');
+    expect(r.status).toBe(0);
     expect(r.stderr, r.stderr).not.toContain('is not installed');
     const report = JSON.parse(r.stdout);
     expect(report.version).toBe('2.1.0');
@@ -339,6 +341,7 @@ describe('doctor qualifier resolution via subprocess (issue #2058)', () => {
   it('@oldest resolves to the earliest installed version', () => {
     seedHome(['2.0.0', '2.1.0'], '2.1.0');
     const r = runDoctor('claude@oldest', '--json');
+    expect(r.status).toBe(0);
     expect(r.stderr, r.stderr).not.toContain('is not installed');
     const report = JSON.parse(r.stdout);
     expect(report.version).toBe('2.0.0');
@@ -347,6 +350,7 @@ describe('doctor qualifier resolution via subprocess (issue #2058)', () => {
   it('@default resolves to the global default', () => {
     seedHome(['2.0.0', '2.1.0'], '2.0.0');
     const r = runDoctor('claude@default', '--json');
+    expect(r.status).toBe(0);
     expect(r.stderr, r.stderr).not.toContain('is not installed');
     const report = JSON.parse(r.stdout);
     expect(report.version).toBe('2.0.0');
@@ -355,6 +359,7 @@ describe('doctor qualifier resolution via subprocess (issue #2058)', () => {
   it('@pinned is an alias of @default', () => {
     seedHome(['2.0.0', '2.1.0'], '2.0.0');
     const r = runDoctor('claude@pinned', '--json');
+    expect(r.status).toBe(0);
     expect(r.stderr, r.stderr).not.toContain('is not installed');
     const report = JSON.parse(r.stdout);
     expect(report.version).toBe('2.0.0');
@@ -363,6 +368,7 @@ describe('doctor qualifier resolution via subprocess (issue #2058)', () => {
   it('@all produces a report for every installed version and is an explicit selector', () => {
     seedHome(['2.0.0', '2.1.0'], '2.0.0');
     const r = runDoctor('claude@all', '--json');
+    expect(r.status).toBe(0);
     expect(r.stderr, r.stderr).not.toContain('is not installed');
     const reports: Array<{ version: string }> = JSON.parse(r.stdout);
     expect(Array.isArray(reports)).toBe(true);
@@ -372,9 +378,21 @@ describe('doctor qualifier resolution via subprocess (issue #2058)', () => {
   it('bare agent (no qualifier) covers every installed version', () => {
     seedHome(['2.0.0', '2.1.0'], '2.0.0');
     const r = runDoctor('claude', '--json');
+    expect(r.status).toBe(0);
     const reports: Array<{ version: string }> = JSON.parse(r.stdout);
     expect(Array.isArray(reports)).toBe(true);
     expect(reports.map((rr) => rr.version).sort()).toEqual(['2.0.0', '2.1.0']);
+  });
+
+  it('exact version selector (claude@2.0.0) returns exactly one result for that version', () => {
+    seedHome(['2.0.0', '2.1.0'], '2.1.0');
+    const r = runDoctor('claude@2.0.0', '--json');
+    expect(r.status).toBe(0);
+    expect(r.stderr, r.stderr).not.toContain('is not installed');
+    const reports: Array<{ version: string }> | { version: string } = JSON.parse(r.stdout);
+    const arr = Array.isArray(reports) ? reports : [reports];
+    expect(arr).toHaveLength(1);
+    expect(arr[0].version).toBe('2.0.0');
   });
 
   it('@default errors clearly when no default is pinned', () => {

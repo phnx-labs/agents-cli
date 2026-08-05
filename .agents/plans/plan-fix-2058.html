@@ -100,11 +100,11 @@
 </tr>
 <tr>
 <td><code>apps/cli/src/commands/doctor.test.ts</code></td>
-<td>Subprocess qualifier tests (<code>@latest</code>, <code>@oldest</code>, <code>@default</code>, <code>@pinned</code>, <code>@all</code>, bare); device-routing strip tests</td>
+<td>Subprocess qualifier tests (<code>@latest</code>, <code>@oldest</code>, <code>@default</code>, <code>@pinned</code>, <code>@all</code>, bare, exact <code>@2.0.0</code>); exit-status assertions (<code>status === 0</code>) on every success case; <code>timeout: 15_000</code> on all spawns; device-routing strip tests</td>
 </tr>
 <tr>
-<td><code>apps/cli/CHANGELOG.md</code></td>
-<td>Two entries under <code>1.22.15</code></td>
+<td><code>apps/cli/.changelog/next/issue-2058.md</code></td>
+<td>Changelog fragment for the next release</td>
 </tr>
 <tr>
 <td><code>apps/cli/AGENTS.md</code></td>
@@ -172,7 +172,7 @@ agents view claude                               # inventory only; never prompts
 </tr>
 <tr>
 <td><code>doctor.test.ts</code> subprocess qualifier tests</td>
-<td>All pass: <code>@latest</code>/<code>@oldest</code>/<code>@default</code>/<code>@pinned</code>/<code>@all</code>/bare</td>
+<td>All pass: <code>@latest</code>/<code>@oldest</code>/<code>@default</code>/<code>@pinned</code>/<code>@all</code>/bare; exact-selector <code>claude@2.0.0</code> returns exactly one result at version <code>2.0.0</code>; every success case asserts <code>status === 0</code>; all spawns use <code>timeout: 15_000</code></td>
 </tr>
 <tr>
 <td>Live: <code>agents view claude</code></td>
@@ -207,7 +207,8 @@ agents view claude                               # inventory only; never prompts
 <aside class="artifact-callout"><strong>Key invariant:</strong> <code>parseTargetArg</code> stays private. The bare-agent path (<code>listInstalledVersions</code>, <code>versionExplicit: false</code>) is unchanged so <code>--fix</code> correctly excludes isolated copies in the default sweep.</aside><h2 id="tracking">Tracking</h2>
 <ul>
 <li>Issue: <a href="https://github.com/phnx-labs/agents-cli/issues/2058">#2058 fix(view,doctor)</a></li>
-<li>Branch: <code>fix/doctor-target-resolution</code> → PR to <code>phnx-labs/agents-cli:main</code></li>
+<li>Core feature landed on <code>phnx-labs/agents-cli:main</code> in PR #2067 at commit <code>236fc0ca</code></li>
+<li>Branch <code>fix/2058-test-plan-followup</code>: strengthens the subprocess regression proof (exit-status assertions, 15 s timeout, exact-selector case for <code>claude@2.0.0</code>) and corrects this plan artifact — does not re-implement the core fix</li>
 </ul>
 </article>
 
