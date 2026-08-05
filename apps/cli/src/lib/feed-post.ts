@@ -157,7 +157,7 @@ export function resolvePostIdentity(
   return {
     sessionId,
     mailboxId,
-    host: machineIdFromEnv(env) || activity?.host || 'unknown',
+    host: activity?.host ?? machineIdFromEnv(env),
     runtime: env.AGENTS_RUNTIME?.trim() || activity?.runtime || 'headless',
     agent: env.AGENTS_AGENT_NAME?.trim()
       || registry?.agent
