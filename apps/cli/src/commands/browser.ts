@@ -16,6 +16,7 @@ import {
   type BrowserProfile,
 } from '../lib/browser/profiles.js';
 import { readMeta, updateMeta } from '../lib/state.js';
+import { resolveActor } from '../lib/actor.js';
 import {
   loginsForProfile,
   profilesLoggedInto,
@@ -755,6 +756,12 @@ function registerTaskCommands(browser: Command): void {
         url: opts.url,
         endpoint: opts.endpoint,
         skipDomainSkill: opts.skills === false,
+        // Forward the caller's identity: the browser daemon is shared, so it
+        // cannot resolve who/which-run called `start`. `resolveActor()` runs
+        // here in the CLI (the caller's process); `$AGENT_LAUNCH_ID` is the
+        // per-run id exec.ts injects for every harness.
+        actor: resolveActor().id,
+        launchId: process.env.AGENT_LAUNCH_ID,
       });
 
       if (!response.ok) {

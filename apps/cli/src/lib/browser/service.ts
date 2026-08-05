@@ -323,7 +323,15 @@ export class BrowserService {
 
   async start(
     profileName: string,
-    opts: { taskName?: string; url?: string; endpointName?: string; skipDomainSkill?: boolean } = {}
+    opts: {
+      taskName?: string;
+      url?: string;
+      endpointName?: string;
+      skipDomainSkill?: boolean;
+      /** Caller identity, forwarded from the CLI (see IPCRequest.actor/launchId). */
+      actor?: string;
+      launchId?: string;
+    } = {}
   ): Promise<{ task: string; name: string; tabId?: string; windowId?: string; profile: string; skill?: ResolvedDomainSkill }> {
     const profile = await getProfile(profileName);
     if (!profile) {
@@ -424,7 +432,12 @@ export class BrowserService {
       currentTabId: undefined,
       createdAt: Date.now(),
       pid: conn.pid,
-      owner: resolveActor().id, // who launched this browser task (RUSH-2020)
+      // Identity is forwarded from the caller. The browser daemon is shared and
+      // long-lived, so a daemon-side resolveActor() would mis-attribute every
+      // task to the daemon's own actor (RUSH-2020 shipped that bug). Prefer the
+      // forwarded actor; resolve locally only for a pre-field CLI mid-rollout.
+      owner: opts.actor ?? resolveActor().id,
+      launchId: opts.launchId, // WHICH run created this (scopes status --mine)
     };
 
     // For Electron, get the existing window as the tab
