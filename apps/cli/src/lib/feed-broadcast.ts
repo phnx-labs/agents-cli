@@ -298,9 +298,39 @@ export function composeBroadcastFooter(ctx: FeedBroadcastContext): string | unde
  * so the safe default is the fallback and the message carries it. Prefer `{message}`
  * over bare `{text}` in messaging sinks.
  */
+/**
+ * The phone copy is a text, not a report. A long body reaches the owner's phone
+ * as an unreadable wall, and the `feed post` forwarding path is where that has to
+ * be shaped: every sink (owner alias, in-process `channel:`, spawned `command:`)
+ * funnels through {@link composeBroadcastMessage}, which is the only seam a shell
+ * hook cannot reach. Keep the title (the scannable headline) and cap the BODY to a
+ * short excerpt, marking the cut with a plain "(full in feed)" — NOT a CLI command
+ * (unusable from a phone, see the note on composeBroadcastMessage). Nothing is
+ * lost: this shapes only the outbound sink text; the full post stays in the feed.
+ */
+const PHONE_BODY_MAX_CHARS = 500;
+const PHONE_BODY_MAX_LINES = 8;
+
+export function truncateBroadcastBody(body: string): string {
+  if (!body) return body;
+  let out = body;
+  let cut = false;
+  const lines = out.split('\n');
+  if (lines.length > PHONE_BODY_MAX_LINES) {
+    out = lines.slice(0, PHONE_BODY_MAX_LINES).join('\n');
+    cut = true;
+  }
+  if (out.length > PHONE_BODY_MAX_CHARS) {
+    out = out.slice(0, PHONE_BODY_MAX_CHARS);
+    cut = true;
+  }
+  if (!cut) return body;
+  return `${out.trimEnd()}\n… (full in feed)`;
+}
+
 export function composeBroadcastMessage(ctx: FeedBroadcastContext): string {
   const title = scrubOutboundDashes(ctx.title ?? '');
-  const body = scrubOutboundDashes(ctx.text ?? '');
+  const body = truncateBroadcastBody(scrubOutboundDashes(ctx.text ?? ''));
   // Title preferred; if an older post has no title, body alone still sends.
   const head = title || body;
   const mid = title && body && title !== body ? body : undefined;

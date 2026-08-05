@@ -140,6 +140,43 @@ describe('message composition', () => {
     expect(msg).toContain('Default in 15 min: wait');
     expect(msg).not.toContain('agents focus');
   });
+
+  it('truncates a many-line body to a phone excerpt, keeping the title', () => {
+    const wall = Array.from({ length: 18 }, (_, i) => `line ${i + 1} of the session summary`).join('\n');
+    const msg = composeBroadcastMessage(ctx({ title: 'Session summary', text: wall }));
+    expect(msg).toContain('Session summary'); // title (headline) preserved
+    expect(msg).toContain('line 1 of the session summary');
+    expect(msg).toContain('line 8 of the session summary');
+    expect(msg).not.toContain('line 9 of the session summary'); // capped at 8 body lines
+    expect(msg).toContain('… (full in feed)'); // plain pointer, not a CLI command
+    expect(msg).not.toContain('agents focus');
+  });
+
+  it('truncates a very long single-line body by character count', () => {
+    const wall = 'x'.repeat(900);
+    const msg = composeBroadcastMessage(ctx({ title: 'Big update', text: wall }));
+    expect(msg).toContain('Big update');
+    expect(msg).toContain('… (full in feed)');
+    // The forwarded copy is far shorter than the 900-char body.
+    expect(msg.length).toBeLessThan(700);
+  });
+
+  it('truncates a no-title long body too (body becomes the head)', () => {
+    const wall = Array.from({ length: 12 }, (_, i) => `row ${i + 1}`).join('\n');
+    const msg = composeBroadcastMessage(
+      ctx({ title: undefined, text: wall, agent: undefined, host: undefined, session: undefined }),
+    );
+    expect(msg).toContain('row 1');
+    expect(msg).toContain('row 8');
+    expect(msg).not.toContain('row 9');
+    expect(msg).toContain('… (full in feed)');
+  });
+
+  it('leaves a short body untouched (no truncation marker)', () => {
+    const msg = composeBroadcastMessage(ctx({ title: 'CI green', text: 'PR #1690 merged, no action.' }));
+    expect(msg).toContain('PR #1690 merged, no action.');
+    expect(msg).not.toContain('full in feed');
+  });
 });
 
 describe('broadcast planning', () => {
