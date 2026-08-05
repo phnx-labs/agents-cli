@@ -115,7 +115,7 @@ describe('pickerPageSize', () => {
 });
 
 describe('itemPicker preview at default height (RUSH-2198 regression)', () => {
-  it('renders the detailed preview with a full 15-row list on a default-height terminal', async () => {
+  it('renders the detailed preview for a 15-row list request on a default-height terminal', async () => {
     const pickerUrl = pathToFileURL(path.resolve('src/lib/picker.ts')).href;
     // 20 rows, pageSize 15 (PICKER_RECENT_COUNT), preview open by default, plus
     // lines printed above the prompt — the exact shape that used to collapse.

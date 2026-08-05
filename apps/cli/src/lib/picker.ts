@@ -49,9 +49,9 @@ export interface PickerConfig<T> {
   emptyMessage?: string;
   enterHint?: string;
   /**
-   * Lines the caller already printed above the Inquirer prompt (fleet-unreachable
-   * warnings, hidden-session footers). Subtracted from the row budget so the list
-   * page is capped to keep the preview — and those notices — on screen together.
+   * Lines the caller already printed above the Inquirer prompt (e.g. the
+   * hidden-session footer). Subtracted from the row budget so the list page is
+   * capped to keep the preview — and those notices — on screen together.
    */
   linesAbovePrompt?: number;
 }
@@ -116,10 +116,11 @@ function terminalRows(): number {
  * list whatever remains, never below {@link PICKER_MIN_LIST_ROWS}.
  *
  * `chromeRows` counts the fixed non-list, non-preview lines (header, subtitle,
- * help, any flash). `linesAbovePrompt` counts lines already printed above the
- * Inquirer prompt (fleet-unreachable warnings, hidden-session footers) that have
- * scrolled the viewport but the picker cannot measure — subtracting them keeps
- * those notices on screen alongside the preview.
+ * help, any flash). `linesAbovePrompt` counts lines the caller printed above the
+ * Inquirer prompt that have scrolled the viewport but the picker cannot measure —
+ * today the session picker passes the hidden-session footer; subtracting it keeps
+ * that notice on screen alongside the preview. (The fleet browser folds its
+ * unreachable-peer warning into the header instead, so it needs no reserve here.)
  */
 export function pickerPageSize(opts: {
   requestedPageSize: number;
