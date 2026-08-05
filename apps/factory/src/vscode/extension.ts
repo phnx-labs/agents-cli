@@ -3668,9 +3668,9 @@ async function launchResumeTerminal(
     terminal.sendText(resumeInput, false);
     setTimeout(() => terminal.sendText('\r', false), 300);
   };
-  readiness.waitFor(terminal, 'agentReady').then(submitToTui, (err) => {
-    console.warn(`[RESUME] agentReady wait FAILED: ${err} — sending resume input anyway`);
-    submitToTui();
+  readiness.waitFor(terminal, 'agentReady').then(submitToTui).catch((err) => {
+    console.error(`[RESUME] agentReady wait FAILED: ${err}`);
+    vscode.window.showErrorMessage('Failed to resume: agent did not become ready.');
   });
 
   vscode.window.setStatusBarMessage(plan.statusMessage, 5000);

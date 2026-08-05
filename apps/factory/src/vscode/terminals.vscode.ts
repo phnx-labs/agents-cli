@@ -720,6 +720,18 @@ export async function scanExisting(
     const persistedByTerminalId = identOpts.terminalId
       ? persistedSessions.find(p => p.terminalId === identOpts.terminalId)
       : undefined;
+
+    // Recover the offloaded device BEFORE any host-dependent lookup runs. VS Code
+    // restores terminals without our env vars, so `entry.host` is lost on reload
+    // unless we rehydrate it from the persisted session here. Without this, a
+    // remote session's resume command degrades to a local raw binary and the
+    // label poller reads the wrong filesystem (extension.ts restore callers pass
+    // `session.host` into buildVersionedResumeCommand; scanExisting is the other
+    // reload path that must keep it, RUSH-2047).
+    if (persistedByTerminalId?.host) {
+      setHost(terminal, persistedByTerminalId.host);
+    }
+
     const pinnedVersion = resolveRestoredVersion(
       identOpts.version,
       persistedByTerminalId?.version
