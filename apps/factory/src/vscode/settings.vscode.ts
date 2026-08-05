@@ -1968,22 +1968,14 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         // Dispatch opens from persisted/cached inventory + last-good host sessions.
         // Never probeCpu and never per-device CPU/memory + sessions fan-out.
         try {
-          const { fetchHostSessions, LOCAL_LABEL, getLastGoodFloorSnapshot } = await import('./remoteSessions.vscode');
+          const { fetchHostSessions, LOCAL_LABEL } = await import('./remoteSessions.vscode');
           const inventories = await getCachedAgentInventories();
-          // Prefer last-good (no CLI). Cold open with no snapshot: one non-force
-          // fetchHostSessions may seed once; subsequent opens stay cache-only.
-          const lastGood = getLastGoodFloorSnapshot();
-          const hostResult = lastGood
-            ? {
-                hosts: lastGood.hosts,
-                sessions: lastGood.sessions,
-                groups: lastGood.groups,
-                fetchedAt: lastGood.fetchedAt,
-              }
-            : await fetchHostSessions(Date.now(), {
-                force: false,
-                projectRules: getSettings(context).projectRules ?? [],
-              });
+          // Non-force is cache-only even on a true cold start; activation owns
+          // the one device-registry read and local-session seed.
+          const hostResult = await fetchHostSessions(Date.now(), {
+            force: false,
+            projectRules: getSettings(context).projectRules ?? [],
+          });
           const defaultTitle = context.globalState.get<string>('agents.defaultAgentTitle', 'CC');
           const defaultAgentId = getBuiltInDefByTitle(defaultTitle)?.key ?? 'claude';
           const agents = mapInventoriesToInstalledAgents(inventories, defaultAgentId);

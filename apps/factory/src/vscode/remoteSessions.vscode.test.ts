@@ -98,7 +98,7 @@ test('setFloorSnapshotStore hydrates last-good so non-force fetchHostSessions do
     },
   });
   expect(getLastGoodFloorSnapshot()?.sessions).toHaveLength(2);
-  expect(shouldRunBareFleetFetch(false, true)).toBe(false);
+  expect(shouldRunBareFleetFetch(false)).toBe(false);
 
   __remoteSessionsTestCounters.reset();
   const before = __remoteSessionsTestCounters.bareActiveCalls;
@@ -111,6 +111,21 @@ test('setFloorSnapshotStore hydrates last-good so non-force fetchHostSessions do
   expect(b.sessions.map((s) => s.sessionId).sort()).toEqual(['local-1', 'remote-1']);
   expect(c.hostFreshness?.yosemite).toBe(1000);
   expect(written).toBeNull(); // non-force read does not rewrite
+});
+
+test('cold non-force host read is cache-only before activation seeding', async () => {
+  __remoteSessionsTestCounters.reset();
+  __deviceHealthTestCounters.reset();
+
+  const result = await fetchHostSessions(Date.now(), { force: false });
+
+  expect(result.fromCache).toBe(true);
+  expect(result.hosts).toEqual([
+    { name: 'this-mac', online: true, agents: 0, load: 'idle', uses: 0 },
+  ]);
+  expect(result.sessions).toEqual([]);
+  expect(__remoteSessionsTestCounters.bareActiveCalls).toBe(0);
+  expect(__deviceHealthTestCounters.registeredDeviceCliCalls).toBe(0);
 });
 
 test('retainLastGoodOnFailure keeps remote rows when a refresh fails', () => {

@@ -152,7 +152,7 @@ const FANOUT_TIMEOUT_MS = 15000;
 const DETAIL_TIMEOUT_MS = 15000;
 // Remote fleet refresh is user-triggered only — short TTL no longer revalidates
 // the bare SSH sweep on every poll. Last-good is retained indefinitely until
-// force or cold seed.
+// an explicit manual refresh.
 const CACHE_TTL_MS = 4000;
 // Local polls used to re-spawn every 1.5s; the Floor performance track uses a
 // 60s local-only backstop instead (see isLocalSessionsStale). Concurrent callers
@@ -609,8 +609,8 @@ function offlineHostInfo(name: string): HostInfo {
 /**
  * Tier-1 fleet sessions.
  *
- * - force=false + last-good exists → return last-good immediately (no CLI).
- * - force=true OR cold start → ONE bare `agents sessions --active --json`.
+ * - force=false → return last-good or an empty local snapshot immediately (no CLI).
+ * - force=true → ONE bare `agents sessions --active --json`.
  * - Failure → retain last-good rows (never wipe the Floor).
  * - Concurrent callers share the in-flight promise (coalescing).
  *
@@ -625,20 +625,39 @@ export async function fetchHostSessions(
   const projectRules = opts.projectRules ?? [];
   const rulesKey = projectRulesKey(projectRules);
 
-  // Serve last-good without a fleet CLI call unless forced or cold.
-  // Policy: shouldRunBareFleetFetch(force, !!lastGoodFloor) === false here.
-  if (!force && lastGoodFloor) {
-    const cached = toHostSessionsResult({ ...lastGoodFloor, fromCache: true });
-    return cached;
-  }
-  if (!force && activeCache && fetchedAt - activeCache.at < CACHE_TTL_MS && activeCache.rulesKey === rulesKey) {
-    return { ...activeCache.result, fromCache: true };
+  // Every non-forced read is cache-only, including a true cold start before the
+  // activation seed has populated globalState. This prevents panel mount and
+  // Dispatch from racing activation into a fleet SSH sweep.
+  if (!force) {
+    if (lastGoodFloor) {
+      return toHostSessionsResult({ ...lastGoodFloor, fromCache: true });
+    }
+    if (activeCache && fetchedAt - activeCache.at < CACHE_TTL_MS && activeCache.rulesKey === rulesKey) {
+      return { ...activeCache.result, fromCache: true };
+    }
+    const local: HostInfo = {
+      name: LOCAL_LABEL,
+      online: true,
+      agents: 0,
+      load: 'idle',
+      uses: 0,
+    };
+    return {
+      hosts: [local],
+      sessions: [],
+      groups: [{ host: LOCAL_LABEL, online: true, fetchedAt: 0, sessions: [] }],
+      fetchedAt: 0,
+      hostFreshness: { [LOCAL_LABEL]: 0 },
+      fromCache: true,
+    };
   }
   if (activeInFlight) return activeInFlight;
 
   activeInFlight = (async () => {
     try {
-      const hosts = await discoverHosts();
+      // Reuse the activation registry cache. Even a manual refresh must run only
+      // the one bare active-session command, never a second devices-list command.
+      const hosts = await discoverHosts(getRegisteredDevicesCache() ?? []);
       // ONE bare fan-out: the CLI runs its own cross-machine SSH sweep.
       __remoteSessionsTestCounters.bareActiveCalls++;
       const fan = await withHardTimeout(

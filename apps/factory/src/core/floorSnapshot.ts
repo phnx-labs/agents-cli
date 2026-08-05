@@ -277,13 +277,7 @@ export function isInventoryStale(
   return now - fetchedAt >= ttlMs;
 }
 
-/**
- * Whether a `fetchHostSessions` call should invoke the bare fleet CLI.
- * force=true always; otherwise only on cold start (no last-good).
- */
-export function shouldRunBareFleetFetch(
-  force: boolean,
-  hasLastGood: boolean,
-): boolean {
-  return force || !hasLastGood;
+/** Only an explicit user refresh may invoke the bare fleet CLI. */
+export function shouldRunBareFleetFetch(force: boolean): boolean {
+  return force;
 }

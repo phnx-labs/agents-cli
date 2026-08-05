@@ -167,10 +167,8 @@ describe('floorSnapshot pure model', () => {
     expect(merged.fromCache).toBe(true);
   });
 
-  test('shouldRunBareFleetFetch: force or cold start only — no recurring fan-out', () => {
-    expect(shouldRunBareFleetFetch(false, true)).toBe(false); // poll with last-good
-    expect(shouldRunBareFleetFetch(true, true)).toBe(true); // user refresh
-    expect(shouldRunBareFleetFetch(false, false)).toBe(true); // cold seed
-    expect(shouldRunBareFleetFetch(true, false)).toBe(true);
+  test('shouldRunBareFleetFetch: explicit user refresh only', () => {
+    expect(shouldRunBareFleetFetch(false)).toBe(false);
+    expect(shouldRunBareFleetFetch(true)).toBe(true);
   });
 });
