@@ -128,6 +128,7 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   disableTmux: 'local-only',
   host: 'local-only',
   device: 'local-only',
+  where: 'local-only', // expands into host/lease before dispatch; never re-forwarded
   on: 'local-only',
   computer: 'local-only',
   any: 'local-only',
