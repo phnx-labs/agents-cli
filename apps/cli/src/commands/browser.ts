@@ -113,6 +113,12 @@ export function registerBrowserCommand(program: Command): void {
       agents browser navigate https://example.com
       agents browser screenshot
 
+      # Drive another machine's browser (needs its consent — see remote-control)
+      agents browser start --host zion
+
+      # Allow / deny other fleet machines driving THIS machine's browser
+      agents browser remote-control on
+
       # End the session when done
       agents browser done
     `,
