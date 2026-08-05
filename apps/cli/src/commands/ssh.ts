@@ -18,7 +18,7 @@ import * as path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import { getCliVersion } from '../lib/version.js';
-import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../lib/secrets/bundles.js';
+import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { isDeviceAuto, resolveDeviceAffinity } from '../lib/smart-launch.js';
 import { registerFleetCaptureCommand } from './fleet-capture.js';
@@ -1625,9 +1625,8 @@ async function runAskpass(): Promise<void> {
   }
   // A read-only stats probe sets ASKPASS_AGENT_ONLY_ENV to force a broker-only
   // resolve even under a TTY — so `agents devices` never pops Touch ID just to
-  // render load/mem for an uncached password-auth device (RUSH-1970). Otherwise
-  // fall back to the headless-context heuristic.
-  const agentOnly = process.env[ASKPASS_AGENT_ONLY_ENV] === '1' || isHeadlessSecretsContext();
+  // render load/mem for an uncached password-auth device (RUSH-1970).
+  const agentOnly = true;
   try {
     const { env } = readAndResolveBundleEnv(bundle, { caller: 'agents ssh', keys: [key], keyMode: 'storage', agentOnly });
     const value = env[key];

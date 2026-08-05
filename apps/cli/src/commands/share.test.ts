@@ -35,14 +35,14 @@ async function freshShareModules() {
   const mem = makeMemoryBackend();
   const secrets = await import('../lib/secrets/index.js');
   secrets.setKeychainBackendForTest(mem.backend);
+  const bundles = await import('../lib/secrets/bundles.js');
+  bundles.setKeychainAgentOnlyBypassForTest(true);
   const filestore = await import('../lib/secrets/filestore.js');
   filestore._resetFileStoreForTest({ fileDir: path.join(tmpHome, '.file-secrets') });
   const share = await import('./share.js');
   const config = await import('../lib/share/config.js');
   return { share, config, mem };
 }
-
-let previousNoPrompt: string | undefined;
 
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-share-command-'));
@@ -51,11 +51,7 @@ beforeEach(() => {
   previousPath = process.env.PATH;
   previousShareGitHubUser = process.env.AGENTS_SHARE_GITHUB_USER;
   delete process.env.AGENTS_SHARE_GITHUB_USER;
-  // Reads go to a temp HOME with no real keychain/agent; on darwin-headless (the
-  // release-gated macOS CI matrix) isHeadlessSecretsContext() would force the
-  // agentOnly no-prompt throw. Pin NO_PROMPT=0 so the direct read runs on every OS.
-  previousNoPrompt = process.env.AGENTS_SECRETS_NO_PROMPT;
-  process.env.AGENTS_SECRETS_NO_PROMPT = '0';
+  // Reads go to a temp HOME with an in-memory keychain backend.
   vi.spyOn(console, 'log').mockImplementation(() => {});
 });
 
@@ -68,8 +64,6 @@ afterEach(() => {
   else process.env.PATH = previousPath;
   if (previousShareGitHubUser === undefined) delete process.env.AGENTS_SHARE_GITHUB_USER;
   else process.env.AGENTS_SHARE_GITHUB_USER = previousShareGitHubUser;
-  if (previousNoPrompt === undefined) delete process.env.AGENTS_SECRETS_NO_PROMPT;
-  else process.env.AGENTS_SECRETS_NO_PROMPT = previousNoPrompt;
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 

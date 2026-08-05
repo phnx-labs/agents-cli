@@ -28,6 +28,8 @@ let authContext: LAContext = {
     return ctx
 }()
 
+let skipAuthenticationUI = ProcessInfo.processInfo.environment["AGENTS_KEYCHAIN_SKIP_AUTH_UI"] == "1"
+
 // Build the access control that gates every item we write: unlock requires a
 // current-enrollment biometry match OR the device passcode, and the item is
 // scoped to this device only. The OS itself enforces this on every
@@ -208,7 +210,7 @@ func readItem(service: String, account: String) -> ReadOutcome {
     dpQuery[kSecReturnData] = kCFBooleanTrue!
     dpQuery[kSecMatchLimit] = kSecMatchLimitOne
     dpQuery[kSecUseAuthenticationContext] = authContext
-    dpQuery[kSecUseAuthenticationUI] = kSecUseAuthenticationUIAllow
+    dpQuery[kSecUseAuthenticationUI] = skipAuthenticationUI ? kSecUseAuthenticationUISkip : kSecUseAuthenticationUIAllow
     dpQuery[kSecUseOperationPrompt] = operationPrompt as CFString
     var dpResult: AnyObject?
     let dpStatus = SecItemCopyMatching(dpQuery as CFDictionary, &dpResult)
@@ -231,7 +233,7 @@ func readItem(service: String, account: String) -> ReadOutcome {
     orphanQuery[kSecReturnPersistentRef] = kCFBooleanTrue!
     orphanQuery[kSecMatchLimit] = kSecMatchLimitOne
     orphanQuery[kSecUseAuthenticationContext] = authContext
-    orphanQuery[kSecUseAuthenticationUI] = kSecUseAuthenticationUIAllow
+    orphanQuery[kSecUseAuthenticationUI] = skipAuthenticationUI ? kSecUseAuthenticationUISkip : kSecUseAuthenticationUIAllow
     orphanQuery[kSecUseOperationPrompt] = operationPrompt as CFString
     var orphanResult: AnyObject?
     let orphanStatus = SecItemCopyMatching(orphanQuery as CFDictionary, &orphanResult)
@@ -250,7 +252,7 @@ func readItem(service: String, account: String) -> ReadOutcome {
     fileQuery[kSecReturnData] = kCFBooleanTrue!
     fileQuery[kSecMatchLimit] = kSecMatchLimitOne
     fileQuery[kSecUseAuthenticationContext] = authContext
-    fileQuery[kSecUseAuthenticationUI] = kSecUseAuthenticationUIAllow
+    fileQuery[kSecUseAuthenticationUI] = skipAuthenticationUI ? kSecUseAuthenticationUISkip : kSecUseAuthenticationUIAllow
     fileQuery[kSecUseOperationPrompt] = operationPrompt as CFString
     var fileResult: AnyObject?
     let fileStatus = SecItemCopyMatching(fileQuery as CFDictionary, &fileResult)
@@ -388,6 +390,7 @@ case "list":
         kSecReturnAttributes: kCFBooleanTrue!,
         kSecUseDataProtectionKeychain: kCFBooleanTrue!,
         kSecAttrSynchronizable: kCFBooleanFalse!,
+        kSecUseAuthenticationUI: kSecUseAuthenticationUISkip,
     ]
     var items: [[String: Any]] = []
     for query in [fileQuery, dpQuery] {
@@ -807,6 +810,7 @@ case "list-synced":
         kSecClass: kSecClassGenericPassword,
         kSecMatchLimit: kSecMatchLimitAll,
         kSecReturnAttributes: kCFBooleanTrue!,
+        kSecUseAuthenticationUI: kSecUseAuthenticationUISkip,
         kSecUseDataProtectionKeychain: kCFBooleanTrue!,
         kSecAttrSynchronizable: kCFBooleanTrue!,
     ]

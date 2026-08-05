@@ -301,7 +301,7 @@ describe('service-name hashing through the primitives', () => {
     expect(healHmacKeyNoAclOnce(stored)).toBe(false);
   });
 
-  it('readHmacKeyRecord heals a stale ACL-stamped hmackey ON READ, once (converges the devices-probe hot path)', () => {
+  it('readHmacKeyRecord never mutates a stale ACL-stamped hmackey on the read path', () => {
     const rec = { v: 1, k: 'cd'.repeat(32), migrated: true };
     // A hmackey an old helper left biometry-ACL'd: present in the store, but NOT
     // written through the no-ACL path — so a real read pops the generic Touch ID
@@ -309,19 +309,18 @@ describe('service-name hashing through the primitives', () => {
     mem.set(HMAC_KEY_ITEM, JSON.stringify(rec));
     expect(mem.noAclWrites.has(HMAC_KEY_ITEM)).toBe(false);
 
-    // The very read every hashed lookup performs (the devices-list stats probe,
-    // any background read) now re-stores it no-ACL once, preserving the key.
+    // Ordinary hashed lookups only read; they do not run the migration.
     const read = readHmacKeyRecord();
     expect(read?.k).toBe(rec.k);
-    expect(read?.healedNoAcl).toBe(true);
-    expect(mem.noAclWrites.has(HMAC_KEY_ITEM)).toBe(true);
+    expect(read?.healedNoAcl).toBeUndefined();
+    expect(mem.noAclWrites.has(HMAC_KEY_ITEM)).toBe(false);
     const stored = JSON.parse(mem.store.get(HMAC_KEY_ITEM) as string);
-    expect(stored.healedNoAcl).toBe(true);
+    expect(stored.healedNoAcl).toBeUndefined();
     expect(stored.k).toBe(rec.k);
 
-    // A subsequent read is silent (already healed) — no repeat no-ACL churn.
+    // A subsequent read remains non-mutating too.
     mem.noAclWrites.delete(HMAC_KEY_ITEM);
-    expect(readHmacKeyRecord()?.healedNoAcl).toBe(true);
+    expect(readHmacKeyRecord()?.healedNoAcl).toBeUndefined();
     expect(mem.noAclWrites.has(HMAC_KEY_ITEM)).toBe(false);
   });
 

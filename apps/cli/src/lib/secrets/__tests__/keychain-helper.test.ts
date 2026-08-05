@@ -37,6 +37,13 @@ describe('keychain-helper Touch ID policy', () => {
     expect(source).toContain('case "get":');
     expect(source).toContain('case "get-batch":');
   });
+
+  it('silent no-ACL reads skip authentication UI instead of raising a sheet', () => {
+    const source = helperSource();
+    const block = source.slice(source.indexOf('func readItem('), source.indexOf('func migrateInline('));
+    expect(source).toContain('let skipAuthenticationUI = ProcessInfo.processInfo.environment["AGENTS_KEYCHAIN_SKIP_AUTH_UI"] == "1"');
+    expect(block.match(/skipAuthenticationUI \? kSecUseAuthenticationUISkip : kSecUseAuthenticationUIAllow/g)).toHaveLength(3);
+  });
 });
 
 describe('keychain-helper data-protection keychain routing', () => {
@@ -197,6 +204,13 @@ describe('keychain-helper has / list still probe both keychains', () => {
     expect(block).toContain('for query in [fileQuery, dpQuery]');
     expect(block).toContain('if status == errSecInteractionNotAllowed { continue }');
     expect(block).toContain('kSecReturnAttributes');
+    expect(block).toContain('kSecUseAuthenticationUI: kSecUseAuthenticationUISkip');
+  });
+
+  it('list-synced skips authentication UI while enumerating attributes', () => {
+    const block = caseBlock(helperSource(), 'list-synced');
+    expect(block).toContain('kSecReturnAttributes');
+    expect(block).toContain('kSecUseAuthenticationUI: kSecUseAuthenticationUISkip');
   });
 });
 
