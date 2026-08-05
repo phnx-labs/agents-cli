@@ -1256,6 +1256,32 @@ interface SpawnResult {
   stdout: string;
 }
 
+/**
+ * Whether a dead pane's failure should be recapped to stderr (RUSH-2185 / EXEC-23a).
+ *
+ * For headless runs only a nonzero exit is a failure worth surfacing — a
+ * clean 0 means the agent finished the task before we could attach.
+ * For interactive runs ANY exit (including 0) is a failure: an instant clean
+ * exit means the harness has no bare REPL and the user would see only a mute
+ * `[detached]` with no explanation.
+ */
+export function shouldRecapDeadPane(status: number | undefined, interactive: boolean): boolean {
+  return (status ?? 0) !== 0 || interactive;
+}
+
+/**
+ * True only when a `display-message #{pane_dead}` tmux query explicitly returned
+ * "0" (pane alive). Used to distinguish "pane alive" from "query failed" in
+ * situations where `paneExitStatus` conservatively returns `{dead: false}` for
+ * both (RUSH-2185 / EXEC-23a / F3).
+ *
+ * @param code   The exit code of the `tmux display-message` command.
+ * @param stdout Its stdout (expected to be "0" when the pane is alive).
+ */
+export function isPaneKnownAliveFromQueryResult(code: number, stdout: string): boolean {
+  return code === 0 && stdout.trim() === '0';
+}
+
 /** Inputs that decide whether an interactive spawn is wrapped in a shared-socket tmux session. */
 export interface TmuxWrapContext {
   /** resolveInteractive() result — only interactive REPL launches are wrapped. */
@@ -1462,10 +1488,11 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
   // already-dead pane — surface its output + status directly and tear down.
   const before = pane ? await paneExitStatus(pane, socket) : { dead: false };
   if (before.dead) {
-    // Only recap a FAILURE. A clean (0) exit before we attached is a successful
-    // quick run, not a crash — a red banner there would be spurious (mirrors the
-    // post-attach guard below).
-    if ((before.status ?? 0) !== 0) {
+    // F2 (RUSH-2185 / EXEC-23a): for interactive runs, ALWAYS recap — a clean
+    // exit-0 before attach means the harness has no interactive REPL and the
+    // user would see only a bare `[detached]` with no clue why. For headless
+    // runs the old quiet behaviour stands: exit-0 is a successful quick run.
+    if (shouldRecapDeadPane(before.status, resolveInteractive(options))) {
       await surfacePaneFailure(before.status, `${options.agent} exited before it could start`);
     }
     await killSession(name, socket).catch(() => {});
@@ -1474,19 +1501,38 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
 
   await attachTmux({ socket, args: ['attach-session', '-t', name] });
 
+  // F3 (RUSH-2185 / EXEC-23a): paneExitStatus returns {dead:false} for BOTH
+  // "pane is alive" and "tmux query failed (race / pane already gone)". Require
+  // POSITIVE proof before taking the keep-session path — a separate direct query
+  // that only returns true when tmux explicitly confirms pane_dead=0.
+  const checkPaneKnownAlive = async (p: string): Promise<boolean> => {
+    try {
+      const r = await runTmux({ socket, args: ['display-message', '-pt', p, '-p', '#{pane_dead}'], throwOnError: false });
+      return isPaneKnownAliveFromQueryResult(r.code, r.stdout);
+    } catch { return false; }
+  };
+
   const after = pane ? await paneExitStatus(pane, socket) : { dead: false };
   if (after.dead) {
     // Nonzero exit after attach → the agent crashed rather than the user
     // detaching cleanly (a clean detach leaves the pane ALIVE, handled below).
-    // The pane-died hook may have yanked the view before the error was readable,
-    // so recap it into the shell. A clean (0) exit stays quiet — nothing to say.
-    if ((after.status ?? 0) !== 0) {
+    // F2: for interactive runs, also recap a clean exit-0 — the harness exited
+    // without error but without starting a REPL, which is still a failure.
+    if (shouldRecapDeadPane(after.status, resolveInteractive(options))) {
       await surfacePaneFailure(after.status, `${options.agent} exited`);
     }
     await killSession(name, socket).catch(() => {});
     return { exitCode: after.status ?? 0, stderr: '', stdout: '' };
   }
-  // Pane still alive → the user detached; keep the session for `agents focus`.
+  // after.dead===false, but that could be a stale/unreadable-pane result.
+  // Require positive proof before keeping the session as "user detached".
+  if (pane && await checkPaneKnownAlive(pane)) {
+    // Confirmed alive: the user pressed Ctrl-b d; keep the session for `agents focus`.
+    return { exitCode: 0, stderr: '', stdout: '' };
+  }
+  // Ambiguous or unreadable pane (race between pane-died hook and our query) —
+  // tear down rather than leave an orphan session.
+  await killSession(name, socket).catch(() => {});
   return { exitCode: 0, stderr: '', stdout: '' };
 }
 

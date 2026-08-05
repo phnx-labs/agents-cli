@@ -1897,7 +1897,7 @@ export function registerRunCommand(program: Command): void {
         { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents, ensureSubagentDispatchTool },
         { resolveRunDefaults },
         { getMcpServersByName, buildWorkflowMcpConfig },
-        { supports },
+        { supports, capableAgents },
         { shareRuntimeEnv },
       ] = await Promise.all([
         import('../lib/exec.js'),
@@ -1967,9 +1967,25 @@ export function registerRunCommand(program: Command): void {
         // — launching a default "because it's there" is how a rotate loop
         // hammers an exhausted account.
         const byHarness = await collectHarnessCandidates();
-        const harnessPick = pickHarnessWeighted(byHarness);
+        // F1 (RUSH-2185 / EXEC-23a): a prompt-less run is interactive; only
+        // harnesses that can open a REPL with no argv are valid candidates.
+        // cursor-agent and similar exit immediately without a prompt, which
+        // leaves a silent [detached] pane and an orphan session.
+        const interactive = prompt === undefined && options.headless !== true;
+        const replCapable = interactive ? new Set(capableAgents('interactiveRepl')) : null;
+        const candidateHarness = replCapable
+          ? new Map([...byHarness].filter(([id]) => replCapable.has(id)))
+          : byHarness;
+        const harnessPick = pickHarnessWeighted(candidateHarness);
         if (!harnessPick) {
-          console.error(chalk.red(formatNoHealthyHarnessError(classifyHarnessCandidates(byHarness))));
+          if (replCapable && byHarness.size > 0 && candidateHarness.size === 0) {
+            const installed = [...byHarness.keys()].join(', ');
+            console.error(chalk.red(
+              `No installed harness supports a prompt-less interactive REPL (installed: ${installed}). Pass a prompt (-p) or install claude, codex, or another REPL-capable harness.`,
+            ));
+          } else {
+            console.error(chalk.red(formatNoHealthyHarnessError(classifyHarnessCandidates(candidateHarness))));
+          }
           process.exit(1);
         }
         agent = harnessPick.picked.agent;

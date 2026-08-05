@@ -47,6 +47,7 @@ import {
 } from '../lib/projects.js';
 import {
   rollupSessionsByProject,
+  withDefaultMachine,
   isDeadStatus,
   liveDeadSplit,
   enrichProjectSignals,
@@ -354,7 +355,12 @@ async function enrichProjectsForRender(
     extraSessions?: Awaited<ReturnType<typeof getActiveSessions>>;
   },
 ): Promise<ProjectRenderData> {
-  const roll = rollupSessionsByProject(all, [...(await getActiveSessions()), ...(opts.extraSessions ?? [])]);
+  // Local getActiveSessions() leaves `machine` unset (the sessions renderer
+  // falls back to this box). Host-grouped agents need an explicit stamp so
+  // under `--fleet` this box does not render as `@local` next to peers that
+  // carry real device ids.
+  const local = withDefaultMachine(await getActiveSessions(), machineId());
+  const roll = rollupSessionsByProject(all, [...local, ...(opts.extraSessions ?? [])]);
   const remote = new Map<string, ProjectRemoteSignals>();
   const linear = new Map<string, LinearProjectCounts>();
   // Local git, no API, no rate limit — measured 0.23s over a 897-commit week.

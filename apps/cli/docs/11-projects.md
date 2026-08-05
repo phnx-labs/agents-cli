@@ -115,11 +115,12 @@ whether you typed `status` or `view`.
 ## The progress card — `agents projects status`
 
 The headline. It matches every live session to a project **by cwd** (longest root
-wins) and rolls up the signals already on disk. The live-agent rollup is over this
-machine's active sessions (the same set `agents sessions --active` shows, matched by
-local-home cwd); the **merged-PR count is repo-global** (via `gh`). A fleet-wide live
-rollup — SSH fan-out plus home-relative cwd matching so a session recorded on a
-different-home machine still matches — is a deferred follow-up (see below):
+wins) and rolls up the signals already on disk. The live-agent rollup defaults to this machine's active sessions (the same set
+`agents sessions --active` shows, matched by local-home cwd); the **merged-PR
+count is repo-global** (via `gh`). With `--fleet`, the live line also includes
+sessions fanned out over SSH — but cwd matching is still against the **local**
+home layout, so a peer session whose path uses a different home root may not
+attribute. Full home-relative matching across homes remains deferred (see below):
 
 ```
 rush  ·  23 live
