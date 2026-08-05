@@ -905,15 +905,24 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // Projects pane. Fetch on mount; the host re-sends managedProjectsData after any
   // save/delete, so no optimistic update is needed. projectFolderPicked answers the
   // pane's Browse… button and prefills its add form. Command failures surface
-  // inline on the Projects pane (never a toast).
+  // inline on the Projects pane (never a toast). When managedProjectsData carries
+  // error, KEEP last-good projects (same last-good pattern as hostSessions).
   useEffect(() => {
     postMessage({ type: 'fetchManagedProjects' })
     postMessage({ type: 'fetchLinearProjects' })
     const onMsg = (event: MessageEvent) => {
       const msg = event.data
-      if (msg?.type === 'managedProjectsData' && Array.isArray(msg.projects)) {
-        setManagedProjects(msg.projects as ManagedProject[])
-        setProjectCommandError(null)
+      if (msg?.type === 'managedProjectsData') {
+        const failed = typeof msg.error === 'string'
+        if (failed) {
+          // Retain last-good projects; surface the error inline on Projects pane.
+          setProjectCommandError(msg.error)
+          return
+        }
+        if (Array.isArray(msg.projects)) {
+          setManagedProjects(msg.projects as ManagedProject[])
+          setProjectCommandError(null)
+        }
       } else if (msg?.type === 'linearProjectsData' && Array.isArray(msg.projects)) {
         setLinearProjects(msg.projects as LinearProjectLite[])
       } else if (msg?.type === 'projectFolderPicked' && typeof msg.path === 'string') {

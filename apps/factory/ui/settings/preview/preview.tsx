@@ -3,8 +3,10 @@
 // current UI can be seen/screenshotted without the VS Code extension host. Not
 // shipped (vite.settings.config.ts only inputs settings/index.html); a dev harness.
 //
-// Run:  cd extension/ui && bun run dev  ->  open http://localhost:5173/settings/preview/
-//   URL params:  ?view=feed|dispatch  &  ?theme=dark|light
+// Run:  cd apps/factory/ui && bunx vite --config vite.preview.config.ts
+//   URL params:  ?view=agents|subtabs|feed|dispatch|sidebar|…  &  ?theme=dark|light
+//   Agents surface (cache-first proof): ?view=agents&stale=1  or  ?view=subtabs&center=agents
+//   Dispatch from cached hosts/targets: ?view=dispatch  or  ?view=agents&dispatch=1
 // (Serve over http, not file://, or ES-module imports are CORS-blocked.)
 import React, { useState } from 'react'
 import ReactDOM from 'react-dom/client'
@@ -275,14 +277,25 @@ const linearProjectList: LinearProjectLite[] = [
   { id: 'a', name: 'Agents CLI' }, { id: 'b', name: 'Prix' }, { id: 'c', name: 'Rush App' }, { id: 'd', name: 'Rush CLI' },
 ]
 
-function Feed() {
+// Agents center feed — cache-first host freshness (issue #2030): manual refresh chip,
+// stale styling, per-host last-good pills, and cached running rows (never a blank canvas).
+// URL: ?view=agents | ?view=subtabs&center=agents | default feed with freshness.
+function AgentsFeed(props: { stale?: boolean; showNeeds?: boolean } = {}) {
+  const { stale = true, showNeeds = false } = props
   const [grp, setGrp] = useState<FloorGroupBy | 'none'>('project')
   const [subgrp, setSubgrp] = useState<FloorGroupBy | 'none'>('host')
   const [srt, setSrt] = useState<'needs' | 'recent' | 'tok' | 'name'>('needs')
   const [showBackground, setShowBackground] = useState(false)
   const visibleRunning = showBackground ? running : running.filter((a) => a.context !== 'headless')
+  // Per-host last-good ages for the freshness line (cached rows stay visible).
+  const hostFresh = [
+    { host: 'zion', age: '12s' },
+    { host: 'mac-mini', age: '1m' },
+    { host: 'yosemite-s0', age: stale ? '3m' : '18s' },
+    { host: 'yosemite-s1', age: stale ? 'stale · 4m' : '40s' },
+  ]
   return (
-    <div className="feed">
+    <div className="feed" data-testid="agents-feed">
       <FloorControls
         mode="agents"
         needsCount={2}
@@ -319,18 +332,44 @@ function Feed() {
         }}
       />
 
-      <div className="feed-sec attn">
-        <Icon name="alert" size={11} /> NEEDS YOU · 5
-        <span className="ln" />
-      </div>
-      <FeedItem agent={idleThinkingAgent} selected={false} plain={false} {...feedHandlers} />
-      <FeedItem agent={twinA} selected={false} plain={false} {...feedHandlers} />
-      <FeedItem agent={twinB} selected={false} plain={false} {...feedHandlers} />
-      <FeedItem agent={askAgent} selected={false} plain={false} {...feedHandlers} />
-      <FeedItem agent={reviewAgent} selected={false} plain={false} {...feedHandlers} />
+      {showNeeds && (
+        <>
+          <div className="feed-sec attn">
+            <Icon name="alert" size={11} /> NEEDS YOU · 5
+            <span className="ln" />
+          </div>
+          <FeedItem agent={idleThinkingAgent} selected={false} plain={false} {...feedHandlers} />
+          <FeedItem agent={twinA} selected={false} plain={false} {...feedHandlers} />
+          <FeedItem agent={twinB} selected={false} plain={false} {...feedHandlers} />
+          <FeedItem agent={askAgent} selected={false} plain={false} {...feedHandlers} />
+          <FeedItem agent={reviewAgent} selected={false} plain={false} {...feedHandlers} />
+        </>
+      )}
 
-      <div className="feed-sec">RUNNING · {visibleRunning.length}<span className="ln" />
-        <span className="fresh"><span className="rot"><Icon name="refresh" size={11} /></span>hosts synced 4s ago</span>
+      <div className="feed-sec">
+        RUNNING · {visibleRunning.length}
+        <span className="ln" />
+        <span
+          className={`fresh${stale ? ' stale' : ''}`}
+          title={stale
+            ? 'Last sync failed / past stale threshold. Click to refresh (cached rows stay visible).'
+            : 'Last cross-host sync. Click to refresh remote hosts now.'}
+          role="button"
+          data-testid="host-freshness-chip"
+        >
+          <span className="rot"><Icon name="refresh" size={11} /></span>
+          {stale ? 'sync failed · retry' : 'hosts 12s ago'}
+        </span>
+        <span className="fresh local-fresh" title="Last local session seed / event update" data-testid="local-freshness-chip">
+          local 4s ago
+        </span>
+      </div>
+      <div className="host-freshness-line" data-testid="per-host-freshness">
+        {hostFresh.map((h) => (
+          <span key={h.host} className="host-fresh-pill" title={`Last good data for ${h.host}`}>
+            {h.host} · {h.age}
+          </span>
+        ))}
       </div>
       {visibleRunning.map((a) => (
         <FeedItem key={a.id} agent={a} selected={false} plain={false} {...feedHandlers} />
@@ -350,6 +389,57 @@ function Feed() {
       {done.map((a) => (
         <FeedItem key={a.id} agent={a} selected={false} plain={false} {...feedHandlers} />
       ))}
+    </div>
+  )
+}
+
+function Feed() {
+  // Legacy feed URL still works; Agents surface proof uses ?view=agents (cache-first).
+  return <AgentsFeed showNeeds stale={false} />
+}
+
+// Full Agents center: sidebar host grid (cached counts) + agents feed with freshness.
+// URL: ?view=agents (&stale=1 for amber chip / per-host stale).
+function AgentsCenter() {
+  const params = new URLSearchParams(location.search)
+  const stale = params.get('stale') !== '0'
+  const [pins, setPins] = useState<string[]>(['zion'])
+  const [sidebarWidth] = useState(FLOOR_SIDEBAR_DEFAULT_WIDTH)
+  const sidebarAgents: FloorAgent[] = [
+    ...running,
+    agent({ id: 's1', hostLabel: 'yosemite-s0', project: 'agents-cli' }),
+    agent({ id: 's2', hostLabel: 'yosemite-s0', project: 'agents-cli' }),
+    agent({ id: 's3', hostLabel: 'yosemite-s1', project: 'agents-cli' }),
+  ]
+  const devices = [
+    { name: 'zion', online: true, agents: 0 },
+    { name: 'mac-mini', online: true, agents: 0 },
+    { name: 'win-mini', online: true, agents: 0 },
+    { name: 'yosemite-s0', online: true, agents: 0 },
+    { name: 'yosemite-s1', online: false, agents: 0 },
+  ]
+  return (
+    <div className="page" style={{ height: '100%', minHeight: '100vh', '--floor-sidebar-width': `${sidebarWidth}px` } as React.CSSProperties} data-testid="agents-center">
+      <FloorSidebar
+        agents={sidebarAgents}
+        tickets={tickets}
+        projFilter={null}
+        offlineHosts={['yosemite-s1']}
+        devices={devices}
+        hostPins={pins}
+        projects={managedProjects}
+        onManageProjects={noop}
+        sidebarWidth={sidebarWidth}
+        onSidebarWidthChange={noop}
+        onCollapse={noop}
+        onToggleHostPin={(n) => setPins((p) => (p.includes(n) ? p.filter((x) => x !== n) : [...p, n]))}
+        onReorderHostPins={setPins}
+        onScope={noop}
+        localHost="zion"
+      />
+      <div className="feed-col">
+        <AgentsFeed stale={stale} showNeeds={false} />
+      </div>
     </div>
   )
 }
@@ -401,6 +491,7 @@ function Backlog() {
 // (Agents/Backlog/Projects/Hosts) with count+needs badges, two pre-opened task tabs, and
 // the one contextual bar that swaps its control set per active center (or hides for a
 // task tab / projects / hosts). URL: ?view=subtabs (&center=agents|backlog|projects|host).
+// center=agents renders the cache-first Agents feed (freshness chip + host pills).
 function Subtabs() {
   const params = new URLSearchParams(location.search)
   const [center, setCenter] = useState<CenterMode>((params.get('center') as CenterMode) || 'agents')
@@ -409,14 +500,13 @@ function Subtabs() {
     { id: 'RUSH-1262', title: 'PKCE token exchange uses unpinned http client', source: 'LN' },
     { id: '#418', title: 'Kanban / Deadline feed views are stubs', source: 'GH' },
   ])
-  const [grp, setGrp] = useState<FloorGroupBy | 'none'>('project')
-  const [subgrp, setSubgrp] = useState<FloorGroupBy | 'none'>('host')
   const [srt, setSrt] = useState<FloorSort>('needs')
   const [tg, setTg] = useState<TicketGroupBy>('project')
   const [tsg, setTsg] = useState<TicketGroupBy | 'none'>('source')
   const [ts, setTs] = useState<TicketSort>('priority')
   const [src, setSrc] = useState<Record<'LN' | 'GH', boolean>>({ LN: true, GH: true })
   const [selected, setSelected] = useState<string | null>(null)
+  const stale = params.get('stale') !== '0'
 
   const fixed: FixedTab[] = [
     { center: 'agents', label: 'Agents', count: running.length + 2, needs: 2 },
@@ -425,8 +515,10 @@ function Subtabs() {
     { center: 'host', label: 'Hosts', count: 5 },
   ]
   const controlsMode = activeTaskTab ? null : floorControlsMode(center)
+  // Agents center owns its FloorControls inside AgentsFeed (Sort + needs only).
+  const showOuterControls = controlsMode && center !== 'agents'
   return (
-    <div className="feed-col">
+    <div className="feed-col" data-testid="subtabs-center">
       <FloorSubtabs
         fixed={fixed}
         center={center}
@@ -441,7 +533,7 @@ function Subtabs() {
         }}
         onDispatch={noop}
       />
-      {controlsMode && (
+      {showOuterControls && (
         <FloorControls
           mode={controlsMode}
           needsCount={2}
@@ -453,6 +545,9 @@ function Subtabs() {
           ticketSort={ts} onTicketSort={setTs}
           srcFilter={src} onToggleSrc={(s) => setSrc((f) => ({ ...f, [s]: !f[s] }))}
         />
+      )}
+      {!activeTaskTab && center === 'agents' && (
+        <AgentsFeed stale={stale} showNeeds={false} />
       )}
       {!activeTaskTab && center === 'backlog' && (
         <BacklogCenter
@@ -469,6 +564,21 @@ function Subtabs() {
             setTaskTabs((prev) => openTaskTab(prev, { id: t.id, title: t.title, source: t.source }))
             setActiveTaskTab(t.id)
           }}
+        />
+      )}
+      {!activeTaskTab && center === 'projects' && (
+        <ProjectsPane
+          projects={managedProjects}
+          rollups={{
+            'agents-cli': { run: 3, wait: 1, backlog: 4, prs: 2, lastActivityMs: Date.now() - 40 * 60_000 },
+            rush: { run: 2, wait: 0, backlog: 12, prs: 1, lastActivityMs: Date.now() - 5 * 60_000 },
+          }}
+          linearProjects={linearProjectList}
+          pickedFolder={null}
+          onSave={noop}
+          onDelete={noop}
+          onPickFolder={noop}
+          onClose={noop}
         />
       )}
     </div>
@@ -822,8 +932,11 @@ function LaunchMatrixPreview() {
 function Preview() {
   const params = new URLSearchParams(location.search)
   const theme = params.get('theme') === 'light' ? 'theme-light' : 'theme-dark'
+  // Agents proof: ?view=agents (sidebar host grid + freshness) or
+  // ?view=subtabs&center=agents. Dispatch from cached hosts/targets: ?view=dispatch
+  // (or ?view=agents&dispatch=1).
   const view = params.get('view') ?? 'feed'
-  const [dispatchOpen] = useState(view === 'dispatch')
+  const [dispatchOpen] = useState(view === 'dispatch' || params.get('dispatch') === '1')
   if (view === 'launch') {
     return (
       <div className={`swarmify-root ${theme}`} style={{ minHeight: '100vh' }}>
@@ -835,7 +948,16 @@ function Preview() {
     <div className={`swarmify-root ${theme}`} style={{ minHeight: '100vh' }}>
       <div className="sw-floor-dashboard" style={{ padding: 0 }}>
         <div className="page" style={{ display: 'flex' }}>
-          {view === 'sidebar' ? <Sidebar /> : view === 'subtabs' ? <Subtabs /> : view === 'projects' ? <div className="feed-col"><Projects /></div> : view === 'detail' ? <Detail /> : view === 'decision' ? <Decision /> : view === 'prs' ? <PrBoard /> : view === 'ticket' ? <Ticket /> : view === 'recap' ? <Recap /> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
+          {view === 'agents' ? <AgentsCenter />
+            : view === 'sidebar' ? <Sidebar />
+            : view === 'subtabs' ? <Subtabs />
+            : view === 'projects' ? <div className="feed-col"><Projects /></div>
+            : view === 'detail' ? <Detail />
+            : view === 'decision' ? <Decision />
+            : view === 'prs' ? <PrBoard />
+            : view === 'ticket' ? <Ticket />
+            : view === 'recap' ? <Recap />
+            : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
         </div>
       </div>
       <DispatchPanel

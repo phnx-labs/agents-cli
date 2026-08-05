@@ -49,6 +49,23 @@ function truncateMiddle(s: string, max = 42): string {
   return `${s.slice(0, head)}…${s.slice(s.length - tail)}`
 }
 
+/**
+ * CLI-safe project id from a repo slug or display name.
+ * `owner/repo` must not keep `/` (path/id separators break agents projects ops).
+ * Exported for unit tests.
+ */
+export function safeProjectId(raw: string): string {
+  const id = raw
+    .trim()
+    .toLowerCase()
+    .replace(/\//g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return id || 'project'
+}
+
 export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFolder, commandError = null, onSave, onDelete, onPickFolder, onClose }: ProjectsPaneProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [path, setPath] = useState('')
@@ -102,7 +119,8 @@ export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFol
   const save = () => {
     if (!canSave) return
     const base = editingId ? projects.find((p) => p.id === editingId) ?? null : null
-    let id = editingId ?? (repoSlug.trim() || name.trim()).toLowerCase().replace(/\s+/g, '-')
+    // Edits keep the existing id; new rows sanitize repoSlug (`owner/repo` → `owner-repo`).
+    let id = editingId ?? safeProjectId(repoSlug.trim() || name.trim())
     // New project: never overwrite an existing entry that shares a name/slug (e.g. two
     // manual projects both named "Agents CLI" with no repo slug). Disambiguate with a
     // numeric suffix so upsertManagedProject can't silently drop the first one.
@@ -120,6 +138,9 @@ export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFol
       repoSlug: repoSlug.trim() || undefined,
       linearProjectId: linear?.id,
       linearProjectName: linear?.name,
+      // Preserve host-owned dispatch caps on edit — the form does not edit them.
+      autoDispatch: base?.autoDispatch,
+      maxAgents: base?.maxAgents,
       confidence: base?.confidence ?? 'high',
       source: base?.source ?? 'manual',
     })

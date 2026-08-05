@@ -56,4 +56,16 @@ describe('Floor poll / timer budget (no recurring probes)', () => {
     expect(source).toContain('data-testid="cli-unavailable"')
     expect(source).toContain('data-testid="per-host-freshness"')
   })
+
+  test('managedProjectsData.error retains last-good projects', () => {
+    // Failure path surfaces error and returns before setManagedProjects.
+    expect(source).toMatch(
+      /msg\?\.type === 'managedProjectsData'[\s\S]*?typeof msg\.error === 'string'[\s\S]*?setProjectCommandError\(msg\.error\)[\s\S]*?return/,
+    )
+    expect(source).toContain('Retain last-good projects')
+    // Success path still replaces projects and clears the error.
+    expect(source).toMatch(
+      /Array\.isArray\(msg\.projects\)[\s\S]*?setManagedProjects\(msg\.projects as ManagedProject\[\]\)[\s\S]*?setProjectCommandError\(null\)/,
+    )
+  })
 })
