@@ -7,9 +7,17 @@ from one place.
 
 > Phoenix Labs OSS · Apache-2.0.
 
-**This file is the repo map + repo-wide policy.** Each component has its own
-`AGENTS.md` (agent map) and/or `README.md` (usage). Start there for anything
-component-specific — this file deliberately stays shallow.
+**Two main projects live here:** (a) the **agents CLI** — [`apps/cli`](apps/cli),
+the published `@phnx-labs/agents-cli` — and (b) the **CLI's VS Code extension,
+Factory** — [`apps/factory`](apps/factory). Everything else (`apps/ios`,
+`native/computer-*`, `packages/*`) is a **helper app / library for one feature**,
+not a main project.
+
+**This file is the repo map + repo-wide policy — it deliberately stays shallow.**
+**Read the nearest component `AGENTS.md` (recursively) before working in it** — for
+Claude that's `CLAUDE.md`, a symlink to the same file — and keep going down: the
+component file, not this one, is where component-specific detail lives. Every
+component with a real `AGENTS.md` carries `CLAUDE.md`/`GEMINI.md` symlinks to it.
 
 ## Repo map
 

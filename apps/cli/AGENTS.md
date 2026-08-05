@@ -317,6 +317,28 @@ Note: `src/lib/session/` here is the transcript **reader**. The live-session
 **writer** is a separate package, [`packages/session-tracker`](../../packages/session-tracker)
 — different data, different consumer; see its AGENTS.md.
 
+### `agents sessions` preview architecture (map before you touch it)
+
+The interactive UI is three picker variants in `src/lib/picker.ts`: `itemPicker`
+(single-select, `space` toggles preview), `dynamicPicker` (async data source, used
+by the session browser, `tab` toggles preview), and a multi-select variant. All
+render a right/bottom **preview pane** built by `buildPreview(session)` in
+`src/commands/sessions-picker.ts` — a header (agent/model/cwd/tokens/ticket/PR) plus
+`formatCompactPreview` (prompt, files/changes, hooks, errors, tests, last response).
+
+Routing lives in `src/commands/sessions.ts`: `isBareBrowserListing`
+(+`hasNoBrowserDisqualifyingFlags`) gates the bare fleet-wide listing to the rich
+`runSessionBrowser` ([`src/commands/sessions-browser.ts`](src/commands/sessions-browser.ts));
+a query/filter falls through to `pickSessionInteractive` → `sessionPicker`.
+`--flat`/`--tree`/`--json`/`--no-interactive` print non-interactive views with no
+preview. `PICKER_RECENT_COUNT = 15` caps the picker's list rows.
+
+Gotcha: the preview pane has **no guaranteed height** — `availablePreviewRows =
+terminalRows() - fixedRows` (`picker.ts`), and `limitPreviewHeight` returns `''` when
+that collapses, so the preview can silently vanish on a full/short terminal (the
+RUSH-2198 bug). See the [§Contracts §Sessions spec](docs/specifications.md#sessions)
+for the non-empty-preview invariant (SES-1, SES-3).
+
 ## Bundled native helpers (where the tarball's `.app`s come from)
 
 Two native helpers plus the standalone signed CLI binary ship **inside** this
