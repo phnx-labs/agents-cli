@@ -1195,9 +1195,12 @@ logic changes, so a new metric never reports stale numbers beside fresh ones.
 - **Facet coverage is per harness.** Line counts come from structured edit arguments, so
   they work for Claude and droid but not codex, which patches through shell `exec`.
   Unmeasurable is rendered as "not measurable", never as `0`.
-- **Commits and pushes are substring-matched from shell commands**, so they disagree
-  with `agents output`, which counts real commits by deduped SHA from `git log`. Labelled
-  "seen in shell commands" for that reason.
+- **Commits and pushes are substring-matched from shell command text**, so they
+  disagree with `agents output`, which counts real commits by deduped SHA from
+  `git log`. Labelled "seen in shell commands" for that reason. Coverage also varies by
+  harness: the codex parser exposes a command string for `exec_command` but not plain
+  `exec`, its dominant tool, so on a measured run only 92 of its 5,197 calls were
+  searchable. A low count there means low visibility, not low activity.
 - **Reply-time percentiles exclude gaps over an hour** (someone left and came back). The
   excluded count is printed. There is deliberately no lower bound: `/insights` drops
   sub-2-second replies, which censors ~28% of the sample and inflates the median by

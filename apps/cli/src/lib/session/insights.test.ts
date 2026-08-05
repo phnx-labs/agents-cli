@@ -122,6 +122,18 @@ describe('computeInsightFacets', () => {
     expect(f.gapsOverCeiling).toBe(1);
   });
 
+  it('rejects a negative gap from clock skew rather than counting it', () => {
+    // Removing the old 2s floor removed the implicit negative guard with it; a real
+    // corpus contained a gap of -8.662s from out-of-order record timestamps.
+    const f = computeInsightFacets([
+      userMsg(0, 'go'),
+      asstMsg(50),
+      userMsg(40, 'arrived with an earlier stamp than the reply it follows'),
+    ], 0);
+    expect(f.responseGaps).toEqual([]);
+    expect(f.gapsOverCeiling).toBe(0);
+  });
+
   it('bins user messages by local hour', () => {
     // UTC 12:00 with a -60min offset (UTC+1) is 13:00 local.
     const f = computeInsightFacets([userMsg(0, 'a'), userMsg(3600, 'b')], -60);

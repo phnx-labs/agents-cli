@@ -88,13 +88,25 @@ export interface InsightFacets {
    */
   linesTouchedBefore: number;
   linesTouchedAfter: number;
-  /** Edit/write calls in a vocabulary we recognise — 0 means the numbers above are not measurable. */
+  /**
+   * Edit/write calls in a vocabulary we recognise. NOT a proxy for measurability:
+   * codex renames `apply_patch` to `Edit` but carries no line-bearing arguments, so it
+   * reports edit calls with zero lines. Callers decide "measurable" from the line
+   * totals themselves.
+   */
   editingToolCalls: number;
   filesCreated: number;
   filesModified: number;
   filesDeleted: number;
   gitCommits: number;
   gitPushes: number;
+  /**
+   * Tool calls that carried an actual command string to search. Not every harness
+   * populates one: the codex parser sets `command` for `exec_command` but not for
+   * plain `exec`, its dominant tool, so git activity is structurally invisible there.
+   * 0 means the commit counts are unmeasurable, not observed-zero.
+   */
+  shellCommandsSeen: number;
   /** 24 slots, local time, indexed by hour of the user's messages. */
   messageHours: number[];
   userTurns: number;
@@ -109,6 +121,7 @@ function emptyFacets(): InsightFacets {
     interruptions: 0, responseGaps: [], gapsOverCeiling: 0,
     linesTouchedBefore: 0, linesTouchedAfter: 0, editingToolCalls: 0,
     filesCreated: 0, filesModified: 0, filesDeleted: 0, gitCommits: 0, gitPushes: 0,
+    shellCommandsSeen: 0,
     messageHours: new Array(24).fill(0), userTurns: 0, assistantTurns: 0,
     toolCount: 0, errorCount: 0,
   };
@@ -229,8 +242,11 @@ export function computeInsightFacets(
           f.messageHours[local.getUTCHours()]++;
           if (lastAssistantTs !== null) {
             const gap = (ts - lastAssistantTs) / 1000;
-            if (gap < GAP_CEILING_SECONDS) f.responseGaps.push(gap);
-            else f.gapsOverCeiling++;
+            // >= 0 because clock skew between records can produce a negative gap
+            // (one of -8.662s in a real corpus). Removing the old 2s floor removed
+            // this guard with it; a negative reply latency is not a data point.
+            if (gap >= 0 && gap < GAP_CEILING_SECONDS) f.responseGaps.push(gap);
+            else if (gap >= GAP_CEILING_SECONDS) f.gapsOverCeiling++;
           }
         }
         lastAssistantTs = null;
@@ -259,6 +275,7 @@ export function computeInsightFacets(
           f.editingToolCalls++;
         }
         if (e.command) {
+          f.shellCommandsSeen++;
           f.gitCommits += countGitOp(e.command, 'commit');
           f.gitPushes += countGitOp(e.command, 'push');
         }
@@ -367,6 +384,7 @@ export function mergeFacets(into: InsightFacets, add: InsightFacets): void {
   into.filesDeleted += add.filesDeleted;
   into.gitCommits += add.gitCommits;
   into.gitPushes += add.gitPushes;
+  into.shellCommandsSeen += add.shellCommandsSeen;
   into.userTurns += add.userTurns;
   into.assistantTurns += add.assistantTurns;
   into.toolCount += add.toolCount;

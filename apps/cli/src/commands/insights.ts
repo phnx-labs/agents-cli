@@ -97,9 +97,13 @@ function resolveGroup(by: string | undefined): GroupDim {
 }
 
 /**
- * Sessions too short to say anything about how you work. Mirrors the filter
- * `/insights` applies (under 2 user messages, under a minute) so the two reports
- * count comparable populations. The dropped count is always reported, never silent.
+ * Sessions too short to say anything about how you work.
+ *
+ * Inspired by the filter `/insights` applies, but NOT identical and deliberately not
+ * claimed to be: `/insights` counts USER messages, while `messageCount` on the index
+ * counts both roles, so the same threshold is a weaker bar here. Matching it exactly
+ * would mean parsing every session just to decide whether to parse it. The dropped
+ * count is always reported, never silent.
  */
 function isSubstantive(m: SessionMeta, minMessages: number): boolean {
   if ((m.messageCount ?? 0) < minMessages) return false;
@@ -311,10 +315,17 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta): v
     out.push(`  ${chalk.gray('lines touched  —  not measurable for this harness (edits go through the shell)')}`);
   }
   out.push(`  ${chalk.gray(`${all.filesCreated} created, ${all.filesModified} modified, ${all.filesDeleted} deleted`)}`);
-  // Substring-matched from shell commands, so it disagrees with `agents output`, which
-  // counts real commits by deduped SHA from git log. Named so the difference is not a
-  // mystery.
-  out.push(`  ${chalk.gray(`${all.gitCommits} commits · ${all.gitPushes} pushes (seen in shell commands)`)}`);
+  // Same not-measurable rule as the lines above. These are substring-matched from
+  // shell command TEXT, and not every harness exposes it — the codex parser populates
+  // `command` for `exec_command` but not plain `exec`, its dominant tool — so gate on
+  // whether we had anything to search rather than on seeing a shell-shaped tool call.
+  // When we did, the count is real, and still disagrees with `agents output`, which
+  // counts deduped SHAs from git log.
+  if (all.shellCommandsSeen > 0) {
+    out.push(`  ${chalk.gray(`${all.gitCommits} commits · ${all.gitPushes} pushes (seen in shell commands)`)}`);
+  } else {
+    out.push(`  ${chalk.gray('commits  —  not measurable for this harness')}`);
+  }
 
   renderHours(all.messageHours, out);
 
@@ -510,7 +521,7 @@ export function registerInsightsCommand(program: Command): void {
     .option('--by <dimension>', 'Group by: account (default), agent, project, or day')
     .option('--account <match>', 'Only sessions whose account key, email, or org contains this')
     .option('--agent <id>', 'Only one harness (claude, codex, droid, …)')
-    .option('--min-messages <n>', 'Skip sessions under this many messages (default 2)')
+    .option('--min-messages <n>', 'Skip sessions under this many messages, both roles counted (default 2)')
     .option('--refresh', 'Discard cached facets and re-read every transcript')
     .option('--narrative', 'Add a written read on the numbers via a headless `claude -p`')
     .action(async (options: InsightsOptions) => {
