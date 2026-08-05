@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.22.22
+
+- **Codex usage bars no longer show a previous account's numbers after you switch accounts.** `agents view` derives a Codex version's usage from that home's session transcripts, which carry no account identity and are not removed on logout — so after logging a version out and into a different ChatGPT account, the bar kept showing the old account's last-seen percentage (e.g. "S: 99%") until the new account ran a session. Usage is now scoped to the current login: only sessions written at/after the id_token's `auth_time` (the OIDC authentication time) count, and a signed-out home reports no usage. `auth_time` is used rather than the auth.json file mtime because Codex rewrites auth.json on every token refresh, but a refresh does not re-authenticate, so `auth_time` stays at the real login — an actively-refreshing account keeps its bar, only a real re-login or account switch moves the floor. Source: `apps/cli/src/lib/usage.ts`.
+
 ## 1.22.21
 
 - **`agents secrets exec <bundle> -- <cmd>` now resolves a locked keychain bundle
