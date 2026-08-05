@@ -1949,7 +1949,7 @@ export function registerRunCommand(program: Command): void {
       if (accountPickerRequested && !isValidAgent(rawAgent)) {
         if (profileExists(rawAgent)) {
           console.error(chalk.red(
-            `Account selection is not available for profile '${rawAgent}'. Run its concrete host agent with @ instead.`,
+            `Account selection is not available for custom harness '${rawAgent}'. Run its concrete host agent with @ instead.`,
           ));
           process.exit(1);
         }
@@ -1995,7 +1995,7 @@ export function registerRunCommand(program: Command): void {
           profileEnv = resolved.env;
           profileFallbackModel = resolved.fallbackModel;
           fromProfile = true;
-          process.stderr.write(chalk.gray(`Resolved profile '${resolved.profileName}' -> ${agent}${version ? `@${version}` : ''}\n`));
+          process.stderr.write(chalk.gray(`Resolved custom harness '${resolved.profileName}' -> ${agent}${version ? `@${version}` : ''}\n`));
           if (resolved.tierNote) {
             process.stderr.write(chalk.gray(`[agents] ${resolved.tierNote}\n`));
           }
@@ -2005,7 +2005,7 @@ export function registerRunCommand(program: Command): void {
           // native, HOST-catalog tier block below. When the profile has no
           // `models:` opt-in at all, resolvedModel stays undefined and
           // options.model is left as the raw tier token on purpose — the
-          // "cost tiers don't apply to profile ..." discard guard further
+          // "cost tiers don't apply to custom harness ..." discard guard further
           // down this function is the canonical fallback for that case, and
           // this block must not race it with a second, differently-worded
           // message.
@@ -2386,7 +2386,7 @@ export function registerRunCommand(program: Command): void {
         if (version) {
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: version ${version} is pinned\n`));
         } else if (fromProfile) {
-          process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: profile pins its own version/auth\n`));
+          process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: custom harness pins its own version/auth\n`));
         } else {
           try {
             const resolved = await resolveRunVersion(agent, strategy, cwd);
@@ -2660,13 +2660,13 @@ export function registerRunCommand(program: Command): void {
           : undefined);
 
       // Cost tiers (cheap|default|best|ultra) resolve against a harness's own model
-      // catalog. A profile's model comes from its endpoint, not the host harness, so a
-      // tier here would forward an incompatible host-harness model to a different API.
-      // Discard it loudly and let the profile's configured model stand.
+      // catalog. A custom harness's model comes from its endpoint, not the host
+      // harness, so a tier here would forward an incompatible host-harness model to a
+      // different API. Discard it loudly and let the custom harness's own model stand.
       if (fromProfile && model && isTierToken(model)) {
         process.stderr.write(chalk.yellow(
-          `[agents] --model ${model}: cost tiers don't apply to profile '${rawAgent}' ` +
-          `(its model comes from the endpoint) — ignoring the tier, using the profile's configured model\n`,
+          `[agents] --model ${model}: cost tiers don't apply to custom harness '${rawAgent}' ` +
+          `(its model comes from the endpoint) — ignoring the tier, using the custom harness's configured model\n`,
         ));
         model = undefined;
       }

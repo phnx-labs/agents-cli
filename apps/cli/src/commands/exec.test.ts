@@ -472,7 +472,7 @@ describe('cost tier on a profile run is discarded, not resolved against the host
         },
       );
       // The guard runs before any spawn, so the standout warning is the invariant.
-      expect(result.stderr).toContain("cost tiers don't apply to profile 'kimiprofile'");
+      expect(result.stderr).toContain("cost tiers don't apply to custom harness 'kimiprofile'");
       // When the host binary is reached, it must carry the profile's own model, never
       // a claude tier id resolved from the host harness catalog.
       if (fs.existsSync(spawnLog)) {
