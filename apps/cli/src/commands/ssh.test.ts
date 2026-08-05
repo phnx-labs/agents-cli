@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { renderLeasedBoxesSection, raceFleetPingDeadline } from './ssh.js';
+import { renderLeasedBoxesSection, showLeasedBoxesSection, raceFleetPingDeadline } from './ssh.js';
 import type { CrabboxBox } from '../lib/crabbox/cli.js';
 import { fanOutDevices, type FanOutDeviceTarget } from '../lib/devices/fleet.js';
 
@@ -173,6 +173,26 @@ describe('renderLeasedBoxesSection — F4 devices "Leased boxes" (RUSH-1923)', (
     expect(flat).not.toContain('203.0.113.9');
     expect(flat).toContain('agents run --box <slug>');
     expect(flat).toContain('agents lease stop <slug>');
+  });
+});
+
+describe('showLeasedBoxesSection — devices list leased-boxes gate (RUSH-2190)', () => {
+  // The section load scans the keychain for bundle credentials and can raise a
+  // Touch ID sheet after the table prints, so the default list must never reach
+  // for it. These pin the exact gate so a refactor can't silently reopen it.
+  it('is off by default and off for --json-style calls (no flags)', () => {
+    expect(showLeasedBoxesSection({})).toBe(false);
+    expect(showLeasedBoxesSection({ stats: true })).toBe(false);
+  });
+
+  it('is on only with an explicit --all', () => {
+    expect(showLeasedBoxesSection({ all: true })).toBe(true);
+    expect(showLeasedBoxesSection({ all: true, stats: true })).toBe(true);
+  });
+
+  it('--no-stats stays a hard opt-out even with --all', () => {
+    expect(showLeasedBoxesSection({ all: true, stats: false })).toBe(false);
+    expect(showLeasedBoxesSection({ stats: false })).toBe(false);
   });
 });
 
