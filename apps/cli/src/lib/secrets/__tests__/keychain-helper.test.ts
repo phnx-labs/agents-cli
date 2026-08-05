@@ -310,9 +310,11 @@ describe('keychain-helper synced (iCloud) recovery verbs', () => {
     expect(block).toContain('kSecReturnAttributes: kCFBooleanTrue!');
     expect(block).not.toContain('kSecReturnData'); // attributes only — never decrypts
     expect(block).toContain('errSecInteractionNotAllowed'); // tolerates a locked keybag
-    // Same SEC-14 no-prompt guard as `list`: an attributes-only sweep still
-    // evaluates a synced item's ACL, so pin UISkip instead of the default UIAllow.
-    expect(block).toContain('kSecUseAuthenticationUI: kSecUseAuthenticationUISkip');
+    // No UISkip needed: a synchronizable item cannot carry the biometry ACL
+    // (mutually exclusive with ...ThisDeviceOnly), so this sweep never evaluates
+    // an ACL — unlike the device-local `list` DP pass. Guard that it stays that
+    // way (no ACL to skip, and never the prompting UIAllow query form).
+    expect(block).not.toContain('kSecUseAuthenticationUI: kSecUseAuthenticationUIAllow');
   });
 
   it('get-batch-synced reads via syncedBase and emits get-batch V/M records', () => {

@@ -674,8 +674,11 @@ case "list-orphans":
     // list-orphans <prefix> <account> — enumerate data-protection items whose
     // service starts with <prefix> for <account> that live under a NON-concrete
     // access group (pre-#279 orphans filed under the implicit default group).
-    // Attributes only — never decrypts, never prompts. Prints one orphaned
-    // service per line; used by `migrate-acl` for its prompt-free dry-run report.
+    // Attributes only — never decrypts. Unlike `list`, this keeps the default
+    // UIAllow: an ACL'd orphan MUST stay visible here so `migrate-acl` can re-home
+    // it, so a kSecMatchLimitAll sweep past a biometry-ACL'd item may pop one sheet
+    // — acceptable because this runs only from the interactive `secrets migrate`
+    // command, never the hot path. Prints one orphaned service per line.
     guard args.count == 4 else { die(2, "Usage: agents-keychain list-orphans <prefix> <account>") }
     let (prefix, account) = (args[2], args[3])
     guard !prefix.isEmpty else { die(2, "list-orphans requires non-empty prefix") }
@@ -810,11 +813,11 @@ case "list-synced":
     // generic-password items whose service starts with <prefix> for the current
     // user. These are pre-biometry-era bundles orphaned by the device-local
     // cutover; every modern query pins kSecAttrSynchronizable false, so this is
-    // the only verb that can see them. Attributes only — never decrypts. UISkip
-    // keeps it prompt-free even if a synced item carries a biometry ACL: an
-    // attributes-only kSecMatchLimitAll sweep still evaluates the ACL and would
-    // otherwise pop a sheet under the default UIAllow (same SEC-14 bug the `list`
-    // verb had). Prints one service name per line.
+    // the only verb that can see them. Attributes only — never decrypts, and
+    // never prompts: a synchronizable item cannot carry the biometry ACL
+    // (kSecAttrSynchronizable is mutually exclusive with the ...ThisDeviceOnly
+    // accessibility the ACL requires — see `get-batch-synced`), so this sweep has
+    // no ACL to evaluate. Prints one service name per line.
     guard args.count == 3 else { die(2, "Usage: agents-keychain list-synced <prefix>") }
     let prefix = args[2]
     guard !prefix.isEmpty else { die(2, "list-synced requires non-empty prefix") }
@@ -825,7 +828,6 @@ case "list-synced":
         kSecReturnAttributes: kCFBooleanTrue!,
         kSecUseDataProtectionKeychain: kCFBooleanTrue!,
         kSecAttrSynchronizable: kCFBooleanTrue!,
-        kSecUseAuthenticationUI: kSecUseAuthenticationUISkip,
     ]
     var syncedResult: AnyObject?
     let syncedStatus = SecItemCopyMatching(syncedQuery as CFDictionary, &syncedResult)
