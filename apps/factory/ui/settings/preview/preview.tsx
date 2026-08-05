@@ -288,8 +288,7 @@ function Feed() {
         needsCount={2}
         sidebarOpen rightOpen plain={false}
         onToggleSidebar={noop} onToggleRight={noop} onTogglePlain={noop}
-        sort={srt} onSort={setSrt} group={grp} onGroup={setGrp}
-        subgroup={subgrp} onSubgroup={setSubgrp}
+        sort={srt} onSort={setSrt}
         ticketGroup="project" onTicketGroup={noop}
         ticketSubgroup="none" onTicketSubgroup={noop}
         ticketSort="priority" onTicketSort={noop}
@@ -375,8 +374,7 @@ function Backlog() {
         mode="backlog"
         sidebarOpen rightOpen plain={false}
         onToggleSidebar={noop} onToggleRight={noop} onTogglePlain={noop}
-        sort="needs" onSort={noop} group="project" onGroup={noop}
-        subgroup="none" onSubgroup={noop}
+        sort="needs" onSort={noop}
         ticketGroup={group} onTicketGroup={setGroup}
         ticketSubgroup={subgroup} onTicketSubgroup={setSubgroup}
         ticketSort={sort} onTicketSort={setSort}
@@ -449,8 +447,7 @@ function Subtabs() {
           needsCount={2}
           sidebarOpen rightOpen plain={false}
           onToggleSidebar={noop} onToggleRight={noop} onTogglePlain={noop}
-          sort={srt} onSort={setSrt} group={grp} onGroup={setGrp}
-          subgroup={subgrp} onSubgroup={setSubgrp}
+          sort={srt} onSort={setSrt}
           ticketGroup={tg} onTicketGroup={setTg}
           ticketSubgroup={tsg} onTicketSubgroup={setTsg}
           ticketSort={ts} onTicketSort={setTs}

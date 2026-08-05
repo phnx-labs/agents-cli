@@ -1182,11 +1182,16 @@
   border-radius: 1px 1px 0 0;
   background: #22C55E;
   opacity: 0.6;
-  transition: height 0.14s cubic-bezier(0.4, 0, 0.2, 1);
+  /* 1s data tick + CSS interpolation (no 140ms React churn) */
+  transition: height 0.9s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sw-spark-bar:nth-last-child(-n+5) { opacity: 0.85; }
 .sw-spark-bar:nth-last-child(-n+2) { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sw-spark-bar { transition: none; }
+}
 
 .sw-throughput-value {
   font-size: 20px;

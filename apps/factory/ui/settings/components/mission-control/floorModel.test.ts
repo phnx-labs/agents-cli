@@ -759,6 +759,19 @@ describe('computeHostRows', () => {
     const rows = computeHostRows([], [], [], ['zion'])
     expect(rows).toEqual([{ name: 'zion', count: 0, offline: false, pinned: true }])
   })
+
+  test('running counts come only from the agents session collection (ignore device agents)', () => {
+    // deviceHealth.runningAgents used to double as a second count source and drift
+    // from the feed. Host rows must count floor agents only.
+    const rows = computeHostRows(
+      [makeAgent({ id: 'a', host: 'zion', hostLabel: 'zion' })],
+      [{ name: 'zion', online: true, agents: 99 }],
+      [],
+      [],
+      'zion',
+    )
+    expect(rows.find((r) => r.name === 'zion')!.count).toBe(1)
+  })
 })
 
 describe('latestTodos -- the checklist from the newest TodoWrite', () => {

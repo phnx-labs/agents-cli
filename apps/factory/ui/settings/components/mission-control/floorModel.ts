@@ -257,7 +257,9 @@ export function computeHostRows(
   const rows = [...names].sort().map((name) => {
     const dev = deviceByName.get(name)
     const offlineRow = dev ? !dev.online : offline.has(name)
-    const count = byHost[normalizeHostKey(name)] ?? dev?.agents ?? 0
+    // Single session collection: counts come only from the live agents list,
+    // never a second deviceHealth/runningAgents number (floor performance).
+    const count = byHost[normalizeHostKey(name)] ?? 0
     return { name, count, offline: offlineRow, pinned: pinIndex.has(name) }
   })
   // Pinned first (in the user's drag order), then the alphabetical remainder.
