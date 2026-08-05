@@ -678,8 +678,8 @@ describe('resolveSessionQuery indexed metadata coverage', () => {
   });
 });
 
-describe('RUSH-2203 local definitive hit skips SSH', () => {
-  it('resolves a full id and an exact label from the local DB without dialing any peer', () => {
+describe('RUSH-2203 local full-UUID hit skips SSH', () => {
+  it('resolves a full id from the local DB with ZERO dials, but a label still consults the fleet', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-local-hit-'));
     try {
       const runner = [
@@ -691,13 +691,17 @@ describe('RUSH-2203 local definitive hit skips SSH', () => {
         "const id = '019fd0c8-b3e9-77a2-a1a4-444698c4d897';",
         "const filePath = path.join(home, id + '.jsonl'); fs.writeFileSync(filePath, '');",
         "upsertSession({ id, shortId: id.slice(0, 8), agent: 'claude', timestamp: new Date().toISOString(), filePath, label: 'ship the resume fix' }, '');",
-        // Any dial throws: a definitive local hit must return before the fan-out.
+        // Any dial throws so we can prove whether a peer was contacted.
         "let dialed = 0;",
         "const deps = { gatherRemoteList: async () => { dialed++; throw new Error('SSH DIALED'); } };",
+        // Full UUID: globally unique, resolves before any fan-out (dialed stays 0).
         "const byId = await resolveSessionMetadataValue(id, {}, deps);",
+        "const idDials = dialed;",
+        // Label: NOT globally unique, so it must consult the fleet (a peer could
+        // hold a same-label session) — the throwing dep makes it fail closed.
         "const byLabel = await resolveSessionMetadataValue('ship the resume fix', {}, deps);",
         "closeDB();",
-        "process.stdout.write(JSON.stringify({ byIdKind: byId.kind, byIdId: byId.session && byId.session.id, byLabelKind: byLabel.kind, byLabelId: byLabel.session && byLabel.session.id, dialed }));",
+        "process.stdout.write(JSON.stringify({ byIdKind: byId.kind, byIdId: byId.session && byId.session.id, idDials, byLabelKind: byLabel.kind, labelDialed: dialed > idDials }));",
       ].join(' ');
       const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', runner], {
         cwd: repoRoot,
@@ -708,9 +712,9 @@ describe('RUSH-2203 local definitive hit skips SSH', () => {
       expect(JSON.parse(result.stdout)).toEqual({
         byIdKind: 'resolved',
         byIdId: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
-        byLabelKind: 'resolved',
-        byLabelId: '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
-        dialed: 0, // zero SSH: the local index answered both lookups
+        idDials: 0,          // zero SSH: the local index answered the UUID lookup
+        byLabelKind: 'partial', // label failed closed because the (throwing) fleet was consulted
+        labelDialed: true,   // the label DID reach the fan-out
       });
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
@@ -1917,16 +1921,15 @@ describe('RUSH-2203 definitive-match fleet resolve', () => {
   };
 
   describe('isDefinitiveMatch', () => {
-    it('treats a full UUID exact match as definitive', () => {
+    it('treats a full UUID exact match as definitive (case-insensitive)', () => {
       expect(isDefinitiveMatch(base, FULL)).toBe(true);
       expect(isDefinitiveMatch(base, FULL.toUpperCase())).toBe(true);
       expect(isDefinitiveMatch({ ...base, id: 'other' }, FULL)).toBe(false);
     });
 
-    it('treats an exact label match as definitive (case-insensitive)', () => {
+    it('is NOT definitive for an exact label — labels can collide across machines', () => {
       const labelled = { ...base, label: 'Fix the flaky ssh test' };
-      expect(isDefinitiveMatch(labelled, 'fix the flaky ssh test')).toBe(true);
-      expect(isDefinitiveMatch(labelled, 'fix the flaky')).toBe(false); // not exact
+      expect(isDefinitiveMatch(labelled, 'fix the flaky ssh test')).toBe(false);
     });
 
     it('is NOT definitive for a short-id prefix — ambiguity needs every peer', () => {
@@ -1935,22 +1938,29 @@ describe('RUSH-2203 definitive-match fleet resolve', () => {
   });
 
   describe('selectorAllowsEarlyExit', () => {
-    it('enables early-exit for a full UUID and for a keyword (potential exact label)', () => {
+    it('enables early-exit ONLY for a full UUID (globally unique)', () => {
       expect(selectorAllowsEarlyExit(FULL)).toBe(true);
-      expect(selectorAllowsEarlyExit('fix the flaky ssh test')).toBe(true);
     });
-    it('disables early-exit for a short-id prefix so the sweep can surface a conflict', () => {
+    it('disables early-exit for labels and short-id prefixes so the sweep can surface a conflict', () => {
+      expect(selectorAllowsEarlyExit('fix the flaky ssh test')).toBe(false);
       expect(selectorAllowsEarlyExit('019fd0c8')).toBe(false);
       expect(selectorAllowsEarlyExit('abcd12')).toBe(false);
     });
   });
 
   describe('metadataResolveOutcome with labels', () => {
-    it('auto-resumes a unique exact-label match even when a peer is unreachable', () => {
+    it('auto-resumes a unique exact-label match once every peer has answered', () => {
+      const labelled = { ...base, label: 'ship the resume fix' };
+      expect(
+        metadataResolveOutcome([], { sessions: [labelled], unreachable: [] }, 'ship the resume fix'),
+      ).toEqual({ kind: 'resolved', session: labelled });
+    });
+
+    it('fails closed (partial) for a label when a peer is unreachable — it may hold a same-label session', () => {
       const labelled = { ...base, label: 'ship the resume fix' };
       expect(
         metadataResolveOutcome([], { sessions: [labelled], unreachable: ['offline-box'] }, 'ship the resume fix'),
-      ).toEqual({ kind: 'resolved', session: labelled });
+      ).toEqual({ kind: 'partial', failedPeers: ['offline-box'] });
     });
 
     it('surfaces a conflict when two distinct sessions share the exact label', () => {

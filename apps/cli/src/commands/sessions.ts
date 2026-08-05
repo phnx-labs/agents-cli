@@ -3937,29 +3937,30 @@ export type MetadataResolveOutcome =
 const FULL_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * A match unique enough to resolve on first sight and cancel the rest of the
- * fleet sweep: a full session UUID (globally unique), or an exact,
- * case-insensitive session-label match. A short-id PREFIX is deliberately NOT
- * definitive — two peers can each hold a distinct session sharing that prefix,
- * and that ambiguity is only knowable once every peer has answered.
+ * A match unique enough to resolve on the FIRST peer that returns it and cancel
+ * the rest of the fleet sweep: a full session UUID, which is globally unique.
+ *
+ * Only a full UUID qualifies. A session **label** is deliberately NOT definitive
+ * here even on an exact match: labels are free-form and can collide, so a
+ * distinct session may carry the same label on a peer that has not answered yet
+ * — early-exiting on the first would silently, and nondeterministically, resume
+ * the wrong session (whichever peer replied first). Labels therefore stay
+ * all-settle so a cross-machine label conflict surfaces as an ambiguity, and a
+ * short-id PREFIX stays all-settle for the same reason (RUSH-2203).
  */
 export function isDefinitiveMatch(session: SessionMeta, selector: string): boolean {
-  const sel = selector.trim().toLowerCase();
-  if (FULL_SESSION_ID_RE.test(selector)) return session.id.toLowerCase() === sel;
-  if (looksLikeSessionId(selector)) return false; // short-id prefix: needs the full sweep
-  const label = typeof session.label === 'string' ? session.label.trim().toLowerCase() : '';
-  return label.length > 0 && label === sel;
+  return FULL_SESSION_ID_RE.test(selector) && session.id.toLowerCase() === selector.trim().toLowerCase();
 }
 
 /**
- * Whether a selector may enable early-exit on the cancellable fan-out. A full
- * UUID always may; a keyword is treated as a potential exact label (the
- * per-item {@link isDefinitiveMatch} only fires on an exact label, so a keyword
- * that matches no label simply never early-exits and falls back to the full
- * sweep). A short-id prefix may NOT — its ambiguity needs every peer's answer.
+ * Whether a selector may enable early-exit on the cancellable fan-out — only a
+ * full UUID, which is globally unique so the first hit is the only hit. Labels,
+ * keywords, and short-id prefixes stay all-settle: their uniqueness (or
+ * conflict) is only knowable once every peer has answered. See
+ * {@link isDefinitiveMatch}.
  */
 export function selectorAllowsEarlyExit(selector: string): boolean {
-  return FULL_SESSION_ID_RE.test(selector) || !looksLikeSessionId(selector);
+  return FULL_SESSION_ID_RE.test(selector);
 }
 
 /** Resolve a fleet sweep through the same canonical full-id / prefix resolver as
@@ -4029,14 +4030,16 @@ export function metadataResolveOutcome(
   selector: string,
 ): MetadataResolveOutcome {
   const candidates = fleetCandidatesByQuery([...localMatches, ...remote.sessions], selector);
-  // A definitive match (a full UUID, or an exact session label) is unique enough
-  // to resolve and auto-resume even when an unrelated peer was unreachable — the
-  // same globally-unique guarantee that already let a full UUID resolve past an
-  // offline box, now extended to exact labels (RUSH-2203). Two distinct sessions
-  // sharing an exact label is a genuine conflict → surface it, don't guess.
-  const definitive = candidates.filter(c => isDefinitiveMatch(c.hits[0].session, selector));
-  if (definitive.length === 1) return { kind: 'resolved', session: definitive[0].hits[0].session };
-  if (definitive.length > 1) return { kind: 'ambiguous', candidates: definitive };
+  // A full UUID is globally unique, so one exact hit resolves even when an
+  // unrelated registered device is offline. A label is NOT globally unique — a
+  // distinct session may carry the same label on an unreachable peer — so it
+  // stays fail-closed: a unique label auto-resumes only once every peer has
+  // answered (candidates.length === 1 below), and an unreachable peer forces
+  // `partial` rather than guessing. (RUSH-2203: early-exit is UUID-only for the
+  // same reason — see isDefinitiveMatch.)
+  if (FULL_SESSION_ID_RE.test(selector) && candidates.length === 1 && candidates[0].id.toLowerCase() === selector.toLowerCase()) {
+    return { kind: 'resolved', session: candidates[0].hits[0].session };
+  }
   if (remote.unreachable.length > 0) return { kind: 'partial', failedPeers: remote.unreachable };
   if (candidates.length === 0) return { kind: 'not-found' };
   if (candidates.length > 1) return { kind: 'ambiguous', candidates };
@@ -4056,12 +4059,16 @@ export async function resolveSessionMetadataValue(
   const localMatches = resolveIndexedMetadataRows(indexed, selector)
     .map(session => ({ ...session, machine: session.machine || localMachine }));
 
-  // A definitive local hit (full UUID, or exact label) resolves with ZERO SSH:
-  // the session lives on this machine, so no peer is dialed. This is the "local
-  // costs nothing" path — local index lookup is synchronous and completes before
-  // any fan-out would spawn, so a local hit never waits on a peer.
-  const localDefinitive = localMatches.find(session => isDefinitiveMatch(session, selector));
-  if (localDefinitive) return { kind: 'resolved', session: localDefinitive };
+  // A full-UUID local hit resolves with ZERO SSH: a UUID is globally unique, so
+  // finding it locally is the whole answer and no peer is dialed. (A label is
+  // NOT resolved local-only here — it can collide with a same-label session on a
+  // peer, so it must consult the fleet; see isDefinitiveMatch, RUSH-2203.) The
+  // local index lookup is synchronous and completes before any fan-out spawns,
+  // so this local hit never waits on a peer.
+  if (FULL_SESSION_ID_RE.test(selector)) {
+    const localOutcome = metadataResolveOutcome(localMatches, { sessions: [], unreachable: [] }, selector);
+    if (localOutcome.kind === 'resolved') return localOutcome;
+  }
 
   if (scope.local === true) return metadataResolveOutcome(localMatches, { sessions: [], unreachable: [] }, selector);
 

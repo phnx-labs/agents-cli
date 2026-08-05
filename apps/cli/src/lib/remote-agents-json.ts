@@ -7,6 +7,7 @@
  * healthy results from the rest of the fleet.
  */
 import { spawn } from 'child_process';
+import { setMaxListeners } from 'node:events';
 import chalk from 'chalk';
 import { SSH_OPTS, controlOpts, assertValidSshTarget, shellQuote } from './ssh-exec.js';
 import { sshTargetFor } from './devices/connect.js';
@@ -32,25 +33,19 @@ export interface RemoteAgentsJsonOptions<T> {
   /** Per-peer deadline. Long-running maintenance commands override 12 seconds. */
   timeoutMs?: number;
   /**
-   * Opt-in early-exit for a definitive lookup (a full session UUID / exact
-   * label). When a peer returns an item that satisfies {@link isDefinitive},
-   * the fan-out resolves immediately and SIGTERMs every still-outstanding peer
-   * instead of waiting for the slowest one to hit {@link REMOTE_TIMEOUT_MS}.
+   * Opt-in early-exit for a globally-unique lookup (a full session UUID). When a
+   * peer returns an item that satisfies {@link isDefinitive}, the fan-out
+   * resolves immediately and SIGTERMs every still-outstanding peer instead of
+   * waiting for the slowest one to hit {@link REMOTE_TIMEOUT_MS}.
    *
    * OMITTED BY DEFAULT — tool-search, program-count, and the default session
-   * listing keep the all-settle behavior (ambiguity is only known once every
-   * peer has answered). Only the id/label resolve path opts in.
+   * listing keep the all-settle behavior (ambiguity, or a label/prefix conflict,
+   * is only known once every peer has answered). Only the full-UUID resolve path
+   * opts in, since only a UUID guarantees the first hit is the only hit.
    */
   earlyExit?: {
     isDefinitive: (item: T, machine: string) => boolean;
   };
-  /**
-   * External cancellation. When a caller resolves definitively by another route
-   * (a local index hit races the fan-out and wins), aborting this signal
-   * SIGTERMs every in-flight peer so a local hit costs zero waiting on SSH.
-   * Peers cancelled this way are NOT reported as unreachable.
-   */
-  signal?: AbortSignal;
 }
 
 /**
@@ -186,28 +181,26 @@ export async function gatherRemoteAgentsJson<T>(
   const skipped: string[] = [];
   const parseFailed: string[] = [];
 
-  // One controller cancels the fan-out: an early definitive hit (below) or the
-  // caller's external signal (a racing local hit) aborts every in-flight peer.
-  // Without early-exit and no external signal this never fires — the default
-  // stays a full all-settle Promise.all, identical to before.
-  const controller = new AbortController();
-  const linkExternal = () => controller.abort();
-  if (options.signal) {
-    if (options.signal.aborted) controller.abort();
-    else options.signal.addEventListener('abort', linkExternal, { once: true });
-  }
+  // The controller exists ONLY for early-exit: the first definitive hit aborts
+  // every still-outstanding peer. When earlyExit is not requested there is no
+  // controller and no per-peer abort listener, so the default path is a plain
+  // all-settle Promise.all, byte-identical to before (tool-search, program-count).
+  const controller = options.earlyExit ? new AbortController() : undefined;
+  // A fleet can hold more peers than Node's default 10-listener cap; each peer's
+  // capture adds one abort listener, so lift the cap to avoid a spurious warning.
+  if (controller) setMaxListeners(targets.length + 1, controller.signal);
   let earlyResolved = false;
 
   const results = await Promise.all(targets.map(async (target) => {
     const command = remoteAgentsJsonCommand(options.args, options.noFanoutEnv, target.os);
     const result = await capture(target.target, command, {
       timeoutMs: options.timeoutMs ?? REMOTE_TIMEOUT_MS,
-      signal: controller.signal,
+      signal: controller?.signal,
     });
     // A peer we deliberately cancelled is neither a hit nor a failure — it never
     // got to answer, so it must not pollute skipped/parseFailed (which drive the
     // "unreachable" listing and the fail-closed partial-resolution gate).
-    const cancelled = controller.signal.aborted;
+    const cancelled = controller?.signal.aborted ?? false;
     if (result.code !== 0) {
       if (!cancelled) {
         skipped.push(target.name);
@@ -227,7 +220,7 @@ export async function gatherRemoteAgentsJson<T>(
       }
       return [] as T[];
     }
-    if (options.earlyExit && !earlyResolved
+    if (controller && options.earlyExit && !earlyResolved
       && parsed.items.some((item) => options.earlyExit!.isDefinitive(item, target.machine))) {
       earlyResolved = true;
       controller.abort(); // SIGTERM the remaining peers; they settle fast below.
@@ -235,6 +228,5 @@ export async function gatherRemoteAgentsJson<T>(
     return parsed.items;
   }));
 
-  if (options.signal) options.signal.removeEventListener('abort', linkExternal);
   return { items: results.flat(), deviceCount: targets.length, skipped, parseFailed, discoveryFailed: false };
 }

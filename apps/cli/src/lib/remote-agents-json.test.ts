@@ -111,27 +111,25 @@ describe('gatherRemoteAgentsJson early-exit + cancellation', () => {
     expect(result.items.map(r => r.id).sort()).toEqual(['another', 'other']);
   });
 
-  it('an external abort signal cancels every in-flight peer without marking them unreachable', async () => {
-    const aborted: string[] = [];
-    const controller = new AbortController();
-    const capture: SshCaptureFn = (target, _cmd, { signal }) => new Promise((resolve) => {
-      if (signal?.aborted) { aborted.push(target); resolve({ code: null, stdout: '' }); return; }
-      signal?.addEventListener('abort', () => { aborted.push(target); resolve({ code: null, stdout: '' }); }, { once: true });
+  it('with NO earlyExit, two peers holding distinct same-label rows are BOTH collected (conflict stays visible)', async () => {
+    // The regression the reviewer caught: if labels early-exited, the first peer
+    // would abort the second and hide the collision. Labels do NOT pass earlyExit
+    // (they are not globally unique), so both rows come back and the caller can
+    // surface the conflict. Modelled as two distinct ids sharing a label.
+    const capture: SshCaptureFn = (target) => new Promise((resolve) => {
+      if (target === FAST) resolve({ code: 0, stdout: JSON.stringify([{ id: 'peer-a', label: 'dup' }]) });
+      else setTimeout(() => resolve({ code: 0, stdout: JSON.stringify([{ id: 'peer-b', label: 'dup' }]) }), 25);
     });
 
-    const pending = gatherRemoteAgentsJson<Row>({
+    const result = await gatherRemoteAgentsJson<Row & { label: string }>({
       args: ['sessions', '--json'],
       noFanoutEnv: 'X',
       hosts: [FAST, SLOW],
       quiet: true,
-      parse: parseRows,
-      signal: controller.signal,
+      parse: (stdout) => (stdout ? JSON.parse(stdout) : []),
+      // no earlyExit — a label lookup must wait for every peer
     }, { capture });
-    controller.abort(); // a racing local hit resolved: drop every peer immediately
 
-    const result = await pending;
-    expect(aborted.sort()).toEqual([FAST, SLOW].sort());
-    expect(result.items).toEqual([]);
-    expect(result.skipped).toEqual([]);
+    expect(result.items.map(r => r.id).sort()).toEqual(['peer-a', 'peer-b']);
   });
 });

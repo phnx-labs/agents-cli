@@ -253,13 +253,11 @@ export function isAutomaticSessionPeer(d: DeviceProfile, self: string): boolean 
  * already `--json`) so every peer returns the same slice this machine asked for.
  */
 export interface GatherRemoteListOptions {
-  /** Cancels every in-flight peer (a racing local hit already resolved). */
-  signal?: AbortSignal;
   /**
-   * Opt-in early-exit for a definitive id/label lookup: the first peer to
-   * return a matching row resolves the fan-out and cancels the rest. Omitted
-   * for browse/ambiguous sweeps, which must wait for every peer to know whether
-   * the match is unique.
+   * Opt-in early-exit for a globally-unique id lookup (a full UUID): the first
+   * peer to return the matching row resolves the fan-out and cancels the rest.
+   * Omitted for browse/label/prefix sweeps, which must wait for every peer to
+   * know whether the match is unique or conflicting.
    */
   isDefinitive?: (session: SessionMeta, machine: string) => boolean;
 }
@@ -274,7 +272,6 @@ export async function gatherRemoteList(
     args: forwardedArgs,
     noFanoutEnv: NO_FANOUT_ENV,
     hosts,
-    signal: opts?.signal,
     earlyExit: opts?.isDefinitive ? { isDefinitive: opts.isDefinitive } : undefined,
     parse: (stdout, machine): RemoteAgentsJsonParseResult<SessionMeta> =>
       parseRemoteListPayload(stdout, machine, safeResolver),
