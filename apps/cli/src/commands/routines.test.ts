@@ -344,7 +344,7 @@ describe('routines devices --set unknown is nonzero/no mutation', () => {
 
 describe('routines add --devices unknown is nonzero/no write', () => {
   it('rejects unknown devices and does not create the routine file', () => {
-    const home = makeHome({ registry });
+    const home = makeHome({ registry: { 'yosemite-s0': registry['yosemite-s0'] } });
     try {
       const res = run(home, [
         'add', 'new-job',
@@ -1036,7 +1036,7 @@ describe('routines add --devices empty/whitespace fails closed', () => {
   });
 
   it('successfully persists --devices with valid names against a running daemon', async () => {
-    const home = makeHome({ registry });
+    const home = makeHome({ registry: { 'yosemite-s0': registry['yosemite-s0'] } });
     let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
     let pid: number | null = null;
     try {
@@ -1050,7 +1050,7 @@ describe('routines add --devices empty/whitespace fails closed', () => {
         '--agent', 'claude',
         '--prompt', 'hi',
         '--devices', 'yosemite-s0',
-      ]);
+      ], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
       expect(res.status).toBe(0);
       const doc = readRoutineYaml(home, 'placed-job');
       expect(doc).not.toBeNull();
