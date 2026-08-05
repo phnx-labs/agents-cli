@@ -19,6 +19,7 @@ import { machineForSessionFile } from './origin-machine.js';
 import { loadSessionActorIndex, readSessionActorRecord } from './actor-sidecar.js';
 import { toolCallsFromEvents, type IndexedToolCall } from './tool-calls.js';
 import { persistToolCalls, purgeToolCalls, toolEvidenceSourcePath } from './tool-store.js';
+import { buildClaudeAccountIndex, resolveClaudeAccount } from './claude-accounts.js';
 import { extractSkills, extractSlashCommands } from './highlights.js';
 import { resolveResource } from '../resources.js';
 import { discoverPlugins } from '../plugins.js';
@@ -30,7 +31,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/05-sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 32;
+export const SCHEMA_VERSION = 33;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every
@@ -74,6 +75,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   routine_run_id TEXT,
   version TEXT,
   account TEXT,
+  account_key TEXT,
+  account_org TEXT,
   mode TEXT,
   timestamp TEXT NOT NULL,
   last_activity TEXT,
@@ -284,6 +287,8 @@ export interface SessionRow {
   routine_run_id: string | null;
   version: string | null;
   account: string | null;
+  account_key: string | null;
+  account_org: string | null;
   mode: string | null;
   timestamp: string;
   last_activity: string | null;
@@ -838,6 +843,48 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.has('mode')) db.exec(`ALTER TABLE sessions ADD COLUMN mode TEXT`);
   }
 
+  if (fromVersion < 33) {
+    // v32 → v33: attribute each Claude session to the account that produced it.
+    // Until now `account` held ONE email resolved process-globally and stamped on
+    // every row of a scan, so a machine with several signed-in accounts reported all
+    // of its history under whichever resolved first.
+    //
+    // Do NOT wipe scan_ledger. Attribution is a pure function of (file_path,
+    // version) — both already stored — so existing rows are repaired in place with
+    // no transcript re-parsed. Adding `DELETE FROM scan_ledger` here to match the
+    // other migrations would force a full re-parse of every indexed transcript to
+    // recompute something derivable from two columns. The v31 migration sets the
+    // same precedent.
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((column) => column.name),
+    );
+    if (!cols.has('account_key')) db.exec(`ALTER TABLE sessions ADD COLUMN account_key TEXT`);
+    if (!cols.has('account_org')) db.exec(`ALTER TABLE sessions ADD COLUMN account_org TEXT`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_account_key ON sessions(account_key)`);
+    backfillClaudeAccounts(db);
+  }
+
+}
+
+/**
+ * Stamp `account_key` / `account_org` / `account` on every Claude row from its
+ * `file_path` and recorded `version`. Used by the v33 migration; idempotent, so it is
+ * safe to re-run.
+ */
+function backfillClaudeAccounts(db: Database.Database): void {
+  const index = buildClaudeAccountIndex();
+  const rows = db.prepare(
+    `SELECT id, file_path, version FROM sessions WHERE agent = 'claude'`,
+  ).all() as Array<{ id: string; file_path: string; version: string | null }>;
+  if (rows.length === 0) return;
+
+  const update = db.prepare(
+    `UPDATE sessions SET account_key = ?, account_org = ?, account = COALESCE(?, account) WHERE id = ?`,
+  );
+  for (const row of rows) {
+    const bucket = resolveClaudeAccount(index, row.file_path ?? '', row.version);
+    update.run(bucket.key, bucket.orgName, bucket.email, row.id);
+  }
 }
 
 /** Open (or return the cached) sessions database, applying migrations as needed. */
@@ -1283,7 +1330,7 @@ export function recordDirScans(
 const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   INSERT INTO sessions (
     id, short_id, agent, origin, routine_name, routine_run_id,
-    version, account, mode, timestamp, last_activity,
+    version, account, account_key, account_org, mode, timestamp, last_activity,
     project, cwd, git_branch, topic, label, message_count, token_count,
     output_tokens, cost_usd, duration_ms, model, tool_call_count,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
@@ -1292,7 +1339,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     actor, initiated_by, used_browser, used_computer
   ) VALUES (
     @id, @short_id, @agent, @origin, @routine_name, @routine_run_id,
-    @version, @account, @mode, @timestamp, @last_activity,
+    @version, @account, @account_key, @account_org, @mode, @timestamp, @last_activity,
     @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
     @output_tokens, @cost_usd, @duration_ms, @model, @tool_call_count,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
@@ -1308,6 +1355,8 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     routine_run_id = excluded.routine_run_id,
     version = excluded.version,
     account = excluded.account,
+    account_key = excluded.account_key,
+    account_org = excluded.account_org,
     mode = COALESCE(excluded.mode, sessions.mode),
     timestamp = excluded.timestamp,
     last_activity = excluded.last_activity,
@@ -1575,6 +1624,8 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     routine_run_id: meta.routineRunId ?? null,
     version: meta.version ?? null,
     account: meta.account ?? null,
+    account_key: meta.accountKey ?? null,
+    account_org: meta.accountOrg ?? null,
     mode: meta.mode ?? actorRec?.mode ?? null,
     timestamp: meta.timestamp,
     last_activity: resolveLastActivity(meta, scan),
@@ -1997,6 +2048,8 @@ function rowToMeta(row: SessionRow): SessionMeta {
     toolCallCount: row.tool_call_count ?? undefined,
     version: row.version ?? undefined,
     account: row.account ?? undefined,
+    accountKey: row.account_key ?? undefined,
+    accountOrg: row.account_org ?? undefined,
     mode: isSessionRunMode(row.mode) ? row.mode : undefined,
     topic: row.topic ?? undefined,
     label: row.label ?? undefined,
@@ -2242,8 +2295,16 @@ export function countSessions(options: QueryOptions = {}): number {
 
 /** One grouped row in a cost/duration rollup. */
 export interface UsageRollupRow {
-  /** Grouping key value: the agent id, project name, or ISO date (YYYY-MM-DD). */
+  /**
+   * Grouping key value: the agent id, project name, ISO date (YYYY-MM-DD), or
+   * account identity (`claude:org=<uuid>` / `unattributed:<reason>`).
+   */
   key: string;
+  /**
+   * Human label for the key when it is not itself readable — an org uuid is an
+   * identity, not something to show a user. Absent when `key` reads fine on its own.
+   */
+  label?: string;
   costUsd: number;
   durationMs: number;
   sessionCount: number;
@@ -2253,7 +2314,7 @@ export interface UsageRollupRow {
 }
 
 /** What to group a usage rollup by. */
-export type UsageRollupGroup = 'agent' | 'project' | 'day';
+export type UsageRollupGroup = 'agent' | 'project' | 'day' | 'account';
 
 /**
  * Smart-launch affinity priors: group sessions by origin machine, harness, or
@@ -2362,13 +2423,23 @@ export function queryUsageRollup(
       ? 'agent'
       : options.groupBy === 'project'
         ? `IFNULL(NULLIF(project, ''), '(no project)')`
-        // ISO timestamps are lexicographically date-sortable; the date is the
-        // first 10 chars (YYYY-MM-DD).
-        : `substr(timestamp, 1, 10)`;
+        : options.groupBy === 'account'
+          // Rows predating the v33 backfill, and non-Claude agents, have no
+          // account_key. Name that explicitly rather than folding them into a
+          // real account's total.
+          ? `IFNULL(NULLIF(account_key, ''), 'unattributed:not-indexed')`
+          // ISO timestamps are lexicographically date-sortable; the date is the
+          // first 10 chars (YYYY-MM-DD).
+          : `substr(timestamp, 1, 10)`;
 
   const sql = `
     SELECT
       ${keyExpr} AS key,
+      ${options.groupBy === 'account'
+        // One label per account_key by construction, so MAX just picks it out.
+        ? `MAX(CASE WHEN account_org IS NOT NULL AND account IS NOT NULL
+                    THEN account_org || ' <' || account || '>' END) AS label,`
+        : ''}
       IFNULL(SUM(cost_usd), 0) AS costUsd,
       IFNULL(SUM(duration_ms), 0) AS durationMs,
       COUNT(*) AS sessionCount,
