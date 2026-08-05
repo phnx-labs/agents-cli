@@ -160,6 +160,7 @@ export function resetCrabboxSecretsMemosForTest(): void {
   tailscaleBundleMemo = undefined;
   tailscaleValueMemo = undefined;
   leaseBundleMemo = undefined;
+  leaseEnvMemo = undefined;
 }
 
 /** A resolved lease bundle: its name, plus (auto-detect only) the exact keys to inject. */
@@ -213,6 +214,59 @@ function resolveLeaseBundleMemo(): ResolvedLeaseBundle | undefined {
   return leaseBundleMemo.value;
 }
 
+/**
+ * Process-lifetime memo for the RESOLVED provider-token env, resolved ONCE up
+ * front. `crabboxEnv` is called on every `crabboxWaitReady` poll iteration
+ * (crabboxWaitReady → crabboxFind → crabboxList → crabboxEnv), so without this
+ * memo the lease-token keychain read re-ran every ~5s of the ready wait — the
+ * per-poll storm this fix exists to kill. The read is now `agentOnly: true`
+ * (SEC-13: a `--lease` run is headless by contract and must never pop an
+ * unwatched Touch ID sheet). A locked `hold`/`always` bundle makes that read
+ * THROW the actionable "unlock <name>" message; we memoize the thrown error too
+ * and re-raise it on every subsequent call, so the failure surfaces loud ONCE
+ * up front (crabboxWarmup / the first crabboxList, before any poll loop) and the
+ * loop never re-issues the read. A `never`/no-ACL or broker-held bundle resolves
+ * silently. `undefined` when no lease bundle is configured (crabbox uses its own
+ * `crabbox login`). The memo (success OR failure) is cleared per test by
+ * resetCrabboxSecretsMemosForTest.
+ */
+let leaseEnvMemo: { env?: NodeJS.ProcessEnv; error?: Error } | undefined;
+function resolveLeaseEnvMemo(explicitBundle?: string): NodeJS.ProcessEnv | undefined {
+  if (!leaseEnvMemo) {
+    const resolved: ResolvedLeaseBundle | undefined = explicitBundle
+      ? { name: explicitBundle }
+      : resolveLeaseBundleMemo();
+    if (!resolved) {
+      leaseEnvMemo = {};
+    } else {
+      try {
+        // Auto-detected bundle → inject ONLY the provider token key(s) (least
+        // privilege; an unrelated bundle can't leak its other secrets into crabbox).
+        // An explicitly-named bundle (env/config or `opts.secretsBundle`) injects
+        // whole — the user chose it. Same resolver `agents secrets exec` uses.
+        const { env } = readAndResolveBundleEnv(resolved.name, {
+          caller: 'agents run --lease (crabbox)',
+          keys: resolved.keys,
+          // --lease is headless by contract and a locked bundle must fail loud with
+          // an unlock hint, NEVER pop a Touch ID sheet — the read cannot be answered
+          // in a background lease (SEC-13).
+          agentOnly: true,
+        });
+        leaseEnvMemo = { env };
+      } catch (e) {
+        leaseEnvMemo = {
+          error: new Error(
+            `Could not load secrets bundle "${resolved.name}" for crabbox: ${(e as Error).message}. ` +
+              `Fix the bundle (agents secrets view ${resolved.name}) or unset lease.secretsBundle to use crabbox's own login.`,
+          ),
+        };
+      }
+    }
+  }
+  if (leaseEnvMemo.error) throw leaseEnvMemo.error;
+  return leaseEnvMemo.env;
+}
+
 /** Persist `lease.secretsBundle` in agents config so `--lease` needs no env var. */
 export function setLeaseSecretsBundle(name: string): void {
   const meta = readMeta();
@@ -224,31 +278,13 @@ export function setLeaseSecretsBundle(name: string): void {
 export function crabboxEnv(opts: CrabboxOptions): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = { ...process.env };
 
-  const resolved: ResolvedLeaseBundle | undefined = opts.secretsBundle
-    ? { name: opts.secretsBundle }
-    : resolveLeaseBundleMemo();
-  if (resolved) {
-    try {
-      // Auto-detected bundle → inject ONLY the provider token key(s) (least
-      // privilege; an unrelated bundle can't leak its other secrets into crabbox).
-      // An explicitly-named bundle (env/config or `opts.secretsBundle`) injects
-      // whole — the user chose it. Same resolver `agents secrets exec` uses.
-      const { env } = readAndResolveBundleEnv(resolved.name, {
-        caller: 'agents run --lease (crabbox)',
-        keys: resolved.keys,
-        // --lease is headless by contract and crabboxEnv is called several times
-        // per run (list/wait/spawn/stop) — resolve broker-only so a keychain bundle
-        // can't pop repeated unwatched Touch ID sheets mid-lease.
-        agentOnly: isHeadlessSecretsContext(),
-      });
-      Object.assign(out, env);
-    } catch (e) {
-      throw new Error(
-        `Could not load secrets bundle "${resolved.name}" for crabbox: ${(e as Error).message}. ` +
-          `Fix the bundle (agents secrets view ${resolved.name}) or unset lease.secretsBundle to use crabbox's own login.`,
-      );
-    }
-  }
+  // The lease provider-token read is resolved ONCE up front and memoized (env or
+  // thrown error) for the process — crabboxEnv runs on every crabboxWaitReady
+  // poll, so re-reading here was the per-poll storm. A locked bundle re-raises
+  // the memoized "unlock <name>" error every call, so the failure surfaces loud
+  // on the first crabboxEnv (before any poll loop) and never re-issues the read.
+  const leaseEnv = resolveLeaseEnvMemo(opts.secretsBundle);
+  if (leaseEnv) Object.assign(out, leaseEnv);
 
   // Tailscale plumbing (F5): inject CRABBOX_TAILSCALE_AUTH_KEY from a bundle that
   // declares a tailscale auth key, when the ambient env doesn't already set one.

@@ -28,7 +28,6 @@ import * as readline from 'readline';
 import {
   listBundles,
   readAndResolveBundleEnv,
-  isHeadlessSecretsContext,
   readBundle,
   validateBundleName,
 } from './bundles.js';
@@ -109,9 +108,13 @@ export function resolveSecret(bundle: string, key: string): string {
         (available.length ? ` Available keys: ${available.join(', ')}.` : ' Bundle has no keys.'),
     );
   }
-  // The MCP get_secret tool is typically served by a background/headless agent
-  // process; resolve broker-only there so it never raises an unwatched prompt.
-  const { env } = readAndResolveBundleEnv(bundle, { caller: 'secrets-mcp', keys: [key], keyMode: 'storage', agentOnly: isHeadlessSecretsContext() });
+  // An MCP `get_secret` tool call is a program asking for a value, never a human
+  // at a Touch ID sheet — so the read is always `agentOnly` (SEC-13: never pop
+  // biometry on its own). A `never`/no-ACL or broker-held bundle resolves
+  // silently; a locked bundle THROWS the actionable "unlock <name>" message,
+  // which propagates as the MCP tool error (the caller surfaces it) rather than
+  // popping an unanswerable prompt.
+  const { env } = readAndResolveBundleEnv(bundle, { caller: 'secrets-mcp', keys: [key], keyMode: 'storage', agentOnly: true });
   const value = env[key];
   if (value === undefined) {
     throw new Error(`Key '${key}' in bundle '${bundle}' could not be resolved.`);
