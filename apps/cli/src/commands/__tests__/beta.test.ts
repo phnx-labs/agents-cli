@@ -92,4 +92,22 @@ describe('agents beta', () => {
     expect(factory.status).toBe(1);
     expect(outputOf(factory)).toContain('FACTORY_FLOOR_URL is not set.');
   });
+
+  it('treats a graduated feature (projects) as a friendly no-op, not an error', () => {
+    const home = makeTempHome();
+    writeUpdateCache(home);
+
+    const enable = runAgents(['beta', 'enable', 'projects'], home);
+    expect(enable.status).toBe(0);
+    expect(outputOf(enable)).toContain('graduated out of beta');
+    const yamlPath = path.join(home, '.agents', 'agents.yaml');
+    if (fs.existsSync(yamlPath)) {
+      expect(fs.readFileSync(yamlPath, 'utf-8')).not.toContain('- projects');
+    }
+
+    // A genuine typo still errors.
+    const typo = runAgents(['beta', 'enable', 'factroy'], home);
+    expect(typo.status).toBe(1);
+    expect(outputOf(typo)).toContain('Unknown beta feature');
+  });
 });
