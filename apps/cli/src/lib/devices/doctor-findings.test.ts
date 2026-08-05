@@ -463,23 +463,38 @@ describe('the severity rubric matches the code (docs cannot drift from behavior)
     return { critical: text.slice(c, w), warning: text.slice(w) };
   }
 
+  /**
+   * Whether a rubric names this kind as a WHOLE token. Plain `includes` credits a
+   * kind whenever a LONGER kind contains it — `cli-missing` inside
+   * `host-cli-missing`, `stale` inside `stale-cli`, `duplicate-hook` inside
+   * `duplicate-hook-drift`. Three such pairs exist today and more will appear, so
+   * this is a boundary match, not a per-pair special case: a kind must not be
+   * flanked by another id character.
+   */
+  const names = (half: string, kind: string): boolean =>
+    new RegExp(`(^|[^a-z-])${kind}($|[^a-z-])`).test(half);
+
   /** Kinds named in the wrong half, as `kind: documented-as -> actually`. */
   function misplaced(critical: string, warning: string): string[] {
     const out: string[] = [];
     for (const kind of ALL_FINDING_KINDS) {
       const actual = FINDING_SEVERITY[kind];
-      const inCritical = critical.includes(kind);
-      const inWarning = warning.includes(kind);
-      if (!inCritical && !inWarning) { out.push(`${kind}: absent -> ${actual}`); continue; }
-      // `duplicate-hook` is a substring of `duplicate-hook-drift`; require the
-      // longer name to be matched on its own before crediting the shorter one.
-      const only = (half: string) =>
-        half.split(kind).length - 1 > (kind === 'duplicate-hook' ? half.split('duplicate-hook-drift').length - 1 : 0);
-      const documented = only(critical) ? 'critical' : only(warning) ? 'warning' : null;
+      const documented = names(critical, kind) ? 'critical' : names(warning, kind) ? 'warning' : null;
       if (documented !== actual) out.push(`${kind}: ${documented ?? 'absent'} -> ${actual}`);
     }
     return out;
   }
+
+  it('the token matcher does not credit a kind that is only a substring of a longer one', () => {
+    // Guards the guard: these three pairs are why plain `includes` was wrong.
+    expect(names('host-cli-missing', 'cli-missing')).toBe(false);
+    expect(names('stale-cli', 'stale')).toBe(false);
+    expect(names('duplicate-hook-drift', 'duplicate-hook')).toBe(false);
+    // …while still matching the real thing in prose and in backticks.
+    expect(names('`cli-missing` and more', 'cli-missing')).toBe(true);
+    expect(names('· stale ·', 'stale')).toBe(true);
+    expect(names('duplicate-hook, host-cli-missing', 'duplicate-hook')).toBe(true);
+  });
 
   it('every builder emits the severity FINDING_SEVERITY declares', () => {
     // Drive the builders and compare what actually comes out.

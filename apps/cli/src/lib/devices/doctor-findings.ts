@@ -92,29 +92,30 @@ export type FindingSeverity = 'critical' | 'warning';
 
 /** A machine-stable class for a finding — drives {@link remediationFor} and lets
  *  the JSON consumer group by kind. */
+/** Every finding class. Severity is NOT annotated here — {@link FINDING_SEVERITY}
+ *  below owns it, and a second copy in these comments is a fourth place to drift. */
 export const ALL_FINDING_KINDS = [
-  'logged-out',          // provable per-version logout (CRITICAL)
-  'logout-unprovable',   // credential absent but not provable (WARNING)
-  'missing-hook',        // a declared hook absent from a version home (CRITICAL)
-  'missing-plugin',      // a declared plugin absent from a version home (CRITICAL)
-  'unwired-hook',        // hook present on disk but not wired into settings.json (CRITICAL)
-  'cli-missing',         // a managed agent whose binary won't resolve (CRITICAL)
-  'missing-resource',    // a missing command/skill/rule/mcp/permission/subagent (WARNING)
-  'content-drift',       // a resource diverged from source (WARNING)
-  'never-synced',        // installed but never synced — CRITICAL when its declared
-                          // resources are therefore absent, WARNING when it declares none
-  'stale',               // sources changed since last sync (WARNING)
-  'repo-behind',         // a config repo behind origin (WARNING)
-  'repo-drift',          // a config repo diverged from the fleet baseline (WARNING)
-  'fleet-resource-gap',  // a resource in another box's central repos, absent here (WARNING)
-  'host-cli-missing',    // a declared host CLI not installed on this box (WARNING)
-  'host-cli-invalid',    // a host-CLI manifest that failed to parse (WARNING)
-  'version-skew',        // an agent version present elsewhere, absent here (WARNING)
-  'orphan',              // orphan resources in a version home (WARNING)
-  'duplicate-hook',      // one hook materialized in several version homes, byte-identical (WARNING)
-  'duplicate-hook-drift',// …with differing content, so a stale copy can disagree (CRITICAL)
-  'rc-secret-export',    // credential-shaped export in a shell rc file (WARNING)
-  'exec-policy',         // Windows execution policy blocks agents.ps1 (WARNING)
+  'logged-out',          // provable per-version logout
+  'logout-unprovable',   // credential absent but not provable
+  'missing-hook',        // a declared hook absent from a version home
+  'missing-plugin',      // a declared plugin absent from a version home
+  'unwired-hook',        // hook present on disk but not wired into settings.json
+  'cli-missing',         // a managed agent whose binary won't resolve
+  'missing-resource',    // a missing command/skill/rule/mcp/permission/subagent
+  'content-drift',       // a resource diverged from source
+  'never-synced',         // installed but never synced
+  'stale',               // sources changed since last sync
+  'repo-behind',         // a config repo behind origin
+  'repo-drift',          // a config repo diverged from the fleet baseline
+  'fleet-resource-gap',  // a resource in another box's central repos, absent here
+  'host-cli-missing',    // a declared host CLI not installed on this box
+  'host-cli-invalid',    // a host-CLI manifest that failed to parse
+  'version-skew',        // an agent version present elsewhere, absent here
+  'orphan',              // orphan resources in a version home
+  'duplicate-hook',      // one hook materialized in several version homes, byte-identical
+  'duplicate-hook-drift',// …with differing content, so a stale copy can disagree
+  'rc-secret-export',    // credential-shaped export in a shell rc file
+  'exec-policy',         // Windows execution policy blocks agents.ps1
   'stale-cli',
 ] as const;
 
