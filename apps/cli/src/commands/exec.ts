@@ -9,6 +9,7 @@
 import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import type { ExecOptions, ExecMode, ExecEffort, FallbackEntry } from '../lib/exec.js';
+import { isTierToken } from '../lib/model-tiers.js';
 import type { AgentId } from '../lib/types.js';
 import { RUN_AUTO_KEYWORD } from '../lib/types.js';
 import type { DetectedRuntime } from '../lib/crabbox/runtimes.js';
@@ -2637,10 +2638,22 @@ export function registerRunCommand(program: Command): void {
         : undefined;
 
       const modelSource = runCmd.getOptionValueSource('model');
-      const model = options.model
+      let model = options.model
         ?? (!fromProfile && modelSource === undefined
           ? (workflowModel ?? (options.fallback ? undefined : runDefaults.model))
           : undefined);
+
+      // Cost tiers (cheap|default|best|ultra) resolve against a harness's own model
+      // catalog. A profile's model comes from its endpoint, not the host harness, so a
+      // tier here would forward an incompatible host-harness model to a different API.
+      // Discard it loudly and let the profile's configured model stand.
+      if (fromProfile && model && isTierToken(model)) {
+        process.stderr.write(chalk.yellow(
+          `[agents] --model ${model}: cost tiers don't apply to profile '${agentSpec}' ` +
+          `(its model comes from the endpoint) — ignoring the tier, using the profile's configured model\n`,
+        ));
+        model = undefined;
+      }
 
       const execOptions: ExecOptions = {
         agent,

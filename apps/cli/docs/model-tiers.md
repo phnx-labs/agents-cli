@@ -43,6 +43,12 @@ a rung and are marked *clamped*. An empty catalog → the tier is unresolvable a
 the caller drops the `--model` flag (harness default) rather than forwarding a
 bogus token.
 
+**Tiers don't apply to profiles.** A profile (`agents run <profile>`) gets its model
+from its endpoint, not the host harness's catalog — so a tier on a profile run would
+forward an incompatible host-harness model. A tier passed to a profile is ignored with
+a standout warning and the profile's configured model is used; a concrete `--model <id>`
+on a profile still works.
+
 ## Model ranking mechanisms, per provider
 
 Each provider defines its own capability ladder and encodes it in model names and
