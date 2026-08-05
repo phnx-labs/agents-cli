@@ -48,6 +48,12 @@ export interface PickerConfig<T> {
   initialSearch?: string;
   emptyMessage?: string;
   enterHint?: string;
+  /**
+   * Lines the caller already printed above the Inquirer prompt (fleet-unreachable
+   * warnings, hidden-session footers). Subtracted from the row budget so the list
+   * page is capped to keep the preview — and those notices — on screen together.
+   */
+  linesAbovePrompt?: number;
 }
 
 /** The result returned when the user selects an item. */
@@ -68,6 +74,8 @@ export interface MultiPickerConfig<T> {
   initialSearch?: string;
   emptyMessage?: string;
   enterHint?: string;
+  /** See {@link PickerConfig.linesAbovePrompt}. */
+  linesAbovePrompt?: number;
 }
 
 interface Choice<T> {
@@ -78,12 +86,57 @@ interface Choice<T> {
 const DEFAULT_TERMINAL_ROWS = 24;
 const DEFAULT_TERMINAL_WIDTH = 80;
 
+/**
+ * Rows the detail preview is guaranteed when it is open and a row is selected.
+ * The list page is capped so this floor always fits the viewport — without it a
+ * long list (PICKER_RECENT_COUNT = 15) consumes the whole default 24-row
+ * terminal, `availablePreviewRows` goes <= 0, and the preview silently collapses
+ * to empty (RUSH-2198).
+ */
+export const PREVIEW_MIN_ROWS = 6;
+
+/** Floor for the visible list page, so a short terminal still shows a few rows. */
+export const PICKER_MIN_LIST_ROWS = 3;
+
 function terminalWidth(): number {
   return Math.max(1, process.stdout.columns || DEFAULT_TERMINAL_WIDTH);
 }
 
 function terminalRows(): number {
   return Math.max(1, process.stdout.rows || DEFAULT_TERMINAL_ROWS);
+}
+
+/**
+ * Cap the visible list page so an open preview keeps a guaranteed floor of rows.
+ *
+ * The picker renders header + list page + separator + preview + help. When the
+ * requested page size (e.g. 15) is large enough to fill the terminal on its own,
+ * the preview has no room left and collapses. This reserves
+ * {@link PREVIEW_MIN_ROWS} (plus its separator) for the preview and hands the
+ * list whatever remains, never below {@link PICKER_MIN_LIST_ROWS}.
+ *
+ * `chromeRows` counts the fixed non-list, non-preview lines (header, subtitle,
+ * help, any flash). `linesAbovePrompt` counts lines already printed above the
+ * Inquirer prompt (fleet-unreachable warnings, hidden-session footers) that have
+ * scrolled the viewport but the picker cannot measure — subtracting them keeps
+ * those notices on screen alongside the preview.
+ */
+export function pickerPageSize(opts: {
+  requestedPageSize: number;
+  terminalRows: number;
+  chromeRows: number;
+  previewOpen: boolean;
+  linesAbovePrompt?: number;
+  previewMinRows?: number;
+  minListRows?: number;
+}): number {
+  const previewMinRows = opts.previewMinRows ?? PREVIEW_MIN_ROWS;
+  const minListRows = opts.minListRows ?? PICKER_MIN_LIST_ROWS;
+  const linesAbove = Math.max(0, opts.linesAbovePrompt ?? 0);
+  // The separator line rides with the preview only when it is open.
+  const previewReserve = opts.previewOpen ? previewMinRows + 1 : 0;
+  const budget = opts.terminalRows - linesAbove - opts.chromeRows - previewReserve;
+  return Math.max(minListRows, Math.min(opts.requestedPageSize, budget));
 }
 
 function renderedRows(text: string, width: number): number {
@@ -238,6 +291,18 @@ export function itemPicker<T>(config: PickerConfig<T>): Promise<PickedItem<T> | 
     const searchStr = searchTerm ? chalk.cyan(searchTerm) : chalk.gray(placeholder);
     const header = [prefix, message, searchStr].filter(Boolean).join(' ');
 
+    // Cap the list page so an open preview keeps a guaranteed floor of rows.
+    // chrome = header + optional subtitle + help; the preview separator is
+    // reserved inside pickerPageSize.
+    const chromeRows = 1 + (cfg.subtitle ? 1 : 0) + 1;
+    const effectivePageSize = pickerPageSize({
+      requestedPageSize: cfg.pageSize ?? 10,
+      terminalRows: terminalRows(),
+      chromeRows,
+      previewOpen: previewOpen && Boolean(cfg.buildPreview),
+      linesAbovePrompt: cfg.linesAbovePrompt,
+    });
+
     const page = usePagination({
       items: results as any,
       active,
@@ -247,7 +312,7 @@ export function itemPicker<T>(config: PickerConfig<T>): Promise<PickedItem<T> | 
         const row = isActive ? chalk.bold(item.label) : item.label;
         return `${cursor} ${row}`;
       },
-      pageSize: cfg.pageSize ?? 10,
+      pageSize: effectivePageSize,
       loop: false,
     });
 
@@ -273,7 +338,7 @@ export function itemPicker<T>(config: PickerConfig<T>): Promise<PickedItem<T> | 
         renderedRows(parts.slice(1).join('\n'), width) +
         renderedRows(separator, width) +
         renderedRows(help, width);
-      const availablePreviewRows = terminalRows() - fixedRows;
+      const availablePreviewRows = terminalRows() - Math.max(0, cfg.linesAbovePrompt ?? 0) - fixedRows;
       const preview = limitPreviewHeight(cfg.buildPreview(selected.value), availablePreviewRows, width);
       if (preview) {
         parts.push(separator);
@@ -379,6 +444,18 @@ export function multiItemPicker<T>(config: MultiPickerConfig<T>): Promise<T[] | 
     const searchStr = searchTerm ? chalk.cyan(searchTerm) : chalk.gray(placeholder);
     const header = [prefix, message, searchStr].filter(Boolean).join(' ');
 
+    // Cap the list page so an open preview keeps a guaranteed floor of rows.
+    // chrome = header + help; the preview separator is reserved inside
+    // pickerPageSize.
+    const chromeRows = 2;
+    const effectivePageSize = pickerPageSize({
+      requestedPageSize: cfg.pageSize ?? 10,
+      terminalRows: terminalRows(),
+      chromeRows,
+      previewOpen: previewOpen && Boolean(cfg.buildPreview),
+      linesAbovePrompt: cfg.linesAbovePrompt,
+    });
+
     const page = usePagination({
       items: results as any,
       active,
@@ -390,7 +467,7 @@ export function multiItemPicker<T>(config: MultiPickerConfig<T>): Promise<T[] | 
         const row = isActive ? chalk.bold(item.label) : item.label;
         return `${cursor} ${box} ${row}`;
       },
-      pageSize: cfg.pageSize ?? 10,
+      pageSize: effectivePageSize,
       loop: false,
     });
 
@@ -415,7 +492,7 @@ export function multiItemPicker<T>(config: MultiPickerConfig<T>): Promise<T[] | 
         renderedRows(parts.slice(1).join('\n'), width) +
         renderedRows(separator, width) +
         renderedRows(help, width);
-      const availablePreviewRows = terminalRows() - fixedRows;
+      const availablePreviewRows = terminalRows() - Math.max(0, cfg.linesAbovePrompt ?? 0) - fixedRows;
       const preview = limitPreviewHeight(cfg.buildPreview(selected.value), availablePreviewRows, width);
       if (preview) {
         parts.push(separator);
@@ -473,6 +550,8 @@ export interface DynamicPickerConfig<T, F> {
   emptyMessage?: string;
   loadingMessage?: string;
   enterHint?: string;
+  /** See {@link PickerConfig.linesAbovePrompt}. */
+  linesAbovePrompt?: number;
 }
 
 /**
@@ -706,6 +785,19 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
     }
     const header = headerBits.filter(Boolean).join(' ');
 
+    // Cap the list page so an open preview keeps a guaranteed floor of rows.
+    // chrome = header + help + optional flash line; the preview separator is
+    // reserved inside pickerPageSize. Only the loaded list steals viewport, so
+    // skip the cap while the loading placeholder is showing.
+    const chromeRows = 2 + (flash ? renderedRows(flash, terminalWidth()) : 0);
+    const effectivePageSize = pickerPageSize({
+      requestedPageSize: cfg.pageSize ?? 12,
+      terminalRows: terminalRows(),
+      chromeRows,
+      previewOpen: previewOpen && Boolean(cfg.buildPreview) && !loading,
+      linesAbovePrompt: cfg.linesAbovePrompt,
+    });
+
     const page = usePagination({
       items: results as any,
       active,
@@ -715,7 +807,7 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
         const row = isActive ? chalk.bold(item.label) : item.label;
         return `${cursor} ${row}`;
       },
-      pageSize: cfg.pageSize ?? 12,
+      pageSize: effectivePageSize,
       loop: false,
     });
 
@@ -747,7 +839,7 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
         renderedRows(separator, width) +
         renderedRows(help, width) +
         flashRows;
-      const availablePreviewRows = terminalRows() - fixedRows;
+      const availablePreviewRows = terminalRows() - Math.max(0, cfg.linesAbovePrompt ?? 0) - fixedRows;
       const preview = limitPreviewHeight(cfg.buildPreview(selected.value), availablePreviewRows, width);
       if (preview) {
         parts.push(separator);
