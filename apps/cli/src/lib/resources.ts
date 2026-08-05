@@ -9,7 +9,7 @@ import type { AgentId } from './types.js';
 import { AGENTS, listInstalledMcpsWithScope } from './agents.js';
 import { listInstalledCommandsWithScope } from './commands.js';
 import { listInstalledSkillsWithScope, type SkillParseError } from './skills.js';
-import { listInstalledHooksWithScope } from './hooks.js';
+import { listInstalledHooksWithScope, listHookEntriesFromDir } from './hooks.js';
 import { listInstalledInstructionsWithScope } from './rules/rules.js';
 import { getEffectiveHome } from './versions.js';
 import { listMcpServerConfigs } from './mcp.js';
@@ -196,6 +196,33 @@ export function listResources(
     [path.join(getSystemAgentsDir(), kind), 'system', getSystemAgentsDir()],
     ...extraRepos.map((e): [string, string, string] => [path.join(e.dir, kind), e.alias, e.dir]),
   ];
+
+  // Hooks use a one-level event-group layout (hooks/pre-tool-use/git-guard.sh).
+  // A flat readdir treats `pre-tool-use` as the resource name, so `system:*`
+  // pattern expansion never includes nested scripts — and `agents sync --force`
+  // leaves stale flat copies in version homes forever. Enumerate via
+  // listHookEntriesFromDir (same discovery as the writer / doctor) and use the
+  // file basename WITH extension so names match getAvailableResources.
+  if (kind === 'hooks') {
+    for (const [dir, source, repoRoot] of roots) {
+      if (!fs.existsSync(dir)) continue;
+      for (const entry of listHookEntriesFromDir(dir)) {
+        // Install / available name is the script filename (git-guard.sh), not
+        // the extension-stripped HookEntry.name (git-guard).
+        const name = path.basename(entry.scriptPath);
+        if (seen.has(name)) continue;
+        if (!resourceIsActive(kind, name, source)) continue;
+        seen.add(name);
+        results.push(withProvenance({
+          name,
+          path: entry.scriptPath,
+          source,
+          repoRoot,
+        }));
+      }
+    }
+    return results;
+  }
 
   for (const [dir, source, repoRoot] of roots) {
     if (!fs.existsSync(dir)) continue;

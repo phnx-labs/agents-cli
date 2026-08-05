@@ -1277,6 +1277,32 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
     expect(sel.skills).toEqual(['system-only']);
   });
 
+  it('expands nested hooks/<event>/ scripts under system:* (not the group dir name)', () => {
+    // After hooks/<event-name>/<script> layout, listResources must expand group
+    // dirs so buildRepoScopedSelection('system') includes git-guard.sh — otherwise
+    // agents sync --force never re-copies nested system hooks into version homes.
+    const home = makeTempHome();
+    const nested = path.join(home, '.agents', '.system', 'hooks', 'pre-tool-use');
+    fs.mkdirSync(nested, { recursive: true });
+    fs.writeFileSync(path.join(nested, 'git-guard.sh'), '#!/bin/sh\necho multi\n', 'utf-8');
+    fs.chmodSync(path.join(nested, 'git-guard.sh'), 0o755);
+    // Flat top-level still works.
+    fs.writeFileSync(
+      path.join(home, '.agents', '.system', 'hooks', 'registration_test.sh'),
+      '#!/bin/sh\n',
+      'utf-8',
+    );
+    // User-layer hook must NOT appear under --repo system.
+    const userHook = path.join(home, '.agents', 'hooks', 'user-only.sh');
+    fs.mkdirSync(path.dirname(userHook), { recursive: true });
+    fs.writeFileSync(userHook, '#!/bin/sh\n', 'utf-8');
+
+    const sel = runBuildScoped(home, 'system') as { hooks?: string[] };
+    expect(sel.hooks).toEqual(expect.arrayContaining(['git-guard.sh', 'registration_test.sh']));
+    expect(sel.hooks).not.toContain('pre-tool-use');
+    expect(sel.hooks).not.toContain('user-only.sh');
+  });
+
   it('scopes to the user repo — only user-layer skills, not system', () => {
     const home = makeTempHome();
     scaffoldSkills(home);
