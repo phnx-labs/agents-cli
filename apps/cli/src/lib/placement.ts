@@ -2,7 +2,7 @@
  * Placement — one model for "where does the body run?"
  *
  * The CLI grew several doors that all mean execution target:
- *   run --host / --device / --lease / --box
+ *   run --host / --device / --lease / --box / --cloud
  *   routines --placement / --run-on / hostStrategy
  *   monitors --run-on (body) vs --device (owner — NOT placement)
  *   teams --device (teammate pin)
@@ -44,6 +44,10 @@ export interface RunPlacementFlags {
   computer?: string;
   lease?: string | boolean;
   box?: string;
+  /** --cloud: vendor cloud placement (the agent's native cloud provider). */
+  cloud?: boolean;
+  /** --provider: refines the cloud placement; not a placement on its own. */
+  provider?: string;
 }
 
 export class PlacementError extends Error {
@@ -132,21 +136,24 @@ export function placementFromRunFlags(flags: RunPlacementFlags): Placement {
   const hostT = hostFamilyTarget(flags);
   const hasLease = flags.lease !== undefined && flags.lease !== false;
   const hasBox = !!flags.box;
+  const hasCloud = flags.cloud === true;
 
   const placementFlags: string[] = [];
   if (where) placementFlags.push('--where');
   if (hostT) placementFlags.push('--host/--device');
   if (hasLease) placementFlags.push('--lease');
   if (hasBox) placementFlags.push('--box');
+  if (hasCloud) placementFlags.push('--cloud');
 
   if (placementFlags.length > 1) {
     throw new PlacementError(
       `Conflicting placement flags: ${placementFlags.join(' + ')}. ` +
-        `Use one door — prefer --where (device:<name> | auto | lease | local).`,
+        `Use one door — prefer --where (device:<name> | auto | lease | cloud | local).`,
     );
   }
 
   if (where) return parseWhereSpec(where, '--where');
+  if (hasCloud) return { kind: 'cloud', target: flags.provider, source: '--cloud' };
   if (hasBox) return { kind: 'lease', target: flags.box, source: '--box' };
   if (hasLease) {
     const backend = typeof flags.lease === 'string' ? flags.lease : undefined;
@@ -160,12 +167,12 @@ export function placementFromRunFlags(flags: RunPlacementFlags): Placement {
  * Expand a resolved placement into the concrete run option fields the
  * existing dispatch paths already understand. Pure — does not mutate input.
  *
- * `cloud` and `fleet` are not valid for a bare `agents run` (use `cloud run`
- * / routines); they throw so callers fail loud.
+ * `fleet` is not valid for a bare `agents run` (it is a routines placement);
+ * it throws so callers fail loud.
  */
 export function expandPlacementToRunFlags(
   placement: Placement,
-): Pick<RunPlacementFlags, 'host' | 'device' | 'lease' | 'box'> {
+): Pick<RunPlacementFlags, 'host' | 'device' | 'lease' | 'box' | 'cloud' | 'provider'> {
   switch (placement.kind) {
     case 'local':
       return {};
@@ -179,15 +186,14 @@ export function expandPlacementToRunFlags(
       // --box reuses a warm slug; --where lease[:backend] / --lease provisions.
       if (placement.source === '--box') return { box: placement.target };
       return placement.target ? { lease: placement.target } : { lease: true };
+    case 'cloud':
+      // Vendor cloud placement — `--where cloud[:provider]` expands to the
+      // --cloud flag (+ --provider refinement) the run action dispatches on.
+      return placement.target ? { cloud: true, provider: placement.target } : { cloud: true };
     case 'fleet':
       throw new PlacementError(
         `fleet placement is for routines (agents routines add … --placement fleet), not agents run. ` +
           `Use --where device:auto for an affinity pick, or --where device:<name>.`,
-      );
-    case 'cloud':
-      throw new PlacementError(
-        `cloud placement is agents cloud run (vendor cloud), not agents run. ` +
-          `For a disposable box use --where lease; for your fleet use --where device:<name>.`,
       );
   }
 }
@@ -227,9 +233,9 @@ export const PLACEMENT_MATRIX = `
   Affinity pick (14d usage)      --where auto            (= --device auto)
   Disposable cloud box           --where lease           (= --lease)
   Reuse warm crabbox             --box <slug>
+  Vendor cloud task              --cloud   (= --where cloud[:provider])
   Routines: body on one box      --run-on <name> / --placement host
   Routines: pick any online      --placement fleet
-  Vendor cloud task              agents cloud run …
   Monitors: who evaluates        --device <owner>   (NOT body placement)
   Monitors: where action runs    --run-on <host>
 `.trim();

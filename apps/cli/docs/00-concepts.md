@@ -221,7 +221,19 @@ one door:
 | Warm crabbox reuse | `kind: lease, target: <slug>` | `--box <slug>` |
 | Routines: body on one box | `kind: device` | `--run-on <name>` · `--placement host` |
 | Routines: pick any online | `kind: fleet` | `--placement fleet` |
-| Vendor cloud task | `kind: cloud` | `agents cloud run …` |
+| Vendor cloud task | `kind: cloud` | `--cloud` · `--where cloud[:provider]` · `agents cloud run …` |
+
+**Cloud placement.** `--cloud` routes the run to the agent's native vendor
+cloud through the provider registry — the same dispatch as `agents cloud run
+--agent <agent>`, tracked by `agents cloud list/status/logs/cancel/message`.
+Routing: claude→rush, codex→codex, droid→factory, antigravity→antigravity;
+`--provider` overrides. An agent with no native cloud (kimi, grok, cursor,
+opencode, …) fails loud unless `--provider` is given. Cloud tasks run in the
+provider's workspace on the provider's accounts, so local-run flags
+(`--loop`, `--resume`, `--secrets`, `--terminal`, `--cwd`, account strategy,
+…) are rejected rather than silently dropped, and `--repo` / `--branch` /
+`--cloud-env` require `--cloud`. Source: `src/commands/run-cloud.ts`,
+`src/lib/cloud/dispatch.ts` (the one dispatch path both surfaces share).
 
 **Owner is not placement.** On monitors, `--device` pins who *evaluates and
 fires* (exactly-once owner). `--run-on` is where the *action body* runs. Same

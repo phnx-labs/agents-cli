@@ -8,47 +8,16 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { die, relTime, truncate, isJsonMode } from '../lib/format.js';
-import * as fs from 'fs';
-import * as path from 'path';
-import ora from 'ora';
 import { resolveProvider, getAllProviders, getDefaultProviderId } from '../lib/cloud/registry.js';
 import { insertTask, updateTaskStatus, getTaskById, listTasks as listStoredTasks, listActiveTasks } from '../lib/cloud/store.js';
 import { renderStream } from '../lib/cloud/stream.js';
-import type { CloudProvider, CloudProviderId, CloudTarget, CloudTaskStatus, DispatchOptions, ImageAttachment, SkillRef } from '../lib/cloud/types.js';
-import { MissingTargetError, MAX_IMAGES_PER_DISPATCH } from '../lib/cloud/types.js';
+import type { CloudProviderId, CloudTaskStatus, DispatchOptions } from '../lib/cloud/types.js';
+import { MAX_IMAGES_PER_DISPATCH } from '../lib/cloud/types.js';
+import { resolveCloudPrompt, executeCloudDispatch } from '../lib/cloud/dispatch.js';
 import type { JobConfig, JobTrigger } from '../lib/routines.js';
 import { normalizeTriggerEvent, validateTrigger, writeJob, setJobEnabled, jobExists, GITHUB_TRIGGER_EVENTS } from '../lib/routines.js';
 import { emit } from '../lib/events.js';
-import { shareRuntimeEnv } from '../lib/share/config.js';
 
-/** Map a supported image file extension to its wire mimeType. Rejects anything else. */
-function imageMimeFromPath(file: string): ImageAttachment['mimeType'] {
-  const ext = path.extname(file).toLowerCase();
-  if (ext === '.png') return 'image/png';
-  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
-  if (ext === '.webp') return 'image/webp';
-  die(`Unsupported image type ${JSON.stringify(ext || file)}. Use .png, .jpg/.jpeg, or .webp.`);
-}
-
-/** Read one image file into a base64 ImageAttachment, dying with a clear error if it's missing. */
-function readImageAttachment(file: string): ImageAttachment {
-  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
-    die(`Image not found: ${file}`);
-  }
-  const mimeType = imageMimeFromPath(file);
-  return { data: fs.readFileSync(file).toString('base64'), mimeType };
-}
-
-/** Parse a `--skill <id>` value (`id` or `id@version`) into a SkillRef. */
-function parseSkillRef(raw: string): SkillRef {
-  const at = raw.lastIndexOf('@');
-  if (at > 0) {
-    return { id: raw.slice(0, at), version: raw.slice(at + 1) };
-  }
-  return { id: raw };
-}
-
-/** Print an error message to stderr and exit. */
 /** Return a chalk color function appropriate for the given task status. */
 export function statusColor(status: string): (s: string) => string {
   switch (status) {
@@ -64,51 +33,6 @@ export function statusColor(status: string): (s: string) => string {
   }
 }
 
-
-/**
- * After a `MissingTargetError`, try to resolve the target interactively.
- * Returns the chosen id, or undefined when no interactive resolution is
- * possible (non-TTY/JSON, provider can't enumerate, or user cancels) — the
- * caller then prints the error's guidance.
- *
- * Codex has no `listTargets` (no list-environments CLI), so it always returns
- * undefined here and the user sees the `codex cloud` guidance. Factory lists
- * Droid Computers; if listing fails (not signed in) or parses to nothing, we
- * fall back to a free-text prompt so a dispatch is never hard-blocked.
- */
-async function pickMissingTarget(
-  provider: CloudProvider,
-  err: MissingTargetError,
-  json: boolean,
-): Promise<string | undefined> {
-  if (json || !process.stdout.isTTY) return undefined;
-  if (!provider.listTargets) return undefined;
-
-  const { select, input } = await import('@inquirer/prompts');
-  const promptName = err.kind === 'env' ? 'environment' : 'computer';
-
-  let targets: CloudTarget[];
-  try {
-    targets = await provider.listTargets();
-  } catch (listErr) {
-    process.stderr.write(chalk.dim(`Could not list ${promptName}s: ${(listErr as Error).message}\n`));
-    targets = [];
-  }
-
-  try {
-    if (targets.length > 0) {
-      return await select({
-        message: `Select a ${promptName}`,
-        choices: targets.map((t) => ({ value: t.id, name: t.label ? `${t.id}  ${chalk.dim(t.label)}` : t.id })),
-      });
-    }
-    const typed = (await input({ message: `No ${promptName}s found. Enter a ${promptName} name (blank to cancel):` })).trim();
-    return typed || undefined;
-  } catch {
-    // User hit Ctrl-C / Esc on the prompt.
-    return undefined;
-  }
-}
 
 /** Register the `agents cloud` command tree (run, list, status, logs, cancel, message, providers). */
 export function registerCloudCommands(program: Command): void {
@@ -243,24 +167,17 @@ Examples:
 
   # Default provider (set in ~/.agents/agents.yaml)
   agents cloud run "refactor auth module" --repo user/repo
+
+  # Same dispatch as a run placement: agents run <agent> "<task>" --cloud
 `)
     .action(async (positionalPrompt: string | undefined, options: Record<string, unknown>) => {
       const json = isJsonMode(options as { json?: boolean });
 
       // Resolve prompt: --prompt flag, positional arg, or file
-      let prompt = (options.prompt as string) || positionalPrompt;
-      if (!prompt) die('Prompt is required. Pass it as an argument or with --prompt.', 1, { json, hint: 'agents cloud run "<task>" --repo <owner/repo>' });
-
-      // If prompt is a file path, read it and tell the user
-      if (fs.existsSync(prompt) && fs.statSync(prompt).isFile()) {
-        const filePath = prompt;
-        const stat = fs.statSync(filePath);
-        const sizeKB = (stat.size / 1024).toFixed(1);
-        prompt = fs.readFileSync(filePath, 'utf-8').trim();
-        if (process.stderr.isTTY) {
-          process.stderr.write(chalk.dim(`Reading prompt from ${filePath} (${sizeKB} KB)\n`));
-        }
-      }
+      const prompt = resolveCloudPrompt((options.prompt as string) || positionalPrompt, {
+        json,
+        hint: 'agents cloud run "<task>" --repo <owner/repo>',
+      });
 
       // --host names one of YOUR machines as the target — that only means
       // something to the host provider, so it implies --provider host rather
@@ -294,9 +211,6 @@ Examples:
         model: options.model as string | undefined,
         providerOptions: {},
       };
-      const shareEnv = shareRuntimeEnv();
-      if (shareEnv) dispatchOptions.env = shareEnv;
-
       if (options.env) dispatchOptions.providerOptions!.env = options.env as string;
       if (options.computer) dispatchOptions.providerOptions!.computer = options.computer as string;
       if (options.host) dispatchOptions.providerOptions!.host = options.host as string;
@@ -367,101 +281,17 @@ Examples:
         return;
       }
 
-      // Vision attachments + ride-along skills. Only wire them when the resolved
-      // provider advertises support — otherwise fail loud rather than silently
-      // drop the flags the user passed.
-      const imagePaths = Array.isArray(options.image) ? (options.image as string[]) : [];
-      const skillIds = Array.isArray(options.skill) ? (options.skill as string[]) : [];
-      const caps = provider.capabilities();
-      if (imagePaths.length > 0) {
-        if (!caps.images) die(`${provider.name} does not support image attachments.`, 1, { json });
-        if (imagePaths.length > MAX_IMAGES_PER_DISPATCH) {
-          die(`Too many images: ${imagePaths.length}. Max is ${MAX_IMAGES_PER_DISPATCH} per dispatch.`, 1, { json });
-        }
-        dispatchOptions.images = imagePaths.map(readImageAttachment);
-      }
-      if (skillIds.length > 0) {
-        if (!caps.skills) die(`${provider.name} does not support ride-along skills.`, 1, { json });
-        dispatchOptions.skills = skillIds.map(parseSkillRef);
-      }
-
-      // Dispatch. On a missing pre-provisioned target (Codex env / Factory
-      // computer), offer an interactive picker instead of a raw error.
-      const dispatchOnce = async () => {
-        const spinner = ora({ text: `Dispatching to ${provider.name}...`, stream: process.stderr }).start();
-        try {
-          const t = await provider.dispatch(dispatchOptions);
-          spinner.succeed(`Task ${t.id} dispatched to ${provider.name}`);
-          return t;
-        } catch (err) {
-          spinner.fail('Dispatch failed');
-          throw err;
-        }
-      };
-
-      let task;
-      try {
-        task = await dispatchOnce();
-      } catch (err) {
-        if (err instanceof MissingTargetError) {
-          const picked = await pickMissingTarget(provider, err, json);
-          if (!picked) {
-            die(err.guidance ? `${err.message}\n\n${err.guidance}` : err.message, 1, { json });
-          }
-          dispatchOptions.providerOptions![err.kind] = picked;
-          try {
-            task = await dispatchOnce();
-          } catch (err2) {
-            die((err2 as Error).message, 1, { json });
-          }
-        } else {
-          die((err as Error).message, 1, { json });
-        }
-      }
-
-      // Persist locally
-      insertTask(task);
-      emit('cloud.dispatch', { module: 'cloud', taskId: task.id, agent: task.agent, provider: task.provider, status: task.status });
-
-      if (json) {
-        process.stdout.write(JSON.stringify(task) + '\n');
-      }
-
-      // Stream output unless --no-follow
-      if (options.follow === false) return;
-
-      try {
-        // Live budget kill-switch (issue #399). Reuses makeLiveSpendWatcher to
-        // feed the provider's `usage` events into a shared watcher; on a cap
-        // breach we call provider.cancel(task.id) mid-stream. Dormant (returns
-        // null) when no caps are configured, so the raw stream flows unchanged.
-        const { wrapStreamWithBudgetGate } = await import('../lib/budget/live-cloud.js');
-        const gated = wrapStreamWithBudgetGate({
-          provider,
-          taskId: task.id,
-          project: task.repo ?? task.repos?.[0] ?? process.cwd(),
-          agent: task.agent ?? 'cloud',
-          cwd: process.cwd(),
-        });
-        const eventSource = gated ? gated.wrap(provider.stream(task.id)) : provider.stream(task.id);
-        const result = await renderStream(eventSource, { json });
-        updateTaskStatus(task.id, result.status as CloudTaskStatus, {
-          summary: result.summary,
-          prUrl: result.prUrl,
-        });
-        emit('cloud.complete', { module: 'cloud', taskId: task.id, status: result.status, prUrl: result.prUrl });
-        if (gated?.gate.breached()) {
-          const b = gated.gate.breach();
-          process.stderr.write(
-            `[budget] cap ${b?.cap} exceeded — cancelled cloud task ${task.id}\n`,
-          );
-          process.exitCode = 7; // Mirrors BUDGET_KILL_EXIT_CODE for CI/headless.
-        }
-      } catch (err) {
-        // Stream disconnect is OK — task keeps running
-        process.stderr.write(chalk.dim(`\nStream disconnected. Task ${task.id} continues running.\n`));
-        process.stderr.write(chalk.dim(`Check status: agents cloud status ${task.id}\n`));
-      }
+      // One dispatch path for every cloud surface — lib/cloud/dispatch.ts owns
+      // capability checks, the missing-target picker, persistence, streaming,
+      // and the budget kill-switch.
+      await executeCloudDispatch({
+        provider,
+        dispatchOptions,
+        imagePaths: Array.isArray(options.image) ? (options.image as string[]) : [],
+        skillIds: Array.isArray(options.skill) ? (options.skill as string[]) : [],
+        follow: options.follow !== false,
+        json,
+      });
     });
 
   // ── agents cloud list ─────────────────────────────────────────────────

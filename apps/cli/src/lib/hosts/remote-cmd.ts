@@ -141,6 +141,14 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   bare: 'local-only', // skips the local setup-copy push; lease-only concern
   tailscale: 'local-only', // --tailscale/--no-tailscale gate the lease net mode; never forwarded
   copyCreds: 'local-only', // copies creds TO the host before dispatch — local concern only
+  // Cloud placement: chosen and dispatched from THIS machine via the provider
+  // registry; mutually exclusive with --host (placement conflict dies before
+  // dispatch), so these never have a remote argv to ride.
+  cloud: 'local-only',
+  provider: 'local-only',
+  repo: 'local-only',
+  branch: 'local-only',
+  cloudEnv: 'local-only',
   authCheck: 'local-only', // --no-auth-check gates the local interactive login preflight; --host runs skip that preflight entirely
   // The notification must land on the box the PERSON is at — the one that
   // dispatched — not on a headless worker with no desktop to post to. The local

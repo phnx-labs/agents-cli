@@ -234,8 +234,10 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    // Claude Code has no headless Anthropic-hosted dispatch CLI (only
-    // --remote-control, which bridges a *local* session). Its cloud is Rush.
+    // Claude Code grew a native `claude --cloud "<prompt>"` (Anthropic-managed
+    // infra, claude.ai/code; requires claude.ai subscription auth). Routing
+    // still goes to Rush Cloud deliberately — it keeps cloud tasks in one
+    // tracked fleet (agents cloud list/status/logs) regardless of harness.
     cloudProvider: 'rush',
     capabilities: { hooks: true, mcp: true, mcpHttp: true, mcpHeaders: true, allowlist: true, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'CLAUDE.md' }, workflows: true, memory: true, modes: ['plan', 'edit', 'auto', 'skip'], rulesImports: true, interactiveRepl: true },
   },

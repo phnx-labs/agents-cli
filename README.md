@@ -623,6 +623,8 @@ Four managed backends behind one interface (`agents cloud providers`):
 
 Auto-routes each `--agent` to its native cloud, or pin the backend with `--provider`. Instead of dispatching now, register a run as an **event trigger** with `--on pull_request` (also `push`, `issue_comment`, `workflow_run`) -- it persists as a trigger-bound routine that fires on the event. `--json` on every subcommand for scripting.
 
+The same dispatch is a placement on `agents run`: `agents run claude "fix the flaky e2e" --cloud --repo acme/api` routes through the identical provider registry and tracks in `agents cloud list/status/logs` alike. `--cloud` sits alongside `--host`/`--device`/`--lease` as one of three placements (local, machine, cloud) and is mutually exclusive with them; `--where cloud[:provider]` is the one-door spelling. Agents without a native cloud fail loud unless `--provider` is given.
+
 ---
 
 ## Workflows

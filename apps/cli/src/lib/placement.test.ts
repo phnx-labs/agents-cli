@@ -87,6 +87,19 @@ describe('placementFromRunFlags', () => {
     });
   });
 
+  it('maps --cloud to a cloud placement, carrying --provider as the target', () => {
+    expect(placementFromRunFlags({ cloud: true })).toEqual({
+      kind: 'cloud',
+      target: undefined,
+      source: '--cloud',
+    });
+    expect(placementFromRunFlags({ cloud: true, provider: 'codex' })).toEqual({
+      kind: 'cloud',
+      target: 'codex',
+      source: '--cloud',
+    });
+  });
+
   it('accepts --where alone and rejects mixes', () => {
     expect(placementFromRunFlags({ where: 'auto' })).toEqual({
       kind: 'device',
@@ -96,6 +109,12 @@ describe('placementFromRunFlags', () => {
     expect(() => placementFromRunFlags({ where: 'local', host: 'zion' })).toThrow(/Conflicting placement/);
     expect(() => placementFromRunFlags({ where: 'lease', lease: true })).toThrow(/Conflicting placement/);
     expect(() => placementFromRunFlags({ host: 'a', lease: true })).toThrow(/Conflicting placement/);
+    // Placements are mutually exclusive by definition: --cloud with any
+    // machine placement (--host/--device family, --lease, --box) is an error.
+    expect(() => placementFromRunFlags({ cloud: true, host: 'zion' })).toThrow(/Conflicting placement/);
+    expect(() => placementFromRunFlags({ cloud: true, lease: true })).toThrow(/Conflicting placement/);
+    expect(() => placementFromRunFlags({ cloud: true, box: 'warm-1' })).toThrow(/Conflicting placement/);
+    expect(() => placementFromRunFlags({ cloud: true, where: 'auto' })).toThrow(/Conflicting placement/);
   });
 });
 
@@ -110,9 +129,16 @@ describe('expandPlacementToRunFlags', () => {
     expect(expandPlacementToRunFlags(parseWhereSpec('local'))).toEqual({});
   });
 
-  it('rejects fleet/cloud on bare run', () => {
+  it('expands --where cloud[:provider] into the --cloud flag form', () => {
+    expect(expandPlacementToRunFlags(parseWhereSpec('cloud'))).toEqual({ cloud: true });
+    expect(expandPlacementToRunFlags(parseWhereSpec('cloud:codex'))).toEqual({
+      cloud: true,
+      provider: 'codex',
+    });
+  });
+
+  it('rejects fleet on bare run', () => {
     expect(() => expandPlacementToRunFlags(parseWhereSpec('fleet'))).toThrow(/routines/);
-    expect(() => expandPlacementToRunFlags(parseWhereSpec('cloud'))).toThrow(/cloud run/);
   });
 });
 

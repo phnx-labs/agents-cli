@@ -104,6 +104,14 @@ interface ExecCommandActionOptions {
   reuse?: boolean; // --reuse: reuse the most-recently-used warm box if one exists
   bare?: boolean; // --bare: skip copying the local ~/.agents setup onto the box
   tailscale?: boolean; // --tailscale / --no-tailscale: tri-state net-mode override
+  // Cloud placement: dispatch to the agent's native vendor cloud via the
+  // cloud provider registry (commands/run-cloud.ts). Mutually exclusive with
+  // the machine-placement flags above (one placement door).
+  cloud?: boolean; // --cloud: vendor cloud placement
+  provider?: string; // --provider <id>: override the agent's native cloud provider
+  repo?: string[]; // --repo <owner/repo> (repeatable): GitHub repo(s) for the cloud task
+  branch?: string; // --branch <name>: target git branch for the cloud task
+  cloudEnv?: string; // --cloud-env <id>: Codex Cloud environment id (--env is taken by KEY=VAL passthrough)
   secretsKeys?: string; // --secrets-keys: comma-separated key subset for --secrets bundles
   allowExpired?: boolean; // --allow-expired: skip expiry pre-run abort for secrets
   emitSessionId?: boolean; // internal: forwarded by --host dispatch so the remote run prints its session id (hosts/session-marker.ts)
@@ -808,7 +816,7 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--where <spec>',
-      'Where this run\'s body executes (one placement door): local | device:<name> | auto | lease[:backend]. Expands to --host/--lease. Do not combine with those flags. See docs/00-concepts.md#placement.',
+      'Where this run\'s body executes (one placement door): local | device:<name> | auto | lease[:backend] | cloud[:provider]. Expands to --host/--lease/--cloud. Do not combine with those flags. See docs/00-concepts.md#placement.',
     )
     .option(
       '--host <name>',
@@ -844,7 +852,20 @@ export function registerRunCommand(program: Command): void {
     )
     .option('--bare', 'With --lease, skip copying your local ~/.agents setup (skills/hooks/commands/MCP) onto the box.')
     .option('--tailscale', 'Lease the box onto your tailnet (reachable only over Tailscale) rather than a public IP.')
-    .option('--no-tailscale', 'Force a public-IP lease even when a reuse context would default to Tailscale.');
+    .option('--no-tailscale', 'Force a public-IP lease even when a reuse context would default to Tailscale.')
+    .option(
+      '--cloud',
+      'Vendor cloud placement: dispatch to the agent\'s native cloud (claude→rush, codex→codex, droid→factory, antigravity→antigravity) and stream the result. Same dispatch as `agents cloud run --agent <agent>`; tracked by `agents cloud list/status/logs`. Same as --where cloud. Mutually exclusive with --host/--lease and local-run flags.',
+    )
+    .option('--provider <id>', 'With --cloud: override the agent\'s native cloud provider (rush | codex | factory | antigravity | host).')
+    .option(
+      '--repo <owner/repo>',
+      'With --cloud: GitHub repository. Repeatable for multi-repo dispatch (Rush Cloud only).',
+      (val: string, prev: string[]) => [...prev, val],
+      [],
+    )
+    .option('--branch <name>', 'With --cloud: target git branch.')
+    .option('--cloud-env <id>', 'With --cloud: Codex Cloud environment ID (run\'s --env is the KEY=VAL passthrough, so the cloud env id gets its own flag).');
 
   // `--on` and `--computer` are hidden aliases of `--host` — same behavior.
   runCmd.addOption(new Option('--on <name>', 'Alias of --host.').hideHelp());
@@ -890,6 +911,14 @@ export function registerRunCommand(program: Command): void {
       agents run claude "…" --where device:yosemite-s0   # = --host yosemite-s0
       agents run claude "…" --where auto                 # = --device auto
       agents run claude "fix CI" --where lease --mode edit
+      agents run claude "fix the flaky e2e" --cloud --repo acme/example
+
+      # Vendor cloud placement — the agent's own cloud runs the task and
+      # agents cloud list/status/logs tracks it. Fire-and-forget: --no-follow
+      agents run claude "fix the flaky e2e" --cloud --repo acme/example
+      agents run codex "add parser tests" --cloud --cloud-env env_a1b2c3
+      agents run droid "QA the onboarding flow" --cloud --no-follow
+      agents run claude "…" --where cloud          # same as --cloud
 
       # Open the session in a terminal tab — detected from where your sessions
       # already run (Ghostty / iTerm / Terminal.app); force one with a value
@@ -951,6 +980,15 @@ export function registerRunCommand(program: Command): void {
 
       Fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.
 
+      Cloud placement: --cloud sends the run to the agent's native vendor cloud
+        (claude→rush, codex→codex, droid→factory, antigravity→antigravity) — the
+        same dispatch as agents cloud run --agent <agent>, tracked by agents
+        cloud list/status/logs/cancel/message. --provider overrides the routing;
+        --repo/--branch/--cloud-env refine the task. Agents without a native
+        cloud (kimi, grok, cursor, opencode, …) fail loud unless --provider is
+        given. --cloud is mutually exclusive with --host/--lease and with
+        local-run flags (--loop, --resume, --secrets, --terminal, …).
+
       Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and restores the source version/device/mode. Claude, Codex, Grok, Kimi, Droid, and Cursor use version-gated native resume; others replay via /continue. agents resume <id> infers the harness too.
 
       Passthrough: everything after -- is forwarded verbatim to the underlying agent CLI.
@@ -981,6 +1019,20 @@ export function registerRunCommand(program: Command): void {
         prompt = undefined;
       }
 
+      // --cloud: vendor cloud placement. Validate BEFORE the terminal handoff
+      // and every local dispatch path — flags like --terminal/--loop/--resume
+      // belong to the local runner and must error, never ride along silently.
+      if (options.cloud || (typeof options.where === 'string' && /^cloud(:|$)/i.test(options.where.trim()))) {
+        const { runCloudConflicts } = await import('./run-cloud.js');
+        const conflicts = runCloudConflicts(options as unknown as Record<string, unknown>);
+        if (conflicts.length > 0) {
+          console.error(chalk.red(
+            `--cloud is a vendor cloud placement; these only apply to local/machine runs: ${conflicts.join(', ')}. Drop them, or drop --cloud.`,
+          ));
+          process.exit(1);
+        }
+      }
+
       // --terminal: this process can't host the TUI (a menu-bar click, a script),
       // so hand the run to a real terminal and exit. Resolved from the user's own
       // live sessions, so it opens where they already work. Done before every
@@ -991,9 +1043,9 @@ export function registerRunCommand(program: Command): void {
         return;
       }
 
-      // Placement: --where expands into --host / --lease before any dispatch.
-      // One door for "where does the body run?" — old flags remain aliases.
-      // See lib/placement.ts and docs/00-concepts.md#placement.
+      // Placement: --where expands into --host / --lease / --cloud before any
+      // dispatch. One door for "where does the body run?" — old flags remain
+      // aliases. See lib/placement.ts and docs/00-concepts.md#placement.
       {
         const { placementFromRunFlags, expandPlacementToRunFlags, PlacementError } =
           await import('../lib/placement.js');
@@ -1005,6 +1057,8 @@ export function registerRunCommand(program: Command): void {
             if (expanded.device !== undefined) options.device = expanded.device;
             if (expanded.lease !== undefined) options.lease = expanded.lease;
             if (expanded.box !== undefined) options.box = expanded.box;
+            if (expanded.cloud !== undefined) options.cloud = expanded.cloud;
+            if (expanded.provider !== undefined) options.provider = expanded.provider;
             // Clear the where flag so remote re-entry (host dispatch) does not
             // re-expand and conflict with the concrete host we just set.
             options.where = undefined;
@@ -1016,6 +1070,24 @@ export function registerRunCommand(program: Command): void {
           }
           throw err;
         }
+      }
+
+      // Cloud refinement flags without the placement are a typo, not a no-op.
+      if (!options.cloud) {
+        const { cloudFlagsWithoutCloud } = await import('./run-cloud.js');
+        const stray = cloudFlagsWithoutCloud(options as unknown as Record<string, unknown>);
+        if (stray.length > 0) {
+          console.error(chalk.red(`${stray.join(', ')} ${stray.length > 1 ? 'require' : 'requires'} --cloud (vendor cloud placement).`));
+          process.exit(1);
+        }
+      }
+
+      // --cloud: dispatch through the cloud provider registry and return — the
+      // run never touches the local/host/lease paths below.
+      if (options.cloud) {
+        const { handleRunCloud } = await import('./run-cloud.js');
+        await handleRunCloud(agentSpec, prompt, options as unknown as Record<string, unknown>, command);
+        return;
       }
 
       // --notify: post a desktop notification when this run finishes. Armed on
