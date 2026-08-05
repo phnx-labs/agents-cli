@@ -10,6 +10,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import * as TOML from 'smol-toml';
+import * as YAML from 'yaml';
 import type { AgentId } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -172,32 +173,87 @@ async function installKimi(opts: InstallOptions): Promise<InstallResult> {
   return { agent: 'kimi', installed: true, configPath };
 }
 
+async function installHermes(opts: InstallOptions): Promise<InstallResult> {
+  const configPath = path.join(os.homedir(), '.hermes', 'config.yaml');
+  const command = hookCommand('hermes', opts);
+  if (opts.dryRun) return { agent: 'hermes', installed: false, configPath };
+  // Read-modify-write the YAML, preserving every sibling key (mcp_servers, …) —
+  // mirrors the CLI's registerHooksForHermes. Hermes maps SessionStart to the
+  // `on_session_start` event (HERMES_EVENT_MAP in apps/cli/src/lib/hooks.ts).
+  let cfg: Record<string, unknown> = {};
+  try {
+    const parsed = YAML.parse(await fs.promises.readFile(configPath, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) cfg = parsed as Record<string, unknown>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const hooks =
+    cfg.hooks && typeof cfg.hooks === 'object' && !Array.isArray(cfg.hooks)
+      ? (cfg.hooks as Record<string, Array<Record<string, unknown>>>)
+      : {};
+  const existing = Array.isArray(hooks.on_session_start) ? hooks.on_session_start : [];
+  hooks.on_session_start = [
+    ...existing.filter(
+      (h) => !(typeof h?.command === 'string' && h.command.includes('packages/session-tracker/src/hook.sh')),
+    ),
+    { command, timeout: 5 },
+  ];
+  cfg.hooks = hooks;
+  await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.promises.writeFile(configPath, YAML.stringify(cfg), 'utf8');
+  return { agent: 'hermes', installed: true, configPath };
+}
+
+/**
+ * Per-agent support for the SessionStart state-writer hook — the single source of
+ * truth, replacing a hardcoded switch whose `default` lumped "not wired up yet"
+ * together with "genuinely can't host it" under one opaque "not yet implemented"
+ * (RUSH-2205). Keyed by {@link AgentId}, so TypeScript forces an entry for every
+ * agent and the completeness test can assert each is either installable or carries
+ * a specific reason. The writer needs BOTH a native SessionStart hook the tracker
+ * can write AND a `hook.sh` branch that parses the harness's payload:
+ *
+ *   - gemini      — hard-deprecated; kept only for parsing old sessions/config.
+ *   - antigravity — its native config has no SessionStart event (only
+ *                   before_tool_call / after_model_call / on_loop_stop / on_error).
+ *   - opencode    — SessionStart is delivered by a generated TS plugin
+ *                   (session.created), not a shell-command hook this tracker emits.
+ *
+ * openclaw and rush are absent from this package's {@link AgentId} entirely — the
+ * former has no native SessionStart hook host, the latter is the Rush app, not a
+ * hook-bearing harness — so the writer cannot reach them at all. Their headless
+ * rows still surface via the discovery comm-map (apps/cli/src/lib/session/active.ts).
+ */
+type HookSupport =
+  | { install: (opts: InstallOptions) => Promise<InstallResult> }
+  | { unsupported: string };
+
+const HOOK_SUPPORT: Record<AgentId, HookSupport> = {
+  claude: { install: installClaude },
+  codex: { install: installCodex },
+  cursor: { install: installCursor },
+  grok: { install: installGrok },
+  droid: { install: installDroid },
+  kimi: { install: installKimi },
+  hermes: { install: installHermes },
+  gemini: { unsupported: 'gemini is hard-deprecated (kept only for parsing old sessions)' },
+  antigravity: { unsupported: 'antigravity has no SessionStart hook event' },
+  opencode: { unsupported: 'opencode SessionStart is a generated plugin, not a shell-command hook' },
+};
+
 export async function installHookFor(
   agent: AgentId,
   opts: InstallOptions = {},
 ): Promise<InstallResult> {
+  const support = HOOK_SUPPORT[agent];
+  if (!support) {
+    return { agent, installed: false, configPath: '', error: `unknown agent '${agent}'` };
+  }
+  if ('unsupported' in support) {
+    return { agent, installed: false, configPath: '', error: support.unsupported };
+  }
   try {
-    switch (agent) {
-      case 'claude':
-        return await installClaude(opts);
-      case 'codex':
-        return await installCodex(opts);
-      case 'cursor':
-        return await installCursor(opts);
-      case 'grok':
-        return await installGrok(opts);
-      case 'droid':
-        return await installDroid(opts);
-      case 'kimi':
-        return await installKimi(opts);
-      default:
-        return {
-          agent,
-          installed: false,
-          configPath: '',
-          error: `installation for ${agent} not yet implemented`,
-        };
-    }
+    return await support.install(opts);
   } catch (err) {
     return {
       agent,

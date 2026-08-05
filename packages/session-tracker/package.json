@@ -16,7 +16,8 @@
     "install-hook": "tsx src/install-hook.ts"
   },
   "dependencies": {
-    "smol-toml": "^1.4.2"
+    "smol-toml": "^1.4.2",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

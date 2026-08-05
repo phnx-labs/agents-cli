@@ -7,7 +7,8 @@ export type AgentId =
   | 'kimi'
   | 'droid'
   | 'antigravity'
-  | 'opencode';
+  | 'opencode'
+  | 'hermes';
 
 export interface TrackSpawnInput {
   agent: AgentId;

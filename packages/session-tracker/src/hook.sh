@@ -5,6 +5,7 @@
 # Each agent passes the hook payload differently:
 #   - claude/codex/cursor: JSON on stdin with session_id (+conversation_id for cursor)
 #   - grok: GROK_SESSION_ID and GROK_WORKSPACE_ROOT env vars
+#   - hermes: JSON on stdin (on_session_start payload); best-effort field probe
 #   - gemini/antigravity: TBD — add branches below as upstream payloads land
 #
 # Writes ~/.agents/.cache/terminals/sessions/<PPID>.json with the canonical
@@ -66,8 +67,9 @@ case "$AGENT" in
     CWD="${GROK_WORKSPACE_ROOT:-$PWD}"
     METHOD="hook-env"
     ;;
-  gemini|antigravity)
-    # Try stdin JSON first (covers most cases); fall through if empty.
+  hermes|gemini|antigravity)
+    # Best-effort stdin-JSON probe across the field names these harnesses use.
+    # A miss exits 0 below (no state file) — never a wrong write.
     SID="$(printf '%s' "$STDIN_JSON" | extract_stdin_json 'session_id conversation_id sessionId')"
     CWD="$(printf '%s' "$STDIN_JSON" | extract_stdin_json 'cwd workspace_roots')"
     ;;
