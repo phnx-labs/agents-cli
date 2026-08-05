@@ -569,10 +569,16 @@ export interface RegistrySearchResult {
 
 /** A package that has been resolved from a registry and is ready to install. */
 export interface ResolvedPackage {
-  type: 'mcp' | 'skill' | 'git';
+  /** `plugin` is Phase 5 packaging: `agents install plugin:<spec>` → plugins install. */
+  type: 'mcp' | 'skill' | 'git' | 'plugin';
   source: string;
   mcpEntry?: McpServerEntry;
   skillEntry?: SkillEntry;
+  /**
+   * Plugin install spec (`name@url`, path, or bare source) when `type === 'plugin'`.
+   * Same grammar as `agents plugins install <spec>`.
+   */
+  pluginSpec?: string;
 }
 
 /** Categories of resources that can be synced into an agent version home. */

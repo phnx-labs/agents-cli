@@ -487,7 +487,7 @@ export async function search(
 
 /** Parse a package identifier into its type (mcp, skill, git) and name. */
 export function parsePackageIdentifier(identifier: string): {
-  type: RegistryType | 'git' | 'unknown';
+  type: RegistryType | 'git' | 'plugin' | 'unknown';
   name: string;
 } {
   // mcp:filesystem -> MCP registry
@@ -498,6 +498,12 @@ export function parsePackageIdentifier(identifier: string): {
   // skill:user/repo -> skill registry (or git fallback)
   if (identifier.startsWith('skill:')) {
     return { type: 'skill', name: identifier.slice(6) };
+  }
+
+  // plugin:name@source | plugin:/path | plugin:gh:user/repo — Phase 5 packaging
+  // umbrella. Spec after the prefix is the same grammar as `agents plugins install`.
+  if (identifier.startsWith('plugin:')) {
+    return { type: 'plugin', name: identifier.slice('plugin:'.length) };
   }
 
   // gh:user/repo -> git source
@@ -532,6 +538,12 @@ export function parsePackageIdentifier(identifier: string): {
 /** Resolve a package identifier to an installable package with source metadata. */
 export async function resolvePackage(identifier: string): Promise<ResolvedPackage | null> {
   const parsed = parsePackageIdentifier(identifier);
+
+  if (parsed.type === 'plugin') {
+    const spec = parsed.name.trim();
+    if (!spec) return null;
+    return { type: 'plugin', source: spec, pluginSpec: spec };
+  }
 
   if (parsed.type === 'git') {
     return { type: 'git', source: parsed.name };
