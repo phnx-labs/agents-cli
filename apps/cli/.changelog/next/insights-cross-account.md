@@ -1,0 +1,48 @@
+- **Claude sessions are attributed to the account that produced them.** The session
+  scanner resolved ONE account email process-globally (`cachedClaudeAccount`) and
+  stamped it on every Claude row of a scan, so a machine with several signed-in
+  accounts reported all of its history under whichever resolved first — on a
+  three-account machine, 982 of 2,736 indexed sessions carried the wrong email and
+  most of the per-account cost was misplaced. Attribution now resolves per transcript,
+  from its path plus the version recorded inside the file. Two orgs sharing one email
+  (a Team seat and a personal Max plan) stay in separate buckets, keyed on the org
+  `usageKey` the same way `agents run`'s balanced rotation keys quota. Sessions whose
+  account cannot be established are reported as `unattributed:<reason>` rather than
+  folded into a real account. Source: `apps/cli/src/lib/session/claude-accounts.ts`,
+  `apps/cli/src/lib/session/discover.ts`.
+
+  Rows under the mutable `~/.claude` symlink are attributed by their recorded version,
+  not by wherever the symlink points now: only 684 of 1,334 such rows came from the
+  version the symlink currently names. Retired (`trash/`) homes keep their
+  `.claude.json`, so their transcripts stay attributable. A transcript in a home that
+  exists but is signed out stays dark and is named after that home — its location
+  proves which config dir Claude used.
+
+  **Harness scope: Claude only.** Attribution depends on the per-version home carrying
+  an `oauthAccount`. Other harnesses have their own per-version credential files, so
+  the mechanism generalizes, but each needs its own identity extractor and
+  quota-bucket notion. Until then a non-Claude session has no `account_key` and rolls
+  up under `unattributed:<agent>`.
+
+- **`account_key` / `account_org` on indexed sessions, and `--by account` rollups.**
+  Schema v33 adds both columns plus `idx_sessions_account_key`, and `queryUsageRollup`
+  accepts `groupBy: 'account'` — surfaced by `agents cost --by account` and
+  `agents output --by account`, which render the org and email rather than the raw
+  uuid. The migration repairs existing rows in place from `file_path` and `version`
+  and deliberately does **not** flush `scan_ledger`: attribution needs no transcript
+  re-parse, so a 2,736-row index migrates in ~200ms with every ledger entry still
+  warm. `getDB` also runs a guarded self-healing repair for rows an older CLI left
+  unattributed. Source: `apps/cli/src/lib/session/db.ts`.
+
+- **`upsertSessionsBatch` bound its named parameters from an untyped literal.** bun
+  binds named parameters in strict mode, where a MISSING key throws, while node binds
+  NULL — so a key omitted from that literal broke only the shipped standalone binary,
+  and the per-row guard swallowed it into a silently skipped session. The literal is
+  now typed against `SessionRow`, so the compiler rejects the next omission. Source:
+  `apps/cli/src/lib/session/db.ts`.
+
+- `readClaudeHomeConfig()` in `apps/cli/src/lib/agents.ts` — the single place a Claude
+  home's `oauthAccount` identity is read. `getAccountInfo` now uses it, so identity
+  extraction is no longer duplicated. Unlike `getAccountInfo` it does not apply the
+  credential floor, because a revoked token does not change which org produced a past
+  transcript.
