@@ -64,7 +64,7 @@ linear:
 dispatch:
   enabled: true                 # opt into auto-dispatch from Linear
   maxAgents: 3                  # cap on concurrent auto-dispatched agents
-  provider: codex               # harness for dispatched sessions (default: claude)
+  provider: codex               # optional cloud backend pin (otherwise agent-native)
   host: mac-mini                # pin dispatch to a specific fleet device
 ```
 
@@ -78,7 +78,7 @@ dispatch:
 | `goals[]` | `{objective, measure}` the OKR-shaped outcomes a project serves — a project may have several. The objective is the "why"; `measure` is the optional key result. Milestones (pulled from Linear) are the dated checkpoints toward them. |
 | `integrations[]` | `{kind, url, label}` external context sources. |
 | `linear` | `{projectId, url, name}` — reuses the existing Linear path. `name` is a display label (shown in Factory Floor and the activity feed); the other two are set by `agents projects link`. |
-| `dispatch` | `{enabled, maxAgents, provider, host}` — auto-dispatch settings read by `agents __auto-dispatch` and by the Factory Floor dispatch panel. All subfields are optional. `enabled: true` opts the project into auto-dispatch; `provider` defaults to `claude`; `host` pins dispatch to a named fleet device. |
+| `dispatch` | `{enabled, maxAgents, provider, host}` — auto-dispatch settings read by `agents __auto-dispatch` and by the Factory Floor dispatch panel. All subfields are optional. `enabled: true` opts the project into auto-dispatch; `provider` optionally pins a `agents cloud` backend (`rush`, `codex`, `factory`, `host`, …), otherwise the delegated agent's native cloud backend is used; `host` selects a named fleet device when `provider: host`. |
 
 ## Resolution — definition first, convention fallback
 

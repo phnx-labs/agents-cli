@@ -270,16 +270,19 @@ export function loadProjectDef(name: string): ProjectDef | undefined {
   let raw: string;
   try {
     raw = fs.readFileSync(projectDefPath(name), 'utf8');
-  } catch {
-    return undefined; // absent — not a defined project
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined; // absent — not a defined project
+    }
+    throw error;
   }
   return validateProjectDef(yaml.parse(raw), name);
 }
 
 /**
- * List every defined project, sorted by name. Skips (does not throw on) a
- * malformed file so one bad definition can't break `projects list`; the loader
- * for a single named project stays strict.
+ * List every defined project, sorted by name. A missing projects directory is
+ * the empty state; malformed definitions and filesystem failures stay loud so
+ * CLI callers (including Factory) can show the actual error.
  */
 export function listProjectDefs(): ProjectDef[] {
   let files: string[];
@@ -288,18 +291,15 @@ export function listProjectDefs(): ProjectDef[] {
     // deliberately do NOT list `.yml` here — accepting it would then ENOENT in the
     // loader and silently drop the project. One extension, one code path.
     files = fs.readdirSync(getProjectsDir()).filter((f) => f.endsWith('.yaml'));
-  } catch {
-    return [];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
   }
   const out: ProjectDef[] = [];
   for (const f of files) {
     const name = f.replace(/\.yaml$/, '');
-    try {
-      const def = loadProjectDef(name);
-      if (def) out.push(def);
-    } catch {
-      /* malformed — skip in the listing */
-    }
+    const def = loadProjectDef(name);
+    if (def) out.push(def);
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -338,8 +338,9 @@ export function removeProjectDef(name: string): boolean {
   try {
     fs.unlinkSync(projectDefPath(name));
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
   }
 }
 

@@ -125,9 +125,8 @@ export function managedToProjectDef(
       ? { ...(def.dispatch as Record<string, unknown>) }
       : {};
   if (project.autoDispatch === true) prevDispatch.enabled = true;
-  else delete prevDispatch.enabled;
+  else if (project.autoDispatch === false) delete prevDispatch.enabled;
   if (project.maxAgents !== undefined) prevDispatch.maxAgents = project.maxAgents;
-  else delete prevDispatch.maxAgents;
   if (Object.keys(prevDispatch).length > 0) def.dispatch = prevDispatch;
   else delete def.dispatch;
 
