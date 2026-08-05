@@ -27,18 +27,17 @@ jobs:
       windows: ${{ steps.scope.outputs.windows }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Three-dot PR comparison needs the merge base. The checked-out PR
+          # merge ref carries the fork head object; full history carries base.
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-      - name: Fetch PR endpoints
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: git fetch --no-tags --depth=1 origin "$BASE_SHA" "$HEAD_SHA"
       - name: Classify changed paths
         id: scope
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: git diff --name-only --diff-filter=ACMRD -z "$BASE_SHA" "$HEAD_SHA" | bun scripts/ci-scope.ts "$GITHUB_OUTPUT"
+        run: bun scripts/ci-scope.ts "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT"
 
   # Install once for type-checking, the compiled-binary smoke, and the gating
   # distributed-session benchmark. The old separate jobs repeated dependency

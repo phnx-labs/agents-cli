@@ -86,10 +86,32 @@ function readChangedFiles(): string[] {
   return input.toString('utf8').split(separator).filter(Boolean);
 }
 
+export function changedFilesBetween(base: string, head: string, cwd = process.cwd()): string[] {
+  const proc = Bun.spawnSync({
+    cmd: [
+      'git',
+      'diff',
+      '--name-only',
+      '--no-renames',
+      '--diff-filter=ACMRD',
+      '-z',
+      `${base}...${head}`,
+    ],
+    cwd,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  if (proc.exitCode !== 0) {
+    throw new Error(Buffer.from(proc.stderr).toString('utf8').trim());
+  }
+  return Buffer.from(proc.stdout).toString('utf8').split('\0').filter(Boolean);
+}
+
 function main(): void {
-  const files = readChangedFiles();
+  const [first, head, explicitOutput] = process.argv.slice(2);
+  const files = first && head ? changedFilesBetween(first, head) : readChangedFiles();
+  const githubOutput = first && head ? explicitOutput : first;
   const output = formatGitHubOutputs(classifyCiScope(files));
-  const githubOutput = process.argv[2];
   if (githubOutput) appendFileSync(githubOutput, output);
   else process.stdout.write(output);
 
