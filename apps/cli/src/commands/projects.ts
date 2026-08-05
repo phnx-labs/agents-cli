@@ -31,6 +31,7 @@ import {
   parseRemoteProbe,
   probeProjectWorkspaces,
   workspaceTargetsForDef,
+  workspaceWarnings,
   type HostWorkspaceStatus,
 } from '../lib/project-probe.js';
 import {
@@ -49,14 +50,16 @@ import {
   isDeadStatus,
   liveDeadSplit,
   enrichProjectSignals,
-  formatProjectMembers,
+  formatProjectMembersByHost,
+  formatProjectWarnings,
   type ProjectSessionRollup,
   type ProjectRemoteSignals,
+  type ProjectWarning,
 } from '../lib/project-status.js';
 import { fetchLinearProjectCounts, type LinearMilestone, type LinearProjectCounts } from '../lib/linear-project-counts.js';
 import { listLinearProjects, pickLinearProject, type LinearPick, type LinearProjectLite } from '../lib/linear-projects.js';
 import { checkRepoSlug } from '../lib/project-doctor.js';
-import { readFocusAreas, type FocusArea } from '../lib/project-focus.js';
+import { formatFocusAreas, readFocusAreas, type FocusArea } from '../lib/project-focus.js';
 import { formatVerdict, scheduleVerdict } from '../lib/project-schedule.js';
 import {
   buildFactoryImportCandidates,
@@ -385,6 +388,11 @@ function renderCard(
   focus: FocusArea[] = [],
   /** `view` mode: the caller prints the stored definition in full afterwards. */
   detail: boolean = false,
+  /**
+   * Workspace probe rows used only for the warnings footer. May be the full
+   * `--fleet` set or a local-only probe so drift is never silent by default.
+   */
+  warnWorkspaces: HostWorkspaceStatus[] = [],
 ): void {
   // The headline counts LIVE agents. It used to be every matched session, which
   // read `39 agents` on a project where 19 had crashed. `planPct` used to sit
@@ -397,14 +405,18 @@ function renderCard(
   if (split.dead > 0) {
     // Wreckage is worth a number of its own — 19 crashed sessions is a thing to
     // go fix, not a throughput signal to fold into the headline.
-    const detail = split.deadByStatus.map((d) => `${d.n} ${d.status}`).join(', ');
-    console.log(`  ${chalk.dim('dead')}     ${chalk.yellow(`${split.dead} finished or lost`)} ${chalk.dim(`(${detail})`)}`);
+    const deadDetail = split.deadByStatus.map((d) => `${d.n} ${d.status}`).join(', ');
+    console.log(`  ${chalk.dim('dead')}     ${chalk.yellow(`${split.dead} finished or lost`)} ${chalk.dim(`(${deadDetail})`)}`);
   }
-  // Live only. The roster used to list every matched session, so a card headed
-  // `23 live` went on to show `crashed ×25` — the corpses the `dead` row above
-  // already accounts for, counted twice and contradicting the headline.
+  // Live only, grouped by host when machine stamps exist so "who is on which
+  // box" is visible. Flat collapse hid that when harness×status matched across hosts.
   const liveMembers = r?.members.filter((m) => !isDeadStatus(m.status)) ?? [];
-  if (liveMembers.length) console.log(`  ${chalk.dim('agents')}   ${formatProjectMembers(liveMembers)}`);
+  if (liveMembers.length) {
+    const agentLines = formatProjectMembersByHost(liveMembers);
+    agentLines.forEach((line, i) => {
+      console.log(`  ${chalk.dim((i === 0 ? 'agents' : '').padEnd(7))}  ${line}`);
+    });
+  }
   const ships: string[] = [];
   if (remote?.mergedPrs) {
     ships.push(chalk.green(`${remote.mergedPrs}${remote.mergedPrsTruncated ? '+' : ''} merged (${remote.windowDays}d)`));
@@ -419,13 +431,15 @@ function renderCard(
   for (const line of formatMilestoneLines(linear?.milestones ?? [], linear?.nextMilestone, nowMs, milestoneLimit)) {
     console.log(line);
   }
-  // What the dates prove — never an invented "on track". See project-schedule.ts.
+  // Informational schedule only. Warn-level verdicts land in the footer so the
+  // bottom of the card is the one place you look for "what needs attention".
   const verdict = linear?.milestones?.length ? formatVerdict(scheduleVerdict(linear.milestones, nowMs)) : undefined;
-  if (verdict) {
-    console.log(`  ${chalk.dim('schedule')} ${verdict.warn ? chalk.yellow(verdict.text) : verdict.text}`);
+  if (verdict && !verdict.warn) {
+    console.log(`  ${chalk.dim('schedule')} ${verdict.text}`);
   }
   if (focus.length) {
-    console.log(`  ${chalk.dim('focus')}    ${focus.map((f) => `${f.path} ${chalk.dim(String(f.touches))}`).join(chalk.dim('  ·  '))}`);
+    const windowDays = remote?.windowDays ?? 7;
+    console.log(`  ${chalk.dim('focus')}    ${formatFocusAreas(focus, windowDays)}`);
   }
   if (r && r.tickets.length) {
     console.log(`  ${chalk.dim('tickets')}  ${r.tickets.slice(0, 8).join(' · ')}${r.tickets.length > 8 ? ' …' : ''}`);
@@ -445,14 +459,30 @@ function renderCard(
   }
   const repos = [def.repo, ...(def.repos ?? []).map((x) => x.slug)].filter(Boolean) as string[];
   if (repos.length) console.log(`  ${chalk.dim('repos')}    ${[...new Set(repos)].join(' · ')}`);
-  // A def whose `repo` disagrees with the checkout's origin reads PR and release
-  // counts from a DIFFERENT repository — both slugs resolve, so nothing errors
-  // and the wrong numbers look right. Say it here, with the fix attached.
+
+  // Warnings footer — critical (🔴) then continue (⚠️). Sources: repo slug
+  // mismatch, workspace drift/dirty/missing, schedule that cannot measure.
+  const warnings: ProjectWarning[] = [];
   const mismatch = def.root ? checkRepoSlug(def, originSlug(expandLocalHome(def.root))) : undefined;
   if (mismatch) {
-    console.log(`  ${chalk.yellow('!')}        ${chalk.yellow(mismatch.message)}`);
-    console.log(`  ${' '.repeat(8)}${chalk.gray(mismatch.remediation)}`);
+    warnings.push({ severity: 'critical', text: mismatch.message, remediation: mismatch.remediation });
   }
+  for (const w of workspaceWarnings(warnWorkspaces)) {
+    warnings.push(w);
+  }
+  if (verdict?.warn) {
+    warnings.push({ severity: 'continue', text: verdict.text });
+  }
+  if (split.dead > 0 && (split.deadByStatus.find((d) => d.status === 'crashed')?.n ?? 0) > 0) {
+    const crashed = split.deadByStatus.find((d) => d.status === 'crashed')!.n;
+    warnings.push({
+      severity: crashed >= 10 ? 'critical' : 'continue',
+      text: `${crashed} crashed session${crashed === 1 ? '' : 's'} on this project`,
+      remediation: 'inspect with agents sessions --active / clean up stuck worktrees',
+    });
+  }
+  for (const line of formatProjectWarnings(warnings)) console.log(line);
+
   // `view` prints these in full (path + purpose, label + URL) right below, so
   // the compact one-line summaries would just say the same thing twice.
   if (!detail && def.goals?.length) {
@@ -697,6 +727,17 @@ export function registerProjectsCommands(program: Command): void {
       return fleetWs.filter((s) => targets.has(s.path));
     };
 
+    /** Local-only workspace probe for the warnings footer when --fleet is off. */
+    const localWsCache = new Map<string, HostWorkspaceStatus[]>();
+    const localWsFor = (d: ProjectDef): HostWorkspaceStatus[] => {
+      const cached = localWsCache.get(d.name);
+      if (cached) return cached;
+      const self = machineId();
+      const rows = probeProjectWorkspaces(workspaceTargetsForDef(d)).map((s) => ({ ...s, host: self }));
+      localWsCache.set(d.name, rows);
+      return rows;
+    };
+
     if (opts.json) {
       if (fleetSkipped.length > 0) process.stderr.write(formatFleetSkippedNote(fleetSkipped));
       // `view` used to nest the def fields at the top level and omit plan /
@@ -751,6 +792,9 @@ export function registerProjectsCommands(program: Command): void {
         milestoneLimit,
         focus.get(d.name) ?? [],
         detail,
+        // Always feed workspace rows into the warnings footer — full fleet when
+        // --fleet, otherwise a local-only probe so behind/dirty is never silent.
+        opts.fleet ? fleetFor(d) : localWsFor(d),
       );
       if (detail) printProjectDefinition(d, d.name);
     }

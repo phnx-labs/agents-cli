@@ -139,9 +139,9 @@ rush  ·  23 live
 
 - **`live`, `agents`, `plan`, open PRs, `tickets`, `worktrees`** come straight from the
   active session list (`rollupSessionsByProject`) — no network. The `agents` line
-  shows WHICH harness is on the project (one cell per session:
-  `agent · status · TICKET @host`), sorted running-first, capped at 6 with a
-  `+N more` tail. Under `--fleet` the remote sessions carry their peer's hostname.
+  groups live agents by host (`@zion  claude · running ×9  ·  …`) so the same
+  harness on two machines is not collapsed into one cell. Within a host, cells
+  collapse identical state (`×N`), sorted running-first, capped with `+N more`. Under `--fleet` the remote sessions carry their peer's hostname.
 - **`ships` merged-count** is a best-effort `gh pr list` on the primary repo
   (`--no-remote` skips it; a missing `gh`/auth degrades to 0). It counts up to the
   100 most recent merges within the window. The trailing tag is the **latest release
@@ -209,6 +209,19 @@ rush  ·  3 agents
 - `--json` includes the fleet data: per project `workspaces: [{host, path,
   present, branch, upstream, ahead, behind, dirty, lastCommit, error}]`.
 - Default is off — `--fleet` is the opt-in because it dials the fleet.
+
+## Warnings footer
+
+Anything that needs attention lands at the **bottom** of the card, not mid-stream:
+
+| Mark | Severity | Examples |
+| --- | --- | --- |
+| 🔴 | critical | missing checkout, ≥10 commits behind, repo slug mismatch, large crash pile |
+| ⚠️ | continue | dirty tree, small behind, schedule not measurable |
+
+A local workspace probe always feeds this footer (cheap, no SSH). The full per-host
+`fleet` table still requires `--fleet`.
+
 
 ## Command surface
 
@@ -405,7 +418,7 @@ the directories the window's commits landed in, three levels deep so a monorepo 
 `apps/cli/src` rather than `apps`:
 
 ```
-focus    apps/cli/src 2138  ·  apps/cli/docs 278  ·  apps/factory/src 208  ·  apps/cli/menubar 81
+focus    apps/cli/src 2.3k  ·  apps/cli/docs 302  file-touches (7d)  # git log --name-only buckets
 ```
 
 Local `git log --name-only`, no GitHub API, no credential, no rate-limit budget — measured at
