@@ -398,7 +398,8 @@ export function listInstalledPermissions(): InstalledPermission[] {
   const seen = new Set<string>();
   const results: InstalledPermission[] = [];
 
-  for (const dir of [getUserPermissionsDir(), getPermissionsDir()]) {
+  for (const baseDir of [getUserPermissionsDir(), getPermissionsDir()]) {
+    const dir = path.join(baseDir, 'groups');
     if (!fs.existsSync(dir)) continue;
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -422,10 +423,11 @@ export function listInstalledPermissions(): InstalledPermission[] {
 }
 
 /**
- * Get a specific permission set by name. Searches user dir first, then system.
+ * Get a specific permission set by name. Searches user groups/ dir first, then system groups/.
  */
 function getPermissionSet(name: string): InstalledPermission | null {
-  for (const dir of [getUserPermissionsDir(), getPermissionsDir()]) {
+  for (const baseDir of [getUserPermissionsDir(), getPermissionsDir()]) {
+    const dir = path.join(baseDir, 'groups');
     for (const ext of ['.yml', '.yaml']) {
       const filePath = safeJoin(dir, name + ext);
       if (fs.existsSync(filePath)) {

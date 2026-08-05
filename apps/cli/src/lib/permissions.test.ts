@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as TOML from 'smol-toml';
 import * as yaml from 'yaml';
 import {
@@ -19,7 +19,13 @@ import {
   convertToGooseFormat,
   convertToKiroFormat,
   formatComputerPermissionGrantHint,
+  listInstalledPermissions,
+  installPermissionSet,
+  getDefaultPermissionSet,
+  saveDefaultPermissionSet,
+  removePermissionSet,
 } from './permissions.js';
+import * as state from './state.js';
 
 const tempDirs: string[] = [];
 
@@ -534,5 +540,132 @@ describe('Kiro permissions', () => {
       { capability: 'fs_write', effect: 'allow', match: ['src/**'] },
       { capability: 'fs_read', effect: 'deny', match: ['**/.env'] },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Permission-set storage: groups/ contract
+// Regression for the bug where writes go to groups/ but reads scanned root.
+// ---------------------------------------------------------------------------
+describe('permission-set storage (groups/ contract)', () => {
+  let userPermsDir: string;
+  let sysPermsDir: string;
+  let sourceFile: string;
+
+  beforeEach(() => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-perms-storage-'));
+    tempDirs.push(base);
+    userPermsDir = path.join(base, 'user', 'permissions');
+    sysPermsDir = path.join(base, 'sys', 'permissions');
+    fs.mkdirSync(path.join(userPermsDir, 'groups'), { recursive: true });
+    fs.mkdirSync(path.join(sysPermsDir, 'groups'), { recursive: true });
+
+    vi.spyOn(state, 'getUserPermissionsDir').mockReturnValue(userPermsDir);
+    vi.spyOn(state, 'getPermissionsDir').mockReturnValue(sysPermsDir);
+
+    // A valid permission-set YAML to install
+    sourceFile = path.join(base, 'my-set.yml');
+    fs.writeFileSync(sourceFile, yaml.stringify({
+      name: 'my-set',
+      description: 'test set',
+      allow: ['Bash(git:*)'],
+      deny: [],
+    }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('installPermissionSet writes to groups/ and listInstalledPermissions finds it', () => {
+    const result = installPermissionSet(sourceFile, 'my-set');
+    expect(result.success).toBe(true);
+
+    // Confirm file landed in groups/, not root
+    expect(fs.existsSync(path.join(userPermsDir, 'groups', 'my-set.yml'))).toBe(true);
+    expect(fs.existsSync(path.join(userPermsDir, 'my-set.yml'))).toBe(false);
+
+    const sets = listInstalledPermissions();
+    expect(sets.map((s) => s.name)).toContain('my-set');
+  });
+
+  it('listInstalledPermissions ignores root YAML and only reads from groups/', () => {
+    // Plant a YAML at root (the old, wrong location) — must NOT be surfaced
+    fs.writeFileSync(path.join(userPermsDir, 'root-only.yml'), yaml.stringify({
+      name: 'root-only',
+      description: 'should be invisible',
+      allow: ['Read(**)'],
+      deny: [],
+    }));
+
+    const sets = listInstalledPermissions();
+    expect(sets.map((s) => s.name)).not.toContain('root-only');
+  });
+
+  it('saveDefaultPermissionSet writes to groups/ and getDefaultPermissionSet reads it back', () => {
+    const saved = saveDefaultPermissionSet({
+      name: 'default',
+      description: 'my defaults',
+      allow: ['Bash(npm:*)'],
+      deny: [],
+    });
+    expect(saved.success).toBe(true);
+
+    // Confirm file is in groups/
+    expect(fs.existsSync(path.join(userPermsDir, 'groups', 'default.yml'))).toBe(true);
+
+    const retrieved = getDefaultPermissionSet();
+    expect(retrieved.allow).toContain('Bash(npm:*)');
+    expect(retrieved.description).toBe('my defaults');
+  });
+
+  it('getDefaultPermissionSet ignores root YAML and reads from groups/', () => {
+    // Plant a root default.yml with different content — must NOT be used
+    fs.writeFileSync(path.join(userPermsDir, 'default.yml'), yaml.stringify({
+      name: 'default',
+      description: 'wrong location',
+      allow: ['Read(**)'],
+      deny: [],
+    }));
+
+    // No groups/default.yml → should return the empty shell, not the root file
+    const result = getDefaultPermissionSet();
+    expect(result.allow).toHaveLength(0);
+    expect(result.description).toBe('Default permission set');
+  });
+
+  it('user groups/ takes precedence over system groups/', () => {
+    // Write to system groups/
+    fs.writeFileSync(path.join(sysPermsDir, 'groups', 'shared.yml'), yaml.stringify({
+      name: 'shared',
+      description: 'system version',
+      allow: ['Read(**)'],
+      deny: [],
+    }));
+
+    // Write to user groups/ with different content
+    fs.writeFileSync(path.join(userPermsDir, 'groups', 'shared.yml'), yaml.stringify({
+      name: 'shared',
+      description: 'user version',
+      allow: ['Bash(git:*)'],
+      deny: [],
+    }));
+
+    const sets = listInstalledPermissions();
+    const shared = sets.find((s) => s.name === 'shared');
+    expect(shared).toBeDefined();
+    expect(shared!.set.description).toBe('user version');
+    // Only one entry (deduped)
+    expect(sets.filter((s) => s.name === 'shared')).toHaveLength(1);
+  });
+
+  it('removePermissionSet deletes from groups/ and listInstalledPermissions no longer sees it', () => {
+    installPermissionSet(sourceFile, 'my-set');
+    expect(listInstalledPermissions().map((s) => s.name)).toContain('my-set');
+
+    const result = removePermissionSet('my-set');
+    expect(result.success).toBe(true);
+
+    expect(listInstalledPermissions().map((s) => s.name)).not.toContain('my-set');
   });
 });
