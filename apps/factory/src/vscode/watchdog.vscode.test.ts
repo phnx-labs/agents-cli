@@ -1,11 +1,10 @@
 import { describe, test, expect, beforeEach, mock } from 'bun:test';
 
 // Minimal vscode mock — the palette handlers show status-bar / error messages;
-// the migration reads the (deleted) agents.watchdog.autoRotate setting via
-// inspect() so it only fires on an EXPLICIT false.
+// the migration receives its VS Code boundary functions explicitly so this
+// file stays deterministic when Bun runs it beside other vscode module mocks.
 const statusMessages: string[] = [];
 const errorMessages: string[] = [];
-let inspectResult: { globalValue?: boolean; workspaceValue?: boolean; workspaceFolderValue?: boolean } = {};
 
 mock.module('vscode', () => ({
   window: {
@@ -19,11 +18,7 @@ mock.module('vscode', () => ({
       return Promise.resolve(undefined);
     },
   },
-  workspace: {
-    getConfiguration: () => ({
-      inspect: () => inspectResult,
-    }),
-  },
+  workspace: {},
   ConfigurationTarget: { Global: 1, Workspace: 2 },
 }));
 
@@ -65,10 +60,29 @@ function makeDeps(behavior: 'ok' | 'fail' = 'ok') {
   };
 }
 
+function makeMigrationDeps(
+  inspect: { globalValue?: boolean; workspaceValue?: boolean; workspaceFolderValue?: boolean } = {},
+  behavior: 'ok' | 'fail' = 'ok',
+) {
+  const { calls, deps } = makeDeps(behavior);
+  return {
+    calls,
+    deps: {
+      ...deps,
+      inspectAutoRotate: () => inspect,
+      setStatusBarMessage: (message: string) => {
+        statusMessages.push(message);
+      },
+      showErrorMessage: (message: string) => {
+        errorMessages.push(message);
+      },
+    },
+  };
+}
+
 beforeEach(() => {
   statusMessages.length = 0;
   errorMessages.length = 0;
-  inspectResult = {};
 });
 
 describe('registerWatchdogPaletteCommands', () => {
@@ -140,7 +154,7 @@ describe('registerWatchdogPaletteCommands', () => {
 
 describe('migrateAutoRotateSettingOnce', () => {
   test('no explicit autoRotate setting → no CLI call, flag set (runs once)', async () => {
-    const { calls, deps } = makeDeps();
+    const { calls, deps } = makeMigrationDeps();
     const state = fakeGlobalState();
     await watchdog.migrateAutoRotateSettingOnce(state, deps);
     expect(calls).toHaveLength(0);
@@ -148,8 +162,7 @@ describe('migrateAutoRotateSettingOnce', () => {
   });
 
   test('autoRotate explicitly true → no migration', async () => {
-    inspectResult = { globalValue: true };
-    const { calls, deps } = makeDeps();
+    const { calls, deps } = makeMigrationDeps({ globalValue: true });
     const state = fakeGlobalState();
     await watchdog.migrateAutoRotateSettingOnce(state, deps);
     expect(calls).toHaveLength(0);
@@ -157,8 +170,7 @@ describe('migrateAutoRotateSettingOnce', () => {
   });
 
   test('autoRotate explicitly false → CLI watchdog rotate off once + one-time note', async () => {
-    inspectResult = { globalValue: false };
-    const { calls, deps } = makeDeps();
+    const { calls, deps } = makeMigrationDeps({ globalValue: false });
     const state = fakeGlobalState();
     await watchdog.migrateAutoRotateSettingOnce(state, deps);
     expect(calls).toEqual([{ file: '/fake/bin/agents', args: ['watchdog', 'rotate', 'off'] }]);
@@ -171,15 +183,13 @@ describe('migrateAutoRotateSettingOnce', () => {
   });
 
   test('workspace-level explicit false also migrates', async () => {
-    inspectResult = { workspaceValue: false };
-    const { calls, deps } = makeDeps();
+    const { calls, deps } = makeMigrationDeps({ workspaceValue: false });
     await watchdog.migrateAutoRotateSettingOnce(fakeGlobalState(), deps);
     expect(calls).toEqual([{ file: '/fake/bin/agents', args: ['watchdog', 'rotate', 'off'] }]);
   });
 
   test('CLI failure → error toast, flag left unset so the next activation retries', async () => {
-    inspectResult = { globalValue: false };
-    const { deps } = makeDeps('fail');
+    const { deps } = makeMigrationDeps({ globalValue: false }, 'fail');
     const state = fakeGlobalState();
     await watchdog.migrateAutoRotateSettingOnce(state, deps);
     expect(state.data.get(watchdog.WATCHDOG_ROTATE_MIGRATED_KEY)).toBeUndefined();
@@ -187,8 +197,7 @@ describe('migrateAutoRotateSettingOnce', () => {
   });
 
   test('flag already set → no-op even with an explicit false', async () => {
-    inspectResult = { globalValue: false };
-    const { calls, deps } = makeDeps();
+    const { calls, deps } = makeMigrationDeps({ globalValue: false });
     const state = fakeGlobalState({ [watchdog.WATCHDOG_ROTATE_MIGRATED_KEY]: true });
     await watchdog.migrateAutoRotateSettingOnce(state, deps);
     expect(calls).toHaveLength(0);

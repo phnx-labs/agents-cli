@@ -162,6 +162,18 @@ interface GlobalStateLike {
   update(key: string, value: unknown): Thenable<void>;
 }
 
+interface AutoRotateSettingInspect {
+  globalValue?: boolean;
+  workspaceValue?: boolean;
+  workspaceFolderValue?: boolean;
+}
+
+export interface AutoRotateMigrationDeps extends WatchdogCliDeps {
+  inspectAutoRotate?: () => AutoRotateSettingInspect | undefined;
+  setStatusBarMessage?: (message: string, hideAfterTimeout: number) => void;
+  showErrorMessage?: (message: string) => void;
+}
+
 /**
  * The `agents.watchdog.*` settings were deleted with the in-extension loop. A
  * user who explicitly set `agents.watchdog.autoRotate: false` opted OUT of
@@ -179,11 +191,11 @@ interface GlobalStateLike {
  */
 export async function migrateAutoRotateSettingOnce(
   globalState: GlobalStateLike,
-  deps: WatchdogCliDeps = {},
+  deps: AutoRotateMigrationDeps = {},
 ): Promise<void> {
   if (globalState.get<boolean>(WATCHDOG_ROTATE_MIGRATED_KEY)) return;
 
-  const inspect = vscode.workspace
+  const inspect = deps.inspectAutoRotate?.() ?? vscode.workspace
     .getConfiguration('agents.watchdog')
     .inspect<boolean>('autoRotate');
   const explicitOff =
@@ -199,13 +211,17 @@ export async function migrateAutoRotateSettingOnce(
   try {
     await runWatchdogCli(['rotate', 'off'], deps);
     await globalState.update(WATCHDOG_ROTATE_MIGRATED_KEY, true);
-    vscode.window.setStatusBarMessage(
+    (deps.setStatusBarMessage ?? ((message, timeout) => {
+      vscode.window.setStatusBarMessage(message, timeout);
+    }))(
       'Migrated watchdog setting: auto-rotate was off — CLI watchdog rotate is off (`agents watchdog rotate on` re-enables)',
       8000,
     );
   } catch (err) {
     console.warn('[WATCHDOG] autoRotate migration failed (will retry next activation):', err);
-    vscode.window.showErrorMessage(
+    (deps.showErrorMessage ?? ((message) => {
+      void vscode.window.showErrorMessage(message);
+    }))(
       `Could not migrate the removed agents.watchdog.autoRotate setting: ${err instanceof Error ? err.message : String(err)}`
     );
   }
