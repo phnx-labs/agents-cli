@@ -767,11 +767,19 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  function writeAuth(mtimeMs: number): void {
+  // Write auth.json whose id_token carries `auth_time` = the login time. The
+  // usage floor comes from that claim, NOT the file mtime — a token refresh
+  // rewrites auth.json but leaves auth_time at the real login. `fileMtimeMs`
+  // lets a test simulate a refresh (file rewritten later than the login).
+  function writeAuth(loginMs: number, fileMtimeMs?: number): void {
     const p = path.join(home, '.codex', 'auth.json');
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify({ tokens: { id_token: 'stub' } }));
-    fs.utimesSync(p, mtimeMs / 1000, mtimeMs / 1000);
+    const payload = Buffer.from(
+      JSON.stringify({ auth_time: Math.floor(loginMs / 1000) })
+    ).toString('base64url');
+    fs.writeFileSync(p, JSON.stringify({ tokens: { id_token: `h.${payload}.s` } }));
+    const t = (fileMtimeMs ?? loginMs) / 1000;
+    fs.utimesSync(p, t, t);
   }
 
   function writeSession(mtimeMs: number, usedPercent: number): void {
@@ -829,5 +837,18 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
 
     const info = await getUsageInfo('codex', { home });
     expect(info.snapshot).toBeNull();
+  });
+
+  it('keeps usage after a token refresh rewrites auth.json (floor is auth_time, not mtime)', async () => {
+    // Regression guard: login at NOW, run a session at NOW+1h (42%), then a
+    // background token refresh rewrites auth.json with a NOW+2h file mtime. The
+    // floor is auth_time (NOW), so the NOW+1h session is still counted — a
+    // mtime-based floor (NOW+2h) would wrongly blank the current account.
+    writeAuth(NOW, NOW + 2 * HOUR);
+    writeSession(NOW + HOUR, 42);
+
+    const info = await getUsageInfo('codex', { home });
+    const session = info.snapshot?.windows.find((w) => w.key === 'session');
+    expect(session?.usedPercent).toBe(42);
   });
 });

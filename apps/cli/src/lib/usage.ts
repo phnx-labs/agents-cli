@@ -894,20 +894,36 @@ export function formatUsageSection(usage: UsageInfo): string[] {
 async function getCodexUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
     // Codex usage is read from on-disk session transcripts, which carry no
-    // account identity. Codex writes auth.json on login (not on token refresh),
-    // so its mtime marks when the account currently in that home signed in.
-    // Only sessions written at/after that belong to the current account — an
-    // older session was written by whoever was signed in before (e.g. after
-    // `codex logout` + login into a different account), and attributing its
-    // rate_limits to the new account is the "wrong usage after switch" bug.
-    // No auth.json means no account is signed in here, so there is no usage to
-    // report. A freshly-switched account correctly shows no usage until it runs
-    // its own session; this errs toward "unavailable", never a wrong number.
+    // account identity and are not removed on logout. To keep the bar scoped to
+    // the account signed in NOW, floor the scan at the current login time: the
+    // id_token's `auth_time` claim — the OIDC time-of-authentication. A session
+    // written before that login belongs to whoever was signed in before (e.g.
+    // after `codex logout` + login into a different account), and showing its
+    // rate_limits is the "wrong usage after switch" bug.
+    //
+    // `auth_time` — not the auth.json file mtime — is the correct floor: Codex
+    // rewrites auth.json on every token refresh (advancing its mtime), but a
+    // refresh_token grant does not re-authenticate the user, so `auth_time`
+    // stays at the real login. Flooring on mtime would blank the bar after each
+    // background refresh; flooring on `auth_time` does not. No readable
+    // credential means the version is signed out — report no usage. A credential
+    // that carries no `auth_time` falls back to no floor (prior behavior) rather
+    // than hide a signed-in account's usage.
     const base = options?.home || os.homedir();
-    const authStat = safeStatSync(path.join(base, '.codex', 'auth.json'));
-    if (!authStat) return { snapshot: null, error: null };
+    let sinceMs: number | undefined;
+    try {
+      const tokens = (
+        JSON.parse(fs.readFileSync(path.join(base, '.codex', 'auth.json'), 'utf-8')) as {
+          tokens?: { id_token?: string; access_token?: string };
+        }
+      ).tokens;
+      const authTime = decodeJwtPayload(tokens?.id_token || tokens?.access_token || '')?.auth_time;
+      if (typeof authTime === 'number' && authTime > 0) sinceMs = authTime * 1000;
+    } catch {
+      return { snapshot: null, error: null };
+    }
 
-    const files = collectCodexSessionFiles(options?.home, authStat.mtimeMs);
+    const files = collectCodexSessionFiles(options?.home, sinceMs);
     for (const filePath of files) {
       const match = await readLatestCodexRateLimits(filePath);
       if (!match) continue;
