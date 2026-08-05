@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.22.18
+
+### Fixed
+
+- **`agents sync` re-copies nested system hooks after content changes.**
+  `listResources('hooks')` treated event-group directories (`pre-tool-use/`) as
+  resource names, so `system:*` pattern expansion never included nested scripts
+  like `git-guard.sh`. Force sync then left stale flat copies in version homes
+  forever. Hooks discovery now expands one-level group dirs the same way as
+  `getAvailableResources` / `listHookEntriesFromDir`. Source:
+  `apps/cli/src/lib/resources.ts`.
+
+- Route owner iMessage notifications through Rush's verified owner message endpoint instead of requiring a live daemon channel registration. (RUSH-2193)
+
+- **`agents sessions --active` now carries `terminalId` on tmux-hosted rows (RUSH-2192).**
+  Grok/Codex (and every `ag-*` tmux pane) get their `AGENT_TERMINAL_ID` from the launch
+  registry's by-pid entry. The ps-scan path already set `terminalId`; the tmux source —
+  which wins dedupe for interactive agents — omitted it, so Factory could never join a
+  tab to its live session even when SessionStart preserved the key. Source:
+  `apps/cli/src/lib/session/active.ts`.
+
 ## 1.22.17
 
 - **Codex versions no longer share one account — each keeps its own login.** Installing a new Codex version used to copy the current default version's `.codex/auth.json` into the new version home, so `agents view` reported the same ChatGPT account for every installed Codex and you could never sign two versions into two accounts. The credential is now excluded from settings carry-forward (config, prompts, and rules still carry), matching how Claude omits `.claude.json`. A fresh Codex version installs signed-out; run `codex login` (or `agents run codex --version <v>`) inside it to authenticate that version's own account. Source: `apps/cli/src/lib/settings-manifest.ts`, `apps/cli/src/commands/versions.ts`.
