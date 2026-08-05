@@ -757,10 +757,16 @@ function bundleMetaIndexPath(): string {
 // an OLD key reads as absent and is rebuilt — otherwise a re-key would leave
 // stale hashed names that resolve to nothing and make every bundle "vanish".
 function metaIndexFingerprint(): string {
-  return keychainServiceAlias(`${BUNDLE_META_PREFIX} meta-index-fingerprint`);
+  return keychainServiceAlias(`${BUNDLE_META_PREFIX}meta-index-fingerprint`);
 }
 
 function readBundleMetaIndex(): string[] | null {
+  // A test-installed in-memory keychain is NOT the real store this index mirrors;
+  // reading (and later writing) the real ~/.agents index from a mock-backend test
+  // would leak fixture bundle names into a developer's live cache. Same guard the
+  // sibling healKeychainBundleMetadataAclOnce uses — treat the index as absent so
+  // listBundles falls back to the (mock) scan.
+  if (isKeychainBackendOverridden()) return null;
   try {
     const parsed = JSON.parse(fs.readFileSync(bundleMetaIndexPath(), 'utf-8'));
     if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.services)) return null;
@@ -772,11 +778,19 @@ function readBundleMetaIndex(): string[] | null {
 }
 
 function writeBundleMetaIndex(services: string[]): void {
+  if (isKeychainBackendOverridden()) return; // never write the real index from a mock-backend test
   try {
     const file = bundleMetaIndexPath();
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const payload = { fp: metaIndexFingerprint(), services: [...new Set(services)].sort() };
-    fs.writeFileSync(file, JSON.stringify(payload), 'utf8');
+    // Atomic write (unique temp + rename) so a concurrent reader/writer never
+    // sees a half-written file. The read-modify-write in add/remove can still
+    // race two concurrent BUNDLE mutations and drop an entry, but that only makes
+    // a `secrets list` cosmetically incomplete (never a resolve-by-name) and
+    // self-heals on the next rebuild — an acceptable trade for rare bundle edits.
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(payload), 'utf8');
+    fs.renameSync(tmp, file);
   } catch {
     // Best effort — a missing index just means listBundles rebuilds it from the
     // one-time broad scan on the next enumeration.
