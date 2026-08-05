@@ -31,6 +31,8 @@
   <a href="https://x.ai" title="Grok Build (xAI)"><strong>Grok</strong></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://factory.ai" title="Factory AI Droid"><strong>Droid</strong></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://omp.sh" title="Oh My Pi"><strong>Pi</strong></a>
 </p>
 
 https://agents-cli.sh/demo.mp4

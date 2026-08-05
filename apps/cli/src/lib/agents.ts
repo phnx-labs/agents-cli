@@ -348,6 +348,42 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     supportsHooks: true,
     capabilities: { hooks: { since: '0.3.130' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: { since: '1.1.1' }, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'] },
   },
+  // Oh My Pi (`omp`, omp.sh) — a Bun-based, terminal-first coding agent that runs
+  // against many model providers (OpenRouter, OpenAI, Anthropic, xAI, DeepSeek,
+  // Ollama, LM Studio, …). It is Claude-compatible: it natively discovers
+  // `.claude/commands`, `.mcp.json`, and Claude-shaped subagents, and keeps its
+  // own native resources under `~/.omp/agent/` (config dir reported by
+  // `omp config path`). configDir points AT the agent dir (not `~/.omp`) so the
+  // rules file lands at `~/.omp/agent/AGENTS.md`, the user context file omp reads.
+  pi: {
+    id: 'pi',
+    name: 'Pi',
+    color: 'magenta',
+    cliCommand: 'omp',
+    npmPackage: '@oh-my-pi/pi-coding-agent',
+    configDir: path.join(HOME, '.omp', 'agent'),
+    commandsDir: path.join(HOME, '.omp', 'agent', 'commands'),
+    commandsSubdir: 'commands',
+    skillsDir: path.join(HOME, '.omp', 'agent', 'skills'),
+    hooksDir: 'hooks',
+    instructionsFile: 'AGENTS.md',
+    format: 'markdown',
+    variableSyntax: '$ARGUMENTS',
+    // omp hooks are per-tool JS/TS extension modules discovered from
+    // `~/.omp/agent/hooks/{pre,post}/<tool>.<ext>` (loaded as HookFactory code),
+    // NOT the event->shell-command registrations agents-cli's hook sync writes.
+    // The two models don't map, so hooks stay off (capabilities.hooks:false).
+    supportsHooks: false,
+    // MCP: omp reads `.mcp.json` with the Claude `{ "mcpServers": {...} }` schema
+    // at user scope (`~/.omp/agent/.mcp.json`) and project scope (`<root>/.mcp.json`),
+    // stdio + http + sse with headers. skills (`~/.omp/agent/skills/<name>/SKILL.md`),
+    // commands (`~/.omp/agent/commands/*.md`), and subagents (`~/.omp/agent/agents/*.md`,
+    // Claude-shaped) are all native. allowlist is OFF: omp gates approval per-TOOL
+    // only (`tools.approval` record: allow|prompt|deny) with no command/path/domain
+    // patterns, so agents-cli's granular permission format has nothing to map to.
+    // plugins are npm packages / TS modules, not the Claude marketplace manifest.
+    capabilities: { hooks: false, mcp: true, mcpHttp: true, mcpHeaders: true, allowlist: false, skills: true, commands: true, plugins: false, subagents: true, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'] },
+  },
   openclaw: {
     id: 'openclaw',
     name: 'OpenClaw',
@@ -2572,6 +2608,9 @@ export function getUserMcpConfigPath(agentId: AgentId): string {
       return path.join(agent.configDir, 'mcp.json');
     case 'hermes':
       return path.join(agent.configDir, 'config.yaml');
+    case 'pi':
+      // omp reads user-scope MCP from ~/.omp/agent/.mcp.json (Claude schema).
+      return path.join(agent.configDir, '.mcp.json');
     default:
       // Gemini and others use settings.json
       return path.join(agent.configDir, 'settings.json');
@@ -2609,6 +2648,8 @@ export function getMcpConfigPathForHome(agentId: AgentId, home: string): string 
       return path.join(home, '.factory', 'mcp.json');
     case 'hermes':
       return path.join(home, '.hermes', 'config.yaml');
+    case 'pi':
+      return path.join(home, '.omp', 'agent', '.mcp.json');
     default:
       return path.join(home, agentConfigDirName(agentId), 'settings.json');
   }
@@ -2649,6 +2690,9 @@ export function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.
       return path.join(cwd, '.factory', 'mcp.json');
     case 'hermes':
       return path.join(cwd, '.hermes', 'config.yaml');
+    case 'pi':
+      // omp reads project MCP from <root>/.mcp.json (Claude-compatible).
+      return path.join(cwd, '.mcp.json');
     default:
       return path.join(cwd, `.${agentId}`, 'settings.json');
   }
