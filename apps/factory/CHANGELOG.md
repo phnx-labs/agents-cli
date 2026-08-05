@@ -125,6 +125,17 @@ All notable changes to the Factory extension are documented here. Format follows
   coalesce into a single in-flight run, and repeats within 6s serve the cache.
   Source: `src/core/cachedInFlight.ts`, `src/vscode/deviceHealth.vscode.ts`.
 
+- **Menu bar warns when a device is under high load.** A new `NEEDS YOU` row
+  surfaces overloaded machines — local (`getloadavg()`, a native libc call, zero
+  subprocess) and remote fleet peers (read from the daemon-warmed
+  `.fleet-stats.json` cache with a 10-min freshness guard). The row reads
+  `⚠ <device> — high load N%` (`✕` red when critical: load ≥150% or mem ≥90%);
+  it counts into the header `⚠ N needs you` badge and tips the menu-bar icon.
+  Action-required rows are bolded so items that need attention stand out. Never
+  touches `agents doctor` (measured ~136s cold-start) — the load signal is
+  `getloadavg` + one cache read on the badge tick. Source:
+  `apps/menubar/src/loadedDevices.ts`, `apps/menubar/src/index.ts`.
+
 ## [0.9.310] - 2026-08-04
 
 - **Every New-agent launch is balanced — `agents run <agent> --interactive
