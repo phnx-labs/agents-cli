@@ -1520,7 +1520,7 @@ Examples:
   agents ssh win-mini                       # interactive login
   agents ssh win-mini hostname              # run a command (PowerShell on Windows)
   agents ssh yosemite-s0 uptime             # run a command (POSIX)
-  agents ssh auto                           # affinity-pick a device (same engine as `agents run --device auto`)
+  agents ssh auto                           # affinity-pick a device (same engine as 'agents run --device auto')
 
 Devices come from 'agents devices'. Password auth pulls the secret from a
 secrets bundle via an askpass shim — the password never touches argv.
