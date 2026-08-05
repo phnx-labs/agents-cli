@@ -13,14 +13,14 @@ afterEach(() => {
 });
 
 describe('SessionStart hook launch metadata', () => {
-  it('atomically joins the effective run mode to the harness session id', () => {
+  it.each(['codex', 'kimi', 'droid'])('atomically joins the effective run mode to a %s session id', (agent) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'session-tracker-hook-'));
     dirs.push(root);
     const home = path.join(root, 'home');
     const history = path.join(root, 'history');
     fs.mkdirSync(home);
 
-    const result = spawnSync(hookPath, ['codex'], {
+    const result = spawnSync(hookPath, [agent], {
       input: JSON.stringify({ session_id: '019fd0c8-b3e9-77a2-a1a4-444698c4d897', cwd: '/repo' }),
       encoding: 'utf8',
       env: {
@@ -40,5 +40,23 @@ describe('SessionStart hook launch metadata', () => {
       actor: 'muqsit',
       initiatedBy: 'human',
     });
+  });
+
+  it('rejects a traversal session id before creating a temporary sidecar', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'session-tracker-hook-'));
+    dirs.push(root);
+    const home = path.join(root, 'home');
+    const history = path.join(root, 'history');
+    fs.mkdirSync(home);
+
+    const result = spawnSync(hookPath, ['codex'], {
+      input: JSON.stringify({ session_id: '../escaped', cwd: '/repo' }),
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, AGENTS_HISTORY_DIR: history, AGENTS_RUN_MODE: 'edit' },
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(fs.existsSync(path.join(history, 'escaped.json'))).toBe(false);
+    expect(fs.existsSync(path.join(history, 'by-session'))).toBe(false);
   });
 });

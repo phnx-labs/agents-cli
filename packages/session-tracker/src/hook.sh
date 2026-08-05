@@ -53,7 +53,7 @@ except Exception:
 }
 
 case "$AGENT" in
-  claude|codex)
+  claude|codex|droid|kimi)
     SID="$(printf '%s' "$STDIN_JSON" | extract_stdin_json 'session_id')"
     CWD="$(printf '%s' "$STDIN_JSON" | extract_stdin_json 'cwd')"
     ;;
@@ -79,6 +79,12 @@ esac
 if [ -z "$SID" ]; then
   exit 0
 fi
+
+# The session id becomes two filenames below. Reject path components before
+# either mktemp or mv sees the harness-provided value.
+case "$SID" in
+  *'/'*|*'\'*|'.'|'..') exit 0 ;;
+esac
 
 [ -z "$CWD" ] && CWD="$PWD"
 
@@ -122,8 +128,6 @@ if [ -n "$HISTORY_DIR" ] && [ -n "$RUN_MODE" ]; then
   python3 - "$SID" "$RUN_MODE" "${AGENTS_ACTOR:-}" "${AGENTS_ACTOR_KIND:-}" > "$SID_TMP" <<'PY'
 import json, sys, time
 sid, mode, actor, initiated_by = sys.argv[1:5]
-if not sid or '/' in sid or '\\' in sid or sid in ('.', '..'):
-    raise SystemExit(1)
 if mode not in ('plan', 'edit', 'auto', 'skip'):
     raise SystemExit(1)
 out = {

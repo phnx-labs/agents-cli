@@ -695,7 +695,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
         expect(rows[0]).not.toHaveProperty('plan');
         expect(rows[0].origin).toBe('cli');
         expect(rows[0]).not.toHaveProperty('account');
-        expect(rows[0].cwd).toBe(repoDir);
+        expect(rows[0]).not.toHaveProperty('cwd');
         expect(rows[0]).not.toHaveProperty('mode');
         expect(rows[0]).not.toHaveProperty('recentDirectoriesTouched');
       }
