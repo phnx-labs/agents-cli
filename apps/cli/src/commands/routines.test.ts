@@ -1291,3 +1291,182 @@ describe('buildRunsJson', () => {
     expect(buildRunsJson([])).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Project-tagging tests (--project / --all-projects / list --json projectGroup)
+// ---------------------------------------------------------------------------
+
+/** Write a minimal project YAML so listProjectDefs() sees it. */
+function writeProject(home: string, name: string): void {
+  const dir = path.join(home, '.agents', 'projects');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${name}.yaml`), yaml.stringify({ name }));
+}
+
+/** Env that points the projects dir at the isolated home. */
+function projectsEnv(home: string): Record<string, string> {
+  return { AGENTS_PROJECTS_DIR: path.join(home, '.agents', 'projects') };
+}
+
+describe('routines add --project persists to YAML', () => {
+  it('writes a single project name into the projects field', () => {
+    const home = makeHome({ registry });
+    writeProject(home, 'myapp');
+    try {
+      const res = run(home, [
+        'add', 'proj-job',
+        '--schedule', '0 9 * * *',
+        '--agent', 'claude',
+        '--prompt', 'run tests',
+        '--project', 'myapp',
+      ], { ...projectsEnv(home), AGENTS_SYNC_MACHINE_ID: 'zion' });
+      expect(res.status, res.stderr).toBe(0);
+      const doc = readRoutineYaml(home, 'proj-job');
+      expect(doc).not.toBeNull();
+      expect(doc!.projects).toEqual(['myapp']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('writes multiple --project values as an array', () => {
+    const home = makeHome({ registry });
+    writeProject(home, 'myapp');
+    writeProject(home, 'billing');
+    try {
+      const res = run(home, [
+        'add', 'multi-proj-job',
+        '--schedule', '0 9 * * *',
+        '--agent', 'claude',
+        '--prompt', 'run tests',
+        '--project', 'myapp',
+        '--project', 'billing',
+      ], { ...projectsEnv(home), AGENTS_SYNC_MACHINE_ID: 'zion' });
+      expect(res.status, res.stderr).toBe(0);
+      const doc = readRoutineYaml(home, 'multi-proj-job');
+      expect(doc).not.toBeNull();
+      expect(doc!.projects).toEqual(['myapp', 'billing']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('routines add --all-projects', () => {
+  it('writes projects: ["*"] to YAML', () => {
+    const home = makeHome({ registry });
+    writeProject(home, 'myapp');
+    try {
+      const res = run(home, [
+        'add', 'all-proj-job',
+        '--schedule', '0 9 * * *',
+        '--agent', 'claude',
+        '--prompt', 'fleet check',
+        '--all-projects',
+      ], { ...projectsEnv(home), AGENTS_SYNC_MACHINE_ID: 'zion' });
+      expect(res.status, res.stderr).toBe(0);
+      const doc = readRoutineYaml(home, 'all-proj-job');
+      expect(doc).not.toBeNull();
+      expect(doc!.projects).toEqual(['*']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects --all-projects combined with --project', () => {
+    const home = makeHome({ registry });
+    writeProject(home, 'myapp');
+    try {
+      const res = run(home, [
+        'add', 'conflict-job',
+        '--schedule', '0 9 * * *',
+        '--agent', 'claude',
+        '--prompt', 'check',
+        '--all-projects',
+        '--project', 'myapp',
+      ], { ...projectsEnv(home), AGENTS_SYNC_MACHINE_ID: 'zion' });
+      expect(res.status).not.toBe(0);
+      const output = res.stdout + res.stderr;
+      expect(output).toMatch(/mutually exclusive/);
+      expect(readRoutineYaml(home, 'conflict-job')).toBeNull();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('routines add --project unknown project rejection', () => {
+  it('rejects an unknown project name and does not create the routine file', () => {
+    const home = makeHome({ registry });
+    // No projects written — "ghost" does not exist.
+    try {
+      const res = run(home, [
+        'add', 'ghost-job',
+        '--schedule', '0 9 * * *',
+        '--agent', 'claude',
+        '--prompt', 'check',
+        '--project', 'ghost',
+      ], { ...projectsEnv(home), AGENTS_SYNC_MACHINE_ID: 'zion' });
+      expect(res.status).not.toBe(0);
+      const output = res.stdout + res.stderr;
+      expect(output).toMatch(/Unknown project/i);
+      expect(readRoutineYaml(home, 'ghost-job')).toBeNull();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('routines list --json projects and projectGroup fields', () => {
+  it('includes projects and projectGroup in the JSON payload', () => {
+    const jobWithProject = { ...baseJob, name: 'tagged-job', projects: ['myapp'] };
+    const jobNoProject = { ...baseJob, name: 'untagged-job' };
+    const home = makeHome({
+      jobs: [jobWithProject, jobNoProject],
+      registry,
+      deviceRoutines: { zion: ['tagged-job', 'untagged-job'] },
+    });
+    writeProject(home, 'myapp');
+    try {
+      const res = run(home, ['list', '--json'], {
+        ...projectsEnv(home),
+        AGENTS_SYNC_MACHINE_ID: 'zion',
+      });
+      expect(res.status, res.stderr).toBe(0);
+      const payload = JSON.parse(res.stdout) as Array<Record<string, unknown>>;
+      const tagged = payload.find((j) => j.name === 'tagged-job');
+      const untagged = payload.find((j) => j.name === 'untagged-job');
+      expect(tagged).toBeDefined();
+      expect(tagged!.projects).toEqual(['myapp']);
+      expect(tagged!.projectGroup).toBe('myapp');
+      expect(untagged).toBeDefined();
+      expect(untagged!.projects).toEqual([]);
+      expect(untagged!.projectGroup).toBe('Operations');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('reports projectGroup as "All projects" for projects: ["*"]', () => {
+    const jobAllProjects = { ...baseJob, name: 'all-proj-job', projects: ['*'] };
+    const home = makeHome({
+      jobs: [jobAllProjects],
+      registry,
+      deviceRoutines: { zion: ['all-proj-job'] },
+    });
+    try {
+      const res = run(home, ['list', '--json'], {
+        ...projectsEnv(home),
+        AGENTS_SYNC_MACHINE_ID: 'zion',
+      });
+      expect(res.status, res.stderr).toBe(0);
+      const payload = JSON.parse(res.stdout) as Array<Record<string, unknown>>;
+      const entry = payload.find((j) => j.name === 'all-proj-job');
+      expect(entry).toBeDefined();
+      expect(entry!.projects).toEqual(['*']);
+      expect(entry!.projectGroup).toBe('All projects');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
