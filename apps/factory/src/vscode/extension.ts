@@ -793,8 +793,15 @@ async function launchAgent(context: vscode.ExtensionContext, opts: LaunchAgentOp
   if (opts.autoHost && AUTO_HOST_AGENT_KEYS.has(agentKey)) {
     host = resolveCachedAutoHost(context, agentKey);
     if (!host) {
-      vscode.window.showWarningMessage(`No cached SSH-reachable device has a signed-in, non-throttled ${agentKey} version — running locally.`);
+      // Cache cold/stale (first launch after activation, >5min idle, or the
+      // background fleet sweep hasn't landed on a loaded box). Don't silently
+      // run local — do the same live, favorites-aware fleet sweep the default
+      // New-agent path uses (honors enable/prefer, drops hosts with no usable
+      // version, ranks by load). It only returns undefined — and we fall back
+      // to local — when no fleet device is genuinely eligible. Also warm the
+      // cache so the NEXT auto launch is instant.
       refreshLaunchHealthCacheInBackground(context);
+      host = await resolveBalancedHost(undefined, agentKey);
     }
   }
 

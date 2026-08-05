@@ -7,6 +7,7 @@ import {
   pickCachedLaunchHost,
   recordLaunch,
 } from './launchHistory';
+import { DeviceLoad, pickBestHost, resolveBalancePool } from './launchHost';
 
 const NOW = 1_800_000_000_000;
 
@@ -43,6 +44,27 @@ describe('pickCachedLaunchHost', () => {
     const stale = cache([]);
     stale.refreshedAt = NOW - LAUNCH_HEALTH_MAX_AGE_MS - 1;
     expect(pickCachedLaunchHost('gemini', stale, {}, {}, NOW)).toBeNull();
+  });
+
+  // Regression: `New X (Auto)` used to run LOCAL whenever the health cache was
+  // cold/stale, because launchAgent bailed on the null cache pick instead of
+  // doing a live sweep. The cache miss is correct here (below); the fix is that
+  // a null cache pick must fall through to the live favorites-aware picker,
+  // which still resolves an eligible fleet host — not this Mac.
+  test('a cold-cache null does not mean local when a fleet host is eligible', () => {
+    const stale = cache([]);
+    stale.refreshedAt = NOW - LAUNCH_HEALTH_MAX_AGE_MS - 1;
+    expect(pickCachedLaunchHost('claude', stale, {}, {}, NOW)).toBeNull();
+
+    // The live fallback path launchAgent now takes: rank the online fleet
+    // (minus this Mac) and pick the least-loaded usable host.
+    const fleet: DeviceLoad[] = [
+      { name: 'zion', online: true, running: 0, usableVersion: true },
+      { name: 'yosemite-s0', online: true, running: 0, usableVersion: true },
+      { name: 'yosemite-m4', online: true, running: 5, usableVersion: true },
+    ];
+    const pool = resolveBalancePool(fleet, { localName: 'zion' });
+    expect(pickBestHost(pool)).toBe('yosemite-s0');
   });
 
   test('excludes devices disabled for auto-launch', () => {

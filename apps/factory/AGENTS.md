@@ -43,8 +43,16 @@ same flags — only host selection differs** (`launchAgent` in
 | Command | `launchAgent` opts | Host selector | Full command |
 |---|---|---|---|
 | `Agents: New X` | `{ agentKey, local: true }` | *(none — this machine)* | `agents run X --interactive --strategy balanced --mode auto` |
-| `Agents: New X (Auto)` | `{ agentKey, autoHost: true }` | `--device auto` | `agents run X --interactive --device auto --strategy balanced --mode auto` |
+| `Agents: New X (Auto)` | `{ agentKey, autoHost: true }` | `--host '<device>'` (resolved) | `agents run X --interactive --host '<device>' --strategy balanced --mode auto` |
 | `Agents: New X (Pick Host)` | `{ agentKey, pickHost: true }` | `--host '<device>'` | `agents run X --interactive --host '<device>' --strategy balanced --mode auto` |
+
+`(Auto)` resolves that device itself (it does NOT hand `--device auto` to the
+CLI): first from the warm health-cache snapshot (`resolveCachedAutoHost` →
+`pickCachedLaunchHost`), and — when that cache is cold or >5min stale — it falls
+through to the same live, favorites-aware fleet sweep the default New-agent path
+uses (`resolveBalancedHost`), honoring enable/prefer and dropping hosts with no
+usable version. It runs local only when no fleet device is genuinely eligible; a
+cold cache no longer silently pins the launch to this Mac (`launchAgent`).
 
 Claude alone adds `--session-id <id>` (minted up front for the resume/fork flow);
 that is the only per-agent addition and it never removes a flag. A **fork**
