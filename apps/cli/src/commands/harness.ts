@@ -90,7 +90,6 @@ export function buildFork(source: string, name: string, opts: ForkOptions): Prof
       baseUrl: opts.baseUrl,
       provider: opts.authProvider,
       version: opts.version,
-      label: opts.label,
       description: opts.description,
     });
   }
@@ -110,7 +109,6 @@ export function buildFork(source: string, name: string, opts: ForkOptions): Prof
     baseUrl: opts.baseUrl,
     provider: opts.authProvider,
     authEnvVar: opts.authProvider ? authEnvKeyForHostOrThrow(host) : undefined,
-    label: opts.label,
     description: opts.description ?? `Forked from ${host}: ${opts.model}`,
   });
 }

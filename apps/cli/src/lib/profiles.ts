@@ -37,9 +37,10 @@ export interface Profile {
   preset?: string;
   provider?: string;
   /**
-   * Human-facing label for the harness — what `agents view` prints as the
-   * agent-type header, the same slot `AGENTS[id].name` fills for a native
-   * harness. Defaults to the profile name when unset.
+   * Stored for backward-compatible YAML parsing only — no longer read for
+   * display. `profileLabel()` always derives the display name from `name` via
+   * the vendor/brand table. Old YAML files that carry this key still parse
+   * correctly; it is simply ignored.
    */
   label?: string;
   /**
@@ -65,7 +66,7 @@ export interface Profile {
  */
 export interface ProfileSummary {
   name: string;
-  /** Human-facing header label — `label` when set, else the profile name. */
+  /** Human-facing header label — always derived from `name` via the vendor/brand table. */
   label: string;
   agent: AgentId;
   host: string;
@@ -277,11 +278,47 @@ export function profileAuthLabel(profile: Profile): string {
 }
 
 /**
- * Header label for the harness — the slot `AGENTS[id].name` fills for a native
- * harness, so `agents view` can print custom and native harnesses the same way.
+ * Curated vendor/brand display names, matched case-insensitively per token.
+ * Entries with a space (e.g. 'Moonshot AI') are single-token → multi-word expansions.
+ */
+const VENDOR_TABLE: ReadonlyArray<readonly [string, string]> = [
+  ['deepseek', 'DeepSeek'],
+  ['openai', 'OpenAI'],
+  ['anthropic', 'Anthropic'],
+  ['claude', 'Claude'],
+  ['grok', 'Grok'],
+  ['xai', 'xAI'],
+  ['gpt', 'GPT'],
+  ['meta', 'Meta'],
+  ['mistral', 'Mistral'],
+  ['mistralai', 'Mistral'],
+  ['qwen', 'Qwen'],
+  ['gemini', 'Gemini'],
+  ['moonshot', 'Moonshot AI'],
+  ['moonshotai', 'Moonshot AI'],
+  ['kimi', 'Kimi'],
+  ['cohere', 'Cohere'],
+  ['perplexity', 'Perplexity'],
+];
+
+function tokenToDisplayName(token: string): string {
+  const lower = token.toLowerCase();
+  for (const [key, display] of VENDOR_TABLE) {
+    if (lower === key) return display;
+  }
+  return token.charAt(0).toUpperCase() + token.slice(1);
+}
+
+/**
+ * Header label for the harness — derived from `profile.name` by splitting on
+ * `[-_]` and mapping each token through the vendor/brand table. Never reads
+ * the stored `label` field; old YAML files with a `label:` key are unaffected.
+ *
+ * Examples: `deepseek-flash` → `'DeepSeek Flash'`, `spark` → `'Spark'`,
+ * `deepseek_chat_v3` → `'DeepSeek Chat V3'`.
  */
 export function profileLabel(profile: Profile): string {
-  return profile.label || profile.name;
+  return profile.name.split(/[-_]/).map(tokenToDisplayName).join(' ');
 }
 
 /** Build a stable, machine-readable summary for list and view surfaces. */
@@ -376,8 +413,6 @@ export interface HostModelOptions {
   /** Env var the host reads its auth token from; pair with `provider` to attach keychain auth. */
   authEnvVar?: string;
   description?: string;
-  /** Human-facing header label; defaults to the harness name. */
-  label?: string;
 }
 
 /**
@@ -400,7 +435,6 @@ export function profileFromHostModel(name: string, host: AgentId, model: string,
     provider: opts.provider ?? host,
     forkedFrom: host,
   };
-  if (opts.label) profile.label = opts.label;
   if (opts.provider && opts.authEnvVar) {
     profile.auth = { envVar: opts.authEnvVar, keychainItem: keychainItemName(opts.provider) };
     profile.authOptional = false;
@@ -421,7 +455,6 @@ export interface ForkProfileOptions {
   authEnvVar?: string;
   /** Re-pin (or unpin, with an empty string) the host CLI version. */
   version?: string;
-  label?: string;
   description?: string;
 }
 
@@ -454,12 +487,6 @@ export function forkProfile(source: Profile, name: string, opts: ForkProfileOpti
     description: opts.description ?? (opts.model ? `Forked from ${source.name}: ${opts.model}` : source.description),
     forkedFrom: source.name,
   };
-  // `label` is the header `agents view` prints, so an inherited one would make
-  // the fork and its source visually identical — the ambiguity a per-harness
-  // block exists to remove. A fork carries a label only when it is given one;
-  // otherwise `profileLabel` falls back to the fork's own name.
-  if (opts.label) forked.label = opts.label;
-  else delete forked.label;
   // A fork that repoints the model or endpoint is no longer that preset — keep
   // the preset link only while the fork still matches what the preset defines.
   if (opts.model || opts.baseUrl) delete forked.preset;
@@ -473,6 +500,53 @@ export function forkProfile(source: Profile, name: string, opts: ForkProfileOpti
     forked.authOptional = source.authOptional ?? false;
   }
   return forked;
+}
+
+/**
+ * Edit an existing profile in-place, applying overrides without changing its
+ * name or lineage. Reuses {@link forkProfile}'s validation and override logic
+ * (model swap, base-URL validation, auth repoint), then restores the original
+ * `forkedFrom` so an edit never self-references the profile.
+ *
+ * Note: this returns the updated `Profile` object but does NOT write it to
+ * disk — callers should follow up with `writeProfile(result)` if persistence
+ * is needed.
+ */
+export function editProfile(source: Profile, opts: ForkProfileOptions = {}): Profile {
+  const edited = forkProfile(source, source.name, opts);
+  // forkProfile sets forkedFrom = source.name; for an in-place edit that would
+  // be a self-reference. Restore the original lineage instead.
+  edited.forkedFrom = source.forkedFrom;
+  return edited;
+}
+
+/**
+ * Rename a profile on disk, then rewrite `forkedFrom` in every other profile
+ * that pointed at the old name so lineage display never goes stale.
+ *
+ * Throws if `oldName` does not exist or `newName` already exists. There is no
+ * `--force` / overwrite path — a collision is a hard error directing the user
+ * to remove the target first.
+ */
+export function renameProfile(oldName: string, newName: string): void {
+  validateProfileName(newName);
+  if (!profileExists(oldName)) {
+    throw new Error(`Profile '${oldName}' not found.`);
+  }
+  if (profileExists(newName)) {
+    throw new Error(`Profile '${newName}' already exists; remove it first.`);
+  }
+  const profile = readProfile(oldName);
+  profile.name = newName;
+  writeProfile(profile);
+  deleteProfile(oldName);
+  // Rewrite forkedFrom in every other profile that referenced the old name.
+  for (const other of listProfiles()) {
+    if (other.name !== newName && other.forkedFrom === oldName) {
+      other.forkedFrom = newName;
+      writeProfile(other);
+    }
+  }
 }
 
 /**

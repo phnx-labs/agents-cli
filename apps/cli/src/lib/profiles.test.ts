@@ -8,11 +8,15 @@ import {
   profileFromHostModel,
   forkProfile,
   profileSummary,
+  profileLabel,
+  editProfile,
+  renameProfile,
   modelEnvKeyForHost,
   resolveProfileEnv,
   readProfile,
   resolveProfileForRun,
   writeProfile,
+  listProfiles,
   type Profile,
 } from './profiles.js';
 import { setKeychainBackendForTest, setKeychainHeadlessDetectorForTest, type KeychainBackend } from './secrets/index.js';
@@ -326,18 +330,22 @@ describe('forkProfile — copy an existing harness under a new name', () => {
     expect(forked.auth).toEqual({ envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.corp.token' });
   });
 
-  it('never inherits the source label — two harnesses must not share one view header', () => {
+  it('a stored label field is never read for display — display derives from name always', () => {
+    // Even if the source YAML carries a label key, profileLabel ignores it.
     const labelled: Profile = { ...source, label: 'DeepSeek Flash' };
     const forked = forkProfile(labelled, 'deepseek-chat', { model: 'deepseek/deepseek-chat-v3' });
-    expect(forked.label).toBeUndefined();
-    expect(profileSummary(forked).label).toBe('deepseek-chat');
-    // A straight copy with no overrides must not inherit it either.
-    expect(forkProfile(labelled, 'twin').label).toBeUndefined();
+    // 'deepseek-chat' → tokens ['deepseek','chat'] → 'DeepSeek Chat'
+    expect(profileSummary(forked).label).toBe('DeepSeek Chat');
+    // Plain copy: 'twin' → 'Twin'
+    expect(profileSummary(forkProfile(labelled, 'twin')).label).toBe('Twin');
   });
 
-  it('carries an explicitly given label onto the fork', () => {
-    const forked = forkProfile(source, 'chat', { label: 'DeepSeek Chat' });
-    expect(profileSummary(forked).label).toBe('DeepSeek Chat');
+  it('an inherited label field in YAML is not read for display after a fork', () => {
+    // A profile whose YAML carries a 'label' key (old format) — profileLabel ignores it.
+    const withStoredLabel: Profile = { ...source, label: 'Some Label' };
+    const forked = forkProfile(withStoredLabel, 'chat');
+    // name 'chat' has no vendor-table match → 'Chat'
+    expect(profileSummary(forked).label).toBe('Chat');
   });
 
   it('re-pins the host version when asked', () => {
@@ -354,26 +362,172 @@ describe('forkProfile — copy an existing harness under a new name', () => {
   });
 });
 
+describe('profileLabel — vendor/brand table + fallback', () => {
+  const p = (name: string): Profile => ({ name, host: { agent: 'claude' }, env: {} });
+
+  it('maps known vendor tokens to their canonical brand names', () => {
+    expect(profileLabel(p('deepseek-flash'))).toBe('DeepSeek Flash');
+    expect(profileLabel(p('openai-gpt4'))).toBe('OpenAI Gpt4');
+    expect(profileLabel(p('grok-beta'))).toBe('Grok Beta');
+    expect(profileLabel(p('gemini-pro'))).toBe('Gemini Pro');
+    expect(profileLabel(p('kimi-k2'))).toBe('Kimi K2');
+    expect(profileLabel(p('mistralai-large'))).toBe('Mistral Large');
+    expect(profileLabel(p('gpt-4o'))).toBe('GPT 4o');
+    expect(profileLabel(p('xai-grok'))).toBe('xAI Grok');
+  });
+
+  it('handles the multi-word moonshot expansion', () => {
+    expect(profileLabel(p('moonshotai'))).toBe('Moonshot AI');
+    expect(profileLabel(p('moonshot-v1'))).toBe('Moonshot AI V1');
+  });
+
+  it('capitalizes-first unmatched tokens', () => {
+    expect(profileLabel(p('spark'))).toBe('Spark');
+    expect(profileLabel(p('flash'))).toBe('Flash');
+    expect(profileLabel(p('v3'))).toBe('V3');
+  });
+
+  it('splits on both dash and underscore', () => {
+    expect(profileLabel(p('deepseek_chat_v3'))).toBe('DeepSeek Chat V3');
+    expect(profileLabel(p('deepseek-flash'))).toBe('DeepSeek Flash');
+  });
+
+  it('is case-insensitive on vendor table lookups; fallback preserves rest-of-token case', () => {
+    // vendor table matches are case-insensitive; unmatched tokens only capitalize the first char
+    expect(profileLabel(p('DeepSeek-Flash'))).toBe('DeepSeek Flash');
+    expect(profileLabel(p('GROK-beta'))).toBe('Grok Beta');
+    // 'BETA' matches no table entry → first char already uppercase, rest preserved → 'BETA'
+    expect(profileLabel(p('GROK-BETA'))).toBe('Grok BETA');
+  });
+
+  it('never reads a stored label field on the profile', () => {
+    const withLabel: Profile = { ...p('deepseek-flash'), label: 'Stored Label' };
+    expect(profileLabel(withLabel)).toBe('DeepSeek Flash');
+  });
+});
+
+describe('editProfile — in-place edit preserving lineage', () => {
+  const source: Profile = {
+    name: 'deepseek-flash',
+    host: { agent: 'claude' },
+    env: {
+      ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731',
+      ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+    },
+    forkedFrom: 'openrouter',
+    provider: 'openrouter',
+  };
+
+  it('returns a profile with the same name as the source', () => {
+    const edited = editProfile(source, { model: 'deepseek/deepseek-chat-v3' });
+    expect(edited.name).toBe('deepseek-flash');
+  });
+
+  it('applies overrides via forkProfile logic', () => {
+    const edited = editProfile(source, { model: 'deepseek/deepseek-chat-v3' });
+    expect(edited.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-chat-v3');
+    expect(edited.env.ANTHROPIC_BASE_URL).toBe('https://openrouter.ai/api');
+  });
+
+  it('restores forkedFrom to the original — does not self-reference', () => {
+    // forkProfile would set forkedFrom = 'deepseek-flash'; editProfile must undo that.
+    const edited = editProfile(source, { model: 'deepseek/deepseek-chat-v3' });
+    expect(edited.forkedFrom).toBe('openrouter');
+  });
+
+  it('preserves a null forkedFrom when the source had none', () => {
+    const noLineage: Profile = { ...source, forkedFrom: undefined };
+    const edited = editProfile(noLineage, { model: 'deepseek/deepseek-chat-v3' });
+    expect(edited.forkedFrom).toBeUndefined();
+  });
+});
+
+describe('renameProfile — rename + forkedFrom cascade', () => {
+  function writeTestProfile(name: string, forkedFrom?: string): void {
+    writeProfile({
+      name,
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'some-model' },
+      ...(forkedFrom ? { forkedFrom } : {}),
+    });
+  }
+
+  it('renames the profile on disk', () => {
+    writeTestProfile('old-name');
+    renameProfile('old-name', 'new-name');
+    expect(readProfile('new-name').name).toBe('new-name');
+    const profiles = listProfiles().map((p) => p.name);
+    expect(profiles).toContain('new-name');
+    expect(profiles).not.toContain('old-name');
+  });
+
+  it('throws when the source does not exist', () => {
+    expect(() => renameProfile('no-such-profile', 'target')).toThrow(/not found/i);
+  });
+
+  it('throws when the target name already exists — no overwrite path', () => {
+    writeTestProfile('source');
+    writeTestProfile('target');
+    expect(() => renameProfile('source', 'target')).toThrow(/already exists/i);
+  });
+
+  it('cascades forkedFrom across all children referencing the old name', () => {
+    writeTestProfile('parent');
+    writeTestProfile('child-a', 'parent');
+    writeTestProfile('child-b', 'parent');
+    writeTestProfile('unrelated', 'other-source');
+
+    renameProfile('parent', 'parent-v2');
+
+    expect(readProfile('child-a').forkedFrom).toBe('parent-v2');
+    expect(readProfile('child-b').forkedFrom).toBe('parent-v2');
+    // Unrelated profile's forkedFrom is untouched.
+    expect(readProfile('unrelated').forkedFrom).toBe('other-source');
+  });
+
+  it('does not modify the renamed profile\'s own forkedFrom', () => {
+    writeTestProfile('grandparent');
+    writeTestProfile('parent', 'grandparent');
+    writeTestProfile('child', 'parent');
+
+    renameProfile('parent', 'parent-v2');
+
+    // parent-v2's forkedFrom was 'grandparent' — must not be changed.
+    expect(readProfile('parent-v2').forkedFrom).toBe('grandparent');
+    // child's forkedFrom pointed at 'parent' → updated to 'parent-v2'.
+    expect(readProfile('child').forkedFrom).toBe('parent-v2');
+  });
+
+  it('rejects an invalid new name before doing anything', () => {
+    writeTestProfile('existing');
+    expect(() => renameProfile('existing', 'bad name!')).toThrow(/invalid profile name/i);
+    // existing profile must still be there
+    expect(readProfile('existing').name).toBe('existing');
+  });
+});
+
 describe('profileSummary — first-class harness fields', () => {
-  it('surfaces the label, host version, description and fork lineage', () => {
+  it('surfaces the host version, description and fork lineage; label derives from name', () => {
     const summary = profileSummary({
       name: 'spark',
-      label: 'Muse Spark',
+      label: 'Muse Spark',  // stored in YAML but not read for display
       host: { agent: 'opencode', version: '1.16.0' },
       env: { OPENCODE_MODEL: 'meta/muse-spark-1.1' },
       description: 'Muse Spark through OpenCode',
       forkedFrom: 'opencode',
     });
-    expect(summary.label).toBe('Muse Spark');
+    // label derived from name 'spark' → 'Spark', not from the stored 'Muse Spark'
+    expect(summary.label).toBe('Spark');
     expect(summary.hostVersion).toBe('1.16.0');
     expect(summary.description).toBe('Muse Spark through OpenCode');
     expect(summary.forkedFrom).toBe('opencode');
     expect(summary.model).toBe('meta/muse-spark-1.1');
   });
 
-  it('falls back to the harness name when no label is set', () => {
+  it('label derives from name even when no label field is present', () => {
     const summary = profileSummary({ name: 'spark', host: { agent: 'opencode' }, env: {} });
-    expect(summary.label).toBe('spark');
+    // 'spark' → no vendor match → 'Spark'
+    expect(summary.label).toBe('Spark');
     expect(summary.hostVersion).toBeNull();
     expect(summary.forkedFrom).toBeNull();
   });
