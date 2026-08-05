@@ -756,3 +756,78 @@ describe('the throttle guard is exercised beyond Claude', () => {
     expect(usage.error ?? '').not.toContain('rate-limited this machine');
   });
 });
+
+describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
+  let home: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-usage-'));
+  });
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  function writeAuth(mtimeMs: number): void {
+    const p = path.join(home, '.codex', 'auth.json');
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify({ tokens: { id_token: 'stub' } }));
+    fs.utimesSync(p, mtimeMs / 1000, mtimeMs / 1000);
+  }
+
+  function writeSession(mtimeMs: number, usedPercent: number): void {
+    const dir = path.join(home, '.codex', 'sessions', '2026', '08', '05');
+    fs.mkdirSync(dir, { recursive: true });
+    const p = path.join(dir, `rollout-${mtimeMs}.jsonl`);
+    fs.writeFileSync(
+      p,
+      JSON.stringify({
+        timestamp: new Date(mtimeMs).toISOString(),
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          rate_limits: { primary: { used_percent: usedPercent, window_minutes: 300 } },
+        },
+      }) + '\n'
+    );
+    fs.utimesSync(p, mtimeMs / 1000, mtimeMs / 1000);
+  }
+
+  const HOUR = 60 * 60 * 1000;
+
+  it('ignores a session written before the current login (prior account is stale)', async () => {
+    // Reproduces the bug: log out, log into a different account. The only
+    // session on disk predates the new login, so its usage is the OLD account's.
+    writeAuth(NOW);
+    writeSession(NOW - HOUR, 99);
+
+    const info = await getUsageInfo('codex', { home });
+    expect(info.snapshot).toBeNull();
+  });
+
+  it('reports a session written after the current login', async () => {
+    writeAuth(NOW);
+    writeSession(NOW + HOUR, 42);
+
+    const info = await getUsageInfo('codex', { home });
+    const session = info.snapshot?.windows.find((w) => w.key === 'session');
+    expect(session?.usedPercent).toBe(42);
+  });
+
+  it('prefers the current account session over a stale pre-login one', async () => {
+    // Old account left a 99% session; the new account then ran a 5% session.
+    writeAuth(NOW);
+    writeSession(NOW - HOUR, 99);
+    writeSession(NOW + HOUR, 5);
+
+    const info = await getUsageInfo('codex', { home });
+    const session = info.snapshot?.windows.find((w) => w.key === 'session');
+    expect(session?.usedPercent).toBe(5);
+  });
+
+  it('reports no usage when no account is signed in (no auth.json)', async () => {
+    writeSession(NOW, 99);
+
+    const info = await getUsageInfo('codex', { home });
+    expect(info.snapshot).toBeNull();
+  });
+});

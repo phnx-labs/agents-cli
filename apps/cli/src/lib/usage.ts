@@ -893,7 +893,21 @@ export function formatUsageSection(usage: UsageInfo): string[] {
 /** Fetch Codex usage by scanning the most recent session files for rate-limit events. */
 async function getCodexUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
-    const files = collectCodexSessionFiles(options?.home);
+    // Codex usage is read from on-disk session transcripts, which carry no
+    // account identity. Codex writes auth.json on login (not on token refresh),
+    // so its mtime marks when the account currently in that home signed in.
+    // Only sessions written at/after that belong to the current account — an
+    // older session was written by whoever was signed in before (e.g. after
+    // `codex logout` + login into a different account), and attributing its
+    // rate_limits to the new account is the "wrong usage after switch" bug.
+    // No auth.json means no account is signed in here, so there is no usage to
+    // report. A freshly-switched account correctly shows no usage until it runs
+    // its own session; this errs toward "unavailable", never a wrong number.
+    const base = options?.home || os.homedir();
+    const authStat = safeStatSync(path.join(base, '.codex', 'auth.json'));
+    if (!authStat) return { snapshot: null, error: null };
+
+    const files = collectCodexSessionFiles(options?.home, authStat.mtimeMs);
     for (const filePath of files) {
       const match = await readLatestCodexRateLimits(filePath);
       if (!match) continue;
@@ -1468,8 +1482,15 @@ function normalizeDroidWindow(
   };
 }
 
-/** Collect Codex JSONL session files sorted newest-first. */
-function collectCodexSessionFiles(home?: string): string[] {
+/**
+ * Collect Codex JSONL session files sorted newest-first.
+ *
+ * `sinceMs` drops files modified before it. Codex session transcripts are not
+ * tagged with the account that wrote them, so this mtime floor is how usage is
+ * kept account-scoped: a session older than the current login belongs to a
+ * prior account (see {@link getCodexUsageInfo}).
+ */
+function collectCodexSessionFiles(home?: string, sinceMs?: number): string[] {
   const base = home || os.homedir();
   const dir = path.join(base, '.codex', 'sessions');
   if (!fs.existsSync(dir)) return [];
@@ -1482,6 +1503,7 @@ function collectCodexSessionFiles(home?: string): string[] {
     seenFiles.add(real);
     const stat = safeStatSync(filePath);
     if (!stat) continue;
+    if (sinceMs !== undefined && stat.mtimeMs < sinceMs) continue;
     files.push({ path: filePath, mtime: stat.mtimeMs });
   }
 
