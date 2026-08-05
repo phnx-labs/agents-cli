@@ -14,8 +14,11 @@ All notable changes to the Factory extension are documented here. Format follows
   Commands are renamed to `Agents: Reader (Enable)` / `Agents: Reader (Disable)`
   (same style as Watchdog). Reader also owns `*.html` / `*.htm` via a sandboxed
   HTML preview (`agents.htmlReader`) so artifacts-cli pages render instead of
-  showing source. Source: `src/core/editorAssociations.ts`,
-  `src/vscode/workbench.vscode.ts`, `src/vscode/htmlReader.ts`, `package.json`.
+  showing source. Floor/plan open paths no longer shell HTML out to the system
+  browser — `openPlanPreview` and file clicks use `vscode.openWith` for the
+  Reader, so `.agents/artifacts/**/*.html` (and plans/reports) open in-editor.
+  Source: `src/core/editorAssociations.ts`, `src/vscode/workbench.vscode.ts`,
+  `src/vscode/htmlReader.ts`, `src/vscode/settings.vscode.ts`, `package.json`.
 
 - **Removed the `agents.terminalMode` setting — tmux is always on when available.**
   The extension no longer exposes an `auto` / `tmux` / `native` "terminal mode".

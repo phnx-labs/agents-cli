@@ -63,6 +63,19 @@ export function readerViewTypeForPattern(pattern: string): string {
 }
 
 /**
+ * View type for opening a concrete path with the Agents Reader, or undefined
+ * when the file is not a reader-owned type. Covers the usual artifact homes
+ * (`.agents/artifacts|plans|reports/`) and any other `*.md` / `*.html`.
+ */
+export function readerViewTypeForPath(filePath: string): string | undefined {
+  const base = filePath.replace(/\\/g, '/').split('/').pop() ?? filePath;
+  const lower = base.toLowerCase();
+  if (lower.endsWith('.md') || lower.endsWith('.markdown')) return AGENTS_MARKDOWN_EDITOR;
+  if (lower.endsWith('.html') || lower.endsWith('.htm')) return AGENTS_HTML_READER;
+  return undefined;
+}
+
+/**
  * Compute the next associations map when enabling/disabling the Agents Reader.
  * Covers markdown (TipTap editor) and HTML (artifact preview).
  */

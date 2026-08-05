@@ -4,6 +4,7 @@ import {
   AGENTS_MARKDOWN_EDITOR,
   MARKDOWN_PATTERN,
   normalizeEditorAssociations,
+  readerViewTypeForPath,
   withReaderEditorAssociations,
 } from './editorAssociations';
 
@@ -98,5 +99,25 @@ describe('withReaderEditorAssociations', () => {
       '*.htm': 'default',
       '*.pdf': 'pdf.preview',
     });
+  });
+});
+
+describe('readerViewTypeForPath', () => {
+  test('maps markdown and html under .agents/artifacts (and anywhere)', () => {
+    expect(readerViewTypeForPath('/repo/.agents/artifacts/fleet-tokens-24h.html')).toBe(
+      AGENTS_HTML_READER
+    );
+    expect(readerViewTypeForPath('/repo/.agents/plans/plan-foo.html')).toBe(AGENTS_HTML_READER);
+    expect(readerViewTypeForPath('/repo/.agents/artifacts/named-runs/plan.md')).toBe(
+      AGENTS_MARKDOWN_EDITOR
+    );
+    expect(readerViewTypeForPath('C:\\Users\\x\\.agents\\artifacts\\x.HTM')).toBe(
+      AGENTS_HTML_READER
+    );
+  });
+
+  test('returns undefined for non-reader types', () => {
+    expect(readerViewTypeForPath('/repo/.agents/artifacts/shot.png')).toBeUndefined();
+    expect(readerViewTypeForPath('/repo/src/main.ts')).toBeUndefined();
   });
 });
