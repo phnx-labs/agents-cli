@@ -339,7 +339,9 @@ describe('launch contract — every runner is balanced', () => {
       expect(buildAgentLaunchCommand(
         key, null, undefined, undefined, undefined, 'balanced', undefined, { local: true },
       )).toBe(`agents run ${key} --interactive --strategy balanced --mode auto`);
-      // New X (Auto) — CLI auto-picks the host via --device auto
+      // Unpinned, no host, not local (QuickLaunch balanced) — CLI affinity-picks
+      // the device via --device auto. (New X (Auto) resolves a concrete --host
+      // itself instead; see launchAgent + apps/factory/AGENTS.md launch contract.)
       expect(buildAgentLaunchCommand(
         key, null, undefined, undefined, undefined, 'balanced', undefined, {},
       )).toBe(`agents run ${key} --interactive --device auto --strategy balanced --mode auto`);
