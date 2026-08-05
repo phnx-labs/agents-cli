@@ -2,15 +2,18 @@ import * as vscode from 'vscode';
 import {
   type EditorAssociations,
   normalizeEditorAssociations,
-  withMarkdownEditorAssociation,
+  withReaderEditorAssociations,
 } from '../core/editorAssociations';
 
 export type { EditorAssociations } from '../core/editorAssociations';
 export {
+  AGENTS_HTML_READER,
   AGENTS_MARKDOWN_EDITOR,
   MARKDOWN_PATTERN,
+  READER_PATTERNS,
   normalizeEditorAssociations,
   withMarkdownEditorAssociation,
+  withReaderEditorAssociations,
 } from '../core/editorAssociations';
 
 /**
@@ -58,10 +61,14 @@ export async function setEditorAssociations(associations: EditorAssociations): P
   await updateSettings({ 'workbench.editorAssociations': associations });
 }
 
+/** Wire *.md + *.html/*.htm to the Agents Reader custom editors (or default off). */
 export async function setMarkdownEditorAssociation(enabled: boolean): Promise<void> {
-  const next = withMarkdownEditorAssociation(getEditorAssociations(), enabled);
+  const next = withReaderEditorAssociations(getEditorAssociations(), enabled);
   await setEditorAssociations(next);
 }
+
+/** Alias — Reader covers markdown and HTML artifacts. */
+export const setReaderEditorAssociations = setMarkdownEditorAssociation;
 
 /**
  * Streamline layout: sidebar right, activity bar hidden.

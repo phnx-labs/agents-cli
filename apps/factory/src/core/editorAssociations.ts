@@ -1,15 +1,25 @@
 /**
  * VS Code's `workbench.editorAssociations` is an object map:
- *   { "*.md": "agents.markdownEditor" }
+ *   { "*.md": "agents.markdownEditor", "*.html": "agents.htmlReader" }
  *
  * Older Factory builds wrote a legacy array of `{ viewType, filenamePattern }`
- * entries. That shape is ignored by the editor resolver, so the Markdown Viewer
- * toggle appeared to save but never changed which editor opened .md files.
+ * entries. That shape is ignored by the editor resolver, so the Reader toggle
+ * appeared to save but never changed which editor opened files.
  */
 
 export type EditorAssociations = Record<string, string>;
 
+/** TipTap / Notion-style markdown reader-editor. */
 export const AGENTS_MARKDOWN_EDITOR = 'agents.markdownEditor';
+
+/** Sandboxed HTML preview for artifacts-cli (and other) HTML docs. */
+export const AGENTS_HTML_READER = 'agents.htmlReader';
+
+export const READER_PATTERNS = ['*.md', '*.html', '*.htm'] as const;
+
+export type ReaderPattern = (typeof READER_PATTERNS)[number];
+
+/** @deprecated Use READER_PATTERNS; kept for call-site clarity in markdown-only paths. */
 export const MARKDOWN_PATTERN = '*.md';
 
 /**
@@ -45,19 +55,40 @@ export function normalizeEditorAssociations(value: unknown): EditorAssociations 
 }
 
 /**
- * Compute the next associations map when enabling/disabling the Agents Markdown Editor.
+ * View type the Agents Reader uses for a given filename pattern.
+ */
+export function readerViewTypeForPattern(pattern: string): string {
+  if (pattern === '*.html' || pattern === '*.htm') return AGENTS_HTML_READER;
+  return AGENTS_MARKDOWN_EDITOR;
+}
+
+/**
+ * Compute the next associations map when enabling/disabling the Agents Reader.
+ * Covers markdown (TipTap editor) and HTML (artifact preview).
+ */
+export function withReaderEditorAssociations(
+  current: EditorAssociations,
+  enabled: boolean
+): EditorAssociations {
+  const next: EditorAssociations = { ...current };
+  for (const pattern of READER_PATTERNS) {
+    if (enabled) {
+      next[pattern] = readerViewTypeForPattern(pattern);
+    } else {
+      // Pin to the default text editor so a prior enable does not stick.
+      next[pattern] = 'default';
+    }
+  }
+  return next;
+}
+
+/**
+ * @deprecated Prefer withReaderEditorAssociations — same behavior, name kept for
+ * older call sites during the rename.
  */
 export function withMarkdownEditorAssociation(
   current: EditorAssociations,
   enabled: boolean
 ): EditorAssociations {
-  const next: EditorAssociations = { ...current };
-  if (enabled) {
-    next[MARKDOWN_PATTERN] = AGENTS_MARKDOWN_EDITOR;
-  } else {
-    // Pin *.md to the default text editor so the custom editor does not stick
-    // via a leftover association from a prior enable.
-    next[MARKDOWN_PATTERN] = 'default';
-  }
-  return next;
+  return withReaderEditorAssociations(current, enabled);
 }

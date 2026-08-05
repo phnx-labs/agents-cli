@@ -47,7 +47,8 @@
     "onStartupFinished",
     "onUri",
     "onLanguage:markdown",
-    "onCustomEditor:agents.markdownEditor"
+    "onCustomEditor:agents.markdownEditor",
+    "onCustomEditor:agents.htmlReader"
   ],
   "main": "./out/vscode/extension.js",
   "contributes": {
@@ -61,10 +62,23 @@
     "customEditors": [
       {
         "viewType": "agents.markdownEditor",
-        "displayName": "Agents Markdown Editor",
+        "displayName": "Agents Reader (Markdown)",
         "selector": [
           {
             "filenamePattern": "*.md"
+          }
+        ],
+        "priority": "option"
+      },
+      {
+        "viewType": "agents.htmlReader",
+        "displayName": "Agents Reader (HTML)",
+        "selector": [
+          {
+            "filenamePattern": "*.html"
+          },
+          {
+            "filenamePattern": "*.htm"
           }
         ],
         "priority": "option"
@@ -324,11 +338,11 @@
       },
       {
         "command": "agents.enableReader",
-        "title": "Agents: Enable Reader"
+        "title": "Agents: Reader (Enable)"
       },
       {
         "command": "agents.disableReader",
-        "title": "Agents: Disable Reader"
+        "title": "Agents: Reader (Disable)"
       },
       {
         "command": "agents.init",

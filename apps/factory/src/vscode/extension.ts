@@ -10,6 +10,7 @@ import {
 } from './agents.vscode';
 import * as claudemd from './claudemd.vscode';
 import { AgentsMarkdownEditorProvider, swarmCurrentDocument } from './customEditor';
+import { AgentsHtmlReaderProvider } from './htmlReader';
 import * as git from './git.vscode';
 import { AgentSettings, hasLoginEnabled, PromptEntry, QUICK_LAUNCH_SLOT_KEYS, getQuickLaunchSlot, QuickLaunchSlot, QuickLaunchSlotKey } from '../core/settings';
 import { listRegisteredDevices, countRunningAgents, fetchDeviceStats, resolveSecret } from './deviceHealth.vscode';
@@ -1489,14 +1490,19 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
-  // Register custom markdown editor
+  // Register custom markdown + HTML readers
   try {
     context.subscriptions.push(
       AgentsMarkdownEditorProvider.register(context)
     );
   } catch (error) {
     // Editor already registered (hot reload) - continue activation
-    console.log('Custom editor already registered, continuing...');
+    console.log('Custom markdown editor already registered, continuing...');
+  }
+  try {
+    context.subscriptions.push(AgentsHtmlReaderProvider.register(context));
+  } catch (error) {
+    console.log('Custom HTML reader already registered, continuing...');
   }
 
   try {
@@ -1729,7 +1735,9 @@ export async function activate(context: vscode.ExtensionContext) {
         editor: { ...(current.editor ?? { markdownViewerEnabled: true }), markdownViewerEnabled: true }
       };
       await settings.saveSettings(context, next);
-      vscode.window.showInformationMessage('Markdown reader enabled. .md files will open in the Agents Markdown Editor.');
+      vscode.window.showInformationMessage(
+        'Agents Reader enabled. .md opens in the Notion-style editor; .html opens as a rendered preview.'
+      );
       await updateContextKeys(context);
     })
   );
@@ -1742,7 +1750,9 @@ export async function activate(context: vscode.ExtensionContext) {
         editor: { ...(current.editor ?? { markdownViewerEnabled: true }), markdownViewerEnabled: false }
       };
       await settings.saveSettings(context, next);
-      vscode.window.showInformationMessage('Markdown reader disabled. .md files will open in the default text editor.');
+      vscode.window.showInformationMessage(
+        'Agents Reader disabled. .md and .html open in the default text editor.'
+      );
       await updateContextKeys(context);
     })
   );

@@ -6,12 +6,16 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
-- **Markdown Viewer toggle actually opens the Notion-style editor.** Factory wrote
+- **Reader association fix + HTML artifacts + command titles.** Factory wrote
   `workbench.editorAssociations` as a legacy array (`[{ viewType, filenamePattern }]`).
   VS Code only accepts the object map (`{ "*.md": "agents.markdownEditor" }`), so the
-  setting saved but `.md` files kept opening as raw text. Writes the object shape,
-  migrates the old array on read, and pins `*.md` to `default` when disabled.
-  Source: `src/core/editorAssociations.ts`, `src/vscode/workbench.vscode.ts`.
+  toggle saved but files kept opening as raw text. Now writes the object shape,
+  migrates the old array on read, and pins patterns to `default` when disabled.
+  Commands are renamed to `Agents: Reader (Enable)` / `Agents: Reader (Disable)`
+  (same style as Watchdog). Reader also owns `*.html` / `*.htm` via a sandboxed
+  HTML preview (`agents.htmlReader`) so artifacts-cli pages render instead of
+  showing source. Source: `src/core/editorAssociations.ts`,
+  `src/vscode/workbench.vscode.ts`, `src/vscode/htmlReader.ts`, `package.json`.
 
 - **Removed the `agents.terminalMode` setting — tmux is always on when available.**
   The extension no longer exposes an `auto` / `tmux` / `native` "terminal mode".

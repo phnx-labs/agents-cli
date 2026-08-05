@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  AGENTS_HTML_READER,
   AGENTS_MARKDOWN_EDITOR,
   MARKDOWN_PATTERN,
   normalizeEditorAssociations,
-  withMarkdownEditorAssociation,
+  withReaderEditorAssociations,
 } from './editorAssociations';
 
 describe('normalizeEditorAssociations', () => {
@@ -50,38 +51,51 @@ describe('normalizeEditorAssociations', () => {
   });
 });
 
-describe('withMarkdownEditorAssociation', () => {
-  test('sets *.md to the Agents Markdown Editor when enabling', () => {
-    expect(withMarkdownEditorAssociation({}, true)).toEqual({
+describe('withReaderEditorAssociations', () => {
+  test('maps md to markdown editor and html/htm to html reader when enabling', () => {
+    expect(withReaderEditorAssociations({}, true)).toEqual({
       [MARKDOWN_PATTERN]: AGENTS_MARKDOWN_EDITOR,
+      '*.html': AGENTS_HTML_READER,
+      '*.htm': AGENTS_HTML_READER,
     });
   });
 
   test('preserves other associations when enabling', () => {
     expect(
-      withMarkdownEditorAssociation({ '*.pdf': 'pdf.preview' }, true)
+      withReaderEditorAssociations({ '*.pdf': 'pdf.preview' }, true)
     ).toEqual({
       '*.pdf': 'pdf.preview',
       [MARKDOWN_PATTERN]: AGENTS_MARKDOWN_EDITOR,
+      '*.html': AGENTS_HTML_READER,
+      '*.htm': AGENTS_HTML_READER,
     });
   });
 
   test('replaces a prior *.md association when enabling', () => {
     expect(
-      withMarkdownEditorAssociation({ [MARKDOWN_PATTERN]: 'default' }, true)
+      withReaderEditorAssociations({ [MARKDOWN_PATTERN]: 'default' }, true)
     ).toEqual({
       [MARKDOWN_PATTERN]: AGENTS_MARKDOWN_EDITOR,
+      '*.html': AGENTS_HTML_READER,
+      '*.htm': AGENTS_HTML_READER,
     });
   });
 
-  test('pins *.md to default when disabling so the custom editor does not stick', () => {
+  test('pins md and html patterns to default when disabling', () => {
     expect(
-      withMarkdownEditorAssociation(
-        { [MARKDOWN_PATTERN]: AGENTS_MARKDOWN_EDITOR, '*.pdf': 'pdf.preview' },
+      withReaderEditorAssociations(
+        {
+          [MARKDOWN_PATTERN]: AGENTS_MARKDOWN_EDITOR,
+          '*.html': AGENTS_HTML_READER,
+          '*.htm': AGENTS_HTML_READER,
+          '*.pdf': 'pdf.preview',
+        },
         false
       )
     ).toEqual({
       [MARKDOWN_PATTERN]: 'default',
+      '*.html': 'default',
+      '*.htm': 'default',
       '*.pdf': 'pdf.preview',
     });
   });
