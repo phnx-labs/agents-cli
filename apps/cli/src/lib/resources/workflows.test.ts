@@ -9,21 +9,27 @@ let tmpDir = '';
 let projectAgentsDir = '';
 let userWorkflowsDir = '';
 let systemWorkflowsDir = '';
+let userPluginsDir = '';
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'workflows-handler-test-'));
   projectAgentsDir = path.join(tmpDir, 'project', '.agents');
   userWorkflowsDir = path.join(tmpDir, 'user', 'workflows');
   systemWorkflowsDir = path.join(tmpDir, 'system', 'workflows');
+  userPluginsDir = path.join(tmpDir, 'user-plugins');
 
   fs.mkdirSync(path.join(projectAgentsDir, 'workflows'), { recursive: true });
   fs.mkdirSync(userWorkflowsDir, { recursive: true });
   fs.mkdirSync(systemWorkflowsDir, { recursive: true });
+  fs.mkdirSync(userPluginsDir, { recursive: true });
 
   vi.spyOn(state, 'getProjectAgentsDir').mockReturnValue(projectAgentsDir);
   vi.spyOn(state, 'getUserWorkflowsDir').mockReturnValue(userWorkflowsDir);
   vi.spyOn(state, 'getSystemWorkflowsDir').mockReturnValue(systemWorkflowsDir);
   vi.spyOn(state, 'getEnabledExtraRepos').mockReturnValue([]);
+  vi.spyOn(state, 'getPluginsDir').mockReturnValue(userPluginsDir);
+  vi.spyOn(state, 'getSystemPluginsDir').mockReturnValue(path.join(tmpDir, 'system-plugins-empty'));
+  vi.spyOn(state, 'getProjectPluginsDir').mockReturnValue(null);
 });
 
 afterEach(() => {
@@ -224,6 +230,39 @@ describe('WorkflowsHandler', () => {
       expect(result!.item.name).toBe('Full Workflow');
       expect(result!.item.description).toBe('Complete');
       expect(result!.item.model).toBe('claude-sonnet-4-6');
+    });
+
+    it('resolves a workflow packaged under a plugin workflows/ dir (Phase 5)', () => {
+      const pluginRoot = path.join(userPluginsDir, 'ship-tools');
+      writeWorkflow(path.join(pluginRoot, 'workflows'), 'deploy', { description: 'from plugin' });
+
+      const result = WorkflowsHandler.resolve('claude', 'deploy', tmpDir);
+      expect(result).not.toBeNull();
+      expect(result!.layer).toBe('plugin');
+      expect(result!.item.description).toBe('from plugin');
+      expect(result!.path).toBe(path.join(pluginRoot, 'workflows', 'deploy'));
+    });
+
+    it('user layer beats plugin layer on name collision', () => {
+      writeWorkflow(userWorkflowsDir, 'shared', { description: 'user wins' });
+      writeWorkflow(path.join(userPluginsDir, 'p1', 'workflows'), 'shared', { description: 'plugin loses' });
+
+      const result = WorkflowsHandler.resolve('claude', 'shared', tmpDir);
+      expect(result!.layer).toBe('user');
+      expect(result!.item.description).toBe('user wins');
+    });
+  });
+
+  describe('listAll plugin layer', () => {
+    it('includes plugin workflows when no higher layer owns the name', () => {
+      writeWorkflow(path.join(userPluginsDir, 'p1', 'workflows'), 'plugin-only', {
+        description: 'plugin packaged',
+      });
+
+      const results = WorkflowsHandler.listAll('claude', tmpDir);
+      const hit = results.find((r) => r.name === 'plugin-only');
+      expect(hit).toBeDefined();
+      expect(hit!.layer).toBe('plugin');
     });
   });
 });

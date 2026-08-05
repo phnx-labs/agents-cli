@@ -413,14 +413,23 @@ route_home_base_phase() {
     bash -c "$snippet" || return 1
     return 0
   fi
-  bold "Routing build + sign + publish to the home base ($RELEASE_HOME_BASE) over ssh (from the tagged tree)..."
-  # Over ssh the remote shell starts in $HOME, so cd into the home base's checkout
-  # first; then run the SAME snippet. `bash -lc` puts `agents` (homebrew) +
-  # node/bun on PATH for the headless signing + secrets resolution. The snippet is
-  # passed on stdin so no quoting of its body is needed across the ssh hop; $HOME
-  # expands on the REMOTE side (single-quoted).
-  ssh "$RELEASE_HOME_BASE" 'bash -lc "cd \$HOME/src/github.com/muqsitnawaz/agents-cli && bash -s"' <<<"$snippet" \
-    || return 1
+  bold "Routing build + sign + publish to the home base ($RELEASE_HOME_BASE) via agents ssh (from the tagged tree)..."
+  # Prefer `agents ssh` over plain `ssh`: it uses the devices registry + brokered
+  # credentials and survives host-key / PATH quirks that plain ssh hits on
+  # headless Linux workers (Host key verification failed). Remote shell starts
+  # in $HOME, so cd into the home base's checkout first; then run the SAME
+  # snippet. `bash -lc` puts `agents` (homebrew) + node/bun on PATH for the
+  # headless signing + secrets resolution. The snippet is passed on stdin so no
+  # quoting of its body is needed across the hop; $HOME expands on the REMOTE
+  # side (single-quoted).
+  if command -v agents >/dev/null 2>&1; then
+    agents ssh "$RELEASE_HOME_BASE" -- bash -lc 'cd "$HOME/src/github.com/muqsitnawaz/agents-cli" && bash -s' <<<"$snippet" \
+      || return 1
+  else
+    # Fallback when agents is not on PATH on the trigger box (rare).
+    ssh "$RELEASE_HOME_BASE" 'bash -lc "cd \$HOME/src/github.com/muqsitnawaz/agents-cli && bash -s"' <<<"$snippet" \
+      || return 1
+  fi
 }
 
 # ----- Validate version bump -----

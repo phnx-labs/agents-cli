@@ -13,6 +13,7 @@ import {
   loadPluginManifest,
   discoverPluginCommands,
   discoverPluginAgentDefs,
+  discoverPluginWorkflows,
   discoverPluginBin,
   discoverPluginHooks,
   expandPluginVars,
@@ -57,6 +58,7 @@ function makeDiscoveredPlugin(root: string, manifest: PluginManifest): Discovere
     scripts: [],
     commands: [],
     agentDefs: [],
+    workflows: [],
     memory: [],
 
     bin: [],
@@ -548,6 +550,33 @@ describe('discoverPluginCommands', () => {
 
 // ─── discoverPluginAgentDefs ──────────────────────────────────────────────────
 
+describe('discoverPluginWorkflows', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-plugin-wf-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns empty when workflows/ is missing', () => {
+    expect(discoverPluginWorkflows(tmpDir)).toEqual([]);
+  });
+
+  it('lists directories that contain WORKFLOW.md', () => {
+    const wfDir = path.join(tmpDir, 'workflows', 'ship-it');
+    fs.mkdirSync(wfDir, { recursive: true });
+    fs.writeFileSync(path.join(wfDir, 'WORKFLOW.md'), '---\ndescription: ship\n---\n');
+    fs.mkdirSync(path.join(tmpDir, 'workflows', 'no-manifest'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'workflows', '.hidden'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'workflows', '.hidden', 'WORKFLOW.md'), '---\ndescription: x\n---\n');
+
+    expect(discoverPluginWorkflows(tmpDir)).toEqual(['ship-it']);
+  });
+});
+
 describe('discoverPluginAgentDefs', () => {
   let tmpDir: string;
 
@@ -997,6 +1026,7 @@ describe('syncPluginToVersion (native marketplace install)', () => {
       scripts: [],
       commands: [],
       agentDefs: [],
+      workflows: [],
       memory: [],
 
       bin: [],
@@ -1152,6 +1182,7 @@ describe('syncPluginToVersion (droid native marketplace install)', () => {
       scripts: [],
       commands: [],
       agentDefs: [],
+      workflows: [],
       memory: [],
 
       bin: [],
@@ -1283,7 +1314,7 @@ describe('syncPluginToVersion (per-marketplace routing)', () => {
     const plugin: DiscoveredPlugin = {
       name, root: pluginRoot,
       manifest: { name, version: '1.0.0', description: 'routed' },
-      skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], memory: [],
+      skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], workflows: [], memory: [],
  bin: [],
       mcpServers: [], lspServers: [], monitors: [],
       hasMcp: false, hasSettings: false,
@@ -1354,7 +1385,7 @@ describe('syncPluginToVersion (per-marketplace routing)', () => {
         {
           name: 'code', root: pluginRoot,
           manifest: { name: 'code', version: '1.0.0', description: marketplace },
-          skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], memory: [],
+          skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], workflows: [], memory: [],
  bin: [],
           mcpServers: [], lspServers: [], monitors: [], hasMcp: false, hasSettings: false,
           marketplace,
@@ -1398,7 +1429,7 @@ describe('removePluginFromVersion', () => {
     const plugin: DiscoveredPlugin = {
       name: 'mp', root: pluginRoot,
       manifest: { name: 'mp', version: '1.0.0', description: 'test' },
-      skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], memory: [],
+      skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], workflows: [], memory: [],
  bin: [],
       mcpServers: [], lspServers: [], monitors: [],
       hasMcp: false, hasSettings: false,
@@ -1548,6 +1579,7 @@ describe('syncPluginToVersion (opencode TS modules)', () => {
       scripts: [],
       commands: [],
       agentDefs: [],
+      workflows: [],
       memory: [],
 
       bin: [],
@@ -1656,6 +1688,7 @@ describe('syncPluginToVersion (cursor native marketplace install)', () => {
       scripts: [],
       commands: [],
       agentDefs: [],
+      workflows: [],
       memory: [],
 
       bin: [],
@@ -1751,6 +1784,7 @@ describe('syncPluginToVersion (goose Open Plugins install)', () => {
       scripts: [],
       commands: [],
       agentDefs: [],
+      workflows: [],
       memory: [],
 
       bin: [],
@@ -1826,6 +1860,7 @@ describe('syncPluginToVersion (hermes plugin install)', () => {
       scripts: [],
       commands: [],
       agentDefs: [],
+      workflows: [],
       memory: [],
       bin: [],
       mcpServers: [],

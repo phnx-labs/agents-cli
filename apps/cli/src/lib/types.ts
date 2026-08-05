@@ -676,6 +676,12 @@ export interface DiscoveredPlugin {
   commands: string[];
   /** Subagent .md files in the plugin's agents/ directory (names without extension). */
   agentDefs: string[];
+  /**
+   * Workflow directory names under the plugin's `workflows/` (each must contain
+   * WORKFLOW.md). Phase 5 packaging: plugins may package workflows as entrypoints;
+   * `agents run <name>` resolves them via project > user > plugin > extra > system.
+   */
+  workflows: string[];
   /** Memory fact basenames from the plugin's memory/ directory (without .md). */
   memory: string[];
   /** Executable files in the plugin's bin/ directory. */

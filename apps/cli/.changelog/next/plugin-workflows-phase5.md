@@ -1,0 +1,3 @@
+- **Plugins package workflows (Phase 5 packaging slice).** A plugin’s `workflows/<name>/WORKFLOW.md` is discovered and resolved by `agents run <name>` with precedence project > user > plugin > extra > system — no separate install into `~/.agents/workflows/` required. Plugin inventory / resource groups list `workflows`. Source: `apps/cli/src/lib/workflows.ts`, `apps/cli/src/lib/plugins.ts`, `apps/cli/src/lib/resources/workflows.ts`.
+
+- **`scripts/release.sh` routes the home-base publish hop via `agents ssh`.** Plain `ssh mac-mini` fails host-key checks on headless Linux workers; `agents ssh` uses the devices registry and brokered credentials. Falls back to plain ssh only when `agents` is not on PATH. Source: `apps/cli/scripts/release.sh`.

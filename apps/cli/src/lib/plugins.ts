@@ -2,11 +2,12 @@
  * Plugin discovery, validation, and syncing.
  *
  * Plugins are bundles in ~/.agents/plugins/ that package skills, hooks,
- * commands, agents, bin scripts, MCP servers, and settings under a single
- * manifest (plugin.json). They are user-authored resources, sitting alongside
- * skills/, commands/, hooks/, etc. — git-tracked as source of truth. This
- * module discovers plugins, validates their manifests, and syncs their
- * contents into agent version homes.
+ * commands, agents, workflows, bin scripts, MCP servers, and settings under a
+ * single manifest (plugin.json). They are user-authored resources, sitting
+ * alongside skills/, commands/, hooks/, etc. — git-tracked as source of truth.
+ * This module discovers plugins, validates their manifests, and syncs their
+ * contents into agent version homes. Workflows under a plugin’s workflows/
+ * are resolved at run time by resolveWorkflowRef (Phase 5 packaging).
  */
 
 import * as fs from 'fs';
@@ -150,6 +151,7 @@ export function buildDiscoveredPlugin(
     scripts: discoverPluginScripts(pluginRoot),
     commands: discoverPluginCommands(pluginRoot),
     agentDefs: discoverPluginAgentDefs(pluginRoot),
+    workflows: discoverPluginWorkflows(pluginRoot),
     memory: discoverPluginMemory(pluginRoot),
     bin: discoverPluginBin(pluginRoot),
     mcpServers: discoverPluginMcpServers(pluginRoot),
@@ -183,6 +185,7 @@ export function pluginResourceGroups(plugin: DiscoveredPlugin): PluginResourceGr
     { label: 'skills', items: plugin.skills.map((s) => `/${plugin.name}:${s}`) },
     { label: 'commands', items: plugin.commands.map((c) => `/${plugin.name}:${c}`) },
     { label: 'subagents', items: plugin.agentDefs },
+    { label: 'workflows', items: plugin.workflows },
     { label: 'hooks', items: plugin.hooks },
     { label: 'memory', items: plugin.memory },
     { label: 'mcp', items: plugin.mcpServers },
@@ -395,6 +398,26 @@ export function discoverPluginAgentDefs(pluginRoot: string): string[] {
   return fs.readdirSync(agentsDir)
     .filter(f => f.endsWith('.md') && !f.startsWith('.'))
     .map(f => f.slice(0, -3));
+}
+
+/**
+ * Discover workflow directories inside a plugin's `workflows/` folder.
+ * A valid workflow is a directory containing WORKFLOW.md (same contract as
+ * project/user/system workflows). Phase 5: plugins package workflows as
+ * entrypoints so `agents run <name>` can resolve them without a separate
+ * install into ~/.agents/workflows/.
+ */
+export function discoverPluginWorkflows(pluginRoot: string): string[] {
+  const workflowsDir = path.join(pluginRoot, 'workflows');
+  if (!fs.existsSync(workflowsDir)) return [];
+  try {
+    return fs.readdirSync(workflowsDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.') &&
+        fs.existsSync(path.join(workflowsDir, e.name, 'WORKFLOW.md')))
+      .map((e) => e.name);
+  } catch {
+    return [];
+  }
 }
 
 /** Discover executable files in a plugin's bin/ directory. */

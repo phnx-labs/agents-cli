@@ -7,7 +7,8 @@
  */
 
 export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'kiro' | 'goose' | 'antigravity' | 'grok' | 'kimi' | 'droid' | 'hermes' | 'pi';
-export type Layer = 'system' | 'user' | 'project';
+/** Resource origin. Precedence (highest first): project > user > plugin > system. */
+export type Layer = 'system' | 'user' | 'project' | 'plugin';
 export type ResourceKind = 'command' | 'hook' | 'skill' | 'rule' | 'mcp' | 'permission' | 'subagent' | 'workflow' | 'memory';
 
 /** A resolved resource with its origin layer. */
