@@ -254,6 +254,37 @@ export function defaultPickedIds(candidates: ResumeCandidate[]): string[] {
   return candidates.filter((c) => c.state === 'detached').map((c) => c.id);
 }
 
+/**
+ * Which ids should be ticked after a list swap, and which ones the user has
+ * turned off. Assigning a QuickPick's `items` clears its checks, so the picker
+ * recomputes the selection on every render; this is that computation, kept pure
+ * so it can be tested without a VS Code host.
+ *
+ * `unticked` is mutated — it is the picker's memory of what the user turned off,
+ * and it survives across swaps.
+ *
+ * Only an id that was a DEFAULT in the previous render can enter `unticked`.
+ * Marking every previously-rendered id instead conflates "the user turned this
+ * off" with "this was never pre-ticked to begin with", and then silently
+ * refuses to pre-tick it when it later becomes detached — which is exactly the
+ * transition this picker exists to catch, since a terminal can die while the
+ * background revalidation is in flight.
+ */
+export function nextPreselection(args: {
+  previous: readonly ResumeCandidate[];
+  checked: ReadonlySet<string>;
+  next: readonly ResumeCandidate[];
+  unticked: Set<string>;
+}): Set<string> {
+  const { previous, checked, next, unticked } = args;
+  for (const id of defaultPickedIds(previous as ResumeCandidate[])) {
+    if (checked.has(id)) unticked.delete(id);
+    else unticked.add(id);
+  }
+  const defaults = defaultPickedIds(next as ResumeCandidate[]);
+  return new Set([...defaults.filter((id) => !unticked.has(id)), ...checked]);
+}
+
 /** A phrase must lead this many topics before it counts as boilerplate. */
 const SHARED_PREFIX_MIN_OCCURRENCES = 3;
 /** Longest phrase (in words) considered — beyond this a "prefix" is the topic. */
@@ -295,18 +326,27 @@ export function sharedTopicPrefixes(
 }
 
 /**
- * Remove the longest shared prefix from `topic`, plus the punctuation it left
- * behind. A topic that is ENTIRELY boilerplate strips to '' on purpose, so
- * {@link distinctiveTopic} falls through to a field that identifies the row —
- * a bare "Resume previous work:" names nothing. Nothing is lost when a phrase
- * recurs but is never extended: {@link sharedTopicPrefixes} does not mint a
- * phrase covering a topic's every word, so such a topic has no prefix to match.
+ * Remove the longest shared prefix from `topic`, keeping whatever follows.
+ *
+ * Two things this deliberately does NOT do:
+ *
+ * It never strips a prefix that covers the whole topic. A longer topic can mint
+ * a phrase equal to a shorter topic's entire text — three sessions named
+ * "Fix login bug …" make "Fix login" a shared prefix, and a fourth session
+ * genuinely called "Fix login" would otherwise be blanked. Losing a real,
+ * differentiating topic is worse than showing a boilerplate one, so a topic
+ * that is entirely a shared phrase keeps its text.
+ *
+ * It only trims whitespace, never punctuation. Prefixes are mined from the real
+ * strings, so a boilerplate phrase already carries its own trailing separator
+ * ("Resume previous work:"); eating a further run of punctuation would corrupt
+ * content that legitimately starts with one ("-1 open issue", "--verbose").
  */
 export function stripSharedPrefix(topic: string, prefixes: readonly string[]): string {
   const trimmed = topic.trim();
   for (const prefix of prefixes) {
-    if (trimmed.startsWith(prefix)) {
-      return trimmed.slice(prefix.length).replace(/^[\s:\-–—,.]+/, '').trim();
+    if (trimmed.length > prefix.length && trimmed.startsWith(prefix)) {
+      return trimmed.slice(prefix.length).replace(/^\s+/, '');
     }
   }
   return trimmed;

@@ -131,6 +131,7 @@ import {
   buildResumeCandidates,
   defaultPickedIds,
   distinctiveTopic,
+  nextPreselection,
   sharedTopicPrefixes,
   RESUME_PICKER_CACHE_KEY,
   STATE_HEADINGS,
@@ -3350,11 +3351,8 @@ async function resumeSessionsBatch(
   quickPick.matchOnDescription = true;
   quickPick.matchOnDetail = true;
 
-  // Ids the user has explicitly UNTICKED. A refresh must not re-tick those, but
-  // it must keep every other default ticked. Keying this on "was rendered
-  // before" instead (the previous behavior) cleared the whole selection on the
-  // first background swap: every default was already rendered, so the filter
-  // dropped all of them and the picker went from "122 pre-selected" to none.
+  // The picker's memory of what the user turned off, carried across list swaps
+  // by nextPreselection (which owns the rules and is unit-tested).
   const unticked = new Set<string>();
   let rendered: ResumeCandidate[] = [];
   const applyItems = (candidates: ResumeCandidate[]) => {
@@ -3363,12 +3361,7 @@ async function resumeSessionsBatch(
     const checked = new Set(
       quickPick.selectedItems.map((i) => i.candidate?.id).filter((id): id is string => !!id),
     );
-    for (const c of rendered) {
-      if (!checked.has(c.id)) unticked.add(c.id);
-      else unticked.delete(c.id);
-    }
-    const defaults = defaultPickedIds(candidates);
-    const preselected = new Set([...defaults.filter((id) => !unticked.has(id)), ...checked]);
+    const preselected = nextPreselection({ previous: rendered, checked, next: candidates, unticked });
     const items = resumeCandidateItems(candidates, preselected);
     quickPick.items = items;
     // `picked` alone does not populate `selectedItems`, which is what onDidAccept
@@ -3376,6 +3369,7 @@ async function resumeSessionsBatch(
     // pre-ticked rows resolve to an empty selection.
     quickPick.selectedItems = items.filter((i) => i.candidate && preselected.has(i.candidate.id));
     rendered = candidates;
+    const defaults = defaultPickedIds(candidates);
     const detachedCount = defaults.length;
     quickPick.placeholder = detachedCount > 0
       ? `${detachedCount} detached session${detachedCount === 1 ? '' : 's'} pre-selected — space toggles, enter opens each in a tab`

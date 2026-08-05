@@ -9,6 +9,7 @@ import {
   classifyResumeState,
   defaultPickedIds,
   distinctiveTopic,
+  nextPreselection,
   sharedTopicPrefixes,
   sortResumeCandidates,
   stripSharedPrefix,
@@ -228,10 +229,21 @@ describe('shared-topic boilerplate stripping', () => {
     expect(stripSharedPrefix('New Session', sharedTopicPrefixes(topics))).toBe('New Session');
   });
 
-  it('falls back to the project when the topic was pure boilerplate', () => {
+  it('keeps a topic that is entirely a shared phrase rather than blanking it', () => {
+    // A longer topic can mint a phrase equal to a shorter topic's whole text.
+    // Three "Fix login bug …" sessions make "Fix login" shared; a fourth session
+    // genuinely called "Fix login" must not lose its only distinguishing text.
+    const topics = ['Fix login bug', 'Fix login bug urgently', 'Fix login bug now', 'Fix login'];
+    const prefixes = sharedTopicPrefixes(topics);
+    expect(prefixes).toContain('Fix login');
+    expect(stripSharedPrefix('Fix login', prefixes)).toBe('Fix login');
+  });
+
+  it('does not eat content that legitimately starts with punctuation', () => {
     const prefixes = ['Resume previous work:'];
-    const c = { topic: 'Resume previous work:', project: 'agents-cli', cwd: '/x/agents-cli' } as ResumeCandidate;
-    expect(distinctiveTopic(c, prefixes)).toBe('agents-cli');
+    expect(stripSharedPrefix('Resume previous work: -1 open issue', prefixes)).toBe('-1 open issue');
+    expect(stripSharedPrefix('Resume previous work: --verbose flag broken', prefixes))
+      .toBe('--verbose flag broken');
   });
 
   it('falls back to the cwd leaf when there is no topic and no project', () => {
@@ -241,5 +253,55 @@ describe('shared-topic boilerplate stripping', () => {
 
   it('reports nothing distinctive rather than a misleading fragment', () => {
     expect(distinctiveTopic({} as ResumeCandidate, [])).toBe('');
+  });
+});
+
+// The selection bookkeeping behind `Agents: Resume`. These run the real
+// function the picker calls; only `quickPick.selectedItems` is stood in for,
+// since that value is supplied by VS Code and is a plain list of ids.
+describe('nextPreselection — selection across list swaps', () => {
+  const c = (id: string, state: ResumeCandidate['state']) => ({ id, state }) as ResumeCandidate;
+
+  it('pre-ticks a session that becomes detached during a refresh', () => {
+    // The regression this picker exists for: a terminal dies while the
+    // background revalidation is in flight, so a session goes idle -> detached
+    // between the two renders. The user touched nothing, so it must be ticked.
+    const unticked = new Set<string>();
+    const first = [c('A', 'detached'), c('X', 'idle')];
+    const p1 = nextPreselection({ previous: [], checked: new Set(), next: first, unticked });
+    expect([...p1]).toEqual(['A']);
+
+    const second = [c('A', 'detached'), c('X', 'detached')];
+    const p2 = nextPreselection({ previous: first, checked: p1, next: second, unticked });
+    expect(p2.has('X')).toBe(true);
+    expect(p2.has('A')).toBe(true);
+  });
+
+  it('remembers a default the user actually unticked', () => {
+    const unticked = new Set<string>();
+    const rows = [c('A', 'detached'), c('B', 'detached')];
+    nextPreselection({ previous: [], checked: new Set(), next: rows, unticked });
+    // The user unticks A, leaving only B checked.
+    const p2 = nextPreselection({ previous: rows, checked: new Set(['B']), next: rows, unticked });
+    expect(p2.has('A')).toBe(false);
+    expect(p2.has('B')).toBe(true);
+  });
+
+  it('keeps an untick sticky across a later swap', () => {
+    const unticked = new Set<string>();
+    const rows = [c('A', 'detached'), c('B', 'detached')];
+    nextPreselection({ previous: [], checked: new Set(), next: rows, unticked });
+    const p2 = nextPreselection({ previous: rows, checked: new Set(['B']), next: rows, unticked });
+    const p3 = nextPreselection({ previous: rows, checked: p2, next: rows, unticked });
+    expect(p3.has('A')).toBe(false);
+  });
+
+  it('re-ticks a default the user turned back on', () => {
+    const unticked = new Set<string>();
+    const rows = [c('A', 'detached')];
+    nextPreselection({ previous: [], checked: new Set(), next: rows, unticked });
+    nextPreselection({ previous: rows, checked: new Set(), next: rows, unticked });
+    const p3 = nextPreselection({ previous: rows, checked: new Set(['A']), next: rows, unticked });
+    expect(p3.has('A')).toBe(true);
   });
 });

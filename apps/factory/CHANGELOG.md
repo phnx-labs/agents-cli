@@ -17,7 +17,12 @@ All notable changes to the Factory extension are documented here. Format follows
   and fall through to project → cwd leaf when nothing distinctive is left, so a row reads
   as its device, id, and the part that actually differs instead of `(no topic)`. Measured
   on a real 222-session listing: 29 rows de-boilerplated, 117 that showed `(no topic)`
-  now name their project.
+  now name their project. Selection bookkeeping lives in `nextPreselection`, which
+  only treats a previously-ticked DEFAULT as user-unticked — marking every rendered
+  row instead silently skipped a session that went idle -> detached mid-refresh. A
+  topic that is entirely a shared phrase keeps its text rather than blanking, since a
+  longer topic can mint a prefix equal to a shorter one's whole text, and only
+  whitespace is trimmed after a prefix so content like `-1 open issue` survives.
 
 - **Reader association fix + HTML artifacts + command titles.** Factory wrote
   `workbench.editorAssociations` as a legacy array (`[{ viewType, filenamePattern }]`).
