@@ -1,13 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **`agents view` harness rows now lead with the version number.** Custom harness rows previously showed `via <host> <version>` — the host CLI name came first, which buried the version in the middle of the line. The format is now `<version> (forked from <host>)` for pinned harnesses and `<version> (forked from <host>, tracks default)` for unpinned ones that follow the host's global default. The `tracks default` label is shown in green so it stands out at a glance.
-
-- **Chained fork lineage in harness headers.** When a custom harness is itself a fork of another custom harness (which in turn forks a native host), the block header now shows the full two-hop chain: `custom · forked from <intermediate> -> <native-host>`. Single-hop forks continue to show `custom · forked from <parent>`.
-
-- **BYOK budget bar in `agents view`.** Custom harnesses backed by an OpenRouter key now show a live spend bar (amount used, remaining, and limit) inline on the model/auth row. Keys are deduplicated so multiple harnesses sharing the same keychain entry trigger exactly one API call. The bar is rendered only when a budget is available; harnesses without a BYOK key are unaffected.
-
 ## 1.22.6
 
 - **Cost tiers are ignored (with a clear warning) for profile runs.** A profile's model comes from its endpoint (e.g. Kimi/DeepSeek/GLM via `agents run <profile>`), not the host harness's catalog — so passing `--model cheap|default|best|ultra` to a profile used to resolve against the *host* harness and forward an incompatible model id to the profile's endpoint. Now a tier on a profile run is discarded with a standout warning and the profile's configured model is used. Concrete `--model <id>` on a profile is unchanged. Source: `apps/cli/src/commands/exec.ts`.
