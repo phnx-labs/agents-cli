@@ -127,6 +127,41 @@ describe('SnapshotDetector', () => {
     }
   });
 
+  test('batches usage into one fetchAllUsage call for multiple agent types', async () => {
+    const emitted: PanelSnapshotPayload[] = [];
+    let allCalls = 0;
+    let perAgentCalls = 0;
+    const detector = new SnapshotDetector({
+      emit: (f) => emitted.push(f),
+      fetchGit: async () => ({ branch: null, numstat: {} }),
+      fetchWorktrees: async () => [],
+      fetchUsage: async (agentType) => {
+        perAgentCalls++;
+        return { agent: agentType, versions: [] };
+      },
+      fetchAllUsage: async () => {
+        allCalls++;
+        return {
+          claude: { agent: 'claude', versions: [] },
+          codex: { agent: 'codex', versions: [] },
+        };
+      },
+      now: () => 99,
+    });
+    try {
+      detector.setWatches('winA', [
+        { workspaceRoot: '/r', agentType: 'claude' },
+        { workspaceRoot: '/r', cwd: '/r/wt', agentType: 'codex' },
+      ]);
+      await detector.tick();
+      expect(allCalls).toBe(1);
+      expect(perAgentCalls).toBe(0);
+      expect(Object.keys(emitted[0].usageByAgent).sort()).toEqual(['claude', 'codex']);
+    } finally {
+      detector.stop();
+    }
+  });
+
   test('in-flight guard prevents a second concurrent recomputation', async () => {
     let gitCalls = 0;
     let release!: () => void;

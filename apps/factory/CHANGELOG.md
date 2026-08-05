@@ -6,6 +6,13 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Panel snapshot poll: one `agents view --json` for every harness per tick.** The
+  centralized SnapshotDetector used to fork `agents view <type> --json` once per
+  watched agent type every 4s. It now loads the full inventory in a single process
+  (`fetchAllUsage`) and slices by agent — same shape as the CLI snapshot inventory,
+  without paying for sessions when the panel only needs usage. Tests that inject
+  only `fetchUsage` keep the per-agent path. Source: `apps/factory/src/monitor/snapshotDetector.ts`.
+
 - **Resume picker: selection no longer clears, and rows say what differs.** The
   batch picker announced "N detached sessions pre-selected" while showing `0 Selected`
   and empty checkboxes. Two causes: the refresh swap filtered defaults by "was rendered

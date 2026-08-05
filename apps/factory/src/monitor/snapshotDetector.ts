@@ -4,10 +4,11 @@
 // (workspaceRoot, cwd, agentType) tuples its visible panel/floor needs; the
 // detector runs the SAME global per-tick work every window's 4s panel poll ran
 // today — `git branch --show-current` + `git diff --numstat HEAD` per workspace,
-// `git worktree list --porcelain`, `agents view <type> --json` usage per agent,
-// and `agents teams list` per cwd — but ONCE machine-wide instead of once per
-// (window, panel). It broadcasts a single merged `panel-snapshot` fact the host
-// pushes to followers, which render from it instead of forking the subprocesses.
+// `git worktree list --porcelain`, ONE `agents view --json` for all harnesses
+// (not N× `view <type>`), and `agents teams list` per cwd — but ONCE machine-wide
+// instead of once per (window, panel). It broadcasts a single merged
+// `panel-snapshot` fact the host pushes to followers, which render from it
+// instead of forking the subprocesses.
 //
 // An IN-FLIGHT GUARD (`tickInFlight`) drops a tick that starts while the prior
 // one is still computing, so a slow `agents view` (self-documented 4-6s) can
@@ -95,6 +96,10 @@ export async function fetchWorktrees(
  * `agents view <agentType> --json`, parsed. Mirrors agentPanel.readUsageStatus's
  * fetch but returns the full view so the consumer applies the same version-match
  * selection locally. Returns null when the binary/JSON is unavailable.
+ *
+ * Prefer {@link fetchAllUsage} when a tick needs more than one agent — one
+ * process instead of N (Phase 4 poll-tax follow-up; same shape as
+ * `agents snapshot` inventory without paying for sessions).
  */
 export async function fetchUsage(agentType: string): Promise<AgentsViewJsonAgent | null> {
   const out = await run('agents', ['view', agentType, '--json'], { maxBuffer: 4 * 1024 * 1024 });
@@ -108,6 +113,27 @@ export async function fetchUsage(agentType: string): Promise<AgentsViewJsonAgent
   }
 }
 
+/**
+ * One `agents view --json` for every installed harness. Used by the 4s panel
+ * snapshot tick so N watched agent types cost 1 CLI fork, not N.
+ */
+export async function fetchAllUsage(): Promise<Record<string, AgentsViewJsonAgent>> {
+  const out = await run('agents', ['view', '--json'], { maxBuffer: 10 * 1024 * 1024 });
+  if (out === null) return {};
+  try {
+    const parsed = JSON.parse(out) as AgentsViewJsonAgent[];
+    if (!Array.isArray(parsed)) return {};
+    const map: Record<string, AgentsViewJsonAgent> = {};
+    for (const entry of parsed) {
+      if (!entry || typeof entry.agent !== 'string' || !Array.isArray(entry.versions)) continue;
+      map[entry.agent] = entry;
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
 export interface SnapshotDetectorOptions {
   emit: (fact: PanelSnapshotPayload) => void;
   /** Recompute cadence (tests). */
@@ -116,8 +142,17 @@ export interface SnapshotDetectorOptions {
   fetchGit?: (workspaceRoot: string) => Promise<GitNumstat>;
   /** Inject the worktree fetcher (tests); defaults to the real `git` CLI. */
   fetchWorktrees?: (workspaceRoot: string, activeCwd?: string) => Promise<WorktreeRef[]>;
-  /** Inject the usage fetcher (tests); defaults to the real `agents` CLI. */
+  /**
+   * Inject the per-agent usage fetcher (tests / single-agent callers).
+   * The tick prefers {@link fetchAllUsage} when this is the default.
+   */
   fetchUsage?: (agentType: string) => Promise<AgentsViewJsonAgent | null>;
+  /**
+   * Inject a one-shot all-agents inventory (defaults to `agents view --json`).
+   * When provided (or default), the tick uses this once instead of N per-agent
+   * `fetchUsage` forks. Tests that inject only `fetchUsage` keep the N-call path.
+   */
+  fetchAllUsage?: () => Promise<Record<string, AgentsViewJsonAgent>>;
   /** Inject the teams fetcher (vscode-coupled — supplied by the wiring layer). */
   fetchTeams?: (cwd: string) => Promise<unknown[]>;
   /** Inject the clock (tests). */
@@ -130,6 +165,8 @@ export class SnapshotDetector {
   private readonly fetchGit: (workspaceRoot: string) => Promise<GitNumstat>;
   private readonly fetchWorktrees: (workspaceRoot: string, activeCwd?: string) => Promise<WorktreeRef[]>;
   private readonly fetchUsage: (agentType: string) => Promise<AgentsViewJsonAgent | null>;
+  /** When set, one inventory call per tick; when unset, fall back to N× fetchUsage. */
+  private readonly fetchAllUsage?: () => Promise<Record<string, AgentsViewJsonAgent>>;
   private readonly fetchTeams?: (cwd: string) => Promise<unknown[]>;
   private readonly now: () => number;
 
@@ -146,6 +183,13 @@ export class SnapshotDetector {
     this.fetchGit = options.fetchGit ?? fetchGitInfo;
     this.fetchWorktrees = options.fetchWorktrees ?? fetchWorktrees;
     this.fetchUsage = options.fetchUsage ?? fetchUsage;
+    // Batch path is default for production; tests that only inject fetchUsage
+    // keep the per-agent path so their call-count assertions stay meaningful.
+    if (options.fetchAllUsage) {
+      this.fetchAllUsage = options.fetchAllUsage;
+    } else if (!options.fetchUsage) {
+      this.fetchAllUsage = fetchAllUsage;
+    }
     this.fetchTeams = options.fetchTeams;
     this.now = options.now ?? Date.now;
   }
@@ -218,10 +262,24 @@ export class SnapshotDetector {
           if (!this.fetchTeams) return;
           teamsByCwd[c] = await this.fetchTeams(c).catch(() => []);
         }),
-        ...[...agents].map(async (a) => {
-          const view = await this.fetchUsage(a).catch(() => null);
-          if (view) usageByAgent[a] = view;
-        }),
+        (async () => {
+          if (agents.size === 0) return;
+          // One `agents view --json` for every watched harness when the batch
+          // path is available; otherwise N per-agent forks (test injection).
+          if (this.fetchAllUsage) {
+            const all = await this.fetchAllUsage().catch(() => ({} as Record<string, AgentsViewJsonAgent>));
+            for (const a of agents) {
+              if (all[a]) usageByAgent[a] = all[a];
+            }
+            return;
+          }
+          await Promise.all(
+            [...agents].map(async (a) => {
+              const view = await this.fetchUsage(a).catch(() => null);
+              if (view) usageByAgent[a] = view;
+            }),
+          );
+        })(),
       ]);
 
       if (this.stopped) return;
