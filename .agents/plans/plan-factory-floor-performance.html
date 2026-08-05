@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Factory Floor performance UI — cache first, no aggressive polls</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header"><div class="header-label">Factory Floor</div><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli / Factory</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-approved">approved</span></div>
+<h1>Factory Floor performance UI — cache first, no aggressive polls</h1>
+<p class="summary">Event-driven local rows, manual remote refresh, last-good under failure, single session collection for counts, CSS throughput, and clearer empty states — without changing extension-host command semantics.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Remove 3s local and 45s remote webview setInterval polls<span class="meta-sep" aria-hidden="true">·</span>Retain last-good hostSessions rows on failure; show freshness chip<span class="meta-sep" aria-hidden="true">·</span>Throughput sparkline: 1s React tick + CSS interpolation + prefers-reduced-motion<span class="meta-sep" aria-hidden="true">·</span>Group/Subgroup only on SavedViews feed header (not FloorControls)<span class="meta-sep" aria-hidden="true">·</span>Running counts from floorAgents only</p><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agents-cli/issues/2030" target="_blank" rel="noopener">Issue</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agents-cli/issues/2006" target="_blank" rel="noopener">Issue</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">agents/factory-floor-ui</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">https://github.com/phnx-labs/agents-cli/issues/2030</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Grok factory-floor-ui</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-m0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">f296547e</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-05</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#proposed-changes"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p>Factory Floor paid a constant cost for feeling "live": a 3-second local <code>fetchLocalSessions</code> interval, a 45-second remote SSH fan-out, and a 140ms React throughput timer. The first paint waited on host sync, so operators saw a blank or blocking canvas while last-good data already existed on the host. This plan is the <strong>UI track</strong> of issue <a href="https://github.com/phnx-labs/agents-cli/issues/2030">#2030</a>: render cached rows immediately, expose freshness + manual refresh, and drop duplicate chrome — without changing extension-host command semantics or touching <code>apps/cli/**</code> / <code>apps/factory/src/vscode/**</code>.</p>
+<p>Sibling tracking for DotAgents layout canonicalization: <a href="https://github.com/phnx-labs/agents-cli/issues/2006">#2006</a>.</p>
+<h2 id="proposed-changes">Proposed Changes</h2>
+<h3>Before / after data flow (C4-style)</h3>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+  <svg class="artifact-diagram" viewBox="0 0 960 420" role="img" aria-label="Before and after Factory Floor data flow">
+    <defs>
+      <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="#7A756D"></path>
+      </marker>
+      <marker id="arr-g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="#a3e635"></path>
+      </marker>
+      <marker id="arr-r" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6 Z" fill="#f59e0b"></path>
+      </marker>
+    </defs>
+
+    
+    <text x="24" y="28" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="13" font-weight="700">C4 container view · Factory Floor webview ↔ extension host</text>
+
+    
+    <rect x="16" y="44" width="450" height="300" rx="10" fill="#121210" stroke="#3f3a32" stroke-width="1.5"></rect>
+    <text x="32" y="68" fill="#f59e0b" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="700">BEFORE</text>
+    <text x="100" y="68" fill="#7A756D" font-family="JetBrains Mono, monospace" font-size="11">blocking sync · dual polls</text>
+
+    <rect x="36" y="86" width="180" height="54" rx="6" fill="#1a1916" stroke="#7A756D"></rect>
+    <text x="126" y="110" text-anchor="middle" fill="#e8e4dc" font-family="Inter, system-ui, sans-serif" font-size="12">Webview</text>
+    <text x="126" y="128" text-anchor="middle" fill="#7A756D" font-family="JetBrains Mono, monospace" font-size="10">UnifiedAgentsPane</text>
+
+    <rect x="260" y="86" width="180" height="54" rx="6" fill="#1a1916" stroke="#7A756D"></rect>
+    <text x="350" y="110" text-anchor="middle" fill="#e8e4dc" font-family="Inter, system-ui, sans-serif" font-size="12">Extension host</text>
+    <text x="350" y="128" text-anchor="middle" fill="#7A756D" font-family="JetBrains Mono, monospace" font-size="10">settings.vscode</text>
+
+    <line x1="216" y1="105" x2="258" y2="105" stroke="#f59e0b" stroke-width="1.5" marker-end="url(#arr-r)"></line>
+    <text x="237" y="98" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono, monospace" font-size="9">postMessage</text>
+
+    <rect x="36" y="168" width="400" height="150" rx="6" fill="#0c0c0a" stroke="#3f3a32"></rect>
+    <text x="48" y="190" fill="#c8c8c8" font-family="JetBrains Mono, monospace" font-size="11">setInterval 3s  → fetchLocalSessions</text>
+    <text x="48" y="212" fill="#c8c8c8" font-family="JetBrains Mono, monospace" font-size="11">setInterval 45s → fetchHostSessions (SSH)</text>
+    <text x="48" y="234" fill="#c8c8c8" font-family="JetBrains Mono, monospace" font-size="11">setInterval 140ms → ThroughputCounter React state</text>
+    <text x="48" y="256" fill="#f59e0b" font-family="Inter, system-ui, sans-serif" font-size="11">Empty canvas while syncingHosts=true</text>
+    <text x="48" y="278" fill="#7A756D" font-family="Inter, system-ui, sans-serif" font-size="11">Group/Subgroup on FloorControls + SavedViews</text>
+    <text x="48" y="300" fill="#7A756D" font-family="Inter, system-ui, sans-serif" font-size="11">Counts: floorAgents OR deviceHealth.runningAgents</text>
+
+    
+    <rect x="490" y="44" width="450" height="300" rx="10" fill="#0f160a" stroke="#3d5a1f" stroke-width="1.5"></rect>
+    <text x="506" y="68" fill="#a3e635" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="700">AFTER</text>
+    <text x="568" y="68" fill="#5a7d1b" font-family="JetBrains Mono, monospace" font-size="11">cache first · manual remote</text>
+
+    <rect x="510" y="86" width="180" height="54" rx="6" fill="#151613" stroke="#a3e635"></rect>
+    <text x="600" y="110" text-anchor="middle" fill="#e8e4dc" font-family="Inter, system-ui, sans-serif" font-size="12">Webview</text>
+    <text x="600" y="128" text-anchor="middle" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="10">cached rows + chip</text>
+
+    <rect x="734" y="86" width="180" height="54" rx="6" fill="#151613" stroke="#5a7d1b"></rect>
+    <text x="824" y="110" text-anchor="middle" fill="#e8e4dc" font-family="Inter, system-ui, sans-serif" font-size="12">Extension host</text>
+    <text x="824" y="128" text-anchor="middle" fill="#5a7d1b" font-family="JetBrains Mono, monospace" font-size="10">same commands</text>
+
+    <line x1="690" y1="105" x2="732" y2="105" stroke="#a3e635" stroke-width="1.5" marker-end="url(#arr-g)"></line>
+    <text x="711" y="98" text-anchor="middle" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="9">postMessage</text>
+
+    <rect x="510" y="168" width="400" height="150" rx="6" fill="#0c1208" stroke="#3d5a1f"></rect>
+    <text x="522" y="190" fill="#c8c8c8" font-family="JetBrains Mono, monospace" font-size="11">one-shot seed on panelVisible</text>
+    <text x="522" y="212" fill="#c8c8c8" font-family="JetBrains Mono, monospace" font-size="11">local: monitor / webview events</text>
+    <text x="522" y="234" fill="#c8c8c8" font-family="JetBrains Mono, monospace" font-size="11">remote: manual freshness chip only</text>
+    <text x="522" y="256" fill="#a3e635" font-family="Inter, system-ui, sans-serif" font-size="11">Last-good rows under stale/failure</text>
+    <text x="522" y="278" fill="#c8c8c8" font-family="JetBrains Mono, monospace" font-size="11">Throughput: 1s tick + CSS 0.9s + reduced-motion</text>
+    <text x="522" y="300" fill="#c8c8c8" font-family="JetBrains Mono, monospace" font-size="11">Counts: floorAgents only · Group on SavedViews</text>
+
+    
+    <rect x="16" y="360" width="924" height="48" rx="8" fill="#121210" stroke="#3f3a32"></rect>
+    <text x="32" y="388" fill="#7A756D" font-family="JetBrains Mono, monospace" font-size="11">LEGEND</text>
+    <line x1="100" y1="384" x2="140" y2="384" stroke="#f59e0b" stroke-width="2"></line>
+    <text x="148" y="388" fill="#c8c8c8" font-family="Inter, system-ui, sans-serif" font-size="11">aggressive poll / blocked UI</text>
+    <line x1="360" y1="384" x2="400" y2="384" stroke="#a3e635" stroke-width="2"></line>
+    <text x="408" y="388" fill="#c8c8c8" font-family="Inter, system-ui, sans-serif" font-size="11">event / one-shot / manual</text>
+    <rect x="620" y="372" width="14" height="14" rx="2" fill="#151613" stroke="#a3e635"></rect>
+    <text x="642" y="384" fill="#c8c8c8" font-family="Inter, system-ui, sans-serif" font-size="11">Factory brand surface</text>
+    <text x="820" y="384" fill="#7A756D" font-family="JetBrains Mono, monospace" font-size="10">protocol: postMessage</text>
+  </svg>
+  <figcaption><b>Figure 1.</b> Before: recurring local/remote polls and a 140ms throughput timer blank the floor while hosts sync. After: one-shot seed, event-driven local rows, manual remote refresh, last-good retention, single session collection for counts. Extension-host command names are unchanged.</figcaption>
+</figure><h3>Scope (this track)</h3>
+<table>
+<thead>
+<tr>
+<th>Owns</th>
+<th>Must not touch</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>apps/factory/ui/settings/components/mission-control/UnifiedAgentsPane.tsx</code></td>
+<td><code>apps/cli/**</code></td>
+</tr>
+<tr>
+<td>Adjacent style / component / test files under <code>mission-control/</code></td>
+<td><code>apps/factory/src/vscode/**</code></td>
+</tr>
+<tr>
+<td>Preview harness fixtures under <code>settings/preview/</code></td>
+<td><code>apps/factory/src/core/managedProjects.ts</code></td>
+</tr>
+<tr>
+<td><code>.agents/plans/plan-factory-floor-performance.html</code> (+ gitignore if needed)</td>
+<td>Extension-host data acquisition code</td>
+</tr>
+</tbody></table>
+<p>Shared dependency: host track may add optional <code>groups</code> / <code>hostFreshness</code> / <code>cliAvailable</code> / <code>ok</code>+<code>error</code> on session messages. UI accepts them when present; absent fields keep backward compile compatibility.</p>
+<h3>UI requirements → implementation</h3>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Implementation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Remove 3s local + 45s remote polling</td>
+<td>Delete <code>LOCAL_POLL_MS</code> / <code>REMOTE_POLL_MS</code> intervals; one-shot seed on <code>panelVisible</code></td>
+</tr>
+<tr>
+<td>Local from monitor/webview events</td>
+<td>Keep <code>items</code> + <code>localSessions</code> / message handlers; no interval</td>
+</tr>
+<tr>
+<td>Remote = clear manual action</td>
+<td>Freshness chip → <code>fetchHostSessions</code></td>
+</tr>
+<tr>
+<td>Cached rows + freshness; last-good</td>
+<td>Do not wipe sessions on <code>ok===false</code> / <code>error</code>; chip shows stale/failed</td>
+</tr>
+<tr>
+<td>One session collection for counts</td>
+<td><code>computeHostRows</code> ignores <code>device.agents</code>; rail/sidebar pass <code>agents: 0</code></td>
+</tr>
+<tr>
+<td>No duplicate Group/Subgroup</td>
+<td>FloorControls agents mode: Sort + needs only; Group on SavedViews</td>
+</tr>
+<tr>
+<td>Projects CLI-managed + inline errors</td>
+<td>ProjectsPane label + <code>commandError</code> prop</td>
+</tr>
+<tr>
+<td>Dispatch from cache</td>
+<td>Existing <code>panelHosts</code> from <code>remoteSessions</code> / dispatchHosts — no blocking wait</td>
+</tr>
+<tr>
+<td>Empty states</td>
+<td>zero-sessions, zero-hosts, CLI unavailable copy</td>
+</tr>
+<tr>
+<td>Throughput 1s + CSS + reduced-motion</td>
+<td><code>THROUGHPUT_TICK_MS=1000</code>; CSS <code>transition: height 0.9s</code>; media query</td>
+</tr>
+</tbody></table>
+<h3>Tagged files table</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>floorRefresh.ts</code></td>
+<td><strong>New</strong> timing constants (<code>REMOTE_STALE_MS</code>, <code>THROUGHPUT_TICK_MS</code>)</td>
+</tr>
+<tr>
+<td><code>UnifiedAgentsPane.tsx</code></td>
+<td>Poll removal, last-good, freshness UI, empty states, throughput tick</td>
+</tr>
+<tr>
+<td><code>FloorControls.tsx</code></td>
+<td>Drop agents Group/Subgroup</td>
+</tr>
+<tr>
+<td><code>floorModel.ts</code></td>
+<td>Host counts from agents only</td>
+</tr>
+<tr>
+<td><code>ProjectsPane.tsx</code></td>
+<td>CLI-managed label + inline <code>commandError</code></td>
+</tr>
+<tr>
+<td><code>floor.css</code> / <code>design-system.css</code></td>
+<td>Empty states, freshness, sparkline CSS</td>
+</tr>
+<tr>
+<td><code>settings/preview/preview.tsx</code></td>
+<td>FloorControls prop shape</td>
+</tr>
+<tr>
+<td><code>*.test.ts(x)</code></td>
+<td>Timer/poll/state + CLI-managed regressions</td>
+</tr>
+<tr>
+<td><code>.agents/plans/plan-factory-floor-performance.html</code></td>
+<td>Committed plan artifact</td>
+</tr>
+</tbody></table>
+<h2 id="public-interface">Public Interface</h2>
+<p>No new CLI flags or extension-host commands. The webview continues to post the same messages; only <em>when</em> it posts them changes (one-shot + manual, not intervals).</p>
+<pre><code># Unchanged host commands (UI no longer polls these on a timer):
+#   postMessage({ type: 'fetchLocalSessions' })   # one-shot on panelVisible + events
+#   postMessage({ type: 'fetchHostSessions' })    # one-shot on panelVisible + chip click
+#   postMessage({ type: 'getFloorThroughput' })   # existing ~2.5s host probe while active
+
+# Optional fields the UI accepts when the host track adds them:
+#   hostSessions: { ok?, error?, groups?, hostFreshness?, cliAvailable?, fetchedAt, sessions, hosts }
+#   localSessions: { ok?, error?, cliAvailable?, fetchedAt, sessions }
+#   managedProjectsError | projectCommandError: { error: string }
+</code></pre>
+<h2 id="validation">Validation</h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Budget / expected</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Recurring webview session polls</td>
+<td><strong>0</strong> (no 3s / 45s <code>setInterval</code>)</td>
+</tr>
+<tr>
+<td>Throughput React state tick</td>
+<td><strong>≤ 1 Hz</strong> (<code>THROUGHPUT_TICK_MS = 1000</code>)</td>
+</tr>
+<tr>
+<td>Sparkline motion</td>
+<td>CSS transition ~0.9s; <code>prefers-reduced-motion: reduce</code> disables</td>
+</tr>
+<tr>
+<td>First paint with cache</td>
+<td>Last-good rows remain mounted during manual refresh</td>
+</tr>
+<tr>
+<td>Tests</td>
+<td><code>bun test</code> on mission-control poll/throughput/controls/floorModel</td>
+</tr>
+<tr>
+<td>Compile</td>
+<td><code>bun run compile:ui</code> (or factory <code>compile</code>)</td>
+</tr>
+<tr>
+<td>Preview harness</td>
+<td><code>vite</code> preview <code>settings/preview/</code> dark + light screenshots</td>
+</tr>
+<tr>
+<td>Frontmatter / HTML</td>
+<td>Renders light+dark; SVG figure visible</td>
+</tr>
+</tbody></table>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local feed feels less "live" without 3s poll</td>
+<td>Terminal monitor + existing webview pushes still update <code>items</code>; one-shot seed on show</td>
+</tr>
+<tr>
+<td>Host track not yet sending <code>ok</code>/<code>error</code></td>
+<td>Failure path is optional; success path unchanged</td>
+</tr>
+<tr>
+<td>Operators expect auto remote refresh</td>
+<td>Chip copy + stale styling; one-shot seed on visibility</td>
+</tr>
+<tr>
+<td>Double Group controls return</td>
+<td>FloorControls test asserts agents mode has no Group/Subgroup</td>
+</tr>
+</tbody></table>
+<aside class="artifact-callout"><strong>Load-bearing takeaway:</strong> Factory Floor is a thin read-only consumer — never a second scheduler. Cached rows always win over a blank syncing canvas; remote fleet cost is opt-in via the freshness chip.</aside><h2 id="tracking">Tracking</h2>
+<ul>
+<li>Primary: <a href="https://github.com/phnx-labs/agents-cli/issues/2030">Issue #2030 — perf(factory): cache Factory Floor state and remove recurring fleet probes</a></li>
+<li>Related: <a href="https://github.com/phnx-labs/agents-cli/issues/2006">Issue #2006 — DotAgents root layout</a> (sibling cleanup; not this PR's code)</li>
+<li>Team: <code>factory-floor-performance-grok</code> · track <code>factory-floor-ui</code></li>
+<li>Plan HTML (committed): <code>.agents/plans/plan-factory-floor-performance.html</code></li>
+<li>Plan source (gitignored artifacts): <code>.agents/artifacts/plans/plan-factory-floor-performance.md</code></li>
+</ul>
+</article>
+<footer class="document-footer">phnx-labs/agents-cli · apps/factory</footer>
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGVtcGxhdGU6IHBsYW4udjEKdGl0bGU6IEZhY3RvcnkgRmxvb3IgcGVyZm9ybWFuY2UgVUkg4oCUIGNhY2hlIGZpcnN0LCBubyBhZ2dyZXNzaXZlIHBvbGxzCnN1bW1hcnk6IEV2ZW50LWRyaXZlbiBsb2NhbCByb3dzLCBtYW51YWwgcmVtb3RlIHJlZnJlc2gsIGxhc3QtZ29vZCB1bmRlciBmYWlsdXJlLCBzaW5nbGUgc2Vzc2lvbiBjb2xsZWN0aW9uIGZvciBjb3VudHMsIENTUyB0aHJvdWdocHV0LCBhbmQgY2xlYXJlciBlbXB0eSBzdGF0ZXMg4oCUIHdpdGhvdXQgY2hhbmdpbmcgZXh0ZW5zaW9uLWhvc3QgY29tbWFuZCBzZW1hbnRpY3MuCmhlYWRlcjogRmFjdG9yeSBGbG9vcgpmb290ZXI6IHBobngtbGFicy9hZ2VudHMtY2xpIMK3IGFwcHMvZmFjdG9yeQpwcm9qZWN0OiBhZ2VudHMtY2xpIC8gRmFjdG9yeQpjb250ZXh0OiBJc3N1ZSAjMjAzMCDCtyB0ZWFtIGZhY3RvcnktZmxvb3ItcGVyZm9ybWFuY2UtZ3JvayDCtyB0cmFjayBmYWN0b3J5LWZsb29yLXVpCnJlcG9zaXRvcnk6IHBobngtbGFicy9hZ2VudHMtY2xpCmJyYW5jaDogYWdlbnRzL2ZhY3RvcnktZmxvb3ItdWkKdHJhY2tpbmc6ICdodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnZW50cy1jbGkvaXNzdWVzLzIwMzAnCnN0YXR1czogYXBwcm92ZWQKaGFybmVzczogZ3JvawphZ2VudDogZmFjdG9yeS1mbG9vci11aQpodW1hbjogbXVxc2l0Cmhvc3Q6ICcnCnNlc3Npb246ICcnCmRhdGU6ICcyMDI2LTA4LTA1JwpmYWN0czoKICAtICdSZW1vdmUgM3MgbG9jYWwgYW5kIDQ1cyByZW1vdGUgd2VidmlldyBzZXRJbnRlcnZhbCBwb2xscycKICAtICdSZXRhaW4gbGFzdC1nb29kIGhvc3RTZXNzaW9ucyByb3dzIG9uIGZhaWx1cmU7IHNob3cgZnJlc2huZXNzIGNoaXAnCiAgLSAnVGhyb3VnaHB1dCBzcGFya2xpbmU6IDFzIFJlYWN0IHRpY2sgKyBDU1MgaW50ZXJwb2xhdGlvbiArIHByZWZlcnMtcmVkdWNlZC1tb3Rpb24nCiAgLSAnR3JvdXAvU3ViZ3JvdXAgb25seSBvbiBTYXZlZFZpZXdzIGZlZWQgaGVhZGVyIChub3QgRmxvb3JDb250cm9scyknCiAgLSAnUnVubmluZyBjb3VudHMgZnJvbSBmbG9vckFnZW50cyBvbmx5JwpsaW5rczoKICAtIGxhYmVsOiBJc3N1ZSAjMjAzMAogICAgdXJsOiBodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnZW50cy1jbGkvaXNzdWVzLzIwMzAKICAtIGxhYmVsOiBJc3N1ZSAjMjAwNiAoRG90QWdlbnRzIGxheW91dCBzaWJsaW5nKQogICAgdXJsOiBodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnZW50cy1jbGkvaXNzdWVzLzIwMDYKYXNzZXRzOiBbXQotLS0KCiMjIFB1cnBvc2UKCkZhY3RvcnkgRmxvb3IgcGFpZCBhIGNvbnN0YW50IGNvc3QgZm9yIGZlZWxpbmcgImxpdmUiOiBhIDMtc2Vjb25kIGxvY2FsIGBmZXRjaExvY2FsU2Vzc2lvbnNgIGludGVydmFsLCBhIDQ1LXNlY29uZCByZW1vdGUgU1NIIGZhbi1vdXQsIGFuZCBhIDE0MG1zIFJlYWN0IHRocm91Z2hwdXQgdGltZXIuIFRoZSBmaXJzdCBwYWludCB3YWl0ZWQgb24gaG9zdCBzeW5jLCBzbyBvcGVyYXRvcnMgc2F3IGEgYmxhbmsgb3IgYmxvY2tpbmcgY2FudmFzIHdoaWxlIGxhc3QtZ29vZCBkYXRhIGFscmVhZHkgZXhpc3RlZCBvbiB0aGUgaG9zdC4gVGhpcyBwbGFuIGlzIHRoZSAqKlVJIHRyYWNrKiogb2YgaXNzdWUgWyMyMDMwXShodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnZW50cy1jbGkvaXNzdWVzLzIwMzApOiByZW5kZXIgY2FjaGVkIHJvd3MgaW1tZWRpYXRlbHksIGV4cG9zZSBmcmVzaG5lc3MgKyBtYW51YWwgcmVmcmVzaCwgYW5kIGRyb3AgZHVwbGljYXRlIGNocm9tZSDigJQgd2l0aG91dCBjaGFuZ2luZyBleHRlbnNpb24taG9zdCBjb21tYW5kIHNlbWFudGljcyBvciB0b3VjaGluZyBgYXBwcy9jbGkvKipgIC8gYGFwcHMvZmFjdG9yeS9zcmMvdnNjb2RlLyoqYC4KClNpYmxpbmcgdHJhY2tpbmcgZm9yIERvdEFnZW50cyBsYXlvdXQgY2Fub25pY2FsaXphdGlvbjogWyMyMDA2XShodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnZW50cy1jbGkvaXNzdWVzLzIwMDYpLgoKIyMgUHJvcG9zZWQgQ2hhbmdlcwoKIyMjIEJlZm9yZSAvIGFmdGVyIGRhdGEgZmxvdyAoQzQtc3R5bGUpCgo8ZmlndXJlIGNsYXNzPSJhcnRpZmFjdC1maWd1cmUgYXJ0aWZhY3QtZmlndXJlLWRpYWdyYW0gYXJ0aWZhY3QtZmlndXJlLXdpZGUiPgogIDxzdmcgY2xhc3M9ImFydGlmYWN0LWRpYWdyYW0iIHZpZXdCb3g9IjAgMCA5NjAgNDIwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkJlZm9yZSBhbmQgYWZ0ZXIgRmFjdG9yeSBGbG9vciBkYXRhIGZsb3ciPgogICAgPGRlZnM+CiAgICAgIDxtYXJrZXIgaWQ9ImFyciIgbWFya2VyV2lkdGg9IjgiIG1hcmtlckhlaWdodD0iOCIgcmVmWD0iNiIgcmVmWT0iMyIgb3JpZW50PSJhdXRvIj4KICAgICAgICA8cGF0aCBkPSJNMCwwIEw2LDMgTDAsNiBaIiBmaWxsPSIjN0E3NTZEIi8+CiAgICAgIDwvbWFya2VyPgogICAgICA8bWFya2VyIGlkPSJhcnItZyIgbWFya2VyV2lkdGg9IjgiIG1hcmtlckhlaWdodD0iOCIgcmVmWD0iNiIgcmVmWT0iMyIgb3JpZW50PSJhdXRvIj4KICAgICAgICA8cGF0aCBkPSJNMCwwIEw2LDMgTDAsNiBaIiBmaWxsPSIjYTNlNjM1Ii8+CiAgICAgIDwvbWFya2VyPgogICAgICA8bWFya2VyIGlkPSJhcnItciIgbWFya2VyV2lkdGg9IjgiIG1hcmtlckhlaWdodD0iOCIgcmVmWD0iNiIgcmVmWT0iMyIgb3JpZW50PSJhdXRvIj4KICAgICAgICA8cGF0aCBkPSJNMCwwIEw2LDMgTDAsNiBaIiBmaWxsPSIjZjU5ZTBiIi8+CiAgICAgIDwvbWFya2VyPgogICAgPC9kZWZzPgoKICAgIDwhLS0gVGl0bGUgLS0+CiAgICA8dGV4dCB4PSIyNCIgeT0iMjgiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNzAwIj5DNCBjb250YWluZXIgdmlldyDCtyBGYWN0b3J5IEZsb29yIHdlYnZpZXcg4oaUIGV4dGVuc2lvbiBob3N0PC90ZXh0PgoKICAgIDwhLS0gQkVGT1JFIC0tPgogICAgPHJlY3QgeD0iMTYiIHk9IjQ0IiB3aWR0aD0iNDUwIiBoZWlnaHQ9IjMwMCIgcng9IjEwIiBmaWxsPSIjMTIxMjEwIiBzdHJva2U9IiMzZjNhMzIiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgICA8dGV4dCB4PSIzMiIgeT0iNjgiIGZpbGw9IiNmNTllMGIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNzAwIj5CRUZPUkU8L3RleHQ+CiAgICA8dGV4dCB4PSIxMDAiIHk9IjY4IiBmaWxsPSIjN0E3NTZEIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+YmxvY2tpbmcgc3luYyDCtyBkdWFsIHBvbGxzPC90ZXh0PgoKICAgIDxyZWN0IHg9IjM2IiB5PSI4NiIgd2lkdGg9IjE4MCIgaGVpZ2h0PSI1NCIgcng9IjYiIGZpbGw9IiMxYTE5MTYiIHN0cm9rZT0iIzdBNzU2RCIvPgogICAgPHRleHQgeD0iMTI2IiB5PSIxMTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNlOGU0ZGMiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIj5XZWJ2aWV3PC90ZXh0PgogICAgPHRleHQgeD0iMTI2IiB5PSIxMjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM3QTc1NkQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5VbmlmaWVkQWdlbnRzUGFuZTwvdGV4dD4KCiAgICA8cmVjdCB4PSIyNjAiIHk9Ijg2IiB3aWR0aD0iMTgwIiBoZWlnaHQ9IjU0IiByeD0iNiIgZmlsbD0iIzFhMTkxNiIgc3Ryb2tlPSIjN0E3NTZEIi8+CiAgICA8dGV4dCB4PSIzNTAiIHk9IjExMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2U4ZTRkYyIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiPkV4dGVuc2lvbiBob3N0PC90ZXh0PgogICAgPHRleHQgeD0iMzUwIiB5PSIxMjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM3QTc1NkQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5zZXR0aW5ncy52c2NvZGU8L3RleHQ+CgogICAgPGxpbmUgeDE9IjIxNiIgeTE9IjEwNSIgeDI9IjI1OCIgeTI9IjEwNSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhcnItcikiLz4KICAgIDx0ZXh0IHg9IjIzNyIgeT0iOTgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmNTllMGIiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjkiPnBvc3RNZXNzYWdlPC90ZXh0PgoKICAgIDxyZWN0IHg9IjM2IiB5PSIxNjgiIHdpZHRoPSI0MDAiIGhlaWdodD0iMTUwIiByeD0iNiIgZmlsbD0iIzBjMGMwYSIgc3Ryb2tlPSIjM2YzYTMyIi8+CiAgICA8dGV4dCB4PSI0OCIgeT0iMTkwIiBmaWxsPSIjYzhjOGM4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+c2V0SW50ZXJ2YWwgM3MgIOKGkiBmZXRjaExvY2FsU2Vzc2lvbnM8L3RleHQ+CiAgICA8dGV4dCB4PSI0OCIgeT0iMjEyIiBmaWxsPSIjYzhjOGM4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+c2V0SW50ZXJ2YWwgNDVzIOKGkiBmZXRjaEhvc3RTZXNzaW9ucyAoU1NIKTwvdGV4dD4KICAgIDx0ZXh0IHg9IjQ4IiB5PSIyMzQiIGZpbGw9IiNjOGM4YzgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj5zZXRJbnRlcnZhbCAxNDBtcyDihpIgVGhyb3VnaHB1dENvdW50ZXIgUmVhY3Qgc3RhdGU8L3RleHQ+CiAgICA8dGV4dCB4PSI0OCIgeT0iMjU2IiBmaWxsPSIjZjU5ZTBiIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSI+RW1wdHkgY2FudmFzIHdoaWxlIHN5bmNpbmdIb3N0cz10cnVlPC90ZXh0PgogICAgPHRleHQgeD0iNDgiIHk9IjI3OCIgZmlsbD0iIzdBNzU2RCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiPkdyb3VwL1N1Ymdyb3VwIG9uIEZsb29yQ29udHJvbHMgKyBTYXZlZFZpZXdzPC90ZXh0PgogICAgPHRleHQgeD0iNDgiIHk9IjMwMCIgZmlsbD0iIzdBNzU2RCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiPkNvdW50czogZmxvb3JBZ2VudHMgT1IgZGV2aWNlSGVhbHRoLnJ1bm5pbmdBZ2VudHM8L3RleHQ+CgogICAgPCEtLSBBRlRFUiAtLT4KICAgIDxyZWN0IHg9IjQ5MCIgeT0iNDQiIHdpZHRoPSI0NTAiIGhlaWdodD0iMzAwIiByeD0iMTAiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iIzNkNWExZiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICAgIDx0ZXh0IHg9IjUwNiIgeT0iNjgiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNzAwIj5BRlRFUjwvdGV4dD4KICAgIDx0ZXh0IHg9IjU2OCIgeT0iNjgiIGZpbGw9IiM1YTdkMWIiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj5jYWNoZSBmaXJzdCDCtyBtYW51YWwgcmVtb3RlPC90ZXh0PgoKICAgIDxyZWN0IHg9IjUxMCIgeT0iODYiIHdpZHRoPSIxODAiIGhlaWdodD0iNTQiIHJ4PSI2IiBmaWxsPSIjMTUxNjEzIiBzdHJva2U9IiNhM2U2MzUiLz4KICAgIDx0ZXh0IHg9IjYwMCIgeT0iMTEwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZThlNGRjIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiI+V2VidmlldzwvdGV4dD4KICAgIDx0ZXh0IHg9IjYwMCIgeT0iMTI4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCI+Y2FjaGVkIHJvd3MgKyBjaGlwPC90ZXh0PgoKICAgIDxyZWN0IHg9IjczNCIgeT0iODYiIHdpZHRoPSIxODAiIGhlaWdodD0iNTQiIHJ4PSI2IiBmaWxsPSIjMTUxNjEzIiBzdHJva2U9IiM1YTdkMWIiLz4KICAgIDx0ZXh0IHg9IjgyNCIgeT0iMTEwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZThlNGRjIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiI+RXh0ZW5zaW9uIGhvc3Q8L3RleHQ+CiAgICA8dGV4dCB4PSI4MjQiIHk9IjEyOCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzVhN2QxYiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPnNhbWUgY29tbWFuZHM8L3RleHQ+CgogICAgPGxpbmUgeDE9IjY5MCIgeTE9IjEwNSIgeDI9IjczMiIgeTI9IjEwNSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhcnItZykiLz4KICAgIDx0ZXh0IHg9IjcxMSIgeT0iOTgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjkiPnBvc3RNZXNzYWdlPC90ZXh0PgoKICAgIDxyZWN0IHg9IjUxMCIgeT0iMTY4IiB3aWR0aD0iNDAwIiBoZWlnaHQ9IjE1MCIgcng9IjYiIGZpbGw9IiMwYzEyMDgiIHN0cm9rZT0iIzNkNWExZiIvPgogICAgPHRleHQgeD0iNTIyIiB5PSIxOTAiIGZpbGw9IiNjOGM4YzgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj5vbmUtc2hvdCBzZWVkIG9uIHBhbmVsVmlzaWJsZTwvdGV4dD4KICAgIDx0ZXh0IHg9IjUyMiIgeT0iMjEyIiBmaWxsPSIjYzhjOGM4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+bG9jYWw6IG1vbml0b3IgLyB3ZWJ2aWV3IGV2ZW50czwvdGV4dD4KICAgIDx0ZXh0IHg9IjUyMiIgeT0iMjM0IiBmaWxsPSIjYzhjOGM4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+cmVtb3RlOiBtYW51YWwgZnJlc2huZXNzIGNoaXAgb25seTwvdGV4dD4KICAgIDx0ZXh0IHg9IjUyMiIgeT0iMjU2IiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSI+TGFzdC1nb29kIHJvd3MgdW5kZXIgc3RhbGUvZmFpbHVyZTwvdGV4dD4KICAgIDx0ZXh0IHg9IjUyMiIgeT0iMjc4IiBmaWxsPSIjYzhjOGM4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+VGhyb3VnaHB1dDogMXMgdGljayArIENTUyAwLjlzICsgcmVkdWNlZC1tb3Rpb248L3RleHQ+CiAgICA8dGV4dCB4PSI1MjIiIHk9IjMwMCIgZmlsbD0iI2M4YzhjOCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPkNvdW50czogZmxvb3JBZ2VudHMgb25seSDCtyBHcm91cCBvbiBTYXZlZFZpZXdzPC90ZXh0PgoKICAgIDwhLS0gTGVnZW5kIC0tPgogICAgPHJlY3QgeD0iMTYiIHk9IjM2MCIgd2lkdGg9IjkyNCIgaGVpZ2h0PSI0OCIgcng9IjgiIGZpbGw9IiMxMjEyMTAiIHN0cm9rZT0iIzNmM2EzMiIvPgogICAgPHRleHQgeD0iMzIiIHk9IjM4OCIgZmlsbD0iIzdBNzU2RCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPkxFR0VORDwvdGV4dD4KICAgIDxsaW5lIHgxPSIxMDAiIHkxPSIzODQiIHgyPSIxNDAiIHkyPSIzODQiIHN0cm9rZT0iI2Y1OWUwYiIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgICA8dGV4dCB4PSIxNDgiIHk9IjM4OCIgZmlsbD0iI2M4YzhjOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiPmFnZ3Jlc3NpdmUgcG9sbCAvIGJsb2NrZWQgVUk8L3RleHQ+CiAgICA8bGluZSB4MT0iMzYwIiB5MT0iMzg0IiB4Mj0iNDAwIiB5Mj0iMzg0IiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMiIvPgogICAgPHRleHQgeD0iNDA4IiB5PSIzODgiIGZpbGw9IiNjOGM4YzgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIj5ldmVudCAvIG9uZS1zaG90IC8gbWFudWFsPC90ZXh0PgogICAgPHJlY3QgeD0iNjIwIiB5PSIzNzIiIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgcng9IjIiIGZpbGw9IiMxNTE2MTMiIHN0cm9rZT0iI2EzZTYzNSIvPgogICAgPHRleHQgeD0iNjQyIiB5PSIzODQiIGZpbGw9IiNjOGM4YzgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIj5GYWN0b3J5IGJyYW5kIHN1cmZhY2U8L3RleHQ+CiAgICA8dGV4dCB4PSI4MjAiIHk9IjM4NCIgZmlsbD0iIzdBNzU2RCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPnByb3RvY29sOiBwb3N0TWVzc2FnZTwvdGV4dD4KICA8L3N2Zz4KICA8ZmlnY2FwdGlvbj48Yj5GaWd1cmUgMS48L2I+IEJlZm9yZTogcmVjdXJyaW5nIGxvY2FsL3JlbW90ZSBwb2xscyBhbmQgYSAxNDBtcyB0aHJvdWdocHV0IHRpbWVyIGJsYW5rIHRoZSBmbG9vciB3aGlsZSBob3N0cyBzeW5jLiBBZnRlcjogb25lLXNob3Qgc2VlZCwgZXZlbnQtZHJpdmVuIGxvY2FsIHJvd3MsIG1hbnVhbCByZW1vdGUgcmVmcmVzaCwgbGFzdC1nb29kIHJldGVudGlvbiwgc2luZ2xlIHNlc3Npb24gY29sbGVjdGlvbiBmb3IgY291bnRzLiBFeHRlbnNpb24taG9zdCBjb21tYW5kIG5hbWVzIGFyZSB1bmNoYW5nZWQuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIyBTY29wZSAodGhpcyB0cmFjaykKCnwgT3ducyB8IE11c3Qgbm90IHRvdWNoIHwKfCAtLS0gfCAtLS0gfAp8IGBhcHBzL2ZhY3RvcnkvdWkvc2V0dGluZ3MvY29tcG9uZW50cy9taXNzaW9uLWNvbnRyb2wvVW5pZmllZEFnZW50c1BhbmUudHN4YCB8IGBhcHBzL2NsaS8qKmAgfAp8IEFkamFjZW50IHN0eWxlIC8gY29tcG9uZW50IC8gdGVzdCBmaWxlcyB1bmRlciBgbWlzc2lvbi1jb250cm9sL2AgfCBgYXBwcy9mYWN0b3J5L3NyYy92c2NvZGUvKipgIHwKfCBQcmV2aWV3IGhhcm5lc3MgZml4dHVyZXMgdW5kZXIgYHNldHRpbmdzL3ByZXZpZXcvYCB8IGBhcHBzL2ZhY3Rvcnkvc3JjL2NvcmUvbWFuYWdlZFByb2plY3RzLnRzYCB8CnwgYC5hZ2VudHMvcGxhbnMvcGxhbi1mYWN0b3J5LWZsb29yLXBlcmZvcm1hbmNlLmh0bWxgICgrIGdpdGlnbm9yZSBpZiBuZWVkZWQpIHwgRXh0ZW5zaW9uLWhvc3QgZGF0YSBhY3F1aXNpdGlvbiBjb2RlIHwKClNoYXJlZCBkZXBlbmRlbmN5OiBob3N0IHRyYWNrIG1heSBhZGQgb3B0aW9uYWwgYGdyb3Vwc2AgLyBgaG9zdEZyZXNobmVzc2AgLyBgY2xpQXZhaWxhYmxlYCAvIGBva2ArYGVycm9yYCBvbiBzZXNzaW9uIG1lc3NhZ2VzLiBVSSBhY2NlcHRzIHRoZW0gd2hlbiBwcmVzZW50OyBhYnNlbnQgZmllbGRzIGtlZXAgYmFja3dhcmQgY29tcGlsZSBjb21wYXRpYmlsaXR5LgoKIyMjIFVJIHJlcXVpcmVtZW50cyDihpIgaW1wbGVtZW50YXRpb24KCnwgUmVxdWlyZW1lbnQgfCBJbXBsZW1lbnRhdGlvbiB8CnwgLS0tIHwgLS0tIHwKfCBSZW1vdmUgM3MgbG9jYWwgKyA0NXMgcmVtb3RlIHBvbGxpbmcgfCBEZWxldGUgYExPQ0FMX1BPTExfTVNgIC8gYFJFTU9URV9QT0xMX01TYCBpbnRlcnZhbHM7IG9uZS1zaG90IHNlZWQgb24gYHBhbmVsVmlzaWJsZWAgfAp8IExvY2FsIGZyb20gbW9uaXRvci93ZWJ2aWV3IGV2ZW50cyB8IEtlZXAgYGl0ZW1zYCArIGBsb2NhbFNlc3Npb25zYCAvIG1lc3NhZ2UgaGFuZGxlcnM7IG5vIGludGVydmFsIHwKfCBSZW1vdGUgPSBjbGVhciBtYW51YWwgYWN0aW9uIHwgRnJlc2huZXNzIGNoaXAg4oaSIGBmZXRjaEhvc3RTZXNzaW9uc2AgfAp8IENhY2hlZCByb3dzICsgZnJlc2huZXNzOyBsYXN0LWdvb2QgfCBEbyBub3Qgd2lwZSBzZXNzaW9ucyBvbiBgb2s9PT1mYWxzZWAgLyBgZXJyb3JgOyBjaGlwIHNob3dzIHN0YWxlL2ZhaWxlZCB8CnwgT25lIHNlc3Npb24gY29sbGVjdGlvbiBmb3IgY291bnRzIHwgYGNvbXB1dGVIb3N0Um93c2AgaWdub3JlcyBgZGV2aWNlLmFnZW50c2A7IHJhaWwvc2lkZWJhciBwYXNzIGBhZ2VudHM6IDBgIHwKfCBObyBkdXBsaWNhdGUgR3JvdXAvU3ViZ3JvdXAgfCBGbG9vckNvbnRyb2xzIGFnZW50cyBtb2RlOiBTb3J0ICsgbmVlZHMgb25seTsgR3JvdXAgb24gU2F2ZWRWaWV3cyB8CnwgUHJvamVjdHMgQ0xJLW1hbmFnZWQgKyBpbmxpbmUgZXJyb3JzIHwgUHJvamVjdHNQYW5lIGxhYmVsICsgYGNvbW1hbmRFcnJvcmAgcHJvcCB8CnwgRGlzcGF0Y2ggZnJvbSBjYWNoZSB8IEV4aXN0aW5nIGBwYW5lbEhvc3RzYCBmcm9tIGByZW1vdGVTZXNzaW9uc2AgLyBkaXNwYXRjaEhvc3RzIOKAlCBubyBibG9ja2luZyB3YWl0IHwKfCBFbXB0eSBzdGF0ZXMgfCB6ZXJvLXNlc3Npb25zLCB6ZXJvLWhvc3RzLCBDTEkgdW5hdmFpbGFibGUgY29weSB8CnwgVGhyb3VnaHB1dCAxcyArIENTUyArIHJlZHVjZWQtbW90aW9uIHwgYFRIUk9VR0hQVVRfVElDS19NUz0xMDAwYDsgQ1NTIGB0cmFuc2l0aW9uOiBoZWlnaHQgMC45c2A7IG1lZGlhIHF1ZXJ5IHwKCiMjIyBUYWdnZWQgZmlsZXMgdGFibGUKCnwgRmlsZSB8IENoYW5nZSB8CnwgLS0tIHwgLS0tIHwKfCBgZmxvb3JSZWZyZXNoLnRzYCB8ICoqTmV3KiogdGltaW5nIGNvbnN0YW50cyAoYFJFTU9URV9TVEFMRV9NU2AsIGBUSFJPVUdIUFVUX1RJQ0tfTVNgKSB8CnwgYFVuaWZpZWRBZ2VudHNQYW5lLnRzeGAgfCBQb2xsIHJlbW92YWwsIGxhc3QtZ29vZCwgZnJlc2huZXNzIFVJLCBlbXB0eSBzdGF0ZXMsIHRocm91Z2hwdXQgdGljayB8CnwgYEZsb29yQ29udHJvbHMudHN4YCB8IERyb3AgYWdlbnRzIEdyb3VwL1N1Ymdyb3VwIHwKfCBgZmxvb3JNb2RlbC50c2AgfCBIb3N0IGNvdW50cyBmcm9tIGFnZW50cyBvbmx5IHwKfCBgUHJvamVjdHNQYW5lLnRzeGAgfCBDTEktbWFuYWdlZCBsYWJlbCArIGlubGluZSBgY29tbWFuZEVycm9yYCB8CnwgYGZsb29yLmNzc2AgLyBgZGVzaWduLXN5c3RlbS5jc3NgIHwgRW1wdHkgc3RhdGVzLCBmcmVzaG5lc3MsIHNwYXJrbGluZSBDU1MgfAp8IGBzZXR0aW5ncy9wcmV2aWV3L3ByZXZpZXcudHN4YCB8IEZsb29yQ29udHJvbHMgcHJvcCBzaGFwZSB8CnwgYCoudGVzdC50cyh4KWAgfCBUaW1lci9wb2xsL3N0YXRlICsgQ0xJLW1hbmFnZWQgcmVncmVzc2lvbnMgfAp8IGAuYWdlbnRzL3BsYW5zL3BsYW4tZmFjdG9yeS1mbG9vci1wZXJmb3JtYW5jZS5odG1sYCB8IENvbW1pdHRlZCBwbGFuIGFydGlmYWN0IHwKCiMjIFB1YmxpYyBJbnRlcmZhY2UKCk5vIG5ldyBDTEkgZmxhZ3Mgb3IgZXh0ZW5zaW9uLWhvc3QgY29tbWFuZHMuIFRoZSB3ZWJ2aWV3IGNvbnRpbnVlcyB0byBwb3N0IHRoZSBzYW1lIG1lc3NhZ2VzOyBvbmx5ICp3aGVuKiBpdCBwb3N0cyB0aGVtIGNoYW5nZXMgKG9uZS1zaG90ICsgbWFudWFsLCBub3QgaW50ZXJ2YWxzKS4KCmBgYGJhc2gKIyBVbmNoYW5nZWQgaG9zdCBjb21tYW5kcyAoVUkgbm8gbG9uZ2VyIHBvbGxzIHRoZXNlIG9uIGEgdGltZXIpOgojICAgcG9zdE1lc3NhZ2UoeyB0eXBlOiAnZmV0Y2hMb2NhbFNlc3Npb25zJyB9KSAgICMgb25lLXNob3Qgb24gcGFuZWxWaXNpYmxlICsgZXZlbnRzCiMgICBwb3N0TWVzc2FnZSh7IHR5cGU6ICdmZXRjaEhvc3RTZXNzaW9ucycgfSkgICAgIyBvbmUtc2hvdCBvbiBwYW5lbFZpc2libGUgKyBjaGlwIGNsaWNrCiMgICBwb3N0TWVzc2FnZSh7IHR5cGU6ICdnZXRGbG9vclRocm91Z2hwdXQnIH0pICAgIyBleGlzdGluZyB+Mi41cyBob3N0IHByb2JlIHdoaWxlIGFjdGl2ZQoKIyBPcHRpb25hbCBmaWVsZHMgdGhlIFVJIGFjY2VwdHMgd2hlbiB0aGUgaG9zdCB0cmFjayBhZGRzIHRoZW06CiMgICBob3N0U2Vzc2lvbnM6IHsgb2s/LCBlcnJvcj8sIGdyb3Vwcz8sIGhvc3RGcmVzaG5lc3M/LCBjbGlBdmFpbGFibGU/LCBmZXRjaGVkQXQsIHNlc3Npb25zLCBob3N0cyB9CiMgICBsb2NhbFNlc3Npb25zOiB7IG9rPywgZXJyb3I/LCBjbGlBdmFpbGFibGU/LCBmZXRjaGVkQXQsIHNlc3Npb25zIH0KIyAgIG1hbmFnZWRQcm9qZWN0c0Vycm9yIHwgcHJvamVjdENvbW1hbmRFcnJvcjogeyBlcnJvcjogc3RyaW5nIH0KYGBgCgojIyBWYWxpZGF0aW9uCgp8IENoZWNrIHwgQnVkZ2V0IC8gZXhwZWN0ZWQgfAp8IC0tLSB8IC0tLSB8CnwgUmVjdXJyaW5nIHdlYnZpZXcgc2Vzc2lvbiBwb2xscyB8ICoqMCoqIChubyAzcyAvIDQ1cyBgc2V0SW50ZXJ2YWxgKSB8CnwgVGhyb3VnaHB1dCBSZWFjdCBzdGF0ZSB0aWNrIHwgKiriiaQgMSBIeioqIChgVEhST1VHSFBVVF9USUNLX01TID0gMTAwMGApIHwKfCBTcGFya2xpbmUgbW90aW9uIHwgQ1NTIHRyYW5zaXRpb24gfjAuOXM7IGBwcmVmZXJzLXJlZHVjZWQtbW90aW9uOiByZWR1Y2VgIGRpc2FibGVzIHwKfCBGaXJzdCBwYWludCB3aXRoIGNhY2hlIHwgTGFzdC1nb29kIHJvd3MgcmVtYWluIG1vdW50ZWQgZHVyaW5nIG1hbnVhbCByZWZyZXNoIHwKfCBUZXN0cyB8IGBidW4gdGVzdGAgb24gbWlzc2lvbi1jb250cm9sIHBvbGwvdGhyb3VnaHB1dC9jb250cm9scy9mbG9vck1vZGVsIHwKfCBDb21waWxlIHwgYGJ1biBydW4gY29tcGlsZTp1aWAgKG9yIGZhY3RvcnkgYGNvbXBpbGVgKSB8CnwgUHJldmlldyBoYXJuZXNzIHwgYHZpdGVgIHByZXZpZXcgYHNldHRpbmdzL3ByZXZpZXcvYCBkYXJrICsgbGlnaHQgc2NyZWVuc2hvdHMgfAp8IEZyb250bWF0dGVyIC8gSFRNTCB8IFJlbmRlcnMgbGlnaHQrZGFyazsgU1ZHIGZpZ3VyZSB2aXNpYmxlIHwKCiMjIFJpc2tzCgp8IFJpc2sgfCBNaXRpZ2F0aW9uIHwKfCAtLS0gfCAtLS0gfAp8IExvY2FsIGZlZWQgZmVlbHMgbGVzcyAibGl2ZSIgd2l0aG91dCAzcyBwb2xsIHwgVGVybWluYWwgbW9uaXRvciArIGV4aXN0aW5nIHdlYnZpZXcgcHVzaGVzIHN0aWxsIHVwZGF0ZSBgaXRlbXNgOyBvbmUtc2hvdCBzZWVkIG9uIHNob3cgfAp8IEhvc3QgdHJhY2sgbm90IHlldCBzZW5kaW5nIGBva2AvYGVycm9yYCB8IEZhaWx1cmUgcGF0aCBpcyBvcHRpb25hbDsgc3VjY2VzcyBwYXRoIHVuY2hhbmdlZCB8CnwgT3BlcmF0b3JzIGV4cGVjdCBhdXRvIHJlbW90ZSByZWZyZXNoIHwgQ2hpcCBjb3B5ICsgc3RhbGUgc3R5bGluZzsgb25lLXNob3Qgc2VlZCBvbiB2aXNpYmlsaXR5IHwKfCBEb3VibGUgR3JvdXAgY29udHJvbHMgcmV0dXJuIHwgRmxvb3JDb250cm9scyB0ZXN0IGFzc2VydHMgYWdlbnRzIG1vZGUgaGFzIG5vIEdyb3VwL1N1Ymdyb3VwIHwKCjxhc2lkZSBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+PHN0cm9uZz5Mb2FkLWJlYXJpbmcgdGFrZWF3YXk6PC9zdHJvbmc+IEZhY3RvcnkgRmxvb3IgaXMgYSB0aGluIHJlYWQtb25seSBjb25zdW1lciDigJQgbmV2ZXIgYSBzZWNvbmQgc2NoZWR1bGVyLiBDYWNoZWQgcm93cyBhbHdheXMgd2luIG92ZXIgYSBibGFuayBzeW5jaW5nIGNhbnZhczsgcmVtb3RlIGZsZWV0IGNvc3QgaXMgb3B0LWluIHZpYSB0aGUgZnJlc2huZXNzIGNoaXAuPC9hc2lkZT4KCiMjIFRyYWNraW5nCgotIFByaW1hcnk6IFtJc3N1ZSAjMjAzMCDigJQgcGVyZihmYWN0b3J5KTogY2FjaGUgRmFjdG9yeSBGbG9vciBzdGF0ZSBhbmQgcmVtb3ZlIHJlY3VycmluZyBmbGVldCBwcm9iZXNdKGh0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdlbnRzLWNsaS9pc3N1ZXMvMjAzMCkKLSBSZWxhdGVkOiBbSXNzdWUgIzIwMDYg4oCUIERvdEFnZW50cyByb290IGxheW91dF0oaHR0cHM6Ly9naXRodWIuY29tL3BobngtbGFicy9hZ2VudHMtY2xpL2lzc3Vlcy8yMDA2KSAoc2libGluZyBjbGVhbnVwOyBub3QgdGhpcyBQUidzIGNvZGUpCi0gVGVhbTogYGZhY3RvcnktZmxvb3ItcGVyZm9ybWFuY2UtZ3Jva2AgwrcgdHJhY2sgYGZhY3RvcnktZmxvb3ItdWlgCi0gUGxhbiBIVE1MIChjb21taXR0ZWQpOiBgLmFnZW50cy9wbGFucy9wbGFuLWZhY3RvcnktZmxvb3ItcGVyZm9ybWFuY2UuaHRtbGAKLSBQbGFuIHNvdXJjZSAoZ2l0aWdub3JlZCBhcnRpZmFjdHMpOiBgLmFnZW50cy9hcnRpZmFjdHMvcGxhbnMvcGxhbi1mYWN0b3J5LWZsb29yLXBlcmZvcm1hbmNlLm1kYAo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
