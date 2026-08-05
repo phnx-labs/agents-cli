@@ -27,6 +27,7 @@ import { registerSetupShareCommand, runShareWizard } from './setup-share.js';
 import { registerSetupMineCommand } from './setup-mine.js';
 import { registerSetupSecretsCommand } from './setup-secrets.js';
 import { registerSetupFleetCommand } from './setup-fleet.js';
+import { registerSetupWatchdogCommand, runWatchdogSetupWizard } from './setup-watchdog.js';
 import { runPreferencesStep } from './setup-preferences.js';
 
 const HOME = os.homedir();
@@ -274,7 +275,7 @@ async function runSetupHub(): Promise<void> {
   if (!isInteractiveTerminal()) return;
   try {
     const { checkbox } = await import('@inquirer/prompts');
-    const picks = await checkbox<'browser' | 'computer' | 'share' | 'secrets' | 'fleet'>({
+    const picks = await checkbox<'browser' | 'computer' | 'share' | 'secrets' | 'fleet' | 'watchdog'>({
       message: 'Set up optional capabilities now? (space to select, enter to confirm)',
       choices: [
         { name: 'browser  — drive a real Chrome/Brave/Edge for web automation', value: 'browser' },
@@ -282,6 +283,7 @@ async function runSetupHub(): Promise<void> {
         { name: 'share    — publish shareable links (Cloudflare R2 + Worker)', value: 'share' },
         { name: 'secrets  — choose storage defaults and import existing credentials', value: 'secrets' },
         { name: 'fleet    — discover Tailscale devices and configure SSH access', value: 'fleet' },
+        { name: 'watchdog — resume stalled agent sessions on selected devices', value: 'watchdog' },
       ],
     });
     for (const pick of picks) {
@@ -291,6 +293,7 @@ async function runSetupHub(): Promise<void> {
       else if (pick === 'share') await runShareWizard();
       else if (pick === 'secrets') await import('./setup-secrets.js').then((m) => m.runSecretsSetupWizard());
       else if (pick === 'fleet') await import('./setup-fleet.js').then((m) => m.runFleetSetupWizard());
+      else if (pick === 'watchdog') await runWatchdogSetupWizard();
     }
   } catch (err) {
     if (isPromptCancelled(err)) return;
@@ -313,6 +316,7 @@ export function registerSetupCommand(program: Command): void {
   registerSetupMineCommand(setupCmd);
   registerSetupSecretsCommand(setupCmd);
   registerSetupFleetCommand(setupCmd);
+  registerSetupWatchdogCommand(setupCmd);
 
   setHelpSections(setupCmd, {
     examples: `
@@ -328,12 +332,13 @@ export function registerSetupCommand(program: Command): void {
       agents setup share
       agents setup secrets
       agents setup fleet
+      agents setup watchdog
     `,
     notes: `
       What it does:
         1. Clones the system repo into ~/.agents/.system/
         2. Imports any unmanaged agent installations it finds
-        3. On a TTY, offers to set up optional capabilities (browser/computer/share/secrets/fleet)
+        3. On a TTY, offers to set up optional capabilities (browser/computer/share/secrets/fleet/watchdog)
         4. On a TTY, asks preferences: which machine you sit at (interactive host)
            and which browser agents drive here — both skippable, both the same
            keys 'agents devices set-interactive' / 'browser profiles set-default' write
@@ -344,6 +349,7 @@ export function registerSetupCommand(program: Command): void {
         agents setup share       # provision or join a Cloudflare share endpoint
         agents setup secrets     # choose secrets backend/policy defaults + import
         agents setup fleet       # discover Tailscale devices + configure SSH access
+        agents setup watchdog    # choose which devices run the watchdog routine
 
       To install CLIs from agents.yaml and sync resources into version homes:
         agents sync --local -y

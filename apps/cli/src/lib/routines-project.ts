@@ -26,11 +26,11 @@ import {
   type JobSource,
   readJob,
   writeJob,
+  setJobEnabled,
   deleteJob,
   listJobs,
   validateJob,
   resolveHostStrategy,
-  placementRequiresFiringPin,
 } from './routines.js';
 import { parseOwnerRepoFromRemote } from './registry.js';
 import { machineId } from './machine-id.js';
@@ -242,7 +242,7 @@ export interface SyncProjectResult {
  * - Overwrites user copies that already carry matching `source.projectPath`
  * - Never clobbers a hand-authored user routine (no source / different source)
  * - Removes user copies from this project whose YAML disappeared
- * - Auto-pins `devices` for host/fleet/cloud placement when unset
+ * - Activates materialized routines on this device without mutating definitions
  */
 export function syncProjectRoutines(projectRoot: string): SyncProjectResult {
   ensureAgentsDir();
@@ -301,13 +301,6 @@ export function syncProjectRoutines(projectRoot: string): SyncProjectResult {
       if (existing.createdAt) job.createdAt = existing.createdAt;
     }
 
-    // Placement that leaves the firing machine must pin devices to avoid
-    // every fleet daemon dispatching once.
-    const strategy = resolveHostStrategy(job);
-    if (placementRequiresFiringPin(strategy) && (!job.devices || job.devices.length === 0)) {
-      job.devices = [machineId()];
-    }
-
     // Surface repo for list/display when project has a GitHub origin.
     if (git.repo && !job.repo) job.repo = git.repo;
     job.source = source;
@@ -321,6 +314,7 @@ export function syncProjectRoutines(projectRoot: string): SyncProjectResult {
 
     try {
       writeJob(job);
+      setJobEnabled(job.name, job.enabled);
       result.synced.push(file.name);
     } catch (err) {
       result.errors.push({ name: file.name, error: (err as Error).message });
@@ -384,4 +378,3 @@ export function discoverProjectRoutinesAt(
     enabled: isProjectRoutinesEnabled(projectRoot) || projectAgentsYamlEnablesRoutines(projectRoot),
   };
 }
-

@@ -377,7 +377,7 @@ export function isWatchdogRotateEnabled(): boolean {
  * Persist `watchdog.rotate: on|off`. Called by the `agents watchdog rotate
  * on|off` subcommand (commands/watchdog.ts) — the rotate-only switch the
  * Factory migration uses so a user who opted out of autoRotate keeps nudging
- * (rather than `agents watchdog disable`, which kills the whole watchdog).
+ * (rather than `agents watchdog off`, which disables the whole watchdog here).
  */
 export function setWatchdogRotateEnabled(on: boolean): void {
   const meta = readMeta();

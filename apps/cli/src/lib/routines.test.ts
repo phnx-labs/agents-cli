@@ -1,8 +1,19 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
+
+// Keep this legacy-definition suite independent of the developer machine's
+// device manifest. Device activation itself has a dedicated adjacent suite.
+vi.mock('./routine-activation.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./routine-activation.js')>();
+  return {
+    ...actual,
+    enabledRoutineNames: () => null,
+    routineEnabledOnThisDevice: () => null,
+  };
+});
 import { routineOwnerDevice, hasAmbiguousDevicePin, validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, finalizeRunMeta, writeRunMeta, resolveJobPrompt, getLatestCompletedRun, routineStats, type JobConfig, type RunMeta } from './routines.js';
 import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir } from './state.js';
 
@@ -211,7 +222,7 @@ describe('system-layer routines (built-ins from ~/.agents/.system/routines/)', (
       // A built-in shipped via the system repo — enabled, on a schedule.
       fs.writeFileSync(
         sysFile,
-        `name: ${name}\nschedule: '0 9 * * 1'\nagent: claude\nprompt: check for updates\n`,
+        `name: ${name}\nschedule: '0 9 * * 1'\nenabled: true\nagent: claude\nprompt: check for updates\n`,
         'utf-8'
       );
 
@@ -235,7 +246,8 @@ describe('system-layer routines (built-ins from ~/.agents/.system/routines/)', (
 
       found = listJobs().find((j) => j.name === name);
       expect(found).toBeDefined();
-      expect(found!.enabled).toBe(false);          // user copy wins
+      expect(found!.enabled).toBe(false);          // a new definition is inactive until device activation
+      expect(fs.readFileSync(path.join(getRoutinesDir(), `${name}.yml`), 'utf-8')).not.toContain('enabled:');
       expect(found!.prompt).toBe('overridden');
       // Only one entry for the name — user shadows system, no duplicate.
       expect(listJobs().filter((j) => j.name === name).length).toBe(1);
@@ -575,9 +587,9 @@ describe('validateJob — host placement', () => {
     expect(validateJob(baseJob({ schedule: '0 3 * * *', host: 'gpu-box', devices: ['zion'] }))).toEqual([]);
   });
 
-  it('rejects host placement without a devices pin', () => {
+  it('accepts host placement without definition-level device state', () => {
     const errors = validateJob(baseJob({ schedule: '0 3 * * *', host: 'gpu-box' }));
-    expect(errors.some((e) => e.includes('requires devices'))).toBe(true);
+    expect(errors).toEqual([]);
   });
 
   it('rejects an empty host', () => {

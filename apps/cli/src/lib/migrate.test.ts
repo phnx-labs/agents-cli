@@ -612,10 +612,10 @@ describe('migrateWatchdogSentinelToRoutine', () => {
     const dir = makeTempHistoryDir();
     const sentinel = path.join(dir, 'enabled');
     fs.writeFileSync(sentinel, 'enabled\n');
-    const calls: boolean[] = [];
-    migrateWatchdogSentinelToRoutine(sentinel, (en) => { calls.push(en); });
+    const calls: Array<[string, boolean]> = [];
+    migrateWatchdogSentinelToRoutine(sentinel, (name, enabled) => { calls.push([name, enabled]); });
     // Opted-in state is carried forward, and the one-shot marker is consumed.
-    expect(calls).toEqual([true]);
+    expect(calls).toEqual([['watchdog', true]]);
     expect(fs.existsSync(sentinel)).toBe(false);
   });
 

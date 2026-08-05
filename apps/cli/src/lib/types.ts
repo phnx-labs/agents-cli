@@ -1007,6 +1007,13 @@ export interface Meta {
    */
   deviceConfig?: Record<string, unknown>;
   /**
+   * Routine names enabled on this machine. In memory this stays distinct from
+   * portable user config; state.ts writes it as top-level `routines:` in
+   * `~/.agents/devices/<machine>/agents.yaml`. Presence in the list is the whole
+   * activation state: absent means disabled on this device.
+   */
+  deviceRoutines?: string[];
+  /**
    * Agent-host registry keyed by host name (`agents hosts`). Portable user
    * config synced with `agents repo push/pull`. For `ssh-config` hosts this is
    * just an overlay (caps/os) — the connection details stay in ~/.ssh/config and

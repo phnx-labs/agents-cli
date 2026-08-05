@@ -48,7 +48,6 @@ import {
   normalizeTriggerEvent,
   parseHostStrategy,
   resolveHostStrategy,
-  placementRequiresFiringPin,
   HOST_STRATEGIES,
 } from '../lib/routines.js';
 import type { JobConfig, JobTrigger, LinearTriggerEvent, RunMeta, HostStrategy } from '../lib/routines.js';
@@ -77,6 +76,9 @@ import { loadDevices, loadDevicesSync } from '../lib/devices/registry.js';
 import type { DeviceRegistry } from '../lib/devices/registry.js';
 import { machineId, normalizeHost } from '../lib/machine-id.js';
 import { addHostOption } from '../lib/hosts/option.js';
+import { devicesWithRoutineEnabled } from '../lib/routine-activation.js';
+import { spawnSync } from 'node:child_process';
+import { getCliLaunch } from '../lib/cli-entry.js';
 
 /**
  * Human-friendly wall-clock a run took (e.g. "  · 3 min", "  · 45 sec"), or ""
@@ -172,7 +174,7 @@ function placementTag(job: JobConfig): string {
 }
 
 function deviceLabel(job: JobConfig, width?: number): { raw: string; display: string; dim: boolean } {
-  const full = [job.devices?.join(',') ?? '', placementTag(job)]
+  const full = [devicesWithRoutineEnabled(job.name).join(','), placementTag(job)]
     .filter(Boolean)
     .join(' ');
   const raw = full.length === 0 ? 'all' : full;
@@ -243,9 +245,9 @@ export function groupRoutineJobsByDevice(
       continue;
     }
 
-    const devices = job.devices ?? [];
+    const devices = devicesWithRoutineEnabled(job.name);
     if (devices.length === 0) {
-      add('fleet', 'Fleet-wide', job);
+      add('disabled', 'Disabled', job);
       continue;
     }
     for (const device of devices) {
@@ -261,9 +263,10 @@ export function groupRoutineJobsByDevice(
   const order = (group: RoutineListGroup): number => {
     if (group.key === 'this-machine') return 0;
     if (group.key === 'fleet') return 1;
-    if (group.key === 'cloud') return 2;
-    if (group.key.startsWith('device:')) return 3;
-    if (group.key.startsWith('host:')) return 4;
+    if (group.key === 'disabled') return 2;
+    if (group.key === 'cloud') return 3;
+    if (group.key.startsWith('device:')) return 4;
+    if (group.key.startsWith('host:')) return 5;
     return 5;
   };
   return [...groups.values()].sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title));
@@ -639,6 +642,7 @@ export function registerRoutinesCommands(program: Command): void {
         const nowJson = new Date();
         const payload = jobs.map((job) => {
           const latestRun = localLatestRun(job);
+          const enabledDevices = devicesWithRoutineEnabled(job.name);
           return {
             name: job.name,
             agent: job.agent ?? null,
@@ -649,7 +653,8 @@ export function registerRoutinesCommands(program: Command): void {
             scheduleHuman: fireConditionLabel(job),
             trigger: job.trigger ?? null,
             timezone: job.timezone ?? null,
-            devices: job.devices ?? [],
+            devices: enabledDevices,
+            enabledDevices,
             host: job.host ?? null,
             hostStrategy: resolveHostStrategy(job),
             source: job.source ?? null,
@@ -727,7 +732,7 @@ export function registerRoutinesCommands(program: Command): void {
     .option('-t, --timeout <timeout>', 'Kill the agent if it runs longer than this (e.g., 10m, 2h, 3d, 1w; max 1w)', '10m')
     .option('--timezone <tz>', 'Interpret schedule in this timezone (e.g., America/Los_Angeles)')
     .option('--devices <names>', 'Fleet allowlist (comma-separated): only listed devices schedule and fire this routine. Omit for unrestricted.')
-    .option('--run-on <name>', 'BODY placement: execute the job body on this machine over SSH (registered host, device, capability tag, or user@host). Sets hostStrategy=host. Not eligibility — see --devices. Auto-pins devices to THIS machine unless --devices is given. Same model as agents run --where device:<name> (docs/00-concepts.md#placement).')
+    .option('--run-on <name>', 'BODY placement: execute the job body on this machine over SSH (registered host, device, capability tag, or user@host). Sets hostStrategy=host. Same model as agents run --where device:<name> (docs/00-concepts.md#placement).')
     .option('--placement <strategy>', `BODY placement strategy: ${HOST_STRATEGIES.join('|')} (default: local, or host when --run-on is set). Maps to the shared Placement model (local|device|fleet|cloud). Not the same as --host (which manages routines on a remote machine).`)
     .option('--run-cwd <dir>', 'Working directory on the --run-on host (--remote-cwd is taken by the remote-management passthrough)')
     .option('--at <time>', 'One-shot mode: run once at this time (e.g., "14:30" or "2026-02-24 09:00"), then disable')
@@ -836,18 +841,6 @@ export function registerRoutinesCommands(program: Command): void {
           process.exit(1);
         }
 
-        // Off-box placement without a --devices pin would fire on EVERY daemon
-        // in the fleet, each dispatching once — duplicate runs (RUSH-1980).
-        // Pin to this machine unless the user chose an explicit eligibility set.
-        const strategyForPin: HostStrategy = hostStrategy
-          ?? (options.runOn ? 'host' : 'local');
-        if (placementRequiresFiringPin(strategyForPin) && !devices) {
-          devices = [machineId()];
-          console.error(chalk.gray(
-            `--placement ${strategyForPin} with no --devices: pinned firing to this machine (${devices[0]}).`,
-          ));
-        }
-
         const config: JobConfig = {
           name: nameOrPath,
           ...(schedule ? { schedule } : {}),
@@ -881,6 +874,7 @@ export function registerRoutinesCommands(program: Command): void {
         }
 
         writeJob(config);
+        setJobEnabled(config.name, config.enabled && (!devices || devices.map(normalizeHost).includes(normalizeHost(machineId()))));
         if (options.json) {
           writeJson({
             ok: true,
@@ -952,17 +946,8 @@ export function registerRoutinesCommands(program: Command): void {
           ));
         }
 
-        // Same duplicate-fire guard as --placement/--run-on: off-box placement
-        // with no eligibility pin would fire from every daemon in the fleet.
-        const fileStrategy = resolveHostStrategy(config);
-        if (placementRequiresFiringPin(fileStrategy) && (!config.devices || config.devices.length === 0)) {
-          config.devices = [machineId()];
-          console.error(chalk.gray(
-            `${fileStrategy} placement with no devices pin: pinned firing to this machine (${config.devices[0]}).`,
-          ));
-        }
-
         writeJob(config);
+        setJobEnabled(config.name, config.enabled && (!config.devices || config.devices.map(normalizeHost).includes(normalizeHost(machineId()))));
         if (options.json) {
           writeJson({
             ok: true,
@@ -1587,12 +1572,13 @@ export function registerRoutinesCommands(program: Command): void {
       }
     });
 
-  // Fleet allowlist management for a single routine.
+  // Device activation management for a single routine. Each mutation executes
+  // on the target device so only that host writes devices/<hostname>/agents.yaml.
   routinesCmd
     .command('devices [name]')
-    .description('View or change which devices may run a routine. Without flags, opens an interactive picker (requires a TTY).')
-    .option('--set <devices>', 'Replace the allowlist with this comma-separated list (strict fleet validation)')
-    .option('--clear', 'Remove the allowlist so the routine runs on every device')
+    .description('View or change the devices where a routine is enabled. Without flags, opens an interactive picker (requires a TTY).')
+    .option('--set <devices>', 'Replace the enabled-device set with this comma-separated list')
+    .option('--clear', 'Disable the routine on every registered device')
     .action(async (name: string | undefined, options: { set?: string; clear?: boolean }) => {
       const hasSet = options.set !== undefined;
       if (hasSet && options.clear) {
@@ -1610,34 +1596,36 @@ export function registerRoutinesCommands(program: Command): void {
         process.exit(1);
       }
 
-      if (options.clear) {
-        const strategy = resolveHostStrategy(job);
-        if (placementRequiresFiringPin(strategy)) {
-          console.error(chalk.red(
-            `Cannot clear devices for hostStrategy: ${strategy} — without a pin every fleet daemon would dispatch once.`,
-          ));
-          console.error(chalk.gray(`Keep a single-machine pin (e.g. --set ${machineId()}) or switch to --placement local.`));
-          process.exit(1);
+      const applyDevices = async (selected: string[]): Promise<void> => {
+        const registry = await loadDevices();
+        const registered = Object.keys(registry).map(normalizeHost);
+        const all = [...new Set([...registered, machineId()].map(normalizeHost))].sort();
+        const selectedSet = new Set(selected.map(normalizeHost));
+        const unknown = [...selectedSet].filter((device) => !all.includes(device));
+        if (unknown.length > 0) throw new Error(`Unknown device${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}`);
+        for (const device of all) {
+          const action = selectedSet.has(device) ? 'resume' : 'pause';
+          if (device === normalizeHost(machineId())) {
+            setJobEnabled(name!, action === 'resume');
+            if (isDaemonRunning()) signalDaemonReload();
+            continue;
+          }
+          const launch = getCliLaunch(['routines', action, name!, '--host', device]);
+          const result = spawnSync(launch.command, launch.args, { stdio: 'inherit', env: process.env });
+          if ((result.status ?? 1) !== 0) throw new Error(`Could not ${action} '${name}' on ${device}`);
         }
-        job.devices = undefined;
-        writeJob(job);
-        console.log(chalk.green(`Devices cleared for '${name}' — runs on all devices`));
-        if (isDaemonRunning()) signalDaemonReload();
+        console.log(chalk.green(selected.length === 0
+          ? `Routine '${name}' disabled on every registered device`
+          : `Routine '${name}' enabled on: ${selected.join(', ')}`));
+      };
+
+      if (options.clear) {
+        await applyDevices([]);
         return;
       }
 
       if (hasSet) {
-        const devices = await parseAndValidateDevices(options.set!);
-        job.devices = devices;
-        // Re-validate so host/fleet/cloud can't be left with an empty set via --set ""
-        const errs = validateJob(job);
-        if (errs.length > 0) {
-          console.error(chalk.red(errs.join('\n')));
-          process.exit(1);
-        }
-        writeJob(job);
-        console.log(chalk.green(`Devices for '${name}' set to: ${devices.join(', ')}`));
-        if (isDaemonRunning()) signalDaemonReload();
+        await applyDevices(await parseAndValidateDevices(options.set!));
         return;
       }
 
@@ -1653,12 +1641,12 @@ export function registerRoutinesCommands(program: Command): void {
         return;
       }
 
-      const currentSet = new Set((job.devices ?? []).map((d) => normalizeHost(d)));
+      const currentSet = new Set(devicesWithRoutineEnabled(name).map(normalizeHost));
 
       try {
         const { checkbox } = await import('@inquirer/prompts');
         const selected = await checkbox({
-          message: `Devices allowed to run '${name}' (space to toggle, enter to confirm, empty = unrestricted):`,
+          message: `Devices where '${name}' is enabled (space to toggle, enter to confirm):`,
           choices: registeredNames.map((d) => ({
             value: d,
             name: d,
@@ -1666,23 +1654,7 @@ export function registerRoutinesCommands(program: Command): void {
           })),
         });
 
-        if (selected.length === 0) {
-          const strategy = resolveHostStrategy(job);
-          if (placementRequiresFiringPin(strategy)) {
-            console.error(chalk.red(
-              `Cannot clear devices for hostStrategy: ${strategy} — without a pin every fleet daemon would dispatch once.`,
-            ));
-            return;
-          }
-          job.devices = undefined;
-          writeJob(job);
-          console.log(chalk.green(`Devices cleared for '${name}' — runs on all devices`));
-        } else {
-          job.devices = selected;
-          writeJob(job);
-          console.log(chalk.green(`Devices for '${name}' set to: ${selected.join(', ')}`));
-        }
-        if (isDaemonRunning()) signalDaemonReload();
+        await applyDevices(selected);
       } catch (err) {
         if (isPromptCancelled(err)) {
           console.log(chalk.gray('Cancelled'));

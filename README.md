@@ -396,7 +396,7 @@ agents watchdog --nudge    # actually inject "Continue." into the stalled split
 agents watchdog --watch    # daemon loop: a tick every --interval
 ```
 
-`agents watchdog` detects a stalled session, resolves the *exact* terminal split it lives in (tmux, iTerm, VSCodium, or a raw pty), and injects a nudge -- `Continue.` by default, or set `--text`. It's dry by default; `--nudge` acts on a single tick, and `agents watchdog enable` flips global auto-nudge on so `--watch` injects on its own. Steer a single run with `agents watchdog policy <id> off | keep | handsoff`.
+`agents watchdog` detects a stalled session, resolves the *exact* terminal split it lives in (tmux, iTerm, VSCodium, or a raw pty), and injects a nudge -- `Continue.` by default, or set `--text`. It's dry by default; `--nudge` acts on a single tick, and `agents watchdog on|off` enables or disables the built-in routine on this device. `agents setup watchdog` chooses devices. Steer a single run with `agents watchdog policy <id> off | keep | handsoff`.
 
 A stalled session whose tail shows a hard account limit ("You've hit your weekly limit · resets …") is **rotated in place** instead of nudged: the watchdog gates on the same healthy-account selection `agents run auto` makes (zero healthy → one skip event per cooldown window, terminal untouched), injects the harness's exit sequence, relaunches `agents run auto --interactive --session-id <uuid>` in the *same* tab, then replays the old session's resume once the new TUI is live. Default on; `agents watchdog rotate off` disables it (nudging stays on).
 
@@ -921,11 +921,11 @@ agents routines run daily-digest       # Test it now, ignore the schedule
 agents routines logs daily-digest      # Last execution — status + report (add --full for raw stdout)
 agents routines stats                  # Run count, failed, missed, avg/p50/p95 duration — per job or all
 
-# Routines sync to every device; restrict to an allowlist with --devices
+# Definitions sync to every device; activation is stored per hostname
 agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
-  --devices yosemite-s0,mac-mini --prompt "Drain the local work queue"
+  --prompt "Drain the local work queue"
 
-agents routines devices nightly-drain --set yosemite-s0,mac-mini  # update allowlist
+agents routines devices nightly-drain --set yosemite-s0,mac-mini  # enable on both hosts
 agents routines list --host yosemite-s0                            # query another device
 
 # Signed webhook trigger: Linear issue labeled "agent" fires a routine

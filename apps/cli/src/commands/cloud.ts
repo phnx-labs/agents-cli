@@ -17,7 +17,7 @@ import { renderStream } from '../lib/cloud/stream.js';
 import type { CloudProvider, CloudProviderId, CloudTarget, CloudTaskStatus, DispatchOptions, ImageAttachment, SkillRef } from '../lib/cloud/types.js';
 import { MissingTargetError, MAX_IMAGES_PER_DISPATCH } from '../lib/cloud/types.js';
 import type { JobConfig, JobTrigger } from '../lib/routines.js';
-import { normalizeTriggerEvent, validateTrigger, writeJob, jobExists, GITHUB_TRIGGER_EVENTS } from '../lib/routines.js';
+import { normalizeTriggerEvent, validateTrigger, writeJob, setJobEnabled, jobExists, GITHUB_TRIGGER_EVENTS } from '../lib/routines.js';
 import { machineId } from '../lib/machine-id.js';
 import { emit } from '../lib/events.js';
 import { shareRuntimeEnv } from '../lib/share/config.js';
@@ -357,6 +357,7 @@ Examples:
           routine.devices = [machineId()];
         }
         writeJob(routine);
+        setJobEnabled(routine.name, true);
 
         if (json) {
           console.log(JSON.stringify({ ok: true, registered: routineName, trigger }, null, 2));

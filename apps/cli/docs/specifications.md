@@ -1943,7 +1943,7 @@ nothing but its own view cache.
   and one executor: the agents-cli daemon (`agents __daemon-run`,
   `apps/cli/src/lib/daemon.ts`) or a CLI command the daemon or the user drives.
   Status: **Current** for routines (`lib/scheduler.ts`), the watchdog
-  (`lib/watchdog/routine.ts`, WD-1), and rotate (`lib/watchdog/rotate.ts`).
+  (the system `routines/watchdog.yml` definition, WD-1), and rotate (`lib/watchdog/rotate.ts`).
 - **SING-2 (MUST NOT).** A UI surface (apps/factory, the menubar app, the iOS app)
   MUST NOT own a timer, watcher, or loop that detects a condition and performs a
   fleet-affecting action. Detection and decision MUST live in the CLI, which holds
@@ -1956,7 +1956,7 @@ nothing but its own view cache.
   `live-terminals.json`, driven by `apps/cli/src/lib/terminal/inject.ts`; the
   terminal engine's vscodium launch backend.
 - **SING-4 (MUST).** A control in any UI that turns a fleet-affecting capability on
-  or off MUST flip the CLI's own state (`agents watchdog enable|disable|rotate`,
+  or off MUST flip the CLI's own state (`agents watchdog on|off|rotate`,
   `agents routines`), so every surface observes one truth. A UI-local toggle that
   gates only the UI's view of an action MUST NOT exist.
 - **SING-5 (MUST).** Routines MUST fire only from the daemon's pid-claimed
@@ -2067,7 +2067,7 @@ not the watchdog's.
 
 - **WD-1 (MUST).** The always-on watchdog MUST be a daemon-fired cron routine, not a
   bespoke loop — the routine command is `agents watchdog --nudge` on
-  `WATCHDOG_ROUTINE_SCHEDULE` (`lib/watchdog/routine.ts`). Each fire MUST run exactly one
+  schedule in the system `routines/watchdog.yml`. Each fire MUST run exactly one
   bounded tick.
 - **WD-2 (MUST).** Delivery MUST occur only when `--nudge` is set; without it a tick is a
   dry run that reports "would nudge" and delivers nothing (`lib/watchdog/runner.ts`).
