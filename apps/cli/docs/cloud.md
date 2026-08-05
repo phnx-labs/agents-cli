@@ -25,10 +25,34 @@ in `~/.agents/agents.yaml` > `rush`.
 
 | Agent | Native cloud | Why |
 |---|---|---|
-| `claude` | `rush` | Claude Code has no headless Anthropic-hosted dispatch CLI (only `--remote-control`, which bridges a *local* session). Rush runs Claude against a repo → PR. |
+| `claude` | `rush` | Rush runs Claude against a repo → PR. (Claude Code does have a native `claude --cloud` on Anthropic-managed infra since 2026-08; routing to Rush is deliberate — one tracked fleet for every harness.) |
 | `codex` | `codex` | `codex cloud exec` — first-class native CLI. |
 | `droid` | `factory` | Factory Droid Computer (cloud VM) via `droid computer ssh` + remote `droid exec`. |
 | `antigravity` | `antigravity` | Gemini Managed Agents Interactions API (remote sandbox). |
+
+### Dispatch from `agents run` — the `--cloud` placement
+
+The same dispatch is a placement on `agents run`
+([#2066](https://github.com/phnx-labs/agents-cli/pull/2066)):
+
+```bash
+agents run claude "fix the flaky e2e" --cloud --repo acme/example
+agents run codex "add parser tests" --cloud --cloud-env env_a1b2c3
+agents run claude "…" --where cloud:codex   # one-door spelling (+ provider)
+```
+
+`--cloud` sits beside `--host`/`--device` and `--lease` as one of three run
+placements (local, machine, cloud) and is mutually exclusive with them. It
+accepts `--provider`, `--repo` (repeatable), `--branch`, `--cloud-env` (run's
+`--env` stays the KEY=VAL passthrough), `--timeout`, `--model`, `--no-follow`,
+and `--json`; local-run flags (`--loop`, `--resume`, `--secrets`, `--terminal`,
+`--cwd`, account strategy, …) are rejected, not silently dropped. Agents with
+no native cloud (kimi, grok, cursor, opencode, …) fail loud with the capable
+list unless `--provider` is given. Both surfaces call the shared dispatch core
+(`executeCloudDispatch` in `src/lib/cloud/dispatch.ts` via
+`src/commands/run-cloud.ts`), so tracking, streaming, and the budget
+kill-switch are identical to `agents cloud run`. See
+[00-concepts.md#placement](00-concepts.md#placement) for the placement model.
 
 ### Pre-provisioned targets (env / computer)
 
