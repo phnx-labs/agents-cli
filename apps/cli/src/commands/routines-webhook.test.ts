@@ -58,6 +58,12 @@ function makeHome(jobs: Record<string, unknown>[]): string {
   // git checkout (isGitRepo → ~/.agents/.system/.git exists). Seed it so the
   // command runs instead of erroring "agents-cli is not set up".
   fs.mkdirSync(path.join(home, '.agents', '.system', '.git'), { recursive: true });
+  const deviceDir = path.join(home, '.agents', 'devices', 'webhook-test');
+  fs.mkdirSync(deviceDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(deviceDir, 'agents.yaml'),
+    `routines:\n${jobs.map((job) => `  - ${job.name}`).join('\n')}\n`,
+  );
   for (const job of jobs) {
     const yamlLines = Object.entries(job).map(([k, v]) =>
       typeof v === 'object' ? `${k}: ${JSON.stringify(v)}` : `${k}: ${JSON.stringify(v)}`,
@@ -71,7 +77,13 @@ function makeHome(jobs: Record<string, unknown>[]): string {
 function runWebhook(home: string, args: string[]): ReturnType<typeof spawnSync> {
   return spawnSync('node', ['--import', 'tsx', 'src/index.ts', 'routines', 'webhook', ...args], {
     cwd: REPO_ROOT,
-    env: { ...process.env, HOME: home, USERPROFILE: home, AGENTS_SKIP_MIGRATION: '1' },
+    env: {
+      ...process.env,
+      HOME: home,
+      USERPROFILE: home,
+      AGENTS_SKIP_MIGRATION: '1',
+      AGENTS_SYNC_MACHINE_ID: 'webhook-test',
+    },
     encoding: 'utf-8',
   });
 }

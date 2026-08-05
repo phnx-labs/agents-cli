@@ -900,6 +900,7 @@ const META_KEY_SCOPE: Record<keyof Meta, 'central' | 'device'> = {
   versions: 'device',
   defaultBrowserProfile: 'device',
   deviceConfig: 'device',
+  deviceRoutines: 'device',
   // Central — synced via agents.yaml.
   run: 'central',
   model: 'central',
@@ -998,7 +999,7 @@ function serializeCentral(central: Record<string, unknown>): string {
 }
 
 function writeMetaUnlocked(meta: Meta): void {
-  const { agents, isolatedAgents, versions, defaultBrowserProfile, deviceConfig, ...central } = meta;
+  const { agents, isolatedAgents, versions, defaultBrowserProfile, deviceConfig, deviceRoutines, ...central } = meta;
 
   // Write the machine-local files FIRST, then strip central — so a crash mid-write
   // never removes pins/versions from central before they're persisted elsewhere.
@@ -1013,15 +1014,17 @@ function writeMetaUnlocked(meta: Meta): void {
   // Device-scope config (`maxAgents`, `schedulerEnabled`, …) is per-machine, so it
   // rides the device doc under `config:` — never the central doc that syncs.
   const hasDeviceConfig = !!deviceConfig && Object.keys(deviceConfig).length > 0;
-  if (hasAgents || hasIsolatedAgents || hasDefaultBrowser || hasDeviceConfig) {
+  const hasDeviceRoutines = Array.isArray(deviceRoutines);
+  if (hasAgents || hasIsolatedAgents || hasDefaultBrowser || hasDeviceConfig || hasDeviceRoutines) {
     // Device-local doc carries `agents:` pins, `defaultBrowserProfile:`, and the
     // device-scope `config:` — all per-machine and must never land in central
     // agents.yaml (which syncs).
-    const deviceDoc: Partial<Meta> = {};
+    const deviceDoc: Partial<Meta> & { routines?: string[] } = {};
     if (hasAgents) deviceDoc.agents = agents;
     if (hasIsolatedAgents) deviceDoc.isolatedAgents = isolatedAgents;
     if (hasDefaultBrowser) deviceDoc.defaultBrowserProfile = defaultBrowserProfile;
     if (hasDeviceConfig) deviceDoc.config = deviceConfig;
+    if (hasDeviceRoutines) deviceDoc.routines = deviceRoutines;
     fs.mkdirSync(path.dirname(devicePath), { recursive: true });
     writeIfChanged(devicePath, META_HEADER + yaml.stringify(deviceDoc));
   } else if (fs.existsSync(devicePath)) {
@@ -1059,13 +1062,22 @@ function writeMetaUnlocked(meta: Meta): void {
 function overlayMachineLocal(meta: Meta): Meta {
   const devicePath = getDeviceMetaPath();
   if (fs.existsSync(devicePath)) {
+    let dm: (Meta & { routines?: unknown }) | null = null;
     try {
-      const dm = yaml.parse(fs.readFileSync(devicePath, 'utf-8')) as Meta;
+      dm = yaml.parse(fs.readFileSync(devicePath, 'utf-8')) as Meta & { routines?: unknown };
+    } catch { /* preserve the existing tolerance for malformed legacy device YAML */ }
+    if (dm) {
       if (dm?.agents) meta.agents = { ...meta.agents, ...dm.agents };
       if (dm?.isolatedAgents) meta.isolatedAgents = { ...meta.isolatedAgents, ...dm.isolatedAgents };
       if (dm?.defaultBrowserProfile) meta.defaultBrowserProfile = dm.defaultBrowserProfile;
       if (dm?.config) meta.deviceConfig = dm.config;
-    } catch { /* ignore malformed device file */ }
+      if (dm && Object.prototype.hasOwnProperty.call(dm, 'routines')) {
+        if (!Array.isArray(dm.routines) || dm.routines.some((name) => typeof name !== 'string')) {
+          throw new Error(`Device config corrupted at ${devicePath}: routines must be a string list.`);
+        }
+        meta.deviceRoutines = dm.routines;
+      }
+    }
   }
   const vrPath = getVersionResourcesPath();
   if (fs.existsSync(vrPath)) {

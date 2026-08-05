@@ -277,6 +277,17 @@ function loadLeasedBoxesSection(): string[] {
 }
 
 /**
+ * Whether `agents devices list` shows the "Leased boxes" section (RUSH-2190).
+ * Opt-in via --all only: loading it scans the keychain for bundle credentials
+ * and can raise a Touch ID sheet after the table has printed, so the default
+ * list must never reach for it. --no-stats stays the hard "instant, no provider
+ * calls" opt-out even when --all is passed.
+ */
+export function showLeasedBoxesSection(opts: { all?: boolean; stats?: boolean }): boolean {
+  return opts.all === true && opts.stats !== false;
+}
+
+/**
  * `agents ssh <slug>` targeting a leased crabbox box. crabbox provisions a
  * per-lease identity key, so we ssh via crabbox's OWN emitted invocation
  * (`crabboxSshArgv`) — a raw `ssh crabbox@ip` fails publickey. Returns false when
@@ -1189,7 +1200,7 @@ Typical workflow:
     return Object.keys(config).length > 0 ? config : undefined;
   };
 
-  const runList = async (opts: { json?: boolean; stats?: boolean; full?: boolean; refresh?: boolean; live?: boolean } = {}) => {
+  const runList = async (opts: { json?: boolean; stats?: boolean; full?: boolean; refresh?: boolean; live?: boolean; all?: boolean } = {}) => {
     const reg = await loadDevices();
     const names = Object.keys(reg).sort();
     const interactiveHost = getConfigValue('interactive.host').value as string | undefined;
@@ -1250,10 +1261,13 @@ Typical workflow:
       console.log(chalk.gray(`  updated ${formatCheckedAge(freshness.oldestFetchedAt)} — pass --refresh (--live) for a live probe`));
     }
     // Ephemeral crabbox leases live alongside the registered fleet but are never
-    // written into the registry — surface them as their own live section. This is
-    // a live provider call, so honor --no-stats (the explicit "instant, no probes"
-    // opt-out) and bound it so a slow provider can't hang `agents devices`.
-    if (opts.stats !== false) {
+    // written into the registry — surface them as their own live section, but only
+    // behind --all (RUSH-2190). Reading them routes through crabboxEnv, whose
+    // bundle auto-detect scans the keychain and can raise a Touch ID sheet AFTER
+    // the table has printed — unacceptable for the default list, which hooks and
+    // other non-interactive callers rely on. The predicate is exported so the
+    // gate itself is unit-tested; keep it the ONLY condition guarding this call.
+    if (showLeasedBoxesSection(opts)) {
       for (const line of loadLeasedBoxesSection()) console.log(line);
     }
   };
@@ -1269,6 +1283,7 @@ Typical workflow:
     .option('--refresh', 'force a live probe of every device, bypassing the cache')
     .option('--live', 'alias of --refresh (shorter to type)')
     .option('-f, --full', 'full mode: add per-device core count and free/total memory')
+    .option('--all', 'also show ephemeral leased boxes (live crabbox call; may need bundle secrets)')
     .action(runList);
 
   devicesCmd

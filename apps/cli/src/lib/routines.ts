@@ -20,6 +20,12 @@ import type { LoopConfig } from './loop.js';
 import { machineId, normalizeHost } from './machine-id.js';
 import { resolveActor } from './actor.js';
 import { percentile } from './percentile.js';
+import {
+  enabledRoutineNames,
+  replaceEnabledRoutines,
+  routineEnabledOnThisDevice,
+  setRoutineEnabledOnThisDevice,
+} from './routine-activation.js';
 
 /** Tool/site/directory allow-list for sandboxed job execution. */
 export interface JobAllowConfig {
@@ -365,7 +371,9 @@ export function finalizeRunMeta(
  * `yosemite-s0` all agree. Every fire path (cron scheduler, webhook,
  * catchup/overdue, manual run) gates on this.
  */
-export function jobRunsOnThisDevice(config: Pick<JobConfig, 'devices'>): boolean {
+export function jobRunsOnThisDevice(config: Pick<JobConfig, 'name' | 'devices'>): boolean {
+  const activated = routineEnabledOnThisDevice(config.name);
+  if (activated !== null) return activated;
   const owner = routineOwnerDevice(config);
   // Unrestricted: no pin means fleet-wide by design (`watchdog`, `check-updates`).
   if (owner === null) return true;
@@ -564,7 +572,7 @@ export function listJobs(cwd?: string): JobConfig[] {
       jobs.push(job);
     }
   }
-  return jobs;
+  return jobs.map(applyDeviceActivation);
 }
 
 /**
@@ -590,11 +598,16 @@ export function readJob(name: string, cwd?: string): JobConfig | null {
   for (const { scope, path: dir } of dirs) {
     const job = readJobFromDir(dir, name);
     if (job) {
-      if (scope === 'project') return overlayUserRoutineDevices(job, readJobFromDir(userDir, name));
-      return job;
+      if (scope === 'project') return applyDeviceActivation(overlayUserRoutineDevices(job, readJobFromDir(userDir, name)));
+      return applyDeviceActivation(job);
     }
   }
   return null;
+}
+
+function applyDeviceActivation(job: JobConfig): JobConfig {
+  const activated = routineEnabledOnThisDevice(job.name);
+  return activated === null ? job : { ...job, enabled: activated };
 }
 
 function readJobFromDir(dir: string, name: string): JobConfig | null {
@@ -634,6 +647,10 @@ function readJobFile(filePath: string): JobConfig | null {
       ...JOB_DEFAULTS,
       ...parsed,
       name: parsed.name || path.basename(filePath).replace(/\.ya?ml$/, ''),
+      // Before a device manifest exists, preserve only explicit legacy state.
+      // A new built-in definition with no `enabled:` field stays opt-in until
+      // setup materializes this host's routines list.
+      enabled: Object.prototype.hasOwnProperty.call(parsed, 'enabled') ? parsed.enabled !== false : false,
     } as JobConfig;
   } catch {
     return null;
@@ -675,11 +692,10 @@ export function writeJob(config: JobConfig): void {
   if (output.mode === 'auto') delete output.mode;
   if (output.effort === 'auto') delete output.effort;
   if (output.timeout === '10m') delete output.timeout;
-  if (output.enabled === true) delete output.enabled;
+  delete output.enabled;
   if (output.runOnce === false || output.runOnce === undefined) delete output.runOnce;
   if (output.catchup === true || output.catchup === undefined) delete output.catchup;
-  const devArr = output.devices as string[] | undefined;
-  if (!devArr || devArr.length === 0) delete output.devices;
+  delete output.devices;
 
   let existingText: string | null = null;
   if (ymlExists || yamlExists) {
@@ -746,8 +762,21 @@ export function deleteJob(name: string): boolean {
 export function setJobEnabled(name: string, enabled: boolean): void {
   const job = readJob(name);
   if (!job) throw new Error(`Job '${name}' not found`);
-  job.enabled = enabled;
-  writeJob(job);
+  const legacyEnabled = enabledRoutineNames() === null
+    ? listJobs().filter((candidate) => candidate.enabled && jobRunsOnThisDevice(candidate)).map((candidate) => candidate.name)
+    : [];
+  setRoutineEnabledOnThisDevice(name, enabled, legacyEnabled);
+}
+
+/** Materialize legacy definition state into this device's activation manifest. */
+export function migrateLegacyRoutineActivation(): boolean {
+  if (enabledRoutineNames() !== null) return false;
+  const jobs = listJobs();
+  if (!jobs.some((job) => job.enabled || Array.isArray(job.devices))) return false;
+  replaceEnabledRoutines(
+    jobs.filter((job) => job.enabled && jobRunsOnThisDevice(job)).map((job) => job.name),
+  );
+  return true;
 }
 
 /** Validate a partial job config, returning a list of human-readable errors. */
@@ -911,18 +940,6 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   if (config.catchup !== undefined && typeof config.catchup !== 'boolean') {
     errors.push('catchup must be a boolean (false to skip running a missed fire late)');
   }
-  // Off-box placement without a devices pin fires on every fleet daemon and
-  // each dispatches once (RUSH-1980). Enforce the pin at validation so hand
-  // edits and devices --clear cannot re-open the hole.
-  if (placementRequiresFiringPin(strategy)) {
-    if (!config.devices || config.devices.length === 0) {
-      errors.push(
-        `hostStrategy: ${strategy} requires devices: [<name>] to pin which daemon may fire ` +
-        '(otherwise every fleet daemon dispatches once). Pin to one machine, e.g. devices: [this-host]',
-      );
-    }
-  }
-
   return errors;
 }
 
@@ -1538,6 +1555,7 @@ export function installJobFromSource(sourcePath: string, name: string): { succes
     }
 
     writeJob(config);
+    setJobEnabled(config.name, config.enabled);
     return { success: true };
   } catch (err) {
     return { success: false, error: (err as Error).message };

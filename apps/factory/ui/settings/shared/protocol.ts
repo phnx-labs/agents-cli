@@ -22,7 +22,15 @@ export type FloorInbound =
   | { type: 'fetchUnifiedTasks' }
   | { type: 'detectTaskSources' }
   | { type: 'getFloorThroughput' }
-  | { type: 'fetchHostSessions' }
+  /**
+   * Fleet host sessions. `force: true` runs one bare `agents sessions --active
+   * --json`. Omit force (or false) to receive last-good immediately without a
+   * fleet CLI call once a snapshot exists. factory-floor-ui: manual refresh
+   * button should pass force:true; background polls must not.
+   */
+  | { type: 'fetchHostSessions'; force?: boolean }
+  /** Local sessions only. `force` bypasses the 60s local-only backstop. */
+  | { type: 'fetchLocalSessions'; force?: boolean }
   | { type: 'fetchHostSessionDetail'; host: string; sessionId: string }
   | { type: 'fetchDispatchData' }
   | { type: 'dismissTask'; taskId: string }
@@ -49,12 +57,28 @@ export type FloorOutbound =
   | { type: 'taskSourcesData'; sources: { linear: boolean; github: boolean } }
   | { type: 'floorThroughputData'; tokensPerSec: number }
   | { type: 'cloudSummaryUpdate'; executionId: string; summary: string; status: string }
-  | { type: 'hostSessions'; hosts: unknown; sessions: unknown; groups: unknown; fetchedAt: unknown }
+  | {
+      type: 'hostSessions'
+      hosts: unknown
+      sessions: unknown
+      groups: unknown
+      fetchedAt: unknown
+      /** Per-host last successful fetch epoch ms (optional freshness). */
+      hostFreshness?: Record<string, number>
+      /** True when served from last-good without a fresh fleet CLI call. */
+      fromCache?: boolean
+    }
+  | {
+      type: 'localSessions'
+      sessions: unknown
+      fetchedAt: unknown
+      fromCache?: boolean
+    }
   | { type: 'hostSessionDetail'; host: string; sessionId: string; markdown?: string; error?: string }
   | { type: 'dispatchData'; agents: unknown[]; hosts: unknown[]; targets: unknown[] }
   | { type: 'updateRunningCounts'; counts: unknown }
   // Managed projects (curated sidebar list + Projects pane).
-  | { type: 'managedProjectsData'; projects: ManagedProject[] }
+  | { type: 'managedProjectsData'; projects: ManagedProject[]; error?: string }
   | { type: 'linearProjectsData'; projects: LinearProjectLite[] }
   | { type: 'projectFolderPicked'; path: string; repoSlug?: string; name: string; suggestedLinear?: LinearProjectLite }
 

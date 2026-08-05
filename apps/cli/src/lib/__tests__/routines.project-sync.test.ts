@@ -229,7 +229,7 @@ describe('project opt-in + source tracking', () => {
     expect(readJob('daily')).toBeNull();
   });
 
-  it('sync auto-pins devices for fleet/cloud/host placement', () => {
+  it('sync activates the routine on this device without changing its definition', () => {
     writeRoutine(projectRoutinesDir, 'fleet-job', {
       schedule: '0 9 * * *',
       agent: 'claude',
@@ -239,8 +239,8 @@ describe('project opt-in + source tracking', () => {
     enableProjectRoutines(projectDir);
     syncProjectRoutines(projectDir);
     const job = readJob('fleet-job')!;
-    expect(job.devices).toBeDefined();
-    expect(job.devices!.length).toBe(1);
+    expect(job.devices).toBeUndefined();
+    expect(job.enabled).toBe(true);
     expect(job.hostStrategy).toBe('fleet');
   });
 });

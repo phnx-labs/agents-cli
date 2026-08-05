@@ -70,6 +70,7 @@ import {
   syncResourcesToVersion,
 } from '../lib/versions.js';
 import {
+  formatPath,
   isInteractiveTerminal,
   isPromptCancelled,
   parseCommaSeparatedList,
@@ -544,7 +545,7 @@ the sha256 in the index and abort on mismatch.
 
   program
     .command('install <identifier>')
-    .description('Install a package by registry name (mcp:notion), GitHub URL (gh:user/repo), or skill identifier')
+    .description('Install a package: mcp:, skill:, plugin:, or GitHub (gh:user/repo) — one install path (Phase 5)')
     .option('-a, --agents <list>', 'Targets: claude, codex@0.116.0, or cursor@default')
     .option(
       '--types <list>',
@@ -555,32 +556,25 @@ the sha256 in the index and abort on mismatch.
       'When source is a repo: comma-separated resource names within the selected types'
     )
     .option('-y, --yes', 'Auto-install any missing agent versions without prompting')
+    .option('--allow-exec-surfaces', 'With plugin: allow plugins that ship hooks/mcp/bin (same as agents plugins install)')
     .addHelpText('after', `
-Install resolves the package type (MCP server, skill, command, hook) and installs to the specified agents. Packages can come from registries (mcp:, skill:), GitHub (gh:user/repo), or direct URLs.
+Install is the unified add path (Phase 5 packaging). Prefix the identifier:
+
+  mcp:<name>       MCP server from a registry
+  skill:<name>     skill from a registry (or gh: fallback)
+  plugin:<spec>    plugin — same grammar as agents plugins install (name@url or path)
+  gh:user/repo     clone a DotAgents / multi-resource repo and install selected types
 
 Examples:
-  # Install an MCP server from a registry
   agents install mcp:notion --agents claude
-
-  # Install skills and commands from GitHub
+  agents install skill:animator --agents claude,codex
+  agents install plugin:my-plugin@https://github.com/user/my-plugin.git
+  agents install plugin:~/Projects/rush-toolkit
   agents install gh:anthropics/skills --agents codex,claude
-
-  # Install using GitHub shorthand
-  agents install gh:user/repo --agents claude@2.1.112
-
-  # Install only specific resource types from a multi-resource repo
   agents install gh:phnx-labs/.agents-system --types skills,workflows --agents claude@all
 
-  # Install specific resources by name
-  agents install gh:phnx-labs/.agents-system --types skills --names animator,composer --agents claude@all
-
-  # Install to all installed agents (uses defaults or prompts)
-  agents install mcp:postgres
-
-When to use:
-  - After search: 'agents search notion' then 'agents install mcp:notion'
-  - Team setup: 'agents install gh:team/resources' to sync everyone's tooling
-  - Quick MCP add: 'agents install mcp:<name>' when you know the package name
+Specialized verbs still work (agents plugins install, agents skills add) and
+delegate to the same underlying installers.
 `)
     .action(async (identifier: string, options) => {
       const spinner = ora('Resolving package...').start();
@@ -590,11 +584,105 @@ When to use:
 
         if (!resolved) {
           spinner.fail('Package not found');
-          console.log(chalk.gray('\nTip: Use explicit prefix (mcp:, skill:, gh:) or check the identifier.'));
+          console.log(chalk.gray('\nTip: Use explicit prefix (mcp:, skill:, plugin:, gh:) or check the identifier.'));
           process.exit(1);
         }
 
         spinner.succeed(`Found ${resolved.type} package`);
+
+        if (resolved.type === 'plugin') {
+          spinner.stop();
+          const spec = resolved.pluginSpec ?? resolved.source;
+          console.log(chalk.gray(`Installing plugin from: ${spec}`));
+          const {
+            installPlugin,
+            getPlugin,
+            inspectPluginCapabilities,
+            pluginCapabilityLabels,
+            parseInstallSpec,
+            checkPluginDependencies,
+            hasPluginExecSurfaces,
+            pluginSupportsAgent,
+            syncPluginToVersion,
+            pluginResourceGroups,
+          } = await import('../lib/plugins.js');
+          const { listInstalledVersions, getGlobalDefault, getVersionHomePath, syncResourcesToVersion } =
+            await import('../lib/versions.js');
+          const { agentLabel } = await import('../lib/agents.js');
+
+          let name: string;
+          let root: string;
+          try {
+            const result = await installPlugin(spec);
+            name = result.name;
+            root = result.root;
+          } catch (err) {
+            console.log(chalk.red(`Install failed: ${(err as Error).message}`));
+            process.exit(1);
+          }
+
+          const plugin = getPlugin(name);
+          if (!plugin) {
+            console.log(chalk.red(`Installed but could not load plugin '${name}'`));
+            process.exit(1);
+          }
+          const capabilities = inspectPluginCapabilities(root);
+          const allowExec = options.allowExecSurfaces === true;
+          if (hasPluginExecSurfaces(capabilities) && !allowExec) {
+            const source = parseInstallSpec(spec).source;
+            console.error(chalk.red('Install refused: plugin ships executable surfaces:'));
+            for (const label of pluginCapabilityLabels(capabilities)) {
+              console.error(`  ${label}`);
+            }
+            console.error(
+              `Re-run with --allow-exec-surfaces if you trust the source: ${source}@HEAD`,
+            );
+            fs.rmSync(root, { recursive: true, force: true });
+            process.exit(1);
+          }
+
+          const missingDeps = checkPluginDependencies(plugin.manifest);
+          if (missingDeps.length > 0) {
+            console.log(chalk.yellow(`Warning: missing dependencies: ${missingDeps.join(', ')}`));
+            console.log(chalk.gray('Install them with: agents install plugin:<name>@<source>'));
+          }
+
+          // Same sync loop as `agents plugins install` (default version per harness).
+          console.log();
+          let synced = 0;
+          for (const agentId of capableAgents('plugins')) {
+            if (!pluginSupportsAgent(plugin, agentId)) continue;
+            const versions = listInstalledVersions(agentId);
+            if (versions.length === 0) continue;
+            const defaultVer = getGlobalDefault(agentId);
+            const targetVersions = defaultVer ? [defaultVer] : [versions[versions.length - 1]];
+            for (const version of targetVersions) {
+              const didSync = allowExec
+                ? syncPluginToVersion(plugin, agentId, getVersionHomePath(agentId, version), {
+                    allowExecSurfaces: true,
+                  }).success
+                : syncResourcesToVersion(agentId, version, { plugins: [name] }).plugins.length > 0;
+              if (didSync) {
+                console.log(chalk.green(`  Synced to ${agentLabel(agentId)}@${version}`));
+                synced++;
+              }
+            }
+          }
+          if (synced === 0) {
+            console.log(
+              chalk.gray('  No supported agent versions installed — run "agents use <agent>@<version>" to sync.'),
+            );
+          }
+
+          console.log(chalk.bold(`\nInstalled ${plugin.name} v${plugin.manifest.version} to ${formatPath(root)}`));
+          const groups = pluginResourceGroups(plugin);
+          if (groups.length > 0) {
+            for (const g of groups) {
+              console.log(chalk.gray(`  ${g.label}: ${g.items.slice(0, 8).join(', ')}${g.items.length > 8 ? '…' : ''}`));
+            }
+          }
+          return;
+        }
 
         if (resolved.type === 'mcp') {
           // Install MCP server

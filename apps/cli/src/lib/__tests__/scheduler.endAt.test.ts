@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as state from '../state.js';
+import * as activation from '../routine-activation.js';
 import { JobScheduler } from '../scheduler.js';
 import { writeJob, readJob, type JobConfig } from '../routines.js';
 
@@ -16,6 +17,7 @@ beforeEach(() => {
 
   vi.spyOn(state, 'getRoutinesDir').mockReturnValue(userRoutinesDir);
   vi.spyOn(state, 'ensureAgentsDir').mockImplementation(() => {});
+  vi.spyOn(activation, 'routineEnabledOnThisDevice').mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -58,7 +60,8 @@ describe('JobScheduler endAt enforcement', () => {
     expect(fired).toBe(0);
     const reloaded = readJob('past-end');
     expect(reloaded).not.toBeNull();
-    expect(reloaded!.enabled).toBe(false);
+    // Activation is device metadata now; the shared definition remains immutable.
+    expect(reloaded!.enabled).toBe(true);
   });
 
   it('fires normally when endAt is in the future', async () => {

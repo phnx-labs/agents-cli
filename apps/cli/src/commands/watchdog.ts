@@ -10,13 +10,12 @@
  *   agents watchdog --nudge            one tick, actually injects (explicit opt-in)
  *   agents watchdog --watch            manual poll loop (dry unless --nudge)
  *   agents watchdog --json             machine-readable tick output (for the menu-bar)
- *   agents watchdog enable|disable     turn the always-on watchdog routine on/off
+ *   agents watchdog on|off             turn the always-on watchdog routine on/off
  *   agents watchdog policy <id> <p>    per-session policy: off | keep | handsoff
  *
  * The always-on watchdog is a daemon-fired ROUTINE, not a private sentinel + a
- * hand-rolled loop: `enable` creates/enables a `watchdog` command routine
- * (`agents watchdog --nudge` every couple of minutes) and reloads the daemon;
- * `disable` pauses it. See ../lib/watchdog/routine.ts.
+ * hand-rolled loop. Its immutable definition comes from the system DotAgents
+ * repo; on/off only changes this device's routine membership.
  */
 
 import type { Command } from 'commander';
@@ -25,17 +24,11 @@ import * as path from 'path';
 import { setHelpSections } from '../lib/help.js';
 import { parseDuration } from '../lib/hooks/cache.js';
 import { getRuntimeStateDir } from '../lib/state.js';
-import { setJobEnabled } from '../lib/routines.js';
+import { readJob, setJobEnabled } from '../lib/routines.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
 import { mailboxIdForActiveSession } from '../lib/mailbox-target.js';
 import { gcMailbox } from '../lib/mailbox-gc.js';
-import {
-  ensureWatchdogRoutine,
-  isWatchdogRoutineEnabled,
-  watchdogRoutineExists,
-  WATCHDOG_ROUTINE_NAME,
-  WATCHDOG_ROUTINE_SCHEDULE,
-} from '../lib/watchdog/routine.js';
+import { devicesWithRoutineEnabled, routineEnabledOnThisDevice } from '../lib/routine-activation.js';
 import {
   runWatchdogTick,
   writePolicySentinel,
@@ -46,6 +39,8 @@ import {
   type SessionOutcome,
 } from '../lib/watchdog/runner.js';
 import { isWatchdogRotateEnabled, listRotateStates, setWatchdogRotateEnabled } from '../lib/watchdog/rotate.js';
+
+const WATCHDOG_ROUTINE_NAME = 'watchdog';
 
 /** Default state dir the runner and these subcommands share. */
 function stateDir(): string {
@@ -141,7 +136,7 @@ export function registerWatchdogCommand(program: Command): void {
     .command('watchdog')
     .description('Auto-nudge stalled agent terminals: detect stalls, resolve the exact split, inject "Continue." — no menu-bar needed.')
     .option('--nudge', 'Actually inject (default is a dry run that only reports what it would do)')
-    .option('--watch', 'Manual poll loop: run a tick every --interval (dry unless --nudge; the always-on path is `watchdog enable`)')
+    .option('--watch', 'Manual poll loop: run a tick every --interval (dry unless --nudge; the always-on path is `watchdog on`)')
     .option('--interval <dur>', 'Poll interval in --watch mode (e.g. 30s, 1m)', '30s')
     .option('--stall <dur>', 'Idle time before a session counts as stalled', humanMs(DEFAULT_THRESHOLDS.stallMs))
     .option('--cooldown <dur>', 'Minimum time between nudges to the same session', humanMs(DEFAULT_THRESHOLDS.cooldownMs))
@@ -190,7 +185,7 @@ export function registerWatchdogCommand(program: Command): void {
       if (!computeWillInject() && !opts.json) {
         console.log(chalk.yellow(
           `watchdog --watch is DETECT-ONLY. Pass --nudge to inject, ` +
-          `or run 'agents watchdog enable' for the always-on daemon routine.`,
+          `or run 'agents watchdog on' for the always-on daemon routine.`,
         ));
       }
       // eslint-disable-next-line no-constant-condition
@@ -221,7 +216,7 @@ export function registerWatchdogCommand(program: Command): void {
       agents watchdog --json
 
       # Turn on the ALWAYS-ON watchdog (a daemon-fired routine)
-      agents watchdog enable
+      agents watchdog on
 
       # Show the routine, rotate config, and any in-flight in-place rotates
       agents watchdog status
@@ -266,9 +261,9 @@ export function registerWatchdogCommand(program: Command): void {
       'watchdog.rotate: off' to ~/.agents/agents.yaml; nudging stays on).
       State machine: ~/.agents/.cache/state/watchdog/rotate/<sessionId>.json.
 
-      Always-on: 'agents watchdog enable' creates + enables a 'watchdog' command
-      routine ('${WATCHDOG_ROUTINE_SCHEDULE}' -> agents watchdog --nudge) and reloads the
-      daemon; 'disable' pauses it. Inspect it with 'agents routines list'. Defaults
+      Always-on: 'agents watchdog on' enables the system-defined 'watchdog' routine
+      on this device and reloads the daemon; 'off' disables it here. Inspect it with
+      'agents routines list'. Defaults
       OFF. Per-session policy: off (ignore), keep (default), handsoff (detect + flag).
 
       State (tray-readable): ${path.join('~/.agents/.cache/state/watchdog', '{nudges,flags,last-tick}.json')}
@@ -277,32 +272,39 @@ export function registerWatchdogCommand(program: Command): void {
 
   // --- always-on enable/disable/status (backed by the daemon routine) --------
 
-  cmd.command('enable')
-    .description('Turn ON the always-on watchdog: create/enable the `watchdog` routine and (re)load the daemon.')
-    .action(async () => {
-      ensureWatchdogRoutine(true);
+  const turnOn = async (): Promise<void> => {
+      const routine = readJob(WATCHDOG_ROUTINE_NAME);
+      if (!routine) throw new Error("Built-in routine 'watchdog' is missing. Run: agents repo pull system");
+      setJobEnabled(WATCHDOG_ROUTINE_NAME, true);
       await reloadDaemonForRoutine(true);
-      console.log(chalk.green(
-        `watchdog: ENABLED — routine '${WATCHDOG_ROUTINE_NAME}' fires ${WATCHDOG_ROUTINE_SCHEDULE} (agents watchdog --nudge)`,
-      ));
-    });
-
-  cmd.command('disable')
-    .description('Turn OFF the always-on watchdog (pause the `watchdog` routine).')
-    .action(async () => {
-      if (!watchdogRoutineExists()) {
-        console.log(chalk.dim('watchdog: already off (no routine)'));
-        return;
-      }
+      console.log(chalk.green(`watchdog: ON on this device (${routine.schedule ?? 'event-triggered'})`));
+  };
+  const turnOff = async (): Promise<void> => {
+      if (!readJob(WATCHDOG_ROUTINE_NAME)) throw new Error("Built-in routine 'watchdog' is missing. Run: agents repo pull system");
       setJobEnabled(WATCHDOG_ROUTINE_NAME, false);
       await reloadDaemonForRoutine(false);
-      console.log(chalk.yellow('watchdog: DISABLED (routine paused)'));
+      console.log(chalk.yellow('watchdog: OFF on this device'));
+  };
+
+  cmd.command('on')
+    .description('Enable the built-in watchdog routine on this device.')
+    .action(async () => {
+      await turnOn();
     });
+
+  cmd.command('off')
+    .description('Disable the built-in watchdog routine on this device.')
+    .action(async () => {
+      await turnOff();
+    });
+
+  cmd.command('enable', { hidden: true }).action(turnOn);
+  cmd.command('disable', { hidden: true }).action(turnOff);
 
   cmd.command('rotate <state>')
     .description(
       'Turn in-place rotate of rate-limited sessions on|off (watchdog.rotate in agents.yaml). ' +
-      'Rotate-only: nudging stays on — unlike `watchdog disable`, which pauses the whole watchdog.',
+      'Rotate-only: nudging stays on — unlike `watchdog off`, which disables the whole watchdog on this device.',
     )
     .action((state: string) => {
       const s = state.toLowerCase();
@@ -327,13 +329,15 @@ export function registerWatchdogCommand(program: Command): void {
       // parent, not this subcommand. optsWithGlobals() merges both levels, so we
       // read it correctly regardless of which command commander bound it to.
       const json = command.optsWithGlobals().json === true;
-      const on = isWatchdogRoutineEnabled();
+      const on = routineEnabledOnThisDevice(WATCHDOG_ROUTINE_NAME) === true;
+      const enabledDevices = devicesWithRoutineEnabled(WATCHDOG_ROUTINE_NAME);
       const rotate = isWatchdogRotateEnabled() ? 'on' : 'off';
       const rotates = listRotateStates(stateDir());
       const inflight = rotates.filter((r) => r.phase !== 'done' && r.phase !== 'failed');
       if (json) {
         console.log(JSON.stringify({
           enabled: on,
+          enabledDevices,
           routine: WATCHDOG_ROUTINE_NAME,
           stateDir: stateDir(),
           rotate,
@@ -349,6 +353,7 @@ export function registerWatchdogCommand(program: Command): void {
         return;
       }
       console.log(`always-on watchdog: ${on ? chalk.green('ON') : chalk.dim('off')} (routine '${WATCHDOG_ROUTINE_NAME}')`);
+      console.log(`enabled devices: ${enabledDevices.length > 0 ? enabledDevices.join(', ') : chalk.dim('none')}`);
       console.log(`rotate: ${rotate === 'on' ? chalk.green('on') : chalk.yellow('off')} (watchdog.rotate in agents.yaml) · ${inflight.length} in-flight`);
       for (const r of inflight) {
         console.log(`  ${chalk.magenta(r.phase.padEnd(12))} ${chalk.bold(r.sessionId.slice(0, 8))} → ${r.newSessionId.slice(0, 8)}${r.error ? chalk.red(`  ${r.error}`) : ''}`);

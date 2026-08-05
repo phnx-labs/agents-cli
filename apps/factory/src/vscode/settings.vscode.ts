@@ -63,12 +63,17 @@ import { startForemanAudio, ForemanAudioSession } from './foreman.audio';
 import { runSmartTurn, capHistory } from './foreman.smart';
 import { buildTaskDispatchPrompt } from '../core/tasks';
 import { draftDispatchPrompt, type DraftTicket } from '../core/draftPrompt';
-import { listRegisteredDevices, fetchDeviceStats, countRunningAgents, getDeviceSyncStatus } from './deviceHealth.vscode';
+import { listRegisteredDevices, getDeviceSyncStatus } from './deviceHealth.vscode';
 import { inferProjectCandidates } from '../core/projectIndex';
 import { normalizeHost, buildRemoteFocusCommand } from '../core/remoteSessions';
 import { rankRepos } from '../core/repoIndex';
 import { detectProjects } from '../core/projectDetect';
 import { getSyncStatus } from '../core/repoSync';
+import {
+  FLOOR_SNAPSHOT_KEY,
+  INVENTORY_CACHE_TTL_MS,
+  parseFloorSnapshot,
+} from '../core/floorSnapshot';
 import {
   isWindowsDevicePlatform,
   encodePowershellScript,
@@ -1516,12 +1521,14 @@ export function resumeFloorPolling(): void {
 }
 
 // Cache for agent inventories. agents view --json takes 4-6s because it hits
-// vendor APIs for usage stats. Within the TTL, repeat calls are instant.
+// vendor APIs for usage stats. Shared 60s SWR with panel/dispatch ONLY — the
+// SnapshotDetector 4s tick does not call agents view (see monitor/snapshotDetector).
 // Strategy mutations bust the cache so the UI reflects the new state.
-const INVENTORY_CACHE_TTL_MS = 60_000;
 const INVENTORY_AGENT_KEYS = ['claude', 'codex', 'gemini', 'opencode', 'cursor', 'kimi', 'grok', 'droid', 'antigravity', 'copilot', 'amp'];
 let cachedInventories: { data: Record<string, AgentInventory>; fetchedAt: number } | null = null;
 let inventoryFetchInflight: Promise<Record<string, AgentInventory>> | null = null;
+/** Activation seed ran once for this extension host lifetime. */
+let floorActivationSeeded = false;
 
 async function getCachedAgentInventories(force = false): Promise<Record<string, AgentInventory>> {
   if (!force && cachedInventories && Date.now() - cachedInventories.fetchedAt < INVENTORY_CACHE_TTL_MS) {
@@ -1542,6 +1549,30 @@ async function getCachedAgentInventories(force = false): Promise<Record<string, 
 
 function invalidateAgentInventoryCache(): void {
   cachedInventories = null;
+}
+
+/**
+ * Wire last-good Floor snapshot persistence + run the one-shot activation seed:
+ * at most one `agents devices list --json` and one `agents sessions --active
+ * --local --json`. Subsequent local updates come from monitor events / the 60s
+ * local backstop; remote fleet refresh is user-triggered only.
+ */
+export async function seedFloorDataPipeline(context: vscode.ExtensionContext): Promise<void> {
+  const remote = await import('./remoteSessions.vscode');
+  remote.setFloorSnapshotStore({
+    read: () => parseFloorSnapshot(context.globalState.get(FLOOR_SNAPSHOT_KEY)) ?? null,
+    write: (snap) => {
+      void context.globalState.update(FLOOR_SNAPSHOT_KEY, snap);
+    },
+  });
+  if (floorActivationSeeded) return;
+  floorActivationSeeded = true;
+  // One registry read (devices list --json) + one local sessions seed. Never
+  // doctor / devices status / fleet status / projects status.
+  await Promise.all([
+    listRegisteredDevices(),
+    remote.seedLocalSessionsOnce(getSettings(context).projectRules ?? []),
+  ]);
 }
 
 export function openPanel(context: vscode.ExtensionContext): void {
@@ -1593,6 +1624,11 @@ export function registerPanelSerializer(context: vscode.ExtensionContext): void 
 
 function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext): void {
   settingsPanel = panel;
+
+  // Floor last-good store + at-most-one activation seed (devices list + local sessions).
+  void seedFloorDataPipeline(context).catch((err) =>
+    console.error('[SETTINGS] Floor data pipeline seed failed:', err),
+  );
 
   // Set the tab icon
   settingsPanel.iconPath = theme.buildIconPathFromUri(context.extensionUri, 'agents.png');
@@ -1867,17 +1903,25 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         break;
       }
       case 'fetchDispatchData': {
-        // Data the consolidated Dispatch panel needs: installed agents (reusing the
-        // cached `agents view --json` inventory — no re-exec), the unified host
-        // roster with live per-host load, and projects ranked by session-index
-        // usage. Host live-load also rides the separate 'hostSessions' message; this
-        // one seeds the panel on open.
+        // Dispatch opens from persisted/cached inventory + last-good host sessions.
+        // Never probeCpu and never per-device CPU/memory + sessions fan-out.
         try {
-          const { fetchHostSessions, LOCAL_LABEL } = await import('./remoteSessions.vscode');
-          const [inventories, hostResult] = await Promise.all([
-            getCachedAgentInventories(),
-            fetchHostSessions(Date.now(), { probeCpu: true, projectRules: getSettings(context).projectRules ?? [] }),
-          ]);
+          const { fetchHostSessions, LOCAL_LABEL, getLastGoodFloorSnapshot } = await import('./remoteSessions.vscode');
+          const inventories = await getCachedAgentInventories();
+          // Prefer last-good (no CLI). Cold open with no snapshot: one non-force
+          // fetchHostSessions may seed once; subsequent opens stay cache-only.
+          const lastGood = getLastGoodFloorSnapshot();
+          const hostResult = lastGood
+            ? {
+                hosts: lastGood.hosts,
+                sessions: lastGood.sessions,
+                groups: lastGood.groups,
+                fetchedAt: lastGood.fetchedAt,
+              }
+            : await fetchHostSessions(Date.now(), {
+                force: false,
+                projectRules: getSettings(context).projectRules ?? [],
+              });
           const defaultTitle = context.globalState.get<string>('agents.defaultAgentTitle', 'CC');
           const defaultAgentId = getBuiltInDefByTitle(defaultTitle)?.key ?? 'claude';
           const agents = mapInventoriesToInstalledAgents(inventories, defaultAgentId);
@@ -1902,9 +1946,19 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         break;
       }
       // ---- managed projects (curated sidebar/dispatch list) ----
+      // All reads/saves/deletes shell through `agents projects` (managedProjects.ts).
+      // Errors stay explicit on the outbound message for inline UI display.
       case 'fetchManagedProjects': {
-        const projects = await readManagedProjects();
-        settingsPanel?.webview.postMessage({ type: 'managedProjectsData', projects });
+        try {
+          const projects = await readManagedProjects();
+          settingsPanel?.webview.postMessage({ type: 'managedProjectsData', projects });
+        } catch (err) {
+          settingsPanel?.webview.postMessage({
+            type: 'managedProjectsData',
+            projects: [],
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
         break;
       }
       case 'fetchLinearProjects': {
@@ -1915,16 +1969,32 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
       case 'saveManagedProject': {
         const p = message?.project as ManagedProject | undefined;
         if (p && typeof p.id === 'string' && typeof p.name === 'string' && typeof p.path === 'string') {
-          const projects = await upsertManagedProject(p);
-          settingsPanel?.webview.postMessage({ type: 'managedProjectsData', projects });
+          try {
+            const projects = await upsertManagedProject(p);
+            settingsPanel?.webview.postMessage({ type: 'managedProjectsData', projects });
+          } catch (err) {
+            settingsPanel?.webview.postMessage({
+              type: 'managedProjectsData',
+              projects: [],
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
         break;
       }
       case 'deleteManagedProject': {
         const id = message?.id;
         if (typeof id === 'string') {
-          const projects = await deleteManagedProject(id);
-          settingsPanel?.webview.postMessage({ type: 'managedProjectsData', projects });
+          try {
+            const projects = await deleteManagedProject(id);
+            settingsPanel?.webview.postMessage({ type: 'managedProjectsData', projects });
+          } catch (err) {
+            settingsPanel?.webview.postMessage({
+              type: 'managedProjectsData',
+              projects: [],
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
         break;
       }
@@ -1971,25 +2041,23 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         break;
       }
       case 'deviceHealth': {
-        // Online status comes from the agents-cli registry (tailscale.online).
-        // For online devices only, fetch live load (loadAvg/mem) and running
-        // agent count over their real address; skip offline hosts to avoid SSH
-        // hangs.
+        // Registry-only reachability for the Floor/dispatch device list.
+        // Per-device CPU/memory + sessions SSH fan-out is intentionally removed
+        // from this path (Factory Floor performance track): online/offline comes
+        // from `agents devices list --json` only. Live load is not required to
+        // open Dispatch; ranking uses last-good session counts when present.
         try {
           const devices = await listRegisteredDevices();
-          const health = await Promise.all(
-            devices.map(async (device) => {
-              if (!device.online) {
-                return { device, stats: { host: device.host, reachable: false, runningAgents: 0, fetchedAt: Date.now() } };
-              }
-              const isLocal = isLocalDeviceHost(device.host);
-              const [stats, runningAgents] = await Promise.all([
-                fetchDeviceStats(device.host, { isLocal }),
-                countRunningAgents(device.host, { isLocal }),
-              ]);
-              return { device, stats: { ...stats, reachable: true, runningAgents } };
-            }),
-          );
+          const now = Date.now();
+          const health = devices.map((device) => ({
+            device,
+            stats: {
+              host: device.host,
+              reachable: device.online === true,
+              runningAgents: 0,
+              fetchedAt: now,
+            },
+          }));
           settingsPanel?.webview.postMessage({ type: 'deviceHealthData', health });
         } catch (err) {
           console.error('[SETTINGS] Error fetching device health:', err);
@@ -2146,21 +2214,31 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         settingsPanel?.webview.postMessage({ type: 'sessionsData', sessions });
         break;
       case 'fetchHostSessions': {
-        // Tier-1 cross-host aggregation: active sessions from this machine +
-        // every reachable SSH/Tailscale host, in parallel. A dead host is marked
-        // offline rather than failing the batch.
+        // Remote fleet: last-good by default; force=true runs one bare
+        // `agents sessions --active --json`. Automatic UI polls must omit force
+        // so they never re-trigger fleet SSH. Manual refresh should pass force.
         try {
           const { fetchHostSessions } = await import('./remoteSessions.vscode');
-          const { hosts, sessions: hostSessions, groups, fetchedAt } = await fetchHostSessions(
-            Date.now(),
-            { projectRules: getSettings(context).projectRules ?? [] },
-          );
+          const force = message?.force === true;
+          const {
+            hosts,
+            sessions: hostSessions,
+            groups,
+            fetchedAt,
+            hostFreshness,
+            fromCache,
+          } = await fetchHostSessions(Date.now(), {
+            force,
+            projectRules: getSettings(context).projectRules ?? [],
+          });
           settingsPanel?.webview.postMessage({
             type: 'hostSessions',
             hosts,
             sessions: hostSessions,
             groups,
             fetchedAt,
+            hostFreshness,
+            fromCache: fromCache === true,
           });
         } catch (err) {
           console.error('[SETTINGS] Error fetching host sessions:', err);
@@ -2170,24 +2248,27 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
             sessions: [],
             groups: [],
             fetchedAt: Date.now(),
+            hostFreshness: {},
+            fromCache: true,
           });
         }
         break;
       }
       case 'fetchLocalSessions': {
-        // Local-only fast path (the 3s feed poll): this machine's sessions with no
-        // SSH and no host discovery. Rides a distinct 'localSessions' message so the
-        // webview replaces only the this-mac rows and leaves remote rows intact.
+        // Local-only: seed + 60s backstop (no SSH). Rides 'localSessions' so the
+        // webview replaces only this-mac rows and leaves remote rows intact.
         try {
           const { fetchLocalSessions } = await import('./remoteSessions.vscode');
-          const { sessions: localSessions, fetchedAt } = await fetchLocalSessions(
+          const force = message?.force === true;
+          const { sessions: localSessions, fetchedAt, fromCache } = await fetchLocalSessions(
             Date.now(),
-            getSettings(context).projectRules ?? [],
+            { force, projectRules: getSettings(context).projectRules ?? [] },
           );
           settingsPanel?.webview.postMessage({
             type: 'localSessions',
             sessions: localSessions,
             fetchedAt,
+            fromCache: fromCache === true,
           });
         } catch (err) {
           console.error('[SETTINGS] Error fetching local sessions:', err);

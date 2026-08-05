@@ -1,15 +1,69 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
   planAutoDispatch,
   isEligible,
   priorityRank,
   dispatchPrompt,
   autoDispatchTick,
+  readAutoDispatchProjects,
   type AutoDispatchProject,
   type DelegatedIssue,
   type LinearGateway,
   type Dispatcher,
 } from './auto-dispatch.js';
+
+let tmpDir: string;
+beforeEach(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auto-dispatch-test-'));
+  process.env.AGENTS_PROJECTS_DIR = tmpDir;
+});
+afterEach(() => {
+  delete process.env.AGENTS_PROJECTS_DIR;
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+describe('readAutoDispatchProjects', () => {
+  it('returns only projects with dispatch.enabled: true', () => {
+    fs.writeFileSync(path.join(tmpDir, 'enabled.yaml'), [
+      'name: enabled',
+      'repo: phnx-labs/enabled',
+      'linear:',
+      '  projectId: lin_1',
+      'dispatch:',
+      '  enabled: true',
+      '  maxAgents: 2',
+      '  provider: codex',
+      '  host: mac-mini',
+    ].join('\n'));
+    fs.writeFileSync(path.join(tmpDir, 'disabled.yaml'), [
+      'name: disabled',
+      'dispatch:',
+      '  enabled: false',
+    ].join('\n'));
+    fs.writeFileSync(path.join(tmpDir, 'nodispatch.yaml'), 'name: nodispatch\n');
+
+    const results = readAutoDispatchProjects();
+    expect(results.map((p) => p.id)).toEqual(['enabled']);
+    expect(results[0]).toMatchObject({
+      id: 'enabled',
+      name: 'enabled',
+      linearProjectId: 'lin_1',
+      repoSlug: 'phnx-labs/enabled',
+      autoDispatch: true,
+      maxAgents: 2,
+      provider: 'codex',
+      host: 'mac-mini',
+    });
+  });
+
+  it('returns empty array when no projects have dispatch.enabled', () => {
+    fs.writeFileSync(path.join(tmpDir, 'plain.yaml'), 'name: plain\n');
+    expect(readAutoDispatchProjects()).toEqual([]);
+  });
+});
 
 const proj = (over: Partial<AutoDispatchProject> = {}): AutoDispatchProject => ({
   id: 'p1',

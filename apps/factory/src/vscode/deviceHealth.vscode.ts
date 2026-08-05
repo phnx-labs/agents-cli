@@ -34,9 +34,14 @@ interface AgentsDeviceEntry {
 }
 
 // Source the device fleet from the canonical agents-cli registry
-// (`agents devices`, self-populated from Tailscale) rather than a hand-rolled
-// file. Online status is derived by isDeviceOnline (matching the CLI: a missing
-// tailscale block is NOT offline), and the SSH address from address.dnsName.
+// (`agents devices list --json`, self-populated from Tailscale) rather than a
+// hand-rolled file. Online status is derived by isDeviceOnline (matching the
+// CLI: a missing tailscale block is NOT offline), and the SSH address from
+// address.dnsName.
+//
+// Floor background paths MUST use this registry read only — never
+// `agents doctor`, `agents devices status`, `agents fleet status`, or
+// `agents projects status` on a recurring/activation path.
 export async function listRegisteredDevices(): Promise<Device[]> {
   try {
     const bin = await resolveAgentsBin();

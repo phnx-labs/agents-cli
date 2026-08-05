@@ -569,10 +569,16 @@ export interface RegistrySearchResult {
 
 /** A package that has been resolved from a registry and is ready to install. */
 export interface ResolvedPackage {
-  type: 'mcp' | 'skill' | 'git';
+  /** `plugin` is Phase 5 packaging: `agents install plugin:<spec>` → plugins install. */
+  type: 'mcp' | 'skill' | 'git' | 'plugin';
   source: string;
   mcpEntry?: McpServerEntry;
   skillEntry?: SkillEntry;
+  /**
+   * Plugin install spec (`name@url`, path, or bare source) when `type === 'plugin'`.
+   * Same grammar as `agents plugins install <spec>`.
+   */
+  pluginSpec?: string;
 }
 
 /** Categories of resources that can be synced into an agent version home. */
@@ -1006,6 +1012,13 @@ export interface Meta {
    * device-config registry (`maxAgents`, `schedulerEnabled`, `notes`). Per-machine by design — unset = today's behavior.
    */
   deviceConfig?: Record<string, unknown>;
+  /**
+   * Routine names enabled on this machine. In memory this stays distinct from
+   * portable user config; state.ts writes it as top-level `routines:` in
+   * `~/.agents/devices/<machine>/agents.yaml`. Presence in the list is the whole
+   * activation state: absent means disabled on this device.
+   */
+  deviceRoutines?: string[];
   /**
    * Agent-host registry keyed by host name (`agents hosts`). Portable user
    * config synced with `agents repo push/pull`. For `ssh-config` hosts this is

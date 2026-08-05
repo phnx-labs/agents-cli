@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/phnx-labs/agents-cli/main/apps/cli/schema/agents-yaml.schema.json",
   "title": "agents-cli agents.yaml",
-  "description": "agents-cli metadata file. Two tiers share this shape: the central (synced) ~/.agents/agents.yaml and each per-device ~/.agents/devices/<host>/agents.yaml. Device-local fields (agents, isolatedAgents, defaultBrowserProfile, device-scope config) belong in the device doc; everything else is portable user config. Source of truth: apps/cli/src/lib/types.ts (Meta).",
+  "description": "agents-cli metadata file. Two tiers share this shape: the central (synced) ~/.agents/agents.yaml and each per-device ~/.agents/devices/<host>/agents.yaml. Device-local fields (agents, isolatedAgents, defaultBrowserProfile, routines, device-scope config) belong in the device doc; everything else is portable user config. Source of truth: apps/cli/src/lib/types.ts (Meta).",
   "type": "object",
   "additionalProperties": true,
   "properties": {
@@ -19,6 +19,12 @@
     "defaultBrowserProfile": {
       "type": "string",
       "description": "Browser profile `agents browser start` resolves to without --profile. Device doc only (config key: browser.profile)."
+    },
+    "routines": {
+      "type": "array",
+      "description": "Enabled routine names on this device. Membership means enabled; device doc only.",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
     },
     "config": {
       "type": "object",

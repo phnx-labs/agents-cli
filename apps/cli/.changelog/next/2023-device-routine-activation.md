@@ -1,0 +1,1 @@
+- **Separate routine definitions from device activation (#2023).** Enable a routine by listing its name in `~/.agents/devices/<hostname>/agents.yaml`; built-in Watchdog setup and `watchdog on|off` now update that host-owned manifest without rewriting the routine definition. Source: `apps/cli/src/lib/routine-activation.ts`, `apps/cli/src/commands/setup-watchdog.ts`.

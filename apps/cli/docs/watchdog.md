@@ -25,8 +25,8 @@ watchdog's #1 dependency: it must reliably tell `idle` (its job) from `waiting_i
 ## The loop
 
 The watchdog is a **daemon-fired routine**, not a live process: the scheduler runs
-`agents watchdog --nudge` on a cron cadence (`WATCHDOG_ROUTINE_SCHEDULE`,
-`lib/watchdog/routine.ts`). Each fire is one bounded tick:
+`agents watchdog --nudge` on the cron cadence declared by the system
+`routines/watchdog.yml`. Each fire is one bounded tick:
 
 1. **Detect idle.** Enumerate active sessions, classify each by transcript freshness and
    inferred activity (`lib/watchdog/read.ts`, `lib/session/state.ts`). A candidate is a
@@ -137,10 +137,10 @@ rotate state.
 
 The watchdog reads the **whole fleet** (`agents sessions --active --json` fans out to every
 device, status computed on each origin host) but delivers **locally** on each session's
-origin box, where injection is reliable. Because routines are fleet-synced git config
-(`~/.agents/routines/`), the watchdog routine can run on one always-on box (pin it with
-`agents routines devices watchdog --set <host>`) and still see every device, or run
-distributed on every box against its own local sessions — see
+origin box, where injection is reliable. Its definition ships at
+`~/.agents/.system/routines/watchdog.yml`; activation lives in each selected host's
+`~/.agents/devices/<hostname>/agents.yaml`. Run `agents setup watchdog` to choose hosts,
+or `agents watchdog on|off` on one host — see
 [routines.md](03-routines.md) and [fleet.md](fleet.md).
 
 ## Per-session policy
@@ -152,14 +152,14 @@ distributed on every box against its own local sessions — see
 
 | File | Role |
 |---|---|
-| `lib/watchdog/routine.ts` | The cron routine (`agents watchdog --nudge`) the daemon fires. |
+| `~/.agents/.system/routines/watchdog.yml` | Built-in cron definition (`agents watchdog --nudge`). |
 | `lib/watchdog/runner.ts` | One tick: enumerate → classify → decide (deterministic + smart) → deliver → log. |
 | `lib/watchdog/watchdog.ts` | `WATCHDOG_SYSTEM_PROMPT`, playbook composition, prompt render, response parse. |
 | `lib/watchdog/read.ts` | Locate a transcript and read its tail; stall thresholds. |
 | `lib/watchdog/watchdogTail.ts` | Summarize a tail into last-user / last-assistant for the brain + log. |
 | `lib/watchdog/rotate.ts` | In-place rotate: limit detection, exit-sequence table, state machine, health gate. |
 | `lib/watchdog/log.ts` | Append decisions to `watchdog.log` for the Factory activity card. |
-| `commands/watchdog.ts` | `agents watchdog` — `enable`/`disable`/`status`/`policy`/`--nudge`/`--watch`. |
+| `commands/watchdog.ts` | `agents watchdog` — `on`/`off`/`status`/`policy`/`--nudge`/`--watch`. |
 | `lib/session/state.ts`, `active.ts` | Status inference (`working`/`waiting_input`/`idle`) the watchdog reads. |
 | `lib/terminal/resolve.ts`, `inject.ts` | Resolve the exact split and deliver the nudge. |
 

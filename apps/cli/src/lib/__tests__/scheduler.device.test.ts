@@ -20,6 +20,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 /** Provision an isolated HOME with routines and optional run metadata. */
 function makeHome(opts: {
   jobs?: Record<string, unknown>[];
+  enabled?: Record<string, string[]>;
   runs?: { jobName: string; runId: string; meta: Record<string, unknown> }[];
 } = {}): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'scheduler-device-test-'));
@@ -30,6 +31,12 @@ function makeHome(opts: {
   fs.mkdirSync(runsDir, { recursive: true });
   fs.writeFileSync(path.join(agentsDir, 'agents.yaml'), 'agents: {}\n');
   fs.mkdirSync(path.join(agentsDir, '.system', '.git'), { recursive: true });
+
+  for (const [device, routines] of Object.entries(opts.enabled ?? {})) {
+    const deviceDir = path.join(agentsDir, 'devices', device);
+    fs.mkdirSync(deviceDir, { recursive: true });
+    fs.writeFileSync(path.join(deviceDir, 'agents.yaml'), yaml.stringify({ routines }));
+  }
 
   for (const job of opts.jobs ?? []) {
     fs.writeFileSync(path.join(routinesDir, `${job.name}.yml`), yaml.stringify(job));
@@ -74,41 +81,35 @@ const baseJob = {
   prompt: 'noop',
 };
 
-describe('JobScheduler devices allowlist', () => {
-  it('loads unpinned jobs and jobs whose allowlist includes this device; skips foreign', () => {
+describe('JobScheduler device activation', () => {
+  it('loads only routines named in this device manifest', () => {
     const home = makeHome({
       jobs: [
         { ...baseJob, name: 'unpinned' },
-        { ...baseJob, name: 'allowed-here', devices: ['zion'] },
-        { ...baseJob, name: 'allowed-elsewhere', devices: ['yosemite-s0'] },
-        // Multi-device pin: owner is 'mac-mini' (lowest normalized name), so on
-        // zion it is NOT loaded — the routine fires once, not once per device.
-        { ...baseJob, name: 'multi-includes-here', devices: ['mac-mini', 'zion'] },
+        { ...baseJob, name: 'enabled-here' },
+        { ...baseJob, name: 'enabled-elsewhere' },
       ],
+      enabled: { zion: ['unpinned', 'enabled-here'], 'yosemite-s0': ['enabled-elsewhere'] },
     });
     try {
       const entries: Record<string, string | null>[] = [
         findJob(home, ['list', '--json'], 'unpinned', { AGENTS_SYNC_MACHINE_ID: 'zion' })!,
-        findJob(home, ['list', '--json'], 'allowed-here', { AGENTS_SYNC_MACHINE_ID: 'zion' })!,
-        findJob(home, ['list', '--json'], 'multi-includes-here', { AGENTS_SYNC_MACHINE_ID: 'zion' })!,
-        findJob(home, ['list', '--json'], 'allowed-elsewhere', { AGENTS_SYNC_MACHINE_ID: 'zion' })!,
+        findJob(home, ['list', '--json'], 'enabled-here', { AGENTS_SYNC_MACHINE_ID: 'zion' })!,
+        findJob(home, ['list', '--json'], 'enabled-elsewhere', { AGENTS_SYNC_MACHINE_ID: 'zion' })!,
       ];
 
-      expect(entries[0].nextRun).not.toBeNull();  // unpinned — fleet-wide
-      expect(entries[1].nextRun).not.toBeNull();  // pinned here
-      // 'multi-includes-here' pins [mac-mini, zion]; mac-mini owns it (lowest
-      // normalized name), so on zion it is NOT scheduled — the routine fires
-      // once, not once per listed device.
+      expect(entries[0].nextRun).not.toBeNull();
+      expect(entries[1].nextRun).not.toBeNull();
       expect(entries[2].nextRun).toBeNull();
-      expect(entries[3].nextRun).toBeNull();      // pinned elsewhere
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
 
-  it('matches an allowlist entry case-insensitively and ignores a domain suffix', () => {
+  it('uses the normalized device directory for a domain-qualified machine id', () => {
     const home = makeHome({
-      jobs: [{ ...baseJob, name: 'fqdn-entry', devices: ['Zion.tailnet.ts.net'] }],
+      jobs: [{ ...baseJob, name: 'fqdn-entry' }],
+      enabled: { zion: ['fqdn-entry'] },
     });
     try {
       const entry = findJob(home, ['list', '--json'], 'fqdn-entry', { AGENTS_SYNC_MACHINE_ID: 'zion' })!;
@@ -119,18 +120,19 @@ describe('JobScheduler devices allowlist', () => {
   });
 });
 
-describe('detectOverdueJobs devices allowlist', () => {
-  it('never flags a job restricted to another device as overdue here', () => {
+describe('detectOverdueJobs device activation', () => {
+  it('never flags a routine enabled only on another device as overdue here', () => {
     const pastRun = { status: 'completed', exitCode: 0, startedAt: '2020-01-01T00:00:00Z', completedAt: '2020-01-01T00:01:00Z' };
     // createdAt predates the missed occurrences: overdue is floored at routine
     // creation, and these fixtures are written to disk during the test.
     const born = { createdAt: '2020-01-01T00:00:00.000Z' };
     const home = makeHome({
       jobs: [
-        { ...baseJob, ...born, name: 'foreign-overdue', devices: ['yosemite-s0'] },
-        { ...baseJob, ...born, name: 'local-overdue', devices: ['zion'] },
+        { ...baseJob, ...born, name: 'foreign-overdue' },
+        { ...baseJob, ...born, name: 'local-overdue' },
         { ...baseJob, ...born, name: 'unpinned-overdue' },
       ],
+      enabled: { zion: ['local-overdue', 'unpinned-overdue'], 'yosemite-s0': ['foreign-overdue'] },
       runs: [
         { jobName: 'foreign-overdue', runId: '2020-01-01T00-00-00-000Z', meta: pastRun },
         { jobName: 'local-overdue', runId: '2020-01-01T00-00-00-000Z', meta: pastRun },

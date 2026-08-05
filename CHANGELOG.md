@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **`agents devices list` moves "Leased boxes" behind `--all`; the default list no longer touches the keychain or pops Touch ID (RUSH-2190).** See
+  `apps/cli/.changelog/next/devices-list-all-flag.md`.
+
 - **Scheduled routines no longer overlap or outlive their configured timeout (RUSH-2186).** See
   `apps/cli/CHANGELOG.md`.
 
