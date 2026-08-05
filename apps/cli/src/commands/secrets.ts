@@ -2379,10 +2379,8 @@ Examples:
           process.exit(1);
         }
         // `agents secrets export --plaintext` is what release/CI scripts eval.
-        // When it runs detached (both stdio non-TTY) or beneath ANY agent — which
-        // inherits AGENTS_RUNTIME — resolve broker-only so it can never pop a Touch
-        // ID sheet on the interactive user's screen. An `eval "$(...)"` typed in a
-        // plain shell carries no AGENTS_RUNTIME, so it is not headless and still prompts.
+        // Every caller is broker-only, including a plain shell, so export never
+        // raises Touch ID on the interactive user's screen.
         const { env } = readAndResolveBundleEnv(resolvedBundleName, {
           caller: `export to shell`,
           keyMode: 'process',
