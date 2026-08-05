@@ -50,7 +50,13 @@ const SETTINGS_MANIFEST: Partial<Record<AgentId, ManifestEntry[]>> = {
       strategy: 'toml-merge',
       stateKeys: ['notice', 'windows_wsl_setup_acknowledged'],
     },
-    { rel: '.codex/auth.json', strategy: 'copy-if-absent', restrictMode: true },
+    // `.codex/auth.json` is deliberately NOT carried forward. Copying it seeded
+    // every new Codex version with the current default's ChatGPT token, so two
+    // installed versions always reported the same account and could never sign
+    // into separate accounts. Claude omits its credential (`.claude.json`) for
+    // the same reason — a version home holds its own login, keeping accounts
+    // per-version. A fresh Codex version installs signed-out; run `codex login`
+    // (or `agents run codex --version <v>`) inside it to authenticate.
     { rel: '.codex/instructions.md', strategy: 'copy-if-absent' },
     { rel: '.codex/hooks.json', strategy: 'copy-if-absent' },
     { rel: '.codex/prompts', strategy: 'dir-entries' },

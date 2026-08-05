@@ -123,7 +123,7 @@ describe('carryForwardSettings (claude)', () => {
 });
 
 describe('carryForwardSettings (codex)', () => {
-  it('merges config.toml, strips state keys, copies auth.json with 0600', () => {
+  it('merges config.toml, strips state keys, and does NOT carry the credential', () => {
     fs.writeFileSync(path.join(fromHome, '.codex/config.toml'), TOML.stringify({
       model: 'gpt-5.5',
       approval_policy: 'on-request',
@@ -139,7 +139,7 @@ describe('carryForwardSettings (codex)', () => {
     } as never));
 
     const result = carryForwardSettings('codex', fromHome, toHome);
-    expect(result.applied).toEqual(expect.arrayContaining(['.codex/config.toml', '.codex/auth.json']));
+    expect(result.applied).toContain('.codex/config.toml');
 
     const merged = TOML.parse(fs.readFileSync(path.join(toHome, '.codex/config.toml'), 'utf-8')) as Record<string, any>;
     expect(merged.model).toBe('gpt-6');
@@ -148,11 +148,10 @@ describe('carryForwardSettings (codex)', () => {
     expect(merged.projects['/root/work'].trust_level).toBe('trusted');
     expect(merged.notice).toBeUndefined();
 
-    // NTFS has no POSIX mode bits — the 0o600 restrictMode is a no-op on Windows.
-    if (process.platform !== 'win32') {
-      const mode = fs.statSync(path.join(toHome, '.codex/auth.json')).mode & 0o777;
-      expect(mode).toBe(0o600);
-    }
+    // The credential is deliberately excluded from carry-forward so each Codex
+    // version keeps its own account — a fresh version installs signed-out.
+    expect(result.applied).not.toContain('.codex/auth.json');
+    expect(fs.existsSync(path.join(toHome, '.codex/auth.json'))).toBe(false);
   });
 
   it('copies prompt dir entries without clobbering existing ones', () => {

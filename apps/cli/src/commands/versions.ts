@@ -552,8 +552,10 @@ export function registerVersionsCommands(program: Command): void {
             }
 
             // Seed the fresh version home with user settings from the current
-            // default version (settings.json, keybindings, codex config/auth).
-            // Gap-filling only — never overwrites what the new home has.
+            // default version (settings.json, keybindings, codex config).
+            // Credentials are deliberately excluded so each version keeps its own
+            // login (see SETTINGS_MANIFEST). Gap-filling only — never overwrites
+            // what the new home has.
             const carrySource = getGlobalDefault(agent);
             if (carrySource && carrySource !== installedVersion) {
               const carried = carryForwardSettings(
