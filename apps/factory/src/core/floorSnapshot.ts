@@ -11,6 +11,12 @@ import type { HostGroup, HostInfo, RemoteSession } from './remoteSessions';
 /** globalState key for the last successful Floor host/sessions snapshot. */
 export const FLOOR_SNAPSHOT_KEY = 'agents.floorSnapshot.v1';
 
+/** globalState key for the last successful devices registry read. */
+export const FLOOR_DEVICES_KEY = 'agents.floorDevices.v1';
+
+/** globalState key for the last successful agent inventory read. */
+export const FLOOR_INVENTORY_KEY = 'agents.floorInventory.v1';
+
 /**
  * How long a non-force local seed may stand before a bounded local-only
  * backstop revalidates (`sessions --active --local --json` only — never SSH).
@@ -33,6 +39,65 @@ export interface FloorHostSessionsSnapshot {
   hostFreshness: Record<string, number>;
   /** True when this result was served from cache without a fresh CLI call. */
   fromCache?: boolean;
+}
+
+/** Persisted registry row. Kept core-only so parsing does not depend on VS Code. */
+export interface FloorDevice {
+  name: string;
+  host: string;
+  platform?: string;
+  online?: boolean;
+  registeredAt: number;
+}
+
+export interface FloorDevicesSnapshot {
+  devices: FloorDevice[];
+  fetchedAt: number;
+}
+
+export interface FloorInventorySnapshot {
+  data: Record<string, unknown>;
+  fetchedAt: number;
+}
+
+/** Shape-check persisted device registry data before hydrating the module cache. */
+export function parseFloorDevicesSnapshot(raw: unknown): FloorDevicesSnapshot | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const candidate = raw as Partial<FloorDevicesSnapshot>;
+  if (!Array.isArray(candidate.devices)) return undefined;
+  if (typeof candidate.fetchedAt !== 'number' || !Number.isFinite(candidate.fetchedAt)) return undefined;
+  const devices: FloorDevice[] = [];
+  for (const value of candidate.devices) {
+    if (!value || typeof value !== 'object') return undefined;
+    const device = value as Partial<FloorDevice>;
+    if (
+      typeof device.name !== 'string'
+      || !device.name
+      || typeof device.host !== 'string'
+      || !device.host
+      || typeof device.registeredAt !== 'number'
+      || !Number.isFinite(device.registeredAt)
+    ) {
+      return undefined;
+    }
+    devices.push({
+      name: device.name,
+      host: device.host,
+      platform: typeof device.platform === 'string' ? device.platform : undefined,
+      online: typeof device.online === 'boolean' ? device.online : undefined,
+      registeredAt: device.registeredAt,
+    });
+  }
+  return { devices, fetchedAt: candidate.fetchedAt };
+}
+
+/** Shape-check persisted agent inventories without assuming vendor-specific fields. */
+export function parseFloorInventorySnapshot(raw: unknown): FloorInventorySnapshot | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const candidate = raw as Partial<FloorInventorySnapshot>;
+  if (!candidate.data || typeof candidate.data !== 'object' || Array.isArray(candidate.data)) return undefined;
+  if (typeof candidate.fetchedAt !== 'number' || !Number.isFinite(candidate.fetchedAt)) return undefined;
+  return { data: candidate.data as Record<string, unknown>, fetchedAt: candidate.fetchedAt };
 }
 
 /** Shape-check a value read back from globalState; returns undefined on drift. */
@@ -163,6 +228,42 @@ export function mergeLocalSessionsIntoSnapshot(
     fetchedAt: previous?.fetchedAt && previous.fetchedAt > fetchedAt ? previous.fetchedAt : fetchedAt,
     hostFreshness,
     fromCache: false,
+  };
+}
+
+/**
+ * Fold the registry roster into last-good Floor state without claiming a
+ * sessions refresh. Existing counts/load/freshness survive; newly registered
+ * hosts render immediately with zero counts and freshness 0.
+ */
+export function mergeHostRosterIntoSnapshot(
+  previous: FloorHostSessionsSnapshot | null | undefined,
+  roster: readonly HostInfo[],
+): FloorHostSessionsSnapshot {
+  const previousHosts = new Map((previous?.hosts ?? []).map((host) => [host.name, host]));
+  const sessions = previous?.sessions ?? [];
+  const sessionHosts = new Set(sessions.map((session) => session.host));
+  const hosts = roster.map((host) => {
+    const prior = previousHosts.get(host.name);
+    return prior
+      ? { ...prior, online: host.online }
+      : host;
+  });
+  const rosterNames = new Set(hosts.map((host) => host.name));
+  for (const prior of previous?.hosts ?? []) {
+    if (!rosterNames.has(prior.name) && sessionHosts.has(prior.name)) hosts.push(prior);
+  }
+  const hostFreshness: Record<string, number> = { ...(previous?.hostFreshness ?? {}) };
+  for (const host of hosts) {
+    if (hostFreshness[host.name] === undefined) hostFreshness[host.name] = 0;
+  }
+  return {
+    hosts,
+    sessions,
+    groups: previous?.groups ?? [],
+    fetchedAt: previous?.fetchedAt ?? 0,
+    hostFreshness,
+    fromCache: true,
   };
 }
 

@@ -37,11 +37,17 @@ import { deriveHostLoad, parseRemoteCpuRatio } from '../core/dispatchRanking';
 import {
   acceptSuccessfulFloorFetch,
   isLocalSessionsStale,
+  mergeHostRosterIntoSnapshot,
   mergeLocalSessionsIntoSnapshot,
   retainLastGoodOnFailure,
   type FloorHostSessionsSnapshot,
 } from '../core/floorSnapshot';
-import { listRegisteredDevices, type Device, type DeviceRef } from './deviceHealth.vscode';
+import {
+  getRegisteredDevicesCache,
+  listRegisteredDevices,
+  type Device,
+  type DeviceRef,
+} from './deviceHealth.vscode';
 
 const execFileAsync = promisify(execFile);
 const execAsync = promisify(exec);
@@ -253,13 +259,36 @@ async function findAgentsCli(): Promise<string> {
  * and threads the same list through).
  */
 export async function discoverHosts(devices?: readonly DeviceRef[]): Promise<ReconciledHost[]> {
-  const registered = devices ?? await listRegisteredDevices();
+  const registered = devices ?? getRegisteredDevicesCache() ?? await listRegisteredDevices();
   const inputs: RegisteredDeviceInput[] = registered.map((d) => ({
     name: d.name,
     address: d.host,
     online: d.online === true,
   }));
   return reconcileHosts(inputs, LOCAL_HOST);
+}
+
+/** Render the activation registry roster into last-good Floor state without SSH. */
+export function seedFloorHostsFromDevices(devices: readonly DeviceRef[]): FloorHostSessionsSnapshot {
+  const inputs: RegisteredDeviceInput[] = devices.map((device) => ({
+    name: device.name,
+    address: device.host,
+    online: device.online === true,
+  }));
+  const roster = reconcileHosts(inputs, LOCAL_HOST).map((host): HostInfo => {
+    const name = host.isLocal ? LOCAL_LABEL : normalizeHost(host.name);
+    const online = host.isLocal || host.online;
+    return {
+      name,
+      online,
+      agents: 0,
+      load: online ? 'idle' : 'off',
+      uses: 0,
+    };
+  });
+  const merged = mergeHostRosterIntoSnapshot(lastGoodFloor, roster);
+  persistFloor(merged);
+  return merged;
 }
 
 // --- Tier-1: active fetch ---------------------------------------------------

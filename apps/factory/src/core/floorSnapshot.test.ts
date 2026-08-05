@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import type { HostInfo, RemoteSession } from './remoteSessions';
 import {
   FLOOR_SNAPSHOT_KEY,
+  FLOOR_DEVICES_KEY,
+  FLOOR_INVENTORY_KEY,
   INVENTORY_CACHE_TTL_MS,
   LOCAL_SESSIONS_BACKSTOP_MS,
   acceptSuccessfulFloorFetch,
@@ -9,7 +11,10 @@ import {
   isInventoryStale,
   isLocalSessionsStale,
   mergeLocalSessionsIntoSnapshot,
+  mergeHostRosterIntoSnapshot,
   parseFloorSnapshot,
+  parseFloorDevicesSnapshot,
+  parseFloorInventorySnapshot,
   retainLastGoodOnFailure,
   shouldRunBareFleetFetch,
   type FloorHostSessionsSnapshot,
@@ -53,6 +58,18 @@ function snap(partial: Partial<FloorHostSessionsSnapshot> = {}): FloorHostSessio
 describe('floorSnapshot pure model', () => {
   test('FLOOR_SNAPSHOT_KEY is stable for globalState', () => {
     expect(FLOOR_SNAPSHOT_KEY).toBe('agents.floorSnapshot.v1');
+    expect(FLOOR_DEVICES_KEY).toBe('agents.floorDevices.v1');
+    expect(FLOOR_INVENTORY_KEY).toBe('agents.floorInventory.v1');
+  });
+
+  test('persisted device and inventory snapshots reject drift', () => {
+    expect(parseFloorDevicesSnapshot({ devices: [], fetchedAt: 10 })).toEqual({ devices: [], fetchedAt: 10 });
+    expect(parseFloorDevicesSnapshot({ devices: [{ name: 's0' }], fetchedAt: 10 })).toBeUndefined();
+    expect(parseFloorInventorySnapshot({ data: { claude: { installed: true } }, fetchedAt: 20 })).toEqual({
+      data: { claude: { installed: true } },
+      fetchedAt: 20,
+    });
+    expect(parseFloorInventorySnapshot({ data: [], fetchedAt: 20 })).toBeUndefined();
   });
 
   test('parseFloorSnapshot rejects drift and accepts a valid shape', () => {
@@ -126,6 +143,28 @@ describe('floorSnapshot pure model', () => {
     expect(merged.hostFreshness['this-mac']).toBe(5000);
     expect(merged.hostFreshness.yosemite).toBe(1000);
     expect(merged.sessions.find((s) => s.host === 'yosemite')?.sessionId).toBe('b');
+  });
+
+  test('mergeHostRosterIntoSnapshot renders registered hosts without erasing last-good rows', () => {
+    const merged = mergeHostRosterIntoSnapshot(snap(), [
+      host('this-mac', true),
+      host('yosemite', false),
+      host('newbox', true),
+    ]);
+    expect(merged.hosts.find((h) => h.name === 'yosemite')).toMatchObject({
+      online: false,
+      agents: 2,
+      uses: 2,
+    });
+    expect(merged.hosts.find((h) => h.name === 'newbox')).toMatchObject({
+      online: true,
+      agents: 0,
+      uses: 0,
+    });
+    expect(merged.sessions.map((s) => s.sessionId).sort()).toEqual(['a', 'b']);
+    expect(merged.hostFreshness.yosemite).toBe(1000);
+    expect(merged.hostFreshness.newbox).toBe(0);
+    expect(merged.fromCache).toBe(true);
   });
 
   test('shouldRunBareFleetFetch: force or cold start only — no recurring fan-out', () => {

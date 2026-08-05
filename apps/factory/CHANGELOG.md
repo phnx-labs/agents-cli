@@ -21,15 +21,17 @@ All notable changes to the Factory extension are documented here. Format follows
   `src/vscode/terminals.vscode.ts`, `src/core/sessions.persist.ts`.
 
 - **Floor data pipeline: last-good snapshot, no recurring fleet fan-out.** The
-  extension host persists the last successful Floor host/sessions snapshot in
-  `globalState` (`agents.floorSnapshot.v1`) and returns it immediately. Activation
+  extension host persists the last successful Floor host/sessions, device-registry,
+  and agent-inventory snapshots in `globalState` and returns them immediately. Activation
   (panel wire) seeds at most one `agents devices list --json` and one
   `agents sessions --active --local --json`. Remote fleet refresh is user-triggered
   only (`fetchHostSessions` with `force: true` → one bare `agents sessions --active
   --json`); failures keep last-good rows and record per-host freshness. Dispatch
   opens from cached inventory + last-good sessions and no longer probes per-device
-  CPU/memory. SnapshotDetector's 4s tick no longer runs `agents view --json`
-  (inventory is a 60s SWR cache shared only by panel/dispatch). Protocol adds
+  CPU/memory; sidebar/Dispatch device messages reuse the activation registry
+  cache instead of rerunning `devices list`. SnapshotDetector's 4s tick no
+  longer runs `agents view --json` (inventory is a persisted 60s SWR cache
+  shared only by panel/dispatch). Protocol adds
   optional `force` / `hostFreshness` / `fromCache` fields on floor host/local
   session messages. Source: `apps/factory/src/core/floorSnapshot.ts`,
   `apps/factory/src/vscode/remoteSessions.vscode.ts`,

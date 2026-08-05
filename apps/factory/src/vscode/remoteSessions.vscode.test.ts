@@ -6,8 +6,14 @@ import {
   __resetRemoteSessionsCachesForTests,
   fetchHostSessions,
   fetchLocalSessions,
+  discoverHosts,
+  seedFloorHostsFromDevices,
   __remoteSessionsTestCounters,
 } from './remoteSessions.vscode';
+import {
+  __deviceHealthTestCounters,
+  setRegisteredDevicesCache,
+} from './deviceHealth.vscode';
 import {
   acceptSuccessfulFloorFetch,
   retainLastGoodOnFailure,
@@ -58,6 +64,8 @@ test('an empty list resolves to an empty array', async () => {
 
 afterEach(() => {
   __resetRemoteSessionsCachesForTests();
+  setRegisteredDevicesCache(null);
+  __deviceHealthTestCounters.reset();
 });
 
 function sampleSnap(): FloorHostSessionsSnapshot {
@@ -145,3 +153,29 @@ test('hydrate retains full last-good including remote rows; fail path cannot emp
   expect(kept?.fromCache).toBe(true);
 });
 
+test('discoverHosts reuses the activation device cache without another devices CLI call', async () => {
+  setRegisteredDevicesCache([
+    { name: 'worker', host: 'worker.tailnet', online: true, registeredAt: 1 },
+  ]);
+  const before = __deviceHealthTestCounters.registeredDeviceCliCalls;
+  const hosts = await discoverHosts();
+  expect(__deviceHealthTestCounters.registeredDeviceCliCalls).toBe(before);
+  expect(hosts.some((host) => host.name === 'worker' && host.online)).toBe(true);
+});
+
+test('activation device seed adds registered hosts while retaining last-good sessions', () => {
+  const snap = sampleSnap();
+  let written: FloorHostSessionsSnapshot | null = null;
+  setFloorSnapshotStore({
+    read: () => snap,
+    write: (next) => {
+      written = next;
+    },
+  });
+  const merged = seedFloorHostsFromDevices([
+    { name: 'newbox', host: 'newbox.tailnet', online: true },
+  ]);
+  expect(merged.hosts.some((host) => host.name === 'newbox')).toBe(true);
+  expect(merged.sessions.map((session) => session.sessionId).sort()).toEqual(['local-1', 'remote-1']);
+  expect(written?.hosts.some((host) => host.name === 'newbox')).toBe(true);
+});
