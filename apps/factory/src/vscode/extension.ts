@@ -13,7 +13,7 @@ import { AgentsMarkdownEditorProvider, swarmCurrentDocument } from './customEdit
 import { AgentsHtmlReaderProvider } from './htmlReader';
 import * as git from './git.vscode';
 import { AgentSettings, hasLoginEnabled, PromptEntry, QUICK_LAUNCH_SLOT_KEYS, getQuickLaunchSlot, QuickLaunchSlot, QuickLaunchSlotKey } from '../core/settings';
-import { listRegisteredDevices, countRunningAgents, fetchDeviceStats, resolveSecret } from './deviceHealth.vscode';
+import { listRegisteredDevices, countRunningAgents, fetchDeviceStats } from './deviceHealth.vscode';
 import { normalizeHost } from '../core/remoteSessions';
 import { pickBestHost, cappedOutDevices, noHostReason, deviceHasUsableVersion, resolveBalancePool, DeviceLoad } from '../core/launchHost';
 import {
@@ -388,9 +388,8 @@ async function refreshLaunchHealthCache(context: vscode.ExtensionContext): Promi
           fetchedAt: Date.now(),
         };
       }
-      const creds = device.secretRef ? await resolveSecret(device.secretRef) : {};
       const [stats, running, usable] = await Promise.all([
-        fetchDeviceStats(device.host, { isLocal: false, identityFile: creds.identityFile, user: creds.user || device.user }),
+        fetchDeviceStats(device.host, { isLocal: false }),
         countRunningAgents(device.name, { isLocal: false }),
         Promise.all([...AUTO_HOST_AGENT_KEYS].map(async (agentKey) => [agentKey, await hostHasUsableVersion(device.name, agentKey)] as const)),
       ]);
@@ -465,7 +464,7 @@ async function resolveBalancedHost(pool?: string[], agentKey?: string): Promise<
     vscode.window.showInformationMessage('Balanced launch: no online device available — running locally.');
     return undefined;
   }
-  // Look up each eligible device's registry entry for its SSH address + creds so
+  // Look up each eligible device's registry entry for its SSH address so
   // the hardware probe can reach it (mirrors the Factory Floor device-health
   // fetch in settings.vscode.ts).
   const byName = new Map(devices.map(d => [normalizeHost(d.name), d]));
@@ -477,9 +476,8 @@ async function resolveBalancedHost(pool?: string[], agentKey?: string): Promise<
       const running = await countRunningAgents(c.name, { isLocal: false });
       if (!agentKey) return { ...c, running };
       // Agent-aware: probe hardware health + usable-version in parallel.
-      const creds = dev?.secretRef ? await resolveSecret(dev.secretRef) : {};
       const [stats, usableVersion] = await Promise.all([
-        fetchDeviceStats(host, { isLocal: false, identityFile: creds.identityFile, user: creds.user || dev?.user }),
+        fetchDeviceStats(host, { isLocal: false }),
         hostHasUsableVersion(c.name, agentKey),
       ]);
       return {
