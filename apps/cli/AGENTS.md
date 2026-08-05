@@ -337,7 +337,7 @@ Gotcha: the preview pane has **no guaranteed height** — `availablePreviewRows 
 terminalRows() - fixedRows` (`picker.ts`), and `limitPreviewHeight` returns `''` when
 that collapses, so the preview can silently vanish on a full/short terminal (the
 RUSH-2198 bug). See the [§Contracts §Sessions spec](docs/specifications.md#sessions)
-for the non-empty-preview invariant (SES-1, SES-3).
+for the non-empty-preview invariant (SES-8).
 
 ## Bundled native helpers (where the tarball's `.app`s come from)
 
