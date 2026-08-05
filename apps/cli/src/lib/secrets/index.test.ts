@@ -19,6 +19,7 @@ import {
   getKeychainTokens,
   hasKeychainToken,
   hashedServiceName,
+  healHmacKeyNoAclOnce,
   HMAC_KEY_ITEM,
   keychainServiceAlias,
   keychainOperationPrompt,
@@ -279,6 +280,24 @@ describe('service-name hashing through the primitives', () => {
     setKeychainToken(HMAC_KEY_ITEM, '{"v":1}');
     expect(mem.store.has('linear-api-key')).toBe(true);
     expect(mem.store.has(HMAC_KEY_ITEM)).toBe(true);
+  });
+
+  it('healHmacKeyNoAclOnce re-stores an ACL-stamped hmackey no-ACL, once, preserving the key', () => {
+    const rec = { v: 1, k: 'ab'.repeat(32), migrated: true };
+    // Simulate a hmackey an old helper re-stamped with a biometry ACL: present in
+    // the store, but NOT written through the no-ACL path (so its read would prompt).
+    mem.set(HMAC_KEY_ITEM, JSON.stringify(rec));
+    expect(mem.noAclWrites.has(HMAC_KEY_ITEM)).toBe(false);
+
+    // First heal: re-stores it no-ACL, flags it, preserves the key value.
+    expect(healHmacKeyNoAclOnce(rec)).toBe(true);
+    expect(mem.noAclWrites.has(HMAC_KEY_ITEM)).toBe(true);
+    const stored = JSON.parse(mem.store.get(HMAC_KEY_ITEM) as string);
+    expect(stored.healedNoAcl).toBe(true);
+    expect(stored.k).toBe(rec.k);
+
+    // Idempotent: an already-healed record is a no-op (no per-process churn).
+    expect(healHmacKeyNoAclOnce(stored)).toBe(false);
   });
 
   it('withRawKeychainServiceNames suspends the transform for migration flows', () => {

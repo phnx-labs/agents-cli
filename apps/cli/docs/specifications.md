@@ -796,6 +796,13 @@ access control (that is 1Password/Vault; this tool is device-local first).
   opaque HMAC-SHA256 hashes (`agents-cli.h.*`) so a passive enumerator learns
   only counts/grouping, never bundle/key/provider names
   (`lib/secrets/index.ts:178-217`). See SEC-CROSS-3 for the platform gap.
+- **SEC-5a (MUST).** The HMAC-key item (`agents-cli.hmackey`) MUST be stored
+  no-ACL and its reads MUST stay prompt-free — it is read before every hashed
+  keychain lookup, so a biometry-ACL'd copy makes nearly every secrets-touching
+  command pop a generic Touch ID sheet. It is written no-ACL (`writeHmacKeyRecord`,
+  `lib/secrets/index.ts`), and a copy an older helper re-stamped with an ACL MUST
+  self-heal: on the first read where hashing is active, an un-healed record is
+  re-stored no-ACL exactly once (`healHmacKeyNoAclOnce`, gated by `healedNoAcl`).
 
 #### 3.2 Materialization boundary — the agent never sees plaintext unless a command says so
 
