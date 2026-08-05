@@ -18,6 +18,7 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import {
   appendActivityEvent,
+  readRecentActivity,
   type ActivityEvent,
   type Attachment,
 } from './activity.js';
@@ -107,11 +108,11 @@ export interface PostIdentity {
  * Resolve who is posting. Order:
  *  1. Explicit --session flag
  *  2. Env: AGENT_SESSION_ID / AGENTS_SESSION_ID / basename(AGENTS_MAILBOX_DIR)
- *  3. Env AGENT_LAUNCH_ID → match in pid registry
+ *  3. Env AGENT_LAUNCH_ID → match in pid registry or activity index
  *  4. Walk parent PIDs from startPid (default process.ppid) through by-pid registry
  */
 export function resolvePostIdentity(
-  input: Pick<FeedPostInput, 'sessionId' | 'env' | 'cwd' | 'startPid' | 'getParentPid' | 'readEntry' | 'listEntries'>,
+  input: Pick<FeedPostInput, 'sessionId' | 'env' | 'cwd' | 'activityRoot' | 'startPid' | 'getParentPid' | 'readEntry' | 'listEntries'>,
 ): PostIdentity | undefined {
   const env = input.env ?? process.env;
   const readEntry = input.readEntry ?? readPidSessionEntry;
@@ -132,6 +133,11 @@ export function resolvePostIdentity(
     registry = listEntries().find((e) => e.launchId === launchId);
   }
 
+  const activity = launchId
+    ? readRecentActivity({ root: input.activityRoot, maxBytesPerSession: 64 * 1024 })
+      .find((event) => event.launchId === launchId)
+    : undefined;
+
   if (!registry) {
     const start = input.startPid ?? (typeof process.ppid === 'number' ? process.ppid : undefined);
     if (start && start > 1) {
@@ -140,7 +146,7 @@ export function resolvePostIdentity(
   }
 
   // Prefer env session (explicit + managed run), fill gaps from registry.
-  const sessionId = envSession ?? registry?.sessionId;
+  const sessionId = envSession ?? registry?.sessionId ?? activity?.sessionId;
   if (!sessionId || !isValidMailboxId(sessionId)) return undefined;
 
   const mailboxFromEnv = mailboxIdFromEnv(env);
@@ -151,17 +157,18 @@ export function resolvePostIdentity(
   return {
     sessionId,
     mailboxId,
-    host: machineIdFromEnv(env),
-    runtime: env.AGENTS_RUNTIME?.trim() || 'headless',
+    host: activity?.host ?? machineIdFromEnv(env),
+    runtime: env.AGENTS_RUNTIME?.trim() || activity?.runtime || 'headless',
     agent: env.AGENTS_AGENT_NAME?.trim()
       || registry?.agent
+      || activity?.agent
       || detectAgentKind(env),
     cwd: input.cwd
-      ?? (env.AGENTS_CWD?.trim() || registry?.cwd || process.cwd()),
-    pid: registry?.pid,
-    launchId: launchId || registry?.launchId,
-    terminalId: env.AGENT_TERMINAL_ID?.trim() || registry?.terminalId,
-    tmuxPane: env.TMUX_PANE?.trim() || registry?.tmuxPane,
+      ?? (env.AGENTS_CWD?.trim() || registry?.cwd || activity?.cwd || process.cwd()),
+    pid: registry?.pid ?? activity?.pid,
+    launchId: launchId || registry?.launchId || activity?.launchId,
+    terminalId: env.AGENT_TERMINAL_ID?.trim() || registry?.terminalId || activity?.terminalId,
+    tmuxPane: env.TMUX_PANE?.trim() || registry?.tmuxPane || activity?.tmuxPane,
   };
 }
 
