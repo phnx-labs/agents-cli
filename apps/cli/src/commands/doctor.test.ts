@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
+import { spawnSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { wrapLine, computeVerdict, computeOverviewHealth, verdictIsAutoFixable, healthBlockLines } from './doctor.js';
+import { stripRoutingFlags, HOST_ROUTING_SPECS } from '../lib/hosts/remote-cmd.js';
 import { stringWidth, stripAnsi } from '../lib/session/width.js';
 import type { ResourceDiff, VersionResourceReport } from '../lib/doctor-diff.js';
 import type { SyncStatusRow, OrphanRow } from '../lib/drift.js';
@@ -223,5 +229,158 @@ describe('healthBlockLines (triaged health rendering)', () => {
     expect(out).toContain('+4 more orphans — agents prune cleanup');
     // The heal footer is suppressed for an orphan-only verdict (prune, not --fix).
     expect(out).not.toContain("heal what's auto-fixable");
+  });
+});
+
+describe('doctor target + qualifier survives --device forwarding (issue #2058)', () => {
+  it('stripRoutingFlags removes --device but preserves the target qualifier verbatim', () => {
+    const args = ['claude@latest', '--device', 'remotebox', '--diff'];
+    const forwarded = stripRoutingFlags(args, HOST_ROUTING_SPECS);
+    expect(forwarded).toEqual(['claude@latest', '--diff']);
+  });
+
+  it('strips --host alias too', () => {
+    const forwarded = stripRoutingFlags(['codex@0.117.0', '--host', 'yosemite-s0'], HOST_ROUTING_SPECS);
+    expect(forwarded).toEqual(['codex@0.117.0']);
+  });
+
+  it('--device=value= form is also stripped', () => {
+    const forwarded = stripRoutingFlags(['claude@pinned', '--device=remotebox'], HOST_ROUTING_SPECS);
+    expect(forwarded).toEqual(['claude@pinned']);
+  });
+
+  it('strips --device before the positional without consuming it', () => {
+    const forwarded = stripRoutingFlags(
+      ['doctor', '--device', 'myhost', 'claude@all', '--json'],
+      HOST_ROUTING_SPECS,
+    );
+    expect(forwarded).toEqual(['doctor', 'claude@all', '--json']);
+  });
+
+  it('preserves @oldest through --device forwarding', () => {
+    const forwarded = stripRoutingFlags(
+      ['doctor', 'claude@oldest', '--device', 'zion', '--fix'],
+      HOST_ROUTING_SPECS,
+    );
+    expect(forwarded).toEqual(['doctor', 'claude@oldest', '--fix']);
+  });
+});
+
+// ─── subprocess qualifier resolution (temp-HOME isolation) ───────────────────
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
+
+let testHome = '';
+let projectDir = '';
+
+afterEach(() => {
+  if (testHome) fs.rmSync(testHome, { recursive: true, force: true });
+  if (projectDir) fs.rmSync(projectDir, { recursive: true, force: true });
+  testHome = '';
+  projectDir = '';
+});
+
+/**
+ * Seed a temp HOME with the given Claude version dirs and an optional global default.
+ * Creates both the binary stub (so listInstalledVersions sees each version) and
+ * the version home dir (so diffVersionResources doesn't abort before JSON output).
+ */
+function seedHome(versions: string[], defaultVersion?: string): void {
+  testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-doctor-spec-home-'));
+  projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-doctor-spec-proj-'));
+
+  const userDir = path.join(testHome, '.agents');
+  const systemDir = path.join(userDir, '.system');
+  fs.mkdirSync(path.join(systemDir, '.git'), { recursive: true });
+  fs.writeFileSync(
+    path.join(systemDir, '.update-check'),
+    JSON.stringify({ lastCheck: 4102444800000, latestVersion: '0.0.0' }),
+  );
+
+  const defaultLine = defaultVersion ? `  claude: "${defaultVersion}"` : '';
+  fs.writeFileSync(path.join(userDir, 'agents.yaml'), `agents:\n${defaultLine}\n`);
+
+  for (const ver of versions) {
+    const versionBase = path.join(userDir, '.history', 'versions', 'claude', ver);
+    const binDir = path.join(versionBase, 'node_modules', '.bin');
+    const homeDir = path.join(versionBase, 'home');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.mkdirSync(homeDir, { recursive: true });
+    const stub = path.join(binDir, 'claude');
+    fs.writeFileSync(stub, '#!/bin/sh\nexit 0\n');
+    fs.chmodSync(stub, 0o755);
+  }
+}
+
+function runDoctor(...args: string[]): { status: number | null; stdout: string; stderr: string } {
+  const r = spawnSync('bun', [INDEX, 'doctor', ...args, '--cwd', projectDir], {
+    encoding: 'utf-8',
+    env: {
+      ...process.env,
+      HOME: testHome,
+      AGENTS_NO_AUTOPULL: '1',
+      AGENTS_NO_UPDATE_CHECK: '1',
+      AGENTS_DEVICES_DIR: path.join(testHome, '.agents', '.history', 'devices'),
+    },
+  });
+  return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
+}
+
+describe('doctor qualifier resolution via subprocess (issue #2058)', () => {
+  it('@latest resolves to the newest installed version, not a literal string', () => {
+    seedHome(['2.0.0', '2.1.0'], '2.0.0');
+    const r = runDoctor('claude@latest', '--json');
+    expect(r.stderr, r.stderr).not.toContain('is not installed');
+    const report = JSON.parse(r.stdout);
+    expect(report.version).toBe('2.1.0');
+  });
+
+  it('@oldest resolves to the earliest installed version', () => {
+    seedHome(['2.0.0', '2.1.0'], '2.1.0');
+    const r = runDoctor('claude@oldest', '--json');
+    expect(r.stderr, r.stderr).not.toContain('is not installed');
+    const report = JSON.parse(r.stdout);
+    expect(report.version).toBe('2.0.0');
+  });
+
+  it('@default resolves to the global default', () => {
+    seedHome(['2.0.0', '2.1.0'], '2.0.0');
+    const r = runDoctor('claude@default', '--json');
+    expect(r.stderr, r.stderr).not.toContain('is not installed');
+    const report = JSON.parse(r.stdout);
+    expect(report.version).toBe('2.0.0');
+  });
+
+  it('@pinned is an alias of @default', () => {
+    seedHome(['2.0.0', '2.1.0'], '2.0.0');
+    const r = runDoctor('claude@pinned', '--json');
+    expect(r.stderr, r.stderr).not.toContain('is not installed');
+    const report = JSON.parse(r.stdout);
+    expect(report.version).toBe('2.0.0');
+  });
+
+  it('@all produces a report for every installed version and is an explicit selector', () => {
+    seedHome(['2.0.0', '2.1.0'], '2.0.0');
+    const r = runDoctor('claude@all', '--json');
+    expect(r.stderr, r.stderr).not.toContain('is not installed');
+    const reports: Array<{ version: string }> = JSON.parse(r.stdout);
+    expect(Array.isArray(reports)).toBe(true);
+    expect(reports.map((rr) => rr.version).sort()).toEqual(['2.0.0', '2.1.0']);
+  });
+
+  it('bare agent (no qualifier) covers every installed version', () => {
+    seedHome(['2.0.0', '2.1.0'], '2.0.0');
+    const r = runDoctor('claude', '--json');
+    const reports: Array<{ version: string }> = JSON.parse(r.stdout);
+    expect(Array.isArray(reports)).toBe(true);
+    expect(reports.map((rr) => rr.version).sort()).toEqual(['2.0.0', '2.1.0']);
+  });
+
+  it('@default errors clearly when no default is pinned', () => {
+    seedHome(['2.0.0']); // no default set
+    const r = runDoctor('claude@default', '--json');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('No default version');
   });
 });

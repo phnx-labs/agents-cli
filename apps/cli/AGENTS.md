@@ -110,6 +110,8 @@ question, and a new health check goes in the one whose scope it matches.
 | `agents inspect <agent>[@version]` | Deep **single-harness** diagnosis | Per-resource diff between one version home and its resolved sources; manifest staleness; orphans. One harness, one machine. |
 | `agents doctor` | **Umbrella** — overall fleet + harness health | Local diagnostics (CLI presence, per-version sign-in, per-version sync, orphans) **and** cross-device divergence, rendered as the prioritized critical-at-top + per-computer hybrid below. The single command a user runs to discover problems before runtime. |
 
+**`agents doctor <agent>[@qualifier]` accepts symbolic qualifiers** — `@latest`, `@oldest`, `@default`/`@pinned`, `@all`, or an exact version — resolved through the shared agent-spec engine (`lib/agent-spec/index.ts`, `resolveAgentTargets`). Bare `agents doctor <agent>` (no qualifier) sweeps every installed version without setting `versionExplicit`; `--fix` then excludes isolated copies. Any explicit qualifier sets `versionExplicit: true`, scoping `--fix` to the resolved version set (including isolated copies for `@all`). `AgentSpecError` from the engine is surfaced as a user-facing error. Routing flags (`--host`/`--device`/`--remote-cwd`) are stripped via `stripRoutingFlags` before target parsing, so `agents doctor claude@latest --device remotebox` resolves correctly on the remote. (issue #2058, `src/commands/doctor.ts:parseTargetArg`)
+
 **`agents doctor` is a prioritized, comprehensive-by-default hybrid (RUSH-2069).**
 There is no `--verbose`. A top `✗ CRITICAL — needs you now (N)` section lists every
 critical across the whole fleet worst-first; a `─── by computer ───` section then

@@ -507,6 +507,13 @@ agents logs <id> --full                 # the full raw transcript / stdout (toke
 agents logs <id> -f                     # re-attach to a running one and follow
 agents view claude --host gpu-box       # inspect the remote install
 agents sync --host gpu-box              # make the remote machine current
+agents doctor claude                    # diagnose every installed claude version
+agents doctor claude@latest             # diagnose only the newest installed version
+agents doctor claude@oldest             # diagnose only the oldest installed version
+agents doctor claude@pinned             # diagnose the global-default (pinned) version
+agents doctor claude@all                # diagnose all versions, including isolated copies
+agents doctor claude@latest --fix       # auto-fix the newest installed version
+agents doctor claude@latest --device mac-mini  # diagnose newest claude on mac-mini
 agents doctor --devices                 # readiness matrix for every registered device
 agents doctor --devices --json          # machine-readable fleet readiness
 agents doctor --device mac-mini         # same matrix, scoped to one device

@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>fix(view,doctor): move resource drift out of view; fix doctor qualifier resolution</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header"><div class="header-label">agents-cli — issue #2058</div><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-implemented">implemented</span></div>
+<h1>fix(view,doctor): move resource drift out of view; fix doctor qualifier resolution</h1>
+<p class="summary">agents view exits clean; agents doctor @latest/@oldest/@pinned/@all now resolve correctly via resolveAgentTargets</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agents-cli/issues/2058" target="_blank" rel="noopener">Issue #2058</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fix/doctor-target-resolution</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">https://github.com/phnx-labs/agents-cli/issues/2058</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude sonnet-4-6</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-m1</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">4782ddb8-b759-400e-b48e-bd53c64f0b8a</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-05</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#proposed-changes"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p>Two bugs filed as issue #2058:</p>
+<p><strong>Bug 1 — <code>agents view</code> side-effects.</strong> <code>view &lt;agent&gt;</code> ran a resource-drift scan at exit, detected unsynced user-repo resources, and incurred the scan overhead; if new resources were found it could present an interactive sync prompt. <code>view</code> is a read command; the side-effect mutated version-home state when confirmed and was unexpected in read-only contexts.</p>
+<p><strong>Bug 2 — <code>agents doctor</code> qualifier resolution.</strong> <code>parseTargetArg</code> (private) handled only two cases before falling through: a bare agent (no qualifier) via <code>listInstalledVersions</code>, and <code>@default</code> via a one-off <code>getGlobalDefault</code> branch. Exact semver versions worked via <code>parseAgentSpec</code> + <code>isVersionInstalled</code>. Symbolic qualifiers <code>@latest</code>, <code>@oldest</code>, <code>@pinned</code>, and <code>@all</code> were not handled — they passed through <code>parseAgentSpec</code> (which accepted them as parseable specs) but then failed <code>isVersionInstalled</code> because "latest" / "oldest" / "pinned" / "all" are not real installed version strings, producing "Claude@latest is not installed" errors. The shared <code>resolveAgentTargets</code> engine used by every other command was never called.</p>
+<h2 id="proposed-changes">Proposed Changes</h2>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+  <svg class="artifact-diagram" viewBox="0 0 900 250" role="img" aria-label="Before/after fix for doctor qualifier resolution and view drift removal">
+    
+    <rect x="10" y="10" width="390" height="230" rx="10" fill="#111" stroke="#444" stroke-width="1"></rect>
+    <text x="205" y="36" text-anchor="middle" fill="#888" font-family="Inter,system-ui,sans-serif" font-size="13" font-weight="600">BEFORE (broken)</text>
+
+    <rect x="30" y="50" width="350" height="44" rx="6" fill="#1a0a0a" stroke="#7f1d1d" stroke-width="1.5"></rect>
+    <text x="205" y="70" text-anchor="middle" fill="#fca5a5" font-family="JetBrains Mono,monospace" font-size="11">agents view claude</text>
+    <text x="205" y="86" text-anchor="middle" fill="#ef4444" font-family="JetBrains Mono,monospace" font-size="10">→ drift scan + sync prompt (mutates state)</text>
+
+    <rect x="30" y="108" width="160" height="50" rx="6" fill="#1a0f0a" stroke="#92400e" stroke-width="1.5"></rect>
+    <text x="110" y="129" text-anchor="middle" fill="#fcd34d" font-family="JetBrains Mono,monospace" font-size="10">@latest / @oldest</text>
+    <text x="110" y="147" text-anchor="middle" fill="#ef4444" font-family="JetBrains Mono,monospace" font-size="10">→ not-installed error</text>
+
+    <rect x="210" y="108" width="170" height="50" rx="6" fill="#1a0f0a" stroke="#92400e" stroke-width="1.5"></rect>
+    <text x="295" y="129" text-anchor="middle" fill="#fcd34d" font-family="JetBrains Mono,monospace" font-size="10">@pinned / @all</text>
+    <text x="295" y="147" text-anchor="middle" fill="#ef4444" font-family="JetBrains Mono,monospace" font-size="10">→ not-installed error</text>
+
+    <rect x="30" y="172" width="350" height="36" rx="6" fill="#0f1a0a" stroke="#166534" stroke-width="1"></rect>
+    <text x="205" y="195" text-anchor="middle" fill="#86efac" font-family="JetBrains Mono,monospace" font-size="10">@default + exact semver → OK (unchanged)</text>
+
+    
+    <line x1="420" y1="130" x2="480" y2="130" stroke="#a3e635" stroke-width="2.5" marker-end="url(#fix-arr)"></line>
+    <text x="450" y="122" text-anchor="middle" fill="#a3e635" font-family="JetBrains Mono,monospace" font-size="10">fix</text>
+    <defs>
+      <marker id="fix-arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L8,3 z" fill="#a3e635"></path>
+      </marker>
+    </defs>
+
+    
+    <rect x="500" y="10" width="390" height="230" rx="10" fill="#0a0a0a" stroke="#a3e635" stroke-width="1.5"></rect>
+    <text x="695" y="36" text-anchor="middle" fill="#a3e635" font-family="Inter,system-ui,sans-serif" font-size="13" font-weight="600">AFTER (fixed)</text>
+
+    <rect x="520" y="50" width="350" height="44" rx="6" fill="#0a150a" stroke="#a3e635" stroke-width="1.5"></rect>
+    <text x="695" y="70" text-anchor="middle" fill="#d9f99d" font-family="JetBrains Mono,monospace" font-size="11">agents view claude</text>
+    <text x="695" y="86" text-anchor="middle" fill="#a3e635" font-family="JetBrains Mono,monospace" font-size="10">→ inventory only; exits 0; filesystem unchanged</text>
+
+    <rect x="520" y="108" width="350" height="50" rx="6" fill="#0a150a" stroke="#a3e635" stroke-width="1.5"></rect>
+    <text x="695" y="129" text-anchor="middle" fill="#d9f99d" font-family="JetBrains Mono,monospace" font-size="10">@latest / @oldest / @pinned / @all</text>
+    <text x="695" y="147" text-anchor="middle" fill="#a3e635" font-family="JetBrains Mono,monospace" font-size="10">→ resolveAgentTargets({ availableAgents: [agent] })</text>
+
+    <rect x="520" y="172" width="350" height="36" rx="6" fill="#0a150a" stroke="#4ade80" stroke-width="1"></rect>
+    <text x="695" y="195" text-anchor="middle" fill="#86efac" font-family="JetBrains Mono,monospace" font-size="10">@default + exact semver → still OK</text>
+  </svg>
+  <figcaption><b>Figure 1.</b> Before/after: <code>agents view</code> drift removal and <code>agents doctor</code> symbolic qualifier fix. Qualifiers that already worked (<code>@default</code>, exact semver) are unchanged.</figcaption>
+</figure><h3>Files changed</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>apps/cli/src/commands/view.ts</code></td>
+<td>Removed 7 drift-only imports and the entire drift-check block from <code>showInstalledVersions</code></td>
+</tr>
+<tr>
+<td><code>apps/cli/src/commands/doctor.ts</code></td>
+<td><code>parseTargetArg</code> (private) calls <code>resolveAgentTargets</code> for explicit qualifiers; bare agent still uses <code>listInstalledVersions</code>; removed <code>getGlobalDefault</code>, <code>isVersionInstalled</code>, <code>parseAgentSpec</code></td>
+</tr>
+<tr>
+<td><code>apps/cli/src/commands/view.resources.test.ts</code></td>
+<td>Subprocess regression: seeds unsynced user-repo skill, runs <code>view claude</code>, asserts exit 0 and unchanged version-home tree snapshot</td>
+</tr>
+<tr>
+<td><code>apps/cli/src/commands/doctor.test.ts</code></td>
+<td>Subprocess qualifier tests (<code>@latest</code>, <code>@oldest</code>, <code>@default</code>, <code>@pinned</code>, <code>@all</code>, bare); device-routing strip tests</td>
+</tr>
+<tr>
+<td><code>apps/cli/CHANGELOG.md</code></td>
+<td>Two entries under <code>1.22.15</code></td>
+</tr>
+<tr>
+<td><code>apps/cli/AGENTS.md</code></td>
+<td>Qualifier contract paragraph</td>
+</tr>
+<tr>
+<td><code>README.md</code></td>
+<td>Doctor examples; <code>--device</code> comment corrected; <code>claude@latest --device mac-mini</code> example added</td>
+</tr>
+</tbody></table>
+<h3><code>parseTargetArg</code> fix (private function)</h3>
+<pre><code>// Bare agent (no qualifier) → listInstalledVersions, versionExplicit: false
+// Explicit qualifier       → resolveAgentTargets,   versionExplicit: true
+const targets = resolveAgentTargets(`${agent}@${qualifier}`, { availableAgents: [agent] });
+</code></pre>
+<h3><code>versionExplicit</code> semantics</h3>
+<table>
+<thead>
+<tr>
+<th>Invocation</th>
+<th><code>versionExplicit</code></th>
+<th><code>--fix</code> scope</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents doctor claude</code></td>
+<td><code>false</code></td>
+<td>all non-isolated installed versions</td>
+</tr>
+<tr>
+<td><code>agents doctor claude@latest</code></td>
+<td><code>true</code></td>
+<td>newest installed version only</td>
+</tr>
+<tr>
+<td><code>agents doctor claude@all</code></td>
+<td><code>true</code></td>
+<td>all versions including isolated copies</td>
+</tr>
+<tr>
+<td><code>agents doctor claude@latest --device mac-mini</code></td>
+<td><code>true</code></td>
+<td>remote: newest on mac-mini</td>
+</tr>
+</tbody></table>
+<h2 id="public-interface">Public Interface</h2>
+<pre><code>agents doctor claude@latest                      # newest installed version
+agents doctor claude@oldest                      # oldest installed version
+agents doctor claude@pinned                      # global-default version (alias: @default)
+agents doctor claude@all                         # all versions, including isolated copies
+agents doctor claude@latest --device mac-mini    # diagnose newest claude on mac-mini
+agents view claude                               # inventory only; never prompts to sync
+</code></pre>
+<h2 id="validation">Validation</h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Expected result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>view.resources.test.ts</code> subprocess test</td>
+<td>exit 0; no drift text; version-home snapshot unchanged</td>
+</tr>
+<tr>
+<td><code>doctor.test.ts</code> subprocess qualifier tests</td>
+<td>All pass: <code>@latest</code>/<code>@oldest</code>/<code>@default</code>/<code>@pinned</code>/<code>@all</code>/bare</td>
+</tr>
+<tr>
+<td>Live: <code>agents view claude</code></td>
+<td>Prints inventory; no "New resources available" line</td>
+</tr>
+<tr>
+<td>Live: <code>agents doctor claude@latest</code></td>
+<td>Reports installed version; no error</td>
+</tr>
+</tbody></table>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Existing callers of removed view.ts imports</td>
+<td>Only the drift block was removed; all rendering code intact; linter confirms no dangling imports</td>
+</tr>
+<tr>
+<td><code>resolveAgentTargets</code> future behaviour changes</td>
+<td>Doctor now benefits automatically from engine improvements</td>
+</tr>
+<tr>
+<td>Subprocess tests in CI</td>
+<td><code>timeout: 15_000</code> per spawn; CI budget is 30 s per test file</td>
+</tr>
+</tbody></table>
+<aside class="artifact-callout"><strong>Key invariant:</strong> <code>parseTargetArg</code> stays private. The bare-agent path (<code>listInstalledVersions</code>, <code>versionExplicit: false</code>) is unchanged so <code>--fix</code> correctly excludes isolated copies in the default sweep.</aside><h2 id="tracking">Tracking</h2>
+<ul>
+<li>Issue: <a href="https://github.com/phnx-labs/agents-cli/issues/2058">#2058 fix(view,doctor)</a></li>
+<li>Branch: <code>fix/doctor-target-resolution</code> → PR to <code>phnx-labs/agents-cli:main</code></li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGVtcGxhdGU6IHBsYW4udjEKdGl0bGU6ICdmaXgodmlldyxkb2N0b3IpOiBtb3ZlIHJlc291cmNlIGRyaWZ0IG91dCBvZiB2aWV3OyBmaXggZG9jdG9yIHF1YWxpZmllciByZXNvbHV0aW9uJwpzdW1tYXJ5OiAnYWdlbnRzIHZpZXcgZXhpdHMgY2xlYW47IGFnZW50cyBkb2N0b3IgQGxhdGVzdC9Ab2xkZXN0L0BwaW5uZWQvQGFsbCBub3cgcmVzb2x2ZSBjb3JyZWN0bHkgdmlhIHJlc29sdmVBZ2VudFRhcmdldHMnCmhlYWRlcjogJ2FnZW50cy1jbGkg4oCUIGlzc3VlICMyMDU4Jwpwcm9qZWN0OiAnYWdlbnRzLWNsaScKcmVwb3NpdG9yeTogJ3BobngtbGFicy9hZ2VudHMtY2xpJwpicmFuY2g6ICdmaXgvZG9jdG9yLXRhcmdldC1yZXNvbHV0aW9uJwp0cmFja2luZzogJ2h0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdlbnRzLWNsaS9pc3N1ZXMvMjA1OCcKc3RhdHVzOiBpbXBsZW1lbnRlZApoYXJuZXNzOiAnY2xhdWRlJwphZ2VudDogJ2NsYXVkZS1zb25uZXQtNC02Jwpob3N0OiAneW9zZW1pdGUtbTEnCnNlc3Npb246ICc0NzgyZGRiOC1iNzU5LTQwMGUtYjQ4ZS1iZDUzYzY0ZjBiOGEnCmRhdGU6ICcyMDI2LTA4LTA1JwpsaW5rczoKICAtIGxhYmVsOiAnSXNzdWUgIzIwNTgnCiAgICB1cmw6ICdodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnZW50cy1jbGkvaXNzdWVzLzIwNTgnCi0tLQoKIyMgUHVycG9zZQoKVHdvIGJ1Z3MgZmlsZWQgYXMgaXNzdWUgIzIwNTg6CgoqKkJ1ZyAxIOKAlCBgYWdlbnRzIHZpZXdgIHNpZGUtZWZmZWN0cy4qKiBgdmlldyA8YWdlbnQ+YCByYW4gYSByZXNvdXJjZS1kcmlmdCBzY2FuIGF0IGV4aXQsIGRldGVjdGVkIHVuc3luY2VkIHVzZXItcmVwbyByZXNvdXJjZXMsIGFuZCBpbmN1cnJlZCB0aGUgc2NhbiBvdmVyaGVhZDsgaWYgbmV3IHJlc291cmNlcyB3ZXJlIGZvdW5kIGl0IGNvdWxkIHByZXNlbnQgYW4gaW50ZXJhY3RpdmUgc3luYyBwcm9tcHQuIGB2aWV3YCBpcyBhIHJlYWQgY29tbWFuZDsgdGhlIHNpZGUtZWZmZWN0IG11dGF0ZWQgdmVyc2lvbi1ob21lIHN0YXRlIHdoZW4gY29uZmlybWVkIGFuZCB3YXMgdW5leHBlY3RlZCBpbiByZWFkLW9ubHkgY29udGV4dHMuCgoqKkJ1ZyAyIOKAlCBgYWdlbnRzIGRvY3RvcmAgcXVhbGlmaWVyIHJlc29sdXRpb24uKiogYHBhcnNlVGFyZ2V0QXJnYCAocHJpdmF0ZSkgaGFuZGxlZCBvbmx5IHR3byBjYXNlcyBiZWZvcmUgZmFsbGluZyB0aHJvdWdoOiBhIGJhcmUgYWdlbnQgKG5vIHF1YWxpZmllcikgdmlhIGBsaXN0SW5zdGFsbGVkVmVyc2lvbnNgLCBhbmQgYEBkZWZhdWx0YCB2aWEgYSBvbmUtb2ZmIGBnZXRHbG9iYWxEZWZhdWx0YCBicmFuY2guIEV4YWN0IHNlbXZlciB2ZXJzaW9ucyB3b3JrZWQgdmlhIGBwYXJzZUFnZW50U3BlY2AgKyBgaXNWZXJzaW9uSW5zdGFsbGVkYC4gU3ltYm9saWMgcXVhbGlmaWVycyBgQGxhdGVzdGAsIGBAb2xkZXN0YCwgYEBwaW5uZWRgLCBhbmQgYEBhbGxgIHdlcmUgbm90IGhhbmRsZWQg4oCUIHRoZXkgcGFzc2VkIHRocm91Z2ggYHBhcnNlQWdlbnRTcGVjYCAod2hpY2ggYWNjZXB0ZWQgdGhlbSBhcyBwYXJzZWFibGUgc3BlY3MpIGJ1dCB0aGVuIGZhaWxlZCBgaXNWZXJzaW9uSW5zdGFsbGVkYCBiZWNhdXNlICJsYXRlc3QiIC8gIm9sZGVzdCIgLyAicGlubmVkIiAvICJhbGwiIGFyZSBub3QgcmVhbCBpbnN0YWxsZWQgdmVyc2lvbiBzdHJpbmdzLCBwcm9kdWNpbmcgIkNsYXVkZUBsYXRlc3QgaXMgbm90IGluc3RhbGxlZCIgZXJyb3JzLiBUaGUgc2hhcmVkIGByZXNvbHZlQWdlbnRUYXJnZXRzYCBlbmdpbmUgdXNlZCBieSBldmVyeSBvdGhlciBjb21tYW5kIHdhcyBuZXZlciBjYWxsZWQuCgojIyBQcm9wb3NlZCBDaGFuZ2VzCgo8ZmlndXJlIGNsYXNzPSJhcnRpZmFjdC1maWd1cmUgYXJ0aWZhY3QtZmlndXJlLWRpYWdyYW0gYXJ0aWZhY3QtZmlndXJlLXdpZGUiPgogIDxzdmcgY2xhc3M9ImFydGlmYWN0LWRpYWdyYW0iIHZpZXdCb3g9IjAgMCA5MDAgMjUwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkJlZm9yZS9hZnRlciBmaXggZm9yIGRvY3RvciBxdWFsaWZpZXIgcmVzb2x1dGlvbiBhbmQgdmlldyBkcmlmdCByZW1vdmFsIj4KICAgIDwhLS0gTGVmdCBwYW5lbDogQkVGT1JFIC0tPgogICAgPHJlY3QgeD0iMTAiIHk9IjEwIiB3aWR0aD0iMzkwIiBoZWlnaHQ9IjIzMCIgcng9IjEwIiBmaWxsPSIjMTExIiBzdHJva2U9IiM0NDQiIHN0cm9rZS13aWR0aD0iMSIvPgogICAgPHRleHQgeD0iMjA1IiB5PSIzNiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSxzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNjAwIj5CRUZPUkUgKGJyb2tlbik8L3RleHQ+CgogICAgPHJlY3QgeD0iMzAiIHk9IjUwIiB3aWR0aD0iMzUwIiBoZWlnaHQ9IjQ0IiByeD0iNiIgZmlsbD0iIzFhMGEwYSIgc3Ryb2tlPSIjN2YxZDFkIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogICAgPHRleHQgeD0iMjA1IiB5PSI3MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZjYTVhNSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+YWdlbnRzIHZpZXcgY2xhdWRlPC90ZXh0PgogICAgPHRleHQgeD0iMjA1IiB5PSI4NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2VmNDQ0NCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCI+4oaSIGRyaWZ0IHNjYW4gKyBzeW5jIHByb21wdCAobXV0YXRlcyBzdGF0ZSk8L3RleHQ+CgogICAgPHJlY3QgeD0iMzAiIHk9IjEwOCIgd2lkdGg9IjE2MCIgaGVpZ2h0PSI1MCIgcng9IjYiIGZpbGw9IiMxYTBmMGEiIHN0cm9rZT0iIzkyNDAwZSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICAgIDx0ZXh0IHg9IjExMCIgeT0iMTI5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmNkMzRkIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5AbGF0ZXN0IC8gQG9sZGVzdDwvdGV4dD4KICAgIDx0ZXh0IHg9IjExMCIgeT0iMTQ3IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZWY0NDQ0IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj7ihpIgbm90LWluc3RhbGxlZCBlcnJvcjwvdGV4dD4KCiAgICA8cmVjdCB4PSIyMTAiIHk9IjEwOCIgd2lkdGg9IjE3MCIgaGVpZ2h0PSI1MCIgcng9IjYiIGZpbGw9IiMxYTBmMGEiIHN0cm9rZT0iIzkyNDAwZSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICAgIDx0ZXh0IHg9IjI5NSIgeT0iMTI5IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmNkMzRkIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5AcGlubmVkIC8gQGFsbDwvdGV4dD4KICAgIDx0ZXh0IHg9IjI5NSIgeT0iMTQ3IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZWY0NDQ0IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj7ihpIgbm90LWluc3RhbGxlZCBlcnJvcjwvdGV4dD4KCiAgICA8cmVjdCB4PSIzMCIgeT0iMTcyIiB3aWR0aD0iMzUwIiBoZWlnaHQ9IjM2IiByeD0iNiIgZmlsbD0iIzBmMWEwYSIgc3Ryb2tlPSIjMTY2NTM0IiBzdHJva2Utd2lkdGg9IjEiLz4KICAgIDx0ZXh0IHg9IjIwNSIgeT0iMTk1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjODZlZmFjIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5AZGVmYXVsdCArIGV4YWN0IHNlbXZlciDihpIgT0sgKHVuY2hhbmdlZCk8L3RleHQ+CgogICAgPCEtLSBBcnJvdyAtLT4KICAgIDxsaW5lIHgxPSI0MjAiIHkxPSIxMzAiIHgyPSI0ODAiIHkyPSIxMzAiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIyLjUiIG1hcmtlci1lbmQ9InVybCgjZml4LWFycikiLz4KICAgIDx0ZXh0IHg9IjQ1MCIgeT0iMTIyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5maXg8L3RleHQ+CiAgICA8ZGVmcz4KICAgICAgPG1hcmtlciBpZD0iZml4LWFyciIgbWFya2VyV2lkdGg9IjgiIG1hcmtlckhlaWdodD0iOCIgcmVmWD0iNiIgcmVmWT0iMyIgb3JpZW50PSJhdXRvIj4KICAgICAgICA8cGF0aCBkPSJNMCwwIEwwLDYgTDgsMyB6IiBmaWxsPSIjYTNlNjM1Ii8+CiAgICAgIDwvbWFya2VyPgogICAgPC9kZWZzPgoKICAgIDwhLS0gUmlnaHQgcGFuZWw6IEFGVEVSIC0tPgogICAgPHJlY3QgeD0iNTAwIiB5PSIxMCIgd2lkdGg9IjM5MCIgaGVpZ2h0PSIyMzAiIHJ4PSIxMCIgZmlsbD0iIzBhMGEwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogICAgPHRleHQgeD0iNjk1IiB5PSIzNiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSxzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNjAwIj5BRlRFUiAoZml4ZWQpPC90ZXh0PgoKICAgIDxyZWN0IHg9IjUyMCIgeT0iNTAiIHdpZHRoPSIzNTAiIGhlaWdodD0iNDQiIHJ4PSI2IiBmaWxsPSIjMGExNTBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgICA8dGV4dCB4PSI2OTUiIHk9IjcwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZDlmOTlkIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj5hZ2VudHMgdmlldyBjbGF1ZGU8L3RleHQ+CiAgICA8dGV4dCB4PSI2OTUiIHk9Ijg2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj7ihpIgaW52ZW50b3J5IG9ubHk7IGV4aXRzIDA7IGZpbGVzeXN0ZW0gdW5jaGFuZ2VkPC90ZXh0PgoKICAgIDxyZWN0IHg9IjUyMCIgeT0iMTA4IiB3aWR0aD0iMzUwIiBoZWlnaHQ9IjUwIiByeD0iNiIgZmlsbD0iIzBhMTUwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogICAgPHRleHQgeD0iNjk1IiB5PSIxMjkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNkOWY5OWQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubyxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPkBsYXRlc3QgLyBAb2xkZXN0IC8gQHBpbm5lZCAvIEBhbGw8L3RleHQ+CiAgICA8dGV4dCB4PSI2OTUiIHk9IjE0NyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCI+4oaSIHJlc29sdmVBZ2VudFRhcmdldHMoeyBhdmFpbGFibGVBZ2VudHM6IFthZ2VudF0gfSk8L3RleHQ+CgogICAgPHJlY3QgeD0iNTIwIiB5PSIxNzIiIHdpZHRoPSIzNTAiIGhlaWdodD0iMzYiIHJ4PSI2IiBmaWxsPSIjMGExNTBhIiBzdHJva2U9IiM0YWRlODAiIHN0cm9rZS13aWR0aD0iMSIvPgogICAgPHRleHQgeD0iNjk1IiB5PSIxOTUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM4NmVmYWMiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubyxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPkBkZWZhdWx0ICsgZXhhY3Qgc2VtdmVyIOKGkiBzdGlsbCBPSzwvdGV4dD4KICA8L3N2Zz4KICA8ZmlnY2FwdGlvbj48Yj5GaWd1cmUgMS48L2I+IEJlZm9yZS9hZnRlcjogPGNvZGU+YWdlbnRzIHZpZXc8L2NvZGU+IGRyaWZ0IHJlbW92YWwgYW5kIDxjb2RlPmFnZW50cyBkb2N0b3I8L2NvZGU+IHN5bWJvbGljIHF1YWxpZmllciBmaXguIFF1YWxpZmllcnMgdGhhdCBhbHJlYWR5IHdvcmtlZCAoPGNvZGU+QGRlZmF1bHQ8L2NvZGU+LCBleGFjdCBzZW12ZXIpIGFyZSB1bmNoYW5nZWQuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIyBGaWxlcyBjaGFuZ2VkCgp8IEZpbGUgfCBDaGFuZ2UgfAp8IC0tLSB8IC0tLSB8CnwgYGFwcHMvY2xpL3NyYy9jb21tYW5kcy92aWV3LnRzYCB8IFJlbW92ZWQgNyBkcmlmdC1vbmx5IGltcG9ydHMgYW5kIHRoZSBlbnRpcmUgZHJpZnQtY2hlY2sgYmxvY2sgZnJvbSBgc2hvd0luc3RhbGxlZFZlcnNpb25zYCB8CnwgYGFwcHMvY2xpL3NyYy9jb21tYW5kcy9kb2N0b3IudHNgIHwgYHBhcnNlVGFyZ2V0QXJnYCAocHJpdmF0ZSkgY2FsbHMgYHJlc29sdmVBZ2VudFRhcmdldHNgIGZvciBleHBsaWNpdCBxdWFsaWZpZXJzOyBiYXJlIGFnZW50IHN0aWxsIHVzZXMgYGxpc3RJbnN0YWxsZWRWZXJzaW9uc2A7IHJlbW92ZWQgYGdldEdsb2JhbERlZmF1bHRgLCBgaXNWZXJzaW9uSW5zdGFsbGVkYCwgYHBhcnNlQWdlbnRTcGVjYCB8CnwgYGFwcHMvY2xpL3NyYy9jb21tYW5kcy92aWV3LnJlc291cmNlcy50ZXN0LnRzYCB8IFN1YnByb2Nlc3MgcmVncmVzc2lvbjogc2VlZHMgdW5zeW5jZWQgdXNlci1yZXBvIHNraWxsLCBydW5zIGB2aWV3IGNsYXVkZWAsIGFzc2VydHMgZXhpdCAwIGFuZCB1bmNoYW5nZWQgdmVyc2lvbi1ob21lIHRyZWUgc25hcHNob3QgfAp8IGBhcHBzL2NsaS9zcmMvY29tbWFuZHMvZG9jdG9yLnRlc3QudHNgIHwgU3VicHJvY2VzcyBxdWFsaWZpZXIgdGVzdHMgKGBAbGF0ZXN0YCwgYEBvbGRlc3RgLCBgQGRlZmF1bHRgLCBgQHBpbm5lZGAsIGBAYWxsYCwgYmFyZSk7IGRldmljZS1yb3V0aW5nIHN0cmlwIHRlc3RzIHwKfCBgYXBwcy9jbGkvQ0hBTkdFTE9HLm1kYCB8IFR3byBlbnRyaWVzIHVuZGVyIGAxLjIyLjE1YCB8CnwgYGFwcHMvY2xpL0FHRU5UUy5tZGAgfCBRdWFsaWZpZXIgY29udHJhY3QgcGFyYWdyYXBoIHwKfCBgUkVBRE1FLm1kYCB8IERvY3RvciBleGFtcGxlczsgYC0tZGV2aWNlYCBjb21tZW50IGNvcnJlY3RlZDsgYGNsYXVkZUBsYXRlc3QgLS1kZXZpY2UgbWFjLW1pbmlgIGV4YW1wbGUgYWRkZWQgfAoKIyMjIGBwYXJzZVRhcmdldEFyZ2AgZml4IChwcml2YXRlIGZ1bmN0aW9uKQoKYGBgdHlwZXNjcmlwdAovLyBCYXJlIGFnZW50IChubyBxdWFsaWZpZXIpIOKGkiBsaXN0SW5zdGFsbGVkVmVyc2lvbnMsIHZlcnNpb25FeHBsaWNpdDogZmFsc2UKLy8gRXhwbGljaXQgcXVhbGlmaWVyICAgICAgIOKGkiByZXNvbHZlQWdlbnRUYXJnZXRzLCAgIHZlcnNpb25FeHBsaWNpdDogdHJ1ZQpjb25zdCB0YXJnZXRzID0gcmVzb2x2ZUFnZW50VGFyZ2V0cyhgJHthZ2VudH1AJHtxdWFsaWZpZXJ9YCwgeyBhdmFpbGFibGVBZ2VudHM6IFthZ2VudF0gfSk7CmBgYAoKIyMjIGB2ZXJzaW9uRXhwbGljaXRgIHNlbWFudGljcwoKfCBJbnZvY2F0aW9uIHwgYHZlcnNpb25FeHBsaWNpdGAgfCBgLS1maXhgIHNjb3BlIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IGBhZ2VudHMgZG9jdG9yIGNsYXVkZWAgfCBgZmFsc2VgIHwgYWxsIG5vbi1pc29sYXRlZCBpbnN0YWxsZWQgdmVyc2lvbnMgfAp8IGBhZ2VudHMgZG9jdG9yIGNsYXVkZUBsYXRlc3RgIHwgYHRydWVgIHwgbmV3ZXN0IGluc3RhbGxlZCB2ZXJzaW9uIG9ubHkgfAp8IGBhZ2VudHMgZG9jdG9yIGNsYXVkZUBhbGxgIHwgYHRydWVgIHwgYWxsIHZlcnNpb25zIGluY2x1ZGluZyBpc29sYXRlZCBjb3BpZXMgfAp8IGBhZ2VudHMgZG9jdG9yIGNsYXVkZUBsYXRlc3QgLS1kZXZpY2UgbWFjLW1pbmlgIHwgYHRydWVgIHwgcmVtb3RlOiBuZXdlc3Qgb24gbWFjLW1pbmkgfAoKIyMgUHVibGljIEludGVyZmFjZQoKYGBgYmFzaAphZ2VudHMgZG9jdG9yIGNsYXVkZUBsYXRlc3QgICAgICAgICAgICAgICAgICAgICAgIyBuZXdlc3QgaW5zdGFsbGVkIHZlcnNpb24KYWdlbnRzIGRvY3RvciBjbGF1ZGVAb2xkZXN0ICAgICAgICAgICAgICAgICAgICAgICMgb2xkZXN0IGluc3RhbGxlZCB2ZXJzaW9uCmFnZW50cyBkb2N0b3IgY2xhdWRlQHBpbm5lZCAgICAgICAgICAgICAgICAgICAgICAjIGdsb2JhbC1kZWZhdWx0IHZlcnNpb24gKGFsaWFzOiBAZGVmYXVsdCkKYWdlbnRzIGRvY3RvciBjbGF1ZGVAYWxsICAgICAgICAgICAgICAgICAgICAgICAgICMgYWxsIHZlcnNpb25zLCBpbmNsdWRpbmcgaXNvbGF0ZWQgY29waWVzCmFnZW50cyBkb2N0b3IgY2xhdWRlQGxhdGVzdCAtLWRldmljZSBtYWMtbWluaSAgICAjIGRpYWdub3NlIG5ld2VzdCBjbGF1ZGUgb24gbWFjLW1pbmkKYWdlbnRzIHZpZXcgY2xhdWRlICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICMgaW52ZW50b3J5IG9ubHk7IG5ldmVyIHByb21wdHMgdG8gc3luYwpgYGAKCiMjIFZhbGlkYXRpb24KCnwgQ2hlY2sgfCBFeHBlY3RlZCByZXN1bHQgfAp8IC0tLSB8IC0tLSB8CnwgYHZpZXcucmVzb3VyY2VzLnRlc3QudHNgIHN1YnByb2Nlc3MgdGVzdCB8IGV4aXQgMDsgbm8gZHJpZnQgdGV4dDsgdmVyc2lvbi1ob21lIHNuYXBzaG90IHVuY2hhbmdlZCB8CnwgYGRvY3Rvci50ZXN0LnRzYCBzdWJwcm9jZXNzIHF1YWxpZmllciB0ZXN0cyB8IEFsbCBwYXNzOiBgQGxhdGVzdGAvYEBvbGRlc3RgL2BAZGVmYXVsdGAvYEBwaW5uZWRgL2BAYWxsYC9iYXJlIHwKfCBMaXZlOiBgYWdlbnRzIHZpZXcgY2xhdWRlYCB8IFByaW50cyBpbnZlbnRvcnk7IG5vICJOZXcgcmVzb3VyY2VzIGF2YWlsYWJsZSIgbGluZSB8CnwgTGl2ZTogYGFnZW50cyBkb2N0b3IgY2xhdWRlQGxhdGVzdGAgfCBSZXBvcnRzIGluc3RhbGxlZCB2ZXJzaW9uOyBubyBlcnJvciB8CgojIyBSaXNrcwoKfCBSaXNrIHwgTWl0aWdhdGlvbiB8CnwgLS0tIHwgLS0tIHwKfCBFeGlzdGluZyBjYWxsZXJzIG9mIHJlbW92ZWQgdmlldy50cyBpbXBvcnRzIHwgT25seSB0aGUgZHJpZnQgYmxvY2sgd2FzIHJlbW92ZWQ7IGFsbCByZW5kZXJpbmcgY29kZSBpbnRhY3Q7IGxpbnRlciBjb25maXJtcyBubyBkYW5nbGluZyBpbXBvcnRzIHwKfCBgcmVzb2x2ZUFnZW50VGFyZ2V0c2AgZnV0dXJlIGJlaGF2aW91ciBjaGFuZ2VzIHwgRG9jdG9yIG5vdyBiZW5lZml0cyBhdXRvbWF0aWNhbGx5IGZyb20gZW5naW5lIGltcHJvdmVtZW50cyB8CnwgU3VicHJvY2VzcyB0ZXN0cyBpbiBDSSB8IGB0aW1lb3V0OiAxNV8wMDBgIHBlciBzcGF3bjsgQ0kgYnVkZ2V0IGlzIDMwIHMgcGVyIHRlc3QgZmlsZSB8Cgo8YXNpZGUgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiPjxzdHJvbmc+S2V5IGludmFyaWFudDo8L3N0cm9uZz4gPGNvZGU+cGFyc2VUYXJnZXRBcmc8L2NvZGU+IHN0YXlzIHByaXZhdGUuIFRoZSBiYXJlLWFnZW50IHBhdGggKDxjb2RlPmxpc3RJbnN0YWxsZWRWZXJzaW9uczwvY29kZT4sIDxjb2RlPnZlcnNpb25FeHBsaWNpdDogZmFsc2U8L2NvZGU+KSBpcyB1bmNoYW5nZWQgc28gPGNvZGU+LS1maXg8L2NvZGU+IGNvcnJlY3RseSBleGNsdWRlcyBpc29sYXRlZCBjb3BpZXMgaW4gdGhlIGRlZmF1bHQgc3dlZXAuPC9hc2lkZT4KCiMjIFRyYWNraW5nCgotIElzc3VlOiBbIzIwNTggZml4KHZpZXcsZG9jdG9yKV0oaHR0cHM6Ly9naXRodWIuY29tL3BobngtbGFicy9hZ2VudHMtY2xpL2lzc3Vlcy8yMDU4KQotIEJyYW5jaDogYGZpeC9kb2N0b3ItdGFyZ2V0LXJlc29sdXRpb25gIOKGkiBQUiB0byBgcGhueC1sYWJzL2FnZW50cy1jbGk6bWFpbmAK"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

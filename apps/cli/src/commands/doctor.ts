@@ -51,12 +51,10 @@ import { checkAllClis, collectTeamsDoctorData, type TeamsDoctorEntry } from '../
 import { AGENTS, ALL_AGENT_IDS, resolveAgentName, formatAgentError, getAccountInfo, type AccountInfo } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import {
-  getGlobalDefault,
   getVersionHomePath,
-  isVersionInstalled,
   listInstalledVersions,
-  parseAgentSpec,
 } from '../lib/versions.js';
+import { resolveAgentTargets, AgentSpecError } from '../lib/agent-spec/index.js';
 import { loadManifest, isStale } from '../lib/staleness/index.js';
 import {
   diffVersionResources,
@@ -504,29 +502,28 @@ interface ResolvedTarget {
 function parseTargetArg(arg: string): ResolvedTarget | { error: string } {
   const at = arg.indexOf('@');
   const agentPart = at === -1 ? arg : arg.slice(0, at);
-  const versionPart = at === -1 ? '' : arg.slice(at + 1);
+  const qualifier = at === -1 ? '' : arg.slice(at + 1);
 
   const agent = resolveAgentName(agentPart);
   if (!agent) return { error: formatAgentError(agentPart) };
 
-  if (!versionPart) {
+  // No qualifier → non-isolated sweep of every installed version; --fix uses the non-isolated path
+  if (!qualifier) {
     const versions = listInstalledVersions(agent);
     if (versions.length === 0) return { error: `${AGENTS[agent].name} has no installed versions. Run \`agents add ${agent}@<version>\` first.` };
     return { agent, versions, versionExplicit: false };
   }
 
-  if (versionPart === 'default') {
-    const def = getGlobalDefault(agent);
-    if (!def) return { error: `${AGENTS[agent].name} has no default version pinned. Run \`agents use ${agent}@<version>\`.` };
-    return { agent, versions: [def], versionExplicit: true };
+  // All explicit qualifiers (@all, @latest, @oldest, @default, @pinned, @x.y.z) → shared resolver
+  try {
+    const targets = resolveAgentTargets(`${agent}@${qualifier}`, { availableAgents: [agent] });
+    const versions = targets.map((t) => t.version).filter((v): v is string => v !== null);
+    if (versions.length === 0) return { error: `${AGENTS[agent].name} has no installed versions. Run \`agents add ${agent}@<version>\` first.` };
+    return { agent, versions, versionExplicit: true };
+  } catch (e) {
+    if (e instanceof AgentSpecError) return { error: e.message };
+    throw e;
   }
-
-  const spec = parseAgentSpec(`${agent}@${versionPart}`);
-  if (!spec) return { error: `Invalid version: ${versionPart}` };
-  if (!isVersionInstalled(agent, versionPart)) {
-    return { error: `${AGENTS[agent].name}@${versionPart} is not installed. Installed: ${listInstalledVersions(agent).join(', ') || '(none)'}` };
-  }
-  return { agent, versions: [versionPart], versionExplicit: true };
 }
 
 function parseKindFilter(arg: string | undefined): DoctorKind[] | { error: string } {

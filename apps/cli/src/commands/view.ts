@@ -50,13 +50,6 @@ import {
   getVersionHomePath,
   getVersionDir,
   resolveVersion,
-  getAvailableResources,
-  getActuallySyncedResources,
-  getNewResources,
-  getProjectOnlyResources,
-  hasNewResources,
-  promptNewResourceSelection,
-  syncResourcesToVersion,
   removeVersion,
   printTrashFooter,
   reconcileStaleLatestForAgent,
@@ -65,7 +58,6 @@ import {
   isVersionIsolated,
   getIsolatedDefault,
 } from '../lib/versions.js';
-import { formatKeptProjectResources } from '../lib/project-resources.js';
 import {
   getShimsDir,
   isShimsInPath,
@@ -88,7 +80,6 @@ import { resolveConfiguredModel, type ConfiguredModelSource } from '../lib/model
 import { listProfiles, profileExists, profileSummary, readProfile, type Profile, type ProfileSummary } from '../lib/profiles.js';
 import { getByokUsageForHarness, hasByokProvider, renderByokBar, type ByokUsageResult } from '../lib/byok-usage.js';
 import { renderHarnessDetail } from './harness.js';
-import { loadManifest, isStale } from '../lib/staleness/index.js';
 import { confirm } from '@inquirer/prompts';
 import { formatPath, isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
@@ -901,49 +892,6 @@ async function showInstalledVersions(
     renderHostClisSection(process.cwd());
   }
 
-  // Check for new resources when viewing a specific agent
-  if (filterAgentId && versionManaged.length > 0) {
-    const defaultVersion = getGlobalDefault(filterAgentId);
-    if (defaultVersion) {
-      const manifest = loadManifest(filterAgentId, defaultVersion);
-      const cwd = process.cwd();
-      if (manifest && !isStale(manifest, filterAgentId, defaultVersion, cwd)) {
-        return;
-      }
-
-      const available = getAvailableResources();
-      const synced = getActuallySyncedResources(filterAgentId, defaultVersion);
-      const projectOnly = getProjectOnlyResources();
-      const newResources = getNewResources(available, synced, projectOnly);
-
-      if (hasNewResources(newResources, filterAgentId, defaultVersion)) {
-        try {
-          const selection = await promptNewResourceSelection(filterAgentId, newResources, defaultVersion);
-          if (selection && Object.keys(selection).length > 0) {
-            const result = syncResourcesToVersion(filterAgentId, defaultVersion, selection);
-            const synced: string[] = [];
-            if (result.commands) synced.push('commands');
-            if (result.skills) synced.push('skills');
-            if (result.hooks) synced.push('hooks');
-            if (result.memory.length > 0) synced.push('memory');
-            if (result.permissions) synced.push('permissions');
-            if (result.mcp.length > 0) synced.push('mcp');
-            if (result.plugins.length > 0) synced.push('plugins');
-            if (result.workflows.length > 0) synced.push('workflows');
-
-            if (synced.length > 0) {
-              console.log(chalk.green(`\nSynced to ${agentLabel(filterAgentId)}@${defaultVersion}: ${synced.join(', ')}`));
-            }
-            const kept = formatKeptProjectResources(result.projectSkipped);
-            if (kept) console.log(chalk.gray(kept));
-          }
-        } catch (err) {
-          if (isPromptCancelled(err)) return;
-          throw err;
-        }
-      }
-    }
-  }
 }
 
 /**
