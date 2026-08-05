@@ -6,8 +6,25 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
-## [0.9.311] - 2026-08-04
-
+- **Status bar no longer shows a stale/stranger identity for a tab (fixes a Kimi
+  tab displaying a Claude `2.1.218` and a wrong `session_…` id).** Two independent
+  defects. (1) The live-session-id lookup resolves a tab's session by reading the
+  SessionStart hook's pid-keyed `<pid>.json` files across the tab's process tree;
+  those files are never pruned, so the OS eventually recycles a dead agent's pid
+  onto a live process under a different tab and the stale file binds. The
+  terminal-age guard couldn't separate a ~30h-old stale file from a same-age
+  long-running tab in the same repo — `liveSessionIdForShell` now also rejects any
+  candidate pid whose CURRENT process (from `ps` ELAPSED) started after the record
+  was written. (2) The status bar rendered whatever version/account were cached on
+  the entry even when they were resolved for a *different* session left over in the
+  same terminal; it now shows only the identity resolved for the session id it
+  displays (`displayIdentity`, gated on a new `identityAppliedSessionId` distinct
+  from the both-fields retry gate so a version-only harness still shows its
+  version), and clears a field
+  the current session doesn't carry (Grok/Cursor/Droid have a version but no
+  account; Kimi has neither). Source: `src/core/liveSession.ts`,
+  `src/core/statusIdentity.ts`, `src/vscode/extension.ts`,
+  `src/vscode/terminals.vscode.ts`.
 - **Removed the `agents.terminalMode` setting — tmux is always on when available.**
   The extension no longer exposes an `auto` / `tmux` / `native` "terminal mode".
   tmux is the default for every agent and shell terminal (giving each a named,

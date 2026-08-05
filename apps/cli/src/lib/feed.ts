@@ -26,7 +26,7 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { getFeedDir, getUserAgentsDir } from './state.js';
 import { isAdmin, isHighConsequenceAllowed, isKnownOperator } from './operator.js';
-import { resolveProjectNameForCwd, listProjectDefs } from './projects.js';
+import { projectKeyFromCwd } from './project-key.js';
 
 export interface BlockOption {
   label: string;
@@ -435,8 +435,7 @@ export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInp
     .filter(Boolean)
     .map((label) => ({ label }));
 
-  // Same resolver as feed post / sessions: defined project name wins, else repo key.
-  const project = resolveProjectNameForCwd(agent.cwd, listProjectDefs());
+  const project = projectKeyFromCwd(agent.cwd);
   return {
     blockId: blockIdForSession(agent.sessionId),
     sessionId: agent.sessionId,

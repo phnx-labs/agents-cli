@@ -554,7 +554,6 @@ docs/06-observability.md.
           local: opts.local,
           includeLocal,
           self,
-          project: opts.project,
         });
         if (opts.json) {
           console.log(JSON.stringify(updates, null, 2));
@@ -789,14 +788,14 @@ export function resolveFeedFilter(raw: string | undefined): FeedFilter {
   return 'needs';
 }
 
-/** True when a block belongs to the requested project (case-insensitive). Exported for tests. */
-export function blockMatchesProject(block: OpenBlock, project?: string): boolean {
+/** True when a block belongs to the requested project (case-insensitive). */
+function blockMatchesProject(block: OpenBlock, project?: string): boolean {
   if (!project) return true;
   return (block.project ?? '').toLowerCase() === project.toLowerCase();
 }
 
-/** True when an activity event belongs to the requested project (case-insensitive). Exported for tests. */
-export function eventMatchesProject(ev: EnrichedActivityEvent, project?: string): boolean {
+/** True when an activity event belongs to the requested project (case-insensitive). */
+function eventMatchesProject(ev: EnrichedActivityEvent, project?: string): boolean {
   if (!project) return true;
   return ((ev.project ?? projectKeyFromCwd(ev.cwd) ?? '')).toLowerCase() === project.toLowerCase();
 }

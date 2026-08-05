@@ -522,6 +522,22 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   tool-search envelopes
   (`commands/sessions.ts:1432-1463,1551-1559,1824-1879,1937-1984,3929-3970,4006-4013`;
   `lib/session/remote-list.ts:98-115,337-541`).
+- **SES-IF-4b (MUST).** `sessions stats --json` MUST emit its own versioned
+  `sessions-stats` envelope (`{ schemaVersion, kind: 'sessions-stats', filters,
+  signal, coverage, totals, order, ranked[], zeroInvoked[] }`), never the
+  `SessionMeta[]` list or `{ session, events }` detail shape. `ranked` is the
+  resource rollup ordered by invocation volume (`--bottom` reverses, `--top <n>`
+  caps); `zeroInvoked` is the installed-but-never-invoked set. The rollup MUST
+  count each resource identity (kind + name) once — merging source layers — and
+  MUST record only EXPLICIT invocations (slash commands + `Skill` tool calls), so
+  an auto-triggered skill reads as 0 (skill invocations come from Claude + Kimi,
+  slash-commands from Claude only); the envelope's `signal` field states this.
+  `sessions backfill resources --json` MUST emit the versioned
+  `resources-backfill` envelope and populate `session_resource_usage` for
+  historical sessions gated by `resource_scan_ledger`, never silently re-scanning
+  a transcript already current at `RESOURCE_INDEX_VERSION`
+  (`commands/sessions-stats.ts`; `commands/sessions-backfill.ts`;
+  `lib/session/db.ts` `queryResourceUsageStats`/`backfillResourceUsage`).
 
 #### 4.3 stdout / stderr / exit discipline
 
@@ -1494,6 +1510,29 @@ schema (`--json` passes through each agent's native stream format).
   non-TTY MUST be refused before spawn rather than hang on dead stdin
   (`inferredInteractiveWithoutTty`, `lib/exec.ts:270-276`; enforced
   `commands/exec.ts:2645-2655`).
+- **EXEC-23a (MUST).** An interactive tmux-wrapped run MUST either attach
+  a confirmed-live pane to the user's terminal OR surface a legible failure
+  banner on stderr, and MUST NEVER leave an orphan session behind (RUSH-2185).
+  Three sub-rules enforce this:
+  - **(F1) Harness gate.** `agents run auto` with no prompt MUST NOT pick a
+    harness whose `capabilities.interactiveRepl` is `false`.  When all
+    installed harnesses lack that capability the run MUST fail with a clear
+    message naming the installed harnesses and instructing the user to pass
+    `-p` or install a REPL-capable one (`commands/exec.ts` auto-picker block;
+    `lib/agents.ts` per-agent capability; `lib/types.ts CapabilityName`).
+  - **(F2) Dead-pane recap.** `surfacePaneFailure` MUST be called whenever a
+    tmux pane is found dead — before or after attach — REGARDLESS of the
+    pane's exit code when the run is interactive.  `shouldRecapDeadPane(status,
+    interactive)` encodes this: `true` when `status !== 0` OR `interactive`
+    (`lib/exec.ts: shouldRecapDeadPane`; applied in `runInTmux`).
+  - **(F3) Positive-proof keep-session.** The "pane still alive → keep session"
+    branch in `runInTmux` MUST only be taken when a direct `tmux
+    display-message #{pane_dead}` query explicitly returns exit-0 with stdout
+    "0".  `paneExitStatus` returning `{dead: false}` is NOT sufficient — it
+    also returns that value on any query error (race with pane death).
+    `isPaneKnownAliveFromQueryResult(code, stdout)` encodes the positive-proof
+    test (`lib/exec.ts: isPaneKnownAliveFromQueryResult`).  An ambiguous
+    result MUST `killSession` rather than keep the orphan.
 - **EXEC-24 (MUST).** A slash-command prompt run headless under the
   implicit default `plan` mode MUST be refused before spawn — it would hang
   forever at `ExitPlanMode` with no TTY to approve it

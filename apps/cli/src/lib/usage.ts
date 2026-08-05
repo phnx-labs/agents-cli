@@ -395,7 +395,7 @@ const USAGE_BG_REFRESH_CONCURRENCY = 2;
  */
 export const USAGE_CACHE_FRESH_MS = 5 * 60 * 1000;
 
-const USAGE_CACHE_SWR_MS = 24 * 60 * 60 * 1000; // 24 hours — beyond this, block on live fetch.
+export const USAGE_CACHE_SWR_MS = 24 * 60 * 60 * 1000; // 24 hours — beyond this, block on live fetch.
 
 /**
  * Unified entry for every multi-account usage lookup (`agents view`, rotation,
@@ -2150,7 +2150,7 @@ function renderCompactUsageBar(usedPercent: number): string {
 }
 
 /** Render a colored block-character progress bar. */
-function renderBar(usedPercent: number, length: number, minimumVisible = 0): string {
+export function renderBar(usedPercent: number, length: number, minimumVisible = 0): string {
   const rounded = Math.round((usedPercent / 100) * length);
   const filled = Math.max(minimumVisible, Math.max(0, Math.min(length, rounded)));
   const color = getUsageColor(usedPercent);
@@ -2163,7 +2163,7 @@ function colorUsage(text: string, usedPercent: number): string {
 }
 
 /** Return a chalk color function based on the usage percentage threshold. */
-function getUsageColor(usedPercent: number): (text: string) => string {
+export function getUsageColor(usedPercent: number): (text: string) => string {
   if (usedPercent >= 100) return chalk.red;
   if (usedPercent >= 80) return chalk.yellow;
   return chalk.cyan;

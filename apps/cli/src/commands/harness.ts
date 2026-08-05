@@ -69,6 +69,7 @@ export interface ForkOptions {
   baseUrl?: string;
   authProvider?: string;
   version?: string;
+  label?: string;
   description?: string;
   keyStdin?: boolean;
   force?: boolean;
@@ -89,6 +90,7 @@ export function buildFork(source: string, name: string, opts: ForkOptions): Prof
       baseUrl: opts.baseUrl,
       provider: opts.authProvider,
       version: opts.version,
+      label: opts.label,
       description: opts.description,
     });
   }
@@ -108,6 +110,7 @@ export function buildFork(source: string, name: string, opts: ForkOptions): Prof
     baseUrl: opts.baseUrl,
     provider: opts.authProvider,
     authEnvVar: opts.authProvider ? authEnvKeyForHostOrThrow(host) : undefined,
+    label: opts.label,
     description: opts.description ?? `Forked from ${host}: ${opts.model}`,
   });
 }
@@ -185,6 +188,7 @@ Examples:
     .option('--base-url <url>', 'Custom endpoint base URL (claude/codex hosts)')
     .option('--auth-provider <provider>', 'Attach a keychain-backed API key under this provider')
     .option('--version <version>', 'Pin the host CLI version (e.g., 1.16.0)')
+    .option('--label <text>', 'Human-facing name shown by `agents view` (defaults to <name>)')
     .option('--description <text>', 'One-line description')
     .option('--key-stdin', 'Read the API key from stdin instead of prompting (for scripts/CI)')
     .option('--force', 'Overwrite an existing harness with the same name')

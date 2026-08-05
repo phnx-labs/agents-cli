@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { recordPredatesTerminal, type SessionStateRecord } from './liveSession';
+import { parseElapsedSeconds, recordPredatesProcess, recordPredatesTerminal, type SessionStateRecord } from './liveSession';
 
 // The real defect this guards: a Factory tab opened on 2026-08-02 displayed the
 // session id and version of a synthetic watchdog run from 20 days earlier,
@@ -59,5 +59,51 @@ describe('recordPredatesTerminal across a reattach', () => {
     // restore, this is what the user would see — a live agent whose identity can
     // never be refreshed again.
     expect(recordPredatesTerminal(rec(agentStartedAt), reattachedAt)).toBe(true);
+  });
+});
+
+describe('parseElapsedSeconds (`ps` ELAPSED / etime, macOS + Linux)', () => {
+  it('parses every field width the format emits', () => {
+    expect(parseElapsedSeconds('00:42')).toBe(42);              // mm:ss
+    expect(parseElapsedSeconds('05:00')).toBe(300);
+    expect(parseElapsedSeconds('01:02:03')).toBe(3723);         // hh:mm:ss
+    expect(parseElapsedSeconds('03-16:16:16')).toBe(317776);    // dd-hh:mm:ss
+    expect(parseElapsedSeconds('  02:00  ')).toBe(120);         // ps right-pads
+  });
+
+  it('returns null for an unparseable value rather than a wrong number', () => {
+    expect(parseElapsedSeconds('ELAPSED')).toBeNull();
+    expect(parseElapsedSeconds('')).toBeNull();
+    expect(parseElapsedSeconds('-')).toBeNull();
+  });
+});
+
+// The exact defect the Kimi tab showed: session_6bdb6da2's file (ts ~30h ago)
+// outlived its dead agent; the OS recycled that pid onto a process now under the
+// live Kimi tab. recordPredatesTerminal could NOT reject it because the Kimi tab
+// was itself ~30h old (a long-running session in the same repo). The start time
+// of the process CURRENTLY holding the pid is what separates them.
+describe('recordPredatesProcess — recycled pid the terminal-age guard misses', () => {
+  const nowMs = Date.UTC(2026, 7, 4, 20, 8, 0);
+  const staleFileTs = Math.floor((nowMs - 30 * 3600 * 1000) / 1000); // dead agent, 30h ago
+  const tabCreatedAtMs = nowMs - 30 * 3600 * 1000;                    // tab is the same age
+
+  it('recordPredatesTerminal alone keeps the stale record (the bug)', () => {
+    expect(recordPredatesTerminal(rec(staleFileTs), tabCreatedAtMs)).toBe(false);
+  });
+
+  it('rejects it once the pid\'s live process is known to have started just now', () => {
+    const processStartMs = nowMs - 30_000; // recycled pid: process is 30s old
+    expect(recordPredatesProcess(rec(staleFileTs), processStartMs)).toBe(true);
+  });
+
+  it('keeps the record when the live process started at the recorded time', () => {
+    const processStartMs = staleFileTs * 1000 + 400; // same process that wrote it
+    expect(recordPredatesProcess(rec(staleFileTs), processStartMs)).toBe(false);
+  });
+
+  it('rejects a record with no usable timestamp rather than trusting it', () => {
+    expect(recordPredatesProcess(rec(0), nowMs)).toBe(false);
+    expect(recordPredatesProcess(rec(Number.NaN), nowMs)).toBe(false);
   });
 });

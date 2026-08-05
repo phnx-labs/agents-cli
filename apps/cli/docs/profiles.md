@@ -47,9 +47,7 @@ agents harness fork claude corp --model gpt-x --base-url https://gw.corp/v1 --au
 agents harness fork deepseek deepseek-chat --model deepseek/deepseek-chat-v3
 ```
 
-Forking a **native** harness requires `--model` — there is no model to inherit. Forking a **custom** harness copies everything (env, endpoint, auth binding, `fallback_model`, host version pin) and applies only the flags you pass; the two diverge from that point, so removing the source never affects the fork. `--force` overwrites an existing harness of the same name. The fork records its parent as `forkedFrom:` in the YAML — display-only lineage.
-
-The header `agents view`/`agents harness list` prints is always derived from the harness's `name` — split on `-`/`_`, each token cased through a curated vendor table (`deepseek` → `DeepSeek`, `openai` → `OpenAI`, `xai` → `xAI`, `moonshotai` → `Moonshot AI`, …) with a plain capitalize-first-letter fallback for anything unmatched. `deepseek-flash` reads as `DeepSeek Flash`; a made-up name like `spark` reads as `Spark`. There is no `--label` override — the name is the only lever, so pick it deliberately when you `add`/`fork`.
+Forking a **native** harness requires `--model` — there is no model to inherit. Forking a **custom** harness copies everything (env, endpoint, auth binding, `fallback_model`, host version pin) and applies only the flags you pass; the two diverge from that point, so removing the source never affects the fork. `--label` sets the name `agents view` prints, `--force` overwrites an existing harness of the same name. The fork records its parent as `forkedFrom:` in the YAML — display-only lineage.
 
 ### Custom harnesses are their own agent type
 
@@ -207,9 +205,20 @@ preset: kimi                   # string, optional — preset this profile was cr
 
 provider: openrouter           # string, optional — provider name for display
                                # Set automatically by `profiles add`; informational only.
+
+models:                        # Partial<Record<ModelTier, string>>, optional
+  cheap: deepseek/deepseek-chat-v3        # per-tier model ids for THIS harness's
+  default: deepseek/deepseek-v4-flash-0731 # own catalog — resolves `agents run
+  best: deepseek/deepseek-r1               # <profile> --model cheap|default|best|ultra`
+                               # against the harness's own models instead of the host
+                               # agent's (claude/codex/...) native catalog. An unset
+                               # tier clamps to the next CHEAPER tier that IS set
+                               # (ultra -> best -> default -> cheap). Omit entirely to
+                               # keep today's behavior: a requested tier falls back to
+                               # the single pinned model in `env`, unchanged.
 ```
 
-Fields sourced from `Profile` interface at `src/lib/profiles.ts:18-32`.
+Fields sourced from `Profile` interface at `src/lib/profiles.ts:19-73`.
 
 ## Recipes
 

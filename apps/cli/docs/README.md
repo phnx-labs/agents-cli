@@ -30,6 +30,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [SSH transport](09-ssh-transport.md) | The one multiplexed engine every `--host` command rides — default connection reuse, keepalive, one-round-trip follow. |
 | [Optimizations](99-optimizations.md) | Sync manifest, SSH transport, startup profiling, hot-path notes. |
 | [Landscape](04-landscape.md) | Where agents-cli sits next to similar tools. |
+| [vs Gas Town](vs-gastown.md) | How agents-cli differs from Gas Town (multi-agent factory): parallels, glossary, what users like/dislike. |
 
 ## Credentials and model routing
 

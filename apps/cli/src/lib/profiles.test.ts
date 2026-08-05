@@ -7,11 +7,7 @@ import {
   profileModelEnvKey,
   profileFromHostModel,
   forkProfile,
-  editProfile,
-  renameProfile,
   profileSummary,
-  profileLabel,
-  profileExists,
   modelEnvKeyForHost,
   resolveProfileEnv,
   readProfile,
@@ -274,6 +270,144 @@ describe('resolveProfileForRun surfaces fallback_model as an env-swap', () => {
   });
 });
 
+describe("resolveProfileForRun resolves cost tiers against the profile's OWN models", () => {
+  it('resolves a tier token to the model configured under profile.models', () => {
+    writeProfile({
+      name: 'deepseek-flash',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731' },
+      models: {
+        cheap: 'deepseek/deepseek-chat-v3',
+        default: 'deepseek/deepseek-v4-flash-0731',
+        best: 'deepseek/deepseek-r1',
+      },
+    });
+
+    const resolved = resolveProfileForRun('deepseek-flash', 'best');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-r1');
+    expect(resolved.resolvedModel).toBe('deepseek/deepseek-r1');
+    expect(resolved.tierNote).toBeUndefined();
+  });
+
+  it('clamps an unset tier to the next cheaper tier that IS set', () => {
+    writeProfile({
+      name: 'deepseek-flash',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731' },
+      // default and ultra are unset: ultra clamps down to best, default
+      // clamps down to cheap.
+      models: {
+        cheap: 'deepseek/deepseek-chat-v3',
+        best: 'deepseek/deepseek-r1',
+      },
+    });
+
+    const ultra = resolveProfileForRun('deepseek-flash', 'ultra');
+    expect(ultra.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-r1');
+    expect(ultra.resolvedModel).toBe('deepseek/deepseek-r1');
+    // A clamp is never silent -- mirrors the native-harness tier block, which
+    // always announces when it substitutes a cheaper rung.
+    expect(ultra.tierNote).toBe(
+      `no "ultra" model configured on profile 'deepseek-flash'; using its "best" tier (deepseek/deepseek-r1)`,
+    );
+
+    const def = resolveProfileForRun('deepseek-flash', 'default');
+    expect(def.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-chat-v3');
+    expect(def.resolvedModel).toBe('deepseek/deepseek-chat-v3');
+    expect(def.tierNote).toBe(
+      `no "default" model configured on profile 'deepseek-flash'; using its "cheap" tier (deepseek/deepseek-chat-v3)`,
+    );
+  });
+
+  it('degrades gracefully (no throw, env unchanged) when the profile has no models: at all', () => {
+    writeProfile({
+      name: 'kimi',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5' },
+    });
+
+    // No `models:` opt-in at all: this function leaves the tier token and env
+    // untouched. It does NOT write its own "no model configured" note --
+    // apps/cli/src/commands/exec.ts's profile-tier discard guard (merged
+    // separately, "cost tiers don't apply to profile ...") is the canonical
+    // message for this case, covered by its own test in exec.test.ts.
+    const resolved = resolveProfileForRun('kimi', 'best');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('moonshotai/kimi-k2.5');
+    expect(resolved.resolvedModel).toBeUndefined();
+    expect(resolved.tierNote).toBeUndefined();
+  });
+
+  it('degrades gracefully when models: is set but nothing at-or-below the requested tier is', () => {
+    writeProfile({
+      name: 'partial',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'some/pinned-model' },
+      // Only `best` is configured; requesting `cheap` has nothing cheaper to
+      // clamp to -- same no-opt-in-for-this-tier outcome as having no
+      // `models:` block at all, deferring to exec.ts's discard guard.
+      models: { best: 'deepseek/deepseek-r1' },
+    });
+
+    const resolved = resolveProfileForRun('partial', 'cheap');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('some/pinned-model');
+    expect(resolved.resolvedModel).toBeUndefined();
+    expect(resolved.tierNote).toBeUndefined();
+  });
+
+  it('regression: tier resolution is NOT affected by the HOST agent\'s own catalog (the collision this fix closes)', () => {
+    // The host is claude, but this profile pins its own deepseek models per
+    // tier. Before this fix, resolveProfileForRun ignored the requested
+    // model entirely and exec.ts's native tier block resolved "best" by
+    // calling resolveTier(options.agent, ...) with options.agent already
+    // overwritten to the HOST id ('claude') -- so a real claude-* id landing
+    // in ANTHROPIC_MODEL here would reproduce that exact collision.
+    writeProfile({
+      name: 'deepseek-flash',
+      host: { agent: 'claude', version: '2.1.219' },
+      env: { ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731' },
+      models: {
+        cheap: 'deepseek/deepseek-chat-v3',
+        default: 'deepseek/deepseek-v4-flash-0731',
+        best: 'deepseek/deepseek-r1',
+      },
+    });
+
+    const resolved = resolveProfileForRun('deepseek-flash', 'best');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-r1');
+    // Never a native Claude catalog id -- proves the substitution came from
+    // the profile's own `models:` map, not from resolving "best" against
+    // claude's catalog.
+    expect(resolved.env.ANTHROPIC_MODEL.startsWith('claude')).toBe(false);
+  });
+
+  it('leaves env untouched when --model is a concrete id, not a tier token', () => {
+    writeProfile({
+      name: 'kimi',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5' },
+      models: { best: 'moonshotai/kimi-k3' },
+    });
+
+    const resolved = resolveProfileForRun('kimi', 'moonshotai/kimi-k2-0905');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('moonshotai/kimi-k2.5');
+    expect(resolved.resolvedModel).toBeUndefined();
+    expect(resolved.tierNote).toBeUndefined();
+  });
+
+  it("leaves env unchanged when no --model is requested at all (today's default behavior)", () => {
+    writeProfile({
+      name: 'kimi',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5' },
+      models: { best: 'moonshotai/kimi-k3' },
+    });
+
+    const resolved = resolveProfileForRun('kimi');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('moonshotai/kimi-k2.5');
+    expect(resolved.resolvedModel).toBeUndefined();
+  });
+});
+
 describe('forkProfile — copy an existing harness under a new name', () => {
   const source: Profile = {
     name: 'deepseek',
@@ -330,16 +464,18 @@ describe('forkProfile — copy an existing harness under a new name', () => {
     expect(forked.auth).toEqual({ envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.corp.token' });
   });
 
-  it('a stored label field is never read for display, forked or not — the header always derives from name', () => {
-    const labelled: Profile = { ...source, label: 'Something Else Entirely' };
-    // The source itself: label is set but ignored; the header comes from `name`.
-    expect(profileSummary(labelled).label).toBe('DeepSeek');
-
+  it('never inherits the source label — two harnesses must not share one view header', () => {
+    const labelled: Profile = { ...source, label: 'DeepSeek Flash' };
     const forked = forkProfile(labelled, 'deepseek-chat', { model: 'deepseek/deepseek-chat-v3' });
     expect(forked.label).toBeUndefined();
-    expect(profileSummary(forked).label).toBe('DeepSeek Chat');
-    // A straight copy with no overrides must not inherit the stored label either.
+    expect(profileSummary(forked).label).toBe('deepseek-chat');
+    // A straight copy with no overrides must not inherit it either.
     expect(forkProfile(labelled, 'twin').label).toBeUndefined();
+  });
+
+  it('carries an explicitly given label onto the fork', () => {
+    const forked = forkProfile(source, 'chat', { label: 'DeepSeek Chat' });
+    expect(profileSummary(forked).label).toBe('DeepSeek Chat');
   });
 
   it('re-pins the host version when asked', () => {
@@ -357,125 +493,26 @@ describe('forkProfile — copy an existing harness under a new name', () => {
 });
 
 describe('profileSummary — first-class harness fields', () => {
-  it('surfaces the derived label, host version, description and fork lineage', () => {
+  it('surfaces the label, host version, description and fork lineage', () => {
     const summary = profileSummary({
       name: 'spark',
+      label: 'Muse Spark',
       host: { agent: 'opencode', version: '1.16.0' },
       env: { OPENCODE_MODEL: 'meta/muse-spark-1.1' },
       description: 'Muse Spark through OpenCode',
       forkedFrom: 'opencode',
     });
-    expect(summary.label).toBe('Spark');
+    expect(summary.label).toBe('Muse Spark');
     expect(summary.hostVersion).toBe('1.16.0');
     expect(summary.description).toBe('Muse Spark through OpenCode');
     expect(summary.forkedFrom).toBe('opencode');
     expect(summary.model).toBe('meta/muse-spark-1.1');
   });
 
-  it('derives the label from name even when a stored label field is set', () => {
-    const summary = profileSummary({ name: 'spark', label: 'Muse Spark', host: { agent: 'opencode' }, env: {} });
-    expect(summary.label).toBe('Spark');
+  it('falls back to the harness name when no label is set', () => {
+    const summary = profileSummary({ name: 'spark', host: { agent: 'opencode' }, env: {} });
+    expect(summary.label).toBe('spark');
     expect(summary.hostVersion).toBeNull();
     expect(summary.forkedFrom).toBeNull();
-  });
-});
-
-describe('profileLabel — curated vendor/brand title derivation', () => {
-  const p = (name: string): Profile => ({ name, host: { agent: 'claude' }, env: {} });
-
-  it('maps known vendor tokens through the curated table, case-insensitively', () => {
-    expect(profileLabel(p('deepseek-flash'))).toBe('DeepSeek Flash');
-    expect(profileLabel(p('DEEPSEEK'))).toBe('DeepSeek');
-    expect(profileLabel(p('openai-gpt'))).toBe('OpenAI GPT');
-    expect(profileLabel(p('xai-grok'))).toBe('xAI Grok');
-    expect(profileLabel(p('moonshotai-kimi'))).toBe('Moonshot AI Kimi');
-    expect(profileLabel(p('mistralai'))).toBe('Mistral');
-    expect(profileLabel(p('anthropic-claude'))).toBe('Anthropic Claude');
-  });
-
-  it('falls back to capitalize-first-letter for a token with no vendor match', () => {
-    expect(profileLabel(p('spark'))).toBe('Spark');
-  });
-
-  it('splits on both dash and underscore, mixing matched and unmatched tokens', () => {
-    expect(profileLabel(p('deepseek_chat_v3'))).toBe('DeepSeek Chat V3');
-  });
-
-  it('never reads profile.label, even when explicitly set', () => {
-    const withLabel: Profile = { ...p('spark'), label: 'Custom Title' };
-    expect(profileLabel(withLabel)).toBe('Spark');
-  });
-});
-
-describe('editProfile — in-place override that preserves lineage', () => {
-  const source: Profile = {
-    name: 'deepseek-flash',
-    host: { agent: 'claude' },
-    env: { ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731', ANTHROPIC_BASE_URL: 'https://openrouter.ai/api' },
-    provider: 'openrouter',
-  };
-
-  it('applies overrides onto the same name, in place', () => {
-    const edited = editProfile(source, { model: 'deepseek/deepseek-chat-v3' });
-    expect(edited.name).toBe('deepseek-flash');
-    expect(edited.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-chat-v3');
-    expect(edited.env.ANTHROPIC_BASE_URL).toBe('https://openrouter.ai/api');
-  });
-
-  it('does not self-reference — forkedFrom stays whatever the source had, even when unset', () => {
-    expect(source.forkedFrom).toBeUndefined();
-    const edited = editProfile(source, { model: 'deepseek/deepseek-chat-v3' });
-    expect(edited.forkedFrom).toBeUndefined();
-    // A bare forkProfile onto the same name is the bug editProfile exists to avoid:
-    // it unconditionally records the source's own name as the lineage.
-    expect(forkProfile(source, source.name).forkedFrom).toBe('deepseek-flash');
-  });
-
-  it('preserves a real recorded forkedFrom instead of overwriting it with the profile\'s own name', () => {
-    const child: Profile = { ...source, forkedFrom: 'claude' };
-    const edited = editProfile(child, { model: 'deepseek/deepseek-chat-v3' });
-    expect(edited.name).toBe('deepseek-flash');
-    expect(edited.forkedFrom).toBe('claude');
-    expect(edited.forkedFrom).not.toBe('deepseek-flash');
-  });
-});
-
-describe('renameProfile — filename rename with forkedFrom lineage cascade', () => {
-  beforeEach(() => {
-    writeProfile({
-      name: 'deepseek-flash',
-      host: { agent: 'claude' },
-      env: { ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731' },
-    });
-  });
-
-  it('renames the file and updates the name field inside it', () => {
-    renameProfile('deepseek-flash', 'deepseek-fast');
-    expect(profileExists('deepseek-flash')).toBe(false);
-    expect(profileExists('deepseek-fast')).toBe(true);
-    expect(readProfile('deepseek-fast').name).toBe('deepseek-fast');
-  });
-
-  it('throws a clear "not found" error when the source does not exist', () => {
-    expect(() => renameProfile('does-not-exist', 'whatever')).toThrow(/not found/i);
-  });
-
-  it('throws a clear "already exists" error and leaves the source untouched (no overwrite path)', () => {
-    writeProfile({ name: 'taken', host: { agent: 'claude' }, env: {} });
-    expect(() => renameProfile('deepseek-flash', 'taken')).toThrow(/already exists/i);
-    expect(profileExists('deepseek-flash')).toBe(true);
-    expect(readProfile('taken').name).toBe('taken');
-  });
-
-  it('rewrites forkedFrom on every child that pointed at the old name, and leaves unrelated ones alone', () => {
-    writeProfile({ name: 'child-a', host: { agent: 'claude' }, env: {}, forkedFrom: 'deepseek-flash' });
-    writeProfile({ name: 'child-b', host: { agent: 'claude' }, env: {}, forkedFrom: 'deepseek-flash' });
-    writeProfile({ name: 'unrelated', host: { agent: 'claude' }, env: {}, forkedFrom: 'other' });
-
-    renameProfile('deepseek-flash', 'deepseek-fast');
-
-    expect(readProfile('child-a').forkedFrom).toBe('deepseek-fast');
-    expect(readProfile('child-b').forkedFrom).toBe('deepseek-fast');
-    expect(readProfile('unrelated').forkedFrom).toBe('other');
   });
 });
