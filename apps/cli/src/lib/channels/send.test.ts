@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import type { Meta } from '../types.js';
 import {
   composeSendText,
@@ -6,11 +9,6 @@ import {
   readOwnerDest,
   resolveSendEnvelope,
 } from './send.js';
-import { getOwnerNotifyFromHumans } from '../humans.js';
-
-vi.mock('../humans.js', () => ({
-  getOwnerNotifyFromHumans: vi.fn(() => null),
-}));
 
 const metaWithOwner = {
   notify: { owner: { channel: 'imessage', to: '+18055550100' } },
@@ -204,21 +202,37 @@ describe('resolveSendEnvelope', () => {
 });
 
 describe('owner destination from humans.yaml', () => {
-  afterEach(() => {
-    vi.mocked(getOwnerNotifyFromHumans).mockReturnValue(null);
+  let humansFile: string;
+
+  beforeEach(() => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'send-humans-test-'));
+    humansFile = path.join(tmp, 'humans.yaml');
+    process.env.AGENTS_HUMANS_FILE = humansFile;
   });
 
+  afterEach(() => {
+    delete process.env.AGENTS_HUMANS_FILE;
+  });
+
+  function writeOwnerNotify(channel: string, to: string): void {
+    fs.writeFileSync(
+      humansFile,
+      `version: 1\nowner:\n  notify:\n    channel: ${channel}\n    to: '${to}'\n`,
+    );
+  }
+
   it('readOwnerDest prefers humans.yaml over meta.notify.owner', () => {
-    vi.mocked(getOwnerNotifyFromHumans).mockReturnValueOnce({ channel: 'imessage', to: '+12125550123' });
+    writeOwnerNotify('imessage', '+12125550123');
     expect(readOwnerDest(metaWithOwner)).toEqual({ channel: 'imessage', to: '+12125550123' });
   });
 
   it('readOwnerDest falls back to meta.notify.owner when humans.yaml absent', () => {
+    // humansFile not written — getOwnerNotifyFromHumans() returns null
     expect(readOwnerDest(metaWithOwner)).toEqual({ channel: 'imessage', to: '+18055550100' });
   });
 
   it('resolveSendEnvelope uses humans.yaml for --to owner with no notify.owner', () => {
-    vi.mocked(getOwnerNotifyFromHumans).mockReturnValueOnce({ channel: 'imessage', to: '+12125550123' });
+    writeOwnerNotify('imessage', '+12125550123');
     const r = resolveSendEnvelope({ text: 'ping', to: 'owner' }, metaEmpty);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -227,7 +241,7 @@ describe('owner destination from humans.yaml', () => {
   });
 
   it('resolveSendEnvelope ownerMode uses humans.yaml with no notify.owner', () => {
-    vi.mocked(getOwnerNotifyFromHumans).mockReturnValueOnce({ channel: 'imessage', to: '+12125550123' });
+    writeOwnerNotify('imessage', '+12125550123');
     const r = resolveSendEnvelope({ text: 'ping', ownerMode: true }, metaEmpty);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -235,7 +249,7 @@ describe('owner destination from humans.yaml', () => {
   });
 
   it('explicit --channel/--to override humans.yaml', () => {
-    vi.mocked(getOwnerNotifyFromHumans).mockReturnValueOnce({ channel: 'imessage', to: '+12125550123' });
+    writeOwnerNotify('imessage', '+12125550123');
     const r = resolveSendEnvelope(
       { text: 'ping', ownerMode: true, channel: 'desktop', to: 'local' },
       metaEmpty,
@@ -247,7 +261,7 @@ describe('owner destination from humans.yaml', () => {
   });
 
   it('humans.yaml takes precedence over meta.notify.owner', () => {
-    vi.mocked(getOwnerNotifyFromHumans).mockReturnValueOnce({ channel: 'slack', to: 'U123' });
+    writeOwnerNotify('slack', 'U123');
     const r = resolveSendEnvelope({ text: 'ping', to: 'owner' }, metaWithOwner);
     expect(r.ok).toBe(true);
     if (!r.ok) return;

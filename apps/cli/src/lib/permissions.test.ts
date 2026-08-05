@@ -25,7 +25,6 @@ import {
   saveDefaultPermissionSet,
   removePermissionSet,
 } from './permissions.js';
-import * as state from './state.js';
 
 const tempDirs: string[] = [];
 
@@ -560,8 +559,8 @@ describe('permission-set storage (groups/ contract)', () => {
     fs.mkdirSync(path.join(userPermsDir, 'groups'), { recursive: true });
     fs.mkdirSync(path.join(sysPermsDir, 'groups'), { recursive: true });
 
-    vi.spyOn(state, 'getUserPermissionsDir').mockReturnValue(userPermsDir);
-    vi.spyOn(state, 'getPermissionsDir').mockReturnValue(sysPermsDir);
+    process.env.AGENTS_USER_PERMISSIONS_DIR = userPermsDir;
+    process.env.AGENTS_SYSTEM_PERMISSIONS_DIR = sysPermsDir;
 
     // A valid permission-set YAML to install
     sourceFile = path.join(base, 'my-set.yml');
@@ -574,7 +573,8 @@ describe('permission-set storage (groups/ contract)', () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    delete process.env.AGENTS_USER_PERMISSIONS_DIR;
+    delete process.env.AGENTS_SYSTEM_PERMISSIONS_DIR;
   });
 
   it('installPermissionSet writes to groups/ and listInstalledPermissions finds it', () => {

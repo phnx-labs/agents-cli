@@ -1948,7 +1948,7 @@ function migrateHumans(): void {
   }
 
   // Only write if we have at least one piece of owner data.
-  if (!notifyOwner && !ownerName) return;
+  if (!notifyOwner && !ownerName && !ownerTimezone && !ownerQuietHours && !ownerDefaultSeverity && !ownerChannels && !ownerPolicy) return;
 
   const humansDoc: Record<string, unknown> = { version: 1 };
   const ownerDoc: Record<string, unknown> = {};
