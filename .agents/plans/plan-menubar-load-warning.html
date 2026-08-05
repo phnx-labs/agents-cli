@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>High-load warnings in the agents-cli menu bar</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e8e8e8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e8e8e8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span></div>
+<h1>High-load warnings in the agents-cli menu bar</h1>
+
+<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/muqsitnawaz/agents" target="_blank" rel="noopener">muqsitnawaz/agents</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">zion</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">b43554ce</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-05</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#context"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Context</a><a href="#proposed-changes"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Risks</a><a href="#out-of-scope-follow-up-ticket"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Out of scope (follow-up ticket)</a></nav><article class="artifact-body"><h1>High-load warnings in the agents-cli menu bar</h1>
+<p><strong>What + type:</strong> feature — add a "device under high load" warning row to the
+MenubarHelper dropdown (local <em>and</em> remote), sourced from a native <code>getloadavg()</code>
+call + the daemon-warmed fleet-stats cache, deliberately bypassing the slow
+<code>agents doctor</code> path.</p>
+<h2 id="purpose">Purpose</h2>
+<p>Give the operator a glanceable, always-on signal that a device (local or remote) is
+overloaded — in the surface they already watch — without adding cost to the menu
+bar's poll loop. Turn the existing-but-hidden <code>headroom()</code> classification into a
+visible warning, and prove the "make it fast" ask by sourcing it from a libc call +
+a warm cache instead of the 136s doctor.</p>
+<h2 id="context">Context</h2>
+<p>During a live profiling session, <code>zion</code> hit <strong>load average 95 on 18 cores</strong> with
+nothing in the menu bar warning that a device was overloaded — even though
+agents-cli already computes per-device load and classifies it (<code>headroom()</code> →
+<code>loaded</code> at ≥75%). The signal exists; it just isn't shown. The user also flagged
+that "the agent structure can be slow" — that is the ~136s <code>agents doctor</code>, the
+wrong thing to hang a load warning off. Two Explore passes confirmed the menu bar
+reads <strong>no</strong> device load today and that <code>doctor</code> carries none.</p>
+<aside class="artifact-callout">
+The load warning reads <code>getloadavg()</code> (a libc call) plus one already-warm
+cache file on the badge tick — it never touches the 136-second <code>agents doctor</code>.
+That is both the feature and the "make it fast" answer.
+</aside><h2 id="proposed-changes">Proposed Changes</h2>
+<p>Local load is a libc call; remote load comes from the daemon-warmed cache; the slow
+doctor is never on the path:</p>
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Load-warning data flow">
+  <defs>
+    <marker id="arw" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#58a6ff"></path>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="760" height="300" fill="#0d1117"></rect>
+  <rect x="24" y="40" width="200" height="70" rx="8" fill="#161b22" stroke="#22c55e"></rect>
+  <text x="124" y="70" fill="#e6edf3" font-family="monospace" font-size="13" text-anchor="middle">LOCAL machine (zion)</text>
+  <text x="124" y="92" fill="#8b949e" font-family="monospace" font-size="11" text-anchor="middle">getloadavg() · libc</text>
+  <rect x="24" y="150" width="200" height="70" rx="8" fill="#161b22" stroke="#58a6ff"></rect>
+  <text x="124" y="180" fill="#e6edf3" font-family="monospace" font-size="13" text-anchor="middle">REMOTE devices</text>
+  <text x="124" y="202" fill="#8b949e" font-family="monospace" font-size="11" text-anchor="middle">.fleet-stats.json (fresh)</text>
+  <rect x="300" y="95" width="180" height="70" rx="8" fill="#161b22" stroke="#d4a72c"></rect>
+  <text x="390" y="125" fill="#e6edf3" font-family="monospace" font-size="13" text-anchor="middle">headroom()</text>
+  <text x="390" y="147" fill="#8b949e" font-family="monospace" font-size="11" text-anchor="middle">≥75% = loaded</text>
+  <rect x="556" y="95" width="180" height="70" rx="8" fill="#161b22" stroke="#ef4444"></rect>
+  <text x="646" y="120" fill="#e6edf3" font-family="monospace" font-size="12" text-anchor="middle">NEEDS YOU row</text>
+  <text x="646" y="140" fill="#d4a72c" font-family="monospace" font-size="11" text-anchor="middle">⚠ zion — 530%</text>
+  <path d="M224,75 L300,110" stroke="#58a6ff" stroke-width="2" fill="none" marker-end="url(#arw)"></path>
+  <path d="M224,185 L300,150" stroke="#58a6ff" stroke-width="2" fill="none" marker-end="url(#arw)"></path>
+  <path d="M480,130 L556,130" stroke="#58a6ff" stroke-width="2" fill="none" marker-end="url(#arw)"></path>
+  <rect x="300" y="220" width="436" height="46" rx="8" fill="#161b22" stroke="#484f58" stroke-dasharray="5 4"></rect>
+  <text x="518" y="248" fill="#6e7681" font-family="monospace" font-size="12" text-anchor="middle">agents doctor (~136s) — BYPASSED, not on this path</text>
+</svg>
+<figcaption>Local = libc call. Remote = warm cache with a freshness guard. Doctor untouched.</figcaption>
+</figure><ul>
+<li><strong>Local machine:</strong> native Swift probe — <code>getloadavg()</code> ÷ <code>hw.ncpu</code> → load%,
+<code>host_statistics64</code> → mem%, classified with <code>headroom()</code> thresholds ported to a
+Swift constant (mirrors <code>devices/health.ts:194-205</code>). Needed because the live
+<code>.fleet-stats.json</code> lists <code>zion</code> as <code>"reachable": false</code> with no stats.</li>
+<li><strong>Remote devices:</strong> <code>LocalState.loadedDevices()</code> (mirrors <code>pendingDevices()</code>)
+reads <code>~/.agents/.cache/.fleet-stats.json</code>, keeps rows that are reachable, fresh
+(<code>fetchedAt</code> within a window — the current file has 31h-stale rows), and <code>loaded</code>.</li>
+<li><strong>Render:</strong> thread <code>[LoadedDevice]</code> into <code>rebuild()</code> and append rows inside
+<code>addNeedsAttention()</code> (chosen placement: the action-required NEEDS YOU section).</li>
+</ul>
+<pre><code>// StatusItemController.addNeedsAttention() — append after the routine block
+for d in loadedDevices {                       // local first, then fresh remote
+    let glyph = d.severity == .critical ? "✕" : "⚠"
+    let color = d.severity == .critical ? fail : wait
+    rows.append((glyph, color, "\(d.name) — high load \(Int(d.loadPercent))%", loadSubmenu(d)))
+}
+</code></pre>
+<h2 id="public-interface">Public Interface</h2>
+<p>No CLI or config surface changes. Menu-bar-only:</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>MenubarHelper/LocalState.swift</code></td>
+<td>native load probe; <code>loadedDevices()</code> reader + freshness guard; <code>LoadedDevice</code> model; ported <code>headroom</code> thresholds</td>
+</tr>
+<tr>
+<td><code>MenubarHelper/StatusItemController.swift</code></td>
+<td><code>[LoadedDevice]</code> into <code>rebuild()</code>; rows in <code>addNeedsAttention()</code>; header count; emphasize action-required rows</td>
+</tr>
+<tr>
+<td><code>MenubarHelper/Models.swift</code></td>
+<td><code>LoadedDevice</code> struct (if models live here)</td>
+</tr>
+<tr>
+<td>new dropdown rows</td>
+<td><code>⚠ &lt;name&gt; — high load &lt;N&gt;%</code> in NEEDS YOU (red <code>✕</code> when critical)</td>
+</tr>
+</tbody></table>
+<h2 id="validation">Validation</h2>
+<pre><code># build the menu bar, replace the installed app, then drive it on zion
+swift build -c release            # or the repo's menubar build script
+open the menu on zion (live load) → confirm the "zion — high load N%" ⚠ row
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Pass condition</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Local warning</td>
+<td><code>zion — high load N%</code> ⚠ appears in NEEDS YOU; clears when load drops</td>
+</tr>
+<tr>
+<td>Remote warning</td>
+<td>a fresh <code>loaded</code> device (e.g. mac-mini 340%) warns</td>
+</tr>
+<tr>
+<td>Freshness guard</td>
+<td>a 31h-stale cache row does NOT warn</td>
+</tr>
+<tr>
+<td>Fast path</td>
+<td>badge tick spawns no <code>agents doctor</code>; menu-open latency unchanged</td>
+</tr>
+</tbody></table>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Stale cache → false remote warning</td>
+<td>freshness guard (ignore rows older than the window)</td>
+</tr>
+<tr>
+<td>Local <code>.fleet-stats.json</code> says <code>reachable:false</code></td>
+<td>probe local natively (getloadavg), never trust the cache row for local</td>
+</tr>
+<tr>
+<td>Threshold noise (bursty load flaps the row)</td>
+<td>classify off <code>headroom()</code> (≥75%); optionally require the row to persist across 2 ticks</td>
+</tr>
+<tr>
+<td>Scope creep into the 136s doctor refactor</td>
+<td>explicitly out of scope — filed as a separate follow-up ticket, linked from this PR</td>
+</tr>
+</tbody></table>
+<h2 id="out-of-scope-follow-up-ticket">Out of scope (follow-up ticket)</h2>
+<p>The broader status-flow slowness — <code>agents doctor</code> ~136s (probes every installed
+version of every harness), per-30s-poll transcript tailing, cross-version Claude
+<code>statSync</code>, teams <code>meta.json</code> scan, <code>ps -A</code>+<code>lsof</code> fan-out — is a larger refactor,
+filed separately and linked from this PR.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6ICJIaWdoLWxvYWQgd2FybmluZ3MgaW4gdGhlIGFnZW50cy1jbGkgbWVudSBiYXIiCmtpY2tlcjogImFnZW50cy1jbGkgwrcgTWVudWJhckhlbHBlciIKc3VidGl0bGU6ICJTdXJmYWNlIGRldmljZSBvdmVybG9hZCB3aGVyZSB0aGUgdXNlciBhbHJlYWR5IGxvb2tzIOKAlCB2aWEgdGhlIGZhc3QgY2FjaGUgcGF0aCwgbm90IHRoZSAxMzZzIGRvY3RvciIKLS0tCgojIEhpZ2gtbG9hZCB3YXJuaW5ncyBpbiB0aGUgYWdlbnRzLWNsaSBtZW51IGJhcgoKKipXaGF0ICsgdHlwZToqKiBmZWF0dXJlIOKAlCBhZGQgYSAiZGV2aWNlIHVuZGVyIGhpZ2ggbG9hZCIgd2FybmluZyByb3cgdG8gdGhlCk1lbnViYXJIZWxwZXIgZHJvcGRvd24gKGxvY2FsICphbmQqIHJlbW90ZSksIHNvdXJjZWQgZnJvbSBhIG5hdGl2ZSBgZ2V0bG9hZGF2ZygpYApjYWxsICsgdGhlIGRhZW1vbi13YXJtZWQgZmxlZXQtc3RhdHMgY2FjaGUsIGRlbGliZXJhdGVseSBieXBhc3NpbmcgdGhlIHNsb3cKYGFnZW50cyBkb2N0b3JgIHBhdGguCgojIyBQdXJwb3NlCgpHaXZlIHRoZSBvcGVyYXRvciBhIGdsYW5jZWFibGUsIGFsd2F5cy1vbiBzaWduYWwgdGhhdCBhIGRldmljZSAobG9jYWwgb3IgcmVtb3RlKSBpcwpvdmVybG9hZGVkIOKAlCBpbiB0aGUgc3VyZmFjZSB0aGV5IGFscmVhZHkgd2F0Y2gg4oCUIHdpdGhvdXQgYWRkaW5nIGNvc3QgdG8gdGhlIG1lbnUKYmFyJ3MgcG9sbCBsb29wLiBUdXJuIHRoZSBleGlzdGluZy1idXQtaGlkZGVuIGBoZWFkcm9vbSgpYCBjbGFzc2lmaWNhdGlvbiBpbnRvIGEKdmlzaWJsZSB3YXJuaW5nLCBhbmQgcHJvdmUgdGhlICJtYWtlIGl0IGZhc3QiIGFzayBieSBzb3VyY2luZyBpdCBmcm9tIGEgbGliYyBjYWxsICsKYSB3YXJtIGNhY2hlIGluc3RlYWQgb2YgdGhlIDEzNnMgZG9jdG9yLgoKIyMgQ29udGV4dAoKRHVyaW5nIGEgbGl2ZSBwcm9maWxpbmcgc2Vzc2lvbiwgYHppb25gIGhpdCAqKmxvYWQgYXZlcmFnZSA5NSBvbiAxOCBjb3JlcyoqIHdpdGgKbm90aGluZyBpbiB0aGUgbWVudSBiYXIgd2FybmluZyB0aGF0IGEgZGV2aWNlIHdhcyBvdmVybG9hZGVkIOKAlCBldmVuIHRob3VnaAphZ2VudHMtY2xpIGFscmVhZHkgY29tcHV0ZXMgcGVyLWRldmljZSBsb2FkIGFuZCBjbGFzc2lmaWVzIGl0IChgaGVhZHJvb20oKWAg4oaSCmBsb2FkZWRgIGF0IOKJpTc1JSkuIFRoZSBzaWduYWwgZXhpc3RzOyBpdCBqdXN0IGlzbid0IHNob3duLiBUaGUgdXNlciBhbHNvIGZsYWdnZWQKdGhhdCAidGhlIGFnZW50IHN0cnVjdHVyZSBjYW4gYmUgc2xvdyIg4oCUIHRoYXQgaXMgdGhlIH4xMzZzIGBhZ2VudHMgZG9jdG9yYCwgdGhlCndyb25nIHRoaW5nIHRvIGhhbmcgYSBsb2FkIHdhcm5pbmcgb2ZmLiBUd28gRXhwbG9yZSBwYXNzZXMgY29uZmlybWVkIHRoZSBtZW51IGJhcgpyZWFkcyAqKm5vKiogZGV2aWNlIGxvYWQgdG9kYXkgYW5kIHRoYXQgYGRvY3RvcmAgY2FycmllcyBub25lLgoKPGFzaWRlIGNsYXNzPSJhcnRpZmFjdC1jYWxsb3V0Ij4KVGhlIGxvYWQgd2FybmluZyByZWFkcyA8Y29kZT5nZXRsb2FkYXZnKCk8L2NvZGU+IChhIGxpYmMgY2FsbCkgcGx1cyBvbmUgYWxyZWFkeS13YXJtCmNhY2hlIGZpbGUgb24gdGhlIGJhZGdlIHRpY2sg4oCUIGl0IG5ldmVyIHRvdWNoZXMgdGhlIDEzNi1zZWNvbmQgPGNvZGU+YWdlbnRzIGRvY3RvcjwvY29kZT4uClRoYXQgaXMgYm90aCB0aGUgZmVhdHVyZSBhbmQgdGhlICJtYWtlIGl0IGZhc3QiIGFuc3dlci4KPC9hc2lkZT4KCiMjIFByb3Bvc2VkIENoYW5nZXMKCkxvY2FsIGxvYWQgaXMgYSBsaWJjIGNhbGw7IHJlbW90ZSBsb2FkIGNvbWVzIGZyb20gdGhlIGRhZW1vbi13YXJtZWQgY2FjaGU7IHRoZSBzbG93CmRvY3RvciBpcyBuZXZlciBvbiB0aGUgcGF0aDoKCjxmaWd1cmU+Cjxzdmcgdmlld0JveD0iMCAwIDc2MCAzMDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJMb2FkLXdhcm5pbmcgZGF0YSBmbG93Ij4KICA8ZGVmcz4KICAgIDxtYXJrZXIgaWQ9ImFydyIgbWFya2VyV2lkdGg9IjkiIG1hcmtlckhlaWdodD0iOSIgcmVmWD0iNyIgcmVmWT0iMyIgb3JpZW50PSJhdXRvIj4KICAgICAgPHBhdGggZD0iTTAsMCBMNywzIEwwLDYgWiIgZmlsbD0iIzU4YTZmZiIvPgogICAgPC9tYXJrZXI+CiAgPC9kZWZzPgogIDxyZWN0IHg9IjAiIHk9IjAiIHdpZHRoPSI3NjAiIGhlaWdodD0iMzAwIiBmaWxsPSIjMGQxMTE3Ii8+CiAgPHJlY3QgeD0iMjQiIHk9IjQwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjcwIiByeD0iOCIgZmlsbD0iIzE2MWIyMiIgc3Ryb2tlPSIjMjJjNTVlIi8+CiAgPHRleHQgeD0iMTI0IiB5PSI3MCIgZmlsbD0iI2U2ZWRmMyIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyIgdGV4dC1hbmNob3I9Im1pZGRsZSI+TE9DQUwgbWFjaGluZSAoemlvbik8L3RleHQ+CiAgPHRleHQgeD0iMTI0IiB5PSI5MiIgZmlsbD0iIzhiOTQ5ZSIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+Z2V0bG9hZGF2ZygpIMK3IGxpYmM8L3RleHQ+CiAgPHJlY3QgeD0iMjQiIHk9IjE1MCIgd2lkdGg9IjIwMCIgaGVpZ2h0PSI3MCIgcng9IjgiIGZpbGw9IiMxNjFiMjIiIHN0cm9rZT0iIzU4YTZmZiIvPgogIDx0ZXh0IHg9IjEyNCIgeT0iMTgwIiBmaWxsPSIjZTZlZGYzIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEzIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5SRU1PVEUgZGV2aWNlczwvdGV4dD4KICA8dGV4dCB4PSIxMjQiIHk9IjIwMiIgZmlsbD0iIzhiOTQ5ZSIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+LmZsZWV0LXN0YXRzLmpzb24gKGZyZXNoKTwvdGV4dD4KICA8cmVjdCB4PSIzMDAiIHk9Ijk1IiB3aWR0aD0iMTgwIiBoZWlnaHQ9IjcwIiByeD0iOCIgZmlsbD0iIzE2MWIyMiIgc3Ryb2tlPSIjZDRhNzJjIi8+CiAgPHRleHQgeD0iMzkwIiB5PSIxMjUiIGZpbGw9IiNlNmVkZjMiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmhlYWRyb29tKCk8L3RleHQ+CiAgPHRleHQgeD0iMzkwIiB5PSIxNDciIGZpbGw9IiM4Yjk0OWUiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuKJpTc1JSA9IGxvYWRlZDwvdGV4dD4KICA8cmVjdCB4PSI1NTYiIHk9Ijk1IiB3aWR0aD0iMTgwIiBoZWlnaHQ9IjcwIiByeD0iOCIgZmlsbD0iIzE2MWIyMiIgc3Ryb2tlPSIjZWY0NDQ0Ii8+CiAgPHRleHQgeD0iNjQ2IiB5PSIxMjAiIGZpbGw9IiNlNmVkZjMiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiPk5FRURTIFlPVSByb3c8L3RleHQ+CiAgPHRleHQgeD0iNjQ2IiB5PSIxNDAiIGZpbGw9IiNkNGE3MmMiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIHRleHQtYW5jaG9yPSJtaWRkbGUiPuKaoCB6aW9uIOKAlCA1MzAlPC90ZXh0PgogIDxwYXRoIGQ9Ik0yMjQsNzUgTDMwMCwxMTAiIHN0cm9rZT0iIzU4YTZmZiIgc3Ryb2tlLXdpZHRoPSIyIiBmaWxsPSJub25lIiBtYXJrZXItZW5kPSJ1cmwoI2FydykiLz4KICA8cGF0aCBkPSJNMjI0LDE4NSBMMzAwLDE1MCIgc3Ryb2tlPSIjNThhNmZmIiBzdHJva2Utd2lkdGg9IjIiIGZpbGw9Im5vbmUiIG1hcmtlci1lbmQ9InVybCgjYXJ3KSIvPgogIDxwYXRoIGQ9Ik00ODAsMTMwIEw1NTYsMTMwIiBzdHJva2U9IiM1OGE2ZmYiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIgbWFya2VyLWVuZD0idXJsKCNhcncpIi8+CiAgPHJlY3QgeD0iMzAwIiB5PSIyMjAiIHdpZHRoPSI0MzYiIGhlaWdodD0iNDYiIHJ4PSI4IiBmaWxsPSIjMTYxYjIyIiBzdHJva2U9IiM0ODRmNTgiIHN0cm9rZS1kYXNoYXJyYXk9IjUgNCIvPgogIDx0ZXh0IHg9IjUxOCIgeT0iMjQ4IiBmaWxsPSIjNmU3NjgxIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5hZ2VudHMgZG9jdG9yICh+MTM2cykg4oCUIEJZUEFTU0VELCBub3Qgb24gdGhpcyBwYXRoPC90ZXh0Pgo8L3N2Zz4KPGZpZ2NhcHRpb24+TG9jYWwgPSBsaWJjIGNhbGwuIFJlbW90ZSA9IHdhcm0gY2FjaGUgd2l0aCBhIGZyZXNobmVzcyBndWFyZC4gRG9jdG9yIHVudG91Y2hlZC48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKLSAqKkxvY2FsIG1hY2hpbmU6KiogbmF0aXZlIFN3aWZ0IHByb2JlIOKAlCBgZ2V0bG9hZGF2ZygpYCDDtyBgaHcubmNwdWAg4oaSIGxvYWQlLAogIGBob3N0X3N0YXRpc3RpY3M2NGAg4oaSIG1lbSUsIGNsYXNzaWZpZWQgd2l0aCBgaGVhZHJvb20oKWAgdGhyZXNob2xkcyBwb3J0ZWQgdG8gYQogIFN3aWZ0IGNvbnN0YW50IChtaXJyb3JzIGBkZXZpY2VzL2hlYWx0aC50czoxOTQtMjA1YCkuIE5lZWRlZCBiZWNhdXNlIHRoZSBsaXZlCiAgYC5mbGVldC1zdGF0cy5qc29uYCBsaXN0cyBgemlvbmAgYXMgYCJyZWFjaGFibGUiOiBmYWxzZWAgd2l0aCBubyBzdGF0cy4KLSAqKlJlbW90ZSBkZXZpY2VzOioqIGBMb2NhbFN0YXRlLmxvYWRlZERldmljZXMoKWAgKG1pcnJvcnMgYHBlbmRpbmdEZXZpY2VzKClgKQogIHJlYWRzIGB+Ly5hZ2VudHMvLmNhY2hlLy5mbGVldC1zdGF0cy5qc29uYCwga2VlcHMgcm93cyB0aGF0IGFyZSByZWFjaGFibGUsIGZyZXNoCiAgKGBmZXRjaGVkQXRgIHdpdGhpbiBhIHdpbmRvdyDigJQgdGhlIGN1cnJlbnQgZmlsZSBoYXMgMzFoLXN0YWxlIHJvd3MpLCBhbmQgYGxvYWRlZGAuCi0gKipSZW5kZXI6KiogdGhyZWFkIGBbTG9hZGVkRGV2aWNlXWAgaW50byBgcmVidWlsZCgpYCBhbmQgYXBwZW5kIHJvd3MgaW5zaWRlCiAgYGFkZE5lZWRzQXR0ZW50aW9uKClgIChjaG9zZW4gcGxhY2VtZW50OiB0aGUgYWN0aW9uLXJlcXVpcmVkIE5FRURTIFlPVSBzZWN0aW9uKS4KCmBgYHN3aWZ0Ci8vIFN0YXR1c0l0ZW1Db250cm9sbGVyLmFkZE5lZWRzQXR0ZW50aW9uKCkg4oCUIGFwcGVuZCBhZnRlciB0aGUgcm91dGluZSBibG9jawpmb3IgZCBpbiBsb2FkZWREZXZpY2VzIHsgICAgICAgICAgICAgICAgICAgICAgIC8vIGxvY2FsIGZpcnN0LCB0aGVuIGZyZXNoIHJlbW90ZQogICAgbGV0IGdseXBoID0gZC5zZXZlcml0eSA9PSAuY3JpdGljYWwgPyAi4pyVIiA6ICLimqAiCiAgICBsZXQgY29sb3IgPSBkLnNldmVyaXR5ID09IC5jcml0aWNhbCA/IGZhaWwgOiB3YWl0CiAgICByb3dzLmFwcGVuZCgoZ2x5cGgsIGNvbG9yLCAiXChkLm5hbWUpIOKAlCBoaWdoIGxvYWQgXChJbnQoZC5sb2FkUGVyY2VudCkpJSIsIGxvYWRTdWJtZW51KGQpKSkKfQpgYGAKCiMjIFB1YmxpYyBJbnRlcmZhY2UKCk5vIENMSSBvciBjb25maWcgc3VyZmFjZSBjaGFuZ2VzLiBNZW51LWJhci1vbmx5OgoKfCBTdXJmYWNlIHwgQ2hhbmdlIHwKfC0tLXwtLS18CnwgYE1lbnViYXJIZWxwZXIvTG9jYWxTdGF0ZS5zd2lmdGAgfCBuYXRpdmUgbG9hZCBwcm9iZTsgYGxvYWRlZERldmljZXMoKWAgcmVhZGVyICsgZnJlc2huZXNzIGd1YXJkOyBgTG9hZGVkRGV2aWNlYCBtb2RlbDsgcG9ydGVkIGBoZWFkcm9vbWAgdGhyZXNob2xkcyB8CnwgYE1lbnViYXJIZWxwZXIvU3RhdHVzSXRlbUNvbnRyb2xsZXIuc3dpZnRgIHwgYFtMb2FkZWREZXZpY2VdYCBpbnRvIGByZWJ1aWxkKClgOyByb3dzIGluIGBhZGROZWVkc0F0dGVudGlvbigpYDsgaGVhZGVyIGNvdW50OyBlbXBoYXNpemUgYWN0aW9uLXJlcXVpcmVkIHJvd3MgfAp8IGBNZW51YmFySGVscGVyL01vZGVscy5zd2lmdGAgfCBgTG9hZGVkRGV2aWNlYCBzdHJ1Y3QgKGlmIG1vZGVscyBsaXZlIGhlcmUpIHwKfCBuZXcgZHJvcGRvd24gcm93cyB8IGDimqAgPG5hbWU+IOKAlCBoaWdoIGxvYWQgPE4+JWAgaW4gTkVFRFMgWU9VIChyZWQgYOKclWAgd2hlbiBjcml0aWNhbCkgfAoKIyMgVmFsaWRhdGlvbgoKYGBgYmFzaAojIGJ1aWxkIHRoZSBtZW51IGJhciwgcmVwbGFjZSB0aGUgaW5zdGFsbGVkIGFwcCwgdGhlbiBkcml2ZSBpdCBvbiB6aW9uCnN3aWZ0IGJ1aWxkIC1jIHJlbGVhc2UgICAgICAgICAgICAjIG9yIHRoZSByZXBvJ3MgbWVudWJhciBidWlsZCBzY3JpcHQKb3BlbiB0aGUgbWVudSBvbiB6aW9uIChsaXZlIGxvYWQpIOKGkiBjb25maXJtIHRoZSAiemlvbiDigJQgaGlnaCBsb2FkIE4lIiDimqAgcm93CmBgYAoKfCBDaGVjayB8IFBhc3MgY29uZGl0aW9uIHwKfC0tLXwtLS18CnwgTG9jYWwgd2FybmluZyB8IGB6aW9uIOKAlCBoaWdoIGxvYWQgTiVgIOKaoCBhcHBlYXJzIGluIE5FRURTIFlPVTsgY2xlYXJzIHdoZW4gbG9hZCBkcm9wcyB8CnwgUmVtb3RlIHdhcm5pbmcgfCBhIGZyZXNoIGBsb2FkZWRgIGRldmljZSAoZS5nLiBtYWMtbWluaSAzNDAlKSB3YXJucyB8CnwgRnJlc2huZXNzIGd1YXJkIHwgYSAzMWgtc3RhbGUgY2FjaGUgcm93IGRvZXMgTk9UIHdhcm4gfAp8IEZhc3QgcGF0aCB8IGJhZGdlIHRpY2sgc3Bhd25zIG5vIGBhZ2VudHMgZG9jdG9yYDsgbWVudS1vcGVuIGxhdGVuY3kgdW5jaGFuZ2VkIHwKCiMjIFJpc2tzCgp8IFJpc2sgfCBNaXRpZ2F0aW9uIHwKfC0tLXwtLS18CnwgU3RhbGUgY2FjaGUg4oaSIGZhbHNlIHJlbW90ZSB3YXJuaW5nIHwgZnJlc2huZXNzIGd1YXJkIChpZ25vcmUgcm93cyBvbGRlciB0aGFuIHRoZSB3aW5kb3cpIHwKfCBMb2NhbCBgLmZsZWV0LXN0YXRzLmpzb25gIHNheXMgYHJlYWNoYWJsZTpmYWxzZWAgfCBwcm9iZSBsb2NhbCBuYXRpdmVseSAoZ2V0bG9hZGF2ZyksIG5ldmVyIHRydXN0IHRoZSBjYWNoZSByb3cgZm9yIGxvY2FsIHwKfCBUaHJlc2hvbGQgbm9pc2UgKGJ1cnN0eSBsb2FkIGZsYXBzIHRoZSByb3cpIHwgY2xhc3NpZnkgb2ZmIGBoZWFkcm9vbSgpYCAo4omlNzUlKTsgb3B0aW9uYWxseSByZXF1aXJlIHRoZSByb3cgdG8gcGVyc2lzdCBhY3Jvc3MgMiB0aWNrcyB8CnwgU2NvcGUgY3JlZXAgaW50byB0aGUgMTM2cyBkb2N0b3IgcmVmYWN0b3IgfCBleHBsaWNpdGx5IG91dCBvZiBzY29wZSDigJQgZmlsZWQgYXMgYSBzZXBhcmF0ZSBmb2xsb3ctdXAgdGlja2V0LCBsaW5rZWQgZnJvbSB0aGlzIFBSIHwKCiMjIE91dCBvZiBzY29wZSAoZm9sbG93LXVwIHRpY2tldCkKClRoZSBicm9hZGVyIHN0YXR1cy1mbG93IHNsb3duZXNzIOKAlCBgYWdlbnRzIGRvY3RvcmAgfjEzNnMgKHByb2JlcyBldmVyeSBpbnN0YWxsZWQKdmVyc2lvbiBvZiBldmVyeSBoYXJuZXNzKSwgcGVyLTMwcy1wb2xsIHRyYW5zY3JpcHQgdGFpbGluZywgY3Jvc3MtdmVyc2lvbiBDbGF1ZGUKYHN0YXRTeW5jYCwgdGVhbXMgYG1ldGEuanNvbmAgc2NhbiwgYHBzIC1BYCtgbHNvZmAgZmFuLW91dCDigJQgaXMgYSBsYXJnZXIgcmVmYWN0b3IsCmZpbGVkIHNlcGFyYXRlbHkgYW5kIGxpbmtlZCBmcm9tIHRoaXMgUFIuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
