@@ -1077,6 +1077,8 @@ export interface HumanChannel {
   id: string;
   /** Provider transport (e.g. "rush", "twilio"). */
   transport: string;
+  /** Provider-specific recipient (phone number, user id, address). */
+  to?: string;
   /** If true the channel is watched for incoming messages. */
   watch?: boolean;
   /** Shell command to invoke (for call channels). */

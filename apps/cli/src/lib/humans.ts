@@ -5,8 +5,7 @@
  * Schema version: 1
  *
  * This module is the single read/write seam for humans.yaml. All channel/
- * notify consumers should read owner config from here (with a fallback to
- * the legacy notify.owner in agents.yaml during the migration window).
+ * notify consumers should read owner config from here.
  */
 import * as fs from 'fs';
 import * as yaml from 'yaml';
@@ -49,13 +48,19 @@ export function writeHumans(config: HumansConfig): void {
 }
 
 /**
- * Return the effective owner notification config from humans.yaml if
- * available, otherwise return null (caller falls back to agents.yaml).
+ * Return the effective owner notification destination from humans.yaml.
+ * The owner's normal-severity policy selects the channel; when no normal
+ * policy is declared, the first addressable channel is the default.
  */
 export function getOwnerNotifyFromHumans(): { channel: string; to: string } | null {
-  const humans = readHumans();
-  const notify = humans?.owner?.notify;
-  if (notify?.channel && notify?.to) return notify;
+  const owner = readHumans()?.owner;
+  const channels = owner?.channels ?? [];
+  const preferredIds = owner?.policy?.normal ?? [];
+  const preferred = preferredIds
+    .map((id) => channels.find((entry) => entry.id === id))
+    .find((entry) => entry?.to);
+  const selected = preferred ?? channels.find((entry) => entry.to);
+  if (selected?.id && selected.to) return { channel: selected.id, to: selected.to };
   return null;
 }
 

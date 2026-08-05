@@ -4,7 +4,7 @@
  * Every human-facing owner notification (feed urgent-block dispatch, monitor
  * `notify` action, `agents notify`) funnels through the single channel seam:
  * `lookupTransport(channel, meta).provider.send(text, opts)`. The recipient comes
- * from `notify.owner` in agents.yaml — never a hardcoded chat id — so changing the
+ * from `humans.yaml` — never a hardcoded chat id — so changing the
  * owner is honoured by every path at once. `notify.transports` picks the actual
  * provider per host (rush telegram on zion, openclaw-telegram on mac-mini).
  * Best-effort: a delivery failure is returned to the caller, never thrown, so a
@@ -24,9 +24,9 @@ import type { SendResult } from './channels/registry.js';
 export interface OwnerNotifyOptions {
   /** Config source (defaults to `readMeta()`); lets callers/tests inject it. */
   meta?: Meta;
-  /** Override the owner channel from `notify.owner.channel`. */
+  /** Override the owner channel resolved from humans.yaml. */
   channel?: string;
-  /** Override the owner target from `notify.owner.to`. */
+  /** Override the owner target resolved from humans.yaml. */
   target?: string;
   /** Resolve + build the delivery but do not actually send. */
   dryRun?: boolean;
@@ -75,17 +75,14 @@ export function buildOpenClawNotifyArgs(
 
 /**
  * Deliver a message to the configured owner through the one channel seam.
- * `channel`/`target` default to `notify.owner.{channel,to}`; `notify.transports`
+ * `channel`/`target` default to the normal owner channel in humans.yaml; `notify.transports`
  * selects the provider per host. A missing owner config or a delivery failure
  * (e.g. openclaw not on PATH) returns a clean `SendResult` error — never a raw
  * ENOENT — so callers surface a consistent, best-effort failure.
  */
 export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}): Promise<SendResult> {
   const meta = options.meta ?? readMeta();
-  // humans.yaml is the primary source; agents.yaml notify.owner is the fallback.
-  const humansOwner = getOwnerNotifyFromHumans();
-  const legacyOwner = meta.notify?.owner;
-  const owner = humansOwner ?? legacyOwner;
+  const owner = getOwnerNotifyFromHumans() ?? meta.notify?.owner;
   const channel = options.channel ?? owner?.channel;
   const target = options.target ?? owner?.to;
   if (!channel || !target) {
@@ -93,7 +90,7 @@ export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}
       ok: false,
       channel: channel ?? 'unknown',
       id: target ?? '',
-      error: 'notify.owner.{channel,to} not set in humans.yaml or agents.yaml',
+      error: 'No addressable owner channel configured in humans.yaml or legacy notify.owner',
     };
   }
   registerBuiltinProviders();
