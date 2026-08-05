@@ -101,6 +101,23 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     expect(await maybeRunOnHost('message', ['message', 'abc', 'hi', '--device=mybox'])).toBe(false);
   });
 
+  it('resolves `auto` to a local pick and runs locally, not a self-SSH (RUSH-2185)', async () => {
+    // AGENTS_DEVICES_DIR is fork-private and empty (tests/setup.ts) and this
+    // machine id has no session history, so resolveDeviceAffinity's only
+    // eligible candidate is this machine — a deterministic "picked local"
+    // outcome without needing to inject the resolver.
+    process.env.AGENTS_SYNC_MACHINE_ID = 'auto-passthrough-test-box';
+    process.argv = ['node', 'agents', 'view', '--host', 'auto'];
+    expect(await maybeRunOnHost('view', ['view', '--host', 'auto'])).toBe(false);
+    // Routing flags stripped exactly like the explicit self-host short-circuit —
+    // proves the command runs locally rather than resolving to a real Host and
+    // SSHing to itself (the bug this test guards: `auto` used to reach
+    // resolveTargetHost('auto', ...) unresolved, either self-SSHing when this
+    // box happened to be a registered device, or dialing a literal host named
+    // "auto" when it wasn't).
+    expect(process.argv).toEqual(['node', 'agents', 'view']);
+  });
+
   it('routes repos/repo --host to a non-self target (the RUSH-1691 repro path)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     // Invalid target rejected by assertValidSshTarget before SSH — proves

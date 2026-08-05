@@ -30,6 +30,7 @@ import {
 } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
 import { machineId } from '../session/sync/config.js';
+import { isDeviceAuto, resolveDeviceAffinity } from '../smart-launch.js';
 import { loadDevices, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
 import { isSelfHost } from '../devices/self-host.js';
 import {
@@ -439,7 +440,7 @@ export async function maybeRunOnHost(
   const deviceFlag = flagValue(allArgs, 'device');
   const hostsFlag = flagValue(allArgs, 'hosts');
   const devicesFlag = flagValue(allArgs, 'devices');
-  const hostName = hostFlag ?? deviceFlag;
+  let hostName = hostFlag ?? deviceFlag;
   const fleetAll = isFleetAllSentinel(hostFlag, deviceFlag, hostsFlag, devicesFlag);
   // Proceed when any routing flag is present, including the plural fleet flags
   // that may carry the `all` sentinel.
@@ -510,6 +511,23 @@ export async function maybeRunOnHost(
   // single-target --host/--device. Guard for the type checker: plural non-all
   // flags and bare flags were already handled.
   if (!hostName) return false;
+
+  // `auto` is the same affinity sentinel `agents run --device auto` resolves
+  // (RUSH-2185) — pick the concrete target up front via resolveDeviceAffinity so
+  // the isSelfHost check right below (which compares a literal name, not "auto")
+  // still catches a local pick and runs the command locally rather than
+  // resolving to a real Host and self-SSHing (or, if this box isn't itself a
+  // registered device, dialing a literal, nonexistent host named "auto").
+  if (isDeviceAuto(hostName)) {
+    const plan = resolveDeviceAffinity({});
+    if (!plan.host) {
+      const stripped = stripRoutingFlags(allArgs, STRIP_SPECS);
+      process.argv = [process.argv[0], process.argv[1], ...stripped];
+      return false;
+    }
+    process.stderr.write(chalk.gray(`[agents] device=auto → ${plan.host}\n`));
+    hostName = plan.host;
+  }
 
   // Running against your own machine is just a local run — skip the SSH round-trip.
   // Match EVERY identity the box answers to (short id, loopback, tailscale
