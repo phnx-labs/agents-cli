@@ -1,4 +1,20 @@
 import * as vscode from 'vscode';
+import {
+  type EditorAssociations,
+  normalizeEditorAssociations,
+  withReaderEditorAssociations,
+} from '../core/editorAssociations';
+
+export type { EditorAssociations } from '../core/editorAssociations';
+export {
+  AGENTS_HTML_READER,
+  AGENTS_MARKDOWN_EDITOR,
+  MARKDOWN_PATTERN,
+  READER_PATTERNS,
+  normalizeEditorAssociations,
+  withMarkdownEditorAssociation,
+  withReaderEditorAssociations,
+} from '../core/editorAssociations';
 
 /**
  * Update multiple VS Code settings at once.
@@ -22,11 +38,6 @@ export async function updateSettings(
   }
 }
 
-export interface EditorAssociation {
-  viewType: string;
-  filenamePattern: string;
-}
-
 /**
  * Read a VS Code setting value.
  */
@@ -42,47 +53,22 @@ export function getSetting<T>(key: string): T | undefined {
   return config.get<T>(property);
 }
 
-export function getEditorAssociations(): EditorAssociation[] {
-  const value = getSetting<unknown>('workbench.editorAssociations');
-  if (!Array.isArray(value)) return [];
-  return value.filter((entry): entry is EditorAssociation => {
-    return !!entry && typeof entry === 'object';
-  });
+export function getEditorAssociations(): EditorAssociations {
+  return normalizeEditorAssociations(getSetting<unknown>('workbench.editorAssociations'));
 }
 
-export async function setEditorAssociations(associations: EditorAssociation[]): Promise<void> {
+export async function setEditorAssociations(associations: EditorAssociations): Promise<void> {
   await updateSettings({ 'workbench.editorAssociations': associations });
 }
 
+/** Wire *.md + *.html/*.htm to the Agents Reader custom editors (or default off). */
 export async function setMarkdownEditorAssociation(enabled: boolean): Promise<void> {
-  const current = getEditorAssociations();
-  const withoutAgents = current.filter((entry) => {
-    return !(
-      entry.viewType === 'agents.markdownEditor' &&
-      entry.filenamePattern === '*.md'
-    );
-  });
-
-  if (!enabled) {
-    const hasOtherMarkdown = withoutAgents.some((entry) => {
-      return entry.filenamePattern === '*.md';
-    });
-    const next = hasOtherMarkdown
-      ? withoutAgents
-      : [{ viewType: 'default', filenamePattern: '*.md' }, ...withoutAgents];
-    await setEditorAssociations(next);
-    return;
-  }
-
-  const withoutMarkdown = withoutAgents.filter((entry) => {
-    return entry.filenamePattern !== '*.md';
-  });
-  const next = [
-    { viewType: 'agents.markdownEditor', filenamePattern: '*.md' },
-    ...withoutMarkdown
-  ];
+  const next = withReaderEditorAssociations(getEditorAssociations(), enabled);
   await setEditorAssociations(next);
 }
+
+/** Alias — Reader covers markdown and HTML artifacts. */
+export const setReaderEditorAssociations = setMarkdownEditorAssociation;
 
 /**
  * Streamline layout: sidebar right, activity bar hidden.

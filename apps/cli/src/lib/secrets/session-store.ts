@@ -120,7 +120,8 @@ function sessionBlobItem(name: string, harness: string): string {
 /** Read the session index by its fixed name. `{bundles:{}}` when absent/unreadable. */
 export function readIndex(): SessionIndex {
   try {
-    const raw = getKeychainToken(SESSION_INDEX_ITEM);
+    // Written no-ACL (writeIndex below) — attest so a headless resolve stays silent.
+    const raw = getKeychainToken(SESSION_INDEX_ITEM, { silentNoAcl: true });
     const parsed = JSON.parse(raw) as SessionIndex;
     if (parsed && typeof parsed === 'object' && parsed.bundles) return parsed;
   } catch {
@@ -177,7 +178,8 @@ export function resolveSession(
 export function loadSession(name: string, now: number = Date.now(), harness: string = GLOBAL_HARNESS): SessionEntry | null {
   if (!shouldPersist()) return null;
   try {
-    const raw = getKeychainToken(sessionBlobItem(name, harness));
+    // Written no-ACL (saveSession) — attest so a headless resolve stays silent.
+    const raw = getKeychainToken(sessionBlobItem(name, harness), { silentNoAcl: true });
     const entry = JSON.parse(raw) as SessionEntry;
     if (!entry || typeof entry !== 'object' || !entry.bundle || !entry.env) return null;
     if (now >= entry.expiresAt) {
@@ -249,7 +251,7 @@ export function rehydrateSessions(now: number = Date.now()): Array<{ name: strin
     for (const [key, meta] of Object.entries(index.bundles)) {
       if (key.includes(':')) continue;
       try {
-        const raw = getKeychainToken(`${SESSION_ITEM_PREFIX}${key}`);
+        const raw = getKeychainToken(`${SESSION_ITEM_PREFIX}${key}`, { silentNoAcl: true });
         const legacy = JSON.parse(raw) as SessionEntry;
         setKeychainToken(sessionBlobItem(key, GLOBAL_HARNESS), JSON.stringify({ ...legacy, harness: GLOBAL_HARNESS }), { noAcl: true });
         deleteKeychainToken(`${SESSION_ITEM_PREFIX}${key}`);
@@ -282,7 +284,7 @@ export function rehydrateSessions(now: number = Date.now()): Array<{ name: strin
         continue;
       }
       try {
-        const raw = getKeychainToken(sessionBlobItem(bundleName, 'cli'));
+        const raw = getKeychainToken(sessionBlobItem(bundleName, 'cli'), { silentNoAcl: true });
         const legacy = JSON.parse(raw) as SessionEntry;
         setKeychainToken(sessionBlobItem(bundleName, GLOBAL_HARNESS), JSON.stringify({ ...legacy, harness: GLOBAL_HARNESS }), { noAcl: true });
         deleteKeychainToken(sessionBlobItem(bundleName, 'cli'));

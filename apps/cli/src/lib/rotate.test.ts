@@ -17,6 +17,7 @@ import {
   readinessFromCandidate,
   matchAccountVersion,
   isUsageVerified,
+  isLaunchableSignedIn,
   capacityWeight,
   PROJECTION_HORIZON_MIN,
   resolveRunVersion,
@@ -46,6 +47,7 @@ function candidate(over: Partial<RotateCandidate> & { version: string }): Rotate
     usageMinutesToLimit: null,
     plan: 'Max',
     signedIn: true,
+    authVerdict: null,
     lastActive: null,
     ...over,
   };
@@ -55,6 +57,39 @@ function candidate(over: Partial<RotateCandidate> & { version: string }): Rotate
 function rotation(healthy: RotateCandidate[], pickedIdx = 0): RotateResult {
   return { picked: healthy[pickedIdx], healthy, excluded: [] };
 }
+
+describe('isLaunchableSignedIn (per-version credential floor for rotation)', () => {
+  // getAccountInfo falls back to the active HOME credential so `agents view`
+  // still labels empty version homes. Rotation must NOT treat that as launchable —
+  // GROK_HOME (and peers) isolate to the version home, so spawn dies "Not signed in".
+  it('rejects a signedIn signal when the known credential is only on the active home', () => {
+    expect(
+      isLaunchableSignedIn(true, { knownLocation: true, perVersion: false }),
+    ).toBe(false);
+  });
+
+  it('accepts a signedIn signal when the credential lives in this version home', () => {
+    expect(
+      isLaunchableSignedIn(true, { knownLocation: true, perVersion: true }),
+    ).toBe(true);
+  });
+
+  it('rejects when not signed in, regardless of credential presence', () => {
+    expect(
+      isLaunchableSignedIn(false, { knownLocation: true, perVersion: true }),
+    ).toBe(false);
+    expect(
+      isLaunchableSignedIn(false, { knownLocation: true, perVersion: false }),
+    ).toBe(false);
+  });
+
+  it('trusts signedIn when we do not know where the credential lives', () => {
+    // keychain-only / unmapped agents — no file path to require
+    expect(
+      isLaunchableSignedIn(true, { knownLocation: false, perVersion: false }),
+    ).toBe(true);
+  });
+});
 
 describe('matchAccountVersion (RUSH-1957 — pin a routine to an account by identity)', () => {
   const gmail = candidate({ version: '2.1.186', email: 'muqsitnawaz@gmail.com' });

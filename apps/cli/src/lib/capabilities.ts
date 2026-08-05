@@ -32,7 +32,7 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-function getCapability(agent: AgentId, cap: CapabilityName): Capability | RulesCapability {
+function getCapability(agent: AgentId, cap: CapabilityName): Capability | RulesCapability | undefined {
   // Guard against unknown agent ids (e.g. a caller passing "claude@2.1.168"
   // instead of "claude"). Without this, AGENTS[agent] is undefined and the
   // property access throws an opaque TypeError instead of reporting false.
@@ -65,7 +65,7 @@ export function supports(
   if (AGENTS[agent]?.deprecated?.hard) return { ok: false, reason: 'unsupported' };
   const c = getCapability(agent, cap);
   if (c === false) return { ok: false, reason: 'unsupported' };
-  if (c === true) return { ok: true };
+  if (c === true || c === undefined) return { ok: true };
   if ('file' in c) return { ok: true };
 
   if (!version) return { ok: true };

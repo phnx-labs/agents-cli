@@ -46,7 +46,7 @@ vi.spyOn(profiles, 'listProfiles').mockImplementation(async () => {
 });
 vi.spyOn(profiles, 'getProfile').mockImplementation(async (name: string) => readProfileYaml(name));
 
-const { BrowserService, resolveScreenshotOutputPath } = await import('./service.js');
+const { BrowserService, resolveScreenshotOutputPath, resolveTaskIdentity } = await import('./service.js');
 
 function reset() {
   try {
@@ -116,6 +116,34 @@ describe('resolveScreenshotOutputPath', () => {
 
     expect(resolved.endsWith(path.join('exports', 'shot.jpg'))).toBe(true);
     expect(resolved).not.toBe(automaticPath);
+  });
+});
+
+describe('resolveTaskIdentity — task owner/launchId attribution', () => {
+  it('stamps the forwarded actor + launchId verbatim and never re-resolves', () => {
+    let localCalled = false;
+    const id = resolveTaskIdentity(
+      { actor: 'agent:kimi-run-7', launchId: 'launch-abc' },
+      () => {
+        localCalled = true;
+        return 'daemon-owner';
+      }
+    );
+    expect(id).toEqual({ owner: 'agent:kimi-run-7', launchId: 'launch-abc' });
+    // The daemon must NOT re-resolve when the caller forwarded an actor — that
+    // was the RUSH-2020 bug (every task attributed to the daemon's own actor).
+    expect(localCalled).toBe(false);
+  });
+
+  it('falls back to the local actor only when none was forwarded (pre-field CLI)', () => {
+    const id = resolveTaskIdentity({ launchId: 'launch-xyz' }, () => 'muqsit');
+    expect(id).toEqual({ owner: 'muqsit', launchId: 'launch-xyz' });
+  });
+
+  it('carries an undefined launchId through untouched', () => {
+    const id = resolveTaskIdentity({ actor: 'muqsit' }, () => 'unused');
+    expect(id.owner).toBe('muqsit');
+    expect(id.launchId).toBeUndefined();
   });
 });
 

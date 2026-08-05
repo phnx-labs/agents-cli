@@ -43,7 +43,7 @@ export function parseSpawnRequest(query: string): SpawnRequest | null {
 export type SpawnSurface = 'tmux-split' | 'tmux-tab' | 'native-split' | 'native-tab';
 
 export interface SpawnSurfaceInput {
-  // Result of resolveTerminalMode(...).useTmux for the current `agents.terminalMode`.
+  // Whether tmux is available (tmux is always used when it is — see launchAgent).
   useTmux: boolean;
   // The request asked to split beside the previously spawned pane.
   wantsSplit: boolean;

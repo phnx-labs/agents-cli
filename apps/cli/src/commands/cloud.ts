@@ -295,7 +295,7 @@ Examples:
         model: options.model as string | undefined,
         providerOptions: {},
       };
-      const shareEnv = shareRuntimeEnv({ agentOnly: true });
+      const shareEnv = shareRuntimeEnv();
       if (shareEnv) dispatchOptions.env = shareEnv;
 
       if (options.env) dispatchOptions.providerOptions!.env = options.env as string;

@@ -1473,6 +1473,41 @@ function relocateGrokBinaryToVersionHome(installedVersion: string): void {
 }
 
 /**
+ * Grok's version directory is keyed by release number alone, not by account —
+ * so two DIFFERENT accounts that both self-update to the identical upstream
+ * release ("latest") target the SAME on-disk `versions/grok/<version>/` home.
+ * When that happens, the second account's `agents add grok@latest` writes
+ * into an already-signed-in directory: grok's own auth flow treats
+ * `~/.grok/auth.json` as authoritative for whichever process invoked it, so
+ * the second account's credential record lands in a file that still names it
+ * as the first account's install everywhere else in agents-cli's bookkeeping.
+ *
+ * Refuse before that happens: if the target version's home already has a
+ * signed-in account whose identity differs from the account currently
+ * driving this update (the previous global default), fail loud instead of
+ * letting the second account silently displace the first's install.
+ */
+async function checkGrokAccountCollision(installedVersion: string): Promise<void> {
+  const targetHome = getVersionHomePath('grok', installedVersion);
+  if (!fs.existsSync(targetHome)) return; // fresh directory, nothing to collide with
+
+  const sourceVersion = getGlobalDefault('grok');
+  if (!sourceVersion || sourceVersion === installedVersion) return; // same install, not a collision
+
+  const [targetEmail, sourceEmail] = await Promise.all([
+    getAccountEmail('grok', targetHome),
+    getAccountEmail('grok', getVersionHomePath('grok', sourceVersion)),
+  ]);
+  if (!targetEmail || !sourceEmail || targetEmail === sourceEmail) return;
+
+  throw new Error(
+    `grok@${installedVersion} is already installed for ${targetEmail}, but this update is running as ${sourceEmail}. ` +
+    `Grok's self-updater can't distinguish two accounts that land on the same release — sign in to ${targetEmail}'s ` +
+    `install (agents use grok@${installedVersion}) before updating it, or wait until the releases diverge.`
+  );
+}
+
+/**
  * Install a specific version of an agent.
  */
 export async function installVersion(
@@ -1551,6 +1586,10 @@ export async function installVersion(
         // Fold any stale literal `latest` dir from an earlier probe-failed
         // install into the real version so it stops shadowing `agents view`.
         await reconcileStaleLatestDir(agent, installedVersion);
+      }
+
+      if (agent === 'grok') {
+        await checkGrokAccountCollision(installedVersion);
       }
 
       onProgress?.(`${agentConfig.name} installed. Setting up agents-cli version home for isolation...`);

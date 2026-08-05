@@ -49,6 +49,39 @@ func buildBiometryAccessControl() -> SecAccessControl {
     return access
 }
 
+// A "silent" service is one the CLI stores WITHOUT a biometry ACL by contract:
+// bundle metadata (`agents-cli.bundles.<name>` cleartext, or `agents-cli.h.<32
+// hex>.m` hashed) and the HMAC key (`agents-cli.hmackey`). Their reads must never
+// pop Touch ID — enumeration (`secrets list`) and the pre-value hmackey read are
+// on the silent path (SEC-4/SEC-11/SEC-12). Value items are NOT silent here; their
+// per-bundle tier is reconciled by the TS layer (never ⇒ no-ACL). This gate exists
+// so the JIT migrate/rehome paths below re-add a silent item WITHOUT re-stamping it
+// with the biometry ACL — the bug that turned a no-ACL metadata/hmackey item into a
+// gated one on read and produced a SECOND Touch ID sheet.
+func isSilentServiceName(_ service: String) -> Bool {
+    if service == "agents-cli.hmackey" { return true }
+    if service.hasPrefix("agents-cli.bundles.") { return true }
+    if service.hasPrefix("agents-cli.h.") && service.hasSuffix(".m") {
+        let mid = service.dropFirst("agents-cli.h.".count).dropLast(".m".count)
+        if mid.count == 32 && mid.allSatisfy({ ("0"..."9").contains($0) || ("a"..."f").contains($0) }) {
+            return true
+        }
+    }
+    return false
+}
+
+// Attach the tier-correct protection to a fresh SecItemAdd attribute dict: silent
+// items (metadata, hmackey) get the no-ACL accessibility that `set-no-acl` uses;
+// everything else keeps the biometry-or-passcode ACL. Centralized so the migrate
+// and rehome paths cannot drift apart.
+func applyMigrationProtection(_ attrs: inout [CFString: Any], service: String) {
+    if isSilentServiceName(service) {
+        attrs[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+    } else {
+        attrs[kSecAttrAccessControl] = buildBiometryAccessControl()
+    }
+}
+
 // The data-protection keychain access group. This is the
 // com.apple.application-identifier granted by the embedded provisioning
 // profile (2HTP252L87.com.phnx-labs.agents-keychain) and is covered by the
@@ -262,7 +295,9 @@ func migrateInline(service: String, account: String, value: String) {
     // errSecDuplicateItem; that delete IS scoped (dpBase carries the DP flag).
     SecItemDelete(dpBase(service: service, account: account) as CFDictionary)
     var addAttrs = dpBase(service: service, account: account)
-    addAttrs[kSecAttrAccessControl] = buildBiometryAccessControl()
+    // Silent items (metadata, hmackey) migrate no-ACL; forcing the biometry ACL
+    // here is what turned a silent item into a gated one on read (the 2nd sheet).
+    applyMigrationProtection(&addAttrs, service: service)
     addAttrs[kSecValueData] = valueData
     let addStatus = SecItemAdd(addAttrs as CFDictionary, nil)
     if addStatus != errSecSuccess {
@@ -287,7 +322,8 @@ func rehomeOrphan(service: String, account: String, value: String, orphanRef: Da
     // hit errSecDuplicateItem, then add the pinned copy with the biometry ACL.
     SecItemDelete(dpBase(service: service, account: account) as CFDictionary)
     var addAttrs = dpBase(service: service, account: account)
-    addAttrs[kSecAttrAccessControl] = buildBiometryAccessControl()
+    // Silent items (metadata, hmackey) re-home no-ACL; see applyMigrationProtection.
+    applyMigrationProtection(&addAttrs, service: service)
     addAttrs[kSecValueData] = valueData
     let addStatus = SecItemAdd(addAttrs as CFDictionary, nil)
     guard addStatus == errSecSuccess else {

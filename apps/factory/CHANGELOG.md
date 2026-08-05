@@ -6,6 +6,73 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Reader association fix + HTML artifacts + command titles.** Factory wrote
+  `workbench.editorAssociations` as a legacy array (`[{ viewType, filenamePattern }]`).
+  VS Code only accepts the object map (`{ "*.md": "agents.markdownEditor" }`), so the
+  toggle saved but files kept opening as raw text. Now writes the object shape,
+  migrates the old array on read, and pins patterns to `default` when disabled.
+  Commands are renamed to `Agents: Reader (Enable)` / `Agents: Reader (Disable)`
+  (same style as Watchdog). Reader also owns `*.html` / `*.htm` via a sandboxed
+  HTML preview (`agents.htmlReader`) so artifacts-cli pages render instead of
+  showing source. Floor/plan open paths no longer shell HTML out to the system
+  browser — `openPlanPreview` and file clicks use `vscode.openWith` for the
+  Reader, so `.agents/artifacts/**/*.html` (and plans/reports) open in-editor.
+  Source: `src/core/editorAssociations.ts`, `src/vscode/workbench.vscode.ts`,
+  `src/vscode/htmlReader.ts`, `src/vscode/settings.vscode.ts`, `package.json`.
+- **Status bar no longer shows a stale/stranger identity for a tab (fixes a Kimi
+  tab displaying a Claude `2.1.218` and a wrong `session_…` id).** Two independent
+  defects. (1) The live-session-id lookup resolves a tab's session by reading the
+  SessionStart hook's pid-keyed `<pid>.json` files across the tab's process tree;
+  those files are never pruned, so the OS eventually recycles a dead agent's pid
+  onto a live process under a different tab and the stale file binds. The
+  terminal-age guard couldn't separate a ~30h-old stale file from a same-age
+  long-running tab in the same repo — `liveSessionIdForShell` now also rejects any
+  candidate pid whose CURRENT process (from `ps` ELAPSED) started after the record
+  was written. (2) The status bar rendered whatever version/account were cached on
+  the entry even when they were resolved for a *different* session left over in the
+  same terminal; it now shows only the identity resolved for the session id it
+  displays (`displayIdentity`, gated on a new `identityAppliedSessionId` distinct
+  from the both-fields retry gate so a version-only harness still shows its
+  version), and clears a field
+  the current session doesn't carry (Grok/Cursor/Droid have a version but no
+  account; Kimi has neither). Source: `src/core/liveSession.ts`,
+  `src/core/statusIdentity.ts`, `src/vscode/extension.ts`,
+  `src/vscode/terminals.vscode.ts`.
+- **Removed the `agents.terminalMode` setting — tmux is always on when available.**
+  The extension no longer exposes an `auto` / `tmux` / `native` "terminal mode".
+  tmux is the default for every agent and shell terminal (giving each a named,
+  reconnectable session), with an automatic fallback to a plain VS Code terminal
+  only when tmux isn't installed (Windows / no binary). The `native` opt-out is
+  gone: it mostly just disabled the extension's crash/SSH-drop reconnect while the
+  `agents` CLI wrapped the agent in tmux anyway. Deletes the setting, the
+  `src/core/terminalMode.ts` module, and the mode reads at the launch / URI-spawn /
+  split sites. Source: `src/vscode/extension.ts`, `package.json`.
+- **Fleet health probes no longer stack duplicate `agents` subprocesses (fixes
+  CPU thrash on a loaded box).** `countRunningAgents` — the per-host running-agent
+  count behind the Dispatch panel's device health and the launch-health refresh —
+  spawned a fresh `agents sessions --active --json --host <box>` subprocess per
+  fleet device on every call, with no cache and no in-flight dedup (unlike its
+  sibling `fetchDeviceStats`). Several uncoordinated callers each fanned out over
+  the whole fleet, and on a loaded box where an `agents` cold-start alone exceeds
+  8s the batches piled up into dozens of concurrent duplicate processes. Both
+  probes now share one `cachedInFlight` guard: concurrent calls for a host
+  coalesce into a single in-flight run, and repeats within 6s serve the cache.
+  Source: `src/core/cachedInFlight.ts`, `src/vscode/deviceHealth.vscode.ts`.
+
+## [0.9.310] - 2026-08-04
+
+- **Every New-agent launch is balanced — `agents run <agent> --interactive
+  --strategy balanced --mode auto`, with no per-harness exception (#1908).** Local
+  **Grok, Kimi, and Droid** used to launch as raw binaries (`grok` / `kimi` /
+  `droid`) with no account rotation and no `--mode`, because three disagreeing
+  allowlists (`STRATEGY_LAUNCH_AGENTS`, `LAUNCHABLE`, `usesManagedAgentLaunch`)
+  gated whether an agent got `--strategy balanced` and whether it even routed
+  through `agents run`. Those lists are collapsed into one predicate,
+  `isAgentRunner(key)` = `key !== 'shell'`. Local New-agent launches also pass
+  `local: true` into the launch builder so they do not accidentally emit
+  `--device auto` and leave this Mac. Source: `src/core/agents.ts`,
+  `src/vscode/extension.ts`.
+
 - **grok / kimi / droid / antigravity tabs now restore, reopen, and reload like the prewarm agents (#1747).**
   Resume past the picker was still gated on `supportsPrewarming` (claude/codex/gemini/cursor/opencode),
   so a grok/kimi/droid/antigravity tab did not come back after a window reload, a reopen-last, or a
@@ -14,6 +81,55 @@ All notable changes to the Factory extension are documented here. Format follows
   back to a generic Ctrl+C-twice exit sequence for agents without a `PREWARM_CONFIGS` entry, and the
   `openSingleAgent` launch path now tracks + polls those harnesses too so there is a persisted session to
   come back to.
+- **Removed the `Agents: Enable Tmux` / `Agents: Disable Tmux` palette commands.**
+  They were back-compat aliases that just flipped the `agents.terminalMode`
+  setting, and the extension no longer needs its own tmux "mode" toggle — the
+  `agents` CLI wraps interactive launches in tmux itself. The `agents.terminalMode`
+  setting stays (set it to `native` in settings.json if you want VS Code editor
+  terminals instead of tmux), and tmux-backed reconnect resilience is unchanged.
+  Removes the two commands, their command-palette menu entries, and the now-unused
+  `agents.tmuxEnabled` context key. Source: `src/vscode/extension.ts`,
+  `package.json`.
+- **BREAKING (settings): the extension's watchdog loop is deleted — the CLI daemon watchdog is the only watchdog.**
+  `agents watchdog enable` (the `agents __daemon-run` routine) now owns
+  rotate-on-exhaustion in addition to stall nudging: it injects the harness
+  exit sequence, `agents run auto --interactive`, and the `/continue` replay
+  into the SAME vscodium tab via the extension's `/inject` URI verb over
+  live-terminals.json, and writes `rotate` events to the shared
+  `~/.agents/.cache/logs/watchdog.log` (a skip is a `kind: 'rotate'` entry with
+  a `rotate skipped:` message prefix — there is no separate skip kind) — the
+  Factory Floor status card keeps
+  working unchanged. Deleted: the `startWatchdog` tick + config listener, the
+  no-healthy suppression machinery, `src/core/autoRotate.ts`,
+  `rotateTerminalToBestVersion`/`RotateOutcome`, and the dormant monitor
+  watchdog broadcast lane (`src/monitor/watchdogDetector.ts`, follower
+  `setWatchdogWatches`, host broadcast, the `watchdog-watch` /
+  `watchdog-versions` protocol types). **The `agents.watchdog.enabled`,
+  `agents.watchdog.autoRotate`, `agents.watchdog.rotateCooldownSeconds`, and
+  `agents.watchdog.tickSeconds` settings are removed** — the on/off now lives
+  in the CLI (`agents watchdog enable|disable|status`); an explicit
+  `autoRotate: false` is migrated once per user via the CLI's rotate-only switch
+  (`agents watchdog rotate off`) on activation — nudging is untouched; on an
+  older CLI without the subcommand the migration retries next activation.
+  Source: `src/vscode/watchdog.vscode.ts`, `src/vscode/extension.ts`,
+  `src/vscode/settings.vscode.ts`, `src/monitor/`, `package.json`.
+
+- **`Agents: Watchdog (Enable)` / `Agents: Watchdog (Disable)` replace `Agents: Toggle Watchdog Auto-Rotate`.**
+  Two honest static palette titles shelling out (execFile argv, no shell
+  string) to the CLI's `agents watchdog enable|disable`, with a status-bar
+  confirmation or an error toast quoting the CLI's stderr. The settings
+  panel's watchdog toggle reads/writes the same CLI state
+  (`agents watchdog status --json`).
+  Source: `src/vscode/watchdog.vscode.ts`, `src/vscode/settings.vscode.ts`,
+  `package.json`.
+
+- **Manual resume commands keep working without the rotate machinery.**
+  `Agents: Resume in Best Profile` now shares the Pick-Harness launch flow
+  (`launchResumeTerminal`) and builds its `agents run auto --interactive
+  --session-id <uuid>` command via `buildAutoRunLaunchCommand` in
+  `src/core/resumeInBest.ts`; a `no healthy` failure surfaces in the fresh
+  terminal itself (the CLI fails loud there).
+  Source: `src/vscode/extension.ts`, `src/core/resumeInBest.ts`.
 
 ## [0.9.309] - 2026-08-03
 

@@ -142,10 +142,15 @@ describe('mcpHttp / mcpHeaders capability gates', () => {
     expect(supports('grok', 'mcpHttp').ok).toBe(false);
     expect(supports('kimi', 'mcpHttp').ok).toBe(false);
     expect(supports('droid', 'mcpHttp').ok).toBe(false);
+    // omp honors HTTP-transport MCP (mcp/types.ts MCPHttpServerConfig; config.ts
+    // infers http from a url-only server entry).
+    expect(supports('pi', 'mcpHttp').ok).toBe(true);
   });
 
-  it('mcpHeaders: only claude', () => {
+  it('mcpHeaders: claude and pi', () => {
     expect(supports('claude', 'mcpHeaders').ok).toBe(true);
+    // omp applies HTTP MCP headers (mcp/config.ts: `if (server.headers) …`).
+    expect(supports('pi', 'mcpHeaders').ok).toBe(true);
     expect(supports('codex', 'mcpHeaders').ok).toBe(false);
     expect(supports('gemini', 'mcpHeaders').ok).toBe(false);
     expect(supports('cursor', 'mcpHeaders').ok).toBe(false);
@@ -167,11 +172,12 @@ describe('mcpHttp / mcpHeaders capability gates', () => {
       'claude',
       'codex',
       'hermes',
+      'pi',
     ]);
   });
 
-  it('capableAgents(mcpHeaders) matches the old inline claude-only check', () => {
-    expect(capableAgents('mcpHeaders')).toEqual(['claude']);
+  it('capableAgents(mcpHeaders) is claude and pi (the header-honoring writers)', () => {
+    expect(capableAgents('mcpHeaders').sort()).toEqual(['claude', 'pi']);
   });
 });
 

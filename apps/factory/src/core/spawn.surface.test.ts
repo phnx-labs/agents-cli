@@ -12,7 +12,7 @@ describe('resolveSpawnSurface', () => {
     ).toBe('tmux-tab');
   });
 
-  test('native mode (agents.terminalMode=native, or no tmux on PATH) stays a plain tab', () => {
+  test('no tmux on PATH (useTmux=false) stays a plain tab', () => {
     expect(
       resolveSpawnSurface({ useTmux: false, wantsSplit: false, hasParent: false, parentIsTmux: false })
     ).toBe('native-tab');

@@ -1,18 +1,11 @@
 import { describe, test, expect, beforeEach, mock } from 'bun:test';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import type { EditorTerminal } from './terminals.vscode';
 
-// Minimal vscode mock — the tick reads config, window focus state, and shows
-// status-bar messages; the toggle command writes config.
-const configStore = new Map<string, unknown>([
-  ['enabled', true],
-  ['autoRotate', true],
-  ['rotateCooldownSeconds', 120],
-  ['tickSeconds', 120],
-]);
+// Minimal vscode mock — the palette handlers show status-bar / error messages;
+// the migration reads the (deleted) agents.watchdog.autoRotate setting via
+// inspect() so it only fires on an EXPLICIT false.
 const statusMessages: string[] = [];
+const errorMessages: string[] = [];
+let inspectResult: { globalValue?: boolean; workspaceValue?: boolean; workspaceFolderValue?: boolean } = {};
 
 mock.module('vscode', () => ({
   window: {
@@ -21,168 +14,183 @@ mock.module('vscode', () => ({
       statusMessages.push(msg);
       return { dispose: () => {} };
     },
+    showErrorMessage: (msg: string) => {
+      errorMessages.push(msg);
+      return Promise.resolve(undefined);
+    },
   },
   workspace: {
     getConfiguration: () => ({
-      get: (key: string, def: unknown) =>
-        configStore.has(key) ? configStore.get(key) : def,
-      update: (key: string, value: unknown) => {
-        configStore.set(key, value);
-        return Promise.resolve();
-      },
+      inspect: () => inspectResult,
     }),
-    onDidChangeConfiguration: () => ({ dispose: () => {} }),
   },
   ConfigurationTarget: { Global: 1, Workspace: 2 },
 }));
 
 const watchdog = await import('./watchdog.vscode');
-const { parseEvents } = await import('../core/watchdogLog');
 
-// Captured-real shape of the CLI's `agents run auto` fail-loud line
-// (RUSH-2132): the reset is `reset.toISOString()` — always milliseconds + Z.
-const CONTRACT_ERROR =
-  "agents: no healthy claude account under strategy 'balanced' — excluded: a@x.com (weekly); " +
-  'earliest window resets 2026-08-10T14:00:00.000Z. Use --strategy pinned to force the default.';
+type ExecCall = { file: string; args: string[] };
 
-function fakeEntry(over: Partial<EditorTerminal> = {}): EditorTerminal {
+function fakeGlobalState(initial: Record<string, unknown> = {}) {
+  const data = new Map<string, unknown>(Object.entries(initial));
   return {
-    id: 'T1',
-    sessionId: 'sess-1',
-    agentType: 'claude',
-    ...over,
-  } as unknown as EditorTerminal;
+    data,
+    get<T>(key: string): T | undefined {
+      return data.get(key) as T | undefined;
+    },
+    update(key: string, value: unknown) {
+      data.set(key, value);
+      return Promise.resolve();
+    },
+  };
 }
 
-let logPath: string;
+function makeDeps(behavior: 'ok' | 'fail' = 'ok') {
+  const calls: ExecCall[] = [];
+  const execFileAsync = (file: string, args: string[]) => {
+    calls.push({ file, args });
+    if (behavior === 'fail') {
+      const err = new Error('exit 1') as Error & { stderr?: string };
+      err.stderr = 'agents: daemon is not running\n';
+      return Promise.reject(err);
+    }
+    return Promise.resolve({ stdout: '', stderr: '' });
+  };
+  return {
+    calls,
+    deps: {
+      execFileAsync,
+      resolveBin: () => Promise.resolve('/fake/bin/agents'),
+    },
+  };
+}
 
 beforeEach(() => {
-  watchdog.__clearNoHealthyStateForTests();
   statusMessages.length = 0;
-  logPath = path.join(
-    fs.mkdtempSync(path.join(os.tmpdir(), 'watchdog-test-')),
-    'watchdog.log',
-  );
-  watchdog.__setWatchdogLogPathForTests(logPath);
+  errorMessages.length = 0;
+  inspectResult = {};
 });
 
-describe('watchdog tick — no healthy suppression', () => {
-  test('tail with the CLI contract error → no rotate, ONE skip event per window', async () => {
-    let rotations = 0;
-    const deps = {
-      listTerminals: () => [fakeEntry()],
-      readTail: () => Promise.resolve(CONTRACT_ERROR),
-      rotateTerminal: () => {
-        rotations++;
-        return Promise.resolve({ status: 'rotated', newSessionId: 'new-1' } as const);
-      },
-    };
-    const lastRotateMs = new Map<string, number>();
-
-    await watchdog.tick(lastRotateMs, deps);
-    expect(rotations).toBe(0);
-
-    // Real log writer, temp path: exactly one rotate skip event.
-    const events = parseEvents(fs.readFileSync(logPath, 'utf8'));
-    const skips = events.filter((e) => e.kind === 'rotate');
-    expect(skips.length).toBe(1);
-    expect(skips[0].message).toContain('skip');
-    expect(skips[0].reason).toContain('no healthy account');
-
-    // Subsequent ticks in the same suppression window: still no rotate, and
-    // NO further skip events (one per window, not per tick).
-    await watchdog.tick(lastRotateMs, deps);
-    await watchdog.tick(lastRotateMs, deps);
-    expect(rotations).toBe(0);
-    const events2 = parseEvents(fs.readFileSync(logPath, 'utf8'));
-    expect(events2.filter((e) => e.kind === 'rotate').length).toBe(1);
-  });
-
-  test('suppression recorded by the rotate path also blocks the tick', async () => {
-    let rotations = 0;
-    watchdog.recordNoHealthyRotateFailure(undefined, Date.now() + 60_000);
-    const deps = {
-      listTerminals: () => [fakeEntry()],
-      readTail: () => Promise.resolve("You've hit your weekly limit"),
-      rotateTerminal: () => {
-        rotations++;
-        return Promise.resolve({ status: 'rotated', newSessionId: 'new-1' } as const);
-      },
-    };
-    await watchdog.tick(new Map(), deps);
-    expect(rotations).toBe(0);
-  });
-
-  test('rate-limited tail → rotates and logs the rotate event', async () => {
-    let rotations = 0;
-    const deps = {
-      listTerminals: () => [fakeEntry()],
-      readTail: () => Promise.resolve('{"text":"You\'ve hit your weekly limit. Resets 7am"}'),
-      rotateTerminal: () => {
-        rotations++;
-        return Promise.resolve({ status: 'rotated', newSessionId: 'new-session-9' } as const);
-      },
-    };
-    await watchdog.tick(new Map(), deps);
-    expect(rotations).toBe(1);
-    const events = parseEvents(fs.readFileSync(logPath, 'utf8'));
-    const rotates = events.filter((e) => e.kind === 'rotate');
-    expect(rotates.length).toBe(1);
-    expect(rotates[0].message).toContain('agents run auto');
-  });
-
-  test('clean tail → no rotate, no log', async () => {
-    let rotations = 0;
-    const deps = {
-      listTerminals: () => [fakeEntry()],
-      readTail: () => Promise.resolve('{"type":"assistant","text":"working on it"}'),
-      rotateTerminal: () => {
-        rotations++;
-        return Promise.resolve({ status: 'rotated', newSessionId: 'new-1' } as const);
-      },
-    };
-    await watchdog.tick(new Map(), deps);
-    expect(rotations).toBe(0);
-    expect(fs.existsSync(logPath)).toBe(false);
-  });
-
-  test('rotate cooldown suppresses a second rotation for the same terminal', async () => {
-    let rotations = 0;
-    const deps = {
-      listTerminals: () => [fakeEntry()],
-      readTail: () => Promise.resolve("You've hit your weekly limit"),
-      rotateTerminal: () => {
-        rotations++;
-        return Promise.resolve({ status: 'rotated', newSessionId: 'new-1' } as const);
-      },
-    };
-    const lastRotateMs = new Map<string, number>();
-    await watchdog.tick(lastRotateMs, deps);
-    await watchdog.tick(lastRotateMs, deps);
-    expect(rotations).toBe(1);
-  });
-});
-
-describe('Agents: Toggle Watchdog Auto-Rotate', () => {
-  test('command registration flips agents.watchdog.autoRotate and confirms', async () => {
-    configStore.set('autoRotate', true);
+describe('registerWatchdogPaletteCommands', () => {
+  test('registers both palette commands', () => {
     const registered = new Map<string, () => Promise<void>>();
-    const disposable = watchdog.registerToggleAutoRotateCommand(
+    const registerCommand = (id: string, handler: () => Promise<void>) => {
+      registered.set(id, handler);
+      return { dispose: () => {} };
+    };
+    const disposables = watchdog.registerWatchdogPaletteCommands(
+      registerCommand as never,
+      makeDeps().deps,
+    );
+    expect(disposables).toHaveLength(2);
+    expect([...registered.keys()].sort()).toEqual([
+      'agents.watchdogDisable',
+      'agents.watchdogEnable',
+    ]);
+  });
+
+  test('enable shells out to `agents watchdog enable` (argv, no shell string) and confirms', async () => {
+    const registered = new Map<string, () => Promise<void>>();
+    const { calls, deps } = makeDeps();
+    watchdog.registerWatchdogPaletteCommands(
       ((id: string, handler: () => Promise<void>) => {
         registered.set(id, handler);
         return { dispose: () => {} };
       }) as never,
+      deps,
     );
-    expect(disposable).toBeDefined();
-    const handler = registered.get('agents.toggleWatchdogAutoRotate');
-    expect(handler).toBeDefined();
+    await registered.get('agents.watchdogEnable')!();
+    expect(calls).toEqual([{ file: '/fake/bin/agents', args: ['watchdog', 'enable'] }]);
+    expect(statusMessages.some((m) => m.includes('Watchdog enabled'))).toBe(true);
+    expect(errorMessages).toHaveLength(0);
+  });
 
-    await handler!();
-    expect(configStore.get('autoRotate')).toBe(false);
-    expect(statusMessages.at(-1)).toContain('OFF');
+  test('disable shells out to `agents watchdog disable` and confirms', async () => {
+    const registered = new Map<string, () => Promise<void>>();
+    const { calls, deps } = makeDeps();
+    watchdog.registerWatchdogPaletteCommands(
+      ((id: string, handler: () => Promise<void>) => {
+        registered.set(id, handler);
+        return { dispose: () => {} };
+      }) as never,
+      deps,
+    );
+    await registered.get('agents.watchdogDisable')!();
+    expect(calls).toEqual([{ file: '/fake/bin/agents', args: ['watchdog', 'disable'] }]);
+    expect(statusMessages.some((m) => m.includes('Watchdog disabled'))).toBe(true);
+  });
 
-    await handler!();
-    expect(configStore.get('autoRotate')).toBe(true);
-    expect(statusMessages.at(-1)).toContain('ON');
+  test('a nonzero CLI exit surfaces an error toast quoting stderr', async () => {
+    const registered = new Map<string, () => Promise<void>>();
+    const { deps } = makeDeps('fail');
+    watchdog.registerWatchdogPaletteCommands(
+      ((id: string, handler: () => Promise<void>) => {
+        registered.set(id, handler);
+        return { dispose: () => {} };
+      }) as never,
+      deps,
+    );
+    await registered.get('agents.watchdogEnable')!();
+    expect(errorMessages).toHaveLength(1);
+    expect(errorMessages[0]).toContain('agents watchdog enable failed');
+    expect(errorMessages[0]).toContain('daemon is not running');
+    expect(statusMessages).toHaveLength(0);
+  });
+});
+
+describe('migrateAutoRotateSettingOnce', () => {
+  test('no explicit autoRotate setting → no CLI call, flag set (runs once)', async () => {
+    const { calls, deps } = makeDeps();
+    const state = fakeGlobalState();
+    await watchdog.migrateAutoRotateSettingOnce(state, deps);
+    expect(calls).toHaveLength(0);
+    expect(state.data.get(watchdog.WATCHDOG_ROTATE_MIGRATED_KEY)).toBe(true);
+  });
+
+  test('autoRotate explicitly true → no migration', async () => {
+    inspectResult = { globalValue: true };
+    const { calls, deps } = makeDeps();
+    const state = fakeGlobalState();
+    await watchdog.migrateAutoRotateSettingOnce(state, deps);
+    expect(calls).toHaveLength(0);
+    expect(state.data.get(watchdog.WATCHDOG_ROTATE_MIGRATED_KEY)).toBe(true);
+  });
+
+  test('autoRotate explicitly false → CLI watchdog rotate off once + one-time note', async () => {
+    inspectResult = { globalValue: false };
+    const { calls, deps } = makeDeps();
+    const state = fakeGlobalState();
+    await watchdog.migrateAutoRotateSettingOnce(state, deps);
+    expect(calls).toEqual([{ file: '/fake/bin/agents', args: ['watchdog', 'rotate', 'off'] }]);
+    expect(state.data.get(watchdog.WATCHDOG_ROTATE_MIGRATED_KEY)).toBe(true);
+    expect(statusMessages.some((m) => m.includes('Migrated watchdog setting'))).toBe(true);
+
+    // Second activation: the flag short-circuits — never runs again.
+    await watchdog.migrateAutoRotateSettingOnce(state, deps);
+    expect(calls).toHaveLength(1);
+  });
+
+  test('workspace-level explicit false also migrates', async () => {
+    inspectResult = { workspaceValue: false };
+    const { calls, deps } = makeDeps();
+    await watchdog.migrateAutoRotateSettingOnce(fakeGlobalState(), deps);
+    expect(calls).toEqual([{ file: '/fake/bin/agents', args: ['watchdog', 'rotate', 'off'] }]);
+  });
+
+  test('CLI failure → error toast, flag left unset so the next activation retries', async () => {
+    inspectResult = { globalValue: false };
+    const { deps } = makeDeps('fail');
+    const state = fakeGlobalState();
+    await watchdog.migrateAutoRotateSettingOnce(state, deps);
+    expect(state.data.get(watchdog.WATCHDOG_ROTATE_MIGRATED_KEY)).toBeUndefined();
+    expect(errorMessages.some((m) => m.includes('Could not migrate'))).toBe(true);
+  });
+
+  test('flag already set → no-op even with an explicit false', async () => {
+    inspectResult = { globalValue: false };
+    const { calls, deps } = makeDeps();
+    const state = fakeGlobalState({ [watchdog.WATCHDOG_ROTATE_MIGRATED_KEY]: true });
+    await watchdog.migrateAutoRotateSettingOnce(state, deps);
+    expect(calls).toHaveLength(0);
   });
 });

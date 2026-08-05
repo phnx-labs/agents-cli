@@ -112,6 +112,15 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     description: 'Whether the routines scheduler (daemon) may fire on this device.',
   },
   {
+    name: 'browser.remote-control',
+    yamlKey: 'browserRemoteControl',
+    scope: 'device',
+    type: 'bool',
+    description:
+      "Whether other fleet machines may drive THIS device's browser over `browser --host <this-device>`. " +
+      'Default off — a fleet-remote drive is refused until the owner runs `agents browser remote-control on`.',
+  },
+  {
     name: 'notes',
     yamlKey: 'notes',
     scope: 'device',

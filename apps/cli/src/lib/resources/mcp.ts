@@ -159,6 +159,9 @@ export function getMcpConfigPath(agent: AgentId, versionHome: string): string | 
       return path.join(versionHome, '.grok', 'mcp.json');
     case 'hermes':
       return path.join(versionHome, '.hermes', 'config.yaml');
+    case 'pi':
+      // omp reads user-scope MCP from ~/.omp/agent/.mcp.json (Claude schema).
+      return path.join(versionHome, '.omp', 'agent', '.mcp.json');
     default:
       return null;
   }

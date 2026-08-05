@@ -15,6 +15,7 @@ enum SingleInstanceSelfTest {
         testFirstAcquireWins()
         testSecondAcquireSurrenders()
         testLockReleasedWhenHolderDies()
+        testAcquireSelfHealsPastALeakedOrphan()
         testLockPathIsRuntimeStateDir()
         testDumpProbeIsExempt()
         testTriggerClassification()
@@ -109,6 +110,86 @@ enum SingleInstanceSelfTest {
         // The userInfo dict must be string-only so it survives distributed delivery.
         check(agentRun.userInfo["automated"] == "1" && agentRun.userInfo["agent"] == "claude",
               "automated userInfo is plist-safe strings")
+    }
+
+    // The deadlock that bricked the menu bar: a leaked orphan (a pre-#1841 `doctor`
+    // child at PPID 1 that inherited the lock fd) holds the flock while NO live
+    // helper runs, and the lock file carries the crashed helper's now-dead pid. The
+    // old acquire returned .alreadyRunning unconditionally and main.swift exited
+    // before it could reap — so the icon stayed dead until reboot. acquire must now
+    // recognize the holder is no live helper, reap it, and WIN. Real held flock,
+    // real orphan process, real reaper — no mock.
+    private static func testAcquireSelfHealsPastALeakedOrphan() {
+        let dir = NSTemporaryDirectory() + "menubar-selfheal-\(getpid())"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let path = dir + "/menubar.lock"
+        let registry = dir + "/menubar-children"
+
+        guard let orphan = spawnOrphanHoldingLock(path) else {
+            check(false, "could not spawn a lock-holding orphan"); return
+        }
+        // The holder is a live process but NOT a MenubarHelper, and the lock file
+        // carries a dead pid — so it must classify as a stale (self-healable) owner.
+        check(!SingleInstance.liveHelperOwnsLock(path: path),
+              "leaked orphan is classified as a stale (non-helper) owner")
+
+        // Record it so the recovery's reaper finds it; its executablePath must
+        // match the recorded path (the reaper's pid-reuse guard).
+        ChildProcess.Registry.register(
+            pid: orphan,
+            path: ChildProcess.executablePath(orphan) ?? "/usr/bin/python3",
+            file: registry)
+
+        // The fix: acquire reaps the orphan (releasing its flock) and WINS instead
+        // of surfacing into the deadlock.
+        let outcome = SingleInstance.acquire(path: path, registryFile: registry)
+        check(outcome == .acquired,
+              "acquire self-heals past a leaked orphan and wins the lock (got \(outcome))")
+
+        // And the orphan is gone.
+        var alive = true
+        for _ in 0..<40 where alive { usleep(100_000); alive = kill(orphan, 0) == 0 }
+        check(!alive, "the leaked orphan was reaped during self-healing acquire")
+        if alive { kill(orphan, SIGKILL) }
+    }
+
+    /// A real detached, non-helper process that holds the lock's flock: its own
+    /// process-group leader (so the reaper's kill(-pgid) has a group), running
+    /// python3 (executablePath != MenubarHelper), holding LOCK_EX and stamping a
+    /// dead pid into the lock file — exactly a leaked helper child. Returns once
+    /// the flock is provably held, so the acquire under test is guaranteed to
+    /// contend. Mirrors ChildProcessSelfTest.spawnDetachedGroupLeader.
+    private static func spawnOrphanHoldingLock(_ lockPath: String) -> pid_t? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        let script = """
+        import fcntl, os, time
+        os.setpgrp()
+        fd = os.open('\(lockPath)', os.O_RDWR | os.O_CREAT, 0o644)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        os.ftruncate(fd, 0)
+        os.write(fd, b'999999\\n')
+        time.sleep(300)
+        """
+        p.arguments = ["-c", script]
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        let pid = p.processIdentifier
+        // Wait until the orphan has actually taken the flock (a fresh flock from
+        // here must be refused) so acquire() is guaranteed to contend.
+        for _ in 0..<50 {
+            usleep(100_000)
+            let probe = open(lockPath, O_RDWR | O_CREAT, 0o644)
+            if probe >= 0 {
+                let refused = flock(probe, LOCK_EX | LOCK_NB) != 0
+                close(probe)
+                if refused { return pid }
+            }
+        }
+        kill(pid, SIGKILL)
+        return nil
     }
 
     private static func check(_ condition: Bool, _ label: String) {

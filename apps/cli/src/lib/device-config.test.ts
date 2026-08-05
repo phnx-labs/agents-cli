@@ -199,6 +199,7 @@ describe('listConfig', () => {
     expect(Object.keys(byName).sort()).toEqual([
       'agents.max-concurrent',
       'browser.profile',
+      'browser.remote-control',
       'interactive.host',
       'notes',
       'scheduler.enabled',

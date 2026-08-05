@@ -97,7 +97,7 @@ Generate commit messages from staged changes with `Cmd+Shift+G`. Learns from you
 - **Auto-start** - Configure which agents launch when VS Code opens
 - **Default models** - Set preferred model per agent type
 - **Shell terminals** - Spawn plain shells alongside agents (`Cmd+Shift+S`)
-- **Markdown editor** - Custom `.md` editor with image paste support
+- **Reader** - Notion-style `.md` editor (TipTap) plus sandboxed HTML preview for artifacts-cli pages; Command Palette: `Agents: Reader (Enable)` / `Agents: Reader (Disable)`
 - **Notifications** - Native macOS notifications when agents need attention
 
 ## For Teams

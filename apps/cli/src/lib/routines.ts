@@ -292,6 +292,8 @@ export interface RunMeta {
   pid: number | null;
   /** Process birth time (epoch ms) recorded at spawn for pid-reuse detection. */
   spawnedAt?: number;
+  /** Configured execution deadline persisted for daemon-restart recovery. */
+  timeoutMs?: number;
   /**
    * `missed` is not an execution outcome — it is the record that a scheduled
    * fire never happened (the daemon was down, asleep, or wedged when it came

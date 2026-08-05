@@ -31,6 +31,8 @@
   <a href="https://x.ai" title="Grok Build (xAI)"><strong>Grok</strong></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://factory.ai" title="Factory AI Droid"><strong>Droid</strong></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://omp.sh" title="Oh My Pi"><strong>Pi</strong></a>
 </p>
 
 https://agents-cli.sh/demo.mp4
@@ -270,6 +272,11 @@ agents sessions --include tools --query 'program:git' --count --fleet --json
 
 # Populate historical tool rows once on each device
 agents sessions backfill tools --fleet
+
+# Which skills/commands you actually invoke -- and which installed ones are dead weight
+agents sessions stats
+agents sessions stats --zero            # only the never-invoked (dead weight)
+agents sessions backfill resources      # fold historical sessions into the usage index
 ```
 
 Interactive picker when you're in a terminal. Structured output (`--json`, `--markdown`, filtered by role or turn count) when piped.
@@ -381,6 +388,8 @@ agents watchdog --watch    # daemon loop: a tick every --interval
 ```
 
 `agents watchdog` detects a stalled session, resolves the *exact* terminal split it lives in (tmux, iTerm, VSCodium, or a raw pty), and injects a nudge -- `Continue.` by default, or set `--text`. It's dry by default; `--nudge` acts on a single tick, and `agents watchdog enable` flips global auto-nudge on so `--watch` injects on its own. Steer a single run with `agents watchdog policy <id> off | keep | handsoff`.
+
+A stalled session whose tail shows a hard account limit ("You've hit your weekly limit · resets …") is **rotated in place** instead of nudged: the watchdog gates on the same healthy-account selection `agents run auto` makes (zero healthy → one skip event per cooldown window, terminal untouched), injects the harness's exit sequence, relaunches `agents run auto --interactive --session-id <uuid>` in the *same* tab, then replays the old session's resume once the new TUI is live. Default on; `agents watchdog rotate off` disables it (nudging stays on).
 
 ---
 

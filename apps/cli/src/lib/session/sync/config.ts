@@ -12,7 +12,7 @@
  * keychain on macOS, libsecret on Linux) — never from env or disk.
  */
 
-import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../../secrets/bundles.js';
+import { readAndResolveBundleEnv } from '../../secrets/bundles.js';
 
 /** Secrets bundle holding the R2 credentials. */
 export const SYNC_BUNDLE = 'r2.backups';
@@ -40,13 +40,17 @@ export interface R2Config {
  * without real credentials (no silent fallback).
  */
 function resolveR2Config(): R2Config {
-  // A headless caller (no TTY — e.g. a routine or SSH-dispatched command) must
-  // resolve broker-only: isHeadlessSecretsContext() true means a broker miss
-  // can never pop an unattended Touch ID sheet on the user's screen (the same
-  // broker-only-when-headless rationale the secrets readers use). Using the
-  // shared predicate rather than a literal keeps it consistent with the other
-  // callers and lets any interactive caller of loadR2Config still prompt.
-  const { env } = readAndResolveBundleEnv(SYNC_BUNDLE, { caller: 'session-transport', agentOnly: isHeadlessSecretsContext() });
+  // Session-sync is a BACKGROUND read: the daemon's ~90s cycle (and the ~2-min
+  // watchdog) resolve this on their own, never at a human's request — so it must
+  // NEVER pop a Touch ID sheet, on the interactive launcher included (SEC-13: an
+  // agent launch never raises biometry on its own). The read is always
+  // `agentOnly`: a `never`/no-ACL or broker-held `r2.backups` bundle resolves
+  // silently; a locked `hold`/`always` bundle THROWS the actionable "unlock
+  // r2.backups" message instead of prompting. isSyncConfigured catches that throw
+  // and degrades to no-transport (sync disabled) with no prompt and no crash —
+  // unlock once (`agents secrets unlock r2.backups`) or set it no-ACL
+  // (`agents secrets policy r2.backups never`) for silent zero-friction sync.
+  const { env } = readAndResolveBundleEnv(SYNC_BUNDLE, { caller: 'session-transport', agentOnly: true });
   const accountId = env.R2_ACCOUNT_ID?.trim();
   const bucket = env.R2_BUCKET_NAME?.trim();
   const accessKeyId = env.R2_ACCESS_KEY_ID?.trim();
@@ -80,33 +84,34 @@ function resolveR2Config(): R2Config {
 }
 
 // ── Resolution cache ────────────────────────────────────────────────────────
-// The daemon calls isSyncConfigured() + syncSessions() every ~90s, and each used
-// to trigger a fresh read of the biometry-gated `r2.backups` keychain items —
-// one Touch ID prompt per gated item, every cycle, forever. We instead resolve
-// at most once per process: a success is memoized for the process lifetime
-// (cleared on daemon SIGHUP via clearR2ConfigCache), so subsequent cycles never
-// touch the keychain again. A *prompt-bearing* failure (cancelled Touch ID, etc.)
-// starts a cooldown so a dismissed prompt is not re-issued every cycle. A simply
-// absent bundle never prompts, so it is re-checked each cycle (fast pickup when
-// the user later adds credentials).
+// The daemon calls isSyncConfigured() + syncSessions() every ~90s. The read is
+// now `agentOnly` (resolveR2Config) so it can NEVER pop Touch ID — a locked bundle
+// throws a cheap, deterministic "unlock r2.backups" error instead. We still resolve
+// at most once per process: a success is memoized for the process lifetime (cleared
+// on daemon SIGHUP via clearR2ConfigCache), so subsequent cycles never touch the
+// keychain again. A failure (absent bundle, or a LOCKED `hold`/`always` bundle) is
+// NOT memoized and never prompts, so it is re-checked each cycle — session-sync
+// degrades to no-transport until the bundle is added / unlocked, then picks it up
+// promptly with no restart.
+//
+// The historical prompt-backoff cooldown (a cancelled Touch ID sheet) is gone: with
+// agentOnly there is no sheet to cancel, so no failure is prompt-bearing and none
+// needs a backoff.
 let cachedConfig: R2Config | null = null;
-let lastPromptFailureAt = 0;
-/** Window after a prompt-bearing resolution failure during which we skip
- *  re-attempting (and thus re-prompting). SIGHUP / restart bypasses it. */
-export const RESOLVE_RETRY_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
 
 /** Drop the cached resolution so the next call reads the bundle fresh. Called on
  *  daemon SIGHUP (to pick up rotated credentials) and between tests. */
 export function clearR2ConfigCache(): void {
   cachedConfig = null;
-  lastPromptFailureAt = 0;
 }
 
 /**
  * Resolve R2 credentials, reading the keychain at most once per process. The
- * first call reads (and may prompt for Touch ID); every later call returns the
- * memoized result. Throws if the bundle/keys are missing — failures are not
- * memoized, but see isSyncConfigured for the re-prompt cooldown.
+ * read is `agentOnly` (resolveR2Config), so it never prompts: a `never`/no-ACL or
+ * broker-held bundle resolves silently and is memoized; a locked `hold`/`always`
+ * bundle throws the actionable "unlock r2.backups" error. Throws (not memoized)
+ * when the bundle/keys are missing or locked — isSyncConfigured catches the throw
+ * and degrades to no-transport.
  */
 export function loadR2Config(): R2Config {
   if (cachedConfig) return cachedConfig;
@@ -115,22 +120,21 @@ export function loadR2Config(): R2Config {
 }
 
 /**
- * True when the sync bundle exists and resolves, without throwing. After a
- * prompt-bearing failure (e.g. a cancelled Touch ID) it returns false without
- * re-reading the keychain for RESOLVE_RETRY_COOLDOWN_MS, so a dismissed prompt
- * does not re-storm every cycle. `now` is injectable for tests.
+ * True when the sync bundle exists and resolves, without throwing. A missing OR
+ * locked bundle resolves to false (session-sync degrades to no-transport) and,
+ * because the `agentOnly` read never prompts, it is re-checked each cycle — so a
+ * later `agents secrets add` / `agents secrets unlock r2.backups` is picked up
+ * promptly with no daemon restart. `now` is accepted for a stable test signature
+ * but no longer gates a cooldown (there is no prompt-bearing failure to back off).
  */
-export function isSyncConfigured(now: number = Date.now()): boolean {
+export function isSyncConfigured(_now: number = Date.now()): boolean {
   if (cachedConfig) return true;
-  if (lastPromptFailureAt && now - lastPromptFailureAt < RESOLVE_RETRY_COOLDOWN_MS) return false;
   try {
     loadR2Config();
     return true;
-  } catch (err) {
-    // A missing bundle never prompts, so keep re-checking it each cycle (so a
-    // later `agents secrets add` is picked up quickly). Any other failure may
-    // have cost a prompt (cancelled Touch ID, keychain error) — back off.
-    if (!/not found/i.test((err as Error).message)) lastPromptFailureAt = now;
+  } catch {
+    // Absent or locked bundle — never prompted (agentOnly), so no backoff: keep
+    // re-checking each cycle for fast pickup once the bundle is added / unlocked.
     return false;
   }
 }

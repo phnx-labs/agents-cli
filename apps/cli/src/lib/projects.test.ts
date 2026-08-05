@@ -78,6 +78,23 @@ describe('validateProjectDef', () => {
     });
     expect(def.repos).toEqual([{ slug: 'phnx-labs/rush-infra', path: '~/src/rush-infra' }]);
   });
+
+  it('keeps well-formed goals (measure optional) and drops entries without a string objective', () => {
+    const def = validateProjectDef({
+      name: 'rush',
+      goals: [
+        { objective: 'Ship agents-cli 2.0', measure: 'fleet on 2.x' },
+        { objective: 'Grow adoption' },
+        { measure: 'no objective' },
+        { objective: 42 },
+        'nope',
+      ],
+    });
+    expect(def.goals).toEqual([
+      { objective: 'Ship agents-cli 2.0', measure: 'fleet on 2.x' },
+      { objective: 'Grow adoption' },
+    ]);
+  });
 });
 
 describe('write/load roundtrip', () => {

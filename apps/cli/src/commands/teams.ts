@@ -389,6 +389,7 @@ function throttleWarningLine(
   const reason =
     r.reason === 'out_of_credits' ? 'is out of credits'
     : r.reason === 'signed_out' ? 'is not signed in'
+    : r.reason === 'revoked' ? 'needs re-login (its token was revoked)'
     : 'is rate-limited right now';
   return (
     chalk.yellow(`⚠ ${who}${acct} ${reason}.`) +
@@ -1791,7 +1792,7 @@ export function registerTeamsCommands(program: Command): void {
             repo: opts.repo,
             branch: opts.branch,
             model: a.model ?? undefined,
-            env: shareRuntimeEnv({ agentOnly: true }),
+            env: shareRuntimeEnv(),
           };
           const cloudTask = await prov.dispatch(dispatchOpts);
           return { cloudSessionId: cloudTask.id };
@@ -1810,7 +1811,7 @@ export function registerTeamsCommands(program: Command): void {
           repo: opts.repo,
           branch: opts.branch,
           model: opts.model,
-          env: shareRuntimeEnv({ agentOnly: true }),
+          env: shareRuntimeEnv(),
         };
         try {
           const cloudTask = await prov.dispatch(dispatchOpts);

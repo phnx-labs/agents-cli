@@ -62,6 +62,20 @@ export interface ProjectContext {
   purpose: string;
 }
 
+/**
+ * A project goal — the OKR-shaped "why". A project serves one or more goals: a
+ * qualitative `objective` ("Ship agents-cli 2.0") and an optional `measure`, the
+ * key result that says whether it's landing ("fleet on 2.x", "p95 < 200ms"). The
+ * goal is the outcome the work is chasing; milestones (dated checkpoints, pulled
+ * from Linear) and live work (agents / PRs / artifacts) are how far along it is.
+ */
+export interface ProjectGoal {
+  /** The outcome, in a line. */
+  objective: string;
+  /** Optional key result — how success is measured. */
+  measure?: string;
+}
+
 /** An external context source hung off the project (surfaced in `projects show`). */
 export interface ProjectIntegration {
   /** e.g. `gdrive`, `notion`, `figma`, `url`. */
@@ -85,6 +99,8 @@ export interface ProjectDef {
   repos?: ProjectRepo[];
   /** Described starting points inside the project. */
   contexts?: ProjectContext[];
+  /** The outcomes this project serves (OKR-shaped); a project may have several. */
+  goals?: ProjectGoal[];
   /** External context sources (Drive, docs, …). */
   integrations?: ProjectIntegration[];
   /** Linear project link — reuses the existing GraphQL path. */
@@ -176,6 +192,17 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
       ) {
         const cc = c as Record<string, unknown>;
         return [{ path: cc.path as string, purpose: cc.purpose as string }];
+      }
+      return [];
+    });
+  }
+  if (Array.isArray(o.goals)) {
+    def.goals = o.goals.flatMap((g) => {
+      if (g && typeof g === 'object' && typeof (g as Record<string, unknown>).objective === 'string') {
+        const gg = g as Record<string, unknown>;
+        const goal: ProjectGoal = { objective: gg.objective as string };
+        if (typeof gg.measure === 'string') goal.measure = gg.measure;
+        return [goal];
       }
       return [];
     });

@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Product acceptance — user stories that stop regressions</title>
+<style>
+  :root, [data-theme="dark"] {
+    --bg:#0a0a0a; --panel:#121212; --panel2:#161616; --ink:#e8e8e8; --dim:#8a8a8a;
+    --line:#242424; --line2:#2e2e2e; --accent:#a3e635; --accent-dim:rgba(163,230,53,.12);
+    --bad:#f87171; --bad-dim:rgba(248,113,113,.12); --good:#34d399; --good-dim:rgba(52,211,153,.12);
+    --cyan:#38bdf8; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+    --sans:Inter,system-ui,-apple-system,sans-serif;
+  }
+  [data-theme="light"] {
+    --bg:#f6f6f4; --panel:#fff; --panel2:#f0f0ec; --ink:#141414; --dim:#5a5a5a;
+    --line:#e4e4e0; --line2:#d4d4ce; --accent:#4d7c0f; --accent-dim:rgba(77,124,15,.1);
+    --bad:#b91c1c; --bad-dim:rgba(185,28,28,.1); --good:#047857; --good-dim:rgba(4,120,87,.1);
+    --cyan:#0369a1;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55}
+  .wrap{max-width:980px;margin:0 auto;padding:48px 28px 96px}
+  .theme-toggle{position:fixed;top:16px;right:16px;width:40px;height:40px;border-radius:999px;
+    border:1px solid var(--line2);background:var(--panel);color:var(--ink);cursor:pointer}
+  .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+  h1{font-size:clamp(1.6rem,3.5vw,2.2rem);font-weight:650;letter-spacing:-.02em;line-height:1.2;margin:10px 0 14px}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);max-width:62ch;margin:0 0 20px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px}
+  .chip{font-family:var(--mono);font-size:11px;color:var(--dim);border:1px solid var(--line2);
+    background:var(--panel);padding:4px 10px;border-radius:999px}
+  .chip b{color:var(--ink);font-weight:500}
+  .toc{display:flex;flex-wrap:wrap;gap:10px 16px;padding:14px 0;border-top:1px solid var(--line);
+    border-bottom:1px solid var(--line);margin:22px 0 8px}
+  .toc a{font-family:var(--mono);font-size:12px;color:var(--dim);text-decoration:none}
+  .toc a:hover{color:var(--accent)}
+  h2{font-size:1.2rem;margin:48px 0 12px;display:flex;gap:12px;align-items:baseline}
+  h2 .n{font-family:var(--mono);font-size:12px;color:var(--accent)}
+  h3{font-size:1rem;margin:22px 0 8px}
+  p{margin:0 0 12px}
+  .callout{border:1px solid var(--line2);border-left:3px solid var(--accent);background:var(--accent-dim);
+    padding:14px 16px;border-radius:0 10px 10px 0;margin:16px 0 20px;font-size:.95rem}
+  .callout.warn{border-left-color:var(--bad);background:var(--bad-dim)}
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0}
+  @media(max-width:760px){.pair{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;min-height:100%}
+  .card.bad{border-top:3px solid var(--bad)}
+  .card.good{border-top:3px solid var(--good)}
+  .card.prod{border-top:3px solid var(--accent)}
+  .label{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;margin:0 0 8px}
+  .card.bad .label{color:var(--bad)}
+  .card.good .label{color:var(--good)}
+  .card.prod .label{color:var(--accent)}
+  .card h4{margin:0 0 8px;font-size:.98rem}
+  .card p,.card li{font-size:.9rem;color:var(--dim);margin:0 0 6px}
+  .card ul,.card ol{margin:0;padding-left:1.15em}
+  .card b{color:var(--ink);font-weight:600}
+  code{font-family:var(--mono);font-size:.84em;background:var(--panel2);border:1px solid var(--line);
+    padding:1px 5px;border-radius:4px}
+  pre{font-family:var(--mono);font-size:12px;background:var(--panel2);border:1px solid var(--line);
+    border-radius:8px;padding:12px 14px;overflow-x:auto;color:var(--dim)}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 14px 10px;margin:16px 0}
+  .fig svg{display:block;width:100%;max-width:920px;margin:0 auto}
+  .fig .cap{font-family:var(--mono);font-size:11px;color:var(--dim);text-align:center;margin:10px 0 0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.9rem;background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim);
+    background:var(--panel2);font-weight:500}
+  tr:last-child td{border-bottom:0}
+  .foot{margin-top:48px;padding-top:16px;border-top:1px solid var(--line);
+    font-family:var(--mono);font-size:11px;color:var(--dim)}
+</style>
+</head>
+<body>
+<button class="theme-toggle" type="button" aria-label="Toggle theme">◐</button>
+<div class="wrap">
+
+  <p class="kicker">agents-cli · product acceptance · user stories</p>
+  <h1>User stories that stop <span class="accent">product regressions</span></h1>
+  <p class="sub">
+    Agents write the code. Humans orchestrate with HTML plans and tests — and still
+    ship product regressions. The hole is not “more technical design.” It is missing
+    <b>approved, test-mapped user outcomes</b> and a short <b>must-not-break</b> list.
+  </p>
+  <div class="meta">
+    <span class="chip">pairs with <b>product-acceptance.md</b></span>
+    <span class="chip">not OpenSpec marketing</span>
+    <span class="chip">date <b>2026-08-03</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#s01">01 Diagnosis</a>
+    <a href="#s02">02 Bad vs good</a>
+    <a href="#s03">03 Product cards</a>
+    <a href="#s04">04 Must-not-break pack</a>
+    <a href="#s05">05 Loop diagram</a>
+  </nav>
+
+  <h2 id="s01"><span class="n">01</span> Diagnosis — how we ship today</h2>
+  <p>
+    Real plans in this fleet (<code>plan-agents-monitors.html</code>,
+    <code>plan-agent-login-status.html</code>) look like: Why → Design/API → Files →
+    Verification of the <em>new</em> surface. That is excellent <b>implementation design</b>.
+    Product regressions are failures of <b>what must stay true for users</b>.
+  </p>
+  <div class="callout warn">
+    <b>You are not “speccing”</b> when an agent shows a plan or a mockup. You are
+    product-speccing when behavior is written as Given/When/Then, you accept it, and
+    a proof command (or test) can fail if it is wrong.
+  </div>
+  <table>
+    <thead><tr><th>Artifact</th><th>Answers</th><th>Stops regressions?</th></tr></thead>
+    <tbody>
+      <tr><td>HTML plan</td><td>How we build</td><td>Weak alone</td></tr>
+      <tr><td>Mock / prototype</td><td>How it might look</td><td>No until frozen</td></tr>
+      <tr><td>Unit tests on new code</td><td>New path works</td><td>Medium</td></tr>
+      <tr><td><b>Product card</b></td><td>Who needs what outcome</td><td><b>Strong if tested</b></td></tr>
+      <tr><td>specifications.md</td><td>MUST over time (core systems)</td><td>Strongest</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="s02"><span class="n">02</span> Bad vs good user stories</h2>
+  <div class="pair">
+    <div class="card bad">
+      <div class="label">Bad — common agent filler</div>
+      <h4>Better session visibility</h4>
+      <p>As a user I want better session visibility so I can be more productive.</p>
+      <ul>
+        <li>No role that does a real job</li>
+        <li>No command or UI surface</li>
+        <li>No observable Then</li>
+        <li>Agent invents UI</li>
+      </ul>
+    </div>
+    <div class="card good">
+      <div class="label">Good — product acceptance</div>
+      <h4>See host on live sessions</h4>
+      <p>As an <b>operator on a busy laptop</b>, I want <code>agents sessions --active</code>
+        to show <b>which host</b> each live agent is on, so I know where to attach without guessing.</p>
+      <ul>
+        <li>Role + concrete surface</li>
+        <li>Independent test: two hosts, one command</li>
+        <li>Scenarios can map to tests</li>
+        <li>Must-not-break JSON for Factory</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="s03"><span class="n">03</span> Three Product cards (copy these)</h2>
+
+  <div class="card prod" style="margin:14px 0">
+    <div class="label">Card A · sessions</div>
+    <h4>P1 — See where live agents run</h4>
+    <p>As an operator on a busy laptop, I want <code>agents sessions --active</code> to show which
+      host each live agent is on, so I know where to attach without guessing.</p>
+    <p><b>Independent test:</b> one local + one remote live agent; one command shows distinct hosts.</p>
+    <ol>
+      <li><b>Given</b> Claude live on zion and Codex live on mac-mini
+        <b>When</b> I run <code>agents sessions --active</code>
+        <b>Then</b> each row shows the correct host (not blank / not swapped).</li>
+      <li><b>Given</b> no live agents
+        <b>When</b> I run <code>agents sessions --active</code>
+        <b>Then</b> exit 0 and empty state, not an error.</li>
+      <li><b>Given</b> the same live set
+        <b>When</b> I run <code>agents sessions --active --json</code>
+        <b>Then</b> each object includes a stable <code>host</code> field Factory Floor can parse.</li>
+    </ol>
+    <p><b>Must not break:</b> preview one-liner · empty vs error exit codes · JSON renames without COMPAT.</p>
+    <pre>agents sessions --active
+agents sessions --active --json</pre>
+  </div>
+
+  <div class="card prod" style="margin:14px 0">
+    <div class="label">Card B · run preflight</div>
+    <h4>P1 — Warn before burning a dead account</h4>
+    <p>As an operator, I want a clear “logged out” warning <b>before</b> a headless run waits on a 401,
+      so I do not waste minutes.</p>
+    <ol>
+      <li><b>Given</b> Claude not authenticated on this version home
+        <b>When</b> I <code>agents run claude "hi"</code>
+        <b>Then</b> I see a warn naming the agent and how to log in (policy stated: warn+continue or hard-stop).</li>
+      <li><b>Given</b> account healthy
+        <b>When</b> I run the same command
+        <b>Then</b> no false logged-out warning.</li>
+    </ol>
+    <p><b>Must not break:</b> <code>doctor</code>, <code>view</code>, and menubar use the <b>same</b> probe.</p>
+    <pre># unhealthy home → warn; healthy home → silent
+agents run claude "hi"</pre>
+  </div>
+
+  <div class="card prod" style="margin:14px 0">
+    <div class="label">Card C · teams</div>
+    <h4>P1 — Parallel tracks do not thrash main</h4>
+    <p>As an operator, I want each teammate in its own worktree with clear Owns, so parallel
+      implement does not corrupt a shared checkout.</p>
+    <ol>
+      <li><b>Given</b> a team with two edit-mode teammates and <code>--enable-worktrees</code>
+        <b>When</b> both start
+        <b>Then</b> each writes only under its worktree; main stays clean of teammate edits.</li>
+      <li><b>Given</b> teammate A Owns <code>src/auth/*</code>
+        <b>When</b> A is briefed
+        <b>Then</b> the brief forbids <code>src/ui/*</code>.</li>
+    </ol>
+    <p><b>Must not break:</b> single-agent <code>agents run</code> without teams; default branch untouched.</p>
+    <pre>git -C "$REPO" status --short   # main clean of teammate edits
+ls .agents/worktrees/           # teammate worktrees present</pre>
+  </div>
+
+  <h2 id="s04"><span class="n">04</span> Must-not-break pack (paste into every user-visible PR)</h2>
+  <div class="card" style="margin:14px 0">
+    <div class="label" style="color:var(--cyan)">Regression pack · example</div>
+    <p>After implementing the <em>new</em> path, still prove these (adapt per surface):</p>
+    <ul>
+      <li><code>--json</code> fields used by Factory / scripts still present</li>
+      <li>Exit codes: empty success vs real error still distinct</li>
+      <li>Defaults unchanged unless the Product card says so</li>
+      <li>Docs / CHANGELOG for user-visible flag or behavior</li>
+      <li>Quoted output of proof commands in the PR body (F3)</li>
+    </ul>
+  </div>
+
+  <h2 id="s05"><span class="n">05</span> The loop that closes the hole</h2>
+  <div class="fig">
+    <svg viewBox="0 0 900 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Plan to product acceptance to implement to F3">
+      <defs>
+        <style>
+          .b{fill:#161616;stroke:#2e2e2e;stroke-width:1.5}
+          .a{fill:#12180f;stroke:#a3e635;stroke-width:1.5}
+          .t{font-family:Inter,system-ui,sans-serif;fill:#e8e8e8;font-size:13px}
+          .s{font-family:JetBrains Mono,monospace;fill:#8a8a8a;font-size:10px}
+          .ar{stroke:#a3e635;stroke-width:1.5;fill:none}
+        </style>
+      </defs>
+      <rect x="30" y="60" width="160" height="70" rx="10" class="b"/>
+      <text x="110" y="90" text-anchor="middle" class="t">HTML plan</text>
+      <text x="110" y="110" text-anchor="middle" class="s">how to build</text>
+
+      <path d="M195 95 H240" class="ar" marker-end="url(#m)"/>
+      <rect x="245" y="60" width="180" height="70" rx="10" class="a"/>
+      <text x="335" y="90" text-anchor="middle" class="t" fill="#a3e635">Product card</text>
+      <text x="335" y="110" text-anchor="middle" class="s">stories · GWT · must-not-break</text>
+
+      <path d="M430 95 H475" class="ar"/>
+      <rect x="480" y="60" width="160" height="70" rx="10" class="b"/>
+      <text x="560" y="90" text-anchor="middle" class="t">Implement</text>
+      <text x="560" y="110" text-anchor="middle" class="s">tests map to GWT</text>
+
+      <path d="M645 95 H690" class="ar"/>
+      <rect x="695" y="60" width="170" height="70" rx="10" class="a"/>
+      <text x="780" y="90" text-anchor="middle" class="t" fill="#a3e635">F3 proof</text>
+      <text x="780" y="110" text-anchor="middle" class="s">quote real output</text>
+
+      <defs>
+        <marker id="m" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+          <path d="M0 0 L7 4 L0 8 z" fill="#a3e635"/>
+        </marker>
+      </defs>
+      <text x="450" y="170" text-anchor="middle" class="s">Without the middle box, green CI still ships product regressions</text>
+    </svg>
+    <p class="cap">Figure — Product acceptance sits between plan and implement. F3 quotes proof commands from the card.</p>
+  </div>
+
+  <div class="callout">
+    <b>Feed the factory with outcomes, not vibes.</b> Short Product cards (1–3 stories,
+    3–7 scenarios, must-not-break, proof commands) are enough. Full OpenSpec/BMAD is optional;
+    this is the peer to your HTML plans.
+  </div>
+
+  <p class="foot">
+    agents-cli · product-acceptance.md · plan-render §Product acceptance · 2026-08-03
+  </p>
+</div>
+<script>
+(function(){
+  var r=document.documentElement, b=document.querySelector('.theme-toggle');
+  var light=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches;
+  r.setAttribute('data-theme', light?'light':'dark');
+  b.addEventListener('click', function(){
+    r.setAttribute('data-theme', r.getAttribute('data-theme')==='dark'?'light':'dark');
+  });
+})();
+</script>
+</body>
+</html>

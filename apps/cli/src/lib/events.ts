@@ -1009,9 +1009,11 @@ export function query(options: {
   caller?: string;
   command?: string;
   module?: string;
+  /** Only events carrying this bundle name in their payload (e.g. secrets events). */
+  bundle?: string;
   limit?: number;
 }): EventRecord[] {
-  const { startDate, endDate = new Date(), eventTypes, level, agent, sessionId, caller, command, module, limit } = options;
+  const { startDate, endDate = new Date(), eventTypes, level, agent, sessionId, caller, command, module, bundle, limit } = options;
   const results: EventRecord[] = [];
 
   if (!fs.existsSync(eventsDir())) return results;
@@ -1059,6 +1061,10 @@ export function query(options: {
         if (command && record.command !== command &&
             !(typeof record.command === 'string' && record.command.startsWith(command + ' '))) continue;
         if (module && record.module !== module) continue;
+        // Filter bundle in the SAME scan, before the limit cutoff — a post-filter
+        // on the already-capped result silently drops matching-bundle records that
+        // fell outside the newest-`limit` window (a data-loss bug for an audit query).
+        if (bundle && record.bundle !== bundle) continue;
 
         results.push(record);
 

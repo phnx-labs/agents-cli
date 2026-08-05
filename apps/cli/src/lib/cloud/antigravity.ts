@@ -29,7 +29,7 @@ import type {
   ProviderCapabilities,
 } from './types.js';
 import { resolveDispatchRepos, normalizeProviderStatus } from './types.js';
-import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../secrets/bundles.js';
+import { readAndResolveBundleEnv } from '../secrets/bundles.js';
 
 const INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 const DEFAULT_MODEL = 'antigravity-preview-05-2026';
@@ -97,7 +97,13 @@ export class AntigravityCloudProvider implements CloudProvider {
   private resolveApiKey(): string {
     if (this.secretsBundle) {
       try {
-        const { env } = readAndResolveBundleEnv(this.secretsBundle, { caller: 'cloud:antigravity', agentOnly: isHeadlessSecretsContext() });
+        // Cloud dispatch resolves the key on its own (no human at a sheet), so the
+        // read is always `agentOnly` (SEC-13: never pop Touch ID on its own). A
+        // locked bundle THROWS the actionable "unlock <name>" message, which the
+        // catch below re-raises verbatim — dispatch genuinely needs the key, so it
+        // fails LOUD with the unlock hint rather than swallowing it into a wrong
+        // path. A `never`/no-ACL or broker-held bundle resolves silently.
+        const { env } = readAndResolveBundleEnv(this.secretsBundle, { caller: 'cloud:antigravity', agentOnly: true });
         for (const k of KEY_NAMES) {
           if (env[k]) return env[k];
         }

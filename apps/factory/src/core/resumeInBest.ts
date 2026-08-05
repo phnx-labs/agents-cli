@@ -3,9 +3,8 @@
 // inventory/status surfaces, and builds the launch + /continue input for the
 // resume flows. Lives in core/ so it can be unit-tested without VS Code.
 //
-// NOTE: version PICKING for rotations no longer lives here — the rotate path
-// delegates host/harness/account selection to `agents run auto` (see
-// core/autoRotate.ts, RUSH-2132).
+// NOTE: version PICKING for rotations no longer lives here — the resume paths
+// delegate host/harness/account selection to `agents run auto` (RUSH-2132).
 
 export interface AgentsViewJsonVersion {
   version: string;
@@ -69,6 +68,29 @@ export function buildAgentRunLaunchCommand(
 /** Single-quote a device name so it can never break out of the built command. */
 function shellQuoteHost(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * The full-auto resume launch (`Agents: Resume in Best Profile`): the CLI
+ * resolves host (affinity) → harness (cross-harness headroom) → account
+ * (balanced), and exits nonzero with a fail-loud `no healthy … resets <time>`
+ * error when every layer is exhausted. A terminal already on a device resumes
+ * ON that device (`--host`); a local terminal omits it and lets affinity pick.
+ * `--session-id` is honored only when the CLI picks claude (existing
+ * claude-only semantics) and ignored otherwise — passing it unconditionally
+ * keeps the local terminal's AGENT_SESSION_ID aligned with the session Claude
+ * actually creates.
+ */
+export function buildAutoRunLaunchCommand(opts: {
+  host?: string;
+  sessionId: string;
+}): string {
+  let cmd = 'agents run auto --interactive';
+  if (opts.host) {
+    cmd += ` --host ${shellQuoteHost(opts.host)}`;
+  }
+  cmd += ` --session-id ${opts.sessionId}`;
+  return cmd;
 }
 
 /**
