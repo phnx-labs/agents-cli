@@ -63,6 +63,29 @@ Adding a harness that is a real `agents run` agent needs no launch-code change; 
 inherits the contract. Tests pin it in `src/core/agents.test.ts`
 (`describe('launch contract — every runner is balanced')`).
 
+## Thin wrapper — no second scheduler (normative — the reviewer enforces this)
+
+**Factory is a consumer, never a scheduler.** Anything that can *act* on this
+machine or a fleet device — spawn, resume, kill, inject, dispatch, rotate, fire a
+routine — is scheduled and executed by the agents-cli daemon or a CLI command, per
+the root `AGENTS.md` invariant and the normative contract in
+[`apps/cli/docs/specifications.md` §Scheduling & execution singularity](../cli/docs/specifications.md#scheduling--execution-singularity).
+
+Rules for this package:
+
+- **No `setInterval` / watcher / loop that acts.** Polling for rendering (panel
+  refresh, presence heartbeat, read-side caches) is fine; a timer whose callback
+  spawns, injects, kills, or fires is a double-fire bug in waiting and does not
+  merge. The deleted watchdog rotate loop (2026-08-03 incident, PR #1914) is the
+  canonical violation.
+- **Controls call the CLI.** A Factory control that changes a fleet-affecting
+  capability flips CLI state (`agents watchdog enable|disable|rotate`,
+  `agents routines …`) via execFile argv — never a UI-local setting that gates only
+  the UI's view of the action.
+- **Actions on UI-owned surfaces go through endpoints the CLI drives.** The
+  `/inject` URI verb over `live-terminals.json` is the precedent: the extension
+  exposes the rail; the daemon decides when to use it.
+
 ## Testing the Factory Floor UI
 
 The Factory Floor feed + Dispatch panel are a React webview (`ui/settings`, top component `UnifiedAgentsPane.tsx`). To SEE and verify UI changes, do NOT install the packaged `.vsix` and drive VS Code via accessibility automation (`osascript` / `agents computer`) to open the dashboard — that steals your focus and is slow. Use the committed preview harness, which renders the real components with representative data in a plain browser page you can screenshot:

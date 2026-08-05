@@ -51,6 +51,7 @@ guarantee, the reference for the mechanism.
 - [Sessions](#sessions) — `agents sessions`: discovery, parsing, preview, metadata, lifecycle, export/import
 - [Secrets](#secrets) — `agents secrets`: storage & materialization boundaries, sharing, no-noise
 - [Agent execution](#agent-execution) — `agents run`: the one execution engine, env, isolation, fallback, dispatch
+- [Scheduling & execution singularity](#scheduling--execution-singularity) — one scheduler, one executor for anything fleet-affecting; UIs are thin wrappers
 - [Watchdog](#watchdog) — `agents watchdog`: detect idle agents, decide nudge/skip, deliver to the exact split
 
 ---
@@ -1854,6 +1855,106 @@ overwrites `<versionHome>/.claude/CLAUDE.md` before the agent spawns — the
 harness never launches against the stale `default`-preset file. A THIRD run
 with no further preset or subrule change instead skip-fasts (EXEC-45): the
 file's mtime is left untouched.
+
+---
+
+## Scheduling & execution singularity
+
+The normative contract for **who may schedule and execute work** across the repo:
+the CLI daemon and the commands it drives — never a UI surface. Requirement keywords
+**MUST / MUST NOT / SHOULD / MAY** are per RFC 2119; scenarios are Given/When/Then.
+
+### 1. Purpose & scope
+
+A fleet-affecting feature that runs on a timer or watcher in two places fires twice:
+two resume-tabs for one exhausted session, two executions of one cron job, two
+injected nudges racing the same agent. This section makes that class of bug
+unrepresentable. In scope: every capability that can **act** — launch, resume, kill,
+or rotate a session; fire a routine or monitor; inject into a terminal; dispatch to
+a host or the cloud. Out of scope: read-only polling that renders state for a human
+(panels refreshing, presence heartbeats), which MAY live anywhere provided it writes
+nothing but its own view cache.
+
+### 2. Terminology
+
+- **Fleet-affecting action** — any operation that mutates state on this machine or
+  another fleet device: spawning or killing processes/sessions, injecting keystrokes,
+  writing shared state (sessions.db, the device registry, agents.yaml), firing a
+  scheduled job, SSH dispatch.
+- **Scheduler** — whatever decides *when* to act: a cron routine, a daemon tick, a
+  `setInterval`, a file watcher, an event subscriber acting autonomously.
+- **Executor** — whatever performs the action once decided.
+- **Thin wrapper** — a UI surface whose only relationships to a fleet-affecting
+  capability are (a) rendering its state, and (b) invoking the CLI command that
+  controls it (`apps/factory/AGENTS.md`, the root `AGENTS.md` §Core concepts).
+
+### 3. Requirements
+
+- **SING-1 (MUST).** Every fleet-affecting capability MUST have exactly one scheduler
+  and one executor: the agents-cli daemon (`agents __daemon-run`,
+  `apps/cli/src/lib/daemon.ts`) or a CLI command the daemon or the user drives.
+  Status: **Current** for routines (`lib/scheduler.ts`), the watchdog
+  (`lib/watchdog/routine.ts`, WD-1), and rotate (`lib/watchdog/rotate.ts`).
+- **SING-2 (MUST NOT).** A UI surface (apps/factory, the menubar app, the iOS app)
+  MUST NOT own a timer, watcher, or loop that detects a condition and performs a
+  fleet-affecting action. Detection and decision MUST live in the CLI, which holds
+  the first-party state (sessions.db, usage snapshots, the device registry).
+  Canonical violation: the Factory watchdog rotate loop (2026-08-03) racing the
+  daemon's view of account health; canonical fix: PR #1914, which deleted it.
+- **SING-3 (MUST).** Where an action needs a UI-owned surface (typing into an editor
+  tab, opening a tab), the UI MUST expose a narrow endpoint the CLI drives — the
+  trigger MUST stay in the CLI. Precedent: the extension's `/inject` URI verb over
+  `live-terminals.json`, driven by `apps/cli/src/lib/terminal/inject.ts`; the
+  terminal engine's vscodium launch backend.
+- **SING-4 (MUST).** A control in any UI that turns a fleet-affecting capability on
+  or off MUST flip the CLI's own state (`agents watchdog enable|disable|rotate`,
+  `agents routines`), so every surface observes one truth. A UI-local toggle that
+  gates only the UI's view of an action MUST NOT exist.
+- **SING-5 (MUST).** Routines MUST fire only from the daemon's pid-claimed
+  `JobScheduler` (`lib/daemon.ts` — the pid-file claim exists precisely so a second
+  scheduler cannot double-fire). A UI MAY request an immediate run
+  (`agents routines run <name>` or equivalent) but MUST NOT hold its own cron,
+  countdown, or "run every N" for a routine.
+- **SING-6 (MUST).** A new fleet-affecting feature MUST be implemented in
+  `apps/cli` (daemon routine and/or command) first; the UI PR adds rendering and
+  control wiring only. If the feature seemingly requires UI-side execution, SING-3
+  applies — the UI grows an endpoint, the CLI keeps the trigger.
+- **SING-7 (SHOULD).** Multi-instance safety SHOULD be structural, not by
+  convention: pid-claimed singletons for daemon loops (the daemon's claim), leader
+  election with lease handoff for any remaining UI-side coordination protocol
+  (apps/factory `src/monitor/leader.ts` — presence fan-out only, not task
+  execution), and idempotent effects so a redelivery is a no-op.
+
+### 4. Given/When/Then scenarios
+
+- **GIVEN** a session hits its weekly account limit, **WHEN** the daemon watchdog
+  tick detects it, **THEN** the daemon alone decides and executes the rotate (or the
+  skip) — no UI surface fires a second rotate for the same session.
+- **GIVEN** two daemon processes are alive on one machine, **WHEN** a routine's cron
+  occurrence arrives, **THEN** the pid-file claim ensures exactly one scheduler
+  executes it; the second daemon never runs its own `JobScheduler`
+  (`lib/daemon.ts`).
+- **GIVEN** a user disables a fleet-affecting capability from the Factory palette,
+  **WHEN** the command completes, **THEN** the CLI's config is the state that
+  changed (`agents watchdog rotate off`), and the daemon, the menubar, and every
+  other surface observe the same off state.
+- **GIVEN** a limited session lives in a Factory editor tab, **WHEN** the daemon
+  rotates it, **THEN** the daemon drives the extension's `/inject` endpoint to act
+  in that tab — the extension performs no detection or decision of its own.
+- **GIVEN** a contributor adds a `setInterval` in apps/factory, **WHEN** the
+  callback performs anything beyond read-only rendering, **THEN** code review MUST
+  flag it under the root `AGENTS.md` §Code review conventions ("No second
+  scheduler") and the action MUST move to the CLI before merge.
+
+### 5. Known gaps
+
+- **SING-GAP-1.** The Factory monitor leader/follower protocol
+  (apps/factory `src/monitor/`) still coordinates presence fan-out inside the
+  extension with its own election. It performs no fleet-affecting action today
+  (post-#1914 it broadcasts read-side snapshots only), so it satisfies SING-2, but
+  it is a second coordination fabric where the daemon's presence tracking
+  (`lib/session/presence.ts`) would be the singular home. Informative; a future
+  consolidation SHOULD retire it in the daemon's favor.
 
 ---
 
