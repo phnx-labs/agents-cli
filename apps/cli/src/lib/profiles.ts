@@ -685,9 +685,12 @@ export function resolveProfileForRun(name: string, requestedModel?: string): Res
       if (tierPick.clampedFrom) {
         resolved.tierNote = `no "${requestedModel}" model configured on profile '${profile.name}'; using its "${tierPick.clampedFrom}" tier (${tierPick.model})`;
       }
-    } else {
-      resolved.tierNote = `no model configured for tier "${requestedModel}" on profile '${profile.name}'; using harness default`;
     }
+    // No `models:` opt-in at all, or no rung to clamp to: leave `env` and
+    // `requestedModel` untouched. `agents commands/exec.ts`'s own profile-tier
+    // guard (the "cost tiers don't apply to profile ..." discard) still sees
+    // the raw tier token downstream and handles the message -- this function
+    // doesn't compete with that canonical fallback for the no-opt-in case.
   }
   return resolved;
 }

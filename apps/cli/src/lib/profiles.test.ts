@@ -330,12 +330,15 @@ describe("resolveProfileForRun resolves cost tiers against the profile's OWN mod
       env: { ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5' },
     });
 
+    // No `models:` opt-in at all: this function leaves the tier token and env
+    // untouched. It does NOT write its own "no model configured" note --
+    // apps/cli/src/commands/exec.ts's profile-tier discard guard (merged
+    // separately, "cost tiers don't apply to profile ...") is the canonical
+    // message for this case, covered by its own test in exec.test.ts.
     const resolved = resolveProfileForRun('kimi', 'best');
     expect(resolved.env.ANTHROPIC_MODEL).toBe('moonshotai/kimi-k2.5');
     expect(resolved.resolvedModel).toBeUndefined();
-    expect(resolved.tierNote).toBe(
-      `no model configured for tier "best" on profile 'kimi'; using harness default`,
-    );
+    expect(resolved.tierNote).toBeUndefined();
   });
 
   it('degrades gracefully when models: is set but nothing at-or-below the requested tier is', () => {
@@ -344,14 +347,15 @@ describe("resolveProfileForRun resolves cost tiers against the profile's OWN mod
       host: { agent: 'claude' },
       env: { ANTHROPIC_MODEL: 'some/pinned-model' },
       // Only `best` is configured; requesting `cheap` has nothing cheaper to
-      // clamp to.
+      // clamp to -- same no-opt-in-for-this-tier outcome as having no
+      // `models:` block at all, deferring to exec.ts's discard guard.
       models: { best: 'deepseek/deepseek-r1' },
     });
 
     const resolved = resolveProfileForRun('partial', 'cheap');
     expect(resolved.env.ANTHROPIC_MODEL).toBe('some/pinned-model');
     expect(resolved.resolvedModel).toBeUndefined();
-    expect(resolved.tierNote).toContain('no model configured for tier "cheap"');
+    expect(resolved.tierNote).toBeUndefined();
   });
 
   it('regression: tier resolution is NOT affected by the HOST agent\'s own catalog (the collision this fix closes)', () => {

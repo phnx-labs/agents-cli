@@ -2000,12 +2000,16 @@ export function registerRunCommand(program: Command): void {
             process.stderr.write(chalk.gray(`[agents] ${resolved.tierNote}\n`));
           }
           // A tier token (cheap/default/best/ultra) already resolved against
-          // this PROFILE's own catalog above (or degraded gracefully, in
-          // which case resolvedModel stays undefined). Replace the raw
-          // --model value here so exec.ts's native tier block — which only
-          // knows the HOST agent's catalog — never sees the original tier
-          // token for a profile-based run.
-          if (resolved.resolvedModel !== undefined || resolved.tierNote !== undefined) {
+          // this PROFILE's own `models:` map above, when the profile opts in.
+          // Replace the raw --model value here so the tier never reaches the
+          // native, HOST-catalog tier block below. When the profile has no
+          // `models:` opt-in at all, resolvedModel stays undefined and
+          // options.model is left as the raw tier token on purpose — the
+          // "cost tiers don't apply to profile ..." discard guard further
+          // down this function is the canonical fallback for that case, and
+          // this block must not race it with a second, differently-worded
+          // message.
+          if (resolved.resolvedModel !== undefined) {
             options.model = resolved.resolvedModel;
           }
         } catch (err) {
