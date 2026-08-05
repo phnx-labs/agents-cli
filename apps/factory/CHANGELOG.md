@@ -4,7 +4,7 @@ All notable changes to the Factory extension are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
-## [Unreleased]
+## [0.9.311] - 2026-08-05
 
 - **Extension no longer orchestrates tmux.** The Factory VS Code extension previously
   wrapped agent terminals in a local tmux session so it could reattach after window
