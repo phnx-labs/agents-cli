@@ -2454,7 +2454,13 @@ Examples:
             caller: `command ${cmd}`,
             keys: keysSubset,
             allowExpired: execOpts.allowExpired,
-            agentOnly: true,
+            // An explicit `secrets exec` at a real terminal is a deliberate use of
+            // the values: an unlocked bundle runs silently, a locked one resolves
+            // with one Touch ID sheet, then the command runs with the secrets
+            // injected. Under an agent (AGENTS_RUNTIME) or headless (no TTY) it
+            // stays broker-only and points at the explicit unlock command instead
+            // of raising a sheet — so release/CI scripts never prompt.
+            agentOnly: isHeadlessSecretsContext() || !isInteractiveTerminal(),
           }).env;
         }
         const { spawn } = await import('child_process');
