@@ -182,6 +182,32 @@ describe('readMeta merges agents.yaml from both repos', () => {
     expect(agents.claude).toBe('2.0.0');
   });
 
+  it('preserves an unknown top-level key on write, but still deletes a cleared known key', () => {
+    // On disk: an unknown key (as if a newer CLI version wrote it) + a known
+    // central key.
+    fs.writeFileSync(
+      path.join(userDir, 'agents.yaml'),
+      'futureUnknownKey: keep-me\nprojectRoot: ~/old\n',
+    );
+
+    // Simulate a CLI whose Meta predates `futureUnknownKey`: its write path never
+    // surfaces that key, and it clears projectRoot. The old delete loop dropped
+    // BOTH (and synced the deletion fleet-wide); the fix must keep the unmodeled
+    // key and only delete the known one.
+    runStateScript(testDir, `
+      const { updateMeta } = await import(${JSON.stringify(modulePath)});
+      updateMeta((meta) => {
+        const { futureUnknownKey, projectRoot, ...rest } = meta;
+        return { ...rest, source: 'set-by-write' };
+      });
+    `);
+
+    const out = fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf8');
+    expect(out).toContain('futureUnknownKey: keep-me'); // unmodeled key survives
+    expect(out).not.toContain('projectRoot'); // cleared KNOWN central key removed
+    expect(out).toContain('source: set-by-write'); // the write that triggered it landed
+  });
+
   it('does not lose concurrent updateMeta callback writes', async () => {
     // Hold the meta lock through the callback longer than the old count-bounded
     // retry budget (~750ms). The loser of the race must wait this out and still

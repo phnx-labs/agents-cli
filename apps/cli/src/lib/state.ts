@@ -883,6 +883,58 @@ function writeIfChanged(filePath: string, content: string): void {
  * `agents:` / `versions:` are not written (no empty committed files).
  */
 /**
+ * Every `Meta` key, classified as `central` (synced via agents.yaml) or `device`
+ * (routed to the per-machine device file by {@link writeMetaUnlocked}). The
+ * `Record<keyof Meta, …>` type makes this EXHAUSTIVE: adding a field to `Meta`
+ * without classifying it here is a compile error. That guarantee is what lets
+ * `serializeCentral` delete only keys THIS version models — a key a newer CLI
+ * version added (absent from this map) is preserved verbatim instead of being
+ * dropped and synced fleet-wide as data loss. This is the fix for the recurring
+ * agents.yaml key-loss (beta flags, `notify.owner`, and `feed:` all vanished
+ * this way when an older-versioned CLI on the fleet rewrote the file).
+ */
+const META_KEY_SCOPE: Record<keyof Meta, 'central' | 'device'> = {
+  // Device-local — writeMetaUnlocked destructures these out; never in central.
+  agents: 'device',
+  isolatedAgents: 'device',
+  versions: 'device',
+  defaultBrowserProfile: 'device',
+  deviceConfig: 'device',
+  // Central — synced via agents.yaml.
+  run: 'central',
+  model: 'central',
+  watchdog: 'central',
+  lease: 'central',
+  secrets: 'central',
+  budget: 'central',
+  feed: 'central',
+  beta: 'central',
+  registries: 'central',
+  profiles: 'central',
+  source: 'central',
+  projectRoot: 'central',
+  extraRepos: 'central',
+  brands: 'central',
+  actors: 'central',
+  seededPresets: 'central',
+  hooks: 'central',
+  browser: 'central',
+  config: 'central',
+  hosts: 'central',
+  fleet: 'central',
+  share: 'central',
+  notify: 'central',
+  routines: 'central',
+};
+
+/** Central (synced) Meta keys — the only keys serializeCentral may delete. */
+const CENTRAL_META_KEYS: ReadonlySet<string> = new Set(
+  Object.entries(META_KEY_SCOPE)
+    .filter(([, scope]) => scope === 'central')
+    .map(([key]) => key),
+);
+
+/**
  * Serialize the central (synced) meta to `agents.yaml` WITHOUT destroying the
  * hand-written comments in the committed file.
  *
@@ -921,7 +973,11 @@ function serializeCentral(central: Record<string, unknown>): string {
     }
   }
   for (const k of Object.keys(current)) {
-    if (!(k in central)) {
+    // Only delete a key THIS version models as central. A key not in
+    // CENTRAL_META_KEYS (e.g. one a newer CLI version added) is preserved
+    // verbatim — deleting it here would drop it and sync the deletion
+    // fleet-wide (the agents.yaml config data-loss bug).
+    if (!(k in central) && CENTRAL_META_KEYS.has(k)) {
       doc.delete(k);
       changed = true;
     }
