@@ -1502,7 +1502,7 @@ export function parseResourceSections(
  * agents-cli extension's "resume current session in best available version"
  * command).
  */
-async function collectAgentsJson(filterAgentId?: AgentId, resourceSections?: Set<ResourceSection>): Promise<ViewJsonAgent[]> {
+export async function collectAgentsJson(filterAgentId?: AgentId, resourceSections?: Set<ResourceSection>): Promise<ViewJsonAgent[]> {
   const agentsToShow = filterAgentId ? [filterAgentId] : ALL_AGENT_IDS;
   const wantResources = !!resourceSections && resourceSections.size > 0;
   // Only pay for the git-status + resource scans when resources were requested.

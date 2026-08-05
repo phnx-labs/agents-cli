@@ -62,6 +62,7 @@ export const loadRestore: ModuleLoader = async () => (await import('../../comman
 export const loadDoctor: ModuleLoader = async () => (await import('../../commands/doctor.js')).registerDoctorCommand;
 export const loadApply: ModuleLoader = async () => (await import('../../commands/apply.js')).registerApplyCommand;
 export const loadStatus: ModuleLoader = async () => (await import('../../commands/status.js')).registerStatusCommand;
+export const loadSnapshot: ModuleLoader = async () => (await import('../../commands/snapshot.js')).registerSnapshotCommand;
 export const loadProfiles: ModuleLoader = async () => (await import('../../commands/profiles.js')).registerProfilesCommands;
 export const loadHarness: ModuleLoader = async () => (await import('../../commands/harness.js')).registerHarnessCommands;
 export const loadSecrets: ModuleLoader = async () => (await import('../../commands/secrets.js')).registerSecretsCommands;
@@ -174,6 +175,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   doctor: [loadDoctor],
   apply: [loadApply],
   status: [loadStatus],
+  snapshot: [loadSnapshot],
   profile: [loadProfiles],
   profiles: [loadProfiles],
   harness: [loadHarness],

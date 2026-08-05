@@ -392,8 +392,10 @@ The `query()` API reads the active JSONL and every numbered gzip archive
 transparently.
 
 External tools (dashboards, voice assistants, CI runners, monitoring) can read
-fleet state via three canonical `--json` sources. No direct DB access, no re-parsing
-of agent-specific formats, no auth to manage.
+fleet state via canonical `--json` sources. Prefer **`agents snapshot --json`** when
+you need inventory + active sessions in one process; keep `agents status --json` for
+sync drift only. No direct DB access, no re-parsing of agent-specific formats, no auth
+to manage.
 
 ## Fleet health & cross-device divergence (`agents doctor`)
 
@@ -408,6 +410,13 @@ Three diagnostics with distinct scopes (RUSH-2027):
   [`src/lib/fleet-status.ts`](../src/lib/fleet-status.ts)); the command unions
   peers' rows on demand, cache-first, ssh-reading a stale/missing peer via
   `agents fleet status --local --json` through a bounded, kill-on-timeout fan-out.
+
+- `agents snapshot` — **one-process consumer poll** for install inventory + active sessions
+  (optional feed / sync). Replaces the N× `view --json` + `sessions --active --json` fork
+  storm. Default sessions scope is this machine; `--all-hosts` matches full active fan-out.
+  JSON contract: `FleetSnapshot` version 1 (`inventory`, `sessions`, `agents`, optional
+  `feed` / `sync`). Does **not** replace `agents status` (UnifiedSyncStatus / drift).
+
   The daemon no longer force-probes every device every 3 minutes (the old N² ssh
   fan-out and orphaned-probe pile-up, RUSH-2114).
 - `agents inspect <agent>[@version]` — deep **single-harness** diff between one
