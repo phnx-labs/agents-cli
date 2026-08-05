@@ -29,7 +29,7 @@ src/types.ts         SessionState, AgentId, DetectionMethod, LookupInput
 src/state-file.ts    STATE_DIR (canonical path), stateFilePath(), writeStateAtomic(), parseState()
 src/writer.ts        recordSession() / clearSession()
 src/reader.ts        descendantPids(), findStateByPid/InTree/ByTerminalId/ByLaunchId, pruneStaleSessionState()
-src/install-hook.ts  installHookFor(agent) — writes the hook into per-agent native config (idempotent)
+src/install-hook.ts  installHookFor(agent) — declarative HOOK_SUPPORT table; writes the hook into per-agent native config (idempotent)
 src/adapters/        Ground-truth test helpers (claude snapshot/await-new-session)
 tests/scenarios/     cold-spawn (50×, ≥99%) + kill-restart (20×, stale-entry regression)
 ```

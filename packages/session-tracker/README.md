@@ -65,8 +65,18 @@ bun run install-hook claude codex cursor grok
 ```
 
 `install-hook.ts` writes into each harness's native config (Claude
-`settings.json`, Codex/Cursor `hooks.json`, Grok `hooks/session-start.json`) and is
-**idempotent** — prior registrations of this package's `hook.sh` are stripped first.
+`settings.json`, Codex/Cursor `hooks.json`, Grok `hooks/session-start.json`, Droid
+`.factory/settings.json`, Kimi `.kimi-code/config.toml`, Hermes `.hermes/config.yaml`
+`on_session_start`) and is **idempotent** — prior registrations of this package's
+`hook.sh` are stripped first.
+
+Support is a declarative capability table (`HOOK_SUPPORT` in `src/install-hook.ts`),
+not a hardcoded switch: every agent either has an installer or returns a **specific**
+reason it can't host the writer hook (gemini is deprecated; antigravity has no
+SessionStart event; opencode's SessionStart is a generated plugin, not a shell hook)
+— never an opaque "not yet implemented". `openclaw`/`rush` have no writable native
+SessionStart hook host, so they are out of scope for the writer; their headless rows
+still surface via the CLI's discovery comm-map.
 
 ## Build & test
 
