@@ -36,8 +36,10 @@
  *    evidence for old rows: on the machine this was developed against only 684 of 1,334
  *    such rows came from the version the symlink currently names, and 322 came from
  *    versions belonging to a *different* org.
- * 3. **Under the symlink with no usable recorded version.** Its current target is the
- *    only evidence there is, and the bucket says so via `evidence`.
+ * 3. **Under the symlink with no recorded version at all.** Its current target is the
+ *    only evidence there is, and the bucket says so via `evidence`. A version that IS
+ *    recorded but resolves to no home stops at tier 2 and stays dark — it never
+ *    reaches here.
  * 4. **None of the above.** An explicitly dark bucket, labelled with why. Never folded
  *    into a real account and never dropped.
  *
@@ -295,8 +297,9 @@ export function resolveClaudeAccount(
     return unattributed(`no home for version ${recordedVersion}`);
   }
 
-  // Tier 3 — under the live symlink with no usable recorded version. Its current
-  // target is the only evidence that exists.
+  // Tier 3 — under the live symlink with no recorded version at all. Its current
+  // target is the only evidence that exists. A recorded-but-unresolvable version
+  // returned dark from tier 2 above and never arrives here.
   if (filePath.startsWith(index.symlinkPrefix + path.sep) && index.symlinkBucket) {
     return index.symlinkBucket;
   }
