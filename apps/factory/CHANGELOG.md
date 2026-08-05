@@ -6,6 +6,19 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.312] - 2026-08-05
+
+- **`New X (Auto)` offloads to the fleet on a cold cache (was: silently local).**
+  `New Claude (Auto)` — and every `New <Agent> (Auto)` — resolved its launch host only
+  from the warm health-cache snapshot. On a cold or >5-min-stale miss, `launchAgent` bailed
+  straight to a local launch: the live favorites-aware `resolveBalancedHost` sweep was
+  guarded out by `!opts.autoHost`, and `local: true` also suppressed the CLI `--device
+  auto`, so the enable/prefer ranking never ran. Fix: on a cache miss, fall through to the
+  same live `resolveBalancedHost` sweep the default New-agent path uses (honors
+  enable/prefer, drops hosts with no usable version); it runs local only when no fleet
+  device is genuinely eligible. Source: `src/vscode/extension.ts` (`launchAgent`),
+  `src/core/launchHistory.test.ts` (regression), `AGENTS.md` launch contract.
+
 - **Status bar session id: CLI join by `AGENT_TERMINAL_ID`, no per-tab poll thrash (RUSH-2192).**
   Grok / Codex / other non-Claude tabs often showed a bare `Agents: Grok` (no id) or a
   Codex `rollout-<timestamp>-<uuid>` stem instead of the real UUID. Root causes: only
