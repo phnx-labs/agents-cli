@@ -27,6 +27,7 @@ import { walkForFilesWithStat } from '../fs-walk.js';
 import { getConfigSymlinkVersion } from '../shims.js';
 import { SESSION_AGENTS } from './types.js';
 import { deriveShortId } from './short-id.js';
+import { buildClaudeAccountIndex, resolveClaudeAccount, type ClaudeAccountIndex } from './claude-accounts.js';
 import { extractSessionTopic, extractSlashCommandName, extractSlashCommandFromToolInput } from './prompt.js';
 import { isSkillInvocation, extractSkills, extractSlashCommands } from './highlights.js';
 import { parseAntigravity, parseCursor } from './parse.js';
@@ -1184,45 +1185,20 @@ async function scanRoutineArchivesIncremental(
 // Claude account info
 // ---------------------------------------------------------------------------
 
-let cachedClaudeAccount: string | undefined;
+let cachedClaudeAccountIndex: ClaudeAccountIndex | undefined;
 
-/** Read the Claude OAuth account email from .claude.json across all version homes. */
-function getClaudeAccount(): string | undefined {
-  if (cachedClaudeAccount !== undefined) return cachedClaudeAccount || undefined;
-
-  // Claude's active config lives at $CLAUDE_CONFIG_DIR/.claude.json; for our shim
-  // that's <version>/home/.claude/.claude.json. The home-level .claude.json is a
-  // legacy path used when Claude runs without CLAUDE_CONFIG_DIR set.
-  const candidates = [
-    path.join(HOME, '.claude', '.claude.json'),
-    path.join(HOME, '.claude.json'),
-  ];
-
-  for (const root of VERSIONS_ROOTS) {
-    const versionsBase = path.join(root, 'versions', 'claude');
-    if (!fs.existsSync(versionsBase)) continue;
-    try {
-      for (const version of fs.readdirSync(versionsBase)) {
-        candidates.push(path.join(versionsBase, version, 'home', '.claude', '.claude.json'));
-        candidates.push(path.join(versionsBase, version, 'home', '.claude.json'));
-      }
-    } catch { /* versions dir unreadable */ }
-  }
-
-  for (const candidate of candidates) {
-    try {
-      if (!fs.existsSync(candidate)) continue;
-      const data = JSON.parse(fs.readFileSync(candidate, 'utf-8'));
-      const name = data.oauthAccount?.emailAddress || data.oauthAccount?.displayName;
-      if (name) {
-        cachedClaudeAccount = name;
-        return name;
-      }
-    } catch { /* auth file unreadable or malformed */ }
-  }
-
-  cachedClaudeAccount = '';
-  return undefined;
+/**
+ * The account-attribution index, built at most once per scan pass.
+ *
+ * Rebuilt when `refresh` is set — `scanClaudeIncremental` does that at the start of
+ * each pass so a long-lived process (the daemon) picks up an `agents use` switch or a
+ * fresh login instead of attributing later sessions to a stale set of homes. Per-file
+ * resolution then reads the cached index, because rebuilding it per transcript would
+ * re-read every home's `.claude.json` thousands of times.
+ */
+function claudeAccountIndex(refresh = false): ClaudeAccountIndex {
+  if (refresh || !cachedClaudeAccountIndex) cachedClaudeAccountIndex = buildClaudeAccountIndex();
+  return cachedClaudeAccountIndex;
 }
 
 // ---------------------------------------------------------------------------
@@ -1268,7 +1244,8 @@ export function buildClaudeLabelMap(): Map<string, string | null> {
 
 /** Incrementally re-scan changed Claude session files and upsert into the DB. */
 async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
-  const account = getClaudeAccount();
+  // Rebuild once per pass; readClaudeMeta resolves each transcript against it.
+  claudeAccountIndex(true);
   const labelMap = buildClaudeLabelMap();
 
   // Enumerate every leaf project dir across all Claude roots. The FIRST root
@@ -1338,7 +1315,7 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
         const sessionId = path.basename(filePath).replace('.jsonl', '');
         const label = labelMap.get(sessionId) ?? undefined;
         const priorRow = priorStates.get(filePath);
-        const result = await readClaudeMeta(filePath, sessionId, scan, priorRow, account, label);
+        const result = await readClaudeMeta(filePath, sessionId, scan, priorRow, label);
         if (result) {
           entries.push({
             meta: result.meta,
@@ -1380,7 +1357,6 @@ async function readClaudeMeta(
   sessionId: string,
   scanStamp: ScanStamp,
   priorRow: { parserState: string | null; fileMtimeMs: number } | undefined,
-  account?: string,
   label?: string,
 ): Promise<{
   meta: SessionMeta;
@@ -1401,6 +1377,10 @@ async function readClaudeMeta(
   if (mode === 'incremental') claudeIncrementalScanCount++;
   else claudeFullScanCount++;
   const isTeamOrigin = scan.entrypoint === 'sdk-cli';
+  // Which account produced this transcript. Resolved from the path plus the version
+  // recorded inside the file, so rows under the mutable ~/.claude symlink are
+  // attributed to the version that actually wrote them. See claude-accounts.ts.
+  const acct = resolveClaudeAccount(claudeAccountIndex(), filePath, scan.version);
 
   let meta: SessionMeta;
   if (scan.timestamp) {
@@ -1417,7 +1397,9 @@ async function readClaudeMeta(
       gitBranch: scan.gitBranch,
       version: scan.version,
       model: scan.model,
-      account,
+      account: acct.email ?? undefined,
+      accountKey: acct.key,
+      accountOrg: acct.orgName ?? undefined,
       topic: scan.topic,
       label,
       messageCount: scan.messageCount,
@@ -1448,7 +1430,9 @@ async function readClaudeMeta(
       timestamp: stat ? stat.mtime.toISOString() : new Date().toISOString(),
       lastActivity: scan.lastActivity,
       filePath,
-      account,
+      account: acct.email ?? undefined,
+      accountKey: acct.key,
+      accountOrg: acct.orgName ?? undefined,
       model: scan.model,
       label,
       messageCount: scan.messageCount,

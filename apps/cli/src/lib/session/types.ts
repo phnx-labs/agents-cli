@@ -169,7 +169,20 @@ export interface SessionMeta {
   model?: string;
   toolCallCount?: number;
   version?: string;
+  /**
+   * Email of the account that produced the session. Display-only: two orgs can share
+   * one email, so never group on this — group on `accountKey`.
+   */
   account?: string;
+  /**
+   * Org-scoped identity of the producing account (`claude:org=<uuid>`), or
+   * `unattributed:<reason>` when it cannot be established. The correct grouping key:
+   * a Team seat and a personal Max plan under one email are separate quota buckets.
+   * See lib/session/claude-accounts.ts for how a transcript is attributed.
+   */
+  accountKey?: string;
+  /** Organization display name of the producing account, when known. */
+  accountOrg?: string;
   /** Effective normalized launch mode captured by the SessionStart hook. */
   mode?: SessionRunMode;
   topic?: string;
