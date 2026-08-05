@@ -748,7 +748,7 @@ export function registerRunCommand(program: Command): void {
     .option('--headless', 'Force headless mode. Auto-enabled when a prompt is provided; pass explicitly to stay headless with no prompt (reads the prompt from stdin).', false)
     .option('--no-auth-check', 'Skip the pre-launch "looks logged out" warning on an interactive run (advisory; never blocks anyway). Also silenced by AGENTS_NO_AUTH_CHECK=1.')
     .option('-i, --interactive', 'Force interactive mode even when a prompt is provided. Mutually exclusive with --headless.')
-    .option('--resume [id]', 'Resume a previous conversation. Accepts a full or partial session id (prefix-matched against the index); omit the id to pick from recent sessions interactively. Resumes under the version that started the session. claude/codex resume natively; other agents replay via a /continue first message. Pair with a prompt to continue headlessly.')
+    .option('--resume [id]', 'Resume a previous conversation. Full IDs resolve locally first, then fleet-wide. Claude, Codex, Grok, Kimi, Droid, and Cursor use version-gated native resume; other agents replay via /continue. Pair with a prompt to continue headlessly.')
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.')
     .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --host runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
@@ -951,7 +951,7 @@ export function registerRunCommand(program: Command): void {
 
       Fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.
 
-      Resume: --resume <id> continues a prior conversation (full or partial id; omit to pick interactively). claude/codex resume natively; others replay via a /continue first message. Add a prompt to continue headlessly.
+      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and restores the source version/device/mode. Claude, Codex, Grok, Kimi, Droid, and Cursor use version-gated native resume; others replay via /continue. agents resume <id> infers the harness too.
 
       Passthrough: everything after -- is forwarded verbatim to the underlying agent CLI.
         agents run kimi -- --plan --some-native-flag value
@@ -1074,7 +1074,99 @@ export function registerRunCommand(program: Command): void {
         ));
         process.exit(1);
       }
-      const autoHarnessRequested = normalizedAgentSpec === RUN_AUTO_KEYWORD;
+      let autoHarnessRequested = normalizedAgentSpec === RUN_AUTO_KEYWORD;
+      let resolvedResumeSource: import('../lib/session/types.js').SessionMeta | undefined;
+
+      // Concrete resume ids resolve BEFORE placement. Full UUIDs take the local
+      // SQLite fast path; only a local miss fans out to the fleet. This lets a
+      // command entered on zion discover that the owning version-home is on a
+      // worker, while a command entered on that worker never pays for SSH.
+      if (typeof options.resume === 'string' && options.resume.trim()) {
+        const selector = options.resume.trim();
+        const injectedSource = (() => {
+          try {
+            const parsed = JSON.parse(process.env.AGENTS_RESUME_SOURCE_JSON ?? 'null');
+            return parsed?.id === selector ? parsed as import('../lib/session/types.js').SessionMeta : undefined;
+          } catch {
+            return undefined;
+          }
+        })();
+        delete process.env.AGENTS_RESUME_SOURCE_JSON;
+        const outcome = injectedSource
+          ? { kind: 'resolved' as const, session: injectedSource }
+          : await (await import('./sessions.js')).resolveSessionMetadataValue(selector);
+        if (outcome.kind === 'partial') {
+          console.error(chalk.red(`Could not resolve session while these devices were unavailable: ${outcome.failedPeers.join(', ')}`));
+          process.exit(2);
+        }
+        if (outcome.kind === 'not-found') {
+          console.error(chalk.red(`No session matching "${selector}".`));
+          process.exit(1);
+        }
+        if (outcome.kind === 'ambiguous') {
+          console.error(chalk.red(`"${selector}" matches ${outcome.candidates.length} sessions. Pass the full session id.`));
+          process.exit(1);
+        }
+        resolvedResumeSource = outcome.session;
+
+        const [requestedAgent, requestedVersion] = normalizedAgentSpec.split('@');
+        if (!autoHarnessRequested && requestedAgent !== resolvedResumeSource.agent) {
+          console.error(chalk.red(
+            `Session ${resolvedResumeSource.shortId} belongs to ${resolvedResumeSource.agent}, not ${requestedAgent}. ` +
+            `Use: agents resume ${resolvedResumeSource.id}`,
+          ));
+          process.exit(1);
+        }
+        if (!autoHarnessRequested && requestedVersion && requestedVersion !== resolvedResumeSource.version) {
+          console.error(chalk.red(
+            `Session ${resolvedResumeSource.shortId} started with ${resolvedResumeSource.agent}@${resolvedResumeSource.version ?? 'unknown'}, ` +
+            `not @${requestedVersion}.`,
+          ));
+          process.exit(1);
+        }
+
+        // Omitted --mode inherits the effective source mode. Commander keeps
+        // the normal new-run default as a real value, so consult its provenance
+        // rather than mistaking the default for an explicit override.
+        if (command.getOptionValueSource('mode') === 'default') {
+          if (resolvedResumeSource.mode) options.mode = resolvedResumeSource.mode;
+          else if (!options.quiet) process.stderr.write(chalk.yellow(
+            `[agents] session ${resolvedResumeSource.shortId} predates stored launch modes; using --mode ${options.mode}\n`,
+          ));
+        }
+
+        const { machineId } = await import('../lib/machine-id.js');
+        const sourceMachine = resolvedResumeSource.machine;
+        const explicitPlacement = hostTargetGiven(options).length > 0;
+        if (sourceMachine && sourceMachine !== machineId() && !explicitPlacement) {
+          options.host = sourceMachine;
+        } else if (!autoHarnessRequested && sourceMachine && sourceMachine !== machineId() && explicitPlacement && !hostTargetGiven(options).includes(sourceMachine)) {
+          console.error(chalk.red(
+            `Strict resume must run on ${sourceMachine}, where session ${resolvedResumeSource.shortId} is owned. ` +
+            `Use agents run auto --resume ${resolvedResumeSource.id} to hand off elsewhere.`,
+          ));
+          process.exit(1);
+        }
+
+        // On the owning machine, `auto` first asks the existing account router
+        // whether the exact source version is healthy. If it is, native resume
+        // wins. If not, keep `auto` so the normal harness/account router selects
+        // a healthy local target and the later resume block performs /continue.
+        if (autoHarnessRequested && (!sourceMachine || sourceMachine === machineId())) {
+          const sourceAgent = resolvedResumeSource.agent as AgentId;
+          if (sourceAgent in AGENTS && resolvedResumeSource.version) {
+            const { resolveRunVersion } = await import('../lib/rotate.js');
+            const health = await resolveRunVersion(sourceAgent, 'available', resolvedResumeSource.cwd ?? process.cwd());
+            if (!health.exhausted && health.version === resolvedResumeSource.version) {
+              normalizedAgentSpec = `${sourceAgent}@${resolvedResumeSource.version}`;
+              autoHarnessRequested = false;
+              if (!options.quiet) process.stderr.write(chalk.gray(
+                `[agents] auto resume → native ${normalizedAgentSpec} on ${sourceMachine ?? machineId()}\n`,
+              ));
+            }
+          }
+        }
+      }
       if (autoHarnessRequested) {
         // `auto` is reserved. If a future harness registers that id, the
         // keyword collides — fail loud rather than silently shadow the harness.
@@ -1094,7 +1186,7 @@ export function registerRunCommand(program: Command): void {
         // Host layer: with no explicit --host/--device, default to the
         // affinity pick. Skipped on a host-dispatched run — its dispatcher
         // already resolved this layer (see runAutoDefaultsToAffinity).
-        if (runAutoDefaultsToAffinity(options)) options.device = 'auto';
+        if (!resolvedResumeSource && runAutoDefaultsToAffinity(options)) options.device = 'auto';
       }
 
       // --device auto / --host auto (and deprecated --smart): affinity-pick host.
@@ -2374,7 +2466,7 @@ export function registerRunCommand(program: Command): void {
         // AgentId is wider than SessionAgentId (amp/kiro/goose/copilot keep no transcripts);
         // those simply yield no matches and fall through to the not-found error.
         const sessionAgent = agent as import('../lib/session/types.js').SessionAgentId;
-        await discoverSessions({ agent: sessionAgent, version });
+        if (!resolvedResumeSource) await discoverSessions({ agent: sessionAgent, version });
 
         // Resume is interactive unless a follow-on prompt makes it headless.
         const wantsInteractive = resolveInteractive({ interactive: options.interactive, headless: options.headless, prompt });
@@ -2382,9 +2474,9 @@ export function registerRunCommand(program: Command): void {
         let scopeCwd: string | undefined;
         try { scopeCwd = fs.realpathSync(cwd); } catch { scopeCwd = cwd; }
 
-        let session: import('../lib/session/types.js').SessionMeta | undefined;
+        let session: import('../lib/session/types.js').SessionMeta | undefined = resolvedResumeSource;
         if (idArg) {
-          let matches = findSessionsById(idArg, { agent: sessionAgent, version, cwd: scopeCwd });
+          let matches = session ? [session] : findSessionsById(idArg, { agent: sessionAgent, version, cwd: scopeCwd });
           if (matches.length === 0) {
             const wide = findSessionsById(idArg, { agent: sessionAgent, version });
             if (wide.length > 0) {
@@ -2428,10 +2520,12 @@ export function registerRunCommand(program: Command): void {
           forceInteractive = true; // bare resume always lands in the agent's TUI
         }
 
-        // Pin to the chosen session's own version (the isolated HOME the transcript
-        // lives in) and route by tier.
-        version = session.version;
-        if (nativeResume(agent)) {
+        // Native resume is valid only for the source harness + exact isolated
+        // version. `auto` may have selected another healthy harness/account; in
+        // that case keep the target version and hand off through /continue.
+        const canResumeNatively = session.agent === agent && nativeResume(agent, session.version);
+        if (canResumeNatively) {
+          version = session.version;
           resumeNative = true;
           resumeSessionId = session.id;
           // Native `--resume` (claude/codex) resolves the transcript relative to the

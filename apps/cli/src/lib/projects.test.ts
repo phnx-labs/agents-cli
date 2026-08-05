@@ -173,12 +173,17 @@ describe('write/load roundtrip', () => {
 });
 
 describe('listProjectDefs', () => {
-  it('lists valid defs sorted, skipping a malformed one', () => {
+  it('lists valid defs sorted', () => {
     writeProjectDef({ name: 'zeta' });
     writeProjectDef({ name: 'alpha' });
-    fs.writeFileSync(path.join(dir, 'broken.yaml'), '- a\n- b\n', 'utf8');
     const names = listProjectDefs().map((d) => d.name);
     expect(names).toEqual(['alpha', 'zeta']);
+  });
+
+  it('surfaces a malformed definition instead of returning a false empty state', () => {
+    writeProjectDef({ name: 'valid' });
+    fs.writeFileSync(path.join(dir, 'broken.yaml'), '- a\n- b\n', 'utf8');
+    expect(() => listProjectDefs()).toThrow(/mapping/);
   });
 
   it('ignores a .yml file so list and load agree on .yaml (no silent-drop)', () => {
@@ -202,6 +207,11 @@ describe('removeProjectDef', () => {
     expect(removeProjectDef('gone')).toBe(true);
     expect(loadProjectDef('gone')).toBeUndefined();
     expect(removeProjectDef('gone')).toBe(false);
+  });
+
+  it('surfaces filesystem failures instead of reporting a missing project', () => {
+    fs.mkdirSync(path.join(dir, 'blocked.yaml'));
+    expect(() => removeProjectDef('blocked')).toThrow();
   });
 });
 

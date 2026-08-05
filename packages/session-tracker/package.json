@@ -15,6 +15,9 @@
     "test:report": "tsx tests/run-report.ts",
     "install-hook": "tsx src/install-hook.ts"
   },
+  "dependencies": {
+    "smol-toml": "^1.4.2"
+  },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "tsx": "^4.19.0",

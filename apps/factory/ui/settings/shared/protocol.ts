@@ -25,8 +25,8 @@ export type FloorInbound =
   /**
    * Fleet host sessions. `force: true` runs one bare `agents sessions --active
    * --json`. Omit force (or false) to receive last-good immediately without a
-   * fleet CLI call once a snapshot exists. factory-floor-ui: manual refresh
-   * button should pass force:true; background polls must not.
+   * fleet CLI call once a snapshot exists. The manual freshness chip passes
+   * force:true; the panel-visible one-shot seed omits it.
    */
   | { type: 'fetchHostSessions'; force?: boolean }
   /** Local sessions only. `force` bypasses the 60s local-only backstop. */
@@ -78,7 +78,7 @@ export type FloorOutbound =
   | { type: 'dispatchData'; agents: unknown[]; hosts: unknown[]; targets: unknown[] }
   | { type: 'updateRunningCounts'; counts: unknown }
   // Managed projects (curated sidebar list + Projects pane).
-  | { type: 'managedProjectsData'; projects: ManagedProject[]; error?: string }
+  | { type: 'managedProjectsData'; projects?: ManagedProject[]; error?: string }
   | { type: 'linearProjectsData'; projects: LinearProjectLite[] }
   | { type: 'projectFolderPicked'; path: string; repoSlug?: string; name: string; suggestedLinear?: LinearProjectLite }
 

@@ -608,6 +608,7 @@ export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}
   // un-updated pinned helper this write fails loudly (the no-ACL command is
   // missing) rather than silently landing an ACL'd item.
   itemStore(prepared.backend).set(prepared.metadataItem, prepared.metadataJson, { noAcl: true });
+  if (prepared.backend === 'keychain') addBundleToMetaIndex(bundle.name);
   finishBundleWrite(bundle, opts);
 }
 
@@ -630,6 +631,7 @@ export function writeBundleWithItems(
       store.setBatch(new Map(items), { noAcl: bundle.policy === 'never' });
     }
     store.set(prepared.metadataItem, prepared.metadataJson, { noAcl: true });
+    addBundleToMetaIndex(bundle.name);
   } else {
     // file / vault: no ACL concept (noAcl is ignored), so one batched write is
     // both correct and cheaper — e.g. a single age re-encrypt for the vault.
@@ -642,8 +644,10 @@ export function writeBundleWithItems(
 
 export function deleteBundle(name: string): boolean {
   validateBundleName(name);
-  const deleted = itemStore(bundleBackend(name)).delete(bundleMetaItem(name));
+  const backend = bundleBackend(name);
+  const deleted = itemStore(backend).delete(bundleMetaItem(name));
   if (deleted) {
+    if (backend === 'keychain') removeBundleFromMetaIndex(name);
     emit('secrets.delete', { module: 'secrets', bundle: name });
     if (shouldEvictAfterBundleWrite(false, process.env.AGENTS_SECRETS_NO_AGENT, isKeychainBackendOverridden())) {
       agentEvictSync(name);
@@ -722,6 +726,103 @@ function markBundleMetadataAclHealed(): void {
   }
 }
 
+// ── No-ACL bundle-metadata name index (kills the enumeration Touch ID storm) ──
+// listBundles cannot ask the keychain for "just the metadata items": with hashed
+// service names (#316) the metadata names are opaque (`agents-cli.h.<ns>.m`), so
+// listKeychainItems(BUNDLE_META_PREFIX) falls back to a BROAD `agents-cli.` scan
+// that also MATCHES the ACL'd secret VALUE items. On some machines macOS
+// evaluates those value ACLs during that attributes-only scan and pops a generic
+// "Agents CLI needs to authenticate" sheet — on EVERY launch (session-title
+// generation, `agents devices list`, every agent run), because listBundles runs
+// on essentially every secrets touch. Neither UIFail nor LAContext can list the
+// no-ACL items while skipping the ACL'd ones (both return nothing), so the fix is
+// to NOT do the broad scan: keep a per-machine index of the metadata items'
+// STORAGE names in the regenerable helpers dir and read THAT (a silent file read)
+// instead. The index holds opaque hashes only — no cleartext bundle names, so it
+// leaks nothing #316 didn't already. It self-heals: absent/unbuilt → listBundles
+// rebuilds it from the one-time broad scan; a stale entry only makes `secrets
+// list` cosmetically incomplete and never affects a resolve-by-name (which
+// computes the hashed name directly, never through this index).
+function bundleMetaIndexPath(): string {
+  // Test-only override (mirrors AGENTS_DAEMON_DIR): redirect to a fork-private
+  // temp so unit tests never touch the real helpers dir. Never set in prod.
+  return (
+    process.env.AGENTS_SECRETS_META_INDEX_FILE ||
+    path.join(getHelpersDir(), 'secrets-agent', 'bundle-meta-index.json')
+  );
+}
+
+// Changes iff the service-name hashing key changes (the #316 re-key, or a
+// cleartext<->hashed transition). Stamped into the index so an index built under
+// an OLD key reads as absent and is rebuilt — otherwise a re-key would leave
+// stale hashed names that resolve to nothing and make every bundle "vanish".
+function metaIndexFingerprint(): string {
+  return keychainServiceAlias(`${BUNDLE_META_PREFIX}meta-index-fingerprint`);
+}
+
+function readBundleMetaIndex(): string[] | null {
+  // A test-installed in-memory keychain is NOT the real store this index mirrors;
+  // reading (and later writing) the real ~/.agents index from a mock-backend test
+  // would leak fixture bundle names into a developer's live cache. Same guard the
+  // sibling healKeychainBundleMetadataAclOnce uses — treat the index as absent so
+  // listBundles falls back to the (mock) scan.
+  if (isKeychainBackendOverridden()) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(bundleMetaIndexPath(), 'utf-8'));
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.services)) return null;
+    if (parsed.fp !== metaIndexFingerprint()) return null; // built under a different hashing key
+    return parsed.services.every((s: unknown) => typeof s === 'string') ? (parsed.services as string[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeBundleMetaIndex(services: string[]): void {
+  if (isKeychainBackendOverridden()) return; // never write the real index from a mock-backend test
+  try {
+    const file = bundleMetaIndexPath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const payload = { fp: metaIndexFingerprint(), services: [...new Set(services)].sort() };
+    // Atomic write (unique temp + rename) so a concurrent reader/writer never
+    // sees a half-written file. The read-modify-write in add/remove can still
+    // race two concurrent BUNDLE mutations and drop an entry, but that only makes
+    // a `secrets list` cosmetically incomplete (never a resolve-by-name) and
+    // self-heals on the next rebuild — an acceptable trade for rare bundle edits.
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(payload), 'utf8');
+    fs.renameSync(tmp, file);
+  } catch {
+    // Best effort — a missing index just means listBundles rebuilds it from the
+    // one-time broad scan on the next enumeration.
+  }
+}
+
+// Append a metadata item's STORAGE name to an ALREADY-BUILT index. No-op when the
+// index has not been built yet (null): never create a one-entry index that would
+// hide every OTHER bundle — listBundles builds the complete index on its first
+// scan, and this newly-written bundle is included in that scan.
+function addBundleToMetaIndex(name: string): void {
+  const cur = readBundleMetaIndex();
+  if (cur === null) return;
+  const svc = keychainServiceAlias(bundleMetaItem(name));
+  if (!cur.includes(svc)) writeBundleMetaIndex([...cur, svc]);
+}
+
+function removeBundleFromMetaIndex(name: string): void {
+  const cur = readBundleMetaIndex();
+  if (cur === null) return;
+  const svc = keychainServiceAlias(bundleMetaItem(name));
+  if (cur.includes(svc)) writeBundleMetaIndex(cur.filter((s) => s !== svc));
+}
+
+/** Test-only accessors for the metadata-name index. Never called in production. */
+export const __metaIndexForTest = {
+  read: readBundleMetaIndex,
+  write: writeBundleMetaIndex,
+  add: addBundleToMetaIndex,
+  remove: removeBundleFromMetaIndex,
+};
+
 /**
  * Re-write already-read keychain bundle metadata items WITHOUT the biometry ACL.
  * `metaJsonByName` maps bundle name → the exact metadata JSON listBundles just
@@ -780,10 +881,22 @@ export function listBundles(): SecretsBundle[] {
   // file store is the single source of truth, so the block below covers all.
   if (!keychainUsesFileFallback()) {
     let keychainServices: string[] = [];
-    try {
-      keychainServices = listKeychainItems(BUNDLE_META_PREFIX);
-    } catch {
-      keychainServices = [];
+    // Prefer the no-ACL metadata-name index (a silent file read) over the broad
+    // `agents-cli.` keychain scan — that scan also matches ACL'd secret VALUE
+    // items and pops Touch ID on every launch (see the index helpers above).
+    // Absent index (first list after upgrade / a cache wipe) → do the one broad
+    // scan and build the index from it, so that scan is the LAST one this machine
+    // performs.
+    const indexedServices = readBundleMetaIndex();
+    if (indexedServices !== null) {
+      keychainServices = indexedServices;
+    } else {
+      try {
+        keychainServices = listKeychainItems(BUNDLE_META_PREFIX);
+        writeBundleMetaIndex(keychainServices);
+      } catch {
+        keychainServices = [];
+      }
     }
     // With hashed service names (macOS, #316) the enumerated services are
     // opaque (`agents-cli.h.<ns>.m`) — the display name is recovered from the

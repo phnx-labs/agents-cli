@@ -42,27 +42,53 @@ interface AgentsDeviceEntry {
 // Floor background paths MUST use this registry read only — never
 // `agents doctor`, `agents devices status`, `agents fleet status`, or
 // `agents projects status` on a recurring/activation path.
+let registeredDevicesCache: Device[] | null = null;
+
+export const __deviceHealthTestCounters = {
+  registeredDeviceCliCalls: 0,
+  reset() {
+    this.registeredDeviceCliCalls = 0;
+  },
+};
+
+export function setRegisteredDevicesCache(devices: readonly Device[] | null): void {
+  registeredDevicesCache = devices ? devices.map((device) => ({ ...device })) : null;
+}
+
+export function getRegisteredDevicesCache(): Device[] | null {
+  return registeredDevicesCache?.map((device) => ({ ...device })) ?? null;
+}
+
+/** Strict registry read used by the one activation seed. */
+export async function fetchRegisteredDevices(): Promise<Device[]> {
+  __deviceHealthTestCounters.registeredDeviceCliCalls++;
+  const bin = await resolveAgentsBin();
+  // 20s, not 8s: on a loaded box the CLI's per-run startup alone can exceed
+  // 8s. The Floor never blocks rendering on this call; it starts with persisted
+  // data and refreshes the cache once in the background.
+  const { stdout } = await execFileAsync(bin, ['devices', 'list', '--json'], {
+    timeout: 20_000,
+    env: augmentedEnv(bin),
+  });
+  const parsed = JSON.parse(stdout) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error('agents devices list --json: expected a JSON array');
+  }
+  const devices = (parsed as AgentsDeviceEntry[]).map((d) => ({
+    name: d.name,
+    host: d.address?.dnsName || d.name,
+    platform: d.platform,
+    online: isDeviceOnline(d.tailscale),
+    registeredAt: d.createdAt ? Date.parse(d.createdAt) || 0 : 0,
+  }));
+  setRegisteredDevicesCache(devices);
+  return devices;
+}
+
+/** Existing non-Floor callers keep their empty-list error contract. */
 export async function listRegisteredDevices(): Promise<Device[]> {
   try {
-    const bin = await resolveAgentsBin();
-    // 20s, not 8s: on a loaded box the CLI's per-run startup alone can exceed
-    // 8s. The host picker's render path never waits on this (it renders from
-    // the persisted snapshot and refreshes in the background); cold-start
-    // callers like the browse-device switcher and balanced-launch still await
-    // it directly, so the timeout stays bounded rather than removed.
-    const { stdout } = await execFileAsync(bin, ['devices', 'list', '--json'], {
-      timeout: 20_000,
-      env: augmentedEnv(bin),
-    });
-    const parsed = JSON.parse(stdout) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return (parsed as AgentsDeviceEntry[]).map((d) => ({
-      name: d.name,
-      host: d.address?.dnsName || d.name,
-      platform: d.platform,
-      online: isDeviceOnline(d.tailscale),
-      registeredAt: d.createdAt ? Date.parse(d.createdAt) || 0 : 0,
-    }));
+    return await fetchRegisteredDevices();
   } catch {
     return [];
   }

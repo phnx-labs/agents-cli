@@ -34,11 +34,66 @@ function resolveContainedHookPath(hooksRoot: string, script: string): string | n
   return resolved;
 }
 
+/**
+ * Subdirectories under hooks/ that group event families (e.g. session-starts/).
+ * Scripts one level down are first-class hooks; their install name remains the
+ * file basename so version-home copies stay flat and doctor/diff keep matching.
+ */
+const HOOK_GROUP_SKIP_DIRS = new Set(['node_modules', '.git', '.cache']);
+
 export function resolveHookScriptPath(script: string): string | null {
   const extraDirs = getEnabledExtraRepos().map(e => e.dir);
   for (const root of [getUserAgentsDir(), ...extraDirs, getSystemAgentsDir()]) {
-    const resolved = resolveContainedHookPath(path.join(root, 'hooks'), script);
+    const hooksRoot = path.join(root, 'hooks');
+    const resolved = resolveContainedHookPath(hooksRoot, script);
     if (resolved) return resolved;
+    // Basename fallback: manifests may say `session-starts/foo.sh` or just
+    // `foo.sh` while the file lives under a one-level group dir.
+    const base = path.basename(script);
+    const nested = findHookScriptInGroupDirs(hooksRoot, base);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+/**
+ * Find `basename` under hooks/<group>/ (one level). Skips known non-group dirs.
+ * Returns the first match in sorted group order for stability.
+ */
+function findHookScriptInGroupDirs(hooksRoot: string, basename: string): string | null {
+  if (!fs.existsSync(hooksRoot)) return null;
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(hooksRoot).sort();
+  } catch {
+    return null;
+  }
+  for (const name of entries) {
+    if (name.startsWith('.') || HOOK_GROUP_SKIP_DIRS.has(name)) continue;
+    const groupDir = path.join(hooksRoot, name);
+    let st: fs.Stats;
+    try {
+      st = fs.lstatSync(groupDir);
+    } catch {
+      continue;
+    }
+    if (!st.isDirectory() || st.isSymbolicLink()) continue;
+    // Only treat dirs that themselves contain scripts as groups (session-starts/),
+    // not fixture-only directory bundles (tests/).
+    let hasScript = false;
+    try {
+      for (const child of fs.readdirSync(groupDir)) {
+        if (SCRIPT_EXTENSIONS.has(path.extname(child).toLowerCase())) {
+          const cp = path.join(groupDir, child);
+          if (fs.existsSync(cp) && fs.statSync(cp).isFile()) { hasScript = true; break; }
+        }
+      }
+    } catch {
+      continue;
+    }
+    if (!hasScript) continue;
+    const candidate = path.join(groupDir, basename);
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
   }
   return null;
 }
@@ -429,15 +484,18 @@ function removeHookFiles(dir: string, name: string): void {
 }
 
 /**
- * List hook entries in a single directory, grouping script + data files by
- * basename. Exported so doctor-diff can reuse the same grouping the sync path
- * applies; without this, doctor would double-count `foo.sh` and `foo.yaml`.
+ * Collect hook-adjacent files from a hooks root: top-level files plus files in
+ * one-level group subdirs (e.g. hooks/session-starts/*.sh). Group dirs exist
+ * only for layout; the install/list name stays the file basename so sync and
+ * doctor keep a flat version-home model.
  */
-export function listHookEntriesFromDir(dir: string): HookEntry[] {
-  if (!fs.existsSync(dir)) {
-    return [];
-  }
-
+function collectHookFilesFromRoot(dir: string): {
+  name: string;
+  base: string;
+  ext: string;
+  fullPath: string;
+  isExec: boolean;
+}[] {
   const files: {
     name: string;
     base: string;
@@ -446,30 +504,105 @@ export function listHookEntriesFromDir(dir: string): HookEntry[] {
     isExec: boolean;
   }[] = [];
 
-  for (const file of fs.readdirSync(dir)) {
-    const fullPath = path.join(dir, file);
-    const stat = fs.statSync(fullPath);
-    if (!stat.isFile()) continue;
-    const ext = path.extname(file);
-    const base = path.basename(file, ext);
+  const pushFile = (fullPath: string, fileName: string, mode: number) => {
+    const ext = path.extname(fileName);
+    const base = path.basename(fileName, ext);
     files.push({
-      name: file,
+      name: fileName,
       base,
       ext,
       fullPath,
-      isExec: isExecutable(stat.mode),
+      isExec: isExecutable(mode),
     });
+  };
+
+  let top: string[];
+  try {
+    top = fs.readdirSync(dir);
+  } catch {
+    return files;
   }
 
-  const grouped = new Map<string, typeof files>();
+  for (const file of top) {
+    if (file.startsWith('.')) continue;
+    const fullPath = path.join(dir, file);
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(fullPath);
+    } catch {
+      continue;
+    }
+    if (stat.isSymbolicLink()) continue;
+    if (stat.isFile()) {
+      pushFile(fullPath, file, stat.mode);
+      continue;
+    }
+    if (!stat.isDirectory() || HOOK_GROUP_SKIP_DIRS.has(file)) continue;
+    // One-level event-group layout: hooks/<group>/<script>. Only dirs that
+    // contain top-level scripts are groups; fixture-only dirs (tests/) are not.
+    let nested: string[];
+    try {
+      nested = fs.readdirSync(fullPath);
+    } catch {
+      continue;
+    }
+    const nestedFiles: { nestedName: string; nestedPath: string; mode: number }[] = [];
+    let hasScript = false;
+    for (const nestedName of nested) {
+      if (nestedName.startsWith('.')) continue;
+      const nestedPath = path.join(fullPath, nestedName);
+      let nstat: fs.Stats;
+      try {
+        nstat = fs.lstatSync(nestedPath);
+      } catch {
+        continue;
+      }
+      if (nstat.isSymbolicLink() || !nstat.isFile()) continue;
+      nestedFiles.push({ nestedName, nestedPath, mode: nstat.mode });
+      if (SCRIPT_EXTENSIONS.has(path.extname(nestedName).toLowerCase())) hasScript = true;
+    }
+    if (!hasScript) continue;
+    for (const n of nestedFiles) pushFile(n.nestedPath, n.nestedName, n.mode);
+  }
+  return files;
+}
+
+/**
+ * List hook entries in a single directory, grouping script + data files by
+ * basename. Also discovers scripts in one-level group subdirs
+ * (hooks/session-starts/). Exported so doctor-diff can reuse the same grouping
+ * the sync path applies; without this, doctor would double-count `foo.sh` and
+ * `foo.yaml`. On basename collision, the top-level file wins over a nested one.
+ */
+export function listHookEntriesFromDir(dir: string): HookEntry[] {
+  if (!fs.existsSync(dir)) {
+    return [];
+  }
+
+  const files = collectHookFilesFromRoot(dir);
+
+  // Prefer top-level over nested when basenames collide (stable install name).
+  const byBase = new Map<string, typeof files>();
   for (const file of files) {
-    const list = grouped.get(file.base) || [];
-    list.push(file);
-    grouped.set(file.base, list);
+    const list = byBase.get(file.base) || [];
+    // Top-level files sit directly under dir; nested have an extra path segment.
+    const isTop = path.dirname(file.fullPath) === path.resolve(dir);
+    if (isTop) list.unshift(file);
+    else list.push(file);
+    byBase.set(file.base, list);
   }
 
   const entries: HookEntry[] = [];
-  for (const [base, group] of grouped) {
+  for (const [base, groupAll] of byBase) {
+    // Keep only files that share the winning script's directory so a nested
+    // data sidecar next to a nested script still pairs, and a top-level
+    // winner is not paired with a nested yaml of the same basename.
+    const winnerScript =
+      groupAll.find((f) => SCRIPT_EXTENSIONS.has(f.ext.toLowerCase())) ||
+      groupAll.find((f) => f.isExec && !NON_SCRIPT_EXTENSIONS.has(f.ext.toLowerCase()));
+    if (!winnerScript) continue;
+    const groupDir = path.dirname(winnerScript.fullPath);
+    const group = groupAll.filter((f) => path.dirname(f.fullPath) === groupDir);
     group.sort((a, b) => a.name.localeCompare(b.name));
     // A group is a hook only if it has an actual script: a script extension,
     // OR an executable bit on a file whose extension is not a known data /
@@ -1457,7 +1590,11 @@ export function registerHooksToSettings(
       return resolveContainedHookPath(path.join(overrideRoots[0], 'hooks'), script);
     }
     if (localHooksDir) {
-      const local = resolveContainedHookPath(localHooksDir, script);
+      // Prefer the exact relative path, then a flat basename copy (sync flattens
+      // group-dir scripts into the version-home hooks/ root).
+      const local =
+        resolveContainedHookPath(localHooksDir, script) ||
+        resolveContainedHookPath(localHooksDir, path.basename(script));
       if (local) return local;
     }
     return resolveHookScriptPath(script);

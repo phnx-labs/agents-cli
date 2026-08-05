@@ -57,7 +57,7 @@ export class AgentsHtmlReaderProvider implements vscode.CustomTextEditorProvider
   private buildHtml(webview: vscode.Webview, document: vscode.TextDocument): string {
     const nonce = getNonce();
     const docDir = path.dirname(document.uri.fsPath);
-    const rewritten = rewriteRelativeResources(document.getText(), docDir, webview);
+    const rewritten = rewriteRelativeResources(document.getText(), docDir, webview, (fsPath) => vscode.Uri.file(fsPath));
     // Escape for embedding as a JS template string assigned to srcdoc.
     const escaped = rewritten
       .replace(/\\/g, '\\\\')
@@ -108,7 +108,8 @@ export class AgentsHtmlReaderProvider implements vscode.CustomTextEditorProvider
 export function rewriteRelativeResources(
   html: string,
   docDir: string,
-  webview: Pick<vscode.Webview, 'asWebviewUri'>
+  webview: Pick<vscode.Webview, 'asWebviewUri'>,
+  fileUri: (fsPath: string) => vscode.Uri = (fsPath) => vscode.Uri.file(fsPath)
 ): string {
   return html.replace(
     /\b(src|href)=(["'])(?!https?:|data:|blob:|#|mailto:|vscode-webview:|vscode-file:|file:)([^"']+)\2/gi,
@@ -117,7 +118,7 @@ export function rewriteRelativeResources(
       if (!rel || rel.startsWith('//')) return `${attr}=${quote}${rel}${quote}`;
       try {
         const abs = path.resolve(docDir, rel);
-        const uri = webview.asWebviewUri(vscode.Uri.file(abs));
+        const uri = webview.asWebviewUri(fileUri(abs));
         return `${attr}=${quote}${uri.toString()}${quote}`;
       } catch {
         return `${attr}=${quote}${rel}${quote}`;

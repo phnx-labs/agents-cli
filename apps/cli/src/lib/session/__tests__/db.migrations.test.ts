@@ -286,6 +286,28 @@ describe('tool ledger session identity migration (v29)', () => {
   });
 });
 
+describe('session launch mode migration (v32)', () => {
+  it('adds the mode column without losing existing sessions', () => {
+    upsertSession({
+      id: 'pre-mode-session',
+      shortId: 'pre-mode',
+      agent: 'codex',
+      timestamp: '2026-08-05T09:00:00.000Z',
+      filePath: '/tmp/pre-mode-session.jsonl',
+    } as SessionMeta, 'resume me');
+
+    const db = getDB();
+    db.exec(`ALTER TABLE sessions DROP COLUMN mode`);
+    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '31')`).run();
+    closeDB();
+
+    const reopened = getDB();
+    const columns = (reopened.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((column) => column.name);
+    expect(columns).toContain('mode');
+    expect(getSessionById('pre-mode-session')?.id).toBe('pre-mode-session');
+  });
+});
+
 describe('spawned_team round-trip', () => {
   it('persists the team a session spawned and reads it back', () => {
     // Before this column existed the value was derived at scan time, set on the

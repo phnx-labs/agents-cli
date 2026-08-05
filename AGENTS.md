@@ -323,4 +323,9 @@ the resource model and resolution semantics of the CLI.
 NOT silently deviate from — [`apps/cli/docs/specifications.md`](apps/cli/docs/specifications.md)
 (§[Sessions](apps/cli/docs/specifications.md#sessions) ·
 §[Secrets](apps/cli/docs/specifications.md#secrets) ·
-§[Agent execution](apps/cli/docs/specifications.md#agent-execution)).
+§[Agent execution](apps/cli/docs/specifications.md#agent-execution) ·
+§[Scheduling & execution singularity](apps/cli/docs/specifications.md#scheduling--execution-singularity) ·
+§[Watchdog](apps/cli/docs/specifications.md#watchdog)). Its
+[coverage inventory](apps/cli/docs/specifications.md#coverage-inventory) names every
+other command group as documented-elsewhere or unspecified — check it before assuming
+a surface has a contract.

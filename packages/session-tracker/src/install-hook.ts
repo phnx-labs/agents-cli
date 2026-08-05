@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import * as TOML from 'smol-toml';
 import type { AgentId } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -128,6 +129,49 @@ async function installGrok(opts: InstallOptions): Promise<InstallResult> {
   return { agent: 'grok', installed: true, configPath };
 }
 
+async function installDroid(opts: InstallOptions): Promise<InstallResult> {
+  const configPath = path.join(os.homedir(), '.factory', 'settings.json');
+  const command = hookCommand('droid', opts);
+  if (opts.dryRun) return { agent: 'droid', installed: false, configPath };
+  const cfg = await readJson(configPath);
+  cfg.hooks = cfg.hooks ?? {};
+  cfg.hooks.SessionStart = cfg.hooks.SessionStart ?? [];
+  for (const entry of cfg.hooks.SessionStart) {
+    if (!entry || !Array.isArray(entry.hooks)) continue;
+    entry.hooks = entry.hooks.filter(
+      (hook: any) => !(hook?.command && String(hook.command).includes('packages/session-tracker/src/hook.sh')),
+    );
+  }
+  let group = cfg.hooks.SessionStart.find((entry: any) => entry?.matcher === '');
+  if (!group) {
+    group = { matcher: '', hooks: [] };
+    cfg.hooks.SessionStart.push(group);
+  }
+  group.hooks.push({ type: 'command', command, timeout: 5 });
+  await writeJsonAtomic(configPath, cfg);
+  return { agent: 'droid', installed: true, configPath };
+}
+
+async function installKimi(opts: InstallOptions): Promise<InstallResult> {
+  const configPath = path.join(os.homedir(), '.kimi-code', 'config.toml');
+  const command = hookCommand('kimi', opts);
+  if (opts.dryRun) return { agent: 'kimi', installed: false, configPath };
+  let cfg: Record<string, unknown> = {};
+  try {
+    cfg = TOML.parse(await fs.promises.readFile(configPath, 'utf8')) as Record<string, unknown>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  const hooks = (Array.isArray(cfg.hooks) ? cfg.hooks : []) as Array<Record<string, unknown>>;
+  cfg.hooks = [
+    ...hooks.filter((hook) => !(typeof hook.command === 'string' && hook.command.includes('packages/session-tracker/src/hook.sh'))),
+    { event: 'SessionStart', command, timeout: 5 },
+  ];
+  await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.promises.writeFile(configPath, TOML.stringify(cfg as Parameters<typeof TOML.stringify>[0]), 'utf8');
+  return { agent: 'kimi', installed: true, configPath };
+}
+
 export async function installHookFor(
   agent: AgentId,
   opts: InstallOptions = {},
@@ -142,6 +186,10 @@ export async function installHookFor(
         return await installCursor(opts);
       case 'grok':
         return await installGrok(opts);
+      case 'droid':
+        return await installDroid(opts);
+      case 'kimi':
+        return await installKimi(opts);
       default:
         return {
           agent,

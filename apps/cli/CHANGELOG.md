@@ -6,6 +6,19 @@
 
 - **`agents routines list` now groups by project by default.** The human terminal view buckets routines under their associated project name, **All projects** (`projects: ["*"]`), **Cross-project** (multiple project entries), **Operations** (no `projects:` field), or **Unknown projects** (project names not found in `agents projects`). Pass `--group-by device` to restore the previous device-placement grouping. The `--json` payload gains `projects` (array) and `projectGroup` (string) fields. Source: `apps/cli/src/commands/routines.ts` (`groupRoutineJobsByProject`).
 
+## 1.22.15
+
+- **Separate routine definitions from device activation (#2023).** Enable a routine by listing its name in `~/.agents/devices/<hostname>/agents.yaml`; built-in Watchdog setup and `watchdog on|off` now update that host-owned manifest without rewriting the routine definition. Source: `apps/cli/src/lib/routine-activation.ts`, `apps/cli/src/commands/setup-watchdog.ts`.
+
+- **`agents devices list` no longer shows the "Leased boxes" section by default — it moves behind a new `--all` flag (RUSH-2190).** Loading the section routes through crabbox's bundle auto-detect, which scans the keychain and can raise a macOS Touch ID sheet *after* the device table has printed, hanging non-interactive callers (observed: the `.agents-system` SessionStart topology hook). The default list now renders only registered devices, which are reachable without any secrets; the load/mem/headroom columns are unchanged (the stats probe was already broker-only). `agents devices list --all` restores the section; `--no-stats` remains a hard "instant, no provider calls" opt-out even with `--all`. Source: `apps/cli/src/commands/ssh.ts` (`showLeasedBoxesSection`), `apps/cli/src/commands/ssh.test.ts`.
+
+- **Install: `plugin:` prefix on the unified path (Phase 5 packaging).**
+  `agents install plugin:<spec>` uses the same grammar and trust gate as
+  `agents plugins install` (`name@url`, local path, `--allow-exec-surfaces`).
+  Specialized verbs still work; `agents install` is the one add path for mcp,
+  skill, plugin, and GitHub sources. Source: `apps/cli/src/commands/packages.ts`,
+  `apps/cli/src/lib/registry.ts`.
+
 ## 1.22.14
 
 - **`agents secrets view <bundle> --reveal` now resolves a locked keychain bundle

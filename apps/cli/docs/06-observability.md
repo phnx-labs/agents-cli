@@ -502,17 +502,18 @@ agents doctor · zion                                        1.20.81
 
 **Severity rubric** (agent-agnostic):
 
-- **CRITICAL** (`✗`) — a **provable** logged-out version, a **missing hook or
-  plugin** from a version, a never-synced version whose declared resources are
-  therefore absent, a missing/broken CLI binary, one hook installed into several
-  version homes with **differing** content (a stale copy can gate differently from
-  the active one).
-- **WARNING** (`⚠`) — content drift, version-skew, repo-behind, repo-drift,
-  orphans, byte-identical duplicate copies of a hook across version homes,
-  a declared host CLI that is not installed, a resource another box has but this
-  one does not, a missing command/skill/rule/mcp/permission/subagent, a credential-shaped
-  export in a shell rc file, a Windows execution policy that blocks `agents.ps1`,
-  and an **unprovable** logout (hedged "could not verify sign-in").
+- **CRITICAL** (`✗`) — `logged-out` (provable), `missing-hook`,
+  `missing-plugin`, `unwired-hook`, `cli-missing`. These block the harness now.
+- **WARNING** (`⚠`) — `logout-unprovable`, `missing-resource`, `content-drift`,
+  `never-synced`, `stale`, `repo-behind`, `repo-drift`, `version-skew`,
+  `fleet-resource-gap`, `orphan`, `duplicate-hook`, `duplicate-hook-drift`,
+  `host-cli-missing`, `host-cli-invalid`, `rc-secret-export`, `exec-policy`,
+  `stale-cli`. Each is resolvable by a routine sync or cleanup.
+
+RUSH-2162 moved `never-synced` and `duplicate-hook-drift` from critical to
+warning: both are stale-sync states one `agents sync` resolves, not "needs you
+now". `FINDING_SEVERITY` in `src/lib/devices/doctor-findings.ts` is the source of
+truth for this list, and a test asserts this rubric agrees with it.
 
 **One root cause is one line.** The readout is de-duplicated before it is
 rendered, so a real machine shows ~16 rows rather than ~57:
@@ -524,7 +525,7 @@ rendered, so a real machine shows ~16 rows rather than ~57:
 | One orphan row per version | one `orphans` line per machine — `agents prune cleanup --all` clears them all |
 | One row per hook duplicated across version homes | one row per (agent, severity) — `agents sync <agent>@all --yes` reconciles them all |
 | `sources changed since last sync` on a version that already listed its drift | nothing — the specific row already said it |
-| One critical per absent resource on a never-synced version | one critical → `agents sync <agent>@<version> --yes` |
+| One row per absent resource on a never-synced version | one warning → `agents sync <agent>@<version> --yes` |
 
 An **isolated** version never folds into a collapsed row: the agent-wide `--fix`
 sweep deliberately skips isolated copies, so it keeps its own

@@ -305,6 +305,15 @@ describe('buildVersionedResumeCommand', () => {
     );
   });
 
+  test('resume launches with the original session id and zero tmux wrapper', () => {
+    const sessionId = '7b1cf038-8761-4e46-af43-5336e7e5a776';
+    const cmd = buildVersionedResumeCommand('claude', sessionId);
+    expect(cmd).toBe(`agents run claude --interactive --resume ${sessionId}`);
+    expect(cmd).not.toContain('tmux');
+    expect(cmd).not.toContain('agents tmux');
+    expect(cmd).not.toContain('\n');
+  });
+
   test('persisted remote session restores with `--host` present', () => {
     // This is the restore path that failed: a remote session was resumed as
     // `claude@2.1.187 -r <id>` because its host did not survive the window

@@ -1,15 +1,13 @@
 import React from 'react'
 import { Icon } from './icons'
-import type { FloorSort, FloorGroupBy, TicketGroupBy, TicketSort, TicketSource, CenterMode } from './floorModel'
+import type { FloorSort, TicketGroupBy, TicketSort, TicketSource, CenterMode } from './floorModel'
 
 // The Floor's ONE contextual controls bar. It renders a different pill set per active
-// center (mode): 'agents' -> Group/Sort/⚑needs (the clean pill bar); 'backlog' ->
-// Group/Sort + LN/GH source chips. The projects/host centers get NO bar — the parent
-// gates rendering on floorControlsMode(center) so those tabs stay chrome-free. Dispatch
-// now lives on the sub-tab strip (FloorSubtabs), not here. Prototype: fbar.
-//
-// Before this, both the agents bar AND the Backlog's own .bktoolbar rendered Group/Sort,
-// so switching to Backlog showed two duplicate control rows. Now there is exactly one.
+// center (mode): 'agents' -> Sort/⚑needs (Group/Subgroup live only on the feed header
+// SavedViews bar — never duplicated here); 'backlog' -> Group/Sort + LN/GH source chips.
+// The projects/host centers get NO bar — the parent gates rendering on
+// floorControlsMode(center) so those tabs stay chrome-free. Dispatch lives on the
+// sub-tab strip (FloorSubtabs), not here. Prototype: fbar.
 
 export type StatusChip = 'needs' | 'running' | 'idle' | 'failed'
 
@@ -25,17 +23,6 @@ const SORT_OPTS: { value: FloorSort; label: string }[] = [
   { value: 'recent', label: 'Recent activity' },
   { value: 'tok', label: 'tok/s' },
   { value: 'name', label: 'Name' },
-]
-
-// Group the live feed by an axis; 'none' keeps the default phase sections.
-// `outcome` (ticket/PR/worktree) is the fleet-scale default (RUSH-1479).
-const GROUP_OPTS: { value: FloorGroupBy | 'none'; label: string }[] = [
-  { value: 'outcome', label: 'Outcome' },
-  { value: 'none', label: 'None' },
-  { value: 'project', label: 'Project' },
-  { value: 'host', label: 'Host' },
-  { value: 'status', label: 'Status' },
-  { value: 'agent', label: 'Agent' },
 ]
 
 const TICKET_GROUP_OPTS: { value: TicketGroupBy; label: string }[] = [
@@ -63,14 +50,9 @@ interface FloorControlsProps {
   plain: boolean
   onTogglePlain: () => void
 
-  // --- agents-mode controls ---
+  // --- agents-mode controls (Sort only — Group/Subgroup live on SavedViews) ---
   sort: FloorSort
   onSort: (s: FloorSort) => void
-  /** How the live feed is grouped ('none' = default phase sections). */
-  group: FloorGroupBy | 'none'
-  onGroup: (g: FloorGroupBy | 'none') => void
-  subgroup: FloorGroupBy | 'none'
-  onSubgroup: (g: FloorGroupBy | 'none') => void
 
   // --- backlog-mode controls ---
   ticketGroup: TicketGroupBy
@@ -87,13 +69,9 @@ export function FloorControls({
   mode,
   needsCount = 0,
   sidebarOpen, onToggleSidebar, rightOpen, onToggleRight, plain, onTogglePlain,
-  sort, onSort, group, onGroup, subgroup, onSubgroup,
+  sort, onSort,
   ticketGroup, onTicketGroup, ticketSubgroup, onTicketSubgroup, ticketSort, onTicketSort, srcFilter, onToggleSrc,
 }: FloorControlsProps) {
-  const groupLabel = (GROUP_OPTS.find((o) => o.value === group) ?? GROUP_OPTS[0]!).label
-  const subgroupValue = group === 'none' || subgroup === group ? 'none' : subgroup
-  const subgroupLabel = (GROUP_OPTS.find((o) => o.value === subgroupValue) ?? GROUP_OPTS[1]!).label
-  const subgroupOpts = GROUP_OPTS.filter((o) => o.value === 'none' || o.value !== group)
   const sortLabel = (SORT_OPTS.find((o) => o.value === sort) ?? SORT_OPTS[0]!).label
   const ticketGroupLabel = (TICKET_GROUP_OPTS.find((o) => o.value === ticketGroup) ?? TICKET_GROUP_OPTS[0]!).label
   const ticketSubgroupValue = ticketSubgroup === ticketGroup ? 'none' : ticketSubgroup
@@ -111,28 +89,6 @@ export function FloorControls({
 
       {mode === 'agents' ? (
         <>
-          <label className="fpill fpill-sel" title="Group the feed">
-            Group: <b>{groupLabel}</b>
-            <select value={group} onChange={(e) => onGroup(e.target.value as FloorGroupBy | 'none')}>
-              {GROUP_OPTS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="fpill fpill-sel" title="Subgroup the feed">
-            Subgroup: <b>{subgroupLabel}</b>
-            <select
-              value={subgroupValue}
-              disabled={group === 'none'}
-              onChange={(e) => onSubgroup(e.target.value as FloorGroupBy | 'none')}
-            >
-              {subgroupOpts.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
-          </label>
-
           <label className="fpill fpill-sel" title="Sort the feed">
             <b>{sortLabel}</b>
             <select value={sort} onChange={(e) => onSort(e.target.value as FloorSort)}>

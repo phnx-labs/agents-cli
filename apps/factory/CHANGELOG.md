@@ -4,23 +4,40 @@ All notable changes to the Factory extension are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
-## [Unreleased]
+## [0.9.311] - 2026-08-05
+
+- **Extension no longer orchestrates tmux.** The Factory VS Code extension previously
+  wrapped agent terminals in a local tmux session so it could reattach after window
+  crashes or SSH drops. That layer is removed: every agent now opens in a plain
+  native VS Code terminal running `agents run <agent> --interactive` directly. This
+  fixes the long tmux init chain that could overflow the tty input queue and leave
+  the agent unstarted. Reconnect/reattach responsibility moves entirely to the
+  agents CLI. Deletes `src/vscode/tmux.ts`, `src/vscode/reconnect.ts`, tmux
+  coordinate tracking in `src/vscode/terminals.vscode.ts`, and the tmux fields in
+  `src/core/sessions.persist.ts`. Tests in `src/core/agents.test.ts` and
+  `src/core/prewarm.test.ts` assert a new spawn sends only the `agents run`
+  command and that a Claude resume with the original session id sends no tmux
+  wrapper or extra input. Source: `src/vscode/extension.ts`, `src/core/spawn.ts`,
+  `src/vscode/terminals.vscode.ts`, `src/core/sessions.persist.ts`.
 
 - **Floor data pipeline: last-good snapshot, no recurring fleet fan-out.** The
-  extension host persists the last successful Floor host/sessions snapshot in
-  `globalState` (`agents.floorSnapshot.v1`) and returns it immediately. Activation
+  extension host persists the last successful Floor host/sessions, device-registry,
+  and agent-inventory snapshots in `globalState` and returns them immediately. Activation
   (panel wire) seeds at most one `agents devices list --json` and one
   `agents sessions --active --local --json`. Remote fleet refresh is user-triggered
   only (`fetchHostSessions` with `force: true` → one bare `agents sessions --active
   --json`); failures keep last-good rows and record per-host freshness. Dispatch
   opens from cached inventory + last-good sessions and no longer probes per-device
-  CPU/memory. SnapshotDetector's 4s tick no longer runs `agents view --json`
-  (inventory is a 60s SWR cache shared only by panel/dispatch). Protocol adds
+  CPU/memory; sidebar/Dispatch device messages reuse the activation registry
+  cache instead of rerunning `devices list`. SnapshotDetector's 4s tick no
+  longer runs `agents view --json` (inventory is a persisted 60s SWR cache
+  shared only by panel/dispatch). Protocol adds
   optional `force` / `hostFreshness` / `fromCache` fields on floor host/local
   session messages. Source: `apps/factory/src/core/floorSnapshot.ts`,
   `apps/factory/src/vscode/remoteSessions.vscode.ts`,
   `apps/factory/src/vscode/settings.vscode.ts`,
   `apps/factory/src/monitor/snapshotDetector.ts`.
+
 
 - **Resume / restore always routes through `agents run --resume`.** Removed the
   per-harness raw binary fallback (`claude -r`, `codex resume`, `cursor-agent
@@ -91,15 +108,11 @@ All notable changes to the Factory extension are documented here. Format follows
   account; Kimi has neither). Source: `src/core/liveSession.ts`,
   `src/core/statusIdentity.ts`, `src/vscode/extension.ts`,
   `src/vscode/terminals.vscode.ts`.
-- **Removed the `agents.terminalMode` setting — tmux is always on when available.**
+- **Removed the `agents.terminalMode` setting.**
   The extension no longer exposes an `auto` / `tmux` / `native` "terminal mode".
-  tmux is the default for every agent and shell terminal (giving each a named,
-  reconnectable session), with an automatic fallback to a plain VS Code terminal
-  only when tmux isn't installed (Windows / no binary). The `native` opt-out is
-  gone: it mostly just disabled the extension's crash/SSH-drop reconnect while the
-  `agents` CLI wrapped the agent in tmux anyway. Deletes the setting, the
-  `src/core/terminalMode.ts` module, and the mode reads at the launch / URI-spawn /
-  split sites. Source: `src/vscode/extension.ts`, `package.json`.
+  The setting and the `src/core/terminalMode.ts` module are deleted, along with
+  the mode reads at the launch / URI-spawn / split sites. Source:
+  `src/vscode/extension.ts`, `package.json`.
 - **Fleet health probes no longer stack duplicate `agents` subprocesses (fixes
   CPU thrash on a loaded box).** `countRunningAgents` — the per-host running-agent
   count behind the Dispatch panel's device health and the launch-health refresh —
@@ -111,6 +124,17 @@ All notable changes to the Factory extension are documented here. Format follows
   probes now share one `cachedInFlight` guard: concurrent calls for a host
   coalesce into a single in-flight run, and repeats within 6s serve the cache.
   Source: `src/core/cachedInFlight.ts`, `src/vscode/deviceHealth.vscode.ts`.
+
+- **Menu bar warns when a device is under high load.** A new `NEEDS YOU` row
+  surfaces overloaded machines — local (`getloadavg()`, a native libc call, zero
+  subprocess) and remote fleet peers (read from the daemon-warmed
+  `.fleet-stats.json` cache with a 10-min freshness guard). The row reads
+  `⚠ <device> — high load N%` (`✕` red when critical: load ≥150% or mem ≥90%);
+  it counts into the header `⚠ N needs you` badge and tips the menu-bar icon.
+  Action-required rows are bolded so items that need attention stand out. Never
+  touches `agents doctor` (measured ~136s cold-start) — the load signal is
+  `getloadavg` + one cache read on the badge tick. Source:
+  `apps/menubar/src/loadedDevices.ts`, `apps/menubar/src/index.ts`.
 
 ## [0.9.310] - 2026-08-04
 

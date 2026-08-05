@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -9,6 +9,18 @@ import type { JobConfig, RunMeta } from './routines.js';
 import type { RotateCandidate, RotateResult } from './rotate.js';
 import { saveTask, hostsCacheDir } from './hosts/tasks.js';
 import { _resetPerfDbForTest, aggregateSamples } from './perf/db.js';
+import * as activation from './routine-activation.js';
+
+beforeEach(() => {
+  // These tests pass synthetic definitions directly to the runner. Exercise
+  // legacy definition eligibility explicitly instead of inheriting the host's
+  // real device manifest from a reused local/CI worker.
+  vi.spyOn(activation, 'routineEnabledOnThisDevice').mockReturnValue(null);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 /** Remove every run directory for a job (its parent dir), best-effort. */
 function cleanupJobRuns(jobName: string): void {

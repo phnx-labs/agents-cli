@@ -52,6 +52,7 @@ export const loadRoutines: ModuleLoader = async () => (await import('../../comma
 export const loadMonitors: ModuleLoader = async () => (await import('../../commands/monitors.js')).registerMonitorsCommands;
 export const loadProjects: ModuleLoader = async () => (await import('../../commands/projects.js')).registerProjectsCommands;
 export const loadRun: ModuleLoader = async () => (await import('../../commands/exec.js')).registerRunCommand;
+export const loadResume: ModuleLoader = async () => (await import('../../commands/resume.js')).registerResumeCommand;
 export const loadFork: ModuleLoader = async () => (await import('../../commands/fork.js')).registerForkCommand;
 export const loadDefaults: ModuleLoader = async () => (await import('../../commands/defaults.js')).registerDefaultsCommands;
 export const loadSet: ModuleLoader = async () => (await import('../../commands/set.js')).registerSetCommand;
@@ -110,6 +111,7 @@ export const loadShare: ModuleLoader = async () => (await import('../../commands
 export const loadAudit: ModuleLoader = async () => (await import('../../commands/audit.js')).registerAuditCommands;
 export const loadWebhook: ModuleLoader = async () => (await import('../../commands/webhook.js')).registerWebhookCommand;
 export const loadFunnel: ModuleLoader = async () => (await import('../../commands/funnel.js')).registerFunnelCommand;
+export const loadHumans: ModuleLoader = async () => (await import('../../commands/humans.js')).registerHumansCommands;
 
 /**
  * Commands whose modules pull in the SQLite-backed session/cloud stack. They are
@@ -122,6 +124,7 @@ export const loadFunnel: ModuleLoader = async () => (await import('../../command
 // same SQLite stack, same post-help registration order as sessions.
 export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'sessions',
+  'resume',
   'roster',
   'teams',
   'cloud',
@@ -175,6 +178,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   monitors: [loadMonitors],
   projects: [loadProjects],
   run: [loadRun],
+  resume: [loadResume],
   fork: [loadFork],
   defaults: [loadDefaults],
   set: [loadSet],
@@ -251,4 +255,5 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   audit: [loadAudit],
   webhook: [loadWebhook],
   funnel: [loadFunnel],
+  humans: [loadHumans],
 };

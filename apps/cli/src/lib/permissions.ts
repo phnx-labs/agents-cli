@@ -144,9 +144,9 @@ export function convertDenyToCodexRules(deny: string[]): string | null {
  * Ensure central permissions directory exists.
  */
 function ensurePermissionsDir(): void {
-  const dir = getUserPermissionsDir();
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  const groupsDir = path.join(getUserPermissionsDir(), 'groups');
+  if (!fs.existsSync(groupsDir)) {
+    fs.mkdirSync(groupsDir, { recursive: true });
   }
 }
 
@@ -398,7 +398,8 @@ export function listInstalledPermissions(): InstalledPermission[] {
   const seen = new Set<string>();
   const results: InstalledPermission[] = [];
 
-  for (const dir of [getUserPermissionsDir(), getPermissionsDir()]) {
+  for (const baseDir of [getUserPermissionsDir(), getPermissionsDir()]) {
+    const dir = path.join(baseDir, 'groups');
     if (!fs.existsSync(dir)) continue;
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -422,10 +423,11 @@ export function listInstalledPermissions(): InstalledPermission[] {
 }
 
 /**
- * Get a specific permission set by name. Searches user dir first, then system.
+ * Get a specific permission set by name. Searches user groups/ dir first, then system groups/.
  */
 function getPermissionSet(name: string): InstalledPermission | null {
-  for (const dir of [getUserPermissionsDir(), getPermissionsDir()]) {
+  for (const baseDir of [getUserPermissionsDir(), getPermissionsDir()]) {
+    const dir = path.join(baseDir, 'groups');
     for (const ext of ['.yml', '.yaml']) {
       const filePath = safeJoin(dir, name + ext);
       if (fs.existsSync(filePath)) {
@@ -454,7 +456,7 @@ export function installPermissionSet(
     return { success: false, error: 'Invalid permission file' };
   }
 
-  const targetPath = safeJoin(getUserPermissionsDir(), name + '.yml');
+  const targetPath = safeJoin(path.join(getUserPermissionsDir(), 'groups'), name + '.yml');
 
   try {
     fs.copyFileSync(sourcePath, targetPath);
@@ -469,10 +471,10 @@ export function installPermissionSet(
  * sets are intentionally not deletable from user commands.
  */
 export function removePermissionSet(name: string): { success: boolean; error?: string } {
-  const dir = getUserPermissionsDir();
+  const groupsDir = path.join(getUserPermissionsDir(), 'groups');
 
   for (const ext of ['.yml', '.yaml']) {
-    const filePath = safeJoin(dir, name + ext);
+    const filePath = safeJoin(groupsDir, name + ext);
     if (fs.existsSync(filePath)) {
       try {
         fs.unlinkSync(filePath);
@@ -2237,7 +2239,7 @@ export function exportPermissionsFromPath(filePath: string): PermissionSet | nul
  */
 function savePermissionSet(set: PermissionSet): { success: boolean; error?: string } {
   ensurePermissionsDir();
-  const filePath = safeJoin(getUserPermissionsDir(), set.name + '.yml');
+  const filePath = safeJoin(path.join(getUserPermissionsDir(), 'groups'), set.name + '.yml');
 
   try {
     const content = yaml.stringify({

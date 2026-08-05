@@ -1,7 +1,8 @@
 # agents-cli — Specifications
 
 > Status: **accepted** · Kind: **normative spec** · Scope: the top-level
-> behavioral contracts for agents-cli's major subsystems.
+> behavioral contracts for the agents-cli subsystems listed in the
+> [coverage inventory](#coverage-inventory) — not every command group.
 
 This is the **source-of-truth contract** for agents-cli: what a human, an agent,
 or a downstream tool is entitled to rely on, stated as testable requirements —
@@ -44,7 +45,10 @@ guarantee, the reference for the mechanism.
   moves — the cited symbol is the durable anchor, not the number.**
 - Behavioral scenarios are written Given/When/Then so they map 1:1 to tests.
 - Each section ends with **known gaps** (`-GAP-`). A new feature MUST NOT widen a
-  gap and SHOULD close the one it touches.
+  gap and SHOULD close the one it touches. A gap that has been closed is marked
+  `(resolved)` and kept, so the entry that a requirement points at never dangles.
+  This document states standing status, not change history — a gap says what is or
+  was true, never "fixed in this PR."
 
 ## Contents
 
@@ -53,6 +57,47 @@ guarantee, the reference for the mechanism.
 - [Agent execution](#agent-execution) — `agents run`: the one execution engine, env, isolation, fallback, dispatch
 - [Scheduling & execution singularity](#scheduling--execution-singularity) — one scheduler, one executor for anything fleet-affecting; UIs are thin wrappers
 - [Watchdog](#watchdog) — `agents watchdog`: detect idle agents, decide nudge/skip, deliver to the exact split
+
+## Coverage inventory
+
+**This document does not cover every command group, and silence here is not a
+guarantee.** The CLI registers **100 top-level names** across **81 distinct
+loaders** — the difference is aliases and multi-command modules (`ssh`/`devices`/`fleet`
+share one; `add`/`use`/`remove`/`rm`/`purge` another) — in `COMMAND_LOADERS`
+(`lib/startup/command-registry.ts:146`, *"Parity is non-negotiable: the name -> loader
+map below mirrors exactly which module registers which top-level command on `main`"*).
+Five subsystems have a normative contract. Before relying on a behavior, check which
+row its surface sits in.
+
+| Coverage | Surfaces | What that means |
+|---|---|---|
+| **Specified here** | `sessions`, `secrets`, `run`, the scheduling/executor singularity, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
+| **Governed in part** | `routines`, `monitors`, `doctor` | One requirement reaches them, no command contract does. `routines`/`monitors` are bound by [§Scheduling & execution singularity](#scheduling--execution-singularity) (SING-5, SING-8, SING-9) — who may schedule and execute them. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. Everything else these commands do is unspecified. |
+| **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `pty`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | A design doc describes the mechanism — [hosts.md](hosts.md), [teams.md](teams.md), [cloud.md](cloud.md), [02-resource-sync.md](02-resource-sync.md), [01-version-management.md](01-version-management.md), … — but states **no** requirements. Verified: `hosts.md`, `teams.md` and `cloud.md` contain **zero capitalized RFC-2119 keywords**. `hosts.md` and `teams.md` do use lowercase "must" in prose ("the remote run must be bounded", `hosts.md:124`; "you must declare what each one owns", `teams.md:207`) — which reads normative but is not, per this document's own capitalization rule. That is exactly the trap: treat those docs as explanation, never as a contract. |
+| **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `worktree`, `webhook`, `funnel`, `lease`, `mailboxes`, `feed`, `message`/`send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
+
+**Where the absence bites hardest.** These act on other machines, hold durable
+state, or sit next to credentials, and have no normative contract today:
+
+1. **`hosts` / `ssh` / `devices`** (`commands/hosts.ts`, `commands/ssh.ts`) — dispatches
+   arbitrary agent runs to other machines over SSH. [09-ssh-transport.md](09-ssh-transport.md)
+   and [hosts.md](hosts.md) describe the transport; no requirement pins it. Individual
+   SSH guarantees are stated piecemeal inside the specified sections (SES-CROSS-1,
+   SEC-CROSS-1, the `--host` requirements in [§Agent execution](#agent-execution)),
+   which is exactly the fragmentation a `Hosts` section would resolve.
+2. **`teams`** (`commands/teams.ts`) — parallel agents across worktrees and devices; the
+   cross-teammate seam is unguarded by any requirement.
+3. **`cloud`** (`commands/cloud.ts`) — dispatches to external infrastructure whose state
+   lives off this machine entirely.
+4. **`wallet`, `helper`** (`commands/wallet.ts`, `commands/helper.ts`) — a payment-card
+   vault and the signed Keychain helper sit directly against the credential boundary
+   that [§Secrets](#secrets) specifies, without inheriting any of its requirements.
+5. **`sync` / `apply` / `status`** — the fleet-reconciliation trio that mutates every
+   installed version's config on every machine.
+
+Adding a normative section to this document MUST move its surface into the
+**Specified here** row of this table; adding a new command group SHOULD place it in
+one of the other rows rather than leaving it unlisted.
 
 ---
 
@@ -193,7 +238,13 @@ SSH access (§7); rendering sessions that no harness produced.
     (`local`|`ssh`), `ssh` IPs, tmux `mux` pane — read from
     `/proc/<pid>/environ` or `ps eww`, **never guessed**
     (`lib/session/provenance.ts:66-79,225-230`), attached only to rows with a
-    live pid (`lib/session/active.ts:1352-1358`).
+    live pid (`lib/session/active.ts:1352-1358`). It is a field of
+    `ActiveSession` (`lib/session/active.ts:231`), **not** of `SessionMeta` —
+    which declares no `provenance` property at all — so on the archived listing
+    path (`sessions --json` without `--active`, served from `discoverSessions`
+    via `serializeSessionsJson`, `commands/sessions.ts:956-961`) the key is
+    **absent from the JSON object entirely**. A consumer MUST test for the key's
+    presence, not for `null`.
   - `context` — the launch context (`terminal`|`teams`|`cloud`|`headless`)
     (`lib/session/active.ts:76`).
   - The adjacent `SessionMeta.origin` (`cli`|`routine`,
@@ -644,11 +695,12 @@ normative — a change that widens/narrows a cell is a spec change.
 - **SES-GAP-6.** Whole-**file** JSON parse failure is inconsistent: Gemini throws
   (and `parseSession` has no outer catch), while Hermes/Antigravity degrade to
   `[]` (`lib/session/parse.ts:143-169,691-696`). Standardize on degrade-to-empty.
-- **SES-GAP-7.** Doc drift (fixed in this change): [05-sessions.md](05-sessions.md)
-  said schema version 13; the code is 18 (`lib/session/db.ts`, `SCHEMA_VERSION`).
-  Any hardcoded schema number in prose drifts — cite the constant. The stale
-  `lib/session/db.ts` header path comment (missing `.history/`) is corrected here
-  too (real path `~/.agents/.history/sessions/sessions.db`).
+- **SES-GAP-7 (resolved).** [05-sessions.md](05-sessions.md) once hardcoded schema
+  version 13 while the code had moved on; it now cites the `SCHEMA_VERSION`
+  constant directly ([05-sessions.md](05-sessions.md):1184), and
+  `lib/session/db.ts`'s header comment carries the real path
+  (`~/.agents/.history/sessions/sessions.db`). The standing rule is the point: any
+  hardcoded schema number in prose drifts — cite the constant.
 - **SES-GAP-8.** No `currentVersion > SCHEMA_VERSION` guard exists (SES-COMPAT-3): an
   older CLI opening a DB written by a newer one silently proceeds instead of
   failing safe (`lib/session/db.ts` schema gate). The "fail safe on newer DB"
@@ -1114,8 +1166,8 @@ normative — a change that widens or narrows a cell is a spec change.
 
 - **SEC-CROSS-1 (MUST).** All three desktop platforms MUST be supported. Windows IS
   a first-class backend (`lib/secrets/windows.ts`, full Credential Manager
-  implementation + tests) — the stale "Windows is not supported" line in
-  `secrets.md` is corrected by this change.
+  implementation + tests); [secrets.md](secrets.md):64 states the platform line as
+  "cross-platform" accordingly.
 - **SEC-CROSS-2 (SHOULD).** Off-macOS, the biometry/broker layer is a documented
   no-op; `unlock`/`lock`/`status` SHOULD degrade to friendly no-ops, not errors
   (`docs/secrets.md:563`).
@@ -1156,9 +1208,10 @@ normative — a change that widens or narrows a cell is a spec change.
   SSH-scoped or client-encrypted push/pull.
 
 **Known gaps (implemented-vs-intended drift to fix, not to paper over):**
-- **SEC-GAP-1 (fixed here).** `secrets.md`'s platform line said "Windows is not
-  supported" while `lib/secrets/windows.ts` implements a full backend (SEC-CROSS-1).
-  This change corrects that line to "cross-platform."
+- **SEC-GAP-1 (resolved).** [secrets.md](secrets.md)'s platform line once said
+  "Windows is not supported" while `lib/secrets/windows.ts` implemented a full
+  backend (SEC-CROSS-1); it now reads "cross-platform"
+  ([secrets.md](secrets.md):64).
 - **SEC-GAP-2.** The `env:`-ref allowlist control exists (`envAllowlist` on
   `ResolveOptions`, `lib/secrets/index.ts` ~`:1392,1411`) but no command wires it
   up — `env:` refs are effectively unrestricted today. Either wire it or remove it.
@@ -1378,7 +1431,7 @@ schema (`--json` passes through each agent's native stream format).
   claude/codex/copilot/kimi ONLY (`CLAUDE_CONFIG_DIR` / `CODEX_HOME` /
   `COPILOT_HOME` / `KIMI_CODE_HOME`) and MUST delete the other three agents'
   vars on every branch, so a config pointer from a different agent's shell
-  never leaks into this invocation (`lib/exec.ts:364-437`).
+  never leaks into this invocation (`buildExecEnv`'s per-agent branch, `lib/exec.ts:402-490`).
 - **EXEC-3 (MUST).** `buildExecEnv` MUST set `AGENTS_MAILBOX_DIR` +
   `AGENT_SESSION_ID` + `AGENTS_SESSION_ID` when a valid session id is present
   (`lib/exec.ts:444-449`), `AGENTS_RUNTIME` to `terminal`/`headless` from
@@ -1397,8 +1450,14 @@ schema (`--json` passes through each agent's native stream format).
 - **EXEC-6 (MUST).** At the command layer, `agents run`'s `--secrets`/`--env`
   handling MUST compose `options.env` in the fixed order **profile env <
   auto-share token < secrets bundles < `--env K=V`**, later wins
-  (`commands/exec.ts:2296-2304`, comment: *"Merge order (later wins): profile
-  env < auto share token < secrets bundles < --env K=V."*).
+  (`commands/exec.ts:2738`, comment: *"Merge order (later wins): profile
+  env < auto share token < secrets bundles < --env K=V."*). `--secrets` is
+  **repeatable** (a collect accumulator, `commands/exec.ts:720-725`), so the
+  bundles slot has its own internal order: bundles resolve **in flag order,
+  later bundle wins** a duplicate key — each is spread over the accumulator
+  (`secretsEnv = { ...secretsEnv, ...bundleEnv }`, `commands/exec.ts:2704,2726`,
+  comment: *"Later bundles override earlier ones."*). A resolution failure in
+  any bundle MUST abort before spawn, so the child never sees a partial env.
 - **EXEC-7 (MUST).** "Profile env" comes from `resolveProfileEnv(profile)` —
   a static `env` block plus, when the profile declares `auth`, a Keychain
   token read live at exec time and merged in under `auth.envVar`, so the
@@ -1432,7 +1491,7 @@ schema (`--json` passes through each agent's native stream format).
 - **EXEC-14 (MUST, scoped).** `buildExecEnv` realizes that isolation ONLY for
   claude/codex/copilot/kimi, by pinning `CLAUDE_CONFIG_DIR` /
   `resolveCodexHome(...)` / `COPILOT_HOME` / `KIMI_CODE_HOME` at
-  `<versionHome>/<configDir>` (`lib/exec.ts:373,396-398,413,427`).
+  `<versionHome>/<configDir>` (`lib/exec.ts:419,451,466,480` — the four assignments inside `buildExecEnv` (`:402`)).
 - **EXEC-15 (clarifying note).** `buildExecEnv` MUST NOT set the raw `HOME`
   var for any agent — no `result.HOME = …` exists anywhere in `lib/exec.ts`.
   Isolation is realized purely through the agent-specific config-dir vars in
@@ -1444,9 +1503,10 @@ schema (`--json` passes through each agent's native stream format).
   `lib/shims.ts` — only `AGENTS_USER_DIR`/`GROK_DOWNLOADS` etc. *read* `$HOME`).
 - **EXEC-16.** The other 12 registered agents
   (gemini, cursor, opencode, openclaw, amp, kiro, goose, antigravity, grok,
-  droid, hermes, forge) get **no** per-version config-dir var from
+  droid, hermes, pi — the 16 in `AgentId`, `lib/types.ts:13`, minus the four
+  EXEC-14 isolates) get **no** per-version config-dir var from
   `buildExecEnv` itself — its per-agent branch has no arm for them
-  (`lib/exec.ts:364-437`, the `else` branch only deletes the four known vars).
+  (`buildExecEnv`'s per-agent branch, `lib/exec.ts:402-490`; the `else` at `:485-489` only deletes the four known vars).
   A separate mechanism — the generated default-name bash shim
   (`generateShimScript`, `lib/shims.ts:271-330`) and the generated
   version-pinned alias shim (`lib/shims.ts:940-1010`) — additionally exports
@@ -1847,7 +1907,7 @@ versions.
 Given grok versions `1.0.0` and `1.1.0` both installed with no version-pinned
 alias shim materialized on disk; When `agents run grok@1.0.0 "..."` runs;
 Then `buildExecEnv` sets no `GROK_HOME` (its per-agent branch has no grok
-arm, `lib/exec.ts:364-437`) and `buildExecCommand` resolves the spawn target
+arm, `buildExecEnv`, `lib/exec.ts:402-490`) and `buildExecCommand` resolves the spawn target
 straight to the real npm binary (`lib/exec.ts:770-778`) — the run is not
 version-isolated the way EXEC-2 promises for claude (EXEC-GAP-1).
 

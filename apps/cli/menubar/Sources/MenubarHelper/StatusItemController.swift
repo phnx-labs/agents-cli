@@ -24,6 +24,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var badgeSessions: [Session] = []
     // New tailnet devices awaiting Register/Ignore (cheap sentinel-dir read).
     private var badgePending: [PendingDevice] = []
+    // Devices under high load — this Mac (native getloadavg) + fresh fleet peers.
+    private var badgeLoaded: [LoadedDevice] = []
 
     // Daemon-down watchdog. The only other proactive "routines won't run"
     // signal is `notifyOverdue` (src/lib/overdue.ts), fired from INSIDE
@@ -187,10 +189,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let s = LocalState.sessions(includeTeams: false)
             let pending = LocalState.pendingDevices()
+            let loaded = LocalState.loadedDevices()
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.badgeSessions = self.merged(s)
                 self.badgePending = pending
+                self.badgeLoaded = loaded
                 self.refreshBadge()
             }
         }
@@ -365,8 +369,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let attention = badgeSessions.filter { $0.status == .attention }.count
         let running = badgeSessions.filter { $0.status == .running }.count
         let pending = badgePending.count
-        if attention > 0 {
-            button.attributedTitle = badge("⚠", wait)
+        if attention > 0 || !badgeLoaded.isEmpty {
+            // A blocked session or a device under high load — both are "needs you".
+            // A critical-load device tips the glyph red; otherwise the amber warn.
+            let critical = badgeLoaded.contains { $0.severity == .critical }
+            button.attributedTitle = badge("⚠", critical ? fail : wait)
         } else if schedulerDown {
             // A dead scheduler means every routine silently stops firing — that
             // outranks a device-registration nudge or a running-session count,
@@ -434,10 +441,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             let sessions = LocalState.sessions(includeTeams: false)
             let browserTasks = LocalState.browserTasks(limit: 3)
             let pending = LocalState.pendingDevices()
+            let loaded = LocalState.loadedDevices()
             rebuild(menu, sessions: sessions, browserTasks: browserTasks,
                     recentSessions: cachedRecentSessions, routines: cachedRoutines,
                     doctor: cachedDoctorOverview, daemonPid: AgentsCLI.daemonPid(),
-                    pending: pending)
+                    pending: pending, loaded: loaded)
             // #region agent log
             debugLog("D", "StatusItemController.swift:menuWillOpen", "after accordion rebuild", [
                 "itemCount": menu.items.count,
@@ -461,11 +469,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let browserTasks = LocalState.browserTasks(limit: 3)
         let daemonPid = AgentsCLI.daemonPid()
         let pending = LocalState.pendingDevices()
+        let loaded = LocalState.loadedDevices()
         badgeSessions = merged(sessions)
         badgePending = pending
+        badgeLoaded = loaded
         rebuild(menu, sessions: sessions, browserTasks: browserTasks,
                 recentSessions: cachedRecentSessions, routines: cachedRoutines,
-                doctor: cachedDoctorOverview, daemonPid: daemonPid, pending: pending)
+                doctor: cachedDoctorOverview, daemonPid: daemonPid, pending: pending, loaded: loaded)
         refreshBadge()
         refreshRoutines()
         refreshRecentSessions()
@@ -534,7 +544,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // glanceable sections; setup + watchdog noise collapses into one System row.
     private func rebuild(_ menu: NSMenu, sessions: [Session], browserTasks: [BrowserTask],
                          recentSessions: [RecentSession], routines: [Routine],
-                         doctor: DoctorOverview?, daemonPid: Int?, pending: [PendingDevice]) {
+                         doctor: DoctorOverview?, daemonPid: Int?, pending: [PendingDevice],
+                         loaded: [LoadedDevice]) {
         menu.removeAllItems()
 
         // Prefer the engine's active list once the warm cache has it — full
@@ -549,15 +560,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let attention = sessions.filter { $0.status == .attention }.count
         let routinesFailing = routines.contains { routineNeedsAttention($0) }
         let schedulerStopped = daemonPid == nil && !routines.isEmpty
-        let needsYou = attention + (routinesFailing ? 1 : 0) + (schedulerStopped ? 1 : 0)
+        let needsYou = attention + loaded.count + (routinesFailing ? 1 : 0) + (schedulerStopped ? 1 : 0)
         let rich = isRich(attention: needsYou)
 
-        addHeader(menu, sessions: sessions)
+        addHeader(menu, sessions: sessions, plusNeeds: loaded.count)
         menu.addItem(.separator())
 
         // What needs me now — rendered only when there's something actionable.
         if addNeedsAttention(menu, sessions: sessions, routines: routines,
-                             daemonPid: daemonPid, rich: rich) {
+                             daemonPid: daemonPid, loaded: loaded, rich: rich) {
             menu.addItem(.separator())
         }
 
@@ -608,8 +619,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     // MARK: Sections
-    private func addHeader(_ menu: NSMenu, sessions: [Session]) {
-        let attn = sessions.filter { $0.status == .attention }.count
+    private func addHeader(_ menu: NSMenu, sessions: [Session], plusNeeds: Int = 0) {
+        let attn = sessions.filter { $0.status == .attention }.count + plusNeeds
         let running = sessions.filter { $0.status == .running }.count
         let status: String
         let color: NSColor
@@ -652,7 +663,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // empty (the ⚠ glyph + section header already convey it). Failing routines
     // follow.
     private func addNeedsAttention(_ menu: NSMenu, sessions: [Session],
-                                   routines: [Routine], daemonPid: Int?, rich: Bool) -> Bool {
+                                   routines: [Routine], daemonPid: Int?,
+                                   loaded: [LoadedDevice], rich: Bool) -> Bool {
         var rows: [(String, NSColor, String, NSMenu?)] = []   // glyph, color, text, submenu
 
         let blocked = sessions.filter { $0.status == .attention }
@@ -686,6 +698,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             }
         }
 
+        // Devices under high load — this Mac (native getloadavg) first, then fresh
+        // fleet peers. Warn at headroom() 'loaded' (≥75%); ✕ red when critical.
+        for d in loaded {
+            let glyph = d.severity == .critical ? "✕" : "⚠"
+            let color = d.severity == .critical ? fail : wait
+            let scope = d.isLocal ? "\(d.name) (this Mac)" : d.name
+            rows.append((glyph, color, "\(scope) — high load \(Int(d.loadPercent.rounded()))%", loadedSubmenu(d)))
+        }
+
         if daemonPid == nil && !routines.isEmpty {
             let sub = NSMenu()
             let start = NSMenuItem(title: "Start scheduler", action: #selector(onStartScheduler), keyEquivalent: "")
@@ -714,11 +735,22 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // rows from the header count when grouping is in play.
         addSectionTitle(menu, "⚠ NEEDS YOU (\(rows.count))", color: wait)
         for (glyph, color, text, sub) in rows {
-            let it = statusRow(glyph, color, text)
+            // Action-required rows are emphasized (bold) so items that need the
+            // user stand out from the informational sections below.
+            let it = statusRow(glyph, color, text, emphasize: true)
             it.submenu = sub
             menu.addItem(it)
         }
         return true
+    }
+
+    // Small breakdown submenu for a high-load device row: load% (+ mem% when known).
+    private func loadedSubmenu(_ d: LoadedDevice) -> NSMenu {
+        let sub = NSMenu()
+        var line = "load \(Int(d.loadPercent.rounded()))%"
+        if let mem = d.memPercent { line += " · mem \(Int(mem.rounded()))%" }
+        sub.addItem(disabled(line))
+        return sub
     }
 
     // Submenu listing every blocked session in a grouped (agent, repo) waiter.
@@ -1473,11 +1505,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     // A row whose leading status glyph is tinted with the Factory palette while
     // the label stays default — mirrors the dashboard's color-coded status dots.
-    private func statusRow(_ glyph: String, _ glyphColor: NSColor, _ rest: String) -> NSMenuItem {
+    private func statusRow(_ glyph: String, _ glyphColor: NSColor, _ rest: String,
+                           emphasize: Bool = false) -> NSMenuItem {
         let title = "  \(glyph) \(rest)"
         let it = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let base = NSFont.menuFont(ofSize: 0)
+        let font = emphasize ? NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask) : base
         let attr = NSMutableAttributedString(string: title, attributes: [
-            .font: NSFont.menuFont(ofSize: 0),
+            .font: font,
             .foregroundColor: NSColor.labelColor,
         ])
         let r = (title as NSString).range(of: glyph)

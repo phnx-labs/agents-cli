@@ -159,6 +159,19 @@ struct PendingDevice {
     let platform: String
 }
 
+// A device (this Mac or a fleet peer) currently under high load, surfaced as a
+// NEEDS YOU warning. `loadPercent` is the normalized load average
+// (loadAvg1/ncpu*100), matching the CLI's src/lib/devices/health.ts. `severity`
+// drives the glyph/color: `.critical` when load or memory is extreme.
+struct LoadedDevice {
+    enum Severity { case warning, critical }
+    let name: String
+    let isLocal: Bool
+    let loadPercent: Double
+    let memPercent: Double?
+    let severity: Severity
+}
+
 enum LocalState {
     private static let home = NSHomeDirectory()
     private static let fm = FileManager.default
@@ -276,6 +289,126 @@ enum LocalState {
             let platform = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             return PendingDevice(name: name, platform: platform.isEmpty ? "unknown" : platform)
         }
+    }
+
+    // MARK: Device load warnings (this Mac natively + fleet peers from the warm cache)
+    // Mirrors the CLI classifier src/lib/devices/health.ts:194-205 — worst of
+    // load%/mem%: <15 idle · <40 light · <75 busy · ≥75 loaded. We warn only on
+    // `loaded` (≥75%). The local machine is probed NATIVELY (getloadavg, a libc
+    // call — zero subprocess, and this is what would have caught zion at load 95)
+    // and is deliberately NOT read from .fleet-stats.json, whose local self-row can
+    // be a stale `reachable:false`. Remote peers come from the daemon-warmed cache
+    // with a freshness guard so stale rows never warn.
+    static let highLoadThreshold: Double = 75      // headroom() 'loaded' cutoff
+    private static let criticalLoadPercent: Double = 150
+    private static let criticalMemPercent: Double = 90
+    private static let fleetStatFreshMs: Double = 10 * 60_000  // ignore rows older than this
+
+    static func loadedDevices(now: Double = LocalState.nowMs()) -> [LoadedDevice] {
+        var out: [LoadedDevice] = []
+        let aliases = selfAliases()
+
+        // Local machine — native probe, always current. Named by the fleet id
+        // (`localMachineName()`), so it reads "zion" (what `agents devices` shows),
+        // not the ProcessInfo mDNS name ("mac.local").
+        let ncpu = max(1, ProcessInfo.processInfo.activeProcessorCount)
+        let localLoadPct = localLoadAvg1() / Double(ncpu) * 100
+        if let d = classifyLoad(name: localMachineName(), isLocal: true,
+                                loadPercent: localLoadPct, memPercent: localMemPercent()) {
+            out.append(d)
+        }
+
+        // Remote peers — daemon-warmed cache, reachable + fresh + loaded only.
+        let path = "\(home)/.agents/.cache/.fleet-stats.json"
+        if let data = fm.contents(atPath: path),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let entries = root["entries"] as? [String: Any] {
+            out += remoteLoadedDevices(entries: entries, selfAliases: aliases, now: now)
+        }
+
+        // Local first, then remote worst-load first.
+        return out.sorted { a, b in
+            if a.isLocal != b.isLocal { return a.isLocal }
+            return a.loadPercent > b.loadPercent
+        }
+    }
+
+    // The fleet id for THIS box, matching how `agents devices` labels it (env
+    // override, else POSIX gethostname() == `hostname`/os.hostname(), e.g. "zion").
+    // Swift's ProcessInfo.hostName returns the mDNS name ("mac.local") which does
+    // NOT match the fleet id, so it can't be the source here.
+    static func localMachineName() -> String {
+        if let ov = ProcessInfo.processInfo.environment["AGENTS_SYNC_MACHINE_ID"], !ov.isEmpty {
+            return ActiveDisplay.normalizeHost(ov)
+        }
+        var buf = [CChar](repeating: 0, count: 256)
+        if gethostname(&buf, buf.count) == 0 {
+            let h = String(cString: buf)
+            if !h.isEmpty { return ActiveDisplay.normalizeHost(h) }
+        }
+        return ActiveDisplay.thisMachineId()
+    }
+
+    // Every name this box can appear under in the fleet cache — the fleet id AND
+    // the ProcessInfo-derived id — so a remote cache row for self is deduped even
+    // when the two disagree (observed: gethostname "zion" vs ProcessInfo "mac").
+    static func selfAliases() -> Set<String> {
+        [localMachineName(), ActiveDisplay.thisMachineId()]
+    }
+
+    // Classify fleet peers from a parsed `.fleet-stats.json` entries dict. Skips
+    // any self-alias (local is probed natively), unreachable rows, rows staler than
+    // the freshness window, and anything below the high-load cutoff. Internal so
+    // the self-test can drive it with synthetic entries.
+    static func remoteLoadedDevices(entries: [String: Any], selfAliases: Set<String>, now: Double) -> [LoadedDevice] {
+        var out: [LoadedDevice] = []
+        for (host, raw) in entries {
+            guard !selfAliases.contains(ActiveDisplay.normalizeHost(host)),  // local handled natively
+                  let row = raw as? [String: Any],
+                  (row["reachable"] as? Bool) == true,
+                  let fetchedAt = double(row["fetchedAt"]), now - fetchedAt <= fleetStatFreshMs,
+                  let loadPct = double(row["loadPercent"]) else { continue }
+            if let d = classifyLoad(name: host, isLocal: false,
+                                    loadPercent: loadPct, memPercent: double(row["memPercent"])) {
+                out.append(d)
+            }
+        }
+        return out
+    }
+
+    // Returns a LoadedDevice only when the device is `loaded` (worst signal ≥75%).
+    static func classifyLoad(name: String, isLocal: Bool,
+                             loadPercent: Double, memPercent: Double?) -> LoadedDevice? {
+        let worst = max(loadPercent, memPercent ?? 0)
+        guard worst >= highLoadThreshold else { return nil }
+        let critical = loadPercent >= criticalLoadPercent || (memPercent ?? 0) >= criticalMemPercent
+        return LoadedDevice(name: name, isLocal: isLocal, loadPercent: loadPercent,
+                            memPercent: memPercent, severity: critical ? .critical : .warning)
+    }
+
+    // 1-minute load average via libc — no subprocess.
+    private static func localLoadAvg1() -> Double {
+        var loads = [Double](repeating: 0, count: 3)
+        return getloadavg(&loads, 3) > 0 ? loads[0] : 0
+    }
+
+    // macOS memory-in-use %, Activity-Monitor semantics (active+wired+compressed
+    // used; free+inactive+speculative available) — mirrors health.ts parseVmStat.
+    // Returns nil on any failure; the classifier then falls back to load% alone.
+    private static func localMemPercent() -> Double? {
+        var stats = vm_statistics64_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
+        let kr = withUnsafeMutablePointer(to: &stats) { ptr -> kern_return_t in
+            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+            }
+        }
+        guard kr == KERN_SUCCESS else { return nil }
+        let used = Double(stats.active_count) + Double(stats.wire_count) + Double(stats.compressor_page_count)
+        let avail = Double(stats.free_count) + Double(stats.inactive_count) + Double(stats.speculative_count)
+        let total = used + avail
+        guard total > 0 else { return nil }
+        return used / total * 100
     }
 
     // MARK: Sessions from the engine's active list (warm cache)

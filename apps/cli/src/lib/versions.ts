@@ -266,28 +266,60 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
   }
   result.skills = filterNamesForActiveResourceProfile('skills', Array.from(skillNames), sourceMapFromResources('skills', cwd));
 
-  // Hooks. A hook is either a directory bundle or an actual script file: known
-  // script extension, OR executable bit on a file with a non-data extension.
-  // Auxiliary content like `README.md` (docs) or `promptcuts.yaml` (data read
-  // directly by the expand-promptcuts script) lives in hooks/ but is not a
-  // hook. Older sync runs chmod 0o755'd everything they copied, so an exec bit
-  // alone can no longer be trusted as the signal.
+  // Hooks:
+  //   - top-level script files
+  //   - one-level *group* dirs that contain top-level scripts (session-starts/*.sh)
+  //     → each script is its own hook resource (install name = basename)
+  //   - other directories (e.g. tests/ with fixtures only) → directory bundles,
+  //     copied wholesale as one resource (pre-existing layout)
+  // Auxiliary content like README.md / promptcuts.yaml is not a hook. Older sync
+  // runs chmod 0o755'd everything, so an exec bit alone is not the signal.
   const NON_SCRIPT_EXTS = new Set(['.md', '.markdown', '.rst', '.txt', '.yaml', '.yml', '.json', '.toml', '.ini', '.conf']);
   const SCRIPT_EXTS     = new Set(['.sh', '.bash', '.zsh', '.py', '.js', '.ts', '.mjs', '.cjs', '.rb', '.pl', '.ps1']);
+  const HOOK_GROUP_SKIP = new Set(['node_modules', '.git', '.cache']);
   const hookNames = new Set<string>();
+  const isHookScriptName = (fileName: string, mode: number): boolean => {
+    const ext = path.extname(fileName).toLowerCase();
+    if (SCRIPT_EXTS.has(ext)) return true;
+    return (mode & 0o111) !== 0 && !NON_SCRIPT_EXTS.has(ext);
+  };
   for (const { base } of resourceBases) {
     const hooksDir = path.join(base, 'hooks');
     if (!fs.existsSync(hooksDir)) continue;
     for (const name of fs.readdirSync(hooksDir)) {
       if (name.startsWith('.')) continue;
       try {
-        const stat = fs.lstatSync(path.join(hooksDir, name));
+        const full = path.join(hooksDir, name);
+        const stat = fs.lstatSync(full);
         if (stat.isSymbolicLink()) continue;
-        if (stat.isDirectory()) { hookNames.add(name); continue; }
-        if (!stat.isFile()) continue;
-        const ext = path.extname(name).toLowerCase();
-        if (SCRIPT_EXTS.has(ext)) { hookNames.add(name); continue; }
-        if ((stat.mode & 0o111) !== 0 && !NON_SCRIPT_EXTS.has(ext)) hookNames.add(name);
+        if (stat.isFile()) {
+          if (isHookScriptName(name, stat.mode)) hookNames.add(name);
+          continue;
+        }
+        if (!stat.isDirectory() || HOOK_GROUP_SKIP.has(name)) continue;
+        // Group vs bundle: if the dir has any top-level script files, expand
+        // them; otherwise treat the whole dir as one hook resource.
+        let nestedNames: string[];
+        try {
+          nestedNames = fs.readdirSync(full);
+        } catch {
+          continue;
+        }
+        const scripts: string[] = [];
+        for (const nested of nestedNames) {
+          if (nested.startsWith('.')) continue;
+          try {
+            const nfull = path.join(full, nested);
+            const nstat = fs.lstatSync(nfull);
+            if (nstat.isSymbolicLink() || !nstat.isFile()) continue;
+            if (isHookScriptName(nested, nstat.mode)) scripts.push(nested);
+          } catch { /* ignore */ }
+        }
+        if (scripts.length > 0) {
+          for (const s of scripts) hookNames.add(s);
+        } else {
+          hookNames.add(name);
+        }
       } catch { /* ignore unreadable */ }
     }
   }

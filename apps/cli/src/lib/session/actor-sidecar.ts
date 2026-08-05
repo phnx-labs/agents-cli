@@ -17,13 +17,16 @@
 import fs from 'fs';
 import path from 'path';
 import { getHistoryDir } from '../state.js';
+import type { SessionRunMode } from './types.js';
 
 export interface SessionActorRecord {
   sessionId: string;
   /** Resolved actor id (`resolveActor().id`) — the responsible human/agent. */
-  actor: string;
+  actor?: string;
   /** Actor kind (`resolveActor().kind`). */
-  initiatedBy: 'human' | 'agent';
+  initiatedBy?: 'human' | 'agent';
+  /** Effective permissions mode used by the launcher. */
+  mode?: SessionRunMode;
   startedAtMs: number;
 }
 
@@ -72,7 +75,8 @@ export function readSessionActorRecord(sessionId: string): SessionActorRecord | 
   }
   try {
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && typeof parsed.sessionId === 'string' && typeof parsed.actor === 'string') {
+    if (parsed && typeof parsed === 'object' && typeof parsed.sessionId === 'string' &&
+      (typeof parsed.actor === 'string' || typeof parsed.mode === 'string')) {
       return parsed as SessionActorRecord;
     }
   } catch {
@@ -98,7 +102,8 @@ export function loadSessionActorIndex(): Map<string, SessionActorRecord> {
   for (const f of files) {
     try {
       const parsed = JSON.parse(fs.readFileSync(path.join(sidecarDir(), f), 'utf8'));
-      if (parsed && typeof parsed === 'object' && typeof parsed.sessionId === 'string' && typeof parsed.actor === 'string') {
+      if (parsed && typeof parsed === 'object' && typeof parsed.sessionId === 'string' &&
+        (typeof parsed.actor === 'string' || typeof parsed.mode === 'string')) {
         out.set(parsed.sessionId, parsed as SessionActorRecord);
       }
     } catch {

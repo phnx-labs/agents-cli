@@ -117,14 +117,19 @@ gives each device its warnings plus a compact accounts/versions line (every
 installed version + its account, provable ✓ / ✗). Single-machine `agents doctor`
 collapses to the CRITICAL section plus one `▸ <machine>` block. Severity:
 **critical** is `logged-out` (provable), `missing-hook`, `missing-plugin`,
-`unwired-hook`, `never-synced` *when the version's declared resources are
-therefore absent*, `duplicate-hook-drift`, and `cli-missing`; **warning** is
-`logout-unprovable`, `missing-resource`, `content-drift`, `stale`, `never-synced`
-when the version declares nothing to miss, `repo-behind`, `repo-drift`,
-`version-skew`, `fleet-resource-gap`, `orphan`, `duplicate-hook`,
-`host-cli-missing`, `host-cli-invalid`, `rc-secret-export`, `exec-policy` and
-`stale-cli`. The same list is in the `doctor-findings.ts` module docblock — keep
-both exhaustive, since a kind missing from either is a doc that lies. The findings model,
+`unwired-hook` and `cli-missing`; **warning** is `logout-unprovable`,
+`missing-resource`, `content-drift`, `never-synced`, `stale`, `repo-behind`,
+`repo-drift`, `version-skew`, `fleet-resource-gap`, `orphan`, `duplicate-hook`,
+`duplicate-hook-drift`, `host-cli-missing`, `host-cli-invalid`,
+`rc-secret-export`, `exec-policy` and `stale-cli`. (RUSH-2162 moved
+`never-synced` and `duplicate-hook-drift` to warning — both are stale-sync states
+one `agents sync` resolves.)
+
+`FINDING_SEVERITY` in
+[`src/lib/devices/doctor-findings.ts`](src/lib/devices/doctor-findings.ts) is the
+single source of truth: the builders read their severity from it, and a test
+asserts this list and the module docblock assign every kind to the **same bucket**
+it does. Change a severity there and the test names the docs to move with it. The findings model,
 builders, `remediationFor`, and the pure `renderFindings` live in
 [`src/lib/devices/doctor-findings.ts`](src/lib/devices/doctor-findings.ts).
 
@@ -155,8 +160,8 @@ takes ~57 rows down to ~16, and the rules are unit-pinned in
   machine with five installed claudes otherwise emits two dozen identical rows.
 - **No vaguer restatement.** A version that just listed its drifted/missing
   resources gets no `sources changed since last sync` row on top, and a
-  never-synced version reports one critical (`agents sync <agent>@<version>
-  --yes`) instead of one per absent resource.
+  never-synced version reports one warning (`agents sync <agent>@<version>
+  --yes`) instead of one row per absent resource.
 
 **Every check the old overview printed is a finding now.** `renderOverviewText`
 was the ONLY text renderer for several independent checks, so deleting it dropped
@@ -671,8 +676,17 @@ Requirement ids are section-namespaced — `SES-*` / `SEC-*` / `EXEC-*`, with th
 `-GAP-` (known gap) families — and a requirement the code does not yet fully meet
 carries a trailing `Status: [Intended]` or `[Drift]` line naming its `-GAP-`.
 
-Both specs also enumerate **known gaps** (implemented-vs-intended drift) — a new
-feature MUST NOT widen them and SHOULD close the one it touches.
+Beyond the two above, the document also specifies **§Agent execution**,
+**§Scheduling & execution singularity**, and **§Watchdog**. It does **not** cover
+every command group — `hosts`, `teams`, and `cloud` have design docs but zero
+RFC-2119 requirements, and surfaces like `wallet`, `worktree`, and `sync`/`apply`
+have neither. The
+[coverage inventory](docs/specifications.md#coverage-inventory) says which row a
+surface sits in; check it before treating a behavior as guaranteed.
+
+Every section enumerates **known gaps** (implemented-vs-intended drift) — a new
+feature MUST NOT widen them and SHOULD close the one it touches. A gap that has
+been closed stays as a `(resolved)` entry so references never dangle.
 
 ## Detailed design
 

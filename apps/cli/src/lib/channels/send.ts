@@ -9,6 +9,7 @@
  * Agent control (`agents message`, `sessions inject`) stays outside this module.
  */
 import type { Meta } from '../types.js';
+import { getOwnerNotifyFromHumans } from '../humans.js';
 import { registerBuiltinProviders } from './providers/index.js';
 import { resolveTransport } from './resolve.js';
 import type { SendResult } from './registry.js';
@@ -75,8 +76,13 @@ export function composeSendText(text: string, urls?: string[]): string {
   return body ? `${body}\n${extra.join('\n')}` : extra.join('\n');
 }
 
-/** Read notify.owner; null when either field is missing. */
+/**
+ * Read the owner destination; humans.yaml is the primary source, agents.yaml
+ * notify.owner is the fallback. Returns null when neither is set.
+ */
 export function readOwnerDest(meta: Meta): { channel: string; to: string } | null {
+  const humansOwner = getOwnerNotifyFromHumans();
+  if (humansOwner) return humansOwner;
   const owner = meta.notify?.owner;
   const channel = owner?.channel?.trim();
   const to = owner?.to?.trim();
@@ -108,17 +114,17 @@ export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): Resolv
   }
 
   // Owner defaults fill only missing fields (and expand the bare "owner" alias).
-  // Explicit --channel/--to always win; a complete notify.owner is NOT required
-  // when both flags are already set (same merge-then-require shape as main).
-  const ownerCfg = meta.notify?.owner;
-  const ownerChannel = ownerCfg?.channel?.trim() || '';
-  const ownerTo = ownerCfg?.to?.trim() || '';
-
+  // humans.yaml is the primary source; notify.owner in agents.yaml is the
+  // fallback for the migration window. Explicit --channel/--to always win.
   let channel = (input.channel ?? '').trim();
   let to = (input.to ?? '').trim();
   const usedOwnerAlias = isOwnerAlias(to);
 
   if (input.ownerMode || usedOwnerAlias) {
+    const humansOwner = getOwnerNotifyFromHumans();
+    const fallbackOwner = meta.notify?.owner;
+    const ownerChannel = humansOwner?.channel ?? fallbackOwner?.channel?.trim() ?? '';
+    const ownerTo = humansOwner?.to ?? fallbackOwner?.to?.trim() ?? '';
     if (!channel) channel = ownerChannel;
     if (!to || usedOwnerAlias) to = ownerTo;
   }
@@ -126,7 +132,7 @@ export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): Resolv
   if (!channel || !to) {
     const hint =
       input.ownerMode || usedOwnerAlias
-        ? 'Set notify.owner.{channel,to} in agents.yaml, or pass --channel and --to explicitly.'
+        ? 'Set notify.{channel,to} in humans.yaml (or notify.owner in agents.yaml), or pass --channel and --to explicitly.'
         : 'Need --channel and --to (or --to owner with notify.owner configured). ' +
           'Example: agents send --channel desktop --to local --text "hi"';
     return { ok: false, error: hint };

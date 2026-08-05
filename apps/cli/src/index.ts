@@ -189,6 +189,7 @@ import {
   loadAudit,
   loadWebhook,
   loadFunnel,
+  loadHumans,
   loadSsh,
   loadPull,
   loadPush,
@@ -1135,6 +1136,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadAudit);
   await reg(loadWebhook);
   await reg(loadFunnel);
+  await reg(loadHumans);
   registerHqTombstoneCommand(program);
   await reg(loadFeed);
   await reg(loadMailboxes);
@@ -1351,7 +1353,7 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1') {
     // Bumping the suffix re-runs migrations for every user; binary releases that
     // don't change the schema must NOT re-run (they would destroy user content
     // when migration steps overlap with user-authored paths). See issue #20.
-    const sentinelValue = 'v14';
+    const sentinelValue = 'v15';
     let needRun = true;
     try {
       if (fs.existsSync(sentinel) && fs.readFileSync(sentinel, 'utf-8').trim() === sentinelValue) {

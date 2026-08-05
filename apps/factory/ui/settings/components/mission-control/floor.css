@@ -574,8 +574,9 @@
 .swarmify-root .hb.dead .beat { background: var(--status-failed); animation: none; }
 @keyframes sw-beat { 0% { box-shadow: 0 0 0 0 var(--status-running-bg); } 70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
-/* data-freshness chip — cross-host sweep age in the LIVE ACTIVITY header. Spins while
- * a sweep is in flight; amber when stale (a host is likely stuck). Click to refresh. */
+/* data-freshness chip — cross-host age in the LIVE ACTIVITY header. Spins while
+ * a manual refresh is in flight; amber when stale/failed. Click to refresh hosts.
+ * Cached rows stay visible under stale/failure — this chip never blanks the feed. */
 .swarmify-root .fresh { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0;
   color: var(--ds-text-dim); background: var(--ds-bg-inset); border: 1px solid var(--ds-border); border-radius: 20px;
   padding: 3px 9px 3px 7px; cursor: pointer; user-select: none; white-space: nowrap; transition: color .15s, border-color .15s; }
@@ -585,7 +586,36 @@
 .swarmify-root .fresh.syncing .rot { animation: sw-spin .9s linear infinite; }
 .swarmify-root .fresh.stale { color: var(--status-pending); border-color: var(--status-pending); }
 .swarmify-root .fresh.stale .rot { color: var(--status-pending); }
+.swarmify-root .fresh.local-fresh { cursor: default; opacity: 0.85; padding-left: 9px; }
+.swarmify-root .fresh.local-fresh:hover { border-color: var(--ds-border); color: var(--ds-text-dim); }
 @keyframes sw-spin { to { transform: rotate(360deg); } }
+
+/* Compact empty / CLI-unavailable copy in the agents feed (never a blocking canvas). */
+.swarmify-root .feed-empty {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: var(--r-lg);
+  border: 1px dashed var(--ds-border);
+  background: var(--ds-bg-inset);
+  color: var(--ds-text-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.swarmify-root .feed-empty-warn {
+  border-color: var(--status-pending);
+  background: var(--status-pending-bg, rgba(234, 179, 8, 0.08));
+  color: var(--ds-text);
+}
+.swarmify-root .feed-empty .mono,
+.swarmify-root .host-dim .mono { font-family: "Geist Mono", ui-monospace, monospace; font-size: 11.5px; }
+.swarmify-root .host-freshness-line {
+  display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; padding: 0 2px;
+}
+.swarmify-root .host-fresh-pill {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
+  color: var(--ds-text-dim); background: var(--ds-bg-inset);
+  border: 1px solid var(--ds-border); border-radius: 999px; padding: 2px 8px;
+}
 
 /* stalled card — distinct from static .attn: a slow amber outline pulse says "no heartbeat" */
 .swarmify-root .fitem.stalled { border-color: var(--status-pending); box-shadow: 0 0 0 1px var(--status-pending-bg); animation: sw-stall 2.4s ease-in-out infinite; }

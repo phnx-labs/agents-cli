@@ -15,6 +15,8 @@ interface ProjectsPaneProps {
   rollups?: Record<string, ProjectRollup>
   linearProjects: LinearProjectLite[]
   pickedFolder: { path: string; repoSlug?: string; name: string; suggestedLinear?: LinearProjectLite } | null
+  /** Inline failure from an agents projects command — never toast. */
+  commandError?: string | null
   onSave: (p: ManagedProject) => void
   onDelete: (id: string) => void
   onPickFolder: () => void
@@ -47,7 +49,24 @@ function truncateMiddle(s: string, max = 42): string {
   return `${s.slice(0, head)}…${s.slice(s.length - tail)}`
 }
 
-export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFolder, onSave, onDelete, onPickFolder, onClose }: ProjectsPaneProps) {
+/**
+ * CLI-safe project id from a repo slug or display name.
+ * `owner/repo` must not keep `/` (path/id separators break agents projects ops).
+ * Exported for unit tests.
+ */
+export function safeProjectId(raw: string): string {
+  const id = raw
+    .trim()
+    .toLowerCase()
+    .replace(/\//g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return id || 'project'
+}
+
+export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFolder, commandError = null, onSave, onDelete, onPickFolder, onClose }: ProjectsPaneProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [path, setPath] = useState('')
   const [name, setName] = useState('')
@@ -100,7 +119,8 @@ export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFol
   const save = () => {
     if (!canSave) return
     const base = editingId ? projects.find((p) => p.id === editingId) ?? null : null
-    let id = editingId ?? (repoSlug.trim() || name.trim()).toLowerCase().replace(/\s+/g, '-')
+    // Edits keep the existing id; new rows sanitize repoSlug (`owner/repo` → `owner-repo`).
+    let id = editingId ?? safeProjectId(repoSlug.trim() || name.trim())
     // New project: never overwrite an existing entry that shares a name/slug (e.g. two
     // manual projects both named "Agents CLI" with no repo slug). Disambiguate with a
     // numeric suffix so upsertManagedProject can't silently drop the first one.
@@ -118,6 +138,9 @@ export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFol
       repoSlug: repoSlug.trim() || undefined,
       linearProjectId: linear?.id,
       linearProjectName: linear?.name,
+      // Preserve host-owned dispatch caps on edit — the form does not edit them.
+      autoDispatch: base?.autoDispatch,
+      maxAgents: base?.maxAgents,
       confidence: base?.confidence ?? 'high',
       source: base?.source ?? 'manual',
     })
@@ -129,7 +152,8 @@ export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFol
       <div className="dhead" style={{ justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span className="title">Projects</span>
-          <span className="sub">{projects.length} managed</span>
+          <span className="sub">{projects.length} CLI-managed</span>
+          <span className="host-cap" title="Owned by agents projects — Factory only renders">CLI-managed</span>
         </div>
         <button className="host-btn" onClick={onClose}>
           <Icon name="chevL" size={12} /> back to agents
@@ -137,11 +161,16 @@ export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFol
       </div>
 
       <div className="dbody">
+        {commandError && (
+          <div className="host-config-error" role="alert" data-testid="project-command-error">
+            {commandError}
+          </div>
+        )}
         {/* Managed list */}
         <div>
-          <div className="lbl">Managed projects</div>
+          <div className="lbl">CLI-managed projects</div>
           {projects.length === 0 ? (
-            <div className="host-dim">No managed projects yet. Add one below.</div>
+            <div className="host-dim">No CLI-managed projects yet. Add one below, or run <span className="mono">agents projects</span>.</div>
           ) : (
             projects.map((p) => (
               <div

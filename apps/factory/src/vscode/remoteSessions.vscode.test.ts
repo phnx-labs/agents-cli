@@ -6,8 +6,14 @@ import {
   __resetRemoteSessionsCachesForTests,
   fetchHostSessions,
   fetchLocalSessions,
+  discoverHosts,
+  seedFloorHostsFromDevices,
   __remoteSessionsTestCounters,
 } from './remoteSessions.vscode';
+import {
+  __deviceHealthTestCounters,
+  setRegisteredDevicesCache,
+} from './deviceHealth.vscode';
 import {
   acceptSuccessfulFloorFetch,
   retainLastGoodOnFailure,
@@ -58,6 +64,8 @@ test('an empty list resolves to an empty array', async () => {
 
 afterEach(() => {
   __resetRemoteSessionsCachesForTests();
+  setRegisteredDevicesCache(null);
+  __deviceHealthTestCounters.reset();
 });
 
 function sampleSnap(): FloorHostSessionsSnapshot {
@@ -90,7 +98,7 @@ test('setFloorSnapshotStore hydrates last-good so non-force fetchHostSessions do
     },
   });
   expect(getLastGoodFloorSnapshot()?.sessions).toHaveLength(2);
-  expect(shouldRunBareFleetFetch(false, true)).toBe(false);
+  expect(shouldRunBareFleetFetch(false)).toBe(false);
 
   __remoteSessionsTestCounters.reset();
   const before = __remoteSessionsTestCounters.bareActiveCalls;
@@ -103,6 +111,21 @@ test('setFloorSnapshotStore hydrates last-good so non-force fetchHostSessions do
   expect(b.sessions.map((s) => s.sessionId).sort()).toEqual(['local-1', 'remote-1']);
   expect(c.hostFreshness?.yosemite).toBe(1000);
   expect(written).toBeNull(); // non-force read does not rewrite
+});
+
+test('cold non-force host read is cache-only before activation seeding', async () => {
+  __remoteSessionsTestCounters.reset();
+  __deviceHealthTestCounters.reset();
+
+  const result = await fetchHostSessions(Date.now(), { force: false });
+
+  expect(result.fromCache).toBe(true);
+  expect(result.hosts).toEqual([
+    { name: 'this-mac', online: true, agents: 0, load: 'idle', uses: 0 },
+  ]);
+  expect(result.sessions).toEqual([]);
+  expect(__remoteSessionsTestCounters.bareActiveCalls).toBe(0);
+  expect(__deviceHealthTestCounters.registeredDeviceCliCalls).toBe(0);
 });
 
 test('retainLastGoodOnFailure keeps remote rows when a refresh fails', () => {
@@ -145,3 +168,29 @@ test('hydrate retains full last-good including remote rows; fail path cannot emp
   expect(kept?.fromCache).toBe(true);
 });
 
+test('discoverHosts reuses the activation device cache without another devices CLI call', async () => {
+  setRegisteredDevicesCache([
+    { name: 'worker', host: 'worker.tailnet', online: true, registeredAt: 1 },
+  ]);
+  const before = __deviceHealthTestCounters.registeredDeviceCliCalls;
+  const hosts = await discoverHosts();
+  expect(__deviceHealthTestCounters.registeredDeviceCliCalls).toBe(before);
+  expect(hosts.some((host) => host.name === 'worker' && host.online)).toBe(true);
+});
+
+test('activation device seed adds registered hosts while retaining last-good sessions', () => {
+  const snap = sampleSnap();
+  let written: FloorHostSessionsSnapshot | null = null;
+  setFloorSnapshotStore({
+    read: () => snap,
+    write: (next) => {
+      written = next;
+    },
+  });
+  const merged = seedFloorHostsFromDevices([
+    { name: 'newbox', host: 'newbox.tailnet', online: true },
+  ]);
+  expect(merged.hosts.some((host) => host.name === 'newbox')).toBe(true);
+  expect(merged.sessions.map((session) => session.sessionId).sort()).toEqual(['local-1', 'remote-1']);
+  expect(written?.hosts.some((host) => host.name === 'newbox')).toBe(true);
+});

@@ -12,7 +12,7 @@ import type { AgentId, Mode } from './types.js';
 import { ALL_MODES } from './types.js';
 import { AGENTS } from './agents.js';
 import { parseTimeout } from './routines.js';
-import { getBinaryPath, getVersionHomePath, isVersionInstalled, resolveVersion } from './versions.js';
+import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled, resolveVersion } from './versions.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { isTierToken, resolveTier } from './model-tiers.js';
 import { emitStart, createTimer, redactPrompt, redactArgs } from './events.js';
@@ -511,6 +511,18 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     result.AGENTS_PARENT_SESSION_ID = spawnerSessionId;
   }
   result.AGENTS_RUNTIME = resolveInteractive(options) ? 'terminal' : 'headless';
+  // Durable SessionStart metadata. The hook joins these launch facts to the
+  // harness-provided real session id and writes them under the shared history
+  // directory, so a later resume can restore the permission boundary without
+  // re-parsing harness-specific transcripts.
+  result.AGENTS_RUN_MODE = resolveHeadlessMode(
+    options.agent,
+    normalizeMode(options.mode),
+    resolveInteractive(options),
+    options.modeWarningContext,
+    options.modeWarningState,
+  );
+  result.AGENTS_HISTORY_DIR = getHistoryDir();
   // So activity / feed posts stamp the right harness without re-detecting.
   if (options.agent) {
     result.AGENTS_AGENT_NAME = options.agent;
@@ -562,7 +574,10 @@ export interface AgentCommandTemplate {
    *   { subcommand } — replace the headless base subcommand with `<subcommand> <id>`
    *                    (codex: `codex exec` -> `codex exec resume <id>`)
    */
-  resume?: { flag: string } | { subcommand: string };
+  resume?: (
+    { flag: string; interactiveFlag?: string; headlessFlag?: string } |
+    { subcommand: string }
+  ) & { since?: string };
 }
 
 /**
@@ -623,6 +638,7 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     },
     jsonFlags: ['--output-format', 'stream-json'],
     modelFlag: '--model',
+    resume: { flag: '--resume', since: '2026.7.23' },
   },
   opencode: {
     base: ['opencode', 'run'],
@@ -746,6 +762,7 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     },
     jsonFlags: ['--output-format', 'streaming-json'],
     modelFlag: '--model',
+    resume: { flag: '--resume', since: '0.2.91' },
   },
   kimi: {
     base: ['kimi'],
@@ -758,6 +775,7 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     },
     jsonFlags: ['--output-format', 'stream-json'],
     modelFlag: '--model',
+    resume: { flag: '--session', since: '0.19.2' },
   },
   // Factory AI Droid (`droid exec` for headless, `droid` for TUI). Flags from
   // docs.factory.ai CLI reference: prompt is positional; --auto low|medium|high
@@ -775,6 +793,7 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     },
     jsonFlags: ['-o', 'stream-json'],
     modelFlag: '-m',
+    resume: { flag: '--resume', headlessFlag: '--session-id', since: '0.186.0' },
   },
   hermes: {
     base: ['hermes', 'chat'],
@@ -791,8 +810,11 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
  * command template's `resume` field — the single source of truth. Agents that
  * return false resume via the universal Tier-2 `/continue` replay instead.
  */
-export function nativeResume(agent: AgentId): boolean {
-  return AGENT_COMMANDS[agent]?.resume !== undefined;
+export function nativeResume(agent: AgentId, version?: string): boolean {
+  const resume = AGENT_COMMANDS[agent]?.resume;
+  if (!resume) return false;
+  if (!resume.since) return true;
+  return !!version && compareVersions(version, resume.since) >= 0;
 }
 
 /**
@@ -991,7 +1013,10 @@ export function buildExecCommand(options: ExecOptions): string[] {
   // `resume`, the legacy claude-only `--session-id` CREATES a session with that id.
   if (options.resume && options.sessionId && resumeSpec) {
     if ('flag' in resumeSpec) {
-      cmd.push(resumeSpec.flag, options.sessionId);
+      const flag = interactive
+        ? (resumeSpec.interactiveFlag ?? resumeSpec.flag)
+        : (resumeSpec.headlessFlag ?? resumeSpec.flag);
+      cmd.push(flag, options.sessionId);
     } else {
       cmd.push(options.sessionId);
     }

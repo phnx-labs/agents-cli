@@ -116,4 +116,37 @@ describe('memory resource (RUSH-1330)', () => {
     expect(fs.existsSync(path.join(targetDir, '.agents-cli-memory.json'))).toBe(true);
   });
 
+  it('isFactFile excludes all rule/index files and lists only user facts', () => {
+    const home = makeTempHome();
+    const memDir = path.join(home, '.agents', 'memory');
+    fs.mkdirSync(memDir, { recursive: true });
+
+    // Rule and index files that must be excluded
+    fs.writeFileSync(path.join(memDir, 'AGENTS.md'), '# rules', 'utf-8');
+    fs.writeFileSync(path.join(memDir, 'README.md'), '# readme', 'utf-8');
+    fs.writeFileSync(path.join(memDir, 'CLAUDE.md'), '# claude', 'utf-8');
+    fs.writeFileSync(path.join(memDir, 'GEMINI.md'), '# gemini', 'utf-8');
+    fs.writeFileSync(path.join(memDir, 'MEMORY.md'), '# index', 'utf-8');
+    // The one real fact
+    fs.writeFileSync(path.join(memDir, 'my-fact.md'), '# fact', 'utf-8');
+
+    const child = spawnSync(
+      tsxBin,
+      ['-e', `
+        import * as memory from ${JSON.stringify(memoryModuleUrl)};
+        const facts = memory.listMemoryFacts(${JSON.stringify(home)});
+        console.log(JSON.stringify(facts.map(f => f.name)));
+      `],
+      { env: { ...process.env, HOME: home }, encoding: 'utf-8' },
+    );
+    if (child.status !== 0) throw new Error(child.stderr || child.stdout);
+    const names = JSON.parse((child.stdout || '').trim()) as string[];
+    expect(names).toEqual(['my-fact']);
+    expect(names).not.toContain('AGENTS');
+    expect(names).not.toContain('README');
+    expect(names).not.toContain('CLAUDE');
+    expect(names).not.toContain('GEMINI');
+    expect(names).not.toContain('MEMORY');
+  });
+
 });

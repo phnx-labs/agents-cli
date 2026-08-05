@@ -53,7 +53,7 @@ except Exception:
 }
 
 case "$AGENT" in
-  claude|codex)
+  claude|codex|droid|kimi)
     SID="$(printf '%s' "$STDIN_JSON" | extract_stdin_json 'session_id')"
     CWD="$(printf '%s' "$STDIN_JSON" | extract_stdin_json 'cwd')"
     ;;
@@ -79,6 +79,12 @@ esac
 if [ -z "$SID" ]; then
   exit 0
 fi
+
+# The session id becomes two filenames below. Reject path components before
+# either mktemp or mv sees the harness-provided value.
+case "$SID" in
+  *'/'*|*'\'*|'.'|'..') exit 0 ;;
+esac
 
 [ -z "$CWD" ] && CWD="$PWD"
 
@@ -108,4 +114,33 @@ json.dump(out, sys.stdout)
 PY
 
 mv -f "$TMP" "$STATE_DIR/$PPID.json"
+
+# Persist launch metadata under the harness's real session id. `agents run`
+# exports the EFFECTIVE mode after capability/headless resolution, plus the
+# shared (non-version-home) history directory. Atomic replacement lets a native
+# resume with an explicit --mode become the new mode for the next resume.
+HISTORY_DIR="${AGENTS_HISTORY_DIR:-}"
+RUN_MODE="${AGENTS_RUN_MODE:-}"
+if [ -n "$HISTORY_DIR" ] && [ -n "$RUN_MODE" ]; then
+  BY_SESSION_DIR="$HISTORY_DIR/by-session"
+  mkdir -p "$BY_SESSION_DIR"
+  SID_TMP="$(mktemp "$BY_SESSION_DIR/.${SID}.XXXXXX")"
+  python3 - "$SID" "$RUN_MODE" "${AGENTS_ACTOR:-}" "${AGENTS_ACTOR_KIND:-}" > "$SID_TMP" <<'PY'
+import json, sys, time
+sid, mode, actor, initiated_by = sys.argv[1:5]
+if mode not in ('plan', 'edit', 'auto', 'skip'):
+    raise SystemExit(1)
+out = {
+    'sessionId': sid,
+    'mode': mode,
+    'startedAtMs': int(time.time() * 1000),
+}
+if actor:
+    out['actor'] = actor
+if initiated_by in ('human', 'agent'):
+    out['initiatedBy'] = initiated_by
+json.dump(out, sys.stdout)
+PY
+  mv -f "$SID_TMP" "$BY_SESSION_DIR/$SID.json"
+fi
 exit 0

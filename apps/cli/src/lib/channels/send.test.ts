@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import type { Meta } from '../types.js';
 import {
   composeSendText,
@@ -195,5 +198,74 @@ describe('resolveSendEnvelope', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.envelope.text).toBe('https://x.test');
+  });
+});
+
+describe('owner destination from humans.yaml', () => {
+  let humansFile: string;
+
+  beforeEach(() => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'send-humans-test-'));
+    humansFile = path.join(tmp, 'humans.yaml');
+    process.env.AGENTS_HUMANS_FILE = humansFile;
+  });
+
+  afterEach(() => {
+    delete process.env.AGENTS_HUMANS_FILE;
+  });
+
+  function writeOwnerNotify(channel: string, to: string): void {
+    fs.writeFileSync(
+      humansFile,
+      `version: 1\nowner:\n  notify:\n    channel: ${channel}\n    to: '${to}'\n`,
+    );
+  }
+
+  it('readOwnerDest prefers humans.yaml over meta.notify.owner', () => {
+    writeOwnerNotify('imessage', '+12125550123');
+    expect(readOwnerDest(metaWithOwner)).toEqual({ channel: 'imessage', to: '+12125550123' });
+  });
+
+  it('readOwnerDest falls back to meta.notify.owner when humans.yaml absent', () => {
+    // humansFile not written — getOwnerNotifyFromHumans() returns null
+    expect(readOwnerDest(metaWithOwner)).toEqual({ channel: 'imessage', to: '+18055550100' });
+  });
+
+  it('resolveSendEnvelope uses humans.yaml for --to owner with no notify.owner', () => {
+    writeOwnerNotify('imessage', '+12125550123');
+    const r = resolveSendEnvelope({ text: 'ping', to: 'owner' }, metaEmpty);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.envelope.channel).toBe('imessage');
+    expect(r.envelope.to).toBe('+12125550123');
+  });
+
+  it('resolveSendEnvelope ownerMode uses humans.yaml with no notify.owner', () => {
+    writeOwnerNotify('imessage', '+12125550123');
+    const r = resolveSendEnvelope({ text: 'ping', ownerMode: true }, metaEmpty);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.envelope).toMatchObject({ channel: 'imessage', to: '+12125550123' });
+  });
+
+  it('explicit --channel/--to override humans.yaml', () => {
+    writeOwnerNotify('imessage', '+12125550123');
+    const r = resolveSendEnvelope(
+      { text: 'ping', ownerMode: true, channel: 'desktop', to: 'local' },
+      metaEmpty,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.envelope.channel).toBe('desktop');
+    expect(r.envelope.to).toBe('local');
+  });
+
+  it('humans.yaml takes precedence over meta.notify.owner', () => {
+    writeOwnerNotify('slack', 'U123');
+    const r = resolveSendEnvelope({ text: 'ping', to: 'owner' }, metaWithOwner);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.envelope.channel).toBe('slack');
+    expect(r.envelope.to).toBe('U123');
   });
 });

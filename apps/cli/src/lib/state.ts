@@ -71,6 +71,12 @@ const META_FILE = path.join(USER_AGENTS_DIR, 'agents.yaml');
 /** Legacy location — used only for one-shot migration in readMeta(). */
 const SYSTEM_META_FILE = path.join(SYSTEM_AGENTS_DIR, 'agents.yaml');
 
+/** Canonical path for the humans.yaml owner-identity/channel config. */
+const HUMANS_FILE = path.join(USER_AGENTS_DIR, 'humans.yaml');
+
+/** Return the absolute path to the humans.yaml file. */
+export function getHumansFilePath(): string { return process.env.AGENTS_HUMANS_FILE ?? HUMANS_FILE; }
+
 // ─── System resource dirs ─────────────────────────────────────────────────────
 
 const SYSTEM_COMMANDS_DIR = path.join(SYSTEM_AGENTS_DIR, 'commands');
@@ -331,7 +337,7 @@ export function getResolvedRulesDir(): string { return SYSTEM_RULES_DIR; }
 export function getMcpDir(): string { return SYSTEM_MCP_DIR; }
 
 /** Path to permission group YAML files — system repo. */
-export function getPermissionsDir(): string { return SYSTEM_PERMISSIONS_DIR; }
+export function getPermissionsDir(): string { return process.env.AGENTS_SYSTEM_PERMISSIONS_DIR ?? SYSTEM_PERMISSIONS_DIR; }
 
 /** Path to subagent definition directories — system repo. */
 export function getSubagentsDir(): string { return SYSTEM_SUBAGENTS_DIR; }
@@ -398,7 +404,7 @@ export function getUserHooksDir(): string { return USER_HOOKS_DIR; }
 export function getUserSkillsDir(): string { return USER_SKILLS_DIR; }
 export function getUserRulesDir(): string { return USER_RULES_DIR; }
 export function getUserMcpDir(): string { return USER_MCP_DIR; }
-export function getUserPermissionsDir(): string { return USER_PERMISSIONS_DIR; }
+export function getUserPermissionsDir(): string { return process.env.AGENTS_USER_PERMISSIONS_DIR ?? USER_PERMISSIONS_DIR; }
 export function getUserSubagentsDir(): string { return USER_SUBAGENTS_DIR; }
 
 export function getSystemWorkflowsDir(): string { return SYSTEM_WORKFLOWS_DIR; }
@@ -772,7 +778,6 @@ export function ensureAgentsDir(): void {
   if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, opts);
   if (!fs.existsSync(PACKAGES_DIR)) fs.mkdirSync(PACKAGES_DIR, opts);
   if (!fs.existsSync(ROUTINES_DIR)) fs.mkdirSync(ROUTINES_DIR, opts);
-  if (!fs.existsSync(WEBHOOKS_DIR)) fs.mkdirSync(WEBHOOKS_DIR, opts);
   if (!fs.existsSync(RUNS_DIR)) fs.mkdirSync(RUNS_DIR, opts);
   if (!fs.existsSync(VERSIONS_DIR)) fs.mkdirSync(VERSIONS_DIR, opts);
   if (!fs.existsSync(SHIMS_DIR)) fs.mkdirSync(SHIMS_DIR, opts);
@@ -782,7 +787,6 @@ export function ensureAgentsDir(): void {
   if (!fs.existsSync(SYSTEM_RULES_DIR)) fs.mkdirSync(SYSTEM_RULES_DIR, opts);
   if (!fs.existsSync(SYSTEM_PERMISSIONS_DIR)) fs.mkdirSync(SYSTEM_PERMISSIONS_DIR, opts);
   if (!fs.existsSync(SYSTEM_SUBAGENTS_DIR)) fs.mkdirSync(SYSTEM_SUBAGENTS_DIR, opts);
-  if (!fs.existsSync(SYSTEM_WEBHOOKS_DIR)) fs.mkdirSync(SYSTEM_WEBHOOKS_DIR, opts);
   try { fs.chmodSync(SYSTEM_AGENTS_DIR, 0o700); } catch {}
 }
 

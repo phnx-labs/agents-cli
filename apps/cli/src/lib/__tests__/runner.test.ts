@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -17,6 +17,15 @@ import { getBinaryPath, getVersionDir } from '../versions.js';
 import { rotationFailoverChain, type RotateCandidate, type RotateResult } from '../rotate.js';
 import { detectRateLimit } from '../exec.js';
 import { buildExecCommand } from '../exec.js';
+import * as activation from '../routine-activation.js';
+
+beforeEach(() => {
+  vi.spyOn(activation, 'routineEnabledOnThisDevice').mockReturnValue(null);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function baseJob(overrides: Partial<JobConfig> = {}): JobConfig {
   return {

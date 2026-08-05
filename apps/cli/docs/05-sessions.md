@@ -22,11 +22,19 @@ interchangeable — pick the verb for the intent:
 | Interactive → **headless** (keep working unattended) | `agents sessions detach <id>` |
 | Headless → **interactive** in this terminal | `agents sessions attach <id>` |
 | Multi-select history and open each in a tab/split | `agents sessions resume [query]` |
+| Resume one session in its original harness, version, device, cwd, and mode | `agents resume <id>` |
 | Continue one session from a script / `run` path | `agents run <agent> --resume <id> …` |
 
 `focus` is the default “take me there” for a live process. `attach` / `detach` are
 the presence pair (foreground ↔ background). `resume` is the multi-open / history
-path. Detail in **Background & foreground (detach / attach)** below, and
+path. Top-level `agents resume <id>` is the strict single-session shortcut: a full
+ID checks the local SQLite index first, fans out to registered devices only on a
+local miss, routes to the owning device, and invokes the version that created the
+session with its recorded cwd and launch mode. `agents run auto --resume <id>` is
+the adaptive form: it prefers native resume when the original harness/version is
+healthy and otherwise lets the normal router select an available harness/account,
+then hands the transcript over through `/continue`. Detail in **Background &
+foreground (detach / attach)** below, and
 `agents sessions --help`.
 
 ## Architecture

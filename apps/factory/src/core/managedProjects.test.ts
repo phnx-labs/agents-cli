@@ -133,6 +133,41 @@ describe('managedToProjectDef', () => {
     expect(def.root).toBe('~/src/rush');
     expect(def.agents).toBeUndefined();
   });
+
+  test('preserves prior dispatch fields when an older Factory payload omits them', () => {
+    const def = managedToProjectDef(
+      {
+        id: 'rush',
+        name: 'rush',
+        path: path.join(HOME, 'src/rush'),
+        confidence: 'high',
+        source: 'manual',
+      },
+      {
+        name: 'rush',
+        dispatch: { enabled: true, maxAgents: 4, provider: 'host', host: 'mac-mini' },
+      },
+    );
+    expect(def.dispatch).toEqual({ enabled: true, maxAgents: 4, provider: 'host', host: 'mac-mini' });
+  });
+
+  test('an explicit autoDispatch false disables dispatch without deleting its routing fields', () => {
+    const def = managedToProjectDef(
+      {
+        id: 'rush',
+        name: 'rush',
+        path: path.join(HOME, 'src/rush'),
+        autoDispatch: false,
+        confidence: 'high',
+        source: 'manual',
+      },
+      {
+        name: 'rush',
+        dispatch: { enabled: true, maxAgents: 4, provider: 'host', host: 'mac-mini' },
+      },
+    );
+    expect(def.dispatch).toEqual({ maxAgents: 4, provider: 'host', host: 'mac-mini' });
+  });
 });
 
 describe('upsertManagedProject / deleteManagedProject — id safety', () => {

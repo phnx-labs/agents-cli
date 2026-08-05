@@ -16,6 +16,7 @@
 import type { OpenBlock } from './feed.js';
 import type { Meta } from './types.js';
 import { readMeta } from './state.js';
+import { getOwnerNotifyFromHumans } from './humans.js';
 import { registerBuiltinProviders } from './channels/providers/index.js';
 import { lookupTransport } from './channels/resolve.js';
 import type { SendResult } from './channels/registry.js';
@@ -81,7 +82,10 @@ export function buildOpenClawNotifyArgs(
  */
 export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}): Promise<SendResult> {
   const meta = options.meta ?? readMeta();
-  const owner = meta.notify?.owner;
+  // humans.yaml is the primary source; agents.yaml notify.owner is the fallback.
+  const humansOwner = getOwnerNotifyFromHumans();
+  const legacyOwner = meta.notify?.owner;
+  const owner = humansOwner ?? legacyOwner;
   const channel = options.channel ?? owner?.channel;
   const target = options.target ?? owner?.to;
   if (!channel || !target) {
@@ -89,7 +93,7 @@ export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}
       ok: false,
       channel: channel ?? 'unknown',
       id: target ?? '',
-      error: 'notify.owner.{channel,to} not set in agents.yaml',
+      error: 'notify.owner.{channel,to} not set in humans.yaml or agents.yaml',
     };
   }
   registerBuiltinProviders();

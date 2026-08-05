@@ -63,7 +63,14 @@ import { startForemanAudio, ForemanAudioSession } from './foreman.audio';
 import { runSmartTurn, capHistory } from './foreman.smart';
 import { buildTaskDispatchPrompt } from '../core/tasks';
 import { draftDispatchPrompt, type DraftTicket } from '../core/draftPrompt';
-import { listRegisteredDevices, getDeviceSyncStatus } from './deviceHealth.vscode';
+import {
+  fetchRegisteredDevices,
+  getRegisteredDevicesCache,
+  getDeviceSyncStatus,
+  listRegisteredDevices,
+  setRegisteredDevicesCache,
+  type Device,
+} from './deviceHealth.vscode';
 import { inferProjectCandidates } from '../core/projectIndex';
 import { normalizeHost, buildRemoteFocusCommand } from '../core/remoteSessions';
 import { rankRepos } from '../core/repoIndex';
@@ -71,7 +78,11 @@ import { detectProjects } from '../core/projectDetect';
 import { getSyncStatus } from '../core/repoSync';
 import {
   FLOOR_SNAPSHOT_KEY,
-  INVENTORY_CACHE_TTL_MS,
+  FLOOR_DEVICES_KEY,
+  FLOOR_INVENTORY_KEY,
+  isInventoryStale,
+  parseFloorDevicesSnapshot,
+  parseFloorInventorySnapshot,
   parseFloorSnapshot,
 } from '../core/floorSnapshot';
 import {
@@ -1529,15 +1540,22 @@ let cachedInventories: { data: Record<string, AgentInventory>; fetchedAt: number
 let inventoryFetchInflight: Promise<Record<string, AgentInventory>> | null = null;
 /** Activation seed ran once for this extension host lifetime. */
 let floorActivationSeeded = false;
+let floorActivationSeedPromise: Promise<void> | null = null;
+let floorDataContext: vscode.ExtensionContext | null = null;
 
-async function getCachedAgentInventories(force = false): Promise<Record<string, AgentInventory>> {
-  if (!force && cachedInventories && Date.now() - cachedInventories.fetchedAt < INVENTORY_CACHE_TTL_MS) {
-    return cachedInventories.data;
-  }
+async function revalidateAgentInventories(): Promise<Record<string, AgentInventory>> {
   if (inventoryFetchInflight) return inventoryFetchInflight;
   inventoryFetchInflight = (async () => {
     const data = await fetchAgentInventories(INVENTORY_AGENT_KEYS);
-    cachedInventories = { data, fetchedAt: Date.now() };
+    const fetchedAt = Date.now();
+    cachedInventories = { data, fetchedAt };
+    if (floorDataContext) {
+      await floorDataContext.globalState.update(FLOOR_INVENTORY_KEY, { data, fetchedAt });
+    }
+    settingsPanel?.webview.postMessage({
+      type: 'agentInventoriesData',
+      agentInventories: data,
+    });
     return data;
   })();
   try {
@@ -1547,8 +1565,19 @@ async function getCachedAgentInventories(force = false): Promise<Record<string, 
   }
 }
 
+async function getCachedAgentInventories(force = false): Promise<Record<string, AgentInventory>> {
+  if (force) return revalidateAgentInventories();
+  const current = cachedInventories?.data ?? {};
+  if (isInventoryStale(cachedInventories?.fetchedAt)) {
+    void revalidateAgentInventories().catch((err) =>
+      console.error('[SETTINGS] Agent inventory revalidation failed:', err),
+    );
+  }
+  return current;
+}
+
 function invalidateAgentInventoryCache(): void {
-  cachedInventories = null;
+  if (cachedInventories) cachedInventories.fetchedAt = 0;
 }
 
 /**
@@ -1559,20 +1588,53 @@ function invalidateAgentInventoryCache(): void {
  */
 export async function seedFloorDataPipeline(context: vscode.ExtensionContext): Promise<void> {
   const remote = await import('./remoteSessions.vscode');
+  floorDataContext = context;
   remote.setFloorSnapshotStore({
     read: () => parseFloorSnapshot(context.globalState.get(FLOOR_SNAPSHOT_KEY)) ?? null,
     write: (snap) => {
       void context.globalState.update(FLOOR_SNAPSHOT_KEY, snap);
     },
   });
+  const persistedDevices = parseFloorDevicesSnapshot(context.globalState.get(FLOOR_DEVICES_KEY));
+  if (persistedDevices) {
+    setRegisteredDevicesCache(persistedDevices.devices as Device[]);
+    remote.seedFloorHostsFromDevices(persistedDevices.devices);
+  }
+  const persistedInventory = parseFloorInventorySnapshot(context.globalState.get(FLOOR_INVENTORY_KEY));
+  if (persistedInventory && !cachedInventories) {
+    cachedInventories = {
+      data: persistedInventory.data as Record<string, AgentInventory>,
+      fetchedAt: persistedInventory.fetchedAt,
+    };
+  }
+  if (floorActivationSeedPromise) return floorActivationSeedPromise;
   if (floorActivationSeeded) return;
   floorActivationSeeded = true;
   // One registry read (devices list --json) + one local sessions seed. Never
   // doctor / devices status / fleet status / projects status.
-  await Promise.all([
-    listRegisteredDevices(),
+  floorActivationSeedPromise = Promise.all([
+    (async () => {
+      try {
+        const devices = await fetchRegisteredDevices();
+        const fetchedAt = Date.now();
+        await context.globalState.update(FLOOR_DEVICES_KEY, { devices, fetchedAt });
+        remote.seedFloorHostsFromDevices(devices);
+        settingsPanel?.webview.postMessage({
+          type: 'devicesData',
+          devices,
+          local: normalizeHost(hostname()),
+        });
+      } catch (err) {
+        console.error('[SETTINGS] Device registry activation seed failed:', err);
+      }
+    })(),
     remote.seedLocalSessionsOnce(getSettings(context).projectRules ?? []),
-  ]);
+  ]).then(() => undefined);
+  try {
+    await floorActivationSeedPromise;
+  } finally {
+    floorActivationSeedPromise = null;
+  }
 }
 
 export function openPanel(context: vscode.ExtensionContext): void {
@@ -1906,22 +1968,14 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         // Dispatch opens from persisted/cached inventory + last-good host sessions.
         // Never probeCpu and never per-device CPU/memory + sessions fan-out.
         try {
-          const { fetchHostSessions, LOCAL_LABEL, getLastGoodFloorSnapshot } = await import('./remoteSessions.vscode');
+          const { fetchHostSessions, LOCAL_LABEL } = await import('./remoteSessions.vscode');
           const inventories = await getCachedAgentInventories();
-          // Prefer last-good (no CLI). Cold open with no snapshot: one non-force
-          // fetchHostSessions may seed once; subsequent opens stay cache-only.
-          const lastGood = getLastGoodFloorSnapshot();
-          const hostResult = lastGood
-            ? {
-                hosts: lastGood.hosts,
-                sessions: lastGood.sessions,
-                groups: lastGood.groups,
-                fetchedAt: lastGood.fetchedAt,
-              }
-            : await fetchHostSessions(Date.now(), {
-                force: false,
-                projectRules: getSettings(context).projectRules ?? [],
-              });
+          // Non-force is cache-only even on a true cold start; activation owns
+          // the one device-registry read and local-session seed.
+          const hostResult = await fetchHostSessions(Date.now(), {
+            force: false,
+            projectRules: getSettings(context).projectRules ?? [],
+          });
           const defaultTitle = context.globalState.get<string>('agents.defaultAgentTitle', 'CC');
           const defaultAgentId = getBuiltInDefByTitle(defaultTitle)?.key ?? 'claude';
           const agents = mapInventoriesToInstalledAgents(inventories, defaultAgentId);
@@ -2031,13 +2085,8 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         // session bucket into this name so the machine shows once under its real
         // name instead of duplicated as 'this-mac' + the registry name.
         const local = normalizeHost(hostname());
-        try {
-          const devices = await listRegisteredDevices();
-          settingsPanel?.webview.postMessage({ type: 'devicesData', devices, local });
-        } catch (err) {
-          console.error('[SETTINGS] Error listing devices:', err);
-          settingsPanel?.webview.postMessage({ type: 'devicesData', devices: [], local });
-        }
+        const devices = getRegisteredDevicesCache() ?? [];
+        settingsPanel?.webview.postMessage({ type: 'devicesData', devices, local });
         break;
       }
       case 'deviceHealth': {
@@ -2046,23 +2095,18 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         // from this path (Factory Floor performance track): online/offline comes
         // from `agents devices list --json` only. Live load is not required to
         // open Dispatch; ranking uses last-good session counts when present.
-        try {
-          const devices = await listRegisteredDevices();
-          const now = Date.now();
-          const health = devices.map((device) => ({
-            device,
-            stats: {
-              host: device.host,
-              reachable: device.online === true,
-              runningAgents: 0,
-              fetchedAt: now,
-            },
-          }));
-          settingsPanel?.webview.postMessage({ type: 'deviceHealthData', health });
-        } catch (err) {
-          console.error('[SETTINGS] Error fetching device health:', err);
-          settingsPanel?.webview.postMessage({ type: 'deviceHealthData', health: [] });
-        }
+        const devices = getRegisteredDevicesCache() ?? [];
+        const now = Date.now();
+        const health = devices.map((device) => ({
+          device,
+          stats: {
+            host: device.host,
+            reachable: device.online === true,
+            runningAgents: 0,
+            fetchedAt: now,
+          },
+        }));
+        settingsPanel?.webview.postMessage({ type: 'deviceHealthData', health });
         break;
       }
       case 'projectCandidates': {
@@ -2433,8 +2477,8 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         // Throughput now rides the CLI payload (ActiveSession.tokPerSec, issue
         // #741): sum the rows belonging to this window's live terminals instead
         // of re-reading and re-parsing each transcript here. fetchLocalSessions
-        // is short-TTL cached, so the 2.5s webview poll shares subprocesses with
-        // the feed poll.
+        // is served from the 60s local last-good backstop, so the 2.5s webview
+        // animation read does not create a recurring CLI subprocess.
         let total = 0;
         try {
           const { fetchLocalSessions } = await import('./remoteSessions.vscode');

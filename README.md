@@ -341,9 +341,11 @@ agents sessions resume                     # multi-select; packs two sessions pe
 agents sessions resume "auth middleware"   # pre-filter the pool, then choose
 agents sessions resume --tmux              # into persistent tmux — survives editor restarts
 agents sessions resume --host zion --tmux  # resume on another machine over SSH
+agents resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # original harness/version/device/mode
+agents run auto --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # adapt if its account is unavailable
 ```
 
-`agents sessions resume` reopens sessions in whatever terminal you're in -- auto-detected across iTerm, Ghostty, tmux, and the VSCodium agent-terminal, or forced with `--iterm` / `--ghostty` / `--tmux` / `--vscodium`. Back them with **tmux** and the runs turn durable: detach, close your editor, reboot the GUI -- the session is still alive to `agents tmux attach`. The whole `agents tmux` subsystem (persistent multiplexer sessions that survive editor restarts and can be shared with other tools) sits underneath.
+`agents sessions resume` reopens several sessions in whatever terminal you're in -- auto-detected across iTerm, Ghostty, tmux, and the VSCodium agent-terminal, or forced with `--iterm` / `--ghostty` / `--tmux` / `--vscodium`. `agents resume <id>` resumes one session without requiring you to name its harness: exact IDs take a local SQLite fast path, then resolve fleet-wide and restore the source harness, version, device, cwd, and recorded launch mode. Back them with **tmux** and the runs turn durable: detach, close your editor, reboot the GUI -- the session is still alive to `agents tmux attach`. The whole `agents tmux` subsystem (persistent multiplexer sessions that survive editor restarts and can be shared with other tools) sits underneath.
 
 ### Send an agent to the background — and bring it back
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as http from 'http';
@@ -18,6 +18,15 @@ import {
   createFileDeliveryStore,
   type IncomingWebhook,
 } from './webhook.js';
+import * as activation from '../routine-activation.js';
+
+beforeEach(() => {
+  vi.spyOn(activation, 'routineEnabledOnThisDevice').mockReturnValue(null);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 /** Build a JobConfig with sensible defaults for tests. */
 function job(partial: Partial<JobConfig> & Pick<JobConfig, 'name'>): JobConfig {

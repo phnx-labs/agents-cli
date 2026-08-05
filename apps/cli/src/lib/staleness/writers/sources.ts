@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId, PluginManifest } from '../../types.js';
 import { getUserAgentsDir, getAgentsDir, getEnabledExtraRepos, getCommandsDir, getSkillsDir, getHooksDir } from '../../state.js';
-import { safeJoin } from '../../paths.js';
+import { isSafeSegmentName, safeJoin } from '../../paths.js';
 
 export type EnabledExtra = { alias: string; dir: string };
 
@@ -120,14 +120,92 @@ export function listPluginSkillNames(options: { agent?: AgentId; plugins?: Set<s
   return Array.from(names);
 }
 
-/** Find the trusted source file for a hook by name. */
+/**
+ * Subdirectories under hooks/ that are never group dirs.
+ * Must stay in lockstep with HOOK_GROUP_SKIP_DIRS in hooks.ts.
+ */
+const HOOK_GROUP_SKIP_DIRS = new Set(['node_modules', '.git', '.cache']);
+
+const HOOK_SCRIPT_EXTS = new Set([
+  '.sh', '.bash', '.zsh', '.py', '.js', '.ts', '.mjs', '.cjs', '.rb', '.pl', '.ps1', '.cmd', '.bat',
+]);
+
+function dirHasTopLevelScripts(groupDir: string): boolean {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(groupDir);
+  } catch {
+    return false;
+  }
+  for (const name of entries) {
+    if (name.startsWith('.')) continue;
+    const ext = path.extname(name).toLowerCase();
+    if (!HOOK_SCRIPT_EXTS.has(ext)) continue;
+    if (isLiveFile(path.join(groupDir, name))) return true;
+  }
+  return false;
+}
+
+function findNestedHookFile(hooksRoot: string, basename: string): string | null {
+  if (!isLiveDir(hooksRoot)) return null;
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(hooksRoot).sort();
+  } catch {
+    return null;
+  }
+  for (const name of entries) {
+    if (name.startsWith('.') || HOOK_GROUP_SKIP_DIRS.has(name)) continue;
+    const groupDir = path.join(hooksRoot, name);
+    if (!isLiveDir(groupDir)) continue;
+    // Only group dirs (those with scripts) contribute nested scripts.
+    if (!dirHasTopLevelScripts(groupDir)) continue;
+    const candidate = path.join(groupDir, basename);
+    if (isLiveFile(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Find the trusted source for a hook by name.
+ * - File basename (`04-session-identity.sh`) or relative path
+ *   (`session-starts/04-session-identity.sh`) → script file
+ * - Directory basename (`tests`) → directory bundle (fixtures-only etc.)
+ */
 export function resolveHookSource(name: string): string | null {
-  const candidates = [
-    safeJoin(path.join(getUserAgentsDir(), 'hooks'), name),
-    safeJoin(getHooksDir(), name),
-    ...getEnabledExtraRepos().map((e) => safeJoin(path.join(e.dir, 'hooks'), name)),
+  const roots = [
+    path.join(getUserAgentsDir(), 'hooks'),
+    getHooksDir(),
+    ...getEnabledExtraRepos().map((e) => path.join(e.dir, 'hooks')),
   ];
-  return candidates.find(isLiveFile) ?? null;
+  const base = path.basename(name);
+
+  for (const hooksRoot of roots) {
+    // Exact relative path (top-level or group/name) — multi-segment needs
+    // path.join + containment, not safeJoin (single-segment only).
+    if (name.includes('/') || name.includes('\\')) {
+      const candidate = path.resolve(hooksRoot, name);
+      const rootResolved = path.resolve(hooksRoot);
+      if (
+        (candidate === rootResolved || candidate.startsWith(rootResolved + path.sep)) &&
+        isLiveFile(candidate)
+      ) {
+        return candidate;
+      }
+    } else if (isSafeSegmentName(name)) {
+      try {
+        const top = safeJoin(hooksRoot, name);
+        // File script first; then directory bundle (e.g. tests/ fixtures).
+        if (isLiveFile(top)) return top;
+        if (isLiveDir(top) && !dirHasTopLevelScripts(top)) return top;
+      } catch {
+        /* invalid segment */
+      }
+    }
+    const nested = findNestedHookFile(hooksRoot, base);
+    if (nested) return nested;
+  }
+  return null;
 }
 
 /** All trusted command-skill source roots, used to dedup name collisions for commands-as-skills writes. */

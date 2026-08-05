@@ -1069,6 +1069,59 @@ export interface Meta {
   };
 }
 
+// ─── humans.yaml types ────────────────────────────────────────────────────────
+
+/** A single delivery channel entry in humans.yaml. */
+export interface HumanChannel {
+  /** Canonical channel identifier (e.g. "imessage", "call"). */
+  id: string;
+  /** Provider transport (e.g. "rush", "twilio"). */
+  transport: string;
+  /** If true the channel is watched for incoming messages. */
+  watch?: boolean;
+  /** Shell command to invoke (for call channels). */
+  cmd?: string;
+  /** Credentials bundle name (`agents secrets`). */
+  creds?: string;
+  /** Whether the channel is intrusive (e.g. voice call). */
+  intrusive?: boolean;
+}
+
+/** Severity-to-channel-list escalation policy in humans.yaml. */
+export interface HumanPolicy {
+  low?: string[];
+  normal?: string[];
+  critical?: string[];
+}
+
+/** Owner identity and contact configuration in humans.yaml. */
+export interface HumanOwner {
+  /** Display name. */
+  name?: string;
+  /** IANA timezone string (e.g. "America/Los_Angeles"). */
+  timezone?: string;
+  /** Quiet hours as "HH:MM-HH:MM" in local time. */
+  quiet_hours?: string;
+  /** Default notification severity when unspecified. */
+  default_severity?: 'low' | 'normal' | 'critical';
+  /** Short-form channel config for `agents send --to owner` (channel + recipient). */
+  notify?: { channel: string; to: string };
+  /** Full delivery-channel definitions. */
+  channels?: HumanChannel[];
+  /** Severity-to-channel escalation policy. */
+  policy?: HumanPolicy;
+}
+
+/**
+ * Versioned humans.yaml config — owner identity, channels, and notification
+ * policy. Written to ~/.agents/humans.yaml by `migrateHumans()`.
+ */
+export interface HumansConfig {
+  /** Schema version. Always 1. */
+  version: 1;
+  owner?: HumanOwner;
+}
+
 /** Persisted agent-host entry in agents.yaml (overlay or inline). */
 export interface HostEntry {
   /** `ssh-config`: reach via the bare name (ssh resolves). `inline`: use address/user below. */

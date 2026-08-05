@@ -4,6 +4,8 @@ export type AgentId =
   | 'gemini'
   | 'cursor'
   | 'grok'
+  | 'kimi'
+  | 'droid'
   | 'antigravity'
   | 'opencode';
 

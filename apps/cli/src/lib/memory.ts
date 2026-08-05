@@ -78,8 +78,10 @@ export function ensureUserMemoryDir(): string {
   return dir;
 }
 
+const RULE_FILE_NAMES = new Set(['memory.md', 'agents.md', 'claude.md', 'gemini.md', 'readme.md']);
+
 function isFactFile(name: string): boolean {
-  return name.endsWith('.md') && name.toLowerCase() !== 'memory.md';
+  return name.endsWith('.md') && !RULE_FILE_NAMES.has(name.toLowerCase());
 }
 
 function slugify(name: string): string {

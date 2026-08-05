@@ -231,6 +231,14 @@ describe('nativeResume (Tier-1 capability derives from the command template)', (
     expect(nativeResume('opencode')).toBe(false);
     expect(nativeResume('gemini')).toBe(false);
   });
+  it('gates newly verified harnesses by the exact installed-version threshold', () => {
+    expect(nativeResume('grok', '0.2.90')).toBe(false);
+    expect(nativeResume('grok', '0.2.91')).toBe(true);
+    expect(nativeResume('kimi', '0.19.2')).toBe(true);
+    expect(nativeResume('droid', '0.186.0')).toBe(true);
+    expect(nativeResume('cursor', '2026.7.23')).toBe(true);
+    expect(nativeResume('cursor')).toBe(false);
+  });
 });
 
 describe('buildExecCommand — versioned launch target (no unspawnable literal)', () => {
@@ -330,6 +338,29 @@ describe('buildExecCommand — native resume wiring', () => {
     const cmd = buildExecCommand(execOpts({ agent: 'codex', mode: 'plan', resume: true, sessionId: 'xyz-9', headless: true, prompt: 'go' }));
     expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
     expect(cmd).toContain('sandbox_mode=read-only');
+  });
+
+  it.each([
+    ['grok', '0.2.91', true, '--resume'],
+    ['grok', '0.2.91', false, '--resume'],
+    ['kimi', '0.19.2', true, '--session'],
+    ['kimi', '0.19.2', false, '--session'],
+    ['cursor', '2026.7.23', true, '--resume'],
+    ['cursor', '2026.7.23', false, '--resume'],
+    ['droid', '0.186.0', true, '--resume'],
+    ['droid', '0.186.0', false, '--session-id'],
+  ] as const)('%s %s %s uses %s for native resume', (agent, version, interactive, flag) => {
+    const cmd = buildExecCommand(execOpts({
+      agent,
+      version,
+      mode: 'edit',
+      resume: true,
+      sessionId: 'session-1',
+      interactive,
+      headless: !interactive,
+      prompt: interactive ? undefined : 'continue',
+    }));
+    expect(cmd[idx(cmd, flag) + 1]).toBe('session-1');
   });
 
   it('non-native agent ignores resume in the arg builder (Tier-2 handles it via the prompt)', () => {
