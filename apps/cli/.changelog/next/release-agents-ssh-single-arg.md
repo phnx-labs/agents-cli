@@ -1,0 +1,1 @@
+- **`scripts/release.sh` home-base hop: pass a single remote argv to `agents ssh`.** Multi-arg forms (`bash -lc '…'`) are joined without re-quoting by `wrapRemoteCommand`, so the remote `cd` never ran and publish failed with `fatal: not a git repository`. One shell string keeps the command intact. Source: `apps/cli/scripts/release.sh`.

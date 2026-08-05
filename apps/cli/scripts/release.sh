@@ -416,18 +416,22 @@ route_home_base_phase() {
   bold "Routing build + sign + publish to the home base ($RELEASE_HOME_BASE) via agents ssh (from the tagged tree)..."
   # Prefer `agents ssh` over plain `ssh`: it uses the devices registry + brokered
   # credentials and survives host-key / PATH quirks that plain ssh hits on
-  # headless Linux workers (Host key verification failed). Remote shell starts
-  # in $HOME, so cd into the home base's checkout first; then run the SAME
-  # snippet. `bash -lc` puts `agents` (homebrew) + node/bun on PATH for the
-  # headless signing + secrets resolution. The snippet is passed on stdin so no
-  # quoting of its body is needed across the hop; $HOME expands on the REMOTE
-  # side (single-quoted).
+  # headless Linux workers (Host key verification failed).
+  #
+  # CRITICAL: pass the remote command as ONE argv element. `agents ssh` joins
+  # cmd[] with spaces via wrapRemoteCommand (lib/devices/connect.ts) before
+  # handing OpenSSH a single remote string — multi-arg forms like
+  #   agents ssh host -- bash -lc 'cd … && bash -s'
+  # become `bash -lc cd … && bash -s` (quotes stripped), so `cd` runs with no
+  # argument and the snippet's `git rev-parse` fails: "not a git repository".
+  # A single quoted string preserves the remote shell syntax. Snippet on stdin
+  # (`bash -s`); $HOME expands on the REMOTE side.
   if command -v agents >/dev/null 2>&1; then
-    agents ssh "$RELEASE_HOME_BASE" -- bash -lc 'cd "$HOME/src/github.com/muqsitnawaz/agents-cli" && bash -s' <<<"$snippet" \
+    agents ssh "$RELEASE_HOME_BASE" -- 'cd $HOME/src/github.com/muqsitnawaz/agents-cli && bash -s' <<<"$snippet" \
       || return 1
   else
     # Fallback when agents is not on PATH on the trigger box (rare).
-    ssh "$RELEASE_HOME_BASE" 'bash -lc "cd \$HOME/src/github.com/muqsitnawaz/agents-cli && bash -s"' <<<"$snippet" \
+    ssh "$RELEASE_HOME_BASE" 'cd $HOME/src/github.com/muqsitnawaz/agents-cli && bash -s' <<<"$snippet" \
       || return 1
   fi
 }
