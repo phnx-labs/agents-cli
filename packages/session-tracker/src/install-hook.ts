@@ -241,6 +241,10 @@ const HOOK_SUPPORT: Record<AgentId, HookSupport> = {
   opencode: { unsupported: 'opencode SessionStart is a generated plugin, not a shell-command hook' },
 };
 
+/** Every agent id the hook installer knows — the keys of the compile-time-complete
+ *  {@link HOOK_SUPPORT} table (Record<AgentId, …>), so this can never drift from AgentId. */
+export const HOOK_AGENTS = Object.keys(HOOK_SUPPORT) as AgentId[];
+
 export async function installHookFor(
   agent: AgentId,
   opts: InstallOptions = {},

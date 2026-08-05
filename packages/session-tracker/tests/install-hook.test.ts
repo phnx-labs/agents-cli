@@ -5,8 +5,7 @@ import os from 'os';
 import path from 'path';
 import * as TOML from 'smol-toml';
 import * as YAML from 'yaml';
-import { installHookFor } from '../src/install-hook.js';
-import type { AgentId } from '../src/types.js';
+import { installHookFor, HOOK_AGENTS } from '../src/install-hook.js';
 
 const roots: string[] = [];
 
@@ -15,11 +14,6 @@ function tmpHome(): string {
   roots.push(root);
   return root;
 }
-
-/** Every agent this package's AgentId admits — the surface the completeness test pins. */
-const ALL_AGENTS: AgentId[] = [
-  'claude', 'codex', 'gemini', 'cursor', 'grok', 'kimi', 'droid', 'antigravity', 'opencode', 'hermes',
-];
 
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
@@ -86,7 +80,8 @@ describe('session tracker hook installation', () => {
     const prevHome = process.env.HOME;
     process.env.HOME = root;
     try {
-      for (const agent of ALL_AGENTS) {
+      expect(HOOK_AGENTS.length).toBeGreaterThanOrEqual(10);
+      for (const agent of HOOK_AGENTS) {
         const r = await installHookFor(agent, { dryRun: true });
         if (r.configPath) {
           // Installable agents resolve a real native config path (even on dry-run).

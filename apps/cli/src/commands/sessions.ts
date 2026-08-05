@@ -793,6 +793,21 @@ const ROW_STATUS_W = 9;
 const ROW_OWNER_W = 9;
 
 /**
+ * Fit pre-styled content (which may carry SGR colour AND OSC-8 hyperlinks — the
+ * clickable ticket/PR/project badges) into `room` display cells. Returns it raw
+ * when it already fits, preserving colour and clickable links; otherwise falls
+ * back to a width-safe truncation. `truncateToWidth` strips OSC-8 before cutting
+ * (see width.ts), so a too-narrow cell drops the hyperlink cleanly rather than
+ * slicing a hyperlink escape in half and corrupting the terminal (RUSH-2205
+ * review). Never run pre-linked content through `truncateToWidth` directly — that
+ * strips its links even when it fits; go through this helper.
+ */
+function fitCell(content: string, room: number): string {
+  if (room <= 0) return '';
+  return stringWidth(content) <= room ? content : truncateToWidth(content, room);
+}
+
+/**
  * Build the (one or two) rendered lines for a single active-session row.
  * Indent is the leading whitespace (2 spaces for flat groups, 4 inside a window
  * sub-group). Sized to `termW` so no line ever wraps under tmux/SSH (RUSH-2205):
@@ -813,37 +828,44 @@ export function renderActiveRowLines(s: ActiveSession, indent: string, termW: nu
   const versionCol = chalk.gray(padToWidth(truncateToWidth(s.version ?? '', ROW_VERSION_W), ROW_VERSION_W + 1));
   const statusCol = statusColor(s.status)(padToWidth(truncateToWidth(activityLabel(s), ROW_STATUS_W - 1), ROW_STATUS_W));
   const ownerCol = chalk.cyan(padToWidth(truncateToWidth(ownerLabel(s), ROW_OWNER_W - 1), ROW_OWNER_W));
+  const fixedCols = idCol + kindCol + versionCol + statusCol + ownerCol;
   const fixedW = stringWidth(indent) + ROW_ID_W + (ROW_AGENT_W + 1) + (ROW_VERSION_W + 1) + ROW_STATUS_W + ROW_OWNER_W;
-
-  // Line 1 right side: time cell + actionable badges (fork count, plan/ask/perm,
-  // ticket, PR, worktree). Badges are the jump-to-work signal, so they win the
-  // width fight — the time cell is truncated to whatever is left before them.
-  const fork = s.pidCount && s.pidCount > 1 ? chalk.dim(`×${s.pidCount} `) : '';
-  const badges = fork + signalBadges(s);
-  const badgesW = badges ? stringWidth(badges) : 0;
   const remaining = Math.max(0, termW - fixedW - 1);
+
+  // Line 1 right side: created/idle time + actionable badges (fork count,
+  // plan/ask/perm, ticket, PR, worktree). Badges are the jump-to-work signal, so
+  // they win the width fight — fitCell keeps them raw+clickable when they fit and
+  // drops the link cleanly when narrow; the time cell takes whatever is left.
+  const fork = s.pidCount && s.pidCount > 1 ? chalk.dim(`×${s.pidCount} `) : '';
+  const badgesCell = fitCell(fork + signalBadges(s), remaining);
+  const badgesW = stringWidth(badgesCell);
   const timeRoom = Math.max(0, remaining - (badgesW ? badgesW + 2 : 0));
   const timeCell = chalk.gray(truncateToWidth(activeTimeCell(s), timeRoom));
   let right = timeCell;
-  if (badges) right += (stringWidth(timeCell) ? '  ' : '') + badges;
-  right = truncateToWidth(right, remaining);
-  // Final whole-line clamp so even a terminal narrower than the fixed columns
-  // truncates rather than wraps (no-wrap guarantee at any width).
-  const lines = [truncateToWidth(indent + idCol + kindCol + versionCol + statusCol + ownerCol + right, termW)];
+  if (badgesCell) right += (stringWidth(timeCell) ? '  ' : '') + badgesCell;
+  // right's visible width is <= remaining by construction, so the assembled line
+  // is <= termW-1 whenever the fixed columns fit; the clamp only bites a terminal
+  // narrower than the fixed columns (where right is empty — no link to corrupt).
+  let line1 = indent + fixedCols + right;
+  if (stringWidth(line1) > termW) line1 = truncateToWidth(line1, termW);
+  const lines = [line1];
 
   // Line 2: label/topic + checklist (the identity, no longer buried) then the
-  // jump locator. Skipped entirely when there is nothing to say.
+  // jump locator. Skipped entirely when there is nothing to say. desc may carry a
+  // clickable project link, so it also goes through fitCell.
   const desc = formatActiveRowDescription(s);
   const loc = locatorBadge(s);
   if (!desc && !loc) return lines;
   const contIndent = indent + ' '.repeat(ROW_ID_W);
-  const room2 = Math.max(8, termW - stringWidth(contIndent) - 2);
-  const locW = loc ? stringWidth(loc) : 0;
-  const descRoom = Math.max(6, room2 - (locW ? locW + 2 : 0));
-  const descCol = chalk.white(truncateToWidth(desc || '-', descRoom));
-  let line2 = contIndent + chalk.dim('└ ') + descCol;
-  if (loc) line2 += '  ' + loc;
-  lines.push(truncateToWidth(line2, termW));
+  const room2 = Math.max(0, termW - stringWidth(contIndent) - 2);
+  const locCell = fitCell(loc, room2);
+  const locW = stringWidth(locCell);
+  const descRoom = Math.max(0, room2 - (locW ? locW + 2 : 0));
+  const descCell = chalk.white(fitCell(desc || '-', descRoom));
+  let line2 = contIndent + chalk.dim('└ ') + descCell;
+  if (locCell) line2 += '  ' + locCell;
+  if (stringWidth(line2) > termW) line2 = truncateToWidth(line2, termW);
+  lines.push(line2);
   return lines;
 }
 

@@ -12,9 +12,20 @@
 /** SGR colour sequences emitted by chalk (e.g. `\x1b[32m`). */
 const SGR_REGEX = /\x1b\[[0-9;]*m/g;
 
-/** Strip SGR colour escapes so width is measured on visible characters only. */
+/**
+ * OSC-8 hyperlink sequences (`\x1b]8;;<url>\x1b\\` … `\x1b]8;;\x1b\\`, or with a
+ * BEL `\x07` terminator) emitted by `osc8()` in render.ts for clickable
+ * ticket/PR/path badges. These carry the URL, which is NOT visible — leaving it
+ * in over-counts width and, worse, lets a truncation land *inside* the escape and
+ * corrupt it. Stripping both the opener and closer leaves only the visible label
+ * between them, so width is measured on what the user sees and `truncateToWidth`
+ * can never cut a hyperlink in half.
+ */
+const OSC8_REGEX = /\x1b\]8;[^;]*;.*?(?:\x1b\\|\x07)/g;
+
+/** Strip SGR colour + OSC-8 hyperlink escapes so width is measured on visible characters only. */
 export function stripAnsi(s: string): string {
-  return s.replace(SGR_REGEX, '');
+  return s.replace(OSC8_REGEX, '').replace(SGR_REGEX, '');
 }
 
 /**

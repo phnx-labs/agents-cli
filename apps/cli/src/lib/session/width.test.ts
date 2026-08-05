@@ -27,6 +27,33 @@ describe('stringWidth', () => {
   });
 });
 
+describe('OSC-8 hyperlinks (RUSH-2205)', () => {
+  // osc8() form: ESC ]8;;<url> ESC \ <label> ESC ]8;; ESC \  — the URL is not
+  // visible, so a clickable RUSH-2205 badge must measure as its 9-char label and
+  // never be sliced mid-escape by truncateToWidth.
+  const link = '\x1b]8;;https://linear.app/x/issue/RUSH-2205\x1b\\RUSH-2205\x1b]8;;\x1b\\';
+
+  it('measures only the visible label, not the URL', () => {
+    expect(stringWidth(link)).toBe(9);
+    expect(stripAnsi(link)).toBe('RUSH-2205');
+  });
+
+  it('handles the BEL-terminated variant', () => {
+    const bel = '\x1b]8;;https://x\x07label\x1b]8;;\x07';
+    expect(stringWidth(bel)).toBe(5);
+    expect(stripAnsi(bel)).toBe('label');
+  });
+
+  it('truncates without leaving a corrupted (unterminated) escape', () => {
+    // A badge + trailing text truncated to below the label: the result must carry
+    // no partial OSC-8 opener (the corruption bug this fixes).
+    const out = truncateToWidth(link + ' idle 3h', 6);
+    expect(stringWidth(out)).toBeLessThanOrEqual(6);
+    // stripAnsi removes complete escapes; any residual ESC means a cut mid-sequence.
+    expect(stripAnsi(out)).not.toContain('\x1b');
+  });
+});
+
 describe('truncateToWidth', () => {
   it('leaves short strings untouched', () => {
     expect(truncateToWidth('short', 10)).toBe('short');
