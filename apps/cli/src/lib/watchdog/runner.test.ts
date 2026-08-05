@@ -17,6 +17,7 @@ import type { ActiveSession } from '../session/active.js';
 import type { SessionProvenance, MuxLocation } from '../session/provenance.js';
 import type { InjectTarget } from '../terminal/inject.js';
 import type { WatchdogCandidate } from './watchdog.js';
+import type { OpenBlock } from '../feed.js';
 import {
   runWatchdogTick,
   DEFAULT_THRESHOLDS,
@@ -193,7 +194,8 @@ describe('runWatchdogTick — parked-on-question escalates to the brain', () => 
     expect(o.decision).toBe('skip');
     expect(o.injected).toBeUndefined();
     expect(o.reason).toMatch(/human/i);
-    expect(readLedger()['sess-tmux']).toBeUndefined();
+    // Brain said "needs human" → reminder is injected → cooldown is recorded.
+    expect(readLedger()['sess-tmux']).toBe(NOW);
   });
 
   it('an ambiguous stall (no promise, no completion, not waiting) also escalates', async () => {
@@ -243,7 +245,7 @@ describe('runWatchdogTick — skips (no nudge)', () => {
   it('SKIPS and FLAGS an un-addressable stall (ghostty, no tmux) — never injects a guessed target', async () => {
     const result = await run({
       sessions: [ghosttySession()], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
-      tailFor: () => PROMISE_TAIL,
+      tailFor: () => PROMISE_TAIL, publishBlockFn: () => { /* collector — no real feed dir */ },
     });
     const o = result.outcomes[0];
     expect(o.decision).toBe('skip');
@@ -255,8 +257,8 @@ describe('runWatchdogTick — skips (no nudge)', () => {
     const flags = readFlags();
     expect(flags['sess-ghostty']).toBeDefined();
     expect(flags['sess-ghostty'].host).toBe('ghostty');
-    // Nothing delivered → no cooldown entry.
-    expect(readLedger()['sess-ghostty']).toBeUndefined();
+    // A declared block is filed on the agent's behalf → cooldown is recorded.
+    expect(readLedger()['sess-ghostty']).toBe(NOW);
   });
 
   it('SKIPS within cooldown (rate-limited by a recent nudge)', async () => {
@@ -278,7 +280,7 @@ describe('runWatchdogTick — skips (no nudge)', () => {
     const policyFor = (): WatchdogPolicy => 'handsoff';
     const result = await run({
       sessions: [tmuxSession()], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
-      tailFor: () => PROMISE_TAIL, policyFor,
+      tailFor: () => PROMISE_TAIL, policyFor, publishBlockFn: () => { /* collector — no real feed dir */ },
     });
     const o = result.outcomes[0];
     expect(o.policy).toBe('handsoff');
@@ -286,7 +288,8 @@ describe('runWatchdogTick — skips (no nudge)', () => {
     expect(o.addressable).toBe(true);
     expect(o.injected).toBe(false);          // ...but never does
     expect(o.reason).toMatch(/handsoff/i);
-    expect(readLedger()['sess-tmux']).toBeUndefined();
+    // A declared block is filed on the agent's behalf → cooldown is recorded.
+    expect(readLedger()['sess-tmux']).toBe(NOW);
     // Flagged for the tray to surface "would-nudge but hands-off".
     const flags = readFlags();
     expect(flags['sess-tmux']).toBeDefined();
@@ -397,5 +400,162 @@ describe('runWatchdogTick — the cooldown ledger is lock-serialized (no lost up
     expect(ledger['sess-a']).toBe(NOW);
     expect(ledger['sess-b']).toBe(NOW);
     fs.rmSync(shared, { recursive: true, force: true });
+  });
+});
+
+describe('runWatchdogTick — brain says needs-human → wires the owner feed', () => {
+  // The brain marks a session "leave for human". The watchdog must surface that
+  // signal on the owner's feed — not drop it silently in a menubar-only flag.
+  // Three paths depending on addressability and policy:
+  //   A. Addressable (tmux): inject a self-file reminder into the agent's terminal.
+  //   B. Un-addressable (ghostty, no tmux): file a declared block on the agent's behalf.
+  //   C. Handsoff policy: same as B — file a block, never inject.
+  // All three paths are gated by the same cooldown ledger as a nudge (at most once
+  // per cooldown window) and are no-ops when a block already exists for the session.
+
+  const needsHumanDecider: SmartDecider = async () => ({ nudge: false, reason: 'credentials required — needs the human' });
+
+  describe('A. addressable session (tmux) — inject a self-file reminder', () => {
+    it('injects the reminder text and records the cooldown', async () => {
+      let capturedText: string | null = null;
+      const injectFn = async (_target: InjectTarget, text: string, _o: { dryRun?: boolean }) => {
+        capturedText = text;
+        return { ok: true as const, backend: 'tmux' as const, writes: 2 };
+      };
+      const result = await run({
+        sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => ASK_TAIL, smartDecider: needsHumanDecider, injectFn,
+        openBlockFor: () => null,
+      });
+      const o = result.outcomes[0];
+      expect(o.decision).toBe('skip');
+      expect(o.reason).toMatch(/credentials/i);
+      // The reminder text must mention agents feed post --blocked.
+      expect(capturedText).not.toBeNull();
+      expect(capturedText).toMatch(/agents feed post/i);
+      expect(capturedText).toMatch(/--blocked/i);
+      // Cooldown is recorded so the next tick within cooldownMs is rate-limited.
+      expect(readLedger()['sess-tmux']).toBe(NOW);
+    });
+
+    it('does NOT inject when a block already exists for the session', async () => {
+      let injected = false;
+      const injectFn = async () => { injected = true; return { ok: true as const, backend: 'tmux' as const, writes: 2 }; };
+      const existingBlock = { blockId: 'block-sess-tmux', sessionId: 'sess-tmux', mailboxId: 'sess-tmux' } as OpenBlock;
+      await run({
+        sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => ASK_TAIL, smartDecider: needsHumanDecider, injectFn,
+        openBlockFor: () => existingBlock,
+      });
+      expect(injected).toBe(false);
+      expect(readLedger()['sess-tmux']).toBeUndefined();
+    });
+
+    it('does NOT inject a second time within the cooldown window', async () => {
+      // Seed a ledger entry 1 minute ago — inside the default 20m cooldown.
+      fs.writeFileSync(path.join(stateDir, 'nudges.json'), JSON.stringify({ 'sess-tmux': NOW - 60_000 }));
+      let injected = false;
+      const injectFn = async () => { injected = true; return { ok: true as const, backend: 'tmux' as const, writes: 2 }; };
+      await run({
+        sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => ASK_TAIL, smartDecider: needsHumanDecider, injectFn,
+        openBlockFor: () => null,
+      });
+      // Reminder is suppressed by the cooldown — no inject, timestamp untouched.
+      expect(injected).toBe(false);
+      expect(readLedger()['sess-tmux']).toBe(NOW - 60_000);
+    });
+  });
+
+  describe('B. un-addressable session (ghostty, no tmux) — file a declared block', () => {
+    it('publishes a declared block and records the cooldown', async () => {
+      const published: OpenBlock[] = [];
+      const publishBlockFn = (b: OpenBlock) => { published.push(b); };
+      const result = await run({
+        sessions: [ghosttySession()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => PROMISE_TAIL, publishBlockFn,
+        openBlockFor: () => null,
+      });
+      const o = result.outcomes[0];
+      expect(o.decision).toBe('skip');
+      expect(o.addressable).toBe(false);
+      // One block published with the session's id.
+      expect(published).toHaveLength(1);
+      expect(published[0].sessionId).toBe('sess-ghostty');
+      expect(published[0].costOfDelay).toBe('high');
+      // Cooldown is recorded.
+      expect(readLedger()['sess-ghostty']).toBe(NOW);
+    });
+
+    it('does NOT publish when a block already exists', async () => {
+      const published: OpenBlock[] = [];
+      const existingBlock = { blockId: 'block-sess-ghostty', sessionId: 'sess-ghostty', mailboxId: 'sess-ghostty' } as OpenBlock;
+      await run({
+        sessions: [ghosttySession()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => PROMISE_TAIL, publishBlockFn: (b) => published.push(b),
+        openBlockFor: () => existingBlock,
+      });
+      expect(published).toHaveLength(0);
+      expect(readLedger()['sess-ghostty']).toBeUndefined();
+    });
+
+    it('does NOT publish a second time within the cooldown window', async () => {
+      fs.writeFileSync(path.join(stateDir, 'nudges.json'), JSON.stringify({ 'sess-ghostty': NOW - 60_000 }));
+      const published: OpenBlock[] = [];
+      await run({
+        sessions: [ghosttySession()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => PROMISE_TAIL, publishBlockFn: (b) => published.push(b),
+        openBlockFor: () => null,
+      });
+      expect(published).toHaveLength(0);
+      expect(readLedger()['sess-ghostty']).toBe(NOW - 60_000);
+    });
+  });
+
+  describe('C. handsoff policy — file a declared block, never inject', () => {
+    it('publishes a block and records the cooldown (handsoff + nudge-worthy + no existing block)', async () => {
+      const published: OpenBlock[] = [];
+      const publishBlockFn = (b: OpenBlock) => { published.push(b); };
+      let injected = false;
+      const injectFn = async () => { injected = true; return { ok: true as const, backend: 'tmux' as const, writes: 2 }; };
+      const result = await run({
+        sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => PROMISE_TAIL, policyFor: () => 'handsoff',
+        publishBlockFn, injectFn, openBlockFor: () => null,
+      });
+      const o = result.outcomes[0];
+      expect(o.policy).toBe('handsoff');
+      expect(o.injected).toBe(false);  // handsoff never injects
+      expect(injected).toBe(false);
+      // A declared block is filed instead.
+      expect(published).toHaveLength(1);
+      expect(published[0].sessionId).toBe('sess-tmux');
+      expect(published[0].costOfDelay).toBe('high');
+      expect(readLedger()['sess-tmux']).toBe(NOW);
+    });
+
+    it('does NOT publish when a block already exists (handsoff)', async () => {
+      const published: OpenBlock[] = [];
+      const existingBlock = { blockId: 'block-sess-tmux', sessionId: 'sess-tmux', mailboxId: 'sess-tmux' } as OpenBlock;
+      await run({
+        sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => PROMISE_TAIL, policyFor: () => 'handsoff',
+        publishBlockFn: (b) => published.push(b), openBlockFor: () => existingBlock,
+      });
+      expect(published).toHaveLength(0);
+      expect(readLedger()['sess-tmux']).toBeUndefined();
+    });
+
+    it('does NOT publish a second time within the cooldown window (handsoff)', async () => {
+      fs.writeFileSync(path.join(stateDir, 'nudges.json'), JSON.stringify({ 'sess-tmux': NOW - 60_000 }));
+      const published: OpenBlock[] = [];
+      await run({
+        sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
+        tailFor: () => PROMISE_TAIL, policyFor: () => 'handsoff',
+        publishBlockFn: (b) => published.push(b), openBlockFor: () => null,
+      });
+      expect(published).toHaveLength(0);
+      expect(readLedger()['sess-tmux']).toBe(NOW - 60_000);
+    });
   });
 });
