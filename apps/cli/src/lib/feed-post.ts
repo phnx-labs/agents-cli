@@ -133,17 +133,17 @@ export function resolvePostIdentity(
     registry = listEntries().find((e) => e.launchId === launchId);
   }
 
-  const activity = launchId
-    ? readRecentActivity({ root: input.activityRoot, maxBytesPerSession: 64 * 1024 })
-      .find((event) => event.launchId === launchId)
-    : undefined;
-
   if (!registry) {
     const start = input.startPid ?? (typeof process.ppid === 'number' ? process.ppid : undefined);
     if (start && start > 1) {
       registry = walkPidRegistry(start, getParent, readEntry);
     }
   }
+
+  const activity = launchId && !envSession && !registry?.sessionId
+    ? readRecentActivity({ root: input.activityRoot, maxBytesPerSession: 64 * 1024 })
+      .find((event) => event.launchId === launchId)
+    : undefined;
 
   // Prefer env session (explicit + managed run), fill gaps from registry.
   const sessionId = envSession ?? registry?.sessionId ?? activity?.sessionId;
@@ -157,7 +157,7 @@ export function resolvePostIdentity(
   return {
     sessionId,
     mailboxId,
-    host: activity?.host ?? machineIdFromEnv(env),
+    host: machineIdFromEnv(env) || activity?.host || 'unknown',
     runtime: env.AGENTS_RUNTIME?.trim() || activity?.runtime || 'headless',
     agent: env.AGENTS_AGENT_NAME?.trim()
       || registry?.agent
