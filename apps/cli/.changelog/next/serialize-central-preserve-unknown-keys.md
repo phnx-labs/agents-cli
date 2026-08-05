@@ -7,7 +7,8 @@
   vanished" data-loss (see the restore in commit `04295e3`). The delete pass now
   consults a `Record<keyof Meta, 'central' | 'device'>` scope map (compile-time
   exhaustive — a new `Meta` field that isn't classified fails the build) and
-  deletes **only keys this version models as central**; a key it doesn't know is
+  deletes **only keys this version knows** (a cleared central key, or a device
+  key that is legacy cruft in the synced file); a key it doesn't know is
   preserved verbatim. Once a machine runs a CLI carrying this fix, it can never
   drop a newer version's key again. Source: `apps/cli/src/lib/state.ts`,
   `apps/cli/src/lib/__tests__/state.test.ts`.

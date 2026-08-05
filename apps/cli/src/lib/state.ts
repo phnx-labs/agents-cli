@@ -927,12 +927,15 @@ const META_KEY_SCOPE: Record<keyof Meta, 'central' | 'device'> = {
   routines: 'central',
 };
 
-/** Central (synced) Meta keys — the only keys serializeCentral may delete. */
-const CENTRAL_META_KEYS: ReadonlySet<string> = new Set(
-  Object.entries(META_KEY_SCOPE)
-    .filter(([, scope]) => scope === 'central')
-    .map(([key]) => key),
-);
+/**
+ * Every key this version models (central + device). serializeCentral deletes an
+ * on-disk key only when it is KNOWN and absent from the write's in-memory object:
+ * a central key the caller cleared, OR a device key that is legacy cruft in the
+ * synced file (device keys are routed to the per-machine file, so one lingering
+ * in central is stale and must be migrated out). A key NOT listed here — e.g. one
+ * a newer CLI version added — is preserved verbatim, never dropped + synced away.
+ */
+const KNOWN_META_KEYS: ReadonlySet<string> = new Set(Object.keys(META_KEY_SCOPE));
 
 /**
  * Serialize the central (synced) meta to `agents.yaml` WITHOUT destroying the
@@ -973,11 +976,12 @@ function serializeCentral(central: Record<string, unknown>): string {
     }
   }
   for (const k of Object.keys(current)) {
-    // Only delete a key THIS version models as central. A key not in
-    // CENTRAL_META_KEYS (e.g. one a newer CLI version added) is preserved
-    // verbatim — deleting it here would drop it and sync the deletion
-    // fleet-wide (the agents.yaml config data-loss bug).
-    if (!(k in central) && CENTRAL_META_KEYS.has(k)) {
+    // Only delete a key THIS version knows about. A key not in KNOWN_META_KEYS
+    // (e.g. one a newer CLI version added) is preserved verbatim — deleting it
+    // here would drop it and sync the deletion fleet-wide (the agents.yaml
+    // config data-loss bug). A known device key lingering in the synced file is
+    // still removed — it belongs in the per-machine file, not here.
+    if (!(k in central) && KNOWN_META_KEYS.has(k)) {
       doc.delete(k);
       changed = true;
     }
