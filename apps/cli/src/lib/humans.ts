@@ -61,6 +61,8 @@ export function getOwnerNotifyFromHumans(): { channel: string; to: string } | nu
     .find((entry) => entry?.to);
   const selected = preferred ?? channels.find((entry) => entry.to);
   if (selected?.id && selected.to) return { channel: selected.id, to: selected.to };
+  const migrated = owner?.notify;
+  if (migrated?.channel && migrated.to) return migrated;
   return null;
 }
 

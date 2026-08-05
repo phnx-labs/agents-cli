@@ -119,4 +119,23 @@ describe('humans.ts', () => {
       to: '+15550000002',
     });
   });
+
+  it('getOwnerNotifyFromHumans reads the owner.notify shape written by migration', () => {
+    const home = makeTempHome();
+    const agentsDir = path.join(home, '.agents');
+    fs.mkdirSync(agentsDir, { recursive: true });
+    fs.writeFileSync(path.join(agentsDir, 'humans.yaml'), [
+      'version: 1',
+      'owner:',
+      '  notify:',
+      '    channel: imessage',
+      "    to: '+15550000003'",
+      '',
+    ].join('\n'));
+
+    expect(runHumans(home, 'humans.getOwnerNotifyFromHumans()')).toEqual({
+      channel: 'imessage',
+      to: '+15550000003',
+    });
+  });
 });
