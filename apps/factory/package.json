@@ -938,7 +938,8 @@
     "watch": "tsc -watch -p ./",
     "package": "bun run compile && vsce package",
     "rebuild": "electron-rebuild -f -w node-pty",
-    "test": "bun test --timeout 30000"
+    "test": "bun test --timeout 30000",
+    "test:agent-integration": "FACTORY_AGENT_INTEGRATION=1 bun test --timeout 95000 src/core/draftPrompt.test.ts src/core/labelgen.test.ts src/core/commitgen.test.ts"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.1",

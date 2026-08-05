@@ -63,16 +63,20 @@ describe('draftDispatchPrompt', () => {
     expect(await draftDispatchPrompt([{ title: '  ' }], '  ')).toBeNull();
   });
 
-  it('drafts a real work order from a ticket (headless agent)', async () => {
-    const result = await draftDispatchPrompt(
-      [{ identifier: 'RUSH-1262', title: 'PKCE token exchange uses an unpinned http client', description: 'The rush CLI OAuth PKCE flow depends on an http client without a pinned version, a supply-chain risk. Pin it and add a regression test.' }],
-      undefined,
-      60000,
-    );
-    expect(result).toBeTruthy();
-    expect(result!.length).toBeGreaterThan(20);
-    expect(result!).not.toMatch(/^```/);
-  }, 65000);
+  it.skipIf(process.env.FACTORY_AGENT_INTEGRATION !== '1')(
+    'drafts a real work order from a ticket (headless agent)',
+    async () => {
+      const result = await draftDispatchPrompt(
+        [{ identifier: 'RUSH-1262', title: 'PKCE token exchange uses an unpinned http client', description: 'The rush CLI OAuth PKCE flow depends on an http client without a pinned version, a supply-chain risk. Pin it and add a regression test.' }],
+        undefined,
+        60000,
+      );
+      expect(result).toBeTruthy();
+      expect(result!.length).toBeGreaterThan(20);
+      expect(result!).not.toMatch(/^```/);
+    },
+    65000,
+  );
 
   it('returns null when the timeout is too short to complete', async () => {
     const result = await draftDispatchPrompt([{ title: 'Build a large feature' }], undefined, 1);

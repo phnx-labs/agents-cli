@@ -8,17 +8,21 @@ describe('generateLabelWithLLM', () => {
     expect(await generateLabelWithLLM('   \n  ')).toBeNull();
   });
 
-  it('returns a short title for a real task description', async () => {
-    const result = await generateLabelWithLLM(
-      'Refactor the database connection pool to use lazy initialization. Add a maximum size of 50 and a timeout of 30 seconds.',
-      20000
-    );
-    expect(result).toBeTruthy();
-    expect(result!.length).toBeLessThanOrEqual(50);
-    expect(result!.split('\n').length).toBe(1);
-    expect(result!).not.toMatch(/^["'`]/);
-    expect(result!).not.toMatch(/[.!?]$/);
-  }, 25000);
+  it.skipIf(process.env.FACTORY_AGENT_INTEGRATION !== '1')(
+    'returns a short title for a real task description',
+    async () => {
+      const result = await generateLabelWithLLM(
+        'Refactor the database connection pool to use lazy initialization. Add a maximum size of 50 and a timeout of 30 seconds.',
+        20000
+      );
+      expect(result).toBeTruthy();
+      expect(result!.length).toBeLessThanOrEqual(50);
+      expect(result!.split('\n').length).toBe(1);
+      expect(result!).not.toMatch(/^["'`]/);
+      expect(result!).not.toMatch(/[.!?]$/);
+    },
+    25000,
+  );
 
   it('returns null when timeout is too short to complete', async () => {
     const result = await generateLabelWithLLM(

@@ -45,8 +45,10 @@ describe('sanitizeCommitMessage', () => {
 });
 
 describe('generateCommitMessageWithClaude (integration, may be slow)', () => {
-  test('produces a conventional-commit message for a simple diff', async () => {
-    const prompt = `Write ONE conventional-commit message for the staged changes below.
+  test.skipIf(process.env.FACTORY_AGENT_INTEGRATION !== '1')(
+    'produces a conventional-commit message for a simple diff',
+    async () => {
+      const prompt = `Write ONE conventional-commit message for the staged changes below.
 
 Respond IMMEDIATELY with only the commit message. Do NOT investigate, do NOT read files, do NOT use tools.
 
@@ -68,8 +70,10 @@ File: README.md (2 lines changed)
 
 Output the commit message and nothing else.`;
 
-    const result = await generateCommitMessageWithClaude(prompt, 90_000);
-    expect(result).not.toBeNull();
-    expect(result).toMatch(/^[a-z]+:\s+\S/);
-  }, 95_000);
+      const result = await generateCommitMessageWithClaude(prompt, 90_000);
+      expect(result).not.toBeNull();
+      expect(result).toMatch(/^[a-z]+:\s+\S/);
+    },
+    95_000,
+  );
 });

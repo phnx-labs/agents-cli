@@ -215,6 +215,7 @@ git -C "\$CACHE" checkout --quiet --detach "\$SHA"
 
 cd "\$CACHE/apps/factory"
 bun install --silent
+(cd ui && bun install --silent)
 bash scripts/release.sh "\$VERSION" $flags --publish-phase
 REMOTE_EOF
 )"

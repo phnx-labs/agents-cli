@@ -136,7 +136,8 @@ agents ssh mac-mini "agents computer screenshot --bundle com.microsoft.VSCode --
 
 ```bash
 bun run compile   # tsc + vite build for both webviews
-bun test          # Full test suite, no mocks
+bun test          # Deterministic test suite; no external agent login required
+bun run test:agent-integration  # Three real Claude-backed helper flows (opt-in)
 bash scripts/install.sh <version>   # Package .vsix and install to Cursor + Code + Codium
 ```
 
@@ -177,10 +178,7 @@ agents secrets unlock vs-marketplace
 Then re-run the release command.
 
 Known gotchas:
-- The release clone's test environment on `zion` currently misses some dev dependencies (`@happy-dom/global-registrator`, `gray-matter`) and cannot find `agents` on PATH for live-agent tests, so the local test run may fail even when GitHub CI is green. If CI passed and the change is release-ready, use `--skip-tests` as a hotfix path:
-  ```bash
-  bash scripts/release.sh 0.9.xxx --confirm --skip-tests
-  ```
+- The deterministic release gate installs both Factory dependency roots and does not require an agent login. Run `bun run test:agent-integration` separately when validating the three helper flows that invoke a real Claude session.
 - The script builds and publishes to both VS Code Marketplace and Open VSX. Marketplace propagation can lag a few minutes; Open VSX is usually live immediately.
 - The script installs the new `.vsix` into local VS Code / Codium windows automatically.
 

@@ -24,6 +24,16 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 DIST_DIR="$PROJECT_ROOT/dist"
 
+# Version stamping is build input, not a source edit. Restore package.json on
+# every exit so a release clone remains reusable after both success and failure.
+PACKAGE_JSON_BACKUP="$(mktemp "${TMPDIR:-/tmp}/factory-package-json.XXXXXX")"
+cp "$PROJECT_ROOT/package.json" "$PACKAGE_JSON_BACKUP"
+restore_package_json() {
+    cp "$PACKAGE_JSON_BACKUP" "$PROJECT_ROOT/package.json"
+    rm -f "$PACKAGE_JSON_BACKUP"
+}
+trap restore_package_json EXIT
+
 # Update version in package.json
 echo "Updating version to ${VERSION}..."
 node -e "const fs=require('fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));pkg.version='${VERSION}';fs.writeFileSync('package.json',JSON.stringify(pkg,null,2)+'\n')"
