@@ -50,10 +50,13 @@ describe('getModelPricing normalization', () => {
     expect(sonnet5!.inputPerToken).not.toBe(getModelPricing('claude-sonnet-4')!.inputPerToken);
   });
 
-  it('keeps every Claude model family the CLI can observe priced', () => {
+  it('keeps every Claude model family shipped to date priced', () => {
     // The failure mode is silence: a model absent from the table prices to $0 and no
-    // command reports it. Pin the families so a new one is a failing test, not a
-    // quietly wrong cost column.
+    // command reports it. This list is maintained by hand and therefore CANNOT catch a
+    // model that ships after it was written — `getModelPricing('claude-opus-6')`
+    // returns null with this suite green. It guards against a regression that REMOVES
+    // an entry, not against a future addition. Catching the latter needs a check
+    // against the live pricing page, which this offline suite deliberately does not do.
     for (const id of [
       'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5', 'claude-mythos-5',
       'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5',
