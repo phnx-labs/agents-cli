@@ -61,6 +61,13 @@ if ProcessInfo.processInfo.environment["MENUBAR_CHILD_TEST"] == "1" {
     ChildProcessSelfTest.run()
 }
 
+// High-load warning self-test: exercise the load classifier + remote-cache
+// filtering (reachable / freshness / cutoff / self-row skip), then print the live
+// loadedDevices() for this box, print PASS/FAIL, exit. See LoadedDeviceSelfTest.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_LOAD_TEST"] == "1" {
+    LoadedDeviceSelfTest.run()
+}
+
 // Everything past here installs the status item and registers the global
 // chords, so it must only run where those chords can actually be serviced.
 // Refuses an ssh-started launch or an unrecognized flag — the two ways a helper
