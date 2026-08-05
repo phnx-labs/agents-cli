@@ -1,6 +1,6 @@
 /**
  * The unified event reader -- one stream over BOTH operational events
- * (`~/.agents/.history/events/events.jsonl` via events.ts: secrets, commands, teams, ...) and
+ * (`~/.agents/.history/events/YYYY-MM-DD/` via events.ts: secrets, commands, teams, ...) and
  * agent-semantic events (the per-session activity logs via activity.ts: plans,
  * PRs, worktrees, sub-agents, artifacts). They share one {@link EventType}
  * vocabulary and one {@link EventRecord} shape, so `agents events` and any

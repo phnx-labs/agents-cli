@@ -1,7 +1,7 @@
 /**
  * `agents events` — read the unified event stream.
  *
- * One stream over BOTH operational events (`~/.agents/.history/events/events.jsonl`: every
+ * One stream over BOTH operational events (`~/.agents/.history/events/YYYY-MM-DD/`: every
  * `agents <module> <cmd>` invocation plus typed events like secrets access,
  * version installs) AND agent-semantic events (the per-session activity logs:
  * plans, PRs, worktrees, sub-agents, artifacts). Each is stamped with who ran
@@ -17,7 +17,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
-import { getLogsPath, type EventRecord, type EventType } from '../lib/events.js';
+import { getLogsPath, type EventRecord, type EventType, type EventLevel } from '../lib/events.js';
 import { readUnifiedEvents } from '../lib/event-stream.js';
 import { ingestBatch } from '../lib/events-ingest.js';
 import { setHelpSections } from '../lib/help.js';
@@ -50,11 +50,13 @@ export function capRecords<T>(fetched: T[], limit: number | undefined): { record
   return { records: fetched.slice(0, limit), truncated: true };
 }
 
-interface EventsOptions {
+export interface EventsOptions {
   module?: string;
   command?: string;
   event?: string[];
   agent?: string;
+  caller?: string;
+  level?: string;
   session?: string;
   bundle?: string;
   since?: string;
@@ -197,21 +199,79 @@ function registerEmitSubcommand(events: Command): void {
   });
 }
 
-export function registerEventsCommand(program: Command): void {
-  const events = program
-    .command('events')
-    .description('Read the unified event stream (operational + agent activity)')
+/** Add the one canonical event-reader option surface to a command or alias. */
+export function addEventsReadOptions(command: Command, includeAuditFlag: boolean = true): Command {
+  command
     .option('--module <name>', 'Only events from this group (e.g. teams, secrets, activity)')
     .option('--command <path>', 'Only this command path — prefix match (e.g. "teams create")')
     .option('--event <type>', 'Only this typed event (repeatable, e.g. secrets.get, secrets.unlocked, pr.opened)', collect, [])
     .option('--agent <name>', 'Only events tagged with this agent')
+    .option('--caller <kind>', 'Only this caller kind (claude-code, codex, gemini, cursor, terminal, script)')
+    .option('--level <level>', 'Only this level: audit, warn, info, debug')
     .option('--session <id>', 'Only events from this session (the provenance sessionId) — e.g. trace which session read a secret')
     .option('--bundle <name>', 'Only events carrying this bundle in their payload — e.g. `--module secrets --bundle share` for every read of the share bundle')
     .option('--since <time>', 'Only events newer than this (e.g. 2h, 7d, or ISO date)')
-    .option('--audit', 'Operational events only (skip agent activity)')
     .option('--limit <n>', 'Max records to show; 0 for no cap (default 50)', '50')
     .option('--json', 'Output raw records as JSON')
-    .option('-f, --follow', "Tail today's operational log live")
+    .option('-f, --follow', "Tail today's operational log live");
+  if (includeAuditFlag) command.option('--audit', 'Operational events only (skip agent activity)');
+  return command;
+}
+
+/** Canonical reader used by both `agents events` and `agents logs audit`. */
+export async function runEventsCommand(options: EventsOptions, forceAudit: boolean = false): Promise<void> {
+  if (options.follow) {
+    await followLog();
+    return;
+  }
+
+  let limit: number | undefined;
+  let startDate: Date | undefined;
+  try {
+    limit = resolveEventsLimit(options.limit);
+    startDate = options.since ? parseSince(options.since) : undefined;
+  } catch (err) {
+    console.error(chalk.red((err as Error).message));
+    process.exitCode = 2;
+    return;
+  }
+
+  const fetched = readUnifiedEvents({
+    startDate,
+    eventTypes: options.event && options.event.length ? (options.event as EventType[]) : undefined,
+    level: options.level as EventLevel | undefined,
+    agent: options.agent,
+    sessionId: options.session,
+    bundle: options.bundle,
+    caller: options.caller,
+    command: options.command,
+    module: options.module,
+    limit: limit === undefined ? undefined : limit + 1,
+    includeActivity: !(forceAudit || options.audit),
+  });
+  const { records, truncated } = capRecords(fetched, limit);
+  const capNote = `Showing the newest ${limit} — more events matched. Pass --limit 0 for all.`;
+
+  if (options.json) {
+    if (truncated) console.error(chalk.yellow(capNote));
+    console.log(JSON.stringify(records, null, 2));
+    return;
+  }
+
+  if (records.length === 0) {
+    console.log(chalk.gray('No matching events.'));
+    return;
+  }
+
+  for (const r of records.slice().reverse()) console.log(renderRow(r));
+  console.log(chalk.gray(`\n${records.length} event(s). Log: ${getLogsPath()}`));
+  if (truncated) console.log(chalk.yellow(capNote));
+}
+
+export function registerEventsCommand(program: Command): void {
+  const events = addEventsReadOptions(program
+    .command('events')
+    .description('Read the unified event stream (operational + agent activity)'))
     .addHelpText('after', `
 Examples:
   agents events                          Everything — ops + agent activity
@@ -227,54 +287,8 @@ Examples:
   agents events --event pr.opened --since 30d --limit 0 --json
                                          Every match — use --limit 0 whenever you
                                          aggregate, or you rank only the newest 50`)
-    .action(async (options: EventsOptions) => {
-      if (options.follow) {
-        await followLog();
-        return;
-      }
-
-      let limit: number | undefined;
-      let startDate: Date | undefined;
-      try {
-        limit = resolveEventsLimit(options.limit);
-        startDate = options.since ? parseSince(options.since) : undefined;
-      } catch (err) {
-        console.error(chalk.red((err as Error).message));
-        process.exit(2);
-      }
-
-      // Read one past the cap so we can tell a full result from a clipped one.
-      const fetched = readUnifiedEvents({
-        startDate,
-        eventTypes: options.event && options.event.length ? (options.event as EventType[]) : undefined,
-        agent: options.agent,
-        sessionId: options.session,
-        bundle: options.bundle,
-        command: options.command,
-        module: options.module,
-        limit: limit === undefined ? undefined : limit + 1,
-        includeActivity: !options.audit,
-      });
-      const { records, truncated } = capRecords(fetched, limit);
-      const capNote = `Showing the newest ${limit} — more events matched. Pass --limit 0 for all.`;
-
-      if (options.json) {
-        // Notice goes to stderr so `--json | jq` still receives clean JSON.
-        if (truncated) console.error(chalk.yellow(capNote));
-        console.log(JSON.stringify(records, null, 2));
-        return;
-      }
-
-      if (records.length === 0) {
-        console.log(chalk.gray('No matching events.'));
-        return;
-      }
-
-      // query() returns newest-first; print oldest-first so a tail reads naturally.
-      for (const r of records.slice().reverse()) console.log(renderRow(r));
-      console.log(chalk.gray(`\n${records.length} event(s). Log: ${getLogsPath()}`));
-      if (truncated) console.log(chalk.yellow(capNote));
-    });
+    .action((_options: EventsOptions, command: Command) =>
+      runEventsCommand(command.optsWithGlobals() as EventsOptions));
 
   // `events` both reads (its own action, above) and writes (this subcommand) —
   // the same shape as `feed` / `feed post`.
@@ -288,7 +302,7 @@ function collect(value: string, previous: string[]): string[] {
 
 /** Tail today's event file, printing new lines as they land. */
 async function followLog(): Promise<void> {
-  const file = getLogsPath();
+  let file = getLogsPath();
   let offset = 0;
   try {
     offset = fs.statSync(file).size;
@@ -297,6 +311,12 @@ async function followLog(): Promise<void> {
   }
   console.log(chalk.gray(`Tailing ${file} — Ctrl-C to stop`));
   const drain = () => {
+    const nextFile = getLogsPath();
+    if (nextFile !== file) {
+      file = nextFile;
+      offset = 0;
+      console.log(chalk.gray(`Tailing ${file}`));
+    }
     let size = 0;
     try {
       size = fs.statSync(file).size;

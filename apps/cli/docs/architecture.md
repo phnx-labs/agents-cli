@@ -190,12 +190,13 @@ long it must live and how it's read back:
 | Transcripts | `~/.claude/projects/…`, `~/.codex/sessions/…`, … | agent-native files (read-only) | the raw truth; parsed on demand |
 | CLI pid-registry | `~/.agents/.cache/terminals/by-pid/<pid>.json` | ephemeral file | `ag run`/shim write; CLI reads (§3) |
 | Live-session state | `~/.agents/.cache/terminals/sessions/<pid>.json` | ephemeral file | hook writes; extension reads (§3) |
-| Audit log | `~/.agents/.history/events/events.jsonl` | locked shared log | `emit()` in [`src/lib/events.ts`](../src/lib/events.ts); `agents events` reads |
+| Audit log | `~/.agents/.history/events/YYYY-MM-DD/events.jsonl` | dated, locked shared log | `emit()` in [`src/lib/events.ts`](../src/lib/events.ts); `agents events` reads; `agents logs audit` aliases it |
 | Teams sentinels | `…/agents/<uuid>/exit_code`, `hosts/<id>.log` + `.exit` | ephemeral files | teammate writes exit code; supervisor reads (§6) |
 | Mailbox spool | `~/.agents/.history/mailbox/<id>/…` | append-only dirs | `agents message` / feed; `agents mailboxes` reads |
 
-There is **one** audit log (`events.jsonl`), shared and file-locked because many
-processes append to it. It is the single choke point for "who did what" — see
+There is **one** audit event implementation, split into local-date files and
+file-locked because many processes append concurrently. It is the single choke
+point for "who did what" — see
 [06-observability.md](06-observability.md).
 
 ---

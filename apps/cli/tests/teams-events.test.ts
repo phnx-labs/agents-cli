@@ -43,14 +43,18 @@ function runCli(home: string, args: string[]) {
 }
 
 function readEvents(home: string): Array<Record<string, unknown>> {
-  const eventsPath = path.join(home, '.agents', '.history', 'events', 'events.jsonl');
-  if (!fs.existsSync(eventsPath)) return [];
+  const eventsRoot = path.join(home, '.agents', '.history', 'events');
+  if (!fs.existsSync(eventsRoot)) return [];
   const out: Array<Record<string, unknown>> = [];
-  for (const line of fs.readFileSync(eventsPath, 'utf-8').split('\n').filter(Boolean)) {
-    try {
-      out.push(JSON.parse(line));
-    } catch {
-      /* skip */
+  for (const day of fs.readdirSync(eventsRoot)) {
+    const eventsPath = path.join(eventsRoot, day, 'events.jsonl');
+    if (!fs.existsSync(eventsPath)) continue;
+    for (const line of fs.readFileSync(eventsPath, 'utf-8').split('\n').filter(Boolean)) {
+      try {
+        out.push(JSON.parse(line));
+      } catch {
+        /* skip */
+      }
     }
   }
   return out;

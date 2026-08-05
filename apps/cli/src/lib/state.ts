@@ -412,7 +412,7 @@ export function getUserSecretsDir(): string { return USER_SECRETS_DIR; }
  * value-free usage telemetry (which bundle was created/imported/exported/viewed/
  * accessed/unlocked, when, by whom), never a secret value. It is a derived index
  * fed FROM the emitSecretAudit chokepoint alongside the append-only
- * ~/.agents/.history/events/events.jsonl audit log — the same way sessions.db indexes session
+ * ~/.agents/.history/events/YYYY-MM-DD audit log — the same way sessions.db indexes session
  * metadata off the real session flow — not a second write path.
  */
 export function getSecretsDbPath(): string {

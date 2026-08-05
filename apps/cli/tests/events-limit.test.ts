@@ -47,7 +47,9 @@ const ALPHA = 55;
 const BETA = 45;
 
 function seedEvents(home: string): void {
-  const file = path.join(home, '.agents', 'events.jsonl');
+  const now = new Date();
+  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const file = path.join(home, '.agents', '.history', 'events', day, 'events.jsonl');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const base = Date.now() - 6 * 60 * 60 * 1000;
   const lines: string[] = [];

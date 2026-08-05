@@ -15,7 +15,7 @@ import { parseTimeout } from './routines.js';
 import { getBinaryPath, getVersionHomePath, isVersionInstalled, resolveVersion } from './versions.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { isTierToken, resolveTier } from './model-tiers.js';
-import { emitStart, maybeRotate, createTimer, redactPrompt, redactArgs } from './events.js';
+import { emitStart, createTimer, redactPrompt, redactArgs } from './events.js';
 import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { resolveActor, actorEnv } from './actor.js';
 import { getShimsDir, getHistoryDir, getUserAgentsDir } from './state.js';
@@ -1622,7 +1622,6 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
   options = { ...options, env: { ...options.env, AGENT_LAUNCH_ID: launchId } };
   const watcherState = await setupBudgetWatcher(options, cwd, runId);
 
-  maybeRotate();
   const timer = createTimer('agent.run', {
     agent: options.agent,
     version: options.version,

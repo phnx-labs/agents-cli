@@ -1,0 +1,1 @@
+- Store operational events in daily history directories, retain 7 days and at most 50 MiB automatically, and make `agents logs audit` use the `agents events --audit` reader.

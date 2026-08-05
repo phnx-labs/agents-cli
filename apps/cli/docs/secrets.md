@@ -130,7 +130,7 @@ Bundle metadata (names, descriptions, variable names + references, and any non-s
 Every secret lifecycle/access event — create, import, export, view, access (a
 value read for injection), unlock — funnels through one chokepoint,
 `emitSecretAudit` (`src/lib/secrets/audit.ts`). That single call writes to **both**
-sinks: the append-only `~/.agents/.history/events/events.jsonl` audit log (surfaced by
+sinks: the append-only `~/.agents/.history/events/YYYY-MM-DD/events.jsonl` audit log (surfaced by
 `agents events --module secrets`) and a **derived per-bundle read-model** at
 `~/.agents/secrets/secrets.db` (`src/lib/secrets/usage-db.ts`). There is no second
 write path — the read-model is an index fed off the real access flow, the way

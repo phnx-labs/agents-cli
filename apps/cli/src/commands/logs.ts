@@ -23,7 +23,6 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import * as fs from 'fs';
 import type { SessionMeta } from '../lib/session/types.js';
 import { discoverSessions, resolveSessionById } from '../lib/session/discover.js';
 import { parseAgentFilter, renderSessionLog, renderSessionLogJson } from './sessions.js';
@@ -32,9 +31,9 @@ import { showHostTaskLog, hostTaskLogJson } from '../lib/hosts/logs.js';
 import { listTasks, type HostTask } from '../lib/hosts/tasks.js';
 import { itemPicker } from '../lib/picker.js';
 import {
-  query, stats, getLogsPath, rotate, levelFor,
-  type EventRecord, type EventType, type EventLevel,
+  stats, getLogsPath, rotate,
 } from '../lib/events.js';
+import { addEventsReadOptions, runEventsCommand, type EventsOptions } from './events.js';
 
 interface LogsOptions {
   host?: string;
@@ -189,21 +188,6 @@ async function runLogs(id: string | undefined, opts: LogsOptions): Promise<void>
   await showCandidate(picked.item, follow, full, !!opts.json);
 }
 
-// ─── Audit subcommand ────────────────────────────────────────────────────────
-
-interface AuditOptions {
-  module?: string;
-  command?: string;
-  event?: string[];
-  agent?: string;
-  caller?: string;
-  level?: string;
-  since?: string;
-  limit?: string;
-  json?: boolean;
-  follow?: boolean;
-}
-
 function parseSince(s: string): Date {
   const m = s.match(/^(\d+)([smhdw])$/);
   if (m) {
@@ -218,126 +202,11 @@ function parseSince(s: string): Date {
   return new Date(ms);
 }
 
-function originLabel(r: EventRecord): string {
-  if (r.transport === 'ssh') {
-    return chalk.yellow(`ssh${r.sshClientIp ? ' ' + r.sshClientIp : ''}`);
-  }
-  return chalk.gray('local');
-}
-
-function auditDetailFor(r: EventRecord): string {
-  if (r.command) return r.command;
-  const bits: string[] = [];
-  if (typeof r.team === 'string') bits.push(`team=${r.team}`);
-  if (typeof r.bundle === 'string') bits.push(`bundle=${r.bundle}`);
-  if (typeof r.skill === 'string') bits.push(`skill=${r.skill}`);
-  if (typeof r.version === 'string') bits.push(`v=${r.version}`);
-  if (typeof r.profile === 'string') bits.push(`profile=${r.profile}`);
-  if (typeof r.server === 'string') bits.push(`server=${r.server}`);
-  if (typeof r.error === 'string') bits.push(chalk.red(r.error));
-  return bits.join(' ');
-}
-
 function levelColor(level: string): string {
   if (level === 'audit') return chalk.magenta(level);
   if (level === 'warn') return chalk.yellow(level);
   if (level === 'debug') return chalk.gray(level);
   return chalk.blue(level);
-}
-
-function renderAuditRow(r: EventRecord): string {
-  const time = chalk.gray(r.ts.slice(0, 19).replace('T', ' '));
-  const user = `${r.osUser ?? '?'}@${r.hostname}`;
-  const ev = r.event.startsWith('error') ? chalk.red(r.event) : chalk.cyan(r.event);
-  const lvl = levelColor(r.level ?? levelFor(r.event as EventType));
-  const agent = r.agent ? chalk.gray(` ${r.agent}`) : '';
-  const caller = chalk.gray(`via ${r.caller ?? 'unknown'}${r.session ? ` ${r.session}` : ''}`);
-  return `${time}  ${lvl.padEnd(14)} ${originLabel(r).padEnd(24)} ${user.padEnd(22)} ${caller.padEnd(28)} ${ev.padEnd(26)}${agent}  ${auditDetailFor(r)}`;
-}
-
-function collect(value: string, previous: string[]): string[] {
-  return previous.concat([value]);
-}
-
-async function runAudit(opts: AuditOptions): Promise<void> {
-  if (opts.follow) {
-    await followAuditLog();
-    return;
-  }
-
-  const limit = Math.max(1, parseInt(opts.limit ?? '50', 10) || 50);
-  let startDate: Date | undefined;
-  try {
-    startDate = opts.since ? parseSince(opts.since) : undefined;
-  } catch (err) {
-    console.error(chalk.red((err as Error).message));
-    process.exit(2);
-  }
-
-  const records = query({
-    startDate,
-    eventTypes: opts.event?.length ? (opts.event as EventType[]) : undefined,
-    level: opts.level as EventLevel | undefined,
-    agent: opts.agent,
-    caller: opts.caller,
-    command: opts.command,
-    module: opts.module,
-    limit,
-  });
-
-  if (opts.json) {
-    console.log(JSON.stringify(records, null, 2));
-    return;
-  }
-
-  if (records.length === 0) {
-    console.log(chalk.gray('No matching events.'));
-    return;
-  }
-
-  for (const r of records.slice().reverse()) console.log(renderAuditRow(r));
-  console.log(chalk.gray(`\n${records.length} event(s). Log: ${getLogsPath()}`));
-}
-
-async function followAuditLog(): Promise<void> {
-  const file = getLogsPath();
-  let offset = 0;
-  try {
-    offset = fs.statSync(file).size;
-  } catch {
-    // File may not exist yet — start at 0.
-  }
-  console.log(chalk.gray(`Tailing ${file} — Ctrl-C to stop`));
-  const drain = () => {
-    let size = 0;
-    try {
-      size = fs.statSync(file).size;
-    } catch {
-      return;
-    }
-    if (size <= offset) {
-      if (size < offset) offset = 0;
-      return;
-    }
-    const fd = fs.openSync(file, 'r');
-    try {
-      const buf = Buffer.alloc(size - offset);
-      fs.readSync(fd, buf, 0, buf.length, offset);
-      offset = size;
-      for (const line of buf.toString('utf-8').split('\n').filter(Boolean)) {
-        try {
-          console.log(renderAuditRow(JSON.parse(line) as EventRecord));
-        } catch {
-          // Skip malformed lines.
-        }
-      }
-    } finally {
-      fs.closeSync(fd);
-    }
-  };
-  await new Promise<void>(() => {
-    setInterval(drain, 500);
-  });
 }
 
 function humanBytes(bytes: number): string {
@@ -422,19 +291,9 @@ export function registerLogsCommand(program: Command): void {
     .option('--json', 'Machine-readable JSON: a host task as { kind, task, log }, a session as the redacted { session, events } (same shape as `sessions <id> --json`)')
     .action((id: string | undefined, opts: LogsOptions) => runLogs(id, opts));
 
-  logsCmd
+  addEventsReadOptions(logsCmd
     .command('audit')
-    .description('Read the structured audit/event log (who ran what, from where)')
-    .option('--module <name>', 'Only events from this command group (e.g. teams, secrets)')
-    .option('--command <path>', 'Only this command path — prefix match (e.g. "teams create")')
-    .option('--event <type>', 'Only this typed event (repeatable)', collect, [])
-    .option('--agent <name>', 'Only events tagged with this agent')
-    .option('--caller <kind>', 'Only this caller kind (claude-code, codex, gemini, cursor, terminal, script)')
-    .option('--level <level>', 'Only this level: audit, warn, info, debug')
-    .option('--since <time>', 'Only events newer than this (e.g. 2h, 7d, or ISO date)')
-    .option('--limit <n>', 'Max records to show (default 50)', '50')
-    .option('--json', 'Output raw records as JSON')
-    .option('-f, --follow', "Tail today's log live")
+    .description('Alias for `agents events --audit`'), false)
     .addHelpText('after', `
 Examples:
   agents logs audit                          Recent activity across everything
@@ -444,7 +303,8 @@ Examples:
   agents logs audit --command "teams create" Just team creations
   agents logs audit --event secrets.get --since 7d --json
   agents logs audit -f                       Live tail`)
-    .action(async (options: AuditOptions) => runAudit(options));
+    .action((_options: EventsOptions, command: Command) =>
+      runEventsCommand(command.optsWithGlobals() as EventsOptions, true));
 
   logsCmd
     .command('stats')
@@ -455,15 +315,22 @@ Examples:
 
   logsCmd
     .command('rotate')
-    .description('Force log rotation — remove files older than the retention period')
+    .description('Apply event retention and the storage ceiling immediately')
     .option('--days <n>', 'Retention period in days (default 7)', '7')
-    .action((opts: { days?: string }) => {
+    .option('--max-mb <n>', 'Total event storage ceiling in MiB (default 50)', '50')
+    .action((opts: { days?: string; maxMb?: string }) => {
       const days = Math.max(1, parseInt(opts.days ?? '7', 10) || 7);
-      const removed = rotate(days);
+      const maxMb = Math.max(1, parseInt(opts.maxMb ?? '50', 10) || 50);
+      const result = rotate(days, maxMb * 1024 * 1024);
+      const removed = result.removedByAge + result.removedBySize;
       if (removed > 0) {
-        console.log(`Removed ${removed} log file${removed === 1 ? '' : 's'} older than ${days} day${days === 1 ? '' : 's'}.`);
+        console.log(
+          `Removed ${removed} event file${removed === 1 ? '' : 's'} ` +
+          `(${result.removedByAge} by age, ${result.removedBySize} by size); ` +
+          `reclaimed ${humanBytes(result.bytesReclaimed)}.`,
+        );
       } else {
-        console.log(chalk.gray('No log files to remove.'));
+        console.log(chalk.gray(`No event files removed (retention ${days} days, ceiling ${maxMb} MiB).`));
       }
     });
 }

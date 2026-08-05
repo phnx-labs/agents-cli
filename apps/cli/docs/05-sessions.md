@@ -385,7 +385,7 @@ Fields:
 | `spawnedTeam` | The team this session CREATED, read off its `agents teams create/add` command at scan time | `null` for the ~everything that never ran one; the inverse of `isTeamOrigin` |
 | `teamOrigin` | For a teammate: its `{team, handle, mode, parentSessionId}`, read from the teammate's `meta.json` | `null` for a non-teammate; `team`/`parentSessionId` absent on records predating their capture, or once the 7-day teams cleanup removes the dir |
 | `plan` | Last `ExitPlanMode` plan markdown (Claude sessions only) | `null` when the session never entered plan-review |
-| `usedBrowser` / `usedComputer` | A sessionId-scoped read of `~/.agents/.history/events/events.jsonl` for `browser.navigate`/`browser.screenshot` / `computer.action` (never a transcript re-scan) | `undefined` on a legacy row this scanner hasn't computed the field for yet — distinct from a real, computed `false` |
+| `usedBrowser` / `usedComputer` | A sessionId-scoped read of `~/.agents/.history/events/YYYY-MM-DD/` for `browser.navigate`/`browser.screenshot` / `computer.action` (never a transcript re-scan) | `undefined` on a legacy row this scanner hasn't computed the field for yet — distinct from a real, computed `false` |
 
 ### Two time fields per row
 

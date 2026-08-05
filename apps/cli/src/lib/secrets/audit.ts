@@ -4,7 +4,7 @@
  * This is the ONE write path for secret events. Every path that creates,
  * imports, exports, views, reads a VALUE from, or unlocks a bundle funnels its
  * audit through here, so the operational event stream — `agents events`, backed
- * by the append-only `~/.agents/.history/events/events.jsonl` audit log — carries a uniform,
+ * by the dated append-only `~/.agents/.history/events/` audit log — carries a uniform,
  * value-free provenance record: bundle, key NAMES, the resolving agent/harness
  * identity, operation, source, status. The ts / host / session / caller fields
  * are filled in by `emit()` itself. The secret VALUE is never part of the
