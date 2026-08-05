@@ -26,8 +26,8 @@ interchangeable — pick the verb for the intent:
 
 `focus` is the default “take me there” for a live process. `attach` / `detach` are
 the presence pair (foreground ↔ background). `resume` is the multi-open / history
-path. Detail: [Background & foreground (detach / attach)](#background--foreground-detach--attach)
-below, and `agents sessions --help`.
+path. Detail in **Background & foreground (detach / attach)** below, and
+`agents sessions --help`.
 
 ## Architecture
 
