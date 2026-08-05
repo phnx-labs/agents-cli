@@ -436,7 +436,8 @@ Diagnostics:
   perf                            Latency rollups (hooks, commands, runs) from the disposable perf warehouse
 
 Config sync:
-  pull                            Clone or pull the system repo at ~/.agents/.system/
+  repo pull [alias]               Git pull a repo (system | user | <extra>)
+  sync [agent]                    Re-materialize installed version homes; --local to skip fetching
   repo init --path <dir>          Scaffold your own editable repo from a template
   repo add <path|gh:user/repo>    Merge an extra repo after the system repo
   lock [--frozen]                 Write/verify agents.lock (SHA-256 of resolved resources); --frozen fails on drift
