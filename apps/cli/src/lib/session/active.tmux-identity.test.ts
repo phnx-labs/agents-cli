@@ -89,6 +89,30 @@ describe('resolvePaneIdentity — name-based recovery (the fleet fix)', () => {
     expect(id?.sessionId).toBe('abcd1234-0000-0000-0000-000000000001');
   });
 
+  it('live registry entry retains terminalId for the tmux ActiveSession join (RUSH-2192)', () => {
+    // resolvePaneIdentity itself returns agent/sessionId/pid only — the tmux
+    // list path must copy liveEntry.terminalId onto the ActiveSession row.
+    // Guard the registry field so a future PidSessionEntry reshape cannot drop
+    // the Factory join key without a failing test here.
+    const live = {
+      pid: 42,
+      agent: 'grok',
+      sessionId: '019fd1e3-8859-7f03-a47c-49d64653b404',
+      startedAtMs: 1,
+      terminalId: 'GK-mid2-test',
+      launchId: 'LID-mid2-test',
+      tmuxPane: '%9',
+    };
+    const id = resolvePaneIdentity('%9', 'ag-grok-af7d9ff4', null, live, emptyHook, new Map());
+    expect(id).toEqual({
+      agent: 'grok',
+      sessionId: '019fd1e3-8859-7f03-a47c-49d64653b404',
+      pid: 42,
+    });
+    // The field the listTmuxAgentSessions path must forward:
+    expect(live.terminalId).toBe('GK-mid2-test');
+  });
+
   it('still drops a genuinely foreign pane (no name, no meta, no registry)', () => {
     expect(resolvePaneIdentity('%8', 'main', null, undefined, emptyHook, names)).toBeUndefined();
   });

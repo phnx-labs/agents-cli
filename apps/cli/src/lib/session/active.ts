@@ -1741,12 +1741,16 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       topic,
       tokPerSec,
       sessionFile,
-      // tmux panes carry no start timestamp; derive both from the transcript
-      // (creation ≈ start, last write ≈ last activity).
-      startedAtMs: birthtimeMs,
+      // Prefer the launch registry's start when known (more accurate than
+      // transcript birth for a resumed/reused file); else transcript times.
+      startedAtMs: liveEntry?.startedAtMs ?? birthtimeMs,
       lastActivityMs: mtimeMs,
       provenance,
       owner: resolveOwner(liveEntry?.actor, id.sessionId ?? sessionIdFromFile(sessionFile)),
+      // Factory / --active join key: AGENT_TERMINAL_ID stamped on the launch
+      // registry and preserved by SessionStart. Without this, Grok/Codex tmux
+      // panes never surface terminalId even when by-pid has it (RUSH-2192).
+      terminalId: liveEntry?.terminalId,
       // An id-less pane keys its dedupe on the unique pane, so two anonymous
       // co-located panes stay two rows instead of folding into one.
       paneId: id.sessionId ?? sessionIdFromFile(sessionFile) ? undefined : pane,
