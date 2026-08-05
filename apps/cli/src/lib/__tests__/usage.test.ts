@@ -23,11 +23,16 @@ import {
   formatKimiPlan,
   normalizeDroidWindows,
   normalizeCursorUsage,
+  normalizeCursorPeriodUsage,
+  normalizeCursorUsageSummary,
   antigravityModelShortLabel,
   antigravityTokenNeedsRefresh,
   normalizeAntigravityWindows,
   parseAntigravityOauthPayload,
+  pickCompactUsageWindows,
   USAGE_SOURCE_AGENT_IDS,
+  USAGE_CACHE_FRESH_MS,
+  USAGE_FETCH_CONCURRENCY,
   type DroidBillingLimitsResponse,
   type KimiUsagesResponse,
   type UsageSnapshot,
@@ -144,6 +149,65 @@ describe('usage formatting', () => {
       .not.toContain('usage unavailable');
   });
 
+  it('caps overview meters so multi-window agents cannot blow out column width', () => {
+    // Claude-style: session + week preferred even when a later window is hotter.
+    const snapshot: UsageSnapshot = {
+      source: 'live',
+      sourceLabel: 'live',
+      capturedAt: new Date(),
+      windows: [
+        { key: 'session', label: 'S', shortLabel: 'S', usedPercent: 10, resetsAt: null, windowMinutes: null },
+        { key: 'week', label: 'W', shortLabel: 'W', usedPercent: 20, resetsAt: null, windowMinutes: null },
+        { key: 'month', label: 'M', shortLabel: 'M', usedPercent: 90, resetsAt: null, windowMinutes: null },
+        { key: 'sonnet_week', label: 'So', shortLabel: 'So', usedPercent: 50, resetsAt: null, windowMinutes: null },
+      ],
+    };
+    const picked = pickCompactUsageWindows(snapshot.windows, 2);
+    expect(picked.map((w) => w.shortLabel)).toEqual(['S', 'W']);
+
+    const summary = stripAnsi(formatUsageSummary(null, snapshot, 3, { maxWindows: 2 }));
+    expect(summary).toContain('S:');
+    expect(summary).toContain('W:');
+    expect(summary).toContain('+1'); // month only; sonnet_week already filtered
+    expect(summary).not.toContain('M:');
+    expect(summary).not.toContain('So:');
+  });
+
+  it('still fills maxWindows when every window shares key: session (Antigravity)', () => {
+    // Antigravity maps each model quota to key:'session'. Picking by key-set
+    // would keep only the first; identity-based fill keeps the hottest rest.
+    const windows: UsageWindow[] = [
+      { key: 'session', label: '2.5F', shortLabel: '2.5F', usedPercent: 10, resetsAt: null, windowMinutes: null },
+      { key: 'session', label: '2.5FL', shortLabel: '2.5FL', usedPercent: 20, resetsAt: null, windowMinutes: null },
+      { key: 'session', label: '2.5P', shortLabel: '2.5P', usedPercent: 90, resetsAt: null, windowMinutes: null },
+      { key: 'session', label: '3.1FL', shortLabel: '3.1FL', usedPercent: 5, resetsAt: null, windowMinutes: null },
+    ];
+    const picked = pickCompactUsageWindows(windows, 2);
+    expect(picked.map((w) => w.shortLabel)).toEqual(['2.5F', '2.5P']);
+    const summary = stripAnsi(formatUsageSummary(null, {
+      source: 'live', sourceLabel: 'live', capturedAt: new Date(), windows,
+    }, 3, { maxWindows: 2 }));
+    expect(summary).toContain('+2');
+  });
+
+  it('prefers highest utilization when session/week are absent', () => {
+    const windows: UsageWindow[] = [
+      { key: 'month', label: 'A', shortLabel: 'A', usedPercent: 10, resetsAt: null, windowMinutes: null },
+      { key: 'month', label: 'B', shortLabel: 'B', usedPercent: 95, resetsAt: null, windowMinutes: null },
+      { key: 'month', label: 'C', shortLabel: 'C', usedPercent: 40, resetsAt: null, windowMinutes: null },
+    ];
+    const picked = pickCompactUsageWindows(windows, 2);
+    expect(picked.map((w) => w.shortLabel)).toEqual(['B', 'C']);
+  });
+
+  it('pins the 5-minute fresh window and bounded fetch concurrency', () => {
+    // Correctness: these are the load-bearing knobs for the pile-up fix. If
+    // someone reverts the fresh window to 2 minutes or unbounded Promise.all,
+    // this fails loudly.
+    expect(USAGE_CACHE_FRESH_MS).toBe(5 * 60 * 1000);
+    expect(USAGE_FETCH_CONCURRENCY).toBe(3);
+  });
+
   it('pins the complete usage source registry and derives support from it', () => {
     expect(USAGE_SOURCE_AGENT_IDS).toEqual(['claude', 'codex', 'kimi', 'droid', 'grok', 'cursor', 'antigravity']);
     for (const agentId of ALL_AGENT_IDS) {
@@ -187,6 +251,64 @@ describe('usage formatting', () => {
     // Missing premium bucket entirely -> no window, no throw.
     expect(normalizeCursorUsage({ startOfMonth: '2026-07-22T11:35:59.000Z' })).toEqual([]);
     expect(normalizeCursorUsage({})).toEqual([]);
+  });
+
+  it('normalizeCursorPeriodUsage maps the primary Auto/API/Total breakdown to three windows', () => {
+    const windows = normalizeCursorPeriodUsage({
+      billingCycleEnd: '2026-08-22T11:35:59.000Z',
+      planUsage: { autoPercentUsed: 13.21, apiPercentUsed: 3.16, totalPercentUsed: 10.19 },
+    });
+    expect(windows).toHaveLength(3);
+    expect(windows[0]).toMatchObject({ key: 'session', shortLabel: 'A', label: 'Auto + Composer', usedPercent: 13.21 });
+    expect(windows[1]).toMatchObject({ key: 'week', shortLabel: 'API', label: 'API', usedPercent: 3.16 });
+    expect(windows[2]).toMatchObject({ key: 'month', shortLabel: 'T', label: 'Total', usedPercent: 10.19 });
+    for (const window of windows) {
+      expect(window.resetsAt?.toISOString()).toBe(new Date('2026-08-22T11:35:59.000Z').toISOString());
+    }
+  });
+
+  it('normalizeCursorPeriodUsage accepts a unix-ms string billingCycleEnd and drops non-finite percents', () => {
+    const windows = normalizeCursorPeriodUsage({
+      billingCycleEnd: '1771077734000',
+      planUsage: { autoPercentUsed: 0, apiPercentUsed: null, totalPercentUsed: 15.48 },
+    });
+    // apiPercentUsed is missing -> only the two finite windows render, no empty gauge for API.
+    expect(windows).toHaveLength(2);
+    expect(windows.map((w) => w.key)).toEqual(['session', 'month']);
+    expect(windows[0]?.resetsAt?.toISOString()).toBe(new Date(1771077734000).toISOString());
+  });
+
+  it('normalizeCursorPeriodUsage returns no windows for a missing/empty planUsage', () => {
+    expect(normalizeCursorPeriodUsage({ billingCycleEnd: '2026-08-22T11:35:59.000Z' })).toEqual([]);
+    expect(normalizeCursorPeriodUsage({})).toEqual([]);
+  });
+
+  it('normalizeCursorUsageSummary maps the fallback individualUsage.plan breakdown', () => {
+    const windows = normalizeCursorUsageSummary({
+      isUnlimited: false,
+      billingCycleEnd: '2026-05-02T14:11:55.000Z',
+      individualUsage: { plan: { autoPercentUsed: 0, apiPercentUsed: 100, totalPercentUsed: 100 } },
+    });
+    expect(windows).toHaveLength(3);
+    expect(windows[0]).toMatchObject({ key: 'session', shortLabel: 'A', usedPercent: 0 });
+    expect(windows[1]).toMatchObject({ key: 'week', shortLabel: 'API', usedPercent: 100 });
+    expect(windows[2]).toMatchObject({ key: 'month', shortLabel: 'T', usedPercent: 100 });
+    expect(windows[0]?.resetsAt?.toISOString()).toBe(new Date('2026-05-02T14:11:55.000Z').toISOString());
+  });
+
+  it('normalizeCursorUsageSummary returns no windows for an unlimited plan with no usable percents', () => {
+    // Non-tiered unlimited plans omit the percent fields entirely (Cursor's admin
+    // API forum confirms this: undocumented percent fields only populate for
+    // tiered self-serve accounts).
+    expect(
+      normalizeCursorUsageSummary({
+        isUnlimited: true,
+        billingCycleEnd: '2026-05-02T14:11:55.000Z',
+        individualUsage: { plan: {} },
+      })
+    ).toEqual([]);
+    expect(normalizeCursorUsageSummary({ isUnlimited: true })).toEqual([]);
+    expect(normalizeCursorUsageSummary({})).toEqual([]);
   });
 
   it('parseAntigravityOauthPayload reads the raw JSON and the go-keyring-base64 wrapper', () => {

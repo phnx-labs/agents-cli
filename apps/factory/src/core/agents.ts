@@ -239,16 +239,23 @@ export function wrapNativeAgentCommand(command: string, isShell: boolean): strin
   return `exec ${command}`;
 }
 
-// Version- and account-managed agents that route through `agents run <agent>`
-// so the CLI can apply balanced selection on local, picked-host, and auto-host
-// launches. Droid has no account enumeration and Shell is not an agent runner.
-export const STRATEGY_LAUNCH_AGENTS = ['claude', 'codex', 'gemini', 'opencode', 'cursor', 'antigravity', 'grok', 'kimi'] as const;
+// The launch contract (apps/factory/AGENTS.md § "Launch contract"): EVERY agent
+// runner launches through `agents run <agent> --interactive --strategy balanced
+// --mode auto`, on this machine, an auto-picked host, or a picked host alike. The
+// only thing that is NOT a runner is 'shell' — a plain terminal, not an agent — so
+// it is the single exclusion. There is deliberately no per-harness allowlist: a
+// bare, strategy-less launch (into whatever account happens to be pinned) is never
+// what we want. `--strategy balanced` is a graceful no-op for a runner with no
+// accounts to rotate (e.g. droid), never an error, so it is always safe to emit.
+export function isAgentRunner(agentKey: string): boolean {
+  return agentKey !== 'shell';
+}
 
-/** Managed agents always launch through `agents run`, even when a host picker
- * brings a remote source back to this machine. Any explicit remote target also
- * uses `agents run` so non-strategy harnesses can cross the SSH boundary. */
-export function usesManagedAgentLaunch(agentKey: string, targetHost?: string): boolean {
-  return !!targetHost || (STRATEGY_LAUNCH_AGENTS as readonly string[]).includes(agentKey);
+/** Every agent runner launches through `agents run`, locally or across an SSH
+ * host boundary — balanced account/version rotation is applied uniformly. Shell
+ * is the only thing that stays a raw terminal (it is not an `agents run` agent). */
+export function usesManagedAgentLaunch(agentKey: string, _targetHost?: string): boolean {
+  return isAgentRunner(agentKey);
 }
 
 // Compare two dotted version strings (e.g. "2.1.170" vs "2.1.42") numerically.

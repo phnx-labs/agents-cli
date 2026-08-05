@@ -42,6 +42,7 @@ import {
   type AnswerRoute,
 } from '../lib/answer-router.js';
 import { injectIntoTerminal } from '../lib/terminal/inject.js';
+import { setHelpSections } from '../lib/help.js';
 
 /** Find the still-open block addressed to `mailboxId`, if any. */
 function findOpenBlockForMailbox(mailboxId: string): OpenBlock | undefined {
@@ -161,15 +162,37 @@ async function deliverViaResume(route: AnswerRoute, mailboxId: string): Promise<
   );
 }
 
+/**
+ * `message` is the agent-control plane (RUSH-2123): the answer/keystroke/
+ * injected input a running agent consumes, never a notification a human reads.
+ * Mirrors SHARED_NOTES in commands/send.ts so an agent reading either --help
+ * sees the same three-plane map and doesn't reach for `message` when it means
+ * `send`/`notify`.
+ */
+const CONTROL_PLANE_NOTES = `
+  Planes (do not mix them up):
+    message / sessions inject  - CONTROL a running agent (mailbox answer, PTY keystroke, or resume by runtime)
+    send / notify              - DELIVER a message to a human recipient over a channel provider
+    feed post                  - RECORD progress / milestones (optional broadcast may call send/notify)
+
+  <text> here is consumed BY THE TARGET AGENT (an answer, a keystroke, or the
+  argument to a resume) -- it is not a notification a person reads on their
+  phone. To reach the operator instead, use \`agents send\` / \`agents notify\`
+  (or a feed.broadcast \`channel:\` sink).
+`;
+
 export function registerMessageCommand(program: Command): void {
-  program
+  const messageCmd = program
     .command('message <target> <text>')
     .description('Send a message to a running or parked agent (mailbox / PTY-select / resume by runtime).')
     .option('--from <who>', 'Label recorded as the sender of this message')
     .option('--as <operator>', 'Verified operator id answering a high-consequence block')
     .option('--surface <surface>', 'Surface that is sending this answer (feed, terminal, etc.)', 'cli')
-    .option('--ttl <dur>', 'Delivery TTL if the message is not consumed (e.g. 30m, 1h, 24h); 0 disables expiry')
-    .action(async (target: string, text: string, opts: { from?: string; as?: string; surface?: string; ttl?: string }) => {
+    .option('--ttl <dur>', 'Delivery TTL if the message is not consumed (e.g. 30m, 1h, 24h); 0 disables expiry');
+
+  setHelpSections(messageCmd, { notes: CONTROL_PLANE_NOTES });
+
+  messageCmd.action(async (target: string, text: string, opts: { from?: string; as?: string; surface?: string; ttl?: string }) => {
       if (!target.trim()) {
         die('Target must be a session/agent id or cloud task id. Run `agents sessions --active` to list running agents.');
       }

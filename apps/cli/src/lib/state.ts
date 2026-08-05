@@ -113,6 +113,7 @@ const PROJECTS_DIR = path.join(USER_AGENTS_DIR, 'projects');
 // History bucket (durable).
 const SESSIONS_DIR = path.join(HISTORY_DIR, 'sessions');
 const SESSIONS_DB_PATH = path.join(SESSIONS_DIR, 'sessions.db');
+const ANALYTICS_DIR = path.join(HISTORY_DIR, 'analytics');
 const VERSIONS_DIR = path.join(HISTORY_DIR, 'versions');
 const RUNS_DIR = path.join(HISTORY_DIR, 'runs');
 // Durable per-monitor state-diff store + fire history (last-seen value/hash,
@@ -136,7 +137,6 @@ const PACKAGES_DIR = path.join(CACHE_DIR, 'packages');
 // They live at the user-root so they're git-tracked as source of truth.
 const PLUGINS_DIR = path.join(USER_AGENTS_DIR, 'plugins');
 const CLOUD_DIR = path.join(CACHE_DIR, 'cloud');
-const DRIVE_DIR = path.join(CACHE_DIR, 'drive');
 const TERMINALS_DIR = path.join(CACHE_DIR, 'terminals');
 const LOGS_DIR = path.join(CACHE_DIR, 'logs');
 /** Disposable performance samples (~/.agents/.cache/perf/) — safe to wipe. */
@@ -418,6 +418,18 @@ export function getUserSecretsDir(): string { return USER_SECRETS_DIR; }
 export function getSecretsDbPath(): string {
   return process.env.AGENTS_SECRETS_DB ?? path.join(USER_SECRETS_DIR, 'secrets.db');
 }
+/**
+ * Path to the durable resource-usage warehouse (~/.agents/.history/analytics/usage.db).
+ * Value-free frequency/lifecycle events (secrets, agents, browser, …). Read at CALL
+ * time so AGENTS_USAGE_DB can redirect tests. Sync shards may also appear as
+ * usage.<machine-id>.db beside this default file.
+ */
+export function getAnalyticsDir(): string {
+  return process.env.AGENTS_ANALYTICS_DIR ?? ANALYTICS_DIR;
+}
+export function getUsageDbPath(): string {
+  return process.env.AGENTS_USAGE_DB ?? path.join(getAnalyticsDir(), 'usage.db');
+}
 export function getUserPromptcutsPath(): string { return USER_PROMPTCUTS_FILE; }
 
 // ─── User operational path getters ────────────────────────────────────────────
@@ -519,11 +531,26 @@ export function getVersionsDir(): string { return VERSIONS_DIR; }
 /** Path to version-switching shim scripts (~/.agents/.cache/shims/). */
 export function getShimsDir(): string { return SHIMS_DIR; }
 
-/** Path to generated per-hook caching/timing shims (~/.agents/.cache/shims/hooks/). */
-export function getHookShimsDir(): string { return HOOK_SHIMS_DIR; }
+/**
+ * Path to generated per-hook caching/timing shims (~/.agents/.cache/shims/hooks/).
+ * Read at CALL time — since every hook now resolves through a shim (RUSH-2xxx,
+ * pass-through timing for matcher-only hooks), a test that registers hooks
+ * in-process (no subprocess HOME override) would otherwise write real shim
+ * files into the user's actual ~/.agents/.cache. AGENTS_HOOK_SHIMS_DIR mirrors
+ * the AGENTS_EVENTS_PATH / AGENTS_DEVICES_DIR test-isolation escape hatches;
+ * never set in production code.
+ */
+export function getHookShimsDir(): string {
+  return process.env.AGENTS_HOOK_SHIMS_DIR ?? HOOK_SHIMS_DIR;
+}
 
-/** Path to per-hook stdout cache files (~/.agents/.cache/state/hooks/). */
-export function getHookCacheDir(): string { return HOOK_CACHE_DIR; }
+/**
+ * Path to per-hook stdout cache files (~/.agents/.cache/state/hooks/). Read at
+ * CALL time for the same reason as {@link getHookShimsDir} — see its doc.
+ */
+export function getHookCacheDir(): string {
+  return process.env.AGENTS_HOOK_CACHE_DIR ?? HOOK_CACHE_DIR;
+}
 
 /** Path to per-agent installed CLI binaries (~/.agents/.cache/bin/). */
 export function getBinDir(): string { return BIN_DIR; }
@@ -549,9 +576,6 @@ export function getProjectPluginsDir(cwd: string = process.cwd()): string | null
   return path.join(projectAgentsDir, 'plugins');
 }
 
-/** Path to synced remote session data (~/.agents/.cache/drive/). */
-export function getDriveDir(): string { return DRIVE_DIR; }
-
 /** Path to soft-deleted resources (~/.agents/.history/trash/). */
 export function getTrashDir(): string { return TRASH_DIR; }
 
@@ -559,7 +583,9 @@ export function getTrashDir(): string { return TRASH_DIR; }
 export function getSessionsDir(): string { return SESSIONS_DIR; }
 
 /** Path to the session index database (~/.agents/.history/sessions/sessions.db). */
-export function getSessionsDbPath(): string { return SESSIONS_DB_PATH; }
+export function getSessionsDbPath(): string {
+  return process.env.AGENTS_SESSIONS_DB ?? SESSIONS_DB_PATH;
+}
 
 /** Path to teams config + registry (~/.agents/teams/). */
 export function getTeamsDir(): string { return TEAMS_DIR; }
@@ -600,20 +626,33 @@ export function getCloudDir(): string { return CLOUD_DIR; }
 /** Path to terminal session metadata (~/.agents/.cache/terminals/). */
 export function getTerminalsDir(): string { return TERMINALS_DIR; }
 
-/** Path to runtime logs (~/.agents/.cache/logs/). */
-export function getLogsDir(): string { return LOGS_DIR; }
+/**
+ * Path to runtime logs (~/.agents/.cache/logs/). Read at CALL time so
+ * AGENTS_LOGS_DIR can redirect it in tests — same test-isolation escape hatch
+ * as {@link getHookShimsDir}; never set in production code.
+ */
+export function getLogsDir(): string {
+  return process.env.AGENTS_LOGS_DIR ?? LOGS_DIR;
+}
 
 /**
  * Path to disposable performance samples (~/.agents/.cache/perf/).
  * Holds `perf.db` + a hook-shim spool. Loss is acceptable — wipe freely.
+ * Read at CALL time: AGENTS_PERF_DIR (the same override perf/db.ts and
+ * perf/spool.ts already honor for their own internal resolution) redirects
+ * this canonical getter too, so a caller that goes through it directly
+ * (hooks/cache.ts's shim generator, the OpenCode timeout sample writer in
+ * hooks.ts) doesn't leak samples into the user's real perf warehouse either.
  */
-export function getPerfDir(): string { return PERF_DIR; }
+export function getPerfDir(): string {
+  return process.env.AGENTS_PERF_DIR ?? PERF_DIR;
+}
 
 /** Path to the perf SQLite warehouse (~/.agents/.cache/perf/perf.db). */
-export function getPerfDbPath(): string { return path.join(PERF_DIR, 'perf.db'); }
+export function getPerfDbPath(): string { return path.join(getPerfDir(), 'perf.db'); }
 
 /** Path to the hook-shim NDJSON spool drained into perf.db on open. */
-export function getPerfSpoolPath(): string { return path.join(PERF_DIR, 'spool.jsonl'); }
+export function getPerfSpoolPath(): string { return path.join(getPerfDir(), 'spool.jsonl'); }
 
 /** Path to per-process runtime state (~/.agents/.cache/state/). */
 export function getRuntimeStateDir(): string { return RUNTIME_STATE_DIR; }
@@ -627,8 +666,17 @@ export function getBrowserRuntimeDir(): string { return BROWSER_RUNTIME_DIR; }
 /** Path to helper subprocess scratch (~/.agents/.cache/helpers/). */
 export function getHelpersDir(): string { return HELPERS_DIR; }
 
-/** Path to scheduler daemon scratch (~/.agents/.cache/helpers/daemon/). */
-export function getDaemonDir(): string { return DAEMON_DIR; }
+/**
+ * Path to scheduler daemon scratch (~/.agents/.cache/helpers/daemon/) — holds
+ * the daemon pid file, heartbeat, start lock, and log. AGENTS_DAEMON_DIR
+ * redirects it to a fork-private temp so daemon tests (which write pid/heartbeat
+ * files and acquire the real start lock) can never clobber a live daemon's state
+ * on a dev machine — the surgical mirror of AGENTS_DEVICES_DIR /
+ * AGENTS_HOOK_SHIMS_DIR, leaving HOME untouched. Read at CALL time (daemon.ts
+ * resolves every path helper through this), so tests/setup.ts can set it before
+ * the daemon module is exercised. Never set in production code.
+ */
+export function getDaemonDir(): string { return process.env.AGENTS_DAEMON_DIR ?? DAEMON_DIR; }
 
 /** Path to PTY server scratch (~/.agents/.cache/helpers/pty/). */
 export function getPtyDir(): string { return PTY_DIR; }

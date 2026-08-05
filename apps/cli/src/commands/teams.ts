@@ -1498,7 +1498,7 @@ export function registerTeamsCommands(program: Command): void {
     .option('-n, --name <name>', 'Friendly name for this teammate (e.g. alice). Required if using --after. Unique within team.')
     .option('-m, --mode <mode>', `Permissions: plan (read-only) | edit (can write files) | auto (smart classifier auto-approves safe ops) | skip (bypass all permission prompts). 'full' accepted as alias for skip. Teammates run headless: plan works headless on claude/codex/droid/opencode; kimi/grok/cursor/antigravity have no headless plan mode and auto-downgrade a plan request to auto.`, 'edit')
     .option('-e, --effort <effort>', `Reasoning intensity: ${VALID_EFFORTS.join('|')}`, 'medium')
-    .option('--model <model>', 'Override the effort tier and use this specific model (e.g. claude-opus-4-6)')
+    .option('--model <model>', 'Cost tier (cheap|default|best|ultra) or a concrete id (e.g. claude-opus-4-8); tiers resolve per harness+version to a supported model')
     .option(
       '--env <key=value>',
       'Set an environment variable for this teammate (repeatable for multiple vars)',
@@ -1791,7 +1791,7 @@ export function registerTeamsCommands(program: Command): void {
             repo: opts.repo,
             branch: opts.branch,
             model: a.model ?? undefined,
-            env: shareRuntimeEnv({ agentOnly: true }),
+            env: shareRuntimeEnv(),
           };
           const cloudTask = await prov.dispatch(dispatchOpts);
           return { cloudSessionId: cloudTask.id };
@@ -1810,7 +1810,7 @@ export function registerTeamsCommands(program: Command): void {
           repo: opts.repo,
           branch: opts.branch,
           model: opts.model,
-          env: shareRuntimeEnv({ agentOnly: true }),
+          env: shareRuntimeEnv(),
         };
         try {
           const cloudTask = await prov.dispatch(dispatchOpts);

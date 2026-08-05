@@ -919,6 +919,9 @@ export interface SessionIdentity {
   version: string | null;
   /** The account/email this session is authenticated as. */
   account: string | null;
+  /** The harness that owns this session (e.g. "claude") — the pick an
+   * `agents run auto` launch made, unknown to the spawner until indexed. */
+  agent: string | null;
 }
 
 /**
@@ -943,8 +946,9 @@ export function parseSessionIdentity(rawJson: string, sessionId?: string): Sessi
   if (!record) return null;
   const version = typeof record.version === 'string' && record.version.trim() ? record.version.trim() : null;
   const account = typeof record.account === 'string' && record.account.trim() ? record.account.trim() : null;
-  if (!version && !account) return null;
-  return { version, account };
+  const agent = typeof record.agent === 'string' && record.agent.trim() ? record.agent.trim() : null;
+  if (!version && !account && !agent) return null;
+  return { version, account, agent };
 }
 
 /** The one session record out of either payload shape, or null when absent. */

@@ -42,7 +42,7 @@ const {
   setKeychainServiceHashingForTest,
   setKeychainToken,
 } = await import('../secrets/index.js');
-const { readAndResolveBundleEnv, writeBundle } = await import('../secrets/bundles.js');
+const { readAndResolveBundleEnv, readBundle, writeBundle } = await import('../secrets/bundles.js');
 const {
   DEFAULT_CF_BUNDLE,
   generateWriteToken,
@@ -139,6 +139,33 @@ describe('share config', () => {
     expect(shareRuntimeEnv()).toEqual({ SHARE_WRITE_TOKEN: 'bundle-token' });
   });
 
+  it('a new share bundle is stored no-ACL (never tier) so auto-share is silent', () => {
+    storeWriteToken('bundle-token');
+    // storeWriteToken defaults a fresh share bundle to `never` — the low-sensitivity
+    // R2 token must not be biometry-gated, or every `agents run` re-prompts.
+    expect(readBundle(SHARE_BUNDLE).policy).toBe('never');
+  });
+
+  it('auto-share NEVER raises Touch ID on a biometry-gated bundle — returns undefined, not a prompt', () => {
+    writeShareConfig({
+      baseUrl: 'https://share.example.com',
+      accountId: 'acct',
+      workerName: 'agents-share',
+      bucketName: 'agents-share',
+    });
+    // A pre-existing hold-tier (biometry-ACL'd) share bundle that is NOT broker-held.
+    setKeychainToken(secretsKeychainItem(SHARE_BUNDLE, SHARE_TOKEN_KEY), 'gated-token');
+    writeBundle({
+      name: SHARE_BUNDLE,
+      policy: 'hold',
+      vars: { [SHARE_TOKEN_KEY]: `keychain:${SHARE_TOKEN_KEY}` },
+    } as SecretsBundle);
+    // The auto-inject read is agentOnly: on a locked keychain bundle it resolves to
+    // undefined (no token injected) rather than popping a sheet — the per-run storm
+    // fix (SEC-13). The agent can still publish via its own explicit `agents share`.
+    expect(shareRuntimeEnv()).toBeUndefined();
+  });
+
   it('uses the injected token for runtime env without touching the bundle', () => {
     writeShareConfig({
       baseUrl: 'https://share.example.com',
@@ -148,7 +175,7 @@ describe('share config', () => {
     });
     process.env.SHARE_WRITE_TOKEN = 'env-token';
 
-    expect(shareRuntimeEnv({ agentOnly: true })).toEqual({ SHARE_WRITE_TOKEN: 'env-token' });
+    expect(shareRuntimeEnv()).toEqual({ SHARE_WRITE_TOKEN: 'env-token' });
   });
 
   it('reads Cloudflare provisioning credentials from the cloudflare bundle by default', () => {

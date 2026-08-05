@@ -31,6 +31,7 @@ function candidate(overrides: Partial<RotateCandidate> = {}): RotateCandidate {
     usageStatus: 'available',
     usageSnapshot: snapshot([['session', 25], ['week', 60], ['month', 90]]),
     usageError: null,
+    usageMinutesToLimit: null,
     plan: 'Max',
     signedIn: true,
     lastActive: null,

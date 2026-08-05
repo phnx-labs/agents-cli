@@ -441,6 +441,15 @@ export class BrowserService {
     await this.saveTaskState(effectiveProfileName, conn.tasks);
 
     emit('browser.launch', { profile: effectiveProfileName, task: taskName, pid: conn.pid });
+    void import('../analytics/usage-db.js').then(({ recordUsage }) => {
+      recordUsage({
+        kind: 'browser',
+        name: effectiveProfileName,
+        event: 'launch',
+        source: 'browser',
+        meta: { task: taskName },
+      });
+    }).catch(() => { /* fail soft */ });
 
     // If URL provided, create tab directly (no about:blank)
     let tabId: string | undefined;
@@ -516,6 +525,15 @@ export class BrowserService {
         await this.saveTaskState(profileName, conn.tasks);
 
         emit('browser.close', { profile: profileName, task: taskName });
+        void import('../analytics/usage-db.js').then(({ recordUsage }) => {
+          recordUsage({
+            kind: 'browser',
+            name: profileName,
+            event: 'close',
+            source: 'browser',
+            meta: { task: taskName },
+          });
+        }).catch(() => { /* fail soft */ });
 
         if (conn.forkedFrom && conn.tasks.size === 0) {
           conn.cdp.close();
@@ -585,6 +603,7 @@ export class BrowserService {
       const sessionId = await this.getSessionId(conn, cdpTargetId);
       await conn.cdp.send('Page.navigate', { url }, sessionId);
       await this.saveTaskState(task.profile, conn.tasks);
+      emit('browser.navigate', { profile: task.profile, task: task.name, url, tabId: currentShortId, created: false });
       return { tabId: currentShortId, url, created: false };
     }
 
@@ -600,6 +619,7 @@ export class BrowserService {
       task.tabs[shortId] = cdpTargetId;
       task.currentTabId = shortId;
       await this.saveTaskState(task.profile, conn.tasks);
+      emit('browser.navigate', { profile: task.profile, task: task.name, url, tabId: shortId, created: true });
       return { tabId: shortId, url, created: true };
     }
 
@@ -614,6 +634,7 @@ export class BrowserService {
     this.invalidateTargetCache(conn);
     await this.saveTaskState(task.profile, conn.tasks);
 
+    emit('browser.navigate', { profile: task.profile, task: task.name, url, tabId: shortId, created: true });
     return { tabId: shortId, url, created: true };
   }
 
@@ -878,6 +899,16 @@ export class BrowserService {
     const dims =
       (extension === 'png' ? readPngDimensions(buffer) : readJpegDimensions(buffer)) ??
       { width: 0, height: 0 };
+    emit('browser.screenshot', {
+      profile: profileName,
+      task: task.name,
+      tabId: shortId,
+      path: finalPath,
+      bytes: buffer.length,
+      width: dims.width,
+      height: dims.height,
+      quality,
+    });
     return { path: finalPath, bytes: buffer.length, width: dims.width, height: dims.height };
   }
 

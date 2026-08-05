@@ -35,6 +35,11 @@ export interface ResolvedSshTarget {
   os?: string;
 }
 
+export interface ResolvedExplicitTargetSet {
+  targets: ResolvedSshTarget[];
+  unresolved: string[];
+}
+
 /** Timestamps for a synthesized ad-hoc profile — never persisted, so a constant
  * keeps the value deterministic (and side-effect free) without reading the clock. */
 const SYNTH_TS = '1970-01-01T00:00:00.000Z';
@@ -109,14 +114,21 @@ export async function resolveDeviceTarget(token: string): Promise<DeviceProfile 
  * cross-machine fan-out so they can never diverge onto two routes.
  */
 export async function resolveExplicitTargets(hosts: string[]): Promise<ResolvedSshTarget[]> {
-  const out: ResolvedSshTarget[] = [];
+  return (await resolveExplicitTargetSet(hosts)).targets;
+}
+
+/** Resolve explicit tokens while retaining failures for coverage-sensitive callers. */
+export async function resolveExplicitTargetSet(hosts: string[]): Promise<ResolvedExplicitTargetSet> {
+  const targets: ResolvedSshTarget[] = [];
+  const unresolved: string[] = [];
   for (const h of hosts) {
     const resolved = await toResolvedTarget(h);
     if (!resolved) {
       process.stderr.write(chalk.gray(`  ${h}: not a resolvable ssh target — skipped\n`));
+      unresolved.push(h);
       continue;
     }
-    out.push(resolved);
+    targets.push(resolved);
   }
-  return out;
+  return { targets, unresolved };
 }

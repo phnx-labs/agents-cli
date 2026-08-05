@@ -7,16 +7,21 @@
  * run in CI. No production code path is stubbed.
  */
 import { describe, expect, test } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import type { Host } from './types.js';
 import {
   reconnectStep,
   backoffMs,
   reconnectNotice,
   exhaustedNotice,
+  remoteExitNotice,
   reconnectInteractiveSession,
+  reattachRemoteCommand,
+  wrapRemoteExitCode,
   initialReconnectState,
   SSH_CONN_FAILURE,
   MAX_ATTEMPTS,
+  REMOTE_EXIT_255_REMAPPED,
   type ReconnectOutcome,
 } from './reconnect.js';
 
@@ -68,6 +73,111 @@ describe('backoffMs — capped exponential', () => {
     expect(backoffMs(3)).toBe(16_000);
     expect(backoffMs(4)).toBe(30_000); // 32s clamped
     expect(backoffMs(10)).toBe(30_000);
+  });
+});
+
+describe('wrapRemoteExitCode — the root-cause fix, exercised with a REAL shell (no mock)', () => {
+  // These run the actual returned string through a real `bash`, the same
+  // interpreter ssh hands it to on a POSIX peer. This is what directly
+  // reproduces (and proves fixed) the "attempt 1/6 forever" bug: the loop only
+  // ever looped because a remote-origin 255 was indistinguishable from a real
+  // ssh drop. Skipped on Windows CI, where `bash` isn't guaranteed on PATH —
+  // interactive host dispatch (what this wraps) is already POSIX-only
+  // (dispatch.ts), so there's no Windows behavior to regress.
+  const runsBash = process.platform !== 'win32';
+
+  // `(exit N)` runs in a forked SUBSHELL — it returns control to the wrapper
+  // script with status N (via `$?`), unlike a bare top-level `exit N` builtin,
+  // which would terminate the wrapper script before its own remap logic ever
+  // runs. This is what makes these tests actually exercise the remap, the same
+  // way a real subprocess (`agents sessions focus …`) returning exit code N does
+  // in production — it doesn't terminate the wrapping `bash -lc` script either.
+  function realBashExitCode(cmd: string): number | undefined {
+    try {
+      execFileSync('bash', ['-c', wrapRemoteExitCode(cmd)]);
+      return 0;
+    } catch (e) {
+      return (e as { status?: number }).status;
+    }
+  }
+
+  test.skipIf(!runsBash)('exit codes other than 255 pass through unchanged (0, 1, 42)', () => {
+    for (const code of [0, 1, 42]) {
+      expect(realBashExitCode(`(exit ${code})`)).toBe(code);
+    }
+  });
+
+  test.skipIf(!runsBash)('a 255 exit is remapped to REMOTE_EXIT_255_REMAPPED (254), verified via real bash exit status — this is the exact mechanism that let the "attempt 1/6 forever" bug loop', () => {
+    // Before this fix: a remote command (the login-shell fallback, a nested
+    // remote-tmux hop) that happened to exit 255 for its own reasons rode back
+    // up through `sshStream` as SSH_CONN_FAILURE — indistinguishable from the ssh
+    // transport itself dropping — and kept refilling the reconnect loop's retry
+    // budget forever.
+    expect(realBashExitCode('(exit 255)')).toBe(REMOTE_EXIT_255_REMAPPED);
+    expect(REMOTE_EXIT_255_REMAPPED).not.toBe(SSH_CONN_FAILURE);
+  });
+
+  test('wraps in bash -lc, matching buildRemoteAgentsInvocation\'s pattern for every other remote dispatch', () => {
+    expect(wrapRemoteExitCode('true')).toBe(`bash -lc 'true; rc=$?; [ "$rc" = "255" ] && rc=254; exit "$rc"'`);
+  });
+});
+
+describe('reattachRemoteCommand — the real remote invocation, exercised through a REAL shell with an argv-echoing "agents" shim (no mock)', () => {
+  const runsBash = process.platform !== 'win32';
+  // Mirrors remote-cmd.test.ts's decodeRemoteArgv/injection-test shim: define
+  // "agents" as a bash FUNCTION (so it runs in-process, not a real binary) that
+  // either echoes its argv one-per-line, or `return`s a chosen status (NOT
+  // `exit`, which would kill the whole script — a function must `return` to
+  // hand a status back to its caller without terminating the shell, the same
+  // way a real subprocess handing back an exit code doesn't kill the wrapper).
+  const argvShim = `agents() { for a in "$@"; do printf '%s\\n' "$a"; done; }; export -f agents; `;
+  const exit255Shim = `agents() { return 255; }; export -f agents; `;
+
+  // A session id is never attacker-controlled in production (Claude mints it,
+  // or it's an existing session's own id), but this proves the composition is
+  // safe regardless: shellQuote is applied to the id AND to the whole wrapper
+  // string, and nested POSIX '\'' escaping must compose correctly under that
+  // double-quoting for the real command to survive.
+  const INJECTION_SID = "a'b; touch /tmp/PWNED-reconnect-test; #";
+
+  test.skipIf(!runsBash)('argv round-trips through bash -lc even for a session id needing quoting — no injection', () => {
+    const res = execFileSync('bash', ['-c', argvShim + reattachRemoteCommand(INJECTION_SID)], { encoding: 'utf8' });
+    expect(res.trimEnd().split('\n')).toEqual(['sessions', 'focus', INJECTION_SID, '--local', '--attach-only']);
+  });
+
+  test.skipIf(!runsBash)('a 255 from the wrapped `agents` command comes back as REMOTE_EXIT_255_REMAPPED (254) — exercised end-to-end through reattachRemoteCommand, not just the wrapRemoteExitCode primitive', () => {
+    // Before this fix: refuseFallback's remote branch (or a nested remote-tmux
+    // hop) exiting 255 for its own reasons rode back up through `sshStream` as
+    // SSH_CONN_FAILURE — indistinguishable from the ssh transport itself
+    // dropping — and kept refilling the reconnect loop's retry budget forever.
+    let status: number | undefined;
+    try {
+      execFileSync('bash', ['-c', exit255Shim + reattachRemoteCommand(SID)]);
+      status = 0;
+    } catch (e) {
+      status = (e as { status?: number }).status;
+    }
+    expect(status).toBe(REMOTE_EXIT_255_REMAPPED);
+    expect(REMOTE_EXIT_255_REMAPPED).not.toBe(SSH_CONN_FAILURE);
+    expect(reconnectStep(initialReconnectState(), { code: REMOTE_EXIT_255_REMAPPED, connected: true })).toEqual({
+      action: 'stop',
+      code: REMOTE_EXIT_255_REMAPPED,
+    });
+  });
+
+  test("the plain string, no shell needed: wraps in bash -lc around the peer's own reconnect verb", () => {
+    expect(reattachRemoteCommand(SID)).toBe(
+      `bash -lc 'agents sessions focus ${SID} --local --attach-only; rc=$?; [ "$rc" = "255" ] && rc=254; exit "$rc"'`,
+    );
+  });
+});
+
+describe('remoteExitNotice — human readable', () => {
+  test('names the host and short id, and reads as "not a network drop"', () => {
+    const s = remoteExitNotice(SID, 'zion');
+    expect(s).toContain('zion');
+    expect(s).toContain('94c75686');
+    expect(s).toContain('not a network drop');
   });
 });
 

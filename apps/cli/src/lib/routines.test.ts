@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { routineOwnerDevice, hasAmbiguousDevicePin, validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, finalizeRunMeta, writeRunMeta, resolveJobPrompt, getLatestCompletedRun, type JobConfig, type RunMeta } from './routines.js';
+import { routineOwnerDevice, hasAmbiguousDevicePin, validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, finalizeRunMeta, writeRunMeta, resolveJobPrompt, getLatestCompletedRun, routineStats, type JobConfig, type RunMeta } from './routines.js';
 import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir } from './state.js';
 
 /** Minimal valid schedule-based job. */
@@ -777,5 +777,64 @@ describe('getLatestCompletedRun / {last_report} poison-stop', () => {
       updatedFrom: { state: { name: 'Triage' } },
     });
     expect(resolved).toBe('Issue RUSH-42: Fix it (from Triage)');
+  });
+});
+
+describe('routineStats', () => {
+  const jobName = `__stats_test_${process.pid}`;
+
+  function seedRun(runId: string, status: RunMeta['status'], duration?: number): void {
+    const meta: RunMeta = {
+      jobName,
+      runId,
+      agent: 'claude',
+      pid: null,
+      status,
+      startedAt: new Date().toISOString(),
+      completedAt: status === 'missed' ? null : new Date().toISOString(),
+      exitCode: status === 'completed' ? 0 : status === 'missed' ? null : 1,
+      ...(duration !== undefined ? { duration } : {}),
+    };
+    writeRunMeta(meta);
+  }
+
+  afterEach(() => {
+    fs.rmSync(getJobRunsDir(jobName), { recursive: true, force: true });
+  });
+
+  it('returns all-zero stats for a job with no runs', () => {
+    expect(routineStats(jobName)).toEqual({ count: 0, failed: 0, missed: 0, avgMs: 0, p50: 0, p95: 0 });
+  });
+
+  it('counts failed and missed runs separately from count, and folds duration into avg/p50/p95', () => {
+    seedRun('r1', 'completed', 10);
+    seedRun('r2', 'completed', 20);
+    seedRun('r3', 'completed', 30);
+    seedRun('r4', 'failed', 40);
+    seedRun('r5', 'timeout', 50);
+    seedRun('r6', 'missed'); // no duration — a fire that never ran
+
+    const stats = routineStats(jobName);
+    expect(stats.count).toBe(6);
+    expect(stats.failed).toBe(2); // failed + timeout
+    expect(stats.missed).toBe(1);
+    // avg of the 5 durations that have one (10+20+30+40+50)/5 = 30
+    expect(stats.avgMs).toBe(30);
+    expect(stats.p50).toBeGreaterThan(0);
+    expect(stats.p95).toBeGreaterThanOrEqual(stats.p50);
+  });
+
+  it('excludes the missed run (no duration) from the percentile set entirely', () => {
+    seedRun('r1', 'completed', 100);
+    seedRun('r2', 'missed');
+
+    const stats = routineStats(jobName);
+    expect(stats.count).toBe(2);
+    expect(stats.missed).toBe(1);
+    // Only one real duration sample (100ms) — p50/p95 both collapse to it,
+    // not diluted by the missed run's absent duration.
+    expect(stats.avgMs).toBe(100);
+    expect(stats.p50).toBe(100);
+    expect(stats.p95).toBe(100);
   });
 });

@@ -13,6 +13,11 @@ import {
   buildSessionDescription,
   fleetCandidatesByQuery,
   metadataResolveForwardedArgs,
+  mergeToolSearchEnvelopes,
+  mergeToolProgramCountEnvelopes,
+  toolOriginSessions,
+  toolSearchFleetSortError,
+  toolSearchForwardedArgs,
 } from './sessions.js';
 import { remoteAgentsJsonCommand } from '../lib/remote-agents-json.js';
 import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
@@ -29,6 +34,78 @@ const cliEntry = path.join(repoRoot, 'src', 'index.ts');
 // problem and shell:true arg-concatenation (which would split multi-word query
 // args like "prompt text").
 const tsxLoaderUrl = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+
+describe('toolSearchForwardedArgs', () => {
+  it('removes coordinator device flags and forces a whole-index local peer query', () => {
+    const argv = [
+      process.execPath, 'agents', 'sessions', '--include', 'tools',
+      '--query', 'program:git', '--device', 'peer-one', '--fleet', '--json',
+    ];
+    expect(toolSearchForwardedArgs(argv, ['peer-one'])).toEqual([
+      'sessions', '--include', 'tools', '--query', 'program:git', '--json', '--all', '--local',
+    ]);
+  });
+});
+
+describe('toolSearchFleetSortError', () => {
+  it('rejects cost and duration sorts only when tool evidence spans devices', () => {
+    expect(toolSearchFleetSortError('cost', true)).toContain('only --sort recent');
+    expect(toolSearchFleetSortError('duration', true)).toContain('only --sort recent');
+    expect(toolSearchFleetSortError('recent', true)).toBeUndefined();
+    expect(toolSearchFleetSortError('cost', false)).toBeUndefined();
+  });
+});
+
+describe('fleet tool query origin partitioning', () => {
+  it('sums occurrences, containing calls, sessions, and coverage across machines', () => {
+    const make = (machine: string, occurrences: number, complete = true) => ({
+      schemaVersion: 1 as const,
+      kind: 'tool-program-count' as const,
+      generatedAt: '2026-08-03T00:00:00Z',
+      query: { program: 'git', semantics: 'static-program-occurrences-v1' as const },
+      coverage: { indexedFiles: 1, indexedCalls: 2, skippedFiles: 0, limitedFiles: 0, remainingFiles: complete ? 0 : 1, complete },
+      totals: { occurrences, toolCalls: occurrences - 1, sessions: 1 },
+      machines: [{
+        machine,
+        coverage: { indexedFiles: 1, indexedCalls: 2, skippedFiles: 0, limitedFiles: 0, remainingFiles: complete ? 0 : 1, complete },
+        totals: { occurrences, toolCalls: occurrences - 1, sessions: 1 },
+      }],
+    });
+    expect(mergeToolProgramCountEnvelopes(make('one', 3), [make('two', 2, false)]))
+      .toMatchObject({
+        coverage: { indexedFiles: 2, complete: false },
+        totals: { occurrences: 5, toolCalls: 3, sessions: 2 },
+        machines: [{ machine: 'one' }, { machine: 'two' }],
+      });
+  });
+
+  it('keeps synced mirrors out of an origin device fleet partition', () => {
+    const local = { id: 'local', machine: 'one' } as SessionMeta;
+    const mirror = { id: 'mirror', machine: 'two' } as SessionMeta;
+    expect(toolOriginSessions([local, mirror], 'one', true)).toEqual([local]);
+    expect(toolOriginSessions([local, mirror], 'one', false)).toEqual([local, mirror]);
+  });
+
+  it('deduplicates evidence for the same origin session returned through two peers', () => {
+    const coverage = {
+      indexedFiles: 1, indexedCalls: 1, skippedFiles: 0,
+      limitedFiles: 0, remainingFiles: 0, complete: true,
+    };
+    const make = (timestamp: string) => ({
+      schemaVersion: 1 as const,
+      generatedAt: timestamp,
+      query: { clauses: ['program:git'] },
+      coverage,
+      sessions: [{
+        id: 'same', shortId: 'same', agent: 'codex', machine: 'origin-one', timestamp,
+        calls: [],
+      }],
+    });
+    expect(mergeToolSearchEnvelopes(make('2026-08-03T00:00:00Z'), [
+      make('2026-08-03T00:00:01Z'),
+    ]).sessions).toHaveLength(1);
+  });
+});
 
 function writeUpdateCache(tempHome: string): void {
   const packageJson = JSON.parse(
@@ -670,6 +747,170 @@ function outputOf(result: { stdout: string; stderr: string }): string {
 }
 
 describe('agents sessions', () => {
+  // Multiple full CLI `runAgents` passes — under ubuntu-22 CI this has hit the
+  // default 30s vitest cap (release 1.22.2/1.22.3 home-base gate). Give it 2m.
+  it('queries two distinct tool calls without changing the ordinary list JSON contract', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-tools-'));
+    try {
+      writeUpdateCache(tempHome);
+      const repoDir = path.join(tempHome, 'work', 'agents-cli');
+      const projectDir = path.join(tempHome, '.claude', 'projects', 'agents-cli-tools');
+      const sessionId = '91919191-9191-4919-8919-919191919191';
+      fs.mkdirSync(repoDir, { recursive: true });
+      fs.mkdirSync(projectDir, { recursive: true });
+      const rows = [
+        { type: 'user', timestamp: '2026-08-03T00:00:00Z', cwd: repoDir, sessionId, message: { role: 'user', content: 'resolve \x1b[2Jconflicts' } },
+        { type: 'assistant', timestamp: '2026-08-03T00:00:01Z', message: { content: [{ type: 'tool_use', id: 'git-1', name: 'Bash', input: { command: 'git merge topic; git status' } }] } },
+        { type: 'user', timestamp: '2026-08-03T00:00:02Z', message: { content: [{ type: 'tool_result', tool_use_id: 'git-1', content: 'merge stopped' }] } },
+        { type: 'assistant', timestamp: '2026-08-03T00:00:03Z', message: { content: [{ type: 'tool_use', id: 'gh-1', name: 'Bash', input: { command: 'gh pr view' } }] } },
+        { type: 'user', timestamp: '2026-08-03T00:00:04Z', message: { content: [{ type: 'tool_result', tool_use_id: 'gh-1', content: 'CONFLICT in app.ts', is_error: true }] } },
+      ];
+      fs.writeFileSync(path.join(projectDir, `${sessionId}.jsonl`), rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+
+      // The ordinary incremental scan owns parsing. Tool queries below read
+      // only the SQLite snapshot populated by this pass.
+      expect(runAgents(['sessions', '--all', '--json', '--no-interactive'], repoDir, tempHome).status).toBe(0);
+
+      const toolResult = runAgents([
+        'sessions', '--include', 'tools',
+        '--query', 'program:git input:merge',
+        '--query', 'program:gh output:CONFLICT',
+        '--all', '--json', '--no-interactive',
+      ], repoDir, tempHome);
+      expect(toolResult.status).toBe(0);
+      const toolJson = JSON.parse(toolResult.stdout) as { schemaVersion: number; sessions: Array<{ id: string; filePath?: string; calls: unknown[] }> };
+      expect(toolJson.schemaVersion).toBe(1);
+      expect(toolJson.sessions).toEqual([expect.objectContaining({ id: sessionId, calls: expect.any(Array) })]);
+      expect(toolJson.sessions[0].calls).toHaveLength(2);
+      expect(toolJson.sessions[0].filePath).toBeUndefined();
+
+      const countResult = runAgents([
+        'sessions', '--include', 'tools', '--query', 'program:git', '--count',
+        '--all', '--json', '--no-interactive',
+      ], repoDir, tempHome);
+      expect(countResult.status).toBe(0);
+      expect(JSON.parse(countResult.stdout)).toMatchObject({
+        kind: 'tool-program-count',
+        query: { program: 'git', semantics: 'static-program-occurrences-v1' },
+        totals: { occurrences: 2, toolCalls: 1, sessions: 1 },
+      });
+
+      const invalidCount = runAgents([
+        'sessions', '--include', 'tools', '--query', 'input:git', '--count',
+        '--all', '--json', '--no-interactive',
+      ], repoDir, tempHome);
+      expect(invalidCount.status).toBe(1);
+      expect(invalidCount.stderr).toContain('exactly one --query program:<name>');
+
+      const humanResult = runAgents([
+        'sessions', '--include', 'tools', '--query', 'program:git',
+        '--all', '--no-interactive',
+      ], repoDir, tempHome);
+      expect(humanResult.status).toBe(0);
+      expect(humanResult.stdout).toContain('resolve conflicts');
+      expect(humanResult.stdout).not.toContain('\x1b');
+
+      const exactResult = runAgents([
+        'sessions', sessionId, '--include', 'tools', '--all', '--json', '--no-interactive',
+      ], repoDir, tempHome);
+      expect(exactResult.status).toBe(0);
+      const exactJson = JSON.parse(exactResult.stdout) as { schemaVersion: number; sessions: Array<{ id: string; calls: unknown[] }> };
+      expect(exactJson.sessions).toEqual([expect.objectContaining({ id: sessionId })]);
+      expect(exactJson.sessions[0].calls).toHaveLength(2);
+
+      fs.appendFileSync(path.join(projectDir, `${sessionId}.jsonl`), [
+        { type: 'assistant', timestamp: '2026-08-03T00:00:05Z', message: { content: [{ type: 'tool_use', id: 'pwd-1', name: 'Bash', input: { command: 'pwd' } }] } },
+        { type: 'user', timestamp: '2026-08-03T00:00:06Z', message: { content: [{ type: 'tool_result', tool_use_id: 'pwd-1', content: repoDir }] } },
+      ].map((row) => JSON.stringify(row)).join('\n') + '\n');
+      const staleExactResult = runAgents([
+        'sessions', sessionId, '--include', 'tools', '--all', '--json', '--no-interactive',
+      ], repoDir, tempHome);
+      expect(JSON.parse(staleExactResult.stdout).sessions[0].calls).toHaveLength(2);
+
+      expect(runAgents(['sessions', '--all', '--json', '--no-interactive'], repoDir, tempHome).status).toBe(0);
+      const refreshedExactResult = runAgents([
+        'sessions', sessionId, '--include', 'tools', '--all', '--json', '--no-interactive',
+      ], repoDir, tempHome);
+      expect(refreshedExactResult.status).toBe(0);
+      const refreshedExactJson = JSON.parse(refreshedExactResult.stdout) as { sessions: Array<{ calls: Array<{ programs: string[] }> }> };
+      expect(refreshedExactJson.sessions[0].calls).toHaveLength(3);
+      expect(refreshedExactJson.sessions[0].calls).toContainEqual(expect.objectContaining({ programs: ['pwd'] }));
+
+      const excessiveClauses = runAgents([
+        'sessions', '--include', 'tools', '--all', '--json', '--no-interactive',
+        ...Array.from({ length: 33 }, () => ['--query', 'program:git']).flat(),
+      ], repoDir, tempHome);
+      expect(excessiveClauses.status).toBe(1);
+      expect(excessiveClauses.stderr).toContain('at most 32');
+
+      const contradictoryScope = runAgents([
+        'sessions', sessionId, '--include', 'tools', '--local',
+        '--device', 'definitely-remote', '--json', '--no-interactive',
+      ], repoDir, tempHome);
+      expect(contradictoryScope.status).toBe(1);
+      expect(contradictoryScope.stderr).toContain('--local and --device name opposite scopes');
+
+      for (const conflictingFlag of ['--markdown', '--no-redact']) {
+        const conflict = runAgents([
+          'sessions', sessionId, '--include', 'tools', conflictingFlag,
+          '--all', '--json', '--no-interactive',
+        ], repoDir, tempHome);
+        expect(conflict.status).toBe(1);
+        expect(conflict.stderr).toContain(`${conflictingFlag} cannot be used with --include tools`);
+      }
+
+      const listResult = runAgents(['sessions', '--all', '--json', '--no-interactive'], repoDir, tempHome);
+      expect(listResult.status).toBe(0);
+      expect(Array.isArray(JSON.parse(listResult.stdout))).toBe(true);
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it('omits a synced mirror when answering a fleet evidence partition', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-tool-mirror-'));
+    try {
+      writeUpdateCache(tempHome);
+      const repoDir = path.join(tempHome, 'work', 'agents-cli');
+      const projectDir = path.join(
+        tempHome,
+        '.agents',
+        '.history',
+        'backups',
+        'claude',
+        'origin-one',
+        'projects',
+        'agents-cli-tools',
+      );
+      const sessionId = '92929292-9292-4929-8929-929292929292';
+      fs.mkdirSync(repoDir, { recursive: true });
+      fs.mkdirSync(projectDir, { recursive: true });
+      fs.writeFileSync(path.join(projectDir, `${sessionId}.jsonl`), [
+        { type: 'user', timestamp: '2026-08-03T00:00:00Z', cwd: repoDir, sessionId, message: { role: 'user', content: 'mirrored command' } },
+        { type: 'assistant', timestamp: '2026-08-03T00:00:01Z', message: { content: [{ type: 'tool_use', id: 'git-1', name: 'Bash', input: { command: 'git status' } }] } },
+      ].map((row) => JSON.stringify(row)).join('\n') + '\n');
+
+      const indexed = runAgents(['sessions', '--all', '--json', '--no-interactive'], repoDir, tempHome);
+      expect(indexed.status, indexed.stderr).toBe(0);
+
+      const localCache = runAgents([
+        'sessions', '--include', 'tools', '--query', 'program:git',
+        '--all', '--json', '--no-interactive',
+      ], repoDir, tempHome);
+      expect(localCache.status, localCache.stderr).toBe(0);
+      expect(JSON.parse(localCache.stdout).sessions).toHaveLength(1);
+
+      const fleetPartition = runAgents([
+        'sessions', '--include', 'tools', '--query', 'program:git',
+        '--all', '--json', '--no-interactive',
+      ], repoDir, tempHome, { [NO_FANOUT_ENV]: '1' });
+      expect(fleetPartition.status, fleetPartition.stderr).toBe(0);
+      expect(JSON.parse(fleetPartition.stdout).sessions).toEqual([]);
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it('lists only sessions from the current directory by default and shows all with --all', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-list-'));
 

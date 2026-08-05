@@ -23,6 +23,7 @@ import * as path from 'path';
 import { sleepSync } from '../fs-atomic.js';
 import { getRuntimeStateDir, getHelpersDir } from '../state.js';
 import { getCliVersion, resolveAgentsBin, resolveInstalledLayout } from '../version.js';
+import { copyAppBundle, withInstallLock } from '../app-bundle-install.js';
 
 const APP_BUNDLE_NAME = 'MenubarHelper.app';
 const INSTALL_DIR_NAME = 'agents-cli';
@@ -166,17 +167,6 @@ function resolveCliEntry(): string | null {
   return null;
 }
 
-function copyAppBundle(src: string, dest: string): void {
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  if (fs.existsSync(dest)) fs.rmSync(dest, { recursive: true, force: true });
-  // `cp -R` preserves the bundle's signature and resource forks (see install-helper.ts).
-  const r = spawnSync('cp', ['-R', src, dest], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8' });
-  if (r.status !== 0) {
-    const msg = (r.stderr || r.stdout || '').toString().trim();
-    throw new Error(`Failed to copy ${src} -> ${dest}: ${msg || 'unknown error'}`);
-  }
-}
-
 /**
  * Register the freshly-installed bundle with LaunchServices.
  *
@@ -221,24 +211,54 @@ export function gatekeeperAssesses(appPath: string): boolean {
   return r.status === 0;
 }
 
+/** True when the bundle carries a Developer ID TeamIdentifier (not ad-hoc). */
+export function hasDeveloperIdSignature(appPath: string): boolean {
+  const r = spawnSync('codesign', ['-dv', '--verbose=4', appPath], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf-8',
+  });
+  const out = `${r.stderr || ''}${r.stdout || ''}`;
+  const team = out.match(/TeamIdentifier=([A-Z0-9]+)/)?.[1];
+  return Boolean(team && team !== 'not set');
+}
+
 /**
  * Copy the bundled `.app` to the stable user path (idempotent unless forced).
  * Returns the installed executable path, or null if no source bundle ships
  * with this install (e.g. Linux package, or a build without the helper).
+ *
+ * Also heals an older install that was ad-hoc re-signed over a Developer ID
+ * source: that unstable identity made Accessibility re-prompt on every upgrade.
+ * When the shipped source is Developer ID and the installed copy is only
+ * ad-hoc, replace it — even without forceReinstall.
  */
 export function ensureMenubarAppInstalled(opts: { forceReinstall?: boolean } = {}): string | null {
   if (!onDarwin()) return null;
   const src = sourceAppPath();
   if (!src) return null;
   const dest = installedAppPath();
-  if (!opts.forceReinstall && fs.existsSync(dest)) {
-    return installedExecutablePath();
-  }
-  copyAppBundle(src, dest);
-  // A fresh copy is exactly when the bundle's icon can be new (first install) or
-  // superseded (upgrade) — register it so LaunchServices knows the bundle and can
-  // resolve its AppIcon for the left-hand slot of daemon notifications.
-  refreshBundleIconRegistration(dest);
+  // Heal an older install that was ad-hoc re-signed over a Developer ID source:
+  // that unstable identity made Accessibility re-prompt on every upgrade.
+  const needsInstall = (): boolean => {
+    if (opts.forceReinstall) return true;
+    if (!fs.existsSync(dest)) return true;
+    return hasDeveloperIdSignature(src) && !hasDeveloperIdSignature(dest);
+  };
+  // Fast path: nothing to do.
+  if (!needsInstall()) return installedExecutablePath();
+  // Serialize the atomic install so concurrent `agents` invocations (this runs
+  // on the darwin startup path) don't race the swap or each re-copy — the
+  // stampede that transiently corrupted MenubarHelper.app and tripped the
+  // "damaged" dialog.
+  withInstallLock(dest, (heartbeat) => {
+    if (!needsInstall()) return;
+    copyAppBundle(src, dest);
+    heartbeat(); // cp -R done; keep the lock fresh across lsregister
+    // A fresh copy is exactly when the bundle's icon can be new (first install) or
+    // superseded (upgrade) — register it so LaunchServices knows the bundle and can
+    // resolve its AppIcon for the left-hand slot of daemon notifications.
+    refreshBundleIconRegistration(dest);
+  });
   return installedExecutablePath();
 }
 
@@ -340,7 +360,7 @@ export function enableMenubarService(opts: { clearOptOut?: boolean } = { clearOp
   // rather than re-signing over it (an ad-hoc re-sign never satisfies Gatekeeper).
   if (!(codesignVerifies(installedAppPath()) && gatekeeperAssesses(installedAppPath()))) {
     process.stderr.write(
-      'agents: menu-bar helper is not notarized/valid on this machine; skipping launch. ' +
+      'agents: AGI Menu is not notarized/valid on this machine; skipping launch. ' +
       'Upgrade to a notarized build (npm i -g @phnx-labs/agents-cli), then `agents menubar setup`.\n'
     );
     return false;
@@ -480,13 +500,23 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
     }
     // Re-enable (recopy helper + rewrite plist) when the version drifted OR the
     // plist's baked interpreter/entry no longer point at the install now running
-    // `agents` — the dual-install skew a version bump alone can't catch.
-    if (menubarSetupStale() || menubarSetupNeedsRepoint()) {
+    // `agents` — the dual-install skew a version bump alone can't catch — OR the
+    // installed copy is still ad-hoc while the shipped source is Developer ID
+    // (older heal path; Accessibility re-prompts until the identity is restored).
+    if (menubarSetupStale() || menubarSetupNeedsRepoint() || installedNeedsDevIdHeal()) {
       enableMenubarService({ clearOptOut: false });
     }
   } catch {
     /* never block startup on the menu bar */
   }
+}
+
+/** True when App Support still has an ad-hoc copy but the npm bundle is Developer ID. */
+function installedNeedsDevIdHeal(): boolean {
+  const src = sourceAppPath();
+  if (!src || !fs.existsSync(installedAppPath())) return false;
+  if (hasDeveloperIdSignature(installedAppPath())) return false;
+  return hasDeveloperIdSignature(src);
 }
 
 /** One step of `agents menubar setup`, and how it came out. */
@@ -546,14 +576,14 @@ export function runMenubarSetup(): SetupResult {
   };
 
   if (!onDarwin()) {
-    step('platform', 'failed', `the menu bar helper is macOS only (this is ${process.platform})`);
+    step('platform', 'failed', `AGI Menu is macOS only (this is ${process.platform})`);
     return { steps, configured: false, status: getMenubarStatus() };
   }
 
   const before = getMenubarStatus();
 
   if (!sourceAppPath()) {
-    step('bundle', 'failed', 'no menu-bar helper bundle ships with this install');
+    step('bundle', 'failed', 'no AGI Menu bundle ships with this install');
     return { steps, configured: false, status: before };
   }
 

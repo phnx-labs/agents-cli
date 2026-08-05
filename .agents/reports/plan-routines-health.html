@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Routines · why they stopped, and how to make them dependable</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111312; --panel2:#161a18; --ink:#e7ece8; --dim:#8b938c;
+    --line:#26302a; --accent:#a3e635; --amber:#f5c451; --red:#ff6b6b; --cyan:#5ad6c0;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  :root[data-theme="light"]{
+    --bg:#faf9f6; --panel:#ffffff; --panel2:#f2f4f0; --ink:#1a1c1a; --dim:#5c655c;
+    --line:#e2e6df; --accent:#4d7c0f; --amber:#b45309; --red:#dc2626; --cyan:#0e7490;
+  }
+  :root[data-theme="light"] .fig{background:#0e120f;border-color:#26302a}
+  :root[data-theme="light"] .fig figcaption{color:#8b938c}
+  :root[data-theme="light"] .fig figcaption b{color:#e7ece8}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:56px 28px 120px}
+  header.hero{border-bottom:1px solid var(--line);padding-bottom:28px;margin-bottom:40px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 14px}
+  h1{font-size:34px;line-height:1.15;margin:0 0 12px;font-weight:700;letter-spacing:-.01em}
+  h1 .accent{color:var(--accent)}
+  .sub{color:var(--dim);font-size:17px;max-width:70ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+  .chip{font-family:var(--mono);font-size:11.5px;color:var(--dim);border:1px solid var(--line);
+    border-radius:999px;padding:4px 11px;background:var(--panel)}
+  .chip b{color:var(--ink);font-weight:500}
+  .prov{margin-top:10px}
+  .prov .chip{font-size:11px;opacity:.82}
+  .prov .chip b{color:var(--cyan)}
+  h2{font-size:23px;margin:52px 0 8px;letter-spacing:-.01em;scroll-margin-top:20px}
+  h2 .n{font-family:var(--mono);color:var(--accent);font-size:15px;margin-right:10px;opacity:.85}
+  h3{font-size:16.5px;margin:26px 0 8px;color:var(--ink)}
+  p{margin:10px 0}
+  .lead{color:var(--dim)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--panel2);border:1px solid var(--line);
+    border-radius:5px;padding:1.5px 6px;color:var(--cyan)}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent}
+  a:hover{border-bottom-color:var(--accent)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:26px 22px 18px;margin:22px 0;overflow-x:auto}
+  .fig figcaption{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:14px;text-align:center}
+  .fig figcaption b{color:var(--ink)}
+  svg{display:block;margin:0 auto;max-width:100%;height:auto}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14.5px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);font-weight:500}
+  td code{font-size:.85em}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600}
+  .tag.a{background:rgba(163,230,53,.12);color:var(--accent);border:1px solid rgba(163,230,53,.3)}
+  .tag.b{background:rgba(90,214,192,.1);color:var(--cyan);border:1px solid rgba(90,214,192,.28)}
+  .tag.c{background:rgba(245,196,81,.1);color:var(--amber);border:1px solid rgba(245,196,81,.28)}
+  .tag.d{background:rgba(255,107,107,.1);color:var(--red);border:1px solid rgba(255,107,107,.28)}
+  ul{margin:10px 0;padding-left:22px}li{margin:6px 0}
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);border-radius:0 10px 10px 0;
+    padding:14px 18px;margin:18px 0}
+  .callout.warn{border-left-color:var(--amber)}
+  .callout.bad{border-left-color:var(--red)}
+  .callout .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);display:block;margin-bottom:5px}
+  .callout.warn .lbl{color:var(--amber)}
+  .callout.bad .lbl{color:var(--red)}
+  .toc{font-family:var(--mono);font-size:13px;display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:18px}
+  .toc a{color:var(--dim);border:0}.toc a:hover{color:var(--accent)}
+  pre{font-family:var(--mono);font-size:13px;background:#0c0f0d;border:1px solid var(--line);
+    border-radius:12px;padding:16px 18px;overflow-x:auto;line-height:1.55;color:#e7ece8}
+  pre .c{color:#8b938c}pre .k{color:#a3e635}pre .s{color:#5ad6c0}pre .r{color:#ff6b6b}
+  .foot{margin-top:60px;padding-top:22px;border-top:1px solid var(--line);color:var(--dim);
+    font-family:var(--mono);font-size:12px}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--dim);
+    justify-content:center;margin-top:6px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .themebtn{position:fixed;top:16px;right:16px;z-index:9;font-family:var(--mono);font-size:12px;
+    color:var(--dim);background:var(--panel);border:1px solid var(--line);border-radius:999px;
+    padding:6px 13px;cursor:pointer}
+  .themebtn:hover{color:var(--accent);border-color:var(--accent)}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="tt()" id="tb">◐ light</button>
+<script>
+  var r=document.documentElement;
+  function set(t){r.setAttribute('data-theme',t);document.getElementById('tb').textContent=(t==='light'?'◑ dark':'◐ light')}
+  set(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
+  function tt(){set(r.getAttribute('data-theme')==='light'?'dark':'light')}
+</script>
+<div class="wrap">
+
+<header class="hero">
+  <p class="kicker">agents-cli · routines · analysis</p>
+  <h1>Routines: why they stopped,<br>and what makes them <span class="accent">dependable</span></h1>
+  <p class="sub">You saw a column of red in the menu bar and asked whether the last few days of
+  routines work had landed. Almost nothing regressed between yesterday and today. What you saw was
+  three infrastructure faults, one live quota outage, and a reporting layer that lies in four
+  distinct ways.</p>
+  <div class="meta">
+    <span class="chip"><b>5</b>&nbsp;devices swept</span>
+    <span class="chip"><b>46</b>&nbsp;routine instances</span>
+    <span class="chip"><b>8</b>&nbsp;distinct issues</span>
+    <span class="chip"><b>2</b>&nbsp;already fixed</span>
+    <span class="chip">status: <b>awaiting go</b></span>
+  </div>
+  <div class="meta prov">
+    <span class="chip">harness <b>claude</b></span>
+    <span class="chip">agent <b>opus-5</b></span>
+    <span class="chip">host <b>yosemite-s0</b></span>
+    <span class="chip">session <b>2f3859d9</b></span>
+    <span class="chip">date <b>2026-08-03</b></span>
+  </div>
+  <nav class="toc">
+    <a href="#s1">01 What a routine does today</a>
+    <a href="#s2">02 Fleet state right now</a>
+    <a href="#s3">03 The eight issues</a>
+    <a href="#s4">04 Why the reporting lies</a>
+    <a href="#s5">05 What I propose, and why</a>
+    <a href="#s6">06 Expected results</a>
+    <a href="#s7">07 Tests and evals</a>
+  </nav>
+</header>
+
+<h2 id="s1"><span class="n">01</span>What a routine does today</h2>
+
+<p>A routine is a YAML file in <code>~/.agents/routines/</code>. A background daemon on each device
+parses its cron expression with <a href="https://github.com/hexagon/croner">croner</a>, and at fire
+time spawns an agent, a workflow, or a plain shell command, capturing the output into a run record
+under <code>~/.agents/.history/runs/&lt;name&gt;/&lt;runId&gt;/</code>.</p>
+
+<p>Two fields decide <em>where</em> it happens. <code>devices:</code> is the firing allowlist — which
+daemon may fire it at all; each listed device fires <strong>independently</strong>.
+<code>hostStrategy:</code> is placement — where the job body executes once fired. They are
+different questions, and conflating them is a recurring source of confusion.</p>
+
+<p>The whole design rests on one assumption that turns out to be load-bearing: <strong>the daemon is
+running when the clock strikes.</strong> Everything below follows from where that assumption breaks.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 940 300" role="img" aria-label="Lifecycle of a scheduled fire, showing the three points where a fire is lost">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L7,3 z" fill="#8b938c"/>
+    </marker>
+    <marker id="arR" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L7,3 z" fill="#ff6b6b"/>
+    </marker>
+  </defs>
+
+  <text x="16" y="26" fill="#8b938c" font-family="monospace" font-size="12">HAPPY PATH</text>
+  <rect x="16" y="40" width="150" height="46" rx="9" fill="#161a18" stroke="#26302a"/>
+  <text x="91" y="62" fill="#e7ece8" font-family="monospace" font-size="12" text-anchor="middle">daemon alive</text>
+  <text x="91" y="77" fill="#8b938c" font-family="monospace" font-size="10.5" text-anchor="middle">croner armed</text>
+
+  <line x1="166" y1="63" x2="222" y2="63" stroke="#8b938c" stroke-width="1.5" marker-end="url(#ar)"/>
+  <rect x="224" y="40" width="150" height="46" rx="9" fill="#161a18" stroke="#26302a"/>
+  <text x="299" y="62" fill="#e7ece8" font-family="monospace" font-size="12" text-anchor="middle">fire time</text>
+  <text x="299" y="77" fill="#8b938c" font-family="monospace" font-size="10.5" text-anchor="middle">devices pin checked</text>
+
+  <line x1="374" y1="63" x2="430" y2="63" stroke="#8b938c" stroke-width="1.5" marker-end="url(#ar)"/>
+  <rect x="432" y="40" width="150" height="46" rx="9" fill="#161a18" stroke="#26302a"/>
+  <text x="507" y="62" fill="#e7ece8" font-family="monospace" font-size="12" text-anchor="middle">spawn</text>
+  <text x="507" y="77" fill="#8b938c" font-family="monospace" font-size="10.5" text-anchor="middle">agent / cmd / workflow</text>
+
+  <line x1="582" y1="63" x2="638" y2="63" stroke="#8b938c" stroke-width="1.5" marker-end="url(#ar)"/>
+  <rect x="640" y="40" width="170" height="46" rx="9" fill="#0e1a12" stroke="#a3e635"/>
+  <text x="725" y="62" fill="#a3e635" font-family="monospace" font-size="12" text-anchor="middle">run record</text>
+  <text x="725" y="77" fill="#8b938c" font-family="monospace" font-size="10.5" text-anchor="middle">completed / failed</text>
+
+  <line x1="16" y1="112" x2="924" y2="112" stroke="#26302a" stroke-dasharray="3 4"/>
+  <text x="16" y="140" fill="#ff6b6b" font-family="monospace" font-size="12">WHERE A FIRE IS LOST</text>
+
+  <rect x="16" y="156" width="286" height="72" rx="9" fill="#1a1113" stroke="#ff6b6b"/>
+  <text x="30" y="177" fill="#ff6b6b" font-family="monospace" font-size="11.5">① daemon not running</text>
+  <text x="30" y="194" fill="#8b938c" font-family="monospace" font-size="10.5">laptop asleep · reboot · wedged ·</text>
+  <text x="30" y="208" fill="#8b938c" font-family="monospace" font-size="10.5">systemd unit broken for 8,439 restarts</text>
+  <text x="30" y="222" fill="#e7ece8" font-family="monospace" font-size="10.5">→ croner re-arms FORWARD. fire gone.</text>
+
+  <rect x="318" y="156" width="286" height="72" rx="9" fill="#1a1113" stroke="#ff6b6b"/>
+  <text x="332" y="177" fill="#ff6b6b" font-family="monospace" font-size="11.5">② pin matches no machine</text>
+  <text x="332" y="194" fill="#8b938c" font-family="monospace" font-size="10.5">devices: [worker] — but machineId()</text>
+  <text x="332" y="208" fill="#8b938c" font-family="monospace" font-size="10.5">returns yosemite-s1, never "worker"</text>
+  <text x="332" y="222" fill="#e7ece8" font-family="monospace" font-size="10.5">→ inert everywhere. silent.</text>
+
+  <rect x="620" y="156" width="304" height="72" rx="9" fill="#1a1113" stroke="#ff6b6b"/>
+  <text x="634" y="177" fill="#ff6b6b" font-family="monospace" font-size="11.5">③ spawn dies instantly</text>
+  <text x="634" y="194" fill="#8b938c" font-family="monospace" font-size="10.5">429 weekly quota → exit 1, and</text>
+  <text x="634" y="208" fill="#8b938c" font-family="monospace" font-size="10.5">errorMessage is written EMPTY</text>
+  <text x="634" y="222" fill="#e7ece8" font-family="monospace" font-size="10.5">→ shows "failed", reason unknowable.</text>
+
+  <line x1="159" y1="156" x2="159" y2="96" stroke="#ff6b6b" stroke-width="1.5" marker-end="url(#arR)" stroke-dasharray="4 3"/>
+  <line x1="461" y1="156" x2="299" y2="96" stroke="#ff6b6b" stroke-width="1.5" marker-end="url(#arR)" stroke-dasharray="4 3"/>
+  <line x1="772" y1="156" x2="725" y2="96" stroke="#ff6b6b" stroke-width="1.5" marker-end="url(#arR)" stroke-dasharray="4 3"/>
+
+  <text x="16" y="268" fill="#8b938c" font-family="monospace" font-size="10.5">In all three cases the routine's row keeps showing the PREVIOUS run's status — there is no "missed" state.</text>
+  <text x="16" y="286" fill="#8b938c" font-family="monospace" font-size="10.5">So a routine that has not run for three weeks still reads "completed".</text>
+</svg>
+<div class="legend">
+  <span><i class="sw" style="background:#a3e635"></i> reaches a run record</span>
+  <span><i class="sw" style="background:#ff6b6b"></i> fire lost, no record written</span>
+  <span><i class="sw" style="background:#26302a"></i> daemon-internal step</span>
+</div>
+<figcaption><b>Figure 1.</b> The fire lifecycle, and the three independent ways a fire disappears.
+Each loss is silent: none of them writes anything the listing can show you.</figcaption>
+</figure>
+
+<h2 id="s2"><span class="n">02</span>Fleet state right now</h2>
+
+<p class="lead">Swept live at 2026-08-03 04:15 PDT across every device that owns routines.</p>
+
+<table>
+<thead><tr><th>device</th><th>owns</th><th>firing?</th><th>what is actually true</th></tr></thead>
+<tbody>
+<tr><td><span class="tag a">ok</span> <code>yosemite-s0</code></td><td>16</td><td>yes</td>
+  <td>Drains fired 11:00Z and 11:10Z; watchdog every 2 min. Healthy.</td></tr>
+<tr><td><span class="tag d">broken</span> <code>yosemite-s1</code></td><td>10</td><td>fires, every agent run fails</td>
+  <td>Claude <strong>weekly quota exhausted</strong>, resets Aug 4 07:00. Every agent routine exits 1 with no stated reason.</td></tr>
+<tr><td><span class="tag c">phantom</span> <code>worker</code></td><td>—</td><td>n/a</td>
+  <td>Not a machine. Same hostname, <code>machine-id</code> and runs-dir inode as <code>yosemite-s1</code>.</td></tr>
+<tr><td><span class="tag c">partial</span> <code>zion</code></td><td>5</td><td>yes</td>
+  <td>Missed Sunday's <code>weekly-fleet-retro</code> while asleep; detected it, warned, did nothing.</td></tr>
+<tr><td><span class="tag b">pending</span> <code>mac-mini</code></td><td>5</td><td>yes</td>
+  <td>Its 3 agent routines moved here Aug 1 (Sat). Today is their <em>first weekday</em>. Correctly armed.</td></tr>
+</tbody>
+</table>
+
+<div class="callout">
+  <span class="lbl">The headline finding</span>
+  <strong>Nothing regressed overnight.</strong> mac-mini's routines were moved there on Saturday and
+  have not yet had a weekday. s0's daily-08:00 routines last ran 20 hours ago and today's fire is not
+  due until 08:00. The red you saw was quota exhaustion on s1, plus four separate reporting defects.
+</div>
+
+<h2 id="s3"><span class="n">03</span>The eight issues</h2>
+
+<table>
+<thead><tr><th>#</th><th>issue</th><th>evidence</th><th>state</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><strong>s1's agent routines all fail on a weekly quota limit, invisibly</strong></td>
+  <td><code>"error":"rate_limit"</code>, <code>api_error_status:429</code>, <em>"You've hit your weekly limit · resets Aug 4, 7am"</em> — and <code>errorMessage</code> written empty</td>
+  <td><span class="tag d">live</span></td></tr>
+<tr><td>2</td><td><strong>Routines flagged overdue for fires predating their existence</strong></td>
+  <td><code>agents-cli-updates</code> created Aug 1, never run, flagged OVERDUE for a Jul 27 fire</td>
+  <td><span class="tag d">blocks #1773</span></td></tr>
+<tr><td>3</td><td><strong><code>worker</code> is a phantom device; pins to it never fire</strong></td>
+  <td>Same <code>machine-id 7af66f30966a</code> as s1; <code>jobRunsOnThisDevice</code> compares against <code>machineId()</code></td>
+  <td><span class="tag d">open</span></td></tr>
+<tr><td>4</td><td><strong>The Linux daemon was never supervised</strong></td>
+  <td>Stale drop-in pointing at nonexistent <code>agents daemon _run</code>; <code>NRestarts</code> 8,439 on s0, 8,939 on s1</td>
+  <td><span class="tag a">fixed today</span></td></tr>
+<tr><td>5</td><td><strong>Missed fires are never recovered</strong></td>
+  <td>zion daemon down 02:03Z→08:23Z; <code>weekly-fleet-retro</code> armed for 04:00:00Z; no run record</td>
+  <td><span class="tag c">PR #1773</span></td></tr>
+<tr><td>6</td><td><strong>Status read from the wrong device</strong></td>
+  <td>zion reported s0's routines as failed from July records while s0 had completed them</td>
+  <td><span class="tag a">merged #1770</span></td></tr>
+<tr><td>7</td><td><strong>A miss leaves no trace at all</strong></td>
+  <td><code>RunMeta.status</code> had no value for it; the row shows the last real run forever</td>
+  <td><span class="tag c">PR #1773</span></td></tr>
+<tr><td>8</td><td>Unexplained failures still to triage</td>
+  <td><code>rush-blog-engine</code> since Jul 31; <code>rush-1107-ssl-watch</code> on zion; mac-mini at load 56</td>
+  <td><span class="tag b">queued</span></td></tr>
+</tbody>
+</table>
+
+<div class="callout bad">
+  <span class="lbl">Found only from live data</span>
+  Issue 2 makes the auto-catchup PR <strong>dangerous as written</strong>. <code>detectOverdueJobs</code>
+  looks back one week and never asks when the routine was created, so auto-catchup would
+  <strong>immediately run every newly created or re-pinned routine</strong>. Two review passes did not
+  catch this; the fleet sweep did. It must land before #1773 merges.
+</div>
+
+<h2 id="s4"><span class="n">04</span>Why the reporting lies</h2>
+
+<p>Four independent defects all present as the same symptom — red where there should be green,
+or green where there should be alarm.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 940 250" role="img" aria-label="What the menu bar showed versus what was true">
+  <text x="16" y="24" fill="#ff6b6b" font-family="monospace" font-size="12">WHAT YOU SAW</text>
+  <rect x="16" y="36" width="440" height="182" rx="10" fill="#1a1113" stroke="#3a2226"/>
+  <text x="36" y="64" fill="#ff6b6b" font-family="monospace" font-size="12">✕ security-sweep      exit 1</text>
+  <text x="36" y="86" fill="#ff6b6b" font-family="monospace" font-size="12">✕ review-open-prs     exit 1</text>
+  <text x="36" y="108" fill="#ff6b6b" font-family="monospace" font-size="12">✕ hetzner-lease-gc    exit 1</text>
+  <text x="36" y="130" fill="#ff6b6b" font-family="monospace" font-size="12">✕ slack-link-rotate   exit 1</text>
+  <text x="36" y="152" fill="#ff6b6b" font-family="monospace" font-size="12">✕ crm-pipeline-brief  exit 1</text>
+  <text x="36" y="174" fill="#ff6b6b" font-family="monospace" font-size="12">✕ weekly-fleet-retro  overdue</text>
+  <text x="36" y="200" fill="#8b938c" font-family="monospace" font-size="10.5">"the routines are broken"</text>
+
+  <text x="500" y="24" fill="#a3e635" font-family="monospace" font-size="12">WHAT WAS TRUE</text>
+  <rect x="500" y="36" width="424" height="182" rx="10" fill="#0e1a12" stroke="#2a3a22"/>
+  <text x="520" y="64" fill="#a3e635" font-family="monospace" font-size="12">✓ completed Aug 2 on yosemite-s0</text>
+  <text x="520" y="86" fill="#a3e635" font-family="monospace" font-size="12">✓ completed Aug 2 on yosemite-s0</text>
+  <text x="520" y="108" fill="#a3e635" font-family="monospace" font-size="12">✓ completed Aug 2 on yosemite-s0</text>
+  <text x="520" y="130" fill="#a3e635" font-family="monospace" font-size="12">✓ completed — not due again yet</text>
+  <text x="520" y="152" fill="#f5c451" font-family="monospace" font-size="12">◔ moved here Aug 1; 1st weekday today</text>
+  <text x="520" y="174" fill="#ff6b6b" font-family="monospace" font-size="12">✕ genuinely missed (laptop asleep)</text>
+  <text x="520" y="200" fill="#8b938c" font-family="monospace" font-size="10.5">1 of 6 was a real failure</text>
+</svg>
+<div class="legend">
+  <span><i class="sw" style="background:#a3e635"></i> healthy, misreported</span>
+  <span><i class="sw" style="background:#f5c451"></i> not yet due, misreported</span>
+  <span><i class="sw" style="background:#ff6b6b"></i> genuinely broken</span>
+</div>
+<figcaption><b>Figure 2.</b> Five of six red rows were reporting defects. The cost is not cosmetic:
+a status you cannot trust means a real failure hides in the noise.</figcaption>
+</figure>
+
+<ul>
+  <li><strong>Wrong device.</strong> Status was resolved from the local runs dir even for routines pinned elsewhere. <span class="tag a">fixed</span></li>
+  <li><strong>Wrong epoch.</strong> Overdue looks back a fixed week, ignoring when the routine came to exist on that device.</li>
+  <li><strong>No miss state.</strong> A fire that never happened writes nothing, so the previous run's status persists indefinitely.</li>
+  <li><strong>No failure reason.</strong> A quota kill records <code>failed</code> with an empty <code>errorMessage</code>.</li>
+</ul>
+
+<h2 id="s5"><span class="n">05</span>What I propose, and why</h2>
+
+<h3>Phase 1 — make every failure state its reason</h3>
+<p>Extend the failure classifier beside the existing <code>isAuthFailureFromLog</code> /
+<code>authFailureReason</code> in <code>runner.ts</code> to recognise a 429 / <code>rate_limit</code> /
+"weekly limit" result and record a structured reason. Reuse the <code>rate_limited</code> vocabulary
+already in <code>usage.ts</code> rather than inventing a second one. Notify once per quota window,
+not per failed run.</p>
+<p class="lead"><strong>Why:</strong> a run that records <code>failed</code> with no reason is
+indistinguishable from a code bug, so you cannot triage without SSH-ing to the box and reading raw
+stdout — which is exactly what today cost. <strong>Benefit:</strong> the menu bar already renders
+<code>failureReason</code>, so it inherits this for free.</p>
+
+<h3>Phase 2 — make "overdue" honest</h3>
+<p>Give <code>detectOverdueJobs</code> an effective-start floor: the later of the routine's
+creation/last-pin time and the device's own scheduler start. Stamp <code>createdAt</code> /
+<code>pinnedAt</code> in <code>writeJob</code>, which already stamps <code>actor</code>.</p>
+<p class="lead"><strong>Why:</strong> this is the blocker for auto-catchup. <strong>Benefit:</strong>
+a young routine reads "not yet due" instead of "overdue", and auto-catchup stops being a footgun that
+fires every new routine on creation.</p>
+
+<h3>Phase 3 — remove the phantom device</h3>
+<p>Either make <code>worker</code> an alias that <code>normalizeHost</code> resolves to
+<code>yosemite-s1</code>, or fail loudly when a pin resolves to no live machine. A routine pinned to a
+name no machine answers to must be marked in the listing, never silently inert.</p>
+<p class="lead"><strong>Why:</strong> a pin that matches nothing is the most confusing possible
+failure — the routine looks configured and enabled, and simply never happens.</p>
+
+<h3>Phase 4 — keep the daemon supervised</h3>
+<p>Teach <code>agents doctor</code> to flag a service-manager unit that is enabled but failing.
+<code>NRestarts</code> in the thousands with the daemon alive only as a detached process is precisely
+the state that went unnoticed for weeks.</p>
+<p class="lead"><strong>Benefit:</strong> the daemon survives reboots, which it did not before today.</p>
+
+<h3>Phase 5 — finish what is in flight</h3>
+<p>Merge <a href="https://github.com/phnx-labs/agents-cli/pull/1773">#1773</a> once Phase 2 lands, then
+re-triage the remaining failures with the reason field actually populated. Several may turn out to be
+Phase 1's quota issue wearing a different mask.</p>
+
+<h2 id="s6"><span class="n">06</span>Expected results</h2>
+
+<table>
+<thead><tr><th>today</th><th>after</th></tr></thead>
+<tbody>
+<tr><td>A failed routine shows <code>exit 1</code> and nothing else</td><td>It names the cause: <code>quota_exhausted: weekly limit, resets Aug 4 07:00</code></td></tr>
+<tr><td>A missed fire is invisible; the row shows a three-week-old <code>completed</code></td><td>The gap is a <code>missed</code> record, and the routine runs late unless it opted out</td></tr>
+<tr><td>A new routine is immediately "overdue"</td><td>It reads "not yet due" until its first real slot</td></tr>
+<tr><td>A routine pinned to a dead name is silently inert</td><td>Rejected at add time, flagged if already present</td></tr>
+<tr><td>The daemon dies on reboot and nobody notices</td><td>Supervised, and drift is reported by <code>agents doctor</code></td></tr>
+<tr><td>Red in the menu bar means "look somewhere, maybe"</td><td>Red means one routine genuinely failed, with a reason attached</td></tr>
+</tbody>
+</table>
+
+<div class="callout warn">
+  <span class="lbl">The measure that matters</span>
+  Not "fewer red rows" — <strong>every red row is real, and every real failure is red.</strong>
+  Today five of six were false. That is the number to drive to zero in both directions.
+</div>
+
+<h2 id="s7"><span class="n">07</span>Tests and evals</h2>
+
+<p>Each phase ships a test that fails without its fix. No mocking — the existing routine tests spawn
+the real CLI against an isolated <code>HOME</code>, and these follow that pattern.</p>
+
+<table>
+<thead><tr><th>#</th><th>what it proves</th><th>how</th></tr></thead>
+<tbody>
+<tr><td><span class="tag a">unit</span></td><td>A 429 quota kill produces a structured reason, never an empty one</td>
+  <td>Replay the captured s1 <code>stdout.log</code> through the classifier; assert the reason string</td></tr>
+<tr><td><span class="tag a">unit</span></td><td>A newly created routine is <em>not</em> overdue and is <em>not</em> caught up</td>
+  <td>Create a routine whose daily slot already passed today; assert <code>detectOverdueJobs</code> returns empty and <code>runCatchup</code> spawns nothing</td></tr>
+<tr><td><span class="tag a">unit</span></td><td>A pin naming no live machine is rejected</td>
+  <td>Add with <code>--devices worker</code> against a registry where it resolves to no <code>machineId</code>; assert nonzero exit and no file written</td></tr>
+<tr><td><span class="tag b">integration</span></td><td>A genuinely missed fire is recorded and re-run exactly once</td>
+  <td>Already passing: isolated HOME, daemon stopped past a fire, <code>catchup</code> records <code>missed</code>, runs late, second pass is a no-op</td></tr>
+<tr><td><span class="tag c">fleet eval</span></td><td>Every remaining red is real</td>
+  <td>Re-run the per-box sweep; assert each <code>FAILED</code>/<code>OVERDUE</code> has a stated reason and a real cause</td></tr>
+<tr><td><span class="tag c">fleet eval</span></td><td>The system works unattended for a day</td>
+  <td>Tomorrow 08:00: s0's dailies fire, mac-mini's three weekday routines fire at 15:00Z/16:00Z, zion's retro is caught up</td></tr>
+</tbody>
+</table>
+
+<p>The fleet evals are the ones that matter. Unit tests prove the code is right; only a morning where
+every routine fired unattended proves the <em>system</em> is right.</p>
+
+<div class="foot">
+  claude · opus-5 · yosemite-s0 · session 2f3859d9 · 2026-08-03 &nbsp;·&nbsp; next: go / reshape
+</div>
+
+</div>
+</body>
+</html>

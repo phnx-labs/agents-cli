@@ -83,6 +83,14 @@ export function storeWriteToken(token: string): void {
     bundle = {
       name: SHARE_BUNDLE,
       description: 'agents share — write token for the R2 share endpoint',
+      // A NEW share bundle defaults to the `never` tier (no biometry ACL). The R2
+      // write token is low-sensitivity automation infra that is auto-read on EVERY
+      // `agents run` (shareRuntimeEnv) — a biometry ACL there is what produced the
+      // per-run Touch ID storm. `never` stores it no-ACL so auto-share is silent
+      // and needs no unlock. An EXISTING bundle keeps its tier (we never silently
+      // downgrade one the user already made); change it explicitly with
+      // `agents secrets policy share <tier>`.
+      policy: 'never',
       vars: {},
     } as SecretsBundle;
   }
@@ -96,6 +104,9 @@ export function storeWriteToken(token: string): void {
 export function readWriteTokenFromBundle(): string {
   const { env } = readAndResolveBundleEnv(SHARE_BUNDLE, {
     caller: 'share',
+    // Explicit `agents share` command (a human published a file): a headless agent
+    // subprocess resolves broker-only, an interactive human may unlock. This is NOT
+    // an agent LAUNCH read (that is exec.ts's --secrets injection, always agentOnly).
     agentOnly: isHeadlessSecretsContext(),
   });
   const token = env[SHARE_TOKEN_KEY];
@@ -114,10 +125,20 @@ export function readWriteToken(): string {
   return readWriteTokenEnv() ?? readWriteTokenFromBundle();
 }
 
-/** Best-effort runtime env for spawned agents. Never throws: a missing/locked
- * bundle should not block unrelated agent runs, but an already-unlocked bundle
- * or injected token lets ephemeral agents publish with no local setup. */
-export function shareRuntimeEnv(opts: { agentOnly?: boolean } = {}): Record<string, string> | undefined {
+/** Best-effort runtime env for spawned agents. Never throws AND never prompts.
+ *
+ * Auto-injecting the share write token on every `agents run` is a background
+ * convenience, NOT a user-initiated secret access — so it MUST NOT raise a Touch
+ * ID sheet (SEC-13: an agent launch never pops biometry on its own). This was the
+ * per-run prompt storm: `share` is a keychain bundle that is rarely broker-held,
+ * so an interactive read here spawned the helper and popped Touch ID on EVERY
+ * launch. The read is now always `agentOnly` — it resolves the token only from the
+ * injected env or an already-held / no-ACL bundle, and silently returns undefined
+ * otherwise (the caller runs without auto-share; the agent can still publish via
+ * its own `agents share`). To get zero-friction auto-share with no prompt: unlock
+ * once (`agents secrets unlock share`) or make it no-ACL (`agents secrets policy
+ * share never`). */
+export function shareRuntimeEnv(): Record<string, string> | undefined {
   if (!readShareConfig()) return undefined;
   const fromEnv = readWriteTokenEnv();
   if (fromEnv) return { [SHARE_TOKEN_ENV_KEY]: fromEnv };
@@ -126,7 +147,7 @@ export function shareRuntimeEnv(opts: { agentOnly?: boolean } = {}): Record<stri
     const { env } = readAndResolveBundleEnv(SHARE_BUNDLE, {
       caller: 'share',
       keys: [SHARE_TOKEN_KEY],
-      agentOnly: opts.agentOnly,
+      agentOnly: true, // never raise a Touch ID sheet on an agent launch (SEC-13)
     });
     const token = env[SHARE_TOKEN_KEY];
     return token ? { [SHARE_TOKEN_ENV_KEY]: token } : undefined;
@@ -147,6 +168,7 @@ export function readCloudflareCreds(
   }
   const { env } = readAndResolveBundleEnv(bundle, {
     caller: 'share',
+    // Explicit `agents share setup` provisioning read — not an agent launch.
     agentOnly: isHeadlessSecretsContext(),
   });
   const find = (re: RegExp): string => {

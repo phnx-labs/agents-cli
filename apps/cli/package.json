@@ -1,6 +1,6 @@
 {
   "name": "@phnx-labs/agents-cli",
-  "version": "1.20.93",
+  "version": "1.22.5",
   "description": "One CLI for all your AI coding agents - versions, config, cloud dispatch, sessions, and teams (now with first-class Grok Build CLI support)",
   "type": "module",
   "main": "dist/index.js",
@@ -89,8 +89,8 @@
     "@types/proper-lockfile": "4.1.4",
     "@xterm/headless": "6.0.0",
     "@zed-industries/agent-client-protocol": "0.4.5",
+    "acorn": "8.18.0",
     "age-encryption": "0.3.0",
-    "aws4fetch": "1.0.20",
     "chalk": "5.6.2",
     "commander": "15.0.0",
     "croner": "10.0.1",
@@ -102,6 +102,7 @@
     "shlex": "3.0.0",
     "simple-git": "3.36.0",
     "smol-toml": "1.7.0",
+    "unbash": "4.0.5",
     "ws": "^8.21.0",
     "yaml": "2.9.0"
   },

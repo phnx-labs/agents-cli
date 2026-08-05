@@ -7,7 +7,7 @@
 // single authority on permissions and targeting.
 
 import type { ComputerClient } from '../computer-rpc.js';
-import { resolveTargetPidDecision, type AppInfo } from '../../commands/computer-actions.js';
+import { resolveTargetPidDecision, emitComputerAction, type AppInfo } from '../../commands/computer-actions.js';
 import type { VerbCall, VerbResult, VerbDispatcher } from './loop.js';
 
 // CLI verb -> daemon RPC method. Only the rename cases need listing; the rest
@@ -107,7 +107,14 @@ function toRpcParams(verb: string, input: Record<string, unknown>, pid?: number)
 // Build a dispatcher bound to a live client. Every call is a single daemon
 // round-trip; errors are returned (never thrown) so the loop can feed them
 // back to the model as a tool_result.
-export function makeVerbDispatcher(client: ComputerClient): VerbDispatcher {
+//
+// `computer run`'s embedded model loop drives every verb (click, type,
+// screenshot, ...) through THIS single seam rather than the explicit
+// `agents computer <verb>` commands in computer-actions.ts, so it must emit
+// the same `computer.action` event those commands emit — otherwise a session
+// that only used the loop reads back usedComputer=false even though it drove
+// real actions (reviewer-flagged regression on #1864).
+export function makeVerbDispatcher(client: ComputerClient, context: { host?: string } = {}): VerbDispatcher {
   return async (call: VerbCall): Promise<VerbResult> => {
     const verb = call.name;
     const input = call.input ?? {};
@@ -126,6 +133,7 @@ export function makeVerbDispatcher(client: ComputerClient): VerbDispatcher {
     const params = toRpcParams(verb, input, pid);
     const res = await client.call(method, params);
     if (res.error) return { ok: false, error: `${res.error.code}: ${res.error.message}` };
+    emitComputerAction(verb, pid, { bundle: input.bundle as string | undefined, host: context.host });
     return { ok: true, result: res.result ?? {} };
   };
 }

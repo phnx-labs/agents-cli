@@ -2,12 +2,12 @@
  * Usage command -- show rate-limit / quota status for each installed agent.
  *
  * Lists every installed agent with the best available usage snapshot:
- *   - claude: live OAuth API call (cached for 2 minutes)
+ *   - claude: live OAuth API call (cached for 5 minutes)
  *   - codex:  parsed from latest session log's rate_limits event
- *   - kimi:   live Kimi Code /usages API call (cached for 2 minutes)
- *   - droid:  live Factory billing/limits API call (cached for 2 minutes)
+ *   - kimi:   live Kimi Code /usages API call (cached for 5 minutes)
+ *   - droid:  live Factory billing/limits API call (cached for 5 minutes)
  *   - grok:   parsed from the latest local usage event
- *   - cursor: live Cursor usage API call (cached for 2 minutes)
+ *   - cursor: live Cursor usage API call (cached for 5 minutes)
  *   - others: marked as "not exposed by CLI"
  */
 import type { Command } from 'commander';

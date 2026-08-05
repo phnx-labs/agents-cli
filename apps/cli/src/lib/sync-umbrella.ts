@@ -2,18 +2,17 @@
  * Umbrella `agents sync` orchestration — "make this machine current".
  *
  * Bare `agents sync` fetches the config repos then reconciles them into every
- * installed agent's version home. Secrets and sessions are opt-in stages
- * (`--secrets` / `--sessions`) — see `planUmbrellaStages` for why they're off by
- * default. Each stage is an existing exported library function; this module only
- * sequences them and decides — from the flags — which stages run. The planner is
- * pure so the flag matrix is unit-tested without any I/O.
+ * installed agent's version home. Secrets are an opt-in stage (`--secrets`) —
+ * see `planUmbrellaStages` for why it's off by default. Each stage is an
+ * existing exported library function; this module only sequences them and
+ * decides — from the flags — which stages run. The planner is pure so the
+ * flag matrix is unit-tested without any I/O.
  *
  * Stage backends:
  *   repos    -> git pull of ~/.agents + enabled ~/.agents-* extras (pullRepo)
  *   secrets  -> listRemoteBundles + pullBundle (needs a passphrase; skipped
  *               cleanly when none is available — tokenized non-interactive auth
  *               arrives with `agents login`, #366/#367)
- *   sessions -> syncSessions(), gated by the session-sync beta opt-in + isSyncConfigured(), like the daemon
  *   reconcile-> refresh({ skipPrompts }) — re-materialize resources into homes
  */
 
@@ -21,11 +20,10 @@ import { pullRepo } from './git.js';
 import { getUserAgentsDir, getEnabledExtraRepos } from './state.js';
 import { listRemoteBundles, pullBundle } from './secrets/sync.js';
 
-/** The five umbrella flags off `agents sync`. */
+/** The umbrella flags off `agents sync`. */
 export interface UmbrellaFlags {
   repos?: boolean;
   secrets?: boolean;
-  sessions?: boolean;
   cloud?: boolean;
   local?: boolean;
 }
@@ -34,7 +32,6 @@ export interface UmbrellaFlags {
 export interface UmbrellaPlan {
   fetchRepos: boolean;
   fetchSecrets: boolean;
-  fetchSessions: boolean;
   reconcile: boolean;
 }
 
@@ -43,38 +40,34 @@ export interface UmbrellaPlan {
  *   bare (no flags)        fetch repos, then reconcile
  *   --local                reconcile only, no fetch
  *   --cloud                fetch repos (or the selected subset), skip reconcile
- *   --repos/--secrets/...  fetch only the selected types, then reconcile
+ *   --repos/--secrets      fetch only the selected types, then reconcile
  * `--local` wins over everything; `--cloud` suppresses reconcile.
  *
- * Secrets and sessions are NOT part of the bare default — they are opt-in via
- * `--secrets` / `--sessions`. Pulling every secret bundle onto the machine on a
- * bare `agents sync` is more blast radius than the verb should carry by
- * default, and session transcripts are queryable on demand (`agents sessions
- * --host <machine>`) so they don't need eager mirroring.
+ * Secrets are NOT part of the bare default — they are opt-in via `--secrets`.
+ * Pulling every secret bundle onto the machine on a bare `agents sync` is more
+ * blast radius than the verb should carry by default.
  */
 export function planUmbrellaStages(f: UmbrellaFlags): UmbrellaPlan {
   if (f.local) {
-    return { fetchRepos: false, fetchSecrets: false, fetchSessions: false, reconcile: true };
+    return { fetchRepos: false, fetchSecrets: false, reconcile: true };
   }
-  const anySelector = !!(f.repos || f.secrets || f.sessions);
+  const anySelector = !!(f.repos || f.secrets);
   if (anySelector) {
     return {
       fetchRepos: !!f.repos,
       fetchSecrets: !!f.secrets,
-      fetchSessions: !!f.sessions,
       reconcile: !f.cloud,
     };
   }
   // No per-type selector: bare = repos + reconcile; --cloud = repos, no
-  // reconcile. Secrets/sessions stay off unless explicitly selected above.
-  return { fetchRepos: true, fetchSecrets: false, fetchSessions: false, reconcile: !f.cloud };
+  // reconcile. Secrets stay off unless explicitly selected above.
+  return { fetchRepos: true, fetchSecrets: false, reconcile: !f.cloud };
 }
 
 export interface UmbrellaResult {
   plan: UmbrellaPlan;
   repos?: { pulled: number; errors: string[] };
   secrets?: { pulled: number; skipped: boolean; reason?: string; errors: string[] };
-  sessions?: { ran: boolean; pushed: number; pulled: number; merged: number; error?: string };
   devices?: { synced: number; pending: number; skipped: boolean };
   reconciled: boolean;
 }
@@ -90,7 +83,7 @@ export interface RunUmbrellaArgs {
 }
 
 /**
- * Execute the planned stages in order: repos -> secrets -> sessions -> reconcile.
+ * Execute the planned stages in order: repos -> secrets -> reconcile.
  * A failure in one fetch stage is recorded and does not abort the others or the
  * reconcile — `agents sync` should make as much current as it can in one pass.
  */
@@ -145,32 +138,6 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
         errors.push((err as Error).message);
       }
       result.secrets = { pulled, skipped: false, errors };
-    }
-  }
-
-  if (plan.fetchSessions) {
-    // Gate exactly like the daemon: without the `session-sync` beta opt-in (or
-    // with a missing r2.backups bundle) this is a clean no-op, not an error that
-    // fails the whole sync.
-    const { isBetaEnabled } = await import('./beta.js');
-    const { isSyncConfigured } = await import('./session/sync/config.js');
-    if (isBetaEnabled('session-sync') && isSyncConfigured()) {
-      const { syncSessions } = await import('./session/sync/sync.js');
-      // Record a failure here instead of letting it throw: like the fetchSecrets
-      // block above, a failure in one fetch stage must not abort the others or
-      // the reconcile below (see this function's doc comment). Without this,
-      // syncSessions() throwing — e.g. via the C1 containment reject on a
-      // malicious peer manifest — would skip `plan.reconcile` entirely.
-      try {
-        const r = await syncSessions();
-        result.sessions = { ran: true, pushed: r.pushed, pulled: r.pulled, merged: r.merged };
-        log(`sessions: pushed ${r.pushed}, pulled ${r.pulled}, merged ${r.merged}`);
-      } catch (err) {
-        result.sessions = { ran: false, pushed: 0, pulled: 0, merged: 0, error: (err as Error).message };
-        log(`sessions: failed — ${(err as Error).message}`);
-      }
-    } else {
-      result.sessions = { ran: false, pushed: 0, pulled: 0, merged: 0 };
     }
   }
 

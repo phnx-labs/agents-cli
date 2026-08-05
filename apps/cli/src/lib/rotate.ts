@@ -9,7 +9,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId, RunStrategy } from './types.js';
 import type { FallbackEntry } from './exec.js';
-import { accountDisplayLabel, getAccountInfo, type AccountInfo } from './agents.js';
+import {
+  accountDisplayLabel,
+  getAccountInfo,
+  credentialPresence,
+  ALL_AGENT_IDS,
+  type AccountInfo,
+  type CredentialPresence,
+} from './agents.js';
 import { readMeta, writeMeta, getHelpersDir } from './state.js';
 import { listInstalledVersions, getVersionHomePath, resolveVersion } from './versions.js';
 import { getProjectRunConfigs } from './run-config.js';
@@ -20,6 +27,7 @@ import {
   deriveUsageStatusFromSnapshot,
   type UsageSnapshot,
 } from './usage.js';
+import { readAccountHeadroom } from './fleet-cache.js';
 
 function getRotateDir(): string {
   const dir = path.join(getHelpersDir(), 'rotate');
@@ -43,6 +51,15 @@ export interface RotateCandidate {
   usageStatus: AccountInfo['usageStatus'];
   usageSnapshot: UsageSnapshot | null;
   usageError: string | null;
+  /**
+   * Projected minutes until this account's 5-hour session window caps, as
+   * computed by the daemon's burn-rate refresher and read from the headroom
+   * cache. `null` when unknown (cold cache, idle, or not burning up). Balanced
+   * routing deprioritizes an account projected to cap soon — see
+   * {@link capacityWeight} — so a launch avoids an account racing toward its
+   * limit, not just one already 100%-maxed.
+   */
+  usageMinutesToLimit: number | null;
   plan: string | null;
   signedIn: boolean;
   lastActive: Date | null;
@@ -114,6 +131,29 @@ export function setGlobalRunStrategy(agent: AgentId, strategy: RunStrategy): voi
 
 function isRotationEligible(candidate: RotateCandidate): boolean {
   return candidate.signedIn && hasUsageAvailable(candidate);
+}
+
+/**
+ * Whether a version home can actually authenticate a launch.
+ *
+ * `getAccountInfo` falls back to the active/global HOME when a version home has
+ * no credential of its own, so `agents view` still shows who is logged in. Launch
+ * paths isolate config (GROK_HOME, CODEX_HOME, KIMI_CODE_HOME, CLAUDE_CONFIG_DIR,
+ * …) to the per-version home, so a home that only "inherits" the active login
+ * cannot spawn a signed-in agent — balanced kept picking those empty homes and
+ * the run died on "Not signed in".
+ *
+ * When we know where the credential lives (`knownLocation`), require it under
+ * THIS version home. When we don't (keychain-only / unmapped agents), trust the
+ * existing `signedIn` signal.
+ */
+export function isLaunchableSignedIn(
+  signedIn: boolean,
+  presence: Pick<CredentialPresence, 'knownLocation' | 'perVersion'>,
+): boolean {
+  if (!signedIn) return false;
+  if (!presence.knownLocation) return true;
+  return presence.perVersion;
 }
 
 function isAvailableEligible(candidate: RotateCandidate): boolean {
@@ -343,18 +383,42 @@ function preferVerified(
 }
 
 /**
+ * How far from its projected cap an account must be to keep its FULL headroom
+ * weight. Inside this horizon the weight is scaled down linearly toward the
+ * floor, so an account racing toward its 5h cap loses priority before it maxes.
+ */
+export const PROJECTION_HORIZON_MIN = 30;
+
+/**
+ * Weight one candidate by remaining routing capacity, deprioritized by how soon
+ * it is projected to cap. The base is weekly headroom (`max(1, 100 - used)`);
+ * an account with no live snapshot is treated as full-capacity (100) since there
+ * is no signal to deprioritize it. `minutesToLimit` (the daemon's burn-rate
+ * projection on the 5h session window) then scales that base: >= horizon (or
+ * unknown) keeps full weight, and closer-to-cap scales toward the floor of 1 —
+ * so a launch avoids an account projected to cap soon, not just a 100%-maxed
+ * one. Pure + exported so the deprioritization is unit-tested directly (a
+ * weighted-random draw is not).
+ */
+export function capacityWeight(
+  usedPercent: number | null,
+  minutesToLimit: number | null,
+): number {
+  const base = usedPercent === null ? 100 : Math.max(1, 100 - usedPercent);
+  if (minutesToLimit === null || !Number.isFinite(minutesToLimit)) return base;
+  const factor = Math.max(0, Math.min(1, minutesToLimit / PROJECTION_HORIZON_MIN));
+  return Math.max(1, base * factor);
+}
+
+/**
  * Pick one candidate from `sorted` using weights proportional to remaining
- * routing capacity. Floor each weight at 1 so a near-exhausted-but-still-
- * eligible candidate can still be picked occasionally. When usage is unknown
- * (no live snapshot), treat the candidate as full-capacity (weight 100) — we
- * have no signal to deprioritize it.
+ * routing capacity (see {@link capacityWeight}). Floor each weight at 1 so a
+ * near-exhausted-but-still-eligible candidate can still be picked occasionally.
  */
 function weightedRandomByCapacity(sorted: RotateCandidate[]): RotateCandidate {
-  const weights = sorted.map((c) => {
-    const used = getRoutingUsedPercent(c.usageSnapshot);
-    if (used === null) return 100;
-    return Math.max(1, 100 - used);
-  });
+  const weights = sorted.map((c) =>
+    capacityWeight(getRoutingUsedPercent(c.usageSnapshot), c.usageMinutesToLimit),
+  );
   const total = weights.reduce((sum, w) => sum + w, 0);
   if (total <= 0) return sorted[0];
   let roll = Math.random() * total;
@@ -406,6 +470,183 @@ export function pickAvailableCandidate(
   return { picked: preferred ?? bestVerified, healthy: sorted, excluded, usageUnverified };
 }
 
+/**
+ * Per-harness routing summary for `agents run auto` — the cross-harness layer
+ * that sits above `pickBalancedCandidate` (which is strictly per-harness).
+ */
+export interface HarnessSummary {
+  agent: AgentId;
+  /** Every installed account slot probed for this harness. */
+  candidates: RotateCandidate[];
+  /** Healthy accounts after identity dedupe, sorted by headroom. */
+  healthy: RotateCandidate[];
+  /** The account this harness would route to (best verified headroom). Null when the harness is excluded. */
+  best: RotateCandidate | null;
+  /** Routing used% of `best` (max across non-session windows); null when unknown. */
+  bestUsedPercent: number | null;
+  /** Why the harness was excluded, e.g. ['2 rate_limited', '1 signed_out']. Empty when healthy. */
+  exclusionReasons: string[];
+}
+
+export interface HarnessPickResult {
+  /** The harness picked for this run. */
+  picked: HarnessSummary;
+  /** Harnesses with ≥1 healthy account (including the picked one). */
+  healthy: HarnessSummary[];
+  /** Harnesses with zero healthy accounts — excluded, not down-weighted. */
+  excluded: HarnessSummary[];
+}
+
+/**
+ * Classify every harness's candidates into healthy (with a representative
+ * best account) vs excluded (with per-reason counts). Pure — the pick and the
+ * zero-healthy error message both read this, so they can never disagree.
+ *
+ * Health uses the exact account-layer gate (`isRotationEligible`: signed in
+ * AND not maxed on ANY blocking window, weekly included). The representative
+ * best account honors `preferVerified`: confirmed headroom beats apparent
+ * headroom, the same freshness rule the account layer routes on.
+ */
+export function classifyHarnessCandidates(
+  byHarness: ReadonlyMap<AgentId, RotateCandidate[]>,
+  nowMs: number = Date.now(),
+): HarnessSummary[] {
+  const summaries: HarnessSummary[] = [];
+  for (const [agent, candidates] of byHarness) {
+    const eligible = candidates.filter(isRotationEligible);
+    if (eligible.length === 0) {
+      const counts = new Map<string, number>();
+      for (const c of candidates) {
+        const readiness = readinessFromCandidate(c);
+        const reason = readiness.ready ? 'ineligible' : readiness.reason;
+        counts.set(reason, (counts.get(reason) ?? 0) + 1);
+      }
+      summaries.push({
+        agent,
+        candidates,
+        healthy: [],
+        best: null,
+        bestUsedPercent: null,
+        exclusionReasons: [...counts.entries()].map(([reason, n]) => `${n} ${reason}`),
+      });
+      continue;
+    }
+    const sorted = dedupeAndSortCandidates(eligible);
+    const { picked: best } = preferVerified(sorted, nowMs, (from) => from[0]);
+    summaries.push({
+      agent,
+      candidates,
+      healthy: sorted,
+      best,
+      bestUsedPercent: getRoutingUsedPercent(best.usageSnapshot),
+      exclusionReasons: [],
+    });
+  }
+  return summaries;
+}
+
+/**
+ * Pick a harness for `agents run auto` using weighted random by best-account
+ * headroom (RUSH-2132).
+ *
+ * A harness's capacity is `100 − min(routingUsed% across its healthy accounts)`
+ * — its best account's headroom. The pick reuses `weightedRandomByCapacity` on
+ * the representative best accounts, so host/harness/account layers all share
+ * one sampling behavior. Harnesses with zero healthy accounts are EXCLUDED,
+ * not down-weighted. Returns null when no harness has any healthy account;
+ * call `classifyHarnessCandidates` for the exclusion detail to message with.
+ */
+export function pickHarnessWeighted(
+  byHarness: ReadonlyMap<AgentId, RotateCandidate[]>,
+  nowMs: number = Date.now(),
+): HarnessPickResult | null {
+  const summaries = classifyHarnessCandidates(byHarness, nowMs);
+  const healthy = summaries.filter((s) => s.best !== null);
+  const excluded = summaries.filter((s) => s.best === null);
+  if (healthy.length === 0) return null;
+  const pickedBest = weightedRandomByCapacity(healthy.map((s) => s.best!));
+  const picked = healthy.find((s) => s.best === pickedBest)!;
+  return { picked, healthy, excluded };
+}
+
+/** One-line banner naming the auto-picked harness and why (headroom). */
+export function formatHarnessPickBanner(result: HarnessPickResult): string {
+  const { picked, healthy, excluded } = result;
+  const headroom = picked.bestUsedPercent === null
+    ? 'best account headroom unknown'
+    : `best account ${Math.max(0, Math.round(100 - picked.bestUsedPercent))}% headroom`;
+  const ratio = `${healthy.length} of ${healthy.length + excluded.length} harnesses healthy`;
+  return `[agents] auto picked ${picked.agent} (${headroom}, ${ratio})`;
+}
+
+/**
+ * The earliest FUTURE window reset across these candidates' usage snapshots —
+ * when the first exhausted account becomes usable again. Null when no snapshot
+ * carries a reset timestamp.
+ */
+export function earliestResetAcross(candidates: RotateCandidate[], nowMs: number = Date.now()): Date | null {
+  let earliest: number | null = null;
+  for (const c of candidates) {
+    for (const window of c.usageSnapshot?.windows ?? []) {
+      const t = window.resetsAt?.getTime();
+      if (t != null && t > nowMs && (earliest === null || t < earliest)) {
+        earliest = t;
+      }
+    }
+  }
+  return earliest === null ? null : new Date(earliest);
+}
+
+/**
+ * The `resets <summary>` fragment both zero-healthy errors share. ISO 8601 so
+ * a watchdog can parse the cooldown straight off the line; `unknown` when no
+ * snapshot carries a reset (a parser falls back to its default cooldown).
+ */
+function formatResetSummary(reset: Date | null): string {
+  return reset ? reset.toISOString() : 'unknown (no reset timestamps in any snapshot)';
+}
+
+/**
+ * The zero-healthy-account error (RUSH-2132). EXACT contract — the Factory
+ * watchdog tail-detects this text: it must contain the literal `no healthy`
+ * and `resets <time>` (parsed for the rotate cooldown). Do not deviate.
+ */
+export function formatNoHealthyAccountError(
+  agent: AgentId,
+  strategy: RunStrategy,
+  excluded: RotateCandidate[],
+  nowMs: number = Date.now(),
+): string {
+  const excludedStr = excluded.length === 0
+    ? 'no installed versions'
+    : excluded.map((c) => {
+        const readiness = readinessFromCandidate(c);
+        const reason = readiness.ready ? 'ineligible' : readiness.reason;
+        return `${c.version} (${reason})`;
+      }).join(', ');
+  const resetSummary = formatResetSummary(earliestResetAcross(excluded, nowMs));
+  return `agents: no healthy ${agent} account under strategy '${strategy}' — excluded: ${excludedStr}; earliest window resets ${resetSummary}. Use --strategy pinned to force the default.`;
+}
+
+/**
+ * The zero-healthy-harness error for `agents run auto` — names each harness's
+ * exclusion reason plus the earliest reset across all snapshots.
+ */
+export function formatNoHealthyHarnessError(
+  summaries: HarnessSummary[],
+  nowMs: number = Date.now(),
+): string {
+  const excludedStr = summaries.length === 0
+    ? 'no installed harnesses'
+    : summaries.map((s) => {
+        const n = s.candidates.length;
+        const detail = s.exclusionReasons.length > 0 ? s.exclusionReasons.join(', ') : 'no accounts signed in';
+        return `${s.agent} (${n} account${n === 1 ? '' : 's'}: ${detail})`;
+      }).join(', ');
+  const resetSummary = formatResetSummary(earliestResetAcross(summaries.flatMap((s) => s.candidates), nowMs));
+  return `agents: no healthy harness for 'run auto' — excluded: ${excludedStr}; earliest window resets ${resetSummary}. Sign in an account or wait for a window to reset.`;
+}
+
 export async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> {
   const versions = listInstalledVersions(agent);
   const rows = await Promise.all(
@@ -419,28 +660,37 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
       // one per installed version, every time `agents run` cold-starts. If
       // claude's stored token has actually expired, the spawned agent detects
       // it at its own startup and re-auths; that's the correct UX.
+      //
+      // Gate signedIn on a real per-version credential when we know where it
+      // lives — see isLaunchableSignedIn. Do not reuse the active-home fallback
+      // identity for routing, or empty version homes look healthy and die at spawn.
+      const launchable = isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
       return {
         agent,
         version,
         home,
         info,
-        accountKey: info.accountKey,
-        accountLabel: accountDisplayLabel(info),
-        email: info.email,
-        usageStatus: info.usageStatus,
-        plan: info.plan,
-        signedIn: info.signedIn,
+        accountKey: launchable ? info.accountKey : null,
+        accountLabel: launchable ? accountDisplayLabel(info) : '',
+        email: launchable ? info.email : null,
+        usageStatus: launchable ? info.usageStatus : null,
+        plan: launchable ? info.plan : null,
+        signedIn: launchable,
         lastActive: info.lastActive,
       };
     })
   );
 
-  // These candidates feed a routing decision, so cap how stale their usage may
-  // be (see USAGE_DECISION_MAX_AGE_MS). Past that the fetch blocks on a live
-  // read instead of serving the cache — one bounded, parallel round trip per
-  // account, and none at all inside the 2-minute fresh window that back-to-back
-  // launches hit. A failed read still falls back to the cache; the pick then
-  // routes around it via isUsageVerified rather than trusting the old number.
+  // These candidates feed a routing decision on the `agents run` hot path, so
+  // this read is CACHE-ONLY (`readOnly`): it never blocks on a live provider
+  // fetch. A snapshot older than USAGE_DECISION_MAX_AGE_MS is not trusted for
+  // the pick — but the guard that enforces that is `isUsageVerified` below, not
+  // a blocking refresh here. Keeping the cache fresh is the daemon's job
+  // (`runUsageRefresh`, adaptive + rate-capped, sole-writer per local account),
+  // so a cold `agents run` reads the last daemon-written snapshot instead of
+  // stalling on N parallel HTTP round trips (the measured cold-start stall this
+  // removes). A stale-or-absent snapshot routes as unverified, exactly as a
+  // failed live read did before.
   const { usageByKey } = await getUsageInfoByIdentity(
     rows.map(({ home, info, version }) => ({
       agentId: agent,
@@ -448,19 +698,46 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
       cliVersion: version,
       info,
     })),
-    { maxAgeMs: USAGE_DECISION_MAX_AGE_MS }
+    { readOnly: true }
   );
 
   return rows.map(({ home: _home, info, ...candidate }) => {
     const usageKey = getUsageLookupKey(info);
     const usage = usageKey ? usageByKey.get(usageKey) : undefined;
+    // Projected headroom is a separate cache-only read (also off the network) —
+    // the daemon publishes minutesToLimit; a cold cache yields null and routing
+    // falls back to snapshot-only weighting.
+    const headroom = usageKey ? readAccountHeadroom(usageKey) : null;
     return {
       ...candidate,
       usageKey,
       usageSnapshot: usage?.snapshot ?? null,
       usageError: usage?.error ?? null,
+      usageMinutesToLimit: headroom?.minutesToLimit ?? null,
     };
   });
+}
+
+/**
+ * Collect run candidates for every harness with ≥1 installed version — the
+ * probe `agents run auto` routes on (the same per-harness account probe
+ * `agents view` aggregates). Harnesses with nothing installed are absent from
+ * the map: not a candidate at all, rather than an excluded one.
+ */
+export async function collectHarnessCandidates(
+  agentIds: AgentId[] = ALL_AGENT_IDS,
+): Promise<Map<AgentId, RotateCandidate[]>> {
+  const entries = await Promise.all(
+    agentIds.map(async (agent) => {
+      if (listInstalledVersions(agent).length === 0) return null;
+      return [agent, await collectRunCandidates(agent)] as const;
+    }),
+  );
+  const byHarness = new Map<AgentId, RotateCandidate[]>();
+  for (const entry of entries) {
+    if (entry) byHarness.set(entry[0], entry[1]);
+  }
+  return byHarness;
 }
 
 /**
@@ -555,18 +832,33 @@ function readRotationStamp(agent: AgentId): string | null {
   return null;
 }
 
-export async function resolveRunVersion(agent: AgentId, strategy: RunStrategy, cwd: string = process.cwd()): Promise<{
+export async function resolveRunVersion(
+  agent: AgentId,
+  strategy: RunStrategy,
+  cwd: string = process.cwd(),
+  collect: (agent: AgentId) => Promise<RotateCandidate[]> = collectRunCandidates,
+): Promise<{
   version: string | null;
   rotation: RotateResult | null;
+  /**
+   * Set when a non-pinned strategy found ZERO healthy candidates among the
+   * installed versions: the full excluded set, so callers fail loud with
+   * per-account reasons instead of launching the exhausted pinned default
+   * (RUSH-2132). Undefined for pinned, for successful picks, and when no
+   * version is installed at all (the pre-existing not-installed path — there
+   * is no account to be "unhealthy").
+   */
+  exhausted?: RotateCandidate[];
 }> {
   const fallback = resolveVersion(agent, cwd);
   if (strategy === 'pinned') {
     return { version: fallback, rotation: null };
   }
 
+  const candidates = await collect(agent);
   const rotation = strategy === 'available'
-    ? await selectAvailableVersion(agent, fallback)
-    : await selectBalancedVersion(agent);
+    ? pickAvailableCandidate(candidates, fallback)
+    : pickBalancedCandidate(candidates);
 
   if (rotation) {
     // `available` is sticky to the pinned default when healthy. Use the 60s
@@ -585,7 +877,7 @@ export async function resolveRunVersion(agent: AgentId, strategy: RunStrategy, c
     return { version: rotation.picked.version, rotation };
   }
 
-  return { version: fallback, rotation: null };
+  return { version: fallback, rotation: null, exhausted: candidates.length > 0 ? candidates : undefined };
 }
 
 /**

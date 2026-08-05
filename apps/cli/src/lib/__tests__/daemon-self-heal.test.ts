@@ -3,15 +3,18 @@
  * RUSH-1669 / RUSH-1670 / RUSH-1672 / RUSH-1673.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { spawn } from 'child_process';
 import {
   writeHeartbeat,
   readHeartbeat,
   removeHeartbeat,
   isDaemonWedged,
+  isDaemonRunning,
+  claimDaemonInstance,
   writeDaemonPid,
   readDaemonPid,
   removeDaemonPid,
@@ -19,9 +22,26 @@ import {
   validateDaemonBinary,
   getDaemonStatus,
 } from '../daemon.js';
+import { getDaemonDir } from '../state.js';
 import { writeRunMeta, type RunMeta } from '../routines.js';
 import { getRunsDir } from '../state.js';
 import { monitorRunningJobs } from '../runner.js';
+
+// Redirect the daemon scratch dir (heartbeat.json / daemon.pid / the O_EXCL start
+// lock) to a file-private temp so these IN-PROCESS writes never touch a live
+// scheduler daemon's state on a dev machine. File-scoped, NOT global (see the
+// note in tests/setup.ts): a global AGENTS_DAEMON_DIR is inherited by the real
+// daemons that migrate.test.ts / daemon.test.ts spawn (env: {...process.env}) and
+// forces them onto one shared dir, colliding on the single-instance guard.
+let priorDaemonDir: string | undefined;
+beforeAll(() => {
+  priorDaemonDir = process.env.AGENTS_DAEMON_DIR;
+  process.env.AGENTS_DAEMON_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-selfheal-'));
+});
+afterAll(() => {
+  if (priorDaemonDir === undefined) delete process.env.AGENTS_DAEMON_DIR;
+  else process.env.AGENTS_DAEMON_DIR = priorDaemonDir;
+});
 
 // ─── RUSH-1670: Heartbeat + wedged-daemon watchdog ──────────────────────────
 
@@ -65,7 +85,7 @@ describe('isDaemonWedged', () => {
   it('returns true when heartbeat is stale (pid alive but tick > 3 minutes old)', () => {
     writeDaemonPid(process.pid);
     const stale = new Date(Date.now() - 4 * 60_000).toISOString();
-    const hbPath = path.join(os.homedir(), '.agents', '.cache', 'helpers', 'daemon', 'heartbeat.json');
+    const hbPath = path.join(getDaemonDir(), 'heartbeat.json');
     fs.mkdirSync(path.dirname(hbPath), { recursive: true });
     fs.writeFileSync(hbPath, JSON.stringify({ lastTick: stale, pid: process.pid }));
     expect(isDaemonWedged()).toBe(true);
@@ -99,11 +119,83 @@ describe('getDaemonStatus', () => {
   it('reports wedged when heartbeat is stale', () => {
     writeDaemonPid(process.pid);
     const stale = new Date(Date.now() - 4 * 60_000).toISOString();
-    const hbPath = path.join(os.homedir(), '.agents', '.cache', 'helpers', 'daemon', 'heartbeat.json');
+    const hbPath = path.join(getDaemonDir(), 'heartbeat.json');
     fs.mkdirSync(path.dirname(hbPath), { recursive: true });
     fs.writeFileSync(hbPath, JSON.stringify({ lastTick: stale, pid: process.pid }));
     const s = getDaemonStatus();
     expect(s.state).toBe('wedged');
+  });
+});
+
+// ─── pid-file / heartbeat desync: false "stopped" + double-start guard ──────
+
+describe('isDaemonRunning — pid-file/heartbeat desync', () => {
+  let priorPid: number | null;
+  beforeEach(() => { priorPid = readDaemonPid(); });
+  afterEach(() => {
+    removeHeartbeat();
+    if (priorPid === null) removeDaemonPid();
+    else writeDaemonPid(priorPid);
+  });
+
+  it('reports running when the pid file is lost but a fresh heartbeat is alive, and re-adopts the pid file', () => {
+    // A live daemon keeps ticking, but its pid file went missing.
+    removeDaemonPid();
+    writeHeartbeat(process.pid); // fresh tick; pid is alive (this test process)
+
+    expect(isDaemonRunning()).toBe(true);
+    // Healed: the pid file now points back at the live pid.
+    expect(readDaemonPid()).toBe(process.pid);
+    // And the user-facing status is "running", not the false "stopped".
+    expect(getDaemonStatus().state).toBe('running');
+  });
+
+  it('reports stopped when the pid file is lost and the heartbeat is stale', () => {
+    removeDaemonPid();
+    const stale = new Date(Date.now() - 4 * 60_000).toISOString();
+    const hbPath = path.join(getDaemonDir(), 'heartbeat.json');
+    fs.mkdirSync(path.dirname(hbPath), { recursive: true });
+    fs.writeFileSync(hbPath, JSON.stringify({ lastTick: stale, pid: process.pid }));
+
+    expect(isDaemonRunning()).toBe(false);
+    expect(readDaemonPid()).toBeNull(); // stale pid file cleared, none re-adopted
+  });
+
+  it('blocks a second claim when a live daemon lost its pid file (heartbeat still proves it)', () => {
+    // A real, foreign, live process stands in for the running daemon.
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { stdio: 'ignore' });
+    try {
+      expect(child.pid).toBeTruthy();
+      // The live daemon's pid file is gone; only its fresh heartbeat remains.
+      removeDaemonPid();
+      writeHeartbeat(child.pid!);
+
+      // Must refuse — a second claim would run a concurrent JobScheduler and
+      // double-fire every routine.
+      expect(claimDaemonInstance()).toBe(false);
+      // Healed to the live daemon's pid, not this process.
+      expect(readDaemonPid()).toBe(child.pid!);
+    } finally {
+      child.kill('SIGKILL');
+    }
+  });
+
+  it('adopts a fresh live heartbeat over a DEAD pid file, healing to the heartbeat pid', () => {
+    // The healing branch where the pid file is present but its pid is dead, and
+    // a different, live, fresh heartbeat exists. (999999 is this repo's
+    // established stand-in for a dead pid — see the orphan-reap tests below.)
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { stdio: 'ignore' });
+    try {
+      expect(child.pid).toBeTruthy();
+      writeDaemonPid(999999);       // pid file present, but that pid is dead
+      writeHeartbeat(child.pid!);   // a different, live, fresh daemon is ticking
+
+      expect(isDaemonRunning()).toBe(true);
+      // The dead pid file is re-adopted to the live heartbeat pid, not left stale.
+      expect(readDaemonPid()).toBe(child.pid!);
+    } finally {
+      child.kill('SIGKILL');
+    }
   });
 });
 

@@ -72,7 +72,6 @@ describe('panel snapshot broadcast round-trip', () => {
       detectors: {
         readiness: false,
         session: false,
-        watchdog: false,
         // Tick fast; no teams fetcher injected, no agentType armed -> git/worktrees only.
         snapshotTickMs: 50,
       },

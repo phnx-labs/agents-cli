@@ -16,7 +16,7 @@ import { execFileSync } from 'child_process';
 import type { AgentId, DiscoveredPlugin, PluginManifest, MarketplaceSpec } from './types.js';
 import { getPluginsDir, getTrashPluginsDir, getExtraPluginsDir, getProjectPluginsDir, getSystemPluginsDir } from './state.js';
 import { IS_WINDOWS, isWindowsAbsolutePath, homeDir } from './platform/index.js';
-import { assertSafeGitTransport } from './git.js';
+import { assertSafeGitTransport, resolveSnapshotSha } from './git.js';
 import { listInstalledVersions, getVersionHomePath } from './versions.js';
 import { AGENTS, agentConfigDirName } from './agents.js';
 import { capableAgents, isCapable } from './capabilities.js';
@@ -133,6 +133,13 @@ export function buildDiscoveredPlugin(
   manifest: PluginManifest,
   spec: MarketplaceSpec = { kind: 'user' }
 ): DiscoveredPlugin {
+  // Every marketplace kind lays plugins out as `<repo>/plugins/<name>`, so the
+  // repo root is always the grandparent of pluginRoot — true for user
+  // (~/.agents), system (~/.agents/.system), each extra repo, and the project
+  // repo (<cwd>/.agents) alike. Deriving it here means every caller of
+  // buildDiscoveredPlugin (discoverPluginsInDir, inspectPluginCapabilities, …)
+  // gets provenance for free with no signature change.
+  const repoRoot = path.dirname(path.dirname(pluginRoot));
   return {
     name: manifest.name,
     root: pluginRoot,
@@ -150,6 +157,10 @@ export function buildDiscoveredPlugin(
     monitors: discoverPluginMonitors(pluginRoot),
     hasMcp: fs.existsSync(path.join(pluginRoot, '.mcp.json')),
     hasSettings: pluginHasNonPermissionSettings(pluginRoot),
+    repoRoot,
+    get snapshotSha() {
+      return resolveSnapshotSha(repoRoot);
+    },
   };
 }
 

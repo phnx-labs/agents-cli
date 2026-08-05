@@ -1,13 +1,14 @@
 /**
  * Agent status posts — deliberate progress messages into the activity stream.
  *
- * Surface: `agents feed post <text>` (agent-callable; humans watch via
- * `agents feed` / `agents activity` / `agents events --module activity`).
+ * Surface: `agents feed post --title <subject> <body>` (agent-callable; humans
+ * watch via `agents feed` / `agents events --module activity`).
  *
  * Identity is automatic: session id, agent, cwd, launch/pid/tmux provenance
  * are resolved from the process environment and the per-pid launch registry
- * (`lib/session/pid-registry.ts`). The agent only authors free-form text —
- * no domain-specific flags (tickets, URLs, tracks).
+ * (`lib/session/pid-registry.ts`). The agent authors a short title + body —
+ * no domain-specific flags (tickets, URLs, tracks). Phone `{message}` ends with
+ * a "Sent from agent/session on host" footer.
  *
  * Storage: append-only activity log as a `status.posted` milestone. Does NOT
  * open a feed block (blocks remain "needs you" state only).
@@ -32,9 +33,16 @@ import {
 
 /** Soft cap so a runaway agent can't flood the activity lane with essays. */
 export const STATUS_POST_MAX_CHARS = 500;
+/** Title is a phone subject line - about four or five words, not a paragraph. */
+export const STATUS_TITLE_MAX_CHARS = 60;
 
 export interface FeedPostInput {
-  /** Human-readable progress text (required). Domain-agnostic free text. */
+  /**
+   * Short subject (required for new posts). ~4–5 words. Phone broadcasts put
+   * this on the first line so a scan names the topic before the body.
+   */
+  title: string;
+  /** Body text (required). Domain-agnostic free text — what happened / the ask. */
   text: string;
   /** Override session id (escape hatch for scripts/tests). Prefer auto-resolve. */
   sessionId?: string;
@@ -331,21 +339,49 @@ export function buildAttachments(
   return out;
 }
 
+/**
+ * Collapse whitespace and strip em/en dashes (house rule: no em-dashes in
+ * agent-authored outbound copy — phones and plain text render them poorly).
+ */
+export function scrubDashes(text: string): string {
+  return text
+    .replace(/\u2014/g, ' - ') // em dash —
+    .replace(/\u2013/g, ' - ') // en dash –
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function normalizeStatusText(text: string): string {
-  const collapsed = text.replace(/\s+/g, ' ').trim();
+  const collapsed = scrubDashes(text);
   if (!collapsed) return '';
   if (collapsed.length <= STATUS_POST_MAX_CHARS) return collapsed;
   return `${collapsed.slice(0, STATUS_POST_MAX_CHARS - 1)}…`;
 }
 
+/** Normalize a short subject line for a post. */
+export function normalizeStatusTitle(title: string): string {
+  const collapsed = scrubDashes(title);
+  if (!collapsed) return '';
+  if (collapsed.length <= STATUS_TITLE_MAX_CHARS) return collapsed;
+  return `${collapsed.slice(0, STATUS_TITLE_MAX_CHARS - 1)}…`;
+}
+
 /**
  * Append a `status.posted` milestone for the calling agent.
- * Throws if text is empty or session identity cannot be resolved.
+ * Throws if title/text is empty or session identity cannot be resolved.
  */
 export function postFeedStatus(input: FeedPostInput): FeedPostResult {
+  const title = normalizeStatusTitle(input.title ?? '');
   const detail = normalizeStatusText(input.text);
+  if (!title) {
+    throw new Error(
+      'Title is empty. Usage: agents feed post --title "Short subject" "what just happened"',
+    );
+  }
   if (!detail) {
-    throw new Error('Status text is empty. Usage: agents feed post "what just happened"');
+    throw new Error(
+      'Status text is empty. Usage: agents feed post --title "Short subject" "what just happened"',
+    );
   }
 
   const identity = resolvePostIdentity(input);
@@ -379,6 +415,7 @@ export function postFeedStatus(input: FeedPostInput): FeedPostResult {
     cwd: identity.cwd,
     agent: identity.agent,
     tool: 'feed.post',
+    title,
     detail,
     ...(project ? { project } : {}),
     ...(identity.pid !== undefined ? { pid: identity.pid } : {}),

@@ -18,7 +18,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { spawnSync } from 'child_process';
+import { spawnSync, execFile } from 'child_process';
 import * as yaml from 'yaml';
 import { listResources, resolveResource } from './resources.js';
 import { composeWin32CommandLine } from './platform/index.js';
@@ -381,6 +381,38 @@ export function isCliInstalled(manifest: CliManifest): boolean {
   return false;
 }
 
+/**
+ * Async, non-blocking sibling of {@link isCliInstalled}. Same dispatch and
+ * Windows-shim retry, but over `execFile` so many manifests can be checked
+ * concurrently — the fix for RUSH-2136, where `agents doctor --json` ran a dozen+
+ * blocking 10s-timeout `spawnSync` checks SERIALLY (measured ~136s on an idle
+ * box). `execFile`'s `timeout` still SIGKILLs a wedged check, so a single
+ * hanging probe can't stall the whole set past 10s.
+ */
+export function isCliInstalledAsync(manifest: CliManifest): Promise<boolean> {
+  const c = manifest.check;
+  if (c.kind === 'which') {
+    cmdExistsCache.delete(c.cmd);
+    return Promise.resolve(hasCommand(c.cmd));
+  }
+  return new Promise<boolean>((resolve) => {
+    execFile(c.cmd, c.args, { timeout: 10_000 }, (err) => {
+      if (!err) return resolve(true);
+      // A spawn failure (as opposed to a non-zero exit) surfaces as a string
+      // errno code (ENOENT/EINVAL); a non-zero exit surfaces as a numeric code.
+      // On Windows a `.cmd`/`.bat` shim spawn-fails without a shell — retry once
+      // through the shell, exactly as the sync path does.
+      const spawnFailed = typeof (err as NodeJS.ErrnoException).code === 'string';
+      if (process.platform === 'win32' && spawnFailed) {
+        const line = composeWin32CommandLine(c.cmd, c.args);
+        execFile(line, { timeout: 10_000, shell: true }, (retryErr) => resolve(!retryErr));
+        return;
+      }
+      resolve(false);
+    });
+  });
+}
+
 // ─── Method selection ────────────────────────────────────────────────────────
 
 /**
@@ -647,5 +679,26 @@ export function listCliStatus(cwd?: string): {
     manifest,
     installed: isCliInstalled(manifest),
   }));
+  return { statuses, errors };
+}
+
+/**
+ * Async sibling of {@link listCliStatus} that probes every manifest CONCURRENTLY
+ * (RUSH-2136). The sync version runs each blocking `spawnSync` check one after
+ * another, so a dozen host CLIs whose checks are slow serialize into a
+ * multi-minute stall on `agents doctor --json`. This awaits them in parallel, so
+ * total wall time is the slowest single check (bounded at 10s), not their sum.
+ */
+export async function listCliStatusAsync(cwd?: string): Promise<{
+  statuses: CliStatus[];
+  errors: CliManifestError[];
+}> {
+  const { manifests, errors } = listCliManifests(cwd);
+  const statuses = await Promise.all(
+    manifests.map(async (manifest) => ({
+      manifest,
+      installed: await isCliInstalledAsync(manifest),
+    })),
+  );
   return { statuses, errors };
 }

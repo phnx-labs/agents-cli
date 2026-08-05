@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { rpcMethodFor, toRpcParams, makeVerbDispatcher } from './dispatch.js';
 import type { ComputerClient, RPCResponse } from '../computer-rpc.js';
+import { query, _resetForTest } from '../events.js';
 
 // The verb -> RPC translation in dispatch.ts is the load-bearing seam behind
 // `computer run`: a single wrong param key silently breaks every gated macOS
@@ -179,5 +183,63 @@ describe('makeVerbDispatcher target resolution', () => {
     const res = await dispatch({ name: 'describe', input: { pid: 321, depth: 1 } });
     expect(res.ok).toBe(true);
     expect(calls).toEqual([{ method: 'describe', params: { pid: 321, max_depth: 1 } }]);
+  });
+});
+
+// `computer run`'s embedded model loop drives every verb through this single
+// dispatcher, bypassing the explicit `agents computer <verb>` commands in
+// computer-actions.ts entirely — including their emitComputerAction() calls.
+// Before this fix, a `computer run` session (or its screenshot fallback) never
+// wrote a `computer.action` event, so usedComputer read back false even for a
+// session that drove real actions (reviewer-flagged regression on #1864).
+describe('makeVerbDispatcher — computer.action emission (#11 regression)', () => {
+  afterEach(() => {
+    _resetForTest();
+  });
+
+  function eventsPath(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-dispatch-'));
+    return path.join(dir, 'events.jsonl');
+  }
+
+  it('emits computer.action for a screenshot verb dispatched by the run loop', async () => {
+    _resetForTest(eventsPath());
+    const { client } = recordingClient();
+    const dispatch = makeVerbDispatcher(client);
+
+    const res = await dispatch({ name: 'screenshot', input: { pid: 999, quality: 80 } });
+    expect(res.ok).toBe(true);
+
+    const recs = query({ eventTypes: ['computer.action'] });
+    expect(recs).toHaveLength(1);
+    expect(recs[0].command).toBe('screenshot');
+    expect(recs[0].targetPid).toBe(999);
+  });
+
+  it('carries the --host target through to the emitted event', async () => {
+    _resetForTest(eventsPath());
+    const { client } = recordingClient();
+    const dispatch = makeVerbDispatcher(client, { host: 'win-mini' });
+
+    await dispatch({ name: 'click', input: { pid: 999, x: 10, y: 20 } });
+
+    const recs = query({ eventTypes: ['computer.action'] });
+    expect(recs).toHaveLength(1);
+    expect(recs[0].command).toBe('click');
+    expect(recs[0].host).toBe('win-mini');
+  });
+
+  it('does NOT emit when the daemon call errors', async () => {
+    _resetForTest(eventsPath());
+    const errClient: ComputerClient = {
+      async call(): Promise<RPCResponse> {
+        return { id: 1, error: { code: -1, message: 'boom' } };
+      },
+    };
+    const dispatch = makeVerbDispatcher(errClient);
+
+    const res = await dispatch({ name: 'click', input: { pid: 999 } });
+    expect(res.ok).toBe(false);
+    expect(query({ eventTypes: ['computer.action'] })).toHaveLength(0);
   });
 });

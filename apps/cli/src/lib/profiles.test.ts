@@ -15,7 +15,7 @@ import {
   writeProfile,
   type Profile,
 } from './profiles.js';
-import { setKeychainBackendForTest, type KeychainBackend } from './secrets/index.js';
+import { setKeychainBackendForTest, setKeychainHeadlessDetectorForTest, type KeychainBackend } from './secrets/index.js';
 
 let TEST_ROOT: string;
 let USER_DIR: string;
@@ -185,6 +185,49 @@ describe('resolveProfileEnv honors authOptional', () => {
   });
 });
 
+describe('resolveProfileEnv fails fast in a headless context', () => {
+  // The Touch ID storm fix: `agents run <profile>` beneath a headless/teams/
+  // terminal runtime (or any TTY-less spawn) must throw the actionable error
+  // instead of raising a sheet nobody is watching. The memory backend is
+  // removed for these tests so resolveProfileEnv reaches the REAL raw-read
+  // guard in getKeychainToken; the detector seam stands in for the darwin-only
+  // headless signal so the throw is exercisable on any CI platform.
+  it('throws the actionable headless error instead of attempting a prompting read', () => {
+    setKeychainBackendForTest(null);
+    setKeychainHeadlessDetectorForTest(() => true);
+    try {
+      const p: Profile = {
+        name: 'kimi',
+        host: { agent: 'kimi' as Profile['host']['agent'] },
+        env: {},
+        auth: { envVar: 'KIMI_API_KEY', keychainItem: 'agents-cli.kimi.token' },
+      };
+      expect(() => resolveProfileEnv(p)).toThrow(/non-interactive/);
+      expect(() => resolveProfileEnv(p)).toThrow(/agents-cli\.kimi\.token/);
+    } finally {
+      setKeychainHeadlessDetectorForTest(null);
+    }
+  });
+
+  it('an interactive context is unaffected — the required-auth missing-item error survives', () => {
+    setKeychainBackendForTest(null);
+    setKeychainHeadlessDetectorForTest(() => false);
+    try {
+      const p: Profile = {
+        name: 'corp',
+        host: { agent: 'claude' },
+        env: {},
+        auth: { envVar: 'ANTHROPIC_AUTH_TOKEN', keychainItem: 'agents-cli.no-such-provider-xyz.token' },
+      };
+      // Past the guard the read reaches the real platform path (helper absent
+      // in a source checkout / item absent on CI) — never the headless error.
+      expect(() => resolveProfileEnv(p)).toThrow(/^(?!.*non-interactive).*$/);
+    } finally {
+      setKeychainHeadlessDetectorForTest(null);
+    }
+  });
+});
+
 describe('resolveProfileForRun surfaces fallback_model as an env-swap', () => {
   it('reports the model env key + fallback value so the fallback cascade can swap it', () => {
     writeProfile({
@@ -224,6 +267,144 @@ describe('resolveProfileForRun surfaces fallback_model as an env-swap', () => {
       fallback_model: 'ignored-because-no-key-to-swap',
     });
     expect(resolveProfileForRun('weird').fallbackModel).toBeUndefined();
+  });
+});
+
+describe("resolveProfileForRun resolves cost tiers against the profile's OWN models", () => {
+  it('resolves a tier token to the model configured under profile.models', () => {
+    writeProfile({
+      name: 'deepseek-flash',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731' },
+      models: {
+        cheap: 'deepseek/deepseek-chat-v3',
+        default: 'deepseek/deepseek-v4-flash-0731',
+        best: 'deepseek/deepseek-r1',
+      },
+    });
+
+    const resolved = resolveProfileForRun('deepseek-flash', 'best');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-r1');
+    expect(resolved.resolvedModel).toBe('deepseek/deepseek-r1');
+    expect(resolved.tierNote).toBeUndefined();
+  });
+
+  it('clamps an unset tier to the next cheaper tier that IS set', () => {
+    writeProfile({
+      name: 'deepseek-flash',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731' },
+      // default and ultra are unset: ultra clamps down to best, default
+      // clamps down to cheap.
+      models: {
+        cheap: 'deepseek/deepseek-chat-v3',
+        best: 'deepseek/deepseek-r1',
+      },
+    });
+
+    const ultra = resolveProfileForRun('deepseek-flash', 'ultra');
+    expect(ultra.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-r1');
+    expect(ultra.resolvedModel).toBe('deepseek/deepseek-r1');
+    // A clamp is never silent -- mirrors the native-harness tier block, which
+    // always announces when it substitutes a cheaper rung.
+    expect(ultra.tierNote).toBe(
+      `no "ultra" model configured on profile 'deepseek-flash'; using its "best" tier (deepseek/deepseek-r1)`,
+    );
+
+    const def = resolveProfileForRun('deepseek-flash', 'default');
+    expect(def.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-chat-v3');
+    expect(def.resolvedModel).toBe('deepseek/deepseek-chat-v3');
+    expect(def.tierNote).toBe(
+      `no "default" model configured on profile 'deepseek-flash'; using its "cheap" tier (deepseek/deepseek-chat-v3)`,
+    );
+  });
+
+  it('degrades gracefully (no throw, env unchanged) when the profile has no models: at all', () => {
+    writeProfile({
+      name: 'kimi',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5' },
+    });
+
+    // No `models:` opt-in at all: this function leaves the tier token and env
+    // untouched. It does NOT write its own "no model configured" note --
+    // apps/cli/src/commands/exec.ts's profile-tier discard guard (merged
+    // separately, "cost tiers don't apply to profile ...") is the canonical
+    // message for this case, covered by its own test in exec.test.ts.
+    const resolved = resolveProfileForRun('kimi', 'best');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('moonshotai/kimi-k2.5');
+    expect(resolved.resolvedModel).toBeUndefined();
+    expect(resolved.tierNote).toBeUndefined();
+  });
+
+  it('degrades gracefully when models: is set but nothing at-or-below the requested tier is', () => {
+    writeProfile({
+      name: 'partial',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'some/pinned-model' },
+      // Only `best` is configured; requesting `cheap` has nothing cheaper to
+      // clamp to -- same no-opt-in-for-this-tier outcome as having no
+      // `models:` block at all, deferring to exec.ts's discard guard.
+      models: { best: 'deepseek/deepseek-r1' },
+    });
+
+    const resolved = resolveProfileForRun('partial', 'cheap');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('some/pinned-model');
+    expect(resolved.resolvedModel).toBeUndefined();
+    expect(resolved.tierNote).toBeUndefined();
+  });
+
+  it('regression: tier resolution is NOT affected by the HOST agent\'s own catalog (the collision this fix closes)', () => {
+    // The host is claude, but this profile pins its own deepseek models per
+    // tier. Before this fix, resolveProfileForRun ignored the requested
+    // model entirely and exec.ts's native tier block resolved "best" by
+    // calling resolveTier(options.agent, ...) with options.agent already
+    // overwritten to the HOST id ('claude') -- so a real claude-* id landing
+    // in ANTHROPIC_MODEL here would reproduce that exact collision.
+    writeProfile({
+      name: 'deepseek-flash',
+      host: { agent: 'claude', version: '2.1.219' },
+      env: { ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731' },
+      models: {
+        cheap: 'deepseek/deepseek-chat-v3',
+        default: 'deepseek/deepseek-v4-flash-0731',
+        best: 'deepseek/deepseek-r1',
+      },
+    });
+
+    const resolved = resolveProfileForRun('deepseek-flash', 'best');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-r1');
+    // Never a native Claude catalog id -- proves the substitution came from
+    // the profile's own `models:` map, not from resolving "best" against
+    // claude's catalog.
+    expect(resolved.env.ANTHROPIC_MODEL.startsWith('claude')).toBe(false);
+  });
+
+  it('leaves env untouched when --model is a concrete id, not a tier token', () => {
+    writeProfile({
+      name: 'kimi',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5' },
+      models: { best: 'moonshotai/kimi-k3' },
+    });
+
+    const resolved = resolveProfileForRun('kimi', 'moonshotai/kimi-k2-0905');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('moonshotai/kimi-k2.5');
+    expect(resolved.resolvedModel).toBeUndefined();
+    expect(resolved.tierNote).toBeUndefined();
+  });
+
+  it("leaves env unchanged when no --model is requested at all (today's default behavior)", () => {
+    writeProfile({
+      name: 'kimi',
+      host: { agent: 'claude' },
+      env: { ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5' },
+      models: { best: 'moonshotai/kimi-k3' },
+    });
+
+    const resolved = resolveProfileForRun('kimi');
+    expect(resolved.env.ANTHROPIC_MODEL).toBe('moonshotai/kimi-k2.5');
+    expect(resolved.resolvedModel).toBeUndefined();
   });
 });
 

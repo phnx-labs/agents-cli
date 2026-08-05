@@ -28,8 +28,6 @@ import {
   SnapshotWatch,
   SnapshotWatchRequest,
   TerminalTuple,
-  WatchdogWatch,
-  WatchdogWatchRequest,
 } from './protocol';
 
 /** Lookup key for resolving a broadcast tuple back to a local terminal. */
@@ -131,28 +129,6 @@ export class MonitorFollower<T> {
       return true;
     } catch (err) {
       console.error('[MONITOR] armAgent failed:', err);
-      return false;
-    }
-  }
-
-  /**
-   * Replace this window's watchdog watch slice on the monitor (#70). The leader
-   * stats each registered session once and broadcasts a stall fact this window
-   * resolves back to its own terminal. Returns false (rather than throwing)
-   * while disconnected so the caller keeps running the local watchdog tick.
-   */
-  async setWatchdogWatches(watches: WatchdogWatch[]): Promise<boolean> {
-    if (!this.client.connected) return false;
-    const request: WatchdogWatchRequest = {
-      op: MONITOR_OP.watchdogWatch,
-      windowId: this.windowId,
-      watches,
-    };
-    try {
-      await this.client.request(request);
-      return true;
-    } catch (err) {
-      console.error('[MONITOR] setWatchdogWatches failed:', err);
       return false;
     }
   }

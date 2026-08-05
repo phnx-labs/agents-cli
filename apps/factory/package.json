@@ -275,14 +275,6 @@
         "title": "Agents: Enable Notifications"
       },
       {
-        "command": "agents.enableTmux",
-        "title": "Agents: Enable Tmux"
-      },
-      {
-        "command": "agents.disableTmux",
-        "title": "Agents: Disable Tmux"
-      },
-      {
         "command": "agents.newTask",
         "title": "Agents: New Task"
       },
@@ -353,6 +345,14 @@
       {
         "command": "agents.detach",
         "title": "Agents: Detach (Send to Background)"
+      },
+      {
+        "command": "agents.watchdogEnable",
+        "title": "Agents: Watchdog (Enable)"
+      },
+      {
+        "command": "agents.watchdogDisable",
+        "title": "Agents: Watchdog (Disable)"
       },
       {
         "command": "agents.attach",
@@ -591,21 +591,6 @@
           "default": ".assets",
           "description": "Folder for storing images and attachments from the markdown editor"
         },
-        "agents.terminalMode": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "tmux",
-            "native"
-          ],
-          "enumDescriptions": [
-            "Use tmux when available (macOS/Linux with tmux on PATH), otherwise a native VS Code terminal.",
-            "Always run agents inside tmux; warn and fall back to native when tmux is unavailable.",
-            "Never use tmux; always use a native VS Code editor terminal."
-          ],
-          "default": "auto",
-          "description": "How agent terminals are launched. 'auto' (default) runs agents inside a tmux session on macOS/Linux for uniform addressing, resume, and tracking \u2014 falling back to a native terminal on Windows or when tmux is missing. Cmd+Shift+H/V create tmux panes instead of VS Code editor splits when tmux is active."
-        },
         "agents.worktreePerTerminal": {
           "type": "boolean",
           "default": false,
@@ -630,26 +615,6 @@
           "type": "number",
           "default": 60000,
           "description": "Timeout (ms) for the `agents run claude --model haiku` call that generates commit messages. Increase if commits are slow to generate."
-        },
-        "agents.watchdog.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Master switch for the version auto-rotate loop. When on, the extension polls active agent terminals on an interval to auto-rotate exhausted versions. (Stall nudging was retired \u2014 the agents-cli daemon watchdog owns that now.)"
-        },
-        "agents.watchdog.autoRotate": {
-          "type": "boolean",
-          "default": true,
-          "description": "When an agent terminal's pinned version hits its limit (out_of_credits, rate_limited, or >=100% session), automatically spawn a fresh terminal on the best available signed-in version and replay /continue. The old terminal is closed."
-        },
-        "agents.watchdog.rotateCooldownSeconds": {
-          "type": "number",
-          "default": 120,
-          "description": "Minimum seconds between auto-rotate attempts for the same terminal."
-        },
-        "agents.watchdog.tickSeconds": {
-          "type": "number",
-          "default": 120,
-          "description": "How often the extension checks agent terminals for a version that needs auto-rotating."
         }
       }
     },
@@ -698,16 +663,6 @@
           "command": "agents.newDroid",
           "when": "true",
           "group": "navigation@2"
-        },
-        {
-          "command": "agents.enableTmux",
-          "when": "!agents.tmuxEnabled",
-          "group": "navigation@3"
-        },
-        {
-          "command": "agents.disableTmux",
-          "when": "agents.tmuxEnabled",
-          "group": "navigation@3"
         },
         {
           "command": "agents.enableReader",

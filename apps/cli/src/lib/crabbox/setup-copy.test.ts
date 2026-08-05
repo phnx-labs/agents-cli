@@ -1,8 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as bundles from '../secrets/bundles.js';
+import * as stateModule from '../state.js';
+import { resetCrabboxSecretsMemosForTest } from './cli.js';
 import {
   enumerateTrackedFiles,
   buildSetupRsyncArgs,
@@ -111,6 +114,21 @@ describe('copySetupToBox', () => {
   // before the transport (the empty-file-set early return, setup-copy.ts:141)
   // still run everywhere — don't widen this to the whole suite.
   const itPosix = it.skipIf(process.platform === 'win32');
+
+  // Hermetic lease-bundle resolution: copySetupToBox → crabboxSshArgv → crabboxEnv
+  // would otherwise auto-detect the DEVELOPER's real provider-token bundle (e.g. a
+  // locked `hetzner.com`), whose agentOnly read throws "not unlocked" (SEC-13) — a
+  // dev-machine-only failure unrelated to the rsync/ssh copy flow under test. Pin
+  // readMeta → {} and listBundles → [] so no lease bundle is found.
+  beforeEach(() => {
+    resetCrabboxSecretsMemosForTest();
+    vi.spyOn(stateModule, 'readMeta').mockReturnValue({} as ReturnType<typeof stateModule.readMeta>);
+    vi.spyOn(bundles, 'listBundles').mockReturnValue([]);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetCrabboxSecretsMemosForTest();
+  });
 
   /**
    * Install a fake `crabbox` (emits the ssh command for `ssh --id`), `rsync`, and

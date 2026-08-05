@@ -8,7 +8,6 @@ import { pathToFileURL } from 'url';
 import {
   getBackupsDir,
   getCommandsDir,
-  getDriveDir,
   getHooksDir,
   getPackagesDir,
   getPluginsDir,
@@ -47,7 +46,6 @@ describe('state paths', () => {
 
     expect(getPackagesDir()).toBe(path.join(cache, 'packages'));
     expect(getShimsDir()).toBe(path.join(cache, 'shims'));
-    expect(getDriveDir()).toBe(path.join(cache, 'drive'));
   });
 
   it('keeps definitions/configs at the top of ~/.agents', () => {

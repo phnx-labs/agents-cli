@@ -11,6 +11,7 @@ import {
   removeHookShim,
 } from './cache.js';
 import { toPosix } from '../platform/index.js';
+import { getHookShimsDir } from '../state.js';
 
 describe('parseDuration', () => {
   it('accepts plain numeric seconds', () => {
@@ -153,11 +154,12 @@ describe('generateHookShim', () => {
     expect(body).toMatch(/SOURCE='\/path\/with'\\''apostrophe\.sh'/);
   });
 
-  it('getHookShimPath returns the real (state.ts-resolved) path for production callers', () => {
-    // The path is whatever getHookShimsDir() resolves to. Doesn't matter what
-    // value — what matters is that production callers (who don't pass `paths`)
-    // get a consistent location.
-    expect(toPosix(getHookShimPath('foo'))).toMatch(/\.cache\/shims\/hooks\/foo\.sh$/);
+  it('getHookShimPath returns the state.ts-resolved shims dir for production callers', () => {
+    // The root is whatever getHookShimsDir() resolves to (AGENTS_HOOK_SHIMS_DIR
+    // in this test run — see tests/setup.ts's hermeticity redirect). Doesn't
+    // matter what root — what matters is that production callers (who don't
+    // pass `paths`) get `<that dir>/<name>.sh` consistently.
+    expect(toPosix(getHookShimPath('foo'))).toBe(`${toPosix(getHookShimsDir())}/foo.sh`);
   });
 
   it('rejects hook names that would escape the shims directory', () => {

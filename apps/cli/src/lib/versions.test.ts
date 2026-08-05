@@ -929,7 +929,12 @@ function runInstallVersionWithScript(
   agent: string,
   version: string,
   installScript: string,
-  extraPathDir?: string
+  extraPathDir?: string,
+  // Full PATH replacement (ignores extraPathDir and the inherited PATH) — for
+  // tests that must guarantee NO real agent binary on this machine's own
+  // PATH (e.g. this repo's own dev box has a real `grok` shim) can leak in
+  // and make a "the binary isn't resolvable yet" scenario silently pass.
+  fullPathOverride?: string
 ): { ok: boolean; error?: string; result?: { success: boolean; installedVersion?: string; error?: string } } {
   const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
   const agentsUrl = pathToFileURL(path.resolve('src/lib/agents.ts')).href;
@@ -950,7 +955,9 @@ function runInstallVersionWithScript(
     env: {
       ...process.env,
       HOME: home,
-      ...(extraPathDir ? { PATH: `${extraPathDir}${path.delimiter}${process.env.PATH}` } : {}),
+      ...(fullPathOverride
+        ? { PATH: fullPathOverride }
+        : extraPathDir ? { PATH: `${extraPathDir}${path.delimiter}${process.env.PATH}` } : {}),
     },
     encoding: 'utf-8',
   });
@@ -993,6 +1000,135 @@ describe('installVersion Grok binary relocation', () => {
     const result = runVersionSync(home, "listInstalledVersions('grok')") as string[];
     expect(result).toContain('0.2.101');
   });
+
+  it.skipIf(process.platform === 'win32')('fails loudly instead of creating a literal "latest" version dir when the post-install version probe never resolves (regression)', () => {
+    const home = makeTempHome();
+    const oldConfigDir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.106', 'home', '.grok');
+    const hostGrok = path.join(home, '.grok');
+
+    fs.mkdirSync(path.join(oldConfigDir, 'downloads'), { recursive: true });
+    fs.symlinkSync(oldConfigDir, hostGrok, 'dir');
+
+    // No `grok` stub on PATH at all — `getCliVersionFromPath`'s
+    // `execFileAsync('grok', ['--version'])` fails every time (ENOENT),
+    // simulating the installer's binary not yet being resolvable in this exec
+    // context right after the curl installer exits.
+    const script = [
+      'mkdir -p ~/.grok/downloads',
+      'printf \'#!/bin/sh\\nexit 0\\n\' > ~/.grok/downloads/grok-0.2.118-linux-x86_64',
+      'chmod +x ~/.grok/downloads/grok-0.2.118-linux-x86_64',
+    ].join(' && ');
+
+    // Only bare system dirs on PATH — no real `grok` binary this machine
+    // happens to have installed can resolve and defeat the "not yet
+    // resolvable" scenario this test exercises.
+    const bareSystemPath = ['/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(path.delimiter);
+    const outcome = runInstallVersionWithScript(home, 'grok', 'latest', script, undefined, bareSystemPath);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result?.success).toBe(false);
+    expect(outcome.result?.error).toContain('could not be determined');
+
+    // No bogus `versions/grok/latest/` dir, and the real binary is left in
+    // place (not silently lost) for a retry to pick up.
+    const staleLatestDir = path.join(home, '.agents', '.history', 'versions', 'grok', 'latest');
+    expect(fs.existsSync(staleLatestDir)).toBe(false);
+    expect(fs.existsSync(path.join(oldConfigDir, 'downloads', 'grok-0.2.118-linux-x86_64'))).toBe(true);
+  }, 10000);
+
+  it.skipIf(process.platform === 'win32')('self-heals a binary stranded in an unrelated version home by an earlier probe-failed install', () => {
+    const home = makeTempHome();
+    // The `latest`-labeled pseudo-version from a past probe-failed install
+    // (see the regression test above) — empty, but still the current
+    // `~/.grok` symlink target, exactly as `reconcileStaleLatestDir` would
+    // leave it before the real version name is known.
+    const staleLatestConfigDir = path.join(home, '.agents', '.history', 'versions', 'grok', 'latest', 'home', '.grok');
+    const hostGrok = path.join(home, '.grok');
+    fs.mkdirSync(path.join(staleLatestConfigDir, 'downloads'), { recursive: true });
+    fs.symlinkSync(staleLatestConfigDir, hostGrok, 'dir');
+
+    // The real binary from that earlier install, stranded in a wholly
+    // unrelated previous-default version home (not `latest`, not the
+    // version now being installed).
+    const strandedConfigDir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.106', 'home', '.grok');
+    fs.mkdirSync(path.join(strandedConfigDir, 'downloads'), { recursive: true });
+    fs.writeFileSync(
+      path.join(strandedConfigDir, 'downloads', 'grok-0.2.118-linux-x86_64'),
+      '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "grok 0.2.118"; exit 0; fi\nexit 0\n',
+      'utf-8'
+    );
+    fs.chmodSync(path.join(strandedConfigDir, 'downloads', 'grok-0.2.118-linux-x86_64'), 0o755);
+
+    const binDir = path.join(home, 'fakebin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const stub = path.join(binDir, 'grok');
+    fs.writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "grok 0.2.118"; exit 0; fi\nexit 0\n', 'utf-8');
+    fs.chmodSync(stub, 0o755);
+
+    // This install's own installer run drops nothing new — it only exercises
+    // relocation's sweep of OTHER version homes for the already-stranded file.
+    const outcome = runInstallVersionWithScript(home, 'grok', 'latest', 'true', binDir);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result?.success).toBe(true);
+    expect(outcome.result?.installedVersion).toBe('0.2.118');
+
+    const targetDownloads = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.118', 'home', '.grok', 'downloads');
+    expect(fs.existsSync(path.join(targetDownloads, 'grok-0.2.118-linux-x86_64'))).toBe(true);
+  }, 10000);
+
+  it.skipIf(process.platform === 'win32')('refuses to update a self-updating agent into a version dir already owned by a different account', () => {
+    const home = makeTempHome();
+
+    // Two accounts already installed as two distinct versions — the state
+    // BOTH accounts self-updating to the SAME upstream release would collide
+    // into. accountA (0.2.118) is the collision target; accountB (0.2.32) is
+    // the currently-default account driving this update.
+    const grokAuth = (email: string, userId: string) => JSON.stringify({
+      'https://auth.x.ai::client-id': {
+        email,
+        user_id: userId,
+        refresh_token: `refresh-${userId}`,
+        create_time: '2026-08-01T00:00:00Z',
+      },
+    });
+    const accountADir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.118', 'home', '.grok');
+    fs.mkdirSync(path.join(accountADir, 'downloads'), { recursive: true });
+    fs.writeFileSync(path.join(accountADir, 'auth.json'), grokAuth('accountA@example.com', 'user-a'), 'utf-8');
+
+    const accountBDir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.32', 'home', '.grok');
+    fs.mkdirSync(path.join(accountBDir, 'downloads'), { recursive: true });
+    fs.writeFileSync(path.join(accountBDir, 'auth.json'), grokAuth('accountB@example.com', 'user-b'), 'utf-8');
+
+    // accountB (0.2.32) is the global default this update runs as.
+    fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.agents', 'agents.yaml'),
+      'agents:\n  grok: "0.2.32"\n',
+      'utf-8'
+    );
+
+    const hostGrok = path.join(home, '.grok');
+    fs.symlinkSync(accountBDir, hostGrok, 'dir');
+
+    const binDir = path.join(home, 'fakebin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const stub = path.join(binDir, 'grok');
+    // The self-updater always reports the SAME upstream release ("0.2.118")
+    // regardless of which account's home invoked it — the real mechanism that
+    // makes two accounts collide on one version directory.
+    fs.writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "grok 0.2.118"; exit 0; fi\nexit 0\n', 'utf-8');
+    fs.chmodSync(stub, 0o755);
+
+    const outcome = runInstallVersionWithScript(home, 'grok', 'latest', 'true', binDir);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result?.success).toBe(false);
+    expect(outcome.result?.error ?? '').toContain('accountA@example.com');
+    expect(outcome.result?.error ?? '').toContain('accountB@example.com');
+
+    // accountA's install must be untouched — refusing the update must not
+    // have written or damaged the file that was already there.
+    const targetAuth = JSON.parse(fs.readFileSync(path.join(accountADir, 'auth.json'), 'utf-8'));
+    expect(targetAuth['https://auth.x.ai::client-id'].email).toBe('accountA@example.com');
+  }, 10000);
 });
 
 // `resolveVersionAlias` is the shared @selector vocabulary (latest / oldest /

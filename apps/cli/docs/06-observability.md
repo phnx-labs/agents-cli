@@ -6,15 +6,15 @@ Using agents-cli as a programmatic observability layer for agent fleets.
 
 ## Command roles at a glance
 
-Six surfaces **read** the fleet's activity; each has one job. Reach for the one
+Five surfaces **read** the fleet's activity; each has one job. Reach for the one
 whose *consumer* and *axis* match your question, not whichever you remember first.
 
 | Command | Role (one line) | Source | Consumer |
 |---|---|---|---|
 | **`events`** | **Raw unified event stream = the audit log.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. | `events.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
 | **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
-| **`feed`** | **Consolidated cross-agent surface.** Open blocks (decisions agents are waiting on) + `feed post` status updates — "what needs you / what are agents saying." | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
-| **`activity`** | **Human milestone timeline.** Recent plans / PRs / worktrees / sub-agents, plus Bash-driven deliverables (video renders, image upscales, metadata edits), newest-first — a friendly lens on the milestone tier of the event stream. Every Bash call also emits a structured `bash.executed` activity record carrying its tool category. | `activity/*.jsonl` | Human at the terminal |
+| **`trends`** | **Usage analytics.** Harness/model mix, tools per session, token ratios, hottest secrets/browser profiles — baked recipes over sessions + a durable resource warehouse. Distinct from quota (`agents usage`) and latency (`agents perf`). | `sessions.db` + `~/.agents/.history/analytics/usage.db` | Humans + `--json` |
+| **`feed`** | **Consolidated cross-agent surface.** Open blocks (decisions agents are waiting on) + `feed post` status updates — "what needs you / what are agents saying." Scope to one project with `--project`. | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
 | **`sessions`** | **Live agent roster + transcripts.** Which agents are running right now and their state; browse/read past conversation transcripts. A live process probe + transcript index, not an event log. | live pid/transcript probe + `sessions.db` | Human + `--json` |
 
@@ -26,7 +26,7 @@ Outbound names that look interchangeable are three different planes:
 |---|---|---|
 | **Deliver** | `agents send` / `agents notify` | Put a message in front of a recipient (`--to`, `--text`, `--channel`, `--attach`, `--url`). `notify` ≡ `send --to owner` (`notify.owner` in agents.yaml). |
 | **Record** | `agents feed post` | Append a status/milestone (and optional OpenBlock). May **forward** via `feed.broadcast` sinks that call `send`/`notify`. |
-| **Observe** | `agents activity` | **Read** the activity stream — not a send path. |
+| **Observe** | `agents feed --filter updates` / `agents feed --filter all` | **Read** the activity stream — not a send path. |
 | **Control** | `agents message` / `agents sessions inject` | Act on a running agent (mailbox answer vs terminal keystroke). Stay separate from `send`. |
 
 ```bash
@@ -35,8 +35,8 @@ agents send --channel desktop --to local --text "deploy finished" --url https://
 agents send --to owner --text "need a decision"
 agents notify --text "same as send --to owner"
 
-# Record (not deliver by itself)
-agents feed post "CHANGELOG pushed; watching CI"
+# Record (not deliver by itself) — title (subject) + body required
+agents feed post --title "CHANGELOG pushed" "Watching CI and mac-mini E2E"
 ```
 
 The write-stores: `~/.agents/events.jsonl` (operational audit), per-session
@@ -85,21 +85,67 @@ Latency samples for optimization — **not** the audit log. Implementation:
 `apps/cli/src/lib/perf/db.ts`, CLI: `apps/cli/src/commands/perf.ts`.
 
 ```
-agents perf                     # summary: commands + hooks + runs
-agents perf hooks               # same as agents hooks profile (SQLite-first)
-agents perf commands --days 30  # slowest CLI entrypoints
-agents perf run --json          # agent.run / perf.timing labels
+agents perf                              # summary: commands + hooks + runs
+agents perf hooks                        # same as agents hooks profile (SQLite-first)
+agents perf commands --days 30           # slowest CLI entrypoints
+agents perf run --json                   # agent.run / perf.timing labels
+agents perf hooks --project agents-cli   # scope to one repo's samples
+agents perf friction                     # sessions stuck retrying the same guard block
 ```
 
 | Producer | Kind | How it lands |
 |---|---|---|
 | CLI `postAction` | `command.end` | Direct `recordSample` (skips the `perf` command itself) |
-| `createTimer` / `time` / `timeAsync` / `withTiming` | `perf.timing` | Best-effort from `events.ts` |
-| Hook cache/matches shims | `hook.fire` | NDJSON spool → drained into SQLite on open |
+| `createTimer` / `time` / `timeAsync` / `withTiming` | `perf.timing` | Best-effort from `events.ts`; also covers routine fires (`agent.run`) |
+| Every hook | `hook.fire` | Generated shim → NDJSON spool → drained into SQLite on open. `cache:`, `matches:`, or a bare `matcher:` are each enough to opt a hook into a shim — git-guard/rm-guard/git-require-clean-tree (matcher-only) are instrumented like any other hook |
+
+Every row carries `p50Ms`/`p95Ms`/`p99Ms`, and — when the underlying samples
+have them — `errorRate`/`timeoutRate` (fractions 0-1, from a nonzero exit code
+or a `status:'timeout'` sample). `--project <key>` scopes any subcommand to one
+repository: it resolves each sample's recorded `cwd` to a project key
+(`lib/project-key.ts` — a worktree cwd folds to the repo it branched from) and
+filters to samples matching the given key.
+
+`agents perf friction` reads a different sink: the `friction` event kind
+(`emitFriction` in `events.ts`, fed by `agents _internal friction` — the
+hidden command guard hooks self-report a block through before they exit 2,
+since they run before any `agents` process exists to emit in-process). It
+groups by (session, surface, failureId) and flags a session that hits the
+*same* guard block 3+ times — an agent retrying the identical denied action
+instead of adapting.
 
 **Disable:** `AGENTS_DISABLE_PERF=1`. **Redirect (tests):** `AGENTS_PERF_DB`,
-`AGENTS_PERF_SPOOL`. Retention: samples older than 30 days are pruned
-opportunistically on open. Wipe anytime: `rm -rf ~/.agents/.cache/perf`.
+`AGENTS_PERF_SPOOL`, `AGENTS_PERF_DIR` (also covers the hook shim's own
+timing/perf writes), plus `AGENTS_HOOK_SHIMS_DIR` / `AGENTS_HOOK_CACHE_DIR` /
+`AGENTS_LOGS_DIR` for the shim-generation side. Retention: samples older than
+30 days are pruned opportunistically on open. Wipe anytime:
+`rm -rf ~/.agents/.cache/perf`.
+
+## Usage analytics (`agents trends`)
+
+Resource and session frequency — **not** model quota (`agents usage`) and **not**
+latency (`agents perf`). Implementation: `apps/cli/src/lib/analytics/`, CLI:
+`apps/cli/src/commands/trends.ts`.
+
+```
+agents trends                     # auto recipe board (skips empty sections)
+agents trends --days 30           # window
+agents trends harness-mix --json  # one baked recipe
+agents trends query --kind secret # raw warehouse rows
+agents trends recipes             # list recipe ids
+```
+
+| Store | Path | Holds |
+|---|---|---|
+| Session index | `sessions.db` | Harness/model mix, token ratios, per-session tool-call counts (`tool_scan_ledger.call_count`, written by the tool indexer) |
+| Usage warehouse | `~/.agents/.history/analytics/usage.db` | Value-free `kind`/`name`/`event` rows (secret, agent, browser, …) |
+
+Secrets usage previously lived only in `~/.agents/secrets/secrets.db`; the warehouse
+migrates those rows once (`kind=secret`) and the secrets UI keeps reading through a
+thin adapter. New emitters: secret access paths, `agents run`, browser launch/close.
+
+**Disable:** `AGENTS_NO_USAGE_TRACK=1`. **Redirect (tests):** `AGENTS_USAGE_DB`,
+`AGENTS_SESSIONS_DB`. Retention: usage events older than 90 days are pruned on open.
 
 ## Audit Event Log (`agents events`)
 
@@ -114,10 +160,20 @@ file rotates losslessly to `events.1.jsonl.gz`; older archives shift to
 The recording is a single choke point — a commander `preAction`/`postAction`
 hook on the root program ([`src/index.ts`](../src/index.ts)) emits `command.start`
 / `command.end` for *every* subcommand, so coverage is automatic and no per-command
-wiring can drift out of date. Richer typed events (`secrets.get`, `version.install`,
+wiring can drift out of date. `command.end` also feeds the disposable perf
+warehouse (`agents perf`) with the resolved sessionId/agent, not just
+duration — the same provenance floor `emit()` stamps on the audit record.
+Richer typed events (`secrets.get`, `version.install`,
 `teams.create`, `teams.disband`, …) layer on top where the extra payload earns it —
 e.g. team lifecycle events are emitted at the registry source with the team name,
 so they fire for every path (`teams create` and the auto-create in `teams add`).
+`browser.navigate`/`browser.screenshot` (every `agents browser` navigate/
+screenshot) and `computer.action` (every `agents computer` verb — click, type,
+key, drag, scroll, launch, screenshot, …) are two more: `query()`/`readUnifiedEvents()`
+accept a `sessionId` filter so a consumer can ask "did session X touch the
+browser/computer" as a scoped read instead of grepping the whole log — this is
+what the sessions index's `usedBrowser`/`usedComputer` columns are built on
+(see [05-sessions.md](05-sessions.md)).
 
 Every record carries **attribution** computed once per process
 ([`src/lib/events.ts`](../src/lib/events.ts)):
@@ -222,6 +278,8 @@ each run, not just *what* is running:
 agents events                          # recent activity across everything
 agents events --module teams           # team lifecycle (create / add / disband)
 agents events --module secrets         # every secret accessed, revealed, or unlocked
+agents events --module secrets --bundle share   # every read of the share bundle (which agent/session)
+agents events --bundle share --session <id>     # trace one session's reads of a bundle
 agents events --command "teams create" # a command path — prefix match
 agents events --event teams.disband    # a semantic event: a team torn down
 agents events --event secrets.get --since 7d --json
@@ -233,7 +291,12 @@ agents events emit --source factory --json < batch.jsonl        # write from out
 
 `--module` filters the top-level group; `--command` matches a command path by
 prefix (`teams` catches `teams create`); `--event` filters a typed event
-(repeatable); `--since` takes `2h`/`7d`/`4w` or an ISO date. `--json` emits the
+(repeatable); `--agent` filters by tagged agent; `--session <id>` filters by the
+provenance session id (every event carries it), and `--bundle <name>` filters by
+the bundle in an event's payload — so `--module secrets --bundle share --session
+<id>` traces exactly which agent/session read a secrets bundle (the answer to
+"which agent triggered that Touch ID sheet"). `--since` takes `2h`/`7d`/`4w` or an
+ISO date. `--json` emits the
 raw records for external consumers.
 
 **`--limit` caps the read at 50 records by default — pass `--limit 0` before you
@@ -337,8 +400,16 @@ of agent-specific formats, no auth to manage.
 Three diagnostics with distinct scopes (RUSH-2027):
 
 - `agents fleet status` — coarse **device** health: online/offline, which agent
-  CLIs are installed, sign-in, agents-cli **version skew**. Not fine-grained
-  resource divergence.
+  CLIs are installed, sign-in, agents-cli **version skew**, and **how many agents
+  are running** on each box. Not fine-grained resource divergence. Device stats and
+  agent counts are **publish-own / read-union** (RUSH-2061): each daemon probes
+  only itself (no ssh) and publishes its own row — resource stats + live-agent
+  workload — to a local mirror (`~/.agents/.cache/.fleet-status.json`,
+  [`src/lib/fleet-status.ts`](../src/lib/fleet-status.ts)); the command unions
+  peers' rows on demand, cache-first, ssh-reading a stale/missing peer via
+  `agents fleet status --local --json` through a bounded, kill-on-timeout fan-out.
+  The daemon no longer force-probes every device every 3 minutes (the old N² ssh
+  fan-out and orphaned-probe pile-up, RUSH-2114).
 - `agents inspect <agent>[@version]` — deep **single-harness** diff between one
   version home and its resolved sources (staleness, orphans).
 - `agents doctor` — the **umbrella**: local diagnostics (CLI presence, sign-in,
@@ -698,9 +769,11 @@ irreducibility, so a fresh cheap ask does not outrank an old critical-path block
 `--filter <view>` selects what the surface shows:
 
 ```bash
-agents feed                     # needs (default): open blocks — decisions agents wait on
-agents feed --filter updates    # only deliberate progress posts (see Status posts below)
-agents feed --filter all        # blocks first, then the updates view appended
+agents feed                              # needs (default): open blocks — decisions agents wait on
+agents feed --filter updates             # only deliberate progress posts (see Status posts below)
+agents feed --filter all                 # blocks first, then the updates view appended
+agents feed --project agents-cli         # scope blocks + updates to one repo/project
+agents feed --filter updates --project agents-cli  # project's progress posts only
 ```
 
 `--filter updates` skips the block pipeline (no stall suppression, no dispatch
@@ -709,6 +782,14 @@ whichever box ran it, so the fleet's posts merge into one recency-ordered list.
 `-H/--host` (alias `--device`) scopes it to named machines; `--local` (or
 `AGENTS_FEED_LOCAL=1`) keeps it to this box. Its `--json` emits the raw
 `status.posted` events.
+
+`--project <name>` scopes every part of the feed — open blocks, the updates view,
+and the trailing activity lane — to one repo/project. It matches the worktree-aware
+project key (`lib/project-key.ts`), so a worktree under `<repo>/.agents/worktrees/`
+folds back into `<repo>`. Filtering is done locally after the fleet fan-out, so
+older peers that do not recognize the flag still contribute their full payload and
+the requesting box narrows it. The masthead reads `<project> needs you` / `<project>
+updates` when a project is set.
 
 The `limit` on this view counts **posts**, not raw events: the event filter is
 pushed into `readRecentActivity` (`events` / `tier` options) rather than applied
@@ -750,24 +831,28 @@ agents feed --kill <id>    # SIGTERM a local process; cloud tasks are cancelled
 
 ### Status posts (`agents feed post`) — agent progress, not “needs you”
 
-Agents can deliberately announce progress without opening a feed block. The
-command is free-text and domain-agnostic; session/agent/host/runtime/pid
-identity is stamped automatically from the process env and the per-pid launch
-registry (`lib/session/pid-registry.ts`).
+Agents can deliberately announce progress without opening a feed block. Every
+post has a **title** (short subject, ~4–5 words — the phone first line) and a
+**body** (what happened / the ask). Session/agent/host/runtime/pid identity is
+stamped automatically from the process env and the per-pid launch registry
+(`lib/session/pid-registry.ts`), and rides the outbound `{message}` footer.
+
+Em/en dashes in title or body are scrubbed to ASCII ` - ` on the way out (phone
+and plain-text clients render them poorly).
 
 ```bash
 # Inside an agents-cli run (AGENT_SESSION_ID / AGENTS_MAILBOX_DIR already set):
-agents feed post "CHANGELOG pushed; watching CI and mac-mini E2E"
-agents feed post "cover render ready" --attach ./out/cover.png   # attach an artifact
-agents feed post "ready for review" --json
+agents feed post --title "CHANGELOG pushed" "Watching CI and mac-mini E2E"
+agents feed post --title "Cover ready" "render at ./out/cover.png" --attach ./out/cover.png
+agents feed post --title "Ready for review" "PR opened, waiting on prix-cloud" --json
 
 # Escape hatch when not in a managed run:
-agents feed post "note" --session <session-id>
+agents feed post --title "Manual note" "context for the next agent" --session <session-id>
 ```
 
 Each post appends a `status.posted` **milestone** to
-`~/.agents/.history/activity/<sessionId>.jsonl` — the same activity stream
-`agents activity` and the feed’s recent-activity lane already read. It does
+`~/.agents/.history/activity/<sessionId>.jsonl` — the same activity stream the
+feed’s recent-activity lane reads. It does
 **not** create a feed block. Domain facts (tickets, PRs) are not CLI flags;
 join them from the session index / live session enrichment at read time.
 
@@ -778,9 +863,9 @@ A plain post is history the moment it lands. `--blocked` says the agent
 scroll away:
 
 ```bash
-agents feed post "force-push denied by git-guard on PR #1749" --blocked
-agents feed post "publish or wait for review?" --blocked --option publish --option wait
-agents feed post "delete the stale preview env?" --blocked --default "leave it"
+agents feed post --title "Force-push denied" "git-guard blocked PR #1749" --blocked
+agents feed post --title "Publish or wait?" "npm now or after review" --blocked --option publish --option wait
+agents feed post --title "Delete preview env?" "stale preview still running" --blocked --default "leave it"
 ```
 
 It is a flag on the existing verb rather than a separate command: the feed is
@@ -821,8 +906,7 @@ failing among several is only a warning, since the channels are redundant.
 - **Rich render.** A `status.posted` event renders multi-line — `agent · session ·
   host · project` chips, the message, an attachment row with per-kind glyphs, and a
   `↳ ag focus/sessions` hint — in the `feed post` echo, the feed activity lane,
-  `agents feed --filter updates`, and `agents activity`. Other milestones keep the
-  compact one-line form.
+  `agents feed --filter updates`. Other milestones keep the compact one-line form.
 
 Identity resolution order: `--session` → `AGENT_SESSION_ID` /
 `AGENTS_SESSION_ID` / mailbox basename → `AGENT_LAUNCH_ID` match in the pid
@@ -859,12 +943,25 @@ Two rules decide whether a sink runs, both read off the post itself:
   known — the template declares what it needs, and a sink can never fire with a
   hole in its argv (`linear update  --comment …` commenting on nothing).
 
-Available placeholders: `{text}` (the post verbatim), `{ticket}`, `{project}`,
-`{agent}`, `{host}`, `{session}`, `{level}`, `{links}` (attached URLs, space
-separated), and `{message}` — a composed human line, `<project> · <text>` with the
-first attached URL on a second line. Prefer `{message}` for a messaging sink: it
-leads with the project the reader cares about and carries a clickable link,
-rather than opening with an agent name that tells them nothing.
+Available placeholders: `{title}` (short subject), `{text}` (body verbatim),
+`{ticket}`, `{project}`, `{agent}`, `{host}`, `{session}`, `{level}`, `{links}`
+(attached URLs, space separated), and `{message}` — a composed multi-line body
+for messaging sinks:
+
+```
+Title in a few words
+
+Body of what happened or the ask.
+
+Sent from <agent>/<session-chunk> on <host>
+[agents focus <id>  — blocked posts only]
+[first attached URL]
+```
+
+Prefer `{message}` for a phone/Slack/iMessage sink. Title first for a scan,
+blank line, then body, then a footer like "Sent from my iPhone" so a fleet of
+agents is attributable without crowding the ask (`agent/session` on `host`).
+`{text}` is still the bare body when a sink wants only that.
 
 **Blocked posts add four more:** `{focus}` (the literal `agents focus <id>` command
 that unblocks the session), `{class}` (`approval` | `decision`), `{cost}` (the
@@ -885,64 +982,58 @@ Delivery is best-effort and reported: each sink that ran prints `→ <name>`, a
 failure prints a warning and a non-zero exit is never propagated. Losing a mirror
 must not cost the operator the post — it is already written.
 
-### Activity lane (`agents activity`) — progress at a glance, fleet-wide
+##### `channel:` sinks — in-process delivery, no argv (RUSH-2123)
 
-`agents activity` reads the same append-only activity stream (never re-parsing
-transcripts), across the whole fleet, bucketed by project:
+A sink can declare `channel:` instead of `command:`. It delivers through the
+same channel-provider registry `agents send` / `agents notify` use
+(`deliverEnvelope()`) — no spawn, no argv template, just the composed
+`{message}` body:
 
-```bash
-agents activity                    # the whole fleet, by project (default)
-agents activity --local            # just this machine
-agents activity --flat             # one newest-first stream
-agents activity --host yosemite-s1 # one box over SSH (--device is an alias)
-agents activity --filter RUSH-2100 # one ticket, fleet-wide
-agents activity --group-by device  # by machine instead of project
-agents activity --milestones       # only plans / PRs / worktrees / sub-agents
+```yaml
+feed:
+  broadcast:
+    owner:
+      channel: owner          # notify.owner.{channel,to} in agents.yaml
+      minLevel: important
+    ops-slack:
+      channel: slack           # any registered channel / notify.transports name
+      to: "#ops"
 ```
 
-- **Fleet fan-out is the default.** Agents run on every box, so every invocation
-  runs the same `activity --json` on each reachable device and merges the peers'
-  streams host-tagged (feed-style, via `gatherRemoteAgentsJson`). `--local` scopes
-  to this machine, `-H/--host` / `--device` to named boxes; `--devices-all` /
-  `--hosts-all` remain accepted no-ops. A peer answering the fan-out carries the
-  `AGENTS_ACTIVITY_LOCAL` guard so it never re-fans out. Peers that don't answer
-  are named once in a trailing `· N devices unreachable: …` line — never dropped
-  silently, never a line each above the timeline.
-- **Grouping is by project by default.** `--group-by project|device|agent|none`
-  picks the dimension; `--flat` (or `--group-by none`) restores the single
-  newest-first stream. There is no sub-grouping: one level, and each project
-  header names the machines its work ran on
-  (`▸ agents-cli  12 events · 4 milestones · zion, yosemite-s0`, capped at three
-  names plus a `+N` tail). `--filter <text>` narrows by project / device / agent /
-  event / ticket.
-- **Projects are defined projects first, repositories otherwise.** A cwd inside a
-  defined project (`~/.agents/projects/<name>.yaml`, see docs/11-projects.md)
-  reads as that project's NAME — so a multi-repo project is one bucket, not one
-  per repo. Anything else resolves to the git repository containing it
-  (`resolveProjectKey`, `lib/project-key.ts`), so `<repo>/apps/cli` files under
-  `<repo>` and a worktree under `<repo>/.agents/worktrees/<slug>` folds back into
-  the repo it branched from. A directory in no repo groups as itself, and a
-  dotfiles repo at `$HOME` is deliberately not treated as a project. This one
-  resolver (`resolveProjectNameForCwd`, `lib/projects.ts`) is shared by the
-  activity timeline, `agents feed post`, and the `agents sessions` overview, so
-  a project reads identically in all three. Each machine resolves its own paths
-  — a peer stamps the project before its events cross the wire. `--project
-  <name>` narrows the stream to one project (exact match on this resolved
-  label).
-- **`--limit` caps milestones, not churn.** The default view collapses routine
-  `file.edited` work to a count, so `-n` bounds the milestones shown and the
-  routine events inside that window ride along for the counts
-  (`capActivityEvents`). Without this, one box editing 40 files hid every other
-  device's PRs behind a single `file edited ×40` line. `--all` shows routine work
-  inline and makes `-n` a plain event cap.
-- **Enrichment (the join, not transcript parsing).** Each item is joined to live
-  sessions for the **project**, the **execution host** (`provenance.host` — the box
-  it actually runs on), and the **Linear ticket** (`ActiveSession.ticket`).
-  `--json` is a mergeable per-host payload carrying these enriched fields.
-- **Only failures of its own hooks are reported.** Registering the activity-log
-  hooks surfaces unrelated manifest problems (a missing `inject-session-id`
-  script, a half-installed plugin); those belong to `agents doctor` and are not
-  printed above the timeline.
+`channel: owner` is the address alias — same one `agents send --to owner` and
+`agents notify` use — and needs no `to`. Any other channel name needs an
+explicit `to`, or the sink is skipped (same "never fire with a hole in it"
+contract a `command:` sink already follows for a missing placeholder). Gated by
+`minLevel` exactly like a `command:` sink; the two shapes are interchangeable
+per sink.
+
+##### The implicit owner fallback
+
+An operator who sets `notify.owner` (for `agents notify`) but never writes a
+`feed.broadcast` block used to get a `--blocked` post that looked recorded and
+reached nobody — `feed.broadcast` and `notify.owner` were two disconnected
+config blocks. Now, when `feed.broadcast` is unset or empty **and** the post is
+`important` (which `--blocked` always is), the post falls back to
+`notify.owner` automatically, as if `feed.broadcast: { owner: { channel: owner
+} }` had been declared. A routine `milestone` post still stays record-only even
+with the fallback available — the fallback follows the same `minLevel` contract
+every sink already does — and writing an actual `feed.broadcast` block always
+wins outright over the fallback.
+
+### Activity lane (inside `agents feed`)
+
+The milestone timeline previously surfaced by the standalone `agents activity`
+command is now part of `agents feed`. The same append-only activity stream is
+read, but it is rendered as a compact lane under the block view or in full via
+`--filter updates` / `--filter all`:
+
+```bash
+agents feed --filter all     # open blocks, then the milestone/updates lane
+agents feed --filter updates # progress posts + milestones, recency-first
+```
+
+The lane still shows plans, PRs, worktrees, sub-agents, and deliberate
+`agents feed post` progress — just through `agents feed`, not a separate command.
 
 ### Live tail (`--watch`, `-f`) — the money shot
 
@@ -1048,16 +1139,25 @@ a stable per-account key:
   fetches live quota and renders `S:`/`W:` bars + plan. It's **stale-while-revalidate**
   (on-disk cache under `~/.agents/.cache/`, keyed per account: 2-min fresh, 24-h
   block) so `agents view` stays off the network on the hot path.
-- **Routing reads the same cache under a tighter rule.** Displaying a slightly old
-  bar costs nothing; *choosing an account* from one costs the whole run, so the
-  balanced router caps staleness at **5 minutes**
-  (`USAGE_DECISION_MAX_AGE_MS`, [`src/lib/rotate.ts`](../src/lib/rotate.ts)) and
-  blocks on a live read past that — one bounded, parallel round trip per account,
-  and none inside the 2-minute fresh window. When a read fails and the cache is
-  all it has, the router prefers any account whose snapshot IS verified, and
-  reports `usage unverified` in the launch banner rather than presenting a stale
-  number as a fact. The cache is strictly per machine and never synced, so a box
-  whose refresh is failing would otherwise route on day-old numbers indefinitely.
+- **Routing reads the same cache, CACHE-ONLY — never on the hot path's network
+  (RUSH-2061).** Displaying a slightly old bar costs nothing; *choosing an account*
+  from one must not cost a network round trip on `agents run` cold-start.
+  `collectRunCandidates` reads the cache with `readOnly`
+  ([`src/lib/rotate.ts`](../src/lib/rotate.ts), [`src/lib/usage.ts`](../src/lib/usage.ts))
+  and never blocks on a live fetch. A snapshot older than **5 minutes**
+  (`USAGE_DECISION_MAX_AGE_MS`) is still not trusted for the pick — but the guard
+  is `isUsageVerified`, which routes around an unconfirmable number and reports
+  `usage unverified` in the launch banner, NOT a blocking refresh. Keeping the
+  cache warm is the **daemon's** job (`runUsageRefresh`,
+  [`src/lib/usage-refresh.ts`](../src/lib/usage-refresh.ts)): each host refreshes
+  only its own signed-in accounts on an adaptive cadence from the session-window
+  burn rate (90s racing toward the 5h cap, up to 15min idle), capped at ~6 calls
+  per account per hour and skipped under a 429 backoff. Balanced weighting also
+  **deprioritizes an account projected to cap soon** — `deriveUsageHeadroom`
+  projects minutes-to-limit and `capacityWeight` scales the headroom weight down
+  as that projection shortens, so a launch avoids an account racing toward its cap,
+  not just one already 100%-maxed. The cache is strictly per machine and never
+  synced.
 - **A 429 is backed off, not retried through.** The endpoint's `Retry-After` is
   recorded per provider (`usage-backoff.ts`, on disk under
   `~/.agents/.cache/usage-backoff/` because the daemon and every one-shot CLI run
@@ -1097,7 +1197,7 @@ contains — this is a data-availability limit, not a policy choice:
 | Grok | email + tier | last-seen (`~/.grok/logs/unified.jsonl`) | email from the local auth file; weekly window (`W`) + subscription tier parsed from the newest `billing: fetched credits config` log line, since Grok's network usage endpoints 404 |
 | Droid | email | live (`api.factory.ai`) | `~/.factory/auth.v2.file` is AES-256-GCM (key on disk at `auth.v2.key`); decrypt locally, read the email from the WorkOS access-token JWT. That same token authorizes `GET /api/billing/limits` for the three rolling rate-limit windows (5-hour → `S`, weekly → `W`, monthly, detailed-view only). |
 | Kimi | `id:<user_id>` + tier | live (`api.kimi.com/coding/v1/usages`) | JWT carries no email — only an opaque `user_id`. Quota + membership tier come from the `/usages` endpoint. |
-| Cursor | email | live (`cursor.com/api/usage`) | email/authId from `~/.cursor/cli-config.json`; access token from `~/.config/cursor/auth.json`. The endpoint is authed with a `WorkosCursorSessionToken=<authId>::<token>` cookie and returns a monthly request bar (`M`) for request-capped (free/legacy) plans. Usage-based plans report no request cap, so they render the account row without a bar. |
+| Cursor | email | live (`cursor.com/api/dashboard/get-current-period-usage`, `cursor.com/api/usage-summary`, `cursor.com/api/usage`) | email/authId from `~/.cursor/cli-config.json`; access token from `~/.config/cursor/auth.json`; the cookie subject prefers the access token's own JWT `sub`, falling back to the config file's `authId`. Every request is authed with a `WorkosCursorSessionToken=<sub>::<token>` cookie. Three sources, tried in order: the dashboard's `get-current-period-usage` (primary) maps `planUsage.{auto,api,total}PercentUsed` to three bars — Auto + Composer (`A`), API (`API`), Total (`T`) — reset from `billingCycleEnd`; `usage-summary` (fallback, for accounts the primary endpoint returns no usable `planUsage` for) nests the same three percentages under `individualUsage.plan`; the legacy `/api/usage` request-cap endpoint (last resort) renders a monthly request bar (`M`) for free/legacy request-capped plans. An account on none of these (fully unlimited, no percent fields) renders without a bar rather than a misleading empty gauge. |
 | Antigravity | `signed in` | live (`cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota`) | OAuth grant with no id_token — presence only. File `~/.gemini/antigravity-cli/antigravity-oauth-token`, else macOS keychain / Linux libsecret (`service gemini` + user `antigravity`). The stored Google OAuth token authorizes the Code Assist quota endpoint `agy` itself uses; it returns one bucket per model (`gemini-3.1-pro`, `gemini-2.5-flash`, …) with its own reset time, and each bucket renders as its own bar (compact model tag: `3.1P`, `2.5F`, …). |
 | others | `not signed in` unless a credential exists | — | `default` case: no detector |
 

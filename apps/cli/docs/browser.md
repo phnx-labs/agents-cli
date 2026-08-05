@@ -50,9 +50,12 @@ an agent run; every subsequent command in that process reads it without
 
 ### 1. Create a profile
 
-A profile names a browser + CDP endpoint pair. The profile config lives in
-`~/.agents/.history/versions/<agent>/<version>/home/` but is addressed by
-name everywhere.
+A profile names a browser + CDP endpoint pair. The profile definition lives in
+the central `~/.agents/agents.yaml` (the `browser:` map) and syncs across the
+fleet with `agents repo push/pull`, so the same name resolves on every machine.
+Runtime state — the Chrome `chrome-data` cookie jar — lives separately under
+`~/.agents/.cache/browser/<profile>@<endpoint>/`, which is gitignored and
+per-machine, so each machine logs in once.
 
 ```bash
 # Minimal: let agents pick a free port and auto-detect the binary
@@ -70,15 +73,23 @@ If you skip `--profile` on `agents browser start`, the profile is resolved in
 this order:
 
 1. **Your configured default** — the profile set via
-   `agents browser profiles set-default <name>` on THIS machine. This also
-   re-points an explicit `--profile default`, so an agent that hardcodes
-   `default` still lands on your chosen profile (e.g. a logged-in Comet).
-2. **An existing `default` profile**, if one has already been created.
+   `agents browser profiles set-default <name>` on THIS machine, when it can
+   launch here. This also re-points an explicit `--profile default`, so an agent
+   that hardcodes `default` still lands on your chosen profile (e.g. a logged-in
+   Comet). If its browser/binary isn't installed on this machine, it warns and
+   falls through to auto-detect.
+2. **An existing `default` profile**, if one exists and its browser is installed
+   on this machine.
 3. **Auto-detect** — the first installed Chromium-family browser, saved as the
    `default` profile. Detection priority:
    - macOS: Chrome > Brave > Edge > Chromium > Comet
    - Linux: Chrome > Chromium > Brave > Edge
    - Windows: Edge > Chrome > Brave > Comet
+
+   A `default` profile that came from another OS whose binary is missing here — a
+   `/Applications/...` Chrome path resolved on Linux, say — is **regenerated for
+   this machine** rather than failing with "Custom binary not found". Remote
+   (`ssh://`) defaults skip this check: their browser lives on the far host.
 
 The configured default is **device-local**: it lives in
 `~/.agents/devices/<machine>/agents.yaml` and never syncs to your other

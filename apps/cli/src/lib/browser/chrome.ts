@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { getProfileRuntimeDir } from './profiles.js';
 import { discoverBrowserWsUrl, registerPipeTransport } from './cdp.js';
-import { readAndResolveBundleEnv, bundleExists, isHeadlessSecretsContext } from '../secrets/bundles.js';
+import { readAndResolveBundleEnv, bundleExists } from '../secrets/bundles.js';
 import { writeProfileRuntime, readProfileRuntime } from './runtime-state.js';
 import type { ChromeOptions } from './types.js';
 import type { Readable, Writable } from 'stream';
@@ -245,6 +245,28 @@ export interface LaunchResult {
   wsUrl: string;
 }
 
+/**
+ * Resolve a browser-profile secrets bundle into an env map for the child, or an
+ * EMPTY map when the bundle is absent, locked, or otherwise unreadable — never a
+ * throw and never a prompt. Injecting profile secrets on launch is a BACKGROUND
+ * read (the agent is spawning the browser, not a human at a Touch ID sheet), so
+ * the read is `agentOnly` (SEC-13: never pop biometry on its own): a `never`/no-ACL
+ * or broker-held bundle resolves silently; a locked `hold`/`always` bundle throws,
+ * and we swallow it so the launch proceeds without those secrets (an agent that
+ * needs them can `agents secrets unlock <bundle>`). Exported so the no-prompt
+ * behavior is testable on the real keychain path without spawning a browser.
+ */
+export function resolveProfileSecretsEnv(secrets?: string): Record<string, string> {
+  if (!secrets || !bundleExists(secrets)) return {};
+  try {
+    const { env } = readAndResolveBundleEnv(secrets, { caller: 'browser profile', agentOnly: true });
+    return env;
+  } catch {
+    // Bundle locked or failed to resolve — launch without secrets (no prompt).
+    return {};
+  }
+}
+
 export async function launchBrowser(
   profileName: string,
   browserType: BrowserType,
@@ -311,15 +333,9 @@ export async function launchBrowser(
     ...(options.args || []),
   ];
 
-  let env: NodeJS.ProcessEnv = { ...process.env };
-  if (secrets && bundleExists(secrets)) {
-    try {
-      const { env: bundleEnv } = readAndResolveBundleEnv(secrets, { caller: 'browser profile', agentOnly: isHeadlessSecretsContext() });
-      env = { ...env, ...bundleEnv };
-    } catch {
-      // Bundle failed to resolve, continue without secrets
-    }
-  }
+  // Profile secrets: agentOnly (SEC-13) — a locked bundle resolves to an empty map
+  // (launch proceeds without them), never a Touch ID prompt. See resolveProfileSecretsEnv.
+  const env: NodeJS.ProcessEnv = { ...process.env, ...resolveProfileSecretsEnv(secrets) };
 
   const child = spawn(browserPath, args, {
     detached: true,

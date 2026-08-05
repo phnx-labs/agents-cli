@@ -20,13 +20,18 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { SYNC_AGENTS, mirrorPath, type SyncAgentSpec } from './sync/agents.js';
-import { hashContent } from './sync/manifest.js';
 import { redactSecrets } from '../redact.js';
 import { encryptTranscript, decryptTranscriptBody } from './sync/transcript-crypto.js';
 
 export const BUNDLE_KIND = 'agents-session-bundle';
 export const BUNDLE_VERSION = 1;
+
+/** SHA-256 of a file body, used for the bundle's dedup/conflict check on import. */
+function hashContent(content: string | Uint8Array): string {
+  return crypto.createHash('sha256').update(content).digest('hex');
+}
 
 /** First line of a bundle: what it is and how the bodies are encoded. */
 export interface BundleHeader {

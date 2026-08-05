@@ -237,7 +237,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     // Claude Code has no headless Anthropic-hosted dispatch CLI (only
     // --remote-control, which bridges a *local* session). Its cloud is Rush.
     cloudProvider: 'rush',
-    capabilities: { hooks: true, mcp: true, mcpHttp: true, mcpHeaders: true, allowlist: true, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'CLAUDE.md' }, workflows: true, memory: true, modes: ['plan', 'edit', 'auto', 'skip'], rulesImports: true },
+    capabilities: { hooks: true, mcp: true, mcpHttp: true, mcpHeaders: true, allowlist: true, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'CLAUDE.md' }, workflows: true, memory: true, modes: ['plan', 'edit', 'auto', 'skip'], rulesImports: true, interactiveRepl: true },
   },
   // codex hooks: gated to >= 0.116.0 (introduced [features] codex_hooks flag).
   codex: {
@@ -259,7 +259,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     cloudProvider: 'codex',
     // Subagents: multi-agent plumbing since 0.117.0; custom agents as
     // ~/.codex/agents/*.toml (name, description, developer_instructions).
-    capabilities: { hooks: { since: '0.116.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: { since: '0.138.0' }, skills: true, commands: { until: '0.117.0' }, plugins: { since: '0.128.0' }, subagents: { since: '0.117.0' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: true, modes: ['plan', 'edit', 'skip'] },
+    capabilities: { hooks: { since: '0.116.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: { since: '0.138.0' }, skills: true, commands: { until: '0.117.0' }, plugins: { since: '0.128.0' }, subagents: { since: '0.117.0' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: true, modes: ['plan', 'edit', 'skip'], interactiveRepl: true },
   },
   gemini: {
     id: 'gemini',
@@ -291,7 +291,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     },
     // gemini hooks: shipped in v0.26.0 (Jan 2026); older binaries silently ignore the `hooks` key.
     // extensions: gemini-extension.json bundles shipped in v0.8.0; custom subagents in v0.36.0.
-    capabilities: { hooks: { since: '0.26.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: { since: '0.8.0' }, subagents: { since: '0.36.0' }, rules: { file: 'GEMINI.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'], rulesImports: true },
+    capabilities: { hooks: { since: '0.26.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: { since: '0.8.0' }, subagents: { since: '0.36.0' }, rules: { file: 'GEMINI.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'], rulesImports: true, interactiveRepl: false },
   },
   cursor: {
     id: 'cursor',
@@ -324,7 +324,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     // + warns for pre-2.4 installs); the direct `subagents add --agents cursor` path
     // writes unconditionally, same as the other since-gated agents.
     // See transformSubagentForCursor / https://cursor.com/docs/subagents.
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '2026.1.22' }, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] }, // allowlist: ~/.cursor/cli-config.json
+    // interactiveRepl: false — cursor-agent exits immediately with no argv. It requires a
+    // prompt to do anything useful; a bare invocation is not a REPL (RUSH-2185, EXEC-23a).
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '2026.1.22' }, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'], interactiveRepl: false }, // allowlist: ~/.cursor/cli-config.json
   },
   opencode: {
     id: 'opencode',
@@ -346,7 +348,43 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: { since: '0.3.130' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: { since: '1.1.1' }, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'] },
+    capabilities: { hooks: { since: '0.3.130' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: { since: '1.1.1' }, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'], interactiveRepl: true },
+  },
+  // Oh My Pi (`omp`, omp.sh) — a Bun-based, terminal-first coding agent that runs
+  // against many model providers (OpenRouter, OpenAI, Anthropic, xAI, DeepSeek,
+  // Ollama, LM Studio, …). It is Claude-compatible: it natively discovers
+  // `.claude/commands`, `.mcp.json`, and Claude-shaped subagents, and keeps its
+  // own native resources under `~/.omp/agent/` (config dir reported by
+  // `omp config path`). configDir points AT the agent dir (not `~/.omp`) so the
+  // rules file lands at `~/.omp/agent/AGENTS.md`, the user context file omp reads.
+  pi: {
+    id: 'pi',
+    name: 'Pi',
+    color: 'magenta',
+    cliCommand: 'omp',
+    npmPackage: '@oh-my-pi/pi-coding-agent',
+    configDir: path.join(HOME, '.omp', 'agent'),
+    commandsDir: path.join(HOME, '.omp', 'agent', 'commands'),
+    commandsSubdir: 'commands',
+    skillsDir: path.join(HOME, '.omp', 'agent', 'skills'),
+    hooksDir: 'hooks',
+    instructionsFile: 'AGENTS.md',
+    format: 'markdown',
+    variableSyntax: '$ARGUMENTS',
+    // omp hooks are per-tool JS/TS extension modules discovered from
+    // `~/.omp/agent/hooks/{pre,post}/<tool>.<ext>` (loaded as HookFactory code),
+    // NOT the event->shell-command registrations agents-cli's hook sync writes.
+    // The two models don't map, so hooks stay off (capabilities.hooks:false).
+    supportsHooks: false,
+    // MCP: omp reads `.mcp.json` with the Claude `{ "mcpServers": {...} }` schema
+    // at user scope (`~/.omp/agent/.mcp.json`) and project scope (`<root>/.mcp.json`),
+    // stdio + http + sse with headers. skills (`~/.omp/agent/skills/<name>/SKILL.md`),
+    // commands (`~/.omp/agent/commands/*.md`), and subagents (`~/.omp/agent/agents/*.md`,
+    // Claude-shaped) are all native. allowlist is OFF: omp gates approval per-TOOL
+    // only (`tools.approval` record: allow|prompt|deny) with no command/path/domain
+    // patterns, so agents-cli's granular permission format has nothing to map to.
+    // plugins are npm packages / TS modules, not the Claude marketplace manifest.
+    capabilities: { hooks: false, mcp: true, mcpHttp: true, mcpHeaders: true, allowlist: false, skills: true, commands: true, plugins: false, subagents: true, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'] },
   },
   openclaw: {
     id: 'openclaw',
@@ -371,7 +409,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     // OpenClaw is self-updating (no pinned since), so `true` is correct.
     // Workflows sync as Lobster `.lobster` files under `.openclaw/workflows/`;
     // the Lobster tool runs them by receiving the file path as `pipeline`.
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: false, plugins: true, subagents: true, rules: { file: 'workspace/AGENTS.md' }, workflows: true, memory: true, modes: ['plan', 'edit', 'skip'] },
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: false, plugins: true, subagents: true, rules: { file: 'workspace/AGENTS.md' }, workflows: true, memory: true, modes: ['plan', 'edit', 'skip'], interactiveRepl: true },
   },
   copilot: {
     id: 'copilot',
@@ -396,7 +434,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '0.0.353' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'auto', 'skip'] },
+    // interactiveRepl: false — copilot requires a prompt for meaningful work; bare invocation
+    // opens a welcome screen but not a persistent coding REPL suitable for agents focus.
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '0.0.353' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'auto', 'skip'], interactiveRepl: false },
   },
   amp: {
     id: 'amp',
@@ -413,7 +453,8 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'] },
+    // interactiveRepl: false — amp requires a prompt; bare invocation exits immediately.
+    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'], interactiveRepl: false },
   },
   kiro: {
     id: 'kiro',
@@ -436,7 +477,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: { since: '0.10.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: { since: '2.8.0' }, skills: true, commands: true, plugins: false, subagents: { since: '1.23.0' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit'] },
+    // interactiveRepl: false — kiro-cli requires a prompt for coding sessions; bare
+    // invocation does not open a persistent REPL.
+    capabilities: { hooks: { since: '0.10.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: { since: '2.8.0' }, skills: true, commands: true, plugins: false, subagents: { since: '1.23.0' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit'], interactiveRepl: false },
   },
   goose: {
     id: 'goose',
@@ -468,7 +511,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     // under `slash_commands: [{ command, recipe_path }]` (see goose-commands.ts).
     // Subagents: recipe YAML named agents under ~/.config/goose/agents/<name>.yaml
     // (goose auto-discovers and delegates to them by name in autonomous mode).
-    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: { since: '1.25.0' }, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: true, memory: false, modes: ['edit'] },
+    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: { since: '1.25.0' }, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: true, memory: false, modes: ['edit'], interactiveRepl: true },
   },
   // Google Antigravity CLI (`agy`) — official replacement for Gemini CLI as of IO 2026.
   // configDir nests inside `~/.gemini/` since agy shares the parent dir with the Gemini
@@ -497,7 +540,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     variableSyntax: '{{args}}',
     supportsHooks: true,
     cloudProvider: 'antigravity',
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '1.0.16' }, rules: { file: 'AGENTS.md' }, workflows: { since: '1.0.6' }, memory: false, modes: ['edit', 'skip'], rulesImports: false }, // workflows: markdown files in the shared, HOME-global ~/.gemini/config/global_workflows/ (agy scans it at startup; not version-isolated — see workflows.ts), invoked as /<name> slash commands
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '1.0.16' }, rules: { file: 'AGENTS.md' }, workflows: { since: '1.0.6' }, memory: false, modes: ['edit', 'skip'], rulesImports: false, interactiveRepl: true }, // workflows: markdown files in the shared, HOME-global ~/.gemini/config/global_workflows/ (agy scans it at startup; not version-isolated — see workflows.ts), invoked as /<name> slash commands
   },
   // xAI Grok Build CLI (`grok`) — early beta, SuperGrok Heavy. Auth via OAuth on
   // first launch, or XAI_API_KEY env var for headless. MCP servers configured inline
@@ -548,6 +591,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       // to auto (→ edit via resolveMode). Interactive plan is unaffected.
       headlessPlan: false,
       rulesImports: true,
+      interactiveRepl: true,
     },
   },
   // Kimi Code CLI (`kimi`) — Moonshot AI coding agent.
@@ -591,6 +635,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       // auto-runs). Interactive plan is unaffected.
       headlessPlan: false,
       rulesImports: false,
+      interactiveRepl: true,
     },
   },
   // Factory AI Droid CLI (`droid`) — agentic coding CLI from factory.ai.
@@ -672,6 +717,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       memory: false,
       modes: ['plan', 'edit', 'auto', 'skip'],
       rulesImports: false,
+      interactiveRepl: true,
     },
   },
   // Nous Hermes Agent. Config lives under ~/.hermes/config.yaml; MCP servers
@@ -721,6 +767,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       memory: true,
       modes: ['edit'],
       rulesImports: false,
+      interactiveRepl: true,
     },
   },
 };
@@ -1873,8 +1920,8 @@ export async function getAccountInfo(
 }
 
 // Fresh window for the cached session walk. Matches USAGE_CACHE_FRESH_MS in
-// usage.ts so a launch storm reuses both probes for the same period.
-const LAST_ACTIVE_CACHE_FRESH_MS = 2 * 60 * 1000;
+// usage.ts (5 minutes) so a launch storm reuses both probes for the same period.
+const LAST_ACTIVE_CACHE_FRESH_MS = 5 * 60 * 1000;
 
 const getLastActiveCachePath = () => path.join(getCacheDir(), 'last-active.json');
 
@@ -2572,6 +2619,9 @@ export function getUserMcpConfigPath(agentId: AgentId): string {
       return path.join(agent.configDir, 'mcp.json');
     case 'hermes':
       return path.join(agent.configDir, 'config.yaml');
+    case 'pi':
+      // omp reads user-scope MCP from ~/.omp/agent/.mcp.json (Claude schema).
+      return path.join(agent.configDir, '.mcp.json');
     default:
       // Gemini and others use settings.json
       return path.join(agent.configDir, 'settings.json');
@@ -2609,6 +2659,8 @@ export function getMcpConfigPathForHome(agentId: AgentId, home: string): string 
       return path.join(home, '.factory', 'mcp.json');
     case 'hermes':
       return path.join(home, '.hermes', 'config.yaml');
+    case 'pi':
+      return path.join(home, '.omp', 'agent', '.mcp.json');
     default:
       return path.join(home, agentConfigDirName(agentId), 'settings.json');
   }
@@ -2649,6 +2701,9 @@ export function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.
       return path.join(cwd, '.factory', 'mcp.json');
     case 'hermes':
       return path.join(cwd, '.hermes', 'config.yaml');
+    case 'pi':
+      // omp reads project MCP from <root>/.mcp.json (Claude-compatible).
+      return path.join(cwd, '.mcp.json');
     default:
       return path.join(cwd, `.${agentId}`, 'settings.json');
   }

@@ -68,6 +68,49 @@ export function isSyntheticUserMessage(raw: string | undefined): boolean {
   return SYNTHETIC_USER_MESSAGE_PATTERNS.some(pattern => pattern.test(raw));
 }
 
+/**
+ * The `<command-name>` wrapper Claude injects into a `role=user` message when
+ * a typed slash command is invoked, e.g.:
+ *   <command-message>recap</command-message>
+ *   <command-name>/recap</command-name>
+ * Captures the name INCLUDING its leading slash (`/recap`), matching how the
+ * `SlashCommand` tool's own `command` input is formatted (see
+ * `extractSlashCommandFromToolInput`) so both sources land on the same shape.
+ */
+const COMMAND_NAME_WRAPPER_RE = /<command-name>\s*([^<]*?)\s*<\/command-name>/i;
+
+/**
+ * Extract the invoked slash-command name from a raw `role=user` message, or
+ * undefined when the message carries no `<command-name>` wrapper. Used by
+ * `parseClaudeContent` to populate `SessionEvent.slashCommand`.
+ *
+ * Normalizes a leading `/` onto the result: current Claude Code wraps the
+ * name WITH the slash already (`/recap`), but the wrapper predates that and
+ * older transcripts carry the bare name (`recap`) — normalizing here means
+ * every consumer sees one consistent `/name` shape regardless of vintage.
+ */
+export function extractSlashCommandName(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const m = raw.match(COMMAND_NAME_WRAPPER_RE);
+  const name = m?.[1]?.trim();
+  if (!name) return undefined;
+  return name.startsWith('/') ? name : `/${name}`;
+}
+
+/**
+ * Extract the invoked slash-command name from the `SlashCommand` tool's input
+ * — the MODEL invoking a command programmatically, not the user typing it.
+ * The tool's `command` field carries the full invocation text (name plus any
+ * args, e.g. `/code:commit fix the bug`); only the leading command token is
+ * the name, matching {@link extractSlashCommandName}'s shape.
+ */
+export function extractSlashCommandFromToolInput(toolInput: Record<string, any> | undefined): string | undefined {
+  const command = toolInput?.command;
+  if (typeof command !== 'string') return undefined;
+  const name = command.trim().split(/\s+/)[0];
+  return name || undefined;
+}
+
 // Prefix prepended to every Claude-in-plan-mode team spawn prompt.
 // Ends at a blank line before the real user task.
 export const HEADLESS_PLAN_MODE_PREFIX = 'You are running in HEADLESS PLAN MODE.';

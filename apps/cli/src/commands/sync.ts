@@ -2,8 +2,8 @@
  * `agents sync` — synchronize central resources into an installed agent version.
  *
  * Forms:
- *   agents sync                                         # umbrella: fetch config repos -> reconcile all (secrets/sessions opt-in)
- *   agents sync --repos|--secrets|--sessions            # umbrella: fetch only those, then reconcile
+ *   agents sync                                         # umbrella: fetch config repos -> reconcile all (secrets opt-in)
+ *   agents sync --repos|--secrets                       # umbrella: fetch only those, then reconcile
  *   agents sync --cloud                                 # umbrella: fetch all, skip reconcile
  *   agents sync --local                                 # umbrella: reconcile all, no fetch
  *   agents sync system                                  # one repo: git pull --rebase (pull-only mirror)
@@ -81,7 +81,6 @@ interface SyncOpts {
   // Umbrella-verb flags (only meaningful when no agent is given).
   repos?: boolean;
   secrets?: boolean;
-  sessions?: boolean;
   cloud?: boolean;
   local?: boolean;
 }
@@ -90,7 +89,7 @@ interface SyncOpts {
 export function registerSyncCommand(program: Command): void {
   addHostOption(program.command('sync [agentSpec] [repo]'))
     .summary('Make this machine current, or sync resources into one agent')
-    .description('With an [agentSpec], syncs resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into that installed agent version — previews changes and lets you pick. e.g. "claude", "claude@2.1.142", a selector: @latest / @oldest / @pinned (= @default), or @all for every installed version.\n\nAppend a [repo] (or pass --repo) to scope the sync to a single DotAgent repo — system / user / project / <alias>. e.g. "agents sync claude@all system" reconciles only the system repo\'s resources into every installed Claude.\n\nGive a DotAgent repo name ALONE — "agents sync system" / "agents sync user" / "agents sync <alias>" — to git-sync that one repo: refuse if the tree is dirty, else git pull --rebase against origin. The user repo and extra aliases also push local commits up; the system repo is a pull-only mirror.\n\nWith NO agent, runs the umbrella verb: fetch the config repos then reconcile them into every installed agent. Secrets and sessions are opt-in — add --secrets to pull secret bundles or --sessions to sync transcripts (sessions are also queryable live via "agents sessions --host <machine>"). Also: --cloud (fetch only), --local (reconcile only).')
+    .description('With an [agentSpec], syncs resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into that installed agent version — previews changes and lets you pick. e.g. "claude", "claude@2.1.142", a selector: @latest / @oldest / @pinned (= @default), or @all for every installed version.\n\nAppend a [repo] (or pass --repo) to scope the sync to a single DotAgent repo — system / user / project / <alias>. e.g. "agents sync claude@all system" reconciles only the system repo\'s resources into every installed Claude.\n\nGive a DotAgent repo name ALONE — "agents sync system" / "agents sync user" / "agents sync <alias>" — to git-sync that one repo: refuse if the tree is dirty, else git pull --rebase against origin. The user repo and extra aliases also push local commits up; the system repo is a pull-only mirror.\n\nWith NO agent, runs the umbrella verb: fetch the config repos then reconcile them into every installed agent. Secrets are opt-in — add --secrets to pull secret bundles. Session transcripts are queryable live via "agents sessions --host <machine>", or moved with "agents sessions export/import". Also: --cloud (fetch only), --local (reconcile only).')
     .option('--agent <agent>', 'Agent identifier (legacy form; prefer the positional spec)')
     .option('--agent-version <version>', 'Version to sync into (legacy form; prefer "agent@version")')
     .option('--repo <name>', 'Scope the sync to a single DotAgent repo: system / user / project / <alias> (also accepted as a positional)')
@@ -103,7 +102,6 @@ export function registerSyncCommand(program: Command): void {
     // Umbrella verb (no agent given): make this machine current.
     .option('--repos', 'Umbrella: git-pull ~/.agents + enabled ~/.agents-* extras', false)
     .option('--secrets', 'Umbrella: pull encrypted secret bundles from the remote', false)
-    .option('--sessions', 'Umbrella: sync session transcripts across machines', false)
     .option('--cloud', 'Umbrella: fetch all remote state but skip the local reconcile', false)
     .option('--local', "Umbrella: reconcile resources into installed agents only (no fetch)", false)
     .action(async (agentSpec: string | undefined, repo: string | undefined, opts: SyncOpts) => {
@@ -269,7 +267,7 @@ async function runUmbrella(
   // Interactive bare `agents sync` (a TTY, no --yes, no scope flag) drops into
   // the two-checklist picker: which repos to sync from, which agents to sync
   // into. Any explicit flag or --yes keeps the non-interactive umbrella below.
-  const anyExplicitFlag = !!(opts.repos || opts.secrets || opts.sessions || opts.cloud || opts.local);
+  const anyExplicitFlag = !!(opts.repos || opts.secrets || opts.cloud || opts.local);
   if (!quiet && !opts.yes && !anyExplicitFlag && isInteractiveTerminal()) {
     await runInteractiveReconcile(opts, outLog, errLog);
     return;
@@ -278,7 +276,6 @@ async function runUmbrella(
   const flags: UmbrellaFlags = {
     repos: opts.repos,
     secrets: opts.secrets,
-    sessions: opts.sessions,
     cloud: opts.cloud,
     local: opts.local,
   };
@@ -301,9 +298,6 @@ async function runUmbrella(
       }
       if (result.secrets) {
         parts.push(result.secrets.skipped ? 'secrets skipped' : `secrets ${result.secrets.pulled} pulled`);
-      }
-      if (result.sessions) {
-        parts.push(result.sessions.ran ? `sessions ${result.sessions.merged} merged` : 'sessions off');
       }
       if (result.reconciled) parts.push('reconciled');
       outLog(chalk.green(`✓ sync: ${parts.join(' · ') || 'nothing to do'}`));

@@ -265,6 +265,7 @@ export interface SessionOutcomeHint {
   prUrl?: string | null;
   worktreeSlug?: string | null;
   branch?: string | null;
+  project?: string | null;
 }
 
 /**
@@ -279,6 +280,7 @@ export function enrichBlockFromSession(block: OpenBlock, hint: SessionOutcomeHin
     else if (hint.prNumber != null) next.pr = `#${hint.prNumber}`;
   }
   if (!next.worktreeSlug && hint.worktreeSlug) next.worktreeSlug = hint.worktreeSlug;
+  if (!next.project && hint.project) next.project = hint.project;
   return next;
 }
 

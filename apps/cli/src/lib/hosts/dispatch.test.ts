@@ -14,6 +14,7 @@ import {
   deriveMirroredCwd,
   terminateDispatchedTask,
   withActorEnv,
+  remoteRunShellPrelude,
 } from './dispatch.js';
 import { buildRemoteAgentsInvocation, posixEnvExports } from './remote-cmd.js';
 import { resetActorCache } from '../actor.js';
@@ -533,5 +534,47 @@ describe('withActorEnv — forward actor provenance across the SSH hop (RUSH-202
     expect(env.GIT_AUTHOR_NAME).toBeUndefined();
     const cmd = buildRemoteAgentsInvocation(['view'], undefined, undefined, env);
     expect(cmd).toContain('export AGENTS_ACTOR=UNRESOLVED@');
+  });
+});
+
+describe('remoteRunShellPrelude — the run-auto chain-hop guard crosses the SSH boundary (RUSH-2132)', () => {
+  it('exports the guard into the remote SHELL env for a `run auto` dispatch — and the remote shell really sees it', () => {
+    // Both dispatch paths (runInteractiveOnHost + launchDetached) build their
+    // remote command with this prelude, so asserting on it exercises the real
+    // boundary. The guard MUST land in the remote CLI's own process.env (read
+    // by runAutoDefaultsToAffinity): a forwarded `--env` flag only reaches the
+    // spawned agent, which was the review finding this guards.
+    const prelude = remoteRunShellPrelude('auto');
+    expect(prelude).toContain('export AGENTS_RUN_AUTO_HOST_RESOLVED=1');
+    const out = spawnSync('bash', ['-lc', `${prelude}printf %s "$AGENTS_RUN_AUTO_HOST_RESOLVED"`], { encoding: 'utf-8' });
+    expect(out.stdout).toBe('1');
+  });
+
+  it('does not arm the guard for a named-harness dispatch (its remote never affinity-picks)', () => {
+    expect(remoteRunShellPrelude('claude')).not.toContain('AGENTS_RUN_AUTO_HOST_RESOLVED');
+    const out = spawnSync('bash', ['-lc', `${remoteRunShellPrelude('claude')}printf %s "$AGENTS_RUN_AUTO_HOST_RESOLVED"`], { encoding: 'utf-8' });
+    expect(out.stdout).toBe('');
+  });
+
+  it('the guard is NOT forwarded as an --env flag by either argv builder (that channel only reaches the spawned agent)', () => {
+    expect(buildRunForwardedArgs({ agent: 'auto', prompt: 'x' }).join(' ')).not.toContain('AGENTS_RUN_AUTO_HOST_RESOLVED');
+    expect(buildInteractiveRunForwardedArgs({ agent: 'auto' }).join(' ')).not.toContain('AGENTS_RUN_AUTO_HOST_RESOLVED');
+  });
+
+  it('keeps the actor provenance exports alongside the guard', () => {
+    const savedActor = process.env.AGENTS_ACTOR;
+    const savedKind = process.env.AGENTS_ACTOR_KIND;
+    process.env.AGENTS_ACTOR = 'muqsit@example.com';
+    process.env.AGENTS_ACTOR_KIND = 'human';
+    resetActorCache();
+    try {
+      const prelude = remoteRunShellPrelude('auto');
+      expect(prelude).toContain('export AGENTS_ACTOR=muqsit@example.com');
+      expect(prelude).toContain('export AGENTS_RUN_AUTO_HOST_RESOLVED=1');
+    } finally {
+      if (savedActor === undefined) delete process.env.AGENTS_ACTOR; else process.env.AGENTS_ACTOR = savedActor;
+      if (savedKind === undefined) delete process.env.AGENTS_ACTOR_KIND; else process.env.AGENTS_ACTOR_KIND = savedKind;
+      resetActorCache();
+    }
   });
 });

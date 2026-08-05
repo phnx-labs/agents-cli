@@ -572,6 +572,13 @@ Those archives are indexed by `agents sessions` with `origin: "routine"`,
 them, or `agents sessions <run-id>` to render the existing session summary view
 for a specific routine run.
 
+Archiving is per-agent (`ROUTINE_TRANSCRIPT_SPECS` in `runner.ts`, mirroring
+`SESSION_ROOT_SPECS` in `session/discover.ts`) and covers every on-disk session
+agent: claude, codex, cursor, gemini, antigravity, droid, kimi, grok. `opencode`
+is the one exception — its transcripts live in one incrementally-scanned SQLite
+db (`~/.local/share/opencode/opencode.db`), not a per-session file tree, so
+there's nothing for this mechanism to copy out.
+
 ### Claude auth for routines
 
 A routine authenticates exactly like an interactive `agents run claude` on the
@@ -913,7 +920,7 @@ Each execution creates a run directory with structured output:
         stderr.log                    # Error output
         exit-code                     # Exit status (0, 1, etc.)
         report.md                     # Extracted report
-        meta.json                     # { agent, version, mode, status, durationMs }
+        meta.json                     # RunMeta: { agent, version, mode, status, duration, ... }
 ```
 
 ### Desktop notifications
@@ -972,6 +979,8 @@ agents routines run <name>            # Run immediately in foreground
 agents routines run <name> --host yosemite-s0  # Run on a specific remote device
 agents routines view <name>           # Show job config
 agents routines runs <name>           # View execution history (last 10)
+agents routines stats                 # Run count/failed/missed/avg/p50/p95 duration, every job
+agents routines stats <name>          # Same rollup, scoped to one job
 agents routines logs <name>           # Show concise summary from latest run
 agents routines logs <name> --run <id>  # Show specific run
 agents routines logs <name> --full    # Show raw stdout from latest run
@@ -1031,3 +1040,4 @@ The status output includes the resolved daemon binary. Startup rejects bun virtu
 | `parseAtTime()` | routines.ts | Parse --at time strings to cron |
 | `getLatestRun()` / `listRuns()` | routines.ts | Query execution history |
 | `jobRunsOnThisDevice()` | routines.ts | Check if job is eligible on current machine |
+| `routineStats()` | routines.ts | Fold `listRuns()` into `{count, failed, missed, avgMs, p50, p95}` — `agents routines stats` |

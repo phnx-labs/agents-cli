@@ -10,6 +10,7 @@ import * as path from 'path';
 import { parseKimi, detectAgent, parseSession, summarizeToolUse } from '../parse.js';
 import { readKimiMeta } from '../discover.js';
 import { extractTodoProgressFromEvents } from '../state.js';
+import { toolCallsFromEvents } from '../tool-calls.js';
 
 /** A Kimi session dir whose state.json omits BOTH createdAt and updatedAt. */
 function makeKimiStateNoTimestamps(): string {
@@ -204,6 +205,7 @@ describe('parseKimi', () => {
       type: 'tool_use',
       agent: 'kimi',
       tool: 'Bash',
+      callId: 'tool_1',
       command: 'ls -la',
       args: { command: 'ls -la' },
     });
@@ -266,7 +268,9 @@ describe('parseKimi', () => {
       type: 'tool_result',
       agent: 'kimi',
       tool: 'Bash',
-      success: true,
+      callId: 'tool_3',
+      success: undefined,
+      outcome: 'unknown',
       output: 'hi',
     });
   });
@@ -305,6 +309,45 @@ describe('parseKimi', () => {
       tool: 'Bash',
       success: false,
     });
+  });
+
+  test('keeps a free-text Error prefix unknown without a structured error flag', () => {
+    const jsonl = [
+      {
+        type: 'context.append_loop_event',
+        event: { type: 'tool.call', toolCallId: 'tool_text_error', name: 'Bash', args: { command: 'printf ok' } },
+        time: 1750723200000,
+      },
+      {
+        type: 'context.append_loop_event',
+        event: { type: 'tool.result', toolCallId: 'tool_text_error', result: { output: 'Error: merely prose' } },
+        time: 1750723200001,
+      },
+    ].map(o => JSON.stringify(o)).join('\n');
+
+    const events = parseKimi(makeKimiSession(jsonl));
+    expect(events[1]).toMatchObject({ type: 'error', success: undefined, outcome: 'unknown' });
+    expect(toolCallsFromEvents(events)).toEqual([
+      expect.objectContaining({ outcome: 'unknown', output: 'Error: merely prose' }),
+    ]);
+  });
+
+  test('ignores non-string native call ids instead of aborting evidence extraction', () => {
+    const jsonl = [
+      {
+        type: 'context.append_loop_event',
+        event: { type: 'tool.call', toolCallId: { malformed: true }, name: 'Bash', args: { command: 'pwd' } },
+        time: 1750723200000,
+      },
+      {
+        type: 'context.append_loop_event',
+        event: { type: 'tool.result', toolCallId: 42, result: { output: '/tmp', isError: false } },
+        time: 1750723200001,
+      },
+    ].map(o => JSON.stringify(o)).join('\n');
+    const events = parseKimi(makeKimiSession(jsonl));
+    expect(events.map((event) => event.callId)).toEqual([undefined, undefined]);
+    expect(() => toolCallsFromEvents(events)).not.toThrow();
   });
 
   // Tests for the event.args shape (real Kimi wire format as of 2026-06)

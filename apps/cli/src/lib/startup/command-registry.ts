@@ -73,11 +73,11 @@ export const loadBeta: ModuleLoader = async () => (await import('../../commands/
 export const loadSync: ModuleLoader = async () => (await import('../../commands/sync.js')).registerSyncCommand;
 export const loadLock: ModuleLoader = async () => (await import('../../commands/lock.js')).registerLockCommand;
 export const loadRefreshRules: ModuleLoader = async () => (await import('../../commands/refresh-rules.js')).registerRefreshRulesCommand;
-export const loadDrive: ModuleLoader = async () => (await import('../../commands/drive.js')).registerDriveCommands;
 export const loadFactory: ModuleLoader = async () => (await import('../../commands/factory.js')).registerFactoryCommands;
 export const loadUsage: ModuleLoader = async () => (await import('../../commands/usage.js')).registerUsageCommand;
 export const loadCost: ModuleLoader = async () => (await import('../../commands/cost.js')).registerCostCommand;
 export const loadPerf: ModuleLoader = async () => (await import('../../commands/perf.js')).registerPerfCommand;
+export const loadTrends: ModuleLoader = async () => (await import('../../commands/trends.js')).registerTrendsCommand;
 export const loadOutput: ModuleLoader = async () => (await import('../../commands/output.js')).registerOutputCommand;
 export const loadBudget: ModuleLoader = async () => (await import('../../commands/budget.js')).registerBudgetCommand;
 export const loadAlias: ModuleLoader = async () => (await import('../../commands/alias.js')).registerAliasCommand;
@@ -103,7 +103,6 @@ export const loadCloud: ModuleLoader = async () => (await import('../../commands
 export const loadMessage: ModuleLoader = async () => (await import('../../commands/message.js')).registerMessageCommand;
 export const loadSend: ModuleLoader = async () => (await import('../../commands/send.js')).registerSendCommand;
 export const loadFeed: ModuleLoader = async () => (await import('../../commands/feed.js')).registerFeedCommand;
-export const loadActivity: ModuleLoader = async () => (await import('../../commands/activity.js')).registerActivityCommand;
 export const loadMailboxes: ModuleLoader = async () => (await import('../../commands/mailboxes.js')).registerMailboxesCommand;
 export const loadServe: ModuleLoader = async () => (await import('../../commands/serve.js')).registerServeCommand;
 export const loadShare: ModuleLoader = async () => (await import('../../commands/share.js')).registerShareCommands;
@@ -190,11 +189,11 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   sync: [loadSync],
   lock: [loadLock],
   'refresh-rules': [loadRefreshRules],
-  drive: [loadDrive],
   factory: [loadFactory],
   usage: [loadUsage],
   cost: [loadCost],
   perf: [loadPerf],
+  trends: [loadTrends],
   output: [loadOutput],
   budget: [loadBudget],
   alias: [loadAlias],
@@ -229,7 +228,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   send: [loadSend],
   notify: [loadSend],
   feed: [loadFeed],
-  activity: [loadActivity],
   mailboxes: [loadMailboxes],
   mailbox: [loadMailboxes],
   serve: [loadServe],

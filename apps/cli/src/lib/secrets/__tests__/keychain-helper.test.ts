@@ -136,9 +136,14 @@ describe('keychain-helper forward migration (file-based -> data-protection)', ()
     const block = source.slice(source.indexOf('func migrateInline('), source.indexOf('func rehomeOrphan('));
     // Clears any stale DP copy first (DP-scoped) so the add can't hit errSecDuplicateItem.
     expect(block).toContain('SecItemDelete(dpBase(service: service, account: account) as CFDictionary)');
-    // Adds the DP copy: DP base (incl. access group) plus the biometry ACL.
+    // Adds the DP copy: DP base (incl. access group) plus the TIER-CORRECT
+    // protection via applyMigrationProtection — silent items (metadata, hmackey)
+    // re-add no-ACL, everything else keeps the biometry gate. Unconditionally
+    // re-stamping the biometry ACL here re-gated silent items on read and produced
+    // a second Touch ID sheet (SEC-12), so that must NOT be the code.
     expect(block).toContain('var addAttrs = dpBase(service: service, account: account)');
-    expect(block).toContain('addAttrs[kSecAttrAccessControl] = buildBiometryAccessControl()');
+    expect(block).toContain('applyMigrationProtection(&addAttrs, service: service)');
+    expect(block).not.toContain('addAttrs[kSecAttrAccessControl] = buildBiometryAccessControl()');
     expect(block).toContain('SecItemAdd(addAttrs as CFDictionary, nil)');
     // Regression guard: migrateInline must NOT delete the legacy copy inline.
     // On macOS 26 the unscoped SecItemDelete(fileBase) also removes the
@@ -216,11 +221,28 @@ describe('keychain-helper orphaned-access-group recovery', () => {
     const delIdx = block.indexOf('SecItemDelete([kSecValuePersistentRef: orphanRef] as CFDictionary)');
     expect(addIdx).toBeGreaterThanOrEqual(0);
     expect(delIdx).toBeGreaterThan(addIdx); // add-before-delete: a failed add leaves the orphan intact
-    // The pinned copy carries the biometry ACL, like every other write.
+    // The pinned copy carries the TIER-CORRECT protection (applyMigrationProtection),
+    // NOT an unconditional biometry ACL — a re-homed metadata/hmackey orphan must
+    // stay silent.
     expect(block).toContain('var addAttrs = dpBase(service: service, account: account)');
-    expect(block).toContain('addAttrs[kSecAttrAccessControl] = buildBiometryAccessControl()');
+    expect(block).toContain('applyMigrationProtection(&addAttrs, service: service)');
+    expect(block).not.toContain('addAttrs[kSecAttrAccessControl] = buildBiometryAccessControl()');
     // Guard: on a failed add we must NOT delete the orphan.
     expect(block).toContain('guard addStatus == errSecSuccess else {');
+  });
+
+  it('applyMigrationProtection keeps silent items (metadata, hmackey) no-ACL on migrate/rehome', () => {
+    const source = helperSource();
+    // The gate that classifies a service as silent (never biometry-gated).
+    expect(source).toContain('func isSilentServiceName(_ service: String) -> Bool');
+    expect(source).toContain('service == "agents-cli.hmackey"'); // the HMAC key
+    expect(source).toContain('service.hasPrefix("agents-cli.bundles.")'); // cleartext metadata
+    expect(source).toContain('service.hasPrefix("agents-cli.h.") && service.hasSuffix(".m")'); // hashed metadata
+    // The applier: silent -> no-ACL accessibility; else -> the biometry ACL.
+    expect(source).toContain('func applyMigrationProtection(');
+    expect(source).toContain('if isSilentServiceName(service) {');
+    expect(source).toContain('attrs[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly');
+    expect(source).toContain('attrs[kSecAttrAccessControl] = buildBiometryAccessControl()');
   });
 
   it('list-orphans enumerates DP items whose group differs from kAccessGroup, no prompt', () => {

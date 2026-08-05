@@ -83,7 +83,7 @@ function actionLabel(action: ActionConfig): string {
     case 'routine':
       return `routine ${action.routine ?? ''}`;
     case 'notify':
-      return `notify ${action.notifyChannel ?? 'telegram'}`;
+      return `notify ${action.notifyChannel ?? 'owner'}`;
     case 'webhook-out':
       return `webhook-out ${action.url ?? ''}`;
     default:
@@ -208,9 +208,11 @@ function buildAction(options: Record<string, any>): ActionConfig {
   }
   if (options.routine) chosen.push({ type: 'routine', routine: options.routine });
   if (options.notify !== undefined) {
-    // --notify may be a bare flag (true) or carry a channel string.
-    const channel = typeof options.notify === 'string' ? options.notify : 'telegram';
-    chosen.push({ type: 'notify', notifyChannel: channel });
+    // --notify may be a bare flag (notify the owner) or carry a channel that
+    // overrides notify.owner.channel. Left unset, the send resolves the owner
+    // channel + target from notify.owner in agents.yaml (one source of truth).
+    const channel = typeof options.notify === 'string' ? options.notify : undefined;
+    chosen.push({ type: 'notify', ...(channel ? { notifyChannel: channel } : {}) });
   }
   if (options.webhookOut) chosen.push({ type: 'webhook-out', url: options.webhookOut });
 
@@ -270,7 +272,7 @@ export function registerMonitorsCommands(program: Command): void {
       # SSL cert issued → notify (poll an HTTPS endpoint every 8h)
       agents monitors add cert-issued \\
         --poll-http 'https://secure.ssl.com/team/.../co-ec1l5dgjofa' 8h \\
-        --match 'issued' --notify telegram --device zion
+        --match 'issued' --notify --device zion
 
       # Dry-run: evaluate the source once and show what it would emit (no action)
       agents monitors test ci-red
@@ -326,7 +328,7 @@ export function registerMonitorsCommands(program: Command): void {
     .option('--effort <effort>', 'Reasoning effort for --run: low | medium | high | xhigh | max | auto')
     .option('--action-timeout <t>', 'Kill the --run action if it runs longer than this (e.g. 10m)')
     .option('--routine <name>', 'Fire an existing routine on change')
-    .option('--notify [channel]', 'Send a notification (default channel: telegram)')
+    .option('--notify [channel]', 'Notify the owner (notify.owner); [channel] overrides the owner channel')
     .option('--webhook-out <url>', 'POST the event to this URL')
     // PLACEMENT / hygiene
     .option('--device <name>', 'OWNER device — the single machine that evaluates + fires (exactly-once)')
@@ -595,7 +597,7 @@ export function registerMonitorsCommands(program: Command): void {
           name,
           source: { type: 'poll', command: 'echo hello', interval: '1m' },
           condition: { mode: 'on-change' },
-          action: { type: 'notify', notifyChannel: 'telegram' },
+          action: { type: 'notify' },
         });
         fs.writeFileSync(monitorPath, template, 'utf-8');
         console.log(chalk.gray(`Created new monitor file: ${monitorPath}`));

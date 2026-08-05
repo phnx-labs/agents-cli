@@ -7,6 +7,8 @@ import { spawnSync } from 'child_process';
 import {
   FEED_PUBLISH_HOOK_SCRIPT,
   ensureFeedPublishHook,
+  buildDeclaredBlock,
+  type DeclaringAgent,
   publishBlock,
   listBlocks,
   readBlock,
@@ -166,6 +168,26 @@ describe('feed store', () => {
     expect(blocks[0].questions[1].multiSelect).toBe(true);
   });
 
+  it('buildDeclaredBlock stamps project from cwd, worktree-aware', () => {
+    const plain = buildDeclaredBlock(
+      { sessionId: 's1', mailboxId: 'm1', host: 'zion', runtime: 'claude', cwd: '/home/muqsit/src/foo' },
+      { text: 'Stuck?' },
+    );
+    expect(plain.project).toBe('foo');
+
+    const worktree = buildDeclaredBlock(
+      { sessionId: 's2', mailboxId: 'm2', host: 'zion', runtime: 'claude', cwd: '/home/muqsit/src/agents-cli/.agents/worktrees/feature-x' },
+      { text: 'Stuck?' },
+    );
+    expect(worktree.project).toBe('agents-cli');
+
+    const noCwd = buildDeclaredBlock(
+      { sessionId: 's3', mailboxId: 'm3', host: 'zion', runtime: 'claude' },
+      { text: 'Stuck?' },
+    );
+    expect(noCwd.project).toBeUndefined();
+  });
+
   it.runIf(hasPython)('real hook publishes every question and runtime into the shared feed', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-hook-'));
     const mailbox = path.join(home, '.agents', '.history', 'mailbox', 'session-123');
@@ -210,6 +232,23 @@ describe('feed store', () => {
       totalAskCount: 2,
     });
     expect(stats[0].recentAskTimestamps).toHaveLength(2);
+  });
+
+  it.runIf(hasPython)('real hook stamps project from cwd, folding worktrees to repo name', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-hook-project-'));
+    const result = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-project',
+        tool_input: { questions: [{ question: 'Which approach?' }] },
+        cwd: '/home/muqsit/src/agents-cli/.agents/worktrees/feature-x',
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(result.status).toBe(0);
+    const blocks = listBlocks(path.join(home, '.agents', '.history', 'feed'));
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].project).toBe('agents-cli');
   });
 
   it.runIf(hasPython)('real hook publishes waiting notifications with routing identity', () => {
@@ -357,6 +396,73 @@ describe('feed store', () => {
     });
     expect(clear.status).toBe(0);
     expect(listBlocks(feedDir)).toEqual([]);
+  });
+
+  it.runIf(hasPython)('real hook does NOT clear a declared (--blocked) block on Stop/SessionEnd/PostToolUse', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-declared-persist-'));
+    const feedDir = path.join(home, '.agents', '.history', 'feed');
+    fs.mkdirSync(feedDir, { recursive: true });
+    // `agents feed post --blocked` writes a declared block here (CLI side).
+    const agent: DeclaringAgent = {
+      sessionId: 'session-declared',
+      mailboxId: 'session-declared',
+      host: 'testbox',
+      runtime: 'headless',
+    };
+    publishBlock(buildDeclaredBlock(agent, { text: 'npm token expired, cannot publish' }), feedDir);
+    expect(listBlocks(feedDir)).toHaveLength(1);
+    expect(listBlocks(feedDir)[0].kind).toBe('declared');
+
+    // The agent parks the block and its turn ends: Stop fires, then SessionEnd,
+    // and any PostToolUse in between. None may drop it -- the owner still has to
+    // answer it, and it must stay in `agents feed` until they do.
+    for (const hook_event_name of ['Stop', 'SessionEnd', 'PostToolUse'] as const) {
+      const clear = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+        input: JSON.stringify({ session_id: 'session-declared', hook_event_name }),
+        env: { ...process.env, HOME: home },
+        encoding: 'utf-8',
+      });
+      expect(clear.status).toBe(0);
+    }
+    expect(listBlocks(feedDir).filter(b => b.kind === 'declared')).toHaveLength(1);
+
+    // Contrast: a notification block (harness idle prompt) STILL clears on Stop --
+    // the fix is scoped to declared blocks, not a blanket "never clear on Stop".
+    spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-notif',
+        hook_event_name: 'Notification',
+        notification_type: 'idle_prompt',
+        message: 'Claude is waiting for your next prompt',
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(listBlocks(feedDir).some(b => b.sessionId === 'session-notif')).toBe(true);
+    const clearNotif = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({ session_id: 'session-notif', hook_event_name: 'Stop' }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(clearNotif.status).toBe(0);
+    expect(listBlocks(feedDir).some(b => b.sessionId === 'session-notif')).toBe(false);
+    // The declared block for the other session is still present.
+    expect(listBlocks(feedDir).filter(b => b.kind === 'declared')).toHaveLength(1);
+
+    // Once the declared block is ANSWERED, a lifecycle clear DOES remove it AND its
+    // answered marker -- so a later --blocked in the same session is not falsely
+    // locked as already-answered (recordAnswer creates the marker with O_EXCL).
+    const declaredBlockId = blockIdForSession('session-declared');
+    recordAnswer(declaredBlockId, { answeredFrom: 'terminal' }, feedDir);
+    expect(isBlockAnswered(declaredBlockId, feedDir)).toBe(true);
+    const clearAnswered = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({ session_id: 'session-declared', hook_event_name: 'Stop' }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(clearAnswered.status).toBe(0);
+    expect(listBlocks(feedDir).some(b => b.sessionId === 'session-declared')).toBe(false);
+    expect(isBlockAnswered(declaredBlockId, feedDir)).toBe(false);
   });
 
   it.runIf(hasPython)('real hook captures multi-operator control metadata', () => {

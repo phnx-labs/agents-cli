@@ -10,10 +10,29 @@ import type { CloudProviderId } from './cloud/types.js';
 import type { FeedBroadcastConfig } from './feed-broadcast.js';
 
 /** Unique identifier for a current or legacy AI coding agent. */
-export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'kiro' | 'goose' | 'antigravity' | 'grok' | 'kimi' | 'droid' | 'hermes';
+export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'kiro' | 'goose' | 'antigravity' | 'grok' | 'kimi' | 'droid' | 'hermes' | 'pi';
 
 /** How `agents run <agent>` chooses an installed version when none is pinned. */
 export type RunStrategy = 'pinned' | 'available' | 'balanced';
+
+/**
+ * Reserved `<agent>` keyword for `agents run auto` — full-auto dispatch:
+ * host (14d launch affinity) → harness (best-account headroom, weighted) →
+ * account (balanced). Lives in lib (not commands/) because both the run
+ * command (exec.ts) and the host dispatch layer (hosts/dispatch.ts, which
+ * arms the chain-hop guard for remote `run auto`) must agree on it.
+ */
+export const RUN_AUTO_KEYWORD = 'auto';
+
+/**
+ * Env var a host dispatcher exports into the remote SHELL when it dispatches
+ * `agents run auto`: tells the remote CLI its host layer is already resolved,
+ * so it must not re-run affinity and chain-hop to a third host. It rides the
+ * shell-export prelude (hosts/dispatch.ts `remoteRunShellPrelude`) because
+ * `--env` flags only reach the spawned AGENT's env — the remote CLI's own
+ * process.env (which exec.ts `runAutoDefaultsToAffinity` reads) never sees them.
+ */
+export const RUN_AUTO_HOST_RESOLVED_ENV = 'AGENTS_RUN_AUTO_HOST_RESOLVED';
 
 /** Per-agent run strategy config. */
 export interface AgentRunConfig {
@@ -71,7 +90,7 @@ export interface BudgetConfig {
 }
 
 /** Preview features that users can opt into via `agents beta`. */
-export type BetaFeatureName = 'drive' | 'factory' | 'session-sync' | 'projects';
+export type BetaFeatureName = 'factory' | 'projects';
 
 /** Subset of chalk color names used for agent-specific terminal output. */
 export type ChalkColor = 'magenta' | 'green' | 'blue' | 'cyan' | 'yellowBright' | 'redBright' | 'whiteBright' | 'blueBright' | 'greenBright' | 'magentaBright' | 'cyanBright';
@@ -190,6 +209,15 @@ export interface AgentConfig {
      * rules file (inline all @-imports) when syncing it into the version home.
      */
     rulesImports?: boolean;
+    /**
+     * Whether the agent can open an interactive REPL session when launched with
+     * NO prompt (bare invocation). Agents whose CLI exits immediately without a
+     * prompt (e.g. cursor-agent) must declare `false` here; agents that open a
+     * TUI/REPL with no args declare `true`. Used by the `auto` harness picker
+     * to avoid routing a prompt-less interactive run to a harness that would
+     * exit silently (RUSH-2185, EXEC-23a).
+     */
+    interactiveRepl?: Capability;
   };
 }
 
@@ -205,7 +233,7 @@ export type Capability = boolean | { since?: string; until?: string };
 export type RulesCapability = false | { file: string };
 
 /** Names of every gateable capability on AgentConfig. */
-export type CapabilityName = 'hooks' | 'mcp' | 'mcpHttp' | 'mcpHeaders' | 'allowlist' | 'skills' | 'commands' | 'plugins' | 'subagents' | 'rules' | 'workflows' | 'memory';
+export type CapabilityName = 'hooks' | 'mcp' | 'mcpHttp' | 'mcpHeaders' | 'allowlist' | 'skills' | 'commands' | 'plugins' | 'subagents' | 'rules' | 'workflows' | 'memory' | 'interactiveRepl';
 /**
  * Permission modes controlling agent autonomy.
  *   plan  read-only investigation; no writes, no shell side-effects
@@ -300,6 +328,12 @@ export type HookCache = string | HookCacheConfig;
 export interface ManifestHook {
   script: string;
   events: string[];
+  /**
+   * Seconds before the hook is killed (default 600). In agents.yaml this may be
+   * written as a bare number (seconds) or a duration string (`5s`, `2m`,
+   * `1h30m`); `parseHookManifest` normalizes it to a seconds number here, so
+   * consumers always see a number.
+   */
   timeout?: number;
   matcher?: string;
   /** @deprecated Use the agent capability table; field is ignored. */
@@ -663,6 +697,20 @@ export interface DiscoveredPlugin {
    * (e.g. workflow-scoped) — those default to the user marketplace on sync.
    */
   marketplace?: string;
+  /**
+   * Absolute path to the DotAgents repo root containing this plugin — the
+   * grandparent of `root` (`<repo>/plugins/<name>` → `<repo>`), true for every
+   * marketplace kind (user/system/extra/project). DotAgents repos are
+   * git-tracked (plugins.ts), so this pairs with {@link snapshotSha}.
+   */
+  repoRoot: string;
+  /**
+   * Short HEAD sha of `repoRoot`'s git checkout, lazily resolved (a getter,
+   * not computed at discovery time) and memoized per repoRoot
+   * (`git.ts` `resolveSnapshotSha`) — see `ResolvedResource.snapshotSha` for
+   * the identical rationale. `undefined` when `repoRoot` isn't a git repo.
+   */
+  readonly snapshotSha: string | undefined;
 }
 
 /**
@@ -793,6 +841,26 @@ export interface Meta {
   isolatedAgents?: Partial<Record<AgentId, string>>;
   run?: RunConfig;
   /**
+   * Cost-tier overrides for `--model cheap|default|best|ultra`. Keyed by the same
+   * `<agent>:<version>` selector run.defaults uses (`kimi:*`, `kimi:0.19.2`); each
+   * value maps a tier to a concrete model id. Written by `agents models tier set`,
+   * never hand-edited. Resolution: exact version selector wins over `<agent>:*`,
+   * which wins over the auto-ranking. See lib/model-tier-overrides.ts.
+   */
+  model?: {
+    tiers?: Record<string, Partial<Record<'cheap' | 'default' | 'best' | 'ultra', string>>>;
+  };
+  /**
+   * Daemon watchdog config. `rotate` (default `on`) lets the watchdog rotate a
+   * rate-limited session IN PLACE onto a healthy account/harness via
+   * `agents run auto` — see lib/watchdog/rotate.ts. Set `off` to keep the
+   * nudge-only behavior (the Factory `agents.watchdog.autoRotate: false`
+   * migration writes `off` here).
+   */
+  watchdog?: {
+    rotate?: 'on' | 'off';
+  };
+  /**
    * `agents run --lease` config. `secretsBundle` names the keychain secrets bundle
    * whose provider token (e.g. `HCLOUD_TOKEN`) crabbox uses to reach the cloud API.
    * When unset, the bundle is resolved by env (`AGENTS_LEASE_SECRETS_BUNDLE`) then
@@ -830,10 +898,14 @@ export interface Meta {
   /** Spend guardrails (issue #346). User-global caps; project agents.yaml overrides. */
   budget?: BudgetConfig;
   /**
-   * `agents feed post` fan-out. `broadcast` maps a sink name to the argv template
-   * run for each post, so mirroring to a tracker or a messaging CLI is the
-   * operator's config rather than an integration compiled into this CLI. See
-   * lib/feed-broadcast.ts and docs/06-observability.md.
+   * `agents feed post` fan-out. `broadcast` maps a sink name to either an argv
+   * template (`command:`, run for each post) or an in-process channel delivery
+   * (`channel:`, the same registry `agents send`/`agents notify` use), so
+   * mirroring to a tracker, a messaging CLI, or a channel provider is the
+   * operator's config rather than an integration compiled into this CLI. When
+   * this is unset/empty, an important-level post falls back to `notify.owner`
+   * implicitly (RUSH-2123) — see lib/feed-broadcast.ts and
+   * docs/06-observability.md.
    */
   feed?: {
     broadcast?: FeedBroadcastConfig;

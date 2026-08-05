@@ -28,6 +28,7 @@ import { addHostOption } from '../lib/hosts/option.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
 import { loadDevices, isControlDevice } from '../lib/devices/registry.js';
 import { fanOutDevices, planFleetTargets, remoteFleetTargets, type FanOutDeviceTarget } from '../lib/devices/fleet.js';
+import { enterDoctorOverviewGate, writeDoctorOverviewCache } from '../lib/devices/doctor-overview-cache.js';
 import { fleetDialTarget } from '../lib/devices/connect.js';
 import { compareFleetInventories, type FleetInventory, type FleetVersionSignIn } from '../lib/devices/fleet-divergence.js';
 import { collectLocalFleetInventory } from '../lib/devices/fleet-inventory.js';
@@ -69,7 +70,7 @@ import { isVersionIsolated } from '../lib/versions.js';
 import { computeDrift, checkSyncStatus, countOrphans, computeSourceBehind, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
 import { readAuthHealthCache, summarizeHostAuth } from '../lib/auth-health.js';
 import { unifiedDiff, colorizeUnifiedDiff } from '../lib/diff-text.js';
-import { listCliStatus } from '../lib/cli-resources.js';
+import { listCliStatus, listCliStatusAsync } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
 import { heal, healChangedAnything, type HealResult } from '../lib/heal.js';
 import { getEffectiveExecutionPolicy } from '../lib/platform/winpath.js';
@@ -83,6 +84,8 @@ const AGENT_NAMES: Record<string, string> = Object.fromEntries(
 );
 
 interface DoctorOptions {
+  /** Bypass the cached bare-`--json` overview snapshot and recompute live (also refreshes the shared cache). */
+  refresh?: boolean;
   json?: boolean;
   diff?: boolean;
   kind?: string;
@@ -1375,12 +1378,18 @@ export function registerDoctorCommand(program: Command): void {
     .option('--devices', 'Check agent readiness AND cross-device harness divergence (missing resources/versions, repo drift) on every registered device (alias --hosts)')
     .option('--hosts', 'Alias of --devices')
     .option('--check', 'CI drift gate: exit non-zero when any installed version is out of sync (stale or never-synced), zero when clean. Combine with --devices to gate the whole fleet.')
+    .option('--refresh', 'Bypass the cached overview snapshot: recompute the bare `doctor --json` overview live and refresh the shared cache that the menu-bar and other pollers read')
     .option('-q, --quiet', 'With --check, suppress per-version lines; print only the one-line verdict');
 
   setHelpSections(doctorCmd, {
     examples: `
       # Overview: CLI availability + sync status + orphans across all defaults
       agents doctor
+
+      # Machine-readable overview (served from a ~90s cache for pollers like the
+      # menu-bar helper); --refresh recomputes live and refreshes that cache
+      agents doctor --json
+      agents doctor --json --refresh
 
       # Full per-resource report for the active default
       agents doctor claude@default
@@ -1505,10 +1514,33 @@ export function registerDoctorCommand(program: Command): void {
       }
 
       if (!target) {
+        // Singleflight + short-TTL cache for the bare `doctor --json` overview.
+        // This overview probes every host CLI, every agent's sign-in, and every
+        // agent×version diff — seconds on an idle box, minutes on a loaded one.
+        // The menu-bar helper polls it with only a per-*process* in-flight guard,
+        // so a helper relaunch (or any second poller) each launched its own live
+        // compute, and a helper killed mid-run orphaned a `doctor --json` that
+        // kept spinning — stacking to dozens of concurrent runs pinning the CPU
+        // (RUSH-2153). Now: a fresh snapshot serves instantly, and when a compute
+        // IS needed exactly one runs while every other caller serves its result.
+        // A crashed computer never wedges the gate — the lock is stolen once its
+        // directory mtime goes stale (see enterDoctorOverviewGate).
+        let releaseOverviewGate: (() => void) | undefined;
+        if (opts.json) {
+          const gate = await enterDoctorOverviewGate({ forceRefresh: !!opts.refresh });
+          if (gate.cached !== null) {
+            console.log(gate.cached);
+            return;
+          }
+          releaseOverviewGate = gate.release;
+        }
         const clis = checkAllClis();
         const syncRows = checkSyncStatus(cwd);
         const orphanRows = countOrphans();
-        const hostClis = listCliStatus(cwd);
+        // Parallel host-CLI probe (RUSH-2136): the serial spawnSync version ran a
+        // dozen+ blocking 10s-timeout checks one after another, which measured
+        // ~136s on an idle box and stalled the menu-bar helper's poll.
+        const hostClis = await listCliStatusAsync(cwd);
         const repoBehindMarkers = readRepoBehindMarkers();
         // The local inventory now carries per-version sign-in (RUSH-2069), so it
         // is the single source for both the accounts line and the logged-out
@@ -1577,7 +1609,7 @@ export function registerDoctorCommand(program: Command): void {
         });
 
         if (opts.json) {
-          console.log(JSON.stringify({
+          const overviewPayload = {
             clis,
             signIn,
             // Cached auth-health rollup for THIS host — lets `agents fleet status`
@@ -1620,7 +1652,12 @@ export function registerDoctorCommand(program: Command): void {
               branch: m.branch,
               fetchedAt: m.fetchedAt,
             })),
-          }, null, 2));
+          };
+          // Persist for the next poller and release the singleflight lock BEFORE
+          // printing, so a concurrent caller picks up the fresh snapshot at once.
+          writeDoctorOverviewCache(overviewPayload);
+          releaseOverviewGate?.();
+          console.log(JSON.stringify(overviewPayload, null, 2));
           return;
         }
 

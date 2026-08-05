@@ -78,6 +78,23 @@ describe('validateProjectDef', () => {
     });
     expect(def.repos).toEqual([{ slug: 'phnx-labs/rush-infra', path: '~/src/rush-infra' }]);
   });
+
+  it('keeps well-formed goals (measure optional) and drops entries without a string objective', () => {
+    const def = validateProjectDef({
+      name: 'rush',
+      goals: [
+        { objective: 'Ship agents-cli 2.0', measure: 'fleet on 2.x' },
+        { objective: 'Grow adoption' },
+        { measure: 'no objective' },
+        { objective: 42 },
+        'nope',
+      ],
+    });
+    expect(def.goals).toEqual([
+      { objective: 'Ship agents-cli 2.0', measure: 'fleet on 2.x' },
+      { objective: 'Grow adoption' },
+    ]);
+  });
 });
 
 describe('write/load roundtrip', () => {
@@ -238,5 +255,71 @@ describe('resolveProjectNameForCwd', () => {
   it('undefined for an empty cwd', () => {
     expect(resolveProjectNameForCwd(undefined, [])).toBeUndefined();
     expect(resolveProjectNameForCwd('', [])).toBeUndefined();
+  });
+});
+
+describe('projectNameForCwd — monorepo subprojects', () => {
+  const HOME_ = process.env.HOME ?? os.homedir();
+  const mono = path.join(HOME_, 'src', 'rush');
+  // Two projects sharing ONE checkout: the umbrella and a subdir project.
+  const defs: ProjectDef[] = [
+    { name: 'rush', root: '~/src/rush' },
+    { name: 'rush-cli', root: '~/src/rush', defaultPath: '~/src/rush/apps/cli' },
+  ];
+
+  it('attributes work in the subdir to the SUBPROJECT, not the umbrella', () => {
+    // `root ?? defaultPath` gave both defs the same anchor (~/src/rush), so the
+    // longest-match tiebreak had nothing to separate them and the first listed
+    // def won regardless of where the session actually was.
+    expect(projectNameForCwd(path.join(mono, 'apps', 'cli', 'src'), defs)).toBe('rush-cli');
+    expect(projectNameForCwd(path.join(mono, 'apps', 'cli'), defs)).toBe('rush-cli');
+  });
+
+  it('still attributes work outside the subdir to the umbrella', () => {
+    expect(projectNameForCwd(path.join(mono, 'apps', 'web'), defs)).toBe('rush');
+    expect(projectNameForCwd(mono, defs)).toBe('rush');
+  });
+
+  it('does not depend on definition order', () => {
+    const reversed = [...defs].reverse();
+    expect(projectNameForCwd(path.join(mono, 'apps', 'cli', 'x'), reversed)).toBe('rush-cli');
+    expect(projectNameForCwd(path.join(mono, 'apps', 'web'), reversed)).toBe('rush');
+  });
+
+  it('anchors a bound repo checkout and its subpath too', () => {
+    const withRepos: ProjectDef[] = [
+      { name: 'umbrella', root: '~/src/rush' },
+      { name: 'infra', root: '~/src/rush', repos: [{ slug: 'o/infra', path: '~/src/rush/infra', subpath: 'deploy' }] },
+    ];
+    expect(projectNameForCwd(path.join(mono, 'infra', 'deploy', 'k8s'), withRepos)).toBe('infra');
+    expect(projectNameForCwd(path.join(mono, 'infra'), withRepos)).toBe('infra');
+    expect(projectNameForCwd(path.join(mono, 'docs'), withRepos)).toBe('umbrella');
+  });
+
+  it('matches nothing outside every anchor', () => {
+    expect(projectNameForCwd(path.join(HOME_, 'src', 'elsewhere'), defs)).toBeUndefined();
+  });
+
+  it('a lone narrowed project still owns the rest of its own checkout', () => {
+    // The subdir claim must not shrink a project that has no umbrella beside it:
+    // `--path` picks where an agent starts, not which work counts. Narrowing to
+    // the subdir alone silently orphaned every session in the repo root and in
+    // sibling subdirs.
+    const solo: ProjectDef[] = [{ name: 'foo', root: '~/src/foo', defaultPath: '~/src/foo/apps/web' }];
+    const repo = path.join(HOME_, 'src', 'foo');
+    expect(projectNameForCwd(path.join(repo, 'apps', 'web'), solo)).toBe('foo');
+    expect(projectNameForCwd(repo, solo)).toBe('foo');
+    expect(projectNameForCwd(path.join(repo, 'apps', 'api'), solo)).toBe('foo');
+    // Still bounded by the root.
+    expect(projectNameForCwd(path.join(HOME_, 'src', 'bar'), solo)).toBeUndefined();
+  });
+
+  it('the umbrella outranks a subproject root even when listed second', () => {
+    // The fallback must lose to any outright claim, in either definition order.
+    const reversed = [...defs].reverse();
+    expect(projectNameForCwd(path.join(mono, 'apps', 'web'), defs)).toBe('rush');
+    expect(projectNameForCwd(path.join(mono, 'apps', 'web'), reversed)).toBe('rush');
+    expect(projectNameForCwd(mono, defs)).toBe('rush');
+    expect(projectNameForCwd(mono, reversed)).toBe('rush');
   });
 });

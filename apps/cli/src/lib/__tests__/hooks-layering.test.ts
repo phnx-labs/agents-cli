@@ -44,7 +44,7 @@ vi.mock('../versions.js', () => ({
   listInstalledVersions: () => [],
 }));
 
-import { parseHookManifest } from '../hooks.js';
+import { normalizeHookTimeoutSeconds, parseHookManifest } from '../hooks.js';
 
 describe('parseHookManifest layering', () => {
   beforeEach(() => {
@@ -120,6 +120,38 @@ describe('parseHookManifest layering', () => {
     expect(out['shared'].timeout).toBe(10);
     expect(warn).toHaveBeenCalledWith(
       "[agents hooks] User-layer hook 'shared' shadows system-shipped hook. Set 'override: true' to silence this warning.",
+    );
+  });
+
+  // #1555: a duration-string timeout in agents.yaml normalizes to a seconds
+  // number, so every downstream serializer keeps reading a number.
+  it('normalizes a duration-string timeout to seconds', () => {
+    fs.writeFileSync(
+      path.join(USER_DIR, 'agents.yaml'),
+      'hooks:\n' +
+        '  quick:\n    script: q.sh\n    events: [Stop]\n    timeout: 5s\n' +
+        '  slow:\n    script: s.sh\n    events: [Stop]\n    timeout: 1h30m\n' +
+        '  bare:\n    script: b.sh\n    events: [Stop]\n    timeout: 45\n',
+      'utf-8'
+    );
+    const out = parseHookManifest();
+    expect(out['quick'].timeout).toBe(5);
+    expect(out['slow'].timeout).toBe(5400);
+    expect(out['bare'].timeout).toBe(45);
+  });
+
+  it('drops an unparseable timeout with a warning, leaving other fields intact', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fs.writeFileSync(
+      path.join(USER_DIR, 'agents.yaml'),
+      'hooks:\n  bad:\n    script: bad.sh\n    events: [Stop]\n    timeout: "soon"\n',
+      'utf-8'
+    );
+    const out = parseHookManifest();
+    expect(out['bad'].script).toBe('bad.sh');
+    expect(out['bad'].timeout).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Hook 'bad' has an invalid timeout"),
     );
   });
 
@@ -243,5 +275,36 @@ describe('parseHookManifest layering', () => {
     ENABLED_EXTRAS = [{ alias: 'work', dir: extraDir, url: 'gh:me/.agents-work' }];
 
     expect(parseHookManifest()).not.toHaveProperty('work-session');
+  });
+});
+
+describe('normalizeHookTimeoutSeconds', () => {
+  it('keeps a positive number as seconds (backward compatible)', () => {
+    expect(normalizeHookTimeoutSeconds(30)).toBe(30);
+    expect(normalizeHookTimeoutSeconds(600)).toBe(600);
+  });
+
+  it('parses duration strings into seconds', () => {
+    expect(normalizeHookTimeoutSeconds('5s')).toBe(5);
+    expect(normalizeHookTimeoutSeconds('2m')).toBe(120);
+    expect(normalizeHookTimeoutSeconds('90s')).toBe(90);
+    expect(normalizeHookTimeoutSeconds('1h')).toBe(3600);
+    expect(normalizeHookTimeoutSeconds('1h30m')).toBe(5400);
+    expect(normalizeHookTimeoutSeconds('1m30s')).toBe(90);
+  });
+
+  it('treats a bare integer string as seconds', () => {
+    expect(normalizeHookTimeoutSeconds('45')).toBe(45);
+  });
+
+  it('returns null for non-positive or unparseable values', () => {
+    expect(normalizeHookTimeoutSeconds(0)).toBeNull();
+    expect(normalizeHookTimeoutSeconds(-5)).toBeNull();
+    expect(normalizeHookTimeoutSeconds('0s')).toBeNull();
+    expect(normalizeHookTimeoutSeconds('soon')).toBeNull();
+    expect(normalizeHookTimeoutSeconds('5 minutes')).toBeNull();
+    expect(normalizeHookTimeoutSeconds('')).toBeNull();
+    expect(normalizeHookTimeoutSeconds(undefined)).toBeNull();
+    expect(normalizeHookTimeoutSeconds(null)).toBeNull();
   });
 });
