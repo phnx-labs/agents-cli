@@ -126,7 +126,9 @@ different-home machine still matches — is a deferred follow-up (see below):
 rush  ·  23 live
   live     14 running · 6 idle · 3 need-input     # LIVE sessions by lifecycle state
   dead     4 finished or lost (3 crashed, 1 closed)
-  agents   claude · running · RUSH-2107 @zion  ·  codex · idle @mac-mini  ·  +21 more
+  agents   @zion        claude · running · RUSH-2107  ·  claude · running ×8
+           @mac-mini    codex · idle  ·  claude · idle ×2
+           @yosemite-s0 claude · running ×5  ·  +6 more
   ships    4 merged (7d) · 2 open PRs · 3 worktrees · v1.20.91  # gh counts + latest release tag
   linear   12/30 done · 5 in progress           # Linear issue counts (needs linear.projectId)
   next     Beta cut  ·  3/8  ·  due in 6 days     # the next unfinished Linear milestone
