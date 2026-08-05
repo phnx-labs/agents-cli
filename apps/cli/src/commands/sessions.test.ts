@@ -835,7 +835,7 @@ describe('agents sessions --resolve local-peer critical path', () => {
       if (peer) await stopSessionResolverSshPeer(peer);
       rmTempHomeWithRetries(tempHome);
     }
-  });
+  }, 90_000);
 
   it('returns a partial fleet result when a real exit-zero peer emits malformed safe output', async () => {
     const tempHome = fs.mkdtempSync(path.join(sshPeerTmpBase, 'sr-'));
