@@ -298,13 +298,13 @@ echo "Checking marketplace for existing $EXT_FQN@$VERSION..."
 PUBLISHED_VSCE="$(vsce show "$EXT_FQN" --json 2>/dev/null \
     | python3 -c "import json,sys; d=json.load(sys.stdin); print('\n'.join(v['version'] for v in d.get('versions',[])))" \
     2>/dev/null || true)"
+PUBLISH_VSCE=1
 if printf '%s\n' "$PUBLISHED_VSCE" | grep -qx "$VERSION"; then
-    echo "Error: $VERSION already published on VS Code Marketplace." >&2
-    echo "       Bump the version and try again." >&2
-    exit 1
+    echo "$VERSION already published on VS Code Marketplace; skipping that registry."
+    PUBLISH_VSCE=0
 fi
 
-PUBLISHED_OVSX=""
+PUBLISH_OVSX=0
 if command -v ovsx >/dev/null 2>&1; then
     echo "Checking Open VSX for existing $EXT_FQN@$VERSION..."
     # `ovsx get <ext> <version> --metadata` ignores the version arg and
@@ -314,10 +314,10 @@ if command -v ovsx >/dev/null 2>&1; then
         | VER="$VERSION" python3 -c "import json,sys,os; d=json.loads(sys.stdin.read() or '{}'); v=os.environ['VER']; files=d.get('files',{}); url=files.get('download',''); print('hit' if d.get('version')==v or '/'+v+'/' in url else '')" \
         2>/dev/null || true)"
     if [ "$OVSX_HIT" = "hit" ]; then
-        echo "Error: $VERSION already published on Open VSX." >&2
-        exit 1
+        echo "$VERSION already published on Open VSX; skipping that registry."
+    else
+        PUBLISH_OVSX=1
     fi
-    PUBLISHED_OVSX="ok"
 else
     echo "Warning: ovsx not installed; skipping Open VSX publish." >&2
 fi
@@ -326,7 +326,7 @@ fi
 
 # Resolve from the keychain bundle if env not already set. Both paths leave
 # VSCE_PAT and OVSX_PAT exported in the script's process — never logged.
-if [ -z "${VSCE_PAT:-}" ] || { [ -n "$PUBLISHED_OVSX" ] && [ -z "${OVSX_PAT:-}" ]; }; then
+if { [ $PUBLISH_VSCE -eq 1 ] && [ -z "${VSCE_PAT:-}" ]; } || { [ $PUBLISH_OVSX -eq 1 ] && [ -z "${OVSX_PAT:-}" ]; }; then
     if ! command -v agents >/dev/null 2>&1; then
         echo "Error: VSCE_PAT/OVSX_PAT not in env and agents-cli not installed." >&2
         echo "       Either export them or install agents-cli to read keychain bundle 'vs-marketplace'." >&2
@@ -341,21 +341,23 @@ if [ -z "${VSCE_PAT:-}" ] || { [ -n "$PUBLISHED_OVSX" ] && [ -z "${OVSX_PAT:-}" 
     }
 fi
 
-if [ -z "${VSCE_PAT:-}" ]; then
+if [ $PUBLISH_VSCE -eq 1 ] && [ -z "${VSCE_PAT:-}" ]; then
     echo "Error: VSCE_PAT not set after exporting vs-marketplace bundle." >&2
     exit 1
 fi
-if [ -n "$PUBLISHED_OVSX" ] && [ -z "${OVSX_PAT:-}" ]; then
+if [ $PUBLISH_OVSX -eq 1 ] && [ -z "${OVSX_PAT:-}" ]; then
     echo "Error: OVSX_PAT not set after exporting vs-marketplace bundle." >&2
     exit 1
 fi
 
-echo "Verifying VSCE PAT against publisher '$PUBLISHER_ID'..."
-if ! vsce verify-pat "$PUBLISHER_ID" >/dev/null 2>&1; then
-    echo "Error: vsce verify-pat failed for $PUBLISHER_ID. Token expired or wrong scope." >&2
-    exit 1
+if [ $PUBLISH_VSCE -eq 1 ]; then
+    echo "Verifying VSCE PAT against publisher '$PUBLISHER_ID'..."
+    if ! vsce verify-pat "$PUBLISHER_ID" >/dev/null 2>&1; then
+        echo "Error: vsce verify-pat failed for $PUBLISHER_ID. Token expired or wrong scope." >&2
+        exit 1
+    fi
+    echo "VSCE PAT verified."
 fi
-echo "VSCE PAT verified."
 
 # --- Tests + Build -------------------------------------------------------
 
@@ -389,8 +391,8 @@ if [ -n "$PRE_TAG" ]; then VSCE_FLAGS+=("--pre-release"); fi
 if [ $CONFIRM -eq 0 ]; then
     echo
     echo "Would publish $VSIX to:"
-    echo "  - VS Code Marketplace via: vsce publish --packagePath $VSIX ${VSCE_FLAGS[*]:-}"
-    if [ -n "$PUBLISHED_OVSX" ]; then
+    [ $PUBLISH_VSCE -eq 1 ] && echo "  - VS Code Marketplace via: vsce publish --packagePath $VSIX ${VSCE_FLAGS[*]:-}"
+    if [ $PUBLISH_OVSX -eq 1 ]; then
         echo "  - Open VSX via: ovsx publish $VSIX"
     fi
     echo
@@ -403,10 +405,12 @@ if [ ! -f "$VSIX" ]; then
     exit 1
 fi
 
-echo "Publishing $VSIX to VS Code Marketplace..."
-vsce publish --packagePath "$VSIX" ${VSCE_FLAGS[@]+"${VSCE_FLAGS[@]}"}
+if [ $PUBLISH_VSCE -eq 1 ]; then
+    echo "Publishing $VSIX to VS Code Marketplace..."
+    vsce publish --packagePath "$VSIX" ${VSCE_FLAGS[@]+"${VSCE_FLAGS[@]}"}
+fi
 
-if [ -n "$PUBLISHED_OVSX" ]; then
+if [ $PUBLISH_OVSX -eq 1 ]; then
     echo "Publishing $VSIX to Open VSX..."
     ovsx publish "$VSIX"
 fi
@@ -414,7 +418,7 @@ fi
 echo
 echo "Released $EXT_FQN@$VERSION"
 echo "  VS Code Marketplace: https://marketplace.visualstudio.com/items?itemName=$EXT_FQN"
-[ -n "$PUBLISHED_OVSX" ] && echo "  Open VSX:            https://open-vsx.org/extension/$PUBLISHER_ID/$EXT_NAME"
+[ $PUBLISH_OVSX -eq 1 ] && echo "  Open VSX:            https://open-vsx.org/extension/$PUBLISHER_ID/$EXT_NAME"
 
 # --- Confirm live on the public channel ----------------------------------
 # `vsce publish` exiting 0 means the upload was accepted, not that the registry
@@ -439,7 +443,7 @@ VSCE_LIVE=0
 OVSX_LIVE=0
 for _ in $(seq 1 18); do   # ~3 min at 10s
     [ "$VSCE_LIVE" -eq 0 ] && [ "$(marketplace_live_version)" = "$VERSION" ] && { VSCE_LIVE=1; echo "  VS Code Marketplace: live ($VERSION)"; }
-    if [ -n "$PUBLISHED_OVSX" ]; then
+    if command -v ovsx >/dev/null 2>&1; then
         [ "$OVSX_LIVE" -eq 0 ] && [ "$(ovsx_live_version)" = "$VERSION" ] && { OVSX_LIVE=1; echo "  Open VSX: live ($VERSION)"; }
     else
         OVSX_LIVE=1
@@ -448,7 +452,7 @@ for _ in $(seq 1 18); do   # ~3 min at 10s
     sleep 10
 done
 [ "$VSCE_LIVE" -eq 0 ] && echo "  Warning: VS Code Marketplace not yet serving $VERSION after ~3 min — check the listing." >&2
-[ -n "$PUBLISHED_OVSX" ] && [ "$OVSX_LIVE" -eq 0 ] && echo "  Warning: Open VSX not yet serving $VERSION after ~3 min — check the listing." >&2
+command -v ovsx >/dev/null 2>&1 && [ "$OVSX_LIVE" -eq 0 ] && echo "  Warning: Open VSX not yet serving $VERSION after ~3 min — check the listing." >&2
 
 # Install the just-published vsix into any local editor CLIs (code, codium,
 # cursor). Marketplace propagation can take minutes; we install from the local
