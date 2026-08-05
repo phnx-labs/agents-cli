@@ -1,14 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **`agents sessions --active` now carries `terminalId` on tmux-hosted rows (RUSH-2192).**
-  Grok/Codex (and every `ag-*` tmux pane) get their `AGENT_TERMINAL_ID` from the launch
-  registry's by-pid entry. The ps-scan path already set `terminalId`; the tmux source —
-  which wins dedupe for interactive agents — omitted it, so Factory could never join a
-  tab to its live session even when SessionStart preserved the key. Source:
-  `apps/cli/src/lib/session/active.ts`.
-
 ## 1.22.16
 
 - **Resume exact sessions locally or across the fleet with `agents resume <id>` and `agents run <agent|auto> --resume <id>`.** Full IDs use the local SQLite index before any SSH fan-out; remote owners route to the recorded device and version home. Session metadata now records launch mode alongside harness, version, account, cwd, and machine so strict resume reconstructs the original run. Claude, Codex, Grok, Kimi, Droid, and Cursor use their verified version-specific native resume syntax; `run auto --resume` can select another healthy harness/account and continue through `/continue` when native resume is unavailable. Source: `apps/cli/src/commands/{exec,resume,sessions}.ts`, `apps/cli/src/lib/{exec,session/db}.ts`, `packages/session-tracker/src/hook.sh`.
