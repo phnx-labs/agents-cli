@@ -272,7 +272,7 @@ export function registerMonitorsCommands(program: Command): void {
       # SSL cert issued → notify (poll an HTTPS endpoint every 8h)
       agents monitors add cert-issued \\
         --poll-http 'https://secure.ssl.com/team/.../co-ec1l5dgjofa' 8h \\
-        --match 'issued' --notify telegram --device zion
+        --match 'issued' --notify --device zion
 
       # Dry-run: evaluate the source once and show what it would emit (no action)
       agents monitors test ci-red
