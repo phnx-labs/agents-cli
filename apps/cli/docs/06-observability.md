@@ -1022,7 +1022,7 @@ wins outright over the fallback.
 
 ### Activity lane (inside `agents feed`)
 
-The milestone timeline previously surfaced by the standalone `agents activity`
+The milestone timeline previously surfaced by the standalone `agents activity` (now a tombstone redirect)
 command is now part of `agents feed`. The same append-only activity stream is
 read, but it is rendered as a compact lane under the block view or in full via
 `--filter updates` / `--filter all`:

@@ -197,6 +197,7 @@ import {
   loadShare,
   loadSend,
   loadFeed,
+  loadActivity,
   loadMailboxes,
   type ModuleLoader,
 } from './lib/startup/command-registry.js';
@@ -1126,6 +1127,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadFunnel);
   registerHqTombstoneCommand(program);
   await reg(loadFeed);
+  await reg(loadActivity); // tombstone → feed --filter updates|all
   await reg(loadMailboxes);
   await reg(loadSsh);
   registerJobsCronAliasCommand(program, 'jobs');
