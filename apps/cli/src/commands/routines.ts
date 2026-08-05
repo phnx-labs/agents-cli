@@ -49,8 +49,10 @@ import {
   parseHostStrategy,
   resolveHostStrategy,
   HOST_STRATEGIES,
+  computeProjectGroup,
 } from '../lib/routines.js';
 import type { JobConfig, JobTrigger, LinearTriggerEvent, RunMeta, HostStrategy } from '../lib/routines.js';
+import { listProjectDefs, isSafeProjectName } from '../lib/projects.js';
 import {
   discoverProjectRoutinesAt,
   enableProjectRoutines,
@@ -270,6 +272,43 @@ export function groupRoutineJobsByDevice(
     return 5;
   };
   return [...groups.values()].sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title));
+}
+
+/**
+ * Group routines by their `projects` metadata field.
+ * Named projects come first (alphabetically), followed by All projects, Cross-project,
+ * Operations (no project), and Unknown projects (stale names).
+ */
+export function groupRoutineJobsByProject(
+  jobs: JobConfig[],
+  knownProjectNames: Set<string>,
+): RoutineListGroup[] {
+  const groups = new Map<string, RoutineListGroup>();
+  const add = (key: string, title: string, job: JobConfig): void => {
+    const existing = groups.get(key);
+    if (existing) {
+      existing.jobs.push(job);
+      return;
+    }
+    groups.set(key, { key, title, jobs: [job], local: true });
+  };
+
+  for (const job of jobs) {
+    const groupTitle = computeProjectGroup(job.projects, knownProjectNames);
+    add(`project:${groupTitle}`, groupTitle, job);
+  }
+
+  const SPECIAL = ['All projects', 'Cross-project', 'Operations', 'Unknown projects'];
+  const order = (group: RoutineListGroup): number => {
+    const idx = SPECIAL.indexOf(group.title);
+    return idx === -1 ? 0 : idx + 1; // named projects first (0), then specials in order
+  };
+  return [...groups.values()].sort((a, b) => order(a) - order(b) || a.title.localeCompare(b.title));
+}
+
+/** commander repeatable-option collector for --project. */
+function collectProject(value: string, previous: string[]): string[] {
+  return previous.concat([value]);
 }
 
 interface RenderRowsOptions {
@@ -606,11 +645,11 @@ export function registerRoutinesCommands(program: Command): void {
     .command('list')
     .description('See all scheduled jobs, when they run next, and their last execution status')
     .option('--json', 'Emit machine-readable JSON instead of the table (used by the menu bar helper)')
-    .option('--group-by <field>', 'Group table output by device (default for terminal output)')
+    .option('--group-by <field>', 'Group output by field: project (default) or device', 'project')
     .option('--flat', 'Print the legacy flat table instead of grouped sections')
     .action((options: { json?: boolean; groupBy?: string; flat?: boolean }) => {
-      if (options.groupBy && options.groupBy !== 'device') {
-        console.error(chalk.red(`Unsupported --group-by '${options.groupBy}'. Use: device`));
+      if (options.groupBy && options.groupBy !== 'device' && options.groupBy !== 'project') {
+        console.error(chalk.red(`Unsupported --group-by '${options.groupBy}'. Use: project (default) or device`));
         process.exit(1);
       }
       try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
@@ -640,6 +679,7 @@ export function registerRoutinesCommands(program: Command): void {
       // The menu bar helper relies on this so it never reimplements cron math.
       if (options.json) {
         const nowJson = new Date();
+        const knownProjectNames = new Set(listProjectDefs().map((p) => p.name));
         const payload = jobs.map((job) => {
           const latestRun = localLatestRun(job);
           const enabledDevices = devicesWithRoutineEnabled(job.name);
@@ -674,6 +714,8 @@ export function registerRoutinesCommands(program: Command): void {
             failureReason: latestRun?.errorMessage ?? null,
             lastRunStartedAt: latestRun?.startedAt ?? null,
             lastRunCompletedAt: latestRun?.completedAt ?? null,
+            projects: job.projects ?? [],
+            projectGroup: computeProjectGroup(job.projects, knownProjectNames),
           };
         });
         scheduler.stopAll();
@@ -692,7 +734,7 @@ export function registerRoutinesCommands(program: Command): void {
       const now = new Date();
       if (options.flat) {
         renderRoutineRows({ jobs, scheduler, overdueSet, link, now });
-      } else {
+      } else if (options.groupBy === 'device') {
         let registry: DeviceRegistry = {};
         try {
           registry = loadDevicesSync();
@@ -707,6 +749,14 @@ export function registerRoutinesCommands(program: Command): void {
         if (groups.some((group) => !group.local)) {
           console.log();
           console.log(chalk.gray('  Last Status is per-device: rows under another device show "-" — read it there with: agents routines list --device <name>'));
+        }
+      } else {
+        // Default: group by project
+        const knownProjectNames = new Set(listProjectDefs().map((p) => p.name));
+        const groups = groupRoutineJobsByProject(jobs, knownProjectNames);
+        for (const group of groups) {
+          console.log(chalk.bold(`\n${group.title}`));
+          renderRoutineRows({ jobs: group.jobs, scheduler, overdueSet, link, now });
         }
       }
 
@@ -748,6 +798,8 @@ export function registerRoutinesCommands(program: Command): void {
     .option('--no-catchup', 'Do not run this routine late if its fire is missed (daemon down/asleep). The miss is still recorded. For routines whose value expires with their slot, e.g. a 9am brief.')
     .option('--disabled', 'Create the routine but keep it paused (enable later with resume)')
     .option('--resume <sessionId>', 'At fire time, resume this existing session id (via `agents run <agent> --resume`) instead of starting fresh — the actual session reopens with full context and the prompt becomes its next turn. Powers self-scheduled wake-ups (e.g. /hibernate). Requires --agent claude or codex; runs un-sandboxed (the session store lives in the real home, not the job overlay).')
+    .option('--project <name>', 'Associate with a named project (repeatable; use --all-projects for all)', collectProject, [] as string[])
+    .option('--all-projects', 'Associate this routine with all defined projects (sets projects: ["*"])')
     .option('--json', 'Emit machine-readable JSON with the created routine id and status')
     .action(async (nameOrPath: string | undefined, options) => {
       // Check if inline mode (has flags) or file mode
@@ -827,6 +879,31 @@ export function registerRoutinesCommands(program: Command): void {
           devices = await parseAndValidateDevices(options.devices);
         }
 
+        // Parse and validate --project / --all-projects.
+        let projects: string[] | undefined;
+        if (options.allProjects) {
+          if (options.project && options.project.length > 0) {
+            console.error(chalk.red('--all-projects and --project are mutually exclusive'));
+            process.exit(1);
+          }
+          projects = ['*'];
+        } else if (options.project && options.project.length > 0) {
+          // Validate each name: format check then existence check against defined projects.
+          for (const name of options.project as string[]) {
+            if (!isSafeProjectName(name)) {
+              console.error(chalk.red(`Invalid project name "${name}": must start with a letter or digit, contain only letters, digits, dots, hyphens, or underscores`));
+              process.exit(1);
+            }
+          }
+          const knownProjectNames = new Set(listProjectDefs().map((p) => p.name));
+          const unknown = (options.project as string[]).filter((n: string) => !knownProjectNames.has(n));
+          if (unknown.length > 0) {
+            console.error(chalk.red(`Unknown project(s): ${unknown.join(', ')}. Define them first with: agents projects add`));
+            process.exit(1);
+          }
+          projects = options.project as string[];
+        }
+
         let hostStrategy: HostStrategy | undefined;
         try {
           hostStrategy = parseHostStrategy(options.placement) ?? undefined;
@@ -862,6 +939,7 @@ export function registerRoutinesCommands(program: Command): void {
           ...(options.catchup === false ? { catchup: false } : {}),
           ...(options.endAt ? { endAt: options.endAt } : {}),
           ...(options.resume ? { resume: options.resume } : {}),
+          ...(projects ? { projects } : {}),
         };
 
         const errors = validateJob(config);

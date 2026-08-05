@@ -13,6 +13,7 @@ import * as yaml from 'yaml';
 import { Cron } from 'croner';
 import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir, getProjectRoutinesDir } from './state.js';
 import { safeJoin, isSafeSegmentName } from './paths.js';
+import { isSafeProjectName } from './projects.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
@@ -285,6 +286,43 @@ export interface JobConfig {
    * RUSH-2020.
    */
   actor?: string;
+  /**
+   * Named projects this routine belongs to. Metadata-only: organises the
+   * routine under a project group in `agents routines list` and the menu bar;
+   * has no effect on scheduling or execution.
+   *
+   * Special values:
+   * - `["*"]` — routine applies to all defined projects (the "All projects" group).
+   * - A single name — routine belongs to that specific project.
+   * - Multiple names — routine spans several projects ("Cross-project" group).
+   * - Absent/empty — routine belongs to no project ("Operations" group).
+   */
+  projects?: string[];
+}
+
+/**
+ * Compute the display group label for a routine's `projects` field.
+ *
+ * @param projects - The routine's projects array (may be undefined).
+ * @param knownProjectNames - The set of currently defined project names (from `listProjectDefs`).
+ *
+ * Returns one of:
+ * - A specific project name — when `projects` has exactly one known name.
+ * - `"All projects"` — when `projects` is `["*"]`.
+ * - `"Cross-project"` — when `projects` has multiple entries (all known).
+ * - `"Operations"` — when `projects` is absent or empty.
+ * - `"Unknown projects"` — when any entry is no longer a defined project (stale).
+ */
+export function computeProjectGroup(
+  projects: string[] | undefined,
+  knownProjectNames: Set<string>,
+): string {
+  if (!projects || projects.length === 0) return 'Operations';
+  if (projects.length === 1 && projects[0] === '*') return 'All projects';
+  const hasUnknown = projects.some((p) => p !== '*' && !knownProjectNames.has(p));
+  if (hasUnknown) return 'Unknown projects';
+  if (projects.length === 1) return projects[0];
+  return 'Cross-project';
 }
 
 /** Metadata for a single job execution, persisted as JSON in the run directory. */
@@ -696,6 +734,7 @@ export function writeJob(config: JobConfig): void {
   if (output.runOnce === false || output.runOnce === undefined) delete output.runOnce;
   if (output.catchup === true || output.catchup === undefined) delete output.catchup;
   delete output.devices;
+  if (!Array.isArray(output.projects) || (output.projects as string[]).length === 0) delete output.projects;
 
   let existingText: string | null = null;
   if (ymlExists || yamlExists) {
@@ -939,6 +978,26 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   }
   if (config.catchup !== undefined && typeof config.catchup !== 'boolean') {
     errors.push('catchup must be a boolean (false to skip running a missed fire late)');
+  }
+  if (config.projects !== undefined) {
+    if (!Array.isArray(config.projects)) {
+      errors.push('projects must be an array of project names (or ["*"] for all projects)');
+    } else if (config.projects.length === 1 && config.projects[0] === '*') {
+      // ["*"] is valid: "all projects" sentinel
+    } else if (config.projects.includes('*')) {
+      errors.push('projects: "*" (all projects) must be the sole entry');
+    } else {
+      for (const p of config.projects) {
+        if (typeof p !== 'string' || p.trim() === '') {
+          errors.push('each entry in projects must be a non-empty project name');
+          break;
+        }
+        if (!isSafeProjectName(p)) {
+          errors.push(`invalid project name "${p}": must start with a letter or digit, contain only letters, digits, dots, hyphens, or underscores`);
+          break;
+        }
+      }
+    }
   }
   return errors;
 }

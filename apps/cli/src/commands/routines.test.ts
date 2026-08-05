@@ -869,7 +869,7 @@ describe('routines list grouped by device', () => {
         exitCode: 1,
       });
 
-      const res = run(home, ['list'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      const res = run(home, ['list', '--group-by', 'device'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
       expect(res.status).toBe(0);
       const stripped = res.stdout.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -889,15 +889,23 @@ describe('routines list grouped by device', () => {
     }
   });
 
-  it('keeps the legacy flat table available with --flat', () => {
+  it('defaults to project grouping; --group-by device restores device view; --flat disables grouping', () => {
     const home = makeHome({ jobs: [baseJob], registry, deviceRoutines: { zion: ['test-job'] } });
     try {
-      const grouped = run(home, ['list'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      const byProject = run(home, ['list'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      const byDevice = run(home, ['list', '--group-by', 'device'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
       const flat = run(home, ['list', '--flat'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
-      expect(grouped.status).toBe(0);
+      expect(byProject.status).toBe(0);
+      expect(byDevice.status).toBe(0);
       expect(flat.status).toBe(0);
-      expect(grouped.stdout.replace(/\x1b\[[0-9;]*m/g, '')).toContain('This machine (zion)');
+      // Default (project): job has no projects, lands in Operations section
+      expect(byProject.stdout.replace(/\x1b\[[0-9;]*m/g, '')).toContain('Operations');
+      expect(byProject.stdout.replace(/\x1b\[[0-9;]*m/g, '')).not.toContain('This machine (zion)');
+      // Explicit device grouping: shows device sections
+      expect(byDevice.stdout.replace(/\x1b\[[0-9;]*m/g, '')).toContain('This machine (zion)');
+      // Flat: no section headers
       expect(flat.stdout.replace(/\x1b\[[0-9;]*m/g, '')).not.toContain('This machine (zion)');
+      expect(flat.stdout.replace(/\x1b\[[0-9;]*m/g, '')).not.toContain('Operations');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

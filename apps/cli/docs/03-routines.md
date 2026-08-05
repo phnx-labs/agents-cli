@@ -113,6 +113,8 @@ endAt: "2026-12-31T23:59:00Z" # optional: auto-disable on/after this time
 hostStrategy: local           # local | host | fleet | cloud (see Host placement strategy)
 devices:                      # optional: the ONE device that owns this routine
   - yosemite-s0               # omit entirely (or --clear) to run on every device
+projects:                     # optional: organises the routine under a project group in `list`
+  - myapp                     # single name → "myapp" group; ["*"] → All projects
 # source:                     # set by `agents routines enable-project` / sync
 #   kind: project
 #   projectPath: /path/to/repo
@@ -474,15 +476,15 @@ agents routines add drain --schedule "0 3 * * *" --agent claude \
 
 `--devices` is validated against the registered fleet (`agents devices sync`).
 
-For a grouped view of everything that targets a device or placement, run:
+For a grouped view of everything, run:
 
 ```bash
-agents routines list
-agents routines list --group-by device
-agents routines list --flat
+agents routines list                    # Default: group by project
+agents routines list --group-by device  # Group by device/placement instead
+agents routines list --flat             # Flat table, no grouping
 ```
 
-The grouped view buckets routines under **This machine**, **Fleet-wide**, **Cloud**, one section per pinned device, and one section per named host. Offline or unknown registry entries are marked in the section header.
+The default grouping buckets routines under their associated project name, **All projects** (for routines tagged `["*"]`), **Cross-project** (multiple projects), **Operations** (no project tag), or **Unknown projects** (stale project names). Pass `--group-by device` to restore the device-placement view, which buckets routines under **This machine**, **Fleet-wide**, **Cloud**, one section per pinned device, and one section per named host. Offline or unknown registry entries are marked in the section header.
 
 Device names are compared against the local `machineId()` (normalized hostname, as
 shown by `agents devices`), so `Yosemite-S0` and `yosemite-s0.tailnet.ts.net` both
@@ -557,6 +559,47 @@ For scripting:
 agents routines devices drain --set yosemite-s0            # set the owning device
 agents routines devices drain --clear                      # remove allowlist (unrestricted)
 ```
+
+### Project tagging
+
+Tag a routine to one or more projects defined in `agents projects`. Tagging is
+**metadata-only** — it organises the routine in `agents routines list` and the menu
+bar, and has no effect on scheduling or execution.
+
+```bash
+# Tag to a single project
+agents routines add nightly-build --schedule "0 3 * * *" --agent claude \
+  --project myapp --prompt "Build and run nightly tests"
+
+# Tag to multiple projects (--project is repeatable)
+agents routines add cross-test --schedule "0 4 * * *" --agent claude \
+  --project myapp --project billing --prompt "Run cross-service integration tests"
+
+# Tag to all defined projects
+agents routines add fleet-check --schedule "0 9 * * 1-5" --agent claude \
+  --all-projects --prompt "Check fleet health across every project"
+```
+
+`--all-projects` and `--project` are mutually exclusive. Both validate names
+against `agents projects list` — unknown project names are rejected with a helpful
+message.
+
+Project names appear in the YAML as a `projects:` array. The special value `["*"]`
+means "all defined projects" (set by `--all-projects`). Routines with no `projects:`
+field appear under the **Operations** group.
+
+`agents routines list` groups by project by default:
+
+| Group | Condition |
+| --- | --- |
+| `<project name>` | single entry in `projects:` |
+| **All projects** | `projects: ["*"]` |
+| **Cross-project** | two or more entries |
+| **Operations** | `projects:` absent or empty |
+| **Unknown projects** | project name(s) no longer exist in `agents projects` |
+
+Pass `--group-by device` to switch to the device/placement grouping, or `--flat`
+for a single unordered table.
 
 ### Remote Routing
 
@@ -1009,6 +1052,10 @@ agents routines list --host yosemite-s0  # List another device's routines
 agents routines add <name> --schedule "0 9 * * *" --agent claude --prompt "..."  # Inline
 agents routines add <name> --devices yosemite-s0 --schedule "0 3 * * *" \
   --agent claude --prompt "..."       # Add with device allowlist
+agents routines add <name> --project myapp --schedule "0 9 * * *" \
+  --agent claude --prompt "..."       # Tag to a named project (repeatable)
+agents routines add <name> --all-projects --schedule "0 9 * * *" \
+  --agent claude --prompt "..."       # Tag to all defined projects
 agents routines add <path.yml>        # Add from YAML file
 agents routines add <name> --at "14:30" --agent claude --prompt "..."            # One-shot
 agents routines edit <name>           # Open job in $EDITOR
