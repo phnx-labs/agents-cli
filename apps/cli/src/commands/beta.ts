@@ -10,7 +10,6 @@ import type { BetaFeatureName } from '../lib/types.js';
 
 const BETA_DESCRIPTIONS: Record<BetaFeatureName, string> = {
   factory: 'Cloud-based agent dispatch via Rush Factory',
-  projects: 'Named multi-repo projects with a progress rollup (agents projects)',
 };
 
 function parseFeatures(values: string[]): BetaFeatureName[] {
