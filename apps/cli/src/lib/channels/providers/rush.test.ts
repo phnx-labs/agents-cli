@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildRushSendArgs, rushProviders, RUSH_CHANNELS } from './rush.js';
+import {
+  buildRushOwnerMessageArgs,
+  buildRushSendArgs,
+  rushProviders,
+  RUSH_CHANNELS,
+} from './rush.js';
 
 describe('buildRushSendArgs', () => {
   it('builds the rush send argv with required channel/id and --json', () => {
@@ -18,6 +23,12 @@ describe('buildRushSendArgs', () => {
     expect(args.filter((a) => a === '--attachment')).toHaveLength(2);
     expect(args).toContain('/a.pdf');
     expect(args).toContain('/b.png');
+  });
+});
+
+describe('buildRushOwnerMessageArgs', () => {
+  it('uses the verified owner-scoped iMessage command', () => {
+    expect(buildRushOwnerMessageArgs('hello')).toEqual(['message', 'send', '--text', 'hello']);
   });
 });
 

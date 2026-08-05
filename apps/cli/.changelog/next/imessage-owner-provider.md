@@ -1,0 +1,1 @@
+- Route owner iMessage notifications through Rush's verified owner message endpoint instead of requiring a live daemon channel registration. (RUSH-2193)

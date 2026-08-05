@@ -1,10 +1,9 @@
 /**
- * Rush-daemon channel providers — telegram / imessage / slack / discord.
+ * Rush channel providers — telegram / imessage / slack / discord.
  *
- * These shell out to the already-built `rush send` CLI, which routes through the
- * rush daemon's live channel gateways over ~/.rush/daemon.sock. We do NOT import
- * rush's Go internals (different repo, internal package) — the CLI boundary is
- * the contract. `rush send --json` prints {"ok":true,"channel":..,"id":..}.
+ * Addressable channels use `rush send`, which routes through the daemon's live
+ * gateways. Owner-scoped iMessage uses `rush message send`; it is backed by the
+ * verified Rush owner account and does not require a daemon channel registration.
  */
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -23,6 +22,11 @@ export function buildRushSendArgs(channel: RushChannel, text: string, opts: Send
   return args;
 }
 
+/** Build the owner-scoped iMessage argv. */
+export function buildRushOwnerMessageArgs(text: string): string[] {
+  return ['message', 'send', '--text', text];
+}
+
 function rushProvider(channel: RushChannel): ChannelProvider {
   return {
     name: channel,
@@ -37,6 +41,19 @@ function rushProvider(channel: RushChannel): ChannelProvider {
         return { ok: false, channel, id: opts.target, error: 'rush CLI not found on PATH' };
       }
       try {
+        if (channel === 'imessage') {
+          if ((opts.attachments?.length ?? 0) > 0) {
+            return {
+              ok: false,
+              channel,
+              id: opts.target,
+              error: 'owner-scoped iMessage does not support attachments',
+            };
+          }
+          await execFileAsync('rush', buildRushOwnerMessageArgs(text));
+          return { ok: true, channel, id: opts.target };
+        }
+
         const { stdout } = await execFileAsync('rush', buildRushSendArgs(channel, text, opts));
         const parsed = JSON.parse(stdout) as { ok?: boolean; attachments?: string[] };
         return {
