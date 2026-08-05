@@ -22,6 +22,7 @@ export interface SendEnvelope {
   thread?: string;
   attachments?: string[];
   from?: string;
+  ownerScoped?: boolean;
   dryRun?: boolean;
 }
 
@@ -149,6 +150,7 @@ export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): Resolv
       thread: input.thread?.trim() || undefined,
       attachments: attachments.length ? attachments : undefined,
       from: input.from?.trim() || undefined,
+      ownerScoped: usedOwnerAlias || (input.ownerMode === true && !input.to?.trim()),
       dryRun: input.dryRun,
     },
   };
@@ -166,6 +168,7 @@ export async function deliverEnvelope(envelope: SendEnvelope, meta: Meta): Promi
     thread: envelope.thread,
     attachments: envelope.attachments,
     from: envelope.from,
+    ownerScoped: envelope.ownerScoped,
     dryRun: envelope.dryRun,
   });
 }

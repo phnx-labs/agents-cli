@@ -18,6 +18,8 @@ export interface SendOptions {
   attachments?: string[];
   /** Sender label (used by the mailbox provider). */
   from?: string;
+  /** Destination was resolved through the verified owner alias. */
+  ownerScoped?: boolean;
   /** Resolve + build the delivery but do not actually send. */
   dryRun?: boolean;
 }

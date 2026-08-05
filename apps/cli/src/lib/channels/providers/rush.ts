@@ -41,7 +41,7 @@ function rushProvider(channel: RushChannel): ChannelProvider {
         return { ok: false, channel, id: opts.target, error: 'rush CLI not found on PATH' };
       }
       try {
-        if (channel === 'imessage') {
+        if (channel === 'imessage' && opts.ownerScoped) {
           if ((opts.attachments?.length ?? 0) > 0) {
             return {
               ok: false,

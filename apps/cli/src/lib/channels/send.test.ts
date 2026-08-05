@@ -112,6 +112,7 @@ describe('resolveSendEnvelope', () => {
     if (!r.ok) return;
     expect(r.envelope.channel).toBe('imessage');
     expect(r.envelope.to).toBe('+18055550100');
+    expect(r.envelope.ownerScoped).toBe(true);
   });
 
   it('ownerMode (notify) defaults to notify.owner', () => {
@@ -122,6 +123,7 @@ describe('resolveSendEnvelope', () => {
       channel: 'imessage',
       to: '+18055550100',
       text: 'ping',
+      ownerScoped: true,
     });
   });
 
@@ -133,6 +135,7 @@ describe('resolveSendEnvelope', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.envelope.channel).toBe('desktop');
+    expect(r.envelope.ownerScoped).toBe(false);
     expect(r.envelope.to).toBe('local');
   });
 

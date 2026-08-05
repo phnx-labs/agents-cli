@@ -44,4 +44,16 @@ describe('rushProviders', () => {
     expect(res.channel).toBe('telegram');
     expect(res.id).toBe('chat-123');
   });
+
+  it('builds an addressable gateway command for explicit iMessage recipients', () => {
+    expect(buildRushSendArgs('imessage', 'hello', { target: '+18055550100' })).toEqual([
+      'send',
+      'hello',
+      '--channel',
+      'imessage',
+      '--id',
+      '+18055550100',
+      '--json',
+    ]);
+  });
 });
