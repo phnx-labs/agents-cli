@@ -1,11 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **`agents routines add` accepts `--project <name>` (repeatable) and `--all-projects` to tag a routine to one or more projects.** Project names are validated against `agents projects list` at creation time; unknown names are rejected with a suggested fix command. The flag sets the new `projects?: string[]` field in the job config YAML — metadata-only, no effect on scheduling or execution. `--all-projects` sets `projects: ["*"]` (the "all defined projects" sentinel) and is mutually exclusive with `--project`. Source: `apps/cli/src/lib/routines.ts` (`JobConfig`, `validateJob`, `computeProjectGroup`, `writeJob`), `apps/cli/src/commands/routines.ts`.
-
-- **`agents routines list` now groups by project by default.** The human terminal view buckets routines under their associated project name, **All projects** (`projects: ["*"]`), **Cross-project** (multiple project entries), **Operations** (no `projects:` field), or **Unknown projects** (project names not found in `agents projects`). Pass `--group-by device` to restore the previous device-placement grouping. The `--json` payload gains `projects` (array) and `projectGroup` (string) fields. Source: `apps/cli/src/commands/routines.ts` (`groupRoutineJobsByProject`).
-
 ## 1.22.15
 
 - **Separate routine definitions from device activation (#2023).** Enable a routine by listing its name in `~/.agents/devices/<hostname>/agents.yaml`; built-in Watchdog setup and `watchdog on|off` now update that host-owned manifest without rewriting the routine definition. Source: `apps/cli/src/lib/routine-activation.ts`, `apps/cli/src/commands/setup-watchdog.ts`.
