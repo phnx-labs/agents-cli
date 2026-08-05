@@ -38,6 +38,7 @@ import {
   keychainRef,
   listBundles,
   healKeychainBundleMetadataAclOnce,
+  isHeadlessSecretsContext,
   migrateLegacyBundles,
   parseDotenv,
   readAndResolveBundleEnv,
@@ -1377,7 +1378,10 @@ export function registerSecretsCommands(program: Command): void {
             const { env } = readAndResolveBundleEnv(bundle.name, {
               caller: 'view --reveal --json',
               keyMode: 'storage',
-              agentOnly: true,
+              // An explicit human `--reveal` at a terminal is a deliberate value
+              // access → resolve interactively (one Touch ID). Under an agent
+              // (AGENTS_RUNTIME) or headless (no TTY) it stays broker-only.
+              agentOnly: isHeadlessSecretsContext() || !isInteractiveTerminal(),
             });
             for (const entry of entries) {
               if (entry.kind === 'keychain' && env[entry.key] !== undefined) {
@@ -1484,15 +1488,16 @@ export function registerSecretsCommands(program: Command): void {
           console.error(chalk.red('--reveal in a non-TTY requires --plaintext.'));
           process.exit(1);
         }
-        // Resolve through the broker / durable-session path. A locked keychain
-        // bundle errors with the explicit unlock hint; viewing never raises a
-        // Touch ID sheet itself.
+        // An explicit human `view --reveal` at a terminal is a deliberate value
+        // access: resolve interactively (one Touch ID) so a locked bundle shows
+        // its values. Under an agent (AGENTS_RUNTIME) or headless (no TTY) it
+        // stays broker-only and errors with the unlock hint — never a sheet.
         const revealedValues = new Map<string, string>();
         if (reveal) {
           const { env } = readAndResolveBundleEnv(bundle.name, {
             caller: 'view --reveal',
             keyMode: 'storage',
-            agentOnly: true,
+            agentOnly: isHeadlessSecretsContext() || !isInteractiveTerminal(),
           });
           for (const entry of entries) {
             if (entry.kind === 'keychain' && env[entry.key] !== undefined) {
