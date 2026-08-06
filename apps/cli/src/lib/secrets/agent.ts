@@ -51,7 +51,7 @@ export { GLOBAL_HARNESS, bundleScopeChain };
 
 /** Bumped when the wire protocol changes; a client that pings a mismatched
  * server kills and respawns it rather than talking a stale dialect. */
-const PROTOCOL_VERSION = 2;
+const PROTOCOL_VERSION = 3;
 
 /** Default lifetime of an unlocked bundle when `--ttl` is not given. */
 export const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d
@@ -826,7 +826,7 @@ export async function runSecretsAgent(
  *
  * Serves the SAME socket and wire protocol as the standalone `runSecretsAgent`
  * — so every existing client (`agentGetSync`, `agentPing`, `agentAutoLoadSync`)
- * keeps working unchanged, no PROTOCOL_VERSION bump — but it is daemon-safe:
+ * keeps working through the versioned protocol — but it is daemon-safe:
  *
  *   - no pid-file single-instance guard (the daemon owns the instance);
  *   - no `process.exit`, no SIGTERM/SIGINT handlers, no self-heal/idle-exit
@@ -857,7 +857,14 @@ export async function startHostedBroker(): Promise<{ close(): void } | null> {
   // whole daemon down with it.
   const sweepTimer = setInterval(() => {
     const now = Date.now();
-    for (const [name, e] of store) if (now >= e.expiresAt) store.delete(name);
+    for (const [name, e] of store) {
+      if (now < e.expiresAt) continue;
+      store.delete(name);
+      if (e.lease) {
+        deleteLeaseSession(e.lease.id);
+        emitSecretAudit({ event: 'secrets.lease-expire', bundle: e.bundle.name, operation: 'lease-expire', source: 'broker', status: 'success', keys: e.lease.keys, keyCount: e.lease.keys.length, agent: e.lease.harness });
+      }
+    }
   }, SWEEP_INTERVAL_MS);
 
   // Auto-lock on sleep, same as the standalone broker: the signed helper emits
