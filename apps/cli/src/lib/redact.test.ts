@@ -26,6 +26,10 @@ const TOKENS: Array<[string, string, string]> = [
   ['GitHub refresh token (ghr_)', j('ghr', '_', B36), '[REDACTED_GITHUB_TOKEN]'],
   ['GitHub fine-grained PAT', j('github', '_pat_', '11ABCDEFG0aBcDeFgHiJkL', '_1234567890abcDEF'), '[REDACTED_GITHUB_TOKEN]'],
   ['Anthropic key (sk-ant-api03-)', j('sk-ant', '-api03-', 'abcdefghijklmnopqrstuvwxyz012345'), '[REDACTED_ANTHROPIC_KEY]'],
+  // OAuth setup-token (sk-ant-oat01-). The generic sk- rule can't reach it — the
+  // hyphen after `ant` breaks its alnum run — so this is the only rule that masks
+  // it. Its leak into run logs is the #1767 credential spill.
+  ['Anthropic OAuth setup-token (sk-ant-oat01-)', j('sk-ant', '-oat01-', 'abcdefghijklmnopqrstuvwxyz012345'), '[REDACTED_ANTHROPIC_KEY]'],
   ['Stripe live secret key (sk_live_)', j('sk_', 'live_', 'abcdefghijklmnopqrstuvwxyz01'), '[REDACTED_STRIPE_KEY]'],
   ['Stripe restricted key (rk_live_)', j('rk_', 'live_', 'abcdefghijklmnopqrstuvwxyz01'), '[REDACTED_STRIPE_KEY]'],
   ['Slack bot token (xoxb-)', j('xox', 'b', '-123456789012-1234567890123-', 'aBcDeFgHiJkLmNoP'), '[REDACTED_SLACK_TOKEN]'],
@@ -64,6 +68,17 @@ describe('redactSecrets', () => {
       const out = redactSecrets(`prefix ${secret} suffix`);
       expect(out).not.toContain(secret);
     }
+  });
+
+  it('masks the OAuth setup-token inside a captured setup-token TTY blob (#1767)', () => {
+    // The exact leak shape: `claude setup-token` output — ANSI banner + the token —
+    // captured and logged. sanitizeForTerminal strips the control sequences, then
+    // redactSecrets must mask the token so it never survives into a log/export.
+    const token = j('sk-ant', '-oat01-', 'abcdefghijklmnopqrstuvwxyz012345');
+    const blob = j('\x1b[?2004h', 'Welcome to Claude Code\n', 'Your OAuth token (valid for 1 year):\n  ', token, '\n');
+    const out = redactSecrets(sanitizeForTerminal(blob));
+    expect(out).not.toContain(token);
+    expect(out).toContain('[REDACTED_ANTHROPIC_KEY]');
   });
 
   it('value-aware pass masks a known secret regardless of format', () => {

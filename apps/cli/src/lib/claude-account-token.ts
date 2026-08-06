@@ -14,6 +14,26 @@ import { bundleBackend, bundleExists, readAndResolveBundleEnv } from './secrets/
  */
 const AUTH_BUNDLE = 'auth';
 
+/**
+ * A well-formed Claude OAuth setup-token: the `sk-ant-oat01-` prefix followed by
+ * token-safe characters only, on a single line. `claude setup-token` mints exactly
+ * this; nothing else is a token.
+ *
+ * The provisioning capture bug behind #1767 stored the raw `claude setup-token`
+ * TTY stream — the welcome banner, ANSI control sequences, box-drawing art, and the
+ * token buried inside — under a per-account key instead of the parsed value. That
+ * blob is not a token: injected as `Authorization: Bearer <blob>` it made Anthropic
+ * reject every request and the run crash. agents-cli only *consumes* these tokens
+ * (the mint itself is the Rush Cloud / mint-auth path), so this is the boundary
+ * where a corrupt bundle entry must be caught before it reaches the auth header.
+ */
+const SETUP_TOKEN_RE = /^sk-ant-oat01-[A-Za-z0-9_-]+$/;
+
+/** True only for a clean, single-line `sk-ant-oat01-…` token — see {@link SETUP_TOKEN_RE}. */
+export function isValidClaudeSetupToken(value: string): boolean {
+  return SETUP_TOKEN_RE.test(value);
+}
+
 /** The per-account key an email maps to inside the `auth` bundle. */
 export function claudeAccountTokenKey(account: string): string {
   const slug = account
@@ -58,7 +78,13 @@ export function resolveClaudeSetupToken(home?: string): string | null {
     if (!bundleExists(AUTH_BUNDLE) || bundleBackend(AUTH_BUNDLE) !== 'file') return null;
     const { env } = readAndResolveBundleEnv(AUTH_BUNDLE, { caller: 'usage', agentOnly: true });
     const v = (env[claudeAccountTokenKey(email)] ?? '').trim();
-    return v.length > 0 ? v : null;
+    if (v.length === 0) return null;
+    // Reject a malformed stored value (e.g. a captured setup-token TTY blob, #1767)
+    // rather than let it become an `Authorization: Bearer <blob>` header that
+    // Anthropic rejects and crashes the run. A corrupt entry is treated as no
+    // usable file-based token, so the caller falls back to the normal login.
+    if (!isValidClaudeSetupToken(v)) return null;
+    return v;
   } catch {
     return null;
   }

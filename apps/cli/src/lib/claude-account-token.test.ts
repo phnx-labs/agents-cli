@@ -3,7 +3,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { claudeAccountTokenKey, resolveClaudeSetupToken } from './claude-account-token.js';
+import {
+  claudeAccountTokenKey,
+  isValidClaudeSetupToken,
+  resolveClaudeSetupToken,
+} from './claude-account-token.js';
 import { buildExecEnv } from './exec.js';
 import { bundleItemStore, keychainRef, writeBundle, type SecretsBundle } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
@@ -96,6 +100,18 @@ describe('resolveClaudeSetupToken', () => {
     expect(resolveClaudeSetupToken(betaHome)).toBe('sk-ant-oat01-beta');
   });
 
+  it('rejects a malformed captured setup-token TTY blob rather than resolving it (#1767)', () => {
+    const home = makeHome('alpha@example.com');
+    // The #1767 shape: the raw `claude setup-token` TTY stream (ANSI + banner +
+    // token) stored as the credential instead of the parsed value. Injecting this
+    // as CLAUDE_CODE_OAUTH_TOKEN builds an invalid Authorization header and crashes
+    // the run — resolve must refuse it, so the caller falls back to normal login.
+    const blob = '\x1b[?2004h\x1b[?1004hWelcome to Claude Code\n  sk-ant-oat01-abcdefghij\n';
+    writeAuthBundle({ [claudeAccountTokenKey('alpha@example.com')]: blob });
+
+    expect(resolveClaudeSetupToken(home)).toBeNull();
+  });
+
   it('buildExecEnv injects the token keyed to the selected version home account', () => {
     const version = `rush-2099-token-test-${process.pid}`;
     const versionHome = getVersionHomePath('claude', version);
@@ -120,5 +136,21 @@ describe('resolveClaudeSetupToken', () => {
 
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-alpha');
     expect(env.CLAUDE_CONFIG_DIR).toBe(configDir);
+  });
+});
+
+describe('isValidClaudeSetupToken', () => {
+  it('accepts a clean single-line sk-ant-oat01- token', () => {
+    expect(isValidClaudeSetupToken('sk-ant-oat01-alpha')).toBe(true);
+    expect(isValidClaudeSetupToken('sk-ant-oat01-AbC_123-xyz')).toBe(true);
+  });
+
+  it('rejects a captured TTY blob, wrong prefix, and whitespace/control chars (#1767)', () => {
+    expect(isValidClaudeSetupToken('\x1b[?2004hWelcome\n  sk-ant-oat01-abc\n')).toBe(false);
+    expect(isValidClaudeSetupToken('sk-ant-oat01-abc\n')).toBe(false);
+    expect(isValidClaudeSetupToken('sk-ant-oat01-abc def')).toBe(false);
+    expect(isValidClaudeSetupToken('sk-ant-api03-abc')).toBe(false);
+    expect(isValidClaudeSetupToken('sk-ant-oat01-')).toBe(false);
+    expect(isValidClaudeSetupToken('')).toBe(false);
   });
 });
