@@ -445,7 +445,7 @@ Credentials and profiles:
 Diagnostics:
   doctor [agent[@version]]        Diagnose CLI availability, sync status, and resource divergence; --check for the CI drift gate
   usage [agent]                   Show rate-limit and quota usage per agent
-  insights                        Session friction, corrections, repeated work, and ranked actions
+  insights                        How work looks — behaviour (default) or counter mix (insights mix)
   perf                            Latency rollups (hooks, commands, runs) from the disposable perf warehouse
 
 Config sync:

@@ -82,6 +82,7 @@ export const loadUsage: ModuleLoader = async () => (await import('../../commands
 export const loadCost: ModuleLoader = async () => (await import('../../commands/cost.js')).registerCostCommand;
 export const loadInsights: ModuleLoader = async () => (await import('../../commands/insights.js')).registerInsightsCommand;
 export const loadPerf: ModuleLoader = async () => (await import('../../commands/perf.js')).registerPerfCommand;
+// Thin deprecated alias of `agents insights mix` — no second mix implementation.
 export const loadTrends: ModuleLoader = async () => (await import('../../commands/trends.js')).registerTrendsCommand;
 export const loadOutput: ModuleLoader = async () => (await import('../../commands/output.js')).registerOutputCommand;
 export const loadBudget: ModuleLoader = async () => (await import('../../commands/budget.js')).registerBudgetCommand;

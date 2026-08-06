@@ -225,7 +225,7 @@ export function computeInsightFacets(
         break;
 
       case 'usage':
-        // shortenModel so the label matches `agents sessions <id>` and `trends`
+        // shortenModel so the label matches `agents sessions <id>` and `insights mix`
         // rather than printing the raw id beside their shortened one.
         if (e.model) bump(f.models, shortenModel(e.model));
         break;

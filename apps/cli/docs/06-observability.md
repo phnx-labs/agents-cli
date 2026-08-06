@@ -13,14 +13,32 @@ whose *consumer* and *axis* match your question, not whichever you remember firs
 |---|---|---|---|
 | **`events`** | **Raw unified event stream = the ops trail.** Everything: secrets access, command invocations, version/skill/mcp/team ops, browser events, plus agent milestones. `--follow` to tail, `--audit` for ops-only. `agents logs audit` is a compatibility alias backed by this same reader. | dated `events/*.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
 | **`audit`** | **Tamper-evident run-dispatch chain** (hash-chained exec log). Not the same as `events`. | `~/.agents` audit log | Governance / CI verify |
-| **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
-| **`trends`** | **Usage analytics.** Harness/model mix, tools per session, token ratios, hottest secrets/browser profiles — baked recipes over sessions + a durable resource warehouse. Distinct from quota (`agents usage`) and latency (`agents perf`). | `sessions.db` + `~/.agents/.history/analytics/usage.db` | Humans + `--json` |
+| **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. Not popularity, not behaviour. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
+| **`insights`** | **How work looks — one verb, two engines.** Bare = behavioural report (transcript content, account split). `insights mix` / recipes = cheap counters (harness/model/token/secrets). Former top-level `agents trends` is a deprecated alias of the mix tree only. | behaviour: `sessions.db` + `session_insights`; mix: `sessions.db` + `usage.db` | Human + `--json` |
 | **`feed`** / **`inbox`** | **Needs-you inbox + status posts.** Open blocks (decisions agents are waiting on) + `feed post` milestones. `inbox` ≡ `feed`. Scope with `--project`. | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
 | **`timeline`** | **Progress stream only.** Alias of `feed --filter updates` — deliberate posts, not tool noise. | same as feed updates lane | Humans + `--json` |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
-| **`insights`** | **Behavioural report.** How you work — tool and language mix, friction (interruptions, tool-error classes, your reply latency), what you changed, hour-of-day rhythm — **split by the Claude account that produced each session**. Reads transcript *content*; `trends` reads counters. | `sessions.db` + `session_insights` facet cache | Human + `--json` |
-| **`sessions`** / **`roster`** | **Live agent roster + transcripts.** `roster` ≡ `sessions --active`. Browse/read past transcripts under `sessions`. | live pid/transcript probe + `sessions.db` | Human + `--json` |
+| **`sessions`** / **`roster`** | **Live agent roster + transcripts.** `roster` ≡ `sessions --active`. Browse/read past transcripts under `sessions`. `sessions stats` = skill/slash invocation leaderboard. | live pid/transcript probe + `sessions.db` | Human + `--json` |
 | **`snapshot`** | **One-process poll.** Inventory + active sessions (+ optional feed/sync). Not `status` (sync-only). | view + active + optional feed | Machines / Factory |
+
+### Why `insights` owns mix (and `trends` does not)
+
+Two peer top-level names — `insights` and `trends` — both read as "analytics" and
+agents (and humans) kept guessing which to use. They answered different questions
+with different stores, but the surface taught the wrong model.
+
+| Verb | Question | Engine |
+|---|---|---|
+| **`agents insights`** (bare) | How did work *look*? tools, friction, rhythm, edits — by account | Transcript content via `parseSession`, cached in `session_insights` |
+| **`agents insights mix`** | What are the *counts*? harness/model mix, tools/session, secrets, browser | Cheap SQL on `sessions.db` + `usage.db` recipes |
+| **`agents perf`** | How *slow* / sticky is the machinery? | Disposable `perf.db` samples from command.end / hooks / runs |
+| **`agents usage`** | Live *quota* headroom right now | Provider rate-limit APIs |
+| **`agents sessions stats`** | Which *skills/slash-commands* were explicitly invoked? | `session_resource_usage` index |
+
+**Do not re-split mix into a peer top-level command.** Latency stays on `perf` so
+it is never confused with popularity or behaviour. `agents trends` remains only as
+a thin deprecated alias that prints one line and runs the mix tree
+(`commands/trends.ts` → `lib/analytics/mix-commands.ts`).
 
 ### Observe aliases (Phase 3)
 
@@ -138,18 +156,24 @@ timing/perf writes), plus `AGENTS_HOOK_SHIMS_DIR` / `AGENTS_HOOK_CACHE_DIR` /
 30 days are pruned opportunistically on open. Wipe anytime:
 `rm -rf ~/.agents/.cache/perf`.
 
-## Usage analytics (`agents trends`)
+## Counter mix (`agents insights mix`)
 
-Resource and session frequency — **not** model quota (`agents usage`) and **not**
-latency (`agents perf`). Implementation: `apps/cli/src/lib/analytics/`, CLI:
-`apps/cli/src/commands/trends.ts`.
+Resource and session **frequency** under the `insights` verb — **not** model quota
+(`agents usage`) and **not** latency (`agents perf`). Implementation:
+`apps/cli/src/lib/analytics/` (recipes + `mix-commands.ts`); CLI entry is
+`apps/cli/src/commands/insights.ts` (registers the mix tree). The retired top-level
+spelling `agents trends` is a thin deprecated alias in `commands/trends.ts` only.
 
 ```
-agents trends                     # auto recipe board (skips empty sections)
-agents trends --days 30           # window
-agents trends harness-mix --json  # one baked recipe
-agents trends query --kind secret # raw warehouse rows
-agents trends recipes             # list recipe ids
+agents insights mix                     # auto recipe board (skips empty sections)
+agents insights mix --days 30           # window
+agents insights harness-mix --json      # one baked recipe
+agents insights query --kind secret     # raw warehouse rows
+agents insights recipes                 # list recipe ids
+
+# Deprecated alias (prints one line, same mix tree)
+agents trends
+agents trends harness-mix --json
 ```
 
 | Store | Path | Holds |
@@ -1141,16 +1165,18 @@ busiest first — the shape of the fleet's chatter at a glance.
 `<id>` dumps one box, `--between` dumps `{a, b, count, messages}`, `--graph`
 dumps the edge list, and `--watch` streams NDJSON.
 
-## Behavioural report (`agents insights`)
+## Behavioural report (`agents insights`, bare)
 
 `agents cost` answers what you spent and `agents output` answers what shipped.
-`agents insights` answers **how you work**, and is the only surface that splits any of
-it by the account that did the work.
+Bare `agents insights` answers **how you work**, and is the only surface that splits any of
+it by the account that did the work. Counter recipes share the same verb as
+`agents insights mix` (see [Counter mix](#counter-mix-agents-insights-mix) above) —
+do not invent a second top-level analytics command.
 
-That split is the reason it exists. `getConfiguredRunStrategy` defaults to `balanced`
-(`lib/rotate.ts`), so sessions are sprayed across every signed-in Claude account. A
-report that reads one account's directory — which is what Claude Code's own `/insights`
-does — describes a fraction of the work and attributes all of it to one org.
+That account split is the reason the behavioural path exists. `getConfiguredRunStrategy`
+defaults to `balanced` (`lib/rotate.ts`), so sessions are sprayed across every signed-in
+Claude account. A report that reads one account's directory — which is what Claude Code's
+own `/insights` does — describes a fraction of the work and attributes all of it to one org.
 
 ```bash
 agents insights                                # last 30d, by account
@@ -1160,7 +1186,7 @@ agents insights --json                         # stable contract for dashboards
 agents insights --narrative                    # add a written read on the numbers
 ```
 
-### What it reports
+### What the behavioural report reports
 
 | Section | Contents |
 |---|---|
@@ -1171,17 +1197,16 @@ agents insights --narrative                    # add a written read on the numbe
 | When you work | 24-slot local-time histogram of your messages |
 | Parallel sessions | overlapping pairs, and how many straddled two accounts |
 
-### How it relates to `agents trends`
+### Two engines under one verb (not two top-level commands)
 
-Both are analytics, and they overlap in spirit on tool and model mix. The boundary is
-the data path:
+| Path | Reads | Answers |
+|---|---|---|
+| Bare `agents insights` | Transcript *content* via `parseSession` | Behaviour: which tools, languages, friction, when you worked — **per account** |
+| `agents insights mix` | *Counters* (`tool_scan_ledger`, `usage.db`) | Distributions: tools per session, harness mix, token ratios, hottest secrets |
 
-- **`trends`** reads *counters* — `tool_scan_ledger` call counts and the analytics
-  warehouse — and reports distributions: how many tool calls per session, harness mix,
-  token ratios.
-- **`insights`** reads transcript *content* through `parseSession` and reports
-  behaviour: which tools, which languages, where things went wrong, when you worked —
-  per account.
+They overlap in spirit on tool and model mix; they do not share a store. Keeping both
+under `insights` is deliberate so agents do not re-create a peer `trends`/`analytics`
+surface. Latency remains `agents perf`.
 
 ### Caching
 

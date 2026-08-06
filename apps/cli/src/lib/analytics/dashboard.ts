@@ -1,17 +1,20 @@
 import {
   RECIPE_IDS,
   runRecipe,
-  trendsWindow,
+  analyticsWindow,
   type RecipeId,
   type RecipeSection,
-  type TrendsWindow,
+  type AnalyticsWindow,
 } from './recipes.js';
 
-export interface TrendsDashboard {
-  window: TrendsWindow;
+export interface MixDashboard {
+  window: AnalyticsWindow;
   durationMs: number;
   sections: RecipeSection[];
 }
+
+/** @deprecated Use MixDashboard. */
+export type TrendsDashboard = MixDashboard;
 
 const DEFAULT_ORDER: RecipeId[] = [
   'harness-mix',
@@ -24,9 +27,9 @@ const DEFAULT_ORDER: RecipeId[] = [
   'resource-mix',
 ];
 
-export function buildTrendsDashboard(opts: { days?: number; ids?: RecipeId[] } = {}): TrendsDashboard {
+export function buildMixDashboard(opts: { days?: number; ids?: RecipeId[] } = {}): MixDashboard {
   const t0 = Date.now();
-  const win = trendsWindow(opts.days ?? 7);
+  const win = analyticsWindow(opts.days ?? 7);
   const ids = opts.ids ?? DEFAULT_ORDER;
   const sections: RecipeSection[] = [];
   for (const id of ids) {
@@ -42,4 +45,15 @@ export function buildTrendsDashboard(opts: { days?: number; ids?: RecipeId[] } =
   };
 }
 
-export { trendsWindow, runRecipe, RECIPE_IDS, type RecipeId, type RecipeSection };
+/** @deprecated Use buildMixDashboard. */
+export const buildTrendsDashboard = buildMixDashboard;
+
+export {
+  analyticsWindow,
+  analyticsWindow as trendsWindow,
+  runRecipe,
+  RECIPE_IDS,
+  type RecipeId,
+  type RecipeSection,
+  type AnalyticsWindow,
+};
