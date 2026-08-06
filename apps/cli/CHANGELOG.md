@@ -1,5 +1,205 @@
 # Changelog
 
+## 1.22.23
+
+- **Daemon-warmed cross-surface session-status cache (RUSH-2062).** Menubar,
+  Factory, watchdog, and CLI used to each re-run a full `sessions --active`
+  gather (~9s / ~170MB) with no sharing. The daemon now warms a local active-
+  session snapshot every 15s; those surfaces read the warm file when fresh.
+  `session/remote.ts` is cache-first too — a reachable host skips SSH while its
+  cache is within the freshness window (it used to replay only on
+  unreachable). Immutable per-session fields (topic, label, cwd, …) are memoized
+  by transcript mtime; live status never rides that memo. Source:
+  `apps/cli/src/lib/session/session-cache.ts`, `apps/cli/src/lib/session/remote.ts`,
+  `apps/cli/src/lib/daemon.ts`.
+
+- **`agents sessions <id>` / `agents resume <id>` resolve across the fleet fast, with
+  early-exit and SSH cancellation (RUSH-2203).** The cross-machine resolve fanned out
+  with `await Promise.all` and no cancellation, so one slow or unreachable peer stalled
+  the whole lookup to the 12s per-peer timeout even after a fast peer already returned
+  the exact match — a full-UUID resolve on a fleet with an offline box took ~16-40s. A
+  **full-UUID** resolve (globally unique) now opts into a cancellable, early-exit
+  fan-out: the first peer holding it resolves the sweep and SIGTERMs every
+  still-outstanding peer, and a local UUID hit resolves with **zero** SSH.
+  `agents resume <label>` auto-resumes the one exact-label match; labels are not globally
+  unique, so they stay all-settle (a same-label session may live on another peer) — a
+  unique label resumes, a cross-machine collision surfaces as an ambiguity. The not-found
+  message reports the actual sweep result (devices searched, which were unreachable)
+  instead of the misleading "search with `--device <host>`" — fleet search is already the
+  default. `--device all` / `--devices` are accepted and mean "the whole fleet". The
+  all-settle default is unchanged for the shared fan-out's other callers (tool-search,
+  program-count) and for labels / ambiguous short-id prefixes, which still wait for every
+  peer. Source:
+  `apps/cli/src/lib/remote-agents-json.ts`, `apps/cli/src/lib/session/remote-list.ts`,
+  `apps/cli/src/commands/sessions.ts`, `apps/cli/src/commands/resume.ts`.
+
+- **`agents sessions focus` gains device + live-state scoping and multi-select tabs
+  (RUSH-2206).** `focus` now honors `--device/--host <name>` (scope the picker to a
+  device's live sessions) and the same live-state filters `sessions --active` defines
+  (`--orphan`/`--crashed`/`--waiting`/`--idle`/`--working`/`--closed`/`--abandoned`/
+  `--queued`/`--unknown`) — they compose, so `agents sessions focus --orphan --device
+  yosemite-s0` lists only that host's orphans. The interactive picker is now
+  multi-select: check several sessions and each opens as a new tab in the terminal
+  you're in (Ghostty / iTerm / tmux, auto-detected), reusing `resume`'s batch open and
+  flood guard. Per tab, live semantics hold — a tmux session is joined (a second
+  client, no fork), local or remote over SSH; a session with no attach rail resumes a
+  copy in the tab, reported never silently dropped. `focus <id>` direct-jump and
+  `--attach-only` (old `go`) behavior are unchanged. Source:
+  `apps/cli/src/commands/focus.ts`, `apps/cli/src/commands/go.ts`.
+
+- **`agents harness edit` is now wizard-capable, on a shared step engine (RUSH-2219).**
+  Run `agents harness edit <name>` with no flags in a terminal and it walks each field
+  (model, endpoint, auth, version, fallback, description) pre-filled with the harness's
+  current values — where before it was flag-only and errored without one. Both `add`/`fork`
+  and `edit` now drive one shared step engine: every step is skippable by the matching flag,
+  so scripting stays non-interactive and a flagless non-interactive `edit` still errors as
+  before. Endpoint and version prompts are gated by the host's API format (a host with no
+  custom-endpoint slot, or one that self-updates, shows the field disabled with a reason
+  instead of silently accepting a value the run would drop). This is the foundation the
+  model catalog, connection test, edit matrix, and cross-host portability build on.
+  Source: `apps/cli/src/commands/harness-wizard.ts`, `apps/cli/src/commands/harness.ts`.
+
+- **Codex launches now default to safe writable access instead of an offline
+  read-only sandbox.** When no configured run default exists, omitting `--mode`
+  selects a managed workspace profile with network access, on-request approvals,
+  `~/.agents`, and regenerable build caches. Explicit `--mode plan` remains
+  filesystem-read-only but now retains network access. The same policy covers
+  `agents run`, fallback attempts, resumes, routines, direct `codex` shims,
+  versioned aliases, and Windows shim passthrough; only explicit `skip` disables
+  the sandbox and approvals. Source: `apps/cli/src/lib/codex-policy.ts`.
+
+- **Phone forwards are shaped to a text, not a wall.** `agents feed post`
+  (`--level important` / `--blocked`), `agents notify`, and `agents send --to owner`
+  all forward to the owner's phone through one seam, `composeBroadcastMessage`; it now
+  keeps the post **title** (the scannable headline) and truncates a long **body** to a
+  short excerpt marked `… (full in feed)` (caps: 500 chars / 8 lines). The full post is
+  untouched in the feed — only the outbound phone copy is shortened — so a requested
+  long write is not lost, and enforcing it at this seam covers every sink (owner alias,
+  in-process `channel:`, spawned `command:` via `{message}`), which a per-command shell
+  hook cannot. Source: `apps/cli/src/lib/feed-broadcast.ts` (`truncateBroadcastBody`).
+
+- **`agents run --lease` self-cleans its warm pool.** Each lease now auto-stops **expired, idle** boxes in the run's profile pool (an expired box can never be reused, so it was pure cost the 1h-idle `agents lease gc` window left running). Conservative: only a box that is running, in the same profile+netMode pool, past its lease expiry, and untouched for a grace window is stopped — a mid-boot or in-use box is never touched. Skipped when an explicit `--box <slug>` is named. Source: `apps/cli/src/lib/crabbox/lease.ts`.
+
+- **Muse Code (Meta) harness support.** `muse` is a first-class agent: install via
+  `curl -fsSL https://dev.meta.ai/install.sh | sh`, run with `agents run muse`,
+  and use in teams. Modes map to Muse safety flags (`--disable-write` /
+  `--disable-approval` / `--yolo`); `--model` and `--reasoning-effort` are
+  forwarded; headless is `muse exec` with `--json`; interactive resume is
+  `muse resume <id>` (id immediately after the verb), headless resume is
+  `--session-id`. Sessions under `~/.local/share/muse/sessions/` (plus version
+  homes) are discovered and parsed; usage shows Meta Model API rate limits when
+  a key is present, otherwise local 7-day token totals. MCP writes to
+  `~/.config/muse/settings.json` (`mcp_servers`, `schema_version: 1`). Model
+  catalog: `muse-spark-1.2` (default), `1.1`, `1.2-contributor` with offline
+  pricing. Aliases: `muse-code`, `meta-muse`. Hooks write Claude-shaped
+  matcher groups into `~/.config/muse/settings.json` (`schema_version: 1`);
+  plugins use the Claude marketplace layout under the XDG data plugin store
+  (`~/.local/share/muse/plugins`) with `.muse-plugin` manifests. Allowlist
+  stays false (Muse uses approval-mode + sandbox, not tool-name allow/deny).
+  Source: `apps/cli/src/lib/{agents,exec,models,usage,mcp,hooks,plugins,
+  plugin-marketplace,runner,shims}.ts`, `apps/cli/src/lib/session/*`.
+
+- **Release CI no longer re-runs the six-job cross-platform matrix on `v*` tags.**
+  The expensive `ci.yml` matrix (ubuntu + macOS + Windows × Node 22/24) still
+  runs on `release/**` branch pushes and manual `workflow_dispatch`, but not when
+  a version tag is pushed. `release.sh` tags the exact commit that already passed
+  the release-branch matrix, so the post-tag matrix was pure cost. Source:
+  `.github/workflows/ci.yml`.
+
+- **`claude-opus-5` and `claude-sonnet-5` were unpriced, so every session using them
+  cost $0.** The pricing table carried `claude-opus-4`, `claude-sonnet-4`,
+  `claude-fable-5` and `claude-mythos-5` but not the Opus/Sonnet 5 line. Matching is
+  dash-bounded (`getModelPricing`), so `claude-opus-5` cannot fall back to the
+  `claude-opus-4` entry — it resolved to null, and an unpriced model contributes
+  nothing rather than erroring. On one real index that silently zeroed **526 sessions**,
+  478 of them the current default model, understating `agents cost`, `agents output`
+  and `agents insights` alike. Rates from the published table: Opus 5 $5/$25 per MTok
+  (cache write $6.25, cache read $0.50); Sonnet 5 $2/$10 (cache write $2.50, cache read
+  $0.20). Source: `apps/cli/src/lib/pricing/prices.json`.
+
+- **Schema v34 reprices the sessions that were zeroed.** Adding prices alone fixes
+  nothing already indexed: `cost_usd` is computed at scan time and the scanner skips any
+  transcript whose `(file_mtime_ms, file_size)` is unchanged, so those rows would keep
+  their NULL forever. They cannot be repaired in place either — the row stores
+  `token_count` and `output_tokens` but not the uncached-input / cache-read / cache-write
+  split the price table needs. So v34 flushes `scan_ledger`, the same remedy v5 → v6 used
+  for this exact column when cost was introduced. One slower scan, then correct numbers.
+  Source: `apps/cli/src/lib/session/db.ts`.
+
+  **Sonnet 5's $2/$10 is introductory pricing that ends 2026-08-31.** From 2026-09-01 the
+  standard rate is $3/$15. The table holds one current rate per model with no notion of an
+  effective date, so that entry must be updated then or Sonnet 5 spend reads ~33% low.
+  Called out at the top of `table.ts`.
+
+- **`agents sessions --orphan`/`--active`: cross-harness live discovery + richer rows (RUSH-2205).**
+  Two fixes. (1) The headless `ps`-scan recognized only 6 agent executables, so a
+  bare-headless `grok`/`kimi`/`antigravity`/`openclaw`/`hermes`/`rush` run was
+  silently dropped from the live views; the comm→kind map is now derived from
+  `SESSION_AGENTS` × the AGENTS registry (`cliCommand`), so every discoverable
+  harness surfaces. (2) Each live row now shows the agent **version** and a human
+  **created · idle** time cell, and backfills the **ticket/PR/label** from the
+  indexed session history onto orphan rows that lack them, with the label/topic on
+  its own line — grouped-by-directory layout unchanged, rows stay width-safe.
+  Source: `apps/cli/src/lib/session/active.ts`, `apps/cli/src/commands/sessions.ts`.
+
+- **`agents doctor --check` verdict lines now carry a `check:` prefix and a total
+  version count**, so CI logs and log-scrapers get one consistent, grep-alike shape
+  whether the result is clean or drifted: `check: ok — 3 version(s) in sync` /
+  `check: drift — 2 stale, 1 never-synced across 3 version(s)`. The per-version
+  status badge for a never-synced version now reads `never-synced` (its real
+  status) instead of the unrelated `cold` label, and all three badges
+  (`stale`/`never-synced`/`unwired`) share one fixed-width column so the rows
+  align. Source: `apps/cli/src/commands/doctor.ts` (`runCheckGate`).
+
+- **`agents secrets export --host --remote-backend file` no longer requires
+  `AGENTS_SECRETS_PASSPHRASE`.** Since the file store became passphrase-free
+  (auto-provisioning a 0600 machine-local key under `~/.agents/.secrets-key/`), the
+  remote `import --backend file` reads headlessly under that key with no passphrase
+  and no Touch ID — but the export path still hard-failed unless a passphrase was
+  set, and forcing one made the remote bundle require that shared passphrase to
+  read, defeating the headless use it was for. The passphrase is now **optional**:
+  with none set, the remote command carries no `AGENTS_SECRETS_PASSPHRASE`
+  read/export prologue and the .env is the only stdin, so the remote keys the bundle
+  under its own machine-local key (headless reads); set `AGENTS_SECRETS_PASSPHRASE`
+  locally only to opt into a shared off-disk key, which is still forwarded over ssh
+  stdin (never argv). This unblocks hands-off Linux-driven releases that provision
+  `apple.com` on a headless macOS sign host. Windows targets are still refused
+  cleanly. Source: `apps/cli/src/lib/secrets/remote.ts`,
+  `apps/cli/src/commands/secrets.ts`.
+
+- **Docs: the per-command secrets Touch-ID contract is now written down and
+  accurate.** The `view --reveal` (1.22.14) and `exec` (1.22.21) interactive-unlock
+  changes shipped in code + CHANGELOG only; the reference docs still implied every
+  value command behaves the same. `docs/secrets.md` and the `secrets` skill now
+  carry an explicit Touch-ID matrix (deliberate `view --reveal`/`exec` at a real
+  terminal → one sheet on a locked bundle; `get`/`export` automation primitives →
+  never prompt, fail closed to `agents secrets unlock`; anything an agent launches →
+  broker-only), `specifications.md` adds **SEC-13b** + a `Prompts?` column on the
+  materialization table + `GWT-S2b`, and the skill's stale hold-window facts are
+  corrected (7-day default, screen-lock does not drop the hold). Docs-only; no
+  behavior change. Source: `apps/cli/docs/secrets.md`,
+  `apps/cli/docs/specifications.md`, `skills/secrets/SKILL.md`.
+
+- **Resume session identities through one live-first path across the fleet.**
+  `agents sessions resume <selector>` accepts a full UUID, unique UUID prefix,
+  durable tmux name (`ag-codex-c1f3d813`), or unique alias suffix (`c1f3d813`). It
+  resolves the owning device, rechecks whether the process and pane are alive,
+  attaches a live pane, and otherwise resumes the harness-native conversation with
+  its recorded version, cwd, and mode. Retained dead tmux panes no longer count as
+  attachable, and native resume no longer collides with an existing live wrapper.
+  Source: `apps/cli/src/commands/focus.ts`,
+  `apps/cli/src/commands/sessions-resume.ts`, `apps/cli/src/lib/exec.ts`.
+
+- **`agents fork` is now `agents sessions fork`.** Forking is a session operation, so
+  it lives under the `sessions` group next to `resume`/`focus` — `agents sessions fork
+  <id>` branches a conversation into a new, independent copy you can continue separately,
+  leaving the original untouched. The old top-level `agents fork` keeps working as a
+  hidden alias, so nothing that scripted it breaks. For a harness without a native copy
+  (anything but Claude today), the command now fails loud and names the manual branch —
+  start a fresh agent and seed it with `/continue <id>` — instead of only saying
+  "unsupported". Source: `apps/cli/src/commands/fork.ts`,
+  `apps/cli/src/commands/sessions.ts`.
+
 ## 1.22.22
 
 - **New: `agents insights` — how you work, split by the Claude account that did the
