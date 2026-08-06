@@ -30,6 +30,10 @@ import type { ActorKind } from './actor.js';
 // Type-only import: no runtime dependency on events.ts, so no import cycle
 // (events.ts / event-stream.ts import THIS module at runtime).
 import type { EventRecord } from './events.js';
+import {
+  pythonToolRegistryLiteral,
+  pythonValueFlagsLiteral,
+} from './session/bash-command.js';
 
 /** Recognizable milestone events, ordered first in any activity lane. */
 export type MilestoneEvent =
@@ -962,115 +966,30 @@ def first_line(text, limit=140):
     return ""
 
 
-# Canonical command taxonomy for Bash tool calls. Mirrors the TypeScript
-# registry in lib/session/bash-command.ts; keep them in sync.
+# Canonical command taxonomy for Bash tool calls, generated from the single
+# source of truth in lib/session/bash-command.ts's TOOL_REGISTRY (#1889) so the
+# two can no longer drift — this hook runs standalone under python3 and can't
+# import that module, so the literal below is generated, not hand-duplicated.
 BASH_TOOL_REGISTRY = {
-    "git": {"category": "vcs", "action": "working in git"},
-    "gh": {"category": "vcs", "action": "using GitHub CLI"},
-    "bun": {"category": "build-test", "action": "running bun"},
-    "npm": {"category": "build-test", "action": "running npm"},
-    "pnpm": {"category": "build-test", "action": "running pnpm"},
-    "yarn": {"category": "build-test", "action": "running yarn"},
-    "vitest": {"category": "build-test", "action": "running vitest"},
-    "jest": {"category": "build-test", "action": "running jest"},
-    "mocha": {"category": "build-test", "action": "running mocha"},
-    "pytest": {"category": "build-test", "action": "running pytest"},
-    "cargo": {"category": "build-test", "action": "running cargo"},
-    "go": {"category": "build-test", "action": "running go"},
-    "tsc": {"category": "build-test", "action": "running tsc"},
-    "tsx": {"category": "build-test", "action": "running tsx"},
-    "node": {"category": "build-test", "action": "running node"},
-    "python": {"category": "build-test", "action": "running python"},
-    "python3": {"category": "build-test", "action": "running python"},
-    "make": {"category": "build-test", "action": "running make"},
-    "brew": {"category": "install", "action": "installing with brew"},
-    "pip": {"category": "install", "action": "installing with pip"},
-    "pip3": {"category": "install", "action": "installing with pip"},
-    "apt": {"category": "install", "action": "installing with apt"},
-    "apk": {"category": "install", "action": "installing with apk"},
-    "ssh": {"category": "remote", "action": "using ssh"},
-    "scp": {"category": "remote", "action": "using scp"},
-    "rsync": {"category": "remote", "action": "using rsync"},
-    "curl": {"category": "http", "action": "fetching with curl"},
-    "wget": {"category": "http", "action": "fetching with wget"},
-    "ffmpeg": {"category": "media", "action": "using ffmpeg"},
-    "ffprobe": {"category": "media", "action": "probing media"},
-    "magick": {"category": "media", "action": "using ImageMagick"},
-    "convert": {"category": "media", "action": "converting images"},
-    "composite": {"category": "media", "action": "compositing images"},
-    "montage": {"category": "media", "action": "montaging images"},
-    "identify": {"category": "media", "action": "identifying images"},
-    "realesrgan": {"category": "upscaling", "action": "upscaling with realesrgan"},
-    "realesrgan-ncnn-vulkan": {"category": "upscaling", "action": "upscaling with realesrgan"},
-    "waifu2x": {"category": "upscaling", "action": "upscaling with waifu2x"},
-    "waifu2x-caffe": {"category": "upscaling", "action": "upscaling with waifu2x"},
-    "waifu2x-converter-cpp": {"category": "upscaling", "action": "upscaling with waifu2x"},
-    "swin2sr": {"category": "upscaling", "action": "upscaling with swin2sr"},
-    "resdet": {"category": "upscaling", "action": "detecting upscale"},
-    "id3v2": {"category": "metadata", "action": "editing id3 tags"},
-    "exiftool": {"category": "metadata", "action": "editing exif metadata"},
-    "metaflac": {"category": "metadata", "action": "editing flac metadata"},
-    "vorbiscomment": {"category": "metadata", "action": "editing vorbis comments"},
-    # Shell
-    "rm": {"category": "shell", "action": "removing files"},
-    "mv": {"category": "shell", "action": "moving files"},
-    "cp": {"category": "shell", "action": "copying files"},
-    "mkdir": {"category": "shell", "action": "making directories"},
-    "touch": {"category": "shell", "action": "touching files"},
-    "echo": {"category": "shell", "action": "echoing"},
-    "printf": {"category": "shell", "action": "printing"},
-    "chmod": {"category": "shell", "action": "changing permissions"},
-    "ln": {"category": "shell", "action": "linking files"},
-    "awk": {"category": "shell", "action": "running awk"},
-    "sed": {"category": "shell", "action": "running sed"},
-    "tee": {"category": "shell", "action": "teeing output"},
-    "xargs": {"category": "shell", "action": "running xargs"},
-    # Probes
-    "ls": {"category": "probe", "action": "listing files"},
-    "cat": {"category": "probe", "action": "reading files"},
-    "head": {"category": "probe", "action": "reading files"},
-    "tail": {"category": "probe", "action": "reading files"},
-    "wc": {"category": "probe", "action": "counting"},
-    "stat": {"category": "probe", "action": "statting files"},
-    "file": {"category": "probe", "action": "inspecting files"},
-    "which": {"category": "probe", "action": "locating binaries"},
-    "tree": {"category": "probe", "action": "listing files"},
-    "pwd": {"category": "probe", "action": "printing pwd"},
-    # Search
-    "grep": {"category": "search", "action": "searching"},
-    "rg": {"category": "search", "action": "searching with ripgrep"},
-    "ag": {"category": "search", "action": "searching with the silver searcher"},
-    "fd": {"category": "search", "action": "searching files"},
-    "find": {"category": "search", "action": "finding files"},
-    # Wait
-    "sleep": {"category": "wait", "action": "sleeping"},
-    "wait": {"category": "wait", "action": "waiting"},
+${pythonToolRegistryLiteral()}
 }
 
 # Two-level tools mapped to the flags that consume the following token as their
-# value, per tool; the subcommand scan skips both. Missing a value flag mis-reads
-# the value as the subcommand; over-listing only drops the subcommand (safe). A
-# tool with no such leading flags maps to an empty set. Mirrors VALUE_FLAGS in
-# lib/session/bash-command.ts; TWO_LEVEL_TOOLS is derived from its keys.
+# value, per tool; the subcommand scan skips both. Generated from VALUE_FLAGS in
+# lib/session/bash-command.ts (#1889) — TWO_LEVEL_TOOLS is derived from its keys.
 VALUE_FLAGS = {
-    "git": {"-C", "-c", "--git-dir", "--work-tree"},
-    "gh": {"-R", "--repo"},
-    "bun": {"--cwd"},
-    "npm": {"--prefix", "-w", "--workspace"},
-    "pnpm": {"--filter", "-C", "--dir"},
-    "yarn": {"--cwd"},
-    "cargo": {"--manifest-path"},
-    "docker": {"-H", "--host", "-c", "--context", "--config", "-l", "--log-level"},
-    "kubectl": {"-n", "--namespace", "--kubeconfig", "--context", "--cluster", "--user", "-s", "--server", "--as", "--token", "--cache-dir", "--request-timeout"},
-    "rush": set(),
-    "openclaw": set(),
+${pythonValueFlagsLiteral()}
 }
 
 TWO_LEVEL_TOOLS = set(VALUE_FLAGS.keys())
 
 
 def _unwrap_command(cmd):
-    """Strip wrapper prefixes so the real executable is classified."""
+    """Strip wrapper prefixes so the real executable is classified.
+
+    Mirrors unwrapCommand() in lib/session/bash-command.ts — keep the shapes
+    aligned when extending either side (#1889).
+    """
     s = (cmd or "").strip()
     ssh = re.match(r'^ssh\s+\S+\s+["\']?(.+?)["\']?\s*(?:\|.*)?$', s)
     if ssh:
@@ -1079,16 +998,46 @@ def _unwrap_command(cmd):
     env = re.match(r'^([A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|' + r"'[^']*'" + r'|\S+)\s+)+(.+)$', s)
     if env:
         return _unwrap_command(env.group(2))
+    # export VAR=value && command / export A=1 B=2; command
+    export_prefix = re.match(
+        r'^export\s+(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|' + r"'[^']*'" + r'|\S+)\s+)*'
+        r'[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|' + r"'[^']*'" + r'|\S+)\s*(?:&&|;|\n)\s*([\s\S]+)$',
+        s,
+    )
+    if export_prefix:
+        return _unwrap_command(export_prefix.group(1))
     # sudo / time prefix (value-taking flags such as -u user consume their argument)
     prefix = re.match(r'^(?:sudo|time)(?:\s+(?:-[uUgGhpCrtDR]\s+\S+|-\S+))*\s+(.+)$', s)
     if prefix:
         return _unwrap_command(prefix.group(1))
-    cd = re.match(r'^cd\s+\S+\s*&&\s*(.+)$', s)
+    # set -euo pipefail && command / set -x; command
+    set_prefix = re.match(r'^set\s+[^&;\n]+?(?:&&|;|\n)\s*([\s\S]+)$', s)
+    if set_prefix:
+        return _unwrap_command(set_prefix.group(1))
+    # cd foo && command  (also ; and newline separators)
+    cd = re.match(r'^cd\s+\S+\s*(?:&&|;|\n)\s*([\s\S]+)$', s)
     if cd:
         return _unwrap_command(cd.group(1))
     npx = re.match(r'^(?:npx|bunx)\s+(?:-\S+\s+)*(.+)$', s)
     if npx:
         return _unwrap_command(npx.group(1))
+    for_loop = re.match(r'^for\s+[\s\S]+?\bdo\b\s*([\s\S]+?)\s*;?\s*done\b[\s\S]*$', s)
+    if for_loop:
+        return _unwrap_command(for_loop.group(1))
+    until_loop = re.match(r'^until\s+[\s\S]+?\bdo\b\s*([\s\S]+?)\s*;?\s*done\b[\s\S]*$', s)
+    if until_loop:
+        return _unwrap_command(until_loop.group(1))
+    if_cond = re.match(
+        r'^if\s+[\s\S]+?\bthen\b\s*([\s\S]+?)\s*;?\s*(?:elif\b|else\b|fi\b)[\s\S]*$',
+        s,
+    )
+    if if_cond:
+        return _unwrap_command(if_cond.group(1))
+    subshell = re.match(r'^\(\s*([\s\S]+?)\s*\)\s*(?:&&|;|\|\|)[\s\S]*$', s) or re.match(
+        r'^\(\s*([\s\S]+?)\s*\)\s*$', s
+    )
+    if subshell:
+        return _unwrap_command(subshell.group(1))
     return s
 
 

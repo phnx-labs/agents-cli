@@ -5,6 +5,9 @@ import {
   detectBashMilestone,
   tokenizeBash,
   categoryLabel,
+  pythonToolRegistryLiteral,
+  pythonValueFlagsLiteral,
+  unwrapCommand,
 } from './bash-command.js';
 
 describe('tokenizeBash', () => {
@@ -64,9 +67,71 @@ describe('tokenizeBash', () => {
     expect(tokenizeBash('npx -y vitest run')).toEqual([['vitest', 'run']]);
   });
 
+  // #1889: follow-up unwrap gaps left after #1830/#1888 — export/set prefixes
+  // and loop/conditional/subshell wrappers still classified as `other`.
+  it('unwraps export prefixes', () => {
+    expect(tokenizeBash('export FOO=bar && git status')).toEqual([['git', 'status']]);
+    expect(tokenizeBash('export FOO=bar BAZ=qux; npm test')).toEqual([['npm', 'test']]);
+  });
+
+  it('unwraps set prefixes', () => {
+    expect(tokenizeBash('set -euo pipefail && git push')).toEqual([['git', 'push']]);
+    expect(tokenizeBash('set -x; npm run build')).toEqual([['npm', 'run', 'build']]);
+  });
+
+  it('unwraps for-loop prefixes to the loop body', () => {
+    expect(tokenizeBash('for f in *.txt; do rm "$f"; done')).toEqual([['rm', '$f']]);
+  });
+
+  it('unwraps until-loop prefixes to the loop body', () => {
+    expect(tokenizeBash('until curl -sf http://x; do sleep 1; done')).toEqual([['sleep', '1']]);
+  });
+
+  it('unwraps if-conditional prefixes to the then branch', () => {
+    expect(tokenizeBash('if [ -f foo ]; then rm foo; fi')).toEqual([['rm', 'foo']]);
+  });
+
+  it('unwraps subshell prefixes', () => {
+    expect(tokenizeBash('(gh pr create --title x)')).toEqual([
+      ['gh', 'pr', 'create', '--title', 'x'],
+    ]);
+    expect(tokenizeBash('(cd /repo && npm install)')).toEqual([['npm', 'install']]);
+  });
+
   it('returns an empty array for empty input', () => {
     expect(tokenizeBash('')).toEqual([]);
     expect(tokenizeBash('   ')).toEqual([]);
+  });
+});
+
+describe('python registry literals (#1889)', () => {
+  it('emits every TOOL_REGISTRY tool and alias, including rmdir', () => {
+    const lit = pythonToolRegistryLiteral();
+    expect(lit).toContain('"rmdir":');
+    expect(lit).toContain('"git":');
+    expect(lit).toContain('"python3":'); // alias of python
+    expect(lit).toContain('"realesrgan-ncnn-vulkan":');
+    // category/action shape the activity hook expects
+    expect(lit).toMatch(/"rmdir": \{"category": "shell", "action": "removing directories"\},/);
+  });
+
+  it('emits agents/linear two-level tools that the hand copy dropped', () => {
+    const lit = pythonValueFlagsLiteral();
+    expect(lit).toContain('"agents":');
+    expect(lit).toContain('"linear": set(),');
+    expect(lit).toContain('"--device"'); // agents value flag
+  });
+});
+
+describe('unwrapCommand (#1889 direct)', () => {
+  it('classifies export/set/loop/if/subshell as the inner tool, not other', () => {
+    expect(classifyBashCommand('export FOO=1 && git push').tool).toBe('git');
+    expect(classifyBashCommand('set -e; cargo build').tool).toBe('cargo');
+    expect(classifyBashCommand('for x in a b; do gh pr list; done').tool).toBe('gh');
+    expect(classifyBashCommand('if true; then bun test; fi').tool).toBe('bun');
+    expect(classifyBashCommand('(agents sessions --active)').summary).toBe('agents sessions');
+    // still a pure no-op on unwrapped input
+    expect(unwrapCommand('git status')).toBe('git status');
   });
 });
 

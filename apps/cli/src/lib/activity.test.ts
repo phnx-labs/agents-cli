@@ -234,6 +234,20 @@ describe('ensureActivityLogHook', () => {
   });
 });
 
+describe('ACTIVITY_LOG_HOOK_SCRIPT generated registries (#1889)', () => {
+  it('embeds rmdir and agents/linear from the TypeScript single source', () => {
+    // The hand-authored Python copy had already drifted: missing rmdir (in
+    // TOOL_REGISTRY) and missing agents/linear (in VALUE_FLAGS). Generated
+    // interpolation from bash-command.ts must carry both.
+    expect(ACTIVITY_LOG_HOOK_SCRIPT).toContain('"rmdir":');
+    expect(ACTIVITY_LOG_HOOK_SCRIPT).toContain('"agents":');
+    expect(ACTIVITY_LOG_HOOK_SCRIPT).toMatch(/"linear":\s*set\(\)/);
+    // Sanity: still a valid dict body (no bare ${interpolation} leftovers)
+    expect(ACTIVITY_LOG_HOOK_SCRIPT).not.toContain('${pythonToolRegistryLiteral');
+    expect(ACTIVITY_LOG_HOOK_SCRIPT).not.toContain('${pythonValueFlagsLiteral');
+  });
+});
+
 describe.skipIf(process.platform === 'win32')('real activity-log hook (Python)', () => {
   // win32: spawns a real Python hook with POSIX env/path assumptions (RUSH-2215 expanded).
   pythonTest('reads actor, kind, launch, and parent provenance from the child env', () => {

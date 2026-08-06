@@ -147,6 +147,26 @@ const TOOL_REGISTRY: Record<string, BashToolInfo> = {
 };
 
 /**
+ * TOOL_REGISTRY (category + action, aliases flattened to their own keys)
+ * serialized as the body of a Python dict literal. The embedded activity-log
+ * hook script (`ACTIVITY_LOG_HOOK_SCRIPT` in `activity.ts`) runs standalone
+ * under `python3` and can't import this module, so its taxonomy is generated
+ * from this single source instead of hand-duplicated (#1889 — the two had
+ * already drifted: the hand-authored copy was missing `rmdir`).
+ */
+export function pythonToolRegistryLiteral(indent = '    '): string {
+  const lines: string[] = [];
+  for (const [name, info] of Object.entries(TOOL_REGISTRY)) {
+    const entry = `{"category": ${JSON.stringify(info.category)}, "action": ${JSON.stringify(info.action)}}`;
+    lines.push(`${indent}${JSON.stringify(name)}: ${entry},`);
+    for (const alias of info.aliases ?? []) {
+      lines.push(`${indent}${JSON.stringify(alias)}: ${entry},`);
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
  * Two-level tools (bucket key includes the subcommand) mapped to the flags that
  * consume the *following* token as their value, per tool. The subcommand scan
  * skips both a value flag and its argument, so `git -C /repo commit` → `commit`
@@ -176,6 +196,26 @@ const VALUE_FLAGS: Record<string, Set<string>> = {
   linear: new Set(),
 };
 
+/**
+ * VALUE_FLAGS serialized as the body of a Python dict of sets. Same reason as
+ * {@link pythonToolRegistryLiteral}: the activity-log hook script embeds this
+ * table and must not hand-drift from the TypeScript source (#1889 — the Python
+ * copy was missing `agents`/`linear` two-level tools).
+ */
+export function pythonValueFlagsLiteral(indent = '    '): string {
+  const lines: string[] = [];
+  for (const [name, flags] of Object.entries(VALUE_FLAGS)) {
+    if (flags.size === 0) {
+      lines.push(`${indent}${JSON.stringify(name)}: set(),`);
+      continue;
+    }
+    // Stable order for golden-string equality (install/write checks).
+    const items = [...flags].sort().map((f) => JSON.stringify(f)).join(', ');
+    lines.push(`${indent}${JSON.stringify(name)}: {${items}},`);
+  }
+  return lines.join('\n');
+}
+
 /** Tools whose bucket key includes the second token (subcommand). */
 const TWO_LEVEL_TOOLS = new Set(Object.keys(VALUE_FLAGS));
 
@@ -198,15 +238,39 @@ export function unwrapCommand(cmd: string): string {
   // VAR=value prefix (value may be a single- or double-quoted string with spaces)
   const env = s.match(/^([A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S+)\s+)+(.+)$/);
   if (env) return unwrapCommand(env[2]);
+  // export VAR=value prefix, same shape as the bare env-var prefix above (#1889)
+  const exportPrefix = s.match(
+    /^export\s+(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S+)\s+)*[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;|\n)\s*([\s\S]+)$/,
+  );
+  if (exportPrefix) return unwrapCommand(exportPrefix[1]);
   // sudo / time prefix (value-taking flags like `-u user` consume their argument)
   const prefix = s.match(/^(?:sudo|time)(?:\s+(?:-[uUgGhpCrtDR]\s+\S+|-\S+))*\s+(.+)$/);
   if (prefix) return unwrapCommand(prefix[1]);
+  // set -euo pipefail && command / set -x; command (shell-option prefix; `-o`
+  // mode names like `pipefail` trail a flag without their own `-`, so consume
+  // everything up to the first operator rather than itemizing flag shapes)
+  const setPrefix = s.match(/^set\s+[^&;\n]+?(?:&&|;|\n)\s*([\s\S]+)$/);
+  if (setPrefix) return unwrapCommand(setPrefix[1]);
   // cd foo && command  (also `cd foo; command` and newline-separated `cd foo\ncommand`)
   const cd = s.match(/^cd\s+\S+\s*(?:&&|;|\n)\s*([\s\S]+)$/);
   if (cd) return unwrapCommand(cd[1]);
   // npx / bunx
   const npx = s.match(/^(?:npx|bunx)\s+(?:-\S+\s+)*(.+)$/);
   if (npx) return unwrapCommand(npx[1]);
+  // for X in ...; do command; done — unwrap to the loop body, not the `for` keyword
+  const forLoop = s.match(/^for\s+[\s\S]+?\bdo\b\s*([\s\S]+?)\s*;?\s*done\b[\s\S]*$/);
+  if (forLoop) return unwrapCommand(forLoop[1]);
+  // until condition; do command; done
+  const untilLoop = s.match(/^until\s+[\s\S]+?\bdo\b\s*([\s\S]+?)\s*;?\s*done\b[\s\S]*$/);
+  if (untilLoop) return unwrapCommand(untilLoop[1]);
+  // if condition; then command; fi — unwrap to the `then` branch, the real work;
+  // the condition itself is usually a test/comparison, not the command of interest
+  const ifCond = s.match(/^if\s+[\s\S]+?\bthen\b\s*([\s\S]+?)\s*;?\s*(?:elif\b|else\b|fi\b)[\s\S]*$/);
+  if (ifCond) return unwrapCommand(ifCond[1]);
+  // (command) subshell, e.g. `(gh pr create --title x)` or `(cd /repo && npm i)`
+  const subshell =
+    s.match(/^\(\s*([\s\S]+?)\s*\)\s*(?:&&|;|\|\|)[\s\S]*$/) ?? s.match(/^\(\s*([\s\S]+?)\s*\)\s*$/);
+  if (subshell) return unwrapCommand(subshell[1]);
   return s;
 }
 
