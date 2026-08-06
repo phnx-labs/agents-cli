@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { applyScopeFilters, buildRoutineChoices, buildRoutineRunGroups, filterSessionsByRoutine, formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, printRoutineRunOverview, resolveRoutineName, teamBadge } from '../sessions.js';
+import { applyScopeFilters, artifactLookupScope, buildRoutineChoices, buildRoutineRunGroups, filterSessionsByRoutine, formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, printRoutineRunOverview, resolveRoutineName, teamBadge } from '../sessions.js';
 import { resolveSessionById } from '../../lib/session/discover.js';
 import { formatTeamLineage } from '../sessions-picker.js';
 import type { SessionMeta } from '../../lib/session/types.js';
@@ -91,6 +91,19 @@ describe('resolveRoutineName', () => {
     const globallyScoped = applyScopeFilters([wanted, other], { routine: 'nightly' });
     expect(resolveSessionById(globallyScoped, 'other-id')).toEqual([]);
     expect(resolveSessionById(globallyScoped, 'wanted-id')).toEqual([wanted]);
+  });
+});
+
+describe('artifact lookup routine scope', () => {
+  it('excludes a session from another routine before resolving its artifacts', () => {
+    const wanted = meta({ id: 'wanted-id', origin: 'routine', routineName: 'nightly-review' });
+    const other = meta({ id: 'other-id', origin: 'routine', routineName: 'release-notes' });
+    const scoped = applyScopeFilters(
+      [wanted, other],
+      artifactLookupScope(undefined, undefined, 'nightly-review'),
+    );
+    expect(resolveSessionById(scoped, 'other-id')).toEqual([]);
+    expect(resolveSessionById(scoped, 'wanted-id')).toEqual([wanted]);
   });
 });
 

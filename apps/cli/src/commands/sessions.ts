@@ -2300,11 +2300,12 @@ async function sessionsAction(
 
   // Artifact-list or artifact-read paths: widen scope and resolve session globally.
   if ((options.artifacts || options.artifact !== undefined) && searchQuery) {
-    await renderArtifactsGlobal(searchQuery, options.artifacts ?? false, options.artifact, {
-      agent: options.agent,
-      project: options.project,
-      routine: options.routine,
-    });
+    await renderArtifactsGlobal(
+      searchQuery,
+      options.artifacts ?? false,
+      options.artifact,
+      artifactLookupScope(options.agent, options.project, options.routine),
+    );
     return;
   }
 
@@ -4255,6 +4256,14 @@ export function applyScopeFilters(
   }
 
   return filtered;
+}
+
+export function artifactLookupScope(
+  agent?: string,
+  project?: string,
+  routine?: boolean | string,
+): { agent?: string; project?: string; routine?: boolean | string } {
+  return { agent, project, routine };
 }
 
 async function renderArtifactsGlobal(
