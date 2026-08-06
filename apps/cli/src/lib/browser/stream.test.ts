@@ -10,8 +10,14 @@ vi.mock('../state.js', async (importOriginal) => {
   return { ...actual, getHelpersDir: () => HELPER_DIR };
 });
 
+vi.mock('../device-config.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../device-config.js')>();
+  return { ...actual, getConfigValue: () => ({ value: false, source: 'default' }) };
+});
+
 const { BrowserIPCServer } = await import('./ipc.js');
 const { BrowserService } = await import('./service.js');
+const { FLEET_REMOTE_ENV } = await import('./remote-control.js');
 const { runBrowserIPCStream } = await import('./stream.js');
 
 let server: InstanceType<typeof BrowserIPCServer>;
@@ -24,6 +30,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await server.stop();
   rmSync(HELPER_DIR, { recursive: true, force: true });
+  vi.unstubAllEnvs();
 });
 
 function waitForLines(output: PassThrough, count: number): Promise<string[]> {
@@ -88,6 +95,32 @@ describe('runBrowserIPCStream', () => {
 
     const [errorLine, versionLine] = await outputLines;
     expect(JSON.parse(errorLine)).toMatchObject({ ok: false });
+    expect(JSON.parse(versionLine)).toMatchObject({ ok: true });
+    await run;
+  });
+
+  it('refuses a fleet-remote start without consent and keeps the stream open', async () => {
+    vi.stubEnv(FLEET_REMOTE_ENV, '1');
+    vi.stubEnv('AGENTS_ACTOR_HOST', 'yosemite-s0');
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const outputLines = waitForLines(output, 2);
+    const run = runBrowserIPCStream({
+      input,
+      output,
+      actor: 'agent:test',
+      autoStartDaemon: false,
+    });
+
+    input.write('{"action":"start","profile":"local"}\n');
+    input.write('{"action":"version"}\n');
+    input.end();
+
+    const [startLine, versionLine] = await outputLines;
+    expect(JSON.parse(startLine)).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/yosemite-s0.*browser --host.*remote-control on/s),
+    });
     expect(JSON.parse(versionLine)).toMatchObject({ ok: true });
     await run;
   });
