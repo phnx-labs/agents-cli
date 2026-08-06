@@ -649,13 +649,17 @@ enum IssueSelfTest {
                                      thisMachine: ActiveDisplay.normalizeHost("Zion.local"))
                   == "local")
 
-        let summary = ActiveDisplay.projectSummary(repo: "agents-cli", running: 8, idle: 1,
-                                                   machines: ["zion", "zion"])
-        check("project summary carries counts and single host",
-              summary.contains("agents-cli") && summary.contains("●8")
-                  && summary.contains("◐1") && summary.contains("zion"),
+        let summary = ActiveDisplay.projectSummary(
+            repo: "agents-cli",
+            statuses: [.running: 8, .idle: 1, .queued: 2, .orphaned: 1],
+            machines: ["zion", "zion"]
+        )
+        check("project summary carries every status and single host",
+              summary.contains("agents-cli") && summary.contains("●8 working")
+                  && summary.contains("○1 idle") && summary.contains("○2 queued")
+                  && summary.contains("◍1 orphan") && summary.contains("zion"),
               detail: summary)
-        let multi = ActiveDisplay.projectSummary(repo: "x", running: 2, idle: 0,
+        let multi = ActiveDisplay.projectSummary(repo: "x", statuses: [.running: 2],
                                                  machines: ["a", "b"])
         check("multi-host summary says N hosts",
               multi.contains("2 hosts"), detail: multi)

@@ -720,12 +720,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         for repo in orderedKeys {
             guard let group = groups[repo] else { continue }
-            let running = group.filter { $0.status == .running }.count
-            let idle = group.filter { $0.status == .idle }.count
+            let statuses = Dictionary(grouping: group, by: \.status).mapValues(\.count)
             let machines = group.compactMap(\.machine)
             let open = expandedProjects.contains(repo)
-            let summary = ActiveDisplay.projectSummary(repo: repo, running: running,
-                                                       idle: idle, machines: machines)
+            let summary = ActiveDisplay.projectSummary(repo: repo, statuses: statuses,
+                                                       machines: machines)
             let header = NSMenuItem(title: summary, action: nil, keyEquivalent: "")
             let headerView = ProjectAccordionRowView(summary: summary, repo: repo,
                                                      sessionCount: group.count, expanded: open)

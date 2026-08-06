@@ -146,13 +146,18 @@ enum ActiveDisplay {
         return "remote · \(m)"
     }
 
-    /// Collapsed project row: `agents-cli  ●8 ◐1  zion`.
-    static func projectSummary(repo: String, running: Int, idle: Int,
+    /// Collapsed project row includes every lifecycle state reported by the CLI.
+    static func projectSummary(repo: String, statuses: [SessionStatus: Int],
                                machines: [String]) -> String {
         var parts: [String] = [repo]
-        var counts: [String] = []
-        if running > 0 { counts.append("●\(running)") }
-        if idle > 0 { counts.append("◐\(idle)") }
+        let order: [SessionStatus] = [
+            .running, .inputRequired, .idle, .queued, .orphaned,
+            .crashed, .closed, .abandoned, .unknown,
+        ]
+        let counts = order.compactMap { status -> String? in
+            guard let count = statuses[status], count > 0 else { return nil }
+            return "\(statusGlyph(status))\(count) \(statusLabel(status))"
+        }
         if !counts.isEmpty { parts.append(counts.joined(separator: " ")) }
         let hosts = Array(Set(machines.filter { !$0.isEmpty })).sorted()
         if hosts.count == 1 {
