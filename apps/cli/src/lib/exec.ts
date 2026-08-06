@@ -1142,6 +1142,11 @@ export function buildExecCommand(options: ExecOptions): string[] {
       // The OpenCode TUI takes an initial prompt via --prompt; a bare positional
       // on the default command is parsed as a project path, not a message.
       cmd.push('--prompt', options.prompt);
+    } else if (interactive && options.agent === 'claude') {
+      // Claude's -p is --print, not a prompt-value flag. In an interactive run
+      // the initial prompt is positional; emitting `-p /continue <id>` turns a
+      // focus recovery into a one-shot print process that immediately exits.
+      cmd.push(options.prompt);
     } else if (template.promptFlag === 'positional') {
       cmd.push(options.prompt);
     } else {

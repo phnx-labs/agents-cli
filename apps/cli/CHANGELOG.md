@@ -13,7 +13,9 @@ transcript belongs to the exact active version home before using native resume;
 a transcript retained in version trash uses same-harness `/continue`, including
 after the same version number is reinstalled. Claude native resume launches from
 the transcript's original project directory rather than a later first-turn cwd,
-so the harness can find its `projects/<cwd-key>` conversation.
+so the harness can find its `projects/<cwd-key>` conversation. Interactive
+`/continue` recovery is now passed as Claude's positional initial prompt instead
+of `-p`, which is Claude's one-shot print flag and closed the recovered session.
 
 ## 1.22.25
 
