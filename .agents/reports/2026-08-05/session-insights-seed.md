@@ -7,7 +7,7 @@
 > The agent stops one step short of done and asks permission for a step it already owns; the user then spends hundreds of prompts chasing the last mile.
 
 - **1,931 of 3,639 (53%)** of agent "?" messages are permission-seeking on an owned step.
-- Corpus: 2505 sessions · 7425 typed prompts · 3639 agent "?" messages · 1311 `AskUserQuestion` calls (1754 zion / 393 yosemite-s0 / 220 yosemite-s1 / 138 mac-mini).
+- Corpus: 2505 sessions (1754 zion / 393 yosemite-s0 / 220 yosemite-s1 / 138 mac-mini) · 7425 typed prompts · 3639 agent "?" messages · 1311 `AskUserQuestion` calls.
 
 ### 2. Top dissatisfaction / correction nudges (user prose, with counts)
 
@@ -29,7 +29,7 @@ Long tail (784 distinct nudges) is thick with frustration + typo variants: "run 
 
 ### 3. Stall `AskUserQuestion` categories
 
-Of categorized `AskUserQuestion` headers, **the majority (`other` ×1163) are legitimate scope/content decisions that should stay questions.** The fixable slice is **430 workflow-stall asks** where the agent had authorization and asked anyway:
+Of the **1803 categorized agent asks** (`ask_categories.csv`; note this categorized set is larger than the 1311 formal `AskUserQuestion` calls — it also picks up prose asks), **the majority (`other` ×1163, plus `scope / goal` ×190 and `cleanup` ×19) are legitimate scope/content decisions that should stay questions.** The fixable slice is **431 workflow-stall asks** where the agent had authorization and asked anyway:
 
 | Stall category | Count |
 |---|---|
@@ -53,15 +53,15 @@ Agent prose "?" themes (`agent_q_themes.csv`): `"should I / want me to…"` ×11
 | codex | 233 | 0 | 5 | 0 (not tracked) | 255 | 205 |
 | droid | 2 | 0 | 0 | 0 | 0 | 0 |
 
-`--by account` (default, claude only, 30d): trp.so 180 sess / $2035 / 50 AUQ / **79 interruptions**; gmail 193 / $1030 / 35 AUQ / 19 int; getrush.ai 139 / $1269 / 38 AUQ; dev@getrush.ai 82 / $656 / 4 AUQ; tech@prix.dev 34 / 11 AUQ; social@swarmify 34; icloud 17. Cross-account overlap: 8230 overlapping pairs, 6105 cross-account, 907 sessions involved.
+`--by account` (default, claude only, 30d): trp.so 180 sess / $2035 / 50 AUQ / **79 interruptions**; gmail 193 / $1030 / 35 AUQ / 19 int; getrush.ai 139 / $1269 / 38 AUQ; dev@getrush.ai 82 / $656 / 4 AUQ; tech@prix.dev 34 / 11 AUQ; social@swarmify 34; icloud 17. (These attributed accounts sum to 679 sessions; the 3-session gap to the 682 by-agent claude total is unattributed-claude sessions, and the two views were separate runs — 913 vs 917 analyzed.) Cross-account overlap: 8230 overlapping pairs, 6105 cross-account, 907 sessions involved.
 
-**The gap this exposes:** insights already counts the *formal* signal per harness (`AskUserQuestion` for claude, `request_user_input` for codex) but does **not** yet mine the *prose* signals the July pack found — permission-asks (×1931), repeated nudges (×455), stall-vs-genuine `AskUserQuestion` classification (430 of 1311). Those are where 90% of the friction hides, and they're currently invisible to the CLI.
+**The gap this exposes:** insights already counts the *formal* signal per harness (`AskUserQuestion` for claude, `request_user_input` for codex) but does **not** yet mine the *prose* signals the July pack found — permission-asks (×1931), repeated nudges (×455), stall-vs-genuine ask classification (431 stall of the 1803 categorized asks). Those are where 90% of the friction hides, and they're currently invisible to the CLI.
 
 ### 5. Concrete automations / product actions the data implies
 
 1. **`insights` friction facet — permission-ask detection.** Mine assistant prose for owned-step permission-asks ("should I / merge now? / release?"); report count + rate per account/agent/project. Directly surfaces the 53% meta-pattern.
 2. **`insights` friction facet — repeated-nudge detection.** Cluster short user prompts (≤6 words, typo-merged) into nudge classes (`check now`, `continue`, `did you merge`); report a per-account/agent "stall tax" (the 455-prompt mass).
-3. **`AskUserQuestion` stall classification.** Split headers into stall (release/next/merge/direction/integrate = 430) vs genuine scope (`other` = 1163); surface the stall *rate*, never the content decisions.
+3. **`AskUserQuestion` stall classification.** Split headers into stall (release/next/merge/direction/integrate = 431) vs genuine scope (`other` = 1163, `scope / goal` = 190, `cleanup` = 19); surface the stall *rate*, never the content decisions.
 4. **`--trend` / recurrence mode.** The July pack's dated recurrence check (2026-07-28) should be a command, not a re-run Python script: friction metrics over successive windows so guard effectiveness is visible.
 5. **Guard-effectiveness attribution.** Tie shipped guards (`no-permission-stop-guard.sh`, `ask-user-question-guard.sh`) to a before/after delta in permission-asks (§6 table already does this by hand: 2441-sess→1167 asks vs 2505-sess→1194). Compute the delta automatically.
 6. **Self-poll enforcement guard — the one unguarded gap.** `check now` ×180 is the top nudge and §6 flags it as *covered by rule (`deployment-and-waiting.md`) but with no guard enforcing it.* A Stop/PreToolUse guard that blocks a turn ending "I'll check back later" or a `run_in_background` command with no finish-echo. (Codex-owned; called out here as the highest-leverage new control.)
