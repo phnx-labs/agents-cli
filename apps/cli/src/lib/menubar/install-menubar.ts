@@ -24,6 +24,7 @@ import { sleepSync } from '../fs-atomic.js';
 import { getRuntimeStateDir, getHelpersDir } from '../state.js';
 import { getCliVersion, resolveAgentsBin, resolveInstalledLayout } from '../version.js';
 import { copyAppBundle, withInstallLock } from '../app-bundle-install.js';
+import { compareVersions } from '../agent-spec/primitives.js';
 
 const APP_BUNDLE_NAME = 'MenubarHelper.app';
 const INSTALL_DIR_NAME = 'agents-cli';
@@ -499,12 +500,11 @@ export function disableMenubarService(): void {
  * different CDHashes. Any digest gate therefore reports "changed" for exactly
  * the skew case it was meant to exempt.
  *
- * So ownership decides instead: the plist's `AGENTS_ENTRY` names the owner, and
- * only the owner may reinstall. A non-owner takes over only once the recorded
- * owner is gone from disk, which is what makes the rule converge — a dead
- * install cannot hold the helper hostage, and a live one cannot be fought over.
- * A same-install upgrade keeps its entry path, so `npm update` still installs
- * the new helper normally. Pure so the truth table is unit-testable.
+ * So the installed version decides release skew: a newer signed release takes
+ * ownership immediately, an older release cannot downgrade it, and equal foreign
+ * releases retain the recorded owner. The plist's `AGENTS_ENTRY` remains the
+ * ownership signal for legacy state with no version marker, where the cooldown
+ * bounds takeover churn. Pure so the truth table is unit-testable.
  */
 export function mayInstallMenubarHelper(opts: {
   /** `AGENTS_ENTRY` baked into the installed plist — the recorded owner. */
@@ -517,6 +517,10 @@ export function mayInstallMenubarHelper(opts: {
   helperExecMissing: boolean;
   /** Installed copy is ad-hoc while the shipped source is Developer ID. */
   needsDevIdHeal: boolean;
+  /** Version stamped beside the installed helper, or null for legacy state. */
+  installedVersion: string | null;
+  /** Version of the agents-cli install now attempting the heal. */
+  currentVersion: string | null;
   /** ms since the last self-heal reinstall, or null if none is recorded. */
   msSinceLastHeal: number | null;
   /** How long a non-owner waits before it may take over. */
@@ -533,8 +537,14 @@ export function mayInstallMenubarHelper(opts: {
   if (!opts.activeEntry) return false;
   // No owner recorded yet (fresh or pre-`AGENTS_ENTRY` plist) — adopt it.
   if (!opts.plistEntry) return true;
-  if (opts.plistEntry === opts.activeEntry) return true; // we are the owner
   if (!opts.ownerEntryExists) return true; // the recorded owner is gone
+  if (opts.installedVersion && opts.currentVersion) {
+    const versionOrder = compareVersions(opts.currentVersion, opts.installedVersion);
+    if (versionOrder > 0) return opts.sourceIsDeveloperId;
+    if (versionOrder < 0) return false;
+    return opts.plistEntry === opts.activeEntry;
+  }
+  if (opts.plistEntry === opts.activeEntry) return true; // we are the owner
   // A foreign install while the owner still exists. Refusing outright bounds the
   // loop but strands the user when the recorded owner is a stale copy that simply
   // still sits on disk (an old nvm node dir) while their daily driver upgrades:
@@ -554,7 +564,8 @@ export function mayInstallMenubarHelper(opts: {
 }
 
 /**
- * How long a non-owner install waits before it may take the helper over. Long
+ * How long a non-owner install waits before it may take an unversioned legacy
+ * helper over. Long
  * enough that a multi-install box restarts the helper at most once an hour
  * instead of every few seconds; short enough that a user who switched installs
  * gets their upgrade without hunting for `agents menubar setup`.
@@ -593,6 +604,8 @@ function mayHealMenubar(needsDevIdHeal: boolean): boolean {
     ownerEntryExists: Boolean(plistEntry) && fs.existsSync(plistEntry as string),
     helperExecMissing: !fs.existsSync(installedExecutablePath()),
     needsDevIdHeal,
+    installedVersion: readInstalledMenubarVersion(),
+    currentVersion: getCliVersion(),
     msSinceLastHeal: msSinceLastMenubarHeal(),
     cooldownMs: MENUBAR_TAKEOVER_COOLDOWN_MS,
     sourceIsDeveloperId: Boolean(src) && hasDeveloperIdSignature(src as string),
