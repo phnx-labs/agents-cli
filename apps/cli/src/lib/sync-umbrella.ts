@@ -19,6 +19,7 @@
 import { pullRepo } from './git.js';
 import { getUserAgentsDir, getEnabledExtraRepos } from './state.js';
 import { listRemoteBundles, pullBundle } from './secrets/sync.js';
+import { SYNC_PASSPHRASE_ENV } from './secrets/sync-passphrase.js';
 
 /** The umbrella flags off `agents sync`. */
 export interface UmbrellaFlags {
@@ -116,10 +117,10 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
       result.secrets = {
         pulled: 0,
         skipped: true,
-        reason: 'no passphrase — set AGENTS_SYNC_PASSPHRASE or run `agents login` (#366)',
+        reason: `no passphrase — set ${SYNC_PASSPHRASE_ENV} or run \`agents login\` (#366)`,
         errors: [],
       };
-      log('secrets: skipped (no passphrase available)');
+      log(`secrets: skipped (no passphrase — set ${SYNC_PASSPHRASE_ENV})`);
     } else {
       let pulled = 0;
       const errors: string[] = [];
