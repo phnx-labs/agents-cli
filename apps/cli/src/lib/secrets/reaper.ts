@@ -138,11 +138,32 @@ export function planKeychainReap(
 }
 
 /**
+ * Parse macOS `ps -o etime=` elapsed time into whole seconds.
+ *
+ * BSD `etime` renders as `[[dd-]hh:]mm:ss` (e.g. `05:03`, `01:02:03`,
+ * `14-04:10:52`). This is the portable keyword: `etimes` (raw seconds) is a
+ * GNU/Linux procps extension that macOS `ps` rejects with a non-zero exit, so
+ * the reaper — which only ever runs on darwin — must read `etime`.
+ * Returns null for an unparseable value so the caller drops the row.
+ */
+export function parseEtimeToSeconds(raw: string): number | null {
+  const m = raw.match(/^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/);
+  if (!m) return null;
+  const days = m[1] ? parseInt(m[1], 10) : 0;
+  const hours = m[2] ? parseInt(m[2], 10) : 0;
+  const mins = parseInt(m[3], 10);
+  const secs = parseInt(m[4], 10);
+  if ([days, hours, mins, secs].some(isNaN)) return null;
+  return ((days * 24 + hours) * 60 + mins) * 60 + secs;
+}
+
+/**
  * Parse one `ps` output line.
  *
- * Expected format from `ps -ax -o pid=,ppid=,etimes=,command=`:
- *   "<pid> <ppid> <etimes> <command...>"
- * The command field is the remainder of the line and may contain spaces.
+ * Expected format from `ps -ax -o pid=,ppid=,etime=,command=`:
+ *   "<pid> <ppid> <etime> <command...>"
+ * where `<etime>` is BSD elapsed time (`[[dd-]hh:]mm:ss`). The command field is
+ * the remainder of the line and may contain spaces.
  */
 function parsePsLine(line: string): {
   pid: number;
@@ -152,13 +173,13 @@ function parsePsLine(line: string): {
 } | null {
   const trimmed = line.trim();
   if (!trimmed) return null;
-  const m = trimmed.match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/);
+  const m = trimmed.match(/^(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/);
   if (!m) return null;
   const pid = parseInt(m[1], 10);
   const ppid = parseInt(m[2], 10);
-  const elapsedSec = parseInt(m[3], 10);
+  const elapsedSec = parseEtimeToSeconds(m[3]);
   const command = m[4];
-  if (isNaN(pid) || isNaN(ppid) || isNaN(elapsedSec)) return null;
+  if (isNaN(pid) || isNaN(ppid) || elapsedSec == null) return null;
   return { pid, ppid, elapsedSec, command };
 }
 
@@ -199,7 +220,7 @@ export function reapOrphanedKeychainProcesses(): {
 
   let out: string;
   try {
-    out = execFileSync('ps', ['-ax', '-o', 'pid=,ppid=,etimes=,command='], {
+    out = execFileSync('ps', ['-ax', '-o', 'pid=,ppid=,etime=,command='], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
     });

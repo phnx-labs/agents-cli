@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   planKeychainReap,
   reapOrphanedKeychainProcesses,
+  parseEtimeToSeconds,
   ORPHAN_GRACE_SEC,
   STUCK_GRACE_SEC,
   resetKeychainReaperCandidatesForTest,
@@ -41,6 +42,31 @@ function candidatesFrom(entries: [number, StuckParentCandidate][]): Map<number, 
 
 beforeEach(() => {
   resetKeychainReaperCandidatesForTest();
+});
+
+describe('parseEtimeToSeconds — macOS BSD etime format', () => {
+  // Regression for RUSH-2268: the reaper shelled `ps -o etimes` (a GNU/Linux
+  // procps keyword), which macOS `ps` rejects with a non-zero exit, so
+  // execFileSync threw and the reaper reaped nothing on its only platform.
+  // The portable keyword is `etime` in `[[dd-]hh:]mm:ss` form.
+  it('parses mm:ss', () => {
+    expect(parseEtimeToSeconds('00:04')).toBe(4);
+    expect(parseEtimeToSeconds('32:10')).toBe(32 * 60 + 10);
+  });
+  it('parses hh:mm:ss', () => {
+    expect(parseEtimeToSeconds('01:02:03')).toBe(3723);
+  });
+  it('parses dd-hh:mm:ss', () => {
+    expect(parseEtimeToSeconds('14-04:10:52')).toBe(((14 * 24 + 4) * 60 + 10) * 60 + 52);
+  });
+  it('returns null for a bare integer (the Linux etimes shape it no longer emits)', () => {
+    expect(parseEtimeToSeconds('42')).toBeNull();
+  });
+  it('returns null for garbage', () => {
+    expect(parseEtimeToSeconds('')).toBeNull();
+    expect(parseEtimeToSeconds('abc')).toBeNull();
+    expect(parseEtimeToSeconds('1:2:3:4')).toBeNull();
+  });
 });
 
 describe('planKeychainReap — orphaned helper class (PPID==1)', () => {
@@ -194,38 +220,34 @@ describe('planKeychainReap — mixed snapshots', () => {
 });
 
 describe('reapOrphanedKeychainProcesses (darwin integration)', () => {
-  // QUARANTINED — RUSH-2268. This case fails on `build (macos-latest, 22|24)`,
-  // which are fail-closed legs of the release gate, so it blocked EVERY agents-cli
-  // and Factory release (release/factory-0.9.313 died on it before the PR that
-  // surfaced it had even merged). It is skipped to unblock releases while the
-  // fixture is finished, NOT because the behaviour stopped mattering.
+  // RUSH-2268. This was quarantined (it.skip) while the fixture was diagnosed.
+  // The real bug was NOT the fixture: `reaper.ts` shelled `ps -o etimes` (a
+  // GNU/Linux procps keyword) which macOS `ps` rejects with exit 1, so
+  // execFileSync threw and the reaper returned `reaped: 0` no matter what the
+  // fixture did — which is exactly why the symlink fixture (correct all along)
+  // still read as reaped:0 during diagnosis. With `reaper.ts` switched to the
+  // portable `etime`, the fixture below reaps a real orphaned sleeper. Verified
+  // on macOS 15.4.1: 20/20 reaper tests pass, this one reaping the sleeper.
   //
-  // What is wrong is the FIXTURE, not `reaper.ts`. The production matcher
-  // (`command === helperPath || command.startsWith(helperPath + ' ')`,
-  // reaper.ts:229) is correct — the real helper appears in `ps` exactly so:
-  //   58446 … /Users/…/agents-cli/Agents CLI.app/Contents/MacOS/Agents CLI watch-lock
-  // Three fixture defects were found and two fixed (all measured on an arm64 Mac):
-  //   1. FIXED — `require('./install-helper.js')` inline: a CommonJS require of a
-  //      local TS module does not resolve under vitest's ESM runtime
-  //      (MODULE_NOT_FOUND), so the test died before asserting. Now a static import.
-  //   2. FIXED — a `#!/bin/sh` fixture: the kernel execs the INTERPRETER, so ps
-  //      reports `/bin/sh <helperPath>` and argv[0] never equals the helper path.
-  //   3. OPEN — replacing it with a COPY of /bin/sleep does not work either: the
-  //      copy loses its code signature and Apple Silicon SIGKILLs it (exit 137).
-  //      A symlink runs and yields the right argv[0] (verified against ps), but
-  //      the reaper still returns `reaped: 0`, so something after the path match
-  //      (the orphan grace window, or the start-time fingerprint capture) is not
-  //      satisfied by the fixture. Diagnosis continues in RUSH-2268 — print
-  //      `result.details`, which names the bail-out reason.
-  it.skip('reaps a real orphaned sleeper that matches the helper path', () => {
+  // Fixture notes (all measured on an arm64 Mac):
+  //   - `require('./install-helper.js')` inline fails under vitest's ESM runtime
+  //     (a CJS require of a local TS module → MODULE_NOT_FOUND); use the static
+  //     imports at the top of the file.
+  //   - a `#!/bin/sh` script fixture: the kernel execs the INTERPRETER, so ps
+  //     reports `/bin/sh <helperPath>` and argv[0] never equals the helper path.
+  //   - a COPY of /bin/sleep loses its code signature and Apple Silicon SIGKILLs
+  //     it on exec (exit 137). A SYMLINK keeps the signature (the kernel execs
+  //     /bin/sleep) while argv[0] stays the symlink path — which is what the
+  //     reaper's exact match (`command === helperPath ||
+  //     command.startsWith(helperPath + ' ')`) requires.
+  it.skipIf(process.platform !== 'darwin')('reaps a real orphaned sleeper that matches the helper path', async () => {
     const { spawn, execFileSync } = require('child_process');
     const os = require('os');
     const path = require('path');
     const fs = require('fs');
 
     // Build a fake installed helper at the exact path getKeychainHelperPath()
-    // resolves to under the test install root. The reaper does an exact
-    // path-match against this string, so the sleeper's argv[0] must equal it.
+    // resolves to under the test install root.
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-reaper-'));
     const fakeHelper = path.join(
       tmpDir,
@@ -238,43 +260,40 @@ describe('reapOrphanedKeychainProcesses (darwin integration)', () => {
       'Agents CLI',
     );
     fs.mkdirSync(path.dirname(fakeHelper), { recursive: true });
-    // SYMLINK to a real signed binary. `reaper.ts` matches on argv[0]
-    // (`command === helperPath || command.startsWith(helperPath + ' ')`), which is
-    // what the production helper — a signed Mach-O invoked directly — produces:
-    //   58446 … /Users/…/agents-cli/Agents CLI.app/Contents/MacOS/Agents CLI watch-lock
-    // Two fixtures that look right but cannot work, both verified on an arm64 Mac:
-    //   - a `#!/bin/sh` script: the kernel execs the INTERPRETER, so ps reports
-    //     `/bin/sh <helperPath>` — argv[0] is /bin/sh and the match never fires.
-    //   - a COPY of /bin/sleep: the copy loses its code signature, and Apple
-    //     Silicon SIGKILLs it on exec (observed exit 137), so nothing ever runs.
-    // A symlink keeps the signature (the kernel execs /bin/sleep) while argv[0]
-    // stays the symlink path, which is what the reaper matches.
     fs.symlinkSync('/bin/sleep', fakeHelper);
 
     // Launch through a disposable shell that exits immediately, so the sleeper
     // is reparented to init (PPID 1).
-    const launcher = spawn('sh', ['-c', `${JSON.stringify(fakeHelper)} 300 &`], {
+    const launcher = spawn('sh', ['-c', `${JSON.stringify(fakeHelper)} 600 &`], {
       detached: true,
       stdio: 'ignore',
     });
     launcher.unref();
 
-    // Wait long enough to exceed the orphan grace window.
-    const deadline = Date.now() + 2_000 + (ORPHAN_GRACE_SEC * 1_000);
-    while (Date.now() < deadline) { /* spin synchronously to stay inside the test */ }
+    // Wait past the orphan grace window (async — do NOT busy-spin: a synchronous
+    // 30s spin pegs a core and blocks the event loop for the whole window).
+    await new Promise((resolve) => setTimeout(resolve, (ORPHAN_GRACE_SEC + 3) * 1_000));
 
-    // Confirm the sleeper is actually orphaned before the reaper runs.
+    // Locate the sleeper and confirm it is actually orphaned (PPID 1). The
+    // ppid assertion is OUTSIDE the try/catch so a broken reparenting assumption
+    // fails loud rather than being swallowed.
     let sleeperPid = 0;
+    let sleeperPpid = -1;
     try {
-      const psOut = execFileSync('ps', ['-ax', '-o', 'pid=,ppid=,etimes=,command='], { encoding: 'utf-8' });
+      const psOut = execFileSync('ps', ['-ax', '-o', 'pid=,ppid=,etime=,command='], { encoding: 'utf-8' });
       for (const line of psOut.split('\n')) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith(fakeHelper) || trimmed.includes(fakeHelper)) {
-          const pid = parseInt(trimmed.match(/^(\d+)/)?.[1] ?? '0', 10);
-          if (pid > 0) { sleeperPid = pid; break; }
+        const m = line.trim().match(/^(\d+)\s+(\d+)\s+\S+\s+(.*)$/);
+        if (!m) continue;
+        const command = m[3];
+        if (command === fakeHelper || command.startsWith(`${fakeHelper} `)) {
+          sleeperPid = parseInt(m[1], 10);
+          sleeperPpid = parseInt(m[2], 10);
+          break;
         }
       }
-    } catch { /* ignore */ }
+    } catch { /* fall through to the assertions below */ }
+    expect(sleeperPid).toBeGreaterThan(0);
+    expect(sleeperPpid).toBe(1); // reparented to init/launchd
 
     try {
       const prevRoot = setInstallRootForTest(tmpDir);
@@ -289,11 +308,8 @@ describe('reapOrphanedKeychainProcesses (darwin integration)', () => {
       if (sleeperPid) {
         try { process.kill(sleeperPid, 'SIGKILL'); } catch { /* may already be reaped */ }
       }
-      // Belt-and-braces: kill anything still running out of THIS test's temp dir.
-      // When the assertion failed, `sleeperPid` was often never resolved, so the
-      // 300s sleeper survived the run — three of them were still alive at PPID 1
-      // on the box that diagnosed this. Scoped to `tmpDir`, so a concurrent run's
-      // sleeper is never touched.
+      // Belt-and-braces: kill anything still running out of THIS test's temp dir,
+      // scoped to `tmpDir` so a concurrent run's sleeper is never touched.
       try { execFileSync('pkill', ['-f', tmpDir], { stdio: 'ignore' }); } catch { /* none left */ }
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
