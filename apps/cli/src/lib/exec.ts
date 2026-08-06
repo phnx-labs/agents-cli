@@ -1546,7 +1546,7 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
 
   // The agent could exit before we attach (fast failure). Don't attach to an
   // already-dead pane — surface its output + status directly and tear down.
-  const before = pane ? await paneExitStatus(pane, socket) : { dead: false };
+  const before = pane ? await paneExitStatus(pane, socket) : { found: false, dead: false, status: undefined };
   if (before.dead) {
     // F2 (RUSH-2185 / EXEC-23a): for interactive runs, ALWAYS recap — a clean
     // exit-0 before attach means the harness has no interactive REPL and the
@@ -1572,7 +1572,7 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
     } catch { return false; }
   };
 
-  const after = pane ? await paneExitStatus(pane, socket) : { dead: false };
+  const after = pane ? await paneExitStatus(pane, socket) : { found: false, dead: false, status: undefined };
   if (after.dead) {
     // Nonzero exit after attach → the agent crashed rather than the user
     // detaching cleanly (a clean detach leaves the pane ALIVE, handled below).

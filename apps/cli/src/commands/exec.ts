@@ -756,7 +756,7 @@ export function registerRunCommand(program: Command): void {
     .option('--headless', 'Force headless mode. Auto-enabled when a prompt is provided; pass explicitly to stay headless with no prompt (reads the prompt from stdin).', false)
     .option('--no-auth-check', 'Skip the pre-launch "looks logged out" warning on an interactive run (advisory; never blocks anyway). Also silenced by AGENTS_NO_AUTH_CHECK=1.')
     .option('-i, --interactive', 'Force interactive mode even when a prompt is provided. Mutually exclusive with --headless.')
-    .option('--resume [id]', 'Resume a previous conversation. Full IDs resolve locally first, then fleet-wide. Claude, Codex, Grok, Kimi, Droid, and Cursor use version-gated native resume; other agents replay via /continue. Pair with a prompt to continue headlessly.')
+    .option('--resume [id]', 'Recover a previous conversation on its origin device. The exact healthy origin uses native resume; otherwise a healthy version of the same harness replays via /continue. Pair with a prompt to continue headlessly.')
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.')
     .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --host runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
@@ -990,7 +990,7 @@ export function registerRunCommand(program: Command): void {
         given. --cloud is mutually exclusive with --host/--lease and with
         local-run flags (--loop, --resume, --secrets, --terminal, …).
 
-      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and restores the source version/device/mode. Claude, Codex, Grok, Kimi, Droid, and Cursor use version-gated native resume; others replay via /continue. agents resume <id> infers the harness too.
+      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. The exact healthy origin version uses native resume; otherwise a healthy version of the same harness replays via /continue. agents resume <id> infers the harness too.
 
       Passthrough: everything after -- is forwarded verbatim to the underlying agent CLI.
         agents run kimi -- --plan --some-native-flag value
@@ -1149,6 +1149,7 @@ export function registerRunCommand(program: Command): void {
       }
       let autoHarnessRequested = normalizedAgentSpec === RUN_AUTO_KEYWORD;
       let resolvedResumeSource: import('../lib/session/types.js').SessionMeta | undefined;
+      let resolvedRecoveryTarget: import('../lib/session/recovery.js').SessionRecoveryTarget | undefined;
 
       // Concrete resume ids resolve BEFORE placement. Full UUIDs take the local
       // SQLite fast path; only a local miss fans out to the fleet. This lets a
@@ -1212,35 +1213,45 @@ export function registerRunCommand(program: Command): void {
         }
 
         const { machineId } = await import('../lib/machine-id.js');
+        const {
+          sessionRecoveryDestinationMatches,
+          sessionRecoveryPeer,
+        } = await import('../lib/session/recovery.js');
         const sourceMachine = resolvedResumeSource.machine;
+        const sourcePeer = sessionRecoveryPeer(resolvedResumeSource);
         const explicitPlacement = hostTargetGiven(options).length > 0;
-        if (sourceMachine && sourceMachine !== machineId() && !explicitPlacement) {
-          options.host = sourceMachine;
-        } else if (!autoHarnessRequested && sourceMachine && sourceMachine !== machineId() && explicitPlacement && !hostTargetGiven(options).includes(sourceMachine)) {
+        if (sourcePeer && !explicitPlacement) {
+          options.host = sourcePeer;
+        } else if (sourcePeer && explicitPlacement && !hostTargetGiven(options).some((host) =>
+          sessionRecoveryDestinationMatches(resolvedResumeSource!, host))) {
           console.error(chalk.red(
-            `Strict resume must run on ${sourceMachine}, where session ${resolvedResumeSource.shortId} is owned. ` +
-            `Use agents run auto --resume ${resolvedResumeSource.id} to hand off elsewhere.`,
+            `Session ${resolvedResumeSource.shortId} must recover on ${sourcePeer}, where its indexed transcript and version history are owned; ` +
+            `the requested device was ${hostTargetGiven(options).join(', ')}.`,
           ));
           process.exit(1);
         }
 
-        // On the owning machine, `auto` first asks the existing account router
-        // whether the exact source version is healthy. If it is, native resume
-        // wins. If not, keep `auto` so the normal harness/account router selects
-        // a healthy local target and the later resume block performs /continue.
-        if (autoHarnessRequested && (!sourceMachine || sourceMachine === machineId())) {
-          const sourceAgent = resolvedResumeSource.agent as AgentId;
-          if (sourceAgent in AGENTS && resolvedResumeSource.version) {
-            const { resolveRunVersion } = await import('../lib/rotate.js');
-            const health = await resolveRunVersion(sourceAgent, 'available', resolvedResumeSource.cwd ?? process.cwd());
-            if (!health.exhausted && health.version === resolvedResumeSource.version) {
-              normalizedAgentSpec = `${sourceAgent}@${resolvedResumeSource.version}`;
-              autoHarnessRequested = false;
-              if (!options.quiet) process.stderr.write(chalk.gray(
-                `[agents] auto resume → native ${normalizedAgentSpec} on ${sourceMachine ?? machineId()}\n`,
-              ));
-            }
+        // Recovery is resolved on the device that owns the transcript. A remote
+        // dispatch is pinned to the source HARNESS (not `run auto`'s cross-harness
+        // picker); the peer repeats this block with the injected SessionMeta and
+        // chooses its own healthy version. Locally, resolve it now.
+        const sourceAgent = resolvedResumeSource.agent as AgentId;
+        if (!sourcePeer) {
+          try {
+            const { resolveSessionRecovery } = await import('../lib/session/recovery.js');
+            resolvedRecoveryTarget = await resolveSessionRecovery(resolvedResumeSource);
+          } catch (err) {
+            console.error(chalk.red((err as Error).message));
+            process.exit(1);
           }
+          normalizedAgentSpec = `${resolvedRecoveryTarget.agent}@${resolvedRecoveryTarget.version}`;
+          autoHarnessRequested = false;
+          if (!options.quiet) process.stderr.write(chalk.gray(
+            `[agents] session recovery → ${resolvedRecoveryTarget.mode} ${normalizedAgentSpec} on ${sourceMachine ?? machineId()} · ${resolvedRecoveryTarget.reason}\n`,
+          ));
+        } else if (autoHarnessRequested) {
+          normalizedAgentSpec = sourceAgent;
+          autoHarnessRequested = false;
         }
       }
       if (autoHarnessRequested) {
@@ -2600,10 +2611,51 @@ export function registerRunCommand(program: Command): void {
           forceInteractive = true; // bare resume always lands in the agent's TUI
         }
 
-        // Native resume is valid only for the source harness + exact isolated
-        // version. `auto` may have selected another healthy harness/account; in
-        // that case keep the target version and hand off through /continue.
-        const canResumeNatively = session.agent === agent && nativeResume(agent, session.version);
+        // Bare `run <harness> --resume` learns the chosen SessionMeta only after
+        // the host-placement phase above. If the picker chose a synced session
+        // from another device, route the recovery command now; resolving local
+        // candidates would otherwise native-resume through this device's
+        // unrelated isolated home.
+        if (!resolvedResumeSource) {
+          const {
+            sessionRecoveryPeer,
+            sessionRecoveryRunArgs,
+          } = await import('../lib/session/recovery.js');
+          const peer = sessionRecoveryPeer(session);
+          if (peer) {
+            const { runOnPeer } = await import('../lib/session/remote-list.js');
+            const routed = await runOnPeer(sessionRecoveryRunArgs(session), peer, { tty: true });
+            if (routed === 'no-target') {
+              console.error(chalk.red(
+                `Cannot recover session ${session.shortId}: origin device ${peer} is not a registered reachable peer.`,
+              ));
+              process.exitCode = 1;
+            }
+            return;
+          }
+        }
+
+        // Bare interactive --resume selects the SessionMeta only down here, so
+        // it has not gone through the early concrete-id resolver. Resolve it now;
+        // concrete ids reuse the exact same target chosen above.
+        if (!resolvedRecoveryTarget) {
+          try {
+            const { resolveSessionRecovery } = await import('../lib/session/recovery.js');
+            resolvedRecoveryTarget = await resolveSessionRecovery(session);
+          } catch (err) {
+            console.error(chalk.red((err as Error).message));
+            process.exit(1);
+          }
+        }
+        if (resolvedRecoveryTarget.agent !== agent) {
+          console.error(chalk.red(
+            `Session ${session.shortId} belongs to ${resolvedRecoveryTarget.agent}, not ${agent}. ` +
+            `Use: agents run auto --resume ${session.id}`,
+          ));
+          process.exit(1);
+        }
+        version = resolvedRecoveryTarget.version;
+        const canResumeNatively = resolvedRecoveryTarget.mode === 'native';
         if (canResumeNatively) {
           version = session.version;
           resumeNative = true;
@@ -2709,6 +2761,14 @@ export function registerRunCommand(program: Command): void {
               ? `agents add ${agent}@${launchTarget} --isolated`
               : `agents add ${agent}@latest`;
             console.error(chalk.red(`agents: ${agent}@${launchTarget} is not runnable and could not be repaired. Try: ${hint}`));
+            process.exit(1);
+          }
+          if (resolvedRecoveryTarget && healed !== launchTarget) {
+            console.error(chalk.red(
+              `agents: session recovery target ${agent}@${launchTarget} became unavailable on ` +
+              `${resolvedResumeSource?.machine ?? 'this device'}; refusing to resume through another version home. ` +
+              `Retry the command so recovery can select a healthy ${agent} version.`,
+            ));
             process.exit(1);
           }
           // Always adopt the healed version explicitly. In the version-undefined

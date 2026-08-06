@@ -312,6 +312,8 @@ export async function listClients(socket?: string): Promise<TmuxClient[]> {
 
 /** A dead pane's exit status, read from tmux while the pane lingers under remain-on-exit. */
 export interface PaneExit {
+  /** False when the pane/socket no longer exists or tmux could not query it. */
+  found: boolean;
   /** True once the process that ran in the pane has exited (pane is dead). */
   dead: boolean;
   /** Exit status of the dead pane's process, when tmux reports it. */
@@ -321,8 +323,8 @@ export interface PaneExit {
 /**
  * Read whether a pane's process has exited and, if so, its exit status. Used by
  * the spawn-wrap path to recover the wrapped agent's exit code after the attach
- * client returns. Returns `{ dead: false }` when tmux can't answer (session gone,
- * pane missing) so the caller treats an unreadable pane as "still alive / detach".
+ * client returns. `found: false` distinguishes a missing pane from a living one;
+ * focus must recover the former instead of attaching a retained/stale target.
  */
 export async function paneExitStatus(pane: string, socket?: string): Promise<PaneExit> {
   let res;
@@ -333,12 +335,12 @@ export async function paneExitStatus(pane: string, socket?: string): Promise<Pan
       throwOnError: false,
     });
   } catch {
-    return { dead: false };
+    return { found: false, dead: false };
   }
-  if (res.code !== 0) return { dead: false };
+  if (res.code !== 0) return { found: false, dead: false };
   const [deadRaw, statusRaw] = res.stdout.trim().split(/\s+/);
   const status = statusRaw !== undefined && statusRaw !== '' ? parseInt(statusRaw, 10) : undefined;
-  return { dead: deadRaw === '1', status: Number.isFinite(status) ? status : undefined };
+  return { found: true, dead: deadRaw === '1', status: Number.isFinite(status) ? status : undefined };
 }
 
 /**

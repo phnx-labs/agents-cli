@@ -11,6 +11,10 @@
  * issued from, so the run appears in that project's session listing like any
  * local run. The `[host/<name>]` label mirrors the cloud path's
  * `[cloud/<status>]` convention.
+ *
+ * `machine` is the dispatch host, not this box. Both the transcript and the
+ * version-isolated harness home live there; omitting it makes the SQLite upsert
+ * infer this box from the empty file path and sends recovery to the wrong home.
  */
 
 import * as fs from 'fs';
@@ -20,6 +24,7 @@ import { isSessionTrackedAgent } from '../session/types.js';
 import { localLogPath, updateTask, type HostTask } from './tasks.js';
 import { parseSessionIdMarker } from './session-marker.js';
 import { deriveShortId } from '../session/short-id.js';
+import { normalizeHost } from '../machine-id.js';
 
 export interface HostSessionContext {
   /** Local directory the `agents run --host` was invoked from. */
@@ -47,6 +52,7 @@ export function hostSessionMeta(task: HostTask, ctx: HostSessionContext): Sessio
     // Remote transcript — no local file. Empty file_path is the sentinel the DB
     // stale-filter treats as "always live" (see module doc).
     filePath: '',
+    machine: normalizeHost(task.host),
     topic: ctx.prompt.split('\n')[0]?.slice(0, 120) || undefined,
     // The run's `--name` seeds the label (resolves `agents sessions <name>` and
     // `agents hosts logs <name>`); an unnamed host run falls back to the
@@ -125,6 +131,7 @@ export function registerInteractiveHostSession(ctx: InteractiveHostSessionContex
         timestamp: ctx.createdAt ?? new Date().toISOString(),
         cwd: ctx.cwd,
         filePath: '',
+        machine: normalizeHost(ctx.host),
         label: ctx.name || `[host/${ctx.host}]`,
       },
       '',

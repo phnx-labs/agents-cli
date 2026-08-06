@@ -551,6 +551,34 @@ SSH access (§7); rendering sessions that no harness produced.
   NOT use embeddings, a vector database, semantic search, or model calls
   (`lib/session/shell-programs.ts`; `lib/session/tool-store.ts`;
   `lib/session/tool-index.ts`; `commands/sessions.ts`).
+- **SES-38 (MUST).** `sessions focus` MUST use the session browser's canonical
+  candidate/filter pipeline for selector-driven focus. A unique session id or
+  prefix MAY focus directly; an agent/version or text selector MUST show the
+  preview picker even when exactly one row matches. Agent version aliases
+  `latest` and `oldest` MUST resolve on each queried device, not on the caller.
+  Device, project/time, team/routine, skill/plugin, favorites, and live-state
+  flags MUST compose, and several live states MUST form the same OR-union as
+  `sessions --active` (`commands/sessions-browser.ts` `BrowserFilter`,
+  `collectSessionCandidates`, `applyFilters`; `commands/focus.ts` `focusAction`;
+  tests `commands/sessions-browser.test.ts`, `commands/focus.test.ts`).
+- **SES-39 (MUST).** Focus MUST query tmux `#{pane_dead}` immediately before
+  attach. A dead or missing pane MUST NOT attach. Session recovery MUST run on
+  the origin device and MUST choose native resume only for the exact healthy
+  origin version in its isolated home. An absent, signed-out, revoked, exhausted,
+  or non-native origin MUST select a healthy version of the same harness and use
+  `/continue <id>` against the indexed transcript; it MUST NOT native-resume from
+  another version home or choose another harness. With no usable version it MUST
+  fail with the device, origin version, and account-health reason
+  (`commands/go.ts` `probeAttachRail`; `lib/tmux/session.ts` `paneExitStatus`;
+  `lib/session/recovery.ts`; `commands/exec.ts`; tests
+  `lib/session/recovery.test.ts`, `commands/focus.test.ts`).
+- **SES-40 (MUST).** Focus, single and multi-session resume, attach, and both
+  concrete-id and picker forms of `run --resume` MUST route through SES-39's one
+  origin-device recovery decision. A host-dispatched session row MUST persist
+  the dispatch host as `machine`. Cross-device attach MUST route before reading
+  the detach record or stopping its headless PID, because both are local to the
+  origin (`lib/hosts/session-index.ts`; `commands/attach.ts`; `commands/exec.ts`;
+  tests `lib/hosts/session-index.test.ts`, `commands/attach.test.ts`).
 
 ---
 
@@ -823,6 +851,24 @@ Given one Bash call contains `git status; git diff`; When
 `--query program:git --count` runs; Then it reports 2 occurrences, 1 containing
 tool call, and 1 distinct session (`lib/session/tool-index.test.ts`;
 `commands/sessions.test.ts`).
+
+**GWT-14 — A retained dead pane recovers.**
+Given a session whose tmux pane remains after the harness exited with status 0;
+When `agents sessions focus <id>` runs; Then focus observes `pane_dead=1`, does
+not attach the pane, and invokes centralized session recovery
+(`commands/focus.test.ts`; `lib/tmux/session.test.ts`).
+
+**GWT-15 — A removed origin version continues on the same harness.**
+Given a Claude session from version 2.1.187, that version is absent, and healthy
+Claude 2.1.218 is installed on the origin device; When the session recovers;
+Then the target is `claude@2.1.218` in `/continue` mode, never native resume and
+never another harness (`lib/session/recovery.test.ts`).
+
+**GWT-16 — A cross-device attach stops the origin continuation.**
+Given a detached session indexed on another device; When `agents sessions attach
+<id>` runs; Then the whole attach command executes on the indexed origin before
+it reads the detach record, stops the headless PID, or invokes recovery
+(`commands/attach.ts`; `commands/attach.test.ts`).
 
 ---
 

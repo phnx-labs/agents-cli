@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Focus sessions with shared filters and automatic recovery</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header"><div class="header-label">agents-cli · session lifecycle</div><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-implementing">implementing</span></div>
+<h1>Focus sessions with shared filters and automatic recovery</h1>
+<p class="summary">Make `agents sessions focus` reuse the sessions browser query contract, attach only to living processes, and recover ended sessions through the originating version or a healthy same-harness `/continue` handoff.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Session 14567b8a reproduced the bug: SSH and tmux attached, but Claude had already exited with status 0.<span class="meta-sep" aria-hidden="true">·</span>The existing sessions browser already owns device fan-out, rich previews, and composable live-state filters.</p><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agents-cli/issues/2108" target="_blank" rel="noopener">#2108</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fix/session-focus-recovery</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">#2108</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex GPT-5</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s1</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">current</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-05</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#proposed-changes"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p><code>agents sessions focus</code> currently builds a separate live-only target map. A tmux session retained with <code>remain-on-exit</code> can therefore be selected even when the process inside its pane has ended. The command successfully reaches the device and attaches tmux, but the user lands on stale terminal content followed by <code>Pane is dead</code>.</p>
+<p>The corrected surface treats selection and action as separate concerns:</p>
+<ul>
+<li>the existing sessions query/filter engine decides which sessions appear;</li>
+<li>the existing preview explains the selected session;</li>
+<li>a fresh liveness check decides whether Enter attaches or recovers;</li>
+<li>recovery preserves the original isolated version when usable, otherwise a healthy version of the same harness loads the indexed transcript through <code>/continue</code>.</li>
+</ul>
+<h2 id="proposed-changes">Proposed Changes</h2>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+  <svg class="artifact-diagram" viewBox="0 0 1120 500" role="img" aria-label="Session focus selection and recovery flowchart">
+    <defs>
+      <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+        <path d="M0,0 L0,6 L9,3 z" fill="#a3e635"></path>
+      </marker>
+    </defs>
+
+    <ellipse cx="115" cy="80" rx="90" ry="34" fill="#10170a" stroke="#a3e635" stroke-width="1.8"></ellipse>
+    <text x="115" y="76" fill="#e8e8e8" font-family="ui-monospace, monospace" font-size="15" text-anchor="middle">focus selector</text>
+    <text x="115" y="96" fill="#888" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">ID · agent@version · query</text>
+
+    <path d="M205 80 H300" fill="none" stroke="#a3e635" stroke-width="1.8" marker-end="url(#arrow)"></path>
+    <path d="M300 45 H535 L555 80 L535 115 H300 L280 80 Z" fill="#141414" stroke="#666" stroke-width="1.5"></path>
+    <text x="417" y="76" fill="#e8e8e8" font-family="ui-monospace, monospace" font-size="15" text-anchor="middle">shared selection engine</text>
+    <text x="417" y="96" fill="#888" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">device · status · time · team</text>
+
+    <path d="M555 80 H650" fill="none" stroke="#a3e635" stroke-width="1.8" marker-end="url(#arrow)"></path>
+    <path d="M650 45 H875 L895 80 L875 115 H650 L630 80 Z" fill="#141414" stroke="#666" stroke-width="1.5"></path>
+    <text x="762" y="76" fill="#e8e8e8" font-family="ui-monospace, monospace" font-size="15" text-anchor="middle">preview picker</text>
+    <text x="762" y="96" fill="#888" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">rich SessionMeta + live status</text>
+
+    <path d="M895 80 H1015 V175 H920" fill="none" stroke="#a3e635" stroke-width="1.8" marker-end="url(#arrow)"></path>
+    <polygon points="810,135 920,205 810,275 700,205" fill="#0f0f0f" stroke="#facc15" stroke-width="1.5"></polygon>
+    <text x="810" y="201" fill="#e8e8e8" font-family="ui-monospace, monospace" font-size="15" text-anchor="middle">pane alive?</text>
+
+    <path d="M700 205 H535" fill="none" stroke="#a3e635" stroke-width="1.8" marker-end="url(#arrow)"></path>
+    <text x="610" y="193" fill="#a3e635" font-family="ui-monospace, monospace" font-size="12">yes</text>
+    <rect x="320" y="165" width="215" height="80" rx="8" fill="#10170a" stroke="#a3e635" stroke-width="1.8"></rect>
+    <text x="427" y="202" fill="#e8e8e8" font-family="ui-monospace, monospace" font-size="15" text-anchor="middle">attach existing process</text>
+    <text x="427" y="222" fill="#888" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">no fork · no resume</text>
+
+    <path d="M810 275 V325" fill="none" stroke="#a3e635" stroke-width="1.8" marker-end="url(#arrow)"></path>
+    <text x="822" y="304" fill="#a3e635" font-family="ui-monospace, monospace" font-size="12">no</text>
+    <polygon points="810,325 940,395 810,465 680,395" fill="#0f0f0f" stroke="#facc15" stroke-width="1.5"></polygon>
+    <text x="810" y="389" fill="#e8e8e8" font-family="ui-monospace, monospace" font-size="15" text-anchor="middle">origin usable?</text>
+    <text x="810" y="410" fill="#888" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">installed · signed in · healthy</text>
+
+    <path d="M680 395 H540" fill="none" stroke="#a3e635" stroke-width="1.8" marker-end="url(#arrow)"></path>
+    <text x="606" y="383" fill="#a3e635" font-family="ui-monospace, monospace" font-size="12">yes</text>
+    <rect x="300" y="355" width="240" height="80" rx="8" fill="#10170a" stroke="#a3e635" stroke-width="1.8"></rect>
+    <text x="420" y="392" fill="#e8e8e8" font-family="ui-monospace, monospace" font-size="15" text-anchor="middle">native resume</text>
+    <text x="420" y="412" fill="#888" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">original isolated home</text>
+
+    <path d="M940 395 H1010" fill="none" stroke="#a3e635" stroke-width="1.8" marker-end="url(#arrow)"></path>
+    <text x="967" y="383" fill="#a3e635" font-family="ui-monospace, monospace" font-size="12">no</text>
+    <rect x="1010" y="315" width="100" height="105" rx="8" fill="#10170a" stroke="#a3e635" stroke-width="1.8"></rect>
+    <text x="1060" y="350" fill="#e8e8e8" font-family="ui-monospace, monospace" font-size="15" text-anchor="middle">healthy</text>
+    <text x="1060" y="370" fill="#e8e8e8" font-family="ui-monospace, monospace" font-size="15" text-anchor="middle">same</text>
+    <text x="1060" y="390" fill="#e8e8e8" font-family="ui-monospace, monospace" font-size="15" text-anchor="middle">harness</text>
+    <text x="1060" y="408" fill="#888" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">/continue</text>
+
+    <path d="M1060 420 V455 H955" fill="none" stroke="#a3e635" stroke-width="1.8" marker-end="url(#arrow)"></path>
+    <rect x="845" y="440" width="110" height="45" rx="8" fill="#1b1010" stroke="#f87171" stroke-width="1.5"></rect>
+    <text x="900" y="458" fill="#888" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">none available:</text>
+    <text x="900" y="476" fill="#888" font-family="ui-monospace, monospace" font-size="12" text-anchor="middle">fail with reason</text>
+  </svg>
+  <figcaption><b>Figure 1.</b> ISO-style control flow. Selection is shared with the sessions browser; action is decided from a fresh process and pane probe after the user presses Enter.</figcaption>
+</figure><h3>Selection contract</h3>
+<p>Create one reusable selection model for the sessions command and focus:</p>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Resolution</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>14567b8a</code></td>
+<td>Unique ID/prefix; focus directly after applying explicit filters</td>
+</tr>
+<tr>
+<td><code>claude</code></td>
+<td>All recent Claude sessions; always show the picker</td>
+</tr>
+<tr>
+<td><code>claude@2.1.187</code></td>
+<td>Recorded origin version, including historical uninstalled versions</td>
+</tr>
+<tr>
+<td><code>claude@latest</code></td>
+<td>Resolve <code>latest</code> independently on each queried device</td>
+</tr>
+<tr>
+<td>Other text</td>
+<td>Existing topic/path/session search</td>
+</tr>
+</tbody></table>
+<p>The shared model carries agent/version selectors, device/host/local scope, project/time/team/resource filters, favorites, and the complete live-status union (<code>active</code>, <code>working</code>, <code>idle</code>, <code>waiting</code>, <code>orphan</code>, <code>crashed</code>, <code>closed</code>, <code>abandoned</code>, <code>queued</code>, <code>unknown</code>). Render-only flags remain outside focus.</p>
+<h3>Picker mockup</h3>
+<pre><code>Focus sessions
+claude@latest · yosemite-s0 · orphan · last 30 days
+
+  STATUS     SESSION    TOPIC                              VERSION
+› ◍ orphan   14567b8a   agents-cli-session-parser…        2.1.187
+  ● working  8d17b949   Repair release automation         2.1.218
+  × closed   32ac110e   Investigate session indexing      2.1.187
+
+Session preview
+agents-cli-session-parser-optimization
+Claude 2.1.187 · yosemite-s0 · orphaned
+Current task: PR5 — wire the SessionStart hook installer
+Focus action: attach existing tmux process
+
+tab preview · / search · ↑↓ select · enter focus · esc cancel
+</code></pre>
+<h3>Recovery contract</h3>
+<p>After selection, probe the target process and tmux pane again to close discovery/action races. A living pane always wins, even if the installed-version inventory changed after launch. A dead or missing pane never attaches.</p>
+<p>For recovery, resolve the indexed <code>SessionMeta</code> on the target device. Native resume is allowed only when the recorded origin version is installed, signed in, healthy, and still owns the transcript home. Otherwise the existing balanced resolver selects a healthy version of the same harness, starts a fresh interactive session on the same device, and sends <code>/continue &lt;old-session-id&gt;</code>. The continue skill reads through the session index, including soft-deleted version homes.</p>
+<h2 id="public-interface">Public Interface</h2>
+<pre><code>agents sessions focus 14567b8a
+agents sessions focus claude@latest --device yosemite-s0
+agents sessions focus claude --active
+agents sessions focus claude --orphan --device yosemite-s0
+agents sessions focus codex@latest --closed --since 7d
+agents sessions focus --orphan --waiting
+</code></pre>
+<p>Agent/version and text selectors always show the picker, even for one result. With no selector or filters, focus preserves its current active-session default. Multiple status flags form a union. <code>--attach-only</code> remains a strict no-recovery mode.</p>
+<h2 id="validation">Validation</h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Expected result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Shared filters</td>
+<td>Sessions browser and focus return identical candidate IDs for the same selection model</td>
+</tr>
+<tr>
+<td>Device selector</td>
+<td><code>latest</code> resolves against the target device inventory</td>
+</tr>
+<tr>
+<td>Live detached pane</td>
+<td>Focus attaches without spawning a replacement</td>
+</tr>
+<tr>
+<td>Dead retained pane</td>
+<td>Focus does not attach; it chooses recovery</td>
+</tr>
+<tr>
+<td>Healthy origin</td>
+<td>Native resume runs inside the original isolated home</td>
+</tr>
+<tr>
+<td>Removed/unhealthy origin</td>
+<td>Balanced same-harness launch receives <code>/continue &lt;id&gt;</code></td>
+</tr>
+<tr>
+<td>Attach-only</td>
+<td>Dead or unreachable targets fail without launching</td>
+</tr>
+<tr>
+<td>Real reproduction</td>
+<td><code>agents pty</code> demonstrates the fixed <code>14567b8a</code> flow</td>
+</tr>
+</tbody></table>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Discovery says live, process exits before Enter</td>
+<td>Re-probe process and <code>pane_dead</code> immediately before the action</td>
+</tr>
+<tr>
+<td>Local <code>latest</code> differs from remote <code>latest</code></td>
+<td>Resolve selectors on each device that owns the candidate rows</td>
+</tr>
+<tr>
+<td>Cross-version native resume cannot see the old transcript</td>
+<td>Use indexed <code>/continue</code>; never native-resume from another isolated home</td>
+</tr>
+<tr>
+<td>Status-filter behavior drifts again</td>
+<td>One shared selection type, normalization function, and parity tests</td>
+</tr>
+<tr>
+<td>A healthy replacement cannot be selected</td>
+<td>Fail with device, origin version, and inventory/health reasons</td>
+</tr>
+</tbody></table>
+<aside class="artifact-callout"><strong>Load-bearing rule:</strong> a tmux target proves that a pane was retained, not that its process is alive. Focus must probe liveness before attaching.</aside><h2 id="tracking">Tracking</h2>
+<ul>
+<li><a href="https://github.com/phnx-labs/agents-cli/issues/2108">Issue #2108 — Session focus attaches dead tmux panes instead of recovering</a></li>
+<li>Implementation branch: <code>fix/session-focus-recovery</code></li>
+</ul>
+</article>
+<footer class="document-footer">Issue #2108 · implementation plan</footer>
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGVtcGxhdGU6IHBsYW4udjEKdGl0bGU6ICJGb2N1cyBzZXNzaW9ucyB3aXRoIHNoYXJlZCBmaWx0ZXJzIGFuZCBhdXRvbWF0aWMgcmVjb3ZlcnkiCnN1bW1hcnk6ICJNYWtlIGBhZ2VudHMgc2Vzc2lvbnMgZm9jdXNgIHJldXNlIHRoZSBzZXNzaW9ucyBicm93c2VyIHF1ZXJ5IGNvbnRyYWN0LCBhdHRhY2ggb25seSB0byBsaXZpbmcgcHJvY2Vzc2VzLCBhbmQgcmVjb3ZlciBlbmRlZCBzZXNzaW9ucyB0aHJvdWdoIHRoZSBvcmlnaW5hdGluZyB2ZXJzaW9uIG9yIGEgaGVhbHRoeSBzYW1lLWhhcm5lc3MgYC9jb250aW51ZWAgaGFuZG9mZi4iCmhlYWRlcjogImFnZW50cy1jbGkgwrcgc2Vzc2lvbiBsaWZlY3ljbGUiCmZvb3RlcjogIklzc3VlICMyMTA4IMK3IGltcGxlbWVudGF0aW9uIHBsYW4iCnByb2plY3Q6ICJhZ2VudHMtY2xpIgpjb250ZXh0OiAiQSByZXRhaW5lZCB0bXV4IHBhbmUgY2FuIG91dGxpdmUgaXRzIENsYXVkZSBwcm9jZXNzIGFuZCBjdXJyZW50bHkgbG9va3MgZm9jdXNhYmxlIGV2ZW4gd2hlbiBgcGFuZV9kZWFkPTFgLiIKcmVwb3NpdG9yeTogInBobngtbGFicy9hZ2VudHMtY2xpIgpicmFuY2g6ICJmaXgvc2Vzc2lvbi1mb2N1cy1yZWNvdmVyeSIKdHJhY2tpbmc6ICIjMjEwOCIKc3RhdHVzOiBpbXBsZW1lbnRpbmcKaGFybmVzczogIkNvZGV4IgphZ2VudDogIkdQVC01IgpodW1hbjogIk11cXNpdCIKaG9zdDogInlvc2VtaXRlLXMxIgpzZXNzaW9uOiAiY3VycmVudCIKZGF0ZTogIjIwMjYtMDgtMDUiCmZhY3RzOgogIC0gIlNlc3Npb24gMTQ1NjdiOGEgcmVwcm9kdWNlZCB0aGUgYnVnOiBTU0ggYW5kIHRtdXggYXR0YWNoZWQsIGJ1dCBDbGF1ZGUgaGFkIGFscmVhZHkgZXhpdGVkIHdpdGggc3RhdHVzIDAuIgogIC0gIlRoZSBleGlzdGluZyBzZXNzaW9ucyBicm93c2VyIGFscmVhZHkgb3ducyBkZXZpY2UgZmFuLW91dCwgcmljaCBwcmV2aWV3cywgYW5kIGNvbXBvc2FibGUgbGl2ZS1zdGF0ZSBmaWx0ZXJzLiIKbGlua3M6CiAgLSAiaHR0cHM6Ly9naXRodWIuY29tL3BobngtbGFicy9hZ2VudHMtY2xpL2lzc3Vlcy8yMTA4Igphc3NldHM6IFtdCi0tLQoKIyMgUHVycG9zZQoKYGFnZW50cyBzZXNzaW9ucyBmb2N1c2AgY3VycmVudGx5IGJ1aWxkcyBhIHNlcGFyYXRlIGxpdmUtb25seSB0YXJnZXQgbWFwLiBBIHRtdXggc2Vzc2lvbiByZXRhaW5lZCB3aXRoIGByZW1haW4tb24tZXhpdGAgY2FuIHRoZXJlZm9yZSBiZSBzZWxlY3RlZCBldmVuIHdoZW4gdGhlIHByb2Nlc3MgaW5zaWRlIGl0cyBwYW5lIGhhcyBlbmRlZC4gVGhlIGNvbW1hbmQgc3VjY2Vzc2Z1bGx5IHJlYWNoZXMgdGhlIGRldmljZSBhbmQgYXR0YWNoZXMgdG11eCwgYnV0IHRoZSB1c2VyIGxhbmRzIG9uIHN0YWxlIHRlcm1pbmFsIGNvbnRlbnQgZm9sbG93ZWQgYnkgYFBhbmUgaXMgZGVhZGAuCgpUaGUgY29ycmVjdGVkIHN1cmZhY2UgdHJlYXRzIHNlbGVjdGlvbiBhbmQgYWN0aW9uIGFzIHNlcGFyYXRlIGNvbmNlcm5zOgoKLSB0aGUgZXhpc3Rpbmcgc2Vzc2lvbnMgcXVlcnkvZmlsdGVyIGVuZ2luZSBkZWNpZGVzIHdoaWNoIHNlc3Npb25zIGFwcGVhcjsKLSB0aGUgZXhpc3RpbmcgcHJldmlldyBleHBsYWlucyB0aGUgc2VsZWN0ZWQgc2Vzc2lvbjsKLSBhIGZyZXNoIGxpdmVuZXNzIGNoZWNrIGRlY2lkZXMgd2hldGhlciBFbnRlciBhdHRhY2hlcyBvciByZWNvdmVyczsKLSByZWNvdmVyeSBwcmVzZXJ2ZXMgdGhlIG9yaWdpbmFsIGlzb2xhdGVkIHZlcnNpb24gd2hlbiB1c2FibGUsIG90aGVyd2lzZSBhIGhlYWx0aHkgdmVyc2lvbiBvZiB0aGUgc2FtZSBoYXJuZXNzIGxvYWRzIHRoZSBpbmRleGVkIHRyYW5zY3JpcHQgdGhyb3VnaCBgL2NvbnRpbnVlYC4KCiMjIFByb3Bvc2VkIENoYW5nZXMKCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZSBhcnRpZmFjdC1maWd1cmUtZGlhZ3JhbSBhcnRpZmFjdC1maWd1cmUtd2lkZSI+CiAgPHN2ZyBjbGFzcz0iYXJ0aWZhY3QtZGlhZ3JhbSIgdmlld0JveD0iMCAwIDExMjAgNTAwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IlNlc3Npb24gZm9jdXMgc2VsZWN0aW9uIGFuZCByZWNvdmVyeSBmbG93Y2hhcnQiPgogICAgPGRlZnM+CiAgICAgIDxtYXJrZXIgaWQ9ImFycm93IiBtYXJrZXJXaWR0aD0iMTAiIG1hcmtlckhlaWdodD0iMTAiIHJlZlg9IjkiIHJlZlk9IjMiIG9yaWVudD0iYXV0byIgbWFya2VyVW5pdHM9InN0cm9rZVdpZHRoIj4KICAgICAgICA8cGF0aCBkPSJNMCwwIEwwLDYgTDksMyB6IiBmaWxsPSIjYTNlNjM1IiAvPgogICAgICA8L21hcmtlcj4KICAgIDwvZGVmcz4KCiAgICA8ZWxsaXBzZSBjeD0iMTE1IiBjeT0iODAiIHJ4PSI5MCIgcnk9IjM0IiBmaWxsPSIjMTAxNzBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS44IiAvPgogICAgPHRleHQgeD0iMTE1IiB5PSI3NiIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5mb2N1cyBzZWxlY3RvcjwvdGV4dD4KICAgIDx0ZXh0IHg9IjExNSIgeT0iOTYiIGZpbGw9IiM4ODgiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+SUQgwrcgYWdlbnRAdmVyc2lvbiDCtyBxdWVyeTwvdGV4dD4KCiAgICA8cGF0aCBkPSJNMjA1IDgwIEgzMDAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjgiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIiAvPgogICAgPHBhdGggZD0iTTMwMCA0NSBINTM1IEw1NTUgODAgTDUzNSAxMTUgSDMwMCBMMjgwIDgwIFoiIGZpbGw9IiMxNDE0MTQiIHN0cm9rZT0iIzY2NiIgc3Ryb2tlLXdpZHRoPSIxLjUiIC8+CiAgICA8dGV4dCB4PSI0MTciIHk9Ijc2IiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPnNoYXJlZCBzZWxlY3Rpb24gZW5naW5lPC90ZXh0PgogICAgPHRleHQgeD0iNDE3IiB5PSI5NiIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5kZXZpY2Ugwrcgc3RhdHVzIMK3IHRpbWUgwrcgdGVhbTwvdGV4dD4KCiAgICA8cGF0aCBkPSJNNTU1IDgwIEg2NTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjgiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIiAvPgogICAgPHBhdGggZD0iTTY1MCA0NSBIODc1IEw4OTUgODAgTDg3NSAxMTUgSDY1MCBMNjMwIDgwIFoiIGZpbGw9IiMxNDE0MTQiIHN0cm9rZT0iIzY2NiIgc3Ryb2tlLXdpZHRoPSIxLjUiIC8+CiAgICA8dGV4dCB4PSI3NjIiIHk9Ijc2IiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPnByZXZpZXcgcGlja2VyPC90ZXh0PgogICAgPHRleHQgeD0iNzYyIiB5PSI5NiIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5yaWNoIFNlc3Npb25NZXRhICsgbGl2ZSBzdGF0dXM8L3RleHQ+CgogICAgPHBhdGggZD0iTTg5NSA4MCBIMTAxNSBWMTc1IEg5MjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjgiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIiAvPgogICAgPHBvbHlnb24gcG9pbnRzPSI4MTAsMTM1IDkyMCwyMDUgODEwLDI3NSA3MDAsMjA1IiBmaWxsPSIjMGYwZjBmIiBzdHJva2U9IiNmYWNjMTUiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iODEwIiB5PSIyMDEiIGZpbGw9IiNlOGU4ZTgiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+cGFuZSBhbGl2ZT88L3RleHQ+CgogICAgPHBhdGggZD0iTTcwMCAyMDUgSDUzNSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuOCIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiIC8+CiAgICA8dGV4dCB4PSI2MTAiIHk9IjE5MyIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIj55ZXM8L3RleHQ+CiAgICA8cmVjdCB4PSIzMjAiIHk9IjE2NSIgd2lkdGg9IjIxNSIgaGVpZ2h0PSI4MCIgcng9IjgiIGZpbGw9IiMxMDE3MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjgiIC8+CiAgICA8dGV4dCB4PSI0MjciIHk9IjIwMiIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5hdHRhY2ggZXhpc3RpbmcgcHJvY2VzczwvdGV4dD4KICAgIDx0ZXh0IHg9IjQyNyIgeT0iMjIyIiBmaWxsPSIjODg4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiPm5vIGZvcmsgwrcgbm8gcmVzdW1lPC90ZXh0PgoKICAgIDxwYXRoIGQ9Ik04MTAgMjc1IFYzMjUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjgiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIiAvPgogICAgPHRleHQgeD0iODIyIiB5PSIzMDQiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiI+bm88L3RleHQ+CiAgICA8cG9seWdvbiBwb2ludHM9IjgxMCwzMjUgOTQwLDM5NSA4MTAsNDY1IDY4MCwzOTUiIGZpbGw9IiMwZjBmMGYiIHN0cm9rZT0iI2ZhY2MxNSIgc3Ryb2tlLXdpZHRoPSIxLjUiIC8+CiAgICA8dGV4dCB4PSI4MTAiIHk9IjM4OSIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5vcmlnaW4gdXNhYmxlPzwvdGV4dD4KICAgIDx0ZXh0IHg9IjgxMCIgeT0iNDEwIiBmaWxsPSIjODg4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmluc3RhbGxlZCDCtyBzaWduZWQgaW4gwrcgaGVhbHRoeTwvdGV4dD4KCiAgICA8cGF0aCBkPSJNNjgwIDM5NSBINTQwIiBmaWxsPSJub25lIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS44IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIgLz4KICAgIDx0ZXh0IHg9IjYwNiIgeT0iMzgzIiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPnllczwvdGV4dD4KICAgIDxyZWN0IHg9IjMwMCIgeT0iMzU1IiB3aWR0aD0iMjQwIiBoZWlnaHQ9IjgwIiByeD0iOCIgZmlsbD0iIzEwMTcwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuOCIgLz4KICAgIDx0ZXh0IHg9IjQyMCIgeT0iMzkyIiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPm5hdGl2ZSByZXN1bWU8L3RleHQ+CiAgICA8dGV4dCB4PSI0MjAiIHk9IjQxMiIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5vcmlnaW5hbCBpc29sYXRlZCBob21lPC90ZXh0PgoKICAgIDxwYXRoIGQ9Ik05NDAgMzk1IEgxMDEwIiBmaWxsPSJub25lIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS44IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIgLz4KICAgIDx0ZXh0IHg9Ijk2NyIgeT0iMzgzIiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPm5vPC90ZXh0PgogICAgPHJlY3QgeD0iMTAxMCIgeT0iMzE1IiB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwNSIgcng9IjgiIGZpbGw9IiMxMDE3MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjgiIC8+CiAgICA8dGV4dCB4PSIxMDYwIiB5PSIzNTAiIGZpbGw9IiNlOGU4ZTgiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+aGVhbHRoeTwvdGV4dD4KICAgIDx0ZXh0IHg9IjEwNjAiIHk9IjM3MCIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjE1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5zYW1lPC90ZXh0PgogICAgPHRleHQgeD0iMTA2MCIgeT0iMzkwIiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTUiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmhhcm5lc3M8L3RleHQ+CiAgICA8dGV4dCB4PSIxMDYwIiB5PSI0MDgiIGZpbGw9IiM4ODgiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+L2NvbnRpbnVlPC90ZXh0PgoKICAgIDxwYXRoIGQ9Ik0xMDYwIDQyMCBWNDU1IEg5NTUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjgiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIiAvPgogICAgPHJlY3QgeD0iODQ1IiB5PSI0NDAiIHdpZHRoPSIxMTAiIGhlaWdodD0iNDUiIHJ4PSI4IiBmaWxsPSIjMWIxMDEwIiBzdHJva2U9IiNmODcxNzEiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iOTAwIiB5PSI0NTgiIGZpbGw9IiM4ODgiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+bm9uZSBhdmFpbGFibGU6PC90ZXh0PgogICAgPHRleHQgeD0iOTAwIiB5PSI0NzYiIGZpbGw9IiM4ODgiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+ZmFpbCB3aXRoIHJlYXNvbjwvdGV4dD4KICA8L3N2Zz4KICA8ZmlnY2FwdGlvbj48Yj5GaWd1cmUgMS48L2I+IElTTy1zdHlsZSBjb250cm9sIGZsb3cuIFNlbGVjdGlvbiBpcyBzaGFyZWQgd2l0aCB0aGUgc2Vzc2lvbnMgYnJvd3NlcjsgYWN0aW9uIGlzIGRlY2lkZWQgZnJvbSBhIGZyZXNoIHByb2Nlc3MgYW5kIHBhbmUgcHJvYmUgYWZ0ZXIgdGhlIHVzZXIgcHJlc3NlcyBFbnRlci48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKIyMjIFNlbGVjdGlvbiBjb250cmFjdAoKQ3JlYXRlIG9uZSByZXVzYWJsZSBzZWxlY3Rpb24gbW9kZWwgZm9yIHRoZSBzZXNzaW9ucyBjb21tYW5kIGFuZCBmb2N1czoKCnwgSW5wdXQgfCBSZXNvbHV0aW9uIHwKfCAtLS0gfCAtLS0gfAp8IGAxNDU2N2I4YWAgfCBVbmlxdWUgSUQvcHJlZml4OyBmb2N1cyBkaXJlY3RseSBhZnRlciBhcHBseWluZyBleHBsaWNpdCBmaWx0ZXJzIHwKfCBgY2xhdWRlYCB8IEFsbCByZWNlbnQgQ2xhdWRlIHNlc3Npb25zOyBhbHdheXMgc2hvdyB0aGUgcGlja2VyIHwKfCBgY2xhdWRlQDIuMS4xODdgIHwgUmVjb3JkZWQgb3JpZ2luIHZlcnNpb24sIGluY2x1ZGluZyBoaXN0b3JpY2FsIHVuaW5zdGFsbGVkIHZlcnNpb25zIHwKfCBgY2xhdWRlQGxhdGVzdGAgfCBSZXNvbHZlIGBsYXRlc3RgIGluZGVwZW5kZW50bHkgb24gZWFjaCBxdWVyaWVkIGRldmljZSB8CnwgT3RoZXIgdGV4dCB8IEV4aXN0aW5nIHRvcGljL3BhdGgvc2Vzc2lvbiBzZWFyY2ggfAoKVGhlIHNoYXJlZCBtb2RlbCBjYXJyaWVzIGFnZW50L3ZlcnNpb24gc2VsZWN0b3JzLCBkZXZpY2UvaG9zdC9sb2NhbCBzY29wZSwgcHJvamVjdC90aW1lL3RlYW0vcmVzb3VyY2UgZmlsdGVycywgZmF2b3JpdGVzLCBhbmQgdGhlIGNvbXBsZXRlIGxpdmUtc3RhdHVzIHVuaW9uIChgYWN0aXZlYCwgYHdvcmtpbmdgLCBgaWRsZWAsIGB3YWl0aW5nYCwgYG9ycGhhbmAsIGBjcmFzaGVkYCwgYGNsb3NlZGAsIGBhYmFuZG9uZWRgLCBgcXVldWVkYCwgYHVua25vd25gKS4gUmVuZGVyLW9ubHkgZmxhZ3MgcmVtYWluIG91dHNpZGUgZm9jdXMuCgojIyMgUGlja2VyIG1vY2t1cAoKYGBgdGV4dApGb2N1cyBzZXNzaW9ucwpjbGF1ZGVAbGF0ZXN0IMK3IHlvc2VtaXRlLXMwIMK3IG9ycGhhbiDCtyBsYXN0IDMwIGRheXMKCiAgU1RBVFVTICAgICBTRVNTSU9OICAgIFRPUElDICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgVkVSU0lPTgrigLog4peNIG9ycGhhbiAgIDE0NTY3YjhhICAgYWdlbnRzLWNsaS1zZXNzaW9uLXBhcnNlcuKApiAgICAgICAgMi4xLjE4NwogIOKXjyB3b3JraW5nICA4ZDE3Yjk0OSAgIFJlcGFpciByZWxlYXNlIGF1dG9tYXRpb24gICAgICAgICAyLjEuMjE4CiAgw5cgY2xvc2VkICAgMzJhYzExMGUgICBJbnZlc3RpZ2F0ZSBzZXNzaW9uIGluZGV4aW5nICAgICAgMi4xLjE4NwoKU2Vzc2lvbiBwcmV2aWV3CmFnZW50cy1jbGktc2Vzc2lvbi1wYXJzZXItb3B0aW1pemF0aW9uCkNsYXVkZSAyLjEuMTg3IMK3IHlvc2VtaXRlLXMwIMK3IG9ycGhhbmVkCkN1cnJlbnQgdGFzazogUFI1IOKAlCB3aXJlIHRoZSBTZXNzaW9uU3RhcnQgaG9vayBpbnN0YWxsZXIKRm9jdXMgYWN0aW9uOiBhdHRhY2ggZXhpc3RpbmcgdG11eCBwcm9jZXNzCgp0YWIgcHJldmlldyDCtyAvIHNlYXJjaCDCtyDihpHihpMgc2VsZWN0IMK3IGVudGVyIGZvY3VzIMK3IGVzYyBjYW5jZWwKYGBgCgojIyMgUmVjb3ZlcnkgY29udHJhY3QKCkFmdGVyIHNlbGVjdGlvbiwgcHJvYmUgdGhlIHRhcmdldCBwcm9jZXNzIGFuZCB0bXV4IHBhbmUgYWdhaW4gdG8gY2xvc2UgZGlzY292ZXJ5L2FjdGlvbiByYWNlcy4gQSBsaXZpbmcgcGFuZSBhbHdheXMgd2lucywgZXZlbiBpZiB0aGUgaW5zdGFsbGVkLXZlcnNpb24gaW52ZW50b3J5IGNoYW5nZWQgYWZ0ZXIgbGF1bmNoLiBBIGRlYWQgb3IgbWlzc2luZyBwYW5lIG5ldmVyIGF0dGFjaGVzLgoKRm9yIHJlY292ZXJ5LCByZXNvbHZlIHRoZSBpbmRleGVkIGBTZXNzaW9uTWV0YWAgb24gdGhlIHRhcmdldCBkZXZpY2UuIE5hdGl2ZSByZXN1bWUgaXMgYWxsb3dlZCBvbmx5IHdoZW4gdGhlIHJlY29yZGVkIG9yaWdpbiB2ZXJzaW9uIGlzIGluc3RhbGxlZCwgc2lnbmVkIGluLCBoZWFsdGh5LCBhbmQgc3RpbGwgb3ducyB0aGUgdHJhbnNjcmlwdCBob21lLiBPdGhlcndpc2UgdGhlIGV4aXN0aW5nIGJhbGFuY2VkIHJlc29sdmVyIHNlbGVjdHMgYSBoZWFsdGh5IHZlcnNpb24gb2YgdGhlIHNhbWUgaGFybmVzcywgc3RhcnRzIGEgZnJlc2ggaW50ZXJhY3RpdmUgc2Vzc2lvbiBvbiB0aGUgc2FtZSBkZXZpY2UsIGFuZCBzZW5kcyBgL2NvbnRpbnVlIDxvbGQtc2Vzc2lvbi1pZD5gLiBUaGUgY29udGludWUgc2tpbGwgcmVhZHMgdGhyb3VnaCB0aGUgc2Vzc2lvbiBpbmRleCwgaW5jbHVkaW5nIHNvZnQtZGVsZXRlZCB2ZXJzaW9uIGhvbWVzLgoKIyMgUHVibGljIEludGVyZmFjZQoKYGBgYmFzaAphZ2VudHMgc2Vzc2lvbnMgZm9jdXMgMTQ1NjdiOGEKYWdlbnRzIHNlc3Npb25zIGZvY3VzIGNsYXVkZUBsYXRlc3QgLS1kZXZpY2UgeW9zZW1pdGUtczAKYWdlbnRzIHNlc3Npb25zIGZvY3VzIGNsYXVkZSAtLWFjdGl2ZQphZ2VudHMgc2Vzc2lvbnMgZm9jdXMgY2xhdWRlIC0tb3JwaGFuIC0tZGV2aWNlIHlvc2VtaXRlLXMwCmFnZW50cyBzZXNzaW9ucyBmb2N1cyBjb2RleEBsYXRlc3QgLS1jbG9zZWQgLS1zaW5jZSA3ZAphZ2VudHMgc2Vzc2lvbnMgZm9jdXMgLS1vcnBoYW4gLS13YWl0aW5nCmBgYAoKQWdlbnQvdmVyc2lvbiBhbmQgdGV4dCBzZWxlY3RvcnMgYWx3YXlzIHNob3cgdGhlIHBpY2tlciwgZXZlbiBmb3Igb25lIHJlc3VsdC4gV2l0aCBubyBzZWxlY3RvciBvciBmaWx0ZXJzLCBmb2N1cyBwcmVzZXJ2ZXMgaXRzIGN1cnJlbnQgYWN0aXZlLXNlc3Npb24gZGVmYXVsdC4gTXVsdGlwbGUgc3RhdHVzIGZsYWdzIGZvcm0gYSB1bmlvbi4gYC0tYXR0YWNoLW9ubHlgIHJlbWFpbnMgYSBzdHJpY3Qgbm8tcmVjb3ZlcnkgbW9kZS4KCiMjIFZhbGlkYXRpb24KCnwgQ2hlY2sgfCBFeHBlY3RlZCByZXN1bHQgfAp8IC0tLSB8IC0tLSB8CnwgU2hhcmVkIGZpbHRlcnMgfCBTZXNzaW9ucyBicm93c2VyIGFuZCBmb2N1cyByZXR1cm4gaWRlbnRpY2FsIGNhbmRpZGF0ZSBJRHMgZm9yIHRoZSBzYW1lIHNlbGVjdGlvbiBtb2RlbCB8CnwgRGV2aWNlIHNlbGVjdG9yIHwgYGxhdGVzdGAgcmVzb2x2ZXMgYWdhaW5zdCB0aGUgdGFyZ2V0IGRldmljZSBpbnZlbnRvcnkgfAp8IExpdmUgZGV0YWNoZWQgcGFuZSB8IEZvY3VzIGF0dGFjaGVzIHdpdGhvdXQgc3Bhd25pbmcgYSByZXBsYWNlbWVudCB8CnwgRGVhZCByZXRhaW5lZCBwYW5lIHwgRm9jdXMgZG9lcyBub3QgYXR0YWNoOyBpdCBjaG9vc2VzIHJlY292ZXJ5IHwKfCBIZWFsdGh5IG9yaWdpbiB8IE5hdGl2ZSByZXN1bWUgcnVucyBpbnNpZGUgdGhlIG9yaWdpbmFsIGlzb2xhdGVkIGhvbWUgfAp8IFJlbW92ZWQvdW5oZWFsdGh5IG9yaWdpbiB8IEJhbGFuY2VkIHNhbWUtaGFybmVzcyBsYXVuY2ggcmVjZWl2ZXMgYC9jb250aW51ZSA8aWQ+YCB8CnwgQXR0YWNoLW9ubHkgfCBEZWFkIG9yIHVucmVhY2hhYmxlIHRhcmdldHMgZmFpbCB3aXRob3V0IGxhdW5jaGluZyB8CnwgUmVhbCByZXByb2R1Y3Rpb24gfCBgYWdlbnRzIHB0eWAgZGVtb25zdHJhdGVzIHRoZSBmaXhlZCBgMTQ1NjdiOGFgIGZsb3cgfAoKIyMgUmlza3MKCnwgUmlzayB8IE1pdGlnYXRpb24gfAp8IC0tLSB8IC0tLSB8CnwgRGlzY292ZXJ5IHNheXMgbGl2ZSwgcHJvY2VzcyBleGl0cyBiZWZvcmUgRW50ZXIgfCBSZS1wcm9iZSBwcm9jZXNzIGFuZCBgcGFuZV9kZWFkYCBpbW1lZGlhdGVseSBiZWZvcmUgdGhlIGFjdGlvbiB8CnwgTG9jYWwgYGxhdGVzdGAgZGlmZmVycyBmcm9tIHJlbW90ZSBgbGF0ZXN0YCB8IFJlc29sdmUgc2VsZWN0b3JzIG9uIGVhY2ggZGV2aWNlIHRoYXQgb3ducyB0aGUgY2FuZGlkYXRlIHJvd3MgfAp8IENyb3NzLXZlcnNpb24gbmF0aXZlIHJlc3VtZSBjYW5ub3Qgc2VlIHRoZSBvbGQgdHJhbnNjcmlwdCB8IFVzZSBpbmRleGVkIGAvY29udGludWVgOyBuZXZlciBuYXRpdmUtcmVzdW1lIGZyb20gYW5vdGhlciBpc29sYXRlZCBob21lIHwKfCBTdGF0dXMtZmlsdGVyIGJlaGF2aW9yIGRyaWZ0cyBhZ2FpbiB8IE9uZSBzaGFyZWQgc2VsZWN0aW9uIHR5cGUsIG5vcm1hbGl6YXRpb24gZnVuY3Rpb24sIGFuZCBwYXJpdHkgdGVzdHMgfAp8IEEgaGVhbHRoeSByZXBsYWNlbWVudCBjYW5ub3QgYmUgc2VsZWN0ZWQgfCBGYWlsIHdpdGggZGV2aWNlLCBvcmlnaW4gdmVyc2lvbiwgYW5kIGludmVudG9yeS9oZWFsdGggcmVhc29ucyB8Cgo8YXNpZGUgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiPjxzdHJvbmc+TG9hZC1iZWFyaW5nIHJ1bGU6PC9zdHJvbmc+IGEgdG11eCB0YXJnZXQgcHJvdmVzIHRoYXQgYSBwYW5lIHdhcyByZXRhaW5lZCwgbm90IHRoYXQgaXRzIHByb2Nlc3MgaXMgYWxpdmUuIEZvY3VzIG11c3QgcHJvYmUgbGl2ZW5lc3MgYmVmb3JlIGF0dGFjaGluZy48L2FzaWRlPgoKIyMgVHJhY2tpbmcKCi0gW0lzc3VlICMyMTA4IOKAlCBTZXNzaW9uIGZvY3VzIGF0dGFjaGVzIGRlYWQgdG11eCBwYW5lcyBpbnN0ZWFkIG9mIHJlY292ZXJpbmddKGh0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdlbnRzLWNsaS9pc3N1ZXMvMjEwOCkKLSBJbXBsZW1lbnRhdGlvbiBicmFuY2g6IGBmaXgvc2Vzc2lvbi1mb2N1cy1yZWNvdmVyeWAK"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

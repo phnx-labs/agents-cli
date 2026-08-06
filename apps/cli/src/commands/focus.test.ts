@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { Command } from 'commander';
 import {
   metaFromActive,
   selectFallback,
@@ -8,9 +9,9 @@ import {
   planFocusSurface,
   openFocusTabs,
   isAttachableLiveSession,
+  inheritFocusOptions,
 } from './focus.js';
 import { refuseFallback } from './go.js';
-import { buildCanonicalResumeCommand } from '../lib/session/resume-command.js';
 import type { ActiveSession } from '../lib/session/active.js';
 import type { SurfaceItem, LaunchResult } from '../lib/terminal/index.js';
 
@@ -18,9 +19,36 @@ function s(over: Partial<ActiveSession>): ActiveSession {
   return { context: 'terminal', kind: 'claude', status: 'running', ...over } as ActiveSession;
 }
 
-/** The local version-pinned resume command a `focus` tab would run (rail-less fallback). */
-const localResume = (sess: ActiveSession): string[] | null =>
-  sess.sessionId ? buildCanonicalResumeCommand(sess.sessionId) : null;
+describe('inheritFocusOptions — parent sessions flags reach focus', () => {
+  it('inherits explicit overlapping flags without replacing child defaults', () => {
+    const parent = new Command('sessions')
+      .option('--device <target...>')
+      .option('--active')
+      .option('--orphan')
+      .option('--limit <n>', '', '50')
+      .option('--sort <field>');
+    parent.parseOptions(['--device', 'yosemite-s0', '--active', '--orphan']);
+    expect(inheritFocusOptions({ attachOnly: true, limit: '500', sort: 'recent' }, parent)).toMatchObject({
+      attachOnly: true,
+      device: ['yosemite-s0'],
+      active: true,
+      orphan: true,
+      limit: '500',
+      sort: 'recent',
+    });
+  });
+
+  it('lets an explicitly provided parent limit override the child default', () => {
+    const parent = new Command('sessions').option('--limit <n>', '', '50');
+    parent.parseOptions(['--limit', '25']);
+    expect(inheritFocusOptions({ limit: '500' }, parent).limit).toBe('25');
+  });
+});
+
+/** Portable recovery command a focus tab can execute locally or over SSH. */
+const localResume = (sess: ActiveSession): string[] => [
+  'agents', 'run', 'auto', '--resume', sess.sessionId ?? '', '--interactive',
+];
 
 describe('selectFallback — --attach-only (old `go`) vs default resume', () => {
   it('--attach-only picks refuseFallback (attach or refuse, never fork)', () => {
@@ -30,6 +58,17 @@ describe('selectFallback — --attach-only (old `go`) vs default resume', () => 
   it('default (undefined/false) picks resume-in-new-tab, not refuseFallback', () => {
     expect(selectFallback(undefined)).not.toBe(refuseFallback);
     expect(selectFallback(false)).not.toBe(refuseFallback);
+  });
+
+  it('strict remote fallback refuses instead of opening a login shell', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const previous = process.exitCode;
+    process.exitCode = undefined;
+    await refuseFallback(s({ sessionId: 'dead1234', machine: 'yosemite-s0' }), 'yosemite-s0');
+    expect(log.mock.calls.flat().join('\n')).toContain('no living tmux pane');
+    expect(process.exitCode).toBe(1);
+    process.exitCode = previous;
+    log.mockRestore();
   });
 });
 
@@ -50,9 +89,11 @@ describe('metaFromActive — the resume fallback input', () => {
 });
 
 describe('focus resume-in-a-tab command', () => {
-  it('delegates every harness to the canonical agents resume command', () => {
+  it('delegates every harness to centralized run --resume recovery', () => {
     for (const kind of ['claude', 'codex', 'opencode', 'grok', 'kimi']) {
-      expect(localResume(s({ sessionId: 'abc12345', kind }))).toEqual(['agents', 'resume', 'abc12345']);
+      expect(localResume(s({ sessionId: 'abc12345', kind }))).toEqual([
+        'agents', 'run', 'auto', '--resume', 'abc12345', '--interactive',
+      ]);
     }
   });
 });
@@ -94,6 +135,7 @@ describe('tmuxAttachScript — resolve pane → attach (join, no fork)', () => {
     const script = tmuxAttachScript({ pane: '%3' });
     expect(script).toContain('attach-session');
     expect(script).toContain('%3');
+    expect(script).toContain('#{pane_dead}');
   });
   it('threads the socket flag when the pane lives on a non-default socket', () => {
     expect(tmuxAttachScript({ socket: '/tmp/tmux-1/agents', pane: '%9' })).toContain('-S');
@@ -120,11 +162,11 @@ describe('planFocusSurface — attach a live pane, or resume a copy (never a sil
     expect(plan.note).toContain('yosemite-s0');
   });
 
-  it('local rail-less (Ghostty, no tmux) → resume a copy in the tab, version-pinned', () => {
+  it('local rail-less (Ghostty, no tmux) → centralized recovery in the tab', () => {
     const plan = planFocusSurface(s({ machine: self, host: 'ghostty', sessionId: 'abc12345', kind: 'claude' }), self, localResume);
     expect(plan.kind).toBe('resume');
     if (plan.kind !== 'resume') return;
-    expect(plan.command).toEqual(['agents', 'resume', 'abc12345']);
+    expect(plan.command).toEqual(['agents', 'run', 'auto', '--resume', 'abc12345', '--interactive']);
     expect(plan.note).toContain('resume a copy');
   });
 
@@ -132,11 +174,31 @@ describe('planFocusSurface — attach a live pane, or resume a copy (never a sil
     const plan = planFocusSurface(s({ machine: 'yosemite-s0', sessionId: 'def67890', kind: 'claude' }), self, localResume);
     expect(plan.kind).toBe('resume');
     if (plan.kind !== 'resume') return;
-    expect(plan.command).toEqual(['agents', 'resume', 'def67890']);
+    expect(plan.command.slice(0, 3)).toEqual(['ssh', '-tt', 'yosemite-s0']);
+    expect(plan.command.join(' ')).toContain('run auto --resume def67890');
   });
 
-  it('an id-less rail-less row → skip, reported (not dropped)', () => {
-    const plan = planFocusSurface(s({ machine: self, host: 'terminal', kind: 'grok' }), self, localResume);
+  it('an indexed Grok session recovers through the universal /continue path', () => {
+    const plan = planFocusSurface(s({ machine: self, host: 'terminal', sessionId: 'z1234567', kind: 'grok' }), self, localResume);
+    expect(plan.kind).toBe('resume');
+    if (plan.kind !== 'resume') return;
+    expect(plan.command.join(' ')).toContain('run auto --resume z1234567');
+  });
+
+  it('a retained dead pane recovers instead of attaching', () => {
+    const plan = planFocusSurface(
+      s({ machine: self, sessionId: 'dead1234', provenance: { mux: { kind: 'tmux', pane: '%9' } } as never }),
+      self,
+      localResume,
+      { state: 'dead', exitStatus: 0 },
+    );
+    expect(plan.kind).toBe('resume');
+    if (plan.kind !== 'resume') return;
+    expect(plan.command.join(' ')).toContain('--resume dead1234');
+  });
+
+  it('an id-less rail-less row is reported and skipped', () => {
+    const plan = planFocusSurface(s({ machine: self, host: 'terminal', kind: 'grok' }), self, () => null);
     expect(plan.kind).toBe('skip');
     if (plan.kind !== 'skip') return;
     expect(plan.note).toContain('grok');
@@ -160,16 +222,20 @@ describe('openFocusTabs — N selected sessions → N tab requests through the e
       s({ machine: 'zion', sessionId: 'aaaa1111', kind: 'claude', cwd: '/tmp' }),
       s({ machine: 'zion', sessionId: 'bbbb2222', kind: 'claude', cwd: '/tmp' }),
     ];
-    await openFocusTabs(targets, 'zion', { open, backend: 'tmux' });
+    await openFocusTabs(targets, 'zion', {
+      open,
+      backend: 'tmux',
+      metas: targets.map(metaFromActive),
+      probe: async () => ({ state: 'missing' }),
+    });
     expect(open).toHaveBeenCalledTimes(1);
     expect(calls[0].items).toHaveLength(2);
     // Tabs open locally (no host) — the remote join, when any, rides inside the command.
     expect(calls[0].opts.packing).toBe('tabs');
     expect(calls[0].opts.host).toBeUndefined();
-    expect(calls[0].items.map((i) => i.command)).toEqual([
-      ['agents', 'resume', 'aaaa1111'],
-      ['agents', 'resume', 'bbbb2222'],
-    ]);
+    for (const command of calls[0].items.map((i) => i.command)) {
+      expect(command.join(' ')).toContain('run auto --resume');
+    }
   });
 
   it('remote tmux selections attach over SSH in each tab (the mockup path)', async () => {
@@ -178,22 +244,53 @@ describe('openFocusTabs — N selected sessions → N tab requests through the e
       s({ machine: 'yosemite-s0', sessionId: 'r1', provenance: { mux: { kind: 'tmux', pane: '%1' } } as never }),
       s({ machine: 'yosemite-s0', sessionId: 'r2', provenance: { mux: { kind: 'tmux', pane: '%2' } } as never }),
     ];
-    await openFocusTabs(targets, 'zion', { open, backend: 'tmux' });
+    await openFocusTabs(targets, 'zion', {
+      open,
+      backend: 'tmux',
+      metas: targets.map(metaFromActive),
+      probe: async () => ({ state: 'alive' }),
+    });
     expect(calls[0].items).toHaveLength(2);
     for (const it of calls[0].items) expect(it.command.slice(0, 3)).toEqual(['ssh', '-tt', 'yosemite-s0']);
   });
 
-  it('a rail-less id-less row is reported and skipped, never fed to the engine as a broken tab', async () => {
+  it('rail-less Claude and Grok sessions both enter centralized recovery', async () => {
     const { calls, open } = recorder();
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const targets = [
       s({ machine: 'zion', host: 'terminal', sessionId: 'ok123456', kind: 'claude', cwd: '/tmp' }),
-      s({ machine: 'zion', host: 'terminal', kind: 'grok' }),
+      s({ machine: 'zion', host: 'terminal', sessionId: 'no123456', kind: 'grok' }),
     ];
-    await openFocusTabs(targets, 'zion', { open, backend: 'tmux' });
-    // Only the resumable one reaches the engine; the grok one is reported (skip line), not dropped silently.
-    expect(calls[0].items.map((i) => i.command)).toEqual([['agents', 'resume', 'ok123456']]);
-    expect(log.mock.calls.flat().join('\n')).toContain('skip');
+    await openFocusTabs(targets, 'zion', {
+      open,
+      backend: 'tmux',
+      metas: targets.map(metaFromActive),
+      probe: async () => ({ state: 'missing' }),
+    });
+    expect(calls[0].items).toHaveLength(2);
+    expect(calls[0].items[0].command.join(' ')).toContain('--resume ok123456');
+    expect(calls[0].items[1].command.join(' ')).toContain('--resume no123456');
+    log.mockRestore();
+  });
+
+  it('--attach-only skips dead and missing panes instead of recovering them', async () => {
+    const { calls, open } = recorder();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const targets = [
+      s({ machine: 'zion', sessionId: 'dead1234', provenance: { mux: { kind: 'tmux', pane: '%9' } } as never }),
+      s({ machine: 'zion', sessionId: 'gone1234', host: 'terminal' }),
+    ];
+    await openFocusTabs(targets, 'zion', {
+      open,
+      backend: 'tmux',
+      metas: targets.map(metaFromActive),
+      attachOnly: true,
+      probe: async (target) => target.sessionId === 'dead1234'
+        ? { state: 'dead', exitStatus: 0 }
+        : { state: 'missing' },
+    });
+    expect(calls).toHaveLength(0);
+    expect(log.mock.calls.flat().join('\n')).toContain('Nothing to open');
     log.mockRestore();
   });
 });

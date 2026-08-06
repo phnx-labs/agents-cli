@@ -55,6 +55,7 @@ describe('hostSessionMeta', () => {
     expect(meta!.agent).toBe('claude');
     expect(meta!.cwd).toBe('/home/me/proj');
     expect(meta!.filePath).toBe(''); // sentinel: remote-only, survives the stale-file filter
+    expect(meta!.machine).toBe('box');
     expect(meta!.label).toBe('[host/box]');
     expect(meta!.topic).toBe('first line');
   });
@@ -62,6 +63,11 @@ describe('hostSessionMeta', () => {
   it('seeds the label with the run --name when present (falls back to the host tag)', () => {
     const meta = hostSessionMeta(task({ name: 'remote-audit' }), { cwd: '/x', prompt: 'p' });
     expect(meta!.label).toBe('remote-audit');
+  });
+
+  it('normalizes the dispatch host as the origin machine', () => {
+    const meta = hostSessionMeta(task({ host: 'BOX.tail.ts.net' }), { cwd: '/x', prompt: 'p' });
+    expect(meta!.machine).toBe('box');
   });
 
   it('returns null when the run captured no session id (nothing to key on)', () => {
@@ -88,6 +94,7 @@ describe('registerInteractiveHostSession', () => {
     expect(byId[0].agent).toBe('claude');
     expect(byId[0].label).toBe('remote-claude');
     expect(byId[0].filePath).toBe('');
+    expect(byId[0].machine).toBe('yosemite-s0');
   });
 
   it('is a no-op for agents that are not session-tracked', () => {
@@ -111,6 +118,7 @@ describe('registerHostSession', () => {
     expect(byId).toHaveLength(1);
     expect(byId[0].label).toBe('[host/box]');
     expect(byId[0].filePath).toBe('');
+    expect(byId[0].machine).toBe('box');
 
     // The empty-file_path row survives the querySessions stale-file filter — a
     // real local session with a missing file would be dropped here.

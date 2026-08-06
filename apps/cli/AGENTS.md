@@ -246,6 +246,16 @@ resource / agent-version / config-repo present on one box but missing on another
 Read-only by default — divergence detection never installs or syncs. `--json`
 carries a stable `fleet` divergence block for the VS Code extension / Agency.
 
+### 10. Session recovery is one decision on the origin device
+
+`resolveSessionRecovery` in `src/lib/session/recovery.ts` is the only place that
+chooses native resume versus `/continue`. Focus, resume, attach, and
+`run --resume` route through it. Native resume is valid only for the exact healthy
+origin version in its isolated home; a removed, signed-out, revoked, or exhausted
+origin rotates to a healthy version of the same harness and reads the indexed
+transcript with `/continue`. Never add a caller-local fallback that native-resumes
+another version home, and never let `run auto` change harnesses during recovery.
+
 ## Supported harnesses
 
 The supported harnesses are the entries in the `AGENTS` registry

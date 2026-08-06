@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildSessionLifecycleArgs, isDirectResumeSelector, resolveResumePacking } from './sessions-resume.js';
+import {
+  buildSessionLifecycleArgs,
+  isDirectResumeSelector,
+  resolveResumePacking,
+  resumeHostMismatch,
+} from './sessions-resume.js';
 
 describe('resolveResumePacking', () => {
   it('opens every resumed session in its own tab by default', () => {
@@ -28,5 +33,16 @@ describe('buildSessionLifecycleArgs', () => {
     expect(buildSessionLifecycleArgs('ag-codex-c1f3d813', ['yosemite-s0'])).toEqual([
       'sessions', 'focus', 'ag-codex-c1f3d813', '--host', 'yosemite-s0',
     ]);
+  });
+});
+
+describe('resumeHostMismatch', () => {
+  it('accepts the indexed origin device', () => {
+    expect(resumeHostMismatch({ shortId: 'abc12345', machine: 'yosemite-s0' }, 'yosemite-s0', 'zion')).toBeNull();
+  });
+
+  it('refuses to migrate recovery to another device', () => {
+    expect(resumeHostMismatch({ shortId: 'abc12345', machine: 'yosemite-s0' }, 'zion', 'zion'))
+      .toMatch(/originated on yosemite-s0.*cannot move recovery/);
   });
 });

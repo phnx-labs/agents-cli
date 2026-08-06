@@ -20,7 +20,7 @@ import {
   filterSessionsByQuery,
   formatPickerLabel,
   pickerColumnsFor,
-  buildResumeCommand,
+  buildSessionRecoveryCommand,
   resumeSessionInPlace,
   parseAgentFilter,
 } from './sessions.js';
@@ -38,8 +38,9 @@ import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 import { confirm } from '@inquirer/prompts';
 import { spawn } from 'node:child_process';
-import { buildCanonicalResumeCommand } from '../lib/session/resume-command.js';
 import { looksLikeSessionId } from '../lib/session/discover.js';
+import { machineId } from '../lib/session/sync/config.js';
+import { sessionOriginDevice, sessionRecoveryDestinationMatches } from '../lib/session/recovery.js';
 
 /** Opening more than this many live sessions at once asks for confirmation first. */
 export const CONFIRM_THRESHOLD = 5;
@@ -70,7 +71,7 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
     .option('--teams', 'Include team-spawned sessions (hidden by default)')
     .option('--since <time>', 'Only sessions newer than this (e.g., 2h, 7d, 4w, or ISO date)')
     .option('-n, --limit <n>', 'Maximum number of sessions to load into the picker', '200')
-    .option('--host <alias>', 'Resume on a remote host over SSH (defaults to tmux there)')
+    .option('--host <alias>', 'Open on the session origin host over SSH; the host must match every selected session')
     .option('--iterm', 'Force the iTerm backend')
     .option('--ghostty', 'Force the Ghostty backend')
     .option('--tmux', 'Force the tmux backend')
@@ -102,8 +103,8 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
       - Layout: one tab per session by default. --splits packs session pairs side by side in each tab.
       - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.
       - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --host too).
-      - --host <alias> resumes on a remote machine over the same SSH transport as 'sessions --host' (defaults to tmux).
-      - Each session opens version-pinned, in its own cwd. Non-resumable agents are skipped with a note.
+      - --host <alias> opens the terminal surface on that host only when it is the selected sessions' origin; recovery never migrates a session to another device.
+      - Recovery runs on the session's origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue <id>.
     `,
   });
 
@@ -169,16 +170,24 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
   }
   if (!chosen || chosen.length === 0) return;
 
-  // 2. Split the selection into resumable surfaces and skipped agents (no silent drop).
+  if (options.host) {
+    const requestedHost = options.host;
+    const mismatches = chosen
+      .map((session) => resumeHostMismatch(session, requestedHost))
+      .filter((message): message is string => message !== null);
+    if (mismatches.length > 0) {
+      for (const message of mismatches) console.error(chalk.red(message));
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  // 2. Route every selection through the owning device's recovery resolver.
   const items: Array<SurfaceItem & { session: SessionMeta }> = [];
   for (const s of chosen) {
-    const command = buildCanonicalResumeCommand(s.id);
+    const command = buildSessionRecoveryCommand(s, !!options.host);
     const cwd = s.cwd && fs.existsSync(s.cwd) ? s.cwd : process.cwd();
     items.push({ session: s, cwd, command });
-  }
-  if (items.length === 0) {
-    console.log(chalk.gray('Nothing resumable in the selection.'));
-    return;
   }
 
   // 3. Resolve the backend (and host).
@@ -274,6 +283,17 @@ async function spawnCliInPlace(args: string[]): Promise<void> {
 
 export function resolveResumePacking(options: Pick<ResumeOptions, 'splits'>): Packing {
   return options.splits ? 'two-per-tab' : 'tabs';
+}
+
+export function resumeHostMismatch(
+  session: Pick<SessionMeta, 'shortId' | 'machine'>,
+  requestedHost: string,
+  self = machineId(),
+): string | null {
+  const origin = sessionOriginDevice(session, self);
+  return sessionRecoveryDestinationMatches(session, requestedHost, self)
+    ? null
+    : `Session ${session.shortId} originated on ${origin}; --host ${requestedHost} cannot move recovery to another device.`;
 }
 
 /**

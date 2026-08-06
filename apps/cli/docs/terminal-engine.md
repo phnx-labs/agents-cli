@@ -218,12 +218,13 @@ await openSurfaces(items, {
 | Flag | Effect |
 |---|---|
 | `--iterm` / `--ghostty` / `--tmux` / `--vscodium` / `--terminal-app` | Force a backend (else auto-detect / prompt). `--terminal-app` is spelled apart from `run --terminal`, which means "open in a terminal", not "use Terminal.app". |
-| `--host <alias>` | Resume on a remote host over SSH (defaults to `tmux`). |
+| `--host <alias>` | Open on the selected sessions' origin host over SSH (defaults to `tmux`); a different host is refused. |
 | `--splits` | Pack two sessions side by side per tab (default is one tab per session). |
 
-Non-resumable agents (where `buildResumeCommand` returns null) are skipped with a
-note, never silently dropped. With no GUI backend and no tmux, resume falls back
-to an in-place, sequential takeover of the current terminal.
+Every selected harness goes through the shared session-recovery command. Native
+resume is used only by the healthy origin version; otherwise a healthy version of
+the same harness receives `/continue <id>`. With no GUI backend and no tmux,
+resume falls back to an in-place, sequential takeover of the current terminal.
 
 ## VSCodium agent terminals
 

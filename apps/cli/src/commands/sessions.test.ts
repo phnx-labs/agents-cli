@@ -23,6 +23,7 @@ import {
   toolSearchFleetSortError,
   toolSearchForwardedArgs,
   matchesLiveStatus,
+  resolveSessionAgentName,
   requestedLiveStatuses,
 } from './sessions.js';
 import { remoteAgentsJsonCommand } from '../lib/remote-agents-json.js';
@@ -41,6 +42,15 @@ const cliEntry = path.join(repoRoot, 'src', 'index.ts');
 // problem and shell:true arg-concatenation (which would split multi-word query
 // args like "prompt text").
 const tsxLoaderUrl = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+
+describe('session harness name resolution', () => {
+  it('shares canonical aliases and typo correction with focus selectors', () => {
+    expect(resolveSessionAgentName('claude-code')).toBe('claude');
+    expect(resolveSessionAgentName('cladue')).toBe('claude');
+    expect(resolveSessionAgentName('GROK')).toBe('grok');
+    expect(resolveSessionAgentName('not-a-harness')).toBeNull();
+  });
+});
 
 describe('live session status flags', () => {
   const row = (over: Partial<ActiveSession>): ActiveSession => ({

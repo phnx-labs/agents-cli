@@ -18,6 +18,9 @@ import { isSessionTrackedAgent, type SessionMeta } from '../lib/session/types.js
 import type { ActiveSession } from '../lib/session/active.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { gatherRemoteList } from '../lib/session/remote-list.js';
+import { resolveVersionAliasLoose } from '../lib/versions.js';
+import { AGENTS } from '../lib/agents.js';
+import type { AgentId } from '../lib/types.js';
 import { enrichTeamOrigins, safeTeamText } from '../lib/session/team-filter.js';
 import { listFavorites, toggleFavorite } from '../lib/session/favorites.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
@@ -37,6 +40,9 @@ import {
   remoteHostsToDial,
   matchesTeam,
   formatLiveStatusHeadline,
+  matchesLiveStatus,
+  parseAgentFilter,
+  type LiveStatusFilter,
   type PickerColumns,
 } from './sessions.js';
 
@@ -61,6 +67,23 @@ export interface BrowserFilter {
   projectScope: 'repo' | 'all';
   /** time window (undefined = all time) — the `W` key / `--since`. */
   window?: string;
+  /** individual live states; an OR-union and, like the CLI flags, running-only. */
+  statuses: LiveStatusFilter[];
+  /** named project scope, independent of the repo/all hotkey. */
+  project?: string;
+  /** upper time bound from --until. */
+  until?: string;
+  /** retain only routine-origin sessions. */
+  routine: boolean;
+  /** indexed resource filters shared by the flag and focus surfaces. */
+  skill?: string;
+  plugin?: string;
+  /** discovery cap. */
+  limit: number;
+  /** include unmanaged native-home transcripts. */
+  unmanaged: boolean;
+  /** candidate order shared with --sort. */
+  sort: 'timestamp' | 'cost' | 'duration';
 }
 
 /**
@@ -86,6 +109,15 @@ export function buildInitialFilter(initial: Partial<BrowserFilter>): BrowserFilt
     team: initial.team,
     projectScope: initial.projectScope ?? 'repo',
     window: 'window' in initial ? initial.window : '30d',
+    statuses: initial.statuses ?? [],
+    project: initial.project,
+    until: initial.until,
+    routine: initial.routine ?? false,
+    skill: initial.skill,
+    plugin: initial.plugin,
+    limit: initial.limit ?? 500,
+    unmanaged: initial.unmanaged ?? false,
+    sort: initial.sort ?? 'timestamp',
   };
 }
 
@@ -97,7 +129,11 @@ function poolCacheKey(f: BrowserFilter): string {
   // fetches the same deep pool and is then narrowed in memory. Keying on the name
   // would make `t` the one hotkey that re-fans-out the fleet on every step of the
   // cycle, at up to REMOTE_TIMEOUT_MS per unreachable peer.
-  return `${f.window ?? 'all'}|${f.teams}|${f.team ? 'team' : ''}`;
+  const versionScoped = f.agent?.includes('@') ? f.agent : '';
+  return [
+    f.window ?? 'all', f.until ?? '', f.teams, f.team ? 'team' : '', versionScoped,
+    f.project ?? '', f.routine, f.skill ?? '', f.plugin ?? '', f.limit, f.unmanaged, f.sort,
+  ].join('|');
 }
 
 /** Pool size when a team filter is active; one team's rows can sit anywhere. */
@@ -154,7 +190,8 @@ export function sessionMatchesQuery(s: SessionMeta, query: string): boolean {
  */
 export function browserFilterToArgv(f: BrowserFilter, query = ''): string[] {
   const a = ['sessions'];
-  if (f.running) a.push('--active');
+  if (f.statuses.length === 0 && f.running) a.push('--active');
+  for (const status of f.statuses) a.push(`--${status === 'orphaned' ? 'orphan' : status}`);
   if (f.teams) a.push('--teams');
   if (f.favorites) a.push('--favorites');
   if (f.agent) a.push('-a', f.agent);
@@ -162,6 +199,14 @@ export function browserFilterToArgv(f: BrowserFilter, query = ''): string[] {
   if (f.team) a.push('--in-team', f.team);
   if (f.projectScope === 'all') a.push('--all');
   if (f.window) a.push('--since', f.window);
+  if (f.until) a.push('--until', f.until);
+  if (f.project) a.push('--project', f.project);
+  if (f.routine) a.push('--routine');
+  if (f.skill) a.push('--skill', f.skill);
+  if (f.plugin) a.push('--plugin', f.plugin);
+  if (f.unmanaged) a.push('--unmanaged');
+  if (f.sort !== 'timestamp') a.push('--sort', f.sort === 'cost' ? 'cost' : 'duration');
+  if (f.limit !== 500) a.push('--limit', String(f.limit));
   const q = query.trim();
   if (q) a.push(JSON.stringify(q));
   return a;
@@ -199,6 +244,7 @@ export function activeBrowserSeed(opts: {
     // --all widens the window to all-time (project is already 'all' here);
     // --since still overrides.
     window: opts.since ?? (opts.all ? undefined : '30d'),
+    statuses: [],
   };
 }
 
@@ -241,6 +287,7 @@ export function bareBrowserSeed(opts: {
     // --all maxes every non-status filter: all dirs AND all-time. --since wins.
     projectScope: opts.all || scoped || wholeTeam ? 'all' : 'repo',
     window: opts.since ?? (opts.all || wholeTeam ? undefined : '30d'),
+    statuses: [],
   };
 }
 
@@ -277,8 +324,14 @@ async function fetchRawPool(
   self: string,
   local: boolean,
   hosts: string[] | undefined,
+  fixedFilters = false,
 ): Promise<{ key: string; rows: SessionMeta[]; unreachable: string[] }> {
   const since = f.window;
+  const selectedAgent = f.agent ? parseAgentFilter(f.agent) : {};
+  const parsedAgent = fixedFilters ? selectedAgent : {};
+  const localAgentVersion = parsedAgent.agent && parsedAgent.agent in AGENTS
+    ? resolveVersionAliasLoose(parsedAgent.agent as AgentId, parsedAgent.version)
+    : parsedAgent.version;
   let unreachable: string[] = [];
   // Local pool: wide (every directory) — device/agent/project are applied in
   // memory so a hotkey toggle is instant and doesn't re-hit the disk. Skipped
@@ -286,16 +339,34 @@ async function fetchRawPool(
   let rows: SessionMeta[] = shouldIncludeLocal(hosts, self)
     ? await discoverSessions({
         all: true,
+        agent: parsedAgent.agent,
+        version: localAgentVersion,
+        includeUnmanaged: f.unmanaged,
         cwd: process.cwd(),
         since,
+        until: f.until,
+        project: f.project,
+        origin: f.routine ? 'routine' : undefined,
+        skill: f.skill,
+        plugin: f.plugin,
         excludeTeamOrigin: !f.teams,
         // A team filter reaches back past the usual browse window, so the pool it
         // draws from has to as well — otherwise the newest 500 rows decide which
         // teams exist.
-        limit: f.team ? WHOLE_TEAM_POOL_LIMIT : 500,
-        sortBy: 'timestamp',
+        limit: f.team ? WHOLE_TEAM_POOL_LIMIT : f.limit,
+        sortBy: f.sort,
       })
     : [];
+
+  // A synced mirror knows which VERSION produced a session, but it cannot know
+  // which version is currently installed as latest/oldest on the origin device.
+  // For an alias selector, keep only this device's rows here and accept peer
+  // rows only from the live query below, where that peer resolves its own
+  // inventory. If the peer is unavailable, an empty/partial result is honest;
+  // widening to cached sessions from every version is not.
+  if (selectedAgent.version === 'latest' || selectedAgent.version === 'oldest') {
+    rows = rows.filter((row) => (row.machine ?? self) === self);
+  }
 
   // Fleet: fold in peers' own indexes over SSH (no sync), same as the flag path.
   // Skipped under --local. An explicit --host/--device scopes exactly which peers
@@ -315,9 +386,7 @@ async function fetchRawPool(
       // the same bug one hop out. A numeric --limit is forwarded rather than
       // --in-team itself, which a peer on an older build would reject as an
       // unknown option and fail the whole fan-out.
-      const forwarded = ['sessions', '--all', '--json', '--limit', String(f.team ? WHOLE_TEAM_POOL_LIMIT : 500)];
-      if (since) forwarded.push('--since', since);
-      if (f.teams) forwarded.push('--teams');
+      const forwarded = remotePoolArgs(f, fixedFilters);
       const remoteResult = await gatherRemoteList(forwarded, remoteHosts);
       unreachable = remoteResult.unreachable;
       if (remoteResult.sessions.length > 0) rows = mergeLocalFirst([...rows, ...remoteResult.sessions], self);
@@ -332,6 +401,23 @@ async function fetchRawPool(
   if (f.teams) rows = enrichTeamOrigins(rows);
 
   return { key: poolCacheKey(f), rows, unreachable };
+}
+
+/** Build the static peer query. Keeping it pure pins the per-device alias
+ * contract: latest/oldest travel unresolved and are resolved by each peer. */
+export function remotePoolArgs(f: BrowserFilter, fixedFilters: boolean): string[] {
+  const forwarded = ['sessions', '--all', '--json', '--limit', String(f.team ? WHOLE_TEAM_POOL_LIMIT : f.limit)];
+  if (f.window) forwarded.push('--since', f.window);
+  if (f.until) forwarded.push('--until', f.until);
+  if (f.project) forwarded.push('--project', f.project);
+  if (f.routine) forwarded.push('--routine');
+  if (f.skill) forwarded.push('--skill', f.skill);
+  if (f.plugin) forwarded.push('--plugin', f.plugin);
+  if (f.unmanaged) forwarded.push('--unmanaged');
+  if (f.sort !== 'timestamp') forwarded.push('--sort', f.sort === 'cost' ? 'cost' : 'duration');
+  if (f.agent && (fixedFilters || f.agent.includes('@'))) forwarded.push('--agent', f.agent);
+  if (f.teams) forwarded.push('--teams');
+  return forwarded;
 }
 
 /**
@@ -437,7 +523,7 @@ export function shouldShowHostColumn(
 }
 
 /** Apply the cheap in-memory filters (agent / device / project / running / favorites). */
-function applyFilters(
+export function applyFilters(
   rows: SessionMeta[],
   live: Map<string, ActiveSession>,
   f: BrowserFilter,
@@ -449,15 +535,63 @@ function applyFilters(
   // favorite is always keyed by a real session id — so an id-less row can never
   // be favorited and correctly drops out here.
   if (f.favorites) out = out.filter((r) => favorites.has(r.id));
-  if (f.agent) out = out.filter((r) => r.agent === f.agent);
+  if (f.agent) {
+    const { agent, version: rawVersion } = parseAgentFilter(f.agent);
+    const localVersion = agent && agent in AGENTS
+      ? resolveVersionAliasLoose(agent as AgentId, rawVersion)
+      : rawVersion;
+    const peerResolvedAlias = rawVersion === 'latest' || rawVersion === 'oldest';
+    out = out.filter((r) => {
+      if (r.agent !== agent) return false;
+      if (!localVersion) return true;
+      // Only a LIVE peer result may claim it resolved latest/oldest against that
+      // device's installed inventory. A synced mirror is historical data, not a
+      // version-inventory oracle.
+      if (peerResolvedAlias && (r.machine ?? self) !== self) return r._remote === true;
+      return r.version === localVersion;
+    });
+  }
   if (f.device) out = out.filter((r) => (r.machine ?? self) === f.device);
   if (f.team) out = out.filter((r) => matchesTeam(r, f.team!));
+  if (f.project) {
+    const q = f.project.toLowerCase();
+    out = out.filter((r) => (r.project ?? '').toLowerCase().includes(q) || (r.cwd ?? '').toLowerCase().includes(q));
+  }
   if (f.projectScope === 'repo') {
     const cwd = process.cwd();
     out = out.filter((r) => !!r.cwd && (r.cwd === cwd || r.cwd.startsWith(cwd + '/')));
   }
   if (f.running) out = out.filter((r) => live.has(r.id));
+  if (f.statuses.length > 0) {
+    out = out.filter((r) => {
+      const active = live.get(r.id);
+      return !!active && f.statuses.some((status) => matchesLiveStatus(active, status));
+    });
+  }
   return out;
+}
+
+/** One-shot form of the browser's canonical candidate pipeline. Focus uses this
+ * instead of maintaining a second discovery/filter implementation. */
+export async function collectSessionCandidates(
+  initial: Partial<BrowserFilter>,
+  opts: { local?: boolean; hosts?: string[]; includeLive?: boolean } = {},
+): Promise<{ sessions: SessionMeta[]; liveById: Map<string, ActiveSession>; self: string; unreachable: string[] }> {
+  const self = machineId();
+  const filter = buildInitialFilter(initial);
+  if (filter.statuses.length > 0) filter.running = true;
+  const hosts = opts.hosts && opts.hosts.length > 0 ? opts.hosts : undefined;
+  const pool = await fetchRawPool(filter, self, opts.local ?? false, hosts, true);
+  let liveById = new Map<string, ActiveSession>();
+  if (filter.running || opts.includeLive) {
+    const { sessions } = await gatherActiveSessions({ local: opts.local ?? false, hosts });
+    liveById = indexLiveRows(sessions, self);
+  }
+  const rows = filter.running || opts.includeLive
+    ? mergeLiveIntoPool(pool.rows, liveById, self)
+    : pool.rows;
+  const sessions = applyFilters(rows, liveById, filter, self, listFavorites());
+  return { sessions, liveById, self, unreachable: pool.unreachable };
 }
 
 /** Derive the SSH-launch origin tag for a picker row from the live index. Set

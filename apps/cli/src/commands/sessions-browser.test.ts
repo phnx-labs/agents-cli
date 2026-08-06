@@ -13,6 +13,8 @@ import {
   liveSessionToMeta,
   mergeLiveIntoPool,
   shouldShowHostColumn,
+  applyFilters,
+  remotePoolArgs,
   type BrowserFilter,
 } from './sessions-browser.js';
 import { liveHostLabel } from './sessions.js';
@@ -39,6 +41,11 @@ const base: BrowserFilter = {
   device: undefined,
   projectScope: 'repo',
   window: undefined,
+  statuses: [],
+  routine: false,
+  limit: 500,
+  unmanaged: false,
+  sort: 'timestamp',
 };
 
 describe('browserFilterToArgv — the human↔agent contract', () => {
@@ -68,6 +75,12 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
       device: 'zion',
       projectScope: 'all',
       window: '7d',
+      statuses: [],
+      routine: false,
+      favorites: false,
+      limit: 500,
+      unmanaged: false,
+      sort: 'timestamp',
     };
     expect(browserFilterToArgv(f)).toEqual([
       'sessions',
@@ -102,6 +115,73 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
 
   it('ignores a blank query', () => {
     expect(browserFilterToArgv(base, '   ')).toEqual(['sessions']);
+  });
+
+  it('round-trips a live-status union without adding a redundant --active', () => {
+    expect(browserFilterToArgv({ ...base, running: true, statuses: ['orphaned', 'waiting'] })).toEqual([
+      'sessions', '--orphan', '--waiting',
+    ]);
+  });
+
+  it('round-trips a non-default discovery limit', () => {
+    expect(browserFilterToArgv({ ...base, limit: 25 })).toEqual(['sessions', '--limit', '25']);
+  });
+});
+
+describe('remotePoolArgs — per-device version aliases', () => {
+  it('forwards latest unresolved so the peer resolves its own installed inventory', () => {
+    expect(remotePoolArgs({ ...base, agent: 'claude@latest' }, true)).toContain('claude@latest');
+  });
+
+  it('forwards a bare harness only for a fixed selector, not a browser hotkey pool', () => {
+    expect(remotePoolArgs({ ...base, agent: 'claude' }, true)).toContain('claude');
+    expect(remotePoolArgs({ ...base, agent: 'claude' }, false)).not.toContain('claude');
+  });
+});
+
+describe('applyFilters — shared browser/focus selection', () => {
+  it('filters historical versions even when that version is no longer installed', () => {
+    const rows = [row({ id: 'old', version: '2.1.187' }), row({ id: 'new', version: '2.1.218' })];
+    const result = applyFilters(
+      rows,
+      new Map(),
+      { ...base, agent: 'claude@2.1.187', projectScope: 'all' },
+      'zion',
+      new Set(),
+    );
+    expect(result.map((session) => session.id)).toEqual(['old']);
+  });
+
+  it('uses the exact live-status union shared with sessions --active', () => {
+    const rows = [row({ id: 'orphan' }), row({ id: 'working' }), row({ id: 'closed' })];
+    const live = new Map<string, ActiveSession>([
+      ['orphan', { context: 'terminal', kind: 'claude', status: 'orphaned', sessionId: 'orphan' } as ActiveSession],
+      ['working', { context: 'terminal', kind: 'claude', status: 'running', activity: 'working', sessionId: 'working' } as ActiveSession],
+      ['closed', { context: 'terminal', kind: 'claude', status: 'closed', sessionId: 'closed' } as ActiveSession],
+    ]);
+    const result = applyFilters(
+      rows,
+      live,
+      { ...base, running: true, statuses: ['orphaned', 'working'], projectScope: 'all' },
+      'zion',
+      new Set(),
+    );
+    expect(result.map((session) => session.id)).toEqual(['orphan', 'working']);
+  });
+
+  it('does not treat a synced mirror as a peer-resolved latest result', () => {
+    const rows = [
+      row({ id: 'mirror', machine: 'yosemite-s0', version: '2.1.187' }),
+      row({ id: 'peer', machine: 'yosemite-s0', version: '2.1.218', _remote: true }),
+    ];
+    const result = applyFilters(
+      rows,
+      new Map(),
+      { ...base, agent: 'claude@latest', projectScope: 'all' },
+      'zion',
+      new Set(),
+    );
+    expect(result.map((session) => session.id)).toEqual(['peer']);
   });
 });
 

@@ -16,8 +16,9 @@ interchangeable — pick the verb for the intent:
 
 | Intent | Verb |
 | --- | --- |
-| Jump to a **live** session, or multi-select several and open each as a tab (attach its pane, or resume a copy) | `agents sessions focus [id]` |
-| Scope the picker to one device and/or a live-state (composes) | `agents sessions focus --orphan --device <host>` |
+| Focus by unique id, or multi-select history/live rows and open tabs | `agents sessions focus [selector]` |
+| Select by harness/version on a device (`latest` resolves there) | `agents sessions focus claude@latest --device <host>` |
+| Compose browser filters, including live-state unions | `agents sessions focus claude --orphan --waiting --device <host>` |
 | Attach only — never open a new tab / fork a copy | `agents sessions focus [id] --attach-only` |
 | Deprecated alias of focus --attach-only | `agents sessions go` (prints a deprecation notice) |
 | Interactive → **headless** (keep working unattended) | `agents sessions detach <id>` |
@@ -29,23 +30,24 @@ interchangeable — pick the verb for the intent:
 `focus` is the default “take me there” action. With an id or tmux alias it resolves
 the canonical session across the fleet, rechecks liveness, and attaches only when
 the process and pane are alive. A retained dead tmux pane is diagnostic state, not
-an attach target; the command resumes the native conversation on its owning device.
-With no id it opens a
+an attach target; the command enters centralized recovery on its owning device.
+With no selector or filter it opens a
 multi-select picker over the live fleet: check several and each opens as a new tab
 in the terminal you're in (Ghostty / iTerm / tmux, auto-detected), reusing
 `resume`'s batch open + flood guard. Per tab it keeps live semantics — a tmux
 session is *joined* (a second client, no fork), local or remote over SSH; a session
-with no attach rail resumes a copy in the tab, reported never silently dropped.
-`--device/--host <name>` scopes the picker to those devices and the `--active`
-live-state filters (`--orphan`/`--crashed`/`--waiting`/`--idle`/`--working`/…) narrow
-by status; the two compose (`focus --orphan --device yosemite-s0`). A direct
-`focus <id>` still single-jumps, and `--attach-only` keeps the old `go` behavior
-(attach one or refuse). `attach` / `detach` are the presence pair (foreground ↔
-background). Bare `sessions resume` is the multi-open/history path. Passing a UUID,
-unique UUID prefix, full tmux name such as `ag-codex-c1f3d813`, or unique alias
-suffix such as `c1f3d813` runs the same live-first lifecycle directly. Tmux aliases
-are bound durably to the harness-native ID at SessionStart and resolve on the device
-that owns them; ambiguous prefixes/suffixes fail instead of guessing. Top-level
+with no attach rail enters recovery in the tab, reported never silently dropped.
+Any selector or filter switches to the shared sessions-browser candidate pipeline:
+agent/version (`claude@2.1.187`, `claude@latest`), device/host/local, project/time,
+team/routine, skill/plugin, favorites, and the complete live-state union. A unique
+id focuses directly; agent/version and text selectors always show the rich preview
+picker, even for one result. `latest` and `oldest` resolve independently on each
+queried device. A full tmux name such as `ag-codex-c1f3d813` and a unique alias
+suffix such as `c1f3d813` resolve to the harness-native session ID on the device
+that owns them; ambiguous prefixes and suffixes fail instead of guessing.
+`--attach-only` keeps the old `go` behavior (attach one living
+process or refuse). `attach` / `detach` are the presence pair (foreground ↔
+background). Bare `resume` is the multi-open/history path. Top-level
 `agents resume <id-or-label>` is the strict single-session shortcut:
 a full **UUID** checks the local SQLite index first and resolves with **zero** SSH on
 a local hit; only on a local miss does it fan out to registered devices, and there the
@@ -56,12 +58,21 @@ version that created the session with its recorded cwd and launch mode. An exact
 **label** always consults the fleet (labels are not globally unique, so a same-label
 session could live on another peer): a unique match auto-resumes, a cross-machine
 collision surfaces as an ambiguity, and an ambiguous short-id prefix still surfaces
-every candidate. `agents run auto --resume <id>` is
-the adaptive form: it prefers native resume when the original harness/version is
-healthy and otherwise lets the normal router select an available harness/account,
-then hands the transcript over through `/continue`. Detail in **Background &
+every candidate. `agents run auto --resume <id>` is the adaptive form: on the
+origin device it prefers native resume only when the original harness/version is
+installed and healthy. Otherwise the account router selects a healthy version of
+the **same harness** and hands the indexed transcript over through `/continue`. It
+never native-resumes from a different version's isolated home. If no same-harness
+version is usable, the command names the device, origin version, and account-health
+reason. Detail in **Background &
 foreground (detach / attach)** below, and
 `agents sessions --help`.
+
+Before focus attaches tmux, it queries `#{pane_dead}` on the owning device. A
+retained `remain-on-exit` pane is not proof of a living agent: dead and missing
+panes recover; living panes attach. The attach shell repeats the check so a pane
+that exits between selection and tab launch fails instead of opening tmux's
+`Pane is dead` screen.
 
 ## Architecture
 
@@ -934,9 +945,15 @@ not a per-agent special case. (In the Factory extension: **Agents: Detach**
     a `teams` session must be stopped through `agents teams` so the team supervisor's
     PID-reuse-safe stop path and bookkeeping stay in sync — `detach` won't SIGTERM a
     teammate out from under it.
-- **attach**: stop the headless continuation (if any), then `resumeSessionInPlace`
-  the session interactively in the current terminal — the same session, full history,
-  including whatever the background run did.
+- **attach**: route the whole operation to the origin device, stop the headless
+  continuation there (if any), then `resumeSessionInPlace` interactively — the
+  same session and full history, including whatever the background run did. The
+  detach-record lookup and PID stop happen after routing so a cross-device attach
+  cannot leave the real background process running beside a second recovery.
+
+Host-dispatched session rows persist the dispatch host as `machine`. Their empty
+remote `filePath` therefore cannot make the SQLite index infer the dispatching box
+as the origin or send recovery into the wrong device's isolated version home.
 
 The record `detach` writes (`~/.agents/.system/detached/<id>.json`, one file per
 session; see `lib/session/detached.ts`) is the source of truth for **presence**, which

@@ -40,8 +40,9 @@ import { isPromptCancelled } from './utils.js';
 import { focusAction } from './focus.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { attachTmux, runTmux } from '../lib/tmux/binary.js';
+import { paneExitStatus } from '../lib/tmux/session.js';
 import { getDefaultSocketPath } from '../lib/tmux/paths.js';
-import { sshStream, assertValidSshTarget, shellQuote } from '../lib/ssh-exec.js';
+import { sshExec, sshStream, assertValidSshTarget, shellQuote } from '../lib/ssh-exec.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs } from '../lib/session/ghostty-tabs.js';
 
 const execFileAsync = promisify(execFile);
@@ -242,17 +243,54 @@ export function describeWhere(s: ActiveSession, self: string): Where {
  */
 export type UnreachableFallback = (s: ActiveSession, remote: string | undefined) => void | Promise<void>;
 
-/** Default (attach-only): open a login shell on the remote, or refuse locally. */
+export type AttachRailLiveness =
+  | { state: 'alive' }
+  | { state: 'dead'; exitStatus?: number }
+  | { state: 'missing' };
+
+/** Probe the tmux process, not just retained provenance. This is deliberately
+ * called immediately before an attach so remain-on-exit panes cannot masquerade
+ * as living agent sessions. */
+export async function probeAttachRail(s: ActiveSession, self: string): Promise<AttachRailLiveness> {
+  const mux = s.provenance?.mux;
+  if (mux?.kind !== 'tmux' || !mux.pane) return { state: 'missing' };
+  const remote = s.machine && s.machine !== self ? s.machine : undefined;
+  if (!remote) {
+    const pane = await paneExitStatus(mux.pane, mux.socket ?? getDefaultSocketPath());
+    if (!pane.found) return { state: 'missing' };
+    return pane.dead ? { state: 'dead', exitStatus: pane.status } : { state: 'alive' };
+  }
+
+  assertValidSshTarget(remote);
+  const sock = mux.socket ? `-S ${shellQuote(mux.socket)} ` : '';
+  const pane = shellQuote(mux.pane);
+  const command =
+    `v=$(tmux ${sock}display-message -pt ${pane} -p '#{pane_dead} #{pane_dead_status}' 2>/dev/null) || { echo missing; exit 0; }; ` +
+    `printf '%s\\n' "$v"`;
+  const result = sshExec(remote, command, { timeoutMs: 15_000, multiplex: true });
+  if (result.code !== 0) return { state: 'missing' };
+  const value = result.stdout.trim();
+  if (value === 'missing' || !value) return { state: 'missing' };
+  const [dead, rawStatus] = value.split(/\s+/);
+  const exitStatus = Number.parseInt(rawStatus ?? '', 10);
+  return dead === '1'
+    ? { state: 'dead', exitStatus: Number.isFinite(exitStatus) ? exitStatus : undefined }
+    : { state: 'alive' };
+}
+
+/** Strict attach-only fallback: no pane means no attach. Never open a shell or
+ * start recovery, because both would violate the caller's no-fork intent. */
 export async function refuseFallback(s: ActiveSession, remote: string | undefined): Promise<void> {
   if (remote) {
-    console.log(chalk.yellow(`${shortId(s)} on ${remote} isn't inside tmux — opening a shell on ${remote} instead.`));
-    assertValidSshTarget(remote);
-    process.exit(sshStream(remote, 'exec "${SHELL:-/bin/sh}" -l', { tty: true }));
+    console.log(chalk.yellow(`Can't attach ${shortId(s)} on ${remote} — it has no living tmux pane.`));
+    process.exitCode = 1;
+    return;
   }
   console.log(
     chalk.yellow(`Can't jump to ${shortId(s)} — it's in ${s.host ?? 'an unknown terminal'} with no attach rail (not tmux/Ghostty).`) +
       chalk.gray(`\nTry: agents sessions resume ${shortId(s)}`),
   );
+  process.exitCode = 1;
 }
 
 export async function jumpTo(s: ActiveSession, self: string, fallback: UnreachableFallback = refuseFallback): Promise<void> {
@@ -262,6 +300,11 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
   // Path C: remote tmux — ssh in and attach, resolving the pane's session on the remote.
   if (remote) {
     if (mux?.kind === 'tmux' && mux.pane) {
+      const liveness = await probeAttachRail(s, self);
+      if (liveness.state !== 'alive') {
+        await fallback(s, remote);
+        return;
+      }
       assertValidSshTarget(remote);
       const sock = mux.socket ? `-S ${shellQuote(mux.socket)} ` : '';
       const p = shellQuote(mux.pane);
@@ -280,6 +323,11 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
 
   // Path B: local tmux — attach (or switch-client if we're already inside tmux).
   if (mux?.kind === 'tmux' && mux.pane) {
+    const liveness = await probeAttachRail(s, self);
+    if (liveness.state !== 'alive') {
+      await fallback(s, undefined);
+      return;
+    }
     const socket = mux.socket ?? getDefaultSocketPath();
     const { session, window } = await resolveLocalPane(socket, mux.pane);
     if (session && window != null) {

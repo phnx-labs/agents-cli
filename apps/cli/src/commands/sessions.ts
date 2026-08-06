@@ -22,7 +22,7 @@ import type { AgentId } from '../lib/types.js';
 import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types.js';
 import { SESSION_AGENTS } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
-import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, findExecutable, composeWin32CommandLine } from '../lib/platform/index.js';
+import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs, type GhosttySurface } from '../lib/session/ghostty-tabs.js';
 import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
@@ -51,6 +51,8 @@ import { getShimsDir } from '../lib/state.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
 import { resolveSessionAlias } from '../lib/session/actor-sidecar.js';
 import { resolveVersionAliasLoose } from '../lib/versions.js';
+import { getAgentsInvocation } from '../lib/daemon.js';
+import { sessionRecoveryRunArgs } from '../lib/session/recovery.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import {
   sessionPicker,
@@ -3394,40 +3396,24 @@ export async function resumeSessionInPlace(session: SessionMeta): Promise<void> 
     ? session.cwd
     : process.cwd();
 
-  const resume = buildResumeCommand(session);
-  if (!resume) {
-    console.log(chalk.yellow(
-      `Resume is not supported for ${session.agent} sessions yet. Showing summary instead.`
-    ));
-    await renderSession(session, 'summary', {});
-    return;
-  }
+  const resume = buildSessionRecoveryCommand(session);
 
   console.log(chalk.gray(`Resuming: ${resume.join(' ')} (cwd: ${cwd})`));
 
-  // Resolve the (possibly version-pinned) launcher up front. On Windows the
-  // agent shim is a `.cmd`/`.ps1` and, under the shell needed to run it (see
-  // spawnResumeCommand), a missing command exits non-zero rather than emitting
-  // an ENOENT `error` event — so detect a removed version here instead of
-  // relying on that event, keeping the fallback working on every OS.
-  // `resume[0]` is an absolute alias path when one exists on disk, so only a bare
-  // name still needs a PATH lookup. Checking existsSync first is what keeps an
-  // isolated install (shims deliberately off PATH) out of the fallback.
-  const launcherFound = path.isAbsolute(resume[0])
-    ? fs.existsSync(resume[0])
-    : !!findExecutable(resume[0]);
-  if (!launcherFound && session.version) {
-    const fallback = buildFallbackCommand(session);
-    if (fallback) {
-      console.log(chalk.gray(
-        `Version ${session.version} is not installed. Resuming with the current version instead...`
-      ));
-      await spawnResumeCommand(fallback, cwd);
-      return;
-    }
-  }
-
   await spawnResumeCommand(resume, cwd);
+}
+
+/**
+ * Relaunch this CLI's one recovery path. The owning device resolves account
+ * health and either performs exact-home native resume or same-harness
+ * `/continue`; callers never guess which version home can see the transcript.
+ * `portable` is for an SSH/terminal-engine command that executes on a peer.
+ */
+export function buildSessionRecoveryCommand(session: Pick<SessionMeta, 'id'>, portable = false): string[] {
+  const args = sessionRecoveryRunArgs(session);
+  if (portable) return ['agents', ...args];
+  const invocation = getAgentsInvocation(args);
+  return [invocation.command, ...invocation.args];
 }
 
 /**
@@ -3501,8 +3487,6 @@ function spawnResumeCommand(cmd: string[], cwd: string): Promise<void> {
  * isolated HOME where the JSONL was written — regardless of which version is
  * currently the default. Falls back to the bare shim when version is unknown.
  *
- * If the versioned binary is missing (version was removed), the ENOENT
- * handler in handlePickedSession retries via buildFallbackCommand.
  */
 /**
  * The agent's own resume invocation, given whichever launcher we resolved.
@@ -3571,19 +3555,6 @@ export function buildResumeCommand(session: SessionMeta): string[] | null {
   }
 }
 
-/**
- * Fallback when the pinned version really is gone: the same resume invocation
- * against the current version.
- *
- * This used to spawn `<cli> "/continue <id>"`, feeding a slash command into the
- * TUI as a prompt. Neither CLI has `/continue` — codex documents `/resume` — so
- * the agent received an unrecognised command and the session was not resumed at
- * all. Reusing resumeArgv keeps the two paths from drifting apart again.
- */
-function buildFallbackCommand(session: SessionMeta): string[] | null {
-  const cli = AGENTS[session.agent as AgentId]?.cliCommand ?? session.agent;
-  return resumeArgv(session.agent, session.id, cli);
-}
 
 // ---------------------------------------------------------------------------
 // Cloud session source (--cloud)
@@ -3669,23 +3640,24 @@ interface AgentFilter {
   version?: string;
 }
 
+/** Resolve the harness portion of a sessions selector with the CLI's canonical
+ * alias and single-typo rules. Kept pure so focus and the browser cannot drift. */
+export function resolveSessionAgentName(name: string): SessionAgentId | null {
+  const normalized = name.toLowerCase();
+  if (SESSION_AGENTS.includes(normalized as SessionAgentId)) {
+    return normalized as SessionAgentId;
+  }
+  const resolved = resolveAgentName(normalized);
+  if (resolved && SESSION_AGENTS.includes(resolved as SessionAgentId)) {
+    return resolved as SessionAgentId;
+  }
+  return fuzzyMatch(normalized, SESSION_AGENTS, FUZZY_PRESETS.agents);
+}
+
 export function parseAgentFilter(agentName?: string): AgentFilter {
   if (!agentName) return {};
   const [name, version] = agentName.split('@', 2);
-  let agent: SessionAgentId | null = SESSION_AGENTS.includes(name as SessionAgentId)
-    ? (name as SessionAgentId)
-    : null;
-  if (!agent) {
-    // Aliases and single-typo corrections (cladue -> claude). SESSION_AGENTS
-    // includes ids (rush, hermes) that resolveAgentName doesn't know, so fall
-    // back to fuzzy-matching the session list directly.
-    const resolved = resolveAgentName(name);
-    if (resolved && SESSION_AGENTS.includes(resolved as SessionAgentId)) {
-      agent = resolved as SessionAgentId;
-    } else {
-      agent = fuzzyMatch(name, SESSION_AGENTS, FUZZY_PRESETS.agents);
-    }
-  }
+  const agent = resolveSessionAgentName(name);
   if (!agent) {
     console.error(chalk.red(`Unknown agent: ${name}. Use: ${SESSION_AGENTS.join(', ')}`));
     process.exit(1);
@@ -4524,7 +4496,7 @@ export function registerSessionsCommands(program: Command): void {
       agents sessions --crashed
 
       # --- Session lifecycle (one verb per intent) ---
-      # Jump to a live session (attach its terminal, or open a tab + resume)
+      # Focus a session (attach its living terminal, or recover an ended one)
       agents sessions focus a1b2c3d4
       # Attach only — never fork a copy (old: sessions go)
       agents sessions focus a1b2c3d4 --attach-only
@@ -4576,7 +4548,7 @@ export function registerSessionsCommands(program: Command): void {
     `,
     notes: `
       Session lifecycle (pick one verb — they are not synonyms):
-        focus [id]              jump to a live session (attach, or open tab + resume)
+        focus [selector]        attach a living pane, or recover on the origin device
         focus [id] --attach-only  attach only; never fork (replaces sessions go)
         detach <id>             interactive → headless continuation
         attach <id>             headless → interactive in this terminal
