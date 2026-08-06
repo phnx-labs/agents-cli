@@ -72,12 +72,9 @@ yellow(){ printf '\033[33m%s\033[0m\n' "$*"; }
 gray()  { printf '\033[2m%s\033[0m\n'  "$*"; }
 die()   { red "error: $*"; exit 2; }
 
-# Describe the holder for a human reading a stuck lease: a real box and, when the
-# releaser is an agent, a real session. This is DIAGNOSTIC text only -- ownership
-# is decided by the lease token below, never by matching this string. A release
-# spans several invocations (claim, then a resumed run that finishes a merged PR),
-# so anything process-scoped like $$ would make a lease undroppable by its own
-# owner on the second invocation.
+# This box's name, the way the fleet knows it. Recorded as the lease's `host` and
+# compared against it, so the liveness probe only ever reads the process table of
+# the machine that actually holds the lease.
 local_host() {
   if [[ "$(uname)" == "Darwin" ]]; then
     scutil --get LocalHostName 2>/dev/null || hostname -s
@@ -92,10 +89,18 @@ local_host() {
 # THAT would make every renewed lease look abandoned. Unset (a hand-run claim)
 # means no pid is recorded at all and liveness stays `unknown`: a missing export
 # must degrade to today's TTL behaviour, never to "instantly reclaimable".
+#
+# This pid decides LIVENESS ONLY, never ownership. Ownership stays the lease
+# token below, because a release spans several invocations (claim, then a resumed
+# run that finishes a merged PR) and a process-scoped owner would make a lease
+# undroppable by its own owner on the second invocation.
 holder_pid() { printf '%s' "${RELEASE_LEASE_HOLDER_PID:-}"; }
 
-# The pid segment is present only when a release process was declared, so the
-# human string never points at a shell that was already gone when it was written.
+# Describe the holder for a human reading a stuck lease: a real box and, when the
+# releaser is an agent, a real session. DIAGNOSTIC text only -- never matched to
+# decide anything. The pid segment appears only when a release process was
+# declared, so the string never points at a shell that was already gone when it
+# was written.
 holder_desc() {
   printf '%s%s%s' "$(local_host)" \
     "${RELEASE_LEASE_HOLDER_PID:+/pid-$RELEASE_LEASE_HOLDER_PID}" \
