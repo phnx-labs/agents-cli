@@ -14,6 +14,11 @@ export interface IPCRequestOptions {
   autoStartDaemon?: boolean;
 }
 
+type PendingIPCResponse = {
+  resolve: (response: IPCResponse) => void;
+  reject: (error: Error) => void;
+};
+
 export class BrowserDaemonNotRunningError extends Error {
   constructor() {
     super(formatBrowserDaemonNotRunningError());
@@ -75,6 +80,96 @@ async function waitForSocket(_socketPath: string, timeoutMs: number): Promise<vo
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error('Timeout waiting for browser daemon socket');
+}
+
+/**
+ * One long-lived connection to the existing browser daemon. Requests are
+ * serialized so the daemon's newline-delimited responses always map to the
+ * caller that produced them, while the process and socket stay warm between
+ * actions.
+ */
+export class BrowserIPCConnection {
+  private buffer = '';
+  private pending: PendingIPCResponse | undefined;
+  private tail: Promise<void> = Promise.resolve();
+  private closed = false;
+
+  constructor(private readonly socket: net.Socket) {
+    socket.on('data', (data) => this.handleData(data));
+    socket.on('error', (error) => this.fail(error));
+    socket.on('close', () => {
+      this.fail(new Error('Browser daemon connection closed'));
+    });
+  }
+
+  request(request: IPCRequest): Promise<IPCResponse> {
+    const result = this.tail.then(() => this.requestOnce(request));
+    this.tail = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  async close(): Promise<void> {
+    await this.tail;
+    if (this.closed || this.socket.destroyed) return;
+
+    await new Promise<void>((resolve) => {
+      this.socket.once('close', resolve);
+      this.socket.end();
+    });
+  }
+
+  private requestOnce(request: IPCRequest): Promise<IPCResponse> {
+    if (this.closed || this.socket.destroyed) {
+      return Promise.reject(new Error('Browser daemon connection is closed'));
+    }
+
+    return new Promise<IPCResponse>((resolve, reject) => {
+      this.pending = { resolve, reject };
+      this.socket.write(`${JSON.stringify(request)}\n`, (error) => {
+        if (!error) return;
+        if (this.pending?.reject === reject) this.pending = undefined;
+        reject(error);
+      });
+    });
+  }
+
+  private handleData(data: Buffer | string): void {
+    this.buffer += data.toString();
+
+    while (true) {
+      const index = this.buffer.indexOf('\n');
+      if (index === -1) return;
+
+      const line = this.buffer.slice(0, index);
+      this.buffer = this.buffer.slice(index + 1);
+      if (!line.trim()) continue;
+
+      const pending = this.pending;
+      if (!pending) {
+        this.socket.destroy();
+        this.fail(new Error('Browser daemon sent an unexpected response'));
+        return;
+      }
+
+      this.pending = undefined;
+      try {
+        pending.resolve(JSON.parse(line) as IPCResponse);
+      } catch {
+        const error = new Error('Browser daemon returned invalid JSON');
+        pending.reject(error);
+        this.socket.destroy();
+        this.fail(error);
+      }
+    }
+  }
+
+  private fail(error: Error): void {
+    if (this.closed) return;
+    this.closed = true;
+    const pending = this.pending;
+    this.pending = undefined;
+    pending?.reject(error);
+  }
 }
 
 export class BrowserIPCServer {
@@ -613,38 +708,45 @@ export async function sendIPCRequest(
   return sendRawIPCRequest(request, opts);
 }
 
+/**
+ * Open one connection that can serve many browser operations. This uses the
+ * same daemon readiness and version-reconciliation path as sendIPCRequest;
+ * only the client process and IPC socket lifetime differ.
+ */
+export async function connectBrowserIPC(
+  opts: IPCRequestOptions = {}
+): Promise<BrowserIPCConnection> {
+  const autoStartDaemon = opts.autoStartDaemon ?? true;
+  await prepareIPC('status', opts);
+
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(getIpcEndpoint());
+
+    const onError = (error: NodeJS.ErrnoException) => {
+      socket.destroy();
+      if (!autoStartDaemon && (error.code === 'ENOENT' || error.code === 'ECONNREFUSED')) {
+        reject(new BrowserDaemonNotRunningError());
+        return;
+      }
+      reject(new Error(`IPC error: ${error.message}`));
+    };
+
+    socket.once('error', onError);
+    socket.once('connect', () => {
+      socket.off('error', onError);
+      resolve(new BrowserIPCConnection(socket));
+    });
+  });
+}
+
 async function sendRawIPCRequest(
   request: IPCRequest,
   opts: IPCRequestOptions = {}
 ): Promise<IPCResponse> {
-  const socketPath = getSocketPath();
   const endpoint = getIpcEndpoint();
   const autoStartDaemon = opts.autoStartDaemon ?? true;
 
-  if (!(await isDaemonReachable())) {
-    if (!autoStartDaemon) {
-      throw new BrowserDaemonNotRunningError();
-    }
-    if (!IS_WINDOWS) {
-      await fs.promises.mkdir(path.dirname(socketPath), { recursive: true, mode: 0o700 });
-      await fs.promises.chmod(path.dirname(socketPath), 0o700);
-    }
-    startDaemon();
-    if (!(await isDaemonReachable())) {
-      await waitForSocket(socketPath, 6000);
-    }
-    if (!(await isDaemonReachable())) {
-      throw new Error('Failed to start browser daemon');
-    }
-    await new Promise((r) => setTimeout(r, 300));
-  }
-
-  // Before serving a real request, make sure the daemon isn't running stale
-  // code. Skips the internal `version` probe (avoids recursion) and callers
-  // that opt out of auto-start. No-ops once reconciled or when versions match.
-  if (request.action !== 'version' && autoStartDaemon) {
-    await reconcileDaemonVersion(socketPath);
-  }
+  await prepareIPC(request.action, opts);
 
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(endpoint);
@@ -678,4 +780,37 @@ async function sendRawIPCRequest(
       }
     });
   });
+}
+
+async function prepareIPC(
+  action: IPCRequest['action'],
+  opts: IPCRequestOptions
+): Promise<void> {
+  const socketPath = getSocketPath();
+  const autoStartDaemon = opts.autoStartDaemon ?? true;
+
+  if (!(await isDaemonReachable())) {
+    if (!autoStartDaemon) {
+      throw new BrowserDaemonNotRunningError();
+    }
+    if (!IS_WINDOWS) {
+      await fs.promises.mkdir(path.dirname(socketPath), { recursive: true, mode: 0o700 });
+      await fs.promises.chmod(path.dirname(socketPath), 0o700);
+    }
+    startDaemon();
+    if (!(await isDaemonReachable())) {
+      await waitForSocket(socketPath, 6000);
+    }
+    if (!(await isDaemonReachable())) {
+      throw new Error('Failed to start browser daemon');
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
+  // Before serving a real request, make sure the daemon isn't running stale
+  // code. Skips the internal `version` probe (avoids recursion) and callers
+  // that opt out of auto-start. No-ops once reconciled or when versions match.
+  if (action !== 'version' && autoStartDaemon) {
+    await reconcileDaemonVersion(socketPath);
+  }
 }
