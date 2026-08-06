@@ -141,18 +141,37 @@ export function promptClaims(text: string): string[] {
   // Two grammars, since the verb can precede or follow the noun. Both carry the
   // same verb set — they drifted apart once, and `The passphrase is prompted at
   // first use.` fell straight through the gap.
-  const verbFirst = /\b(prompts?|asks?|asked|requests?|requested|prompted)\b[^.]{0,90}\bpassphrase\b/gi;
-  const passphraseFirst = /\bpassphrase\b[^.]{0,60}\b(prompted|prompts?|requested|requests?|asked|asks?)\b/gi;
+  const PROMPT_VERB = String.raw`prompts?|prompted|asks?|asked|requests?|requested`
+    + String.raw`|enters?|entered|types?|typed|supplys?|supplies|supplied|provides?|provided|inputs?`;
+  const verbFirst = new RegExp(String.raw`\b(${PROMPT_VERB})\b[^.]{0,90}\bpassphrase\b`, 'gi');
+  const passphraseFirst = new RegExp(String.raw`\bpassphrase\b[^.]{0,60}\b(${PROMPT_VERB})\b`, 'gi');
   return [
     ...findMatches(section, verbFirst),
     ...findMatches(section, passphraseFirst),
   ].map((m) => m.text);
 }
 
-/** Instructions to set the MASTER key so unattended sync works. */
+/**
+ * Instructions to set the MASTER key so unattended sync works.
+ *
+ * The verb set is a LIST, and a list is never complete — `use` and `provide`
+ * were both missing until review named them. The alternative, flagging any
+ * master-key mention inside a headless-sync window, was measured against the
+ * real document and reports two legitimate passages: the `--remote-backend file`
+ * table row (which says "only if set") and the sentence contrasting the two
+ * variables. Neither can carry a marker cleanly — an HTML comment inside a
+ * Markdown table breaks the table — so the verb list is the bounded choice.
+ * A phrasing it misses is a gap to add here, not a reason to loosen the rule.
+ */
 export function headlessSyncInstructions(text: string): string[] {
   const guardedText = stripAllowedRegions(text);
-  const instruction = new RegExp(String.raw`\b(set|export|define|configure)\s+\`?${MASTER_KEY}`, 'gi');
+  const instruction = new RegExp(
+    String.raw`\b(set|sets|setting|export|exports|exporting|define|defines|configure|configures`
+    + String.raw`|use|uses|using|provide|provides|supply|supplies|specify|specifies|pass|passes`
+    + String.raw`|give|gives|need|needs|require|requires|add|adds|put|puts|inject|injects)\s+`
+    + String.raw`(?:\w+\s+){0,2}\`?${MASTER_KEY}`,
+    'gi',
+  );
   return findMatches(guardedText, instruction)
     // The index comes from the match itself, so filtering never misaligns a
     // survivor with an earlier match's context (the bug this replaced).
@@ -311,6 +330,30 @@ describe('docs-hygiene checks catch the bypasses review found', () => {
     // The mirror of the above: the same grammar, affirmative, must still fail.
     const bad = `${HEAD}The passphrase is requested at first use.\n`;
     expect(promptClaims(bad)).not.toEqual([]);
+  });
+
+  it('rejects a prompt claim phrased with "enter"', () => {
+    // The verb set covered prompt/ask/request but not the imperative an
+    // operator would actually read: "enter the passphrase".
+    const bad = `${HEAD}At first use, enter the passphrase in the terminal.\n`;
+    expect(promptClaims(bad)).not.toEqual([]);
+  });
+
+  it('rejects a headless-sync instruction phrased with "use"', () => {
+    // `use` and `provide` express the RUSH-1968 mistake exactly, and neither
+    // was in the verb set until review named them.
+    const bad = `On a headless CI box, use ${MASTER_KEY} so push and pull work.\n`;
+    expect(headlessSyncInstructions(bad)).not.toEqual([]);
+  });
+
+  it('rejects a headless-sync instruction phrased with "provide"', () => {
+    const bad = `For unattended sync on a worker box, provide ${MASTER_KEY} and pull will succeed.\n`;
+    expect(headlessSyncInstructions(bad)).not.toEqual([]);
+  });
+
+  it('rejects a headless-sync instruction with words between verb and variable', () => {
+    const bad = `On a headless CI box, set the ${MASTER_KEY} value so push and pull work.\n`;
+    expect(headlessSyncInstructions(bad)).not.toEqual([]);
   });
 
   it('rejects a passive prompt claim using "prompted"', () => {
