@@ -35,6 +35,7 @@ import * as yaml from 'yaml';
 import { buildCredentialScript, buildHomeFileWriteScript, CLAUDE_TOKEN_REMOTE, type DetectedRuntime } from './runtimes.js';
 import { LEASE_AGENT_MARKER, leasePhaseSentinel } from './progress.js';
 import { copySetupToBox } from './setup-copy.js';
+import { DEFAULT_CRABBOX_PROFILE } from './config.js';
 
 /** Phase signal for a lease run, so the command layer can drive a progress UI. */
 export type LeasePhase =
@@ -260,6 +261,67 @@ function pickReadyPoolBox(opts: LeaseRunOptions): CrabboxBox | null {
   return null;
 }
 
+/** Untouched-for-this-long ⇒ no active run holds the box, so an expired one is a stray. */
+export const STRAY_GRACE_SECS = 600;
+
+export interface StrayMatchOptions {
+  /** Pool the lease belongs to (defaults to DEFAULT_CRABBOX_PROFILE). */
+  profile?: string;
+  /** Network mode of the lease (default 'public'); a box is partitioned by it. */
+  netMode?: 'public' | 'tailscale';
+  /** The box this run is using — never a stray. */
+  keepSlug: string;
+  /** Injectable clock (unix seconds). */
+  nowSecs?: number;
+  /** Idle grace window (defaults to {@link STRAY_GRACE_SECS}). */
+  graceSecs?: number;
+}
+
+/**
+ * Whether `box` is an EXPIRED, idle stray in this run's pool — the boxes that
+ * accumulate cost. An expired box can never be reused (`poolReusableBoxes` gates
+ * on an unexpired lease), yet `keep:true` leaves it running, so without a sweep a
+ * fresh provision leaves the old one billing until `gc`'s 1h-idle window. Only a
+ * box that is running, in the SAME profile+netMode pool, has an EXPIRED lease, and
+ * has been untouched for the grace window is a stray — a mid-boot or in-use box
+ * (recent `lastTouchedAt`, or an unexpired lease) is never one. Pure — testable
+ * without a shell.
+ */
+export function isExpiredPoolStray(box: CrabboxBox, opts: StrayMatchOptions): boolean {
+  const profile = opts.profile ?? DEFAULT_CRABBOX_PROFILE;
+  const netMode = opts.netMode ?? 'public';
+  const nowSecs = opts.nowSecs ?? Math.floor(Date.now() / 1000);
+  const graceSecs = opts.graceSecs ?? STRAY_GRACE_SECS;
+  if (box.slug === opts.keepSlug) return false;
+  if (box.status !== 'running') return false;
+  if ((box.profile ?? DEFAULT_CRABBOX_PROFILE) !== profile) return false;
+  const boxNet = box.tailscaleIPv4 || box.tailscaleFQDN ? 'tailscale' : 'public';
+  if (boxNet !== netMode) return false;
+  if (box.expiresAt === null || box.expiresAt > nowSecs) return false; // unexpired ⇒ reusable
+  if (box.lastTouchedAt !== null && nowSecs - box.lastTouchedAt < graceSecs) return false; // maybe active
+  return true;
+}
+
+/**
+ * Opportunistically stop expired, idle strays in this run's pool — rides the
+ * lease (no scheduler), best-effort (never throws, never blocks the run). Returns
+ * how many were stopped.
+ */
+function reapExpiredPoolStrays(opts: LeaseRunOptions, keepSlug: string): number {
+  let boxes: CrabboxBox[];
+  try {
+    boxes = crabboxList({ secretsBundle: opts.secretsBundle });
+  } catch {
+    return 0;
+  }
+  let reaped = 0;
+  for (const b of boxes) {
+    if (!isExpiredPoolStray(b, { profile: opts.profile, netMode: opts.netMode, keepSlug })) continue;
+    if (crabboxStop(b.slug, { secretsBundle: opts.secretsBundle })) reaped++;
+  }
+  return reaped;
+}
+
 export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult> {
   const startedAt = Date.now();
   let box: CrabboxBox;
@@ -296,6 +358,14 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
     }
   }
   opts.onPhase?.({ kind: 'ready', box, elapsedMs: Date.now() - startedAt });
+
+  // Reap expired, idle strays in this pool now that we hold our box. An expired
+  // box can never be reused, so these are pure cost the 1h-idle `gc` window
+  // leaves running. Skip when the caller named an explicit `--box` (they're
+  // driving box lifecycle by hand). Best-effort — never blocks or aborts the run.
+  if (!opts.reuseBox) {
+    reapExpiredPoolStrays(opts, box.slug);
+  }
 
   // Setup-copy (F1, RUSH-1920): push the git-tracked ~/.agents config onto the
   // box from the host, over crabbox's own per-lease ssh (a raw ssh fails

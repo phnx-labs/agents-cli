@@ -264,6 +264,47 @@ agents defaults project-root ~/src/github.com/<user>          # set/show the roo
 `--remote-cwd <dir>` is the explicit escape hatch — a literal remote path, used
 verbatim (not re-rooted). Precedence: `--remote-cwd` > `--project`/`--cwd`.
 
+## Lease a disposable cloud box (`--lease`)
+
+`agents run <agent> "<task>" --lease` runs the agent on a **disposable cloud box**
+(via crabbox) instead of locally, then tears it down. Unlike `--host`, no machine is
+registered — the box is ephemeral. One-time provider setup, then run:
+
+```bash
+agents lease setup                                    # provider creds (hetzner today)
+agents run claude "refactor the auth module" --lease  # cwd must be a git repo
+```
+
+Progress renders as a live checklist: provision (or reuse a warm pool box) → sync the
+working dir → install agents-cli + the runtime → **copy your local `~/.agents` setup**
+(skills / hooks / commands / MCP) onto the box → run the agent → tear down. Because your
+setup is copied, the agent on the box has the same skills it does locally.
+
+**Reuse-first, self-cleaning.** By default `--lease` reuses a ready box from the repo's
+warm profile pool when one exists (and keeps it); only a freshly-provisioned box is
+destroyed after the run. Each lease also **auto-stops expired, idle strays** in that pool
+(an expired box can never be reused, so it's pure cost) — the pool self-cleans toward a
+single warm box. Control the box lifecycle:
+
+| Flag | Effect |
+|------|--------|
+| `--fresh` | Always provision a brand-new box (skip the warm-pool reuse); tear down after |
+| `--reuse` | Reuse the most-recently-used warm box if any, else provision fresh (scriptable form of the picker) |
+| `--box <slug>` | Reuse one specific warm box by slug (see `agents lease list`) |
+| `--keep-box` | Keep the box after the run instead of stopping it |
+| `--bare` | Skip copying your `~/.agents` setup — a stock box with just the runtime |
+| `--tailscale` / `--no-tailscale` | Join the box to your tailnet (private) vs. force a public-IP lease |
+| `--lease <backend>` | Pick the cloud: `hetzner` (default), `aws`, `do`. Also spellable `--where lease[:backend]` |
+
+### Manage leased boxes
+
+```bash
+agents lease list             # warm boxes you can reuse (--box <slug>)
+agents lease stop <slug>      # stop / release one now
+agents lease gc               # stop expired, idle boxes holding provider quota (safe)
+agents devices list --all     # also show ephemeral leased boxes alongside the fleet
+```
+
 ## Bounded runs
 
 Kill the agent after a duration. Useful in CI and scheduled jobs.
