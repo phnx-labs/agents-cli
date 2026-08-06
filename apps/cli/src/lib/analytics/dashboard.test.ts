@@ -1,7 +1,4 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest';
-
-// win32: better-sqlite3 + vitest hooks hang/timeout at 10s in CI (RUSH-2215).
-const describeDash = process.platform === 'win32' ? describe.skip : describe;
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -9,6 +6,9 @@ import Database from '../sqlite.js';
 import { closeUsageDb, recordUsage } from './usage-db.js';
 import { buildMixDashboard } from './dashboard.js';
 import { recipeHarnessMix, recipeToolsPerSession, analyticsWindow } from './recipes.js';
+
+// win32: better-sqlite3 + vitest hooks hang/timeout at 10s in CI (RUSH-2215).
+const describeDash = process.platform === 'win32' ? describe.skip : describe;
 
 const tmpDirs: string[] = [];
 let prevNoTrack: string | undefined;
