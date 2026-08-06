@@ -14,9 +14,15 @@
  * never fatal — one asleep laptop must not blank the list.
  */
 import { spawn } from 'child_process';
-import { StringDecoder } from 'string_decoder';
 import chalk from 'chalk';
-import { SSH_OPTS, controlOpts, assertValidSshTarget, shellQuote } from '../ssh-exec.js';
+import {
+  SSH_OPTS,
+  controlOpts,
+  assertValidSshTarget,
+  shellQuote,
+  REMOTE_STDOUT_MAX_BYTES,
+  RemoteUtf8Accumulator,
+} from '../ssh-exec.js';
 import { sshTargetFor } from '../devices/connect.js';
 import { resolveExplicitTargetSet } from '../devices/resolve-target.js';
 import { loadDevices, isControlDevice, isDialableDevice, type DeviceProfile } from '../devices/registry.js';
@@ -48,31 +54,16 @@ import {
 } from './tool-calls.js';
 
 const REMOTE_TOOL_TIMEOUT_MS = 60_000;
-export const REMOTE_STDOUT_MAX_BYTES = 16 * 1024 * 1024;
+// The per-peer stdout ceiling and the UTF-8-safe accumulator live in ssh-exec.ts
+// (the shared SSH transport both this reader and the top-level `remote-agents-json`
+// fan-out import), so the bound is defined once. Re-exported here for the existing
+// consumers/tests that reach them through this module.
+export { REMOTE_STDOUT_MAX_BYTES, RemoteUtf8Accumulator } from '../ssh-exec.js';
 export const REMOTE_TOOL_AGGREGATE_MAX_BYTES = TOOL_QUERY_MAX_SERIALIZED_BYTES;
 
 export interface RemoteToolByteBudget {
   remainingBytes: number;
   exhausted: boolean;
-}
-
-/** Preserve UTF-8 code points when SSH splits them across stdout chunks. */
-export class RemoteUtf8Accumulator {
-  private readonly decoder = new StringDecoder('utf8');
-  private value = '';
-
-  write(chunk: Buffer): void {
-    this.value += this.decoder.write(chunk);
-  }
-
-  end(): string {
-    this.value += this.decoder.end();
-    return this.value;
-  }
-
-  current(): string {
-    return this.value;
-  }
 }
 
 /** Claim received bytes against one fleet-query budget before retaining them. */

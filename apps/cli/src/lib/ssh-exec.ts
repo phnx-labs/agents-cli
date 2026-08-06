@@ -9,6 +9,7 @@
  */
 
 import { spawn, spawnSync } from 'child_process';
+import { StringDecoder } from 'string_decoder';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getCacheDir } from './state.js';
@@ -52,6 +53,43 @@ export const SSH_OPTS: readonly string[] = [
   '-o', 'ServerAliveInterval=15',
   '-o', 'ServerAliveCountMax=3',
 ];
+
+/**
+ * Hard ceiling on the stdout one peer may return before its capture is aborted.
+ * A cross-machine fan-out streams every peer's `agents … --json` into memory in
+ * parallel, so an unbounded buffer means one runaway peer (a corrupt or
+ * pathologically large payload) can exhaust the caller's heap and take the whole
+ * sweep down with it — RUSH-2065 observed ~170MB retained across a single
+ * `--active` gather. 16 MiB is far above any legitimate JSON listing yet small
+ * enough that N peers in flight stay bounded. A peer that overflows is treated as
+ * unreachable rather than trusted with partial output.
+ */
+export const REMOTE_STDOUT_MAX_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Accumulate SSH stdout as UTF-8 without corrupting a multi-byte code point that
+ * a chunk boundary splits — the streaming `on('data')` callbacks hand us raw
+ * `Buffer`s, and a naive `buf.toString()` per chunk mangles any character the
+ * kernel cut in half. `StringDecoder` holds the trailing partial bytes until the
+ * next chunk completes them.
+ */
+export class RemoteUtf8Accumulator {
+  private readonly decoder = new StringDecoder('utf8');
+  private value = '';
+
+  write(chunk: Buffer): void {
+    this.value += this.decoder.write(chunk);
+  }
+
+  end(): string {
+    this.value += this.decoder.end();
+    return this.value;
+  }
+
+  current(): string {
+    return this.value;
+  }
+}
 
 /**
  * OpenSSH connection-multiplexing options. The first connection to a host opens

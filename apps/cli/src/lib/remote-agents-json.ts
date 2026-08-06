@@ -9,7 +9,14 @@
 import { spawn } from 'child_process';
 import { setMaxListeners } from 'node:events';
 import chalk from 'chalk';
-import { SSH_OPTS, controlOpts, assertValidSshTarget, shellQuote } from './ssh-exec.js';
+import {
+  SSH_OPTS,
+  controlOpts,
+  assertValidSshTarget,
+  shellQuote,
+  REMOTE_STDOUT_MAX_BYTES,
+  RemoteUtf8Accumulator,
+} from './ssh-exec.js';
 import { sshTargetFor } from './devices/connect.js';
 import { resolveExplicitTargets } from './devices/resolve-target.js';
 import { loadDevices, isControlDevice, isDialableDevice, type DeviceProfile } from './devices/registry.js';
@@ -104,23 +111,46 @@ export function remoteAgentsJsonCommand(args: string[], noFanoutEnv: string, os?
   return `bash -lc ${shellQuote(inner)}`;
 }
 
-const sshCapture: SshCaptureFn = (target, remoteCmd, { timeoutMs, signal }) => {
-  assertValidSshTarget(target);
+/**
+ * The subset of a spawned `ssh` child this capture loop drives. Structural so a
+ * unit test can feed synthetic `data`/`close` events through a fake without a
+ * live SSH connection.
+ */
+export interface CapturableChild {
+  stdout: { on(event: 'data', listener: (chunk: Buffer) => void): unknown } | null;
+  on(event: 'error' | 'close', listener: (arg?: number | null) => void): unknown;
+  kill(signal?: NodeJS.Signals): unknown;
+}
+
+/**
+ * Stream one child's stdout into memory under a hard per-peer byte ceiling.
+ *
+ * A cross-machine fan-out awaits every peer's capture under one `Promise.all`,
+ * so an unbounded buffer means a single runaway peer (a corrupt or
+ * pathologically large payload) exhausts the caller's heap and takes the whole
+ * sweep down — RUSH-2065. Once the accumulated bytes would exceed
+ * {@link REMOTE_STDOUT_MAX_BYTES}, the child is SIGKILLed and the capture settles
+ * as `code: null` (unreachable) rather than trust a truncated body. A definitive
+ * early-exit `signal` SIGTERMs the child the same way, and the timer is the
+ * per-peer deadline.
+ */
+export function captureBoundedStdout(
+  child: CapturableChild,
+  { timeoutMs, signal }: { timeoutMs: number; signal?: AbortSignal },
+): Promise<{ code: number | null; stdout: string }> {
   return new Promise((resolve) => {
-    if (signal?.aborted) {
-      resolve({ code: null, stdout: '' });
-      return;
-    }
-    const args = [...SSH_OPTS, ...controlOpts(), target, remoteCmd];
-    const child = spawn('ssh', args, { stdio: ['ignore', 'pipe', 'ignore'] });
-    let stdout = '';
+    const decoded = new RemoteUtf8Accumulator();
+    let stdoutBytes = 0;
     let settled = false;
     const done = (code: number | null) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
-      resolve({ code, stdout });
+      // A killed/aborted capture never cleanly ends its decoder; return what
+      // decoded so far (the caller treats a non-zero code as unreachable and
+      // ignores stdout anyway).
+      resolve({ code, stdout: code === null ? decoded.current() : decoded.end() });
     };
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
@@ -130,10 +160,28 @@ const sshCapture: SshCaptureFn = (target, remoteCmd, { timeoutMs, signal }) => {
     // unreachable peer is not left running to its full timeout.
     const onAbort = () => { child.kill('SIGTERM'); done(null); };
     signal?.addEventListener('abort', onAbort, { once: true });
-    child.stdout.on('data', (data) => { stdout += data.toString(); });
+    child.stdout?.on('data', (data: Buffer) => {
+      // Over the ceiling, SIGKILL the child and treat it as unreachable rather
+      // than trust a partial payload — the RUSH-2065 OOM guard.
+      if (stdoutBytes + data.byteLength > REMOTE_STDOUT_MAX_BYTES) {
+        child.kill('SIGKILL');
+        done(null);
+        return;
+      }
+      stdoutBytes += data.byteLength;
+      decoded.write(data);
+    });
     child.on('error', () => done(null));
-    child.on('close', (code) => done(code));
+    child.on('close', (code) => done(code ?? null));
   });
+}
+
+const sshCapture: SshCaptureFn = (target, remoteCmd, { timeoutMs, signal }) => {
+  assertValidSshTarget(target);
+  if (signal?.aborted) return Promise.resolve({ code: null, stdout: '' });
+  const args = [...SSH_OPTS, ...controlOpts(), target, remoteCmd];
+  const child = spawn('ssh', args, { stdio: ['ignore', 'pipe', 'ignore'] });
+  return captureBoundedStdout(child, { timeoutMs, signal });
 };
 
 /** Query explicit hosts, or every registered online peer when hosts is omitted. */

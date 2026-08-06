@@ -1,13 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
+import { EventEmitter } from 'events';
 import { decodePowershell } from './hosts/remote-cmd.js';
 import {
+  captureBoundedStdout,
   gatherRemoteAgentsJson,
   parseRemoteAgentsJsonPayload,
   remoteAgentsJsonCommand,
+  type CapturableChild,
   type SshCaptureFn,
 } from './remote-agents-json.js';
+import { REMOTE_STDOUT_MAX_BYTES } from './ssh-exec.js';
 import { parseRemoteListPayload } from './session/remote-list.js';
+
+/**
+ * A fake `ssh` child: an EventEmitter for the process-level `error`/`close`
+ * events with a nested emitter standing in for `stdout`, recording every kill so
+ * a test can assert the capture aborted a runaway peer.
+ */
+class FakeChild extends EventEmitter implements CapturableChild {
+  readonly stdout = new EventEmitter();
+  readonly kills: Array<NodeJS.Signals | undefined> = [];
+  kill(signal?: NodeJS.Signals): boolean {
+    this.kills.push(signal);
+    return true;
+  }
+}
 
 describe('remoteAgentsJsonCommand', () => {
   it('guards a POSIX peer against recursive fan-out', () => {
@@ -37,6 +55,47 @@ describe('parseRemoteAgentsJsonPayload', () => {
     );
 
     expect(parsed).toEqual({ items: [], parseFailed: true });
+  });
+});
+
+describe('captureBoundedStdout per-peer stdout cap (RUSH-2065)', () => {
+  it('returns a clean sub-ceiling payload on a zero-exit close', async () => {
+    const child = new FakeChild();
+    const capture = captureBoundedStdout(child, { timeoutMs: 1_000 });
+    child.stdout.emit('data', Buffer.from('[{"id":"a"}]'));
+    child.emit('close', 0);
+    await expect(capture).resolves.toEqual({ code: 0, stdout: '[{"id":"a"}]' });
+    expect(child.kills).toEqual([]); // a well-behaved peer is never killed
+  });
+
+  it('SIGKILLs a peer that overflows the ceiling and settles it as unreachable', async () => {
+    const child = new FakeChild();
+    const capture = captureBoundedStdout(child, { timeoutMs: 5_000 });
+    // First chunk sits exactly at the ceiling (allowed); the next byte trips it.
+    child.stdout.emit('data', Buffer.alloc(REMOTE_STDOUT_MAX_BYTES, 0x20));
+    child.stdout.emit('data', Buffer.from('x'));
+    const result = await capture;
+    expect(result.code).toBeNull(); // overflow → treated as unreachable, not trusted
+    expect(child.kills).toEqual(['SIGKILL']);
+    // The buffer never grew past the ceiling (the tripping byte was dropped).
+    expect(Buffer.byteLength(result.stdout)).toBeLessThanOrEqual(REMOTE_STDOUT_MAX_BYTES);
+  });
+
+  it('does not corrupt a multi-byte code point split across chunks', async () => {
+    const child = new FakeChild();
+    const capture = captureBoundedStdout(child, { timeoutMs: 1_000 });
+    // '€' is 0xE2 0x82 0xAC — split it so a naive per-chunk toString() would mangle it.
+    child.stdout.emit('data', Buffer.from([0xe2, 0x82]));
+    child.stdout.emit('data', Buffer.from([0xac]));
+    child.emit('close', 0);
+    await expect(capture).resolves.toEqual({ code: 0, stdout: '€' });
+  });
+
+  it('settles null on a spawn error without killing', async () => {
+    const child = new FakeChild();
+    const capture = captureBoundedStdout(child, { timeoutMs: 1_000 });
+    child.emit('error', new Error('ENOENT'));
+    await expect(capture).resolves.toEqual({ code: null, stdout: '' });
   });
 });
 
