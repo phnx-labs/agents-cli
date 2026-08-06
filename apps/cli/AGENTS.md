@@ -249,6 +249,23 @@ resource / agent-version / config-repo present on one box but missing on another
 Read-only by default — divergence detection never installs or syncs. `--json`
 carries a stable `fleet` divergence block for the VS Code extension / Agency.
 
+**Per-device harness/account readiness lives in `agents devices harnesses` /
+`agents devices accounts` (RUSH-2003).** A fourth fleet lens, distinct from the
+three diagnostics above: not "is the fleet healthy?" (`fleet status`) or "is a
+token live?" (`fleet ping`), but "what can each box actually *run* right now?" —
+per installed `agent@version`, its account, signed-in, quota, and a single `ready`
+verdict (signed in AND not rate-limited). `harnesses` is the per-install view;
+`accounts` collapses installs that share one account. The collector
+([`collectLocalHarnessInventory`](src/lib/devices/harness-inventory.ts)) reuses
+`getAccountInfo` (identity), the daemon-warmed usage cache via
+`getUsageInfoByIdentity({ readOnly })` (quota — never blocks on a per-account
+network fetch unless `--refresh`), and `deriveUsageStatusFromSnapshot` (throttle
+state); the fan-out mirrors `fleet ping` (probe self in process, SSH each peer's
+`devices harnesses --local --json` worker, same per-device + overall deadlines).
+Everything but the collector is pure and unit-tested
+([`harness-inventory.test.ts`](src/lib/devices/harness-inventory.test.ts)). Agent
+coverage is `ALL_AGENT_IDS`-driven, so a new harness is included automatically.
+
 ### 10. Session recovery is one decision on the origin device
 
 `resolveSessionRecovery` in `src/lib/session/recovery.ts` is the only place that

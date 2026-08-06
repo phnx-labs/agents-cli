@@ -545,6 +545,9 @@ agents fleet status                     # online/offline rollup + NEEDS ATTENTIO
 agents fleet status --verbose           # full per-device auth/CLI/sync/version grid
 agents fleet status --live              # force a live resource probe (alias of --refresh)
 agents fleet status --json --strict     # scriptable fleet health gate
+agents devices harnesses                # per device: agent@version · account · signed · quota · ready
+agents devices accounts                 # same, one row per account (which harnesses share it)
+agents devices harnesses --agents claude,codex --json   # scoped, machine-readable
 agents doctor --check --devices         # CI drift gate across every registered device
 
 # Your Tailscale fleet, auto-discovered
@@ -592,6 +595,18 @@ cries wolf: `●live` (verified), `·present` (signed in but the agent has no li
 endpoint — e.g. codex/grok — benign), `◐degraded` (soft/self-healing: expired-but-refreshing,
 rate-limited), and `○revoked` (server rejected — re-login now). Only `○` means a real
 re-login is needed. Run `agents fleet ping` to force a live re-verification across the fleet.
+
+`agents devices harnesses` answers "what can each box actually run right now?" — one row
+per installed `agent@version` across the fleet with its **account**, **signed-in**,
+**quota** (highest usage-window utilization; `*` = from the cached snapshot), and a single
+**ready** verdict (signed in AND not rate-limited). It SSH-probes each online device
+(bounded, so one unreachable box can't stall the glance) and reuses the daemon-warmed usage
+cache, so it never blocks on a per-account network fetch — pass `--refresh` (`--live`) for a
+live quota read. `agents devices accounts` is the same data through the **identity lens**:
+one row per account, collapsing the installs that share it (e.g. five claude versions on one
+email) and naming which harnesses use it — the fast way to see which accounts are logged in
+and healthy across every machine. Scope either with `--agents <csv>` / `--device <csv>`, and
+add `--json` for the machine-readable per-host rows.
 
 **Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--host` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/00-concepts.md](apps/cli/docs/00-concepts.md#devices--hosts).
 
