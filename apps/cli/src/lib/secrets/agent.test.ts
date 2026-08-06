@@ -103,6 +103,16 @@ describe('handleAgentRequest', () => {
     expect(handleAgentRequest(store, { cmd: 'get', name: 'prod' }, 6_000)).toMatchObject({ hit: false });
   });
 
+  it('revokes exactly one lease id without wiping other grants', () => {
+    const store = freshStore();
+    const lease = (id: string, bundle: string) => ({ id, bundle, keys: ['TOKEN'], createdAt: 0, expiresAt: 60_000, harness: '*', sleepPersist: false });
+    handleAgentRequest(store, { ...loadReq('a', { TOKEN: 'a' }, 60_000), lease: lease('lease-a', 'a') }, 0);
+    handleAgentRequest(store, { ...loadReq('b', { TOKEN: 'b' }, 60_000), lease: lease('lease-b', 'b') }, 0);
+    expect(handleAgentRequest(store, { cmd: 'revoke', leaseId: 'lease-a' }, 1)).toEqual({ ok: true, cmd: 'revoke', wiped: 1 });
+    expect(handleAgentRequest(store, { cmd: 'get', name: 'a' }, 1)).toMatchObject({ hit: false });
+    expect(handleAgentRequest(store, { cmd: 'get', name: 'b' }, 1)).toMatchObject({ hit: true });
+  });
+
   // The bug: an unlock typed in a terminal was stored under the ambient harness
   // and a read from inside an agent asked under ITS ambient harness, so the two
   // never met and a live grant read as "not unlocked" for its whole TTL.

@@ -106,12 +106,13 @@ import {
   agentLock,
   agentPing,
   agentStatus,
+  agentRevoke,
   ensureAgentRunning,
   runAgentLoadFromStdin,
   runSecretsAgent,
   uninstallSecretsAgentService,
 } from '../lib/secrets/agent.js';
-import { saveSession, deleteBundleSessions, deleteAllSessions } from '../lib/secrets/session-store.js';
+import { saveSession, deleteBundleSessions, deleteAllSessions, deleteLeaseSession } from '../lib/secrets/session-store.js';
 import { getCliVersionFresh } from '../lib/version.js';
 import { readMeta } from '../lib/state.js';
 import { parseDuration } from '../lib/hooks/cache.js';
@@ -2624,6 +2625,31 @@ Examples:
         status: 'success', keys: lease.keys, keyCount: lease.keys.length, agent: harness, ttlMs: lease.expiresAt - lease.createdAt,
       });
       console.log(`${chalk.green('leased')} ${chalk.cyan(lease.id)} ${chalk.gray(`(${name}: ${lease.keys.join(', ')}, ${humanRemaining(lease.expiresAt)})`)}`);
+    });
+
+  cmd
+    .command('leases')
+    .description('List active scoped secret leases.')
+    .action(async () => {
+      const leases = (await agentStatus()).filter((entry) => entry.leaseId);
+      if (leases.length === 0) {
+        console.log(chalk.gray('No active secret leases.'));
+        return;
+      }
+      console.log(`${'ID'.padEnd(24)} ${'BUNDLE'.padEnd(24)} ${'KEYS'.padEnd(24)} EXPIRES IN`);
+      for (const lease of leases) {
+        console.log(`${lease.leaseId!.padEnd(24)} ${lease.name.padEnd(24)} ${(lease.keys ?? []).join(',').padEnd(24)} ${humanRemaining(lease.expiresAt)}`);
+      }
+    });
+
+  cmd
+    .command('revoke <lease-id>')
+    .description('Revoke one scoped secret lease immediately.')
+    .action(async (leaseId: string) => {
+      const wiped = await agentRevoke(leaseId);
+      const persisted = deleteLeaseSession(leaseId);
+      if (wiped + persisted === 0) throw new Error(`Secret lease '${leaseId}' is not active.`);
+      console.log(chalk.green(`Revoked secret lease ${leaseId}.`));
     });
 
   cmd

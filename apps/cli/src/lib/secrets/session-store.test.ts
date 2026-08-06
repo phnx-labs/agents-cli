@@ -20,6 +20,7 @@ import {
   deleteSession,
   deleteAllSessions,
   deleteBundleSessions,
+  deleteLeaseSession,
   rehydrateSessions,
   pruneSessionsOnSleep,
   readIndex,
@@ -126,6 +127,8 @@ describe.each([
     };
     saveSession('prod', leased);
     expect(rehydrateSessions(Date.now())).toMatchObject([{ name: 'prod', entry: { env: { TOKEN: 'leased' }, lease: { id: 'lease-1', keys: ['TOKEN'] } } }]);
+    expect(deleteLeaseSession('lease-1')).toBe(1);
+    expect(resolveSession('prod')).toBeNull();
   });
 
   // The durable twin of the broker's scope chain: after a restart the broker RAM

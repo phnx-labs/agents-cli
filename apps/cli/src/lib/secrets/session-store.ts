@@ -220,6 +220,21 @@ export function deleteSession(name: string, harness: string = GLOBAL_HARNESS): v
   }
 }
 
+export function deleteLeaseSession(leaseId: string): number {
+  if (!shouldPersist()) return 0;
+  const index = readIndex();
+  let deleted = 0;
+  for (const [key, meta] of Object.entries(index.bundles)) {
+    const bundleName = key.split(':').slice(1).join(':');
+    const harness = meta.harness || GLOBAL_HARNESS;
+    const entry = loadSession(bundleName, Date.now(), harness);
+    if (entry?.lease?.id !== leaseId) continue;
+    deleteSession(bundleName, harness);
+    deleted++;
+  }
+  return deleted;
+}
+
 /** Delete every session blob + the index (for `secrets lock --all`). */
 export function deleteAllSessions(): void {
   if (!shouldPersist()) return;

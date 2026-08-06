@@ -1,0 +1,1 @@
+- **Scoped leases can now be listed and revoked by id (RUSH-2256).** `agents secrets leases` shows bundle, keys, and remaining lifetime; `agents secrets revoke <lease-id>` wipes exactly that broker grant and its restart session. Source: `apps/cli/src/{commands/secrets.ts,lib/secrets/{agent,session-store}.ts}`.

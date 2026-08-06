@@ -355,6 +355,7 @@ export type Request =
   | { cmd: 'get'; name: string; harness?: string; token?: string }
   | { cmd: 'load'; name: string; harness?: string; bundle: SecretsBundle; env: Record<string, string>; ttlMs: number; lease?: SecretLease; token?: string }
   | { cmd: 'lock'; name?: string; token?: string }
+  | { cmd: 'revoke'; leaseId: string; token?: string }
   | { cmd: 'status'; token?: string };
 
 export type Response =
@@ -363,6 +364,7 @@ export type Response =
   | { ok: true; cmd: 'get'; hit: true; bundle: SecretsBundle; env: Record<string, string>; lease?: SecretLease }
   | { ok: true; cmd: 'load' }
   | { ok: true; cmd: 'lock'; wiped: number }
+  | { ok: true; cmd: 'revoke'; wiped: number }
   | { ok: true; cmd: 'status'; entries: AgentStatusEntry[] }
   | { ok: false; error: string };
 
@@ -428,6 +430,11 @@ export function handleAgentRequest(
       const wiped = store.size;
       store.clear();
       return { ok: true, cmd: 'lock', wiped };
+    }
+    case 'revoke': {
+      let wiped = 0;
+      for (const [key, entry] of store) if (entry.lease?.id === req.leaseId && store.delete(key)) wiped++;
+      return { ok: true, cmd: 'revoke', wiped };
     }
     case 'status': {
       const entries: AgentStatusEntry[] = [];
@@ -1284,6 +1291,11 @@ export async function agentLoad(
 export async function agentLock(name?: string): Promise<number> {
   const r = await request({ cmd: 'lock', name });
   return r?.ok === true && r.cmd === 'lock' ? r.wiped : 0;
+}
+
+export async function agentRevoke(leaseId: string): Promise<number> {
+  const r = await request({ cmd: 'revoke', leaseId });
+  return r?.ok === true && r.cmd === 'revoke' ? r.wiped : 0;
 }
 
 /** List currently-unlocked bundles, or [] when no broker is running. The
