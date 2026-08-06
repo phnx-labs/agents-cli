@@ -9,6 +9,7 @@ import {
   assertValidSshTarget,
   assertNeverPolicyAcknowledged,
   buildRemoteUnlockArgs,
+  resolveUnlockTtlMs,
   buildSecretsExecEnv,
   bundleEnvToDotenv,
   exportBundleToFile,
@@ -707,6 +708,20 @@ describe('readImportDotenv', () => {
   });
 });
 
+describe('resolveUnlockTtlMs', () => {
+  const now = Date.parse('2026-08-05T12:00:00Z');
+
+  it('converts an absolute date to the remaining TTL', () => {
+    expect(resolveUnlockTtlMs(undefined, '2026-08-06T12:00:00Z', now)).toBe(86_400_000);
+  });
+
+  it('rejects invalid, past, and conflicting dates', () => {
+    expect(() => resolveUnlockTtlMs(undefined, 'not-a-date', now)).toThrow('Invalid --until');
+    expect(() => resolveUnlockTtlMs(undefined, '2026-08-04', now)).toThrow('date must be in the future');
+    expect(() => resolveUnlockTtlMs('2h', '2026-08-06', now)).toThrow('mutually exclusive');
+  });
+});
+
 describe('buildRemoteUnlockArgs (unlock --host wiring)', () => {
   it('forwards explicit bundle names', () => {
     expect(buildRemoteUnlockArgs(['a', 'b'], {})).toEqual(['unlock', 'a', 'b']);
@@ -722,6 +737,11 @@ describe('buildRemoteUnlockArgs (unlock --host wiring)', () => {
 
   it('--all wins over any stray names', () => {
     expect(buildRemoteUnlockArgs(['x'], { all: true })).toEqual(['unlock', '--all']);
+  });
+
+  it('forwards --until verbatim for the remote to parse', () => {
+    expect(buildRemoteUnlockArgs(['a'], { until: '2026-08-06T12:00:00Z' }))
+      .toEqual(['unlock', 'a', '--until', '2026-08-06T12:00:00Z']);
   });
 
   it('forwards --durable so the remote honors it (not silently downgraded)', () => {

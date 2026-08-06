@@ -686,6 +686,7 @@ async function showInstalledVersions(
         const runDefaults = resolveRunDefaults(agentId, version);
         const runDefaultBits: string[] = [];
         if (runDefaults.mode) runDefaultBits.push(`mode:${runDefaults.mode}`);
+        if (runDefaults.effort) runDefaultBits.push('effort:' + runDefaults.effort);
 
         if (!hasEmail && !hasUsage && !signedIn) {
           // No per-version credential. That is NOT the same as unusable: Claude

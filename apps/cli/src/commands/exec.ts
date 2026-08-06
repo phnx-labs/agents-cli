@@ -2839,7 +2839,8 @@ export function registerRunCommand(program: Command): void {
         process.exit(1);
       }
 
-      const effort = options.effort as ExecEffort;
+      const effortSource = runCmd.getOptionValueSource('effort');
+      const effort = (effortSource === 'default' && runDefaults.effort ? runDefaults.effort : options.effort) as ExecEffort;
       if (!['low', 'medium', 'high', 'xhigh', 'max', 'auto'].includes(effort)) {
         console.error(chalk.red(`Invalid effort: ${effort}. Use 'low', 'medium', 'high', 'xhigh', 'max', or 'auto'`));
         process.exit(1);

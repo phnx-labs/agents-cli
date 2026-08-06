@@ -18,6 +18,7 @@ import { getProjectRoot, setProjectRoot } from '../lib/project-root.js';
 interface RunDefaultsSetOptions {
   mode?: string;
   model?: string;
+  effort?: string;
 }
 
 export function registerDefaultsCommands(program: Command): void {
@@ -65,11 +66,13 @@ export function registerDefaultsCommands(program: Command): void {
     .description('Set defaults for an agent/version selector')
     .option('--mode <mode>', "Default mode: plan, edit, auto, skip. 'full' accepted as alias for skip.")
     .option('--model <model>', 'Default model or model alias, forwarded via --model')
+    .option('--effort <effort>', 'Default reasoning effort: low, medium, high, xhigh, max, or auto')
     .action((selector: string, options: RunDefaultsSetOptions) => {
       try {
         const entry = setRunDefault(selector, {
           ...(options.mode !== undefined ? { mode: options.mode } : {}),
           ...(options.model !== undefined ? { model: options.model } : {}),
+          ...(options.effort !== undefined ? { effort: options.effort } : {}),
         });
         console.log(chalk.green('Set run default:'));
         console.log(`  ${formatRunDefaultEntry(entry)}`);

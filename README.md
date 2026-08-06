@@ -313,7 +313,7 @@ On a terminal, `agents sessions --active` (and a bare `agents sessions`) open th
 | `r` | running only | `--active` |
 | `f` | favorites only | `--favorites` |
 | `*` | star / unstar the highlighted session | `agents sessions favorite <id>` |
-| `c` | team sessions | `--teams` |
+| `c` | team sessions | `--team` (alias: `--teams`) |
 | `a` | agent (cycles) | `-a` |
 | `d` | device (cycles) | `--device` |
 | `p` | this repo ↔ all dirs | `--all` |

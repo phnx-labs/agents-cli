@@ -15,6 +15,8 @@ export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'o
 /** How `agents run <agent>` chooses an installed version when none is pinned. */
 export type RunStrategy = 'pinned' | 'available' | 'balanced';
 
+export type RunEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
+
 /**
  * Reserved `<agent>` keyword for `agents run auto` — full-auto dispatch:
  * host (14d launch affinity) → harness (best-account headroom, weighted) →
@@ -43,6 +45,7 @@ export interface AgentRunConfig {
 export interface RunDefaults {
   mode?: Mode;
   model?: string;
+  effort?: RunEffort;
 }
 
 /** `run:` section in agents.yaml. Agent keys keep strategy; `defaults` stores selector rules. */

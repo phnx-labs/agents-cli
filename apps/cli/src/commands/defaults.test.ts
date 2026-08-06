@@ -36,20 +36,23 @@ describe('defaults command', () => {
   });
 
   it('sets, lists, and unsets run defaults', () => {
-    const setOut = runAgents(home, ['defaults', 'run', 'set', 'claude@2.1.45', '--mode', 'full', '--model', 'opus']);
+    const setOut = runAgents(home, ['defaults', 'run', 'set', 'claude@2.1.45', '--mode', 'full', '--model', 'opus', '--effort', 'high']);
     expect(setOut).toContain('claude:2.1.45');
     expect(setOut).toContain('mode skip');
     expect(setOut).toContain('model opus');
+    expect(setOut).toContain('effort high');
 
     const yaml = fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8');
     expect(yaml).toContain('claude:2.1.45');
     expect(yaml).toContain('mode: skip');
     expect(yaml).toContain('model: opus');
+    expect(yaml).toContain('effort: high');
 
     const listOut = runAgents(home, ['defaults', 'run', 'list']);
     expect(listOut).toContain('claude:2.1.45');
     expect(listOut).toContain('mode skip');
     expect(listOut).toContain('model opus');
+    expect(listOut).toContain('effort high');
 
     const unsetOut = runAgents(home, ['defaults', 'run', 'unset', 'claude:2.1.45']);
     expect(unsetOut).toContain('Removed run default claude:2.1.45');

@@ -39,3 +39,11 @@ describe('sessions lifecycle verbs are grouped under `sessions`', () => {
     expect(migrate!.aliases()).not.toContain('detach');
   });
 });
+
+describe('sessions team filter aliases', () => {
+  it('registers --team as an alias of --teams', () => {
+    const teams = sessionsGroup().options.find((option) => option.long === '--teams');
+    expect(teams).toBeDefined();
+    expect(teams!.short).toBe('--team');
+  });
+});

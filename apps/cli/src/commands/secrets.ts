@@ -378,11 +378,28 @@ function maybePrintSyncedHint(name: string, stillPresent: boolean): void {
  * defaults). Shared with the command action so the wiring is unit-testable
  * without a live SSH session.
  */
-export function buildRemoteUnlockArgs(names: string[], opts: { all?: boolean; ttl?: string; durable?: boolean }): string[] {
+export function resolveUnlockTtlMs(ttl: string | undefined, until: string | undefined, now: number = Date.now()): number {
+  if (ttl && until) throw new Error('--ttl and --until are mutually exclusive.');
+  if (until) {
+    const expiresAt = Date.parse(until);
+    if (!Number.isFinite(expiresAt)) throw new Error("Invalid --until '" + until + "'. Use an ISO date or timestamp.");
+    if (expiresAt <= now) throw new Error("Invalid --until '" + until + "': date must be in the future.");
+    return expiresAt - now;
+  }
+  if (ttl) {
+    const secs = parseDuration(ttl);
+    if (!secs) throw new Error("Invalid --ttl '" + ttl + "'. Use e.g. 30m, 2h, 8h, 3d.");
+    return secs * 1000;
+  }
+  return secretsHoldMs();
+}
+
+export function buildRemoteUnlockArgs(names: string[], opts: { all?: boolean; ttl?: string; until?: string; durable?: boolean }): string[] {
   return [
     'unlock',
     ...(opts.all ? ['--all'] : names),
     ...(opts.ttl ? ['--ttl', opts.ttl] : []),
+    ...(opts.until ? ['--until', opts.until] : []),
     // Forward --durable so a remote unlock honors it too; without this the remote
     // silently falls back to its own secrets.agent.durable default (off).
     ...(opts.durable ? ['--durable'] : []),
@@ -2636,11 +2653,16 @@ Examples:
     .command('unlock [names...]')
     .description('Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS). With --host, unlock FILE-backed bundle(s) on a remote (the passphrase prompt surfaces over the SSH TTY); keychain/biometry bundles are GUI-only and can\'t be remote-unlocked.')
     .option('--ttl <duration>', 'How long to hold it (e.g. 30m, 8h, 3d). Default 7d.')
+    .option('--until <date>', 'Hold until this absolute date or timestamp (for example 2026-08-06T12:00:00Z). Mutually exclusive with --ttl.')
     .option('--durable', 'Keep the unlock across sleep + reboot too (default: survives upgrade/restart but re-locks on sleep). Set secrets.agent.durable in agents.yaml to make this the default.')
     .option('--for <agent>', 'Narrow the unlock to ONE harness type (for example claude, codex, or kimi). Default: the grant is global — every harness and a plain shell can read it, so one Touch ID covers them all.')
     .option('--all', 'Unlock every configured bundle')
     .option('--host <target>', 'Unlock the bundle(s) on this remote machine over SSH instead of locally (file-backed bundles only — the remote\'s passphrase prompt surfaces on your terminal over a -tt session). Single-valued (NOT variadic) so it never swallows the bundle name: `unlock <name> --host <machine>`.')
-    .action(async (names: string[], opts: { ttl?: string; durable?: boolean; all?: boolean; host?: string; for?: string }) => {
+    .action(async (names: string[], opts: { ttl?: string; until?: string; durable?: boolean; all?: boolean; host?: string; for?: string }) => {
+      if (opts.ttl && opts.until) {
+        console.error(chalk.red('--ttl and --until are mutually exclusive.'));
+        process.exit(1);
+      }
       // Single-valued (not variadic): a variadic --host greedily consumes the
       // positional bundle name (`unlock --host mac wztest` -> host=[mac,wztest],
       // names=[]). Unlock targets one remote at a time anyway.
@@ -2675,6 +2697,12 @@ Examples:
         if (failures > 0) process.exit(1);
         return;
       }
+      if (opts.until) {
+        try { resolveUnlockTtlMs(undefined, opts.until); } catch (err) {
+          console.error(chalk.red((err as Error).message));
+          process.exit(1);
+        }
+      }
       if (process.platform !== 'darwin') {
         // No broker + no biometry prompt off darwin: secrets already resolve
         // durably from the OS store (libsecret / Credential Manager) on every
@@ -2688,15 +2716,14 @@ Examples:
         console.error(chalk.red('Specify one or more bundle names, or --all.'));
         process.exit(1);
       }
-      let ttlMs = secretsHoldMs(); // default hold, capped by secrets.agent.holdMs
-      if (opts.ttl) {
-        const secs = parseDuration(opts.ttl);
-        if (!secs) {
-          console.error(chalk.red(`Invalid --ttl '${opts.ttl}'. Use e.g. 30m, 2h, 8h, 3d.`));
-          process.exit(1);
-        }
-        ttlMs = secs * 1000;
+      let ttlMs: number;
+      try {
+        ttlMs = resolveUnlockTtlMs(opts.ttl, opts.until);
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
       }
+      const expiresAt = Date.now() + ttlMs;
       if (!(await ensureAgentRunning())) {
         console.error(chalk.red('Could not start the secrets broker.'));
         process.exit(1);
@@ -2722,7 +2749,7 @@ Examples:
             noAgent: true,
             caller: 'unlock secrets',
             agent: harness,
-            duration: humanRemaining(Date.now() + ttlMs),
+            duration: humanRemaining(expiresAt),
             keyMode: 'storage',
           });
           // Migrations are authorized only by this explicit unlock. The bundle
@@ -2738,7 +2765,7 @@ Examples:
             saveSession(name, {
               bundle,
               env,
-              expiresAt: Date.now() + ttlMs,
+              expiresAt,
               sleepPersist: durable,
               harness,
             });
@@ -2757,7 +2784,7 @@ Examples:
               agent: harness,
               ttlMs,
             });
-            console.log(`${chalk.green('unlocked')} ${chalk.cyan(name)} ${chalk.gray(`(${Object.keys(env).length} keys, ${humanRemaining(Date.now() + ttlMs)})`)}`);
+            console.log(`${chalk.green('unlocked')} ${chalk.cyan(name)} ${chalk.gray(`(${Object.keys(env).length} keys, ${humanRemaining(expiresAt)})`)}`);
           } else {
             console.error(chalk.red(`Failed to load '${name}' into the agent.`));
           }

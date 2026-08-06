@@ -591,7 +591,7 @@ agents sessions --agent codex@0.116.0
 agents sessions "auth refactor"
 
 # Include team-spawned sessions (hidden by default)
-agents sessions --teams
+agents sessions --team   # alias of --teams
 
 # One team's whole lineage: the session that spawned it, plus (with --teams) its
 # teammates. Spans every directory and all time — a team's teammates run in their

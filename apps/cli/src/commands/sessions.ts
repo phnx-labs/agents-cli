@@ -4456,7 +4456,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--opencode', 'Shorthand for --agent opencode')
     .option('--all', 'Widen every non-status filter to "all": every directory (not just this project) and all time (no window cap). Status filters like --active still compose; -a/--device/--since still narrow their axis.')
     .option('--unmanaged', "Also show sessions from your own ~/.<agent> installs (hidden once agents-cli manages that agent)")
-    .option('--teams', 'Include team-spawned sessions (hidden by default)')
+    .option('--team, --teams', 'Include team-spawned sessions (hidden by default)')
     .option('--in-team <name>', "Only this team: the session that spawned it plus (with --teams) its teammates. Spans every directory and all time, since a team's worktrees and history sit outside the default window.")
     .option('--routine', 'Show only sessions archived from routine runs')
     .option('-p, --project <name>', 'Filter by project name (searches across all directories)')

@@ -12,7 +12,7 @@
  *         mode: plan
  */
 
-import type { AgentId, Mode, RunConfig, RunDefaults } from './types.js';
+import type { AgentId, Mode, RunConfig, RunDefaults, RunEffort } from './types.js';
 import { ALL_MODES } from './types.js';
 import { AGENTS } from './agents.js';
 import { readMeta, updateMeta } from './state.js';
@@ -31,6 +31,7 @@ export interface ResolvedRunDefaults extends RunDefaults {
   sources: {
     mode?: string;
     model?: string;
+    effort?: string;
   };
 }
 
@@ -42,7 +43,10 @@ export interface RunDefaultEntry {
 type RunDefaultsInput = {
   mode?: unknown;
   model?: unknown;
+  effort?: unknown;
 };
+
+const RUN_EFFORTS: readonly RunEffort[] = ['low', 'medium', 'high', 'xhigh', 'max', 'auto'];
 
 function isAgentId(value: string): value is AgentId {
   return value in AGENTS;
@@ -70,6 +74,13 @@ function normalizeRunDefaults(defaults: RunDefaultsInput, selector: string): Run
       throw new Error(`Invalid model in run.defaults.${selector}: expected a non-empty string.`);
     }
     out.model = defaults.model.trim();
+  }
+
+  if (defaults.effort !== undefined) {
+    if (typeof defaults.effort !== 'string' || !RUN_EFFORTS.includes(defaults.effort as RunEffort)) {
+      throw new Error('Invalid effort in run.defaults.' + selector + ': use one of: ' + RUN_EFFORTS.join(', ') + '.');
+    }
+    out.effort = defaults.effort as RunEffort;
   }
 
   return out;
@@ -138,6 +149,10 @@ export function resolveRunDefaultsFromConfig(
     resolved.model = wildcard.model;
     resolved.sources.model = wildcardSelector;
   }
+  if (wildcard?.effort) {
+    resolved.effort = wildcard.effort;
+    resolved.sources.effort = wildcardSelector;
+  }
 
   if (exactSelector && defaults[exactSelector]) {
     const exact = normalizeRunDefaults(defaults[exactSelector], exactSelector);
@@ -148,6 +163,10 @@ export function resolveRunDefaultsFromConfig(
     if (exact.model) {
       resolved.model = exact.model;
       resolved.sources.model = exactSelector;
+    }
+    if (exact.effort) {
+      resolved.effort = exact.effort;
+      resolved.sources.effort = exactSelector;
     }
   }
 
@@ -171,6 +190,10 @@ export function resolveRunDefaultsFromConfigs(
       resolved.model = next.model;
       resolved.sources.model = next.sources.model;
     }
+    if (next.effort) {
+      resolved.effort = next.effort;
+      resolved.sources.effort = next.sources.effort;
+    }
   }
 
   return resolved;
@@ -189,6 +212,7 @@ export function formatRunDefaultEntry(entry: RunDefaultEntry): string {
   const parts: string[] = [];
   if (entry.defaults.mode) parts.push(`mode ${chalk.white(entry.defaults.mode)}`);
   if (entry.defaults.model) parts.push(`model ${chalk.white(entry.defaults.model)}`);
+  if (entry.defaults.effort) parts.push('effort ' + chalk.white(entry.defaults.effort));
   return `${chalk.cyan(entry.selector.padEnd(22))} ${parts.join('  ')}`;
 }
 
@@ -205,8 +229,8 @@ export function listRunDefaults(): RunDefaultEntry[] {
 export function setRunDefault(selectorInput: string, defaultsInput: RunDefaultsInput): RunDefaultEntry {
   const parsed = parseRunDefaultSelector(selectorInput);
   const defaults = normalizeRunDefaults(defaultsInput, parsed.selector);
-  if (!defaults.mode && !defaults.model) {
-    throw new Error('Set at least one default: --mode <mode> or --model <model>.');
+  if (!defaults.mode && !defaults.model && !defaults.effort) {
+    throw new Error('Set at least one default: --mode <mode>, --model <model>, or --effort <effort>.');
   }
 
   updateMeta((meta) => {

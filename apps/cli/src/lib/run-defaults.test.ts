@@ -44,9 +44,11 @@ describe('run defaults', () => {
         'claude:*': {
           mode: 'auto',
           model: 'opus',
+          effort: 'medium',
         },
         'claude:2.1.45': {
           mode: 'plan',
+          effort: 'high',
         },
       },
     };
@@ -54,9 +56,11 @@ describe('run defaults', () => {
     expect(resolveRunDefaultsFromConfig(config, 'claude', '2.1.45')).toEqual({
       mode: 'plan',
       model: 'opus',
+      effort: 'high',
       sources: {
         mode: 'claude:2.1.45',
         model: 'claude:*',
+        effort: 'claude:2.1.45',
       },
     });
   });
@@ -106,5 +110,9 @@ describe('run defaults', () => {
         model: 'claude:*',
       },
     });
+  });
+  it('rejects invalid configured effort', () => {
+    expect(() => resolveRunDefaultsFromConfig({ defaults: { 'codex:*': { effort: 'extreme' as never } } }, 'codex', '0.1.0'))
+      .toThrow(/Invalid effort/);
   });
 });

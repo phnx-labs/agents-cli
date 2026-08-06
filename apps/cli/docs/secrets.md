@@ -404,6 +404,7 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets unlock [names...]` | Read a bundle once (one Touch ID) and hold it in the secrets-agent so later runs read it silently | `agents secrets unlock prod` |
 | `secrets unlock --all` | Unlock every configured bundle | `agents secrets unlock --all` |
 | `secrets unlock <name> --ttl <dur>` | Hold for a custom lifetime (default 7d) | `agents secrets unlock prod --ttl 30m` |
+| `secrets unlock <name> --until <date>` | Hold until an absolute date or timestamp | `agents secrets unlock prod --until 2026-08-06T12:00:00Z` |
 | `secrets unlock <name> --durable` | Also survive sleep + reboot (default: survives upgrade/restart, re-locks on sleep) | `agents secrets unlock prod --durable` |
 | `secrets lock [names...]` | Wipe held bundles from the agent (default: all) — next read re-prompts | `agents secrets lock` |
 | `secrets status` | Show which bundles the agent holds and when they lock, and suggest unlocking any you keep getting prompted for | `agents secrets status` |
