@@ -17,6 +17,7 @@ import { loadTask, localLogPath, updateTask, terminalPatch, type HostTask } from
 import { followHostTask } from './progress.js';
 import { reconcileTask } from './reconcile.js';
 import { sshExecRaw } from '../ssh-exec.js';
+import { encodePowershell } from './remote-cmd.js';
 
 export interface HostLogResult {
   /** False when no host task with this id exists (caller may fall through to sessions). */
@@ -42,6 +43,8 @@ export async function showHostTaskLog(id: string, follow: boolean, full = false)
       remoteExit: task.remoteExit,
       taskId: id,
       echo: true,
+      remoteShell: task.remoteShell,
+      extraSshArgs: task.identityFile ? ['-i', task.identityFile, '-o', 'IdentitiesOnly=yes'] : [],
     });
     // -1 = follow window closed; the run continues on the host (not a failure,
     // so exit 0). Any real code is the finished run — persist the terminal
@@ -117,7 +120,10 @@ export function tailLines(text: string, n: number): string {
  * and progress.ts.
  */
 function fetchAndCacheRemoteLog(task: HostTask): Buffer | null {
-  const res = sshExecRaw(task.target, `cat ${task.remoteLog} 2>/dev/null`, { timeoutMs: 30000, multiplex: true });
+  const command = task.remoteShell === 'powershell'
+    ? `powershell -NoProfile -EncodedCommand ${encodePowershell(`$path = Join-Path $HOME '${task.remoteLog.replace(/^\$HOME\//, '').replace(/'/g, "''")}'; if (Test-Path -LiteralPath $path) { $bytes = [IO.File]::ReadAllBytes($path); [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length) }`)}`
+    : `cat ${task.remoteLog} 2>/dev/null`;
+  const res = sshExecRaw(task.target, command, { timeoutMs: 30000, multiplex: true });
   if (res.code !== 0 || res.stdout.length === 0) return null;
   // The hosts cache dir already exists (saveTask created it) — write is best-effort.
   try { fs.writeFileSync(localLogPath(task.id), res.stdout); } catch { /* best-effort cache */ }

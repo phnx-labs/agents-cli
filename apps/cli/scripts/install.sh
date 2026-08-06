@@ -103,8 +103,8 @@ node -e "
   delete p.scripts?.postinstall;
   delete p.scripts?.prepack;
   delete p.scripts?.prepare;
-  fs.writeFileSync('$STAGE_DIR/package.json', JSON.stringify(p, null, 2));
-"
+  fs.writeFileSync(process.argv[1], JSON.stringify(p, null, 2));
+" "$STAGE_DIR/package.json"
 
 dim "  Packing tarball"
 (

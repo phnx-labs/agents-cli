@@ -14,6 +14,7 @@
 
 import * as fs from 'fs';
 import { sshExec, sshExecRaw, sshExecRawStream } from '../ssh-exec.js';
+import { encodePowershell } from './remote-cmd.js';
 import { localLogPath } from './tasks.js';
 
 function sleep(ms: number): Promise<void> {
@@ -73,6 +74,7 @@ export interface FollowOptions {
   /** Idle-backoff ceiling (default 4× the fast interval, min 4000ms). */
   maxPollMs?: number;
   extraSshArgs?: string[];
+  remoteShell?: 'posix' | 'powershell';
 }
 
 const STREAM_EXIT_POLL_SECONDS = 1;
@@ -126,17 +128,16 @@ export function splitProgressBytes(
  */
 export function fetchProgress(
   target: string,
-  opts: { remoteLog: string; remoteExit: string; taskId: string; offset: number },
+  opts: { remoteLog: string; remoteExit: string; taskId: string; offset: number; remoteShell?: 'posix' | 'powershell' },
 ): { logChunk: Buffer; exit: string } | null {
   // Derive the printf format from the SAME exitMarker the parser splits on, so
   // the emitted sentinel and the one we look for can never desync. The marker's
   // only escape-sensitive bytes are its newlines (→ `\n`); it carries no `%`,
   // single-quote, or other printf/shell-special chars (task id is hex).
   const printfArg = exitMarker(opts.taskId).replace(/\n/g, '\\n');
-  const remote =
-    `tail -c +${opts.offset + 1} ${opts.remoteLog} 2>/dev/null; ` +
-    `printf '${printfArg}'; ` +
-    `cat ${opts.remoteExit} 2>/dev/null`;
+  const remote = opts.remoteShell === 'powershell'
+    ? buildWindowsProgressCommand(opts)
+    : `tail -c +${opts.offset + 1} ${opts.remoteLog} 2>/dev/null; printf '${printfArg}'; cat ${opts.remoteExit} 2>/dev/null`;
   // Raw bytes (no UTF-8 decode): the log tail must be counted and re-emitted
   // byte-for-byte so a multibyte char split at the `tail -c` boundary neither
   // drifts the offset nor renders as U+FFFD. The exit code is pure ASCII → safe
@@ -145,6 +146,22 @@ export function fetchProgress(
   const parts = splitProgressBytes(res.stdout, opts.taskId);
   if (!parts) return null;
   return { logChunk: parts.logChunk, exit: parts.exit.toString('utf8') };
+}
+
+export function buildWindowsProgressCommand(opts: { remoteLog: string; remoteExit: string; taskId: string; offset: number }): string {
+  const windowsPath = (value: string): string => value.startsWith('$HOME/')
+    ? `(Join-Path $HOME '${value.slice('$HOME/'.length).replace(/'/g, "''")}')`
+    : `'${value.replace(/'/g, "''")}'`;
+  const script = [
+    `$out = [Console]::OpenStandardOutput()`,
+    `$log = ${windowsPath(opts.remoteLog)}`,
+    `$exit = ${windowsPath(opts.remoteExit)}`,
+    `if (Test-Path -LiteralPath $log) { $bytes = [IO.File]::ReadAllBytes($log); if ($bytes.Length -gt ${opts.offset}) { $out.Write($bytes, ${opts.offset}, $bytes.Length - ${opts.offset}) } }`,
+    `$marker = [Text.Encoding]::UTF8.GetBytes(${JSON.stringify(exitMarker(opts.taskId))})`,
+    `$out.Write($marker, 0, $marker.Length)`,
+    `if (Test-Path -LiteralPath $exit) { $bytes = [IO.File]::ReadAllBytes($exit); $out.Write($bytes, 0, $bytes.Length) }`,
+  ].join('; ');
+  return `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
 }
 
 /**
@@ -246,6 +263,20 @@ export async function followHostTask(target: string, opts: FollowOptions): Promi
     offset += logChunk.length; // exact wire bytes — no re-encode drift
     return true;
   };
+
+  if (opts.remoteShell === 'powershell') {
+    for (;;) {
+      if (Date.now() >= deadline) return -1;
+      const fetched = fetchProgress(target, { ...opts, offset, remoteShell: 'powershell' });
+      if (fetched) {
+        flush(fetched.logChunk);
+        const code = parseInt(fetched.exit.trim(), 10);
+        if (Number.isFinite(code)) return code;
+      }
+      await sleep(waitMs);
+      waitMs = Math.min(maxMs, Math.round(waitMs * 1.5));
+    }
+  }
 
   for (;;) {
     const remaining = deadline - Date.now();

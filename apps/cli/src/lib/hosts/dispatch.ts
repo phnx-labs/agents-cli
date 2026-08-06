@@ -14,7 +14,7 @@ import { sshExec, sshStream, shellQuote } from '../ssh-exec.js';
 import type { Host } from './types.js';
 import { hostIdentityArgs, sshTargetFor } from './types.js';
 import { ensureHostReady } from './ready.js';
-import { remoteShellFor, posixEnvExports } from './remote-cmd.js';
+import { encodePowershell, powershellQuote, remoteShellFor, posixEnvExports } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
 import { resolveActor, actorEnv } from '../actor.js';
 import { saveTask, updateTask, terminalPatch, type HostTask } from './tasks.js';
@@ -154,6 +154,50 @@ export function buildDetachedLaunchCommand(inner: string): string {
   return `bash -lc ${shellQuote(`node -e ${shellQuote(nodeScript)}`)}`;
 }
 
+function windowsRemotePath(path: string): string {
+  return path.startsWith('$HOME/')
+    ? `(Join-Path $HOME ${powershellQuote(path.slice('$HOME/'.length))})`
+    : powershellQuote(path);
+}
+
+/** Build the detached PowerShell launch protocol used by Windows SSH hosts. */
+export function buildWindowsDetachedLaunchCommand(opts: {
+  forwardedArgs: string[];
+  remoteCwd?: string;
+  mirrorCwd?: boolean;
+  remoteLog: string;
+  remoteExit: string;
+  env: Record<string, string>;
+}): string {
+  const log = windowsRemotePath(opts.remoteLog);
+  const exit = windowsRemotePath(opts.remoteExit);
+  const env = Object.entries(opts.env).map(([key, value]) => `$env:${key} = ${powershellQuote(value)}`);
+  const cwd = opts.remoteCwd
+    ? opts.mirrorCwd
+      ? `try { Set-Location -LiteralPath ${powershellQuote(opts.remoteCwd)} } catch { Set-Location -LiteralPath $HOME }`
+      : `Set-Location -LiteralPath ${powershellQuote(opts.remoteCwd)}`
+    : '';
+  const inner = [
+    `$ProgressPreference = 'SilentlyContinue'`,
+    ...env,
+    cwd,
+    `$log = ${log}`,
+    `$exit = ${exit}`,
+    `& ${['agents', ...opts.forwardedArgs].map(powershellQuote).join(' ')} *> $log`,
+    `$code = $LASTEXITCODE`,
+    `Set-Content -LiteralPath $exit -Value $code -NoNewline -Encoding ascii`,
+  ].filter(Boolean).join('; ');
+  const encodedInner = encodePowershell(inner);
+  const outer = [
+    `$dir = Join-Path $HOME '.agents/.cache/hosts'`,
+    `New-Item -ItemType Directory -Force -Path $dir | Out-Null`,
+    `Remove-Item -LiteralPath ${exit} -Force -ErrorAction SilentlyContinue`,
+    `$process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-EncodedCommand',${powershellQuote(encodedInner)}) -WindowStyle Hidden -PassThru`,
+    `Write-Output $process.Id`,
+  ].join('; ');
+  return `powershell -NoProfile -EncodedCommand ${encodePowershell(outer)}`;
+}
+
 export interface DispatchResult {
   task: HostTask;
   /** Exit code when followed; undefined when detached (--no-follow). */
@@ -163,8 +207,9 @@ export interface DispatchResult {
 function terminateRemoteLaunch(task: HostTask): void {
   if (!task.pid) throw new Error(`Cannot terminate remote task ${task.id}: launch returned no PID.`);
   const pid = task.pid;
-  const command =
-    `if kill -TERM -- -${pid} 2>/dev/null; then ` +
+  const command = task.remoteShell === 'powershell'
+    ? `powershell -NoProfile -EncodedCommand ${encodePowershell(`Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue; Remove-Item -LiteralPath ${windowsRemotePath(task.remoteLog)}, ${windowsRemotePath(task.remoteExit)} -Force -ErrorAction SilentlyContinue`)}`
+    : `if kill -TERM -- -${pid} 2>/dev/null; then ` +
       `sleep 1; kill -KILL -- -${pid} 2>/dev/null || true; ` +
     `elif kill -0 -- -${pid} 2>/dev/null; then exit 1; fi; ` +
     `rm -f ${task.remoteLog} ${task.remoteExit}`;
@@ -213,6 +258,18 @@ export function buildStopRemoteCommand(pid: number, remoteExit: string): string 
   );
 }
 
+export function buildWindowsStopRemoteCommand(pid: number, remoteExit: string): string {
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error(`Invalid remote task pid: ${pid}`);
+  const exit = windowsRemotePath(remoteExit);
+  const script = [
+    `$process = Get-Process -Id ${pid} -ErrorAction SilentlyContinue`,
+    `if ($process) { Stop-Process -Id ${pid} -Force; Set-Content -LiteralPath ${exit} -Value 143 -NoNewline -Encoding ascii; Write-Output 'SIGNALED' }`,
+    `elseif (Test-Path -LiteralPath ${exit}) { $code = (Get-Content -LiteralPath ${exit} -Raw).Trim(); if ($code) { Write-Output (\"ALREADY $code\") } else { Set-Content -LiteralPath ${exit} -Value 143 -NoNewline -Encoding ascii; Write-Output 'GONE' } }`,
+    `else { Set-Content -LiteralPath ${exit} -Value 143 -NoNewline -Encoding ascii; Write-Output 'GONE' }`,
+  ].join('; ');
+  return `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
+}
+
 /**
  * Stop a running host task from the origin machine (`agents hosts stop <id>`).
  *
@@ -228,7 +285,9 @@ export function stopDispatchedTask(task: HostTask): HostTask {
   if (!task.pid) {
     throw new Error(`Cannot stop remote task ${task.id}: launch returned no PID.`);
   }
-  const command = buildStopRemoteCommand(task.pid, task.remoteExit);
+  const command = task.remoteShell === 'powershell'
+    ? buildWindowsStopRemoteCommand(task.pid, task.remoteExit)
+    : buildStopRemoteCommand(task.pid, task.remoteExit);
   const result = sshExec(task.target, command, { timeoutMs: 10000, multiplex: true, extraSshArgs: task.identityFile ? ['-i', task.identityFile, '-o', 'IdentitiesOnly=yes'] : undefined });
   if (result.code !== 0) {
     throw new Error(
@@ -272,23 +331,11 @@ interface LaunchOptions {
  * and `dispatchAgentsCommand` (teams) build their `forwardedArgs` and call here,
  * so the nohup/exit-file/offset-tail machinery lives in exactly one place.
  *
- * Windows remotes are refused up front: the detached launch is only half the
- * contract — the follow/reconcile layer (`progress.ts`/`reconcile.ts`) offset-
- * tails the log with POSIX `tail -c`/`printf`/`cat`/`stat`, which do not exist
- * in cmd.exe/PowerShell. Shipping the launch alone would leave `run --host
- * <windows>` dispatching but hanging on follow forever, so we fail fast with an
- * actionable message instead. Read-only `--host` commands (view/sessions/…) run
- * a single round-trip with no follow protocol and DO work against Windows.
+ * POSIX hosts use a detached bash process group; Windows hosts use a hidden
+ * detached PowerShell process and the same durable log/exit-file protocol.
  */
 async function launchDetached(host: Host, target: string, opts: LaunchOptions): Promise<DispatchResult> {
-  if (remoteShellFor(resolveRemoteOsSync(host.name)) === 'powershell') {
-    throw new Error(
-      `Detached dispatch to Windows host "${host.name}" is not supported yet — the run ` +
-        `follow/reconcile layer is POSIX-only (offset-tails the remote log with tail/cat/stat). ` +
-        `Read-only --host commands (view, sessions, usage, cost, doctor, list, teams) do work ` +
-        `against Windows.`,
-    );
-  }
+  const remoteShell = remoteShellFor(host.os ?? resolveRemoteOsSync(host.name));
   const id = randomUUID().slice(0, 8);
   const remoteLog = `${REMOTE_DIR}/${id}.log`;
   const remoteExit = `${REMOTE_DIR}/${id}.exit`;
@@ -313,7 +360,16 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
 
   // Outer: ensure dir, launch the login-shell wrapper as a new process-group
   // leader, and print that leader PID.
-  const launch = `mkdir -p ${REMOTE_DIR}; ${buildDetachedLaunchCommand(inner)}`;
+  const launch = remoteShell === 'powershell'
+    ? buildWindowsDetachedLaunchCommand({
+        forwardedArgs: opts.forwardedArgs,
+        remoteCwd: opts.remoteCwd,
+        mirrorCwd: opts.mirrorCwd,
+        remoteLog,
+        remoteExit,
+        env: withActorEnv(opts.agentLabel === RUN_AUTO_KEYWORD ? { [RUN_AUTO_HOST_RESOLVED_ENV]: '1' } : {}),
+      })
+    : `mkdir -p ${REMOTE_DIR}; ${buildDetachedLaunchCommand(inner)}`;
   const res = sshExec(target, launch, {
     timeoutMs: 30000,
     multiplex: !opts.copyCreds,
@@ -330,6 +386,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     host: host.name,
     target,
     identityFile: host.identityFile,
+    remoteShell,
     agent: opts.agentLabel,
     prompt: opts.promptLabel,
     pid: Number.isFinite(pid) ? pid : undefined,
@@ -365,6 +422,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     echo: true,
     timeoutMs: opts.timeoutMs,
     extraSshArgs: hostIdentityArgs(host),
+    remoteShell,
   });
   // -1 = the follow window closed while the run continues on the host. Leave the
   // record 'running' (do NOT freeze it terminal) so a later `hosts ps`/`logs`

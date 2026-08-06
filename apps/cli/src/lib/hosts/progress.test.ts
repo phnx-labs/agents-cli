@@ -15,10 +15,25 @@ const {
   buildStreamingFollowCommand,
   parseStreamingExitFrame,
   followHostTask,
+  buildWindowsProgressCommand,
 } = await import('./progress.js');
 const { localLogPath } = await import('./tasks.js');
 
 const LOCALHOST_SSH = sshReachable('localhost', 5000);
+
+it('builds a byte-accurate Windows log/exit poll from the requested offset', () => {
+  const command = buildWindowsProgressCommand({
+    remoteLog: '$HOME/.agents/.cache/hosts/abc.log',
+    remoteExit: '$HOME/.agents/.cache/hosts/abc.exit',
+    taskId: 'abc',
+    offset: 17,
+  });
+  const encoded = command.match(/-EncodedCommand (\S+)$/)?.[1];
+  const script = Buffer.from(encoded!, 'base64').toString('utf16le');
+  expect(script).toContain('$out.Write($bytes, 17, $bytes.Length - 17)');
+  expect(script).toContain("Join-Path $HOME '.agents/.cache/hosts/abc.log'");
+  expect(script).toContain('@@AGENTS_HOST_EXIT_abc@@');
+});
 
 beforeEach(() => {
   CACHE_ROOT = mkdtempSync(join(tmpdir(), 'agents-cli-progress-'));

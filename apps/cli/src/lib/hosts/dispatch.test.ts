@@ -7,9 +7,11 @@ import { randomUUID } from 'crypto';
 import { shellQuote, sshExec } from '../ssh-exec.js';
 import {
   buildDetachedLaunchCommand,
+  buildWindowsDetachedLaunchCommand,
   buildRunForwardedArgs,
   buildInteractiveRunForwardedArgs,
   buildStopRemoteCommand,
+  buildWindowsStopRemoteCommand,
   remoteCdPrefix,
   deriveMirroredCwd,
   terminateDispatchedTask,
@@ -21,6 +23,40 @@ import { resetActorCache } from '../actor.js';
 import type { HostTask } from './tasks.js';
 
 const LOCAL_HOME = process.env.HOME ?? os.homedir();
+
+function decodeWindows(command: string): string {
+  const encoded = command.match(/-EncodedCommand (\S+)$/)?.[1];
+  if (!encoded) throw new Error(`not encoded PowerShell: ${command}`);
+  return Buffer.from(encoded, 'base64').toString('utf16le');
+}
+
+describe('Windows detached protocol', () => {
+  it('starts a hidden process with actor env, cwd, log, and exit sentinel', () => {
+    const outer = decodeWindows(buildWindowsDetachedLaunchCommand({
+      forwardedArgs: ['run', 'codex', 'hello world', '--mode', 'plan'],
+      remoteCwd: 'C:\\src\\repo',
+      remoteLog: '$HOME/.agents/.cache/hosts/abc.log',
+      remoteExit: '$HOME/.agents/.cache/hosts/abc.exit',
+      env: { AGENTS_ACTOR: 'overnight' },
+    }));
+    expect(outer).toContain('Start-Process');
+    expect(outer).toContain('-WindowStyle Hidden');
+    const innerEncoded = outer.match(/'([A-Za-z0-9+/=]{40,})'\) -WindowStyle/)?.[1];
+    expect(innerEncoded).toBeTruthy();
+    const inner = Buffer.from(innerEncoded!, 'base64').toString('utf16le');
+    expect(inner).toContain("$env:AGENTS_ACTOR = 'overnight'");
+    expect(inner).toContain("Set-Location -LiteralPath 'C:\\src\\repo'");
+    expect(inner).toContain("& 'agents' 'run' 'codex' 'hello world' '--mode' 'plan'");
+    expect(inner).toContain('Set-Content -LiteralPath $exit -Value $code');
+  });
+
+  it('stops by pid without overwriting a completed exit sentinel', () => {
+    const script = decodeWindows(buildWindowsStopRemoteCommand(4242, '$HOME/.agents/.cache/hosts/abc.exit'));
+    expect(script).toContain('Get-Process -Id 4242');
+    expect(script).toContain('Stop-Process -Id 4242 -Force');
+    expect(script).toContain('ALREADY $code');
+  });
+});
 
 describe('buildStopRemoteCommand', () => {
   const exit = '$HOME/.agents/.cache/hosts/abc12345.exit';
