@@ -2203,14 +2203,15 @@ export class AgentManager {
     );
     if (teammates.length === 0) return;
 
-    const byTarget = new Map<string, AgentProcess[]>();
+    const byTarget = new Map<string, { target: string; agents: AgentProcess[] }>();
     for (const a of teammates) {
-      const arr = byTarget.get(a.hostTarget!) || [];
-      arr.push(a);
-      byTarget.set(a.hostTarget!, arr);
+      const key = `${a.hostTarget!}\0${a.hostIdentityFile ?? ''}`;
+      const group = byTarget.get(key) || { target: a.hostTarget!, agents: [] };
+      group.agents.push(a);
+      byTarget.set(key, group);
     }
 
-    for (const [target, agents] of byTarget) {
+    for (const { target, agents } of byTarget.values()) {
       // Emit one line per teammate: "<agentId> ALIVE|DEAD <exitOrEmpty>". A single
       // round-trip over the multiplexed socket, regardless of teammate count.
       const parts = agents.map((a) => {
@@ -2227,7 +2228,12 @@ export class AgentManager {
           `else printf 'DEAD\\n'; fi`
         );
       });
-      const res = sshExec(target, parts.join('; '), { timeoutMs: 12000, multiplex: true });
+      const identityFile = agents[0]?.hostIdentityFile;
+      const res = sshExec(target, parts.join('; '), {
+        timeoutMs: 12000,
+        multiplex: true,
+        extraSshArgs: identityFile ? ['-i', identityFile, '-o', 'IdentitiesOnly=yes'] : [],
+      });
       if (res.code === null) continue; // transient ssh failure — skip this wave, no snapshot
       const snapshots = new Map<string, { alive: boolean; exit: string | null }>();
       for (const line of res.stdout.split('\n')) {

@@ -32,6 +32,7 @@ describe('remote-teammate meta round-trip', () => {
     a.remoteLog = '$HOME/.agents/.cache/hosts/04e22423.log';
     a.remoteExit = '$HOME/.agents/.cache/hosts/04e22423.exit';
     a.remoteLogOffset = 512;
+    a.hostIdentityFile = '/home/muqsit/.ssh/fleet_ed25519';
     await a.saveMeta();
 
     const loaded = await AgentProcess.loadFromDisk(id, base);
@@ -43,6 +44,7 @@ describe('remote-teammate meta round-trip', () => {
     expect(loaded!.remoteLog).toBe('$HOME/.agents/.cache/hosts/04e22423.log');
     expect(loaded!.remoteExit).toBe('$HOME/.agents/.cache/hosts/04e22423.exit');
     expect(loaded!.remoteLogOffset).toBe(512);
+    expect(loaded!.hostIdentityFile).toBe('/home/muqsit/.ssh/fleet_ed25519');
 
     fs.rmSync(base, { recursive: true, force: true });
   });
