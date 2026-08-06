@@ -271,19 +271,24 @@ the confusing `Bundle '<b>' key '<k>': stored item '…' not found`.
 The push now **verifies** a keychain-backed write by reading the bundle back the way
 a release will (headlessly, so no Touch ID) and **fails loudly** if the keys didn't
 materialize — naming the locked-login-keychain cause and steering to the fix. For a
-headless sign host, push with the headless-readable file backend instead:
+headless sign host, push with the headless-readable file backend instead — **no
+passphrase required**:
 
 ```bash
-export AGENTS_SECRETS_PASSPHRASE="…"                 # one biometry-gated read on the laptop
 agents secrets export apple.com --host mac-mini --remote-backend file
 ```
 
-A file-backed bundle is encrypted at rest with `AGENTS_SECRETS_PASSPHRASE` (forwarded
-over ssh stdin, never argv) and reads with no biometry — the right choice whenever the
-remote can't satisfy a Touch ID prompt. Alternatively, unlock the remote login
-keychain first (an interactive login / `agents secrets unlock` on the target) and
-retry the keychain push. See [File-backed bundles](#file-backed-bundles-headless--remote)
-and [Recipe 8](#8-headless-release-on-a-remote-mac).
+A file-backed bundle is encrypted at rest and reads with **no biometry** — the right
+choice whenever the remote can't satisfy a Touch ID prompt. By default the remote
+encrypts it under a **machine-local key** it auto-provisions (a 0600 file under
+`~/.agents/.secrets-key/`), so the push needs no passphrase and the remote's reads are
+fully headless. Set `AGENTS_SECRETS_PASSPHRASE` locally only to **opt into** a shared
+off-disk key: when set it is forwarded over ssh stdin (never argv) and the remote keys
+the bundle under it instead — meaning that same passphrase is then required to read it,
+so only set it when you want that. Alternatively, unlock the remote login keychain
+first (an interactive login / `agents secrets unlock` on the target) and retry the
+keychain push. See [File-backed bundles](#file-backed-bundles-headless--remote) and
+[Recipe 8](#8-headless-release-on-a-remote-mac).
 
 ### Push to a Windows host
 
@@ -345,7 +350,7 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets create [name]` | Create an empty bundle (name it after what it holds; pass `--description`) | `agents secrets create stripe.com` |
 | `secrets create [name] --description <text>` | Create with a description | `agents secrets create prod --description "Live API keys"` |
 | `secrets create [name] --allow-exec` | Enable exec: refs in this bundle | `agents secrets create tools --allow-exec` |
-| `secrets create [name] --backend <keychain\|file>` | Storage backend; `file` is passphrase-encrypted and headless-readable (see [File-backed bundles](#file-backed-bundles-headless--remote)) | `agents secrets create rush.releases --backend file` |
+| `secrets create [name] --backend <keychain\|file>` | Storage backend; `file` is encrypted at rest and headless-readable via a machine-local key (or `AGENTS_SECRETS_PASSPHRASE` if set) (see [File-backed bundles](#file-backed-bundles-headless--remote)) | `agents secrets create rush.releases --backend file` |
 | `secrets create [name] --synced` | Store this bundle in the age-encrypted synced-secrets file unlocked by `agents login` | `agents secrets create hetzner.com --synced` |
 | `secrets create [name] --force` | Overwrite an existing bundle | `agents secrets create prod --force` |
 | `secrets rename <old> <new>` / `mv` | Rename bundle and move all keychain items | `agents secrets rename staging prod` |
@@ -388,7 +393,7 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets export ... --force` | Overwrite existing 1Password items | `agents secrets export prod --to-1password --vault Team --force` |
 | `secrets export [bundle] --to-file <path>` | Write the bundle as an AES-256-GCM encrypted offline file (needs `AGENTS_SECRETS_PASSPHRASE`; symmetric counterpart of `import --from-file`) | `agents secrets export prod --to-file prod.enc` |
 | `secrets export [bundle] --host <target>` | Push the bundle over SSH to a remote (repeatable; `--device` is an alias). Keychain-backed by default; the push read-back-verifies the write and fails loudly if it didn't persist | `agents secrets export apple.com --host mac-mini` |
-| `secrets export ... --remote-backend file` | Push as a headless-readable file bundle (needs `AGENTS_SECRETS_PASSPHRASE`) — required for a **headless sign host** whose login keychain is locked over SSH | `agents secrets export apple.com --host mac-mini --remote-backend file` |
+| `secrets export ... --remote-backend file` | Push as a headless-readable file bundle (no passphrase — the remote keys it with its machine-local key; forwards `AGENTS_SECRETS_PASSPHRASE` only if set) — for a **headless sign host** whose login keychain is locked over SSH | `agents secrets export apple.com --host mac-mini --remote-backend file` |
 
 ### Agent commands (macOS)
 
@@ -607,36 +612,44 @@ Key naming: use `BASE.account`, where `BASE` is the environment variable the chi
 ### 8. Headless release on a remote Mac
 
 Run a release on a headless Mac (e.g. a build host reached over SSH) that needs
-signing/release secrets, without any Touch ID on the remote. The laptop holds
-the one passphrase (biometry-gated) and hands it over per run; the remote holds
-only ciphertext. See [File-backed bundles](#file-backed-bundles-headless--remote).
+signing/release secrets, without any Touch ID on the remote. Push the secrets as a
+file-backed bundle and the remote reads them headlessly under its own machine-local
+key — **no passphrase to manage on either end**. See
+[File-backed bundles](#file-backed-bundles-headless--remote).
 
 ```bash
 # --- One-time setup, on the laptop ---
-# 1. Keep a strong passphrase in a biometry-gated keychain bundle (the one key).
-agents secrets generate 32 | agents secrets add release.key PASSPHRASE --value-stdin
-
-# 2. Ship the release secrets to the remote as a file-backed bundle. The laptop
-#    resolves them (one Touch ID) and forwards AGENTS_SECRETS_PASSPHRASE over
-#    stdin (never argv) so the remote can encrypt them at rest.
-export AGENTS_SECRETS_PASSPHRASE="$(agents secrets exec release.key -- printenv PASSPHRASE)"
-agents secrets export apple.com    --host mac-mini --remote-backend file
+# Ship the release secrets to the remote as a file-backed bundle. The laptop
+# resolves them (one Touch ID) and pushes; the remote encrypts them at rest under
+# a machine-local key it auto-provisions — nothing to set, nothing to forward.
+agents secrets export apple.com     --host mac-mini --remote-backend file
 agents secrets export rush.releases --host mac-mini --remote-backend file
-unset AGENTS_SECRETS_PASSPHRASE
 
 # --- Each release, from the laptop ---
-# Read the passphrase (one Touch ID) and run the release on the remote. The
-# passphrase reaches the remote process env, never its disk or argv.
-P="$(agents secrets exec release.key -- printenv PASSPHRASE)"   # one Touch ID
+# The remote reads the file-backed bundle headlessly (its own machine-local key) —
+# no passphrase, no Touch ID, no GUI.
+ssh mac-mini 'agents secrets exec rush.releases -- ./rush/app/scripts/release.sh 0.10.0 alpha.1 --yes'
+```
+
+The remote `agents secrets exec` decrypts the file-backed bundle with the machine-local
+key — no Touch ID, no GUI. (`codesign` itself still needs the Developer ID identity in an
+unlocked keychain on the build host — a one-time `security import` of the `.p12`,
+unrelated to `agents secrets`.)
+
+**Opt-in shared passphrase.** To key the remote bundle under a shared secret held off
+disk instead of the remote's machine-local key, set `AGENTS_SECRETS_PASSPHRASE` on the
+laptop before the push — it is forwarded over ssh stdin (never argv), and the remote
+then requires that same passphrase to read the bundle:
+
+```bash
+export AGENTS_SECRETS_PASSPHRASE="$(agents secrets exec release.key -- printenv PASSPHRASE)"
+agents secrets export apple.com --host mac-mini --remote-backend file   # keyed under the shared passphrase
+unset AGENTS_SECRETS_PASSPHRASE
+# then each release forwards the same passphrase to the remote process env:
+P="$(agents secrets exec release.key -- printenv PASSPHRASE)"           # one Touch ID
 ssh mac-mini 'AGENTS_SECRETS_PASSPHRASE=$(cat) \
   agents secrets exec rush.releases -- ./rush/app/scripts/release.sh 0.10.0 alpha.1 --yes' <<<"$P"
 ```
-
-`$(cat)` reads the passphrase from ssh stdin so it never appears in the remote
-process's argv / `ps`. The remote `agents secrets exec` decrypts the file-backed
-bundle with it — no Touch ID, no GUI. (`codesign` itself still needs the Developer
-ID identity in an unlocked keychain on the build host — a one-time `security
-import` of the `.p12`, unrelated to `agents secrets`.)
 
 ## Demo
 

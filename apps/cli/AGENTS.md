@@ -505,8 +505,11 @@ another Mac (no publish); it too is zero-config, targeting the same hardcoded
 **Provisioning the `apple.com` bundle on a headless sign host.** A Linux-driven
 release offloads macOS signing to a sign host over SSH, which needs the `apple.com`
 secrets bundle *on that host*. Push it with the **file backend** —
-`agents secrets export apple.com --host <signer> --remote-backend file` (needs
-`AGENTS_SECRETS_PASSPHRASE` set locally) — **not** the default keychain backend: a
+`agents secrets export apple.com --host <signer> --remote-backend file` (**no
+passphrase required** — the remote keys it under a machine-local key it
+auto-provisions and reads it headlessly; set `AGENTS_SECRETS_PASSPHRASE` locally only
+to opt into a shared off-disk key, forwarded over ssh stdin) — **not** the default
+keychain backend: a
 macOS login keychain is locked under headless SSH, so a keychain-backed push lands
 the bundle metadata but no readable secret items (`secrets export --host` now
 read-back-verifies a keychain push and fails loudly if it didn't persist, pointing
