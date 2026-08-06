@@ -453,6 +453,45 @@ describe('pullRepo reconciliation', () => {
     expect(fs.existsSync(path.join(local, 'up.txt'))).toBe(true);
   });
 
+  // RUSH-2282: a clean 1-behind checkout must fast-forward even when FETCH_HEAD
+  // is multi-entry (extra remote branches + a concurrent/leftover fetch). The
+  // old path ran `git pull --rebase` after a bare fetch and died with
+  // "Cannot rebase onto multiple branches" on fleet boxes.
+  it('fast-forwards a clean 1-behind checkout despite multi-entry FETCH_HEAD (RUSH-2282)', async () => {
+    // Extra branches on the remote so a bare `git fetch` writes multi-line FETCH_HEAD.
+    await commitFile(author, 'side.txt', 'side\n', 'side branch base');
+    await simpleGit(author).push('origin', 'main');
+    await simpleGit(author).checkoutLocalBranch('other');
+    await commitFile(author, 'other.txt', 'other\n', 'other branch tip');
+    await simpleGit(author).push('origin', 'other');
+    await simpleGit(author).checkout('main');
+
+    // Local is still behind origin/main by the commits we just pushed (plus
+    // the final tip below). Push one more so the gap is unambiguous.
+    await commitFile(author, 'up.txt', 'from-author\n', 'author tip');
+    await simpleGit(author).push('origin', 'main');
+
+    // Seed a multi-entry FETCH_HEAD the way a bare fetch leaves it, then confirm
+    // pullRepo still integrates origin/main without consulting FETCH_HEAD.
+    await simpleGit(local).fetch();
+    const fetchHead = path.join(local, '.git', 'FETCH_HEAD');
+    expect(fs.existsSync(fetchHead)).toBe(true);
+    const fetchHeadBody = fs.readFileSync(fetchHead, 'utf-8');
+    // At least two lines when origin has main + other (and possibly more).
+    expect(fetchHeadBody.trim().split('\n').length).toBeGreaterThanOrEqual(2);
+
+    const before = await simpleGit(local).revparse(['HEAD']);
+    const remoteTip = await simpleGit(local).revparse(['origin/main']);
+    expect(before).not.toBe(remoteTip);
+
+    const res = await pullRepo(local);
+    const after = await simpleGit(local).revparse(['HEAD']);
+
+    expect(res.success, res.error).toBe(true);
+    expect(after).toBe(remoteTip);
+    expect(fs.existsSync(path.join(local, 'up.txt'))).toBe(true);
+  });
+
   it('reports already up to date when local matches origin', async () => {
     const before = await simpleGit(local).revparse(['HEAD']);
     const res = await pullRepo(local);

@@ -993,9 +993,15 @@ export function displayHomePath(dir: string): string {
  * Pull changes in an existing repo.
  * Refuses to pull if the working tree is dirty -- user must commit or discard changes first.
  *
- * Uses `git pull --rebase` (same strategy as {@link syncRepoGit}) so a diverged
- * branch reconciles instead of failing with "Need to specify how to reconcile
- * divergent branches".
+ * Strategy (RUSH-2282):
+ *   1. Fetch, then compare HEAD to the resolved tracking ref.
+ *   2. Clean behind-only (HEAD is an ancestor of tracking) → `merge --ff-only`
+ *      against the tracking ref. Never re-enter `git pull` after a bare fetch —
+ *      multi-entry FETCH_HEAD (concurrent fetch, multi-branch remote) makes
+ *      `git pull --rebase` die with "Cannot rebase onto multiple branches" even
+ *      when the checkout is a pure fast-forward.
+ *   3. Genuinely diverged (local commits not on tracking) → `rebase` onto the
+ *      tracking ref (same outcome as {@link syncRepoGit}, without a second pull).
  */
 export async function pullRepo(
   dir: string,
@@ -1067,16 +1073,16 @@ export async function pullRepo(
       }
     }
 
-    // Split the remote-tracking ref (<remote>/<branch>) into its parts and pull
-    // THOSE. Hardcoding 'origin' while comparing against `tracking` is how a
-    // branch tracking e.g. upstream/main silently 'succeeded': revparse saw a
-    // difference, the pull fetched origin/main (already current), and pullRepo
-    // returned success having moved nothing — the same "reported ok, pulled
-    // nothing" failure this change exists to remove. Branch names may contain
-    // slashes, so split on the FIRST separator only.
+    // Split the remote-tracking ref (<remote>/<branch>) so callers/logs can name
+    // the remote. Branch names may contain slashes, so split on the FIRST
+    // separator only. The integrate step below uses `tracking` directly (not a
+    // second `git pull <remote> <branch>`) so a multi-entry FETCH_HEAD cannot
+    // turn a clean fast-forward into "Cannot rebase onto multiple branches".
     const sep = tracking.indexOf('/');
-    const remoteName = sep > 0 ? tracking.slice(0, sep) : 'origin';
     const remoteBranch = sep > 0 ? tracking.slice(sep + 1) : branch;
+    // Keep branch-name validation on the ref we would have passed to pull —
+    // rejects traversal / flag-smuggling shapes before any integrate command.
+    assertValidBranchName(remoteBranch);
 
     // Bare fetch: updates every remote, so the revparse below sees a fresh ref
     // whichever one the branch tracks. Deliberately argument-less — simple-git's
@@ -1100,17 +1106,34 @@ export async function pullRepo(
       };
     }
 
+    // Behind-only when tracking has commits we lack AND we have none of our own
+    // on top. Use rev-list counts — simple-git does not reject on the exit-1
+    // that `merge-base --is-ancestor` returns for a non-ancestor, so a try/catch
+    // around that call would always report "can ff" (RUSH-2282).
+    const aheadCount = parseInt(
+      (await git.raw(['rev-list', '--count', `${tracking}..HEAD`])).trim(),
+      10,
+    );
+    const behindCount = parseInt(
+      (await git.raw(['rev-list', '--count', `HEAD..${tracking}`])).trim(),
+      10,
+    );
+    const canFastForward =
+      Number.isFinite(aheadCount) &&
+      Number.isFinite(behindCount) &&
+      aheadCount === 0 &&
+      behindCount > 0;
+
     try {
-      // Rebase, not --ff-only. Fast-forward refuses ANY divergence, conflict or
-      // not, so a single local commit permanently wedged the pull with nothing
-      // actually in conflict. Matches syncRepoGit (below) and this function's doc.
-      //
-      // Pull the RESOLVED tracking ref, not `branch`: when the local branch has
-      // no tracking config the block above falls back to origin's default head,
-      // which may be named differently (local `main` vs origin `master`). Using
-      // `branch` there asks origin for a ref it does not have.
-      assertValidBranchName(remoteBranch);
-      await git.pull(remoteName, remoteBranch, { '--rebase': 'true' });
+      if (canFastForward) {
+        // Integrate the already-fetched tracking ref. No network, no FETCH_HEAD.
+        await git.raw(['merge', '--ff-only', tracking]);
+      } else {
+        // Diverged (or local-only commits). Rebase onto the tracking tip —
+        // same outcome as `git pull --rebase <remote> <branch>` without
+        // re-fetching or consulting FETCH_HEAD.
+        await git.raw(['rebase', tracking]);
+      }
     } catch (err) {
       // Abort so the tree is restored, matching the atomicity --ff-only gave us.
       // Without this a conflict leaves the repo detached, mid-rebase, with
@@ -1119,10 +1142,11 @@ export async function pullRepo(
       // the cause. `agents sync` reaches this path unattended across the fleet,
       // so a wedged checkout would be worse than the bug this fixes.
       await git.raw(['rebase', '--abort']).catch(() => { /* not mid-rebase */ });
+      const verb = canFastForward ? 'Fast-forward' : 'Rebase';
       return {
         success: false,
         commit: '',
-        error: `Rebase onto ${tracking} hit a conflict — the pull was rolled back, nothing changed.\n\nResolve the divergence, then pull again:\n\n  cd ${displayHomePath(dir)} && git log --oneline HEAD...${tracking}\n\n${(err as Error).message}`,
+        error: `${verb} onto ${tracking} failed — the pull was rolled back, nothing changed.\n\nResolve the divergence, then pull again:\n\n  cd ${displayHomePath(dir)} && git log --oneline HEAD...${tracking}\n\n${(err as Error).message}`,
       };
     }
 
