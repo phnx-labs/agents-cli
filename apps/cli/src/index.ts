@@ -523,12 +523,12 @@ import {
 const UPDATE_CHECK_FILE = getUpdateCheckPath();
 
 /**
- * Warn once when PATH resolves `agents` to a different agents-cli install
- * than the copy that is currently running (or to several). Divergent installs
+ * Warn once when this machine contains a different agents-cli install than the
+ * copy that is currently running (or several). Divergent installs
  * are how self-updates "succeed" without changing the command the user types.
- * The warning re-fires only when the set of install roots changes; dev builds
- * (0.0.0-dev) are ignored because side-by-side dev installs are a supported
- * workflow.
+ * The warning re-fires only when the set of install roots or their helper-copy
+ * safety changes. Dev builds are included because old dev copies can still
+ * overwrite the shared macOS helper bundle non-atomically.
  */
 function maybeWarnMultiInstall(): void {
   const sentinel = path.join(getRuntimeStateDir(), 'multi-install-warned');
@@ -544,9 +544,10 @@ function maybeWarnMultiInstall(): void {
   const byRoot = new Map<string, { version: string; note: string }>();
   byRoot.set(runningRoot, { version: VERSION, note: 'running' });
   for (const install of findAgentsCliInstalls(process.env.PATH || '')) {
-    if (install.version.startsWith('0.0.0-dev')) continue;
     if (!byRoot.has(install.packageRoot)) {
-      byRoot.set(install.packageRoot, { version: install.version, note: `agents on PATH: ${install.binPath}` });
+      const notes = [install.binPath ? `agents on PATH: ${install.binPath}` : 'discovered install'];
+      if (!install.atomicHelperInstall) notes.push('unsafe legacy helper installer — remove this copy');
+      byRoot.set(install.packageRoot, { version: install.version, note: notes.join('; ') });
     }
   }
 
@@ -555,7 +556,10 @@ function maybeWarnMultiInstall(): void {
     return;
   }
 
-  const key = [...byRoot.keys()].sort().join('\n');
+  const key = [...byRoot.entries()]
+    .map(([root, info]) => `${root}\t${info.version}\t${info.note}`)
+    .sort()
+    .join('\n');
   try {
     if (fs.readFileSync(sentinel, 'utf-8') === key) return;
   } catch { /* not warned for this set yet */ }

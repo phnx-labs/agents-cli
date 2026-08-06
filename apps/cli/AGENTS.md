@@ -710,7 +710,11 @@ deadlock. **(b)** The cooldown bounds the loop but does not converge it: two
 installs that are *both* invoked regularly trade ownership every cooldown, so the
 helper restarts roughly hourly until one is removed. That is deliberate — the
 alternative is stranding one of them — and the real fix is a single install
-(#2147 covers making the multi-install banner actually name them all).
+(#2147 expanded the multi-install banner beyond `PATH` to NVM, fnm, Volta, Bun,
+common npm prefixes, and the npm `_npx` cache). The banner also checks each
+copy for `dist/lib/app-bundle-install.js`; a copy without it is labelled an
+unsafe legacy helper installer and must be removed, because current code cannot
+make an older executable use the atomic installer it predates.
 
 **Do NOT "improve" this by comparing bundle content.** It looks like the obvious
 gate and it does not work: the helper is rebuilt, re-signed and re-notarized on
