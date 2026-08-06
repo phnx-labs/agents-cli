@@ -215,16 +215,18 @@ describe('reapOrphanedKeychainProcesses (darwin integration)', () => {
       'Agents CLI',
     );
     fs.mkdirSync(path.dirname(fakeHelper), { recursive: true });
-    // A REAL binary, not a shebang script. `reaper.ts` matches on argv[0]
+    // SYMLINK to a real signed binary. `reaper.ts` matches on argv[0]
     // (`command === helperPath || command.startsWith(helperPath + ' ')`), which is
-    // what the production helper — a signed Mach-O invoked directly — actually
-    // produces. Exec'ing a `#!/bin/sh` script instead makes the kernel run the
-    // INTERPRETER, so `ps` reports `/bin/sh <helperPath>`: argv[0] is `/bin/sh`
-    // and the match can never fire, so the reaper found nothing and the test
-    // asserted `0 >= 1`. Copying `/bin/sleep` to the helper path keeps argv[0]
-    // equal to that path.
-    fs.copyFileSync('/bin/sleep', fakeHelper);
-    fs.chmodSync(fakeHelper, 0o755);
+    // what the production helper — a signed Mach-O invoked directly — produces:
+    //   58446 … /Users/…/agents-cli/Agents CLI.app/Contents/MacOS/Agents CLI watch-lock
+    // Two fixtures that look right but cannot work, both verified on an arm64 Mac:
+    //   - a `#!/bin/sh` script: the kernel execs the INTERPRETER, so ps reports
+    //     `/bin/sh <helperPath>` — argv[0] is /bin/sh and the match never fires.
+    //   - a COPY of /bin/sleep: the copy loses its code signature, and Apple
+    //     Silicon SIGKILLs it on exec (observed exit 137), so nothing ever runs.
+    // A symlink keeps the signature (the kernel execs /bin/sleep) while argv[0]
+    // stays the symlink path, which is what the reaper matches.
+    fs.symlinkSync('/bin/sleep', fakeHelper);
 
     // Launch through a disposable shell that exits immediately, so the sleeper
     // is reparented to init (PPID 1).
