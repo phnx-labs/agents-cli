@@ -1,0 +1,121 @@
+import { describe, it, expect, afterEach } from 'vitest';
+import {
+  PROCESS_TABLE_FRESH_MS,
+  UNATTRIBUTED_RESCAN_MS,
+  attributedSetLostPids,
+  filterCachedUnattributed,
+  clearActiveScanCachesForTest,
+  setActiveScanClockForTest,
+  processTableLiveReadCountForTest,
+  unattributedFullRescanCountForTest,
+  listUnattributedActive,
+  hostFromPid,
+  type ActiveSession,
+} from './active.js';
+
+afterEach(() => {
+  clearActiveScanCachesForTest();
+});
+
+describe('attributedSetLostPids', () => {
+  it('is false when next is a superset of prev', () => {
+    expect(attributedSetLostPids(new Set([1, 2]), new Set([1, 2, 3]))).toBe(false);
+    expect(attributedSetLostPids(new Set([1]), new Set([1]))).toBe(false);
+    expect(attributedSetLostPids(new Set(), new Set([1]))).toBe(false);
+  });
+
+  it('is true when any prev pid is missing from next', () => {
+    expect(attributedSetLostPids(new Set([1, 2]), new Set([1]))).toBe(true);
+    expect(attributedSetLostPids(new Set([5]), new Set())).toBe(true);
+  });
+});
+
+describe('filterCachedUnattributed', () => {
+  const row = (pid: number): ActiveSession => ({
+    context: 'headless',
+    kind: 'claude',
+    status: 'running',
+    pid,
+  });
+
+  it('drops attributed and dead pids; keeps live unattributed', () => {
+    const sessions = [row(10), row(20), row(30)];
+    const attributed = new Set([20]);
+    const alive = (pid: number) => pid !== 30;
+    const out = filterCachedUnattributed(sessions, attributed, alive);
+    expect(out.map((s) => s.pid)).toEqual([10]);
+  });
+
+  it('drops rows with no pid', () => {
+    const sessions: ActiveSession[] = [
+      { context: 'headless', kind: 'claude', status: 'running' },
+      row(11),
+    ];
+    expect(filterCachedUnattributed(sessions, new Set(), () => true).map((s) => s.pid)).toEqual([11]);
+  });
+});
+
+describe('process-table memo (#2047)', () => {
+  it('reuses one live ps/CIM snapshot across callers within PROCESS_TABLE_FRESH_MS', async () => {
+    // hostFromPid walks the process table; two calls in the same window must
+    // share the snapshot (one live read, not two).
+    let t = 1_000_000;
+    setActiveScanClockForTest(() => t);
+    clearActiveScanCachesForTest();
+    setActiveScanClockForTest(() => t);
+
+    await hostFromPid(process.pid);
+    const afterFirst = processTableLiveReadCountForTest();
+    expect(afterFirst).toBeGreaterThanOrEqual(1);
+
+    await hostFromPid(process.pid);
+    expect(processTableLiveReadCountForTest()).toBe(afterFirst);
+
+    // Advance past the fresh window — next call must re-snapshot.
+    t += PROCESS_TABLE_FRESH_MS + 1;
+    await hostFromPid(process.pid);
+    expect(processTableLiveReadCountForTest()).toBe(afterFirst + 1);
+  });
+});
+
+describe('unattributed rescan throttle (#2047)', () => {
+  it('reuses the last full scan within UNATTRIBUTED_RESCAN_MS when attributed did not shrink', async () => {
+    let t = 2_000_000;
+    setActiveScanClockForTest(() => t);
+
+    const first = await listUnattributedActive(new Set());
+    expect(unattributedFullRescanCountForTest()).toBe(1);
+    // Shape: array of sessions (may be empty on a quiet box).
+    expect(Array.isArray(first)).toBe(true);
+
+    const second = await listUnattributedActive(new Set());
+    expect(unattributedFullRescanCountForTest()).toBe(1);
+    // Same pids present (filtered only for death/attribution — none here).
+    expect(second.map((s) => s.pid).sort()).toEqual(first.map((s) => s.pid).sort());
+
+    // Growing the attributed set filters without a full rescan.
+    const samplePid = first.find((s) => s.pid != null)?.pid;
+    if (samplePid != null) {
+      const filtered = await listUnattributedActive(new Set([samplePid]));
+      expect(unattributedFullRescanCountForTest()).toBe(1);
+      expect(filtered.some((s) => s.pid === samplePid)).toBe(false);
+    }
+
+    // Past the rescan window → full rescan.
+    t += UNATTRIBUTED_RESCAN_MS + 1;
+    await listUnattributedActive(new Set());
+    expect(unattributedFullRescanCountForTest()).toBe(2);
+  });
+
+  it('forces a full rescan when the attributed set loses a pid', async () => {
+    let t = 3_000_000;
+    setActiveScanClockForTest(() => t);
+
+    await listUnattributedActive(new Set([999_001, 999_002]));
+    expect(unattributedFullRescanCountForTest()).toBe(1);
+
+    // Still inside the window, but a pid left the attributed set — rescan.
+    await listUnattributedActive(new Set([999_001]));
+    expect(unattributedFullRescanCountForTest()).toBe(2);
+  });
+});

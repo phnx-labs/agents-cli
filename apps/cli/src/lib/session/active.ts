@@ -77,6 +77,88 @@ const LSOF_STAGGER_MS = 10;
 const LSOF_TIMEOUT_MS = 5_000;
 const PS_SNAPSHOT_TIMEOUT_MS = 10_000;
 
+/**
+ * Process-local process-table memo (#2047). One `getActiveSessions` scan can
+ * call `ps -A` from the terminal path, the headless path, and host ancestry —
+ * without this, each is a full process-table snapshot. 5s is well under the
+ * ~10–30s menu-bar / `--active` poll so a quiet re-poll usually reuses the
+ * snapshot; a brand-new agent pid still appears on the next full refresh.
+ */
+export const PROCESS_TABLE_FRESH_MS = 5_000;
+
+/**
+ * How long {@link listUnattributedActive} may reuse its last full `ps`+`lsof`
+ * result (#2047). Between full rescans the previous rows are re-emitted after
+ * dropping dead PIDs and PIDs that are now attributed. A *shrinking* attributed
+ * set forces a rescan so a process that just left teams/terminals can reappear
+ * as headless instead of vanishing until the next cold poll.
+ */
+export const UNATTRIBUTED_RESCAN_MS = 15_000;
+
+/** Injectable clock for the active-scan memos (tests only). */
+let activeScanNow: () => number = () => Date.now();
+
+/** Test seam: override the clock used by process-table / unattributed memos. */
+export function setActiveScanClockForTest(fn?: () => number): void {
+  activeScanNow = fn ?? (() => Date.now());
+}
+
+let processTableCache: { at: number; rows: ProcRow[] } | undefined;
+let processTableLiveReads = 0;
+let unattributedCache: {
+  at: number;
+  attributed: Set<number>;
+  sessions: ActiveSession[];
+} | undefined;
+let unattributedFullRescans = 0;
+
+/** Test seam: drop the process-table + unattributed memos and their counters. */
+export function clearActiveScanCachesForTest(): void {
+  processTableCache = undefined;
+  processTableLiveReads = 0;
+  unattributedCache = undefined;
+  unattributedFullRescans = 0;
+  activeScanNow = () => Date.now();
+}
+
+/** Test seam: how many times the live `ps` / CIM path actually ran. */
+export function processTableLiveReadCountForTest(): number {
+  return processTableLiveReads;
+}
+
+/** Test seam: how many full unattributed (ps + lsof) rescans ran. */
+export function unattributedFullRescanCountForTest(): number {
+  return unattributedFullRescans;
+}
+
+/**
+ * True when any pid in `prev` is absent from `next` — the attributed set
+ * shrank, so a process may need to reappear as unattributed. Pure for tests.
+ */
+export function attributedSetLostPids(prev: Set<number>, next: Set<number>): boolean {
+  for (const p of prev) {
+    if (!next.has(p)) return true;
+  }
+  return false;
+}
+
+/**
+ * Drop rows whose pid is now attributed or no longer alive. Pure over the
+ * inputs so the unattributed TTL reuse path is unit-testable without a live
+ * process table.
+ */
+export function filterCachedUnattributed(
+  sessions: ActiveSession[],
+  attributed: Set<number>,
+  alive: (pid: number) => boolean,
+): ActiveSession[] {
+  return sessions.filter((s) => {
+    if (s.pid == null) return false;
+    if (attributed.has(s.pid)) return false;
+    return alive(s.pid);
+  });
+}
+
 export type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
 /**
@@ -1263,8 +1345,25 @@ const HOST_MATCHERS: Array<{ host: string; tokens: string[] }> = [
  * walk ancestry chains to attribute child processes to their terminal hosts.
  * `comm` may be an absolute path for shim-launched agents, so basename before
  * matching against AGENT_CLI_NAMES.
+ *
+ * Memoized for {@link PROCESS_TABLE_FRESH_MS} so one active-session scan (and a
+ * quiet re-poll within the window) does not re-shell `ps -A` / CIM for every
+ * caller — terminal host detection, headless attribution, and `hostFromPid`
+ * all share the same snapshot (#2047).
  */
 async function readProcessTable(): Promise<ProcRow[]> {
+  const now = activeScanNow();
+  if (processTableCache && now - processTableCache.at < PROCESS_TABLE_FRESH_MS) {
+    return processTableCache.rows;
+  }
+  const rows = await readProcessTableLive();
+  processTableCache = { at: now, rows };
+  return rows;
+}
+
+/** Uncached process-table snapshot (the live `ps` / CIM path). */
+async function readProcessTableLive(): Promise<ProcRow[]> {
+  processTableLiveReads += 1;
   if (process.platform === 'win32') return readProcessTableWin32();
   let out: string;
   try {
@@ -1526,8 +1625,30 @@ export function foldSubordinateAgents(
  * Classified by walking the ppid chain: any recognised UI ancestor (IDE
  * helper, terminal-app, or multiplexer) means `terminal`; nothing of the
  * sort means `headless` (daemon, launchd-spawned, orphan).
+ *
+ * Full `ps`+`lsof` rescans are throttled to {@link UNATTRIBUTED_RESCAN_MS}
+ * (#2047). Between rescans the previous rows are re-emitted after dropping
+ * dead PIDs and PIDs that are now attributed. A shrinking attributed set
+ * forces a rescan so a process that just left teams/terminals can reappear
+ * as headless.
  */
 export async function listUnattributedActive(attributed: Set<number>): Promise<ActiveSession[]> {
+  const now = activeScanNow();
+  if (
+    unattributedCache &&
+    now - unattributedCache.at < UNATTRIBUTED_RESCAN_MS &&
+    !attributedSetLostPids(unattributedCache.attributed, attributed)
+  ) {
+    return filterCachedUnattributed(unattributedCache.sessions, attributed, (pid) => isPidAlive(pid));
+  }
+  const out = await listUnattributedActiveLive(attributed);
+  unattributedCache = { at: now, attributed: new Set(attributed), sessions: out };
+  return out;
+}
+
+/** Unthrottled headless scan (live process table + cwd probes). */
+async function listUnattributedActiveLive(attributed: Set<number>): Promise<ActiveSession[]> {
+  unattributedFullRescans += 1;
   const table = await readProcessTable();
   const procByPid = new Map<number, ProcRow>();
   const ppidMap = new Map<number, number>();
