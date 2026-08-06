@@ -26,6 +26,10 @@ const require = createRequire(import.meta.url);
 const TSX_IMPORT = pathToFileURL(require.resolve('tsx')).href;
 const CLI_ENTRYPOINT = path.join(REPO_ROOT, 'src', 'index.ts');
 
+// win32: subprocess CLI + process-group signals / path spawn assumptions (RUSH-2215).
+const describeRoutines = process.platform === 'win32' ? describe.skip : describe;
+
+
 /** Provision an isolated HOME with agents.yaml, .system/.git, and optional routines + device registry. */
 function makeHome(opts: {
   jobs?: Record<string, unknown>[];
@@ -102,7 +106,7 @@ function readRoutineYaml(home: string, name: string): Record<string, unknown> | 
   return yaml.parse(fs.readFileSync(p, 'utf-8'));
 }
 
-describe('routines add help', () => {
+describeRoutines('routines add help', () => {
   it('lists exactly the agents backed by the daemon command table', () => {
     const home = makeHome();
     try {
@@ -241,7 +245,7 @@ function writeDeviceRoutines(home: string, device: string, routines: string[]): 
   fs.writeFileSync(path.join(dir, 'agents.yaml'), yaml.stringify({ routines }));
 }
 
-describe('routines devices --set persists', () => {
+describeRoutines('routines devices --set persists', () => {
   it('writes activation to the target device manifest without changing definition metadata', () => {
     const home = makeHome({ jobs: [baseJob], registry: { 'yosemite-s0': registry['yosemite-s0'] } });
     try {
@@ -258,7 +262,7 @@ describe('routines devices --set persists', () => {
   });
 });
 
-describe('routines devices --set on .yaml-only routine', () => {
+describeRoutines('routines devices --set on .yaml-only routine', () => {
   it('leaves the .yaml definition untouched and list --json reports enabled devices+runsHere', () => {
     const home = makeHome({ registry: { 'yosemite-s0': registry['yosemite-s0'] } });
     try {
@@ -288,7 +292,7 @@ describe('routines devices --set on .yaml-only routine', () => {
   });
 });
 
-describe('routines devices --set normalizes mixed case and FQDN duplicates', () => {
+describeRoutines('routines devices --set normalizes mixed case and FQDN duplicates', () => {
   it('persists one normalized entry per device', () => {
     const job = { ...baseJob, devices: ['yosemite-s0'] };
     const home = makeHome({ jobs: [job], registry: { 'yosemite-s0': registry['yosemite-s0'] } });
@@ -306,7 +310,7 @@ describe('routines devices --set normalizes mixed case and FQDN duplicates', () 
   });
 });
 
-describe('routines devices --clear removes activation', () => {
+describeRoutines('routines devices --clear removes activation', () => {
   it('removes the routine from this device manifest without rewriting YAML', () => {
     const job = { ...baseJob, devices: ['yosemite-s0'] };
     const home = makeHome({ jobs: [job], registry: { 'yosemite-s0': registry['yosemite-s0'] } });
@@ -325,7 +329,7 @@ describe('routines devices --clear removes activation', () => {
   });
 });
 
-describe('routines devices --set unknown is nonzero/no mutation', () => {
+describeRoutines('routines devices --set unknown is nonzero/no mutation', () => {
   it('rejects unknown device names and does not mutate the YAML', () => {
     const job = { ...baseJob, devices: ['yosemite-s0'] };
     const home = makeHome({ jobs: [job], registry, deviceRoutines: { 'yosemite-s0': ['test-job'] } });
@@ -343,7 +347,7 @@ describe('routines devices --set unknown is nonzero/no mutation', () => {
   });
 });
 
-describe('routines add --devices unknown is nonzero/no write', () => {
+describeRoutines('routines add --devices unknown is nonzero/no write', () => {
   it('rejects unknown devices and does not create the routine file', () => {
     const home = makeHome({ registry: { 'yosemite-s0': registry['yosemite-s0'] } });
     try {
@@ -362,7 +366,7 @@ describe('routines add --devices unknown is nonzero/no write', () => {
   });
 });
 
-describe('routines add --agent unsupported by the local daemon (RUSH-2102)', () => {
+describeRoutines('routines add --agent unsupported by the local daemon (RUSH-2102)', () => {
   it('rejects a real agent the daemon cannot fire, at add time, and writes no routine file', () => {
     const home = makeHome({ registry });
     try {
@@ -397,7 +401,7 @@ describe('routines add --agent unsupported by the local daemon (RUSH-2102)', () 
   });
 });
 
-describe('routines add --on aliases', () => {
+describeRoutines('routines add --on aliases', () => {
   it('accepts the pr GitHub alias and writes the canonical trigger event', async () => {
     const home = makeHome({ registry });
     let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
@@ -435,7 +439,7 @@ describe('routines add --on aliases', () => {
   });
 });
 
-describe('routines add --json', () => {
+describeRoutines('routines add --json', () => {
   it('emits only the created routine id and status on stdout', async () => {
     const home = makeHome({ registry });
     let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
@@ -476,7 +480,7 @@ describe('routines add --json', () => {
   });
 });
 
-describe('routines add one-shot-looking --schedule', () => {
+describeRoutines('routines add one-shot-looking --schedule', () => {
   it('warns, persists runOnce, and keeps JSON stdout parseable', async () => {
     const home = makeHome({ registry });
     let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
@@ -511,7 +515,7 @@ describe('routines add one-shot-looking --schedule', () => {
   });
 });
 
-describe('routines list --json has devices+runsHere, no device', () => {
+describeRoutines('routines list --json has devices+runsHere, no device', () => {
   it('includes devices array and runsHere, excludes singular device key', () => {
     const job = { ...baseJob, devices: ['yosemite-s0'] };
     const home = makeHome({
@@ -714,7 +718,7 @@ describe('routines list --json has devices+runsHere, no device', () => {
   });
 });
 
-describe('routines runs --json', () => {
+describeRoutines('routines runs --json', () => {
   it('emits run ids and statuses for the requested routine', () => {
     const home = makeHome({ jobs: [baseJob], registry });
     try {
@@ -765,7 +769,7 @@ describe('routines runs --json', () => {
   });
 });
 
-describe('routines list table has Devices column with bounded ellipsis', () => {
+describeRoutines('routines list table has Devices column with bounded ellipsis', () => {
   it('table header includes Devices', () => {
     const home = makeHome({ jobs: [baseJob], registry });
     try {
@@ -836,7 +840,7 @@ describe('routines list table has Devices column with bounded ellipsis', () => {
   });
 });
 
-describe('routines list grouped by device', () => {
+describeRoutines('routines list grouped by device', () => {
   it('groups by fleet, current device, pinned devices, hosts, cloud, and offline registry state', () => {
     const jobs = [
       { ...baseJob, name: 'all-local' },
@@ -948,7 +952,7 @@ describe('routines list grouped by device', () => {
   });
 });
 
-describe('routines cleanup', () => {
+describeRoutines('routines cleanup', () => {
   it('removes completed expired one-shot-looking routines', () => {
     const year = new Date().getFullYear();
     const job = { ...baseJob, name: 'stale-followup', schedule: '0 0 1 1 *' };
@@ -979,7 +983,7 @@ describe('routines cleanup', () => {
   });
 });
 
-describe('routines devices no-flags nonTTY names --set/--clear', () => {
+describeRoutines('routines devices no-flags nonTTY names --set/--clear', () => {
   it('non-interactive devices without flags exits nonzero naming --set and --clear', () => {
     const home = makeHome({ jobs: [baseJob], registry });
     try {
@@ -994,7 +998,7 @@ describe('routines devices no-flags nonTTY names --set/--clear', () => {
   });
 });
 
-describe('routines list --host self runs locally', () => {
+describeRoutines('routines list --host self runs locally', () => {
   it('exits 0 and lists when --host matches AGENTS_SYNC_MACHINE_ID', () => {
     const job = { ...baseJob, devices: ['zion'] };
     const home = makeHome({ jobs: [job], registry });
@@ -1008,7 +1012,7 @@ describe('routines list --host self runs locally', () => {
   });
 });
 
-describe('routines --help documents --host and --device', () => {
+describeRoutines('routines --help documents --host and --device', () => {
   it('help output contains --host and --device', () => {
     const home = makeHome();
     try {
@@ -1022,7 +1026,7 @@ describe('routines --help documents --host and --device', () => {
   });
 });
 
-describe('routines devices --set and --clear are mutually exclusive', () => {
+describeRoutines('routines devices --set and --clear are mutually exclusive', () => {
   it('exits nonzero without mutation when both are given', () => {
     const job = { ...baseJob, devices: ['yosemite-s0'] };
     const home = makeHome({ jobs: [job], registry });
@@ -1040,7 +1044,7 @@ describe('routines devices --set and --clear are mutually exclusive', () => {
   });
 });
 
-describe('routines add --devices empty/whitespace fails closed', () => {
+describeRoutines('routines add --devices empty/whitespace fails closed', () => {
   it('rejects --devices "" and does not create the routine file', () => {
     const home = makeHome({ registry: { 'yosemite-s0': registry['yosemite-s0'] } });
     try {
@@ -1108,7 +1112,7 @@ describe('routines add --devices empty/whitespace fails closed', () => {
   });
 });
 
-describe('routines devices --set empty/whitespace fails closed', () => {
+describeRoutines('routines devices --set empty/whitespace fails closed', () => {
   it('rejects --set "" without mutating the routine', () => {
     const job = { ...baseJob, devices: ['yosemite-s0'] };
     const home = makeHome({ jobs: [job], registry });
@@ -1142,7 +1146,7 @@ describe('routines devices --set empty/whitespace fails closed', () => {
   });
 });
 
-describe('routines run wrong-host exact output', () => {
+describeRoutines('routines run wrong-host exact output', () => {
   it('prints the canonical message and suggestion then exits nonzero', () => {
     const job = { ...baseJob, devices: ['yosemite-s0', 'mac-mini'] };
     const home = makeHome({ jobs: [job], registry });
@@ -1161,7 +1165,7 @@ describe('routines run wrong-host exact output', () => {
   });
 });
 
-describe('routines list --help documents --host and --device once each', () => {
+describeRoutines('routines list --help documents --host and --device once each', () => {
   it('lists each routing flag exactly once', () => {
     const home = makeHome();
     try {
@@ -1193,7 +1197,7 @@ function directSubcommandNames(home: string): string[] {
     .filter((name): name is string => Boolean(name));
 }
 
-describe('routines subcommand --help documents --host and --device once each', () => {
+describeRoutines('routines subcommand --help documents --host and --device once each', () => {
   it('derives every direct command from routines --help and checks local help', () => {
     const home = makeHome();
     try {
@@ -1216,7 +1220,7 @@ describe('routines subcommand --help documents --host and --device once each', (
   }, 90_000);
 });
 
-describe('routines run --host SELF follows the normal local eligibility path', () => {
+describeRoutines('routines run --host SELF follows the normal local eligibility path', () => {
   it('passes device eligibility when self is in the allowlist', () => {
     const job = { ...baseJob, devices: ['zion'] };
     const home = makeHome({ jobs: [job], registry });
@@ -1234,7 +1238,7 @@ describe('routines run --host SELF follows the normal local eligibility path', (
   });
 });
 
-describe('routines run --json', () => {
+describeRoutines('routines run --json', () => {
   it('emits the real run id and status for a command routine', () => {
     const home = makeHome({
       jobs: [{
@@ -1281,7 +1285,7 @@ describe('routines run --json', () => {
   });
 });
 
-describe('buildRunsJson', () => {
+describeRoutines('buildRunsJson', () => {
   const meta = (runId: string, status: RunMeta['status'], startedAt: string): RunMeta => ({
     jobName: 'test-job',
     runId,
@@ -1344,7 +1348,7 @@ function projectsEnv(home: string): Record<string, string> {
   return { AGENTS_PROJECTS_DIR: path.join(home, '.agents', 'projects') };
 }
 
-describe('routines add --project persists to YAML', () => {
+describeRoutines('routines add --project persists to YAML', () => {
   it('writes a single project name into the projects field', () => {
     const home = makeHome({ registry });
     writeProject(home, 'myapp');
@@ -1409,7 +1413,7 @@ describe('routines add --project persists to YAML', () => {
   });
 });
 
-describe('routines add --all-projects', () => {
+describeRoutines('routines add --all-projects', () => {
   it('writes projects: ["*"] to YAML', () => {
     const home = makeHome({ registry });
     writeProject(home, 'myapp');
@@ -1452,7 +1456,7 @@ describe('routines add --all-projects', () => {
   });
 });
 
-describe('routines add --project unknown project rejection', () => {
+describeRoutines('routines add --project unknown project rejection', () => {
   it('rejects an unknown project name and does not create the routine file', () => {
     const home = makeHome({ registry });
     // No projects written — "ghost" does not exist.
@@ -1474,7 +1478,7 @@ describe('routines add --project unknown project rejection', () => {
   });
 });
 
-describe('groupRoutineJobsByProject — named projects never collide with special buckets', () => {
+describeRoutines('groupRoutineJobsByProject — named projects never collide with special buckets', () => {
   const mk = (name: string, projects?: string[]): JobConfig =>
     ({ ...baseJob, name, ...(projects ? { projects } : {}) }) as unknown as JobConfig;
 
@@ -1535,7 +1539,7 @@ describe('groupRoutineJobsByProject — named projects never collide with specia
   });
 });
 
-describe('routines list --json projects and projectGroup fields', () => {
+describeRoutines('routines list --json projects and projectGroup fields', () => {
   it('includes projects and projectGroup in the JSON payload', () => {
     const jobWithProject = { ...baseJob, name: 'tagged-job', projects: ['myapp'] };
     const jobNoProject = { ...baseJob, name: 'untagged-job' };

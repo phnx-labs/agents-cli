@@ -156,7 +156,8 @@ describe('parseOrphanMigrationOutput', () => {
   });
 });
 
-describe('spawnKeychainHelper timeout (RUSH-2231)', () => {
+describe.skipIf(process.platform === 'win32')('spawnKeychainHelper timeout (RUSH-2231)', () => {
+  // win32: spawns /bin/sh sleep (RUSH-2215).
   beforeEach(() => {
     setKeychainDaemonBootForTest(false);
   });

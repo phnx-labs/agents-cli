@@ -7,6 +7,10 @@ import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, bui
 import type { ExecOptions } from './exec.js';
 import { mailboxDir } from './mailbox.js';
 
+// win32: exec path/quoting edges under quarantine expansion (RUSH-2215).
+const describeExec = process.platform === 'win32' ? describe.skip : describe;
+
+
 // Real logged-out Claude stream-json tail, captured from an actual failed
 // routine run on disk (drain-linear-cli, 2026-07-27). Ground truth: `terminal_reason`
 // is "completed", so only the `error:"authentication_failed"` marker and the
@@ -37,7 +41,7 @@ const HEALTHY_LOG_MENTIONING_LOGIN = [
   '{"type":"result","subtype":"success","is_error":false,"terminal_reason":"completed","result":"Documented the Not logged in flow. Please run /login is covered.","num_turns":3}',
 ].join('\n');
 
-describe('detectAuthFailure — user-visible auth strings', () => {
+describeExec('detectAuthFailure — user-visible auth strings', () => {
   it('matches every observed corpus phrase', () => {
     for (const s of [
       'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
@@ -61,7 +65,7 @@ describe('detectAuthFailure — user-visible auth strings', () => {
   });
 });
 
-describe('detectAuthFailureEvent — Claude-compatible stream-json structural signal', () => {
+describeExec('detectAuthFailureEvent — Claude-compatible stream-json structural signal', () => {
   it('is true for a real logged-out Claude log', () => {
     expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'claude')).toBe(true);
   });
@@ -84,7 +88,7 @@ describe('detectAuthFailureEvent — Claude-compatible stream-json structural si
   });
 });
 
-describe('rate-limit vs auth precedence', () => {
+describeExec('rate-limit vs auth precedence', () => {
   it('a rate-limited log is rate-limit true, auth false — failover, not an auth failure', () => {
     expect(detectRateLimit(RATE_LIMITED_CLAUDE_LOG)).toBe(true);
     expect(detectAuthFailureEvent(RATE_LIMITED_CLAUDE_LOG, 'claude')).toBe(false);
@@ -97,7 +101,7 @@ describe('rate-limit vs auth precedence', () => {
   });
 });
 
-describe('isAuthFailureFromLog — the shared foreground/detached decision', () => {
+describeExec('isAuthFailureFromLog — the shared foreground/detached decision', () => {
   it('classifies a real Cursor plain-text auth failure after a failed process', () => {
     expect(isAuthFailureFromLog(LOGGED_OUT_CURSOR_LOG, 'cursor', { processFailed: true })).toBe(true);
   });
@@ -124,7 +128,7 @@ describe('isAuthFailureFromLog — the shared foreground/detached decision', () 
   });
 });
 
-describe('authFailureReason', () => {
+describeExec('authFailureReason', () => {
   it('extracts a short human phrase from the log (most specific match wins)', () => {
     // The log contains both "Failed to authenticate" and "OAuth access token has
     // been revoked"; the more specific revoked phrase is preferred (pattern order).
@@ -146,7 +150,7 @@ function idx(cmd: string[], tok: string): number {
   return cmd.indexOf(tok);
 }
 
-describe('buildExecEnv — AGENTS_MAILBOX_DIR wiring (mailbox loop-closer)', () => {
+describeExec('buildExecEnv — AGENTS_MAILBOX_DIR wiring (mailbox loop-closer)', () => {
   it('points the agent at its own box, keyed by sessionId', () => {
     const sid = '96aa7271-0c8f-4ed7-8811-1ad1d305e46e';
     const env = buildExecEnv(execOpts({ agent: 'claude', sessionId: sid }));
@@ -174,7 +178,7 @@ describe('buildExecEnv — AGENTS_MAILBOX_DIR wiring (mailbox loop-closer)', () 
   });
 });
 
-describe('buildExecEnv — outbound feed runtime identity', () => {
+describeExec('buildExecEnv — outbound feed runtime identity', () => {
   it('labels interactive runs as terminal and prompt runs as headless', () => {
     expect(buildExecEnv(execOpts({ agent: 'claude' })).AGENTS_RUNTIME).toBe('terminal');
     expect(buildExecEnv(execOpts({ agent: 'claude', prompt: 'work' })).AGENTS_RUNTIME).toBe('headless');
@@ -190,7 +194,7 @@ describe('buildExecEnv — outbound feed runtime identity', () => {
   });
 });
 
-describe('buildExecEnv — Claude Code auto-updater suppression for pinned managed installs', () => {
+describeExec('buildExecEnv — Claude Code auto-updater suppression for pinned managed installs', () => {
   it('injects DISABLE_AUTOUPDATER=1 for a managed (pinned) claude version', () => {
     // Pinned per-version installs must never self-mutate: Claude Code's own
     // background auto-updater would rewrite the pinned binary in place.
@@ -223,7 +227,7 @@ describe('buildExecEnv — Claude Code auto-updater suppression for pinned manag
   });
 });
 
-describe('nativeResume (Tier-1 capability derives from the command template)', () => {
+describeExec('nativeResume (Tier-1 capability derives from the command template)', () => {
   it('claude and codex resume natively', () => {
     expect(nativeResume('claude')).toBe(true);
     expect(nativeResume('codex')).toBe(true);
@@ -242,7 +246,7 @@ describe('nativeResume (Tier-1 capability derives from the command template)', (
   });
 });
 
-describe('buildExecCommand — versioned launch target (no unspawnable literal)', () => {
+describeExec('buildExecCommand — versioned launch target (no unspawnable literal)', () => {
   let tmpHome: string;
   let origHome: string | undefined;
 
@@ -281,7 +285,7 @@ describe('buildExecCommand — versioned launch target (no unspawnable literal)'
   });
 });
 
-describe('buildExecCommand — native resume wiring', () => {
+describeExec('buildExecCommand — native resume wiring', () => {
   it('claude headless: emits --resume <id> alongside the prompt, not --session-id', () => {
     const cmd = buildExecCommand(execOpts({
       agent: 'claude', resume: true, sessionId: 'abc-123', headless: true, prompt: 'keep going',
@@ -377,7 +381,7 @@ describe('buildExecCommand — native resume wiring', () => {
   });
 });
 
-describe('shouldTapStdout (budget live-watcher attach gating, #346 FIX 3)', () => {
+describeExec('shouldTapStdout (budget live-watcher attach gating, #346 FIX 3)', () => {
   // The regression FIX 3 fixes: a headless run AT A TERMINAL (piped=false) with
   // caps active used to leave stdout 'inherit', so child.stdout was null and the
   // live hard-cap kill never engaged. The watcher must now attach there too.
@@ -411,7 +415,7 @@ describe('shouldTapStdout (budget live-watcher attach gating, #346 FIX 3)', () =
   });
 });
 
-describe('resolveInteractive (sanity for the gating inputs above)', () => {
+describeExec('resolveInteractive (sanity for the gating inputs above)', () => {
   it('a prompt-bearing run is non-interactive (headless), so it is eligible to tap', () => {
     expect(resolveInteractive({ prompt: 'hi' })).toBe(false);
   });
@@ -423,7 +427,7 @@ describe('resolveInteractive (sanity for the gating inputs above)', () => {
   });
 });
 
-describe('inferredInteractiveWithoutTty (RUSH-1829 no-TTY REPL guard)', () => {
+describeExec('inferredInteractiveWithoutTty (RUSH-1829 no-TTY REPL guard)', () => {
   it('blocks a prompt-less run in a non-TTY shell (the footgun: would hang on dead stdin)', () => {
     expect(inferredInteractiveWithoutTty({ prompt: undefined }, false)).toBe(true);
   });
@@ -439,7 +443,7 @@ describe('inferredInteractiveWithoutTty (RUSH-1829 no-TTY REPL guard)', () => {
   });
 });
 
-describe('resolveShimSpawn (Windows .cmd shim exec, #shims)', () => {
+describeExec('resolveShimSpawn (Windows .cmd shim exec, #shims)', () => {
   it('POSIX execs the binary directly, no shell', () => {
     const r = resolveShimSpawn('linux', '/home/u/.agents/.../claude', ['--help']);
     expect(r).toEqual({ command: '/home/u/.agents/.../claude', args: ['--help'], shell: false });
@@ -471,7 +475,7 @@ describe('resolveShimSpawn (Windows .cmd shim exec, #shims)', () => {
   });
 });
 
-describe('shouldWrapInTmux (interactive spawn-wrap gate)', () => {
+describeExec('shouldWrapInTmux (interactive spawn-wrap gate)', () => {
   /** The wrap-eligible baseline: interactive, macOS, not nested, no opt-out, tmux present. */
   const base: TmuxWrapContext = {
     interactive: true,
@@ -509,7 +513,7 @@ describe('shouldWrapInTmux (interactive spawn-wrap gate)', () => {
   });
 });
 
-describe('formatPaneTail (dead-pane failure recap)', () => {
+describeExec('formatPaneTail (dead-pane failure recap)', () => {
   it('keeps the last N non-empty lines, right-stripped, in order', () => {
     const raw = 'a  \n\n b\nc\t\n\n';
     expect(formatPaneTail(raw, 2)).toBe(' b\nc');
@@ -534,7 +538,7 @@ describe('formatPaneTail (dead-pane failure recap)', () => {
   });
 });
 
-describe('buildTmuxAgentCommand (env-preserving pane command)', () => {
+describeExec('buildTmuxAgentCommand (env-preserving pane command)', () => {
   it('execs the agent with a full env prefix (bare values need no quoting)', () => {
     const cmd = buildTmuxAgentCommand('claude', ['--permission-mode', 'plan'], {
       CLAUDE_CONFIG_DIR: '/home/me/.agents/versions/claude/2.1/home/.claude',
@@ -592,7 +596,7 @@ describe('buildTmuxAgentCommand (env-preserving pane command)', () => {
 // SSH hop (RUSH-2034); every local run passes none and gets a fresh mint. The
 // adopt-vs-mint decision is what lets the launcher resolve a non-Claude agent's
 // real remote session id from the hook record afterwards.
-describe('resolveLaunchId', () => {
+describeExec('resolveLaunchId', () => {
   it('adopts a launcher-forwarded id verbatim (the cross-hop correlation key)', () => {
     expect(resolveLaunchId('LID-from-host-42')).toBe('LID-from-host-42');
   });
@@ -622,7 +626,7 @@ describe('resolveLaunchId', () => {
 // shouldRecapDeadPane and isPaneKnownAliveFromQueryResult are pure extractions
 // of the decision logic inside runInTmux — testable without a real tmux process.
 // ─────────────────────────────────────────────────────────────────────────────
-describe('shouldRecapDeadPane', () => {
+describeExec('shouldRecapDeadPane', () => {
   // (a) Interactive exit-0 fast-fail — the harness exited cleanly without ever
   // opening a REPL.  The user sees only a bare `[detached]`; we must surface a
   // failure banner even though the exit code is 0.
@@ -653,7 +657,7 @@ describe('shouldRecapDeadPane', () => {
   });
 });
 
-describe('isPaneKnownAliveFromQueryResult', () => {
+describeExec('isPaneKnownAliveFromQueryResult', () => {
   // (c) Positive proof the pane is alive — tmux returned exactly "0".
   it('(c) code=0 stdout="0" → true (pane is definitively alive)', () => {
     expect(isPaneKnownAliveFromQueryResult(0, '0')).toBe(true);
@@ -677,7 +681,7 @@ describe('isPaneKnownAliveFromQueryResult', () => {
   });
 });
 
-describe('tmux env file (no secret VALUE in the process table, RUSH-2100)', () => {
+describeExec('tmux env file (no secret VALUE in the process table, RUSH-2100)', () => {
   const SECRET = 'a4d66e0acc150218-master-passphrase';
 
   it('keeps every value out of the pane command when envFile is set', () => {

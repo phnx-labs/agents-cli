@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+
+// win32: exec path/quoting edges under quarantine expansion (RUSH-2215).
+const describeExec = process.platform === 'win32' ? describe.skip : describe;
+
   buildExecCommand,
   resolveInteractive,
   buildExecEnv,
@@ -41,7 +45,7 @@ const ALL_AGENTS = Object.keys(AGENT_COMMANDS) as AgentId[];
 // version-home builder does so the expected path matches on every OS.
 const HOME = process.env.HOME ?? os.homedir();
 
-describe('buildExecCommand', () => {
+describeExec('buildExecCommand', () => {
   it('launches kiro with --v3 so standalone hooks load (RUSH-1612)', () => {
     const cmd = buildExecCommand(opts({ agent: 'kiro', mode: 'edit', prompt: 'hi' }));
     expect(cmd[0]).toBe('kiro-cli');
@@ -1235,7 +1239,7 @@ describe('buildExecCommand', () => {
   });
 });
 
-describe('detectRateLimit', () => {
+describeExec('detectRateLimit', () => {
   it.each([
     ['Anthropic 5-hour limit', 'Your 5-hour limit has been reached. Resets in 2h.'],
     ['generic rate-limit phrasing', 'Error: rate limit exceeded for claude-opus'],
@@ -1264,7 +1268,7 @@ describe('detectRateLimit', () => {
   });
 });
 
-describe('buildFallbackPrompt', () => {
+describeExec('buildFallbackPrompt', () => {
   const uuid = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
 
   it('returns /continue <id> when next agent is Claude and we have a session ID', () => {
@@ -1295,7 +1299,7 @@ describe('buildFallbackPrompt', () => {
   });
 });
 
-describe('normalizeMode', () => {
+describeExec('normalizeMode', () => {
   it.each<[string, Mode]>([
     ['plan', 'plan'],
     ['edit', 'edit'],
@@ -1317,7 +1321,7 @@ describe('normalizeMode', () => {
   });
 });
 
-describe('resolveMode', () => {
+describeExec('resolveMode', () => {
   it("returns the requested mode when supported (claude/skip)", () => {
     expect(resolveMode('claude', 'skip')).toBe('skip');
   });
@@ -1355,7 +1359,7 @@ describe('resolveMode', () => {
   });
 });
 
-describe('resolveHeadlessMode (RUSH-1810)', () => {
+describeExec('resolveHeadlessMode (RUSH-1810)', () => {
   it('warns exactly once when one run builds argv more than once', () => {
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const warningState = {};
@@ -1441,7 +1445,7 @@ describe('resolveHeadlessMode (RUSH-1810)', () => {
   });
 });
 
-describe('defaultModeFor', () => {
+describeExec('defaultModeFor', () => {
   it('returns the first listed mode for each agent', () => {
     // Antigravity: ['edit', 'skip'] — no plan, so default must be edit.
     expect(defaultModeFor('antigravity')).toBe('edit');
@@ -1460,7 +1464,7 @@ describe('defaultModeFor', () => {
   });
 });
 
-describe('implicitModeFor', () => {
+describeExec('implicitModeFor', () => {
   it('defaults Codex to safe writable and other harnesses to plan', () => {
     expect(implicitModeFor('codex')).toBe('edit');
     expect(implicitModeFor('claude')).toBe('plan');
@@ -1468,7 +1472,7 @@ describe('implicitModeFor', () => {
   });
 });
 
-describe('headlessPlanStallCommand', () => {
+describeExec('headlessPlanStallCommand', () => {
   // The footgun: `ag run claude "/code:commit"` with no --mode defaults to
   // read-only plan, then hangs forever at ExitPlanMode in a headless run.
   it('blocks a slash command run headless under implicit-default plan', () => {

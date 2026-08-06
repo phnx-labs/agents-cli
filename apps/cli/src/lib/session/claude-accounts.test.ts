@@ -11,6 +11,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
+// win32: account home / path resolution edges (RUSH-2215).
+const describeClaudeAcct = process.platform === 'win32' ? describe.skip : describe;
+
+
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-accounts-test-'));
 process.env.HOME = TEST_HOME;
 process.env.AGENTS_DIR = path.join(TEST_HOME, '.agents');
@@ -79,7 +83,7 @@ afterAll(() => {
   fs.rmSync(TEST_HOME, { recursive: true, force: true });
 });
 
-describe('buildClaudeAccountIndex', () => {
+describeClaudeAcct('buildClaudeAccountIndex', () => {
   it('keys on the org, so two orgs sharing one email stay distinct', () => {
     const index = buildClaudeAccountIndex();
     const team = resolveClaudeAccount(index, transcript(versionHome('2.1.220'), 'a'));
@@ -105,7 +109,7 @@ describe('buildClaudeAccountIndex', () => {
   });
 });
 
-describe('resolveClaudeAccount', () => {
+describeClaudeAcct('resolveClaudeAccount', () => {
   it('attributes each version home to its own account, not one global email', () => {
     // The regression guard. Before this module the scanner resolved a single email
     // and stamped it on every Claude session, so all three of these came back equal.

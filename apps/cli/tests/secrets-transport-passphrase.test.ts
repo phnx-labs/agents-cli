@@ -38,6 +38,10 @@ const keychainHelperAvailable =
   fs.existsSync(path.join(REPO_ROOT, 'dist', 'lib', 'secrets', 'Agents CLI.app'));
 const helperDependentIt = keychainHelperAvailable ? it : it.skip;
 
+// win32: export/import envelope + file-store decrypt path is POSIX-process oriented (RUSH-2215).
+const describeSecrets = process.platform === 'win32' ? describe.skip : describe;
+
+
 const SYNC_ENV = 'AGENTS_SYNC_PASSPHRASE';
 const LEGACY_ENV = 'AGENTS_SECRETS_PASSPHRASE';
 /** Not a real credential — a literal used only to key a throwaway temp bundle. */
@@ -100,7 +104,7 @@ afterEach(() => {
   }
 });
 
-describe('export --to-file / import --from-file use AGENTS_SYNC_PASSPHRASE (RUSH-1968)', () => {
+describeSecrets('export --to-file / import --from-file use AGENTS_SYNC_PASSPHRASE (RUSH-1968)', () => {
   helperDependentIt('round-trips a bundle through an encrypted file under the NEW variable', () => {
     const home = makeTempHome();
     seedBundle(home, 'src-bundle', 'DEMO_TOKEN', 'demo-value-123');

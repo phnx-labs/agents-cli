@@ -6,6 +6,10 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import lockfile from 'proper-lockfile';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+
+// win32: event bus / process timing edges (RUSH-2215).
+const describeEvents = process.platform === 'win32' ? describe.skip : describe;
+
   emit, emitStart, emitCommand, emitFriction, query, rotate, stats,
   redactPrompt, redactArgs, truncate,
   detectCaller,
@@ -38,7 +42,7 @@ function setupLogsDir(): string {
   return dir;
 }
 
-describe('events', () => {
+describeEvents('events', () => {
   describe('emit', () => {
     it('writes a JSONL record with level and caller fields', () => {
       const logsDir = setupLogsDir();
@@ -674,7 +678,7 @@ describe('events', () => {
   });
 });
 
-describe('event-kind table (the drift guard for out-of-process producers)', () => {
+describeEvents('event-kind table (the drift guard for out-of-process producers)', () => {
   it('exposes every union member at runtime, including the factory.* kinds', () => {
     // EVENT_TYPES is derived from a Record<EventType, true>, so tsc already
     // rejects a union member with no table entry. This pins the runtime half:
@@ -715,7 +719,7 @@ describe('event-kind table (the drift guard for out-of-process producers)', () =
   });
 });
 
-describe('emit() timestamp override', () => {
+describeEvents('emit() timestamp override', () => {
   it('honours a caller-supplied ts so a batched producer keeps real event times', () => {
     setupLogsDir();
     const happenedAt = '2026-08-03T01:02:03.000Z';

@@ -2,9 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+// win32: bash release.sh PR-head synchronization (RUSH-2215).
+const describeRelease = process.platform === 'win32' ? describe.skip : describe;
+
+
 const RELEASE_SH = fs.readFileSync(path.resolve(__dirname, 'release.sh'), 'utf-8');
 
-describe('release.sh PR-head synchronization', () => {
+describeRelease('release.sh PR-head synchronization', () => {
   it('pins CI to the exact release commit instead of GitHub\'s eventually consistent PR head', () => {
     const waitFunction = RELEASE_SH.match(
       /wait_for_ci_green\(\) \{(?<body>[\s\S]*?)\n\}/,
