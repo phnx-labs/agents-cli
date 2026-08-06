@@ -1055,7 +1055,6 @@ export async function runDaemon(): Promise<void> {
       const reloaded = scheduler!.listScheduled();
       log('INFO', `Reloaded ${reloaded.length} jobs`);
     }
-    void runDaemonWatchdog();
     try {
       monitorEngine.reload();
     } catch (err) {

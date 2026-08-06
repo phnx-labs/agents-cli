@@ -15,8 +15,17 @@ export interface RoutineProcessCleanupOptions {
 
 function processMatchesRun(meta: RunMeta): boolean {
   if (!meta.pid || !meta.spawnedAt) return false;
-  if (process.platform === 'win32') return true;
   try {
+    if (process.platform === 'win32') {
+      const startedAt = execFileSync('powershell.exe', [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `(Get-Process -Id ${meta.pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToString("o")`,
+      ], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim();
+      const processStart = Date.parse(startedAt);
+      return Number.isFinite(processStart) && Math.abs(processStart - meta.spawnedAt) < 30_000;
+    }
     const elapsed = execFileSync('ps', ['-p', String(meta.pid), '-o', 'etime='], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],

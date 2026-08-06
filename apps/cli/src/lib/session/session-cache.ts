@@ -38,13 +38,13 @@ const IMMUTABLE_FILE = '.active-session-immutable.json';
  * Short on purpose: live status (running/idle/waiting) must not go stale.
  * The daemon warm tick uses the same cadence (see {@link SESSION_CACHE_WARM_INTERVAL_MS}).
  */
-export const DEFAULT_ACTIVE_CACHE_MAX_AGE_MS = 15_000;
+export const DEFAULT_ACTIVE_CACHE_MAX_AGE_MS = 4 * 60_000;
 
 /** Daemon warm interval — keep in sync with the setInterval in `lib/daemon.ts`. */
-export const SESSION_CACHE_WARM_INTERVAL_MS = 15_000;
+export const SESSION_CACHE_WARM_INTERVAL_MS = 3 * 60_000;
 
-/** Kick off the first warm ~25s after daemon start (staggered off other ticks). */
-export const SESSION_CACHE_WARM_KICKOFF_MS = 25_000;
+/** Kick off the first warm 30s after daemon start (staggered off other ticks). */
+export const SESSION_CACHE_WARM_KICKOFF_MS = 30_000;
 
 /** Snapshot scope: this host only, or a fleet-wide merge written by a reader. */
 export type ActiveCacheScope = 'local' | 'fleet';
