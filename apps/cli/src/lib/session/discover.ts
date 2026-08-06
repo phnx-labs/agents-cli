@@ -2239,21 +2239,30 @@ function getOpenCodeAccount(handle?: Database.Database): string | undefined {
  * honest cost of parsing that session — strictly better than the whole-DB size
  * this column used to hold for every OpenCode row.
  *
- * A degenerate row (no finite timestamp anywhere) falls back to the whole-DB
- * stat, keeping the pre-RUSH-2210 always-rescan behavior for exactly those rows
- * rather than pinning them to a stamp that never changes.
+ * The size is `LENGTH(CAST(data AS BLOB))`, not `LENGTH(data)`: SQLite's
+ * `LENGTH()` on a TEXT column counts CHARACTERS, so a CJK/emoji-heavy transcript
+ * would under-report its real size by up to 4x — and this number is a byte
+ * budget downstream.
+ *
+ * A degenerate row — nothing but zeros/NaN for every time AND no payload at all
+ * — falls back to the whole-DB stat, keeping the pre-RUSH-2210 always-rescan
+ * behavior for exactly those rows rather than pinning them to a stamp that never
+ * changes.
  */
 function openCodeSessionStamp(
   times: { timeUpdated: number; timeCreated: number; lastMessageAt: number; lastPartAt: number },
   bytes: { messageBytes: number; partBytes: number },
   dbScan: ScanStamp,
 ): ScanStamp {
-  const finite = [times.timeUpdated, times.lastMessageAt, times.lastPartAt, times.timeCreated]
-    .filter(t => Number.isFinite(t));
-  if (finite.length === 0) return dbScan;
+  // A positive time, not merely a finite one: the SQL COALESCEs the aggregates
+  // to 0, so `Number.isFinite` alone would accept a row that told us nothing and
+  // this branch could never fire.
+  const known = [times.timeUpdated, times.lastMessageAt, times.lastPartAt, times.timeCreated]
+    .filter(t => Number.isFinite(t) && t > 0);
   const size = (Number.isFinite(bytes.messageBytes) ? bytes.messageBytes : 0)
     + (Number.isFinite(bytes.partBytes) ? bytes.partBytes : 0);
-  return { fileMtimeMs: Math.floor(Math.max(...finite)), fileSize: size };
+  if (known.length === 0 && size === 0) return dbScan;
+  return { fileMtimeMs: known.length === 0 ? 0 : Math.floor(Math.max(...known)), fileSize: size };
 }
 
 /** Scan OpenCode sessions from its SQLite database when the DB file has changed. */
@@ -2302,7 +2311,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
         SELECT
           session_id,
           MAX(time_created) AS last_part_at,
-          SUM(LENGTH(data)) AS part_bytes
+          SUM(LENGTH(CAST(data AS BLOB))) AS part_bytes
         FROM part
         GROUP BY session_id
       ) parts ON parts.session_id = s.id
@@ -2311,7 +2320,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
           session_id,
           COUNT(*) AS message_count,
           MAX(time_created) AS last_message_at,
-          SUM(LENGTH(data)) AS message_bytes,
+          SUM(LENGTH(CAST(data AS BLOB))) AS message_bytes,
           SUM(
             COALESCE(json_extract(data, '$.tokens.input'), 0) +
             COALESCE(json_extract(data, '$.tokens.output'), 0) +

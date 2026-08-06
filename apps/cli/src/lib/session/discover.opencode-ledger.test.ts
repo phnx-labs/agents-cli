@@ -261,6 +261,27 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     expect(expected).toBeGreaterThan(SESSION_COUNT); // not a count masquerading as bytes
   });
 
+  it('counts BYTES, not characters, for multi-byte content', async () => {
+    const target = 'ses_fixture07';
+    await scan();
+    const before = ledgerFor(target);
+
+    // SQLite's LENGTH() on a TEXT column returns characters: LENGTH('日本語')
+    // is 3, LENGTH(CAST('日本語' AS BLOB)) is 9. The stamp is a byte budget
+    // downstream (tool-index.ts), so a CJK transcript must not report a third
+    // of its real size.
+    const cjk = '日本語'.repeat(200); // 600 chars, 1800 UTF-8 bytes
+    appendPartTo(target, `${target}-m0`, Date.UTC(2026, 6, 2, 6), cjk);
+
+    await scan();
+
+    const grew = ledgerFor(target).file_size - before.file_size;
+    expect(grew).toBeGreaterThan(1800);
+    expect(grew).toBeGreaterThan(Buffer.byteLength(cjk, 'utf8'));
+    // A character count would have grown by only ~600 plus the JSON envelope.
+    expect(grew).toBeGreaterThan(cjk.length * 2);
+  });
+
   it('emits nothing when the DB file changes but no session row does', async () => {
     await scan();
 
