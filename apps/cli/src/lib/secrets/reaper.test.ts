@@ -10,12 +10,20 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   planKeychainReap,
+  reapOrphanedKeychainProcesses,
   ORPHAN_GRACE_SEC,
   STUCK_GRACE_SEC,
   resetKeychainReaperCandidatesForTest,
   type KeychainProcessSnapshot,
   type StuckParentCandidate,
 } from './reaper.js';
+// Imported statically, NOT via an inline require(): these are local TS modules,
+// and a CommonJS `require('./install-helper.js')` inside a vitest ESM test cannot
+// resolve the `.js` specifier to its `.ts` source — it throws MODULE_NOT_FOUND at
+// runtime, which failed the darwin leg of the release CI matrix and blocked every
+// release until it was fixed. Node BUILTIN requires (child_process/os/path/fs)
+// resolve fine, which is why only these two broke.
+import { setInstallRootForTest } from './install-helper.js';
 
 function snap(overrides: Partial<KeychainProcessSnapshot> & Pick<KeychainProcessSnapshot, 'pid'>): KeychainProcessSnapshot {
   return {
@@ -235,8 +243,6 @@ describe('reapOrphanedKeychainProcesses (darwin integration)', () => {
     } catch { /* ignore */ }
 
     try {
-      const { setInstallRootForTest } = require('./install-helper.js');
-      const { reapOrphanedKeychainProcesses } = require('./reaper.js');
       const prevRoot = setInstallRootForTest(tmpDir);
       try {
         const result = reapOrphanedKeychainProcesses();
