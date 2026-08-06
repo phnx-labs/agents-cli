@@ -923,6 +923,18 @@ access control (that is 1Password/Vault; this tool is device-local first).
   child env: `buildSecretsExecEnv` deletes `AGENTS_SECRETS_PASSPHRASE` before
   spawn (`commands/secrets.ts:369-376`, quoted in
   `../../../docs/design/secrets-trust-boundaries.md:61-65`).
+- **SEC-8a (MUST).** A resolved secret value MUST NOT reach any process's
+  command line. SEC-7 keeps values out of stdout and SEC-8 strips the master
+  passphrase, but the tmux launch path put the ENTIRE exec env — every resolved
+  bundle value — into the pane's argv as `exec env K=V … <agent>`, where any
+  process of the same user reads it with a plain `ps -eo command`. The pane now
+  sources a `0600` file it unlinks before `exec`
+  (`buildTmuxAgentCommand` / `writeTmuxEnvFile`, `lib/exec.ts`), so only the file
+  PATH is ever argv-visible. Every key is routed through the file rather than a
+  curated secret-bearing subset, so a newly added credential is covered by
+  construction rather than by remembering to list it. (RUSH-2100. Observed: six
+  live processes on one fleet box carrying `AGENTS_SECRETS_PASSPHRASE`, which
+  decrypts every file-backed bundle on that machine.)
 - **SEC-9 (MUST).** Materializing commands (`export --plaintext`, `view --reveal`,
   `get`) are the ONLY commands that print a plaintext value, and each MUST require
   an explicit opt-in flag or be a declared automation primitive: `export` refuses

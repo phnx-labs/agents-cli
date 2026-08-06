@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, formatPaneTail, detectRateLimit, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, type TmuxWrapContext } from './exec.js';
+import { execFileSync } from 'node:child_process';
+import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { mailboxDir } from './mailbox.js';
 
@@ -667,5 +668,57 @@ describe('isPaneKnownAliveFromQueryResult', () => {
 
   it('(c) code=0 stdout="" → false (empty output, inconclusive)', () => {
     expect(isPaneKnownAliveFromQueryResult(0, '')).toBe(false);
+  });
+});
+
+describe('tmux env file (no secret VALUE in the process table, RUSH-2100)', () => {
+  const SECRET = 'a4d66e0acc150218-master-passphrase';
+
+  it('keeps every value out of the pane command when envFile is set', () => {
+    const cmd = buildTmuxAgentCommand('claude', ['--permission-mode', 'plan'], {
+      AGENTS_SECRETS_PASSPHRASE: SECRET,
+      ATTIO_API_KEY: 'df83ec4b-token',
+      PATH: '/usr/bin:/bin',
+    }, { envFile: '/run/agents/tmux-env/x.env' });
+    // The whole point: `ps` shows the file path, never a value.
+    expect(cmd).not.toContain(SECRET);
+    expect(cmd).not.toContain('df83ec4b-token');
+    expect(cmd).toContain('/run/agents/tmux-env/x.env');
+    // Still execs the agent as the pane leaf, and unlinks before it does.
+    expect(cmd).toMatch(/exec claude --permission-mode plan$/);
+    expect(cmd).toContain('rm -f ');
+  });
+
+  it('aborts the pane when the env file is missing rather than launching half-configured', () => {
+    const cmd = buildTmuxAgentCommand('claude', [], {}, { envFile: '/nope.env' });
+    expect(cmd).toContain('|| exit 1');
+  });
+
+  it('writes a 0600 file a shell can source back to the exact values', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tmux-envfile-'));
+    const file = path.join(dir, 'pane.env');
+    writeTmuxEnvFile({
+      AGENTS_SECRETS_PASSPHRASE: SECRET,
+      TRICKY: "a b'c",
+      UNSET: undefined,
+      'BASH_FUNC_foo%%': '() { echo hi; }',
+    }, file);
+
+    expect((fs.statSync(file).mode & 0o777).toString(8)).toBe('600');
+    // Round-trip through a real shell — the file must be sourceable, not just text.
+    const out = execFileSync('sh', ['-c', `set -a; . ${file}; printf '%s|%s' "$AGENTS_SECRETS_PASSPHRASE" "$TRICKY"`], { encoding: 'utf-8' });
+    expect(out).toBe(`${SECRET}|a b'c`);
+    const body = fs.readFileSync(file, 'utf-8');
+    expect(body).not.toContain('UNSET');
+    expect(body).not.toContain('BASH_FUNC_foo');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('refuses to reuse an existing path, so it cannot inherit a looser mode', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tmux-envfile-'));
+    const file = path.join(dir, 'pane.env');
+    fs.writeFileSync(file, 'PRE=1\n', { mode: 0o644 });
+    expect(() => writeTmuxEnvFile({ A: '1' }, file)).toThrow(/EEXIST/);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
