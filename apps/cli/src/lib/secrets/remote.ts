@@ -16,7 +16,7 @@
  * in argv / `ps` / remote shell history. Nothing is persisted locally.
  */
 
-import { sshExec, sshStream, assertValidSshTarget, type SshExecResult } from '../ssh-exec.js';
+import { sshExec, sshStream, assertValidSshTarget, shellQuote, type SshExecResult } from '../ssh-exec.js';
 import { resolveHost } from '../hosts/registry.js';
 import { emitSecretAudit } from './audit.js';
 import { sshTargetFor } from '../hosts/types.js';
@@ -410,4 +410,45 @@ export function verifyRemoteKeychainPush(
     });
   }
   return evaluateKeychainWriteVerification(pushedKeys, { ok: true, keys });
+}
+
+/**
+ * The `bash -lc` command + stdin payload that drives a **file-backed** remote
+ * import for `secrets export --host … --remote-backend file`.
+ *
+ * The file store is passphrase-free by default: with `AGENTS_SECRETS_PASSPHRASE`
+ * unset the remote `agents secrets import --backend file` auto-provisions the
+ * remote's own machine-local key (0600 under `~/.agents/.secrets-key/`), so its
+ * reads are HEADLESS — no passphrase, no Touch ID. A passphrase is therefore
+ * OPTIONAL and only forwarded when the operator sets one locally (opt-in, e.g. to
+ * key the bundle off-disk under a shared secret):
+ *
+ * - **No passphrase** → the remote runs `import … --backend file` directly with
+ *   ONLY the .env on stdin. No `read`/`export AGENTS_SECRETS_PASSPHRASE`
+ *   prologue, so `AGENTS_SECRETS_PASSPHRASE` stays UNSET on the remote → the
+ *   machine-local key path → headless reads.
+ * - **Passphrase set** → forward it as the FIRST stdin line, consumed by
+ *   `IFS= read -r` (so it never lands in argv / `ps` / remote shell history),
+ *   then the .env. The remote then keys the bundle under that shared passphrase.
+ *
+ * Pure — no I/O — so the exact command string and stdin ordering are unit-testable
+ * against the SSH boundary the same way `remoteSecretsRaw` is.
+ */
+export function buildRemoteFileImportCommand(
+  bundle: string,
+  dotenv: string,
+  opts: { passphrase?: string; force?: boolean } = {},
+): { remoteCmd: string; input: string } {
+  const force = opts.force ? ' --force' : '';
+  const importCmd = `agents secrets import ${shellQuote(bundle)} --from - --backend file${force}`;
+  const passphrase = opts.passphrase ?? '';
+  if (passphrase) {
+    // Opt-in shared passphrase: read it off the FIRST stdin line, export it, then
+    // let `import --from -` read the .env remainder.
+    const remoteAgents = `IFS= read -r AGENTS_SECRETS_PASSPHRASE; export AGENTS_SECRETS_PASSPHRASE; ${importCmd}`;
+    return { remoteCmd: `bash -lc ${shellQuote(remoteAgents)}`, input: `${passphrase}\n${dotenv}` };
+  }
+  // No passphrase: NO prologue — AGENTS_SECRETS_PASSPHRASE stays unset on the
+  // remote, so the file store falls back to its machine-local key (headless).
+  return { remoteCmd: `bash -lc ${shellQuote(importCmd)}`, input: dotenv };
 }
