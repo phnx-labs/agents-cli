@@ -96,6 +96,16 @@ describe('scanClaudeCatalogIds (#1892 — word-boundary anchored scan)', () => {
   it('does not capture an id glued to surrounding identifier characters', () => {
     expect(ids).not.toContain('claude-opus-4-9'); // came from `zzclaude-opus-4-9zz`
   });
+
+  it('does not backtrack-emit a bare major from a suffix-glued multi-segment token', () => {
+    // `claude-opus-9-1x` — two packed strings glued with no separator, as the
+    // binary-string extractor can produce. The greedy `-\d+` run must match
+    // atomically: it must NOT fail the trailing anchor on the full token, drop
+    // the `-1` segment, and re-emit the bare `claude-opus-9` (a 404-able id).
+    const glued = scanClaudeCatalogIds('cfg={id:"claude-opus-9-1x"};');
+    expect(glued).not.toContain('claude-opus-9');
+    expect(glued).toHaveLength(0);
+  });
 });
 
 const m = (ids: string[]): ModelInfo[] => ids.map((id) => ({ id }));

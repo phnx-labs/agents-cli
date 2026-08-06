@@ -429,6 +429,14 @@ export function dropBareLegacyIds(ids: string[]): string[] {
  *    scraped as `claude-sonnet-4`, while a real id followed by an unrelated `.`
  *    suffix (`claude-fable-5.md`) still matches. Dash-separated segments only:
  *    the dotted form never appears in a genuine id.
+ *
+ *    The id body is captured inside a lookahead (`(?=(...))\1`) so the greedy
+ *    `-\d+` run matches **atomically**: without it, a suffix-glued token like
+ *    `claude-opus-4-1x` would fail the trailing anchor on the full match, then
+ *    backtrack a segment and re-emit the bare `claude-opus-4` — the exact 404-able
+ *    id this scan exists to suppress (two packed strings can end up glued with no
+ *    separator in the extracted binary text). The atomic match fails outright
+ *    instead of degrading to the bare form.
  *  - **`dropBareLegacyIds`.** A standalone `.includes("claude-opus-4")` prefix
  *    check is a fully delimited string the anchors cannot tell apart from a real
  *    bare id, so a bare `claude-<family>-<major>` is dropped only when a
@@ -437,10 +445,13 @@ export function dropBareLegacyIds(ids: string[]): string[] {
  */
 export function scanClaudeCatalogIds(text: string): string[] {
   const idRe =
-    /(?<![A-Za-z0-9_])claude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:-\d+)*(?:-(?:fast|v\d+))?(?![A-Za-z0-9])(?!\.\d)/g;
+    /(?<![A-Za-z0-9_])(?=(claude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:-\d+)*(?:-(?:fast|v\d+))?))\1(?![A-Za-z0-9])(?!\.\d)/g;
   const scanned = new Set<string>();
   let sm: RegExpExecArray | null;
-  while ((sm = idRe.exec(text)) !== null) scanned.add(sm[0]);
+  while ((sm = idRe.exec(text)) !== null) {
+    scanned.add(sm[0]);
+    if (sm.index === idRe.lastIndex) idRe.lastIndex++;
+  }
   return dropBareLegacyIds([...scanned]);
 }
 
