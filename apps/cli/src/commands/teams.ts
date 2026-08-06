@@ -1659,7 +1659,9 @@ export function registerTeamsCommands(program: Command): void {
           effectiveRepo = (await getRemoteUrl(process.cwd())) ?? '';
         }
         try {
-          hostRepoPath = ensureRemoteRepo(hostTarget!, effectiveRepo, team);
+          hostRepoPath = ensureRemoteRepo(hostTarget!, effectiveRepo, team, {
+            extraSshArgs: host.identityFile ? ['-i', host.identityFile, '-o', 'IdentitiesOnly=yes'] : [],
+          });
         } catch (err) {
           dieFriction(
             'teams',
