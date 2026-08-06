@@ -198,6 +198,7 @@ import {
   loadRepo,
   loadSetup,
   loadUninstall,
+  loadBench,
   loadShare,
   loadSend,
   loadFeed,
@@ -1125,6 +1126,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadCost);
   await reg(loadInsights);
   await reg(loadPerf);
+  await reg(loadBench);
   await reg(loadTrends);
   await reg(loadOutput);
   await reg(loadBudget);
