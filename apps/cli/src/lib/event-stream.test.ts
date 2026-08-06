@@ -169,4 +169,70 @@ describe('readUnifiedEvents', () => {
     expect(events[0].detail).toBe('Write tests 2/3 done');
     expect(events[0].module).toBe('activity');
   });
+
+  it('applies event-type filter BEFORE limit so a rare match survives routine churn (RUSH-2093)', () => {
+    // Mirror the activity.ts contract: without pushing eventTypes into the
+    // reader, limit:5 takes the five newest file.edited rows and the later
+    // matches() filter drops them all — silently missing the older pr.opened.
+    const { activityRoot } = setup();
+    appendActivityEvent(
+      {
+        ts: new Date(Date.now() - 60_000).toISOString(),
+        event: 'pr.opened',
+        sessionId: 's-pr',
+        mailboxId: 's-pr',
+        host: 'h',
+        runtime: 'headless',
+        agent: 'claude',
+        detail: 'gh pr create #2093',
+        url: 'https://example/pull/2093',
+      },
+      activityRoot,
+    );
+    for (let i = 0; i < 20; i++) {
+      appendActivityEvent(
+        {
+          ts: new Date(Date.now() - i * 1000).toISOString(),
+          event: 'file.edited',
+          sessionId: `s-edit-${i}`,
+          mailboxId: 's',
+          host: 'h',
+          runtime: 'headless',
+        },
+        activityRoot,
+      );
+    }
+    // Post-filter on a capped unfiltered read would miss the PR.
+    expect(
+      readUnifiedEvents({ activityRoot, limit: 5 })
+        .filter((e) => e.event === 'pr.opened'),
+    ).toHaveLength(0);
+    // Filter-before-limit surfaces it.
+    const hits = readUnifiedEvents({
+      activityRoot,
+      eventTypes: ['pr.opened'],
+      limit: 5,
+    });
+    expect(hits.map((e) => e.event)).toEqual(['pr.opened']);
+    expect(hits[0].detail).toBe('gh pr create #2093');
+  });
+
+  it('skips the activity half when --module is a non-activity module', () => {
+    const { activityRoot } = setup();
+    emit('secrets.get', { module: 'secrets', command: 'secrets get' });
+    appendActivityEvent(
+      {
+        ts: new Date(Date.now() - 1000).toISOString(),
+        event: 'pr.opened',
+        sessionId: 's1',
+        mailboxId: 's1',
+        host: 'h',
+        runtime: 'headless',
+      },
+      activityRoot,
+    );
+    const secrets = readUnifiedEvents({ activityRoot, module: 'secrets', limit: 10 });
+    expect(secrets.map((e) => e.event)).toEqual(['secrets.get']);
+    expect(secrets.every((e) => e.module === 'secrets')).toBe(true);
+  });
 });

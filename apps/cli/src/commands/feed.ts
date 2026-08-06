@@ -361,6 +361,41 @@ export function sessionHintsFromActive(
   }));
 }
 
+/**
+ * True when a SQLite open/query failed because another writer holds the lock.
+ * better-sqlite3 surfaces this as message "database is locked" and/or code
+ * SQLITE_BUSY (RUSH-2006).
+ */
+export function isSqliteBusyError(err: unknown): boolean {
+  if (err == null) return false;
+  const msg = err instanceof Error ? err.message : String(err);
+  const code = typeof err === 'object' && err !== null && 'code' in err
+    ? String((err as { code?: unknown }).code ?? '')
+    : '';
+  return /SQLITE_BUSY|database is locked/i.test(msg) || /SQLITE_BUSY/i.test(code);
+}
+
+/**
+ * Load session metas for feed outcome enrichment. The sessions index can be
+ * locked by a concurrent scanner/daemon — enrichment is best-effort, so a lock
+ * degrades to an empty list instead of crashing `agents feed` (RUSH-2006).
+ *
+ * `load` is injected so tests can throw a real lock-shaped error without
+ * mocking the session module.
+ */
+export async function loadSessionMetasForFeedEnrichment<T>(
+  load: () => Promise<T[]>,
+): Promise<{ metas: T[]; skippedLock: boolean }> {
+  try {
+    return { metas: await load(), skippedLock: false };
+  } catch (err) {
+    if (isSqliteBusyError(err)) {
+      return { metas: [], skippedLock: true };
+    }
+    throw err;
+  }
+}
+
 export function registerFeedCommand(program: Command): void {
   const feed = program
     .command('feed')
@@ -575,7 +610,21 @@ export function registerFeedCommand(program: Command): void {
       if (includeLocal) {
         sessions = await getActiveSessions();
       }
-      const sessionMetas = includeLocal && sessions.length > 0 ? await discoverSessions({ all: true, limit: 5000 }) : [];
+      // discoverSessions touches sessions.db; under concurrent scan pressure it
+      // can throw SQLITE_BUSY. Outcome enrichment is best-effort — degrade with
+      // a warning rather than crash the whole feed (RUSH-2006).
+      let sessionMetas: Awaited<ReturnType<typeof discoverSessions>> = [];
+      if (includeLocal && sessions.length > 0) {
+        const loaded = await loadSessionMetasForFeedEnrichment(
+          () => discoverSessions({ all: true, limit: 5000 }),
+        );
+        if (loaded.skippedLock) {
+          console.error(chalk.yellow(
+            'Feed: session index is locked; skipping local outcome enrichment',
+          ));
+        }
+        sessionMetas = loaded.metas;
+      }
       const localSignals = buildSessionSignals(sessions, sessionMetas);
 
       if (opts.pause || opts.kill) {

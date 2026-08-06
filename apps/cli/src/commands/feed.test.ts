@@ -7,6 +7,8 @@ import {
   formatFeedMastheadRight,
   formatFeedReplyHint,
   formatOutcomeHeader,
+  isSqliteBusyError,
+  loadSessionMetasForFeedEnrichment,
   mergeFeedBlocks,
   parseRemoteFeed,
   prepareLocalFeedBlocks,
@@ -112,6 +114,36 @@ describe('mergeFeedBlocks', () => {
       [block('same', 'zion', '2026-07-13T00:00:00Z')],
       [block('same', 'mac-mini', '2026-07-13T00:00:00Z')],
     )).toHaveLength(2);
+  });
+});
+
+describe('loadSessionMetasForFeedEnrichment (RUSH-2006)', () => {
+  it('recognizes SQLITE_BUSY / database-is-locked error shapes', () => {
+    expect(isSqliteBusyError(new Error('database is locked'))).toBe(true);
+    expect(isSqliteBusyError(Object.assign(new Error('busy'), { code: 'SQLITE_BUSY' }))).toBe(true);
+    expect(isSqliteBusyError(new Error('SQLITE_BUSY: database is locked'))).toBe(true);
+    expect(isSqliteBusyError(new Error('no such table: sessions'))).toBe(false);
+    expect(isSqliteBusyError(null)).toBe(false);
+  });
+
+  it('returns empty metas and skippedLock on a lock error instead of throwing', async () => {
+    // Real lock-shaped failure from the loader (no module mock). Before the
+    // guard, discoverSessions throwing here crashed `agents feed --local`.
+    const locked = await loadSessionMetasForFeedEnrichment(async () => {
+      throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' });
+    });
+    expect(locked).toEqual({ metas: [], skippedLock: true });
+  });
+
+  it('propagates non-lock errors so real index failures still surface', async () => {
+    await expect(loadSessionMetasForFeedEnrichment(async () => {
+      throw new Error('no such table: sessions');
+    })).rejects.toThrow(/no such table/);
+  });
+
+  it('returns loaded metas when the index is free', async () => {
+    const ok = await loadSessionMetasForFeedEnrichment(async () => [{ id: 's1' }]);
+    expect(ok).toEqual({ metas: [{ id: 's1' }], skippedLock: false });
   });
 });
 
