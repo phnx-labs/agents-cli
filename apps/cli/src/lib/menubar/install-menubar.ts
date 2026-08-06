@@ -513,22 +513,76 @@ export function mayInstallMenubarHelper(opts: {
   activeEntry: string | null;
   /** Whether `plistEntry` still exists on disk. */
   ownerEntryExists: boolean;
+  /** The App Support helper executable is absent — a repair, not a contest. */
+  helperExecMissing: boolean;
+  /** Installed copy is ad-hoc while the shipped source is Developer ID. */
+  needsDevIdHeal: boolean;
+  /** ms since the last self-heal reinstall, or null if none is recorded. */
+  msSinceLastHeal: number | null;
+  /** How long a non-owner waits before it may take over. */
+  cooldownMs: number;
 }): boolean {
+  // Repairs are never gated: a missing binary or a broken signing identity leaves
+  // the menu bar dead or re-prompting for Accessibility, and no other install can
+  // be "fighting" for a bundle that isn't there. Blocking these behind ownership
+  // is what turned the first version of this gate into a silent stuck state.
+  if (opts.helperExecMissing || opts.needsDevIdHeal) return true;
   // Can't resolve which install we are (a dev/tsx run) — never churn the plist.
   if (!opts.activeEntry) return false;
   // No owner recorded yet (fresh or pre-`AGENTS_ENTRY` plist) — adopt it.
   if (!opts.plistEntry) return true;
   if (opts.plistEntry === opts.activeEntry) return true; // we are the owner
-  return !opts.ownerEntryExists; // take over only from an install that is gone
+  if (!opts.ownerEntryExists) return true; // the recorded owner is gone
+  // A foreign install while the owner still exists. Refusing outright bounds the
+  // loop but strands the user when the recorded owner is a stale copy that simply
+  // still sits on disk (an old nvm node dir) while their daily driver upgrades:
+  // that install would never heal again. So it may take over, but only once per
+  // cooldown — which turns an every-invocation storm into at most one restart per
+  // cooldown while keeping every install able to make progress.
+  return opts.msSinceLastHeal === null || opts.msSinceLastHeal >= opts.cooldownMs;
 }
 
-/** Whether this install owns the menu-bar helper (see `mayInstallMenubarHelper`). */
-function ownsMenubarHelper(): boolean {
+/**
+ * How long a non-owner install waits before it may take the helper over. Long
+ * enough that a multi-install box restarts the helper at most once an hour
+ * instead of every few seconds; short enough that a user who switched installs
+ * gets their upgrade without hunting for `agents menubar setup`.
+ */
+const MENUBAR_TAKEOVER_COOLDOWN_MS = 60 * 60 * 1000;
+
+/** Timestamp of the last self-heal reinstall, next to the version stamp. */
+function lastHealMarkerPath(): string {
+  return path.join(installDir(), '.menubar-last-heal');
+}
+
+function msSinceLastMenubarHeal(): number | null {
+  try {
+    const t = Number(fs.readFileSync(lastHealMarkerPath(), 'utf-8').trim());
+    if (!Number.isFinite(t)) return null;
+    return Math.max(0, Date.now() - t);
+  } catch {
+    return null;
+  }
+}
+
+function stampMenubarHeal(): void {
+  try {
+    fs.mkdirSync(installDir(), { recursive: true });
+    fs.writeFileSync(lastHealMarkerPath(), String(Date.now()));
+  } catch { /* best effort */ }
+}
+
+/** Whether this install may (re)install the helper (see `mayInstallMenubarHelper`). */
+function mayHealMenubar(needsDevIdHeal: boolean): boolean {
   const plistEntry = readPlistEnvValue('AGENTS_ENTRY');
   return mayInstallMenubarHelper({
     plistEntry,
     activeEntry: resolveCliEntry(),
     ownerEntryExists: Boolean(plistEntry) && fs.existsSync(plistEntry as string),
+    helperExecMissing: !fs.existsSync(installedExecutablePath()),
+    needsDevIdHeal,
+    msSinceLastHeal: msSinceLastMenubarHeal(),
+    cooldownMs: MENUBAR_TAKEOVER_COOLDOWN_MS,
   });
 }
 
@@ -556,18 +610,19 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
       enableMenubarService({ clearOptOut: false });
       return;
     }
-    // Only the install that owns the helper may reinstall it. Without this, every
-    // coexisting copy treats the others' version stamp / baked entry as drift and
-    // recopies the bundle over them, killing the live helper on a loop (#2109).
-    if (!ownsMenubarHelper()) return;
     // Re-enable (recopy helper + rewrite plist) when the version drifted OR the
     // plist's baked interpreter/entry no longer point at the install now running
     // `agents` — e.g. the owner moved between node interpreters — OR the
     // installed copy is still ad-hoc while the shipped source is Developer ID
     // (older heal path; Accessibility re-prompts until the identity is restored).
-    if (menubarSetupStale() || menubarSetupNeedsRepoint() || installedNeedsDevIdHeal()) {
-      enableMenubarService({ clearOptOut: false });
-    }
+    const needsDevIdHeal = installedNeedsDevIdHeal();
+    if (!(menubarSetupStale() || menubarSetupNeedsRepoint() || needsDevIdHeal)) return;
+    // ...but a copy that does not own the helper only gets to act on that drift
+    // once per cooldown. Without the gate every coexisting install recopies the
+    // bundle on every invocation, killing the live helper on a loop (#2109).
+    if (!mayHealMenubar(needsDevIdHeal)) return;
+    stampMenubarHeal();
+    enableMenubarService({ clearOptOut: false });
   } catch {
     /* never block startup on the menu bar */
   }

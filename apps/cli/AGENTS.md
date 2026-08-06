@@ -567,10 +567,21 @@ which `KeepAlive` restarts it and the next copy repeats it. Observed: a new pid
 every 5-15s, 578 launches in one helper log, a status item that never stayed
 visible, and `agents menubar status` still saying `running: yes` because a pid
 always existed (#2109). `mayInstallMenubarHelper` gates it: the plist's
-`AGENTS_ENTRY` names the owner, only the owner may reinstall, and a non-owner takes
-over only once the recorded owner is **gone from disk**. That converges — a dead
-install can't hold the helper hostage, a live one can't be fought over — and a
-same-install upgrade keeps its entry path, so `npm update` still lands normally.
+`AGENTS_ENTRY` names the owner, and only the owner reinstalls freely. A same-install
+upgrade keeps its entry path, so `npm update` still lands normally.
+
+Three escapes keep the gate from becoming a **stuck state**, which is how the first
+version of it regressed: (1) **repairs are never gated** — a missing helper
+executable or a Developer-ID heal proceeds from any install, since a bundle that
+isn't there cannot be contested and blocking it leaves the menu bar dead with no
+automatic recovery; (2) a non-owner takes over immediately once the recorded owner
+is **gone from disk**; (3) otherwise a non-owner may still take over **once per
+`MENUBAR_TAKEOVER_COOLDOWN_MS`** (1h, stamped in `.menubar-last-heal`). Without (3)
+a stale-but-present copy — an old nvm node dir nobody runs — owns the plist forever
+while the user's actual daily driver upgrades and never heals again. The cooldown
+turns an every-invocation storm into at most one restart per hour while leaving
+every install able to make progress. `agents menubar setup` bypasses the gate
+entirely and stays the immediate manual fix.
 
 **Do NOT "improve" this by comparing bundle content.** It looks like the obvious
 gate and it does not work: the helper is rebuilt, re-signed and re-notarized on

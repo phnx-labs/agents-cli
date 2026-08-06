@@ -61,7 +61,12 @@ function printStatus(s: MenubarStatus, opts: { brief?: boolean } = {}): void {
     console.log(chalk.gray('  End them with `agents menubar setup`.'));
   }
   if (s.stale) {
-    console.log(chalk.yellow('\n  Installed AGI Menu is stale — runs on next `agents` startup, or `agents menubar setup` now.'));
+    // Not "runs on next startup": the self-heal only reinstalls from the install
+    // that owns the helper, or from another one once the takeover cooldown has
+    // passed (mayInstallMenubarHelper) — so on a box with several agents-cli
+    // copies this can persist for a while. `setup` bypasses the gate and is the
+    // immediate fix.
+    console.log(chalk.yellow('\n  Installed AGI Menu is stale — `agents menubar setup` updates it now.'));
   } else if (!s.serviceInstalled && !s.disabledByUser) {
     console.log(chalk.gray('\n  Set it up with `agents menubar setup`.'));
   }

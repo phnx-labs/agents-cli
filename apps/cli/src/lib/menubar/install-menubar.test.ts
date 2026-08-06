@@ -197,35 +197,76 @@ describe('menubarPlistNeedsRepoint', () => {
 describe('mayInstallMenubarHelper', () => {
   const brew = '/opt/homebrew/lib/node_modules/@phnx-labs/agents-cli/dist/index.js';
   const nvm = '/Users/me/.nvm/versions/node/v24.15.0/lib/node_modules/@phnx-labs/agents-cli/dist/index.js';
+  const HOUR = 60 * 60 * 1000;
+  // Healthy install, recent heal — the fields that are not what a case is about.
+  const base = {
+    helperExecMissing: false,
+    needsDevIdHeal: false,
+    msSinceLastHeal: 60_000,
+    cooldownMs: HOUR,
+  };
 
   it('refuses a foreign install while the recorded owner still exists (#2109)', () => {
     // The steady state that produced the loop: nvm 1.22.5 invoking while the
-    // Homebrew copy owns the helper. Before the gate this reinstalled and killed
-    // the running helper; now it is a no-op.
+    // Homebrew copy owns the helper. Before the gate this recopied the bundle and
+    // killed the running helper on every invocation.
     expect(mayInstallMenubarHelper({
-      plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
+      ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
     })).toBe(false);
   });
 
   it('allows the owner to reinstall — a same-install upgrade still lands', () => {
     // `npm update` keeps the entry path and only bumps the version, so the
-    // staleness path behind this gate must still fire.
+    // staleness path behind this gate must still fire, cooldown or not.
     expect(mayInstallMenubarHelper({
-      plistEntry: brew, activeEntry: brew, ownerEntryExists: true,
+      ...base, plistEntry: brew, activeEntry: brew, ownerEntryExists: true,
     })).toBe(true);
   });
 
   it('lets another install take over once the owner is gone from disk', () => {
-    // This is what makes the rule converge: an uninstalled copy cannot hold the
-    // helper hostage forever.
     expect(mayInstallMenubarHelper({
-      plistEntry: brew, activeEntry: nvm, ownerEntryExists: false,
+      ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: false,
+    })).toBe(true);
+  });
+
+  it('lets a foreign install take over after the cooldown, so nobody is stranded', () => {
+    // The stuck state a pure ownership rule creates: a stale-but-present install
+    // (an old nvm node dir nobody runs) owns the plist while the user's daily
+    // driver upgrades. Refusing forever would freeze the menu bar at whatever the
+    // dead owner last installed. The cooldown bounds the churn without stranding.
+    expect(mayInstallMenubarHelper({
+      ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
+      msSinceLastHeal: HOUR + 1,
+    })).toBe(true);
+  });
+
+  it('treats a never-healed install as past the cooldown', () => {
+    expect(mayInstallMenubarHelper({
+      ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
+      msSinceLastHeal: null,
+    })).toBe(true);
+  });
+
+  it('never blocks a repair: a missing helper executable heals from any install', () => {
+    // A bundle that is not there cannot be contested, and gating this behind
+    // ownership leaves the menu bar dead with no automatic recovery.
+    expect(mayInstallMenubarHelper({
+      ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
+      helperExecMissing: true,
+    })).toBe(true);
+  });
+
+  it('never blocks a repair: the Developer-ID heal runs from any install', () => {
+    // An ad-hoc copy re-prompts for Accessibility until the identity is restored.
+    expect(mayInstallMenubarHelper({
+      ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
+      needsDevIdHeal: true,
     })).toBe(true);
   });
 
   it('adopts a plist that records no owner yet (older install)', () => {
     expect(mayInstallMenubarHelper({
-      plistEntry: null, activeEntry: brew, ownerEntryExists: false,
+      ...base, plistEntry: null, activeEntry: brew, ownerEntryExists: false,
     })).toBe(true);
   });
 
@@ -233,7 +274,7 @@ describe('mayInstallMenubarHelper', () => {
     // Matches menubarPlistNeedsRepoint's existing guard: an unresolvable entry
     // must not be written into the plist or used to seize ownership.
     expect(mayInstallMenubarHelper({
-      plistEntry: brew, activeEntry: null, ownerEntryExists: true,
+      ...base, plistEntry: brew, activeEntry: null, ownerEntryExists: true,
     })).toBe(false);
   });
 });
