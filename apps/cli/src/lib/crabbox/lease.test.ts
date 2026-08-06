@@ -239,8 +239,10 @@ describe('buildBootstrapScript', () => {
       workspaceId: 'agents-cli-task-a',
     });
 
-    expect(script).toContain('WORKSPACE_DIR="$HOME"/\'workspaces/agents-cli-task-a\'');
+    expect(script).toContain('WORKSPACE_DIR="$BOX_HOME"/\'workspaces/agents-cli-task-a\'');
     expect(script).toContain('rsync -a --delete --exclude=node_modules --exclude=.agents/worktrees "$REPO_DIR/" "$WORKSPACE_DIR/"');
+    expect(script).toContain('export HOME="$BOX_HOME"/\'lease-homes/agents-cli-task-a\'');
+    expect(script).toContain('ln -sfn "$BOX_HOME/.agents/.system" "$HOME/.agents/.system"');
     expect(script.indexOf('cd "$WORKSPACE_DIR"')).toBeLessThan(script.indexOf("agents run 'claude'"));
   });
 });

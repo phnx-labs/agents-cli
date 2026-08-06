@@ -129,6 +129,11 @@ export function leaseWorkspaceId(repoRoot: string, startedAtMs = Date.now(), pid
   return `${safeRepo}-${startedAtMs.toString(36)}-${pid.toString(36)}`;
 }
 
+/** Isolated box-home path for one run, relative to the shared box user's home. */
+export function leaseHomeDir(workspaceId: string): string {
+  return `lease-homes/${workspaceId}`;
+}
+
 function profileRemotePath(name: string): string {
   return `.agents/profiles/${name}.yml`;
 }
@@ -221,11 +226,20 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
   const copySetup = opts.copySetup !== false; // default TRUE
   const workspace = opts.workspaceId
     ? [
+        'BOX_HOME="$HOME"',
         'REPO_DIR="$(pwd)"',
-        `WORKSPACE_DIR="$HOME"/${q(`workspaces/${opts.workspaceId}`)}`,
+        `WORKSPACE_DIR="$BOX_HOME"/${q(`workspaces/${opts.workspaceId}`)}`,
         'mkdir -p "$WORKSPACE_DIR"',
         'rsync -a --delete --exclude=node_modules --exclude=.agents/worktrees "$REPO_DIR/" "$WORKSPACE_DIR/"',
         'cd "$WORKSPACE_DIR"',
+      ].join('\n')
+    : '';
+  const isolatedHome = opts.workspaceId
+    ? [
+        `export HOME="$BOX_HOME"/${q(leaseHomeDir(opts.workspaceId))}`,
+        'mkdir -p "$HOME/.agents"',
+        'ln -sfn "$BOX_HOME/.agents/.system" "$HOME/.agents/.system"',
+        'export PATH="$BOX_HOME/.local/bin:$PATH"',
       ].join('\n')
     : '';
 
@@ -239,6 +253,7 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
     opts.netMode === 'tailscale' ? step('joined-tailnet') : '',
     step('install'),
     ENSURE_AGENTS_CLI,
+    isolatedHome,
     step('runtime'),
     installRuntimes,
     step('creds'),
@@ -400,6 +415,7 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
         secretsBundle: opts.secretsBundle,
         onData: opts.onData,
         refresh: false,
+        remoteDir: opts.workspaceId ? `${leaseHomeDir(opts.workspaceId)}/.agents/` : undefined,
       });
     } catch {
       /* best-effort — never block the run on a config-copy failure */

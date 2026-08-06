@@ -43,6 +43,11 @@ export interface CopySetupOptions {
   secretsBundle?: string;
   /** Override the local `~/.agents` dir (defaults to `getUserAgentsDir()`). */
   userAgentsDir?: string;
+  /**
+   * Destination relative to the box user's home. Lease runs set this to their
+   * isolated home; other callers retain the historical `~/.agents/` target.
+   */
+  remoteDir?: string;
   /** Receives combined stdout/stderr of the rsync + refresh, if set. */
   onData?: (chunk: string) => void;
   /**
@@ -155,9 +160,25 @@ export async function copySetupToBox(opts: CopySetupOptions): Promise<CopySetupR
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-setup-copy-'));
   const listPath = path.join(tmp, 'files.lst');
   try {
+    if (opts.remoteDir) {
+      if (!/^[a-zA-Z0-9._/-]+$/.test(opts.remoteDir) || opts.remoteDir.startsWith('/') || opts.remoteDir.split('/').includes('..')) {
+        throw new Error(`remote setup directory must stay under the box home: ${opts.remoteDir}`);
+      }
+      const remoteDir = opts.remoteDir.replace(/\/$/, '');
+      const prepareArgs = [
+        ...sshArgv.slice(1),
+        'bash',
+        '-lc',
+        `mkdir -p "$HOME"/${JSON.stringify(remoteDir)}`,
+      ];
+      const prepareExitCode = await runStreaming('ssh', prepareArgs, env, opts.onData);
+      if (prepareExitCode !== 0) {
+        return { files, pushExitCode: prepareExitCode, refreshExitCode: null };
+      }
+    }
     // NUL-separated list, matching `buildSetupRsyncArgs`'s `--from0`.
     fs.writeFileSync(listPath, files.join('\0'), 'utf-8');
-    const rsyncArgs = buildSetupRsyncArgs({ rsh, host, filesFrom: listPath, source: dir });
+    const rsyncArgs = buildSetupRsyncArgs({ rsh, host, filesFrom: listPath, source: dir, remoteDir: opts.remoteDir });
     const pushExitCode = await runStreaming('rsync', rsyncArgs, env, opts.onData);
 
     let refreshExitCode: number | null = null;

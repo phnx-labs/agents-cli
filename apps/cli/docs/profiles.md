@@ -363,7 +363,7 @@ before leasing a new box it looks for a warm box with the same network mode that
 box per repo. If the pool is empty, the newly warmed box is kept after the run so
 the next caller can reuse it. Each concurrent run copies the synced checkout into its own
 `~/workspaces/<repo>-<run>` directory, then launches there; callers share compute,
-not a working tree. Switching repositories therefore pays a re-sync latency in
+not a working tree, agent home, or credential file. Switching repositories therefore pays a re-sync latency in
 exchange for the lower idle-compute cost.
 
 The generic `.crabbox.yaml` `profile:` key still scopes repo sandbox/CI scripts.

@@ -103,6 +103,17 @@ describe('buildSetupRsyncArgs', () => {
     expect(eIdx).toBeGreaterThan(-1);
     expect(args[eIdx + 1]).toBe('ssh -i /k/id_ed25519 -p 2222');
   });
+
+  it('can target an isolated lease home', () => {
+    const args = buildSetupRsyncArgs({
+      rsh: 'ssh -i /k/id_ed25519',
+      host: 'crabbox@203.0.113.5',
+      filesFrom: '/tmp/list',
+      source: '/home/u/.agents',
+      remoteDir: 'lease-homes/run-a/.agents/',
+    });
+    expect(args).toContain('crabbox@203.0.113.5:lease-homes/run-a/.agents/');
+  });
 });
 
 describe('copySetupToBox', () => {
@@ -207,6 +218,27 @@ describe('copySetupToBox', () => {
         expect(result.pushExitCode).toBe(0);
         expect(result.refreshExitCode).toBeNull();
         expect(fs.existsSync(sshLog)).toBe(false); // refresh handled in-bootstrap
+      });
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  itPosix('creates and targets an isolated lease home before copying setup', async () => {
+    const repo = makeGitRepo({ 'skills/a.md': 'x' });
+    spawnSync('git', ['-C', repo, 'add', '-A']);
+    try {
+      await withFakeTransport({ rsync: 0, ssh: 0 }, async ({ rsyncLog, sshLog }) => {
+        const result = await copySetupToBox({
+          slug: 'blue-box',
+          userAgentsDir: repo,
+          remoteDir: 'lease-homes/run-a/.agents/',
+          refresh: false,
+        });
+        expect(result.pushExitCode).toBe(0);
+        expect(fs.readFileSync(sshLog, 'utf-8')).toContain('mkdir -p');
+        expect(fs.readFileSync(sshLog, 'utf-8')).toContain('lease-homes/run-a/.agents');
+        expect(fs.readFileSync(rsyncLog, 'utf-8')).toContain('crabbox@203.0.113.7:lease-homes/run-a/.agents/');
       });
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
