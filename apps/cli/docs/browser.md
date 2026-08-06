@@ -138,7 +138,9 @@ The response is one compact JSON object per non-empty input line, in the same
 order. A long-lived caller can leave stdin open and write later requests to the
 same process. `--task` supplies the default `task` field; a task returned by a
 `start` request becomes the default for subsequent lines. Malformed JSON returns
-an error response without closing the stream.
+an error response without closing the stream. A fleet-remote `start` line obeys
+the same device-local `browser remote-control` consent gate as the ordinary
+`browser start` command.
 
 ## Command Reference
 
