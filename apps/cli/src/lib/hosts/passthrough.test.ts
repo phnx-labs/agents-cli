@@ -65,6 +65,26 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('falls through for an UNKNOWN command so commander reports it (RUSH-2022)', async () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
+    // `session` is a typo for the very much host-routable `sessions`. The router
+    // runs before commander parses, so claiming "does not support --host" here
+    // both invents a command and states the opposite of the truth for the one
+    // the user meant. It must decline and let `unknown command 'session'` win.
+    expect(await maybeRunOnHost('session', ['session', 'resume', '--host', 'mac'])).toBe(false);
+    expect(process.exitCode).toBe(0);
+    expect(await maybeRunOnHost('zzzznotacommand', ['zzzznotacommand', '--device', 'mac'])).toBe(false);
+    expect(process.exitCode).toBe(0);
+  });
+
+  it('still rejects --host on a REAL command that has no remote semantics', async () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
+    // The unknown-command gate above must not weaken this: `login` exists, so
+    // the flag-support error is the correct, honest answer.
+    expect(await maybeRunOnHost('login', ['login', '--host', 'mac'])).toBe(true);
+    expect(process.exitCode).toBe(1);
+  });
+
   it('returns false when no --host is given', async () => {
     expect(await maybeRunOnHost('view', ['view', 'claude'])).toBe(false);
   });

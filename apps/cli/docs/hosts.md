@@ -90,6 +90,18 @@ agents view --device all --json        # machine-readable fleet inventory
 `--devices all` and `--hosts all` are synonyms. Commands that already register
 `--all-hosts` (e.g. `agents output --all-hosts`) keep their existing behavior.
 
+**The router only speaks for commands that exist.** `--host`/`--device` is handled
+before commander parses, so a group with no remote semantics gets a clear
+`` `agents <cmd>` does not support --host/--device `` instead of commander's raw
+`unknown option`. That answer is reserved for a **real** command: a name the CLI
+does not register falls straight through to `unknown command '<name>'` (plus its
+did-you-mean). Without that gate `agents session resume --host <box>` — one letter
+off `sessions`, which *does* take `--host` — was answered with a flag-support error
+about a command nobody typed, sending the user looking in the wrong place
+(RUSH-2022). `KNOWN_TOP_LEVEL_COMMANDS`
+([`src/lib/startup/command-registry.ts`](../src/lib/startup/command-registry.ts))
+is the name set, pinned to the real command tree by a test.
+
 It sits next to the vendor clouds (`agents cloud run --provider rush|codex|…`),
 not replacing them: those dispatch to *someone else's* cloud; `hosts` dispatches
 to *your* boxes (owned, or leased on demand via crabbox — see Host sources).

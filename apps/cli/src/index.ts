@@ -1241,6 +1241,9 @@ if (requestedCommand !== undefined && !helpOrVersionRequested && !requestedIsDis
 // Register only the command(s) this invocation actually uses. Lazy commands
 // (sessions/teams/cloud) are handled after applyGlobalHelpConventions below.
 const isLazyRequest = requestedCommand !== undefined && LAZY_COMMAND_NAMES.has(requestedCommand);
+// Set when the requested name maps to no command: the lazy tree is then also
+// registered below so the spellcheck can suggest `sessions`/`teams`/`cloud`.
+let requestedIsUnknown = false;
 if (requestedIsDisabled) {
   // The brand turned this command off: register the full tree so the "did you
   // mean" picker still works, then strip the disabled commands below so the
@@ -1253,6 +1256,7 @@ if (requestedIsDisabled) {
     // spellcheck and edit-distance-1 auto-correct (the command:* handler above)
     // see the same candidate set — and ordering — as main.
     await registerAllEagerCommands();
+    requestedIsUnknown = true;
   }
 }
 // When requestedCommand is undefined (bare invocation, --version, --help, -h) no
@@ -1268,6 +1272,19 @@ applyGlobalHelpConventions(program);
 // only when explicitly requested, keeping lightweight commands off that path.
 if (isLazyRequest && !requestedIsDisabled) {
   for (const loader of COMMAND_LOADERS[requestedCommand!]) await reg(loader);
+} else if (requestedIsUnknown) {
+  // Unknown command: the lazy names must be candidates too, or `agents session`
+  // (a typo for the very much lazy `sessions`) gets no "did you mean" at all —
+  // the miss the RUSH-2022 report walked into. Registration order still mirrors
+  // main: lazy commands come after applyGlobalHelpConventions.
+  const seen = new Set<ModuleLoader>();
+  for (const name of LAZY_COMMAND_NAMES) {
+    for (const loader of COMMAND_LOADERS[name] ?? []) {
+      if (seen.has(loader)) continue;
+      seen.add(loader);
+      await reg(loader);
+    }
+  }
 }
 
 // White-label: remove any commands this brand disabled so they resolve as

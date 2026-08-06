@@ -176,6 +176,11 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   registry: [loadPackages],
   search: [loadPackages],
   install: [loadPackages],
+  // packages.ts also registers `publish` at top level (commands/packages.ts:435).
+  // It was missing here, so `agents publish` only worked via the unknown-command
+  // fallback that registers the whole tree — and the --host router could not see
+  // it as a real command at all (RUSH-2022).
+  publish: [loadPackages],
   routines: [loadRoutines],
   monitors: [loadMonitors],
   projects: [loadProjects],
@@ -261,3 +266,43 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   funnel: [loadFunnel],
   humans: [loadHumans],
 };
+
+/**
+ * Top-level names that {@link COMMAND_LOADERS} does not carry because they are
+ * registered inline in src/index.ts — closures over entry-point state (the
+ * deprecated aliases and tombstones) plus the internal/upgrade commands. They are
+ * real commands, so anything that asks "does this command exist?" must count them.
+ */
+const INLINE_COMMAND_NAMES = [
+  'perms', // deprecated alias -> permissions
+  'exec', // deprecated alias -> run
+  'jobs', // deprecated alias -> routines
+  'cron', // deprecated alias -> routines
+  'check', // tombstone -> doctor --check
+  'resources', // tombstone -> view --merged
+  'hq', // tombstone
+  '_internal',
+  'upgrade',
+] as const;
+
+/**
+ * Every top-level command name the CLI answers to — the loader table plus the
+ * inline aliases/tombstones above. This is the "does this command exist?"
+ * predicate for code that runs BEFORE commander parses, most importantly the
+ * `--host`/`--device` router (lib/hosts/passthrough.ts): without it a typo'd
+ * command carrying `--host` reported a flag-support error instead of
+ * `unknown command` (RUSH-2022).
+ *
+ * Commander sub-aliases (`sessions ls`, `teams rm`, …) are deliberately absent —
+ * this set is top-level only. `command-registry.test.ts` pins it against the real
+ * registered command tree so a new command can never drift out of it.
+ */
+export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
+  ...Object.keys(COMMAND_LOADERS),
+  ...INLINE_COMMAND_NAMES,
+]);
+
+/** Whether `name` is a top-level command this CLI registers. See {@link KNOWN_TOP_LEVEL_COMMANDS}. */
+export function isKnownTopLevelCommand(name: string): boolean {
+  return KNOWN_TOP_LEVEL_COMMANDS.has(name);
+}
