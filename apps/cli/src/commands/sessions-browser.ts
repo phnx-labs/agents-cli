@@ -543,11 +543,11 @@ export function applyFilters(
     const peerResolvedAlias = rawVersion === 'latest' || rawVersion === 'oldest';
     out = out.filter((r) => {
       if (r.agent !== agent) return false;
-      if (!localVersion) return true;
       // Only a LIVE peer result may claim it resolved latest/oldest against that
       // device's installed inventory. A synced mirror is historical data, not a
       // version-inventory oracle.
       if (peerResolvedAlias && (r.machine ?? self) !== self) return r._remote === true;
+      if (!localVersion) return true;
       return r.version === localVersion;
     });
   }
