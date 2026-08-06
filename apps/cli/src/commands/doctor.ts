@@ -1229,26 +1229,34 @@ function runCheckGate(opts: DoctorOptions, cwd: string): void {
     const orphanNote = drift.orphanVersionCount > 0
       ? chalk.gray(` (${drift.orphanVersionCount} version(s) carry orphans — run \`agents prune cleanup\`)`)
       : '';
-    console.log(`${chalk.green('ok')}  ${drift.syncRows.length} version(s) in sync${orphanNote}`);
+    console.log(`${chalk.gray('check:')} ${chalk.green('ok')} — ${drift.syncRows.length} version(s) in sync${orphanNote}`);
     process.exit(0);
   }
 
-  // Drift: one-line verdict always, per-version detail unless --quiet.
+  // Drift: one-line verdict always, per-version detail unless --quiet. The
+  // `check:` prefix and total count make every verdict line grep/parse-alike
+  // whether it's clean or drifted, instead of the bare `drift  <parts>` shape
+  // that gave CI logs no anchor to search on.
   const parts: string[] = [];
   if (drift.staleCount > 0) parts.push(`${drift.staleCount} stale`);
   if (drift.neverSyncedCount > 0) parts.push(`${drift.neverSyncedCount} never-synced`);
   if (drift.unwiredHookVersions > 0) parts.push(`${drift.unwiredHookVersions} with unwired hooks`);
   if (drift.sourceBehind.length > 0) parts.push(`${drift.sourceBehind.length} source layer(s) behind origin`);
-  console.error(`${chalk.red('drift')}  ${parts.join(', ')}`);
+  console.error(`${chalk.gray('check:')} ${chalk.red('drift')} — ${parts.join(', ')} across ${drift.syncRows.length} version(s)`);
 
   if (!opts.quiet) {
+    // Fixed-width, left-aligned so rows form a real column; the badge text is
+    // the actual status name ('never-synced'), not the unrelated 'cold' label
+    // that used to hide it. Width is 'never-synced'.length + a 2-space gap so
+    // the longest badge still separates cleanly from the label that follows.
+    const STATUS_BADGE_WIDTH = 'never-synced'.length + 2;
     for (const row of drift.syncRows) {
       const unwired = (row.unwiredHooks ?? 0) > 0;
       if (row.status === 'fresh' && !unwired) continue;
-      const tag = row.status === 'stale' ? chalk.yellow('stale')
-        : row.status === 'never-synced' ? chalk.gray('cold ')
-        : chalk.red('unwired'); // fresh but hooks not wired into settings.json
-      console.error(`  ${tag}  ${checkLabel(row)}`);
+      const tag = row.status === 'stale' ? chalk.yellow('stale'.padEnd(STATUS_BADGE_WIDTH))
+        : row.status === 'never-synced' ? chalk.gray('never-synced'.padEnd(STATUS_BADGE_WIDTH))
+        : chalk.red('unwired'.padEnd(STATUS_BADGE_WIDTH)); // fresh but hooks not wired into settings.json
+      console.error(`  ${tag}${checkLabel(row)}`);
       for (const line of row.divergence ?? []) {
         console.error(chalk.gray(`           ${line}`));
       }
