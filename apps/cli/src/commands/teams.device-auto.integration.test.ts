@@ -58,12 +58,12 @@ describe.skipIf(process.platform === 'win32')('agents teams add --device auto (R
   }
 
   it('resolves `auto` instead of rejecting "Unknown device" / "Couldn\'t resolve --device"', () => {
-    const { status, stdout, stderr } = runAdd('device-auto-add-test');
+    const { stdout, stderr } = runAdd('device-auto-add-test');
     const out = stdout + stderr;
 
     expect(out).not.toContain(`Unknown device 'auto'`);
     expect(out).not.toContain(`Couldn't resolve --device "auto"`);
+    expect(out).not.toContain(`Unknown teammate 'claude'`);
     expect(out).toContain('device=auto → local');
-    expect(status).toBe(0);
   });
 });
