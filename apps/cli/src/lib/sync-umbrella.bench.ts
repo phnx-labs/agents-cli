@@ -68,18 +68,24 @@
  *   - `registerHooksToSettings` rewrites `writeTarget`'s settings.json and also
  *     writes OUTSIDE every version home, in two places. All of it is exactly
  *     what a real `agents sync` does, and none of it is inert:
- *       * the GLOBAL hook-shims dir (`getHookShimsDir()` -> state.ts:138):
- *         `sweepOrphanShims` (hooks.ts:1632) unlinks shims whose hook is gone
- *         (hooks.ts:1607); `generateHookShim` (hooks.ts:390 ->
- *         hooks/cache.ts:149/152) rewrites a live shim whose content drifted
- *         and re-chmods 0o755 otherwise -- so a LIVE shim is touched on every
+ *       * the hook-shims dir: `sweepOrphanShims` (hooks.ts:1632) unlinks shims
+ *         whose hook is gone (hooks.ts:1607); `generateHookShim` (hooks.ts:390
+ *         -> hooks/cache.ts:149/152) rewrites a live shim whose content drifted
+ *         and re-chmods 0o755 otherwise -- so a LIVE shim is written on every
  *         call, not only an orphaned one; and `removeHookShim` (hooks.ts:381 ->
  *         hooks/cache.ts:611) unlinks the live shim of a hook that declares no
- *         `cache:` / `matches:` / `matcher:`.
+ *         `cache:` / `matches:` / `matcher:`. UNDER `vitest bench` these land in
+ *         a fork-private temp dir, NOT the real `~/.agents/.cache/shims/hooks`:
+ *         tests/setup.ts:62 pins `AGENTS_HOOK_SHIMS_DIR` and state.ts:550 reads
+ *         it at call time. So stage 5 pays first-write shim GENERATION rather
+ *         than the warm re-chmod production takes -- read its number with that
+ *         in mind. Outside vitest the same code writes the real global dir.
  *       * the hook SOURCE scripts in the DotAgents repos: `ensureExecutable`
  *         (hooks.ts:1644 -> hooks.ts:441) chmods `mode | 0o755` on any hook
  *         script that is not already executable. Hooks register by source path
- *         and are never copied, so this mutates the user's `hooks/` tree.
+ *         and are never copied, and there is NO env indirection here -- unlike
+ *         the shims dir above, this one hits the user's real `hooks/` tree even
+ *         under vitest.
  *
  * This file is NOT part of `vitest run`: vitest.config.ts:11 includes only
  * `*.test.ts` globs and there is no `benchmark.include`, so it is reached
