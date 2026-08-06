@@ -52,3 +52,19 @@ export function codexPolicyArgs(
     `permissions.${profile}=${codexPermissionProfileConfig(mode, writableRoots)}`,
   ];
 }
+
+/** Preserve whether --mode was omitted when a run is re-dispatched remotely. */
+export function modeForRemoteDispatch(
+  mode: string,
+  source: string | undefined,
+): string | undefined {
+  return source === 'default' ? undefined : mode;
+}
+
+/** Only the untouched Commander default selects Codex's writable default. */
+export function modeWasImplicit(
+  source: string | undefined,
+  hasConfiguredDefault: boolean,
+): boolean {
+  return source === 'default' && !hasConfiguredDefault;
+}

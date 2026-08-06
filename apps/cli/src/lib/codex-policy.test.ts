@@ -4,6 +4,8 @@ import {
   CODEX_PLAN_PROFILE,
   codexPermissionProfileConfig,
   codexPolicyArgs,
+  modeForRemoteDispatch,
+  modeWasImplicit,
 } from './codex-policy.js';
 
 describe('codexPolicyArgs', () => {
@@ -26,6 +28,19 @@ describe('codexPolicyArgs', () => {
 
   it('keeps skip as the only sandbox and approval bypass', () => {
     expect(codexPolicyArgs('skip')).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
+  });
+});
+
+describe('mode provenance', () => {
+  it('preserves omitted versus explicit mode across remote dispatch', () => {
+    expect(modeForRemoteDispatch('plan', 'default')).toBeUndefined();
+    expect(modeForRemoteDispatch('plan', 'cli')).toBe('plan');
+    expect(modeForRemoteDispatch('edit', 'config')).toBe('edit');
+  });
+
+  it.each(['plan', 'edit', 'skip'])('does not replace an inherited %s resume mode', (mode) => {
+    expect(modeForRemoteDispatch(mode, 'implied')).toBe(mode);
+    expect(modeWasImplicit('implied', false)).toBe(false);
   });
 });
 
