@@ -3150,12 +3150,16 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
   // `sessions.label` by every upsert path (storedFtsLabel), so this is the
   // same data, indexed. Token-prefix matching seeks the FTS index instead of
   // scanning every row, at the cost of only matching at token boundaries — a
-  // mid-word slice spanning two tokens (e.g. "ix-b" inside "fix-bug") no
-  // longer matches. That's the accepted trade-off for an indexable interactive
-  // path; the exact/prefix/contains scoring below still runs in JS over the
-  // FTS candidate set, so ranking among real matches is unchanged. Only a
-  // query with no indexable token (rare — e.g. punctuation-only input) falls
-  // back to the direct scan rather than silently dropping the tier.
+  // substring inside a single token (e.g. "ckf" inside "quickfix") no longer
+  // matches, since FTS5 only indexes prefixes of whole tokens, not arbitrary
+  // interior slices. (A slice spanning a token boundary, like "ix-b" inside
+  // "fix-bug", still matches: "ix-b" tokenizes to "ix" + "b", and "b" is a
+  // valid prefix of the "bug" token.) That's the accepted trade-off for an
+  // indexable interactive path; the exact/prefix/contains scoring below still
+  // runs in JS over the FTS candidate set, so ranking among real matches is
+  // unchanged. Only a query with no indexable token (rare — e.g.
+  // punctuation-only input) falls back to the direct scan rather than
+  // silently dropping the tier.
   const labelMatchExpr = buildLabelFtsQuery(input);
   const labelRows = labelMatchExpr
     ? (db.prepare(`
