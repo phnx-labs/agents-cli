@@ -493,7 +493,7 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
     expect(phases).toEqual(['reuse', 'ready']);
     expect(calls).toContain('list --json');
     expect(calls).toContain('status --id warm-one');
-    expect(calls).toContain('run --id warm-one --reclaim --script-stdin');
+    expect(calls).toContain('run --id warm-one --reclaim --ttl 3600s --script-stdin');
     expect(calls.some((l) => l.startsWith('warmup'))).toBe(false);
     expect(calls.some((l) => l.startsWith('stop'))).toBe(false);
   });
@@ -599,6 +599,9 @@ describe('isExpiredPoolStray — the on-lease expired-stray sweep', () => {
   });
   it('never a box touched within the grace window (a run may hold it)', () => {
     expect(isExpiredPoolStray(strayBox({ lastTouchedAt: NOW - 30 }), opts)).toBe(false);
+  });
+  it('never a box with unknown last-touched age', () => {
+    expect(isExpiredPoolStray(strayBox({ lastTouchedAt: null }), opts)).toBe(false);
   });
   it('never a box in a different profile pool', () => {
     expect(isExpiredPoolStray(strayBox({ profile: 'agents-cli' }), opts)).toBe(false);

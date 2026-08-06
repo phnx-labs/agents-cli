@@ -333,7 +333,8 @@ export function isExpiredPoolStray(box: CrabboxBox, opts: StrayMatchOptions): bo
   const boxNet = box.tailscaleIPv4 || box.tailscaleFQDN ? 'tailscale' : 'public';
   if (boxNet !== netMode) return false;
   if (box.expiresAt === null || box.expiresAt > nowSecs) return false; // unexpired ⇒ reusable
-  if (box.lastTouchedAt !== null && nowSecs - box.lastTouchedAt < graceSecs) return false; // maybe active
+  if (box.lastTouchedAt === null) return false; // unknown age is never reap-safe
+  if (nowSecs - box.lastTouchedAt < graceSecs) return false; // maybe active
   return true;
 }
 
@@ -426,9 +427,13 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
   let exitCode: number | null = null;
   let toreDown = false;
   try {
+    const renewTtlSecs = reused && !opts.reuseBox && box.expiresAt !== null && box.createdAt !== null
+      ? box.expiresAt - box.createdAt
+      : undefined;
     exitCode = await crabboxRunScript(box.slug, script, {
       secretsBundle: opts.secretsBundle,
       onData: opts.onData,
+      renewTtlSecs,
     });
   } finally {
     // Normal --lease establishes or reuses the warm pool, so the box outlives
