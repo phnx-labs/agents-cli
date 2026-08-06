@@ -13,6 +13,7 @@ import {
   menubarPlistNeedsRepoint,
   processesToEnd,
   restartMenubarLaunchAgent,
+  shouldReplaceRunningHelper,
 } from './install-menubar.js';
 
 // Regression guard for the STOLEN-HOTKEY blind spot. Status used
@@ -176,6 +177,65 @@ describe('menubarPlistNeedsRepoint', () => {
 
   it('re-points a plist that has no baked entry yet (older install)', () => {
     expect(menubarPlistNeedsRepoint({ plistEntry: null, plistNode: null, activeEntry: bun, activeNode: bunNode })).toBe(true);
+  });
+});
+
+// Regression guard for #2109: two agents-cli installs on one box reinstalled the
+// helper over each other on EVERY invocation, because both the version stamp and
+// the plist's baked entry name whichever copy invoked last. Recopying the bundle
+// replaces the executable under the live helper and kills it; KeepAlive restarts
+// it; the other install repeats it. Observed: a new pid every 5-15s, 578 launches
+// in the helper's log, and a status item that never stayed visible while
+// `agents menubar status` still said `running: yes`.
+//
+// The rule that breaks the loop — skew alone never earns a teardown — is the same
+// one #909 applied to the secrets broker (`shouldTeardownVersionSkewedBroker`).
+describe('shouldReplaceRunningHelper', () => {
+  it('does NOT replace a running helper for pure skew with an identical bundle (#2109)', () => {
+    // The dual-install steady state: stale-version and/or repoint fired, but the
+    // shipped helper binary is byte-identical to the installed one. Replacing
+    // here is what killed the helper every few seconds.
+    expect(shouldReplaceRunningHelper({
+      liveOwnHelpers: 1,
+      bundleChanged: false,
+      needsDevIdHeal: false,
+    })).toBe(false);
+  });
+
+  it('replaces a running helper when the shipped binary genuinely differs (real upgrade)', () => {
+    expect(shouldReplaceRunningHelper({
+      liveOwnHelpers: 1,
+      bundleChanged: true,
+      needsDevIdHeal: false,
+    })).toBe(true);
+  });
+
+  it('replaces a running helper to heal an ad-hoc signature', () => {
+    // An ad-hoc copy re-prompts for Accessibility on every upgrade, so this heal
+    // outranks keeping the current process alive.
+    expect(shouldReplaceRunningHelper({
+      liveOwnHelpers: 1,
+      bundleChanged: false,
+      needsDevIdHeal: true,
+    })).toBe(true);
+  });
+
+  it('installs freely when no helper is running — there is nothing to protect', () => {
+    expect(shouldReplaceRunningHelper({
+      liveOwnHelpers: 0,
+      bundleChanged: false,
+      needsDevIdHeal: false,
+    })).toBe(true);
+  });
+
+  it('protects every live copy, not just a single one', () => {
+    // `instances` is a LIST on purpose (classifyMenubarProcesses); a duplicate
+    // icon must not become a reason to start reinstalling on every invocation.
+    expect(shouldReplaceRunningHelper({
+      liveOwnHelpers: 2,
+      bundleChanged: false,
+      needsDevIdHeal: false,
+    })).toBe(false);
   });
 });
 

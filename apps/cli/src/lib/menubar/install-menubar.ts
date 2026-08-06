@@ -17,6 +17,7 @@
 
 import { fileURLToPath } from 'url';
 import { execFileSync, spawnSync } from 'child_process';
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -477,17 +478,99 @@ export function disableMenubarService(): void {
 }
 
 /**
+ * Whether the startup self-heal may tear down a helper that is CURRENTLY
+ * RUNNING. The menu-bar twin of `shouldTeardownVersionSkewedBroker`
+ * (`src/lib/secrets/agent.ts`), and it exists for the same reason.
+ *
+ * `enableMenubarService` recopies the app bundle, which replaces the executable
+ * under the live helper and kills it; launchd `KeepAlive` then restarts it. That
+ * is correct for a genuine upgrade and catastrophic for mere skew: with two
+ * agents-cli installs on one box (`/opt/homebrew` + `~/.local`, the pair in #435
+ * and #2109) the version stamp and the plist's baked entry each name whichever
+ * copy invoked last, so BOTH copies see drift on every invocation and reinstall
+ * over each other. The helper is killed every few seconds — 578 launches in one
+ * observed log — and its status item never survives long enough to be visible,
+ * while `agents menubar status` still reports `running: yes` because some pid
+ * always exists.
+ *
+ * So skew alone does not earn a teardown. Only a genuinely different helper
+ * binary (a real upgrade) or a signing-identity heal does; everything else is
+ * corrected in place by `refreshMenubarServiceMetadata`. Pure so the truth table
+ * is unit-testable.
+ */
+export function shouldReplaceRunningHelper(opts: {
+  /** Live processes of the installed bundle (`MenubarStatus.instances`). */
+  liveOwnHelpers: number;
+  /** The shipped helper executable differs from the installed one. */
+  bundleChanged: boolean;
+  /** Installed copy is ad-hoc while the shipped source is Developer ID. */
+  needsDevIdHeal: boolean;
+}): boolean {
+  if (opts.liveOwnHelpers === 0) return true; // nothing to protect — install freely
+  return opts.bundleChanged || opts.needsDevIdHeal;
+}
+
+/** sha256 of a file, or null when it cannot be read. */
+function fileDigest(file: string): string | null {
+  try {
+    return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when the shipped helper executable differs from the installed one — the
+ * only condition under which a running helper is worth replacing. Compares
+ * content, not the version stamp: two CLI releases routinely carry the SAME
+ * helper build, and treating a version-string difference as a new binary is what
+ * let two installs bounce the bundle forever (#2109). An unreadable side is
+ * reported as changed so a real upgrade is never skipped.
+ */
+function menubarBundleChanged(): boolean {
+  const src = sourceAppPath();
+  if (!src) return false;
+  const srcExec = path.join(src, 'Contents', 'MacOS', 'MenubarHelper');
+  const installed = installedExecutablePath();
+  if (!fs.existsSync(installed)) return true;
+  const [a, b] = [fileDigest(srcExec), fileDigest(installed)];
+  if (!a || !b) return true;
+  return a !== b;
+}
+
+/**
+ * Correct the service's metadata WITHOUT touching the running helper: rewrite
+ * the plist (so the next natural launch picks up the current install's
+ * interpreter/entry) and re-stamp the installed version (so the staleness check
+ * stops firing). Deliberately no bundle recopy and no `launchctl` restart —
+ * those are what kill the live status item.
+ */
+function refreshMenubarServiceMetadata(): void {
+  const exec = installedExecutablePath();
+  if (!fs.existsSync(exec)) return;
+  const plist = servicePlistPath();
+  try {
+    fs.mkdirSync(path.dirname(plist), { recursive: true });
+    fs.writeFileSync(plist, generateServicePlist(exec));
+  } catch { /* best effort */ }
+  try { fs.writeFileSync(installedVersionMarkerPath(), getCliVersion()); } catch { /* best effort */ }
+}
+
+/**
  * Startup self-heal, run on every darwin CLI invocation (see src/index.ts).
  * No-ops cheaply (a couple of existsSync + a tiny file read) unless work is
  * needed:
  *   - fresh install (no service yet)      -> enable
- *   - upgrade (version stamp changed) or  -> re-enable: recopy the new helper
+ *   - a genuinely new helper binary, or   -> re-enable: recopy the new helper
  *     the App Support helper went missing     binary + rewrite the plist + kick
+ *   - version/entry skew only             -> refresh plist + stamp in place,
+ *                                             leaving the running helper alone
  *
  * Without the staleness re-enable, `npm update` refreshed the CLI but left the
  * menu bar running the previous release's helper binary on a possibly-stale
- * plist. No-ops if: not darwin, the user opted out, or no helper bundle ships.
- * Best-effort — never throws into startup.
+ * plist. Without `shouldReplaceRunningHelper` gating it, two coexisting installs
+ * reinstall over each other forever (#2109). No-ops if: not darwin, the user
+ * opted out, or no helper bundle ships. Best-effort — never throws into startup.
  */
 export function installMenubarLaunchAgentOnUpgrade(): void {
   try {
@@ -498,13 +581,25 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
       enableMenubarService({ clearOptOut: false });
       return;
     }
-    // Re-enable (recopy helper + rewrite plist) when the version drifted OR the
-    // plist's baked interpreter/entry no longer point at the install now running
-    // `agents` — the dual-install skew a version bump alone can't catch — OR the
-    // installed copy is still ad-hoc while the shipped source is Developer ID
-    // (older heal path; Accessibility re-prompts until the identity is restored).
-    if (menubarSetupStale() || menubarSetupNeedsRepoint() || installedNeedsDevIdHeal()) {
+    // Act when the version drifted OR the plist's baked interpreter/entry no
+    // longer point at the install now running `agents` — the dual-install skew a
+    // version bump alone can't catch — OR the installed copy is still ad-hoc
+    // while the shipped source is Developer ID (older heal path; Accessibility
+    // re-prompts until the identity is restored).
+    const needsDevIdHeal = installedNeedsDevIdHeal();
+    if (!(menubarSetupStale() || menubarSetupNeedsRepoint() || needsDevIdHeal)) return;
+
+    // ...but only REPLACE a live helper for a real new binary. The digest is
+    // computed here, in the already-rare branch, so the common no-drift startup
+    // path never reads the bundle.
+    if (shouldReplaceRunningHelper({
+      liveOwnHelpers: liveMenubarProcesses().own.length,
+      bundleChanged: menubarBundleChanged(),
+      needsDevIdHeal,
+    })) {
       enableMenubarService({ clearOptOut: false });
+    } else {
+      refreshMenubarServiceMetadata();
     }
   } catch {
     /* never block startup on the menu bar */

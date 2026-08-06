@@ -557,6 +557,27 @@ healthy `running: yes`. `agents menubar setup` is the recovery path — it ends
 every live helper and re-kickstarts the service so the survivor is always
 launchd's.
 
+**Skew never tears down a LIVE helper — only a genuinely new binary does.** The
+startup self-heal (`installMenubarLaunchAgentOnUpgrade`, every darwin invocation)
+reinstalls when the version stamp drifted or the plist's baked entry names another
+install. Both of those name *whichever copy invoked last*, so on a box with two
+agents-cli installs each copy saw drift and recopied the bundle over the other's —
+and recopying replaces the executable under the running helper, killing it, after
+which `KeepAlive` restarts it and the other install repeats it. Observed: a new pid
+every 5-15s, 578 launches in one helper log, a status item that never stayed
+visible, and `agents menubar status` still saying `running: yes` because some pid
+always existed (#2109). So the reinstall is now gated by
+`shouldReplaceRunningHelper`: with a live helper, only a **content-different**
+helper binary (`menubarBundleChanged`, sha256 — NOT the version string, since
+consecutive CLI releases routinely ship the same helper build) or a Developer-ID
+heal earns the teardown. Everything else calls `refreshMenubarServiceMetadata`,
+which rewrites the plist and re-stamps the version **without** recopying or
+`launchctl`-restarting, so the skew is still corrected and the next natural launch
+picks it up. This is the menu-bar twin of `shouldTeardownVersionSkewedBroker`
+(`src/lib/secrets/agent.ts`), which fixed the identical failure in the secrets
+broker on the identical pair of prefixes (#435, PR #909) — when you add a third
+`KeepAlive` helper, give it the same gate rather than rediscovering this.
+
 **The lock fd is `O_CLOEXEC`, and `acquire` self-heals a stale lock.** The lock is
 opened `O_RDWR | O_CREAT | O_CLOEXEC` so no spawned child can inherit the
 descriptor — a pre-fix `doctor` child that inherited it and orphaned at PPID 1 held
