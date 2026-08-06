@@ -628,6 +628,59 @@ export async function maybeRunOnHost(
 }
 
 /**
+ * `--host` passthrough for a **standalone binary** whose command name is fixed by
+ * the binary itself (the `browser`/`computer` bins, `dist/browser.js` etc.) rather
+ * than being the first argv token.
+ *
+ * `agents browser … --host <box>` routes through {@link maybeRunOnHost} in
+ * index.ts, but the standalone `browser` binary never enters index.ts — so without
+ * this it dropped `--host` entirely (commander errored with `unknown option
+ * '--host'`). This wires the identical routing: it synthesizes the implicit command
+ * token (`browser`) at the front of the argv so the remote invocation builds as
+ * `agents browser …`, delegates to {@link maybeRunOnHost}, and returns `true` when
+ * it dispatched the run to a remote (the local program must then NOT parse).
+ *
+ * On a local / self-host fall-through it rewrites `process.argv` to the ORIGINAL
+ * args minus the routing flags — never the synthetic command token — so the
+ * standalone commander program parses cleanly and never sees an unknown `--host`.
+ * When no routing flag is present it leaves `process.argv` untouched (the common
+ * case), so an unrelated flag like `--no-tty` is never stripped from a purely local
+ * run.
+ *
+ * @param command the fixed command name the binary stands for (`'browser'`).
+ */
+export async function maybeRunStandaloneOnHost(
+  command: string,
+  opts?: FleetPassthroughOptions,
+): Promise<boolean> {
+  const rawArgs = process.argv.slice(2);
+  const hasRoutingFlag =
+    flagValue(rawArgs, 'host', 'H') !== undefined ||
+    flagValue(rawArgs, 'device') !== undefined ||
+    flagValue(rawArgs, 'hosts') !== undefined ||
+    flagValue(rawArgs, 'devices') !== undefined;
+  // No routing flag → nothing to route or strip. Leave argv alone so a purely
+  // local run keeps every flag it passed.
+  if (!hasRoutingFlag) return false;
+
+  // Keep --help/--version local (docs must work without a reachable host), mirroring
+  // index.ts's `helpOrVersionRequested` guard, but still strip the routing flags
+  // below so commander doesn't choke on them.
+  const helpOrVersion = rawArgs.some(
+    (a) => a === '--help' || a === '-h' || a === '--version' || a === '-V',
+  );
+  if (!helpOrVersion && (await maybeRunOnHost(command, [command, ...rawArgs], opts))) {
+    return true;
+  }
+
+  // Local / self-host fall-through (maybeRunOnHost may have rewritten process.argv
+  // with the synthetic command token). Rebuild argv from the original args minus
+  // the routing flags so the standalone program parses cleanly.
+  process.argv = [process.argv[0], process.argv[1], ...stripRoutingFlags(rawArgs, STRIP_SPECS)];
+  return false;
+}
+
+/**
  * Run `agents <forwardedArgs>` on `host` over SSH, streaming its output, and
  * return the exit code. The single place the SSH hop is built, so every remote
  * `agents` invocation carries identical env semantics.
