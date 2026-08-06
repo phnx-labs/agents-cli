@@ -508,7 +508,9 @@ agents doctor · zion                                        1.20.81
 **Severity rubric** (agent-agnostic):
 
 - **CRITICAL** (`✗`) — `logged-out` (provable), `missing-hook`,
-  `missing-plugin`, `unwired-hook`, `cli-missing`. These block the harness now.
+  `missing-plugin`, `unwired-hook`, `cli-missing`, `owner-sink-unreachable`. These
+  block the harness now, or (owner-sink-unreachable) mean this box cannot escalate
+  a blocked agent to the owner.
 - **WARNING** (`⚠`) — `logout-unprovable`, `missing-resource`, `content-drift`,
   `never-synced`, `stale`, `repo-behind`, `repo-drift`, `version-skew`,
   `fleet-resource-gap`, `orphan`, `duplicate-hook`, `duplicate-hook-drift`,
@@ -519,6 +521,21 @@ RUSH-2162 moved `never-synced` and `duplicate-hook-drift` from critical to
 warning: both are stale-sync states one `agents sync` resolves, not "needs you
 now". `FINDING_SEVERITY` in `src/lib/devices/doctor-findings.ts` is the source of
 truth for this list, and a test asserts this rubric agrees with it.
+
+`owner-sink-unreachable` (RUSH-2262) is critical because a factory that cannot
+escalate a blocked agent to the owner is not healthy, and that failure is
+otherwise silent until a block is filed. `agents doctor` probes the same
+owner-delivery lane `agents notify` / `agents feed post --level important` uses,
+from the same context it runs in: the rush-backed owner channel (iMessage) can
+only deliver when `rush` is both on PATH and holds a usable, keychain-bound
+session HERE. So a headless Linux box (no rush) or a non-GUI SSH session on a mac
+(login keychain locked) reports the critical — the case a GUI session hides. The
+probe reads `rush whoami`, never `~/.rush/user.yaml` (the token is a keychain
+item, not that file), and `agents notify --dry-run` is NOT this check: it
+short-circuits before the `which rush` preflight, so it reports success on a box
+with no rush at all. The finding is per-box, surfaced wherever `agents doctor`
+runs (each box self-reports it in its own `--json`); `--devices` shows it for the
+box you invoke it on, not recomputed for remotes.
 
 **One root cause is one line.** The readout is de-duplicated before it is
 rendered, so a real machine shows ~16 rows rather than ~57:

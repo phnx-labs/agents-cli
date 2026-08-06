@@ -67,6 +67,8 @@ import { checkVersionHookWiring, inspectDuplicateVersionHooks, registerHooksToSe
 import { isVersionIsolated } from '../lib/versions.js';
 import { computeDrift, checkSyncStatus, countOrphans, computeSourceBehind, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
 import { readAuthHealthCache, summarizeHostAuth } from '../lib/auth-health.js';
+import { readMeta } from '../lib/state.js';
+import { probeOwnerSink } from '../lib/channels/owner-sink.js';
 import { unifiedDiff, colorizeUnifiedDiff } from '../lib/diff-text.js';
 import { listCliStatus, listCliStatusAsync } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
@@ -437,6 +439,9 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
         isolatedVersions: localReports
           .filter((rep) => isVersionIsolated(rep.agent, rep.version))
           .map((rep) => `${rep.agent}@${rep.version}`),
+        // Can the owner-delivery lane escalate a block from THIS box? Local only —
+        // remote boxes self-report it in their own `agents doctor --json`.
+        ownerSink: await probeOwnerSink(readMeta()),
       }));
       accounts[localName] = r.inventory?.signIn ?? {};
       continue;
@@ -1616,6 +1621,9 @@ export function registerDoctorCommand(program: Command): void {
             ? { platform: process.platform, policy: getEffectiveExecutionPolicy() }
             : undefined,
           isolatedVersions,
+          // Can the owner-delivery lane (feed/notify) escalate a block from this
+          // box? A factory that cannot escalate is not healthy (RUSH-2262).
+          ownerSink: await probeOwnerSink(readMeta()),
         });
 
         if (opts.json) {

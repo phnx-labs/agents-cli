@@ -18,7 +18,8 @@
  * with. Keep this list exhaustive; a kind missing from it is a doc that lies.
  *   CRITICAL — logged-out (provable) · missing-hook · missing-plugin ·
  *              unwired-hook (a hook on disk that settings.json never fires) ·
- *              cli-missing.
+ *              cli-missing · owner-sink-unreachable (the feed/notify owner lane
+ *              cannot reach the owner from this box).
  *   WARNING  — logout-unprovable (hedged) · missing-resource · content-drift ·
  *              never-synced · stale · repo-behind · repo-drift · version-skew ·
  *              fleet-resource-gap · orphan · duplicate-hook ·
@@ -42,6 +43,7 @@ import { padToWidth, stringWidth } from '../session/width.js';
 import type { AgentId } from '../types.js';
 import type { DuplicateVersionHook } from '../hooks.js';
 import type { RcSecretFinding } from '../secrets/rc-hygiene.js';
+import type { OwnerSinkStatus } from '../channels/owner-sink.js';
 import type { SyncStatusRow, OrphanRow } from '../drift.js';
 import type { FetchStatusMarker } from '../auto-pull.js';
 import type { VersionResourceReport } from '../doctor-diff.js';
@@ -117,6 +119,7 @@ export const ALL_FINDING_KINDS = [
   'rc-secret-export',    // credential-shaped export in a shell rc file
   'exec-policy',         // Windows execution policy blocks agents.ps1
   'stale-cli',
+  'owner-sink-unreachable', // the feed/notify owner-delivery lane can't reach the owner from this box
 ] as const;
 
 /**
@@ -137,6 +140,9 @@ export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
   'missing-plugin': 'critical',
   'unwired-hook': 'critical',
   'cli-missing': 'critical',
+  // A factory that cannot escalate a blocked agent to the owner is not healthy,
+  // and the failure is otherwise silent until a block is filed (RUSH-2262/2258).
+  'owner-sink-unreachable': 'critical',
   // Everything else is resolvable by a routine sync/cleanup and does not block
   // the harness right now. RUSH-2162 moved never-synced and duplicate-hook-drift
   // here: both are stale-sync states that one `agents sync` resolves.
@@ -295,6 +301,13 @@ export function remediationFor(finding: DoctorFinding): string {
       return 'Set-ExecutionPolicy -Scope CurrentUser RemoteSigned';
     case 'stale-cli':
       return 'upgrade';
+    case 'owner-sink-unreachable':
+      // The lane delivers over the rush-backed owner channel, which needs rush on
+      // PATH AND a usable session in THIS context. Non-interactive shells miss a
+      // ~/.zshrc export (RUSH-2258), and the session is keychain-bound, not in
+      // ~/.rush/user.yaml (RUSH-2262) — so `rush login` here, or the Rush App for
+      // a GUI keychain, is what makes it reachable.
+      return "put rush on PATH for non-interactive shells (~/.zshenv) and run 'rush login'";
   }
 }
 
@@ -373,6 +386,11 @@ export interface LocalFindingInputs {
    *  sweep deliberately skips isolated copies, so a collapsed row would print a
    *  remediation that does not fix them. */
   isolatedVersions?: string[];
+  /** Whether the feed/notify owner-delivery lane can reach the owner from this box
+   *  (RUSH-2262). Collected by `probeOwnerSink` in the command (it spawns the real
+   *  `rush` transport, so it stays out of this pure module). Absent → no probe ran
+   *  → no finding. */
+  ownerSink?: OwnerSinkStatus;
 }
 
 /**
@@ -394,6 +412,23 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     out.push(finding({
       severity: FINDING_SEVERITY['cli-missing'], kind: 'cli-missing', device, agent,
       message: `${agentName(agent)} binary not found`,
+    }));
+  }
+
+  // owner-sink-unreachable — the feed/notify owner-delivery lane can't reach the
+  // owner from this box (RUSH-2262). Only when owner delivery is CONFIGURED for the
+  // fleet; an un-opted-in box is not broken. The message names the concrete reason.
+  const sink = input.ownerSink;
+  if (sink?.configured && !sink.reachable) {
+    const chan = sink.channel ?? 'owner';
+    const why = sink.reason === 'rush-not-on-path'
+      ? `rush CLI not on this box's PATH`
+      : sink.reason === 'rush-signed-out'
+        ? 'rush has no usable session here'
+        : 'transport unreachable';
+    out.push(finding({
+      severity: FINDING_SEVERITY['owner-sink-unreachable'], kind: 'owner-sink-unreachable', device,
+      message: `${chan} → owner unreachable: ${why}`,
     }));
   }
 
@@ -865,6 +900,9 @@ function subjectLabel(f: DoctorFinding): string {
 }
 
 function critLabel(f: DoctorFinding): { left: string; account: string; message: string } {
+  // Machine-level criticals with no agent get a category subject so the left
+  // column is not blank; the owner-sink row reads `owner  …`, not an empty label.
+  if (f.kind === 'owner-sink-unreachable') return { left: 'owner', account: '', message: f.message };
   return {
     left: subjectLabel(f),
     account: f.account ?? '',
