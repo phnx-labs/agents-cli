@@ -18,17 +18,38 @@
 #   release-lease.sh renew                            # refresh our lease's timestamp
 #   release-lease.sh verify                           # 0 = we still hold it, 1 = we do NOT
 #   release-lease.sh release                          # drop the lease we hold
+#   release-lease.sh clear [--ttl-min N]              # drop a lease with no live holder
 #   release-lease.sh status                           # print the current holder, if any
 #
 # Env:
-#   RELEASE_LEASE_REF   override the ref (tests point this at a scratch ref)
-#   RELEASE_LEASE_TTL   minutes before an unrenewed lease is reclaimable (30)
+#   RELEASE_LEASE_REF          override the ref (tests point this at a scratch ref)
+#   RELEASE_LEASE_TTL          minutes before an unrenewed lease is reclaimable (30)
+#   RELEASE_LEASE_HOLDER_PID   pid of the release process this lease belongs to
 #
 # A lease older than the TTL is reclaimable: a release that dies without running
 # its trap (SIGKILL, a severed ssh, a rebooted box) must not wedge the pipeline
 # forever. Reclaiming is itself a compare-and-swap (--force-with-lease pinned to
 # the exact stale sha), so two agents reclaiming at once still yield one winner,
 # and the stale holder is always logged rather than silently overwritten.
+#
+# The TTL alone is a slow answer to an externally killed run: for up to 30
+# minutes `status` reads `held` while nothing is releasing, and the operator has
+# no way to tell that apart from a healthy long release. So the lease also
+# records WHICH process holds it -- `host`, `pid`, and that pid's start time --
+# and `claim`/`clear`/`status` probe it:
+#
+#   alive    the recorded pid is running on THIS box, same start time
+#   dead     we are on the holder's box and that process is gone
+#   unknown  the holder is another box, or the lease predates these fields
+#
+# A `dead` holder is reclaimable immediately -- no TTL wait -- because nothing
+# can still be releasing. `unknown` falls back to the TTL, so a holder we cannot
+# probe is treated exactly as before. `alive` is NEVER taken, at any age: a live
+# holder is the collision this script exists to prevent, so the answer there is
+# to stop that process, not to steal its lease. The pid start time is what makes
+# `dead` safe to act on -- after a reboot a recycled pid would otherwise read as
+# alive, and a recycled pid belonging to something else would read as a live
+# release forever.
 #
 # The TTL must NOT be read as "how long a release takes" -- it is "how long since
 # the holder last proved it was alive". A real release routinely outlives any
@@ -57,14 +78,27 @@ die()   { red "error: $*"; exit 2; }
 # spans several invocations (claim, then a resumed run that finishes a merged PR),
 # so anything process-scoped like $$ would make a lease undroppable by its own
 # owner on the second invocation.
-holder_desc() {
-  local host
+local_host() {
   if [[ "$(uname)" == "Darwin" ]]; then
-    host="$(scutil --get LocalHostName 2>/dev/null || hostname -s)"
+    scutil --get LocalHostName 2>/dev/null || hostname -s
   else
-    host="$(hostname -s 2>/dev/null || hostname)"
+    hostname -s 2>/dev/null || hostname
   fi
-  printf '%s/pid-%s%s' "$host" "$$" \
+}
+
+# The process whose death means this release is dead. release.sh exports its own
+# pid, so a lease survives the short-lived `renew` invocations that rotate it --
+# each of those is a fresh shell whose $$ is dead a second later, and recording
+# THAT would make every renewed lease look abandoned. Unset (a hand-run claim)
+# means no pid is recorded at all and liveness stays `unknown`: a missing export
+# must degrade to today's TTL behaviour, never to "instantly reclaimable".
+holder_pid() { printf '%s' "${RELEASE_LEASE_HOLDER_PID:-}"; }
+
+# The pid segment is present only when a release process was declared, so the
+# human string never points at a shell that was already gone when it was written.
+holder_desc() {
+  printf '%s%s%s' "$(local_host)" \
+    "${RELEASE_LEASE_HOLDER_PID:+/pid-$RELEASE_LEASE_HOLDER_PID}" \
     "${AGENTS_SESSION_ID:+/session-$AGENTS_SESSION_ID}"
 }
 
@@ -114,21 +148,100 @@ lease_age_min() { # $1 = sha
   echo $(( (now - when) / 60 ))
 }
 
+# ── Holder liveness ─────────────────────────────────────────────────────────
+# `ps -p` rather than `kill -0`: kill(2) also fails with EPERM for a live process
+# owned by another user, and reading that as "dead" would steal a lease from a
+# running release. `ps -p <pid> -o pid=` answers existence regardless of owner.
+#
+# Presence in the table is not life, though: a SIGKILLed release whose parent has
+# not reaped it stays listed as a zombie, and that is precisely the case this
+# whole feature is about. A zombie has already exited -- only its exit status is
+# parked -- so it counts as dead. An unreadable state degrades to alive, keeping
+# every uncertainty on the never-steal side.
+pid_alive() { # $1 = pid
+  ps -p "$1" -o pid= >/dev/null 2>&1 || return 1
+  local state
+  state="$(ps -p "$1" -o stat= 2>/dev/null | tr -d '[:space:]')"
+  [[ "$state" != Z* ]]
+}
+
+# The pid's start time, squeezed to a single space-free token so it survives the
+# "key: value" commit-message parser (`lease_field` splits on ": ", which the
+# colons inside a clock time never produce). Empty when ps cannot answer.
+pid_start_stamp() { # $1 = pid
+  ps -p "$1" -o lstart= 2>/dev/null | tr -s '[:space:]' '_' | sed 's/^_//; s/_$//'
+}
+
+# alive | dead | unknown — see the header block for what each one licenses.
+holder_liveness() { # $1 = sha
+  local host pid started running
+  host="$(lease_field "$1" host)"
+  pid="$(lease_field "$1" pid)"
+  # A lease with no recorded process (an older release.sh, or a hand-run claim)
+  # is unprobeable, not dead.
+  [[ -n "$host" && "$pid" =~ ^[0-9]+$ ]] || { printf 'unknown'; return; }
+  # Only the holder's own box can see the holder's process table.
+  [[ "$host" == "$(local_host)" ]] || { printf 'unknown'; return; }
+  pid_alive "$pid" || { printf 'dead'; return; }
+  # The pid exists — but a reboot or ordinary pid recycling can hand that number
+  # to an unrelated process, which would read as a live release forever.
+  started="$(lease_field "$1" started)"
+  running="$(pid_start_stamp "$pid")"
+  if [[ -n "$started" && -n "$running" && "$started" != "$running" ]]; then
+    printf 'dead'
+    return
+  fi
+  printf 'alive'
+}
+
+# Why a held lease may be taken over: "dead" (its holder is provably gone),
+# "stale" (unrenewed past the TTL), or "" (leave it alone). One predicate for
+# both `claim` and `clear`, so neither can grow its own weaker rule.
+reclaim_reason() { # $1 = sha, $2 = ttl-min
+  case "$(holder_liveness "$1")" in
+    alive) printf '' ;;
+    dead)  printf 'dead' ;;
+    *)     [[ "$(lease_age_min "$1")" -ge "$2" ]] && printf 'stale' || printf '' ;;
+  esac
+}
+
 describe_lease() { # $1 = sha
-  local v h a
+  local v h a l
   v="$(lease_field "$1" version)"; h="$(lease_field "$1" holder)"; a="$(lease_age_min "$1")"
-  printf 'version=%s holder=%s age=%smin' "${v:-?}" "${h:-?}" "$a"
+  case "$(holder_liveness "$1")" in
+    alive) l=yes ;;
+    dead)  l=no ;;
+    *)     l=unknown ;;
+  esac
+  printf 'version=%s holder=%s age=%smin holder-alive=%s' "${v:-?}" "${h:-?}" "$a" "$l"
 }
 
 # Build the orphan lease commit. No parents is what makes every claim a
 # non-fast-forward against any existing lease, which is the whole mechanism.
 make_lease_commit() { # $1 = version
-  local tree msg
+  local tree msg pid
   tree="$(git hash-object -t tree /dev/null)"
   msg="release lease
 
 version: $1
 holder: $(holder_desc)
+host: $(local_host)"
+  # `pid` + `started` are what make a dead holder detectable. They are written
+  # only when the caller declared the release process, and `started` only when
+  # ps can read it -- a half-recorded holder must degrade to `unknown`, not to a
+  # guess. `renew` rebuilds this message, so both stay current across rotations.
+  pid="$(holder_pid)"
+  if [[ -n "$pid" ]]; then
+    msg="$msg
+pid: $pid"
+    local started
+    started="$(pid_start_stamp "$pid")"
+    if [[ -n "$started" ]]; then
+      msg="$msg
+started: $started"
+    fi
+  fi
+  msg="$msg
 claimed: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   git commit-tree "$tree" -m "$msg"
 }
@@ -173,15 +286,25 @@ cmd_claim() {
 
   fetch_lease || true
   age="$(lease_age_min "$held")"
-  if [[ "$age" -lt "$ttl" ]]; then
+  local reason
+  reason="$(reclaim_reason "$held" "$ttl")"
+  if [[ -z "$reason" ]]; then
     red "release already in flight -- not starting a competing one"
     gray "  lease: $(describe_lease "$held")"
-    gray "  it expires (becomes reclaimable) after ${ttl}min; watch that release instead of racing it"
+    if [[ "$(holder_liveness "$held")" == "alive" ]]; then
+      gray "  its holder process is still running on this box; stop that release before claiming"
+    else
+      gray "  it expires (becomes reclaimable) after ${ttl}min; watch that release instead of racing it"
+    fi
     return 1
   fi
 
-  yellow "reclaiming a stale release lease (${age}min old, TTL ${ttl}min)"
-  yellow "  stale holder: $(describe_lease "$held")"
+  if [[ "$reason" == "dead" ]]; then
+    yellow "reclaiming a release lease whose holder is gone (${age}min old, no live process)"
+  else
+    yellow "reclaiming a stale release lease (${age}min old, TTL ${ttl}min)"
+  fi
+  yellow "  previous holder: $(describe_lease "$held")"
   # CAS the delete against the exact sha we inspected, so two agents reclaiming
   # the same stale lease still produce one winner.
   if ! git push --quiet --force-with-lease="$LEASE_REF:$held" origin ":$LEASE_REF" 2>/dev/null; then
@@ -276,6 +399,55 @@ cmd_release() {
   gray "release lease dropped"
 }
 
+# Drop a lease nobody is holding, WITHOUT starting a release. This is the answer
+# to the shape that wedged the pipeline: an external kill (SIGKILL, a severed
+# ssh, a rebooted box) leaves the lease on origin, `status` reads `held`, and
+# there is no process left to finish the release or run the drop. `release`
+# cannot help -- it only drops a lease THIS checkout claimed. Same predicate as
+# `claim`, so this can never take a lease off a live holder either.
+cmd_clear() {
+  local ttl="$DEFAULT_TTL_MIN"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ttl-min) ttl="${2:?--ttl-min needs a value}"; shift 2 ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+
+  local held reason
+  held="$(remote_lease_sha)"
+  if [[ -z "$held" ]]; then
+    gray "no release lease to clear"
+    return 0
+  fi
+  fetch_lease || true
+  reason="$(reclaim_reason "$held" "$ttl")"
+  if [[ -z "$reason" ]]; then
+    red "refusing to clear a lease that may still be held"
+    gray "  lease: $(describe_lease "$held")"
+    if [[ "$(holder_liveness "$held")" == "alive" ]]; then
+      gray "  its holder process is still running on this box; stop that release first"
+    else
+      gray "  it becomes clearable after ${ttl}min without a renewal"
+    fi
+    return 1
+  fi
+
+  # CAS against the exact sha we inspected: two operators clearing at once, or a
+  # holder that came back and renewed between the read and the push, must not
+  # lose to a blind delete.
+  if ! git push --quiet --force-with-lease="$LEASE_REF:$held" origin ":$LEASE_REF" 2>/dev/null; then
+    red "could not clear the release lease -- it changed under us; re-read status and retry"
+    return 1
+  fi
+  green "cleared a release lease with no live holder ($reason)"
+  gray "  was: $(describe_lease "$held")"
+  # If it happened to be ours, forget the token too, so a later `release` in this
+  # checkout does not think it still owns something.
+  if owned_token "$held"; then clear_token; fi
+  return 0
+}
+
 cmd_status() {
   local held
   held="$(remote_lease_sha)"
@@ -285,6 +457,11 @@ cmd_status() {
   fi
   fetch_lease || true
   echo "held $(describe_lease "$held")"
+  # Say what to DO about a holder that is provably gone. Without this the
+  # operator reads `held` and waits out a TTL for a release that already died.
+  if [[ "$(holder_liveness "$held")" == "dead" ]]; then
+    gray "  the holder process is gone -- drop it with: $(basename "$0") clear"
+  fi
 }
 
 case "${1:-}" in
@@ -292,7 +469,10 @@ case "${1:-}" in
   renew)   shift; cmd_renew "$@" ;;
   verify)  shift; cmd_verify "$@" ;;
   release) shift; cmd_release "$@" ;;
+  clear)   shift; cmd_clear "$@" ;;
   status)  shift; cmd_status "$@" ;;
-  -h|--help|"") sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  # The whole header block, however long it grows -- a hardcoded line range
+  # silently truncated the help mid-sentence every time the block was extended.
+  -h|--help|"") sed -n '2,/^[^#]/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
   *) die "unknown subcommand: $1" ;;
 esac
