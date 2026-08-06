@@ -134,6 +134,15 @@ create / delete / rename bumps the dir mtime and forces a full re-walk of that d
 Set `AGENTS_SESSIONS_NO_DIR_LEDGER=1` to disable the short-circuit and force the old
 full per-file walk.
 
+**OpenCode is stamped per row, not per file.** It keeps every session in one shared
+`~/.local/share/opencode/opencode.db`, so that file's `(mtime, size)` moves whenever
+*any* session is written and cannot say which one changed. Its `scan_ledger` stamp is
+the session row's own `time_updated` plus its message count, keyed by the synthetic
+`opencode.db#<id>` path; the file-level stat is kept only as the cheap "nothing changed
+at all" short-circuit for the whole harness. Before this, one new turn re-emitted every
+indexed OpenCode session (up to the scan's `LIMIT 1000`) and re-opened the database
+once per re-emitted session to re-parse a transcript that had not moved (RUSH-2210).
+
 Cursor is installed outside agents-cli's version homes. Once any managed agent
 version exists, the default managed scope excludes Cursor transcripts; pass
 `--unmanaged` (for example, `agents sessions --agent cursor --unmanaged`) to list

@@ -2178,16 +2178,21 @@ const OPENCODE_DB = path.join(HOME, '.local', 'share', 'opencode', 'opencode.db'
 
 let cachedOpenCodeAccount: string | undefined;
 
-/** Query the active OpenCode account email from its SQLite database. */
-async function getOpenCodeAccount(): Promise<string | undefined> {
+/**
+ * Query the active OpenCode account email from its SQLite database.
+ *
+ * Takes the scan's already-open handle so a scan opens `opencode.db` exactly
+ * once (RUSH-2210); opens its own only when called without one.
+ */
+function getOpenCodeAccount(handle?: Database.Database): string | undefined {
   if (cachedOpenCodeAccount !== undefined) return cachedOpenCodeAccount || undefined;
 
   // Read through the node/bun SQLite wrapper (not the `sqlite3` CLI) so this
   // works on every OS — the CLI is absent on Windows.
-  let db: Database.Database | undefined;
+  let owned: Database.Database | undefined;
   try {
-    if (fs.existsSync(OPENCODE_DB)) {
-      db = new Database(OPENCODE_DB);
+    const db = handle ?? (fs.existsSync(OPENCODE_DB) ? (owned = new Database(OPENCODE_DB)) : undefined);
+    if (db) {
       const row = db
         .prepare('SELECT email FROM control_account WHERE active=1 LIMIT 1;')
         .get() as { email?: unknown } | undefined;
@@ -2199,11 +2204,48 @@ async function getOpenCodeAccount(): Promise<string | undefined> {
     }
   } catch { /* DB not accessible, sqlite module unavailable, or query failed */ }
   finally {
-    try { db?.close(); } catch { /* best-effort close */ }
+    try { owned?.close(); } catch { /* best-effort close */ }
   }
 
   cachedOpenCodeAccount = '';
   return undefined;
+}
+
+/**
+ * The per-session ledger stamp for an OpenCode row.
+ *
+ * OpenCode keeps every session in ONE shared SQLite file, so that file's
+ * mtime/size changes whenever *any* session is written. Stamping each session
+ * with the whole-DB stat therefore invalidated every indexed session on every
+ * scan: up to `LIMIT 1000` sessions were re-emitted into `upsertSessionsBatch`,
+ * and its enrichment step re-opened `opencode.db` once per re-emitted entry via
+ * `parseSession` (RUSH-2210).
+ *
+ * The row carries its own change signal — `time_updated` moves on every write to
+ * that session, and the message count grows with it — so that pair is the stamp.
+ * `fileMtimeMs`/`fileSize` are just the ledger's two integer columns here; they
+ * name a file only for the one-file-per-session harnesses.
+ *
+ * Degenerate rows (a non-numeric `time_updated` *and* `time_created`) fall back
+ * to the whole-DB stat, which keeps the pre-RUSH-2210 always-rescan behavior for
+ * exactly those rows rather than pinning them to a stamp that never changes.
+ */
+function openCodeSessionStamp(
+  timeUpdated: number,
+  timeCreated: number,
+  messageCount: number,
+  dbScan: ScanStamp,
+): ScanStamp {
+  const mtime = Number.isFinite(timeUpdated)
+    ? timeUpdated
+    : Number.isFinite(timeCreated)
+      ? timeCreated
+      : null;
+  if (mtime === null) return dbScan;
+  return {
+    fileMtimeMs: Math.floor(mtime),
+    fileSize: Number.isFinite(messageCount) ? messageCount : 0,
+  };
 }
 
 /** Scan OpenCode sessions from its SQLite database when the DB file has changed. */
@@ -2213,8 +2255,9 @@ async function scanOpenCodeIncremental(): Promise<void> {
   const stat = safeStatSync(OPENCODE_DB);
   if (!stat) return;
 
-  // OpenCode is one big DB; we use its mtime/size as the ledger for the
-  // entire fleet of OpenCode sessions.
+  // OpenCode is one big DB. Its mtime/size is the cheap "did ANYTHING change"
+  // short-circuit for the whole harness — not the per-session stamp, which each
+  // row carries itself (see openCodeSessionStamp, RUSH-2210).
   const currentScan: ScanStamp = {
     fileMtimeMs: Math.floor(stat.mtimeMs),
     fileSize: stat.size,
@@ -2224,7 +2267,6 @@ async function scanOpenCodeIncremental(): Promise<void> {
     return;
   }
 
-  const account = await getOpenCodeAccount();
   const currentVersion = await getCurrentAgentVersion('opencode');
 
   // Read through the node/bun SQLite wrapper (not the `sqlite3` CLI) so this
@@ -2266,6 +2308,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
     `.replace(/\n/g, ' ');
 
     db = new Database(OPENCODE_DB);
+    const account = getOpenCodeAccount(db);
     const rows = db.prepare(query).all() as Array<{
       id: unknown;
       title: unknown;
@@ -2279,16 +2322,42 @@ async function scanOpenCodeIncremental(): Promise<void> {
       has_token_data: unknown;
     }>;
 
-    const entries: ScanEntry[] = [];
-    for (const row of rows) {
+    // Two passes. First derive each row's identity + per-session stamp, then
+    // bulk-load the prior stamps in ONE query and keep only the rows that
+    // actually changed. Skipped rows never reach upsertSessionsBatch, so they
+    // never pay its per-entry `parseSession` re-open of this same DB.
+    const asInt = (v: unknown): number =>
+      typeof v === 'number' ? v : parseInt(String(v), 10);
+    const candidates = rows.flatMap(row => {
       const id = typeof row.id === 'string' ? row.id : '';
-      if (!id) continue;
+      if (!id) return [];
+      const filePath = `${OPENCODE_DB}#${id}`;
+      return [{
+        row,
+        id,
+        filePath,
+        scan: openCodeSessionStamp(
+          asInt(row.time_updated),
+          asInt(row.time_created),
+          asInt(row.message_count),
+          currentScan,
+        ),
+      }];
+    });
+    const priorStamps = getScanStampsForPaths(candidates.map(c => c.filePath));
+    const changed = candidates.filter(c => {
+      const prevStamp = priorStamps.get(c.filePath);
+      return !prevStamp
+        || prevStamp.fileMtimeMs !== c.scan.fileMtimeMs
+        || prevStamp.fileSize !== c.scan.fileSize;
+    });
+
+    const entries: ScanEntry[] = [];
+    for (const { row, id, filePath, scan } of changed) {
       const title = typeof row.title === 'string' ? row.title : '';
       const directory = typeof row.directory === 'string' ? row.directory : '';
       const version = typeof row.version === 'string' ? row.version : '';
 
-      const asInt = (v: unknown): number =>
-        typeof v === 'number' ? v : parseInt(String(v), 10);
       const timeCreated = asInt(row.time_created);
       const timeUpdated = asInt(row.time_updated);
       const messageCount = asInt(row.message_count);
@@ -2310,7 +2379,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
         lastActivity,
         project: directory ? path.basename(directory) : undefined,
         cwd: directory ? normalizeCwd(directory) : undefined,
-        filePath: `${OPENCODE_DB}#${id}`,
+        filePath,
         version: resolveSessionVersion('opencode', OPENCODE_DB, version || undefined, currentVersion),
         account,
         topic,
@@ -2319,7 +2388,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
         outputTokens: hasTokenData && !Number.isNaN(outputTokens) ? outputTokens : undefined,
       };
 
-      entries.push({ meta, content: topic || '', scan: currentScan });
+      entries.push({ meta, content: topic || '', scan });
     }
 
     upsertSessionsBatch(entries);
