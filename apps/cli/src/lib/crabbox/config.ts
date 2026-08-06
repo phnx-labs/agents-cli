@@ -2,10 +2,9 @@
  * The repo-local crabbox config (`.crabbox.yaml` at the repo root).
  *
  * crabbox itself reads this file when warming a box (the `profile:` key becomes
- * the box's `profile` label). `agents run --lease` reads it too so the warm-pool
- * reuse check matches on the SAME profile the warmup would have used — a reused
- * box is then interchangeable with a fresh one (scripts/sandbox.sh's
- * `pick_ready_box` resolves the pool the same way).
+ * the box's `profile` label). `agents run --lease` deliberately does NOT inherit
+ * that repo/CI label: leases share the default pool unless `leaseProfile:` opts
+ * the repo into a dedicated hot box.
  */
 
 import * as fs from 'fs';
@@ -19,12 +18,7 @@ import * as yaml from 'yaml';
  */
 export const DEFAULT_CRABBOX_PROFILE = 'default';
 
-/**
- * The `profile:` declared by `<repoRoot>/.crabbox.yaml`, or undefined when the
- * file is missing, unreadable, or has no profile key (crabbox then applies its
- * own default, which the pool matcher treats as DEFAULT_CRABBOX_PROFILE).
- */
-export function readCrabboxRepoProfile(repoRoot: string): string | undefined {
+function readCrabboxRepoConfig(repoRoot: string): Record<string, unknown> | undefined {
   let raw: string;
   try {
     raw = fs.readFileSync(path.join(repoRoot, '.crabbox.yaml'), 'utf-8');
@@ -37,7 +31,15 @@ export function readCrabboxRepoProfile(repoRoot: string): string | undefined {
   } catch {
     return undefined;
   }
-  if (!parsed || typeof parsed !== 'object') return undefined;
-  const profile = (parsed as Record<string, unknown>).profile;
-  return typeof profile === 'string' && profile.length > 0 ? profile : undefined;
+  return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : undefined;
+}
+
+/**
+ * Pool label for `agents run --lease`. The generic `profile:` key remains owned
+ * by repo sandbox/CI scripts; only the explicit `leaseProfile:` key opts lease
+ * runs out of the shared default pool.
+ */
+export function readCrabboxLeaseProfile(repoRoot: string): string {
+  const profile = readCrabboxRepoConfig(repoRoot)?.leaseProfile;
+  return typeof profile === 'string' && profile.length > 0 ? profile : DEFAULT_CRABBOX_PROFILE;
 }

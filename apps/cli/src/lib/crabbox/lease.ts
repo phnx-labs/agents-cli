@@ -3,10 +3,11 @@
  *
  * Acquire a box → provision the picked runtime(s) + their credentials → run the
  * agent on the box (via `crabbox run`, which owns the SSH) → tear the box down.
- * Acquisition is reuse-first against the warm profile pool (a ready box carrying
- * the run's profile + netMode labels is reused and kept; `--fresh` opts out and
- * always leases a new, torn-down box). The whole box-side sequence rides a
- * single `--script-stdin` body so the token contents never touch argv.
+ * Acquisition is reuse-first against the shared warm pool (a ready box carrying
+ * the lease profile + netMode labels is reused and kept; `--fresh` opts out and
+ * always leases a new, torn-down box). Concurrent callers run from separate
+ * `~/workspaces/<repo>-<run>` directories on that box. The whole box-side
+ * sequence rides a single `--script-stdin` body so token contents never touch argv.
  *
  * ── Command-layer contract (RUSH-1920/1921/1924) ─────────────────────────────
  * Exports the commands layer (exec.ts / lease.ts / ssh.ts) consumes:
@@ -53,6 +54,8 @@ export interface LeaseRunOptions {
   backend?: string;
   boxClass?: string;
   profile?: string;
+  /** Per-run directory under ~/workspaces; isolates concurrent runs on one box. */
+  workspaceId?: string;
   /** Runtimes to install on the box. */
   runtimes: AgentId[];
   /** Runtime credentials to copy; defaults to `runtimes`. */
@@ -117,6 +120,13 @@ export interface LeaseRunResult {
 /** POSIX single-quote for safe embedding in the generated bootstrap script. */
 function q(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
+/** Build a shell-safe, collision-resistant workspace id for one lease run. */
+export function leaseWorkspaceId(repoRoot: string, startedAtMs = Date.now(), pid = process.pid): string {
+  const repo = repoRoot.split(/[\\/]/).filter(Boolean).pop() ?? 'repo';
+  const safeRepo = repo.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'repo';
+  return `${safeRepo}-${startedAtMs.toString(36)}-${pid.toString(36)}`;
 }
 
 function profileRemotePath(name: string): string {
@@ -209,12 +219,22 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
   // them as a structured step stream — they never appear as setup noise.
   const step = (name: string) => `echo ${q(leasePhaseSentinel(name))}`;
   const copySetup = opts.copySetup !== false; // default TRUE
+  const workspace = opts.workspaceId
+    ? [
+        'REPO_DIR="$(pwd)"',
+        `WORKSPACE_DIR="$HOME"/${q(`workspaces/${opts.workspaceId}`)}`,
+        'mkdir -p "$WORKSPACE_DIR"',
+        'rsync -a --delete --exclude=node_modules --exclude=.agents/worktrees "$REPO_DIR/" "$WORKSPACE_DIR/"',
+        'cd "$WORKSPACE_DIR"',
+      ].join('\n')
+    : '';
 
   return [
     'set -uo pipefail',
     // crabbox has finished its workspace resync by the time this script runs;
     // the sync sentinel marks the transition out of that (crabbox-driven) phase.
     step('sync'),
+    workspace,
     // Only meaningful on a tailnet lease — the box already joined during warmup.
     opts.netMode === 'tailscale' ? step('joined-tailnet') : '',
     step('install'),
@@ -395,10 +415,10 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
       onData: opts.onData,
     });
   } finally {
-    // Always attempt teardown (bounds credential lifetime to the run) unless the
-    // caller explicitly asked to keep the box or the box was reused (an explicit
-    // --box target or a warm pool box — both outlive this run).
-    if (!opts.keep && !reused) {
+    // Normal --lease establishes or reuses the warm pool, so the box outlives
+    // this run; credentials are still shredded inside the script above. Only
+    // --fresh requests the old one-shot lifecycle and tears its new box down.
+    if (!opts.keep && opts.fresh && !reused) {
       opts.onPhase?.({ kind: 'teardown' });
       toreDown = crabboxStop(box.slug, { secretsBundle: opts.secretsBundle });
     }

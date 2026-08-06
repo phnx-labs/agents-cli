@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as bundles from '../secrets/bundles.js';
 import * as stateModule from '../state.js';
-import { buildBootstrapScript, leaseAndRun, isExpiredPoolStray, STRAY_GRACE_SECS } from './lease.js';
+import { buildBootstrapScript, leaseAndRun, leaseWorkspaceId, isExpiredPoolStray, STRAY_GRACE_SECS } from './lease.js';
 import { resetCrabboxSecretsMemosForTest, type CrabboxBox } from './cli.js';
 import { LEASE_AGENT_MARKER, leasePhaseSentinel } from './progress.js';
 import type { DetectedRuntime } from './runtimes.js';
@@ -228,6 +228,29 @@ describe('buildBootstrapScript', () => {
     });
     // The dangerous prompt is fully contained in a single-quoted argument.
     expect(script).toContain("'don'\\''t break; rm -rf /'");
+  });
+
+  it('copies the synced checkout into a per-run workspace before launching the agent', () => {
+    const script = buildBootstrapScript({
+      agent: 'claude',
+      prompt: 'work concurrently',
+      runtimes: ['claude'],
+      detected,
+      workspaceId: 'agents-cli-task-a',
+    });
+
+    expect(script).toContain('WORKSPACE_DIR="$HOME"/\'workspaces/agents-cli-task-a\'');
+    expect(script).toContain('rsync -a --delete --exclude=node_modules --exclude=.agents/worktrees "$REPO_DIR/" "$WORKSPACE_DIR/"');
+    expect(script.indexOf('cd "$WORKSPACE_DIR"')).toBeLessThan(script.indexOf("agents run 'claude'"));
+  });
+});
+
+describe('leaseWorkspaceId', () => {
+  it('keeps the repo name readable and separates concurrent process runs', () => {
+    expect(leaseWorkspaceId('/src/Agents CLI', 1_800_000_000_000, 41)).toMatch(/^agents-cli-[a-z0-9]+-15$/);
+    expect(leaseWorkspaceId('/src/Agents CLI', 1_800_000_000_000, 42)).not.toBe(
+      leaseWorkspaceId('/src/Agents CLI', 1_800_000_000_000, 41),
+    );
   });
 });
 
@@ -473,18 +496,18 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
     expect(calls.some((l) => l.startsWith('stop'))).toBe(false);
   });
 
-  it('skips a pool box that is not SSH-ready, then warms + tears down a fresh box', async () => {
+  it('skips a pool box that is not SSH-ready, then warms and keeps a replacement pool box', async () => {
     // status=running but `crabbox status` says ready=false (bootstrap dud) —
     // the sandbox.sh box_ready gate. The dud is left alone, never stopped.
     const fake = setupPoolFake({ boxes: [poolBoxJson('dud-one', { profile: 'agents-cli' })], readySlugs: [] });
     const { result, phases, calls } = await runWithPool(fake);
 
     expect(result.box.slug).toBe('fresh-one');
-    expect(result.toreDown).toBe(true);
-    expect(phases).toEqual(['warmup', 'ready', 'teardown']);
+    expect(result.toreDown).toBe(false);
+    expect(phases).toEqual(['warmup', 'ready']);
     expect(calls).toContain('status --id dud-one');
     expect(calls.some((l) => l.startsWith('warmup'))).toBe(true);
-    expect(calls).toContain('stop fresh-one');
+    expect(calls).not.toContain('stop fresh-one');
     expect(calls.some((l) => l.startsWith('stop dud-one'))).toBe(false);
   });
 
@@ -522,13 +545,13 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
     expect(calls.some((l) => l.startsWith('warmup'))).toBe(false);
   });
 
-  it('warms fresh when the pool is empty', async () => {
+  it('warms and keeps a pool box when the pool is empty', async () => {
     const fake = setupPoolFake({ boxes: [], readySlugs: [] });
     const { result, phases, calls } = await runWithPool(fake);
 
     expect(result.box.slug).toBe('fresh-one');
-    expect(result.toreDown).toBe(true);
-    expect(phases).toEqual(['warmup', 'ready', 'teardown']);
+    expect(result.toreDown).toBe(false);
+    expect(phases).toEqual(['warmup', 'ready']);
     expect(calls.some((l) => l.startsWith('status'))).toBe(false);
   });
 

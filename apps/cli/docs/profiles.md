@@ -357,11 +357,25 @@ the profile has no auth env of its own. `--box <slug>` targets an existing warm
 crabbox box instead of provisioning a disposable lease, so the same box can serve
 profile runs from different repositories and remains running after the command.
 
-`--lease` itself is reuse-first against the repo's profile pool: before leasing a
-new box it looks for a warm box carrying the same `profile` label (from the
-repo's `.crabbox.yaml`) and network mode that `crabbox status` reports
-SSH-ready, and reuses it (kept after the run) instead of paying for a fresh
-lease. `--fresh` opts out — always a brand-new box, torn down after the run.
+`--lease` is reuse-first against one shared `default` pool across repositories:
+before leasing a new box it looks for a warm box with the same network mode that
+`crabbox status` reports SSH-ready, and reuses it instead of paying for one warm
+box per repo. If the pool is empty, the newly warmed box is kept after the run so
+the next caller can reuse it. Each concurrent run copies the synced checkout into its own
+`~/workspaces/<repo>-<run>` directory, then launches there; callers share compute,
+not a working tree. Switching repositories therefore pays a re-sync latency in
+exchange for the lower idle-compute cost.
+
+The generic `.crabbox.yaml` `profile:` key still scopes repo sandbox/CI scripts.
+To opt `agents run --lease` into a dedicated hot-box pool, add a separate lease
+label explicitly:
+
+```yaml
+leaseProfile: private-hot-box
+```
+
+`--fresh` opts out of reuse entirely: it always provisions a brand-new box and
+tears it down after the run.
 
 ## Demo
 

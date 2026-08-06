@@ -387,8 +387,8 @@ export function crabboxStatusReady(slug: string, opts: CrabboxOptions = {}): boo
 
 export interface PoolMatchOptions {
   /**
-   * Profile label this run would warm a box with (from the repo's
-   * `.crabbox.yaml`; see config.ts). Both sides normalize an unset profile to
+   * Lease pool label (shared default, or `.crabbox.yaml leaseProfile:` opt-in;
+   * see config.ts). Both sides normalize an unset profile to
    * DEFAULT_CRABBOX_PROFILE, so profile-less runs match unlabeled boxes.
    */
   profile?: string;

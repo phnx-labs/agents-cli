@@ -1367,20 +1367,22 @@ export function registerRunCommand(program: Command): void {
         const nowSecs = Math.floor(Date.now() / 1000);
         let reuseSlug: string | undefined = options.box;
 
-        // The profile this run's pool/box carries: the repo's .crabbox.yaml
-        // `profile:` when declared (what crabbox warmup would label a fresh box
-        // with), else crabbox's default. Passing it to leaseAndRun makes the
-        // pool-reuse match interchangeable with a fresh warmup.
+        // Lease runs share one default warm pool across repositories. The generic
+        // `.crabbox.yaml profile:` remains available to repo sandbox/CI scripts;
+        // `leaseProfile:` is the explicit opt-in for a dedicated lease hot box.
         const repoRoot = gitToplevel(leaseCwd);
-        const { readCrabboxRepoProfile } = await import('../lib/crabbox/config.js');
-        const poolProfile = repoRoot ? readCrabboxRepoProfile(repoRoot) : undefined;
+        const { readCrabboxLeaseProfile } = await import('../lib/crabbox/config.js');
+        const poolProfile = repoRoot ? readCrabboxLeaseProfile(repoRoot) : 'default';
 
         if (options.lease && !reuseSlug && !options.fresh) {
-          const { crabboxList } = await import('../lib/crabbox/cli.js');
-          const { reusableBoxes, formatBoxRow } = await import('./lease.js');
+          const { crabboxList, poolReusableBoxes } = await import('../lib/crabbox/cli.js');
+          const { formatBoxRow } = await import('./lease.js');
           let warm: CrabboxBox[] = [];
           try {
-            warm = reusableBoxes(crabboxList({ secretsBundle: leaseSecretsBundle }), nowSecs);
+            warm = poolReusableBoxes(crabboxList({ secretsBundle: leaseSecretsBundle }), {
+              profile: poolProfile,
+              nowSecs,
+            });
           } catch {
             warm = []; // crabbox unavailable / no creds → the pool check in leaseAndRun decides
           }
@@ -1449,7 +1451,7 @@ export function registerRunCommand(program: Command): void {
         }
 
         const { detectSignedInRuntimes, resolveClaudeCredentialsBlob, inferLeaseRuntime, profileNeedsBaseRuntimeCredentials } = await import('../lib/crabbox/runtimes.js');
-        const { leaseAndRun } = await import('../lib/crabbox/lease.js');
+        const { leaseAndRun, leaseWorkspaceId } = await import('../lib/crabbox/lease.js');
         const { boxAddress } = await import('./lease.js');
         const { getConfiguredRunStrategy, resolveRunVersion } = await import('../lib/rotate.js');
         const { profileExists, readProfile, resolveProfileEnv } = await import('../lib/profiles.js');
@@ -1543,7 +1545,7 @@ export function registerRunCommand(program: Command): void {
             ? 'the box is kept after the run'
             : options.fresh
               ? 'the box is destroyed after the run'
-              : 'a fresh box is destroyed after the run; a reused pool box is kept';
+              : 'the shared-pool box is kept after the run';
         console.error(
           chalk.gray(
             `${boxLifecycle} · shipping ${whatShips}${credentialRuntimes.length > 0 && leaseEmail ? ` (${leaseEmail})` : ''}; ${boxAfterRun}.`,
@@ -1626,6 +1628,7 @@ export function registerRunCommand(program: Command): void {
             reuseBox: reuseSlug,
             fresh: options.fresh,
             profile: poolProfile,
+            workspaceId: leaseWorkspaceId(repoRoot ?? leaseCwd),
             copySetup,
             netMode,
             onData: (chunk) => router.push(chunk),

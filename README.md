@@ -149,6 +149,12 @@ agents run antigravity "Write tests for the fixed code"
 
 Each resolves to the project-pinned version with skills, MCP servers, and permissions already synced. Single-typo names auto-correct across every command — `agents view cladue` resolves to `claude`, `agents add codx@latest` to `codex`.
 
+`agents run claude "task" --lease` reuses one shared warm crabbox pool across
+repositories by default. Concurrent runs share the box but execute in isolated
+`~/workspaces/<repo>-<run>` directories. Add `leaseProfile: private-hot-box` to
+`.crabbox.yaml` only when a repo intentionally needs a dedicated warm pool;
+cross-repo reuse trades re-sync latency for lower idle-compute cost.
+
 ### Rate-limited? Keep working.
 
 ```bash
