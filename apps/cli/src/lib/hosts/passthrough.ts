@@ -25,6 +25,7 @@ import { dispatchAgentsCommand, withActorEnv } from './dispatch.js';
 import {
   stripRoutingFlags,
   buildRemoteAgentsInvocation,
+  stripClixml,
   HOST_ROUTING_SPECS,
   type StripSpec,
 } from './remote-cmd.js';
@@ -231,7 +232,9 @@ function buildFleetForwardedArgs(allArgs: string[]): string[] {
 /** Parse stdout as JSON; on failure return an object describing the error. */
 function safeJsonParse(stdout: string): unknown {
   try {
-    return JSON.parse(stdout);
+    // A Windows device relays its `--json` through PowerShell, which can prefix a
+    // CLIXML banner ahead of the payload — strip it before parsing (RUSH-2286).
+    return JSON.parse(stripClixml(stdout));
   } catch {
     return { parseError: 'invalid JSON', snippet: stdout.trim().slice(0, 200) };
   }
