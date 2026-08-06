@@ -21,6 +21,7 @@ import { executeJobDetached, monitorRunningJobs } from './runner.js';
 import { detectOverdueJobs, notifyOverdue } from './overdue.js';
 import { runCatchup } from './catchup.js';
 import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } from './routine-notify.js';
+import { notifyOwnerRoutineFinish, notifyOwnerRoutineStartFailed } from './routine-notify-owner.js';
 import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
 import { redactSecrets } from './redact.js';
@@ -520,6 +521,11 @@ export async function runDaemon(): Promise<void> {
       const meta = await executeJobDetached(config, {
         onFinish: (final) => {
           try { notifyRoutineFinish(final); } catch { /* best-effort */ }
+          // RUSH-2288: a failed/timed-out routine also reaches the OWNER's phone
+          // (in-process owner channel stack), not just the local desktop. Green
+          // runs are silent — the builder returns early. Async + swallowed so a
+          // delivery hiccup never blocks the finish path.
+          void notifyOwnerRoutineFinish(final).catch(() => { /* best-effort */ });
         },
       });
       log('INFO', `Job '${config.name}' spawned (run: ${meta.runId}, PID: ${meta.pid})`);
@@ -531,6 +537,10 @@ export async function runDaemon(): Promise<void> {
       // "failed to start" finish here — otherwise the user is left with an orphaned
       // "Routine started" and never told it failed.
       try { notifyRoutineStartFailed(config, message); } catch { /* best-effort */ }
+      // RUSH-2288: the pre-spawn failure (e.g. auth_failed) is exactly the one the
+      // per-routine `agents notify` prompt can never send — its agent never ran —
+      // so the daemon reaches the owner directly.
+      void notifyOwnerRoutineStartFailed(config, message).catch(() => { /* best-effort */ });
     }
   };
 
