@@ -2340,10 +2340,11 @@ export function registerTeamsCommands(program: Command): void {
         try {
           if (agent.hostName && agent.hostTarget && agent.repoPath) {
             // Distributed teammate: guard + remove the worktree ON THE HOST.
-            if (remoteWorktreeDirty(agent.hostTarget, agent.worktreePath)) {
+            const ssh = { extraSshArgs: agent.hostIdentityFile ? ['-i', agent.hostIdentityFile, '-o', 'IdentitiesOnly=yes'] : [] };
+            if (remoteWorktreeDirty(agent.hostTarget, agent.worktreePath, ssh)) {
               worktreeKept = true;
             } else {
-              removeRemoteWorktree(agent.hostTarget, agent.repoPath, agent.worktreeName);
+              removeRemoteWorktree(agent.hostTarget, agent.repoPath, agent.worktreeName, true, ssh);
             }
           } else {
             const dirty = await hasUncommittedChanges(agent.worktreePath);
@@ -2573,10 +2574,11 @@ export function registerTeamsCommands(program: Command): void {
           try {
             if (agent.hostName && agent.hostTarget && agent.repoPath) {
               // Distributed teammate: guard + remove the worktree ON THE HOST.
-              if (remoteWorktreeDirty(agent.hostTarget, agent.worktreePath)) {
+              const ssh = { extraSshArgs: agent.hostIdentityFile ? ['-i', agent.hostIdentityFile, '-o', 'IdentitiesOnly=yes'] : [] };
+              if (remoteWorktreeDirty(agent.hostTarget, agent.worktreePath, ssh)) {
                 keptWorktrees.push(agent.worktreeName);
               } else {
-                removeRemoteWorktree(agent.hostTarget, agent.repoPath, agent.worktreeName);
+                removeRemoteWorktree(agent.hostTarget, agent.repoPath, agent.worktreeName, true, ssh);
               }
             } else {
               const dirty = await hasUncommittedChanges(agent.worktreePath);

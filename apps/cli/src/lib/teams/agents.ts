@@ -1975,7 +1975,9 @@ export class AgentManager {
       if (resume && agent.worktreePath) {
         remoteCwd = agent.worktreePath;
       } else {
-        const worktreePath = createRemoteWorktree(agent.hostTarget, agent.repoPath, agent.worktreeName);
+        const worktreePath = createRemoteWorktree(agent.hostTarget, agent.repoPath, agent.worktreeName, {
+          extraSshArgs: agent.hostIdentityFile ? ['-i', agent.hostIdentityFile, '-o', 'IdentitiesOnly=yes'] : [],
+        });
         agent.worktreePath = worktreePath;
         remoteCwd = worktreePath;
       }
@@ -2075,7 +2077,9 @@ export class AgentManager {
     }
     const target = sshTargetFor(host);
     const teamMeta = await getTeam(taskName);
-    const repoRoot = ensureRemoteRepo(target, teamMeta?.repo ?? '', taskName);
+    const repoRoot = ensureRemoteRepo(target, teamMeta?.repo ?? '', taskName, {
+      extraSshArgs: host.identityFile ? ['-i', host.identityFile, '-o', 'IdentitiesOnly=yes'] : [],
+    });
     agent.hostName = host.name;
     agent.hostTarget = target;
     agent.hostIdentityFile = host.identityFile ?? null;

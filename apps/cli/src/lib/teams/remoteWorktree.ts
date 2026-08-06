@@ -12,6 +12,8 @@
 import { sshExec, shellQuote, assertValidSshTarget } from '../ssh-exec.js';
 import { assertSafeGitTransport } from '../git.js';
 
+interface RemoteSshOptions { extraSshArgs?: string[] }
+
 // Same allowlist as the local helper — worktree names land in a branch name and
 // a path, so keep them injection-safe (no shell metacharacters).
 const WORKTREE_NAME_RE = /^[A-Za-z0-9_-]+$/;
@@ -42,18 +44,18 @@ export function remotePathExpr(p: string): string {
  * downstream remote command (launch `cd`, worktree create, polling) works from an
  * absolute path with no tilde-expansion hazard.
  */
-export function resolveRemoteRepoRoot(target: string, repoPath: string): string | null {
+export function resolveRemoteRepoRoot(target: string, repoPath: string, opts: RemoteSshOptions = {}): string | null {
   assertValidSshTarget(target);
   const cmd = `git -C ${remotePathExpr(repoPath)} rev-parse --show-toplevel 2>/dev/null`;
-  const res = sshExec(target, cmd, { timeoutMs: 15000, multiplex: true });
+  const res = sshExec(target, cmd, { timeoutMs: 15000, multiplex: true, extraSshArgs: opts.extraSshArgs });
   const root = res.stdout.trim();
   return res.code === 0 && root ? root : null;
 }
 
 /** Run one git command in `repoPath` on the host; throw with stderr on failure. */
-function remoteGit(target: string, repoPath: string, args: string[], timeoutMs = 60000): string {
+function remoteGit(target: string, repoPath: string, args: string[], timeoutMs = 60000, opts: RemoteSshOptions = {}): string {
   const cmd = ['git', '-C', repoPath, ...args].map(shellQuote).join(' ');
-  const res = sshExec(target, cmd, { timeoutMs, multiplex: true });
+  const res = sshExec(target, cmd, { timeoutMs, multiplex: true, extraSshArgs: opts.extraSshArgs });
   if (res.code !== 0) {
     throw new Error(`remote git failed on ${target} (${args[0]}): ${(res.stderr || res.stdout).trim() || 'ssh error'}`);
   }
@@ -61,13 +63,13 @@ function remoteGit(target: string, repoPath: string, args: string[], timeoutMs =
 }
 
 /** True when `repoPath` is a git working tree on the host. */
-export function isRemoteGitRepo(target: string, repoPath: string): boolean {
+export function isRemoteGitRepo(target: string, repoPath: string, opts: RemoteSshOptions = {}): boolean {
   assertValidSshTarget(target);
   // remotePathExpr so a `~`/`$HOME`-relative path (the canonical repos dir) expands
   // on the host — plain shellQuote would single-quote the tilde into a literal,
   // making an existing checkout look absent and forcing a doomed re-clone.
   const cmd = `git -C ${remotePathExpr(repoPath)} rev-parse --git-dir 2>/dev/null`;
-  const res = sshExec(target, cmd, { timeoutMs: 15000, multiplex: true });
+  const res = sshExec(target, cmd, { timeoutMs: 15000, multiplex: true, extraSshArgs: opts.extraSshArgs });
   return res.code === 0;
 }
 
@@ -76,16 +78,16 @@ export function isRemoteGitRepo(target: string, repoPath: string): boolean {
  * Falls back to `main` when origin/HEAD isn't set, matching the local recipe's
  * `remote set-head` step.
  */
-export function remoteDefaultBranch(target: string, repoPath: string): string {
+export function remoteDefaultBranch(target: string, repoPath: string, opts: RemoteSshOptions = {}): string {
   assertValidSshTarget(target);
   try {
     // Refresh origin/HEAD first so a repo cloned before the default was set resolves.
     sshExec(
       target,
       ['git', '-C', repoPath, 'remote', 'set-head', 'origin', '--auto'].map(shellQuote).join(' '),
-      { timeoutMs: 20000, multiplex: true },
+      { timeoutMs: 20000, multiplex: true, extraSshArgs: opts.extraSshArgs },
     );
-    const ref = remoteGit(target, repoPath, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
+    const ref = remoteGit(target, repoPath, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], 60000, opts);
     return ref.replace(/^origin\//, '') || 'main';
   } catch {
     return 'main';
@@ -100,20 +102,20 @@ export function remoteDefaultBranch(target: string, repoPath: string): string {
  * `worktree add -b … origin/<default>` so a stale checkout can't fork the
  * teammate off old code.
  */
-export function createRemoteWorktree(target: string, repoPath: string, worktreeName: string): string {
+export function createRemoteWorktree(target: string, repoPath: string, worktreeName: string, opts: RemoteSshOptions = {}): string {
   assertValidSshTarget(target);
   assertName(worktreeName);
-  const gitRoot = remoteGit(target, repoPath, ['rev-parse', '--show-toplevel']);
-  const base = remoteDefaultBranch(target, gitRoot);
+  const gitRoot = remoteGit(target, repoPath, ['rev-parse', '--show-toplevel'], 60000, opts);
+  const base = remoteDefaultBranch(target, gitRoot, opts);
   const worktreePath = `${gitRoot}/.agents/worktrees/${worktreeName}`;
   const branchName = `agents/${worktreeName}`;
 
-  remoteGit(target, gitRoot, ['fetch', 'origin'], 120000);
+  remoteGit(target, gitRoot, ['fetch', 'origin'], 120000, opts);
   remoteGit(
     target,
     gitRoot,
     ['worktree', 'add', '-b', branchName, worktreePath, `origin/${base}`],
-    120000,
+    120000, opts,
   );
   return worktreePath;
 }
@@ -143,32 +145,32 @@ function repoSlug(name: string): string {
  * expands `$HOME` — single-quoting the tilde would defeat expansion, the same
  * hazard dispatch.ts avoids.
  */
-export function ensureRemoteRepo(target: string, repo: string, slug: string): string {
+export function ensureRemoteRepo(target: string, repo: string, slug: string, opts: RemoteSshOptions = {}): string {
   assertValidSshTarget(target);
   const safeSlug = repoSlug(slug);
   const canonical = `~/.agents/repos/${safeSlug}`;
 
   // 1. Canonical checkout already exists → fetch and reuse.
-  if (isRemoteGitRepo(target, canonical)) {
+  if (isRemoteGitRepo(target, canonical, opts)) {
     // Best-effort refresh; a fetch failure (offline origin) shouldn't block reuse.
     sshExec(
       target,
       `git -C ${remotePathExpr(canonical)} fetch origin`,
-      { timeoutMs: 120000, multiplex: true },
+      { timeoutMs: 120000, multiplex: true, extraSshArgs: opts.extraSshArgs },
     );
-    const root = resolveRemoteRepoRoot(target, canonical);
+    const root = resolveRemoteRepoRoot(target, canonical, opts);
     if (!root) throw new Error(`Repo at ${canonical} on ${target} vanished mid-provision.`);
     return root;
   }
 
   // 2. `repo` is a path that already exists on the host as a git repo → use it.
   if (repo && !looksLikeUrl(repo)) {
-    const existing = resolveRemoteRepoRoot(target, repo);
+    const existing = resolveRemoteRepoRoot(target, repo, opts);
     if (existing) {
       sshExec(
         target,
         `git -C ${remotePathExpr(existing)} fetch origin`,
-        { timeoutMs: 120000, multiplex: true },
+        { timeoutMs: 120000, multiplex: true, extraSshArgs: opts.extraSshArgs },
       );
       return existing;
     }
@@ -191,7 +193,7 @@ export function ensureRemoteRepo(target: string, repo: string, slug: string): st
     target,
     `mkdir -p ${remotePathExpr('~/.agents/repos')} && ` +
       `git clone -- ${shellQuote(repo)} ${remotePathExpr(canonical)}`,
-    { timeoutMs: 600000, multiplex: true },
+    { timeoutMs: 600000, multiplex: true, extraSshArgs: opts.extraSshArgs },
   );
   if (clone.code !== 0) {
     throw new Error(
@@ -199,7 +201,7 @@ export function ensureRemoteRepo(target: string, repo: string, slug: string): st
         `${(clone.stderr || clone.stdout).trim() || 'ssh error'}`,
     );
   }
-  const root = resolveRemoteRepoRoot(target, canonical);
+  const root = resolveRemoteRepoRoot(target, canonical, opts);
   if (!root) throw new Error(`Cloned ${repo} into ${canonical} on ${target} but it isn't a git repo.`);
   return root;
 }
@@ -214,10 +216,10 @@ function looksLikeUrl(repo: string): boolean {
 }
 
 /** True when the host worktree has uncommitted changes (staged or unstaged). */
-export function remoteWorktreeDirty(target: string, worktreePath: string): boolean {
+export function remoteWorktreeDirty(target: string, worktreePath: string, opts: RemoteSshOptions = {}): boolean {
   assertValidSshTarget(target);
   const cmd = ['git', '-C', worktreePath, 'status', '--porcelain'].map(shellQuote).join(' ');
-  const res = sshExec(target, cmd, { timeoutMs: 20000, multiplex: true });
+  const res = sshExec(target, cmd, { timeoutMs: 20000, multiplex: true, extraSshArgs: opts.extraSshArgs });
   if (res.code !== 0) return false;
   return res.stdout.trim().length > 0;
 }
@@ -232,22 +234,24 @@ export function removeRemoteWorktree(
   repoPath: string,
   worktreeName: string,
   deleteBranch = true,
+  opts: RemoteSshOptions = {},
 ): void {
   assertValidSshTarget(target);
   assertName(worktreeName);
-  const gitRoot = remoteGit(target, repoPath, ['rev-parse', '--show-toplevel']);
+  const gitRoot = remoteGit(target, repoPath, ['rev-parse', '--show-toplevel'], 60000, opts);
   const worktreePath = `${gitRoot}/.agents/worktrees/${worktreeName}`;
   const branchName = `agents/${worktreeName}`;
 
   const rm = sshExec(
     target,
     ['git', '-C', gitRoot, 'worktree', 'remove', '--force', worktreePath].map(shellQuote).join(' '),
-    { timeoutMs: 60000, multiplex: true },
+    { timeoutMs: 60000, multiplex: true, extraSshArgs: opts.extraSshArgs },
   );
   if (rm.code !== 0 && /is not a working tree/.test(rm.stderr + rm.stdout)) {
     sshExec(target, ['git', '-C', gitRoot, 'worktree', 'prune'].map(shellQuote).join(' '), {
       timeoutMs: 30000,
       multiplex: true,
+      extraSshArgs: opts.extraSshArgs,
     });
   }
   if (deleteBranch) {
@@ -255,6 +259,7 @@ export function removeRemoteWorktree(
     sshExec(target, ['git', '-C', gitRoot, 'branch', '-D', branchName].map(shellQuote).join(' '), {
       timeoutMs: 20000,
       multiplex: true,
+      extraSshArgs: opts.extraSshArgs,
     });
   }
 }
