@@ -235,7 +235,7 @@ describe('ensureActivityLogHook', () => {
 });
 
 describe.skipIf(process.platform === 'win32')('real activity-log hook (Python)', () => {
-  // win32: spawns a real Python hook with POSIX env/path assumptions (RUSH-2215).
+  // win32: spawns a real Python hook with POSIX env/path assumptions (RUSH-2215 expanded).
   pythonTest('reads actor, kind, launch, and parent provenance from the child env', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-activity-provenance-'));
     const r = runHook(home, {
