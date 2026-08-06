@@ -154,7 +154,7 @@ jobs:
       # regressions, not a hand-picked slice (RUSH-2215). The POSIX-only
       # integration tests that used to collapse the run — openclaw `which`+`sh`
       # delivery, ssh ControlMaster multiplexing, `#!/bin/sh` PATH stubs, bash
-      # release-script checks, sqlite-locked teardown — now skip on win32 with a
+      # release-script checks, sqlite-locked teardown — now skip on win32 (expanded RUSH-2215 quarantine) with a
       # stated reason (describe/it.skipIf), so the suite runs green and a genuine
       # Windows break stops standing out from the noise instead of hiding in it.
       - run: bun run test
