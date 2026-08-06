@@ -162,6 +162,78 @@ export function viewHasAgent(view: string, agent: string): boolean {
   return new RegExp(`\\b${agent}\\b`, 'i').test(view);
 }
 
+/**
+ * True when `version` is a concrete pin the remote must already have installed
+ * (e.g. `0.145.0`, `2.1.207`). Aliases (`latest` / `oldest` / `pinned` /
+ * `default` / `all` / `any`) resolve against the remote's own install set and
+ * are not preflight-checked here.
+ */
+export function isConcreteVersionPin(version?: string | null): boolean {
+  if (!version) return false;
+  const v = version.trim();
+  if (!v) return false;
+  // Keep in lockstep with agent-spec AGENT_QUALIFIERS (+ `any` filter token).
+  if (['latest', 'oldest', 'pinned', 'default', 'all', 'any'].includes(v.toLowerCase())) return false;
+  // Same shape agent-spec accepts for an exact pin (no path traversal / spaces).
+  return /^(?!.*\.\.)[A-Za-z0-9._+-]{1,64}$/.test(v);
+}
+
+/**
+ * Installed version strings for `agent` from `agents view --json` output.
+ * Returns `[]` when the agent row is absent, `undefined` when `view` is not
+ * JSON (text `agents list` fallback) so callers can degrade.
+ */
+export function viewAgentVersions(view: string, agent: string): string[] | undefined {
+  try {
+    const rows = JSON.parse(view) as Array<{
+      agent?: string;
+      versions?: Array<{ version?: string }>;
+    }>;
+    if (!Array.isArray(rows)) return undefined;
+    const row = rows.find((candidate) => candidate.agent?.toLowerCase() === agent.toLowerCase());
+    if (!row) return [];
+    return (row.versions ?? [])
+      .map((entry) => entry.version)
+      .filter((v): v is string => typeof v === 'string' && v.length > 0);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether a concrete `agent@version` is installed according to remote view
+ * output. JSON path is authoritative; text listing falls back to a whole-token
+ * version match. `undefined` only when the text path has the agent but no
+ * version token to confirm against (callers treat that as unverified).
+ */
+export function viewHasAgentVersion(view: string, agent: string, version: string): boolean | undefined {
+  const versions = viewAgentVersions(view, agent);
+  if (versions !== undefined) return versions.includes(version);
+  if (!viewHasAgent(view, agent)) return false;
+  const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (new RegExp(`\\b${escaped}\\b`).test(view)) return true;
+  return undefined;
+}
+
+/** Actionable fail-loud message for a missing remote pin (RUSH-2313). */
+export function missingPinnedVersionMessage(
+  hostName: string,
+  agent: string,
+  version: string,
+  installed?: string[],
+): string {
+  let installedHint = '';
+  if (installed) {
+    installedHint = installed.length > 0
+      ? ` Installed on that box: ${installed.join(', ')}.`
+      : ` Agent "${agent}" is not installed there.`;
+  }
+  return (
+    `Pinned ${agent}@${version} is not installed on "${hostName}".${installedHint} ` +
+    `Install it on that box: agents ssh ${hostName} -- agents add ${agent}@${version}`
+  );
+}
+
 /** Read the requested harness's sign-in verdict from `agents view --json`. */
 export function viewAgentSignedIn(view: string, agent: string): boolean | undefined {
   try {
@@ -182,14 +254,52 @@ export function viewAgentSignedIn(view: string, agent: string): boolean | undefi
 
 export interface EnsureReadyOptions {
   agent: string;
+  /**
+   * Explicit version pin (e.g. `"0.145.0"`). Concrete pins fail loud when the
+   * remote does not have that version installed so a detached `--no-follow`
+   * dispatch never reports "Dispatched" for a pin the box cannot run
+   * (RUSH-2313). Aliases (`latest` / …) are left for the remote CLI to resolve.
+   */
+  version?: string;
   /** Throw instead of warn when the agent isn't installed remotely. */
   requireAgent?: boolean;
+}
+
+/**
+ * Pure readiness verdict for the agent/version half of {@link ensureHostReady}
+ * (unit-tested without SSH). Returns warnings for soft agent-missing cases, or
+ * throws (via the caller's `throw new Error`) when a concrete pin is missing.
+ */
+export function evaluateHostAgentInstall(
+  view: string,
+  opts: EnsureReadyOptions,
+  hostName: string,
+): { warnings: string[] } {
+  const warnings: string[] = [];
+  if (isConcreteVersionPin(opts.version)) {
+    const version = opts.version!.trim();
+    const installed = viewAgentVersions(view, opts.agent);
+    const has = viewHasAgentVersion(view, opts.agent, version);
+    if (has === true) return { warnings };
+    // Missing or unverifiable pin: fail loud. Detached host dispatch used to
+    // print "Dispatched" and only die in the remote log ("codex@0.145.0 is not
+    // installed") — whole fleet drains no-op'd under that silent success.
+    throw new Error(missingPinnedVersionMessage(hostName, opts.agent, version, installed));
+  }
+  if (!viewHasAgent(view, opts.agent)) {
+    const msg = `Agent "${opts.agent}" may not be installed on "${hostName}" (remote \`agents add ${opts.agent}\` to install).`;
+    if (opts.requireAgent) throw new Error(msg);
+    warnings.push(msg);
+  }
+  return { warnings };
 }
 
 /**
  * Verify a host can run the agent: reachable + agents-cli present. Throws with an
  * actionable message otherwise. Agent-not-installed is a warning by default (the
  * remote `agents run` will surface it); pass requireAgent to make it fatal.
+ * A concrete `version` pin always fails loud when that version is absent
+ * (RUSH-2313) — never a silent "Dispatched" for a pin the box cannot run.
  *
  * One ssh round-trip (`readyProbe`) covers all three checks.
  */
@@ -211,11 +321,5 @@ export function ensureHostReady(host: Host, opts: EnsureReadyOptions): { warning
       `agents-cli is not installed on "${host.name}". Enroll it first: agents hosts add ${host.name} (bootstraps agents-cli).`,
     );
   }
-  const warnings: string[] = [];
-  if (!viewHasAgent(probe.view, opts.agent)) {
-    const msg = `Agent "${opts.agent}" may not be installed on "${host.name}" (remote \`agents add ${opts.agent}\` to install).`;
-    if (opts.requireAgent) throw new Error(msg);
-    warnings.push(msg);
-  }
-  return { warnings };
+  return evaluateHostAgentInstall(probe.view, opts, host.name);
 }

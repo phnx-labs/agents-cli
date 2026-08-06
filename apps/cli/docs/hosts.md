@@ -631,7 +631,14 @@ sync substrate, so the precondition is thin and mostly one-time/cached:
    absent, bootstrap (mirror `scripts/sandbox.sh:218-239`).
 2. **Config current** — `agents pull` on the box so `~/.agents` matches (git-backed;
    cheap, idempotent).
-3. **Agent installed** — remote `agents list` confirms the requested harness exists.
+3. **Agent installed** — remote `agents view --json` (fallback: `agents list`)
+   confirms the requested harness exists. A **concrete version pin**
+   (`agents run codex@0.145.0 --host <box>`) is checked against that listing and
+   **fails loud** when the pin is missing — naming the box, the missing pin, what
+   *is* installed, and the install command — so a detached `--no-follow` dispatch
+   never prints `Dispatched` for a pin the box cannot run (RUSH-2313). Aliases
+   (`@latest` / `@oldest` / `@pinned`) still resolve on the remote. A bare agent
+   name (no pin) keeps the soft warning.
 4. **Codebase present** — the target repo/branch is checked out at the run cwd
    (`git fetch` + checkout; no working-tree copy in Phase 1).
 

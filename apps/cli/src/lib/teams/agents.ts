@@ -1956,10 +1956,15 @@ export class AgentManager {
     }
     agent.hostIdentityFile = host.identityFile ?? null;
 
-    // Ensure agents-cli is present + version-matched on the host; surface (not
-    // fail on) an agent-not-installed warning like dispatch.ts does.
+    // Ensure agents-cli is present + the pin is installed on the host. A bare
+    // agent name still warns (like dispatch.ts); a concrete agent.version pin
+    // fails loud so the teammate never reports launched against a missing pin
+    // (RUSH-2313).
     try {
-      const { warnings } = ensureHostReady(host, { agent: agent.agentType });
+      const { warnings } = ensureHostReady(host, {
+        agent: agent.agentType,
+        version: agent.version ?? undefined,
+      });
       for (const w of warnings) process.stderr.write(`[teams] warning: ${w}\n`);
     } catch (err) {
       throw new Error(`Host "${agent.hostName}" not ready for teammate ${agent.agentId}: ${(err as Error).message}`);
