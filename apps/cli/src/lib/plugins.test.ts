@@ -9,9 +9,10 @@ import * as yaml from 'yaml';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { toPosix } from './platform/index.js';
 
-// win32: temporary full skip — one fail in 111 tests, expand later (RUSH-2215).
-const describePlugins = process.platform === 'win32' ? describe.skip : describe;
-
+// RUSH-2215 review: do not skip the whole file on win32. Symlink-only cases
+// already use it.skipIf(win32); pure suites (expandPluginVars, parseInstallSpec, …)
+// must stay active so the restored full Windows gate still catches regressions.
+const describePlugins = describe;
 
 import {
   loadPluginManifest,
@@ -270,7 +271,8 @@ describePlugins('discoverPlugins', () => {
 
   it('discovers plugin roots that are symlinked into the plugins directory', async () => {
     const sourceRoot = makePluginRoot(tmpDir, { name: 'linked-plugin' });
-    fs.symlinkSync(sourceRoot, path.join(pluginsDir, 'linked-plugin'), 'dir');
+    // dir junctions work without Developer Mode on Windows CI.
+    fs.symlinkSync(sourceRoot, path.join(pluginsDir, 'linked-plugin'), process.platform === 'win32' ? 'junction' : 'dir');
 
     vi.resetModules();
     vi.doMock('./state.js', async (importOriginal) => {
@@ -327,7 +329,8 @@ describePlugins('discoverPlugins', () => {
     }
   });
 
-  it('ignores broken symlinks in the plugins directory', async () => {
+  // Broken dir symlink needs Developer Mode / elevation on Windows CI.
+  it.skipIf(process.platform === 'win32')('ignores broken symlinks in the plugins directory', async () => {
     fs.symlinkSync(path.join(tmpDir, 'missing'), path.join(pluginsDir, 'missing-plugin'), 'dir');
 
     vi.resetModules();
