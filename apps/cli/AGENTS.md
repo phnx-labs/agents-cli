@@ -124,7 +124,7 @@ gives each device its warnings plus a compact accounts/versions line (every
 installed version + its account, provable ✓ / ✗). Single-machine `agents doctor`
 collapses to the CRITICAL section plus one `▸ <machine>` block. Severity:
 **critical** is `logged-out` (provable), `missing-hook`, `missing-plugin`,
-`unwired-hook`, `cli-missing` and `owner-sink-unreachable` (the feed/notify
+`unwired-hook`, `cli-missing`, `ssh-key-enrollment` and `owner-sink-unreachable` (the feed/notify
 owner-delivery lane can't reach the owner from this box, RUSH-2262); **warning**
 is `logout-unprovable`,
 `missing-resource`, `content-drift`, `never-synced`, `stale`, `repo-behind`,
@@ -184,6 +184,7 @@ testable without a shell, PowerShell, or an installed CLI):
 | Credential-shaped shell-rc exports (RUSH-1968) | `rcSecrets` | `rc-secret-export` |
 | The file-store master key live in the process env (RUSH-1968) | `masterPassphraseInEnv` | `env-secret-export` |
 | Windows exec policy blocking `agents.ps1` | `execPolicy` | `exec-policy` |
+| Windows OpenSSH key path/content/ACL invalid | `windowsSshEnrollment` | `ssh-key-enrollment` |
 | Hooks duplicated across version homes | `duplicateHooks` | `duplicate-hook{,-drift}` |
 | Declared host CLIs not on PATH | `hostClis.statuses` | `host-cli-missing` |
 | Host-CLI manifests the loader rejected | `hostClis.errors` | `host-cli-invalid` |

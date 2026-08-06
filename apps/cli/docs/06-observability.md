@@ -532,7 +532,7 @@ agents doctor · zion                                        1.20.81
 **Severity rubric** (agent-agnostic):
 
 - **CRITICAL** (`✗`) — `logged-out` (provable), `missing-hook`,
-  `missing-plugin`, `unwired-hook`, `cli-missing`, `owner-sink-unreachable`. These
+  `missing-plugin`, `unwired-hook`, `cli-missing`, `ssh-key-enrollment`, `owner-sink-unreachable`. These
   block the harness now, or (owner-sink-unreachable) mean this box cannot escalate
   a blocked agent to the owner.
 - **WARNING** (`⚠`) — `logout-unprovable`, `missing-resource`, `content-drift`,

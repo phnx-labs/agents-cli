@@ -52,6 +52,27 @@ function localInput(over: Partial<LocalFindingInputs> = {}): LocalFindingInputs 
 }
 
 describe('severity rubric', () => {
+  it('a broken Windows OpenSSH enrollment is CRITICAL and names the effective file', () => {
+    const findings = buildLocalFindings(localInput({
+      windowsSshEnrollment: { status: {
+        administrator: true,
+        expectedPath: 'C:\\ProgramData\\ssh\\administrators_authorized_keys',
+        configuredPaths: ['__PROGRAMDATA__\\ssh\\administrators_authorized_keys'],
+        fileExists: false,
+        hasPublicKey: false,
+        owner: null,
+        systemFullControl: false,
+        administratorsFullControl: false,
+        unexpectedAclPrincipals: [],
+      } },
+    }));
+    expect(findings).toMatchObject([{
+      severity: 'critical',
+      kind: 'ssh-key-enrollment',
+      message: 'SSH public-key file missing: C:\\ProgramData\\ssh\\administrators_authorized_keys',
+    }]);
+  });
+
   it('a missing hook from a synced version is CRITICAL', () => {
     const findings = buildLocalFindings(localInput({
       reports: [report('claude', '2.1.0', { hooks: [{ kind: 'hooks', name: 'git-guard', status: 'missing' }] })],

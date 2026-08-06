@@ -480,6 +480,23 @@ transparently — no Tailscale-specific code path. (Tailscale SSH / ACL-tag auth
 works too, since it's still `ssh <address> <cmd>` under the hood, but it's not
 required and not assumed.)
 
+#### Windows OpenSSH key enrollment
+
+`agents doctor` audits Windows key enrollment without reading or printing a private
+key or password. It asks `sshd -T` for the effective `AuthorizedKeysFile`, checks
+that the selected file exists and contains a public-key record, and inspects its
+ACL. Administrator accounts use
+`C:\ProgramData\ssh\administrators_authorized_keys`; normal accounts use
+`%USERPROFILE%\.ssh\authorized_keys`. The administrator file must grant
+`FullControl` to `SYSTEM` and `Administrators` and no unrelated principal.
+
+Enroll or rotate by writing the replacement **public** key to the effective file,
+then restore those ACLs and run `agents doctor` again before removing the old key.
+Revoke by deleting that public-key line. If key auth is already locked out, recover
+through the Windows console or a separately configured password-auth device profile,
+repair the effective file and ACL, then return the device to key auth. Doctor is
+read-only: it diagnoses these states but never requests credentials or changes the file.
+
 ### 3. Execution — remote `agents run` (harness-agnostic)
 
 Host dispatch has two shapes, chosen by whether a prompt is present:
