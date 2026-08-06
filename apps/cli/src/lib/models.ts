@@ -415,6 +415,35 @@ export function dropBareLegacyIds(ids: string[]): string[] {
   });
 }
 
+/**
+ * Scan raw binary/bundle text for canonical Claude model ids, then drop bare
+ * legacy prefixes (issue #1892). Two independent guards keep non-model strings
+ * out of the catalog:
+ *
+ *  - **Word-boundary anchors on the id regex.** The id must not be glued to a
+ *    surrounding identifier character, and must not be the truncated prefix of a
+ *    longer *version* token. `(?<![A-Za-z0-9_])` rejects a glued prefix;
+ *    `(?![A-Za-z0-9])` rejects a glued alnum suffix; `(?!\.\d)` rejects a
+ *    dotted-version continuation — so the bare-major prefix of the binary's own
+ *    "Typo in model ID" troubleshooting string `claude-sonnet-4.6` is not
+ *    scraped as `claude-sonnet-4`, while a real id followed by an unrelated `.`
+ *    suffix (`claude-fable-5.md`) still matches. Dash-separated segments only:
+ *    the dotted form never appears in a genuine id.
+ *  - **`dropBareLegacyIds`.** A standalone `.includes("claude-opus-4")` prefix
+ *    check is a fully delimited string the anchors cannot tell apart from a real
+ *    bare id, so a bare `claude-<family>-<major>` is dropped only when a
+ *    more-specific sibling (`claude-opus-4-8`) is also present; a genuinely bare
+ *    current id with no sibling (`claude-sonnet-5`) is kept.
+ */
+export function scanClaudeCatalogIds(text: string): string[] {
+  const idRe =
+    /(?<![A-Za-z0-9_])claude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:-\d+)*(?:-(?:fast|v\d+))?(?![A-Za-z0-9])(?!\.\d)/g;
+  const scanned = new Set<string>();
+  let sm: RegExpExecArray | null;
+  while ((sm = idRe.exec(text)) !== null) scanned.add(sm[0]);
+  return dropBareLegacyIds([...scanned]);
+}
+
 function extractClaudeCatalog(text: string): { models: ModelInfo[]; aliases: Record<string, string> } {
   const aliases: Record<string, string> = {};
 
@@ -482,15 +511,7 @@ function extractClaudeCatalog(text: string): { models: ModelInfo[]; aliases: Rec
   // catalog while a newer one still gets a real catalog (incl. fable/mythos and
   // the opus-5/sonnet-5 line) rather than an empty or single-model one.
   if (models.length < 2) {
-    const scanned = new Set<string>();
-    // Dash-separated segments only. Real ids are `claude-sonnet-4-6`; the dotted
-    // form `claude-sonnet-4.6` appears only inside the binary's own "Typo in
-    // model ID" troubleshooting text, so a `.`-permitting pattern would scrape a
-    // non-model string as if it were real.
-    const idRe = /claude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:-\d+)*(?:-(?:fast|v\d+))?/g;
-    let sm: RegExpExecArray | null;
-    while ((sm = idRe.exec(text)) !== null) scanned.add(sm[0]);
-    const filtered = dropBareLegacyIds([...scanned]);
+    const filtered = scanClaudeCatalogIds(text);
     if (filtered.length >= 2) models = build(filtered);
   }
 

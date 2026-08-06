@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { isTierToken, tierizeModels, resolveTierMap, resolveTier, MODEL_TIERS, applyTierOverrides, type TierResolution } from './model-tiers.js';
-import { getModelCatalog, dropBareLegacyIds, type ModelInfo } from './models.js';
+import { getModelCatalog, dropBareLegacyIds, scanClaudeCatalogIds, type ModelInfo } from './models.js';
 import { listInstalledVersions } from './versions.js';
 import { buildExecCommand } from './exec.js';
 
@@ -56,6 +56,45 @@ describe('dropBareLegacyIds (#1892)', () => {
     expect(out).not.toContain('claude-haiku-4'); // has sibling -> dropped
     expect(out).toContain('claude-sonnet-5'); // no sibling -> kept
     expect(out).toContain('claude-opus-4-8'); // specific -> kept
+  });
+});
+
+describe('scanClaudeCatalogIds (#1892 — word-boundary anchored scan)', () => {
+  // A slice shaped like the real native binary's strings: `.includes(...)`
+  // prefix-check literals, a dotted "Typo in model ID" example, real dated /
+  // variant ids, and a bare current with no sibling.
+  const text = [
+    'if(m.includes("claude-opus-4")||m.includes("claude-haiku-4")){}', // prefix-check artifacts
+    '"Typo in model ID: claude-opus-9.0 (no dashed form exists yet)"', // sibling-less dotted typo
+    'DEFAULTS={firstParty:"claude-opus-4-8"} "claude-opus-4-6-fast" "claude-opus-4-1-20250805-v1"',
+    'HAIKU="claude-haiku-4-5" SONNET5="claude-sonnet-5" FABLE="claude-fable-5.md"',
+    'var x=zzclaude-opus-4-9zz;', // glued on both sides -> not a real id
+  ].join('\n');
+  const ids = scanClaudeCatalogIds(text);
+
+  it('does not scrape a bare major out of a sibling-less dotted-typo string (the anchor)', () => {
+    // `claude-opus-9.0` has no dashed `claude-opus-9-*` in-scan sibling for the
+    // sibling-drop to catch, so without the trailing `(?!\.\d)` anchor the scan
+    // would scrape and *keep* `claude-opus-9` — a 404-able id. The anchor stops
+    // the scrape at the source.
+    expect(ids).not.toContain('claude-opus-9');
+  });
+
+  it('drops the standalone .includes() prefix-check artifacts (the sibling drop)', () => {
+    expect(ids).not.toContain('claude-opus-4'); // sibling claude-opus-4-8 present
+    expect(ids).not.toContain('claude-haiku-4'); // sibling claude-haiku-4-5 present
+  });
+
+  it('keeps real ids: dated, -fast, -v1, and a bare current with no sibling', () => {
+    expect(ids).toContain('claude-opus-4-8');
+    expect(ids).toContain('claude-opus-4-6-fast');
+    expect(ids).toContain('claude-opus-4-1-20250805-v1');
+    expect(ids).toContain('claude-sonnet-5'); // no sibling -> kept
+    expect(ids).toContain('claude-fable-5'); // real id followed by an unrelated ".md"
+  });
+
+  it('does not capture an id glued to surrounding identifier characters', () => {
+    expect(ids).not.toContain('claude-opus-4-9'); // came from `zzclaude-opus-4-9zz`
   });
 });
 

@@ -4,6 +4,8 @@
 
 - Make bare `agents setup` a re-runnable onboarding hub with live capability status and direct access to browser, computer, secrets, fleet, share, watchdog, and preference wizards.
 
+- **`agents models claude` no longer lists bare legacy ids that 404 (#1892).** The native-binary id-scan fallback is now word-boundary anchored, so it can't scrape the bare-major prefix (`claude-sonnet-4`) out of the binary's own dotted `claude-sonnet-4.6` "Typo in model ID" troubleshooting string or out of a glued token. The existing sibling-drop still removes the standalone `.includes("claude-opus-4")` prefix-check artifacts; genuine bare currents (`claude-sonnet-5`) are kept.
+
 - **`agents apply --provision-secrets` pushes the manifest's declared secrets
   bundles to each device, instead of only printing a reminder (RUSH-1968).** This
   gap is a direct cause of the ticket: an operator who needed secrets on a worker
