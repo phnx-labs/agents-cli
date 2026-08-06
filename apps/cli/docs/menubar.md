@@ -208,7 +208,8 @@ One rule shapes the menu: **attention floats up, context groups down.**
   [terminal-engine.md → Choosing a terminal](terminal-engine.md#choosing-a-terminal-for-a-gui-caller).
   (It used to always open Terminal.app.)
 - **ACTIVE** — **project accordion** + **session detail submenu**. Projects are
-  **collapsed by default** as a status strip (`▶ agents-cli  ●8 ◐1  zion`).
+  **collapsed by default** as a status strip
+  (`▶ agents-cli  ●8 working ◐1 waiting ○1 idle  zion`).
   Click `▶`/`▼` to fold the project open **inline** and list its agents.
   The project header is an embedded menu control, so expanding or collapsing
   mutates only that project's rows inside the current menu tracking session; it
