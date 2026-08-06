@@ -611,10 +611,10 @@ Team state is observable via `agents teams list --json` / `agents teams status -
 
 ## Cloud
 
-Some work shouldn't tie up your laptop. `agents cloud run` hands a task to a managed provider that clones the repo, plans, implements, tests, and opens a PR -- while your terminal stays free. A fifth provider, `host`, dispatches the same way onto machines you own: `agents cloud run "…" --host gpu-box` (tasks track in `agents cloud ps` and `agents hosts ps` alike).
+Some work shouldn't tie up your laptop. `agents cloud run` hands a task to a managed provider that clones the repo, plans, implements, tests, and opens a PR -- while your terminal stays free. The `host` provider dispatches the same way onto machines you own: `agents cloud run "…" --host gpu-box` (tasks track in `agents cloud ps` and `agents hosts ps` alike).
 
 <p align="center">
-  <img src="assets/cloud.svg" alt="agents cloud run dispatches one prompt to a managed provider (Rush, Codex, Factory, or Antigravity) that clones, plans, tests, and opens a pull request while you keep working" width="100%" />
+  <img src="assets/cloud.svg" alt="agents cloud run dispatches one prompt to a managed provider (Rush, Codex, Cursor, Factory, or Antigravity) that runs while you keep working" width="100%" />
 </p>
 
 ```bash
@@ -628,7 +628,7 @@ agents cloud message <id> "also update the changelog"  # steer it mid-run
 agents cloud cancel <id>
 ```
 
-Four managed backends behind one interface (`agents cloud providers`):
+Five managed backends behind one interface (`agents cloud providers`):
 
 | Provider | What runs | Notes |
 |---|---|---|
@@ -636,6 +636,7 @@ Four managed backends behind one interface (`agents cloud providers`):
 | `codex` | A pre-built Codex Cloud environment | Target it with `--env`. |
 | `factory` | `droid exec` on a cloud VM | Computer-use; pick the box with `--computer`. |
 | `antigravity` | Gemini managed agents | Antigravity harness in a remote sandbox. |
+| `cursor` | Cursor Cloud Agents | v1 REST API with repo, status, SSE, cancel, and follow-up runs. |
 
 Auto-routes each `--agent` to its native cloud, or pin the backend with `--provider`. Instead of dispatching now, register a run as an **event trigger** with `--on pull_request` (also `push`, `issue_comment`, `workflow_run`) -- it persists as a trigger-bound routine that fires on the event. `--json` on every subcommand for scripting.
 

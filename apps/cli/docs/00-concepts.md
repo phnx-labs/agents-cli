@@ -226,8 +226,8 @@ one door:
 **Cloud placement.** `--cloud` routes the run to the agent's native vendor
 cloud through the provider registry — the same dispatch as `agents cloud run
 --agent <agent>`, tracked by `agents cloud list/status/logs/cancel/message`.
-Routing: claude→rush, codex→codex, droid→factory, antigravity→antigravity;
-`--provider` overrides. An agent with no native cloud (kimi, grok, cursor,
+Routing: claude→rush, codex→codex, cursor→cursor, droid→factory, antigravity→antigravity;
+`--provider` overrides. An agent with no native cloud (kimi, grok,
 opencode, …) fails loud unless `--provider` is given. Cloud tasks run in the
 provider's workspace on the provider's accounts, so local-run flags
 (`--loop`, `--resume`, `--secrets`, `--terminal`, `--cwd`, account strategy,
