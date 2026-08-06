@@ -6,6 +6,8 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.313] - 2026-08-05
+
 - **Resume delegates session lifecycle to agents-cli.** The picker keeps its
   cross-device session list but starts with no rows selected. A chosen row sends
   only `agents sessions resume <canonical-id>`; the CLI decides whether to attach
