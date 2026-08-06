@@ -71,8 +71,6 @@ swiftc -O -target x86_64-apple-macos12 "$SOURCE" -o /tmp/agents-keychain-x86_64
 # and prepack only checks the shipped bundle's signature, so without this the
 # self-test would never run on the way to a release.
 echo "Running helper self-tests..."
-# if/then, not `[ … ] && …`: under `set -e` a false one-liner test is a failing
-# statement and would abort the build on every arm64 machine.
 if [ "$(uname -m)" = "x86_64" ]; then
     NATIVE_SLICE="/tmp/agents-keychain-x86_64"
 else
