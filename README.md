@@ -11,7 +11,7 @@
   <a href="https://github.com/phnx-labs/agents-cli"><img src="https://img.shields.io/badge/github-phnx--labs%2Fagents--cli-blue?style=flat-square" alt="github" /></a>
 </p>
 
-**The missing toolchain for CLI coding agents.** Run any agent on your existing subscription. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Schedule routines and set monitors that fire an agent when a source changes, drive browsers and Electron apps, store secrets behind Touch ID, and file tickets from a menu-bar bar — all from one CLI.
+**A framework for running a distributed agent factory.** Dispatch Claude, Codex, Antigravity, Grok, and more across your own machines — in parallel, on your existing subscriptions. Measure every run with `agents perf` / `agents insights`, fold what you learn back into `AGENTS.md` and skills, then put the loop on a schedule with routines and monitors. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Store secrets behind Touch ID, drive real browsers and Electron apps, and steer the whole fleet from a menu bar — all from one CLI.
 
 <p align="center">
   <a href="https://github.com/anthropics/claude-code" title="Claude Code"><img src="assets/harnesses/anthropic.svg" height="32" alt="Claude Code" /></a>
@@ -60,20 +60,25 @@ Source: [github.com/phnx-labs/agents-cli](https://github.com/phnx-labs/agents-cl
 
 Also available as `ag` -- all commands work with both `agents` and `ag`.
 
-- [Pin versions per project](#pin-versions-per-project)
+- [Factory loop](#factory-loop)
 - [One config, every agent](#one-config-every-agent)
 - [Run any agent](#run-any-agent)
 - [Sessions across agents](#sessions-across-agents)
 - [Control the fleet](#control-the-fleet)
 - [Sync the fleet](#sync-the-fleet)
+- [Pin versions per project](#pin-versions-per-project)
 - [Run open models through Claude Code](#run-open-models-through-claude-code)
+- [Run on your own machines](#run-on-your-own-machines)
 - [Teams](#teams)
 - [Cloud](#cloud)
 - [Workflows](#workflows)
+- [Plugins](#plugins)
+- [Make it yours](#make-it-yours)
 - [Browser](#browser)
 - [Secrets](#secrets)
 - [Routines](#routines)
 - [Monitors](#monitors)
+- [Share](#share)
 - [PTY](#pty)
 - [Portable setup](#portable-setup)
 - [Menu bar](#menu-bar)
@@ -84,33 +89,34 @@ Also available as `ag` -- all commands work with both `agents` and `ag`.
 
 ---
 
-## Pin versions per project
+## Factory loop
+
+The same loop whether it's one agent on your laptop or a fleet across a dozen machines: dispatch work, measure what happened, fold the lesson back into the harness, then put it on a schedule.
 
 ```bash
-# This project needs claude@2.0.65 -- newer versions changed tool calling.
-agents use claude@2.0.65 -p
+# Dispatch a team across the fleet -- each teammate in its own worktree
+agents teams create checkout --devices yosemite-s0,yosemite-s1
+agents teams add checkout claude "Owns: app/payments/*" --name payments
+agents teams add checkout codex  "Write tests for the new code" --name qa --after payments
+agents teams start checkout --watch
 
-# The monorepo uses codex@0.116.0 across the team.
-agents use codex@0.116.0 -p
+# Measure what happened -- latency, friction, dead-weight skills
+agents perf commands --days 7      # slowest CLI entrypoints
+agents insights --since 30d        # friction, harness comparison, ranked actions
+
+# Fold the lesson back into the harness -- every agent picks it up next run
+agents rules add ~/lessons/payments-review.md --agents claude
+agents skills add ~/skills/payments-review --agents claude
+
+# Put it on a schedule so it runs itself
+agents routines add nightly-payments-audit \
+  --schedule "0 2 * * *" --agent claude --prompt "Audit payments/* for regressions"
+
+# Steer the fleet this loop runs on from the menu bar
+agents menubar setup
 ```
 
-This creates an `agents.yaml` at the project root:
-
-```yaml
-# agents.yaml (commit this to your repo)
-agents:
-  claude: "2.0.65"
-  codex: "0.116.0"
-```
-
-Think `requirements.txt` for CLI coding agents, on steroids. A shim reads `agents.yaml` from the project root and routes `claude` / `codex` / `antigravity` / `grok` (and others) to the right version automatically. Each version gets its own isolated home -- switching backs up config and re-syncs resources.
-
-```bash
-agents add claude@2.0.65     # Install a specific version
-agents add codex@latest       # Install latest
-agents add codex@oldest       # Install the oldest published version
-agents view                   # See everything installed
-```
+`agents perf` reads a disposable warehouse at `~/.agents/.cache/perf/perf.db` -- hook, command, and run timing rollups, deletable any time. `agents insights` (alias `agents sessions insights`) is deterministic and offline: it caches per-session facets, compares harnesses, and ranks actions by evidence count -- no model call unless you pass `--narrative`. Routines put any of this on a cron ([Routines](#routines)); monitors fire it on a change instead of a clock ([Monitors](#monitors)); the menu bar is the always-on control surface for the fleet these commands drive ([Menu bar](#menu-bar)).
 
 ---
 
@@ -461,6 +467,36 @@ agents apply --no-login             # skip login propagation
 `agents apply` (`ag apply`) probes every target over the existing SSH transport, then reconciles it to the profile: installs missing agents, upgrades `agents-cli`, syncs the named config scopes, and **propagates logins** so a host signed in once seeds the fleet -- turning "6 hosts x 8 harnesses = 48 OAuth flows" into one. Portable credential files (claude, codex, grok, kimi, opencode, droid, antigravity) stream to each target over encrypted SSH stdin, never shell-interpolated, and land at `0600`. **Honest boundary:** macOS keychain-bound tokens (claude, antigravity on a Mac target) can't be extracted -- those surface as a one-time manual login, never faked. `--plan` / `--dry-run` shows the full matrix without touching anything.
 
 See [docs/fleet.md](apps/cli/docs/fleet.md) for the manifest schema and reconcile semantics.
+
+---
+
+## Pin versions per project
+
+```bash
+# This project needs claude@2.0.65 -- newer versions changed tool calling.
+agents use claude@2.0.65 -p
+
+# The monorepo uses codex@0.116.0 across the team.
+agents use codex@0.116.0 -p
+```
+
+This creates an `agents.yaml` at the project root:
+
+```yaml
+# agents.yaml (commit this to your repo)
+agents:
+  claude: "2.0.65"
+  codex: "0.116.0"
+```
+
+Think `requirements.txt` for CLI coding agents, on steroids. A shim reads `agents.yaml` from the project root and routes `claude` / `codex` / `antigravity` / `grok` (and others) to the right version automatically. Each version gets its own isolated home -- switching backs up config and re-syncs resources.
+
+```bash
+agents add claude@2.0.65     # Install a specific version
+agents add codex@latest       # Install latest
+agents add codex@oldest       # Install the oldest published version
+agents view                   # See everything installed
+```
 
 ---
 
