@@ -55,6 +55,8 @@ describe('Windows detached protocol', () => {
     expect(script).toContain('Get-Process -Id 4242');
     expect(script).toContain('Stop-Process -Id 4242 -Force');
     expect(script).toContain('ALREADY $code');
+    expect(script).not.toContain('}; elseif');
+    expect(script).not.toContain('}; else');
   });
 });
 
