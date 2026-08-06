@@ -214,7 +214,7 @@ export function buildTeammateSpawnEnv(
 export { captureProcessStartTime };
 
 /** Agent types the team runner supports. */
-const TEAM_AGENT_TYPES: AgentType[] = ['codex', 'cursor', 'claude', 'opencode', 'grok', 'antigravity', 'kimi', 'droid'];
+const TEAM_AGENT_TYPES: AgentType[] = ['codex', 'cursor', 'claude', 'opencode', 'grok', 'antigravity', 'kimi', 'droid', 'warp'];
 
 /**
  * Reasoning-intensity knob. Passed through to `agents run --effort`, which

@@ -3144,6 +3144,10 @@ export const AGENT_NAME_ALIASES: Record<string, AgentId> = {
   'muse-code': 'muse',
   'muse-spark': 'muse',
   'meta-muse': 'muse',
+  warp: 'warp',
+  oz: 'warp',
+  'warp-agent': 'warp',
+  'warp-cli': 'warp',
 };
 
 /**

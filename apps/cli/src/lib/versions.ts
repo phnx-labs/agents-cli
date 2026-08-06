@@ -1032,6 +1032,20 @@ export function getBinaryPath(agent: AgentId, version: string): string {
       ? path.join(getHomeDir(), 'bin', 'muse.exe')
       : path.join(getHomeDir(), '.local', 'bin', 'muse');
   }
+  if (agent === 'warp') {
+    // Warp Agent CLI installs a single global, self-updating `oz` binary — brew
+    // cask on macOS, the `oz-stable` apt|yum|pacman package on Linux — so, unlike
+    // droid/muse (which land at ~/.local/bin), its install location is
+    // platform/package specific. Resolve the real binary on PATH (findInPath
+    // skips our own shims dir) so isVersionInstalled / agents view agree with
+    // what executes. When oz is not installed, fall back to a deterministic path
+    // that won't exist, so isVersionInstalled reports uninstalled honestly.
+    const onPath = findInPath('oz');
+    if (onPath) return onPath;
+    return IS_WINDOWS
+      ? path.join(getHomeDir(), 'bin', 'oz.exe')
+      : '/opt/warpdotdev/oz-stable/oz';
+  }
   const versionDir = getVersionDir(agent, version);
   return path.join(versionDir, 'node_modules', '.bin', agentConfig.cliCommand);
 }
@@ -1668,7 +1682,7 @@ export async function installVersion(
     // exec itself forever. So we skip the resolver-backed agents here AND, for
     // everyone else, filter the shims dir out of the `which` candidates so the
     // same race can't bite a non-special-cased installScript agent.
-    if (agent !== 'grok' && agent !== 'droid' && agent !== 'muse') {
+    if (agent !== 'grok' && agent !== 'droid' && agent !== 'muse' && agent !== 'warp') {
       // findInPath is a pure-Node PATH scan that already skips our own shims
       // dir — so it returns the genuine install, never our dispatcher shim
       // (which sits ahead of ~/.local/bin on PATH and would otherwise be

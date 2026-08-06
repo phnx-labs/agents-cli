@@ -102,9 +102,10 @@ const AGENT_NAMES: Record<AgentType, string> = {
   antigravity: 'Antigravity',
   kimi: 'Kimi',
   droid: 'Droid',
+  warp: 'Warp',
 };
 
-const VALID_AGENTS: AgentType[] = ['claude', 'codex', 'cursor', 'opencode', 'grok', 'antigravity', 'kimi', 'droid'];
+const VALID_AGENTS: AgentType[] = ['claude', 'codex', 'cursor', 'opencode', 'grok', 'antigravity', 'kimi', 'droid', 'warp'];
 // 'full' kept as historical alias for 'skip'; normalized to 'skip' downstream.
 const VALID_MODES = ['plan', 'edit', 'auto', 'skip', 'full'] as const;
 const VALID_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'auto'] as const;
