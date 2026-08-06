@@ -194,12 +194,23 @@ export async function deliverOwnerFailure(text: string, meta: Meta): Promise<Own
 const notifiedFailures = new Set<string>();
 const MAX_DEDUP_KEYS = 1000;
 
-/** Record a dedup key; returns false when it was already delivered. */
+/**
+ * Claim a dedup key for an in-flight delivery. Returns false when this
+ * job+runId was already delivered (or is already in flight). Callers MUST
+ * {@link releaseFailureKey} when delivery fails so a later tick can retry —
+ * claiming before send without a release would suppress permanent failures
+ * forever (RUSH-2288 review).
+ */
 function claimFailureKey(key: string): boolean {
   if (notifiedFailures.has(key)) return false;
   if (notifiedFailures.size >= MAX_DEDUP_KEYS) notifiedFailures.clear();
   notifiedFailures.add(key);
   return true;
+}
+
+/** Drop a key so a failed delivery can be retried on the next finish hook. */
+function releaseFailureKey(key: string): void {
+  notifiedFailures.delete(key);
 }
 
 /** Test-only: reset the dedup set so cases don't leak state into each other. */
@@ -212,14 +223,18 @@ const NO_DELIVERY: OwnerDeliveryResult = { delivered: false, attempts: [] };
 
 /**
  * Daemon glue: on a routine FINISH, ping the owner IFF the run failed. Green
- * runs return early (no ping). Deduped per job+runId. Best-effort — resolves
- * either way; the daemon also wraps it in try/catch.
+ * runs return early (no ping). Deduped per job+runId — claimed for the
+ * in-flight window so two finish hooks don't double-text, released when no
+ * channel accepted so a later sweep can retry. Best-effort.
  */
 export async function notifyOwnerRoutineFinish(meta: RunMeta): Promise<OwnerDeliveryResult> {
   const text = routineFinishOwnerText(meta, os.hostname());
   if (!text) return NO_DELIVERY; // green / non-terminal → silent
-  if (!claimFailureKey(`${meta.jobName} ${meta.runId}`)) return NO_DELIVERY;
-  return deliverOwnerFailure(text, readMeta());
+  const key = `${meta.jobName} ${meta.runId}`;
+  if (!claimFailureKey(key)) return NO_DELIVERY;
+  const result = await deliverOwnerFailure(text, readMeta());
+  if (!result.delivered) releaseFailureKey(key);
+  return result;
 }
 
 /**

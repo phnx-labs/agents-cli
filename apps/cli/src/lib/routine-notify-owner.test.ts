@@ -266,6 +266,40 @@ describe('notifyOwnerRoutineFinish — dedup per job+runId, green stays silent',
     expect(r.delivered).toBe(false);
     expect(r.attempts).toEqual([{ channel: 'owntest-fail', ok: false, error: 'owntest-fail refused' }]);
   });
+
+  it('retries the same job+runId after a total delivery failure (claim released)', async () => {
+    // Review: claim-before-send without release suppressed retries forever when
+    // every channel refused. First attempt refuses; second (with a working
+    // channel) must still deliver for the same runId.
+    fs.writeFileSync(
+      humansFile,
+      `version: 1\nowner:\n  channels:\n    - id: owntest-fail\n      transport: rush\n      to: '+1555'\n  policy:\n    normal: [owntest-fail]\n`,
+    );
+    const first = await notifyOwnerRoutineFinish(
+      meta({ runId: 'run-retry', status: 'failed', exitCode: 1, errorMessage: 'auth_failed: 401' }),
+    );
+    expect(first.delivered).toBe(false);
+    expect(sent).toHaveLength(1);
+
+    fs.writeFileSync(
+      humansFile,
+      `version: 1\nowner:\n  channels:\n    - id: owntest-ok\n      transport: rush\n      to: '+1555'\n  policy:\n    normal: [owntest-ok]\n`,
+    );
+    const second = await notifyOwnerRoutineFinish(
+      meta({ runId: 'run-retry', status: 'failed', exitCode: 1, errorMessage: 'auth_failed: 401' }),
+    );
+    expect(second.delivered).toBe(true);
+    expect(sent).toHaveLength(2);
+    expect(sent[1].provider).toBe('owntest-ok');
+
+    // Third call still dedups after a successful delivery.
+    const third = await notifyOwnerRoutineFinish(
+      meta({ runId: 'run-retry', status: 'failed', exitCode: 1, errorMessage: 'auth_failed: 401' }),
+    );
+    expect(third.delivered).toBe(false);
+    expect(third.attempts).toEqual([]);
+    expect(sent).toHaveLength(2);
+  });
 });
 
 describe('notifyOwnerRoutineStartFailed — reaches the owner on a pre-spawn failure', () => {
