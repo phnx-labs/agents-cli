@@ -1352,8 +1352,11 @@ agents output --json | jq '.burn | {costUsd, costUsdNoCache, inputTokens, cacheR
 
 `--pricing` only chooses which cost the **text** report leads with; the `--json`
 payload always carries both `costUsd` and `costUsdNoCache` so a dashboard can pick.
-Because caching is a discount, `costUsdNoCache ≥ costUsd`; the text report shows the
-saving (`caching: actual $X vs no-cache $Y (saved $Z, N%)`) whenever it is nonzero.
+`costUsdNoCache ≥ costUsd` in typical sessions, where cheap cache **reads** dominate
+the burn. It can invert in a cache-**write**-heavy session: Claude prices a cache
+write at 1.25× the input rate, so repricing those writes *down* to the input rate can
+make the no-cache figure lower. The text report shows the saving (`caching: actual $X
+vs no-cache $Y (saved $Z, N%)`) only when the no-cache figure is actually higher.
 
 ## Accounts & Usage in `agents view`
 

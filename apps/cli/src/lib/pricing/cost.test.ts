@@ -59,7 +59,9 @@ describe('costOfUsageNoCache', () => {
     expect(costOfUsageNoCache(args)).toBeCloseTo(0.055, 10);
   });
 
-  it('is always >= the cache-aware cost (caching is a discount)', () => {
+  it('exceeds the cache-aware cost when cache reads dominate (the common case)', () => {
+    // Cache reads are the cheap-relative-to-input bucket, so repricing them up to
+    // the input rate raises the total — the typical session shape.
     const args = {
       model: 'claude-opus-4',
       inputTokens: 5_000,
@@ -68,6 +70,21 @@ describe('costOfUsageNoCache', () => {
       cacheCreationTokens: 10_000,
     } as const;
     expect(costOfUsageNoCache(args)).toBeGreaterThan(costOfUsage(args));
+  });
+
+  it('can fall BELOW the cache-aware cost in a cache-write-heavy session', () => {
+    // Claude prices a cache write at 1.25x input (opus: cacheWrite 6.25e-6 vs input
+    // 5e-6), so repricing writes DOWN to the input rate lowers the total when writes
+    // dominate and reads are small. This is why no-cache is not an unconditional
+    // upper bound — the output savings line is guarded accordingly (RUSH-2287 review).
+    const args = {
+      model: 'claude-opus-4',
+      inputTokens: 100_000,
+      outputTokens: 20_000,
+      cacheReadTokens: 50_000,
+      cacheCreationTokens: 2_000_000,
+    } as const;
+    expect(costOfUsageNoCache(args)).toBeLessThan(costOfUsage(args));
   });
 
   it('returns 0 for unknown/missing model', () => {
