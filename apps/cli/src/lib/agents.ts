@@ -1624,22 +1624,41 @@ function isValidOpenCodeCredential(value: unknown): boolean {
 
 /**
  * Whether a Muse Code `~/.config/muse/auth.json` document holds any usable
- * access token. The launcher stores per-provider slots (e.g. `meta`) each with
- * an `access_token` string; a top-level `access_token` is also accepted.
- * Never returns the secret itself — presence only.
+ * access token. Live shape from `muse login` (device OAuth, Muse Code 0.1.0):
+ *   { schema_version: 1, providers: { meta: { access_token, api_key, user_email, … } } }
+ * Also accept top-level or one-level-nested tokens for older/alternate writers.
+ * Recurses into objects so `providers.meta.access_token` is found — a flat
+ * one-level walk only saw `providers` and reported signed-out after a successful
+ * login (balanced then excluded the account). Never returns the secret itself.
  */
-function museAuthHasToken(value: unknown): boolean {
+function museAuthHasToken(value: unknown, depth = 0): boolean {
+  if (depth > 4) return false;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const root = value as Record<string, unknown>;
   if (typeof root.access_token === 'string' && root.access_token.length > 0) return true;
   if (typeof root.api_key === 'string' && root.api_key.length > 0) return true;
   for (const slot of Object.values(root)) {
-    if (!slot || typeof slot !== 'object' || Array.isArray(slot)) continue;
-    const entry = slot as Record<string, unknown>;
-    if (typeof entry.access_token === 'string' && entry.access_token.length > 0) return true;
-    if (typeof entry.api_key === 'string' && entry.api_key.length > 0) return true;
+    if (museAuthHasToken(slot, depth + 1)) return true;
   }
   return false;
+}
+
+/** Best-effort email from a Muse auth.json (providers.meta.user_email, etc.). */
+function museAuthEmail(value: unknown, depth = 0): string | null {
+  if (depth > 4) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const root = value as Record<string, unknown>;
+  if (typeof root.user_email === 'string' && root.user_email.includes('@')) {
+    return root.user_email;
+  }
+  if (typeof root.email === 'string' && root.email.includes('@')) {
+    return root.email;
+  }
+  for (const slot of Object.values(root)) {
+    const found = museAuthEmail(slot, depth + 1);
+    if (found) return found;
+  }
+  return null;
 }
 
 /**
@@ -2074,10 +2093,8 @@ export async function getAccountInfo(
       }
       case 'muse': {
         // Muse Code authenticates with META_API_KEY (env, highest priority) or
-        // a stored OAuth/API credential at ~/.config/muse/auth.json. The auth
-        // file is launcher-managed JSON with per-provider slots holding
-        // access_token; there is no email claim, so we report signed-in + a
-        // stable identity key (env-key vs provider slots) like kimi/opencode.
+        // a stored OAuth/API credential at ~/.config/muse/auth.json. Live file
+        // shape nests under providers.meta (access_token + optional user_email).
         if (process.env.META_API_KEY?.trim() || process.env.MODEL_API_KEY?.trim()) {
           const accountKey = buildIdentityKey(agentId, [['auth', 'env']]);
           return { ...empty, signedIn: true, accountId: 'env', accountKey, lastActive };
@@ -2086,12 +2103,20 @@ export async function getAccountInfo(
         if (!authPath) return { ...empty, lastActive };
         const data = JSON.parse(await fs.promises.readFile(authPath, 'utf-8'));
         if (!data || typeof data !== 'object') return { ...empty, lastActive };
-        // auth.json shape: { meta?: { access_token }, … } or similar slots.
-        // Any object with a nested access_token (or a top-level one) counts.
-        const hasToken = museAuthHasToken(data);
-        if (!hasToken) return { ...empty, lastActive };
-        const accountKey = buildIdentityKey(agentId, [['auth', 'file']]);
-        return { ...empty, signedIn: true, accountId: 'file', accountKey, lastActive };
+        if (!museAuthHasToken(data)) return { ...empty, lastActive };
+        const email = museAuthEmail(data);
+        const accountKey = buildIdentityKey(
+          agentId,
+          email ? [['email', email]] : [['auth', 'file']],
+        );
+        return {
+          ...empty,
+          signedIn: true,
+          email,
+          accountId: email ?? 'file',
+          accountKey,
+          lastActive,
+        };
       }
       default:
         return { ...empty, lastActive };

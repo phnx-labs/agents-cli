@@ -692,6 +692,49 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
     expect(info.signedIn).toBe(false);
   });
 
+  it('detects Muse signed-in from providers.meta.access_token (live muse login shape)', async () => {
+    // muse login writes { schema_version, providers: { meta: { access_token, … } } }.
+    // A one-level walk only saw `providers` and reported signed_out, so balanced
+    // excluded the only install after a successful login.
+    const home = makeTempDir();
+    const dir = path.join(home, '.config', 'muse');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'auth.json'),
+      JSON.stringify({
+        schema_version: 1,
+        providers: {
+          meta: {
+            access_token: 'dca:test-token-not-real',
+            obtained_via: 'device_code',
+            mechanism: 'oauth',
+            api_key: 'LLM|test',
+            user_email: 'muqsit@example.com',
+            user_full_name: 'Muqsit',
+          },
+        },
+      }),
+      'utf-8',
+    );
+    const info = await getAccountInfo('muse', home);
+    expect(info.signedIn).toBe(true);
+    expect(info.email).toBe('muqsit@example.com');
+    expect(info.accountId).toBe('muqsit@example.com');
+  });
+
+  it('treats Muse as signed out when auth.json has no nested token', async () => {
+    const home = makeTempDir();
+    const dir = path.join(home, '.config', 'muse');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'auth.json'),
+      JSON.stringify({ schema_version: 1, providers: { meta: {} } }),
+      'utf-8',
+    );
+    const info = await getAccountInfo('muse', home);
+    expect(info.signedIn).toBe(false);
+  });
+
   it('decrypts auth.v2.file and surfaces the email + org from the WorkOS JWT', async () => {
     const home = makeTempDir();
     writeDroidCredential(path.join(home, '.factory'), {
