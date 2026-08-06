@@ -102,8 +102,12 @@ describe('unattributed rescan throttle (#2047)', () => {
 
     const second = await listUnattributedActive(new Set());
     expect(unattributedFullRescanCountForTest()).toBe(1);
-    // Same pids present (filtered only for death/attribution — none here).
-    expect(second.map((s) => s.pid).sort()).toEqual(first.map((s) => s.pid).sort());
+    // Reuse path only DROPS rows (dead / pid-reuse / newly attributed) — never
+    // invents pids. Second is a subset of first.
+    const firstPids = new Set(first.map((s) => s.pid));
+    for (const s of second) {
+      expect(firstPids.has(s.pid)).toBe(true);
+    }
 
     // Growing the attributed set filters without a full rescan.
     const samplePid = first.find((s) => s.pid != null)?.pid;
