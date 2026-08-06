@@ -1639,10 +1639,17 @@ export function registerTeamsCommands(program: Command): void {
         } catch (err) {
           dieFriction('teams', 'ssh-target-unresolvable', `Can't resolve an ssh target for "${host.name}": ${(err as Error).message}`);
         }
-        // Ensure agents-cli is present + version-matched on the host; surface
-        // (not fail on) an agent-not-installed warning, like the run --host path.
+        // Ensure agents-cli is present + the pin is installed on the host.
+        // Bare agent names still only warn; a concrete pin fails loud so
+        // `teams add --device` never stages a teammate the box cannot run
+        // (RUSH-2313). parseTeammate already resolves @latest/etc. to a concrete
+        // version when one is pinned on the teammate spec.
         try {
-          const { warnings } = ensureHostReady(host, { agent: parseTeammate(teammate).agent });
+          const parsed = parseTeammate(teammate);
+          const { warnings } = ensureHostReady(host, {
+            agent: parsed.agent,
+            version: parsed.version ?? undefined,
+          });
           for (const w of warnings) process.stderr.write(chalk.yellow(`[teams] warning: ${w}\n`));
         } catch (err) {
           dieFriction('teams', 'host-not-ready', `Host "${host.name}" is not ready: ${(err as Error).message}`);
