@@ -1,6 +1,7 @@
 import { createInterface } from 'readline';
 import type { Readable, Writable } from 'stream';
 import { connectBrowserIPC } from './ipc.js';
+import { assertRemoteControlAllowed } from './remote-control.js';
 import type { IPCRequest, IPCResponse } from './types.js';
 
 export interface BrowserIPCStreamOptions {
@@ -29,6 +30,13 @@ function writeResponse(output: Writable, response: IPCResponse): void {
   output.write(`${JSON.stringify(response)}\n`);
 }
 
+function writeErrorResponse(output: Writable, error: unknown): void {
+  writeResponse(output, {
+    ok: false,
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+
 /**
  * Read browser IPC requests as NDJSON and write one NDJSON response per line.
  * The Node process and daemon connection stay alive until input closes.
@@ -46,14 +54,17 @@ export async function runBrowserIPCStream(options: BrowserIPCStreamOptions): Pro
       try {
         request = parseRequest(line);
       } catch (error) {
-        writeResponse(options.output, {
-          ok: false,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        writeErrorResponse(options.output, error);
         continue;
       }
 
       if (request.action === 'start') {
+        try {
+          assertRemoteControlAllowed();
+        } catch (error) {
+          writeErrorResponse(options.output, error);
+          continue;
+        }
         request = {
           ...request,
           taskName: request.taskName ?? defaultTask,
