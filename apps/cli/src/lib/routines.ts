@@ -412,6 +412,14 @@ export interface RunMeta {
   jobName: string;
   runId: string;
   agent?: AgentId;  // undefined at runtime for workflow and command jobs
+  /**
+   * Resolved agent version this run launched under (the head of the failover
+   * chain). Recorded so `archiveRoutineTranscripts` can find the transcript in
+   * the per-version home a config-dir-relocating agent (claude/codex/kimi) writes
+   * to, and so account attribution can name the home that ran (RUSH-2271). Unset
+   * for command/self-updating runs.
+   */
+  version?: string;
   workflow?: string;
   /** The shell command that ran, for command-mode routines (no agent). */
   command?: string;

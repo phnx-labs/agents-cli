@@ -30,8 +30,9 @@ import {
   checkJobDeviceEligibility,
   finalizeRunMeta,
 } from './routines.js';
-import { getRunsDir } from './state.js';
+import { getRunsDir, getUserAgentsDir } from './state.js';
 import type { AgentId } from './types.js';
+import { shortCodexHome } from './codex-home.js';
 import { prepareJobHome, buildSpawnEnv, getJobHomePath } from './sandbox.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { createTimer, redactPrompt } from './events.js';
@@ -362,8 +363,61 @@ function generateRunId(): string {
   return new Date().toISOString().replace(/[:.]/g, '-');
 }
 
-export function archiveRoutineTranscripts(
-  meta: Pick<RunMeta, 'jobName' | 'runId' | 'agent'>,
+/**
+ * Agents whose config dir `buildExecEnv` relocates OUT of the sandbox overlay HOME
+ * into their per-version home (exec.ts: CLAUDE_CONFIG_DIR / CODEX_HOME / KIMI_CODE_HOME
+ * / COPILOT_HOME). A routine spawned for one of these writes its transcript under the
+ * version home, NOT the overlay the sandbox generated — so the archiver has to read it
+ * there. Every one is version-pinned (never self-updating), so `RunMeta.version` names a
+ * real home. Muse relocates too but via XDG on a self-updating home; it stays on the
+ * overlay path here and is a separate follow-up.
+ */
+const CONFIG_DIR_RELOCATED_AGENTS = new Set<AgentId>(['claude', 'codex', 'kimi', 'copilot']);
+
+/** Whether this run's transcript lands in a SHARED per-version home (accumulating every
+ *  session that version+account ever ran) rather than the run's own disposable overlay. */
+function usesSharedTranscriptHome(agent: AgentId, version: string | undefined): boolean {
+  return Boolean(version) && CONFIG_DIR_RELOCATED_AGENTS.has(agent);
+}
+
+/**
+ * The directories the child actually writes a transcript to for one spec — resolved to
+ * match `buildExecEnv` (exec.ts), the single decision-point for where the transcript
+ * lands, so the archiver can never drift from it. For a config-dir-relocated agent that
+ * is the per-version home (`.claude`, `.codex`, …); for everyone else it is the sandbox
+ * overlay HOME. Codex may run from a SUN_LEN-safe short home on macOS (codex-home.ts),
+ * so both candidates are returned and the caller skips whichever does not exist.
+ */
+function routineTranscriptSourceRoots(
+  agent: AgentId,
+  version: string | undefined,
+  overlayHome: string,
+  spec: { root: string[] },
+): string[] {
+  if (usesSharedTranscriptHome(agent, version)) {
+    const roots = [path.join(getVersionHomePath(agent, version!), ...spec.root)];
+    if (agent === 'codex') {
+      roots.push(path.join(shortCodexHome(getUserAgentsDir(), version!), ...spec.root.slice(1)));
+    }
+    return roots;
+  }
+  return [path.join(overlayHome, ...spec.root)];
+}
+
+/** Path of the per-run baseline recorded before spawn (see {@link snapshotRoutineTranscriptBase}). */
+function transcriptBasePath(runDir: string): string {
+  return path.join(runDir, '.transcript-base.json');
+}
+
+/**
+ * Record every transcript file already present in the child's transcript dirs BEFORE
+ * the run spawns. When the transcript lands in a shared per-version home, this baseline
+ * is what lets the archiver copy only the file THIS run produced instead of sweeping in
+ * every sibling session that home holds (which would mis-tag them all `origin='routine'`
+ * under this run's name). Called once per run, before spawn.
+ */
+export function snapshotRoutineTranscriptBase(
+  meta: Pick<RunMeta, 'jobName' | 'agent' | 'version'>,
   runDir: string,
   overlayHome?: string,
 ): void {
@@ -372,21 +426,69 @@ export function archiveRoutineTranscripts(
   if (!specs) return;
 
   const home = overlayHome ?? getJobHomePath(meta.jobName);
+  const preexisting = new Set<string>();
   for (const spec of specs) {
-    const sourceRoot = path.join(home, ...spec.root);
-    if (!fs.existsSync(sourceRoot)) continue;
+    for (const root of routineTranscriptSourceRoots(meta.agent, meta.version, home, spec)) {
+      if (!fs.existsSync(root)) continue;
+      for (const f of walkForFiles(root, spec.ext, 100_000)) preexisting.add(f);
+    }
+  }
+  try {
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(transcriptBasePath(runDir), JSON.stringify([...preexisting]), { mode: 0o600 });
+  } catch {
+    // Best-effort: a missing baseline is handled conservatively at archive time
+    // (a shared home is skipped rather than bulk-copied).
+  }
+}
+
+/** Read the pre-spawn baseline. `null` means none was recorded (older run or a failed
+ *  snapshot) — the archiver then refuses to bulk-copy a shared home. */
+function readTranscriptBase(runDir: string): Set<string> | null {
+  try {
+    const arr = JSON.parse(fs.readFileSync(transcriptBasePath(runDir), 'utf-8'));
+    if (Array.isArray(arr)) return new Set(arr.filter((x): x is string => typeof x === 'string'));
+  } catch {
+    // No baseline file, or it was unreadable/corrupt.
+  }
+  return null;
+}
+
+export function archiveRoutineTranscripts(
+  meta: Pick<RunMeta, 'jobName' | 'runId' | 'agent' | 'version'>,
+  runDir: string,
+  overlayHome?: string,
+): void {
+  if (!meta.agent) return;
+  const specs = ROUTINE_TRANSCRIPT_SPECS[meta.agent];
+  if (!specs) return;
+
+  const home = overlayHome ?? getJobHomePath(meta.jobName);
+  const shared = usesSharedTranscriptHome(meta.agent, meta.version);
+  const base = readTranscriptBase(runDir);
+  // A shared per-version home holds every session that version+account ran, so without a
+  // per-run baseline we cannot tell this run's transcript from a sibling's — copy nothing
+  // rather than mis-tag them all. A disposable overlay is this run's alone, so copy all.
+  if (shared && base === null) return;
+
+  for (const spec of specs) {
     const destRoot = path.join(runDir, 'sessions', meta.agent, spec.root[spec.root.length - 1]);
-    for (const sourcePath of walkForFiles(sourceRoot, spec.ext, 100_000)) {
-      const rel = path.relative(sourceRoot, sourcePath);
-      if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
-      const destPath = path.join(destRoot, rel);
-      fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      try {
-        fs.copyFileSync(sourcePath, destPath);
-        fs.chmodSync(destPath, 0o600);
-      } catch {
-        // The process already reached a terminal state; a concurrently removed
-        // transcript should not rewrite that outcome.
+    for (const sourceRoot of routineTranscriptSourceRoots(meta.agent, meta.version, home, spec)) {
+      if (!fs.existsSync(sourceRoot)) continue;
+      for (const sourcePath of walkForFiles(sourceRoot, spec.ext, 100_000)) {
+        // Skip files that predate this run (a sibling session in the shared home).
+        if (base?.has(sourcePath)) continue;
+        const rel = path.relative(sourceRoot, sourcePath);
+        if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+        const destPath = path.join(destRoot, rel);
+        fs.mkdirSync(path.dirname(destPath), { recursive: true });
+        try {
+          fs.copyFileSync(sourcePath, destPath);
+          fs.chmodSync(destPath, 0o600);
+        } catch {
+          // The process already reached a terminal state; a concurrently removed
+          // transcript should not rewrite that outcome.
+        }
       }
     }
   }
@@ -844,6 +946,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     runId,
     ...runProvenance(config),
     agent: effectiveAgent,
+    version: primaryVersion,
     ...(config.workflow ? { workflow: config.workflow } : {}),
     pid: null,
     spawnedAt: Date.now(),
@@ -853,6 +956,9 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     exitCode: null,
   };
   writeRunMeta(meta);
+  // Baseline the child's transcript dirs BEFORE spawning so archiveRoutineTranscripts
+  // copies only THIS run's transcript out of a shared per-version home (RUSH-2271).
+  snapshotRoutineTranscriptBase(meta, runDir, overlayHome);
 
   // Auth preflight: if the last live probe rejected this (agent, version)'s
   // token (verdict `revoked`), the run is guaranteed to fail auth — fail fast
@@ -1421,6 +1527,7 @@ async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks
     runId,
     ...runProvenance(config),
     agent: effectiveAgent,
+    version,
     ...(config.workflow ? { workflow: config.workflow } : {}),
     pid: null,
     spawnedAt: Date.now(),
@@ -1430,6 +1537,9 @@ async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks
     completedAt: null,
     exitCode: null,
   };
+  // Baseline the child's transcript dirs BEFORE spawning so archiveRoutineTranscripts
+  // copies only THIS run's transcript out of a shared per-version home (RUSH-2271).
+  snapshotRoutineTranscriptBase(meta, runDir, overlayHome);
 
   // Auth preflight (mirrors executeJob): with no injected token, a daemon-fired
   // Claude routine authenticates via the pinned account's own CLAUDE_CONFIG_DIR
