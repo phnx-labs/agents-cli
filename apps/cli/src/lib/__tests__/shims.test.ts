@@ -96,8 +96,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 28 (Codex direct shims use the safe writable permission profile)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(28);
+  it('is 29 (Muse XDG pin for multi-version isolation)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(29);
   });
 });
 
@@ -169,7 +169,7 @@ describe('generateShimScript — config-dir env vars', () => {
 describe('generateVersionedAliasScript', () => {
   it('uses ~/.agents/.history for direct alias binary and config paths', () => {
     const script = generateVersionedAliasScript('codex', '0.125.0');
-    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(14);
+    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(15);
     expect(script).toContain('$HOME/.agents/.history/versions/codex/0.125.0');
     expect(script).not.toContain('$HOME/.agents-system/versions/codex/0.125.0');
   });
