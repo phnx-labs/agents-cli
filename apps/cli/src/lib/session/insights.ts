@@ -86,6 +86,12 @@ export interface InsightFacets {
   toolCounts: Record<string, number>;
   /** Per-model assistant turn counts. `/insights` has no model dimension at all. */
   models: Record<string, number>;
+  /**
+   * Silent stalls attributed to the model that last spoke before the idle gap
+   * (from the nearest preceding `usage`/message model tag). Some models go
+   * quiet more often — this is the laziness split. Key = shortened model id.
+   */
+  silentStallsByModel: Record<string, number>;
   languages: Record<string, number>;
   /** Slash commands the user invoked, by name. */
   slashCommands: Record<string, number>;
@@ -139,7 +145,8 @@ export interface InsightFacets {
 
 function emptyFacets(): InsightFacets {
   return {
-    toolCounts: {}, models: {}, languages: {}, slashCommands: {}, errorCategories: {},
+    toolCounts: {}, models: {}, silentStallsByModel: {}, languages: {},
+    slashCommands: {}, errorCategories: {},
     interruptions: 0, responseGaps: [], gapsOverCeiling: 0,
     linesTouchedBefore: 0, linesTouchedAfter: 0, editingToolCalls: 0,
     filesCreated: 0, filesModified: 0, filesDeleted: 0, gitCommits: 0, gitPushes: 0,
@@ -237,6 +244,8 @@ export function computeInsightFacets(
   // ("continue", "keep going", or any later message after minutes of silence). This is
   // the inverse framing of reply latency: same timestamps, attributed to the agent.
   let lastAssistantTs: number | null = null;
+  /** Shortened model id of the last assistant activity (for stall attribution). */
+  let lastAssistantModel: string | null = null;
   let lastFailedTool: string | null = null;
 
   for (const e of events) {
@@ -251,7 +260,14 @@ export function computeInsightFacets(
       case 'usage':
         // shortenModel so the label matches `agents sessions <id>` and `insights mix`
         // rather than printing the raw id beside their shortened one.
-        if (e.model) bump(f.models, shortenModel(e.model));
+        if (e.model) {
+          const m = shortenModel(e.model);
+          bump(f.models, m);
+          // Usage rows are the reliable model tag for Claude turns; keep as
+          // "last model" even when the timestamp is missing so a following
+          // tool_use still attributes a stall correctly.
+          lastAssistantModel = m;
+        }
         break;
 
       case 'error':
@@ -268,6 +284,7 @@ export function computeInsightFacets(
       case 'message':
         if (e.role === 'assistant') {
           if (hasTs) lastAssistantTs = ts;
+          if (e.model) lastAssistantModel = shortenModel(e.model);
           break;
         }
         if (e.role !== 'user') break;
@@ -292,6 +309,7 @@ export function computeInsightFacets(
             // Agent silent stall: model stopped; session sat idle until this message.
             if (gap >= SILENT_STALL_SECONDS) {
               classifySilentStall(gap, e.content ?? '', f.frictionSignals, f.correctionSignals);
+              bump(f.silentStallsByModel, lastAssistantModel ?? 'unknown');
             }
           }
         }
@@ -302,6 +320,7 @@ export function computeInsightFacets(
       case 'tool_use': {
         if (e._local) break;
         if (hasTs) lastAssistantTs = ts;
+        if (e.model) lastAssistantModel = shortenModel(e.model);
         const args = e.args ?? {};
         const toolName = e.tool ?? '';
         if (/askuserquestion/i.test(toolName)) classifyAskStall(args, f.correctionSignals);
@@ -495,6 +514,7 @@ export function detectOverlap(spans: SessionSpan[]): OverlapReport {
 export function mergeFacets(into: InsightFacets, add: InsightFacets): void {
   for (const [k, v] of Object.entries(add.toolCounts)) bump(into.toolCounts, k, v);
   for (const [k, v] of Object.entries(add.models)) bump(into.models, k, v);
+  for (const [k, v] of Object.entries(add.silentStallsByModel ?? {})) bump(into.silentStallsByModel, k, v);
   for (const [k, v] of Object.entries(add.languages)) bump(into.languages, k, v);
   for (const [k, v] of Object.entries(add.slashCommands)) bump(into.slashCommands, k, v);
   for (const [k, v] of Object.entries(add.errorCategories)) bump(into.errorCategories, k, v);

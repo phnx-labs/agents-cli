@@ -149,6 +149,20 @@ describe('computeInsightFacets', () => {
     expect(f.responseGaps).toContain(120);
   });
 
+  it('attributes silent stalls to the model that last spoke (laziness split)', () => {
+    const f = computeInsightFacets([
+      userMsg(0, 'go'),
+      { type: 'usage', agent: 'claude', timestamp: at(5), model: 'claude-opus-4-8-20250514' } as SessionEvent,
+      asstMsg(10, 'working'),
+      userMsg(10 + 600, 'continue'),
+      { type: 'usage', agent: 'claude', timestamp: at(700), model: 'claude-sonnet-4-20250514' } as SessionEvent,
+      asstMsg(710, 'more'),
+      userMsg(710 + 1200, 'ok'),
+    ], 0);
+    expect(f.silentStallsByModel['opus-4-8']).toBe(1);
+    expect(f.silentStallsByModel['sonnet-4']).toBe(1);
+  });
+
   it('emits a high-priority action for resume-after-silent-stall patterns', () => {
     const facets = computeInsightFacets([
       userMsg(0, 'ship it'),
