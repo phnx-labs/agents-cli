@@ -264,6 +264,27 @@ describe('groupFleetAuthInstalls — probe once per account (RUSH-2111)', () => 
   it('returns no groups for no installs', () => {
     expect(groupFleetAuthInstalls([])).toEqual([]);
   });
+
+  it('only merges installs the isMergeable predicate accepts', () => {
+    // The real caller passes `LIVE_PROBE_AGENTS.has(agent)`: claude merges (it can
+    // 429), cursor does not (a cheap local verdict with no rate limit — merging
+    // could silently override one home's signedIn state with another's).
+    const isLive = (i: FleetAuthInstall) => i.agent === 'claude';
+    const groups = groupFleetAuthInstalls(
+      [
+        inst('claude', '1.0.0', 'alice@example.com'),
+        inst('claude', '1.1.0', 'alice@example.com'),
+        inst('cursor', '2.0.0', 'alice@example.com'),
+        inst('cursor', '2.1.0', 'alice@example.com'),
+      ],
+      isLive,
+    );
+    // claude: 2 homes -> 1 group; cursor: 2 homes -> 2 groups (never merged).
+    expect(groups).toHaveLength(3);
+    const claude = groups.find((g) => g.probe.agent === 'claude');
+    expect(claude?.members).toHaveLength(2);
+    expect(groups.filter((g) => g.probe.agent === 'cursor').every((g) => g.members.length === 1)).toBe(true);
+  });
 });
 
 describe('formatCheckedAge', () => {

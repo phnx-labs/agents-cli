@@ -412,20 +412,26 @@ export interface FleetAuthProbeGroup<T extends FleetAuthInstall> {
  * incident {@link file:./usage-backoff.ts} was written to survive; this removes
  * its cause). Grouping by account means N homes on one account issue ONE request.
  *
- * Installs with no resolvable account label are never merged — we cannot prove
- * two of them are the same account — so each becomes its own group keyed by
- * version, preserving the old per-install probe for the un-labelable case
- * (which is also the `unconfigured` case that gets dropped downstream). Pure: no
+ * `isMergeable` scopes the dedup to the installs it actually helps: only agents
+ * that make a network probe ({@link LIVE_PROBE_AGENTS}) can 429, so only they are
+ * merged. A best-effort agent (its verdict is a cheap local file read, no rate
+ * limit) is left per-install — collapsing it would gain nothing and could
+ * silently override one home's local `signedIn` verdict with another's. Installs
+ * with no resolvable account label, or that `isMergeable` rejects, are never
+ * merged: each becomes its own group keyed by version, preserving the old
+ * per-install probe (also the `unconfigured` case dropped downstream). Pure: no
  * fs, no network, so the dedup decision is unit-tested directly.
  */
 export function groupFleetAuthInstalls<T extends FleetAuthInstall>(
   installs: readonly T[],
+  isMergeable: (install: T) => boolean = () => true,
 ): FleetAuthProbeGroup<T>[] {
   const groups = new Map<string, FleetAuthProbeGroup<T>>();
   for (const inst of installs) {
-    // NUL separates the segments so an account label can never collide with the
-    // version fallback key (a version string cannot contain NUL).
-    const key = inst.account
+    // A NUL byte separates the segments so an account label (which may contain a
+    // space or a literal "ver:") can never collide with the version fallback key
+    // — a version string cannot contain a NUL.
+    const key = inst.account && isMergeable(inst)
       ? `${inst.agent} acct:${inst.account}`
       : `${inst.agent} ver:${inst.version}`;
     const existing = groups.get(key);
@@ -473,11 +479,12 @@ export async function probeLocalFleetAuth(opts?: {
     }),
   );
 
-  // Probe once per (agent, account); fan the one verdict out to every home in the
-  // group. Groups run in parallel — they target distinct accounts, so there is no
-  // same-account concurrency left to trip the throttle.
+  // Probe once per (agent, account) — but only for the network-probing agents
+  // that can actually 429; best-effort agents stay per-install (see
+  // groupFleetAuthInstalls). Groups run in parallel: they target distinct
+  // accounts, so no same-account concurrency is left to trip the throttle.
   const perGroup = await Promise.all(
-    groupFleetAuthInstalls(installs).map(async (group): Promise<AuthProbeRow[]> => {
+    groupFleetAuthInstalls(installs, (inst) => LIVE_PROBE_AGENTS.has(inst.agent)).map(async (group): Promise<AuthProbeRow[]> => {
       const rep = group.probe;
       const health = await probeAuthHealth(rep.agent, rep.home, { cliVersion: opts?.cliVersion, info: rep.info });
       health.account = authAccountLabel(rep.info);

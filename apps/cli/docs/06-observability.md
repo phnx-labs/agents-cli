@@ -1334,12 +1334,14 @@ a stable per-account key:
   are separate processes — one empty file per penalty, named
   `<agent>.<deadline>`, so concurrent writers cannot displace each other's
   deadline and a read simply takes the furthest one), and both
-  the usage fetch and the auth-health probe skip the network until it passes. The
-  daemon's 3-minute auth-health warm probes every installed version home in one
-  batch, so a box with several accounts could previously hold itself inside a
-  45-minute penalty window indefinitely and never refresh its cache — measured on
-  `yosemite-s1`, `retry-after: 2678` on all five accounts at once, with the
-  credentials reading healthy.
+  the usage fetch and the auth-health probe skip the network until it passes.
+  Backoff is the second layer; the first is that the daemon's 3-minute
+  auth-health warm now probes once per (network-probing agent, account) rather
+  than once per installed version home (`groupFleetAuthInstalls`, RUSH-2111), so
+  several homes signed into one account no longer fire concurrent same-account
+  requests that raced the rate limit in the first place — measured on
+  `yosemite-s1` before the fix, `retry-after: 2678` on all five accounts at once,
+  with the credentials reading healthy.
 - **A read that fails on the credential names the reason.** No readable
   credential, a locally-expired one, a rejected request, and a request that threw
   are distinct errors (`usageNoCredentialError` / `usageExpiredCredentialError` /
