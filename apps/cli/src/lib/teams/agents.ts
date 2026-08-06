@@ -35,7 +35,8 @@ import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { pullRemoteLogDelta, REMOTE_MIRROR_MAX_BYTES } from '../hosts/progress.js';
 import { createRemoteWorktree, ensureRemoteRepo } from './remoteWorktree.js';
 import { getTeam } from './registry.js';
-import { resolvePlacement, cappedDevices } from './scheduler.js';
+import { resolvePlacement, classifyExclusions, NoViableDeviceError } from './scheduler.js';
+import { probePoolSignals } from './placement-probe.js';
 import { readMaxConcurrentCaps } from '../device-config.js';
 import chalk from 'chalk';
 
@@ -2079,22 +2080,88 @@ export class AgentManager {
    * (immediate add-launch) and startReady() (staged launch) so an unpinned pool
    * teammate schedules identically no matter how it was fired.
    */
-  private async maybeSchedulePlacement(agent: AgentProcess, taskName: string): Promise<void> {
+  private async maybeSchedulePlacement(
+    agent: AgentProcess,
+    taskName: string,
+    opts: { probe?: boolean } = {},
+  ): Promise<void> {
     if (agent.hostName || agent.cloudProvider) return;
     const teamMeta = await getTeam(taskName);
     if (!teamMeta) return;
     const roster = await this.listByTask(taskName);
     const pool = teamMeta.devices ?? [];
     const maxConcurrent = pool.length > 1 ? readMaxConcurrentCaps(pool) : undefined;
-    if (maxConcurrent) {
-      for (const c of cappedDevices(pool, roster, maxConcurrent)) {
-        console.error(chalk.dim(
-          `[placement] '${c.device}' excluded from auto-pick — at its agents.max-concurrent cap (${c.running}/${c.cap} running)`,
-        ));
+    // On the start path (opts.probe), gather live signals so the pick is health-,
+    // harness-, and load-aware (RUSH-2002); the add path stays the cap-only
+    // roster count so `teams add` never blocks on an SSH fan-out. Cached per
+    // (pool, agent), so a wave placing many teammates probes the pool once.
+    const signals =
+      opts.probe && pool.length > 0
+        ? await probePoolSignals(pool, agent.agentType, { now: Date.now() })
+        : undefined;
+    const placeOpts = {
+      maxConcurrent,
+      signals,
+      agentLabel: this.placementAgentLabel(agent),
+    };
+    if (signals) {
+      for (const e of classifyExclusions(pool, roster, placeOpts).excluded) {
+        const why =
+          e.reason === 'capped'
+            ? `at its agents.max-concurrent cap (${e.detail} running)`
+            : e.reason === 'not-installed'
+              ? `does not have ${this.placementAgentLabel(agent)} installed`
+              : e.reason;
+        console.error(chalk.dim(`[placement] '${e.device}' excluded from auto-pick — ${why}`));
       }
     }
-    const { device } = resolvePlacement(teamMeta, null, roster, { maxConcurrent });
+    const { device } = resolvePlacement(teamMeta, null, roster, placeOpts);
     if (device) await this.resolveScheduledPlacement(agent, device, taskName);
+  }
+
+  /** Human label of a teammate's agent for the placement fail-loud message. */
+  private placementAgentLabel(agent: AgentProcess): string {
+    return agent.version ? `${agent.agentType}@${agent.version}` : String(agent.agentType);
+  }
+
+  /**
+   * Pre-flight the team pool at `teams start` (RUSH-2002): probe the pool and
+   * confirm each distinct agent among the pending, unpinned, pooled teammates
+   * has at least one viable device. Returns the first {@link NoViableDeviceError}
+   * so the command can fail loud BEFORE launching a wave, rather than silently
+   * leaving teammates stranded pending. A poolless team (no `--devices`) or a
+   * probe that could not gather positive evidence returns null — fail-loud fires
+   * only on proof that no device can run the agent, never on a probe miss.
+   */
+  async preflightPlacement(taskName: string): Promise<NoViableDeviceError | null> {
+    await this.initialize();
+    const teamMeta = await getTeam(taskName);
+    const pool = teamMeta?.devices ?? [];
+    if (!teamMeta || pool.length === 0) return null;
+    const roster = await this.listByTask(taskName);
+    const pending = roster.filter(
+      (a) => a.status === AgentStatus.PENDING && !a.hostName && !a.cloudProvider,
+    );
+    if (pending.length === 0) return null;
+    const maxConcurrent = pool.length > 1 ? readMaxConcurrentCaps(pool) : undefined;
+    // One representative teammate per distinct agent type — the signal + gate is
+    // per harness, not per teammate.
+    const byAgent = new Map<string, AgentProcess>();
+    for (const a of pending) if (!byAgent.has(a.agentType)) byAgent.set(a.agentType, a);
+    for (const [, rep] of byAgent) {
+      const signals = await probePoolSignals(pool, rep.agentType, { now: Date.now() });
+      try {
+        resolvePlacement(teamMeta, null, roster, {
+          maxConcurrent,
+          signals,
+          agentLabel: this.placementAgentLabel(rep),
+        });
+      } catch (err) {
+        if (err instanceof NoViableDeviceError) return err;
+        throw err;
+      }
+    }
+    return null;
   }
 
   /**
@@ -2196,8 +2263,11 @@ export class AgentManager {
       // immediate-add and staged paths agree. A null pick keeps hostName null →
       // local spawn, unchanged. Cloud teammates never schedule.
       try {
-        await this.maybeSchedulePlacement(agent, taskName);
+        await this.maybeSchedulePlacement(agent, taskName, { probe: true });
       } catch (err) {
+        // A NoViableDeviceError means the pool cannot host this teammate right
+        // now — leave it PENDING (never a silent local fallback) and surface the
+        // reason; a transient device loss is retried next wave.
         console.error(`Could not schedule ${agent.agentId} onto the team pool:`, err);
         continue;
       }

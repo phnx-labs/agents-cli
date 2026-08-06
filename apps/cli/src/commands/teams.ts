@@ -2065,6 +2065,29 @@ export function registerTeamsCommands(program: Command): void {
         await warnThrottledTeammates(mgr, team);
       }
 
+      // Health-/harness-aware pre-flight (RUSH-2002): if the team declares a
+      // device pool and no device in it can run a pending teammate's agent, fail
+      // loud here rather than launching a wave that strands teammates pending.
+      // --force downgrades it to a warning so the user can still try.
+      const placementError = await mgr.preflightPlacement(team);
+      if (placementError) {
+        if (isJsonMode(opts)) {
+          console.log(JSON.stringify({
+            team,
+            error: 'no-viable-device',
+            message: placementError.message,
+            excluded: placementError.excluded,
+          }));
+          if (!opts.force) { process.exitCode = 1; return; }
+        } else if (opts.force) {
+          console.error(chalk.yellow(`⚠ ${placementError.message}\n  Continuing anyway (--force).`));
+        } else {
+          console.error(chalk.red(placementError.message));
+          process.exitCode = 1;
+          return;
+        }
+      }
+
       emit('teams.start', { module: 'teams', team, watch: Boolean(opts.watch) });
 
       if (!opts.watch) {

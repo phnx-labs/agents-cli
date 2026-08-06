@@ -297,17 +297,37 @@ agents teams start feat --watch
 ```bash
 agents teams create feat --devices zion,yosemite-s0,yosemite-s1 \
   --repo https://github.com/you/your-repo.git
-agents teams add feat claude "..." --name w1                    # auto-scheduled (least-loaded)
+agents teams add feat claude "..." --name w1                    # auto-scheduled (best viable device)
 agents teams add feat claude "..." --name w2 --device yosemite-s1   # or pin
 agents teams start feat --watch
 ```
 
 **Where a teammate runs** — resolved at launch, top-down:
 
-1. teammate has `--device X` → **X** (explicit pin — no pool required)
+1. teammate has `--device X` → **X** (explicit pin — no pool required, never second-guessed)
 2. else the team pool is a **single** device → that device (whole team there)
-3. else the team pool has **many** devices → **auto-scheduled** (least-loaded)
+3. else the team pool has **many** devices → **auto-scheduled** (best viable device)
 4. else (no pin, no pool) → **local**, exactly like today
+
+**Auto-scheduling is health-, harness-, and load-aware (RUSH-2002).** At
+`teams start` the pool is probed once (reachability + load via the same snapshot
+`agents devices` shows, plus whether the teammate's agent is installed there), and
+the pick:
+
+- **excludes** an unreachable device, an overloaded one (`loaded` headroom), a
+  device at its `agents.max-concurrent` cap, and one the agent is not installed on;
+- **ranks** the survivors by (a) agent installed **and signed in**, (b) lower load
+  (idle beats busy), (c) fewer running teammates on that device.
+
+If **no** pool device can run a pending teammate's agent, `teams start` **fails
+loud** — e.g. `No device in the team pool can run claude@2.1.112. Run 'agents
+devices ping' to see which devices have the agent installed + signed in.` —
+instead of stranding the teammate; it never silently falls back to a local run you
+did not ask for. Pass
+`--force` to downgrade that to a warning and start anyway. A probe that simply
+could not reach the pool (no positive evidence) does **not** trigger the failure —
+the real error then surfaces at the SSH dispatch. Set a per-device cap with
+`agents devices configure <name> --max-agents N`.
 
 **Repo provisioning.** The team's `--repo` (defaulting to the local checkout's
 `origin`) is used to ensure the code is present on each device — an existing

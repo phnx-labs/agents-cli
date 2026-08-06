@@ -7,11 +7,25 @@
  * short-circuit never fires, keeping assertions host-independent.
  */
 import { describe, it, expect } from 'vitest';
-import { resolvePlacement, pickLeastLoaded, cappedDevices, type RosterEntry } from './scheduler.js';
+import {
+  resolvePlacement,
+  pickLeastLoaded,
+  pickBestDevice,
+  cappedDevices,
+  classifyExclusions,
+  NoViableDeviceError,
+  formatNoViableMessage,
+  type RosterEntry,
+  type DevicePlacementSignal,
+} from './scheduler.js';
 import { machineId } from '../machine-id.js';
 
 const running = (hostName: string | null): RosterEntry => ({ hostName, status: 'running' });
 const done = (hostName: string | null): RosterEntry => ({ hostName, status: 'completed' });
+
+/** Build a signals map from a plain object of device → partial signal. */
+const sig = (m: Record<string, DevicePlacementSignal>): Map<string, DevicePlacementSignal> =>
+  new Map(Object.entries(m));
 
 describe('resolvePlacement cascade', () => {
   it('1. explicit pin wins even with no pool', () => {
@@ -147,5 +161,197 @@ describe('local teammates count against the local pool member', () => {
     // Today’s behavior preserved: roster entries outside the pool never skew it.
     const roster = [running(null), running('box-b')];
     expect(pickLeastLoaded(['box-a', 'box-b'], roster)).toBe('box-a');
+  });
+});
+
+describe('classifyExclusions — health/harness filters (RUSH-2002)', () => {
+  it('excludes an unreachable device, keeps reachable ones', () => {
+    const { eligible, excluded } = classifyExclusions(['box-a', 'box-b'], [], {
+      signals: sig({ 'box-a': { reachable: false }, 'box-b': { reachable: true } }),
+    });
+    expect(eligible).toEqual(['box-b']);
+    expect(excluded).toEqual([{ device: 'box-a', reason: 'unreachable' }]);
+  });
+
+  it('excludes an overloaded (headroom=loaded) device', () => {
+    const { eligible, excluded } = classifyExclusions(['box-a', 'box-b'], [], {
+      signals: sig({ 'box-a': { headroom: 'loaded' }, 'box-b': { headroom: 'idle' } }),
+    });
+    expect(eligible).toEqual(['box-b']);
+    expect(excluded).toEqual([{ device: 'box-a', reason: 'overloaded' }]);
+  });
+
+  it('excludes a device the agent is not installed on', () => {
+    const { eligible, excluded } = classifyExclusions(['box-a', 'box-b'], [], {
+      signals: sig({ 'box-a': { installed: false }, 'box-b': { installed: true } }),
+    });
+    expect(eligible).toEqual(['box-b']);
+    expect(excluded).toEqual([{ device: 'box-a', reason: 'not-installed' }]);
+  });
+
+  it('folds the cap check in alongside signals, with running/cap detail', () => {
+    const roster = [running('box-a'), running('box-a')];
+    const { eligible, excluded } = classifyExclusions(['box-a', 'box-b'], roster, {
+      maxConcurrent: { 'box-a': 2 },
+      signals: sig({ 'box-a': { reachable: true }, 'box-b': { reachable: true } }),
+    });
+    expect(eligible).toEqual(['box-b']);
+    expect(excluded).toEqual([{ device: 'box-a', reason: 'capped', detail: '2/2' }]);
+  });
+
+  it('a device with no signal is neither excluded nor filtered', () => {
+    const { eligible, excluded } = classifyExclusions(['box-a', 'box-b'], [], {
+      signals: sig({ 'box-a': { reachable: false } }), // box-b has no signal
+    });
+    expect(eligible).toEqual(['box-b']);
+    expect(excluded).toEqual([{ device: 'box-a', reason: 'unreachable' }]);
+  });
+
+  it('reports the most fundamental blocker first (unreachable over not-installed)', () => {
+    const { excluded } = classifyExclusions(['box-a'], [], {
+      signals: sig({ 'box-a': { reachable: false, installed: false } }),
+    });
+    expect(excluded).toEqual([{ device: 'box-a', reason: 'unreachable' }]);
+  });
+});
+
+describe('pickBestDevice — health/harness/load ranking (RUSH-2002)', () => {
+  it('prefers a signed-in device over a merely installed one', () => {
+    const signals = sig({
+      'box-a': { installed: true, signedIn: false, headroom: 'idle' },
+      'box-b': { installed: true, signedIn: true, headroom: 'idle' },
+    });
+    expect(pickBestDevice(['box-a', 'box-b'], [], { signals })).toBe('box-b');
+  });
+
+  it('prefers a less-loaded device (headroom tier) over a busier one', () => {
+    const signals = sig({
+      'box-a': { headroom: 'busy' },
+      'box-b': { headroom: 'idle' },
+    });
+    expect(pickBestDevice(['box-a', 'box-b'], [], { signals })).toBe('box-b');
+  });
+
+  it('load tier outranks teammate count', () => {
+    // box-a is idle but already has a teammate; box-b is busy and empty.
+    // Lower load (tier) wins over fewer teammates per the ranking order.
+    const roster = [running('box-a')];
+    const signals = sig({
+      'box-a': { headroom: 'idle' },
+      'box-b': { headroom: 'busy' },
+    });
+    expect(pickBestDevice(['box-a', 'box-b'], roster, { signals })).toBe('box-a');
+  });
+
+  it('within the same headroom tier, fewer running teammates wins', () => {
+    const roster = [running('box-a')];
+    const signals = sig({
+      'box-a': { headroom: 'idle' },
+      'box-b': { headroom: 'idle' },
+    });
+    expect(pickBestDevice(['box-a', 'box-b'], roster, { signals })).toBe('box-b');
+  });
+
+  it('same tier + same teammates → lower raw load cost wins', () => {
+    const signals = sig({
+      'box-a': { headroom: 'light', loadPercent: 30 },
+      'box-b': { headroom: 'light', loadPercent: 20 },
+    });
+    expect(pickBestDevice(['box-a', 'box-b'], [], { signals })).toBe('box-b');
+  });
+
+  it('an unprobed box ranks between light and busy', () => {
+    const signals = sig({ 'box-a': { headroom: 'busy' } }); // box-b unknown
+    expect(pickBestDevice(['box-a', 'box-b'], [], { signals })).toBe('box-b');
+    const signals2 = sig({ 'box-a': { headroom: 'light' } }); // box-b unknown
+    expect(pickBestDevice(['box-a', 'box-b'], [], { signals: signals2 })).toBe('box-a');
+  });
+
+  it('throws NoViableDeviceError naming each reason when nothing survives', () => {
+    const signals = sig({
+      'box-a': { reachable: false },
+      'box-b': { headroom: 'loaded' },
+    });
+    let caught: unknown;
+    try {
+      pickBestDevice(['box-a', 'box-b'], [], { signals, agentLabel: 'claude@2.1.112' });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(NoViableDeviceError);
+    const err = caught as NoViableDeviceError;
+    expect(err.excluded).toEqual([
+      { device: 'box-a', reason: 'unreachable' },
+      { device: 'box-b', reason: 'overloaded' },
+    ]);
+    expect(err.message).toContain('box-a (unreachable)');
+    expect(err.message).toContain('box-b (overloaded)');
+  });
+
+  it('fail-loud message for an all-not-installed pool names the agent + accounts hint', () => {
+    const msg = formatNoViableMessage(
+      [
+        { device: 'box-a', reason: 'not-installed' },
+        { device: 'box-b', reason: 'not-installed' },
+      ],
+      'claude@2.1.112',
+    );
+    expect(msg).toContain('No device in the team pool can run claude@2.1.112.');
+    expect(msg).toContain('agents devices ping');
+  });
+});
+
+describe('resolvePlacement with live signals (RUSH-2002)', () => {
+  it('many-device pool picks the best viable device', () => {
+    const signals = sig({
+      'box-a': { reachable: true, headroom: 'busy', installed: true },
+      'box-b': { reachable: true, headroom: 'idle', installed: true },
+    });
+    expect(resolvePlacement({ devices: ['box-a', 'box-b'] }, null, [], { signals })).toEqual({
+      device: 'box-b',
+    });
+  });
+
+  it('many-device pool fails loud (throws) when no device can run the agent', () => {
+    const signals = sig({
+      'box-a': { installed: false },
+      'box-b': { installed: false },
+    });
+    expect(() =>
+      resolvePlacement({ devices: ['box-a', 'box-b'] }, null, [], {
+        signals,
+        agentLabel: 'claude@2.1.112',
+      }),
+    ).toThrow(NoViableDeviceError);
+  });
+
+  it('pool of one fails loud when the agent is not installed there', () => {
+    const signals = sig({ 'box-a': { installed: false } });
+    expect(() =>
+      resolvePlacement({ devices: ['box-a'] }, null, [], { signals, agentLabel: 'claude@2.1.112' }),
+    ).toThrow(/No device in the team pool can run claude@2.1.112/);
+  });
+
+  it('pool of one is respected for load/reachability (only harness fails it)', () => {
+    // box-a is overloaded but it is the sole pool device and the agent is
+    // installed → respect the user's choice, do not second-guess load.
+    const signals = sig({ 'box-a': { installed: true, headroom: 'loaded' } });
+    expect(resolvePlacement({ devices: ['box-a'] }, null, [], { signals })).toEqual({
+      device: 'box-a',
+    });
+  });
+
+  it('an explicit pin is never second-guessed, even when signals mark it unusable', () => {
+    const signals = sig({ 'box-a': { installed: false, reachable: false } });
+    expect(resolvePlacement({ devices: ['box-a', 'box-b'] }, 'box-a', [], { signals })).toEqual({
+      device: 'box-a',
+    });
+  });
+
+  it('without signals, a many-device pool stays the pure roster-count pick', () => {
+    const roster = [running('box-a')];
+    expect(resolvePlacement({ devices: ['box-a', 'box-b'] }, null, roster)).toEqual({
+      device: 'box-b',
+    });
   });
 });
