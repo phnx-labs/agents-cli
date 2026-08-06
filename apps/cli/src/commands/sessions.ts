@@ -2300,7 +2300,11 @@ async function sessionsAction(
 
   // Artifact-list or artifact-read paths: widen scope and resolve session globally.
   if ((options.artifacts || options.artifact !== undefined) && searchQuery) {
-    await renderArtifactsGlobal(searchQuery, options.artifacts ?? false, options.artifact, { agent: options.agent, project: options.project });
+    await renderArtifactsGlobal(searchQuery, options.artifacts ?? false, options.artifact, {
+      agent: options.agent,
+      project: options.project,
+      routine: options.routine,
+    });
     return;
   }
 
@@ -4257,7 +4261,7 @@ async function renderArtifactsGlobal(
   query: string,
   listAll: boolean,
   name: string | undefined,
-  scope: { agent?: string; project?: string },
+  scope: { agent?: string; project?: string; routine?: boolean | string },
 ): Promise<void> {
   const spinner = ora().start();
   const tracker = createScanProgressTracker(FIND_VERBS, 'session', spinner);
