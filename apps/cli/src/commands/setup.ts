@@ -29,7 +29,7 @@ import { registerSetupSecretsCommand } from './setup-secrets.js';
 import { registerSetupFleetCommand } from './setup-fleet.js';
 import { registerSetupWatchdogCommand, runWatchdogSetupWizard } from './setup-watchdog.js';
 import { runPreferencesStep } from './setup-preferences.js';
-import { getConfiguredDefaultProfileName, getProfile, DEFAULT_BROWSER_PROFILE_NAME } from '../lib/browser/profiles.js';
+import { getConfiguredDefaultProfileName, getProfile, isProfileLaunchableHere, DEFAULT_BROWSER_PROFILE_NAME } from '../lib/browser/profiles.js';
 import { listInstalledBrowsers } from '../lib/browser/chrome.js';
 import { probeComputerTrust } from './computer.js';
 import { readShareConfig } from '../lib/share/config.js';
@@ -290,6 +290,7 @@ export interface SetupStatusRow {
 export async function getSetupStatus(): Promise<SetupStatusRow[]> {
   const configuredBrowserProfile = getConfiguredDefaultProfileName();
   const browserProfile = await getProfile(configuredBrowserProfile ?? DEFAULT_BROWSER_PROFILE_NAME);
+  const browserReady = browserProfile !== null && isProfileLaunchableHere(browserProfile);
   const installedBrowsers = listInstalledBrowsers();
   const computerState = process.platform === 'darwin' ? (await probeComputerTrust() ? 'ready' : 'missing') : 'n/a';
   const devices = await loadDevices();
@@ -301,7 +302,7 @@ export async function getSetupStatus(): Promise<SetupStatusRow[]> {
   const defaultBrowser = getConfigValue('browser.profile').value;
   return [
     { phase: 'core', state: coreReady ? 'ready' : 'missing', detail: coreReady ? 'system repo ready' : 'system repo missing' },
-    { phase: 'browser', state: browserProfile ? 'ready' : 'missing', detail: browserProfile ? `profile ${browserProfile.name}` : installedBrowsers.length ? 'no default profile' : 'no supported browser found' },
+    { phase: 'browser', state: browserReady ? 'ready' : 'missing', detail: browserReady ? `profile ${browserProfile.name}` : browserProfile ? `profile ${browserProfile.name} cannot launch here` : installedBrowsers.length ? 'no default profile' : 'no supported browser found' },
     { phase: 'computer', state: computerState, detail: computerState === 'ready' ? 'helper trusted' : computerState === 'n/a' ? 'macOS local setup only' : 'helper not running or not trusted' },
     { phase: 'secrets', state: secretsReady ? 'ready' : 'missing', detail: secretsReady ? 'defaults chosen' : 'defaults not chosen' },
     { phase: 'fleet', state: Object.keys(devices).length ? 'ready' : 'missing', detail: Object.keys(devices).length ? `${Object.keys(devices).length} device${Object.keys(devices).length === 1 ? '' : 's'} registered` : 'no devices registered' },

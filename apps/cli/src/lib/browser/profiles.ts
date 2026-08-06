@@ -115,7 +115,7 @@ export async function getProfile(name: string): Promise<BrowserProfile | null> {
  * "Custom binary not found" failure) fails this check so the caller re-detects
  * for the current machine.
  */
-function isProfileLaunchableHere(profile: BrowserProfile): boolean {
+export function isProfileLaunchableHere(profile: BrowserProfile): boolean {
   const remote = Object.values(getEndpointPresets(profile)).some((preset) =>
     preset.target.startsWith('ssh://')
   );

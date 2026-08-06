@@ -81,6 +81,22 @@ describe('agents setup command group', () => {
     expect(rows.find((row) => row.phase === 'browser')).toMatchObject({ state: 'ready', detail: 'profile work' });
   });
 
+  it('reports a configured browser profile with a missing binary as unavailable', async () => {
+    const { updateProfile } = await import('../lib/browser/profiles.js');
+    await updateProfile({
+      name: 'work',
+      browser: 'custom',
+      binary: path.join(TEST_HOME, 'missing-browser'),
+      endpoints: ['cdp://127.0.0.1:9333'],
+      viewport: { width: 1280, height: 720 },
+    });
+    const rows = await getSetupStatus();
+    expect(rows.find((row) => row.phase === 'browser')).toMatchObject({
+      state: 'missing',
+      detail: 'profile work cannot launch here',
+    });
+  });
+
   it('prints status, returns without prompting, and exits nonzero for missing phases outside a TTY', async () => {
     let selected = false;
     try {
