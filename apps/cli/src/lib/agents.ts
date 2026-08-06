@@ -406,14 +406,22 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     instructionsFile: 'workspace/AGENTS.md', // Primary memory file (also has SOUL.md, IDENTITY.md, etc.)
     format: 'markdown',
     variableSyntax: '{{ARGUMENTS}}',
-    supportsHooks: true,
+    // hooks: NOT supported. OpenClaw only exposes a fixed set of internal,
+    // named hooks (e.g. `boot-md`, which runs BOOT.md on gateway restart) —
+    // there is no general event->shell-command registration surface (no
+    // PreToolUse/PostToolUse/UserPromptSubmit equivalent an agents-cli
+    // hooks.yaml manifest could target). registerHooksToSettings has no
+    // `openclaw` case and silently no-ops (RUSH-2122: capability claimed
+    // hooks:true with zero hooks ever installed). Flip back to `true` only
+    // alongside a real registerHooksForOpenClaw implementation.
+    supportsHooks: false,
     // allowlist: maps blanket (whole-tool) rules to ~/.openclaw/openclaw.json
     // tools.alsoAllow (allow) / tools.deny (deny). OpenClaw gates at tool
     // granularity only, so sub-command/path/domain patterns are skipped.
     // OpenClaw is self-updating (no pinned since), so `true` is correct.
     // Workflows sync as Lobster `.lobster` files under `.openclaw/workflows/`;
     // the Lobster tool runs them by receiving the file path as `pipeline`.
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: false, plugins: true, subagents: true, rules: { file: 'workspace/AGENTS.md' }, workflows: true, memory: true, modes: ['plan', 'edit', 'skip'], interactiveRepl: true },
+    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: false, plugins: true, subagents: true, rules: { file: 'workspace/AGENTS.md' }, workflows: true, memory: true, modes: ['plan', 'edit', 'skip'], interactiveRepl: true },
   },
   copilot: {
     id: 'copilot',

@@ -204,11 +204,14 @@ describe('isCapable()', () => {
 });
 
 describe('capableAgents()', () => {
-  it('includes claude/codex/openclaw for hooks and excludes hard-deprecated gemini', () => {
+  it('includes claude/codex for hooks, excludes openclaw (no registrar) and hard-deprecated gemini', () => {
     const agents = capableAgents('hooks');
     expect(agents).toContain('claude');
     expect(agents).toContain('codex');
-    expect(agents).toContain('openclaw');
+    // OpenClaw only exposes fixed internal hooks (e.g. boot-md), not a
+    // general event->shell-command registration surface, and
+    // registerHooksToSettings has no 'openclaw' branch — RUSH-2122.
+    expect(agents).not.toContain('openclaw');
     expect(agents).not.toContain('gemini');
   });
 
