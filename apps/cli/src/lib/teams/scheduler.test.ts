@@ -288,6 +288,25 @@ describe('pickBestDevice — health/harness/load ranking (RUSH-2002)', () => {
     expect(err.message).toContain('box-b (overloaded)');
   });
 
+  it('an ALL-UNREACHABLE pool degrades (does not throw) — a probe miss, not proof', () => {
+    // Every device unreachable is a transient SSH blip, not proof the agent
+    // can't run there. Degrade to a best-effort roster-count pick so the wave
+    // retries and the real error surfaces at SSH dispatch.
+    const roster = [running('box-a')];
+    const signals = sig({ 'box-a': { reachable: false }, 'box-b': { reachable: false } });
+    // box-a has a teammate, box-b is idle → the roster-count fallback picks box-b.
+    expect(pickBestDevice(['box-a', 'box-b'], roster, { signals, agentLabel: 'claude' })).toBe(
+      'box-b',
+    );
+  });
+
+  it('unreachable MIXED with a hard reason still fails loud', () => {
+    const signals = sig({ 'box-a': { reachable: false }, 'box-b': { installed: false } });
+    expect(() =>
+      pickBestDevice(['box-a', 'box-b'], [], { signals, agentLabel: 'claude@2.1.112' }),
+    ).toThrow(NoViableDeviceError);
+  });
+
   it('fail-loud message for an all-not-installed pool names the agent + accounts hint', () => {
     const msg = formatNoViableMessage(
       [
@@ -346,6 +365,18 @@ describe('resolvePlacement with live signals (RUSH-2002)', () => {
     expect(resolvePlacement({ devices: ['box-a', 'box-b'] }, 'box-a', [], { signals })).toEqual({
       device: 'box-a',
     });
+  });
+
+  it('an all-unreachable pool does NOT fail loud — it degrades to a placement', () => {
+    const signals = sig({ 'box-a': { reachable: false }, 'box-b': { reachable: false } });
+    const { device } = resolvePlacement({ devices: ['box-a', 'box-b'] }, null, [], {
+      signals,
+      agentLabel: 'claude@2.1.112',
+    });
+    // A device was still chosen (SSH dispatch will surface the real error) —
+    // never a silent local (null) fallback.
+    expect(device).not.toBeNull();
+    expect(['box-a', 'box-b']).toContain(device);
   });
 
   it('without signals, a many-device pool stays the pure roster-count pick', () => {

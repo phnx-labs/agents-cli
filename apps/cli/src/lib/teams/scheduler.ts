@@ -127,9 +127,12 @@ export function formatNoViableMessage(excluded: ExcludedDevice[], agentLabel?: s
   const head = anyNotInstalled
     ? `No device in the team pool can run ${agent}.`
     : `No viable device in the team pool for ${agent}.`;
+  const anyUnreachable = excluded.some((e) => e.reason === 'unreachable');
   const hint = anyNotInstalled
     ? " Run 'agents devices ping' to see which devices have the agent installed + signed in, or add the agent to a pool device."
-    : ' Add a device to the pool, raise a cap, or bring an overloaded box under load.';
+    : anyUnreachable
+      ? " Add a device to the pool, raise a cap, or wait for the pool to free up / come back online ('agents devices ping')."
+      : ' Add a device to the pool, raise a cap, or bring an overloaded box under load.';
   return `${head} ${perDevice}.${hint}`;
 }
 
@@ -306,11 +309,31 @@ export function pickBestDevice(
   if (devices.length === 0) {
     throw new Error('pickBestDevice called with an empty device pool');
   }
+  const load = loadByDevice(devices, roster);
   const { eligible, excluded } = classifyExclusions(devices, roster, opts);
   if (eligible.length === 0) {
-    throw new NoViableDeviceError(excluded, opts?.agentLabel);
+    // A pool excluded ONLY for unreachability is a probe MISS / transient infra
+    // blip (a worker went briefly unresponsive during `teams start`), not proof
+    // the agent can't RUN there. Per the fail-loud contract — fire only on
+    // positive evidence (not-installed / saturated), never on a bare
+    // reachability miss — degrade to a best-effort roster-count pick so the wave
+    // retries and the real error surfaces at SSH dispatch, instead of a hard
+    // exit-1 that strands an all-remote pool on a transient blip.
+    const onlyUnreachable = excluded.every((e) => e.reason === 'unreachable');
+    if (!onlyUnreachable) {
+      throw new NoViableDeviceError(excluded, opts?.agentLabel);
+    }
+    let fallback = devices[0];
+    let fallbackLoad = load.get(fallback) ?? 0;
+    for (const d of devices) {
+      const l = load.get(d) ?? 0;
+      if (l < fallbackLoad) {
+        fallback = d;
+        fallbackLoad = l;
+      }
+    }
+    return fallback;
   }
-  const load = loadByDevice(devices, roster);
   const signals = opts?.signals;
   const order = new Map(devices.map((d, i) => [d, i]));
   // Ascending composite sort — the first element is the best placement.
