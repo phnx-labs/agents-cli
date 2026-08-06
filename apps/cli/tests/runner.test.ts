@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
@@ -175,20 +175,15 @@ describe('buildJobCommand', () => {
       ]);
     });
 
-    it('warns when the stale registry degrades plan mode to writable edit', () => {
-      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    it('builds the exact plan mode command with --plan', () => {
       expect(buildJobCommand(makeConfig({ agent: 'cursor', mode: 'plan' }), 'hello')).toEqual([
         'cursor-agent',
         '-p',
         'hello',
         '--output-format',
         'stream-json',
-        '--trust',
+        '--plan',
       ]);
-      expect(stderr).toHaveBeenCalledWith(
-        "[agents] routine test-job: cursor's read-only plan mode is not enabled in this build; running 'edit' (writable) instead (RUSH-2101). Pass --mode edit to silence this.\n",
-      );
-      stderr.mockRestore();
     });
 
     it('adds --model when config.model is set', () => {
