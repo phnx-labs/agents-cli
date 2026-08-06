@@ -52,9 +52,52 @@ export function parseRunResult(raw: unknown): BenchRunResult {
   string(value.prompt, "bench result prompt");
   string(value.started_at, "bench result started_at");
   string(value.finished_at, "bench result finished_at");
+  if (value.task_id !== undefined)
+    string(value.task_id, "bench result task_id");
   if (!Array.isArray(value.cells))
     throw new Error("bench result cells must be an array");
+  value.cells.forEach((rawCell, index) => {
+    const cell = object(rawCell, `bench result cells[${index}]`);
+    string(cell.agent, `bench result cells[${index}].agent`);
+    if (cell.model !== undefined)
+      string(cell.model, `bench result cells[${index}].model`);
+    if (cell.status !== "passed" && cell.status !== "failed")
+      throw new Error(
+        `bench result cells[${index}].status must be passed or failed`,
+      );
+    if (
+      cell.exit !== null &&
+      (!Number.isInteger(cell.exit) || (cell.exit as number) < 0)
+    )
+      throw new Error(
+        `bench result cells[${index}].exit must be a non-negative integer or null`,
+      );
+    if (
+      typeof cell.wall_ms !== "number" ||
+      !Number.isFinite(cell.wall_ms) ||
+      cell.wall_ms < 0
+    )
+      throw new Error(
+        `bench result cells[${index}].wall_ms must be a non-negative number`,
+      );
+    if (
+      cell.tokens !== undefined &&
+      (!Number.isSafeInteger(cell.tokens) || (cell.tokens as number) < 0)
+    )
+      throw new Error(
+        `bench result cells[${index}].tokens must be a non-negative integer`,
+      );
+    if (typeof cell.stdout !== "string" || typeof cell.stderr !== "string")
+      throw new Error(
+        `bench result cells[${index}] stdout and stderr must be strings`,
+      );
+  });
   return value as unknown as BenchRunResult;
+}
+export function validateRunId(runId: string): string {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(runId))
+    throw new Error(`Invalid run id: ${runId}`);
+  return runId;
 }
 export function loadTask(taskId: string, tasksRoot: string): BenchTask {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(taskId))

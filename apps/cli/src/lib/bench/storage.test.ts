@@ -25,5 +25,9 @@ describe("bench result storage", () => {
   });
   it("does not allow a run id to escape the result directory", () => {
     expect(() => loadRun("../outside", "/tmp/nope")).toThrow("Invalid run id");
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "bench-storage-"));
+    expect(() =>
+      saveRun(result("../outside", "2026-08-05T01:00:00.000Z"), root),
+    ).toThrow("Invalid run id");
   });
 });

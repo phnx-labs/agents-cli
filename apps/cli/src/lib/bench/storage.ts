@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { getUserAgentsDir } from "../state.js";
-import { parseRunResult } from "./schema.js";
+import { parseRunResult, validateRunId } from "./schema.js";
 import type { BenchRunResult } from "./types.js";
 export function benchHistoryDir(): string {
   return path.join(getUserAgentsDir(), ".history", "bench");
@@ -10,6 +10,8 @@ export function saveRun(
   result: BenchRunResult,
   root = benchHistoryDir(),
 ): string {
+  parseRunResult(result);
+  validateRunId(result.run_id);
   fs.mkdirSync(root, { recursive: true });
   const target = path.join(root, `${result.run_id}.json`);
   const temporary = `${target}.${process.pid}.tmp`;
@@ -23,8 +25,7 @@ export function loadRun(
   runId: string,
   root = benchHistoryDir(),
 ): BenchRunResult {
-  if (!/^[a-zA-Z0-9._-]+$/.test(runId))
-    throw new Error(`Invalid run id: ${runId}`);
+  validateRunId(runId);
   return parseRunResult(
     JSON.parse(fs.readFileSync(path.join(root, `${runId}.json`), "utf8")),
   );

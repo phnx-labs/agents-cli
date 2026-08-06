@@ -31,5 +31,15 @@ describe("bench schemas", () => {
     expect(() => parseRunResult({ schema_version: 2 })).toThrow(
       "schema_version",
     );
+    expect(() =>
+      parseRunResult({
+        schema_version: 1,
+        run_id: "r",
+        prompt: "p",
+        started_at: "s",
+        finished_at: "f",
+        cells: [{ agent: "codex", status: "passed" }],
+      }),
+    ).toThrow("exit");
   });
 });
