@@ -2,8 +2,6 @@
 
 ## 1.22.26
 
-- Add `agents bench list`, `agents bench run`, and `agents bench results`: benchmark cells fan out through the existing `agents run` path with isolated fixture copies, bounded concurrency, custom harness names, wall-time/exit capture, and durable JSON results under `~/.agents/.history/bench/` (RUSH-2302, RUSH-2303).
-
 - Make bare `agents setup` a re-runnable onboarding hub with live capability status and direct access to browser, computer, secrets, fleet, share, watchdog, and preference wizards.
 
 - **`agents apply --provision-secrets` pushes the manifest's declared secrets
