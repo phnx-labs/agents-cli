@@ -6,6 +6,7 @@ import {
   buildRemoteVersionCommand,
   buildBootstrapCommand,
   buildReadyProbeCommand,
+  type ReadyProbe,
 } from './ready.js';
 import { decodePowershell } from './remote-cmd.js';
 
@@ -17,6 +18,28 @@ function decodeWindows(cmd: string): string {
   expect(m, `not an encoded PowerShell command: ${cmd}`).not.toBeNull();
   return decodePowershell(m![1]);
 }
+
+describe('ReadyProbe.timedOut — timeout vs unreachable distinction', () => {
+  it('timedOut is absent on a successful probe', () => {
+    const p: ReadyProbe = parseReadyProbe(`2.1.170\n${MARK}\nClaude\n`);
+    expect(p.timedOut).toBeUndefined();
+    expect(p.reachable).toBe(true);
+  });
+
+  it('timedOut is absent on a probe that got a non-timeout empty response', () => {
+    // ssh connected but the sentinel never came (auth failure, wrong command, etc.)
+    const p: ReadyProbe = parseReadyProbe('');
+    expect(p.timedOut).toBeUndefined();
+    expect(p.reachable).toBe(false);
+  });
+
+  it('timedOut probe is not reachable and carries the flag', () => {
+    // Simulates what readyProbe() returns when r.timedOut is true.
+    const p: ReadyProbe = { reachable: false, version: null, view: '', timedOut: true };
+    expect(p.reachable).toBe(false);
+    expect(p.timedOut).toBe(true);
+  });
+});
 
 describe('parseReadyProbe', () => {
   it('parses version + agent listing from one compound probe', () => {
