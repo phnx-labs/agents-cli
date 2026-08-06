@@ -859,8 +859,10 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
   // the global `--output-format json`. Autonomy comes from the selected agent
   // profile (`--profile`), not a per-run permission flag, so the single `edit`
   // mode maps to no flags (mirrors hermes). `--model` overrides the base model
-  // (`oz model list`). Native resume continues a server-side conversation by id
-  // (`--conversation <id>`).
+  // (`oz model list`). No `resume`: Oz's `oz agent run --conversation <id>`
+  // continues a SERVER-SIDE conversation by id, and warp is not session-tracked
+  // (absent from SESSION_AGENTS), so agents-cli has no local id to resume from —
+  // declaring it would make nativeResume(warp) true against an unreachable path.
   warp: {
     base: ['oz', 'agent', 'run'],
     promptFlag: '-p',
@@ -869,7 +871,6 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     },
     jsonFlags: ['--output-format', 'json'],
     modelFlag: '--model',
-    resume: { flag: '--conversation' },
   },
 };
 
