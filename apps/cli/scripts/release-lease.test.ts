@@ -66,14 +66,25 @@ function procState(pid: number): string {
 const zombieParents: ChildProcess[] = [];
 
 /**
- * A real, unreaped zombie: a bash that backgrounds a short `sleep` and then
- * blocks without waiting on it, so the exited child sits in the process table
- * with nothing to collect it. That is exactly the shape a SIGKILLed release.sh
- * leaves behind, and `ps -p <pid>` still lists it.
+ * A real, unreaped zombie: a Python parent forks, lets its child exit, and then
+ * deliberately never calls wait(2), so the exited child stays in the process
+ * table. Bash cannot provide this fixture portably because macOS Bash reaps a
+ * completed background job while the shell is still blocked. This is exactly
+ * the shape a SIGKILLed release.sh leaves behind, and `ps -p <pid>` still lists
+ * it.
  */
 function spawnZombie(): number {
   const pidFile = path.join(root, `zombie-${zombieParents.length}.pid`);
-  const parent = spawn('bash', ['-c', `sleep 0.2 & echo $! > "${pidFile}"; sleep 60`], { stdio: 'ignore' });
+  const parent = spawn('python3', ['-c', [
+    'import os, sys, time',
+    'pid = os.fork()',
+    'if pid == 0:',
+    '    os._exit(0)',
+    'with open(sys.argv[1], "w", encoding="utf-8") as f:',
+    '    f.write(str(pid))',
+    'time.sleep(60)',
+  ].join('\n'), pidFile], { stdio: 'ignore' });
+  if (!parent.pid) throw new Error('python3 is required to create the zombie process fixture');
   zombieParents.push(parent);
   for (let i = 0; i < 200; i++) {
     if (fs.existsSync(pidFile)) {
