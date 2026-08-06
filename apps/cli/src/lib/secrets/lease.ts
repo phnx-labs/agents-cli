@@ -60,5 +60,7 @@ export function leaseIsActive(lease: SecretLease, now: number = Date.now()): boo
 
 export function selectLeasedEnv(lease: SecretLease, env: Record<string, string>, now: number = Date.now()): Record<string, string> {
   if (!leaseIsActive(lease, now)) throw new Error(`Secret lease '${lease.id}' has expired.`);
+  const missing = lease.keys.filter((key) => typeof env[key] !== 'string');
+  if (missing.length > 0) throw new Error(`Secret lease '${lease.id}' is missing value(s): ${missing.join(', ')}`);
   return Object.fromEntries(lease.keys.map((key) => [key, env[key]]));
 }

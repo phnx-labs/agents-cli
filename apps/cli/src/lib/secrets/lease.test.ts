@@ -33,6 +33,13 @@ describe('secret lease model', () => {
       .toThrow('Unknown secret lease key(s): B');
   });
 
+  it('fails closed when a leased key is absent from the runtime env', () => {
+    const lease = createSecretLease({
+      id: 'lease-missing', bundle: 'prod', keys: ['A'], availableKeys: ['A'], ttlMs: MIN_LEASE_MS, now: 0,
+    });
+    expect(() => selectLeasedEnv(lease, {}, 1)).toThrow("Secret lease 'lease-missing' is missing value(s): A");
+  });
+
   it('clamps finite durations to the broker hold limits', () => {
     expect(clampLeaseTtlMs(1)).toBe(MIN_LEASE_MS);
     expect(clampLeaseTtlMs(MAX_LEASE_MS + 1)).toBe(MAX_LEASE_MS);
