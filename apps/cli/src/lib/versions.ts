@@ -422,10 +422,19 @@ function skillDirsMatch(src: string, dest: string): boolean {
       if (!fs.existsSync(destPath)) return false;
       if (!skillDirsMatch(srcPath, destPath)) return false;
     } else {
-      if (!fs.existsSync(destPath)) return false;
-      const srcContent = fs.readFileSync(srcPath, 'utf-8');
-      const destContent = fs.readFileSync(destPath, 'utf-8');
-      if (srcContent !== destContent) return false;
+      // Stat-first (RUSH-2320 #2): size mismatch = definitive miss, no reads.
+      // Equal mtimes across different trees are accidental — content-compare
+      // whenever sizes match.
+      let srcStat: fs.Stats;
+      let destStat: fs.Stats;
+      try {
+        srcStat = fs.statSync(srcPath);
+        destStat = fs.statSync(destPath);
+      } catch {
+        return false;
+      }
+      if (srcStat.size !== destStat.size) return false;
+      if (fs.readFileSync(srcPath, 'utf-8') !== fs.readFileSync(destPath, 'utf-8')) return false;
     }
   }
   return true;
@@ -2774,7 +2783,7 @@ export function mergeRepoScopedSelections(repos: string[], cwd: string = process
  *
  * For Gemini: commands are converted from markdown to TOML.
  */
-export function syncResourcesToVersion(agent: AgentId, version: string, selection?: ResourceSelection, options: { projectDir?: string; cwd?: string; force?: boolean } = {}): SyncResult {
+export function syncResourcesToVersion(agent: AgentId, version: string, selection?: ResourceSelection, options: { projectDir?: string; cwd?: string; force?: boolean; available?: AvailableResources } = {}): SyncResult {
   if (isAgentHardDeprecated(agent)) {
     return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [] };
   }
@@ -2796,7 +2805,31 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // Extra DotAgent repos registered via `agents repo add`. Looked up last so
   // project/user/system repos win on name collisions.
   const extraRepos = getEnabledExtraRepos();
-  const available = getAvailableResources(cwd);
+
+  // Project-layer fan-out always runs — even on the early guard hit — so the
+  // `projectSkipped` contract is preserved for callers (RUSH-2320 #4).
+  if (projectAgentsDir) {
+    result.projectSkipped = syncProjectResourcesToAgent(agent, version, projectAgentsDir).skipped;
+  }
+
+  // Fast guard BEFORE getAvailableResources / pattern expansion /
+  // ensureVersionResourcePatterns. Guard needs only loadManifest + isStale
+  // (~6 ms); the work that used to sit ahead of it was ~12.5 ms of the 21.5 ms
+  // guard-hit path and is discarded when nothing changed (RUSH-2320 #4).
+  // Behavior note: a valid manifest implies a prior full sync already wrote
+  // version resource patterns, so skipping ensureVersionResourcePatterns on
+  // the hit path is safe in practice but is not byte-identical to the old
+  // order (that call always wrote missing pattern defaults).
+  if (!userPassedSelection && !options.force) {
+    const manifest = loadManifest(agent, version);
+    if (manifest && !isStale(manifest, agent, version, cwd)) {
+      return { ...result };
+    }
+  }
+
+  // Prefer a caller-supplied inventory (refresh already built one) so multi-
+  // version fan-out does not re-scan resource trees per version (RUSH-2320 #5).
+  const available = options.available ?? getAvailableResources(cwd);
 
   // Write default resource selection patterns for this version (idempotent —
   // only sets fields that aren't already present, preserving user edits).
@@ -2859,23 +2892,6 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
       if (Object.keys(patternSelection).length > 0) {
         selection = patternSelection;
       }
-    }
-  }
-
-  if (projectAgentsDir) {
-    result.projectSkipped = syncProjectResourcesToAgent(agent, version, projectAgentsDir).skipped;
-  }
-
-  // Fast guard: skip the entire sync when the caller requested a full sync and
-  // nothing has changed since the last full sync. Pattern-derived selections
-  // still count as full syncs because they are the persisted intended scope,
-  // not a one-off caller override.
-  if (!userPassedSelection && !options.force) {
-    const manifest = loadManifest(agent, version);
-    if (manifest && !isStale(manifest, agent, version, cwd)) {
-      // Nothing synced, but the project sync above already ran — carry its
-      // skipped files out so the caller can still report them.
-      return { ...result };
     }
   }
 
@@ -3257,9 +3273,11 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // launch can skip the slow path. Pattern-derived selections still count as
   // "full" — the agents.yaml patterns describe the intended scope, not a
   // one-off override, so the resulting state matches what the manifest
-  // records as the synced set.
+  // records as the synced set. Carry forward still-fresh fingerprints from
+  // the previous manifest so we do not re-hash an unchanged tree (RUSH-2320 #3).
   if (!userPassedSelection) {
-    const manifest = buildSyncManifest(agent, version, cwd);
+    const previous = loadManifest(agent, version);
+    const manifest = buildSyncManifest(agent, version, cwd, previous);
     manifest.writtenCommands = writtenCommands;
     saveManifest(agent, version, manifest);
   }

@@ -13,7 +13,8 @@ import { lazyAgentMap } from '../writers/lazy-map.js';
 
 const SKILL_COPY_IGNORE = new Set(['.DS_Store', '.git', '.gitignore', '.venv', '__pycache__', 'node_modules']);
 
-function skillDirsMatch(src: string, dest: string): boolean {
+/** Exported for unit tests (RUSH-2320 #2). Production callers: list() below. */
+export function skillDirsMatch(src: string, dest: string): boolean {
   const entries = fs.readdirSync(src, { withFileTypes: true });
   for (const entry of entries) {
     if (entry.isSymbolicLink()) continue;
@@ -24,7 +25,20 @@ function skillDirsMatch(src: string, dest: string): boolean {
       if (!fs.existsSync(destPath)) return false;
       if (!skillDirsMatch(srcPath, destPath)) return false;
     } else {
-      if (!fs.existsSync(destPath)) return false;
+      // Stat-first (RUSH-2320 #2): size mismatch is a definitive miss with no
+      // content reads. Do NOT treat equal mtimes as equal content — src and
+      // dest are different trees (version home vs source), and copyFileSync
+      // does not preserve mtime, so mtime equality is accidental and unsafe.
+      // Content compare only when sizes match.
+      let srcStat: fs.Stats;
+      let destStat: fs.Stats;
+      try {
+        srcStat = fs.statSync(srcPath);
+        destStat = fs.statSync(destPath);
+      } catch {
+        return false;
+      }
+      if (srcStat.size !== destStat.size) return false;
       if (fs.readFileSync(srcPath, 'utf-8') !== fs.readFileSync(destPath, 'utf-8')) return false;
     }
   }

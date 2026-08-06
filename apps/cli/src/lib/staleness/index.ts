@@ -86,7 +86,21 @@ export function saveManifest(agent: AgentId, version: string, manifest: SyncMani
   }
 }
 
-export function buildManifest(agent: AgentId, version: string, cwd: string): SyncManifest {
+/**
+ * Snapshot current resource fingerprints for `agent@version`.
+ *
+ * When `previous` is supplied (the still-loaded post-guard manifest), any
+ * entry whose stored path/mtime/size still match via the checker's `isFresh`
+ * is carried forward without re-hashing. Measured: full rebuild ~716 ms →
+ * carry-forward near the 5.67 ms `isStale` cost on an unchanged tree
+ * (RUSH-2320 #3).
+ */
+export function buildManifest(
+  agent: AgentId,
+  version: string,
+  cwd: string,
+  previous?: SyncManifest | null,
+): SyncManifest {
   const manifest: SyncManifest = {
     v: MANIFEST_VERSION,
     syncedAt: new Date().toISOString(),
@@ -103,14 +117,28 @@ export function buildManifest(agent: AgentId, version: string, cwd: string): Syn
 
   for (const { checker, field } of STANDARD_CHECKERS) {
     const target = manifest[field] as Record<string, unknown>;
+    const prevMap = (previous?.[field] ?? {}) as Record<string, unknown>;
     for (const name of checker.listNames(cwd)) {
+      const prev = prevMap[name];
+      if (prev !== undefined && checker.isFresh(name, prev, cwd)) {
+        target[name] = prev;
+        continue;
+      }
       const entry = checker.build(name, cwd);
       if (entry !== null) target[name] = entry;
     }
   }
 
-  manifest.rules       = buildRules(agent, version, cwd);
-  manifest.permissions = buildPermissions();
+  if (previous?.rules && !isRulesStale(previous.rules, agent, version, cwd)) {
+    manifest.rules = previous.rules;
+  } else {
+    manifest.rules = buildRules(agent, version, cwd);
+  }
+  if (previous?.permissions && !isPermissionsStale(previous.permissions)) {
+    manifest.permissions = previous.permissions;
+  } else {
+    manifest.permissions = buildPermissions();
+  }
   return manifest;
 }
 

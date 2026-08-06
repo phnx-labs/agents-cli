@@ -39,6 +39,7 @@ import type { ResourceChecker } from '../checkers/types.js';
 
 type Op =
   | { cmd: 'build';   agent: AgentId; version: string; cwd: string }
+  | { cmd: 'buildCarry'; agent: AgentId; version: string; cwd: string }
   | { cmd: 'isStale'; agent: AgentId; version: string; cwd: string }
   | { cmd: 'detectPermissions'; agent: AgentId; version: string; versionHome: string; cwd: string }
   | { cmd: 'list';    type: string;   cwd: string };
@@ -58,6 +59,22 @@ function run(op: Op): unknown {
     const m = buildManifest(op.agent, op.version, op.cwd);
     saveManifest(op.agent, op.version, m);
     return { manifest: m };
+  }
+  // RUSH-2320 #3: rebuild with the previous manifest as a carry-forward seed.
+  // Returns which skill entries kept object identity (still-fresh, no re-hash).
+  if (op.cmd === 'buildCarry') {
+    const prev = loadManifest(op.agent, op.version);
+    const m = buildManifest(op.agent, op.version, op.cwd, prev);
+    saveManifest(op.agent, op.version, m);
+    const reused: string[] = [];
+    if (prev?.skills) {
+      for (const name of Object.keys(m.skills ?? {})) {
+        if (prev.skills[name] !== undefined && m.skills[name] === prev.skills[name]) {
+          reused.push(name);
+        }
+      }
+    }
+    return { manifest: m, reused };
   }
   if (op.cmd === 'isStale') {
     const m = loadManifest(op.agent, op.version);

@@ -208,16 +208,24 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
       ? listInstalledVersions(agentId)
       : [defaultVer];
 
-    const actuallySynced = getActuallySyncedResources(agentId, defaultVer);
-    const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources());
-
-    const hasAnySynced = actuallySynced.commands.length > 0 ||
-      actuallySynced.skills.length > 0 ||
-      actuallySynced.hooks.length > 0 ||
-      actuallySynced.memory.length > 0 ||
-      actuallySynced.mcp.length > 0 ||
-      actuallySynced.permissions.length > 0 ||
-      actuallySynced.plugins.length > 0;
+    // Interactive-only: getActuallySyncedResources walks every skill tree with
+    // content compares (~1s/agent on a full install). The unattended path
+    // (`skipPrompts` / `agents sync --yes`) never reads these — it always
+    // force-full-syncs — so skip the scan entirely (RUSH-2320 #1).
+    let actuallySynced: ReturnType<typeof getActuallySyncedResources> | undefined;
+    let newResources: ReturnType<typeof getNewResources> | undefined;
+    let hasAnySynced = false;
+    if (!skipPrompts) {
+      actuallySynced = getActuallySyncedResources(agentId, defaultVer);
+      newResources = getNewResources(available, actuallySynced, getProjectOnlyResources());
+      hasAnySynced = actuallySynced.commands.length > 0 ||
+        actuallySynced.skills.length > 0 ||
+        actuallySynced.hooks.length > 0 ||
+        actuallySynced.memory.length > 0 ||
+        actuallySynced.mcp.length > 0 ||
+        actuallySynced.permissions.length > 0 ||
+        actuallySynced.plugins.length > 0;
+    }
 
     try {
       let selection: ResourceSelection | undefined;
@@ -229,7 +237,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
         log(chalk.yellow(`\n${agentLabel(agentId)}@${defaultVer} has no synced resources.`));
         const userSelection = await promptResourceSelection(agentId);
         if (userSelection) selection = userSelection;
-      } else if (hasNewResources(newResources, agentId, defaultVer)) {
+      } else if (newResources && hasNewResources(newResources, agentId, defaultVer)) {
         log(chalk.cyan(`\n${agentLabel(agentId)}@${defaultVer}:`));
         const userSelection = await promptNewResourceSelection(agentId, newResources, defaultVer);
         if (userSelection) selection = userSelection;
@@ -240,11 +248,13 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
       if (forceFullSync || (selection && Object.keys(selection).length > 0)) {
         const kinds = new Set<string>();
         for (const ver of versionsToSync) {
+          // Pass the already-built `available` so each version does not re-scan
+          // resource trees (RUSH-2320 #5).
           const syncResult = syncResourcesToVersion(
             agentId,
             ver,
             selection,
-            forceFullSync ? { force: true } : undefined,
+            { available, ...(forceFullSync ? { force: true as const } : {}) },
           );
           if (syncResult.commands) kinds.add('commands');
           if (syncResult.skills) kinds.add('skills');
