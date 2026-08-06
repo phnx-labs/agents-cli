@@ -369,7 +369,9 @@ runs the real suite cheaply on Linux — `test`
 ([`../../.github/workflows/tests.yml`](../../.github/workflows/tests.yml)) plus
 `gitleaks`; those two are the required checks. The full cross-platform matrix
 (ubuntu + macOS + Windows × Node 22/24, `ci.yml`) is cost-gated to `release/**`
-branches and `v*` tags. CI runs from `apps/cli` via `defaults.run.working-directory`.
+branch pushes/PRs and manual `workflow_dispatch` — not `v*` tags (the tag points
+at the commit already gated on the release branch). CI runs from `apps/cli` via
+`defaults.run.working-directory`.
 
 **Live Windows `--host` e2e (opt-in):** `src/lib/ssh-tunnel.e2e.test.ts` and
 `src/lib/browser/drivers/ssh.e2e.test.ts` drive a real Windows box end-to-end
