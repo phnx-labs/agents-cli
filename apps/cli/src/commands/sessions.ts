@@ -69,6 +69,7 @@ import { registerSessionsFavoriteCommand } from './sessions-favorite.js';
 import { isFavorite, listFavorites } from '../lib/session/favorites.js';
 import { registerGoCommand } from './go.js';
 import { registerFocusCommand } from './focus.js';
+import { registerReconnectCommand } from './reconnect.js';
 import { registerDetachCommand } from './detach.js';
 import { registerAttachCommand } from './attach.js';
 import { registerSessionsInjectCommand } from './sessions-inject.js';
@@ -4610,6 +4611,7 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsFavoriteCommand(sessionsCmd);
   registerGoCommand(sessionsCmd);
   registerFocusCommand(sessionsCmd);
+  registerReconnectCommand(sessionsCmd);
   registerDetachCommand(sessionsCmd);
   registerAttachCommand(sessionsCmd);
   registerSessionsInjectCommand(sessionsCmd);

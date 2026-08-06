@@ -142,7 +142,9 @@ describe('reattachRemoteCommand — the real remote invocation, exercised throug
 
   test.skipIf(!runsBash)('argv round-trips through bash -lc even for a session id needing quoting — no injection', () => {
     const res = execFileSync('bash', ['-c', argvShim + reattachRemoteCommand(INJECTION_SID)], { encoding: 'utf8' });
-    expect(res.trimEnd().split('\n')).toEqual(['sessions', 'focus', INJECTION_SID, '--local', '--attach-only']);
+    // No --attach-only: the peer's focus attaches a live pane or RESUMES a dead
+    // one (RUSH-2085), so a reattach after the pane died never dead-ends.
+    expect(res.trimEnd().split('\n')).toEqual(['sessions', 'focus', INJECTION_SID, '--local']);
   });
 
   test.skipIf(!runsBash)('a 255 from the wrapped `agents` command comes back as REMOTE_EXIT_255_REMAPPED (254) — exercised end-to-end through reattachRemoteCommand, not just the wrapRemoteExitCode primitive', () => {
@@ -165,9 +167,9 @@ describe('reattachRemoteCommand — the real remote invocation, exercised throug
     });
   });
 
-  test("the plain string, no shell needed: wraps in bash -lc around the peer's own reconnect verb", () => {
+  test("the plain string, no shell needed: wraps in bash -lc around the peer's own recovery verb (attach-else-resume, no --attach-only)", () => {
     expect(reattachRemoteCommand(SID)).toBe(
-      `bash -lc 'agents sessions focus ${SID} --local --attach-only; rc=$?; [ "$rc" = "255" ] && rc=254; exit "$rc"'`,
+      `bash -lc 'agents sessions focus ${SID} --local; rc=$?; [ "$rc" = "255" ] && rc=254; exit "$rc"'`,
     );
   });
 });
@@ -190,8 +192,8 @@ describe('notices — human readable', () => {
     expect(s).toContain(`attempt 2/${MAX_ATTEMPTS}`);
   });
 
-  test('exhausted notice hands back the manual command', () => {
-    expect(exhaustedNotice(SID, 'zion')).toContain('agents sessions focus 94c75686');
+  test('exhausted notice hands back the manual reconnect command', () => {
+    expect(exhaustedNotice(SID, 'zion')).toContain('agents reconnect 94c75686');
   });
 });
 
@@ -232,7 +234,7 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     });
     expect(rc).toBe(SSH_CONN_FAILURE);
     expect(calls).toBe(MAX_ATTEMPTS); // exactly the budget, no infinite loop
-    expect(writes.some((w) => w.includes('agents sessions focus 94c75686'))).toBe(true);
+    expect(writes.some((w) => w.includes('agents reconnect 94c75686'))).toBe(true);
   });
 
   test('a mid-run second drop after a genuine reconnection keeps reconnecting', async () => {

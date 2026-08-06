@@ -20,6 +20,7 @@ interchangeable — pick the verb for the intent:
 | Select by harness/version on a device (`latest` resolves there) | `agents sessions focus claude@latest --device <host>` |
 | Compose browser filters, including live-state unions | `agents sessions focus claude --orphan --waiting --device <host>` |
 | Attach only — never open a new tab / fork a copy | `agents sessions focus [id] --attach-only` |
+| Re-enter a dropped remote terminal (attach live pane, else resume) | `agents reconnect [id]` / `agents sessions reconnect [id]` |
 | Deprecated alias of focus --attach-only | `agents sessions go` (prints a deprecation notice) |
 | Interactive → **headless** (keep working unattended) | `agents sessions detach <id>` |
 | Headless → **interactive** in this terminal | `agents sessions attach <id>` |
@@ -46,8 +47,13 @@ queried device. A full tmux name such as `ag-codex-c1f3d813` and a unique alias
 suffix such as `c1f3d813` resolve to the harness-native session ID on the device
 that owns them; ambiguous prefixes and suffixes fail instead of guessing.
 `--attach-only` keeps the old `go` behavior (attach one living
-process or refuse). `attach` / `detach` are the presence pair (foreground ↔
-background). Bare `resume` is the multi-open/history path. Top-level
+process or refuse). `reconnect` is the recovery-first sibling for a dropped remote
+terminal: it attaches the live pane if it survived, else resumes the session, and
+with no id targets the most recent session started from the current directory (the
+one that most likely just dropped) rather than the fleet picker — the manual
+companion to the automatic reattach that runs when `agents run --device <box>`
+loses its ssh link (see [hosts.md](hosts.md)). `attach` / `detach` are the presence
+pair (foreground ↔ background). Bare `resume` is the multi-open/history path. Top-level
 `agents resume <id-or-label>` is the strict single-session shortcut:
 a full **UUID** checks the local SQLite index first and resolves with **zero** SSH on
 a local hit; only on a local miss does it fan out to registered devices, and there the

@@ -309,14 +309,26 @@ agents run <agent> ["<task>"] --host <host>
 > working. When an interactive host run with a known session id (Claude, or a
 > `--resume`d run) drops (ssh reports its connection-layer code, 255), the local CLI
 > **re-attaches the live remote pane automatically** — it drives the host's own
-> `agents sessions focus <id> --local --attach-only` over SSH (a live join, not a
-> resumed copy), with bounded exponential backoff (2s→30s, up to 6 attempts; the
-> budget refills after a genuinely live reconnection). A clean detach (`Ctrl-b d`,
-> exit 0) or a real agent exit (any non-255 code) is left alone, and `--raw`/no-tmux
-> runs are not retried (they don't survive a drop). If every attempt fails the CLI
-> prints the manual `agents sessions focus <id>` to reconnect once the link is back.
+> `agents sessions focus <id> --local` over SSH, which JOINS the live pane when it
+> survived and RESUMES the session in place when the pane is already gone (so a
+> reattach landing after the pane died recovers the agent instead of dead-ending at
+> a bare shell — RUSH-2085), with bounded exponential backoff (2s→30s, up to 6
+> attempts; the budget refills after a genuinely live reconnection). A clean detach
+> (`Ctrl-b d`, exit 0) or a real agent exit (any non-255 code) is left alone, and
+> `--raw`/no-tmux runs are not retried (they don't survive a drop). If every attempt
+> fails the CLI prints the manual **`agents reconnect <id>`** to get back in once the
+> link is back.
 >
-> The remote `agents sessions focus --local --attach-only` invocation the reattach
+> **`agents reconnect [session-id]`** is the manual companion — one verb that always
+> tries hardest to put you back into a dropped agent terminal: attach the live pane
+> if it survived, else resume the session (best-effort: live pane > resumed copy > a
+> clear message about what was lost). Use it after the auto-loop above gave up on a
+> sustained outage, or when a VS Code terminal tab closed with the dead ssh client.
+> With no id it reconnects the most recent session started from the current
+> directory — the terminal that most likely just dropped — not the full fleet
+> picker. It is also spelled `agents sessions reconnect`.
+>
+> The remote `agents sessions focus --local` invocation the reattach
 > drives is wrapped so that whatever exit code it decides on, a 255 is remapped to
 > 254 before this process sees it — so a remote-side path that happened to exit
 > 255 for its own reasons would never be mistaken for the link dropping again.

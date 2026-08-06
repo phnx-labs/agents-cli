@@ -11,9 +11,13 @@
  * SSH automatically, with bounded backoff, until the user detaches cleanly (the
  * remote returns 0) or the agent exits (the tmux session is gone; a non-255 code).
  *
- * The re-attach reuses the peer's OWN reconnect verb — `agents sessions focus <id>
- * --local --attach-only` joins the live local tmux pane there (no fork, no resumed
- * copy) — so there is no second re-attach implementation to keep in sync.
+ * The re-attach reuses the peer's OWN recovery verb — `agents sessions focus <id>
+ * --local` — which JOINS the live local tmux pane there (a second client, no fork)
+ * when it still exists, and RESUMES the session in place when the pane is already
+ * gone. Dropping `--attach-only` is deliberate: a reattach that lands after the
+ * remote pane died must not dead-end at a bare shell (the RUSH-2085 bug), it must
+ * fall through to resume so the user is put back into the agent. There is one
+ * re-attach implementation (the peer's focus) to keep in sync.
  *
  * **Why the budget refills on `connected`, not on call duration.** ssh returns 255
  * for BOTH "couldn't connect at all" and "connected, then the link dropped." A
@@ -31,29 +35,24 @@
  *
  * **255 from the REMOTE side should never be trusted as "the link dropped."**
  * `reattachRemoteSession`'s `connected` flag is set as soon as the fast preflight
- * probe succeeds — it says nothing about whether the interactive attach that
- * follows actually reattached a live pane. If the REMOTE command (`agents
- * sessions focus <id> --local --attach-only`) itself ever happened to exit 255
- * for a reason that has nothing to do with the ssh transport, `sshStream` would
- * return that same 255, `reconnectStep` couldn't tell it apart from a genuine
- * drop, and `connected: true` would refill the retry budget forever — "attempt
- * 1/N" printed on every single cycle, the terminal filling with aborted-TTY
- * escape-code garbage, `MAX_ATTEMPTS` never actually bounding anything.
+ * probe succeeds — it says nothing about whether the interactive attach/resume
+ * that follows actually put the user back into the agent. If the REMOTE command
+ * (`agents sessions focus <id> --local`) itself ever happened to exit 255 for a
+ * reason that has nothing to do with the ssh transport, `sshStream` would return
+ * that same 255, `reconnectStep` couldn't tell it apart from a genuine drop, and
+ * `connected: true` would refill the retry budget forever — "attempt 1/N" printed
+ * on every single cycle, the terminal filling with aborted-TTY escape-code
+ * garbage, `MAX_ATTEMPTS` never actually bounding anything.
  *
- * Two candidate producers of that scenario were investigated —
- * `refuseFallback`'s login-shell fallback (commands/go.ts) and `jumpTo`'s
- * nested remote-tmux hop — and both turned out to be UNREACHABLE through this
- * exact remote command: under `--local`, `gatherLiveTargets` never sets a
- * foreign `.machine` (go.ts:61), so `remote` is always `undefined` in both,
- * and neither branch can fire (the same reasoning that made an earlier,
- * narrower fix here dead code — see git history). So this fix does not close
- * a confirmed incident cause; what it closes is the underlying channel-level
- * flaw that would make *any* future remote-side 255 producer — reachable today
- * or not — indistinguishable from a real drop. {@link wrapRemoteExitCode} wraps
- * the entire remote command so that whatever exit code it decides on, a 255 is
- * remapped to {@link REMOTE_EXIT_255_REMAPPED} before `sshStream` ever sees it,
- * regardless of which internal branch produced it and regardless of the peer's
- * `agents` version (the remap happens in the shell wrapper THIS process sends).
+ * The resume fall-through only widens that surface — the peer's focus now runs a
+ * full recovery path (`resumeSessionInPlace` / `runOnPeer`) on a dead pane, any
+ * step of which could in principle exit 255 for its own reasons. So the channel-
+ * level defense is what matters, not an audit of which branch can fire:
+ * {@link wrapRemoteExitCode} wraps the entire remote command so that whatever exit
+ * code it decides on, a 255 is remapped to {@link REMOTE_EXIT_255_REMAPPED} before
+ * `sshStream` ever sees it, regardless of which internal branch produced it and
+ * regardless of the peer's `agents` version (the remap happens in the shell
+ * wrapper THIS process sends).
  *
  * This does NOT close every way `reconnectStep` can loop on a real transport
  * 255: a genuinely recurring LOCAL ssh failure (a fast-flapping link, an
@@ -135,9 +134,10 @@ export function reconnectNotice(sessionId: string, host: string, attempt: number
   return `\nConnection to ${host} dropped — the agent is still running there. Reconnecting to ${sessionId.slice(0, 8)} ${when} (attempt ${attempt}/${MAX_ATTEMPTS})…\n`;
 }
 
-/** Notice shown once the retry budget is spent. */
+/** Notice shown once the retry budget is spent. Hands back the one verb that
+ *  re-enters the terminal — attach the live pane if it survived, else resume. */
 export function exhaustedNotice(sessionId: string, host: string): string {
-  return `\nCouldn't reconnect to ${host} after ${MAX_ATTEMPTS} attempts. The agent may still be running — reattach when the network is back:\n  agents sessions focus ${sessionId.slice(0, 8)}\n`;
+  return `\nCouldn't reconnect to ${host} after ${MAX_ATTEMPTS} attempts. The agent may still be running — get back in when the network is back:\n  agents reconnect ${sessionId.slice(0, 8)}\n`;
 }
 
 /** Notice shown when a reattach stops on a remapped remote-side exit
@@ -146,7 +146,7 @@ export function exhaustedNotice(sessionId: string, host: string): string {
  *  {@link wrapRemoteExitCode}). Distinct from {@link exhaustedNotice}, which is
  *  only for a genuinely spent retry budget. */
 export function remoteExitNotice(sessionId: string, host: string): string {
-  return `\nReattach to ${sessionId.slice(0, 8)} on ${host} ended (not a network drop) — check whether it's still live:\n  agents sessions ${sessionId.slice(0, 8)}\n`;
+  return `\nReattach to ${sessionId.slice(0, 8)} on ${host} ended (not a network drop) — get back in, or check whether it's still live:\n  agents reconnect ${sessionId.slice(0, 8)}\n`;
 }
 
 /**
@@ -172,16 +172,17 @@ export function wrapRemoteExitCode(cmd: string): string {
 }
 
 /**
- * The remote command a reattach runs — the peer's own reconnect verb
- * (`agents sessions focus <id> --local --attach-only`), wrapped by
- * {@link wrapRemoteExitCode} so a stray remote-origin 255 (from this command,
- * whatever produces it — see the file header) can never masquerade as a
- * network drop. Split out from {@link reattachRemoteSession} so it is
- * unit-tested without SSH — mirrors `remoteAgentsJsonCommand` in
- * lib/remote-agents-json.ts.
+ * The remote command a reattach runs — the peer's own recovery verb
+ * (`agents sessions focus <id> --local`), wrapped by {@link wrapRemoteExitCode}
+ * so a stray remote-origin 255 (from this command, whatever produces it — see the
+ * file header) can never masquerade as a network drop. No `--attach-only`: focus
+ * joins the live pane when it survived, else RESUMES the session in place, so a
+ * reattach landing after the pane died recovers the agent instead of dead-ending
+ * (RUSH-2085). Split out from {@link reattachRemoteSession} so it is unit-tested
+ * without SSH — mirrors `remoteAgentsJsonCommand` in lib/remote-agents-json.ts.
  */
 export function reattachRemoteCommand(sessionId: string): string {
-  const inner = ['agents', 'sessions', 'focus', sessionId, '--local', '--attach-only']
+  const inner = ['agents', 'sessions', 'focus', sessionId, '--local']
     .map(shellQuote)
     .join(' ');
   return wrapRemoteExitCode(inner);
@@ -192,10 +193,10 @@ export function reattachRemoteCommand(sessionId: string): string {
  * `agents sessions focus`. A fast, un-multiplexed preflight probe (`ssh … true`)
  * first establishes whether the host is actually reachable this attempt — that
  * `connected` bit, not the call duration, is what the retry policy keys on. Only on
- * a reachable host do we run the interactive attach (which carries no credentials —
- * the agent already runs on the peer — so it rides the normal transport). Returns
- * the ssh exit code (255 = dropped again / unreachable; 0 = clean detach; other =
- * session ended) plus whether this attempt connected.
+ * a reachable host do we run the interactive attach-or-resume (which carries no
+ * credentials — the agent already runs on the peer — so it rides the normal
+ * transport). Returns the ssh exit code (255 = dropped again / unreachable; 0 =
+ * clean detach; other = session ended) plus whether this attempt connected.
  */
 export function reattachRemoteSession(host: Host, sessionId: string): ReconnectOutcome {
   const target = sshTargetFor(host);

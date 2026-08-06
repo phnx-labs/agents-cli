@@ -53,6 +53,7 @@ export const loadMonitors: ModuleLoader = async () => (await import('../../comma
 export const loadProjects: ModuleLoader = async () => (await import('../../commands/projects.js')).registerProjectsCommands;
 export const loadRun: ModuleLoader = async () => (await import('../../commands/exec.js')).registerRunCommand;
 export const loadResume: ModuleLoader = async () => (await import('../../commands/resume.js')).registerResumeCommand;
+export const loadReconnect: ModuleLoader = async () => (await import('../../commands/reconnect.js')).registerReconnectCommand;
 export const loadFork: ModuleLoader = async () => (await import('../../commands/fork.js')).registerForkCommand;
 export const loadDefaults: ModuleLoader = async () => (await import('../../commands/defaults.js')).registerDefaultsCommands;
 export const loadSet: ModuleLoader = async () => (await import('../../commands/set.js')).registerSetCommand;
@@ -127,6 +128,7 @@ export const loadHumans: ModuleLoader = async () => (await import('../../command
 export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'sessions',
   'resume',
+  'reconnect',
   'roster',
   'teams',
   'cloud',
@@ -186,6 +188,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   projects: [loadProjects],
   run: [loadRun],
   resume: [loadResume],
+  reconnect: [loadReconnect],
   fork: [loadFork],
   defaults: [loadDefaults],
   set: [loadSet],
