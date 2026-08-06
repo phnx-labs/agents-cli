@@ -404,7 +404,13 @@ let listDataProtectionTimeoutLabel: String = {
 }()
 
 // Self-test for the bounded wait (AGENTS_KEYCHAIN_BOUNDED_TEST=1). Headless and
-// keychain-free, so it runs on any Mac against an unsigned build.
+// keychain-free, so it runs on any Mac against an unsigned build — that is what
+// lets scripts/build-keychain-helper.sh gate the artifact on it before signing.
+//
+// Every margin below is deliberately wide (a worker sleeping 10s against a 0.2s
+// deadline, asserted released within 5s). A build gate that flakes on a loaded
+// machine gets disabled, so the assertions test the ORDER OF MAGNITUDE — bound
+// fired vs worker ran to completion — never a tight stopwatch.
 if ProcessInfo.processInfo.environment["AGENTS_KEYCHAIN_BOUNDED_TEST"] == "1" {
     var failures = 0
     func check(_ label: String, _ ok: Bool) {
@@ -412,30 +418,33 @@ if ProcessInfo.processInfo.environment["AGENTS_KEYCHAIN_BOUNDED_TEST"] == "1" {
         if !ok { failures += 1 }
     }
 
-    check("work finishing inside the deadline returns its value", boundedWait(2) { 42 } == 42)
+    check("work finishing inside the deadline returns its value", boundedWait(5) { 42 } == 42)
 
     let slowStarted = Date()
     let slowResult = boundedWait(0.2) { () -> Int in
-        Thread.sleep(forTimeInterval: 3)
+        Thread.sleep(forTimeInterval: 10)
         return 42
     }
     let slowElapsed = Date().timeIntervalSince(slowStarted)
     check("work outrunning the deadline yields nil", slowResult == nil)
-    check("the caller is released at the deadline, not at completion (\(String(format: "%.2f", slowElapsed))s)", slowElapsed < 2)
+    check("the caller is released at the deadline, not at completion (\(String(format: "%.2f", slowElapsed))s of a 10s worker)", slowElapsed < 5)
 
     // A worker that publishes after the caller walked away must not corrupt
     // anything — the abandoned-worker case, run for real.
     let late = BoundedSlot<Int>()
-    _ = boundedWait(0.1) { () -> Int in
-        Thread.sleep(forTimeInterval: 0.5)
+    _ = boundedWait(0.2) { () -> Int in
+        Thread.sleep(forTimeInterval: 2)
         late.publish(7)
         return 7
     }
     check("caller sees nothing from a worker still running", late.take() == nil)
-    Thread.sleep(forTimeInterval: 1)
+    // Poll rather than sleeping a fixed span, so a slow machine waits longer
+    // instead of failing.
+    let deadline = Date().addingTimeInterval(30)
+    while late.take() == nil && Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
     check("abandoned worker still completes safely", late.take() == 7)
 
-    check("zero timeout skips immediately", boundedWait(0) { Thread.sleep(forTimeInterval: 0.3); return 1 } == nil)
+    check("zero timeout skips immediately", boundedWait(0) { Thread.sleep(forTimeInterval: 5); return 1 } == nil)
 
     exit(failures == 0 ? 0 : 1)
 }

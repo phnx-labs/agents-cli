@@ -63,6 +63,23 @@ swiftc -O -target arm64-apple-macos12 "$SOURCE" -o /tmp/agents-keychain-arm64
 echo "Compiling x86_64..."
 swiftc -O -target x86_64-apple-macos12 "$SOURCE" -o /tmp/agents-keychain-x86_64
 
+# Gate the artifact on the helper's headless self-test (the bounded wait behind
+# `list`'s data-protection pass). Runs against the just-built native slice,
+# BEFORE lipo/signing/notarization, so a regression fails the build instead of
+# shipping — and never wastes a notarize submit. Same reasoning as the menubar
+# helper's scripts/test-menubar.sh gate: PR CI is Linux and cannot build Swift,
+# and prepack only checks the shipped bundle's signature, so without this the
+# self-test would never run on the way to a release.
+echo "Running helper self-tests..."
+# if/then, not `[ … ] && …`: under `set -e` a false one-liner test is a failing
+# statement and would abort the build on every arm64 machine.
+if [ "$(uname -m)" = "x86_64" ]; then
+    NATIVE_SLICE="/tmp/agents-keychain-x86_64"
+else
+    NATIVE_SLICE="/tmp/agents-keychain-arm64"
+fi
+AGENTS_KEYCHAIN_BOUNDED_TEST=1 "$NATIVE_SLICE"
+
 echo "Lipo to universal..."
 lipo -create -output "$BIN" /tmp/agents-keychain-arm64 /tmp/agents-keychain-x86_64
 
