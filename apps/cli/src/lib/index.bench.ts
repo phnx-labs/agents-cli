@@ -46,14 +46,14 @@
  * but with one twist: it resolves its worker script relative to
  * `fileURLToPath(import.meta.url)` (auto-pull.ts:51), i.e. relative to wherever
  * the RUNNING copy of this module lives. Importing it the normal bench way (via
- * './lib/auto-pull.js', vitest's TS-source resolution) would put that module at
+ * './auto-pull.js', vitest's TS-source resolution) would put that module at
  * src/lib/auto-pull.ts, where only auto-pull-worker.TS exists -- so
  * `fs.existsSync(workerPath)` (auto-pull.ts:53) would ALWAYS be false and the
  * function would always take the early-return guard path, never actually
  * spawning anything. That is real behavior for an unbuilt checkout, but it is
  * not what a real user's installed copy does (npm ships dist/lib/auto-pull-
  * worker.js). To measure the real spawn this file imports the ACTUAL BUILT
- * ARTIFACT at ../dist/lib/auto-pull.js (produced by `bun run build` /
+ * ARTIFACT at ../../dist/lib/auto-pull.js (produced by `bun run build` /
  * `bun install`'s `prepare` hook) so `import.meta.url` resolves inside dist/lib/
  * and the real dist/lib/auto-pull-worker.js is found. Both regimes are benched
  * explicitly below so the guard-path cost and the real fork+exec cost are never
@@ -66,6 +66,12 @@
  * background (detached, unref'd, so it does not block this process or this
  * benchmark's timing; see auto-pull-worker.ts). That group is therefore bounded
  * to a small iteration count, mirroring exec.bench.ts's execAgent group.
+ *
+ * Lives at src/lib/index.bench.ts, not src/index.bench.ts, so that
+ * `typecheck:bench` (package.json:58, globs `src/lib/*.bench.ts
+ * src/lib/**\/*.bench.ts`) actually type-checks it -- a prior version at
+ * src/index.bench.ts silently sat outside that glob and shipped a stale
+ * `@ts-expect-error` (TS2578, unused directive) that no gate caught.
  */
 import { describe, bench } from 'vitest';
 import * as path from 'node:path';
@@ -76,12 +82,13 @@ import {
   buildMultiInstallInventory,
   findAgentsCliInstalls,
   resolveRunningPackageRoot,
-} from './lib/self-update.js';
-import { getUpdateCheckPath } from './lib/state.js';
-// Real built artifact (see docblock above) -- NOT './lib/auto-pull.js', which
+} from './self-update.js';
+import { getUpdateCheckPath } from './state.js';
+// Real built artifact (see docblock above) -- NOT './auto-pull.js', which
 // would resolve to the unbuilt TS source and always miss the worker script.
-// @ts-expect-error -- plain JS build output, no .d.ts resolution needed here.
-import { spawnDetachedSync } from '../dist/lib/auto-pull.js';
+// dist/lib/auto-pull.d.ts exists (tsconfig.json declaration:true), so this
+// resolves and type-checks normally -- no @ts-expect-error needed here.
+import { spawnDetachedSync } from '../../dist/lib/auto-pull.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPDATE_CHECK_FILE = getUpdateCheckPath();
