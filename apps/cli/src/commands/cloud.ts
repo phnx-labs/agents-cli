@@ -38,7 +38,7 @@ export function statusColor(status: string): (s: string) => string {
 export function registerCloudCommands(program: Command): void {
   const cloud = program
     .command('cloud', { hidden: true })
-    .description('Dispatch and manage cloud agent tasks across providers (Rush, Codex, Factory, Antigravity).')
+    .description('Dispatch and manage cloud agent tasks across providers (Rush, Codex, Cursor, Factory, Antigravity, Host).')
     .addHelpText('after', `
 Each agent runs in its own cloud. Pass --agent and the provider is auto-selected
 (claude→rush, codex→codex, cursor→cursor, droid→factory, antigravity→antigravity); --provider overrides.
@@ -46,6 +46,7 @@ Each agent runs in its own cloud. Pass --agent and the provider is auto-selected
 Providers:
   rush         Rush Cloud — Claude against a GitHub repo + branch → PR
   codex        Codex Cloud — runs in a pre-built Codex environment (--env)
+  cursor       Cursor Cloud Agents — v1 REST API, with optional GitHub repos
   factory      Factory Droid Computer — droid exec on a cloud VM (--computer)
   antigravity  Gemini Managed Agents — Antigravity harness in a remote sandbox
 
@@ -61,6 +62,9 @@ Examples:
 
   # Codex Cloud against a saved environment
   agents cloud run "add pytest fixtures for the new billing module" --provider codex --env env_a1b2c3 --agent codex --timeout 30m
+
+  # Cursor Cloud Agents against a GitHub repository
+  agents cloud run "fix the flaky parser test" --agent cursor --repo acme/example
 
   # Factory pod targeting a specific computer (Droid)
   agents cloud run "QA the new onboarding flow end-to-end" --provider factory --computer linux-vm-1 --agent droid
@@ -89,10 +93,10 @@ Examples:
     .command('run [prompt]')
     .description('Dispatch a task to a cloud agent.')
     .option('--provider <id>', 'Cloud backend: rush, codex, cursor, factory, antigravity, host (overrides agent auto-routing)')
-    .option('--agent <name>', 'Agent to run: claude, codex, droid, antigravity (auto-routes to its native cloud)')
+    .option('--agent <name>', 'Agent to run: claude, codex, cursor, droid, antigravity (auto-routes to its native cloud)')
     .option(
       '--repo <owner/repo>',
-      'GitHub repository. Repeatable for multi-repo dispatch (Rush Cloud only).',
+      'GitHub repository. Repeatable for multi-repo dispatch (Rush or Cursor Cloud).',
       (value: string, previous: string[] | undefined) => {
         const acc = Array.isArray(previous) ? previous : [];
         acc.push(value);
