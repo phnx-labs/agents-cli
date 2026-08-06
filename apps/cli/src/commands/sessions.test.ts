@@ -882,7 +882,11 @@ describe('agents sessions --resolve local-peer critical path', () => {
     });
   });
 
-  it('returns a partial fleet result when a real old peer rejects the safe resolver protocol', async () => {
+  // POSIX-only (RUSH-2215): grafts a real ssh2 peer onto an OpenSSH
+  // `ControlMaster=auto` multiplexing socket, which Windows OpenSSH does not
+  // support — the ControlMaster startup hangs the fixture (and the suite) rather
+  // than failing fast, so this real-peer path only runs on a POSIX host.
+  it.skipIf(process.platform === 'win32')('returns a partial fleet result when a real old peer rejects the safe resolver protocol', async () => {
     const tempHome = fs.mkdtempSync(path.join(sshPeerTmpBase, 'sr-'));
     let peer: SessionResolverSshPeer | undefined;
     try {
@@ -909,7 +913,9 @@ describe('agents sessions --resolve local-peer critical path', () => {
     }
   }, 90_000);
 
-  it('returns a partial fleet result when a real exit-zero peer emits malformed safe output', async () => {
+  // POSIX-only (RUSH-2215): same real ssh2 peer over an OpenSSH ControlMaster
+  // multiplexing socket as the sibling test above — hangs on Windows OpenSSH.
+  it.skipIf(process.platform === 'win32')('returns a partial fleet result when a real exit-zero peer emits malformed safe output', async () => {
     const tempHome = fs.mkdtempSync(path.join(sshPeerTmpBase, 'sr-'));
     let peer: SessionResolverSshPeer | undefined;
     try {

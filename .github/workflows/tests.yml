@@ -150,11 +150,14 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - run: bun install --frozen-lockfile
       - run: bun run build
-      # The Windows gate is activated only by hooks, host dispatch, platform,
-      # and shim changes. Keep its test set aligned with that classifier: the
-      # full suite contains POSIX-only integration tests that cannot pass on a
-      # Windows runner and duplicates the three Linux shards.
-      - run: bun run test -- hooks hosts platform shims
+      # Run the full Vitest suite on Windows so the gate reflects real Windows
+      # regressions, not a hand-picked slice (RUSH-2215). The POSIX-only
+      # integration tests that used to collapse the run — openclaw `which`+`sh`
+      # delivery, ssh ControlMaster multiplexing, `#!/bin/sh` PATH stubs, bash
+      # release-script checks, sqlite-locked teardown — now skip on win32 with a
+      # stated reason (describe/it.skipIf), so the suite runs green and a genuine
+      # Windows break stops standing out from the noise instead of hiding in it.
+      - run: bun run test
 
   test:
     needs: [scope, cli-preflight, cli-test-shard, cli-docs, factory, session-tracker, windows]

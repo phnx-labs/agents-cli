@@ -61,8 +61,13 @@ describe('formatUrgentBlockMessage', () => {
  * `openclaw` executable (a shell script that records its argv) is placed on PATH,
  * so the assertions run through lookupTransport → openclaw-telegram provider →
  * exec, the actual delivery path.
+ *
+ * POSIX-only (RUSH-2215): the openclaw-telegram provider resolves the binary
+ * with `which openclaw` and execs it, and the fake is a `#!/bin/sh` recorder —
+ * neither works on Windows (no `which`; an extensionless shell script is not
+ * executable), so these assertions can only run on a POSIX host.
  */
-describe('sendToOwner (owner resolution + provider routing)', () => {
+describe.skipIf(process.platform === 'win32')('sendToOwner (owner resolution + provider routing)', () => {
   let tmp: string;
   let record: string;
   const savedPath = process.env.PATH;
@@ -176,7 +181,9 @@ describe('sendToOwner (owner resolution + provider routing)', () => {
   });
 });
 
-describe('notifyUrgentBlock (feed urgent-block dispatch resolves the owner)', () => {
+// POSIX-only (RUSH-2215): same openclaw `which` + `#!/bin/sh` recorder path as
+// sendToOwner above — untestable on Windows.
+describe.skipIf(process.platform === 'win32')('notifyUrgentBlock (feed urgent-block dispatch resolves the owner)', () => {
   let tmp: string;
   let record: string;
   const savedPath = process.env.PATH;

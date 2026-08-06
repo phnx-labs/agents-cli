@@ -130,7 +130,10 @@ describe('release.sh: every irreversible act is gated by the lease', () => {
   // on the act, so the next one is caught here instead of by a third reviewer.
   const LINES = fs
     .readFileSync(path.resolve(__dirname, 'release.sh'), 'utf-8')
-    .split('\n');
+    // Split on \r?\n: git's autocrlf checks out release.sh with CRLF on Windows,
+    // and a bare .split('\n') leaves a trailing \r that defeats the $-anchored
+    // `route_home_base_phase\s*\\?$` match below (RUSH-2215).
+    .split(/\r?\n/);
 
   /** The nearest preceding non-blank, non-comment line(s) within `window`. */
   function precededByLeaseGate(idx: number, window = 6) {

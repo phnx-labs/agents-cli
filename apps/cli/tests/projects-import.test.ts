@@ -105,7 +105,11 @@ describe('agents projects import --from-linear', () => {
   /** Read a written def back off disk (the YAML is the contract, not a return value). */
   const def = (name: string) => fs.readFileSync(path.join(projectsDir, `${name}.yaml`), 'utf8');
 
-  it('binds an exact local checkout and leaves the rest to name + link', () => {
+  // POSIX-only (RUSH-2215): the stub `linear` on PATH is a `#!/bin/sh` recorder
+  // (installLinearCli), which Windows cannot execute as a bare extensionless
+  // file — the import fails with "Could not list Linear projects". The
+  // missing-CLI case below has no stub and still runs on Windows.
+  it.skipIf(process.platform === 'win32')('binds an exact local checkout and leaves the rest to name + link', () => {
     makeCheckout('agents-cli', 'muqsitnawaz/agents-cli');
     makeCheckout('web', 'someone/web');
     stubLinearCli([
@@ -133,7 +137,8 @@ describe('agents projects import --from-linear', () => {
     expect(def('rush-web')).toContain('projectId: lin_3');
   });
 
-  it('preserves hand-set fields and refuses to relink a bound def without --force', () => {
+  // POSIX-only (RUSH-2215): same `#!/bin/sh` stub `linear` on PATH as above.
+  it.skipIf(process.platform === 'win32')('preserves hand-set fields and refuses to relink a bound def without --force', () => {
     makeCheckout('agents-cli', 'muqsitnawaz/agents-cli');
     stubLinearCli([{ id: 'lin_1', name: 'Agents CLI' }]);
     runCli(['projects', 'import', '--from-linear']);

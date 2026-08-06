@@ -110,7 +110,10 @@ describe('session shell-command sampler', () => {
     ])).toEqual(['manual', 'probe-reachable']);
   });
 
-  it('spawns the production CLI path for candidate and exact local queries', () => {
+  // POSIX-only (RUSH-2215): the sampler spawns the real `agents` binary resolved
+  // off PATH; the Windows `.cmd` shim is not reliably resolved by that spawn
+  // (`agents exited null`), so this end-to-end spawn assertion runs on POSIX.
+  it.skipIf(process.platform === 'win32')('spawns the production CLI path for candidate and exact local queries', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sampler-spawn-'));
     const binDir = path.join(root, 'bin');
     const sessionsDir = path.join(root, '.codex', 'sessions');

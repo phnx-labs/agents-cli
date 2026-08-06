@@ -13,8 +13,13 @@ import type { Meta } from '../types.js';
  * it inherited a hardcoded owner number and had no missing-binary guard (raw
  * ENOENT). It now routes through the one owner-send seam (sendToOwner →
  * lookupTransport). Real path: a fake `openclaw` on PATH records the argv.
+ *
+ * POSIX-only (RUSH-2215): the openclaw-telegram provider resolves the binary
+ * with `which openclaw` and execs it, and the fake is a `#!/bin/sh` recorder —
+ * neither works on Windows (no `which`; an extensionless shell script is not
+ * executable), so these assertions can only run on a POSIX host.
  */
-describe('dispatchAction notify (resolves the owner, fails loud on a missing binary)', () => {
+describe.skipIf(process.platform === 'win32')('dispatchAction notify (resolves the owner, fails loud on a missing binary)', () => {
   let tmp: string;
   let record: string;
   const savedPath = process.env.PATH;

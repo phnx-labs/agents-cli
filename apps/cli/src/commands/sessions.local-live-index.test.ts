@@ -102,7 +102,12 @@ function writeClaudeSession(sessionId: string, cwd: string): void {
   );
 }
 
-describe('maybeLiveIndex --local (RUSH-2118 default-listing gap)', () => {
+// Windows-fs-incompatible (RUSH-2215): the fixture keys the transcript dir off
+// the absolute cwd (`.claude/projects/<cwd>`), which on Windows embeds a drive
+// colon (`C:\...`) mid-path and mkdir rejects it; and the in-process session
+// index keeps a sqlite handle open that Windows locks, so afterAll's rmSync of
+// the temp home fails EPERM. Both describes run on POSIX only.
+describe.skipIf(process.platform === 'win32')('maybeLiveIndex --local (RUSH-2118 default-listing gap)', () => {
   it('a bare `agents sessions --local` (no --active) issues zero ssh for a remote-host teammate', async () => {
     await makeRemoteTeammate('remote-running-local');
 
@@ -132,7 +137,8 @@ describe('maybeLiveIndex --local (RUSH-2118 default-listing gap)', () => {
   });
 });
 
-describe('renderSessionPreview --local (RUSH-2118 --preview gap)', () => {
+// Windows-fs-incompatible (RUSH-2215): see the note on the sibling describe above.
+describe.skipIf(process.platform === 'win32')('renderSessionPreview --local (RUSH-2118 --preview gap)', () => {
   const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   afterAll(() => consoleLogSpy.mockRestore());
 
