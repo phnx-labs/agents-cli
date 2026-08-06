@@ -11,7 +11,7 @@
   <a href="https://github.com/phnx-labs/agents-cli"><img src="https://img.shields.io/badge/github-phnx--labs%2Fagents--cli-blue?style=flat-square" alt="github" /></a>
 </p>
 
-**A framework for running a distributed agent factory.** Dispatch Claude, Codex, Antigravity, Grok, and more across your own machines — in parallel, on your existing subscriptions. Measure every run with `agents perf` / `agents insights`, fold what you learn back into `AGENTS.md` and skills, then put the loop on a schedule with routines and monitors. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Store secrets behind Touch ID, drive real browsers and Electron apps, and steer the whole fleet from a menu bar — all from one CLI.
+**A framework for running a distributed agent factory.** Dispatch Claude, Codex, Antigravity, Grok, and more across your own machines, in parallel, on your existing subscriptions. Measure every run with `agents perf` / `agents insights`, fold what you learn back into `AGENTS.md` and skills, then put the loop on a schedule with routines and monitors. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Store secrets behind Touch ID, drive real browsers and Electron apps, and steer the whole fleet from a menu bar — all from one CLI.
 
 <p align="center">
   <a href="https://github.com/anthropics/claude-code" title="Claude Code"><img src="assets/harnesses/anthropic.svg" height="32" alt="Claude Code" /></a>
@@ -67,7 +67,7 @@ Also available as `ag` -- all commands work with both `agents` and `ag`.
 - [Control the fleet](#control-the-fleet)
 - [Sync the fleet](#sync-the-fleet)
 - [Pin versions per project](#pin-versions-per-project)
-- [Run open models through Claude Code](#run-open-models-through-claude-code)
+- [Run open models through Claude Code](#run-open-models-through-claude-code-experimental)
 - [Run on your own machines](#run-on-your-own-machines)
 - [Teams](#teams)
 - [Cloud](#cloud)
