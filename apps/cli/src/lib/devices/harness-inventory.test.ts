@@ -65,6 +65,15 @@ describe('summarizeQuota', () => {
   it('marks a cached (last_seen) snapshot stale', () => {
     expect(summarizeQuota(snapshot([win('session', 5)], 'last_seen')).stale).toBe(true);
   });
+
+  it('never shows 100% for an account that is not actually capped', () => {
+    // 99.6 rounds to 100, but the account is still `available` (a true 100 window
+    // would flip status to rate_limited) — so the display caps at 99 to avoid a
+    // "100%" cell next to a "ready" verdict.
+    const q = summarizeQuota(snapshot([win('session', 99.6)]));
+    expect(q.status).toBe('available');
+    expect(q.usedPercent).toBe(99);
+  });
 });
 
 describe('computeReady', () => {
