@@ -51,7 +51,21 @@ export interface RcSecretFinding {
 
 /** The file-store master key. Its own resolution prefers an off-env 0600 file, so
  *  a shell-rc export is always wrong once the store exists (RUSH-1968). */
-const MASTER_PASSPHRASE = 'AGENTS_SECRETS_PASSPHRASE';
+export const MASTER_PASSPHRASE = 'AGENTS_SECRETS_PASSPHRASE';
+
+/**
+ * True when the file-store master key is live in THIS process's environment.
+ *
+ * The scanner above reads FILES, and that leaves a hole: a value inherited by a
+ * long-lived process outlives the rc line that set it, so deleting the export
+ * makes `scanRcExports` report clean while every shell, editor and agent started
+ * beforehand still carries the key and passes it to everything it spawns.
+ * Returns a boolean — never the value — so a finding built from it can be
+ * printed, logged, or shipped without leaking the secret.
+ */
+export function masterPassphraseInEnv(): boolean {
+  return (process.env[MASTER_PASSPHRASE] ?? '').length > 0;
+}
 
 /**
  * Last `_`-delimited segment values that mark a variable as credential-shaped.

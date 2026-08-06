@@ -45,12 +45,13 @@ describe('modes command', () => {
     expect(out).toContain('--permission-mode');
   });
 
-  it('lists only edit/skip for cursor and marks plan unsupported', () => {
+  it('lists plan/edit/skip for cursor and marks auto unsupported', () => {
     const out = runAgents(home, ['modes', 'cursor']);
     expect(out).toMatch(/cursor/i);
+    expect(out).toContain('plan');
     expect(out).toContain('edit');
     expect(out).toContain('skip');
-    expect(out).toContain('unsupported: plan');
+    expect(out).toContain('unsupported: auto');
   });
 
   it('emits JSON with modes and flags', () => {

@@ -134,6 +134,28 @@ create / delete / rename bumps the dir mtime and forces a full re-walk of that d
 Set `AGENTS_SESSIONS_NO_DIR_LEDGER=1` to disable the short-circuit and force the old
 full per-file walk.
 
+**OpenCode is stamped per row, not per file.** It keeps every session in one shared
+`~/.local/share/opencode/opencode.db`, so that file's `(mtime, size)` moves whenever
+*any* session is written and cannot say which one changed. Its `scan_ledger` stamp is
+keyed by the synthetic `opencode.db#<id>` path and holds, for that session alone: the
+newest write time across its `session` row, its messages, and its parts, paired with
+the total byte length of its message + part payloads. The file-level stat is kept only
+as the cheap "nothing changed at all" short-circuit for the whole harness. Before this,
+one new turn re-emitted every indexed OpenCode session (up to the scan's `LIMIT 1000`)
+and re-opened the database once per re-emitted session to re-parse a transcript that
+had not moved (RUSH-2210).
+
+Both halves of that stamp are load-bearing. `session.time_updated` alone is **not** the
+session's change signal — on a real database, parts land long after the session row was
+last touched (one session carried `time_updated = 1771316403087` with its newest part
+over four hours later), so a stamp built from it would call that session unchanged
+forever. And the byte total is a genuine size rather than a row counter, because
+`sessions.file_size` is read back as bytes elsewhere: `ensureToolIndex` uses it as the
+tool-backfill byte budget and `toolCallsForBackfill` as the 16 MiB in-memory parser cap
+([`src/lib/session/tool-index.ts`](../src/lib/session/tool-index.ts)). A per-session
+message + part byte total is the honest parse cost, where this column previously held
+the whole database's size for every OpenCode row.
+
 Cursor is installed outside agents-cli's version homes. Once any managed agent
 version exists, the default managed scope excludes Cursor transcripts; pass
 `--unmanaged` (for example, `agents sessions --agent cursor --unmanaged`) to list
@@ -692,7 +714,13 @@ unreachable still falls back to any age).
 
 On a TTY it opens the interactive browser seeded to running-only; `--json`,
 `--waiting`, and `--no-interactive` print the static grouped view instead. Both read
-the same gather, so they always agree on what is live.
+the same gather and the same running predicate, so they always agree on what is live.
+The registry retains terminally-dead rows for recovery, but bare `--active` excludes
+`closed`, `crashed`, and rows whose process is positively dead. Explicit lifecycle
+filters such as `--closed` and `--crashed` select those retained rows instead.
+Per-device `latest` / `oldest` selectors accept only rows returned by that device's
+version-filtered index query; an unindexed live row with no resolved version does not
+silently widen the picker.
 
 **Team lineage.** A teams teammate row carries the id of the **orchestrator** that
 spawned it — the session that ran `agents teams add`, captured from
@@ -1197,6 +1225,23 @@ target converge). `agents sessions migrations` prints it — the border tracker 
 session's `from → to`, mode, move-vs-copy, and status; a session that hops A→B→C leaves
 three lines, its lineage. Source: `src/commands/sessions-migrate.ts`,
 `src/lib/session/migrate-targets.ts`, `src/lib/session/migrations.ts`.
+
+## Cross-harness workflow insights
+
+`agents sessions insights` analyzes the last 30 days by default across every indexed
+session-capable harness. The existing `agents insights` spelling is an alias. Repeat
+`--agent` to compare a subset, use the standard `--host`/`--device` routing flags for a
+specific machine, and use `--json` for the structured report.
+
+The deterministic report runs offline and includes friction/thrash, owner corrections,
+automatable command recipes, the harness split, and a ranked actions table. Facets are
+cached in `session_insights` and invalidated by transcript mtime/size. Sample evidence is
+limited to shortened session ids; transcript text, credentials, and local paths are not
+included. `--narrative` is explicitly opt-in and sends only the aggregate report to the
+coach process.
+
+Agents can invoke the same source of truth through `/sessions-insights`; the slash entry
+is a thin command wrapper, not a second analyzer.
 
 ## Skill/plugin/slash-command usage (`session_resource_usage`)
 

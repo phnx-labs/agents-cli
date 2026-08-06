@@ -260,6 +260,8 @@ export interface GatherRemoteListOptions {
    * know whether the match is unique or conflicting.
    */
   isDefinitive?: (session: SessionMeta, machine: string) => boolean;
+  /** Per-peer deadline for slower indexed browse queries. */
+  timeoutMs?: number;
 }
 
 export async function gatherRemoteList(
@@ -272,6 +274,7 @@ export async function gatherRemoteList(
     args: forwardedArgs,
     noFanoutEnv: NO_FANOUT_ENV,
     hosts,
+    timeoutMs: opts?.timeoutMs,
     earlyExit: opts?.isDefinitive ? { isDefinitive: opts.isDefinitive } : undefined,
     parse: (stdout, machine): RemoteAgentsJsonParseResult<SessionMeta> =>
       parseRemoteListPayload(stdout, machine, safeResolver),

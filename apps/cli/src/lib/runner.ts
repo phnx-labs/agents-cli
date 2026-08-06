@@ -286,10 +286,9 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
   }
 
   if (config.agent === 'cursor') {
-    // cursor-agent supports --plan, but the capability registry has not been
-    // upgraded yet. RUSH-2101 tracks adding that read-only mode after PR #1721.
-    const cursorMode = resolveHeadlessMode('cursor', mode, false, `routine ${config.name}`);
-    if (cursorMode === 'skip') {
+    if (mode === 'plan') {
+      cmd.push('--plan');
+    } else if (mode === 'skip') {
       cmd.push('-f');
     } else {
       // The configured cwd is the user's workspace trust decision. --trust is

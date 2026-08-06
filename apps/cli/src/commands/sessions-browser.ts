@@ -40,6 +40,7 @@ import {
   remoteHostsToDial,
   matchesTeam,
   formatLiveStatusHeadline,
+  isRunningLiveSession,
   matchesLiveStatus,
   parseAgentFilter,
   type LiveStatusFilter,
@@ -138,6 +139,8 @@ function poolCacheKey(f: BrowserFilter): string {
 
 /** Pool size when a team filter is active; one team's rows can sit anywhere. */
 const WHOLE_TEAM_POOL_LIMIT = 5000;
+/** A cold peer may need to resolve an installed-version alias and scan its index. */
+const BROWSER_PEER_TIMEOUT_MS = 30_000;
 
 /** Ordered window cycle for the `W` key. `undefined` = all time. */
 const WINDOW_CYCLE: (string | undefined)[] = [undefined, '1d', '7d', '30d'];
@@ -387,7 +390,9 @@ async function fetchRawPool(
       // --in-team itself, which a peer on an older build would reject as an
       // unknown option and fail the whole fan-out.
       const forwarded = remotePoolArgs(f, fixedFilters);
-      const remoteResult = await gatherRemoteList(forwarded, remoteHosts);
+      const remoteResult = await gatherRemoteList(forwarded, remoteHosts, {
+        timeoutMs: BROWSER_PEER_TIMEOUT_MS,
+      });
       unreachable = remoteResult.unreachable;
       if (remoteResult.sessions.length > 0) rows = mergeLocalFirst([...rows, ...remoteResult.sessions], self);
     } catch {
@@ -497,7 +502,12 @@ export function mergeLiveIntoPool(
   rows: SessionMeta[],
   live: Map<string, ActiveSession>,
   self: string,
+  includeUnindexed = true,
 ): SessionMeta[] {
+  // A latest/oldest selector is resolved by the peer's transcript query. A live
+  // row absent from that result has no proof it belongs to the resolved version,
+  // so callers using an alias fail closed instead of widening the selector.
+  if (!includeUnindexed) return rows;
   const known = new Set(rows.map((r) => r.id));
   const extra: SessionMeta[] = [];
   for (const [key, a] of live) {
@@ -561,7 +571,15 @@ export function applyFilters(
     const cwd = process.cwd();
     out = out.filter((r) => !!r.cwd && (r.cwd === cwd || r.cwd.startsWith(cwd + '/')));
   }
-  if (f.running) out = out.filter((r) => live.has(r.id));
+  // The live registry retains dead rows so explicit --closed/--crashed filters
+  // can recover them. Bare --active means currently active; a lifecycle filter
+  // intentionally replaces that default predicate with its exact status union.
+  if (f.running && f.statuses.length === 0) {
+    out = out.filter((r) => {
+      const active = live.get(r.id);
+      return !!active && isRunningLiveSession(active);
+    });
+  }
   if (f.statuses.length > 0) {
     out = out.filter((r) => {
       const active = live.get(r.id);
@@ -587,8 +605,9 @@ export async function collectSessionCandidates(
     const { sessions } = await gatherActiveSessions({ local: opts.local ?? false, hosts });
     liveById = indexLiveRows(sessions, self);
   }
+  const includeUnindexedLive = !filter.agent?.match(/@(latest|oldest)$/);
   const rows = filter.running || opts.includeLive
-    ? mergeLiveIntoPool(pool.rows, liveById, self)
+    ? mergeLiveIntoPool(pool.rows, liveById, self, includeUnindexedLive)
     : pool.rows;
   const sessions = applyFilters(rows, liveById, filter, self, listFavorites());
   return { sessions, liveById, self, unreachable: pool.unreachable };
@@ -700,7 +719,10 @@ export async function runSessionBrowser(
     if (live) liveCache = live;
     // Live sessions the transcript pool lacks become rows of their own, so the
     // running view lists every active session, not just the ones already indexed.
-    const rows = f.running && live ? mergeLiveIntoPool(pool.rows, live, self) : pool.rows;
+    const includeUnindexedLive = !f.agent?.match(/@(latest|oldest)$/);
+    const rows = f.running && live
+      ? mergeLiveIntoPool(pool.rows, live, self, includeUnindexedLive)
+      : pool.rows;
     agentsInPool = distinct(rows.map((r) => r.agent));
     devicesInPool = distinct(rows.map((r) => r.machine ?? self));
     // Both ends of the lineage seed the cycle: teams a row spawned, and teams a

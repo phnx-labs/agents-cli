@@ -855,9 +855,9 @@ export function registerRunCommand(program: Command): void {
     .option('--no-tailscale', 'Force a public-IP lease even when a reuse context would default to Tailscale.')
     .option(
       '--cloud',
-      'Vendor cloud placement: dispatch to the agent\'s native cloud (claude→rush, codex→codex, droid→factory, antigravity→antigravity) and stream the result. Same dispatch as `agents cloud run --agent <agent>`; tracked by `agents cloud list/status/logs`. Same as --where cloud. Mutually exclusive with --host/--lease and local-run flags.',
+      'Vendor cloud placement: dispatch to the agent\'s native cloud (claude→rush, codex→codex, cursor→cursor, droid→factory, antigravity→antigravity) and stream the result. Same dispatch as `agents cloud run --agent <agent>`; tracked by `agents cloud list/status/logs`. Same as --where cloud. Mutually exclusive with --host/--lease and local-run flags.',
     )
-    .option('--provider <id>', 'With --cloud: override the agent\'s native cloud provider (rush | codex | factory | antigravity | host).')
+    .option('--provider <id>', 'With --cloud: override the agent\'s native cloud provider (rush | codex | cursor | factory | antigravity | host).')
     .option(
       '--repo <owner/repo>',
       'With --cloud: GitHub repository. Repeatable for multi-repo dispatch (Rush Cloud only).',
@@ -956,8 +956,8 @@ export function registerRunCommand(program: Command): void {
         Models (cheap|default|best|ultra): agents models <agent[@version]>
 
       Headless plan support (a prompt makes the run headless):
-        plan works headless on claude, codex, droid, opencode.
-        kimi, grok, cursor, antigravity have no headless plan mode — a headless
+        plan works headless on claude, codex, cursor, droid, opencode.
+        kimi, grok, antigravity have no headless plan mode — a headless
         --mode plan auto-downgrades to --mode auto (with a stderr warning).
         Interactive plan (omit the prompt) works everywhere it is listed.
 
@@ -2855,7 +2855,7 @@ export function registerRunCommand(program: Command): void {
       }
 
       // Default CLI mode is the generic 'plan'. Agents without a read-only
-      // mode (antigravity, cursor, kiro, …) degrade via resolveMode to their
+      // mode (antigravity, kiro, …) degrade via resolveMode to their
       // safest native mode (modes[0], typically edit). That covers both the
       // implicit default and an explicit `--mode plan`, so multi-agent
       // scripts can pass a uniform plan flag without per-agent branching.

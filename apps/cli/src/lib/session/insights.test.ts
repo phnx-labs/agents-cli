@@ -5,6 +5,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   computeInsightFacets,
   detectOverlap,
@@ -13,6 +15,7 @@ import {
   topEntries,
   mergeFacets,
   newFacetAccumulator,
+  buildInsightActions,
   type SessionSpan,
 } from './insights.js';
 import type { SessionEvent } from './types.js';
@@ -273,5 +276,34 @@ describe('topEntries', () => {
       { name: 'a', count: 2 },
       { name: 'b', count: 2 },
     ]);
+  });
+});
+
+describe('actions-forward analysis', () => {
+  it('classifies corrections, AskUserQuestion stalls, failed loops, and repeatable recipes', () => {
+    const fixture = JSON.parse(fs.readFileSync(
+      path.join(import.meta.dirname, 'testdata', 'insights-actions.json'), 'utf8',
+    )) as SessionEvent[];
+    const facets = computeInsightFacets(fixture, 0);
+
+    expect(facets.correctionSignals).toMatchObject({
+      'continue / keep going': 1,
+      'Ask stall: release / ship / deploy': 1,
+    });
+    expect(facets.frictionSignals).toMatchObject({
+      'CI red loop': 2,
+      'failed tool loop: exec_command': 1,
+    });
+    expect(facets.automationSignals['PR babysitting']).toBe(1);
+  });
+
+  it('emits deterministic actions with bounded, redacted session identifiers', () => {
+    const facets = computeInsightFacets([userMsg(0, 'did you merge?')], 0);
+    const actions = buildInsightActions([{ id: 'aaaaaaaa-secret-tail', facets }]);
+    expect(actions).toEqual([expect.objectContaining({
+      category: 'automation',
+      evidenceCount: 1,
+      sampleSessionIds: ['aaaaaaaa'],
+    })]);
   });
 });

@@ -54,7 +54,9 @@ import {
   percentile,
   bucketGaps,
   topEntries,
+  buildInsightActions,
   type InsightFacets,
+  type InsightAction,
   type SessionSpan,
 } from '../lib/session/insights.js';
 import { formatUsd } from '../lib/pricing/index.js';
@@ -69,11 +71,24 @@ interface InsightsOptions {
   since?: string;
   all?: boolean;
   account?: string;
-  agent?: string;
+  agent?: string[];
   by?: string;
   refresh?: boolean;
   narrative?: boolean;
   minMessages?: string;
+}
+
+function collectAgent(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
+function agentsFromArgv(argv: string[]): string[] {
+  const values: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--agent' && argv[i + 1]) values.push(argv[++i]);
+    else if (argv[i].startsWith('--agent=')) values.push(argv[i].slice('--agent='.length));
+  }
+  return values;
 }
 
 /** One reported group — an account by default, else an agent/project/day. */
@@ -244,7 +259,7 @@ function renderHours(hours: number[], out: string[]): void {
   out.push(`  ${chalk.gray('0h'.padEnd(6))}${chalk.gray('6h'.padEnd(6))}${chalk.gray('12h'.padEnd(6))}${chalk.gray('18h'.padEnd(5))}${chalk.gray('23h')}`);
 }
 
-function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta): void {
+function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, actions: InsightAction[], harnesses: Array<{ name: string; count: number }>): void {
   const out: string[] = [];
   const scope = meta.since ? `last ${meta.since}` : 'all time';
   out.push(chalk.bold('Insights') + chalk.gray(`  ${scope} · ${meta.analyzed} of ${meta.scanned} sessions`));
@@ -296,6 +311,23 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta): v
   const errs = topEntries(all.errorCategories, 6);
   if (errs.length > 0) {
     for (const e of errs) out.push(`    ${chalk.gray('·')} ${padToWidth(e.name, 16)} ${chalk.gray(String(e.count))}`);
+  }
+
+  renderCounts('Friction / thrash', topEntries(all.frictionSignals, 10), out);
+  renderCounts('Dissatisfaction / corrections', topEntries(all.correctionSignals, 10), out);
+  renderCounts('Automatable repeats', topEntries(all.automationSignals, 10), out);
+  renderCounts('Harness split', harnesses, out);
+
+  out.push('');
+  out.push(chalk.bold('Actions'));
+  if (actions.length === 0) {
+    out.push(chalk.gray('  No repeated action pattern met the evidence threshold in this window.'));
+  } else {
+    out.push(chalk.gray('  pri     category    evidence  sample sessions  action'));
+    for (const action of actions.slice(0, 12)) {
+      out.push(`  ${padToWidth(action.priority, 7)} ${padToWidth(action.category, 11)} ` +
+        `${String(action.evidenceCount).padStart(8)}  ${padToWidth(action.sampleSessionIds.join(', '), 25)} ${action.action}`);
+    }
   }
 
   // Output
@@ -431,11 +463,11 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
   if (options.refresh) clearSessionInsights();
 
   const filter: QueryOptions = { sinceMs };
-  if (options.agent) filter.agent = options.agent as QueryOptions['agent'];
   const scanned = querySessions(filter);
 
   const wanted = options.account?.toLowerCase();
   const inScope = scanned.filter((m) => {
+    if (options.agent?.length && !options.agent.includes(m.agent)) return false;
     if (!wanted) return true;
     return [m.accountKey, m.account, m.accountOrg]
       .some((v) => v?.toLowerCase().includes(wanted));
@@ -461,6 +493,15 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
   });
   const overlap = detectOverlap(spans);
   const groups = buildGroups(substantive, facetsById, dim);
+  const evidence = substantive.flatMap((m) => {
+    const facets = facetsById.get(m.id);
+    return facets ? [{ id: m.id, facets }] : [];
+  });
+  const actions = buildInsightActions(evidence);
+  const harnesses = topEntries(substantive.reduce<Record<string, number>>((counts, row) => {
+    counts[row.agent] = (counts[row.agent] ?? 0) + 1;
+    return counts;
+  }, {}), 20);
 
   if (options.json) {
     const payload = {
@@ -473,6 +514,8 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
       minMessages,
       by: dim,
       overlap,
+      actions,
+      harnesses,
       groups: groups.map((g) => ({
         key: g.key,
         label: g.label,
@@ -501,7 +544,7 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
     unreadable,
     minMessages,
     overlap,
-  });
+  }, actions, harnesses);
 
   if (options.narrative) {
     await renderNarrative(groups.map((g) => ({
@@ -517,20 +560,31 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
   }
 }
 
-export function registerInsightsCommand(program: Command): void {
-  const cmd = addHostOption(program.command('insights'))
-    .description('How you work — tools, friction, and rhythm, split by the account that did the work')
+function configureInsightsCommand(cmd: Command): void {
+  addHostOption(cmd)
+    .description('Analyze friction, corrections, repeated work, and actions across session harnesses')
     .option('--json', 'Output the full report as JSON')
     .option('--since <time>', 'Window: 7d, 4w, 3mo, an ISO date, or "all" (default 30d)')
     .option('--all', 'Every session ever indexed. Alias for --since all')
     .option('--by <dimension>', 'Group by: account (default), agent, project, or day')
     .option('--account <match>', 'Only sessions whose account key, email, or org contains this')
-    .option('--agent <id>', 'Only one harness (claude, codex, droid, …)')
+    .option('--agent <id>', 'Only these harnesses; repeat for more than one', collectAgent, [])
     .option('--min-messages <n>', 'Skip sessions under this many messages, both roles counted (default 2)')
     .option('--refresh', 'Discard cached facets and re-read every transcript')
     .option('--narrative', 'Add a written read on the numbers via a headless `claude -p`')
     .action(async (options: InsightsOptions) => {
-      await insightsAction(options);
+      const inherited = cmd.parent?.name() === 'sessions'
+        ? cmd.parent.opts() as Record<string, unknown>
+        : {};
+      const inheritedAgent = typeof inherited.agent === 'string' ? [inherited.agent] : [];
+      const rawAgents = agentsFromArgv(process.argv.slice(2));
+      await insightsAction({
+        ...inherited,
+        ...options,
+        agent: rawAgents.length > 0 ? rawAgents : [...inheritedAgent, ...(options.agent ?? [])],
+        json: options.json ?? inherited.json as boolean | undefined,
+        since: options.since ?? inherited.since as string | undefined,
+      });
     });
 
   setHelpSections(cmd, {
@@ -545,7 +599,7 @@ export function registerInsightsCommand(program: Command): void {
       agents insights --account "Turing Labs" --all
 
       # Machine-readable, for a dashboard or a slash command
-      agents insights --json
+      agents sessions insights --agent claude --agent codex --json
 
       # Add a written read on what to change
       agents insights --narrative
@@ -557,10 +611,18 @@ export function registerInsightsCommand(program: Command): void {
       The first run parses every in-scope transcript and caches the result; later runs
       re-read only files that changed. \`--refresh\` forces a full re-read.
 
-      Account attribution is Claude-only today. Sessions from other harnesses group
-      under \`unattributed:<agent>\`.
+      \`agents insights\` is the top-level alias of \`agents sessions insights\`.
+      Repeat \`--agent\` to compare several harnesses in one report.
 
       Everything except \`--narrative\` is local and makes no network calls.
     `,
   });
+}
+
+export function registerInsightsCommand(program: Command): void {
+  configureInsightsCommand(program.command('insights'));
+}
+
+export function registerSessionsInsightsCommand(sessions: Command): void {
+  configureInsightsCommand(sessions.command('insights'));
 }

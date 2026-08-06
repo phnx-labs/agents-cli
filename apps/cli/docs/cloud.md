@@ -5,10 +5,10 @@ Run agent tasks on remote infrastructure across multiple cloud backends, with un
 ## Overview
 
 `agents cloud` dispatches tasks to remote agent environments without requiring
-a local CLI session. **Each agent runs in its own cloud** — four providers ship
+a local CLI session. **Each agent runs in its own cloud** — five managed providers ship
 today: Rush Cloud (Claude against a GitHub repo → PR), Codex Cloud (pre-built
 Codex environments), Factory (Droid on a cloud Droid Computer), and Antigravity
-(Gemini Managed Agents). Pass `--agent` and the provider is auto-selected;
+(Gemini Managed Agents), plus Cursor Cloud Agents. Pass `--agent` and the provider is auto-selected;
 `--provider` overrides. Every dispatched task is tracked in a local SQLite store
 so `agents cloud list` shows the full history across all providers, and transient
 states (`queued`, `allocating`, `running`, `input_required`) are refreshed
@@ -29,6 +29,7 @@ in `~/.agents/agents.yaml` > `rush`.
 | `codex` | `codex` | `codex cloud exec` — first-class native CLI. |
 | `droid` | `factory` | Factory Droid Computer (cloud VM) via `droid computer ssh` + remote `droid exec`. |
 | `antigravity` | `antigravity` | Gemini Managed Agents Interactions API (remote sandbox). |
+| `cursor` | `cursor` | Cursor Cloud Agents v1 REST API (repo-backed or no-repo agent). |
 
 ### Dispatch from `agents run` — the `--cloud` placement
 
@@ -38,6 +39,7 @@ The same dispatch is a placement on `agents run`
 ```bash
 agents run claude "fix the flaky e2e" --cloud --repo acme/example
 agents run codex "add parser tests" --cloud --cloud-env env_a1b2c3
+agents run cursor "fix the flaky parser test" --cloud --repo acme/example
 agents run claude "…" --where cloud:codex   # one-door spelling (+ provider)
 ```
 
@@ -47,7 +49,7 @@ accepts `--provider`, `--repo` (repeatable), `--branch`, `--cloud-env` (run's
 `--env` stays the KEY=VAL passthrough), `--timeout`, `--model`, `--no-follow`,
 and `--json`; local-run flags (`--loop`, `--resume`, `--secrets`, `--terminal`,
 `--cwd`, account strategy, …) are rejected, not silently dropped. Agents with
-no native cloud (kimi, grok, cursor, opencode, …) fail loud with the capable
+no native cloud (kimi, grok, opencode, …) fail loud with the capable
 list unless `--provider` is given. Both surfaces call the shared dispatch core
 (`executeCloudDispatch` in `src/lib/cloud/dispatch.ts` via
 `src/commands/run-cloud.ts`), so tracking, streaming, and the budget
@@ -93,7 +95,7 @@ CLI (agents cloud run ...)
   │    reads cloud.default_provider  from ~/.agents/agents.yaml
   │    returns CloudProvider impl
   │
-  ├─ provider.dispatch(options)      rush.ts | codex.ts | factory.ts
+  ├─ provider.dispatch(options)      rush.ts | codex.ts | cursor.ts | factory.ts
   │    POST to remote API
   │    returns CloudTask { id, status, ... }
   │
@@ -110,7 +112,7 @@ agents cloud list
   └─ listStoredTasks({ provider, status, limit })
 
 agents cloud providers
-  └─ getAllProviders()                instantiate all three, report capabilities()
+  └─ getAllProviders()                instantiate every provider, report capabilities()
 ```
 
 ## Command Reference
@@ -130,8 +132,8 @@ agents cloud providers
 
 | Flag | Description |
 |---|---|
-| `--provider <id>` | Cloud backend: `rush`, `codex`, `factory` |
-| `--agent <name>` | Agent to run: `claude`, `codex`, `droid` |
+| `--provider <id>` | Cloud backend: `rush`, `codex`, `cursor`, `factory`, `antigravity`, `host` |
+| `--agent <name>` | Agent to run; native cloud routing includes `claude`, `codex`, `cursor`, `droid`, and `antigravity` |
 | `--repo <owner/repo>` | GitHub repository. Repeatable for multi-repo dispatch (Rush Cloud only) |
 | `--branch <name>` | Target git branch |
 | `-p, --prompt <text>` | Inline prompt (alternative to positional argument) |
@@ -170,7 +172,7 @@ agents cloud providers
 
 ## Providers
 
-Four providers are registered at startup (`src/lib/cloud/registry.ts`):
+Six providers, including the `host` machine backend, are registered at startup (`src/lib/cloud/registry.ts`):
 
 | ID | Name | Dispatch target | Multi-repo |
 |---|---|---|---|
@@ -178,6 +180,7 @@ Four providers are registered at startup (`src/lib/cloud/registry.ts`):
 | `codex` | Codex Cloud | Pre-built Codex environment (`--env`) | No — bundle the repos into the env |
 | `factory` | Factory (Droid) | Droid Computer (`--computer`) via relay SSH + `droid exec` | No |
 | `antigravity` | Antigravity (Gemini) | Gemini Managed Agents remote sandbox | No — raw sandbox, no repo → PR |
+| `cursor` | Cursor Cloud Agents | Cursor-hosted agent with optional GitHub repos | Yes — up to the API limit |
 
 The default provider is read from `cloud.default_provider` in
 `~/.agents/agents.yaml`. If unset, it falls back to `rush`. Note that an
@@ -197,6 +200,11 @@ API key comes from an `agents secrets` bundle named in
 `GOOGLE_API_KEY` in the env). It is a raw sandbox — no GitHub repo → PR; pass a
 repo and it routes you to `--provider rush` instead.
 
+**Cursor.** Talks directly to `https://api.cursor.com/v1`; it does not invoke
+`cursor-agent --cloud`. The API key comes from `CURSOR_API_KEY` in the
+`agents secrets` bundle named by `cloud.providers.cursor.secretsBundle`.
+Free-plan keys fail with a paid-plan requirement instead of a generic auth error.
+
 ### Provider configuration (`~/.agents/agents.yaml`)
 
 ```yaml
@@ -212,6 +220,8 @@ cloud:
     antigravity:
       secretsBundle: gemini.com   # agents secrets bundle holding GEMINI_API_KEY
       # model: antigravity-preview-05-2026   # optional managed-agent override
+    cursor:
+      secretsBundle: cursor    # agents secrets bundle holding CURSOR_API_KEY
 ```
 
 Rush Cloud uses the session token injected by `agents` — no separate config

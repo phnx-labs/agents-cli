@@ -16,13 +16,14 @@ import type { JobTrigger } from '../routines.js';
  *   - `codex`       — OpenAI Codex Cloud (`codex cloud exec`)
  *   - `factory`     — Factory Droid Computers (`droid computer ssh` + remote `droid exec`)
  *   - `antigravity` — Google Gemini Managed Agents (Interactions API)
+ *   - `cursor`      — Cursor Cloud Agents REST API
  *   - `host`        — a machine you own (`agents hosts` / `agents devices`), over SSH
  *
  * Agents route to their native cloud automatically (see `cloudProvider` in the
  * agent registry); `--provider` overrides. Nothing auto-routes to `host` — it
  * is always an explicit `--provider host` (or `--host <name>`) choice.
  */
-export type CloudProviderId = 'rush' | 'codex' | 'factory' | 'antigravity' | 'host';
+export type CloudProviderId = 'rush' | 'codex' | 'factory' | 'antigravity' | 'cursor' | 'host';
 
 /**
  * Lifecycle state of a cloud-dispatched task.
@@ -42,7 +43,7 @@ export type CloudTaskStatus =
   | 'cancelled';
 
 /** Cloud backends whose wire status is normalized by `normalizeProviderStatus`. */
-export type StatusNormalizingProvider = 'rush' | 'codex' | 'antigravity';
+export type StatusNormalizingProvider = 'rush' | 'codex' | 'antigravity' | 'cursor';
 
 /**
  * Normalize a provider's raw wire status into the canonical `CloudTaskStatus`.
@@ -73,6 +74,21 @@ export function normalizeProviderStatus(
       return normalizeCodexStatus(wireStatus ?? '');
     case 'antigravity':
       return normalizeAntigravityStatus(wireStatus);
+    case 'cursor':
+      return normalizeCursorStatus(wireStatus ?? '');
+  }
+}
+
+/** Cursor Cloud run status → canonical enum. Unknown non-terminal states remain running. */
+function normalizeCursorStatus(s: string): CloudTaskStatus {
+  switch (s.toUpperCase()) {
+    case 'CREATING': return 'queued';
+    case 'RUNNING': return 'running';
+    case 'FINISHED': return 'completed';
+    case 'ERROR':
+    case 'EXPIRED': return 'failed';
+    case 'CANCELLED': return 'cancelled';
+    default: return 'running';
   }
 }
 
@@ -364,6 +380,8 @@ export interface CloudProviderConfig {
    * environment. `model` overrides the default managed-agent id.
    */
   antigravity?: { secretsBundle?: string; model?: string };
+  /** Cursor Cloud Agents API. The API key remains in the named secrets bundle. */
+  cursor?: { secretsBundle?: string };
 }
 
 /** Top-level `cloud` section of agents.yaml. */

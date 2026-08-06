@@ -14,6 +14,7 @@ import { RushCloudProvider } from './rush.js';
 import { CodexCloudProvider } from './codex.js';
 import { FactoryCloudProvider } from './factory.js';
 import { AntigravityCloudProvider } from './antigravity.js';
+import { CursorCloudProvider } from './cursor.js';
 import { HostCloudProvider } from './host.js';
 import { getUserAgentsDir } from '../state.js';
 import { AGENTS } from '../agents.js';
@@ -54,6 +55,7 @@ function initProviders(): void {
   providers.set('codex', new CodexCloudProvider(config.providers?.codex));
   providers.set('factory', new FactoryCloudProvider(config.providers?.factory));
   providers.set('antigravity', new AntigravityCloudProvider(config.providers?.antigravity));
+  providers.set('cursor', new CursorCloudProvider(config.providers?.cursor));
   // Your own machines (agents hosts / agents devices) over SSH. No agent
   // auto-routes here — it's always an explicit --provider host / --host choice.
   providers.set('host', new HostCloudProvider());

@@ -78,6 +78,7 @@ import { registerSessionsImportCommand } from './sessions-import.js';
 import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
 import { registerSessionsBackfillCommand } from './sessions-backfill.js';
 import { registerSessionsStatsCommand } from './sessions-stats.js';
+import { registerSessionsInsightsCommand } from './insights.js';
 import { registerSessionsOptimizeCommand } from './sessions-optimize.js';
 import { runBrowserSessions } from '../lib/browser/sessions-list.js';
 import {
@@ -671,6 +672,20 @@ export function isAwaitingUser(s: ActiveSession): boolean {
   if (s.status === 'crashed' || s.status === 'closed') return false;
   if (s.status === 'abandoned' && s.pidAlive !== true) return false;
   return s.status === 'input_required' || s.activity === 'waiting_input';
+}
+
+/**
+ * Whether a row belongs in an unqualified `--active` view.
+ *
+ * The live registry deliberately retains terminally-dead rows long enough for
+ * `--closed` / `--crashed` and recovery to find them. Presence in that registry
+ * therefore is not, by itself, evidence that a session is still active.
+ * Explicit lifecycle filters bypass this predicate and select those retained
+ * rows through {@link matchesLiveStatus} instead.
+ */
+export function isRunningLiveSession(s: ActiveSession): boolean {
+  if (s.status === 'closed' || s.status === 'crashed') return false;
+  return s.pidAlive !== false;
 }
 
 /** Width of the live status column — `crashed` is the longest word it renders. */
@@ -1448,7 +1463,7 @@ async function renderActiveSessions(
   // gate: exit non-zero when the union contains a session awaiting the user.
   const statusFiltered = opts.statuses?.length
     ? merged.filter((session) => opts.statuses!.some((status) => matchesLiveStatus(session, status)))
-    : merged;
+    : merged.filter(isRunningLiveSession);
   const sessions = statusFiltered;
 
   // Backfill agent version + ticket/PR/label/created onto the live rows from the
@@ -4605,6 +4620,7 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsMigrationsCommand(sessionsCmd);
   registerSessionsBackfillCommand(sessionsCmd);
   registerSessionsStatsCommand(sessionsCmd);
+  registerSessionsInsightsCommand(sessionsCmd);
   registerSessionsOptimizeCommand(sessionsCmd);
 
   // Observe-umbrella alias (Phase 3): roster → sessions --active.

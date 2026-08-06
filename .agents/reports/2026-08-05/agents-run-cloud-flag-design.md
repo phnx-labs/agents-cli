@@ -31,7 +31,7 @@ both flags. There is no "cloud run on a host": placement is chosen once.
 and follow-up messaging across rush / codex / factory / antigravity / host,
 with agent auto-routing via the `cloudProvider` field on the agent registry.
 The alternative — appending each harness's native flag (`claude --cloud`,
-`codex exec --cloud`, `cursor-agent --cloud`) — was rejected: sessions would
+`codex exec --cloud`, or a nonexistent `cursor-agent --cloud`) — was rejected: sessions would
 live outside `agents cloud list/status/logs/cancel/message`, tracking would be
 uneven per vendor, and the flag would silently mean a different backend per
 agent.
@@ -42,7 +42,7 @@ agent.
 |---|---|---|
 | claude | `claude --cloud "<prompt>"` (hidden flag, docs 2026-08-04; Anthropic infra, claude.ai/code; needs claude.ai sub auth) | `rush` (unchanged by this spec) |
 | codex | `codex cloud exec` / `codex exec --cloud` | `codex` (provider already wraps the native CLI) |
-| cursor | `cursor-agent --cloud` (since 2026-03) | **none yet** — fails loud until a cursor provider lands (follow-up) |
+| cursor | Cursor Cloud Agents REST API (`api.cursor.com/v1`) | `cursor` (added by RUSH-2228) |
 | droid | Factory pods | `factory` |
 | antigravity | Gemini Managed Agents | `antigravity` |
 | kimi | none found (kimi-cli is local-only; kimi-agent-sdk is programmatic, not cloud) | unsupported — fail loud |
@@ -108,7 +108,7 @@ agents run <agent> [prompt] --cloud [--provider <id>] [--repo <owner/repo>]...
   has no headless Anthropic-hosted dispatch CLI") — `claude --cloud` now
   exists; record that routing to `rush` is deliberate (this doc).
 - Tests (real path, no mocks): registry routing for each capable agent
-  (claude→rush, codex→codex, droid→factory, antigravity→antigravity), the
+  (claude→rush, codex→codex, cursor→cursor, droid→factory, antigravity→antigravity), the
   unsupported-agent error, each placement-conflict rejection, `--where cloud`
   equivalence. Next to source per repo convention.
 - Docs: `apps/cli/docs/` run reference + `docs/00-concepts.md#placement`,
@@ -116,9 +116,8 @@ agents run <agent> [prompt] --cloud [--provider <id>] [--repo <owner/repo>]...
 
 ## Follow-ups (not in this spec)
 
-- **Cursor provider** wrapping `cursor-agent --cloud`, then
-  `cloudProvider: 'cursor'` on the cursor registry entry — capability flips to
-  supported only in the same PR as the real code path (repo rule).
+- **Cursor provider:** completed by RUSH-2228 through the Cursor Cloud Agents
+  REST API; no `cursor-agent --cloud` wrapper exists or is used.
 - **Kimi / Grok**: no native cloud exists for either; revisit if Moonshot or
   xAI ships one.
 - **Native claude provider** (`claude --cloud` → claude.ai/code) as an

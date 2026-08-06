@@ -37,6 +37,8 @@ import {
   fleetDivergenceToFindings,
   signInToFindings,
   renderFindings,
+  remediationFor,
+  FINDING_SEVERITY,
   type DoctorFinding,
   type LocalFindingInputs,
 } from '../lib/devices/doctor-findings.js';
@@ -72,7 +74,7 @@ import { listCliStatus, listCliStatusAsync } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
 import { heal, healChangedAnything, type HealResult } from '../lib/heal.js';
 import { getEffectiveExecutionPolicy } from '../lib/platform/winpath.js';
-import { scanUserRcFiles } from '../lib/secrets/rc-hygiene.js';
+import { scanUserRcFiles, masterPassphraseInEnv } from '../lib/secrets/rc-hygiene.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import { readRepoBehindMarkers, type FetchStatusMarker } from '../lib/auto-pull.js';
 import * as fs from 'fs';
@@ -167,6 +169,82 @@ interface DeviceDoctorResult {
    *  divergence detection (RUSH-2027). Undefined when the inventory probe failed
    *  or the remote is an older CLI that doesn't emit the `fleet` field. */
   inventory?: FleetInventory;
+  /** Secret-hygiene findings the remote reported about ITSELF. The aggregator
+   *  can recompute a remote's sign-in and divergence findings from its
+   *  inventory, but it cannot see that box's shell rc files or process
+   *  environment — only the remote's own doctor can, so those two ride back
+   *  here or they are lost (RUSH-1968). */
+  secretFindings?: DoctorFinding[];
+}
+
+/** What one remote `doctor --json` contributes: its inventory (for the
+ *  divergence comparator) plus the findings only it can observe. */
+interface RemoteDoctorPayload {
+  inventory: FleetInventory | null;
+  secretFindings: DoctorFinding[];
+}
+
+/**
+ * Narrow a remote `findings` array to the secret-hygiene rows, or `[]`.
+ *
+ * Deliberately NOT "forward every remote finding". The aggregator already
+ * rebuilds a remote's sign-in rows from its inventory and its divergence rows
+ * from the comparator, so forwarding wholesale would double them; and pulling a
+ * remote's orphan/drift rows into a fleet readout is a much larger UX change
+ * than this fix. The two secret kinds are the ones that are BOTH unrecomputable
+ * centrally and security-relevant, which is exactly why they were being lost.
+ *
+ * **The remote contributes exactly one thing: the KIND.** Severity, message and
+ * remediation are all generated HERE. That is not defensiveness for its own
+ * sake — the remote runs its own agents-cli, whose version and integrity we do
+ * not control, and each forwarded string is load-bearing in a different way:
+ *
+ *   - `remediation` is a command a human copies and runs. Accepting it from the
+ *     wire is an injection channel, full stop.
+ *   - `message` is the one place a secret VALUE could re-enter a readout that
+ *     otherwise guarantees it never prints one. A local builder cannot leak what
+ *     it never receives.
+ *   - `severity` decides the CRITICAL section, so a remote could otherwise
+ *     promote its own warning and bury real criticals under it.
+ *   - `device` is overwritten with the name we dialled, so no box can pin a
+ *     finding on another.
+ *
+ * The cost is detail: the fleet row says which box and which kind, not which
+ * file and line. Run `agents doctor` on that box for the specifics — the
+ * message says so.
+ */
+const REMOTE_FORWARDED_KINDS = ['rc-secret-export', 'env-secret-export'] as const;
+type RemoteForwardedKind = typeof REMOTE_FORWARDED_KINDS[number];
+
+/** Canonical, locally-authored text for a forwarded kind. Never the remote's. */
+const REMOTE_SECRET_MESSAGE: Record<RemoteForwardedKind, string> = {
+  'rc-secret-export': 'a credential-shaped export was found in this box\'s shell rc files'
+    + ' — run `agents doctor` there for the file and line',
+  'env-secret-export': 'AGENTS_SECRETS_PASSPHRASE is set in this box\'s process environment'
+    + ' — run `agents doctor` there for detail',
+};
+
+export function asRemoteSecretFindings(raw: unknown, device: string): DoctorFinding[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: DoctorFinding[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const kind = (item as Record<string, unknown>).kind;
+    if (typeof kind !== 'string') continue;
+    if (!(REMOTE_FORWARDED_KINDS as readonly string[]).includes(kind)) continue;
+    if (seen.has(kind)) continue;   // one row per kind per box
+    seen.add(kind);
+    const k = kind as RemoteForwardedKind;
+    const base = {
+      severity: FINDING_SEVERITY[k],
+      kind: k as DoctorFinding['kind'],
+      device,
+      message: REMOTE_SECRET_MESSAGE[k],
+    };
+    out.push({ ...base, remediation: remediationFor({ ...base, remediation: '' }) });
+  }
+  return out;
 }
 
 interface FleetTarget {
@@ -256,7 +334,22 @@ async function probeFleetTarget(target: FleetTarget): Promise<DeviceDoctorResult
  * null (unreachable, non-zero exit, unparseable, or an older CLI with no
  * `fleet` field); a null is skipped by the comparator, never a false gap.
  */
-async function probeFleetInventory(target: FleetTarget): Promise<FleetInventory | null> {
+/**
+ * How long one remote `doctor --json` probe may take.
+ *
+ * 180s, matching `ChildProcess.doctorTimeout`, which was set to 180 for this
+ * same command for this same reason. The previous 30s sat BELOW the command's
+ * real cost — 56s measured on `yosemite-m0`, 136s on an idle box — so every slow
+ * device silently contributed nothing at all: no inventory, no sign-in, no
+ * divergence, no secret findings. A ceiling under the true cost does not make a
+ * probe cheap, it makes it always fail.
+ *
+ * This does not multiply by device count: `fanOutDevices` is `Promise.all`, so
+ * whole-fleet wall time is bounded near the slowest box, not 180s x N.
+ */
+export const FLEET_INVENTORY_TIMEOUT_MS = 180_000;
+
+async function probeFleetInventory(target: FleetTarget): Promise<RemoteDoctorPayload | null> {
   const isWin = /^win/i.test((target.os ?? '').trim());
   const remoteCmd = buildRemoteAgentsInvocation(
     ['doctor', '--json'],
@@ -264,11 +357,14 @@ async function probeFleetInventory(target: FleetTarget): Promise<FleetInventory 
     isWin ? 'windows' : undefined,
     isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
   );
-  const res = await sshExecAsync(target.sshTarget, remoteCmd, { timeoutMs: 30000, multiplex: true });
+  const res = await sshExecAsync(target.sshTarget, remoteCmd, { timeoutMs: FLEET_INVENTORY_TIMEOUT_MS, multiplex: true });
   if (res.code !== 0) return null;
   try {
-    const parsed = JSON.parse(res.stdout) as { fleet?: unknown };
-    return asFleetInventory(parsed.fleet);
+    const parsed = JSON.parse(res.stdout) as { fleet?: unknown; findings?: unknown };
+    return {
+      inventory: asFleetInventory(parsed.fleet),
+      secretFindings: asRemoteSecretFindings(parsed.findings, target.name),
+    };
   } catch {
     return null;
   }
@@ -361,17 +457,20 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
     fanOutDevices(targets, probeFleetTarget),
     fanOutDevices(targets, probeFleetInventory),
   ]);
-  const inventoryByName = new Map<string, FleetInventory | null>();
-  for (const r of inventoryResults) inventoryByName.set(r.name, r.status === 'ok' ? (r.value ?? null) : null);
+  const payloadByName = new Map<string, RemoteDoctorPayload | null>();
+  for (const r of inventoryResults) payloadByName.set(r.name, r.status === 'ok' ? (r.value ?? null) : null);
   results.push(...remoteResults.map((r): DeviceDoctorResult => {
-    const inventory = inventoryByName.get(r.name) ?? undefined;
-    if (r.status === 'ok' && r.value) return { ...r.value, inventory: inventory ?? undefined };
+    const payload = payloadByName.get(r.name) ?? null;
+    const inventory = payload?.inventory ?? undefined;
+    const secretFindings = payload?.secretFindings;
+    if (r.status === 'ok' && r.value) return { ...r.value, inventory, secretFindings };
     return {
       name: r.name,
       online: false,
       error: r.error ?? String(r.reason ?? 'skipped'),
       agents: {},
-      inventory: inventory ?? undefined,
+      inventory,
+      secretFindings,
     };
   }));
 
@@ -431,6 +530,7 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
         duplicateHooks: inspectDuplicateVersionHooks(cwd),
         hostClis: toHostCliInput(listCliStatus(cwd)),
         rcSecrets: scanUserRcFiles(),
+        masterPassphraseInEnv: masterPassphraseInEnv(),
         execPolicy: process.platform === 'win32'
           ? { platform: process.platform, policy: getEffectiveExecutionPolicy() }
           : undefined,
@@ -453,6 +553,11 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
       });
       continue;
     }
+    // Secret hygiene the aggregator cannot see for itself — the remote's shell
+    // rc files and its process environment. Without this the fleet readout
+    // reports a leaking box as clean (RUSH-1968).
+    if (r.secretFindings?.length) findings.push(...r.secretFindings);
+
     if (r.inventory?.signIn) {
       findings.push(...signInToFindings(r.name, r.inventory.signIn));
       accounts[r.name] = r.inventory.signIn;
@@ -1610,6 +1715,7 @@ export function registerDoctorCommand(program: Command): void {
           duplicateHooks,
           hostClis: toHostCliInput(hostClis),
           rcSecrets: scanUserRcFiles(),
+          masterPassphraseInEnv: masterPassphraseInEnv(),
           // getEffectiveExecutionPolicy spawns powershell — a doomed process on
           // POSIX, where the advisory never applies. Probe only on Windows.
           execPolicy: process.platform === 'win32'

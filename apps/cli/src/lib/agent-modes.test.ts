@@ -20,13 +20,12 @@ describe('getAgentModesCatalog', () => {
     expect(cat.headlessPlan).toBe(true);
   });
 
-  it('lists only edit/skip for cursor and notes plan degrade', () => {
+  it('lists plan/edit/skip for cursor with --plan flag', () => {
     const cat = getAgentModesCatalog('cursor');
-    expect(cat.modes.map((m) => m.mode)).toEqual(['edit', 'skip']);
-    expect(cat.defaultMode).toBe('edit');
-    expect(cat.unsupported).toContain('plan');
-    expect(cat.unsupported).toContain('auto');
-    expect(cat.notes.some((n) => n.includes('plan degrades'))).toBe(true);
+    expect(cat.modes.map((m) => m.mode)).toEqual(['plan', 'edit', 'skip']);
+    expect(cat.defaultMode).toBe('plan');
+    expect(cat.unsupported).toEqual(['auto']);
+    expect(cat.modes.find((m) => m.mode === 'plan')!.flags).toEqual(['--plan']);
     expect(cat.modes.find((m) => m.mode === 'skip')!.flags).toEqual(['-f']);
   });
 

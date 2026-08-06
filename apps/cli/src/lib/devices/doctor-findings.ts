@@ -23,7 +23,7 @@
  *              never-synced · stale · repo-behind · repo-drift · version-skew ·
  *              fleet-resource-gap · orphan · duplicate-hook ·
  *              duplicate-hook-drift · host-cli-missing · host-cli-invalid ·
- *              rc-secret-export · exec-policy · stale-cli.
+ *              rc-secret-export · env-secret-export · exec-policy · stale-cli.
  *   (RUSH-2162 moved never-synced and duplicate-hook-drift to WARNING: both are
  *   stale-sync states one `agents sync` resolves, not "needs you now".)
  *
@@ -115,6 +115,7 @@ export const ALL_FINDING_KINDS = [
   'duplicate-hook',      // one hook materialized in several version homes, byte-identical
   'duplicate-hook-drift',// …with differing content, so a stale copy can disagree
   'rc-secret-export',    // credential-shaped export in a shell rc file
+  'env-secret-export',   // the file-store master key live in THIS process's env
   'exec-policy',         // Windows execution policy blocks agents.ps1
   'stale-cli',
 ] as const;
@@ -155,6 +156,7 @@ export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
   'host-cli-missing': 'warning',
   'host-cli-invalid': 'warning',
   'rc-secret-export': 'warning',
+  'env-secret-export': 'warning',
   'exec-policy': 'warning',
   'stale-cli': 'warning',
 };
@@ -291,6 +293,11 @@ export function remediationFor(finding: DoctorFinding): string {
       return 'fix the manifest';
     case 'rc-secret-export':
       return 'agents secrets add';
+    case 'env-secret-export':
+      // Not just "restart the shell": the value is in every long-lived parent
+      // that inherited it — an editor, a tmux server, the agents daemon — and
+      // each keeps handing it to new children until IT restarts.
+      return 'unset at the source, then restart every process that inherited it (shells, editor, tmux, agents daemon)';
     case 'exec-policy':
       return 'Set-ExecutionPolicy -Scope CurrentUser RemoteSigned';
     case 'stale-cli':
@@ -365,6 +372,12 @@ export interface LocalFindingInputs {
   duplicateHooks?: DuplicateVersionHook[];
   /** Credential-shaped exports found in the user's shell rc files (RUSH-1968). */
   rcSecrets?: RcSecretFinding[];
+  /** True when the file-store master key is live in THIS process's environment.
+   *  Distinct from `rcSecrets`, which scans FILES: a value inherited by a
+   *  long-lived process survives deleting the rc line that set it, so the rc
+   *  scan reports clean while the leak is still in flight (RUSH-1968). Never the
+   *  value — only whether it is set. */
+  masterPassphraseInEnv?: boolean;
   /** The effective PowerShell execution policy and the platform it was read on.
    *  Only `win32` yields a finding — the `agents.ps1` launcher is Windows-only. */
   execPolicy?: { platform: NodeJS.Platform; policy: string | null };
@@ -563,6 +576,10 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
   // into `agents secrets`.
   for (const f of rcSecretFindings(device, input.rcSecrets ?? [])) out.push(f);
 
+  // The same key, live in this process's environment rather than in a file.
+  const envFinding = envSecretFinding(device, input.masterPassphraseInEnv ?? false);
+  if (envFinding) out.push(envFinding);
+
   // Windows execution policy blocking the generated agents.ps1 launcher.
   const policyFinding = execPolicyFinding(device, input.execPolicy);
   if (policyFinding) out.push(policyFinding);
@@ -686,6 +703,32 @@ function rcSecretFindings(device: string, rc: RcSecretFinding[]): DoctorFinding[
  * policy itself. Returns null off Windows or on a permissive policy — pure, so
  * both branches are testable without invoking PowerShell.
  */
+/**
+ * The file-store master key sitting in THIS process's environment.
+ *
+ * `rc-hygiene.ts` scans FILES, which leaves a real hole: a value inherited by a
+ * long-lived process outlives the rc line that set it, so an operator who
+ * deletes `~/.zshenv:8` gets a clean `rc-secret-export` while every shell,
+ * editor and agent started before the edit still carries the key — and hands it
+ * to everything they spawn. Verified on a box with no rc export whose live
+ * environment still held the value, hashing identical to its key file.
+ *
+ * Warning, not critical: on the release home base the export is deliberate and
+ * scoped (`headless-sign-context.sh`), so the message names that exception
+ * rather than the check trying to detect it.
+ */
+function envSecretFinding(device: string, present: boolean): DoctorFinding | null {
+  if (!present) return null;
+  return finding({
+    severity: FINDING_SEVERITY['env-secret-export'], kind: 'env-secret-export', device,
+    // Never the value — only that it is set.
+    message: 'AGENTS_SECRETS_PASSPHRASE is set in this process environment — every '
+      + 'child inherits it and any same-user process can read it from /proc/<pid>/environ. '
+      + 'It outlives the shell rc line that set it, so deleting that line is not enough. '
+      + '(Expected inside a release sign context, which sets it deliberately.)',
+  });
+}
+
 function execPolicyFinding(
   device: string,
   execPolicy: LocalFindingInputs['execPolicy'],
@@ -1019,6 +1062,7 @@ function warningSubject(f: DoctorFinding): string {
   if (f.kind === 'stale-cli') return 'agents-cli';
   if (f.kind === 'orphan') return 'orphans';
   if (f.kind === 'rc-secret-export') return 'shell rc';
+  if (f.kind === 'env-secret-export') return 'environment';
   if (f.kind === 'exec-policy') return 'PowerShell';
   if (f.kind === 'fleet-resource-gap') return 'fleet gap';
   if (f.kind === 'host-cli-missing') return 'host CLIs';

@@ -113,6 +113,10 @@ export interface InsightFacets {
   assistantTurns: number;
   toolCount: number;
   errorCount: number;
+  /** Deterministic evidence buckets used by the actions-forward report. */
+  frictionSignals: Record<string, number>;
+  correctionSignals: Record<string, number>;
+  automationSignals: Record<string, number>;
 }
 
 function emptyFacets(): InsightFacets {
@@ -124,6 +128,7 @@ function emptyFacets(): InsightFacets {
     shellCommandsSeen: 0,
     messageHours: new Array(24).fill(0), userTurns: 0, assistantTurns: 0,
     toolCount: 0, errorCount: 0,
+    frictionSignals: {}, correctionSignals: {}, automationSignals: {},
   };
 }
 
@@ -208,6 +213,7 @@ export function computeInsightFacets(
   // a reply latency. It censors 5.5% of gaps, and `gapsOverCeiling` reports how many so
   // the number is never quietly truncated.
   let lastAssistantTs: number | null = null;
+  let lastFailedTool: string | null = null;
 
   for (const e of events) {
     const ts = new Date(e.timestamp).getTime();
@@ -226,6 +232,13 @@ export function computeInsightFacets(
 
       case 'error':
         bump(f.errorCategories, categorizeError(e.content ?? e.output ?? ''));
+        if (e.tool && e.tool === lastFailedTool) bump(f.frictionSignals, `failed tool loop: ${e.tool}`);
+        lastFailedTool = e.tool ?? null;
+        classifyFriction(e.content ?? e.output ?? '', f.frictionSignals);
+        break;
+
+      case 'tool_result':
+        if (e.success !== false && e.outcome !== 'error') lastFailedTool = null;
         break;
 
       case 'message':
@@ -234,6 +247,7 @@ export function computeInsightFacets(
           break;
         }
         if (e.role !== 'user') break;
+        if (!e._synthetic) classifyCorrection(e.content ?? '', f.correctionSignals);
         if (hasTs) {
           // Local-time hour. parse.ts falls back to `new Date()` for a record with no
           // timestamp; those are indistinguishable here, but they are rare and would
@@ -258,6 +272,7 @@ export function computeInsightFacets(
         if (hasTs) lastAssistantTs = ts;
         const args = e.args ?? {};
         const toolName = e.tool ?? '';
+        if (/askuserquestion/i.test(toolName)) classifyAskStall(args, f.correctionSignals);
         // Keyed on the SHARED cross-harness vocabulary, not Claude's literals. Keying
         // on 'Edit'|'MultiEdit'|'Write' meant codex (whose vocabulary is exec /
         // exec_command / write_stdin) reported 5,197 tool calls and exactly zero lines
@@ -278,6 +293,7 @@ export function computeInsightFacets(
           f.shellCommandsSeen++;
           f.gitCommits += countGitOp(e.command, 'commit');
           f.gitPushes += countGitOp(e.command, 'push');
+          classifyAutomation(e.command, f.automationSignals);
         }
         break;
       }
@@ -288,6 +304,57 @@ export function computeInsightFacets(
   }
 
   return f;
+}
+
+const FRICTION_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/blocked by|guard(?:rail)? (?:blocked|denied)|permission denied/i, 'blocked guard'],
+  [/\b(?:ci|check|workflow)\b.*\b(?:red|fail(?:ed|ure)?)\b|\b(?:red|failed)\b.*\bci\b/i, 'CI red loop'],
+  [/merge conflict|conflict in |CONFLICT \(/i, 'merge conflict'],
+];
+
+const CORRECTION_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\b(?:continue|keep going|don'?t stop)\b/i, 'continue / keep going'],
+  [/\b(?:yes|go ahead|do it|merge it)\b/i, 'approval repeated'],
+  [/\b(?:are we done|done end.to.end|what(?:'s| is) left)\b/i, 'done end-to-end?'],
+  [/\b(?:did you merge|merged\??)\b/i, 'did you merge?'],
+  [/\bwhat(?:'s| is) next\??\b/i, "what's next?"],
+  [/\b(?:check now|check again|try now|did it work)\b/i, 'check now'],
+  [/\b(?:don'?t ask|just do it|run what)\b/i, "don't ask / just do it"],
+];
+
+const AUTOMATION_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\bgh pr (?:checks|view|merge)\b/i, 'PR babysitting'],
+  [/\bagents secrets (?:list|exec|unlock|export)\b/i, 'secrets unlock dance'],
+  [/\bgit (?:fetch|rebase|merge|push)\b/i, 'git reconcile recipe'],
+  [/\b(?:scp|rsync|agents ssh)\b/i, 'fleet file transfer'],
+  [/\b(?:release\.sh|deploy\.sh|npm publish)\b/i, 'release / deploy recipe'],
+];
+
+function classifyFriction(text: string, counts: Record<string, number>): void {
+  for (const [pattern, label] of FRICTION_PATTERNS) if (pattern.test(text)) bump(counts, label);
+}
+
+function classifyCorrection(text: string, counts: Record<string, number>): void {
+  const normalized = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  for (const [pattern, label] of CORRECTION_PATTERNS) if (pattern.test(normalized)) bump(counts, label);
+}
+
+function classifyAskStall(args: Record<string, unknown>, counts: Record<string, number>): void {
+  const text = JSON.stringify(args).toLowerCase();
+  const categories: ReadonlyArray<readonly [RegExp, string]> = [
+    [/release|ship|deploy|publish/, 'Ask stall: release / ship / deploy'],
+    [/what'?s next|next step|next move/, "Ask stall: what's next?"],
+    [/merge|reconcile|rebase/, 'Ask stall: merge / reconcile'],
+    [/direction|approach|implementation/, 'Ask stall: direction / approach'],
+  ];
+  for (const [pattern, label] of categories) {
+    if (pattern.test(text)) { bump(counts, label); return; }
+  }
+  bump(counts, 'AskUserQuestion');
+}
+
+function classifyAutomation(command: string, counts: Record<string, number>): void {
+  for (const [pattern, label] of AUTOMATION_PATTERNS) if (pattern.test(command)) bump(counts, label);
 }
 
 /** Percentile of a numeric sample, nearest-rank. Returns 0 for an empty sample. */
@@ -373,6 +440,9 @@ export function mergeFacets(into: InsightFacets, add: InsightFacets): void {
   for (const [k, v] of Object.entries(add.languages)) bump(into.languages, k, v);
   for (const [k, v] of Object.entries(add.slashCommands)) bump(into.slashCommands, k, v);
   for (const [k, v] of Object.entries(add.errorCategories)) bump(into.errorCategories, k, v);
+  for (const [k, v] of Object.entries(add.frictionSignals ?? {})) bump(into.frictionSignals, k, v);
+  for (const [k, v] of Object.entries(add.correctionSignals ?? {})) bump(into.correctionSignals, k, v);
+  for (const [k, v] of Object.entries(add.automationSignals ?? {})) bump(into.automationSignals, k, v);
   into.interruptions += add.interruptions;
   into.responseGaps.push(...add.responseGaps);
   into.gapsOverCeiling += add.gapsOverCeiling;
@@ -406,4 +476,89 @@ export function topEntries(
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
     .slice(0, limit);
+}
+
+export type InsightActionCategory = 'rule' | 'skill' | 'automation' | 'product';
+
+export interface InsightAction {
+  priority: 'high' | 'medium' | 'low';
+  category: InsightActionCategory;
+  action: string;
+  evidenceCount: number;
+  sampleSessionIds: string[];
+}
+
+export interface SessionFacetEvidence {
+  id: string;
+  facets: InsightFacets;
+}
+
+/** Build a stable, evidence-backed action list without exposing transcript text. */
+export function buildInsightActions(sessions: SessionFacetEvidence[]): InsightAction[] {
+  const specs: Array<{
+    source: keyof Pick<InsightFacets, 'frictionSignals' | 'correctionSignals' | 'automationSignals'>;
+    label: string;
+    category: InsightActionCategory;
+    action: string;
+  }> = [
+    { source: 'correctionSignals', label: 'continue / keep going', category: 'rule', action: 'Keep working through the delivery chain without waiting for another “continue”.' },
+    { source: 'correctionSignals', label: 'approval repeated', category: 'rule', action: 'Treat the original build or ship request as authorization for routine follow-through.' },
+    { source: 'correctionSignals', label: 'done end-to-end?', category: 'rule', action: 'Verify the user-visible outcome before declaring the task complete.' },
+    { source: 'correctionSignals', label: 'did you merge?', category: 'automation', action: 'Automate PR review, CI watching, and merge-on-green as one durable workflow.' },
+    { source: 'correctionSignals', label: "what's next?", category: 'rule', action: 'State and execute the next in-scope step instead of asking the owner to steer implementation.' },
+    { source: 'correctionSignals', label: 'check now', category: 'automation', action: 'Add bounded status polling with a terminal success or failure signal.' },
+    { source: 'correctionSignals', label: "don't ask / just do it", category: 'rule', action: 'Reserve questions for genuine product or scope choices.' },
+    { source: 'correctionSignals', label: 'Ask stall: release / ship / deploy', category: 'skill', action: 'Teach release workflows to carry publish, tag, rollout, and live verification as one chain.' },
+    { source: 'correctionSignals', label: "Ask stall: what's next?", category: 'rule', action: 'Remove workflow-stall “what next?” prompts from agent guidance.' },
+    { source: 'correctionSignals', label: 'Ask stall: merge / reconcile', category: 'skill', action: 'Encode the safe merge and reconcile path in the git workflow skill.' },
+    { source: 'correctionSignals', label: 'Ask stall: direction / approach', category: 'rule', action: 'Let agents choose implementation details after scope is clear.' },
+    { source: 'frictionSignals', label: 'blocked guard', category: 'product', action: 'Make guard failures return the safe next command and exact blocked operation.' },
+    { source: 'frictionSignals', label: 'CI red loop', category: 'automation', action: 'Deduplicate CI watchers and turn repeated red checks into one stateful wait.' },
+    { source: 'frictionSignals', label: 'merge conflict', category: 'skill', action: 'Standardize conflict diagnosis and fix-forward reconciliation.' },
+    { source: 'automationSignals', label: 'PR babysitting', category: 'automation', action: 'Bundle PR checks, review collection, comment handling, and merge-on-green.' },
+    { source: 'automationSignals', label: 'secrets unlock dance', category: 'product', action: 'Provide one headless secrets-backed command path for repeated credential operations.' },
+    { source: 'automationSignals', label: 'git reconcile recipe', category: 'skill', action: 'Promote repeated git reconciliation commands into the canonical workflow.' },
+    { source: 'automationSignals', label: 'fleet file transfer', category: 'product', action: 'Add a first-class fleet file transfer command with host/path validation.' },
+    { source: 'automationSignals', label: 'release / deploy recipe', category: 'automation', action: 'Turn repeated release shell recipes into a checked-in release script.' },
+  ];
+
+  const actions: InsightAction[] = [];
+  for (const spec of specs) {
+    let evidenceCount = 0;
+    const ids: string[] = [];
+    for (const session of sessions) {
+      const count = session.facets[spec.source]?.[spec.label] ?? 0;
+      if (count <= 0) continue;
+      evidenceCount += count;
+      if (ids.length < 3) ids.push(session.id.slice(0, 8));
+    }
+    if (evidenceCount === 0) continue;
+    actions.push({
+      priority: evidenceCount >= 10 ? 'high' : evidenceCount >= 3 ? 'medium' : 'low',
+      category: spec.category,
+      action: spec.action,
+      evidenceCount,
+      sampleSessionIds: ids,
+    });
+  }
+  let failedLoopCount = 0;
+  const failedLoopIds: string[] = [];
+  for (const session of sessions) {
+    const count = Object.entries(session.facets.frictionSignals ?? {})
+      .filter(([label]) => label.startsWith('failed tool loop:'))
+      .reduce((sum, [, value]) => sum + value, 0);
+    if (count <= 0) continue;
+    failedLoopCount += count;
+    if (failedLoopIds.length < 3) failedLoopIds.push(session.id.slice(0, 8));
+  }
+  if (failedLoopCount > 0) {
+    actions.push({
+      priority: failedLoopCount >= 10 ? 'high' : failedLoopCount >= 3 ? 'medium' : 'low',
+      category: 'automation',
+      action: 'Detect repeated failures of the same tool and stop the retry loop with a different recovery path.',
+      evidenceCount: failedLoopCount,
+      sampleSessionIds: failedLoopIds,
+    });
+  }
+  return actions.sort((a, b) => b.evidenceCount - a.evidenceCount || a.action.localeCompare(b.action));
 }

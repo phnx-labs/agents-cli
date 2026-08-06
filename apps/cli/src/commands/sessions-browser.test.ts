@@ -169,6 +169,31 @@ describe('applyFilters — shared browser/focus selection', () => {
     expect(result.map((session) => session.id)).toEqual(['orphan', 'working']);
   });
 
+  it('keeps retained dead rows out of bare --active while explicit lifecycle filters can select them', () => {
+    const rows = [row({ id: 'working' }), row({ id: 'closed' }), row({ id: 'crashed' })];
+    const live = new Map<string, ActiveSession>([
+      ['working', { context: 'terminal', kind: 'claude', status: 'running', pidAlive: true, sessionId: 'working' } as ActiveSession],
+      ['closed', { context: 'terminal', kind: 'claude', status: 'closed', pidAlive: false, sessionId: 'closed' } as ActiveSession],
+      ['crashed', { context: 'terminal', kind: 'claude', status: 'crashed', pidAlive: false, sessionId: 'crashed' } as ActiveSession],
+    ]);
+
+    expect(applyFilters(
+      rows,
+      live,
+      { ...base, running: true, projectScope: 'all' },
+      'zion',
+      new Set(),
+    ).map((session) => session.id)).toEqual(['working']);
+
+    expect(applyFilters(
+      rows,
+      live,
+      { ...base, running: true, statuses: ['closed', 'crashed'], projectScope: 'all' },
+      'zion',
+      new Set(),
+    ).map((session) => session.id)).toEqual(['closed', 'crashed']);
+  });
+
   it('does not treat a synced mirror as a peer-resolved latest result', () => {
     const rows = [
       row({ id: 'mirror', machine: 'yosemite-s0', version: '2.1.187' }),
@@ -450,6 +475,15 @@ describe('mergeLiveIntoPool — running is a SOURCE of rows, not an intersection
   it('leaves the pool untouched when nothing live is missing from it', () => {
     const rows = [row({ id: 'local-1' })];
     expect(mergeLiveIntoPool(rows, new Map(), 'zion')).toBe(rows);
+  });
+
+  it('does not widen a peer-resolved latest/oldest selector with unindexed live rows', () => {
+    const indexed = row({ id: 'indexed', machine: 'yosemite-s0', version: '2.1.219', _remote: true });
+    const unindexed = live({ sessionId: 'unindexed', machine: 'yosemite-s0', status: 'running' });
+    const liveIndex = indexLiveRows([unindexed], 'zion');
+
+    expect(mergeLiveIntoPool([indexed], liveIndex, 'zion', false)).toEqual([indexed]);
+    expect(mergeLiveIntoPool([indexed], liveIndex, 'zion', true).map((session) => session.id)).toContain('unindexed');
   });
 });
 

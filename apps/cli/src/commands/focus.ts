@@ -25,6 +25,7 @@ import {
   filterSessionsByQuery,
   formatLiveStatusHeadline,
   formatPickerLabel,
+  isRunningLiveSession,
   pickerColumnsFor,
   resumeSessionInPlace,
   resolveSessionMetadataValue,
@@ -356,7 +357,7 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
 
 /** A retained pane is not attachable merely because tmux can still display it. */
 export function isAttachableLiveSession(session: ActiveSession): boolean {
-  return session.pidAlive !== false && session.status !== 'closed' && session.status !== 'crashed';
+  return isRunningLiveSession(session);
 }
 
 const FOCUS_AGENT_SHORTHANDS = ['claude', 'codex', 'kimi', 'antigravity', 'grok', 'opencode'] as const;

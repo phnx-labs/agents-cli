@@ -16,7 +16,7 @@ import {
 
 describe('cloudCapableAgentIds', () => {
   it('is exactly the agents with a native cloudProvider in the registry', () => {
-    expect(cloudCapableAgentIds()).toEqual(['antigravity', 'claude', 'codex', 'droid']);
+    expect(cloudCapableAgentIds()).toEqual(['antigravity', 'claude', 'codex', 'cursor', 'droid']);
   });
 });
 
@@ -26,10 +26,11 @@ describe('resolveRunCloudProvider', () => {
     expect(resolveRunCloudProvider('codex').id).toBe('codex');
     expect(resolveRunCloudProvider('droid').id).toBe('factory');
     expect(resolveRunCloudProvider('antigravity').id).toBe('antigravity');
+    expect(resolveRunCloudProvider('cursor').id).toBe('cursor');
   });
 
   it('fails loud for agents with no native cloud, naming the capable set', () => {
-    for (const agent of ['kimi', 'grok', 'cursor', 'opencode']) {
+    for (const agent of ['kimi', 'grok', 'opencode']) {
       expect(() => resolveRunCloudProvider(agent)).toThrow(RunCloudError);
       expect(() => resolveRunCloudProvider(agent)).toThrow(/has no native cloud/);
       expect(() => resolveRunCloudProvider(agent)).toThrow(/claude/);

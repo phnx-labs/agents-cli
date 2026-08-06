@@ -1,0 +1,7 @@
+[
+  {"type":"message","agent":"codex","timestamp":"2026-07-01T12:00:00.000Z","role":"user","content":"continue, keep going"},
+  {"type":"tool_use","agent":"codex","timestamp":"2026-07-01T12:00:01.000Z","tool":"AskUserQuestion","args":{"header":"release","question":"Should I publish and deploy?"}},
+  {"type":"tool_use","agent":"codex","timestamp":"2026-07-01T12:00:02.000Z","tool":"exec_command","args":{"cmd":"gh pr checks 42 --watch"},"command":"gh pr checks 42 --watch"},
+  {"type":"error","agent":"codex","timestamp":"2026-07-01T12:00:03.000Z","tool":"exec_command","content":"CI check failed: red"},
+  {"type":"error","agent":"codex","timestamp":"2026-07-01T12:00:04.000Z","tool":"exec_command","content":"CI check failed: red"}
+]
