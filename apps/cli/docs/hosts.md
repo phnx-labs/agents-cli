@@ -313,7 +313,8 @@ agents run <agent> ["<task>"] --host <host>
 > survived and RESUMES the session in place when the pane is already gone (so a
 > reattach landing after the pane died recovers the agent instead of dead-ending at
 > a bare shell — RUSH-2085), with bounded exponential backoff (2s→30s, up to 6
-> attempts; the budget refills after a genuinely live reconnection). A clean detach
+> attempts; the budget refills after a genuinely live reconnection — one that
+> reached the host **and** held the pane for at least 10 seconds). A clean detach
 > (`Ctrl-b d`, exit 0) or a real agent exit (any non-255 code) is left alone, and
 > `--raw`/no-tmux runs are not retried (they don't survive a drop). If every attempt
 > fails the CLI prints the manual **`agents reconnect <id>`** to get back in once the
@@ -333,9 +334,20 @@ agents run <agent> ["<task>"] --host <host>
 > 254 before this process sees it — so a remote-side path that happened to exit
 > 255 for its own reasons would never be mistaken for the link dropping again.
 > This closes a channel-level flaw (any future remote-side 255 producer would
-> have been indistinguishable from a real drop) rather than a confirmed live
-> bug; a genuinely recurring *local* ssh failure can still refill the retry
-> budget on every attempt by design (that part is unchanged).
+> have been indistinguishable from a real drop) rather than a confirmed live bug.
+>
+> **A recurring *local* ssh failure is bounded too (#1884).** The retry budget
+> refills only on a reattach that reached the host **and** held the pane for at
+> least 10 seconds, timed on the attach alone (the reachability probe has already
+> returned by then). A fast-flapping link — or an attach that dies at TTY
+> negotiation on every reconnect — therefore drains the budget like an unreachable
+> host instead of refilling it forever, and the loop gives up with a message that
+> names what actually happened ("kept dropping again within 10 seconds of getting
+> back in"), not the unreachable-host "couldn't reconnect". The floor is
+> deliberately a *hold* requirement rather than a flat cap on total attempts: any
+> fixed total would eventually strand the all-day-blinking session this feature
+> exists for, while the hold floor only ever stops a loop that is failing to put
+> you back into the agent.
 >
 > Pass `--name <slug>` at dispatch to give the run a durable handle instead of an
 > opaque id: `agents hosts ps` shows it under a **NAME** column, and
