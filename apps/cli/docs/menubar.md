@@ -169,8 +169,8 @@ One rule shapes the menu: **attention floats up, context groups down.**
  │ New Session                                ⌘N │   submenu: one entry per agent
  ├────────────────────────────────────────────────┤
  │ ACTIVE · 3 run · 1 idle · 2 projects          │   projects collapsed by default
- │   ▶ agents-cli  ●2 ◐1  zion                   │   accordion: ▶ folds agents open
- │   ▼ web  ●1  zion                             │
+│   ▶ agents-cli  ●2 working ○1 idle  zion      │   accordion: ▶ folds agents open
+│   ▼ web  ●1 working  zion                     │
  │     ● Codex · zion · 12m  ⌥ PR#42 — title   › │   › side submenu = full detail
  ├────────────────────────────────────────────────┤
  │ ROUTINES · 16 · next 7:00 PM · 2 paused       │   next few upcoming + failing
