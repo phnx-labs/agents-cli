@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as path from "path";
 import { parseRunResult, parseTask } from "./schema.js";
 
 describe("bench schemas", () => {
@@ -17,7 +18,7 @@ describe("bench schemas", () => {
       "/repo/apps/cli/bench/tasks/hello-repo/task.json",
     );
     expect(task.fixtureDir).toBe(
-      "/repo/apps/cli/bench/tasks/hello-repo/fixture",
+      path.join("/repo/apps/cli/bench/tasks/hello-repo", "fixture"),
     );
     expect(task.pass).toHaveLength(4);
   });

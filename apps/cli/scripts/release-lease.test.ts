@@ -414,7 +414,7 @@ describeWin('release-lease: status', () => {
  * run, and killing it is the external kill. Faking liveness would prove nothing,
  * since the whole mechanism is a live `ps` probe.
  */
-describe('release-lease: a killed holder must not wedge the pipeline', () => {
+describeWin('release-lease: a killed holder must not wedge the pipeline', () => {
   const victims: ChildProcess[] = [];
 
   /** A real, live process to stand in for a running release.sh. */
@@ -540,7 +540,7 @@ describe('release-lease: a killed holder must not wedge the pipeline', () => {
   });
 });
 
-describe('release-lease: clear', () => {
+describeWin('release-lease: clear', () => {
   it('drops a lease whose holder was killed, without starting a release', async () => {
     const p = spawn('sleep', ['300'], { stdio: 'ignore' });
     lease(boxA, ['claim', '1.20.82'], { RELEASE_LEASE_HOLDER_PID: String(p.pid) });

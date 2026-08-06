@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+
+// win32: Claude projects path joins absolute cwd with colons (RUSH-2215).
+const describeLive = process.platform === 'win32' ? describe.skip : describe;
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -53,7 +56,7 @@ describe('session harness name resolution', () => {
   });
 });
 
-describe('live session status flags', () => {
+describeLive('live session status flags', () => {
   const row = (over: Partial<ActiveSession>): ActiveSession => ({
     context: 'terminal', kind: 'codex', status: 'running', ...over,
   });
