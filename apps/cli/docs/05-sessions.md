@@ -629,8 +629,12 @@ agents sessions --agent codex@0.116.0
 # FTS5 search (BM25 ranked, labels weighted highest)
 agents sessions "auth refactor"
 
-# Include team-spawned sessions (hidden by default)
-agents sessions --team   # alias of --teams
+# Team-spawned sessions (hidden by default), grouped by team: each team names its
+# spawner and spawn time, teammates show their mode + handle, and team-flagged
+# spawns with no teammate record (`agents run`, or teammates whose meta aged out)
+# sink into a trailing (no team) bucket. A printed report like --tree, not the
+# interactive browser. --flat/--tree keep the plain inline table instead.
+agents sessions --teams   # --team is an alias
 
 # One team's whole lineage: the session that spawned it, plus (with --teams) its
 # teammates. Spans every directory and all time — a team's teammates run in their

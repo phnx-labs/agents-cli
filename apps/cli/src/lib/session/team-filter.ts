@@ -40,7 +40,7 @@ export function classifyTeamSession(session: SessionMeta): TeamOrigin | null {
   if (origin) return origin;
 
   if (session.isTeamOrigin) {
-    return { handle: session.id.slice(0, 8) };
+    return { handle: session.id.slice(0, 8), source: 'entrypoint' };
   }
 
   return null;
@@ -61,11 +61,15 @@ function readTeamOrigin(metaPath: string, agentId: string): { origin: TeamOrigin
         mode: str(meta.mode),
         team: str(meta.task_name),
         parentSessionId: str(meta.parent_session_id),
+        startedAt: str(meta.started_at),
+        source: 'meta',
       },
       sessionId: str(meta.remote_session_id),
     };
   } catch {
-    return { origin: { handle: agentId.slice(0, 8) } };
+    // An unreadable meta.json still lives under the teams agents dir, so the
+    // session IS a teammate — mark the source accordingly, just without fields.
+    return { origin: { handle: agentId.slice(0, 8), source: 'meta' } };
   }
 }
 
@@ -143,7 +147,8 @@ export function enrichTeamOrigins(sessions: SessionMeta[]): SessionMeta[] {
     if (session.teamOrigin) return session;
 
     const origin =
-      index.get(session.id) ?? (session.isTeamOrigin ? { handle: session.id.slice(0, 8) } : null);
+      index.get(session.id) ??
+      (session.isTeamOrigin ? { handle: session.id.slice(0, 8), source: 'entrypoint' as const } : null);
     return origin ? { ...session, teamOrigin: origin } : session;
   });
 }
@@ -181,4 +186,115 @@ export function filterTeamSessions(
   }
 
   return { visible, hiddenCount };
+}
+
+/**
+ * Whether a team-origin session is a real `agents teams` teammate or a bare SDK
+ * sub-agent (a `Task` / `Agent()` spawn). The two share the `sdk-cli` entrypoint
+ * that sets `isTeamOrigin`, so they are told apart only by whether a `meta.json`
+ * teammate record backs the origin ({@link TeamOrigin.source} === `'meta'`).
+ */
+export function teamRowKind(origin: TeamOrigin | undefined): 'teammate' | 'subagent' {
+  return origin?.source === 'meta' ? 'teammate' : 'subagent';
+}
+
+/** A team-origin session with its resolved {@link TeamOrigin} guaranteed present. */
+type TeamSession = SessionMeta & { teamOrigin: TeamOrigin };
+
+/**
+ * Key/label for the residual bucket — sessions flagged `isTeamOrigin` (an SDK /
+ * `sdk-cli` entrypoint) that carry no teammate `meta.json`. In practice this is
+ * headless `agents run` spawns and teammates whose team record aged out; a true
+ * `Task` sub-agent's transcript is never indexed, so it cannot land here. Named
+ * "(no team)" rather than "(sub-agents)" so the label matches what it holds.
+ */
+export const NO_TEAM_GROUP_KEY = '(no team)';
+/** Key/label for teammates whose record carries no team name (`task_name`). */
+export const UNNAMED_TEAM_KEY = '(unnamed team)';
+
+/** One team's sessions, grouped for the `agents sessions --teams` view. */
+export interface TeamSessionGroup {
+  /**
+   * The grouping key: the team name, {@link UNNAMED_TEAM_KEY} for teammates that
+   * carry no `task_name`, or {@link NO_TEAM_GROUP_KEY} for the residual bucket.
+   */
+  key: string;
+  /** A named team of `agents teams` teammates vs the catch-all no-team bucket. */
+  kind: 'team' | 'noTeam';
+  /** Team name when this is a named team, else undefined. */
+  team?: string;
+  /**
+   * The orchestrator session id that spawned this team (`parent_session_id`),
+   * when every teammate agrees on one. Undefined for the no-team bucket, an
+   * unparented team, or a group whose teammates disagree.
+   */
+  spawnerSessionId?: string;
+  /** The team's rows, newest-active first. */
+  sessions: TeamSession[];
+  /** Most-recent activity across the group, for ordering groups. */
+  maxTs: string;
+  /** Earliest spawn time across the group (`started_at`, else `timestamp`). */
+  firstSpawnTs: string;
+}
+
+/** Recency signal for a row: last activity, else the creation timestamp. */
+function rowTs(s: SessionMeta): string {
+  return s.lastActivity ?? s.timestamp;
+}
+
+/** Spawn time for a row: the meta `started_at`, else the transcript creation time. */
+function spawnTs(s: TeamSession): string {
+  return s.teamOrigin.startedAt ?? s.timestamp;
+}
+
+/**
+ * Group team-origin sessions for the `--teams` view: each named team becomes one
+ * group of its teammates, and every bare SDK spawn with no teammate record falls
+ * into a single trailing {@link NO_TEAM_GROUP_KEY} bucket, so a real teammate and
+ * a bare spawn are never shown as the same thing.
+ *
+ * Only rows with a resolved {@link TeamOrigin} participate (the caller has
+ * already run {@link filterTeamSessions}); any non-team session is ignored.
+ * Groups are ordered newest-active first; sub-agents always sort last. Pure —
+ * unit-tested.
+ */
+export function groupSessionsByTeam(sessions: SessionMeta[]): TeamSessionGroup[] {
+  const byKey = new Map<string, TeamSession[]>();
+  for (const s of sessions) {
+    if (!s.teamOrigin) continue;
+    const kind = teamRowKind(s.teamOrigin);
+    const key =
+      kind === 'subagent'
+        ? NO_TEAM_GROUP_KEY
+        : safeTeamText(s.teamOrigin.team) ?? UNNAMED_TEAM_KEY;
+    const ts = s as TeamSession;
+    (byKey.get(key) ?? byKey.set(key, []).get(key)!).push(ts);
+  }
+
+  const groups: TeamSessionGroup[] = [];
+  for (const [key, rows] of byKey) {
+    rows.sort((a, b) => (rowTs(a) < rowTs(b) ? 1 : rowTs(a) > rowTs(b) ? -1 : 0));
+    const kind = key === NO_TEAM_GROUP_KEY ? 'noTeam' : 'team';
+    // A single agreed-on spawner names the orchestrator for the whole team; a
+    // mix (or none) leaves it unset rather than claiming a wrong parent.
+    const parents = new Set(
+      rows.map((r) => r.teamOrigin.parentSessionId).filter((p): p is string => !!p),
+    );
+    groups.push({
+      key,
+      kind,
+      team: kind === 'team' && key !== UNNAMED_TEAM_KEY ? key : undefined,
+      spawnerSessionId: parents.size === 1 ? [...parents][0] : undefined,
+      sessions: rows,
+      maxTs: rowTs(rows[0]),
+      firstSpawnTs: rows.map(spawnTs).sort()[0],
+    });
+  }
+
+  // Newest-active team first; the no-team bucket always sinks to the bottom.
+  groups.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === 'noTeam' ? 1 : -1;
+    return a.maxTs < b.maxTs ? 1 : a.maxTs > b.maxTs ? -1 : a.key.localeCompare(b.key);
+  });
+  return groups;
 }

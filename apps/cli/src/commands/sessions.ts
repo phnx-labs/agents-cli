@@ -39,7 +39,13 @@ import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { inferSessionState } from '../lib/session/state.js';
 import { discoverSessions, queryIndexedSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, scopeToManaged, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { findSessionsById, querySessions, getSessionById } from '../lib/session/db.js';
-import { filterTeamSessions, safeTeamText } from '../lib/session/team-filter.js';
+import {
+  filterTeamSessions,
+  safeTeamText,
+  groupSessionsByTeam,
+  NO_TEAM_GROUP_KEY,
+  type TeamSessionGroup,
+} from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
 import { formatRelativeTime, formatCompactAge, sessionAgeParts, type SessionAgeParts } from '../lib/session/relative-time.js';
@@ -2120,7 +2126,13 @@ async function sessionsAction(
   // filter the browser can't represent), or --no-interactive keep the existing
   // printed/render paths (agents and scripts unaffected). An explicit --since seeds
   // the browser's window so the flag is honored, not swallowed.
-  if (isBareBrowserListing(options, query)) {
+  //
+  // `--teams` diverts to the printed team-grouped report (printTeamsView, below):
+  // grouping teammates under their team is a shape the flat fuzzy picker cannot
+  // represent, so like --tree it is a printed listing, not an interactive pick.
+  // --teams --flat/--tree keep their inline table rendering; a search query keeps
+  // the picker so `<term> --teams` still searches.
+  if (isBareBrowserListing(options, query) && !options.teams) {
     const { runSessionBrowser, bareBrowserSeed } = await import('./sessions-browser.js');
     await runSessionBrowser(
       bareBrowserSeed({
@@ -2468,6 +2480,16 @@ async function sessionsAction(
       if (hiddenUnmanaged > 0) {
         console.log(chalk.gray(formatUnmanagedHiddenFooter(hiddenUnmanaged)));
       }
+      return;
+    }
+
+    // `--teams` prints the team-grouped report: teammates under their team (with
+    // spawner + spawn time), bare SDK spawns in their own bucket. --flat/--tree
+    // keep their inline table rendering; a search query keeps the picker. Placed
+    // before the project overview and picker so it wins the bare `--teams` case.
+    if (options.teams && !options.flat && !options.tree && !searchQuery && !pathFilter) {
+      const liveIndex = await maybeLiveIndex(options);
+      printTeamsView(sessions, liveIndex, hiddenUnmanaged);
       return;
     }
 
@@ -2878,6 +2900,129 @@ function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = fals
   if (hiddenCount > 0) {
     console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
   }
+}
+
+/** Width of the mode cell (plan/edit/auto/skip) in a team-member row. */
+const TEAM_MODE_W = 5;
+/** Longest teammate handle folded into a team-member row before it truncates. */
+const TEAM_HANDLE_W = 16;
+
+/**
+ * One row under a team group: `shortId · agent · mode · handle · doing · time`.
+ * Unlike {@link flatSessionRow}/{@link treeSessionRow} it drops the
+ * `[team/handle]` topic prefix — the group header already names the team — and
+ * promotes the teammate's mode and handle to their own cells, the richer
+ * identity the `--teams` view exists to show (RUSH-1997).
+ */
+function teamMemberRow(session: SessionMeta, live?: ActiveSession): string {
+  const agentColor = colorAgent(session.agent);
+  const origin = session.teamOrigin;
+  const age = sessionAgeParts(session.timestamp, session.lastActivity);
+  const handle = safeTeamText(origin?.handle) ?? session.shortId;
+  const mode = safeTeamText(origin?.mode) ?? '';
+  const { glyph, preview } = liveGlyphAndPreview(live);
+  // Match flatSessionRow: a live preview already folds ActiveSession.todos; a
+  // resting row surfaces SessionMeta.todos when the scan attached it.
+  const restingTodo = !live ? formatTodoCompact(session.todos) : '';
+  const doing = [restingTodo, preview || session.topic || ''].filter(Boolean).join(' · ');
+  const shownHandle = truncateToWidth(handle, TEAM_HANDLE_W);
+  const head = doing ? `${shownHandle} · ${doing}` : shownHandle;
+  const badges = signalBadges(metaSignals(session));
+  const badgeW = badges ? stringWidth(badges) + 1 : 0;
+  const { cell: statusCell, width: statusW } = liveStatusCell(live);
+  const glyphW = glyph ? 2 : 0;
+  const baseTopicW =
+    terminalWidth() - (2 + 9 + 8 + (TEAM_MODE_W + 1)) - glyphW - statusW - badgeW - stringWidth(age.last) - 1;
+  const when = timeCell(age, baseTopicW);
+  const topicW = Math.max(12, baseTopicW - when.extraW);
+  return (
+    '  ' +
+    chalk.dim(padToWidth(session.shortId, 9)) +
+    agentColor(padToWidth(truncateToWidth(session.agent, 7), 8)) +
+    chalk.yellow(padToWidth(mode || '-', TEAM_MODE_W + 1)) +
+    (badges ? badges + ' ' : '') +
+    (glyph ? glyph + ' ' : '') +
+    statusCell +
+    padToWidth(chalk.white(truncateToWidth(head, topicW)), topicW) +
+    ' ' +
+    when.text
+  );
+}
+
+/** The header line for one team group (or the residual no-team bucket). */
+function teamGroupHeader(g: TeamSessionGroup, glyph: string, labelById: Map<string, string>): string {
+  const count = chalk.gray(`(${g.sessions.length})`);
+  if (g.kind === 'noTeam') {
+    // These carry the isTeamOrigin flag but no teammate meta.json — a Task
+    // sub-agent's transcript is never indexed, so in practice this bucket is
+    // headless `agents run` spawns or teammates whose meta aged out. Named
+    // honestly rather than claimed as real teammates.
+    return (
+      chalk.magenta('▸') + ' ' + chalk.magenta.bold(NO_TEAM_GROUP_KEY) + '  ' + count +
+      '  ' + chalk.gray('team-flagged spawns with no team record (`agents run`, or aged-out teammates)')
+    );
+  }
+  const bits = [chalk.cyan('▸') + ' ' + chalk.cyan.bold(g.key), count];
+  if (glyph) bits.push(glyph);
+  if (g.spawnerSessionId) {
+    const who = labelById.get(g.spawnerSessionId) ?? g.spawnerSessionId.slice(0, 8);
+    bits.push(chalk.gray(`by ${who}`));
+  }
+  bits.push(chalk.gray(`spawned ${formatRelativeTime(g.firstSpawnTs)}`));
+  return bits.join('  ');
+}
+
+/**
+ * The `agents sessions --teams` view: team-origin sessions grouped by team, the
+ * richer display RUSH-1997 asks for. Each named team names its spawner (the
+ * orchestrator session that created it) and spawn time, with its teammates'
+ * mode + handle under it; team-flagged spawns that carry no teammate record fall
+ * into a trailing no-team bucket, so a real teammate and a bare spawn are never
+ * conflated. A printed report like `--tree`, not an interactive pick.
+ */
+function printTeamsView(
+  pool: SessionMeta[],
+  liveIndex: Map<string, ActiveSession> | undefined,
+  hiddenUnmanaged = 0,
+): void {
+  const groups = groupSessionsByTeam(pool);
+  if (groups.length === 0) {
+    console.log(chalk.gray('No team sessions found.'));
+    console.log(chalk.gray('Team sessions are spawned by `agents teams` — see `agents teams status`.'));
+    return;
+  }
+
+  // Resolve a spawner session id to its human label from the pool. The
+  // orchestrator may or may not be in view; fall back to the short id, the same
+  // degradation the --active teams rows use (active.ts resolveOrchestratorLabels).
+  const labelById = new Map<string, string>();
+  for (const s of pool) {
+    const label = (s as any).label || s.topic;
+    if (label) labelById.set(s.id, cleanPreview(label));
+  }
+
+  const total = groups.reduce((n, g) => n + g.sessions.length, 0);
+  const teamCount = groups.filter((g) => g.kind === 'team').length;
+  const noTeam = groups.find((g) => g.kind === 'noTeam');
+  const parts = [
+    `${total} team session${total === 1 ? '' : 's'}`,
+    `${teamCount} team${teamCount === 1 ? '' : 's'}`,
+  ];
+  if (noTeam) parts.push(`${noTeam.sessions.length} without a team record`);
+  console.log(chalk.gray(parts.join(' · ') + '\n'));
+
+  let first = true;
+  for (const g of groups) {
+    if (!first) console.log();
+    first = false;
+    const { glyph } = liveGlyphAndPreview(liveIndex?.get(g.sessions[0].id));
+    console.log(teamGroupHeader(g, glyph, labelById));
+    for (const s of g.sessions) console.log(teamMemberRow(s, liveIndex?.get(s.id)));
+  }
+
+  console.log();
+  console.log(chalk.gray('newest-active team first · resume any row with `agents sessions resume <id>`'));
+  if (hiddenUnmanaged > 0) console.log(chalk.gray(formatUnmanagedHiddenFooter(hiddenUnmanaged)));
 }
 
 function buildFilterOptions(options: SessionsOptions): FilterOptions {
@@ -4453,7 +4598,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--opencode', 'Shorthand for --agent opencode')
     .option('--all', 'Widen every non-status filter to "all": every directory (not just this project) and all time (no window cap). Status filters like --active still compose; -a/--device/--since still narrow their axis.')
     .option('--unmanaged', "Also show sessions from your own ~/.<agent> installs (hidden once agents-cli manages that agent)")
-    .option('--team, --teams', 'Include team-spawned sessions (hidden by default)')
+    .option('--team, --teams', 'Show team-spawned sessions (hidden by default), grouped by team — each team names its spawner and spawn time, teammates show their mode + handle, and bare SDK spawns sink into a sub-agents bucket. --flat/--tree keep the plain inline table')
     .option('--in-team <name>', "Only this team: the session that spawned it plus (with --teams) its teammates. Spans every directory and all time, since a team's worktrees and history sit outside the default window.")
     .option('--routine', 'Show only sessions archived from routine runs')
     .option('-p, --project <name>', 'Filter by project name (searches across all directories)')
@@ -4538,6 +4683,10 @@ export function registerSessionsCommands(program: Command): void {
 
       # Search across every directory, not just this project
       agents sessions "topic" --all
+
+      # Team-spawned sessions, grouped by team (spawner + spawn time per team,
+      # teammate mode/handle per row; bare SDK spawns in a sub-agents bucket)
+      agents sessions --teams
 
       # Who spawned which team: an orchestrator row carries team:<name>, and a
       # teammate row [<team>/<handle>]. --in-team narrows to one team's lineage.

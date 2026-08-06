@@ -133,6 +133,24 @@ export interface TeamOrigin {
    * meta dir has aged past the teams cleanup window.
    */
   parentSessionId?: string;
+  /**
+   * Spawn time (`started_at` in the teammate meta.json) — when `agents teams`
+   * launched this teammate. Distinct from the session's own `timestamp` (first
+   * transcript line), and present even before the harness writes a transcript.
+   * Absent for the entrypoint-only fallback (no meta record).
+   */
+  startedAt?: string;
+  /**
+   * How this origin was established, which is what separates a real
+   * `agents teams` teammate from a plain SDK sub-agent (a `Task` / `Agent()`
+   * spawn). Both carry the `sdk-cli` entrypoint that sets `isTeamOrigin`, so the
+   * entrypoint flag alone cannot tell them apart — only a teammate has a
+   * `meta.json` under the teams agents dir.
+   *   - `'meta'`     — a teammate: read from its `meta.json` record.
+   *   - `'entrypoint'` — an SDK spawn with no team record (a sub-agent, or a
+   *                      teammate whose meta dir aged past the cleanup window).
+   */
+  source?: 'meta' | 'entrypoint';
 }
 
 /** Lightweight metadata for a discovered session, used in listings and pickers. */
