@@ -557,26 +557,34 @@ healthy `running: yes`. `agents menubar setup` is the recovery path — it ends
 every live helper and re-kickstarts the service so the survivor is always
 launchd's.
 
-**Skew never tears down a LIVE helper — only a genuinely new binary does.** The
-startup self-heal (`installMenubarLaunchAgentOnUpgrade`, every darwin invocation)
-reinstalls when the version stamp drifted or the plist's baked entry names another
-install. Both of those name *whichever copy invoked last*, so on a box with two
-agents-cli installs each copy saw drift and recopied the bundle over the other's —
+**Only the install that OWNS the helper may reinstall it.** The startup self-heal
+(`installMenubarLaunchAgentOnUpgrade`, every darwin invocation) reinstalls when the
+version stamp drifted or the plist's baked entry names another install. Both of
+those record *whichever copy acted last*, so on a box with several agents-cli
+copies each one read the others' marks as drift and recopied the bundle over them —
 and recopying replaces the executable under the running helper, killing it, after
-which `KeepAlive` restarts it and the other install repeats it. Observed: a new pid
+which `KeepAlive` restarts it and the next copy repeats it. Observed: a new pid
 every 5-15s, 578 launches in one helper log, a status item that never stayed
-visible, and `agents menubar status` still saying `running: yes` because some pid
-always existed (#2109). So the reinstall is now gated by
-`shouldReplaceRunningHelper`: with a live helper, only a **content-different**
-helper binary (`menubarBundleChanged`, sha256 — NOT the version string, since
-consecutive CLI releases routinely ship the same helper build) or a Developer-ID
-heal earns the teardown. Everything else calls `refreshMenubarServiceMetadata`,
-which rewrites the plist and re-stamps the version **without** recopying or
-`launchctl`-restarting, so the skew is still corrected and the next natural launch
-picks it up. This is the menu-bar twin of `shouldTeardownVersionSkewedBroker`
-(`src/lib/secrets/agent.ts`), which fixed the identical failure in the secrets
-broker on the identical pair of prefixes (#435, PR #909) — when you add a third
-`KeepAlive` helper, give it the same gate rather than rediscovering this.
+visible, and `agents menubar status` still saying `running: yes` because a pid
+always existed (#2109). `mayInstallMenubarHelper` gates it: the plist's
+`AGENTS_ENTRY` names the owner, only the owner may reinstall, and a non-owner takes
+over only once the recorded owner is **gone from disk**. That converges — a dead
+install can't hold the helper hostage, a live one can't be fought over — and a
+same-install upgrade keeps its entry path, so `npm update` still lands normally.
+
+**Do NOT "improve" this by comparing bundle content.** It looks like the obvious
+gate and it does not work: the helper is rebuilt, re-signed and re-notarized on
+every release (`menubar/scripts/build.sh` via `release.sh`), so consecutive
+releases ship byte-different bundles from identical Swift source. Measured on
+1.22.20/21/22 — same 2876288-byte executable, three different sha256s, and three
+different **CDHashes** (so stripping the CMS/timestamp blob doesn't rescue it
+either). Any digest gate reports "changed" for precisely the skew case it was
+meant to exempt. Ownership is the only signal here that is stable across
+independently-signed builds. Related: the secrets broker hit the same
+multi-install failure and answered it differently, by keeping a *hot* broker alive
+across version skew (`shouldTeardownVersionSkewedBroker`, `src/lib/secrets/agent.ts`;
+#435, PR #909) — same disease, and a third `KeepAlive` helper will need one of
+these two answers rather than a fresh rediscovery.
 
 **The lock fd is `O_CLOEXEC`, and `acquire` self-heals a stale lock.** The lock is
 opened `O_RDWR | O_CREAT | O_CLOEXEC` so no spawned child can inherit the

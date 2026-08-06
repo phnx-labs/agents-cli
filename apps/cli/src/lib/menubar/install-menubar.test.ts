@@ -11,9 +11,9 @@ import {
   hasDeveloperIdSignature,
   isMenubarStale,
   menubarPlistNeedsRepoint,
+  mayInstallMenubarHelper,
   processesToEnd,
   restartMenubarLaunchAgent,
-  shouldReplaceRunningHelper,
 } from './install-menubar.js';
 
 // Regression guard for the STOLEN-HOTKEY blind spot. Status used
@@ -180,61 +180,60 @@ describe('menubarPlistNeedsRepoint', () => {
   });
 });
 
-// Regression guard for #2109: two agents-cli installs on one box reinstalled the
-// helper over each other on EVERY invocation, because both the version stamp and
-// the plist's baked entry name whichever copy invoked last. Recopying the bundle
+// Regression guard for #2109: several agents-cli installs on one box reinstalled
+// the helper over each other on EVERY invocation, because both the version stamp
+// and the plist's baked entry name whichever copy acted last. Recopying the bundle
 // replaces the executable under the live helper and kills it; KeepAlive restarts
-// it; the other install repeats it. Observed: a new pid every 5-15s, 578 launches
+// it; the next install repeats it. Observed: a new pid every 5-15s, 578 launches
 // in the helper's log, and a status item that never stayed visible while
 // `agents menubar status` still said `running: yes`.
 //
-// The rule that breaks the loop — skew alone never earns a teardown — is the same
-// one #909 applied to the secrets broker (`shouldTeardownVersionSkewedBroker`).
-describe('shouldReplaceRunningHelper', () => {
-  it('does NOT replace a running helper for pure skew with an identical bundle (#2109)', () => {
-    // The dual-install steady state: stale-version and/or repoint fired, but the
-    // shipped helper binary is byte-identical to the installed one. Replacing
-    // here is what killed the helper every few seconds.
-    expect(shouldReplaceRunningHelper({
-      liveOwnHelpers: 1,
-      bundleChanged: false,
-      needsDevIdHeal: false,
+// Ownership — not content — decides, because content cannot. The helper is
+// rebuilt/re-signed/re-notarized every release, so consecutive releases ship
+// byte-different bundles from identical source: 1.22.20/21/22 all carry the same
+// 2876288-byte executable with three different sha256s and three different
+// CDHashes. A digest gate would report "changed" for exactly the skew it was
+// meant to exempt, which is why this predicate never looks at bytes.
+describe('mayInstallMenubarHelper', () => {
+  const brew = '/opt/homebrew/lib/node_modules/@phnx-labs/agents-cli/dist/index.js';
+  const nvm = '/Users/me/.nvm/versions/node/v24.15.0/lib/node_modules/@phnx-labs/agents-cli/dist/index.js';
+
+  it('refuses a foreign install while the recorded owner still exists (#2109)', () => {
+    // The steady state that produced the loop: nvm 1.22.5 invoking while the
+    // Homebrew copy owns the helper. Before the gate this reinstalled and killed
+    // the running helper; now it is a no-op.
+    expect(mayInstallMenubarHelper({
+      plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
     })).toBe(false);
   });
 
-  it('replaces a running helper when the shipped binary genuinely differs (real upgrade)', () => {
-    expect(shouldReplaceRunningHelper({
-      liveOwnHelpers: 1,
-      bundleChanged: true,
-      needsDevIdHeal: false,
+  it('allows the owner to reinstall — a same-install upgrade still lands', () => {
+    // `npm update` keeps the entry path and only bumps the version, so the
+    // staleness path behind this gate must still fire.
+    expect(mayInstallMenubarHelper({
+      plistEntry: brew, activeEntry: brew, ownerEntryExists: true,
     })).toBe(true);
   });
 
-  it('replaces a running helper to heal an ad-hoc signature', () => {
-    // An ad-hoc copy re-prompts for Accessibility on every upgrade, so this heal
-    // outranks keeping the current process alive.
-    expect(shouldReplaceRunningHelper({
-      liveOwnHelpers: 1,
-      bundleChanged: false,
-      needsDevIdHeal: true,
+  it('lets another install take over once the owner is gone from disk', () => {
+    // This is what makes the rule converge: an uninstalled copy cannot hold the
+    // helper hostage forever.
+    expect(mayInstallMenubarHelper({
+      plistEntry: brew, activeEntry: nvm, ownerEntryExists: false,
     })).toBe(true);
   });
 
-  it('installs freely when no helper is running — there is nothing to protect', () => {
-    expect(shouldReplaceRunningHelper({
-      liveOwnHelpers: 0,
-      bundleChanged: false,
-      needsDevIdHeal: false,
+  it('adopts a plist that records no owner yet (older install)', () => {
+    expect(mayInstallMenubarHelper({
+      plistEntry: null, activeEntry: brew, ownerEntryExists: false,
     })).toBe(true);
   });
 
-  it('protects every live copy, not just a single one', () => {
-    // `instances` is a LIST on purpose (classifyMenubarProcesses); a duplicate
-    // icon must not become a reason to start reinstalling on every invocation.
-    expect(shouldReplaceRunningHelper({
-      liveOwnHelpers: 2,
-      bundleChanged: false,
-      needsDevIdHeal: false,
+  it('never churns when the active entry cannot be resolved (dev/tsx run)', () => {
+    // Matches menubarPlistNeedsRepoint's existing guard: an unresolvable entry
+    // must not be written into the plist or used to seize ownership.
+    expect(mayInstallMenubarHelper({
+      plistEntry: brew, activeEntry: null, ownerEntryExists: true,
     })).toBe(false);
   });
 });
