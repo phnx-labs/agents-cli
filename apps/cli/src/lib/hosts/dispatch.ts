@@ -179,6 +179,7 @@ export function buildWindowsDetachedLaunchCommand(opts: {
     : '';
   const inner = [
     `$ProgressPreference = 'SilentlyContinue'`,
+    `$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'`,
     ...env,
     cwd,
     `$log = ${log}`,

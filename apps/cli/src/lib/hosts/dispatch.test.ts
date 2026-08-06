@@ -44,6 +44,7 @@ describe('Windows detached protocol', () => {
     const innerEncoded = outer.match(/-EncodedCommand ([A-Za-z0-9+/=]+)/)?.[1];
     expect(innerEncoded).toBeTruthy();
     const inner = Buffer.from(innerEncoded!, 'base64').toString('utf16le');
+    expect(inner).toContain("$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'");
     expect(inner).toContain("$env:AGENTS_ACTOR = 'overnight'");
     expect(inner).toContain("Set-Location -LiteralPath 'C:\\src\\repo'");
     expect(inner).toContain("& 'agents' 'run' 'codex' 'hello world' '--mode' 'plan'");
