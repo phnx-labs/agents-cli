@@ -155,6 +155,21 @@ describe('parseHookManifest layering', () => {
     );
   });
 
+  it('drops a 100h duration timeout with a warning, leaving other fields intact', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fs.writeFileSync(
+      path.join(USER_DIR, 'agents.yaml'),
+      'hooks:\n  bad:\n    script: bad.sh\n    events: [Stop]\n    timeout: 100h\n',
+      'utf-8'
+    );
+    const out = parseHookManifest();
+    expect(out['bad'].script).toBe('bad.sh');
+    expect(out['bad'].timeout).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Hook 'bad' has an invalid timeout"),
+    );
+  });
+
   it('enabled: false in user entry disables a system-shipped hook by name', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     fs.writeFileSync(
@@ -291,6 +306,13 @@ describe('normalizeHookTimeoutSeconds', () => {
     expect(normalizeHookTimeoutSeconds('1h')).toBe(3600);
     expect(normalizeHookTimeoutSeconds('1h30m')).toBe(5400);
     expect(normalizeHookTimeoutSeconds('1m30s')).toBe(90);
+  });
+
+  it('rejects a 100h duration without capping bare seconds', () => {
+    expect(normalizeHookTimeoutSeconds('24h')).toBe(86400);
+    expect(normalizeHookTimeoutSeconds('100h')).toBeNull();
+    expect(normalizeHookTimeoutSeconds(360000)).toBe(360000);
+    expect(normalizeHookTimeoutSeconds('360000')).toBe(360000);
   });
 
   it('treats a bare integer string as seconds', () => {
