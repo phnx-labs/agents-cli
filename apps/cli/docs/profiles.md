@@ -67,7 +67,9 @@ agents harness edit spark --version ""
 agents harness edit deepseek --fallback-model deepseek/deepseek-chat-v3
 ```
 
-`edit` takes the same override flags as `fork` (`--model`, `--base-url`, `--auth-provider`, `--version`, `--description`, `--from-secrets`) plus one edit-only flag, `--fallback-model`, for `Profile.fallback_model` (see [`03-routines.md`](03-routines.md) and the fallback cascade in `runWithFallback`). Unlike `fork`, `edit` never rewrites `forkedFrom` to point at itself. Giving zero flags is a no-op error naming the available ones.
+`edit` takes the same override flags as `fork` (`--model`, `--base-url`, `--auth-provider`, `--version`, `--description`, `--from-secrets`) plus one edit-only flag, `--fallback-model`, for `Profile.fallback_model` (see [`03-routines.md`](03-routines.md) and the fallback cascade in `runWithFallback`). Unlike `fork`, `edit` never rewrites `forkedFrom` to point at itself.
+
+Giving zero flags **in a terminal** now opens the same interactive wizard `add`/`fork` use, pre-filled with the harness's current values (`agents harness edit deepseek` with no flags). It walks each editable field — model, endpoint, auth, version, fallback, description — and writes only what you change; leaving every prompt at its default is a no-op. Fields the host can't carry are shown disabled with a reason: a host with no custom-endpoint slot (anything but claude/codex) skips the base-URL prompt, and a self-updating host (grok/droid/antigravity/cursor/hermes/muse/kiro/goose) skips the version pin, rather than silently accepting a value a run would drop. Giving zero flags **without** a terminal stays a no-op error naming the available ones, so scripts are unchanged.
 
 `agents harness rename <old-name> <new-name>` renames the underlying YAML file and updates the `name:` field inside it; every other harness whose `forkedFrom:` pointed at the old name is rewritten to the new one. Renaming onto an existing name is a hard error — there is no overwrite path (use `remove` first if that's really the intent).
 
@@ -80,9 +82,11 @@ agents harness add corp --host claude --model gpt-x --auth-provider corp --from-
 agents harness edit corp --from-secrets prod:OPENROUTER_KEY   # rotate later without retyping
 ```
 
-### Interactive wizard (`agents harness add` / `fork` with no args)
+### Interactive wizard (`agents harness add` / `fork` / `edit`)
 
-Run `add` or `fork` in a terminal without enough flags to build a harness (e.g. bare `agents harness add`, or `agents harness fork claude` with no `--model`) and a picker walks you through it instead of throwing: fork from (every native host plus your existing harnesses) → a built-in preset or "build custom" (host + model + provider) → the harness's name (pre-filled with the preset's own name, e.g. `deepseek`, not a model detail) → how to get the key (type it, or pick a bundle+key via `--from-secrets`). Flags remain fully supported for scripts — the wizard only engages when required info is missing **and** stdout is a TTY; a non-interactive shell still gets the original error.
+Run `add` or `fork` in a terminal without enough flags to build a harness (e.g. bare `agents harness add`, or `agents harness fork claude` with no `--model`) and a picker walks you through it instead of throwing: fork from (every native host plus your existing harnesses) → a built-in preset or "build custom" (host + model + provider) → the harness's name (pre-filled with the preset's own name, e.g. `deepseek`, not a model detail) → how to get the key (type it, or pick a bundle+key via `--from-secrets`). `edit` opens the same wizard pre-filled with a harness's current values when you run it with no flags (see above). Flags remain fully supported for scripts — the wizard only engages when required info is missing **and** stdin+stdout are a TTY; a non-interactive shell still gets the original error.
+
+Both flows drive one shared step engine ([`src/commands/harness-wizard.ts`](../src/commands/harness-wizard.ts)): a `create` and an `edit` step list over a single runner, each step skippable by the matching flag and gated by a `WizardIO` seam that makes the engine testable without a TTY. The model catalog, connection test, per-host edit matrix, and cross-host portability plug into it via typed extension points (`WizardHooks`).
 
 ### Custom harnesses are their own agent type
 

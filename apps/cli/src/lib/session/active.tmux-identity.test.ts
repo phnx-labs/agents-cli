@@ -12,6 +12,7 @@ import {
 import type { HookSessionIndex } from './hook-sessions.js';
 import { writePidSessionEntry, prunePidSessionRegistry } from './pid-registry.js';
 import { isTmuxInstalled, runTmux } from '../tmux/binary.js';
+import { createSession, killSession } from '../tmux/session.js';
 import * as tmuxPaths from '../tmux/paths.js';
 
 // These are pure functions — the DB dependency is injected — so no fixtures or
@@ -178,5 +179,41 @@ describe.skipIf(tmuxSkip)('listTmuxAgentSessions forwards terminalId (RUSH-2192)
     expect(mine!.terminalId).toBe(TERMINAL_ID);
     expect(mine!.kind).toBe('grok');
     expect(mine!.host).toBe('tmux');
+  });
+});
+
+describe.skipIf(tmuxSkip)('listTmuxAgentSessions retained dead panes', () => {
+  const SESSION_ID = '019fd3da-a1a7-7610-821c-336bd47eeed9';
+  const SESS = 'ag-codex-c1f3d813';
+  let tempDir: string;
+  let socket: string;
+  let socketSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-tmux-dead-pane-'));
+    socket = path.join(tempDir, 'server.sock');
+    socketSpy = vi.spyOn(tmuxPaths, 'getDefaultSocketPath').mockReturnValue(socket);
+  });
+
+  afterEach(async () => {
+    socketSpy?.mockRestore();
+    await killSession(SESS, socket).catch(() => {});
+    await runTmux({ socket, args: ['kill-server'], throwOnError: false });
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('reports a remain-on-exit pane as closed rather than attachable/live', async () => {
+    const meta = await createSession({
+      name: SESS,
+      cmd: 'sh -c "exit 0"',
+      socket,
+      labels: { agent: 'codex', sessionId: SESSION_ID },
+    });
+    expect(meta.pane).toBeTruthy();
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const rows = await listTmuxAgentSessions();
+    const row = rows.find(candidate => candidate.sessionId === SESSION_ID);
+    expect(row).toBeDefined();
+    expect(row!.status).toBe('closed');
   });
 });

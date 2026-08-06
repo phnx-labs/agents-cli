@@ -21,9 +21,55 @@ export function parseManifest(content: string): Manifest {
   return yaml.parse(content) as Manifest;
 }
 
-/** Serialize a Manifest object to a YAML string with 2-space indentation. */
-export function serializeManifest(manifest: Manifest): string {
-  return yaml.stringify(manifest, { indent: 2 });
+/**
+ * Serialize a Manifest to YAML WITHOUT destroying hand-written comments.
+ *
+ * Plain `yaml.stringify(manifest)` drops every comment, so `agents mcp add`
+ * (and every other writeManifest caller) used to clobber annotations in
+ * agents.yaml. Matching `serializeCentral` in state.ts: when existing file
+ * text is provided, parse it into a `yaml.Document` (comments + key order
+ * preserved) and edit only keys that actually changed. Untouched keys and
+ * their comments stay byte-stable. Falls back to plain stringify when there
+ * is no existing document yet.
+ */
+export function serializeManifest(manifest: Manifest, existingContent?: string | null): string {
+  const entries = Object.entries(manifest as Record<string, unknown>).filter(
+    ([, v]) => v !== undefined,
+  );
+  const isEmpty = entries.length === 0;
+
+  if (existingContent == null || existingContent.trim() === '') {
+    return isEmpty ? '' : yaml.stringify(manifest, { indent: 2 });
+  }
+
+  const doc = yaml.parseDocument(existingContent);
+  const current: Record<string, unknown> = (doc.toJSON() as Record<string, unknown>) ?? {};
+  let changed = false;
+
+  for (const [k, v] of entries) {
+    if (JSON.stringify(current[k]) !== JSON.stringify(v)) {
+      doc.set(k, v);
+      changed = true;
+    }
+  }
+
+  // Full-document write: callers do read-modify-write, so keys absent from the
+  // new manifest are intentional removals (e.g. clearing beta).
+  for (const k of Object.keys(current)) {
+    const next = (manifest as Record<string, unknown>)[k];
+    if (!(k in (manifest as object)) || next === undefined) {
+      doc.delete(k);
+      changed = true;
+    }
+  }
+
+  // Nothing changed → keep the file byte-identical (comments intact).
+  if (!changed) return existingContent;
+
+  // Force BLOCK style: an existing flow root (e.g. legacy `{}`) would otherwise
+  // make edited nodes render flow. collectionStyle pins the whole doc block
+  // while parseDocument still preserves comments + key ordering.
+  return isEmpty ? '' : doc.toString({ collectionStyle: 'block' });
 }
 
 /** Read and parse agents.yaml from a directory. Returns null if the file does not exist. */
@@ -61,8 +107,21 @@ function withManifestLock<T>(filePath: string, fn: () => T): T {
 /** Write a Manifest object to agents.yaml in the given directory. */
 export function writeManifest(repoPath: string, manifest: Manifest): void {
   const manifestPath = safeJoin(repoPath, MANIFEST_FILENAME);
-  const content = serializeManifest(manifest);
-  withManifestLock(manifestPath, () => atomicWriteFileSync(manifestPath, content));
+  withManifestLock(manifestPath, () => {
+    let existing: string | null = null;
+    try {
+      existing = fs.readFileSync(manifestPath, 'utf-8');
+    } catch {
+      /* first write — no file yet (or empty lock target) */
+    }
+    // ensureLockTarget may have created an empty file for the lock path.
+    if (existing !== null && existing.trim() === '') existing = null;
+    const content = serializeManifest(manifest, existing);
+    // Skip the atomic rewrite when nothing changed so comments stay byte-stable
+    // and concurrent readers never see a no-op churn.
+    if (existing !== null && content === existing) return;
+    atomicWriteFileSync(manifestPath, content);
+  });
 }
 
 /** Create a Manifest with sensible defaults for a fresh agents repo. */

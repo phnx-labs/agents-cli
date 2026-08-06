@@ -97,6 +97,9 @@ vi.mock('../src/lib/state.js', () => {
     get getActiveRulesPreset() { return () => 'default'; },
     get setActiveRulesPreset() { return () => {}; },
     get getCliVersionCachePath() { return () => nodePath.join(state().AGENTS_DIR, '.cli-version-cache.json'); },
+    // droid/muse global-binary paths resolve under the real user home; pin to
+    // TEST_ROOT so path helpers stay hermetic in this suite.
+    get getHomeDir() { return () => state().TEST_ROOT || require('node:os').homedir(); },
   };
 });
 
@@ -670,6 +673,16 @@ describe('version path helpers', () => {
   it('getBinaryPath returns correct binary location', () => {
     const bin = getBinaryPath('claude', '2.0.65');
     expect(toPosix(bin)).toContain('node_modules/.bin/claude');
+  });
+
+  it('getBinaryPath for muse is the global self-updating launcher (any version)', () => {
+    // Muse installs once under ~/.local/bin/muse (or %USERPROFILE%\bin\muse.exe).
+    // Version dirs must resolve to the same path so isGlobalBinaryAgent is true
+    // and agents view / isVersionInstalled see the real binary after import.
+    const a = getBinaryPath('muse', '0.1.0');
+    const b = getBinaryPath('muse', '9.9.9');
+    expect(a).toBe(b);
+    expect(toPosix(a)).toMatch(/\/(\.local\/bin\/muse|bin\/muse\.exe)$/);
   });
 
   it('getVersionHomePath returns home subdir', () => {

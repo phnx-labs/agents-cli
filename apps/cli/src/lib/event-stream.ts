@@ -59,7 +59,9 @@ function matches(r: EventRecord, q: UnifiedQuery): boolean {
  * Read a unified, newest-first event stream. Operational events come from
  * events.ts `query()`; agent-semantic events from the activity logs, normalized
  * to the same record shape and filtered identically. `limit` caps the merged
- * result (each source is fetched up to `limit`, so the top-N is exact).
+ * result (each source is fetched up to `limit` *after* its primary filters —
+ * eventTypes for activity, eventTypes/module/bundle for ops — so the top-N is
+ * exact for those filters).
  */
 export function readUnifiedEvents(q: UnifiedQuery = {}): EventRecord[] {
   // `bundle` is filtered inside query()'s scan (before its limit cutoff) so a
@@ -80,10 +82,21 @@ export function readUnifiedEvents(q: UnifiedQuery = {}): EventRecord[] {
 
   if (q.includeActivity === false) return ops;
 
+  // Activity events always stamp module: 'activity'. A non-activity module
+  // filter can never match them — skip the activity scan entirely.
+  if (q.module != null && q.module !== 'activity') return ops;
+
+  // Push eventTypes into the activity reader so `limit` is applied AFTER the
+  // event-type filter (readRecentActivity already does this for `events`).
+  // Without this, a rare match older than the newest-`limit` window of routine
+  // churn is silently dropped — the same class of bug as the ops-side bundle
+  // pre-filter above (RUSH-2093). Remaining filters (agent, sessionId, …) still
+  // run via matches() for fields activity.ts does not pre-filter.
   const acts = readActivityAsEventRecords({
     sinceMs: q.startDate?.getTime(),
     limit: q.limit,
     root: q.activityRoot,
+    events: q.eventTypes,
   }).filter((r) => matches(r, q));
 
   const merged = [...ops, ...acts].sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));

@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { archiveRoutineTranscripts, executeJob, executeJobDetached, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd } from './runner.js';
+import { archiveRoutineTranscripts, buildJobCommand, executeJob, executeJobDetached, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd } from './runner.js';
 import { getRunDir, writeRunMeta } from './routines.js';
 import type { JobConfig, RunMeta } from './routines.js';
 import type { RotateCandidate, RotateResult } from './rotate.js';
@@ -41,6 +41,27 @@ function baseConfig(partial: Partial<JobConfig> = {}): JobConfig {
     ...partial,
   } as JobConfig;
 }
+
+describe('Codex routine permission profiles', () => {
+  it('keeps plan read-only with network and on-request approvals', () => {
+    const cmd = buildJobCommand(baseConfig({ agent: 'codex', mode: 'plan' }), 'inspect');
+    expect(cmd).toContain('approval_policy="on-request"');
+    expect(cmd).toContain('default_permissions="agents-plan"');
+    expect(cmd.join(' ')).toContain('extends = ":read-only"');
+    expect(cmd.join(' ')).toContain('network = { enabled = true, allow_local_binding = true }');
+  });
+
+  it('uses the writable profile for edit and preserves explicit skip', () => {
+    const edit = buildJobCommand(baseConfig({ agent: 'codex', mode: 'edit', allow: { dirs: ['/tmp/routine'] } }), 'edit');
+    expect(edit).toContain('default_permissions="agents-edit"');
+    expect(edit.join(' ')).toContain('"/tmp/routine" = true');
+    expect(edit).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+
+    const skip = buildJobCommand(baseConfig({ agent: 'codex', mode: 'skip' }), 'skip');
+    expect(skip).toContain('--dangerously-bypass-approvals-and-sandbox');
+    expect(skip).not.toContain('default_permissions="agents-edit"');
+  });
+});
 
 describe('routine spawn cwd', () => {
   it('uses the existing home directory when no repo is declared', () => {

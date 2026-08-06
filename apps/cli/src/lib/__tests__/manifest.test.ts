@@ -84,3 +84,120 @@ describe('writeManifest concurrent safety', () => {
     expect(raw).toContain('claude');
   });
 });
+
+/**
+ * RUSH-2090: writeManifest used plain yaml.stringify and stripped every comment
+ * from agents.yaml. The mcp-add path is read → mutate mcp → writeManifest; it
+ * must keep hand-written annotations (matching serializeCentral in state.ts).
+ */
+describe('writeManifest comment preservation (RUSH-2090)', () => {
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'manifest-comments-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(testDir, { recursive: true, force: true });
+  });
+
+  function run(script: string): string {
+    return execFileSync('bun', ['-e', script], {
+      cwd: process.cwd(),
+      env: { ...process.env, HOME: testDir },
+      stdio: 'pipe',
+      encoding: 'utf8',
+    }).trim();
+  }
+
+  it('keeps document + inline comments when mcp add mutates the manifest', () => {
+    const yamlPath = path.join(testDir, 'agents.yaml');
+    fs.writeFileSync(
+      yamlPath,
+      [
+        '# keep this hand-written comment',
+        'agents:',
+        '  claude: 2.1.0  # pin note',
+        'mcp: {}',
+        'defaults:',
+        '  method: symlink  # prefer symlinks',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    // Same shape as commands/mcp.ts mcp-add: read → set mcp[name] → writeManifest.
+    const out = run(`
+      import * as fs from 'fs';
+      const { readManifest, writeManifest } = await import(${JSON.stringify(manifestPath)});
+      const dir = ${JSON.stringify(testDir)};
+      const manifest = readManifest(dir) || {};
+      manifest.mcp = manifest.mcp || {};
+      manifest.mcp.demo = {
+        command: 'demo-server',
+        transport: 'stdio',
+        scope: 'user',
+        agents: ['claude'],
+      };
+      writeManifest(dir, manifest);
+      const after = fs.readFileSync(dir + '/agents.yaml', 'utf8');
+      console.log(JSON.stringify({
+        headerComment: after.includes('keep this hand-written comment'),
+        inlinePinComment: after.includes('# pin note'),
+        defaultsComment: after.includes('# prefer symlinks'),
+        demoAdded: after.includes('demo') && after.includes('demo-server'),
+        claudePin: after.includes('claude: 2.1.0'),
+      }));
+    `);
+
+    const r = JSON.parse(out);
+    expect(r.headerComment).toBe(true);
+    expect(r.inlinePinComment).toBe(true);
+    expect(r.defaultsComment).toBe(true);
+    expect(r.demoAdded).toBe(true);
+    expect(r.claudePin).toBe(true);
+  });
+
+  it('returns byte-identical content when nothing in the manifest changed', () => {
+    const yamlPath = path.join(testDir, 'agents.yaml');
+    const before = [
+      '# do not clobber me',
+      'agents:',
+      '  claude: 2.1.0  # pin',
+      'mcp: {}',
+      '',
+    ].join('\n');
+    fs.writeFileSync(yamlPath, before, 'utf-8');
+
+    const out = run(`
+      import * as fs from 'fs';
+      const { readManifest, writeManifest } = await import(${JSON.stringify(manifestPath)});
+      const dir = ${JSON.stringify(testDir)};
+      const before = fs.readFileSync(dir + '/agents.yaml', 'utf8');
+      writeManifest(dir, readManifest(dir));
+      const after = fs.readFileSync(dir + '/agents.yaml', 'utf8');
+      console.log(JSON.stringify({ byteIdentical: before === after }));
+    `);
+
+    expect(JSON.parse(out).byteIdentical).toBe(true);
+  });
+
+  it('falls back to plain stringify for a brand-new manifest file', () => {
+    const out = run(`
+      import * as fs from 'fs';
+      const { writeManifest, readManifest } = await import(${JSON.stringify(manifestPath)});
+      const dir = ${JSON.stringify(testDir)};
+      writeManifest(dir, { agents: { claude: '1.0.0' }, mcp: {} });
+      const raw = fs.readFileSync(dir + '/agents.yaml', 'utf8');
+      const parsed = readManifest(dir);
+      console.log(JSON.stringify({
+        hasClaude: raw.includes('claude'),
+        parsedClaude: parsed?.agents?.claude ?? null,
+      }));
+    `);
+
+    const r = JSON.parse(out);
+    expect(r.hasClaude).toBe(true);
+    expect(r.parsedClaude).toBe('1.0.0');
+  });
+});

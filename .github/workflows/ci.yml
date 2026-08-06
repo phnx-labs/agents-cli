@@ -4,14 +4,17 @@ name: CI
 # on GitHub-hosted runners) and largely redundant per-PR: every PR to main
 # already runs the real suite cheaply on Linux via `test` (sandbox.yml) plus
 # `gitleaks` (secret-scan.yml). So the full matrix runs only where a green
-# cross-platform picture actually matters — release/** branches and v* tags —
-# plus manual dispatch. It does NOT run on main pushes/PRs. The release flow
-# (scripts/release.sh) opens each release as a chore PR on a release/v<version>
-# branch, which fires this workflow before the release is merged + published.
+# cross-platform picture actually matters — release/** branch pushes/PRs —
+# plus manual dispatch. It does NOT run on main pushes/PRs, and it deliberately
+# does NOT re-run on v* tags: the tag points at the exact release commit that
+# already passed this matrix on the release/** branch, so repeating the six-job
+# OS × Node matrix after tagging would only burn macOS/Windows minutes. The
+# release flow (scripts/release.sh) opens each release as a chore PR on a
+# release/v<version> branch, which fires this workflow before the release is
+# merged + published; the subsequent tag push is the publish trigger only.
 on:
   push:
     branches: ['release/**']
-    tags: ['v*']
   pull_request:
     branches: ['release/**']
   workflow_dispatch:
@@ -30,10 +33,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node-version: [22, 24]
-    # Runs pre-release only (release/** branches + v* tags + manual dispatch),
-    # so this is the last cross-platform gate before a version ships. None of
-    # these legs are required on main PRs — the main-protection ruleset gates
-    # merges on the cheap `test` + `gitleaks` checks instead.
+    # Runs pre-release only (release/** branches + manual dispatch). The tag is
+    # not a trigger: it already points at the commit this matrix gated on the
+    # release branch, so the matrix is deliberately not repeated after tagging.
+    # None of these legs are required on main PRs — the main-protection ruleset
+    # gates merges on the cheap `test` + `gitleaks` checks instead.
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -55,7 +59,7 @@ jobs:
       # (not even without --ignore-scripts, as of bun 1.3.x), so build this one
       # native dep explicitly — otherwise the daemon crashes on macOS/Windows
       # (Linux uses the shipped prebuild and stayed green, masking the break;
-      # the matrix runs only on release/** + v*, so it never showed on PRs). The
+      # the matrix runs only on release/**, so it never showed on PRs). The
       # package's install script prefers a prebuilt download and falls back to a
       # node-gyp compile, so it self-heals on runners with no matching prebuilt.
       - name: Build node-pty native binary
@@ -98,4 +102,5 @@ jobs:
   # swiftc/codesign/notarytool and cannot produce the helper, so a CI publish
   # would either fail at prepack or ship a macOS-broken tarball. Releasing stays
   # on a macOS machine that holds the signed helper and the npm token. The build
-  # job above still runs on tag pushes as a sanity check.
+  # job above gates the release/** branch commit; the subsequent v* tag is not
+  # a second matrix run.

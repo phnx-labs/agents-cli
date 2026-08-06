@@ -876,6 +876,43 @@ export async function runDaemon(): Promise<void> {
   const fleetCacheInterval = setInterval(() => { void runFleetCacheWarm(); }, 3 * 60_000);
   const fleetCacheKickoff = setTimeout(() => { void runFleetCacheWarm(); }, 60_000);
 
+  // Session-status cache warm (RUSH-2062): publish THIS host's local active
+  // sessions so menubar / Factory / watchdog / CLI share one warm snapshot
+  // instead of each re-running a full ~9s / ~170MB gather. Publish-own only
+  // (no cross-host SSH — same N² lesson as RUSH-2061). Short interval keeps
+  // live status fresh; forceRefresh still re-gathers. Additive sibling of
+  // fleetCacheInterval — does not touch the reaper tick.
+  let warmingSessionCache = false;
+  // Import once so the interval/kickoff constants stay the single source of truth
+  // (SESSION_CACHE_WARM_* in session-cache.ts). Dynamic import of the warm fn
+  // itself stays inside the tick so a cold daemon boot does not pay the load.
+  const sessionCacheWarmTiming = import('./session/session-cache.js').then((m) => ({
+    intervalMs: m.SESSION_CACHE_WARM_INTERVAL_MS,
+    kickoffMs: m.SESSION_CACHE_WARM_KICKOFF_MS,
+    publish: m.publishLocalActiveSessions,
+  }));
+  const runSessionCacheWarm = async () => {
+    if (warmingSessionCache) return;
+    warmingSessionCache = true;
+    try {
+      const { publish } = await sessionCacheWarmTiming;
+      const r = await publish();
+      log('INFO', `session cache warm: ${r.sessions.length} local session(s)`);
+    } catch (err) {
+      log('ERROR', `session cache warm failed: ${(err as Error).message}`);
+    } finally {
+      warmingSessionCache = false;
+    }
+  };
+  // Intervals resolved from the module constants (fallback matches the defaults
+  // if the import is still pending — the first tick uses the live import).
+  let sessionCacheInterval: ReturnType<typeof setInterval> | undefined;
+  let sessionCacheKickoff: ReturnType<typeof setTimeout> | undefined;
+  void sessionCacheWarmTiming.then(({ intervalMs, kickoffMs }) => {
+    sessionCacheInterval = setInterval(() => { void runSessionCacheWarm(); }, intervalMs);
+    sessionCacheKickoff = setTimeout(() => { void runSessionCacheWarm(); }, kickoffMs);
+  });
+
   // Usage refresh: keep the usage cache the `agents run` router reads
   // (RUSH-2061, readOnly hot path) fresh, WITHOUT the hot path ever fetching.
   // This host is the sole writer for its own local accounts. The tick wakes
@@ -941,6 +978,29 @@ export async function runDaemon(): Promise<void> {
   };
   const brokerSelfHealInterval = setInterval(() => { void runBrokerSelfHeal(); }, 60_000);
 
+  // RUSH-2232: reap orphaned keychain helpers and `agents` processes stuck on a
+  // keychain call. Runs as a 5-min interval in the daemon (the single executor)
+  // so no UI surface can race it. The reaper shells `ps` once, plans kills in a
+  // pure function, and executes via killTree.
+  let reapingKeychain = false;
+  const runKeychainReap = async () => {
+    if (reapingKeychain) return;
+    reapingKeychain = true;
+    try {
+      const { reapOrphanedKeychainProcesses } = await import('./secrets/reaper.js');
+      const result = reapOrphanedKeychainProcesses();
+      if (result.reaped > 0) {
+        log('WARN', `Reaped ${result.reaped} keychain orphan/stuck process(es)`);
+        for (const d of result.details) log('WARN', `  ${d}`);
+      }
+    } catch (err) {
+      log('ERROR', `Keychain reaper failed: ${(err as Error).message}`);
+    } finally {
+      reapingKeychain = false;
+    }
+  };
+  const keychainReapInterval = setInterval(() => { void runKeychainReap(); }, 5 * 60_000);
+
   const handleReload = () => {
     log('INFO', 'Reloading jobs (SIGHUP)');
     // Refresh user-layer copies of opted-in project routines BEFORE the
@@ -996,9 +1056,12 @@ export async function runDaemon(): Promise<void> {
     clearTimeout(launchHealthKickoff);
     clearInterval(fleetCacheInterval);
     clearTimeout(fleetCacheKickoff);
+    if (sessionCacheInterval) clearInterval(sessionCacheInterval);
+    if (sessionCacheKickoff) clearTimeout(sessionCacheKickoff);
     clearInterval(usageRefreshInterval);
     clearTimeout(usageRefreshKickoff);
     clearInterval(brokerSelfHealInterval);
+    clearInterval(keychainReapInterval);
     hostedBroker?.close();
     removeDaemonPid();
     removeHeartbeat();

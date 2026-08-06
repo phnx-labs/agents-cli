@@ -6,7 +6,7 @@ import * as path from 'path';
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-sidecar-'));
 process.env.HOME = TEST_HOME;
 
-const { writeSessionActorRecord, readSessionActorRecord, loadSessionActorIndex } = await import('./actor-sidecar.js');
+const { writeSessionActorRecord, writeSessionAliasRecord, readSessionActorRecord, loadSessionActorIndex, resolveSessionAlias } = await import('./actor-sidecar.js');
 const { resolveOwner } = await import('./active.js');
 const { getDB, closeDB, upsertSession, upsertSessionsBatch, getSessionById } = await import('./db.js');
 type SessionMeta = import('./types.js').SessionMeta;
@@ -50,6 +50,28 @@ describe('session actor sidecar (RUSH-2019)', () => {
     const idx = loadSessionActorIndex();
     expect(idx.get('sid-a')?.actor).toBe('a@x.io');
     expect(idx.get('sid-b')?.initiatedBy).toBe('agent');
+  });
+
+  it('persists a tmux alias without discarding actor or mode metadata', () => {
+    writeSessionActorRecord({ sessionId: 'alias-actor', actor: 'ada@example.com', initiatedBy: 'human', mode: 'edit', startedAtMs: 1 });
+    writeSessionAliasRecord('alias-actor', 'ag-codex-d4e5f607');
+    const record = readSessionActorRecord('alias-actor');
+    expect(record?.actor).toBe('ada@example.com');
+    expect(record?.mode).toBe('edit');
+    expect(record?.aliases).toContain('ag-codex-d4e5f607');
+  });
+
+  it('resolves an exact tmux alias plus unique prefix and suffix selectors', () => {
+    writeSessionAliasRecord('native-codex-session', 'ag-codex-e5f60718');
+    expect(resolveSessionAlias('ag-codex-e5f60718')).toEqual({ kind: 'resolved', sessionId: 'native-codex-session' });
+    expect(resolveSessionAlias('ag-codex-e5')).toEqual({ kind: 'resolved', sessionId: 'native-codex-session' });
+    expect(resolveSessionAlias('e5f60718')).toEqual({ kind: 'resolved', sessionId: 'native-codex-session' });
+  });
+
+  it('fails closed when an alias suffix belongs to more than one native session', () => {
+    writeSessionAliasRecord('native-a', 'ag-codex-a1b2c3d4');
+    writeSessionAliasRecord('native-b', 'ag-claude-a1b2c3d4');
+    expect(resolveSessionAlias('a1b2c3d4')).toEqual({ kind: 'ambiguous', sessionIds: ['native-a', 'native-b'] });
   });
 
   it('refuses a session id with path separators (no write outside by-session/)', () => {

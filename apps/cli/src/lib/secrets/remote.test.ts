@@ -37,6 +37,7 @@ import {
   verifyRemoteKeychainPush,
   evaluateKeychainWriteVerification,
   keychainWriteFailureMessage,
+  buildRemoteFileImportCommand,
 } from './remote.js';
 
 const ok = (stdout: string): SshExecResult => ({ code: 0, stdout, stderr: '', timedOut: false });
@@ -398,5 +399,65 @@ describe('verifyRemoteKeychainPush (real read-back over the stubbed SSH boundary
     if (v.ok) throw new Error('expected failure');
     expect(v.kind).toBe('error');
     expect(v.reason).toContain('timed out');
+  });
+});
+
+describe('buildRemoteFileImportCommand (secrets export --host --remote-backend file)', () => {
+  const DOTENV = 'APPLE_ID="me@example.com"\nAPPLE_APP_SPECIFIC_PASSWORD="abcd-efgh-ijkl-mnop"\n';
+
+  it('with NO passphrase: builds a plain `import --backend file` with NO read/export prologue, .env is the only stdin', () => {
+    // This is the headless-by-default path: no AGENTS_SECRETS_PASSPHRASE forwarded,
+    // so it stays UNSET on the remote → the file store's machine-local key → headless
+    // reads. The regression the fix closes: the old code REQUIRED a passphrase here.
+    const { remoteCmd, input } = buildRemoteFileImportCommand('apple.com', DOTENV);
+    expect(remoteCmd).toBe(`bash -lc 'agents secrets import apple.com --from - --backend file'`);
+    // No passphrase-forwarding prologue at all — the giveaway that the remote runs headless.
+    expect(remoteCmd).not.toContain('read -r AGENTS_SECRETS_PASSPHRASE');
+    expect(remoteCmd).not.toContain('export AGENTS_SECRETS_PASSPHRASE');
+    expect(remoteCmd).not.toContain('AGENTS_SECRETS_PASSPHRASE');
+    // Stdin is JUST the .env — no passphrase line prepended.
+    expect(input).toBe(DOTENV);
+    expect(input.startsWith('\n')).toBe(false);
+  });
+
+  it('with an empty-string passphrase: treated as unset (no prologue)', () => {
+    // process.env.X ?? '' yields '' when unset AND when set-empty; both mean "no opt-in".
+    const { remoteCmd, input } = buildRemoteFileImportCommand('apple.com', DOTENV, { passphrase: '' });
+    expect(remoteCmd).not.toContain('AGENTS_SECRETS_PASSPHRASE');
+    expect(input).toBe(DOTENV);
+  });
+
+  it('with a passphrase set: forwards it via the read/export prologue as the FIRST stdin line, never in argv', () => {
+    const pass = 'hunter2hunter2';
+    const { remoteCmd, input } = buildRemoteFileImportCommand('apple.com', DOTENV, { passphrase: pass });
+    // Prologue present: consume the first stdin line into the env, export it, then import.
+    expect(remoteCmd).toContain('IFS= read -r AGENTS_SECRETS_PASSPHRASE; export AGENTS_SECRETS_PASSPHRASE;');
+    expect(remoteCmd).toContain('agents secrets import apple.com --from - --backend file');
+    // The passphrase is the FIRST stdin line, then the .env — never in the command argv.
+    expect(input).toBe(`${pass}\n${DOTENV}`);
+    expect(remoteCmd).not.toContain(pass);
+  });
+
+  it('threads --force through both branches', () => {
+    expect(buildRemoteFileImportCommand('b', DOTENV, { force: true }).remoteCmd)
+      .toContain('--backend file --force');
+    expect(buildRemoteFileImportCommand('b', DOTENV, { force: true, passphrase: 'p' }).remoteCmd)
+      .toContain('--backend file --force');
+  });
+
+  it('shell-quotes the bundle name against injection in both branches', () => {
+    const evil = 'b; rm -rf /';
+    // The bundle name is single-quoted inside the import command, which is itself
+    // single-quoted for `bash -lc`, so the inner quotes come back re-escaped as
+    // '\'' — the metacharacters are inert either way, so the remote shell can't run
+    // the injected `rm`. Assert the safe escaped form, and that a bare unquoted
+    // `; rm -rf /` never appears.
+    const noPass = buildRemoteFileImportCommand(evil, DOTENV).remoteCmd;
+    expect(noPass).toBe(
+      `bash -lc 'agents secrets import '\\''b; rm -rf /'\\'' --from - --backend file'`,
+    );
+    const withPass = buildRemoteFileImportCommand(evil, DOTENV, { passphrase: 'p' }).remoteCmd;
+    // The bundle name is quoted the same way inside the prologue variant.
+    expect(withPass).toContain(`import '\\''b; rm -rf /'\\'' --from -`);
   });
 });

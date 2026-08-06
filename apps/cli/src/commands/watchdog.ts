@@ -26,6 +26,7 @@ import { parseDuration } from '../lib/hooks/cache.js';
 import { getRuntimeStateDir } from '../lib/state.js';
 import { readJob, setJobEnabled } from '../lib/routines.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
+import { loadLocalActiveSessions } from '../lib/session/session-cache.js';
 import { mailboxIdForActiveSession } from '../lib/mailbox-target.js';
 import { gcMailbox } from '../lib/mailbox-gc.js';
 import { devicesWithRoutineEnabled, routineEnabledOnThisDevice } from '../lib/routine-activation.js';
@@ -170,9 +171,20 @@ export function registerWatchdogCommand(program: Command): void {
           sessions,
         });
 
+      // RUSH-2062: share the daemon-warmed local active-session snapshot with
+      // menubar/CLI/Factory instead of re-running a full gather every tick.
+      const loadWatchdogSessions = async () => {
+        const loaded = await loadLocalActiveSessions({
+          // Force a live gather only when the warm path is unavailable; the
+          // cache layer already re-gathers past DEFAULT_ACTIVE_CACHE_MAX_AGE_MS.
+          gather: () => getActiveSessions({ localOnly: true }),
+        });
+        return loaded.sessions;
+      };
+
       if (!opts.watch) {
         const willInject = computeWillInject();
-        const sessions = await getActiveSessions();
+        const sessions = await loadWatchdogSessions();
         const result = await tickOnce(willInject, sessions);
         await runMailboxGc(sessions);
         if (opts.json) console.log(JSON.stringify(result, null, 2));
@@ -192,7 +204,7 @@ export function registerWatchdogCommand(program: Command): void {
       while (true) {
         // Re-evaluated each tick: picks up enable/disable flips mid-run.
         const willInject = computeWillInject();
-        const sessions = await getActiveSessions();
+        const sessions = await loadWatchdogSessions();
         const result = await tickOnce(willInject, sessions);
         await runMailboxGc(sessions);
         if (opts.json) console.log(JSON.stringify(result));

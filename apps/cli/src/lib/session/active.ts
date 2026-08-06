@@ -26,7 +26,7 @@ import type { CloudTaskStatus } from '../cloud/types.js';
 import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
 import { readPidSessionEntry, listPidSessionEntries, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
-import { readSessionActorRecord } from './actor-sidecar.js';
+import { readSessionActorRecord, writeSessionAliasRecord } from './actor-sidecar.js';
 import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { buildClaudeLabelMap, getAgentSessionDirs } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
@@ -1672,7 +1672,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
   try {
     res = await runTmux({
       socket,
-      args: ['list-panes', '-a', '-F', ['#{pane_id}', '#{session_name}', '#{pane_pid}', '#{pane_current_path}'].join(TMUX_FIELD_SEP)],
+      args: ['list-panes', '-a', '-F', ['#{pane_id}', '#{session_name}', '#{pane_pid}', '#{pane_dead}', '#{pane_current_path}'].join(TMUX_FIELD_SEP)],
       throwOnError: false,
       // A wedged tmux server must not hang the whole active-session scan. The
       // catch below turns a timeout into an empty tmux source (the other sources
@@ -1714,8 +1714,8 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     // The path is the LAST field, so rejoin its tail: a directory containing the
     // separator must not truncate it (the earlier fields cannot contain one).
     const parts = line.split(TMUX_FIELD_SEP);
-    const [pane, sessName, pidRaw] = parts;
-    const curPath = parts.slice(3).join(TMUX_FIELD_SEP);
+    const [pane, sessName, pidRaw, paneDeadRaw] = parts;
+    const curPath = parts.slice(4).join(TMUX_FIELD_SEP);
     if (!pane || !sessName) continue;
     const meta = readSessionMeta(sessName);
     const liveEntry = liveByPane.get(pane);
@@ -1739,6 +1739,9 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
         ?? (liveEntry ? readStateSessionRecord(liveEntry.pid, liveEntry.startedAtMs)?.session_id : undefined);
       if (backfilled) id = { ...id, sessionId: backfilled };
     }
+    if (id.sessionId && shortIdFromName(sessName)) {
+      writeSessionAliasRecord(id.sessionId, sessName);
+    }
     // Dedupe by resolved session id; an as-yet-unresolved id (a hookless/lagging
     // split) keys on the unique pane so it still surfaces as its own row.
     const dedupKey = id.sessionId ?? pane;
@@ -1756,7 +1759,10 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     // bug). Refuse to guess: an id-less pane surfaces as its own row instead.
     const sessionFile = id.sessionId ? findSessionFileForKind(id.agent, cwd, id.sessionId) : undefined;
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
-    const pidAlive = pid ? isPidAlive(pid, liveEntry?.startedAtMs) : true;
+    // `remain-on-exit` retains the pane after its child exits. pane_dead is the
+    // authoritative signal; a retained pane is diagnostic, not attachable.
+    const paneDead = paneDeadRaw === '1';
+    const pidAlive = !paneDead && (pid ? isPidAlive(pid, liveEntry?.startedAtMs) : true);
     const { state, tokPerSec } = computeLiveSignals(id.agent, sessionFile, cwd, pidAlive);
     const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
     // The mux/reply rails are known exactly here (the pane IS a tmux pane), so we
@@ -1966,7 +1972,9 @@ function foldPresence(rows: ActiveSession[]): void {
  * session that has a live pid. Mutates in place. Runs after dedupe so we probe
  * each session once, not once per fork pid. Probes run in parallel — each is a
  * single /proc read (Linux) or `ps` call (macOS); failures leave `provenance`
- * undefined rather than blocking the listing.
+ * undefined rather than blocking the listing. The probes use the same bounded
+ * concurrency as the adjacent per-PID lsof sweep so large session lists cannot
+ * spawn one `ps eww` subprocess per row at once on macOS.
  *
  * A row that already carries provenance (the tmux path, which knows its exact
  * mux/reply from the pane) is not skipped — it is probe-and-MERGED. The tmux
@@ -1976,11 +1984,15 @@ function foldPresence(rows: ActiveSession[]): void {
  * authoritative mux/reply the pane already gave us. Skipping this (the old
  * behavior) is exactly why ssh-launched tmux sessions rendered as local.
  */
-async function enrichProvenance(sessions: ActiveSession[]): Promise<void> {
-  await Promise.all(
-    sessions.map(async (s) => {
+export async function enrichProvenance(
+  sessions: ActiveSession[],
+  probe: (pid: number) => Promise<SessionProvenance | undefined> = detectProvenance,
+): Promise<void> {
+  await mapBounded(
+    sessions,
+    async (s) => {
       if (!s.pid) return;
-      const probed = await detectProvenance(s.pid);
+      const probed = await probe(s.pid);
       if (!probed) return;
       if (!s.provenance) {
         s.provenance = probed;
@@ -1993,7 +2005,8 @@ async function enrichProvenance(sessions: ActiveSession[]): Promise<void> {
         s.provenance.ssh = probed.ssh;
       }
       if (probed.term && !s.provenance.term) s.provenance.term = probed.term;
-    }),
+    },
+    { concurrency: LSOF_CONCURRENCY },
   );
 }
 

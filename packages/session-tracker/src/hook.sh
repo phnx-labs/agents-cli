@@ -123,24 +123,37 @@ mv -f "$TMP" "$STATE_DIR/$PPID.json"
 # resume with an explicit --mode become the new mode for the next resume.
 HISTORY_DIR="${AGENTS_HISTORY_DIR:-}"
 RUN_MODE="${AGENTS_RUN_MODE:-}"
-if [ -n "$HISTORY_DIR" ] && [ -n "$RUN_MODE" ]; then
+TMUX_SESSION_NAME="${AGENT_TMUX_SESSION_NAME:-}"
+if [ -n "$HISTORY_DIR" ] && { [ -n "$RUN_MODE" ] || [ -n "$TMUX_SESSION_NAME" ]; }; then
   BY_SESSION_DIR="$HISTORY_DIR/by-session"
   mkdir -p "$BY_SESSION_DIR"
   SID_TMP="$(mktemp "$BY_SESSION_DIR/.${SID}.XXXXXX")"
-  python3 - "$SID" "$RUN_MODE" "${AGENTS_ACTOR:-}" "${AGENTS_ACTOR_KIND:-}" > "$SID_TMP" <<'PY'
-import json, sys, time
-sid, mode, actor, initiated_by = sys.argv[1:5]
-if mode not in ('plan', 'edit', 'auto', 'skip'):
-    raise SystemExit(1)
-out = {
-    'sessionId': sid,
-    'mode': mode,
-    'startedAtMs': int(time.time() * 1000),
-}
+  python3 - "$SID" "$RUN_MODE" "${AGENTS_ACTOR:-}" "${AGENTS_ACTOR_KIND:-}" "$TMUX_SESSION_NAME" "$BY_SESSION_DIR/$SID.json" > "$SID_TMP" <<'PY'
+import json, re, sys, time
+sid, mode, actor, initiated_by, tmux_name, existing_path = sys.argv[1:7]
+out = {}
+try:
+    with open(existing_path) as existing:
+        value = json.load(existing)
+        if isinstance(value, dict):
+            out = value
+except (OSError, ValueError):
+    pass
+out['sessionId'] = sid
+if mode in ('plan', 'edit', 'auto', 'skip'):
+    out['mode'] = mode
+out['startedAtMs'] = int(time.time() * 1000)
 if actor:
     out['actor'] = actor
 if initiated_by in ('human', 'agent'):
     out['initiatedBy'] = initiated_by
+if re.fullmatch(r'ag-[a-z][a-z0-9-]*-[0-9a-f]{8}', tmux_name, re.I):
+    aliases = out.get('aliases')
+    if not isinstance(aliases, list):
+        aliases = []
+    aliases = [alias.lower() for alias in aliases if isinstance(alias, str) and re.fullmatch(r'ag-[a-z][a-z0-9-]*-[0-9a-f]{8}', alias, re.I)]
+    aliases.append(tmux_name.lower())
+    out['aliases'] = list(dict.fromkeys(aliases))
 json.dump(out, sys.stdout)
 PY
   mv -f "$SID_TMP" "$BY_SESSION_DIR/$SID.json"

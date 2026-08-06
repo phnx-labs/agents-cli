@@ -37,11 +37,14 @@ import {
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 import { confirm } from '@inquirer/prompts';
+import { spawn } from 'node:child_process';
+import { buildCanonicalResumeCommand } from '../lib/session/resume-command.js';
+import { looksLikeSessionId } from '../lib/session/discover.js';
 
 /** Opening more than this many live sessions at once asks for confirmation first. */
 export const CONFIRM_THRESHOLD = 5;
 
-interface ResumeOptions {
+export interface ResumeOptions {
   agent?: string;
   all?: boolean;
   teams?: boolean;
@@ -60,8 +63,8 @@ interface ResumeOptions {
 export function registerSessionsResumeCommand(sessionsCmd: Command): void {
   const cmd = sessionsCmd
     .command('resume')
-    .argument('[query]', 'Filter sessions before selecting (topic, path, or id fragment)')
-    .description('Multi-select sessions and resume each in a terminal tab/split (this terminal, iTerm, Ghostty, tmux, VSCodium; local or --host).')
+    .argument('[query]', 'Session id/tmux alias to reopen directly, or text that filters the picker')
+    .description('Reopen one session by canonical identity, or multi-select history into terminal tabs/splits.')
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
     .option('--all', 'Include sessions from every directory (not just current project)')
     .option('--teams', 'Include team-spawned sessions (hidden by default)')
@@ -83,6 +86,10 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
       # Pre-filter the pool before selecting (space in the filter → use [query])
       agents sessions resume "auth middleware"
 
+      # Reopen one session from any device by UUID prefix or tmux alias
+      agents sessions resume 019fd114
+      agents sessions resume ag-codex-c1f3d813
+
       # Force a backend / side-by-side splits / a remote host
       agents sessions resume --ghostty
       agents sessions resume --vscodium
@@ -90,7 +97,8 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
       agents sessions resume --host zion --tmux
     `,
     notes: `
-      - space toggles a session, enter confirms; tab toggles the preview pane.
+      - A UUID/prefix or ag-<agent>-<suffix> alias bypasses the picker: a live pane is attached; an inactive session resumes on its owning device.
+      - With no identity selector, space toggles a session, enter confirms, and tab toggles the preview pane.
       - Layout: one tab per session by default. --splits packs session pairs side by side in each tab.
       - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.
       - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --host too).
@@ -108,6 +116,11 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
   if (!isInteractiveTerminal()) {
     console.error(chalk.red('sessions resume needs an interactive terminal.'));
     process.exitCode = 1;
+    return;
+  }
+
+  if (query && isDirectResumeSelector(query)) {
+    await dispatchSessionLifecycleInPlace(query.trim(), options.host ? [options.host] : []);
     return;
   }
 
@@ -159,11 +172,7 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
   // 2. Split the selection into resumable surfaces and skipped agents (no silent drop).
   const items: Array<SurfaceItem & { session: SessionMeta }> = [];
   for (const s of chosen) {
-    const command = buildResumeCommand(s);
-    if (!command) {
-      console.log(chalk.yellow(`  skip ${s.shortId} — resume is not supported for ${s.agent} sessions yet`));
-      continue;
-    }
+    const command = buildCanonicalResumeCommand(s.id);
     const cwd = s.cwd && fs.existsSync(s.cwd) ? s.cwd : process.cwd();
     items.push({ session: s, cwd, command });
   }
@@ -224,6 +233,43 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
     }
   });
   console.log(chalk.gray(`\nOpened ${opened}/${items.length} in ${where}.`));
+}
+
+/** IDs and tmux aliases are actions, not picker search text. Human phrases keep
+ * the existing pre-filtered picker, while an explicit identity resumes directly. */
+export function isDirectResumeSelector(query: string): boolean {
+  const selector = query.trim();
+  return looksLikeSessionId(selector) || /^ag-[a-z][a-z0-9-]*-[0-9a-f]{8}$/i.test(selector);
+}
+
+/** Re-enter through the top-level command so fleet routing and harness policy
+ * stay centralized. The child inherits this terminal for a real interactive resume. */
+export async function resumeSelectorInPlace(selector: string): Promise<void> {
+  await spawnCliInPlace(['resume', selector]);
+}
+
+/** Direct identities use focus as the lifecycle dispatcher: it rechecks the
+ * live fleet, attaches a healthy pane, and falls through to `agents resume`
+ * only when the process is no longer attachable. */
+export async function dispatchSessionLifecycleInPlace(selector: string, hosts: string[] = []): Promise<void> {
+  await spawnCliInPlace(buildSessionLifecycleArgs(selector, hosts));
+}
+
+export function buildSessionLifecycleArgs(selector: string, hosts: string[] = []): string[] {
+  return ['sessions', 'focus', selector, ...hosts.flatMap(host => ['--host', host])];
+}
+
+function asyncExitCode(child: ReturnType<typeof spawn>): Promise<number> {
+  return new Promise<number>((resolve) => {
+    child.once('error', () => resolve(127));
+    child.once('exit', (code, signal) => resolve(code ?? (signal ? 1 : 0)));
+  });
+}
+
+async function spawnCliInPlace(args: string[]): Promise<void> {
+  const child = spawn(process.execPath, [process.argv[1], ...args], { stdio: 'inherit' });
+  const exitCode = await asyncExitCode(child);
+  process.exitCode = exitCode;
 }
 
 export function resolveResumePacking(options: Pick<ResumeOptions, 'splits'>): Packing {

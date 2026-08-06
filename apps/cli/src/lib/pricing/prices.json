@@ -19,6 +19,18 @@
       "cacheReadPerToken": 1e-07,
       "cacheWritePerToken": 1.25e-06
     },
+    "claude-opus-5": {
+      "inputPerToken": 0.000005,
+      "outputPerToken": 0.000025,
+      "cacheReadPerToken": 0.0000005,
+      "cacheWritePerToken": 0.00000625
+    },
+    "claude-sonnet-5": {
+      "inputPerToken": 0.000002,
+      "outputPerToken": 0.00001,
+      "cacheReadPerToken": 0.0000002,
+      "cacheWritePerToken": 0.0000025
+    },
     "claude-fable-5": {
       "inputPerToken": 1e-05,
       "outputPerToken": 5e-05,

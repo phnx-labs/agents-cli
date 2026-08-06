@@ -31,7 +31,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/05-sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 33;
+export const SCHEMA_VERSION = 34;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every
@@ -889,6 +889,38 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.has('account_org')) db.exec(`ALTER TABLE sessions ADD COLUMN account_org TEXT`);
     db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_account_key ON sessions(account_key)`);
     backfillClaudeAccounts(db);
+  }
+
+  if (fromVersion < 34) {
+    // v33 -> v34: claude-opus-5 and claude-sonnet-5 were missing from the pricing
+    // table. `getModelPricing` matches on a dash-bounded prefix, so neither could fall
+    // back to its Claude 4 entry: both resolved to null and every session using them
+    // priced to $0 -- silently, because an unpriced model contributes nothing rather
+    // than raising. On one real index that was 526 sessions, 478 of them the current
+    // default model.
+    //
+    // Adding the prices alone fixes nothing already indexed: cost_usd is computed at
+    // scan time, and the scanner skips any transcript whose (file_mtime_ms, file_size)
+    // is unchanged. Nor can those rows be repaired in place -- the row stores
+    // token_count and output_tokens, not the uncached-input / cache-read / cache-write
+    // split the price table needs -- so the figure has to come from re-reading the
+    // transcript.
+    //
+    // Flush ONLY the affected transcripts, not the whole ledger. A blanket
+    // `DELETE FROM scan_ledger` (what v5 -> v6 did when cost was introduced) would
+    // re-parse every session on the next scan and break the contract the other
+    // migrations here are tested against: adding a column must not invalidate warm
+    // session ledgers. Scoping it to the rows that actually mispriced keeps every
+    // other ledger entry warm and still guarantees the numbers correct themselves.
+    db.exec(`
+      DELETE FROM scan_ledger
+      WHERE file_path IN (
+        SELECT file_path FROM sessions
+        WHERE cost_usd IS NULL
+          AND file_path IS NOT NULL AND file_path <> ''
+          AND (model LIKE 'claude-opus-5%' OR model LIKE 'claude-sonnet-5%')
+      );
+    `);
   }
 
 }

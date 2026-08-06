@@ -32,6 +32,8 @@
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://factory.ai" title="Factory AI Droid"><strong>Droid</strong></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://dev.meta.ai/docs/muse-code" title="Meta Muse Code"><strong>Muse</strong></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://omp.sh" title="Oh My Pi"><strong>Pi</strong></a>
 </p>
 
@@ -218,7 +220,11 @@ otherwise the first permission option offered by the server. The same last-resor
 warning applies.
 
 Codex has no native smart-classifier mode, so `agents run codex --mode auto` resolves
-to sandboxed `edit` and can still prompt. `agents run codex --mode skip` is different:
+to sandboxed `edit` and can still prompt. When `--mode` is omitted for Codex, the same
+safe writable mode is used: the workspace, `~/.agents`, and regenerable toolchain caches
+are writable; network access is enabled; and approvals are requested on demand. An
+explicit `--mode plan` keeps the filesystem read-only while leaving network access on.
+`agents run codex --mode skip` is different:
 it bypasses approvals **and** removes the sandbox. `full` remains an alias for `skip`,
 but new scripts should use the explicit `skip` name.
 
@@ -684,7 +690,7 @@ tools:
 ---
 ```
 
-Workflows that need to write — post PR comments, edit files, send Slack — should run with `--mode edit`, or `--mode auto` on Claude Code and GitHub Copilot. Reserve `--mode skip` (legacy alias: `full`) for last-resort bypasses. `agents run` defaults to `--mode plan` (read-only), which deadlocks at `ExitPlanMode` in headless runs.
+Workflows that need to write — post PR comments, edit files, send Slack — should run with `--mode edit`, or `--mode auto` on Claude Code and GitHub Copilot. Reserve `--mode skip` (legacy alias: `full`) for last-resort bypasses. `agents run` defaults to `--mode plan` for other harnesses; Codex defaults to its safe writable profile. An explicit Codex `--mode plan` is read-only with network access.
 
 Resolution is project > user > system: a `<repo>/.agents/workflows/<name>/` overrides a same-named workflow in `~/.agents/workflows/`. Commit project workflows with your repo so teammates get the same pipeline.
 

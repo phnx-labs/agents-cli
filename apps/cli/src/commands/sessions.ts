@@ -29,6 +29,10 @@ import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
 import { resolveViewingIn, viewingInLabel } from '../lib/session/viewing-in.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.js';
+import {
+  loadFleetActiveSessions,
+  loadLocalActiveSessions,
+} from '../lib/session/session-cache.js';
 import { gatherRemoteList, gatherRemoteToolProgramCounts, gatherRemoteToolSearch, runOnPeer } from '../lib/session/remote-list.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
@@ -45,6 +49,7 @@ import { renderMarkdown } from '../lib/markdown.js';
 import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';
 import { getShimsDir } from '../lib/state.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
+import { resolveSessionAlias } from '../lib/session/actor-sidecar.js';
 import { resolveVersionAliasLoose } from '../lib/versions.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import {
@@ -1330,8 +1335,52 @@ export function remoteHostsToDial(hosts: string[] | undefined, self: string): st
  * call it, so the browser can never disagree with `--active --json` about which
  * sessions are live (it used to call the local-only `getActiveSessions()` directly
  * and silently hid every remote session).
+ *
+ * RUSH-2062: default path is cache-first against the daemon-warmed shared
+ * snapshot (`session-cache.ts`). Menubar / Factory / watchdog / CLI share one
+ * warm result instead of each re-running the full SSH fan-out. `forceRefresh`
+ * (or `AGENTS_SESSIONS_FORCE_REFRESH=1`) re-gathers live; scoped `--host` lists
+ * always gather live so a filter never returns a wrong unscoped snapshot.
  */
 export async function gatherActiveSessions(
+  opts: { local?: boolean; hosts?: string[]; forceRefresh?: boolean } = {},
+): Promise<{ sessions: ActiveSession[]; remoteDeviceCount: number }> {
+  const forceRefresh = opts.forceRefresh === true
+    || process.env.AGENTS_SESSIONS_FORCE_REFRESH === '1';
+  // Scoped host lists are not represented in the unscoped fleet/local snapshot
+  // — always gather live so a filter cannot return the wrong set.
+  const scoped = (opts.hosts?.length ?? 0) > 0;
+
+  if (opts.local && !scoped) {
+    const loaded = await loadLocalActiveSessions({
+      forceRefresh,
+      gather: async () => {
+        const rows = await getActiveSessions({ localOnly: true });
+        const self = machineId();
+        for (const s of rows) if (!s.machine) s.machine = self;
+        return rows;
+      },
+    });
+    return { sessions: loaded.sessions, remoteDeviceCount: 0 };
+  }
+
+  if (!opts.local && !scoped) {
+    const loaded = await loadFleetActiveSessions({
+      forceRefresh,
+      gather: () => gatherActiveSessionsLive({ local: false }),
+    });
+    return { sessions: loaded.sessions, remoteDeviceCount: loaded.remoteDeviceCount };
+  }
+
+  return gatherActiveSessionsLive(opts);
+}
+
+/**
+ * Live (uncached) gather — the work the daemon / force-refresh path pays once
+ * so other surfaces can share the snapshot. Kept separate so the cache layer
+ * never recursively re-enters itself.
+ */
+async function gatherActiveSessionsLive(
   opts: { local?: boolean; hosts?: string[] } = {},
 ): Promise<{ sessions: ActiveSession[]; remoteDeviceCount: number }> {
   const self = machineId();
@@ -1341,7 +1390,9 @@ export async function gatherActiveSessions(
   // remote-host teammate over ssh even for this machine's OWN local gather —
   // "this machine only" must mean zero ssh, not just "skip the cross-machine
   // device fan-out below".
-  const local = shouldIncludeLocal(opts.hosts, self) ? await getActiveSessions({ localOnly: opts.local }) : [];
+  const local = shouldIncludeLocal(opts.hosts, self)
+    ? await getActiveSessions({ localOnly: opts.local })
+    : [];
   for (const s of local) if (!s.machine) s.machine = self;
 
   let remoteDeviceCount = 0;
@@ -4110,12 +4161,12 @@ export function selectorAllowsEarlyExit(selector: string): boolean {
  * local lookups, then group copies by logical session id. Synced mirrors of one
  * session therefore stay one candidate even when several machines report them;
  * distinct ids sharing a prefix remain distinct ambiguity candidates. */
-export function fleetCandidatesByQuery(rows: SessionMeta[], query: string): FleetSessionCandidate[] {
+export function fleetCandidatesByQuery(rows: SessionMeta[], query: string, trustResolvedRows = false): FleetSessionCandidate[] {
   // An id selector must still be prefix-filtered defensively against older peers
   // returning content mentioners. Keyword rows, however, were already matched by
   // each peer's own FTS index; the parent does not own that transcript/index and
   // must not re-run metadata-only filtering that could discard a content hit.
-  const matched = looksLikeSessionId(query)
+  const matched = !trustResolvedRows && looksLikeSessionId(query)
     ? resolveSessionQuery(rows, query, { indexFallback: false }).matches
     : rows;
   const byId = new Map<string, Map<string, SessionMeta>>();
@@ -4139,6 +4190,14 @@ export function fleetCandidatesByQuery(rows: SessionMeta[], query: string): Flee
 
 /** Resolve through the canonical metadata+content union used by keyword search. */
 function resolveIndexedMetadataRows(indexed: SessionMeta[], selector: string): SessionMeta[] {
+  const alias = resolveSessionAlias(selector);
+  if (alias.kind === 'resolved') {
+    return resolveSessionQuery(indexed, alias.sessionId, { indexFallback: false }).matches;
+  }
+  if (alias.kind === 'ambiguous') {
+    const ids = new Set(alias.sessionIds.map(id => id.toLowerCase()));
+    return indexed.filter(session => ids.has(session.id.toLowerCase()));
+  }
   return resolveSessionQuery(indexed, selector, { indexFallback: false }).matches;
 }
 
@@ -4172,7 +4231,11 @@ export function metadataResolveOutcome(
   remote: { sessions: SessionMeta[]; unreachable: string[] },
   selector: string,
 ): MetadataResolveOutcome {
-  const candidates = fleetCandidatesByQuery([...localMatches, ...remote.sessions], selector);
+  // Every peer answered through --resolve-safe-v1, so its native-id row is
+  // already the result of resolving the original selector. Re-filtering by the
+  // selector would discard alias suffixes such as c1f3d813 because the native
+  // UUID intentionally has a different prefix.
+  const candidates = fleetCandidatesByQuery([...localMatches, ...remote.sessions], selector, true);
   // A full UUID is globally unique, so one exact hit resolves even when an
   // unrelated registered device is offline. A label is NOT globally unique — a
   // distinct session may carry the same label on an unreachable peer — so it

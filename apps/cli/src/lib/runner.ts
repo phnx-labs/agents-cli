@@ -35,6 +35,7 @@ import type { AgentId } from './types.js';
 import { prepareJobHome, buildSpawnEnv, getJobHomePath } from './sandbox.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { createTimer, redactPrompt } from './events.js';
+import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
 import {
   normalizeMode,
   resolveHeadlessMode,
@@ -55,7 +56,8 @@ import { backgroundSpawnOptions, killTree } from './platform/process.js';
 import lockfile from 'proper-lockfile';
 import { ensureLockTarget } from './fs-atomic.js';
 import { walkForFiles } from './fs-walk.js';
-import { getBinaryPath, isVersionInstalled, resolveVersion } from './versions.js';
+import { getBinaryPath, isVersionInstalled, resolveVersion, getVersionHomePath } from './versions.js';
+import { resolveClaudeSetupToken } from './claude-account-token.js';
 import {
   getConfiguredRunStrategy,
   resolveRunVersion,
@@ -138,7 +140,7 @@ function terminateRoutineTree(pid: number | null): void {
 /** CLI command templates per agent, with {prompt} as a placeholder. */
 const AGENT_COMMANDS: Record<string, string[]> = {
   claude: ['claude', '-p', '--verbose', '{prompt}', '--output-format', 'stream-json', '--permission-mode', 'plan'],
-  codex: ['codex', 'exec', '--sandbox', 'workspace-write', '{prompt}', '--json'],
+  codex: ['codex', 'exec', '{prompt}', '--json'],
   gemini: ['gemini', '{prompt}', '--output-format', 'stream-json'],
   cursor: ['cursor-agent', '-p', '{prompt}', '--output-format', 'stream-json'],
   kimi: ['kimi', '--prompt', '{prompt}', '--output-format', 'stream-json'],
@@ -261,20 +263,14 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
   }
 
   if (config.agent === 'codex') {
-    if (mode === 'plan') {
-      // The template defaults to workspace-write; plan means read-only.
-      const sbIndex = cmd.indexOf('--sandbox');
-      if (sbIndex !== -1) cmd[sbIndex + 1] = 'read-only';
-    } else if (mode === 'edit' || mode === 'auto') {
-      // Keep the workspace-write sandbox — no approval bypass; only skip drops
-      // the guardrails. Re-enable network, which workspace-write turns off.
-      cmd.push('-c', 'sandbox_workspace_write.network_access=true');
-    } else if (mode === 'skip') {
-      // Remove sandbox restriction, just --dangerously-bypass-approvals-and-sandbox
-      const sbIndex = cmd.indexOf('--sandbox');
-      if (sbIndex !== -1) cmd.splice(sbIndex, 2);
-      cmd.push('--dangerously-bypass-approvals-and-sandbox');
-    }
+    const policyMode = mode === 'plan' || mode === 'skip' ? mode : 'edit';
+    const routineRoots = (config.allow?.dirs ?? []).map((dir) => {
+      if (dir.startsWith('-')) {
+        throw new Error(`allow.dirs entries must not start with '-': ${JSON.stringify(dir)}`);
+      }
+      return dir.replace(/^~/, os.homedir());
+    });
+    cmd.push(...codexPolicyArgs(policyMode, [...codexEditWritableRoots(), ...routineRoots]));
 
     appendModelAndReasoning(cmd, config);
   }
@@ -641,22 +637,24 @@ export function buildRoutineSpawnEnv(
   for (const [k, v] of Object.entries(execEnv)) {
     if (v !== undefined) out[k] = v;
   }
-  // A routine authenticates through the pinned account's own CLAUDE_CONFIG_DIR
-  // login on THIS box (buildExecEnv points it at the per-account version home).
-  // Claude Code's interactive session refreshes itself per-device; keeping the
-  // daemon out of the credential entirely is what avoids the fleet-wide rotation
-  // logout — a shared/rotating token was the cause, not the fix.
-  //
-  // Injecting a token was already ruled out, but INHERITING one was not:
-  // buildExecEnv spreads the ambient process.env (exec.ts) and sanitizeProcessEnv
-  // only strips loader/interpreter vars, never credentials. So on any box whose
-  // daemon environment happens to carry CLAUDE_CODE_OAUTH_TOKEN, every routine
-  // spawn silently ran on that one shared rotating token instead of the host's
-  // own login — the exact fleet-wide-logout path, arriving by inheritance rather
-  // than injection. CI never caught it because CI has no token to inherit; a
-  // provisioned box does. Drop it here so a routine always uses the login of the
-  // machine it runs on.
-  delete out.CLAUDE_CODE_OAUTH_TOKEN;
+  // CLAUDE_CODE_OAUTH_TOKEN comes in two flavours, and only one is safe for a
+  // routine. KEEP a per-account `claude setup-token` (long-lived, NON-rotating,
+  // keyed to this home's own account) that buildExecEnv injected from the reserved
+  // `auth` bundle (resolveClaudeSetupToken) — that is the durable cure for the
+  // single-use-refresh-token revocation storm: a setup-token never rotates, so a
+  // scheduled routine can't land on a sibling home's just-rotated-out credential.
+  // STRIP an INHERITED ambient value instead: buildExecEnv spreads process.env
+  // (exec.ts) and sanitizeProcessEnv leaves credentials, so a daemon env that
+  // happens to carry a shared/rotating CLAUDE_CODE_OAUTH_TOKEN would otherwise make
+  // every routine run on that one token — the RUSH-1822 fleet-wide-logout path.
+  // Distinguish by value: only the resolved setup-token survives.
+  // Authoritative: buildExecEnv injects the setup-token but then spreads the caller
+  // env over it, so an ambient CLAUDE_CODE_OAUTH_TOKEN would win — re-assert here.
+  const setupToken = agent === 'claude' && version
+    ? resolveClaudeSetupToken(getVersionHomePath('claude', version))
+    : null;
+  if (setupToken) out.CLAUDE_CODE_OAUTH_TOKEN = setupToken;
+  else delete out.CLAUDE_CODE_OAUTH_TOKEN;
   if (agent === 'cursor' && overlayHome) {
     // prepareJobHome links this host's Cursor auth file here. Pin XDG_CONFIG_HOME
     // to the overlay so an ambient value cannot bypass the routine sandbox.

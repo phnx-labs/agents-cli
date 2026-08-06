@@ -78,12 +78,16 @@ final class Dispatcher {
         case "ping":
             return ["pong": true]
         case "trust_status":
-            // Diagnostic: report AX trust + identity without throwing. Useful
-            // when TCC grants look right in the UI but AX calls still 403.
+            // Diagnostic: report AX + Screen Recording trust and identity
+            // without throwing. Useful when TCC grants look right in the UI
+            // but AX calls still 403, or screenshot capture times out.
+            // screen_recording is additive — older callers that only read
+            // `trusted`/`pid`/`path` are unaffected.
             let pid = Int(ProcessInfo.processInfo.processIdentifier)
             let path = Bundle.main.executablePath ?? CommandLine.arguments.first ?? ""
             return [
                 "trusted": AX.isTrusted(),
+                "screen_recording": Screenshot.isScreenRecordingTrusted(),
                 "pid": pid,
                 "path": path,
             ]

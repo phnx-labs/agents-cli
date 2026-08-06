@@ -27,6 +27,8 @@ export interface SessionActorRecord {
   initiatedBy?: 'human' | 'agent';
   /** Effective permissions mode used by the launcher. */
   mode?: SessionRunMode;
+  /** Stable wrapper names that resolve to this native session id. */
+  aliases?: string[];
   startedAtMs: number;
 }
 
@@ -49,6 +51,28 @@ function recordPath(sessionId: string): string {
   return path.join(sidecarDir(), `${sessionId}.json`);
 }
 
+function isSafeAlias(alias: string): boolean {
+  return /^ag-[a-z][a-z0-9-]*-[0-9a-f]{8}$/i.test(alias);
+}
+
+function hasRecordData(record: SessionActorRecord): boolean {
+  return typeof record.actor === 'string'
+    || typeof record.mode === 'string'
+    || (Array.isArray(record.aliases) && record.aliases.some(alias => typeof alias === 'string'));
+}
+
+function normalizedAliases(aliases: unknown): string[] {
+  if (!Array.isArray(aliases)) return [];
+  return [...new Set(aliases
+    .filter((alias): alias is string => typeof alias === 'string' && isSafeAlias(alias))
+    .map(alias => alias.toLowerCase()))];
+}
+
+function writeRecord(record: SessionActorRecord): void {
+  fs.mkdirSync(sidecarDir(), { recursive: true });
+  fs.writeFileSync(recordPath(record.sessionId), JSON.stringify(record), 'utf8');
+}
+
 /**
  * Record the actor a session was launched under. Never throws — the sidecar is
  * an attribution optimization; a session with no record simply scans unattributed.
@@ -57,11 +81,55 @@ function recordPath(sessionId: string): string {
 export function writeSessionActorRecord(record: SessionActorRecord): void {
   if (!isSafeSessionId(record.sessionId)) return;
   try {
-    fs.mkdirSync(sidecarDir(), { recursive: true });
-    fs.writeFileSync(recordPath(record.sessionId), JSON.stringify(record), 'utf8');
+    const previous = readSessionActorRecord(record.sessionId);
+    writeRecord({
+      ...previous,
+      ...record,
+      aliases: normalizedAliases([...(previous?.aliases ?? []), ...(record.aliases ?? [])]),
+    });
   } catch {
     /* degrade to an unattributed row */
   }
+}
+
+export function writeSessionAliasRecord(sessionId: string, alias: string): void {
+  if (!isSafeSessionId(sessionId) || !isSafeAlias(alias)) return;
+  try {
+    const previous = readSessionActorRecord(sessionId);
+    writeRecord({
+      sessionId,
+      actor: previous?.actor,
+      initiatedBy: previous?.initiatedBy,
+      mode: previous?.mode,
+      aliases: normalizedAliases([...(previous?.aliases ?? []), alias]),
+      startedAtMs: previous?.startedAtMs ?? Date.now(),
+    });
+  } catch {
+    /* the native id remains usable */
+  }
+}
+
+export type SessionAliasResolution =
+  | { kind: 'resolved'; sessionId: string }
+  | { kind: 'ambiguous'; sessionIds: string[] }
+  | { kind: 'not-found' };
+
+/** Resolve an exact alias, or a unique prefix/suffix of at least six chars. */
+export function resolveSessionAlias(selector: string): SessionAliasResolution {
+  const normalized = selector.trim().toLowerCase();
+  if (!normalized) return { kind: 'not-found' };
+  const exact = new Set<string>();
+  const fuzzy = new Set<string>();
+  for (const record of loadSessionActorIndex().values()) {
+    for (const alias of normalizedAliases(record.aliases)) {
+      if (alias === normalized) exact.add(record.sessionId);
+      else if (normalized.length >= 6 && (alias.startsWith(normalized) || alias.endsWith(normalized))) fuzzy.add(record.sessionId);
+    }
+  }
+  const matches = exact.size > 0 ? [...exact] : [...fuzzy];
+  if (matches.length === 0) return { kind: 'not-found' };
+  if (matches.length > 1) return { kind: 'ambiguous', sessionIds: matches.sort() };
+  return { kind: 'resolved', sessionId: matches[0] };
 }
 
 /** Read one session's actor record. Returns undefined if absent/corrupt. */
@@ -76,7 +144,7 @@ export function readSessionActorRecord(sessionId: string): SessionActorRecord | 
   try {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && typeof parsed.sessionId === 'string' &&
-      (typeof parsed.actor === 'string' || typeof parsed.mode === 'string')) {
+      hasRecordData(parsed as SessionActorRecord)) {
       return parsed as SessionActorRecord;
     }
   } catch {
@@ -103,7 +171,7 @@ export function loadSessionActorIndex(): Map<string, SessionActorRecord> {
     try {
       const parsed = JSON.parse(fs.readFileSync(path.join(sidecarDir(), f), 'utf8'));
       if (parsed && typeof parsed === 'object' && typeof parsed.sessionId === 'string' &&
-        (typeof parsed.actor === 'string' || typeof parsed.mode === 'string')) {
+        hasRecordData(parsed as SessionActorRecord)) {
         out.set(parsed.sessionId, parsed as SessionActorRecord);
       }
     } catch {

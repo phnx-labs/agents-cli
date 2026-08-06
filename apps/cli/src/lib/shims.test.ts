@@ -54,7 +54,9 @@ describe('generateShimScript', () => {
     const script = generateShimScript('codex');
     expect(script).not.toContain('DISABLE_AUTOUPDATER');
     // codex keeps its own suppression flag, injected at exec.
-    expect(script).toContain('-c check_for_update_on_startup=false');
+    expect(script).toContain('check_for_update_on_startup=false');
+    expect(script).toContain('default_permissions=\"agents-edit\"');
+    expect(script).toContain('approval_policy=\"on-request\"');
   });
 });
 
@@ -67,7 +69,8 @@ describe('generateVersionedAliasScript', () => {
   it('does not touch DISABLE_AUTOUPDATER for a codex@version alias (codex path unchanged)', () => {
     const script = generateVersionedAliasScript('codex', '0.20.0');
     expect(script).not.toContain('DISABLE_AUTOUPDATER');
-    expect(script).toContain('-c check_for_update_on_startup=false');
+    expect(script).toContain('check_for_update_on_startup=false');
+    expect(script).toContain('default_permissions=\"agents-edit\"');
   });
 
   it('execs normally for a valid project agents.yaml version', () => {

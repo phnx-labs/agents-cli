@@ -135,7 +135,9 @@ describe('schema migration v32 -> v33 (per-account attribution)', () => {
     const idx = (db.prepare(`PRAGMA index_list(sessions)`).all() as Array<{ name: string }>)
       .map((i) => i.name);
     expect(idx).toContain('idx_sessions_account_key');
-    expect(SCHEMA_VERSION).toBe(33);
+    // >= 33 rather than == : this file tests the v33 step, not the head version, so a
+    // later migration must not force an edit here.
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(33);
   });
 
   it('backfills each row to the account that actually produced it', () => {
@@ -246,40 +248,12 @@ describe('v33 self-healing repair on an already-migrated DB', () => {
 });
 
 describe('v33 repair safety', () => {
-  it('does not throw when schema_version says 33 but the columns are absent', () => {
-    // getDB stamps schema_version = SCHEMA_VERSION for any DB whose meta has no row,
-    // WITHOUT running migrateSchema. A repair that queried account_key unguarded would
-    // throw "no such column" and take down every command that opens the index.
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-v33-noco-'));
-    const dbPath = path.join(dir, 'sessions.db');
-    const seed = new Database(dbPath);
-    seed.exec(`
-      CREATE TABLE sessions (
-        id TEXT PRIMARY KEY, short_id TEXT NOT NULL, agent TEXT NOT NULL,
-        timestamp TEXT NOT NULL, file_path TEXT NOT NULL, account TEXT
-      );
-      CREATE VIRTUAL TABLE session_text USING fts5(session_id UNINDEXED, label, topic, project, content);
-      CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
-      CREATE TABLE scan_ledger (
-        file_path TEXT PRIMARY KEY, file_mtime_ms INTEGER NOT NULL, file_size INTEGER NOT NULL,
-        scanned_at INTEGER NOT NULL, parser_state TEXT, content_text TEXT
-      );
-    `);
-    seed.close();
-
-    // Re-open through getDB with the DB redirected at this bare file.
-    const prev = process.env.AGENTS_SESSIONS_DB;
-    process.env.AGENTS_SESSIONS_DB = dbPath;
-    closeDB();
-    try {
-      expect(() => getDB()).not.toThrow();
-    } finally {
-      closeDB();
-      if (prev === undefined) delete process.env.AGENTS_SESSIONS_DB;
-      else process.env.AGENTS_SESSIONS_DB = prev;
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  });
+  // NOTE: the missing-column guard that lived here was removed. It set
+  // AGENTS_SESSIONS_DB mid-file and called getDB(), but db.ts:29 captures DB_PATH at
+  // module load, so it opened the file-level fixture and `not.toThrow()` could never
+  // fail. Exercising that path needs its own test file with HOME set before import,
+  // the pattern every other migration test here uses. A test that cannot fail is worse
+  // than no test, so it is gone rather than left as false assurance.
 
   it('repairs only broken rows, leaving an attributed row untouched', () => {
     // Re-resolving every Claude row on an unrelated trigger would downgrade a correct
@@ -308,3 +282,4 @@ describe('v33 repair safety', () => {
     expect(fixed.account_key).toContain('claude:org=');
   });
 });
+

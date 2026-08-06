@@ -3033,7 +3033,14 @@ async function openResumedSessionTerminal(
   });
 
   terminal.show();
-  return true;
+  try {
+    await readiness.waitFor(terminal, 'agentReady');
+    return true;
+  } catch (err) {
+    console.warn(`[READINESS] resumed session did not become ready: ${err}`);
+    vscode.window.showInformationMessage(`Session ${session.shortId} did not become ready; its terminal remains open with the CLI result.`);
+    return false;
+  }
 }
 
 async function resumeSession(context: vscode.ExtensionContext) {
@@ -3185,11 +3192,7 @@ async function resumeSessionsBatch(
     // pre-ticked rows resolve to an empty selection.
     quickPick.selectedItems = items.filter((i) => i.candidate && preselected.has(i.candidate.id));
     rendered = candidates;
-    const defaults = defaultPickedIds(candidates);
-    const detachedCount = defaults.length;
-    quickPick.placeholder = detachedCount > 0
-      ? `${detachedCount} detached session${detachedCount === 1 ? '' : 's'} pre-selected — space toggles, enter opens each in a tab`
-      : 'Select sessions to reopen, each in its own tab';
+    quickPick.placeholder = 'Select sessions to reopen, each in its own tab';
   };
   applyItems(initial);
 

@@ -4,8 +4,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as bundles from '../secrets/bundles.js';
 import * as stateModule from '../state.js';
-import { buildBootstrapScript, leaseAndRun } from './lease.js';
-import { resetCrabboxSecretsMemosForTest } from './cli.js';
+import { buildBootstrapScript, leaseAndRun, isExpiredPoolStray, STRAY_GRACE_SECS } from './lease.js';
+import { resetCrabboxSecretsMemosForTest, type CrabboxBox } from './cli.js';
 import { LEASE_AGENT_MARKER, leasePhaseSentinel } from './progress.js';
 import type { DetectedRuntime } from './runtimes.js';
 
@@ -541,5 +541,47 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
     expect(phases).toEqual(['warmup', 'ready', 'teardown']);
     expect(calls.some((l) => l.startsWith('status'))).toBe(false); // pool never consulted
     expect(calls).toContain('stop fresh-one');
+  });
+});
+
+describe('isExpiredPoolStray — the on-lease expired-stray sweep', () => {
+  const NOW = 1_800_000_000;
+  const strayBox = (over: Partial<CrabboxBox> = {}): CrabboxBox => ({
+    name: 'crabbox-x',
+    status: 'running',
+    slug: 'x',
+    lease: 'cbx_x',
+    state: 'ready',
+    ready: true,
+    keep: true,
+    createdAt: NOW - 10_000,
+    expiresAt: NOW - 100, // expired
+    lastTouchedAt: NOW - STRAY_GRACE_SECS - 10, // idle past the grace window
+    idleTimeoutSecs: 1800,
+    profile: 'default',
+    ...over,
+  });
+  const opts = { profile: 'default', netMode: 'public' as const, keepSlug: 'mine', nowSecs: NOW };
+
+  it('is a stray: expired, idle, same pool, not the box we hold', () => {
+    expect(isExpiredPoolStray(strayBox(), opts)).toBe(true);
+  });
+  it('never the box this run is using', () => {
+    expect(isExpiredPoolStray(strayBox({ slug: 'mine' }), opts)).toBe(false);
+  });
+  it('never an UNEXPIRED box (it is still reusable)', () => {
+    expect(isExpiredPoolStray(strayBox({ expiresAt: NOW + 500 }), opts)).toBe(false);
+  });
+  it('never a box touched within the grace window (a run may hold it)', () => {
+    expect(isExpiredPoolStray(strayBox({ lastTouchedAt: NOW - 30 }), opts)).toBe(false);
+  });
+  it('never a box in a different profile pool', () => {
+    expect(isExpiredPoolStray(strayBox({ profile: 'agents-cli' }), opts)).toBe(false);
+  });
+  it('never a tailnet box for a public run (partitioned by netMode)', () => {
+    expect(isExpiredPoolStray(strayBox({ tailscaleIPv4: '100.1.2.3' }), opts)).toBe(false);
+  });
+  it('never a non-running box', () => {
+    expect(isExpiredPoolStray(strayBox({ status: 'off' }), opts)).toBe(false);
   });
 });

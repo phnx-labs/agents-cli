@@ -121,6 +121,10 @@ function indexLive(live: RawActiveSession[]): Map<string, RawActiveSession> {
  */
 export function classifyResumeState(live: RawActiveSession | undefined): ResumeState {
   if (!live) return 'idle';
+  // Retained closed panes explain what happened; they are not attach targets.
+  if (live.pid === 0 || live.pidAlive === false || live.status === 'closed' || live.status === 'crashed') {
+    return 'idle';
+  }
   if (live.presence === 'background') return 'background';
   if (live.presence === 'parked') return 'parked';
   return live.viewingIn === 'detached' ? 'detached' : 'watched';
@@ -245,13 +249,10 @@ export function abandonedCandidates(candidates: ResumeCandidate[]): ResumeCandid
 }
 
 /**
- * The candidates checked when the picker opens: the crashed ones. Everything
- * else is a deliberate choice the user makes by ticking it — auto-selecting a
- * session someone is watching would double-attach it, and auto-selecting a
- * headless background run would drag it back into the foreground unasked.
+ * Start with no candidates checked. Reopening is always an explicit choice.
  */
-export function defaultPickedIds(candidates: ResumeCandidate[]): string[] {
-  return candidates.filter((c) => c.state === 'detached').map((c) => c.id);
+export function defaultPickedIds(_candidates: ResumeCandidate[]): string[] {
+  return [];
 }
 
 /**
@@ -263,12 +264,8 @@ export function defaultPickedIds(candidates: ResumeCandidate[]): string[] {
  * `unticked` is mutated — it is the picker's memory of what the user turned off,
  * and it survives across swaps.
  *
- * Only an id that was a DEFAULT in the previous render can enter `unticked`.
- * Marking every previously-rendered id instead conflates "the user turned this
- * off" with "this was never pre-ticked to begin with", and then silently
- * refuses to pre-tick it when it later becomes detached — which is exactly the
- * transition this picker exists to catch, since a terminal can die while the
- * background revalidation is in flight.
+ * There are no automatic defaults; the result preserves explicit checks while
+ * a background refresh replaces the candidate list.
  */
 export function nextPreselection(args: {
   previous: readonly ResumeCandidate[];

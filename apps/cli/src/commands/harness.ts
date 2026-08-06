@@ -31,15 +31,23 @@ import {
   renameProfile,
   profileFromHostModel,
   authEnvKeyForHost,
+  modelEnvKeyForHost,
+  baseUrlEnvKeyForHost,
   getProfilePath,
   validateProfileName,
   type Profile,
   type ForkProfileOptions,
 } from '../lib/profiles.js';
 import { listPresets, getPreset } from '../lib/profiles-presets.js';
-import { listBundles } from '../lib/secrets/bundles.js';
 import { AGENTS, ALL_AGENT_IDS, resolveAgentName } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
+import {
+  runWizardSteps,
+  createSteps,
+  editSteps,
+  defaultWizardIO,
+  type HarnessDraft,
+} from './harness-wizard.js';
 
 /** Short capability summary for a native harness — its supported run modes. */
 function nativeModes(id: (typeof ALL_AGENT_IDS)[number]): string {
@@ -244,115 +252,92 @@ async function runForkFlow(source: string, name: string, opts: ForkOptions): Pro
   console.log(chalk.gray(`Try: agents run ${name} "hello"`));
 }
 
-/** The first `_MODEL`-suffixed env var in a preset's static env block, if any. */
-function presetModel(preset: ReturnType<typeof listPresets>[number]): string | undefined {
-  return Object.entries(preset.env).find(([k]) => k.endsWith('_MODEL'))?.[1];
+/**
+ * Interactive `agents harness add`/`fork` wizard — runs when required info is
+ * missing and stdin+stdout are a TTY (see {@link forkNeedsWizard}, {@link addNeedsWizard}).
+ * Drives the shared step engine ({@link createSteps}) and maps its finished draft
+ * back to the same `(source, name, opts)` shape {@link buildFork} accepts via
+ * {@link runForkFlow}, so a wizard run and a hand-written fork call build an
+ * identical profile.
+ */
+async function runCreateWizard(): Promise<{ source: string; name: string; opts: ForkOptions }> {
+  const io = await defaultWizardIO();
+  const draft = await runWizardSteps(createSteps(), { mode: 'create' }, io);
+  return {
+    source: draft.source!,
+    name: draft.name!,
+    opts: {
+      model: draft.model,
+      baseUrl: draft.baseUrl,
+      authProvider: draft.authProvider,
+      fromSecrets: draft.fromSecrets,
+    },
+  };
 }
 
 /**
- * Interactive `agents harness add`/`fork` wizard — runs when required info is
- * missing and stdout is a TTY (see {@link forkNeedsWizard}, {@link addNeedsWizard}).
- * Always resolves to the same `(source, name, opts)` shape {@link buildFork}
- * accepts via {@link runForkFlow}, so a wizard run and a hand-written fork call
- * build an identical profile.
+ * Map a finished edit-wizard draft onto {@link EditOptions}, keeping only the
+ * fields the user actually changed from the profile's current values. Unchanged
+ * accepts (the wizard pre-fills each prompt with the current value) drop out, so
+ * the resulting {@link buildEdit} touches nothing the user left alone — and the
+ * "no changes" case is detectable via {@link hasEditFlags}. Base-URL clearing is
+ * intentionally not expressed here: the flag path can't clear it either (an empty
+ * `--base-url` is a no-op in `forkProfile`), so the wizard matches that until a
+ * later subtask adds explicit clearing.
  */
-async function runHarnessWizard(): Promise<{ source: string; name: string; opts: ForkOptions }> {
-  const { select, input } = await import('@inquirer/prompts');
+export function draftToEditOptions(draft: HarnessDraft, original: Profile): EditOptions {
+  const host = original.host.agent;
+  const curModel = original.env[modelEnvKeyForHost(host)];
+  const baseKey = baseUrlEnvKeyForHost(host);
+  const curBaseUrl = baseKey ? original.env[baseKey] : undefined;
+  const curVersion = original.host.version ?? '';
+  const curFallback = original.fallback_model ?? '';
+  const curDescription = original.description ?? '';
 
-  const customNames = listProfiles().map((p) => p.name);
-  const source = await select<string>({
-    message: 'Fork from',
-    choices: [
-      ...ALL_AGENT_IDS.map((id) => ({ name: `${AGENTS[id].name}  ${chalk.gray('(native)')}`, value: id as string })),
-      ...customNames.map((n) => ({ name: `${n}  ${chalk.gray('(custom harness)')}`, value: n })),
-    ],
-  });
+  const opts: EditOptions = {};
+  if (draft.model !== undefined && draft.model !== curModel) opts.model = draft.model;
+  if (draft.baseUrl && draft.baseUrl !== curBaseUrl) opts.baseUrl = draft.baseUrl;
+  if (draft.authProvider !== undefined) opts.authProvider = draft.authProvider;
+  if (draft.fromSecrets !== undefined) opts.fromSecrets = draft.fromSecrets;
+  if (draft.version !== undefined && draft.version !== curVersion) opts.version = draft.version;
+  if (draft.fallbackModel !== undefined && draft.fallbackModel !== curFallback) opts.fallbackModel = draft.fallbackModel;
+  if (draft.description !== undefined && draft.description !== curDescription) opts.description = draft.description;
+  return opts;
+}
 
-  const presets = listPresets();
-  const CUSTOM = '__custom__';
-  const presetChoice = await select<string>({
-    message: 'Preset',
-    choices: [
-      ...presets.map((p) => ({ name: `${p.name}  ${chalk.gray(p.description.slice(0, 60))}`, value: p.name })),
-      { name: 'Build custom (host + model + provider)', value: CUSTOM },
-    ],
-  });
-
-  let model: string | undefined;
-  let baseUrl: string | undefined;
-  let authProvider: string | undefined;
-  let defaultName = source;
-
-  if (presetChoice === CUSTOM) {
-    model = await input({ message: 'Model id' });
-    const NO_AUTH = '__none__';
-    const providers = [...new Set(presets.map((p) => p.provider))];
-    const providerChoice = await select<string>({
-      message: 'Provider',
-      choices: [
-        ...providers.map((p) => ({ name: p, value: p })),
-        { name: 'no auth / host manages its own login', value: NO_AUTH },
-      ],
-    });
-    authProvider = providerChoice === NO_AUTH ? undefined : providerChoice;
-    const baseUrlInput = await input({ message: 'Base URL (optional)', default: '' });
-    baseUrl = baseUrlInput || undefined;
-  } else {
-    const preset = getPreset(presetChoice)!;
-    model = presetModel(preset);
-    baseUrl = preset.env.ANTHROPIC_BASE_URL || preset.env.OPENAI_BASE_URL;
-    authProvider = preset.authOptional ? undefined : preset.provider;
-    // Pre-fill with the preset's own name (e.g. 'deepseek'), not a model
-    // detail, so users aren't nudged toward baking one into the identity name.
-    defaultName = preset.name;
+/**
+ * Interactive `agents harness edit <name>` wizard — runs when no edit flags were
+ * given and stdin+stdout are a TTY. Loads the profile, drives the shared step
+ * engine ({@link editSteps}) pre-filled with current values, then persists via the
+ * same build+write path as the flag-driven edit. `--key-stdin` is honored for the
+ * auth step's key entry. When the user changes nothing, it says so and writes
+ * nothing.
+ */
+async function runEditWizard(name: string, cliOpts: EditOptions): Promise<void> {
+  if (!profileExists(name)) {
+    throw new Error(`Harness '${name}' not found. Create it first: agents harness add ${name} ...`);
   }
-
-  const name = await input({
-    message: 'Harness name',
-    default: defaultName,
-    validate: (v) => {
-      try {
-        validateProfileName(v);
-        return true;
-      } catch (err) {
-        return (err as Error).message;
-      }
-    },
-  });
-
-  const opts: ForkOptions = { model, baseUrl, authProvider };
-
-  if (authProvider) {
-    const bundles = listBundles();
-    const TYPE_NOW = 'type';
-    const FROM_SECRETS = 'secrets';
-    const keySource = bundles.length > 0
-      ? await select<string>({
-          message: `How should '${authProvider}' get its key?`,
-          choices: [
-            { name: 'Type a key now', value: TYPE_NOW },
-            { name: 'Use an existing agents secrets bundle', value: FROM_SECRETS },
-          ],
-        })
-      : TYPE_NOW;
-    if (keySource === FROM_SECRETS) {
-      const bundleName = await select<string>({
-        message: 'Bundle',
-        choices: bundles.map((b) => ({
-          name: b.description ? `${b.name}  ${chalk.gray(b.description)}` : b.name,
-          value: b.name,
-        })),
-      });
-      const bundle = bundles.find((b) => b.name === bundleName)!;
-      const keys = Object.keys(bundle.vars);
-      const key = keys.length === 1
-        ? keys[0]
-        : await select<string>({ message: 'Key', choices: keys.map((k) => ({ name: k, value: k })) });
-      opts.fromSecrets = `${bundleName}:${key}`;
-    }
+  const original = readProfile(name);
+  const io = await defaultWizardIO();
+  const draft = await runWizardSteps(
+    editSteps(original),
+    { mode: 'edit', original, host: original.host.agent, name },
+    io,
+  );
+  const opts: EditOptions = { ...draftToEditOptions(draft, original), keyStdin: cliOpts.keyStdin };
+  if (!hasEditFlags(opts)) {
+    console.log(chalk.gray(`No changes made to '${name}'.`));
+    return;
   }
-
-  return { source, name, opts };
+  const edited = buildEdit(name, opts);
+  if (opts.fromSecrets) {
+    await applyFromSecrets(edited, opts.fromSecrets, opts.authProvider);
+  } else if (opts.authProvider) {
+    await ensureProviderToken(opts.authProvider, undefined, opts.keyStdin);
+  }
+  writeProfile(edited);
+  console.log(chalk.green(`Harness '${name}' updated.`));
+  console.log(chalk.gray(`Model:  ${profileModelLabel(edited)}`));
 }
 
 export function registerHarnessCommands(program: Command): void {
@@ -419,7 +404,7 @@ Examples:
               "'agents harness add' needs --preset or --host + --model (or a name and an interactive terminal for the wizard).",
             );
           }
-          const wiz = await runHarnessWizard();
+          const wiz = await runCreateWizard();
           await runForkFlow(wiz.source, wiz.name, { ...wiz.opts, force: opts.force, keyStdin: opts.keyStdin });
           return;
         }
@@ -467,7 +452,7 @@ Examples:
           if (!isInteractiveTerminal()) {
             throw new Error("'agents harness fork' needs <source> and <name> (or an interactive terminal for the wizard).");
           }
-          const wiz = await runHarnessWizard();
+          const wiz = await runCreateWizard();
           await runForkFlow(wiz.source, wiz.name, { ...wiz.opts, force: opts.force, keyStdin: opts.keyStdin });
           return;
         }
@@ -480,7 +465,7 @@ Examples:
 
   cmd
     .command('edit <name>')
-    .description('Edit an existing custom harness in place — model, endpoint, auth, version, description, fallback.')
+    .description('Edit an existing custom harness in place — model, endpoint, auth, version, description, fallback. Omit flags in a terminal for the interactive wizard.')
     .option('--model <id>', 'Swap the pinned model')
     .option('--base-url <url>', 'Swap the custom endpoint base URL')
     .option('--auth-provider <provider>', 'Repoint auth at a different provider (keychain-backed)')
@@ -507,10 +492,21 @@ Examples:
 
   # Copy a key out of an existing secrets bundle instead of typing it
   agents harness edit corp --from-secrets prod:OPENROUTER_KEY
+
+  # No flags, in an interactive terminal: a wizard walks each field pre-filled
+  agents harness edit deepseek
 `,
     )
     .action(async (name: string, opts: EditOptions) => {
       try {
+        // No edit flags + a real terminal → the interactive wizard, pre-filled
+        // with current values. Any flag (or a non-interactive caller) takes the
+        // flag path unchanged; a flagless non-interactive call still errors via
+        // buildEdit's EDIT_FLAGS_HELP.
+        if (!hasEditFlags(opts) && isInteractiveTerminal()) {
+          await runEditWizard(name, opts);
+          return;
+        }
         const edited = buildEdit(name, opts);
         if (opts.fromSecrets) {
           await applyFromSecrets(edited, opts.fromSecrets, opts.authProvider);

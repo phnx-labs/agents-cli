@@ -301,6 +301,8 @@ export interface RawActiveSession {
   presence?: string;
   kind?: string;
   pid?: number;
+  /** Whether the CLI's process probe found the pid alive. */
+  pidAlive?: boolean;
   sessionId?: string;
   cwd?: string;
   label?: string;

@@ -167,47 +167,29 @@ export function selectBestSession(
 /**
  * Build resume command for a pre-warmed session.
  *
- * Every resume goes through `agents run <agent> --interactive --resume <id>`;
- * the CLI resolves the version that started the session and handles remote
- * hosts via `--host`. No per-harness raw binary resume is ever emitted.
+ * Every resume goes through `agents sessions resume <id>`. Factory supplies
+ * identity only; the CLI owns live attach, harness, version, and fleet routing.
  */
 export function buildResumeCommand(session: PrewarmedSession): string {
   return buildVersionedResumeCommand(session.agentType, session.sessionId);
 }
 
 /**
- * Build the unified resume command for any harness.
- *
- * `agents run --resume` resumes under the version that started the session
- * (verified in the CLI: `apps/cli/src/commands/exec.ts` forwards `version:
- * undefined` when `resume` is set, and the remote/local CLI resolves the
- * originating version from its session index). Therefore we never pin an
- * explicit `@version` here.
- *
- * `host` is the device the session was offloaded to. Its transcript lives on
- * THAT machine, so a local raw resume would start a brand-new agent against an
- * id this box has never seen; route through `agents run --host … --resume` so
- * the resume happens where the session is.
- *
- * `agentType` widens past {@link PrewarmAgentType} because resume is not a
- * prewarm-only capability: the CLI records transcripts for every harness it can
- * run (grok, kimi, droid, antigravity, …) and `agents run --resume` resumes any
- * of them under the version that started the session.
+ * Build the canonical resume command for any harness. The legacy parameters
+ * remain at call sites as display metadata; none may override CLI policy.
  */
 export function buildVersionedResumeCommand(
-  agentType: PrewarmAgentType | string,
+  _agentType: PrewarmAgentType | string,
   sessionId: string,
   _version?: string,
-  host?: string,
+  _host?: string,
 ): string {
-  if (host) {
-    return `agents run ${agentType} --interactive --host ${shellQuoteArg(host)} --resume ${sessionId}`;
-  }
-  return `agents run ${agentType} --interactive --resume ${sessionId}`;
+  return `agents sessions resume ${shellQuoteArg(sessionId)}`;
 }
 
-/** Single-quote a device name so it can never break out of the built command. */
+/** Quote a session selector only when shell syntax requires it. */
 function shellQuoteArg(value: string): string {
+  if (/^[A-Za-z0-9._:-]+$/.test(value)) return value;
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 

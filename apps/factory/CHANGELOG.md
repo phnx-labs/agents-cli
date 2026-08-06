@@ -6,6 +6,13 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Resume delegates session lifecycle to agents-cli.** The picker keeps its
+  cross-device session list but starts with no rows selected. A chosen row sends
+  only `agents sessions resume <canonical-id>`; the CLI decides whether to attach
+  a live pane or resume an inactive session on its owner. Closed/crashed retained
+  panes are shown as inactive, and Factory waits for readiness before reporting a
+  reopened terminal as successful.
+
 ## [0.9.312] - 2026-08-05
 
 - **`New X (Auto)` offloads to the fleet on a cold cache (was: silently local).**

@@ -21,6 +21,7 @@ import {
   hashedServiceName,
   healHmacKeyNoAclOnce,
   HMAC_KEY_ITEM,
+  KeychainHelperTimeoutError,
   keychainServiceAlias,
   keychainOperationPrompt,
   listKeychainItems,
@@ -28,8 +29,10 @@ import {
   readHmacKeyRecord,
   rekeyServiceNames,
   setKeychainBackendForTest,
+  setKeychainDaemonBootForTest,
   setKeychainServiceHashingForTest,
   setKeychainToken,
+  spawnKeychainHelperForTest,
   withRawKeychainServiceNames,
   type KeychainBackend,
 } from './index.js';
@@ -150,6 +153,23 @@ describe('parseOrphanMigrationOutput', () => {
   it('returns [] for empty output', () => {
     expect(parseOrphanMigrationOutput('')).toEqual([]);
     expect(parseOrphanMigrationOutput('\n\n')).toEqual([]);
+  });
+});
+
+describe('spawnKeychainHelper timeout (RUSH-2231)', () => {
+  beforeEach(() => {
+    setKeychainDaemonBootForTest(false);
+  });
+  afterEach(() => {
+    setKeychainDaemonBootForTest(true);
+  });
+
+  it('kills a sleeping helper within the timeout and throws KeychainHelperTimeoutError', () => {
+    const start = Date.now();
+    expect(() =>
+      spawnKeychainHelperForTest('/bin/sh', ['-c', 'sleep 30'], { stdio: ['ignore', 'pipe', 'pipe'] }, 300),
+    ).toThrow(KeychainHelperTimeoutError);
+    expect(Date.now() - start).toBeLessThan(2_000);
   });
 });
 

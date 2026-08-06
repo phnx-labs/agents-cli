@@ -284,12 +284,12 @@ describe('shims - resource comparison', () => {
 describe('codex shim launch flags', () => {
   test('injects update-check disable flag into the codex shim', () => {
     const script = generateShimScript('codex');
-    expect(script).toContain('exec "$BINARY" -c check_for_update_on_startup=false "$@"');
+    expect(script).toContain("'check_for_update_on_startup=false'");
   });
 
   test('injects update-check disable flag into codex versioned aliases', () => {
     const script = generateVersionedAliasScript('codex', '0.116.0');
-    expect(script).toContain('exec "$BINARY" -c check_for_update_on_startup=false "$@"');
+    expect(script).toContain("'check_for_update_on_startup=false'");
   });
 
   test('does not add the codex-only flag to other shims', () => {

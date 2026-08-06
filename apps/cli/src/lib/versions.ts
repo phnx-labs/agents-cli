@@ -1021,6 +1021,17 @@ export function getBinaryPath(agent: AgentId, version: string): string {
       ? path.join(getHomeDir(), 'bin', 'droid.exe')
       : path.join(getHomeDir(), '.local', 'bin', 'droid');
   }
+  if (agent === 'muse') {
+    // Muse Code install script drops a self-updating launcher at
+    // ~/.local/bin/muse (curl -fsSL https://dev.meta.ai/install.sh | sh).
+    // Same global-binary shape as droid: one binary for every version dir,
+    // config isolation via version-home HOME rewrite. Mirror the shim's
+    // `muse` branch so isVersionInstalled / agents view / agents import
+    // agree with what executes.
+    return IS_WINDOWS
+      ? path.join(getHomeDir(), 'bin', 'muse.exe')
+      : path.join(getHomeDir(), '.local', 'bin', 'muse');
+  }
   const versionDir = getVersionDir(agent, version);
   return path.join(versionDir, 'node_modules', '.bin', agentConfig.cliCommand);
 }
@@ -1650,14 +1661,14 @@ export async function installVersion(
     // ~/.local/bin (or similar) rather than the version's node_modules/.bin.
     //
     // Agents whose binary is special-cased in getBinaryPath (grok ->
-    // ~/.grok/downloads, droid -> ~/.local/bin/droid) need no symlink — and
+    // ~/.grok/downloads, droid/muse -> ~/.local/bin/<cli>) need no symlink — and
     // creating one is actively harmful: `which <cli>` can resolve to OUR OWN
     // dispatcher shim, because ~/.agents/.cache/shims sits ahead of ~/.local/bin
     // on PATH. Symlinking node_modules/.bin/<cli> at the shim makes the shim
     // exec itself forever. So we skip the resolver-backed agents here AND, for
     // everyone else, filter the shims dir out of the `which` candidates so the
     // same race can't bite a non-special-cased installScript agent.
-    if (agent !== 'grok' && agent !== 'droid') {
+    if (agent !== 'grok' && agent !== 'droid' && agent !== 'muse') {
       // findInPath is a pure-Node PATH scan that already skips our own shims
       // dir — so it returns the genuine install, never our dispatcher shim
       // (which sits ahead of ~/.local/bin on PATH and would otherwise be

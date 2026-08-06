@@ -291,7 +291,8 @@ src/
   index.ts             # CLI entry (commander.js)
   commands/            # User-facing subcommands (one file per `agents <cmd>`)
   lib/
-    state.ts           # Path constants; agents.yaml read/write
+    state.ts           # Path constants; agents.yaml read/write (serializeCentral preserves comments)
+    manifest.ts        # Project/user agents.yaml Manifest read/write (comment-preserving Document round-trip; used by mcp add, etc.)
     resources.ts       # resolveResource() / listResources() — layered resolution
     capabilities.ts    # supports() — the per-agent write gate
     agents.ts          # Per-agent capability table
@@ -369,7 +370,9 @@ runs the real suite cheaply on Linux — `test`
 ([`../../.github/workflows/tests.yml`](../../.github/workflows/tests.yml)) plus
 `gitleaks`; those two are the required checks. The full cross-platform matrix
 (ubuntu + macOS + Windows × Node 22/24, `ci.yml`) is cost-gated to `release/**`
-branches and `v*` tags. CI runs from `apps/cli` via `defaults.run.working-directory`.
+branch pushes/PRs and manual `workflow_dispatch` — not `v*` tags (the tag points
+at the commit already gated on the release branch). CI runs from `apps/cli` via
+`defaults.run.working-directory`.
 
 **Live Windows `--host` e2e (opt-in):** `src/lib/ssh-tunnel.e2e.test.ts` and
 `src/lib/browser/drivers/ssh.e2e.test.ts` drive a real Windows box end-to-end
@@ -505,8 +508,11 @@ another Mac (no publish); it too is zero-config, targeting the same hardcoded
 **Provisioning the `apple.com` bundle on a headless sign host.** A Linux-driven
 release offloads macOS signing to a sign host over SSH, which needs the `apple.com`
 secrets bundle *on that host*. Push it with the **file backend** —
-`agents secrets export apple.com --host <signer> --remote-backend file` (needs
-`AGENTS_SECRETS_PASSPHRASE` set locally) — **not** the default keychain backend: a
+`agents secrets export apple.com --host <signer> --remote-backend file` (**no
+passphrase required** — the remote keys it under a machine-local key it
+auto-provisions and reads it headlessly; set `AGENTS_SECRETS_PASSPHRASE` locally only
+to opt into a shared off-disk key, forwarded over ssh stdin) — **not** the default
+keychain backend: a
 macOS login keychain is locked under headless SSH, so a keychain-backed push lands
 the bundle metadata but no readable secret items (`secrets export --host` now
 read-back-verifies a keychain push and fails loudly if it didn't persist, pointing

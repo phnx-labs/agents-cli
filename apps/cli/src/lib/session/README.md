@@ -50,6 +50,18 @@ provenance (`provenance.ts:66`). `ActiveSession` carries runtime facts that no
 persisted `SessionMeta` has — notably the origin device and a live fork/subagent
 count — and those facts are lost the moment the process exits unless we persist them.
 
+### Cross-surface active-session cache (RUSH-2062)
+
+`session-cache.ts` is the daemon-warmed shared snapshot menubar / Factory /
+watchdog / CLI read so they do not each re-fan-out a full gather. The daemon
+publishes **this host only** every ~15s (`publishLocalActiveSessions` from
+`daemon.ts`); `gatherActiveSessions` is cache-first for unscoped local/fleet
+loads. Live status fields (`status`, `activity`, `preview`, …) only ride that
+short snapshot — never the immutable memo. Immutable identity fields (topic,
+label, cwd, …) are memoized by `(sessionId, transcriptMtimeMs)` so a transcript
+rewrite invalidates them. `remote.ts` is also cache-first: a reachable host
+skips SSH while its cache is fresh (it used to replay only on unreachable).
+
 ## The session preview contract
 
 There are two distinct renders. Do not confuse them.
