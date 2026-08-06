@@ -152,12 +152,13 @@ export function buildWindowsProgressCommand(opts: { remoteLog: string; remoteExi
   const windowsPath = (value: string): string => value.startsWith('$HOME/')
     ? `(Join-Path $HOME '${value.slice('$HOME/'.length).replace(/'/g, "''")}')`
     : `'${value.replace(/'/g, "''")}'`;
+  const markerBase64 = Buffer.from(exitMarker(opts.taskId), 'utf8').toString('base64');
   const script = [
     `$out = [Console]::OpenStandardOutput()`,
     `$log = ${windowsPath(opts.remoteLog)}`,
     `$exit = ${windowsPath(opts.remoteExit)}`,
     `if (Test-Path -LiteralPath $log) { $bytes = [IO.File]::ReadAllBytes($log); if ($bytes.Length -gt ${opts.offset}) { $out.Write($bytes, ${opts.offset}, $bytes.Length - ${opts.offset}) } }`,
-    `$marker = [Text.Encoding]::UTF8.GetBytes(${JSON.stringify(exitMarker(opts.taskId))})`,
+    `$marker = [Convert]::FromBase64String('${markerBase64}')`,
     `$out.Write($marker, 0, $marker.Length)`,
     `if (Test-Path -LiteralPath $exit) { $bytes = [IO.File]::ReadAllBytes($exit); $out.Write($bytes, 0, $bytes.Length) }`,
   ].join('; ');
