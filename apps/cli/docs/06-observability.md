@@ -1138,7 +1138,7 @@ does — describes a fraction of the work and attributes all of it to one org.
 ```bash
 agents insights                                # last 30d, by account
 agents insights --by project --since 90d       # which repo is eating the time
-agents insights --account "Turing Labs" --since all
+agents insights --account "Turing Labs" --all  # one account, every session ever
 agents insights --json                         # stable contract for dashboards
 agents insights --narrative                    # add a written read on the numbers
 ```

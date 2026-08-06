@@ -67,6 +67,7 @@ const execFileAsync = promisify(execFile);
 interface InsightsOptions {
   json?: boolean;
   since?: string;
+  all?: boolean;
   account?: string;
   agent?: string;
   by?: string;
@@ -418,7 +419,10 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
     console.error(chalk.red('error: --min-messages must be a non-negative integer'));
     process.exit(1);
   }
-  const since = options.since ?? '30d';
+  // `--all` is the spelling people reach for; `--since all` is what the window parser
+  // speaks. Accept both rather than failing on an unknown option, and let an explicit
+  // --since win so `--all --since 7d` is not silently contradictory.
+  const since = options.since ?? (options.all ? 'all' : '30d');
   const sinceMs = since === 'all' ? undefined : parseTimeFilter(since);
 
   // Refresh the index first, exactly as `agents cost` does, so a report never silently
@@ -518,6 +522,7 @@ export function registerInsightsCommand(program: Command): void {
     .description('How you work — tools, friction, and rhythm, split by the account that did the work')
     .option('--json', 'Output the full report as JSON')
     .option('--since <time>', 'Window: 7d, 4w, 3mo, an ISO date, or "all" (default 30d)')
+    .option('--all', 'Every session ever indexed. Alias for --since all')
     .option('--by <dimension>', 'Group by: account (default), agent, project, or day')
     .option('--account <match>', 'Only sessions whose account key, email, or org contains this')
     .option('--agent <id>', 'Only one harness (claude, codex, droid, …)')
@@ -537,7 +542,7 @@ export function registerInsightsCommand(program: Command): void {
       agents insights --by project --since 90d
 
       # One account only, all of its history
-      agents insights --account "Turing Labs" --since all
+      agents insights --account "Turing Labs" --all
 
       # Machine-readable, for a dashboard or a slash command
       agents insights --json

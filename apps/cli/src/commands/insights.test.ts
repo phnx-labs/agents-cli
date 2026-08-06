@@ -158,6 +158,20 @@ describe('agents insights', () => {
     expect(byProject.groups).toHaveLength(1);   // every fixture shares one cwd
   });
 
+  it('accepts --all as an alias for --since all', async () => {
+    // The spelling people reach for. Before this it was `unknown option '--all'`,
+    // which is a hard exit in the middle of a report they asked for.
+    const viaAlias = JSON.parse(await runInsights(['--json', '--all']));
+    const viaSince = JSON.parse(await runInsights(['--json', '--since', 'all']));
+    expect(viaAlias.window.since).toBeNull();
+    expect(viaAlias.analyzed).toBe(viaSince.analyzed);
+  });
+
+  it('lets an explicit --since win over --all rather than contradicting it', async () => {
+    const both = JSON.parse(await runInsights(['--json', '--all', '--since', '30d']));
+    expect(both.window.since).toBe('30d');
+  });
+
   it('filters to one account with --account', async () => {
     const payload = JSON.parse(await runInsights(['--json', '--since', 'all', '--account', 'Beta']));
     expect(payload.groups).toHaveLength(1);
