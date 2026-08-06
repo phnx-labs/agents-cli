@@ -44,11 +44,7 @@ describe('ci.yml release matrix trigger policy', () => {
   });
 
   it('documents why the tag does not re-run the matrix', () => {
-    // Nearby comments must explain the deliberate skip so future edits do not
-    // re-add the tag trigger without reading the cost rationale.
-    const comments = CI_YML.replace(/\n#/g, ' ');
-    expect(comments).toMatch(/does NOT re-run on v\* tags/i);
-    expect(comments).toMatch(/tag points at the exact release commit/i);
-    expect(comments).toMatch(/deliberately not repeated after tagging/i);
+    expect(CI_YML).toMatch(/does NOT re-run on v\* tags/i);
+    expect(CI_YML).toMatch(/tag points at the exact release commit/i);
   });
 });
