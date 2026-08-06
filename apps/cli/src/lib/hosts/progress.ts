@@ -128,7 +128,7 @@ export function splitProgressBytes(
  */
 export function fetchProgress(
   target: string,
-  opts: { remoteLog: string; remoteExit: string; taskId: string; offset: number; extraSshArgs?: string[]; remoteShell?: 'posix' | 'powershell' },
+  opts: { remoteLog: string; remoteExit: string; taskId: string; offset: number; remoteShell?: 'posix' | 'powershell'; extraSshArgs?: string[] },
 ): { logChunk: Buffer; exit: string } | null {
   // Derive the printf format from the SAME exitMarker the parser splits on, so
   // the emitted sentinel and the one we look for can never desync. The marker's
