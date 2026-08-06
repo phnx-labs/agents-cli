@@ -46,6 +46,18 @@ describe('filterCachedUnattributed', () => {
     expect(out.map((s) => s.pid)).toEqual([10]);
   });
 
+  it('passes startedAtMs to the alive predicate (pid-reuse guard)', () => {
+    const sessions: ActiveSession[] = [
+      { context: 'headless', kind: 'claude', status: 'running', pid: 42, startedAtMs: 1_700_000_000_000 },
+    ];
+    const seen: Array<{ pid: number; startedAtMs?: number }> = [];
+    filterCachedUnattributed(sessions, new Set(), (pid, startedAtMs) => {
+      seen.push({ pid, startedAtMs });
+      return true;
+    });
+    expect(seen).toEqual([{ pid: 42, startedAtMs: 1_700_000_000_000 }]);
+  });
+
   it('drops rows with no pid', () => {
     const sessions: ActiveSession[] = [
       { context: 'headless', kind: 'claude', status: 'running' },

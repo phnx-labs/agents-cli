@@ -145,17 +145,18 @@ export function attributedSetLostPids(prev: Set<number>, next: Set<number>): boo
 /**
  * Drop rows whose pid is now attributed or no longer alive. Pure over the
  * inputs so the unattributed TTL reuse path is unit-testable without a live
- * process table.
+ * process table. `alive` receives the row's `startedAtMs` so callers can apply
+ * the same pid-reuse guard {@link isPidAlive} uses elsewhere.
  */
 export function filterCachedUnattributed(
   sessions: ActiveSession[],
   attributed: Set<number>,
-  alive: (pid: number) => boolean,
+  alive: (pid: number, startedAtMs?: number) => boolean,
 ): ActiveSession[] {
   return sessions.filter((s) => {
     if (s.pid == null) return false;
     if (attributed.has(s.pid)) return false;
-    return alive(s.pid);
+    return alive(s.pid, s.startedAtMs);
   });
 }
 
@@ -1639,7 +1640,7 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
     now - unattributedCache.at < UNATTRIBUTED_RESCAN_MS &&
     !attributedSetLostPids(unattributedCache.attributed, attributed)
   ) {
-    return filterCachedUnattributed(unattributedCache.sessions, attributed, (pid) => isPidAlive(pid));
+    return filterCachedUnattributed(unattributedCache.sessions, attributed, isPidAlive);
   }
   const out = await listUnattributedActiveLive(attributed);
   unattributedCache = { at: now, attributed: new Set(attributed), sessions: out };
