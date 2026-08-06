@@ -13,7 +13,12 @@ import { sshReachable } from '../ssh-exec.js';
 let CACHE_ROOT: string = mkdtempSync(join(tmpdir(), 'agents-cli-reconcile-boot-'));
 vi.spyOn(state, 'getCacheDir').mockImplementation(() => CACHE_ROOT);
 
-import { classifyExit, reconcileTask, reconcileRunningTasks } from './reconcile.js';
+import { classifyExit, reconcileTask, reconcileRunningTasks, reachabilityProbeCommand } from './reconcile.js';
+
+it('uses a valid reachability command for each remote shell', () => {
+  expect(reachabilityProbeCommand('powershell')).toBe('powershell -NoProfile -Command "exit 0"');
+  expect(reachabilityProbeCommand('posix')).toBe('true');
+});
 import { saveTask, loadTask, terminalPatch, type HostTask } from './tasks.js';
 
 // The heal path needs a real ssh round-trip (no mocking, per repo policy). Gate
