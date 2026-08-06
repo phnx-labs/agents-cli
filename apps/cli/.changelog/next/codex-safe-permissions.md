@@ -5,4 +5,4 @@
   filesystem-read-only but now retains network access. The same policy covers
   `agents run`, fallback attempts, resumes, routines, direct `codex` shims,
   versioned aliases, and Windows shim passthrough; only explicit `skip` disables
-  the sandbox and approvals.
+  the sandbox and approvals. Source: `apps/cli/src/lib/codex-policy.ts`.
