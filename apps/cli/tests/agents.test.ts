@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { AGENTS, ALL_AGENT_IDS, MANAGED_AGENT_IDS, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName } from '../src/lib/agents.js';
+import { AGENTS, ALL_AGENT_IDS, MANAGED_AGENT_IDS, getAccountEmail, getMcpConfigPathForHome, isSelfUpdatingAgent, parseMcpConfig, resolveAgentName } from '../src/lib/agents.js';
 import { writeMcpConfig } from '../src/lib/mcp.js';
 import { convertToOpenCodeFormat, convertToCursorFormat, applyPermissionsToVersion } from '../src/lib/permissions.js';
 import { capableAgents, supports } from '../src/lib/capabilities.js';
@@ -173,6 +173,66 @@ describe('pi (Oh My Pi)', () => {
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
       fs.rmSync(subDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('warp (Warp Agent CLI / Oz)', () => {
+  it('is registered with a truthful capability set', () => {
+    expect(ALL_AGENT_IDS).toContain('warp');
+    // MCP + skills are the surfaces Oz actually exposes to agents-cli.
+    expect(capableAgents('mcp')).toContain('warp');
+    expect(capableAgents('skills')).toContain('warp');
+    // Oz reads the Claude .mcp.json schema (url + headers).
+    expect(capableAgents('mcpHttp')).toContain('warp');
+    expect(capableAgents('mcpHeaders')).toContain('warp');
+    // No matching install surface for these: hooks (no event->shell registration),
+    // allowlist (profile-based permissions, not a tool allow/deny list), commands
+    // (native/server slash-commands), plugins (no Claude marketplace manifest),
+    // subagents (server-side cloud agents), workflows, memory.
+    expect(capableAgents('hooks')).not.toContain('warp');
+    expect(capableAgents('allowlist')).not.toContain('warp');
+    expect(capableAgents('commands')).not.toContain('warp');
+    expect(capableAgents('plugins')).not.toContain('warp');
+    expect(capableAgents('subagents')).not.toContain('warp');
+    expect(capableAgents('workflows')).not.toContain('warp');
+    expect(capableAgents('memory')).not.toContain('warp');
+    expect(AGENTS.warp.cliCommand).toBe('oz');
+    expect(AGENTS.warp.supportsHooks).toBe(false);
+    expect(AGENTS.warp.instructionsFile).toBe('AGENTS.md');
+    expect(AGENTS.warp.capabilities.rules).toEqual({ file: 'AGENTS.md' });
+    // Autonomy is governed by the agent profile, not a per-run permission flag,
+    // so a single autonomous mode maps to no flags (mirrors hermes).
+    expect(AGENTS.warp.capabilities.modes).toEqual(['edit']);
+  });
+
+  it('is a self-updating agent (brew/apt install, no pinnable semver)', () => {
+    expect(AGENTS.warp.npmPackage).toBe('');
+    expect(AGENTS.warp.installScript).toContain('oz');
+    expect(isSelfUpdatingAgent('warp')).toBe(true);
+  });
+
+  it('resolves MCP config to ~/.warp/.mcp.json and round-trips the mcpServers shape', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-warp-mcp-'));
+    try {
+      const configPath = getMcpConfigPathForHome('warp', home);
+      expect(configPath).toBe(path.join(home, '.warp', '.mcp.json'));
+
+      // Oz reads the Claude schema — write an http server WITH headers and
+      // read it back to prove the transport + headers survive the round-trip.
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      writeMcpConfig('warp', configPath, [
+        { name: 'ctx', command: 'ctx-server', args: ['--stdio'], env: {}, transport: 'stdio', scope: 'user' },
+        { name: 'remote', url: 'https://mcp.example.com', headers: { Authorization: 'Bearer x' }, transport: 'http', scope: 'user' },
+      ]);
+
+      const parsed = parseMcpConfig('warp', configPath);
+      expect(Object.keys(parsed)).toContain('ctx');
+      expect(Object.keys(parsed)).toContain('remote');
+      const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      expect(raw.mcpServers.remote.headers).toEqual({ Authorization: 'Bearer x' });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
     }
   });
 });
