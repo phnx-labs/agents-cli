@@ -1195,7 +1195,23 @@ program.on('command:*', (operands) => {
   if (minDist === 1 && closest) {
     const args = process.argv.slice(2);
     args[0] = closest;
-    program.parse(['node', 'agents', ...args]);
+    // The typo'd name was unknown, so the top-level --host router (which ran
+    // before commander parsing, against the ORIGINAL name) could not have
+    // routed it - it correctly fell through to reach this handler at all
+    // (that fallthrough is this ticket's own fix). But falling through to a
+    // plain local re-parse means a routing flag on a corrected REAL
+    // host-routable command (e.g. `docto --host box`, corrected to `doctor`)
+    // silently ran LOCALLY instead of remotely, with no error - worse than
+    // the loud "does not support --host" this ticket replaced. Re-run the
+    // router with the CORRECTED name before falling through to local parse;
+    // it already no-ops when no routing flag is present. RUSH-2022 review r2.
+    void (async () => {
+      const { maybeRunOnHost } = await import('./lib/hosts/passthrough.js');
+      if (await maybeRunOnHost(closest, args)) {
+        process.exit(process.exitCode ?? 0);
+      }
+      program.parse(['node', 'agents', ...args]);
+    })();
     return;
   }
 
