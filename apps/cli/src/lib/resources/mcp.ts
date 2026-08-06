@@ -164,6 +164,9 @@ export function getMcpConfigPath(agent: AgentId, versionHome: string): string | 
       return path.join(versionHome, '.omp', 'agent', '.mcp.json');
     case 'muse':
       return path.join(versionHome, '.config', 'muse', 'settings.json');
+    case 'warp':
+      // Oz reads user-scope MCP from ~/.warp/.mcp.json (Claude schema).
+      return path.join(versionHome, '.warp', '.mcp.json');
     default:
       return null;
   }

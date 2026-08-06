@@ -855,6 +855,22 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     // `resume` subcommand — special-cased in buildExecCommand.
     resume: { flag: '--session-id' },
   },
+  // Warp Agent CLI (`oz agent run`). Headless is `-p/--prompt "<task>"`; JSON is
+  // the global `--output-format json`. Autonomy comes from the selected agent
+  // profile (`--profile`), not a per-run permission flag, so the single `edit`
+  // mode maps to no flags (mirrors hermes). `--model` overrides the base model
+  // (`oz model list`). Native resume continues a server-side conversation by id
+  // (`--conversation <id>`).
+  warp: {
+    base: ['oz', 'agent', 'run'],
+    promptFlag: '-p',
+    modeFlags: {
+      edit: [],
+    },
+    jsonFlags: ['--output-format', 'json'],
+    modelFlag: '--model',
+    resume: { flag: '--conversation' },
+  },
 };
 
 /**

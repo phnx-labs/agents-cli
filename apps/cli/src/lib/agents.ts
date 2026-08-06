@@ -834,6 +834,75 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       interactiveRepl: true,
     },
   },
+  // Warp Agent CLI (`oz`) — the standalone coding-agent CLI on Warp's "Oz"
+  // platform (the same shared Warp binary invoked via the `oz` symlink). Native
+  // binary via `brew install --cask oz` (macOS) / `oz-stable` apt|yum|pacman
+  // package (Linux); self-updating, no npm package. Config lives under `~/.warp/`
+  // (`.mcp.json`, `skills/`, `tab_configs/`, `worktrees/`, `remote-server`).
+  // Headless: `oz agent run --prompt "<task>" [--model <id>]` (local) /
+  // `oz agent run-cloud` (cloud). Auth: `oz login` (browser OAuth) or a
+  // `WARP_API_KEY` env token for headless/CI (`oz api-key create`). Rules/context
+  // file is `AGENTS.md` (also reads WARP.md / CLAUDE.md). Autonomy is governed by
+  // the selected agent profile (`--profile`), not a per-run permission flag.
+  // Sessions/conversations are stored SERVER-SIDE (retrieved with auth via
+  // `oz run conversation get <id>`), so there is no local transcript for
+  // `agents sessions` to index — warp is intentionally absent from SESSION_AGENTS.
+  // Docs: https://docs.warp.dev/reference/cli
+  warp: {
+    id: 'warp',
+    name: 'Warp',
+    color: 'blueBright',
+    cliCommand: 'oz',
+    npmPackage: '',
+    installScript: 'brew install --cask oz',
+    configDir: path.join(HOME, '.warp'),
+    commandsDir: '',
+    commandsSubdir: '',
+    skillsDir: path.join(HOME, '.warp', 'skills'),
+    hooksDir: 'hooks',
+    instructionsFile: 'AGENTS.md',
+    format: 'markdown',
+    variableSyntax: '$ARGUMENTS',
+    // Oz has no event->shell-command hook registration surface (its documented
+    // capabilities are agent-profiles-permissions, codebase-context,
+    // full-terminal-use, mcp, planning, rules, slash-commands — no hooks).
+    supportsHooks: false,
+    capabilities: {
+      hooks: false,
+      // MCP: Oz reads the Claude `{ "mcpServers": {...} }` schema from
+      // `.warp/.mcp.json` (user `~/.warp/.mcp.json`, project `<root>/.warp/.mcp.json`)
+      // and accepts `--mcp <path|json>` at run time; `oz mcp list` reads them
+      // back. stdio + http with headers, same schema as Claude's .mcp.json.
+      mcp: true,
+      mcpHttp: true,
+      mcpHeaders: true,
+      // Autonomy is governed by the selected agent profile
+      // (agent-profiles-permissions), not a Claude-style tool-name allow/deny
+      // list agents-cli can write — so no allowlist writer (mirrors muse).
+      allowlist: false,
+      // Skills: `--skill <spec>` + `oz agent skills`; searched in
+      // `.agents/skills/`, `.warp/skills/`, `.claude/skills/`, `.codex/skills/`.
+      skills: true,
+      // Slash-commands are native/server-managed (no droppable markdown
+      // command-file directory for agents-cli to sync into).
+      commands: false,
+      // No Claude marketplace / plugin manifest support.
+      plugins: false,
+      // Cloud agents + agent profiles are server-side; no installable
+      // subagent-definition directory to sync into (keeps the table truthful).
+      subagents: false,
+      rules: { file: 'AGENTS.md' },
+      workflows: false,
+      memory: false,
+      // Oz has no per-run permission flag; a single autonomous mode maps to no
+      // flags (the `--profile` selection governs autonomy). Mirrors hermes.
+      modes: ['edit'],
+      rulesImports: false,
+      // `oz agent run` requires a prompt (--prompt/--saved-prompt/--task-id/
+      // --skill), so a bare invocation opens no REPL.
+      interactiveRepl: false,
+    },
+  },
 };
 
 /** All current and legacy agent IDs derived from the AGENTS registry. */
@@ -2813,6 +2882,9 @@ export function getUserMcpConfigPath(agentId: AgentId): string {
     case 'muse':
       // Muse Code: MCP lives in ~/.config/muse/settings.json under mcp_servers.
       return path.join(agent.configDir, 'settings.json');
+    case 'warp':
+      // Oz reads user-scope MCP from ~/.warp/.mcp.json (Claude schema).
+      return path.join(agent.configDir, '.mcp.json');
     default:
       // Gemini and others use settings.json
       return path.join(agent.configDir, 'settings.json');
@@ -2854,6 +2926,8 @@ export function getMcpConfigPathForHome(agentId: AgentId, home: string): string 
       return path.join(home, '.omp', 'agent', '.mcp.json');
     case 'muse':
       return path.join(home, '.config', 'muse', 'settings.json');
+    case 'warp':
+      return path.join(home, '.warp', '.mcp.json');
     default:
       return path.join(home, agentConfigDirName(agentId), 'settings.json');
   }
@@ -2901,6 +2975,9 @@ export function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.
       // Muse project MCP rides the same settings schema under .muse/settings.json
       // when present; otherwise fall back to the user settings path.
       return path.join(cwd, '.muse', 'settings.json');
+    case 'warp':
+      // Oz reads project MCP from <root>/.warp/.mcp.json (Claude schema).
+      return path.join(cwd, '.warp', '.mcp.json');
     default:
       return path.join(cwd, `.${agentId}`, 'settings.json');
   }

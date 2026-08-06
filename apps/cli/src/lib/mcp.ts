@@ -702,6 +702,7 @@ function writeMcpConfigSupportsAgent(agentId: AgentId): boolean {
     case 'hermes':
     case 'pi':
     case 'muse':
+    case 'warp':
       return true;
     default:
       return false;
@@ -734,7 +735,10 @@ export function writeMcpConfig(
     // omp reads the same Claude `{ "mcpServers": {...} }` schema from .mcp.json
     // (stdio: command/args/env; http/sse: url/headers — transport inferred from
     // command/url presence).
-    case 'pi': {
+    case 'pi':
+    // Oz reads the same Claude `{ "mcpServers": {...} }` schema from
+    // `.warp/.mcp.json` (stdio + http with headers).
+    case 'warp': {
       let config: Record<string, unknown> = {};
       if (fs.existsSync(configPath)) {
         try {
