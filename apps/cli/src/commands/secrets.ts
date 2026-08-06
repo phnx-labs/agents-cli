@@ -113,6 +113,7 @@ import { readMeta } from '../lib/state.js';
 import { parseDuration } from '../lib/hooks/cache.js';
 import { emit, query } from '../lib/events.js';
 import { emitSecretAudit } from '../lib/secrets/audit.js';
+import { SYNC_PASSPHRASE_ENV, resolveSyncPassphraseFromEnv } from '../lib/secrets/sync-passphrase.js';
 import {
   getBundleUsage,
   getAllBundleUsage,
@@ -2070,7 +2071,7 @@ Examples:
     .option('--synced', 'When creating the bundle, store it in the age-encrypted synced secrets file')
     .option('--force', 'Overwrite an existing key in the bundle')
     .option('--purge', 'With --from icloud: delete the iCloud copies after a successful import (iCloud propagates the deletion to your other devices)')
-    .option('--from-file <path>', 'Import from an AES-256-GCM encrypted offline bundle file (needs AGENTS_SECRETS_PASSPHRASE; symmetric counterpart of export --to-file)')
+    .option('--from-file <path>', `Import from an AES-256-GCM encrypted offline bundle file (needs ${SYNC_PASSPHRASE_ENV}; symmetric counterpart of export --to-file)`)
     .option('--from-ssh', 'Pull the bundle from a fleet peer over SSH and import it locally (requires --host)')
     .option('--host <peer>', 'SSH peer to pull from when using --from-ssh (host alias or user@host)')
     .action(async (bundleName: string | undefined, opts: {
@@ -2100,10 +2101,11 @@ Examples:
           );
         }
         if (opts.fromFile) {
-          const passphrase = process.env.AGENTS_SECRETS_PASSPHRASE ?? '';
+          // Transport, not the local store's master key — see lib/secrets/sync-passphrase.ts.
+          const passphrase = resolveSyncPassphraseFromEnv().value ?? '';
           if (!passphrase) {
             throw new Error(
-              '--from-file needs AGENTS_SECRETS_PASSPHRASE set to decrypt the bundle file.'
+              `--from-file needs ${SYNC_PASSPHRASE_ENV} set to decrypt the bundle file.`
             );
           }
           const env = importBundleFromFile(opts.fromFile, passphrase);
@@ -2194,7 +2196,7 @@ Examples:
     .option('--remote-backend <backend>', 'Backend for the bundle on the remote (with --host): keychain (default) or file. file is headless-readable via the remote\'s machine-local key; it forwards AGENTS_SECRETS_PASSPHRASE over stdin only if set (opt-in).', 'keychain')
     .option('--force', 'Overwrite existing keys/items on the target (used with --to-1password and --host)')
     .option('--format <shell|json>', 'Output for --plaintext export: shell (default) or json (lossless, machine-readable; used by remote resolve)', 'shell')
-    .option('--to-file <path>', 'Write the bundle as an AES-256-GCM encrypted offline file (needs AGENTS_SECRETS_PASSPHRASE; symmetric counterpart of import --from-file)')
+    .option('--to-file <path>', `Write the bundle as an AES-256-GCM encrypted offline file (needs ${SYNC_PASSPHRASE_ENV}; symmetric counterpart of import --from-file)`)
     .action(async (bundleName: string | undefined, opts: {
       plaintext?: boolean;
       to1password?: boolean;
@@ -2215,10 +2217,11 @@ Examples:
         const resolvedBundleName = bundleName ?? (await pickBundleName('export'));
 
         if (opts.toFile) {
-          const passphrase = process.env.AGENTS_SECRETS_PASSPHRASE ?? '';
+          // Transport, not the local store's master key — see lib/secrets/sync-passphrase.ts.
+          const passphrase = resolveSyncPassphraseFromEnv().value ?? '';
           if (!passphrase) {
             throw new Error(
-              '--to-file needs AGENTS_SECRETS_PASSPHRASE set to encrypt the bundle. ' +
+              `--to-file needs ${SYNC_PASSPHRASE_ENV} set to encrypt the bundle. ` +
               'Set it for this command, then supply the same value when importing.'
             );
           }

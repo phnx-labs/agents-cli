@@ -1,5 +1,6 @@
-- **`agents secrets push`/`pull` and `agents sync --secrets` read `AGENTS_SYNC_PASSPHRASE`
-  now; `AGENTS_SECRETS_PASSPHRASE` is the file store's master key and nothing else
+- **`agents secrets push`/`pull`, `agents sync --secrets`, and `agents secrets
+  export --to-file` / `import --from-file` read `AGENTS_SYNC_PASSPHRASE` now;
+  `AGENTS_SECRETS_PASSPHRASE` is the file store's master key and nothing else
   (RUSH-1968).** One variable meant two different secrets: the local file store's master
   key, and the passphrase that seals a bundle for transport. The store stopped needing a
   passphrase once it auto-provisioned a machine-local key, but headless `push`/`pull`
@@ -11,7 +12,10 @@
   `push --all` over many bundles does not flood stderr — so scripted CI and release
   automation keep working across the upgrade. The headless error now names the new
   variable (`A sync passphrase is required. Run from a TTY, or set
-  AGENTS_SYNC_PASSPHRASE.`), and `agents sync`'s skip reason with it. Resolution moved to
+  AGENTS_SYNC_PASSPHRASE.`), and `agents sync`'s skip line with it — it previously read
+  `no passphrase available`, naming nothing an operator could act on. Note the legacy
+  fallback only works where that value is also the store's master key, since the old name
+  still keys the store; that coupling is the thing being retired. Resolution moved to
   one chokepoint so the once-per-process promise holds rather than being per-call-site. Also
   corrects `SEC-29a`, which claimed the variable applied "exclusively" to the file and
   age-vault backends: the age-vault backend never reads it (it is gated by `agents

@@ -384,14 +384,14 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets import [bundle] --from 1password:<vault>` | Import from a 1Password vault (requires `op` CLI; `--from-1password --vault <name>` is a deprecated alias) | `agents secrets import prod --from 1password:Personal` |
 | `secrets import [bundle] --from icloud` | Recover a bundle stranded in the iCloud Keychain by the pre-biometry era (macOS; omit the bundle name for an interactive multi-select of everything discovered) | `agents secrets import hetzner.com --from icloud` |
 | `secrets import --from icloud --purge` | After a successful import, delete the iCloud copies (propagates to your other devices) | `agents secrets import --from icloud --purge` |
-| `secrets import [bundle] --from-file <path>` | Recover from an AES-256-GCM encrypted offline bundle file (needs `AGENTS_SECRETS_PASSPHRASE`; server-independent, symmetric counterpart of `export --to-file`) | `agents secrets import prod --from-file prod.enc` |
+| `secrets import [bundle] --from-file <path>` | Recover from an AES-256-GCM encrypted offline bundle file (needs `AGENTS_SYNC_PASSPHRASE`; server-independent, symmetric counterpart of `export --to-file`) | `agents secrets import prod --from-file prod.enc` |
 | `secrets import [bundle] --from-ssh --host <peer>` | Pull a bundle from a fleet peer over SSH and import it locally (no dependency on api.prix.dev) | `agents secrets import prod --from-ssh --host mac-mini` |
 | `secrets import ... --all-plaintext` | Store imported values as literals, skip keychain | `agents secrets import prod --from .env --all-plaintext` |
 | `secrets import ... --force` | Overwrite existing keys | `agents secrets import prod --from .env --force` |
 | `secrets export [bundle]` | Print `KEY=VALUE` lines for shell eval | `eval "$(agents secrets export prod --plaintext)"` |
 | `secrets export [bundle] --to-1password --vault <name>` | Push bundle to a 1Password vault | `agents secrets export prod --to-1password --vault Team` |
 | `secrets export ... --force` | Overwrite existing 1Password items | `agents secrets export prod --to-1password --vault Team --force` |
-| `secrets export [bundle] --to-file <path>` | Write the bundle as an AES-256-GCM encrypted offline file (needs `AGENTS_SECRETS_PASSPHRASE`; symmetric counterpart of `import --from-file`) | `agents secrets export prod --to-file prod.enc` |
+| `secrets export [bundle] --to-file <path>` | Write the bundle as an AES-256-GCM encrypted offline file (needs `AGENTS_SYNC_PASSPHRASE`; symmetric counterpart of `import --from-file`) | `agents secrets export prod --to-file prod.enc` |
 | `secrets export [bundle] --host <target>` | Push the bundle over SSH to a remote (repeatable; `--device` is an alias). Keychain-backed by default; the push read-back-verifies the write and fails loudly if it didn't persist | `agents secrets export apple.com --host mac-mini` |
 | `secrets export ... --remote-backend file` | Push as a headless-readable file bundle (no passphrase — the remote keys it with its machine-local key; forwards `AGENTS_SECRETS_PASSPHRASE` only if set) — for a **headless sign host** whose login keychain is locked over SSH | `agents secrets export apple.com --host mac-mini --remote-backend file` |
 
@@ -574,6 +574,8 @@ agents secrets pull prod
 ```
 
 Plaintext never leaves the machine — the bundle is sealed with AES-256-GCM before upload. Source: `src/commands/secrets-sync.ts:7-8`.
+
+Headless (CI, a worker box with no TTY), set `AGENTS_SYNC_PASSPHRASE` instead of being prompted. That is the **transport** passphrase and nothing else — deliberately not `AGENTS_SECRETS_PASSPHRASE`, which is the file store's master key (see [File-backed bundles](#file-backed-bundles-headless--remote)). Exporting the master key to get headless sync hands every same-user process the key to the whole store, which is what RUSH-1968 was. The old name is still accepted here and warns once per process. Source: `src/lib/secrets/sync-passphrase.ts`.
 
 ### 6. Run a one-off command with secrets
 
