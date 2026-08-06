@@ -84,19 +84,41 @@ export function stripAllowedRegions(text: string): string {
  * it. Requiring adjacency means a disclaimer placed anywhere else in the
  * sentence changes nothing.
  */
-const NEGATION_TOKEN = /\b(never|not|no|without|neither|instead of|rather than)\b/gi;
+const NEGATION_WORDS = new Set(['never', 'not', "n't", 'no', 'without', 'neither', 'nor']);
+/** Words that may sit inside a negation phrase without breaking it. */
+const CARRIER_WORDS = new Set([
+  'do', 'does', 'did', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'it', 'they', 'we', 'you', 'this', 'that', 'there', 'and', 'but', 'will', 'would',
+  'can', 'could', 'shall', 'should', 'may', 'might', 'must', 'has', 'have', 'had',
+]);
 
 /**
- * True when the run of text immediately preceding a claim negates it.
+ * True when the words immediately preceding a claim negate it.
  *
- * Counts negation tokens rather than testing for one, because a single-token
- * test reads a DOUBLE negative as a denial: `do not not set …` and `does not
- * never prompt …` are affirmative, and both cleared the earlier check by adding
- * one word. An odd count negates; an even count does not.
+ * Walks backwards from the claim, consuming only negation words and the
+ * auxiliaries that can sit inside a negation phrase (`is not`, `does not
+ * never`), and stops at the first ordinary content word. Two failures forced
+ * this shape:
+ *
+ * - A single-token test read a DOUBLE negative as a denial: `do not not set …`
+ *   and `does not never prompt …` are affirmative. So negations are COUNTED and
+ *   an odd count negates.
+ * - Accepting any run of letters and spaces let a negation govern a DIFFERENT
+ *   verb: in `do not hesitate to set …` and `do not only set …` the `not`
+ *   attaches to `hesitate` / `only`, not to `set`. Stopping at the first content
+ *   word (`hesitate`, `only`, `to`) breaks that association.
  */
-function negatesClaim(abutting: string): boolean {
-  const hits = abutting.match(NEGATION_TOKEN) ?? [];
-  return hits.length % 2 === 1;
+function negatesClaim(before: string): boolean {
+  const words = before.toLowerCase().match(/[a-z']+|[^\sa-z']/g) ?? [];
+  let negations = 0;
+  for (let i = words.length - 1; i >= 0; i--) {
+    const w = words[i];
+    if (!/^[a-z']+$/.test(w)) break;          // punctuation ends the phrase
+    if (NEGATION_WORDS.has(w)) { negations++; continue; }
+    if (CARRIER_WORDS.has(w)) continue;
+    break;                                     // an ordinary content word
+  }
+  return negations % 2 === 1;
 }
 
 /**
@@ -130,9 +152,7 @@ export function unnegatedMatches(
       : (m as RegExpMatchArray & { indices?: Array<[number, number] | undefined> })
         .indices?.[anchorGroup]?.[0];
     const anchor = groupStart ?? at;
-    const before = text.slice(Math.max(0, anchor - 32), anchor);
-    const abutting = /([A-Za-z ]*)$/.exec(before)?.[1] ?? '';
-    if (negatesClaim(abutting)) continue;
+    if (negatesClaim(text.slice(Math.max(0, anchor - 64), anchor))) continue;
     out.push({ text: m[0].replace(/\s+/g, ' ').trim(), index: at });
   }
   return out;
@@ -175,7 +195,7 @@ export function promptClaims(text: string): string[] {
   // match; passphrase-first ("the passphrase is not requested") negates before
   // the trailing verb, so that one anchors on its capture group.
   const verbFirst = /\b(prompts?|asks?|asked|requests?|requested|prompted)\b[^.]{0,90}\bpassphrase\b/gi;
-  const passphraseFirst = /\bpassphrase\b[^.]{0,60}\b(prompt|requested|asked)\b/gi;
+  const passphraseFirst = /\bpassphrase\b[^.]{0,60}\b(prompted|prompts?|requested|requests?|asked|asks?)\b/gi;
   return [
     ...unnegatedMatches(section, verbFirst),
     ...unnegatedMatches(section, passphraseFirst, 1),
@@ -367,6 +387,18 @@ describe('docs-hygiene checks catch the bypasses review found', () => {
     expect(promptClaims(bad)).not.toEqual([]);
   });
 
+  it('rejects a passive prompt claim using "prompted"', () => {
+    // The verb-first grammar listed `prompted`; the passphrase-first one did
+    // not, so this promise of a prompt slipped through the gap between them.
+    const bad = `${HEAD}The passphrase is prompted at first use.\n`;
+    expect(promptClaims(bad)).not.toEqual([]);
+  });
+
+  it('rejects a prompt claim whose negation governs a different verb', () => {
+    const bad = `${HEAD}We do not hesitate to ask for a passphrase at startup.\n`;
+    expect(promptClaims(bad)).not.toEqual([]);
+  });
+
   it('rejects a DOUBLE negative prompt claim', () => {
     // "does not never prompt" is affirmative. A single-token negation test read
     // it as a denial; counting tokens and requiring an odd count does not.
@@ -393,6 +425,19 @@ describe('docs-hygiene checks catch the bypasses review found', () => {
   it('accepts a genuine prohibition where the negation abuts the instruction', () => {
     const ok = `For unattended sync never set ${MASTER_KEY}; use the transport passphrase for push and pull.\n`;
     expect(headlessSyncInstructions(ok)).toEqual([]);
+  });
+
+  it('rejects an instruction whose negation governs a DIFFERENT verb', () => {
+    // "not" attaches to "hesitate", not to "set". An abutting window of plain
+    // letters and spaces let the negation reach across and excuse the
+    // instruction; walking back word-by-word stops at "hesitate".
+    const bad = `For unattended sync, do not hesitate to set ${MASTER_KEY} so pull works.\n`;
+    expect(headlessSyncInstructions(bad)).not.toEqual([]);
+  });
+
+  it('rejects "do not only set" — the negation governs the adverb', () => {
+    const bad = `For unattended sync on a worker box, do not only set ${MASTER_KEY}; pull needs it.\n`;
+    expect(headlessSyncInstructions(bad)).not.toEqual([]);
   });
 
   it('rejects a DOUBLE negative headless-sync instruction', () => {
