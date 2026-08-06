@@ -1478,7 +1478,7 @@ export function readAndResolveBundleEnv(
         emitSecretAudit({ event: 'secrets.lease-denied', bundle: name, operation: opts.caller, source: 'agent', status: 'error', keys: denied, keyCount: denied.length, agent: harness, error: 'key outside lease scope' });
         throw new Error(`Secret lease '${hit.lease?.id}' does not grant key(s): ${denied.join(', ')}`);
       }
-      // The agent stores the FULL bundle env. Apply the same subset filter and
+      // The agent stores a full unlock or a scoped lease env. Apply the same subset filter and
       // expiry gate as the slow path — without this, `--secrets-keys X` would
       // silently inject every key and an expired key would flow through after
       // the first cache-populating run.

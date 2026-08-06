@@ -112,7 +112,7 @@ import {
   runSecretsAgent,
   uninstallSecretsAgentService,
 } from '../lib/secrets/agent.js';
-import { saveSession, deleteBundleSessions, deleteAllSessions, deleteLeaseSession } from '../lib/secrets/session-store.js';
+import { activeLeaseSessions, saveSession, deleteBundleSessions, deleteAllSessions, deleteLeaseSession } from '../lib/secrets/session-store.js';
 import { getCliVersionFresh } from '../lib/version.js';
 import { readMeta } from '../lib/state.js';
 import { parseDuration } from '../lib/hooks/cache.js';
@@ -2632,7 +2632,12 @@ Examples:
     .command('leases')
     .description('List active scoped secret leases.')
     .action(async () => {
-      const leases = (await agentStatus()).filter((entry) => entry.leaseId);
+      const brokerLeases = (await agentStatus()).filter((entry) => entry.leaseId);
+      const byId = new Map(brokerLeases.map((entry) => [entry.leaseId!, entry]));
+      for (const { name, lease } of activeLeaseSessions()) {
+        if (!byId.has(lease.id)) byId.set(lease.id, { name, expiresAt: lease.expiresAt, keyCount: lease.keys.length, harness: lease.harness, leaseId: lease.id, keys: lease.keys });
+      }
+      const leases = [...byId.values()];
       if (leases.length === 0) {
         console.log(chalk.gray('No active secret leases.'));
         return;

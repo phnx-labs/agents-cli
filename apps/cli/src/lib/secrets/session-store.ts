@@ -235,6 +235,12 @@ export function deleteLeaseSession(leaseId: string): number {
   return deleted;
 }
 
+export function activeLeaseSessions(now: number = Date.now()): Array<{ name: string; lease: SecretLease }> {
+  return rehydrateSessions(now)
+    .filter((item): item is { name: string; entry: SessionEntry & { lease: SecretLease } } => Boolean(item.entry.lease))
+    .map(({ name, entry }) => ({ name, lease: entry.lease }));
+}
+
 /** Delete every session blob + the index (for `secrets lock --all`). */
 export function deleteAllSessions(): void {
   if (!shouldPersist()) return;

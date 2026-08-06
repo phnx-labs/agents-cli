@@ -37,7 +37,7 @@ import { getCliVersion, getCliVersionFresh } from '../version.js';
 import { getCliLaunch } from '../cli-entry.js';
 import type { SecretsBundle } from './bundles.js';
 import { GLOBAL_HARNESS, bundleScopeChain } from './scope.js';
-import { rehydrateSessions, pruneSessionsOnSleep } from './session-store.js';
+import { deleteLeaseSession, rehydrateSessions, pruneSessionsOnSleep } from './session-store.js';
 import { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './sync-commands.js';
 import { MAX_LEASE_MS, MIN_LEASE_MS } from './lease.js';
 import { selectLeasedEnv, type SecretLease } from './lease.js';
@@ -412,7 +412,14 @@ export function handleAgentRequest(
         const key = scopedBundleKey(req.name, scope);
         const e = store.get(key);
         if (!e) continue;
-        if (now >= e.expiresAt) { store.delete(key); continue; } // drop expired on read
+        if (now >= e.expiresAt) {
+          store.delete(key);
+          if (e.lease) {
+            deleteLeaseSession(e.lease.id);
+            emitSecretAudit({ event: 'secrets.lease-expire', bundle: e.bundle.name, operation: 'lease-expire', source: 'broker', status: 'success', keys: e.lease.keys, keyCount: e.lease.keys.length, agent: e.lease.harness });
+          }
+          continue;
+        }
         return { ok: true, cmd: 'get', hit: true, bundle: e.bundle, env: e.env, lease: e.lease };
       }
       return { ok: true, cmd: 'get', hit: false };
