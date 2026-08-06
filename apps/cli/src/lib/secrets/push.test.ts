@@ -116,7 +116,7 @@ describe('planPushTransport — which transport a backend/OS pair selects', () =
     expect(plan('push-test-never-registered', 'keychain').kind).toBe('remote-secrets');
   });
 
-  it('forwards --force on every transport that has one', () => {
+  it('forwards --force on all three transports', () => {
     const win = plan('push-test-win', 'keychain', true);
     if (win.kind !== 'ssh') throw new Error('unreachable');
     const script = Buffer.from(win.remoteCmd.split('-EncodedCommand ')[1], 'base64').toString('utf16le');
@@ -124,14 +124,34 @@ describe('planPushTransport — which transport a backend/OS pair selects', () =
     expect(plan('push-test-linux', 'keychain', true)).toMatchObject({
       args: ['import', 'apple.com', '--from', '-', '--force'],
     });
+    const file = plan('push-test-linux', 'file', true);
+    if (file.kind !== 'ssh') throw new Error('unreachable');
+    expect(file.remoteCmd).toContain('--force');
+    expect((plan('push-test-linux', 'file') as { remoteCmd: string }).remoteCmd).not.toContain('--force');
   });
 
   it('never forwards a passphrase the caller did not pass — the RUSH-1968 contract', () => {
     // `fleet apply` calls this with no passphrase on purpose: each device keys the
     // bundle under its OWN machine-local key instead of a fleet-wide shared secret.
+    // No prologue means AGENTS_SECRETS_PASSPHRASE stays unset on the remote.
     const t = plan('push-test-linux', 'file');
     if (t.kind !== 'ssh') throw new Error('unreachable');
-    expect(t.remoteCmd).not.toContain('AGENTS_SECRETS_PASSPHRASE=');
+    expect(t.remoteCmd).not.toContain('AGENTS_SECRETS_PASSPHRASE');
+    expect(t.input).toBe(RESOLVED.dotenv);
+  });
+
+  it('carries an opt-in passphrase on stdin, never in the command line', () => {
+    // A value in argv is readable from any process list, so the shared-key opt-in
+    // reads it off the FIRST stdin line instead.
+    const t = planPushTransport(RESOLVED, 'apple.com', 'push-test-linux', {
+      remoteBackend: 'file',
+      passphrase: 'push-test-passphrase',
+      operation: 'push.test',
+    });
+    if (t.kind !== 'ssh') throw new Error('unreachable');
+    expect(t.remoteCmd).not.toContain('push-test-passphrase');
+    expect(t.remoteCmd).toContain('IFS= read -r AGENTS_SECRETS_PASSPHRASE');
+    expect(t.input).toBe(`push-test-passphrase\n${RESOLVED.dotenv}`);
   });
 });
 
