@@ -154,21 +154,34 @@ export function promptClaims(text: string): string[] {
 /**
  * Instructions to set the MASTER key so unattended sync works.
  *
- * The verb set is a LIST, and a list is never complete — `use` and `provide`
- * were both missing until review named them. The alternative, flagging any
- * master-key mention inside a headless-sync window, was measured against the
- * real document and reports two legitimate passages: the `--remote-backend file`
- * table row (which says "only if set") and the sentence contrasting the two
- * variables. Neither can carry a marker cleanly — an HTML comment inside a
- * Markdown table breaks the table — so the verb list is the bounded choice.
- * A phrasing it misses is a gap to add here, not a reason to loosen the rule.
+ * The verb set is a LIST, and a list is never complete — `use`, `provide`,
+ * `store` and `make … available` were each missing until review named them.
+ *
+ * The alternative — flagging ANY master-key mention inside the same
+ * headless-sync window, with no verb at all — was measured rather than assumed.
+ * Against the GUARDED text (what this check actually sees, marked regions
+ * already removed) it reports **2** legitimate passages in the current doc:
+ *
+ *   1. the `--remote-backend file` table row, which says "only if set";
+ *   2. the sentence contrasting the two variables ("deliberately not …").
+ *
+ * On the RAW document the count is 3 — the third sits inside a marked region and
+ * never reaches any check, so it is not a cost of the verbless rule. Neither of
+ * the two real ones can carry a marker: the first is a Markdown table row, and an
+ * HTML comment inside a table breaks the table.
+ *
+ * So the verb list is the bounded choice. A phrasing it misses is a verb to add
+ * here, not a reason to loosen the rule — and each one review has named is now
+ * pinned by a test below.
  */
 export function headlessSyncInstructions(text: string): string[] {
   const guardedText = stripAllowedRegions(text);
   const instruction = new RegExp(
     String.raw`\b(set|sets|setting|export|exports|exporting|define|defines|configure|configures`
-    + String.raw`|use|uses|using|provide|provides|supply|supplies|specify|specifies|pass|passes`
-    + String.raw`|give|gives|need|needs|require|requires|add|adds|put|puts|inject|injects)\s+`
+    + String.raw`|use|uses|using|provide|provides|providing|supply|supplies|specify|specifies`
+    + String.raw`|pass|passes|give|gives|need|needs|require|requires|add|adds|put|puts`
+    + String.raw`|inject|injects|store|stores|storing|stash|save|saves|keep|keeps|write|writes`
+    + String.raw`|make|makes|making|have|hold|holds|populate|populates)\s+`
     + String.raw`(?:\w+\s+){0,2}\`?${MASTER_KEY}`,
     'gi',
   );
@@ -348,6 +361,16 @@ describe('docs-hygiene checks catch the bypasses review found', () => {
 
   it('rejects a headless-sync instruction phrased with "provide"', () => {
     const bad = `For unattended sync on a worker box, provide ${MASTER_KEY} and pull will succeed.\n`;
+    expect(headlessSyncInstructions(bad)).not.toEqual([]);
+  });
+
+  it('rejects a headless-sync instruction phrased with "store"', () => {
+    const bad = `For unattended CI sync, store ${MASTER_KEY} in the secret manager so push works.\n`;
+    expect(headlessSyncInstructions(bad)).not.toEqual([]);
+  });
+
+  it('rejects the "make … available" construction', () => {
+    const bad = `For unattended CI sync, make ${MASTER_KEY} available so pull works.\n`;
     expect(headlessSyncInstructions(bad)).not.toEqual([]);
   });
 
