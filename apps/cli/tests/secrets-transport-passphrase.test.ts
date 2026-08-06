@@ -25,6 +25,19 @@ const PACKAGE_VERSION = (JSON.parse(
   fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf-8'),
 ) as { version: string }).version;
 
+// A source checkout on a GitHub macOS runner does not carry the signed
+// `Agents CLI.app`. Even `import --backend file` must probe the Keychain first
+// to reject an existing keychain-backed bundle with the same name, so the real
+// CLI subprocess cannot seed this fixture there. Keep the end-to-end coverage
+// on Linux and on macOS installs that have the shipped helper, matching the
+// established subprocess guards in commands/secrets.test.ts and ssh.test.ts.
+const keychainHelperAvailable =
+  process.platform !== 'darwin' ||
+  fs.existsSync(path.join(REPO_ROOT, 'src', 'lib', 'secrets', 'Agents CLI.app')) ||
+  fs.existsSync(path.join(REPO_ROOT, 'bin', 'Agents CLI.app')) ||
+  fs.existsSync(path.join(REPO_ROOT, 'dist', 'lib', 'secrets', 'Agents CLI.app'));
+const helperDependentIt = keychainHelperAvailable ? it : it.skip;
+
 const SYNC_ENV = 'AGENTS_SYNC_PASSPHRASE';
 const LEGACY_ENV = 'AGENTS_SECRETS_PASSPHRASE';
 /** Not a real credential — a literal used only to key a throwaway temp bundle. */
@@ -88,7 +101,7 @@ afterEach(() => {
 });
 
 describe('export --to-file / import --from-file use AGENTS_SYNC_PASSPHRASE (RUSH-1968)', () => {
-  it('round-trips a bundle through an encrypted file under the NEW variable', () => {
+  helperDependentIt('round-trips a bundle through an encrypted file under the NEW variable', () => {
     const home = makeTempHome();
     seedBundle(home, 'src-bundle', 'DEMO_TOKEN', 'demo-value-123');
     const sealed = path.join(home, 'bundle.enc');
@@ -109,7 +122,7 @@ describe('export --to-file / import --from-file use AGENTS_SYNC_PASSPHRASE (RUSH
     expect(imported.stderr + imported.stdout).toContain('Imported 1 key');
   });
 
-  it('with NEITHER variable set, both halves error naming the NEW variable', () => {
+  helperDependentIt('with NEITHER variable set, both halves error naming the NEW variable', () => {
     const home = makeTempHome();
     seedBundle(home, 'src-bundle', 'DEMO_TOKEN', 'demo-value-123');
     const sealed = path.join(home, 'bundle.enc');
@@ -126,7 +139,7 @@ describe('export --to-file / import --from-file use AGENTS_SYNC_PASSPHRASE (RUSH
     expect(importOut).not.toContain(LEGACY_ENV);
   });
 
-  it('still accepts the LEGACY variable on a pre-upgrade box, with a deprecation warning', () => {
+  helperDependentIt('still accepts the LEGACY variable on a pre-upgrade box, with a deprecation warning', () => {
     // The box that already exports the master key — the configuration this PR
     // exists to retire. Its store is keyed to that same value, so the export
     // works and nothing scripted breaks across the upgrade.
@@ -142,7 +155,7 @@ describe('export --to-file / import --from-file use AGENTS_SYNC_PASSPHRASE (RUSH
     expect(exported.stderr).toContain(SYNC_ENV);
   });
 
-  it('a file sealed on a LEGACY box opens on an upgraded box using the NEW variable', () => {
+  helperDependentIt('a file sealed on a LEGACY box opens on an upgraded box using the NEW variable', () => {
     // Same secret, two spellings, two machines: the upgrade must not strand a
     // file sealed by the other side of the version boundary. Two temp HOMEs,
     // because each box keys its own store differently.
