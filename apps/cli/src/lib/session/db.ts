@@ -2570,6 +2570,7 @@ interface DirectoryMembershipCacheEntry {
 
 const directoryMembershipCache = new Map<string, DirectoryMembershipCacheEntry>();
 let directoryMembershipSweepCount = 0;
+const DIRECTORY_MTIME_SETTLE_MS = 2_000;
 
 /** Process-local diagnostics for the real-filesystem existence-cache tests. */
 export function getSessionExistenceCacheStats(): { sweeps: number } {
@@ -2600,7 +2601,8 @@ function findMissingFilePaths(filePaths: string[]): Set<string> {
     try {
       const stat = fs.statSync(dir);
       const cached = directoryMembershipCache.get(dir);
-      if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      const settled = Date.now() - stat.mtimeMs > DIRECTORY_MTIME_SETTLE_MS;
+      if (settled && cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
         entries = cached.entries;
       } else {
         entries = new Set(fs.readdirSync(dir));

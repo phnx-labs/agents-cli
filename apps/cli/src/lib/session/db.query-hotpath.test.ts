@@ -71,11 +71,13 @@ describe('querySessions default sort uses the last_activity index', () => {
 });
 
 describe('querySessions batched existence check', () => {
-  it('reuses unchanged directory membership and invalidates on concurrent create and remove', async () => {
+  it('reuses settled directory membership and never caches rapid create/remove ticks', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-qhp-cache-'));
     const first = path.join(dir, 'first.jsonl');
     const concurrent = path.join(dir, 'concurrent.jsonl');
     fs.writeFileSync(first, '{}');
+    const settled = new Date(Date.now() - 5_000);
+    fs.utimesSync(dir, settled, settled);
     upsertSession(meta('exist-cache-first', { filePath: first }), '');
     upsertSession(meta('exist-cache-concurrent', { filePath: concurrent }), '');
 
@@ -90,17 +92,30 @@ describe('querySessions batched existence check', () => {
     // A concurrent writer can create the transcript without touching SQLite.
     // The directory metadata is the cross-process invalidation signal, so this
     // process must not keep the cached "missing" membership result.
-    await new Promise(resolve => setTimeout(resolve, 10));
     fs.writeFileSync(concurrent, '{}');
     expect(new Set(querySessions({ idPrefix: 'exist-cache-' }).map(row => row.id)))
       .toEqual(new Set(['exist-cache-first', 'exist-cache-concurrent']));
     expect(getSessionExistenceCacheStats().sweeps).toBe(afterFirstSweep + 1);
 
-    await new Promise(resolve => setTimeout(resolve, 10));
     fs.unlinkSync(first);
     expect(querySessions({ idPrefix: 'exist-cache-' }).map(row => row.id))
       .toEqual(['exist-cache-concurrent']);
     expect(getSessionExistenceCacheStats().sweeps).toBe(afterFirstSweep + 2);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('does not hide same-tick filesystem-only mutations', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-qhp-rapid-'));
+    const file = path.join(dir, 'rapid.jsonl');
+    upsertSession(meta('exist-cache-rapid', { filePath: file }), '');
+
+    for (let i = 0; i < 25; i++) {
+      fs.writeFileSync(file, String(i));
+      expect(querySessions({ idExact: 'exist-cache-rapid' }).map(row => row.id))
+        .toEqual(['exist-cache-rapid']);
+      fs.unlinkSync(file);
+      expect(querySessions({ idExact: 'exist-cache-rapid' })).toEqual([]);
+    }
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
