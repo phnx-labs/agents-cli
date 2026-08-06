@@ -55,6 +55,8 @@ describe('Windows detached protocol', () => {
     const script = decodeWindows(buildWindowsStopRemoteCommand(4242, '$HOME/.agents/.cache/hosts/abc.exit'));
     expect(script).toContain('Get-Process -Id 4242');
     expect(script).toContain('Stop-Process -Id 4242 -Force');
+    expect(script).toContain('Get-CimInstance Win32_Process');
+    expect(script).toContain('foreach ($childId in $descendants)');
     expect(script).toContain('ALREADY $code');
     expect(script).not.toContain('}; elseif');
     expect(script).not.toContain('}; else');

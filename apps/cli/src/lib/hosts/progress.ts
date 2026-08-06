@@ -128,7 +128,7 @@ export function splitProgressBytes(
  */
 export function fetchProgress(
   target: string,
-  opts: { remoteLog: string; remoteExit: string; taskId: string; offset: number; remoteShell?: 'posix' | 'powershell' },
+  opts: { remoteLog: string; remoteExit: string; taskId: string; offset: number; remoteShell?: 'posix' | 'powershell'; extraSshArgs?: string[] },
 ): { logChunk: Buffer; exit: string } | null {
   // Derive the printf format from the SAME exitMarker the parser splits on, so
   // the emitted sentinel and the one we look for can never desync. The marker's
@@ -142,7 +142,7 @@ export function fetchProgress(
   // byte-for-byte so a multibyte char split at the `tail -c` boundary neither
   // drifts the offset nor renders as U+FFFD. The exit code is pure ASCII → safe
   // to decode to a string for the caller's `.trim()`.
-  const res = sshExecRaw(target, remote, { timeoutMs: 20000 });
+  const res = sshExecRaw(target, remote, { timeoutMs: 20000, extraSshArgs: opts.extraSshArgs });
   const parts = splitProgressBytes(res.stdout, opts.taskId);
   if (!parts) return null;
   return { logChunk: parts.logChunk, exit: parts.exit.toString('utf8') };

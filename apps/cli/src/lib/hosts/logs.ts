@@ -123,7 +123,11 @@ function fetchAndCacheRemoteLog(task: HostTask): Buffer | null {
   const command = task.remoteShell === 'powershell'
     ? `powershell -NoProfile -EncodedCommand ${encodePowershell(`$path = Join-Path $HOME '${task.remoteLog.replace(/^\$HOME\//, '').replace(/'/g, "''")}'; if (Test-Path -LiteralPath $path) { $bytes = [IO.File]::ReadAllBytes($path); [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length) }`)}`
     : `cat ${task.remoteLog} 2>/dev/null`;
-  const res = sshExecRaw(task.target, command, { timeoutMs: 30000, multiplex: true });
+  const res = sshExecRaw(task.target, command, {
+    timeoutMs: 30000,
+    multiplex: true,
+    extraSshArgs: task.identityFile ? ['-i', task.identityFile, '-o', 'IdentitiesOnly=yes'] : undefined,
+  });
   if (res.code !== 0 || res.stdout.length === 0) return null;
   // The hosts cache dir already exists (saveTask created it) — write is best-effort.
   try { fs.writeFileSync(localLogPath(task.id), res.stdout); } catch { /* best-effort cache */ }

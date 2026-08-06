@@ -81,7 +81,8 @@ export function reconcileRunningTasks(tasks: HostTask[]): HostTask[] {
   const patched = new Map<string, HostTask>();
   for (const t of running) {
     if (!reachable.has(t.target)) {
-      const probe = sshExec(t.target, 'true', {
+      const probeCommand = reachabilityProbeCommand(t.remoteShell);
+      const probe = sshExec(t.target, probeCommand, {
         timeoutMs: 6000,
         extraSshArgs: t.identityFile ? ['-i', t.identityFile, '-o', 'IdentitiesOnly=yes'] : undefined,
       });
@@ -95,4 +96,8 @@ export function reconcileRunningTasks(tasks: HostTask[]): HostTask[] {
     }
   }
   return tasks.map((t) => patched.get(t.id) ?? t);
+}
+
+export function reachabilityProbeCommand(remoteShell?: 'posix' | 'powershell'): string {
+  return remoteShell === 'powershell' ? 'powershell -NoProfile -Command "exit 0"' : 'true';
 }
