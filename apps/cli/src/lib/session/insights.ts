@@ -271,7 +271,11 @@ export function computeInsightFacets(
           break;
         }
         if (e.role !== 'user') break;
-        if (!e._synthetic) classifyCorrection(e.content ?? '', f.correctionSignals);
+        // Synthetic user rows (stop-hook feedback, injected meta) are not a human
+        // resume — skip correction/stall classification and leave lastAssistantTs so
+        // the next real user message still measures the full idle gap.
+        if (e._synthetic) break;
+        classifyCorrection(e.content ?? '', f.correctionSignals);
         if (hasTs) {
           // Local-time hour. parse.ts falls back to `new Date()` for a record with no
           // timestamp; those are indistinguishable here, but they are rare and would

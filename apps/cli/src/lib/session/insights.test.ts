@@ -165,6 +165,24 @@ describe('computeInsightFacets', () => {
     )).toBe(true);
   });
 
+  it('ignores synthetic user messages so stop-hook feedback does not end a silent stall', () => {
+    // Assistant at t=0; synthetic meta at t=600 (would look like a 10m gap); real
+    // "continue" at t=1200 (20m from assistant). Stall must be measured to the real
+    // human message, not the injected row.
+    const f = computeInsightFacets([
+      userMsg(0, 'build'),
+      asstMsg(1, 'working'),
+      {
+        type: 'message', agent: 'claude', timestamp: at(600), role: 'user',
+        content: 'Stop hook feedback: open PR still…', _synthetic: true,
+      } as SessionEvent,
+      userMsg(1200, 'continue'),
+    ], 0);
+    expect(f.frictionSignals['silent stall: 15-60m']).toBe(1);
+    expect(f.frictionSignals['silent stall: 5-15m']).toBeUndefined();
+    expect(f.correctionSignals['resume after silent stall']).toBe(1);
+  });
+
   it('rejects a negative gap from clock skew rather than counting it', () => {
     // Removing the old 2s floor removed the implicit negative guard with it; a real
     // corpus contained a gap of -8.662s from out-of-order record timestamps.
