@@ -1283,8 +1283,10 @@ export function registerRunCommand(program: Command): void {
         const { applyDeviceAutoToOptions } = await import('../lib/smart-launch.js');
         const result = await applyDeviceAutoToOptions(options, {
           accountPickerRequested,
+          // `run auto` selects its harness after placement, so do not filter
+          // candidates against an arbitrary proxy harness at this stage.
           agent: normalizedAgentSpec.split('@')[0] === RUN_AUTO_KEYWORD
-            ? 'codex'
+            ? undefined
             : (resolveAgentName(normalizedAgentSpec.split('@')[0]) ?? undefined),
         });
         if (!options.quiet && result.deprecationSmart) {

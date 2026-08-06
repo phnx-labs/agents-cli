@@ -174,8 +174,8 @@ export interface MatchHostOptions {
    * "Unknown device" verdict reachable).
    */
   allowBareLiteral?: boolean;
-  /** Override the affinity pick for the `auto` sentinel (tests). Defaults to
-   * `resolveDeviceAffinity({})` — the same engine `agents run --device auto` uses. */
+  /** Override the affinity pick for generic `auto` host resolution in tests.
+   * Harness-aware run/team placement resolves `auto` before reaching this core. */
   resolveAuto?: () => DeviceAffinityPlan;
 }
 
@@ -193,11 +193,9 @@ export interface MatchHostOptions {
  * into a dispatch verdict.
  */
 export async function matchHost(name: string, opts: MatchHostOptions = {}): Promise<ResolvedHost | null> {
-  // `auto` is the same affinity sentinel `agents run --device auto` resolves
-  // (isDeviceAuto / resolveDeviceAffinity in ../smart-launch.js) — shared here so
-  // every caller through this one core (ssh, teams, dispatch/passthrough) picks a
-  // device the SAME way `run` does instead of rejecting it as "Unknown device
-  // 'auto'" (RUSH-2185). A `null` plan.host means the affinity engine picked this
+  // Generic host-only callers resolve `auto` through the affinity engine here;
+  // harness-aware run/team placement resolves it earlier with live probes. A
+  // `null` plan.host means the affinity engine picked this
   // very machine; resolve that as the local device/host entry (if any) rather than
   // returning nothing — callers that already special-case "target is this
   // machine" (teams add/create, the passthrough self-host check) then treat it as

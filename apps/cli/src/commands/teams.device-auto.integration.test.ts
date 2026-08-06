@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,8 +14,8 @@ import path from 'node:path';
  * Real CLI, real filesystem, no mocking: drive the built entrypoint against a
  * throwaway HOME with no devices registered under a unique machine id, which
  * makes the affinity engine's only eligible candidate "this machine" —
- * deterministic without needing a real device fleet. The teammate name is
- * deliberately invalid so the command cannot spawn a real agent process.
+ * deterministic without needing a real device fleet. `teams add` only records
+ * the teammate, so a valid harness exercises placement without spawning it.
  */
 describe.skipIf(process.platform === 'win32')('agents teams add --device auto (RUSH-2185)', () => {
   let home: string;
@@ -34,31 +34,27 @@ describe.skipIf(process.platform === 'win32')('agents teams add --device auto (R
   });
 
   function runAdd(team: string): { status: number; stdout: string; stderr: string } {
-    try {
-      const stdout = execFileSync(
-        'bun',
-        [path.resolve(process.cwd(), 'src/index.ts'), 'teams', 'add', team, 'not-a-real-agent-xyz', 'task', '--device', 'auto'],
-        {
-          cwd: process.cwd(),
-          env: {
-            ...process.env,
-            HOME: home,
-            AGENTS_SYNC_MACHINE_ID: machineId,
-            AGENTS_NO_NUDGE: '1',
-            FORCE_COLOR: '0',
-          },
-          stdio: ['ignore', 'pipe', 'pipe'],
+    const result = spawnSync(
+      'bun',
+      [path.resolve(process.cwd(), 'src/index.ts'), 'teams', 'add', team, 'claude', 'task', '--device', 'auto'],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          HOME: home,
+          AGENTS_SYNC_MACHINE_ID: machineId,
+          AGENTS_NO_NUDGE: '1',
+          FORCE_COLOR: '0',
         },
-      ).toString('utf-8');
-      return { status: 0, stdout, stderr: '' };
-    } catch (e) {
-      const err = e as { status?: number; stdout?: Buffer; stderr?: Buffer };
-      return {
-        status: err.status ?? 1,
-        stdout: err.stdout?.toString('utf-8') ?? '',
-        stderr: err.stderr?.toString('utf-8') ?? '',
-      };
-    }
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    return {
+      status: result.status ?? 1,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
   }
 
   it('resolves `auto` instead of rejecting "Unknown device" / "Couldn\'t resolve --device"', () => {
@@ -67,9 +63,7 @@ describe.skipIf(process.platform === 'win32')('agents teams add --device auto (R
 
     expect(out).not.toContain(`Unknown device 'auto'`);
     expect(out).not.toContain(`Couldn't resolve --device "auto"`);
-    // Teammate validation now precedes the harness-aware live placement probe;
-    // the pure resolveDeviceAuto tests cover the concrete local/remote pick.
-    expect(status).not.toBe(0);
-    expect(out).toContain(`Unknown teammate 'not-a-real-agent-xyz'`);
+    expect(out).toContain('device=auto → local');
+    expect(status).toBe(0);
   });
 });
