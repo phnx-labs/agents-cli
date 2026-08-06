@@ -389,7 +389,7 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
   /** A `crabbox list --json` entry. `profile` undefined → no profile label. */
   function poolBoxJson(
     slug: string,
-    over: { profile?: string; tailscale?: boolean; state?: string; expiresAt?: string; ttlSecs?: string } = {},
+    over: { profile?: string; tailscale?: boolean; state?: string; expiresAt?: string } = {},
   ) {
     return {
       name: `crabbox-${slug}`,
@@ -402,7 +402,6 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
         profile: over.profile,
         created_at: '1800000000',
         expires_at: over.expiresAt ?? '1800003600',
-        ttl_secs: over.ttlSecs ?? '3600',
         last_touched_at: '1800000100',
         idle_timeout_secs: '1800',
         ...(over.tailscale ? { tailscale_ipv4: '100.64.0.9' } : {}),
@@ -497,20 +496,19 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
     expect(phases).toEqual(['reuse', 'ready']);
     expect(calls).toContain('list --json');
     expect(calls).toContain('status --id warm-one');
-    expect(calls).toContain('run --id warm-one --reclaim --ttl 3600s --script-stdin');
+    expect(calls).toContain('run --id warm-one --reclaim --idle-timeout 1800s --script-stdin');
     expect(calls.some((l) => l.startsWith('warmup'))).toBe(false);
     expect(calls.some((l) => l.startsWith('stop'))).toBe(false);
   });
 
-  it('renews with the stable TTL after a prior reuse moved expiresAt', async () => {
+  it('renews with the stable idle window after a prior reuse moved expiresAt', async () => {
     const fake = setupPoolFake({
-      boxes: [poolBoxJson('warm-one', { profile: 'agents-cli', expiresAt: '1800007200', ttlSecs: '3600' })],
+      boxes: [poolBoxJson('warm-one', { profile: 'agents-cli', expiresAt: '1800007200' })],
       readySlugs: ['warm-one'],
     });
     const { calls } = await runWithPool(fake);
 
-    expect(calls).toContain('run --id warm-one --reclaim --ttl 3600s --script-stdin');
-    expect(calls).not.toContain('run --id warm-one --reclaim --ttl 7200s --script-stdin');
+    expect(calls).toContain('run --id warm-one --reclaim --idle-timeout 1800s --script-stdin');
   });
 
   it('skips a pool box that is not SSH-ready, then warms and keeps a replacement pool box', async () => {

@@ -427,13 +427,13 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
   let exitCode: number | null = null;
   let toreDown = false;
   try {
-    const renewTtlSecs = reused && !opts.reuseBox && typeof box.ttlSecs === 'number'
-      ? box.ttlSecs
+    const renewIdleTimeoutSecs = reused && !opts.reuseBox && box.idleTimeoutSecs !== null
+      ? box.idleTimeoutSecs
       : undefined;
     exitCode = await crabboxRunScript(box.slug, script, {
       secretsBundle: opts.secretsBundle,
       onData: opts.onData,
-      renewTtlSecs,
+      renewIdleTimeoutSecs,
     });
   } finally {
     // Normal --lease establishes or reuses the warm pool, so the box outlives

@@ -45,8 +45,6 @@ export interface CrabboxBox {
   createdAt: number | null;
   /** Unix seconds the lease expires, or null. */
   expiresAt: number | null;
-  /** Stable lease lifetime in seconds, when crabbox reports it. */
-  ttlSecs?: number | null;
   /** Unix seconds the box was last touched (reused / run against), or null. */
   lastTouchedAt: number | null;
   /** Idle-timeout window in seconds, or null. */
@@ -338,7 +336,6 @@ function normalizeBox(raw: Record<string, unknown>): CrabboxBox | null {
     keep: labels.keep === 'true',
     createdAt: num(labels.created_at),
     expiresAt: num(labels.expires_at),
-    ttlSecs: num(labels.ttl_secs),
     lastTouchedAt: num(labels.last_touched_at),
     idleTimeoutSecs: num(labels.idle_timeout_secs ?? labels.idle_timeout),
   };
@@ -553,8 +550,8 @@ export interface CrabboxRunOptions extends CrabboxOptions {
   onData?: (chunk: string) => void;
   /** Force a full remote resync before running. */
   fullResync?: boolean;
-  /** Extend an existing lease by this many seconds before running. */
-  renewTtlSecs?: number;
+  /** Refresh an existing lease with this idle window before running. */
+  renewIdleTimeoutSecs?: number;
 }
 
 /**
@@ -593,7 +590,7 @@ export function crabboxRun(slug: string, remoteCmd: string, opts: CrabboxRunOpti
 export function crabboxRunScript(slug: string, script: string, opts: CrabboxRunOptions = {}): Promise<number | null> {
   findCrabbox();
   const args = ['run', '--id', slug, '--reclaim'];
-  if (opts.renewTtlSecs !== undefined) args.push('--ttl', `${opts.renewTtlSecs}s`);
+  if (opts.renewIdleTimeoutSecs !== undefined) args.push('--idle-timeout', `${opts.renewIdleTimeoutSecs}s`);
   if (opts.fullResync) args.push('--full-resync');
   args.push('--script-stdin');
   return new Promise((resolve) => {
