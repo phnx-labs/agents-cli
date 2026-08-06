@@ -514,6 +514,11 @@ Host dispatch has two shapes, chosen by whether a prompt is present:
   `--interactive` with `--host` also takes the interactive path and forwards the
   prompt to the remote TUI.
 
+Headless dispatch supports Linux, macOS, and Windows OpenSSH hosts. Windows uses
+a hidden detached PowerShell process plus the same durable per-task log and exit
+sentinel as POSIX hosts; follow, reconnect, `hosts logs`, `hosts ps`, and
+`hosts stop` select the matching remote protocol from the task record.
+
 (`--json`/`--quiet`/`--mode`/`--model` are real flags on `agents run`, registered in
 `src/commands/exec.ts`; there is no user-facing `--print` — the per-harness
 headless/`--print` mapping is internal to `buildExecCommand`.) `agents run` already

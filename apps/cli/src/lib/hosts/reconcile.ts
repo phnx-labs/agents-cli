@@ -13,6 +13,7 @@
 
 import { sshExec, type SshExecResult } from '../ssh-exec.js';
 import { updateTask, terminalPatch, type HostTask } from './tasks.js';
+import { encodePowershell } from './remote-cmd.js';
 
 export type RemoteExitState =
   | { state: 'running' } //     .exit absent, or present-but-empty (mid-write) → not finished
@@ -41,8 +42,11 @@ export function classifyExit(res: Pick<SshExecResult, 'code' | 'stdout' | 'timed
  * $HOME-prefixed path with a safe (hex) basename — intentionally unquoted so the
  * remote shell expands $HOME (same contract as progress.ts's fetch).
  */
-export function readRemoteExit(target: string, remoteExit: string, timeoutMs = 6000, identityFile?: string): RemoteExitState {
-  return classifyExit(sshExec(target, `cat ${remoteExit} 2>/dev/null`, {
+export function readRemoteExit(target: string, remoteExit: string, timeoutMs = 6000, identityFile?: string, remoteShell: 'posix' | 'powershell' = 'posix'): RemoteExitState {
+  const command = remoteShell === 'powershell'
+    ? `powershell -NoProfile -EncodedCommand ${encodePowershell(`$path = Join-Path $HOME '${remoteExit.replace(/^\$HOME\//, '').replace(/'/g, "''")}'; if (Test-Path -LiteralPath $path) { Get-Content -LiteralPath $path -Raw }`)}`
+    : `cat ${remoteExit} 2>/dev/null`;
+  return classifyExit(sshExec(target, command, {
     timeoutMs,
     multiplex: true,
     extraSshArgs: identityFile ? ['-i', identityFile, '-o', 'IdentitiesOnly=yes'] : undefined,
@@ -56,7 +60,7 @@ export function readRemoteExit(target: string, remoteExit: string, timeoutMs = 6
  */
 export function reconcileTask(task: HostTask): HostTask {
   if (task.status !== 'running') return task;
-  const st = readRemoteExit(task.target, task.remoteExit, 6000, task.identityFile);
+  const st = readRemoteExit(task.target, task.remoteExit, 6000, task.identityFile, task.remoteShell);
   if (st.state !== 'done') return task;
   return updateTask(task.id, terminalPatch(st.code)) ?? task;
 }
@@ -84,7 +88,7 @@ export function reconcileRunningTasks(tasks: HostTask[]): HostTask[] {
       reachable.set(t.target, probe.code === 0);
     }
     if (!reachable.get(t.target)) continue; // host down → leave running
-    const st = readRemoteExit(t.target, t.remoteExit, 6000, t.identityFile);
+    const st = readRemoteExit(t.target, t.remoteExit, 6000, t.identityFile, t.remoteShell);
     if (st.state === 'done') {
       const updated = updateTask(t.id, terminalPatch(st.code));
       if (updated) patched.set(t.id, updated);

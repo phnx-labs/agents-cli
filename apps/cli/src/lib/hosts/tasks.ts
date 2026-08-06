@@ -20,6 +20,7 @@ export interface HostTask {
   target: string;
   /** OpenSSH private-key path retained for follow/reconcile/stop calls. */
   identityFile?: string;
+  remoteShell?: 'posix' | 'powershell';
   agent: string;
   prompt: string;
   pid?: number;

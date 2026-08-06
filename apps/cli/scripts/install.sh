@@ -103,8 +103,8 @@ node -e "
   delete p.scripts?.postinstall;
   delete p.scripts?.prepack;
   delete p.scripts?.prepare;
-  fs.writeFileSync('$STAGE_DIR/package.json', JSON.stringify(p, null, 2));
-"
+  fs.writeFileSync(process.argv[1], JSON.stringify(p, null, 2));
+" "$STAGE_DIR/package.json"
 
 dim "  Packing tarball"
 (
@@ -130,11 +130,21 @@ npm install -g "$TARBALL" \
 # `agents` -- to use it instead of the registry one, put $LINK_DIR ahead of
 # the registry bin dir on PATH.
 mkdir -p "$LINK_DIR"
-for bin in agents ag browser; do
-  src="$PREFIX/bin/$bin"
-  [[ -e "$src" ]] || continue
-  ln -sf "$src" "$LINK_DIR/$bin"
-done
+if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
+  for bin in agents ag browser; do
+    [[ -e "$PREFIX/$bin.cmd" ]] || continue
+    printf '@"%%USERPROFILE%%\\.local\\agents-cli-dev\\%s.cmd" %%*\r\n' "$bin" > "$LINK_DIR/$bin.cmd"
+    printf '& "$HOME\\.local\\agents-cli-dev\\%s.ps1" @args\r\n' "$bin" > "$LINK_DIR/$bin.ps1"
+    printf '#!/usr/bin/env bash\nexec "$HOME/.local/agents-cli-dev/%s" "$@"\n' "$bin" > "$LINK_DIR/$bin"
+    chmod +x "$LINK_DIR/$bin"
+  done
+else
+  for bin in agents ag browser; do
+    src="$PREFIX/bin/$bin"
+    [[ -e "$src" ]] || continue
+    ln -sf "$src" "$LINK_DIR/$bin"
+  done
+fi
 
 # Prefer the standalone Mach-O when the staged dist carries one (macOS): the
 # node-shebang shim is what EDR flags (#315). Runnable-probe first - an
@@ -148,7 +158,7 @@ fi
 
 # Confirm the dev binary is runnable.
 LINKED_PATH="$LINK_DIR/agents"
-[[ -L "$LINKED_PATH" ]] || die "agents not installed at $LINKED_PATH"
+[[ -e "$LINKED_PATH" ]] || die "agents not installed at $LINKED_PATH"
 LINKED_VER=$("$LINKED_PATH" --version 2>/dev/null | head -1 || echo "?")
 
 # Install the signed macOS Keychain helper to its stable user path. The dev
