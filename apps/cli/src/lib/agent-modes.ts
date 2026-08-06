@@ -34,7 +34,7 @@ export interface AgentModesCatalog {
   agent: AgentId;
   /** Modes this harness natively supports, in declaration order. */
   modes: AgentModeEntry[];
-  /** capabilities.modes[0] — used when --mode is omitted and no run default is set. */
+  /** capabilities.modes[0] — safest native mode; run may still default elsewhere (e.g. CLI plan, teams edit). */
   defaultMode: Mode;
   /**
    * Configured run.defaults mode for this agent@version, when set.
