@@ -1575,15 +1575,6 @@ export function readAndResolveBundleEnv(
 
   const json = fetched.get(metaItem);
   if (json === undefined) {
-    // For a file-backed bundle the metadata item is on disk (that's how
-    // bundleBackend resolved to 'file'); a missing decrypt means the wrong
-    // passphrase, not a missing bundle. getBatch swallowed the decrypt error,
-    // so distinguish here rather than report a misleading "not found".
-    if (backend === 'file' && fileStore.has(metaItem)) {
-      throw new Error(
-        `Bundle '${name}': failed to decrypt — wrong AGENTS_SECRETS_PASSPHRASE or tampered file store.`,
-      );
-    }
     if (vaultExists() && !getVaultSession().loggedIn) {
       throw new Error(`Synced secrets are locked. Run: agents login`);
     }
