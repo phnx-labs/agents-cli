@@ -9,7 +9,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, resolveRoutineName, teamBadge } from '../sessions.js';
+import { filterSessionsByRoutine, formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, resolveRoutineName, teamBadge } from '../sessions.js';
+import { resolveSessionById } from '../../lib/session/discover.js';
 import { formatTeamLineage } from '../sessions-picker.js';
 import type { SessionMeta } from '../../lib/session/types.js';
 
@@ -77,6 +78,16 @@ describe('resolveRoutineName', () => {
   it('rejects missing and ambiguous selectors', () => {
     expect(resolveRoutineName('missing', names)).toBeNull();
     expect(resolveRoutineName('notes', ['release-notes', 'meeting-notes'])).toBeNull();
+  });
+
+  it('removes another routine before a positional session ID can resolve', async () => {
+    const wanted = meta({ id: 'wanted-id', shortId: 'wanted', origin: 'routine', routineName: 'nightly-review' });
+    const other = meta({ id: 'other-id', shortId: 'other', origin: 'routine', routineName: 'security-scan' });
+    const filtered = await filterSessionsByRoutine([wanted, other], 'nightly', false);
+
+    expect(filtered).not.toBeNull();
+    expect(resolveSessionById(filtered!, 'other-id')).toEqual([]);
+    expect(resolveSessionById(filtered!, 'wanted-id')).toEqual([wanted]);
   });
 });
 

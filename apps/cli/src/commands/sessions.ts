@@ -1655,7 +1655,7 @@ async function selectRoutineName(names: readonly string[]): Promise<string | nul
   return picked?.item ?? null;
 }
 
-async function filterSessionsByRoutine(
+export async function filterSessionsByRoutine(
   sessions: SessionMeta[],
   routine: boolean | string,
   interactive: boolean,
@@ -2450,6 +2450,14 @@ async function sessionsAction(
       ? 0
       : countSessionsInScope({ ...scope, onlyTeamOrigin: true });
 
+    // A typed routine scope must apply before smart ID routing. Otherwise an ID
+    // from another routine resolves and renders before the routine filter below.
+    if (typeof options.routine === 'string') {
+      const filteredByRoutine = await filterSessionsByRoutine(sessions, options.routine, false);
+      if (!filteredByRoutine) return;
+      sessions = filteredByRoutine;
+    }
+
     // Smart ID routing: a bare query that resolves to one session renders
     // directly. If nothing matches in the scoped window and the query looks
     // like a session ID, widen to global scope (incl. Claude /resume history).
@@ -2473,7 +2481,7 @@ async function sessionsAction(
     }
 
     if (options.json) {
-      if (options.routine) {
+      if (options.routine === true) {
         const filteredByRoutine = await filterSessionsByRoutine(sessions, options.routine, false);
         if (!filteredByRoutine) return;
         sessions = filteredByRoutine;
