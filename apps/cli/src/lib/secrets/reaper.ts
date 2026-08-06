@@ -207,7 +207,19 @@ export function reapOrphanedKeychainProcesses(): {
     return { reaped: 0, details: [`ps failed: ${(err as Error).message}`], plan: { kill: [], nextCandidates: new Map() } };
   }
 
-  const snapshots: KeychainProcessSnapshot[] = [];
+  // Parse the snapshot cheaply, then capture start-time fingerprints ONLY for
+  // helper processes (and their parents when a stuck candidate is found).
+  // captureProcessStartTime shells `ps` per unseen pid; doing it for every
+  // process on the machine would create the very pileup the reaper exists to
+  // prevent.
+  type PrelimRow = {
+    pid: number;
+    ppid: number;
+    elapsedSec: number;
+    isHelper: boolean;
+    startTime: string | null;
+  };
+  const rows: PrelimRow[] = [];
   for (const line of out.split('\n')) {
     const parsed = parsePsLine(line);
     if (!parsed) continue;
@@ -215,14 +227,28 @@ export function reapOrphanedKeychainProcesses(): {
     // Exact path-match: the helper invocation's command line begins with the
     // absolute helper path, followed by a space and its arguments (or nothing).
     const isHelper = command === helperPath || command.startsWith(`${helperPath} `);
-    snapshots.push({
-      pid,
-      ppid,
-      elapsedSec,
-      startTime: captureProcessStartTime(pid),
-      isHelper,
-    });
+    rows.push({ pid, ppid, elapsedSec, isHelper, startTime: null });
   }
+
+  const rowByPid = new Map<number, PrelimRow>(rows.map((r) => [r.pid, r]));
+  for (const row of rows) {
+    if (!row.isHelper) continue;
+    row.startTime = captureProcessStartTime(row.pid);
+    if (row.ppid !== 1 && row.elapsedSec > STUCK_GRACE_SEC) {
+      const parent = rowByPid.get(row.ppid);
+      if (parent && parent.startTime === null) {
+        parent.startTime = captureProcessStartTime(row.ppid);
+      }
+    }
+  }
+
+  const snapshots: KeychainProcessSnapshot[] = rows.map((r) => ({
+    pid: r.pid,
+    ppid: r.ppid,
+    elapsedSec: r.elapsedSec,
+    startTime: r.startTime,
+    isHelper: r.isHelper,
+  }));
 
   const plan = planKeychainReap(snapshots, Date.now(), stuckParentCandidates);
   stuckParentCandidates = plan.nextCandidates;
