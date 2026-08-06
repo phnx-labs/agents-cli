@@ -2,8 +2,6 @@
 
 ## 1.22.26
 
-- **The newest signed agents-cli installation now owns the menu-bar helper (#2210).** A newer release takes over immediately even during the legacy ownership cooldown, while an older installation can no longer replace a newer helper and equal-version installations keep the existing owner stable. Missing-helper, Developer-ID repair, missing-owner, and unversioned legacy recovery paths are unchanged.
-
 - Make bare `agents setup` a re-runnable onboarding hub with live capability status and direct access to browser, computer, secrets, fleet, share, watchdog, and preference wizards.
 
 - **`agents apply --provision-secrets` pushes the manifest's declared secrets
