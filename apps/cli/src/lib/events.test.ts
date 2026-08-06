@@ -14,8 +14,10 @@ import {
 } from './events.js';
 import { resetActorCache } from './actor.js';
 
-// win32: event bus / process timing edges (RUSH-2215).
-const describeEvents = process.platform === 'win32' ? describe.skip : describe;
+// RUSH-2215: quarantine only I/O-heavy event-bus suites on win32; pure
+// event-kind / level tables still run (review: do not skip platform-neutral guards).
+const describeEventsIo = process.platform === 'win32' ? describe.skip : describe;
+const describeEvents = describe;
 
 const tempDirs: string[] = [];
 
@@ -41,7 +43,7 @@ function setupLogsDir(): string {
   return dir;
 }
 
-describeEvents('events', () => {
+describeEventsIo('events', () => {
   describe('emit', () => {
     it('writes a JSONL record with level and caller fields', () => {
       const logsDir = setupLogsDir();
@@ -718,7 +720,7 @@ describeEvents('event-kind table (the drift guard for out-of-process producers)'
   });
 });
 
-describeEvents('emit() timestamp override', () => {
+describeEventsIo('emit() timestamp override', () => {
   it('honours a caller-supplied ts so a batched producer keeps real event times', () => {
     setupLogsDir();
     const happenedAt = '2026-08-03T01:02:03.000Z';

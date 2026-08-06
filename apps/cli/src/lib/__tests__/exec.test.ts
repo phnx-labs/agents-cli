@@ -23,8 +23,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// win32: exec path/quoting edges under quarantine expansion (RUSH-2215).
-const describeExec = process.platform === 'win32' ? describe.skip : describe;
+// Pure command-construction / mode resolution — runs on every platform (RUSH-2215 review).
+const describeExec = describe;
 
 function opts(overrides: Partial<ExecOptions>): ExecOptions {
   return {
