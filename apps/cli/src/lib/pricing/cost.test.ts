@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   costOfUsage,
+  costOfUsageNoCache,
   costOfSession,
   formatUsd,
   estimateCost,
@@ -37,6 +38,41 @@ describe('costOfUsage', () => {
 
   it('returns 0 when model is missing', () => {
     expect(costOfUsage({ inputTokens: 1_000_000 })).toBe(0);
+  });
+});
+
+describe('costOfUsageNoCache', () => {
+  it('bills cache read and cache write at the full input rate', () => {
+    // opus: input $5/M. Cached tokens repriced from their discount to $5/M.
+    const usd = costOfUsageNoCache({
+      model: 'claude-opus-4',
+      cacheReadTokens: 10_000,    // 10000 * 5e-6 = 0.05  (vs 0.005 cached)
+      cacheCreationTokens: 1_000, // 1000  * 5e-6 = 0.005 (vs 0.00625 cached)
+    });
+    expect(usd).toBeCloseTo(0.05 + 0.005, 10);
+  });
+
+  it('leaves uncached input and output untouched', () => {
+    const args = { model: 'claude-opus-4', inputTokens: 1000, outputTokens: 2000 } as const;
+    // No cache tokens -> identical to the cache-aware cost.
+    expect(costOfUsageNoCache(args)).toBeCloseTo(costOfUsage(args), 10);
+    expect(costOfUsageNoCache(args)).toBeCloseTo(0.055, 10);
+  });
+
+  it('is always >= the cache-aware cost (caching is a discount)', () => {
+    const args = {
+      model: 'claude-opus-4',
+      inputTokens: 5_000,
+      outputTokens: 5_000,
+      cacheReadTokens: 100_000,
+      cacheCreationTokens: 10_000,
+    } as const;
+    expect(costOfUsageNoCache(args)).toBeGreaterThan(costOfUsage(args));
+  });
+
+  it('returns 0 for unknown/missing model', () => {
+    expect(costOfUsageNoCache({ model: 'nope-9000', cacheReadTokens: 1_000_000 })).toBe(0);
+    expect(costOfUsageNoCache({ cacheReadTokens: 1_000_000 })).toBe(0);
   });
 });
 
