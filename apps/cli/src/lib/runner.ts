@@ -929,7 +929,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   // share this one gate (a hard-deprecated agent has no `cloudProvider` entry,
   // so cloud placement would otherwise silently fall back to the default
   // provider instead of refusing). See hardDeprecationRunFailure.
-  if (!config.workflow && config.agent && isAgentHardDeprecated(config.agent)) {
+  if (!config.workflow && config.agent && ROUTINE_AGENT_IDS.includes(config.agent) && isAgentHardDeprecated(config.agent)) {
     return { meta: hardDeprecationRunFailure(config, config.agent), reportPath: null };
   }
 
@@ -1507,7 +1507,7 @@ async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks
   // share this one gate (a hard-deprecated agent has no `cloudProvider` entry,
   // so cloud placement would otherwise silently fall back to the default
   // provider instead of refusing). See hardDeprecationRunFailure.
-  if (!config.workflow && config.agent && isAgentHardDeprecated(config.agent)) {
+  if (!config.workflow && config.agent && ROUTINE_AGENT_IDS.includes(config.agent) && isAgentHardDeprecated(config.agent)) {
     return hardDeprecationRunFailure(config, config.agent);
   }
 
