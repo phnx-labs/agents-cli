@@ -305,14 +305,29 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
 
   // Friction — the section that earns the command.
   const gaps = all.responseGaps;
+  const silentStalls = Object.entries(all.frictionSignals)
+    .filter(([k]) => k.startsWith('silent stall:'))
+    .reduce((n, [, c]) => n + c, 0);
+  const resumeNudges = all.correctionSignals['resume after silent stall'] ?? 0;
   out.push('');
   out.push(chalk.bold('Friction'));
   out.push(`  ${padToWidth('interruptions', 18)}  ${chalk.cyan(String(all.interruptions))}` +
     chalk.gray('   turns you cut short'));
   out.push(`  ${padToWidth('tool errors', 18)}  ${chalk.cyan(String(all.errorCount))}`);
   if (gaps.length > 0) {
-    out.push(`  ${padToWidth('your reply time', 18)}  ` +
-      chalk.cyan(`p50 ${Math.round(percentile(gaps, 50))}s`) + chalk.gray(` · p90 ${Math.round(percentile(gaps, 90))}s`));
+    // Same timestamps as silent stalls; this line is the distribution. Silent
+    // stalls (below) are the agent-attributed long gaps after the model stopped.
+    out.push(`  ${padToWidth('gap until next msg', 18)}  ` +
+      chalk.cyan(`p50 ${Math.round(percentile(gaps, 50))}s`) + chalk.gray(` · p90 ${Math.round(percentile(gaps, 90))}s`) +
+      chalk.gray('   after assistant last spoke'));
+  }
+  if (silentStalls > 0) {
+    out.push(`  ${padToWidth('silent stalls', 18)}  ${chalk.cyan(String(silentStalls))}` +
+      chalk.gray('   agent idle ≥5m until you resumed'));
+  }
+  if (resumeNudges > 0) {
+    out.push(`  ${padToWidth('resume nudges', 18)}  ${chalk.cyan(String(resumeNudges))}` +
+      chalk.gray('   "continue"/"keep going" after a silent stall'));
   }
   const errs = topEntries(all.errorCategories, 6);
   if (errs.length > 0) {
@@ -390,7 +405,9 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
     out.push(chalk.yellow(`  ${meta.unreadable} transcripts could not be read; their behaviour is missing from these totals.`));
   }
   if (all.gapsOverCeiling > 0) {
-    out.push(chalk.gray(`  ${all.gapsOverCeiling} reply gaps over an hour excluded from the percentiles.`));
+    out.push(chalk.gray(
+      `  ${all.gapsOverCeiling} gaps over an hour excluded from p50/p90 (still counted as silent stall: 1h+ when the assistant last spoke).`,
+    ));
   }
   out.push('');
   out.push(chalk.gray('  `agents insights --by project` to see it per repo'));
@@ -422,6 +439,13 @@ async function renderNarrative(payload: unknown): Promise<void> {
     '2. What is costing you — split into the assistant\'s fault vs your own workflow.',
     '3. Quick wins — concrete, tied to a number in the data.',
     '4. Worth trying — one more ambitious workflow change.',
+    '',
+    'Silent stalls (required): if frictionSignals contain "silent stall: …" or',
+    'correctionSignals contain "resume after silent stall" / "continue / keep going",',
+    'call that out explicitly in section 2 or 3 with the counts. Those mean the model',
+    'stopped mid-session and sat idle until the human pinged it (timestamps: last',
+    'assistant event → next user message ≥ 5 minutes). Do not reframe them as the',
+    'user being slow unless the data only shows short reply gaps.',
     'Be specific and cite the numbers. No preamble, no flattery, no bullet padding.',
     '',
     JSON.stringify(payload),

@@ -316,7 +316,8 @@ CREATE TABLE IF NOT EXISTS session_insights (
  * re-derives on the next `agents insights` instead of silently reporting stale
  * numbers alongside fresh ones. Same role as RESOURCE_INDEX_VERSION.
  */
-export const INSIGHTS_EXTRACTOR_VERSION = 4;
+/** Bump when facet extraction changes so cached rows recompute (silent-stall v5). */
+export const INSIGHTS_EXTRACTOR_VERSION = 5;
 
 /** Raw row shape returned from the sessions table. */
 export interface SessionRow {

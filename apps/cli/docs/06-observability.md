@@ -1192,10 +1192,30 @@ agents insights --narrative                    # add a written read on the numbe
 |---|---|
 | By account | sessions, cost, duration per account (or per `--by` dimension) |
 | Top tools / Languages / Models | histograms by name, from transcript content |
-| Friction | interruptions, tool errors bucketed into classes, your own reply latency (p50/p90) |
+| Friction | interruptions, tool errors, gap until next user message (p50/p90), **agent silent stalls** (assistant last spoke, then ≥5m idle until you resumed — buckets 5-15m / 15-60m / 1h+), resume nudges ("continue" after a stall) |
 | What you changed | lines touched, files created/modified/deleted, git commits and pushes |
 | When you work | 24-slot local-time histogram of your messages |
 | Parallel sessions | overlapping pairs, and how many straddled two accounts |
+
+### Agent silent stalls (model goes quiet until you ping)
+
+A common failure mode: the assistant ends a turn while work remains, sits idle, and
+only resumes when you type "continue" / "keep going" later. Insights detects that from
+**timestamps**, not vibes:
+
+1. Take the last assistant event timestamp (message or tool_use).
+2. Take the next non-synthetic user message timestamp.
+3. If the gap is **≥ 5 minutes**, count a **silent stall** (bucketed by duration).
+4. If that user message is a resume nudge (`continue`, `keep going`, `resume`, …),
+   also count **resume after silent stall**.
+
+Gaps under 5 minutes stay normal turn-taking (and feed the p50/p90 "gap until next
+msg" line). Gaps over an hour are excluded from p50/p90 (you may have left the desk)
+but still count as `silent stall: 1h+` when the assistant was the last speaker.
+
+Actions and `--narrative` are instructed to call these out so the report drives
+anti-idle rules (stop gates, background watches, queue drain) rather than treating
+the human as the only resume signal.
 
 ### Two engines under one verb (not two top-level commands)
 
