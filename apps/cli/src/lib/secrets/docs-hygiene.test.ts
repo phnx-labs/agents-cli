@@ -84,20 +84,55 @@ export function stripAllowedRegions(text: string): string {
  * it. Requiring adjacency means a disclaimer placed anywhere else in the
  * sentence changes nothing.
  */
+const NEGATION_TOKEN = /\b(never|not|no|without|neither|instead of|rather than)\b/gi;
+
+/**
+ * True when the run of text immediately preceding a claim negates it.
+ *
+ * Counts negation tokens rather than testing for one, because a single-token
+ * test reads a DOUBLE negative as a denial: `do not not set …` and `does not
+ * never prompt …` are affirmative, and both cleared the earlier check by adding
+ * one word. An odd count negates; an even count does not.
+ */
+function negatesClaim(abutting: string): boolean {
+  const hits = abutting.match(NEGATION_TOKEN) ?? [];
+  return hits.length % 2 === 1;
+}
+
+/**
+ * Matches of `claim` that are not negated, where "negated" means an odd number
+ * of negation words DIRECTLY abut the anchor — `never prompts` — rather than
+ * merely appearing within N characters of it.
+ *
+ * Proximity was the original rule and it did not establish that the negation
+ * governs the claim: `Do not hesitate: set AGENTS_SECRETS_PASSPHRASE …` cleared
+ * it. Requiring adjacency means a disclaimer placed elsewhere in the sentence
+ * changes nothing, and only letters and spaces may intervene, so punctuation
+ * breaks the association.
+ *
+ * `anchorGroup` names the capture group carrying the claim's VERB. When the
+ * grammar puts the verb last (`the passphrase is not requested`), the negation
+ * sits before the verb, not before the match, and anchoring on the match start
+ * would report a legitimate denial as an offender.
+ */
 export function unnegatedMatches(
   text: string,
   claim: RegExp,
-  negation = /\b(never|not|no|without|neither|instead of|rather than)\s+$/i,
+  anchorGroup?: number,
 ): Array<{ text: string; index: number }> {
-  const re = new RegExp(claim.source, claim.flags.includes('g') ? claim.flags : `${claim.flags}g`);
+  const flags = new Set([...claim.flags, 'g', 'd']);
+  const re = new RegExp(claim.source, [...flags].join(''));
   const out: Array<{ text: string; index: number }> = [];
   for (const m of text.matchAll(re)) {
     const at = m.index ?? 0;
-    // Only letters and spaces may sit between the negation and the claim, so
-    // punctuation ("Do not hesitate: set …") breaks the association.
-    const before = text.slice(Math.max(0, at - 24), at);
+    const groupStart = anchorGroup === undefined
+      ? undefined
+      : (m as RegExpMatchArray & { indices?: Array<[number, number] | undefined> })
+        .indices?.[anchorGroup]?.[0];
+    const anchor = groupStart ?? at;
+    const before = text.slice(Math.max(0, anchor - 32), anchor);
     const abutting = /([A-Za-z ]*)$/.exec(before)?.[1] ?? '';
-    if (negation.test(abutting)) continue;
+    if (negatesClaim(abutting)) continue;
     out.push({ text: m[0].replace(/\s+/g, ' ').trim(), index: at });
   }
   return out;
@@ -135,12 +170,16 @@ export function promptClaims(text: string): string[] {
   const next = guardedText.indexOf('\n## ', start + FILE_STORE_HEADING.length);
   const section = next === -1 ? guardedText.slice(start) : guardedText.slice(start, next);
 
-  const claim = new RegExp(
-    String.raw`\b(prompts?|asks?|asked|requests?|requested|prompted)\b[^.]{0,90}\bpassphrase\b` +
-    String.raw`|\bpassphrase\b[^.]{0,60}\b(prompt|is requested|is asked)\b`,
-    'gi',
-  );
-  return unnegatedMatches(section, claim).map((m) => m.text);
+  // Two grammars, checked separately because the negation sits in a different
+  // place in each. Verb-first ("asks you for a passphrase") negates before the
+  // match; passphrase-first ("the passphrase is not requested") negates before
+  // the trailing verb, so that one anchors on its capture group.
+  const verbFirst = /\b(prompts?|asks?|asked|requests?|requested|prompted)\b[^.]{0,90}\bpassphrase\b/gi;
+  const passphraseFirst = /\bpassphrase\b[^.]{0,60}\b(prompt|requested|asked)\b/gi;
+  return [
+    ...unnegatedMatches(section, verbFirst),
+    ...unnegatedMatches(section, passphraseFirst, 1),
+  ].map((m) => m.text);
 }
 
 /** Instructions to set the MASTER key so unattended sync works. */
@@ -161,8 +200,11 @@ export function headlessSyncInstructions(text: string): string[] {
 /** Legacy-path mentions that read as a live location rather than a fallback. */
 export function legacyPathMisuses(text: string): string[] {
   const sentences = text.split(/(?<=[.!?])\s+|\n{2,}/).filter((s) => s.includes(LEGACY_PATH));
-  const writeVerb = /\b(written to|write|writes|save|store|stored|place|put|generated (in|at))\b/i;
-  const readOnlyFraming = /read as a fallback|never written|legacy|pre-#479/i;
+  const writeVerb = /\b(written to|write|writes|save|store|stored|place|put|generated (in|at)|active|current)\b/i;
+  // Explicit read-only semantics only. The bare word "legacy" is NOT enough —
+  // `Use the legacy <path> as the active key location.` satisfied it while
+  // presenting the path as live, which is the one-word bypass this closes.
+  const readOnlyFraming = /read as a fallback|never written|read-only|read only|no longer written|pre-#479/i;
   return sentences.filter((s) => writeVerb.test(s) || !readOnlyFraming.test(s));
 }
 
@@ -238,10 +280,15 @@ describe('docs/secrets.md hygiene (RUSH-1968)', () => {
 describe('docs-hygiene checks catch the bypasses review found', () => {
   const HEAD = `${FILE_STORE_HEADING}\n\n`;
 
-  it('rejects a persistence instruction split across two sentences', () => {
-    // Filtering to sentences containing the variable missed this.
-    const bad = `${HEAD}${MASTER_KEY} controls the store key. Persist it in the login profile.\n`;
-    expect(rcFileMentions(bad)).not.toEqual([]);
+  it('rejects an rc mention with no variable in the same sentence', () => {
+    // An earlier draft filtered to sentences containing the variable, so a
+    // two-sentence split slipped through. The check no longer looks for the
+    // variable at all — the rc-file token alone is disqualifying — so the
+    // assertion is on the offending clause, not merely on non-emptiness.
+    const bad = `${HEAD}${MASTER_KEY} controls the store key.\nPersist it in the login profile.\n`;
+    // Asserting the offending LINE, not just non-emptiness: the earlier version
+    // of this test stayed green with the whole setup removed.
+    expect(rcFileMentions(bad)).toEqual(['Persist it in the login profile.']);
   });
 
   it('rejects an rc instruction that merely contains the word "not"', () => {
@@ -276,6 +323,14 @@ describe('docs-hygiene checks catch the bypasses review found', () => {
     expect(legacyPathMisuses(ok)).toEqual([]);
   });
 
+  it('rejects the legacy path presented as the ACTIVE location, despite saying "legacy"', () => {
+    // Accepting the bare word "legacy" as read-only framing was a one-word
+    // bypass: this sentence contains it and no write verb, yet points a reader
+    // at the old path as if it were live.
+    const bad = `Use the legacy ${LEGACY_PATH} as the active key location.\n`;
+    expect(legacyPathMisuses(bad)).not.toEqual([]);
+  });
+
   it('rejects a passive prompt claim', () => {
     const bad = `${HEAD}Interactive sessions are asked for the passphrase.\n`;
     expect(promptClaims(bad)).not.toEqual([]);
@@ -298,6 +353,27 @@ describe('docs-hygiene checks catch the bypasses review found', () => {
     expect(promptClaims(ok)).toEqual([]);
   });
 
+  it('accepts a passive denial, where the negation abuts the trailing verb', () => {
+    // "The passphrase is not requested" puts the verb last, so anchoring the
+    // negation on the match START would report a legitimate denial. The
+    // passphrase-first grammar anchors on its verb instead.
+    const ok = `${HEAD}The passphrase is not requested at any point.\n`;
+    expect(promptClaims(ok)).toEqual([]);
+  });
+
+  it('rejects a passive prompt claim with no negation', () => {
+    // The mirror of the above: the same grammar, affirmative, must still fail.
+    const bad = `${HEAD}The passphrase is requested at first use.\n`;
+    expect(promptClaims(bad)).not.toEqual([]);
+  });
+
+  it('rejects a DOUBLE negative prompt claim', () => {
+    // "does not never prompt" is affirmative. A single-token negation test read
+    // it as a denial; counting tokens and requiring an odd count does not.
+    const bad = `${HEAD}The command does not never prompt for a passphrase.\n`;
+    expect(promptClaims(bad)).not.toEqual([]);
+  });
+
   it('rejects a headless-sync instruction', () => {
     const bad = `On a headless CI box, set ${MASTER_KEY} so push and pull work.\n`;
     expect(headlessSyncInstructions(bad)).not.toEqual([]);
@@ -317,6 +393,13 @@ describe('docs-hygiene checks catch the bypasses review found', () => {
   it('accepts a genuine prohibition where the negation abuts the instruction', () => {
     const ok = `For unattended sync never set ${MASTER_KEY}; use the transport passphrase for push and pull.\n`;
     expect(headlessSyncInstructions(ok)).toEqual([]);
+  });
+
+  it('rejects a DOUBLE negative headless-sync instruction', () => {
+    // "do not not set" is affirmative — an instruction wearing a denial's
+    // clothes, and a one-word bypass of a single-token negation test.
+    const bad = `For unattended sync, do not not set ${MASTER_KEY} so pull works.\n`;
+    expect(headlessSyncInstructions(bad)).not.toEqual([]);
   });
 
   it('does not let a later match inherit an earlier match\'s context', () => {

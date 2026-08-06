@@ -776,9 +776,9 @@ resolved key is cached, so this lookup runs once:
    (mode 0600), if one was provisioned earlier. Deliberately outside the store
    directory so a scan of `~/.agents/.cache/secrets/` never turns up key and
    ciphertext together.
-3. **The legacy co-located key** — `~/.agents/.cache/secrets/.passphrase`, on a
-   machine provisioned before #479. Read as a fallback, never written; new keys
-   always go to the path in step 2.
+3. **The legacy co-located key** — `~/.agents/.cache/secrets/.passphrase` is
+   read as a fallback, never written, on a machine provisioned before #479; new
+   keys always go to the path in step 2.
 4. **Auto-provisioned** — with none of the above, a random 32-byte key is
    generated once and written to `~/.agents/.secrets-key/passphrase` (mode 0600),
    on every platform including macOS. This is what makes `agents secrets` work
