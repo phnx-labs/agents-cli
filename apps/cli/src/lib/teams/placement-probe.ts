@@ -7,11 +7,11 @@
  *
  *   - reachability + headroom + load  ← {@link probeFleetStats} (one parallel
  *     SSH fan-out over the pool; the local box is measured directly).
- *   - requested agent installed + signed in  ← a one-shot readiness
+ *   - requested agent installed + signed in (when known) ← a one-shot readiness
  *     probe per remote device ({@link buildReadyProbeCommand} → `agents view`),
  *     the local box via {@link checkCliAvailable}/{@link checkCliSignedIn}.
  *
- * The result is cached briefly per (pool, agent) so a `teams start` wave that
+ * The result is cached briefly per (pool, agent-or-any) so a `teams start` wave that
  * places N teammates probes the pool ONCE, not N times — the roster-count part
  * of the rank stays live (the pure pick recounts the roster each call), only the
  * SSH-measured load/harness snapshot is reused within the TTL.
@@ -51,8 +51,8 @@ interface CacheEntry {
 }
 const cache = new Map<string, CacheEntry>();
 
-function cacheKey(pool: string[], agent: string): string {
-  return `${agent}::${[...pool].map(normalizeHost).sort().join(',')}`;
+function cacheKey(pool: string[], agent?: string): string {
+  return `${agent ?? 'any-agent'}::${[...pool].map(normalizeHost).sort().join(',')}`;
 }
 
 /** Clear the probe cache — for tests and after a device-registry change. */
@@ -106,7 +106,7 @@ function probeRemoteReadiness(
  */
 export async function probePoolSignals(
   pool: string[],
-  agent: AgentType,
+  agent?: AgentType,
   opts: { force?: boolean; now?: number } = {},
 ): Promise<Map<string, DevicePlacementSignal>> {
   const now = opts.now ?? Date.now();
@@ -133,8 +133,8 @@ export async function probePoolSignals(
   const stats = await probeFleetStats(profiles, { selfName: selfProfile?.name });
 
   type InstalledInfo = { installed: boolean | undefined; signedIn: boolean | undefined };
-  const installed = new Map<string, InstalledInfo>(
-    await Promise.all(
+  const installed = new Map<string, InstalledInfo>(agent
+    ? await Promise.all(
       profiles.map(async (d): Promise<readonly [string, InstalledInfo]> => {
         const isSelf = normalizeHost(d.name) === self;
         if (isSelf) {
@@ -144,7 +144,8 @@ export async function probePoolSignals(
         }
         return [d.name, await probeRemoteReadiness(d, agent)];
       }),
-    ),
+    )
+    : [],
   );
 
   const signals = new Map<string, DevicePlacementSignal>();

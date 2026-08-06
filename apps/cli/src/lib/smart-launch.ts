@@ -108,16 +108,17 @@ export interface DeviceAutoPlan {
 }
 
 /**
- * Pick the least-loaded healthy device that can run `agent`. The local machine
- * participates in the same probe and therefore wins whenever no remote is
- * better; a fully unusable fleet degrades to local instead of stranding a run.
+ * Pick the least-loaded healthy device that can run `agent` when the harness is
+ * known. `run auto` omits the agent and ranks the same live health/load signals
+ * without an installed-harness filter. The local machine participates in the
+ * same probe; a fully unusable fleet degrades to local instead of stranding a run.
  */
 export async function resolveDeviceAuto(
-  agent: string,
+  agent?: string,
   opts: {
     eligibleHosts?: string[];
     localMachine?: string;
-    probe?: (pool: string[], agent: AgentType) => Promise<Map<string, DevicePlacementSignal>>;
+    probe?: (pool: string[], agent?: AgentType) => Promise<Map<string, DevicePlacementSignal>>;
   } = {},
 ): Promise<DeviceAutoPlan> {
   const local = normalizeHost(opts.localMachine ?? localMachineId());
@@ -125,7 +126,7 @@ export async function resolveDeviceAuto(
   if (!pool.includes(local)) pool.push(local);
 
   try {
-    const signals = await (opts.probe ?? probePoolSignals)(pool, agent as AgentType);
+    const signals = await (opts.probe ?? probePoolSignals)(pool, agent as AgentType | undefined);
     const picked = pickBestDevice(pool, [], { signals, agentLabel: agent });
     return {
       host: picked === local ? null : picked,
@@ -263,16 +264,8 @@ export async function applyDeviceAutoToOptions(
   }
 
   try {
-    const resolve: () => DeviceAutoPlan | Promise<DeviceAutoPlan> = deps.resolve ?? (deps.agent
-      ? () => resolveDeviceAuto(deps.agent!)
-      : () => {
-          const affinity = resolveDeviceAffinity({});
-          return {
-            host: affinity.host,
-            pickedDeviceKey: affinity.pickedDeviceKey ?? localMachineId(),
-            candidates: affinity.deviceCandidates.map((candidate) => ({ key: candidate.key })),
-          };
-        });
+    const resolve: () => DeviceAutoPlan | Promise<DeviceAutoPlan> =
+      deps.resolve ?? (() => resolveDeviceAuto(deps.agent));
     const plan = await resolve();
     const concrete = plan.host; // null = local
     for (const k of HOST_SLOTS) {

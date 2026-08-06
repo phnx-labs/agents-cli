@@ -122,6 +122,22 @@ describe('resolveDeviceAuto', () => {
     expect(plan.host).toBeNull();
     expect(plan.pickedDeviceKey).toBe('local');
   });
+
+  it('keeps live load placement when run auto has not selected a harness yet', async () => {
+    const plan = await resolveDeviceAuto(undefined, {
+      localMachine: 'local',
+      eligibleHosts: ['local', 'idle'],
+      probe: async (_pool, agent) => {
+        expect(agent).toBeUndefined();
+        return new Map([
+          ['local', { reachable: true, loadPercent: 40, memPercent: 20, headroom: 'light' }],
+          ['idle', { reachable: true, loadPercent: 5, memPercent: 10, headroom: 'idle' }],
+        ]);
+      },
+    });
+    expect(plan.host).toBe('idle');
+    expect(plan.pickedDeviceKey).toBe('idle');
+  });
 });
 
 describe('applyDeviceAutoToOptions', () => {
