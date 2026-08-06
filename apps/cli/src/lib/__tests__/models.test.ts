@@ -562,6 +562,39 @@ describe('getModelCatalog falls back to a raw id scan (issue #1820)', () => {
     expect(ids).not.toContain('claude-opus-4'); // dropped by dropBareLegacyIds
   });
 
+  it('does not promote a foundry bare-minor to models[].id when its dated firstParty sibling is present (#2233)', async () => {
+    // Force the text-scan fallback: no alias/const map, and only ONE structured
+    // perCloud record (extractClaudeCatalog only falls back when models < 2).
+    // The second model family appears only as raw id strings, with the foundry
+    // short form sitting next to the dated firstParty form the way the native
+    // binary packs them.
+    const bundle = [
+      'no structured {opus:...,sonnet:...,haiku:...} alias map',
+      // one structured hit only — keeps models.length at 1 so fallback runs
+      '{firstParty:"claude-haiku-4-5-20251001",bedrock:"x",vertex:"y",foundry:"claude-haiku-4-5"}',
+      // raw packing of firstParty + foundry short form (scan path)
+      'firstParty claude-opus-4-1-20250805 foundry claude-opus-4-1',
+      'firstParty claude-sonnet-4-6-20250514 foundry claude-sonnet-4-6',
+      'claude-fable-5',
+    ].join(' ');
+    writeFakeBundle('2.1.219', bundle);
+
+    const { getModelCatalog: getCatalog } = await freshModels();
+    const catalog = getCatalog('claude', '2.1.219');
+
+    expect(catalog).not.toBeNull();
+    const ids = catalog!.models.map((m) => m.id).sort();
+    expect(ids).toEqual([
+      'claude-fable-5',
+      'claude-haiku-4-5-20251001',
+      'claude-opus-4-1-20250805',
+      'claude-sonnet-4-6-20250514',
+    ]);
+    expect(ids).not.toContain('claude-opus-4-1');
+    expect(ids).not.toContain('claude-sonnet-4-6');
+    expect(ids).not.toContain('claude-haiku-4-5'); // foundry short form of the structured record
+  });
+
   it('does not fall back when the structured maps already yield >=2 models', async () => {
     // A pre-2.1.207-shaped bundle with the real alias map, plus a stray raw
     // id that is NOT part of that map: the curated set must win outright,

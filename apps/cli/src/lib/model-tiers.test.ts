@@ -46,7 +46,7 @@ describe('applyTierOverrides (pure — no config I/O)', () => {
   });
 });
 
-describe('dropBareLegacyIds (#1892)', () => {
+describe('dropBareLegacyIds (#1892, #2233)', () => {
   it('drops a bare major with a more-specific sibling, keeps a bare id with none', () => {
     const out = dropBareLegacyIds([
       'claude-opus-4', 'claude-opus-4-1', 'claude-opus-4-8',
@@ -56,10 +56,37 @@ describe('dropBareLegacyIds (#1892)', () => {
     expect(out).not.toContain('claude-haiku-4'); // has sibling -> dropped
     expect(out).toContain('claude-sonnet-5'); // no sibling -> kept
     expect(out).toContain('claude-opus-4-8'); // specific -> kept
+    // bare-minor with no longer sibling of its own is still a real catalog id
+    expect(out).toContain('claude-opus-4-1');
+  });
+
+  it('drops a bare-minor per-cloud field value when the dated firstParty sibling is present (#2233)', () => {
+    // Shape of a native-binary per-cloud record: firstParty is the submittable
+    // id; foundry (and sometimes vertex without @date) carry a shorter form
+    // that must not become a top-level models[].id under the text-scan path.
+    const out = dropBareLegacyIds([
+      'claude-opus-4-1-20250805',
+      'claude-opus-4-1', // foundry field only
+      'claude-sonnet-4-6-20250514',
+      'claude-sonnet-4-6',
+      'claude-haiku-4-5', // no longer sibling — real id, keep
+    ]);
+    expect(out).not.toContain('claude-opus-4-1');
+    expect(out).not.toContain('claude-sonnet-4-6');
+    expect(out).toContain('claude-opus-4-1-20250805');
+    expect(out).toContain('claude-sonnet-4-6-20250514');
+    expect(out).toContain('claude-haiku-4-5');
+  });
+
+  it('does not treat claude-opus-4-1 as a prefix of claude-opus-4-10', () => {
+    // Dash boundary: startsWith("claude-opus-4-1-") must not match
+    // "claude-opus-4-10" (no trailing dash after the shared digits).
+    const out = dropBareLegacyIds(['claude-opus-4-1', 'claude-opus-4-10']);
+    expect(out).toEqual(['claude-opus-4-1', 'claude-opus-4-10']);
   });
 });
 
-describe('scanClaudeCatalogIds (#1892 — word-boundary anchored scan)', () => {
+describe('scanClaudeCatalogIds (#1892 / #2233 — word-boundary + sibling drop)', () => {
   // A slice shaped like the real native binary's strings: `.includes(...)`
   // prefix-check literals, a dotted "Typo in model ID" example, real dated /
   // variant ids, and a bare current with no sibling.
@@ -105,6 +132,26 @@ describe('scanClaudeCatalogIds (#1892 — word-boundary anchored scan)', () => {
     const glued = scanClaudeCatalogIds('cfg={id:"claude-opus-9-1x"};');
     expect(glued).not.toContain('claude-opus-9');
     expect(glued).toHaveLength(0);
+  });
+
+  it('drops a foundry bare-minor next to its dated firstParty sibling (#2233)', () => {
+    // Exact shape the issue reports: per-cloud record carries firstParty dated
+    // id + foundry short form. Text-scan fallback must not promote the foundry
+    // value to models[].id (structured path already scopes it to perCloud).
+    const cloudText = [
+      'noise no structured alias map here so fallback scan runs',
+      '{firstParty:"claude-opus-4-1-20250805",bedrock:"anthropic.claude-opus-4-1-v1",vertex:"claude-opus-4-1@20250805",foundry:"claude-opus-4-1"}',
+      '{firstParty:"claude-sonnet-4-6-20250514",bedrock:"x",vertex:"claude-sonnet-4-6@20250514",foundry:"claude-sonnet-4-6"}',
+      'claude-haiku-4-5',
+      'claude-fable-5',
+    ].join(' ');
+    const scanned = scanClaudeCatalogIds(cloudText);
+    expect(scanned).not.toContain('claude-opus-4-1');
+    expect(scanned).not.toContain('claude-sonnet-4-6');
+    expect(scanned).toContain('claude-opus-4-1-20250805');
+    expect(scanned).toContain('claude-sonnet-4-6-20250514');
+    expect(scanned).toContain('claude-haiku-4-5');
+    expect(scanned).toContain('claude-fable-5');
   });
 });
 

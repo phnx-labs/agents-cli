@@ -361,23 +361,29 @@ function extractStrings(filePath: string, minLen = 6): string {
  *   - constants: {OPUS_ID:"...",OPUS_NAME:"...",SONNET_ID:"...",...}
  */
 /**
- * Drop a bare `claude-<family>-<major>` (e.g. `claude-opus-4`) when a more specific
- * sibling (`claude-opus-4-8`) is present. The bare form is only ever an internal
- * `.includes("claude-opus-4")` prefix-check string in the binary, not a submittable
- * id (issue #1892); a bare id with no sibling (e.g. `claude-sonnet-5`) is a real
- * current model and is kept.
+ * Drop a catalog id that is a proper dash-boundary prefix of a more-specific
+ * sibling also present in the list (e.g. `claude-opus-4` when `claude-opus-4-8`
+ * is present, or `claude-opus-4-1` when `claude-opus-4-1-20250805` is present).
+ *
+ * Two sources produce these prefix forms in the native binary:
+ *  - standalone `.includes("claude-opus-4")` prefix-check strings (#1892)
+ *  - per-cloud metadata field values such as `foundry:"claude-opus-4-1"` next
+ *    to a real firstParty id `claude-opus-4-1-20250805` (#2233)
+ *
+ * A genuine bare current id with no longer sibling (e.g. `claude-sonnet-5`) is
+ * kept. The dash boundary (`startsWith(id + '-')`) avoids collapsing
+ * `claude-opus-4-1` into `claude-opus-4-10`.
  */
 export function dropBareLegacyIds(ids: string[]): string[] {
-  return ids.filter((id) => {
-    const bareMajor = /^claude-[a-z]+-\d+$/.test(id);
-    return !(bareMajor && ids.some((o) => o !== id && o.startsWith(`${id}-`)));
-  });
+  return ids.filter(
+    (id) => !ids.some((other) => other !== id && other.startsWith(`${id}-`)),
+  );
 }
 
 /**
  * Scan raw binary/bundle text for canonical Claude model ids, then drop bare
- * legacy prefixes (issue #1892). Two independent guards keep non-model strings
- * out of the catalog:
+ * legacy / cloud-metadata prefixes (#1892, #2233). Two independent guards keep
+ * non-model strings out of the catalog:
  *
  *  - **Word-boundary anchors on the id regex.** The id must not be glued to a
  *    surrounding identifier character, and must not be the truncated prefix of a
@@ -396,10 +402,10 @@ export function dropBareLegacyIds(ids: string[]): string[] {
  *    id this scan exists to suppress (two packed strings can end up glued with no
  *    separator in the extracted binary text). The atomic match fails outright
  *    instead of degrading to the bare form.
- *  - **`dropBareLegacyIds`.** A standalone `.includes("claude-opus-4")` prefix
- *    check is a fully delimited string the anchors cannot tell apart from a real
- *    bare id, so a bare `claude-<family>-<major>` is dropped only when a
- *    more-specific sibling (`claude-opus-4-8`) is also present; a genuinely bare
+ *  - **`dropBareLegacyIds`.** A fully delimited string the anchors cannot tell
+ *    apart from a real id — whether a bare major (`.includes("claude-opus-4")`)
+ *    or a bare-minor per-cloud field value (`foundry:"claude-opus-4-1"`) — is
+ *    dropped when a more-specific sibling is also present; a genuinely bare
  *    current id with no sibling (`claude-sonnet-5`) is kept.
  */
 export function scanClaudeCatalogIds(text: string): string[] {
