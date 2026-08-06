@@ -427,8 +427,8 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
   let exitCode: number | null = null;
   let toreDown = false;
   try {
-    const renewTtlSecs = reused && !opts.reuseBox && box.expiresAt !== null && box.createdAt !== null
-      ? box.expiresAt - box.createdAt
+    const renewTtlSecs = reused && !opts.reuseBox && typeof box.ttlSecs === 'number'
+      ? box.ttlSecs
       : undefined;
     exitCode = await crabboxRunScript(box.slug, script, {
       secretsBundle: opts.secretsBundle,

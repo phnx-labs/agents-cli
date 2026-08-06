@@ -45,6 +45,8 @@ export interface CrabboxBox {
   createdAt: number | null;
   /** Unix seconds the lease expires, or null. */
   expiresAt: number | null;
+  /** Stable lease lifetime in seconds, when crabbox reports it. */
+  ttlSecs?: number | null;
   /** Unix seconds the box was last touched (reused / run against), or null. */
   lastTouchedAt: number | null;
   /** Idle-timeout window in seconds, or null. */
@@ -336,6 +338,7 @@ function normalizeBox(raw: Record<string, unknown>): CrabboxBox | null {
     keep: labels.keep === 'true',
     createdAt: num(labels.created_at),
     expiresAt: num(labels.expires_at),
+    ttlSecs: num(labels.ttl_secs),
     lastTouchedAt: num(labels.last_touched_at),
     idleTimeoutSecs: num(labels.idle_timeout_secs ?? labels.idle_timeout),
   };
