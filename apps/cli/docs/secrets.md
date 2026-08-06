@@ -411,6 +411,7 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets unlock <name> --ttl <dur>` | Hold for a custom lifetime (default 7d) | `agents secrets unlock prod --ttl 30m` |
 | `secrets unlock <name> --until <date>` | Hold until an absolute date or timestamp | `agents secrets unlock prod --until 2026-08-06T12:00:00Z` |
 | `secrets unlock <name> --durable` | Also survive sleep + reboot (default: survives upgrade/restart, re-locks on sleep) | `agents secrets unlock prod --durable` |
+| `secrets lease <name> --keys K1,K2 --for <dur>` | Hold only the named keys under their own lease id and expiry (macOS) | `agents secrets lease prod --keys API_KEY --for 8h` |
 | `secrets lock [names...]` | Wipe held bundles from the agent (default: all) — next read re-prompts | `agents secrets lock` |
 | `secrets status` | Show which bundles the agent holds and when they lock, and suggest unlocking any you keep getting prompted for | `agents secrets status` |
 | `secrets policy <bundle> [policy]` | Show or set a bundle's prompt policy: `hold` (default), `always`, or `never` (silent, no biometry ACL — needs `--i-understand`) | `agents secrets policy signing always` |

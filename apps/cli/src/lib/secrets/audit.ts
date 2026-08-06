@@ -42,7 +42,9 @@ export type SecretAuditEvent =
   | 'secrets.create'
   | 'secrets.import'
   | 'secrets.export'
-  | 'secrets.view';
+  | 'secrets.view'
+  | 'secrets.lease-denied'
+  | 'secrets.lease-expire';
 
 /**
  * Map each audit event onto the usage-DB kind it is counted as. `secrets.get` is
@@ -55,6 +57,8 @@ const USAGE_KIND: Record<SecretAuditEvent, SecretUsageEvent> = {
   'secrets.import': 'import',
   'secrets.export': 'export',
   'secrets.view': 'view',
+  'secrets.lease-denied': 'access',
+  'secrets.lease-expire': 'access',
 };
 
 export interface SecretAuditParams {

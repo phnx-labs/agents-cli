@@ -98,6 +98,7 @@ import {
   type OpVault,
 } from '../lib/onepassword.js';
 import { GLOBAL_HARNESS } from '../lib/secrets/scope.js';
+import { createSecretLease, selectLeasedEnv } from '../lib/secrets/lease.js';
 import {
   secretsHoldMs,
   secretsAgentDurable,
@@ -2574,6 +2575,55 @@ Examples:
       } else {
         console.log(password);
       }
+    });
+
+  cmd
+    .command('lease <bundle>')
+    .description('Hold only an explicit subset of a bundle until an independent expiry.')
+    .requiredOption('--keys <keys>', 'Comma-separated key subset')
+    .requiredOption('--for <duration>', 'Lease duration, for example 30m or 8h')
+    .option('--agent <agent>', 'Narrow the lease to one harness; default is global')
+    .option('--durable', 'Keep the lease across sleep as well as broker restart')
+    .action(async (name: string, opts: { keys: string; for: string; agent?: string; durable?: boolean }) => {
+      if (process.platform !== 'darwin') {
+        throw new Error('Scoped lease brokering is not available on this platform yet.');
+      }
+      const seconds = parseDuration(opts.for);
+      if (seconds === null) throw new Error(`Invalid lease duration '${opts.for}'.`);
+      const ttlMs = seconds * 1000;
+      const harness = opts.agent || GLOBAL_HARNESS;
+      const { bundle, env } = readAndResolveBundleEnv(name, {
+        noAgent: true,
+        interactiveUnlock: true,
+        caller: 'lease secrets',
+        agent: harness,
+        keyMode: 'storage',
+      });
+      const lease = createSecretLease({
+        bundle: name,
+        keys: opts.keys.split(','),
+        availableKeys: Object.keys(env),
+        ttlMs,
+        harness,
+        sleepPersist: opts.durable,
+      });
+      const leasedEnv = selectLeasedEnv(lease, env);
+      if (!(await ensureAgentRunning()) || !(await agentLoad(name, bundle, leasedEnv, ttlMs, harness, lease))) {
+        throw new Error('Could not load the scoped lease into the secrets broker.');
+      }
+      saveSession(name, {
+        bundle,
+        env: leasedEnv,
+        expiresAt: lease.expiresAt,
+        sleepPersist: lease.sleepPersist,
+        harness,
+        lease,
+      });
+      emitSecretAudit({
+        event: 'secrets.unlocked', bundle: name, operation: 'lease', source: lease.sleepPersist ? 'broker+durable' : 'broker',
+        status: 'success', keys: lease.keys, keyCount: lease.keys.length, agent: harness, ttlMs: lease.expiresAt - lease.createdAt,
+      });
+      console.log(`${chalk.green('leased')} ${chalk.cyan(lease.id)} ${chalk.gray(`(${name}: ${lease.keys.join(', ')}, ${humanRemaining(lease.expiresAt)})`)}`);
     });
 
   cmd

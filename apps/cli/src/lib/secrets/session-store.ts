@@ -28,6 +28,7 @@
 import { getKeychainToken, setKeychainToken, deleteKeychainToken, isKeychainBackendOverridden } from './index.js';
 import { GLOBAL_HARNESS, bundleScopeChain } from './scope.js';
 import type { SecretsBundle } from './bundles.js';
+import type { SecretLease } from './lease.js';
 
 /** Prefix for all durable session items (device-local, no-ACL). */
 export const SESSION_ITEM_PREFIX = 'agents-cli.session.';
@@ -44,6 +45,7 @@ export interface SessionEntry {
   /** true only for `--durable` unlocks — survives SLEEP. */
   sleepPersist: boolean;
   harness?: string;
+  lease?: SecretLease;
 }
 
 /** Metadata for one held bundle, kept in the index so we can rehydrate / prune

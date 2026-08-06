@@ -40,6 +40,8 @@ import { GLOBAL_HARNESS, bundleScopeChain } from './scope.js';
 import { rehydrateSessions, pruneSessionsOnSleep } from './session-store.js';
 import { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './sync-commands.js';
 import { MAX_LEASE_MS, MIN_LEASE_MS } from './lease.js';
+import type { SecretLease } from './lease.js';
+import { emitSecretAudit } from './audit.js';
 
 // Re-exported so callers already reaching for agent.js keep one obvious home for
 // the scope vocabulary; the definitions live in the leaf module scope.ts because
@@ -163,6 +165,7 @@ export interface StoredBundle {
   /** epoch ms; the entry is gone once Date.now() passes this. */
   expiresAt: number;
   harness: string;
+  lease?: SecretLease;
 }
 
 /** One unlocked bundle as reported by `status`. */
@@ -171,6 +174,8 @@ export interface AgentStatusEntry {
   expiresAt: number;
   keyCount: number;
   harness: string;
+  leaseId?: string;
+  keys?: string[];
 }
 
 function onDarwin(): boolean {
@@ -188,7 +193,7 @@ function rehydrateStore(now: number = Date.now()): Map<string, StoredBundle> {
   const store = new Map<string, StoredBundle>();
   for (const { name, entry } of rehydrateSessions(now)) {
     const harness = entry.harness || GLOBAL_HARNESS;
-    store.set(scopedBundleKey(name, harness), { bundle: entry.bundle, env: entry.env, expiresAt: entry.expiresAt, harness });
+    store.set(scopedBundleKey(name, harness), { bundle: entry.bundle, env: entry.env, expiresAt: entry.expiresAt, harness, lease: entry.lease });
   }
   return store;
 }
@@ -348,14 +353,14 @@ export async function uninstallSecretsAgentService(): Promise<void> {
 export type Request =
   | { cmd: 'ping' }
   | { cmd: 'get'; name: string; harness?: string; token?: string }
-  | { cmd: 'load'; name: string; harness?: string; bundle: SecretsBundle; env: Record<string, string>; ttlMs: number; token?: string }
+  | { cmd: 'load'; name: string; harness?: string; bundle: SecretsBundle; env: Record<string, string>; ttlMs: number; lease?: SecretLease; token?: string }
   | { cmd: 'lock'; name?: string; token?: string }
   | { cmd: 'status'; token?: string };
 
 export type Response =
   | { ok: true; cmd: 'ping'; version: number; cliVersion: string }
   | { ok: true; cmd: 'get'; hit: false }
-  | { ok: true; cmd: 'get'; hit: true; bundle: SecretsBundle; env: Record<string, string> }
+  | { ok: true; cmd: 'get'; hit: true; bundle: SecretsBundle; env: Record<string, string>; lease?: SecretLease }
   | { ok: true; cmd: 'load' }
   | { ok: true; cmd: 'lock'; wiped: number }
   | { ok: true; cmd: 'status'; entries: AgentStatusEntry[] }
@@ -406,13 +411,13 @@ export function handleAgentRequest(
         const e = store.get(key);
         if (!e) continue;
         if (now >= e.expiresAt) { store.delete(key); continue; } // drop expired on read
-        return { ok: true, cmd: 'get', hit: true, bundle: e.bundle, env: e.env };
+        return { ok: true, cmd: 'get', hit: true, bundle: e.bundle, env: e.env, lease: e.lease };
       }
       return { ok: true, cmd: 'get', hit: false };
     }
     case 'load':
       const harness = req.harness || GLOBAL_HARNESS;
-      store.set(scopedBundleKey(req.name, harness), { bundle: req.bundle, env: req.env, expiresAt: now + req.ttlMs, harness });
+      store.set(scopedBundleKey(req.name, harness), { bundle: req.bundle, env: req.env, expiresAt: req.lease?.expiresAt ?? now + req.ttlMs, harness, lease: req.lease });
       return { ok: true, cmd: 'load' };
     case 'lock': {
       if (req.name) {
@@ -429,7 +434,7 @@ export function handleAgentRequest(
       for (const [name, e] of store) {
         if (now >= e.expiresAt) continue;
         if (e.bundle.name.startsWith(META_CACHE_PREFIX)) continue; // internal list cache
-        entries.push({ name: e.bundle.name, expiresAt: e.expiresAt, keyCount: Object.keys(e.env).length, harness: e.harness });
+        entries.push({ name: e.bundle.name, expiresAt: e.expiresAt, keyCount: Object.keys(e.env).length, harness: e.harness, leaseId: e.lease?.id, keys: e.lease?.keys });
       }
       return { ok: true, cmd: 'status', entries };
     }
@@ -689,7 +694,10 @@ export async function runSecretsAgent(
   // costs at most one extra prompt on the next `secrets list`.
   const sweep = () => {
     const now = Date.now();
-    for (const [name, e] of store) if (now >= e.expiresAt) store.delete(name);
+    for (const [name, e] of store) if (now >= e.expiresAt) {
+      store.delete(name);
+      if (e.lease) emitSecretAudit({ event: 'secrets.lease-expire', bundle: e.bundle.name, operation: 'lease-expire', source: 'broker', status: 'success', keys: e.lease.keys, keyCount: e.lease.keys.length, agent: e.lease.harness });
+    }
     const live = realBundleCount(store);
     // Self-heal onto a newer in-place install — but ONLY while no real unlocks
     // are held, so we never wipe live unlocks and force a re-prompt (#435). A
@@ -953,14 +961,14 @@ function syncClient(sub: string[], timeout: number): SpawnSyncReturns<string> | 
  * null if the agent isn't running / doesn't hold this bundle / anything fails
  * (soft — caller falls through to the real keychain). macOS only.
  */
-export function agentGetSync(name: string, harness: string = GLOBAL_HARNESS): { bundle: SecretsBundle; env: Record<string, string> } | null {
+export function agentGetSync(name: string, harness: string = GLOBAL_HARNESS): { bundle: SecretsBundle; env: Record<string, string>; lease?: SecretLease } | null {
   if (!agentSocketExists()) return null;
   const r = syncClient([SYNC_GET_CMD, name, harness], SYNC_GET_TIMEOUT_MS);
   if (!r || r.status !== 0 || !r.stdout) return null;
   try {
-    const o = JSON.parse(lastLine(r.stdout)) as { bundle: SecretsBundle; env: Record<string, string> };
+    const o = JSON.parse(lastLine(r.stdout)) as { bundle: SecretsBundle; env: Record<string, string>; lease?: SecretLease };
     if (!o || typeof o !== 'object' || !o.env) return null;
-    return { bundle: o.bundle, env: o.env };
+    return { bundle: o.bundle, env: o.env, lease: o.lease };
   } catch {
     return null;
   }
@@ -1041,7 +1049,7 @@ export async function runAgentGetSync(name: string, harness: string = GLOBAL_HAR
     // truncated on exit — the parent would see a partial or empty payload, treat
     // it as a miss, and fall through to a keychain read, silently costing the
     // Touch ID prompt this whole path exists to avoid.
-    const payload = JSON.stringify({ bundle: r.bundle, env: r.env }) + '\n';
+    const payload = JSON.stringify({ bundle: r.bundle, env: r.env, lease: r.lease }) + '\n';
     await new Promise<void>((resolve) => { process.stdout.write(payload, () => resolve()); });
     return 0;
   }
@@ -1265,8 +1273,9 @@ export async function agentLoad(
   env: Record<string, string>,
   ttlMs: number,
   harness: string = GLOBAL_HARNESS,
+  lease?: SecretLease,
 ): Promise<boolean> {
-  const r = await request({ cmd: 'load', name, bundle, env, ttlMs, harness });
+  const r = await request({ cmd: 'load', name, bundle, env, ttlMs, harness, lease });
   return r?.ok === true && r.cmd === 'load';
 }
 

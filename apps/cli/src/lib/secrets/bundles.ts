@@ -1473,6 +1473,11 @@ export function readAndResolveBundleEnv(
     const harness = opts.agent || process.env.AGENTS_AGENT_NAME || GLOBAL_HARNESS;
     const hit = agentGetSync(name, harness);
     if (hit) {
+      const denied = (opts.keys ?? []).filter((key) => hit.lease && !hit.lease.keys.includes(key));
+      if (denied.length > 0) {
+        emitSecretAudit({ event: 'secrets.lease-denied', bundle: name, operation: opts.caller, source: 'agent', status: 'error', keys: denied, keyCount: denied.length, agent: harness, error: 'key outside lease scope' });
+        throw new Error(`Secret lease '${hit.lease?.id}' does not grant key(s): ${denied.join(', ')}`);
+      }
       // The agent stores the FULL bundle env. Apply the same subset filter and
       // expiry gate as the slow path — without this, `--secrets-keys X` would
       // silently inject every key and an expired key would flow through after

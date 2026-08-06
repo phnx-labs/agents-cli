@@ -117,6 +117,17 @@ describe.each([
     expect(Object.keys(readIndex().bundles)).toEqual(['*:apple.com']);
   });
 
+  it('persists a leased subset and its independent expiry across broker restart', () => {
+    const expiresAt = Date.now() + FAR;
+    const leased: SessionEntry = {
+      ...entry('prod', expiresAt, false),
+      env: { TOKEN: 'leased' },
+      lease: { id: 'lease-1', bundle: 'prod', keys: ['TOKEN'], createdAt: 1, expiresAt, harness: '*', sleepPersist: false },
+    };
+    saveSession('prod', leased);
+    expect(rehydrateSessions(Date.now())).toMatchObject([{ name: 'prod', entry: { env: { TOKEN: 'leased' }, lease: { id: 'lease-1', keys: ['TOKEN'] } } }]);
+  });
+
   // The durable twin of the broker's scope chain: after a restart the broker RAM
   // is empty and reads come from here, so if this resolved differently a bundle
   // would work until the daemon bounced and then silently stop.

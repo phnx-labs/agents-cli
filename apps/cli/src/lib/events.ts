@@ -153,6 +153,8 @@ export type EventType =
   | 'secrets.import'
   | 'secrets.export'
   | 'secrets.view'
+  | 'secrets.lease-denied'
+  | 'secrets.lease-expire'
   | 'secrets.set'
   | 'secrets.delete'
   | 'secrets.rename'
