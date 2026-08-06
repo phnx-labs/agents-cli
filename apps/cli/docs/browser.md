@@ -15,8 +15,10 @@ Intended users: LLM agents that need to log in to real web apps, scrape authenti
 ```
 agent process
      │
-     │  agents browser <subcommand>
-     │  (resolves $AGENTS_BROWSER_TASK or --task)
+     ├─ agents browser <subcommand> (one request, then exit)
+     │
+     └─ agents browser stream (long-lived NDJSON; process + socket stay warm)
+        (both resolve $AGENTS_BROWSER_TASK or --task)
      ▼
   CLI (browser.ts)
      │
@@ -116,6 +118,28 @@ export AGENTS_BROWSER_TASK=$(agents browser start --profile work)
 Every subsequent command in that shell reads `$AGENTS_BROWSER_TASK`
 automatically.
 
+### Keep the action loop warm
+
+Normal `agents browser <command>` calls are convenient for individual actions,
+but each shell invocation starts a new Node process and opens a new daemon IPC
+connection. For an observe-and-act loop, start `browser stream` once and send one
+IPC request object per line. It keeps both the narrow browser CLI process and the
+existing browser-daemon socket open until stdin closes; the daemon continues to
+reuse its existing CDP connection.
+
+```bash
+printf '%s\n' \
+  '{"action":"screenshot","path":"/tmp/page.jpg"}' \
+  '{"action":"click","atX":320,"atY":540}' \
+  | agents browser stream --task "$AGENTS_BROWSER_TASK"
+```
+
+The response is one compact JSON object per non-empty input line, in the same
+order. A long-lived caller can leave stdin open and write later requests to the
+same process. `--task` supplies the default `task` field; a task returned by a
+`start` request becomes the default for subsequent lines. Malformed JSON returns
+an error response without closing the stream.
+
 ## Command Reference
 
 ### Profile management
@@ -156,6 +180,7 @@ automatically.
 | `agents browser tasks` | List all tasks in non-interactive table form |
 | `agents browser ps` | List all tracked browser/electron/tunnel processes, alive or stale |
 | `agents browser history` | Recent task history |
+| `agents browser stream [--task <name>]` | Keep one CLI process and daemon IPC socket open; NDJSON requests in, NDJSON responses out |
 
 `start` flags:
 

@@ -819,6 +819,12 @@ agents browser done                  # Close task's tabs when finished
 
 # Need to address a different task in the same shell? Override per call:
 agents browser screenshot --task other-flow
+
+# Repeated observe/action loops: one Node process and daemon socket stay warm.
+printf '%s\n' \
+  '{"action":"screenshot","path":"/tmp/page.jpg"}' \
+  '{"action":"click","atX":320,"atY":540}' \
+  | agents browser stream --task "$AGENTS_BROWSER_TASK"
 ```
 
 ### Why this works where Playwright fails
