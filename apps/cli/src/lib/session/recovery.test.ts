@@ -1,8 +1,12 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { describe, expect, it } from 'vitest';
 import type { RotateCandidate } from '../rotate.js';
 import type { SessionMeta } from './types.js';
 import {
   SessionRecoveryError,
+  inspectNativeResumeSession,
   resolveSessionRecoveryFromCandidates,
   sessionOriginDevice,
   sessionRecoveryDestinationMatches,
@@ -45,12 +49,31 @@ function candidate(version: string, over: Partial<RotateCandidate> = {}): Rotate
 
 describe('resolveSessionRecoveryFromCandidates', () => {
   it('native-resumes only the healthy origin version', () => {
-    const result = resolveSessionRecoveryFromCandidates(
-      session(),
-      [candidate('2.1.187'), candidate('2.1.218')],
-      () => true,
-    );
-    expect(result).toMatchObject({ mode: 'native', agent: 'claude', version: '2.1.187' });
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-native-'));
+    try {
+      const home = path.join(root, 'home');
+      const cwd = path.join(root, 'original-project');
+      const laterCwd = path.join(root, 'later-project');
+      const filePath = path.join(home, '.claude', 'projects', '-original-project', `${session().id}.jsonl`);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.mkdirSync(cwd);
+      fs.mkdirSync(laterCwd);
+      fs.writeFileSync(filePath, [
+        JSON.stringify({ type: 'attachment', cwd }),
+        JSON.stringify({ type: 'user', cwd: laterCwd }),
+      ].join('\n') + '\n');
+      const source = session({ filePath, cwd: laterCwd });
+      const inspection = inspectNativeResumeSession(source, home);
+      const result = resolveSessionRecoveryFromCandidates(
+        source,
+        [candidate('2.1.187'), candidate('2.1.218')],
+        () => true,
+        inspection,
+      );
+      expect(result).toMatchObject({ mode: 'native', agent: 'claude', version: '2.1.187', cwd });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('uses /continue on a healthy same-harness version when the origin is signed out', () => {
@@ -81,6 +104,28 @@ describe('resolveSessionRecoveryFromCandidates', () => {
     expect(result.mode).toBe('continue');
     expect(result.version).toBe('2.1.218');
     expect(result.reason).toContain('2.1.187 is not installed');
+  });
+
+  it('uses /continue when a same-number reinstall does not own the retained transcript', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-recovery-trash-'));
+    try {
+      const home = path.join(root, 'active-home');
+      const retained = path.join(root, 'trash', `${session().id}.jsonl`);
+      fs.mkdirSync(home, { recursive: true });
+      fs.mkdirSync(path.dirname(retained), { recursive: true });
+      fs.writeFileSync(retained, '{}\n');
+      const source = session({ filePath: retained });
+      const result = resolveSessionRecoveryFromCandidates(
+        source,
+        [candidate('2.1.187')],
+        () => true,
+        inspectNativeResumeSession(source, home),
+      );
+      expect(result).toMatchObject({ mode: 'continue', agent: 'claude', version: '2.1.187' });
+      expect(result.reason).toContain('retained outside the active claude@2.1.187 home');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('fails with the concrete device, origin version, and account reason', () => {

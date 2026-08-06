@@ -254,10 +254,14 @@ carries a stable `fleet` divergence block for the VS Code extension / Agency.
 `resolveSessionRecovery` in `src/lib/session/recovery.ts` is the only place that
 chooses native resume versus `/continue`. Focus, resume, attach, and
 `run --resume` route through it. Native resume is valid only for the exact healthy
-origin version in its isolated home; a removed, signed-out, revoked, or exhausted
-origin rotates to a healthy version of the same harness and reads the indexed
-transcript with `/continue`. Never add a caller-local fallback that native-resumes
-another version home, and never let `run auto` change harnesses during recovery.
+origin version when that active isolated home still owns the indexed transcript;
+a removed, signed-out, revoked, exhausted, trashed, backup-only, or same-number
+reinstalled origin uses a healthy version of the same harness and reads the
+indexed transcript with `/continue`. Claude native resume uses the earliest
+recorded transcript cwd, which selected `projects/<cwd-key>`, not the later cwd
+stored from its first user turn. Never add a caller-local fallback that
+native-resumes another version home, and never let `run auto` change harnesses
+during recovery.
 
 ## Supported harnesses
 

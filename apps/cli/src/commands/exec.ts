@@ -2658,20 +2658,18 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         version = resolvedRecoveryTarget.version;
-        const canResumeNatively = resolvedRecoveryTarget.mode === 'native';
-        if (canResumeNatively) {
+        if (resolvedRecoveryTarget.mode === 'native') {
           version = session.version;
           resumeNative = true;
           resumeSessionId = session.id;
-          // Native `--resume` (claude/codex) resolves the transcript relative to the
-          // working directory (projects/<cwd-hash>/). The session may have been started
-          // in a different directory than we're standing in now — most importantly when a
-          // routine daemon fires `agents run --resume` from its own cwd. Spawn from the
-          // session's ORIGIN cwd so the resume actually finds it; otherwise the agent
-          // exits "No conversation found with session ID". Honor an explicit --cwd only if
-          // the caller passed one (they're overriding on purpose).
-          if (!options.cwd && session.cwd) options.cwd = session.cwd;
-          if (!options.quiet) process.stderr.write(chalk.gray(`Resuming ${agent} ${session.shortId} (native)${version ? ` @${version}` : ''}${!options.cwd || options.cwd === session.cwd ? ` in ${session.cwd ?? cwd}` : ''}\n`));
+          // The centralized recovery decision proves the transcript belongs to
+          // this exact isolated home and resolves any harness-specific launch cwd.
+          // Claude's indexed `session.cwd` is the first user-turn cwd, which may
+          // differ from the earlier cwd that selected projects/<cwd-key>.
+          if (!options.cwd && resolvedRecoveryTarget.cwd) options.cwd = resolvedRecoveryTarget.cwd;
+          if (!options.quiet) process.stderr.write(chalk.gray(
+            `Resuming ${agent} ${session.shortId} (native)${version ? ` @${version}` : ''} in ${options.cwd ?? cwd}\n`,
+          ));
         } else {
           // Tier-2: launch fresh with a /continue <id> first message; the agent
           // loads the transcript via `agents sessions <id>` and picks up.

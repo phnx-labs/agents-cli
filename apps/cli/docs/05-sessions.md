@@ -66,11 +66,15 @@ session could live on another peer): a unique match auto-resumes, a cross-machin
 collision surfaces as an ambiguity, and an ambiguous short-id prefix still surfaces
 every candidate. `agents run auto --resume <id>` is the adaptive form: on the
 origin device it prefers native resume only when the original harness/version is
-installed and healthy. Otherwise the account router selects a healthy version of
-the **same harness** and hands the indexed transcript over through `/continue`. It
-never native-resumes from a different version's isolated home. If no same-harness
-version is usable, the command names the device, origin version, and account-health
-reason. Detail in **Background &
+installed, healthy, and still owns the indexed transcript in its active isolated
+home. Claude resumes from the earliest recorded cwd, the directory that selected
+its `projects/<cwd-key>` conversation, rather than a later first-turn cwd. A
+transcript retained in trash or backups therefore uses `/continue` even if the
+same version number was reinstalled into a new empty home. Otherwise the account
+router selects a healthy version of the **same harness** and hands the indexed
+transcript over through `/continue`. It never native-resumes from a different
+version's isolated home. If no same-harness version is usable, the command names
+the device, origin version, and account-health reason. Detail in **Background &
 foreground (detach / attach)** below, and
 `agents sessions --help`.
 

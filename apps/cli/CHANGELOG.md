@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.22.26
+
+---
+issue: 2108
+type: fixed
+---
+
+`agents sessions focus <id>` no longer attaches a metadata-less retained tmux
+pane after its harness has exited. Recovery now proves that the indexed
+transcript belongs to the exact active version home before using native resume;
+a transcript retained in version trash uses same-harness `/continue`, including
+after the same version number is reinstalled. Claude native resume launches from
+the transcript's original project directory rather than a later first-turn cwd,
+so the harness can find its `projects/<cwd-key>` conversation.
+
 ## 1.22.25
 
 ---
