@@ -2,21 +2,6 @@
 
 ## 1.22.22
 
-- **`agents feed` no longer crashes when the session index is locked.** Outcome
-  enrichment calls `discoverSessions` against `sessions.db`; under concurrent
-  scanner/daemon pressure that open can throw `SQLITE_BUSY` / "database is
-  locked" and take down the whole feed. A lock error now degrades to an empty
-  meta set with a stderr warning so blocks still render (RUSH-2006). Source:
-  `apps/cli/src/commands/feed.ts`.
-
-- **`agents events --event` / filtered activity reads no longer miss matches
-  under `--limit`.** The unified reader capped activity records *before*
-  applying the event-type filter, so a rare match older than the newest-N
-  routine rows (e.g. one `pr.opened` under twenty `file.edited`) was silently
-  dropped. Event types are now passed into `readRecentActivity` so the cap
-  counts matching rows; a non-`activity` `--module` skips the activity half
-  entirely (RUSH-2093). Source: `apps/cli/src/lib/event-stream.ts`.
-
 - **New: `agents insights` — how you work, split by the Claude account that did the
   work.** Tool and language mix, friction (interruptions, tool-error classes, your own
   reply latency), what you changed (line deltas, files, commits), an hour-of-day
