@@ -6,10 +6,6 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import lockfile from 'proper-lockfile';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-
-// win32: event bus / process timing edges (RUSH-2215).
-const describeEvents = process.platform === 'win32' ? describe.skip : describe;
-
   emit, emitStart, emitCommand, emitFriction, query, rotate, stats,
   redactPrompt, redactArgs, truncate,
   detectCaller,
@@ -17,6 +13,9 @@ const describeEvents = process.platform === 'win32' ? describe.skip : describe;
   getLogsPath, _resetForTest,
 } from './events.js';
 import { resetActorCache } from './actor.js';
+
+// win32: event bus / process timing edges (RUSH-2215).
+const describeEvents = process.platform === 'win32' ? describe.skip : describe;
 
 const tempDirs: string[] = [];
 

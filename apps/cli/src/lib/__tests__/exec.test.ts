@@ -1,9 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-
-// win32: exec path/quoting edges under quarantine expansion (RUSH-2215).
-const describeExec = process.platform === 'win32' ? describe.skip : describe;
-
   buildExecCommand,
   resolveInteractive,
   buildExecEnv,
@@ -26,6 +22,9 @@ import { buildWorkflowMcpConfig, getMcpServersByName } from '../mcp.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+
+// win32: exec path/quoting edges under quarantine expansion (RUSH-2215).
+const describeExec = process.platform === 'win32' ? describe.skip : describe;
 
 function opts(overrides: Partial<ExecOptions>): ExecOptions {
   return {
