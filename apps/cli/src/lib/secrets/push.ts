@@ -103,7 +103,13 @@ export function resolveBundleForPush(bundle: string, caller: string): ResolvedBu
   return { env, dotenv: bundleEnvToDotenv(env), keyCount: Object.keys(env).length };
 }
 
-function isPowershellTarget(host: string): boolean {
+/**
+ * Does this host need PowerShell rather than a POSIX `bash -lc`? Resolved from
+ * the device registry / hosts overlay, never probed. Exported so the transport
+ * choice is assertable on its own: the same predicate decides BOTH the Windows
+ * file-backend refusal and the Windows keychain bridge below.
+ */
+export function isPowershellTarget(host: string): boolean {
   return remoteShellFor(resolveRemoteOsSync(host.split('@').pop() ?? host)) === 'powershell';
 }
 
