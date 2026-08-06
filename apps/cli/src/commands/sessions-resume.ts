@@ -17,13 +17,13 @@ import { filterTeamSessions } from '../lib/session/team-filter.js';
 import { multiItemPicker, itemPicker } from '../lib/picker.js';
 import { buildPreview } from './sessions-picker.js';
 import {
-  filterSessionsByQuery,
   formatPickerLabel,
   pickerColumnsFor,
   buildSessionRecoveryCommand,
   resumeSessionInPlace,
   parseAgentFilter,
 } from './sessions.js';
+import { sessionMatchesQuery } from './sessions-browser.js';
 import {
   openSurfaces,
   availableBackends,
@@ -155,7 +155,7 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
     chosen = await multiItemPicker<SessionMeta>({
       message: 'Select sessions to resume:',
       items: sessions,
-      filter: (q: string) => (q.trim() ? filterSessionsByQuery(sessions, q) : sessions),
+      filter: (q: string) => (q.trim() ? sessions.filter((s) => sessionMatchesQuery(s, q)) : sessions),
       labelFor: (s, q) => formatPickerLabel(s, q, cols),
       keyFor: (s) => s.id,
       buildPreview,
