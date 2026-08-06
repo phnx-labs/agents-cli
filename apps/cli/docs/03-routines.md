@@ -497,9 +497,11 @@ and no coordination. Listing several devices is a misconfiguration: it used to f
 routine once per listed device (duplicate work, duplicate spend), so `add`/`devices --set`
 now reject it and `agents doctor` reports any that remain on disk.
 
-**Omitting `devices:` means unrestricted** — the job fires on every device running
-the scheduler. That is the genuine fleet-wide case (`watchdog`, `check-updates`).
-`--clear` restores it (see below).
+**Omitting `devices:` at creation means unrestricted** — the job fires on every
+device running the scheduler. That is the genuine fleet-wide case (`watchdog`,
+`check-updates`). Later, `devices --clear` **disables** the routine on every
+registered device (it does not restore unrestricted — re-add without `--devices`
+or enable it on every host if you need fleet-wide again).
 
 On a device not in the allowlist the job is fully inert:
 
@@ -557,11 +559,13 @@ For scripting:
 
 ```bash
 agents routines devices drain --set yosemite-s0            # set the owning device
-agents routines devices drain --clear                      # remove allowlist (unrestricted)
+agents routines devices drain --clear                      # disable on every registered device
 ```
 
 `--set` / `--clear` fan out pause/resume to every registered device so peers
-outside the new set stop firing the routine. An **unreachable** peer (asleep,
+outside the new set stop firing the routine (`--clear` disables it everywhere;
+it does **not** restore the unrestricted "fires on every scheduler" default —
+omit `--devices` at `add` time for that). An **unreachable** peer (asleep,
 offline, missing address) is **skipped with a warning**, not a hard fail — the
 pin on reachable targets still succeeds, and an offline box cannot be running
 the routine (it picks up the enabled set on its next sync). The command exits
@@ -1098,7 +1102,7 @@ agents routines resume <name>         # Re-enable a paused job
 # Device allowlist management
 agents routines devices <name>                         # Interactive multi-select picker
 agents routines devices <name> --set yosemite-s0           # Set the owning device
-agents routines devices <name> --clear                 # Remove allowlist (unrestricted)
+agents routines devices <name> --clear                 # Disable on every registered device
 
 # Execution
 agents routines run <name>            # Run immediately in foreground
