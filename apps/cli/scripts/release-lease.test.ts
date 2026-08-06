@@ -66,14 +66,18 @@ function procState(pid: number): string {
 const zombieParents: ChildProcess[] = [];
 
 /**
- * A real, unreaped zombie: a bash that backgrounds a short `sleep` and then
- * blocks without waiting on it, so the exited child sits in the process table
- * with nothing to collect it. That is exactly the shape a SIGKILLed release.sh
- * leaves behind, and `ps -p <pid>` still lists it.
+ * A real, unreaped zombie: Perl forks a child that exits while its parent blocks
+ * without waiting, so the exited child sits in the process table with nothing
+ * to collect it. That is exactly the shape a SIGKILLed release.sh leaves behind,
+ * and `ps -p <pid>` still lists it.
  */
 function spawnZombie(): number {
   const pidFile = path.join(root, `zombie-${zombieParents.length}.pid`);
-  const parent = spawn('bash', ['-c', `sleep 0.2 & echo $! > "${pidFile}"; sleep 60`], { stdio: 'ignore' });
+  const parent = spawn(
+    'perl',
+    ['-e', 'my $pid = fork(); if ($pid == 0) { exit 0 } open(my $fh, ">", $ARGV[0]) or die $!; print $fh $pid; close($fh); sleep 60', pidFile],
+    { stdio: 'ignore' },
+  );
   zombieParents.push(parent);
   for (let i = 0; i < 200; i++) {
     if (fs.existsSync(pidFile)) {
