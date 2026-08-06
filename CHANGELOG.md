@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **The macOS `computer` helper's `trust_status` RPC now reports Screen Recording trust, not just Accessibility (RUSH-1882).** It previously returned only
+  `AX.isTrusted()`, so a missing Screen Recording grant only surfaced indirectly
+  when a `screenshot` capture timed out after 5s. Adds a `screen_recording` field
+  via the non-prompting `CGPreflightScreenCaptureAccess()`, additive and
+  backward-compatible with callers that only read `trusted`/`pid`/`path`. Source:
+  `native/computer-mac/Sources/ComputerHelper/RPC.swift`,
+  `native/computer-mac/Sources/ComputerHelper/Screenshot.swift`.
+
 - **`agents devices list` moves "Leased boxes" behind `--all`; the default list no longer touches the keychain or pops Touch ID (RUSH-2190).** See
   `apps/cli/.changelog/next/devices-list-all-flag.md`.
 
