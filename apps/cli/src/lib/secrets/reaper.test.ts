@@ -215,11 +215,20 @@ describe('reapOrphanedKeychainProcesses (darwin integration)', () => {
       'Agents CLI',
     );
     fs.mkdirSync(path.dirname(fakeHelper), { recursive: true });
-    fs.writeFileSync(fakeHelper, '#!/bin/sh\nsleep 300\n', { mode: 0o755 });
+    // A REAL binary, not a shebang script. `reaper.ts` matches on argv[0]
+    // (`command === helperPath || command.startsWith(helperPath + ' ')`), which is
+    // what the production helper — a signed Mach-O invoked directly — actually
+    // produces. Exec'ing a `#!/bin/sh` script instead makes the kernel run the
+    // INTERPRETER, so `ps` reports `/bin/sh <helperPath>`: argv[0] is `/bin/sh`
+    // and the match can never fire, so the reaper found nothing and the test
+    // asserted `0 >= 1`. Copying `/bin/sleep` to the helper path keeps argv[0]
+    // equal to that path.
+    fs.copyFileSync('/bin/sleep', fakeHelper);
+    fs.chmodSync(fakeHelper, 0o755);
 
     // Launch through a disposable shell that exits immediately, so the sleeper
     // is reparented to init (PPID 1).
-    const launcher = spawn('sh', ['-c', `${JSON.stringify(fakeHelper)} &`], {
+    const launcher = spawn('sh', ['-c', `${JSON.stringify(fakeHelper)} 300 &`], {
       detached: true,
       stdio: 'ignore',
     });
@@ -255,6 +264,12 @@ describe('reapOrphanedKeychainProcesses (darwin integration)', () => {
       if (sleeperPid) {
         try { process.kill(sleeperPid, 'SIGKILL'); } catch { /* may already be reaped */ }
       }
+      // Belt-and-braces: kill anything still running out of THIS test's temp dir.
+      // When the assertion failed, `sleeperPid` was often never resolved, so the
+      // 300s sleeper survived the run — three of them were still alive at PPID 1
+      // on the box that diagnosed this. Scoped to `tmpDir`, so a concurrent run's
+      // sleeper is never touched.
+      try { execFileSync('pkill', ['-f', tmpDir], { stdio: 'ignore' }); } catch { /* none left */ }
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   }, 60_000);
