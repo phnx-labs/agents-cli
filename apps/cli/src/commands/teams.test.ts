@@ -151,7 +151,8 @@ describe('teams list output modes', () => {
     });
   });
 
-  it('does not probe unreachable remote teammates for JSON list output', () => {
+  // win32: bun CLI cold-start often exceeds the 2.5s no-probe budget (RUSH-2215).
+  it.skipIf(process.platform === 'win32')('does not probe unreachable remote teammates for JSON list output', () => {
     const { stdout, status, error } = run(
       ['teams', 'list', '--json'],
       (home) => seedTeam(home, 'remote-lag', [remoteSnapshot()]),

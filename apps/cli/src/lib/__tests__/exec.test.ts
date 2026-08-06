@@ -880,8 +880,12 @@ describeExec('buildExecCommand', () => {
     it('dedupes ~/.agents when the user also passes it explicitly', () => {
       const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit', addDirs: [AGENTS_DIR, '/x'] }));
       const rendered = cmd.join(' ');
-      expect(rendered.match(new RegExp(`${AGENTS_DIR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\" = true`, 'g'))).toHaveLength(1);
-      expect(rendered).toContain('"/x" = true');
+      // Match the TOML fragment the same way the implicit-grant test does
+      // (JSON.stringify path), so Windows backslashes do not break the regex.
+      const grant = `${JSON.stringify(AGENTS_DIR)} = true`;
+      const escaped = grant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      expect(rendered.match(new RegExp(escaped, 'g'))).toHaveLength(1);
+      expect(rendered).toContain(JSON.stringify('/x') + ' = true');
     });
 
     it('does NOT add ~/.agents for codex read-only (plan) — no writes happen there', () => {
