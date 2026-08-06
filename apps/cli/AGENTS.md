@@ -450,11 +450,12 @@ of the first's, so git's rejection *is* the failed lock acquisition: no polling,
 second service.
 
 ```bash
-scripts/release-lease.sh status     # unheld | held version=… holder=… age=…min
+scripts/release-lease.sh status     # unheld | held version=… holder=… age=…min holder-alive=yes|no|unknown
 scripts/release-lease.sh claim <v>  # 0 = acquired, 1 = someone else is releasing
 scripts/release-lease.sh renew      # prove this run is still alive
 scripts/release-lease.sh verify     # 0 = still ours; fails CLOSED on any doubt
 scripts/release-lease.sh release    # drop the lease this checkout claimed
+scripts/release-lease.sh clear      # drop a lease with no live holder (any checkout)
 ```
 
 `release.sh` claims it right after the confirmation (before the first mutation)
@@ -481,6 +482,32 @@ together:
 A lease abandoned by a killed run stops being renewed, so it becomes reclaimable
 after `RELEASE_LEASE_TTL` minutes (default 30); reclaiming names the dead holder
 rather than silently overwriting it.
+
+**An externally killed run is detected, not just waited out (RUSH-2274).** The TTL
+alone made a killed release indistinguishable from a healthy long one: for up to 30
+minutes `status` read `held` while nothing was releasing. So the lease also records
+**which process** holds it — `host`, `pid`, and that pid's start time — and
+`claim`/`clear`/`status` probe it, reporting `holder-alive=yes|no|unknown`:
+
+| Probe | When | What it licenses |
+|---|---|---|
+| `dead` | we are on the holder's box and that process is gone | reclaim **immediately**, no TTL wait |
+| `alive` | the recorded pid runs here with the recorded start time | **never** taken, at any age — stop that release instead |
+| `unknown` | the holder is another box, or the lease predates these fields | the TTL, exactly as before |
+
+`release.sh` exports `RELEASE_LEASE_HOLDER_PID=$$` so the recorded pid is the
+orchestrating release, not the 10-minutely `renew` shell (whose `$$` is dead a
+second later — recording that would make every renewed lease read as abandoned).
+A lease with no recorded pid stays `unknown`, so a missing export degrades to the
+old TTL behaviour rather than to "instantly reclaimable". The start time is what
+makes `dead` safe to act on: a recycled pid would otherwise read as a live release
+forever. A **zombie** counts as dead — a SIGKILLed release whose parent never
+reaped it is still listed by `ps`, which is precisely the case this detects.
+
+`scripts/release-lease.sh clear` drops such a lease without starting a release —
+the operator's unwedge path, since `release` only drops a lease *this checkout*
+claimed. It shares one predicate with `claim`, so it can never take a live holder's
+lease either.
 
 **Finish a stuck release before cutting a new one.** `release.sh` refuses to start
 when an older `v*` tag exists that npm never received, and prints the re-run that
