@@ -306,7 +306,12 @@ export function decideSecretPush(
   // carries `updated_at` for a future content check). It is a timestamp
   // heuristic, not a content hash — a bundle whose VALUES changed locally still
   // reads as present. `--force` is the way to overwrite regardless.
-  if (!ctx.forceSecrets && probe.remoteBundles && bundle in probe.remoteBundles) {
+  // hasOwnProperty, NOT `in`: `in` walks the prototype chain, so a bundle named
+  // `toString` / `constructor` / `valueOf` would read as present on an EMPTY map
+  // and be silently skipped — leaving that device unprovisioned, the worse of the
+  // two errors this gate can make.
+  if (!ctx.forceSecrets && probe.remoteBundles
+      && Object.prototype.hasOwnProperty.call(probe.remoteBundles, bundle)) {
     return { push: false, backend, reason: `secrets bundle '${bundle}' already present on ${device} — pass --force to overwrite` };
   }
 
@@ -410,7 +415,11 @@ export function parseRemoteBundles(stdout: string): Record<string, string> {
       : Array.isArray((parsed as { bundles?: unknown })?.bundles)
         ? (parsed as { bundles: unknown[] }).bundles
         : [];
-    const out: Record<string, string> = {};
+    // Null-prototype: a remote-supplied name is used as a KEY here, so `{}` would
+    // let `__proto__` hit the prototype setter instead of becoming an own
+    // property (and then read back as absent). It also means the presence check
+    // cannot see inherited names.
+    const out: Record<string, string> = Object.create(null);
     for (const row of rows) {
       if (!row || typeof row !== 'object') continue;
       const r = row as Record<string, unknown>;

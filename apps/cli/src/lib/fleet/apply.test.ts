@@ -272,6 +272,42 @@ describe('diffFleet — secrets surfacing', () => {
     expect(forced.actions.filter((a) => a.kind === 'push-secret')).toHaveLength(1);
   });
 
+  it('does NOT skip a prototype-named bundle the device lacks', () => {
+    // `bundle in remoteBundles` returned true for 'toString' against an EMPTY
+    // listing, so that bundle was silently never provisioned. The gate uses an
+    // own-property check now.
+    const emptyListing = new Map<string, DeviceProbe>([
+      ['s1', { ...converged.get('s1')!, remoteBundles: parseRemoteBundles('[]') }],
+    ]);
+    const plan = diffFleet(desired, emptyListing, {
+      targetCliVersion: CLI,
+      sourceAuth: srcAuth(['codex']),
+      secretsBundles: ['toString'],
+      provisionSecrets: true,
+      isHostPinned: () => true,
+    });
+    expect(plan.actions.filter((a) => a.kind === 'push-secret').map((a) => a.bundle)).toEqual(['toString']);
+  });
+
+  it('does NOT skip a prototype-named bundle when remoteBundles is a plain object', () => {
+    // Defence in depth, and the case that actually distinguishes the two fixes.
+    // parseRemoteBundles returns a null-prototype map, so `in` happens to be safe
+    // on ITS output — but `remoteBundles` is a plain field any caller can fill,
+    // and a `{}` literal (what every other fixture here uses) inherits toString.
+    // Under `in` this device would be judged already-provisioned and skipped.
+    const plainLiteral = new Map<string, DeviceProbe>([
+      ['s1', { ...converged.get('s1')!, remoteBundles: { somethingElse: 't' } }],
+    ]);
+    const plan = diffFleet(desired, plainLiteral, {
+      targetCliVersion: CLI,
+      sourceAuth: srcAuth(['codex']),
+      secretsBundles: ['toString'],
+      provisionSecrets: true,
+      isHostPinned: () => true,
+    });
+    expect(plan.actions.filter((a) => a.kind === 'push-secret').map((a) => a.bundle)).toEqual(['toString']);
+  });
+
   it('picks file on linux and keychain on macos — the unshared-key default', () => {
     // A headless Linux box has no keychain, and its file store auto-provisions
     // its OWN machine-local key. That per-box key is the alternative to the
@@ -446,6 +482,26 @@ describe('parseRemoteBundles — a remote secrets listing, metadata only', () =>
     // unprovisioned, which is the worse of the two errors.
     for (const junk of ['', 'not json', 'null', '3', '{"bundles":"nope"}']) {
       expect(parseRemoteBundles(junk)).toEqual({});
+    }
+  });
+
+  it('a name that collides with an Object prototype key is an OWN property', () => {
+    // `{}` inherits toString/constructor/valueOf, and assigning `__proto__` on it
+    // hits the prototype setter instead of creating a key. A null-prototype map
+    // makes every remote-supplied name a plain own property.
+    const out = parseRemoteBundles('[{"name":"toString"},{"name":"__proto__","updatedAt":"t"}]');
+    expect(Object.prototype.hasOwnProperty.call(out, 'toString')).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(out, '__proto__')).toBe(true);
+    expect(out['__proto__']).toBe('t');
+  });
+
+  it('an EMPTY listing claims nothing — not even inherited names', () => {
+    // The bug this closes: `'toString' in {}` is true, so a bundle named
+    // toString read as already-present on a device that has nothing.
+    const empty = parseRemoteBundles('[]');
+    for (const name of ['toString', 'constructor', 'valueOf', 'hasOwnProperty']) {
+      expect(Object.prototype.hasOwnProperty.call(empty, name)).toBe(false);
+      expect(name in empty).toBe(false);
     }
   });
 
