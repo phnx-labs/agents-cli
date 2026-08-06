@@ -6994,3 +6994,6 @@ The files themselves haven't changed -- AGENTS.md is still AGENTS.md. Only the C
 - Pull/push commands for syncing agent configurations
 - Slash command management
 - Multi-agent support (Claude, Codex, Gemini, Cursor, OpenCode)
+## Unreleased
+
+- **Secret leases now have one scoped, time-boxed domain model (RUSH-2254).** A lease names one bundle, an explicit validated key subset, an absolute expiry, harness scope, and sleep-persistence posture. Durations use the broker's 1-minute to 30-day safety bounds, duplicate keys normalize once, unknown keys fail closed, and expired leases cannot project values. Source: `apps/cli/src/lib/secrets/lease.ts`.
