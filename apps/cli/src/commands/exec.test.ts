@@ -46,9 +46,11 @@ describe('degraded run governance mode', () => {
     fs.mkdirSync(binDir, { recursive: true });
     fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
     fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), 'agents: {}\n');
-    const cursor = path.join(binDir, process.platform === 'win32' ? 'cursor-agent.cmd' : 'cursor-agent');
+    // Antigravity has no read-only plan mode, so --mode plan degrades to edit.
+    // Cursor now supports plan (RUSH-2101), so it can no longer exercise this path.
+    const agy = path.join(binDir, process.platform === 'win32' ? 'agy.cmd' : 'agy');
     fs.writeFileSync(
-      cursor,
+      agy,
       process.platform === 'win32'
         ? '@echo {"type":"result","subtype":"success","is_error":false,"result":"OK"}\r\n'
         : '#!/bin/sh\nprintf \'{"type":"result","subtype":"success","is_error":false,"result":"OK"}\\n\'\n',
@@ -62,7 +64,7 @@ describe('degraded run governance mode', () => {
       const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
       const result = spawnSync(
         'node',
-        ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'cursor', 'probe', '--mode', 'plan', '--quiet', '--cwd', root],
+        ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'antigravity', 'probe', '--mode', 'plan', '--quiet', '--cwd', root],
         {
           cwd: path.resolve(import.meta.dirname, '..', '..'),
           env: { ...process.env, HOME: root, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` },
@@ -71,7 +73,7 @@ describe('degraded run governance mode', () => {
       );
       expect(result.status, result.stderr).toBe(0);
       const lines = fs.readFileSync(path.join(root, '.agents', '.history', 'audit', 'log.jsonl'), 'utf8').trim().split('\n');
-      expect(JSON.parse(lines.at(-1)!)).toMatchObject({ agent: 'cursor', mode: 'edit', outcome: 'ok', exit: 0 });
+      expect(JSON.parse(lines.at(-1)!)).toMatchObject({ agent: 'antigravity', mode: 'edit', outcome: 'ok', exit: 0 });
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
