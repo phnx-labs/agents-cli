@@ -102,6 +102,7 @@ describe('Cursor session parsing and discovery metadata', () => {
       activeForm: 'Summarize the commands',
     });
     expect(result!.content).toBe('Inspect the public CLI documentation and summarize the session commands.');
+    expect(result!.events).toEqual(parseCursor(transcriptPath));
   });
 
   test('indexes transcript-only archives without inventing cwd or title', () => {
