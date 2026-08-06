@@ -31,7 +31,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/05-sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 34;
+export const SCHEMA_VERSION = 35;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every
@@ -923,6 +923,18 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     `);
   }
 
+  if (fromVersion < 35) {
+    // v34 -> v35: the default listing sort was `ORDER BY IFNULL(last_activity,
+    // timestamp) DESC` — wrapping the column in IFNULL() makes SQLite unable to
+    // satisfy it from idx_sessions_last_activity, so every list/resume query did
+    // a full table sort instead of an index walk (RUSH-2211). Every upsert path
+    // already writes a non-NULL last_activity (resolveLastActivity falls back to
+    // `timestamp`, itself NOT NULL) — the only rows that can still be NULL here
+    // are ones written before the v8 migration that somehow slipped the backfill,
+    // or seeded directly by a test. Backfill them so the column is unconditionally
+    // NOT NULL, then querySessions can sort on the bare column and use the index.
+    db.exec(`UPDATE sessions SET last_activity = timestamp WHERE last_activity IS NULL`);
+  }
 }
 
 /**
@@ -2378,6 +2390,50 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
   return { clause, params };
 }
 
+/**
+ * Resolve which of the given file paths no longer exist, batching the check
+ * per directory instead of one `fs.existsSync` stat syscall per file.
+ * Transcript trees put many sessions in the same directory (one Claude
+ * `~/.claude/projects/<slug>/` holds every session for that project), so
+ * `readdirSync` once per directory and a Set membership test collapses what
+ * used to be N stat syscalls into (number of distinct directories) readdir
+ * syscalls — the same existence answer, far fewer syscalls on a large index
+ * (RUSH-2211). Falls back to per-file existsSync only when the directory
+ * itself can't be listed (permissions, race with a concurrent delete).
+ */
+function findMissingFilePaths(filePaths: string[]): Set<string> {
+  const byDir = new Map<string, Set<string>>();
+  for (const p of filePaths) {
+    const dir = path.dirname(p);
+    let basenames = byDir.get(dir);
+    if (!basenames) {
+      basenames = new Set();
+      byDir.set(dir, basenames);
+    }
+    basenames.add(path.basename(p));
+  }
+
+  const missing = new Set<string>();
+  for (const [dir, basenames] of byDir) {
+    let entries: Set<string>;
+    try {
+      entries = new Set(fs.readdirSync(dir));
+    } catch {
+      // Directory itself is gone (or unreadable) — every file in it is missing.
+      // Also covers the race where readdir loses to a concurrent delete: fall
+      // back to a direct stat rather than assuming existence.
+      for (const base of basenames) {
+        if (!fs.existsSync(path.join(dir, base))) missing.add(path.join(dir, base));
+      }
+      continue;
+    }
+    for (const base of basenames) {
+      if (!entries.has(base)) missing.add(path.join(dir, base));
+    }
+  }
+  return missing;
+}
+
 /** Query sessions from the database, applying filters and ordering by last-activity descending (default). */
 export function querySessions(options: QueryOptions = {}): SessionMeta[] {
   const db = getDB();
@@ -2390,12 +2446,19 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
     : '';
   // NULLs last so unpriced / duration-less rows never crowd out real data when
   // sorting by cost or duration. timestamp is never null (NOT NULL column).
+  // Default sort is the bare `last_activity` column, not `IFNULL(last_activity,
+  // timestamp)` — the v35 migration backfills every row so last_activity is
+  // never NULL, and every upsert path (resolveLastActivity) keeps it that way
+  // going forward. Wrapping the column in IFNULL() defeats
+  // idx_sessions_last_activity (SQLite can't use an index on an expression that
+  // isn't the bare column); the bare column lets the planner walk the index
+  // instead of sorting the whole result set (RUSH-2211).
   const orderClause =
     options.sortBy === 'cost'
       ? 'ORDER BY cost_usd IS NULL, cost_usd DESC, timestamp DESC'
       : options.sortBy === 'duration'
         ? 'ORDER BY duration_ms IS NULL, duration_ms DESC, timestamp DESC'
-        : 'ORDER BY IFNULL(last_activity, timestamp) DESC, timestamp DESC';
+        : 'ORDER BY last_activity DESC, timestamp DESC';
   const sql = `SELECT * FROM sessions ${clause} ${orderClause} ${limitClause}`;
   const rows = db.prepare(sql).all(...params) as SessionRow[];
   if (options.skipExistenceCheck) {
@@ -2408,7 +2471,8 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
   // surfacing in the Factory UI if any code path forgets to rewrite (#136).
   // Synthetic rows (OpenClaw channels/cron — see scanOpenClawIncremental) carry
   // an empty file_path and are exempt; they're keyed by CLI output, not files.
-  const missing = rows.filter(r => r.file_path && !fs.existsSync(r.file_path));
+  const missingPaths = findMissingFilePaths(rows.map(r => r.file_path).filter((p): p is string => !!p));
+  const missing = rows.filter(r => r.file_path && missingPaths.has(r.file_path));
   if (missing.length > 0) {
     const purge = db.transaction(() => {
       for (const row of missing) purgeToolCalls(db, row.id);
@@ -3037,6 +3101,20 @@ export function buildFtsQuery(input: string): { expr: string; terms: string[] } 
 }
 
 /**
+ * Build a `label:(...)` FTS5 column-filter MATCH expression for the label
+ * tier. Unlike `buildFtsQuery` (2-char floor, tuned for full-content search),
+ * this allows 1-char terms: label search is the interactive type-ahead path —
+ * the query grows one keystroke at a time, so a single character has to be
+ * indexable too. Terms are filtered to `[a-z0-9]` before being embedded in the
+ * expression string, so there's no FTS5 syntax injection from user input.
+ */
+function buildLabelFtsQuery(input: string): string {
+  const terms = input.toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length >= 1);
+  if (terms.length === 0) return '';
+  return `label:(${terms.map(t => `${t}*`).join(' OR ')})`;
+}
+
+/**
  * Label-first search. Sessions whose custom label substring-matches the query
  * always rank ahead of FTS5 hits — this gives predictable behavior when a user
  * types the exact name they gave a session via /rename.
@@ -3064,10 +3142,30 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
   // its `label` — set by an agent title / `/rename`, or seeded at launch from
   // `agents run --name`. Typing it resolves the session ahead of any FTS content
   // hit.
-  const labelRows = db.prepare(`
-    SELECT id, label FROM sessions
-    WHERE label IS NOT NULL AND LOWER(label) LIKE ?
-  `).all(`%${lower}%`) as Array<{ id: string; label: string | null }>;
+  //
+  // Candidates come from the FTS5 `label` column, not a raw `LOWER(label) LIKE
+  // '%q%'` scan of `sessions`: a leading wildcard can't use any index, so on a
+  // large session table that was a full-table scan on every keystroke of
+  // interactive search (RUSH-2211). `session_text.label` is kept 1:1 with
+  // `sessions.label` by every upsert path (storedFtsLabel), so this is the
+  // same data, indexed. Token-prefix matching seeks the FTS index instead of
+  // scanning every row, at the cost of only matching at token boundaries — a
+  // mid-word slice spanning two tokens (e.g. "ix-b" inside "fix-bug") no
+  // longer matches. That's the accepted trade-off for an indexable interactive
+  // path; the exact/prefix/contains scoring below still runs in JS over the
+  // FTS candidate set, so ranking among real matches is unchanged. Only a
+  // query with no indexable token (rare — e.g. punctuation-only input) falls
+  // back to the direct scan rather than silently dropping the tier.
+  const labelMatchExpr = buildLabelFtsQuery(input);
+  const labelRows = labelMatchExpr
+    ? (db.prepare(`
+        SELECT session_id AS id, label FROM session_text
+        WHERE session_text MATCH ?
+      `).all(labelMatchExpr) as Array<{ id: string; label: string | null }>)
+    : (db.prepare(`
+        SELECT id, label FROM sessions
+        WHERE label IS NOT NULL AND LOWER(label) LIKE ?
+      `).all(`%${lower}%`) as Array<{ id: string; label: string | null }>);
 
   let hasExactLabelMatch = false;
   for (const row of labelRows) {
