@@ -204,7 +204,32 @@ describe('keychain-helper has / list still probe both keychains', () => {
     expect(block).toContain('for query in [fileQuery, dpQuery]');
     expect(block).toContain('if status == errSecInteractionNotAllowed { continue }');
     expect(block).toContain('kSecReturnAttributes');
-    expect(block).toContain('kSecUseAuthenticationUI: kSecUseAuthenticationUISkip');
+  });
+
+  it('the list DP pass carries NO kSecUseAuthenticationUI key (RUSH-2251 regression)', () => {
+    // kSecUseAuthenticationUISkip on the DP enumeration silently omits every
+    // biometry-ACL item, so every hold/always-policy bundle enumerated zero value
+    // items and became unreadable (regression window: added 2e677937, removed
+    // b395fb54, RE-added bf79dc88 / v1.22.10). The DP pass MUST stay attributes-only
+    // with no UI key at all: kSecReturnAttributes without kSecReturnData never
+    // evaluates the ACL, so it neither prompts nor filters the ACL'd items out.
+    const block = caseBlock(helperSource(), 'list');
+    const fileQueryIdx = block.indexOf('let fileQuery: [CFString: Any] = [');
+    const dpDecl = 'let dpQuery: [CFString: Any] = [';
+    const dpQueryStart = block.indexOf(dpDecl);
+    // Search for the closing `]` past the opening bracket, so the `]` in the
+    // `[CFString: Any]` type annotation isn't matched as the end of the literal.
+    const dpQueryEnd = block.indexOf(']', dpQueryStart + dpDecl.length);
+    expect(fileQueryIdx, 'fileQuery literal present').toBeGreaterThanOrEqual(0);
+    expect(dpQueryStart, 'dpQuery literal present').toBeGreaterThan(fileQueryIdx);
+    expect(dpQueryEnd, 'dpQuery literal closes').toBeGreaterThan(dpQueryStart);
+    const dpQueryLiteral = block.slice(dpQueryStart, dpQueryEnd);
+    // The DP query literal must not set the UI key to any value (Skip or Fail).
+    expect(dpQueryLiteral).not.toContain('kSecUseAuthenticationUI');
+    // The file pass still uses UIFail — it is a legacy-keychain probe with no ACL.
+    expect(block).toContain('kSecUseAuthenticationUI: kSecUseAuthenticationUIFail');
+    // The DP pass stays bounded (coreauthd may still be hit — RUSH-2233).
+    expect(block).toContain('boundedWait(listDataProtectionTimeout');
   });
 
   it('list-synced skips authentication UI while enumerating attributes', () => {

@@ -491,15 +491,19 @@ case "list":
         kSecReturnAttributes: kCFBooleanTrue!,
         kSecUseDataProtectionKeychain: kCFBooleanTrue!,
         kSecAttrSynchronizable: kCFBooleanFalse!,
-        kSecUseAuthenticationUI: kSecUseAuthenticationUISkip,
     ]
-    // The DP pass hits LocalAuthentication/coreauthd even though it never
-    // evaluates an ACL, so a starved coreauthd leaves SecItemCopyMatching
-    // blocked with no deadline of its own — that is how helpers accumulate
-    // (RUSH-2233). Bound it and skip on timeout. Switching the pass to
-    // kSecUseAuthenticationUIFail would bound it too, but at the cost named at
-    // the top of this case: it drops every biometry-ACL item even when
-    // coreauthd is healthy.
+    // No kSecUseAuthenticationUI on the DP pass — attributes-only, exactly as the
+    // note at the top of this case requires. A UI key would bound the pass
+    // cheaply, but neither value is usable here: kSecUseAuthenticationUIFail errors
+    // out of the DP keychain wholesale, and kSecUseAuthenticationUISkip silently
+    // omits every biometry-ACL item — which is precisely the value items `list`
+    // exists to enumerate (RUSH-2251: with UISkip present, every hold/always-policy
+    // bundle enumerated zero value items and became unreadable). Omitting the key
+    // instead never evaluates an ACL (attributes without kSecReturnData), so it
+    // neither prompts nor filters. It does still hit LocalAuthentication/coreauthd,
+    // so a starved coreauthd could block SecItemCopyMatching with no deadline of
+    // its own (RUSH-2233) — the boundedWait below is its only bound, and skips the
+    // pass on timeout.
     var items: [[String: Any]] = []
     for query in [fileQuery, dpQuery] {
         var result: AnyObject?
