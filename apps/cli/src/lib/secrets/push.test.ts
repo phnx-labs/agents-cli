@@ -15,6 +15,12 @@
  * - **A reserved `.invalid` hostname** (RFC 6761: guaranteed never to resolve)
  *   gives a real ssh process exiting non-zero, with no packet leaving the box.
  *
+ * The transport SELECTION is pinned separately from execution, against
+ * `planPushTransport`. Choosing wrong is silent — a Windows target handed
+ * `--from -` hangs on a stdin the `agents.ps1` shim never forwards — and it is
+ * not observable from an `SshExecResult`, so asserting the plan is the only way
+ * to bite that branch without a live Windows box.
+ *
  * Not covered here: the keychain read-back on a SUCCESSFUL push. It needs a live
  * macOS remote whose login keychain is reachable over headless SSH — there is no
  * way to reach `code === 0` without one, and a fake `ssh` on PATH would be the
@@ -45,8 +51,7 @@ afterAll(() => {
   fs.rmSync(TEST_DEVICES_DIR, { recursive: true, force: true });
 });
 
-const { pushResolvedBundleToHost, isPowershellTarget, bundleEnvToDotenv } = await import('./push.js');
-const { buildWindowsStdinImportCommand } = await import('../hosts/remote-cmd.js');
+const { pushResolvedBundleToHost, planPushTransport, bundleEnvToDotenv } = await import('./push.js');
 
 /** A bundle already read from the store — never resolved here, so nothing prompts. */
 const RESOLVED = {
@@ -55,27 +60,93 @@ const RESOLVED = {
   keyCount: 2,
 };
 
-describe('isPowershellTarget — the one predicate behind both Windows branches', () => {
-  it('reads the platform off the real device registry', () => {
-    expect(isPowershellTarget('push-test-win')).toBe(true);
-    expect(isPowershellTarget('push-test-linux')).toBe(false);
+/**
+ * The selection, not the builders it calls. Picking the wrong transport is
+ * silent — a Windows target handed `--from -` hangs on a stdin the `agents.ps1`
+ * shim never forwards — so what is pinned here is which of the four a
+ * (backend, target-OS) pair resolves to, decided off the real device registry.
+ */
+describe('planPushTransport — which transport a backend/OS pair selects', () => {
+  const plan = (host: string, remoteBackend: 'file' | 'keychain', force?: boolean) =>
+    planPushTransport(RESOLVED, 'apple.com', host, { remoteBackend, force, operation: 'push.test' });
+
+  it('refuses file backend to a Windows target instead of emitting broken PowerShell', () => {
+    expect(plan('push-test-win', 'file')).toEqual({
+      kind: 'refuse',
+      message: 'file backend export to a Windows target is not yet supported',
+    });
   });
 
-  it('strips a user@ prefix before the lookup', () => {
-    expect(isPowershellTarget('admin@push-test-win')).toBe(true);
+  it('sends the POSIX file-import command to a Linux target, with the .env on stdin', () => {
+    const t = plan('push-test-linux', 'file');
+    expect(t.kind).toBe('ssh');
+    if (t.kind !== 'ssh') throw new Error('unreachable');
+    expect(t.remoteCmd).toContain('bash -lc');
+    expect(t.remoteCmd).not.toMatch(/powershell/i);
+    expect(t.input).toContain('API_KEY=');
   });
 
-  it('treats an unknown host as POSIX', () => {
-    expect(isPowershellTarget('push-test-never-registered')).toBe(false);
+  it('bridges a Windows KEYCHAIN push through PowerShell, never through --from -', () => {
+    const t = plan('push-test-win', 'keychain');
+    expect(t.kind).toBe('ssh');
+    if (t.kind !== 'ssh') throw new Error('unreachable');
+    expect(t.remoteCmd).toMatch(/^powershell -NoProfile -EncodedCommand /);
+    const script = Buffer.from(t.remoteCmd.split('-EncodedCommand ')[1], 'base64').toString('utf16le');
+    // The shim can't forward ssh-piped stdin to node, so `--from -` would hang.
+    expect(script).toContain("agents secrets import 'apple.com' --from $tmp");
+    expect(script).not.toContain('--from -');
+    expect(t.input).toBe(RESOLVED.dotenv);
+  });
+
+  it('uses the OS-aware secrets wrapper for a POSIX keychain push', () => {
+    expect(plan('push-test-linux', 'keychain')).toEqual({
+      kind: 'remote-secrets',
+      args: ['import', 'apple.com', '--from', '-'],
+      input: RESOLVED.dotenv,
+    });
+  });
+
+  it('resolves the target OS after stripping a user@ prefix', () => {
+    expect(plan('admin@push-test-win', 'file').kind).toBe('refuse');
+    expect(plan('admin@push-test-linux', 'file').kind).toBe('ssh');
+  });
+
+  it('treats an unregistered host as POSIX', () => {
+    expect(plan('push-test-never-registered', 'file').kind).toBe('ssh');
+    expect(plan('push-test-never-registered', 'keychain').kind).toBe('remote-secrets');
+  });
+
+  it('forwards --force on every transport that has one', () => {
+    const win = plan('push-test-win', 'keychain', true);
+    if (win.kind !== 'ssh') throw new Error('unreachable');
+    const script = Buffer.from(win.remoteCmd.split('-EncodedCommand ')[1], 'base64').toString('utf16le');
+    expect(script).toContain('--from $tmp --force');
+    expect(plan('push-test-linux', 'keychain', true)).toMatchObject({
+      args: ['import', 'apple.com', '--from', '-', '--force'],
+    });
+  });
+
+  it('never forwards a passphrase the caller did not pass — the RUSH-1968 contract', () => {
+    // `fleet apply` calls this with no passphrase on purpose: each device keys the
+    // bundle under its OWN machine-local key instead of a fleet-wide shared secret.
+    const t = plan('push-test-linux', 'file');
+    if (t.kind !== 'ssh') throw new Error('unreachable');
+    expect(t.remoteCmd).not.toContain('AGENTS_SECRETS_PASSPHRASE=');
   });
 });
 
 describe('pushResolvedBundleToHost — transport branches', () => {
   const realPath = process.env.PATH;
+  // Mirror AGENTS_DEVICES_DIR's delete-or-restore, so an env that genuinely had
+  // no PATH is not handed back an empty string.
+  const restorePath = () => {
+    if (realPath === undefined) delete process.env.PATH;
+    else process.env.PATH = realPath;
+  };
 
   describe('with no ssh on PATH (transport cannot run)', () => {
     beforeAll(() => { process.env.PATH = ''; });
-    afterAll(() => { process.env.PATH = realPath; });
+    afterAll(restorePath);
 
     it('refuses a file-backend push to a Windows target BEFORE reaching ssh', () => {
       const out = pushResolvedBundleToHost(RESOLVED, 'apple.com', 'push-test-win', {
@@ -155,38 +226,8 @@ describe('pushResolvedBundleToHost — transport branches', () => {
         }
       }
     } finally {
-      process.env.PATH = realPath;
+      restorePath();
     }
-  });
-});
-
-describe('Windows keychain transport bridges stdin through a temp file', () => {
-  // The `agents.ps1` shim does not forward ssh-piped stdin to node, so the POSIX
-  // `--from -` form would hang forever. This is the command that branch sends.
-  const cmd = buildWindowsStdinImportCommand('apple.com');
-
-  it('is an encoded PowerShell command, not a bash -lc', () => {
-    expect(cmd).toMatch(/^powershell -NoProfile -EncodedCommand /);
-    expect(cmd).not.toContain('bash -lc');
-  });
-
-  it('imports from a temp FILE and deletes it, rather than from stdin', () => {
-    const encoded = cmd.split('-EncodedCommand ')[1];
-    const script = Buffer.from(encoded, 'base64').toString('utf16le');
-    expect(script).toContain('[Console]::In.ReadToEnd()');
-    expect(script).toContain('GetTempFileName()');
-    expect(script).toContain("agents secrets import 'apple.com' --from $tmp");
-    expect(script).not.toContain('--from -');
-    // The temp file holds the .env, so cleanup must be unconditional.
-    expect(script).toContain('finally {');
-    expect(script).toContain('Remove-Item -LiteralPath $tmp -Force');
-  });
-
-  it('forwards --force only when asked', () => {
-    const decode = (c: string) =>
-      Buffer.from(c.split('-EncodedCommand ')[1], 'base64').toString('utf16le');
-    expect(decode(buildWindowsStdinImportCommand('apple.com', { force: true }))).toContain('--from $tmp --force');
-    expect(decode(cmd)).not.toContain('--force');
   });
 });
 
