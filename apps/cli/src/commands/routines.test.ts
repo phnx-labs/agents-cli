@@ -347,6 +347,100 @@ describeRoutines('routines devices --set unknown is nonzero/no mutation', () => 
   });
 });
 
+// #2118: --set fans out pause/resume to every registered device. An offline
+// peer that is NOT in the new set must be a warning, not a hard fail — the
+// pin on the reachable target already succeeded.
+describeRoutines('routines devices --set skips unreachable non-targets (#2118)', () => {
+  it('enables on the local target and warns about an offline peer that cannot be paused', () => {
+    const offlinePeer = {
+      name: 'offline-box',
+      platform: 'macos',
+      // No dnsName/ip: resolveHost fails immediately (no SSH hang) the same way
+      // a sleeping Tailscale host does for applyDevices' remote pause.
+      address: { via: 'manual' },
+      auth: { method: 'key' },
+    };
+    const home = makeHome({
+      jobs: [baseJob],
+      registry: {
+        'yosemite-s0': { name: 'yosemite-s0', platform: 'linux' },
+        'offline-box': offlinePeer,
+      },
+    });
+    try {
+      const res = run(home, ['devices', 'test-job', '--set', 'yosemite-s0'], {
+        AGENTS_SYNC_MACHINE_ID: 'yosemite-s0',
+      });
+      expect(res.status, res.stderr + res.stdout).toBe(0);
+      expect(res.stdout + res.stderr).toMatch(/Skipped pause of 'test-job' on offline-box/i);
+      expect(res.stdout + res.stderr).toMatch(/enabled on: yosemite-s0/i);
+      expect(res.stdout + res.stderr).toMatch(/offline device.*skipped/i);
+      expect(readDeviceRoutines(home, 'yosemite-s0')).toContain('test-job');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('exits non-zero when a selected target device cannot be reached', () => {
+    const offlinePeer = {
+      name: 'offline-box',
+      platform: 'macos',
+      address: { via: 'manual' },
+      auth: { method: 'key' },
+    };
+    const home = makeHome({
+      jobs: [baseJob],
+      registry: {
+        'yosemite-s0': { name: 'yosemite-s0', platform: 'linux' },
+        'offline-box': offlinePeer,
+      },
+      deviceRoutines: { 'yosemite-s0': ['test-job'] },
+    });
+    try {
+      const res = run(home, ['devices', 'test-job', '--set', 'offline-box'], {
+        AGENTS_SYNC_MACHINE_ID: 'yosemite-s0',
+      });
+      expect(res.status).not.toBe(0);
+      expect(res.stderr + res.stdout).toMatch(/Could not enable 'test-job' on: offline-box/i);
+      // Local pause (removing the routine from this device) still applied before
+      // the remote target failed — pin must not claim full success.
+      expect(readDeviceRoutines(home, 'yosemite-s0')).not.toContain('test-job');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describeRoutines('routines devices --clear skips unreachable peers (#2118)', () => {
+  it('clears the local pin and reports skipped offline peers instead of aborting', () => {
+    const offlinePeer = {
+      name: 'offline-box',
+      platform: 'macos',
+      address: { via: 'manual' },
+      auth: { method: 'key' },
+    };
+    const home = makeHome({
+      jobs: [{ ...baseJob, devices: ['yosemite-s0'] }],
+      registry: {
+        'yosemite-s0': { name: 'yosemite-s0', platform: 'linux' },
+        'offline-box': offlinePeer,
+      },
+      deviceRoutines: { 'yosemite-s0': ['test-job'] },
+    });
+    try {
+      const res = run(home, ['devices', 'test-job', '--clear'], {
+        AGENTS_SYNC_MACHINE_ID: 'yosemite-s0',
+      });
+      expect(res.status, res.stderr + res.stdout).toBe(0);
+      expect(res.stdout + res.stderr).toMatch(/Skipped pause of 'test-job' on offline-box/i);
+      expect(res.stdout + res.stderr).toMatch(/disabled on every registered device/i);
+      expect(readDeviceRoutines(home, 'yosemite-s0')).toEqual([]);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describeRoutines('routines add --devices unknown is nonzero/no write', () => {
   it('rejects unknown devices and does not create the routine file', () => {
     const home = makeHome({ registry: { 'yosemite-s0': registry['yosemite-s0'] } });

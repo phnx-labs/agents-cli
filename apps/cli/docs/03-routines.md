@@ -560,6 +560,13 @@ agents routines devices drain --set yosemite-s0            # set the owning devi
 agents routines devices drain --clear                      # remove allowlist (unrestricted)
 ```
 
+`--set` / `--clear` fan out pause/resume to every registered device so peers
+outside the new set stop firing the routine. An **unreachable** peer (asleep,
+offline, missing address) is **skipped with a warning**, not a hard fail — the
+pin on reachable targets still succeeds, and an offline box cannot be running
+the routine (it picks up the enabled set on its next sync). The command exits
+non-zero only when a **selected** target device could not be enabled.
+
 ### Project tagging
 
 Tag a routine to one or more projects defined in `agents projects`. Tagging is

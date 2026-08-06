@@ -1710,8 +1710,17 @@ export function registerRoutinesCommands(program: Command): void {
         const selectedSet = new Set(selected.map(normalizeHost));
         const unknown = [...selectedSet].filter((device) => !all.includes(device));
         if (unknown.length > 0) throw new Error(`Unknown device${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}`);
+        // --set/--clear fan out to every registered device so peers outside the
+        // new set get paused. An asleep/offline peer must not abort the whole
+        // pin: the target may already be applied, and an unreachable box cannot
+        // be running the routine (it picks up the enabled set on next sync).
+        // Exit non-zero only when a *selected* device could not be enabled
+        // (github.com/phnx-labs/agents-cli#2118).
+        const skipped: Array<{ device: string; action: 'resume' | 'pause' }> = [];
+        const failedTargets: string[] = [];
         for (const device of all) {
-          const action = selectedSet.has(device) ? 'resume' : 'pause';
+          const action: 'resume' | 'pause' = selectedSet.has(device) ? 'resume' : 'pause';
+          const isTarget = selectedSet.has(device);
           if (device === normalizeHost(machineId())) {
             setJobEnabled(name!, action === 'resume');
             if (isDaemonRunning()) signalDaemonReload();
@@ -1719,11 +1728,33 @@ export function registerRoutinesCommands(program: Command): void {
           }
           const launch = getCliLaunch(['routines', action, name!, '--host', device]);
           const result = spawnSync(launch.command, launch.args, { stdio: 'inherit', env: process.env });
-          if ((result.status ?? 1) !== 0) throw new Error(`Could not ${action} '${name}' on ${device}`);
+          if ((result.status ?? 1) !== 0) {
+            if (isTarget) {
+              failedTargets.push(device);
+            } else {
+              skipped.push({ device, action });
+            }
+          }
         }
+        for (const s of skipped) {
+          console.log(chalk.yellow(
+            `Skipped ${s.action} of '${name}' on ${s.device} (unreachable; will sync when online)`,
+          ));
+        }
+        if (failedTargets.length > 0) {
+          const offlineNote = skipped.length > 0
+            ? ` (also skipped offline: ${skipped.map((s) => s.device).join(', ')})`
+            : '';
+          throw new Error(
+            `Could not enable '${name}' on: ${failedTargets.join(', ')}${offlineNote}`,
+          );
+        }
+        const offlineNote = skipped.length > 0
+          ? ` (${skipped.length} offline device${skipped.length === 1 ? '' : 's'} skipped)`
+          : '';
         console.log(chalk.green(selected.length === 0
-          ? `Routine '${name}' disabled on every registered device`
-          : `Routine '${name}' enabled on: ${selected.join(', ')}`));
+          ? `Routine '${name}' disabled on every registered device${offlineNote}`
+          : `Routine '${name}' enabled on: ${selected.join(', ')}${offlineNote}`));
       };
 
       if (options.clear) {
