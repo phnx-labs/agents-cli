@@ -78,11 +78,23 @@ interface SyncOpts {
   yes?: boolean;
   force?: boolean;
   quiet?: boolean;
+  /**
+   * Machine-readable output. Also required by the fleet fan-out path
+   * (`agents sync --host all`), which injects `--json` on every peer so the
+   * roster can parse per-device results. Without this option registered,
+   * remotes reject the flag with `unknown option '--json'` (RUSH-2216).
+   */
+  json?: boolean;
   // Umbrella-verb flags (only meaningful when no agent is given).
   repos?: boolean;
   secrets?: boolean;
   cloud?: boolean;
   local?: boolean;
+}
+
+/** Emit one JSON object to stdout for `--json` callers / fleet fan-out. */
+function emitJson(payload: unknown): void {
+  console.log(JSON.stringify(payload));
 }
 
 /** Register the `agents sync` command. */
@@ -99,6 +111,7 @@ export function registerSyncCommand(program: Command): void {
     .option('-y, --yes', 'Skip the interactive preview and auto-sync all detected resources', false)
     .option('--force', 'Re-sync even if no changes are detected since the last sync', false)
     .option('--quiet', 'Suppress all output (exit code indicates success)', false)
+    .option('--json', 'Emit machine-readable JSON (also accepted so fleet fan-out via --host all can parse each peer)', false)
     // Umbrella verb (no agent given): make this machine current.
     .option('--repos', 'Umbrella: git-pull ~/.agents + enabled ~/.agents-* extras', false)
     .option('--secrets', 'Umbrella: pull encrypted secret bundles from the remote', false)
@@ -134,21 +147,46 @@ async function runRepoGitSync(
   quiet: boolean,
   outLog: (msg: string) => void,
   errLog: (msg: string) => void,
+  json = false,
 ): Promise<void> {
   const target = resolveRepoGitTarget(repo);
   if (!target) {
-    errLog(chalk.red(`The '${repo}' repo isn't independently git-synced.`));
-    errLog(chalk.gray('Syncable repos: system (pull-only), user, and enabled extra-repo aliases.'));
+    if (json) {
+      emitJson({
+        ok: false,
+        mode: 'repo-git',
+        repo,
+        error: `The '${repo}' repo isn't independently git-synced.`,
+      });
+    } else {
+      errLog(chalk.red(`The '${repo}' repo isn't independently git-synced.`));
+      errLog(chalk.gray('Syncable repos: system (pull-only), user, and enabled extra-repo aliases.'));
+    }
     process.exitCode = 1;
     return;
   }
 
-  if (!quiet) outLog(chalk.bold(`Syncing ${repo} repo…`) + chalk.gray(` (${target.dir})`));
+  if (!quiet && !json) outLog(chalk.bold(`Syncing ${repo} repo…`) + chalk.gray(` (${target.dir})`));
   const result = await syncRepoGit(target.dir, { push: target.push });
 
   if (!result.success) {
-    errLog(chalk.red(`sync ${repo} failed: ${result.error}`));
+    if (json) {
+      emitJson({ ok: false, mode: 'repo-git', repo, error: result.error ?? 'sync failed' });
+    } else {
+      errLog(chalk.red(`sync ${repo} failed: ${result.error}`));
+    }
     process.exitCode = 1;
+    return;
+  }
+
+  if (json) {
+    emitJson({
+      ok: true,
+      mode: 'repo-git',
+      repo,
+      commit: result.commit,
+      pushed: !!result.pushed,
+    });
     return;
   }
 
@@ -263,12 +301,15 @@ async function runUmbrella(
   quiet: boolean,
   outLog: (msg: string) => void,
   errLog: (msg: string) => void,
+  json = false,
 ): Promise<void> {
   // Interactive bare `agents sync` (a TTY, no --yes, no scope flag) drops into
   // the two-checklist picker: which repos to sync from, which agents to sync
-  // into. Any explicit flag or --yes keeps the non-interactive umbrella below.
+  // into. Any explicit flag, --yes, or --json keeps the non-interactive path.
+  // --json is a machine consumer (and the fleet fan-out injects it), so never
+  // open a picker under it.
   const anyExplicitFlag = !!(opts.repos || opts.secrets || opts.cloud || opts.local);
-  if (!quiet && !opts.yes && !anyExplicitFlag && isInteractiveTerminal()) {
+  if (!quiet && !json && !opts.yes && !anyExplicitFlag && isInteractiveTerminal()) {
     await runInteractiveReconcile(opts, outLog, errLog);
     return;
   }
@@ -281,14 +322,31 @@ async function runUmbrella(
   };
   const passphrase = process.env.AGENTS_SECRETS_PASSPHRASE || undefined;
 
-  if (!quiet) outLog(chalk.bold('Syncing this machine…'));
+  // Fleet fan-out only injects --json (not --yes). Treat --json as non-interactive
+  // so refresh({ skipPrompts }) never tries to prompt over SSH.
+  const yes = !!opts.yes || json;
+
+  if (!quiet && !json) outLog(chalk.bold('Syncing this machine…'));
   try {
     const result = await runUmbrellaSync({
       flags,
-      yes: !!opts.yes,
+      yes,
       passphrase,
-      log: (msg) => { if (!quiet) outLog(chalk.gray(`  ${msg}`)); },
+      log: (msg) => { if (!quiet && !json) outLog(chalk.gray(`  ${msg}`)); },
     });
+
+    if (json) {
+      emitJson({
+        ok: true,
+        mode: 'umbrella',
+        plan: result.plan,
+        repos: result.repos,
+        secrets: result.secrets,
+        devices: result.devices,
+        reconciled: result.reconciled,
+      });
+      return;
+    }
 
     if (!quiet) {
       const parts: string[] = [];
@@ -306,15 +364,27 @@ async function runUmbrella(
       for (const e of errs) errLog(chalk.yellow(`  ! ${e}`));
     }
   } catch (err) {
-    errLog(chalk.red(`sync failed: ${(err as Error).message}`));
+    if (json) {
+      emitJson({ ok: false, mode: 'umbrella', error: (err as Error).message });
+    } else {
+      errLog(chalk.red(`sync failed: ${(err as Error).message}`));
+    }
     process.exitCode = 1;
   }
 }
 
 async function runSync(agentSpec: string | undefined, repoArg: string | undefined, opts: SyncOpts): Promise<void> {
-  const quiet = !!opts.quiet;
+  const json = !!opts.json;
+  // --json is a machine consumer: suppress human stdout/stderr chatter so the
+  // single JSON object on stdout stays parseable for fleet fan-out.
+  const quiet = !!opts.quiet || json;
   const errLog = (msg: string) => { if (!quiet) console.error(msg); };
   const outLog = (msg: string) => { if (!quiet) console.log(msg); };
+  // Failures under --json still need a structured line on stdout so fleet
+  // fan-out's safeJsonParse gets a real object (not "unknown option").
+  const failJson = (payload: Record<string, unknown>) => {
+    if (json) emitJson({ ok: false, ...payload });
+  };
 
   // ---------- 1. Resolve agent + version ----------
   let agentId: AgentId | undefined;
@@ -334,15 +404,22 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   // below, and it precedes agent-spec parsing because repo names like
   // "system"/"user" would otherwise fail parseAgentSpec.
   if (agentSpec && !opts.agent && !repoArg && listRepoNames().includes(agentSpec)) {
-    await runRepoGitSync(agentSpec, quiet, outLog, errLog);
+    await runRepoGitSync(agentSpec, quiet, outLog, errLog, json);
     return;
   }
 
   if (agentSpec) {
     const parsed = parseAgentSpec(agentSpec);
     if (!parsed) {
-      errLog(chalk.red(`Invalid agent spec '${agentSpec}'.`));
-      errLog(chalk.gray('Examples: claude, claude@2.1.142, claude@latest, claude@oldest, claude@pinned, claude@all'));
+      failJson({
+        mode: 'agent',
+        error: `Invalid agent spec '${agentSpec}'.`,
+        hint: 'Examples: claude, claude@2.1.142, claude@latest, claude@oldest, claude@pinned, claude@all',
+      });
+      if (!json) {
+        errLog(chalk.red(`Invalid agent spec '${agentSpec}'.`));
+        errLog(chalk.gray('Examples: claude, claude@2.1.142, claude@latest, claude@oldest, claude@pinned, claude@all'));
+      }
       process.exitCode = 1;
       return;
     }
@@ -356,8 +433,11 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   if (repoScope !== undefined) {
     const known = listRepoNames();
     if (!known.includes(repoScope)) {
-      errLog(chalk.red(`Unknown repo '${repoScope}'.`));
-      errLog(chalk.gray(`Known repos: ${known.join(', ')}`));
+      failJson({ mode: 'agent', error: `Unknown repo '${repoScope}'.`, known });
+      if (!json) {
+        errLog(chalk.red(`Unknown repo '${repoScope}'.`));
+        errLog(chalk.gray(`Known repos: ${known.join(', ')}`));
+      }
       process.exitCode = 1;
       return;
     }
@@ -366,14 +446,16 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   if (opts.agent) {
     const resolved = resolveAgentName(opts.agent);
     if (!resolved) {
-      errLog(chalk.red(`Unknown agent '${opts.agent}'.`));
+      failJson({ mode: 'agent', error: `Unknown agent '${opts.agent}'.` });
+      if (!json) errLog(chalk.red(`Unknown agent '${opts.agent}'.`));
       process.exitCode = 1;
       return;
     }
     agentId = resolved;
   }
   if (agentId && isAgentHardDeprecated(agentId)) {
-    errLog(chalk.red(hardDeprecationError(agentId)));
+    failJson({ mode: 'agent', error: hardDeprecationError(agentId) });
+    if (!json) errLog(chalk.red(hardDeprecationError(agentId)));
     process.exitCode = 1;
     return;
   }
@@ -386,7 +468,8 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   if (!agentId) {
     // No agent specified → the umbrella verb: make this machine current
     // (fetch repos + secrets + sessions, then reconcile all installed agents).
-    await runUmbrella(opts, quiet, outLog, errLog);
+    // This is the path fleet fan-out (`--host all`) hits with injected --json.
+    await runUmbrella(opts, quiet, outLog, errLog, json);
     return;
   }
 
@@ -400,8 +483,11 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   if (selector === 'all') {
     const installed = listInstalledVersions(agentId);
     if (installed.length === 0) {
-      errLog(chalk.red(`No ${agentLabel(agentId)} versions installed.`));
-      errLog(chalk.gray(`Install one: agents add ${agentId}@latest`));
+      failJson({ mode: 'agent-all', agent: agentId, error: `No ${agentLabel(agentId)} versions installed.` });
+      if (!json) {
+        errLog(chalk.red(`No ${agentLabel(agentId)} versions installed.`));
+        errLog(chalk.gray(`Install one: agents add ${agentId}@latest`));
+      }
       process.exitCode = 1;
       return;
     }
@@ -409,15 +495,38 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     if (repoScope) {
       selection = buildRepoScopedSelection(repoScope, cwd);
       if (Object.keys(selection).length === 0) {
-        outLog(chalk.gray(`Nothing from repo '${repoScope}' to sync.`));
+        if (json) emitJson({ ok: true, mode: 'agent-all', agent: agentId, repo: repoScope, versions: [], note: 'nothing to sync' });
+        else outLog(chalk.gray(`Nothing from repo '${repoScope}' to sync.`));
         return;
       }
     }
     const scopeLabel = repoScope ? chalk.gray(` (repo: ${repoScope})`) : '';
-    outLog(chalk.cyan(`Syncing ${installed.length} ${agentLabel(agentId)} version(s)${scopeLabel}.`));
+    if (!json) outLog(chalk.cyan(`Syncing ${installed.length} ${agentLabel(agentId)} version(s)${scopeLabel}.`));
+    const versions: Array<{ version: string; result: SyncResult }> = [];
     for (const v of installed) {
       const result = syncResourcesToVersion(agentId, v, selection, { projectDir, cwd, force });
-      if (!quiet) printSyncDetail(result, agentId, v, cwd);
+      versions.push({ version: v, result });
+      if (!quiet && !json) printSyncDetail(result, agentId, v, cwd);
+    }
+    if (json) {
+      emitJson({
+        ok: true,
+        mode: 'agent-all',
+        agent: agentId,
+        repo: repoScope,
+        versions: versions.map(({ version: v, result }) => ({
+          version: v,
+          commands: !!result.commands,
+          skills: !!result.skills,
+          hooks: !!result.hooks,
+          memory: result.memory,
+          mcp: result.mcp,
+          permissions: !!result.permissions,
+          subagents: result.subagents,
+          plugins: result.plugins,
+          workflows: result.workflows,
+        })),
+      });
     }
     return;
   }
@@ -438,14 +547,25 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
       if (installed.length === 1) {
         version = installed[0];
       } else if (installed.length === 0) {
-        errLog(chalk.red(`No ${agentLabel(agentId)} versions installed.`));
-        errLog(chalk.gray(`Install one: agents add ${agentId}@latest`));
+        failJson({ mode: 'agent', agent: agentId, error: `No ${agentLabel(agentId)} versions installed.` });
+        if (!json) {
+          errLog(chalk.red(`No ${agentLabel(agentId)} versions installed.`));
+          errLog(chalk.gray(`Install one: agents add ${agentId}@latest`));
+        }
         process.exitCode = 1;
         return;
       } else {
-        errLog(chalk.red(`No default ${agentLabel(agentId)} version pinned. Specify one:`));
-        for (const v of installed) {
-          errLog(chalk.gray(`  agents sync ${agentId}@${v}`));
+        failJson({
+          mode: 'agent',
+          agent: agentId,
+          error: `No default ${agentLabel(agentId)} version pinned.`,
+          installed,
+        });
+        if (!json) {
+          errLog(chalk.red(`No default ${agentLabel(agentId)} version pinned. Specify one:`));
+          for (const v of installed) {
+            errLog(chalk.gray(`  agents sync ${agentId}@${v}`));
+          }
         }
         process.exitCode = 1;
         return;
@@ -454,19 +574,28 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   }
 
   if (!isVersionInstalled(agentId, version)) {
-    errLog(chalk.red(`${agentLabel(agentId)}@${version} is not installed.`));
     const installed = listInstalledVersions(agentId);
-    if (installed.length > 0) {
-      errLog(chalk.gray(`Installed: ${installed.join(', ')}`));
+    failJson({
+      mode: 'agent',
+      agent: agentId,
+      version,
+      error: `${agentLabel(agentId)}@${version} is not installed.`,
+      installed,
+    });
+    if (!json) {
+      errLog(chalk.red(`${agentLabel(agentId)}@${version} is not installed.`));
+      if (installed.length > 0) {
+        errLog(chalk.gray(`Installed: ${installed.join(', ')}`));
+      }
+      errLog(chalk.gray(`Install it: agents add ${agentId}@${version}`));
     }
-    errLog(chalk.gray(`Install it: agents add ${agentId}@${version}`));
     process.exitCode = 1;
     return;
   }
 
   // ---------- 3. --launch mode bypasses everything below ----------
   if (opts.launch) {
-    runLaunchMode(agentId, version, cwd, quiet);
+    runLaunchMode(agentId, version, cwd, quiet, json);
     return;
   }
 
@@ -476,16 +605,32 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   if (repoScope) {
     const scoped = buildRepoScopedSelection(repoScope, cwd);
     if (Object.keys(scoped).length === 0) {
-      outLog(chalk.gray(`Nothing from repo '${repoScope}' to sync into ${agentLabel(agentId)}@${version}.`));
+      if (json) {
+        emitJson({
+          ok: true,
+          mode: 'agent',
+          agent: agentId,
+          version,
+          repo: repoScope,
+          note: 'nothing to sync',
+        });
+      } else {
+        outLog(chalk.gray(`Nothing from repo '${repoScope}' to sync into ${agentLabel(agentId)}@${version}.`));
+      }
       return;
     }
     const result = syncResourcesToVersion(agentId, version, scoped, { projectDir, cwd, force });
-    if (!quiet) printSyncDetail(result, agentId, version, cwd);
+    if (json) {
+      emitJson(agentSyncJson(agentId, version, result, repoScope));
+    } else if (!quiet) {
+      printSyncDetail(result, agentId, version, cwd);
+    }
     return;
   }
 
   // ---------- 4. Decide selection (interactive preview vs auto) ----------
-  const yes = !!opts.yes;
+  // --json forces non-interactive (machine consumer / fleet fan-out).
+  const yes = !!opts.yes || json;
   const interactive = !quiet && !yes && isInteractiveTerminal();
 
   let selection: ResourceSelection | undefined;
@@ -541,6 +686,21 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     projectCompile = compileRulesForProject(projectRoot);
   }
 
+  if (json) {
+    emitJson({
+      ...agentSyncJson(agentId, version, result),
+      projectCompile: projectCompile
+        ? {
+            compiled: !!projectCompile.compiled,
+            agentsPath: projectCompile.agentsPath,
+            symlinks: projectCompile.symlinks,
+            skippedClobber: projectCompile.skippedClobber,
+          }
+        : null,
+    });
+    return;
+  }
+
   if (quiet) return;
 
   // ---------- 6. Detailed output ----------
@@ -557,6 +717,32 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
       `Skipped (user-authored, not overwritten): ${projectCompile.skippedClobber.join(', ')}`,
     ));
   }
+}
+
+/** Stable `--json` payload for a single agent@version resource sync. */
+function agentSyncJson(
+  agent: AgentId,
+  version: string,
+  result: SyncResult,
+  repo?: string,
+): Record<string, unknown> {
+  return {
+    ok: true,
+    mode: 'agent',
+    agent,
+    version,
+    ...(repo !== undefined ? { repo } : {}),
+    commands: !!result.commands,
+    skills: !!result.skills,
+    hooks: !!result.hooks,
+    memory: result.memory,
+    mcp: result.mcp,
+    permissions: !!result.permissions,
+    subagents: result.subagents,
+    plugins: result.plugins,
+    workflows: result.workflows,
+    projectSkipped: result.projectSkipped,
+  };
 }
 
 function anyResources(r: AvailableResources): boolean {
@@ -606,14 +792,37 @@ function printSyncDetail(result: SyncResult, agent: AgentId, version: string, cw
   if (kept) console.log(chalk.gray(kept));
 }
 
-function runLaunchMode(agent: AgentId, version: string, cwd: string, quiet: boolean): void {
+function runLaunchMode(agent: AgentId, version: string, cwd: string, quiet: boolean, json = false): void {
   let result;
   try {
     result = runLaunchSync({ agent, version, cwd });
   } catch (err) {
-    if (!quiet) {
+    if (json) {
+      emitJson({
+        ok: false,
+        mode: 'launch',
+        agent,
+        version,
+        error: (err as Error).message,
+      });
+      process.exitCode = 1;
+    } else if (!quiet) {
       console.error(chalk.yellow(`agents: launch sync skipped (${(err as Error).message})`));
     }
+    return;
+  }
+
+  if (json) {
+    emitJson({
+      ok: true,
+      mode: 'launch',
+      agent,
+      version,
+      rulesCompiled: !!result.rulesCompiled,
+      workspaceLinks: result.workspaceLinks,
+      marketplaces: result.marketplaces,
+      workspaceSkipped: result.workspaceSkipped,
+    });
     return;
   }
 
