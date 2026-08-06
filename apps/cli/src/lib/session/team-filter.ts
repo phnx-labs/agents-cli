@@ -190,12 +190,24 @@ export function filterTeamSessions(
 
 /**
  * Whether a team-origin session is a real `agents teams` teammate or a bare SDK
- * sub-agent (a `Task` / `Agent()` spawn). The two share the `sdk-cli` entrypoint
- * that sets `isTeamOrigin`, so they are told apart only by whether a `meta.json`
- * teammate record backs the origin ({@link TeamOrigin.source} === `'meta'`).
+ * spawn with no teammate record. The two share the `sdk-cli` entrypoint that
+ * sets `isTeamOrigin`, so they are told apart by whether a `meta.json` teammate
+ * record backs the origin ({@link TeamOrigin.source} === `'meta'`).
+ *
+ * `source` is newer than the rest of {@link TeamOrigin}, so a row that arrived
+ * from a pre-`source` peer over the `--host` fan-out carries none. There the
+ * meta-only fields settle it: the entrypoint fallback is a bare `{ handle }`, so
+ * any `team` / `mode` / `parentSessionId` / `startedAt` means a real teammate
+ * record produced it — otherwise a genuine teammate from an unupgraded peer
+ * would be misfiled into the no-team bucket, the exact conflation this splits.
  */
 export function teamRowKind(origin: TeamOrigin | undefined): 'teammate' | 'subagent' {
-  return origin?.source === 'meta' ? 'teammate' : 'subagent';
+  if (!origin) return 'subagent';
+  if (origin.source === 'meta') return 'teammate';
+  if (origin.source === 'entrypoint') return 'subagent';
+  return origin.team || origin.mode || origin.parentSessionId || origin.startedAt
+    ? 'teammate'
+    : 'subagent';
 }
 
 /** A team-origin session with its resolved {@link TeamOrigin} guaranteed present. */

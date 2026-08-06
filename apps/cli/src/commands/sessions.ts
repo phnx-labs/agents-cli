@@ -2939,7 +2939,7 @@ function teamMemberRow(session: SessionMeta, live?: ActiveSession): string {
     '  ' +
     chalk.dim(padToWidth(session.shortId, 9)) +
     agentColor(padToWidth(truncateToWidth(session.agent, 7), 8)) +
-    chalk.yellow(padToWidth(mode || '-', TEAM_MODE_W + 1)) +
+    chalk.yellow(padToWidth(truncateToWidth(mode || '-', TEAM_MODE_W), TEAM_MODE_W + 1)) +
     (badges ? badges + ' ' : '') +
     (glyph ? glyph + ' ' : '') +
     statusCell +
@@ -4598,7 +4598,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--opencode', 'Shorthand for --agent opencode')
     .option('--all', 'Widen every non-status filter to "all": every directory (not just this project) and all time (no window cap). Status filters like --active still compose; -a/--device/--since still narrow their axis.')
     .option('--unmanaged', "Also show sessions from your own ~/.<agent> installs (hidden once agents-cli manages that agent)")
-    .option('--team, --teams', 'Show team-spawned sessions (hidden by default), grouped by team — each team names its spawner and spawn time, teammates show their mode + handle, and bare SDK spawns sink into a sub-agents bucket. --flat/--tree keep the plain inline table')
+    .option('--team, --teams', 'Show team-spawned sessions (hidden by default), grouped by team — each team names its spawner and spawn time, teammates show their mode + handle, and team-flagged spawns with no teammate record sink into a (no team) bucket. --flat/--tree keep the plain inline table')
     .option('--in-team <name>', "Only this team: the session that spawned it plus (with --teams) its teammates. Spans every directory and all time, since a team's worktrees and history sit outside the default window.")
     .option('--routine', 'Show only sessions archived from routine runs')
     .option('-p, --project <name>', 'Filter by project name (searches across all directories)')
@@ -4685,7 +4685,8 @@ export function registerSessionsCommands(program: Command): void {
       agents sessions "topic" --all
 
       # Team-spawned sessions, grouped by team (spawner + spawn time per team,
-      # teammate mode/handle per row; bare SDK spawns in a sub-agents bucket)
+      # teammate mode/handle per row; team-flagged spawns with no team record
+      # in a trailing (no team) bucket)
       agents sessions --teams
 
       # Who spawned which team: an orchestrator row carries team:<name>, and a

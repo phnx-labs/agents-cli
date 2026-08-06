@@ -195,9 +195,18 @@ describe('teamRowKind', () => {
     expect(teamRowKind({ handle: 'x', source: 'entrypoint' })).toBe('subagent');
   });
 
-  it('an origin with no source (or none at all) is treated as a sub-agent, never a false teammate', () => {
+  it('a bare-handle origin with no source is a sub-agent; undefined is too', () => {
     expect(teamRowKind({ handle: 'x' })).toBe('subagent');
     expect(teamRowKind(undefined)).toBe('subagent');
+  });
+
+  it('a source-less origin carrying meta fields is a teammate — version-skew peer safety (RUSH-1997)', () => {
+    // A pre-`source` peer sends a teamOrigin over the --host fan-out with no
+    // `source` but real meta fields. It must stay a teammate, not fall into the
+    // no-team bucket and lose its team name.
+    expect(teamRowKind({ handle: 'x', team: 'redesign' })).toBe('teammate');
+    expect(teamRowKind({ handle: 'x', mode: 'edit' })).toBe('teammate');
+    expect(teamRowKind({ handle: 'x', parentSessionId: 'orch-1' })).toBe('teammate');
   });
 });
 
@@ -450,6 +459,15 @@ describe('groupSessionsByTeam (RUSH-1997)', () => {
   it('buckets a teammate that carries no team name under (unnamed team), not the sub-agents bucket', () => {
     const groups = groupSessionsByTeam([teamRow({ id: 'n1', team: undefined, source: 'meta' })]);
     expect(groups[0].key).toBe(UNNAMED_TEAM_KEY);
+    expect(groups[0].kind).toBe('team');
+  });
+
+  it('groups a source-less peer teammate (version skew) under its team, not (no team)', () => {
+    const groups = groupSessionsByTeam([
+      makeSession({ id: 'peer1', teamOrigin: { handle: 'ui', team: 'legacy-peer-team' } }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].key).toBe('legacy-peer-team');
     expect(groups[0].kind).toBe('team');
   });
 
