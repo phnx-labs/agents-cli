@@ -349,7 +349,7 @@ export function registerSetupCommand(program: Command): void {
         agents setup share       # provision or join a Cloudflare share endpoint
         agents setup secrets     # choose secrets backend/policy defaults + import
         agents setup fleet       # discover Tailscale devices + configure SSH access
-        agents setup watchdog    # choose which devices run the watchdog routine
+        agents setup watchdog    # choose which devices run the daemon watchdog pass
 
       To install CLIs from agents.yaml and sync resources into version homes:
         agents sync --local -y

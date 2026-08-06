@@ -986,7 +986,7 @@ access control (that is 1Password/Vault; this tool is device-local first).
   auto-share read therefore resolve `agentOnly: true` unconditionally
   (`commands/exec.ts` secrets injection; `lib/share/config.ts` `shareRuntimeEnv`),
   NOT gated on `isHeadlessSecretsContext()`. Gating the launch read on tty let a
-  watchdog's `agents run auto --interactive` (routine + menu-bar tick, ~2 min)
+  watchdog's `agents run auto --interactive` (daemon-owned pass)
   prompt for a `hold` bundle and pile up helper sheets. **Given** an interactive
   `agents run --secrets <hold-bundle>` whose bundle is not broker-held **When** it
   launches **Then** it fails fast naming `agents secrets unlock <bundle>`, no sheet.
@@ -2105,8 +2105,8 @@ nothing but its own view cache.
 - **SING-1 (MUST).** Every fleet-affecting capability MUST have exactly one scheduler
   and one executor: the agents-cli daemon (`agents __daemon-run`,
   `apps/cli/src/lib/daemon.ts`) or a CLI command the daemon or the user drives.
-  Status: **Current** for routines (`lib/scheduler.ts`), the watchdog
-  (the system `routines/watchdog.yml` definition, WD-1), and rotate (`lib/watchdog/rotate.ts`).
+  Status: **Current** for routines (`lib/scheduler.ts`), the daemon-native watchdog
+  (`lib/daemon.ts`, WD-1), and rotate (`lib/watchdog/rotate.ts`).
 - **SING-2 (MUST NOT).** A UI surface (apps/factory, the menubar app, the iOS app)
   MUST NOT own a timer, watcher, or loop that detects a condition and performs a
   fleet-affecting action. Detection and decision MUST live in the CLI, which holds
@@ -2219,7 +2219,7 @@ is not two daemons existing — it is two daemons consuming the **same** input.
 
 ## Watchdog
 
-The normative contract for `agents watchdog` — the routine that detects **idle** agents
+The normative contract for `agents watchdog` — the daemon-owned service that detects **idle** agents
 and steers them to completion. The how-it-works companion is [watchdog.md](watchdog.md).
 Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are per RFC 2119; scenarios are
 Given/When/Then so they map 1:1 to tests.
@@ -2236,14 +2236,13 @@ not the watchdog's.
 
 #### 2.1 Trigger & lifecycle
 
-- **WD-1 (MUST).** The always-on watchdog MUST be a daemon-fired cron routine, not a
-  bespoke loop — the routine command is `agents watchdog --nudge` on
-  schedule in the system `routines/watchdog.yml`. Each fire MUST run exactly one
-  bounded tick.
+- **WD-1 (MUST).** The agents daemon MUST be the sole automatic watchdog scheduler and
+  executor. When device-local `watchdog.enabled` is true it MUST run one bounded,
+  non-overlapping pass every three minutes. UI surfaces MUST only render persisted state.
 - **WD-2 (MUST).** Delivery MUST occur only when `--nudge` is set; without it a tick is a
   dry run that reports "would nudge" and delivers nothing (`lib/watchdog/runner.ts`).
-- **WD-3 (MUST).** `enable`/`disable` MUST be backed by the routine store (create/pause the
-  job), and `status` MUST reflect the routine's real state (`commands/watchdog.ts`).
+- **WD-3 (MUST).** `on`/`off` MUST write the typed device-local `watchdog.enabled`
+  setting, and `status` MUST reflect that setting (`commands/watchdog.ts`).
 
 #### 2.2 Detection — idle is the target
 

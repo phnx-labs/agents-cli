@@ -72,18 +72,9 @@ enum AgentsCLI {
         return (try? JSONDecoder().decode([Routine].self, from: data)) ?? []
     }
 
-    static func recentSessions(limit: Int = 3) -> [RecentSession] {
-        guard let data = capture(argv(["sessions", "--all", "--limit", "\(limit)", "--json"])) else { return [] }
-        return (try? JSONDecoder().decode([RecentSession].self, from: data)) ?? []
-    }
-
-    // The session engine's live view — every local session (tmux, IDE, headless),
-    // not just extension-registered terminals. Costs seconds (transcript tails
-    // across version homes), so it is ONLY called from the warm-cache refreshers,
-    // never on the menu-open click path.
-    static func activeSessions() -> [ActiveSession] {
-        guard let data = capture(argv(["sessions", "--active", "--local", "--json"])) else { return [] }
-        return (try? JSONDecoder().decode([ActiveSession].self, from: data)) ?? []
+    static func menubarSnapshot() -> MenubarSnapshot? {
+        guard let data = capture(argv(["menubar", "snapshot", "--json"])) else { return nil }
+        return try? JSONDecoder().decode(MenubarSnapshot.self, from: data)
     }
 
     // The heaviest call the helper makes: `doctor --json` probes every installed
@@ -93,25 +84,6 @@ enum AgentsCLI {
     static func doctorOverview() -> DoctorOverview? {
         guard let data = capture(argv(["doctor", "--json"]), timeout: ChildProcess.doctorTimeout) else { return nil }
         return try? JSONDecoder().decode(DoctorOverview.self, from: data)
-    }
-
-    // RUSH-1415: is global auto-nudge on? The Swift menu-bar toggle drives this
-    // sentinel via watchdogSetEnabled; the tick reads it back to decide whether
-    // to inject or stay detect-only.
-    static func watchdogStatus() -> WatchdogStatus? {
-        guard let data = capture(argv(["watchdog", "status", "--json"])) else { return nil }
-        return try? JSONDecoder().decode(WatchdogStatus.self, from: data)
-    }
-
-    // RUSH-1415: run one watchdog tick. `nudge` actually injects "Continue." into
-    // stalled+addressable splits; without it the tick is detect-only (for the
-    // badge). The CLI's own cooldown ledger prevents re-nudging the same split, so
-    // this is safe to call on every 10s menu-bar poll.
-    static func watchdogTick(nudge: Bool) -> WatchdogTick? {
-        var a = ["watchdog", "--json"]
-        if nudge { a.append("--nudge") }
-        guard let data = capture(argv(a)) else { return nil }
-        return try? JSONDecoder().decode(WatchdogTick.self, from: data)
     }
 
     static func watchdogSetEnabled(_ on: Bool) {

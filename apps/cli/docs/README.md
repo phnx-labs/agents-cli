@@ -55,7 +55,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [Routines](03-routines.md) | Cron-scheduled and signed-webhook-triggered agent runs with sandboxed permissions and a long-running daemon. |
 | [Monitors](10-monitors.md) | Durable event-triggered watchers: watch a source, detect a change, fire an action. A routine whose trigger is a watched source instead of a clock. |
 | [Projects](11-projects.md) | Named multi-repo projects layered over the `--project` convention, plus the progress rollup — one card per project instead of a per-agent activity line. Beta. |
-| [Watchdog](watchdog.md) | Detect **idle** agents across the fleet and steer them to completion — a daemon-fired routine that analyzes a stalled session's goal and nudges it with the concrete next step (idle is its job; `waiting` belongs to the feed). |
+| [Watchdog](watchdog.md) | Detect **idle** agents across the fleet and steer them to completion — one device-local daemon pass every three minutes analyzes stalled sessions and nudges them with the concrete next step (idle is its job; `waiting` belongs to the feed). |
 
 ## Extensibility
 

@@ -193,6 +193,7 @@ describe('listConfig', () => {
     const { listConfig, setConfigValue } = await freshModules();
     setConfigValue('interactive.host', 'zion');
     setConfigValue('scheduler.enabled', true);
+    setConfigValue('watchdog.enabled', false);
 
     const entries = listConfig();
     const byName = Object.fromEntries(entries.map((e) => [e.spec.name, e]));
@@ -203,9 +204,11 @@ describe('listConfig', () => {
       'interactive.host',
       'notes',
       'scheduler.enabled',
+      'watchdog.enabled',
     ]);
     expect(byName['interactive.host']).toMatchObject({ value: 'zion', layer: 'user' });
     expect(byName['scheduler.enabled']).toMatchObject({ value: true, layer: 'device' });
+    expect(byName['watchdog.enabled']).toMatchObject({ value: false, layer: 'device' });
     expect(byName['notes'].value).toBeUndefined();
     expect(byName['notes'].layer).toBeUndefined();
   });

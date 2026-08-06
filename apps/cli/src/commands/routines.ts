@@ -497,6 +497,67 @@ export function buildRunsJson(runs: RunMeta[]): Record<string, unknown>[] {
   return runs.map(runMetaJson);
 }
 
+/** Build the exact structured routine rows shared by `routines list --json`
+ * and the one-process AGI Menu snapshot. */
+export function buildRoutineListJson(): Record<string, unknown>[] {
+  try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
+  const jobs = listAllJobs(process.cwd());
+  if (jobs.length === 0) return [];
+
+  const scheduler = new JobScheduler(async () => {});
+  scheduler.loadAll();
+  try {
+    const overdueSet = new Set<string>();
+    try {
+      for (const job of detectOverdueJobs()) overdueSet.add(job.name);
+    } catch {
+      // Best-effort indicator; never block the list on detection errors.
+    }
+    const now = new Date();
+    const knownProjectNames = new Set(listProjectDefs().map((project) => project.name));
+    return jobs.map((job) => {
+      const latestRun = localLatestRun(job);
+      const enabledDevices = devicesWithRoutineEnabled(job.name);
+      return {
+        name: job.name,
+        agent: job.agent ?? null,
+        workflow: job.workflow ?? null,
+        command: job.command ?? null,
+        repo: job.repo ?? null,
+        schedule: job.schedule ?? null,
+        scheduleHuman: fireConditionLabel(job),
+        trigger: job.trigger ?? null,
+        timezone: job.timezone ?? null,
+        devices: enabledDevices,
+        enabledDevices,
+        host: job.host ?? null,
+        hostStrategy: resolveHostStrategy(job),
+        source: job.source ?? null,
+        sourceRepo: job.source?.repo ?? job.repo ?? null,
+        sourceBranch: job.source?.branch ?? null,
+        runOnce: Boolean(job.runOnce),
+        catchup: job.catchup !== false,
+        oneShot: isOneShotRoutine(job),
+        expired: isPastOneShotRoutine(job, now),
+        runsHere: jobRunsOnThisDevice(job),
+        enabled: job.enabled,
+        overdue: overdueSet.has(job.name),
+        nextRun: nextRunForDisplay(job, scheduler)?.toISOString() ?? null,
+        nextRunHuman: nextRunLabel(job, scheduler, now),
+        lastStatus: latestRun?.status ?? null,
+        exitCode: latestRun?.exitCode ?? null,
+        failureReason: latestRun?.errorMessage ?? null,
+        lastRunStartedAt: latestRun?.startedAt ?? null,
+        lastRunCompletedAt: latestRun?.completedAt ?? null,
+        projects: job.projects ?? [],
+        projectGroup: computeProjectGroup(job.projects, knownProjectNames),
+      };
+    });
+  } finally {
+    scheduler.stopAll();
+  }
+}
+
 /** Detect Ctrl+C or premature stream close during an interactive prompt. */
 function isPromptCancelled(err: unknown): boolean {
   return (
@@ -661,6 +722,10 @@ export function registerRoutinesCommands(program: Command): void {
         console.error(chalk.red(`Unsupported --group-by '${options.groupBy}'. Use: project (default) or device`));
         process.exit(1);
       }
+      if (options.json) {
+        process.stdout.write(JSON.stringify(buildRoutineListJson()) + '\n');
+        return;
+      }
       try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
       const jobs = listAllJobs(process.cwd());
       if (jobs.length === 0) {
@@ -682,54 +747,6 @@ export function registerRoutinesCommands(program: Command): void {
         for (const j of detectOverdueJobs()) overdueSet.add(j.name);
       } catch {
         // Best-effort indicator; never block the list on detection errors.
-      }
-
-      // Machine-readable path: same data the table renders, but structured.
-      // The menu bar helper relies on this so it never reimplements cron math.
-      if (options.json) {
-        const nowJson = new Date();
-        const knownProjectNames = new Set(listProjectDefs().map((p) => p.name));
-        const payload = jobs.map((job) => {
-          const latestRun = localLatestRun(job);
-          const enabledDevices = devicesWithRoutineEnabled(job.name);
-          return {
-            name: job.name,
-            agent: job.agent ?? null,
-            workflow: job.workflow ?? null,
-            command: job.command ?? null,
-            repo: job.repo ?? null,
-            schedule: job.schedule ?? null,
-            scheduleHuman: fireConditionLabel(job),
-            trigger: job.trigger ?? null,
-            timezone: job.timezone ?? null,
-            devices: enabledDevices,
-            enabledDevices,
-            host: job.host ?? null,
-            hostStrategy: resolveHostStrategy(job),
-            source: job.source ?? null,
-            sourceRepo: job.source?.repo ?? job.repo ?? null,
-            sourceBranch: job.source?.branch ?? null,
-            runOnce: Boolean(job.runOnce),
-            catchup: job.catchup !== false,
-            oneShot: isOneShotRoutine(job),
-            expired: isPastOneShotRoutine(job, nowJson),
-            runsHere: jobRunsOnThisDevice(job),
-            enabled: job.enabled,
-            overdue: overdueSet.has(job.name),
-            nextRun: nextRunForDisplay(job, scheduler)?.toISOString() ?? null,
-            nextRunHuman: nextRunLabel(job, scheduler, nowJson),
-            lastStatus: latestRun?.status ?? null,
-            exitCode: latestRun?.exitCode ?? null,
-            failureReason: latestRun?.errorMessage ?? null,
-            lastRunStartedAt: latestRun?.startedAt ?? null,
-            lastRunCompletedAt: latestRun?.completedAt ?? null,
-            projects: job.projects ?? [],
-            projectGroup: computeProjectGroup(job.projects, knownProjectNames),
-          };
-        });
-        scheduler.stopAll();
-        process.stdout.write(JSON.stringify(payload) + '\n');
-        return;
       }
 
       console.log(chalk.bold('Scheduled Jobs\n'));

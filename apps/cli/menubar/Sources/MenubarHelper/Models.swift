@@ -117,10 +117,20 @@ struct WatchdogCounts: Decodable {
     let skipped: Int
 }
 
-// `agents watchdog status --json` — is global auto-nudge on?
-struct WatchdogStatus: Decodable {
+// `agents menubar snapshot --json` — the single repeating CLI read owned by
+// AGI Menu. Doctor remains a separate 15-minute diagnostic refresh.
+struct MenubarSnapshot: Decodable {
+    let version: Int
+    let capturedAt: String
+    let routines: [Routine]
+    let recentSessions: [RecentSession]
+    let activeSessions: [ActiveSession]
+    let watchdog: MenubarWatchdogSnapshot
+}
+
+struct MenubarWatchdogSnapshot: Decodable {
     let enabled: Bool
-    let stateDir: String?
+    let lastTick: WatchdogTick?
 }
 
 struct DoctorOrphan: Decodable {

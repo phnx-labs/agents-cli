@@ -357,6 +357,16 @@ describe('command-mode routines (executeJobDetached — daemon/cron path)', () =
     expect(final.status).toBe('completed');
   });
 
+  it('blocks a replacement while a failed record still owns a live process', async () => {
+    const command = `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 5000)"`;
+    const config = commandConfig('cmd-det-failed-live', command);
+    const first = await executeJobDetached(config);
+    writeRunMeta({ ...first, status: 'failed', completedAt: new Date().toISOString(), exitCode: 1 });
+
+    await expect(executeJobDetached(config)).rejects.toBeInstanceOf(RoutineAlreadyRunningError);
+    await waitTerminal(config.name, first.runId, 7000);
+  });
+
   it('monitorRunningJobs kills a detached process after its persisted deadline', async () => {
     const jobName = 'cmd-det-restart-timeout';
     jobs.push(jobName);

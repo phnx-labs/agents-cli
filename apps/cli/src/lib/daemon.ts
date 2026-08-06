@@ -25,7 +25,9 @@ import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
 import { redactSecrets } from './redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
-import { isSchedulerEnabled, assertSchedulerEnabled } from './device-config.js';
+import { getConfigValue, isSchedulerEnabled, assertSchedulerEnabled } from './device-config.js';
+import { reapTerminalRoutineProcesses } from './routine-process-cleanup.js';
+import { runWatchdogPass } from './watchdog/service.js';
 
 const PID_FILE = 'daemon.pid';
 const LOCK_FILE = 'daemon.lock';
@@ -36,6 +38,7 @@ const LOG_ROTATE_COUNT = 3;
 const PLIST_NAME = 'com.phnx-labs.agents-daemon';
 const SYSTEMD_UNIT = 'agents-daemon.service';
 const MONITOR_TICK_MS = 60_000;
+const WATCHDOG_TICK_MS = 3 * 60_000;
 /**
  * How often to re-scan for missed fires. Deliberately slower than the monitor
  * tick: detection walks a week of cron occurrences per routine
@@ -575,6 +578,25 @@ export async function runDaemon(): Promise<void> {
 
   if (schedulerEnabledAtBoot) bootScheduler();
 
+  let watchdogInFlight = false;
+  const runDaemonWatchdog = async () => {
+    if (watchdogInFlight || getConfigValue('watchdog.enabled').value !== true) return;
+    watchdogInFlight = true;
+    try {
+      const result = await runWatchdogPass({ nudge: true });
+      log(
+        'INFO',
+        `watchdog: ${result.counts.total} live, ${result.counts.stalled} stalled, ${result.counts.nudged} nudged`,
+      );
+    } catch (err) {
+      log('ERROR', `watchdog tick failed: ${(err as Error).message}`);
+    } finally {
+      watchdogInFlight = false;
+    }
+  };
+  const watchdogInterval = setInterval(() => { void runDaemonWatchdog(); }, WATCHDOG_TICK_MS);
+  const watchdogKickoff = setTimeout(() => { void runDaemonWatchdog(); }, 30_000);
+
   // Monitor engine: event-triggered watchers, beside the cron scheduler. Same
   // daemon, same dispatch seam — a monitor is a routine whose trigger is a
   // watched source instead of a clock. Reloads on SIGHUP alongside the scheduler.
@@ -681,6 +703,8 @@ export async function runDaemon(): Promise<void> {
   const monitorInterval = setInterval(() => {
     writeHeartbeat();
     monitorRunningJobs();
+    const reaped = reapTerminalRoutineProcesses();
+    if (reaped.length > 0) log('WARN', `Reaped ${reaped.length} terminal routine process group(s): ${reaped.join(', ')}`);
   }, MONITOR_TICK_MS);
 
   // Resource safety check: heal gaps between what DotAgents repos define and
@@ -1031,6 +1055,7 @@ export async function runDaemon(): Promise<void> {
       const reloaded = scheduler!.listScheduled();
       log('INFO', `Reloaded ${reloaded.length} jobs`);
     }
+    void runDaemonWatchdog();
     try {
       monitorEngine.reload();
     } catch (err) {
@@ -1044,6 +1069,8 @@ export async function runDaemon(): Promise<void> {
     monitorEngine.stop();
     await browserIPC.stop();
     clearInterval(monitorInterval);
+    clearInterval(watchdogInterval);
+    clearTimeout(watchdogKickoff);
     clearInterval(healInterval);
     clearTimeout(healKickoff);
     clearInterval(autoDispatchInterval);

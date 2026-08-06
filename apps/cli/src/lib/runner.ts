@@ -95,7 +95,7 @@ function activeRoutineRun(config: Pick<JobConfig, 'name' | 'timeout'>): RunMeta 
   const runs = listRuns(config.name);
   for (let i = runs.length - 1; i >= 0; i--) {
     const run = runs[i];
-    if (run.status !== 'running') continue;
+    if (!['running', 'failed', 'timeout'].includes(run.status)) continue;
     if (run.pid && isPidOurs(run.pid, run.spawnedAt)) return run;
     if (!run.pid) {
       const startedAt = Date.parse(run.startedAt);

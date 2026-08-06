@@ -142,6 +142,15 @@ export function registerMenubarCommands(program: Command): void {
   });
 
   menubar
+    .command('snapshot', { hidden: true })
+    .description('Emit the consolidated AGI Menu polling snapshot.')
+    .option('--json', 'Emit machine-readable JSON')
+    .action(async () => {
+      const { computeMenubarSnapshot } = await import('../lib/menubar/snapshot.js');
+      process.stdout.write(`${JSON.stringify(await computeMenubarSnapshot())}\n`);
+    });
+
+  menubar
     .command('enable')
     .description('Install and start AGI Menu (launches at login)')
     .action(() => {

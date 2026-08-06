@@ -112,6 +112,13 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     description: 'Whether the routines scheduler (daemon) may fire on this device.',
   },
   {
+    name: 'watchdog.enabled',
+    yamlKey: 'watchdogEnabled',
+    scope: 'device',
+    type: 'bool',
+    description: 'Whether the daemon runs the watchdog pass on this device.',
+  },
+  {
     name: 'browser.remote-control',
     yamlKey: 'browserRemoteControl',
     scope: 'device',

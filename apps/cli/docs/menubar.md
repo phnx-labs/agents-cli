@@ -8,10 +8,10 @@ The menu bar helper (`MenubarHelper.app`) is a no-Dock, `.accessory` status-bar
 app. Its icon — the agents-cli `a` mark — sits in the menu bar and answers, at a
 glance, "what are my agents doing right now, and does anything need me?"
 
-It reads state **directly from disk** and never invokes the `agents` CLI to
-populate the menu, so opening it costs a few file reads and never triggers the
-sessions transcript re-index. It shells the CLI only for *actions* (starting a
-session, running a routine).
+It keeps menu state warm with one read-only `agents menubar snapshot --json`
+subprocess every three minutes. That command reads indexed/cache state and never
+re-indexes transcripts. Opening the menu uses the warm result; CLI actions remain
+explicit controls (starting a session, running a routine).
 
 macOS only. It is auto-enabled for every user (see [Lifecycle](#lifecycle)); opt
 out with `agents menubar disable`.
@@ -313,12 +313,14 @@ the helper can no longer become the second, and `status` now lists every copy.
 
 ## Data sources
 
-The helper assembles the menu by reading these directly — no CLI, no re-index:
+The helper assembles the menu from these cached/indexed sources through one snapshot
+command every three minutes; the 10-second badge/liveness checks stay local:
 
 | Source | Path | Gives |
 |---|---|---|
 | Terminals | `~/.agents/.cache/terminals/live-terminals.json` | extension-registered terminals (agent, cwd, pid, label) — cold start + 10s badge poll |
-| Active sessions | `agents sessions --active --local --json` (warm cache, 30s TTL) | every local session (tmux / IDE / headless) with running-vs-idle — feeds triage + ACTIVE once loaded |
+| Menu snapshot | `agents menubar snapshot --json` every three minutes | routines, 40 indexed recent sessions, daemon-warmed local active sessions, and persisted watchdog status in one subprocess |
+| Doctor | `agents doctor --json` every 15 minutes | install and configuration health; kept separate because it is substantially heavier |
 | Teams | `~/.agents/.history/teams/agents/<id>/meta.json` | running teammate agents |
 | Cloud | `~/.agents/.cache/cloud/tasks.db` (SQLite) | cloud tasks, incl. `input_required` or `needs_review` → "awaiting input" |
 | Attention sentinels | `~/.agents/.cache/state/attention/<sessionId>` | terminal sessions awaiting input — mtime = wait start, content = the awaiting message (written by the Notification hook). On read, sentinels whose sessionId is not in the current live-terminals set are unlinked as orphans (defense against sessions killed hard, hookless Claude versions, or sessionId mismatches). |
