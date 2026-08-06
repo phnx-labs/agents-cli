@@ -20,7 +20,7 @@ import { SSH_OPTS, controlOpts, assertValidSshTarget, shellQuote } from '../ssh-
 import { sshTargetFor } from '../devices/connect.js';
 import { resolveExplicitTargetSet } from '../devices/resolve-target.js';
 import { loadDevices, isControlDevice, isDialableDevice, type DeviceProfile } from '../devices/registry.js';
-import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
+import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from '../hosts/remote-cmd.js';
 import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../remote-agents-json.js';
 import { machineId, normalizeHost } from './sync/config.js';
 import { NO_FANOUT_ENV } from './remote-active.js';
@@ -126,7 +126,7 @@ export function remoteListCommand(forwardedArgs: string[], os?: string): string 
 export function parseRemoteList(stdout: string, machine: string): SessionMeta[] {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(stdout);
+    parsed = JSON.parse(stripClixml(stdout));
   } catch {
     return [];
   }
@@ -155,7 +155,7 @@ export function parseRemoteListPayload(stdout: string, machine: string, safeReso
 } {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(stdout);
+    parsed = JSON.parse(stripClixml(stdout));
   } catch {
     return { items: [], valid: false };
   }

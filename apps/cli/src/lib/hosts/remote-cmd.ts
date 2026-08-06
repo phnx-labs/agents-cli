@@ -312,6 +312,32 @@ export interface WindowsAgentsCommand {
  */
 export const POWERSHELL_PROGRESS_SILENCE = "$ProgressPreference = 'SilentlyContinue'";
 
+/**
+ * Strip a PowerShell CLIXML wrapper from stdout relayed off a Windows host.
+ *
+ * PowerShell 5.1 serializes progress / error / verbose records to CLIXML when a
+ * stream is a redirected pipe (an ssh capture, not a console): a `#< CLIXML`
+ * banner followed by one or more `<Objs …>…</Objs>` elements. {@link
+ * POWERSHELL_PROGRESS_SILENCE} suppresses the common "Preparing modules for
+ * first use." progress record at the source, but a Windows peer reached WITHOUT
+ * that prelude — a raw `agents ssh <win> 'agents … --json'`, an older peer, or a
+ * record on a stream we did not silence — can still emit the banner ahead of the
+ * real payload, which breaks a naive `JSON.parse` of the relayed `--json`
+ * (RUSH-2286). Remove the banner and every self-contained `<Objs …>…</Objs>`
+ * block, leaving the genuine payload untouched. A no-op (returns the input
+ * unchanged) when no `#< CLIXML` marker is present, so it is safe to apply on
+ * every remote-JSON boundary regardless of the peer's OS.
+ */
+export function stripClixml(stdout: string): string {
+  if (!stdout.includes('#< CLIXML')) return stdout;
+  return stdout
+    // The `#< CLIXML` banner line (a stream may flush it mid-output, so match anywhere).
+    .replace(/^#< CLIXML[^\n]*\r?\n?/gm, '')
+    // Each CLIXML object element carrying the serialized progress/error records.
+    .replace(/<Objs\b[\s\S]*?<\/Objs>/g, '')
+    .trim();
+}
+
 export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
   const { args, env, cwd, propagateExit = true } = cmd;
   const parts: string[] = [POWERSHELL_PROGRESS_SILENCE];

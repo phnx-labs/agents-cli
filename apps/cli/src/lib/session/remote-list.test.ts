@@ -193,6 +193,21 @@ describe('parseRemoteList', () => {
     expect(parseRemoteList('bash: agents: command not found\n', 'zion')).toEqual([]);
   });
 
+  it('parses a payload a Windows peer prefixed with a PowerShell CLIXML banner (RUSH-2286)', () => {
+    const payload = JSON.stringify([
+      { id: 'w', shortId: 'w', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', filePath: 'C:\\r\\w.jsonl' },
+    ]);
+    const polluted =
+      '#< CLIXML\n' +
+      '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">' +
+      '<Obj S="progress" RefId="0"><MS><AV>Preparing modules for first use.</AV></MS></Obj></Objs>\n' +
+      payload;
+    const out = parseRemoteList(polluted, 'win-mini');
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe('w');
+    expect(out[0].machine).toBe('win-mini');
+  });
+
   it('returns [] when the top level is not an array', () => {
     expect(parseRemoteList(JSON.stringify({ error: 'nope' }), 'zion')).toEqual([]);
   });

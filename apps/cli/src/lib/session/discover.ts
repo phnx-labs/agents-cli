@@ -24,6 +24,8 @@ import type { SessionAgentId, SessionEvent, SessionMeta, TodoProgress } from './
 import type { AgentId } from '../types.js';
 import { AGENTS, agentConfigDirName, getCliVersion } from '../agents.js';
 import { walkForFilesWithStat } from '../fs-walk.js';
+import { hasCommand } from '../cli-resources.js';
+import { execFileShellSpec } from '../platform/exec.js';
 import { getConfigSymlinkVersion } from '../shims.js';
 import { SESSION_AGENTS } from './types.js';
 import { deriveShortId } from './short-id.js';
@@ -2452,12 +2454,11 @@ async function scanOpenCodeIncremental(): Promise<void> {
 
 /** Scan active OpenClaw channels and cron jobs via the openclaw CLI. */
 async function scanOpenClawIncremental(): Promise<void> {
-  // Check if openclaw is installed — silently skip if not.
-  try {
-    await execFileAsync('which', ['openclaw']);
-  } catch {
-    return;
-  }
+  // Check if openclaw is installed — silently skip if not. `which` is POSIX-only
+  // (Windows resolves PATH with `where`), so a bare `which` throws ENOENT on every
+  // Windows run and silently disabled the entire OpenClaw scan there — its sessions
+  // never reached the index (RUSH-2286). hasCommand() probes cross-platform.
+  if (!hasCommand('openclaw')) return;
 
   // TTL cache: skip subprocess calls if we scanned recently. Stored in the
   // meta table so we skip even when no channels/cron exist to produce rows.
@@ -2474,8 +2475,13 @@ async function scanOpenClawIncremental(): Promise<void> {
   const entries: ScanEntry[] = [];
 
   try {
-    const { stdout: output } = await execFileAsync('openclaw', ['channels', 'status'], {
+    // On Windows `openclaw` resolves to a .cmd/.ps1 shim that execFile can't launch
+    // directly; execFileShellSpec composes a shell-safe invocation there and is a
+    // no-op passthrough on POSIX (RUSH-2286).
+    const channelsSpec = execFileShellSpec('openclaw', ['channels', 'status']);
+    const { stdout: output } = await execFileAsync(channelsSpec.command, channelsSpec.args, {
       encoding: 'utf-8',
+      shell: channelsSpec.shell,
     });
 
     for (const line of output.split('\n')) {
@@ -2504,8 +2510,10 @@ async function scanOpenClawIncremental(): Promise<void> {
   }
 
   try {
-    const { stdout: output } = await execFileAsync('openclaw', ['cron', 'list'], {
+    const cronSpec = execFileShellSpec('openclaw', ['cron', 'list']);
+    const { stdout: output } = await execFileAsync(cronSpec.command, cronSpec.args, {
       encoding: 'utf-8',
+      shell: cronSpec.shell,
     });
 
     const lines = output.split('\n');
@@ -5230,10 +5238,13 @@ export function readGrokMeta(
         : undefined;
 
   // Grok records its managed home in summary.grok_home
-  // (…/versions/grok/<version>/home/.grok) — recover the version from it.
+  // (…/versions/grok/<version>/home/.grok) — recover the version from it. The
+  // value is written by the Grok CLI in the writing host's native separators, so
+  // a Windows-authored summary is backslash-separated; normalize to `/` before
+  // matching or the version never resolves on Windows (RUSH-2286).
   let embeddedVersion: string | undefined;
   if (typeof summary?.grok_home === 'string') {
-    embeddedVersion = summary.grok_home.match(/versions\/grok\/([^/]+)\//)?.[1];
+    embeddedVersion = summary.grok_home.replace(/\\/g, '/').match(/versions\/grok\/([^/]+)\//)?.[1];
   }
 
   const meta: SessionMeta = {

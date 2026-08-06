@@ -31,6 +31,7 @@ import { terminalWidth, truncateToWidth, padToWidth } from '../lib/session/width
 import { collectGitOutput } from '../lib/output/git-output.js';
 import { loadDevices, isControlDevice } from '../lib/devices/registry.js';
 import { machineId } from '../lib/session/sync/config.js';
+import { stripClixml } from '../lib/hosts/remote-cmd.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -200,7 +201,9 @@ async function fetchRemotePayload(device: string, options: OutputOptions): Promi
       timeout: 120_000,
       maxBuffer: 64 * 1024 * 1024,
     });
-    const parsed = JSON.parse(stdout) as OutputPayload;
+    // A Windows device relays its payload through PowerShell, which can prefix a
+    // CLIXML banner ahead of the JSON — strip it before parsing (RUSH-2286).
+    const parsed = JSON.parse(stripClixml(stdout)) as OutputPayload;
     parsed.machine = parsed.machine || device;
     return parsed;
   } catch (err: any) {
