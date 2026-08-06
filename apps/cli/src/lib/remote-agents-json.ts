@@ -20,7 +20,7 @@ import {
 import { deviceIdentityArgs, sshTargetFor } from './devices/connect.js';
 import { resolveExplicitTargets } from './devices/resolve-target.js';
 import { loadDevices, isControlDevice, isDialableDevice, type DeviceProfile } from './devices/registry.js';
-import { remoteShellFor, buildWindowsAgentsCommand } from './hosts/remote-cmd.js';
+import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from './hosts/remote-cmd.js';
 import { machineId, normalizeHost } from './machine-id.js';
 
 const REMOTE_TIMEOUT_MS = 12_000;
@@ -96,7 +96,9 @@ export function parseRemoteAgentsJsonPayload<T>(
   machine: string,
   parse: RemoteAgentsJsonOptions<T>['parse'],
 ): { items: T[]; parseFailed: boolean } {
-  const parsed = normalizeRemoteAgentsJsonParse(parse(stdout, machine));
+  // A Windows peer can prefix the JSON with a PowerShell CLIXML banner; strip it
+  // before handing stdout to the command-specific parser (RUSH-2286).
+  const parsed = normalizeRemoteAgentsJsonParse(parse(stripClixml(stdout), machine));
   return parsed.valid
     ? { items: parsed.items, parseFailed: false }
     : { items: [], parseFailed: true };

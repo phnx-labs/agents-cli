@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, mkdirSync, rmSync, readFileSync, lstatSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, readFileSync, lstatSync } from 'fs';
 import { join, relative } from 'path';
 import { tmpdir, homedir } from 'os';
 
@@ -31,7 +31,6 @@ import {
   cleanJobHome,
   generateClaudeConfig,
   generateCodexConfig,
-  generateGeminiConfig,
   symlinkAllowedDirs,
   buildSpawnEnv,
 } from '../src/lib/sandbox.js';
@@ -239,77 +238,9 @@ describe('generateCodexConfig', () => {
   });
 });
 
-describe('generateGeminiConfig', () => {
-  const overlayHome = join(TEST_DIR, 'gemini-overlay');
-
-  beforeEach(() => {
-    mkdirSync(overlayHome, { recursive: true });
-  });
-
-  afterEach(() => {
-    rmSync(TEST_DIR, { recursive: true, force: true });
-  });
-
-  it('creates .gemini/settings.json', () => {
-    const config = makeConfig({ agent: 'gemini' });
-    generateGeminiConfig(overlayHome, config);
-
-    const settingsPath = join(overlayHome, '.gemini', 'settings.json');
-    expect(existsSync(settingsPath)).toBe(true);
-  });
-
-  it('includes model in settings', () => {
-    const config = makeConfig({
-      agent: 'gemini',
-      config: { model: 'gemini-2.5-pro' },
-    });
-    generateGeminiConfig(overlayHome, config);
-
-    const settings = JSON.parse(
-      readFileSync(join(overlayHome, '.gemini', 'settings.json'), 'utf-8')
-    );
-    expect(settings.model).toBe('gemini-2.5-pro');
-    expect(settings.general.enableAutoUpdate).toBe(false);
-  });
-
-  it('writes auto-update disabled when no config', () => {
-    const config = makeConfig({ agent: 'gemini' });
-    generateGeminiConfig(overlayHome, config);
-
-    const settings = JSON.parse(
-      readFileSync(join(overlayHome, '.gemini', 'settings.json'), 'utf-8')
-    );
-    expect(settings).toEqual({
-      general: {
-        enableAutoUpdate: false,
-      },
-    });
-  });
-
-  it('merges with existing settings.json instead of replacing it', () => {
-    const settingsPath = join(overlayHome, '.gemini', 'settings.json');
-    mkdirSync(join(overlayHome, '.gemini'), { recursive: true });
-    writeFileSync(settingsPath, JSON.stringify({
-      theme: 'dark',
-      general: {
-        preferredEditor: 'vim',
-        enableAutoUpdate: true,
-      },
-    }, null, 2));
-
-    const config = makeConfig({ agent: 'gemini' });
-    generateGeminiConfig(overlayHome, config);
-
-    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-    expect(settings).toEqual({
-      theme: 'dark',
-      general: {
-        preferredEditor: 'vim',
-        enableAutoUpdate: false,
-      },
-    });
-  });
-});
+// generateGeminiConfig was removed with RUSH-2202: gemini is hard-deprecated
+// and a gemini routine is now rejected in runner.ts before it ever reaches
+// prepareJobHome, so there is no sandbox-config writer left to test here.
 
 describe('symlinkAllowedDirs', () => {
   const overlayHome = join(TEST_DIR, 'symlink-overlay');

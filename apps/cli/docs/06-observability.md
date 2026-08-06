@@ -532,7 +532,7 @@ agents doctor · zion                                        1.20.81
 **Severity rubric** (agent-agnostic):
 
 - **CRITICAL** (`✗`) — `logged-out` (provable), `missing-hook`,
-  `missing-plugin`, `unwired-hook`, `cli-missing`, `owner-sink-unreachable`. These
+  `missing-plugin`, `unwired-hook`, `cli-missing`, `ssh-key-enrollment`, `owner-sink-unreachable`. These
   block the harness now, or (owner-sink-unreachable) mean this box cannot escalate
   a blocked agent to the owner.
 - **WARNING** (`⚠`) — `logout-unprovable`, `missing-resource`, `content-drift`,
@@ -1314,6 +1314,49 @@ spend or wall-clock time (NULLs last).
 agents sessions --all --sort cost --limit 10 --json | \
   jq '.[] | {shortId, agent, costUsd, durationMs, topic}'
 ```
+
+## Productivity Rollup (`agents output`)
+
+`agents cost` answers *what you spent*; `agents output` joins that burn to *what
+shipped* (real generated output tokens, plus PRs and commits) — the "was it worth
+it" axis. It leads with `output_tokens` (real generation), not the cache-inflated
+`token_count`.
+
+### Burn split — input / cache-read / cache-write
+
+Where the harness records a per-message cache split (**Claude, Codex, Gemini,
+Droid**), each session persists the split — uncached `input_tokens`,
+`cache_read_tokens`, and `cache_write_tokens` (schema v37) — and the rollup sums
+them. The text report adds a `burn split:` line and `--json` carries the three
+counts on `burn` and on every `breakdown` row. Harnesses that expose no cache
+split (e.g. OpenCode, Kimi) leave the split absent and show total + output only.
+
+### `--pricing no-cache` — model the burn without prompt caching
+
+Each session also persists a second cost, `cost_usd_nocache`, computed at scan
+time by repricing its cache-read and cache-write tokens at the model's full
+**input** rate (output and uncached input are unchanged). This is the "what would
+this have cost with caching off?" scenario.
+
+```bash
+# Actual (cache-discounted) burn, with a caching-savings comparison line
+agents output
+
+# Lead the burn with the no-cache figure (breakdown column becomes burn(nc))
+agents output --pricing no-cache
+
+# Both costs + the split, machine-readable (JSON is scenario-agnostic —
+# it always carries burn.costUsd AND burn.costUsdNoCache plus the split)
+agents output --json | jq '.burn | {costUsd, costUsdNoCache, inputTokens, cacheReadTokens, cacheWriteTokens}'
+```
+
+`--pricing` only chooses which cost the **text** report leads with; the `--json`
+payload always carries both `costUsd` and `costUsdNoCache` so a dashboard can pick.
+`costUsdNoCache ≥ costUsd` in typical sessions, where cheap cache **reads** dominate
+the burn. It can invert in a cache-**write**-heavy session: Claude prices a cache
+write at 1.25× the input rate, so repricing those writes *down* to the input rate can
+make the no-cache figure lower. The text report shows the saving (`caching: actual $X
+vs no-cache $Y (saved $Z, N%)`) only when the no-cache figure is actually higher.
 
 ## Accounts & Usage in `agents view`
 

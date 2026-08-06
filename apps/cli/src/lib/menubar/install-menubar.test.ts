@@ -202,6 +202,8 @@ describe('mayInstallMenubarHelper', () => {
   const base = {
     helperExecMissing: false,
     needsDevIdHeal: false,
+    installedVersion: null,
+    currentVersion: null,
     msSinceLastHeal: 60_000,
     cooldownMs: HOUR,
     sourceIsDeveloperId: true,
@@ -224,13 +226,45 @@ describe('mayInstallMenubarHelper', () => {
     })).toBe(true);
   });
 
-  it('lets another install take over once the owner is gone from disk', () => {
+  it('lets a newer signed release take over inside the cooldown', () => {
     expect(mayInstallMenubarHelper({
-      ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: false,
+      ...base, plistEntry: nvm, activeEntry: brew, ownerEntryExists: true,
+      installedVersion: '1.22.5', currentVersion: '1.22.25',
     })).toBe(true);
   });
 
-  it('lets a foreign install take over after the cooldown, so nobody is stranded', () => {
+  it('never lets an older release reclaim a newer helper', () => {
+    expect(mayInstallMenubarHelper({
+      ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
+      installedVersion: '1.22.25', currentVersion: '1.22.5',
+      msSinceLastHeal: HOUR + 1,
+    })).toBe(false);
+  });
+
+  it('never lets an older release reinstall through a formerly owner-shaped entry', () => {
+    expect(mayInstallMenubarHelper({
+      ...base, plistEntry: nvm, activeEntry: nvm, ownerEntryExists: true,
+      installedVersion: '1.22.25', currentVersion: '1.22.5',
+      msSinceLastHeal: HOUR + 1,
+    })).toBe(false);
+  });
+
+  it('keeps the existing owner stable for an equal-version foreign install', () => {
+    expect(mayInstallMenubarHelper({
+      ...base, plistEntry: nvm, activeEntry: brew, ownerEntryExists: true,
+      installedVersion: '1.22.25', currentVersion: '1.22.25',
+      msSinceLastHeal: HOUR + 1,
+    })).toBe(false);
+  });
+
+  it('lets another install take over once the owner is gone from disk', () => {
+    expect(mayInstallMenubarHelper({
+      ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: false,
+      installedVersion: '1.22.25', currentVersion: '1.22.5',
+    })).toBe(true);
+  });
+
+  it('lets a foreign install take over after the cooldown in unversioned legacy state', () => {
     // The stuck state a pure ownership rule creates: a stale-but-present install
     // (an old nvm node dir nobody runs) owns the plist while the user's daily
     // driver upgrades. Refusing forever would freeze the menu bar at whatever the
@@ -254,6 +288,7 @@ describe('mayInstallMenubarHelper', () => {
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
       helperExecMissing: true,
+      installedVersion: '1.22.25', currentVersion: '1.22.5',
     })).toBe(true);
   });
 
@@ -262,6 +297,7 @@ describe('mayInstallMenubarHelper', () => {
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
       needsDevIdHeal: true,
+      installedVersion: '1.22.25', currentVersion: '1.22.5',
     })).toBe(true);
   });
 
@@ -288,6 +324,7 @@ describe('mayInstallMenubarHelper', () => {
   it('adopts a plist that records no owner yet (older install)', () => {
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: null, activeEntry: brew, ownerEntryExists: false,
+      installedVersion: '1.22.25', currentVersion: '1.22.5',
     })).toBe(true);
   });
 

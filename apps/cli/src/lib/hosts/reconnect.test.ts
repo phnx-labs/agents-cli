@@ -11,9 +11,11 @@ import { execFileSync } from 'node:child_process';
 import type { Host } from './types.js';
 import {
   reconnectStep,
+  refillsBudget,
   backoffMs,
   reconnectNotice,
   exhaustedNotice,
+  unstableNotice,
   remoteExitNotice,
   reconnectInteractiveSession,
   reattachRemoteCommand,
@@ -21,47 +23,75 @@ import {
   initialReconnectState,
   SSH_CONN_FAILURE,
   MAX_ATTEMPTS,
+  MIN_HOLD_MS,
   REMOTE_EXIT_255_REMAPPED,
   type ReconnectOutcome,
 } from './reconnect.js';
 
 const HOST = { name: 'zion' } as Host;
 const SID = '94c75686-145c-465d-b3f8-a9c0d3a0387c';
-const dropped = (connected: boolean): ReconnectOutcome => ({ code: SSH_CONN_FAILURE, connected });
+
+/** Reconnected, held the pane, then dropped — the one shape that refills the budget. */
+const heldThenDropped = (): ReconnectOutcome => ({ code: SSH_CONN_FAILURE, connected: true, heldMs: MIN_HOLD_MS });
+/** Never reached the host (the preflight probe failed): a sustained outage. */
+const unreachable = (): ReconnectOutcome => ({ code: SSH_CONN_FAILURE, connected: false, heldMs: 0 });
+/** Reached the host, then the attach died straight back — the flapping link / dead-at-
+ *  TTY-negotiation case that used to refill the budget forever (agents-cli#1884). */
+const flapped = (): ReconnectOutcome => ({ code: SSH_CONN_FAILURE, connected: true, heldMs: MIN_HOLD_MS - 1 });
 
 describe('reconnectStep — the pure retry decision', () => {
   test('a clean detach (exit 0) stops and surfaces 0 — never reconnects', () => {
-    expect(reconnectStep(initialReconnectState(), { code: 0, connected: true })).toEqual({ action: 'stop', code: 0 });
+    expect(reconnectStep(initialReconnectState(), { code: 0, connected: true, heldMs: MIN_HOLD_MS })).toEqual({
+      action: 'stop',
+      code: 0,
+    });
   });
 
   test('a real remote exit code (agent ended, non-255) stops and surfaces it', () => {
-    expect(reconnectStep({ attempt: 0 }, { code: 1, connected: true })).toEqual({ action: 'stop', code: 1 });
-    expect(reconnectStep({ attempt: 3 }, { code: 130, connected: false })).toEqual({ action: 'stop', code: 130 });
+    expect(reconnectStep({ attempt: 0 }, { code: 1, connected: true, heldMs: MIN_HOLD_MS })).toEqual({ action: 'stop', code: 1 });
+    expect(reconnectStep({ attempt: 3 }, { code: 130, connected: false, heldMs: 0 })).toEqual({ action: 'stop', code: 130 });
   });
 
-  test('a 255 drop from a connected attempt retries with backoff and advances the attempt', () => {
-    expect(reconnectStep({ attempt: 0 }, dropped(true))).toEqual({ action: 'retry', waitMs: 2_000, state: { attempt: 1 } });
-    expect(reconnectStep({ attempt: 1 }, dropped(true))).toEqual({ action: 'retry', waitMs: 2_000, state: { attempt: 1 } });
+  test('a 255 drop from an attempt that reconnected AND HELD retries with backoff and refills', () => {
+    expect(reconnectStep({ attempt: 0 }, heldThenDropped())).toEqual({ action: 'retry', waitMs: 2_000, state: { attempt: 1 } });
+    expect(reconnectStep({ attempt: 1 }, heldThenDropped())).toEqual({ action: 'retry', waitMs: 2_000, state: { attempt: 1 } });
   });
 
   test('a 255 from a FAILED connect counts against the budget (attempt accumulates)', () => {
-    expect(reconnectStep({ attempt: 0 }, dropped(false))).toEqual({ action: 'retry', waitMs: 2_000, state: { attempt: 1 } });
-    expect(reconnectStep({ attempt: 1 }, dropped(false))).toEqual({ action: 'retry', waitMs: 4_000, state: { attempt: 2 } });
-    expect(reconnectStep({ attempt: 3 }, dropped(false))).toEqual({ action: 'retry', waitMs: 16_000, state: { attempt: 4 } });
+    expect(reconnectStep({ attempt: 0 }, unreachable())).toEqual({ action: 'retry', waitMs: 2_000, state: { attempt: 1 } });
+    expect(reconnectStep({ attempt: 1 }, unreachable())).toEqual({ action: 'retry', waitMs: 4_000, state: { attempt: 2 } });
+    expect(reconnectStep({ attempt: 3 }, unreachable())).toEqual({ action: 'retry', waitMs: 16_000, state: { attempt: 4 } });
   });
 
   test('the budget is bounded: MAX_ATTEMPTS consecutive FAILED connects stops at 255', () => {
-    expect(reconnectStep({ attempt: MAX_ATTEMPTS }, dropped(false))).toEqual({ action: 'stop', code: SSH_CONN_FAILURE });
+    expect(reconnectStep({ attempt: MAX_ATTEMPTS }, unreachable())).toEqual({ action: 'stop', code: SSH_CONN_FAILURE });
   });
 
-  test('a genuine reconnection (connected) refills the budget even at the cap', () => {
+  test('a genuine reconnection (connected AND held) refills the budget even at the cap', () => {
     // The regression prix caught: a hung/failed connect must NOT look like a live
-    // session. Only `connected: true` refills; `connected: false` at the cap stops.
-    expect(reconnectStep({ attempt: MAX_ATTEMPTS }, dropped(true))).toEqual({
+    // session. `connected: false` at the cap stops; a held reconnection refills.
+    expect(reconnectStep({ attempt: MAX_ATTEMPTS }, heldThenDropped())).toEqual({
       action: 'retry',
       waitMs: backoffMs(0),
       state: { attempt: 1 },
     });
+  });
+
+  test('agents-cli#1884: an attach that CONNECTED but died inside MIN_HOLD_MS does NOT refill', () => {
+    // The bug: `connected` was set by the preflight probe alone, so a link that
+    // reconnected and dropped the user straight back out refilled the budget on
+    // every cycle — "attempt 1/6" forever, MAX_ATTEMPTS bounding nothing.
+    expect(refillsBudget(flapped())).toBe(false);
+    expect(reconnectStep({ attempt: 1 }, flapped())).toEqual({ action: 'retry', waitMs: 4_000, state: { attempt: 2 } });
+    expect(reconnectStep({ attempt: MAX_ATTEMPTS }, flapped())).toEqual({ action: 'stop', code: SSH_CONN_FAILURE });
+  });
+
+  test('MIN_HOLD_MS is the boundary: exactly at the floor refills, one ms under does not', () => {
+    expect(refillsBudget({ code: SSH_CONN_FAILURE, connected: true, heldMs: MIN_HOLD_MS })).toBe(true);
+    expect(refillsBudget({ code: SSH_CONN_FAILURE, connected: true, heldMs: MIN_HOLD_MS - 1 })).toBe(false);
+    // A long hold on an attempt that never connected is not reachable in production
+    // (heldMs is 0 there) and must not refill on the duration alone either.
+    expect(refillsBudget({ code: SSH_CONN_FAILURE, connected: false, heldMs: MIN_HOLD_MS * 10 })).toBe(false);
   });
 });
 
@@ -161,7 +191,9 @@ describe('reattachRemoteCommand — the real remote invocation, exercised throug
     }
     expect(status).toBe(REMOTE_EXIT_255_REMAPPED);
     expect(REMOTE_EXIT_255_REMAPPED).not.toBe(SSH_CONN_FAILURE);
-    expect(reconnectStep(initialReconnectState(), { code: REMOTE_EXIT_255_REMAPPED, connected: true })).toEqual({
+    expect(
+      reconnectStep(initialReconnectState(), { code: REMOTE_EXIT_255_REMAPPED, connected: true, heldMs: MIN_HOLD_MS }),
+    ).toEqual({
       action: 'stop',
       code: REMOTE_EXIT_255_REMAPPED,
     });
@@ -195,13 +227,26 @@ describe('notices — human readable', () => {
   test('exhausted notice hands back the manual reconnect command', () => {
     expect(exhaustedNotice(SID, 'zion')).toContain('agents reconnect 94c75686');
   });
+
+  test('unstable notice says the link kept dropping, not that it could not reconnect', () => {
+    const s = unstableNotice(SID, 'zion');
+    expect(s).toContain('zion');
+    expect(s).toContain('kept dropping again within');
+    expect(s).toContain(`${MAX_ATTEMPTS} attempts`);
+    expect(s).toContain('agents reconnect 94c75686');
+    // The distinction that makes it worth a second notice: it DID reconnect. It
+    // also claims no count of successful reconnections — the budget can be spent
+    // by unreachable attempts plus one that reconnected and dropped straight out.
+    expect(s).not.toContain("Couldn't reconnect");
+    expect(s).not.toMatch(/Reconnected to \w+ \d+ times/);
+  });
 });
 
 describe('reconnectInteractiveSession — the loop over the real state machine', () => {
   const noWait = async () => {};
 
   test('reattaches after a drop, then returns 0 when the user detaches cleanly', async () => {
-    const seq: ReconnectOutcome[] = [{ code: 0, connected: true }]; // reattach → clean detach
+    const seq: ReconnectOutcome[] = [{ code: 0, connected: true, heldMs: MIN_HOLD_MS }]; // reattach → clean detach
     const writes: string[] = [];
     const rc = await reconnectInteractiveSession({
       host: HOST,
@@ -227,21 +272,69 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
       initialExit: SSH_CONN_FAILURE,
       reattach: () => {
         calls++;
-        return { code: SSH_CONN_FAILURE, connected: false }; // host unreachable every time
+        return unreachable(); // host unreachable every time
       },
       wait: noWait,
       write: (s) => writes.push(s),
     });
     expect(rc).toBe(SSH_CONN_FAILURE);
     expect(calls).toBe(MAX_ATTEMPTS); // exactly the budget, no infinite loop
+    expect(writes.some((w) => w.includes("Couldn't reconnect"))).toBe(true);
     expect(writes.some((w) => w.includes('agents reconnect 94c75686'))).toBe(true);
+  });
+
+  test('agents-cli#1884: a link that reconnects and drops straight back out ALSO terminates', async () => {
+    // The reported spin. Every reattach reaches the host (so the old `connected`
+    // check refilled the budget) but the attach dies inside MIN_HOLD_MS, so the
+    // loop printed "attempt 1/6" forever. It must now spend the budget and stop.
+    let calls = 0;
+    const writes: string[] = [];
+    const rc = await reconnectInteractiveSession({
+      host: HOST,
+      sessionId: SID,
+      initialExit: SSH_CONN_FAILURE,
+      reattach: () => {
+        calls++;
+        return flapped();
+      },
+      wait: noWait,
+      write: (s) => writes.push(s),
+    });
+    expect(rc).toBe(SSH_CONN_FAILURE);
+    expect(calls).toBe(MAX_ATTEMPTS); // bounded — this looped forever before the fix
+    // The attempt counter actually advances now instead of resetting to 1 each cycle.
+    expect(writes.some((w) => w.includes(`attempt ${MAX_ATTEMPTS}/${MAX_ATTEMPTS}`))).toBe(true);
+    // And the reason is reported truthfully: it reconnected, it could not stay.
+    expect(writes.some((w) => w.includes('kept dropping again within'))).toBe(true);
+    expect(writes.some((w) => w.includes("Couldn't reconnect"))).toBe(false);
+    expect(writes.some((w) => w.includes('agents reconnect 94c75686'))).toBe(true);
+  });
+
+  test('a mixed outage — unreachable attempts, then one that reconnects and drops out — reports the drop, not "couldn\'t reconnect"', async () => {
+    // The budget is spent by the run of unreachable attempts, but the attempt that
+    // spends it DID reach the host, so the notice must describe that, and must not
+    // claim a count of successful reconnections it never made.
+    const seq: ReconnectOutcome[] = [...Array(MAX_ATTEMPTS - 1).fill(unreachable()), flapped()];
+    const writes: string[] = [];
+    const rc = await reconnectInteractiveSession({
+      host: HOST,
+      sessionId: SID,
+      initialExit: SSH_CONN_FAILURE,
+      reattach: () => seq.shift()!,
+      wait: noWait,
+      write: (s) => writes.push(s),
+    });
+    expect(rc).toBe(SSH_CONN_FAILURE);
+    expect(seq).toHaveLength(0); // the whole budget was spent, no more, no fewer
+    expect(writes.some((w) => w.includes('kept dropping again within'))).toBe(true);
+    expect(writes.some((w) => /Reconnected to \w+ \d+ times/.test(w))).toBe(false);
   });
 
   test('a mid-run second drop after a genuine reconnection keeps reconnecting', async () => {
     // drop → reattach connects and holds, then drops again → reattach → clean exit.
     const seq: ReconnectOutcome[] = [
-      { code: SSH_CONN_FAILURE, connected: true }, // reconnected, then dropped
-      { code: 0, connected: true }, // reconnected, clean detach
+      heldThenDropped(), // reconnected, held, then dropped
+      { code: 0, connected: true, heldMs: MIN_HOLD_MS }, // reconnected, clean detach
     ];
     const rc = await reconnectInteractiveSession({
       host: HOST,
@@ -258,10 +351,10 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     // 3 unreachable attempts, then a connect that holds and cleanly exits — the
     // failed attempts alone are under MAX_ATTEMPTS, and the connect refills anyway.
     const seq: ReconnectOutcome[] = [
-      dropped(false),
-      dropped(false),
-      dropped(false),
-      { code: 0, connected: true },
+      unreachable(),
+      unreachable(),
+      unreachable(),
+      { code: 0, connected: true, heldMs: MIN_HOLD_MS },
     ];
     const rc = await reconnectInteractiveSession({
       host: HOST,
@@ -272,5 +365,26 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
       write: () => {},
     });
     expect(rc).toBe(0);
+  });
+
+  test('the all-day-blinking session the feature exists for is still unbounded', async () => {
+    // The reason the fix is a hold FLOOR and not a flat total-attempt ceiling: a
+    // link that drops repeatedly but puts the user back into a working pane each
+    // time must keep reconnecting, well past MAX_ATTEMPTS drops in total.
+    const blinks = MAX_ATTEMPTS * 5;
+    let calls = 0;
+    const rc = await reconnectInteractiveSession({
+      host: HOST,
+      sessionId: SID,
+      initialExit: SSH_CONN_FAILURE,
+      reattach: () => {
+        calls++;
+        return calls <= blinks ? heldThenDropped() : { code: 0, connected: true, heldMs: MIN_HOLD_MS };
+      },
+      wait: noWait,
+      write: () => {},
+    });
+    expect(rc).toBe(0);
+    expect(calls).toBe(blinks + 1);
   });
 });

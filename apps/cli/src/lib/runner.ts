@@ -71,7 +71,7 @@ import {
 } from './rotate.js';
 import { readAuthHealth, isDeadVerdict } from './auth-health.js';
 import { machineId } from './machine-id.js';
-import { isSelfUpdatingAgent, ROUTINE_AGENT_COMMANDS as AGENT_COMMANDS, ROUTINE_AGENT_IDS } from './agents.js';
+import { isSelfUpdatingAgent, ROUTINE_AGENT_COMMANDS as AGENT_COMMANDS, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from './agents.js';
 import { expandLocalHome, getProjectRoot } from './project-root.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
@@ -883,11 +883,56 @@ function injectRoutineActor(env: Record<string, string>, config: JobConfig): Rec
   return env;
 }
 
+/**
+ * `routines add`/`routines edit` refuse to create a routine pinned to a
+ * hard-deprecated harness (commands/routines.ts), but that check runs only at
+ * CLI-write time. A routine YAML written before the harness was deprecated, or
+ * edited directly on disk / synced from another device, has no equivalent gate
+ * at fire time — the daemon would happily build and spawn `gemini …` against a
+ * backend Google retired. Fail loud here, before any version/account
+ * resolution or sandbox prep, so a legacy routine skips with the same message
+ * every other entry point (`sync`, `exec`, `import`, `run-cloud`, `versions`)
+ * already shows instead of a doomed, confusing spawn failure.
+ */
+function hardDeprecationRunFailure(config: JobConfig, agent: AgentId): RunMeta {
+  const runId = generateRunId();
+  const runDir = getRunDir(config.name, runId);
+  fs.mkdirSync(runDir, { recursive: true });
+  const reason = hardDeprecationError(agent);
+  const meta: RunMeta = {
+    jobName: config.name,
+    runId,
+    ...runProvenance(config),
+    agent,
+    pid: null,
+    spawnedAt: Date.now(),
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    exitCode: null,
+  };
+  writeRunMeta(meta);
+  process.stderr.write(`[agents] routine ${config.name}: ${reason}\n`);
+  finalizeRunMeta(meta, 'failed', 1, { errorMessage: reason });
+  writeRunMeta(meta);
+  return meta;
+}
+
 export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<RunResult> {
   const eligibility = checkJobDeviceEligibility(config);
   if (eligibility) {
     throw new Error(eligibility.message);
   }
+
+  // Hard-deprecated harness (e.g. gemini): fail loud before placement, version/
+  // account resolution, or sandbox prep — local, host, AND cloud placement all
+  // share this one gate (a hard-deprecated agent has no `cloudProvider` entry,
+  // so cloud placement would otherwise silently fall back to the default
+  // provider instead of refusing). See hardDeprecationRunFailure.
+  if (!config.workflow && config.agent && ROUTINE_AGENT_IDS.includes(config.agent) && isAgentHardDeprecated(config.agent)) {
+    return { meta: hardDeprecationRunFailure(config, config.agent), reportPath: null };
+  }
+
   // Placement (hostStrategy / bare host:) — body may run on another machine
   // over SSH or in the cloud; local version selection / sandbox / spawn then
   // do not apply. Sync callers (manual `routines run`, catchup) follow the
@@ -1457,6 +1502,15 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
 }
 
 async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks): Promise<RunMeta> {
+  // Hard-deprecated harness (e.g. gemini): fail loud before placement, version/
+  // account resolution, or sandbox prep — local, host, AND cloud placement all
+  // share this one gate (a hard-deprecated agent has no `cloudProvider` entry,
+  // so cloud placement would otherwise silently fall back to the default
+  // provider instead of refusing). See hardDeprecationRunFailure.
+  if (!config.workflow && config.agent && ROUTINE_AGENT_IDS.includes(config.agent) && isAgentHardDeprecated(config.agent)) {
+    return hardDeprecationRunFailure(config, config.agent);
+  }
+
   // Placement (hostStrategy / bare host:) — dispatch off-box and return; the
   // monitor finalizes host: runs, cloud runs stay terminal when dispatch ends.
   // Either way the in-process onFinish hook does not fire for off-box routines

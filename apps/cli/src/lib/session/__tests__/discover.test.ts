@@ -340,6 +340,21 @@ describe('readGrokMeta', () => {
     expect(r!.meta.shortId).toBe(uuid.slice(0, 8));
   });
 
+  it('resolves the version from a Windows (backslash) grok_home path (RUSH-2286)', () => {
+    // The Grok CLI writes grok_home in the writing host's native separators; a
+    // Windows-authored summary is backslash-separated. The summary lives in a
+    // tmp dir (no versions/grok path on disk), so grok_home is the ONLY version
+    // source — before the fix the `/`-only regex left version undefined here.
+    const fp = writeSummary({
+      info: { id: uuid, cwd: 'C:\\Users\\muqsit\\src' },
+      generated_title: 'Windows session',
+      grok_home: 'C:\\Users\\muqsit\\.agents\\.history\\versions\\grok\\0.2.101\\home\\.grok',
+    });
+    const r = readGrokMeta(fp);
+    expect(r).not.toBeNull();
+    expect(r!.meta.version).toBe('0.2.101');
+  });
+
   it('falls back to session_summary when no generated_title, and to the dir uuid when info.id is absent', () => {
     const fp = writeSummary({
       info: { cwd: '/tmp/x' },

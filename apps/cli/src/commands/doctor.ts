@@ -77,6 +77,7 @@ import { listCliStatus, listCliStatusAsync } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
 import { heal, healChangedAnything, type HealResult } from '../lib/heal.js';
 import { getEffectiveExecutionPolicy } from '../lib/platform/winpath.js';
+import { auditWindowsSshEnrollment, diagnoseWindowsSshFailure } from '../lib/devices/windows-ssh-enrollment.js';
 import { scanUserRcFiles, masterPassphraseInEnv } from '../lib/secrets/rc-hygiene.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import { readRepoBehindMarkers, type FetchStatusMarker } from '../lib/auto-pull.js';
@@ -188,14 +189,14 @@ interface RemoteDoctorPayload {
 }
 
 /**
- * Narrow a remote `findings` array to the secret-hygiene rows, or `[]`.
+ * Narrow a remote `findings` array to rows only that device can observe.
  *
  * Deliberately NOT "forward every remote finding". The aggregator already
  * rebuilds a remote's sign-in rows from its inventory and its divergence rows
  * from the comparator, so forwarding wholesale would double them; and pulling a
  * remote's orphan/drift rows into a fleet readout is a much larger UX change
- * than this fix. The two secret kinds are the ones that are BOTH unrecomputable
- * centrally and security-relevant, which is exactly why they were being lost.
+ * than this fix. These kinds are unrecomputable centrally: shell/process secret
+ * hygiene and the Windows host's effective OpenSSH key path/content/ACL.
  *
  * **The remote contributes exactly one thing: the KIND.** Severity, message and
  * remediation are all generated HERE. That is not defensiveness for its own
@@ -216,7 +217,7 @@ interface RemoteDoctorPayload {
  * file and line. Run `agents doctor` on that box for the specifics — the
  * message says so.
  */
-const REMOTE_FORWARDED_KINDS = ['rc-secret-export', 'env-secret-export'] as const;
+const REMOTE_FORWARDED_KINDS = ['rc-secret-export', 'env-secret-export', 'ssh-key-enrollment'] as const;
 type RemoteForwardedKind = typeof REMOTE_FORWARDED_KINDS[number];
 
 /** Canonical, locally-authored text for a forwarded kind. Never the remote's. */
@@ -225,6 +226,8 @@ const REMOTE_SECRET_MESSAGE: Record<RemoteForwardedKind, string> = {
     + ' — run `agents doctor` there for the file and line',
   'env-secret-export': 'AGENTS_SECRETS_PASSPHRASE is set in this box\'s process environment'
     + ' — run `agents doctor` there for detail',
+  'ssh-key-enrollment': 'Windows OpenSSH key enrollment is invalid'
+    + ' — run `agents doctor` on this box for the effective path or ACL failure',
 };
 
 export function asRemoteSecretFindings(raw: unknown, device: string): DoctorFinding[] {
@@ -314,7 +317,9 @@ async function probeFleetTarget(target: FleetTarget): Promise<DeviceDoctorResult
     return {
       name: target.name,
       online: false,
-      error: res.timedOut ? 'timed out' : (res.stderr || `exit ${res.code ?? 'unknown'}`),
+      error: isWin
+        ? diagnoseWindowsSshFailure(res.stderr, res.timedOut)
+        : res.timedOut ? 'timed out' : (res.stderr || `exit ${res.code ?? 'unknown'}`),
       agents: {},
     };
   }
@@ -544,6 +549,7 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
         execPolicy: process.platform === 'win32'
           ? { platform: process.platform, policy: getEffectiveExecutionPolicy() }
           : undefined,
+        windowsSshEnrollment: auditWindowsSshEnrollment(),
         isolatedVersions: localReports
           .filter((rep) => isVersionIsolated(rep.agent, rep.version))
           .map((rep) => `${rep.agent}@${rep.version}`),

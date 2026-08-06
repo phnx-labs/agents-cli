@@ -19,15 +19,20 @@
  * fall through to resume so the user is put back into the agent. There is one
  * re-attach implementation (the peer's focus) to keep in sync.
  *
- * **Why the budget refills on `connected`, not on call duration.** ssh returns 255
- * for BOTH "couldn't connect at all" and "connected, then the link dropped." A
- * failed connect still takes up to `ConnectTimeout` (10s) to return, so timing
- * alone can't tell the two apart — a duration threshold below the connect timeout
- * would classify every hung connect as a live session and retry forever under a
- * sustained outage (the exact failure this feature exists to survive). Instead each
- * attempt runs a fast preflight probe: a reattach that genuinely reconnected (and
- * then dropped again) refills the retry budget; one that never reached the host
- * counts against it, so a sustained outage gives up after MAX_ATTEMPTS.
+ * **What it takes to refill the budget: reached the host AND held the pane.** ssh
+ * returns 255 for BOTH "couldn't connect at all" and "connected, then the link
+ * dropped." A failed connect still takes up to `ConnectTimeout` (10s) to return, so
+ * the duration of the whole call can't tell the two apart — a threshold below the
+ * connect timeout would classify every hung connect as a live session and retry
+ * forever under a sustained outage (the exact failure this feature exists to
+ * survive). So each attempt runs a fast preflight probe FIRST, and only once that
+ * probe proves the host reachable does the interactive attach run — which means the
+ * ATTACH's own duration is a clean signal, measured with the connect phase already
+ * behind it. A reattach that reached the host and then held for at least
+ * {@link MIN_HOLD_MS} refills the retry budget, so a long session that blinks all
+ * day keeps reconnecting. Everything else — never reached the host, or reached it
+ * and died right back — counts against the budget, so a sustained outage and a
+ * fast-flapping link both give up after {@link MAX_ATTEMPTS}.
  *
  * The retry policy is a pure state machine (`reconnectStep`) so it is unit-tested
  * without touching SSH; the loop (`reconnectInteractiveSession`) only adds the real
@@ -54,13 +59,18 @@
  * regardless of the peer's `agents` version (the remap happens in the shell
  * wrapper THIS process sends).
  *
- * This does NOT close every way `reconnectStep` can loop on a real transport
- * 255: a genuinely recurring LOCAL ssh failure (a fast-flapping link, an
- * attach that dies at the TTY stage on every reconnect) still refills the
- * budget every time by design (see "Why the budget refills on `connected`"
- * above) and can still print "attempt 1/N" indefinitely. That's an accepted,
- * pre-existing tradeoff of the original feature, not something this fix
- * changes either way — tracked separately (agents-cli#1884), not fixed here.
+ * A recurring LOCAL ssh failure used to defeat the budget the same way, and the
+ * remap alone did not close it (agents-cli#1884): `connected` was set by the
+ * preflight probe and said nothing about whether the attach that followed held, so
+ * a fast-flapping link — or an attach that died at the TTY-negotiation stage every
+ * single time — refilled the budget on every cycle, printed "attempt 1/N" forever,
+ * and left `MAX_ATTEMPTS` bounding nothing. The {@link MIN_HOLD_MS} floor above is
+ * what closes it: an attach that dies immediately is not a reconnection, so the
+ * budget drains and the loop gives up with {@link unstableNotice}. A flat total-
+ * attempt or wall-clock ceiling that ignored `connected` was the alternative and is
+ * deliberately NOT taken — any fixed total eventually strands the all-day-blinking
+ * session this feature exists for, while the hold floor only ever stops a loop that
+ * is failing to put the user back into the agent.
  */
 import { sshExec, sshStream, shellQuote } from '../ssh-exec.js';
 import { hostIdentityArgs, sshTargetFor, type Host } from './types.js';
@@ -74,16 +84,27 @@ export const SSH_CONN_FAILURE = 255;
  *  transport itself, so it can never be confused with {@link SSH_CONN_FAILURE}. */
 export const REMOTE_EXIT_255_REMAPPED = 254;
 
-/** Consecutive failed-to-connect reattaches before giving up. Backoff is capped at
- *  {@link MAX_BACKOFF_MS}. A reattach that actually reconnected (then dropped again)
- *  refills the budget, so a long session that blinks all day reconnects every time
- *  — only consecutive UNREACHABLE attempts exhaust it. */
+/** Consecutive unproductive reattaches before giving up. Backoff is capped at
+ *  {@link MAX_BACKOFF_MS}. A reattach that reconnected and HELD (then dropped again)
+ *  refills the budget, so a long session that blinks all day reconnects every time —
+ *  an attempt that never reached the host, or reached it and died back inside
+ *  {@link MIN_HOLD_MS}, counts against it. */
 export const MAX_ATTEMPTS = 6;
 const BASE_BACKOFF_MS = 2_000;
 const MAX_BACKOFF_MS = 30_000;
 
+/** How long a reattach must hold the remote pane before it counts as a genuine
+ *  reconnection that refills the budget. Measured on the interactive attach ALONE
+ *  — the preflight probe has already returned by then, so this is not the connect
+ *  timing the file header rules out. 10s is comfortably longer than any attach that
+ *  dies during TTY negotiation and far shorter than a session the user is working
+ *  in; a link that drops the user out inside 10s on every attempt is one this loop
+ *  should stop retrying, not one it should keep re-entering. */
+export const MIN_HOLD_MS = 10_000;
+
 export interface ReconnectState {
-  /** Consecutive failed-to-connect reattaches since the last genuine reconnection. */
+  /** Consecutive unproductive reattaches since the last genuine reconnection — one
+   *  that reached the host and held for {@link MIN_HOLD_MS}. */
   attempt: number;
 }
 
@@ -92,8 +113,13 @@ export interface ReconnectOutcome {
   code: number;
   /** Whether the ssh handshake for this attempt actually completed. The initial run
    *  and any reattach whose preflight probe succeeded are `connected`; a reattach
-   *  that couldn't reach the host is not. Drives the budget refill (see file head). */
+   *  that couldn't reach the host is not. Half of the budget refill (see file head). */
   connected: boolean;
+  /** Wall-clock ms the interactive attach ran for, timed from after the preflight
+   *  probe returned. `0` when the attempt never reached the host. The other half of
+   *  the refill: it must be at least {@link MIN_HOLD_MS} to count as a genuine
+   *  reconnection rather than a link that drops the user straight back out. */
+  heldMs: number;
 }
 
 export type ReconnectDecision =
@@ -110,19 +136,31 @@ export function backoffMs(attempt: number): number {
 }
 
 /**
+ * Did this attempt genuinely put the user back into the agent? Only such an attempt
+ * refills the retry budget — it must have reached the host AND held the pane for at
+ * least {@link MIN_HOLD_MS}. An attach that reached the host and died right back is
+ * a flapping link, not a reconnection, and counts against the budget like an
+ * unreachable host (agents-cli#1884; see the file header).
+ */
+export function refillsBudget(outcome: ReconnectOutcome): boolean {
+  return outcome.connected && outcome.heldMs >= MIN_HOLD_MS;
+}
+
+/**
  * Decide what to do after a run/re-attach returned `outcome`. Pure — the only
  * input is the prior state and the outcome, the only output is the next action.
  *
  *  - a non-255 code means the remote command spoke for itself (clean detach = 0,
  *    agent exit / no live session = non-zero) → stop and surface that code.
  *  - a 255 means the link dropped → retry, unless the budget is spent.
- *  - a 255 from an attempt that DID connect (a genuine reconnection that then
- *    dropped) refills the budget first; a 255 that never connected counts against
- *    it, so a host that stays unreachable gives up after MAX_ATTEMPTS.
+ *  - a 255 from an attempt that reconnected AND held ({@link refillsBudget})
+ *    refills the budget first; every other 255 counts against it, so a host that
+ *    stays unreachable — and a link that keeps dropping the attach immediately —
+ *    both give up after MAX_ATTEMPTS.
  */
 export function reconnectStep(state: ReconnectState, outcome: ReconnectOutcome): ReconnectDecision {
   if (outcome.code !== SSH_CONN_FAILURE) return { action: 'stop', code: outcome.code };
-  const attempts = outcome.connected ? 0 : state.attempt;
+  const attempts = refillsBudget(outcome) ? 0 : state.attempt;
   if (attempts >= MAX_ATTEMPTS) return { action: 'stop', code: SSH_CONN_FAILURE };
   return { action: 'retry', waitMs: backoffMs(attempts), state: { attempt: attempts + 1 } };
 }
@@ -134,10 +172,22 @@ export function reconnectNotice(sessionId: string, host: string, attempt: number
   return `\nConnection to ${host} dropped — the agent is still running there. Reconnecting to ${sessionId.slice(0, 8)} ${when} (attempt ${attempt}/${MAX_ATTEMPTS})…\n`;
 }
 
-/** Notice shown once the retry budget is spent. Hands back the one verb that
- *  re-enters the terminal — attach the live pane if it survived, else resume. */
+/** Notice shown once the retry budget is spent on a host that stayed UNREACHABLE.
+ *  Hands back the one verb that re-enters the terminal — attach the live pane if it
+ *  survived, else resume. */
 export function exhaustedNotice(sessionId: string, host: string): string {
   return `\nCouldn't reconnect to ${host} after ${MAX_ATTEMPTS} attempts. The agent may still be running — get back in when the network is back:\n  agents reconnect ${sessionId.slice(0, 8)}\n`;
+}
+
+/** Notice shown when the budget is spent the OTHER way: the last reattach reached
+ *  the host and the connection dropped again within {@link MIN_HOLD_MS}. Saying
+ *  "couldn't reconnect" there would be false — it did reconnect and could not stay
+ *  — and the user needs to know the link, not the host, is the problem. It claims
+ *  no count of successful reconnections: the budget can also be spent by a run of
+ *  unreachable attempts followed by one that reconnected and dropped straight out. */
+export function unstableNotice(sessionId: string, host: string): string {
+  const secs = Math.round(MIN_HOLD_MS / 1000);
+  return `\nGave up reconnecting to ${host} after ${MAX_ATTEMPTS} attempts — it kept dropping again within ${secs} seconds of getting back in. The agent may still be running there; reconnect once the link is stable:\n  agents reconnect ${sessionId.slice(0, 8)}\n`;
 }
 
 /** Notice shown when a reattach stops on a remapped remote-side exit
@@ -196,16 +246,22 @@ export function reattachRemoteCommand(sessionId: string): string {
  * a reachable host do we run the interactive attach-or-resume (which carries no
  * credentials — the agent already runs on the peer — so it rides the normal
  * transport). Returns the ssh exit code (255 = dropped again / unreachable; 0 =
- * clean detach; other = session ended) plus whether this attempt connected.
+ * clean detach; other = session ended), whether this attempt connected, and how
+ * long the attach held — the two inputs {@link refillsBudget} decides on.
  */
 export function reattachRemoteSession(host: Host, sessionId: string): ReconnectOutcome {
   const target = sshTargetFor(host);
   const extraSshArgs = hostIdentityArgs(host);
   // Fresh (non-multiplexed) reachability probe: code 0 means the handshake actually
   // completed, so a hung/failed connect is never mistaken for a live reconnection.
+  // RUSH-2265: pass host identity on every hop (probe + stream), not only the first.
   const probe = sshExec(target, 'true', { multiplex: false, extraSshArgs });
-  if (probe.code !== 0) return { code: SSH_CONN_FAILURE, connected: false };
-  return { code: sshStream(target, reattachRemoteCommand(sessionId), { tty: true, extraSshArgs }), connected: true };
+  if (probe.code !== 0) return { code: SSH_CONN_FAILURE, connected: false, heldMs: 0 };
+  // Timed from AFTER the probe returned, so this is the attach's own duration and
+  // carries none of the connect phase the file header rules out as a signal.
+  const startedAt = Date.now();
+  const code = sshStream(target, reattachRemoteCommand(sessionId), { tty: true, extraSshArgs });
+  return { code, connected: true, heldMs: Date.now() - startedAt };
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -235,13 +291,24 @@ export async function reconnectInteractiveSession(opts: ReconnectLoopOpts): Prom
   const reattach = opts.reattach ?? reattachRemoteSession;
 
   let state = initialReconnectState();
-  // The initial run reached the point of running the agent, so it connected.
-  let outcome: ReconnectOutcome = { code: opts.initialExit, connected: true };
+  // The initial run reached the point of running the agent, so it connected. Its
+  // hold duration is never measured — exec.ts owns that call — and never needs to
+  // be: refilling is a no-op at attempt 0, which is where the loop starts, so this
+  // outcome can only ever produce the first retry either way.
+  let outcome: ReconnectOutcome = { code: opts.initialExit, connected: true, heldMs: 0 };
   for (;;) {
     const decision = reconnectStep(state, outcome);
     if (decision.action === 'stop') {
-      if (decision.code === SSH_CONN_FAILURE) write(exhaustedNotice(opts.sessionId, opts.host.name));
-      else if (decision.code === REMOTE_EXIT_255_REMAPPED) write(remoteExitNotice(opts.sessionId, opts.host.name));
+      // A spent budget has two shapes and one wrong message: `outcome` is the
+      // reattach that spent it, so an unreachable host reads "couldn't reconnect"
+      // and a link that reconnected but kept dropping reads as exactly that.
+      if (decision.code === SSH_CONN_FAILURE) {
+        write(outcome.connected
+          ? unstableNotice(opts.sessionId, opts.host.name)
+          : exhaustedNotice(opts.sessionId, opts.host.name));
+      } else if (decision.code === REMOTE_EXIT_255_REMAPPED) {
+        write(remoteExitNotice(opts.sessionId, opts.host.name));
+      }
       return decision.code;
     }
     write(reconnectNotice(opts.sessionId, opts.host.name, decision.state.attempt, decision.waitMs));

@@ -30,11 +30,10 @@ const claudeBinaryVer = listInstalledVersions('claude').find((v) =>
 // Prefer a version whose model source actually resolves on this host — partial
 // installs (e.g. ones missing the vendored binary) would otherwise short-circuit
 // the catalog tests with null catalogs.
-const firstLocatable = (agent: 'codex' | 'gemini' | 'opencode' | 'openclaw' | 'antigravity' | 'kimi' | 'grok'): string | null =>
+const firstLocatable = (agent: 'codex' | 'opencode' | 'openclaw' | 'antigravity' | 'kimi' | 'grok'): string | null =>
   listInstalledVersions(agent).find((v) => locateModelSource(agent, v) !== null) ?? null;
 
 const codexVer = firstLocatable('codex');
-const geminiVer = firstLocatable('gemini');
 const opencodeVer = firstLocatable('opencode');
 const openclawVer = firstLocatable('openclaw');
 const antigravityVer = firstLocatable('antigravity');
@@ -189,32 +188,9 @@ describe('resolveModel', () => {
   });
 });
 
-describe('getModelCatalog (gemini)', () => {
-  it('parses the models.js ES module and surfaces aliases', () => {
-    if (!geminiVer) return;
-    const src = locateModelSource('gemini', geminiVer);
-    expect(src).not.toBeNull();
-    expect(src!.kind).toBe('js');
-    // <=0.41 ships gemini-cli-core/dist/src/config/models.js; 0.42+ inlines the same
-    // constants into a chunk under @google/gemini-cli/bundle/.
-    expect(src!.path).toMatch(/(gemini-cli-core\/dist\/src\/config\/models\.js$)|(gemini-cli\/bundle\/.+\.js$)/);
-
-    const catalog = getModelCatalog('gemini', geminiVer);
-    expect(catalog).not.toBeNull();
-    expect(catalog!.models.length).toBeGreaterThan(0);
-    // Gemini's VALID_GEMINI_MODELS set covers both `gemini-*` and Google's
-    // `gemma-*` sibling family; either prefix is valid.
-    for (const m of catalog!.models) {
-      expect(m.id).toMatch(/^(gemini|gemma)-/);
-    }
-    // The `flash` / `flash-lite` / `pro` aliases always resolve somewhere.
-    expect(Object.keys(catalog!.aliases)).toEqual(
-      expect.arrayContaining(['flash', 'flash-lite', 'pro'])
-    );
-    // At least one model must be marked default (pointed to by an alias).
-    expect(catalog!.models.some((m) => m.isDefault)).toBe(true);
-  });
-});
+// gemini is hard-deprecated: locateModelSource/getModelCatalog no longer parse
+// its bundle at all (RUSH-2202 — a dead, unreachable catalog surface for a
+// harness with no launch path left), so there is no describe block for it here.
 
 describe('getModelCatalog (opencode)', () => {
   it('delegates to `opencode models --verbose` and returns provider/id keys', () => {

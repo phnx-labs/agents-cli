@@ -1313,17 +1313,22 @@ export function listCentralHooks(): HookEntry[] {
   return results;
 }
 
+const MAX_HOOK_DURATION_SECONDS = 24 * 60 * 60;
+
 /**
  * Normalize a hook `timeout` from agents.yaml into a whole number of seconds.
  *
  * A bare number stays seconds (`timeout: 30` → 30) for backward compatibility.
  * A Go-style duration string is parsed into seconds: `5s`, `2m`, `1h30m`,
- * `90s`, `1h`. This intentionally does NOT reuse {@link parseTimeout} from
- * routines.ts — that one returns milliseconds, has no seconds (`s`) unit, and
- * floors at one minute, none of which fit hook timeouts (typically 5–600s).
+ * `90s`, `1h`. Suffixed durations longer than 24 hours are rejected as likely
+ * typos, while bare seconds stay uncapped for backward compatibility. This
+ * intentionally does NOT reuse {@link parseTimeout} from routines.ts — that one
+ * returns milliseconds, has no seconds (`s`) unit, and floors at one minute,
+ * none of which fit hook timeouts (typically 5–600s).
  *
- * Returns the seconds value, or `null` when the input is not a positive number
- * or a parseable duration string — the caller decides how to surface that.
+ * Returns the seconds value, or `null` when the input is not a positive number,
+ * is not parseable, or is a suffixed duration longer than 24 hours — the caller
+ * decides how to surface that.
  */
 export function normalizeHookTimeoutSeconds(value: unknown): number | null {
   if (typeof value === 'number') {
@@ -1345,7 +1350,7 @@ export function normalizeHookTimeoutSeconds(value: unknown): number | null {
     const minutes = Number(m[4] || 0);
     const seconds = Number(m[5] || 0);
     const total = ((weeks * 7 + days) * 24 + hours) * 3600 + minutes * 60 + seconds;
-    return total > 0 ? total : null;
+    return total > 0 && total <= MAX_HOOK_DURATION_SECONDS ? total : null;
   }
   return null;
 }

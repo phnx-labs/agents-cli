@@ -227,7 +227,8 @@ description: Local Llama 3.3  # string, optional — shown in `profiles list` an
 
 host:
   agent: claude                # AgentId, required — which CLI binary to spawn
-                               # One of: claude, codex, gemini, cursor, opencode, grok, antigravity
+                               # One of: claude, codex, cursor, opencode, grok, antigravity
+                               # (gemini is hard-deprecated — see 00-concepts.md)
   version: 2.1.113             # string, optional — pin this host CLI version
 
 env:                           # Record<string, string>, required (may be empty {})

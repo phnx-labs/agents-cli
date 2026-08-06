@@ -8,6 +8,7 @@ import * as path from 'path';
 import { needsWindowsShell, toPosix } from './platform/index.js';
 import {
   bunGlobalDir,
+  buildMultiInstallInventory,
   deriveGlobalPrefix,
   detectPackageManager,
   dismissUpdateVersion,
@@ -374,6 +375,15 @@ describe('update-check cache', () => {
 // symlinks — the function returns [] on win32), and the fixtures here create
 // symlinks that need Developer Mode on Windows. Skip the whole block there.
 describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
+  function pathOnlyOptions(base: string) {
+    return {
+      homeDir: path.join(base, 'empty-home'),
+      fnmDir: path.join(base, 'empty-fnm'),
+      npmCacheDir: path.join(base, 'empty-cache'),
+      globalNodeModulesDirs: [],
+    };
+  }
+
   /** Lay out an npm-global-shaped install and a bin dir whose `agents` symlinks into it. */
   function makeInstall(base: string, name: string, version: string, pkgName = '@phnx-labs/agents-cli') {
     const packageRoot = path.join(base, name, 'lib', 'node_modules', ...pkgName.split('/'));
@@ -388,13 +398,25 @@ describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
     return { packageRoot: fs.realpathSync(packageRoot), binDir };
   }
 
+  function makeDiscoveredInstall(packageRoot: string, version: string, atomic: boolean): string {
+    fs.mkdirSync(path.join(packageRoot, 'dist', 'lib'), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageRoot, 'package.json'),
+      JSON.stringify({ name: '@phnx-labs/agents-cli', version }),
+    );
+    if (atomic) {
+      fs.writeFileSync(path.join(packageRoot, 'dist', 'lib', 'app-bundle-install.js'), '// atomic installer\n');
+    }
+    return fs.realpathSync(packageRoot);
+  }
+
   it('resolves each PATH entry to its package root, deduplicating repeats', () => {
     const base = makeTempDir('installs');
     const a = makeInstall(base, 'prefix-a', '1.20.4');
     const b = makeInstall(base, 'prefix-b', '1.20.7');
     const pathEnv = [a.binDir, b.binDir, a.binDir].join(path.delimiter);
 
-    const installs = findAgentsCliInstalls(pathEnv);
+    const installs = findAgentsCliInstalls(pathEnv, pathOnlyOptions(base));
 
     expect(installs).toHaveLength(2);
     expect(installs.map((i) => i.packageRoot).sort()).toEqual([a.packageRoot, b.packageRoot].sort());
@@ -409,7 +431,7 @@ describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
     fs.mkdirSync(localBin, { recursive: true });
     fs.symlinkSync(path.join(real.binDir, 'agents'), path.join(localBin, 'agents'));
 
-    const installs = findAgentsCliInstalls(localBin);
+    const installs = findAgentsCliInstalls(localBin, pathOnlyOptions(base));
 
     expect(installs).toHaveLength(1);
     expect(installs[0].packageRoot).toBe(real.packageRoot);
@@ -432,13 +454,13 @@ describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
 
     // A compiled shim on its own must resolve — before the fix this was [],
     // i.e. the copy that actually runs was invisible to the scan entirely.
-    const compiledOnly = findAgentsCliInstalls(localBin);
+    const compiledOnly = findAgentsCliInstalls(localBin, pathOnlyOptions(base));
     expect(compiledOnly).toHaveLength(1);
     expect(compiledOnly[0].packageRoot).toBe(real.packageRoot);
     expect(compiledOnly[0].version).toBe('1.20.73');
 
     // And alongside the sibling npm bin it dedups to one install, not two.
-    const both = findAgentsCliInstalls([localBin, real.binDir].join(path.delimiter));
+    const both = findAgentsCliInstalls([localBin, real.binDir].join(path.delimiter), pathOnlyOptions(base));
     expect(both).toHaveLength(1);
     expect(both[0].binPath).toBe(path.join(localBin, 'agents'));
   });
@@ -459,6 +481,78 @@ describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
     fs.mkdirSync(empty, { recursive: true });
 
     const pathEnv = [plainBin, foreign.binDir, dangling, empty].join(path.delimiter);
-    expect(findAgentsCliInstalls(pathEnv)).toEqual([]);
+    expect(findAgentsCliInstalls(pathEnv, pathOnlyOptions(base))).toEqual([]);
+  });
+
+  it('discovers installs outside PATH across node managers and the npx cache (#2147)', () => {
+    const homeDir = makeTempDir('managed-installs');
+    const npmCacheDir = path.join(homeDir, 'npm-cache');
+    const roots = [
+      makeDiscoveredInstall(
+        path.join(homeDir, '.nvm', 'versions', 'node', 'v24.15.0', 'lib', 'node_modules', '@phnx-labs', 'agents-cli'),
+        '1.22.5',
+        true,
+      ),
+      makeDiscoveredInstall(
+        path.join(homeDir, '.local', 'share', 'fnm', 'node-versions', 'v24.14.0', 'installation', 'lib', 'node_modules', '@phnx-labs', 'agents-cli'),
+        '1.22.4',
+        true,
+      ),
+      makeDiscoveredInstall(
+        path.join(homeDir, '.volta', 'tools', 'image', 'packages', '@phnx-labs', 'agents-cli', 'lib', 'node_modules', '@phnx-labs', 'agents-cli'),
+        '1.22.3',
+        true,
+      ),
+      makeDiscoveredInstall(
+        path.join(npmCacheDir, '_npx', 'run-1', 'node_modules', '@phnx-labs', 'agents-cli'),
+        '1.20.88',
+        false,
+      ),
+    ];
+
+    const installs = findAgentsCliInstalls('', {
+      homeDir,
+      npmCacheDir,
+      globalNodeModulesDirs: [],
+    });
+
+    expect(installs.map((install) => install.packageRoot).sort()).toEqual(roots.sort());
+    expect(installs.every((install) => install.binPath === undefined)).toBe(true);
+    expect(installs.find((install) => install.version === '1.20.88')?.atomicHelperInstall).toBe(false);
+    expect(installs.filter((install) => install.atomicHelperInstall)).toHaveLength(3);
+  });
+
+  it('deduplicates a managed install already found through PATH and preserves its PATH note', () => {
+    const homeDir = makeTempDir('managed-dedup');
+    const nvmRoot = path.join(homeDir, '.nvm', 'versions', 'node', 'v24.15.0');
+    const install = makeInstall(path.dirname(nvmRoot), path.basename(nvmRoot), '1.22.5');
+
+    const installs = findAgentsCliInstalls(install.binDir, {
+      homeDir,
+      npmCacheDir: path.join(homeDir, 'empty-cache'),
+      globalNodeModulesDirs: [],
+    });
+
+    expect(installs).toHaveLength(1);
+    expect(installs[0].packageRoot).toBe(install.packageRoot);
+    expect(installs[0].binPath).toBe(path.join(install.binDir, 'agents'));
+  });
+});
+
+describe('buildMultiInstallInventory', () => {
+  it('marks the running copy unsafe when it predates the atomic helper installer', () => {
+    const runningRoot = '/prefix/lib/node_modules/@phnx-labs/agents-cli';
+    const inventory = buildMultiInstallInventory(runningRoot, '1.20.88', [{
+      binPath: '/prefix/bin/agents',
+      packageRoot: runningRoot,
+      version: '1.20.88',
+      atomicHelperInstall: false,
+    }]);
+
+    expect(inventory).toEqual([{
+      packageRoot: runningRoot,
+      version: '1.20.88',
+      note: 'running; unsafe legacy helper installer — remove this copy',
+    }]);
   });
 });

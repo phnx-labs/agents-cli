@@ -24,6 +24,8 @@ import type { SessionAgentId, SessionEvent, SessionMeta, TodoProgress } from './
 import type { AgentId } from '../types.js';
 import { AGENTS, agentConfigDirName, getCliVersion } from '../agents.js';
 import { walkForFilesWithStat } from '../fs-walk.js';
+import { hasCommand } from '../cli-resources.js';
+import { execFileShellSpec } from '../platform/exec.js';
 import { getConfigSymlinkVersion } from '../shims.js';
 import { SESSION_AGENTS } from './types.js';
 import { deriveShortId } from './short-id.js';
@@ -32,7 +34,7 @@ import { extractSessionTopic, extractSlashCommandName, extractSlashCommandFromTo
 import { isSkillInvocation, extractSkills, extractSlashCommands } from './highlights.js';
 import { parseAntigravity, parseCursor } from './parse.js';
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket, extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
-import { costOfUsage } from '../pricing/index.js';
+import { costOfUsage, costOfUsageNoCache } from '../pricing/index.js';
 import { machineId } from './sync/config.js';
 import { machineForSessionFile } from './origin-machine.js';
 export { machineForSessionFile } from './origin-machine.js';
@@ -241,8 +243,14 @@ interface ClaudeSessionScan {
   tokenCount?: number;
   /** Real generated (output) tokens, excluding cache-read/-write context. */
   outputTokens?: number;
+  /** Burn split — uncached input / cache-read / cache-write tokens (RUSH-2287). */
+  inputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   /** Total USD cost accumulated from per-(model, direction) token usage. */
   costUsd?: number;
+  /** USD cost with cache read/write repriced at the input rate (RUSH-2287). */
+  costUsdNoCache?: number;
   /** Wall-clock duration in ms between the first and last timestamped event. */
   durationMs?: number;
   /** ISO time of the last timestamped event — the session's last activity. */
@@ -287,7 +295,13 @@ interface CodexSessionScan {
   tokenCount?: number;
   /** Real generated (output) tokens, excluding cache-read/-write context. */
   outputTokens?: number;
+  /** Burn split — uncached input / cache-read tokens (Codex has no cache-write) (RUSH-2287). */
+  inputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   costUsd?: number;
+  /** USD cost with cache read repriced at the input rate (RUSH-2287). */
+  costUsdNoCache?: number;
   durationMs?: number;
   lastActivity?: string;
   contentText?: string;
@@ -1413,7 +1427,11 @@ async function readClaudeMeta(
       toolCallCount: scan.toolCallCount,
       tokenCount: scan.tokenCount,
       outputTokens: scan.outputTokens,
+      inputTokens: scan.inputTokens,
+      cacheReadTokens: scan.cacheReadTokens,
+      cacheWriteTokens: scan.cacheWriteTokens,
       costUsd: scan.costUsd,
+      costUsdNoCache: scan.costUsdNoCache,
       durationMs: scan.durationMs,
       isTeamOrigin,
       prUrl: scan.prUrl,
@@ -1446,7 +1464,11 @@ async function readClaudeMeta(
       toolCallCount: scan.toolCallCount,
       tokenCount: scan.tokenCount,
       outputTokens: scan.outputTokens,
+      inputTokens: scan.inputTokens,
+      cacheReadTokens: scan.cacheReadTokens,
+      cacheWriteTokens: scan.cacheWriteTokens,
       costUsd: scan.costUsd,
+      costUsdNoCache: scan.costUsdNoCache,
       durationMs: scan.durationMs,
       topic: scan.topic,
       isTeamOrigin,
@@ -1784,7 +1806,11 @@ export async function readCodexMeta(
     messageCount: scan.messageCount,
     tokenCount: scan.tokenCount,
     outputTokens: scan.outputTokens,
+    inputTokens: scan.inputTokens,
+    cacheReadTokens: scan.cacheReadTokens,
+    cacheWriteTokens: scan.cacheWriteTokens,
     costUsd: scan.costUsd,
+    costUsdNoCache: scan.costUsdNoCache,
     durationMs: scan.durationMs,
     account: resolveAccount?.(),
     prUrl: scan.prUrl,
@@ -1932,8 +1958,11 @@ function readGeminiMeta(
   let messageCount = 0;
   let tokenCount = 0;
   let outputTokens = 0;
+  let inputTokens = 0;
+  let cacheReadTokens = 0;
   let sawTokenCount = false;
   let costUsd = 0;
+  let costUsdNoCache = 0;
   let sawCost = false;
   let firstTsMs: number | undefined;
   let lastTsMs: number | undefined;
@@ -1977,13 +2006,16 @@ function readGeminiMeta(
         (typeof gtk.output === 'number' ? gtk.output : 0) +
         (typeof gtk.thoughts === 'number' ? gtk.thoughts : 0) +
         (typeof gtk.tool === 'number' ? gtk.tool : 0);
+      // Burn split (RUSH-2287): Gemini has uncached input + cache-read, no cache-write.
+      if (typeof gtk.input === 'number') inputTokens += gtk.input;
+      if (typeof gtk.cached === 'number') cacheReadTokens += gtk.cached;
     }
 
     // Per-message cost: directional tokens × this message's model price.
     const msgModel = (typeof message.model === 'string' ? message.model : undefined) || sessionModel;
     const tk = message.tokens;
     if (msgModel && tk && typeof tk === 'object') {
-      const c = costOfUsage({
+      const usage = {
         model: msgModel,
         inputTokens: typeof tk.input === 'number' ? tk.input : undefined,
         outputTokens:
@@ -1991,9 +2023,11 @@ function readGeminiMeta(
           (typeof tk.thoughts === 'number' ? tk.thoughts : 0) +
           (typeof tk.tool === 'number' ? tk.tool : 0),
         cacheReadTokens: typeof tk.cached === 'number' ? tk.cached : undefined,
-      });
+      };
+      const c = costOfUsage(usage);
       if (c > 0) {
         costUsd += c;
+        costUsdNoCache += costOfUsageNoCache(usage);
         sawCost = true;
       }
     }
@@ -2019,7 +2053,10 @@ function readGeminiMeta(
     messageCount,
     tokenCount: sawTokenCount ? tokenCount : undefined,
     outputTokens: sawTokenCount ? outputTokens : undefined,
+    inputTokens: sawTokenCount ? inputTokens : undefined,
+    cacheReadTokens: sawTokenCount ? cacheReadTokens : undefined,
     costUsd: sawCost ? costUsd : undefined,
+    costUsdNoCache: sawCost ? costUsdNoCache : undefined,
     durationMs,
   };
   return { meta, content: userTexts.join('\n') };
@@ -2452,12 +2489,11 @@ async function scanOpenCodeIncremental(): Promise<void> {
 
 /** Scan active OpenClaw channels and cron jobs via the openclaw CLI. */
 async function scanOpenClawIncremental(): Promise<void> {
-  // Check if openclaw is installed — silently skip if not.
-  try {
-    await execFileAsync('which', ['openclaw']);
-  } catch {
-    return;
-  }
+  // Check if openclaw is installed — silently skip if not. `which` is POSIX-only
+  // (Windows resolves PATH with `where`), so a bare `which` throws ENOENT on every
+  // Windows run and silently disabled the entire OpenClaw scan there — its sessions
+  // never reached the index (RUSH-2286). hasCommand() probes cross-platform.
+  if (!hasCommand('openclaw')) return;
 
   // TTL cache: skip subprocess calls if we scanned recently. Stored in the
   // meta table so we skip even when no channels/cron exist to produce rows.
@@ -2474,8 +2510,13 @@ async function scanOpenClawIncremental(): Promise<void> {
   const entries: ScanEntry[] = [];
 
   try {
-    const { stdout: output } = await execFileAsync('openclaw', ['channels', 'status'], {
+    // On Windows `openclaw` resolves to a .cmd/.ps1 shim that execFile can't launch
+    // directly; execFileShellSpec composes a shell-safe invocation there and is a
+    // no-op passthrough on POSIX (RUSH-2286).
+    const channelsSpec = execFileShellSpec('openclaw', ['channels', 'status']);
+    const { stdout: output } = await execFileAsync(channelsSpec.command, channelsSpec.args, {
       encoding: 'utf-8',
+      shell: channelsSpec.shell,
     });
 
     for (const line of output.split('\n')) {
@@ -2504,8 +2545,10 @@ async function scanOpenClawIncremental(): Promise<void> {
   }
 
   try {
-    const { stdout: output } = await execFileAsync('openclaw', ['cron', 'list'], {
+    const cronSpec = execFileShellSpec('openclaw', ['cron', 'list']);
+    const { stdout: output } = await execFileAsync(cronSpec.command, cronSpec.args, {
       encoding: 'utf-8',
+      shell: cronSpec.shell,
     });
 
     const lines = output.split('\n');
@@ -3063,15 +3106,19 @@ async function readDroidMeta(
   const settings = readDroidSettings(filePath.replace(/\.jsonl$/, '.settings.json'));
   const model = settings.model || scan.model;
   const tokenCount = settings.tokenCount;
-  const costUsd = model && settings.usage
-    ? costOfUsage({
+  // Droid records a full split (input / cache-read / cache-write / output) in its
+  // settings sidecar, so both the actual and no-cache cost are derivable (RUSH-2287).
+  const usageForCost = model && settings.usage
+    ? {
         model,
         inputTokens: settings.usage.inputTokens,
         outputTokens: settings.usage.outputTokens,
         cacheReadTokens: settings.usage.cacheReadTokens,
         cacheCreationTokens: settings.usage.cacheCreationTokens,
-      })
-    : 0;
+      }
+    : undefined;
+  const costUsd = usageForCost ? costOfUsage(usageForCost) : 0;
+  const costUsdNoCache = usageForCost ? costOfUsageNoCache(usageForCost) : 0;
 
   const stat = safeStatSync(filePath);
   const cwd = normalizeCwd(scan.cwd || '');
@@ -3090,7 +3137,11 @@ async function readDroidMeta(
     messageCount: scan.messageCount,
     tokenCount,
     outputTokens: settings.usage?.outputTokens,
+    inputTokens: settings.usage?.inputTokens,
+    cacheReadTokens: settings.usage?.cacheReadTokens,
+    cacheWriteTokens: settings.usage?.cacheCreationTokens,
     costUsd: costUsd > 0 ? costUsd : undefined,
+    costUsdNoCache: costUsd > 0 ? costUsdNoCache : undefined,
     durationMs: scan.durationMs,
   };
   return { meta, content: scan.contentText || '' };
@@ -3250,8 +3301,14 @@ export interface ClaudeParseState {
   toolCallCount: number;
   tokenCount: number;
   outputTokens: number;
+  // Burn split accumulators (RUSH-2287): uncached input / cache-read / cache-write.
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   sawTokenCount: boolean;
   costUsd: number;
+  // Same session cost with cache read/write repriced at the input rate.
+  costUsdNoCache: number;
   sawCost: boolean;
   // Track the first and last timestamped event to derive wall-clock duration.
   firstTsMs?: number;
@@ -3299,8 +3356,12 @@ export function initClaudeParseState(): ClaudeParseState {
     toolCallCount: 0,
     tokenCount: 0,
     outputTokens: 0,
+    inputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
     sawTokenCount: false,
     costUsd: 0,
+    costUsdNoCache: 0,
     sawCost: false,
     firstTsMs: undefined,
     lastTsMs: undefined,
@@ -3495,20 +3556,30 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
     state.sawTokenCount = true;
   }
   if (typeof usageObj?.output_tokens === 'number') state.outputTokens += usageObj.output_tokens;
+  // Burn split (RUSH-2287): accumulate the raw directional counts so `agents
+  // output` can report uncached-input / cache-read / cache-write separately.
+  if (usageObj && typeof usageObj === 'object') {
+    if (typeof usageObj.input_tokens === 'number') state.inputTokens += usageObj.input_tokens;
+    if (typeof usageObj.cache_read_input_tokens === 'number') state.cacheReadTokens += usageObj.cache_read_input_tokens;
+    if (typeof usageObj.cache_creation_input_tokens === 'number') state.cacheWriteTokens += usageObj.cache_creation_input_tokens;
+  }
   // Per-assistant-message cost: each event carries its own model, so we
   // multiply that event's raw token directions by that model's price.
   const model = parsed.message?.model;
   if (typeof model === 'string' && model) state.model = model;
   if (model && usageObj && typeof usageObj === 'object') {
-    const eventCost = costOfUsage({
+    const usageForCost = {
       model,
       inputTokens: usageObj.input_tokens,
       outputTokens: usageObj.output_tokens,
       cacheReadTokens: usageObj.cache_read_input_tokens,
       cacheCreationTokens: usageObj.cache_creation_input_tokens,
-    });
+    };
+    const eventCost = costOfUsage(usageForCost);
     if (eventCost > 0) {
       state.costUsd += eventCost;
+      // No-cache scenario: reprice this same event's cache tokens at the input rate.
+      state.costUsdNoCache += costOfUsageNoCache(usageForCost);
       state.sawCost = true;
     }
   }
@@ -3542,7 +3613,11 @@ export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
     toolCallCount: state.toolCallCount,
     tokenCount: state.sawTokenCount ? state.tokenCount : undefined,
     outputTokens: state.sawTokenCount ? state.outputTokens : undefined,
+    inputTokens: state.sawTokenCount ? state.inputTokens : undefined,
+    cacheReadTokens: state.sawTokenCount ? state.cacheReadTokens : undefined,
+    cacheWriteTokens: state.sawTokenCount ? state.cacheWriteTokens : undefined,
     costUsd: state.sawCost ? state.costUsd : undefined,
+    costUsdNoCache: state.sawCost ? state.costUsdNoCache : undefined,
     durationMs,
     lastActivity: state.lastTsMs !== undefined ? new Date(state.lastTsMs).toISOString() : undefined,
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
@@ -3600,7 +3675,10 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
  * exact even when the recent window is smaller than the true count.
  */
 export interface ClaudeParserState {
-  v: 2;
+  // v3 (RUSH-2287): added the burn-split accumulators + no-cache cost. A stale v2
+  // blob is rejected by the `!== 3` guard and the session is re-parsed from byte 0,
+  // which populates the new split correctly rather than resuming without it.
+  v: 3;
   offset: number;
   jsonlDroppingOversizedLine?: boolean;
   timestamp?: string;
@@ -3619,9 +3697,13 @@ export interface ClaudeParserState {
   toolCallCount: number;
   tokenCount: number;
   outputTokens: number;
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   sawTokenCount: boolean;
   sawCost: boolean;
   costUsd: number;
+  costUsdNoCache: number;
   seenIdsSize: number;
   seenIdsRecent: string[];
   sawPrCreate: boolean;
@@ -3659,7 +3741,7 @@ export function serializeClaudeParserState(
     : allIds;
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
   return {
-    v: 2,
+    v: 3,
     offset,
     jsonlDroppingOversizedLine: jsonlDroppingOversizedLine || undefined,
     timestamp: state.timestamp,
@@ -3678,9 +3760,13 @@ export function serializeClaudeParserState(
     toolCallCount: state.toolCallCount,
     tokenCount: state.tokenCount,
     outputTokens: state.outputTokens,
+    inputTokens: state.inputTokens,
+    cacheReadTokens: state.cacheReadTokens,
+    cacheWriteTokens: state.cacheWriteTokens,
     sawTokenCount: state.sawTokenCount,
     sawCost: state.sawCost,
     costUsd: state.costUsd,
+    costUsdNoCache: state.costUsdNoCache,
     seenIdsSize: state.seenAssistantIds.size,
     seenIdsRecent,
     sawPrCreate: state.sawPrCreate,
@@ -3741,8 +3827,12 @@ export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseSt
     toolCallCount: prior.toolCallCount ?? 0,
     tokenCount: prior.tokenCount,
     outputTokens: prior.outputTokens,
+    inputTokens: prior.inputTokens ?? 0,
+    cacheReadTokens: prior.cacheReadTokens ?? 0,
+    cacheWriteTokens: prior.cacheWriteTokens ?? 0,
     sawTokenCount: prior.sawTokenCount,
     costUsd: prior.costUsd,
+    costUsdNoCache: prior.costUsdNoCache ?? 0,
     sawCost: prior.sawCost,
     firstTsMs: prior.firstTsMs,
     lastTsMs: prior.lastTsMs,
@@ -3911,7 +4001,7 @@ function parsePriorClaudeState(row: { parserState: string | null } | undefined):
   if (!row?.parserState) return null;
   try {
     const parsed = JSON.parse(row.parserState) as ClaudeParserState;
-    if (parsed?.v !== 2 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
+    if (parsed?.v !== 3 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
     return parsed;
   } catch {
     return null;
@@ -4106,16 +4196,34 @@ export function applyCodexLine(state: CodexParseState, parsed: any): void {
  * exact return-building {@link scanCodexSession} used to run inline.
  */
 export function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
-  // Price the final cumulative token snapshot once, against the session model.
+  // Codex reports one cumulative snapshot: uncached input, cached (cache-read)
+  // input, and output+reasoning. It has no cache-write bucket. Derive the burn
+  // split and both costs (actual + no-cache) from that final snapshot (RUSH-2287).
+  const snap = state.lastTotalTokenUsage;
+  const outputTokens = snap
+    ? (snap.output_tokens ?? 0) + (snap.reasoning_output_tokens ?? 0)
+    : undefined;
   let costUsd: number | undefined;
-  if (state.model && state.lastTotalTokenUsage) {
-    const c = costOfUsage({
+  let costUsdNoCache: number | undefined;
+  let inputTokens: number | undefined;
+  let cacheReadTokens: number | undefined;
+  if (snap) {
+    inputTokens = typeof snap.input_tokens === 'number' ? snap.input_tokens : undefined;
+    cacheReadTokens = typeof snap.cached_input_tokens === 'number' ? snap.cached_input_tokens : undefined;
+  }
+  // Price the final cumulative token snapshot once, against the session model.
+  if (state.model && snap) {
+    const usage = {
       model: state.model,
-      inputTokens: state.lastTotalTokenUsage.input_tokens,
-      outputTokens: (state.lastTotalTokenUsage.output_tokens ?? 0) + (state.lastTotalTokenUsage.reasoning_output_tokens ?? 0),
-      cacheReadTokens: state.lastTotalTokenUsage.cached_input_tokens,
-    });
-    if (c > 0) costUsd = c;
+      inputTokens: snap.input_tokens,
+      outputTokens,
+      cacheReadTokens: snap.cached_input_tokens,
+    };
+    const c = costOfUsage(usage);
+    if (c > 0) {
+      costUsd = c;
+      costUsdNoCache = costOfUsageNoCache(usage);
+    }
   }
 
   const durationMs =
@@ -4136,10 +4244,12 @@ export function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
     topic: state.topic,
     messageCount: state.messageCount,
     tokenCount: state.tokenCount,
-    outputTokens: state.lastTotalTokenUsage
-      ? (state.lastTotalTokenUsage.output_tokens ?? 0) + (state.lastTotalTokenUsage.reasoning_output_tokens ?? 0)
-      : undefined,
+    outputTokens,
+    inputTokens,
+    cacheReadTokens,
+    cacheWriteTokens: undefined,
     costUsd,
+    costUsdNoCache,
     durationMs,
     lastActivity: state.lastTsMs !== undefined ? new Date(state.lastTsMs).toISOString() : undefined,
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
@@ -5230,10 +5340,13 @@ export function readGrokMeta(
         : undefined;
 
   // Grok records its managed home in summary.grok_home
-  // (…/versions/grok/<version>/home/.grok) — recover the version from it.
+  // (…/versions/grok/<version>/home/.grok) — recover the version from it. The
+  // value is written by the Grok CLI in the writing host's native separators, so
+  // a Windows-authored summary is backslash-separated; normalize to `/` before
+  // matching or the version never resolves on Windows (RUSH-2286).
   let embeddedVersion: string | undefined;
   if (typeof summary?.grok_home === 'string') {
-    embeddedVersion = summary.grok_home.match(/versions\/grok\/([^/]+)\//)?.[1];
+    embeddedVersion = summary.grok_home.replace(/\\/g, '/').match(/versions\/grok\/([^/]+)\//)?.[1];
   }
 
   const meta: SessionMeta = {

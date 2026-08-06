@@ -653,8 +653,9 @@ run metadata:
 Those archives are indexed by `agents sessions` with `origin: "routine"`,
 `routineName`, and `routineRunId`. Use `agents sessions --routine --all` (or the
 `--routines` alias) to pick a routine interactively, or pass a fuzzy name such
-as `agents sessions --routine nightly-review --all`, to list
-them, or `agents sessions <run-id>` to render the existing session summary view
+as `agents sessions --routine nightly-review --all`, to list them. The picker
+includes last-run and session-count context, and the selected view groups sessions
+by run ID and timestamp. Use `agents sessions <run-id>` to render the existing session summary view
 for a specific routine run.
 
 Archiving is per-agent (`ROUTINE_TRANSCRIPT_SPECS` in `runner.ts`, mirroring
@@ -1044,6 +1045,28 @@ Notifications are actionable where a target exists: clicking a **Finish** opens
 the run's `report.md`/`stdout.log`; **Start**/**Overdue** open the runs folder.
 The finish notification only fires for locally-run routines — `host:`-placed
 runs are finalized by the monitor sweep and do not emit one.
+
+### Owner notification on failure (RUSH-2288)
+
+Desktop notifications never leave the machine, so a failed routine on a headless
+fleet box was invisible until someone looked. On a **failure only** — a
+`failed`/`timeout` finish, or a pre-spawn failure such as `auth_failed` — the
+daemon also pings the **owner's phone**, through the same channel stack `agents
+notify` uses (the `owner.channels` in `humans.yaml`, or the legacy
+`notify.owner` in `agents.yaml`). This is the failure the per-routine `agents
+notify` prompt can never send itself: when the routine's own agent fails to
+spawn, that prompt never runs.
+
+- **Only failures.** A green routine of any kind stays silent. The desktop
+  thresholds above are unchanged; this is an additional failures-only lane.
+- **In-process, not `ssh`.** The daemon calls the channel providers directly
+  (`src/lib/routine-notify-owner.ts`) — it does not shell out to `ssh mac-mini
+  agents notify`.
+- **Fallback channel.** If the primary owner channel cannot deliver from this
+  box, the daemon walks the remaining configured `owner.channels` in order
+  (e.g. an OpenClaw channel after iMessage). Telegram and intrusive (voice)
+  channels are excluded; an owner whose only channel is Telegram gets no ping.
+- **Deduped** per job+runId, so a run reaches the owner at most once.
 
 ## Commands
 

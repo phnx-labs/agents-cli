@@ -16,6 +16,13 @@ type SessionMeta = import('../lib/session/types.js').SessionMeta;
 const FILES_DIR = path.join(TEST_HOME, 'output-cmd-files');
 fs.mkdirSync(FILES_DIR, { recursive: true });
 
+interface Split {
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsdNoCache: number;
+}
+
 function seed(
   id: string,
   agent: SessionMeta['agent'],
@@ -24,6 +31,7 @@ function seed(
   outputTokens: number,
   tokenCount: number,
   project: string,
+  split?: Split,
 ): void {
   const filePath = path.join(FILES_DIR, `${id}.jsonl`);
   fs.writeFileSync(filePath, '');
@@ -39,6 +47,7 @@ function seed(
     costUsd,
     outputTokens,
     tokenCount,
+    ...(split ?? {}),
   };
   upsertSession(meta, '');
 }
@@ -73,9 +82,15 @@ const BASE = ['--since', '2020-01-01', '--no-prs'];
 describe('agents output', () => {
   beforeAll(() => {
     // token_count is deliberately >> outputTokens to model cache-read inflation.
-    seed('big0001', 'claude', '2026-05-20T10:00:00.000Z', 30, 1_000_000, 50_000_000, 'rush');
-    seed('mid0002', 'claude', '2026-05-21T10:00:00.000Z', 10, 400_000, 12_000_000, 'agents-cli');
-    seed('cdx0003', 'codex', '2026-05-21T12:00:00.000Z', 2, 100_000, 3_000_000, 'agents-cli');
+    // The split (input/cache-read/cache-write) and cost_usd_nocache are seeded so
+    // the rollup + --pricing no-cache scenario have real numbers (RUSH-2287).
+    // Per session: costUsdNoCache > costUsd (caching is a discount).
+    seed('big0001', 'claude', '2026-05-20T10:00:00.000Z', 30, 1_000_000, 50_000_000, 'rush',
+      { inputTokens: 2_000_000, cacheReadTokens: 46_000_000, cacheWriteTokens: 1_000_000, costUsdNoCache: 90 });
+    seed('mid0002', 'claude', '2026-05-21T10:00:00.000Z', 10, 400_000, 12_000_000, 'agents-cli',
+      { inputTokens: 1_000_000, cacheReadTokens: 10_500_000, cacheWriteTokens: 100_000, costUsdNoCache: 25 });
+    seed('cdx0003', 'codex', '2026-05-21T12:00:00.000Z', 2, 100_000, 3_000_000, 'agents-cli',
+      { inputTokens: 500_000, cacheReadTokens: 2_400_000, cacheWriteTokens: 0, costUsdNoCache: 5 });
   });
 
   afterAll(() => {
@@ -133,5 +148,69 @@ describe('agents output', () => {
     expect(out).toMatch(/\dM|\dK/);
     // Honesty footer present.
     expect(out).toContain('not counted');
+  });
+
+  it('--json carries the input / cache-read / cache-write burn split (RUSH-2287)', async () => {
+    const out = await runOutput([...BASE, '--json']);
+    const d = JSON.parse(out);
+    expect(d.burn.inputTokens).toBe(3_500_000);       // 2M + 1M + 0.5M
+    expect(d.burn.cacheReadTokens).toBe(58_900_000);  // 46M + 10.5M + 2.4M
+    expect(d.burn.cacheWriteTokens).toBe(1_100_000);  // 1M + 0.1M + 0
+    // Split fields also ride each breakdown row.
+    const byKey = Object.fromEntries(
+      (await runOutput([...BASE, '--by', 'agent', '--json']).then(JSON.parse)).breakdown.rows.map(
+        (r: any) => [r.key, r],
+      ),
+    );
+    expect(byKey.claude.inputTokens).toBe(3_000_000);      // 2M + 1M
+    expect(byKey.claude.cacheReadTokens).toBe(56_500_000); // 46M + 10.5M
+    expect(byKey.codex.cacheWriteTokens).toBe(0);
+  });
+
+  it('--json carries both actual and no-cache costs regardless of scenario', async () => {
+    const d = JSON.parse(await runOutput([...BASE, '--json']));
+    expect(d.burn.costUsd).toBeCloseTo(42, 5);         // 30 + 10 + 2
+    expect(d.burn.costUsdNoCache).toBeCloseTo(120, 5); // 90 + 25 + 5
+    // No-cache is strictly higher — caching is a discount.
+    expect(d.burn.costUsdNoCache).toBeGreaterThan(d.burn.costUsd);
+    // The scenario flag does not change the JSON payload.
+    const d2 = JSON.parse(await runOutput([...BASE, '--pricing', 'no-cache', '--json']));
+    expect(d2.burn.costUsd).toBeCloseTo(42, 5);
+    expect(d2.burn.costUsdNoCache).toBeCloseTo(120, 5);
+  });
+
+  it('TTY shows the burn split line and the caching comparison', async () => {
+    const out = await runOutput([...BASE]);
+    expect(out).toContain('burn split:');
+    expect(out).toContain('input');
+    expect(out).toContain('cache-read');
+    expect(out).toContain('cache-write');
+    // Actual mode still surfaces the saving.
+    expect(out).toContain('caching:');
+    expect(out).toContain('no-cache');
+  });
+
+  it('--pricing no-cache leads the burn with the no-cache figure', async () => {
+    const out = await runOutput([...BASE, '--pricing', 'no-cache']);
+    expect(out).toContain('(no-cache)');
+    // $120.00 no-cache is the headline; $42.00 actual still appears in the comparison.
+    expect(out).toContain('$120.00');
+    expect(out).toContain('$42.00');
+    // Breakdown header switches to the no-cache column label.
+    expect(out).toContain('burn(nc)');
+  });
+
+  it('rejects an unknown --pricing scenario', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((): never => {
+      throw new Error('exit');
+    }) as any);
+    try {
+      await expect(runOutput([...BASE, '--pricing', 'bogus'])).rejects.toThrow();
+      expect(errSpy.mock.calls.flat().join(' ')).toContain('--pricing must be one of');
+    } finally {
+      errSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
   });
 });

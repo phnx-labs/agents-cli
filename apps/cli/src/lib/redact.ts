@@ -14,9 +14,14 @@ const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/\bghp_[A-Za-z0-9]{36}\b/g, '[REDACTED_GITHUB_TOKEN]'],
   [/\bgh[osru]_[A-Za-z0-9]{36}\b/g, '[REDACTED_GITHUB_TOKEN]'],
   [/\bgithub_pat_[A-Za-z0-9_]{22,}\b/g, '[REDACTED_GITHUB_TOKEN]'],
-  // Anthropic keys (sk-ant-api03-…) before the generic sk- rule so the marker
-  // is specific; the generic rule would otherwise swallow it first.
-  [/\bsk-ant-api03-[A-Za-z0-9_-]{20,}\b/g, '[REDACTED_ANTHROPIC_KEY]'],
+  // Anthropic credentials, before the generic sk- rule so the marker is specific
+  // (the generic rule would otherwise swallow them first). Covers every kind of
+  // sk-ant token by matching the kind segment generically: API keys
+  // (sk-ant-api03-…) AND the long-lived OAuth setup-tokens (sk-ant-oat01-…) that
+  // `claude setup-token` mints. The generic sk- rule below CANNOT match an oat01
+  // token — the hyphen after `ant` breaks its [A-Za-z0-9]{20,} run — so without
+  // this an OAuth setup-token leaks verbatim into any log/export (#1767).
+  [/\bsk-ant-[a-z0-9]{3,8}-[A-Za-z0-9_-]{8,}\b/g, '[REDACTED_ANTHROPIC_KEY]'],
   // Stripe live secret / restricted keys.
   [/\b[rs]k_live_[A-Za-z0-9]{20,}\b/g, '[REDACTED_STRIPE_KEY]'],
   [/\bsk-[A-Za-z0-9]{20,}\b/g, '[REDACTED_API_KEY]'],

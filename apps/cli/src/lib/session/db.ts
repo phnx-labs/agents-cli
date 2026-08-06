@@ -31,7 +31,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/05-sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 36;
+export const SCHEMA_VERSION = 37;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every
@@ -88,7 +88,11 @@ CREATE TABLE IF NOT EXISTS sessions (
   message_count INTEGER,
   token_count INTEGER,
   output_tokens INTEGER,
+  input_tokens INTEGER,
+  cache_read_tokens INTEGER,
+  cache_write_tokens INTEGER,
   cost_usd REAL,
+  cost_usd_nocache REAL,
   duration_ms INTEGER,
   model TEXT,
   tool_call_count INTEGER,
@@ -342,7 +346,11 @@ export interface SessionRow {
   message_count: number | null;
   token_count: number | null;
   output_tokens: number | null;
+  input_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
   cost_usd: number | null;
+  cost_usd_nocache: number | null;
   duration_ms: number | null;
   model: string | null;
   tool_call_count: number | null;
@@ -990,6 +998,24 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
       FROM tool_calls;
     `);
   }
+
+  if (fromVersion < 37) {
+    // v36 -> v37: persist the burn SPLIT (uncached input / cache-read /
+    // cache-write) and a second "no-cache" cost per session, so `agents output`
+    // can report the token split and a --pricing no-cache scenario (RUSH-2287).
+    // These are new nullable columns — do NOT flush scan_ledger (adding a column
+    // must keep warm session ledgers warm, the contract the v33->v34 note above
+    // states). Pre-upgrade rows stay NULL for the split until their transcript is
+    // re-scanned; `agents output` reports the split only where it is present, so
+    // an absent split reads as "not available for this session", never as zero.
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!cols.has('input_tokens')) db.exec(`ALTER TABLE sessions ADD COLUMN input_tokens INTEGER`);
+    if (!cols.has('cache_read_tokens')) db.exec(`ALTER TABLE sessions ADD COLUMN cache_read_tokens INTEGER`);
+    if (!cols.has('cache_write_tokens')) db.exec(`ALTER TABLE sessions ADD COLUMN cache_write_tokens INTEGER`);
+    if (!cols.has('cost_usd_nocache')) db.exec(`ALTER TABLE sessions ADD COLUMN cost_usd_nocache REAL`);
+  }
 }
 
 /**
@@ -1549,7 +1575,8 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     id, short_id, agent, origin, routine_name, routine_run_id,
     version, account, account_key, account_org, mode, timestamp, last_activity,
     project, cwd, git_branch, topic, label, message_count, token_count,
-    output_tokens, cost_usd, duration_ms, model, tool_call_count,
+    output_tokens, input_tokens, cache_read_tokens, cache_write_tokens,
+    cost_usd, cost_usd_nocache, duration_ms, model, tool_call_count,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
     pr_url, pr_number, worktree_slug, ticket_id, spawned_team, plan, todos,
     recent_directories_touched, linear_project, linear_project_url, machine,
@@ -1558,7 +1585,8 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     @id, @short_id, @agent, @origin, @routine_name, @routine_run_id,
     @version, @account, @account_key, @account_org, @mode, @timestamp, @last_activity,
     @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
-    @output_tokens, @cost_usd, @duration_ms, @model, @tool_call_count,
+    @output_tokens, @input_tokens, @cache_read_tokens, @cache_write_tokens,
+    @cost_usd, @cost_usd_nocache, @duration_ms, @model, @tool_call_count,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
     @pr_url, @pr_number, @worktree_slug, @ticket_id, @spawned_team, @plan, @todos,
     @recent_directories_touched, @linear_project, @linear_project_url, @machine,
@@ -1593,7 +1621,11 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     message_count = excluded.message_count,
     token_count = excluded.token_count,
     output_tokens = excluded.output_tokens,
+    input_tokens = excluded.input_tokens,
+    cache_read_tokens = excluded.cache_read_tokens,
+    cache_write_tokens = excluded.cache_write_tokens,
     cost_usd = excluded.cost_usd,
+    cost_usd_nocache = excluded.cost_usd_nocache,
     duration_ms = excluded.duration_ms,
     model = excluded.model,
     tool_call_count = excluded.tool_call_count,
@@ -1873,7 +1905,11 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     message_count: meta.messageCount ?? null,
     token_count: meta.tokenCount ?? null,
     output_tokens: meta.outputTokens ?? null,
+    input_tokens: meta.inputTokens ?? null,
+    cache_read_tokens: meta.cacheReadTokens ?? null,
+    cache_write_tokens: meta.cacheWriteTokens ?? null,
     cost_usd: meta.costUsd ?? null,
+    cost_usd_nocache: meta.costUsdNoCache ?? null,
     duration_ms: meta.durationMs ?? null,
     model: meta.model ?? null,
     tool_call_count: meta.toolCallCount ?? null,
@@ -2076,7 +2112,11 @@ export function upsertSessionsBatch(
         message_count: meta.messageCount ?? null,
         token_count: meta.tokenCount ?? null,
         output_tokens: meta.outputTokens ?? null,
+        input_tokens: meta.inputTokens ?? null,
+        cache_read_tokens: meta.cacheReadTokens ?? null,
+        cache_write_tokens: meta.cacheWriteTokens ?? null,
         cost_usd: meta.costUsd ?? null,
+        cost_usd_nocache: meta.costUsdNoCache ?? null,
         duration_ms: meta.durationMs ?? null,
         model: meta.model ?? null,
         tool_call_count: meta.toolCallCount ?? null,
@@ -2305,7 +2345,11 @@ function rowToMeta(row: SessionRow): SessionMeta {
     messageCount: row.message_count ?? undefined,
     tokenCount: row.token_count ?? undefined,
     outputTokens: row.output_tokens ?? undefined,
+    inputTokens: row.input_tokens ?? undefined,
+    cacheReadTokens: row.cache_read_tokens ?? undefined,
+    cacheWriteTokens: row.cache_write_tokens ?? undefined,
     costUsd: row.cost_usd ?? undefined,
+    costUsdNoCache: row.cost_usd_nocache ?? undefined,
     durationMs: row.duration_ms ?? undefined,
     model: row.model ?? undefined,
     toolCallCount: row.tool_call_count ?? undefined,
@@ -2621,11 +2665,23 @@ export interface UsageRollupRow {
    */
   label?: string;
   costUsd: number;
+  /**
+   * USD cost priced as if caching were off (cache read/write at the input rate),
+   * summed from `cost_usd_nocache`. Backs `agents output --pricing no-cache`.
+   * Equals `costUsd` for rows whose sessions record no cache split (RUSH-2287).
+   */
+  costUsdNoCache: number;
   durationMs: number;
   sessionCount: number;
   tokenCount: number;
   /** Real generated (output) tokens — excludes cache-read/-write context. */
   outputTokens: number;
+  /** Uncached input tokens summed across the group (0 where no harness recorded a split). */
+  inputTokens: number;
+  /** Cache-read tokens summed across the group. */
+  cacheReadTokens: number;
+  /** Cache-write (cache-creation) tokens summed across the group. */
+  cacheWriteTokens: number;
 }
 
 /** What to group a usage rollup by. */
@@ -2832,10 +2888,17 @@ export function queryUsageRollup(
                     THEN account_org || ' <' || account || '>' END) AS label,`
         : ''}
       IFNULL(SUM(cost_usd), 0) AS costUsd,
+      -- A session with a cost but no persisted no-cache figure records no cache
+      -- split, so its no-cache cost equals its actual cost — fall back to cost_usd
+      -- so it still contributes to the scenario total rather than dropping to 0.
+      IFNULL(SUM(COALESCE(cost_usd_nocache, cost_usd)), 0) AS costUsdNoCache,
       IFNULL(SUM(duration_ms), 0) AS durationMs,
       COUNT(*) AS sessionCount,
       IFNULL(SUM(token_count), 0) AS tokenCount,
-      IFNULL(SUM(output_tokens), 0) AS outputTokens
+      IFNULL(SUM(output_tokens), 0) AS outputTokens,
+      IFNULL(SUM(input_tokens), 0) AS inputTokens,
+      IFNULL(SUM(cache_read_tokens), 0) AS cacheReadTokens,
+      IFNULL(SUM(cache_write_tokens), 0) AS cacheWriteTokens
     FROM sessions
     ${clause}
     GROUP BY key

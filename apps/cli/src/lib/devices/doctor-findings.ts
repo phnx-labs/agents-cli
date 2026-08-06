@@ -18,7 +18,7 @@
  * with. Keep this list exhaustive; a kind missing from it is a doc that lies.
  *   CRITICAL — logged-out (provable) · missing-hook · missing-plugin ·
  *              unwired-hook (a hook on disk that settings.json never fires) ·
- *              cli-missing · owner-sink-unreachable (the feed/notify owner lane
+ *              cli-missing · ssh-key-enrollment · owner-sink-unreachable (the feed/notify owner lane
  *              cannot reach the owner from this box).
  *   WARNING  — logout-unprovable (hedged) · missing-resource · content-drift ·
  *              never-synced · stale · repo-behind · repo-drift · version-skew ·
@@ -44,6 +44,7 @@ import type { AgentId } from '../types.js';
 import type { DuplicateVersionHook } from '../hooks.js';
 import type { RcSecretFinding } from '../secrets/rc-hygiene.js';
 import type { OwnerSinkStatus } from '../channels/owner-sink.js';
+import { windowsSshEnrollmentProblem, type WindowsSshEnrollmentAudit } from './windows-ssh-enrollment.js';
 import type { SyncStatusRow, OrphanRow } from '../drift.js';
 import type { FetchStatusMarker } from '../auto-pull.js';
 import type { VersionResourceReport } from '../doctor-diff.js';
@@ -119,6 +120,7 @@ export const ALL_FINDING_KINDS = [
   'rc-secret-export',    // credential-shaped export in a shell rc file
   'env-secret-export',   // the file-store master key live in THIS process's env
   'exec-policy',         // Windows execution policy blocks agents.ps1
+  'ssh-key-enrollment',  // Windows OpenSSH public-key path/content/ACL is invalid
   'stale-cli',
   'owner-sink-unreachable', // the feed/notify owner-delivery lane can't reach the owner from this box
 ] as const;
@@ -164,6 +166,7 @@ export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
   'rc-secret-export': 'warning',
   'env-secret-export': 'warning',
   'exec-policy': 'warning',
+  'ssh-key-enrollment': 'critical',
   'stale-cli': 'warning',
 };
 
@@ -306,6 +309,8 @@ export function remediationFor(finding: DoctorFinding): string {
       return 'unset at the source, then restart every process that inherited it (shells, editor, tmux, agents daemon)';
     case 'exec-policy':
       return 'Set-ExecutionPolicy -Scope CurrentUser RemoteSigned';
+    case 'ssh-key-enrollment':
+      return 'repair the reported AuthorizedKeysFile, then rerun agents doctor';
     case 'stale-cli':
       return 'upgrade';
     case 'owner-sink-unreachable':
@@ -394,6 +399,8 @@ export interface LocalFindingInputs {
   /** The effective PowerShell execution policy and the platform it was read on.
    *  Only `win32` yields a finding — the `agents.ps1` launcher is Windows-only. */
   execPolicy?: { platform: NodeJS.Platform; policy: string | null };
+  /** Read-only Windows OpenSSH AuthorizedKeysFile/content/ACL audit. */
+  windowsSshEnrollment?: WindowsSshEnrollmentAudit | null;
   /** `<agent>@<version>` keys whose home is an isolated copy. Their findings are
    *  never collapsed across versions: the agent-wide `agents doctor <agent> --fix`
    *  sweep deliberately skips isolated copies, so a collapsed row would print a
@@ -618,6 +625,16 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
   // Windows execution policy blocking the generated agents.ps1 launcher.
   const policyFinding = execPolicyFinding(device, input.execPolicy);
   if (policyFinding) out.push(policyFinding);
+
+  if (input.windowsSshEnrollment) {
+    const problem = windowsSshEnrollmentProblem(input.windowsSshEnrollment);
+    if (problem) {
+      out.push(finding({
+        severity: FINDING_SEVERITY['ssh-key-enrollment'], kind: 'ssh-key-enrollment', device,
+        message: problem,
+      }));
+    }
+  }
 
   // Per-version sign-in → logged-out (critical, provable) / logout-unprovable
   // (warning). Signed-in versions produce no finding — the accounts line shows

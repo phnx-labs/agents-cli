@@ -4,9 +4,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { archiveRoutineTranscripts, buildJobCommand, executeJob, executeJobDetached, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
-import { getRunDir, writeRunMeta } from './routines.js';
+import { getRunDir, readRunMeta, writeRunMeta } from './routines.js';
 import { getVersionHomePath } from './versions.js';
 import type { JobConfig, RunMeta } from './routines.js';
+import { hardDeprecationError } from './agents.js';
 import type { RotateCandidate, RotateResult } from './rotate.js';
 import { saveTask, hostsCacheDir } from './hosts/tasks.js';
 import { _resetPerfDbForTest, aggregateSamples } from './perf/db.js';
@@ -101,6 +102,56 @@ describe('runner device enforcement', () => {
 
     const runDir = path.dirname(getRunDir(config.name, 'any'));
     expect(fs.existsSync(runDir)).toBe(false);
+  });
+});
+
+describe('runner hard-deprecation enforcement (RUSH-2202)', () => {
+  afterEach(() => cleanupJobRuns('gemini-legacy'));
+
+  it('executeJob fails loud with a failed run record instead of building a gemini command', async () => {
+    const config = baseConfig({ name: 'gemini-legacy', agent: 'gemini' });
+    const { meta, reportPath } = await executeJob(config);
+
+    expect(meta.status).toBe('failed');
+    expect(meta.exitCode).toBe(1);
+    expect(meta.agent).toBe('gemini');
+    expect(meta.errorMessage).toBe(hardDeprecationError('gemini'));
+    expect(reportPath).toBeNull();
+
+    // The failure is persisted, not just returned — `agents routines runs` and
+    // the daemon's own record-keeping see the same skip reason.
+    const persisted = readRunMeta(config.name, meta.runId);
+    expect(persisted?.status).toBe('failed');
+    expect(persisted?.errorMessage).toBe(hardDeprecationError('gemini'));
+  });
+
+  it('executeJobDetached fails loud with a failed run record instead of spawning gemini', async () => {
+    const config = baseConfig({ name: 'gemini-legacy', agent: 'gemini' });
+    const meta = await executeJobDetached(config);
+
+    expect(meta.status).toBe('failed');
+    expect(meta.exitCode).toBe(1);
+    expect(meta.pid).toBeNull();
+    expect(meta.errorMessage).toBe(hardDeprecationError('gemini'));
+  });
+
+  it('gates hostStrategy: cloud too — gemini has no cloudProvider entry and would otherwise silently fall back to the default provider', async () => {
+    // Regression for a gap a non-author review found: the gate used to sit
+    // AFTER placement resolution, so a cloud-placed gemini routine reached
+    // resolveProvider(undefined, 'gemini') — which finds no native
+    // cloudProvider for gemini and falls back to the configured default
+    // ('rush'), dispatching for real instead of refusing. The gate now runs
+    // before placement is resolved at all, so this never reaches
+    // executeJobOnCloud/resolveProvider.
+    const config = baseConfig({ name: 'gemini-legacy', agent: 'gemini', hostStrategy: 'cloud' });
+    const { meta, reportPath } = await executeJob(config);
+
+    expect(meta.status).toBe('failed');
+    expect(meta.errorMessage).toBe(hardDeprecationError('gemini'));
+    expect(reportPath).toBeNull();
+    // No cloud dispatch happened — no cloudTaskId/cloudProvider was ever set.
+    expect(meta.cloudTaskId).toBeUndefined();
+    expect(meta.cloudProvider).toBeUndefined();
   });
 });
 

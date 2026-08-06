@@ -9,9 +9,65 @@ import {
   remoteShellFor,
   powershellQuote,
   decodePowershell,
+  stripClixml,
   HOST_ROUTING_SPECS,
   type StripSpec,
 } from './remote-cmd.js';
+
+describe('stripClixml', () => {
+  // The exact banner + progress element a live win-mini (PowerShell 5.1) emits
+  // ahead of relayed output — the RUSH-2286 reproduction.
+  const CLIXML_BANNER =
+    '#< CLIXML\n' +
+    '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">' +
+    '<Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T>' +
+    '<T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record">' +
+    '<AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC>' +
+    '<T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>';
+
+  it('leaves clean stdout untouched (no CLIXML marker → identity)', () => {
+    const json = '{"burn":{"outputTokens":123}}';
+    expect(stripClixml(json)).toBe(json);
+    expect(stripClixml('[]')).toBe('[]');
+  });
+
+  it('strips the banner + <Objs> block prefixed to a JSON payload so it parses', () => {
+    const payload = '[{"id":"abc","outputTokens":42}]';
+    const polluted = CLIXML_BANNER + '\n' + payload;
+    const cleaned = stripClixml(polluted);
+    expect(cleaned).toBe(payload);
+    expect(() => JSON.parse(cleaned)).not.toThrow();
+    expect(JSON.parse(cleaned)[0].outputTokens).toBe(42);
+  });
+
+  it('strips a CLIXML block appended after the JSON payload', () => {
+    const payload = '{"burn":{"outputTokens":7}}';
+    const polluted = payload + '\n' + CLIXML_BANNER;
+    expect(JSON.parse(stripClixml(polluted)).burn.outputTokens).toBe(7);
+  });
+
+  it('yields empty output when the whole stream is CLIXML (no real payload)', () => {
+    expect(stripClixml(CLIXML_BANNER)).toBe('');
+  });
+
+  it('strips two consecutive CLIXML flushes', () => {
+    const payload = '{"outputTokens":9}';
+    expect(stripClixml(CLIXML_BANNER + '\n' + CLIXML_BANNER + '\n' + payload)).toBe(payload);
+  });
+
+  it('does NOT delete a legitimate JSON value that merely quotes CLIXML text', () => {
+    // A real CLIXML banner is present (so the guard fires), and the payload's own
+    // string fields contain the literal substrings `<Objs` and `</Objs>`. A naive
+    // global `<Objs>…</Objs>` strip would silently delete the JSON between them;
+    // the banner-anchored strip must leave the payload intact.
+    const payload = '{"topic":"debug <Objs> parsing","label":"</Objs> handler","outputTokens":5}';
+    const cleaned = stripClixml(CLIXML_BANNER + '\n' + payload);
+    const parsed = JSON.parse(cleaned);
+    expect(parsed.topic).toBe('debug <Objs> parsing');
+    expect(parsed.label).toBe('</Objs> handler');
+    expect(parsed.outputTokens).toBe(5);
+  });
+});
 
 /** Decode the PowerShell script a Windows `--host` invocation ships, by pulling
  * the base64 payload off `powershell -NoProfile -EncodedCommand <b64>` and

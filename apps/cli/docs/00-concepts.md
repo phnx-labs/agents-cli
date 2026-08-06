@@ -173,14 +173,14 @@ handling (`run`, `sessions`, `feed`, `computer`, `secrets`, `logs`). Groups with
 no remote semantics reject the flag with a clear message rather than commander's
 raw `unknown option`. The target may be a registered host name, a capability tag
 (`--host gpu --any`), a raw `user@host`, or the special value `auto`
-(`--device auto` / `--host auto`) to affinity-pick a host from 14-day session
-usage on `sessions.db` (weighted sample among online devices). `auto` is resolved
-by the shared `matchHost` core (below), so `agents run --device auto`, `agents
-ssh auto`, and `agents teams add --device auto` all pick the same way — `agents
-ssh` is the one exception that refuses a pick landing on the machine you're
-already on (`agents ssh` dials OUT to a remote box, so self is never the useful
-outcome) rather than silently self-dialing. Harness is always the agent you
-type — never auto-picked. Affinity failure degrades to local.
+(`--device auto` / `--host auto`) to pick the least-loaded reachable host where
+the requested agent is installed and signed in, keeping execution local when no
+remote is better. `agents run` and `agents teams add` use this live harness-aware
+pick. Generic host-only callers such as `agents ssh auto`, which have no requested
+harness to validate, retain the 14-day `sessions.db` affinity resolver; `agents
+ssh` also refuses a pick that lands on the current machine because its purpose is
+to dial out. Harness is always the agent you type, never auto-picked. Probe
+failure degrades to local.
 
 The two registries feed **one host pool** behind the `HostProvider` seam:
 `local` (agents.yaml overlay ∪ ssh-config) registers first, `devices` (the
@@ -218,7 +218,7 @@ one door:
 |---|---|---|
 | This machine | `kind: local` | (default) · `--where local` |
 | Named fleet / host box | `kind: device, target: <name>` | `--where device:<name>` · `--host` / `--device` |
-| Affinity pick (14d usage) | `kind: device, target: auto` | `--where auto` · `--device auto` |
+| Live healthy/load-aware pick | `kind: device, target: auto` | `--where auto` · `--device auto` |
 | Disposable crabbox | `kind: lease` | `--where lease` · `--lease` |
 | Warm crabbox reuse | `kind: lease, target: <slug>` | `--box <slug>` |
 | Routines: body on one box | `kind: device` | `--run-on <name>` · `--placement host` |

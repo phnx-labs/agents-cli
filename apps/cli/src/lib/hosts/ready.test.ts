@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseReadyProbe,
   viewHasAgent,
+  viewAgentSignedIn,
   buildProbeCommand,
   buildRemoteVersionCommand,
   buildBootstrapCommand,
@@ -41,6 +42,15 @@ describe('ReadyProbe.timedOut — timeout vs unreachable distinction', () => {
     for (const stdout of ['', `2.1.170\n${MARK}\n`, `\n${MARK}\n`, 'garbage\nno-marker']) {
       expect(parseReadyProbe(stdout).timedOut).toBeUndefined();
     }
+  });
+});
+
+describe('viewAgentSignedIn', () => {
+  const view = JSON.stringify([{ agent: 'codex', versions: [{ signedIn: false }, { signedIn: true }] }]);
+  it('reads the per-version sign-in split from agents view JSON', () => {
+    expect(viewAgentSignedIn(view, 'codex')).toBe(true);
+    expect(viewAgentSignedIn(view, 'claude')).toBeUndefined();
+    expect(viewAgentSignedIn('not json', 'codex')).toBeUndefined();
   });
 });
 
@@ -90,7 +100,7 @@ describe('ready commands — POSIX branch unchanged', () => {
     expect(buildProbeCommand('linux')).toBe('uname -s 2>/dev/null || echo unknown');
     expect(buildRemoteVersionCommand('darwin')).toBe('bash -lc "agents --version 2>/dev/null"');
     expect(buildReadyProbeCommand()).toBe(
-      `bash -lc 'agents --version 2>/dev/null; printf '\\''\\n${MARK}\\n'\\''; agents view 2>/dev/null || agents list 2>/dev/null'`,
+      `bash -lc 'agents --version 2>/dev/null; printf '\\''\\n${MARK}\\n'\\''; agents view --json 2>/dev/null || agents list 2>/dev/null'`,
     );
     expect(buildBootstrapCommand('@phnx-labs/agents-cli@2.1.170')).toBe(
       "bash -lc 'npm install -g @phnx-labs/agents-cli@2.1.170 2>&1 | tail -3; " +
@@ -114,7 +124,7 @@ describe('ready commands — Windows branch speaks PowerShell', () => {
     // Parser keys off the sentinel substring — this output must still parse.
     const script = decodeWindows(buildReadyProbeCommand('windows'));
     expect(script).toBe(
-      `$ProgressPreference = 'SilentlyContinue'; agents --version 2>$null; Write-Output "${MARK}"; agents view 2>$null; if ($LASTEXITCODE -ne 0) { agents list 2>$null }`,
+      `$ProgressPreference = 'SilentlyContinue'; agents --version 2>$null; Write-Output "${MARK}"; agents view --json 2>$null; if ($LASTEXITCODE -ne 0) { agents list 2>$null }`,
     );
     // The script's stdout shape (marker on its own line) round-trips through parseReadyProbe.
     const p = parseReadyProbe(`2.1.170\n${MARK}\nClaude (balanced)\n`);

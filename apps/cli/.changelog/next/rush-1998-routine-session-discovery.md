@@ -1,1 +1,0 @@
-- **Routine session discovery now supports an interactive picker and fuzzy names (RUSH-1998).** `agents sessions --routine` opens a routine picker on a TTY, `--routine <name>` accepts exact, substring, or unambiguous typo matches, and `--routines` is an alias for the same session filter.

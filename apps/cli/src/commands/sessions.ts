@@ -1645,21 +1645,76 @@ export function resolveRoutineName(query: string, names: readonly string[]): str
   return fuzzyMatch(query, names, FUZZY_PRESETS.dynamic);
 }
 
-async function selectRoutineName(names: readonly string[]): Promise<string | null> {
-  const picked = await itemPicker<string>({
+export interface RoutineRunGroup {
+  runId: string;
+  timestamp: string;
+  sessions: SessionMeta[];
+}
+
+export interface RoutineChoice {
+  name: string;
+  lastRunAt: string;
+  runCount: number;
+  latestRunSessionCount: number;
+}
+
+export function buildRoutineRunGroups(sessions: SessionMeta[]): RoutineRunGroup[] {
+  const byRun = new Map<string, SessionMeta[]>();
+  for (const session of sessions) {
+    const runId = session.routineRunId ?? session.timestamp;
+    (byRun.get(runId) ?? byRun.set(runId, []).get(runId)!).push(session);
+  }
+  return [...byRun.entries()]
+    .map(([runId, rows]) => ({
+      runId,
+      timestamp: rows.reduce(
+        (latest, row) => (row.lastActivity ?? row.timestamp) > latest ? (row.lastActivity ?? row.timestamp) : latest,
+        rows[0].lastActivity ?? rows[0].timestamp,
+      ),
+      sessions: rows.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)),
+    }))
+    .sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : a.runId.localeCompare(b.runId)));
+}
+
+export function buildRoutineChoices(sessions: SessionMeta[]): RoutineChoice[] {
+  const byName = new Map<string, SessionMeta[]>();
+  for (const session of sessions) {
+    if (!session.routineName) continue;
+    (byName.get(session.routineName) ?? byName.set(session.routineName, []).get(session.routineName)!).push(session);
+  }
+  return [...byName.entries()]
+    .map(([name, rows]) => {
+      const runs = buildRoutineRunGroups(rows);
+      return {
+        name,
+        lastRunAt: runs[0].timestamp,
+        runCount: runs.length,
+        latestRunSessionCount: runs[0].sessions.length,
+      };
+    })
+    .sort((a, b) => (a.lastRunAt < b.lastRunAt ? 1 : a.lastRunAt > b.lastRunAt ? -1 : a.name.localeCompare(b.name)));
+}
+
+async function selectRoutineName(sessions: SessionMeta[]): Promise<string | null> {
+  const choices = buildRoutineChoices(sessions);
+  const picked = await itemPicker<RoutineChoice>({
     message: 'Select a routine:',
-    items: [...names],
+    items: choices,
     filter: (query) => {
       const normalized = query.trim().toLowerCase();
-      if (!normalized) return [...names];
-      return names.filter((name) => name.toLowerCase().includes(normalized));
+      if (!normalized) return choices;
+      return choices.filter((choice) => choice.name.toLowerCase().includes(normalized));
     },
-    labelFor: (name) => name,
-    shortIdFor: (name) => name,
+    labelFor: (choice) => {
+      const runs = `${choice.runCount} run${choice.runCount === 1 ? '' : 's'}`;
+      const sessions = `${choice.latestRunSessionCount} session${choice.latestRunSessionCount === 1 ? '' : 's'} in latest`;
+      return `${choice.name}  ${chalk.gray(`${runs} · ${sessions} · ${formatRelativeTime(choice.lastRunAt)}`)}`;
+    },
+    shortIdFor: (choice) => choice.name,
     emptyMessage: 'No routines match.',
     enterHint: 'show sessions',
   });
-  return picked?.item ?? null;
+  return picked?.item.name ?? null;
 }
 
 export async function filterSessionsByRoutine(
@@ -1680,7 +1735,7 @@ export async function filterSessionsByRoutine(
       return null;
     }
   } else if (interactive) {
-    selectedRoutine = await selectRoutineName(routineNames);
+    selectedRoutine = await selectRoutineName(sessions);
     if (!selectedRoutine) return null;
   }
   return selectedRoutine
@@ -2245,7 +2300,12 @@ async function sessionsAction(
 
   // Artifact-list or artifact-read paths: widen scope and resolve session globally.
   if ((options.artifacts || options.artifact !== undefined) && searchQuery) {
-    await renderArtifactsGlobal(searchQuery, options.artifacts ?? false, options.artifact, { agent: options.agent, project: options.project });
+    await renderArtifactsGlobal(
+      searchQuery,
+      options.artifacts ?? false,
+      options.artifact,
+      artifactLookupScope(options.agent, options.project, options.routine),
+    );
     return;
   }
 
@@ -2576,6 +2636,10 @@ async function sessionsAction(
     // Interact/resume via `agents sessions <project>` or `agents sessions resume`.
     if (wantsOverview) {
       const liveIndex = await maybeLiveIndex(options);
+      if (options.routine) {
+        printRoutineRunOverview(sessions, liveIndex, { hiddenCount, hiddenUnmanaged });
+        return;
+      }
       // Per-project row cap is fixed (--limit carries a default of 50 and drives
       // the fetch pool, not the display); `--all` expands every group instead.
       printSessionOverview(sessions, hiddenCount, liveIndex, { perProjectCap: OVERVIEW_ROWS_PER_PROJECT, expand: !!options.all, hiddenUnmanaged });
@@ -2931,6 +2995,28 @@ function printSessionOverview(
   parts.push(chalk.gray('agents sessions --all spans every project on disk · <project> to drill in · --flat for the plain list'));
   console.log(parts.join(chalk.gray('  ·  ')));
   if (hiddenCount > 0) console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
+  if (opts.hiddenUnmanaged) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
+}
+
+export function printRoutineRunOverview(
+  sessions: SessionMeta[],
+  liveIndex: Map<string, ActiveSession> | undefined,
+  opts: { hiddenCount?: number; hiddenUnmanaged?: number } = {},
+): void {
+  const groups = buildRoutineRunGroups(sessions);
+  console.log(chalk.gray(`${sessions.length} session${sessions.length === 1 ? '' : 's'} · ${groups.length} routine run${groups.length === 1 ? '' : 's'} · newest run first\n`));
+  let first = true;
+  for (const group of groups) {
+    if (!first) console.log();
+    first = false;
+    console.log(
+      `${chalk.cyan('▸')} ${chalk.cyan.bold(group.runId)}  ` +
+      `${chalk.gray(`${group.sessions.length} session${group.sessions.length === 1 ? '' : 's'} · ${formatRelativeTime(group.timestamp)}`)}`,
+    );
+    for (const session of group.sessions) console.log(treeSessionRow(session, liveIndex?.get(session.id)));
+  }
+  console.log(chalk.gray('\nGrouped by routine run id and timestamp.'));
+  if (opts.hiddenCount) console.log(chalk.gray(formatTeamHiddenFooter(opts.hiddenCount)));
   if (opts.hiddenUnmanaged) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
 }
 
@@ -4172,11 +4258,19 @@ export function applyScopeFilters(
   return filtered;
 }
 
+export function artifactLookupScope(
+  agent?: string,
+  project?: string,
+  routine?: boolean | string,
+): { agent?: string; project?: string; routine?: boolean | string } {
+  return { agent, project, routine };
+}
+
 async function renderArtifactsGlobal(
   query: string,
   listAll: boolean,
   name: string | undefined,
-  scope: { agent?: string; project?: string },
+  scope: { agent?: string; project?: string; routine?: boolean | string },
 ): Promise<void> {
   const spinner = ora().start();
   const tracker = createScanProgressTracker(FIND_VERBS, 'session', spinner);

@@ -63,7 +63,7 @@ import {
   removeWorktree,
 } from '../lib/teams/worktree.js';
 import { resolveHost } from '../lib/hosts/registry.js';
-import { isDeviceAuto, resolveDeviceAffinity } from '../lib/smart-launch.js';
+import { isDeviceAuto, resolveDeviceAuto } from '../lib/smart-launch.js';
 import { sshTargetFor } from '../lib/hosts/types.js';
 import { ensureHostReady } from '../lib/hosts/ready.js';
 import { remoteShellFor } from '../lib/hosts/remote-cmd.js';
@@ -1590,12 +1590,12 @@ export function registerTeamsCommands(program: Command): void {
         return h ?? d ?? null;
       })();
 
-      // `auto` is the same affinity sentinel `agents run --device auto` resolves
+      // `auto` is the same live fleet sentinel `agents run --device auto` resolves
       // (RUSH-2185) — pick the concrete device name up front so the local-machine
       // check right below (and every dieFriction message further down) sees the
       // real target instead of the literal string "auto".
       if (explicitDevice && isDeviceAuto(explicitDevice)) {
-        const plan = resolveDeviceAffinity({});
+        const plan = await resolveDeviceAuto(parseTeammate(teammate).agent);
         const picked = plan.host ?? machineId();
         process.stderr.write(chalk.gray(`[teams] device=auto → ${picked === machineId() ? 'local' : picked}\n`));
         explicitDevice = picked;

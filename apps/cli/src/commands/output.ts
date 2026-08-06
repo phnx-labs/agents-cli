@@ -31,6 +31,7 @@ import { terminalWidth, truncateToWidth, padToWidth } from '../lib/session/width
 import { collectGitOutput } from '../lib/output/git-output.js';
 import { loadDevices, isControlDevice } from '../lib/devices/registry.js';
 import { machineId } from '../lib/session/sync/config.js';
+import { stripClixml } from '../lib/hosts/remote-cmd.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -43,6 +44,7 @@ interface OutputOptions {
   login?: string[];
   prs?: boolean; // commander sets `prs: false` for --no-prs
   allHosts?: boolean;
+  pricing?: string;
 }
 
 interface RollupRow {
@@ -50,16 +52,28 @@ interface RollupRow {
   /** Human label when the key is an identity rather than display text (--by account). */
   label?: string;
   costUsd: number;
+  /** USD cost with cache read/write repriced at the input rate (RUSH-2287). */
+  costUsdNoCache: number;
   durationMs: number;
   sessionCount: number;
   tokenCount: number;
   outputTokens: number;
+  /** Burn split — 0 for harnesses that record no cache split (RUSH-2287). */
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
 }
 
 interface BurnTotals {
   costUsd: number;
+  /** USD cost priced as if caching were off (cache read/write at the input rate). */
+  costUsdNoCache: number;
   outputTokens: number;
   tokenCount: number;
+  /** Burn split summed across the window. */
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   sessionCount: number;
   durationMs: number;
 }
@@ -100,16 +114,21 @@ export function registerOutputCommand(program: Command): void {
     .option('--login <login...>', 'Count PRs for these GitHub logins (default: current gh user)')
     .option('--no-prs', 'Skip the GitHub PR lookup (commits only)')
     .option('--all-hosts', 'Aggregate across every online device (ag devices) over SSH')
+    .option('--pricing <scenario>', 'Cost scenario: actual (default, cache-discounted) or no-cache (cache read/write billed at the full input rate)')
     .addHelpText('after', `
 Examples:
   agents output                       Last 7 days: burn, output tokens, PRs, commits, ratios
   agents output --since 24h           Last 24 hours
   agents output --since 1mo           Last month  (units: 1h 24h 7d 4w 1mo 1y, or ISO date)
+  agents output --pricing no-cache    Model the burn as if prompt caching were off
   agents output --all-hosts           Fleet-wide, folding in every online machine
   agents output --by day --json       Machine-readable daily burn/output rollup
 
 Burn (cost) is computed offline from a versioned per-model price table (${PRICING_VERSION}).
 Output tokens are the real generated tokens — NOT the cache-inflated total token count.
+The burn is split into input / cache-read / cache-write where the harness records it
+(Claude/Codex/Gemini/Droid). --pricing no-cache reprices cached tokens at the input rate,
+so you can see what caching is saving. --json always carries both actual and no-cache costs.
 `)
     .action(async (options: OutputOptions) => {
       await outputAction(options);
@@ -123,6 +142,15 @@ function resolveGroup(by: string | undefined): UsageRollupGroup {
   process.exit(1);
 }
 
+type PricingScenario = 'actual' | 'no-cache';
+
+function resolvePricing(pricing: string | undefined): PricingScenario {
+  if (pricing === undefined || pricing === 'actual') return 'actual';
+  if (pricing === 'no-cache') return 'no-cache';
+  console.error(chalk.red('error: --pricing must be one of: actual, no-cache'));
+  process.exit(1);
+}
+
 /** Compact token formatter: 38.6M, 4.1K, 10.6B. */
 function formatCompact(n: number): string {
   const abs = Math.abs(n);
@@ -133,14 +161,28 @@ function formatCompact(n: number): string {
 }
 
 function emptyBurn(): BurnTotals {
-  return { costUsd: 0, outputTokens: 0, tokenCount: 0, sessionCount: 0, durationMs: 0 };
+  return {
+    costUsd: 0,
+    costUsdNoCache: 0,
+    outputTokens: 0,
+    tokenCount: 0,
+    inputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    sessionCount: 0,
+    durationMs: 0,
+  };
 }
 
 function sumBurn(rows: RollupRow[]): BurnTotals {
   return rows.reduce((acc, r) => {
     acc.costUsd += r.costUsd;
+    acc.costUsdNoCache += r.costUsdNoCache;
     acc.outputTokens += r.outputTokens;
     acc.tokenCount += r.tokenCount;
+    acc.inputTokens += r.inputTokens;
+    acc.cacheReadTokens += r.cacheReadTokens;
+    acc.cacheWriteTokens += r.cacheWriteTokens;
     acc.sessionCount += r.sessionCount;
     acc.durationMs += r.durationMs;
     return acc;
@@ -200,7 +242,9 @@ async function fetchRemotePayload(device: string, options: OutputOptions): Promi
       timeout: 120_000,
       maxBuffer: 64 * 1024 * 1024,
     });
-    const parsed = JSON.parse(stdout) as OutputPayload;
+    // A Windows device relays its payload through PowerShell, which can prefix a
+    // CLIXML banner ahead of the JSON — strip it before parsing (RUSH-2286).
+    const parsed = JSON.parse(stripClixml(stdout)) as OutputPayload;
     parsed.machine = parsed.machine || device;
     return parsed;
   } catch (err: any) {
@@ -219,6 +263,10 @@ async function fetchRemotePayload(device: string, options: OutputOptions): Promi
 
 async function outputAction(options: OutputOptions): Promise<void> {
   const includePrs = options.prs !== false;
+  // Validate --pricing up front so a bad value errors even under --json. The JSON
+  // payload always carries BOTH costs regardless of the scenario — the flag only
+  // chooses which one the text renderer leads with.
+  const scenario = resolvePricing(options.pricing);
 
   if (!options.allHosts) {
     const payload = await computeLocalPayload(options, includePrs);
@@ -226,7 +274,7 @@ async function outputAction(options: OutputOptions): Promise<void> {
       process.stdout.write(JSON.stringify(withRatios(payload, [payload]), null, 2) + '\n');
       return;
     }
-    renderSingle(payload);
+    renderSingle(payload, scenario);
     return;
   }
 
@@ -248,7 +296,7 @@ async function outputAction(options: OutputOptions): Promise<void> {
     process.stdout.write(JSON.stringify(withRatios(mergeMachines(machines, options), machines), null, 2) + '\n');
     return;
   }
-  renderFleet(machines, options);
+  renderFleet(machines, options, scenario);
 }
 
 /** Merge per-machine payloads into a combined one (burn + commits summed; PRs local-only). */
@@ -262,22 +310,34 @@ function mergeMachines(machines: OutputPayload[], options: OutputOptions): Outpu
   const uncosted = new Set<string>();
   for (const m of machines) {
     burn.costUsd += m.burn.costUsd;
+    burn.costUsdNoCache += m.burn.costUsdNoCache;
     burn.outputTokens += m.burn.outputTokens;
     burn.tokenCount += m.burn.tokenCount;
+    burn.inputTokens += m.burn.inputTokens;
+    burn.cacheReadTokens += m.burn.cacheReadTokens;
+    burn.cacheWriteTokens += m.burn.cacheWriteTokens;
     burn.sessionCount += m.burn.sessionCount;
     burn.durationMs += m.burn.durationMs;
     for (const s of m.output.commitShas) allShas.add(s);
     for (const a of m.uncostedAgents) uncosted.add(a);
     for (const r of m.breakdown.rows) {
-      const cur = byKey.get(r.key) ?? { key: r.key, label: r.label, costUsd: 0, durationMs: 0, sessionCount: 0, tokenCount: 0, outputTokens: 0 };
+      const cur = byKey.get(r.key) ?? {
+        key: r.key, label: r.label, costUsd: 0, costUsdNoCache: 0, durationMs: 0,
+        sessionCount: 0, tokenCount: 0, outputTokens: 0,
+        inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+      };
       // Peers resolve their own labels; keep the first non-empty one so a machine that
       // has not indexed an account yet does not blank a label another machine supplied.
       cur.label ??= r.label;
       cur.costUsd += r.costUsd;
+      cur.costUsdNoCache += r.costUsdNoCache;
       cur.durationMs += r.durationMs;
       cur.sessionCount += r.sessionCount;
       cur.tokenCount += r.tokenCount;
       cur.outputTokens += r.outputTokens;
+      cur.inputTokens += r.inputTokens;
+      cur.cacheReadTokens += r.cacheReadTokens;
+      cur.cacheWriteTokens += r.cacheWriteTokens;
       byKey.set(r.key, cur);
     }
   }
@@ -309,46 +369,82 @@ function withRatios(payload: OutputPayload, machines: OutputPayload[]): unknown 
   };
 }
 
-/** Shared header line: burned · output tokens · PRs · commits, plus ratios. */
-function headerLines(payload: OutputPayload): string[] {
+/** The cost the text renderer leads with for the chosen scenario. */
+function scenarioCost(x: { costUsd: number; costUsdNoCache: number }, scenario: PricingScenario): number {
+  return scenario === 'no-cache' ? x.costUsdNoCache : x.costUsd;
+}
+
+/** Shared header line: burned · output tokens · PRs · commits, plus ratios + burn split. */
+function headerLines(payload: OutputPayload, scenario: PricingScenario): string[] {
   const prsTotal = payload.output.prsOpened + payload.output.prsMerged;
+  const burn = payload.burn;
+  const cost = scenarioCost(burn, scenario);
   const out: string[] = [];
   out.push(
     '  ' +
-      `${chalk.green(formatUsd(payload.burn.costUsd))} burned` +
+      `${chalk.green(formatUsd(cost))} burned${scenario === 'no-cache' ? chalk.gray(' (no-cache)') : ''}` +
       chalk.gray('  ·  ') +
-      `${chalk.cyan(formatCompact(payload.burn.outputTokens))} output tokens` +
+      `${chalk.cyan(formatCompact(burn.outputTokens))} output tokens` +
       chalk.gray('  ·  ') +
       `${chalk.yellow(String(prsTotal))} PRs ${chalk.gray(`(${payload.output.prsMerged} merged)`)}` +
       chalk.gray('  ·  ') +
       `${chalk.yellow(String(payload.output.commits))} commits`,
   );
   const ratios: string[] = [];
-  if (prsTotal > 0) ratios.push(`${formatUsd(payload.burn.costUsd / prsTotal)}/PR`);
-  if (payload.output.commits > 0) ratios.push(`${formatUsd(payload.burn.costUsd / payload.output.commits)}/commit`);
-  if (payload.burn.costUsd > 0) ratios.push(`${formatCompact(Math.round(payload.burn.outputTokens / payload.burn.costUsd))} out-tok/$`);
+  if (prsTotal > 0) ratios.push(`${formatUsd(cost / prsTotal)}/PR`);
+  if (payload.output.commits > 0) ratios.push(`${formatUsd(cost / payload.output.commits)}/commit`);
+  if (cost > 0) ratios.push(`${formatCompact(Math.round(burn.outputTokens / cost))} out-tok/$`);
   if (ratios.length > 0) out.push(chalk.gray('  ' + ratios.join('  ·  ')));
+
+  // Burn split — only for harnesses that recorded one (input/cache totals > 0).
+  const splitTotal = burn.inputTokens + burn.cacheReadTokens + burn.cacheWriteTokens;
+  if (splitTotal > 0) {
+    out.push(
+      chalk.gray('  burn split: ') +
+        `${chalk.cyan(formatCompact(burn.inputTokens))} input` +
+        chalk.gray('  ·  ') +
+        `${chalk.cyan(formatCompact(burn.cacheReadTokens))} cache-read` +
+        chalk.gray('  ·  ') +
+        `${chalk.cyan(formatCompact(burn.cacheWriteTokens))} cache-write`,
+    );
+  }
+
+  // No-cache comparison — shown whenever caching actually moved the number, so an
+  // operator sees the saving in `actual` mode too (RUSH-2287: "both if useful").
+  if (burn.costUsdNoCache > burn.costUsd && burn.costUsd > 0) {
+    const saved = burn.costUsdNoCache - burn.costUsd;
+    const pct = Math.round((saved / burn.costUsdNoCache) * 100);
+    out.push(
+      chalk.gray('  caching: ') +
+        `actual ${chalk.green(formatUsd(burn.costUsd))}` +
+        chalk.gray('  vs  ') +
+        `no-cache ${chalk.yellow(formatUsd(burn.costUsdNoCache))}` +
+        chalk.gray(`  (saved ${formatUsd(saved)}, ${pct}%)`),
+    );
+  }
   return out;
 }
 
 /** Render the per-group burn/output table. */
-function renderBreakdown(rows: RollupRow[], groupBy: string): string[] {
+function renderBreakdown(rows: RollupRow[], groupBy: string, scenario: PricingScenario): string[] {
   const out: string[] = [chalk.bold(`By ${groupBy}`)];
   if (rows.length === 0) return out;
+  const rowCost = (r: RollupRow): number => scenarioCost(r, scenario);
   const cols = terminalWidth();
-  const burnW = Math.max(...rows.map(r => formatUsd(r.costUsd).length), 4);
+  const burnHeader = scenario === 'no-cache' ? 'burn(nc)' : 'burn';
+  const burnW = Math.max(...rows.map(r => formatUsd(rowCost(r)).length), burnHeader.length);
   const outW = Math.max(...rows.map(r => formatCompact(r.outputTokens).length), 6);
   const sessW = Math.max(...rows.map(r => String(r.sessionCount).length), 3);
   const fixedW = 2 + 2 + burnW + 2 + outW + 2 + sessW + 8;
   const display = (r: RollupRow): string => r.label ?? r.key;
   const keyW = Math.max(8, Math.min(Math.max(...rows.map(r => display(r).length), groupBy.length), cols - fixedW));
-  out.push('  ' + chalk.gray(padToWidth('', keyW)) + '  ' + chalk.gray(padToWidth('burn', burnW)) + '  ' + chalk.gray(padToWidth('output', outW)) + '  ' + chalk.gray('sessions'));
+  out.push('  ' + chalk.gray(padToWidth('', keyW)) + '  ' + chalk.gray(padToWidth(burnHeader, burnW)) + '  ' + chalk.gray(padToWidth('output', outW)) + '  ' + chalk.gray('sessions'));
   for (const r of rows) {
     out.push(
       '  ' +
         padToWidth(truncateToWidth(display(r), keyW), keyW) +
         '  ' +
-        chalk.green(padToWidth(formatUsd(r.costUsd), burnW)) +
+        chalk.green(padToWidth(formatUsd(rowCost(r)), burnW)) +
         '  ' +
         chalk.cyan(padToWidth(formatCompact(r.outputTokens), outW)) +
         '  ' +
@@ -358,17 +454,17 @@ function renderBreakdown(rows: RollupRow[], groupBy: string): string[] {
   return out;
 }
 
-function renderSingle(payload: OutputPayload): void {
+function renderSingle(payload: OutputPayload, scenario: PricingScenario): void {
   const out: string[] = [];
   out.push(chalk.bold('Output') + chalk.gray(`  ·  pricing ${payload.pricingVersion}  ·  since ${payload.since}`));
-  out.push(...headerLines(payload));
+  out.push(...headerLines(payload, scenario));
   out.push('');
   if (payload.burn.sessionCount === 0) {
     out.push(chalk.gray('No sessions with cost data found. Run `agents sessions --all` to index, then retry.'));
     console.log(out.join('\n'));
     return;
   }
-  out.push(...renderBreakdown(payload.breakdown.rows, payload.breakdown.by));
+  out.push(...renderBreakdown(payload.breakdown.rows, payload.breakdown.by, scenario));
   out.push('');
   out.push(chalk.bold('Shipped'));
   out.push(`  ${chalk.yellow(String(payload.output.commits))} commits across ${payload.output.reposScanned} repos` + chalk.gray(`  (authors: ${payload.output.authors.length > 0 ? payload.output.authors.join(', ') : 'none detected'})`));
@@ -383,24 +479,24 @@ function renderSingle(payload: OutputPayload): void {
   console.log(out.join('\n'));
 }
 
-function renderFleet(machines: OutputPayload[], options: OutputOptions): void {
+function renderFleet(machines: OutputPayload[], options: OutputOptions, scenario: PricingScenario): void {
   const merged = mergeMachines(machines, options);
   const out: string[] = [];
   out.push(chalk.bold('Output') + chalk.gray(`  ·  fleet (${machines.length} machines)  ·  pricing ${merged.pricingVersion}  ·  since ${merged.since}`));
-  out.push(...headerLines(merged));
+  out.push(...headerLines(merged, scenario));
   out.push('');
 
   // By machine.
   out.push(chalk.bold('By machine'));
   const nameW = Math.max(...machines.map(m => m.machine.length), 7);
-  const burnW = Math.max(...machines.map(m => formatUsd(m.burn.costUsd).length), 4);
+  const burnW = Math.max(...machines.map(m => formatUsd(scenarioCost(m.burn, scenario)).length), 4);
   for (const m of machines) {
     const note = m.error ? chalk.red(`  (${m.error})`) : '';
     out.push(
       '  ' +
         padToWidth(m.machine, nameW) +
         '  ' +
-        chalk.green(padToWidth(formatUsd(m.burn.costUsd), burnW)) +
+        chalk.green(padToWidth(formatUsd(scenarioCost(m.burn, scenario)), burnW)) +
         '  ' +
         chalk.cyan(padToWidth(formatCompact(m.burn.outputTokens), 7)) +
         '  ' +
@@ -409,7 +505,7 @@ function renderFleet(machines: OutputPayload[], options: OutputOptions): void {
     );
   }
   out.push('');
-  out.push(...renderBreakdown(merged.breakdown.rows, merged.breakdown.by));
+  out.push(...renderBreakdown(merged.breakdown.rows, merged.breakdown.by, scenario));
   out.push('');
   out.push(chalk.gray(notCountedLine(merged.uncostedAgents)));
   console.log(out.join('\n'));

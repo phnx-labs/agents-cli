@@ -132,12 +132,12 @@ export function buildReadyProbeCommand(os?: string): string {
     const script =
       `${POWERSHELL_PROGRESS_SILENCE}; ` +
       `agents --version 2>$null; Write-Output "${READY_MARKER}"; ` +
-      `agents view 2>$null; if ($LASTEXITCODE -ne 0) { agents list 2>$null }`;
+      `agents view --json 2>$null; if ($LASTEXITCODE -ne 0) { agents list 2>$null }`;
     return `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
   }
   const script =
     `agents --version 2>/dev/null; printf '\\n${READY_MARKER}\\n'; ` +
-    `agents view 2>/dev/null || agents list 2>/dev/null`;
+    `agents view --json 2>/dev/null || agents list 2>/dev/null`;
   return `bash -lc ${shellQuote(script)}`;
 }
 
@@ -160,6 +160,24 @@ export function parseReadyProbe(stdout: string): ReadyProbe {
 /** True if `view` output lists the named agent (word-boundary, case-insensitive). */
 export function viewHasAgent(view: string, agent: string): boolean {
   return new RegExp(`\\b${agent}\\b`, 'i').test(view);
+}
+
+/** Read the requested harness's sign-in verdict from `agents view --json`. */
+export function viewAgentSignedIn(view: string, agent: string): boolean | undefined {
+  try {
+    const rows = JSON.parse(view) as Array<{
+      agent?: string;
+      versions?: Array<{ signedIn?: boolean }>;
+    }>;
+    const row = rows.find((candidate) => candidate.agent?.toLowerCase() === agent.toLowerCase());
+    if (!row) return undefined;
+    const verdicts = (row.versions ?? [])
+      .map((version) => version.signedIn)
+      .filter((value): value is boolean => typeof value === 'boolean');
+    return verdicts.length === 0 ? undefined : verdicts.some(Boolean);
+  } catch {
+    return undefined;
+  }
 }
 
 export interface EnsureReadyOptions {

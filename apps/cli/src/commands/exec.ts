@@ -820,7 +820,7 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--host <name>',
-      'Offload this run onto another machine over SSH — a device name, registered host, or user@host. Pass "auto" to pick from 14d usage affinity (most-used online device has highest probability). Same as --where device:<name>. See `agents devices`.',
+      'Offload this run onto another machine over SSH — a device name, registered host, or user@host. Pass "auto" to pick the least-loaded reachable device where the requested agent is installed and signed in, keeping the run local when no remote is better. Same as --where device:<name>. See `agents devices`.',
     )
     .option(
       '--device <name>',
@@ -1276,13 +1276,18 @@ export function registerRunCommand(program: Command): void {
         if (!resolvedResumeSource && runAutoDefaultsToAffinity(options)) options.device = 'auto';
       }
 
-      // --device auto / --host auto (and deprecated --smart): affinity-pick host.
+      // --device auto / --host auto (and deprecated --smart): live fleet pick.
       // Harness is always the agent the user typed — never auto-picked.
       // Affinity failure degrades to local (does not kill the run).
       {
         const { applyDeviceAutoToOptions } = await import('../lib/smart-launch.js');
-        const result = applyDeviceAutoToOptions(options, {
+        const result = await applyDeviceAutoToOptions(options, {
           accountPickerRequested,
+          // `run auto` selects its harness after placement, so do not filter
+          // candidates against an arbitrary proxy harness at this stage.
+          agent: normalizedAgentSpec.split('@')[0] === RUN_AUTO_KEYWORD
+            ? undefined
+            : (resolveAgentName(normalizedAgentSpec.split('@')[0]) ?? undefined),
         });
         if (!options.quiet && result.deprecationSmart) {
           process.stderr.write(
@@ -1301,7 +1306,7 @@ export function registerRunCommand(program: Command): void {
           process.stderr.write(
             chalk.gray(
               `[agents] device=auto → ${hostLabel}` +
-                (deviceHint ? ` (affinity ${deviceHint})` : '') +
+                (deviceHint ? ` (load ${deviceHint})` : '') +
                 ` · ${acctNote}\n`,
             ),
           );
