@@ -420,6 +420,27 @@ export function readBundle(name: string): SecretsBundle {
     if (vaultExists() && !getVaultSession().loggedIn) {
       throw new Error(`Synced secrets are locked. Run: agents login`);
     }
+    // Distinguish a genuinely-absent bundle from a present-but-unreadable one
+    // (a locked login keychain, or a legacy ACL'd metadata item before first
+    // unlock). `has` counts an unreadable item as present, so a metadata item
+    // that exists but could not be read must not report as "not found" — an
+    // existence answer and a read answer may not contradict (RUSH-2253).
+    if (backend === 'keychain') {
+      let present: boolean;
+      try {
+        present = hasKeychainToken(bundleMetaItem(name));
+      } catch (probeErr) {
+        // Keychain unreachable (RUSH-2235 fail-loud): neither absent nor
+        // add-the-key — surface the reachability failure, not a false absence.
+        throw new Error(`Secrets bundle '${name}': ${(probeErr as Error).message}`);
+      }
+      if (present) {
+        throw new Error(
+          `Secrets bundle '${name}' is present but its metadata could not be read — the keychain is locked. ` +
+          `Unlock it (log in, or reboot then log in) and retry. (${(err as Error).message})`,
+        );
+      }
+    }
     throw new Error(`Secrets bundle '${name}' not found.`);
   }
   let parsed: Partial<SecretsBundle>;
@@ -1268,6 +1289,106 @@ export function assertRemoteBundleFlagsUnsupported(
   );
 }
 
+/**
+ * A declared `keychain:` ref resolved to NO value in the batch read. Classify
+ * genuinely-absent vs present-but-unreadable before choosing the error, so a
+ * read can never contradict what `agents secrets view` reports (RUSH-2248,
+ * RUSH-2253). `view`'s "stored" badge comes from `hasKeychainToken` — the exact
+ * existence probe used here — which counts a biometry-ACL'd or locked-keychain
+ * item (`errSecInteractionNotAllowed`) as present. So:
+ *
+ *   - present  ⇒ the item exists but this context could not read it (keychain
+ *     locked, or Touch ID not granted). Report HOW to unlock; NEVER
+ *     "add the key", whose remediation (`secrets add`) would overwrite a good
+ *     secret.
+ *   - absent   ⇒ genuinely not stored on this machine — the honest "not found"
+ *     with the `secrets add` remediation.
+ *   - probe throws ⇒ the keychain itself is unreachable (RUSH-2235 fail-loud):
+ *     neither absent nor add-the-key — surface the reachability failure verbatim.
+ *
+ * Only the keychain backend has a locked/biometry state; a file/vault miss is
+ * genuinely absent.
+ */
+function missingBundleKeychainItemError(
+  bundleName: string,
+  key: string,
+  item: string,
+  backendKind: SecretsBackend,
+): Error {
+  if (backendKind === 'keychain') {
+    let present: boolean;
+    try {
+      present = hasKeychainToken(item);
+    } catch (err) {
+      return new Error(`Bundle '${bundleName}' key '${key}': ${(err as Error).message}`);
+    }
+    if (present) {
+      return new Error(
+        `Bundle '${bundleName}' key '${key}': stored item '${item}' is present but could not be read — ` +
+        `the keychain is locked or Touch ID was not granted for this read. ` +
+        `Run: agents secrets unlock ${bundleName}  (or read it once at an interactive terminal so Touch ID can be granted). ` +
+        `Do NOT run 'agents secrets add' — the secret is already stored and adding would overwrite it.`,
+      );
+    }
+  }
+  return new Error(
+    `Bundle '${bundleName}' key '${key}': stored item '${item}' not found. ` +
+    `Run: agents secrets add ${bundleName} ${key}`,
+  );
+}
+
+/**
+ * Resolve every selected key of an already-read bundle into a flat env map,
+ * given a pre-fetched keychain batch. The single per-key resolution loop shared
+ * by `resolveBundleEnv` and `readAndResolveBundleEnv` so the keychain lookup and
+ * the missing-item classification can never diverge again (RUSH-2252: the two
+ * paths drifted — one did the hashed-alias fallback lookup and one did not, and
+ * only one classified a missing item honestly).
+ *
+ * The keychain lookup tries the cleartext name first (Linux / file store), then
+ * its hashed storage alias (macOS with #316 hashing active) — the batch keys its
+ * results by the names it was ASKED for, which for the metadata + declared keys
+ * is the cleartext form and for an enumerated leftover is the hashed form.
+ */
+function assembleBundleEnv(
+  bundle: SecretsBundle,
+  selectedKeys: Set<string>,
+  parsedByKey: Map<string, { literal: string } | { ref: SecretRef }>,
+  fetched: Map<string, string>,
+  keyMode: ResolveBundleOptions['keyMode'],
+  backendKind: SecretsBackend,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  const owners = new Map<string, string>();
+  for (const [key] of Object.entries(bundle.vars)) {
+    if (!selectedKeys.has(key)) continue;
+    const parsed = parsedByKey.get(key)!;
+    if ('literal' in parsed) {
+      assignResolvedEnvValue(env, bundle, key, parsed.literal, keyMode, owners);
+      continue;
+    }
+    if (parsed.ref.provider === 'keychain') {
+      const item = secretsKeychainItem(bundle.name, parsed.ref.value);
+      const value = fetched.get(item) ?? fetched.get(keychainServiceAlias(item));
+      if (value === undefined) {
+        throw missingBundleKeychainItemError(bundle.name, key, item, backendKind);
+      }
+      assignResolvedEnvValue(env, bundle, key, value, keyMode, owners);
+      continue;
+    }
+    try {
+      const value = resolveRef(parsed.ref, {
+        allowExec: bundle.allow_exec,
+        keychainItemFor: (shortId: string) => secretsKeychainItem(bundle.name, shortId),
+      });
+      assignResolvedEnvValue(env, bundle, key, value, keyMode, owners);
+    } catch (err) {
+      throw new Error(`Bundle '${bundle.name}' key '${key}': ${(err as Error).message}`);
+    }
+  }
+  return env;
+}
+
 // Walk the bundle and produce a flat env map. Every keychain: ref is gathered
 // into a single batch read so macOS shows ONE Touch ID prompt for the whole
 // bundle — including the metadata fetch that already happened in readBundle
@@ -1305,37 +1426,14 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
       : store.getBatch(keychainItemsToFetch)
     : new Map<string, string>();
 
-  const env: Record<string, string> = {};
-  const owners = new Map<string, string>();
-  for (const [key, raw] of Object.entries(bundle.vars)) {
-    if (!selectedKeys.has(key)) continue;
-    const parsed = parsedByKey.get(key)!;
-    if ('literal' in parsed) {
-      assignResolvedEnvValue(env, bundle, key, parsed.literal, _opts.keyMode, owners);
-      continue;
-    }
-    if (parsed.ref.provider === 'keychain') {
-      const item = secretsKeychainItem(bundle.name, parsed.ref.value);
-      const value = fetched.get(item);
-      if (value === undefined) {
-        throw new Error(
-          `Bundle '${bundle.name}' key '${key}': stored item '${item}' not found. ` +
-          `Run: agents secrets add ${bundle.name} ${key}`
-        );
-      }
-      assignResolvedEnvValue(env, bundle, key, value, _opts.keyMode, owners);
-      continue;
-    }
-    try {
-      const value = resolveRef(parsed.ref, {
-        allowExec: bundle.allow_exec,
-        keychainItemFor: (shortId: string) => secretsKeychainItem(bundle.name, shortId),
-      });
-      assignResolvedEnvValue(env, bundle, key, value, _opts.keyMode, owners);
-    } catch (err) {
-      throw new Error(`Bundle '${bundle.name}' key '${key}': ${(err as Error).message}`);
-    }
-  }
+  const env = assembleBundleEnv(
+    bundle,
+    selectedKeys,
+    parsedByKey,
+    fetched,
+    _opts.keyMode,
+    bundle.backend ?? 'keychain',
+  );
   // `caller` is intentionally unused; see ResolveBundleOptions.
   void _opts.caller;
   return env;
@@ -1551,6 +1649,52 @@ export function readAndResolveBundleEnv(
   const keys = [...selectedKeys].sort();
   keychainKeys.sort();
 
+  // RUSH-2252: complete the read set from the bundle's DECLARED keys, not only
+  // from the enumeration above. `store.list()` derives the batch by enumerating
+  // the bundle's namespace, and that enumeration is lossy by construction — the
+  // macOS helper's `list` omits every biometry-ACL'd item
+  // (`kSecUseAuthenticationUISkip`) and skips the whole data-protection pass when
+  // the keychain is locked, so a `hold`-policy bundle's value items never appear
+  // and a present secret reads as "not found" (RUSH-2248). A declared key whose
+  // item did not enumerate is therefore absent from `fetched`; read those exact
+  // items directly — a point read DOES evaluate the ACL, so it triggers Touch ID
+  // and returns the value the enumeration could not see. The enumeration still
+  // earns its place (it catches hashed/aliased storage names and stale leftovers
+  // not named in the metadata), so this is a UNION, not a replacement.
+  //
+  // One Touch ID sheet is preserved: the items missing from `fetched` are exactly
+  // the ACL'd ones the enumeration dropped, so the first batch (metadata plus any
+  // no-ACL / `never` items) raised no sheet, and this second batch raises the
+  // single sheet that covers all of them. When the enumeration is healthy every
+  // declared item is already in `fetched`, `missingDeclared` is empty, and this
+  // is skipped entirely — zero behavior change and no extra spawn on the hot path.
+  if (backend === 'keychain') {
+    const missingDeclared: string[] = [];
+    for (const key of keychainKeys) {
+      const p = parsedByKey.get(key)!;
+      if (!('ref' in p) || p.ref.provider !== 'keychain') continue;
+      const item = secretsKeychainItem(bundle.name, p.ref.value);
+      if (fetched.get(item) === undefined && fetched.get(keychainServiceAlias(item)) === undefined) {
+        missingDeclared.push(item);
+      }
+    }
+    if (missingDeclared.length > 0) {
+      const declaredFetched = getKeychainTokens([...new Set(missingDeclared)], {
+        agent: opts.agent || process.env.AGENTS_AGENT_NAME || 'Agents CLI',
+        bundle: name,
+        sessionId: process.env.AGENT_SESSION_ID || process.env.AGENTS_SESSION_ID,
+        reason: opts.caller ? `to ${opts.caller}` : reason,
+        duration: opts.duration || humanUnlockDuration(secretsHoldMs()),
+        // The policy is known now (metadata parsed), so the prompt names the real
+        // duration instead of the pre-read default the first batch had to guess.
+        defaultPolicy: bundlePolicy(bundle),
+        forceDuration: Boolean(opts.duration),
+        silentNoAcl: verifiedNoAclBundle,
+      });
+      for (const [k, v] of declaredFetched) fetched.set(k, v);
+    }
+  }
+
   const emitReadAudit = (status: 'success' | 'error', err?: unknown) => {
     emitSecretAudit({
       event: 'secrets.get',
@@ -1567,40 +1711,10 @@ export function readAndResolveBundleEnv(
   };
 
   try {
-    const env: Record<string, string> = {};
-    const owners = new Map<string, string>();
-    for (const [key] of Object.entries(bundle.vars)) {
-      if (!selectedKeys.has(key)) continue;
-      const p = parsedByKey.get(key)!;
-      if ('literal' in p) {
-        assignResolvedEnvValue(env, bundle, key, p.literal, opts.keyMode, owners);
-        continue;
-      }
-      if (p.ref.provider === 'keychain') {
-        const item = secretsKeychainItem(bundle.name, p.ref.value);
-        // The batch keys results by the names it was ASKED for: the cleartext
-        // metaItem, plus enumerated storage names. Look up the cleartext name
-        // first (Linux / file store), then its hashed storage alias (macOS).
-        const value = fetched.get(item) ?? fetched.get(keychainServiceAlias(item));
-        if (value === undefined) {
-          throw new Error(
-            `Bundle '${bundle.name}' key '${key}': stored item '${item}' not found. ` +
-            `Run: agents secrets add ${bundle.name} ${key}`,
-          );
-        }
-        assignResolvedEnvValue(env, bundle, key, value, opts.keyMode, owners);
-        continue;
-      }
-      try {
-        const value = resolveRef(p.ref, {
-          allowExec: bundle.allow_exec,
-          keychainItemFor: (shortId: string) => secretsKeychainItem(bundle.name, shortId),
-        });
-        assignResolvedEnvValue(env, bundle, key, value, opts.keyMode, owners);
-      } catch (err) {
-        throw new Error(`Bundle '${bundle.name}' key '${key}': ${(err as Error).message}`);
-      }
-    }
+    // Shared per-key resolver: same keychain lookup (cleartext name, then hashed
+    // storage alias) and same missing-item classification as resolveBundleEnv, so
+    // the two paths can never diverge again (RUSH-2252, RUSH-2253).
+    const env = assembleBundleEnv(bundle, selectedKeys, parsedByKey, fetched, opts.keyMode, backend);
     emitReadAudit('success');
     // Auto-cache: this was a real keychain read (the agent fast-path returned
     // earlier on a hit). If the bundle opts into the `daily` policy and the user

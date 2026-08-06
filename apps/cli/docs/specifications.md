@@ -1137,6 +1137,33 @@ access control (that is 1Password/Vault; this tool is device-local first).
   macOS sheet itself emits no event. **No read path is exempt** from the audit
   funnel — a code path that resolves a value without an `emitSecretAudit` record is a
   spec violation.
+- **SEC-30 (MUST).** **An existence answer and a read answer MUST NOT contradict, and a
+  read refusal MUST be reported as a refusal, never as absence.** A bundle read MUST
+  build its keychain read set from the bundle's **declared keys** (the `keychain:` refs
+  in its metadata), not solely from an enumeration of its namespace: the macOS helper's
+  `list` omits biometry-ACL'd items (`kSecUseAuthenticationUISkip`) and skips the whole
+  data-protection pass on a locked keychain (`keychain-helper.swift` `list`), so an
+  enumeration-only read set turns a present secret into a false "not found"
+  (`readAndResolveBundleEnv` unions the declared keys with the enumeration —
+  `lib/secrets/bundles.ts`). When a declared item still resolves to no value, the read
+  MUST classify it before erroring: an item that `hasKeychainToken` reports **present**
+  (which counts `errSecInteractionNotAllowed` as present, matching what `secrets view`
+  shows) MUST be reported as **present-but-unreadable** with how to unlock, and MUST NOT
+  print a remediation that would overwrite it (`agents secrets add`); only a **proven
+  absence** may print the add remediation (`missingBundleKeychainItemError`,
+  `lib/secrets/bundles.ts`). **Given** `secrets view` shows a key as `stored` **When**
+  `secrets view --reveal` / `unlock` reads it **Then** it returns the value or an
+  explicit read-failure — never `stored item '<item>' not found`.
+- **SEC-31 (MUST).** An existence or delete probe that cannot reach the keychain MUST
+  fail loud, never answer a false "no". `hasKeychainToken` and `deleteKeychainToken`
+  (`lib/secrets/index.ts`) MUST treat only the helper's exit 0 (present / deleted) and
+  exit 1 (genuinely absent / nothing to delete) as answers; any other outcome — helper
+  error, spawn failure, or the SIGKILL timeout (`spawnKeychainHelper`,
+  `KeychainHelperTimeoutError`) — MUST throw a reachability error rather than return
+  `false`, because a swallowed failure silently disarms the destructive-write guards
+  (`bundleExists`, the `--force` overwrite checks, the rename/purge) that key on these
+  primitives (RUSH-2235). Every keychain-helper spawn stays bounded by that timeout +
+  SIGKILL so a wedged `coreauthd` can never hang the parent (RUSH-2231/2232).
 
 #### 3.4 Authorization model
 

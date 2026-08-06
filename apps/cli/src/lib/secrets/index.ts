@@ -906,9 +906,23 @@ export function hasKeychainToken(item: string): boolean {
     }, KEYCHAIN_SILENT_TIMEOUT_MS).status === 0;
   }
   const bin = getKeychainHelperPath();
-  return spawnKeychainHelper(bin, ['has', item, os.userInfo().username], {
+  const r = spawnKeychainHelper(bin, ['has', item, os.userInfo().username], {
     stdio: ['ignore', 'pipe', 'pipe'],
-  }, KEYCHAIN_SILENT_TIMEOUT_MS).status === 0;
+  }, KEYCHAIN_SILENT_TIMEOUT_MS);
+  // The helper exits 0 = present (incl. errSecInteractionNotAllowed — a locked or
+  // biometry-ACL'd item still EXISTS), 1 = genuinely absent. Any other outcome
+  // (bad args, helper failure, spawn error) means the keychain could not be
+  // reached — and a false "absent" silently disarms every destructive-write guard
+  // that calls this (see the docblock), so it MUST fail loud rather than answer
+  // "no" (RUSH-2235). Timeouts already throw inside spawnKeychainHelper.
+  if (r.status === 0) return true;
+  if (r.status === 1) return false;
+  const stderr = r.stderr?.toString().trim();
+  throw new Error(
+    stderr ||
+    `keychain existence check for '${item}' failed (helper exit ${r.status ?? 'null'}` +
+    `${r.error ? `: ${r.error.message}` : ''}) — keychain unreachable, not a proven absence.`,
+  );
 }
 
 /**
@@ -1314,13 +1328,27 @@ export function deleteKeychainToken(item: string): boolean {
   if (isLinux()) return linuxBackend.delete(item);
   if (isWindows()) return windowsBackend.delete(item);
   const bin = getKeychainHelperPath();
-  const deleted = spawnKeychainHelper(bin, ['delete', item, os.userInfo().username], {
+  const r = spawnKeychainHelper(bin, ['delete', item, os.userInfo().username], {
     stdio: ['ignore', 'pipe', 'pipe'],
-  }, KEYCHAIN_SILENT_TIMEOUT_MS).status === 0;
-  // A deleted item must fail its next read as plain "not found", not with a
-  // stale back-off error left over from a pre-delete cancel.
-  if (deleted) clearKeychainReadBackoff(requested);
-  return deleted;
+  }, KEYCHAIN_SILENT_TIMEOUT_MS);
+  // The helper exits 0 = an item was removed from at least one keychain, 1 =
+  // nothing to delete (genuinely absent). Any other outcome means the keychain
+  // could not be reached; like hasKeychainToken this must fail loud rather than
+  // report a false "nothing was there" (RUSH-2235) — a swallowed failure lets a
+  // rename/purge believe it cleared a name it did not.
+  if (r.status === 0) {
+    // A deleted item must fail its next read as plain "not found", not with a
+    // stale back-off error left over from a pre-delete cancel.
+    clearKeychainReadBackoff(requested);
+    return true;
+  }
+  if (r.status === 1) return false;
+  const stderr = r.stderr?.toString().trim();
+  throw new Error(
+    stderr ||
+    `keychain delete for '${item}' failed (helper exit ${r.status ?? 'null'}` +
+    `${r.error ? `: ${r.error.message}` : ''}) — keychain unreachable, deletion unproven.`,
+  );
 }
 
 /**
