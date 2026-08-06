@@ -29,7 +29,7 @@ import { registerSetupSecretsCommand } from './setup-secrets.js';
 import { registerSetupFleetCommand } from './setup-fleet.js';
 import { registerSetupWatchdogCommand, runWatchdogSetupWizard } from './setup-watchdog.js';
 import { runPreferencesStep } from './setup-preferences.js';
-import { getProfile, DEFAULT_BROWSER_PROFILE_NAME } from '../lib/browser/profiles.js';
+import { getConfiguredDefaultProfileName, getProfile, DEFAULT_BROWSER_PROFILE_NAME } from '../lib/browser/profiles.js';
 import { listInstalledBrowsers } from '../lib/browser/chrome.js';
 import { probeComputerTrust } from './computer.js';
 import { readShareConfig } from '../lib/share/config.js';
@@ -288,7 +288,8 @@ export interface SetupStatusRow {
 }
 
 export async function getSetupStatus(): Promise<SetupStatusRow[]> {
-  const browserProfile = await getProfile(DEFAULT_BROWSER_PROFILE_NAME);
+  const configuredBrowserProfile = getConfiguredDefaultProfileName();
+  const browserProfile = await getProfile(configuredBrowserProfile ?? DEFAULT_BROWSER_PROFILE_NAME);
   const installedBrowsers = listInstalledBrowsers();
   const computerState = process.platform === 'darwin' ? (await probeComputerTrust() ? 'ready' : 'missing') : 'n/a';
   const devices = await loadDevices();
@@ -336,7 +337,9 @@ export async function runSetupHub(deps: {
 } = {}): Promise<void> {
   const interactive = deps.interactive ?? isInteractiveTerminal();
   if (!interactive) {
-    renderSetupStatus(await getSetupStatus());
+    const rows = await getSetupStatus();
+    renderSetupStatus(rows);
+    if (rows.some((row) => row.state === 'missing')) process.exitCode = 1;
     return;
   }
   try {

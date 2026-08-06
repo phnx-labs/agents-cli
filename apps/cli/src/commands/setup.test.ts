@@ -66,13 +66,33 @@ describe('agents setup command group', () => {
     expect(promptCount).toBe(2);
   });
 
-  it('prints status and returns without prompting outside a TTY', async () => {
-    let selected = false;
-    await runSetupHub({
-      interactive: false,
-      selectPhase: async () => { selected = true; return 'exit'; },
+  it('uses the configured named browser profile for readiness', async () => {
+    const { createProfile } = await import('../lib/browser/profiles.js');
+    const { setConfigValue } = await import('../lib/device-config.js');
+    await createProfile({
+      name: 'work',
+      browser: 'custom',
+      binary: process.execPath,
+      endpoints: ['cdp://127.0.0.1:9333'],
+      viewport: { width: 1280, height: 720 },
     });
-    expect(selected).toBe(false);
+    setConfigValue('browser.profile', 'work');
+    const rows = await getSetupStatus();
+    expect(rows.find((row) => row.phase === 'browser')).toMatchObject({ state: 'ready', detail: 'profile work' });
+  });
+
+  it('prints status, returns without prompting, and exits nonzero for missing phases outside a TTY', async () => {
+    let selected = false;
+    try {
+      await runSetupHub({
+        interactive: false,
+        selectPhase: async () => { selected = true; return 'exit'; },
+      });
+      expect(selected).toBe(false);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = undefined;
+    }
   });
 });
 
