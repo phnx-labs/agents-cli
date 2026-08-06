@@ -533,7 +533,9 @@ export function indexActiveBySessionId(active: ActiveSession[]): Map<string, Act
 }
 
 /** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
-type BackfillMeta = Pick<SessionMeta, 'version' | 'timestamp' | 'label' | 'ticketId' | 'prUrl' | 'prNumber'>;
+export type BackfillMeta = Pick<SessionMeta,
+  'version' | 'timestamp' | 'label' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName'
+>;
 
 /**
  * Backfill display-only fields onto live rows from the indexed SessionMeta, by
@@ -559,6 +561,8 @@ export function backfillActiveRowsFromMeta(
       const ts = new Date(m.timestamp).getTime();
       if (!Number.isNaN(ts)) s.startedAtMs = ts;
     }
+    if (!s.origin && m.origin) s.origin = m.origin;
+    if (!s.routineName && m.routineName) s.routineName = m.routineName;
   }
 }
 
@@ -580,6 +584,11 @@ function loadBackfillMetaFor(sessions: ActiveSession[]): Map<string, BackfillMet
     /* enrichment is best-effort — an unavailable DB leaves rows un-backfilled */
   }
   return byId;
+}
+
+/** Add indexed display metadata to active rows for non-renderer consumers. */
+export function backfillActiveRowsFromIndex(sessions: ActiveSession[]): void {
+  backfillActiveRowsFromMeta(sessions, loadBackfillMetaFor(sessions));
 }
 
 /**
@@ -1447,7 +1456,7 @@ async function renderActiveSessions(
   // an orphan row usually lacks them. Done before both the JSON and human paths
   // so every consumer (incl. the SSH fan-out's remote --json) sees enriched rows;
   // transcripts sync across the fleet, so a remote row resolves from the local DB.
-  backfillActiveRowsFromMeta(sessions, loadBackfillMetaFor(sessions));
+  backfillActiveRowsFromIndex(sessions);
 
   if (asJson) {
     // Resolve who is watching each local tmux pane before serializing: `viewingIn`

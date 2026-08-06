@@ -70,6 +70,10 @@ export interface OpenBlock {
   mailboxId: string;
   host: string;
   runtime: string;
+  /** Indexed launch origin, added at read time when the live session is known. */
+  origin?: 'cli' | 'routine';
+  /** Routine definition name when origin is `routine`. */
+  routineName?: string;
   /** Project/repo name this block belongs to (derived from cwd, worktree-aware). */
   project?: string;
   ts: string;

@@ -5,6 +5,7 @@ import type { OpenBlock } from '../lib/feed.js';
 import {
   controlFeedSession,
   formatFeedMastheadRight,
+  formatFeedRuntime,
   formatFeedReplyHint,
   formatOutcomeHeader,
   isSqliteBusyError,
@@ -198,6 +199,36 @@ describe('formatOutcomeHeader', () => {
       }),
     ]);
     expect(formatOutcomeHeader(groups[0])).toBe('RUSH-1125 · 2 agents · 1 needs you · 1 answered');
+  });
+
+  it('counts unique agents in every state so needs-you never exceeds agents', () => {
+    const groups = groupBlocksByOutcome([
+      block('a-first', 'zion', '2026-07-13T00:00:00Z', { ticket: 'RUSH-1993', mailboxId: 'agent-a' }),
+      block('a-second', 'zion', '2026-07-13T00:00:01Z', { ticket: 'RUSH-1993', mailboxId: 'agent-a' }),
+      block('b', 'zion', '2026-07-13T00:00:02Z', { ticket: 'RUSH-1993', mailboxId: 'agent-b' }),
+    ]);
+    expect(groups[0].counts).toMatchObject({ agents: 2, open: 2 });
+    expect(formatOutcomeHeader(groups[0])).toBe('RUSH-1993 · 2 agents · 2 needs you');
+  });
+
+  it('assigns an agent with several blocks to one most-actionable state', () => {
+    const groups = groupBlocksByOutcome([
+      block('open', 'zion', '2026-07-13T00:00:00Z', { ticket: 'RUSH-1993', mailboxId: 'agent-a' }),
+      block('answered', 'zion', '2026-07-13T00:00:01Z', {
+        ticket: 'RUSH-1993', mailboxId: 'agent-a', answer: { answeredAt: 't', answeredFrom: 'cli' },
+      }),
+    ]);
+    expect(groups[0].counts).toEqual({ agents: 1, open: 1, answered: 0, parked: 0 });
+  });
+});
+
+describe('formatFeedRuntime', () => {
+  it('uses the known host app instead of generic terminal and shows routine provenance', () => {
+    expect(formatFeedRuntime({ runtime: 'ghostty' })).toBe('Ghostty');
+    expect(formatFeedRuntime({ runtime: 'code' })).toBe('VS Code');
+    expect(formatFeedRuntime({ runtime: 'terminal' })).toBe('terminal');
+    expect(formatFeedRuntime({ runtime: 'codium', origin: 'routine', routineName: 'nightly-review' }))
+      .toBe('VSCodium · routine:nightly-review');
   });
 });
 

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { buildRoutineListJson } from '../../commands/routines.js';
-import { serializeActiveSessionsForJson, serializeSessionsJson } from '../../commands/sessions.js';
+import { backfillActiveRowsFromIndex, serializeActiveSessionsForJson, serializeSessionsJson } from '../../commands/sessions.js';
 import { getConfigValue } from '../device-config.js';
 import { querySessions } from '../session/db.js';
 import { readActiveSessionsCache } from '../session/session-cache.js';
@@ -38,12 +38,14 @@ export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
     Promise.resolve(querySessions({ limit: 40, skipExistenceCheck: true })),
   ]);
   const active = readActiveSessionsCache('local');
+  const activeSessions = active?.sessions ?? [];
+  backfillActiveRowsFromIndex(activeSessions);
   return {
     version: 1,
     capturedAt: new Date().toISOString(),
     routines,
     recentSessions: JSON.parse(serializeSessionsJson(recent)) as Record<string, unknown>[],
-    activeSessions: serializeActiveSessionsForJson(active?.sessions ?? []) as Record<string, unknown>[],
+    activeSessions: serializeActiveSessionsForJson(activeSessions) as Record<string, unknown>[],
     watchdog: {
       enabled: getConfigValue('watchdog.enabled').value === true,
       lastTick: (() => {

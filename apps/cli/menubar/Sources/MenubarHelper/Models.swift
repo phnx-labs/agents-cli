@@ -168,4 +168,6 @@ struct ActiveSession: Decodable {
     let lastActivityMs: Double?
     let owner: String?
     let label: String?
+    let origin: String?
+    let routineName: String?
 }

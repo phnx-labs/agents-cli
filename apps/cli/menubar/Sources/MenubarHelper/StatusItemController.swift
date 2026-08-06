@@ -357,7 +357,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private func refreshBadge() {
         guard let button = statusItem.button else { return }
-        let attention = badgeSessions.filter { $0.status == .attention }.count
+        let attention = badgeSessions.filter { $0.status == .inputRequired }.count
         let running = badgeSessions.filter { $0.status == .running }.count
         let pending = badgePending.count
         if attention > 0 || !badgeLoaded.isEmpty {
@@ -428,7 +428,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // failing/overdue routines and a stopped scheduler — so the menu is rich
         // whenever the triage strip has anything to say, not only when a session
         // is blocked.
-        let attention = sessions.filter { $0.status == .attention }.count
+        let attention = sessions.filter { $0.status == .inputRequired }.count
         let routinesFailing = routines.contains { routineNeedsAttention($0) }
         let schedulerStopped = daemonPid == nil && !routines.isEmpty
         let needsYou = attention + loaded.count + (routinesFailing ? 1 : 0) + (schedulerStopped ? 1 : 0)
@@ -453,7 +453,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         // Live work grouped by repo — attention rows live in the triage strip,
         // not here. Skipped entirely on a calm, idle machine.
-        let live = sessions.filter { $0.status == .running || $0.status == .idle }
+        let live = sessions.filter { $0.status != .inputRequired }
         if !live.isEmpty || !browserTasks.isEmpty {
             addActive(menu, live: live, browserTasks: browserTasks, rich: rich)
             menu.addItem(.separator())
@@ -476,22 +476,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         addFooter(menu, daemonPid: daemonPid)
     }
 
-    // Swap the cheap terminal rows for the engine's list once the warm cache
-    // has it. The engine list also carries teams/cloud contexts — those are
-    // dropped here because the cheap sources own them (titles from meta.json /
-    // tasks.db that the engine payload lacks); keeping both would double-count.
+    // Swap every cheap row for the engine's canonical list once the warm cache
+    // has it. This preserves the exact lifecycle status and row count emitted by
+    // `agents sessions --active --local --json` across terminal, teams, cloud,
+    // tmux, and headless contexts. Cheap files are cold-start display only.
     private func merged(_ cheap: [Session]) -> [Session] {
         guard activeSessionsLoaded, !cachedActiveSessions.isEmpty else { return cheap }
-        let engineTerminals = cachedActiveSessions.filter {
-            $0.context != "teams" && $0.context != "cloud"
-        }
-        return LocalState.sessions(fromActive: engineTerminals)
-            + cheap.filter { $0.context != "terminal" }
+        return LocalState.sessions(fromActive: cachedActiveSessions)
     }
 
     // MARK: Sections
     private func addHeader(_ menu: NSMenu, sessions: [Session], plusNeeds: Int = 0) {
-        let attn = sessions.filter { $0.status == .attention }.count + plusNeeds
+        let attn = sessions.filter { $0.status == .inputRequired }.count + plusNeeds
         let running = sessions.filter { $0.status == .running }.count
         let status: String
         let color: NSColor
@@ -538,7 +534,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                                    loaded: [LoadedDevice], rich: Bool) -> Bool {
         var rows: [(String, NSColor, String, NSMenu?)] = []   // glyph, color, text, submenu
 
-        let blocked = sessions.filter { $0.status == .attention }
+        let blocked = sessions.filter { $0.status == .inputRequired }
         let groups = Dictionary(grouping: blocked) { s in "\(s.agent)\u{0000}\(s.repo)" }
         // Sort each group oldest-first, then order groups by their oldest wait.
         let sortedGroups = groups.values.map { group -> [Session] in
@@ -697,12 +693,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // Expand rebuilds from the warm cache only — no CLI, no re-index.
     private func addActive(_ menu: NSMenu, live: [Session], browserTasks: [BrowserTask], rich: Bool) {
         let totalRun = live.filter { $0.status == .running }.count
-        let totalIdle = live.count - totalRun
+        let totalIdle = live.filter { $0.status == .idle }.count
         let projectCount = Set(live.map { $0.repo.isEmpty ? "other" : $0.repo }).count
         var head = "ACTIVE"
         var bits: [String] = []
         if totalRun > 0 { bits.append("\(totalRun) run") }
         if totalIdle > 0 { bits.append("\(totalIdle) idle") }
+        let otherStatuses = Dictionary(grouping: live.filter {
+            $0.status != .running && $0.status != .idle
+        }, by: \.status)
+        for status in otherStatuses.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+            bits.append("\(otherStatuses[status]!.count) \(ActiveDisplay.statusLabel(status))")
+        }
         if projectCount > 0 { bits.append("\(projectCount) project\(projectCount == 1 ? "" : "s")") }
         if !bits.isEmpty { head += " · " + bits.joined(separator: " · ") }
         addSectionTitle(menu, head, color: .secondaryLabelColor)
@@ -719,7 +721,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         for repo in orderedKeys {
             guard let group = groups[repo] else { continue }
             let running = group.filter { $0.status == .running }.count
-            let idle = group.count - running
+            let idle = group.filter { $0.status == .idle }.count
             let machines = group.compactMap(\.machine)
             let open = expandedProjects.contains(repo)
             let summary = ActiveDisplay.projectSummary(repo: repo, running: running,
@@ -757,8 +759,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// Agent summary under an expanded project. Detail lives in the › submenu
     /// (linkable ticket/PR/cwd, locality, duration) — not a second accordion.
     private func makeSessionRow(session s: Session, rich: Bool) -> NSMenuItem {
-        let glyph = s.status == .running ? "●" : (s.status == .attention ? "⚠" : "◐")
-        let color = s.status == .running ? run : (s.status == .attention ? wait : idleC)
+        let glyph = ActiveDisplay.statusGlyph(s.status)
+        let color = s.status == .running ? run : (s.status == .inputRequired ? wait : idleC)
         let agent = LocalState.agentLabel(s.agent)
         let host = s.machine ?? thisMachine
         let age = ActiveDisplay.ageLabel(fromMs: s.lastActivityMs ?? s.startedAtMs)
@@ -769,6 +771,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if let t = s.ticketId, !t.isEmpty { chips.append("🎫\(t)") }
         if let pr = ActiveDisplay.prNumber(from: s.prLink) { chips.append("PR#\(pr)") }
         else if let link = s.prLink, !link.isEmpty { chips.append("PR") }
+        if s.origin == "routine" {
+            chips.append(s.routineName.map { "routine:\($0)" } ?? "routine")
+        }
 
         var line = "\(glyph) \(agent) · \(host)"
         if let surface = s.surface, !surface.isEmpty { line += " · \(surface)" }
@@ -826,7 +831,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // rest already starts with glyph when built above — strip the leading glyph
         // if present so we don't double it.
         var body = rest
-        for prefix in ["● ", "◐ ", "⚠ "] {
+        for prefix in ["● ", "◐ ", "○ ", "⊘ ", "× ", "✗ ", "◍ ", "◌ "] {
             if body.hasPrefix(prefix) { body = String(body.dropFirst(prefix.count)); break }
         }
         out.append(NSAttributedString(string: body, attributes: [
@@ -911,8 +916,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             switch s.status {
             case .running: return "● running"
             case .idle: return "◐ idle"
-            case .attention: return "⚠ needs you"
-            case .queued: return "queued"
+            case .inputRequired: return "waiting"
+            case .orphaned: return "orphan"
+            default: return ActiveDisplay.statusLabel(s.status)
             }
         }()
         var timeLine = statusWord

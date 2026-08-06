@@ -198,18 +198,23 @@ export function groupBlocksByOutcome(blocks: OpenBlock[]): OutcomeGroup[] {
   const groups: OutcomeGroup[] = [];
   for (const { outcome, blocks: members } of byKey.values()) {
     const mailboxes = new Set(members.map((b) => b.mailboxId));
-    let open = 0;
-    let answered = 0;
-    let parked = 0;
+    const states = new Map<string, 'open' | 'parked' | 'answered'>();
     for (const b of members) {
-      if (b.parkedAt) parked += 1;
-      else if (b.answer || b.defaultedAt || b.continuedAt) answered += 1;
-      else open += 1;
+      const next = b.parkedAt
+        ? 'parked'
+        : b.answer || b.defaultedAt || b.continuedAt ? 'answered' : 'open';
+      const current = states.get(b.mailboxId);
+      // One agent occupies one state. Its most actionable block wins.
+      if (!current || next === 'open' || (next === 'parked' && current === 'answered')) {
+        states.set(b.mailboxId, next);
+      }
     }
+    const count = (state: 'open' | 'parked' | 'answered') =>
+      [...states.values()].filter((value) => value === state).length;
     groups.push({
       outcome,
       blocks: members,
-      counts: { agents: mailboxes.size, open, answered, parked },
+      counts: { agents: mailboxes.size, open: count('open'), answered: count('answered'), parked: count('parked') },
     });
   }
 
@@ -266,6 +271,9 @@ export interface SessionOutcomeHint {
   worktreeSlug?: string | null;
   branch?: string | null;
   project?: string | null;
+  host?: string | null;
+  origin?: 'cli' | 'routine' | null;
+  routineName?: string | null;
 }
 
 /**
@@ -281,6 +289,11 @@ export function enrichBlockFromSession(block: OpenBlock, hint: SessionOutcomeHin
   }
   if (!next.worktreeSlug && hint.worktreeSlug) next.worktreeSlug = hint.worktreeSlug;
   if (!next.project && hint.project) next.project = hint.project;
+  if (hint.host && hint.host !== 'terminal' && next.runtime === 'terminal') next.runtime = hint.host;
+  if (hint.origin === 'routine') {
+    next.origin = 'routine';
+    if (hint.routineName) next.routineName = hint.routineName;
+  }
   return next;
 }
 

@@ -74,6 +74,7 @@ import { notifyUrgentBlock } from '../lib/notify.js';
 import { gcMailbox } from '../lib/mailbox-gc.js';
 import { isValidMailboxId } from '../lib/mailbox.js';
 import { getActiveSessions } from '../lib/session/active.js';
+import { backfillActiveRowsFromMeta } from './sessions.js';
 import { mailboxIdForActiveSession } from '../lib/mailbox-target.js';
 import { GLYPH, masthead } from '../lib/comms-render.js';
 import { discoverSessions } from '../lib/session/discover.js';
@@ -247,7 +248,7 @@ export function prepareLocalFeedBlocks(
 
 function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   const host = b.host !== localHost ? chalk.yellow(` [${b.host}]`) : '';
-  const runtime = chalk.gray(b.runtime);
+  const runtime = chalk.gray(formatFeedRuntime(b));
   const age = chalk.gray(relTime(b.ts));
   const cls = b.blockClass ? chalk.gray(`(${b.blockClass})`) : '';
   const consequence = b.consequence && b.consequence !== 'normal' ? chalk.red(`[${b.consequence}]`) : '';
@@ -314,6 +315,21 @@ function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   console.log();
 }
 
+/** Specific host app + routine provenance for one feed row. */
+export function formatFeedRuntime(block: Pick<OpenBlock, 'runtime' | 'origin' | 'routineName'>): string {
+  const host = ({
+    ghostty: 'Ghostty',
+    iterm: 'iTerm',
+    terminal: 'terminal',
+    kitty: 'Kitty',
+    codium: 'VSCodium',
+    code: 'VS Code',
+    cursor: 'Cursor',
+  } as Record<string, string>)[block.runtime.toLowerCase()] ?? block.runtime;
+  if (block.origin !== 'routine') return host;
+  return `${host} · routine${block.routineName ? `:${block.routineName}` : ''}`;
+}
+
 /** Human summary line for one outcome rollup. */
 export function formatOutcomeHeader(group: OutcomeGroup): string {
   const { agents, open, answered, parked } = group.counts;
@@ -346,6 +362,9 @@ export function sessionHintsFromActive(
     ticket?: { id?: string };
     pr?: { url?: string; number?: number };
     worktree?: { slug?: string };
+    host?: string;
+    origin?: 'cli' | 'routine';
+    routineName?: string;
   }>,
 ): SessionOutcomeHint[] {
   return sessions.map((s) => ({
@@ -358,6 +377,9 @@ export function sessionHintsFromActive(
     prUrl: s.pr?.url,
     worktreeSlug: s.worktree?.slug,
     project: s.cwd ? projectKeyFromCwd(s.cwd) : undefined,
+    host: s.host,
+    origin: s.origin,
+    routineName: s.routineName,
   }));
 }
 
@@ -624,6 +646,7 @@ export function registerFeedCommand(program: Command): void {
           ));
         }
         sessionMetas = loaded.metas;
+        backfillActiveRowsFromMeta(sessions, new Map(sessionMetas.map((meta) => [meta.id, meta])));
       }
       const localSignals = buildSessionSignals(sessions, sessionMetas);
 

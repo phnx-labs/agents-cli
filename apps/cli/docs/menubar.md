@@ -13,6 +13,14 @@ subprocess every three minutes. That command reads indexed/cache state and never
 re-indexes transcripts. Opening the menu uses the warm result; CLI actions remain
 explicit controls (starting a session, running a routine).
 
+The snapshot carries the same rows and lifecycle status as
+`agents sessions --active --local --json`. After the warm snapshot loads, the
+menu does not infer status again from terminal registries or attention files;
+those cheap files are used only during cold start. The ACTIVE section therefore
+uses the CLI words `working`, `waiting`, `idle`, `queued`, `orphan`, `crashed`,
+`closed`, `abandoned`, and `unknown`, and routine sessions carry
+`routine:<name>` when the indexed name is available.
+
 macOS only. It is auto-enabled for every user (see [Lifecycle](#lifecycle)); opt
 out with `agents menubar disable`.
 
@@ -319,7 +327,7 @@ command every three minutes; the 10-second badge/liveness checks stay local:
 | Source | Path | Gives |
 |---|---|---|
 | Terminals | `~/.agents/.cache/terminals/live-terminals.json` | extension-registered terminals (agent, cwd, pid, label) — cold start + 10s badge poll |
-| Menu snapshot | `agents menubar snapshot --json` every three minutes | routines, 40 indexed recent sessions, daemon-warmed local active sessions, and persisted watchdog status in one subprocess |
+| Menu snapshot | `agents menubar snapshot --json` every three minutes | routines, 40 indexed recent sessions, daemon-warmed local active sessions with the exact `sessions --active` lifecycle status, and persisted watchdog status in one subprocess |
 | Doctor | `agents doctor --json` every 15 minutes | install and configuration health; kept separate because it is substantially heavier |
 | Teams | `~/.agents/.history/teams/agents/<id>/meta.json` | running teammate agents |
 | Cloud | `~/.agents/.cache/cloud/tasks.db` (SQLite) | cloud tasks, incl. `input_required` or `needs_review` → "awaiting input" |

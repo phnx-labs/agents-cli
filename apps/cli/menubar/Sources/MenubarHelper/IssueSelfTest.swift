@@ -31,6 +31,7 @@ enum IssueSelfTest {
         testLinearCache()
         testTicketDispatchContract()
         testActiveDisplay()
+        testCanonicalSessionStatuses()
         testAgentAvatar()
         if failures == 0 {
             print("\nALL PASS")
@@ -38,6 +39,20 @@ enum IssueSelfTest {
         }
         print("\n\(failures) FAILED")
         exit(1)
+    }
+
+    private static func testCanonicalSessionStatuses() {
+        let cases: [(SessionStatus, String, String)] = [
+            (.running, "working", "●"), (.inputRequired, "waiting", "◐"),
+            (.idle, "idle", "○"), (.queued, "queued", "○"),
+            (.closed, "closed", "×"), (.abandoned, "abandoned", "⊘"),
+            (.orphaned, "orphan", "◍"), (.crashed, "crashed", "✗"),
+            (.unknown, "unknown", "◌"),
+        ]
+        for (status, label, glyph) in cases {
+            check("canonical status label \(status.rawValue)", ActiveDisplay.statusLabel(status) == label)
+            check("canonical status glyph \(status.rawValue)", ActiveDisplay.statusGlyph(status) == glyph)
+        }
     }
 
     // imageFiles must return images newest-first ACROSS dirs, skip non-images and

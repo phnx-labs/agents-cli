@@ -98,6 +98,16 @@ describe('backfillActiveRowsFromMeta', () => {
     expect(s.startedAtMs).toBe(Date.parse('2026-07-30T10:00:00.000Z'));
   });
 
+  it('backfills routine provenance for every active JSON consumer', () => {
+    const s = active({ sessionId: 'sid-routine', origin: undefined, routineName: undefined });
+    const byId = new Map<string, SessionMeta>([
+      ['sid-routine', meta({ id: 'sid-routine', origin: 'routine', routineName: 'nightly-review' })],
+    ]);
+    backfillActiveRowsFromMeta([s], byId);
+    expect(s.origin).toBe('routine');
+    expect(s.routineName).toBe('nightly-review');
+  });
+
   it('never overrides a value the live row already carries (live wins)', () => {
     const s = active({ sessionId: 'sid-2', version: '9.9.9', ticket: { id: 'LIVE-1' }, startedAtMs: 111 });
     const byId = new Map<string, SessionMeta>([

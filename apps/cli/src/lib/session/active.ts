@@ -189,6 +189,10 @@ export interface ActiveSession {
    */
   lastActivityMs?: number;
   status: ActiveStatus;
+  /** Indexed launch origin, backfilled by the sessions command for JSON consumers. */
+  origin?: 'cli' | 'routine';
+  /** Routine definition name when origin is `routine`. */
+  routineName?: string;
   /**
    * Foreground/background presence for the detach/attach model:
    *   `attached`   — live interactive TUI you're watching;
