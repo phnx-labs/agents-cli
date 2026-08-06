@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.22.27
+
+- **Auth-health probes once per account, not once per version home (RUSH-2111).**
+  The daemon's every-3-minute auth-health refresh fanned `probeLocalFleetAuth`
+  over *every* installed version home at once, so a box with several Claude homes
+  signed into one account fired that many concurrent requests at the same provider
+  endpoint — racing its OAuth rate limit into a 429 that then parked the whole
+  box's usage reads behind a `Retry-After` penalty (`usage-backoff.ts` survives
+  that penalty; this removes its cause). Installs are now grouped by account and
+  the live probe runs once per (agent, account), fanning the one verdict out to
+  each home's cache row. Homes with no resolvable account are still probed
+  individually. Source: `apps/cli/src/lib/auth-health.ts`
+  (`groupFleetAuthInstalls`, `probeLocalFleetAuth`).
+
 ## 1.22.26
 
 - Make bare `agents setup` a re-runnable onboarding hub with live capability status and direct access to browser, computer, secrets, fleet, share, watchdog, and preference wizards.

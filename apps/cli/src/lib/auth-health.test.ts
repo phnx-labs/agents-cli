@@ -5,6 +5,7 @@ import {
   authCacheKey,
   authCellColor,
   classifyHttpStatus,
+  groupFleetAuthInstalls,
   mergeAuthHealthEntries,
   formatCheckedAge,
   probeDetail,
@@ -16,6 +17,7 @@ import {
   verdictLabel,
   type AuthHealth,
   type AuthVerdict,
+  type FleetAuthInstall,
 } from './auth-health.js';
 
 describe('classifyHttpStatus', () => {
@@ -200,6 +202,67 @@ describe('summarizeHostAuth', () => {
   it('returns an empty summary for a host with no cached rows', () => {
     const r = summarizeHostAuth(cache, 'never-probed');
     expect(r).toEqual({ live: 0, present: 0, degraded: 0, revoked: 0, total: 0, oldestCheckedAt: null });
+  });
+});
+
+describe('groupFleetAuthInstalls — probe once per account (RUSH-2111)', () => {
+  const inst = (agent: string, version: string, account: string | undefined): FleetAuthInstall =>
+    ({ agent: agent as FleetAuthInstall['agent'], version, account });
+
+  it('collapses two homes on the SAME account into ONE probe group', () => {
+    const groups = groupFleetAuthInstalls([
+      inst('claude', '1.0.0', 'alice@example.com'),
+      inst('claude', '1.1.0', 'alice@example.com'),
+    ]);
+    // The whole point: two version homes, one live probe.
+    expect(groups).toHaveLength(1);
+    expect(groups[0].members.map((m) => m.version)).toEqual(['1.0.0', '1.1.0']);
+    // The representative is the first-seen home; every member rides its verdict.
+    expect(groups[0].probe.version).toBe('1.0.0');
+  });
+
+  it('keeps DIFFERENT accounts on the same agent as separate probes', () => {
+    const groups = groupFleetAuthInstalls([
+      inst('claude', '1.0.0', 'alice@example.com'),
+      inst('claude', '1.1.0', 'bob@example.com'),
+    ]);
+    expect(groups).toHaveLength(2);
+    expect(groups.every((g) => g.members.length === 1)).toBe(true);
+  });
+
+  it('never merges the same account label across different agents', () => {
+    const groups = groupFleetAuthInstalls([
+      inst('claude', '1.0.0', 'shared@example.com'),
+      inst('kimi', '2.0.0', 'shared@example.com'),
+    ]);
+    expect(groups).toHaveLength(2);
+  });
+
+  it('never merges installs with no resolvable account — each is its own group', () => {
+    const groups = groupFleetAuthInstalls([
+      inst('claude', '1.0.0', undefined),
+      inst('claude', '1.1.0', undefined),
+    ]);
+    // Can't prove they're the same account, so probe each (matches the old
+    // per-install behaviour for the un-labelable / unconfigured case).
+    expect(groups).toHaveLength(2);
+  });
+
+  it('deduplicates within an account while isolating the un-labelable ones', () => {
+    const groups = groupFleetAuthInstalls([
+      inst('claude', '1.0.0', 'alice@example.com'),
+      inst('claude', '1.1.0', 'alice@example.com'),
+      inst('claude', '1.2.0', undefined),
+      inst('claude', '1.3.0', 'bob@example.com'),
+    ]);
+    // alice(1 group of 2) + bob(1) + un-labelable(1) = 3 probes for 4 homes.
+    expect(groups).toHaveLength(3);
+    const alice = groups.find((g) => g.probe.account === 'alice@example.com');
+    expect(alice?.members.map((m) => m.version)).toEqual(['1.0.0', '1.1.0']);
+  });
+
+  it('returns no groups for no installs', () => {
+    expect(groupFleetAuthInstalls([])).toEqual([]);
   });
 });
 

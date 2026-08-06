@@ -383,33 +383,115 @@ export interface AuthProbeRow {
   health: AuthHealth;
 }
 
+/** One installed (agent, version) home, tagged with its resolved account label. */
+export interface FleetAuthInstall {
+  agent: AgentId;
+  version: string;
+  /** Human account label from {@link authAccountLabel}, or undefined when none resolves. */
+  account: string | undefined;
+}
+
 /**
- * Enumerate every installed (agent, version) on THIS host, probe each in
- * parallel, and return the rows (installs with no credential at all are
- * dropped). Shared by `agents fleet ping --local` and the daemon refresh.
+ * A set of installs that share one provider account and MUST be probed once.
+ * The live probe runs against `probe` (the representative home); every entry in
+ * `members` — the representative included — then receives that one verdict.
+ */
+export interface FleetAuthProbeGroup<T extends FleetAuthInstall> {
+  probe: T;
+  members: T[];
+}
+
+/**
+ * Collapse installs so a live auth probe fires ONCE per (agent, account) rather
+ * than once per version home.
+ *
+ * Several version homes signed into the same provider account share one OAuth
+ * rate limit, so probing each of them concurrently — which the daemon did every
+ * three minutes across every installed home (RUSH-2111) — raced that limit into
+ * a 429 storm that then parked the whole box behind a `Retry-After` penalty (the
+ * incident {@link file:./usage-backoff.ts} was written to survive; this removes
+ * its cause). Grouping by account means N homes on one account issue ONE request.
+ *
+ * Installs with no resolvable account label are never merged — we cannot prove
+ * two of them are the same account — so each becomes its own group keyed by
+ * version, preserving the old per-install probe for the un-labelable case
+ * (which is also the `unconfigured` case that gets dropped downstream). Pure: no
+ * fs, no network, so the dedup decision is unit-tested directly.
+ */
+export function groupFleetAuthInstalls<T extends FleetAuthInstall>(
+  installs: readonly T[],
+): FleetAuthProbeGroup<T>[] {
+  const groups = new Map<string, FleetAuthProbeGroup<T>>();
+  for (const inst of installs) {
+    // NUL separates the segments so an account label can never collide with the
+    // version fallback key (a version string cannot contain NUL).
+    const key = inst.account
+      ? `${inst.agent} acct:${inst.account}`
+      : `${inst.agent} ver:${inst.version}`;
+    const existing = groups.get(key);
+    if (existing) existing.members.push(inst);
+    else groups.set(key, { probe: inst, members: [inst] });
+  }
+  return [...groups.values()];
+}
+
+/**
+ * Enumerate every installed (agent, version) on THIS host and return one row per
+ * install (installs with no credential at all are dropped). Shared by
+ * `agents fleet ping --local` and the daemon refresh.
+ *
+ * The live network probe is deduped by account: homes sharing one provider
+ * account are probed ONCE and the verdict is fanned out to each home's row, so
+ * the daemon's every-3-minute refresh can no longer fire concurrent same-account
+ * requests and self-inflict a 429 (RUSH-2111). Each home still gets its own cache
+ * row (the cache key is per-version by design — see {@link authCacheKey}).
  */
 export async function probeLocalFleetAuth(opts?: {
   cliVersion?: string | null;
   agents?: readonly AgentId[];
 }): Promise<AuthProbeRow[]> {
   const agentIds = opts?.agents ?? ALL_AGENT_IDS;
-  const tasks: Promise<AuthProbeRow | null>[] = [];
+
+  interface LocalInstall extends FleetAuthInstall {
+    home: string;
+    info: AccountInfo | null;
+  }
+
+  // Enumerate every install, then resolve its account label. getAccountInfo is a
+  // local credential-file read (no network), so this fan-out is cheap and cannot
+  // contribute to the rate limit the probe grouping below exists to avoid.
+  const installs: LocalInstall[] = [];
   for (const agent of agentIds) {
     for (const version of listInstalledVersions(agent)) {
-      const home = getVersionHomePath(agent, version);
-      tasks.push(
-        (async (): Promise<AuthProbeRow | null> => {
-          const info = await getAccountInfo(agent, home).catch(() => null);
-          const health = await probeAuthHealth(agent, home, { cliVersion: opts?.cliVersion, info });
-          health.account = authAccountLabel(info);
-          if (health.verdict === 'unconfigured') return null;
-          return { agent, version, account: health.account, health };
-        })(),
-      );
+      installs.push({ agent, version, home: getVersionHomePath(agent, version), info: null, account: undefined });
     }
   }
-  const settled = await Promise.all(tasks);
-  return settled.filter((r): r is AuthProbeRow => r !== null);
+  await Promise.all(
+    installs.map(async (inst) => {
+      inst.info = await getAccountInfo(inst.agent, inst.home).catch(() => null);
+      inst.account = authAccountLabel(inst.info);
+    }),
+  );
+
+  // Probe once per (agent, account); fan the one verdict out to every home in the
+  // group. Groups run in parallel — they target distinct accounts, so there is no
+  // same-account concurrency left to trip the throttle.
+  const perGroup = await Promise.all(
+    groupFleetAuthInstalls(installs).map(async (group): Promise<AuthProbeRow[]> => {
+      const rep = group.probe;
+      const health = await probeAuthHealth(rep.agent, rep.home, { cliVersion: opts?.cliVersion, info: rep.info });
+      health.account = authAccountLabel(rep.info);
+      if (health.verdict === 'unconfigured') return [];
+      return group.members.map((inst) => ({
+        agent: inst.agent,
+        version: inst.version,
+        account: health.account,
+        // A distinct object per row so a later mutation of one can't bleed across.
+        health: { ...health },
+      }));
+    }),
+  );
+  return perGroup.flat();
 }
 
 /** Persist a host's probed rows into the cache (keyed by host+agent+version). */
