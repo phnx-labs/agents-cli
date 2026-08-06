@@ -243,7 +243,9 @@ function fullName(type: AgentType, version: string | null | undefined): string {
  */
 export function printFeedHint(team: string): void {
   console.log(
-    chalk.gray('Tip: teammates post IMPORTANT milestones to the feed — watch with ') +
+    chalk.gray('Tip: teammates post IMPORTANT milestones to the feed (') +
+    chalk.cyan('agents feed timeline') +
+    chalk.gray('); watch team progress with ') +
     chalk.cyan(`agents teams status ${team}`) +
     chalk.gray('.'),
   );

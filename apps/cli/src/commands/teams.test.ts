@@ -183,7 +183,7 @@ describe('teams list output modes', () => {
 });
 
 describe('printFeedHint', () => {
-  it('nudges the operator to watch feed milestones with the team-scoped status command', () => {
+  it('points milestones at the feed and team progress at teams status', () => {
     const lines: string[] = [];
     const orig = console.log;
     console.log = (msg?: unknown) => { lines.push(String(msg ?? '')); };
@@ -193,10 +193,12 @@ describe('printFeedHint', () => {
       console.log = orig;
     }
     const out = lines.join('\n');
-    // Pins the watch command the hint teaches — if the surface renames, this fails.
+    // Milestones live on the feed, NOT in `teams status` (which shows transcript
+    // activity) — pin the correct watch command so the hint can't drift back.
+    expect(out).toContain('agents feed timeline');
+    // Team progress is the separate, team-scoped command.
     expect(out).toContain('agents teams status pricing-page');
-    // Pins the anti-spam framing (RUSH-2250): milestones, not every step.
+    // Anti-spam framing (RUSH-2250): milestones, not every step.
     expect(out).toContain('IMPORTANT milestones');
-    expect(out).toContain('feed');
   });
 });
