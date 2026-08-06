@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { filterSessionsByRoutine, formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, resolveRoutineName, teamBadge } from '../sessions.js';
+import { applyScopeFilters, filterSessionsByRoutine, formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, resolveRoutineName, teamBadge } from '../sessions.js';
 import { resolveSessionById } from '../../lib/session/discover.js';
 import { formatTeamLineage } from '../sessions-picker.js';
 import type { SessionMeta } from '../../lib/session/types.js';
@@ -88,6 +88,9 @@ describe('resolveRoutineName', () => {
     expect(filtered).not.toBeNull();
     expect(resolveSessionById(filtered!, 'other-id')).toEqual([]);
     expect(resolveSessionById(filtered!, 'wanted-id')).toEqual([wanted]);
+    const globallyScoped = applyScopeFilters([wanted, other], { routine: 'nightly' });
+    expect(resolveSessionById(globallyScoped, 'other-id')).toEqual([]);
+    expect(resolveSessionById(globallyScoped, 'wanted-id')).toEqual([wanted]);
   });
 });
 

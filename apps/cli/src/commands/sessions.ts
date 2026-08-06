@@ -2239,7 +2239,7 @@ async function sessionsAction(
   // When the user explicitly asks to render (via mode flag), resolve the
   // query globally so sessions outside the default cwd/30d window are found.
   if (wantsRender && searchQuery) {
-    await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, filter: filterOpts, redact: options.redact, local: options.local, hosts: options.host });
+    await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, routine: options.routine, filter: filterOpts, redact: options.redact, local: options.local, hosts: options.host });
     return;
   }
 
@@ -2475,7 +2475,7 @@ async function sessionsAction(
         return;
       }
       if (idMatches.length === 0 && looksLikeSessionId(searchQuery)) {
-        await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, filter: filterOpts, redact: options.redact, local: options.local, hosts: options.host });
+        await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, routine: options.routine, filter: filterOpts, redact: options.redact, local: options.local, hosts: options.host });
         return;
       }
     }
@@ -3958,9 +3958,9 @@ function scoreSessionQuery(session: SessionMeta, terms: string[]): number {
  * the project you specified AND elsewhere, producing an ambiguity error
  * even though the user already pointed at the correct scope.
  */
-function applyScopeFilters(
+export function applyScopeFilters(
   sessions: SessionMeta[],
-  scope: { agent?: string; project?: string },
+  scope: { agent?: string; project?: string; routine?: boolean | string },
 ): SessionMeta[] {
   let filtered = sessions;
 
@@ -3983,6 +3983,19 @@ function applyScopeFilters(
       if (wantVersion && s.version !== wantVersion) return false;
       return true;
     });
+  }
+
+  if (scope.routine) {
+    filtered = filtered.filter((session) => session.origin === 'routine');
+    if (typeof scope.routine === 'string') {
+      const names = [...new Set(
+        filtered.map((session) => session.routineName).filter((name): name is string => !!name),
+      )];
+      const selected = resolveRoutineName(scope.routine, names);
+      filtered = selected
+        ? filtered.filter((session) => session.routineName === selected)
+        : [];
+    }
   }
 
   return filtered;
@@ -4039,7 +4052,7 @@ async function renderArtifactsGlobal(
 async function renderOneSession(
   query: string,
   mode: ViewMode,
-  scope: { agent?: string; project?: string; filter: FilterOptions; redact?: boolean; local?: boolean; hosts?: string[] },
+  scope: { agent?: string; project?: string; routine?: boolean | string; filter: FilterOptions; redact?: boolean; local?: boolean; hosts?: string[] },
 ): Promise<void> {
   const spinner = ora().start();
   const tracker = createScanProgressTracker(FIND_VERBS, 'session', spinner);
