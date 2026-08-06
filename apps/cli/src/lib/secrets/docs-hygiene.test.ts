@@ -26,8 +26,10 @@
  *   outside a marked region is held to the rules with no escape hatch, so a new
  *   rc-file mention fails until an author consciously marks it. Region count,
  *   pairing, and size are pinned so the exemption cannot quietly widen.
- * - **Negation is judged per match and must ABUT the claim** (`never prompts`),
- *   not merely appear nearby. `Do not hesitate: set …` does not clear the check.
+ * - **No negation detection.** Seven passes tried; every version traded a false
+ *   negative for a false positive (see `findMatches`). The pattern is forbidden
+ *   outside a marked region in EITHER polarity, so a denial that pairs the two
+ *   is marked or rephrased — a decision a human makes, not a regex.
  * - **The checks are functions over text, and are tested against synthetic
  *   documents**, not only against the real one. Every bypass found in review is
  *   pinned below, so the same class cannot silently return.
@@ -75,87 +77,33 @@ export function stripAllowedRegions(text: string): string {
 }
 
 /**
- * Matches of `claim` that are not negated, where "negated" means the negation
- * word DIRECTLY abuts the match — `never prompts`, `not asked` — rather than
- * merely appearing within N characters of it.
+ * Every match of `claim`, with its position.
  *
- * Proximity was the previous rule and it did not establish that the negation
- * governs the claim: `Do not hesitate: set AGENTS_SECRETS_PASSPHRASE …` cleared
- * it. Requiring adjacency means a disclaimer placed anywhere else in the
- * sentence changes nothing.
+ * There is deliberately **no negation detection here.** Seven review passes
+ * tried to build one, and every version traded a false negative for a false
+ * positive, because telling `do not hesitate to set X` (an instruction) from
+ * `we do not recommend that you set X` (a denial) needs the polarity of the
+ * intervening verb, which no regex has:
+ *
+ *   proximity             -> `Do not hesitate: set X` cleared it
+ *   any single negation   -> `do not not set X` cleared it (double negative)
+ *   letters/spaces run    -> `do not hesitate to set X` cleared it
+ *   stop at content word  -> `do not recommend that you set X` was WRONGLY flagged
+ *
+ * So the guard stops trying. The rule is now simply: the pattern must not appear
+ * outside a marked region, in EITHER polarity. A sentence that legitimately needs
+ * to pair the master key with a set-verb — including one that forbids it — goes
+ * inside `<!-- docs-hygiene:allow-master-key-discussion -->`, which is what that
+ * marker is for, or is phrased so it does not pair them. Being made to choose is
+ * the review moment this guard exists to create, so a flagged denial is the
+ * design working rather than a defect in it.
  */
-const NEGATION_WORDS = new Set(['never', 'not', "n't", 'no', 'without', 'neither', 'nor']);
-/** Words that may sit inside a negation phrase without breaking it. */
-const CARRIER_WORDS = new Set([
-  'do', 'does', 'did', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-  'it', 'they', 'we', 'you', 'this', 'that', 'there', 'and', 'but', 'will', 'would',
-  'can', 'could', 'shall', 'should', 'may', 'might', 'must', 'has', 'have', 'had',
-]);
-
-/**
- * True when the words immediately preceding a claim negate it.
- *
- * Walks backwards from the claim, consuming only negation words and the
- * auxiliaries that can sit inside a negation phrase (`is not`, `does not
- * never`), and stops at the first ordinary content word. Two failures forced
- * this shape:
- *
- * - A single-token test read a DOUBLE negative as a denial: `do not not set …`
- *   and `does not never prompt …` are affirmative. So negations are COUNTED and
- *   an odd count negates.
- * - Accepting any run of letters and spaces let a negation govern a DIFFERENT
- *   verb: in `do not hesitate to set …` and `do not only set …` the `not`
- *   attaches to `hesitate` / `only`, not to `set`. Stopping at the first content
- *   word (`hesitate`, `only`, `to`) breaks that association.
- */
-function negatesClaim(before: string): boolean {
-  const words = before.toLowerCase().match(/[a-z']+|[^\sa-z']/g) ?? [];
-  let negations = 0;
-  for (let i = words.length - 1; i >= 0; i--) {
-    const w = words[i];
-    if (!/^[a-z']+$/.test(w)) break;          // punctuation ends the phrase
-    if (NEGATION_WORDS.has(w)) { negations++; continue; }
-    if (CARRIER_WORDS.has(w)) continue;
-    break;                                     // an ordinary content word
-  }
-  return negations % 2 === 1;
-}
-
-/**
- * Matches of `claim` that are not negated, where "negated" means an odd number
- * of negation words DIRECTLY abut the anchor — `never prompts` — rather than
- * merely appearing within N characters of it.
- *
- * Proximity was the original rule and it did not establish that the negation
- * governs the claim: `Do not hesitate: set AGENTS_SECRETS_PASSPHRASE …` cleared
- * it. Requiring adjacency means a disclaimer placed elsewhere in the sentence
- * changes nothing, and only letters and spaces may intervene, so punctuation
- * breaks the association.
- *
- * `anchorGroup` names the capture group carrying the claim's VERB. When the
- * grammar puts the verb last (`the passphrase is not requested`), the negation
- * sits before the verb, not before the match, and anchoring on the match start
- * would report a legitimate denial as an offender.
- */
-export function unnegatedMatches(
-  text: string,
-  claim: RegExp,
-  anchorGroup?: number,
-): Array<{ text: string; index: number }> {
-  const flags = new Set([...claim.flags, 'g', 'd']);
-  const re = new RegExp(claim.source, [...flags].join(''));
-  const out: Array<{ text: string; index: number }> = [];
-  for (const m of text.matchAll(re)) {
-    const at = m.index ?? 0;
-    const groupStart = anchorGroup === undefined
-      ? undefined
-      : (m as RegExpMatchArray & { indices?: Array<[number, number] | undefined> })
-        .indices?.[anchorGroup]?.[0];
-    const anchor = groupStart ?? at;
-    if (negatesClaim(text.slice(Math.max(0, anchor - 64), anchor))) continue;
-    out.push({ text: m[0].replace(/\s+/g, ' ').trim(), index: at });
-  }
-  return out;
+export function findMatches(text: string, claim: RegExp): Array<{ text: string; index: number }> {
+  const re = new RegExp(claim.source, claim.flags.includes('g') ? claim.flags : `${claim.flags}g`);
+  return [...text.matchAll(re)].map((m) => ({
+    text: m[0].replace(/\s+/g, ' ').trim(),
+    index: m.index ?? 0,
+  }));
 }
 
 // ------------------------------------------------------------------- checks
@@ -190,15 +138,14 @@ export function promptClaims(text: string): string[] {
   const next = guardedText.indexOf('\n## ', start + FILE_STORE_HEADING.length);
   const section = next === -1 ? guardedText.slice(start) : guardedText.slice(start, next);
 
-  // Two grammars, checked separately because the negation sits in a different
-  // place in each. Verb-first ("asks you for a passphrase") negates before the
-  // match; passphrase-first ("the passphrase is not requested") negates before
-  // the trailing verb, so that one anchors on its capture group.
+  // Two grammars, since the verb can precede or follow the noun. Both carry the
+  // same verb set — they drifted apart once, and `The passphrase is prompted at
+  // first use.` fell straight through the gap.
   const verbFirst = /\b(prompts?|asks?|asked|requests?|requested|prompted)\b[^.]{0,90}\bpassphrase\b/gi;
   const passphraseFirst = /\bpassphrase\b[^.]{0,60}\b(prompted|prompts?|requested|requests?|asked|asks?)\b/gi;
   return [
-    ...unnegatedMatches(section, verbFirst),
-    ...unnegatedMatches(section, passphraseFirst, 1),
+    ...findMatches(section, verbFirst),
+    ...findMatches(section, passphraseFirst),
   ].map((m) => m.text);
 }
 
@@ -206,7 +153,7 @@ export function promptClaims(text: string): string[] {
 export function headlessSyncInstructions(text: string): string[] {
   const guardedText = stripAllowedRegions(text);
   const instruction = new RegExp(String.raw`\b(set|export|define|configure)\s+\`?${MASTER_KEY}`, 'gi');
-  return unnegatedMatches(guardedText, instruction)
+  return findMatches(guardedText, instruction)
     // The index comes from the match itself, so filtering never misaligns a
     // survivor with an earlier match's context (the bug this replaced).
     .filter(({ index }) => {
@@ -281,7 +228,7 @@ describe('docs/secrets.md hygiene (RUSH-1968)', () => {
     // Scoped to the file-store section on purpose: `secrets push`/`pull` really
     // do prompt, for the TRANSPORT passphrase, a different secret.
     expect(promptClaims(doc())).toEqual([]);
-    expect(doc()).toMatch(/\*\*never prompts\*\*/i);
+    expect(doc()).toMatch(/no TTY step anywhere in this list/i);
   });
 
   it('points headless sync at the transport variable, not the master key', () => {
@@ -356,30 +303,9 @@ describe('docs-hygiene checks catch the bypasses review found', () => {
     expect(promptClaims(bad)).not.toEqual([]);
   });
 
-  it('rejects a prompt claim that appends an unrelated negation', () => {
-    // The per-sentence exclusion cleared this; per-match adjacency does not.
-    const bad = `${HEAD}The command asks you for a passphrase; no prompt is needed elsewhere.\n`;
-    expect(promptClaims(bad)).not.toEqual([]);
-  });
 
-  it('rejects a prompt claim preceded by a negation that does not govern it', () => {
-    // Proximity-based negation cleared this: "No" sits within 30 chars of "asks".
-    const bad = `${HEAD}No caveat: the command asks for a passphrase.\n`;
-    expect(promptClaims(bad)).not.toEqual([]);
-  });
 
-  it('accepts a genuine denial where the negation abuts the verb', () => {
-    const ok = `${HEAD}It never prompts for a passphrase, on any platform.\n`;
-    expect(promptClaims(ok)).toEqual([]);
-  });
 
-  it('accepts a passive denial, where the negation abuts the trailing verb', () => {
-    // "The passphrase is not requested" puts the verb last, so anchoring the
-    // negation on the match START would report a legitimate denial. The
-    // passphrase-first grammar anchors on its verb instead.
-    const ok = `${HEAD}The passphrase is not requested at any point.\n`;
-    expect(promptClaims(ok)).toEqual([]);
-  });
 
   it('rejects a passive prompt claim with no negation', () => {
     // The mirror of the above: the same grammar, affirmative, must still fail.
@@ -394,21 +320,33 @@ describe('docs-hygiene checks catch the bypasses review found', () => {
     expect(promptClaims(bad)).not.toEqual([]);
   });
 
-  it('rejects a prompt claim whose negation governs a different verb', () => {
-    const bad = `${HEAD}We do not hesitate to ask for a passphrase at startup.\n`;
-    expect(promptClaims(bad)).not.toEqual([]);
-  });
 
-  it('rejects a DOUBLE negative prompt claim', () => {
-    // "does not never prompt" is affirmative. A single-token negation test read
-    // it as a denial; counting tokens and requiring an odd count does not.
-    const bad = `${HEAD}The command does not never prompt for a passphrase.\n`;
-    expect(promptClaims(bad)).not.toEqual([]);
-  });
 
   it('rejects a headless-sync instruction', () => {
     const bad = `On a headless CI box, set ${MASTER_KEY} so push and pull work.\n`;
     expect(headlessSyncInstructions(bad)).not.toEqual([]);
+  });
+
+  it('flags a DENIAL that still pairs the master key with a set-verb', () => {
+    // `we do not recommend that you set X` is a genuine denial, and it is
+    // flagged. That is the deliberate tradeoff, not an oversight: no regex can
+    // separate it from `do not hesitate to set X` without the polarity of the
+    // intervening verb, and every attempt to guess produced a bypass. Being made
+    // to rephrase or mark it is the review moment the guard exists for.
+    const denial = `For unattended sync, we do not recommend that you set ${MASTER_KEY}; push and pull use the transport passphrase.\n`;
+    expect(headlessSyncInstructions(denial)).not.toEqual([]);
+  });
+
+  it('accepts that same denial rephrased to not pair them', () => {
+    // The way out, and the one the doc itself takes.
+    const ok = `For unattended sync, push and pull use ${SYNC_KEY}; the store's master key is not involved.\n`;
+    expect(headlessSyncInstructions(ok)).toEqual([]);
+  });
+
+  it('accepts that same denial inside a marked region', () => {
+    // The other way out: mark it, which is a deliberate, reviewable act.
+    const marked = `${ALLOW_OPEN} -->\nFor unattended sync, never set ${MASTER_KEY}; push and pull use the transport passphrase.\n${ALLOW_CLOSE}\n`;
+    expect(headlessSyncInstructions(marked)).toEqual([]);
   });
 
   it('rejects a headless-sync instruction that appends "this is opt-in"', () => {
@@ -416,36 +354,10 @@ describe('docs-hygiene checks catch the bypasses review found', () => {
     expect(headlessSyncInstructions(bad)).not.toEqual([]);
   });
 
-  it('rejects a headless-sync instruction preceded by a non-governing negation', () => {
-    // Proximity negation cleared this: "not" sits just before "set".
-    const bad = `For unattended sync, do not hesitate: set ${MASTER_KEY} and pull will work.\n`;
-    expect(headlessSyncInstructions(bad)).not.toEqual([]);
-  });
 
-  it('accepts a genuine prohibition where the negation abuts the instruction', () => {
-    const ok = `For unattended sync never set ${MASTER_KEY}; use the transport passphrase for push and pull.\n`;
-    expect(headlessSyncInstructions(ok)).toEqual([]);
-  });
 
-  it('rejects an instruction whose negation governs a DIFFERENT verb', () => {
-    // "not" attaches to "hesitate", not to "set". An abutting window of plain
-    // letters and spaces let the negation reach across and excuse the
-    // instruction; walking back word-by-word stops at "hesitate".
-    const bad = `For unattended sync, do not hesitate to set ${MASTER_KEY} so pull works.\n`;
-    expect(headlessSyncInstructions(bad)).not.toEqual([]);
-  });
 
-  it('rejects "do not only set" — the negation governs the adverb', () => {
-    const bad = `For unattended sync on a worker box, do not only set ${MASTER_KEY}; pull needs it.\n`;
-    expect(headlessSyncInstructions(bad)).not.toEqual([]);
-  });
 
-  it('rejects a DOUBLE negative headless-sync instruction', () => {
-    // "do not not set" is affirmative — an instruction wearing a denial's
-    // clothes, and a one-word bypass of a single-token negation test.
-    const bad = `For unattended sync, do not not set ${MASTER_KEY} so pull works.\n`;
-    expect(headlessSyncInstructions(bad)).not.toEqual([]);
-  });
 
   it('does not let a later match inherit an earlier match\'s context', () => {
     // The index-misalignment bug: a negated earlier instruction shifted every

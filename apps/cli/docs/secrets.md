@@ -763,11 +763,11 @@ When that happens (or when `secret-tool` isn't installed), `agents secrets`
 transparently falls back to an **AES-256-GCM encrypted-file store** under
 `~/.agents/.cache/secrets/` (one `<item>.enc` file per secret, mode 0600).
 
-The encryption key (passphrase) is resolved from these sources, in order. It
-**never prompts**, and it never fails for want of a passphrase — the store works
-out of the box on every platform without anyone setting, typing, or remembering
-one (`getPassphrase`, `src/lib/secrets/filestore.ts`). Within a single process the
-resolved key is cached, so this lookup runs once:
+The encryption key (passphrase) is resolved from these sources, in order. There
+is **no TTY step anywhere in this list**, and no resolution failure for want of a
+key — the store works out of the box on every platform without anyone setting,
+typing, or remembering one (`getPassphrase`, `src/lib/secrets/filestore.ts`).
+Within a single process the resolved key is cached, so this lookup runs once:
 
 1. **`AGENTS_SECRETS_PASSPHRASE`** — if set, always wins. An **opt-in** for
    holding the key off disk, not a requirement. See the warning below before
