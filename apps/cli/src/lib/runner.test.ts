@@ -134,6 +134,25 @@ describe('runner hard-deprecation enforcement (RUSH-2202)', () => {
     expect(meta.pid).toBeNull();
     expect(meta.errorMessage).toBe(hardDeprecationError('gemini'));
   });
+
+  it('gates hostStrategy: cloud too — gemini has no cloudProvider entry and would otherwise silently fall back to the default provider', async () => {
+    // Regression for a gap a non-author review found: the gate used to sit
+    // AFTER placement resolution, so a cloud-placed gemini routine reached
+    // resolveProvider(undefined, 'gemini') — which finds no native
+    // cloudProvider for gemini and falls back to the configured default
+    // ('rush'), dispatching for real instead of refusing. The gate now runs
+    // before placement is resolved at all, so this never reaches
+    // executeJobOnCloud/resolveProvider.
+    const config = baseConfig({ name: 'gemini-legacy', agent: 'gemini', hostStrategy: 'cloud' });
+    const { meta, reportPath } = await executeJob(config);
+
+    expect(meta.status).toBe('failed');
+    expect(meta.errorMessage).toBe(hardDeprecationError('gemini'));
+    expect(reportPath).toBeNull();
+    // No cloud dispatch happened — no cloudTaskId/cloudProvider was ever set.
+    expect(meta.cloudTaskId).toBeUndefined();
+    expect(meta.cloudProvider).toBeUndefined();
+  });
 });
 
 describe('runner host placement', () => {

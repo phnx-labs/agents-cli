@@ -923,6 +923,16 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   if (eligibility) {
     throw new Error(eligibility.message);
   }
+
+  // Hard-deprecated harness (e.g. gemini): fail loud before placement, version/
+  // account resolution, or sandbox prep — local, host, AND cloud placement all
+  // share this one gate (a hard-deprecated agent has no `cloudProvider` entry,
+  // so cloud placement would otherwise silently fall back to the default
+  // provider instead of refusing). See hardDeprecationRunFailure.
+  if (!config.workflow && config.agent && isAgentHardDeprecated(config.agent)) {
+    return { meta: hardDeprecationRunFailure(config, config.agent), reportPath: null };
+  }
+
   // Placement (hostStrategy / bare host:) — body may run on another machine
   // over SSH or in the cloud; local version selection / sandbox / spawn then
   // do not apply. Sync callers (manual `routines run`, catchup) follow the
@@ -943,12 +953,6 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   // list/runs/overdue keep working.
   if (config.command) {
     return executeCommandJobForeground(config);
-  }
-
-  // Hard-deprecated harness (e.g. gemini): fail loud before wasting a version/
-  // account resolution on a backend that can never run. See hardDeprecationRunFailure.
-  if (!config.workflow && config.agent && isAgentHardDeprecated(config.agent)) {
-    return { meta: hardDeprecationRunFailure(config, config.agent), reportPath: null };
   }
 
   const launch = await resolveRoutineLaunch(config);
@@ -1498,6 +1502,15 @@ export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks
 }
 
 async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks): Promise<RunMeta> {
+  // Hard-deprecated harness (e.g. gemini): fail loud before placement, version/
+  // account resolution, or sandbox prep — local, host, AND cloud placement all
+  // share this one gate (a hard-deprecated agent has no `cloudProvider` entry,
+  // so cloud placement would otherwise silently fall back to the default
+  // provider instead of refusing). See hardDeprecationRunFailure.
+  if (!config.workflow && config.agent && isAgentHardDeprecated(config.agent)) {
+    return hardDeprecationRunFailure(config, config.agent);
+  }
+
   // Placement (hostStrategy / bare host:) — dispatch off-box and return; the
   // monitor finalizes host: runs, cloud runs stay terminal when dispatch ends.
   // Either way the in-process onFinish hook does not fire for off-box routines
@@ -1521,12 +1534,6 @@ async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks
   // list/runs, and overdue tracking keep working.
   if (config.command) {
     return executeCommandJobDetached(config, hooks);
-  }
-
-  // Hard-deprecated harness (e.g. gemini): fail loud before wasting a version/
-  // account resolution on a backend that can never run. See hardDeprecationRunFailure.
-  if (!config.workflow && config.agent && isAgentHardDeprecated(config.agent)) {
-    return hardDeprecationRunFailure(config, config.agent);
   }
 
   // Pre-flight: pick a healthy version/account so the daemon does not launch
