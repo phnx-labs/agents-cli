@@ -237,6 +237,19 @@ function fullName(type: AgentType, version: string | null | undefined): string {
 }
 
 /**
+ * One-line operator nudge after `teams start`: teammates are briefed to post
+ * IMPORTANT milestones to the feed (RUSH-2250), and this is how to watch them.
+ * Print-only — no engine behavior.
+ */
+export function printFeedHint(team: string): void {
+  console.log(
+    chalk.gray('Tip: teammates post IMPORTANT milestones to the feed — watch with ') +
+    chalk.cyan(`agents teams status ${team}`) +
+    chalk.gray('.'),
+  );
+}
+
+/**
  * Resolve a teammate spec to its execution target.
  *
  * Accepts:
@@ -489,6 +502,7 @@ async function runOneWave(mgr: AgentManager, team: string, json: boolean): Promi
       console.log(`  ${chalk.blue(h)}  ${chalk.gray('after')} ${a.after.join(', ')}`);
     }
   }
+  if (launched.length > 0) printFeedHint(team);
 }
 
 /**
@@ -2071,6 +2085,8 @@ export function registerTeamsCommands(program: Command): void {
         await runOneWave(mgr, team, Boolean(opts.json));
         return;
       }
+
+      if (!isJsonMode(opts)) printFeedHint(team);
 
       const intervalMs = Math.max(1000, Number.parseInt(opts.interval, 10) * 1000 || 8000);
       const maxWaves = Math.max(1, Number.parseInt(opts.maxWaves, 10) || 1000);

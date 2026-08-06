@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { buildTeamRowsFromSnapshots, type TeamListAgentSnapshot } from './teams.js';
+import { buildTeamRowsFromSnapshots, printFeedHint, type TeamListAgentSnapshot } from './teams.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const INDEX = path.join(REPO_ROOT, 'src', 'index.ts');
@@ -179,5 +179,24 @@ describe('teams list output modes', () => {
     expect(friction.surface).toBe('teams');
     expect(friction.failureId).toBe('remote-cwd-on-add');
     expect(friction.error).toContain('--remote-cwd');
+  });
+});
+
+describe('printFeedHint', () => {
+  it('nudges the operator to watch feed milestones with the team-scoped status command', () => {
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (msg?: unknown) => { lines.push(String(msg ?? '')); };
+    try {
+      printFeedHint('pricing-page');
+    } finally {
+      console.log = orig;
+    }
+    const out = lines.join('\n');
+    // Pins the watch command the hint teaches — if the surface renames, this fails.
+    expect(out).toContain('agents teams status pricing-page');
+    // Pins the anti-spam framing (RUSH-2250): milestones, not every step.
+    expect(out).toContain('IMPORTANT milestones');
+    expect(out).toContain('feed');
   });
 });
