@@ -671,6 +671,9 @@ agents sessions --routine nightly-review --all
 agents sessions --routines --all      # alias; pick a routine interactively on a TTY
 agents sessions 2026-07-21T10-30-00-000Z
 
+# The picker shows last-run/run-count/session-count context. After selection,
+# sessions are grouped by routine run id and timestamp.
+
 # Sort the list by cost or duration (default: recent)
 agents sessions --sort cost --limit 10
 agents sessions --sort duration --all
