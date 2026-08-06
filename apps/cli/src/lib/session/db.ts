@@ -1807,6 +1807,7 @@ export function upsertSessionsBatch(
     scan?: ScanStamp;
     parserState?: string;
     contentText?: string;
+    events?: SessionEvent[];
     toolCalls?: IndexedToolCall[];
     toolScan?: ScanStamp;
     toolIndexMode?: 'replace' | 'append';
@@ -1859,9 +1860,10 @@ export function upsertSessionsBatch(
             const stat = fs.statSync(toolSourcePath);
             return { fileMtimeMs: stat.mtimeMs, fileSize: stat.size };
           })();
-      // Non-resumable harnesses already parse here for todos/recent dirs. Derive
-      // the tool index from those same in-memory events: no second file read.
-      const events = parseSession(entry.meta.filePath, entry.meta.agent);
+      // Some non-resumable scanners already normalized the transcript while
+      // deriving metadata. Reuse those events; scanners that only read summary
+      // metadata fall back to exactly one normalized parse here.
+      const events = entry.events ?? parseSession(entry.meta.filePath, entry.meta.agent);
       writeResourceUsage(entry.meta.id, events, entry.meta.cwd);
       return {
         ...entry,
@@ -1872,6 +1874,8 @@ export function upsertSessionsBatch(
         },
         toolCalls: toolCallsFromEvents(events),
         toolScan,
+        // These are complete event arrays, not an appended tail. Append would
+        // duplicate existing evidence even when persistToolCalls supports it.
         toolIndexMode: 'replace' as const,
       };
     } catch {

@@ -308,6 +308,8 @@ interface ScanEntry {
   meta: SessionMeta;
   content: string;
   scan: ScanStamp;
+  /** Normalized events already produced while scanning; avoids reopening the transcript in the DB sink. */
+  events?: SessionEvent[];
   /**
    * Serialized {@link ClaudeParserState} continuation to persist in
    * scan_ledger.parser_state (Claude only). Carries the offset + accumulator so
@@ -1105,6 +1107,7 @@ async function readRoutineArchiveMeta(
 ): Promise<{
   meta: SessionMeta;
   content: string;
+  events?: SessionEvent[];
   toolCalls?: IndexedToolCall[];
   toolIndexMode?: 'replace' | 'append';
 } | null> {
@@ -1169,6 +1172,7 @@ async function scanRoutineArchivesIncremental(
         meta: result.meta,
         content: result.content,
         scan,
+        events: result.events,
         toolCalls: result.toolCalls,
         toolIndexMode: result.toolIndexMode,
       });
@@ -2117,7 +2121,7 @@ async function scanAntigravityIncremental(onProgress?: (p: ScanProgress) => void
       const result = readAntigravityMeta(filePath, currentVersion);
       if (result && !seen.has(result.meta.id)) {
         seen.add(result.meta.id);
-        entries.push({ meta: result.meta, content: result.content, scan });
+        entries.push({ meta: result.meta, content: result.content, scan, events: result.events });
       } else {
         touched.push({ filePath, scan });
       }
@@ -2136,7 +2140,7 @@ async function scanAntigravityIncremental(onProgress?: (p: ScanProgress) => void
 function readAntigravityMeta(
   filePath: string,
   currentVersion?: string,
-): { meta: SessionMeta; content: string } | null {
+): { meta: SessionMeta; content: string; events: SessionEvent[] } | null {
   const sessionId = path.basename(filePath).replace(/\.db$/, '');
   if (!sessionId) return null;
 
@@ -2167,7 +2171,7 @@ function readAntigravityMeta(
     topic: topic ? topic.slice(0, 120) : undefined,
     messageCount: events.length,
   };
-  return { meta, content: contentParts.join('\n') };
+  return { meta, content: contentParts.join('\n'), events };
 }
 
 // ---------------------------------------------------------------------------
@@ -4729,7 +4733,7 @@ async function scanCursorIncremental(onProgress?: (p: ScanProgress) => void): Pr
       const result = readCursorMeta(filePath, currentVersion);
       if (result && !seen.has(result.meta.id)) {
         seen.add(result.meta.id);
-        entries.push({ meta: result.meta, content: result.content, scan });
+        entries.push({ meta: result.meta, content: result.content, scan, events: result.events });
       } else {
         touched.push({ filePath, scan });
       }
@@ -4788,7 +4792,7 @@ function readCursorChatMeta(filePath: string, sessionId: string): any | undefine
 export function readCursorMeta(
   filePath: string,
   currentVersion?: string,
-): { meta: SessionMeta; content: string } | null {
+): { meta: SessionMeta; content: string; events: SessionEvent[] } | null {
   const sessionId = path.basename(filePath).replace(/\.jsonl$/, '');
   if (!sessionId || path.basename(path.dirname(filePath)) !== sessionId) return null;
 
@@ -4830,7 +4834,7 @@ export function readCursorMeta(
     todos: extractTodoProgressFromEvents(events),
   };
 
-  return { meta, content: userTexts.join('\n') };
+  return { meta, content: userTexts.join('\n'), events };
 }
 
 // ---------------------------------------------------------------------------
