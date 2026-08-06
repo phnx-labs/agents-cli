@@ -124,3 +124,10 @@ agents run <agent> [prompt] --cloud [--provider <id>] [--repo <owner/repo>]...
 - **Native claude provider** (`claude --cloud` → claude.ai/code) as an
   additional provider, if direct Anthropic-infra dispatch without Rush is
   wanted. Would give `agents run claude --cloud --provider claude`.
+
+## Tracking
+
+- **RUSH-2224** — Implement `agents run --cloud` placement flag (registry-routed):
+  <https://linear.app/getrush/issue/RUSH-2224/implement-agents-run-cloud-placement-flag-registry-routed>
+  Carries this spec's acceptance criteria. The follow-ups above are out of its
+  scope; the cursor provider's adjacent parent is RUSH-2079.
