@@ -80,6 +80,11 @@ export interface RunUmbrellaArgs {
   yes: boolean;
   /** Secrets passphrase, if available (env var or prompt). Undefined => skip secrets. */
   passphrase?: string;
+  /**
+   * Suppress human progress from the reconcile stage (`refresh`). Required so
+   * `agents sync --json` / fleet fan-out leave stdout as a single JSON object.
+   */
+  quiet?: boolean;
 }
 
 /**
@@ -88,7 +93,7 @@ export interface RunUmbrellaArgs {
  * reconcile — `agents sync` should make as much current as it can in one pass.
  */
 export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaResult> {
-  const { flags, log, yes, passphrase } = args;
+  const { flags, log, yes, passphrase, quiet = false } = args;
   const plan = planUmbrellaStages(flags);
   const result: UmbrellaResult = { plan, reconciled: false };
 
@@ -143,7 +148,7 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
 
   if (plan.reconcile) {
     const { refresh } = await import('./refresh.js');
-    await refresh({ skipPrompts: yes });
+    await refresh({ skipPrompts: yes, quiet });
     result.reconciled = true;
 
     // Keep already-registered devices' reachability current, and surface newly

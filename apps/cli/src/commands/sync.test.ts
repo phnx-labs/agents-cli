@@ -93,8 +93,13 @@ describe('agents sync --json (RUSH-2216 fleet fan-out)', () => {
     // stdout — which is what every remote showed under `agents sync --host all`.
     expect(stderr).not.toMatch(/unknown option ['"]--json['"]/);
     expect(stdout.trim().length).toBeGreaterThan(0);
+    // Must not leak human reconcile chatter — fleet parses the entire stdout
+    // (safeJsonParse), not the last line.
+    expect(stdout).not.toMatch(/Synced:/);
+    expect(stdout).not.toMatch(/Registered \d+ hook/);
+    expect(stdout).not.toMatch(/Declared CLIs missing/);
 
-    const parsed = JSON.parse(stdout.trim().split('\n').pop()!);
+    const parsed = JSON.parse(stdout.trim());
     expect(parsed.ok).toBe(true);
     expect(parsed.mode).toBe('umbrella');
     expect(parsed.plan).toEqual({
@@ -113,7 +118,9 @@ describe('agents sync --json (RUSH-2216 fleet fan-out)', () => {
     const home = guardedHome();
     const { stdout, stderr } = run(['sync', '--json'], home);
     expect(stderr).not.toMatch(/unknown option ['"]--json['"]/);
-    const parsed = JSON.parse(stdout.trim().split('\n').pop()!);
+    expect(stdout).not.toMatch(/Synced:/);
+    expect(stdout).not.toMatch(/Registered \d+ hook/);
+    const parsed = JSON.parse(stdout.trim());
     expect(parsed.mode).toBe('umbrella');
     expect(typeof parsed.ok).toBe('boolean');
   });

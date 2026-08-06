@@ -332,6 +332,8 @@ async function runUmbrella(
       flags,
       yes,
       passphrase,
+      // quiet under --json so refresh() cannot pollute the JSON stdout the fleet parses.
+      quiet: quiet || json,
       log: (msg) => { if (!quiet && !json) outLog(chalk.gray(`  ${msg}`)); },
     });
 
