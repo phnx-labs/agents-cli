@@ -45,8 +45,8 @@ struct Session {
     let lastActivityMs: Double?
     let preview: String?
     let owner: String?
-    let origin: String? = nil
-    let routineName: String? = nil
+    let origin: String?
+    let routineName: String?
 
     /// Prefer topic/label/preview for "what" — never leave a bare agent name alone
     /// when the engine already carried a better signal.
@@ -566,7 +566,7 @@ enum LocalState {
                                    machine: nil, surface: nil, sessionId: sid.isEmpty ? nil : sid,
                                    ticketId: nil, prLink: nil,
                                    startedAtMs: nil, lastActivityMs: nil,
-                                   preview: nil, owner: nil))
+                                   preview: nil, owner: nil, origin: nil, routineName: nil))
             }
         }
         return out
@@ -593,7 +593,7 @@ enum LocalState {
                                machine: nil, surface: nil, sessionId: id,
                                ticketId: nil, prLink: nil,
                                startedAtMs: nil, lastActivityMs: nil,
-                               preview: nil, owner: nil))
+                               preview: nil, owner: nil, origin: nil, routineName: nil))
         }
         return out
     }
@@ -629,7 +629,7 @@ enum LocalState {
                                machine: nil, surface: "cloud", sessionId: nil,
                                ticketId: nil, prLink: nil,
                                startedAtMs: nil, lastActivityMs: nil,
-                               preview: nil, owner: nil))
+                               preview: nil, owner: nil, origin: nil, routineName: nil))
         }
         return out
     }
