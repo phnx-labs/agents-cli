@@ -2,8 +2,6 @@
 
 ## 1.22.24
 
-- **File-backed secret resolution now fails on decryption errors instead of treating unreadable ciphertext as an absent value (RUSH-2264).** A wrong `AGENTS_SECRETS_PASSPHRASE` or tampered encrypted value now reports the affected file-store item and stops before launching a consumer with an empty secret such as `HCLOUD_TOKEN`. Source: `apps/cli/src/lib/secrets/bundles.ts`.
-
 - **`agents sessions focus` recovers dead panes and shares the sessions browser's selectors (GH-2108).** A retained tmux `remain-on-exit` pane is probed through `#{pane_dead}` immediately before attach, so dead or missing panes no longer open a `Pane is dead` screen. `focus` accepts session ids, topic/path searches, `agent@version` selectors (including per-device `latest`/`oldest`), device, project/time, team/routine, skill/plugin, favorites, and the complete live-state union. Focus, resume, attach, and `run --resume` now use one recovery decision on the origin device: a healthy exact origin performs native resume; otherwise balanced selection chooses a healthy version of the same harness and sends `/continue <id>` to read the indexed transcript, including transcripts retained under version trash. Host-dispatched rows persist the dispatch host as their origin, and `attach` routes its detach-record cleanup there before resuming. No usable same-harness version fails with the device, origin version, and account-health reason. Source: `apps/cli/src/commands/focus.ts`, `apps/cli/src/commands/sessions-browser.ts`, `apps/cli/src/lib/session/recovery.ts`.
 
 - **`agents secrets setup` no longer tells you to set `AGENTS_SECRETS_PASSPHRASE`, and
