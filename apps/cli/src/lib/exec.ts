@@ -1403,7 +1403,11 @@ export function buildTmuxAgentCommand(
   // rather than silently launching with a half-built env.
   if (opts.envFile) {
     const f = shellQuote(opts.envFile);
-    return `set -a; . ${f} || exit 1; rm -f ${f}; set +a; exec ${agentCmd}`;
+    // Remove the file whether or not sourcing succeeds — a bare `. f || exit 1`
+    // strands the plaintext env (incl. the secrets-store master passphrase) on
+    // disk on any source failure, worse than the argv leak this replaces
+    // (RUSH-2100). Capture the source rc, unlink, then honor it.
+    return `set -a; . ${f}; __agents_rc=$?; set +a; rm -f ${f}; [ "$__agents_rc" -eq 0 ] || exit 1; exec ${agentCmd}`;
   }
   const envPrefix = Object.entries(env)
     .filter(([k, v]) => v !== undefined && EXEC_ENV_KEY_PATTERN.test(k))
@@ -1510,7 +1514,17 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
   const labels: Record<string, string> = { agent: options.agent };
   if (options.sessionId) labels.sessionId = options.sessionId;
 
-  const meta = await createSession({ name, cmd, metaCmd, cwd, socket, source: 'cli', labels });
+  // Only a launched pane sources-and-unlinks the env file. If createSession
+  // throws, the pane never runs, so the resolved secrets (incl. the master
+  // passphrase) would linger on disk — remove it on that failure path
+  // (RUSH-2100). On success the detached pane owns the unlink.
+  let meta;
+  try {
+    meta = await createSession({ name, cmd, metaCmd, cwd, socket, source: 'cli', labels });
+  } catch (err) {
+    try { fs.rmSync(envFile, { force: true }); } catch { /* best-effort */ }
+    throw err;
+  }
   const pane = meta.pane;
 
   if (options.sessionId) writeSessionAliasRecord(options.sessionId, name);

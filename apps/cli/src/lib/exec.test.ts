@@ -700,6 +700,26 @@ describe('tmux env file (no secret VALUE in the process table, RUSH-2100)', () =
     expect(cmd).toContain('|| exit 1');
   });
 
+  it('unlinks the env file even when sourcing fails, so secrets never strand on disk', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tmux-envfile-fail-'));
+    const file = path.join(dir, 'pane.env');
+    // A file that exists and sources with a non-zero result (the trailing
+    // `false`), the RUSH-2100 strand case: the old `. f || exit 1; rm -f f`
+    // took the `exit` before the `rm`, leaving the plaintext secrets on disk.
+    fs.writeFileSync(file, 'FOO=bar\nfalse\n', { mode: 0o600 });
+    const cmd = buildTmuxAgentCommand('true', [], {}, { envFile: file });
+    let exitCode = 0;
+    try {
+      execFileSync('sh', ['-c', cmd], { stdio: 'ignore' });
+    } catch (err) {
+      exitCode = (err as { status?: number }).status ?? 1;
+    }
+    // Aborted (didn't launch half-configured) AND the secrets file is gone.
+    expect(exitCode).not.toBe(0);
+    expect(fs.existsSync(file)).toBe(false);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   it('writes a 0600 file a shell can source back to the exact values', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tmux-envfile-'));
     const file = path.join(dir, 'pane.env');
