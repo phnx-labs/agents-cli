@@ -130,11 +130,21 @@ npm install -g "$TARBALL" \
 # `agents` -- to use it instead of the registry one, put $LINK_DIR ahead of
 # the registry bin dir on PATH.
 mkdir -p "$LINK_DIR"
-for bin in agents ag browser; do
-  src="$PREFIX/bin/$bin"
-  [[ -e "$src" ]] || continue
-  ln -sf "$src" "$LINK_DIR/$bin"
-done
+if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
+  for bin in agents ag browser; do
+    for ext in '' .cmd .ps1; do
+      src="$PREFIX/$bin$ext"
+      [[ -e "$src" ]] || continue
+      cp -f "$src" "$LINK_DIR/$bin$ext"
+    done
+  done
+else
+  for bin in agents ag browser; do
+    src="$PREFIX/bin/$bin"
+    [[ -e "$src" ]] || continue
+    ln -sf "$src" "$LINK_DIR/$bin"
+  done
+fi
 
 # Prefer the standalone Mach-O when the staged dist carries one (macOS): the
 # node-shebang shim is what EDR flags (#315). Runnable-probe first - an
@@ -148,7 +158,7 @@ fi
 
 # Confirm the dev binary is runnable.
 LINKED_PATH="$LINK_DIR/agents"
-[[ -L "$LINKED_PATH" ]] || die "agents not installed at $LINKED_PATH"
+[[ -e "$LINKED_PATH" ]] || die "agents not installed at $LINKED_PATH"
 LINKED_VER=$("$LINKED_PATH" --version 2>/dev/null | head -1 || echo "?")
 
 # Install the signed macOS Keychain helper to its stable user path. The dev
