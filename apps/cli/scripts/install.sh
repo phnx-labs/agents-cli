@@ -132,11 +132,11 @@ npm install -g "$TARBALL" \
 mkdir -p "$LINK_DIR"
 if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == MSYS* ]]; then
   for bin in agents ag browser; do
-    for ext in '' .cmd .ps1; do
-      src="$PREFIX/$bin$ext"
-      [[ -e "$src" ]] || continue
-      cp -f "$src" "$LINK_DIR/$bin$ext"
-    done
+    [[ -e "$PREFIX/$bin.cmd" ]] || continue
+    printf '@"%%USERPROFILE%%\\.local\\agents-cli-dev\\%s.cmd" %%*\r\n' "$bin" > "$LINK_DIR/$bin.cmd"
+    printf '& "$HOME\\.local\\agents-cli-dev\\%s.ps1" @args\r\n' "$bin" > "$LINK_DIR/$bin.ps1"
+    printf '#!/usr/bin/env bash\nexec "$HOME/.local/agents-cli-dev/%s" "$@"\n' "$bin" > "$LINK_DIR/$bin"
+    chmod +x "$LINK_DIR/$bin"
   done
 else
   for bin in agents ag browser; do
