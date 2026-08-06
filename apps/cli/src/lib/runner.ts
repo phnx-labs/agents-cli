@@ -71,7 +71,7 @@ import {
 } from './rotate.js';
 import { readAuthHealth, isDeadVerdict } from './auth-health.js';
 import { machineId } from './machine-id.js';
-import { isSelfUpdatingAgent, ROUTINE_AGENT_COMMANDS as AGENT_COMMANDS, ROUTINE_AGENT_IDS } from './agents.js';
+import { isSelfUpdatingAgent, ROUTINE_AGENT_COMMANDS as AGENT_COMMANDS, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from './agents.js';
 import { expandLocalHome, getProjectRoot } from './project-root.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
@@ -883,6 +883,41 @@ function injectRoutineActor(env: Record<string, string>, config: JobConfig): Rec
   return env;
 }
 
+/**
+ * `routines add`/`routines edit` refuse to create a routine pinned to a
+ * hard-deprecated harness (commands/routines.ts), but that check runs only at
+ * CLI-write time. A routine YAML written before the harness was deprecated, or
+ * edited directly on disk / synced from another device, has no equivalent gate
+ * at fire time — the daemon would happily build and spawn `gemini …` against a
+ * backend Google retired. Fail loud here, before any version/account
+ * resolution or sandbox prep, so a legacy routine skips with the same message
+ * every other entry point (`sync`, `exec`, `import`, `run-cloud`, `versions`)
+ * already shows instead of a doomed, confusing spawn failure.
+ */
+function hardDeprecationRunFailure(config: JobConfig, agent: AgentId): RunMeta {
+  const runId = generateRunId();
+  const runDir = getRunDir(config.name, runId);
+  fs.mkdirSync(runDir, { recursive: true });
+  const reason = hardDeprecationError(agent);
+  const meta: RunMeta = {
+    jobName: config.name,
+    runId,
+    ...runProvenance(config),
+    agent,
+    pid: null,
+    spawnedAt: Date.now(),
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    exitCode: null,
+  };
+  writeRunMeta(meta);
+  process.stderr.write(`[agents] routine ${config.name}: ${reason}\n`);
+  finalizeRunMeta(meta, 'failed', 1, { errorMessage: reason });
+  writeRunMeta(meta);
+  return meta;
+}
+
 export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<RunResult> {
   const eligibility = checkJobDeviceEligibility(config);
   if (eligibility) {
@@ -908,6 +943,12 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   // list/runs/overdue keep working.
   if (config.command) {
     return executeCommandJobForeground(config);
+  }
+
+  // Hard-deprecated harness (e.g. gemini): fail loud before wasting a version/
+  // account resolution on a backend that can never run. See hardDeprecationRunFailure.
+  if (!config.workflow && config.agent && isAgentHardDeprecated(config.agent)) {
+    return { meta: hardDeprecationRunFailure(config, config.agent), reportPath: null };
   }
 
   const launch = await resolveRoutineLaunch(config);
@@ -1480,6 +1521,12 @@ async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks
   // list/runs, and overdue tracking keep working.
   if (config.command) {
     return executeCommandJobDetached(config, hooks);
+  }
+
+  // Hard-deprecated harness (e.g. gemini): fail loud before wasting a version/
+  // account resolution on a backend that can never run. See hardDeprecationRunFailure.
+  if (!config.workflow && config.agent && isAgentHardDeprecated(config.agent)) {
+    return hardDeprecationRunFailure(config, config.agent);
   }
 
   // Pre-flight: pick a healthy version/account so the daemon does not launch
