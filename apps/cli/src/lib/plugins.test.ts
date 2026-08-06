@@ -380,7 +380,8 @@ describePlugins('discoverPlugins', () => {
 
     const out = captured.join('');
     expect(out).toContain("'nomanifest'");
-    expect(out).toContain('.claude-plugin/plugin.json');
+    // Message embeds path.join of the manifest relative path — backslash on win32.
+    expect(out).toMatch(/\.claude-plugin[/\\]plugin\.json/);
     expect(out).not.toContain("'goodplug'");
   });
 });

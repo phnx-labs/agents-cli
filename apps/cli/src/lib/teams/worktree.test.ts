@@ -17,6 +17,8 @@ function git(cwd: string, args: string[]): string {
   }).trim();
 }
 
+// Windows CI: bare+seed+two clones regularly exceeds vitest's 10s default
+// hookTimeout (RUSH-2215 full suite). Keep the real git fixture; just give it room.
 describe('createWorktree base freshness', () => {
   let tmp: string;
   let bare: string;
@@ -46,7 +48,7 @@ describe('createWorktree base freshness', () => {
     } catch {
       // some git versions need the bare HEAD already set (done above)
     }
-  });
+  }, 60_000);
 
   afterEach(() => {
     fs.rmSync(tmp, { recursive: true, force: true });
