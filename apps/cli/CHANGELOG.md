@@ -2,6 +2,14 @@
 
 ## 1.22.22
 
+- **Codex launches now default to safe writable access instead of an offline
+  read-only sandbox.** Omitting `--mode` selects a managed workspace profile
+  with network access, on-request approvals, `~/.agents`, and regenerable build
+  caches. Explicit `--mode plan` remains filesystem-read-only but now retains
+  network access. The same policy covers `agents run`, fallback attempts,
+  resumes, routines, direct `codex` shims, versioned aliases, and Windows shim
+  passthrough; only explicit `skip` disables the sandbox and approvals.
+
 - **New: `agents insights` — how you work, split by the Claude account that did the
   work.** Tool and language mix, friction (interruptions, tool-error classes, your own
   reply latency), what you changed (line deltas, files, commits), an hour-of-day

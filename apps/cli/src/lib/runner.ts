@@ -35,6 +35,7 @@ import type { AgentId } from './types.js';
 import { prepareJobHome, buildSpawnEnv, getJobHomePath } from './sandbox.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { createTimer, redactPrompt } from './events.js';
+import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
 import {
   normalizeMode,
   resolveHeadlessMode,
@@ -138,7 +139,7 @@ function terminateRoutineTree(pid: number | null): void {
 /** CLI command templates per agent, with {prompt} as a placeholder. */
 const AGENT_COMMANDS: Record<string, string[]> = {
   claude: ['claude', '-p', '--verbose', '{prompt}', '--output-format', 'stream-json', '--permission-mode', 'plan'],
-  codex: ['codex', 'exec', '--sandbox', 'workspace-write', '{prompt}', '--json'],
+  codex: ['codex', 'exec', '{prompt}', '--json'],
   gemini: ['gemini', '{prompt}', '--output-format', 'stream-json'],
   cursor: ['cursor-agent', '-p', '{prompt}', '--output-format', 'stream-json'],
   kimi: ['kimi', '--prompt', '{prompt}', '--output-format', 'stream-json'],
@@ -261,20 +262,14 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
   }
 
   if (config.agent === 'codex') {
-    if (mode === 'plan') {
-      // The template defaults to workspace-write; plan means read-only.
-      const sbIndex = cmd.indexOf('--sandbox');
-      if (sbIndex !== -1) cmd[sbIndex + 1] = 'read-only';
-    } else if (mode === 'edit' || mode === 'auto') {
-      // Keep the workspace-write sandbox — no approval bypass; only skip drops
-      // the guardrails. Re-enable network, which workspace-write turns off.
-      cmd.push('-c', 'sandbox_workspace_write.network_access=true');
-    } else if (mode === 'skip') {
-      // Remove sandbox restriction, just --dangerously-bypass-approvals-and-sandbox
-      const sbIndex = cmd.indexOf('--sandbox');
-      if (sbIndex !== -1) cmd.splice(sbIndex, 2);
-      cmd.push('--dangerously-bypass-approvals-and-sandbox');
-    }
+    const policyMode = mode === 'plan' || mode === 'skip' ? mode : 'edit';
+    const routineRoots = (config.allow?.dirs ?? []).map((dir) => {
+      if (dir.startsWith('-')) {
+        throw new Error(`allow.dirs entries must not start with '-': ${JSON.stringify(dir)}`);
+      }
+      return dir.replace(/^~/, os.homedir());
+    });
+    cmd.push(...codexPolicyArgs(policyMode, [...codexEditWritableRoots(), ...routineRoots]));
 
     appendModelAndReasoning(cmd, config);
   }

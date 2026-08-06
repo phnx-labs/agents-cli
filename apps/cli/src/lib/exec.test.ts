@@ -312,8 +312,9 @@ describe('buildExecCommand — native resume wiring', () => {
     expect(cmd.slice(0, 3)).toEqual(['codex', 'exec', 'resume']);
     // Only skip may bypass approvals/sandbox — edit resumes stay sandboxed.
     expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
-    expect(cmd).toContain('sandbox_mode=workspace-write');
-    expect(cmd).toContain('sandbox_workspace_write.network_access=true');
+    expect(cmd).toContain('default_permissions="agents-edit"');
+    expect(cmd.join(' ')).toContain('extends = ":workspace"');
+    expect(cmd.join(' ')).toContain('network = { enabled = true, allow_local_binding = true }');
     expect(idx(cmd, 'xyz-9')).toBeGreaterThan(idx(cmd, 'resume'));
     expect(idx(cmd, 'go')).toBeGreaterThan(idx(cmd, 'xyz-9'));
     // codex's `exec resume` does NOT accept --sandbox; it must not leak through.
@@ -329,15 +330,20 @@ describe('buildExecCommand — native resume wiring', () => {
     expect(cmd).not.toContain('--sandbox');
   });
 
-  it('codex interactive resume drops `exec` and carries the TUI sandbox flags', () => {
+  it('codex interactive resume drops `exec` and carries the read-only network profile', () => {
     const cmd = buildExecCommand(execOpts({ agent: 'codex', mode: 'plan', resume: true, sessionId: 'xyz-9', interactive: true }));
-    expect(cmd).toEqual(['codex', 'resume', '--sandbox', 'read-only', 'xyz-9']);
+    expect(cmd.slice(0, 2)).toEqual(['codex', 'resume']);
+    expect(cmd).toContain('default_permissions="agents-plan"');
+    expect(cmd.join(' ')).toContain('extends = ":read-only"');
+    expect(cmd.join(' ')).toContain('network = { enabled = true, allow_local_binding = true }');
+    expect(cmd.at(-1)).toBe('xyz-9');
   });
 
   it('codex plan-mode headless resume passes no bypass (read-only via -c sandbox_mode)', () => {
     const cmd = buildExecCommand(execOpts({ agent: 'codex', mode: 'plan', resume: true, sessionId: 'xyz-9', headless: true, prompt: 'go' }));
     expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
-    expect(cmd).toContain('sandbox_mode=read-only');
+    expect(cmd).toContain('default_permissions="agents-plan"');
+    expect(cmd.join(' ')).toContain('extends = ":read-only"');
   });
 
   it.each([

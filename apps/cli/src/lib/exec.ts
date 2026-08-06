@@ -31,6 +31,7 @@ import { composeWin32CommandLine } from './platform/index.js';
 import { isTmuxInstalled } from './tmux/binary.js';
 import { shellQuote } from './ssh-exec.js';
 import { resolveClaudeSetupToken } from './claude-account-token.js';
+import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -201,6 +202,11 @@ export function defaultModeFor(agent: AgentId): Mode {
   return AGENTS[agent].capabilities.modes[0];
 }
 
+/** Safe mode used when the user did not provide --mode or a configured default. */
+export function implicitModeFor(agent: AgentId): ExecMode {
+  return agent === 'codex' ? 'edit' : 'plan';
+}
+
 /** Reasoning effort levels passed to agents that support them. 'auto' defers to the agent's default. */
 export type ExecEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
 
@@ -213,6 +219,8 @@ export interface ExecOptions {
   /** Force interactive mode even when a prompt is provided. Wins over `headless`. */
   interactive?: boolean;
   mode: ExecMode;
+  /** True when the caller omitted --mode; fallback agents resolve their own safe default. */
+  modeWasImplicit?: boolean;
   effort: ExecEffort;
   cwd?: string;
   /** Force headless mode even when no prompt is provided (e.g. piping via stdin). */
@@ -607,11 +615,11 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     promptFlag: 'positional',
     resume: { subcommand: 'resume' },
     modeFlags: {
-      plan: ['--sandbox', 'read-only'],
-      // Sandboxed writes inside the workspace. Network stays on (workspace-write
-      // disables it by default) so edit-mode runs can still use git/gh/package
-      // installs. No approval bypass here — only `skip` drops the guardrails.
-      edit: ['--sandbox', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true'],
+      // Native Codex modes are assembled by codexPolicyArgs below. Named
+      // permission profiles keep filesystem access and network access
+      // independent; legacy --sandbox flags cannot express that combination.
+      plan: [],
+      edit: [],
       // skip = codex --yolo: drops the sandbox entirely and approves anything.
       skip: ['--dangerously-bypass-approvals-and-sandbox'],
     },
@@ -976,37 +984,23 @@ export function buildExecCommand(options: ExecOptions): string[] {
     // narrower than --yolo/-f, which also bypasses permission checks.
     cmd.push('--trust');
   }
-  // Codex's workspace-write sandbox blocks $HOME (verified against the live CLI
-  // and OpenAI's sandbox docs: writable roots extend scope "without removing the
-  // sandbox entirely"). But the model routinely shells out to `agents ...`, whose
-  // runtime state lives under ~/.agents — the SSH askpass shim
-  // (~/.agents/.cache/devices/askpass.sh), the device/stats cache, secrets,
-  // session writes, config tunings. Without ~/.agents as a writable root those
-  // inner writes fail with EROFS (e.g. `agents ssh` dies before connecting),
-  // which is why a remote `agents run codex` couldn't reach the fleet. Grant it
-  // implicitly whenever codex runs workspace-write — far narrower than --mode skip
-  // (danger-full-access). Fresh runs take --add-dir (below); resume forms reject
-  // --add-dir, so they take the same root via -c writable_roots here.
-  const codexWorkspaceWrite = options.agent === 'codex' && resolvedMode === 'edit';
-  if (resumeSpec && 'subcommand' in resumeSpec) {
+  if (options.agent === 'codex') {
+    const policyMode = resolvedMode === 'plan' || resolvedMode === 'skip' ? resolvedMode : 'edit';
+    const writableRoots = [...codexEditWritableRoots(), ...(options.addDirs ?? [])];
+    cmd.push(...codexPolicyArgs(policyMode, writableRoots));
+  } else if (resumeSpec && 'subcommand' in resumeSpec) {
     if (resolvedMode === 'skip') {
       // skip = yolo on resume too; both `codex resume` (TUI) and
       // `codex exec resume` accept the bypass flag.
       cmd.push('--dangerously-bypass-approvals-and-sandbox');
     } else if (interactive) {
-      // `codex resume` (TUI) accepts the same -s/--sandbox flags as a fresh run.
       cmd.push(...modeFlags);
-      if (codexWorkspaceWrite) cmd.push('-c', codexWritableRootsConfig(getUserAgentsDir()));
     } else {
       // `codex exec resume` rejects `--sandbox <mode>` (verified against
       // `codex exec resume --help` on 0.142.5), but takes -c config overrides —
       // map the mode through sandbox_mode so a non-skip resume never gets the
       // approval/sandbox bypass.
-      cmd.push('-c', `sandbox_mode=${resolvedMode === 'plan' ? 'read-only' : 'workspace-write'}`);
-      if (resolvedMode !== 'plan') {
-        cmd.push('-c', 'sandbox_workspace_write.network_access=true');
-        cmd.push('-c', codexWritableRootsConfig(getUserAgentsDir()));
-      }
+      cmd.push(...modeFlags);
     }
   } else if (options.agent === 'kimi' && !interactive) {
     // kimi's headless prompt mode (`-p`/`--prompt`) is self-contained and REFUSES
@@ -1120,24 +1114,10 @@ export function buildExecCommand(options: ExecOptions): string[] {
     }
   }
 
-  // Extra writable dirs. Claude and Codex both take `--add-dir`; for Codex it
-  // widens the workspace-write sandbox (teams relies on this to let teammates
-  // write ~/.agents), so it must actually be forwarded — it used to be
-  // claude-only, silently dropped for codex and masked by edit mode carrying
-  // the approval/sandbox bypass. Codex's resume forms reject --add-dir, so
-  // skip it there (claude's flag-based resume accepts it).
-  //
-  // On top of any user-supplied dirs, a fresh codex workspace-write run
-  // implicitly gets ~/.agents (deduped) so the CLI's own tooling — askpass,
-  // secrets, sessions, tunings — can write from inside the sandbox. Resume forms
-  // get the same root via -c writable_roots above (see codexWorkspaceWrite).
-  const codexImplicitDirs =
-    codexWorkspaceWrite && !options.resume ? [getUserAgentsDir()] : [];
-  const addDirs = [...new Set([...(options.addDirs ?? []), ...codexImplicitDirs])];
-  if (
-    addDirs.length > 0 &&
-    (options.agent === 'claude' || (options.agent === 'codex' && !options.resume))
-  ) {
+  // Codex add-dirs are folded into its named edit profile above, including on
+  // resume where the native CLI rejects --add-dir. Claude keeps its native flag.
+  const addDirs = [...new Set(options.addDirs ?? [])];
+  if (addDirs.length > 0 && options.agent === 'claude') {
     for (const dir of addDirs) {
       cmd.push('--add-dir', dir);
     }
@@ -1250,8 +1230,11 @@ export async function execShimPassthrough(
     if (fs.existsSync(cmdPath)) binary = cmdPath;
   }
 
-  // The only flag the bash shim injects (codex); everything else is transparent.
-  const launchArgs = agent === 'codex' ? ['-c', 'check_for_update_on_startup=false'] : [];
+  // Match the POSIX shim: direct Codex launches default to the safe writable
+  // profile, while later user arguments can still override native settings.
+  const launchArgs = agent === 'codex'
+    ? ['-c', 'check_for_update_on_startup=false', ...codexPolicyArgs('edit')]
+    : [];
   // Mint a launch id and export it as AGENT_LAUNCH_ID so the agent's SessionStart
   // hook records the same id — the join key that maps this launch to its exact
   // session even though the recorded pid here is the cmd.exe wrapper (Windows) or
@@ -2203,6 +2186,7 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
       ...options,
       agent,
       version,
+      mode: options.modeWasImplicit ? implicitModeFor(agent) : options.mode,
       prompt,
       env: envOverride ? { ...(options.env ?? {}), ...envOverride } : options.env,
       sessionId: pinnedSessionId ?? (i === 0 ? options.sessionId : undefined),

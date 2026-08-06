@@ -11,6 +11,7 @@ import {
   resolveMode,
   resolveHeadlessMode,
   defaultModeFor,
+  implicitModeFor,
   headlessPlanStallCommand,
   codexWritableRootsConfig,
   type ExecOptions,
@@ -81,18 +82,21 @@ describe('buildExecCommand', () => {
       expect(cmd[cmd.indexOf('--permission-mode') + 1]).toBe('auto');
     });
 
-    it('codex plan produces --sandbox read-only', () => {
+    it('codex plan produces a read-only profile with network and on-request approval', () => {
       const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'plan' }));
-      expect(cmd).toContain('--sandbox');
-      expect(cmd[cmd.indexOf('--sandbox') + 1]).toBe('read-only');
+      expect(cmd).toContain('approval_policy="on-request"');
+      expect(cmd).toContain('default_permissions="agents-plan"');
+      expect(cmd.join(' ')).toContain('extends = ":read-only"');
+      expect(cmd.join(' ')).toContain('network = { enabled = true, allow_local_binding = true }');
       expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
     });
 
-    it('codex edit produces --sandbox workspace-write with network on, no approval bypass', () => {
+    it('codex edit produces a workspace profile with network on and no approval bypass', () => {
       const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit' }));
-      expect(cmd).toContain('--sandbox');
-      expect(cmd[cmd.indexOf('--sandbox') + 1]).toBe('workspace-write');
-      expect(cmd).toContain('sandbox_workspace_write.network_access=true');
+      expect(cmd).toContain('approval_policy="on-request"');
+      expect(cmd).toContain('default_permissions="agents-edit"');
+      expect(cmd.join(' ')).toContain('extends = ":workspace"');
+      expect(cmd.join(' ')).toContain('network = { enabled = true, allow_local_binding = true }');
       expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
     });
 
@@ -317,7 +321,8 @@ describe('buildExecCommand', () => {
         if (agent === 'claude') {
           expect(cmd[cmd.indexOf('--permission-mode') + 1]).toBe('plan');
         } else if (agent === 'codex') {
-          expect(cmd[cmd.indexOf('--sandbox') + 1]).toBe('read-only');
+          expect(cmd).toContain('default_permissions="agents-plan"');
+          expect(cmd.join(' ')).toContain('extends = ":read-only"');
         } else if (agent === 'opencode') {
           expect(cmd[cmd.indexOf('--agent') + 1]).toBe('plan');
         }
@@ -791,7 +796,9 @@ describe('buildExecCommand', () => {
 
     it('codex effort=auto omits reasoning flags', () => {
       const cmd = buildExecCommand(opts({ agent: 'codex', effort: 'auto' }));
-      expect(cmd).not.toContain('-c');
+      expect(cmd).not.toContain('model_reasoning_effort=low');
+      expect(cmd).not.toContain('model_reasoning_effort=medium');
+      expect(cmd).not.toContain('model_reasoning_effort=high');
     });
 
     it('gemini ignores effort (no reasoning flags)', () => {
@@ -835,9 +842,10 @@ describe('buildExecCommand', () => {
       expect(cmd[indices[1] + 1]).toBe('/b');
     });
 
-    it('codex addDirs adds --add-dir (widens the workspace-write sandbox)', () => {
-      const cmd = buildExecCommand(opts({ agent: 'codex', addDirs: ['/a'] }));
-      expect(cmd[cmd.indexOf('--add-dir') + 1]).toBe('/a');
+    it('codex edit folds addDirs into the named workspace profile', () => {
+      const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit', addDirs: ['/a'] }));
+      expect(cmd).not.toContain('--add-dir');
+      expect(cmd.join(' ')).toContain('"/a" = true');
     });
 
     it('codex resume drops addDirs (`codex exec resume` rejects --add-dir)', () => {
@@ -858,21 +866,20 @@ describe('buildExecCommand', () => {
   // Codex's workspace-write sandbox blocks $HOME, so `agents ...` the model
   // shells out to can't write ~/.agents (askpass shim, secrets, sessions),
   // which broke remote `agents run codex`. A fresh edit run gets ~/.agents via
-  // --add-dir; resume forms (which reject --add-dir) get it via -c writable_roots.
+  // the named edit profile for both fresh and resumed runs.
   describe('codex ~/.agents writable root', () => {
     const AGENTS_DIR = path.join(HOME, '.agents');
 
     it('fresh codex edit run implicitly grants ~/.agents as a writable root', () => {
       const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit' }));
-      const dirs = cmd.reduce<string[]>((acc, v, i) => (v === '--add-dir' ? [...acc, cmd[i + 1]] : acc), []);
-      expect(dirs).toContain(AGENTS_DIR);
+      expect(cmd.join(' ')).toContain(`${JSON.stringify(AGENTS_DIR)} = true`);
     });
 
     it('dedupes ~/.agents when the user also passes it explicitly', () => {
       const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit', addDirs: [AGENTS_DIR, '/x'] }));
-      const dirs = cmd.reduce<string[]>((acc, v, i) => (v === '--add-dir' ? [...acc, cmd[i + 1]] : acc), []);
-      expect(dirs.filter((d) => d === AGENTS_DIR)).toHaveLength(1);
-      expect(dirs).toContain('/x');
+      const rendered = cmd.join(' ');
+      expect(rendered.match(new RegExp(`${AGENTS_DIR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\" = true`, 'g'))).toHaveLength(1);
+      expect(rendered).toContain('"/x" = true');
     });
 
     it('does NOT add ~/.agents for codex read-only (plan) — no writes happen there', () => {
@@ -895,9 +902,7 @@ describe('buildExecCommand', () => {
         agent: 'codex', mode: 'edit', resume: true, sessionId: 'abc-1', prompt: 'go',
       }));
       expect(cmd).not.toContain('--add-dir');
-      const ci = cmd.indexOf(codexWritableRootsConfig(AGENTS_DIR));
-      expect(ci).toBeGreaterThan(0);
-      expect(cmd[ci - 1]).toBe('-c');
+      expect(cmd.join(' ')).toContain(`${JSON.stringify(AGENTS_DIR)} = true`);
     });
 
     it('codex interactive TUI resume grants ~/.agents via -c writable_roots (rejects --add-dir)', () => {
@@ -905,9 +910,7 @@ describe('buildExecCommand', () => {
         agent: 'codex', mode: 'edit', resume: true, sessionId: 'abc-2', interactive: true, prompt: undefined,
       }));
       expect(cmd).not.toContain('--add-dir');
-      const ci = cmd.indexOf(codexWritableRootsConfig(AGENTS_DIR));
-      expect(ci).toBeGreaterThan(0);
-      expect(cmd[ci - 1]).toBe('-c');
+      expect(cmd.join(' ')).toContain(`${JSON.stringify(AGENTS_DIR)} = true`);
     });
 
     it('codexWritableRootsConfig emits a TOML array of the quoted dir', () => {
@@ -1445,6 +1448,14 @@ describe('defaultModeFor', () => {
     for (const agent of ALL_AGENTS) {
       expect(defaultModeFor(agent)).toBe(AGENTS[agent].capabilities.modes[0]);
     }
+  });
+});
+
+describe('implicitModeFor', () => {
+  it('defaults Codex to safe writable and other harnesses to plan', () => {
+    expect(implicitModeFor('codex')).toBe('edit');
+    expect(implicitModeFor('claude')).toBe('plan');
+    expect(implicitModeFor('gemini')).toBe('plan');
   });
 });
 

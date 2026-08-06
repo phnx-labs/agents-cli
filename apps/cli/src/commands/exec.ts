@@ -716,7 +716,7 @@ export function registerRunCommand(program: Command): void {
   const runCmd = program
     .command('run <agent> [prompt]')
     .description('Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively.')
-    .option('-m, --mode <mode>', 'How much the agent can do: plan (read-only), edit (can write files), auto (smart classifier auto-approves safe ops, prompts for risky), skip (bypass all permission prompts). \'full\' accepted as alias for skip.', 'plan')
+    .option('-m, --mode <mode>', 'How much the agent can do: plan (read-only), edit (can write files), auto (smart classifier auto-approves safe ops, prompts for risky), skip (bypass all permission prompts). Omitted Codex mode defaults to safe writable edit; other harnesses default to plan. \'full\' accepted as alias for skip.', 'plan')
     .option('-e, --effort <effort>', 'Reasoning effort: low | medium | high | xhigh | max | auto (claude and codex only)', 'auto')
     .option('--model <model>', 'Cost tier (cheap|default|best|ultra) or a concrete model id; tiers resolve per harness+version to a supported model')
     .option(
@@ -2125,7 +2125,7 @@ export function registerRunCommand(program: Command): void {
       }
 
       const [
-        { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, headlessPlanStallCommand, nativeResume, resolveInteractive, inferredInteractiveWithoutTty },
+        { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, implicitModeFor, headlessPlanStallCommand, nativeResume, resolveInteractive, inferredInteractiveWithoutTty },
         { ALL_AGENT_IDS, ACCOUNT_INSPECTION_AGENT_IDS, agentLabel, supportsAccountInspection },
         { profileExists, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
@@ -2792,7 +2792,12 @@ export function registerRunCommand(program: Command): void {
       // `skip` still hard-fails when unsupported — pretending we bypassed
       // permissions would be unsafe.
       const modeIsDefault = modeSource === 'default';
-      const requestedMode = normalizeMode(mode);
+      let requestedMode = normalizeMode(mode);
+      // Codex's intrinsic omitted-mode default is safe writable: workspace plus
+      // common caches, network enabled, approvals on request. An explicit
+      // --mode plan and a configured run default remain read-only.
+      const modeWasImplicit = modeSource === 'default' && !modeFromRunDefault;
+      if (modeWasImplicit) requestedMode = implicitModeFor(agent);
       let resolvedMode: ReturnType<typeof resolveMode>;
       try {
         resolvedMode = resolveMode(agent, requestedMode);
@@ -2934,6 +2939,7 @@ export function registerRunCommand(program: Command): void {
         prompt,
         interactive: options.interactive || forceInteractive,
         mode: requestedMode,
+        modeWasImplicit,
         effort,
         cwd: options.cwd,
         model,
