@@ -119,6 +119,22 @@ describe('querySessions batched existence check', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  it('expires a matching directory signature after the timestamp precision window', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-qhp-expire-'));
+    const file = path.join(dir, 'delayed.jsonl');
+    const settled = new Date(Date.now() - 5_000);
+    fs.utimesSync(dir, settled, settled);
+    upsertSession(meta('exist-cache-delayed', { filePath: file }), '');
+    expect(querySessions({ idExact: 'exist-cache-delayed' })).toEqual([]);
+
+    fs.writeFileSync(file, '{}');
+    fs.utimesSync(dir, settled, settled);
+    await new Promise(resolve => setTimeout(resolve, 2_100));
+    expect(querySessions({ idExact: 'exist-cache-delayed' }).map(row => row.id))
+      .toEqual(['exist-cache-delayed']);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   it('drops rows whose backing file is gone and keeps rows whose file is present, across several directories', () => {
     const dirA = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-qhp-dirA-'));
     const dirB = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-qhp-dirB-'));

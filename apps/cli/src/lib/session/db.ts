@@ -2565,6 +2565,7 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
 interface DirectoryMembershipCacheEntry {
   mtimeMs: number;
   size: number;
+  cachedAtMs: number;
   entries: Set<string>;
 }
 
@@ -2601,12 +2602,14 @@ function findMissingFilePaths(filePaths: string[]): Set<string> {
     try {
       const stat = fs.statSync(dir);
       const cached = directoryMembershipCache.get(dir);
-      const settled = Date.now() - stat.mtimeMs > DIRECTORY_MTIME_SETTLE_MS;
-      if (settled && cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+      const now = Date.now();
+      const settled = now - stat.mtimeMs > DIRECTORY_MTIME_SETTLE_MS;
+      const fresh = cached && now - cached.cachedAtMs <= DIRECTORY_MTIME_SETTLE_MS;
+      if (settled && fresh && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
         entries = cached.entries;
       } else {
         entries = new Set(fs.readdirSync(dir));
-        directoryMembershipCache.set(dir, { mtimeMs: stat.mtimeMs, size: stat.size, entries });
+        directoryMembershipCache.set(dir, { mtimeMs: stat.mtimeMs, size: stat.size, cachedAtMs: now, entries });
         directoryMembershipSweepCount++;
       }
     } catch {
