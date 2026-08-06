@@ -27,6 +27,14 @@ import UniformTypeIdentifiers
 // and the backing scale factor, so a caller can map screenshot pixels to
 // global screen coordinates for click()/scroll(): global = origin + pixel/scale.
 enum Screenshot {
+    // Non-prompting Screen Recording trust check, mirrors AX.isTrusted(). Used
+    // by trust_status so a caller can tell AX and Screen Recording apart
+    // instead of only learning about a missing Screen Recording grant when a
+    // screenshot capture times out after 5s (see the `timedOut` branch below).
+    static func isScreenRecordingTrusted() -> Bool {
+        CGPreflightScreenCaptureAccess()
+    }
+
     static func capture(params: [String: Any]) throws -> [String: Any] {
         let pid = try Params.int(params, "pid")
         let quality = max(1, min(100, Params.intOpt(params, "quality") ?? 85))
