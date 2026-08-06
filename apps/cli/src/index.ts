@@ -516,6 +516,7 @@ import {
   saveUpdateCheck,
   dismissUpdateVersion,
   shouldPromptUpgrade,
+  buildMultiInstallInventory,
   findAgentsCliInstalls,
   resolveRunningPackageRoot,
   type UpdateCheckCache,
@@ -541,23 +542,19 @@ function maybeWarnMultiInstall(): void {
     // "/$bunfs" install. This warning is advisory — stay silent instead.
     return;
   }
-  const byRoot = new Map<string, { version: string; note: string }>();
-  byRoot.set(runningRoot, { version: VERSION, note: 'running' });
-  for (const install of findAgentsCliInstalls(process.env.PATH || '')) {
-    if (!byRoot.has(install.packageRoot)) {
-      const notes = [install.binPath ? `agents on PATH: ${install.binPath}` : 'discovered install'];
-      if (!install.atomicHelperInstall) notes.push('unsafe legacy helper installer — remove this copy');
-      byRoot.set(install.packageRoot, { version: install.version, note: notes.join('; ') });
-    }
-  }
+  const inventory = buildMultiInstallInventory(
+    runningRoot,
+    VERSION,
+    findAgentsCliInstalls(process.env.PATH || ''),
+  );
 
-  if (byRoot.size < 2) {
+  if (inventory.length < 2) {
     try { fs.unlinkSync(sentinel); } catch { /* nothing recorded */ }
     return;
   }
 
-  const key = [...byRoot.entries()]
-    .map(([root, info]) => `${root}\t${info.version}\t${info.note}`)
+  const key = inventory
+    .map((info) => `${info.packageRoot}\t${info.version}\t${info.note}`)
     .sort()
     .join('\n');
   try {
@@ -565,8 +562,8 @@ function maybeWarnMultiInstall(): void {
   } catch { /* not warned for this set yet */ }
 
   console.error(chalk.yellow('Multiple agents-cli installs detected:'));
-  for (const [root, info] of byRoot) {
-    console.error(chalk.gray(`  ${root}  ${info.version}  (${info.note})`));
+  for (const info of inventory) {
+    console.error(chalk.gray(`  ${info.packageRoot}  ${info.version}  (${info.note})`));
   }
   console.error(chalk.gray('Upgrades apply to the running copy. Remove a stale copy with: npm uninstall -g --prefix <prefix> @phnx-labs/agents-cli'));
 

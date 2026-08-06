@@ -392,6 +392,35 @@ export interface FindAgentsCliInstallsOptions {
   globalNodeModulesDirs?: string[];
 }
 
+export interface MultiInstallInventoryEntry {
+  packageRoot: string;
+  version: string;
+  note: string;
+}
+
+export function buildMultiInstallInventory(
+  runningRoot: string,
+  runningVersion: string,
+  installs: AgentsCliInstall[],
+): MultiInstallInventoryEntry[] {
+  const byRoot = new Map<string, MultiInstallInventoryEntry>();
+  byRoot.set(runningRoot, { packageRoot: runningRoot, version: runningVersion, note: 'running' });
+  for (const install of installs) {
+    const notes = [install.packageRoot === runningRoot
+      ? 'running'
+      : install.binPath
+        ? `agents on PATH: ${install.binPath}`
+        : 'discovered install'];
+    if (!install.atomicHelperInstall) notes.push('unsafe legacy helper installer — remove this copy');
+    byRoot.set(install.packageRoot, {
+      packageRoot: install.packageRoot,
+      version: install.version,
+      note: notes.join('; '),
+    });
+  }
+  return [...byRoot.values()];
+}
+
 function childDirectories(parent: string): string[] {
   try {
     return fs.readdirSync(parent, { withFileTypes: true })

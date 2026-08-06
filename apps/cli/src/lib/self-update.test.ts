@@ -8,6 +8,7 @@ import * as path from 'path';
 import { needsWindowsShell, toPosix } from './platform/index.js';
 import {
   bunGlobalDir,
+  buildMultiInstallInventory,
   deriveGlobalPrefix,
   detectPackageManager,
   dismissUpdateVersion,
@@ -535,5 +536,23 @@ describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
     expect(installs).toHaveLength(1);
     expect(installs[0].packageRoot).toBe(install.packageRoot);
     expect(installs[0].binPath).toBe(path.join(install.binDir, 'agents'));
+  });
+});
+
+describe('buildMultiInstallInventory', () => {
+  it('marks the running copy unsafe when it predates the atomic helper installer', () => {
+    const runningRoot = '/prefix/lib/node_modules/@phnx-labs/agents-cli';
+    const inventory = buildMultiInstallInventory(runningRoot, '1.20.88', [{
+      binPath: '/prefix/bin/agents',
+      packageRoot: runningRoot,
+      version: '1.20.88',
+      atomicHelperInstall: false,
+    }]);
+
+    expect(inventory).toEqual([{
+      packageRoot: runningRoot,
+      version: '1.20.88',
+      note: 'running; unsafe legacy helper installer — remove this copy',
+    }]);
   });
 });
