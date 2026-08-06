@@ -16,14 +16,15 @@
  * of the two caches below on their own -- it's claude-account-token.ts:51
  * resolveClaudeSetupToken(), called from exec.ts:424 for EVERY resolved claude
  * version (pinned or auto-resolved) whose version home has a signed-in
- * account. It is entirely uncached: each call re-derives an AES key via
+ * account. Before RUSH-2317 it was uncached: each call re-derived an AES key via
  * `scryptSync` (secrets/filestore.ts:208-210, invoked from
  * decryptForFallback at secrets/filestore.ts:230-240) to decrypt the
  * file-backed `auth` secrets bundle. Measured standalone (a one-off
  * `performance.now()` probe against the real bundle, not part of this
- * benchmark file): ~150-170ms per call, first call and every call after —
- * scrypt is deliberately memory-hard/slow and nothing memoizes the derived
- * key or the decrypted token across calls. A version home with NO signed-in
+ * benchmark file): ~150-170ms per call, first call and every call after. RUSH-2317
+ * added a process-lifetime token cache keyed by version home and the encrypted
+ * item file's identity, ctime, mtime, and size, so unchanged follow-up calls pay
+ * only file metadata checks. A version home with NO signed-in
  * account short-circuits at claude-account-token.ts:56-57
  * (readClaudeAccountEmail returns null) before ever reaching the decrypt, so
  * the SAME code path costs ~0.07ms or ~150ms purely depending on whether that
@@ -145,7 +146,7 @@ const COLD_SAMPLE_OPTS = { setup: invalidateCaches, iterations: 1, time: 1, warm
 describe.skipIf(!loggedInClaudeVersion || !loggedOutClaudeVersion)(
   'buildExecEnv — resolveClaudeSetupToken cost split (exec.ts:424, claude-account-token.ts:51): same code path, signed-in vs not',
   () => {
-    bench('pinned version WITH a signed-in account (pays the uncached scrypt decrypt every call)', () => {
+    bench('pinned version WITH a signed-in account (first call decrypts; unchanged calls hit the token cache)', () => {
       buildExecEnv(execOpts({ agent: 'claude', version: loggedInClaudeVersion, sessionId: randomUUID() }));
     });
 

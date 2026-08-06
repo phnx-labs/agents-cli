@@ -3,6 +3,8 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { bundleBackend, bundleExists, readAndResolveBundleEnv } from './secrets/bundles.js';
+import { fileStoreItemPath } from './secrets/filestore.js';
+import { secretsKeychainItem } from './secrets/index.js';
 
 /**
  * Reserved FILE-BASED secrets bundle holding long-lived, non-rotating Claude
@@ -28,6 +30,24 @@ const AUTH_BUNDLE = 'auth';
  * where a corrupt bundle entry must be caught before it reaches the auth header.
  */
 const SETUP_TOKEN_RE = /^sk-ant-oat01-[A-Za-z0-9_-]+$/;
+
+interface SetupTokenCacheEntry {
+  credentialPath: string;
+  fingerprint: string;
+  token: string | null;
+}
+
+/** Process-local only: plaintext setup-tokens are never written to another cache. */
+const setupTokenCache = new Map<string, SetupTokenCacheEntry>();
+
+function credentialFingerprint(credentialPath: string): string {
+  try {
+    const stat = fs.statSync(credentialPath, { bigint: true });
+    return `${stat.dev}:${stat.ino}:${stat.ctimeNs}:${stat.mtimeNs}:${stat.size}`;
+  } catch {
+    return 'missing';
+  }
+}
 
 /** True only for a clean, single-line `sk-ant-oat01-…` token — see {@link SETUP_TOKEN_RE}. */
 export function isValidClaudeSetupToken(value: string): boolean {
@@ -76,15 +96,31 @@ export function resolveClaudeSetupToken(home?: string): string | null {
     const email = readClaudeAccountEmail(home);
     if (!email) return null;
     if (!bundleExists(AUTH_BUNDLE) || bundleBackend(AUTH_BUNDLE) !== 'file') return null;
-    const { env } = readAndResolveBundleEnv(AUTH_BUNDLE, { caller: 'usage', agentOnly: true });
-    const v = (env[claudeAccountTokenKey(email)] ?? '').trim();
-    if (v.length === 0) return null;
-    // Reject a malformed stored value (e.g. a captured setup-token TTY blob, #1767)
-    // rather than let it become an `Authorization: Bearer <blob>` header that
-    // Anthropic rejects and crashes the run. A corrupt entry is treated as no
-    // usable file-based token, so the caller falls back to the normal login.
-    if (!isValidClaudeSetupToken(v)) return null;
-    return v;
+    const cacheKey = home ?? os.homedir();
+    const item = secretsKeychainItem(AUTH_BUNDLE, claudeAccountTokenKey(email));
+    const credentialPath = fileStoreItemPath(item);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const before = credentialFingerprint(credentialPath);
+      const cached = setupTokenCache.get(cacheKey);
+      if (cached?.credentialPath === credentialPath && cached.fingerprint === before) {
+        return cached.token;
+      }
+      if (before === 'missing') {
+        setupTokenCache.set(cacheKey, { credentialPath, fingerprint: before, token: null });
+        return null;
+      }
+      const { env } = readAndResolveBundleEnv(AUTH_BUNDLE, { caller: 'usage', agentOnly: true });
+      const v = (env[claudeAccountTokenKey(email)] ?? '').trim();
+      const token = v.length > 0 && isValidClaudeSetupToken(v) ? v : null;
+      const after = credentialFingerprint(credentialPath);
+      if (before === after) {
+        setupTokenCache.set(cacheKey, { credentialPath, fingerprint: after, token });
+        return token;
+      }
+    }
+    // The credential changed during both decrypt attempts. Fail closed rather
+    // than return a token whose current file fingerprint was never observed.
+    return null;
   } catch {
     return null;
   }

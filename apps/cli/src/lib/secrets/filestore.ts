@@ -245,6 +245,11 @@ function fileFor(item: string): string {
   return path.join(fileDir(), `${item}.enc`);
 }
 
+/** Absolute path of one encrypted file-store item. No read or decrypt occurs. */
+export function fileStoreItemPath(item: string): string {
+  return fileFor(item);
+}
+
 function fileHas(item: string): boolean {
   return fs.existsSync(fileFor(item));
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -10,7 +10,7 @@ import {
 } from './claude-account-token.js';
 import { buildExecEnv } from './exec.js';
 import { bundleItemStore, keychainRef, writeBundle, type SecretsBundle } from './secrets/bundles.js';
-import { _resetFileStoreForTest } from './secrets/filestore.js';
+import { _resetFileStoreForTest, fileStore, fileStoreItemPath } from './secrets/filestore.js';
 import { secretsKeychainItem } from './secrets/index.js';
 import { getVersionHomePath } from './versions.js';
 
@@ -36,6 +36,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   _resetFileStoreForTest({});
   if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
   else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
@@ -98,6 +99,79 @@ describe('resolveClaudeSetupToken', () => {
 
     expect(resolveClaudeSetupToken(alphaHome)).toBe('sk-ant-oat01-alpha');
     expect(resolveClaudeSetupToken(betaHome)).toBe('sk-ant-oat01-beta');
+  });
+
+  it('decrypts a credential once while its encrypted file fingerprint is unchanged', () => {
+    const home = makeHome('alpha@example.com');
+    writeAuthBundle({ [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha' });
+    const decryptBatch = vi.spyOn(fileStore, 'getBatch');
+    expect(resolveClaudeSetupToken(home)).toBe('sk-ant-oat01-alpha');
+    expect(resolveClaudeSetupToken(home)).toBe('sk-ant-oat01-alpha');
+    expect(decryptBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('caches a missing per-account credential as a negative result', () => {
+    const home = makeHome('missing@example.com');
+    writeAuthBundle({ [claudeAccountTokenKey('other@example.com')]: 'sk-ant-oat01-other' });
+    const decryptBatch = vi.spyOn(fileStore, 'getBatch');
+
+    expect(resolveClaudeSetupToken(home)).toBeNull();
+    expect(resolveClaudeSetupToken(home)).toBeNull();
+    expect(decryptBatch).not.toHaveBeenCalled();
+  });
+
+  it('re-decrypts after the encrypted credential file mtime changes', () => {
+    const home = makeHome('alpha@example.com');
+    writeAuthBundle({ [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha' });
+    const decryptBatch = vi.spyOn(fileStore, 'getBatch');
+    expect(resolveClaudeSetupToken(home)).toBe('sk-ant-oat01-alpha');
+    const item = secretsKeychainItem('auth', claudeAccountTokenKey('alpha@example.com'));
+    const credentialPath = fileStoreItemPath(item);
+    const changed = new Date(Date.now() + 2_000);
+    fs.utimesSync(credentialPath, changed, changed);
+    expect(resolveClaudeSetupToken(home)).toBe('sk-ant-oat01-alpha');
+    expect(decryptBatch).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns the rotated token instead of a stale cached value', () => {
+    const home = makeHome('alpha@example.com');
+    writeAuthBundle({ [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha' });
+    expect(resolveClaudeSetupToken(home)).toBe('sk-ant-oat01-alpha');
+
+    writeAuthBundle({ [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-rotated' });
+
+    expect(resolveClaudeSetupToken(home)).toBe('sk-ant-oat01-rotated');
+  });
+
+  it('never shares a cached token between version homes', () => {
+    const alphaHome = makeHome('alpha@example.com');
+    const betaHome = makeHome('beta@example.com');
+    writeAuthBundle({
+      [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha',
+      [claudeAccountTokenKey('beta@example.com')]: 'sk-ant-oat01-beta',
+    });
+    const decryptBatch = vi.spyOn(fileStore, 'getBatch');
+    expect(resolveClaudeSetupToken(alphaHome)).toBe('sk-ant-oat01-alpha');
+    expect(resolveClaudeSetupToken(betaHome)).toBe('sk-ant-oat01-beta');
+    expect(resolveClaudeSetupToken(alphaHome)).toBe('sk-ant-oat01-alpha');
+    expect(resolveClaudeSetupToken(betaHome)).toBe('sk-ant-oat01-beta');
+    expect(decryptBatch).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidates a version-home entry when that home changes accounts', () => {
+    const home = makeHome('alpha@example.com');
+    writeAuthBundle({
+      [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha',
+      [claudeAccountTokenKey('beta@example.com')]: 'sk-ant-oat01-beta',
+    });
+    expect(resolveClaudeSetupToken(home)).toBe('sk-ant-oat01-alpha');
+
+    fs.writeFileSync(
+      path.join(home, '.claude', '.claude.json'),
+      JSON.stringify({ oauthAccount: { emailAddress: 'beta@example.com' } }),
+    );
+
+    expect(resolveClaudeSetupToken(home)).toBe('sk-ant-oat01-beta');
   });
 
   it('rejects a malformed captured setup-token TTY blob rather than resolving it (#1767)', () => {
