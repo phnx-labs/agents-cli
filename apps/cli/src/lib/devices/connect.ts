@@ -141,6 +141,7 @@ export function buildSshInvocation(
     args.push('-o', 'PreferredAuthentications=password', '-o', 'PubkeyAuthentication=no', '-o', 'NumberOfPasswordPrompts=1');
   } else {
     args.push('-o', 'BatchMode=yes');
+    if (device.auth.identityFile) args.push('-i', device.auth.identityFile);
   }
 
   // An interactive login (no remote command) needs a real tty.

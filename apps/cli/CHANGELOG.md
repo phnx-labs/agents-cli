@@ -2,6 +2,8 @@
 
 ## 1.22.26
 
+- **Fleet devices accept an explicit SSH private-key path (RUSH-2265).** `agents devices set <name> --auth key --identity-file <path>` stores the path on that device and every shared SSH invocation passes it to OpenSSH with `-i`, so devices no longer depend on whichever key the ambient ssh agent happens to offer.
+
 - Make bare `agents setup` a re-runnable onboarding hub with live capability status and direct access to browser, computer, secrets, fleet, share, watchdog, and preference wizards.
 
 - **`agents apply --provision-secrets` pushes the manifest's declared secrets

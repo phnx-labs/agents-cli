@@ -1024,6 +1024,7 @@ Typical workflow:
   agents devices configure mac-mini --max-agents 4 --scheduler off
   agents devices note mac-mini "runs the releases — don't reboot"
   agents devices set win-mini --auth password --bundle muqsit
+  agents devices set worker --auth key --identity-file ~/.ssh/worker_ed25519
   agents devices render --write  # write ~/.ssh/config.d/agents include
   agents fleet update            # roll out latest agents-cli to every online device
   agents fleet run uname -a      # run a command on every online device
@@ -1586,14 +1587,16 @@ email) into a single row. Use \`agents devices harnesses\` for the per-install v
     .option('--auth <method>', 'key | password')
     .option('--bundle <bundle>', 'secrets bundle holding the password (for --auth password)')
     .option('--bundle-key <key>', "key within the bundle (default 'password')")
-    .action(async (name: string, opts: { platform?: string; user?: string; auth?: string; bundle?: string; bundleKey?: string }) => {
+    .option('--identity-file <path>', 'private-key path for --auth key')
+    .action(async (name: string, opts: { platform?: string; user?: string; auth?: string; bundle?: string; bundleKey?: string; identityFile?: string }) => {
       try {
         const existing = await mustGetDevice(name);
-        const auth = opts.auth || opts.bundle || opts.bundleKey
+        const auth = opts.auth || opts.bundle || opts.bundleKey || opts.identityFile
           ? {
               method: (opts.auth as DeviceAuthMethod) ?? existing.auth.method,
               bundle: opts.bundle ?? existing.auth.bundle,
               bundleKey: opts.bundleKey ?? existing.auth.bundleKey,
+              identityFile: opts.identityFile ?? existing.auth.identityFile,
             }
           : undefined;
         const d = await upsertDevice(name, {

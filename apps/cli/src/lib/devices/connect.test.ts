@@ -79,6 +79,15 @@ describe('buildSshInvocation', () => {
     expect(args[args.length - 1]).toBe('uptime');
   });
 
+  it('key auth passes the device identity file to every OpenSSH invocation', () => {
+    const { args } = buildSshInvocation(
+      dev({ name: 'keyed', user: 'me', auth: { method: 'key', identityFile: '/keys/fleet worker' } }),
+      ['uptime'],
+      '/shim',
+    );
+    expect(args.slice(args.indexOf('-i'), args.indexOf('-i') + 2)).toEqual(['-i', '/keys/fleet worker']);
+  });
+
   it('password auth wires the askpass shim and disables pubkey + extra prompts', () => {
     const { args, env } = buildSshInvocation(
       dev({ name: 'p', user: 'muqsit', auth: { method: 'password', bundle: 'muqsit', bundleKey: 'password' } }),

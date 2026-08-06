@@ -88,6 +88,20 @@ describe('devices set-interactive', () => {
   });
 });
 
+describe('devices set', () => {
+  it('persists an explicit SSH identity file for key-auth devices', () => {
+    guardedHome();
+    expect(run(['devices', 'add', 'worker', 'muqsit@192.0.2.3']).status).toBe(0);
+
+    const set = run(['devices', 'set', 'worker', '--auth', 'key', '--identity-file', '/keys/fleet worker']);
+    expect(set.status, set.stderr).toBe(0);
+    const listed = run(['devices', 'list', '--json']);
+    expect(listed.status, listed.stderr).toBe(0);
+    const worker = JSON.parse(listed.stdout).find((device: { name: string }) => device.name === 'worker');
+    expect(worker.auth).toEqual({ method: 'key', identityFile: '/keys/fleet worker' });
+  });
+});
+
 describe('devices configure', () => {
   it('writes device-scope keys into the named device’s doc and prints them back', () => {
     guardedHome();
