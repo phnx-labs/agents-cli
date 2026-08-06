@@ -7,9 +7,10 @@ import {
   tmuxAttachScript,
   planFocusSurface,
   openFocusTabs,
+  isAttachableLiveSession,
 } from './focus.js';
 import { refuseFallback } from './go.js';
-import { buildResumeCommand } from './sessions.js';
+import { buildCanonicalResumeCommand } from '../lib/session/resume-command.js';
 import type { ActiveSession } from '../lib/session/active.js';
 import type { SurfaceItem, LaunchResult } from '../lib/terminal/index.js';
 
@@ -18,7 +19,8 @@ function s(over: Partial<ActiveSession>): ActiveSession {
 }
 
 /** The local version-pinned resume command a `focus` tab would run (rail-less fallback). */
-const localResume = (sess: ActiveSession): string[] | null => buildResumeCommand(metaFromActive(sess));
+const localResume = (sess: ActiveSession): string[] | null =>
+  sess.sessionId ? buildCanonicalResumeCommand(sess.sessionId) : null;
 
 describe('selectFallback — --attach-only (old `go`) vs default resume', () => {
   it('--attach-only picks refuseFallback (attach or refuse, never fork)', () => {
@@ -47,23 +49,22 @@ describe('metaFromActive — the resume fallback input', () => {
   });
 });
 
-describe('focus resume-in-a-tab command (metaFromActive → buildResumeCommand)', () => {
-  it('claude → claude --resume <id>', () => {
-    expect(buildResumeCommand(metaFromActive(s({ sessionId: 'abc12345', kind: 'claude' })))).toEqual(['claude', '--resume', 'abc12345']);
-  });
-
-  it('codex → codex resume <id>', () => {
-    expect(buildResumeCommand(metaFromActive(s({ sessionId: 'def67890', kind: 'codex' })))).toEqual(['codex', 'resume', 'def67890']);
-  });
-
-  it('opencode → opencode --session <id>', () => {
-    expect(buildResumeCommand(metaFromActive(s({ sessionId: 'ses_9', kind: 'opencode' })))).toEqual(['opencode', '--session', 'ses_9']);
-  });
-
-  it('non-resumable agents (gemini/grok/…) → null, so focus refuses cleanly', () => {
-    for (const kind of ['gemini', 'grok', 'antigravity', 'droid', 'kimi']) {
-      expect(buildResumeCommand(metaFromActive(s({ sessionId: 'x1234567', kind })))).toBeNull();
+describe('focus resume-in-a-tab command', () => {
+  it('delegates every harness to the canonical agents resume command', () => {
+    for (const kind of ['claude', 'codex', 'opencode', 'grok', 'kimi']) {
+      expect(localResume(s({ sessionId: 'abc12345', kind }))).toEqual(['agents', 'resume', 'abc12345']);
     }
+  });
+});
+
+describe('isAttachableLiveSession', () => {
+  it('rejects retained panes whose process exited', () => {
+    expect(isAttachableLiveSession(s({ pidAlive: false, status: 'closed' }))).toBe(false);
+    expect(isAttachableLiveSession(s({ pidAlive: false, status: 'crashed' }))).toBe(false);
+  });
+
+  it('accepts a running live pane', () => {
+    expect(isAttachableLiveSession(s({ pidAlive: true, status: 'running' }))).toBe(true);
   });
 });
 
@@ -123,20 +124,19 @@ describe('planFocusSurface — attach a live pane, or resume a copy (never a sil
     const plan = planFocusSurface(s({ machine: self, host: 'ghostty', sessionId: 'abc12345', kind: 'claude' }), self, localResume);
     expect(plan.kind).toBe('resume');
     if (plan.kind !== 'resume') return;
-    expect(plan.command).toEqual(['claude', '--resume', 'abc12345']);
+    expect(plan.command).toEqual(['agents', 'resume', 'abc12345']);
     expect(plan.note).toContain('resume a copy');
   });
 
-  it('remote rail-less → resume ON the peer over SSH (peer resolves the pinned version)', () => {
+  it('remote rail-less → canonical resume resolves the owning peer', () => {
     const plan = planFocusSurface(s({ machine: 'yosemite-s0', sessionId: 'def67890', kind: 'claude' }), self, localResume);
     expect(plan.kind).toBe('resume');
     if (plan.kind !== 'resume') return;
-    expect(plan.command.slice(0, 3)).toEqual(['ssh', '-tt', 'yosemite-s0']);
-    expect(plan.command.join(' ')).toContain('sessions resume def67890');
+    expect(plan.command).toEqual(['agents', 'resume', 'def67890']);
   });
 
-  it('non-resumable AND rail-less → skip, reported (not dropped)', () => {
-    const plan = planFocusSurface(s({ machine: self, host: 'terminal', sessionId: 'z1234567', kind: 'grok' }), self, localResume);
+  it('an id-less rail-less row → skip, reported (not dropped)', () => {
+    const plan = planFocusSurface(s({ machine: self, host: 'terminal', kind: 'grok' }), self, localResume);
     expect(plan.kind).toBe('skip');
     if (plan.kind !== 'skip') return;
     expect(plan.note).toContain('grok');
@@ -167,8 +167,8 @@ describe('openFocusTabs — N selected sessions → N tab requests through the e
     expect(calls[0].opts.packing).toBe('tabs');
     expect(calls[0].opts.host).toBeUndefined();
     expect(calls[0].items.map((i) => i.command)).toEqual([
-      ['claude', '--resume', 'aaaa1111'],
-      ['claude', '--resume', 'bbbb2222'],
+      ['agents', 'resume', 'aaaa1111'],
+      ['agents', 'resume', 'bbbb2222'],
     ]);
   });
 
@@ -183,16 +183,16 @@ describe('openFocusTabs — N selected sessions → N tab requests through the e
     for (const it of calls[0].items) expect(it.command.slice(0, 3)).toEqual(['ssh', '-tt', 'yosemite-s0']);
   });
 
-  it('a rail-less non-resumable is reported and skipped, never fed to the engine as a broken tab', async () => {
+  it('a rail-less id-less row is reported and skipped, never fed to the engine as a broken tab', async () => {
     const { calls, open } = recorder();
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const targets = [
       s({ machine: 'zion', host: 'terminal', sessionId: 'ok123456', kind: 'claude', cwd: '/tmp' }),
-      s({ machine: 'zion', host: 'terminal', sessionId: 'no123456', kind: 'grok' }),
+      s({ machine: 'zion', host: 'terminal', kind: 'grok' }),
     ];
     await openFocusTabs(targets, 'zion', { open, backend: 'tmux' });
     // Only the resumable one reaches the engine; the grok one is reported (skip line), not dropped silently.
-    expect(calls[0].items.map((i) => i.command)).toEqual([['claude', '--resume', 'ok123456']]);
+    expect(calls[0].items.map((i) => i.command)).toEqual([['agents', 'resume', 'ok123456']]);
     expect(log.mock.calls.flat().join('\n')).toContain('skip');
     log.mockRestore();
   });

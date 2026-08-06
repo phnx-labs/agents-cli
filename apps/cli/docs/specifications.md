@@ -377,6 +377,16 @@ SSH access (§7); rendering sessions that no harness produced.
   semantics), leaving the original untouched, and MUST refuse harnesses it can't
   yet handle with a clear message (Claude-only in v1)
   (`lib/session/fork.ts:1-16,84-86`).
+- **SES-41 (MUST).** A direct lifecycle selector (full session id, unique id
+  prefix, full `ag-<agent>-<8hex>` tmux alias, or unique alias prefix/suffix of at
+  least six characters) MUST resolve to one canonical harness-native session id
+  across the fleet. `sessions focus <selector>` and `sessions resume <selector>`
+  MUST re-read live state after resolution: an alive tmux pane is attached, while
+  `pane_dead=1`, `pidAlive=false`, `closed`, or `crashed` MUST take the native
+  resume path on the owning device. Alias ambiguity MUST fail closed. Bare
+  `sessions resume` remains the multi-select history picker
+  (`commands/focus.ts`; `commands/sessions-resume.ts`;
+  `lib/session/actor-sidecar.ts`; `lib/session/active.ts`).
 
 #### 3.5 Remote & export/import
 

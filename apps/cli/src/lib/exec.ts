@@ -22,7 +22,7 @@ import { getShimsDir, getHistoryDir, getUserAgentsDir } from './state.js';
 import { resolveCodexHome } from './codex-home.js';
 import { readCodexConfiguredModel } from './shims.js';
 import { writePidSessionEntry, extractSessionIdArg } from './session/pid-registry.js';
-import { writeSessionActorRecord } from './session/actor-sidecar.js';
+import { writeSessionActorRecord, writeSessionAliasRecord } from './session/actor-sidecar.js';
 import { loadHookSessionIndex, resolveHookSessionId } from './session/hook-sessions.js';
 import { sessionIdMarkerLine } from './hosts/session-marker.js';
 import { recordRunName } from './session/run-names.js';
@@ -1453,7 +1453,7 @@ export function formatPaneTail(raw: string, maxLines = 30): string {
  *      (Ctrl-b d) — return 0 and LEAVE the session for `agents focus` to re-attach.
  */
 async function runInTmux(options: ExecOptions, executable: string, args: string[]): Promise<SpawnResult> {
-  const { createSession, killSession, paneExitStatus, setSessionHook, slugifyName, agentPaneDiedHook, markSessionHookSchema } = await import('./tmux/session.js');
+  const { createSession, hasSession, killSession, paneExitStatus, setSessionHook, slugifyName, agentPaneDiedHook, markSessionHookSchema } = await import('./tmux/session.js');
   const { getDefaultSocketPath } = await import('./tmux/paths.js');
   const { attachTmux, runTmux } = await import('./tmux/binary.js');
 
@@ -1461,7 +1461,22 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
   const cwd = options.cwd || process.cwd();
   const idSeed = (options.sessionId ?? randomUUID()).slice(0, 8);
   const name = slugifyName(`ag-${options.agent}-${idSeed}`);
-  const execEnv = buildExecEnv(options);
+
+  // A native resume must not create a competing wrapper for a live session.
+  // A retained dead pane is reaped before the harness resumes normally.
+  if (options.resume && await hasSession(name, socket)) {
+    const existing = await createSession({ name, cwd, socket, source: 'cli', attachExisting: true });
+    if (options.sessionId) writeSessionAliasRecord(options.sessionId, name);
+    if (!existing.pane || !(await paneExitStatus(existing.pane, socket)).dead) {
+      await attachTmux({ socket, args: ['attach-session', '-t', name] });
+      return { exitCode: 0, stderr: '', stdout: '' };
+    }
+    await killSession(name, socket);
+  }
+
+  // SessionStart learns some harness IDs only after launch. Carry the wrapper
+  // name into that hook so it can bind both identities durably.
+  const execEnv = { ...buildExecEnv(options), AGENT_TMUX_SESSION_NAME: name };
   // Launch with the real env (secret VALUES materialized into the pane); persist
   // only a value-redacted copy in SessionMeta.cmd so resolved secrets never hit
   // disk via the informational cmd field (RUSH-1758).
@@ -1473,6 +1488,8 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
 
   const meta = await createSession({ name, cmd, metaCmd, cwd, socket, source: 'cli', labels });
   const pane = meta.pane;
+
+  if (options.sessionId) writeSessionAliasRecord(options.sessionId, name);
 
   if (pane) {
     // When the AGENT pane dies, detach the client (don't kill) so the session

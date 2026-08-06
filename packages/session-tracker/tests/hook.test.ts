@@ -42,6 +42,26 @@ describe('SessionStart hook launch metadata', () => {
     });
   });
 
+  it('joins the tmux wrapper alias to a harness-native session id without losing mode metadata', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'session-tracker-hook-'));
+    dirs.push(root);
+    const home = path.join(root, 'home');
+    const history = path.join(root, 'history');
+    const sessionId = '019fd114-4689-7df1-963f-ce06e5a36aeb';
+    fs.mkdirSync(home);
+    const result = spawnSync(hookPath, ['codex'], {
+      input: JSON.stringify({ session_id: sessionId, cwd: '/repo' }),
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, AGENTS_HISTORY_DIR: history, AGENTS_RUN_MODE: 'edit', AGENT_TMUX_SESSION_NAME: 'ag-codex-c1f3d813' },
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(history, 'by-session', `${sessionId}.json`), 'utf8'))).toMatchObject({
+      sessionId,
+      mode: 'edit',
+      aliases: ['ag-codex-c1f3d813'],
+    });
+  });
+
   it('rejects a traversal session id before creating a temporary sidecar', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'session-tracker-hook-'));
     dirs.push(root);

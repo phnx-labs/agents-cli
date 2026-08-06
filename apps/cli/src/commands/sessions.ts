@@ -45,6 +45,7 @@ import { renderMarkdown } from '../lib/markdown.js';
 import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';
 import { getShimsDir } from '../lib/state.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
+import { resolveSessionAlias } from '../lib/session/actor-sidecar.js';
 import { resolveVersionAliasLoose } from '../lib/versions.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import {
@@ -4110,12 +4111,12 @@ export function selectorAllowsEarlyExit(selector: string): boolean {
  * local lookups, then group copies by logical session id. Synced mirrors of one
  * session therefore stay one candidate even when several machines report them;
  * distinct ids sharing a prefix remain distinct ambiguity candidates. */
-export function fleetCandidatesByQuery(rows: SessionMeta[], query: string): FleetSessionCandidate[] {
+export function fleetCandidatesByQuery(rows: SessionMeta[], query: string, trustResolvedRows = false): FleetSessionCandidate[] {
   // An id selector must still be prefix-filtered defensively against older peers
   // returning content mentioners. Keyword rows, however, were already matched by
   // each peer's own FTS index; the parent does not own that transcript/index and
   // must not re-run metadata-only filtering that could discard a content hit.
-  const matched = looksLikeSessionId(query)
+  const matched = !trustResolvedRows && looksLikeSessionId(query)
     ? resolveSessionQuery(rows, query, { indexFallback: false }).matches
     : rows;
   const byId = new Map<string, Map<string, SessionMeta>>();
@@ -4139,6 +4140,14 @@ export function fleetCandidatesByQuery(rows: SessionMeta[], query: string): Flee
 
 /** Resolve through the canonical metadata+content union used by keyword search. */
 function resolveIndexedMetadataRows(indexed: SessionMeta[], selector: string): SessionMeta[] {
+  const alias = resolveSessionAlias(selector);
+  if (alias.kind === 'resolved') {
+    return resolveSessionQuery(indexed, alias.sessionId, { indexFallback: false }).matches;
+  }
+  if (alias.kind === 'ambiguous') {
+    const ids = new Set(alias.sessionIds.map(id => id.toLowerCase()));
+    return indexed.filter(session => ids.has(session.id.toLowerCase()));
+  }
   return resolveSessionQuery(indexed, selector, { indexFallback: false }).matches;
 }
 
@@ -4172,7 +4181,11 @@ export function metadataResolveOutcome(
   remote: { sessions: SessionMeta[]; unreachable: string[] },
   selector: string,
 ): MetadataResolveOutcome {
-  const candidates = fleetCandidatesByQuery([...localMatches, ...remote.sessions], selector);
+  // Every peer answered through --resolve-safe-v1, so its native-id row is
+  // already the result of resolving the original selector. Re-filtering by the
+  // selector would discard alias suffixes such as c1f3d813 because the native
+  // UUID intentionally has a different prefix.
+  const candidates = fleetCandidatesByQuery([...localMatches, ...remote.sessions], selector, true);
   // A full UUID is globally unique, so one exact hit resolves even when an
   // unrelated registered device is offline. A label is NOT globally unique — a
   // distinct session may carry the same label on an unreachable peer — so it

@@ -20,9 +20,8 @@ import { confirm } from '@inquirer/prompts';
 import { gatherLiveTargets, pickLiveTarget, pickLiveTargets, jumpTo, refuseFallback, type UnreachableFallback } from './go.js';
 import type { ActiveSession } from '../lib/session/active.js';
 import type { SessionMeta, SessionAgentId } from '../lib/session/types.js';
-import { buildResumeCommand, resumeSessionInPlace, requestedLiveStatuses, type LiveStatusFilter } from './sessions.js';
-import { resolveBackend, CONFIRM_THRESHOLD } from './sessions-resume.js';
-import { runOnPeer } from '../lib/session/remote-list.js';
+import { requestedLiveStatuses, resolveSessionMetadataValue, type LiveStatusFilter } from './sessions.js';
+import { resolveBackend, CONFIRM_THRESHOLD, resumeSelectorInPlace } from './sessions-resume.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { shellQuote, assertValidSshTarget } from '../lib/ssh-exec.js';
 import {
@@ -34,6 +33,7 @@ import {
 } from '../lib/terminal/index.js';
 import { isInteractiveTerminal } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
+import { buildCanonicalResumeCommand } from '../lib/session/resume-command.js';
 
 /** Options for `sessions focus` — device/host scope + the `--active` live-state filters. */
 export interface FocusOptions {
@@ -144,23 +144,36 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
   const fallback = selectFallback(opts.attachOnly);
 
   if (id) {
-    const q = id.toLowerCase();
-    const matches = [...activeById.values()].filter((s) => s.sessionId!.toLowerCase().startsWith(q));
-    if (matches.length === 1) {
-      await jumpTo(matches[0], self, fallback);
+    const outcome = await resolveSessionMetadataValue(id.trim(), { local, hosts });
+    if (outcome.kind === 'partial') {
+      console.error(chalk.red(`Could not resolve session while these devices were unavailable: ${outcome.failedPeers.join(', ')}`));
+      process.exitCode = 2;
       return;
     }
-    if (matches.length > 1) {
-      console.error(chalk.red(`"${id}" is ambiguous (${matches.length} live matches). Use more of the id.`));
+    if (outcome.kind === 'ambiguous') {
+      console.error(chalk.red(`"${id}" matches ${outcome.candidates.length} sessions. Pass a longer id or alias.`));
       process.exitCode = 1;
       return;
     }
-    // Not live — it's a past session; resume is the right tool (multi-select + placement).
-    console.log(
-      chalk.yellow(`No live session matching "${id}".`) +
-        chalk.gray(`\nTo resume a past session: agents sessions resume ${id}`),
-    );
-    process.exitCode = 1;
+    if (outcome.kind === 'not-found') {
+      console.error(chalk.red(`No session matching "${id}".`));
+      process.exitCode = 1;
+      return;
+    }
+
+    const live = activeById.get(outcome.session.id);
+    if (live && isAttachableLiveSession(live)) {
+      await jumpTo(live, self, fallback);
+      return;
+    }
+
+    if (opts.attachOnly) {
+      console.error(chalk.red(`${outcome.session.shortId} has no live terminal to attach.`));
+      process.exitCode = 1;
+      return;
+    }
+
+    await recoverResolvedSession(outcome.session);
     return;
   }
 
@@ -189,6 +202,28 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
   const targets = await pickLiveTargets(activeById, self, header);
   if (targets.length === 0) return;
   await openFocusTabs(targets, self);
+}
+
+/** A retained pane is not attachable merely because tmux can still display it. */
+export function isAttachableLiveSession(session: ActiveSession): boolean {
+  return session.pidAlive !== false && session.status !== 'closed' && session.status !== 'crashed';
+}
+
+async function recoverResolvedSession(session: SessionMeta): Promise<void> {
+  const command = buildCanonicalResumeCommand(session.id);
+  const cwd = session.cwd && fs.existsSync(session.cwd) ? session.cwd : process.cwd();
+  const ctx = currentContext();
+  const backend: Backend | undefined = detectCurrentBackend(ctx) ?? availableBackends(ctx)[0]?.id;
+  if (!backend) {
+    await resumeSelectorInPlace(session.id);
+    return;
+  }
+  console.log(chalk.gray(`${session.shortId} is not live — opening a ${backend} tab and resuming it.`));
+  const [result] = await openSurfaces([{ cwd, command }], { backend, packing: 'tabs' });
+  if (!result?.ok) {
+    console.error(chalk.red(`Failed to open ${session.shortId}: ${result?.error ?? 'unknown error'}`));
+    process.exitCode = 1;
+  }
 }
 
 /** Human scope suffix for the empty-pool message, e.g. " (orphaned on yosemite-s0)". */
@@ -257,17 +292,7 @@ export function planFocusSurface(
     return { kind: 'attach', command: ['sh', '-c', shellQuote(script)], note: `attach ${mux.pane}` };
   }
 
-  // No join rail → resume a copy (never a silent drop).
-  if (remote) {
-    // Resume ON the peer over SSH so it resolves the pinned version + HOME there.
-    const id = s.sessionId ?? '';
-    assertValidSshTarget(remote);
-    return {
-      kind: 'resume',
-      command: ['ssh', '-tt', remote, shellQuote(`agents sessions resume ${id}`)],
-      note: `resume a copy on ${remote} (no live tmux to join)`,
-    };
-  }
+  // No join rail → the canonical command resolves the owner device itself.
   const cmd = resumeCommandFor(s);
   if (!cmd) return { kind: 'skip', note: `${sid} — ${s.kind} sessions can't be resumed, and it has no live tmux to join` };
   return { kind: 'resume', command: cmd, note: 'resume a copy (no live tmux to join)' };
@@ -293,14 +318,11 @@ export async function openFocusTabs(
   deps: OpenFocusTabsDeps = {},
 ): Promise<void> {
   const open = deps.open ?? openSurfaces;
-  // Resolve rich indexed metas ONCE so local resume commands stay version-pinned.
-  let byId = new Map<string, SessionMeta>();
-  try {
-    const metas = await discoverSessions({ all: true, since: '90d', limit: 2000 });
-    byId = new Map(metas.map((m) => [m.id, m]));
-  } catch { /* fall back to synthesized metas per session */ }
-  const metaFor = (s: ActiveSession): SessionMeta => byId.get(s.sessionId ?? '') ?? metaFromActive(s);
-  const resumeCommandFor = (s: ActiveSession): string[] | null => buildResumeCommand(metaFor(s));
+  // The canonical resume command resolves metadata itself; active cwd is enough
+  // to place the terminal without another transcript scan.
+  const byId = new Map<string, SessionMeta>();
+  const resumeCommandFor = (s: ActiveSession): string[] | null =>
+    s.sessionId ? buildCanonicalResumeCommand(s.sessionId) : null;
 
   const planned = targets.map((s) => ({ s, plan: planFocusSurface(s, self, resumeCommandFor) }));
 
@@ -389,41 +411,23 @@ async function richMetaById(id: string): Promise<SessionMeta | undefined> {
  * Note: for a session that's still mid-run, this opens a COPY (the original keeps going);
  * only tmux can *join* a live one without forking (see the header).
  */
-const resumeInNewTab: UnreachableFallback = async (s, remote) => {
+const resumeInNewTab: UnreachableFallback = async (s) => {
   const id = s.sessionId ?? '';
   if (!id) {
     console.log(chalk.yellow('This session has no id to resume.'));
     return;
   }
 
-  // Remote: the transcript + pinned version live on the peer, so resume THERE over SSH.
-  // runOnPeer runs `agents sessions resume <id>` with a real TTY (`-tt`) in the foreground —
-  // it actually delivers you to the session (the peer picks the right version + HOME).
-  if (remote) {
-    console.log(chalk.gray(`${shortId(s)} has no live terminal on ${remote} — resuming it there over SSH…`));
-    const rc = await runOnPeer(['sessions', 'resume', id], remote, { tty: true });
-    if (rc === 'no-target') {
-      console.log(chalk.red(`${remote} isn't reachable as a device. Try: agents devices sync`));
-      console.log(chalk.gray(`  or run it yourself: ssh ${remote} 'agents sessions resume ${shortId(s)}'`));
-    }
-    return;
-  }
-
-  // Local: resume in a new tab. Use the indexed meta so the version-pinned binary
-  // resumes in the same isolated HOME the transcript was written in.
+  // The canonical command resolves the source device and pinned launch metadata.
   const meta = (await richMetaById(id)) ?? metaFromActive(s);
-  const command = buildResumeCommand(meta);
-  if (!command) {
-    console.log(chalk.yellow(`${meta.shortId} — ${meta.agent} sessions aren't resumable, so there's no way to reopen it.`));
-    return;
-  }
+  const command = buildCanonicalResumeCommand(meta.id);
   const cwd = meta.cwd && fs.existsSync(meta.cwd) ? meta.cwd : process.cwd();
 
   const ctx = currentContext();
   const backend: Backend | undefined = detectCurrentBackend(ctx) ?? availableBackends(ctx)[0]?.id;
   if (!backend) {
     // No tab-capable surface (off-macOS, not in tmux) — resume in this process.
-    await resumeSessionInPlace(meta);
+    await resumeSelectorInPlace(meta.id);
     return;
   }
 

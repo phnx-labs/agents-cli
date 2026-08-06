@@ -59,6 +59,13 @@ describe('classifyResumeState', () => {
     expect(classifyResumeState(live({ viewingIn: 'detached' }))).toBe('detached');
   });
 
+  it('treats retained closed panes and dead pids as inactive transcripts', () => {
+    expect(classifyResumeState(live({ viewingIn: 'detached', status: 'closed' }))).toBe('idle');
+    expect(classifyResumeState(live({ viewingIn: 'detached', status: 'crashed' }))).toBe('idle');
+    expect(classifyResumeState(live({ viewingIn: 'detached', pid: 0 }))).toBe('idle');
+    expect(classifyResumeState(live({ viewingIn: 'detached', pidAlive: false }))).toBe('idle');
+  });
+
   it('is watched when a client is attached', () => {
     expect(classifyResumeState(live({ viewingIn: 'ghostty tab 2' }))).toBe('watched');
   });
@@ -165,13 +172,13 @@ describe('abandonedCandidates', () => {
 });
 
 describe('defaultPickedIds', () => {
-  it('pre-selects only the crashed sessions', () => {
+  it('starts every batch resume with an explicit selection', () => {
     const candidates: ResumeCandidate[] = sortResumeCandidates([
       { id: 'd', shortId: 'd', agent: 'claude', state: 'detached', viewingIn: '', host: '', lastActivityMs: 3, pid: 1 },
       { id: 'b', shortId: 'b', agent: 'claude', state: 'background', viewingIn: '', host: '', lastActivityMs: 2, pid: 2 },
       { id: 'w', shortId: 'w', agent: 'claude', state: 'watched', viewingIn: 'codium tab 1', host: '', lastActivityMs: 1, pid: 3 },
     ]);
-    expect(defaultPickedIds(candidates)).toEqual(['d']);
+    expect(defaultPickedIds(candidates)).toEqual([]);
   });
 });
 
@@ -291,45 +298,41 @@ describe('shared-topic boilerplate stripping', () => {
 describe('nextPreselection — selection across list swaps', () => {
   const c = (id: string, state: ResumeCandidate['state']) => ({ id, state }) as ResumeCandidate;
 
-  it('pre-ticks a session that becomes detached during a refresh', () => {
-    // The regression this picker exists for: a terminal dies while the
-    // background revalidation is in flight, so a session goes idle -> detached
-    // between the two renders. The user touched nothing, so it must be ticked.
+  it('does not add a newly detached session during a refresh', () => {
     const unticked = new Set<string>();
     const first = [c('A', 'detached'), c('X', 'idle')];
     const p1 = nextPreselection({ previous: [], checked: new Set(), next: first, unticked });
-    expect([...p1]).toEqual(['A']);
+    expect([...p1]).toEqual([]);
 
     const second = [c('A', 'detached'), c('X', 'detached')];
     const p2 = nextPreselection({ previous: first, checked: p1, next: second, unticked });
-    expect(p2.has('X')).toBe(true);
-    expect(p2.has('A')).toBe(true);
+    expect(p2.has('X')).toBe(false);
+    expect(p2.has('A')).toBe(false);
   });
 
-  it('remembers a default the user actually unticked', () => {
+  it('keeps an explicit selection across a refresh', () => {
     const unticked = new Set<string>();
     const rows = [c('A', 'detached'), c('B', 'detached')];
-    nextPreselection({ previous: [], checked: new Set(), next: rows, unticked });
-    // The user unticks A, leaving only B checked.
+    nextPreselection({ previous: [], checked: new Set(['A', 'B']), next: rows, unticked });
     const p2 = nextPreselection({ previous: rows, checked: new Set(['B']), next: rows, unticked });
     expect(p2.has('A')).toBe(false);
     expect(p2.has('B')).toBe(true);
   });
 
-  it('keeps an untick sticky across a later swap', () => {
+  it('keeps a user deselection across a later swap', () => {
     const unticked = new Set<string>();
     const rows = [c('A', 'detached'), c('B', 'detached')];
-    nextPreselection({ previous: [], checked: new Set(), next: rows, unticked });
+    nextPreselection({ previous: [], checked: new Set(['A', 'B']), next: rows, unticked });
     const p2 = nextPreselection({ previous: rows, checked: new Set(['B']), next: rows, unticked });
     const p3 = nextPreselection({ previous: rows, checked: p2, next: rows, unticked });
     expect(p3.has('A')).toBe(false);
   });
 
-  it('re-ticks a default the user turned back on', () => {
+  it('keeps a user selection when the same row remains visible', () => {
     const unticked = new Set<string>();
     const rows = [c('A', 'detached')];
-    nextPreselection({ previous: [], checked: new Set(), next: rows, unticked });
-    nextPreselection({ previous: rows, checked: new Set(), next: rows, unticked });
+    nextPreselection({ previous: [], checked: new Set(['A']), next: rows, unticked });
+    nextPreselection({ previous: rows, checked: new Set(['A']), next: rows, unticked });
     const p3 = nextPreselection({ previous: rows, checked: new Set(['A']), next: rows, unticked });
     expect(p3.has('A')).toBe(true);
   });

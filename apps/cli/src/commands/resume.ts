@@ -33,7 +33,7 @@ export function buildResumeRunArgs(
 export function registerResumeCommand(program: Command): void {
   const cmd = program
     .command('resume <session> [prompt]')
-    .description('Resume a session by full id, unique id prefix, or exact label with its original harness, version, device, account, cwd, and mode. Searches the fleet automatically; a local full-id hit resumes with zero SSH.')
+    .description('Resume a session by id, tmux alias, or exact label with its original harness, version, device, account, cwd, and mode. Searches the fleet automatically; a local full-id hit resumes with zero SSH.')
     .option('-m, --mode <mode>', 'Override the recorded launch mode')
     .option('-i, --interactive', 'Resume interactively even when a prompt is provided')
     .option('--headless', 'Resume headlessly (a prompt is required)')
@@ -85,6 +85,10 @@ export function registerResumeCommand(program: Command): void {
 
       # Resume by exact label (auto-resumes the one match)
       agents resume "fix the flaky ssh test"
+
+      # Resume by durable tmux alias or its unique suffix
+      agents resume ag-codex-c1f3d813
+      agents resume c1f3d813
 
       # Deliberately change permissions
       agents resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897 --mode edit`,
