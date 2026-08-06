@@ -32,6 +32,8 @@
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://factory.ai" title="Factory AI Droid"><strong>Droid</strong></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://dev.meta.ai/docs/muse-code" title="Meta Muse Code"><strong>Muse</strong></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://omp.sh" title="Oh My Pi"><strong>Pi</strong></a>
 </p>
 
