@@ -57,6 +57,7 @@ export const loadFork: ModuleLoader = async () => (await import('../../commands/
 export const loadDefaults: ModuleLoader = async () => (await import('../../commands/defaults.js')).registerDefaultsCommands;
 export const loadSet: ModuleLoader = async () => (await import('../../commands/set.js')).registerSetCommand;
 export const loadModels: ModuleLoader = async () => (await import('../../commands/models.js')).registerModelsCommand;
+export const loadModes: ModuleLoader = async () => (await import('../../commands/modes.js')).registerModesCommand;
 export const loadPrune: ModuleLoader = async () => (await import('../../commands/prune.js')).registerPruneCommand;
 export const loadTrash: ModuleLoader = async () => (await import('../../commands/trash.js')).registerTrashCommands;
 export const loadRestore: ModuleLoader = async () => (await import('../../commands/trash.js')).registerRestoreCommand;
@@ -184,6 +185,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   defaults: [loadDefaults],
   set: [loadSet],
   models: [loadModels],
+  modes: [loadModes],
   trash: [loadTrash],
   restore: [loadRestore],
   doctor: [loadDoctor],

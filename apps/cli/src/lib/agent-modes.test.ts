@@ -1,0 +1,59 @@
+import { describe, expect, it } from 'vitest';
+import { ALL_AGENT_IDS, AGENTS } from './agents.js';
+import { AGENT_COMMANDS } from './exec.js';
+import {
+  formatModeFlags,
+  getAgentModesCatalog,
+  MODE_DESCRIPTIONS,
+} from './agent-modes.js';
+import { ALL_MODES } from './types.js';
+
+describe('getAgentModesCatalog', () => {
+  it('lists every capability mode for claude with native flags', () => {
+    const cat = getAgentModesCatalog('claude');
+    expect(cat.modes.map((m) => m.mode)).toEqual(['plan', 'edit', 'auto', 'skip']);
+    expect(cat.defaultMode).toBe('plan');
+    expect(cat.modes.find((m) => m.mode === 'plan')!.isDefault).toBe(true);
+    expect(cat.modes.find((m) => m.mode === 'auto')!.flags).toEqual(['--permission-mode', 'auto']);
+    expect(cat.modes.find((m) => m.mode === 'skip')!.flags).toEqual(['--dangerously-skip-permissions']);
+    expect(cat.unsupported).toEqual([]);
+    expect(cat.headlessPlan).toBe(true);
+  });
+
+  it('lists only edit/skip for cursor and notes plan degrade', () => {
+    const cat = getAgentModesCatalog('cursor');
+    expect(cat.modes.map((m) => m.mode)).toEqual(['edit', 'skip']);
+    expect(cat.defaultMode).toBe('edit');
+    expect(cat.unsupported).toContain('plan');
+    expect(cat.unsupported).toContain('auto');
+    expect(cat.notes.some((n) => n.includes('plan degrades'))).toBe(true);
+    expect(cat.modes.find((m) => m.mode === 'skip')!.flags).toEqual(['-f']);
+  });
+
+  it('agrees with AGENTS.capabilities.modes and AGENT_COMMANDS.modeFlags for every agent', () => {
+    for (const agent of ALL_AGENT_IDS) {
+      if (AGENTS[agent].deprecated?.hard) continue;
+      const cat = getAgentModesCatalog(agent);
+      expect(cat.modes.map((m) => m.mode)).toEqual(AGENTS[agent].capabilities.modes);
+      expect(cat.defaultMode).toBe(AGENTS[agent].capabilities.modes[0]);
+      for (const entry of cat.modes) {
+        expect(AGENT_COMMANDS[agent].modeFlags[entry.mode]).toEqual(entry.flags);
+        expect(entry.description).toBe(MODE_DESCRIPTIONS[entry.mode]);
+      }
+      for (const mode of ALL_MODES) {
+        const supported = AGENTS[agent].capabilities.modes.includes(mode);
+        expect(cat.unsupported.includes(mode)).toBe(!supported);
+      }
+    }
+  });
+});
+
+describe('formatModeFlags', () => {
+  it('renders empty flags as harness default', () => {
+    expect(formatModeFlags([])).toBe('(harness default)');
+  });
+
+  it('joins flag tokens', () => {
+    expect(formatModeFlags(['--permission-mode', 'plan'])).toBe('--permission-mode plan');
+  });
+});

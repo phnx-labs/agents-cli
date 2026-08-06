@@ -25,6 +25,7 @@ import type { AgentId, CapabilityName, DiscoveredPlugin, ManifestHook, HookMatch
 import { AGENTS, getCliState, resolveAgentName } from '../lib/agents.js';
 import { supports } from '../lib/capabilities.js';
 import { resolveConfiguredModel } from '../lib/models.js';
+import { getAgentModesCatalog } from '../lib/agent-modes.js';
 import { resolveSingleAgentTarget, AgentSpecError } from '../lib/agent-spec/index.js';
 import {
   readMeta,
@@ -668,6 +669,7 @@ async function renderSummary(agent: AgentId, version: string, versionHome: strin
   };
 
   if (options.json) {
+    const modeCat = getAgentModesCatalog(agent, version);
     const json = {
       agent,
       version,
@@ -681,6 +683,13 @@ async function renderSummary(agent: AgentId, version: string, versionHome: strin
       strategy,
       installedShim: cliState?.installed === true ? cliState.path : null,
       capabilities,
+      modes: {
+        supported: modeCat.modes.map((m) => m.mode),
+        defaultMode: modeCat.defaultMode,
+        configuredMode: modeCat.configuredMode,
+        headlessPlan: modeCat.headlessPlan,
+        unsupported: modeCat.unsupported,
+      },
       resources: itemsByKind ? summaryResourcesJson(itemsByKind, hookByScript!, mcpConfigs!) : null,
       sessions,
     };
@@ -712,6 +721,16 @@ async function renderSummary(agent: AgentId, version: string, versionHome: strin
     const mark = res.ok ? chalk.green('✓') : chalk.red('✗');
     const reason = res.ok ? '' : chalk.gray(`(${res.reason}${res.need ? ' ' + res.need : ''})`);
     console.log(`  ${cap.padEnd(10)} ${mark} ${reason}`);
+  }
+  // Permission modes are a separate axis from the capability booleans above —
+  // same data as `agents modes <agent>`, kept next to the rest of the inspect
+  // surface so a human/agent does not have to leave this view.
+  {
+    const modeCat = getAgentModesCatalog(agent, version);
+    const modeList = modeCat.modes.map((m) => (m.isDefault ? `${m.mode}*` : m.mode)).join('/');
+    const cfg = modeCat.configuredMode ? chalk.gray(`  run default: ${modeCat.configuredMode}`) : '';
+    console.log(`  ${'modes'.padEnd(10)} ${chalk.cyan(modeList)}${cfg}`);
+    console.log(chalk.gray(`             agents modes ${agent}  ·  agents models ${agent}@${version}`));
   }
 
   if (itemsByKind) {

@@ -65,6 +65,19 @@ tiers resolve against the installed version's catalog.
 | **Cursor** | Aggregator: re-exposes provider models with effort/speed baked into the id (`claude-opus-5-thinking-high`). Ids are normalized to a base model, then ranked by the provider lineup / price. |
 | **Factory** (Droid) | Aggregator with its own **credit-multiplier** economy (0.55x…4x) and no models list command — so a small curated tier map, capped at 2x (`cheap` GLM-5.2, `default` Kimi K3, `best`/`ultra` Opus 5). |
 
+## Permission modes (separate axis)
+
+`--mode plan|edit|auto|skip` is **not** a model pick — it is permissions (how much the
+agent can do). Discover what a harness accepts with:
+
+```
+$ agents modes claude
+$ agents modes cursor --json
+$ agents modes                 # every non-deprecated harness
+```
+
+That is the modes counterpart of `agents models`. See `agents modes --help`.
+
 ## Inspecting the map — the discovery menu
 
 `agents models [agent[@version]]` is the one command an agent (or human) reads to pick a

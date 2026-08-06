@@ -946,12 +946,14 @@ export function registerRunCommand(program: Command): void {
       agents run claude "fix the bug" -- --custom-flag
     `,
     notes: `
-      Modes (not every agent supports every mode — check agents.yaml capabilities):
+      Modes (not every agent supports every mode — run \`agents modes <agent>\`):
         plan  read-only investigation; no writes, no shell side-effects
         edit  may edit files; prompts for shell / risky operations
         auto  smart classifier auto-approves safe ops, prompts for risky (claude, copilot)
         skip  bypass every permission prompt (dangerously-skip-permissions)
         Legacy 'full' is silently rewritten to 'skip'.
+        List per-harness support + native flags: agents modes · agents modes claude
+        Models (cheap|default|best|ultra): agents models <agent[@version]>
 
       Headless plan support (a prompt makes the run headless):
         plan works headless on claude, codex, droid, opencode.
