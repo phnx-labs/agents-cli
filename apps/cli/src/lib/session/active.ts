@@ -669,6 +669,21 @@ function claudeProjectDirName(cwd: string): string {
 }
 
 /**
+ * Process-local memo for Claude transcript path resolution. Each active-session
+ * poll re-walks every Claude version-home `projects/` tree for every live pid
+ * (#2047). A resolved path is sticky while the file still exists; a miss or a
+ * vanished file re-walks. Cap size so a long-lived process cannot retain every
+ * cwd it has ever seen.
+ */
+const CLAUDE_SESSION_FILE_CACHE_MAX = 256;
+const claudeSessionFileCache = new Map<string, string>();
+
+/** Test seam: drop the Claude session-file path memo. */
+export function clearClaudeSessionFileCacheForTest(): void {
+  claudeSessionFileCache.clear();
+}
+
+/**
  * Locate the active Claude session file for a process. If we know the session
  * UUID (from terminal env or team parent), prefer the exact match. Otherwise
  * fall back to the most-recent-mtime .jsonl in the project's folder.
@@ -685,7 +700,22 @@ function claudeProjectDirName(cwd: string): string {
  * the rest of the CLI uses, so this stays in lockstep with discovery.
  */
 function findClaudeSessionFile(cwd: string, sessionId?: string): string | undefined {
-  return pickClaudeSessionFileAcrossRoots(getAgentSessionDirs('claude', 'projects'), cwd, sessionId);
+  const cacheKey = `${cwd}\0${sessionId ?? ''}`;
+  const hit = claudeSessionFileCache.get(cacheKey);
+  // Only positive resolutions are cached. A miss is re-walked every call so a
+  // brand-new transcript becomes visible on the next poll without a restart.
+  if (hit !== undefined) {
+    try {
+      if (fs.existsSync(hit)) return hit;
+    } catch { /* re-resolve */ }
+    claudeSessionFileCache.delete(cacheKey);
+  }
+  const resolved = pickClaudeSessionFileAcrossRoots(getAgentSessionDirs('claude', 'projects'), cwd, sessionId);
+  if (resolved) {
+    if (claudeSessionFileCache.size >= CLAUDE_SESSION_FILE_CACHE_MAX) claudeSessionFileCache.clear();
+    claudeSessionFileCache.set(cacheKey, resolved);
+  }
+  return resolved;
 }
 
 /**
@@ -876,6 +906,25 @@ function parseTailEventsForKind(agent: SessionAgentId, sessionFile: string): Ses
 }
 
 /**
+ * Process-local memo for {@link computeLiveSignals}. The menu-bar / `--active`
+ * poll re-reads every live session on a ~30s tick (#2047). When a transcript's
+ * mtime (and pidAlive / kind / cwd) are unchanged, re-parsing the tail yields
+ * the same signals — skip the parse. Bound the map so a long-lived daemon that
+ * sees thousands of sessions over its life cannot retain them forever.
+ */
+const LIVE_SIGNALS_CACHE_MAX = 512;
+const liveSignalsCache = new Map<string, {
+  mtimeMs: number | undefined;
+  pidAlive: boolean;
+  signals: LiveSignals;
+}>();
+
+/** Test seam: drop the in-process live-signals memo. */
+export function clearLiveSignalsCacheForTest(): void {
+  liveSignalsCache.clear();
+}
+
+/**
  * Derive the inferred state (working / waiting / idle + preview/badges) and, for
  * the two harnesses whose raw lines carry it, the output-token throughput.
  *
@@ -888,25 +937,41 @@ function parseTailEventsForKind(agent: SessionAgentId, sessionFile: string): Ses
  * `unknown` it used to fall through to. An opaque/untracked kind or an
  * unreadable/empty transcript yields an empty signal set, and the caller's
  * {@link resolveFallbackStatus} reports the honest live floor (`running`).
+ *
+ * Unchanged-mtime hits reuse the previous result (see {@link liveSignalsCache})
+ * so a 30s active-session poll does not re-tail every quiet transcript.
  */
 export function computeLiveSignals(kind: string, sessionFile: string | undefined, cwd: string | undefined, pidAlive: boolean): LiveSignals {
   if (!sessionFile) return {};
   let mtimeMs: number | undefined;
   try { mtimeMs = fs.statSync(sessionFile).mtimeMs; } catch { /* vanished between calls */ }
+
+  const cacheKey = `${kind}\0${sessionFile}\0${cwd ?? ''}`;
+  const cached = liveSignalsCache.get(cacheKey);
+  if (cached && cached.mtimeMs === mtimeMs && cached.pidAlive === pidAlive) {
+    return cached.signals;
+  }
+
   const ctx = { cwd, pidAlive, mtimeMs, activeWindowMs: ACTIVE_MTIME_WINDOW_MS };
+  let signals: LiveSignals = {};
 
   if (kind === 'claude' || kind === 'codex') {
     const { events, content } = readSessionTailWithRaw(sessionFile, kind);
-    if (events.length === 0) return {};
-    const state = inferSessionState(events, ctx);
-    const tokPerSec = computeTokPerSec(content, kind);
-    return { state, tokPerSec: tokPerSec > 0 ? tokPerSec : undefined };
+    if (events.length > 0) {
+      const state = inferSessionState(events, ctx);
+      const tokPerSec = computeTokPerSec(content, kind);
+      signals = { state, tokPerSec: tokPerSec > 0 ? tokPerSec : undefined };
+    }
+  } else if (isSessionTrackedAgent(kind)) {
+    const events = parseTailEventsForKind(kind, sessionFile);
+    if (events.length > 0) {
+      signals = { state: inferSessionState(events, ctx) };
+    }
   }
 
-  if (!isSessionTrackedAgent(kind)) return {};
-  const events = parseTailEventsForKind(kind, sessionFile);
-  if (events.length === 0) return {};
-  return { state: inferSessionState(events, ctx) };
+  if (liveSignalsCache.size >= LIVE_SIGNALS_CACHE_MAX) liveSignalsCache.clear();
+  liveSignalsCache.set(cacheKey, { mtimeMs, pidAlive, signals });
+  return signals;
 }
 
 /** Map inferred activity onto the coarse ActiveStatus used by the renderer and counts. */

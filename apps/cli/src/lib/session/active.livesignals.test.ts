@@ -1,8 +1,8 @@
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { computeLiveSignals } from './active.js';
+import { clearLiveSignalsCacheForTest, computeLiveSignals } from './active.js';
 
 const TESTDATA = path.join(import.meta.dirname, 'testdata');
 const tmp: string[] = [];
@@ -20,6 +20,10 @@ function freshCopy(fixtureRelative: string, basename: string): string {
 }
 
 describe('computeLiveSignals wires every tracked harness into real state', () => {
+  beforeEach(() => {
+    clearLiveSignalsCacheForTest();
+  });
+
   it('a live grok transcript yields working (not an empty signal set)', () => {
     const file = freshCopy('grok-working/chat_history.jsonl', 'chat_history.jsonl');
     const { state } = computeLiveSignals('grok', file, path.dirname(file), true);
@@ -49,6 +53,39 @@ describe('computeLiveSignals wires every tracked harness into real state', () =>
 
   it('no transcript file yields no state', () => {
     expect(computeLiveSignals('grok', undefined, '/tmp', true)).toEqual({});
+  });
+
+  it('reuses signals when the transcript mtime is unchanged (#2047)', () => {
+    const file = freshCopy('grok-working/chat_history.jsonl', 'chat_history.jsonl');
+    const cwd = path.dirname(file);
+    const first = computeLiveSignals('grok', file, cwd, true);
+    expect(first.state?.activity).toBe('working');
+    // Same path + mtime + pidAlive → identical object from the process memo
+    // (not a deep clone). A second parse would allocate a new state object.
+    const second = computeLiveSignals('grok', file, cwd, true);
+    expect(second).toBe(first);
+  });
+
+  it('recomputes when the transcript mtime advances', () => {
+    const file = freshCopy('grok-working/chat_history.jsonl', 'chat_history.jsonl');
+    const cwd = path.dirname(file);
+    const first = computeLiveSignals('grok', file, cwd, true);
+    // Bump mtime without rewriting content — the cache key includes mtime, so
+    // this must re-enter the parse path and return a fresh object.
+    const later = new Date(Date.now() + 5_000);
+    fs.utimesSync(file, later, later);
+    const second = computeLiveSignals('grok', file, cwd, true);
+    expect(second).not.toBe(first);
+    expect(second.state?.activity).toBe('working');
+  });
+
+  it('recomputes when pidAlive flips (lifecycle context)', () => {
+    const file = freshCopy('grok-working/chat_history.jsonl', 'chat_history.jsonl');
+    const cwd = path.dirname(file);
+    const alive = computeLiveSignals('grok', file, cwd, true);
+    const dead = computeLiveSignals('grok', file, cwd, false);
+    expect(dead).not.toBe(alive);
+    expect(dead.state).toBeDefined();
   });
 
   afterAll(() => {
