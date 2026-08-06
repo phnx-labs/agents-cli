@@ -35,6 +35,8 @@
   <a href="https://dev.meta.ai/docs/muse-code" title="Meta Muse Code"><strong>Muse</strong></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://omp.sh" title="Oh My Pi"><strong>Pi</strong></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://docs.warp.dev/reference/cli" title="Warp Agent CLI (Oz)"><strong>Warp</strong></a>
 </p>
 
 https://agents-cli.sh/demo.mp4

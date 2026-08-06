@@ -267,6 +267,7 @@ of truth: [`src/lib/placement.ts`](../src/lib/placement.ts).
 | Droid | yes | yes | >= 0.57.5 | >= 0.26.0 | yes | yes | yes | `AGENTS.md` | no |
 | Hermes | no | yes | yes | yes | no | yes | no | `MEMORY.md` | no |
 | Pi (Oh My Pi) | no | yes | no | yes | yes | no | yes | `AGENTS.md` | no |
+| Warp Agent CLI | no | yes | no | yes | no | no | no | `AGENTS.md` | no |
 
 Pi (`omp`) is Claude-compatible — it natively reads `.claude/commands`, `.mcp.json`, and
 Claude-shaped subagents, and keeps its own native resources under `~/.omp/agent/`
@@ -277,6 +278,18 @@ only via `tools.approval`, no command/path patterns); plugins are off (npm/TS mo
 the Claude marketplace manifest). Its cross-provider model catalog (OpenRouter, OpenAI,
 Anthropic, xAI, DeepSeek, …) surfaces in `agents view` / `agents models pi` via
 `omp models --json`.
+
+Warp Agent CLI (`oz`) is the coding-agent CLI on Warp's Oz platform. Install is
+self-updating (`brew install --cask oz` / the `oz-stable` apt|yum|pacman package);
+config lives under `~/.warp/`, the rules file is `AGENTS.md`, and auth is `oz login`
+(browser OAuth) or a `WARP_API_KEY` token for headless/CI. MCP rides the Claude
+`.mcp.json` schema at `~/.warp/.mcp.json` (stdio + http + headers); skills come from
+`--skill` + `oz agent skills`. Hooks, allowlist, commands, plugins, subagents,
+workflows, and memory are off (Oz exposes no matching install surface — its
+permissions are profile-based, its slash-commands native/server-managed, its cloud
+agents server-side). Warp is absent from `SESSION_AGENTS`: Oz stores conversations
+server-side (retrieved via `oz run conversation get <id>`), so there is no local
+transcript for `agents sessions` to index, and it exposes no usage/limits endpoint.
 
 **Gemini is hard-deprecated.** Google retired the Gemini CLI for free/Pro/Ultra
 tiers on June 18, 2026 (announced at Google I/O 2026); Antigravity CLI
