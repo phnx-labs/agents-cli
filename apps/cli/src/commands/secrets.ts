@@ -105,6 +105,7 @@ import {
   agentLoad,
   agentLock,
   agentPing,
+  agentSocketExists,
   agentStatus,
   agentRevoke,
   ensureAgentRunning,
@@ -2652,6 +2653,9 @@ Examples:
     .command('revoke <lease-id>')
     .description('Revoke one scoped secret lease immediately.')
     .action(async (leaseId: string) => {
+      if (agentSocketExists() && !(await agentPing()).reachable) {
+        throw new Error('Cannot revoke while the secrets broker is using an incompatible protocol. Restart the broker and retry.');
+      }
       const persisted = deleteLeaseSession(leaseId);
       const wiped = await agentRevoke(leaseId);
       if (wiped + persisted === 0) throw new Error(`Secret lease '${leaseId}' is not active.`);
