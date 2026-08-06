@@ -193,7 +193,7 @@ export function buildWindowsDetachedLaunchCommand(opts: {
     `Remove-Item -LiteralPath ${exit} -Force -ErrorAction SilentlyContinue`,
     `$process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-EncodedCommand',${powershellQuote(encodedInner)}) -WindowStyle Hidden -PassThru`,
     `Write-Output $process.Id`,
-  ].join(' ');
+  ].join('; ');
   return `powershell -NoProfile -EncodedCommand ${encodePowershell(outer)}`;
 }
 
@@ -265,7 +265,7 @@ export function buildWindowsStopRemoteCommand(pid: number, remoteExit: string): 
     `if ($process) { Stop-Process -Id ${pid} -Force; Set-Content -LiteralPath ${exit} -Value 143 -NoNewline -Encoding ascii; Write-Output 'SIGNALED' }`,
     `elseif (Test-Path -LiteralPath ${exit}) { $code = (Get-Content -LiteralPath ${exit} -Raw).Trim(); if ($code) { Write-Output (\"ALREADY $code\") } else { Set-Content -LiteralPath ${exit} -Value 143 -NoNewline -Encoding ascii; Write-Output 'GONE' } }`,
     `else { Set-Content -LiteralPath ${exit} -Value 143 -NoNewline -Encoding ascii; Write-Output 'GONE' }`,
-  ].join('; ');
+  ].join(' ');
   return `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
 }
 
