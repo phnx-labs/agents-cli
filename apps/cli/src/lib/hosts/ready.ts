@@ -49,8 +49,8 @@ export function buildProbeCommand(os?: string): string {
  * platform / enrolled `HostEntry.os`); when it marks the host Windows we take
  * the PowerShell path and report that known platform, otherwise POSIX + uname.
  */
-export function probeHost(target: string, os?: string): { reachable: boolean; os?: string } {
-  const r = sshExec(target, buildProbeCommand(os), { timeoutMs: 12000 });
+export function probeHost(target: string, os?: string, extraSshArgs: string[] = []): { reachable: boolean; os?: string } {
+  const r = sshExec(target, buildProbeCommand(os), { timeoutMs: 12000, extraSshArgs });
   if (r.code !== 0) return { reachable: false };
   if (remoteShellFor(os) === 'powershell') return { reachable: true, os };
   const uname = r.stdout.trim();
@@ -65,8 +65,8 @@ export function buildRemoteVersionCommand(os?: string): string {
 }
 
 /** Remote agents-cli version (PATH-resolved on the remote), or null if not installed. */
-export function remoteAgentsVersion(target: string, os?: string): string | null {
-  const r = sshExec(target, buildRemoteVersionCommand(os), { timeoutMs: 20000 });
+export function remoteAgentsVersion(target: string, os?: string, extraSshArgs: string[] = []): string | null {
+  const r = sshExec(target, buildRemoteVersionCommand(os), { timeoutMs: 20000, extraSshArgs });
   if (r.code !== 0) return null;
   const v = r.stdout.trim();
   return v || null;

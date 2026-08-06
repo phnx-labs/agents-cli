@@ -63,7 +63,7 @@
  * changes either way — tracked separately (agents-cli#1884), not fixed here.
  */
 import { sshExec, sshStream, shellQuote } from '../ssh-exec.js';
-import { sshTargetFor, type Host } from './types.js';
+import { hostIdentityArgs, sshTargetFor, type Host } from './types.js';
 
 /** ssh's connection-layer failure code — the signal that the link dropped rather
  *  than the remote command exiting on its own. Mirrors ssh-exec.ts `sshStream`. */
@@ -200,11 +200,12 @@ export function reattachRemoteCommand(sessionId: string): string {
  */
 export function reattachRemoteSession(host: Host, sessionId: string): ReconnectOutcome {
   const target = sshTargetFor(host);
+  const extraSshArgs = hostIdentityArgs(host);
   // Fresh (non-multiplexed) reachability probe: code 0 means the handshake actually
   // completed, so a hung/failed connect is never mistaken for a live reconnection.
-  const probe = sshExec(target, 'true', { multiplex: false });
+  const probe = sshExec(target, 'true', { multiplex: false, extraSshArgs });
   if (probe.code !== 0) return { code: SSH_CONN_FAILURE, connected: false };
-  return { code: sshStream(target, reattachRemoteCommand(sessionId), { tty: true }), connected: true };
+  return { code: sshStream(target, reattachRemoteCommand(sessionId), { tty: true, extraSshArgs }), connected: true };
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));

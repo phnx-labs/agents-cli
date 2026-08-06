@@ -47,14 +47,14 @@ export const REMOTE_MIRROR_MAX_BYTES = 512 * 1024;
  */
 export function pullRemoteLogDelta(
   target: string,
-  opts: { remoteLog: string; offset: number },
+  opts: { remoteLog: string; offset: number; extraSshArgs?: string[] },
 ): { bytes: Buffer; newOffset: number } | null {
   // remoteLog is a dispatch-generated `$HOME/.agents/.cache/hosts/<hex>.log` path —
   // interpolate UNQUOTED so the remote shell expands `$HOME` (shellQuote would
   // single-quote it into a literal `$HOME`, and the tail would find nothing). The
   // hex basename is injection-safe, matching fetchProgress below.
   const remote = `tail -c +${opts.offset + 1} ${opts.remoteLog} 2>/dev/null`;
-  const res = sshExecRaw(target, remote, { timeoutMs: 20000, multiplex: true });
+  const res = sshExecRaw(target, remote, { timeoutMs: 20000, multiplex: true, extraSshArgs: opts.extraSshArgs });
   if (res.code === null) return null; // ssh itself failed / timed out
   return { bytes: res.stdout, newOffset: opts.offset + res.stdout.length };
 }
@@ -126,7 +126,7 @@ export function splitProgressBytes(
  */
 export function fetchProgress(
   target: string,
-  opts: { remoteLog: string; remoteExit: string; taskId: string; offset: number },
+  opts: { remoteLog: string; remoteExit: string; taskId: string; offset: number; extraSshArgs?: string[] },
 ): { logChunk: Buffer; exit: string } | null {
   // Derive the printf format from the SAME exitMarker the parser splits on, so
   // the emitted sentinel and the one we look for can never desync. The marker's
@@ -141,7 +141,7 @@ export function fetchProgress(
   // byte-for-byte so a multibyte char split at the `tail -c` boundary neither
   // drifts the offset nor renders as U+FFFD. The exit code is pure ASCII → safe
   // to decode to a string for the caller's `.trim()`.
-  const res = sshExecRaw(target, remote, { timeoutMs: 20000 });
+  const res = sshExecRaw(target, remote, { timeoutMs: 20000, extraSshArgs: opts.extraSshArgs });
   const parts = splitProgressBytes(res.stdout, opts.taskId);
   if (!parts) return null;
   return { logChunk: parts.logChunk, exit: parts.exit.toString('utf8') };

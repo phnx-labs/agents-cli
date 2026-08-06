@@ -18,7 +18,7 @@
  * `user@host` all resolve identically no matter which subcommand called.
  */
 import chalk from 'chalk';
-import { sshTargetFor } from '../hosts/types.js';
+import { hostIdentityArgs, sshTargetFor } from '../hosts/types.js';
 import { matchHost, splitUserHost, type MatchHostOptions } from '../hosts/registry.js';
 import { normalizeHost } from '../machine-id.js';
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
@@ -33,6 +33,7 @@ export interface ResolvedSshTarget {
   machine: string;
   name: string;
   os?: string;
+  extraSshArgs?: string[];
 }
 
 export interface ResolvedExplicitTargetSet {
@@ -78,7 +79,14 @@ async function toResolvedTarget(token: string): Promise<ResolvedSshTarget | unde
   }
   const hostPart = host.device ? host.device.name : splitUserHost(host.name).host;
   const name = host.device ? host.device.name : host.name;
-  return { target, machine: normalizeHost(hostPart), name, os: host.os ?? resolveRemoteOsSync(name) };
+  const extraSshArgs = hostIdentityArgs(host);
+  return {
+    target,
+    machine: normalizeHost(hostPart),
+    name,
+    os: host.os ?? resolveRemoteOsSync(name),
+    ...(extraSshArgs.length > 0 ? { extraSshArgs } : {}),
+  };
 }
 
 /**

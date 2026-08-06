@@ -49,7 +49,7 @@ export async function pullBundlesFromHosts(hosts: string[], exportArgs: string[]
   for (const t of targets) {
     const cmd = remoteAgentsCommand(['sessions', 'export', ...exportArgs, '--stdout'], t.os);
     process.stderr.write(chalk.dim(`Pulling sessions from ${t.name}…\n`));
-    const res = sshExec(t.target, cmd, { timeoutMs: REMOTE_EXPORT_TIMEOUT_MS });
+    const res = sshExec(t.target, cmd, { timeoutMs: REMOTE_EXPORT_TIMEOUT_MS, extraSshArgs: t.extraSshArgs });
     if (res.timedOut) {
       errors.push(`${t.name}: timed out after ${Math.round(REMOTE_EXPORT_TIMEOUT_MS / 1000)}s`);
       continue;

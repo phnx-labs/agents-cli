@@ -177,6 +177,7 @@ export class HostCloudProvider implements CloudProvider {
         remoteExit: task.remoteExit,
         taskId: task.id,
         offset,
+        extraSshArgs: task.identityFile ? ['-i', task.identityFile, '-o', 'IdentitiesOnly=yes'] : [],
       });
       if (fetched) {
         if (fetched.logChunk.length > 0) {

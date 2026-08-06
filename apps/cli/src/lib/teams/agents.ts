@@ -561,6 +561,7 @@ export class AgentProcess {
   // (remotePid/remoteLog/remoteExit) — so the giant constructor stays untouched.
   hostName: string | null = null;
   hostTarget: string | null = null;
+  hostIdentityFile: string | null = null;
   repoPath: string | null = null;
   remotePid: number | null = null;
   remoteLog: string | null = null;
@@ -816,6 +817,7 @@ export class AgentProcess {
     const delta = pullRemoteLogDelta(this.hostTarget, {
       remoteLog: this.remoteLog,
       offset: this.remoteLogOffset,
+      extraSshArgs: this.hostIdentityFile ? ['-i', this.hostIdentityFile, '-o', 'IdentitiesOnly=yes'] : [],
     });
     if (delta && delta.bytes.length > 0) {
       const stdoutPath = await this.getStdoutPath();
@@ -840,6 +842,7 @@ export class AgentProcess {
       const res = sshExec(this.hostTarget, `cat ${this.remoteExit} 2>/dev/null`, {
         timeoutMs: 8000,
         multiplex: true,
+        extraSshArgs: this.hostIdentityFile ? ['-i', this.hostIdentityFile, '-o', 'IdentitiesOnly=yes'] : [],
       });
       exit = res.code === 0 && res.stdout.trim() !== '' ? res.stdout.trim() : null;
     }
@@ -1026,6 +1029,7 @@ export class AgentProcess {
       worktree_path: this.worktreePath,
       host_name: this.hostName,
       host_target: this.hostTarget,
+      host_identity_file: this.hostIdentityFile,
       repo_path: this.repoPath,
       remote_pid: this.remotePid,
       remote_log: this.remoteLog,
@@ -1115,6 +1119,7 @@ export class AgentProcess {
       // constructor signature stays fixed. Null on every pre-existing teammate.
       agent.hostName = meta.host_name || null;
       agent.hostTarget = meta.host_target || null;
+      agent.hostIdentityFile = meta.host_identity_file || null;
       agent.repoPath = meta.repo_path || null;
       agent.remotePid = typeof meta.remote_pid === 'number' ? meta.remote_pid : null;
       agent.remoteLog = meta.remote_log || null;
@@ -1142,7 +1147,11 @@ export class AgentProcess {
       const probe =
         `test -f ${this.remoteExit} && echo DEAD || ` +
         `(kill -0 ${this.remotePid} 2>/dev/null && echo ALIVE || echo DEAD)`;
-      const res = sshExec(this.hostTarget, probe, { timeoutMs: 8000, multiplex: true });
+      const res = sshExec(this.hostTarget, probe, {
+        timeoutMs: 8000,
+        multiplex: true,
+        extraSshArgs: this.hostIdentityFile ? ['-i', this.hostIdentityFile, '-o', 'IdentitiesOnly=yes'] : [],
+      });
       if (res.code === null) return true; // transient ssh failure — don't reap early
       return res.stdout.trim().endsWith('ALIVE');
     }
@@ -1945,6 +1954,7 @@ export class AgentManager {
     if (!host) {
       throw new Error(`Cannot launch remote teammate ${agent.agentId}: device "${agent.hostName}" no longer resolves.`);
     }
+    agent.hostIdentityFile = host.identityFile ?? null;
 
     // Ensure agents-cli is present + version-matched on the host; surface (not
     // fail on) an agent-not-installed warning like dispatch.ts does.
@@ -2068,6 +2078,7 @@ export class AgentManager {
     const repoRoot = ensureRemoteRepo(target, teamMeta?.repo ?? '', taskName);
     agent.hostName = host.name;
     agent.hostTarget = target;
+    agent.hostIdentityFile = host.identityFile ?? null;
     agent.repoPath = repoRoot;
     await agent.saveMeta();
   }
@@ -2530,6 +2541,7 @@ export class AgentManager {
           sshExec(agent.hostTarget, `kill -TERM -- -${agent.remotePid} 2>/dev/null`, {
             timeoutMs: 10000,
             multiplex: true,
+            extraSshArgs: agent.hostIdentityFile ? ['-i', agent.hostIdentityFile, '-o', 'IdentitiesOnly=yes'] : [],
           });
         } catch {
           // best-effort — record the stop regardless

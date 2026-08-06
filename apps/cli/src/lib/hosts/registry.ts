@@ -121,6 +121,7 @@ function deviceHost(device: DeviceProfile, user: string | undefined, overlay?: H
     source: 'inline',
     ...(address ? { address } : {}),
     user: user ?? device.user,
+    identityFile: device.auth.identityFile,
     os: device.platform !== 'unknown' ? device.platform : overlay?.os,
     ...(overlay?.caps?.length ? { caps: overlay.caps } : {}),
     enrolled: true,

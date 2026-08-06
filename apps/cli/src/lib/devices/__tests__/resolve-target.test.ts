@@ -75,6 +75,12 @@ describe('resolveExplicitTargets — fan-out through the unified core', () => {
     });
   });
 
+  it('carries the registered identity into explicit fan-out targets', async () => {
+    await addDevice('keyed', { auth: { method: 'key', identityFile: '/keys/keyed' } });
+    const [r] = await resolveExplicitTargets(['keyed']);
+    expect(r?.extraSshArgs).toEqual(['-i', '/keys/keyed', '-o', 'IdentitiesOnly=yes']);
+  });
+
   it('matches a tailnet FQDN / different case to the same device (normalized)', async () => {
     await addDevice('yosemite-s0');
     expect((await resolveExplicitTargets(['YOSEMITE-S0.tail1a85a1.ts.net']))[0]?.target).toBe(

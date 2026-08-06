@@ -117,7 +117,8 @@ export function tailLines(text: string, n: number): string {
  * and progress.ts.
  */
 function fetchAndCacheRemoteLog(task: HostTask): Buffer | null {
-  const res = sshExecRaw(task.target, `cat ${task.remoteLog} 2>/dev/null`, { timeoutMs: 30000, multiplex: true });
+  const extraSshArgs = task.identityFile ? ['-i', task.identityFile, '-o', 'IdentitiesOnly=yes'] : [];
+  const res = sshExecRaw(task.target, `cat ${task.remoteLog} 2>/dev/null`, { timeoutMs: 30000, multiplex: true, extraSshArgs });
   if (res.code !== 0 || res.stdout.length === 0) return null;
   // The hosts cache dir already exists (saveTask created it) — write is best-effort.
   try { fs.writeFileSync(localLogPath(task.id), res.stdout); } catch { /* best-effort cache */ }

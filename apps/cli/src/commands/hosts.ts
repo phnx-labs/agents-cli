@@ -15,7 +15,7 @@ import { isInteractiveTerminal } from './utils.js';
 import { assertValidSshTarget } from '../lib/ssh-exec.js';
 import { getProvider, listAllHosts, resolveHost } from '../lib/hosts/registry.js';
 import { getDevice } from '../lib/devices/registry.js';
-import { sshTargetFor, type Host } from '../lib/hosts/types.js';
+import { hostIdentityArgs, sshTargetFor, type Host } from '../lib/hosts/types.js';
 import { listSshConfigHosts, listKnownHosts, isSshConfigHost } from '../lib/hosts/ssh-config.js';
 import {
   probeHost,
@@ -205,14 +205,15 @@ async function doCheck(name: string): Promise<void> {
   const target = sshTargetFor(host);
   const os = host.os ?? resolveRemoteOsSync(name);
   process.stdout.write(`Probing ${chalk.cyan(name)} (${target})… `);
-  const probe = probeHost(target, os);
+  const identityArgs = hostIdentityArgs(host);
+  const probe = probeHost(target, os, identityArgs);
   if (!probe.reachable) {
     console.log(chalk.red('unreachable'));
     process.exitCode = 1;
     return;
   }
   console.log(chalk.green('reachable') + chalk.gray(probe.os ? ` · ${probe.os}` : ''));
-  const ver = remoteAgentsVersion(target, probe.os ?? os);
+  const ver = remoteAgentsVersion(target, probe.os ?? os, identityArgs);
   console.log(`  agents-cli: ${ver ? chalk.green(ver) : chalk.yellow('not installed')}`);
 }
 
