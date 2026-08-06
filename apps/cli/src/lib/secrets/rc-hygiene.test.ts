@@ -3,7 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  MASTER_PASSPHRASE,
   isCredentialName,
+  masterPassphraseInEnv,
   scanRcExports,
   scanUserRcFiles,
 } from './rc-hygiene.js';
@@ -136,6 +138,51 @@ describe('scanUserRcFiles', () => {
     try {
       expect(scanUserRcFiles(dir)).toEqual([]);
     } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('masterPassphraseInEnv', () => {
+  // Real process.env, no stubbing — this is the actual signal the doctor reads.
+  const saved = process.env[MASTER_PASSPHRASE];
+  const restore = () => {
+    if (saved === undefined) delete process.env[MASTER_PASSPHRASE];
+    else process.env[MASTER_PASSPHRASE] = saved;
+  };
+
+  it('is false when unset, true when set', () => {
+    try {
+      delete process.env[MASTER_PASSPHRASE];
+      expect(masterPassphraseInEnv()).toBe(false);
+      process.env[MASTER_PASSPHRASE] = 'not-a-real-key';
+      expect(masterPassphraseInEnv()).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it('treats an empty value as unset', () => {
+    // An exported-but-empty var is not a leak, and reporting one would train
+    // operators to ignore the finding.
+    try {
+      process.env[MASTER_PASSPHRASE] = '';
+      expect(masterPassphraseInEnv()).toBe(false);
+    } finally {
+      restore();
+    }
+  });
+
+  it('detects the leak the FILE scan cannot see', () => {
+    // A home dir with no rc export at all: scanUserRcFiles is clean while the
+    // value is live in this process. That divergence is the whole finding.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-hygiene-env-'));
+    try {
+      process.env[MASTER_PASSPHRASE] = 'not-a-real-key';
+      expect(scanUserRcFiles(dir)).toEqual([]);
+      expect(masterPassphraseInEnv()).toBe(true);
+    } finally {
+      restore();
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });

@@ -123,7 +123,7 @@ collapses to the CRITICAL section plus one `▸ <machine>` block. Severity:
 `missing-resource`, `content-drift`, `never-synced`, `stale`, `repo-behind`,
 `repo-drift`, `version-skew`, `fleet-resource-gap`, `orphan`, `duplicate-hook`,
 `duplicate-hook-drift`, `host-cli-missing`, `host-cli-invalid`,
-`rc-secret-export`, `exec-policy` and `stale-cli`. (RUSH-2162 moved
+`rc-secret-export`, `env-secret-export`, `exec-policy` and `stale-cli`. (RUSH-2162 moved
 `never-synced` and `duplicate-hook-drift` to warning — both are stale-sync states
 one `agents sync` resolves.)
 
@@ -175,6 +175,7 @@ testable without a shell, PowerShell, or an installed CLI):
 | Check | Input | Finding kind |
 |---|---|---|
 | Credential-shaped shell-rc exports (RUSH-1968) | `rcSecrets` | `rc-secret-export` |
+| The file-store master key live in the process env (RUSH-1968) | `masterPassphraseInEnv` | `env-secret-export` |
 | Windows exec policy blocking `agents.ps1` | `execPolicy` | `exec-policy` |
 | Hooks duplicated across version homes | `duplicateHooks` | `duplicate-hook{,-drift}` |
 | Declared host CLIs not on PATH | `hostClis.statuses` | `host-cli-missing` |

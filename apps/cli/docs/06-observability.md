@@ -512,7 +512,7 @@ agents doctor · zion                                        1.20.81
 - **WARNING** (`⚠`) — `logout-unprovable`, `missing-resource`, `content-drift`,
   `never-synced`, `stale`, `repo-behind`, `repo-drift`, `version-skew`,
   `fleet-resource-gap`, `orphan`, `duplicate-hook`, `duplicate-hook-drift`,
-  `host-cli-missing`, `host-cli-invalid`, `rc-secret-export`, `exec-policy`,
+  `host-cli-missing`, `host-cli-invalid`, `rc-secret-export`, `env-secret-export`, `exec-policy`,
   `stale-cli`. Each is resolvable by a routine sync or cleanup.
 
 RUSH-2162 moved `never-synced` and `duplicate-hook-drift` from critical to

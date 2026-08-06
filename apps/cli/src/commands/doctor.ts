@@ -72,7 +72,7 @@ import { listCliStatus, listCliStatusAsync } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
 import { heal, healChangedAnything, type HealResult } from '../lib/heal.js';
 import { getEffectiveExecutionPolicy } from '../lib/platform/winpath.js';
-import { scanUserRcFiles } from '../lib/secrets/rc-hygiene.js';
+import { scanUserRcFiles, masterPassphraseInEnv } from '../lib/secrets/rc-hygiene.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import { readRepoBehindMarkers, type FetchStatusMarker } from '../lib/auto-pull.js';
 import * as fs from 'fs';
@@ -431,6 +431,7 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
         duplicateHooks: inspectDuplicateVersionHooks(cwd),
         hostClis: toHostCliInput(listCliStatus(cwd)),
         rcSecrets: scanUserRcFiles(),
+        masterPassphraseInEnv: masterPassphraseInEnv(),
         execPolicy: process.platform === 'win32'
           ? { platform: process.platform, policy: getEffectiveExecutionPolicy() }
           : undefined,
@@ -1610,6 +1611,7 @@ export function registerDoctorCommand(program: Command): void {
           duplicateHooks,
           hostClis: toHostCliInput(hostClis),
           rcSecrets: scanUserRcFiles(),
+          masterPassphraseInEnv: masterPassphraseInEnv(),
           // getEffectiveExecutionPolicy spawns powershell — a doomed process on
           // POSIX, where the advisory never applies. Probe only on Windows.
           execPolicy: process.platform === 'win32'

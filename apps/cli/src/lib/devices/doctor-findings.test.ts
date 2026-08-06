@@ -364,6 +364,34 @@ describe('rc-hygiene + exec-policy findings (restored from the pre-RUSH-2069 adv
     expect(buildLocalFindings(localInput({ rcSecrets: [] })).some((f) => f.kind === 'rc-secret-export')).toBe(false);
   });
 
+  it('the master key live in the process env is its own warning', () => {
+    const findings = buildLocalFindings(localInput({ masterPassphraseInEnv: true }));
+    const env = findings.filter((f) => f.kind === 'env-secret-export');
+    expect(env).toHaveLength(1);
+    expect(env[0].severity).toBe('warning');
+    expect(env[0].remediation).toBe('unset it and restart the shell');
+    // The message must never carry the value — only that it is set.
+    expect(env[0].message).toContain('AGENTS_SECRETS_PASSPHRASE is set in this process environment');
+  });
+
+  it('the env finding fires with NO rc export present — the gap it exists for', () => {
+    // The whole point: a value inherited by a long-lived process outlives the rc
+    // line that set it, so deleting the line leaves `rcSecrets` empty while the
+    // key is still in flight. A file scan alone reports that box clean.
+    const findings = buildLocalFindings(localInput({ rcSecrets: [], masterPassphraseInEnv: true }));
+    expect(findings.some((f) => f.kind === 'rc-secret-export')).toBe(false);
+    expect(findings.some((f) => f.kind === 'env-secret-export')).toBe(true);
+  });
+
+  it('not set → no env finding', () => {
+    expect(buildLocalFindings(localInput({ masterPassphraseInEnv: false }))
+      .some((f) => f.kind === 'env-secret-export')).toBe(false);
+    // Absent input behaves as false rather than throwing — every other local
+    // input is optional and a remote payload may omit it.
+    expect(buildLocalFindings(localInput({}))
+      .some((f) => f.kind === 'env-secret-export')).toBe(false);
+  });
+
   it.each(['Restricted', 'AllSigned'] as const)(
     'a Windows %s execution policy warns that agents.ps1 is blocked',
     (policy) => {
