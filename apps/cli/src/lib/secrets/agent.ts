@@ -716,7 +716,10 @@ export async function runSecretsAgent(
     const now = Date.now();
     for (const [name, e] of store) if (now >= e.expiresAt) {
       store.delete(name);
-      if (e.lease) emitSecretAudit({ event: 'secrets.lease-expire', bundle: e.bundle.name, operation: 'lease-expire', source: 'broker', status: 'success', keys: e.lease.keys, keyCount: e.lease.keys.length, agent: e.lease.harness });
+      if (e.lease) {
+        deleteLeaseSession(e.lease.id);
+        emitSecretAudit({ event: 'secrets.lease-expire', bundle: e.bundle.name, operation: 'lease-expire', source: 'broker', status: 'success', keys: e.lease.keys, keyCount: e.lease.keys.length, agent: e.lease.harness });
+      }
     }
     const live = realBundleCount(store);
     // Self-heal onto a newer in-place install — but ONLY while no real unlocks

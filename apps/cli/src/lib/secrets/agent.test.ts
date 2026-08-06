@@ -110,6 +110,13 @@ describe('handleAgentRequest', () => {
     expect(handleAgentRequest(store, { cmd: 'get', name: 'prod' }, 1)).toMatchObject({ env: { TOKEN: 't' } });
   });
 
+  it('rejects a leased load when the payload omits a granted key', () => {
+    const store = freshStore();
+    const lease = { id: 'lease-missing', bundle: 'prod', keys: ['TOKEN'], createdAt: 0, expiresAt: 60_000, harness: '*', sleepPersist: false };
+    expect(handleAgentRequest(store, { ...loadReq('prod', { ADMIN: 'no' }, 60_000), lease }, 0)).toMatchObject({ ok: false });
+    expect(handleAgentRequest(store, { cmd: 'get', name: 'prod' }, 1)).toMatchObject({ hit: false });
+  });
+
   it('revokes exactly one lease id without wiping other grants', () => {
     const store = freshStore();
     const lease = (id: string, bundle: string) => ({ id, bundle, keys: ['TOKEN'], createdAt: 0, expiresAt: 60_000, harness: '*', sleepPersist: false });

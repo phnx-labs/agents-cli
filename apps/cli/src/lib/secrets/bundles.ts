@@ -1233,9 +1233,9 @@ export function canCacheResolvedEnv(bundle: SecretsBundle, selectedKeys: Set<str
 
 /**
  * Apply the --keys subset + expiry gate to an already-resolved snapshot from
- * the secrets-agent fast-path. The agent stores the FULL bundle env, so a
- * naive fast-path return would silently defeat --keys and inject expired
- * values. Mirrors the slow-path pre-checks in `resolveBundleEnv` /
+ * the secrets-agent fast-path. The agent stores either a full unlock or a
+ * scoped lease env, so a naive fast-path return could silently defeat --keys
+ * and inject expired values. Mirrors the slow-path pre-checks in `resolveBundleEnv` /
  * `readAndResolveBundleEnv` and returns a new env whose keys match the subset.
  *
  * Exported for tests; production callers reach it via the fast-path branch in
