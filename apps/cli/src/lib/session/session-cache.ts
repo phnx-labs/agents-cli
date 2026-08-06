@@ -498,10 +498,14 @@ export async function loadFleetActiveSessions(
   } catch {
     self = undefined;
   }
-  const localOnly = live.sessions.filter(
-    (s) => !s.machine || (self !== undefined && s.machine === self),
-  );
-  if (localOnly.length > 0) {
+  // Always rewrite the local slice when we know self — including the empty
+  // case. If the last local session just died, leaving a still-fresh snapshot
+  // with ghost rows would make watchdog / `--local` report sessions that are
+  // gone (review on RUSH-2062 / PR #2116).
+  if (self !== undefined) {
+    const localOnly = live.sessions.filter(
+      (s) => !s.machine || s.machine === self,
+    );
     writeCache('local', localOnly, { capturedAt: now });
   }
   return {

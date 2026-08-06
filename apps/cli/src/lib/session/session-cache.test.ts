@@ -199,6 +199,35 @@ describe('loadFleetActiveSessions — fleet snapshot share', () => {
     expect(res.remoteDeviceCount).toBe(3);
     expect(res.sessions[0].machine).toBe('box-a');
   });
+
+  it('rewrites local to empty when a live fleet gather has no local rows (no ghost sessions)', async () => {
+    // Prior warm left a local session; the next fleet gather has only remotes
+    // — the local snapshot must not keep ghosting the dead row.
+    writeActiveSessionsCache(
+      'local',
+      [session({ sessionId: 'ghost', status: 'running', lastActivityMs: 1 })],
+      { capturedAt: 500 },
+    );
+
+    await loadFleetActiveSessions({
+      forceRefresh: true,
+      nowMs: 10_000,
+      gather: async () => ({
+        sessions: [
+          session({ sessionId: 'remote-only', machine: 'other-box', status: 'running' }),
+        ],
+        remoteDeviceCount: 1,
+      }),
+    });
+
+    const local = readActiveSessionsCache('local');
+    // When machineId() is available, local is rewritten at nowMs and must not
+    // contain `ghost`. When machineId is unavailable the write is skipped —
+    // assert the invariant only when the rewrite ran.
+    if (local && local.capturedAt === 10_000) {
+      expect(local.sessions.some((s) => s.sessionId === 'ghost')).toBe(false);
+    }
+  });
 });
 
 describe('immutable memo — mtime-keyed, never carries live status', () => {

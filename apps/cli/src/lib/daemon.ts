@@ -883,17 +883,20 @@ export async function runDaemon(): Promise<void> {
   // live status fresh; forceRefresh still re-gathers. Additive sibling of
   // fleetCacheInterval — does not touch the reaper tick.
   let warmingSessionCache = false;
+  // Import once so the interval/kickoff constants stay the single source of truth
+  // (SESSION_CACHE_WARM_* in session-cache.ts). Dynamic import of the warm fn
+  // itself stays inside the tick so a cold daemon boot does not pay the load.
+  const sessionCacheWarmTiming = import('./session/session-cache.js').then((m) => ({
+    intervalMs: m.SESSION_CACHE_WARM_INTERVAL_MS,
+    kickoffMs: m.SESSION_CACHE_WARM_KICKOFF_MS,
+    publish: m.publishLocalActiveSessions,
+  }));
   const runSessionCacheWarm = async () => {
     if (warmingSessionCache) return;
     warmingSessionCache = true;
     try {
-      const {
-        publishLocalActiveSessions,
-        SESSION_CACHE_WARM_INTERVAL_MS,
-      } = await import('./session/session-cache.js');
-      // INTERVAL is imported so a greppable reference keeps daemon + module in sync.
-      void SESSION_CACHE_WARM_INTERVAL_MS;
-      const r = await publishLocalActiveSessions();
+      const { publish } = await sessionCacheWarmTiming;
+      const r = await publish();
       log('INFO', `session cache warm: ${r.sessions.length} local session(s)`);
     } catch (err) {
       log('ERROR', `session cache warm failed: ${(err as Error).message}`);
@@ -901,9 +904,14 @@ export async function runDaemon(): Promise<void> {
       warmingSessionCache = false;
     }
   };
-  // Keep the numeric interval aligned with SESSION_CACHE_WARM_INTERVAL_MS (15s).
-  const sessionCacheInterval = setInterval(() => { void runSessionCacheWarm(); }, 15_000);
-  const sessionCacheKickoff = setTimeout(() => { void runSessionCacheWarm(); }, 25_000);
+  // Intervals resolved from the module constants (fallback matches the defaults
+  // if the import is still pending — the first tick uses the live import).
+  let sessionCacheInterval: ReturnType<typeof setInterval> | undefined;
+  let sessionCacheKickoff: ReturnType<typeof setTimeout> | undefined;
+  void sessionCacheWarmTiming.then(({ intervalMs, kickoffMs }) => {
+    sessionCacheInterval = setInterval(() => { void runSessionCacheWarm(); }, intervalMs);
+    sessionCacheKickoff = setTimeout(() => { void runSessionCacheWarm(); }, kickoffMs);
+  });
 
   // Usage refresh: keep the usage cache the `agents run` router reads
   // (RUSH-2061, readOnly hot path) fresh, WITHOUT the hot path ever fetching.
@@ -1025,8 +1033,8 @@ export async function runDaemon(): Promise<void> {
     clearTimeout(launchHealthKickoff);
     clearInterval(fleetCacheInterval);
     clearTimeout(fleetCacheKickoff);
-    clearInterval(sessionCacheInterval);
-    clearTimeout(sessionCacheKickoff);
+    if (sessionCacheInterval) clearInterval(sessionCacheInterval);
+    if (sessionCacheKickoff) clearTimeout(sessionCacheKickoff);
     clearInterval(usageRefreshInterval);
     clearTimeout(usageRefreshKickoff);
     clearInterval(brokerSelfHealInterval);
