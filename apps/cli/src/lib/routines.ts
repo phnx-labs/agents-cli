@@ -413,11 +413,13 @@ export interface RunMeta {
   runId: string;
   agent?: AgentId;  // undefined at runtime for workflow and command jobs
   /**
-   * Resolved agent version this run launched under (the head of the failover
-   * chain). Recorded so `archiveRoutineTranscripts` can find the transcript in
-   * the per-version home a config-dir-relocating agent (claude/codex/kimi) writes
-   * to, and so account attribution can name the home that ran (RUSH-2271). Unset
-   * for command/self-updating runs.
+   * Resolved agent version this run launched under. Re-pointed to each failover
+   * attempt's version as the single-shot chain advances (runner.ts), so it names
+   * the version that actually ran and wrote the transcript. Recorded so
+   * `archiveRoutineTranscripts` can find the transcript in the per-version home a
+   * config-dir-relocating agent (claude/codex) writes to, and so account
+   * attribution can name the home that ran (RUSH-2271). Unset for
+   * command/self-updating runs.
    */
   version?: string;
   workflow?: string;

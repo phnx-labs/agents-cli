@@ -365,14 +365,20 @@ function generateRunId(): string {
 
 /**
  * Agents whose config dir `buildExecEnv` relocates OUT of the sandbox overlay HOME
- * into their per-version home (exec.ts: CLAUDE_CONFIG_DIR / CODEX_HOME / KIMI_CODE_HOME
- * / COPILOT_HOME). A routine spawned for one of these writes its transcript under the
- * version home, NOT the overlay the sandbox generated — so the archiver has to read it
- * there. Every one is version-pinned (never self-updating), so `RunMeta.version` names a
- * real home. Muse relocates too but via XDG on a self-updating home; it stays on the
- * overlay path here and is a separate follow-up.
+ * into their per-version home (exec.ts: CLAUDE_CONFIG_DIR / CODEX_HOME). A routine
+ * spawned for one of these writes its transcript under the version home, NOT the overlay
+ * the sandbox generated — so the archiver has to read it there. Both are version-pinned
+ * (never self-updating), so `RunMeta.version` names a real home.
+ *
+ * Scoped to the agents whose archived transcript the DISCOVERY side can already index as
+ * origin='routine' — `readRoutineArchiveMeta` (session/discover.ts) has a branch for
+ * claude and codex but not kimi. Kimi also relocates (KIMI_CODE_HOME) and hits the same
+ * bug, but archiving it here without a discovery branch would only copy files that are
+ * never indexed; adding a kimi reader (its session spans state.json + wire.jsonl under a
+ * `session_<uuid>` dir) is the separate follow-up that lets kimi join this set. Muse
+ * (XDG, self-updating) and copilot (no transcript spec) are likewise out of scope.
  */
-const CONFIG_DIR_RELOCATED_AGENTS = new Set<AgentId>(['claude', 'codex', 'kimi', 'copilot']);
+const CONFIG_DIR_RELOCATED_AGENTS = new Set<AgentId>(['claude', 'codex']);
 
 /** Whether this run's transcript lands in a SHARED per-version home (accumulating every
  *  session that version+account ever ran) rather than the run's own disposable overlay. */
@@ -1049,6 +1055,14 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     if (i === 0) {
       process.stderr.write(`[agents] routine ${config.name}: running ${label}\n`);
     }
+
+    // A rate-limit failover spawns the NEXT chain entry, whose version/account has
+    // its own per-version transcript home. Re-point meta.version at the attempt that
+    // is about to run and re-baseline that home, so the archiver reads the transcript
+    // where THIS attempt writes it — not chain[0]'s home (RUSH-2271). The pre-loop
+    // snapshot already covered chain[0]; this makes every later attempt correct too.
+    meta.version = attemptVersion;
+    snapshotRoutineTranscriptBase(meta, runDir, overlayHome);
 
     const viaAgentsRun = dispatchesViaAgentsRun(config);
     const cmd = viaAgentsRun

@@ -21,15 +21,18 @@ process.env.USERPROFILE = tmpHome;
 type Discover = typeof import('../discover.js');
 type DB = typeof import('../db.js');
 type State = typeof import('../../state.js');
+type Versions = typeof import('../../versions.js');
 
 let discover: Discover;
 let db: DB;
 let state: State;
+let versions: Versions;
 
 beforeAll(async () => {
   db = await import('../db.js');
   discover = await import('../discover.js');
   state = await import('../../state.js');
+  versions = await import('../../versions.js');
   db.getDB(); // create schema
 });
 
@@ -54,12 +57,24 @@ describe('RUSH-2271 routine archive → origin=routine (e2e)', () => {
     const runId = '2026-08-05T00-00-00-000Z';
     const sessionId = 'routine-sess-2271';
 
+    const transcript = claudeTranscript(sessionId);
+
+    // The ORIGINAL still lives in the per-version CLAUDE_CONFIG_DIR home (where the
+    // routine wrote it, and where the ordinary scan finds it as origin='cli') — the
+    // archive is a COPY. The routine-archive scan runs after the version-home scan
+    // within one discoverSessions pass, so origin='routine' must win deterministically.
+    const versionHomeProjects = path.join(
+      versions.getVersionHomePath('claude', '2.1.0'), '.claude', 'projects', '-home-u-repo',
+    );
+    fs.mkdirSync(versionHomeProjects, { recursive: true });
+    fs.writeFileSync(path.join(versionHomeProjects, `${sessionId}.jsonl`), transcript, 'utf-8');
+
     // Exactly what archiveRoutineTranscripts writes: the run's own sessions tree.
     const archiveDir = path.join(
       state.getRunsDir(), jobName, runId, 'sessions', 'claude', 'projects', '-home-u-repo',
     );
     fs.mkdirSync(archiveDir, { recursive: true });
-    fs.writeFileSync(path.join(archiveDir, `${sessionId}.jsonl`), claudeTranscript(sessionId), 'utf-8');
+    fs.writeFileSync(path.join(archiveDir, `${sessionId}.jsonl`), transcript, 'utf-8');
 
     await discover.discoverSessions({ agent: 'claude', all: true });
 

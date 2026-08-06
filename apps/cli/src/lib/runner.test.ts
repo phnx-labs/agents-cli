@@ -261,6 +261,46 @@ describe('routine transcript archiving', () => {
     }
   });
 
+  // RUSH-2271 failover: the single-shot loop spawns each chain entry's OWN version,
+  // whose per-version home differs from chain[0]'s. When a run rate-limit-fails over to
+  // a second account, the archiver must read the home the attempt that actually ran wrote
+  // to — re-pointed via meta.version + a re-taken baseline before each attempt (runner.ts).
+  it('archives the failover attempt\'s version home, not the first attempt\'s (RUSH-2271)', () => {
+    const jobName = 'archive-failover-test';
+    const runId = 'run-fo-1';
+    const vA = '99.0.2-rush2271'; // first attempt (rate-limited)
+    const vB = '99.0.3-rush2271'; // failover attempt that actually ran
+    const runDir = getRunDir(jobName, runId);
+    fs.mkdirSync(runDir, { recursive: true });
+    const projA = path.join(getVersionHomePath('claude', vA), '.claude', 'projects', 'p');
+    const projB = path.join(getVersionHomePath('claude', vB), '.claude', 'projects', 'p');
+    fs.mkdirSync(projA, { recursive: true });
+    fs.mkdirSync(projB, { recursive: true });
+    // A sibling session already in the failover home, and one in the first home.
+    fs.writeFileSync(path.join(projB, 'old-B.jsonl'), '{"type":"user","message":{"content":"earlier B session"}}\n', 'utf-8');
+    fs.writeFileSync(path.join(projA, 'old-A.jsonl'), '{"type":"user","message":{"content":"earlier A session"}}\n', 'utf-8');
+
+    try {
+      // Attempt 1 on version A: baseline A (rate-limits, writes nothing new).
+      snapshotRoutineTranscriptBase({ jobName, runId, agent: 'claude', version: vA }, runDir);
+      // Failover to version B: re-point meta.version + re-baseline B, then B runs.
+      const metaB = { jobName, runId, agent: 'claude' as const, version: vB };
+      snapshotRoutineTranscriptBase(metaB, runDir);
+      fs.writeFileSync(path.join(projB, 'sess-B.jsonl'), '{"type":"user","message":{"content":"ran on B"}}\n', 'utf-8');
+      archiveRoutineTranscripts(metaB, runDir);
+
+      const archivedB = path.join(runDir, 'sessions', 'claude', 'projects', 'p', 'sess-B.jsonl');
+      expect(fs.readFileSync(archivedB, 'utf-8')).toContain('ran on B');
+      // Neither the failover home's earlier session nor the first attempt's home is swept in.
+      expect(fs.existsSync(path.join(runDir, 'sessions', 'claude', 'projects', 'p', 'old-B.jsonl'))).toBe(false);
+      expect(fs.existsSync(path.join(runDir, 'sessions', 'claude', 'projects', 'p', 'old-A.jsonl'))).toBe(false);
+    } finally {
+      fs.rmSync(getVersionHomePath('claude', vA), { recursive: true, force: true });
+      fs.rmSync(getVersionHomePath('claude', vB), { recursive: true, force: true });
+      cleanupJobRuns(jobName);
+    }
+  });
+
   // Safety: a shared per-version home holds every session that version+account ran,
   // so with NO pre-spawn baseline the archiver cannot tell this run's transcript from
   // a sibling's — it must copy nothing rather than sweep them all in as origin='routine'.
