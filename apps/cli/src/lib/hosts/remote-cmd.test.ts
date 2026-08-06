@@ -49,6 +49,24 @@ describe('stripClixml', () => {
   it('yields empty output when the whole stream is CLIXML (no real payload)', () => {
     expect(stripClixml(CLIXML_BANNER)).toBe('');
   });
+
+  it('strips two consecutive CLIXML flushes', () => {
+    const payload = '{"outputTokens":9}';
+    expect(stripClixml(CLIXML_BANNER + '\n' + CLIXML_BANNER + '\n' + payload)).toBe(payload);
+  });
+
+  it('does NOT delete a legitimate JSON value that merely quotes CLIXML text', () => {
+    // A real CLIXML banner is present (so the guard fires), and the payload's own
+    // string fields contain the literal substrings `<Objs` and `</Objs>`. A naive
+    // global `<Objs>…</Objs>` strip would silently delete the JSON between them;
+    // the banner-anchored strip must leave the payload intact.
+    const payload = '{"topic":"debug <Objs> parsing","label":"</Objs> handler","outputTokens":5}';
+    const cleaned = stripClixml(CLIXML_BANNER + '\n' + payload);
+    const parsed = JSON.parse(cleaned);
+    expect(parsed.topic).toBe('debug <Objs> parsing');
+    expect(parsed.label).toBe('</Objs> handler');
+    expect(parsed.outputTokens).toBe(5);
+  });
 });
 
 /** Decode the PowerShell script a Windows `--host` invocation ships, by pulling

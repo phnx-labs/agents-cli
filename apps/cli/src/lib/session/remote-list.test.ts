@@ -262,6 +262,31 @@ describe('parseRemoteToolSearch', () => {
     expect(parseRemoteToolSearch(payload, 'mac-mini', ['program:git'])?.sessions).toHaveLength(1);
   });
 
+  it('parses an envelope a Windows peer prefixed with a CLIXML banner (RUSH-2286)', () => {
+    const payload = JSON.stringify({
+      schemaVersion: 1,
+      generatedAt: '2026-08-06T00:00:00Z',
+      query: { clauses: ['program:git'] },
+      coverage: { indexedFiles: 0, indexedCalls: 0, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
+      sessions: [{
+        id: 'w', shortId: 'w', agent: 'codex', timestamp: '2026-08-06T00:00:00Z',
+        filePath: 'C:\\peer\\w.jsonl', calls: [{
+          id: 'c', ordinal: 0, timestamp: '2026-08-06T00:00:01Z', tool: 'exec_command',
+          programs: ['git'], programOccurrences: [{ program: 'git', role: 'effective' }],
+          input: 'git status', outcome: 'unknown',
+        }],
+      }],
+    });
+    const polluted =
+      '#< CLIXML\n' +
+      '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">' +
+      '<Obj S="progress" RefId="0"><MS><AV>Preparing modules for first use.</AV></MS></Obj></Objs>\n' +
+      payload;
+    const parsed = parseRemoteToolSearch(polluted, 'win-mini');
+    expect(parsed?.sessions).toHaveLength(1);
+    expect(parsed?.sessions[0].machine).toBe('win-mini');
+  });
+
   it('preserves the transcript origin machine across a peer hop', () => {
     const payload = JSON.stringify({
       schemaVersion: 1,

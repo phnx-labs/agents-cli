@@ -330,11 +330,14 @@ export const POWERSHELL_PROGRESS_SILENCE = "$ProgressPreference = 'SilentlyConti
  */
 export function stripClixml(stdout: string): string {
   if (!stdout.includes('#< CLIXML')) return stdout;
+  // A CLIXML flush is the `#< CLIXML` banner immediately followed by one or more
+  // <Objs …>…</Objs> elements, as one contiguous block. Remove that whole unit,
+  // ANCHORED to the banner: the <Objs> removal is scoped to blocks that follow a
+  // banner, so a stray `<Objs>` appearing inside a legitimate JSON string value
+  // (a session title/prompt that quotes CLIXML text) is never touched — stripping
+  // <Objs> globally would silently delete JSON between two such substrings.
   return stdout
-    // The `#< CLIXML` banner line (a stream may flush it mid-output, so match anywhere).
-    .replace(/^#< CLIXML[^\n]*\r?\n?/gm, '')
-    // Each CLIXML object element carrying the serialized progress/error records.
-    .replace(/<Objs\b[\s\S]*?<\/Objs>/g, '')
+    .replace(/#< CLIXML[^\n]*\r?\n?(?:\s*<Objs\b[\s\S]*?<\/Objs>)*/g, '')
     .trim();
 }
 
