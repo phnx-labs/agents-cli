@@ -825,6 +825,16 @@ fi
 # the version was left merged but unshipped.
 #
 # Released by cleanup_all's trap on EVERY exit path, success or failure.
+#
+# Declare THIS process as the lease holder. A run killed externally never reaches
+# the trap, and the lease then outlives it: without a recorded pid the only cure
+# is waiting out the TTL, during which `status` reads `held` with nothing
+# releasing. With it, the next claim (or `release-lease.sh clear`) on this box
+# sees the holder is gone and reclaims immediately. It must be the orchestrating
+# release.sh pid, not $$ inside the lease script -- the background renewer runs
+# release-lease.sh in a fresh shell every 10 minutes, and recording that shell
+# would stamp every renewed lease with an already-dead pid.
+export RELEASE_LEASE_HOLDER_PID=$$
 LEASE_HELD=false
 if ! scripts/release-lease.sh claim "$TARGET"; then
   die "another release is in flight -- watch it instead of racing it (scripts/release-lease.sh status)"
