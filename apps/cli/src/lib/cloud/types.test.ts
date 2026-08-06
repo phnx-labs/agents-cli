@@ -114,4 +114,16 @@ describe('normalizeProviderStatus', () => {
       expect(normalizeProviderStatus('antigravity', undefined)).toBe('completed');
     });
   });
+
+  describe('cursor (v1 run statuses)', () => {
+    it('maps every documented run status', () => {
+      expect(normalizeProviderStatus('cursor', 'CREATING')).toBe('queued');
+      expect(normalizeProviderStatus('cursor', 'RUNNING')).toBe('running');
+      expect(normalizeProviderStatus('cursor', 'FINISHED')).toBe('completed');
+      expect(normalizeProviderStatus('cursor', 'ERROR')).toBe('failed');
+      expect(normalizeProviderStatus('cursor', 'EXPIRED')).toBe('failed');
+      expect(normalizeProviderStatus('cursor', 'CANCELLED')).toBe('cancelled');
+      expect(normalizeProviderStatus('cursor', 'future')).toBe('running');
+    });
+  });
 });

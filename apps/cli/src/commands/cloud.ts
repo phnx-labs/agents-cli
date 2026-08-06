@@ -41,7 +41,7 @@ export function registerCloudCommands(program: Command): void {
     .description('Dispatch and manage cloud agent tasks across providers (Rush, Codex, Factory, Antigravity).')
     .addHelpText('after', `
 Each agent runs in its own cloud. Pass --agent and the provider is auto-selected
-(claude→rush, codex→codex, droid→factory, antigravity→antigravity); --provider overrides.
+(claude→rush, codex→codex, cursor→cursor, droid→factory, antigravity→antigravity); --provider overrides.
 
 Providers:
   rush         Rush Cloud — Claude against a GitHub repo + branch → PR
@@ -88,7 +88,7 @@ Examples:
   cloud
     .command('run [prompt]')
     .description('Dispatch a task to a cloud agent.')
-    .option('--provider <id>', 'Cloud backend: rush, codex, factory, antigravity, host (overrides agent auto-routing)')
+    .option('--provider <id>', 'Cloud backend: rush, codex, cursor, factory, antigravity, host (overrides agent auto-routing)')
     .option('--agent <name>', 'Agent to run: claude, codex, droid, antigravity (auto-routes to its native cloud)')
     .option(
       '--repo <owner/repo>',

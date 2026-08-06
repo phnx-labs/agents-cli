@@ -101,7 +101,7 @@ export function resolveRunCloudProvider(agentId: string, explicitProvider?: stri
   if (!nativeProviderForAgent(agentId)) {
     throw new RunCloudError(
       `${agentId} has no native cloud. Cloud-capable agents: ${cloudCapableAgentIds().join(', ')}. ` +
-        `Override with --provider <id> (rush | codex | factory | antigravity | host).`,
+        `Override with --provider <id> (rush | codex | cursor | factory | antigravity | host).`,
     );
   }
   return resolveProvider(undefined, agentId);

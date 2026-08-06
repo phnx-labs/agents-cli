@@ -2,16 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { resolveProvider, nativeProviderForAgent } from './registry.js';
 
 describe('nativeProviderForAgent', () => {
-  it('maps the four agents to their own cloud', () => {
+  it('maps agents with native clouds', () => {
     expect(nativeProviderForAgent('claude')).toBe('rush');
     expect(nativeProviderForAgent('codex')).toBe('codex');
     expect(nativeProviderForAgent('droid')).toBe('factory');
     expect(nativeProviderForAgent('antigravity')).toBe('antigravity');
+    expect(nativeProviderForAgent('cursor')).toBe('cursor');
   });
 
   it('returns undefined for agents with no native cloud', () => {
     expect(nativeProviderForAgent('gemini')).toBeUndefined();
-    expect(nativeProviderForAgent('cursor')).toBeUndefined();
     expect(nativeProviderForAgent('not-an-agent')).toBeUndefined();
   });
 });
@@ -21,6 +21,7 @@ describe('resolveProvider precedence', () => {
     expect(resolveProvider(undefined, 'codex').id).toBe('codex');
     expect(resolveProvider(undefined, 'droid').id).toBe('factory');
     expect(resolveProvider(undefined, 'antigravity').id).toBe('antigravity');
+    expect(resolveProvider(undefined, 'cursor').id).toBe('cursor');
     expect(resolveProvider(undefined, 'claude').id).toBe('rush');
   });
 

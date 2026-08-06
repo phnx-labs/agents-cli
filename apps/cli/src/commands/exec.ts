@@ -855,9 +855,9 @@ export function registerRunCommand(program: Command): void {
     .option('--no-tailscale', 'Force a public-IP lease even when a reuse context would default to Tailscale.')
     .option(
       '--cloud',
-      'Vendor cloud placement: dispatch to the agent\'s native cloud (claude→rush, codex→codex, droid→factory, antigravity→antigravity) and stream the result. Same dispatch as `agents cloud run --agent <agent>`; tracked by `agents cloud list/status/logs`. Same as --where cloud. Mutually exclusive with --host/--lease and local-run flags.',
+      'Vendor cloud placement: dispatch to the agent\'s native cloud (claude→rush, codex→codex, cursor→cursor, droid→factory, antigravity→antigravity) and stream the result. Same dispatch as `agents cloud run --agent <agent>`; tracked by `agents cloud list/status/logs`. Same as --where cloud. Mutually exclusive with --host/--lease and local-run flags.',
     )
-    .option('--provider <id>', 'With --cloud: override the agent\'s native cloud provider (rush | codex | factory | antigravity | host).')
+    .option('--provider <id>', 'With --cloud: override the agent\'s native cloud provider (rush | codex | cursor | factory | antigravity | host).')
     .option(
       '--repo <owner/repo>',
       'With --cloud: GitHub repository. Repeatable for multi-repo dispatch (Rush Cloud only).',

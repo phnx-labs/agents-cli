@@ -301,6 +301,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     color: 'cyan',
     cliCommand: 'cursor-agent',
     npmPackage: '',
+    cloudProvider: 'cursor',
     installScript: 'curl https://cursor.com/install -fsS | bash && mv ~/.local/bin/agent ~/.local/bin/cursor-agent && grep -q "/.local/bin" ~/.zshrc || echo \'export PATH="$HOME/.local/bin:$PATH"\' >> ~/.zshrc',
     configDir: path.join(HOME, '.cursor'),
     commandsDir: path.join(HOME, '.cursor', 'commands'),
