@@ -11,7 +11,7 @@
  * what this file measures, decomposed into the four stages refresh.ts actually
  * runs per agent version:
  *
- *   1. DISCOVERY   refresh.ts:201 `getAvailableResources()` -> versions.ts:224,
+ *   1. DISCOVERY   refresh.ts:200 `getAvailableResources()` -> versions.ts:224,
  *                  re-called a second time per version inside the sync itself
  *                  (versions.ts:2799). Name-set scan across every layer.
  *   2. GUARD       versions.ts:2874-2875 `loadManifest` + `isStale` -- the fast
@@ -28,8 +28,9 @@
  *                  (fingerprint.ts:24 `fingerprintFile`, fingerprint.ts:59
  *                  `fingerprintDir`).
  *
- * plus the hook lifecycle registration refresh.ts:275/289 runs per version
- * (`parseHookManifest` hooks.ts:1369, `registerHooksToSettings` hooks.ts:1611).
+ * plus the hook lifecycle registration refresh.ts:287-294 runs per version
+ * (`parseHookManifest` hooks.ts:1369 once per refresh at refresh.ts:275;
+ * `registerHooksToSettings` hooks.ts:1611, called at refresh.ts:289).
  *
  * NO MOCKING. Every bench runs against this machine's REAL ~/.agents layout --
  * the real user repo (`getUserAgentsDir()`), the real system repo, the real
@@ -40,19 +41,33 @@
  * project-layer walk (`getProjectAgentsDir`) runs at its real depth.
  *
  * Side effects, stated plainly -- these are real writes, identical to what
- * `agents sync claude@<version>` does today, not test scaffolding:
- *   - the write benches copy resources into the chosen version home and rewrite
- *     its `.sync-manifest.json` (versions.ts:3264 `saveManifest`);
- *   - the first full sync of a version whose selectors are unset writes default
+ * `agents sync claude@<version>` does today, not test scaffolding. The list is
+ * exhaustive; anything added here must be added to it:
+ *   - EXACTLY ONE version home is written: `writeTarget`, the OLDEST installed
+ *     claude, never the newest and never the `~/.claude`-symlinked default. The
+ *     stage-3 full sync copies resources into it and rewrites its
+ *     `.sync-manifest.json` (versions.ts:3264 `saveManifest`); its pre-run state
+ *     is captured below and restored on exit, including deleting a manifest that
+ *     did not exist before.
+ *   - Every OTHER installed version is touched only by stage 6, which is
+ *     restricted to versions whose manifest is present and fresh, so
+ *     `syncResourcesToVersion` provably takes the versions.ts:2878 early return
+ *     and writes nothing into those homes. See `guardHitVersions`.
+ *   - `<projectRoot>/.claude/` in the INVOKING CHECKOUT is rewritten on every
+ *     `syncResourcesToVersion` call, guard hits included: versions.ts:2865-2867
+ *     runs `syncProjectResourcesToAgent` BEFORE the guard, and
+ *     project-resources.ts removes previously-managed paths and re-copies them
+ *     into `<projectRoot>/.<agent>/`. A `.claude` glob is gitignored, so this
+ *     cannot dirty a commit, but it is a real write and is named here rather
+ *     than omitted.
+ *   - The first sync of a version whose selectors are unset writes default
  *     resource patterns into ~/.agents/agents.yaml (versions.ts:2806 ->
- *     state.ts:1266 `ensureVersionResourcePatterns`, which no-ops once set);
- *   - `registerHooksToSettings` rewrites that version home's settings.json.
- * The target version is deliberately the OLDEST installed claude, never the
- * newest, so a bench run never writes into the version home most likely to be
- * running the session that invoked it.
+ *     state.ts:1266 `ensureVersionResourcePatterns`, which no-ops once set).
+ *   - `registerHooksToSettings` rewrites `writeTarget`'s settings.json.
  *
- * This file is NOT part of `vitest run`: vitest.config.ts:9 includes only
- * `*.test.ts`, so it is reached exclusively by `vitest bench`.
+ * This file is NOT part of `vitest run`: vitest.config.ts:11 includes only
+ * `*.test.ts` globs and there is no `benchmark.include`, so it is reached
+ * exclusively by `vitest bench` (whose default include matches `*.bench.ts`).
  */
 import { describe, bench } from 'vitest';
 import * as fs from 'node:fs';
@@ -62,6 +77,7 @@ import { planUmbrellaStages } from './sync-umbrella.js';
 import {
   getAvailableResources,
   getActuallySyncedResources,
+  getGlobalDefault,
   getNewResources,
   getProjectOnlyResources,
   getVersionHomePath,
@@ -69,7 +85,7 @@ import {
   syncResourcesToVersion,
 } from './versions.js';
 import { listResources } from './resources.js';
-import { buildManifest, isStale, loadManifest, saveManifest } from './staleness/index.js';
+import { buildManifest, isStale, loadManifest } from './staleness/index.js';
 import { getDetector } from './staleness/registry.js';
 import { clearLayerCache } from './staleness/layers.js';
 import { parseHookManifest, registerHooksToSettings } from './hooks.js';
@@ -78,15 +94,21 @@ const cwd = process.cwd();
 
 /**
  * Real installed claude versions, oldest first (versions.ts:1315 sorts with
- * `compareVersions`). Write benches target the oldest; read-only benches prefer
- * a version that already carries a `.sync-manifest.json` so the guard path is
- * measured against a manifest this bench did not just author.
+ * `compareVersions`). The ONE version this bench is allowed to write into is
+ * the oldest -- never the newest, never the `~/.claude`-symlinked default.
  */
 const installedClaude = listInstalledVersions('claude');
 const writeTarget = installedClaude[0];
-const manifestTarget =
-  installedClaude.find((v) => fs.existsSync(path.join(getVersionHomePath('claude', v), '.sync-manifest.json'))) ??
-  writeTarget;
+
+/**
+ * The version `refresh.ts:211` actually passes to `getActuallySyncedResources`
+ * is `defaultVer` (refresh.ts:205 `getGlobalDefault(agentId)`), not the oldest.
+ * The read-only detector benches use it so the number they report models the
+ * real call. Falls back to `writeTarget` only when no global default is
+ * recorded, in which case `refresh.ts:206` would `continue` past the agent
+ * entirely and there is no "real" version to model.
+ */
+const detectorTarget = getGlobalDefault('claude') ?? writeTarget;
 
 const hookManifest = parseHookManifest();
 
@@ -95,8 +117,42 @@ const hookManifest = parseHookManifest();
  * file is absent or its `v` does not match MANIFEST_VERSION, in which case
  * versions.ts:2875 never reaches `isStale` -- so a null here means the guard
  * benches have nothing real to measure and skip rather than fabricate one.
+ * Read-only: nothing in stage 2 writes, so this may safely be a version the
+ * write benches never touch.
  */
+const manifestTarget = detectorTarget;
 const storedManifest = manifestTarget ? loadManifest('claude', manifestTarget) : null;
+
+/**
+ * Versions stage 6 may fan out over. `syncResourcesToVersion` only takes the
+ * versions.ts:2878 early return when `loadManifest` returns a manifest AND
+ * `isStale` is false (versions.ts:2873-2880); ANY other state falls through to
+ * the full writer and ends at `saveManifest` (versions.ts:3264). Filtering here
+ * -- with the same two read-only calls the guard itself makes -- is what makes
+ * "stage 6 writes into no version home" true rather than merely intended. An
+ * earlier revision looped every installed version and did rewrite all eight
+ * manifests, including the default and the newest.
+ */
+const guardHitVersions = installedClaude.filter((v) => {
+  const m = loadManifest('claude', v);
+  return m !== null && !isStale(m, 'claude', v, cwd);
+});
+
+/**
+ * Pre-run state of the ONE manifest the write benches rewrite. Captured as raw
+ * bytes (not a parsed `SyncManifest`) so the restore is byte-exact, and as
+ * `null` when the file does not exist yet -- in which case restoring means
+ * DELETING the manifest the bench created, not writing some other version's.
+ * Restoring is a correctness step, not cleanup: a foreign or invented manifest
+ * changes what the next real `agents sync` decides to do (versions.ts:2873-2879).
+ */
+const writeTargetManifestPath = writeTarget
+  ? path.join(getVersionHomePath('claude', writeTarget), '.sync-manifest.json')
+  : null;
+const writeTargetManifestBefore =
+  writeTargetManifestPath && fs.existsSync(writeTargetManifestPath)
+    ? fs.readFileSync(writeTargetManifestPath)
+    : null;
 
 describe('stage 0 -- planUmbrellaStages (sync-umbrella.ts:51): the only work the umbrella itself does', () => {
   bench('bare `agents sync` (fetchRepos + reconcile)', () => {
@@ -109,7 +165,7 @@ describe('stage 0 -- planUmbrellaStages (sync-umbrella.ts:51): the only work the
 });
 
 describe.skipIf(!writeTarget)('stage 1 -- discovery: the name-set scan run once per refresh AND once per version', () => {
-  bench('getAvailableResources(cwd) (versions.ts:224) -- refresh.ts:201 and again at versions.ts:2799', () => {
+  bench('getAvailableResources(cwd) (versions.ts:224) -- refresh.ts:200 and again at versions.ts:2799', () => {
     getAvailableResources(cwd);
   });
 
@@ -136,11 +192,11 @@ describe.skipIf(!writeTarget)('stage 1 -- discovery: the name-set scan run once 
   });
 });
 
-describe.skipIf(!writeTarget)('stage 1b -- refresh.ts:211-212 new-resource diff (runs per agent even on the interactive path)', () => {
+describe.skipIf(!detectorTarget)('stage 1b -- refresh.ts:211-212 new-resource diff (computed per agent on BOTH paths)', () => {
   const available = getAvailableResources(cwd);
 
-  bench('getActuallySyncedResources + getNewResources (refresh.ts:211-212)', () => {
-    const synced = getActuallySyncedResources('claude', writeTarget!);
+  bench(`getActuallySyncedResources + getNewResources (refresh.ts:211-212), claude@${detectorTarget} (the refresh.ts:205 defaultVer)`, () => {
+    const synced = getActuallySyncedResources('claude', detectorTarget!);
     getNewResources(available, synced, getProjectOnlyResources());
   });
 });
@@ -151,8 +207,8 @@ describe.skipIf(!writeTarget)('stage 1b -- refresh.ts:211-212 new-resource diff 
  * whole says only that it is slow. This attributes the cost to a single kind,
  * which is what a proposal has to name.
  */
-describe.skipIf(!writeTarget)('stage 1c -- per-detector breakdown of getActuallySyncedResources (versions.ts:460-468)', () => {
-  const ctx = { version: writeTarget!, versionHome: getVersionHomePath('claude', writeTarget!), cwd };
+describe.skipIf(!detectorTarget)('stage 1c -- per-detector breakdown of getActuallySyncedResources (versions.ts:460-468)', () => {
+  const ctx = { version: detectorTarget!, versionHome: getVersionHomePath('claude', detectorTarget!), cwd };
   const kinds = ['commands', 'skills', 'hooks', 'rules', 'mcp', 'permissions', 'subagents', 'plugins', 'workflows'] as const;
 
   for (const kind of kinds) {
@@ -228,30 +284,40 @@ describe.skipIf(!writeTarget || Object.keys(hookManifest).length === 0)(
 /**
  * refresh.ts:207-209: an unattended `agents sync --yes` syncs
  * `listInstalledVersions(agentId)` -- every installed version, not just the
- * default -- and refresh.ts:283-285 registers hooks over the same set. So the
- * per-version costs above are multiplied by the install count. This measures
- * that multiplication directly on the real fan-out for one agent, using the
- * guard path (the realistic steady state) rather than forcing N full writes.
+ * default -- and refresh.ts:283-285 selects the same set for the hook
+ * registration loop at refresh.ts:287-294. So the per-version costs above are
+ * multiplied by the install count. This measures that multiplication on the
+ * real fan-out.
+ *
+ * Restricted to `guardHitVersions` so it is provably a GUARD measurement and
+ * writes into no version home -- see that binding for why the unrestricted loop
+ * was not one. The label reports both counts so a box where the two differ
+ * cannot silently read as full coverage.
  */
-describe.skipIf(installedClaude.length < 2)(
-  `stage 6 -- per-version fan-out (refresh.ts:207-209): ${installedClaude.length} installed claude versions`,
+describe.skipIf(guardHitVersions.length < 2)(
+  `stage 6 -- per-version fan-out (refresh.ts:207-209): ${guardHitVersions.length} of ${installedClaude.length} installed claude versions are guard hits`,
   () => {
-    bench('syncResourcesToVersion across EVERY installed claude version (guard path)', () => {
-      for (const v of installedClaude) {
+    bench('syncResourcesToVersion across every guard-hit claude version', () => {
+      for (const v of guardHitVersions) {
         syncResourcesToVersion('claude', v, undefined, { cwd });
       }
     }, { time: 3000 });
   },
 );
 
-// Keep the guard target's manifest exactly as found: the write benches above
-// rewrite `.sync-manifest.json` for `writeTarget`, and when writeTarget ===
-// manifestTarget that would leave the box with a manifest authored by a
-// benchmark rather than by a real sync. Restoring is a correctness step, not
-// cleanup -- a stale/foreign manifest changes what the NEXT real `agents sync`
-// decides to do (versions.ts:2873-2879).
-if (storedManifest && manifestTarget) {
+// Put `writeTarget`'s manifest back exactly as found -- byte-for-byte if it
+// existed, deleted if it did not. `saveManifest` (staleness/index.ts:77-87) and
+// everything here is synchronous, which is what makes `process.on('exit')` a
+// valid place to do it. A failure is printed, never swallowed: the restore is a
+// correctness step (see `writeTargetManifestBefore`), so a silent miss would
+// leave the box in a state the next real `agents sync` misreads.
+if (writeTargetManifestPath) {
   process.on('exit', () => {
-    try { saveManifest('claude', manifestTarget, storedManifest); } catch { /* best effort */ }
+    try {
+      if (writeTargetManifestBefore === null) fs.rmSync(writeTargetManifestPath, { force: true });
+      else fs.writeFileSync(writeTargetManifestPath, writeTargetManifestBefore);
+    } catch (err) {
+      console.error(`sync-umbrella.bench: FAILED to restore ${writeTargetManifestPath}: ${(err as Error).message}`);
+    }
   });
 }
