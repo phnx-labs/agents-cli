@@ -48,7 +48,7 @@ environment — both are **names only, never values**:
 
 | Field | Meaning |
 |---|---|
-| `secrets.bundles` | Secrets-bundle **names** to ensure exist. Values live in the OS keychain and are never captured or pushed; `apply` surfaces missing bundles to recreate manually. |
+| `secrets.bundles` | Secrets-bundle **names** to ensure exist. By default `apply` only *surfaces* them to recreate manually; `--provision-secrets` pushes them (see below). |
 | `routines` | Routine **names** that should be active on the fleet (the routine files themselves sync via the repo). |
 
 > Browser profiles are **not** captured into `fleet:` — the central `browser:`
@@ -85,7 +85,7 @@ reported as unresolved rather than aborting the run.
 ## What a reconcile does
 
 For each targeted, reachable device `apply` probes state, then plans the minimal
-set of actions across four dimensions:
+set of actions across five dimensions:
 
 - **agents-cli** — `install-cli` if absent, `upgrade-cli` on a version mismatch.
 - **agents** — `add-agent` for any profile agent not installed. A bare/`@latest`
@@ -96,6 +96,10 @@ set of actions across four dimensions:
 - **config** — `sync-config` for the declared `sync:` scopes.
 - **login** — `push-login` where a portable credential can be propagated;
   `needs-login` where the login is desired but genuinely can't be (see below).
+- **secrets** — `push-secret` for a declared bundle when `--provision-secrets` is
+  set and the gates below pass; `needs-secret` (a manual reminder) otherwise. Runs
+  **last**, because it is the most sensitive mutation `apply` performs: every
+  lower-risk step is already recorded before credential values move.
 
 An unreachable device yields no actions. The whole run is idempotent — a device
 already matching the profile plans nothing.
@@ -115,6 +119,41 @@ Fleet profile · 10 device(s) · 3 agent(s) (claude, codex, gemini)
 
 Run without `--plan` to execute; `apply` confirms first, and `-y/--yes` skips
 the prompt.
+
+## Provisioning secrets (`--provision-secrets`)
+
+`apply` can push the bundles `secrets.bundles` declares to each device. It is
+**off by default** and it is a **flag, not a manifest field** — `agents.yaml` is
+shared, so a file-level default would mean someone else's `apply -y` silently
+ships credential values. That is the same shape of accident as RUSH-1968, where
+the absence of any supported provisioning path led an operator to hand-export the
+file store's master key across the fleet instead.
+
+Three gates, in order. Every refusal still prints a `needs-secret` reminder, so a
+skipped device is never silent:
+
+| Gate | Refusal |
+|---|---|
+| `--provision-secrets` set? | reminder naming the flag |
+| Device reachable? | ordinary manual reminder |
+| Host key **pinned**? | `host key not pinned; run \`agents ssh <device>\` once to pin it` |
+
+The pin requirement is the same bar `agents exec --copy-creds` already sets
+(EXEC-34): credential values only ever move to a host whose key is pinned.
+
+**Backend follows the platform, and this is the load-bearing default:** `file` on
+Linux, `keychain` on macOS/Windows. A headless Linux box has no keychain, and its
+file store **auto-provisions its own machine-local key** — so each device ends up
+with an unshared at-rest key and **no passphrase is forwarded**. That is the
+direct alternative to a fleet-wide shared secret.
+
+**Idempotence.** With provisioning on, `apply` runs one extra
+`agents secrets list --json` per device (**metadata only** — names and timestamps,
+never values) and skips a bundle the device already has. Without it every run
+re-resolves the bundle locally, and a resolve can prompt for Touch ID, so a
+converged fleet would nag on every apply. Known limitation, stated plainly: this
+compares **presence**, not content — a bundle whose values changed locally still
+reads as present. Use `--force` to re-push regardless.
 
 ## Login propagation
 
@@ -156,6 +195,8 @@ propagation path.
 | `--agent <specs...>` | Override the roster for the targeted device(s) — install exactly these specs instead of the manifest's. Pairs with `--device` to seed one box. See [§Replicating this machine's version set](#replicating-this-machines-version-set). |
 | `--only <dims>` | Limit to a comma list of `agents,config,login`. |
 | `--no-login` | Do not propagate logins (equivalent to `login: skip` everywhere). |
+| `--provision-secrets` | Push the declared `secrets.bundles` to each device. OFF by default; only to a device whose host key is pinned. See [§Provisioning secrets](#provisioning-secrets---provision-secrets). |
+| `--force` | With `--provision-secrets`: re-push a bundle the device already has. |
 
 ## Replicating this machine's version set
 

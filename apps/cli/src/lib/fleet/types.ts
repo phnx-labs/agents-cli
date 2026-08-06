@@ -99,6 +99,16 @@ export interface DeviceProbe {
    * undefined, version-pinned specs fall back to id-level presence.
    */
   installedVersions?: Record<string, string[]>;
+  /**
+   * Secrets bundles already present on the device: name -> `updated_at` (or ''
+   * when the remote reports none). Only populated when the manifest declares
+   * bundles AND `--provision-secrets` is set — a fleet that uses no bundles
+   * never pays for the extra round trip.
+   *
+   * METADATA ONLY. `agents secrets list --json` returns names and timestamps and
+   * explicitly never values, which is what makes this probe safe to run.
+   */
+  remoteBundles?: Record<string, string>;
   /** Reason string when `reachable` is false or the probe partially failed. */
   note?: string;
 }
@@ -111,8 +121,13 @@ export type FleetActionKind =
   | 'sync-config'
   | 'push-login'
   | 'needs-login'
-  /** Secrets bundles the profile declares but that can't be pushed (values are
-   * keychain-local) — surfaced as a manual recreate, like `needs-login`. */
+  /** Push a declared secrets bundle to the device over SSH. Opt-in only
+   * (`--provision-secrets`) and gated on a pinned host key, because this moves
+   * credential VALUES to another machine (RUSH-1968). */
+  | 'push-secret'
+  /** A declared secrets bundle that could NOT be pushed — the flag is off, the
+   * host key isn't pinned, or the bundle is already current. Surfaced as a manual
+   * recreate, like `needs-login`. */
   | 'needs-secret';
 
 export interface FleetAction {
@@ -123,6 +138,10 @@ export interface FleetAction {
   /** Full agent spec for `add-agent` (e.g. `claude@2.1.170`) so the plan can show
    * the exact version being installed; equals the id for a bare/latest spec. */
   spec?: string;
+  /** Bundle name for `push-secret` / `needs-secret`, so the executor pushes the
+   *  bundle the planner decided on rather than re-deriving it from the detail
+   *  string. */
+  bundle?: string;
   /** Human, one-line description of the action. */
   detail: string;
 }

@@ -10,6 +10,7 @@
 
 import * as os from 'os';
 import type { DeviceProfile } from '../devices/registry.js';
+import { pushBundleToHost, type RemoteBackend } from '../secrets/push.js';
 import { sshTargetFor } from '../devices/connect.js';
 import { readyProbe, bootstrapAgentsCli } from '../hosts/ready.js';
 import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
@@ -131,10 +132,18 @@ export interface DiffContext {
   /** agents-cli version the source is on — the fleet target version. */
   targetCliVersion: string;
   sourceAuth: SourceAuth;
-  /** Secrets-bundle names the profile declares. Values are keychain-local and
-   * can't be pushed, so each reachable device surfaces them as a manual recreate
-   * (`needs-secret`) — informational, never an executed mutation. */
+  /** Secrets-bundle names the profile declares. */
   secretsBundles?: string[];
+  /** `--provision-secrets`. OFF by default: pushing a bundle moves credential
+   *  VALUES to another machine, so it is opted into per invocation and never
+   *  defaulted from the shared `agents.yaml` (RUSH-1968). */
+  provisionSecrets?: boolean;
+  /** Is this device's host key pinned? Injected so `decideSecretPush` stays pure
+   *  and its refusals are testable against real known_hosts fixtures with no
+   *  network. Absent = treated as unpinned, i.e. refuse. */
+  isHostPinned?: (device: string) => boolean;
+  /** `--force`: push a declared bundle even when the device already has it. */
+  forceSecrets?: boolean;
 }
 
 /** Pure: desired vs probed -> per-device diff + flat action list. */
@@ -204,14 +213,32 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
           }
         }
       }
-      // secrets — surfaced, never pushed (values are keychain-local). Declared
-      // once at the manifest level, so every reachable device gets the same
-      // manual-recreate reminder. Not an executable action (see idempotence
-      // check in commands/apply.ts, which excludes needs-* kinds).
+      // secrets. Declared once at the manifest level, so every reachable device
+      // is considered. Historically this was ALWAYS a manual reminder — "surfaced,
+      // never pushed" — and that gap is a direct cause of RUSH-1968: an operator
+      // who needed secrets on a worker box had no supported path, so they
+      // hand-exported the file store's master key across the fleet instead.
+      //
+      // It is now pushable, but only deliberately. `--provision-secrets` is off by
+      // default and is a FLAG, not a manifest field: `agents.yaml` is shared, and
+      // a file-level default would mean someone else's `apply -y` silently ships
+      // credential values — the same shape of accident this ticket is about.
+      // Everything the gate refuses stays a `needs-secret` reminder, so nothing
+      // is ever silently skipped.
       if (ctx.secretsBundles && ctx.secretsBundles.length > 0) {
         for (const bundle of ctx.secretsBundles) {
-          secretsNeeded.push(bundle);
-          rowActions.push({ device: d.device, kind: 'needs-secret', detail: `recreate secrets bundle '${bundle}' (\`agents secrets create ${bundle}\`)` });
+          const decision = decideSecretPush(bundle, d, probe, ctx);
+          if (decision.push) {
+            rowActions.push({
+              device: d.device,
+              kind: 'push-secret',
+              bundle,
+              detail: `push secrets bundle '${bundle}' (${decision.backend} backend)`,
+            });
+          } else {
+            secretsNeeded.push(bundle);
+            rowActions.push({ device: d.device, kind: 'needs-secret', bundle, detail: decision.reason });
+          }
         }
       }
     }
@@ -221,6 +248,78 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
   }
 
   return { devices, actions };
+}
+
+/** Why a declared bundle is or is not pushed to one device. */
+export interface SecretPushDecision {
+  push: boolean;
+  /** Where it would land on the remote. Only meaningful when `push`. */
+  backend: RemoteBackend;
+  /** Set when `push` is false — rendered as the `needs-secret` reminder. */
+  reason: string;
+}
+
+/**
+ * Decide whether `fleet apply` may push one declared bundle to one device.
+ *
+ * PURE — no ssh, no keychain, no filesystem beyond the injectable pin check — so
+ * every branch is unit-testable with no live fleet. Three gates, in order, and
+ * each REFUSAL still yields a `needs-secret` reminder rather than silence:
+ *
+ *   1. `--provision-secrets` must be set. Off by default, and deliberately a
+ *      flag rather than an `agents.yaml` field: the manifest is shared, so a
+ *      file-level default means someone else's `apply -y` ships credential
+ *      values without deciding to (RUSH-1968's shape of accident).
+ *   2. The device must be reachable — nothing to push to otherwise.
+ *   3. The host key must be PINNED. This moves credential values to another
+ *      machine, so it reuses the same bar `agents exec --copy-creds` already
+ *      sets (EXEC-34): an unpinned device earns its pin through a normal
+ *      `agents ssh <device>` first.
+ *
+ * Backend follows the platform, and this is the load-bearing default of the
+ * whole feature: **file on Linux, keychain on macOS/Windows**. A headless Linux
+ * box has no keychain (`lib/secrets/linux.ts`), and the file store there
+ * auto-provisions its OWN machine-local key — so each box ends up with an
+ * unshared at-rest key and NO passphrase is forwarded. That is the direct
+ * alternative to the fleet-wide shared secret this ticket exists to remove.
+ */
+export function decideSecretPush(
+  bundle: string,
+  desired: DeviceDesired,
+  probe: DeviceProbe,
+  ctx: DiffContext,
+): SecretPushDecision {
+  const device = desired.device;
+  const backend: RemoteBackend = probe.platform === 'linux' ? 'file' : 'keychain';
+  const manual = `recreate secrets bundle '${bundle}' (\`agents ssh ${device} -- secrets create ${bundle}\`)`;
+
+  if (!ctx.provisionSecrets) {
+    return { push: false, backend, reason: `${manual} — or re-run with --provision-secrets to push it` };
+  }
+  if (!probe.reachable) {
+    return { push: false, backend, reason: manual };
+  }
+  // Already there? Skip — otherwise every `apply` re-resolves the bundle, and a
+  // resolve can prompt for Touch ID, so a converged fleet would nag on every run.
+  //
+  // Known limitation, stated rather than hidden: this compares PRESENCE (and
+  // carries `updated_at` for a future content check). It is a timestamp
+  // heuristic, not a content hash — a bundle whose VALUES changed locally still
+  // reads as present. `--force` is the way to overwrite regardless.
+  if (!ctx.forceSecrets && probe.remoteBundles && bundle in probe.remoteBundles) {
+    return { push: false, backend, reason: `secrets bundle '${bundle}' already present on ${device} — pass --force to overwrite` };
+  }
+
+  if (!ctx.isHostPinned?.(device)) {
+    // Same bar as `exec --copy-creds`: never ship credential values to a host
+    // whose key we have not pinned.
+    return {
+      push: false,
+      backend,
+      reason: `${manual} — host key not pinned; run \`agents ssh ${device}\` once to pin it, then re-apply`,
+    };
+  }
+  return { push: true, backend, reason: '' };
 }
 
 // ---- execution (real SSH; verified end-to-end, not unit-mocked) ----
@@ -238,6 +337,10 @@ export interface ProbeOptions {
   /** Also fetch per-agent installed versions (one extra `agents view --json`
    * round-trip). Enable only when the plan has a version-pinned spec. */
   withVersions?: boolean;
+  /** Also fetch which secrets bundles the device already has (one extra
+   *  `agents secrets list --json`). Enable only when the manifest declares
+   *  bundles and provisioning is on — same cost discipline as `withVersions`. */
+  withSecrets?: boolean;
 }
 
 /** Probe one device: reachability + agents-cli version + installed agent ids
@@ -271,6 +374,14 @@ export function probeDevice(device: DeviceProfile, opts?: ProbeOptions): DeviceP
     const vres = sshExec(target, viewCmd, { timeoutMs: 30000, multiplex: true });
     if (vres.code === 0) installedVersions = parseInstalledVersions(vres.stdout);
   }
+  let remoteBundles: Record<string, string> | undefined;
+  if (opts?.withSecrets) {
+    // Metadata only — `secrets list --json` returns names + timestamps and never
+    // values, which is why this is safe to run across the fleet.
+    const listCmd = buildRemoteAgentsInvocation(['secrets', 'list', '--json'], undefined, hint, remoteEnv(device.platform));
+    const lres = sshExec(target, listCmd, { timeoutMs: 30000, multiplex: true });
+    if (lres.code === 0) remoteBundles = parseRemoteBundles(lres.stdout);
+  }
   return {
     device: device.name,
     reachable: true,
@@ -278,7 +389,45 @@ export function probeDevice(device: DeviceProfile, opts?: ProbeOptions): DeviceP
     cliVersion: ready.version ?? undefined,
     installedAgents: installed,
     installedVersions,
+    remoteBundles,
   };
+}
+
+/**
+ * Narrow a remote `secrets list --json` payload to `name -> updated_at`.
+ *
+ * Exported and pure so the parse is unit-tested against real payload shapes with
+ * no live fleet. Returns `{}` rather than throwing on anything unexpected: the
+ * remote runs its own agents-cli version, and a parse failure must degrade to
+ * "unknown, so push" — never to "present, so skip", which would silently leave a
+ * device unprovisioned.
+ */
+export function parseRemoteBundles(stdout: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(stdout) as unknown;
+    const rows = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray((parsed as { bundles?: unknown })?.bundles)
+        ? (parsed as { bundles: unknown[] }).bundles
+        : [];
+    const out: Record<string, string> = {};
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      const r = row as Record<string, unknown>;
+      const name = typeof r.name === 'string' ? r.name : undefined;
+      if (!name) continue;
+      // `updatedAt` is the real field name in `secrets list --json` — verified
+      // against a live payload, not assumed. `updated_at` is accepted too so an
+      // older remote is not silently recorded with an empty timestamp.
+      const ts = typeof r.updatedAt === 'string' ? r.updatedAt
+        : typeof r.updated_at === 'string' ? r.updated_at
+          : '';
+      out[name] = ts;
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 export interface ApplyStep {
@@ -361,6 +510,50 @@ export function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exe
     const r = sshAgents(['apply', '--recv-auth'], JSON.stringify(bundle));
     steps.push({ kind: 'push-login', ok: r.code === 0, detail: `propagate login: ${pushAgents.join(', ')}` });
     ok = ok && r.code === 0;
+  }
+
+  // 5. secrets provisioning — LAST, and deliberately so. It is the most
+  // sensitive mutation apply performs (credential VALUES crossing to another
+  // machine), so every lower-risk step above is already recorded before we
+  // touch it: a failure here never obscures what did land.
+  //
+  // Resolve ONCE per device even for several bundles is not possible (a resolve
+  // is per bundle), but each bundle resolves once and pushes once — the read can
+  // prompt, so it must not repeat.
+  const pushSecrets = row.actions.filter((a) => a.kind === 'push-secret');
+  for (const action of pushSecrets) {
+    const bundle = action.bundle;
+    if (!bundle) {
+      // A push-secret action without a bundle name is a planner bug, not a
+      // recoverable state — fail loud rather than push nothing and report ok.
+      steps.push({ kind: 'push-secret', ok: false, detail: 'push-secret action carried no bundle name' });
+      ok = false;
+      continue;
+    }
+    const backend: RemoteBackend = device.platform === 'linux' ? 'file' : 'keychain';
+    try {
+      const out = pushBundleToHost(bundle, target, {
+        remoteBackend: backend,
+        operation: `fleet apply ${row.device}`,
+        // No passphrase, ever, from this path. On the file backend the remote
+        // auto-provisions its OWN machine-local key, which is the entire point:
+        // each box gets an unshared at-rest key instead of the fleet-wide shared
+        // secret RUSH-1968 is about.
+      });
+      steps.push({
+        kind: 'push-secret',
+        ok: out.ok,
+        detail: out.ok
+          ? `secrets '${bundle}' -> ${row.device} (${backend}): ${out.message}`
+          : `secrets '${bundle}' -> ${row.device}: ${out.message}`,
+      });
+      ok = ok && out.ok;
+    } catch (e) {
+      // A local resolve failure (locked store, missing bundle, multi-line value)
+      // is reported per bundle rather than aborting the whole device.
+      steps.push({ kind: 'push-secret', ok: false, detail: `secrets '${bundle}': ${(e as Error).message}` });
+      ok = false;
+    }
   }
 
   // Surface blocked logins as (non-fatal) informational steps.

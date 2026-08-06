@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
+  decideSecretPush,
+  parseRemoteBundles,
   agentIdOf,
   diffFleet,
   canPushLogin,
@@ -205,6 +207,83 @@ describe('diffFleet — secrets surfacing', () => {
     expect(executable.map((a) => a.kind)).toEqual(['sync-config']);
   });
 
+  it('pushes nothing without --provision-secrets, and SAYS the capability exists', () => {
+    // Off by default. The reason string has to name the flag: an operator who
+    // reads only "recreate manually" concludes there is no supported path, which
+    // is how a master key got hand-exported across the fleet (RUSH-1968).
+    const plan = diffFleet(desired, converged, {
+      targetCliVersion: CLI, sourceAuth: srcAuth(['codex']), secretsBundles: ['attio'],
+    });
+    expect(plan.actions.filter((a) => a.kind === 'push-secret')).toEqual([]);
+    const need = plan.actions.find((a) => a.kind === 'needs-secret');
+    expect(need?.detail).toContain('--provision-secrets');
+  });
+
+  it('pushes when the flag is set AND the host key is pinned', () => {
+    const plan = diffFleet(desired, converged, {
+      targetCliVersion: CLI,
+      sourceAuth: srcAuth(['codex']),
+      secretsBundles: ['attio'],
+      provisionSecrets: true,
+      isHostPinned: () => true,
+    });
+    const push = plan.actions.filter((a) => a.kind === 'push-secret');
+    expect(push).toHaveLength(1);
+    expect(push[0].bundle).toBe('attio');
+    // A push IS executable, unlike the needs-* reminders.
+    expect(plan.devices[0].secretsNeeded).toEqual([]);
+  });
+
+  it('refuses an UNPINNED host even with the flag — credential values need a pinned key', () => {
+    // Same bar as `exec --copy-creds` (EXEC-34).
+    const plan = diffFleet(desired, converged, {
+      targetCliVersion: CLI,
+      sourceAuth: srcAuth(['codex']),
+      secretsBundles: ['attio'],
+      provisionSecrets: true,
+      isHostPinned: () => false,
+    });
+    expect(plan.actions.filter((a) => a.kind === 'push-secret')).toEqual([]);
+    expect(plan.actions.find((a) => a.kind === 'needs-secret')?.detail).toContain('host key not pinned');
+  });
+
+  it('treats a MISSING pin check as unpinned — the gate fails closed', () => {
+    const plan = diffFleet(desired, converged, {
+      targetCliVersion: CLI, sourceAuth: srcAuth(['codex']), secretsBundles: ['attio'], provisionSecrets: true,
+    });
+    expect(plan.actions.filter((a) => a.kind === 'push-secret')).toEqual([]);
+  });
+
+  it('skips a bundle the device already has, and --force overrides', () => {
+    // Without this every apply re-resolves the bundle, and a resolve can prompt
+    // for Touch ID — a converged fleet would nag on every run.
+    const withBundle = new Map<string, DeviceProbe>([
+      ['s1', { ...converged.get('s1')!, remoteBundles: { attio: '2026-08-01T00:00:00Z' } }],
+    ]);
+    const base = {
+      targetCliVersion: CLI, sourceAuth: srcAuth(['codex']),
+      secretsBundles: ['attio'], provisionSecrets: true, isHostPinned: () => true,
+    };
+    const skipped = diffFleet(desired, withBundle, base);
+    expect(skipped.actions.filter((a) => a.kind === 'push-secret')).toEqual([]);
+    expect(skipped.actions.find((a) => a.kind === 'needs-secret')?.detail).toContain('already present');
+
+    const forced = diffFleet(desired, withBundle, { ...base, forceSecrets: true });
+    expect(forced.actions.filter((a) => a.kind === 'push-secret')).toHaveLength(1);
+  });
+
+  it('picks file on linux and keychain on macos — the unshared-key default', () => {
+    // A headless Linux box has no keychain, and its file store auto-provisions
+    // its OWN machine-local key. That per-box key is the alternative to the
+    // fleet-wide shared secret RUSH-1968 is about.
+    const probe = (platform: string): DeviceProbe =>
+      ({ device: 's1', reachable: true, platform, cliVersion: CLI, installedAgents: ['codex'] });
+    const ctx = { targetCliVersion: CLI, sourceAuth: srcAuth(['codex']), secretsBundles: ['attio'], provisionSecrets: true, isHostPinned: () => true };
+    expect(decideSecretPush('attio', desired[0], probe('linux'), ctx).backend).toBe('file');
+    expect(decideSecretPush('attio', desired[0], probe('macos'), ctx).backend).toBe('keychain');
+    expect(decideSecretPush('attio', desired[0], probe('windows'), ctx).backend).toBe('keychain');
+  });
+
   it('emits nothing for secrets when the profile declares no bundles', () => {
     const plan = diffFleet(desired, converged, { targetCliVersion: CLI, sourceAuth: srcAuth(['codex']) });
     expect(plan.actions.filter((a) => a.kind === 'needs-secret')).toEqual([]);
@@ -340,5 +419,37 @@ describe('diffFleet — version-aware add-agent', () => {
     ]);
     const plan = diffFleet(roster, probes, { targetCliVersion: CLI, sourceAuth: srcAuth(['claude']) });
     expect(plan.actions.filter((a) => a.kind === 'push-login')).toHaveLength(1);
+  });
+});
+
+describe('parseRemoteBundles — a remote secrets listing, metadata only', () => {
+  it('reads name -> updatedAt from the REAL payload shape', () => {
+    // Verified against live `agents secrets list --json`: a bare array of rows
+    // whose timestamp field is `updatedAt`. The first draft of this parser read
+    // `updated_at` and would have recorded an empty timestamp for every bundle.
+    const real = '[{"name":"claude-getrush","keys":1,"backend":"file","createdAt":"2026-08-02T10:12:09.610Z","updatedAt":"2026-08-03T01:02:03.000Z"}]';
+    expect(parseRemoteBundles(real)).toEqual({ 'claude-getrush': '2026-08-03T01:02:03.000Z' });
+  });
+
+  it('also accepts snake_case from an older remote', () => {
+    expect(parseRemoteBundles('[{"name":"attio","updated_at":"2026-08-01T00:00:00Z"}]'))
+      .toEqual({ attio: '2026-08-01T00:00:00Z' });
+  });
+
+  it('reads the same from a { bundles: [...] } envelope', () => {
+    expect(parseRemoteBundles('{"bundles":[{"name":"a"},{"name":"b","updated_at":"t"}]}'))
+      .toEqual({ a: '', b: 't' });
+  });
+
+  it('degrades to {} on junk — unknown must mean PUSH, never skip', () => {
+    // Returning a populated map on a parse failure would silently leave a device
+    // unprovisioned, which is the worse of the two errors.
+    for (const junk of ['', 'not json', 'null', '3', '{"bundles":"nope"}']) {
+      expect(parseRemoteBundles(junk)).toEqual({});
+    }
+  });
+
+  it('ignores rows with no usable name', () => {
+    expect(parseRemoteBundles('[null,"x",{"nope":1},{"name":7},{"name":"ok"}]')).toEqual({ ok: '' });
   });
 });

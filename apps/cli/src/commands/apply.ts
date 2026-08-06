@@ -16,6 +16,7 @@ import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { loadDevices, isControlDevice, type DeviceProfile } from '../lib/devices/registry.js';
+import { isHostPinned, managedKnownHostsPath } from '../lib/devices/known-hosts.js';
 import { ensureDevicesRegistered } from '../lib/devices/sync.js';
 import { readFleetFile, resolveDesired } from '../lib/fleet/manifest.js';
 import { snapshotAuth, materializeAuth, parseAuthBundle, KEYCHAIN_BOUND_ON_MAC, isCredentialSafeToPropagate } from '../lib/fleet/auth-sync.js';
@@ -45,6 +46,8 @@ interface ApplyOptions {
   only?: string;
   login?: boolean; // Commander sets false for --no-login
   recvAuth?: boolean; // hidden internal receiver
+  provisionSecrets?: boolean;
+  force?: boolean;
 }
 
 /** Version of the running agents-cli — the fleet target version. */
@@ -112,7 +115,10 @@ function renderPlan(plan: FleetPlan): void {
     return chalk.cyan('↑ ' + acts.map((a) => a.agent ?? a.kind.replace('-cli', '')).join(','));
   };
 
-  const header = `  ${'device'.padEnd(nameWidth)}   ${'agents-cli'.padEnd(12)}${'agents'.padEnd(20)}${'config'.padEnd(10)}login`;
+  // Only show the secrets column when the manifest declares any — an all-`-`
+  // column on every fleet that uses no bundles is noise.
+  const anySecrets = rows.some((r) => r.actions.some((a) => a.kind === 'push-secret' || a.kind === 'needs-secret'));
+  const header = `  ${'device'.padEnd(nameWidth)}   ${'agents-cli'.padEnd(12)}${'agents'.padEnd(20)}${'config'.padEnd(10)}${anySecrets ? 'login'.padEnd(18) + 'secrets' : 'login'}`;
   console.log(chalk.gray(header));
   for (const row of rows) {
     const cli = row.probe.reachable
@@ -130,10 +136,29 @@ function renderPlan(plan: FleetPlan): void {
       ? (row.actions.some((a) => a.kind === 'sync-config') ? chalk.cyan('↑ sync') : chalk.green('ok'))
       : chalk.gray('-');
     const loginCell = cell(row, ['push-login', 'needs-login'], `${row.desired.agents.length}/${row.desired.agents.length}`);
-    console.log(`  ${row.device.padEnd(nameWidth)}   ${stripPad(cli, 12)}${stripPad(agentsCell, 20)}${stripPad(configCell, 10)}${loginCell}`);
+    const secretsCell = (() => {
+      if (!anySecrets) return '';
+      if (!row.probe.reachable) return chalk.gray('- offline');
+      const push = row.actions.filter((a) => a.kind === 'push-secret').length;
+      const blocked = row.actions.filter((a) => a.kind === 'needs-secret').length;
+      if (push === 0 && blocked === 0) return chalk.green('ok');
+      if (push > 0 && blocked === 0) return chalk.cyan(`↑ push ${push}`);
+      if (push === 0) return chalk.yellow(`blocked ${blocked}`);
+      return chalk.yellow(`↑ push ${push} · blocked ${blocked}`);
+    })();
+    const loginPart = anySecrets ? stripPad(loginCell, 18) + secretsCell : loginCell;
+    console.log(`  ${row.device.padEnd(nameWidth)}   ${stripPad(cli, 12)}${stripPad(agentsCell, 20)}${stripPad(configCell, 10)}${loginPart}`);
   }
   console.log();
   console.log(chalk.gray(`  ${plan.actions.length} action(s) across ${rows.filter((r) => r.probe.reachable).length} reachable device(s)`));
+
+  // The capability is opt-in, so when it is OFF and the manifest declares
+  // bundles, say that it exists. Otherwise an operator reads "manual recreate"
+  // and concludes there is no supported path — which is exactly the conclusion
+  // that led to a master key being hand-exported across the fleet (RUSH-1968).
+  if (anySecrets && !rows.some((r) => r.actions.some((a) => a.kind === 'push-secret'))) {
+    console.log(chalk.gray('  secrets: not pushed. `--provision-secrets` pushes declared bundles to devices whose host key is pinned.'));
+  }
 
   // Distinguish *why* a login can't be propagated: macOS keychain-bound,
   // single-use rotating refresh token (never copied), or the source simply not
@@ -158,14 +183,15 @@ function renderPlan(plan: FleetPlan): void {
   if (noToken.length > 0) {
     console.log(chalk.yellow(`  manual login needed (no portable token on source): ${noToken.join(', ')}`));
   }
-  // Secrets bundles are declared once for the fleet; surface the distinct set to
-  // recreate on any device missing them (values are keychain-local, never pushed).
+  // Secrets bundles are declared once for the fleet; surface the distinct set the
+  // gate did NOT push, so a refusal is never silent. "never pushed" used to be
+  // literally true here and no longer is — `--provision-secrets` pushes them.
   const bundles = [...new Set(rows.flatMap((r) => r.secretsNeeded))];
   if (bundles.length > 0) {
     const shown = bundles.slice(0, 12);
     const more = bundles.length - shown.length;
     const list = shown.join(', ') + (more > 0 ? `, +${more} more` : '');
-    console.log(chalk.yellow(`  ${bundles.length} secrets bundle(s) to recreate where missing (keychain-local, never pushed): ${list}`));
+    console.log(chalk.yellow(`  ${bundles.length} secrets bundle(s) not pushed — recreate where missing: ${list}`));
   }
 }
 
@@ -251,12 +277,25 @@ async function runApply(opts: ApplyOptions): Promise<void> {
   // Probe every target device in parallel.
   const nameToProfile = new Map<string, DeviceProfile>(desired.map((d) => [d.device, registry[d.device]!]));
   const withVersions = rosterNeedsVersions(desired);
+  // One extra `secrets list --json` per device, and only when it can change the
+  // plan: the manifest declares bundles AND provisioning is on. Same cost
+  // discipline as `withVersions` — a fleet that uses no bundles never pays it.
+  const withSecrets = opts.provisionSecrets === true && (manifest.secrets?.bundles?.length ?? 0) > 0;
   console.log(chalk.gray(`Probing ${desired.length} device(s)…`));
-  const probeList = await pool(desired, 6, async (d) => probeDevice(nameToProfile.get(d.device)!, { withVersions }));
+  const probeList = await pool(desired, 6, async (d) => probeDevice(nameToProfile.get(d.device)!, { withVersions, withSecrets }));
   const probes = new Map<string, DeviceProbe>(probeList.map((p) => [p.device, p]));
 
   const targetCliVersion = localCliVersion();
-  let plan = diffFleet(desired, probes, { targetCliVersion, sourceAuth, secretsBundles: manifest.secrets?.bundles });
+  let plan = diffFleet(desired, probes, {
+    targetCliVersion,
+    sourceAuth,
+    secretsBundles: manifest.secrets?.bundles,
+    provisionSecrets: opts.provisionSecrets === true,
+    forceSecrets: opts.force === true,
+    // Same bar as `exec --copy-creds` (EXEC-34): credential values only ever go
+    // to a host whose key we already pinned.
+    isHostPinned: (device) => isHostPinned(device, managedKnownHostsPath()),
+  });
 
   // --only filter.
   if (opts.only) {
@@ -276,7 +315,8 @@ async function runApply(opts: ApplyOptions): Promise<void> {
   if (isDry) return;
   // `needs-login`/`needs-secret` are surfaced manual reminders, not executable
   // mutations — exclude them so an otherwise-converged fleet still says "nothing
-  // to do" instead of looping forever on un-actionable surfacing.
+  // to do" instead of looping forever on un-actionable surfacing. `push-secret`
+  // IS executable and deliberately stays counted.
   if (plan.actions.filter((a) => a.kind !== 'needs-login' && a.kind !== 'needs-secret').length === 0) {
     console.log(chalk.green('\nNothing to do — fleet already matches the profile.'));
     return;
@@ -338,6 +378,8 @@ export function configureApplyCommand(cmd: Command): Command {
     .option('--agent <specs...>', 'Override the roster for targeted device(s): install these specs instead of the manifest\'s. Use `claude@all` to replicate every version installed on this machine.')
     .option('--only <dims>', 'Limit to dimensions: comma list of agents,config,login')
     .option('--no-login', 'Do not propagate logins')
+    .option('--provision-secrets', "Push the manifest's declared secrets bundles to each device (OFF by default; moves credential values over SSH, and only to a device whose host key is already pinned)")
+    .option('--force', 'With --provision-secrets: re-push a bundle the device already has')
     .addOption(new Option('--recv-auth', 'internal: receive an auth bundle on stdin').hideHelp())
     .action(async (opts: ApplyOptions) => {
       try {
