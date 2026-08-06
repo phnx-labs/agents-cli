@@ -34,7 +34,7 @@ export interface SeedE2eWinHostOpts {
   devicesDir: string;
   /** Absolute path to the real fleet registry.json (may not exist). */
   realRegistryPath: string;
-  /** Injectable `ssh -G` resolver for tests. Defaults to a real BatchMode spawn. */
+  /** Injectable `ssh -G` resolver for tests. Defaults to a real `ssh -G` spawn (5s timeout). */
   resolveSshG?: (host: string) => SshGFields | null;
   /** Fixed now for deterministic tests. Defaults to `new Date().toISOString()`. */
   now?: string;
@@ -51,8 +51,8 @@ export function parseSshG(stdout: string): SshGFields | null {
     else hostname = m[2];
   }
   if (!user || !hostname) return null;
-  // OpenSSH defaults hostname to the Host alias when nothing is configured —
-  // that is not a usable dial target for a real e2e (would loop back).
+  // OpenSSH defaults hostname to the Host alias when HostName is unset; that is
+  // still a usable dial target — OpenSSH resolves it via the user's ssh_config.
   return { user, hostname };
 }
 
@@ -90,7 +90,7 @@ export function synthesizeWindowsDevice(
 }
 
 function defaultResolveSshG(host: string): SshGFields | null {
-  // BatchMode + short connect timeout: never hang CI if Host is missing.
+  // Process timeout only: `ssh -G` does not open a connection.
   const r = spawnSync('ssh', ['-G', host], {
     encoding: 'utf-8',
     timeout: 5_000,
@@ -139,14 +139,8 @@ export function seedHermeticE2eWinHost(opts: SeedE2eWinHostOpts): 'real' | 'ssh-
   const resolve = opts.resolveSshG ?? defaultResolveSshG;
   const fields = resolve(host);
   if (!fields) return 'missing';
-  // Refuse a hostname that equals the alias with no real dial target.
-  if (fields.hostname === host && !isIpLiteral(fields.hostname) && !fields.hostname.includes('.')) {
-    // Bare alias with no HostName expansion — still usable if ssh config has
-    // IdentityFile etc., but hostNameFor needs a dialable address. Prefer
-    // dnsName = host so fleetDialTarget can fall through to bare name… actually
-    // sshTargetFor needs dnsName|ip. Use the alias as dnsName and let OpenSSH
-    // resolve it via the user's config (same as dialing the bare name).
-  }
+  // Bare alias hostnames are fine: synthesizeWindowsDevice sets address.dnsName
+  // to the alias and OpenSSH resolves via the user's config (same as dialing the bare name).
   const now = opts.now ?? new Date().toISOString();
   priv[host] = synthesizeWindowsDevice(host, fields, now);
   fs.writeFileSync(privateRegPath, JSON.stringify(priv, null, 2) + '\n', { mode: 0o600 });
