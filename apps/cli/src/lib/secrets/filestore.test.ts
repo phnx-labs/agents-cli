@@ -71,6 +71,18 @@ describe('filestore passphrase policy (silent auto-provision)', () => {
       .toThrow(/decrypt|passphrase/i);
   });
 
+  it('batch reads omit missing items but fail on ciphertext that cannot decrypt', () => {
+    process.env.AGENTS_SECRETS_PASSPHRASE = 'right';
+    _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
+    fileStore.set('agents-cli.secrets.b.K', 'sealed');
+    expect(fileStore.getBatch(['missing'])).toEqual(new Map());
+
+    process.env.AGENTS_SECRETS_PASSPHRASE = 'wrong';
+    _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
+    expect(() => fileStore.getBatch(['agents-cli.secrets.b.K']))
+      .toThrow("Failed to decrypt 'agents-cli.secrets.b.K'");
+  });
+
   it('auto-provisions the passphrase outside the encrypted store dir (#479)', () => {
     fileStore.set('agents-cli.secrets.b.K', 'sealed');
     const storeEntries = fs.readdirSync(storeDir);

@@ -103,18 +103,7 @@ const keychainStore: ItemStore = {
 const fileItemStore: ItemStore = {
   has: (item) => fileStore.has(item),
   get: (item) => fileStore.get(item),
-  getBatch: (items) => {
-    const out = new Map<string, string>();
-    for (const item of items) {
-      try {
-        out.set(item, fileStore.get(item));
-      } catch {
-        // Missing/undecryptable item — absent from the map, mirroring
-        // getKeychainTokens (caller decides whether that's an error).
-      }
-    }
-    return out;
-  },
+  getBatch: (items) => fileStore.getBatch(items),
   set: (item, value) => fileStore.set(item, value),
   setBatch: (items) => {
     for (const [item, value] of items) {

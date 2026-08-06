@@ -270,6 +270,18 @@ function fileGet(item: string): string {
   }
 }
 
+function fileGetBatch(items: string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const item of items) {
+    // A missing file is an absent item. Any error reading an existing file,
+    // especially an AES-GCM authentication failure, is a broken store and must
+    // stop the caller rather than silently produce an incomplete environment.
+    if (!fileHas(item)) continue;
+    out.set(item, fileGet(item));
+  }
+  return out;
+}
+
 function fileSet(item: string, value: string): void {
   ensureFileDir();
   // Under the store lock: a write must not interleave with a rotation's swap.
@@ -316,6 +328,7 @@ export function fileStoreHasItems(): boolean {
 export const fileStore = {
   has: fileHas,
   get: fileGet,
+  getBatch: fileGetBatch,
   set: fileSet,
   delete: fileDelete,
   list: fileList,

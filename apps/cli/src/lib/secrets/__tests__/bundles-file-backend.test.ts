@@ -21,10 +21,11 @@ import {
   listBundles,
   readAndResolveBundleEnv,
   readBundle,
+  resolveBundleEnv,
   writeBundle,
   type SecretsBundle,
 } from '../bundles.js';
-import { _resetFileStoreForTest } from '../filestore.js';
+import { _resetFileStoreForTest, fileStore } from '../filestore.js';
 import {
   secretsKeychainItem,
   setKeychainBackendForTest,
@@ -140,9 +141,25 @@ describe('file-backed bundle routing', () => {
 
   it('resolution fails clearly when the passphrase is wrong', () => {
     createFileBundle('rel', 'TOKEN', 'sealed-value');
+    const bundle = readBundle('rel');
     process.env.AGENTS_SECRETS_PASSPHRASE = 'wrong';
     _resetFileStoreForTest({ fileDir: tmpDir, passphrase: 'wrong' });
-    expect(() => readAndResolveBundleEnv('rel', { caller: 'test' })).toThrow(/decrypt|passphrase/i);
+
+    expect(() => resolveBundleEnv(bundle, { caller: 'test' }))
+      .toThrow("Failed to decrypt 'agents-cli.secrets.rel.TOKEN'");
+    expect(() => readAndResolveBundleEnv('rel', { caller: 'test' }))
+      .toThrow("Failed to decrypt 'agents-cli.bundles.rel'");
+  });
+
+  it('read-and-resolve fails on an undecryptable value instead of treating it as absent', () => {
+    createFileBundle('rel', 'HCLOUD_TOKEN', 'sealed-value');
+
+    _resetFileStoreForTest({ fileDir: tmpDir, passphrase: 'wrong' });
+    fileStore.set(secretsKeychainItem('rel', 'HCLOUD_TOKEN'), 'encrypted-with-wrong-key');
+    _resetFileStoreForTest({ fileDir: tmpDir, passphrase: PASS });
+
+    expect(() => readAndResolveBundleEnv('rel', { caller: 'test' }))
+      .toThrow("Failed to decrypt 'agents-cli.secrets.rel.HCLOUD_TOKEN'");
   });
 
   it('listBundles merges keychain and file bundles with the right backend tag', () => {
