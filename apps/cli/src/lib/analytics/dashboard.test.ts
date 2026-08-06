@@ -4,8 +4,8 @@ import * as os from 'os';
 import * as path from 'path';
 import Database from '../sqlite.js';
 import { closeUsageDb, recordUsage } from './usage-db.js';
-import { buildTrendsDashboard } from './dashboard.js';
-import { recipeHarnessMix, recipeToolsPerSession, trendsWindow } from './recipes.js';
+import { buildMixDashboard } from './dashboard.js';
+import { recipeHarnessMix, recipeToolsPerSession, analyticsWindow } from './recipes.js';
 
 const tmpDirs: string[] = [];
 let prevNoTrack: string | undefined;
@@ -13,7 +13,7 @@ let prevUsageDb: string | undefined;
 let prevSessionsDb: string | undefined;
 
 function pin(): { usage: string; sessions: string } {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-trends-dash-'));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-insights-mix-'));
   tmpDirs.push(d);
   const usage = path.join(d, 'usage.db');
   const sessions = path.join(d, 'sessions.db');
@@ -90,9 +90,9 @@ afterEach(() => {
   tmpDirs.length = 0;
 });
 
-describe('trends recipes + dashboard', () => {
+describe('insights mix recipes + dashboard', () => {
   it('harness-mix and tools-per-session read the sessions index', () => {
-    const win = trendsWindow(7);
+    const win = analyticsWindow(7);
     const harness = recipeHarnessMix(win);
     expect(harness.empty).toBe(false);
     expect(harness.rows.some((r) => r.harness === 'claude' && r.sessions === 2)).toBe(true);
@@ -109,7 +109,7 @@ describe('trends recipes + dashboard', () => {
   });
 
   it('counts sessions the teams summarizer never stamped (sessions.tool_call_count IS NULL)', () => {
-    const tools = recipeToolsPerSession(trendsWindow(7));
+    const tools = recipeToolsPerSession(analyticsWindow(7));
     // s3 is codex with a NULL tool_call_count but 30 indexed calls. Reading the
     // column dropped it and pinned the fleet-wide p50 at 0; the ledger has it.
     const codex = tools.rows.find((r) => r.scope === 'codex');
@@ -121,14 +121,14 @@ describe('trends recipes + dashboard', () => {
     const db = new Database(process.env.AGENTS_SESSIONS_DB as string);
     db.exec('DROP TABLE tool_scan_ledger');
     db.close();
-    expect(recipeToolsPerSession(trendsWindow(7)).empty).toBe(true);
+    expect(recipeToolsPerSession(analyticsWindow(7)).empty).toBe(true);
   });
 
-  it('dashboard skips empty recipes and stays under the compute budget', () => {
+  it('mix dashboard skips empty recipes and stays under the compute budget', () => {
     recordUsage({ kind: 'secret', name: 'npm', event: 'access' });
     const samples: number[] = [];
     for (let i = 0; i < 25; i++) {
-      const dash = buildTrendsDashboard({ days: 7 });
+      const dash = buildMixDashboard({ days: 7 });
       samples.push(dash.durationMs);
       expect(dash.sections.length).toBeGreaterThan(0);
       expect(dash.sections.every((s) => !s.empty)).toBe(true);

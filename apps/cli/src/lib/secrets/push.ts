@@ -108,6 +108,69 @@ function isPowershellTarget(host: string): boolean {
 }
 
 /**
+ * WHICH transport a (backend, target-OS) pair selects, and the exact bytes it
+ * will send. One of four outcomes, and picking the wrong one is silent: a
+ * Windows target handed a POSIX `bash -lc` produces garbage, and a Windows
+ * target handed `--from -` hangs forever on a stdin the `agents.ps1` shim never
+ * forwards. Neither shows up as a failed ssh, so the selection is the thing
+ * worth pinning.
+ *
+ * Separated from execution so it is decidable without a network: the branch is
+ * chosen from the device registry alone, and `pushResolvedBundleToHost` below
+ * does nothing but run what this returns.
+ */
+export type PushTransport =
+  /** No supported command exists for this pair — fail loud, never a wrong path. */
+  | { kind: 'refuse'; message: string }
+  /** A command sent over the raw ssh engine, with the .env on stdin. */
+  | { kind: 'ssh'; remoteCmd: string; input: string }
+  /** The OS-aware `agents secrets` wrapper, the READ inverse's own path. */
+  | { kind: 'remote-secrets'; args: string[]; input: string };
+
+/** Choose the transport for one push. Pure: registry read in, plan out. */
+export function planPushTransport(
+  resolved: ResolvedBundleForPush,
+  bundle: string,
+  host: string,
+  opts: PushBundleOptions,
+): PushTransport {
+  const powershell = isPowershellTarget(host);
+  if (opts.remoteBackend === 'file') {
+    // Both file-backend paths build a POSIX `bash -lc` command. Refuse a Windows
+    // target cleanly rather than emit broken PowerShell (fail loud at the
+    // boundary, never a silent wrong path).
+    if (powershell) {
+      return { kind: 'refuse', message: 'file backend export to a Windows target is not yet supported' };
+    }
+    const { remoteCmd, input } = buildRemoteFileImportCommand(bundle, resolved.dotenv, {
+      passphrase: opts.passphrase ?? '',
+      force: opts.force,
+    });
+    return { kind: 'ssh', remoteCmd, input };
+  }
+  if (powershell) {
+    // Keychain on a Windows target: the `agents.ps1` shim doesn't forward
+    // ssh-piped stdin to node, so `--from -` would hang. Bridge the piped .env
+    // through PowerShell into a temp file and import `--from <file>` (deleted
+    // afterwards). Same hardened ssh engine; the .env still only ever crosses
+    // the wire over ssh stdin.
+    return {
+      kind: 'ssh',
+      remoteCmd: buildWindowsStdinImportCommand(bundle, { force: opts.force }),
+      input: resolved.dotenv,
+    };
+  }
+  // Keychain on a POSIX target: OS-aware wrapping + the hardened ssh engine
+  // (BatchMode, ConnectTimeout, keepalive, control-socket reuse) via the same
+  // path the READ inverse (`remoteResolveEnv`) uses.
+  return {
+    kind: 'remote-secrets',
+    args: ['import', bundle, '--from', '-', ...(opts.force ? ['--force'] : [])],
+    input: resolved.dotenv,
+  };
+}
+
+/**
  * Push an already-resolved bundle to ONE host.
  *
  * Drives the remote's own `agents secrets import --from -`, so the values land
@@ -123,36 +186,11 @@ export function pushResolvedBundleToHost(
   const fail = (message: string): PushBundleResult =>
     ({ ok: false, host, bundle, keyCount: resolved.keyCount, message });
 
-  let res: SshExecResult;
-  if (opts.remoteBackend === 'file') {
-    // Both file-backend paths build a POSIX `bash -lc` command. Refuse a Windows
-    // target cleanly rather than emit broken PowerShell (fail loud at the
-    // boundary, never a silent wrong path).
-    if (isPowershellTarget(host)) {
-      return fail('file backend export to a Windows target is not yet supported');
-    }
-    const { remoteCmd, input } = buildRemoteFileImportCommand(bundle, resolved.dotenv, {
-      passphrase: opts.passphrase ?? '',
-      force: opts.force,
-    });
-    res = sshExec(host, remoteCmd, { input });
-  } else if (isPowershellTarget(host)) {
-    // Keychain on a Windows target: the `agents.ps1` shim doesn't forward
-    // ssh-piped stdin to node, so `--from -` would hang. Bridge the piped .env
-    // through PowerShell into a temp file and import `--from <file>` (deleted
-    // afterwards). Same hardened ssh engine; the .env still only ever crosses
-    // the wire over ssh stdin.
-    res = sshExec(host, buildWindowsStdinImportCommand(bundle, { force: opts.force }), { input: resolved.dotenv });
-  } else {
-    // Keychain on a POSIX target: OS-aware wrapping + the hardened ssh engine
-    // (BatchMode, ConnectTimeout, keepalive, control-socket reuse) via the same
-    // path the READ inverse (`remoteResolveEnv`) uses.
-    res = remoteSecretsRaw(
-      host,
-      ['import', bundle, '--from', '-', ...(opts.force ? ['--force'] : [])],
-      { input: resolved.dotenv, osLookupName: host },
-    );
-  }
+  const plan = planPushTransport(resolved, bundle, host, opts);
+  if (plan.kind === 'refuse') return fail(plan.message);
+  const res: SshExecResult = plan.kind === 'ssh'
+    ? sshExec(host, plan.remoteCmd, { input: plan.input })
+    : remoteSecretsRaw(host, plan.args, { input: plan.input, osLookupName: host });
 
   if (res.code === null) {
     return fail(res.stderr.trim() || (res.timedOut ? 'ssh timed out' : 'ssh failed'));

@@ -6,6 +6,7 @@ import {
   buildRemoteVersionCommand,
   buildBootstrapCommand,
   buildReadyProbeCommand,
+  type ReadyProbe,
 } from './ready.js';
 import { decodePowershell } from './remote-cmd.js';
 
@@ -17,6 +18,31 @@ function decodeWindows(cmd: string): string {
   expect(m, `not an encoded PowerShell command: ${cmd}`).not.toBeNull();
   return decodePowershell(m![1]);
 }
+
+describe('ReadyProbe.timedOut — timeout vs unreachable distinction', () => {
+  it('timedOut is absent on a successful probe', () => {
+    const p: ReadyProbe = parseReadyProbe(`2.1.170\n${MARK}\nClaude\n`);
+    expect(p.timedOut).toBeUndefined();
+    expect(p.reachable).toBe(true);
+  });
+
+  it('timedOut is absent on a probe that got a non-timeout empty response', () => {
+    // ssh connected but the sentinel never came (auth failure, wrong command, etc.)
+    const p: ReadyProbe = parseReadyProbe('');
+    expect(p.timedOut).toBeUndefined();
+    expect(p.reachable).toBe(false);
+  });
+
+  it('parseReadyProbe never sets timedOut — that path is readyProbe-only', () => {
+    // timedOut is set only by readyProbe() when sshExec signals a timeout kill.
+    // parseReadyProbe() is a pure stdout parser and must never set it, regardless
+    // of what stdout looks like. The sshExec timedOut detection is exercised by
+    // the ssh-exec.test.ts PATH-stub tests.
+    for (const stdout of ['', `2.1.170\n${MARK}\n`, `\n${MARK}\n`, 'garbage\nno-marker']) {
+      expect(parseReadyProbe(stdout).timedOut).toBeUndefined();
+    }
+  });
+});
 
 describe('parseReadyProbe', () => {
   it('parses version + agent listing from one compound probe', () => {

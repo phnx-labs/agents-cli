@@ -9,6 +9,7 @@ import {
   controlOpts,
   SSH_OPTS,
   sshConnectOpts,
+  sshExec,
   sshExecAsync,
   sshExecRawStream,
 } from './ssh-exec.js';
@@ -106,6 +107,43 @@ describe('controlOpts (connection multiplexing)', () => {
     expect(cp).toContain('%C');
     const dir = path.dirname(cp!.replace('ControlPath=', ''));
     expect(fs.existsSync(dir)).toBe(true);
+  });
+});
+
+// POSIX-only: the stub is a `#!/bin/sh` script, which Windows cannot exec.
+// Same skip rationale as the sshExecAsync suite below.
+describe.skipIf(process.platform === 'win32')('sshExec timedOut detection (PATH ssh stub)', () => {
+  function withStubSshSync<T>(script: string, fn: () => T): T {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sshstub-'));
+    fs.writeFileSync(path.join(dir, 'ssh'), script, { mode: 0o755 });
+    const prevPath = process.env.PATH;
+    process.env.PATH = dir + path.delimiter + prevPath;
+    try {
+      return fn();
+    } finally {
+      process.env.PATH = prevPath;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('flags timedOut when spawnSync kills the ssh process after timeoutMs', () => {
+    // Before the fix, spawnSync set res.signal = 'SIGTERM' on timeout but NOT
+    // res.error.code = 'ETIMEDOUT', so the old detection always returned false.
+    const res = withStubSshSync(
+      '#!/bin/sh\nexec sleep 30\n',
+      () => sshExec('testhost', 'slow', { multiplex: false, timeoutMs: 150 }),
+    );
+    expect(res.timedOut).toBe(true);
+    expect(res.code).toBeNull();
+  });
+
+  it('does not flag timedOut when the stub exits normally within the timeout', () => {
+    const res = withStubSshSync(
+      '#!/bin/sh\nprintf "out"\nexit 0\n',
+      () => sshExec('testhost', 'fast', { multiplex: false, timeoutMs: 5000 }),
+    );
+    expect(res.timedOut).toBe(false);
+    expect(res.code).toBe(0);
   });
 });
 

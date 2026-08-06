@@ -3,8 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { archiveRoutineTranscripts, buildJobCommand, executeJob, executeJobDetached, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd } from './runner.js';
+import { archiveRoutineTranscripts, buildJobCommand, executeJob, executeJobDetached, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
 import { getRunDir, writeRunMeta } from './routines.js';
+import { getVersionHomePath } from './versions.js';
 import type { JobConfig, RunMeta } from './routines.js';
 import type { RotateCandidate, RotateResult } from './rotate.js';
 import { saveTask, hostsCacheDir } from './hosts/tasks.js';
@@ -217,6 +218,110 @@ describe('routine transcript archiving', () => {
     } finally {
       fs.rmSync(overlayHome, { recursive: true, force: true });
       cleanupJobRuns(kimiJobName);
+    }
+  });
+
+  // RUSH-2271: a real Claude routine writes its transcript to the per-version
+  // CLAUDE_CONFIG_DIR home (buildExecEnv, exec.ts), NOT the sandbox overlay the
+  // archiver used to scan — so nothing was ever archived and the run never became
+  // an origin='routine' session. The archiver now reads the version home, scoped by
+  // a pre-spawn baseline so it copies ONLY this run's transcript out of that shared
+  // home, never a sibling session's.
+  it('archives a Claude routine transcript from the per-version home and excludes pre-existing sessions', () => {
+    const jobName = 'archive-versionhome-test';
+    const runId = 'run-vh-1';
+    const version = '99.0.0-rush2271';
+    const runDir = getRunDir(jobName, runId);
+    fs.mkdirSync(runDir, { recursive: true });
+    // Where a claude routine actually writes: <versionHome>/.claude/projects.
+    const projects = path.join(getVersionHomePath('claude', version), '.claude', 'projects', 'proj');
+    fs.mkdirSync(projects, { recursive: true });
+    // A sibling session already in the shared home BEFORE this run — must never be
+    // swept in and mis-tagged as this routine's.
+    const preexisting = path.join(projects, 'sess-preexisting.jsonl');
+    fs.writeFileSync(preexisting, '{"type":"user","message":{"content":"an earlier interactive session"}}\n', 'utf-8');
+
+    const meta = { jobName, runId, agent: 'claude' as const, version };
+    try {
+      // 1) Baseline captured before the run spawns (records the pre-existing session).
+      snapshotRoutineTranscriptBase(meta, runDir);
+      // 2) The run produces its own transcript in the same shared home.
+      const thisRun = path.join(projects, 'sess-thisrun.jsonl');
+      fs.writeFileSync(thisRun, '{"type":"user","message":{"content":"the routine run"}}\n', 'utf-8');
+      // 3) Archive.
+      archiveRoutineTranscripts(meta, runDir);
+
+      const archivedThisRun = path.join(runDir, 'sessions', 'claude', 'projects', 'proj', 'sess-thisrun.jsonl');
+      const archivedPreexisting = path.join(runDir, 'sessions', 'claude', 'projects', 'proj', 'sess-preexisting.jsonl');
+      expect(fs.readFileSync(archivedThisRun, 'utf-8')).toContain('the routine run');
+      expect(fs.existsSync(archivedPreexisting)).toBe(false);
+    } finally {
+      fs.rmSync(getVersionHomePath('claude', version), { recursive: true, force: true });
+      cleanupJobRuns(jobName);
+    }
+  });
+
+  // RUSH-2271 failover: the single-shot loop spawns each chain entry's OWN version,
+  // whose per-version home differs from chain[0]'s. When a run rate-limit-fails over to
+  // a second account, the archiver must read the home the attempt that actually ran wrote
+  // to — re-pointed via meta.version + a re-taken baseline before each attempt (runner.ts).
+  it('archives the failover attempt\'s version home, not the first attempt\'s (RUSH-2271)', () => {
+    const jobName = 'archive-failover-test';
+    const runId = 'run-fo-1';
+    const vA = '99.0.2-rush2271'; // first attempt (rate-limited)
+    const vB = '99.0.3-rush2271'; // failover attempt that actually ran
+    const runDir = getRunDir(jobName, runId);
+    fs.mkdirSync(runDir, { recursive: true });
+    const projA = path.join(getVersionHomePath('claude', vA), '.claude', 'projects', 'p');
+    const projB = path.join(getVersionHomePath('claude', vB), '.claude', 'projects', 'p');
+    fs.mkdirSync(projA, { recursive: true });
+    fs.mkdirSync(projB, { recursive: true });
+    // A sibling session already in the failover home, and one in the first home.
+    fs.writeFileSync(path.join(projB, 'old-B.jsonl'), '{"type":"user","message":{"content":"earlier B session"}}\n', 'utf-8');
+    fs.writeFileSync(path.join(projA, 'old-A.jsonl'), '{"type":"user","message":{"content":"earlier A session"}}\n', 'utf-8');
+
+    try {
+      // Attempt 1 on version A: baseline A (rate-limits, writes nothing new).
+      snapshotRoutineTranscriptBase({ jobName, runId, agent: 'claude', version: vA }, runDir);
+      // Failover to version B: re-point meta.version + re-baseline B, then B runs.
+      const metaB = { jobName, runId, agent: 'claude' as const, version: vB };
+      snapshotRoutineTranscriptBase(metaB, runDir);
+      fs.writeFileSync(path.join(projB, 'sess-B.jsonl'), '{"type":"user","message":{"content":"ran on B"}}\n', 'utf-8');
+      archiveRoutineTranscripts(metaB, runDir);
+
+      const archivedB = path.join(runDir, 'sessions', 'claude', 'projects', 'p', 'sess-B.jsonl');
+      expect(fs.readFileSync(archivedB, 'utf-8')).toContain('ran on B');
+      // Neither the failover home's earlier session nor the first attempt's home is swept in.
+      expect(fs.existsSync(path.join(runDir, 'sessions', 'claude', 'projects', 'p', 'old-B.jsonl'))).toBe(false);
+      expect(fs.existsSync(path.join(runDir, 'sessions', 'claude', 'projects', 'p', 'old-A.jsonl'))).toBe(false);
+    } finally {
+      fs.rmSync(getVersionHomePath('claude', vA), { recursive: true, force: true });
+      fs.rmSync(getVersionHomePath('claude', vB), { recursive: true, force: true });
+      cleanupJobRuns(jobName);
+    }
+  });
+
+  // Safety: a shared per-version home holds every session that version+account ran,
+  // so with NO pre-spawn baseline the archiver cannot tell this run's transcript from
+  // a sibling's — it must copy nothing rather than sweep them all in as origin='routine'.
+  it('copies nothing from a shared version home when no baseline was recorded', () => {
+    const jobName = 'archive-nobaseline-test';
+    const runId = 'run-nb-1';
+    const version = '99.0.1-rush2271';
+    const runDir = getRunDir(jobName, runId);
+    fs.mkdirSync(runDir, { recursive: true });
+    const projects = path.join(getVersionHomePath('claude', version), '.claude', 'projects', 'proj');
+    fs.mkdirSync(projects, { recursive: true });
+    fs.writeFileSync(path.join(projects, 'sess-orphan.jsonl'), '{"type":"user","message":{"content":"unrelated"}}\n', 'utf-8');
+
+    const meta = { jobName, runId, agent: 'claude' as const, version };
+    try {
+      // No snapshotRoutineTranscriptBase() call → no baseline on disk.
+      archiveRoutineTranscripts(meta, runDir);
+      expect(fs.existsSync(path.join(runDir, 'sessions', 'claude'))).toBe(false);
+    } finally {
+      fs.rmSync(getVersionHomePath('claude', version), { recursive: true, force: true });
+      cleanupJobRuns(jobName);
     }
   });
 });

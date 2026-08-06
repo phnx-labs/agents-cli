@@ -17,6 +17,11 @@ module map, build, and release mechanics the README does not.
 > Phoenix Labs OSS · Apache-2.0. Repo-wide policy (conventions, code review, security)
 > lives in the root [AGENTS.md](../../AGENTS.md).
 
+`agents setup` is the re-runnable onboarding hub. It reports live readiness for
+core, browser, computer, secrets, fleet, share, watchdog, and preferences, then
+delegates each selected phase to its existing `agents setup <capability>` wizard.
+`agents setup status --json` is the non-interactive view of the same probes.
+
 ## Core design choices (read this first)
 
 Break these and downstream code drifts silently.

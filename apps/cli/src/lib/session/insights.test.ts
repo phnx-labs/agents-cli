@@ -123,6 +123,64 @@ describe('computeInsightFacets', () => {
     ], 0);
     expect(f.responseGaps).toEqual([60, 1]);
     expect(f.gapsOverCeiling).toBe(1);
+    // 2h idle after assistant still counts as a silent stall (1h+ bucket).
+    expect(f.frictionSignals['silent stall: 1h+']).toBe(1);
+  });
+
+  it('classifies agent silent stalls from timestamps (model idle until human resumes)', () => {
+    // Assistant stops at t=10; user "continue" at t=10+600 (10m later) → 5-15m stall + resume nudge.
+    // Assistant stops again; user arbitrary "ok next" after 20m → 15-60m stall, no resume nudge.
+    // Sub-threshold 2m gap is normal turn-taking — not a silent stall.
+    const f = computeInsightFacets([
+      userMsg(0, 'build it'),
+      asstMsg(10, 'working…'),
+      userMsg(10 + 600, 'continue'),
+      asstMsg(700, 'more work'),
+      userMsg(700 + 1200, 'ok next file'),
+      asstMsg(2000, 'done for now'),
+      userMsg(2000 + 120, 'small follow-up'),
+    ], 0);
+    expect(f.frictionSignals['silent stall: 5-15m']).toBe(1);
+    expect(f.frictionSignals['silent stall: 15-60m']).toBe(1);
+    expect(f.frictionSignals['silent stall: 1h+']).toBeUndefined();
+    expect(f.correctionSignals['resume after silent stall']).toBe(1);
+    expect(f.correctionSignals['continue / keep going']).toBe(1);
+    // 2m gap stays in reply-latency sample, not silent-stall friction.
+    expect(f.responseGaps).toContain(120);
+  });
+
+  it('emits a high-priority action for resume-after-silent-stall patterns', () => {
+    const facets = computeInsightFacets([
+      userMsg(0, 'ship it'),
+      asstMsg(5),
+      userMsg(5 + 900, 'keep going'),
+    ], 0);
+    const actions = buildInsightActions([{ id: 'bbbbbbbb-stall-sess', facets }]);
+    expect(actions.some((a) =>
+      a.action.includes('Never stop mid-task') && a.evidenceCount >= 1,
+    )).toBe(true);
+    expect(actions.some((a) =>
+      a.action.includes('Stop ending turns while work remains') ||
+      a.action.includes('Long idle after the assistant'),
+    )).toBe(true);
+  });
+
+  it('ignores synthetic user messages so stop-hook feedback does not end a silent stall', () => {
+    // Assistant at t=0; synthetic meta at t=600 (would look like a 10m gap); real
+    // "continue" at t=1200 (20m from assistant). Stall must be measured to the real
+    // human message, not the injected row.
+    const f = computeInsightFacets([
+      userMsg(0, 'build'),
+      asstMsg(1, 'working'),
+      {
+        type: 'message', agent: 'claude', timestamp: at(600), role: 'user',
+        content: 'Stop hook feedback: open PR still…', _synthetic: true,
+      } as SessionEvent,
+      userMsg(1200, 'continue'),
+    ], 0);
+    expect(f.frictionSignals['silent stall: 15-60m']).toBe(1);
+    expect(f.frictionSignals['silent stall: 5-15m']).toBeUndefined();
+    expect(f.correctionSignals['resume after silent stall']).toBe(1);
   });
 
   it('rejects a negative gap from clock skew rather than counting it', () => {

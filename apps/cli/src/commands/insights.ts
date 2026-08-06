@@ -1,23 +1,26 @@
 /**
- * Insights command — how you actually work, split by the account that did the work.
+ * Insights command — one observe verb for "how work looks".
  *
- * The behavioural sibling of the existing rollups, and deliberately not a duplicate of
- * any of them:
+ * Two data paths under one name (do not re-split into peer top-level commands):
  *
- *   agents cost      what you spent            ($ and duration)
- *   agents output    what shipped              (burn vs PRs and commits)
- *   agents usage     live quota headroom       (rate-limit windows, right now)
- *   agents trends    aggregate distributions   (harness mix, tools-per-session, token ratios)
- *   agents sessions  browse individual work    (search, resume, render)
- *   agents insights  HOW you work              (tools, friction, rhythm, per account)
+ *   agents insights              HOW you work (transcript content: tools, friction,
+ *                                rhythm, edits) — split by Claude account by default
+ *   agents insights mix          COUNTERS (sessions index + usage.db recipes:
+ *                                harness/model mix, token ratios, secrets, browser)
+ *   agents insights <recipe>     One baked mix recipe (harness-mix, tools-per-session, …)
+ *   agents insights query        Raw usage.db rows
  *
- * The closest neighbour is `agents trends`, and the boundary is the data path: trends
- * reads counters — `tool_scan_ledger` call counts and the analytics warehouse — to
- * produce distributions ("how many tool calls per session, by harness"). This reads
- * transcript CONTENT through `parseSession` to produce behaviour ("which tools, which
- * languages, where it went wrong, when you were working"), and splits all of it by
- * account, a dimension trends does not have. They overlap in spirit on tool and model
- * mix; they do not read the same store or answer the same question.
+ * Sibling observe verbs (stay separate — different questions):
+ *
+ *   agents cost       what you spent ($ and duration)
+ *   agents output     what shipped (burn vs PRs and commits)
+ *   agents usage      live quota headroom
+ *   agents perf       latency (hooks, CLI commands, agent.run) — not popularity
+ *   agents sessions stats  which skills/slash-commands were explicitly invoked
+ *
+ * Why mix lives here (not a second top-level `trends`): two abstract "analytics"
+ * nouns taught agents and humans to guess. One verb, two engines — cheap SQL mix
+ * vs transcript facets. Latency stays on `perf` so it is never confused with mix.
  *
  * Modelled on Claude Code's `/insights`, with the difference that motivated it: that
  * command reads one account's directory, while `balanced` rotation sprays sessions
@@ -27,6 +30,8 @@
  * The deterministic report makes zero network calls. `--narrative` is opt-in and adds
  * the coaching prose by piping the AGGREGATE (never raw transcripts) through a headless
  * `claude -p`.
+ *
+ * `agents trends` is a thin deprecated alias of the mix tree only (see commands/trends.ts).
  */
 
 import type { Command } from 'commander';
@@ -63,6 +68,7 @@ import { formatUsd } from '../lib/pricing/index.js';
 import { formatDuration } from '../lib/session/render.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import type { SessionMeta } from '../lib/session/types.js';
+import { registerMixCommands } from '../lib/analytics/mix-commands.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -299,14 +305,29 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
 
   // Friction — the section that earns the command.
   const gaps = all.responseGaps;
+  const silentStalls = Object.entries(all.frictionSignals)
+    .filter(([k]) => k.startsWith('silent stall:'))
+    .reduce((n, [, c]) => n + c, 0);
+  const resumeNudges = all.correctionSignals['resume after silent stall'] ?? 0;
   out.push('');
   out.push(chalk.bold('Friction'));
   out.push(`  ${padToWidth('interruptions', 18)}  ${chalk.cyan(String(all.interruptions))}` +
     chalk.gray('   turns you cut short'));
   out.push(`  ${padToWidth('tool errors', 18)}  ${chalk.cyan(String(all.errorCount))}`);
   if (gaps.length > 0) {
-    out.push(`  ${padToWidth('your reply time', 18)}  ` +
-      chalk.cyan(`p50 ${Math.round(percentile(gaps, 50))}s`) + chalk.gray(` · p90 ${Math.round(percentile(gaps, 90))}s`));
+    // Same timestamps as silent stalls; this line is the distribution. Silent
+    // stalls (below) are the agent-attributed long gaps after the model stopped.
+    out.push(`  ${padToWidth('gap until next msg', 18)}  ` +
+      chalk.cyan(`p50 ${Math.round(percentile(gaps, 50))}s`) + chalk.gray(` · p90 ${Math.round(percentile(gaps, 90))}s`) +
+      chalk.gray('   after assistant last spoke'));
+  }
+  if (silentStalls > 0) {
+    out.push(`  ${padToWidth('silent stalls', 18)}  ${chalk.cyan(String(silentStalls))}` +
+      chalk.gray('   agent idle ≥5m until you resumed'));
+  }
+  if (resumeNudges > 0) {
+    out.push(`  ${padToWidth('resume nudges', 18)}  ${chalk.cyan(String(resumeNudges))}` +
+      chalk.gray('   "continue"/"keep going" after a silent stall'));
   }
   const errs = topEntries(all.errorCategories, 6);
   if (errs.length > 0) {
@@ -384,7 +405,9 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
     out.push(chalk.yellow(`  ${meta.unreadable} transcripts could not be read; their behaviour is missing from these totals.`));
   }
   if (all.gapsOverCeiling > 0) {
-    out.push(chalk.gray(`  ${all.gapsOverCeiling} reply gaps over an hour excluded from the percentiles.`));
+    out.push(chalk.gray(
+      `  ${all.gapsOverCeiling} gaps over an hour excluded from p50/p90 (still counted as silent stall: 1h+ when the assistant last spoke).`,
+    ));
   }
   out.push('');
   out.push(chalk.gray('  `agents insights --by project` to see it per repo'));
@@ -416,6 +439,13 @@ async function renderNarrative(payload: unknown): Promise<void> {
     '2. What is costing you — split into the assistant\'s fault vs your own workflow.',
     '3. Quick wins — concrete, tied to a number in the data.',
     '4. Worth trying — one more ambitious workflow change.',
+    '',
+    'Silent stalls (required): if frictionSignals contain "silent stall: …" or',
+    'correctionSignals contain "resume after silent stall" / "continue / keep going",',
+    'call that out explicitly in section 2 or 3 with the counts. Those mean the model',
+    'stopped mid-session and sat idle until the human pinged it (timestamps: last',
+    'assistant event → next user message ≥ 5 minutes). Do not reframe them as the',
+    'user being slow unless the data only shows short reply gaps.',
     'Be specific and cite the numbers. No preamble, no flattery, no bullet padding.',
     '',
     JSON.stringify(payload),
@@ -562,7 +592,7 @@ async function insightsAction(options: InsightsOptions): Promise<void> {
 
 function configureInsightsCommand(cmd: Command): void {
   addHostOption(cmd)
-    .description('Analyze friction, corrections, repeated work, and actions across session harnesses')
+    .description('How work looks — behavioural report (default) or counter mix (`mix`, recipes)')
     .option('--json', 'Output the full report as JSON')
     .option('--since <time>', 'Window: 7d, 4w, 3mo, an ISO date, or "all" (default 30d)')
     .option('--all', 'Every session ever indexed. Alias for --since all')
@@ -587,13 +617,22 @@ function configureInsightsCommand(cmd: Command): void {
       });
     });
 
+  // Cheap counter recipes (former top-level `agents trends`) — same parent, no peer verb.
+  registerMixCommands(cmd);
+
   setHelpSections(cmd, {
     examples: `
-      # Last 30 days, split by Claude account — the default
+      # Behavioural report — last 30 days, split by Claude account (default)
       agents insights
 
       # Which repo is eating the time
       agents insights --by project --since 90d
+
+      # Counter mix board (harness/model/token/secrets recipes) — former agents trends
+      agents insights mix
+      agents insights mix --days 30
+      agents insights harness-mix --json
+      agents insights query --kind secret --days 7
 
       # One account only, all of its history
       agents insights --account "Turing Labs" --all
@@ -605,10 +644,13 @@ function configureInsightsCommand(cmd: Command): void {
       agents insights --narrative
     `,
     notes: `
-      Answers "how do you work". For "what did it cost" use \`agents cost\`, for "what
-      shipped" use \`agents output\`, for live quota use \`agents usage\`.
+      Two paths under one verb:
+        bare \`agents insights\`     — transcript behaviour (tools, friction, rhythm, by account)
+        \`agents insights mix\`      — cheap counters from sessions.db + usage.db
+      Latency is \`agents perf\` (not mix). Quota is \`agents usage\`. Skill/slash popularity
+      is \`agents sessions stats\`. \`agents trends\` is a deprecated alias of the mix tree.
 
-      The first run parses every in-scope transcript and caches the result; later runs
+      The behavioural report parses in-scope transcripts once and caches facets; later runs
       re-read only files that changed. \`--refresh\` forces a full re-read.
 
       \`agents insights\` is the top-level alias of \`agents sessions insights\`.

@@ -52,15 +52,33 @@ const ERROR_CATEGORIES: ReadonlyArray<readonly [readonly string[], string]> = [
 ];
 
 /**
- * Gaps longer than this are someone leaving and coming back, not a reply latency.
- * Counted separately rather than silently dropped.
+ * Gaps longer than this leave the reply-latency percentiles (someone left for
+ * lunch / overnight). They still count as silent stalls when the assistant
+ * was the last speaker — the agent had already stopped before the user left.
  */
 const GAP_CEILING_SECONDS = 3600;
+
+/**
+ * Minimum quiet time after the assistant's last event before a user message
+ * is classified as an **agent silent stall**: the model went quiet on its own
+ * and sat idle until the human resumed. Shorter gaps are normal turn-taking.
+ * 5 minutes is long enough to exclude "user typing the next instruction" and
+ * short enough to catch "went silent mid-task until I said continue."
+ */
+export const SILENT_STALL_SECONDS = 300;
 
 /** Response-gap buckets, in ascending order. Upper bound is exclusive. */
 const GAP_BUCKETS: ReadonlyArray<readonly [string, number]> = [
   ['<10s', 10], ['10-30s', 30], ['30s-1m', 60], ['1-2m', 120],
   ['2-5m', 300], ['5-15m', 900], ['15-60m', Infinity],
+];
+
+/** Silent-stall duration buckets (agent idle after its last event). */
+const SILENT_STALL_BUCKETS: ReadonlyArray<readonly [string, number, number]> = [
+  // label, min inclusive, max exclusive (Infinity = open)
+  ['silent stall: 5-15m', 300, 900],
+  ['silent stall: 15-60m', 900, 3600],
+  ['silent stall: 1h+', 3600, Infinity],
 ];
 
 /** Behavioural facets of one session. Serialized as JSON into `session_insights`. */
@@ -209,9 +227,15 @@ export function computeInsightFacets(
   // reported p50 by 63% (143s against a true 88s), because fast replies are common and
   // dropping them all shifts the median right. A 0-second reply is a real reply.
   //
-  // The upper bound stays: past an hour the user went away and came back, which is not
-  // a reply latency. It censors 5.5% of gaps, and `gapsOverCeiling` reports how many so
-  // the number is never quietly truncated.
+  // The upper bound stays for *percentiles only*: past an hour the user often left the
+  // desk, which is not "reply latency." Those gaps still feed silent-stall classification
+  // (the agent had already stopped). `gapsOverCeiling` reports how many so percentiles
+  // are never quietly truncated.
+  //
+  // Silent stall (agent idle): when the gap after the assistant's last event is long
+  // enough that the model clearly stopped mid-session and waited for a human nudge
+  // ("continue", "keep going", or any later message after minutes of silence). This is
+  // the inverse framing of reply latency: same timestamps, attributed to the agent.
   let lastAssistantTs: number | null = null;
   let lastFailedTool: string | null = null;
 
@@ -225,7 +249,7 @@ export function computeInsightFacets(
         break;
 
       case 'usage':
-        // shortenModel so the label matches `agents sessions <id>` and `trends`
+        // shortenModel so the label matches `agents sessions <id>` and `insights mix`
         // rather than printing the raw id beside their shortened one.
         if (e.model) bump(f.models, shortenModel(e.model));
         break;
@@ -247,7 +271,11 @@ export function computeInsightFacets(
           break;
         }
         if (e.role !== 'user') break;
-        if (!e._synthetic) classifyCorrection(e.content ?? '', f.correctionSignals);
+        // Synthetic user rows (stop-hook feedback, injected meta) are not a human
+        // resume — skip correction/stall classification and leave lastAssistantTs so
+        // the next real user message still measures the full idle gap.
+        if (e._synthetic) break;
+        classifyCorrection(e.content ?? '', f.correctionSignals);
         if (hasTs) {
           // Local-time hour. parse.ts falls back to `new Date()` for a record with no
           // timestamp; those are indistinguishable here, but they are rare and would
@@ -261,6 +289,10 @@ export function computeInsightFacets(
             // this guard with it; a negative reply latency is not a data point.
             if (gap >= 0 && gap < GAP_CEILING_SECONDS) f.responseGaps.push(gap);
             else if (gap >= GAP_CEILING_SECONDS) f.gapsOverCeiling++;
+            // Agent silent stall: model stopped; session sat idle until this message.
+            if (gap >= SILENT_STALL_SECONDS) {
+              classifySilentStall(gap, e.content ?? '', f.frictionSignals, f.correctionSignals);
+            }
           }
         }
         lastAssistantTs = null;
@@ -321,6 +353,32 @@ const CORRECTION_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\b(?:check now|check again|try now|did it work)\b/i, 'check now'],
   [/\b(?:don'?t ask|just do it|run what)\b/i, "don't ask / just do it"],
 ];
+
+/** User text that is a pure resume nudge after the agent went silent. */
+const RESUME_NUDGE_PATTERN =
+  /\b(?:continue|keep going|don'?t stop|resume|pick up|you stopped|still there|wake up|hello\??|are you (?:there|stuck)|go on)\b/i;
+
+/**
+ * Classify a long quiet gap after the assistant's last event as an agent silent stall.
+ * Optionally also marks an explicit resume nudge ("continue", …) after that silence.
+ */
+export function classifySilentStall(
+  gapSeconds: number,
+  userText: string,
+  friction: Record<string, number>,
+  corrections: Record<string, number>,
+): void {
+  for (const [label, min, max] of SILENT_STALL_BUCKETS) {
+    if (gapSeconds >= min && gapSeconds < max) {
+      bump(friction, label);
+      break;
+    }
+  }
+  const normalized = userText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (normalized && RESUME_NUDGE_PATTERN.test(normalized)) {
+    bump(corrections, 'resume after silent stall');
+  }
+}
 
 const AUTOMATION_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bgh pr (?:checks|view|merge)\b/i, 'PR babysitting'],
@@ -502,6 +560,7 @@ export function buildInsightActions(sessions: SessionFacetEvidence[]): InsightAc
     action: string;
   }> = [
     { source: 'correctionSignals', label: 'continue / keep going', category: 'rule', action: 'Keep working through the delivery chain without waiting for another “continue”.' },
+    { source: 'correctionSignals', label: 'resume after silent stall', category: 'rule', action: 'Never stop mid-task waiting for a human ping — finish the current goal or park with an explicit blocker; keep driving CI/review/merge without going idle.' },
     { source: 'correctionSignals', label: 'approval repeated', category: 'rule', action: 'Treat the original build or ship request as authorization for routine follow-through.' },
     { source: 'correctionSignals', label: 'done end-to-end?', category: 'rule', action: 'Verify the user-visible outcome before declaring the task complete.' },
     { source: 'correctionSignals', label: 'did you merge?', category: 'automation', action: 'Automate PR review, CI watching, and merge-on-green as one durable workflow.' },
@@ -512,6 +571,9 @@ export function buildInsightActions(sessions: SessionFacetEvidence[]): InsightAc
     { source: 'correctionSignals', label: "Ask stall: what's next?", category: 'rule', action: 'Remove workflow-stall “what next?” prompts from agent guidance.' },
     { source: 'correctionSignals', label: 'Ask stall: merge / reconcile', category: 'skill', action: 'Encode the safe merge and reconcile path in the git workflow skill.' },
     { source: 'correctionSignals', label: 'Ask stall: direction / approach', category: 'rule', action: 'Let agents choose implementation details after scope is clear.' },
+    { source: 'frictionSignals', label: 'silent stall: 5-15m', category: 'rule', action: 'Stop ending turns while work remains open — after a tool batch, take the next step or schedule a real background wait that re-invokes you; do not sit idle until the user says continue.' },
+    { source: 'frictionSignals', label: 'silent stall: 15-60m', category: 'rule', action: 'Long idle after the assistant last spoke is an agent stop, not a user pause — drive open PRs/CI/todos to completion or name a true external blocker instead of going silent.' },
+    { source: 'frictionSignals', label: 'silent stall: 1h+', category: 'rule', action: 'Sessions that sit idle for an hour+ after the model stops are stranded work — use stop-gates, background watches, and queue drain so a human is not the only resume signal.' },
     { source: 'frictionSignals', label: 'blocked guard', category: 'product', action: 'Make guard failures return the safe next command and exact blocked operation.' },
     { source: 'frictionSignals', label: 'CI red loop', category: 'automation', action: 'Deduplicate CI watchers and turn repeated red checks into one stateful wait.' },
     { source: 'frictionSignals', label: 'merge conflict', category: 'skill', action: 'Standardize conflict diagnosis and fix-forward reconciliation.' },

@@ -108,6 +108,8 @@ export interface ReadyProbe {
   version: string | null;
   /** Raw `agents view`/`list` output, for installed-agent checks. */
   view: string;
+  /** True when the ssh probe timed out before the sentinel arrived. */
+  timedOut?: boolean;
 }
 
 /**
@@ -140,7 +142,10 @@ export function buildReadyProbeCommand(os?: string): string {
 }
 
 export function readyProbe(target: string, os?: string): ReadyProbe {
-  const r = sshExec(target, buildReadyProbeCommand(os), { timeoutMs: 20000 });
+  // Disable multiplexing: a stale control socket can hang the local ssh client
+  // until the timeout fires, just like sshExecAsync does for the same reason.
+  const r = sshExec(target, buildReadyProbeCommand(os), { timeoutMs: 20000, multiplex: false });
+  if (r.timedOut) return { reachable: false, version: null, view: '', timedOut: true };
   return parseReadyProbe(r.stdout);
 }
 
@@ -173,6 +178,13 @@ export interface EnsureReadyOptions {
 export function ensureHostReady(host: Host, opts: EnsureReadyOptions): { warnings: string[] } {
   const target = sshTargetFor(host);
   const probe = readyProbe(target, host.os ?? resolveRemoteOsSync(host.name));
+  if (probe.timedOut) {
+    throw new Error(
+      `Host "${host.name}" (${target}) did not respond in time — the SSH probe timed out after 20 seconds. ` +
+        `The host may be slow to start a login shell (nvm/sdkman init, cold node startup). ` +
+        `Retry, or run \`agents ssh ${host.name} agents view\` to confirm manually.`,
+    );
+  }
   if (!probe.reachable) {
     throw new Error(`Host "${host.name}" (${target}) is not reachable over SSH. Check it's online and key auth works.`);
   }

@@ -150,7 +150,12 @@ export function sshExec(target: string, remoteCmd: string, opts: SshExecOptions 
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
-  const timedOut = !!(res.error && (res.error as NodeJS.ErrnoException).code === 'ETIMEDOUT');
+  // Node's spawnSync with a `timeout` option kills the child via SIGTERM and sets
+  // res.signal (e.g. 'SIGTERM') — it does NOT set res.error.code = 'ETIMEDOUT'.
+  // Check both so the detection fires whether the timeout is signalled or errored.
+  const timedOut =
+    !!(res.error && (res.error as NodeJS.ErrnoException).code === 'ETIMEDOUT') ||
+    (!!opts.timeoutMs && res.signal !== null);
   return {
     code: typeof res.status === 'number' ? res.status : null,
     stdout: res.stdout ?? '',
@@ -245,7 +250,10 @@ export function sshExecRaw(target: string, remoteCmd: string, opts: SshExecOptio
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
-  const timedOut = !!(res.error && (res.error as NodeJS.ErrnoException).code === 'ETIMEDOUT');
+  // Same fix as sshExec: spawnSync sets res.signal, not error.code = 'ETIMEDOUT'.
+  const timedOut =
+    !!(res.error && (res.error as NodeJS.ErrnoException).code === 'ETIMEDOUT') ||
+    (!!opts.timeoutMs && res.signal !== null);
   return {
     code: typeof res.status === 'number' ? res.status : null,
     stdout: (res.stdout as Buffer | null) ?? Buffer.alloc(0),

@@ -29,6 +29,13 @@ import { registerSetupSecretsCommand } from './setup-secrets.js';
 import { registerSetupFleetCommand } from './setup-fleet.js';
 import { registerSetupWatchdogCommand, runWatchdogSetupWizard } from './setup-watchdog.js';
 import { runPreferencesStep } from './setup-preferences.js';
+import { getConfiguredDefaultProfileName, getProfile, isProfileLaunchableHere, DEFAULT_BROWSER_PROFILE_NAME } from '../lib/browser/profiles.js';
+import { listInstalledBrowsers } from '../lib/browser/chrome.js';
+import { probeComputerTrust } from './computer.js';
+import { readShareConfig } from '../lib/share/config.js';
+import { loadDevices } from '../lib/devices/registry.js';
+import { getConfigValue } from '../lib/device-config.js';
+import { setupSecretsPrefsPath } from './setup-secrets.js';
 
 const HOME = os.homedir();
 
@@ -78,15 +85,21 @@ async function importAgent(agentId: AgentId, version: string): Promise<{ success
   }
 }
 
+interface RunSetupOptions {
+  force?: boolean;
+  suppressFooter?: boolean;
+  systemRepo?: boolean;
+  runHub?: () => Promise<void>;
+}
+
 /** First-run setup. Clones ~/.agents/.system/ from the system repo if needed. */
-export async function runSetup(program: Command, options: { force?: boolean; suppressFooter?: boolean; systemRepo?: boolean } = {}): Promise<void> {
+export async function runSetup(program: Command, options: RunSetupOptions = {}): Promise<void> {
   const agentsDir = getAgentsDir();
   const alreadyConfigured = isGitRepo(agentsDir);
 
   if (alreadyConfigured && !options.force) {
-    console.log(chalk.gray('~/.agents/.system/ is already set up.'));
-    console.log(chalk.gray('\nTo sync updates:      agents repo pull system'));
-    console.log(chalk.gray('To re-run setup:      agents setup --force'));
+    if (options.suppressFooter) return;
+    await (options.runHub ?? runSetupHub)();
     return;
   }
 
@@ -222,12 +235,7 @@ export async function runSetup(program: Command, options: { force?: boolean; sup
   // Fresh-machine hub: offer to set up the optional capabilities that need their
   // own guided flow. TTY-only and fully opt-in — a non-interactive `agents setup`
   // stops at the system-repo bootstrap above, unchanged.
-  await runSetupHub();
-
-  // Preferences step: the two questions that keep agents off the wrong machine —
-  // which box you sit at (interactive host) and which browser agents drive here.
-  // TTY-only, skippable, and writes the same keys as `agents devices …`.
-  await runPreferencesStep();
+  await (options.runHub ?? runSetupHub)();
 
   console.log(chalk.bold('\nSetup complete. Try:'));
   console.log(chalk.cyan('  agents view                 ') + chalk.gray(' # see what\'s installed'));
@@ -271,29 +279,93 @@ export async function ensureInitialized(program: Command): Promise<void> {
  * wizard. Never throws — a cancel or an optional wizard's error just skips the
  * rest and lets core setup complete.
  */
-async function runSetupHub(): Promise<void> {
-  if (!isInteractiveTerminal()) return;
+export type SetupPhase = 'browser' | 'computer' | 'share' | 'secrets' | 'fleet' | 'watchdog' | 'preferences';
+export type SetupStatusState = 'ready' | 'missing' | 'n/a';
+export interface SetupStatusRow {
+  phase: 'core' | SetupPhase;
+  state: SetupStatusState;
+  detail: string;
+}
+
+export async function getSetupStatus(): Promise<SetupStatusRow[]> {
+  const configuredBrowserProfile = getConfiguredDefaultProfileName();
+  const browserProfile = await getProfile(configuredBrowserProfile ?? DEFAULT_BROWSER_PROFILE_NAME);
+  const browserReady = browserProfile !== null && isProfileLaunchableHere(browserProfile);
+  const installedBrowsers = listInstalledBrowsers();
+  const computerState = process.platform === 'darwin' ? (await probeComputerTrust() ? 'ready' : 'missing') : 'n/a';
+  const devices = await loadDevices();
+  const coreReady = isGitRepo(getAgentsDir());
+  const secretsReady = fs.existsSync(setupSecretsPrefsPath());
+  const shareConfig = readShareConfig();
+  const watchdogEnabled = getConfigValue('watchdog.enabled').value === true;
+  const interactiveHost = getConfigValue('interactive.host').value;
+  const defaultBrowser = getConfigValue('browser.profile').value;
+  return [
+    { phase: 'core', state: coreReady ? 'ready' : 'missing', detail: coreReady ? 'system repo ready' : 'system repo missing' },
+    { phase: 'browser', state: browserReady ? 'ready' : 'missing', detail: browserReady ? `profile ${browserProfile.name}` : browserProfile ? `profile ${browserProfile.name} cannot launch here` : installedBrowsers.length ? 'no default profile' : 'no supported browser found' },
+    { phase: 'computer', state: computerState, detail: computerState === 'ready' ? 'helper trusted' : computerState === 'n/a' ? 'macOS local setup only' : 'helper not running or not trusted' },
+    { phase: 'secrets', state: secretsReady ? 'ready' : 'missing', detail: secretsReady ? 'defaults chosen' : 'defaults not chosen' },
+    { phase: 'fleet', state: Object.keys(devices).length ? 'ready' : 'missing', detail: Object.keys(devices).length ? `${Object.keys(devices).length} device${Object.keys(devices).length === 1 ? '' : 's'} registered` : 'no devices registered' },
+    { phase: 'share', state: shareConfig ? 'ready' : 'missing', detail: shareConfig?.baseUrl ?? 'endpoint not configured' },
+    { phase: 'watchdog', state: watchdogEnabled ? 'ready' : 'missing', detail: watchdogEnabled ? 'enabled on this device' : 'disabled on this device' },
+    { phase: 'preferences', state: interactiveHost || defaultBrowser ? 'ready' : 'missing', detail: [interactiveHost && `host ${interactiveHost}`, defaultBrowser && `browser ${defaultBrowser}`].filter(Boolean).join(' · ') || 'interactive host and browser unset' },
+  ];
+}
+
+export function renderSetupStatus(rows: SetupStatusRow[]): void {
+  console.log(chalk.bold('\nagents setup — onboarding\n'));
+  for (const row of rows) {
+    const marker = row.state === 'ready' ? chalk.green('[x]') : row.state === 'n/a' ? chalk.gray('[-]') : chalk.yellow('[ ]');
+    const label = row.phase[0].toUpperCase() + row.phase.slice(1);
+    console.log(`  ${marker} ${label.padEnd(12)} ${chalk.gray(row.detail)}`);
+  }
+}
+
+async function runSetupPhase(phase: SetupPhase): Promise<void> {
+  if (phase === 'browser') await runBrowserWizard();
+  else if (phase === 'computer') await runComputerWizard();
+  else if (phase === 'share') await runShareWizard();
+  else if (phase === 'secrets') await import('./setup-secrets.js').then((m) => m.runSecretsSetupWizard());
+  else if (phase === 'fleet') await import('./setup-fleet.js').then((m) => m.runFleetSetupWizard());
+  else if (phase === 'watchdog') await runWatchdogSetupWizard();
+  else await runPreferencesStep();
+}
+
+export async function runSetupHub(deps: {
+  interactive?: boolean;
+  selectPhase?: (rows: SetupStatusRow[]) => Promise<SetupPhase | 'exit'>;
+  runPhase?: (phase: SetupPhase) => Promise<void>;
+} = {}): Promise<void> {
+  const interactive = deps.interactive ?? isInteractiveTerminal();
+  if (!interactive) {
+    const rows = await getSetupStatus();
+    renderSetupStatus(rows);
+    if (rows.some((row) => row.state === 'missing')) process.exitCode = 1;
+    return;
+  }
   try {
-    const { checkbox } = await import('@inquirer/prompts');
-    const picks = await checkbox<'browser' | 'computer' | 'share' | 'secrets' | 'fleet' | 'watchdog'>({
-      message: 'Set up optional capabilities now? (space to select, enter to confirm)',
-      choices: [
-        { name: 'browser  — drive a real Chrome/Brave/Edge for web automation', value: 'browser' },
-        { name: 'computer — control native macOS apps (screenshot, click, type)', value: 'computer' },
-        { name: 'share    — publish shareable links (Cloudflare R2 + Worker)', value: 'share' },
-        { name: 'secrets  — choose storage defaults and import existing credentials', value: 'secrets' },
-        { name: 'fleet    — discover Tailscale devices and configure SSH access', value: 'fleet' },
-        { name: 'watchdog — resume stalled agent sessions on selected devices', value: 'watchdog' },
-      ],
-    });
-    for (const pick of picks) {
+    while (true) {
+      const rows = await getSetupStatus();
+      renderSetupStatus(rows);
+      let pick: SetupPhase | 'exit';
+      if (deps.selectPhase) {
+        pick = await deps.selectPhase(rows);
+      } else {
+        const { select } = await import('@inquirer/prompts');
+        pick = await select<SetupPhase | 'exit'>({
+          message: 'Choose a phase to configure',
+          choices: [
+            ...rows.filter((row): row is SetupStatusRow & { phase: SetupPhase } => row.phase !== 'core' && row.state !== 'n/a').map((row) => ({
+              name: `${row.state === 'ready' ? '[x]' : '[ ]'} ${row.phase.padEnd(12)} ${row.detail}`,
+              value: row.phase,
+            })),
+            { name: 'Exit setup', value: 'exit' as const },
+          ],
+        });
+      }
+      if (pick === 'exit') return;
       console.log();
-      if (pick === 'browser') await runBrowserWizard();
-      else if (pick === 'computer') await runComputerWizard();
-      else if (pick === 'share') await runShareWizard();
-      else if (pick === 'secrets') await import('./setup-secrets.js').then((m) => m.runSecretsSetupWizard());
-      else if (pick === 'fleet') await import('./setup-fleet.js').then((m) => m.runFleetSetupWizard());
-      else if (pick === 'watchdog') await runWatchdogSetupWizard();
+      await (deps.runPhase ?? runSetupPhase)(pick);
     }
   } catch (err) {
     if (isPromptCancelled(err)) return;
@@ -305,7 +377,7 @@ async function runSetupHub(): Promise<void> {
 export function registerSetupCommand(program: Command): void {
   const setupCmd = program
     .command('setup')
-    .description('First-time setup. Clones a config repo and installs agent CLIs.')
+    .description('Set up agents-cli, or re-open the capability onboarding hub.')
     .option('-f, --force', 'Re-run setup even if ~/.agents/.system/ already exists (use with caution)')
     .option('--no-system-repo', 'Skip cloning the system repo (you must populate ~/.agents/.system/ yourself)');
 
@@ -317,6 +389,15 @@ export function registerSetupCommand(program: Command): void {
   registerSetupSecretsCommand(setupCmd);
   registerSetupFleetCommand(setupCmd);
   registerSetupWatchdogCommand(setupCmd);
+  setupCmd.command('status')
+    .description('Show setup readiness for core, browser, computer, secrets, fleet, share, watchdog, and preferences.')
+    .option('--json', 'print machine-readable JSON')
+    .action(async (options: { json?: boolean }) => {
+      const rows = await getSetupStatus();
+      if (options.json) console.log(JSON.stringify(rows, null, 2));
+      else renderSetupStatus(rows);
+      if (rows.some((row) => row.state === 'missing')) process.exitCode = 1;
+    });
 
   setHelpSections(setupCmd, {
     examples: `
@@ -338,10 +419,8 @@ export function registerSetupCommand(program: Command): void {
       What it does:
         1. Clones the system repo into ~/.agents/.system/
         2. Imports any unmanaged agent installations it finds
-        3. On a TTY, offers to set up optional capabilities (browser/computer/share/secrets/fleet/watchdog)
-        4. On a TTY, asks preferences: which machine you sit at (interactive host)
-           and which browser agents drive here — both skippable, both the same
-           keys 'agents devices set-interactive' / 'browser profiles set-default' write
+        3. Opens a re-runnable capability menu with live ready/missing status
+        4. Delegates each selection to its existing setup wizard
 
       Capability setup can also be run any time on its own:
         agents setup browser    # detect a browser + create the default profile

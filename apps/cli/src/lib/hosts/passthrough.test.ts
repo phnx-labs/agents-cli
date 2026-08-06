@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { flagValue, maybeRunOnHost, runFleetPassthrough } from './passthrough.js';
+import { flagValue, maybeRunOnHost, maybeRunStandaloneOnHost, runFleetPassthrough } from './passthrough.js';
 import { machineId } from '../session/sync/config.js';
 import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
 
@@ -456,5 +456,85 @@ describe('runFleetPassthrough — direct unit tests', () => {
     expect(selfCmds).toHaveLength(1);
     expect(selfCmds[0][0]).toBe('agents');
     expect(selfCmds[0]).not.toContain('AGENTS_FLEET_REMOTE=1');
+  });
+});
+
+// The standalone `browser` binary (dist/browser.js) never enters index.ts, so it
+// wires --host routing itself via maybeRunStandaloneOnHost. These prove it routes
+// exactly like `agents browser … --host <box>` while leaving pure-local runs alone.
+describe('maybeRunStandaloneOnHost — standalone binary --host routing (RUSH-2214)', () => {
+  const originalArgv = process.argv.slice();
+
+  afterEach(() => {
+    delete process.env.AGENTS_SYNC_MACHINE_ID;
+    process.argv = originalArgv.slice();
+    process.exitCode = 0;
+  });
+
+  it('leaves argv untouched and runs locally when no routing flag is present', async () => {
+    process.argv = ['node', 'browser', 'screenshot', '--json'];
+    expect(await maybeRunStandaloneOnHost('browser')).toBe(false);
+    // No synthetic command token injected, no flag stripped — the local commander
+    // program sees exactly what the user typed.
+    expect(process.argv).toEqual(['node', 'browser', 'screenshot', '--json']);
+  });
+
+  it('routes --host to a non-self target (rejected by assertValidSshTarget before SSH)', async () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
+    // `--evil` starts with '-', so assertValidSshTarget rejects it before any SSH
+    // connection. Returning true with exitCode > 0 proves the remote route was
+    // entered — i.e. `browser` reached REMOTE_PASSTHROUGH via the synthesized
+    // command token, the exact path the standalone binary previously lacked.
+    process.argv = ['node', 'browser', 'start', '--host', '--evil'];
+    expect(await maybeRunStandaloneOnHost('browser')).toBe(true);
+    expect(process.exitCode).toBeGreaterThan(0);
+  });
+
+  it('treats --device as an alias of --host for the remote route', async () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
+    process.argv = ['node', 'browser', 'get-text', '--device', '--evil'];
+    expect(await maybeRunStandaloneOnHost('browser')).toBe(true);
+    expect(process.exitCode).toBeGreaterThan(0);
+  });
+
+  it('runs locally and strips routing flags (no synthetic token) when --host names this machine', async () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
+    expect(machineId()).toBe('mybox');
+    process.argv = ['node', 'browser', 'screenshot', '--host', 'mybox'];
+    expect(await maybeRunStandaloneOnHost('browser')).toBe(false);
+    // Argv is the ORIGINAL args minus routing flags — never the synthetic
+    // 'browser' token maybeRunOnHost prepends for its remote build.
+    expect(process.argv).toEqual(['node', 'browser', 'screenshot']);
+  });
+
+  it('keeps --help local but strips the routing flags so commander parses', async () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
+    process.argv = ['node', 'browser', '--host', 'otherbox', '--help'];
+    expect(await maybeRunStandaloneOnHost('browser')).toBe(false);
+    expect(process.argv).toEqual(['node', 'browser', '--help']);
+  });
+
+  it('builds the remote invocation as `agents browser <sub> …` for the fleet `all` sentinel', async () => {
+    const registry = fakeRegistry([fakeDevice('zion', 'macos'), fakeDevice('mac-mini', 'macos')]);
+    const remoteCmds: string[][] = [];
+    const originalLog = console.log;
+    console.log = () => {};
+    process.argv = ['node', 'browser', 'start', '--host', 'all'];
+    const handled = await maybeRunStandaloneOnHost('browser', {
+      self: 'zion',
+      loadDevices: async () => registry,
+      runner: (_d: DeviceProfile, cmd: string[]) => {
+        remoteCmds.push(cmd);
+        return { code: 0, stdout: '{}', stderr: '' };
+      },
+      localRunner: () => ({ code: 0, stdout: '{}', stderr: '' }),
+    });
+    console.log = originalLog;
+    expect(handled).toBe(true);
+    // The remote (mac-mini) target runs `agents browser start …`, proving the
+    // implicit command token is synthesized into the forwarded argv.
+    expect(remoteCmds).toHaveLength(1);
+    expect(remoteCmds[0]).toContain('browser');
+    expect(remoteCmds[0]).toContain('start');
   });
 });
