@@ -2,6 +2,8 @@ import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { resolveCwds, enrichProvenance, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission } from './active.js';
 import { SESSION_AGENTS } from './types.js';
 import type { HookSessionIndex } from './hook-sessions.js';
@@ -260,16 +262,19 @@ describe('resolveCwds', () => {
 });
 
 describe('enrichProvenance', () => {
-  it('bounds provenance probes to LSOF_CONCURRENCY', async () => {
+  it('bounds real provenance subprocesses to LSOF_CONCURRENCY', async () => {
     let inFlight = 0;
     let maxInFlight = 0;
     const sessions = Array.from({ length: 30 }, (_, i) => ({ pid: i + 1000 })) as Parameters<typeof enrichProvenance>[0];
     const probe = async () => {
       inFlight++;
       maxInFlight = Math.max(maxInFlight, inFlight);
-      await delay(20);
-      inFlight--;
-      return { host: 'test', transport: 'local' as const };
+      try {
+        await promisify(execFile)(process.execPath, ['-e', 'setTimeout(() => {}, 20)']);
+        return { host: 'test', transport: 'local' as const, reply: null };
+      } finally {
+        inFlight--;
+      }
     };
 
     await enrichProvenance(sessions, probe);
