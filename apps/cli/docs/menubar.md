@@ -343,6 +343,21 @@ The helper is a launchd user service (`com.phnx-labs.agents-menubar`,
   self-heal re-copies the bundle, rewrites the plist, and restarts it — so
   `npm update` actually moves users onto the new helper instead of leaving the
   old one running.
+- **One owner, when several installs coexist.** The helper lives at one path, but
+  every agents-cli copy on the box runs the self-heal. The plist's `AGENTS_ENTRY`
+  records the owner, and only the owner re-copies the bundle freely — otherwise
+  each copy reads the others' marks as drift and reinstalls over them, killing the
+  running helper every few seconds (#2109). A same-install `npm update` keeps its
+  entry path, so upgrades are unaffected. Another install still gets there:
+  immediately if the recorded owner is gone from disk, otherwise at most once an
+  hour (`.menubar-last-heal`), and never on that timer if its own bundle is
+  ad-hoc/dev-signed — recopying an un-notarized bundle over a good one gets it
+  rejected as "damaged". Repairs (missing executable, Developer-ID heal) are never
+  gated. `agents menubar setup` bypasses all of this and is the immediate fix.
+
+  Two installs that are *both* invoked regularly will keep trading ownership at
+  the cooldown, so the helper restarts about once an hour until one is removed —
+  bounded and survivable, but the real fix is a single install.
 - **Opt-out is sticky.** `agents menubar disable` writes
   `~/.agents/.cache/state/menubar.disabled`; the auto-enable honors it, so a
   disabled menu bar never silently returns on the next upgrade. Re-enable with
@@ -459,6 +474,7 @@ the current bundle on any version bump.
 | `~/Library/LaunchAgents/com.phnx-labs.agents-menubar.plist` | launchd service |
 | `~/Library/Application Support/agents-cli/MenubarHelper.app` | installed helper bundle |
 | `~/Library/Application Support/agents-cli/.menubar-version` | installed-version stamp |
+| `~/Library/Application Support/agents-cli/.menubar-last-heal` | last self-heal reinstall, epoch ms — the non-owner takeover cooldown |
 | `~/.agents/.cache/state/menubar.disabled` | sticky opt-out marker |
 | `~/.agents/.cache/helpers/menubar/menubar.log` | helper stdout / stderr |
 | `~/.agents/.history/menubar/recent-tickets.json` | tickets filed from the quick-dispatch panel (RECENT TICKETS) |

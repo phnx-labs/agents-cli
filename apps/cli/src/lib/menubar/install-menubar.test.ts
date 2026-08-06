@@ -204,6 +204,7 @@ describe('mayInstallMenubarHelper', () => {
     needsDevIdHeal: false,
     msSinceLastHeal: 60_000,
     cooldownMs: HOUR,
+    sourceIsDeveloperId: true,
   };
 
   it('refuses a foreign install while the recorded owner still exists (#2109)', () => {
@@ -261,6 +262,26 @@ describe('mayInstallMenubarHelper', () => {
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
       needsDevIdHeal: true,
+    })).toBe(true);
+  });
+
+  it('never lets an ad-hoc/dev build seize a healthy helper on the timer', () => {
+    // scripts/install.sh puts a dev build beside the npm global, and its bundle
+    // cannot be notarized. Recopying it over a good Developer-ID bundle makes
+    // Gatekeeper reject the result as "damaged" and AppKit crash at launch
+    // (RUSH-2134) — a broken menu bar, not just a cosmetic restart.
+    expect(mayInstallMenubarHelper({
+      ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
+      msSinceLastHeal: HOUR + 1, sourceIsDeveloperId: false,
+    })).toBe(false);
+  });
+
+  it('still lets an ad-hoc build adopt a helper whose owner is gone', () => {
+    // The deadlock case must not be reintroduced: if nothing else can install it,
+    // an ad-hoc build is better than no menu bar.
+    expect(mayInstallMenubarHelper({
+      ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: false,
+      sourceIsDeveloperId: false,
     })).toBe(true);
   });
 

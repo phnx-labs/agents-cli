@@ -521,6 +521,8 @@ export function mayInstallMenubarHelper(opts: {
   msSinceLastHeal: number | null;
   /** How long a non-owner waits before it may take over. */
   cooldownMs: number;
+  /** This install's OWN shipped bundle is Developer-ID signed (not ad-hoc/dev). */
+  sourceIsDeveloperId: boolean;
 }): boolean {
   // Repairs are never gated: a missing binary or a broken signing identity leaves
   // the menu bar dead or re-prompting for Accessibility, and no other install can
@@ -539,6 +541,15 @@ export function mayInstallMenubarHelper(opts: {
   // that install would never heal again. So it may take over, but only once per
   // cooldown — which turns an every-invocation storm into at most one restart per
   // cooldown while keeping every install able to make progress.
+  //
+  // Except an ad-hoc/dev-signed copy, which never seizes a healthy helper on a
+  // timer. `scripts/install.sh` deliberately puts a dev build beside the npm
+  // global, and its bundle cannot be notarized; letting it win the timed takeover
+  // would recopy an ad-hoc bundle over a good Developer-ID one, and Gatekeeper
+  // then rejects the result as "damaged" and AppKit crashes at launch (RUSH-2134)
+  // — trading a cosmetic loop for a broken menu bar. It can still take over when
+  // the owner is genuinely gone (above), which is the case that must not deadlock.
+  if (!opts.sourceIsDeveloperId) return false;
   return opts.msSinceLastHeal === null || opts.msSinceLastHeal >= opts.cooldownMs;
 }
 
@@ -575,6 +586,7 @@ function stampMenubarHeal(): void {
 /** Whether this install may (re)install the helper (see `mayInstallMenubarHelper`). */
 function mayHealMenubar(needsDevIdHeal: boolean): boolean {
   const plistEntry = readPlistEnvValue('AGENTS_ENTRY');
+  const src = sourceAppPath();
   return mayInstallMenubarHelper({
     plistEntry,
     activeEntry: resolveCliEntry(),
@@ -583,6 +595,7 @@ function mayHealMenubar(needsDevIdHeal: boolean): boolean {
     needsDevIdHeal,
     msSinceLastHeal: msSinceLastMenubarHeal(),
     cooldownMs: MENUBAR_TAKEOVER_COOLDOWN_MS,
+    sourceIsDeveloperId: Boolean(src) && hasDeveloperIdSignature(src as string),
   });
 }
 
@@ -621,8 +634,11 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
     // once per cooldown. Without the gate every coexisting install recopies the
     // bundle on every invocation, killing the live helper on a loop (#2109).
     if (!mayHealMenubar(needsDevIdHeal)) return;
-    stampMenubarHeal();
-    enableMenubarService({ clearOptOut: false });
+    // Stamp only a heal that actually happened. `enableMenubarService` returns
+    // false without installing when the bundle fails the Gatekeeper check, and
+    // stamping first would spend the shared cooldown on a no-op — locking every
+    // non-owner out for another hour while nothing had been fixed.
+    if (enableMenubarService({ clearOptOut: false })) stampMenubarHeal();
   } catch {
     /* never block startup on the menu bar */
   }

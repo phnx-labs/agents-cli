@@ -583,6 +583,18 @@ turns an every-invocation storm into at most one restart per hour while leaving
 every install able to make progress. `agents menubar setup` bypasses the gate
 entirely and stays the immediate manual fix.
 
+Two caveats worth knowing before you tune any of this. **(a)** Escape (3) is
+refused to a source bundle that is not Developer-ID signed: `scripts/install.sh`
+puts an ad-hoc dev build beside the npm global, and letting it win a *timed*
+takeover would recopy an un-notarized bundle over a good one, which Gatekeeper
+rejects as "damaged" and AppKit crashes on (RUSH-2134) — a broken menu bar rather
+than a cosmetic restart. It can still adopt via (2), the case that must never
+deadlock. **(b)** The cooldown bounds the loop but does not converge it: two
+installs that are *both* invoked regularly trade ownership every cooldown, so the
+helper restarts roughly hourly until one is removed. That is deliberate — the
+alternative is stranding one of them — and the real fix is a single install
+(#2147 covers making the multi-install banner actually name them all).
+
 **Do NOT "improve" this by comparing bundle content.** It looks like the obvious
 gate and it does not work: the helper is rebuilt, re-signed and re-notarized on
 every release (`menubar/scripts/build.sh` via `release.sh`), so consecutive

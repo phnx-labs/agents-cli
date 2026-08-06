@@ -14,6 +14,12 @@
   that merely still sits on disk can't freeze the menu bar for whichever install the
   user actually upgrades. Repairs (a missing helper executable, a Developer-ID heal)
   are never gated, and `agents menubar setup` bypasses the gate as the immediate
-  manual fix. `agents menubar status` no longer promises that a stale helper "runs on
-  next `agents` startup", which is not guaranteed on a multi-install box. Fixes #2109.
-  Source: `apps/cli/src/lib/menubar/install-menubar.ts`.
+  manual fix. An ad-hoc/dev-signed build never wins the timed takeover — recopying
+  an un-notarized bundle over a good one gets it rejected as "damaged" — though it
+  can still adopt a helper whose owner is gone. Two installs that are both invoked
+  regularly still trade ownership at the cooldown, so the helper restarts about once
+  an hour until one is removed; that is bounded rather than converged, and the real
+  fix remains a single install. `agents menubar status` no longer promises that a
+  stale helper "runs on next `agents` startup", which is not guaranteed on a
+  multi-install box. Fixes #2109. Source:
+  `apps/cli/src/lib/menubar/install-menubar.ts`.
