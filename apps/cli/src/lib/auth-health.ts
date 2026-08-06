@@ -428,12 +428,11 @@ export function groupFleetAuthInstalls<T extends FleetAuthInstall>(
 ): FleetAuthProbeGroup<T>[] {
   const groups = new Map<string, FleetAuthProbeGroup<T>>();
   for (const inst of installs) {
-    // A NUL byte separates the segments so an account label (which may contain a
-    // space or a literal "ver:") can never collide with the version fallback key
-    // — a version string cannot contain a NUL.
+    // The `acct:` / `ver:` tokens make the two branches disjoint, so an account
+    // label can never collide with a version fallback key no matter its content.
     const key = inst.account && isMergeable(inst)
-      ? `${inst.agent} acct:${inst.account}`
-      : `${inst.agent} ver:${inst.version}`;
+      ? `${inst.agent} acct:${inst.account}`
+      : `${inst.agent} ver:${inst.version}`;
     const existing = groups.get(key);
     if (existing) existing.members.push(inst);
     else groups.set(key, { probe: inst, members: [inst] });
