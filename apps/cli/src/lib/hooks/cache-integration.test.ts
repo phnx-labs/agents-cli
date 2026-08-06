@@ -206,6 +206,78 @@ echo "call=$count"
     expect(line.session_id).toBe('sess-guard');
   });
 
+  // RUSH-2259: an orphaned bg lockdir (from a refresh hard-killed before its
+  // EXIT trap ran) must not stop bg refresh forever. Poll for the detached
+  // child's effect since the shim returns before its bg refresh finishes.
+  function waitFor(pred: () => boolean, timeoutMs = 3000): boolean {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (pred()) return true;
+      execFileSync('bash', ['-c', 'sleep 0.05']);
+    }
+    return pred();
+  }
+
+  it('reclaims a stale bg lockdir and refreshes, instead of stalling forever', () => {
+    const shim = generateHookShim({
+      name: 'stale-lock-hook',
+      scriptPath,
+      cache: { ttl: 1, key: 'global', prefetch: 'background' },
+      paths,
+    });
+    const cacheFile = path.join(paths.cacheDir!, 'stale-lock-hook.out');
+    const lockDir = `${cacheFile}.bg.lck`;
+
+    // Populate the cache (call=1), then backdate it past ttl so the next fire
+    // takes the stale-while-revalidate (bg refresh) branch.
+    expect(runShim(shim, '{}').stdout.trim()).toBe('call=1');
+    const past = new Date(Date.now() - 5 * 60_000);
+    fs.utimesSync(cacheFile, past, past);
+
+    // Simulate the orphaned lock: a leftover dir from a bg refresh that was
+    // hard-killed before its trap removed it, backdated well past LOCK_TTL_SEC.
+    fs.mkdirSync(lockDir, { recursive: true });
+    fs.utimesSync(lockDir, past, past);
+
+    // Fire: serves stale (call=1) synchronously, and the bg child must reclaim
+    // the stale lock and refresh the cache to call=2.
+    const fire = runShim(shim, '{}');
+    expect(fire.stdout.trim()).toBe('call=1');
+
+    const refreshed = waitFor(() => {
+      try { return fs.readFileSync(cacheFile, 'utf-8').trim() === 'call=2'; }
+      catch { return false; }
+    });
+    expect(refreshed).toBe(true);
+    // The bg subshell's EXIT trap removes the lock it (re)acquired.
+    expect(waitFor(() => !fs.existsSync(lockDir))).toBe(true);
+  });
+
+  it('does NOT reclaim a fresh bg lockdir — a live refresh is left alone', () => {
+    const shim = generateHookShim({
+      name: 'fresh-lock-hook',
+      scriptPath,
+      cache: { ttl: 1, key: 'global', prefetch: 'background' },
+      paths,
+    });
+    const cacheFile = path.join(paths.cacheDir!, 'fresh-lock-hook.out');
+    const lockDir = `${cacheFile}.bg.lck`;
+
+    expect(runShim(shim, '{}').stdout.trim()).toBe('call=1');
+    const past = new Date(Date.now() - 5 * 60_000);
+    fs.utimesSync(cacheFile, past, past);
+
+    // A freshly-held lock (age ~0) stands in for an in-flight refresh: it must
+    // survive and the second refresh must be skipped, so the counter stays at 1.
+    fs.mkdirSync(lockDir, { recursive: true });
+
+    expect(runShim(shim, '{}').stdout.trim()).toBe('call=1');
+    // Give any (incorrectly-spawned) bg child a chance to advance the counter.
+    execFileSync('bash', ['-c', 'sleep 0.3']);
+    expect(fs.readFileSync(callCounterFile, 'utf-8').trim()).toBe('1');
+    expect(fs.existsSync(lockDir)).toBe(true);
+  });
+
   it('omits cwd/session_id from the perf-spool line when stdin carries neither', () => {
     const shim = generateHookShim({
       name: 'unattributed-hook',

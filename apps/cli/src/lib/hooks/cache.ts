@@ -533,6 +533,21 @@ if [ "$CACHE_STATUS" = miss ]; then
     if [ "$_in_backoff" -eq 0 ]; then
       # Fix 1: lockdir — only one background refresh runs at a time.
       LOCK_DIR="$CACHE_FILE.bg.lck"
+      # Fix 4 (RUSH-2259): reclaim a stale lock. The lock is released by the bg
+      # subshell's EXIT trap, but a hard kill (SIGKILL, OOM, reboot) skips the
+      # trap and orphans the dir — after which every future mkdir fails and bg
+      # refresh stops FOREVER while stale cache is served indefinitely. The dir
+      # mtime is fixed at mkdir time (the refresh writes elsewhere), so its age
+      # is the time the lock has been held; treat a lock older than LOCK_TTL_SEC
+      # as abandoned and remove it before locking. LOCK_TTL_SEC is set well above
+      # any real hook runtime so a live refresh is never reclaimed out from under.
+      LOCK_TTL_SEC=300
+      if [ -d "$LOCK_DIR" ]; then
+        _lock_mtime=$("$PY" -c 'import os,sys; print(int(os.path.getmtime(sys.argv[1])))' "$LOCK_DIR" 2>/dev/null || echo 0)
+        _lock_now_s=$(date +%s)
+        _lock_age=$((_lock_now_s - \${_lock_mtime:-0}))
+        [ "$_lock_age" -ge "$LOCK_TTL_SEC" ] && rm -rf "$LOCK_DIR" 2>/dev/null
+      fi
       if mkdir "$LOCK_DIR" 2>/dev/null; then
         tmp="$CACHE_FILE.new.$$"
         # Fix 3: background subshell captures and logs its own real exit code.

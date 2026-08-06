@@ -250,6 +250,24 @@ describe('generateHookShim', () => {
     expect(body).toMatch(/"exit":%d/);
   });
 
+  // Fix 4 (RUSH-2259): the bg lockdir has a TTL so an orphaned lock (bg refresh
+  // hard-killed before its EXIT trap) is reclaimed instead of stopping all
+  // future refresh permanently.
+  it('background-prefetch shim reclaims a stale bg lockdir before acquiring', () => {
+    const shim = generateHookShim({
+      name: 'bg-lock-ttl-test',
+      scriptPath: '/some/script.sh',
+      cache: { ttl: 60, key: 'global', prefetch: 'background' },
+      paths: testPaths,
+    });
+    const body = fs.readFileSync(shim, 'utf-8');
+    expect(body).toMatch(/LOCK_TTL_SEC=/);
+    // Guards the reclaim on the lock's own age, then removes it before mkdir.
+    expect(body).toMatch(/\[ -d "\$LOCK_DIR" \]/);
+    expect(body).toMatch(/_lock_age=/);
+    expect(body).toMatch(/\[ "\$_lock_age" -ge "\$LOCK_TTL_SEC" \] && rm -rf "\$LOCK_DIR"/);
+  });
+
   // Fix 2 (sync path): synchronous fetch also clears the FAIL_FILE sentinel on success
   it('synchronous-prefetch shim clears FAIL_FILE on a successful fetch', () => {
     const shim = generateHookShim({
