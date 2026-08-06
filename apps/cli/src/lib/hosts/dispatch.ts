@@ -183,9 +183,8 @@ export function buildWindowsDetachedLaunchCommand(opts: {
     cwd,
     `$log = ${log}`,
     `$exit = ${exit}`,
-    `& ${['agents', ...opts.forwardedArgs].map(powershellQuote).join(' ')} *> $log`,
-    `$code = $LASTEXITCODE`,
-    `Set-Content -LiteralPath $exit -Value $code -NoNewline -Encoding ascii`,
+    `$code = 1`,
+    `try { & ${['agents', ...opts.forwardedArgs].map(powershellQuote).join(' ')} *> $log; if ($null -ne $LASTEXITCODE) { $code = $LASTEXITCODE } } catch { $_ | Out-File -LiteralPath $log -Append; $code = 1 } finally { Set-Content -LiteralPath $exit -Value $code -NoNewline -Encoding ascii }`,
   ].filter(Boolean).join('; ');
   const encodedInner = encodePowershell(inner);
   const outer = [
