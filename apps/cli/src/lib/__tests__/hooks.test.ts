@@ -627,6 +627,42 @@ describe('registerHooksToSettings - OpenCode', () => {
     expect(plugin).toContain('"matcher": "Bash|bash"');
   });
 
+  // #1869 — OpenCode timeout-sample spool dir must use path.dirname, not a
+  // hardcoded '/'. On Windows getPerfDir() is backslash-separated; lastIndexOf('/')
+  // returns -1 and slice drops one character, so mkdir never creates the real dir
+  // (fail-silent catch) and the timeout sample is lost.
+  it('derives the timeout-sample spool dir with path.dirname (Windows-safe)', () => {
+    makeScript('slow.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const result = registerHooksToSettings(
+      'opencode',
+      versionHome,
+      { slow: { script: 'slow.sh', events: ['SessionStart'], timeout: 1 } },
+      agentsDir,
+    );
+    expect(result.errors).toHaveLength(0);
+
+    const plugin = fs.readFileSync(
+      path.join(versionHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts'),
+      'utf-8',
+    );
+    expect(plugin).toContain('import path from "node:path"');
+    expect(plugin).toContain('path.dirname(PERF_SPOOL)');
+    expect(plugin).not.toContain("PERF_SPOOL.lastIndexOf(\"/\")");
+    expect(plugin).not.toContain("PERF_SPOOL.lastIndexOf('/')");
+    expect(plugin).not.toMatch(/PERF_SPOOL\.slice\(0,\s*PERF_SPOOL\.lastIndexOf\(/);
+
+    // Document the bug class the old slice broke: dirname keeps the parent on
+    // both separators; lastIndexOf('/') on a backslash path returns -1.
+    const winSpool = 'C:\\Users\\me\\.agents\\.cache\\perf\\spool.jsonl';
+    expect(path.win32.dirname(winSpool)).toBe('C:\\Users\\me\\.agents\\.cache\\perf');
+    expect(winSpool.lastIndexOf('/')).toBe(-1);
+    expect(winSpool.slice(0, winSpool.lastIndexOf('/'))).toBe(
+      'C:\\Users\\me\\.agents\\.cache\\perf\\spool.json', // drops one char (the trailing 'l')
+    );
+    expect(winSpool.slice(0, winSpool.lastIndexOf('/'))).not.toBe(path.win32.dirname(winSpool));
+  });
+
   it('compiles only the explicitly selected hook script', () => {
     const selected = selectHookManifest({
       first: { script: 'first.sh', events: ['SessionStart'] },
