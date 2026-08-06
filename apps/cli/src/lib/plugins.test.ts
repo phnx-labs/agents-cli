@@ -340,6 +340,42 @@ describe('discoverPlugins', () => {
       vi.resetModules();
     }
   });
+
+  it('RUSH-2270: warns to stderr when a plugin directory has no .claude-plugin/plugin.json', async () => {
+    // The real bug: `work` merged with commands/ + README.md but no plugin.json,
+    // and every downstream command (list/info/sync) silently reported it as not
+    // existing — no diagnostic anywhere pointed at the missing manifest.
+    fs.mkdirSync(path.join(pluginsDir, 'nomanifest', 'commands'), { recursive: true });
+    fs.writeFileSync(path.join(pluginsDir, 'nomanifest', 'commands', 'dispatch.md'), '# dispatch');
+    // A valid neighbour must NOT warn and must still be discovered.
+    makePluginRoot(tmpDir, { name: 'goodplug' });
+    fs.renameSync(path.join(tmpDir, 'test-plugin'), path.join(pluginsDir, 'goodplug'));
+
+    vi.resetModules();
+    vi.doMock('./state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./state.js')>();
+      return { ...actual, getPluginsDir: () => pluginsDir, getEnabledExtraRepos: () => [], getProjectPluginsDir: () => null, getSystemPluginsDir: () => path.join(tmpDir, 'no-system') };
+    });
+
+    const origWrite = process.stderr.write.bind(process.stderr);
+    const captured: string[] = [];
+    process.stderr.write = ((chunk: unknown) => { captured.push(String(chunk)); return true; }) as typeof process.stderr.write;
+    try {
+      const { discoverPlugins: discover } = await import('./plugins.js');
+      const plugins = discover();
+      // The malformed dir is skipped (unchanged behavior); the valid one still discovers.
+      expect(plugins.map((p) => p.name)).toEqual(['goodplug']);
+    } finally {
+      process.stderr.write = origWrite;
+      vi.doUnmock('./state.js');
+      vi.resetModules();
+    }
+
+    const out = captured.join('');
+    expect(out).toContain("'nomanifest'");
+    expect(out).toContain('.claude-plugin/plugin.json');
+    expect(out).not.toContain("'goodplug'");
+  });
 });
 
 // ─── discoverPlugins across all marketplaces ──────────────────────────────────

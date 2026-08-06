@@ -104,7 +104,22 @@ export function discoverPluginsInDir(pluginsDir: string, spec: MarketplaceSpec =
 
     const pluginRoot = path.join(pluginsDir, entry.name);
     const manifest = loadPluginManifest(pluginRoot);
-    if (!manifest) continue;
+    if (!manifest) {
+      // A directory that looks like a plugin root but has no valid manifest is
+      // silently invisible to every downstream command (list/info/sync, and the
+      // materialize-into-version-homes copy) with no other diagnostic anywhere
+      // in the chain — it can sit here indefinitely, on the correct git commit,
+      // and never surface as broken (RUSH-2270: the `work` plugin shipped
+      // without .claude-plugin/plugin.json and nothing noticed for a full merge
+      // cycle). Warn once here, at the one place that decides discoverability,
+      // so the gap is visible the moment `agents sync` runs.
+      const manifestPath = path.join(entry.name, PLUGIN_MANIFEST_DIR, PLUGIN_MANIFEST_FILE);
+      process.stderr.write(
+        `agents-cli: '${entry.name}' in ${pluginsDir} has no valid ${manifestPath} ` +
+        `(missing, malformed JSON, or missing name/version) — skipped, not discovered as a plugin.\n`
+      );
+      continue;
+    }
 
     plugins.push(buildDiscoveredPlugin(pluginRoot, manifest, spec));
   }
