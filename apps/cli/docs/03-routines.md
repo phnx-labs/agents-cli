@@ -651,7 +651,9 @@ run metadata:
 ```
 
 Those archives are indexed by `agents sessions` with `origin: "routine"`,
-`routineName`, and `routineRunId`. Use `agents sessions --routine --all` to list
+`routineName`, and `routineRunId`. Use `agents sessions --routine --all` (or the
+`--routines` alias) to pick a routine interactively, or pass a fuzzy name such
+as `agents sessions --routine nightly-review --all`, to list
 them, or `agents sessions <run-id>` to render the existing session summary view
 for a specific routine run.
 

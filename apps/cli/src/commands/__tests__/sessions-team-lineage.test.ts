@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, teamBadge } from '../sessions.js';
+import { formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, resolveRoutineName, teamBadge } from '../sessions.js';
 import { formatTeamLineage } from '../sessions-picker.js';
 import type { SessionMeta } from '../../lib/session/types.js';
 
@@ -62,6 +62,21 @@ describe('hasNoBrowserDisqualifyingFlags — which views the browser can represe
   it('one host qualifies; two do not, because `y` can only copy back one --device', () => {
     expect(hasNoBrowserDisqualifyingFlags({ host: ['zion'] }, undefined)).toBe(true);
     expect(hasNoBrowserDisqualifyingFlags({ host: ['zion', 'mac-mini'] }, undefined)).toBe(false);
+  });
+});
+
+describe('resolveRoutineName', () => {
+  const names = ['nightly-review', 'release-notes', 'security-scan'];
+
+  it('resolves exact, unique substring, and unambiguous typo matches', () => {
+    expect(resolveRoutineName('NIGHTLY-REVIEW', names)).toBe('nightly-review');
+    expect(resolveRoutineName('release', names)).toBe('release-notes');
+    expect(resolveRoutineName('securty-scan', names)).toBe('security-scan');
+  });
+
+  it('rejects missing and ambiguous selectors', () => {
+    expect(resolveRoutineName('missing', names)).toBeNull();
+    expect(resolveRoutineName('notes', ['release-notes', 'meeting-notes'])).toBeNull();
   });
 });
 

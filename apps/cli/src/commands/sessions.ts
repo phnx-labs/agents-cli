@@ -49,6 +49,7 @@ import { renderMarkdown } from '../lib/markdown.js';
 import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';
 import { getShimsDir } from '../lib/state.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
+import { itemPicker } from '../lib/picker.js';
 import { resolveSessionAlias } from '../lib/session/actor-sidecar.js';
 import { resolveVersionAliasLoose } from '../lib/versions.js';
 import { getAgentsInvocation } from '../lib/daemon.js';
@@ -108,7 +109,7 @@ interface SessionFilterOptions {
   all?: boolean;
   teams?: boolean;
   inTeam?: string;
-  routine?: boolean;
+  routine?: boolean | string;
   since?: string;
   until?: string;
 }
@@ -1626,6 +1627,60 @@ export function hasNoBrowserDisqualifyingFlags(
   );
 }
 
+/** Resolve a typed routine selector by exact name, substring, or one unambiguous typo. */
+export function resolveRoutineName(query: string, names: readonly string[]): string | null {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return null;
+  const exact = names.find((name) => name.toLowerCase() === normalized);
+  if (exact) return exact;
+  const containing = names.filter((name) => name.toLowerCase().includes(normalized));
+  if (containing.length === 1) return containing[0];
+  return fuzzyMatch(query, names, FUZZY_PRESETS.dynamic);
+}
+
+async function selectRoutineName(names: readonly string[]): Promise<string | null> {
+  const picked = await itemPicker<string>({
+    message: 'Select a routine:',
+    items: [...names],
+    filter: (query) => {
+      const normalized = query.trim().toLowerCase();
+      if (!normalized) return [...names];
+      return names.filter((name) => name.toLowerCase().includes(normalized));
+    },
+    labelFor: (name) => name,
+    shortIdFor: (name) => name,
+    emptyMessage: 'No routines match.',
+    enterHint: 'show sessions',
+  });
+  return picked?.item ?? null;
+}
+
+async function filterSessionsByRoutine(
+  sessions: SessionMeta[],
+  routine: boolean | string,
+  interactive: boolean,
+): Promise<SessionMeta[] | null> {
+  const routineNames = [...new Set(
+    sessions.map((session) => session.routineName).filter((name): name is string => !!name),
+  )].sort((a, b) => a.localeCompare(b));
+  let selectedRoutine: string | null = null;
+  if (typeof routine === 'string') {
+    selectedRoutine = resolveRoutineName(routine, routineNames);
+    if (!selectedRoutine) {
+      console.error(chalk.red(`No routine matches "${routine}".`));
+      if (routineNames.length > 0) console.error(chalk.gray(`Available routines: ${routineNames.join(', ')}`));
+      process.exitCode = 1;
+      return null;
+    }
+  } else if (interactive) {
+    selectedRoutine = await selectRoutineName(routineNames);
+    if (!selectedRoutine) return null;
+  }
+  return selectedRoutine
+    ? sessions.filter((session) => session.routineName === selectedRoutine)
+    : sessions;
+}
+
 /** The canonical `ag sessions …` command for a set of flags — the twin of the
  * browser's `y` hotkey (see --print-cmd). Normalizes to the stable flag form. */
 function canonicalSessionsCommand(query: string | undefined, options: SessionsOptions): string {
@@ -1641,7 +1696,10 @@ function canonicalSessionsCommand(query: string | undefined, options: SessionsOp
   if (options.unknown) a.push('--unknown');
   if (options.teams) a.push('--teams');
   if (options.inTeam) a.push('--in-team', options.inTeam);
-  if (options.routine) a.push('--routine');
+  if (options.routine) {
+    a.push('--routine');
+    if (typeof options.routine === 'string') a.push(options.routine);
+  }
   if (options.agent) a.push('-a', options.agent);
   for (const h of options.host ?? []) a.push('--device', h);
   if (options.project) a.push('--project', options.project);
@@ -2415,6 +2473,11 @@ async function sessionsAction(
     }
 
     if (options.json) {
+      if (options.routine) {
+        const filteredByRoutine = await filterSessionsByRoutine(sessions, options.routine, false);
+        if (!filteredByRoutine) return;
+        sessions = filteredByRoutine;
+      }
       // An id-shaped query resolves by id ONLY — the same rule the render path
       // uses (resolveSessionQuery). Without this a `--json <uuid>` (as issued by
       // the fleet locate sweep, which runs `sessions <uuid> --json --local` on
@@ -2454,6 +2517,12 @@ async function sessionsAction(
       } finally {
         fanSpinner?.stop();
       }
+    }
+
+    if (options.routine) {
+      const filteredByRoutine = await filterSessionsByRoutine(sessions, options.routine, isInteractive);
+      if (!filteredByRoutine) return;
+      sessions = filteredByRoutine;
     }
 
     if (sessions.length === 0) {
@@ -4455,7 +4524,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--unmanaged', "Also show sessions from your own ~/.<agent> installs (hidden once agents-cli manages that agent)")
     .option('--team, --teams', 'Include team-spawned sessions (hidden by default)')
     .option('--in-team <name>', "Only this team: the session that spawned it plus (with --teams) its teammates. Spans every directory and all time, since a team's worktrees and history sit outside the default window.")
-    .option('--routine', 'Show only sessions archived from routine runs')
+    .option('--routines, --routine [name]', 'Show routine-run sessions; omit the name on a TTY to pick one interactively (fuzzy name matching)')
     .option('-p, --project <name>', 'Filter by project name (searches across all directories)')
     .option('--skill <name>', 'Only sessions that invoked this skill (matches a bare name or a namespaced plugin skill\'s short name, e.g. --skill design finds rush:design)')
     .option('--plugin <name>', 'Only sessions that used a skill/command owned by this plugin')
@@ -4545,6 +4614,7 @@ export function registerSessionsCommands(program: Command): void {
 
       # Show routine-run sessions and open one by routine run id
       agents sessions --routine --all
+      agents sessions --routine nightly-review --all
       agents sessions 2026-07-21T10-30-00-000Z
 
       # Export for analysis
@@ -4591,7 +4661,7 @@ export function registerSessionsCommands(program: Command): void {
       - --first and --last are mutually exclusive.
       - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.
       - --cloud sources from Rush Cloud captured runs instead of local disk.
-      - --routine shows only transcripts archived from routine run directories; routine rows also resolve by run id.
+      - --routine [name] shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.
       - Without --teams, team-spawned sessions are hidden by default.
     `,
   });

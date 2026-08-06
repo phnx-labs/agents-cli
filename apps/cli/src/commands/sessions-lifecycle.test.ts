@@ -47,3 +47,13 @@ describe('sessions team filter aliases', () => {
     expect(teams!.short).toBe('--team');
   });
 });
+
+describe('sessions routine discovery surface', () => {
+  it('registers --routines as an alias and accepts an optional routine name', () => {
+    const sessions = sessionsGroup();
+    const routine = sessions.options.find((option) => option.long === '--routine');
+    expect(routine).toBeDefined();
+    expect(routine!.short).toBe('--routines');
+    expect(routine!.optional).toBe(true);
+  });
+});
