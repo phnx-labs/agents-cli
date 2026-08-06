@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { wrapLine, computeVerdict, computeOverviewHealth, verdictIsAutoFixable, healthBlockLines } from './doctor.js';
+import { wrapLine, computeVerdict, computeOverviewHealth, verdictIsAutoFixable, healthBlockLines, asRemoteSecretFindings } from './doctor.js';
 import { stripRoutingFlags, HOST_ROUTING_SPECS } from '../lib/hosts/remote-cmd.js';
 import { stringWidth, stripAnsi } from '../lib/session/width.js';
 import type { ResourceDiff, VersionResourceReport } from '../lib/doctor-diff.js';
@@ -400,5 +400,72 @@ describe('doctor qualifier resolution via subprocess (issue #2058)', () => {
     const r = runDoctor('claude@default', '--json');
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('No default version');
+  });
+});
+
+describe('asRemoteSecretFindings — a remote box\'s secret hygiene, forwarded (RUSH-1968)', () => {
+  const good = {
+    severity: 'warning',
+    kind: 'env-secret-export',
+    device: 'someone-else',
+    message: 'AGENTS_SECRETS_PASSPHRASE is set in this process environment',
+    remediation: 'unset at the source, then restart every process that inherited it',
+  };
+
+  it('forwards a secret finding and ATTRIBUTES it to the box we dialled', () => {
+    // The remote sends its own `device`. Trusting it would let one box pin a
+    // finding on another, so the name we dialled always wins.
+    const out = asRemoteSecretFindings([good], 'yosemite-m0');
+    expect(out).toHaveLength(1);
+    expect(out[0].device).toBe('yosemite-m0');
+    expect(out[0].kind).toBe('env-secret-export');
+    expect(out[0].message).toBe(good.message);
+  });
+
+  it('forwards rc-secret-export too — the other thing only that box can see', () => {
+    const rc = { ...good, kind: 'rc-secret-export', message: 'master key exported from a shell rc file' };
+    expect(asRemoteSecretFindings([rc], 'm1').map((f) => f.kind)).toEqual(['rc-secret-export']);
+  });
+
+  it('drops kinds the aggregator recomputes, so nothing is reported twice', () => {
+    // Sign-in and divergence rows are rebuilt centrally from the inventory;
+    // forwarding them as well would double every one.
+    const noisy = [
+      { ...good, kind: 'logged-out' },
+      { ...good, kind: 'version-skew' },
+      { ...good, kind: 'orphan' },
+      good,
+    ];
+    expect(asRemoteSecretFindings(noisy, 'm2').map((f) => f.kind)).toEqual(['env-secret-export']);
+  });
+
+  it('rejects malformed rows instead of trusting the remote CLI', () => {
+    // The remote runs its own agents-cli version; every field is validated.
+    const junk = [
+      null,
+      'a string',
+      [],
+      { kind: 'env-secret-export' },                              // no message
+      { kind: 'env-secret-export', message: '', severity: 'warning' }, // empty message
+      { kind: 'env-secret-export', message: 'm', severity: 'loud' },   // bad severity
+      { message: 'm', severity: 'warning' },                      // no kind
+    ];
+    expect(asRemoteSecretFindings(junk, 'm3')).toEqual([]);
+  });
+
+  it('falls back to OUR remediation when the remote omits one', () => {
+    // An older remote may not send it. Dropping an otherwise-valid security
+    // finding over a missing hint would be worse than supplying the canonical one.
+    const { remediation: _omitted, ...noRemediation } = good;
+    const out = asRemoteSecretFindings([noRemediation], 'm4');
+    expect(out).toHaveLength(1);
+    expect(out[0].remediation).toContain('unset at the source');
+  });
+
+  it('a non-array payload yields nothing, never a throw', () => {
+    // An older remote has no `findings` key at all.
+    expect(asRemoteSecretFindings(undefined, 'm5')).toEqual([]);
+    expect(asRemoteSecretFindings({ findings: [] }, 'm5')).toEqual([]);
+    expect(asRemoteSecretFindings('nope', 'm5')).toEqual([]);
   });
 });

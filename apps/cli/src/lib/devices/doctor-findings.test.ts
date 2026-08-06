@@ -369,7 +369,10 @@ describe('rc-hygiene + exec-policy findings (restored from the pre-RUSH-2069 adv
     const env = findings.filter((f) => f.kind === 'env-secret-export');
     expect(env).toHaveLength(1);
     expect(env[0].severity).toBe('warning');
-    expect(env[0].remediation).toBe('unset it and restart the shell');
+    // "restart the shell" alone is wrong: the value lives in every long-lived
+    // parent that inherited it, each still handing it to new children.
+    expect(env[0].remediation).toContain('unset at the source');
+    expect(env[0].remediation).toContain('agents daemon');
     // The message must never carry the value — only that it is set.
     expect(env[0].message).toContain('AGENTS_SECRETS_PASSPHRASE is set in this process environment');
   });

@@ -294,7 +294,10 @@ export function remediationFor(finding: DoctorFinding): string {
     case 'rc-secret-export':
       return 'agents secrets add';
     case 'env-secret-export':
-      return 'unset it and restart the shell';
+      // Not just "restart the shell": the value is in every long-lived parent
+      // that inherited it — an editor, a tmux server, the agents daemon — and
+      // each keeps handing it to new children until IT restarts.
+      return 'unset at the source, then restart every process that inherited it (shells, editor, tmux, agents daemon)';
     case 'exec-policy':
       return 'Set-ExecutionPolicy -Scope CurrentUser RemoteSigned';
     case 'stale-cli':

@@ -37,6 +37,7 @@ import {
   fleetDivergenceToFindings,
   signInToFindings,
   renderFindings,
+  remediationFor,
   type DoctorFinding,
   type LocalFindingInputs,
 } from '../lib/devices/doctor-findings.js';
@@ -167,6 +168,63 @@ interface DeviceDoctorResult {
    *  divergence detection (RUSH-2027). Undefined when the inventory probe failed
    *  or the remote is an older CLI that doesn't emit the `fleet` field. */
   inventory?: FleetInventory;
+  /** Secret-hygiene findings the remote reported about ITSELF. The aggregator
+   *  can recompute a remote's sign-in and divergence findings from its
+   *  inventory, but it cannot see that box's shell rc files or process
+   *  environment — only the remote's own doctor can, so those two ride back
+   *  here or they are lost (RUSH-1968). */
+  secretFindings?: DoctorFinding[];
+}
+
+/** What one remote `doctor --json` contributes: its inventory (for the
+ *  divergence comparator) plus the findings only it can observe. */
+interface RemoteDoctorPayload {
+  inventory: FleetInventory | null;
+  secretFindings: DoctorFinding[];
+}
+
+/**
+ * Narrow a remote `findings` array to the secret-hygiene rows, or `[]`.
+ *
+ * Deliberately NOT "forward every remote finding". The aggregator already
+ * rebuilds a remote's sign-in rows from its inventory and its divergence rows
+ * from the comparator, so forwarding wholesale would double them; and pulling a
+ * remote's orphan/drift rows into a fleet readout is a much larger UX change
+ * than this fix. The two secret kinds are the ones that are BOTH unrecomputable
+ * centrally and security-relevant, which is exactly why they were being lost.
+ *
+ * The remote runs its own agents-cli, whose version we do not control, so every
+ * field is validated and `device` is OVERWRITTEN with the name we dialled —
+ * a remote must never be able to attribute a finding to another box.
+ */
+const REMOTE_FORWARDED_KINDS = new Set(['rc-secret-export', 'env-secret-export']);
+
+export function asRemoteSecretFindings(raw: unknown, device: string): DoctorFinding[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DoctorFinding[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const f = item as Record<string, unknown>;
+    if (typeof f.kind !== 'string' || !REMOTE_FORWARDED_KINDS.has(f.kind)) continue;
+    if (typeof f.message !== 'string' || f.message.length === 0) continue;
+    if (f.severity !== 'warning' && f.severity !== 'critical') continue;
+    const base = {
+      severity: f.severity as DoctorFinding['severity'],
+      kind: f.kind as DoctorFinding['kind'],
+      device,
+      message: f.message,
+    };
+    out.push({
+      ...base,
+      // An older remote may omit it, or send something non-string. Fall back to
+      // OUR canonical remediation for the kind rather than inventing one or
+      // dropping an otherwise-valid security finding.
+      remediation: typeof f.remediation === 'string' && f.remediation.length > 0
+        ? f.remediation
+        : remediationFor({ ...base, remediation: '' }),
+    });
+  }
+  return out;
 }
 
 interface FleetTarget {
@@ -225,7 +283,13 @@ async function probeFleetTarget(target: FleetTarget): Promise<DeviceDoctorResult
     // prevent $HOME expansion there, so skip the bootstrap on Windows.
     isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
   );
-  const res = await sshExecAsync(target.sshTarget, remoteCmd, { timeoutMs: 30000, multiplex: true });
+  // 180s, not 30s. `doctor --json` is expensive — 57s measured on yosemite-m0,
+  // and 136s on an idle box per the menubar's own measurement, which is why
+  // ChildProcess.doctorTimeout is also 180. A ceiling below the real cost does
+  // not make the probe cheap, it makes it always fail: every slow box came back
+  // with NO inventory, so its sign-in, divergence and secret findings were all
+  // silently absent from the fleet readout rather than reported.
+  const res = await sshExecAsync(target.sshTarget, remoteCmd, { timeoutMs: 180000, multiplex: true });
   if (res.code !== 0) {
     return {
       name: target.name,
@@ -256,7 +320,7 @@ async function probeFleetTarget(target: FleetTarget): Promise<DeviceDoctorResult
  * null (unreachable, non-zero exit, unparseable, or an older CLI with no
  * `fleet` field); a null is skipped by the comparator, never a false gap.
  */
-async function probeFleetInventory(target: FleetTarget): Promise<FleetInventory | null> {
+async function probeFleetInventory(target: FleetTarget): Promise<RemoteDoctorPayload | null> {
   const isWin = /^win/i.test((target.os ?? '').trim());
   const remoteCmd = buildRemoteAgentsInvocation(
     ['doctor', '--json'],
@@ -267,8 +331,11 @@ async function probeFleetInventory(target: FleetTarget): Promise<FleetInventory 
   const res = await sshExecAsync(target.sshTarget, remoteCmd, { timeoutMs: 30000, multiplex: true });
   if (res.code !== 0) return null;
   try {
-    const parsed = JSON.parse(res.stdout) as { fleet?: unknown };
-    return asFleetInventory(parsed.fleet);
+    const parsed = JSON.parse(res.stdout) as { fleet?: unknown; findings?: unknown };
+    return {
+      inventory: asFleetInventory(parsed.fleet),
+      secretFindings: asRemoteSecretFindings(parsed.findings, target.name),
+    };
   } catch {
     return null;
   }
@@ -361,17 +428,20 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
     fanOutDevices(targets, probeFleetTarget),
     fanOutDevices(targets, probeFleetInventory),
   ]);
-  const inventoryByName = new Map<string, FleetInventory | null>();
-  for (const r of inventoryResults) inventoryByName.set(r.name, r.status === 'ok' ? (r.value ?? null) : null);
+  const payloadByName = new Map<string, RemoteDoctorPayload | null>();
+  for (const r of inventoryResults) payloadByName.set(r.name, r.status === 'ok' ? (r.value ?? null) : null);
   results.push(...remoteResults.map((r): DeviceDoctorResult => {
-    const inventory = inventoryByName.get(r.name) ?? undefined;
-    if (r.status === 'ok' && r.value) return { ...r.value, inventory: inventory ?? undefined };
+    const payload = payloadByName.get(r.name) ?? null;
+    const inventory = payload?.inventory ?? undefined;
+    const secretFindings = payload?.secretFindings;
+    if (r.status === 'ok' && r.value) return { ...r.value, inventory, secretFindings };
     return {
       name: r.name,
       online: false,
       error: r.error ?? String(r.reason ?? 'skipped'),
       agents: {},
-      inventory: inventory ?? undefined,
+      inventory,
+      secretFindings,
     };
   }));
 
@@ -454,6 +524,11 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
       });
       continue;
     }
+    // Secret hygiene the aggregator cannot see for itself — the remote's shell
+    // rc files and its process environment. Without this the fleet readout
+    // reports a leaking box as clean (RUSH-1968).
+    if (r.secretFindings?.length) findings.push(...r.secretFindings);
+
     if (r.inventory?.signIn) {
       findings.push(...signInToFindings(r.name, r.inventory.signIn));
       accounts[r.name] = r.inventory.signIn;
