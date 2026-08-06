@@ -32,6 +32,7 @@ import { isTmuxInstalled } from './tmux/binary.js';
 import { shellQuote } from './ssh-exec.js';
 import { resolveClaudeSetupToken } from './claude-account-token.js';
 import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
+import { applyActiveRulesPresetAtRun } from './rules/run-sync.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -2276,6 +2277,13 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
 
   for (let i = 0; i < chain.length; i++) {
     const { agent, version, envOverride } = chain[i];
+    // Every fallback entry can target a different harness/version home. Sync
+    // its active preset immediately before dispatch so entries 2..N cannot
+    // inherit the stale rules file left by the primary entry.
+    const rulesVersion = version ?? resolveVersion(agent);
+    if (rulesVersion) {
+      applyActiveRulesPresetAtRun(agent, rulesVersion, getVersionHomePath(agent, rulesVersion));
+    }
     // Record the entry we're about to attempt so the caller (audit log) sees the
     // agent+version that actually ran, even after a rate-limit handoff.
     if (options.dispatchSink) { options.dispatchSink.agent = agent; options.dispatchSink.version = version; }
