@@ -95,7 +95,7 @@ export function headlessPlanStallCommand(args: {
  *   (every agent supports edit-like behavior as its default).
  * - `plan` on an agent without a read-only mode degrades to the agent's
  *   safest native mode (`capabilities.modes[0]`, typically `edit`). Agents
- *   like antigravity/cursor/kiro have no plan flag; hard-failing made
+ *   like antigravity/kiro have no plan flag; hard-failing made
  *   multi-agent scripts (`--mode plan` for everyone) unusable and diverged
  *   from `agents teams add`, which already defaults to `edit`. Callers that
  *   care (the `agents run` CLI) must surface a warning when requested ≠
@@ -116,7 +116,7 @@ export function resolveMode(agent: AgentId, requested: Mode): Mode {
 
   if (requested === 'plan') {
     // No read-only mode on this agent. modes[0] is the declared safest mode
-    // (edit for antigravity/cursor/kiro/…). Prefer that over hard-fail so
+    // (edit for antigravity/kiro/…). Prefer that over hard-fail so
     // uniform multi-agent `--mode plan` dispatches still run.
     return supported[0];
   }
@@ -135,8 +135,8 @@ export function resolveMode(agent: AgentId, requested: Mode): Mode {
  * `--prompt` + `--plan`, and grok's `--permission-mode plan` silently stalls at
  * its ExitPlanMode gate. For those agents, a headless plan request degrades to
  * `auto` (kimi -p auto-runs; grok maps auto→edit via resolveMode) with a visible
- * one-line stderr warning, mirroring the graceful plan→edit degrade cursor and
- * antigravity get for having no plan flag at all. Interactive runs are never
+ * one-line stderr warning, mirroring the graceful plan→edit degrade antigravity
+ * and kiro get for having no plan flag at all. Interactive runs are never
  * downgraded. This is the single source of truth shared by buildExecCommand
  * (agents run / teams) and the routine runner.
  */

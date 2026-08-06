@@ -119,9 +119,9 @@ describe('buildJobCommand', () => {
 });
 
 describe('cursor loop routine mode warning', () => {
-  it('warns from the shared command builder before a plan-mode loop iteration runs', async () => {
+  it('emits --plan for cursor plan-mode routines now that headless plan is supported (RUSH-2101)', async () => {
     const config = baseJob({
-      name: 'cursor-loop-warning-test',
+      name: 'cursor-loop-plan-test',
       agent: 'cursor',
       version: '0.0.0-test',
       mode: 'plan',
@@ -134,12 +134,13 @@ describe('cursor loop routine mode warning', () => {
         runIteration: async (options) => {
           expect(options.version).toBeUndefined();
           const argv = buildExecCommand(options);
-          expect(argv).toContain('--trust');
+          expect(argv).toContain('--plan');
+          expect(argv).not.toContain('--trust');
           return { exitCode: 0, tokens: 0 };
         },
       });
-      expect(write).toHaveBeenCalledWith(
-        expect.stringContaining("[agents] routine cursor-loop-warning-test: cursor's read-only plan mode is not enabled in this build"),
+      expect(write).not.toHaveBeenCalledWith(
+        expect.stringContaining("[agents] routine cursor-loop-plan-test: cursor's read-only plan mode is not enabled in this build"),
       );
     } finally {
       write.mockRestore();

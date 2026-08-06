@@ -956,8 +956,8 @@ export function registerRunCommand(program: Command): void {
         Models (cheap|default|best|ultra): agents models <agent[@version]>
 
       Headless plan support (a prompt makes the run headless):
-        plan works headless on claude, codex, droid, opencode.
-        kimi, grok, cursor, antigravity have no headless plan mode — a headless
+        plan works headless on claude, codex, cursor, droid, opencode.
+        kimi, grok, antigravity have no headless plan mode — a headless
         --mode plan auto-downgrades to --mode auto (with a stderr warning).
         Interactive plan (omit the prompt) works everywhere it is listed.
 
@@ -2852,7 +2852,7 @@ export function registerRunCommand(program: Command): void {
       }
 
       // Default CLI mode is the generic 'plan'. Agents without a read-only
-      // mode (antigravity, cursor, kiro, …) degrade via resolveMode to their
+      // mode (antigravity, kiro, …) degrade via resolveMode to their
       // safest native mode (modes[0], typically edit). That covers both the
       // implicit default and an explicit `--mode plan`, so multi-agent
       // scripts can pass a uniform plan flag without per-agent branching.
