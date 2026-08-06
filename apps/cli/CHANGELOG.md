@@ -2,13 +2,6 @@
 
 ## 1.22.22
 
-- **`agents mcp add` no longer strips comments from `agents.yaml`.** The
-  write path (`writeManifest` / `serializeManifest` in `src/lib/manifest.ts`)
-  used plain `yaml.stringify`, which dropped every hand-written comment on
-  every add. It now round-trips via `yaml.parseDocument` and edits only the
-  keys that changed — the same approach `serializeCentral` already uses for
-  the central meta file (RUSH-2090).
-
 - **New: `agents insights` — how you work, split by the Claude account that did the
   work.** Tool and language mix, friction (interruptions, tool-error classes, your own
   reply latency), what you changed (line deltas, files, commits), an hour-of-day
