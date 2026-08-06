@@ -27,6 +27,8 @@ export function loginHint(agentId: AgentId): string {
       return `${cli}, then /login`;
     case 'codex':
     case 'grok':
+    // Warp Agent CLI: `oz login` opens a browser sign-in (or set WARP_API_KEY).
+    case 'warp':
       return `${cli} login`;
     case 'opencode':
       return `${cli} auth login`;

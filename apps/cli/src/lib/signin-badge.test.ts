@@ -20,6 +20,8 @@ describe('loginHint', () => {
     expect(loginHint('grok')).toBe('grok login');
     expect(loginHint('opencode')).toBe('opencode auth login');
     expect(loginHint('claude')).toBe('claude, then /login');
+    // Warp Agent CLI logs in with `oz login`.
+    expect(loginHint('warp')).toBe('oz login');
   });
 
   it('falls back to the bare cli command for device/oauth-on-launch agents', () => {
