@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.22.23
+
+- **fix(hooks): three race conditions in the hook cache shim's background-refresh path (RUSH-2121).**
+  1. **Thundering herd**: N concurrent invocations each spawned their own detached subshell. Fixed with an atomic `mkdir` lockdir — only the first caller spawns the refresh; the rest serve stale content and skip.
+  2. **No backoff**: a hook whose source script consistently fails was retried on every invocation. Fixed with a failure sentinel file (`$CACHE_FILE.fail`) whose mtime is checked before spawning; if the last failure is within 60 s, the refresh is skipped until the cooldown elapses.
+  3. **Profiler-blind**: the background subshell's real exit code was never captured; the `hook.fire` log entry always showed `"exit":0` for `stale-prefetch` events. Fixed by capturing `_bg_exit` inside the subshell and emitting a `hook.cache.refresh` event with the real code.
+
 ## 1.22.22
 
 - **New: `agents insights` — how you work, split by the Claude account that did the

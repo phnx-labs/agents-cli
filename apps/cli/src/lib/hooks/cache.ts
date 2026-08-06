@@ -491,6 +491,9 @@ except Exception: pass' 2>/dev/null || true)"
     ;;
 esac
 CACHE_FILE="$CACHE_DIR/$HOOK_NAME$cache_suffix.out"
+# Failure sentinel: touched on bg-refresh failure; mtime drives the backoff window.
+FAIL_FILE="$CACHE_FILE.fail"
+BACKOFF_SEC=60
 
 # Monotonic-ish nanosecond timer (macOS \`date\` has no %N).
 now_ns() { "$PY" -c 'import time; print(int(time.time()*1e9))'; }
@@ -519,9 +522,38 @@ if [ "$CACHE_STATUS" = miss ]; then
     # Stale-while-revalidate: serve stale immediately, refresh in detached child.
     cat "$CACHE_FILE"
     CACHE_STATUS=stale-prefetch
-    tmp="$CACHE_FILE.new.$$"
-    ( printf '%s' "$STDIN_PAYLOAD" | "$SOURCE" >"$tmp" 2>/dev/null && mv -f "$tmp" "$CACHE_FILE" || rm -f "$tmp" ) >/dev/null 2>&1 &
-    disown 2>/dev/null || true
+    # Fix 2: backoff — skip bg refresh if last attempt failed within BACKOFF_SEC.
+    _in_backoff=0
+    if [ -f "$FAIL_FILE" ]; then
+      _fail_mtime=$("$PY" -c 'import os,sys; print(int(os.path.getmtime(sys.argv[1])))' "$FAIL_FILE" 2>/dev/null || echo 0)
+      _now_s=$(date +%s)
+      _fail_age=$((_now_s - \${_fail_mtime:-0}))
+      [ "$_fail_age" -lt "$BACKOFF_SEC" ] && _in_backoff=1
+    fi
+    if [ "$_in_backoff" -eq 0 ]; then
+      # Fix 1: lockdir — only one background refresh runs at a time.
+      LOCK_DIR="$CACHE_FILE.bg.lck"
+      if mkdir "$LOCK_DIR" 2>/dev/null; then
+        tmp="$CACHE_FILE.new.$$"
+        # Fix 3: background subshell captures and logs its own real exit code.
+        (
+          trap 'rm -rf "$LOCK_DIR"' EXIT
+          _bg_exit=0
+          if printf '%s' "$STDIN_PAYLOAD" | "$SOURCE" >"$tmp" 2>/dev/null; then
+            mv -f "$tmp" "$CACHE_FILE" && rm -f "$FAIL_FILE"
+          else
+            _bg_exit=$?
+            rm -f "$tmp"
+            touch "$FAIL_FILE"
+          fi
+          _bg_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          _bg_log_file="$LOGS_DIR/events-$(date -u +%Y-%m-%d).jsonl"
+          printf '{"ts":"%s","event":"hook.cache.refresh","hook":"%s","cache":"bg-refresh","exit":%d}\\n' \\
+            "$_bg_ts" "$HOOK_NAME" "$_bg_exit" >>"$_bg_log_file" 2>/dev/null || true
+        ) >/dev/null 2>&1 &
+        disown 2>/dev/null || true
+      fi
+    fi
   else
     # Synchronous fetch + cache.
     tmp="$CACHE_FILE.new.$$"
@@ -529,6 +561,7 @@ if [ "$CACHE_STATUS" = miss ]; then
       EXIT=0
       cat "$tmp"
       mv -f "$tmp" "$CACHE_FILE"
+      rm -f "$FAIL_FILE"
     else
       EXIT=$?
       rm -f "$tmp"

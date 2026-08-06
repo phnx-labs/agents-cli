@@ -204,4 +204,62 @@ describe('generateHookShim', () => {
     // Removing again is a no-op
     expect(() => removeHookShim('doomed', testPaths.shimsDir)).not.toThrow();
   });
+
+  // Fix 1: single-flight lock guard (thundering herd prevention)
+  it('background-prefetch shim wraps bg spawn in an atomic mkdir lock', () => {
+    const shim = generateHookShim({
+      name: 'bg-lock-test',
+      scriptPath: '/some/script.sh',
+      cache: { ttl: 60, key: 'global', prefetch: 'background' },
+      paths: testPaths,
+    });
+    const body = fs.readFileSync(shim, 'utf-8');
+    expect(body).toMatch(/LOCK_DIR=/);
+    expect(body).toMatch(/mkdir "\$LOCK_DIR"/);
+    expect(body).toMatch(/trap 'rm -rf "\$LOCK_DIR"' EXIT/);
+  });
+
+  // Fix 2: backoff sentinel so a persistently-failing refresh is not retried every invocation
+  it('background-prefetch shim skips spawn while in backoff window', () => {
+    const shim = generateHookShim({
+      name: 'bg-backoff-test',
+      scriptPath: '/some/script.sh',
+      cache: { ttl: 60, key: 'global', prefetch: 'background' },
+      paths: testPaths,
+    });
+    const body = fs.readFileSync(shim, 'utf-8');
+    expect(body).toMatch(/FAIL_FILE=/);
+    expect(body).toMatch(/BACKOFF_SEC=/);
+    expect(body).toMatch(/_in_backoff=0/);
+    // Failure path must record the sentinel; success path must clear it.
+    expect(body).toMatch(/touch "\$FAIL_FILE"/);
+    expect(body).toMatch(/rm -f "\$FAIL_FILE"/);
+  });
+
+  // Fix 3: background subshell logs its real exit code, not the hardcoded EXIT=0
+  it('background-prefetch shim logs hook.cache.refresh with real exit code', () => {
+    const shim = generateHookShim({
+      name: 'bg-exit-log-test',
+      scriptPath: '/some/script.sh',
+      cache: { ttl: 60, key: 'global', prefetch: 'background' },
+      paths: testPaths,
+    });
+    const body = fs.readFileSync(shim, 'utf-8');
+    expect(body).toMatch(/_bg_exit=/);
+    expect(body).toMatch(/hook\.cache\.refresh/);
+    expect(body).toMatch(/"exit":%d/);
+  });
+
+  // Fix 2 (sync path): synchronous fetch also clears the FAIL_FILE sentinel on success
+  it('synchronous-prefetch shim clears FAIL_FILE on a successful fetch', () => {
+    const shim = generateHookShim({
+      name: 'sync-clear-fail-test',
+      scriptPath: '/some/script.sh',
+      cache: { ttl: 60, key: 'global', prefetch: 'none' },
+      paths: testPaths,
+    });
+    const body = fs.readFileSync(shim, 'utf-8');
+    expect(body).toMatch(/FAIL_FILE=/);
+    expect(body).toMatch(/rm -f "\$FAIL_FILE"/);
+  });
 });
