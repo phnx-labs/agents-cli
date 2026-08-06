@@ -3,8 +3,8 @@
  *
  * This is the only thing standing between a typo in the comparison chain and a
  * bad `latest` on npm: nothing else in CI runs `scripts/`, and `release.sh`
- * cannot be invoked in a test — it demands a clean main, npm auth and gh auth
- * long before it reaches the bump decision. Extracting the decision into
+ * cannot be invoked hermetically in a test — it demands live npm and GitHub
+ * access long before it reaches the bump decision. Extracting the decision into
  * `validate-bump.sh` is what makes the real code path testable here.
  */
 

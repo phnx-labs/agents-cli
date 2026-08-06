@@ -405,9 +405,9 @@ Nothing from `apps/`, `native/`, or sibling `packages/` can leak into the tarbal
 
 ## Releasing
 
-**Self-routing, zero-config.** Run it from ANY fleet box with an empty
-environment — no variables to set, no Touch ID, no hand-moved credentials. Run
-from a clean, in-sync `main`:
+**Self-routing, zero-config.** Run it from ANY fleet box and ANY checkout state —
+no variables to set, no Touch ID, no hand-moved credentials, and no requirement
+that the caller be on a clean `main`:
 
 ```bash
 scripts/release.sh <version>          # dry-run: bump, type-check, tarball preview, detected state
@@ -419,12 +419,21 @@ each phase labeled with the box it runs on and a ✓/✗ result:
 
 | Work | Runs on | How it's chosen |
 |---|---|---|
-| Orchestrate: bump, changelog, PR, tag | the box you invoked it on | it's already there (git + gh only) |
-| CI / tests (Linux) | a **crabbox** (Hetzner Linux VM) | [`scripts/sandbox.sh`](scripts/sandbox.sh) selects an available box for this repo's `.crabbox.yaml` profile or warms a fresh one — **dynamic, never a hardcoded instance** |
+| Orchestrate: bump, changelog, PR, tag | a detached worktree on the box you invoked it on | fresh `origin/<default>` under `.agents/worktrees/release-v<version>-<pid>` |
+| CI / tests (Linux) | a **crabbox** workspace (Hetzner Linux VM) | [`scripts/sandbox.sh`](scripts/sandbox.sh) reclaims an available warm box and syncs into `~/workspaces/<repo>-<task>`; it warms capacity only when the shared pool has none — **dynamic, never a hardcoded or release-exclusive instance** |
 | Build, sign+notarize, npm publish, computer-helper | the **home base** | one hardcoded constant `RELEASE_HOME_BASE="mac-mini"` in `release.sh`; the script detects if it's already there (`scutil --get LocalHostName` / `hostname -s`), else reaches it over `ssh` |
 
 `mac-mini` is the only hardcoded machine name (it holds the Developer ID cert +
 npm publish rights). The crabbox is **not** hardcoded.
+
+**The caller checkout is never mutated or gated.** `release.sh` immediately
+fetches origin and re-enters the release from a detached, release-owned worktree
+at fresh `origin/<default>`. Version bumps, changelog folding, release-branch
+construction, CI orchestration, merging, and tagging happen there. The worktree
+is removed on every exit path, so a dirty shared `main`, an agent feature branch,
+or another branch already checking out `main` cannot block or contaminate a
+release. The isolated tree installs dependencies from its pinned lockfile; it
+does not borrow `node_modules` or staged files from the caller.
 
 **One releaser at a time — the lease.** Because the script runs from any box, two
 agents on two machines could enter it at once; they then clobber the same release

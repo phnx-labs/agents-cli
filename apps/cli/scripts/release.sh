@@ -7,7 +7,8 @@
 # (frozen at 1.19.x since v1.20.0).
 #
 # Three self-selected homes, no environment variables to set:
-#   - Orchestrate (bump, changelog, PR, tag): the box you invoke it on (git + gh).
+#   - Orchestrate (bump, changelog, PR, tag): a release-owned detached worktree
+#     on the box you invoke it on (git + gh), based on fresh origin/<default>.
 #   - CI / tests: a crabbox (dynamic Hetzner Linux VM) via scripts/sandbox.sh --
 #     never a hardcoded instance. Covers the Linux suite; the GH Actions matrix
 #     still covers the cross-platform (macOS/Windows) legs on the release PR.
@@ -104,6 +105,9 @@ YES=false
 # publish phase (build + sign + notarize + npm publish + computer-helper) against
 # an already-merged+tagged release. It is never something an operator passes.
 HOME_BASE_PHASE=false
+# --orchestration-phase is an INTERNAL marker added only by release-worktree.sh.
+# It prevents the release-owned checkout from recursively creating another one.
+ORCHESTRATION_PHASE=false
 TARGET=""
 for arg in "$@"; do
   case "$arg" in
@@ -111,6 +115,7 @@ for arg in "$@"; do
     --skip-tests) SKIP_TESTS=true ;;
     --yes|-y) YES=true ;;
     --home-base-phase) HOME_BASE_PHASE=true ;;
+    --orchestration-phase) ORCHESTRATION_PHASE=true ;;
     -h|--help) printf '%s\n' "usage: scripts/release.sh <version> [--apply] [--skip-tests] [--yes]"; exit 0 ;;
     --*) die "unknown flag: $arg" ;;
     *)
@@ -121,6 +126,18 @@ for arg in "$@"; do
 done
 [[ -n "$TARGET" ]] || die "usage: scripts/release.sh <version> [--apply]  (e.g. 1.14.2 --apply)"
 [[ "$TARGET" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "version must be MAJOR.MINOR.PATCH (no pre-release tags)"
+
+# The caller's checkout is never the orchestration workspace. It may be a dirty
+# shared main checkout or an agent's feature worktree; either way, release-owned
+# isolation keeps unrelated work out of the release index and avoids contending
+# for the branch already checked out there. The internal home-base phase is
+# already inside its own tagged worktree and deliberately bypasses this hop.
+if ! $HOME_BASE_PHASE && ! $ORCHESTRATION_PHASE; then
+  CALLER_GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    || die "release.sh must run from an agents-cli git checkout"
+  CALLER_REPO_ROOT="$(dirname "$CALLER_GIT_COMMON_DIR")"
+  exec scripts/release-worktree.sh "$CALLER_REPO_ROOT" "$@"
+fi
 
 if $APPLY; then
   bold "Mode: APPLY (real publish)"
@@ -283,27 +300,31 @@ fi
 # ----- Pre-flight -----
 command -v npm >/dev/null    || die "npm not found"
 command -v node >/dev/null   || die "node not found"
+command -v bun >/dev/null    || die "bun not found"
 command -v git >/dev/null    || die "git not found"
 command -v jq >/dev/null     || die "jq not found (brew install jq)"
 command -v gh >/dev/null      || die "gh (GitHub CLI) not found (brew install gh) -- needed to open + merge the release PR"
 gh auth status >/dev/null 2>&1 || die "gh is not authenticated -- run 'gh auth login'"
 
-# Working tree must be clean. This is load-bearing: the release commit is built
-# straight from the index via 'git write-tree' (see the apply phase), so a dirty
-# tree would smuggle unrelated changes into the release PR + published tarball.
-if [[ -n "$(git status --porcelain)" ]]; then
-  die "working tree is dirty -- commit or stash first"
-fi
-
-# Resolve the default branch dynamically; must be on it and in sync with origin.
+# Resolve the default branch dynamically. release-worktree.sh checked out this
+# fresh remote tip in a detached worktree, so the caller need not be on main and
+# its dirty files cannot enter the index used below.
 git fetch --quiet origin
 DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
 [[ -n "$DEFAULT_BRANCH" ]] || DEFAULT_BRANCH="main"
-BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-[[ "$BRANCH" == "$DEFAULT_BRANCH" ]] || die "not on $DEFAULT_BRANCH (on '$BRANCH') -- release runs from the default branch"
 BASE_SHA="$(git rev-parse HEAD)"
 REMOTE="$(git rev-parse "origin/$DEFAULT_BRANCH")"
-[[ "$BASE_SHA" == "$REMOTE" ]] || die "$DEFAULT_BRANCH is not in sync with origin/$DEFAULT_BRANCH (run 'git push' first)"
+[[ "$BASE_SHA" == "$REMOTE" ]] || die "release worktree is not at fresh origin/$DEFAULT_BRANCH -- recreate only this release worktree and retry"
+if [[ -n "$(git status --porcelain)" ]]; then
+  red "release worktree became dirty before orchestration; changed files:" >&2
+  git status --short >&2
+  die "release-owned worktree must stay clean -- inspect the listed files; do not stash or alter the caller checkout"
+fi
+
+# A clean clone/worktree has no node_modules. Install from the pinned lockfile in
+# this isolated tree rather than borrowing mutable dependencies from the caller.
+bun install --frozen-lockfile >/dev/null \
+  || die "dependency install failed in the isolated release worktree"
 
 # ----- npm auth: resolved ON the home base, never borrowed to the trigger box -----
 # The npm publish token lives only on the home base (mac-mini) and is resolved
@@ -456,8 +477,8 @@ read -r TMAJ TMIN TPAT <<< "$(parse_v "$TARGET")"
 
 # Which kind of bump is this? The arithmetic lives in scripts/validate-bump.sh
 # so it can be tested directly (scripts/validate-bump.test.ts) — reaching it
-# here requires a clean main, npm auth and gh auth first. It prints the bump
-# kind, or the accepted versions to stderr and exits 1.
+# here requires live npm and GitHub authentication. It prints the bump kind, or
+# the accepted versions to stderr and exits 1.
 PKG_JSON_VERSION="$(jq -r .version package.json)"
 if ! BUMP="$(scripts/validate-bump.sh "$PHNX_LATEST" "$PKG_JSON_VERSION" "$SWARMIFY_LATEST" "$TARGET")"; then
   exit 1
@@ -835,7 +856,7 @@ require_lease() { # $1 = what we are about to do
 PKG_BUMPED=false
 
 phase "Preflight + version validation complete" "$THIS_HOST"
-phase_ok "clean $DEFAULT_BRANCH, bump $BUMP ($PHNX_LATEST -> $TARGET), type check + tarball preview done"
+phase_ok "isolated origin/$DEFAULT_BRANCH, bump $BUMP ($PHNX_LATEST -> $TARGET), type check + tarball preview done"
 
 # ----- Short-circuit: already published -----
 # Registry is the source of truth. If the version is live, the release happened;

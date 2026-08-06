@@ -10,8 +10,7 @@
 #
 # The arithmetic lives here rather than inline in release.sh so it can be tested
 # directly (scripts/stuck-release.test.ts) -- reaching it inside release.sh
-# requires a clean main, npm auth and gh auth first. Same split as
-# validate-bump.sh.
+# requires live npm and GitHub access first. Same split as validate-bump.sh.
 #
 # Usage:
 #   stuck-release.sh <registry-latest> < tags.txt

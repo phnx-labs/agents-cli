@@ -6,7 +6,7 @@
  * untested tarball: when unrelated PRs merge during a release PR's CI window, the
  * squash-merge tree diverges from what CI tested, and release.sh must fall back to
  * the CI-tested release commit rather than the drifted merge. release.sh itself
- * cannot run in a test (it demands a clean main, npm + gh auth); extracting the
+ * cannot run hermetically in a test (it demands live npm + GitHub); extracting the
  * decision into select-publish-commit.sh is what makes this path testable — the
  * same reason validate-bump.sh exists.
  */
