@@ -437,6 +437,32 @@ async function lowestPaneId(name: string, socket: string): Promise<string | unde
 }
 
 /**
+ * Decide whether a native resume may attach an existing managed tmux session.
+ * Only a positively resolved, living agent pane is reusable. Metadata-less
+ * legacy sessions and stale metadata resolve their real first pane through
+ * tmux before the decision; a dead or unreadable session is reaped so the
+ * caller can create a fresh wrapper for the resumed harness.
+ */
+export async function prepareSessionForResume(
+  name: string,
+  socket?: string,
+): Promise<'attach' | 'create'> {
+  const sock = socket ?? getDefaultSocketPath();
+  if (!(await hasSession(name, sock))) return 'create';
+
+  const recordedPane = readSessionMeta(name)?.pane;
+  const recordedState = recordedPane ? await paneExitStatus(recordedPane, sock) : undefined;
+  const pane = recordedPane && recordedState?.found
+    ? recordedPane
+    : await lowestPaneId(name, sock);
+  const state = pane ? await paneExitStatus(pane, sock) : undefined;
+  if (pane && state?.found && !state.dead) return 'attach';
+
+  await killSession(name, sock);
+  return 'create';
+}
+
+/**
  * Retrofit the current guarded `pane-died` hook onto every managed `agents run`
  * session whose hook predates AGENT_HOOK_SCHEMA. Idempotent and NON-DESTRUCTIVE:
  * it only `set-hook`s (never kills a pane or detaches a client), so a long-lived
