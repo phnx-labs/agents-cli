@@ -6,6 +6,7 @@ Reference documentation for every feature `agents` ships.
 
 | Doc | Why read it |
 |---|---|
+| **[`QUICKSTART.md`](QUICKSTART.md)** | New to agents-cli? Install, add harnesses, smoke-test a team, and set up a fleet — start here if you are a human getting set up. |
 | **[`AGENT-CHEATSHEET.md`](AGENT-CHEATSHEET.md)** | The dozen concepts agents repeatedly need, on one page. Start here if you are an agent touching the codebase. |
 | [`00-concepts.md`](00-concepts.md) | DotAgents repos, resource kinds, and the layered resolution model that everything else builds on. |
 | [`architecture.md`](architecture.md) | How the CLI and Factory extension layer, and the two meanings of "session". |

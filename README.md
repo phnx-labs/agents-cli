@@ -46,11 +46,13 @@ https://agents-cli.sh/demo.mp4
 ```bash
 npm install -g @phnx-labs/agents-cli   # or: curl -fsSL agi-cli.sh | sh
 agents setup                           # first-time setup, or re-open the capability hub
-agents setup status                    # readiness for browser, computer, fleet, and more
+agents doctor                          # readiness for browser, computer, fleet, and more
 agents run claude "explain this repo"  # run any agent on your existing subscription
 ```
 
 `agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, fleet, share, watchdog, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
+
+Full path -- installing harnesses, logging in, smoke-testing `agents teams`, and setting up your own fleet: [`apps/cli/docs/QUICKSTART.md`](apps/cli/docs/QUICKSTART.md).
 
 Already installed? `agents upgrade` updates agents-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt). The command is `upgrade` on every platform -- there is no `agents update` (on macOS, `agents helper update` is a different command that reinstalls the keychain helper, not agents-cli).
 
