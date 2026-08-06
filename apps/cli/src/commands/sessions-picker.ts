@@ -20,12 +20,17 @@ import { renderMarkdown } from '../lib/markdown.js';
 import { itemPicker } from '../lib/picker.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } from '../lib/session/digest.js';
 import { extractArtifacts, extractHooks, extractLinks, extractRepos, extractSkills } from '../lib/session/highlights.js';
-/** A session whose transcript lives on another machine (folded in over the live
- * cross-machine fan-out): its `filePath` is on that peer's disk, so the preview
- * can't parse it locally — it shows metadata + a "resume there" note instead.
- * Keys off `_remote`, not the machine tag, so locally-readable synced mirrors
- * still parse their file normally. */
-function remoteMachineOf(session: SessionMeta): string | undefined {
+/** A session whose transcript FILE is on another machine (folded in over the
+ * live cross-machine fan-out): its `filePath` is on that peer's disk, so the
+ * preview can't parse it locally — it shows metadata + a "resume there" note
+ * instead. Keys off `_remote`, not the machine tag, so locally-readable synced
+ * mirrors still parse their file normally.
+ *
+ * This is the READ rule and only the read rule. Whether a session may be
+ * RESUMED here is a different question with a different answer — a mirror is
+ * readable but not resumable — and `sessionOwnerDevice`
+ * (lib/session/resume-owner.ts) is the single place that answers it (RUSH-2022). */
+function transcriptOnPeerOf(session: SessionMeta): string | undefined {
   return session._remote ? session.machine : undefined;
 }
 
@@ -122,7 +127,7 @@ const previewCache = new Map<string, string>();
 
 /** Build a cached multi-line preview string for display in the session picker. */
 export function buildPreview(session: SessionMeta): string {
-  const remote = remoteMachineOf(session);
+  const remote = transcriptOnPeerOf(session);
   const cacheKey = remote ? `${remote}:${session.id}` : session.id;
   const cached = previewCache.get(cacheKey);
   if (cached) return cached;

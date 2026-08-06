@@ -53,6 +53,8 @@ export interface DeviceAddress {
 /** Authentication settings for a device. */
 export interface DeviceAuth {
   method: DeviceAuthMethod;
+  /** Explicit private-key path passed to OpenSSH for key authentication. */
+  identityFile?: string;
   /** Secrets bundle holding the password (when method === 'password'). */
   bundle?: string;
   /** Key within the bundle whose value is the password. Defaults to 'password'. */

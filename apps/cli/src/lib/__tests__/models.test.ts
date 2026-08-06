@@ -30,11 +30,10 @@ const claudeBinaryVer = listInstalledVersions('claude').find((v) =>
 // Prefer a version whose model source actually resolves on this host — partial
 // installs (e.g. ones missing the vendored binary) would otherwise short-circuit
 // the catalog tests with null catalogs.
-const firstLocatable = (agent: 'codex' | 'gemini' | 'opencode' | 'openclaw' | 'antigravity' | 'kimi' | 'grok'): string | null =>
+const firstLocatable = (agent: 'codex' | 'opencode' | 'openclaw' | 'antigravity' | 'kimi' | 'grok'): string | null =>
   listInstalledVersions(agent).find((v) => locateModelSource(agent, v) !== null) ?? null;
 
 const codexVer = firstLocatable('codex');
-const geminiVer = firstLocatable('gemini');
 const opencodeVer = firstLocatable('opencode');
 const openclawVer = firstLocatable('openclaw');
 const antigravityVer = firstLocatable('antigravity');
@@ -189,32 +188,9 @@ describe('resolveModel', () => {
   });
 });
 
-describe('getModelCatalog (gemini)', () => {
-  it('parses the models.js ES module and surfaces aliases', () => {
-    if (!geminiVer) return;
-    const src = locateModelSource('gemini', geminiVer);
-    expect(src).not.toBeNull();
-    expect(src!.kind).toBe('js');
-    // <=0.41 ships gemini-cli-core/dist/src/config/models.js; 0.42+ inlines the same
-    // constants into a chunk under @google/gemini-cli/bundle/.
-    expect(src!.path).toMatch(/(gemini-cli-core\/dist\/src\/config\/models\.js$)|(gemini-cli\/bundle\/.+\.js$)/);
-
-    const catalog = getModelCatalog('gemini', geminiVer);
-    expect(catalog).not.toBeNull();
-    expect(catalog!.models.length).toBeGreaterThan(0);
-    // Gemini's VALID_GEMINI_MODELS set covers both `gemini-*` and Google's
-    // `gemma-*` sibling family; either prefix is valid.
-    for (const m of catalog!.models) {
-      expect(m.id).toMatch(/^(gemini|gemma)-/);
-    }
-    // The `flash` / `flash-lite` / `pro` aliases always resolve somewhere.
-    expect(Object.keys(catalog!.aliases)).toEqual(
-      expect.arrayContaining(['flash', 'flash-lite', 'pro'])
-    );
-    // At least one model must be marked default (pointed to by an alias).
-    expect(catalog!.models.some((m) => m.isDefault)).toBe(true);
-  });
-});
+// gemini is hard-deprecated: locateModelSource/getModelCatalog no longer parse
+// its bundle at all (RUSH-2202 — a dead, unreachable catalog surface for a
+// harness with no launch path left), so there is no describe block for it here.
 
 describe('getModelCatalog (opencode)', () => {
   it('delegates to `opencode models --verbose` and returns provider/id keys', () => {
@@ -508,5 +484,98 @@ describe('getModelCatalog caches a 0-model extraction, bounded by a retry TTL', 
 
     const second = getCatalog('claude', '2.1.209');
     expect(second?.models.length).toBeGreaterThan(0);
+  });
+});
+
+// Reproduces issue #1820: extractClaudeCatalog's structured-map regexes
+// (the alias map, the OPUS_ID/... const record, the per-cloud record) miss
+// entirely on claude>=2.1.207 bundles, which stopped embedding those literal
+// shapes -- the extractor fell back to 0 models for every 2.1.207+ install.
+// The fallback id scan (models.ts, `if (models.length < 2)`) is what
+// recovers a real catalog on those builds; these tests pin its behavior with
+// synthetic bundle text so the regression is caught in CI even when no real
+// claude>=2.1.207 binary is installed on the runner (the `getModelCatalog
+// (claude)` suite above is gated on one being present locally).
+describe('getModelCatalog falls back to a raw id scan (issue #1820)', () => {
+  let TMP = '';
+
+  function claudeBundlePath(version: string): string {
+    return path.join(
+      TMP,
+      '.agents',
+      '.history',
+      'versions',
+      'claude',
+      version,
+      'node_modules',
+      '@anthropic-ai',
+      'claude-code',
+      'cli.js'
+    );
+  }
+
+  function writeFakeBundle(version: string, contents: string) {
+    const p = claudeBundlePath(version);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, contents);
+  }
+
+  async function freshModels() {
+    vi.resetModules();
+    return import('../models.js');
+  }
+
+  beforeEach(() => {
+    TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-models-fallback-test-'));
+    process.env.HOME = TMP;
+  });
+  afterEach(() => {
+    try {
+      fs.rmSync(TMP, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
+  });
+
+  it('recovers a real catalog when the structured alias/const/perCloud maps are absent', async () => {
+    // No `{opus:"...",sonnet:"...",haiku:"..."}`, no `{OPUS_ID:...}`, no
+    // `{firstParty:...,bedrock:...}` -- exactly what changed on 2.1.207+.
+    // The only signal left is bare `claude-<family>-<version>` strings
+    // scattered in the binary, same as the real fallback scan targets.
+    const bundle = [
+      'some unrelated minified JS noise, no structured model maps in here',
+      'claude-opus-4', // bare legacy -- has a specific sibling below, must be dropped
+      'claude-opus-4-8',
+      'claude-sonnet-5', // bare, no sibling -- must be kept (a real current id, #1892)
+      'claude-haiku-4-5',
+      'claude-fable-5',
+      'more unrelated noise',
+    ].join(' ');
+    writeFakeBundle('2.1.207', bundle);
+
+    const { getModelCatalog: getCatalog } = await freshModels();
+    const catalog = getCatalog('claude', '2.1.207');
+
+    expect(catalog).not.toBeNull();
+    const ids = catalog!.models.map((m) => m.id).sort();
+    expect(ids).toEqual(['claude-fable-5', 'claude-haiku-4-5', 'claude-opus-4-8', 'claude-sonnet-5']);
+    expect(ids).not.toContain('claude-opus-4'); // dropped by dropBareLegacyIds
+  });
+
+  it('does not fall back when the structured maps already yield >=2 models', async () => {
+    // A pre-2.1.207-shaped bundle with the real alias map, plus a stray raw
+    // id that is NOT part of that map: the curated set must win outright,
+    // and the fallback scan (unused here) must not leak the stray id in.
+    const bundle =
+      '{opus:"claude-opus-4-1",sonnet:"claude-sonnet-4-5",haiku:"claude-haiku-4-1"} ' +
+      'claude-fable-5'; // stray id, not part of the alias map
+    writeFakeBundle('2.1.186', bundle);
+
+    const { getModelCatalog: getCatalog } = await freshModels();
+    const catalog = getCatalog('claude', '2.1.186')!;
+
+    const ids = catalog.models.map((m) => m.id).sort();
+    expect(ids).toEqual(['claude-haiku-4-1', 'claude-opus-4-1', 'claude-sonnet-4-5']);
+    expect(ids).not.toContain('claude-fable-5');
   });
 });

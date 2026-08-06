@@ -278,20 +278,35 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
   }
 
   // Per-group table — the headline, and the thing no sibling command produces.
+  // Includes silent-stall counts so harness/account laziness is visible without --json.
   out.push('');
   out.push(chalk.bold(`By ${dim}`));
   const labelW = Math.min(
     Math.max(...groups.map((g) => stringWidth(g.label)), 5),
-    Math.max(20, terminalWidth() - 46),
+    Math.max(16, terminalWidth() - 58),
   );
   const sessW = Math.max(...groups.map((g) => String(g.sessions).length), 3);
+  const stallOf = (g: GroupReport): number =>
+    Object.entries(g.facets.frictionSignals)
+      .filter(([k]) => k.startsWith('silent stall:'))
+      .reduce((n, [, c]) => n + c, 0);
+  const resumeOf = (g: GroupReport): number =>
+    g.facets.correctionSignals['resume after silent stall'] ?? 0;
+  const stallW = Math.max(...groups.map((g) => String(stallOf(g)).length), 5);
+  out.push(chalk.gray(
+    `  ${padToWidth('', labelW)}  ${''.padStart(sessW)}       ` +
+    `${''.padStart(9)}  ${''.padStart(8)}  ${'stalls'.padStart(stallW)}  resume`,
+  ));
   for (const g of groups) {
     const cost = g.costUsd > 0 ? formatUsd(g.costUsd) : '—';
     const dur = g.durationMs > 0 ? formatDuration(g.durationMs) : '—';
+    const stalls = stallOf(g);
+    const resumes = resumeOf(g);
     out.push(
       `  ${padToWidth(truncateToWidth(g.label, labelW), labelW)}  ` +
       `${chalk.gray(String(g.sessions).padStart(sessW))} ${chalk.gray('sess')}  ` +
-      `${chalk.green(padToWidth(cost, 9))}  ${chalk.gray(dur)}`,
+      `${chalk.green(padToWidth(cost, 9))}  ${chalk.gray(padToWidth(dur, 8))}  ` +
+      `${chalk.cyan(String(stalls).padStart(stallW))}  ${chalk.cyan(String(resumes))}`,
     );
   }
 
@@ -302,6 +317,7 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
   renderCounts('Top tools', topEntries(all.toolCounts, 8), out);
   renderCounts('Languages', topEntries(all.languages, 6), out);
   renderCounts('Models', topEntries(all.models, 6), out);
+  renderCounts('Silent stalls by model', topEntries(all.silentStallsByModel ?? {}, 8), out);
 
   // Friction — the section that earns the command.
   const gaps = all.responseGaps;
@@ -323,7 +339,7 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
   }
   if (silentStalls > 0) {
     out.push(`  ${padToWidth('silent stalls', 18)}  ${chalk.cyan(String(silentStalls))}` +
-      chalk.gray('   agent idle ≥5m until you resumed'));
+      chalk.gray('   agent idle ≥5m until you resumed (also in By ' + dim + ' table)'));
   }
   if (resumeNudges > 0) {
     out.push(`  ${padToWidth('resume nudges', 18)}  ${chalk.cyan(String(resumeNudges))}` +

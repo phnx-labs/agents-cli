@@ -14,6 +14,7 @@ export {
 export {
   type TokenUsage,
   costOfUsage,
+  costOfUsageNoCache,
   costOfSession,
   formatUsd,
   estimateCost,

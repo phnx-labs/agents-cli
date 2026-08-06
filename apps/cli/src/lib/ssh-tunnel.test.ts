@@ -77,6 +77,14 @@ describe('buildTunnelArgs', () => {
     expect(args.join(' ')).toContain('ServerAliveInterval=15');
     expect(args.join(' ')).toContain('ServerAliveCountMax=3');
   });
+
+  it('uses an explicit identity for a device tunnel', () => {
+    const args = buildTunnelArgs('muqsit', 'win-mini', 55000, 8765, [
+      '-i', '/keys/win-mini', '-o', 'IdentitiesOnly=yes',
+    ]);
+    expect(args).toContain('/keys/win-mini');
+    expect(args).toContain('IdentitiesOnly=yes');
+  });
 });
 
 describe('buildPushScript', () => {
@@ -102,6 +110,14 @@ describe('buildPushScript', () => {
     expect(args[args.length - 1]).toBe('muqsit@win-mini:C:/Users/muqsit/AppData/Local/agents/computer-helper-win.exe');
     expect(args.join(' ')).not.toContain('powershell');
     expect(args.join(' ')).not.toContain('base64');
+  });
+
+  it('uses an explicit identity for a device copy', () => {
+    const args = buildScpArgs('muqsit@win-mini', 'C:/helper.exe', '/tmp/helper.exe', [
+      '-i', '/keys/win-mini', '-o', 'IdentitiesOnly=yes',
+    ]);
+    expect(args).toContain('/keys/win-mini');
+    expect(args).toContain('IdentitiesOnly=yes');
   });
 
   it('normalizes Windows paths for scp without changing the remote destination', () => {

@@ -8,8 +8,9 @@
  * or falls back to the legacy per-host SSH stream.
  */
 
-import { describe, it, expect } from 'vitest';
-import { formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, teamBadge } from '../sessions.js';
+import { describe, it, expect, vi } from 'vitest';
+import { applyScopeFilters, artifactLookupScope, buildRoutineChoices, buildRoutineRunGroups, filterSessionsByRoutine, formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, printRoutineRunOverview, resolveRoutineName, teamBadge } from '../sessions.js';
+import { resolveSessionById } from '../../lib/session/discover.js';
 import { formatTeamLineage } from '../sessions-picker.js';
 import type { SessionMeta } from '../../lib/session/types.js';
 
@@ -62,6 +63,84 @@ describe('hasNoBrowserDisqualifyingFlags — which views the browser can represe
   it('one host qualifies; two do not, because `y` can only copy back one --device', () => {
     expect(hasNoBrowserDisqualifyingFlags({ host: ['zion'] }, undefined)).toBe(true);
     expect(hasNoBrowserDisqualifyingFlags({ host: ['zion', 'mac-mini'] }, undefined)).toBe(false);
+  });
+});
+
+describe('resolveRoutineName', () => {
+  const names = ['nightly-review', 'release-notes', 'security-scan'];
+
+  it('resolves exact, unique substring, and unambiguous typo matches', () => {
+    expect(resolveRoutineName('NIGHTLY-REVIEW', names)).toBe('nightly-review');
+    expect(resolveRoutineName('release', names)).toBe('release-notes');
+    expect(resolveRoutineName('securty-scan', names)).toBe('security-scan');
+  });
+
+  it('rejects missing and ambiguous selectors', () => {
+    expect(resolveRoutineName('missing', names)).toBeNull();
+    expect(resolveRoutineName('notes', ['release-notes', 'meeting-notes'])).toBeNull();
+  });
+
+  it('removes another routine before a positional session ID can resolve', async () => {
+    const wanted = meta({ id: 'wanted-id', shortId: 'wanted', origin: 'routine', routineName: 'nightly-review' });
+    const other = meta({ id: 'other-id', shortId: 'other', origin: 'routine', routineName: 'security-scan' });
+    const filtered = await filterSessionsByRoutine([wanted, other], 'nightly', false);
+
+    expect(filtered).not.toBeNull();
+    expect(resolveSessionById(filtered!, 'other-id')).toEqual([]);
+    expect(resolveSessionById(filtered!, 'wanted-id')).toEqual([wanted]);
+    const globallyScoped = applyScopeFilters([wanted, other], { routine: 'nightly' });
+    expect(resolveSessionById(globallyScoped, 'other-id')).toEqual([]);
+    expect(resolveSessionById(globallyScoped, 'wanted-id')).toEqual([wanted]);
+  });
+});
+
+describe('artifact lookup routine scope', () => {
+  it('excludes a session from another routine before resolving its artifacts', () => {
+    const wanted = meta({ id: 'wanted-id', origin: 'routine', routineName: 'nightly-review' });
+    const other = meta({ id: 'other-id', origin: 'routine', routineName: 'release-notes' });
+    const scoped = applyScopeFilters(
+      [wanted, other],
+      artifactLookupScope(undefined, undefined, 'nightly-review'),
+    );
+    expect(resolveSessionById(scoped, 'other-id')).toEqual([]);
+    expect(resolveSessionById(scoped, 'wanted-id')).toEqual([wanted]);
+  });
+});
+
+describe('routine picker and run grouping', () => {
+  const sessions = [
+    meta({ id: 'a', shortId: 'a', origin: 'routine', routineName: 'nightly', routineRunId: 'run-2', timestamp: '2026-08-05T02:00:00.000Z' }),
+    meta({ id: 'b', shortId: 'b', origin: 'routine', routineName: 'nightly', routineRunId: 'run-2', timestamp: '2026-08-05T02:01:00.000Z' }),
+    meta({ id: 'c', shortId: 'c', origin: 'routine', routineName: 'nightly', routineRunId: 'run-1', timestamp: '2026-08-04T02:00:00.000Z' }),
+    meta({ id: 'd', shortId: 'd', origin: 'routine', routineName: 'weekly', routineRunId: 'weekly-1', timestamp: '2026-08-03T02:00:00.000Z' }),
+  ];
+
+  it('summarizes last run, run count, and session count for each routine', () => {
+    expect(buildRoutineChoices(sessions)).toEqual([
+      { name: 'nightly', lastRunAt: '2026-08-05T02:01:00.000Z', runCount: 2, latestRunSessionCount: 2 },
+      { name: 'weekly', lastRunAt: '2026-08-03T02:00:00.000Z', runCount: 1, latestRunSessionCount: 1 },
+    ]);
+  });
+
+  it('groups selected sessions by run id and newest timestamp', () => {
+    const groups = buildRoutineRunGroups(sessions.slice(0, 3));
+    expect(groups.map((group) => [group.runId, group.timestamp, group.sessions.length])).toEqual([
+      ['run-2', '2026-08-05T02:01:00.000Z', 2],
+      ['run-1', '2026-08-04T02:00:00.000Z', 1],
+    ]);
+  });
+
+  it('keeps the hidden team and unmanaged-session disclosures', () => {
+    const lines: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((line = '') => lines.push(String(line)));
+    try {
+      printRoutineRunOverview(sessions.slice(0, 3), undefined, { hiddenCount: 2, hiddenUnmanaged: 1 });
+    } finally {
+      log.mockRestore();
+    }
+    const output = lines.join('\n');
+    expect(output).toContain('2 team sessions hidden');
+    expect(output).toContain('1 session from your own unmanaged installs hidden');
   });
 });
 

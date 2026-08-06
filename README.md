@@ -11,7 +11,7 @@
   <a href="https://github.com/phnx-labs/agents-cli"><img src="https://img.shields.io/badge/github-phnx--labs%2Fagents--cli-blue?style=flat-square" alt="github" /></a>
 </p>
 
-**The missing toolchain for CLI coding agents.** Run any agent on your existing subscription. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Schedule routines and set monitors that fire an agent when a source changes, drive browsers and Electron apps, store secrets behind Touch ID, and file tickets from a menu-bar bar — all from one CLI.
+**A framework for running a distributed agent factory.** Dispatch Claude, Codex, Antigravity, Grok, and more across your own machines — in parallel, on your existing subscriptions. Measure every run with `agents perf` / `agents insights`, fold what you learn back into `AGENTS.md` and skills, then put the loop on a schedule with routines and monitors. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Store secrets behind Touch ID, drive real browsers and Electron apps, and steer the whole fleet from a menu bar — all from one CLI.
 
 <p align="center">
   <a href="https://github.com/anthropics/claude-code" title="Claude Code"><img src="assets/harnesses/anthropic.svg" height="32" alt="Claude Code" /></a>
@@ -52,26 +52,33 @@ agents run claude "explain this repo"  # run any agent on your existing subscrip
 
 `agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, fleet, share, watchdog, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
 
+Full path -- installing harnesses, logging in, smoke-testing `agents teams`, and setting up your own fleet: [`apps/cli/docs/QUICKSTART.md`](apps/cli/docs/QUICKSTART.md).
+
 Already installed? `agents upgrade` updates agents-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt). The command is `upgrade` on every platform -- there is no `agents update` (on macOS, `agents helper update` is a different command that reinstalls the keychain helper, not agents-cli).
 
 Source: [github.com/phnx-labs/agents-cli](https://github.com/phnx-labs/agents-cli)
 
 Also available as `ag` -- all commands work with both `agents` and `ag`.
 
-- [Pin versions per project](#pin-versions-per-project)
+- [Factory loop](#factory-loop)
 - [One config, every agent](#one-config-every-agent)
 - [Run any agent](#run-any-agent)
 - [Sessions across agents](#sessions-across-agents)
 - [Control the fleet](#control-the-fleet)
 - [Sync the fleet](#sync-the-fleet)
+- [Pin versions per project](#pin-versions-per-project)
 - [Run open models through Claude Code](#run-open-models-through-claude-code)
+- [Run on your own machines](#run-on-your-own-machines)
 - [Teams](#teams)
 - [Cloud](#cloud)
 - [Workflows](#workflows)
+- [Plugins](#plugins)
+- [Make it yours](#make-it-yours)
 - [Browser](#browser)
 - [Secrets](#secrets)
 - [Routines](#routines)
 - [Monitors](#monitors)
+- [Share](#share)
 - [PTY](#pty)
 - [Portable setup](#portable-setup)
 - [Menu bar](#menu-bar)
@@ -82,33 +89,34 @@ Also available as `ag` -- all commands work with both `agents` and `ag`.
 
 ---
 
-## Pin versions per project
+## Factory loop
+
+The same loop whether it's one agent on your laptop or a fleet across a dozen machines: dispatch work, measure what happened, fold the lesson back into the harness, then put it on a schedule.
 
 ```bash
-# This project needs claude@2.0.65 -- newer versions changed tool calling.
-agents use claude@2.0.65 -p
+# Dispatch a team across the fleet -- each teammate in its own worktree
+agents teams create checkout --devices yosemite-s0,yosemite-s1
+agents teams add checkout claude "Owns: app/payments/*" --name payments
+agents teams add checkout codex  "Write tests for the new code" --name qa --after payments
+agents teams start checkout --watch
 
-# The monorepo uses codex@0.116.0 across the team.
-agents use codex@0.116.0 -p
+# Measure what happened -- latency, friction, dead-weight skills
+agents perf commands --days 7      # slowest CLI entrypoints
+agents insights --since 30d        # friction, harness comparison, ranked actions
+
+# Fold the lesson back into the harness -- every agent picks it up next run
+agents rules add ~/lessons/payments-review.md --agents claude
+agents skills add ~/skills/payments-review --agents claude
+
+# Put it on a schedule so it runs itself
+agents routines add nightly-payments-audit \
+  --schedule "0 2 * * *" --agent claude --prompt "Audit payments/* for regressions"
+
+# Steer the fleet this loop runs on from the menu bar
+agents menubar setup
 ```
 
-This creates an `agents.yaml` at the project root:
-
-```yaml
-# agents.yaml (commit this to your repo)
-agents:
-  claude: "2.0.65"
-  codex: "0.116.0"
-```
-
-Think `requirements.txt` for CLI coding agents, on steroids. A shim reads `agents.yaml` from the project root and routes `claude` / `codex` / `antigravity` / `grok` (and others) to the right version automatically. Each version gets its own isolated home -- switching backs up config and re-syncs resources.
-
-```bash
-agents add claude@2.0.65     # Install a specific version
-agents add codex@latest       # Install latest
-agents add codex@oldest       # Install the oldest published version
-agents view                   # See everything installed
-```
+`agents perf` reads a disposable warehouse at `~/.agents/.cache/perf/perf.db` -- hook, command, and run timing rollups, deletable any time. `agents insights` (alias `agents sessions insights`) is deterministic and offline: it caches per-session facets, compares harnesses, and ranks actions by evidence count -- no model call unless you pass `--narrative`. Routines put any of this on a cron ([Routines](#routines)); monitors fire it on a change instead of a clock ([Monitors](#monitors)); the menu bar is the always-on control surface for the fleet these commands drive ([Menu bar](#menu-bar)).
 
 ---
 
@@ -370,7 +378,7 @@ agents resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # original harness/version/d
 agents run auto --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # adapt if its account is unavailable
 ```
 
-`agents sessions resume` reopens several sessions in whatever terminal you're in -- auto-detected across iTerm, Ghostty, tmux, and the VSCodium agent-terminal, or forced with `--iterm` / `--ghostty` / `--tmux` / `--vscodium`. `agents resume <id>` resumes one session without requiring you to name its harness: exact IDs take a local SQLite fast path, then resolve fleet-wide and recover on the source device. If the origin version is installed, signed in, and healthy, its isolated home performs native resume. Otherwise a healthy version of the **same harness** starts with `/continue <id>`, which reads the indexed transcript even when the old version home is retained under version trash. It never native-resumes from a different isolated home. Back them with **tmux** and the runs turn durable: detach, close your editor, reboot the GUI -- the session is still alive to `agents tmux attach`. The whole `agents tmux` subsystem (persistent multiplexer sessions that survive editor restarts and can be shared with other tools) sits underneath.
+`agents sessions resume` reopens several sessions in whatever terminal you're in -- auto-detected across iTerm, Ghostty, tmux, and the VSCodium agent-terminal, or forced with `--iterm` / `--ghostty` / `--tmux` / `--vscodium`. `agents resume <id>` resumes one session without requiring you to name its harness: exact IDs take a local SQLite fast path, then resolve fleet-wide and recover on the source device. If the origin version is installed, signed in, healthy, and still owns the indexed transcript, its isolated home performs native resume. Claude launches that native resume from the original project directory recorded before the first turn, so its `projects/<cwd-key>` lookup reaches the conversation even when the session later changed directories. Otherwise a healthy version of the **same harness** starts with `/continue <id>`, which reads the indexed transcript even when the old version home is retained under version trash or the same version number was reinstalled into a new home. It never native-resumes from a different isolated home. Back them with **tmux** and the runs turn durable: detach, close your editor, reboot the GUI -- the session is still alive to `agents tmux attach`. The whole `agents tmux` subsystem (persistent multiplexer sessions that survive editor restarts and can be shared with other tools) sits underneath.
 
 ### Send an agent to the background — and bring it back
 
@@ -462,6 +470,36 @@ See [docs/fleet.md](apps/cli/docs/fleet.md) for the manifest schema and reconcil
 
 ---
 
+## Pin versions per project
+
+```bash
+# This project needs claude@2.0.65 -- newer versions changed tool calling.
+agents use claude@2.0.65 -p
+
+# The monorepo uses codex@0.116.0 across the team.
+agents use codex@0.116.0 -p
+```
+
+This creates an `agents.yaml` at the project root:
+
+```yaml
+# agents.yaml (commit this to your repo)
+agents:
+  claude: "2.0.65"
+  codex: "0.116.0"
+```
+
+Think `requirements.txt` for CLI coding agents, on steroids. A shim reads `agents.yaml` from the project root and routes `claude` / `codex` / `antigravity` / `grok` (and others) to the right version automatically. Each version gets its own isolated home -- switching backs up config and re-syncs resources.
+
+```bash
+agents add claude@2.0.65     # Install a specific version
+agents add codex@latest       # Install latest
+agents add codex@oldest       # Install the oldest published version
+agents view                   # See everything installed
+```
+
+---
+
 ## Run open models through Claude Code (experimental)
 
 > **Note:** Profiles are experimental, but available by default — no enable step needed.
@@ -546,6 +584,9 @@ agents fleet status                     # online/offline rollup + NEEDS ATTENTIO
 agents fleet status --verbose           # full per-device auth/CLI/sync/version grid
 agents fleet status --live              # force a live resource probe (alias of --refresh)
 agents fleet status --json --strict     # scriptable fleet health gate
+agents devices harnesses                # per device: agent@version · account · signed · quota · ready
+agents devices accounts                 # same, one row per account (which harnesses share it)
+agents devices harnesses --agents claude,codex --json   # scoped, machine-readable
 agents doctor --check --devices         # CI drift gate across every registered device
 
 # Your Tailscale fleet, auto-discovered
@@ -593,6 +634,18 @@ cries wolf: `●live` (verified), `·present` (signed in but the agent has no li
 endpoint — e.g. codex/grok — benign), `◐degraded` (soft/self-healing: expired-but-refreshing,
 rate-limited), and `○revoked` (server rejected — re-login now). Only `○` means a real
 re-login is needed. Run `agents fleet ping` to force a live re-verification across the fleet.
+
+`agents devices harnesses` answers "what can each box actually run right now?" — one row
+per installed `agent@version` across the fleet with its **account**, **signed-in**,
+**quota** (highest usage-window utilization; `*` = from the cached snapshot), and a single
+**ready** verdict (signed in AND not rate-limited). It SSH-probes each online device
+(bounded, so one unreachable box can't stall the glance) and reuses the daemon-warmed usage
+cache, so it never blocks on a per-account network fetch — pass `--refresh` (`--live`) for a
+live quota read. `agents devices accounts` is the same data through the **identity lens**:
+one row per account, collapsing the installs that share it (e.g. five claude versions on one
+email) and naming which harnesses use it — the fast way to see which accounts are logged in
+and healthy across every machine. Scope either with `--agents <csv>` / `--device <csv>`, and
+add `--json` for the machine-readable per-host rows.
 
 **Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--host` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/00-concepts.md](apps/cli/docs/00-concepts.md#devices--hosts).
 

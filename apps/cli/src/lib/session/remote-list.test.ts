@@ -193,6 +193,21 @@ describe('parseRemoteList', () => {
     expect(parseRemoteList('bash: agents: command not found\n', 'zion')).toEqual([]);
   });
 
+  it('parses a payload a Windows peer prefixed with a PowerShell CLIXML banner (RUSH-2286)', () => {
+    const payload = JSON.stringify([
+      { id: 'w', shortId: 'w', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', filePath: 'C:\\r\\w.jsonl' },
+    ]);
+    const polluted =
+      '#< CLIXML\n' +
+      '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">' +
+      '<Obj S="progress" RefId="0"><MS><AV>Preparing modules for first use.</AV></MS></Obj></Objs>\n' +
+      payload;
+    const out = parseRemoteList(polluted, 'win-mini');
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe('w');
+    expect(out[0].machine).toBe('win-mini');
+  });
+
   it('returns [] when the top level is not an array', () => {
     expect(parseRemoteList(JSON.stringify({ error: 'nope' }), 'zion')).toEqual([]);
   });
@@ -245,6 +260,31 @@ describe('parseRemoteToolSearch', () => {
     expect(parseRemoteToolSearch('{broken', 'mac-mini')).toBeUndefined();
     expect(parseRemoteToolSearch(payload, 'mac-mini', ['program:gh'])).toBeUndefined();
     expect(parseRemoteToolSearch(payload, 'mac-mini', ['program:git'])?.sessions).toHaveLength(1);
+  });
+
+  it('parses an envelope a Windows peer prefixed with a CLIXML banner (RUSH-2286)', () => {
+    const payload = JSON.stringify({
+      schemaVersion: 1,
+      generatedAt: '2026-08-06T00:00:00Z',
+      query: { clauses: ['program:git'] },
+      coverage: { indexedFiles: 0, indexedCalls: 0, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
+      sessions: [{
+        id: 'w', shortId: 'w', agent: 'codex', timestamp: '2026-08-06T00:00:00Z',
+        filePath: 'C:\\peer\\w.jsonl', calls: [{
+          id: 'c', ordinal: 0, timestamp: '2026-08-06T00:00:01Z', tool: 'exec_command',
+          programs: ['git'], programOccurrences: [{ program: 'git', role: 'effective' }],
+          input: 'git status', outcome: 'unknown',
+        }],
+      }],
+    });
+    const polluted =
+      '#< CLIXML\n' +
+      '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">' +
+      '<Obj S="progress" RefId="0"><MS><AV>Preparing modules for first use.</AV></MS></Obj></Objs>\n' +
+      payload;
+    const parsed = parseRemoteToolSearch(polluted, 'win-mini');
+    expect(parsed?.sessions).toHaveLength(1);
+    expect(parsed?.sessions[0].machine).toBe('win-mini');
   });
 
   it('preserves the transcript origin machine across a peer hop', () => {

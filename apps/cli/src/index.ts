@@ -198,6 +198,7 @@ import {
   loadRepo,
   loadSetup,
   loadUninstall,
+  loadBench,
   loadShare,
   loadSend,
   loadFeed,
@@ -516,6 +517,7 @@ import {
   saveUpdateCheck,
   dismissUpdateVersion,
   shouldPromptUpgrade,
+  buildMultiInstallInventory,
   findAgentsCliInstalls,
   resolveRunningPackageRoot,
   type UpdateCheckCache,
@@ -523,12 +525,12 @@ import {
 const UPDATE_CHECK_FILE = getUpdateCheckPath();
 
 /**
- * Warn once when PATH resolves `agents` to a different agents-cli install
- * than the copy that is currently running (or to several). Divergent installs
+ * Warn once when this machine contains a different agents-cli install than the
+ * copy that is currently running (or several). Divergent installs
  * are how self-updates "succeed" without changing the command the user types.
- * The warning re-fires only when the set of install roots changes; dev builds
- * (0.0.0-dev) are ignored because side-by-side dev installs are a supported
- * workflow.
+ * The warning re-fires only when the set of install roots or their helper-copy
+ * safety changes. Dev builds are included because old dev copies can still
+ * overwrite the shared macOS helper bundle non-atomically.
  */
 function maybeWarnMultiInstall(): void {
   const sentinel = path.join(getRuntimeStateDir(), 'multi-install-warned');
@@ -541,28 +543,28 @@ function maybeWarnMultiInstall(): void {
     // "/$bunfs" install. This warning is advisory — stay silent instead.
     return;
   }
-  const byRoot = new Map<string, { version: string; note: string }>();
-  byRoot.set(runningRoot, { version: VERSION, note: 'running' });
-  for (const install of findAgentsCliInstalls(process.env.PATH || '')) {
-    if (install.version.startsWith('0.0.0-dev')) continue;
-    if (!byRoot.has(install.packageRoot)) {
-      byRoot.set(install.packageRoot, { version: install.version, note: `agents on PATH: ${install.binPath}` });
-    }
-  }
+  const inventory = buildMultiInstallInventory(
+    runningRoot,
+    VERSION,
+    findAgentsCliInstalls(process.env.PATH || ''),
+  );
 
-  if (byRoot.size < 2) {
+  if (inventory.length < 2) {
     try { fs.unlinkSync(sentinel); } catch { /* nothing recorded */ }
     return;
   }
 
-  const key = [...byRoot.keys()].sort().join('\n');
+  const key = inventory
+    .map((info) => `${info.packageRoot}\t${info.version}\t${info.note}`)
+    .sort()
+    .join('\n');
   try {
     if (fs.readFileSync(sentinel, 'utf-8') === key) return;
   } catch { /* not warned for this set yet */ }
 
   console.error(chalk.yellow('Multiple agents-cli installs detected:'));
-  for (const [root, info] of byRoot) {
-    console.error(chalk.gray(`  ${root}  ${info.version}  (${info.note})`));
+  for (const info of inventory) {
+    console.error(chalk.gray(`  ${info.packageRoot}  ${info.version}  (${info.note})`));
   }
   console.error(chalk.gray('Upgrades apply to the running copy. Remove a stale copy with: npm uninstall -g --prefix <prefix> @phnx-labs/agents-cli'));
 
@@ -1125,6 +1127,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadCost);
   await reg(loadInsights);
   await reg(loadPerf);
+  await reg(loadBench);
   await reg(loadTrends);
   await reg(loadOutput);
   await reg(loadBudget);

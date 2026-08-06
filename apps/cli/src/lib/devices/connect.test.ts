@@ -9,7 +9,7 @@
  * injection guard.
  */
 import { describe, expect, it } from 'vitest';
-import { buildAskpassShimBody, buildSshInvocation, fleetDialTarget, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV, ASKPASS_AGENT_ONLY_ENV } from './connect.js';
+import { buildAskpassShimBody, buildSshInvocation, deviceIdentityArgs, fleetDialTarget, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV, ASKPASS_AGENT_ONLY_ENV } from './connect.js';
 import type { DeviceProfile } from './registry.js';
 
 function decodePowerShell(cmd: string): string {
@@ -77,6 +77,16 @@ describe('buildSshInvocation', () => {
     expect(env.SSH_ASKPASS).toBeUndefined();
     expect(args[args.length - 2]).toBe('me@k.ts.net');
     expect(args[args.length - 1]).toBe('uptime');
+  });
+
+  it('key auth passes the device identity file to every OpenSSH invocation', () => {
+    const { args } = buildSshInvocation(
+      dev({ name: 'keyed', user: 'me', auth: { method: 'key', identityFile: '/keys/fleet worker' } }),
+      ['uptime'],
+      '/shim',
+    );
+    expect(args.slice(args.indexOf('-i'), args.indexOf('-i') + 4)).toEqual(['-i', '/keys/fleet worker', '-o', 'IdentitiesOnly=yes']);
+    expect(deviceIdentityArgs(dev({ auth: { method: 'password', identityFile: '/ignored' } }))).toEqual([]);
   });
 
   it('password auth wires the askpass shim and disables pubkey + extra prompts', () => {

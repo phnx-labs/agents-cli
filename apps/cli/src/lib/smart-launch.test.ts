@@ -5,6 +5,7 @@ import {
   resolveDeviceAffinity,
   isDeviceAuto,
   applyDeviceAutoToOptions,
+  resolveDeviceAuto,
   type WeightedCandidate,
 } from './smart-launch.js';
 import type { AffinityRow } from './session/db.js';
@@ -94,15 +95,60 @@ describe('resolveDeviceAffinity', () => {
   });
 });
 
+describe('resolveDeviceAuto', () => {
+  it('picks the least-loaded reachable device with the requested agent installed', async () => {
+    const plan = await resolveDeviceAuto('codex', {
+      localMachine: 'local',
+      eligibleHosts: ['local', 'busy', 'idle-no-codex', 'idle'],
+      probe: async () => new Map([
+        ['local', { reachable: true, loadPercent: 30, memPercent: 20, headroom: 'light', installed: true, signedIn: true }],
+        ['busy', { reachable: true, loadPercent: 80, memPercent: 20, headroom: 'loaded', installed: true }],
+        ['idle-no-codex', { reachable: true, loadPercent: 2, memPercent: 5, headroom: 'idle', installed: false }],
+        ['idle', { reachable: true, loadPercent: 5, memPercent: 5, headroom: 'idle', installed: true, signedIn: true }],
+      ]),
+    });
+    expect(plan.host).toBe('idle');
+    expect(plan.pickedDeviceKey).toBe('idle');
+  });
+
+  it('falls back to local when live probing cannot produce a viable remote', async () => {
+    const plan = await resolveDeviceAuto('codex', {
+      localMachine: 'local',
+      eligibleHosts: ['local', 'remote'],
+      probe: async () => {
+        throw new Error('probe unavailable');
+      },
+    });
+    expect(plan.host).toBeNull();
+    expect(plan.pickedDeviceKey).toBe('local');
+  });
+
+  it('keeps live load placement when run auto has not selected a harness yet', async () => {
+    const plan = await resolveDeviceAuto(undefined, {
+      localMachine: 'local',
+      eligibleHosts: ['local', 'idle'],
+      probe: async (_pool, agent) => {
+        expect(agent).toBeUndefined();
+        return new Map([
+          ['local', { reachable: true, loadPercent: 40, memPercent: 20, headroom: 'light' }],
+          ['idle', { reachable: true, loadPercent: 5, memPercent: 10, headroom: 'idle' }],
+        ]);
+      },
+    });
+    expect(plan.host).toBe('idle');
+    expect(plan.pickedDeviceKey).toBe('idle');
+  });
+});
+
 describe('applyDeviceAutoToOptions', () => {
-  it('rewrites --device auto to a concrete remote host and enables balanced', () => {
+  it('rewrites --device auto to a concrete remote host and enables balanced', async () => {
     const options = { device: 'auto' as string | undefined };
-    const result = applyDeviceAutoToOptions(options, {
+    const result = await applyDeviceAutoToOptions(options, {
       resolve: () => ({
         host: 'yosemite-s1',
-        deviceCandidates: [
-          { key: 'yosemite-s1', launches: 50, weight: 50 },
-          { key: 'yosemite-s0', launches: 5, weight: 5 },
+        candidates: [
+          { key: 'yosemite-s1', loadPercent: 5 },
+          { key: 'yosemite-s0', loadPercent: 50 },
         ],
         pickedDeviceKey: 'yosemite-s1',
       }),
@@ -112,19 +158,19 @@ describe('applyDeviceAutoToOptions', () => {
     expect(result.attempted).toBe(true);
     expect(result.skipped).toBeUndefined();
     expect(result.banner?.hostLabel).toBe('yosemite-s1');
-    expect(result.banner?.deviceHint).toContain('yosemite-s1:50');
+    expect(result.banner?.deviceHint).toContain('yosemite-s1:5%');
     expect(result.banner?.acctNote).toBe('accounts=balanced');
   });
 
-  it('rewrites auto on every host slot alias once', () => {
+  it('rewrites auto on every host slot alias once', async () => {
     const options = {
       host: 'auto' as string | undefined,
       device: 'auto' as string | undefined,
     };
-    applyDeviceAutoToOptions(options, {
+    await applyDeviceAutoToOptions(options, {
       resolve: () => ({
         host: 'mac-mini',
-        deviceCandidates: [{ key: 'mac-mini', launches: 3, weight: 3 }],
+        candidates: [{ key: 'mac-mini', loadPercent: 3 }],
         pickedDeviceKey: 'mac-mini',
       }),
     });
@@ -132,12 +178,12 @@ describe('applyDeviceAutoToOptions', () => {
     expect(options.device).toBe('mac-mini');
   });
 
-  it('maps local pick to undefined host (no --host)', () => {
+  it('maps local pick to undefined host (no --host)', async () => {
     const options = { device: 'auto' as string | undefined };
-    const result = applyDeviceAutoToOptions(options, {
+    const result = await applyDeviceAutoToOptions(options, {
       resolve: () => ({
         host: null,
-        deviceCandidates: [{ key: 'yosemite-s0', launches: 10, weight: 10 }],
+        candidates: [{ key: 'yosemite-s0', loadPercent: 10 }],
         pickedDeviceKey: 'yosemite-s0',
       }),
     });
@@ -145,21 +191,21 @@ describe('applyDeviceAutoToOptions', () => {
     expect(result.banner?.hostLabel).toBe('local');
   });
 
-  it('maps deprecated --smart to --device auto when no host given', () => {
+  it('maps deprecated --smart to --device auto when no host given', async () => {
     const options: { smart?: boolean; device?: string } = { smart: true };
-    applyDeviceAutoToOptions(options, {
+    await applyDeviceAutoToOptions(options, {
       resolve: () => ({
         host: 'zion',
-        deviceCandidates: [{ key: 'zion', launches: 1, weight: 1 }],
+        candidates: [{ key: 'zion', loadPercent: 1 }],
         pickedDeviceKey: 'zion',
       }),
     });
     expect(options.device).toBe('zion');
   });
 
-  it('does not override an explicit host when --smart is also set', () => {
+  it('does not override an explicit host when --smart is also set', async () => {
     const options = { smart: true, device: 'gpu-box' as string | undefined };
-    const result = applyDeviceAutoToOptions(options, {
+    const result = await applyDeviceAutoToOptions(options, {
       resolve: () => {
         throw new Error('should not resolve');
       },
@@ -169,9 +215,9 @@ describe('applyDeviceAutoToOptions', () => {
     expect(result.deprecationSmart).toBe(true);
   });
 
-  it('degrades to local on resolve failure without throwing', () => {
+  it('degrades to local on resolve failure without throwing', async () => {
     const options = { device: 'auto' as string | undefined, balanced: undefined as boolean | undefined };
-    const result = applyDeviceAutoToOptions(options, {
+    const result = await applyDeviceAutoToOptions(options, {
       resolve: () => {
         throw new Error('db locked');
       },
@@ -182,16 +228,16 @@ describe('applyDeviceAutoToOptions', () => {
     expect(result.banner).toBeUndefined();
   });
 
-  it('preserves strategy override and account-picker note', () => {
+  it('preserves strategy override and account-picker note', async () => {
     const options = {
       device: 'auto' as string | undefined,
       strategy: 'round-robin',
     };
-    const result = applyDeviceAutoToOptions(options, {
+    const result = await applyDeviceAutoToOptions(options, {
       accountPickerRequested: true,
       resolve: () => ({
         host: null,
-        deviceCandidates: [],
+        candidates: [],
         pickedDeviceKey: 'local',
       }),
     });

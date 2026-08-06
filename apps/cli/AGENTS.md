@@ -124,7 +124,7 @@ gives each device its warnings plus a compact accounts/versions line (every
 installed version + its account, provable ✓ / ✗). Single-machine `agents doctor`
 collapses to the CRITICAL section plus one `▸ <machine>` block. Severity:
 **critical** is `logged-out` (provable), `missing-hook`, `missing-plugin`,
-`unwired-hook`, `cli-missing` and `owner-sink-unreachable` (the feed/notify
+`unwired-hook`, `cli-missing`, `ssh-key-enrollment` and `owner-sink-unreachable` (the feed/notify
 owner-delivery lane can't reach the owner from this box, RUSH-2262); **warning**
 is `logout-unprovable`,
 `missing-resource`, `content-drift`, `never-synced`, `stale`, `repo-behind`,
@@ -184,6 +184,7 @@ testable without a shell, PowerShell, or an installed CLI):
 | Credential-shaped shell-rc exports (RUSH-1968) | `rcSecrets` | `rc-secret-export` |
 | The file-store master key live in the process env (RUSH-1968) | `masterPassphraseInEnv` | `env-secret-export` |
 | Windows exec policy blocking `agents.ps1` | `execPolicy` | `exec-policy` |
+| Windows OpenSSH key path/content/ACL invalid | `windowsSshEnrollment` | `ssh-key-enrollment` |
 | Hooks duplicated across version homes | `duplicateHooks` | `duplicate-hook{,-drift}` |
 | Declared host CLIs not on PATH | `hostClis.statuses` | `host-cli-missing` |
 | Host-CLI manifests the loader rejected | `hostClis.errors` | `host-cli-invalid` |
@@ -254,15 +255,36 @@ resource / agent-version / config-repo present on one box but missing on another
 Read-only by default — divergence detection never installs or syncs. `--json`
 carries a stable `fleet` divergence block for the VS Code extension / Agency.
 
+**Per-device harness/account readiness lives in `agents devices harnesses` /
+`agents devices accounts` (RUSH-2003).** A fourth fleet lens, distinct from the
+three diagnostics above: not "is the fleet healthy?" (`fleet status`) or "is a
+token live?" (`fleet ping`), but "what can each box actually *run* right now?" —
+per installed `agent@version`, its account, signed-in, quota, and a single `ready`
+verdict (signed in AND not rate-limited). `harnesses` is the per-install view;
+`accounts` collapses installs that share one account. The collector
+([`collectLocalHarnessInventory`](src/lib/devices/harness-inventory.ts)) reuses
+`getAccountInfo` (identity), the daemon-warmed usage cache via
+`getUsageInfoByIdentity({ readOnly })` (quota — never blocks on a per-account
+network fetch unless `--refresh`), and `deriveUsageStatusFromSnapshot` (throttle
+state); the fan-out mirrors `fleet ping` (probe self in process, SSH each peer's
+`devices harnesses --local --json` worker, same per-device + overall deadlines).
+Everything but the collector is pure and unit-tested
+([`harness-inventory.test.ts`](src/lib/devices/harness-inventory.test.ts)). Agent
+coverage is `ALL_AGENT_IDS`-driven, so a new harness is included automatically.
+
 ### 10. Session recovery is one decision on the origin device
 
 `resolveSessionRecovery` in `src/lib/session/recovery.ts` is the only place that
 chooses native resume versus `/continue`. Focus, resume, attach, and
 `run --resume` route through it. Native resume is valid only for the exact healthy
-origin version in its isolated home; a removed, signed-out, revoked, or exhausted
-origin rotates to a healthy version of the same harness and reads the indexed
-transcript with `/continue`. Never add a caller-local fallback that native-resumes
-another version home, and never let `run auto` change harnesses during recovery.
+origin version when that active isolated home still owns the indexed transcript;
+a removed, signed-out, revoked, exhausted, trashed, backup-only, or same-number
+reinstalled origin uses a healthy version of the same harness and reads the
+indexed transcript with `/continue`. Claude native resume uses the earliest
+recorded transcript cwd, which selected `projects/<cwd-key>`, not the later cwd
+stored from its first user turn. Never add a caller-local fallback that
+native-resumes another version home, and never let `run auto` change harnesses
+during recovery.
 
 ## Supported harnesses
 
@@ -361,6 +383,45 @@ that collapses, so the preview can silently vanish on a full/short terminal (the
 RUSH-2198 bug). See the [§Contracts §Sessions spec](docs/specifications.md#sessions)
 for the non-empty-preview invariant (SES-8).
 
+### Resume is machine-bound — check the owner before you start a harness
+
+**Reading and resuming follow different machines, and conflating them is the bug.**
+Reading follows the FILE — a synced mirror is on this disk, so only a live fan-out
+row (`_remote`) must be read on the peer (`transcriptOnPeerOf` in
+`sessions-picker.ts`). Resuming follows the HARNESS STATE, which is on the owning
+machine whatever the transcript's location. A mirror is therefore readable and NOT
+resumable, and that is the trap: nothing fails until the agent is asked to continue
+a conversation it has never seen, and `sessions-resume.ts`'s `fs.existsSync(cwd)`
+fallback then quietly resumed in `process.cwd()` (RUSH-2022).
+
+`sessionOwnerDevice`
+([`src/lib/session/resume-owner.ts`](src/lib/session/resume-owner.ts)) is the one
+answer to "may this resume run here?". Every path that starts a harness from a picked
+row consults it first: `agents resume` and the `agents sessions` picker hop to the
+owner, and `sessions attach` hops as an **attach** (its detach record and the
+headless process it stops are both on the owner — hopping as a bare resume would
+skip the stop and leave two processes on one transcript). The batch
+`sessions resume` mostly inherits it for free: every TAB it opens runs the
+canonical `agents resume <id>` (`lib/session/resume-command.ts`), whose docblock
+already promised source-device routing — this is what makes that true. Its
+no-tab-backend path (`inplace`, which any Linux box in a plain ssh shell lands on)
+never runs that command, so it routes explicitly via `resumeOnOwnerIfRemote`.
+`resumeSessionInPlace` is the LOCAL takeover and **fails loud** if it is handed a
+peer-owned session, since reaching it with one means a caller skipped its routing
+step.
+
+The hop uses `runOnPeer` ([`src/lib/session/remote-list.ts`](src/lib/session/remote-list.ts)),
+not the `--host` passthrough. Two reasons: the passthrough re-discovers locally and
+dead-ends for a session that exists only on the peer, and it marks the run
+`AGENTS_FLEET_REMOTE` — a one-shot command may carry that consent marker, but a
+resumed session would inherit it for its whole life and `agents browser start` inside
+it would be refused as a cross-machine drive.
+
+The signal is only as good as what wrote it: `machine` on a host-dispatched run is
+stamped by [`src/lib/hosts/session-index.ts`](src/lib/hosts/session-index.ts) from
+the dispatch host. Any new writer of an `agents run --device`-shaped row must set it,
+or the index will claim the dispatching box.
+
 ## Bundled native helpers (where the tarball's `.app`s come from)
 
 Two native helpers plus the standalone signed CLI binary ship **inside** this
@@ -455,11 +516,12 @@ of the first's, so git's rejection *is* the failed lock acquisition: no polling,
 second service.
 
 ```bash
-scripts/release-lease.sh status     # unheld | held version=… holder=… age=…min
+scripts/release-lease.sh status     # unheld | held version=… holder=… age=…min holder-alive=yes|no|unknown
 scripts/release-lease.sh claim <v>  # 0 = acquired, 1 = someone else is releasing
 scripts/release-lease.sh renew      # prove this run is still alive
 scripts/release-lease.sh verify     # 0 = still ours; fails CLOSED on any doubt
 scripts/release-lease.sh release    # drop the lease this checkout claimed
+scripts/release-lease.sh clear      # drop a lease with no live holder (any checkout)
 ```
 
 `release.sh` claims it right after the confirmation (before the first mutation)
@@ -486,6 +548,32 @@ together:
 A lease abandoned by a killed run stops being renewed, so it becomes reclaimable
 after `RELEASE_LEASE_TTL` minutes (default 30); reclaiming names the dead holder
 rather than silently overwriting it.
+
+**An externally killed run is detected, not just waited out (RUSH-2274).** The TTL
+alone made a killed release indistinguishable from a healthy long one: for up to 30
+minutes `status` read `held` while nothing was releasing. So the lease also records
+**which process** holds it — `host`, `pid`, and that pid's start time — and
+`claim`/`clear`/`status` probe it, reporting `holder-alive=yes|no|unknown`:
+
+| Probe | When | What it licenses |
+|---|---|---|
+| `dead` | we are on the holder's box and that process is gone | reclaim **immediately**, no TTL wait |
+| `alive` | the recorded pid runs here with the recorded start time | **never** taken, at any age — stop that release instead |
+| `unknown` | the holder is another box, or the lease predates these fields | the TTL, exactly as before |
+
+`release.sh` exports `RELEASE_LEASE_HOLDER_PID=$$` so the recorded pid is the
+orchestrating release, not the 10-minutely `renew` shell (whose `$$` is dead a
+second later — recording that would make every renewed lease read as abandoned).
+A lease with no recorded pid stays `unknown`, so a missing export degrades to the
+old TTL behaviour rather than to "instantly reclaimable". The start time is what
+makes `dead` safe to act on: a recycled pid would otherwise read as a live release
+forever. A **zombie** counts as dead — a SIGKILLed release whose parent never
+reaped it is still listed by `ps`, which is precisely the case this detects.
+
+`scripts/release-lease.sh clear` drops such a lease without starting a release —
+the operator's unwedge path, since `release` only drops a lease *this checkout*
+claimed. It shares one predicate with `claim`, so it can never take a live holder's
+lease either.
 
 **Finish a stuck release before cutting a new one.** `release.sh` refuses to start
 when an older `v*` tag exists that npm never received, and prints the re-run that
@@ -623,7 +711,11 @@ deadlock. **(b)** The cooldown bounds the loop but does not converge it: two
 installs that are *both* invoked regularly trade ownership every cooldown, so the
 helper restarts roughly hourly until one is removed. That is deliberate — the
 alternative is stranding one of them — and the real fix is a single install
-(#2147 covers making the multi-install banner actually name them all).
+(#2147 expanded the multi-install banner beyond `PATH` to NVM, fnm, Volta, Bun,
+common npm prefixes, and the npm `_npx` cache). The banner also checks each
+copy for `dist/lib/app-bundle-install.js`; a copy without it is labelled an
+unsafe legacy helper installer and must be removed, because current code cannot
+make an older executable use the atomic installer it predates.
 
 **Do NOT "improve" this by comparing bundle content.** It looks like the obvious
 gate and it does not work: the helper is rebuilt, re-signed and re-notarized on

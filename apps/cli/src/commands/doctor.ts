@@ -45,7 +45,8 @@ import {
 import { getCliVersion } from '../lib/version.js';
 import { resolveHost } from '../lib/hosts/registry.js';
 import { sshExecAsync } from '../lib/ssh-exec.js';
-import { sshTargetFor } from '../lib/hosts/types.js';
+import { hostIdentityArgs, sshTargetFor } from '../lib/hosts/types.js';
+import { deviceIdentityArgs } from '../lib/devices/connect.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { findAmbiguousDevicePins } from '../lib/routines.js';
 import chalk from 'chalk';
@@ -76,6 +77,7 @@ import { listCliStatus, listCliStatusAsync } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
 import { heal, healChangedAnything, type HealResult } from '../lib/heal.js';
 import { getEffectiveExecutionPolicy } from '../lib/platform/winpath.js';
+import { auditWindowsSshEnrollment, diagnoseWindowsSshFailure } from '../lib/devices/windows-ssh-enrollment.js';
 import { scanUserRcFiles, masterPassphraseInEnv } from '../lib/secrets/rc-hygiene.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import { readRepoBehindMarkers, type FetchStatusMarker } from '../lib/auto-pull.js';
@@ -187,14 +189,14 @@ interface RemoteDoctorPayload {
 }
 
 /**
- * Narrow a remote `findings` array to the secret-hygiene rows, or `[]`.
+ * Narrow a remote `findings` array to rows only that device can observe.
  *
  * Deliberately NOT "forward every remote finding". The aggregator already
  * rebuilds a remote's sign-in rows from its inventory and its divergence rows
  * from the comparator, so forwarding wholesale would double them; and pulling a
  * remote's orphan/drift rows into a fleet readout is a much larger UX change
- * than this fix. The two secret kinds are the ones that are BOTH unrecomputable
- * centrally and security-relevant, which is exactly why they were being lost.
+ * than this fix. These kinds are unrecomputable centrally: shell/process secret
+ * hygiene and the Windows host's effective OpenSSH key path/content/ACL.
  *
  * **The remote contributes exactly one thing: the KIND.** Severity, message and
  * remediation are all generated HERE. That is not defensiveness for its own
@@ -215,7 +217,7 @@ interface RemoteDoctorPayload {
  * file and line. Run `agents doctor` on that box for the specifics — the
  * message says so.
  */
-const REMOTE_FORWARDED_KINDS = ['rc-secret-export', 'env-secret-export'] as const;
+const REMOTE_FORWARDED_KINDS = ['rc-secret-export', 'env-secret-export', 'ssh-key-enrollment'] as const;
 type RemoteForwardedKind = typeof REMOTE_FORWARDED_KINDS[number];
 
 /** Canonical, locally-authored text for a forwarded kind. Never the remote's. */
@@ -224,6 +226,8 @@ const REMOTE_SECRET_MESSAGE: Record<RemoteForwardedKind, string> = {
     + ' — run `agents doctor` there for the file and line',
   'env-secret-export': 'AGENTS_SECRETS_PASSPHRASE is set in this box\'s process environment'
     + ' — run `agents doctor` there for detail',
+  'ssh-key-enrollment': 'Windows OpenSSH key enrollment is invalid'
+    + ' — run `agents doctor` on this box for the effective path or ACL failure',
 };
 
 export function asRemoteSecretFindings(raw: unknown, device: string): DoctorFinding[] {
@@ -253,6 +257,7 @@ interface FleetTarget {
   name: string;
   sshTarget: string;
   os?: string;
+  extraSshArgs?: string[];
 }
 
 async function resolveFleetTargets(opts: DoctorOptions): Promise<FleetTarget[]> {
@@ -267,11 +272,12 @@ async function resolveFleetTargets(opts: DoctorOptions): Promise<FleetTarget[]> 
         name: deviceProfile.name,
         sshTarget: deviceProfile.name,
         os: deviceProfile.platform !== 'unknown' ? deviceProfile.platform : undefined,
+        extraSshArgs: deviceIdentityArgs(deviceProfile),
       }];
     }
     const host = await resolveHost(singleName);
     if (host) {
-      return [{ name: singleName, sshTarget: sshTargetFor(host), os: host.os }];
+      return [{ name: singleName, sshTarget: sshTargetFor(host), os: host.os, extraSshArgs: hostIdentityArgs(host) }];
     }
     console.error(chalk.red(`Unknown host or device '${singleName}'.`));
     process.exit(1);
@@ -290,6 +296,7 @@ async function resolveFleetTargets(opts: DoctorOptions): Promise<FleetTarget[]> 
       name: d.name,
       sshTarget: d.name,
       os: d.platform !== 'unknown' ? d.platform : undefined,
+      extraSshArgs: deviceIdentityArgs(d),
     }));
 }
 
@@ -305,12 +312,14 @@ async function probeFleetTarget(target: FleetTarget): Promise<DeviceDoctorResult
     // prevent $HOME expansion there, so skip the bootstrap on Windows.
     isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
   );
-  const res = await sshExecAsync(target.sshTarget, remoteCmd, { timeoutMs: 30000, multiplex: true });
+  const res = await sshExecAsync(target.sshTarget, remoteCmd, { timeoutMs: 30000, multiplex: true, extraSshArgs: target.extraSshArgs });
   if (res.code !== 0) {
     return {
       name: target.name,
       online: false,
-      error: res.timedOut ? 'timed out' : (res.stderr || `exit ${res.code ?? 'unknown'}`),
+      error: isWin
+        ? diagnoseWindowsSshFailure(res.stderr, res.timedOut)
+        : res.timedOut ? 'timed out' : (res.stderr || `exit ${res.code ?? 'unknown'}`),
       agents: {},
     };
   }
@@ -359,7 +368,11 @@ async function probeFleetInventory(target: FleetTarget): Promise<RemoteDoctorPay
     isWin ? 'windows' : undefined,
     isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
   );
-  const res = await sshExecAsync(target.sshTarget, remoteCmd, { timeoutMs: FLEET_INVENTORY_TIMEOUT_MS, multiplex: true });
+  const res = await sshExecAsync(target.sshTarget, remoteCmd, {
+    timeoutMs: FLEET_INVENTORY_TIMEOUT_MS,
+    multiplex: true,
+    extraSshArgs: target.extraSshArgs,
+  });
   if (res.code !== 0) return null;
   try {
     const parsed = JSON.parse(res.stdout) as { fleet?: unknown; findings?: unknown };
@@ -536,6 +549,7 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
         execPolicy: process.platform === 'win32'
           ? { platform: process.platform, policy: getEffectiveExecutionPolicy() }
           : undefined,
+        windowsSshEnrollment: auditWindowsSshEnrollment(),
         isolatedVersions: localReports
           .filter((rep) => isVersionIsolated(rep.agent, rep.version))
           .map((rep) => `${rep.agent}@${rep.version}`),
@@ -1404,6 +1418,7 @@ interface CheckFanOutTarget extends FanOutDeviceTarget {
   platform?: string;
   /** Registry Tailscale address to dial, not the bare name — see {@link fleetDialTarget}. */
   dialTarget: string;
+  extraSshArgs?: string[];
 }
 
 async function probeDeviceCheck(target: CheckFanOutTarget): Promise<DeviceCheckResult> {
@@ -1414,7 +1429,7 @@ async function probeDeviceCheck(target: CheckFanOutTarget): Promise<DeviceCheckR
     isWin ? 'windows' : undefined,
     isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
   );
-  const res = await sshExecAsync(target.dialTarget, remoteCmd, { timeoutMs: 30000, multiplex: true });
+  const res = await sshExecAsync(target.dialTarget, remoteCmd, { timeoutMs: 30000, multiplex: true, extraSshArgs: target.extraSshArgs });
   if (res.code !== 0 && !res.stdout.trim()) {
     throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
   }
@@ -1443,6 +1458,7 @@ async function runDevicesCheck(opts: DoctorOptions, cwd: string): Promise<void> 
       platform: t.device.platform,
       skip: t.skip,
       dialTarget: fleetDialTarget(t.device),
+      extraSshArgs: deviceIdentityArgs(t.device),
     }));
   const remote = await fanOutDevices(remoteTargets, probeDeviceCheck);
   const devices: DeviceCheckResult[] = [local];

@@ -589,11 +589,16 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-39 (MUST).** Focus MUST query tmux `#{pane_dead}` immediately before
   attach. A dead or missing pane MUST NOT attach. Session recovery MUST run on
   the origin device and MUST choose native resume only for the exact healthy
-  origin version in its isolated home. An absent, signed-out, revoked, exhausted,
-  or non-native origin MUST select a healthy version of the same harness and use
-  `/continue <id>` against the indexed transcript; it MUST NOT native-resume from
-  another version home or choose another harness. With no usable version it MUST
-  fail with the device, origin version, and account-health reason
+  origin version when its active isolated home owns the indexed transcript.
+  Claude native resume MUST launch from the earliest existing absolute cwd in
+  that transcript, because it is the directory that selected
+  `projects/<cwd-key>`; the later first-turn `SessionMeta.cwd` is not sufficient.
+  An absent, signed-out, revoked, exhausted, non-native, trash-retained,
+  backup-only, or same-number reinstalled origin MUST select a healthy version
+  of the same harness and use `/continue <id>` against the indexed transcript;
+  it MUST NOT native-resume from another version home or choose another harness.
+  With no usable version it MUST fail with the device, origin version, and
+  account-health reason
   (`commands/go.ts` `probeAttachRail`; `lib/tmux/session.ts` `paneExitStatus`;
   `lib/session/recovery.ts`; `commands/exec.ts`; tests
   `lib/session/recovery.test.ts`, `commands/focus.test.ts`).
@@ -900,6 +905,13 @@ Given a detached session indexed on another device; When `agents sessions attach
 <id>` runs; Then the whole attach command executes on the indexed origin before
 it reads the detach record, stops the headless PID, or invokes recovery
 (`commands/attach.ts`; `commands/attach.test.ts`).
+
+**GWT-17 — Claude native resume uses the project-key cwd.**
+Given a healthy Claude origin home owns a transcript whose attachment envelope
+records cwd A before its first user turn records cwd B; When the session recovers;
+Then native resume launches from A. Given the transcript is retained outside the
+active origin home instead; Then the same healthy harness/version uses
+`/continue`, never native resume (`lib/session/recovery.test.ts`).
 
 ---
 

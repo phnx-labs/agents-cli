@@ -132,7 +132,7 @@ function saveCache(): void {
 }
 
 /** How the model catalog source was obtained. */
-export type ModelSourceKind = 'bundle' | 'binary' | 'js' | 'cli';
+export type ModelSourceKind = 'bundle' | 'binary' | 'cli';
 
 /** Describes the location and extraction strategy for a model catalog source. */
 export interface ModelSource {
@@ -191,49 +191,8 @@ export function locateModelSource(
     return null;
   }
 
-  if (agent === 'gemini') {
-    // <=0.41 shipped a clean ES module at @google/gemini-cli-core/dist/src/config/models.js.
-    // 0.42+ inlines the same constants into a minified chunk under @google/gemini-cli/bundle/.
-    const modelsJs = path.join(
-      versionDir,
-      'node_modules',
-      '@google',
-      'gemini-cli-core',
-      'dist',
-      'src',
-      'config',
-      'models.js'
-    );
-    if (fs.existsSync(modelsJs)) return { path: modelsJs, kind: 'js' };
-
-    const bundleDir = path.join(versionDir, 'node_modules', '@google', 'gemini-cli', 'bundle');
-    if (fs.existsSync(bundleDir)) {
-      try {
-        const entries = fs.readdirSync(bundleDir);
-        // The model constants live in a single chunk; pick the first .js file
-        // whose contents contain VALID_GEMINI_MODELS. Skip subdirectories.
-        for (const name of entries) {
-          if (!name.endsWith('.js')) continue;
-          const full = path.join(bundleDir, name);
-          let stat: fs.Stats;
-          try { stat = fs.statSync(full); } catch { continue; }
-          if (!stat.isFile()) continue;
-          // Most chunks just re-export the constants; only the defining chunk
-          // actually has `var VALID_GEMINI_MODELS = ... new Set(`. Match that
-          // shape so we pick the chunk that the extractor can parse.
-          let body: string;
-          try {
-            body = fs.readFileSync(full, 'utf-8');
-          } catch { continue; }
-          if (/var\s+VALID_GEMINI_MODELS\s*=[^\n]*new\s+Set/.test(body) &&
-              /var\s+DEFAULT_GEMINI_MODEL\s*=/.test(body)) {
-            return { path: full, kind: 'js' };
-          }
-        }
-      } catch { /* unreadable bundle dir */ }
-    }
-    return null;
-  }
+  // gemini is hard-deprecated (no launch path left to validate a model
+  // against), so its bundle is deliberately not parsed for a catalog here.
 
   if (agent === 'opencode') {
     // The `opencode` shim under node_modules/.bin dispatches to a platform-
@@ -415,6 +374,46 @@ export function dropBareLegacyIds(ids: string[]): string[] {
   });
 }
 
+/**
+ * Scan raw binary/bundle text for canonical Claude model ids, then drop bare
+ * legacy prefixes (issue #1892). Two independent guards keep non-model strings
+ * out of the catalog:
+ *
+ *  - **Word-boundary anchors on the id regex.** The id must not be glued to a
+ *    surrounding identifier character, and must not be the truncated prefix of a
+ *    longer *version* token. `(?<![A-Za-z0-9_])` rejects a glued prefix;
+ *    `(?![A-Za-z0-9])` rejects a glued alnum suffix; `(?!\.\d)` rejects a
+ *    dotted-version continuation — so the bare-major prefix of the binary's own
+ *    "Typo in model ID" troubleshooting string `claude-sonnet-4.6` is not
+ *    scraped as `claude-sonnet-4`, while a real id followed by an unrelated `.`
+ *    suffix (`claude-fable-5.md`) still matches. Dash-separated segments only:
+ *    the dotted form never appears in a genuine id.
+ *
+ *    The id body is captured inside a lookahead (`(?=(...))\1`) so the greedy
+ *    `-\d+` run matches **atomically**: without it, a suffix-glued token like
+ *    `claude-opus-4-1x` would fail the trailing anchor on the full match, then
+ *    backtrack a segment and re-emit the bare `claude-opus-4` — the exact 404-able
+ *    id this scan exists to suppress (two packed strings can end up glued with no
+ *    separator in the extracted binary text). The atomic match fails outright
+ *    instead of degrading to the bare form.
+ *  - **`dropBareLegacyIds`.** A standalone `.includes("claude-opus-4")` prefix
+ *    check is a fully delimited string the anchors cannot tell apart from a real
+ *    bare id, so a bare `claude-<family>-<major>` is dropped only when a
+ *    more-specific sibling (`claude-opus-4-8`) is also present; a genuinely bare
+ *    current id with no sibling (`claude-sonnet-5`) is kept.
+ */
+export function scanClaudeCatalogIds(text: string): string[] {
+  const idRe =
+    /(?<![A-Za-z0-9_])(?=(claude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:-\d+)*(?:-(?:fast|v\d+))?))\1(?![A-Za-z0-9])(?!\.\d)/g;
+  const scanned = new Set<string>();
+  let sm: RegExpExecArray | null;
+  while ((sm = idRe.exec(text)) !== null) {
+    scanned.add(sm[0]);
+    if (sm.index === idRe.lastIndex) idRe.lastIndex++;
+  }
+  return dropBareLegacyIds([...scanned]);
+}
+
 function extractClaudeCatalog(text: string): { models: ModelInfo[]; aliases: Record<string, string> } {
   const aliases: Record<string, string> = {};
 
@@ -482,15 +481,7 @@ function extractClaudeCatalog(text: string): { models: ModelInfo[]; aliases: Rec
   // catalog while a newer one still gets a real catalog (incl. fable/mythos and
   // the opus-5/sonnet-5 line) rather than an empty or single-model one.
   if (models.length < 2) {
-    const scanned = new Set<string>();
-    // Dash-separated segments only. Real ids are `claude-sonnet-4-6`; the dotted
-    // form `claude-sonnet-4.6` appears only inside the binary's own "Typo in
-    // model ID" troubleshooting text, so a `.`-permitting pattern would scrape a
-    // non-model string as if it were real.
-    const idRe = /claude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:-\d+)*(?:-(?:fast|v\d+))?/g;
-    let sm: RegExpExecArray | null;
-    while ((sm = idRe.exec(text)) !== null) scanned.add(sm[0]);
-    const filtered = dropBareLegacyIds([...scanned]);
+    const filtered = scanClaudeCatalogIds(text);
     if (filtered.length >= 2) models = build(filtered);
   }
 
@@ -540,89 +531,6 @@ function extractCodexCatalog(text: string): { models: ModelInfo[]; aliases: Reco
   }
 
   return { models, aliases: {} };
-}
-
-/**
- * Extract Gemini's model catalog from `@google/gemini-cli-core/.../config/models.js`.
- *
- * The module exports a set of named constants (e.g. `DEFAULT_GEMINI_MODEL`,
- * `PREVIEW_GEMINI_FLASH_MODEL`) plus a `VALID_GEMINI_MODELS` Set and a handful
- * of `GEMINI_MODEL_ALIAS_*` strings. We parse it with regex (a JS-module import
- * would pollute the runtime and ES-module interop is awkward from a CJS build).
- */
-function extractGeminiCatalog(text: string): { models: ModelInfo[]; aliases: Record<string, string> } {
-  // Old (<=0.41) layout used `export const FOO = 'bar';` in models.js.
-  // New (0.42+) bundle inlines the same constants as `var FOO = "bar";`.
-  const constRe = /(?:export\s+const|var)\s+([A-Z0-9_]+)\s*=\s*['"]([^'"]+)['"]/g;
-  const constants = new Map<string, string>();
-  let m: RegExpExecArray | null;
-  while ((m = constRe.exec(text)) !== null) {
-    constants.set(m[1], m[2]);
-  }
-
-  // The set of ids the CLI accepts as "valid model names". Names (not values)
-  // are listed inside `new Set([...])`, so we expand them via the constants map.
-  const validIds = new Set<string>();
-  const setBlock = text.match(/VALID_GEMINI_MODELS\s*=\s*(?:\/\*[^*]*\*\/\s*)?new\s+Set\(\[([\s\S]*?)\]\)/);
-  if (setBlock) {
-    const nameRe = /([A-Z0-9_]+)/g;
-    let nm: RegExpExecArray | null;
-    while ((nm = nameRe.exec(setBlock[1])) !== null) {
-      const id = constants.get(nm[1]);
-      if (id) validIds.add(id);
-    }
-  }
-  // Fall back to any gemini-shaped id we saw in the constants map -- useful
-  // when the Set shape changes across gemini versions.
-  if (validIds.size === 0) {
-    for (const [name, value] of constants) {
-      if (/^(DEFAULT_|PREVIEW_)/.test(name) && /^gemini-/.test(value)) {
-        validIds.add(value);
-      }
-    }
-  }
-
-  // Aliases are exported as `GEMINI_MODEL_ALIAS_FLASH = 'flash'` etc. The alias
-  // is the *value*; the target model is resolved at runtime by `resolveModel()`.
-  // We replicate that logic here so callers get a concrete id per alias.
-  const defaultId = constants.get('DEFAULT_GEMINI_MODEL');
-  const previewPro = constants.get('PREVIEW_GEMINI_MODEL');
-  const previewFlash = constants.get('PREVIEW_GEMINI_FLASH_MODEL');
-  const flashLite = constants.get('DEFAULT_GEMINI_FLASH_LITE_MODEL');
-
-  const aliases: Record<string, string> = {};
-  if (previewPro) {
-    aliases.auto = previewPro;
-    aliases.pro = previewPro;
-  }
-  if (previewFlash) aliases.flash = previewFlash;
-  if (flashLite) aliases['flash-lite'] = flashLite;
-
-  const aliasReverse: Record<string, string[]> = {};
-  for (const [alias, id] of Object.entries(aliases)) {
-    (aliasReverse[id] ||= []).push(alias);
-  }
-
-  const defaults = new Set<string>();
-  if (defaultId) defaults.add(defaultId);
-  if (previewPro) defaults.add(previewPro); // auto/pro alias resolves here
-
-  const displayNameFor = (id: string): string | undefined => {
-    // Gemini has a `getDisplayString` for some aliases but the canonical id
-    // is human-readable enough ("gemini-3-pro-preview") -- no separate map.
-    return undefined;
-  };
-
-  const models: ModelInfo[] = Array.from(validIds)
-    .sort()
-    .map((id) => ({
-      id,
-      displayName: displayNameFor(id),
-      alias: aliasReverse[id]?.[0],
-      isDefault: defaults.has(id),
-    }));
-
-  return { models, aliases };
 }
 
 /**
@@ -1120,13 +1028,6 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
       agent === 'claude' ? extractClaudeCatalog(text)
       : agent === 'codex' ? extractCodexCatalog(text)
       : { models: [], aliases: {} });
-  } else if (src.kind === 'js') {
-    try {
-      const text = fs.readFileSync(src.path, 'utf-8');
-      if (agent === 'gemini') ({ models, aliases } = extractGeminiCatalog(text));
-    } catch {
-      /* unreadable */
-    }
   } else if (src.kind === 'cli') {
     if (agent === 'opencode') ({ models, aliases } = extractOpenCodeCatalog(src.path));
     else if (agent === 'cursor') ({ models, aliases } = extractCursorCatalog(src.path));

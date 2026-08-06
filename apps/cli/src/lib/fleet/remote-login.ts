@@ -31,7 +31,7 @@ import type { AgentId } from '../types.js';
 import type { DeviceProfile } from '../devices/registry.js';
 import { isControlDevice } from '../devices/registry.js';
 import { loadDevices } from '../devices/registry.js';
-import { fleetDialTarget } from '../devices/connect.js';
+import { deviceIdentityArgs, fleetDialTarget } from '../devices/connect.js';
 import { planFleetTargets } from '../devices/fleet.js';
 import { assertValidSshTarget, shellQuote, sshExecAsync } from '../ssh-exec.js';
 import { machineId } from '../session/sync/config.js';
@@ -142,6 +142,7 @@ export interface PendingLogin {
   platform?: string;
   /** ssh dial target for the device. */
   target: string;
+  extraSshArgs?: string[];
   flow: LoginFlow;
   /** True when a device-code flow this command can actually drive. */
   remotable: boolean;
@@ -182,6 +183,7 @@ export function selectLoginTargets(
         agent,
         platform: device.platform,
         target: fleetDialTarget(device),
+        extraSshArgs: deviceIdentityArgs(device),
         flow,
         remotable,
         reason,
@@ -201,7 +203,7 @@ export function selectLoginTargets(
  * devices need the askpass shim env, which the PTY env allowlist strips — those
  * are a follow-up (TODO), surfaced as an error rather than silently mis-driven.
  */
-export function buildRemoteLoginSshCommand(target: string, flow: LoginFlow): string {
+export function buildRemoteLoginSshCommand(target: string, flow: LoginFlow, extraSshArgs: string[] = []): string {
   assertValidSshTarget(target);
   // The agent CLIs (kimi/droid/codex/…) are agents-cli shims that live in
   // ~/.agents/.cache/shims and are only on PATH in an interactive/login shell.
@@ -214,6 +216,7 @@ export function buildRemoteLoginSshCommand(target: string, flow: LoginFlow): str
     'ssh', '-tt',
     '-o', 'StrictHostKeyChecking=accept-new',
     '-o', 'ConnectTimeout=10',
+    ...extraSshArgs.map(shellQuote),
     shellQuote(target),
     shellQuote(remoteCmd),
   ].join(' ');
@@ -477,6 +480,7 @@ export async function driveRemoteLogin(
   flow: LoginFlow,
   driver: PtyDriver,
   opts: DriveOptions = {},
+  extraSshArgs: string[] = [],
 ): Promise<DriveResult> {
   const initialDelayMs = opts.initialDelayMs ?? 4000;
   const pollMs = opts.pollMs ?? 1000;
@@ -488,7 +492,7 @@ export async function driveRemoteLogin(
   // `ssh -tt` process it drives) leaks until the sidecar's idle reaper. On the
   // normal return paths the caller owns stop() via the returned sessionId.
   try {
-    await driver.exec(id, buildRemoteLoginSshCommand(target, flow));
+    await driver.exec(id, buildRemoteLoginSshCommand(target, flow, extraSshArgs));
     await sleep(initialDelayMs);
 
     if (flow.deviceCodeSelect) {
@@ -553,9 +557,9 @@ export async function detectPending(opts: DetectOptions = {}): Promise<PendingLo
  * bumping after the human completes the browser step. POSIX `stat` only (the
  * device-code agents are all POSIX-fleet).
  */
-export async function remoteFileMtime(target: string, homeRel: string): Promise<number> {
+export async function remoteFileMtime(target: string, homeRel: string, extraSshArgs: string[] = []): Promise<number> {
   const cmd = `stat -c %Y "$HOME/${homeRel}" 2>/dev/null || stat -f %m "$HOME/${homeRel}" 2>/dev/null || echo 0`;
-  const res = await sshExecAsync(target, cmd, { timeoutMs: 15000, multiplex: true }).catch(() => null);
+  const res = await sshExecAsync(target, cmd, { timeoutMs: 15000, multiplex: true, extraSshArgs }).catch(() => null);
   if (!res || res.code !== 0) return 0;
   const n = parseInt(res.stdout.trim(), 10);
   return Number.isFinite(n) ? n : 0;
@@ -653,10 +657,10 @@ export async function runFleetLogin(opts: RunFleetLoginOptions = {}): Promise<Lo
     const k = key(p.device, p.agent);
     const st = statuses.get(k)!;
     st.state = 'driving';
-    const baseMtime = await remoteFileMtime(p.target, p.flow.successFile).catch(() => 0);
+    const baseMtime = await remoteFileMtime(p.target, p.flow.successFile, p.extraSshArgs).catch(() => 0);
     let sessionId: string | undefined;
     try {
-      const r = await driveRemoteLogin(p.target, p.flow, driver, opts.drive);
+      const r = await driveRemoteLogin(p.target, p.flow, driver, opts.drive, p.extraSshArgs);
       sessionId = r.sessionId;
       if (r.url && r.code) {
         st.url = r.url; st.code = r.code; st.expiresAt = Date.now() + codeTtl; st.state = 'ready';
@@ -676,7 +680,7 @@ export async function runFleetLogin(opts: RunFleetLoginOptions = {}): Promise<Lo
     const codeDeadline = st.expiresAt ?? Date.now() + codeTtl;
     for (;;) {
       if (Date.now() > codeDeadline) { st.state = 'error'; st.detail = 'device code expired before authorization'; break; }
-      const mtime = await remoteFileMtime(p.target, p.flow.successFile).catch(() => 0);
+      const mtime = await remoteFileMtime(p.target, p.flow.successFile, p.extraSshArgs).catch(() => 0);
       if (mtime > baseMtime) { st.state = 'authorized'; break; }
       await sleep(3000);
     }

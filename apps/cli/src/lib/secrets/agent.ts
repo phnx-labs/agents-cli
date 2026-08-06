@@ -39,6 +39,7 @@ import type { SecretsBundle } from './bundles.js';
 import { GLOBAL_HARNESS, bundleScopeChain } from './scope.js';
 import { rehydrateSessions, pruneSessionsOnSleep } from './session-store.js';
 import { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './sync-commands.js';
+import { MAX_LEASE_MS, MIN_LEASE_MS } from './lease.js';
 
 // Re-exported so callers already reaching for agent.js keep one obvious home for
 // the scope vocabulary; the definitions live in the leaf module scope.ts because
@@ -1136,8 +1137,8 @@ export function secretsAgentDurable(): boolean {
 /** Minimum / maximum bounds for the configurable hold window. A too-small value
  * would defeat the broker (constant re-prompts); a too-large one pins secrets in
  * memory far longer than intended. */
-export const MIN_HOLD_MS = 60 * 1000;            // 1m
-export const MAX_HOLD_MS = 30 * 24 * 60 * 60 * 1000; // 30d
+export const MIN_HOLD_MS = MIN_LEASE_MS;
+export const MAX_HOLD_MS = MAX_LEASE_MS;
 
 /**
  * How long an unlocked / auto-cached bundle is held before the next read

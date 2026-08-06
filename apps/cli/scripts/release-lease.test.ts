@@ -13,7 +13,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { spawn, spawnSync } from 'child_process';
+import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -61,6 +61,45 @@ function leaseAsync(cwd: string, args: string[]) {
   });
 }
 
+/** The kernel's state letter for a pid, as `ps` reports it ('' when unlisted). */
+function procState(pid: number): string {
+  return spawnSync('ps', ['-p', String(pid), '-o', 'stat='], { encoding: 'utf-8' }).stdout.trim();
+}
+
+/** Long-lived parents of the zombies below; torn down with each temp root. */
+const zombieParents: ChildProcess[] = [];
+
+/**
+ * A real, unreaped zombie: a Python parent forks, lets its child exit, and then
+ * deliberately never calls wait(2), so the exited child stays in the process
+ * table. Bash cannot provide this fixture portably because macOS Bash reaps a
+ * completed background job while the shell is still blocked. This is exactly
+ * the shape a SIGKILLed release.sh leaves behind, and `ps -p <pid>` still lists
+ * it.
+ */
+function spawnZombie(): number {
+  const pidFile = path.join(root, `zombie-${zombieParents.length}.pid`);
+  const parent = spawn('python3', ['-c', [
+    'import os, sys, time',
+    'pid = os.fork()',
+    'if pid == 0:',
+    '    os._exit(0)',
+    'with open(sys.argv[1], "w", encoding="utf-8") as f:',
+    '    f.write(str(pid))',
+    'time.sleep(60)',
+  ].join('\n'), pidFile], { stdio: 'ignore' });
+  if (!parent.pid) throw new Error('python3 is required to create the zombie process fixture');
+  zombieParents.push(parent);
+  for (let i = 0; i < 200; i++) {
+    if (fs.existsSync(pidFile)) {
+      const pid = Number(fs.readFileSync(pidFile, 'utf-8').trim());
+      if (pid && procState(pid).startsWith('Z')) return pid;
+    }
+    spawnSync('sleep', ['0.05']);
+  }
+  throw new Error('no zombie appeared');
+}
+
 /** A clone that behaves like a distinct release box. */
 function makeBox(name: string) {
   const dir = path.join(root, name);
@@ -88,11 +127,19 @@ function plantStaleLease(
   cwd: string,
   version: string,
   ageMin: number,
-  opts: { force?: boolean } = {},
+  opts: { force?: boolean; host?: string; pid?: number; started?: string } = {},
 ) {
   const when = new Date(Date.now() - ageMin * 60_000).toISOString();
   const tree = git(cwd, 'hash-object', '-t', 'tree', '/dev/null');
-  const msg = `release lease\n\nversion: ${version}\nholder: dead-box/pid-1\nclaimed: ${when}\n`;
+  const holder = opts.host ? `${opts.host}/pid-${opts.pid ?? 1}` : 'dead-box/pid-1';
+  const fields = [`version: ${version}`, `holder: ${holder}`];
+  // Only a lease that names a probeable process gets liveness detection; the
+  // default (no host/pid) is the pre-RUSH-2274 shape, which must still work.
+  if (opts.host) fields.push(`host: ${opts.host}`);
+  if (opts.pid !== undefined) fields.push(`pid: ${opts.pid}`);
+  if (opts.started) fields.push(`started: ${opts.started}`);
+  fields.push(`claimed: ${when}`);
+  const msg = `release lease\n\n${fields.join('\n')}\n`;
   const r = spawnSync('git', ['commit-tree', tree, '-m', msg], {
     cwd,
     encoding: 'utf-8',
@@ -126,6 +173,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  for (const p of zombieParents.splice(0)) p.kill('SIGKILL');
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -353,5 +401,179 @@ describeWin('release-lease: status', () => {
     const s = lease(boxB, ['status']);
     expect(s.stdout).toContain('held');
     expect(s.stdout).toContain('version=1.20.82');
+  });
+});
+
+/**
+ * RUSH-2274: an externally killed release (SIGKILL, a severed ssh, a rebooted
+ * box) never reaches its trap, so its lease stays on origin. Before this, the
+ * only cure was the TTL: for up to 30 minutes `status` read `held` while nothing
+ * was releasing, and nothing distinguished that from a healthy long release.
+ *
+ * These tests use REAL processes — a spawned `sleep` stands in for the release
+ * run, and killing it is the external kill. Faking liveness would prove nothing,
+ * since the whole mechanism is a live `ps` probe.
+ */
+describe('release-lease: a killed holder must not wedge the pipeline', () => {
+  const victims: ChildProcess[] = [];
+
+  /** A real, live process to stand in for a running release.sh. */
+  function spawnVictim(): ChildProcess {
+    const p = spawn('sleep', ['300'], { stdio: 'ignore' });
+    victims.push(p);
+    return p;
+  }
+
+  /** Kill it the way an external SIGKILL would, and wait until it is really gone. */
+  async function killVictim(p: ChildProcess): Promise<void> {
+    const exited = new Promise<void>((resolve) => p.once('exit', () => resolve()));
+    p.kill('SIGKILL');
+    await exited;
+  }
+
+  /** The host string the script itself stamps, so tests never guess it. */
+  function thisHost(): string {
+    lease(boxA, ['claim', '0.0.0'], { RELEASE_LEASE_HOLDER_PID: String(process.pid) });
+    const host = currentHolder(boxA).split('/')[0];
+    lease(boxA, ['release']);
+    expect(host).not.toBe('');
+    return host;
+  }
+
+  /** The pid start stamp exactly as the script records it. */
+  function startStamp(pid: number): string {
+    const r = spawnSync('bash', ['-c', `ps -p ${pid} -o lstart= | tr -s '[:space:]' '_' | sed 's/^_//; s/_$//'`], {
+      encoding: 'utf-8',
+    });
+    return r.stdout.trim();
+  }
+
+  afterEach(() => {
+    for (const p of victims.splice(0)) p.kill('SIGKILL');
+  });
+
+  it('status says the holder is alive, then says it is gone once killed', async () => {
+    const victim = spawnVictim();
+    lease(boxA, ['claim', '1.20.82'], { RELEASE_LEASE_HOLDER_PID: String(victim.pid) });
+
+    expect(lease(boxA, ['status']).stdout).toContain('holder-alive=yes');
+
+    await killVictim(victim);
+
+    const dead = lease(boxA, ['status']);
+    expect(dead.stdout).toContain('holder-alive=no');
+    // Saying "held" without saying what to do is the original complaint.
+    expect(dead.stdout).toContain('clear');
+  });
+
+  it('reclaims a killed holder immediately, without waiting out the TTL', async () => {
+    const victim = spawnVictim();
+    lease(boxA, ['claim', '1.20.82'], { RELEASE_LEASE_HOLDER_PID: String(victim.pid) });
+    await killVictim(victim);
+
+    // Age 0 against a 45-minute TTL: only liveness can unblock this.
+    const again = lease(boxA, ['claim', '1.20.83', '--ttl-min', '45']);
+    expect(again.status).toBe(0);
+    expect(again.stdout).toContain('holder is gone');
+    expect(lease(boxA, ['verify']).status).toBe(0);
+  });
+
+  it('counts an unreaped zombie holder as dead, not as a live release', () => {
+    // A SIGKILLed release whose parent never reaps it stays LISTED in the
+    // process table. `ps -p` alone reads that as alive, so the lease would
+    // survive the very kill this feature exists to survive.
+    const pid = spawnZombie();
+    expect(procState(pid)).toMatch(/^Z/);
+
+    plantStaleLease(boxA, '1.20.82', 0, { host: thisHost(), pid });
+    const b = lease(boxA, ['claim', '1.20.83', '--ttl-min', '45']);
+    expect(b.status).toBe(0);
+    expect(b.stdout).toContain('holder is gone');
+  });
+
+  it('never force-steals a live holder, even long past the TTL', () => {
+    const pid = spawnVictim().pid!;
+    plantStaleLease(boxA, '1.20.82', 90, { host: thisHost(), pid, started: startStamp(pid) });
+
+    const b = lease(boxA, ['claim', '1.20.83', '--ttl-min', '45']);
+    expect(b.status).toBe(1);
+    expect(b.stderr).toContain('release already in flight');
+    expect(b.stdout).toContain('still running on this box');
+  });
+
+  it('treats a recycled pid as dead, not as a live release', () => {
+    // A reboot (or ordinary pid recycling) can hand the recorded number to an
+    // unrelated process. Without the start-time guard that reads as `alive`
+    // forever, which would wedge the pipeline harder than the TTL ever did.
+    const pid = spawnVictim().pid!;
+    plantStaleLease(boxA, '1.20.82', 0, { host: thisHost(), pid, started: 'Mon_Jan_1_00:00:00_1990' });
+
+    const b = lease(boxA, ['claim', '1.20.83', '--ttl-min', '45']);
+    expect(b.status).toBe(0);
+    expect(b.stdout).toContain('holder is gone');
+  });
+
+  it('will not probe a holder on another box — the TTL still governs there', () => {
+    // pid 1 is alive on every box, but it is not OUR pid 1. Guessing either way
+    // would be wrong, so an unprobeable holder must behave exactly as before.
+    plantStaleLease(boxA, '1.20.82', 5, { host: 'some-other-box', pid: 1 });
+    const fresh = lease(boxA, ['claim', '1.20.83', '--ttl-min', '45']);
+    expect(fresh.status).toBe(1);
+    expect(fresh.stdout).toContain('holder-alive=unknown');
+
+    plantStaleLease(boxA, '1.20.82', 90, { host: 'some-other-box', pid: 1, force: true });
+    const stale = lease(boxA, ['claim', '1.20.84', '--ttl-min', '45']);
+    expect(stale.status).toBe(0);
+    expect(stale.stdout).toContain('reclaiming a stale release lease');
+  });
+
+  it('keeps the release process as the holder across a renew', () => {
+    // The trap: `renew` runs in a fresh shell every 10 minutes. Recording THAT
+    // shell would stamp every renewed lease with an already-dead pid, so every
+    // healthy long release would read as abandoned.
+    const env = { RELEASE_LEASE_HOLDER_PID: String(spawnVictim().pid) };
+    lease(boxA, ['claim', '1.20.82'], env);
+    expect(lease(boxA, ['renew'], env).status).toBe(0);
+
+    expect(lease(boxA, ['status']).stdout).toContain('holder-alive=yes');
+    expect(lease(boxB, ['claim', '1.20.83', '--ttl-min', '45']).status).toBe(1);
+  });
+});
+
+describe('release-lease: clear', () => {
+  it('drops a lease whose holder was killed, without starting a release', async () => {
+    const p = spawn('sleep', ['300'], { stdio: 'ignore' });
+    lease(boxA, ['claim', '1.20.82'], { RELEASE_LEASE_HOLDER_PID: String(p.pid) });
+    const exited = new Promise<void>((resolve) => p.once('exit', () => resolve()));
+    p.kill('SIGKILL');
+    await exited;
+
+    // A second checkout on the holder's box never claimed anything, so `release`
+    // cannot help it — that is the gap `clear` fills for an operator unwedging
+    // the pipeline after the run that held it was killed.
+    expect(lease(boxB, ['release']).stdout).toContain('no release lease to drop');
+
+    const cleared = lease(boxB, ['clear']);
+    expect(cleared.status).toBe(0);
+    expect(cleared.stdout).toContain('no live holder');
+    expect(lease(boxB, ['status']).stdout.trim()).toBe('unheld');
+  });
+
+  it('refuses to clear a lease that may still be held', () => {
+    // No recorded holder at all: unprobeable and fresh, so clearing it could
+    // hand the pipeline to a second releaser while the first is publishing.
+    plantStaleLease(boxA, '1.20.82', 5);
+    const r = lease(boxB, ['clear', '--ttl-min', '45']);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('refusing to clear');
+    expect(lease(boxB, ['status']).stdout).toContain('version=1.20.82');
+  });
+
+  it('clears a long-stale lease and is a no-op when nothing is held', () => {
+    expect(lease(boxA, ['clear']).stdout).toContain('no release lease to clear');
+
+    plantStaleLease(boxA, '1.20.82', 90);
+    expect(lease(boxB, ['clear', '--ttl-min', '45']).status).toBe(0);
+    expect(lease(boxB, ['status']).stdout.trim()).toBe('unheld');
   });
 });

@@ -29,7 +29,7 @@ import { sshExec, SSH_OPTS, assertValidSshTarget } from './ssh-exec.js';
 import { backgroundSpawnOptions } from './platform/process.js';
 import { encodePowerShell } from './browser/drivers/ssh.js';
 import { getDevice, type DeviceProfile } from './devices/registry.js';
-import { sshTargetFor } from './devices/connect.js';
+import { deviceIdentityArgs, sshTargetFor } from './devices/connect.js';
 import { hostNameFor } from './devices/ssh-config.js';
 import { getCacheDir } from './state.js';
 import { getCliVersion } from './version.js';
@@ -48,6 +48,7 @@ export interface StartTunnelOptions {
    * of one CDP session and kills it on cleanup.
    */
   detached?: boolean;
+  extraSshArgs?: string[];
 }
 
 /** Build the ssh argv (after the `ssh` program name) for an `-L` tunnel. Pure.
@@ -60,12 +61,14 @@ export function buildTunnelArgs(
   host: string,
   localPort: number,
   remotePort: number,
+  extraSshArgs: string[] = [],
 ): string[] {
   return [
     '-L',
     `${localPort}:127.0.0.1:${remotePort}`,
     `${user}@${host}`,
     '-N',
+    ...extraSshArgs,
     ...SSH_OPTS,
   ];
 }
@@ -97,7 +100,7 @@ export function startSSHTunnel(
       reject(err as Error);
       return;
     }
-    const args = buildTunnelArgs(user, host, localPort, remotePort);
+    const args = buildTunnelArgs(user, host, localPort, remotePort, opts.extraSshArgs);
 
     const tunnel = spawn('ssh', args, {
       stdio: opts.detached ? 'ignore' : ['ignore', 'ignore', 'pipe'],
@@ -434,8 +437,8 @@ export function scpRemotePath(remotePath: string): string {
  * assert the real binary copy path keeps BatchMode and does not route bytes
  * through a PowerShell decoder.
  */
-export function buildScpArgs(target: string, remotePath: string, filePath: string): string[] {
-  return [...SSH_OPTS, filePath, `${target}:${scpRemotePath(remotePath)}`];
+export function buildScpArgs(target: string, remotePath: string, filePath: string, extraSshArgs: string[] = []): string[] {
+  return [...extraSshArgs, ...SSH_OPTS, filePath, `${target}:${scpRemotePath(remotePath)}`];
 }
 
 /**
@@ -446,10 +449,11 @@ function copyFileOverScp(
   target: string,
   remotePath: string,
   filePath: string,
+  extraSshArgs: string[] = [],
   timeoutMs = 600_000,
 ): Promise<{ code: number | null; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn('scp', buildScpArgs(target, remotePath, filePath), {
+    const child = spawn('scp', buildScpArgs(target, remotePath, filePath, extraSshArgs), {
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     let stderr = '';
@@ -479,13 +483,14 @@ function copyFileOverScp(
  */
 
 export async function setupRemoteHelper(name: string): Promise<{ target: string; taskName: string }> {
-  const { target } = await resolveRemoteDevice(name);
+  const { device, target } = await resolveRemoteDevice(name);
+  const identityArgs = deviceIdentityArgs(device);
 
   // Local build output, else the checksum-verified GitHub release asset for
   // this CLI version. Throws naming the tag it checked when neither exists.
   const exe = await ensureWinHelperExe();
 
-  const prep = sshExec(target, encodePowerShell(buildPushScript()), { timeoutMs: 60_000 });
+  const prep = sshExec(target, encodePowerShell(buildPushScript()), { timeoutMs: 60_000, extraSshArgs: identityArgs });
   if (prep.code !== 0) {
     throw new Error(`preparing helper exe path on '${name}' failed (exit ${prep.code ?? 'null'}): ${prep.stderr.trim() || prep.stdout.trim()}`);
   }
@@ -494,13 +499,13 @@ export async function setupRemoteHelper(name: string): Promise<{ target: string;
     throw new Error(`preparing helper exe path on '${name}' did not return a destination path`);
   }
 
-  const push = await copyFileOverScp(target, remotePath, exe);
+  const push = await copyFileOverScp(target, remotePath, exe, identityArgs);
   if (push.code !== 0) {
     throw new Error(`pushing helper exe to '${name}' failed (exit ${push.code ?? 'null'}): ${push.stderr.trim()}`);
   }
 
   const expectedBytes = fs.statSync(exe).size;
-  const verify = sshExec(target, encodePowerShell(buildVerifyPushScript(remotePath, expectedBytes)), { timeoutMs: 60_000 });
+  const verify = sshExec(target, encodePowerShell(buildVerifyPushScript(remotePath, expectedBytes)), { timeoutMs: 60_000, extraSshArgs: identityArgs });
   if (verify.code !== 0) {
     throw new Error(`verifying helper exe on '${name}' failed (exit ${verify.code ?? 'null'}): ${verify.stderr.trim() || verify.stdout.trim()}`);
   }
@@ -510,7 +515,7 @@ export async function setupRemoteHelper(name: string): Promise<{ target: string;
   // refuses to start without a token, so a token-less (open-to-any-local-process)
   // daemon can no longer be stood up through the CLI.
   const token = generateToken();
-  const tokWrite = sshExec(target, encodePowerShell(buildWriteTokenScript(token)), { timeoutMs: 60_000 });
+  const tokWrite = sshExec(target, encodePowerShell(buildWriteTokenScript(token)), { timeoutMs: 60_000, extraSshArgs: identityArgs });
   if (tokWrite.code !== 0) {
     throw new Error(`writing helper token on '${name}' failed (exit ${tokWrite.code ?? 'null'}): ${tokWrite.stderr.trim() || tokWrite.stdout.trim()}`);
   }
@@ -522,6 +527,7 @@ export async function setupRemoteHelper(name: string): Promise<{ target: string;
   // Register + start the LOGON task, pointing it at the token file.
   const reg = sshExec(target, encodePowerShell(buildRegisterTaskScript(REMOTE_HELPER_PORT, REMOTE_TASK_NAME, remoteTokenPath)), {
     timeoutMs: 60_000,
+    extraSshArgs: identityArgs,
   });
   if (reg.code !== 0) {
     throw new Error(`registering scheduled task on '${name}' failed (exit ${reg.code ?? 'null'}): ${reg.stderr.trim() || reg.stdout.trim()}`);
@@ -552,11 +558,14 @@ export function pickFreePort(): Promise<number> {
  * the state (and leaves the tunnel running in the background).
  */
 export async function startRemoteTunnel(name: string): Promise<RemoteTunnelState> {
-  const { target, user, host } = await resolveRemoteDevice(name);
+  const { device, target, user, host } = await resolveRemoteDevice(name);
   const remotePort = REMOTE_HELPER_PORT;
   const localPort = await pickFreePort();
 
-  const tunnel = await startSSHTunnel(user, host, localPort, remotePort, { detached: true });
+  const tunnel = await startSSHTunnel(user, host, localPort, remotePort, {
+    detached: true,
+    extraSshArgs: deviceIdentityArgs(device),
+  });
   const tunnelPid = tunnel.pid ?? 0;
 
   // Verify the daemon answers through the tunnel before we record it. This is
@@ -628,8 +637,11 @@ export async function stopRemoteHelper(name: string): Promise<{ tunnelKilled: bo
 
   let taskRemoved = false;
   try {
-    const { target } = await resolveRemoteDevice(name);
-    const res = sshExec(target, encodePowerShell(buildUnregisterTaskScript(REMOTE_TASK_NAME)), { timeoutMs: 60_000 });
+    const { device, target } = await resolveRemoteDevice(name);
+    const res = sshExec(target, encodePowerShell(buildUnregisterTaskScript(REMOTE_TASK_NAME)), {
+      timeoutMs: 60_000,
+      extraSshArgs: deviceIdentityArgs(device),
+    });
     taskRemoved = res.code === 0;
   } catch {
     /* device gone / offline — local teardown still succeeds */

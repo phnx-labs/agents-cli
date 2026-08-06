@@ -25,6 +25,7 @@ import { dispatchAgentsCommand, withActorEnv } from './dispatch.js';
 import {
   stripRoutingFlags,
   buildRemoteAgentsInvocation,
+  stripClixml,
   HOST_ROUTING_SPECS,
   type StripSpec,
 } from './remote-cmd.js';
@@ -56,8 +57,16 @@ interface RemoteSpec {
  * (`repo`/`repos`, `exec`/`run`) so either argv form routes the same way.
  *
  * Prefer adding here over per-command SSH code — this is the single choke point.
+ *
+ * Every key MUST be a real top-level command (a `KNOWN_TOP_LEVEL_COMMANDS`
+ * member) — `passthrough.test.ts` asserts it. A key that is not one is dead:
+ * the gate in {@link maybeRunOnHost} rejects the name as unknown before this
+ * table is consulted, and before that gate existed it SSH'd a command the peer
+ * would also reject. `cli`/`packages`/`versions`/`daemon` were exactly that
+ * (the commands are `clis`, `registry`/`search`/`install`/`publish`,
+ * `add`/`use`/`list`, and none) and were removed.
  */
-const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
+export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   // status / inspect
   view: {},
   inspect: {},
@@ -85,10 +94,8 @@ const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   permissions: {},
   perms: {},
   mcp: {},
-  cli: {},
   subagents: {},
   workflows: {},
-  packages: {},
   models: {},
   profiles: {},
   defaults: {},
@@ -109,13 +116,11 @@ const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   lock: {},
   feedback: {},
   wallet: {},
-  daemon: {},
   pty: {},
   tmux: {},
   watchdog: {},
   factory: {},
   browser: {},
-  versions: {},
 };
 
 /**
@@ -123,7 +128,7 @@ const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
  * fall through to local commander even when the flag is present. Do not add
  * these to {@link REMOTE_PASSTHROUGH}.
  */
-const OWN_HOST_COMMANDS = new Set([
+export const OWN_HOST_COMMANDS = new Set([
   'run',
   'exec', // deprecated alias of run
   'harness', // `--host <agent>` names the host CLI to run under, not a remote device
@@ -231,7 +236,9 @@ function buildFleetForwardedArgs(allArgs: string[]): string[] {
 /** Parse stdout as JSON; on failure return an object describing the error. */
 function safeJsonParse(stdout: string): unknown {
   try {
-    return JSON.parse(stdout);
+    // A Windows device relays its `--json` through PowerShell, which can prefix a
+    // CLIXML banner ahead of the payload — strip it before parsing (RUSH-2286).
+    return JSON.parse(stripClixml(stdout));
   } catch {
     return { parseError: 'invalid JSON', snippet: stdout.trim().slice(0, 200) };
   }

@@ -1,8 +1,8 @@
 /**
- * Device affinity for `--device auto` / `--host auto`.
+ * Device placement for `--device auto` / `--host auto`.
  *
- * Picks a host from 14d session usage (launches by machine), weighted sample
- * among online devices. Most-used has highest probability — not a hard lock.
+ * Explicit auto placement probes live fleet health and harness readiness.
+ * Historical affinity remains for generic host resolution callers.
  * Account selection is separate (`--strategy balanced` / rotate.ts).
  */
 
@@ -10,6 +10,9 @@ import { queryAffinityRollup, type AffinityRow } from './session/db.js';
 import { localMachineId } from './session/origin-machine.js';
 import { loadDevicesSync } from './devices/registry.js';
 import { normalizeHost } from './machine-id.js';
+import { probePoolSignals } from './teams/placement-probe.js';
+import { pickBestDevice, type DevicePlacementSignal } from './teams/scheduler.js';
+import type { AgentType } from './teams/agents.js';
 
 /** Peakiness of usage weights; >1 amplifies the most-used option. */
 export const DEFAULT_AFFINITY_ALPHA = 1.3;
@@ -94,6 +97,54 @@ export interface DeviceAffinityPlan {
   host: string | null;
   deviceCandidates: WeightedCandidate[];
   pickedDeviceKey: string | null;
+}
+
+/** Live placement plan used by the explicit `--device auto` surface. */
+export interface DeviceAutoPlan {
+  /** null means the local machine won the comparison. */
+  host: string | null;
+  candidates: Array<{ key: string; loadPercent?: number; installed?: boolean; signedIn?: boolean }>;
+  pickedDeviceKey: string;
+}
+
+/**
+ * Pick the least-loaded healthy device that can run `agent` when the harness is
+ * known. `run auto` omits the agent and ranks the same live health/load signals
+ * without an installed-harness filter. The local machine participates in the
+ * same probe; a fully unusable fleet degrades to local instead of stranding a run.
+ */
+export async function resolveDeviceAuto(
+  agent?: string,
+  opts: {
+    eligibleHosts?: string[];
+    localMachine?: string;
+    probe?: (pool: string[], agent?: AgentType) => Promise<Map<string, DevicePlacementSignal>>;
+  } = {},
+): Promise<DeviceAutoPlan> {
+  const local = normalizeHost(opts.localMachine ?? localMachineId());
+  const pool = [...new Set((opts.eligibleHosts ?? listOnlineDeviceNames(local)).map(normalizeHost))];
+  if (!pool.includes(local)) pool.push(local);
+
+  try {
+    const signals = await (opts.probe ?? probePoolSignals)(pool, agent as AgentType | undefined);
+    const picked = pickBestDevice(pool, [], { signals, agentLabel: agent });
+    return {
+      host: picked === local ? null : picked,
+      pickedDeviceKey: picked,
+      candidates: pool.map((key) => ({
+        key,
+        loadPercent: signals.get(key)?.loadPercent,
+        installed: signals.get(key)?.installed,
+        signedIn: signals.get(key)?.signedIn,
+      })),
+    };
+  } catch {
+    return {
+      host: null,
+      pickedDeviceKey: local,
+      candidates: [{ key: local }],
+    };
+  }
 }
 
 /**
@@ -189,13 +240,14 @@ export type DeviceAutoApplyResult = {
  * Mutates `options` in place. On affinity failure, clears auto slots (local) and
  * returns `skipped` — never throws; callers must not hard-exit.
  */
-export function applyDeviceAutoToOptions(
+export async function applyDeviceAutoToOptions(
   options: DeviceAutoHostOptions,
   deps: {
-    resolve?: () => DeviceAffinityPlan;
+    resolve?: () => DeviceAutoPlan | Promise<DeviceAutoPlan>;
+    agent?: string;
     accountPickerRequested?: boolean;
   } = {},
-): DeviceAutoApplyResult {
+): Promise<DeviceAutoApplyResult> {
   let deprecationSmart = false;
 
   if (options.smart) {
@@ -212,7 +264,9 @@ export function applyDeviceAutoToOptions(
   }
 
   try {
-    const plan = (deps.resolve ?? (() => resolveDeviceAffinity({})))();
+    const resolve: () => DeviceAutoPlan | Promise<DeviceAutoPlan> =
+      deps.resolve ?? (() => resolveDeviceAuto(deps.agent));
+    const plan = await resolve();
     const concrete = plan.host; // null = local
     for (const k of HOST_SLOTS) {
       if (isDeviceAuto(options[k])) {
@@ -224,9 +278,9 @@ export function applyDeviceAutoToOptions(
       options.balanced = true;
     }
     const hostLabel = concrete ?? 'local';
-    const deviceHint = plan.deviceCandidates
+    const deviceHint = plan.candidates
       .slice(0, 4)
-      .map((c) => `${c.key}:${c.launches}`)
+      .map((c) => `${c.key}:${c.loadPercent === undefined ? '?' : `${Math.round(c.loadPercent)}%`}`)
       .join(', ');
     const acctNote = accountPickerRequested ? 'accounts=picker' : 'accounts=balanced';
     return {

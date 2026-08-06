@@ -39,16 +39,24 @@ import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { inferSessionState } from '../lib/session/state.js';
 import { discoverSessions, queryIndexedSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, scopeToManaged, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { findSessionsById, querySessions, getSessionById } from '../lib/session/db.js';
-import { filterTeamSessions, safeTeamText } from '../lib/session/team-filter.js';
+import {
+  filterTeamSessions,
+  safeTeamText,
+  groupSessionsByTeam,
+  NO_TEAM_GROUP_KEY,
+  type TeamSessionGroup,
+} from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
 import { formatRelativeTime, formatCompactAge, sessionAgeParts, type SessionAgeParts } from '../lib/session/relative-time.js';
 import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkPath, linkUrl, shortenModel, type FilterOptions } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
+import { sessionOwnerDevice, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';
 import { getShimsDir } from '../lib/state.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
+import { itemPicker } from '../lib/picker.js';
 import { resolveSessionAlias } from '../lib/session/actor-sidecar.js';
 import { resolveVersionAliasLoose } from '../lib/versions.js';
 import { getAgentsInvocation } from '../lib/daemon.js';
@@ -108,7 +116,7 @@ interface SessionFilterOptions {
   all?: boolean;
   teams?: boolean;
   inTeam?: string;
-  routine?: boolean;
+  routine?: boolean | string;
   since?: string;
   until?: string;
 }
@@ -1626,6 +1634,115 @@ export function hasNoBrowserDisqualifyingFlags(
   );
 }
 
+/** Resolve a typed routine selector by exact name, substring, or one unambiguous typo. */
+export function resolveRoutineName(query: string, names: readonly string[]): string | null {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return null;
+  const exact = names.find((name) => name.toLowerCase() === normalized);
+  if (exact) return exact;
+  const containing = names.filter((name) => name.toLowerCase().includes(normalized));
+  if (containing.length === 1) return containing[0];
+  return fuzzyMatch(query, names, FUZZY_PRESETS.dynamic);
+}
+
+export interface RoutineRunGroup {
+  runId: string;
+  timestamp: string;
+  sessions: SessionMeta[];
+}
+
+export interface RoutineChoice {
+  name: string;
+  lastRunAt: string;
+  runCount: number;
+  latestRunSessionCount: number;
+}
+
+export function buildRoutineRunGroups(sessions: SessionMeta[]): RoutineRunGroup[] {
+  const byRun = new Map<string, SessionMeta[]>();
+  for (const session of sessions) {
+    const runId = session.routineRunId ?? session.timestamp;
+    (byRun.get(runId) ?? byRun.set(runId, []).get(runId)!).push(session);
+  }
+  return [...byRun.entries()]
+    .map(([runId, rows]) => ({
+      runId,
+      timestamp: rows.reduce(
+        (latest, row) => (row.lastActivity ?? row.timestamp) > latest ? (row.lastActivity ?? row.timestamp) : latest,
+        rows[0].lastActivity ?? rows[0].timestamp,
+      ),
+      sessions: rows.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)),
+    }))
+    .sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : a.runId.localeCompare(b.runId)));
+}
+
+export function buildRoutineChoices(sessions: SessionMeta[]): RoutineChoice[] {
+  const byName = new Map<string, SessionMeta[]>();
+  for (const session of sessions) {
+    if (!session.routineName) continue;
+    (byName.get(session.routineName) ?? byName.set(session.routineName, []).get(session.routineName)!).push(session);
+  }
+  return [...byName.entries()]
+    .map(([name, rows]) => {
+      const runs = buildRoutineRunGroups(rows);
+      return {
+        name,
+        lastRunAt: runs[0].timestamp,
+        runCount: runs.length,
+        latestRunSessionCount: runs[0].sessions.length,
+      };
+    })
+    .sort((a, b) => (a.lastRunAt < b.lastRunAt ? 1 : a.lastRunAt > b.lastRunAt ? -1 : a.name.localeCompare(b.name)));
+}
+
+async function selectRoutineName(sessions: SessionMeta[]): Promise<string | null> {
+  const choices = buildRoutineChoices(sessions);
+  const picked = await itemPicker<RoutineChoice>({
+    message: 'Select a routine:',
+    items: choices,
+    filter: (query) => {
+      const normalized = query.trim().toLowerCase();
+      if (!normalized) return choices;
+      return choices.filter((choice) => choice.name.toLowerCase().includes(normalized));
+    },
+    labelFor: (choice) => {
+      const runs = `${choice.runCount} run${choice.runCount === 1 ? '' : 's'}`;
+      const sessions = `${choice.latestRunSessionCount} session${choice.latestRunSessionCount === 1 ? '' : 's'} in latest`;
+      return `${choice.name}  ${chalk.gray(`${runs} · ${sessions} · ${formatRelativeTime(choice.lastRunAt)}`)}`;
+    },
+    shortIdFor: (choice) => choice.name,
+    emptyMessage: 'No routines match.',
+    enterHint: 'show sessions',
+  });
+  return picked?.item.name ?? null;
+}
+
+export async function filterSessionsByRoutine(
+  sessions: SessionMeta[],
+  routine: boolean | string,
+  interactive: boolean,
+): Promise<SessionMeta[] | null> {
+  const routineNames = [...new Set(
+    sessions.map((session) => session.routineName).filter((name): name is string => !!name),
+  )].sort((a, b) => a.localeCompare(b));
+  let selectedRoutine: string | null = null;
+  if (typeof routine === 'string') {
+    selectedRoutine = resolveRoutineName(routine, routineNames);
+    if (!selectedRoutine) {
+      console.error(chalk.red(`No routine matches "${routine}".`));
+      if (routineNames.length > 0) console.error(chalk.gray(`Available routines: ${routineNames.join(', ')}`));
+      process.exitCode = 1;
+      return null;
+    }
+  } else if (interactive) {
+    selectedRoutine = await selectRoutineName(sessions);
+    if (!selectedRoutine) return null;
+  }
+  return selectedRoutine
+    ? sessions.filter((session) => session.routineName === selectedRoutine)
+    : sessions;
+}
+
 /** The canonical `ag sessions …` command for a set of flags — the twin of the
  * browser's `y` hotkey (see --print-cmd). Normalizes to the stable flag form. */
 function canonicalSessionsCommand(query: string | undefined, options: SessionsOptions): string {
@@ -1641,7 +1758,10 @@ function canonicalSessionsCommand(query: string | undefined, options: SessionsOp
   if (options.unknown) a.push('--unknown');
   if (options.teams) a.push('--teams');
   if (options.inTeam) a.push('--in-team', options.inTeam);
-  if (options.routine) a.push('--routine');
+  if (options.routine) {
+    a.push('--routine');
+    if (typeof options.routine === 'string') a.push(options.routine);
+  }
   if (options.agent) a.push('-a', options.agent);
   for (const h of options.host ?? []) a.push('--device', h);
   if (options.project) a.push('--project', options.project);
@@ -2120,7 +2240,13 @@ async function sessionsAction(
   // filter the browser can't represent), or --no-interactive keep the existing
   // printed/render paths (agents and scripts unaffected). An explicit --since seeds
   // the browser's window so the flag is honored, not swallowed.
-  if (isBareBrowserListing(options, query)) {
+  //
+  // `--teams` diverts to the printed team-grouped report (printTeamsView, below):
+  // grouping teammates under their team is a shape the flat fuzzy picker cannot
+  // represent, so like --tree it is a printed listing, not an interactive pick.
+  // --teams --flat/--tree keep their inline table rendering; a search query keeps
+  // the picker so `<term> --teams` still searches.
+  if (isBareBrowserListing(options, query) && !options.teams) {
     const { runSessionBrowser, bareBrowserSeed } = await import('./sessions-browser.js');
     await runSessionBrowser(
       bareBrowserSeed({
@@ -2174,14 +2300,19 @@ async function sessionsAction(
 
   // Artifact-list or artifact-read paths: widen scope and resolve session globally.
   if ((options.artifacts || options.artifact !== undefined) && searchQuery) {
-    await renderArtifactsGlobal(searchQuery, options.artifacts ?? false, options.artifact, { agent: options.agent, project: options.project });
+    await renderArtifactsGlobal(
+      searchQuery,
+      options.artifacts ?? false,
+      options.artifact,
+      artifactLookupScope(options.agent, options.project, options.routine),
+    );
     return;
   }
 
   // When the user explicitly asks to render (via mode flag), resolve the
   // query globally so sessions outside the default cwd/30d window are found.
   if (wantsRender && searchQuery) {
-    await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, filter: filterOpts, redact: options.redact, local: options.local, hosts: options.host });
+    await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, routine: options.routine, filter: filterOpts, redact: options.redact, local: options.local, hosts: options.host });
     return;
   }
 
@@ -2392,6 +2523,14 @@ async function sessionsAction(
       ? 0
       : countSessionsInScope({ ...scope, onlyTeamOrigin: true });
 
+    // A typed routine scope must apply before smart ID routing. Otherwise an ID
+    // from another routine resolves and renders before the routine filter below.
+    if (typeof options.routine === 'string') {
+      const filteredByRoutine = await filterSessionsByRoutine(sessions, options.routine, false);
+      if (!filteredByRoutine) return;
+      sessions = filteredByRoutine;
+    }
+
     // Smart ID routing: a bare query that resolves to one session renders
     // directly. If nothing matches in the scoped window and the query looks
     // like a session ID, widen to global scope (incl. Claude /resume history).
@@ -2409,12 +2548,17 @@ async function sessionsAction(
         return;
       }
       if (idMatches.length === 0 && looksLikeSessionId(searchQuery)) {
-        await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, filter: filterOpts, redact: options.redact, local: options.local, hosts: options.host });
+        await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, routine: options.routine, filter: filterOpts, redact: options.redact, local: options.local, hosts: options.host });
         return;
       }
     }
 
     if (options.json) {
+      if (options.routine === true) {
+        const filteredByRoutine = await filterSessionsByRoutine(sessions, options.routine, false);
+        if (!filteredByRoutine) return;
+        sessions = filteredByRoutine;
+      }
       // An id-shaped query resolves by id ONLY — the same rule the render path
       // uses (resolveSessionQuery). Without this a `--json <uuid>` (as issued by
       // the fleet locate sweep, which runs `sessions <uuid> --json --local` on
@@ -2456,6 +2600,12 @@ async function sessionsAction(
       }
     }
 
+    if (options.routine) {
+      const filteredByRoutine = await filterSessionsByRoutine(sessions, options.routine, isInteractive);
+      if (!filteredByRoutine) return;
+      sessions = filteredByRoutine;
+    }
+
     if (sessions.length === 0) {
       if (pathFilter) {
         console.log(chalk.gray(`No sessions found for ${pathFilter}.`));
@@ -2471,11 +2621,25 @@ async function sessionsAction(
       return;
     }
 
+    // `--teams` prints the team-grouped report: teammates under their team (with
+    // spawner + spawn time), bare SDK spawns in their own bucket. --flat/--tree
+    // keep their inline table rendering; a search query keeps the picker. Placed
+    // before the project overview and picker so it wins the bare `--teams` case.
+    if (options.teams && !options.flat && !options.tree && !searchQuery && !pathFilter) {
+      const liveIndex = await maybeLiveIndex(options);
+      printTeamsView(sessions, liveIndex, hiddenUnmanaged);
+      return;
+    }
+
     // The grouped project overview is the bare interactive default: a scannable
     // dashboard of the whole fleet grouped by project, newest-active first.
     // Interact/resume via `agents sessions <project>` or `agents sessions resume`.
     if (wantsOverview) {
       const liveIndex = await maybeLiveIndex(options);
+      if (options.routine) {
+        printRoutineRunOverview(sessions, liveIndex, { hiddenCount, hiddenUnmanaged });
+        return;
+      }
       // Per-project row cap is fixed (--limit carries a default of 50 and drives
       // the fetch pool, not the display); `--all` expands every group instead.
       printSessionOverview(sessions, hiddenCount, liveIndex, { perProjectCap: OVERVIEW_ROWS_PER_PROJECT, expand: !!options.all, hiddenUnmanaged });
@@ -2834,6 +2998,28 @@ function printSessionOverview(
   if (opts.hiddenUnmanaged) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
 }
 
+export function printRoutineRunOverview(
+  sessions: SessionMeta[],
+  liveIndex: Map<string, ActiveSession> | undefined,
+  opts: { hiddenCount?: number; hiddenUnmanaged?: number } = {},
+): void {
+  const groups = buildRoutineRunGroups(sessions);
+  console.log(chalk.gray(`${sessions.length} session${sessions.length === 1 ? '' : 's'} · ${groups.length} routine run${groups.length === 1 ? '' : 's'} · newest run first\n`));
+  let first = true;
+  for (const group of groups) {
+    if (!first) console.log();
+    first = false;
+    console.log(
+      `${chalk.cyan('▸')} ${chalk.cyan.bold(group.runId)}  ` +
+      `${chalk.gray(`${group.sessions.length} session${group.sessions.length === 1 ? '' : 's'} · ${formatRelativeTime(group.timestamp)}`)}`,
+    );
+    for (const session of group.sessions) console.log(treeSessionRow(session, liveIndex?.get(session.id)));
+  }
+  console.log(chalk.gray('\nGrouped by routine run id and timestamp.'));
+  if (opts.hiddenCount) console.log(chalk.gray(formatTeamHiddenFooter(opts.hiddenCount)));
+  if (opts.hiddenUnmanaged) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
+}
+
 function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = false, liveIndex?: Map<string, ActiveSession>): void {
   if (tree) {
     // Group by directory; drop the id/version columns from view. The short id
@@ -2878,6 +3064,129 @@ function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = fals
   if (hiddenCount > 0) {
     console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
   }
+}
+
+/** Width of the mode cell (plan/edit/auto/skip) in a team-member row. */
+const TEAM_MODE_W = 5;
+/** Longest teammate handle folded into a team-member row before it truncates. */
+const TEAM_HANDLE_W = 16;
+
+/**
+ * One row under a team group: `shortId · agent · mode · handle · doing · time`.
+ * Unlike {@link flatSessionRow}/{@link treeSessionRow} it drops the
+ * `[team/handle]` topic prefix — the group header already names the team — and
+ * promotes the teammate's mode and handle to their own cells, the richer
+ * identity the `--teams` view exists to show (RUSH-1997).
+ */
+function teamMemberRow(session: SessionMeta, live?: ActiveSession): string {
+  const agentColor = colorAgent(session.agent);
+  const origin = session.teamOrigin;
+  const age = sessionAgeParts(session.timestamp, session.lastActivity);
+  const handle = safeTeamText(origin?.handle) ?? session.shortId;
+  const mode = safeTeamText(origin?.mode) ?? '';
+  const { glyph, preview } = liveGlyphAndPreview(live);
+  // Match flatSessionRow: a live preview already folds ActiveSession.todos; a
+  // resting row surfaces SessionMeta.todos when the scan attached it.
+  const restingTodo = !live ? formatTodoCompact(session.todos) : '';
+  const doing = [restingTodo, preview || session.topic || ''].filter(Boolean).join(' · ');
+  const shownHandle = truncateToWidth(handle, TEAM_HANDLE_W);
+  const head = doing ? `${shownHandle} · ${doing}` : shownHandle;
+  const badges = signalBadges(metaSignals(session));
+  const badgeW = badges ? stringWidth(badges) + 1 : 0;
+  const { cell: statusCell, width: statusW } = liveStatusCell(live);
+  const glyphW = glyph ? 2 : 0;
+  const baseTopicW =
+    terminalWidth() - (2 + 9 + 8 + (TEAM_MODE_W + 1)) - glyphW - statusW - badgeW - stringWidth(age.last) - 1;
+  const when = timeCell(age, baseTopicW);
+  const topicW = Math.max(12, baseTopicW - when.extraW);
+  return (
+    '  ' +
+    chalk.dim(padToWidth(session.shortId, 9)) +
+    agentColor(padToWidth(truncateToWidth(session.agent, 7), 8)) +
+    chalk.yellow(padToWidth(truncateToWidth(mode || '-', TEAM_MODE_W), TEAM_MODE_W + 1)) +
+    (badges ? badges + ' ' : '') +
+    (glyph ? glyph + ' ' : '') +
+    statusCell +
+    padToWidth(chalk.white(truncateToWidth(head, topicW)), topicW) +
+    ' ' +
+    when.text
+  );
+}
+
+/** The header line for one team group (or the residual no-team bucket). */
+function teamGroupHeader(g: TeamSessionGroup, glyph: string, labelById: Map<string, string>): string {
+  const count = chalk.gray(`(${g.sessions.length})`);
+  if (g.kind === 'noTeam') {
+    // These carry the isTeamOrigin flag but no teammate meta.json — a Task
+    // sub-agent's transcript is never indexed, so in practice this bucket is
+    // headless `agents run` spawns or teammates whose meta aged out. Named
+    // honestly rather than claimed as real teammates.
+    return (
+      chalk.magenta('▸') + ' ' + chalk.magenta.bold(NO_TEAM_GROUP_KEY) + '  ' + count +
+      '  ' + chalk.gray('team-flagged spawns with no team record (`agents run`, or aged-out teammates)')
+    );
+  }
+  const bits = [chalk.cyan('▸') + ' ' + chalk.cyan.bold(g.key), count];
+  if (glyph) bits.push(glyph);
+  if (g.spawnerSessionId) {
+    const who = labelById.get(g.spawnerSessionId) ?? g.spawnerSessionId.slice(0, 8);
+    bits.push(chalk.gray(`by ${who}`));
+  }
+  bits.push(chalk.gray(`spawned ${formatRelativeTime(g.firstSpawnTs)}`));
+  return bits.join('  ');
+}
+
+/**
+ * The `agents sessions --teams` view: team-origin sessions grouped by team, the
+ * richer display RUSH-1997 asks for. Each named team names its spawner (the
+ * orchestrator session that created it) and spawn time, with its teammates'
+ * mode + handle under it; team-flagged spawns that carry no teammate record fall
+ * into a trailing no-team bucket, so a real teammate and a bare spawn are never
+ * conflated. A printed report like `--tree`, not an interactive pick.
+ */
+function printTeamsView(
+  pool: SessionMeta[],
+  liveIndex: Map<string, ActiveSession> | undefined,
+  hiddenUnmanaged = 0,
+): void {
+  const groups = groupSessionsByTeam(pool);
+  if (groups.length === 0) {
+    console.log(chalk.gray('No team sessions found.'));
+    console.log(chalk.gray('Team sessions are spawned by `agents teams` — see `agents teams status`.'));
+    return;
+  }
+
+  // Resolve a spawner session id to its human label from the pool. The
+  // orchestrator may or may not be in view; fall back to the short id, the same
+  // degradation the --active teams rows use (active.ts resolveOrchestratorLabels).
+  const labelById = new Map<string, string>();
+  for (const s of pool) {
+    const label = (s as any).label || s.topic;
+    if (label) labelById.set(s.id, cleanPreview(label));
+  }
+
+  const total = groups.reduce((n, g) => n + g.sessions.length, 0);
+  const teamCount = groups.filter((g) => g.kind === 'team').length;
+  const noTeam = groups.find((g) => g.kind === 'noTeam');
+  const parts = [
+    `${total} team session${total === 1 ? '' : 's'}`,
+    `${teamCount} team${teamCount === 1 ? '' : 's'}`,
+  ];
+  if (noTeam) parts.push(`${noTeam.sessions.length} without a team record`);
+  console.log(chalk.gray(parts.join(' · ') + '\n'));
+
+  let first = true;
+  for (const g of groups) {
+    if (!first) console.log();
+    first = false;
+    const { glyph } = liveGlyphAndPreview(liveIndex?.get(g.sessions[0].id));
+    console.log(teamGroupHeader(g, glyph, labelById));
+    for (const s of g.sessions) console.log(teamMemberRow(s, liveIndex?.get(s.id)));
+  }
+
+  console.log();
+  console.log(chalk.gray('newest-active team first · resume any row with `agents sessions resume <id>`'));
+  if (hiddenUnmanaged > 0) console.log(chalk.gray(formatUnmanagedHiddenFooter(hiddenUnmanaged)));
 }
 
 function buildFilterOptions(options: SessionsOptions): FilterOptions {
@@ -3348,16 +3657,6 @@ export async function pickSessionInteractive(
   }
 }
 
-/**
- * The machine a picked session lives on when its transcript is on that peer's
- * disk (folded in over the live fan-out), else undefined. Keys off `_remote`,
- * NOT `machine !== local`: a synced mirror is machine-tagged too, but its file
- * is a local mirror path, so it must be read/resumed locally like any other.
- */
-function remoteMachineOf(session: SessionMeta): string | undefined {
-  return session._remote ? session.machine : undefined;
-}
-
 /** True when the peer wasn't a dialable device; prints one clear line so a
  * remote pick never dead-ends silently. */
 function warnNoPeerTarget(machine: string, session: SessionMeta): void {
@@ -3386,27 +3685,47 @@ export async function handlePickedSession(picked: PickedSession): Promise<void> 
     console.log(chalk.gray(`Watch for it with: agents sessions --active${picked.session.machine ? ` --host ${picked.session.machine}` : ''}`));
     return;
   }
-  // A session on another machine is read/resumed ON that machine over SSH — its
-  // transcript and agent binary live there. Both actions execute on the peer
-  // (not a local `--host` hop, which would discover locally and dead-end for a
-  // session that exists only on the peer).
-  const remote = remoteMachineOf(picked.session);
-  if (remote) {
-    if (picked.action === 'view') {
-      const rc = await runOnPeer(['sessions', picked.session.shortId, '--markdown'], remote);
-      if (rc === 'no-target') warnNoPeerTarget(remote, picked.session);
-    } else {
-      console.log(chalk.gray(`Resuming ${picked.session.shortId} on ${remote} over SSH...`));
-      const rc = await runOnPeer(['sessions', 'resume', picked.session.shortId], remote, { tty: true });
-      if (rc === 'no-target') warnNoPeerTarget(remote, picked.session);
-    }
-    return;
-  }
+  // Reading and resuming are on DIFFERENT machines' terms, and conflating them
+  // is what RUSH-2022 was. Reading follows the FILE: a synced mirror sits on
+  // this disk, so only a live fan-out row (`_remote`) has to be read on the
+  // peer. Resuming follows the HARNESS STATE, which is on the owning machine
+  // whatever the transcript's location — a mirror included.
   if (picked.action === 'view') {
+    const readFrom = picked.session._remote ? picked.session.machine : undefined;
+    if (readFrom) {
+      const rc = await runOnPeer(['sessions', picked.session.shortId, '--markdown'], readFrom);
+      if (rc === 'no-target') warnNoPeerTarget(readFrom, picked.session);
+      return;
+    }
     await renderSession(picked.session, 'summary', {});
     return;
   }
+
+  if (await resumeOnOwnerIfRemote(picked.session)) return;
   await resumeSessionInPlace(picked.session);
+}
+
+/**
+ * Resume `session` on the machine that owns it, when that is not this one.
+ * Returns true when it handled the resume (hopped, or reported an unreachable
+ * owner), false when the session is local and the caller should take over here.
+ *
+ * The one hop for a foreground, one-session-at-a-time resume — shared by the
+ * `agents sessions` picker and by `sessions resume`'s no-tab-backend path, which
+ * would otherwise reach `resumeSessionInPlace` and be refused (RUSH-2022).
+ */
+export async function resumeOnOwnerIfRemote(session: SessionMeta): Promise<boolean> {
+  const owner = sessionOwnerDevice(session);
+  if (!owner) return false;
+  console.log(chalk.gray(`Resuming ${session.shortId} on ${owner} over SSH...`));
+  // `agents resume <id>` is the strict single-session path — one pick, one
+  // resume. (`sessions resume <shortId>` would re-open a picker over there.)
+  const rc = await runOnPeer(['resume', session.id], owner, {
+    tty: true,
+    env: { [RESUME_PINNED_ENV]: '1' },
+  });
+  if (rc === 'no-target') warnNoPeerTarget(owner, session);
+  return true;
 }
 
 /**
@@ -3417,6 +3736,21 @@ export async function handlePickedSession(picked: PickedSession): Promise<void> 
  * version-pinned launcher is genuinely missing.
  */
 export async function resumeSessionInPlace(session: SessionMeta): Promise<void> {
+  // This function is the LOCAL takeover, and every caller is responsible for
+  // routing a peer-owned session before it gets here (the picker above,
+  // `agents resume`, `sessions attach`). Reaching it with one anyway means a
+  // caller skipped that step, so refuse rather than start the harness against
+  // state this box does not have — the `fs.existsSync(session.cwd)` fallback
+  // just below is exactly how that used to pass unnoticed, quietly swapping in
+  // `process.cwd()` when the recorded directory was a peer's path (RUSH-2022).
+  const owner = sessionOwnerDevice(session);
+  if (owner) {
+    console.error(chalk.red(`Session ${session.shortId} belongs to ${owner} — it cannot resume on this machine.`));
+    console.error(chalk.gray(`  Resume it there: agents resume ${session.id}`));
+    process.exitCode = 1;
+    return;
+  }
+
   const cwd = session.cwd && fs.existsSync(session.cwd)
     ? session.cwd
     : process.cwd();
@@ -3881,9 +4215,9 @@ function scoreSessionQuery(session: SessionMeta, terms: string[]): number {
  * the project you specified AND elsewhere, producing an ambiguity error
  * even though the user already pointed at the correct scope.
  */
-function applyScopeFilters(
+export function applyScopeFilters(
   sessions: SessionMeta[],
-  scope: { agent?: string; project?: string },
+  scope: { agent?: string; project?: string; routine?: boolean | string },
 ): SessionMeta[] {
   let filtered = sessions;
 
@@ -3908,14 +4242,35 @@ function applyScopeFilters(
     });
   }
 
+  if (scope.routine) {
+    filtered = filtered.filter((session) => session.origin === 'routine');
+    if (typeof scope.routine === 'string') {
+      const names = [...new Set(
+        filtered.map((session) => session.routineName).filter((name): name is string => !!name),
+      )];
+      const selected = resolveRoutineName(scope.routine, names);
+      filtered = selected
+        ? filtered.filter((session) => session.routineName === selected)
+        : [];
+    }
+  }
+
   return filtered;
+}
+
+export function artifactLookupScope(
+  agent?: string,
+  project?: string,
+  routine?: boolean | string,
+): { agent?: string; project?: string; routine?: boolean | string } {
+  return { agent, project, routine };
 }
 
 async function renderArtifactsGlobal(
   query: string,
   listAll: boolean,
   name: string | undefined,
-  scope: { agent?: string; project?: string },
+  scope: { agent?: string; project?: string; routine?: boolean | string },
 ): Promise<void> {
   const spinner = ora().start();
   const tracker = createScanProgressTracker(FIND_VERBS, 'session', spinner);
@@ -3962,7 +4317,7 @@ async function renderArtifactsGlobal(
 async function renderOneSession(
   query: string,
   mode: ViewMode,
-  scope: { agent?: string; project?: string; filter: FilterOptions; redact?: boolean; local?: boolean; hosts?: string[] },
+  scope: { agent?: string; project?: string; routine?: boolean | string; filter: FilterOptions; redact?: boolean; local?: boolean; hosts?: string[] },
 ): Promise<void> {
   const spinner = ora().start();
   const tracker = createScanProgressTracker(FIND_VERBS, 'session', spinner);
@@ -4453,9 +4808,9 @@ export function registerSessionsCommands(program: Command): void {
     .option('--opencode', 'Shorthand for --agent opencode')
     .option('--all', 'Widen every non-status filter to "all": every directory (not just this project) and all time (no window cap). Status filters like --active still compose; -a/--device/--since still narrow their axis.')
     .option('--unmanaged', "Also show sessions from your own ~/.<agent> installs (hidden once agents-cli manages that agent)")
-    .option('--team, --teams', 'Include team-spawned sessions (hidden by default)')
+    .option('--team, --teams', 'Show team-spawned sessions (hidden by default), grouped by team — each team names its spawner and spawn time, teammates show their mode + handle, and team-flagged spawns with no teammate record sink into a (no team) bucket. --flat/--tree keep the plain inline table')
     .option('--in-team <name>', "Only this team: the session that spawned it plus (with --teams) its teammates. Spans every directory and all time, since a team's worktrees and history sit outside the default window.")
-    .option('--routine', 'Show only sessions archived from routine runs')
+    .option('--routines, --routine [name]', 'Show routine-run sessions; omit the name on a TTY to pick one interactively (fuzzy name matching)')
     .option('-p, --project <name>', 'Filter by project name (searches across all directories)')
     .option('--skill <name>', 'Only sessions that invoked this skill (matches a bare name or a namespaced plugin skill\'s short name, e.g. --skill design finds rush:design)')
     .option('--plugin <name>', 'Only sessions that used a skill/command owned by this plugin')
@@ -4539,12 +4894,18 @@ export function registerSessionsCommands(program: Command): void {
       # Search across every directory, not just this project
       agents sessions "topic" --all
 
+      # Team-spawned sessions, grouped by team (spawner + spawn time per team,
+      # teammate mode/handle per row; team-flagged spawns with no team record
+      # in a trailing (no team) bucket)
+      agents sessions --teams
+
       # Who spawned which team: an orchestrator row carries team:<name>, and a
       # teammate row [<team>/<handle>]. --in-team narrows to one team's lineage.
       agents sessions --in-team redesign --teams
 
       # Show routine-run sessions and open one by routine run id
       agents sessions --routine --all
+      agents sessions --routine nightly-review --all
       agents sessions 2026-07-21T10-30-00-000Z
 
       # Export for analysis
@@ -4591,7 +4952,7 @@ export function registerSessionsCommands(program: Command): void {
       - --first and --last are mutually exclusive.
       - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.
       - --cloud sources from Rush Cloud captured runs instead of local disk.
-      - --routine shows only transcripts archived from routine run directories; routine rows also resolve by run id.
+      - --routine [name] shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.
       - Without --teams, team-spawned sessions are hidden by default.
     `,
   });

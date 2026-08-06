@@ -4,7 +4,9 @@ import { runAgents } from './agentsBin';
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const cache = new Map<string, { catalog: AgentCatalog | null; fetchedAt: number }>();
 
-export const MODEL_CATALOG_AGENTS = ['claude', 'codex', 'gemini', 'cursor', 'opencode', 'antigravity', 'grok'] as const;
+// gemini is hard-deprecated (no launch path left in Factory to run against a
+// fetched catalog — see RUSH-2089/RUSH-2202), so it is deliberately absent here.
+export const MODEL_CATALOG_AGENTS = ['claude', 'codex', 'cursor', 'opencode', 'antigravity', 'grok'] as const;
 export type ModelCatalogAgent = (typeof MODEL_CATALOG_AGENTS)[number];
 
 export interface AgentCatalogModel {

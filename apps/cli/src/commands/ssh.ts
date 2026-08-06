@@ -57,6 +57,7 @@ import {
   ASKPASS_KEY_ENV,
   ASKPASS_AGENT_ONLY_ENV,
   buildSshInvocation,
+  deviceIdentityArgs,
   fleetDialTarget,
   writeAskpassShim,
 } from '../lib/devices/connect.js';
@@ -94,6 +95,15 @@ import { checkAllClis } from '../lib/teams/agents.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
 import { sshExec, sshExecAsync, SSH_OPTS } from '../lib/ssh-exec.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
+import type { AgentId } from '../lib/types.js';
+import {
+  collectLocalHarnessInventory,
+  groupByAccount,
+  renderAccountsMatrix,
+  renderHarnessMatrix,
+  type HarnessRow,
+  type HostHarnessResult,
+} from '../lib/devices/harness-inventory.js';
 import { crabboxList, crabboxFind, crabboxSshArgv, type CrabboxBox } from '../lib/crabbox/cli.js';
 import { boxAddress, boxStatus, fmtIdleShort, fmtExpiresShort } from './lease.js';
 import {
@@ -437,6 +447,7 @@ interface FleetStatusTarget extends FanOutDeviceTarget {
    * correct entry and makes a reachable box look dead (the 60s fleet-status hang).
    */
   dialTarget: string;
+  extraSshArgs?: string[];
 }
 
 async function localHealthRow(self: string, stats?: DeviceStats): Promise<FleetHealthRow> {
@@ -462,7 +473,7 @@ async function probeRemoteFleetStatus(target: FleetStatusTarget): Promise<import
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
   const cmd = buildRemoteAgentsInvocation(['devices', 'status', '--local', '--json'], undefined, isWin ? 'windows' : undefined, env);
-  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true });
+  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true, extraSshArgs: target.extraSshArgs });
   if (res.code !== 0) {
     throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
   }
@@ -473,11 +484,11 @@ async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetH
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
   const versionCmd = buildRemoteAgentsInvocation(['--version'], undefined, isWin ? 'windows' : undefined, env);
-  const versionRes = await sshExecAsync(target.dialTarget, versionCmd, { timeoutMs: 15000, multiplex: true });
+  const versionRes = await sshExecAsync(target.dialTarget, versionCmd, { timeoutMs: 15000, multiplex: true, extraSshArgs: target.extraSshArgs });
   const version = versionRes.code === 0 ? versionRes.stdout.trim().split(/\s+/)[0] || null : null;
 
   const doctorCmd = buildRemoteAgentsInvocation(['doctor', '--json'], undefined, isWin ? 'windows' : undefined, env);
-  const doctorRes = await sshExecAsync(target.dialTarget, doctorCmd, { timeoutMs: 30000, multiplex: true });
+  const doctorRes = await sshExecAsync(target.dialTarget, doctorCmd, { timeoutMs: 30000, multiplex: true, extraSshArgs: target.extraSshArgs });
   if (doctorRes.code !== 0) {
     throw new Error(doctorRes.timedOut ? 'timed out' : (doctorRes.stderr.trim() || `exit ${doctorRes.code ?? 'unknown'}`));
   }
@@ -540,6 +551,7 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
       // this is trusted on the default path, not just under `--refresh`.
       skip: fleetHealthSkip(t.skip, statsMap.get(t.device.name)),
       dialTarget: fleetDialTarget(t.device),
+      extraSshArgs: deviceIdentityArgs(t.device),
     }));
   const remote = await fanOutDevices(remoteTargets, probeRemoteHealth);
   for (const result of remote) {
@@ -645,7 +657,7 @@ async function probeRemoteAuth(target: FleetStatusTarget): Promise<AuthProbeRow[
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
   const cmd = buildRemoteAgentsInvocation(['devices', 'ping', '--local', '--json'], undefined, isWin ? 'windows' : undefined, env);
-  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true });
+  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true, extraSshArgs: target.extraSshArgs });
   if (res.code !== 0) {
     throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
   }
@@ -722,6 +734,7 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
     platform: t.device.platform,
     skip: t.skip,
     dialTarget: fleetDialTarget(t.device),
+    extraSshArgs: deviceIdentityArgs(t.device),
   }));
   const probeable = remoteTargets.filter((t) => !t.skip).length;
   const spinner = isInteractiveTerminal() && !opts.json
@@ -762,6 +775,136 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
 
   const anyBad = results.some((r) => r.rows.some((row) => isDeadVerdict(row.health.verdict)));
   if (opts.strict && anyBad) process.exitCode = 1;
+}
+
+// ---------------------------------------------------------------------------
+// `agents devices harnesses` / `agents devices accounts` (RUSH-2003)
+//
+// Both render the same per-device inventory — every installed (agent, version)
+// with its account, sign-in, quota, and a single "ready" verdict — through two
+// lenses: `harnesses` groups by install, `accounts` collapses installs that
+// share one account. The fan-out mirrors `runFleetPing`: probe THIS host in
+// process, then SSH each peer's `devices harnesses --local --json` worker.
+// ---------------------------------------------------------------------------
+
+interface HarnessInventoryOpts {
+  agents?: AgentId[];
+  devices?: string[];
+  refresh?: boolean;
+  json?: boolean;
+  local?: boolean;
+}
+
+/** SSH into a host and read its raw harness rows (the `--local --json` worker). */
+async function probeRemoteHarnesses(
+  target: FleetStatusTarget,
+  refresh: boolean,
+): Promise<HarnessRow[]> {
+  const isWin = /^win/i.test((target.platform ?? '').trim());
+  const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
+  const args = ['devices', 'harnesses', '--local', '--json'];
+  if (refresh) args.push('--refresh');
+  const cmd = buildRemoteAgentsInvocation(args, undefined, isWin ? 'windows' : undefined, env);
+  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true, extraSshArgs: target.extraSshArgs });
+  if (res.code !== 0) {
+    throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
+  }
+  const parsed = JSON.parse(res.stdout) as { host: string; rows: HarnessRow[] };
+  return parsed.rows ?? [];
+}
+
+/**
+ * Gather harness rows across the fleet: THIS host in process, every reachable
+ * peer over SSH. Shared by both `harnesses` and `accounts` (they differ only in
+ * how the rows are rendered). Honors an optional `--device` allowlist on both
+ * the local and remote rows. Bounded by the same per-device + overall deadlines
+ * as `fleet ping`, so one unreachable box can never stall the glance.
+ */
+async function collectFleetHarnesses(opts: HarnessInventoryOpts): Promise<HostHarnessResult[]> {
+  const self = machineId();
+  const want = opts.devices?.length ? new Set(opts.devices) : null;
+  const results: HostHarnessResult[] = [];
+
+  if (!want || want.has(self)) {
+    const localRows = await collectLocalHarnessInventory({ agents: opts.agents, refresh: opts.refresh });
+    results.push({ host: self, rows: localRows });
+  }
+
+  const reg = await loadDevices();
+  const planned = planFleetTargets(reg);
+  let remoteTargets: FleetStatusTarget[] = remoteFleetTargets(planned, self).map((t) => ({
+    name: t.device.name,
+    platform: t.device.platform,
+    skip: t.skip,
+    dialTarget: fleetDialTarget(t.device),
+    extraSshArgs: deviceIdentityArgs(t.device),
+  }));
+  if (want) remoteTargets = remoteTargets.filter((t) => want.has(t.name));
+
+  if (remoteTargets.length > 0) {
+    const probeable = remoteTargets.filter((t) => !t.skip).length;
+    const spinner = isInteractiveTerminal() && !opts.json
+      ? ora(`Probing ${probeable} device${probeable === 1 ? '' : 's'}…`).start()
+      : undefined;
+    let remote: Awaited<ReturnType<typeof fanOutDevices<HarnessRow[], FleetStatusTarget>>>;
+    try {
+      const fanOut = fanOutDevices(
+        remoteTargets,
+        (t) => probeRemoteHarnesses(t, !!opts.refresh),
+        { perDeviceTimeoutMs: 15_000 },
+      );
+      remote = await raceFleetPingDeadline(fanOut, remoteTargets, 30_000);
+    } finally {
+      spinner?.stop();
+    }
+    for (const r of remote) {
+      if (r.status === 'ok' && r.value) {
+        results.push({ host: r.name, rows: r.value });
+      } else {
+        results.push({
+          host: r.name,
+          rows: [],
+          error: r.error,
+          skipped: r.reason ? String(r.reason) : undefined,
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
+async function runDevicesHarnesses(opts: HarnessInventoryOpts): Promise<void> {
+  if (opts.local) {
+    const rows = await collectLocalHarnessInventory({ agents: opts.agents, refresh: opts.refresh });
+    if (opts.json) console.log(JSON.stringify({ host: machineId(), rows }));
+    else for (const line of renderHarnessMatrix([{ host: machineId(), rows }])) console.log(line);
+    return;
+  }
+  const results = await collectFleetHarnesses(opts);
+  if (opts.json) console.log(JSON.stringify(results, null, 2));
+  else for (const line of renderHarnessMatrix(results)) console.log(line);
+}
+
+async function runDevicesAccounts(opts: HarnessInventoryOpts): Promise<void> {
+  if (opts.local) {
+    const rows = await collectLocalHarnessInventory({ agents: opts.agents, refresh: opts.refresh });
+    if (opts.json) console.log(JSON.stringify({ host: machineId(), accounts: groupByAccount(rows) }));
+    else for (const line of renderAccountsMatrix([{ host: machineId(), rows }])) console.log(line);
+    return;
+  }
+  const results = await collectFleetHarnesses(opts);
+  if (opts.json) {
+    const grouped = results.map((r) => ({
+      host: r.host,
+      error: r.error,
+      skipped: r.skipped,
+      accounts: groupByAccount(r.rows),
+    }));
+    console.log(JSON.stringify(grouped, null, 2));
+  } else {
+    for (const line of renderAccountsMatrix(results)) console.log(line);
+  }
 }
 
 /** Resolve an {@link AuthCellColor} to a chalk painter. Single map for cells + labels. */
@@ -886,6 +1029,7 @@ Typical workflow:
   agents devices configure mac-mini --max-agents 4 --scheduler off
   agents devices note mac-mini "runs the releases — don't reboot"
   agents devices set win-mini --auth password --bundle muqsit
+  agents devices set worker --auth key --identity-file ~/.ssh/worker_ed25519
   agents devices render --write  # write ~/.ssh/config.d/agents include
   agents fleet update            # roll out latest agents-cli to every online device
   agents fleet run uname -a      # run a command on every online device
@@ -1322,6 +1466,71 @@ Typical workflow:
       await runFleetPing({ ...opts, verbose });
     });
 
+  const csvList = (s?: string): string[] | undefined =>
+    s ? s.split(',').map((x) => x.trim()).filter(Boolean) : undefined;
+  const harnessInvOpts = (opts: {
+    agents?: string;
+    device?: string;
+    devices?: string;
+    refresh?: boolean;
+    live?: boolean;
+    json?: boolean;
+    local?: boolean;
+  }): HarnessInventoryOpts => ({
+    agents: csvList(opts.agents) as AgentId[] | undefined,
+    devices: csvList(opts.device ?? opts.devices),
+    refresh: opts.refresh || opts.live,
+    json: opts.json,
+    local: opts.local,
+  });
+
+  const harnessesCmd = devicesCmd
+    .command('harnesses')
+    .description('Per device, one row per installed agent@version: account, signed-in, quota, and a single ready verdict. SSH-probes each online box.')
+    .option('--json', 'output machine-readable JSON (per-host rows)')
+    .option('--agents <csv>', 'only these agents (comma-separated)')
+    .option('--device <csv>', 'only these devices (comma-separated); default: every online box')
+    .option('--refresh', 'fetch live quota instead of the cached snapshot (slower)')
+    .option('--live', 'alias of --refresh')
+    .option('--local', "this host only: emit THIS box's rows (the per-host worker the fan-out reads over ssh)")
+    .action(async (opts: { json?: boolean; agents?: string; device?: string; refresh?: boolean; live?: boolean; local?: boolean }) => {
+      await runDevicesHarnesses(harnessInvOpts(opts));
+    });
+  setHelpSections(harnessesCmd, {
+    examples: `
+agents devices harnesses                 # every box: agent@version · account · signed · quota · ready
+agents devices harnesses --agents claude,codex   # just these harnesses
+agents devices harnesses --device zion   # one box
+agents devices harnesses --refresh       # live quota (bypass the cached snapshot)
+agents devices harnesses --json          # machine-readable, per-host rows`,
+    notes: `
+"ready" = signed in AND not rate-limited — usable for a run right now.
+Quota is the cached usage snapshot (the daemon warms it); --refresh fetches live.
+Use \`agents devices accounts\` for the same data grouped by account.`,
+  });
+
+  const accountsCmd = devicesCmd
+    .command('accounts')
+    .description('Per device, one row per account: which harnesses share it, signed-in, quota, and ready. The identity lens on `agents devices harnesses`.')
+    .option('--json', 'output machine-readable JSON (per-host account groups)')
+    .option('--agents <csv>', 'only these agents (comma-separated)')
+    .option('--device <csv>', 'only these devices (comma-separated); default: every online box')
+    .option('--refresh', 'fetch live quota instead of the cached snapshot (slower)')
+    .option('--live', 'alias of --refresh')
+    .option('--local', "this host only: emit THIS box's account groups")
+    .action(async (opts: { json?: boolean; agents?: string; device?: string; refresh?: boolean; live?: boolean; local?: boolean }) => {
+      await runDevicesAccounts(harnessInvOpts(opts));
+    });
+  setHelpSections(accountsCmd, {
+    examples: `
+agents devices accounts                  # every box: account · agents · signed · quota · ready
+agents devices accounts --device mac-mini
+agents devices accounts --json           # machine-readable, per-host account groups`,
+    notes: `
+Collapses the installs that share one account (e.g. five claude versions on one
+email) into a single row. Use \`agents devices harnesses\` for the per-install view.`,
+  });
+
   devicesCmd
     .command('login')
     .description('Log agent CLIs into fleet boxes over SSH: drive each box\'s device-code OAuth, scrape the URL + code, and surface every pending login in one local browser page. Default drives all codes at once; --interactive walks one box at a time (codes requested just-in-time so they don\'t expire).')
@@ -1383,15 +1592,19 @@ Typical workflow:
     .option('--auth <method>', 'key | password')
     .option('--bundle <bundle>', 'secrets bundle holding the password (for --auth password)')
     .option('--bundle-key <key>', "key within the bundle (default 'password')")
-    .action(async (name: string, opts: { platform?: string; user?: string; auth?: string; bundle?: string; bundleKey?: string }) => {
+    .option('--identity-file <path>', 'private-key path for --auth key')
+    .option('--clear-identity-file', 'return key auth to ssh-agent/default-key discovery')
+    .action(async (name: string, opts: { platform?: string; user?: string; auth?: string; bundle?: string; bundleKey?: string; identityFile?: string; clearIdentityFile?: boolean }) => {
       try {
         const existing = await mustGetDevice(name);
-        const auth = opts.auth || opts.bundle || opts.bundleKey
-          ? {
-              method: (opts.auth as DeviceAuthMethod) ?? existing.auth.method,
-              bundle: opts.bundle ?? existing.auth.bundle,
-              bundleKey: opts.bundleKey ?? existing.auth.bundleKey,
-            }
+        const nextMethod = (opts.auth as DeviceAuthMethod | undefined) ?? existing.auth.method;
+        if (opts.identityFile && nextMethod !== 'key') {
+          throw new Error('--identity-file requires key auth; pass --auth key in the same command.');
+        }
+        const auth = opts.auth || opts.bundle || opts.bundleKey || opts.identityFile || opts.clearIdentityFile
+          ? nextMethod === 'key'
+            ? { method: nextMethod, identityFile: opts.clearIdentityFile ? undefined : (opts.identityFile ?? existing.auth.identityFile) }
+            : { method: nextMethod, bundle: opts.bundle ?? existing.auth.bundle, bundleKey: opts.bundleKey ?? existing.auth.bundleKey }
           : undefined;
         const d = await upsertDevice(name, {
           platform: (opts.platform as DevicePlatform) ?? undefined,

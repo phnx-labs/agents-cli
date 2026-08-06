@@ -7,26 +7,30 @@
  *
  *   - reachability + headroom + load  ← {@link probeFleetStats} (one parallel
  *     SSH fan-out over the pool; the local box is measured directly).
- *   - requested agent installed (+ signed in, locally)  ← a one-shot readiness
+ *   - requested agent installed + signed in (when known) ← a one-shot readiness
  *     probe per remote device ({@link buildReadyProbeCommand} → `agents view`),
  *     the local box via {@link checkCliAvailable}/{@link checkCliSignedIn}.
  *
- * The result is cached briefly per (pool, agent) so a `teams start` wave that
+ * The result is cached briefly per (pool, agent-or-any) so a `teams start` wave that
  * places N teammates probes the pool ONCE, not N times — the roster-count part
  * of the rank stays live (the pure pick recounts the roster each call), only the
  * SSH-measured load/harness snapshot is reused within the TTL.
  *
  * All SSH here is via `execFile` (async, bounded) so the whole pool is probed in
  * parallel; a slow or wedged box degrades to "no signal" instead of blocking the
- * launch. Remote sign-in is deliberately left unknown — sign-in detection is
- * unreliable over SSH (see {@link checkCliSignedIn}); it ranks the local box
- * only, and the install gate (not sign-in) is what drives the fail-loud.
+ * launch. The readiness payload is `agents view --json`, so remote and local
+ * candidates carry the same installed/sign-in verdict.
  */
 import { execFile } from 'child_process';
 import { probeFleetStats, headroom } from '../devices/health.js';
 import { loadDevicesSync, type DeviceProfile } from '../devices/registry.js';
 import { buildSshInvocation, writeAskpassShim } from '../devices/connect.js';
-import { buildReadyProbeCommand, parseReadyProbe, viewHasAgent } from '../hosts/ready.js';
+import {
+  buildReadyProbeCommand,
+  parseReadyProbe,
+  viewAgentSignedIn,
+  viewHasAgent,
+} from '../hosts/ready.js';
 import { localMachineId } from '../session/origin-machine.js';
 import { normalizeHost } from '../machine-id.js';
 import { checkCliAvailable, checkCliSignedIn, type AgentType } from './agents.js';
@@ -47,8 +51,8 @@ interface CacheEntry {
 }
 const cache = new Map<string, CacheEntry>();
 
-function cacheKey(pool: string[], agent: string): string {
-  return `${agent}::${[...pool].map(normalizeHost).sort().join(',')}`;
+function cacheKey(pool: string[], agent?: string): string {
+  return `${agent ?? 'any-agent'}::${[...pool].map(normalizeHost).sort().join(',')}`;
 }
 
 /** Clear the probe cache — for tests and after a device-registry change. */
@@ -62,7 +66,10 @@ export function clearPlacementSignalCache(): void {
  * failure) — reachability is then left to {@link probeFleetStats}; `false` when
  * the box answered but agents-cli or the agent is absent (a genuine can't-run).
  */
-function probeRemoteInstalled(device: DeviceProfile, agent: string): Promise<boolean | undefined> {
+function probeRemoteReadiness(
+  device: DeviceProfile,
+  agent: string,
+): Promise<{ installed: boolean | undefined; signedIn: boolean | undefined }> {
   let args: string[];
   let env: Record<string, string>;
   try {
@@ -72,7 +79,7 @@ function probeRemoteInstalled(device: DeviceProfile, agent: string): Promise<boo
     // on a password-auth device (mirrors probeDeviceStats in devices/health).
     ({ args, env } = buildSshInvocation(device, [cmd], shim, {}, { agentOnly: true }));
   } catch {
-    return Promise.resolve(undefined);
+    return Promise.resolve({ installed: undefined, signedIn: undefined });
   }
   return new Promise((resolve) => {
     execFile(
@@ -80,11 +87,12 @@ function probeRemoteInstalled(device: DeviceProfile, agent: string): Promise<boo
       args,
       { encoding: 'utf-8', env: { ...process.env, ...env }, timeout: READY_PROBE_TIMEOUT_MS },
       (err, stdout) => {
-        if (err || !stdout) return resolve(undefined);
+        if (err || !stdout) return resolve({ installed: undefined, signedIn: undefined });
         const probe = parseReadyProbe(stdout);
-        if (!probe.reachable) return resolve(undefined); // ssh/login issue → unknown
-        if (!probe.version) return resolve(false); // agents-cli missing → cannot run
-        resolve(viewHasAgent(probe.view, agent));
+        if (!probe.reachable) return resolve({ installed: undefined, signedIn: undefined });
+        if (!probe.version) return resolve({ installed: false, signedIn: false });
+        const installed = viewHasAgent(probe.view, agent);
+        resolve({ installed, signedIn: installed ? viewAgentSignedIn(probe.view, agent) : false });
       },
     );
   });
@@ -98,7 +106,7 @@ function probeRemoteInstalled(device: DeviceProfile, agent: string): Promise<boo
  */
 export async function probePoolSignals(
   pool: string[],
-  agent: AgentType,
+  agent?: AgentType,
   opts: { force?: boolean; now?: number } = {},
 ): Promise<Map<string, DevicePlacementSignal>> {
   const now = opts.now ?? Date.now();
@@ -125,8 +133,8 @@ export async function probePoolSignals(
   const stats = await probeFleetStats(profiles, { selfName: selfProfile?.name });
 
   type InstalledInfo = { installed: boolean | undefined; signedIn: boolean | undefined };
-  const installed = new Map<string, InstalledInfo>(
-    await Promise.all(
+  const installed = new Map<string, InstalledInfo>(agent
+    ? await Promise.all(
       profiles.map(async (d): Promise<readonly [string, InstalledInfo]> => {
         const isSelf = normalizeHost(d.name) === self;
         if (isSelf) {
@@ -134,11 +142,10 @@ export async function probePoolSignals(
           const signedIn = inst ? await checkCliSignedIn(agent) : undefined;
           return [d.name, { installed: inst, signedIn }];
         }
-        // Remote sign-in stays unknown (see the module docblock); the install
-        // gate is what drives the fail-loud.
-        return [d.name, { installed: await probeRemoteInstalled(d, agent), signedIn: undefined }];
+        return [d.name, await probeRemoteReadiness(d, agent)];
       }),
-    ),
+    )
+    : [],
   );
 
   const signals = new Map<string, DevicePlacementSignal>();

@@ -66,11 +66,15 @@ session could live on another peer): a unique match auto-resumes, a cross-machin
 collision surfaces as an ambiguity, and an ambiguous short-id prefix still surfaces
 every candidate. `agents run auto --resume <id>` is the adaptive form: on the
 origin device it prefers native resume only when the original harness/version is
-installed and healthy. Otherwise the account router selects a healthy version of
-the **same harness** and hands the indexed transcript over through `/continue`. It
-never native-resumes from a different version's isolated home. If no same-harness
-version is usable, the command names the device, origin version, and account-health
-reason. Detail in **Background &
+installed, healthy, and still owns the indexed transcript in its active isolated
+home. Claude resumes from the earliest recorded cwd, the directory that selected
+its `projects/<cwd-key>` conversation, rather than a later first-turn cwd. A
+transcript retained in trash or backups therefore uses `/continue` even if the
+same version number was reinstalled into a new empty home. Otherwise the account
+router selects a healthy version of the **same harness** and hands the indexed
+transcript over through `/continue`. It never native-resumes from a different
+version's isolated home. If no same-harness version is usable, the command names
+the device, origin version, and account-health reason. Detail in **Background &
 foreground (detach / attach)** below, and
 `agents sessions --help`.
 
@@ -648,8 +652,12 @@ agents sessions --agent codex@0.116.0
 # FTS5 search (BM25 ranked, labels weighted highest)
 agents sessions "auth refactor"
 
-# Include team-spawned sessions (hidden by default)
-agents sessions --team   # alias of --teams
+# Team-spawned sessions (hidden by default), grouped by team: each team names its
+# spawner and spawn time, teammates show their mode + handle, and team-flagged
+# spawns with no teammate record (`agents run`, or teammates whose meta aged out)
+# sink into a trailing (no team) bucket. A printed report like --tree, not the
+# interactive browser. --flat/--tree keep the plain inline table instead.
+agents sessions --teams   # --team is an alias
 
 # One team's whole lineage: the session that spawned it, plus (with --teams) its
 # teammates. Spans every directory and all time — a team's teammates run in their
@@ -659,7 +667,12 @@ agents sessions --in-team redesign --teams
 
 # Show routine-run sessions, then open one by routine run id
 agents sessions --routine --all
+agents sessions --routine nightly-review --all
+agents sessions --routines --all      # alias; pick a routine interactively on a TTY
 agents sessions 2026-07-21T10-30-00-000Z
+
+# The picker shows last-run/run-count/session-count context. After selection,
+# sessions are grouped by routine run id and timestamp.
 
 # Sort the list by cost or duration (default: recent)
 agents sessions --sort cost --limit 10

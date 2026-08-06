@@ -89,3 +89,7 @@ export function sshTargetFor(host: Host): string {
   }
   return host.user ? `${host.user}@${host.address}` : host.address;
 }
+
+export function hostIdentityArgs(host: Host): string[] {
+  return host.identityFile ? ['-i', host.identityFile, '-o', 'IdentitiesOnly=yes'] : [];
+}

@@ -4,6 +4,7 @@ import type { Command } from 'commander';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
 import { resolveSessionMetadataValue } from './sessions.js';
+import { sessionOwnerDevice, consumeResumePinned, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
 
 interface ResumeOptions {
   mode?: string;
@@ -11,6 +12,30 @@ interface ResumeOptions {
   headless?: boolean;
   cwd?: string;
   quiet?: boolean;
+  /** Run on THIS machine even when the session belongs to a peer (escape hatch). */
+  here?: boolean;
+}
+
+/**
+ * The argv to re-run this resume on the machine that owns the session.
+ *
+ * Deliberately carries no "don't route again" FLAG — that rides the
+ * {@link RESUME_PINNED_ENV} export instead, so the hop also works against a peer
+ * on an older CLI (see the constant's docs). Every argv token here exists in the
+ * released surface.
+ */
+export function buildResumeRemoteArgs(
+  sessionId: string,
+  prompt: string | undefined,
+  options: ResumeOptions,
+): string[] {
+  const args = ['resume', sessionId, ...(prompt === undefined ? [] : [prompt])];
+  if (options.mode) args.push('--mode', options.mode);
+  if (options.interactive) args.push('--interactive');
+  if (options.headless) args.push('--headless');
+  if (options.cwd) args.push('--cwd', options.cwd);
+  if (options.quiet) args.push('--quiet');
+  return args;
 }
 
 /** Translate `agents resume <id>` to the canonical `agents run` surface after
@@ -39,7 +64,11 @@ export function registerResumeCommand(program: Command): void {
     .option('--headless', 'Resume headlessly (a prompt is required)')
     .option('--cwd <path>', 'Override the recorded working directory')
     .option('-q, --quiet', 'Suppress routing banners')
+    .option('--here', 'Run on this machine even if the session belongs to another device')
     .action(async (sessionId: string, prompt: string | undefined, options: ResumeOptions) => {
+      // Read (and clear) the routing pin before anything else, so it can never
+      // reach the agent's own children.
+      const pinnedHere = consumeResumePinned() || !!options.here;
       const outcome = await resolveSessionMetadataValue(sessionId.trim());
       if (outcome.kind === 'partial') {
         console.error(chalk.red(`Could not resolve session while these devices were unavailable: ${outcome.failedPeers.join(', ')}`));
@@ -54,6 +83,34 @@ export function registerResumeCommand(program: Command): void {
       if (outcome.kind === 'ambiguous') {
         console.error(chalk.red(`"${sessionId}" matches ${outcome.candidates.length} sessions. Pass the full session id.`));
         process.exitCode = 1;
+        return;
+      }
+
+      // The harness keeps its conversation state on the machine that produced
+      // the session, so a peer-owned session MUST resume there. Running it here
+      // starts the agent against state this box does not have — silently, since
+      // a synced mirror makes the transcript look local (RUSH-2022).
+      const owner = pinnedHere ? undefined : sessionOwnerDevice(outcome.session);
+      if (owner) {
+        if (!options.quiet) {
+          process.stderr.write(chalk.gray(`[agents] session ${outcome.session.shortId} belongs to ${owner} → resuming there\n`));
+        }
+        // `runOnPeer` is the existing transport for "this session's transcript
+        // and agent binary are on that box" (lib/session/remote-list.ts) — the
+        // same one the picker already uses. Not the `--host` passthrough: that
+        // one re-discovers locally and marks the run AGENTS_FLEET_REMOTE, which
+        // a long-lived resumed session must not inherit.
+        const { runOnPeer } = await import('../lib/session/remote-list.js');
+        const rc = await runOnPeer(
+          buildResumeRemoteArgs(outcome.session.id, prompt, options),
+          owner,
+          { tty: !!process.stdout.isTTY, env: { [RESUME_PINNED_ENV]: '1' } },
+        );
+        if (rc === 'no-target') {
+          console.error(chalk.red(`Session ${outcome.session.shortId} lives on ${owner}, which isn't a reachable device right now.`));
+          console.error(chalk.gray(`Register/wake it (agents devices), or run there: agents ssh ${owner}`));
+          process.exitCode = 1;
+        }
         return;
       }
 
@@ -94,6 +151,7 @@ export function registerResumeCommand(program: Command): void {
       agents resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897 --mode edit`,
     notes: `
       A full ID resolves from the local session database first (zero SSH) and, on a local miss, fans out with the first peer holding it cancelling the rest. An exact label always consults the fleet (labels are not globally unique) and auto-resumes the one match; a cross-machine label collision surfaces as an ambiguity.
+      A session that ran on another device resumes ON that device over SSH — the harness's conversation state lives there, so running it here would start against state this machine does not have. --here overrides that and runs locally.
       Use agents run auto --resume <id> when the original account is unavailable and another harness may continue.`,
   });
 }

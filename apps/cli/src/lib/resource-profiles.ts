@@ -67,10 +67,9 @@ export function getActiveResourceProfileName(): string | null {
 }
 
 export function getActiveResourceProfile(): ActiveResourceProfile | null {
-  const meta = readMeta();
   const name = getActiveResourceProfileName();
   if (!name) return null;
-  const preset = meta.profiles?.presets?.[name];
+  const preset = readMeta().profiles?.presets?.[name];
   return preset ? { name, preset } : null;
 }
 

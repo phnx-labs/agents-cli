@@ -22,6 +22,7 @@ import {
   listClients,
   listSessions,
   paneExitStatus,
+  prepareSessionForResume,
   reconcileSessionHooks,
   sendKeys,
   setSessionHook,
@@ -180,6 +181,42 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
       attachExisting: true,
     });
     expect(reused.createdAt).toBe(first.createdAt);
+  });
+
+  it('native resume reaps a metadata-less retained dead pane instead of attaching it', async () => {
+    await runTmux({
+      socket,
+      args: [
+        'set-option', '-g', 'remain-on-exit', 'on', ';',
+        'new-session', '-d', '-s', 'legacy-dead-resume', '--', 'sh', '-c', 'exit 0',
+      ],
+    });
+
+    let pane = '';
+    let dead = '';
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const result = await runTmux({
+        socket,
+        args: ['list-panes', '-t', 'legacy-dead-resume', '-F', '#{pane_id} #{pane_dead}'],
+        throwOnError: false,
+      });
+      [pane = '', dead = ''] = result.stdout.trim().split(/\s+/);
+      if (/^%\d+$/.test(pane) && dead === '1') break;
+      await wait(50);
+    }
+    expect(pane).toMatch(/^%\d+$/);
+    expect(dead).toBe('1');
+
+    expect(await prepareSessionForResume('legacy-dead-resume', socket)).toBe('create');
+    expect(await hasSession('legacy-dead-resume', socket)).toBe(false);
+  });
+
+  it('native resume reuses a positively living existing pane', async () => {
+    await createSession({ name: 'living-resume', cmd: 'sleep 30', socket });
+
+    expect(await prepareSessionForResume('living-resume', socket)).toBe('attach');
+    expect(await hasSession('living-resume', socket)).toBe(true);
   });
 
   it('killSession is idempotent on missing sessions', async () => {

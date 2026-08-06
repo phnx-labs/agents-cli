@@ -26,7 +26,7 @@ import {
 import { sshTargetFor } from '../devices/connect.js';
 import { resolveExplicitTargetSet } from '../devices/resolve-target.js';
 import { loadDevices, isControlDevice, isDialableDevice, type DeviceProfile } from '../devices/registry.js';
-import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
+import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from '../hosts/remote-cmd.js';
 import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../remote-agents-json.js';
 import { machineId, normalizeHost } from './sync/config.js';
 import { NO_FANOUT_ENV } from './remote-active.js';
@@ -117,7 +117,7 @@ export function remoteListCommand(forwardedArgs: string[], os?: string): string 
 export function parseRemoteList(stdout: string, machine: string): SessionMeta[] {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(stdout);
+    parsed = JSON.parse(stripClixml(stdout));
   } catch {
     return [];
   }
@@ -146,7 +146,7 @@ export function parseRemoteListPayload(stdout: string, machine: string, safeReso
 } {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(stdout);
+    parsed = JSON.parse(stripClixml(stdout));
   } catch {
     return { items: [], valid: false };
   }
@@ -463,6 +463,10 @@ export function parseRemoteToolSearch(
   machine: string,
   expectedClauses?: string[],
 ): ToolSearchEnvelope | undefined {
+  // The fleet tool-search fan-out reads a raw sshCapture (not the stripped
+  // gatherRemoteAgentsJson wrapper), so a Windows peer's PowerShell CLIXML banner
+  // must be removed here too or the box reads as "no envelope" (RUSH-2286).
+  stdout = stripClixml(stdout);
   if (Buffer.byteLength(stdout) > REMOTE_STDOUT_MAX_BYTES) return undefined;
   try {
     const parsed = JSON.parse(stdout) as Record<string, unknown>;
@@ -622,16 +626,30 @@ export async function resolvePeerTarget(machine: string): Promise<{ target: stri
  * not via a local `--host` hop, which would discover locally and dead-end for a
  * session that exists only on the peer. Resolves 'no-target' when the machine
  * isn't a dialable registered device; the caller surfaces a clear message.
+ *
+ * `opts.env` adds variables to the remote command. It deliberately does NOT
+ * carry `AGENTS_FLEET_REMOTE` the way the `--host` passthrough does: that marker
+ * gates consent-sensitive actions on the far side
+ * (lib/browser/remote-control.ts), and a resumed agent is a long-lived session
+ * that would inherit it for its whole life — `agents browser start` inside it
+ * would then be refused as a cross-machine drive. A one-shot `--host` command
+ * can carry the marker; a session cannot.
  */
-export async function runOnPeer(args: string[], machine: string, opts: { tty?: boolean } = {}): Promise<'ok' | 'no-target'> {
+export async function runOnPeer(
+  args: string[],
+  machine: string,
+  opts: { tty?: boolean; env?: Record<string, string> } = {},
+): Promise<'ok' | 'no-target'> {
   const peer = await resolvePeerTarget(machine);
   if (!peer) return 'no-target';
   assertValidSshTarget(peer.target); // registry-sourced, but validate like the fan-out does
 
   const cols = terminalWidth();
+  const env: Record<string, string> = { ...(cols > 0 ? { COLUMNS: String(cols) } : {}), ...opts.env };
+  const assignments = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`);
   const remoteCmd = remoteShellFor(peer.os) === 'powershell'
-    ? buildWindowsAgentsCommand({ args, env: cols > 0 ? { COLUMNS: String(cols) } : undefined })
-    : `bash -lc ${shellQuote((cols > 0 ? [`COLUMNS=${cols}`] : []).concat(['agents', ...args].map(shellQuote)).join(' '))}`;
+    ? buildWindowsAgentsCommand({ args, env: assignments.length ? env : undefined })
+    : `bash -lc ${shellQuote(assignments.concat(['agents', ...args].map(shellQuote)).join(' '))}`;
 
   const sshArgs = [...SSH_OPTS, ...controlOpts()];
   if (opts.tty) sshArgs.push('-tt'); // force a PTY so the resumed agent is interactive

@@ -550,6 +550,8 @@ export interface CrabboxRunOptions extends CrabboxOptions {
   onData?: (chunk: string) => void;
   /** Force a full remote resync before running. */
   fullResync?: boolean;
+  /** Refresh an existing lease with this idle window before running. */
+  renewIdleTimeoutSecs?: number;
 }
 
 /**
@@ -588,6 +590,7 @@ export function crabboxRun(slug: string, remoteCmd: string, opts: CrabboxRunOpti
 export function crabboxRunScript(slug: string, script: string, opts: CrabboxRunOptions = {}): Promise<number | null> {
   findCrabbox();
   const args = ['run', '--id', slug, '--reclaim'];
+  if (opts.renewIdleTimeoutSecs !== undefined) args.push('--idle-timeout', `${opts.renewIdleTimeoutSecs}s`);
   if (opts.fullResync) args.push('--full-resync');
   args.push('--script-stdin');
   return new Promise((resolve) => {

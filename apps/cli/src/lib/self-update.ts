@@ -376,16 +376,123 @@ function packageRootForEntry(real: string): string | null {
 }
 
 export interface AgentsCliInstall {
-  /** The PATH entry (`<dir>/agents`) that resolves to this install. */
-  binPath: string;
+  /** The PATH entry (`<dir>/agents`) that resolves to this install, when found through PATH. */
+  binPath?: string;
   /** Package root containing package.json and dist/. */
   packageRoot: string;
   version: string;
+  /** Whether this copy uses the serialized, atomic helper-bundle installer. */
+  atomicHelperInstall: boolean;
+}
+
+export interface FindAgentsCliInstallsOptions {
+  homeDir?: string;
+  fnmDir?: string;
+  npmCacheDir?: string;
+  globalNodeModulesDirs?: string[];
+}
+
+export interface MultiInstallInventoryEntry {
+  packageRoot: string;
+  version: string;
+  note: string;
+}
+
+export function buildMultiInstallInventory(
+  runningRoot: string,
+  runningVersion: string,
+  installs: AgentsCliInstall[],
+): MultiInstallInventoryEntry[] {
+  const byRoot = new Map<string, MultiInstallInventoryEntry>();
+  byRoot.set(runningRoot, { packageRoot: runningRoot, version: runningVersion, note: 'running' });
+  for (const install of installs) {
+    const notes = [install.packageRoot === runningRoot
+      ? 'running'
+      : install.binPath
+        ? `agents on PATH: ${install.binPath}`
+        : 'discovered install'];
+    if (!install.atomicHelperInstall) notes.push('unsafe legacy helper installer — remove this copy');
+    byRoot.set(install.packageRoot, {
+      packageRoot: install.packageRoot,
+      version: install.version,
+      note: notes.join('; '),
+    });
+  }
+  return [...byRoot.values()];
+}
+
+function childDirectories(parent: string): string[] {
+  try {
+    return fs.readdirSync(parent, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(parent, entry.name));
+  } catch {
+    return [];
+  }
+}
+
+function knownPackageRoots(opts: FindAgentsCliInstallsOptions): string[] {
+  const homeDir = opts.homeDir ?? os.homedir();
+  const fnmRoots = opts.fnmDir !== undefined
+    ? [opts.fnmDir]
+    : [process.env.FNM_DIR, path.join(homeDir, '.local', 'share', 'fnm')]
+      .filter((value): value is string => Boolean(value));
+  const roots: string[] = [];
+  const packageTail = path.join('lib', 'node_modules', ...NPM_PACKAGE_NAME.split('/'));
+
+  for (const nodeDir of childDirectories(path.join(homeDir, '.nvm', 'versions', 'node'))) {
+    roots.push(path.join(nodeDir, packageTail));
+  }
+  for (const fnmRoot of fnmRoots) {
+    for (const versionDir of childDirectories(path.join(fnmRoot, 'node-versions'))) {
+      roots.push(path.join(versionDir, 'installation', packageTail));
+    }
+  }
+
+  roots.push(
+    path.join(homeDir, '.volta', 'tools', 'image', 'packages', ...NPM_PACKAGE_NAME.split('/'), packageTail),
+    path.join(homeDir, '.local', packageTail),
+    path.join(homeDir, '.bun', 'install', 'global', 'node_modules', ...NPM_PACKAGE_NAME.split('/')),
+  );
+
+  const npmCacheDir = opts.npmCacheDir ?? process.env.npm_config_cache ?? path.join(homeDir, '.npm');
+  for (const npxRunDir of childDirectories(path.join(npmCacheDir, '_npx'))) {
+    roots.push(path.join(npxRunDir, 'node_modules', ...NPM_PACKAGE_NAME.split('/')));
+  }
+
+  const globalNodeModulesDirs = opts.globalNodeModulesDirs ?? [
+    '/opt/homebrew/lib/node_modules',
+    '/usr/local/lib/node_modules',
+    '/usr/lib/node_modules',
+  ];
+  for (const nodeModulesDir of globalNodeModulesDirs) {
+    roots.push(path.join(nodeModulesDir, ...NPM_PACKAGE_NAME.split('/')));
+  }
+  return roots;
+}
+
+function readAgentsCliInstall(packageRoot: string, binPath?: string): AgentsCliInstall | null {
+  let canonicalRoot: string;
+  let pkg: { name?: unknown; version?: unknown };
+  try {
+    canonicalRoot = fs.realpathSync(packageRoot);
+    pkg = JSON.parse(fs.readFileSync(path.join(canonicalRoot, 'package.json'), 'utf-8'));
+  } catch {
+    return null;
+  }
+  if (pkg.name !== NPM_PACKAGE_NAME || typeof pkg.version !== 'string') return null;
+  return {
+    ...(binPath ? { binPath } : {}),
+    packageRoot: canonicalRoot,
+    version: pkg.version,
+    atomicHelperInstall: fs.existsSync(path.join(canonicalRoot, 'dist', 'lib', 'app-bundle-install.js')),
+  };
 }
 
 /**
- * Scan PATH for `agents` entrypoints and resolve each to the agents-cli
- * package root it executes. More than one distinct root means upgrades,
+ * Resolve every `agents` entrypoint on PATH, then inspect the bounded global
+ * install layouts used by NVM, fnm, Volta, Bun, npm, and npx. More than one
+ * distinct package root means upgrades,
  * shims, and the command the user types can act on different copies — the
  * divergence behind silently-failing self-updates.
  *
@@ -399,10 +506,18 @@ export interface AgentsCliInstall {
  * @phnx-labs/agents-cli is some other tool and is skipped.
  * POSIX-only: Windows npm bins are .cmd wrappers, not symlinks.
  */
-export function findAgentsCliInstalls(pathEnv: string): AgentsCliInstall[] {
+export function findAgentsCliInstalls(
+  pathEnv: string,
+  opts: FindAgentsCliInstallsOptions = {},
+): AgentsCliInstall[] {
   if (process.platform === 'win32') return [];
   const installs: AgentsCliInstall[] = [];
   const seenRoots = new Set<string>();
+  const addInstall = (install: AgentsCliInstall | null): void => {
+    if (!install || seenRoots.has(install.packageRoot)) return;
+    seenRoots.add(install.packageRoot);
+    installs.push(install);
+  };
   for (const dir of pathEnv.split(path.delimiter).filter(Boolean)) {
     const candidate = path.join(dir, 'agents');
     let real: string;
@@ -413,16 +528,10 @@ export function findAgentsCliInstalls(pathEnv: string): AgentsCliInstall[] {
     }
     const packageRoot = packageRootForEntry(real);
     if (!packageRoot) continue;
-    if (seenRoots.has(packageRoot)) continue;
-    let pkg: { name?: unknown; version?: unknown };
-    try {
-      pkg = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf-8'));
-    } catch {
-      continue;
-    }
-    if (pkg.name !== NPM_PACKAGE_NAME || typeof pkg.version !== 'string') continue;
-    seenRoots.add(packageRoot);
-    installs.push({ binPath: candidate, packageRoot, version: pkg.version });
+    addInstall(readAgentsCliInstall(packageRoot, candidate));
+  }
+  for (const packageRoot of knownPackageRoots(opts)) {
+    addInstall(readAgentsCliInstall(packageRoot));
   }
   return installs;
 }

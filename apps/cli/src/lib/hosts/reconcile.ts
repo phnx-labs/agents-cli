@@ -11,7 +11,7 @@
  * `.exit` leaves the record `running` (we never guess failure).
  */
 
-import { sshExec, sshReachable, type SshExecResult } from '../ssh-exec.js';
+import { sshExec, type SshExecResult } from '../ssh-exec.js';
 import { updateTask, terminalPatch, type HostTask } from './tasks.js';
 
 export type RemoteExitState =
@@ -41,8 +41,12 @@ export function classifyExit(res: Pick<SshExecResult, 'code' | 'stdout' | 'timed
  * $HOME-prefixed path with a safe (hex) basename — intentionally unquoted so the
  * remote shell expands $HOME (same contract as progress.ts's fetch).
  */
-export function readRemoteExit(target: string, remoteExit: string, timeoutMs = 6000): RemoteExitState {
-  return classifyExit(sshExec(target, `cat ${remoteExit} 2>/dev/null`, { timeoutMs, multiplex: true }));
+export function readRemoteExit(target: string, remoteExit: string, timeoutMs = 6000, identityFile?: string): RemoteExitState {
+  return classifyExit(sshExec(target, `cat ${remoteExit} 2>/dev/null`, {
+    timeoutMs,
+    multiplex: true,
+    extraSshArgs: identityFile ? ['-i', identityFile, '-o', 'IdentitiesOnly=yes'] : undefined,
+  }));
 }
 
 /**
@@ -52,7 +56,7 @@ export function readRemoteExit(target: string, remoteExit: string, timeoutMs = 6
  */
 export function reconcileTask(task: HostTask): HostTask {
   if (task.status !== 'running') return task;
-  const st = readRemoteExit(task.target, task.remoteExit);
+  const st = readRemoteExit(task.target, task.remoteExit, 6000, task.identityFile);
   if (st.state !== 'done') return task;
   return updateTask(task.id, terminalPatch(st.code)) ?? task;
 }
@@ -72,9 +76,15 @@ export function reconcileRunningTasks(tasks: HostTask[]): HostTask[] {
   const reachable = new Map<string, boolean>();
   const patched = new Map<string, HostTask>();
   for (const t of running) {
-    if (!reachable.has(t.target)) reachable.set(t.target, sshReachable(t.target, 6000));
+    if (!reachable.has(t.target)) {
+      const probe = sshExec(t.target, 'true', {
+        timeoutMs: 6000,
+        extraSshArgs: t.identityFile ? ['-i', t.identityFile, '-o', 'IdentitiesOnly=yes'] : undefined,
+      });
+      reachable.set(t.target, probe.code === 0);
+    }
     if (!reachable.get(t.target)) continue; // host down → leave running
-    const st = readRemoteExit(t.target, t.remoteExit);
+    const st = readRemoteExit(t.target, t.remoteExit, 6000, t.identityFile);
     if (st.state === 'done') {
       const updated = updateTask(t.id, terminalPatch(st.code));
       if (updated) patched.set(t.id, updated);

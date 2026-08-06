@@ -18,6 +18,8 @@ export interface HostTask {
   id: string;
   host: string;
   target: string;
+  /** OpenSSH private-key path retained for follow/reconcile/stop calls. */
+  identityFile?: string;
   agent: string;
   prompt: string;
   pid?: number;

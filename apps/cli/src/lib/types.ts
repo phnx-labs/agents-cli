@@ -1135,6 +1135,8 @@ export interface HostEntry {
   address?: string;
   /** SSH user — inline hosts only. */
   user?: string;
+  /** Explicit private key inherited from a fleet device profile. */
+  identityFile?: string;
   /** Captured at enroll probe. */
   os?: string;
   /** Free-form capability tags for routing (e.g. ['gpu']). */

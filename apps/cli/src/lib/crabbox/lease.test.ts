@@ -387,7 +387,10 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
   ];
 
   /** A `crabbox list --json` entry. `profile` undefined → no profile label. */
-  function poolBoxJson(slug: string, over: { profile?: string; tailscale?: boolean; state?: string } = {}) {
+  function poolBoxJson(
+    slug: string,
+    over: { profile?: string; tailscale?: boolean; state?: string; expiresAt?: string } = {},
+  ) {
     return {
       name: `crabbox-${slug}`,
       status: 'running',
@@ -398,7 +401,7 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
         keep: 'true',
         profile: over.profile,
         created_at: '1800000000',
-        expires_at: '1800003600',
+        expires_at: over.expiresAt ?? '1800003600',
         last_touched_at: '1800000100',
         idle_timeout_secs: '1800',
         ...(over.tailscale ? { tailscale_ipv4: '100.64.0.9' } : {}),
@@ -493,9 +496,19 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
     expect(phases).toEqual(['reuse', 'ready']);
     expect(calls).toContain('list --json');
     expect(calls).toContain('status --id warm-one');
-    expect(calls).toContain('run --id warm-one --reclaim --script-stdin');
+    expect(calls).toContain('run --id warm-one --reclaim --idle-timeout 1800s --script-stdin');
     expect(calls.some((l) => l.startsWith('warmup'))).toBe(false);
     expect(calls.some((l) => l.startsWith('stop'))).toBe(false);
+  });
+
+  it('renews with the stable idle window after a prior reuse moved expiresAt', async () => {
+    const fake = setupPoolFake({
+      boxes: [poolBoxJson('warm-one', { profile: 'agents-cli', expiresAt: '1800007200' })],
+      readySlugs: ['warm-one'],
+    });
+    const { calls } = await runWithPool(fake);
+
+    expect(calls).toContain('run --id warm-one --reclaim --idle-timeout 1800s --script-stdin');
   });
 
   it('skips a pool box that is not SSH-ready, then warms and keeps a replacement pool box', async () => {
@@ -599,6 +612,9 @@ describe('isExpiredPoolStray — the on-lease expired-stray sweep', () => {
   });
   it('never a box touched within the grace window (a run may hold it)', () => {
     expect(isExpiredPoolStray(strayBox({ lastTouchedAt: NOW - 30 }), opts)).toBe(false);
+  });
+  it('never a box with unknown last-touched age', () => {
+    expect(isExpiredPoolStray(strayBox({ lastTouchedAt: null }), opts)).toBe(false);
   });
   it('never a box in a different profile pool', () => {
     expect(isExpiredPoolStray(strayBox({ profile: 'agents-cli' }), opts)).toBe(false);

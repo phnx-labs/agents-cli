@@ -2,7 +2,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { _resetTeamOriginIndex, classifyTeamSession, enrichTeamOrigins, filterTeamSessions } from './team-filter.js';
+import {
+  _resetTeamOriginIndex,
+  classifyTeamSession,
+  enrichTeamOrigins,
+  filterTeamSessions,
+  groupSessionsByTeam,
+  teamRowKind,
+  NO_TEAM_GROUP_KEY,
+  UNNAMED_TEAM_KEY,
+} from './team-filter.js';
 import type { SessionMeta } from './types.js';
 
 function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
@@ -120,6 +129,49 @@ describe('classifyTeamSession', () => {
     expect(origin!.handle).toBe('no-meta-');
   });
 
+  it('captures started_at as the spawn time and marks a meta-backed origin as source=meta (RUSH-1997)', () => {
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const agentDir = path.join(tmpDir, sessionId);
+    fs.mkdirSync(agentDir);
+    fs.writeFileSync(
+      path.join(agentDir, 'meta.json'),
+      JSON.stringify({
+        agent_id: sessionId,
+        name: 'frontend',
+        mode: 'edit',
+        task_name: 'redesign',
+        started_at: '2026-08-05T10:00:00.000Z',
+      }),
+    );
+
+    const origin = classifyTeamSession(makeSession({ id: sessionId }));
+
+    expect(origin!.startedAt).toBe('2026-08-05T10:00:00.000Z');
+    expect(origin!.source).toBe('meta');
+  });
+
+  it('marks the isTeamOrigin fallback as source=entrypoint — a bare SDK spawn, not a teammate (RUSH-1997)', () => {
+    const origin = classifyTeamSession(makeSession({ id: 'no-meta-here-2222', isTeamOrigin: true }));
+    expect(origin!.source).toBe('entrypoint');
+    expect(origin!.startedAt).toBeUndefined();
+  });
+
+  it('an unreadable meta.json is still a teammate (source=meta), just without fields (RUSH-1997)', () => {
+    const sessionId = 'cccccccc-dddd-eeee-ffff-000000000000';
+    const agentDir = path.join(tmpDir, sessionId);
+    fs.mkdirSync(agentDir);
+    fs.writeFileSync(path.join(agentDir, 'meta.json'), '{ this is not valid json');
+
+    const origin = classifyTeamSession(makeSession({ id: sessionId }));
+    expect(origin!.source).toBe('meta');
+    expect(origin!.handle).toBe('cccccccc');
+  });
+
+  it('enrichTeamOrigins tags the entrypoint fallback source too (RUSH-1997)', () => {
+    const [enriched] = enrichTeamOrigins([makeSession({ id: 'sdk-spawn-9999', isTeamOrigin: true })]);
+    expect(enriched.teamOrigin?.source).toBe('entrypoint');
+  });
+
   it('does NOT classify normal interactive session as team', () => {
     const session = makeSession({
       id: 'normal-session-id-no-meta',
@@ -134,6 +186,27 @@ describe('classifyTeamSession', () => {
   it('does NOT classify session as team when no meta.json and isTeamOrigin is false', () => {
     const session = makeSession({ id: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff' });
     expect(classifyTeamSession(session)).toBeNull();
+  });
+});
+
+describe('teamRowKind', () => {
+  it('a meta-backed origin is a teammate; an entrypoint-only origin is a sub-agent', () => {
+    expect(teamRowKind({ handle: 'x', source: 'meta' })).toBe('teammate');
+    expect(teamRowKind({ handle: 'x', source: 'entrypoint' })).toBe('subagent');
+  });
+
+  it('a bare-handle origin with no source is a sub-agent; undefined is too', () => {
+    expect(teamRowKind({ handle: 'x' })).toBe('subagent');
+    expect(teamRowKind(undefined)).toBe('subagent');
+  });
+
+  it('a source-less origin carrying meta fields is a teammate — version-skew peer safety (RUSH-1997)', () => {
+    // A pre-`source` peer sends a teamOrigin over the --host fan-out with no
+    // `source` but real meta fields. It must stay a teammate, not fall into the
+    // no-team bucket and lose its team name.
+    expect(teamRowKind({ handle: 'x', team: 'redesign' })).toBe('teammate');
+    expect(teamRowKind({ handle: 'x', mode: 'edit' })).toBe('teammate');
+    expect(teamRowKind({ handle: 'x', parentSessionId: 'orch-1' })).toBe('teammate');
   });
 });
 
@@ -322,5 +395,88 @@ describe('enrichTeamOrigins', () => {
     const [out] = enrichTeamOrigins([makeSession({ id: 'legacy-team-row', isTeamOrigin: true })]);
     expect(out.teamOrigin?.handle).toBe('legacy-t');
     expect(out.teamOrigin?.team).toBeUndefined();
+  });
+});
+
+describe('groupSessionsByTeam (RUSH-1997)', () => {
+  function teamRow(overrides: Partial<SessionMeta> & { team?: string; source?: 'meta' | 'entrypoint'; parent?: string; startedAt?: string }): SessionMeta {
+    const { team, source, parent, startedAt, ...rest } = overrides;
+    return makeSession({
+      ...rest,
+      teamOrigin: {
+        handle: (rest.id as string)?.slice(0, 8) ?? 'h',
+        team,
+        parentSessionId: parent,
+        startedAt,
+        source: source ?? 'meta',
+      },
+    });
+  }
+
+  it('groups teammates under their team and puts bare SDK spawns in the sub-agents bucket', () => {
+    const groups = groupSessionsByTeam([
+      teamRow({ id: 'a1', team: 'redesign', lastActivity: '2026-08-05T10:00:00Z' }),
+      teamRow({ id: 'a2', team: 'redesign', lastActivity: '2026-08-05T11:00:00Z' }),
+      teamRow({ id: 'b1', team: 'auth', lastActivity: '2026-08-05T09:00:00Z' }),
+      teamRow({ id: 'c1', source: 'entrypoint', lastActivity: '2026-08-05T12:00:00Z' }),
+    ]);
+
+    const redesign = groups.find((g) => g.key === 'redesign');
+    expect(redesign?.kind).toBe('team');
+    expect(redesign?.sessions.map((s) => s.id)).toEqual(['a2', 'a1']); // newest-active first within a team
+
+    const sub = groups.find((g) => g.key === NO_TEAM_GROUP_KEY);
+    expect(sub?.kind).toBe('noTeam');
+    expect(sub?.sessions.map((s) => s.id)).toEqual(['c1']);
+  });
+
+  it('sinks the sub-agents bucket last even when it is the most recently active group', () => {
+    const groups = groupSessionsByTeam([
+      teamRow({ id: 's1', source: 'entrypoint', lastActivity: '2026-08-05T23:00:00Z' }),
+      teamRow({ id: 't1', team: 'ui', lastActivity: '2026-08-05T08:00:00Z' }),
+    ]);
+    expect(groups.map((g) => g.kind)).toEqual(['team', 'noTeam']);
+  });
+
+  it('names the single agreed-on spawner and the earliest spawn time for a team', () => {
+    const groups = groupSessionsByTeam([
+      teamRow({ id: 'm1', team: 'ship', parent: 'orch-123', startedAt: '2026-08-05T10:05:00Z', lastActivity: '2026-08-05T10:30:00Z' }),
+      teamRow({ id: 'm2', team: 'ship', parent: 'orch-123', startedAt: '2026-08-05T10:00:00Z', lastActivity: '2026-08-05T10:20:00Z' }),
+    ]);
+    const ship = groups.find((g) => g.key === 'ship')!;
+    expect(ship.spawnerSessionId).toBe('orch-123');
+    expect(ship.firstSpawnTs).toBe('2026-08-05T10:00:00Z');
+  });
+
+  it('leaves the spawner unset when teammates disagree on their parent', () => {
+    const groups = groupSessionsByTeam([
+      teamRow({ id: 'x1', team: 'mixed', parent: 'orch-A' }),
+      teamRow({ id: 'x2', team: 'mixed', parent: 'orch-B' }),
+    ]);
+    expect(groups[0].spawnerSessionId).toBeUndefined();
+  });
+
+  it('buckets a teammate that carries no team name under (unnamed team), not the sub-agents bucket', () => {
+    const groups = groupSessionsByTeam([teamRow({ id: 'n1', team: undefined, source: 'meta' })]);
+    expect(groups[0].key).toBe(UNNAMED_TEAM_KEY);
+    expect(groups[0].kind).toBe('team');
+  });
+
+  it('groups a source-less peer teammate (version skew) under its team, not (no team)', () => {
+    const groups = groupSessionsByTeam([
+      makeSession({ id: 'peer1', teamOrigin: { handle: 'ui', team: 'legacy-peer-team' } }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].key).toBe('legacy-peer-team');
+    expect(groups[0].kind).toBe('team');
+  });
+
+  it('ignores sessions that carry no teamOrigin', () => {
+    const groups = groupSessionsByTeam([
+      makeSession({ id: 'plain', topic: 'normal work' }),
+      teamRow({ id: 'g1', team: 'only' }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].key).toBe('only');
   });
 });

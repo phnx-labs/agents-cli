@@ -1,0 +1,206 @@
+import { describe, expect, it } from 'vitest';
+
+import type { UsageSnapshot, UsageWindow } from '../usage.js';
+import {
+  computeReady,
+  formatQuota,
+  groupByAccount,
+  renderAccountsMatrix,
+  renderHarnessMatrix,
+  summarizeQuota,
+  type HarnessRow,
+  type QuotaSummary,
+} from './harness-inventory.js';
+
+/** Build a usage window; only `key` + `usedPercent` matter for these tests. */
+function win(key: UsageWindow['key'], usedPercent: number): UsageWindow {
+  return { key, label: key, shortLabel: key, usedPercent, resetsAt: null, windowMinutes: null };
+}
+
+function snapshot(windows: UsageWindow[], source: 'live' | 'last_seen' = 'live'): UsageSnapshot {
+  return { source, sourceLabel: source, capturedAt: null, windows };
+}
+
+/** A HarnessRow with sane defaults, overridable per test. */
+function row(overrides: Partial<HarnessRow> = {}): HarnessRow {
+  const quota: QuotaSummary = overrides.quota ?? { status: 'available', usedPercent: 10, stale: false };
+  return {
+    agent: 'claude',
+    version: '1.0.0',
+    account: 'a@ex.com',
+    signedIn: true,
+    quota,
+    ready: true,
+    ...overrides,
+  };
+}
+
+describe('summarizeQuota', () => {
+  it('returns null status and no percent when there is no snapshot', () => {
+    expect(summarizeQuota(null)).toEqual({ status: null, usedPercent: null, stale: false });
+    expect(summarizeQuota(snapshot([]))).toEqual({ status: null, usedPercent: null, stale: false });
+  });
+
+  it('takes the highest utilization across blocking windows', () => {
+    const q = summarizeQuota(snapshot([win('session', 12), win('week', 47)]));
+    expect(q.usedPercent).toBe(47);
+    expect(q.status).toBe('available');
+  });
+
+  it('rounds the percent', () => {
+    expect(summarizeQuota(snapshot([win('session', 12.6)])).usedPercent).toBe(13);
+  });
+
+  it('excludes the sonnet_week sub-limit from the account-wide utilization', () => {
+    // A maxed model sub-limit must not read as a throttled account.
+    const q = summarizeQuota(snapshot([win('session', 20), win('sonnet_week', 100)]));
+    expect(q.usedPercent).toBe(20);
+    expect(q.status).toBe('available');
+  });
+
+  it('reports rate_limited when a blocking window is at 100%', () => {
+    expect(summarizeQuota(snapshot([win('week', 100)])).status).toBe('rate_limited');
+  });
+
+  it('marks a cached (last_seen) snapshot stale', () => {
+    expect(summarizeQuota(snapshot([win('session', 5)], 'last_seen')).stale).toBe(true);
+  });
+
+  it('never shows 100% for an account that is not actually capped', () => {
+    // 99.6 rounds to 100, but the account is still `available` (a true 100 window
+    // would flip status to rate_limited) — so the display caps at 99 to avoid a
+    // "100%" cell next to a "ready" verdict.
+    const q = summarizeQuota(snapshot([win('session', 99.6)]));
+    expect(q.status).toBe('available');
+    expect(q.usedPercent).toBe(99);
+  });
+});
+
+describe('computeReady', () => {
+  it('is not ready and reasons "signed out" when signed out', () => {
+    expect(computeReady(false, { status: null, usedPercent: null, stale: false })).toEqual({
+      ready: false,
+      reason: 'signed out',
+    });
+  });
+
+  it('is not ready and reasons "rate-limited" when throttled', () => {
+    expect(computeReady(true, { status: 'rate_limited', usedPercent: 100, stale: false })).toEqual({
+      ready: false,
+      reason: 'rate-limited',
+    });
+  });
+
+  it('is ready when signed in and not throttled — even with no quota data', () => {
+    expect(computeReady(true, { status: null, usedPercent: null, stale: false })).toEqual({ ready: true });
+    expect(computeReady(true, { status: 'available', usedPercent: 30, stale: false })).toEqual({ ready: true });
+  });
+});
+
+describe('formatQuota', () => {
+  it('renders limited / percent / dash, marking cached with *', () => {
+    expect(formatQuota({ status: 'rate_limited', usedPercent: 100, stale: false })).toBe('limited');
+    expect(formatQuota({ status: 'available', usedPercent: 42, stale: false })).toBe('42%');
+    expect(formatQuota({ status: 'available', usedPercent: 42, stale: true })).toBe('42%*');
+    expect(formatQuota({ status: null, usedPercent: null, stale: false })).toBe('—');
+  });
+});
+
+describe('groupByAccount', () => {
+  it('collapses installs that share one account into a single row', () => {
+    const rows = [
+      row({ agent: 'claude', version: '1.0.0', account: 'me@ex.com' }),
+      row({ agent: 'claude', version: '1.1.0', account: 'me@ex.com' }),
+      row({ agent: 'codex', version: '0.1.0', account: 'work@ex.com' }),
+    ];
+    const groups = groupByAccount(rows);
+    expect(groups).toHaveLength(2);
+    const me = groups.find((g) => g.account === 'me@ex.com')!;
+    expect(me.installs).toBe(2);
+    expect(me.agents).toEqual(['claude']);
+    expect(me.signedIn).toBe(true);
+  });
+
+  it('buckets signed-out installs under a null account', () => {
+    const groups = groupByAccount([
+      row({ account: null, signedIn: false, ready: false, reason: 'signed out' }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].account).toBeNull();
+    expect(groups[0].signedIn).toBe(false);
+    expect(groups[0].ready).toBe(false);
+  });
+
+  it('surfaces a throttled member so a rate-limit is never hidden by an available sibling', () => {
+    const groups = groupByAccount([
+      row({ agent: 'droid', version: '1', account: 'x@ex.com', quota: { status: 'available', usedPercent: 5, stale: false } }),
+      row({ agent: 'droid', version: '2', account: 'x@ex.com', quota: { status: 'rate_limited', usedPercent: 100, stale: false }, ready: false, reason: 'rate-limited' }),
+    ]);
+    expect(groups[0].quota.status).toBe('rate_limited');
+    expect(groups[0].ready).toBe(false);
+    expect(groups[0].reason).toBe('rate-limited');
+  });
+
+  it('collects distinct agent ids sorted', () => {
+    const groups = groupByAccount([
+      row({ agent: 'codex', account: 'shared@ex.com' }),
+      row({ agent: 'claude', account: 'shared@ex.com' }),
+      row({ agent: 'claude', version: '2', account: 'shared@ex.com' }),
+    ]);
+    expect(groups[0].agents).toEqual(['claude', 'codex']);
+    expect(groups[0].installs).toBe(3);
+  });
+});
+
+describe('renderHarnessMatrix', () => {
+  it('groups rows under each device and shows account / signed / quota / ready', () => {
+    const out = renderHarnessMatrix([
+      { host: 'zion', rows: [row({ agent: 'claude', version: '1.2.3', account: 'me@ex.com', quota: { status: 'available', usedPercent: 12, stale: false } })] },
+    ]).join('\n');
+    expect(out).toContain('Fleet harnesses');
+    expect(out).toContain('zion');
+    expect(out).toContain('claude@1.2.3');
+    expect(out).toContain('me@ex.com');
+    expect(out).toContain('12%');
+    expect(out).toContain('ready');
+  });
+
+  it('shows a signed-out install with its reason, not "ready"', () => {
+    const out = renderHarnessMatrix([
+      { host: 'box', rows: [row({ signedIn: false, account: null, ready: false, reason: 'signed out', quota: { status: null, usedPercent: null, stale: false } })] },
+    ]).join('\n');
+    expect(out).toContain('signed out');
+  });
+
+  it('notes an offline / skipped host instead of rows', () => {
+    const out = renderHarnessMatrix([
+      { host: 'sleepy', rows: [], skipped: 'offline' },
+      { host: 'broken', rows: [], error: 'timed out' },
+      { host: 'bare', rows: [] },
+    ]).join('\n');
+    expect(out).toContain('offline');
+    expect(out).toContain('timed out');
+    expect(out).toContain('no harnesses installed');
+  });
+});
+
+describe('renderAccountsMatrix', () => {
+  it('renders one row per account with its harnesses', () => {
+    const out = renderAccountsMatrix([
+      {
+        host: 'mac-mini',
+        rows: [
+          row({ agent: 'claude', version: '1', account: 'me@ex.com' }),
+          row({ agent: 'claude', version: '2', account: 'me@ex.com' }),
+          row({ agent: 'codex', version: '1', account: 'work@ex.com' }),
+        ],
+      },
+    ]).join('\n');
+    expect(out).toContain('Fleet accounts');
+    expect(out).toContain('mac-mini');
+    expect(out).toContain('me@ex.com');
+    expect(out).toContain('work@ex.com');
+    // collapsed: one 'me@ex.com' row, not two
+    expect(out.match(/me@ex\.com/g)?.length).toBe(1);
+  });
+});

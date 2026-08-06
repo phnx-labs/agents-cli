@@ -11,7 +11,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { JobConfig } from './routines.js';
-import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from './gemini-settings.js';
 import { getRoutinesDir, getUserAgentsDir } from './state.js';
 import { safeJoin } from './paths.js';
 import { createLink } from './platform/index.js';
@@ -105,12 +104,12 @@ export function prepareJobHome(config: JobConfig): string {
   cleanJobHome(config.name);
   fs.mkdirSync(overlayHome, { recursive: true });
 
+  // gemini is hard-deprecated: runner.ts rejects a gemini routine before it
+  // ever reaches prepareJobHome, so there is deliberately no branch here.
   if (config.agent === 'claude') {
     generateClaudeConfig(overlayHome, config);
   } else if (config.agent === 'codex') {
     generateCodexConfig(overlayHome, config);
-  } else if (config.agent === 'gemini') {
-    generateGeminiConfig(overlayHome, config);
   } else if (config.agent === 'cursor') {
     generateCursorConfig(overlayHome);
   }
@@ -312,22 +311,4 @@ export function generateCodexConfig(overlayHome: string, config: JobConfig): voi
     lines.join('\n') + '\n',
     'utf-8'
   );
-}
-
-/** Generate a Gemini settings.json in the overlay from the job's config block. */
-export function generateGeminiConfig(overlayHome: string, config: JobConfig): void {
-  const settingsPath = path.join(overlayHome, '.gemini', 'settings.json');
-  updateGeminiSettings(settingsPath, (settings) => {
-    if (config.config?.model) {
-      settings.model = config.config.model;
-    }
-
-    if (config.config) {
-      for (const [key, value] of Object.entries(config.config)) {
-        settings[key] = value;
-      }
-    }
-
-    setGeminiAutoUpdateDisabled(settings);
-  });
 }

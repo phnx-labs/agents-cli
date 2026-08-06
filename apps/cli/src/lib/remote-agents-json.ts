@@ -17,10 +17,10 @@ import {
   REMOTE_STDOUT_MAX_BYTES,
   RemoteUtf8Accumulator,
 } from './ssh-exec.js';
-import { sshTargetFor } from './devices/connect.js';
+import { deviceIdentityArgs, sshTargetFor } from './devices/connect.js';
 import { resolveExplicitTargets } from './devices/resolve-target.js';
 import { loadDevices, isControlDevice, isDialableDevice, type DeviceProfile } from './devices/registry.js';
-import { remoteShellFor, buildWindowsAgentsCommand } from './hosts/remote-cmd.js';
+import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from './hosts/remote-cmd.js';
 import { machineId, normalizeHost } from './machine-id.js';
 
 const REMOTE_TIMEOUT_MS = 12_000;
@@ -62,7 +62,7 @@ export interface RemoteAgentsJsonOptions<T> {
 export type SshCaptureFn = (
   target: string,
   remoteCmd: string,
-  opts: { timeoutMs: number; signal?: AbortSignal },
+  opts: { timeoutMs: number; signal?: AbortSignal; extraSshArgs?: string[] },
 ) => Promise<{ code: number | null; stdout: string }>;
 
 export interface GatherRemoteAgentsJsonDeps {
@@ -96,7 +96,9 @@ export function parseRemoteAgentsJsonPayload<T>(
   machine: string,
   parse: RemoteAgentsJsonOptions<T>['parse'],
 ): { items: T[]; parseFailed: boolean } {
-  const parsed = normalizeRemoteAgentsJsonParse(parse(stdout, machine));
+  // A Windows peer can prefix the JSON with a PowerShell CLIXML banner; strip it
+  // before handing stdout to the command-specific parser (RUSH-2286).
+  const parsed = normalizeRemoteAgentsJsonParse(parse(stripClixml(stdout), machine));
   return parsed.valid
     ? { items: parsed.items, parseFailed: false }
     : { items: [], parseFailed: true };
@@ -176,10 +178,10 @@ export function captureBoundedStdout(
   });
 }
 
-const sshCapture: SshCaptureFn = (target, remoteCmd, { timeoutMs, signal }) => {
+const sshCapture: SshCaptureFn = (target, remoteCmd, { timeoutMs, signal, extraSshArgs }) => {
   assertValidSshTarget(target);
   if (signal?.aborted) return Promise.resolve({ code: null, stdout: '' });
-  const args = [...SSH_OPTS, ...controlOpts(), target, remoteCmd];
+  const args = [...SSH_OPTS, ...controlOpts(), ...(extraSshArgs ?? []), target, remoteCmd];
   const child = spawn('ssh', args, { stdio: ['ignore', 'pipe', 'ignore'] });
   return captureBoundedStdout(child, { timeoutMs, signal });
 };
@@ -191,7 +193,7 @@ export async function gatherRemoteAgentsJson<T>(
 ): Promise<RemoteAgentsJsonResult<T>> {
   const capture = deps.capture ?? sshCapture;
   const self = machineId();
-  const targets: Array<{ target: string; machine: string; name: string; os?: string }> = [];
+  const targets: Array<{ target: string; machine: string; name: string; os?: string; extraSshArgs?: string[] }> = [];
 
   if (options.hosts && options.hosts.length > 0) {
     targets.push(...await resolveExplicitTargets(options.hosts));
@@ -219,6 +221,7 @@ export async function gatherRemoteAgentsJson<T>(
           machine: normalizeHost(device.name),
           name: device.name,
           os: device.platform,
+          extraSshArgs: deviceIdentityArgs(device),
         });
       } catch {
         // A registered profile without a dialable address is not a peer yet.
@@ -244,6 +247,7 @@ export async function gatherRemoteAgentsJson<T>(
     const result = await capture(target.target, command, {
       timeoutMs: options.timeoutMs ?? REMOTE_TIMEOUT_MS,
       signal: controller?.signal,
+      extraSshArgs: target.extraSshArgs,
     });
     // A peer we deliberately cancelled is neither a hit nor a failure — it never
     // got to answer, so it must not pollute skipped/parseFailed (which drive the

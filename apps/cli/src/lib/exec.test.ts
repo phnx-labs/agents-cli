@@ -303,6 +303,14 @@ describeExec('buildExecCommand — native resume wiring', () => {
     expect(cmd).not.toContain('--print');
   });
 
+  it('claude interactive prompt is positional instead of the -p print flag', () => {
+    const prompt = '/continue abc-123';
+    const cmd = buildExecCommand(execOpts({ agent: 'claude', prompt, interactive: true }));
+    expect(cmd).toContain(prompt);
+    expect(cmd).not.toContain('-p');
+    expect(cmd).not.toContain('--print');
+  });
+
   it('legacy --session-id (no resume) still CREATES with the fixed id', () => {
     const cmd = buildExecCommand(execOpts({ agent: 'claude', sessionId: 'abc-123', headless: true, prompt: 'hi' }));
     expect(cmd).toContain('--session-id');
