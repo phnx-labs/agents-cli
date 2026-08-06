@@ -14,7 +14,7 @@ import type { SessionAgentId, SessionEvent, SessionMeta, SessionRunMode } from '
 import { parseSession } from './parse.js';
 import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
 import { getSessionsDir, getSessionsDbPath } from '../state.js';
-import { query as queryEvents } from '../events.js';
+import { query as queryEvents, queryToolUsageForSessions } from '../events.js';
 import { machineForSessionFile } from './origin-machine.js';
 import { loadSessionActorIndex, readSessionActorRecord } from './actor-sidecar.js';
 import { toolCallsFromEvents, type IndexedToolCall } from './tool-calls.js';
@@ -1880,6 +1880,15 @@ export function upsertSessionsBatch(
   });
   const writtenEntries: typeof enrichedEntries = [];
 
+  // Pre-compute browser/computer usage for all sessions outside the write
+  // transaction. detectToolUsage scans all event log files (O(files) I/O
+  // per call) and holding the SQLite write lock during that scan is what
+  // causes the "DB locked" errors (RUSH-2006). One pass for the whole batch
+  // costs O(files) total instead of O(N × files) inside the lock.
+  const toolUsageBySession = queryToolUsageForSessions(
+    new Set(enrichedEntries.map(e => e.meta.id)),
+  );
+
   const txn = db.transaction((items: typeof entries) => {
     // Re-read the ledger now that we hold the write lock. Any file committed
     // by a concurrent process since our pre-scan is visible here.
@@ -1910,7 +1919,7 @@ export function upsertSessionsBatch(
       // back when the error escapes `fn`, so catching + skipping here leaves the txn valid
       // and committable. We deliberately do NOT stamp the ledger for a skipped row, so the
       // next scan re-tries it (self-healing once the underlying parser is fixed).
-      const toolUsage = detectToolUsage(meta.id);
+      const toolUsage = toolUsageBySession.get(meta.id) ?? { usedBrowser: false, usedComputer: false };
       // claude/codex skip enrichCachedSessionMeta above (preserving their
       // resumable-parse optimization) — write their pre-computed
       // skillsUsed/slashCommandsUsed (folded incrementally by discover.ts's

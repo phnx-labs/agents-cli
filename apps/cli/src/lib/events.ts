@@ -1321,6 +1321,70 @@ export function query(options: {
   return results;
 }
 
+/**
+ * Scan event logs once for a set of session IDs and return browser/computer
+ * usage flags for each. O(files) instead of O(N × files) — safe to call
+ * outside a SQLite write transaction.
+ */
+export function queryToolUsageForSessions(
+  sessionIds: ReadonlySet<string>,
+): Map<string, { usedBrowser: boolean; usedComputer: boolean }> {
+  const result = new Map<string, { usedBrowser: boolean; usedComputer: boolean }>();
+  if (sessionIds.size === 0) return result;
+
+  for (const id of sessionIds) {
+    result.set(id, { usedBrowser: false, usedComputer: false });
+  }
+
+  const BROWSER_EVENTS = new Set(['browser.navigate', 'browser.screenshot']);
+  const COMPUTER_EVENTS = new Set(['computer.action']);
+
+  eventsPath();
+  migrateLegacyEventLogs();
+  const files = listEventLogFiles().sort((a, b) =>
+    Number(b.currentActive) - Number(a.currentActive) || b.mtimeMs - a.mtimeMs || b.path.localeCompare(a.path)
+  );
+
+  let remaining = sessionIds.size * 2; // each session needs up to 2 flags set
+
+  for (const file of files) {
+    if (remaining <= 0) break;
+
+    let content: string;
+    if (file.gzip) {
+      try {
+        content = gunzipSync(fs.readFileSync(file.path)).toString('utf-8');
+      } catch {
+        continue;
+      }
+    } else {
+      content = fs.readFileSync(file.path, 'utf-8');
+    }
+
+    for (const line of content.trim().split('\n')) {
+      if (!line) continue;
+      try {
+        const record = JSON.parse(line) as EventRecord;
+        const sid = record.sessionId;
+        if (!sid || !result.has(sid)) continue;
+
+        const entry = result.get(sid)!;
+        if (BROWSER_EVENTS.has(record.event as string) && !entry.usedBrowser) {
+          entry.usedBrowser = true;
+          remaining--;
+        } else if (COMPUTER_EVENTS.has(record.event as string) && !entry.usedComputer) {
+          entry.usedComputer = true;
+          remaining--;
+        }
+      } catch {
+        // skip malformed lines
+      }
+    }
+  }
+
+  return result;
+}
+
 // ─── Stats ────────────────────────────────────────────────────────────────────
 
 /**

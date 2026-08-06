@@ -185,6 +185,41 @@ describe('usedBrowser/usedComputer — a scoped events-log read, not a transcrip
     expect(row.usedBrowser).toBeUndefined();
     expect(row.usedComputer).toBeUndefined();
   });
+
+  it('upsertSessionsBatch correctly flags multiple sessions in one call without scanning event logs inside the write transaction', () => {
+    // Three sessions in one batch: browser-only, computer-only, and neither.
+    // This exercises the pre-computed queryToolUsageForSessions path that runs
+    // outside the SQLite write transaction (RUSH-2207 fix).
+    emit('browser.navigate', { sessionId: 'batch-browser', profile: 'default', url: 'https://a.com' });
+    emit('computer.action', { sessionId: 'batch-computer', command: 'click', targetPid: 1 });
+    // 'batch-none' gets no events
+
+    const makeMeta = (id: string): SessionMeta => ({
+      id,
+      shortId: id.slice(0, 8),
+      agent: 'claude' as const,
+      timestamp: '2026-08-01T00:00:00Z',
+      filePath: emptyFile(id),
+    });
+
+    upsertSessionsBatch([
+      { meta: makeMeta('batch-browser'), content: '' },
+      { meta: makeMeta('batch-computer'), content: '' },
+      { meta: makeMeta('batch-none'), content: '' },
+    ]);
+
+    const browser = findSessionsById('batch-browser')[0];
+    expect(browser.usedBrowser).toBe(true);
+    expect(browser.usedComputer).toBe(false);
+
+    const computer = findSessionsById('batch-computer')[0];
+    expect(computer.usedBrowser).toBe(false);
+    expect(computer.usedComputer).toBe(true);
+
+    const none = findSessionsById('batch-none')[0];
+    expect(none.usedBrowser).toBe(false);
+    expect(none.usedComputer).toBe(false);
+  });
 });
 
 describe('session_resource_usage — skill/slash-command usage joined against real provenance (#12)', () => {
