@@ -160,13 +160,9 @@ export function resolveHeadlessMode(
   if (mode !== requested) {
     const subject = warningContext ? `${warningContext}: ` : '';
     if (requested === 'plan') {
-      const limitation = agent === 'cursor'
-        ? "cursor's read-only plan mode is not enabled in this build"
-        : `${agent} has no read-only 'plan' mode`;
       warn(
-        `[agents] ${subject}${limitation}; ` +
-        `running '${mode}' (writable) instead${agent === 'cursor' ? ' (RUSH-2101)' : ''}. ` +
-        `Pass --mode ${mode} to silence this.\n`,
+        `[agents] ${subject}${agent} has no read-only 'plan' mode; ` +
+        `running '${mode}' (writable) instead. Pass --mode ${mode} to silence this.\n`,
       );
     } else {
       warn(`[agents] ${subject}${agent} has no '${requested}' mode; using '${mode}'.\n`);
@@ -662,6 +658,7 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     base: ['cursor-agent'],
     promptFlag: '-p',
     modeFlags: {
+      plan: ['--plan'],
       edit: [],
       skip: ['-f'],
     },

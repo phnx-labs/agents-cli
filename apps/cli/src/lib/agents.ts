@@ -328,7 +328,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     // See transformSubagentForCursor / https://cursor.com/docs/subagents.
     // interactiveRepl: false — cursor-agent exits immediately with no argv. It requires a
     // prompt to do anything useful; a bare invocation is not a REPL (RUSH-2185, EXEC-23a).
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '2026.1.22' }, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'], interactiveRepl: false }, // allowlist: ~/.cursor/cli-config.json
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '2026.1.22' }, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'], interactiveRepl: false }, // allowlist: ~/.cursor/cli-config.json
   },
   opencode: {
     id: 'opencode',
