@@ -12,6 +12,7 @@ import {
   planKeychainReap,
   reapOrphanedKeychainProcesses,
   parseEtimeToSeconds,
+  isReapableHelperCommand,
   ORPHAN_GRACE_SEC,
   STUCK_GRACE_SEC,
   resetKeychainReaperCandidatesForTest,
@@ -25,6 +26,8 @@ import {
 // release until it was fixed. Node BUILTIN requires (child_process/os/path/fs)
 // resolve fine, which is why only these two broke.
 import { setInstallRootForTest } from './install-helper.js';
+
+const HELPER_PATH = '/Users/x/Library/Application Support/agents-cli/Agents CLI.app/Contents/MacOS/Agents CLI';
 
 function snap(overrides: Partial<KeychainProcessSnapshot> & Pick<KeychainProcessSnapshot, 'pid'>): KeychainProcessSnapshot {
   return {
@@ -314,4 +317,63 @@ describe('reapOrphanedKeychainProcesses (darwin integration)', () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   }, 60_000);
+});
+
+describe('isReapableHelperCommand — never target the long-lived watch-lock watcher', () => {
+  it('excludes the watch-lock watcher (the auto-lock-on-sleep child)', () => {
+    expect(isReapableHelperCommand(`${HELPER_PATH} watch-lock`, HELPER_PATH)).toBe(false);
+  });
+
+  it('includes the short-lived keychain verbs a wedged coreauthd can hang', () => {
+    for (const verb of ['get', 'has', 'list', 'set', 'delete', 'migrate-acl', 'get-batch']) {
+      expect(isReapableHelperCommand(`${HELPER_PATH} ${verb} some-item user`, HELPER_PATH)).toBe(true);
+    }
+  });
+
+  it('includes a bare helper exec with no verb (still not watch-lock)', () => {
+    expect(isReapableHelperCommand(HELPER_PATH, HELPER_PATH)).toBe(true);
+  });
+
+  it('excludes any non-helper command', () => {
+    expect(isReapableHelperCommand('/usr/bin/node index.js', HELPER_PATH)).toBe(false);
+    // A different binary whose name merely CONTAINS the helper path as a substring
+    // must not match — the guard requires the exact path as a prefix + a space.
+    expect(isReapableHelperCommand(`${HELPER_PATH}-evil watch-lock`, HELPER_PATH)).toBe(false);
+  });
+});
+
+describe('planKeychainReap — the watch-lock regression (RUSH-2232 follow-up)', () => {
+  // A watch-lock watcher is a helper child of a LIVE parent (the broker/daemon),
+  // long-lived (days). The driver marks it isHelper=false via isReapableHelperCommand,
+  // so the planner must never record or kill it, even across many sweeps.
+  const brokerPid = 400;
+  const watchLockPid = 401;
+  const parent = snap({ pid: brokerPid, ppid: 1, elapsedSec: 1_000_000, isHelper: false, startTime: 'st-broker' });
+  const watchLock = snap({
+    pid: watchLockPid,
+    ppid: brokerPid,
+    elapsedSec: STUCK_GRACE_SEC + 100_000, // far past the stuck threshold
+    isHelper: false, // excluded by isReapableHelperCommand
+    startTime: 'st-watchlock',
+  });
+
+  it('never kills or records the watch-lock watcher across three sweeps', () => {
+    let candidates = new Map<number, StuckParentCandidate>();
+    for (let sweep = 0; sweep < 3; sweep++) {
+      const plan = planKeychainReap([parent, watchLock], Date.now() + sweep * 300_000, candidates);
+      expect(plan.kill).toEqual([]);
+      expect(plan.nextCandidates.size).toBe(0);
+      candidates = plan.nextCandidates;
+    }
+  });
+
+  it('still kills a genuinely stuck read verb on the second sweep (fix does not weaken reaping)', () => {
+    // Same shape, but this helper child IS reap-eligible (a stuck `get`).
+    const stuckGet = snap({ pid: 402, ppid: brokerPid, elapsedSec: STUCK_GRACE_SEC + 50, isHelper: true, startTime: 'st-get' });
+    const sweep1 = planKeychainReap([parent, stuckGet], 1_000, new Map());
+    expect(sweep1.kill).toEqual([]);
+    expect(sweep1.nextCandidates.size).toBe(1);
+    const sweep2 = planKeychainReap([parent, stuckGet], 2_000, sweep1.nextCandidates);
+    expect(sweep2.kill).toContain(402);
+  });
 });

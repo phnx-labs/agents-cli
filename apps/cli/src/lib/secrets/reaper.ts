@@ -33,7 +33,12 @@ export interface KeychainProcessSnapshot {
    * `null` means "could not capture" — the planner must fail closed.
    */
   startTime: string | null;
-  /** True when this process's executable path matches the installed helper. */
+  /**
+   * True when this process is a REAP-ELIGIBLE helper invocation — the installed
+   * helper binary running a short-lived keychain verb. False for a non-helper
+   * process AND for the long-lived `watch-lock` watcher (see
+   * {@link isReapableHelperCommand}), which must never be reaped.
+   */
   isHelper: boolean;
 }
 
@@ -183,6 +188,31 @@ function parsePsLine(line: string): {
   return { pid, ppid, elapsedSec, command };
 }
 
+/**
+ * The one helper verb that is DELIBERATELY long-lived: the broker's auto-lock
+ * sleep/lock watcher (`spawn(getKeychainHelperPath(), ['watch-lock'], …)` in
+ * `agent.ts`). It lives for the broker's whole hold — potentially days — as a
+ * healthy child of the live broker/daemon, emitting LOCK/SLEEP lines that wipe
+ * the in-memory secret store on sleep. It is NOT a stuck keychain read, so the
+ * reaper must never target it: killing it silently disables auto-lock-on-sleep.
+ */
+const HELPER_WATCH_LOCK_VERB = 'watch-lock';
+
+/**
+ * Whether a `ps` command line is a REAP-ELIGIBLE helper invocation: the installed
+ * helper binary running a short-lived keychain verb (get/has/list/set/delete/
+ * migrate-*) that a wedged `coreauthd` can hang. Returns false for a non-helper
+ * command AND for the deliberately long-lived `watch-lock` watcher — matching by
+ * the full argv (`ps … command=`), so a live-parent `watch-lock` child is never
+ * mistaken for a stuck read and killed. Pure; unit-tested.
+ */
+export function isReapableHelperCommand(command: string, helperPath: string): boolean {
+  if (command === helperPath) return true; // bare exec, no verb — never watch-lock
+  if (!command.startsWith(`${helperPath} `)) return false; // not our helper
+  const firstArg = command.slice(helperPath.length + 1).trimStart().split(/\s+/)[0];
+  return firstArg !== HELPER_WATCH_LOCK_VERB;
+}
+
 /** Module-state for the two-sweep stuck-parent debounce. */
 let stuckParentCandidates = new Map<number, StuckParentCandidate>();
 
@@ -245,9 +275,11 @@ export function reapOrphanedKeychainProcesses(): {
     const parsed = parsePsLine(line);
     if (!parsed) continue;
     const { pid, ppid, elapsedSec, command } = parsed;
-    // Exact path-match: the helper invocation's command line begins with the
-    // absolute helper path, followed by a space and its arguments (or nothing).
-    const isHelper = command === helperPath || command.startsWith(`${helperPath} `);
+    // Reap-eligible = the helper binary running a short-lived keychain verb. The
+    // full-argv match excludes the deliberately long-lived `watch-lock` watcher,
+    // whose live-parent child would otherwise be killed as if it were stuck
+    // (RUSH-2232 — that silently disabled auto-lock-on-sleep).
+    const isHelper = isReapableHelperCommand(command, helperPath);
     rows.push({ pid, ppid, elapsedSec, isHelper, startTime: null });
   }
 
