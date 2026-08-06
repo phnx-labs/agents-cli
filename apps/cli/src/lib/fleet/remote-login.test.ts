@@ -166,6 +166,14 @@ describe('buildRemoteLoginSshCommand', () => {
     expect(cmd).toContain('PATH="$HOME/.agents/.cache/shims:$PATH" codex login');
   });
 
+  it('pins an explicit device identity', () => {
+    const cmd = buildRemoteLoginSshCommand('user@box', codex, [
+      '-i', '/keys/box', '-o', 'IdentitiesOnly=yes',
+    ]);
+    expect(cmd).toContain('-i /keys/box');
+    expect(cmd).toContain('-o IdentitiesOnly=yes');
+  });
+
   it('rejects an injection-shaped target', () => {
     expect(() => buildRemoteLoginSshCommand('box; rm -rf /', droid)).toThrow();
   });

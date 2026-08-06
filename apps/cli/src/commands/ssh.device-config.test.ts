@@ -101,6 +101,15 @@ describe('devices set', () => {
     const worker = JSON.parse(listed.stdout).find((device: { name: string }) => device.name === 'worker');
     expect(worker.auth).toEqual({ method: 'key', identityFile: '/keys/fleet worker' });
     expect(listed.stdout).not.toContain('legacy');
+
+    expect(run(['devices', 'set', 'worker', '--clear-identity-file']).status).toBe(0);
+    const cleared = JSON.parse(run(['devices', 'list', '--json']).stdout).find((device: { name: string }) => device.name === 'worker');
+    expect(cleared.auth).toEqual({ method: 'key' });
+
+    expect(run(['devices', 'set', 'worker', '--auth', 'password', '--bundle', 'legacy']).status).toBe(0);
+    const invalid = run(['devices', 'set', 'worker', '--identity-file', '/keys/wrong-mode']);
+    expect(invalid.status).toBe(1);
+    expect(invalid.stderr).toContain('--identity-file requires key auth');
   });
 });
 

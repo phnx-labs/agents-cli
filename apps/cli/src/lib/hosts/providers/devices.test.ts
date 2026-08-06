@@ -54,7 +54,7 @@ describe('DevicesHostProvider.list', () => {
       platform: 'linux',
       user: 'taylor',
       address: { via: 'tailscale', dnsName: 'gpu-box.tail1a85a1.ts.net', ip: '100.68.1.2' },
-      auth: { method: 'key' },
+      auth: { method: 'key', identityFile: '/keys/gpu-box' },
       tailscale: { id: 'n1', hostName: 'gpu-box', online: true },
     });
 
@@ -66,6 +66,7 @@ describe('DevicesHostProvider.list', () => {
     expect(hosts[0].address).toBe('gpu-box.tail1a85a1.ts.net');
     expect(hosts[0].status).toBe('online');
     expect(hosts[0].dispatchable).toBe(true);
+    expect(hosts[0].identityFile).toBe('/keys/gpu-box');
   });
 
   it('lists password-auth devices marked non-dispatchable', async () => {

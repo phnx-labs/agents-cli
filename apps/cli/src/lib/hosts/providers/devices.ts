@@ -49,6 +49,7 @@ function deviceToPoolHost(device: DeviceProfile): Host | null {
     source: 'inline',
     address,
     user: device.user,
+    identityFile: device.auth.identityFile,
     ...(device.platform !== 'unknown' ? { os: device.platform } : {}),
     enrolled: true,
     status: statusOf(device),

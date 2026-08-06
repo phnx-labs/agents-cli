@@ -12,7 +12,7 @@
 import { randomUUID } from 'crypto';
 import { sshExec, sshStream, shellQuote } from '../ssh-exec.js';
 import type { Host } from './types.js';
-import { sshTargetFor } from './types.js';
+import { hostIdentityArgs, sshTargetFor } from './types.js';
 import { ensureHostReady } from './ready.js';
 import { remoteShellFor, posixEnvExports } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
@@ -168,7 +168,7 @@ function terminateRemoteLaunch(task: HostTask): void {
       `sleep 1; kill -KILL -- -${pid} 2>/dev/null || true; ` +
     `elif kill -0 -- -${pid} 2>/dev/null; then exit 1; fi; ` +
     `rm -f ${task.remoteLog} ${task.remoteExit}`;
-  const result = sshExec(task.target, command, { timeoutMs: 10000, multiplex: true });
+  const result = sshExec(task.target, command, { timeoutMs: 10000, multiplex: true, extraSshArgs: task.identityFile ? ['-i', task.identityFile, '-o', 'IdentitiesOnly=yes'] : undefined });
   if (result.code !== 0) {
     throw new Error(
       `Failed to terminate remote task ${task.id} on ${task.host}: ` +
@@ -229,7 +229,7 @@ export function stopDispatchedTask(task: HostTask): HostTask {
     throw new Error(`Cannot stop remote task ${task.id}: launch returned no PID.`);
   }
   const command = buildStopRemoteCommand(task.pid, task.remoteExit);
-  const result = sshExec(task.target, command, { timeoutMs: 10000, multiplex: true });
+  const result = sshExec(task.target, command, { timeoutMs: 10000, multiplex: true, extraSshArgs: task.identityFile ? ['-i', task.identityFile, '-o', 'IdentitiesOnly=yes'] : undefined });
   if (result.code !== 0) {
     throw new Error(
       `Failed to stop remote task ${task.id} on ${task.host}: ` +
@@ -318,6 +318,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     timeoutMs: 30000,
     multiplex: !opts.copyCreds,
     hostKeyOpts: credHostKeyOpts,
+    extraSshArgs: hostIdentityArgs(host),
   });
   if (res.code !== 0) {
     throw new Error(`Failed to launch on "${host.name}": ${(res.stderr || res.stdout).trim() || 'ssh error'}`);
@@ -328,6 +329,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     id,
     host: host.name,
     target,
+    identityFile: host.identityFile,
     agent: opts.agentLabel,
     prompt: opts.promptLabel,
     pid: Number.isFinite(pid) ? pid : undefined,
@@ -362,6 +364,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     taskId: id,
     echo: true,
     timeoutMs: opts.timeoutMs,
+    extraSshArgs: hostIdentityArgs(host),
   });
   // -1 = the follow window closed while the run continues on the host. Leave the
   // record 'running' (do NOT freeze it terminal) so a later `hosts ps`/`logs`
@@ -583,6 +586,7 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
     tty: process.stdin.isTTY,
     multiplex: !opts.copyCreds,
     hostKeyOpts: credHostKeyOpts,
+    extraSshArgs: hostIdentityArgs(host),
   });
 }
 

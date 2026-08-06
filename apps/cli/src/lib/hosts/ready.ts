@@ -11,7 +11,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { sshExec, shellQuote } from '../ssh-exec.js';
 import type { Host } from './types.js';
-import { sshTargetFor } from './types.js';
+import { hostIdentityArgs, sshTargetFor } from './types.js';
 import { remoteShellFor, buildWindowsAgentsCommand, encodePowershell, powershellQuote, POWERSHELL_PROGRESS_SILENCE } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
 
@@ -92,9 +92,9 @@ export function buildBootstrapCommand(spec: string, os?: string): string {
 }
 
 /** Install (or upgrade to) a specific agents-cli version on the remote, then `agents setup`. */
-export function bootstrapAgentsCli(target: string, version: string | null, os?: string): { ok: boolean; output: string } {
+export function bootstrapAgentsCli(target: string, version: string | null, os?: string, extraSshArgs?: string[]): { ok: boolean; output: string } {
   const spec = version ? `@phnx-labs/agents-cli@${version}` : '@phnx-labs/agents-cli';
-  const r = sshExec(target, buildBootstrapCommand(spec, os), { timeoutMs: 300000 });
+  const r = sshExec(target, buildBootstrapCommand(spec, os), { timeoutMs: 300000, extraSshArgs });
   return { ok: r.code === 0, output: (r.stdout + r.stderr).trim() };
 }
 
@@ -141,10 +141,10 @@ export function buildReadyProbeCommand(os?: string): string {
   return `bash -lc ${shellQuote(script)}`;
 }
 
-export function readyProbe(target: string, os?: string): ReadyProbe {
+export function readyProbe(target: string, os?: string, extraSshArgs?: string[]): ReadyProbe {
   // Disable multiplexing: a stale control socket can hang the local ssh client
   // until the timeout fires, just like sshExecAsync does for the same reason.
-  const r = sshExec(target, buildReadyProbeCommand(os), { timeoutMs: 20000, multiplex: false });
+  const r = sshExec(target, buildReadyProbeCommand(os), { timeoutMs: 20000, multiplex: false, extraSshArgs });
   if (r.timedOut) return { reachable: false, version: null, view: '', timedOut: true };
   return parseReadyProbe(r.stdout);
 }
@@ -177,7 +177,7 @@ export interface EnsureReadyOptions {
  */
 export function ensureHostReady(host: Host, opts: EnsureReadyOptions): { warnings: string[] } {
   const target = sshTargetFor(host);
-  const probe = readyProbe(target, host.os ?? resolveRemoteOsSync(host.name));
+  const probe = readyProbe(target, host.os ?? resolveRemoteOsSync(host.name), hostIdentityArgs(host));
   if (probe.timedOut) {
     throw new Error(
       `Host "${host.name}" (${target}) did not respond in time — the SSH probe timed out after 20 seconds. ` +

@@ -72,6 +72,7 @@ export interface FollowOptions {
   pollMs?: number;
   /** Idle-backoff ceiling (default 4× the fast interval, min 4000ms). */
   maxPollMs?: number;
+  extraSshArgs?: string[];
 }
 
 const STREAM_EXIT_POLL_SECONDS = 1;
@@ -197,11 +198,11 @@ export function parseStreamingExitFrame(stderr: Buffer, taskId: string): Buffer 
  * File identity (`dev:ino`) of a path on the remote host, or null if it can't be
  * stat'd. GNU (`-c`) then BSD (`-f`) format, so it works on Linux and macOS hosts.
  */
-export function readRemoteFileId(target: string, remotePath: string): string | null {
+export function readRemoteFileId(target: string, remotePath: string, extraSshArgs?: string[]): string | null {
   const res = sshExec(
     target,
     `stat -c '%d:%i' ${remotePath} 2>/dev/null || stat -f '%d:%i' ${remotePath} 2>/dev/null`,
-    { timeoutMs: 8000 },
+    { timeoutMs: 8000, extraSshArgs },
   );
   const id = res.stdout.trim();
   return id || null;
@@ -233,7 +234,7 @@ export async function followHostTask(target: string, opts: FollowOptions): Promi
   let mirror = true;
   try {
     const s = fs.statSync(local);
-    if (mirrorAliasesSource(`${s.dev}:${s.ino}`, readRemoteFileId(target, opts.remoteLog))) {
+    if (mirrorAliasesSource(`${s.dev}:${s.ino}`, readRemoteFileId(target, opts.remoteLog, opts.extraSshArgs))) {
       mirror = false;
     }
   } catch { /* mirror absent or unstattable → distinct file, keep mirroring */ }
@@ -265,6 +266,7 @@ export async function followHostTask(target: string, opts: FollowOptions): Promi
           timeoutMs: remaining,
           signal: abort.signal,
           multiplex: true,
+          extraSshArgs: opts.extraSshArgs,
           onStdout: (chunk) => { gotOutput = flush(chunk) || gotOutput; },
         },
       );

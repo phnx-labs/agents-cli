@@ -100,6 +100,13 @@ export interface SshHostKeyOptions {
   knownHostsFile?: string;
 }
 
+/** OpenSSH argv that makes an explicit device key authoritative. */
+export function deviceIdentityArgs(device: DeviceProfile): string[] {
+  return device.auth?.method === 'key' && device.auth.identityFile
+    ? ['-i', device.auth.identityFile, '-o', 'IdentitiesOnly=yes']
+    : [];
+}
+
 /**
  * Build the argv (after the `ssh` program name) and the environment overlay
  * for connecting to a device. For password auth this points `SSH_ASKPASS` at
@@ -141,7 +148,7 @@ export function buildSshInvocation(
     args.push('-o', 'PreferredAuthentications=password', '-o', 'PubkeyAuthentication=no', '-o', 'NumberOfPasswordPrompts=1');
   } else {
     args.push('-o', 'BatchMode=yes');
-    if (device.auth.identityFile) args.push('-i', device.auth.identityFile);
+    args.push(...deviceIdentityArgs(device));
   }
 
   // An interactive login (no remote command) needs a real tty.

@@ -57,6 +57,7 @@ import {
   ASKPASS_KEY_ENV,
   ASKPASS_AGENT_ONLY_ENV,
   buildSshInvocation,
+  deviceIdentityArgs,
   fleetDialTarget,
   writeAskpassShim,
 } from '../lib/devices/connect.js';
@@ -446,6 +447,7 @@ interface FleetStatusTarget extends FanOutDeviceTarget {
    * correct entry and makes a reachable box look dead (the 60s fleet-status hang).
    */
   dialTarget: string;
+  extraSshArgs?: string[];
 }
 
 async function localHealthRow(self: string, stats?: DeviceStats): Promise<FleetHealthRow> {
@@ -471,7 +473,7 @@ async function probeRemoteFleetStatus(target: FleetStatusTarget): Promise<import
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
   const cmd = buildRemoteAgentsInvocation(['devices', 'status', '--local', '--json'], undefined, isWin ? 'windows' : undefined, env);
-  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true });
+  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true, extraSshArgs: target.extraSshArgs });
   if (res.code !== 0) {
     throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
   }
@@ -482,11 +484,11 @@ async function probeRemoteHealth(target: FleetStatusTarget): Promise<Omit<FleetH
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
   const versionCmd = buildRemoteAgentsInvocation(['--version'], undefined, isWin ? 'windows' : undefined, env);
-  const versionRes = await sshExecAsync(target.dialTarget, versionCmd, { timeoutMs: 15000, multiplex: true });
+  const versionRes = await sshExecAsync(target.dialTarget, versionCmd, { timeoutMs: 15000, multiplex: true, extraSshArgs: target.extraSshArgs });
   const version = versionRes.code === 0 ? versionRes.stdout.trim().split(/\s+/)[0] || null : null;
 
   const doctorCmd = buildRemoteAgentsInvocation(['doctor', '--json'], undefined, isWin ? 'windows' : undefined, env);
-  const doctorRes = await sshExecAsync(target.dialTarget, doctorCmd, { timeoutMs: 30000, multiplex: true });
+  const doctorRes = await sshExecAsync(target.dialTarget, doctorCmd, { timeoutMs: 30000, multiplex: true, extraSshArgs: target.extraSshArgs });
   if (doctorRes.code !== 0) {
     throw new Error(doctorRes.timedOut ? 'timed out' : (doctorRes.stderr.trim() || `exit ${doctorRes.code ?? 'unknown'}`));
   }
@@ -549,6 +551,7 @@ async function runFleetStatus(opts: { json?: boolean; strict?: boolean; stats?: 
       // this is trusted on the default path, not just under `--refresh`.
       skip: fleetHealthSkip(t.skip, statsMap.get(t.device.name)),
       dialTarget: fleetDialTarget(t.device),
+      extraSshArgs: deviceIdentityArgs(t.device),
     }));
   const remote = await fanOutDevices(remoteTargets, probeRemoteHealth);
   for (const result of remote) {
@@ -654,7 +657,7 @@ async function probeRemoteAuth(target: FleetStatusTarget): Promise<AuthProbeRow[
   const isWin = /^win/i.test((target.platform ?? '').trim());
   const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
   const cmd = buildRemoteAgentsInvocation(['devices', 'ping', '--local', '--json'], undefined, isWin ? 'windows' : undefined, env);
-  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true });
+  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true, extraSshArgs: target.extraSshArgs });
   if (res.code !== 0) {
     throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
   }
@@ -731,6 +734,7 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
     platform: t.device.platform,
     skip: t.skip,
     dialTarget: fleetDialTarget(t.device),
+    extraSshArgs: deviceIdentityArgs(t.device),
   }));
   const probeable = remoteTargets.filter((t) => !t.skip).length;
   const spinner = isInteractiveTerminal() && !opts.json
@@ -801,7 +805,7 @@ async function probeRemoteHarnesses(
   const args = ['devices', 'harnesses', '--local', '--json'];
   if (refresh) args.push('--refresh');
   const cmd = buildRemoteAgentsInvocation(args, undefined, isWin ? 'windows' : undefined, env);
-  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true });
+  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true, extraSshArgs: target.extraSshArgs });
   if (res.code !== 0) {
     throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
   }
@@ -833,6 +837,7 @@ async function collectFleetHarnesses(opts: HarnessInventoryOpts): Promise<HostHa
     platform: t.device.platform,
     skip: t.skip,
     dialTarget: fleetDialTarget(t.device),
+    extraSshArgs: deviceIdentityArgs(t.device),
   }));
   if (want) remoteTargets = remoteTargets.filter((t) => want.has(t.name));
 
@@ -1588,13 +1593,17 @@ email) into a single row. Use \`agents devices harnesses\` for the per-install v
     .option('--bundle <bundle>', 'secrets bundle holding the password (for --auth password)')
     .option('--bundle-key <key>', "key within the bundle (default 'password')")
     .option('--identity-file <path>', 'private-key path for --auth key')
-    .action(async (name: string, opts: { platform?: string; user?: string; auth?: string; bundle?: string; bundleKey?: string; identityFile?: string }) => {
+    .option('--clear-identity-file', 'return key auth to ssh-agent/default-key discovery')
+    .action(async (name: string, opts: { platform?: string; user?: string; auth?: string; bundle?: string; bundleKey?: string; identityFile?: string; clearIdentityFile?: boolean }) => {
       try {
         const existing = await mustGetDevice(name);
         const nextMethod = (opts.auth as DeviceAuthMethod | undefined) ?? existing.auth.method;
-        const auth = opts.auth || opts.bundle || opts.bundleKey || opts.identityFile
+        if (opts.identityFile && nextMethod !== 'key') {
+          throw new Error('--identity-file requires key auth; pass --auth key in the same command.');
+        }
+        const auth = opts.auth || opts.bundle || opts.bundleKey || opts.identityFile || opts.clearIdentityFile
           ? nextMethod === 'key'
-            ? { method: nextMethod, identityFile: opts.identityFile ?? existing.auth.identityFile }
+            ? { method: nextMethod, identityFile: opts.clearIdentityFile ? undefined : (opts.identityFile ?? existing.auth.identityFile) }
             : { method: nextMethod, bundle: opts.bundle ?? existing.auth.bundle, bundleKey: opts.bundleKey ?? existing.auth.bundleKey }
           : undefined;
         const d = await upsertDevice(name, {

@@ -29,6 +29,9 @@ function renderHost(device: DeviceProfile): string | null {
   if (!hostName) return null;
   const lines = [`Host ${device.name}`, `    HostName ${hostName}`];
   if (device.user) lines.push(`    User ${device.user}`);
+  if (device.auth.method === 'key' && device.auth.identityFile) {
+    lines.push(`    IdentityFile ${device.auth.identityFile}`, '    IdentitiesOnly yes');
+  }
   return lines.join('\n');
 }
 

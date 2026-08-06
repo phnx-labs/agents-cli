@@ -11,7 +11,7 @@
 import * as os from 'os';
 import type { DeviceProfile } from '../devices/registry.js';
 import { pushBundleToHost, type RemoteBackend } from '../secrets/push.js';
-import { sshTargetFor } from '../devices/connect.js';
+import { deviceIdentityArgs, sshTargetFor } from '../devices/connect.js';
 import { readyProbe, bootstrapAgentsCli } from '../hosts/ready.js';
 import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
 import { sshExec } from '../ssh-exec.js';
@@ -358,13 +358,14 @@ export function probeDevice(device: DeviceProfile, opts?: ProbeOptions): DeviceP
     return { device: device.name, reachable: false, platform: device.platform, installedAgents: [], note: (e as Error).message };
   }
   const hint = osHint(device.platform);
-  const ready = readyProbe(target, hint);
+  const extraSshArgs = deviceIdentityArgs(device);
+  const ready = readyProbe(target, hint, extraSshArgs);
   if (!ready.reachable) {
     return { device: device.name, reachable: false, platform: device.platform, installedAgents: [], note: 'unreachable' };
   }
   let installed: string[] = [];
   const remoteCmd = buildRemoteAgentsInvocation(['teams', 'doctor', '--json'], undefined, hint, remoteEnv(device.platform));
-  const res = sshExec(target, remoteCmd, { timeoutMs: 30000, multiplex: true });
+  const res = sshExec(target, remoteCmd, { timeoutMs: 30000, multiplex: true, extraSshArgs });
   if (res.code === 0) {
     try {
       const map = JSON.parse(res.stdout) as Record<string, TeamsDoctorEntry>;
@@ -376,7 +377,7 @@ export function probeDevice(device: DeviceProfile, opts?: ProbeOptions): DeviceP
   let installedVersions: Record<string, string[]> | undefined;
   if (opts?.withVersions) {
     const viewCmd = buildRemoteAgentsInvocation(['view', '--json'], undefined, hint, remoteEnv(device.platform));
-    const vres = sshExec(target, viewCmd, { timeoutMs: 30000, multiplex: true });
+    const vres = sshExec(target, viewCmd, { timeoutMs: 30000, multiplex: true, extraSshArgs });
     if (vres.code === 0) installedVersions = parseInstalledVersions(vres.stdout);
   }
   let remoteBundles: Record<string, string> | undefined;
@@ -384,7 +385,7 @@ export function probeDevice(device: DeviceProfile, opts?: ProbeOptions): DeviceP
     // Metadata only — `secrets list --json` returns names + timestamps and never
     // values, which is why this is safe to run across the fleet.
     const listCmd = buildRemoteAgentsInvocation(['secrets', 'list', '--json'], undefined, hint, remoteEnv(device.platform));
-    const lres = sshExec(target, listCmd, { timeoutMs: 30000, multiplex: true });
+    const lres = sshExec(target, listCmd, { timeoutMs: 30000, multiplex: true, extraSshArgs });
     if (lres.code === 0) remoteBundles = parseRemoteBundles(lres.stdout);
   }
   return {
@@ -474,15 +475,16 @@ export function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exe
   }
   const hint = osHint(device.platform);
   const env = remoteEnv(device.platform);
+  const extraSshArgs = deviceIdentityArgs(device);
   let ok = true;
 
   const sshAgents = (args: string[], input?: string) =>
-    sshExec(target, buildRemoteAgentsInvocation(args, undefined, hint, env), { timeoutMs: 300000, multiplex: true, input });
+    sshExec(target, buildRemoteAgentsInvocation(args, undefined, hint, env), { timeoutMs: 300000, multiplex: true, input, extraSshArgs });
 
   // 1. agents-cli install/upgrade.
   const cliAction = row.actions.find((a) => a.kind === 'install-cli' || a.kind === 'upgrade-cli');
   if (cliAction) {
-    const r = bootstrapAgentsCli(target, ctx.targetCliVersion, hint);
+    const r = bootstrapAgentsCli(target, ctx.targetCliVersion, hint, extraSshArgs);
     steps.push({ kind: cliAction.kind, ok: r.ok, detail: cliAction.detail });
     ok = ok && r.ok;
   }

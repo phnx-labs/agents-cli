@@ -390,6 +390,8 @@ export interface SshStreamOptions {
    * interactive credential-copy path (RUSH-1767).
    */
   hostKeyOpts?: string[];
+  /** Additional OpenSSH argv placed before the target (for example `-i <path>`). */
+  extraSshArgs?: string[];
 }
 
 /**
@@ -403,7 +405,7 @@ export function sshStream(target: string, remoteCmd: string, opts: SshStreamOpti
   assertValidSshTarget(target);
   const mux = opts.multiplex === false ? [] : controlOpts();
   const tty = opts.tty ? ['-tt'] : [];
-  const args = [...sshConnectOpts(mux, opts.hostKeyOpts), ...tty, target, remoteCmd];
+  const args = [...sshConnectOpts(mux, opts.hostKeyOpts), ...(opts.extraSshArgs ?? []), ...tty, target, remoteCmd];
   const res = spawnSync('ssh', args, { stdio: 'inherit' });
   if (typeof res.status === 'number') return res.status;
   return 255; // spawn error / signal — treat as a connection-layer failure

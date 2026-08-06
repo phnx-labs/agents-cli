@@ -29,7 +29,7 @@ describe('renderSshConfig', () => {
     const reg: DeviceRegistry = {
       // intentionally out of order to prove the render sorts
       zebra: dev({ name: 'zebra', user: 'z', address: { via: 'tailscale', dnsName: 'zebra.ts.net', ip: '100.0.0.9' } }),
-      'win-mini': dev({ name: 'win-mini', platform: 'windows', shell: 'powershell', user: 'muqsit', address: { via: 'tailscale', dnsName: 'win-mini.ts.net', ip: '100.68.123.39' } }),
+      'win-mini': dev({ name: 'win-mini', platform: 'windows', shell: 'powershell', user: 'muqsit', auth: { method: 'key', identityFile: '/keys/win mini' }, address: { via: 'tailscale', dnsName: 'win-mini.ts.net', ip: '100.68.123.39' } }),
       noaddr: dev({ name: 'noaddr', address: { via: 'manual' } }), // must be skipped
       iponly: dev({ name: 'iponly', user: 'root', address: { via: 'manual', ip: '10.0.0.5' } }),
     };
@@ -41,6 +41,7 @@ describe('renderSshConfig', () => {
 
     // DNS preferred when present; IP used only when there's no DNS name.
     expect(out).toContain('Host win-mini\n    HostName win-mini.ts.net\n    User muqsit');
+    expect(out).toContain('    IdentityFile /keys/win mini\n    IdentitiesOnly yes');
     expect(out).toContain('Host iponly\n    HostName 10.0.0.5\n    User root');
 
     // Stable alphabetical ordering: iponly < win-mini < zebra.

@@ -9,7 +9,7 @@
  * injection guard.
  */
 import { describe, expect, it } from 'vitest';
-import { buildAskpassShimBody, buildSshInvocation, fleetDialTarget, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV, ASKPASS_AGENT_ONLY_ENV } from './connect.js';
+import { buildAskpassShimBody, buildSshInvocation, deviceIdentityArgs, fleetDialTarget, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV, ASKPASS_AGENT_ONLY_ENV } from './connect.js';
 import type { DeviceProfile } from './registry.js';
 
 function decodePowerShell(cmd: string): string {
@@ -85,7 +85,8 @@ describe('buildSshInvocation', () => {
       ['uptime'],
       '/shim',
     );
-    expect(args.slice(args.indexOf('-i'), args.indexOf('-i') + 2)).toEqual(['-i', '/keys/fleet worker']);
+    expect(args.slice(args.indexOf('-i'), args.indexOf('-i') + 4)).toEqual(['-i', '/keys/fleet worker', '-o', 'IdentitiesOnly=yes']);
+    expect(deviceIdentityArgs(dev({ auth: { method: 'password', identityFile: '/ignored' } }))).toEqual([]);
   });
 
   it('password auth wires the askpass shim and disables pubkey + extra prompts', () => {
