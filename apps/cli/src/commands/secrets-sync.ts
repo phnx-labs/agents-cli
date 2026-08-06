@@ -17,10 +17,15 @@ import {
 } from '../lib/secrets/sync.js';
 import { bundleExists, listBundles } from '../lib/secrets/bundles.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
+import {
+  missingSyncPassphraseMessage,
+  resolveSyncPassphraseFromEnv,
+  warnEnvPassphraseReadableOnce,
+} from '../lib/secrets/sync-passphrase.js';
 
 async function promptPassphrase(message: string, confirm = false): Promise<string> {
   if (!isInteractiveTerminal()) {
-    throw new Error('A sync passphrase is required. Run from a TTY, or set AGENTS_SECRETS_PASSPHRASE.');
+    throw new Error(missingSyncPassphraseMessage());
   }
   const { password } = await import('@inquirer/prompts');
   const first = await password({ message, mask: true });
@@ -31,24 +36,18 @@ async function promptPassphrase(message: string, confirm = false): Promise<strin
   return first;
 }
 
-// Print the env-var-source warning at most once per process so a `--all` push
-// over many bundles doesn't flood stderr with the same notice.
-let envPassphraseWarned = false;
-
 function passphraseFromEnvOrPrompt(confirm: boolean): Promise<string> {
-  const fromEnv = process.env.AGENTS_SECRETS_PASSPHRASE;
-  if (fromEnv) {
-    if (fromEnv.length < MIN_PASSPHRASE_LEN) {
+  // Env resolution (current name, then the deprecated master-key name) lives in
+  // lib/secrets/sync-passphrase.ts so this command and `agents sync` share one
+  // chokepoint — otherwise each call site warns separately and the "once per
+  // process" promise is a lie.
+  const { value } = resolveSyncPassphraseFromEnv();
+  if (value) {
+    if (value.length < MIN_PASSPHRASE_LEN) {
       return Promise.reject(new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LEN} characters.`));
     }
-    if (!envPassphraseWarned) {
-      envPassphraseWarned = true;
-      process.stderr.write(chalk.yellow(
-        'warn: using AGENTS_SECRETS_PASSPHRASE. Env vars are readable by other same-user processes ' +
-        '(/proc, ps, crash dumps, CI logs) — rotate the passphrase after CI use.\n',
-      ));
-    }
-    return Promise.resolve(fromEnv);
+    warnEnvPassphraseReadableOnce();
+    return Promise.resolve(value);
   }
   return promptPassphrase('Sync passphrase', confirm);
 }

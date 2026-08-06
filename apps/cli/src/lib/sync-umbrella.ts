@@ -116,7 +116,7 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
       result.secrets = {
         pulled: 0,
         skipped: true,
-        reason: 'no passphrase — set AGENTS_SECRETS_PASSPHRASE or run `agents login` (#366)',
+        reason: 'no passphrase — set AGENTS_SYNC_PASSPHRASE or run `agents login` (#366)',
         errors: [],
       };
       log('secrets: skipped (no passphrase available)');

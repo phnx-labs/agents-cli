@@ -1133,9 +1133,20 @@ access control (that is 1Password/Vault; this tool is device-local first).
 - **SEC-29a (MUST NOT).** The default keychain flow MUST NOT require a passphrase or
   read one from an environment variable to keep a bundle unlocked. On macOS the
   Keychain is gated by the OS login only; `AGENTS_SECRETS_PASSPHRASE` applies
-  **exclusively** to the encrypted-file (SEC-2) and age-vault (SEC-3) fallback
-  backends and MUST NOT be introduced into, or required by, the keychain path
-  (SEC-8 already strips it from every injected child env).
+  **exclusively** to the encrypted-file store (SEC-2) — it is that store's master
+  key and nothing else — and MUST NOT be introduced into, or required by, the
+  keychain path (SEC-8 already strips it from every injected child env). The
+  age-vault backend (SEC-3) does NOT read it; that backend is gated by
+  `agents login` (`lib/secrets/vault.ts`).
+- **SEC-29b (MUST).** Transport passphrases MUST use `AGENTS_SYNC_PASSPHRASE`, not
+  the file-store master key: `push`/`pull` (SEC-23) and the portable
+  `export --to-file` / `import --from-file` envelope seal data for a DIFFERENT
+  trust boundary than the local store. `AGENTS_SECRETS_PASSPHRASE` MUST remain
+  honoured there only as a deprecated fallback, warned exactly once per process
+  (`lib/secrets/sync-passphrase.ts`). Overloading one variable for both is what
+  put a file-store master key into a shell rc file on seven worker boxes
+  (RUSH-1968): the store stopped needing a passphrase, headless sync still did,
+  so the master key was exported fleet-wide to satisfy sync.
 
 #### 3.5 Sharing & sync
 

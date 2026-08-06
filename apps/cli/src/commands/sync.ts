@@ -33,6 +33,7 @@
 import * as path from 'path';
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { resolveSyncPassphraseFromEnv } from '../lib/secrets/sync-passphrase.js';
 import { agentLabel, resolveAgentName, MANAGED_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import {
@@ -279,7 +280,9 @@ async function runUmbrella(
     cloud: opts.cloud,
     local: opts.local,
   };
-  const passphrase = process.env.AGENTS_SECRETS_PASSPHRASE || undefined;
+  // Same chokepoint as `agents secrets push/pull` — prefers AGENTS_SYNC_PASSPHRASE,
+  // falls back to the deprecated master-key name with a single warning.
+  const passphrase = resolveSyncPassphraseFromEnv().value ?? undefined;
 
   if (!quiet) outLog(chalk.bold('Syncing this machine…'));
   try {
