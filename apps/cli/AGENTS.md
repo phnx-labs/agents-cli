@@ -291,7 +291,8 @@ src/
   index.ts             # CLI entry (commander.js)
   commands/            # User-facing subcommands (one file per `agents <cmd>`)
   lib/
-    state.ts           # Path constants; agents.yaml read/write
+    state.ts           # Path constants; agents.yaml read/write (serializeCentral preserves comments)
+    manifest.ts        # Project/user agents.yaml Manifest read/write (comment-preserving Document round-trip; used by mcp add, etc.)
     resources.ts       # resolveResource() / listResources() — layered resolution
     capabilities.ts    # supports() — the per-agent write gate
     agents.ts          # Per-agent capability table

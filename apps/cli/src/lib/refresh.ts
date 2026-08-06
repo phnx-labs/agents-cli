@@ -70,6 +70,11 @@ export interface RefreshOptions {
   skipPrompts?: boolean;
   /** Skip CLI version install/upgrade from agents.yaml. */
   skipClis?: boolean;
+  /**
+   * Suppress human progress lines on stdout. Required for machine consumers
+   * (`agents sync --json` / fleet fan-out) so stdout stays a single JSON object.
+   */
+  quiet?: boolean;
 }
 
 /**
@@ -78,7 +83,7 @@ export interface RefreshOptions {
  * hook reads from a fixed path so it survives version upgrades. If the root
  * file doesn't exist yet but an agent-scoped one does, hoist the first one found.
  */
-function migratePromptcutsToRoot(agentsDir: string): void {
+function migratePromptcutsToRoot(agentsDir: string, quiet = false): void {
   const rootPath = path.join(agentsDir, 'promptcuts.yaml');
   if (fs.existsSync(rootPath)) return;
 
@@ -88,7 +93,7 @@ function migratePromptcutsToRoot(agentsDir: string): void {
     if (fs.existsSync(legacyPath)) {
       try {
         fs.renameSync(legacyPath, rootPath);
-        console.log(chalk.gray(`Moved ${dir}/promptcuts.yaml → promptcuts.yaml (repo root)`));
+        if (!quiet) console.log(chalk.gray(`Moved ${dir}/promptcuts.yaml → promptcuts.yaml (repo root)`));
         return;
       } catch {
         // Best-effort migration; hook still works if the user moves it manually.
@@ -105,19 +110,21 @@ function migratePromptcutsToRoot(agentsDir: string): void {
  * Idempotent — safe to run repeatedly. No network operations.
  */
 export async function refresh(options: RefreshOptions = {}): Promise<void> {
-  const { agentFilter, skipPrompts = false, skipClis = false } = options;
+  const { agentFilter, skipPrompts = false, skipClis = false, quiet = false } = options;
   const agentsDir = getUserAgentsDir();
+  // Gate every human progress line so --json / fleet fan-out can parse stdout.
+  const log = (...args: unknown[]) => { if (!quiet) console.log(...args); };
 
-  migratePromptcutsToRoot(agentsDir);
+  migratePromptcutsToRoot(agentsDir, quiet);
 
   const manifest = readManifest(agentsDir);
   if (!manifest) {
-    console.log(chalk.gray(`No ${MANIFEST_FILENAME} found`));
+    log(chalk.gray(`No ${MANIFEST_FILENAME} found`));
   }
 
   // 1. Install/upgrade CLI versions from agents.yaml
   if (!skipClis && manifest?.agents) {
-    console.log(chalk.bold('\nCLI Versions:\n'));
+    log(chalk.bold('\nCLI Versions:\n'));
 
     const cliAgents = Object.keys(manifest.agents) as AgentId[];
     for (const agentId of cliAgents) {
@@ -146,7 +153,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
 
   // 2. Register MCP servers
   if (manifest?.mcp && Object.keys(manifest.mcp).length > 0) {
-    console.log(chalk.bold('\nMCP Servers:\n'));
+    log(chalk.bold('\nMCP Servers:\n'));
 
     for (const [name, config] of Object.entries(manifest.mcp)) {
       if (!config.command || config.transport === 'http') continue;
@@ -177,7 +184,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
           const label = result.version
             ? `${agentLabel(result.agentId)}@${result.version}`
             : agentLabel(result.agentId);
-          console.log(`  ${chalk.green('+')} ${name} -> ${label}`);
+          log(`  ${chalk.green('+')} ${name} -> ${label}`);
         }
       }
     }
@@ -219,11 +226,11 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
       if (skipPrompts) {
         forceFullSync = true;
       } else if (!hasAnySynced) {
-        console.log(chalk.yellow(`\n${agentLabel(agentId)}@${defaultVer} has no synced resources.`));
+        log(chalk.yellow(`\n${agentLabel(agentId)}@${defaultVer} has no synced resources.`));
         const userSelection = await promptResourceSelection(agentId);
         if (userSelection) selection = userSelection;
       } else if (hasNewResources(newResources, agentId, defaultVer)) {
-        console.log(chalk.cyan(`\n${agentLabel(agentId)}@${defaultVer}:`));
+        log(chalk.cyan(`\n${agentLabel(agentId)}@${defaultVer}:`));
         const userSelection = await promptNewResourceSelection(agentId, newResources, defaultVer);
         if (userSelection) selection = userSelection;
       } else {
@@ -252,12 +259,12 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
           const verNote = versionsToSync.length > 1
             ? chalk.gray(` (${versionsToSync.length} versions)`)
             : '';
-          console.log(chalk.green(`  Synced: ${[...kinds].join(', ')}`) + verNote);
+          log(chalk.green(`  Synced: ${[...kinds].join(', ')}`) + verNote);
         }
       }
     } catch (err) {
       if (isPromptCancelled(err)) {
-        console.log(chalk.gray('Skipped resource selection'));
+        log(chalk.gray('Skipped resource selection'));
       } else {
         throw err;
       }
@@ -282,12 +289,12 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
         const result = registerHooksToSettings(agentId, home, hookManifest);
         hookRegistered += result.registered.length;
         for (const error of result.errors) {
-          console.log(chalk.yellow(`  Hook warning: ${error}`));
+          log(chalk.yellow(`  Hook warning: ${error}`));
         }
       }
     }
     if (hookRegistered > 0) {
-      console.log(chalk.green(`\nRegistered ${hookRegistered} hook lifecycle event(s)`));
+      log(chalk.green(`\nRegistered ${hookRegistered} hook lifecycle event(s)`));
     }
   }
 
@@ -295,11 +302,11 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
   if (!isShimsInPath()) {
     const pathResult = addShimsToPath();
     if (pathResult.success && !pathResult.alreadyPresent) {
-      console.log(chalk.green(`\nAdded shims to ${pathResult.location}`));
-      console.log(chalk.gray(pathResult.reloadHint));
+      log(chalk.green(`\nAdded shims to ${pathResult.location}`));
+      log(chalk.gray(pathResult.reloadHint));
     } else if (!pathResult.success) {
-      console.log(chalk.yellow('\nCould not auto-add shims to PATH:'));
-      console.log(chalk.gray(getPathSetupInstructions()));
+      log(chalk.yellow('\nCould not auto-add shims to PATH:'));
+      log(chalk.gray(getPathSetupInstructions()));
     }
   }
 
@@ -346,12 +353,12 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
       setGlobalDefault(agentId, version);
       const symlinkResult = await switchConfigSymlink(agentId, version);
       if (!symlinkResult.success) {
-        console.log(chalk.yellow(`Warning: ${symlinkResult.error}`));
+        log(chalk.yellow(`Warning: ${symlinkResult.error}`));
       } else if (symlinkResult.backupPath) {
-        console.log(chalk.gray(`Backed up existing config to: ${symlinkResult.backupPath}`));
+        log(chalk.gray(`Backed up existing config to: ${symlinkResult.backupPath}`));
       }
       switchHomeFileSymlinks(agentId, version);
-      console.log(chalk.green(`Set ${agentLabel(agent.id)}@${version} as default`));
+      log(chalk.green(`Set ${agentLabel(agent.id)}@${version} as default`));
     }
   }
 
@@ -359,47 +366,47 @@ export async function refresh(options: RefreshOptions = {}): Promise<void> {
   try {
     const { statuses, errors } = listCliStatus(process.cwd());
     for (const err of errors) {
-      console.log(chalk.yellow(`  CLI manifest parse error: ${err.file}: ${err.reason}`));
+      log(chalk.yellow(`  CLI manifest parse error: ${err.file}: ${err.reason}`));
     }
     const missing = statuses.filter((s) => !s.installed);
     if (missing.length > 0) {
-      console.log(chalk.bold('\nDeclared CLIs missing from this host:'));
+      log(chalk.bold('\nDeclared CLIs missing from this host:'));
       for (const s of missing) {
         const method = selectInstallMethod(s.manifest);
         const action = method ? describeMethod(method) : chalk.red('no compatible install method');
-        console.log(`  ${chalk.cyan(s.manifest.name.padEnd(20))} ${chalk.gray(action)}`);
+        log(`  ${chalk.cyan(s.manifest.name.padEnd(20))} ${chalk.gray(action)}`);
       }
-      console.log('');
+      log('');
 
       if (!skipPrompts) {
         const proceed = await confirm({ message: `Install ${missing.length} missing CLI(s) now?`, default: true });
         if (proceed) {
           for (const s of missing) {
-            console.log(chalk.bold(`\n→ ${s.manifest.name}`));
+            log(chalk.bold(`\n→ ${s.manifest.name}`));
             const result = installCli(s.manifest);
             if (result.error) {
-              console.log(chalk.red(`  ${result.error}`));
+              log(chalk.red(`  ${result.error}`));
               continue;
             }
             if (result.installed) {
-              console.log(chalk.green(`  installed`));
+              log(chalk.green(`  installed`));
               if (s.manifest.postInstall) {
-                console.log(chalk.gray(s.manifest.postInstall.trim().split('\n').map((l) => '  ' + l).join('\n')));
+                log(chalk.gray(s.manifest.postInstall.trim().split('\n').map((l) => '  ' + l).join('\n')));
               }
             } else {
-              console.log(chalk.yellow(`  install ran but \`${describeCheck(s.manifest.check)}\` still fails`));
+              log(chalk.yellow(`  install ran but \`${describeCheck(s.manifest.check)}\` still fails`));
             }
           }
         } else {
-          console.log(chalk.gray(`Skipped. Run 'agents cli install' later.`));
+          log(chalk.gray(`Skipped. Run 'agents cli install' later.`));
         }
       } else {
-        console.log(chalk.gray(`Run 'agents cli install' to install them.`));
+        log(chalk.gray(`Run 'agents cli install' to install them.`));
       }
     }
   } catch (err) {
     if (!isPromptCancelled(err)) {
-      console.log(chalk.yellow(`CLI install skipped: ${(err as Error).message}`));
+      log(chalk.yellow(`CLI install skipped: ${(err as Error).message}`));
     }
   }
 }

@@ -326,7 +326,11 @@ raw records for external consumers.
 **`--limit` caps the read at 50 records by default — pass `--limit 0` before you
 aggregate.** The cap keeps an interactive `agents events` readable, but it is
 applied *after* filtering and *before* you see the records, so a group-by over a
-capped `--json` read ranks the newest 50 rather than the real set. On a 30-day
+capped `--json` read ranks the newest 50 rather than the real set. That
+filter-before-cap contract covers both halves of the unified stream: operational
+events (and their `bundle` / module filters) and agent-semantic activity events
+(`--event` / event-type filters are pushed into the activity reader so a rare
+match is not buried under routine `file.edited` churn — RUSH-2093). On a 30-day
 stream here that is 50 records out of 29,649. When a read is capped, the command
 says so — on stderr for `--json` (so a `| jq` pipeline still gets clean JSON), on
 stdout for the human view:
@@ -1134,7 +1138,7 @@ does — describes a fraction of the work and attributes all of it to one org.
 ```bash
 agents insights                                # last 30d, by account
 agents insights --by project --since 90d       # which repo is eating the time
-agents insights --account "Turing Labs" --since all
+agents insights --account "Turing Labs" --all  # one account, every session ever
 agents insights --json                         # stable contract for dashboards
 agents insights --narrative                    # add a written read on the numbers
 ```

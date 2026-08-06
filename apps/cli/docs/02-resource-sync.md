@@ -114,12 +114,16 @@ agents sync claude              # the resolved default version (interactive prev
 agents sync claude@all          # every installed Claude version
 agents sync claude@all system   # scope to one DotAgent repo: system | user | project | <alias>
 agents sync claude --repo user  # same, via the flag form
+agents sync --json              # machine-readable umbrella result (also used by --host all)
+agents sync --host all          # fan out umbrella sync across every registered device
 ```
 
 A repo scope reconciles **only** that layer's resources into the target
 version(s), leaving the other layers' already-synced resources untouched. Bare
 `agents sync` (no agent) runs the umbrella verb — fetch remote state, then
-reconcile every installed agent.
+reconcile every installed agent. `--json` emits a single JSON object on stdout
+(and forces non-interactive mode); the fleet fan-out path (`--host all` /
+`--device all`) injects `--json` on each peer so the roster can parse results.
 
 ## MCP Servers: Per-Agent JSON Write
 
