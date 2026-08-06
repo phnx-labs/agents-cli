@@ -36,10 +36,13 @@ agents setup secrets    # choose secrets backend/policy defaults
 agents setup fleet      # discover Tailscale devices + configure SSH access
 ```
 
-To check overall health at any point (CLI availability, sign-in state,
-resource drift) use `agents doctor`, not a `setup` subcommand:
+Check setup readiness at any point with `agents setup status` (add `--json`
+for a machine-readable view). For deeper diagnostics — CLI availability,
+sign-in state, resource drift, cross-device divergence — use `agents doctor`
+instead; it's the broader umbrella health check, not a `setup` subcommand:
 
 ```bash
+agents setup status      # readiness for core, browser, computer, secrets, fleet, share, watchdog
 agents doctor            # local diagnostics + cross-device divergence
 agents doctor --fix      # heal every gap it found
 ```

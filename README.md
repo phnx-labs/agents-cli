@@ -46,7 +46,7 @@ https://agents-cli.sh/demo.mp4
 ```bash
 npm install -g @phnx-labs/agents-cli   # or: curl -fsSL agi-cli.sh | sh
 agents setup                           # first-time setup, or re-open the capability hub
-agents doctor                          # readiness for browser, computer, fleet, and more
+agents setup status                    # readiness for browser, computer, fleet, and more
 agents run claude "explain this repo"  # run any agent on your existing subscription
 ```
 
