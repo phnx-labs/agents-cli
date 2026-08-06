@@ -78,6 +78,7 @@ import { registerSessionsImportCommand } from './sessions-import.js';
 import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
 import { registerSessionsBackfillCommand } from './sessions-backfill.js';
 import { registerSessionsStatsCommand } from './sessions-stats.js';
+import { registerSessionsInsightsCommand } from './insights.js';
 import { registerSessionsOptimizeCommand } from './sessions-optimize.js';
 import { runBrowserSessions } from '../lib/browser/sessions-list.js';
 import {
@@ -4619,6 +4620,7 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsMigrationsCommand(sessionsCmd);
   registerSessionsBackfillCommand(sessionsCmd);
   registerSessionsStatsCommand(sessionsCmd);
+  registerSessionsInsightsCommand(sessionsCmd);
   registerSessionsOptimizeCommand(sessionsCmd);
 
   // Observe-umbrella alias (Phase 3): roster → sessions --active.

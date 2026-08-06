@@ -667,6 +667,12 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   a transcript already current at `RESOURCE_INDEX_VERSION`
   (`commands/sessions-stats.ts`; `commands/sessions-backfill.ts`;
   `lib/session/db.ts` `queryResourceUsageStats`/`backfillResourceUsage`).
+- **SES-IF-4c (MUST).** `sessions insights` and top-level `insights` MUST invoke
+  the same implementation. The default report MUST be deterministic and offline,
+  MUST include friction, corrections, automatable repeats, harness split, and ranked
+  evidence-backed actions, and MUST NOT emit raw transcript text or full local paths.
+  `--agent` MUST be repeatable. `--narrative` MAY call a coach only with aggregate
+  report data (`commands/insights.ts`; `lib/session/insights.ts`).
 
 #### 4.3 stdout / stderr / exit discipline
 

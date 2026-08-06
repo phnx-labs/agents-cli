@@ -1204,6 +1204,23 @@ session's `from â†’ to`, mode, move-vs-copy, and status; a session that hops Aâ†
 three lines, its lineage. Source: `src/commands/sessions-migrate.ts`,
 `src/lib/session/migrate-targets.ts`, `src/lib/session/migrations.ts`.
 
+## Cross-harness workflow insights
+
+`agents sessions insights` analyzes the last 30 days by default across every indexed
+session-capable harness. The existing `agents insights` spelling is an alias. Repeat
+`--agent` to compare a subset, use the standard `--host`/`--device` routing flags for a
+specific machine, and use `--json` for the structured report.
+
+The deterministic report runs offline and includes friction/thrash, owner corrections,
+automatable command recipes, the harness split, and a ranked actions table. Facets are
+cached in `session_insights` and invalidated by transcript mtime/size. Sample evidence is
+limited to shortened session ids; transcript text, credentials, and local paths are not
+included. `--narrative` is explicitly opt-in and sends only the aggregate report to the
+coach process.
+
+Agents can invoke the same source of truth through `/sessions-insights`; the slash entry
+is a thin command wrapper, not a second analyzer.
+
 ## Skill/plugin/slash-command usage (`session_resource_usage`)
 
 A separate table, `session_resource_usage(session_id, kind, name, plugin,

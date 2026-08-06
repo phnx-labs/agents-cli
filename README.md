@@ -295,7 +295,15 @@ agents sessions backfill tools --fleet
 agents sessions stats
 agents sessions stats --zero            # only the never-invoked (dead weight)
 agents sessions backfill resources      # fold historical sessions into the usage index
+
+# Friction, owner corrections, repeated recipes, and ranked actions across harnesses
+agents sessions insights --since 30d
+agents sessions insights --agent claude --agent codex --json
+# Top-level alias
+agents insights --since 7d
 ```
+
+`sessions insights` is deterministic and offline by default. It caches per-session facets, compares harnesses, and emits an actions table with evidence counts plus shortened sample session ids. `--narrative` is opt-in and receives aggregates only, never raw transcripts. The installed `/sessions-insights` slash command invokes the same CLI source of truth.
 
 Interactive picker when you're in a terminal. Structured output (`--json`, `--markdown`, filtered by role or turn count) when piped.
 

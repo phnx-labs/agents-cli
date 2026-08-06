@@ -316,7 +316,7 @@ src/
     monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/10-monitors.md
     projects.ts        # `agents projects` — named multi-repo project defs (~/.agents/projects/*.yaml) layered above the --project convention (resolveProjectRef in project-root.ts); project-status.ts rolls live sessions + merged PRs + artifacts into the progress card. Beta-gated. See docs/11-projects.md
     migrate.ts         # One-shot idempotent migrations
-    session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents sessions stats` + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key) and `insights.ts` extracts the behavioural facets behind `agents insights` (session_insights cache)
+    session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents sessions stats` + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key) and `insights.ts` extracts the cached multi-harness friction/correction/automation facets behind `agents sessions insights` (`agents insights` alias)
     terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux/Terminal.app, local or --host;
                        #   preferred.ts resolves WHICH terminal for a GUI caller (from live sessions' host app)
     cloud/             # Provider registry (Rush / Codex / Factory / Antigravity)
@@ -760,7 +760,8 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
   clauses match distinct calls, tool queries never parse transcripts, and exact
   static program counts retain repeated sites with wrapper/effective roles;
   versioned tool envelopes do not replace the list/detail JSON contracts
-  (SES-31..SES-37, SES-IF-4a); `agents sessions stats` emits its own versioned
+  (SES-31..SES-37, SES-IF-4a); `agents sessions insights` emits aggregate-only
+  actions and keeps `agents insights` as its top-level alias (SES-IF-4c); `agents sessions stats` emits its own versioned
   `sessions-stats` rollup of skill/command usage and never the list/detail shape
   (SES-IF-4b); `agents sessions
   export --encrypt` seals every transcript
