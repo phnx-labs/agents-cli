@@ -249,9 +249,22 @@ describe('notifyOwnerRoutineFinish — dedup per job+runId, green stays silent',
     expect(sent).toHaveLength(2);
   });
 
-  it('stays silent for a green run', async () => {
-    await notifyOwnerRoutineFinish(meta({ status: 'completed', exitCode: 0 }));
+  it('stays silent for a green run and reports no attempts', async () => {
+    const r = await notifyOwnerRoutineFinish(meta({ status: 'completed', exitCode: 0 }));
     expect(sent).toHaveLength(0);
+    expect(r).toEqual({ delivered: false, attempts: [] });
+  });
+
+  it('returns the delivery result so the daemon can log a total failure', async () => {
+    // A failed run whose only channel refuses: delivered=false but attempts non-empty
+    // — the exact shape the daemon WARN guards on.
+    fs.writeFileSync(
+      humansFile,
+      `version: 1\nowner:\n  channels:\n    - id: owntest-fail\n      transport: rush\n      to: '+1555'\n  policy:\n    normal: [owntest-fail]\n`,
+    );
+    const r = await notifyOwnerRoutineFinish(meta({ runId: 'run-Z', status: 'failed', exitCode: 1 }));
+    expect(r.delivered).toBe(false);
+    expect(r.attempts).toEqual([{ channel: 'owntest-fail', ok: false, error: 'owntest-fail refused' }]);
   });
 });
 

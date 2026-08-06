@@ -525,7 +525,12 @@ export async function runDaemon(): Promise<void> {
           // (in-process owner channel stack), not just the local desktop. Green
           // runs are silent — the builder returns early. Async + swallowed so a
           // delivery hiccup never blocks the finish path.
-          void notifyOwnerRoutineFinish(final).catch(() => { /* best-effort */ });
+          void notifyOwnerRoutineFinish(final)
+            .then((r) => {
+              if (r.attempts.length && !r.delivered)
+                log('WARN', `Owner failure-notify for '${config.name}' reached no channel (tried: ${r.attempts.map((a) => a.channel).join(', ')})`);
+            })
+            .catch(() => { /* best-effort */ });
         },
       });
       log('INFO', `Job '${config.name}' spawned (run: ${meta.runId}, PID: ${meta.pid})`);
@@ -540,7 +545,12 @@ export async function runDaemon(): Promise<void> {
       // RUSH-2288: the pre-spawn failure (e.g. auth_failed) is exactly the one the
       // per-routine `agents notify` prompt can never send — its agent never ran —
       // so the daemon reaches the owner directly.
-      void notifyOwnerRoutineStartFailed(config, message).catch(() => { /* best-effort */ });
+      void notifyOwnerRoutineStartFailed(config, message)
+        .then((r) => {
+          if (r.attempts.length && !r.delivered)
+            log('WARN', `Owner start-failure notify for '${config.name}' reached no channel (tried: ${r.attempts.map((a) => a.channel).join(', ')})`);
+        })
+        .catch(() => { /* best-effort */ });
     }
   };
 
