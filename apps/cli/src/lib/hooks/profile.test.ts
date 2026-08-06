@@ -75,6 +75,8 @@ describe('aggregateHookProfile', () => {
       { event: 'hook.fire', hook: 'ok', ms: 12, cache: 'hit', exit: 0 },
     ]);
     expect(clean[0].errorRate).toBeUndefined();
+    expect(clean[0].blockCount).toBe(0);
+    expect(clean[0].blockRate).toBeUndefined();
 
     const flaky = aggregateHookProfile([
       { event: 'hook.fire', hook: 'flaky', ms: 10, cache: 'miss', exit: 0 },
@@ -84,6 +86,24 @@ describe('aggregateHookProfile', () => {
     ]);
     expect(flaky[0].errorCount).toBe(1);
     expect(flaky[0].errorRate).toBeCloseTo(0.25, 3);
+    expect(flaky[0].blockCount).toBe(0);
+  });
+
+  it('counts intentional exit 2 as blockCount, not errorCount (RUSH-2294)', () => {
+    // deny-by-design guards exit 2 on purpose; a high blockRate is healthy,
+    // a high errorRate is a crash. Conflating them made ask-user-question-guard
+    // look like a 92%-error hook.
+    const [row] = aggregateHookProfile([
+      { event: 'hook.fire', hook: 'ask-user-question-guard', ms: 10, cache: 'miss', exit: 0 },
+      { event: 'hook.fire', hook: 'ask-user-question-guard', ms: 12, cache: 'miss', exit: 2 },
+      { event: 'hook.fire', hook: 'ask-user-question-guard', ms: 11, cache: 'miss', exit: 2 },
+      { event: 'hook.fire', hook: 'ask-user-question-guard', ms: 15, cache: 'miss', exit: 1 },
+    ]);
+    expect(row.n).toBe(4);
+    expect(row.blockCount).toBe(2);
+    expect(row.blockRate).toBeCloseTo(0.5, 3);
+    expect(row.errorCount).toBe(1);
+    expect(row.errorRate).toBeCloseTo(0.25, 3);
   });
 
   it('aggregates per-hook and sorts by p99 desc', () => {
@@ -110,6 +130,7 @@ describe('aggregateHookProfile', () => {
     expect(row.cacheStalePct).toBe(20);
     expect(row.cacheMissPct).toBe(20);
     expect(row.errorCount).toBe(1);
+    expect(row.blockCount).toBe(0);
   });
 });
 
@@ -134,10 +155,10 @@ describe('formatMs', () => {
 
 describe('formatCacheColumn', () => {
   it('says n/a when nothing was cached', () => {
-    expect(formatCacheColumn({ hook: 'x', n: 1, p50Ms: 0, p95Ms: 0, p99Ms: 0, meanMs: 0, maxMs: 0, cacheHitPct: 0, cacheStalePct: 0, cacheMissPct: 0, errorCount: 0 })).toBe('n/a');
+    expect(formatCacheColumn({ hook: 'x', n: 1, p50Ms: 0, p95Ms: 0, p99Ms: 0, meanMs: 0, maxMs: 0, cacheHitPct: 0, cacheStalePct: 0, cacheMissPct: 0, errorCount: 0, blockCount: 0 })).toBe('n/a');
   });
   it('lists only non-zero buckets', () => {
-    expect(formatCacheColumn({ hook: 'x', n: 100, p50Ms: 0, p95Ms: 0, p99Ms: 0, meanMs: 0, maxMs: 0, cacheHitPct: 98, cacheStalePct: 0, cacheMissPct: 2, errorCount: 0 }))
+    expect(formatCacheColumn({ hook: 'x', n: 100, p50Ms: 0, p95Ms: 0, p99Ms: 0, meanMs: 0, maxMs: 0, cacheHitPct: 98, cacheStalePct: 0, cacheMissPct: 2, errorCount: 0, blockCount: 0 }))
       .toBe('hit:98% miss:2%');
   });
 });

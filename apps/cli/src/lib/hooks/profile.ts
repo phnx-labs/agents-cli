@@ -26,8 +26,19 @@ export interface HookProfileRow {
   cacheStalePct: number;
   cacheMissPct: number;
   errorCount: number;
-  /** Fraction (0-1) of fires with a nonzero exit code. */
+  /**
+   * Fraction (0-1) of fires with a real crash exit (exit 1 / other nonzero
+   * except intentional PreToolUse deny code 2). Exit 2 is blockRate.
+   */
   errorRate?: number;
+  /**
+   * Count of intentional deny/block exits (PreToolUse exit 2). Deny-by-design
+   * guards (ask-user-question-guard, git-guard, plan-html-reminder) use this
+   * path — not a crash.
+   */
+  blockCount: number;
+  /** Fraction (0-1) of fires with exit code 2 (intentional deny/block). */
+  blockRate?: number;
   /** Fraction (0-1) of fires that hit their configured timeout. */
   timeoutRate?: number;
   /** Project key the row is scoped to (see project-key.ts) — set only when
@@ -91,7 +102,10 @@ export function aggregateHookProfile(events: RawFireEvent[]): HookProfileRow[] {
     const hits = evs.filter(e => e.cache === 'hit').length;
     const stale = evs.filter(e => e.cache === 'stale-prefetch').length;
     const misses = evs.filter(e => e.cache === 'miss').length;
-    const errors = evs.filter(e => typeof e.exit === 'number' && e.exit !== 0).length;
+    // Exit classes (Claude/Codex PreToolUse convention): 0 allow, 2 deny/block,
+    // 1 / other nonzero = real error. Exit 2 is not a crash.
+    const blocks = evs.filter(e => e.exit === 2).length;
+    const errors = evs.filter(e => typeof e.exit === 'number' && e.exit !== 0 && e.exit !== 2).length;
     rows.push({
       hook,
       n,
@@ -104,7 +118,9 @@ export function aggregateHookProfile(events: RawFireEvent[]): HookProfileRow[] {
       cacheStalePct: Math.round((stale / n) * 100),
       cacheMissPct: Math.round((misses / n) * 100),
       errorCount: errors,
+      blockCount: blocks,
       ...(errors > 0 ? { errorRate: Math.round((errors / n) * 1000) / 1000 } : {}),
+      ...(blocks > 0 ? { blockRate: Math.round((blocks / n) * 1000) / 1000 } : {}),
       // timeoutRate is not derivable here: the daily JSONL a shim writes only
       // covers fires that reached their own trailing printf — an externally
       // enforced timeout (the agent harness killing the process) never gets

@@ -68,6 +68,8 @@ export function asHookRows(rows: PerfAggregateRow[]): HookProfileRow[] {
     cacheMissPct: r.cacheMissPct ?? 0,
     errorCount: r.errorCount ?? 0,
     errorRate: r.errorRate,
+    blockCount: r.blockCount ?? 0,
+    blockRate: r.blockRate,
     timeoutRate: r.timeoutRate,
     project: r.project,
   }));
@@ -89,10 +91,15 @@ function printTable(
   }
 }
 
-/** `err:12% to:4%` when either rate is present, else ''. */
-function formatRateColumn(r: { errorRate?: number; timeoutRate?: number }): string {
+/**
+ * `err:12% block:40% to:4%` when any rate is present, else ''.
+ * Exit 2 (intentional deny) is `block:`, not `err:` — so a deny-by-design
+ * guard no longer reads as a crashing hook in the table.
+ */
+export function formatRateColumn(r: { errorRate?: number; blockRate?: number; timeoutRate?: number }): string {
   const parts: string[] = [];
   if (r.errorRate) parts.push(`err:${Math.round(r.errorRate * 100)}%`);
+  if (r.blockRate) parts.push(`block:${Math.round(r.blockRate * 100)}%`);
   if (r.timeoutRate) parts.push(`to:${Math.round(r.timeoutRate * 100)}%`);
   return parts.join(' ');
 }
@@ -104,7 +111,7 @@ export function renderHookTable(rows: HookProfileRow[], warnMs: number): void {
     console.log(chalk.gray('Hooks write via cache/matches shims into the spool; run a session or resync hooks.'));
     return;
   }
-  const widths = { hook: 36, n: 5, p50: 7, p95: 7, p99: 7, mean: 7, max: 7, cache: 22, rate: 14 };
+  const widths = { hook: 36, n: 5, p50: 7, p95: 7, p99: 7, mean: 7, max: 7, cache: 22, rate: 22 };
   const pad = (s: string, w: number) => (s.length >= w ? s.slice(0, w) : s + ' '.repeat(w - s.length));
   const header = [
     pad('HOOK', widths.hook),
@@ -115,7 +122,7 @@ export function renderHookTable(rows: HookProfileRow[], warnMs: number): void {
     pad('MEAN', widths.mean),
     pad('MAX', widths.max),
     pad('CACHE', widths.cache),
-    pad('ERR/TIMEOUT', widths.rate),
+    pad('ERR/BLOCK/TO', widths.rate),
   ].join(' ');
   console.log(chalk.bold(header));
   console.log(chalk.gray('─'.repeat(header.length)));
@@ -144,9 +151,9 @@ function renderLabelTable(title: string, rows: PerfAggregateRow[], warnMs: numbe
     console.log(chalk.gray(`No ${title} samples yet.`));
     return;
   }
-  const widths = [40, 5, 7, 7, 7, 7, 7, 14];
+  const widths = [40, 5, 7, 7, 7, 7, 7, 22];
   printTable(
-    ['LABEL', 'N', 'P50', 'P95', 'P99', 'MEAN', 'MAX', 'ERR/TIMEOUT'],
+    ['LABEL', 'N', 'P50', 'P95', 'P99', 'MEAN', 'MAX', 'ERR/BLOCK/TO'],
     widths,
     sliced.map((r) => [
       r.label,

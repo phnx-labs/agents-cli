@@ -263,6 +263,7 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
     stale: number;
     misses: number;
     errors: number;
+    blocks: number;
     timeouts: number;
   };
   const map = new Map<string, Bucket>();
@@ -271,15 +272,23 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
     const key = `${r.kind}\0${r.label}`;
     let b = map.get(key);
     if (!b) {
-      b = { kind: r.kind, label: r.label, durations: [], hits: 0, stale: 0, misses: 0, errors: 0, timeouts: 0 };
+      b = { kind: r.kind, label: r.label, durations: [], hits: 0, stale: 0, misses: 0, errors: 0, blocks: 0, timeouts: 0 };
       map.set(key, b);
     }
     b.durations.push(Number(r.duration_ms));
     if (r.cache === 'hit') b.hits++;
     else if (r.cache === 'stale-prefetch') b.stale++;
     else if (r.cache === 'miss' || r.cache === 'none') b.misses++;
+    // Exit classes (Claude/Codex PreToolUse convention):
+    //   0 → allowed
+    //   2 → intentional deny/block (not a crash)
+    //   1 / other nonzero → real error
+    // Timeouts are recorded via status, not exit_code, so they don't double-count.
     if (r.status === 'timeout') b.timeouts++;
-    else if (typeof r.exit_code === 'number' && r.exit_code !== 0) b.errors++;
+    else if (typeof r.exit_code === 'number') {
+      if (r.exit_code === 2) b.blocks++;
+      else if (r.exit_code !== 0) b.errors++;
+    }
   }
 
   const out: PerfAggregateRow[] = [];
@@ -307,6 +316,10 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
     if (b.errors > 0) {
       row.errorCount = b.errors;
       row.errorRate = Math.round((b.errors / n) * 1000) / 1000;
+    }
+    if (b.blocks > 0) {
+      row.blockCount = b.blocks;
+      row.blockRate = Math.round((b.blocks / n) * 1000) / 1000;
     }
     if (b.timeouts > 0) row.timeoutRate = Math.round((b.timeouts / n) * 1000) / 1000;
     if (opts.project) row.project = opts.project;

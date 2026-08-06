@@ -38,8 +38,19 @@ export interface PerfAggregateRow {
   cacheStalePct?: number;
   cacheMissPct?: number;
   errorCount?: number;
-  /** Fraction (0-1) of samples with a nonzero exit code. */
+  /**
+   * Fraction (0-1) of samples with a real crash exit (exit 1 / other nonzero
+   * except the intentional PreToolUse deny code 2). Exit 2 is blockRate.
+   */
   errorRate?: number;
+  /**
+   * Count of intentional deny/block exits (Claude/Codex PreToolUse exit 2).
+   * Not an error — deny-by-design guards (ask-user-question-guard, git-guard,
+   * plan-html-reminder) exit 2 when they block.
+   */
+  blockCount?: number;
+  /** Fraction (0-1) of samples with exit code 2 (intentional deny/block). */
+  blockRate?: number;
   /** Fraction (0-1) of samples with status:'timeout'. */
   timeoutRate?: number;
   /** Project key (see project-key.ts) the row is scoped to — set only when

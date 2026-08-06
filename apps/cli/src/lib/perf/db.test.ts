@@ -143,6 +143,25 @@ describe('perf/db', () => {
     expect(row.errorCount).toBe(1);
     expect(row.errorRate).toBeCloseTo(1 / 12, 3);
     expect(row.timeoutRate).toBeCloseTo(1 / 12, 3);
+    expect(row.blockCount).toBeUndefined();
+  });
+
+  it('counts exit 2 as blockCount/blockRate, not errorCount (RUSH-2294)', () => {
+    const base = Date.now();
+    // 1 allow, 2 intentional denials, 1 real crash
+    recordSample({ tsMs: base, kind: 'hook.fire', label: 'ask-user-question-guard', durationMs: 10, exitCode: 0 });
+    recordSample({ tsMs: base, kind: 'hook.fire', label: 'ask-user-question-guard', durationMs: 12, exitCode: 2 });
+    recordSample({ tsMs: base, kind: 'hook.fire', label: 'ask-user-question-guard', durationMs: 11, exitCode: 2 });
+    recordSample({ tsMs: base, kind: 'hook.fire', label: 'ask-user-question-guard', durationMs: 15, exitCode: 1 });
+
+    const rows = aggregateSamples({ days: 1, kinds: ['hook.fire'] });
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    expect(row.n).toBe(4);
+    expect(row.blockCount).toBe(2);
+    expect(row.blockRate).toBeCloseTo(0.5, 3);
+    expect(row.errorCount).toBe(1);
+    expect(row.errorRate).toBeCloseTo(0.25, 3);
   });
 
   it('project filter scopes aggregation to samples whose cwd resolves to that project', () => {
