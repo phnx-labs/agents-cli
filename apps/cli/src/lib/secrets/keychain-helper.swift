@@ -492,14 +492,16 @@ case "list":
     // the top of this case: it drops every biometry-ACL item even when
     // coreauthd is healthy.
     var items: [[String: Any]] = []
-    let passes: [(dataProtection: Bool, query: [CFString: Any])] = [(false, fileQuery), (true, dpQuery)]
-    for pass in passes {
+    for query in [fileQuery, dpQuery] {
         var result: AnyObject?
         let status: OSStatus
-        if pass.dataProtection {
+        // The pass carrying kSecUseDataProtectionKeychain IS the DP pass — read
+        // it off the query rather than off loop position, so the two passes stay
+        // a plain literal list.
+        if query[kSecUseDataProtectionKeychain] != nil {
             guard let outcome = boundedWait(listDataProtectionTimeout, { () -> (OSStatus, AnyObject?) in
                 var dpResult: AnyObject?
-                let dpStatus = SecItemCopyMatching(pass.query as CFDictionary, &dpResult)
+                let dpStatus = SecItemCopyMatching(query as CFDictionary, &dpResult)
                 return (dpStatus, dpResult)
             }) else {
                 writeStderr("list: data-protection keychain did not answer within \(listDataProtectionTimeoutLabel) (coreauthd unresponsive); skipping that pass — file-keychain results only")
@@ -508,7 +510,7 @@ case "list":
             status = outcome.0
             result = outcome.1
         } else {
-            status = SecItemCopyMatching(pass.query as CFDictionary, &result)
+            status = SecItemCopyMatching(query as CFDictionary, &result)
         }
         if status == errSecItemNotFound { continue }
         // The DP keybag locks with the screen; enumeration then reports
