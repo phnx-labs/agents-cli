@@ -700,22 +700,26 @@ export function clearClaudeSessionFileCacheForTest(): void {
  * the rest of the CLI uses, so this stays in lockstep with discovery.
  */
 function findClaudeSessionFile(cwd: string, sessionId?: string): string | undefined {
-  const cacheKey = `${cwd}\0${sessionId ?? ''}`;
-  const hit = claudeSessionFileCache.get(cacheKey);
-  // Only positive resolutions are cached. A miss is re-walked every call so a
-  // brand-new transcript becomes visible on the next poll without a restart.
-  if (hit !== undefined) {
-    try {
-      if (fs.existsSync(hit)) return hit;
-    } catch { /* re-resolve */ }
-    claudeSessionFileCache.delete(cacheKey);
+  // Only memoize when the exact session UUID is known. Without an id the
+  // resolver picks newest-by-mtime under the project dir; caching that path
+  // would stick to an old transcript after a new session starts in the same cwd.
+  if (sessionId) {
+    const cacheKey = `${cwd}\0${sessionId}`;
+    const hit = claudeSessionFileCache.get(cacheKey);
+    if (hit !== undefined) {
+      try {
+        if (fs.existsSync(hit)) return hit;
+      } catch { /* re-resolve */ }
+      claudeSessionFileCache.delete(cacheKey);
+    }
+    const resolved = pickClaudeSessionFileAcrossRoots(getAgentSessionDirs('claude', 'projects'), cwd, sessionId);
+    if (resolved) {
+      if (claudeSessionFileCache.size >= CLAUDE_SESSION_FILE_CACHE_MAX) claudeSessionFileCache.clear();
+      claudeSessionFileCache.set(cacheKey, resolved);
+    }
+    return resolved;
   }
-  const resolved = pickClaudeSessionFileAcrossRoots(getAgentSessionDirs('claude', 'projects'), cwd, sessionId);
-  if (resolved) {
-    if (claudeSessionFileCache.size >= CLAUDE_SESSION_FILE_CACHE_MAX) claudeSessionFileCache.clear();
-    claudeSessionFileCache.set(cacheKey, resolved);
-  }
-  return resolved;
+  return pickClaudeSessionFileAcrossRoots(getAgentSessionDirs('claude', 'projects'), cwd, sessionId);
 }
 
 /**
