@@ -503,6 +503,27 @@ SSH access (§7); rendering sessions that no harness produced.
   persistence MUST use ledger byte totals and read only changed ordinals
   (`lib/session/db.ts`; `lib/session/tool-store.ts`; `lib/session/tool-index.ts`;
   `commands/sessions-backfill.ts`; `commands/sessions.ts`).
+- **SES-42 (MUST).** An `ensureToolIndex` pass over a Claude/Codex transcript that
+  only grew MUST read only the bytes appended since the last pass (incremental
+  discovery already appends via `toolIndexMode`; this is the backfill side).
+  Schema v36's `tool_scan_ledger`
+  carries a resume point — `parsed_offset`, the byte just past the last complete
+  record consumed, and `parser_state`, the collector snapshot at that offset — and
+  the scan MUST resume there and persist with `mode: 'append'`, leaving the
+  session's already-stored call rows in place. The resume point MUST be refused,
+  and the whole file re-read, when the extractor version differs, no resume point
+  is recorded, the ledger's source path does not match, or the file is shorter
+  than what was already parsed. A record with no trailing newline MUST be indexed
+  but MUST NOT advance `parsed_offset`, so re-reading it next scan re-derives the
+  same ordinals rather than duplicating the call. Harnesses parsed whole into
+  memory record no resume point and stay full replaces.
+  Every `tool_call_text` row MUST be addressed by the `rowid` of the `tool_calls`
+  row it describes; its `call_key` is UNINDEXED, so a `call_key` predicate scans
+  the entire index once per call.
+  The scan path MUST also perform bounded, threshold-gated FTS compaction
+  (`maintainSessionSearchIndex`) so index health does not depend on a human
+  running `agents sessions optimize`
+  (`lib/session/tool-index.ts`; `lib/session/tool-store.ts`; `lib/session/db.ts`).
 - **SES-35 (MUST).** Fleet tool search MUST cap each peer's stdout at 16 MiB,
   query at most six peers concurrently, and subtract the exact encoded local
   envelope plus 64 KiB of coordinator headroom from the 15 MiB aggregate receive

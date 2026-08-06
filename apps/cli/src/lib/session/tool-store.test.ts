@@ -32,12 +32,12 @@ describe('persistToolCalls', () => {
         { program: 'git', role: 'effective' },
       ],
       input: 'git status', outcome: 'unknown',
-    }], stamp, 'replace');
+    }], stamp, { mode: 'replace' });
     persistToolCalls(db, session, [{
       ordinal: 0, timestamp: session.timestamp, tool: 'exec_command', programs: ['git'],
       programOccurrences: [{ program: 'git', role: 'effective' }],
       input: 'git status', outcome: 'error', error: 'failed',
-    }], stamp, 'append');
+    }], stamp, { mode: 'append' });
 
     expect(db.prepare(`SELECT outcome, error FROM tool_calls WHERE session_id = ?`).get(session.id))
       .toEqual({ outcome: 'error', error: 'failed' });
@@ -49,6 +49,90 @@ describe('persistToolCalls', () => {
       { occurrence_ordinal: 0, program: 'git', role: 'effective' },
     ]);
     expect((db.prepare(`SELECT call_count FROM tool_scan_ledger`).get() as { call_count: number }).call_count).toBe(1);
+  });
+
+  it('keeps prior evidence on append and drops it on replace', () => {
+    const db = getDB();
+    const filePath = path.join(TEST_HOME, 'append-vs-replace.jsonl');
+    fs.writeFileSync(filePath, '{}\n');
+    const session = {
+      id: 'append-vs-replace', shortId: 'append-v', agent: 'claude',
+      timestamp: '2026-08-03T00:00:00Z', filePath,
+    } as SessionMeta;
+    const call = (ordinal: number, input: string) => ({
+      ordinal, timestamp: session.timestamp, tool: 'Bash', programs: ['git'],
+      programOccurrences: [{ program: 'git', role: 'effective' as const }],
+      input, outcome: 'unknown' as const,
+    });
+    const stamp = () => {
+      const stat = fs.statSync(filePath);
+      return { fileMtimeMs: stat.mtimeMs, fileSize: stat.size };
+    };
+    const rowids = () => db.prepare(`SELECT rowid FROM tool_calls WHERE session_id = ? ORDER BY ordinal`)
+      .all(session.id) as Array<{ rowid: number }>;
+    const inputs = () => (db.prepare(`SELECT input FROM tool_calls WHERE session_id = ? ORDER BY ordinal`)
+      .all(session.id) as Array<{ input: string }>).map((row) => row.input);
+
+    persistToolCalls(db, session, [call(0, 'git status'), call(1, 'git diff')], stamp(), {
+      mode: 'replace',
+      resume: { parserState: '{"v":1,"nextOrdinal":2,"pending":[]}', parsedOffset: 3 },
+    });
+    const beforeRowids = rowids();
+    fs.appendFileSync(filePath, '{}\n');
+
+    // The transcript grew, so the scan indexes only the new call. The two calls
+    // already stored keep their rows -- this is the delete-everything-and-reparse
+    // that RUSH-2208 is about, and the rowids prove they were never rewritten.
+    persistToolCalls(db, session, [call(2, 'git log')], stamp(), {
+      mode: 'append',
+      resume: { parserState: '{"v":1,"nextOrdinal":3,"pending":[]}', parsedOffset: 6 },
+    });
+
+    expect(inputs()).toEqual(['git status', 'git diff', 'git log']);
+    expect(rowids().slice(0, 2)).toEqual(beforeRowids);
+    expect(db.prepare(`SELECT call_count, parsed_offset FROM tool_scan_ledger WHERE session_id = ?`).get(session.id))
+      .toEqual({ call_count: 3, parsed_offset: 6 });
+    // Every stored call is still searchable through the rowid-addressed FTS rows.
+    expect(db.prepare(`
+      SELECT count(*) AS n FROM tool_call_text
+      WHERE rowid IN (SELECT rowid FROM tool_calls WHERE session_id = ?)
+    `).get(session.id)).toEqual({ n: 3 });
+
+    // A replace with no resume point clears the session's evidence and the
+    // resume point with it, so the next scan starts from byte 0.
+    persistToolCalls(db, session, [call(0, 'git fetch')], stamp(), { mode: 'replace' });
+
+    expect(inputs()).toEqual(['git fetch']);
+    expect(db.prepare(`SELECT call_count, parser_state, parsed_offset FROM tool_scan_ledger WHERE session_id = ?`)
+      .get(session.id)).toEqual({ call_count: 1, parser_state: null, parsed_offset: null });
+    expect(db.prepare(`
+      SELECT count(*) AS n FROM tool_call_text
+      WHERE rowid IN (SELECT rowid FROM tool_calls WHERE session_id = ?)
+    `).get(session.id)).toEqual({ n: 1 });
+  });
+
+  it('leaves no orphaned search rows when a session is replaced', () => {
+    const db = getDB();
+    const filePath = path.join(TEST_HOME, 'fts-orphans.jsonl');
+    fs.writeFileSync(filePath, '{}\n');
+    const session = {
+      id: 'fts-orphans', shortId: 'fts-orph', agent: 'claude',
+      timestamp: '2026-08-03T00:00:00Z', filePath,
+    } as SessionMeta;
+    const stat = fs.statSync(filePath);
+    const stamp = { fileMtimeMs: stat.mtimeMs, fileSize: stat.size };
+    const before = (db.prepare(`SELECT count(*) AS n FROM tool_call_text`).get() as { n: number }).n;
+    persistToolCalls(db, session, [0, 1, 2].map((ordinal) => ({
+      ordinal, timestamp: session.timestamp, tool: 'Bash', programs: ['rg'],
+      programOccurrences: [{ program: 'rg', role: 'effective' as const }],
+      input: `rg orphan-probe-${ordinal}`, outcome: 'unknown' as const,
+    })), stamp, { mode: 'replace' });
+
+    persistToolCalls(db, session, [], stamp, { mode: 'replace' });
+
+    expect(db.prepare(`SELECT count(*) AS n FROM tool_call_text`).get()).toEqual({ n: before });
+    expect(db.prepare(`SELECT count(*) AS n FROM tool_call_text WHERE tool_call_text MATCH '"orphan-probe"'`).get())
+      .toEqual({ n: 0 });
   });
 
   it('stores an explicit terminal record when a session reaches its evidence budget', () => {
@@ -64,7 +148,7 @@ describe('persistToolCalls', () => {
       ordinal: 0, timestamp: session.timestamp, tool: 'exec_command', programs: ['git'],
       programOccurrences: [{ program: 'git', role: 'effective' }],
       input: `git status ${'x'.repeat(200)}`, outcome: 'unknown',
-    }], { fileMtimeMs: stat.mtimeMs, fileSize: stat.size }, 'replace', 256);
+    }], { fileMtimeMs: stat.mtimeMs, fileSize: stat.size }, { mode: 'replace', maxSessionBytes: 256 });
 
     expect(db.prepare(`SELECT tool, parse_error FROM tool_calls WHERE session_id = ?`).all(session.id))
       .toEqual([{ tool: 'index_limit', parse_error: 'Additional tool calls were not indexed for this session.' }]);
@@ -92,7 +176,7 @@ describe('persistToolCalls', () => {
     fs.appendFileSync(filePath, '{}\n');
     const second = fs.statSync(filePath);
 
-    persistToolCalls(db, session, [], { fileMtimeMs: second.mtimeMs, fileSize: second.size }, 'append');
+    persistToolCalls(db, session, [], { fileMtimeMs: second.mtimeMs, fileSize: second.size }, { mode: 'append' });
 
     expect(db.prepare(`SELECT call_count, evidence_bytes FROM tool_scan_ledger WHERE file_path = ?`).get(filePath)).toEqual(before);
     expect(db.prepare(`SELECT count(*) AS n FROM tool_calls WHERE session_id = ?`).get(session.id)).toEqual({ n: 1 });

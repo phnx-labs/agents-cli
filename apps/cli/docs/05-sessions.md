@@ -353,6 +353,25 @@ rows are rebuilt explicitly without forcing ordinary session history to reparse.
 The ledger is keyed by session id; its source path is retained for maintenance,
 not resolved or checked during a query.
 
+Schema v36 makes the **backfill** side of that lifecycle incremental too.
+Incremental discovery already appended (`toolIndexMode: 'append'`, `discover.ts`),
+carrying its own continuation in `scan_ledger.parser_state`; `ensureToolIndex`
+did not, so every `agents sessions backfill tools` pass re-read the transcript
+from byte 0 and deleted the session's evidence to rewrite it. `tool_scan_ledger`
+now carries its own resume point — `parsed_offset` (the byte just past the last
+complete record consumed) and `parser_state` (the collector snapshot at that
+offset) — so a transcript that only grew is read from where the last pass stopped
+and merged with `mode: 'append'`. A discovery-driven write records no resume point
+of its own and clears the columns, which is correct: it keeps the tool ledger's
+stamp current, so the next backfill pass finds nothing to do at all. The resume point is refused, and the whole file
+re-read, on a different extractor version, a ledger source path that does not
+match, or a file shorter than what was already parsed. Harnesses parsed whole into
+memory record no resume point and remain full replaces. The same migration rebuilds
+`tool_call_text` so each row sits at the `rowid` of the `tool_calls` row it
+describes: its `call_key` is UNINDEXED, so the previous `DELETE ... WHERE call_key
+= ?` scanned the whole FTS index once per call. Neither ledger is wiped — existing
+sessions re-read once, record a resume point, and are incremental after that.
+
 Schema v33 adds `account_key` / `account_org` and `idx_sessions_account_key`. Its
 migration also leaves `scan_ledger` alone: attribution derives from `file_path` and
 `version`, both already stored, so existing rows are repaired in place with no
@@ -1424,4 +1443,4 @@ fan-out specifically.
 - `agents sessions <id> --artifacts` — list files created/modified in a session
 - `agents teams status` — session state for team-coordinated runs
 - `agents cloud logs <id>` — for remote cloud dispatches (different subsystem)
-- `agents sessions optimize` — compact the FTS5 search index (`tool_call_text` / `session_text`) when it has bloated from repeated re-indexing, which slows or hangs `agents sessions`. FTS5 appends a segment per insert and never self-merges the scanner's delete+insert churn; this runs `'optimize'` to merge segments + purge tombstones, non-destructively. Reclaimed space frees as reusable pages (VACUUM with the daemon stopped returns it to disk). Wireable to a weekly routine so the index never re-bloats.
+- `agents sessions optimize` — compact the FTS5 search index (`tool_call_text` / `session_text`) in one full pass. FTS5 appends a segment per insert and leaves a tombstone per delete; this runs `'optimize'` to merge every segment + purge tombstones, non-destructively. Reclaimed space frees as reusable pages (VACUUM with the daemon stopped returns it to disk). Since 1.22.25 the scan path also compacts on its own — after a batch of writes it runs a bounded incremental `'merge'` (`maintainSessionSearchIndex`), gated on a segment-count threshold so a healthy index costs nothing — so this command is the manual, unbounded catch-up for an index that already bloated, not the only thing standing between the DB and gigabytes of unmerged segments.

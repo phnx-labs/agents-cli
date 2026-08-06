@@ -31,7 +31,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/05-sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 35;
+export const SCHEMA_VERSION = 36;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every
@@ -211,6 +211,12 @@ CREATE TABLE IF NOT EXISTS tool_program_occurrences (
 CREATE INDEX IF NOT EXISTS idx_tool_program_occurrences_program
   ON tool_program_occurrences(program, call_key);
 
+-- Derived search index over tool_calls. call_key is UNINDEXED -- it is carried
+-- for display, NOT for lookup: an FTS5 table has no index on an ordinary column,
+-- so DELETE ... WHERE call_key = ? scans the whole index once per call, which is
+-- quadratic in a session's call count. Every write here therefore addresses a
+-- row by rowid, mirroring the tool_calls.rowid of the call it describes, so a
+-- delete is a single rowid seek (tool-store.ts persistToolCalls/deleteSessionCalls).
 CREATE VIRTUAL TABLE IF NOT EXISTS tool_call_text USING fts5(
   call_key UNINDEXED,
   tool,
@@ -231,7 +237,15 @@ CREATE TABLE IF NOT EXISTS tool_scan_ledger (
   extractor_version INTEGER NOT NULL,
   indexed_at INTEGER NOT NULL,
   call_count INTEGER NOT NULL,
-  evidence_bytes INTEGER NOT NULL
+  evidence_bytes INTEGER NOT NULL,
+  -- Resume point for the incremental tool scan. parsed_offset is the byte
+  -- offset just past the last COMPLETE newline-terminated record consumed, and
+  -- parser_state is the serialized ToolCallCollector snapshot at that offset
+  -- (next ordinal + still-unresolved calls). Together they let the next scan of
+  -- a session that only grew read the appended bytes instead of the whole file.
+  -- NULL means "no resume point" — the next scan re-reads from byte 0.
+  parser_state TEXT,
+  parsed_offset INTEGER
 );
 
 -- Skill/slash-command usage per session (#12), computed from a session's
@@ -935,6 +949,46 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     // NOT NULL, then querySessions can sort on the bare column and use the index.
     db.exec(`UPDATE sessions SET last_activity = timestamp WHERE last_activity IS NULL`);
   }
+
+  if (fromVersion < 36) {
+    // v35 -> v36: make the tool index incremental, and stop paying a full FTS
+    // scan per deleted call.
+    //
+    // (a) tool_scan_ledger gains a resume point (parser_state + parsed_offset).
+    //     Existing rows get NULLs, which read as "no resume point": the next
+    //     scan of each session re-reads it once from byte 0 and records a resume
+    //     point, so every scan after that is incremental. No ledger is wiped.
+    //
+    // (b) tool_call_text is rebuilt so its rowid mirrors tool_calls.rowid. The
+    //     old rows were inserted with FTS5-assigned rowids and are only
+    //     addressable by the UNINDEXED call_key, i.e. a full index scan per
+    //     delete. There is no ALTER for that, and the rowids cannot be repaired
+    //     in place, so the table is dropped and repopulated from tool_calls --
+    //     the same non-destructive derived-table rebuild v27 did (the source of
+    //     truth is tool_calls, which is untouched). The rebuild also lands the
+    //     content as one merged segment, which is the compaction
+    //     optimizeSessionSearchIndex would otherwise have to do afterwards.
+    const ledgerCols = new Set(
+      (db.prepare(`PRAGMA table_info(tool_scan_ledger)`).all() as Array<{ name: string }>)
+        .map((column) => column.name),
+    );
+    if (!ledgerCols.has('parser_state')) db.exec(`ALTER TABLE tool_scan_ledger ADD COLUMN parser_state TEXT`);
+    if (!ledgerCols.has('parsed_offset')) db.exec(`ALTER TABLE tool_scan_ledger ADD COLUMN parsed_offset INTEGER`);
+    db.exec(`
+      DROP TABLE IF EXISTS tool_call_text;
+      CREATE VIRTUAL TABLE tool_call_text USING fts5(
+        call_key UNINDEXED,
+        tool,
+        input,
+        output,
+        error,
+        tokenize = 'trigram'
+      );
+      INSERT INTO tool_call_text (rowid, call_key, tool, input, output, error)
+      SELECT rowid, call_key, tool, input, coalesce(output, ''), coalesce(error, '')
+      FROM tool_calls;
+    `);
+  }
 }
 
 /**
@@ -1128,6 +1182,55 @@ export function optimizeSessionSearchIndex(): FtsOptimizeResult[] {
     db.prepare(`INSERT INTO ${table}(${table}) VALUES('optimize')`).run();
     return { table, segmentsBefore, segmentsAfter: segments(table) };
   });
+}
+
+/**
+ * Segment count above which a scan pays for a slice of merge work. Below it the
+ * index is small enough that querying it is not the bottleneck and merging is
+ * pure overhead on every scan.
+ */
+const FTS_MAINTENANCE_SEGMENT_THRESHOLD = 512;
+
+/**
+ * Page budget for one incremental merge. FTS5's `'merge'` command does at most
+ * this much work and returns — it is not `'optimize'`, which merges the whole
+ * index in one unbounded pass. That bound is why this can run on the scan path:
+ * the cost per scan is fixed, and repeated scans converge the index instead of
+ * one scan stalling on a multi-gigabyte compaction.
+ */
+const FTS_MAINTENANCE_MERGE_PAGES = 64;
+
+/**
+ * Keep the FTS indexes from degrading on the normal scan path.
+ *
+ * `optimizeSessionSearchIndex` is the full, unbounded compaction behind
+ * `agents sessions optimize`. Leaving it as the ONLY compaction meant the index
+ * degraded until a human happened to run that command, which is how
+ * `tool_call_text_data` reached gigabytes for tens of MB of content. This is the
+ * automatic counterpart: bounded, threshold-gated, and safe to call after every
+ * batch of writes. Non-destructive — merging never changes what is searchable.
+ *
+ * Returns one result per table it actually merged (empty when every table is
+ * under the threshold, which is the common case on a warm index).
+ */
+export function maintainSessionSearchIndex(
+  db: Database.Database = getDB(),
+  options: { segmentThreshold?: number; mergePages?: number } = {},
+): FtsOptimizeResult[] {
+  const threshold = options.segmentThreshold ?? FTS_MAINTENANCE_SEGMENT_THRESHOLD;
+  const pages = options.mergePages ?? FTS_MAINTENANCE_MERGE_PAGES;
+  // Hardcoded literals — never interpolate caller input into an identifier.
+  const tables = ['tool_call_text', 'session_text'];
+  const segments = (table: string): number =>
+    (db.prepare(`SELECT count(*) AS n FROM ${table}_data`).get() as { n: number }).n;
+  const results: FtsOptimizeResult[] = [];
+  for (const table of tables) {
+    const segmentsBefore = segments(table);
+    if (segmentsBefore < threshold) continue;
+    db.prepare(`INSERT INTO ${table}(${table}, rank) VALUES('merge', ?)`).run(pages);
+    results.push({ table, segmentsBefore, segmentsAfter: segments(table) });
+  }
+  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -2034,11 +2137,17 @@ export function upsertSessionsBatch(
     const toolScan = entry.toolScan ?? entry.scan;
     if (!toolScan || !entry.toolCalls) continue;
     try {
-      persistToolCalls(db, entry.meta, entry.toolCalls, toolScan, entry.toolIndexMode ?? 'replace');
+      persistToolCalls(db, entry.meta, entry.toolCalls, toolScan, { mode: entry.toolIndexMode ?? 'replace' });
     } catch {
       // Boundary is intentionally retryable via tool_scan_ledger.
     }
   }
+  // Every batch appends FTS segments (session_text always, tool_call_text for the
+  // harnesses indexed above). Pay a bounded slice of the merge here so the
+  // scan path keeps its own index healthy instead of leaving all compaction to
+  // the manual `agents sessions optimize` (RUSH-2208). Threshold-gated, so a
+  // small index costs two counts and nothing else.
+  maintainSessionSearchIndex(db);
 }
 
 /**

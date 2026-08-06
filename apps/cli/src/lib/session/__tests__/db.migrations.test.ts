@@ -279,7 +279,12 @@ describe('tool ledger session identity migration (v29)', () => {
 
     const reopened = getDB();
     expect((reopened.prepare(`PRAGMA table_info(tool_scan_ledger)`).all() as Array<{ name: string }>).map((column) => column.name))
-      .toEqual(['session_id', 'file_path', 'file_mtime_ms', 'file_size', 'extractor_version', 'indexed_at', 'call_count', 'evidence_bytes']);
+      .toEqual([
+        'session_id', 'file_path', 'file_mtime_ms', 'file_size', 'extractor_version', 'indexed_at',
+        'call_count', 'evidence_bytes',
+        // v36 resume point for the incremental tool scan.
+        'parser_state', 'parsed_offset',
+      ]);
     expect(reopened.prepare(`SELECT count(*) AS n FROM tool_scan_ledger`).get()).toEqual({ n: 0 });
     expect(reopened.prepare(`SELECT count(*) AS n FROM scan_ledger WHERE file_path = ?`).get('/tmp/session-ledger/session.jsonl'))
       .toEqual({ n: 1 });

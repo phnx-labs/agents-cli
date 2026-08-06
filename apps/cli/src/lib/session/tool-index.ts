@@ -1,12 +1,13 @@
 import * as fs from 'fs';
 import { StringDecoder } from 'string_decoder';
 import type Database from '../sqlite.js';
-import { getDB } from './db.js';
+import { getDB, maintainSessionSearchIndex } from './db.js';
 import { parseSession } from './parse.js';
 import {
   TOOL_INDEX_VERSION,
   TOOL_INDEX_LIMIT_ORDINAL,
   ToolCallCollector,
+  type ToolCallCollectorSnapshot,
   collectClaudeToolCalls,
   collectCodexToolCalls,
   toolCallEvidenceBytes,
@@ -15,9 +16,11 @@ import {
 } from './tool-calls.js';
 import type { SessionMeta } from './types.js';
 import {
+  canonicalToolLedgerPath,
   persistToolCalls,
   purgeToolCalls,
   toolEvidenceSourcePath,
+  type ToolScanResumePoint,
 } from './tool-store.js';
 
 const BACKFILL_MAX_FILES = 25;
@@ -138,23 +141,83 @@ interface StoredCallRow {
   parse_error: string | null;
 }
 
+interface ToolLedgerRow {
+  file_path: string;
+  file_mtime_ms: number;
+  file_size: number;
+  extractor_version: number;
+  parsed_offset: number | null;
+}
+
+/**
+ * The ledger columns every candidate session is judged on. Deliberately NOT
+ * `parser_state`: this runs once per session in the scan's warm path, and that
+ * column holds a serialized collector snapshot that can reach a megabyte. It is
+ * read separately, only for the sessions that turn out to need indexing.
+ */
+function readToolLedger(db: Database.Database, sessionId: string): ToolLedgerRow | undefined {
+  return db.prepare(`
+    SELECT file_path, file_mtime_ms, file_size, extractor_version, parsed_offset
+    FROM tool_scan_ledger WHERE session_id = ?
+  `).get(sessionId) as ToolLedgerRow | undefined;
+}
+
+function readToolParserState(db: Database.Database, sessionId: string): string | null {
+  const row = db.prepare(`SELECT parser_state FROM tool_scan_ledger WHERE session_id = ?`)
+    .get(sessionId) as { parser_state: string | null } | undefined;
+  return row?.parser_state ?? null;
+}
+
 function needsIndex(
-  db: Database.Database,
-  sessionId: string,
+  row: ToolLedgerRow | undefined,
   stamp: { fileMtimeMs: number; fileSize: number },
 ): boolean {
-  const row = db.prepare(`
-    SELECT file_mtime_ms, file_size, extractor_version
-    FROM tool_scan_ledger WHERE session_id = ?
-  `).get(sessionId) as {
-    file_mtime_ms: number;
-    file_size: number;
-    extractor_version: number;
-  } | undefined;
   return !row
     || row.file_mtime_ms !== stamp.fileMtimeMs
     || row.file_size !== stamp.fileSize
     || row.extractor_version !== TOOL_INDEX_VERSION;
+}
+
+/**
+ * Where to start reading a session whose transcript changed.
+ *
+ * A live session's transcript is append-only, so re-reading it from byte 0 on
+ * every scan re-parses the entire history to discover the handful of records
+ * that are new — the cost that makes a large session's tool index quadratic in
+ * the number of scans. When the ledger carries a resume point that the current
+ * file still agrees with, the scan reads only the appended bytes and merges the
+ * result (`append`); anything else re-reads the whole file (`replace`).
+ *
+ * Each check below rejects a case where the stored prefix may no longer describe
+ * the file: a harness the streaming parser cannot resume, a different extractor,
+ * no recorded resume point, a source path the ledger row does not describe, a
+ * file that shrank below what was already parsed (a rewrite or truncation, not
+ * an append), or a snapshot that does not read back.
+ */
+function planToolScan(
+  db: Database.Database,
+  sessionId: string,
+  row: ToolLedgerRow | undefined,
+  sourcePath: string,
+  stamp: { fileMtimeMs: number; fileSize: number },
+  resumable: boolean,
+): { mode: 'replace' | 'append'; startOffset: number; snapshot?: ToolCallCollectorSnapshot } {
+  const full = { mode: 'replace' as const, startOffset: 0 };
+  if (!resumable || !row) return full;
+  if (row.extractor_version !== TOOL_INDEX_VERSION) return full;
+  if (row.parsed_offset === null) return full;
+  if (row.file_path !== canonicalToolLedgerPath(sourcePath)) return full;
+  if (stamp.fileSize < row.file_size || stamp.fileSize < row.parsed_offset) return full;
+  const parserState = readToolParserState(db, sessionId);
+  if (parserState === null) return full;
+  let snapshot: ToolCallCollectorSnapshot;
+  try {
+    snapshot = JSON.parse(parserState) as ToolCallCollectorSnapshot;
+  } catch {
+    return full;
+  }
+  if (snapshot?.v !== 1 || !Number.isSafeInteger(snapshot.nextOrdinal)) return full;
+  return { mode: 'append', startOffset: row.parsed_offset, snapshot };
 }
 
 /** Read index completeness from SQLite only; never stat or parse transcripts. */
@@ -203,15 +266,37 @@ function backfillLimitCall(session: SessionMeta, reason: string): IndexedToolCal
   };
 }
 
+/**
+ * One parse of a transcript: the calls to persist, plus where a later scan may
+ * resume. `resume` is null when the parse could not be trusted to have covered
+ * its whole prefix — the next scan then re-reads from byte 0.
+ */
+interface ToolParseResult {
+  calls: IndexedToolCall[];
+  resume: ToolScanResumePoint | null;
+}
+
 /** Stream Claude/Codex JSONL without ever retaining an oversized record. */
-async function streamJsonlToolCalls(session: SessionMeta): Promise<IndexedToolCall[]> {
-  const collector = new ToolCallCollector();
-  const stream = fs.createReadStream(session.filePath, { highWaterMark: 64 * 1024 });
+async function streamJsonlToolCalls(
+  session: SessionMeta,
+  from: { startOffset: number; snapshot?: ToolCallCollectorSnapshot } = { startOffset: 0 },
+): Promise<ToolParseResult> {
+  const collector = new ToolCallCollector(from.snapshot);
+  const stream = fs.createReadStream(session.filePath, {
+    highWaterMark: 64 * 1024,
+    start: from.startOffset,
+  });
   const decoder = new StringDecoder('utf8');
   let pending = '';
   let pendingBytes = 0;
   let droppingOversizedLine = false;
   let skippedOversizedLine = false;
+  // Byte offset just past the last complete record applied. Only a complete,
+  // newline-terminated record advances it, so resuming here can never re-apply a
+  // record (which would mint a second ordinal for it) nor skip a partial tail.
+  let parsedOffset = from.startOffset;
+  /** Bytes of the record currently being assembled, across chunk boundaries. */
+  let lineBytes = 0;
 
   const applyLine = (line: string): void => {
     if (!line.trim()) return;
@@ -231,8 +316,14 @@ async function streamJsonlToolCalls(session: SessionMeta): Promise<IndexedToolCa
       const newline = text.indexOf('\n', start);
       const end = newline >= 0 ? newline : text.length;
       const segment = text.slice(start, end);
+      const segmentBytes = Buffer.byteLength(segment);
+      // Counted outside the drop guard and across chunk boundaries: this is the
+      // record's true size on disk, which is what the resume offset is measured
+      // in. `pendingBytes` cannot stand in for it — that one resets when an
+      // oversized record is dropped, and a record split over two 64 KiB reads
+      // would lose the part carried in from the previous chunk.
+      lineBytes += segmentBytes;
       if (!droppingOversizedLine) {
-        const segmentBytes = Buffer.byteLength(segment);
         if (pendingBytes + segmentBytes <= BACKFILL_MAX_JSONL_RECORD_BYTES) {
           pending += segment;
           pendingBytes += segmentBytes;
@@ -245,6 +336,8 @@ async function streamJsonlToolCalls(session: SessionMeta): Promise<IndexedToolCa
       }
       if (newline < 0) break;
       if (!droppingOversizedLine) applyLine(pending);
+      parsedOffset += lineBytes + 1; // + the newline itself
+      lineBytes = 0;
       pending = '';
       pendingBytes = 0;
       droppingOversizedLine = false;
@@ -254,6 +347,17 @@ async function streamJsonlToolCalls(session: SessionMeta): Promise<IndexedToolCa
 
   for await (const chunk of stream) consume(decoder.write(chunk as Buffer));
   consume(decoder.end());
+
+  // Snapshot BEFORE the unterminated trailing record, and pair it with an offset
+  // that stops short of that record. The writer may be mid-append, so the record
+  // is indexed now (its evidence is real) but is re-read by the next scan — which
+  // resumes with the same next-ordinal and so re-derives the same ordinals,
+  // making the re-read an idempotent upsert rather than a duplicate.
+  const resume = skippedOversizedLine
+    // A dropped oversized record left the ordinals and the pending map out of
+    // step with the file; nothing here can be resumed from.
+    ? null
+    : { parserState: JSON.stringify(collector.snapshot()), parsedOffset };
   if (!droppingOversizedLine && pending.length > 0) applyLine(pending);
 
   const calls = collector.drainChanged();
@@ -263,29 +367,44 @@ async function streamJsonlToolCalls(session: SessionMeta): Promise<IndexedToolCa
       'At least one JSONL record exceeded the 1 MiB tool-backfill parser limit.',
     ));
   }
-  return calls;
+  return { calls, resume };
+}
+
+/** True for the harnesses whose transcript the streaming parser can resume. */
+function isResumableToolSource(agent: string): boolean {
+  return agent === 'claude' || agent === 'codex';
 }
 
 async function toolCallsForBackfill(
   session: SessionMeta,
   sourceBytes: number,
-): Promise<IndexedToolCall[]> {
-  if (session.agent === 'claude' || session.agent === 'codex') {
+  from: { startOffset: number; snapshot?: ToolCallCollectorSnapshot } = { startOffset: 0 },
+): Promise<ToolParseResult> {
+  if (isResumableToolSource(session.agent)) {
     if (sourceBytes > BACKFILL_MAX_STREAM_SOURCE_BYTES) {
-      return [backfillLimitCall(
-        session,
-        'Transcript exceeds the 64 MiB safe streaming tool-backfill limit.',
-      )];
+      return {
+        calls: [backfillLimitCall(
+          session,
+          'Transcript exceeds the 64 MiB safe streaming tool-backfill limit.',
+        )],
+        resume: null,
+      };
     }
-    return streamJsonlToolCalls(session);
+    return streamJsonlToolCalls(session, from);
   }
   if (sourceBytes > BACKFILL_MAX_IN_MEMORY_SOURCE_BYTES) {
-    return [backfillLimitCall(
-      session,
-      'Transcript exceeds the 16 MiB safe in-memory tool-backfill parser limit.',
-    )];
+    return {
+      calls: [backfillLimitCall(
+        session,
+        'Transcript exceeds the 16 MiB safe in-memory tool-backfill parser limit.',
+      )],
+      resume: null,
+    };
   }
-  return toolCallsFromEvents(parseSession(session.filePath, session.agent));
+  // Every other harness is parsed whole into memory by parseSession, which
+  // exposes no byte offset to resume from — so these stay full replaces and
+  // record no resume point, rather than storing one this path cannot honour.
+  return { calls: toolCallsFromEvents(parseSession(session.filePath, session.agent)), resume: null };
 }
 
 /**
@@ -299,12 +418,19 @@ export async function ensureToolIndex(
   const maxFiles = limits.maxFiles ?? BACKFILL_MAX_FILES;
   const maxBytes = limits.maxBytes ?? BACKFILL_MAX_BYTES;
   const db = getDB();
-  const pending: Array<{ session: SessionMeta; stamp: { fileMtimeMs: number; fileSize: number } }> = [];
+  const pending: Array<{
+    session: SessionMeta;
+    stamp: { fileMtimeMs: number; fileSize: number };
+    plan: ReturnType<typeof planToolScan>;
+    /** Bytes this scan will actually read — the whole file, or just the tail. */
+    readBytes: number;
+  }> = [];
   let skippedFiles = 0;
 
   for (const session of sessions) {
     if (!session.filePath) continue;
     const sourcePath = toolEvidenceSourcePath(session.filePath, session.agent);
+    const ledger = readToolLedger(db, session.id);
     const mustStatSource = limits.verifySourceStamps || sourcePath !== session.filePath;
     const indexed = !mustStatSource
       ? db.prepare(`
@@ -324,7 +450,14 @@ export async function ensureToolIndex(
         continue;
       }
     }
-    if (needsIndex(db, session.id, stamp)) pending.push({ session, stamp });
+    if (!needsIndex(ledger, stamp)) continue;
+    const plan = planToolScan(db, session.id, ledger, sourcePath, stamp, isResumableToolSource(session.agent));
+    pending.push({
+      session,
+      stamp,
+      plan,
+      readBytes: Math.max(0, stamp.fileSize - plan.startOffset),
+    });
   }
 
   let indexedFiles = 0;
@@ -336,18 +469,25 @@ export async function ensureToolIndex(
     // The byte budget is a batch boundary, not a correctness boundary. Admit
     // one oversized transcript by itself so it can never wedge the ledger or
     // silently disappear from results; the next invocation resumes afterward.
-    if (attemptedFiles > 0 && consumedBytes + item.stamp.fileSize > maxBytes) break;
+    // Budgeted on the bytes this scan reads, not the file's size: a resumed
+    // session costs only its appended tail, so a batch can cover far more
+    // growing sessions than it could when every one was re-read whole.
+    if (attemptedFiles > 0 && consumedBytes + item.readBytes > maxBytes) break;
     attemptedFiles++;
-    consumedBytes += item.stamp.fileSize;
+    consumedBytes += item.readBytes;
     try {
-      const calls = await toolCallsForBackfill(item.session, item.stamp.fileSize);
-      persistToolCalls(db, item.session, calls, item.stamp);
+      const { calls, resume } = await toolCallsForBackfill(item.session, item.stamp.fileSize, item.plan);
+      persistToolCalls(db, item.session, calls, item.stamp, { mode: item.plan.mode, resume });
       indexedFiles++;
       indexedCalls += calls.length;
     } catch {
       skippedFiles++;
     }
   }
+  // The scan just wrote a batch of FTS segments; pay a bounded slice of the
+  // merge they need so the index converges here instead of degrading until
+  // someone runs `agents sessions optimize` by hand (RUSH-2208).
+  if (indexedFiles > 0) maintainSessionSearchIndex(db);
 
   const remainingFiles = Math.max(0, pending.length - attemptedFiles);
   const limitedSessionIds = new Set<string>();

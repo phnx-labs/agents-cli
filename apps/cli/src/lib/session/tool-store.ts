@@ -38,11 +38,17 @@ export function toolEvidenceSourcePath(filePath: string, agent: string): string 
 }
 
 function deleteSessionCalls(db: Database.Database, sessionId: string): void {
-  const keys = db.prepare(`SELECT call_key FROM tool_calls WHERE session_id = ?`).all(sessionId) as Array<{ call_key: string }>;
-  for (const { call_key } of keys) {
-    db.prepare(`DELETE FROM tool_call_programs WHERE call_key = ?`).run(call_key);
-    db.prepare(`DELETE FROM tool_program_occurrences WHERE call_key = ?`).run(call_key);
-    db.prepare(`DELETE FROM tool_call_text WHERE call_key = ?`).run(call_key);
+  const rows = db.prepare(`SELECT rowid, call_key FROM tool_calls WHERE session_id = ?`)
+    .all(sessionId) as Array<{ rowid: number; call_key: string }>;
+  const deletePrograms = db.prepare(`DELETE FROM tool_call_programs WHERE call_key = ?`);
+  const deleteOccurrences = db.prepare(`DELETE FROM tool_program_occurrences WHERE call_key = ?`);
+  // Addressed by rowid, never by the UNINDEXED call_key — see the tool_call_text
+  // schema comment in db.ts. A call_key predicate scans the whole FTS index.
+  const deleteText = db.prepare(`DELETE FROM tool_call_text WHERE rowid = ?`);
+  for (const { rowid, call_key } of rows) {
+    deletePrograms.run(call_key);
+    deleteOccurrences.run(call_key);
+    deleteText.run(rowid);
   }
   db.prepare(`DELETE FROM tool_calls WHERE session_id = ?`).run(sessionId);
 }
@@ -80,15 +86,43 @@ export function purgeMissingToolCallsInDirectory(
   return purged;
 }
 
-/** Persist one parser batch and its file stamp atomically. */
+/** The resume point a later incremental scan starts from. */
+export interface ToolScanResumePoint {
+  /** Serialized ToolCallCollector snapshot at `parsedOffset`. */
+  parserState: string;
+  /** Byte offset just past the last complete record consumed. */
+  parsedOffset: number;
+}
+
+export interface PersistToolCallsOptions {
+  /**
+   * `replace` drops the session's stored evidence first — correct for a parse
+   * that started at byte 0. `append` merges the batch into what is already
+   * stored and requires an existing ledger row; use it only for a parse that
+   * resumed from that row's `parsedOffset`.
+   */
+  mode?: 'replace' | 'append';
+  /**
+   * Where a later scan may resume. Omitted (or null) clears any stored resume
+   * point, which forces the next scan of this session to re-read from byte 0 —
+   * the correct outcome whenever the parse could not cover the whole prefix
+   * (an oversized record, a size-capped transcript, a non-streaming harness).
+   */
+  resume?: ToolScanResumePoint | null;
+  maxSessionBytes?: number;
+}
+
+/** Persist one parser batch, its file stamp, and its resume point atomically. */
 export function persistToolCalls(
   db: Database.Database,
   session: SessionMeta,
   calls: IndexedToolCall[],
   sourceStamp: { fileMtimeMs: number; fileSize: number },
-  mode: 'replace' | 'append' = 'replace',
-  maxSessionBytes = TOOL_SESSION_EVIDENCE_MAX_BYTES,
+  options: PersistToolCallsOptions = {},
 ): void {
+  const mode = options.mode ?? 'replace';
+  const maxSessionBytes = options.maxSessionBytes ?? TOOL_SESSION_EVIDENCE_MAX_BYTES;
+  const resume = options.resume ?? null;
   const sourcePath = toolEvidenceSourcePath(session.filePath, session.agent);
   const insertCall = db.prepare(`
     INSERT INTO tool_calls (
@@ -115,16 +149,19 @@ export function persistToolCalls(
     INSERT INTO tool_program_occurrences (call_key, occurrence_ordinal, program, role)
     VALUES (?, ?, ?, ?)
   `);
-  const insertText = db.prepare(`INSERT INTO tool_call_text (call_key, tool, input, output, error) VALUES (?, ?, ?, ?, ?)`);
+  // tool_call_text rows are addressed by the rowid of the tool_calls row they
+  // describe (db.ts schema comment): its UNINDEXED call_key cannot be seeked.
+  const insertText = db.prepare(`INSERT INTO tool_call_text (rowid, call_key, tool, input, output, error) VALUES (?, ?, ?, ?, ?, ?)`);
+  const callRowid = db.prepare(`SELECT rowid FROM tool_calls WHERE call_key = ?`);
   const deletePrograms = db.prepare(`DELETE FROM tool_call_programs WHERE call_key = ?`);
   const deleteOccurrences = db.prepare(`DELETE FROM tool_program_occurrences WHERE call_key = ?`);
-  const deleteText = db.prepare(`DELETE FROM tool_call_text WHERE call_key = ?`);
+  const deleteText = db.prepare(`DELETE FROM tool_call_text WHERE rowid = ?`);
   const deleteCall = db.prepare(`DELETE FROM tool_calls WHERE call_key = ?`);
   const writeLedger = db.prepare(`
     INSERT INTO tool_scan_ledger (
       session_id, file_path, file_mtime_ms, file_size, extractor_version, indexed_at, call_count,
-      evidence_bytes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      evidence_bytes, parser_state, parsed_offset
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(session_id) DO UPDATE SET
       file_path = excluded.file_path,
       file_mtime_ms = excluded.file_mtime_ms,
@@ -132,7 +169,9 @@ export function persistToolCalls(
       extractor_version = excluded.extractor_version,
       indexed_at = excluded.indexed_at,
       call_count = excluded.call_count,
-      evidence_bytes = excluded.evidence_bytes
+      evidence_bytes = excluded.evidence_bytes,
+      parser_state = excluded.parser_state,
+      parsed_offset = excluded.parsed_offset
   `);
 
   const txn = db.transaction(() => {
@@ -151,6 +190,7 @@ export function persistToolCalls(
       writeLedger.run(
         session.id, ledgerPath, sourceStamp.fileMtimeMs, sourceStamp.fileSize, TOOL_INDEX_VERSION, Date.now(),
         priorLedger!.call_count, priorLedger!.evidence_bytes,
+        resume?.parserState ?? null, resume?.parsedOffset ?? null,
       );
       return;
     }
@@ -162,9 +202,10 @@ export function persistToolCalls(
     const priorLimit = mode === 'append'
       ? existingSize.get(session.id, TOOL_INDEX_LIMIT_ORDINAL) as { evidence_bytes: number } | undefined
       : undefined;
+    const limitRow = callRowid.get(limitKey) as { rowid: number } | undefined;
     deletePrograms.run(limitKey);
     deleteOccurrences.run(limitKey);
-    deleteText.run(limitKey);
+    if (limitRow) deleteText.run(limitRow.rowid);
     deleteCall.run(limitKey);
 
     const existingRows = mode === 'append'
@@ -222,18 +263,22 @@ export function persistToolCalls(
         call.statusCode ?? null, call.errorCode ?? null, call.output ?? null,
         call.error ?? null, call.parseError ?? null, toolCallEvidenceBytes(call),
       );
+      // The upsert above preserves the rowid of a call it updated, so this is
+      // the same rowid the existing text row (if any) was written under.
+      const { rowid } = callRowid.get(key) as { rowid: number };
       deletePrograms.run(key);
       deleteOccurrences.run(key);
-      deleteText.run(key);
+      deleteText.run(rowid);
       for (const program of call.programs) insertProgram.run(key, program);
       call.programOccurrences.forEach((occurrence, occurrenceOrdinal) => {
         insertOccurrence.run(key, occurrenceOrdinal, occurrence.program, occurrence.role);
       });
-      insertText.run(key, call.tool, call.input, call.output ?? '', call.error ?? '');
+      insertText.run(rowid, key, call.tool, call.input, call.output ?? '', call.error ?? '');
     }
     writeLedger.run(
       session.id, ledgerPath, sourceStamp.fileMtimeMs, sourceStamp.fileSize,
       TOOL_INDEX_VERSION, Date.now(), count, storedBytes,
+      resume?.parserState ?? null, resume?.parsedOffset ?? null,
     );
   });
   txn();
