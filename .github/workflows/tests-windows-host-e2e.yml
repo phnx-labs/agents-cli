@@ -8,8 +8,11 @@ name: Windows-host e2e (tailnet)
 #
 # Runner: the `crabbox-ci` org runner pool (ci-runner-fsn1, Hetzner) — two
 # persistent org-scoped runners labeled [crabbox-ci, tailnet], joined to the
-# tailnet with fleet SSH reach to win-mini and a device registry entry for it
-# (`agents devices sync`). The pool is an org runner group restricted to
+# tailnet with fleet SSH reach to win-mini. The vitest setup file hermetically
+# redirects AGENTS_DEVICES_DIR (RUSH-2042); the e2e seeder
+# (apps/cli/tests/seed-e2e-win-host.ts) copies win-mini from the real fleet
+# registry or synthesizes it from `ssh -G win-mini` into that private dir so
+# resolveRemoteDevice can dial. The pool is an org runner group restricted to
 # agents-cli + agi-cli.
 #
 # LABEL RULE: `crabbox-ci` may only appear in workflows with trusted triggers
