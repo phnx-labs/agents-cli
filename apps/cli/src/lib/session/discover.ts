@@ -2212,7 +2212,9 @@ function getOpenCodeAccount(handle?: Database.Database): string | undefined {
 }
 
 /**
- * The per-session ledger stamp for an OpenCode row.
+ * The per-session ledger stamp for an OpenCode row: the newest write time across
+ * the session's own row, its messages, and its parts, paired with the total byte
+ * length of that session's message + part payloads.
  *
  * OpenCode keeps every session in ONE shared SQLite file, so that file's
  * mtime/size changes whenever *any* session is written. Stamping each session
@@ -2221,31 +2223,37 @@ function getOpenCodeAccount(handle?: Database.Database): string | undefined {
  * and its enrichment step re-opened `opencode.db` once per re-emitted entry via
  * `parseSession` (RUSH-2210).
  *
- * The row carries its own change signal — `time_updated` moves on every write to
- * that session, and the message count grows with it — so that pair is the stamp.
- * `fileMtimeMs`/`fileSize` are just the ledger's two integer columns here; they
- * name a file only for the one-file-per-session harnesses.
+ * `s.time_updated` alone is NOT that session's change signal, which is the trap
+ * this shape exists to avoid. On a real database, parts land long after the
+ * session row was last touched — e.g. `ses_3955202dfffe…` carried
+ * `time_updated = 1771316403087` with its newest part at `1771331512162`, over
+ * four hours later. So the stamp maxes `time_updated` with the newest message
+ * and part times, and pairs it with a byte total that also moves when an
+ * existing part's `data` is rewritten in place (a streaming turn) without any
+ * new row or timestamp.
  *
- * Degenerate rows (a non-numeric `time_updated` *and* `time_created`) fall back
- * to the whole-DB stat, which keeps the pre-RUSH-2210 always-rescan behavior for
- * exactly those rows rather than pinning them to a stamp that never changes.
+ * The byte total is a REAL size, not a repurposed counter, because
+ * `sessions.file_size` is read back as bytes elsewhere: `ensureToolIndex` uses
+ * it as the tool-backfill byte budget and `toolCallsForBackfill` as the 16 MiB
+ * in-memory parser cap (`tool-index.ts`). A message/part byte total is the
+ * honest cost of parsing that session — strictly better than the whole-DB size
+ * this column used to hold for every OpenCode row.
+ *
+ * A degenerate row (no finite timestamp anywhere) falls back to the whole-DB
+ * stat, keeping the pre-RUSH-2210 always-rescan behavior for exactly those rows
+ * rather than pinning them to a stamp that never changes.
  */
 function openCodeSessionStamp(
-  timeUpdated: number,
-  timeCreated: number,
-  messageCount: number,
+  times: { timeUpdated: number; timeCreated: number; lastMessageAt: number; lastPartAt: number },
+  bytes: { messageBytes: number; partBytes: number },
   dbScan: ScanStamp,
 ): ScanStamp {
-  const mtime = Number.isFinite(timeUpdated)
-    ? timeUpdated
-    : Number.isFinite(timeCreated)
-      ? timeCreated
-      : null;
-  if (mtime === null) return dbScan;
-  return {
-    fileMtimeMs: Math.floor(mtime),
-    fileSize: Number.isFinite(messageCount) ? messageCount : 0,
-  };
+  const finite = [times.timeUpdated, times.lastMessageAt, times.lastPartAt, times.timeCreated]
+    .filter(t => Number.isFinite(t));
+  if (finite.length === 0) return dbScan;
+  const size = (Number.isFinite(bytes.messageBytes) ? bytes.messageBytes : 0)
+    + (Number.isFinite(bytes.partBytes) ? bytes.partBytes : 0);
+  return { fileMtimeMs: Math.floor(Math.max(...finite)), fileSize: size };
 }
 
 /** Scan OpenCode sessions from its SQLite database when the DB file has changed. */
@@ -2282,6 +2290,10 @@ async function scanOpenCodeIncremental(): Promise<void> {
         s.time_created AS time_created,
         s.time_updated AS time_updated,
         COALESCE(stats.message_count, 0) AS message_count,
+        COALESCE(stats.last_message_at, 0) AS last_message_at,
+        COALESCE(stats.message_bytes, 0) AS message_bytes,
+        COALESCE(parts.last_part_at, 0) AS last_part_at,
+        COALESCE(parts.part_bytes, 0) AS part_bytes,
         stats.token_count AS token_count,
         stats.output_tokens AS output_tokens,
         COALESCE(stats.has_token_data, 0) AS has_token_data
@@ -2289,7 +2301,17 @@ async function scanOpenCodeIncremental(): Promise<void> {
       LEFT JOIN (
         SELECT
           session_id,
+          MAX(time_created) AS last_part_at,
+          SUM(LENGTH(data)) AS part_bytes
+        FROM part
+        GROUP BY session_id
+      ) parts ON parts.session_id = s.id
+      LEFT JOIN (
+        SELECT
+          session_id,
           COUNT(*) AS message_count,
+          MAX(time_created) AS last_message_at,
+          SUM(LENGTH(data)) AS message_bytes,
           SUM(
             COALESCE(json_extract(data, '$.tokens.input'), 0) +
             COALESCE(json_extract(data, '$.tokens.output'), 0) +
@@ -2317,6 +2339,10 @@ async function scanOpenCodeIncremental(): Promise<void> {
       time_created: unknown;
       time_updated: unknown;
       message_count: unknown;
+      last_message_at: unknown;
+      message_bytes: unknown;
+      last_part_at: unknown;
+      part_bytes: unknown;
       token_count: unknown;
       output_tokens: unknown;
       has_token_data: unknown;
@@ -2337,9 +2363,13 @@ async function scanOpenCodeIncremental(): Promise<void> {
         id,
         filePath,
         scan: openCodeSessionStamp(
-          asInt(row.time_updated),
-          asInt(row.time_created),
-          asInt(row.message_count),
+          {
+            timeUpdated: asInt(row.time_updated),
+            timeCreated: asInt(row.time_created),
+            lastMessageAt: asInt(row.last_message_at),
+            lastPartAt: asInt(row.last_part_at),
+          },
+          { messageBytes: asInt(row.message_bytes), partBytes: asInt(row.part_bytes) },
           currentScan,
         ),
       }];

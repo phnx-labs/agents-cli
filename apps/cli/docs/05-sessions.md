@@ -137,11 +137,24 @@ full per-file walk.
 **OpenCode is stamped per row, not per file.** It keeps every session in one shared
 `~/.local/share/opencode/opencode.db`, so that file's `(mtime, size)` moves whenever
 *any* session is written and cannot say which one changed. Its `scan_ledger` stamp is
-the session row's own `time_updated` plus its message count, keyed by the synthetic
-`opencode.db#<id>` path; the file-level stat is kept only as the cheap "nothing changed
-at all" short-circuit for the whole harness. Before this, one new turn re-emitted every
-indexed OpenCode session (up to the scan's `LIMIT 1000`) and re-opened the database
-once per re-emitted session to re-parse a transcript that had not moved (RUSH-2210).
+keyed by the synthetic `opencode.db#<id>` path and holds, for that session alone: the
+newest write time across its `session` row, its messages, and its parts, paired with
+the total byte length of its message + part payloads. The file-level stat is kept only
+as the cheap "nothing changed at all" short-circuit for the whole harness. Before this,
+one new turn re-emitted every indexed OpenCode session (up to the scan's `LIMIT 1000`)
+and re-opened the database once per re-emitted session to re-parse a transcript that
+had not moved (RUSH-2210).
+
+Both halves of that stamp are load-bearing. `session.time_updated` alone is **not** the
+session's change signal — on a real database, parts land long after the session row was
+last touched (one session carried `time_updated = 1771316403087` with its newest part
+over four hours later), so a stamp built from it would call that session unchanged
+forever. And the byte total is a genuine size rather than a row counter, because
+`sessions.file_size` is read back as bytes elsewhere: `ensureToolIndex` uses it as the
+tool-backfill byte budget and `toolCallsForBackfill` as the 16 MiB in-memory parser cap
+([`src/lib/session/tool-index.ts`](../src/lib/session/tool-index.ts)). A per-session
+message + part byte total is the honest parse cost, where this column previously held
+the whole database's size for every OpenCode row.
 
 Cursor is installed outside agents-cli's version homes. Once any managed agent
 version exists, the default managed scope excludes Cursor transcripts; pass

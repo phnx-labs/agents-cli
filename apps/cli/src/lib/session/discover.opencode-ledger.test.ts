@@ -109,10 +109,44 @@ function appendTurnTo(sessionId: string, ts: number, text: string): void {
   bumpDbMtime(ts);
 }
 
+/**
+ * Append a PART to a session's existing message without touching `session` or
+ * `message`. This is not hypothetical: on a real `opencode.db` (mac-mini,
+ * 74 sessions) `ses_3955202dfffe7C4oedWxL38Lul` carried
+ * `time_updated = 1771316403087` with its newest part at `1771331512162` — over
+ * four hours later. A stamp built from `session.time_updated` alone would call
+ * that session unchanged forever.
+ */
+function appendPartTo(sessionId: string, messageId: string, ts: number, text: string): void {
+  const oc = openFixture();
+  oc.prepare(`INSERT INTO part (id, message_id, session_id, data, time_created) VALUES (?, ?, ?, ?, ?)`)
+    .run(`${messageId}-p-${ts}`, messageId, sessionId, JSON.stringify({ type: 'text', text }), ts);
+  oc.close();
+  bumpDbMtime(ts);
+}
+
+/**
+ * Grow an EXISTING part's `data` in place — a streaming turn — with no new row,
+ * no new id, and no timestamp anywhere moving.
+ */
+function growPartInPlace(partId: string, text: string, ts: number): void {
+  const oc = openFixture();
+  oc.prepare(`UPDATE part SET data = ? WHERE id = ?`).run(JSON.stringify({ type: 'text', text }), partId);
+  oc.close();
+  bumpDbMtime(ts);
+}
+
 /** Force the DB file's mtime forward so the whole-DB short-circuit sees a delta. */
 function bumpDbMtime(ts: number): void {
   const secs = Math.floor(ts / 1000);
   fs.utimesSync(OPENCODE_DB, secs, secs);
+}
+
+/** The per-session ledger row the scan wrote, read back from sessions.db. */
+function ledgerFor(sessionId: string): { file_mtime_ms: number; file_size: number } {
+  return db.getDB()
+    .prepare(`SELECT file_mtime_ms, file_size FROM scan_ledger WHERE file_path = ?`)
+    .get(`${OPENCODE_DB}#${sessionId}`) as { file_mtime_ms: number; file_size: number };
 }
 
 // `skipExistenceCheck` because an OpenCode filePath is `opencode.db#<id>` — a
@@ -171,6 +205,60 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     // re-emitted entry); now it is the scan handle plus the single changed row.
     expect(openCounter.count).toBeLessThanOrEqual(3);
     expect(openCounter.count).toBeLessThan(SESSION_COUNT);
+  });
+
+  it('catches a part appended with NO write to session or message', async () => {
+    const target = 'ses_fixture05';
+    await scan();
+    const before = ledgerFor(target);
+
+    // The real-world shape: a part lands hours after session.time_updated.
+    appendPartTo(target, `${target}-m0`, Date.UTC(2026, 6, 2, 4), 'a part written much later');
+
+    openCounter.match = OPENCODE_DB;
+    openCounter.count = 0;
+    await scan();
+
+    const after = ledgerFor(target);
+    // The stamp moved on the part's own time and on the added bytes, so the
+    // session was re-indexed rather than skipped forever.
+    expect(after.file_mtime_ms).toBeGreaterThan(before.file_mtime_ms);
+    expect(after.file_size).toBeGreaterThan(before.file_size);
+    // Still only this one session was re-emitted.
+    expect(openCounter.count).toBeLessThanOrEqual(3);
+  });
+
+  it('catches an existing part rewritten in place (no new row, no timestamp move)', async () => {
+    const target = 'ses_fixture06';
+    await scan();
+    const before = ledgerFor(target);
+
+    growPartInPlace(`${target}-m0-p0`, 'x'.repeat(4096), Date.UTC(2026, 6, 2, 5));
+
+    await scan();
+
+    const after = ledgerFor(target);
+    // No timestamp anywhere changed — the byte total is what caught it.
+    expect(after.file_mtime_ms).toBe(before.file_mtime_ms);
+    expect(after.file_size).toBeGreaterThan(before.file_size);
+  });
+
+  it('stamps file_size in real bytes, which tool-index reads as a byte budget', async () => {
+    await scan();
+    // `sessions.file_size` feeds ensureToolIndex's byte budget and
+    // toolCallsForBackfill's 16 MiB in-memory cap (tool-index.ts), so the value
+    // must be a genuine payload size — not a repurposed row counter.
+    const row = db.getDB()
+      .prepare(`SELECT file_size FROM sessions WHERE id = ?`)
+      .get('ses_fixture00') as { file_size: number };
+    const oc = openFixture();
+    const expected = (oc.prepare(
+      `SELECT (SELECT COALESCE(SUM(LENGTH(data)),0) FROM message WHERE session_id = ?)
+            + (SELECT COALESCE(SUM(LENGTH(data)),0) FROM part WHERE session_id = ?) AS n`,
+    ).get('ses_fixture00', 'ses_fixture00') as { n: number }).n;
+    oc.close();
+    expect(row.file_size).toBe(expected);
+    expect(expected).toBeGreaterThan(SESSION_COUNT); // not a count masquerading as bytes
   });
 
   it('emits nothing when the DB file changes but no session row does', async () => {
