@@ -191,8 +191,9 @@ export function buildWindowsDetachedLaunchCommand(opts: {
     `$dir = Join-Path $HOME '.agents/.cache/hosts'`,
     `New-Item -ItemType Directory -Force -Path $dir | Out-Null`,
     `Remove-Item -LiteralPath ${exit} -Force -ErrorAction SilentlyContinue`,
-    `$process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-EncodedCommand',${powershellQuote(encodedInner)}) -WindowStyle Hidden -PassThru`,
-    `Write-Output $process.Id`,
+    `$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ${powershellQuote(`powershell.exe -NoProfile -EncodedCommand ${encodedInner}`)} }`,
+    `if ($result.ReturnValue -ne 0) { throw \"Win32_Process.Create failed with code $($result.ReturnValue)\" }`,
+    `Write-Output $result.ProcessId`,
   ].join('; ');
   return `powershell -NoProfile -EncodedCommand ${encodePowershell(outer)}`;
 }
@@ -260,12 +261,11 @@ export function buildStopRemoteCommand(pid: number, remoteExit: string): string 
 export function buildWindowsStopRemoteCommand(pid: number, remoteExit: string): string {
   if (!Number.isInteger(pid) || pid <= 0) throw new Error(`Invalid remote task pid: ${pid}`);
   const exit = windowsRemotePath(remoteExit);
-  const script = [
-    `$process = Get-Process -Id ${pid} -ErrorAction SilentlyContinue`,
-    `if ($process) { Stop-Process -Id ${pid} -Force; Set-Content -LiteralPath ${exit} -Value 143 -NoNewline -Encoding ascii; Write-Output 'SIGNALED' }`,
-    `elseif (Test-Path -LiteralPath ${exit}) { $code = (Get-Content -LiteralPath ${exit} -Raw).Trim(); if ($code) { Write-Output (\"ALREADY $code\") } else { Set-Content -LiteralPath ${exit} -Value 143 -NoNewline -Encoding ascii; Write-Output 'GONE' } }`,
-    `else { Set-Content -LiteralPath ${exit} -Value 143 -NoNewline -Encoding ascii; Write-Output 'GONE' }`,
-  ].join(' ');
+  const script =
+    `$process = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; ` +
+    `if ($process) { Stop-Process -Id ${pid} -Force; Set-Content -LiteralPath ${exit} -Value 143 -NoNewline -Encoding ascii; Write-Output 'SIGNALED' } ` +
+    `elseif (Test-Path -LiteralPath ${exit}) { $code = (Get-Content -LiteralPath ${exit} -Raw).Trim(); if ($code) { Write-Output (\"ALREADY $code\") } else { Set-Content -LiteralPath ${exit} -Value 143 -NoNewline -Encoding ascii; Write-Output 'GONE' } } ` +
+    `else { Set-Content -LiteralPath ${exit} -Value 143 -NoNewline -Encoding ascii; Write-Output 'GONE' }`;
   return `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
 }
 

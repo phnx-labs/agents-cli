@@ -39,9 +39,9 @@ describe('Windows detached protocol', () => {
       remoteExit: '$HOME/.agents/.cache/hosts/abc.exit',
       env: { AGENTS_ACTOR: 'overnight' },
     }));
-    expect(outer).toContain('Start-Process');
-    expect(outer).toContain('-WindowStyle Hidden');
-    const innerEncoded = outer.match(/'([A-Za-z0-9+/=]{40,})'\) -WindowStyle/)?.[1];
+    expect(outer).toContain('Invoke-CimMethod -ClassName Win32_Process -MethodName Create');
+    expect(outer).toContain('Win32_Process.Create failed with code');
+    const innerEncoded = outer.match(/-EncodedCommand ([A-Za-z0-9+/=]+)/)?.[1];
     expect(innerEncoded).toBeTruthy();
     const inner = Buffer.from(innerEncoded!, 'base64').toString('utf16le');
     expect(inner).toContain("$env:AGENTS_ACTOR = 'overnight'");
