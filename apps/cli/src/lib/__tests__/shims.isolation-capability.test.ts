@@ -18,6 +18,9 @@ const CONFIG_ENV_BY_AGENT: Record<(typeof CONFIG_ENV_ISOLATED_AGENTS)[number], s
   grok: 'GROK_HOME',
   kimi: 'KIMI_CODE_HOME',
   opencode: 'OPENCODE_CONFIG_DIR',
+  // Muse has no dedicated config env; isolation is XDG (proved: empty
+  // XDG_CONFIG_HOME works; adopt symlink at ~/.config/muse fails SymlinkOrReparse).
+  muse: 'XDG_CONFIG_HOME',
 };
 const ALL_CONFIG_ENVS = Object.values(CONFIG_ENV_BY_AGENT);
 

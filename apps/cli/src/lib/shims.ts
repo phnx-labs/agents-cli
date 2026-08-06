@@ -252,7 +252,7 @@ async function promptConflictStrategy(
 //        The old dispatcher checked only the global dir, so a pinned grok that
 //        installed into the versioned home fell through to the "not installed"
 //        error.
-export const SHIM_SCHEMA_VERSION = 28;
+export const SHIM_SCHEMA_VERSION = 29;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -336,7 +336,18 @@ export OPENCODE_CONFIG_DIR="$VERSION_DIR/home/.config/opencode"
 # mcp.json, sessions, skills, hooks). Point it at the versioned home.
 export KIMI_CODE_HOME="$VERSION_DIR/home/${configDirName}"
 `
-            : '';
+            : agent === 'muse'
+              ? `
+# Muse Code has no MUSE_CONFIG_DIR. It resolves config via XDG:
+#   $XDG_CONFIG_HOME/muse  (settings, skills, hooks, auth)
+#   $XDG_DATA_HOME/muse    (sessions, plugins)
+# Pin XDG into the version home so managed runs never walk the adopt-time
+# ~/.config/muse -> version-home symlink — Muse refuses agent-definition
+# sources that are SymlinkOrReparse (exit 1). Same idea as CLAUDE_CONFIG_DIR.
+export XDG_CONFIG_HOME="$VERSION_DIR/home/.config"
+export XDG_DATA_HOME="$VERSION_DIR/home/.local/share"
+`
+              : '';
 
   const launchArgs = agent === 'codex' ? ` ${codexShimLaunchArgs()}` : '';
 
@@ -925,7 +936,7 @@ export function removeShim(agent: AgentId): boolean {
  *        the versioned home (installer run with GROK_HOME set, or grok
  *        self-update under the shim).
  */
-export const VERSIONED_ALIAS_SCHEMA_VERSION = 14;
+export const VERSIONED_ALIAS_SCHEMA_VERSION = 15;
 
 /** Internal marker string used to embed the schema version in versioned alias scripts. */
 const VERSIONED_ALIAS_VERSION_MARKER = 'agents-versioned-alias-version:';
@@ -956,7 +967,7 @@ function assertSafeVersion(version: string): void {
  * KEEP IN SYNC with the `managedEnv` switch in `generateVersionedAliasScript`.
  * The colocated test `shims.isolation-capability.test.ts` enforces this.
  */
-export const CONFIG_ENV_ISOLATED_AGENTS: readonly AgentId[] = ['claude', 'codex', 'copilot', 'grok', 'kimi', 'opencode'];
+export const CONFIG_ENV_ISOLATED_AGENTS: readonly AgentId[] = ['claude', 'codex', 'copilot', 'grok', 'kimi', 'opencode', 'muse'];
 
 /**
  * Whether an agent supports a clean `--isolated` install — i.e. its config
@@ -1019,7 +1030,15 @@ export OPENCODE_CONFIG_DIR="$HOME/.agents/.history/versions/${agent}/${version}/
 # mcp.json, sessions, skills, hooks). Point direct aliases at the versioned home.
 export KIMI_CODE_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
 `
-            : '';
+            : agent === 'muse'
+              ? `
+# Muse Code: no dedicated config env var. Pin XDG so config/sessions live under
+# the version home as real directories (not via the adopt symlink at
+# ~/.config/muse, which Muse rejects with SymlinkOrReparse).
+export XDG_CONFIG_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/.config"
+export XDG_DATA_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/.local/share"
+`
+              : '';
   const launchArgs = agent === 'codex' ? ` ${codexShimLaunchArgs()}` : '';
 
   // Resolve the binary the same way the main shim does (see generateShimScript).

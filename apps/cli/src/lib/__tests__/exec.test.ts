@@ -1099,6 +1099,16 @@ describe('buildExecCommand', () => {
       }
     });
 
+    it('injects XDG config/data homes for pinned Muse versions', () => {
+      // Muse has no MUSE_CONFIG_DIR; isolation is XDG (Claude/Codex pattern).
+      // Without this, adopt leaves ~/.config/muse as a symlink and Muse dies
+      // with SymlinkOrReparse.
+      const env = buildExecEnv(opts({ agent: 'muse', version: '0.1.0' }));
+      const versionHome = path.join(HOME, '.agents', '.history', 'versions', 'muse', '0.1.0', 'home');
+      expect(env.XDG_CONFIG_HOME).toBe(path.join(versionHome, '.config'));
+      expect(env.XDG_DATA_HOME).toBe(path.join(versionHome, '.local', 'share'));
+    });
+
     it('injects KIMI_CODE_HOME for pinned Kimi versions', () => {
       const env = buildExecEnv(opts({ agent: 'kimi', version: '0.11.0' }));
       expect(env.KIMI_CODE_HOME).toBe(

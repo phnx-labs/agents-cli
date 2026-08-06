@@ -490,6 +490,27 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     delete result.CLAUDE_CONFIG_DIR;
     delete result.CODEX_HOME;
     delete result.COPILOT_HOME;
+  } else if (options.agent === 'muse') {
+    // Muse has no MUSE_CONFIG_DIR. Config is XDG-based:
+    //   $XDG_CONFIG_HOME/muse  (settings, skills, hooks, auth)
+    //   $XDG_DATA_HOME/muse    (sessions, plugins)
+    // Pin both into the version home so multi-version isolation matches
+    // Claude's CLAUDE_CONFIG_DIR / Codex's CODEX_HOME, and so Muse never
+    // resolves through the adopt-time ~/.config/muse symlink (SymlinkOrReparse).
+    const cwd = options.cwd || process.cwd();
+    const resolvedVersion = options.version ?? resolveVersion('muse', cwd);
+    const version = options.version
+      ? resolvedVersion
+      : (resolvedVersion && isVersionInstalled('muse', resolvedVersion) ? resolvedVersion : null);
+    if (version) {
+      const versionHome = getVersionHomePath('muse', version);
+      result.XDG_CONFIG_HOME = path.join(versionHome, '.config');
+      result.XDG_DATA_HOME = path.join(versionHome, '.local', 'share');
+    }
+    delete result.CLAUDE_CONFIG_DIR;
+    delete result.CODEX_HOME;
+    delete result.COPILOT_HOME;
+    delete result.KIMI_CODE_HOME;
   } else {
     delete result.CLAUDE_CONFIG_DIR;
     delete result.CODEX_HOME;
