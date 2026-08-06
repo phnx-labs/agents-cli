@@ -2632,7 +2632,7 @@ async function sessionsAction(
     if (wantsOverview) {
       const liveIndex = await maybeLiveIndex(options);
       if (options.routine) {
-        printRoutineRunOverview(sessions, liveIndex);
+        printRoutineRunOverview(sessions, liveIndex, { hiddenCount, hiddenUnmanaged });
         return;
       }
       // Per-project row cap is fixed (--limit carries a default of 50 and drives
@@ -2993,9 +2993,10 @@ function printSessionOverview(
   if (opts.hiddenUnmanaged) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
 }
 
-function printRoutineRunOverview(
+export function printRoutineRunOverview(
   sessions: SessionMeta[],
   liveIndex: Map<string, ActiveSession> | undefined,
+  opts: { hiddenCount?: number; hiddenUnmanaged?: number } = {},
 ): void {
   const groups = buildRoutineRunGroups(sessions);
   console.log(chalk.gray(`${sessions.length} session${sessions.length === 1 ? '' : 's'} · ${groups.length} routine run${groups.length === 1 ? '' : 's'} · newest run first\n`));
@@ -3010,6 +3011,8 @@ function printRoutineRunOverview(
     for (const session of group.sessions) console.log(treeSessionRow(session, liveIndex?.get(session.id)));
   }
   console.log(chalk.gray('\nGrouped by routine run id and timestamp.'));
+  if (opts.hiddenCount) console.log(chalk.gray(formatTeamHiddenFooter(opts.hiddenCount)));
+  if (opts.hiddenUnmanaged) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
 }
 
 function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = false, liveIndex?: Map<string, ActiveSession>): void {
