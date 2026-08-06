@@ -1591,13 +1591,11 @@ email) into a single row. Use \`agents devices harnesses\` for the per-install v
     .action(async (name: string, opts: { platform?: string; user?: string; auth?: string; bundle?: string; bundleKey?: string; identityFile?: string }) => {
       try {
         const existing = await mustGetDevice(name);
+        const nextMethod = (opts.auth as DeviceAuthMethod | undefined) ?? existing.auth.method;
         const auth = opts.auth || opts.bundle || opts.bundleKey || opts.identityFile
-          ? {
-              method: (opts.auth as DeviceAuthMethod) ?? existing.auth.method,
-              bundle: opts.bundle ?? existing.auth.bundle,
-              bundleKey: opts.bundleKey ?? existing.auth.bundleKey,
-              identityFile: opts.identityFile ?? existing.auth.identityFile,
-            }
+          ? nextMethod === 'key'
+            ? { method: nextMethod, identityFile: opts.identityFile ?? existing.auth.identityFile }
+            : { method: nextMethod, bundle: opts.bundle ?? existing.auth.bundle, bundleKey: opts.bundleKey ?? existing.auth.bundleKey }
           : undefined;
         const d = await upsertDevice(name, {
           platform: (opts.platform as DevicePlatform) ?? undefined,
