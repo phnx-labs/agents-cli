@@ -715,7 +715,7 @@ export function streamAgentsOnHost(
   const remoteOs = opts.remoteOs ?? resolveRemoteOsSync(host.name);
   const env = withActorEnv({ ...opts.extraEnv, AGENTS_FLEET_REMOTE: '1' });
   const remoteCmd = buildRemoteAgentsInvocation(forwardedArgs, opts.remoteCwd, remoteOs, env);
-  const code = sshStream(target, remoteCmd, { tty: !!opts.interactive, multiplex: true, extraSshArgs: hostIdentityArgs(host) });
+  const code = sshStream(target, remoteCmd, passthroughSshOptions(host, !!opts.interactive));
   if (code === 255) {
     console.error(
       chalk.red(`${host.name}: unreachable over SSH (asleep, offline, or host key changed?).`) +
@@ -723,4 +723,12 @@ export function streamAgentsOnHost(
     );
   }
   return code;
+}
+
+export function passthroughSshOptions(host: Host, interactive: boolean): {
+  tty: boolean;
+  multiplex: true;
+  extraSshArgs: string[];
+} {
+  return { tty: interactive, multiplex: true, extraSshArgs: hostIdentityArgs(host) };
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { flagValue, maybeRunOnHost, maybeRunStandaloneOnHost, runFleetPassthrough } from './passthrough.js';
+import { flagValue, maybeRunOnHost, maybeRunStandaloneOnHost, passthroughSshOptions, runFleetPassthrough } from './passthrough.js';
 import { machineId } from '../session/sync/config.js';
 import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
 
@@ -20,6 +20,14 @@ function fakeDevice(name: string, platform: DeviceProfile['platform'], overrides
 function fakeRegistry(devices: DeviceProfile[]): DeviceRegistry {
   return Object.fromEntries(devices.map((d) => [d.name, d]));
 }
+
+it('pins the configured identity for --host passthrough streams', () => {
+  expect(passthroughSshOptions({ name: 'win-mini', target: 'muqsit@win-mini', identityFile: '/keys/fleet' }, true)).toEqual({
+    tty: true,
+    multiplex: true,
+    extraSshArgs: ['-i', '/keys/fleet', '-o', 'IdentitiesOnly=yes'],
+  });
+});
 
 describe('flagValue', () => {
   it('reads the space-separated long form', () => {
