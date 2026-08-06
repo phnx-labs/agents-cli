@@ -33,11 +33,14 @@ describe('ReadyProbe.timedOut — timeout vs unreachable distinction', () => {
     expect(p.reachable).toBe(false);
   });
 
-  it('timedOut probe is not reachable and carries the flag', () => {
-    // Simulates what readyProbe() returns when r.timedOut is true.
-    const p: ReadyProbe = { reachable: false, version: null, view: '', timedOut: true };
-    expect(p.reachable).toBe(false);
-    expect(p.timedOut).toBe(true);
+  it('parseReadyProbe never sets timedOut — that path is readyProbe-only', () => {
+    // timedOut is set only by readyProbe() when sshExec signals a timeout kill.
+    // parseReadyProbe() is a pure stdout parser and must never set it, regardless
+    // of what stdout looks like. The sshExec timedOut detection is exercised by
+    // the ssh-exec.test.ts PATH-stub tests.
+    for (const stdout of ['', `2.1.170\n${MARK}\n`, `\n${MARK}\n`, 'garbage\nno-marker']) {
+      expect(parseReadyProbe(stdout).timedOut).toBeUndefined();
+    }
   });
 });
 
