@@ -39,7 +39,7 @@ function defaultBackendForPlatform(platform: NodeJS.Platform = process.platform)
   return platform === 'darwin' ? 'keychain' : 'file';
 }
 
-function setupSecretsPrefsPath(): string {
+export function setupSecretsPrefsPath(): string {
   return path.join(getHistoryDir(), 'setup', 'secrets.json');
 }
 

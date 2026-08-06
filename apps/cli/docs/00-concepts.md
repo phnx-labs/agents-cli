@@ -152,11 +152,13 @@ toward it depends on the consumer: Factory auto-launch counts device-wide
 running agents, while teams placement counts the team's own roster on the
 device (local teammates included); a capped device is excluded from auto-pick
 with a stated reason, and an all-capped pool fails loud. Setup asks instead of
-guessing: bare `agents setup` ends with a skippable preferences step (which
-machine you sit at → `interactive.host`; which browser agents drive here →
-`browser.profile`), `agents setup fleet` offers the interactive host after a
+guessing: bare `agents setup` opens a re-runnable capability hub with live
+ready/missing status for core, browser, computer, secrets, fleet, share,
+watchdog, and preferences. Selecting preferences runs the skippable questions
+(which machine you sit at → `interactive.host`; which browser agents drive here
+→ `browser.profile`), `agents setup fleet` offers the interactive host after a
 sync, and `agents setup browser` highlights the auto-detect winner in its
-picker.
+picker. `agents setup status --json` exposes the same probes to automation.
 
 **Hosts** — machines you dispatch agent work to. `agents hosts add` enrolls a
 target either from an existing `~/.ssh/config` stanza (connection details stay in

@@ -2,13 +2,14 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 
 // Isolate HOME before importing modules that capture path constants at import.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-setup-test-'));
 process.env.HOME = TEST_HOME;
 
 const { Command } = await import('commander');
-const { registerSetupCommand } = await import('./setup.js');
+const { getSetupStatus, registerSetupCommand, runSetup, runSetupHub } = await import('./setup.js');
 const { listInstalledBrowsers } = await import('../lib/browser/chrome.js');
 
 describe('agents setup command group', () => {
@@ -18,7 +19,7 @@ describe('agents setup command group', () => {
     const setup = program.commands.find((c) => c.name() === 'setup');
     expect(setup).toBeDefined();
     const subs = setup!.commands.map((c) => c.name()).sort();
-    expect(subs).toEqual(['browser', 'computer', 'fleet', 'mine', 'secrets', 'share', 'watchdog']);
+    expect(subs).toEqual(['browser', 'computer', 'fleet', 'mine', 'secrets', 'share', 'status', 'watchdog']);
   });
 
   it('keeps the bare `setup` command with its force / no-system-repo flags', () => {
@@ -28,6 +29,50 @@ describe('agents setup command group', () => {
     const flags = setup.options.map((o) => o.long).sort();
     expect(flags).toContain('--force');
     expect(flags).toContain('--no-system-repo');
+  });
+
+  it('reports real ready/missing rows after core setup already exists', async () => {
+    const systemRepo = path.join(TEST_HOME, '.agents', '.system');
+    fs.mkdirSync(systemRepo, { recursive: true });
+    execFileSync('git', ['init', '--quiet'], { cwd: systemRepo });
+
+    const rows = await getSetupStatus();
+    expect(rows.find((row) => row.phase === 'core')).toMatchObject({ state: 'ready', detail: 'system repo ready' });
+    expect(rows.find((row) => row.phase === 'browser')?.state).toBe('missing');
+    expect(rows.find((row) => row.phase === 'computer')).toBeDefined();
+    expect(rows.map((row) => row.phase)).toEqual([
+      'core', 'browser', 'computer', 'secrets', 'fleet', 'share', 'watchdog', 'preferences',
+    ]);
+  });
+
+  it('re-enters the onboarding hub instead of returning when core is configured', async () => {
+    const systemRepo = path.join(TEST_HOME, '.agents', '.system');
+    fs.mkdirSync(systemRepo, { recursive: true });
+    execFileSync('git', ['init', '--quiet'], { cwd: systemRepo });
+    let hubRuns = 0;
+    await runSetup(new Command(), { runHub: async () => { hubRuns += 1; } });
+    expect(hubRuns).toBe(1);
+  });
+
+  it('re-enters the hub, runs a selected wizard seam, then refreshes status', async () => {
+    const selected: string[] = [];
+    let promptCount = 0;
+    await runSetupHub({
+      interactive: true,
+      selectPhase: async () => (promptCount++ === 0 ? 'browser' : 'exit'),
+      runPhase: async (phase) => { selected.push(phase); },
+    });
+    expect(selected).toEqual(['browser']);
+    expect(promptCount).toBe(2);
+  });
+
+  it('prints status and returns without prompting outside a TTY', async () => {
+    let selected = false;
+    await runSetupHub({
+      interactive: false,
+      selectPhase: async () => { selected = true; return 'exit'; },
+    });
+    expect(selected).toBe(false);
   });
 });
 
