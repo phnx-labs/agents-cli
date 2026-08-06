@@ -692,7 +692,13 @@ unreachable still falls back to any age).
 
 On a TTY it opens the interactive browser seeded to running-only; `--json`,
 `--waiting`, and `--no-interactive` print the static grouped view instead. Both read
-the same gather, so they always agree on what is live.
+the same gather and the same running predicate, so they always agree on what is live.
+The registry retains terminally-dead rows for recovery, but bare `--active` excludes
+`closed`, `crashed`, and rows whose process is positively dead. Explicit lifecycle
+filters such as `--closed` and `--crashed` select those retained rows instead.
+Per-device `latest` / `oldest` selectors accept only rows returned by that device's
+version-filtered index query; an unindexed live row with no resolved version does not
+silently widen the picker.
 
 **Team lineage.** A teams teammate row carries the id of the **orchestrator** that
 spawned it — the session that ran `agents teams add`, captured from

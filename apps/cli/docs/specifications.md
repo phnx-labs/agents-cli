@@ -561,6 +561,10 @@ SSH access (§7); rendering sessions that no harness produced.
   `sessions --active` (`commands/sessions-browser.ts` `BrowserFilter`,
   `collectSessionCandidates`, `applyFilters`; `commands/focus.ts` `focusAction`;
   tests `commands/sessions-browser.test.ts`, `commands/focus.test.ts`).
+  Bare `--active` MUST exclude terminally-dead rows retained by the live registry;
+  explicit `--closed` / `--crashed` filters MUST remain able to select those rows.
+  A per-device `latest` / `oldest` query MUST NOT admit an unindexed live row whose
+  version was not part of the peer's filtered result.
 - **SES-39 (MUST).** Focus MUST query tmux `#{pane_dead}` immediately before
   attach. A dead or missing pane MUST NOT attach. Session recovery MUST run on
   the origin device and MUST choose native resume only for the exact healthy
