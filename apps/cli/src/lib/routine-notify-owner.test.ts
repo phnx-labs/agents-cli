@@ -153,6 +153,29 @@ describe('ownerFailureDeliveryPlan — primary + fallbacks, no Telegram', () => 
     expect(plan).toEqual([{ channel: 'owntest-ok', to: '+1555' }]);
   });
 
+  it('excludes an intrusive primary when policy points normal at a voice channel', () => {
+    // Primary was previously push()ed without the intrusive check.
+    writeHumans(
+      `  channels:\n` +
+        `    - id: call\n      transport: twilio\n      to: '+1911'\n      intrusive: true\n` +
+        `    - id: owntest-ok\n      transport: rush\n      to: '+1555'\n` +
+        `  policy:\n    normal: [call]\n`,
+    );
+    const plan = ownerFailureDeliveryPlan({} as Meta);
+    expect(plan).toEqual([{ channel: 'owntest-ok', to: '+1555' }]);
+  });
+
+  it('excludes a neutral id whose humans.yaml transport field is telegram', () => {
+    // isTelegramChannel previously ignored HumanChannel.transport.
+    writeHumans(
+      `  channels:\n` +
+        `    - id: buzz\n      transport: telegram\n      to: 'tg-chat'\n` +
+        `    - id: owntest-ok\n      transport: rush\n      to: '+1555'\n`,
+    );
+    const plan = ownerFailureDeliveryPlan({} as Meta);
+    expect(plan).toEqual([{ channel: 'owntest-ok', to: '+1555' }]);
+  });
+
   it('is empty when the owner has no non-Telegram channel (silence beats Telegram)', () => {
     writeHumans(`  channels:\n    - id: telegram\n      transport: telegram\n      to: 'tg1'\n`);
     expect(ownerFailureDeliveryPlan({} as Meta)).toEqual([]);

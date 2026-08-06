@@ -93,9 +93,22 @@ export interface OwnerDest {
   to: string;
 }
 
-/** True when a channel id resolves (via `notify.transports`) to a Telegram transport. */
-function isTelegramChannel(channelId: string, meta: Meta): boolean {
+/**
+ * True when a channel would deliver over Telegram. Checks, in order:
+ * 1. the channel id itself (`telegram`);
+ * 2. the humans.yaml `transport` field on the channel entry (when provided);
+ * 3. `notify.transports[id]` remapping (or the id as the default transport name).
+ * Any of those landing on a Telegram-delivering provider is excluded.
+ */
+function isTelegramChannel(
+  channelId: string,
+  meta: Meta,
+  humansTransport?: string,
+): boolean {
   if (channelId.trim().toLowerCase() === 'telegram') return true;
+  if (humansTransport && TELEGRAM_TRANSPORTS.has(humansTransport.trim().toLowerCase())) {
+    return true;
+  }
   const transport = meta.notify?.transports?.[channelId] ?? channelId;
   return TELEGRAM_TRANSPORTS.has(transport.trim().toLowerCase());
 }
@@ -107,15 +120,24 @@ function isTelegramChannel(channelId: string, meta: Meta): boolean {
  * intrusive channels (a voice call is too much for a routine failure) are
  * excluded entirely — so an owner whose ONLY channel is Telegram gets an empty
  * plan and no ping, which is the intended "silence beats Telegram" outcome.
+ *
+ * The same filters apply to the primary and the fallback list — a policy that
+ * points normal severity at a voice channel must not auto-call the owner on
+ * every routine failure.
  */
 export function ownerFailureDeliveryPlan(meta: Meta): OwnerDest[] {
   const plan: OwnerDest[] = [];
   const seen = new Set<string>();
+  const ownerChannels = getOwnerFromHumans()?.channels ?? [];
+  const byId = new Map(ownerChannels.map((ch) => [ch.id, ch]));
+
   const push = (channel?: string, to?: string): void => {
     const c = channel?.trim();
     const t = to?.trim();
     if (!c || !t) return;
-    if (isTelegramChannel(c, meta)) return;
+    const entry = byId.get(c);
+    if (entry?.intrusive) return;
+    if (isTelegramChannel(c, meta, entry?.transport)) return;
     const key = `${c} ${t}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -123,13 +145,12 @@ export function ownerFailureDeliveryPlan(meta: Meta): OwnerDest[] {
   };
 
   // Primary = the destination `agents notify` would resolve (humans policy →
-  // first addressable → legacy notify.owner).
+  // first addressable → legacy notify.owner). Same filters as the fallbacks.
   const primary = readOwnerDest(meta);
   if (primary) push(primary.channel, primary.to);
 
   // Fallbacks = the remaining configured owner channels, in declared order.
-  for (const ch of getOwnerFromHumans()?.channels ?? []) {
-    if (ch.intrusive) continue;
+  for (const ch of ownerChannels) {
     push(ch.id, ch.to);
   }
   return plan;
