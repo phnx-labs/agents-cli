@@ -1966,7 +1966,9 @@ function foldPresence(rows: ActiveSession[]): void {
  * session that has a live pid. Mutates in place. Runs after dedupe so we probe
  * each session once, not once per fork pid. Probes run in parallel — each is a
  * single /proc read (Linux) or `ps` call (macOS); failures leave `provenance`
- * undefined rather than blocking the listing.
+ * undefined rather than blocking the listing. The probes use the same bounded
+ * concurrency as the adjacent per-PID lsof sweep so large session lists cannot
+ * spawn one `ps eww` subprocess per row at once on macOS.
  *
  * A row that already carries provenance (the tmux path, which knows its exact
  * mux/reply from the pane) is not skipped — it is probe-and-MERGED. The tmux
@@ -1976,11 +1978,15 @@ function foldPresence(rows: ActiveSession[]): void {
  * authoritative mux/reply the pane already gave us. Skipping this (the old
  * behavior) is exactly why ssh-launched tmux sessions rendered as local.
  */
-async function enrichProvenance(sessions: ActiveSession[]): Promise<void> {
-  await Promise.all(
-    sessions.map(async (s) => {
+export async function enrichProvenance(
+  sessions: ActiveSession[],
+  probe: (pid: number) => Promise<SessionProvenance | undefined> = detectProvenance,
+): Promise<void> {
+  await mapBounded(
+    sessions,
+    async (s) => {
       if (!s.pid) return;
-      const probed = await detectProvenance(s.pid);
+      const probed = await probe(s.pid);
       if (!probed) return;
       if (!s.provenance) {
         s.provenance = probed;
@@ -1993,7 +1999,8 @@ async function enrichProvenance(sessions: ActiveSession[]): Promise<void> {
         s.provenance.ssh = probed.ssh;
       }
       if (probed.term && !s.provenance.term) s.provenance.term = probed.term;
-    }),
+    },
+    { concurrency: LSOF_CONCURRENCY },
   );
 }
 

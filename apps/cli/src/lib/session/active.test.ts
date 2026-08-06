@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission } from './active.js';
+import { resolveCwds, enrichProvenance, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission } from './active.js';
 import { SESSION_AGENTS } from './types.js';
 import type { HookSessionIndex } from './hook-sessions.js';
 import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
@@ -256,6 +256,27 @@ describe('resolveCwds', () => {
     };
     const cwds = await resolveCwds(pids, probe);
     expect(cwds).toEqual(['cwd-5', 'cwd-4', 'cwd-3', 'cwd-2', 'cwd-1']);
+  });
+});
+
+describe('enrichProvenance', () => {
+  it('bounds provenance probes to LSOF_CONCURRENCY', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const sessions = Array.from({ length: 30 }, (_, i) => ({ pid: i + 1000 })) as Parameters<typeof enrichProvenance>[0];
+    const probe = async () => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await delay(20);
+      inFlight--;
+      return { host: 'test', transport: 'local' as const };
+    };
+
+    await enrichProvenance(sessions, probe);
+
+    expect(maxInFlight).toBeLessThanOrEqual(LSOF_CONCURRENCY);
+    expect(maxInFlight).toBeGreaterThan(1);
+    expect(sessions.every(s => s.provenance?.host === 'test')).toBe(true);
   });
 });
 
