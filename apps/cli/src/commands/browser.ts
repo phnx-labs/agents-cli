@@ -50,6 +50,7 @@ import { isInteractiveTerminal } from './utils.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { buildHar } from '../lib/browser/har.js';
 import { getCliVersion } from '../lib/version.js';
+import { runBrowserIPCStream } from '../lib/browser/stream.js';
 
 /**
  * Resolve which browser task a command targets. Order:
@@ -81,6 +82,7 @@ const TASK_OPTION_DESC = 'Task name (defaults to $AGENTS_BROWSER_TASK)';
 // trailing "Other commands" section automatically.
 const BROWSER_HELP_GROUPS = [
   { title: 'Session lifecycle', names: ['start', 'done', 'status'] },
+  { title: 'Fast action loop', names: ['stream'] },
   {
     title: 'Drive the page',
     names: ['navigate', 'tabs', 'screenshot', 'evaluate', 'click', 'type', 'press', 'wait'],
@@ -113,6 +115,9 @@ export function registerBrowserCommand(program: Command): void {
       # Drive the page
       agents browser navigate https://example.com
       agents browser screenshot
+
+      # Keep one process and daemon socket warm for repeated actions
+      agents browser stream --task "$AGENTS_BROWSER_TASK"
 
       # Drive another machine's browser (needs its consent — see remote-control)
       agents browser start --host zion
@@ -708,6 +713,38 @@ function registerTaskCommands(browser: Command): void {
           : 'Cross-machine `browser --host` drives to this machine are refused.',
       );
     });
+
+  const stream = browser
+    .command('stream')
+    .description('Keep one process and daemon IPC socket open; read NDJSON requests from stdin and write NDJSON responses')
+    .option(TASK_OPTION_FLAG, 'Default task for requests that omit `task` (defaults to $AGENTS_BROWSER_TASK)')
+    .action(async (opts: { task?: string }) => {
+      await runBrowserIPCStream({
+        input: process.stdin,
+        output: process.stdout,
+        task: opts.task ?? process.env.AGENTS_BROWSER_TASK,
+        actor: resolveActor().id,
+        launchId: process.env.AGENT_LAUNCH_ID,
+      });
+    });
+
+  setHelpSections(stream, {
+    examples: `
+      # Batch two warm actions through one process and one daemon connection
+      printf '%s\\n' \\
+        '{"action":"screenshot","path":"/tmp/page.jpg"}' \\
+        '{"action":"click","atX":320,"atY":540}' \\
+        | agents browser stream --task "$AGENTS_BROWSER_TASK"
+
+      # Keep the command open and send one JSON object per line from a long-lived shell
+      agents browser stream --task "$AGENTS_BROWSER_TASK"
+    `,
+    notes: `
+      stdout is protocol-only: one compact JSON response for each non-empty input line.
+      Malformed JSON returns an error response without closing the stream.
+      The first start response becomes the default task for later lines in the same stream.
+    `,
+  });
 
   browser
     .command('start')
