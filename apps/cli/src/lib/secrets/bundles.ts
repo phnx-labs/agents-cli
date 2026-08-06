@@ -1505,13 +1505,18 @@ export function readAndResolveBundleEnv(
     const resolved = resolveSession(name, Date.now(), harness);
     if (resolved) {
       const session = resolved.entry;
+      const denied = (opts.keys ?? []).filter((key) => session.lease && !session.lease.keys.includes(key));
+      if (denied.length > 0) {
+        emitSecretAudit({ event: 'secrets.lease-denied', bundle: name, operation: opts.caller, source: 'session', status: 'error', keys: denied, keyCount: denied.length, agent: harness, error: 'key outside lease scope' });
+        throw new Error(`Secret lease '${session.lease?.id}' does not grant key(s): ${denied.join(', ')}`);
+      }
       const filtered = filterAgentHitBySubsetAndExpiry({ bundle: session.bundle, env: session.env }, opts);
       stampLastUsed(filtered.bundle);
       // Re-warm the broker with the remaining TTL so later reads hit RAM and
       // `agents secrets status` is honest. Re-warm under the scope the grant was
       // MADE in (resolved.harness), never the asking scope — re-warming a global
       // grant as `claude` would silently narrow it for every other harness.
-      agentAutoLoadSync(name, session.bundle, session.env, Math.max(1, session.expiresAt - Date.now()), resolved.harness);
+      agentAutoLoadSync(name, session.bundle, session.env, Math.max(1, session.expiresAt - Date.now()), resolved.harness, session.lease);
       emitSecretAudit({
         event: 'secrets.get',
         bundle: name,

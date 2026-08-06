@@ -103,6 +103,13 @@ describe('handleAgentRequest', () => {
     expect(handleAgentRequest(store, { cmd: 'get', name: 'prod' }, 6_000)).toMatchObject({ hit: false });
   });
 
+  it('clips an oversized load payload to the lease keys at the broker boundary', () => {
+    const store = freshStore();
+    const lease = { id: 'lease-clip', bundle: 'prod', keys: ['TOKEN'], createdAt: 0, expiresAt: 60_000, harness: '*', sleepPersist: false };
+    expect(handleAgentRequest(store, { ...loadReq('prod', { TOKEN: 't', ADMIN: 'no' }, 60_000), lease }, 0)).toMatchObject({ ok: true });
+    expect(handleAgentRequest(store, { cmd: 'get', name: 'prod' }, 1)).toMatchObject({ env: { TOKEN: 't' } });
+  });
+
   it('revokes exactly one lease id without wiping other grants', () => {
     const store = freshStore();
     const lease = (id: string, bundle: string) => ({ id, bundle, keys: ['TOKEN'], createdAt: 0, expiresAt: 60_000, harness: '*', sleepPersist: false });

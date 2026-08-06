@@ -40,7 +40,7 @@ import { GLOBAL_HARNESS, bundleScopeChain } from './scope.js';
 import { rehydrateSessions, pruneSessionsOnSleep } from './session-store.js';
 import { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './sync-commands.js';
 import { MAX_LEASE_MS, MIN_LEASE_MS } from './lease.js';
-import type { SecretLease } from './lease.js';
+import { selectLeasedEnv, type SecretLease } from './lease.js';
 import { emitSecretAudit } from './audit.js';
 
 // Re-exported so callers already reaching for agent.js keep one obvious home for
@@ -417,10 +417,16 @@ export function handleAgentRequest(
       }
       return { ok: true, cmd: 'get', hit: false };
     }
-    case 'load':
+    case 'load': {
       const harness = req.harness || GLOBAL_HARNESS;
-      store.set(scopedBundleKey(req.name, harness), { bundle: req.bundle, env: req.env, expiresAt: req.lease?.expiresAt ?? now + req.ttlMs, harness, lease: req.lease });
+      let env = req.env;
+      if (req.lease) {
+        try { env = selectLeasedEnv(req.lease, req.env, now); }
+        catch (err) { return { ok: false, error: (err as Error).message }; }
+      }
+      store.set(scopedBundleKey(req.name, harness), { bundle: req.bundle, env, expiresAt: req.lease?.expiresAt ?? now + req.ttlMs, harness, lease: req.lease });
       return { ok: true, cmd: 'load' };
+    }
     case 'lock': {
       if (req.name) {
         let wiped = 0;
@@ -1205,9 +1211,10 @@ export function agentAutoLoadSync(
   env: Record<string, string>,
   ttlMs: number,
   harness: string = GLOBAL_HARNESS,
+  lease?: SecretLease,
 ): void {
   if (!onDarwin()) return;
-  const payload = JSON.stringify({ name, bundle, env, ttlMs, harness });
+  const payload = JSON.stringify({ name, bundle, env, ttlMs, harness, lease });
   // Broker actually LISTENING → deterministic synchronous warm (bounded; the read
   // already paid a Touch ID, so <1s here is invisible). We gate on a real liveness
   // ping, NOT mere socket-file existence: a broker that died leaving its socket
@@ -1252,7 +1259,7 @@ export async function runAgentLoadFromStdin(): Promise<void> {
   if (!onDarwin()) return;
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-  let payload: { name?: string; bundle?: SecretsBundle; env?: Record<string, string>; ttlMs?: number; harness?: string };
+  let payload: { name?: string; bundle?: SecretsBundle; env?: Record<string, string>; ttlMs?: number; harness?: string; lease?: SecretLease };
   try {
     payload = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
   } catch {
@@ -1269,7 +1276,7 @@ export async function runAgentLoadFromStdin(): Promise<void> {
     process.exitCode = 1; // broker couldn't be brought up — did NOT load
     return;
   }
-  const loaded = await agentLoad(payload.name, payload.bundle, payload.env, payload.ttlMs ?? DEFAULT_TTL_MS, payload.harness ?? GLOBAL_HARNESS);
+  const loaded = await agentLoad(payload.name, payload.bundle, payload.env, payload.ttlMs ?? DEFAULT_TTL_MS, payload.harness ?? GLOBAL_HARNESS, payload.lease);
   if (!loaded) process.exitCode = 1; // transport failed — did NOT load
 }
 

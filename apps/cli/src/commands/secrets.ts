@@ -2612,6 +2612,7 @@ Examples:
       if (!(await ensureAgentRunning()) || !(await agentLoad(name, bundle, leasedEnv, ttlMs, harness, lease))) {
         throw new Error('Could not load the scoped lease into the secrets broker.');
       }
+      ensureDaemonStarted();
       saveSession(name, {
         bundle,
         env: leasedEnv,
@@ -2646,8 +2647,8 @@ Examples:
     .command('revoke <lease-id>')
     .description('Revoke one scoped secret lease immediately.')
     .action(async (leaseId: string) => {
-      const wiped = await agentRevoke(leaseId);
       const persisted = deleteLeaseSession(leaseId);
+      const wiped = await agentRevoke(leaseId);
       if (wiped + persisted === 0) throw new Error(`Secret lease '${leaseId}' is not active.`);
       console.log(chalk.green(`Revoked secret lease ${leaseId}.`));
     });
