@@ -9,13 +9,14 @@
  * upfront copy, always current, but the peer must be reachable. SSH access is the
  * only auth — if you can `ssh <host>`, you own the box (no identity layer by design).
  *
- * Offline degradation (no sync, still fetch-first): every *successful* fetch is
+ * Cache-first (RUSH-2062) + offline degradation: every *successful* fetch is
  * cached to `~/.agents/.cache/remote-sessions/`, keyed by host + the exact query.
- * When a later run finds the host unreachable, the cache is replayed with a clearly
- * labelled "showing cached results" banner instead of returning nothing. The cache
- * is a byproduct of fetches you already made — never a background job, freely
- * deletable — so the fetch-don't-replicate model holds; this is just graceful
- * degradation when the peer is asleep.
+ * A later call with a *fresh* cache serves it without SSH (same daemon-warmed
+ * shared-cache shape as `stats-cache.ts`) so a reachable host is not re-probed
+ * on every menubar/CLI/watchdog tick. When the host is unreachable, any cache
+ * (even stale) is replayed with a clearly labelled "showing cached results"
+ * banner. The cache is a byproduct of fetches you already made — freely
+ * deletable — so the fetch-don't-replicate model holds.
  *
  * Mirrors the transport already used by `agents secrets export --host`
  * (`src/commands/secrets.ts`): `ssh -o BatchMode=yes <host> bash -lc '<cmd>'`,
@@ -149,6 +150,13 @@ export function classifySshFailure(res: { error?: Error | null; status: number |
 const REMOTE_CACHE_DIR = join(getCacheDir(), 'remote-sessions');
 
 /**
+ * How long a successful remote fetch may be served without re-SSHing.
+ * Short on purpose: session listings must stay near-live (RUSH-2062). Match the
+ * active-session snapshot window so surfaces share one freshness model.
+ */
+export const REMOTE_CACHE_MAX_AGE_MS = 15_000;
+
+/**
  * Deterministic cache path for a (host, forwarded-args) pair. The forwarded args
  * are hashed so distinct queries cache independently; the host stays readable in
  * the filename (sanitised so `user@host` and aliases are filesystem-safe).
@@ -157,6 +165,48 @@ export function remoteCachePath(host: string, forwardedArgs: string[]): string {
   const hash = createHash('sha256').update(forwardedArgs.join('\u0000')).digest('hex').slice(0, 16);
   const safeHost = host.replace(/[^a-zA-Z0-9._@-]/g, '_');
   return join(REMOTE_CACHE_DIR, `${safeHost}__${hash}.txt`);
+}
+
+/**
+ * Pure freshness check for a remote-sessions cache entry. A reachable host
+ * skips SSH only while this returns true; unreachable fallback ignores age.
+ */
+export function isRemoteCacheFresh(
+  mtimeMs: number,
+  nowMs: number,
+  maxAgeMs: number = REMOTE_CACHE_MAX_AGE_MS,
+): boolean {
+  if (!Number.isFinite(mtimeMs) || !Number.isFinite(maxAgeMs) || maxAgeMs < 0) return false;
+  return nowMs - mtimeMs <= maxAgeMs;
+}
+
+export interface RemoteCacheHit {
+  output: string;
+  mtimeMs: number;
+}
+
+/**
+ * Read a cached remote fetch. When `maxAgeMs` is set, returns null if the
+ * entry is older than the window (cache-first path for reachable hosts).
+ * Omit `maxAgeMs` to accept any age (unreachable fallback).
+ */
+export function readRemoteCache(
+  host: string,
+  forwardedArgs: string[],
+  opts: { maxAgeMs?: number; nowMs?: number } = {},
+): RemoteCacheHit | null {
+  try {
+    const p = remoteCachePath(host, forwardedArgs);
+    if (!existsSync(p)) return null;
+    const mtimeMs = statSync(p).mtimeMs;
+    if (opts.maxAgeMs !== undefined) {
+      const now = opts.nowMs ?? Date.now();
+      if (!isRemoteCacheFresh(mtimeMs, now, opts.maxAgeMs)) return null;
+    }
+    return { output: readFileSync(p, 'utf8'), mtimeMs };
+  } catch {
+    return null;
+  }
 }
 
 /** Banner shown above replayed cache rows when the peer is offline. */
@@ -172,9 +222,9 @@ export function formatUnreachable(host: string): string {
   );
 }
 
-/** Persist a successful fetch for later offline replay. Best-effort: a cache
- * write must never break the live query. */
-function writeRemoteCache(host: string, forwardedArgs: string[], output: string): void {
+/** Persist a successful fetch for later cache-first / offline replay.
+ * Best-effort: a cache write must never break the live query. Exported for tests. */
+export function writeRemoteCache(host: string, forwardedArgs: string[], output: string): void {
   try {
     mkdirSync(REMOTE_CACHE_DIR, { recursive: true });
     writeFileSync(remoteCachePath(host, forwardedArgs), output);
@@ -183,25 +233,55 @@ function writeRemoteCache(host: string, forwardedArgs: string[], output: string)
   }
 }
 
-/** Replay a cached fetch for an unreachable host. Banner goes to stderr (so a
- * piped stdout stays exactly the cached rows); returns false when nothing is
- * cached for this exact (host, query). */
-function replayRemoteCache(host: string, forwardedArgs: string[]): boolean {
-  try {
-    const p = remoteCachePath(host, forwardedArgs);
-    if (!existsSync(p)) return false;
-    process.stderr.write(formatStaleBanner(host, statSync(p).mtimeMs) + '\n');
-    process.stdout.write(readFileSync(p, 'utf8'));
-    return true;
-  } catch {
-    return false;
-  }
+/**
+ * Serve a *fresh* cache entry for a reachable-host skip (no banner — the data
+ * is still within the freshness window). Returns false when missing/stale so
+ * the caller SSHes. RUSH-2062: without this, a reachable host never skipped SSH
+ * even when the cache was just written.
+ */
+export function serveWarmRemoteCache(
+  host: string,
+  forwardedArgs: string[],
+  opts: { maxAgeMs?: number; nowMs?: number } = {},
+): boolean {
+  const hit = readRemoteCache(host, forwardedArgs, {
+    maxAgeMs: opts.maxAgeMs ?? REMOTE_CACHE_MAX_AGE_MS,
+    nowMs: opts.nowMs,
+  });
+  if (!hit) return false;
+  process.stdout.write(hit.output);
+  return true;
+}
+
+/** Replay a cached fetch for an unreachable host (any age). Banner goes to
+ * stderr (so a piped stdout stays exactly the cached rows); returns false when
+ * nothing is cached for this exact (host, query). */
+export function replayRemoteCache(host: string, forwardedArgs: string[]): boolean {
+  const hit = readRemoteCache(host, forwardedArgs); // no maxAge — any age ok
+  if (!hit) return false;
+  process.stderr.write(formatStaleBanner(host, hit.mtimeMs) + '\n');
+  process.stdout.write(hit.output);
+  return true;
+}
+
+export interface RunRemoteSessionsOptions {
+  /** Skip warm cache and SSH every host (force-refresh). */
+  forceRefresh?: boolean;
+  /** Override freshness window for the warm path. */
+  maxAgeMs?: number;
+  /** Clock (tests). */
+  nowMs?: number;
 }
 
 /**
  * Run the current `agents sessions` invocation on one or more remote machines over
- * SSH, writing each remote's output to the terminal. A successful fetch is cached;
- * an unreachable host falls back to that cache (with a stale banner) when present.
+ * SSH, writing each remote's output to the terminal.
+ *
+ * Cache policy (RUSH-2062):
+ * - **Default:** serve a fresh cache hit without SSH; SSH only on miss/stale.
+ * - **`forceRefresh`:** always SSH, then rewrite the cache.
+ * - **Unreachable:** fall back to any cached output (with a stale banner).
+ *
  * Sets `process.exitCode = 1` if any host could not be answered (live or cached).
  * Reads the invocation from `process.argv` (override via `argv` for testing).
  *
@@ -209,16 +289,32 @@ function replayRemoteCache(host: string, forwardedArgs: string[]): boolean {
  * Session output is small and the remote returns quickly, so buffering is
  * imperceptible; `maxBuffer` is generous for the rare large `--markdown <id>` dump.
  */
-export function runRemoteSessions(hosts: string[], argv: string[] = process.argv): void {
+export function runRemoteSessions(
+  hosts: string[],
+  argv: string[] = process.argv,
+  opts: RunRemoteSessionsOptions = {},
+): void {
   for (const host of hosts) assertValidSshTarget(host); // fail fast on any bad target
 
   const forwarded = ensureWholeIndex(buildForwardedArgs(argv, new Set(hosts)));
   const cols = terminalWidth();
   const multi = hosts.length > 1;
   let failures = 0;
+  const forceRefresh = opts.forceRefresh === true
+    || process.env.AGENTS_SESSIONS_FORCE_REFRESH === '1';
 
   for (const host of hosts) {
     if (multi) process.stdout.write(chalk.cyan(`\n── ${host} ──\n`));
+
+    // Cache-first: a warm hit skips SSH entirely so reachable hosts share one
+    // snapshot across menubar/CLI/watchdog instead of re-fanning every call.
+    if (!forceRefresh && serveWarmRemoteCache(host, forwarded, {
+      maxAgeMs: opts.maxAgeMs,
+      nowMs: opts.nowMs,
+    })) {
+      continue;
+    }
+
     // Per-host: a Windows peer needs a PowerShell command, POSIX peers `bash -lc`.
     const remoteCmd = buildRemoteCommand(forwarded, cols, resolveRemoteOsSync(host));
     const res = spawnSync('ssh', [...SSH_OPTS, ...controlOpts(), host, remoteCmd], {

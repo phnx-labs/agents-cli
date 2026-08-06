@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import {
   buildForwardedArgs,
@@ -10,6 +11,12 @@ import {
   remoteCachePath,
   formatStaleBanner,
   formatUnreachable,
+  isRemoteCacheFresh,
+  REMOTE_CACHE_MAX_AGE_MS,
+  readRemoteCache,
+  writeRemoteCache,
+  serveWarmRemoteCache,
+  replayRemoteCache,
 } from './remote.js';
 
 /**
@@ -222,5 +229,80 @@ describe('offline banners', () => {
     const msg = formatUnreachable('mac-mini');
     expect(msg).toContain('mac-mini');
     expect(msg.toLowerCase()).toContain('unreachable');
+  });
+});
+
+describe('remote cache freshness (RUSH-2062 — reachable host skips SSH)', () => {
+  it('isRemoteCacheFresh is true only inside the max-age window', () => {
+    expect(isRemoteCacheFresh(1000, 1000 + REMOTE_CACHE_MAX_AGE_MS, REMOTE_CACHE_MAX_AGE_MS)).toBe(true);
+    expect(isRemoteCacheFresh(1000, 1000 + REMOTE_CACHE_MAX_AGE_MS + 1, REMOTE_CACHE_MAX_AGE_MS)).toBe(false);
+  });
+
+  it('write + read with maxAge serves a fresh entry (reachable path skips SSH)', () => {
+    const host = `test-host-fresh-${process.pid}`;
+    const args = ['sessions', '--active', '--json', `q-${Date.now()}`];
+    writeRemoteCache(host, args, 'SESSION_ROWS_OK\n');
+    const hit = readRemoteCache(host, args, { maxAgeMs: REMOTE_CACHE_MAX_AGE_MS, nowMs: Date.now() });
+    expect(hit).not.toBeNull();
+    expect(hit!.output).toBe('SESSION_ROWS_OK\n');
+  });
+
+  it('read with maxAge returns null for a deliberately aged entry', () => {
+    const host = `test-host-stale-${process.pid}`;
+    const args = ['sessions', '--active', '--json', `stale-${Date.now()}`];
+    writeRemoteCache(host, args, 'OLD_ROWS\n');
+    // Force mtime into the past by touching the file.
+    const p = remoteCachePath(host, args);
+    const old = (Date.now() - REMOTE_CACHE_MAX_AGE_MS - 5_000) / 1000;
+    fs.utimesSync(p, old, old);
+    const hit = readRemoteCache(host, args, { maxAgeMs: REMOTE_CACHE_MAX_AGE_MS, nowMs: Date.now() });
+    expect(hit).toBeNull();
+    // Unreachable fallback still accepts any age.
+    const anyAge = readRemoteCache(host, args);
+    expect(anyAge?.output).toBe('OLD_ROWS\n');
+  });
+
+  it('serveWarmRemoteCache writes stdout for a fresh hit and returns true', () => {
+    const host = `test-host-serve-${process.pid}`;
+    const args = ['sessions', `serve-${Date.now()}`];
+    writeRemoteCache(host, args, 'WARM_OUT\n');
+    const chunks: string[] = [];
+    const orig = process.stdout.write.bind(process.stdout);
+    (process.stdout as { write: typeof process.stdout.write }).write = ((chunk: string | Uint8Array) => {
+      chunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      expect(serveWarmRemoteCache(host, args, { nowMs: Date.now() })).toBe(true);
+      expect(chunks.join('')).toBe('WARM_OUT\n');
+    } finally {
+      process.stdout.write = orig;
+    }
+  });
+
+  it('replayRemoteCache serves any-age cache with a stale banner on stderr', () => {
+    const host = `test-host-replay-${process.pid}`;
+    const args = ['sessions', `replay-${Date.now()}`];
+    writeRemoteCache(host, args, 'REPLAY_OUT\n');
+    const out: string[] = [];
+    const err: string[] = [];
+    const origOut = process.stdout.write.bind(process.stdout);
+    const origErr = process.stderr.write.bind(process.stderr);
+    (process.stdout as { write: typeof process.stdout.write }).write = ((c: string | Uint8Array) => {
+      out.push(typeof c === 'string' ? c : Buffer.from(c).toString());
+      return true;
+    }) as typeof process.stdout.write;
+    (process.stderr as { write: typeof process.stderr.write }).write = ((c: string | Uint8Array) => {
+      err.push(typeof c === 'string' ? c : Buffer.from(c).toString());
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      expect(replayRemoteCache(host, args)).toBe(true);
+      expect(out.join('')).toBe('REPLAY_OUT\n');
+      expect(err.join('').toLowerCase()).toContain('cached');
+    } finally {
+      process.stdout.write = origOut;
+      process.stderr.write = origErr;
+    }
   });
 });

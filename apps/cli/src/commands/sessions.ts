@@ -29,6 +29,10 @@ import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
 import { resolveViewingIn, viewingInLabel } from '../lib/session/viewing-in.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.js';
+import {
+  loadFleetActiveSessions,
+  loadLocalActiveSessions,
+} from '../lib/session/session-cache.js';
 import { gatherRemoteList, gatherRemoteToolProgramCounts, gatherRemoteToolSearch, runOnPeer } from '../lib/session/remote-list.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
@@ -1330,8 +1334,52 @@ export function remoteHostsToDial(hosts: string[] | undefined, self: string): st
  * call it, so the browser can never disagree with `--active --json` about which
  * sessions are live (it used to call the local-only `getActiveSessions()` directly
  * and silently hid every remote session).
+ *
+ * RUSH-2062: default path is cache-first against the daemon-warmed shared
+ * snapshot (`session-cache.ts`). Menubar / Factory / watchdog / CLI share one
+ * warm result instead of each re-running the full SSH fan-out. `forceRefresh`
+ * (or `AGENTS_SESSIONS_FORCE_REFRESH=1`) re-gathers live; scoped `--host` lists
+ * always gather live so a filter never returns a wrong unscoped snapshot.
  */
 export async function gatherActiveSessions(
+  opts: { local?: boolean; hosts?: string[]; forceRefresh?: boolean } = {},
+): Promise<{ sessions: ActiveSession[]; remoteDeviceCount: number }> {
+  const forceRefresh = opts.forceRefresh === true
+    || process.env.AGENTS_SESSIONS_FORCE_REFRESH === '1';
+  // Scoped host lists are not represented in the unscoped fleet/local snapshot
+  // — always gather live so a filter cannot return the wrong set.
+  const scoped = (opts.hosts?.length ?? 0) > 0;
+
+  if (opts.local && !scoped) {
+    const loaded = await loadLocalActiveSessions({
+      forceRefresh,
+      gather: async () => {
+        const rows = await getActiveSessions({ localOnly: true });
+        const self = machineId();
+        for (const s of rows) if (!s.machine) s.machine = self;
+        return rows;
+      },
+    });
+    return { sessions: loaded.sessions, remoteDeviceCount: 0 };
+  }
+
+  if (!opts.local && !scoped) {
+    const loaded = await loadFleetActiveSessions({
+      forceRefresh,
+      gather: () => gatherActiveSessionsLive({ local: false }),
+    });
+    return { sessions: loaded.sessions, remoteDeviceCount: loaded.remoteDeviceCount };
+  }
+
+  return gatherActiveSessionsLive(opts);
+}
+
+/**
+ * Live (uncached) gather — the work the daemon / force-refresh path pays once
+ * so other surfaces can share the snapshot. Kept separate so the cache layer
+ * never recursively re-enters itself.
+ */
+async function gatherActiveSessionsLive(
   opts: { local?: boolean; hosts?: string[] } = {},
 ): Promise<{ sessions: ActiveSession[]; remoteDeviceCount: number }> {
   const self = machineId();
@@ -1341,7 +1389,9 @@ export async function gatherActiveSessions(
   // remote-host teammate over ssh even for this machine's OWN local gather —
   // "this machine only" must mean zero ssh, not just "skip the cross-machine
   // device fan-out below".
-  const local = shouldIncludeLocal(opts.hosts, self) ? await getActiveSessions({ localOnly: opts.local }) : [];
+  const local = shouldIncludeLocal(opts.hosts, self)
+    ? await getActiveSessions({ localOnly: opts.local })
+    : [];
   for (const s of local) if (!s.machine) s.machine = self;
 
   let remoteDeviceCount = 0;

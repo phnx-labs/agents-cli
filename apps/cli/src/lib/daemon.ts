@@ -876,6 +876,35 @@ export async function runDaemon(): Promise<void> {
   const fleetCacheInterval = setInterval(() => { void runFleetCacheWarm(); }, 3 * 60_000);
   const fleetCacheKickoff = setTimeout(() => { void runFleetCacheWarm(); }, 60_000);
 
+  // Session-status cache warm (RUSH-2062): publish THIS host's local active
+  // sessions so menubar / Factory / watchdog / CLI share one warm snapshot
+  // instead of each re-running a full ~9s / ~170MB gather. Publish-own only
+  // (no cross-host SSH — same N² lesson as RUSH-2061). Short interval keeps
+  // live status fresh; forceRefresh still re-gathers. Additive sibling of
+  // fleetCacheInterval — does not touch the reaper tick.
+  let warmingSessionCache = false;
+  const runSessionCacheWarm = async () => {
+    if (warmingSessionCache) return;
+    warmingSessionCache = true;
+    try {
+      const {
+        publishLocalActiveSessions,
+        SESSION_CACHE_WARM_INTERVAL_MS,
+      } = await import('./session/session-cache.js');
+      // INTERVAL is imported so a greppable reference keeps daemon + module in sync.
+      void SESSION_CACHE_WARM_INTERVAL_MS;
+      const r = await publishLocalActiveSessions();
+      log('INFO', `session cache warm: ${r.sessions.length} local session(s)`);
+    } catch (err) {
+      log('ERROR', `session cache warm failed: ${(err as Error).message}`);
+    } finally {
+      warmingSessionCache = false;
+    }
+  };
+  // Keep the numeric interval aligned with SESSION_CACHE_WARM_INTERVAL_MS (15s).
+  const sessionCacheInterval = setInterval(() => { void runSessionCacheWarm(); }, 15_000);
+  const sessionCacheKickoff = setTimeout(() => { void runSessionCacheWarm(); }, 25_000);
+
   // Usage refresh: keep the usage cache the `agents run` router reads
   // (RUSH-2061, readOnly hot path) fresh, WITHOUT the hot path ever fetching.
   // This host is the sole writer for its own local accounts. The tick wakes
@@ -996,6 +1025,8 @@ export async function runDaemon(): Promise<void> {
     clearTimeout(launchHealthKickoff);
     clearInterval(fleetCacheInterval);
     clearTimeout(fleetCacheKickoff);
+    clearInterval(sessionCacheInterval);
+    clearTimeout(sessionCacheKickoff);
     clearInterval(usageRefreshInterval);
     clearTimeout(usageRefreshKickoff);
     clearInterval(brokerSelfHealInterval);

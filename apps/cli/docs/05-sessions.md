@@ -661,6 +661,16 @@ device over SSH, through one shared gather — `gatherActiveSessions` in
 `src/commands/sessions.ts`. `--host`/`--device` **scopes** that sweep to the named
 machines rather than adding to it.
 
+**Cross-surface cache (RUSH-2062).** The default path is cache-first against a
+daemon-warmed snapshot (`src/lib/session/session-cache.ts`, ~15s freshness). The
+daemon publishes this host's local active set on a short tick; menubar, Factory,
+watchdog, and CLI share it instead of each re-running the full gather. Live status
+stays inside that short window (`forceRefresh` / `AGENTS_SESSIONS_FORCE_REFRESH=1`
+re-gathers). Immutable identity fields are memoized by transcript mtime and never
+carry live status. `sessions --host` is likewise cache-first in
+`src/lib/session/remote.ts` (a reachable host skips SSH while the cache is fresh;
+unreachable still falls back to any age).
+
 On a TTY it opens the interactive browser seeded to running-only; `--json`,
 `--waiting`, and `--no-interactive` print the static grouped view instead. Both read
 the same gather, so they always agree on what is live.
