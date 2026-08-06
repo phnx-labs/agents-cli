@@ -20,7 +20,7 @@
 import chalk from 'chalk';
 import { assertValidSshTarget, sshStream } from '../ssh-exec.js';
 import { resolveHost, resolveHostByCap } from './registry.js';
-import { sshTargetFor, type Host } from './types.js';
+import { sshTargetFor, hostIdentityArgs, type Host } from './types.js';
 import { dispatchAgentsCommand, withActorEnv } from './dispatch.js';
 import {
   stripRoutingFlags,
@@ -715,7 +715,7 @@ export function streamAgentsOnHost(
   const remoteOs = opts.remoteOs ?? resolveRemoteOsSync(host.name);
   const env = withActorEnv({ ...opts.extraEnv, AGENTS_FLEET_REMOTE: '1' });
   const remoteCmd = buildRemoteAgentsInvocation(forwardedArgs, opts.remoteCwd, remoteOs, env);
-  const code = sshStream(target, remoteCmd, { tty: !!opts.interactive, multiplex: true });
+  const code = sshStream(target, remoteCmd, { tty: !!opts.interactive, multiplex: true, extraSshArgs: hostIdentityArgs(host) });
   if (code === 255) {
     console.error(
       chalk.red(`${host.name}: unreachable over SSH (asleep, offline, or host key changed?).`) +
