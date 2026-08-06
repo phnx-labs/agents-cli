@@ -1,24 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PassThrough } from 'stream';
 import { rmSync } from 'fs';
 import type * as net from 'net';
 
-const HELPER_DIR = `/tmp/agents-cli-browser-stream-${process.pid}`;
+const TEST_HOME = `/tmp/agents-cli-browser-stream-${process.pid}`;
+const ORIGINAL_HOME = process.env.HOME;
+process.env.HOME = TEST_HOME;
 
-vi.mock('../state.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../state.js')>();
-  return { ...actual, getHelpersDir: () => HELPER_DIR };
-});
-
-vi.mock('../device-config.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../device-config.js')>();
-  return { ...actual, getConfigValue: () => ({ value: false, source: 'default' }) };
-});
-
+const { getHelpersDir } = await import('../state.js');
 const { BrowserIPCServer } = await import('./ipc.js');
 const { BrowserService } = await import('./service.js');
 const { FLEET_REMOTE_ENV } = await import('./remote-control.js');
 const { runBrowserIPCStream } = await import('./stream.js');
+const HELPER_DIR = getHelpersDir();
 
 let server: InstanceType<typeof BrowserIPCServer>;
 
@@ -29,8 +23,13 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await server.stop();
-  rmSync(HELPER_DIR, { recursive: true, force: true });
+  rmSync(TEST_HOME, { recursive: true, force: true });
   vi.unstubAllEnvs();
+});
+
+afterAll(() => {
+  if (ORIGINAL_HOME === undefined) delete process.env.HOME;
+  else process.env.HOME = ORIGINAL_HOME;
 });
 
 function waitForLines(output: PassThrough, count: number): Promise<string[]> {
