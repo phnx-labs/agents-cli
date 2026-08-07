@@ -1,10 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { bundlePolicy } from '../lib/secrets/bundles.js';
+import { bundleExists, bundlePolicy, readBundle, writeBundle } from '../lib/secrets/bundles.js';
+import { _resetFileStoreForTest } from '../lib/secrets/filestore.js';
+import { setKeychainBackendForTest, type KeychainBackend } from '../lib/secrets/index.js';
 import {
   assertValidSshTarget,
   assertNeverPolicyAcknowledged,
@@ -20,6 +22,7 @@ import {
   quoteWin32ExecArg,
   readImportDotenv,
   registerSecretsCommands,
+  resolveImportBundle,
   renderHoldSummary,
   renderPolicyCol,
   renderExpiringCol,
@@ -831,5 +834,99 @@ describe('exportBundleToFile / importBundleFromFile file round-trip', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * Regression for #2305: `import --force` could not repair a bundle whose
+ * metadata RECORD was undecryptable.
+ *
+ * That is the exact state provisioning exists to fix — a box whose file-store
+ * key was lost or rotated out from under it, so its bundles are present but
+ * unreadable. `agents secrets export <bundle> --host <box> --remote-backend
+ * file --force` drives the remote's own `import`, which died on `readBundle`:
+ *
+ *   remote import failed (exit 1): Bundle 'higgsfield.ai': failed to decrypt
+ *
+ * The push wrote nothing (clean failure, no corruption), but the only route
+ * left was deleting the record by hand on an already-degraded store. Found
+ * while remediating yosemite-s0's 57 orphaned items (RUSH-2351).
+ */
+describe('resolveImportBundle — an undecryptable bundle record', () => {
+  const NAME = 'import-undecryptable-fixture.test';
+  let dir: string;
+  let prevBackend: ReturnType<typeof setKeychainBackendForTest>;
+  let prevPassphrase: string | undefined;
+
+  /** An always-empty keychain, so the encrypted FILE store is what answers. */
+  class EmptyKeychain implements KeychainBackend {
+    store = new Map<string, string>();
+    has(item: string) { return this.store.has(item); }
+    get(item: string): string { throw new Error(`missing ${item}`); }
+    set(item: string, value: string) { this.store.set(item, value); }
+    delete(item: string) { return this.store.delete(item); }
+    list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+  }
+
+  /** Re-key the store, making the on-disk ciphertext a genuine key loss. */
+  function usePassphrase(phrase: string): void {
+    process.env.AGENTS_SECRETS_PASSPHRASE = phrase;
+    _resetFileStoreForTest({ fileDir: dir, passphrase: null });
+  }
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'secrets-import-undecryptable-'));
+    prevPassphrase = process.env.AGENTS_SECRETS_PASSPHRASE;
+    prevBackend = setKeychainBackendForTest(new EmptyKeychain());
+    usePassphrase('the-original-passphrase');
+  });
+
+  afterEach(() => {
+    setKeychainBackendForTest(prevBackend);
+    if (prevPassphrase === undefined) delete process.env.AGENTS_SECRETS_PASSPHRASE;
+    else process.env.AGENTS_SECRETS_PASSPHRASE = prevPassphrase;
+    _resetFileStoreForTest({});
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  });
+
+  /** Write a file-backed bundle, then lose the key it was written under. */
+  function strandBundle(): void {
+    writeBundle({ name: NAME, backend: 'file', vars: { NPM_TOKEN: 'literal:shhh' } });
+    expect(readBundle(NAME).vars.NPM_TOKEN).toBe('literal:shhh');
+    usePassphrase('a-different-passphrase');
+    expect(bundleExists(NAME)).toBe(true);
+    expect(() => readBundle(NAME)).toThrow(/failed to decrypt/i);
+  }
+
+  it('is recreated under --force, so provisioning can repair the box', () => {
+    strandBundle();
+    const bundle = resolveImportBundle(NAME, 'file', false, true);
+    expect(bundle.name).toBe(NAME);
+    expect(bundle.backend).toBe('file');
+    // Empty: the old ciphertext is unreadable, so the import starts clean and
+    // the pushed keys land under the CURRENT key.
+    expect(bundle.vars).toEqual({});
+  });
+
+  it('still refuses without --force — a forgotten passphrase must not wipe a healthy bundle', () => {
+    strandBundle();
+    expect(() => resolveImportBundle(NAME, 'file', false, false)).toThrow(/failed to decrypt/i);
+  });
+
+  it('does not recreate a bundle that decrypts fine, even with --force', () => {
+    writeBundle({ name: NAME, backend: 'file', vars: { NPM_TOKEN: 'literal:keep-me' } });
+    const bundle = resolveImportBundle(NAME, 'file', false, true);
+    // --force means "overwrite the keys I am importing", never "discard the rest".
+    expect(bundle.vars.NPM_TOKEN).toBe('literal:keep-me');
+  });
+
+  it('still throws for a genuinely missing name rather than reporting it unreadable', () => {
+    // Not-found is a different state from unreadable; --force must not blur them
+    // into "create it silently" for a caller that typo'd the bundle name... it
+    // creates, which is import's documented behavior — but via the not-exists
+    // path, carrying the requested backend rather than inheriting a stale one.
+    const fresh = resolveImportBundle('no-such-bundle.test', 'file', false, true);
+    expect(fresh.vars).toEqual({});
+    expect(fresh.backend).toBe('file');
   });
 });

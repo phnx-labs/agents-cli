@@ -924,18 +924,38 @@ export function renderExpiringCol(b: SecretsBundle, now: number = Date.now()): s
  * new one with the requested backend. Refuses to silently downgrade a
  * keychain-backed bundle to `file` — shared by every `import` source so the
  * guard can't drift between them.
+ *
+ * `force` additionally recreates a bundle whose METADATA RECORD is present but
+ * undecryptable — a file store whose key was lost or rotated out from under it.
+ * That is precisely the state provisioning exists to repair (import is how a box
+ * gets its bundles back), and without this the import dies on `readBundle` and
+ * the only route left is deleting the record by hand on an already-degraded
+ * store. It is gated on `--force` on purpose: recreating unconditionally would
+ * destroy a perfectly healthy bundle for someone who merely forgot to set
+ * `AGENTS_SECRETS_PASSPHRASE`, which is the hazard `readBundleIfDecryptable`
+ * exists to describe. `--force` already means "overwrite what is there".
  */
-function resolveImportBundle(name: string, backendOpt: string | undefined, synced = false): SecretsBundle {
+export function resolveImportBundle(
+  name: string,
+  backendOpt: string | undefined,
+  synced = false,
+  force = false,
+): SecretsBundle {
   const requestedBackend = synced ? 'vault' : resolveBackendOpt(backendOpt);
   if (bundleExists(name)) {
-    const bundle = readBundle(name);
-    if (requestedBackend !== 'keychain' && bundle.backend !== requestedBackend) {
-      throw new Error(
-        `Bundle '${name}' already exists with a different backend; ` +
-        `delete it first to recreate it as ${requestedBackend === 'vault' ? 'synced' : `${requestedBackend}-backed`}.`
-      );
+    // readBundleIfDecryptable nulls ONLY on BundleUndecryptableError; a locked
+    // keychain or logged-out vault still throws, so a recoverable state can
+    // never be mistaken for a lost key and silently overwritten.
+    const bundle = force ? readBundleIfDecryptable(name) : readBundle(name);
+    if (bundle) {
+      if (requestedBackend !== 'keychain' && bundle.backend !== requestedBackend) {
+        throw new Error(
+          `Bundle '${name}' already exists with a different backend; ` +
+          `delete it first to recreate it as ${requestedBackend === 'vault' ? 'synced' : `${requestedBackend}-backed`}.`
+        );
+      }
+      return bundle;
     }
-    return bundle;
   }
   return { name, backend: requestedBackend === 'keychain' ? undefined : requestedBackend, vars: {} };
 }
@@ -2113,7 +2133,7 @@ Examples:
           }
           const env = importBundleFromFile(opts.fromFile, passphrase);
           const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
-          const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced);
+          const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced, opts.force);
           const { added, skipped } = applyEnvToBundle(bundle, env, opts);
           emitSecretAudit({ event: 'secrets.import', bundle: bundle.name, operation: 'import --from-file', source: 'file', status: 'success', keyCount: added });
           console.log(chalk.green(`Imported ${added} key(s) from file${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
@@ -2128,7 +2148,7 @@ Examples:
           const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
           const target = await resolveHostSshTarget(opts.host);
           const env = await remoteResolveEnv(target, resolvedBundleName, { osLookupName: opts.host });
-          const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced);
+          const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced, opts.force);
           const { added, skipped } = applyEnvToBundle(bundle, env, opts);
           emitSecretAudit({ event: 'secrets.import', bundle: bundle.name, operation: 'import --from-ssh', source: 'ssh', host: opts.host, status: 'success', keyCount: added });
           console.log(chalk.green(`Imported ${added} key(s) from ${opts.host}${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
@@ -2159,7 +2179,7 @@ Examples:
         // to downgrade keychain -> file) or creates it with the requested backend
         // so a single `import --backend file` works (what `export --host ...
         // --remote-backend file` drives on the remote).
-        const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced);
+        const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced, opts.force);
 
         if (source.kind === '1password') {
           assertOpAvailable();
