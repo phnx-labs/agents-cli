@@ -73,12 +73,13 @@
  * src/index.bench.ts silently sat outside that glob and shipped a stale
  * `@ts-expect-error` (TS2578, unused directive) that no gate caught.
  */
-import { describe, bench, afterAll } from 'vitest';
+import { describe, bench, beforeAll, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { Command } from 'commander';
 import { detectDevBuild } from './startup/dev-build.js';
 import { SYNC_PING_CMD } from './secrets/sync-commands.js';
@@ -97,6 +98,8 @@ import {
   readMeta,
 } from './state.js';
 import { isGitRepo } from './git.js';
+import { emit, redactArgs, _resetForTest } from './events.js';
+import { stampProvenance } from './event-provenance.js';
 import { installMenubarLaunchAgentOnUpgrade } from './menubar/install-menubar.js';
 import {
   resolveBrandName,
@@ -298,16 +301,17 @@ describe('command-registry.ts loaders — warm in-process registration only (mod
  * The core bootstrap block: everything index.ts evaluates and RUNS before the
  * first argv fast path can return — `detectDevBuild()` (index.ts:113), the
  * secrets-broker token dispatch (index.ts:71-84), and the root commander
- * program (index.ts:243-251). Paid by `--version` and `--help` too: the
- * `!helpOrVersionRequested` guard is at index.ts:1322, ~1200 lines below all of
- * it, and it only gates `checkForUpdates()` + `spawnDetachedSync()`.
+ * program (index.ts:262-270) with its audit hooks (index.ts:305-371). Paid by
+ * `--version` and `--help` too: the `!helpOrVersionRequested` guard is at
+ * index.ts:1322, ~1200 lines below all of it, and it only gates
+ * `checkForUpdates()` + `spawnDetachedSync()`.
  *
  * The groups below measure the WORK these lines do, not the cost of loading
- * their modules. The module-graph question — what `import { Command } from
- * 'commander'` (index.ts:10) and `import chalk from 'chalk'` (index.ts:11) cost
- * to evaluate — is the subject of the open sibling PR #2280, which adds a
- * per-import cold-child group to this same file. These groups deliberately do
- * not restate those rows; where a number here needs the import cost to be
+ * their modules. The module-graph question was previously deferred here to a
+ * sibling PR (#2280) that was CLOSED unmerged, so no group ever landed for it:
+ * `import { Command } from 'commander'` (index.ts:10) is now priced by the
+ * commander group further down, and `import chalk from 'chalk'` (index.ts:11)
+ * remains unmeasured. Where a number here needs the import cost to be
  * interpretable it uses the whole-invocation anchor at the bottom instead.
  *
  * Two of these ARE in scope here and are not in that PR, because they are
@@ -431,10 +435,11 @@ describe('detectDevBuild(process.argv[1], VERSION) — runs unconditionally at i
  * loud: it runs each spec list ONCE at module scope, where a throw aborts the
  * whole bench file before a single sample is taken.
  */
-function coldEval(specs: string[]): void {
+function coldEval(specs: string[], extraEnv?: NodeJS.ProcessEnv): void {
   const src = specs.map((s) => `await import(${JSON.stringify(s)});`).join('\n');
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', src], {
     stdio: ['ignore', 'ignore', 'pipe'],
+    ...(extraEnv ? { env: { ...process.env, ...extraEnv } } : {}),
   });
   if (r.status !== 0) {
     throw new Error(
@@ -468,6 +473,44 @@ const VERSIONS_SPEC = distUrl('lib/versions.js');
 const PRIMITIVES_SPEC = distUrl('lib/agent-spec/primitives.js');
 const STATE_SPEC = distUrl('lib/state.js');
 const TYPES_SPEC = distUrl('lib/types.js');
+
+/**
+ * `commander` itself (index.ts:10, `import { Command } from 'commander'`).
+ *
+ * Every other cold-import spec in this file is a `distUrl(...)` of a FIRST-PARTY
+ * module, and the two multi-module bundles below are described in their own
+ * docblock as "index.ts's own eager local-module imports" — so no row in this
+ * file, and none in events.bench.ts / brand.bench.ts, has ever priced the
+ * third-party edge that index.ts:10 declares. It is not optional and not lazy:
+ * `Command` is used at index.ts:262 (`new Command()`) and as a type in
+ * `auditCommandPath` (index.ts:280), so it is evaluated before argv is even
+ * looked at, on EVERY invocation including `--version` / `--help`.
+ *
+ * Resolved through `createRequire(...).resolve` rather than a hand-built path so
+ * a hoisted / relocated `node_modules` can never silently point this row at
+ * nothing (require.resolve throws, and the module-scope preflight below turns
+ * that into a failed suite). commander 15.0.0 is `"type": "module"` with
+ * `"main": "./index.js"`, so the resolved path IS the ESM entry the CLI loads.
+ */
+const COMMANDER_SPEC = pathToFileURL(
+  createRequire(import.meta.url).resolve('commander'),
+).href;
+
+/**
+ * A warm on-disk V8 code cache for the same cold imports. `NODE_COMPILE_CACHE`
+ * is Node's supported env knob for `module.enableCompileCache()` (present on
+ * this box's node v24.11.1; the package floor is `"node": ">=22.5.0"`,
+ * package.json:84, and the API landed in 22.1), so it is a real, shipped
+ * configuration — not a patched runtime. The directory is populated by
+ * `preflightColdImports` below before any row is timed, so the timed samples
+ * read a warm cache rather than paying to write it.
+ */
+const COMPILE_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-compile-cache-'));
+const COMPILE_CACHE_ENV = { NODE_COMPILE_CACHE: COMPILE_CACHE_DIR } as const;
+
+afterAll(() => {
+  try { fs.rmSync(COMPILE_CACHE_DIR, { recursive: true, force: true }); } catch { /* best effort */ }
+});
 
 /**
  * index.ts's own eager local-module imports, EXCLUDING brand.js — by line:
@@ -534,6 +577,7 @@ const PING_EXIT_CODES = [0, 3] as const;
     PRIMITIVES_SPEC,
     STATE_SPEC,
     TYPES_SPEC,
+    COMMANDER_SPEC,
   ])
     coldEval([spec]);
   // The multi-spec rows (EAGER_MINUS_BRAND / EAGER_WITH_BRAND) get their own
@@ -543,6 +587,12 @@ const PING_EXIT_CODES = [0, 3] as const;
   coldEval(EAGER_WITH_BRAND);
   coldEval([EVENTS_SPEC, EVENT_PROVENANCE_SPEC, FORMAT_SPEC]);
   coldEval([...EAGER_WITH_BRAND, VIEW_COMMAND_SPEC]);
+  // Populate the code cache so the NODE_COMPILE_CACHE rows time a warm read,
+  // not the one-time write. Two passes: the first writes, the second proves the
+  // cache is readable (a spawn that failed either way would throw here).
+  coldEval([COMMANDER_SPEC], COMPILE_CACHE_ENV);
+  coldEval([COMMANDER_SPEC], COMPILE_CACHE_ENV);
+  coldEval([], COMPILE_CACHE_ENV);
   // Same reasoning for the one runCli row whose number is only meaningful if
   // the index.ts:71-84 intercept was actually reached.
   expectExit(runCli([SYNC_PING_CMD]), PING_EXIT_CODES, '__secrets-ping preflight');
@@ -567,24 +617,404 @@ describe('the secrets-broker intercept (index.ts:36, 71-84) — what the leaf mo
   }, { time: 4000, iterations: 15 });
 });
 
-describe('root program construction (index.ts:243-251) — commander work every invocation does before parse, warm in-process', () => {
-  bench('new Command() alone (index.ts:243)', () => {
+/**
+ * `import { Command } from 'commander'` (index.ts:10) — the module load itself,
+ * before a single `new Command()` is constructed. Unconditional and eager: there
+ * is no argv fast path above it (the two intercepts at index.ts:38 and
+ * index.ts:71 sit BELOW the import block, which ESM hoists and evaluates first),
+ * so `--version`, `--help`, `__secrets-ping` and every real command pay it.
+ *
+ * commander 15.0.0 is pure ESM and index.js re-exports six lib modules —
+ * command.js (87647 B), help.js (20812 B), option.js (10237 B),
+ * suggestSimilar.js (2735 B), argument.js (3134 B), error.js (1089 B) — so this
+ * row prices ~126 KB of third-party JS parsed + evaluated per invocation.
+ */
+describe('commander module load (index.ts:10) — the third-party eager edge no first-party spec list covers', () => {
+  bench('FLOOR: bare `node --input-type=module -e ""` — the spawn cost the row below also pays; subtract it', () => {
+    coldEval([]);
+  }, COLD_OPTS);
+
+  bench('import commander — the exact specifier at index.ts:10, its 6-module ESM graph into a fresh process', () => {
+    coldEval([COMMANDER_SPEC]);
+  }, COLD_OPTS);
+
+  bench('FLOOR with a warm NODE_COMPILE_CACHE — the same bare process, so the pair below is comparable to the pair above', () => {
+    coldEval([], COMPILE_CACHE_ENV);
+  }, COLD_OPTS);
+
+  bench('import commander with a warm NODE_COMPILE_CACHE — same graph, V8 compilation served from the on-disk code cache instead of re-parsing ~126 KB per process', () => {
+    coldEval([COMMANDER_SPEC], COMPILE_CACHE_ENV);
+  }, COLD_OPTS);
+});
+
+/**
+ * ============================================================================
+ * The root program and its audit backbone (index.ts:260-371).
+ *
+ * After the eager module graph, every invocation runs this block before
+ * `program.parseAsync()` (index.ts:1480) can dispatch anything:
+ *
+ *   index.ts:260  const BRAND = resolveBrandName()            (priced in brand.bench.ts)
+ *   index.ts:262  const program = new Command()
+ *   index.ts:264-270  .name/.description/.version/.option/.helpOption/.addHelpCommand
+ *   index.ts:290  const auditStarts = new WeakMap<Command, number>()
+ *   index.ts:300-303  AUDIT_EXEMPT_COMMANDS = new Set([...])
+ *   index.ts:305  program.hook('preAction', ...)
+ *   index.ts:325  program.hook('postAction', ...)
+ *
+ * `auditCommandPath` (index.ts:280-288), the two hook closures, `auditStarts`
+ * and `AUDIT_EXEMPT_COMMANDS` are all PRIVATE to index.ts and index.ts cannot be
+ * imported (top-level await, argv reads, an eventual `program.parse()` — see the
+ * docblock at the top of this file), so they are reproduced verbatim below,
+ * character for character against index.ts:280-371, with two mechanical
+ * adjustments that are named rather than hidden:
+ *
+ *   1. `BRAND` (index.ts:260) becomes the constant `'agents'` — the unbranded
+ *      value `resolveBrandName()` returns for every plain `agents`/`ag` call on
+ *      this fleet (brand.ts:34-38; brand.bench.ts prices the branded variant).
+ *   2. The two `void import(...)` specifiers are rewritten from index.ts's
+ *      `./lib/analytics/usage-db.js` / `./lib/perf/spool.js` to
+ *      `./analytics/usage-db.js` / `./perf/spool.js`, because this file sits in
+ *      src/lib/ and index.ts in src/. Same modules.
+ *
+ * WHAT IS AND IS NOT INSIDE A SAMPLE. The postAction spool branch
+ * (index.ts:363-370) is `void import(...).then(...)` — fire-and-forget, never
+ * awaited by the hook. Its module import and `recordSample` write therefore
+ * settle on a later microtask/IO turn, OUTSIDE the timed body; what the rows
+ * below capture from it is the synchronous `stampProvenance()` (index.ts:359,
+ * which IS awaited-in-line) plus the dynamic-import initiation. The same holds
+ * for the `parts[0] === 'run'` usage-db branch (index.ts:350-357), which none of
+ * the benched command paths reach anyway. Rows are labelled accordingly; this is
+ * stated, not glossed, because a reader could otherwise take the composed number
+ * as including a real perf-spool append.
+ *
+ * NO MOCKING. The hook bodies call the REAL `redactArgs` / `emit` /
+ * `stampProvenance` from events.ts / event-provenance.ts against a real temp
+ * events sink (proper-lockfile lock + appendFileSync + rotate/prune checks), the
+ * REAL commander dispatch (`_chainOrCallHooks`, command.js:1511-1531, invoked at
+ * command.js:1614 and 1623), and real `parseAsync` runs over registered
+ * commands. events.bench.ts:194-213 owns the isolated `emit`/`redactArgs`/
+ * `stampProvenance` timings; what is measured here and NOWHERE else is the
+ * commander-side wiring — hook registration, `_chainOrCallHooks`'s
+ * ancestor-walk + filter + array build per dispatch, `auditCommandPath`'s own
+ * walk, and the exempt-gate — plus the composed per-invocation delta.
+ */
+const BENCH_BRAND = 'agents';
+
+/** Verbatim index.ts:280-288, with BRAND -> BENCH_BRAND (see docblock). */
+function auditCommandPath(cmd: Command): string[] {
+  const parts: string[] = [];
+  let c: Command | null | undefined = cmd;
+  while (c && c.name() && c.name() !== BENCH_BRAND) {
+    parts.unshift(c.name());
+    c = c.parent;
+  }
+  return parts;
+}
+
+/** Verbatim index.ts:290. */
+const auditStarts = new WeakMap<Command, number>();
+
+/** Verbatim index.ts:300-303. */
+const AUDIT_EXEMPT_COMMANDS: ReadonlySet<string> = new Set([
+  'events emit',
+  '_internal friction',
+]);
+
+/** Verbatim index.ts:264-270 — the root option chain, unbranded, real VERSION. */
+function buildRootProgram(): Command {
+  return new Command()
+    .name(BENCH_BRAND)
+    .description('Environment manager for AI agents')
+    .version(REAL_VERSION)
+    .option('--verbose', 'Show startup self-heal details on stderr')
+    .helpOption('-h, --help', 'Show help')
+    .addHelpCommand(false);
+}
+
+/** Verbatim index.ts:305-371 (both hook registrations and both bodies). */
+function attachAuditHooks(program: Command): Command {
+  program.hook('preAction', (_thisCommand, actionCommand) => {
+    try {
+      const parts = auditCommandPath(actionCommand);
+      if (parts.length === 0) return;
+      if (AUDIT_EXEMPT_COMMANDS.has(parts.join(' '))) return;
+      auditStarts.set(actionCommand, Date.now());
+      emit('command.start', {
+        module: parts[0],
+        command: parts.join(' '),
+        args: redactArgs(process.argv.slice(2, 22)),
+        cwd: process.cwd(),
+      });
+    } catch {
+      // Audit logging must never break command dispatch.
+    }
+  });
+
+  program.hook('postAction', (_thisCommand, actionCommand) => {
+    try {
+      const parts = auditCommandPath(actionCommand);
+      if (parts.length === 0) return;
+      if (AUDIT_EXEMPT_COMMANDS.has(parts.join(' '))) return;
+      const started = auditStarts.get(actionCommand);
+      const durationMs = started !== undefined ? Date.now() - started : undefined;
+      const command = parts.join(' ');
+      emit('command.end', {
+        module: parts[0],
+        command,
+        ...(durationMs !== undefined ? { durationMs } : {}),
+      });
+      if (parts[0] === 'run') {
+        const agentName = actionCommand.args?.[0] ? String(actionCommand.args[0]).split('@')[0] : 'run';
+        void import('./analytics/usage-db.js').then(({ recordUsage }) => {
+          recordUsage({
+            kind: 'agent',
+            name: agentName || 'run',
+            event: 'invoke',
+            source: 'cli',
+            meta: durationMs !== undefined ? { durationMs } : undefined,
+          });
+        }).catch(() => { /* fail soft */ });
+      }
+      if (durationMs !== undefined && parts[0] !== 'perf') {
+        const { sessionId, agent } = stampProvenance();
+        void import('./perf/spool.js').then(({ recordSample }) => {
+          recordSample({
+            kind: 'command.end',
+            label: command,
+            durationMs,
+            cwd: process.cwd(),
+            sessionId,
+            agent,
+          });
+        }).catch(() => { /* fail soft */ });
+      }
+    } catch {
+      // Best-effort completion record; the start line is the durable audit fact.
+    }
+  });
+  return program;
+}
+
+/**
+ * Register the command shapes the dispatch rows parse. `noop` is a depth-1
+ * action command (`auditCommandPath` -> ['noop']); `sessions list` is depth-2
+ * (['sessions','list']) so the ancestor walk in BOTH `auditCommandPath`
+ * (index.ts:283-286) and commander's `_getCommandAndAncestors()`
+ * (command.js:1514) runs one level deeper; `events emit` is depth-2 AND the
+ * first member of AUDIT_EXEMPT_COMMANDS (index.ts:301), so both hooks return at
+ * index.ts:309 / index.ts:329 before any emit.
+ *
+ * Each action bumps a counter the preflight asserts on — a row whose command
+ * silently stopped dispatching (renamed, mis-parsed) would otherwise keep
+ * posting a plausible number for work that never ran.
+ */
+let dispatchCount = 0;
+function registerBenchCommands(program: Command): Command {
+  program.command('noop').action(() => { dispatchCount++; });
+  const sessions = program.command('sessions');
+  sessions.command('list').action(() => { dispatchCount++; });
+  const events = program.command('events');
+  events.command('emit').action(() => { dispatchCount++; });
+  return program;
+}
+
+/**
+ * COUNTERFACTUAL, not the shipped path: the same two hooks with the preAction
+ * `emit('command.start', …)` (index.ts:316) removed, so one record is appended
+ * per invocation instead of two. It prices the single change the measured
+ * numbers point at — everything else about the wiring, the path walk, the
+ * exempt gate, the WeakMap and the postAction record is byte-identical to
+ * `attachAuditHooks`. Same role as the `lib/secrets/agent.js` row above: a row
+ * that prices a decision the source has not taken.
+ *
+ * `redactArgs(process.argv.slice(2, 22))` (index.ts:313) goes with it, since it
+ * exists only to build that record's `args` field.
+ */
+function attachPostActionOnlyAuditHook(program: Command): Command {
+  program.hook('preAction', (_thisCommand, actionCommand) => {
+    try {
+      const parts = auditCommandPath(actionCommand);
+      if (parts.length === 0) return;
+      if (AUDIT_EXEMPT_COMMANDS.has(parts.join(' '))) return;
+      auditStarts.set(actionCommand, Date.now());
+    } catch {
+      // Audit logging must never break command dispatch.
+    }
+  });
+
+  program.hook('postAction', (_thisCommand, actionCommand) => {
+    try {
+      const parts = auditCommandPath(actionCommand);
+      if (parts.length === 0) return;
+      if (AUDIT_EXEMPT_COMMANDS.has(parts.join(' '))) return;
+      const started = auditStarts.get(actionCommand);
+      const durationMs = started !== undefined ? Date.now() - started : undefined;
+      const command = parts.join(' ');
+      emit('command.end', {
+        module: parts[0],
+        command,
+        args: redactArgs(process.argv.slice(2, 22)),
+        cwd: process.cwd(),
+        ...(durationMs !== undefined ? { durationMs } : {}),
+      });
+      if (durationMs !== undefined && parts[0] !== 'perf') {
+        const { sessionId, agent } = stampProvenance();
+        void import('./perf/spool.js').then(({ recordSample }) => {
+          recordSample({
+            kind: 'command.end',
+            label: command,
+            durationMs,
+            cwd: process.cwd(),
+            sessionId,
+            agent,
+          });
+        }).catch(() => { /* fail soft */ });
+      }
+    } catch {
+      // Best-effort completion record; the start line is the durable audit fact.
+    }
+  });
+  return program;
+}
+
+/** Root wired exactly like index.ts:262-371, plus the benched command shapes. */
+const HOOKED_PROGRAM = registerBenchCommands(attachAuditHooks(buildRootProgram()));
+/** Identical root with NO hooks — the commander-only dispatch baseline. */
+const UNHOOKED_PROGRAM = registerBenchCommands(buildRootProgram());
+/** Identical root, one audit append per invocation instead of two. */
+const ONE_APPEND_PROGRAM = registerBenchCommands(attachPostActionOnlyAuditHook(buildRootProgram()));
+
+/**
+ * Real temp events sink so the hooks' `emit()` takes the real proper-lockfile
+ * lock and appends to a real file. Same seam events.bench.ts:135-137 and
+ * events.test.ts:42 use. The perf spool is redirected too: the postAction
+ * branch at index.ts:363-370 writes through `getPerfDir()`, which reads
+ * AGENTS_PERF_DIR at call time, so without this a bench run would append
+ * samples into the user's real ~/.agents/.cache. Set at module scope so the
+ * cold-spawn rows elsewhere in this file inherit the same redirect.
+ */
+const AUDIT_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-audit-bench-'));
+const AUDIT_SINK = path.join(AUDIT_TMP, 'events.jsonl');
+process.env.AGENTS_PERF_DIR = path.join(AUDIT_TMP, 'perf');
+_resetForTest(AUDIT_SINK);
+
+afterAll(() => {
+  _resetForTest();
+  try { fs.rmSync(AUDIT_TMP, { recursive: true, force: true }); } catch { /* best effort */ }
+});
+
+/**
+ * Prove every dispatch row actually reaches its action handler BEFORE any row is
+ * timed — module scope, so a throw here fails the suite instead of posting NaN
+ * (same reasoning as preflightColdImports above). Also primes the sink's prune
+ * marker and the provenance/chmod caches so timed emits measure steady state,
+ * not the one-time first-append prune.
+ */
+await (async function preflightAuditDispatch(): Promise<void> {
+  const before = dispatchCount;
+  await HOOKED_PROGRAM.parseAsync(['node', 'agents', 'noop']);
+  await HOOKED_PROGRAM.parseAsync(['node', 'agents', 'sessions', 'list']);
+  await HOOKED_PROGRAM.parseAsync(['node', 'agents', 'events', 'emit']);
+  await UNHOOKED_PROGRAM.parseAsync(['node', 'agents', 'noop']);
+  await ONE_APPEND_PROGRAM.parseAsync(['node', 'agents', 'noop']);
+  if (dispatchCount !== before + 5) {
+    throw new Error(
+      `audit dispatch preflight: expected 5 actions to fire, got ${dispatchCount - before} — these rows are measuring the wrong path`,
+    );
+  }
+  if (!fs.existsSync(AUDIT_SINK)) {
+    throw new Error(`audit dispatch preflight: the hooks never wrote ${AUDIT_SINK} — emit() is not on this path`);
+  }
+})();
+
+/**
+ * Time-bounded so the cumulative sink stays far below the 10 MiB gzip-rotation
+ * threshold (events.ts:107) and no rotation skews a sample — the same bound and
+ * the same reason as events.bench.ts:170-174.
+ */
+const PARSE_OPTS = { time: 400, iterations: 20, warmupTime: 100 } as const;
+
+describe('root program construction (index.ts:262-270) — commander work every invocation does before parse, warm in-process', () => {
+  bench('new Command() alone (index.ts:262)', () => {
     new Command();
   });
 
-  bench('the real chain: new Command() + .name().description().version().option().helpOption().addHelpCommand(false) (index.ts:243-251), with the real VERSION and the unbranded name', () => {
-    new Command()
-      .name('agents')
-      .description('Environment manager for AI agents')
-      .version(REAL_VERSION)
-      .option('--verbose', 'Show startup self-heal details on stderr')
-      .helpOption('-h, --help', 'Show help')
-      .addHelpCommand(false);
+  bench('the real chain: new Command() + .name().description().version().option().helpOption().addHelpCommand(false) (index.ts:262-270), with the real VERSION and the unbranded name', () => {
+    buildRootProgram();
+  });
+
+  bench('program.hook("preAction", …) + program.hook("postAction", …) — registration ONLY (index.ts:305, 325). commander pushes each listener onto `_lifeCycleHooks[event]` (command.js:488-499); no body runs here', () => {
+    const p = new Command();
+    attachAuditHooks(p);
+  });
+
+  bench('the COMPLETE root bootstrap: option chain + both audit-hook registrations (index.ts:262-371) — everything between resolveBrandName() and the first command registration', () => {
+    attachAuditHooks(buildRootProgram());
   });
 });
 
+describe('audit-hook body pieces (index.ts:280-288, 308-309) — the per-dispatch work that runs BEFORE emit(), measured nowhere else', () => {
+  bench('auditCommandPath(depth-1 action command) — one loop turn + one unshift, then the BRAND compare stops at the root (index.ts:283-286)', () => {
+    auditCommandPath(HOOKED_PROGRAM.commands[0]);
+  });
+
+  bench('auditCommandPath(depth-2 action command, `sessions list`) — two loop turns, two unshifts into the same array (index.ts:283-286)', () => {
+    auditCommandPath(HOOKED_PROGRAM.commands[1].commands[0]);
+  });
+
+  bench('the exempt gate as written: parts.join(" ") + AUDIT_EXEMPT_COMMANDS.has(...) on a depth-2 path (index.ts:309). preAction and postAction each run this, and postAction joins a THIRD time at index.ts:335', () => {
+    const parts = ['sessions', 'list'];
+    AUDIT_EXEMPT_COMMANDS.has(parts.join(' '));
+  });
+});
+
+describe('the real per-invocation audit tax — `program.parseAsync` through commander\'s hook dispatch (command.js:1614, 1623), hooks attached vs not', () => {
+  /**
+   * The hook bodies read `process.argv.slice(2, 22)` verbatim (index.ts:313).
+   * Under vitest that is the worker's argv, not a CLI one, so it is swapped for
+   * a realistic `agents run` line for this suite only and restored after —
+   * suites run sequentially, so no other group in this file sees it. The shape
+   * matches events.bench.ts:149-158 (a >200-char --prompt hitting the sha256
+   * marker branch, a session id, a device, a path) so the redaction branches
+   * exercised here are the real ones.
+   */
+  const REAL_ARGV = process.argv;
+  beforeAll(() => {
+    process.argv = [
+      process.argv[0], process.argv[1],
+      'sessions', 'list', '--json', '--limit', '50',
+      '--query', 'benchmark the commander root bootstrap and audit hooks in apps/cli/src/index.ts, read the call path end to end, commit a vitest bench beside the source, and propose optimizations from the measured numbers only',
+      '--session', 'ce1e00cb-61dc-4c62-b30e-f053ef6ce990',
+      '--device', 'yosemite-s1',
+      '--cwd', '/home/muqsit/src/github.com/muqsitnawaz/agents-cli',
+    ];
+  });
+  afterAll(() => { process.argv = REAL_ARGV; });
+
+  bench('BASELINE `agents noop`: NO hooks attached. Pure commander dispatch — argv parse, _processArguments, _chainOrCall(action). `_chainOrCallHooks` still runs twice but finds nothing (command.js:1511-1531)', async () => {
+    await UNHOOKED_PROGRAM.parseAsync(['node', 'agents', 'noop']);
+  }, PARSE_OPTS);
+
+  bench('`agents noop` WITH both audit hooks: the same dispatch plus the real preAction+postAction — auditCommandPath ×2, join ×3, WeakMap set/get, redactArgs, TWO real emit() appends, stampProvenance. Delta vs the baseline above IS the audit tax per invocation', async () => {
+    await HOOKED_PROGRAM.parseAsync(['node', 'agents', 'noop']);
+  }, PARSE_OPTS);
+
+  bench('`agents events emit` WITH both hooks — AUDIT_EXEMPT_COMMANDS hit (index.ts:301, 309/329), so both bodies return before emit. Delta vs the baseline isolates the WIRING alone: commander\'s per-dispatch hook assembly + the path walk + the join/Set gate, with zero fs work', async () => {
+    await HOOKED_PROGRAM.parseAsync(['node', 'agents', 'events', 'emit']);
+  }, PARSE_OPTS);
+
+  bench('`agents sessions list` WITH both hooks — depth-2, non-exempt: one more ancestor in commander\'s _getCommandAndAncestors() (command.js:1514) and one more unshift per auditCommandPath call, on top of the same two emits', async () => {
+    await HOOKED_PROGRAM.parseAsync(['node', 'agents', 'sessions', 'list']);
+  }, PARSE_OPTS);
+
+  bench('COUNTERFACTUAL `agents noop` with ONE append: same wiring, preAction\'s emit(command.start) (index.ts:316) folded into the postAction record. Not the shipped path — this row prices dropping one of the two synchronous appends', async () => {
+    await ONE_APPEND_PROGRAM.parseAsync(['node', 'agents', 'noop']);
+  }, PARSE_OPTS);
+});
+
 describe('whole-invocation anchor — real cold `node dist/index.js --version` (the denominator for every row above)', () => {
-  bench('`agents --version` — pays the full eager module graph (index.ts:10-215, 513-524), detectDevBuild (index.ts:113), the program chain (index.ts:243-251), AND the two migration hops that carry no help/version guard: foldLegacySystemRepo (index.ts:1366-1369) and runMigration (index.ts:1389-1391), both gated only by AGENTS_SKIP_MIGRATION, so `await import("./lib/migrate.js")` is inside this number. It skips only checkForUpdates + spawnDetachedSync (index.ts:1322) and ensureInitialized (index.ts:1373-1381)', () => {
+  bench('`agents --version` — pays the full eager module graph (index.ts:10-215, 513-524), detectDevBuild (index.ts:113), the program chain + audit hooks (index.ts:262-371), AND the two migration hops that carry no help/version guard: foldLegacySystemRepo (index.ts:1366-1369) and runMigration (index.ts:1389-1391), both gated only by AGENTS_SKIP_MIGRATION, so `await import("./lib/migrate.js")` is inside this number. It skips only checkForUpdates + spawnDetachedSync (index.ts:1322) and ensureInitialized (index.ts:1373-1381)', () => {
     expectExit(runCli(['--version']), [0], '--version');
   }, { time: 4000, iterations: 15 });
 
