@@ -10702,6 +10702,10 @@
           "description": "Widen every non-status filter to \"all\": every directory (not just this project) and all time (no window cap). Status filters like --active still compose; -a/--device/--since still narrow their axis."
         },
         {
+          "flags": "--bookmarks",
+          "description": "Show only bookmarked sessions — bookmark them with `*` in the browser or `agents sessions bookmark <id>`"
+        },
+        {
           "flags": "--unmanaged",
           "description": "Also show sessions from your own ~/.<agent> installs (hidden once agents-cli manages that agent)"
         },
@@ -10832,10 +10836,6 @@
         {
           "flags": "--unknown",
           "description": "Show sessions whose live state cannot be determined (implies --active)"
-        },
-        {
-          "flags": "--bookmarks",
-          "description": "Show only bookmarked sessions — bookmark them with `*` in the browser or `agents sessions bookmark <id>`"
         },
         {
           "flags": "--tree",
