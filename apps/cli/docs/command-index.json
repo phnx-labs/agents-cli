@@ -1,7 +1,7 @@
 {
   "command": "agents",
-  "groups": 98,
-  "commands": 569,
+  "groups": 99,
+  "commands": 571,
   "tree": [
     {
       "name": "accounts",
@@ -13817,6 +13817,55 @@
         }
       ],
       "subcommands": []
+    },
+    {
+      "name": "update",
+      "path": "update",
+      "aliases": [],
+      "description": "Move a frozen agent installation to a new release, keeping its name and every reference to it",
+      "args": [
+        {
+          "name": "target",
+          "required": false,
+          "variadic": false
+        }
+      ],
+      "options": [
+        {
+          "flags": "--to <release>",
+          "description": "Release to move to: latest (default), oldest, or an exact version"
+        },
+        {
+          "flags": "--account <label>",
+          "description": "Disambiguate by signed-in account when several installations match"
+        },
+        {
+          "flags": "--json",
+          "description": "Machine-readable result"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "list",
+          "path": "update list",
+          "aliases": [],
+          "description": "Show every frozen installation of an agent and the release each carries",
+          "args": [
+            {
+              "name": "agent",
+              "required": true,
+              "variadic": false
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Machine-readable listing"
+            }
+          ],
+          "subcommands": []
+        }
+      ]
     },
     {
       "name": "usage",

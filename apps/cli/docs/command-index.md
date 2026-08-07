@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `upgrade`, `_internal`).
 
-_98 command groups · 569 commands._
+_99 command groups · 571 commands._
 
 ## accounts — Browse and name signed-in harness accounts
 
@@ -1005,6 +1005,13 @@ agents trends tools-per-session  Mix recipe: tools-per-session
 
 ```
 agents uninstall  Completely remove agents-cli and restore your original agent configs. Reverses `agents setup`.
+```
+
+## update — Move a frozen agent installation to a new release, keeping its name and every reference to it
+
+```
+agents update [target]      Move a frozen agent installation to a new release, keeping its name and every reference to it
+agents update list <agent>  Show every frozen installation of an agent and the release each carries
 ```
 
 ## usage — Show rate-limit / quota usage per agent
