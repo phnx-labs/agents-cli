@@ -73,7 +73,7 @@
  * src/index.bench.ts silently sat outside that glob and shipped a stale
  * `@ts-expect-error` (TS2578, unused directive) that no gate caught.
  */
-import { describe, bench } from 'vitest';
+import { describe, bench, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -174,11 +174,17 @@ describe('spawnDetachedSync — real detached child_process.spawn against the bu
  *      path above, exactly as a user's shell invokes it. `--help` is appended
  *      to every invocation so each run exits fast and deterministically
  *      (commander prints help and exits 0) without touching stdin. `--help`
- *      does skip checkForUpdates/spawnDetachedSync (benched above) and
- *      ensureInitialized/runMigration (index.ts:1373-1381, both DO carry a
- *      `!helpOrVersionRequested` guard -- the sibling migration-triad bench in
- *      PR #2277 covers that path), so this isolates the registration/import
- *      cost from those other two hot-path pieces instead of conflating them.
+ *      does skip checkForUpdates/spawnDetachedSync (benched above, guarded by
+ *      `!helpOrVersionRequested` at index.ts:1322) and ensureInitialized
+ *      (index.ts:1373-1378, the only member of the migration triad that
+ *      carries that guard -- the sibling migration-triad bench in PR #2277
+ *      covers that path), so this isolates the registration/import cost from
+ *      those pieces instead of conflating them. It does NOT skip
+ *      foldLegacySystemRepo (index.ts:1366-1369) or runMigration
+ *      (index.ts:1386-1391): both are gated only by the AGENTS_SKIP_MIGRATION
+ *      env var, so a `--help` row still pays their `await import(
+ *      './lib/migrate.js')`. An earlier revision of this docblock claimed
+ *      runMigration was skipped too; it is not.
  *   2. WARM IN-PROCESS REGISTRATION (further below): call the real, exported
  *      command-registry.ts loaders directly -- `(await loadX())(new
  *      Command())` -- for a representative subset. Node's ESM loader caches a
@@ -200,11 +206,35 @@ describe('spawnDetachedSync — real detached child_process.spawn against the bu
  */
 const CLI_ENTRY = path.join(__dirname, '../../dist/index.js');
 
-function runCli(args: string[]): void {
+function runCli(args: string[]): number | null {
   // spawnSync (not execFileSync) so a non-zero exit never throws inside the
   // timed callback -- every arg list below is verified to exit 0 on this
-  // machine, but the bench must stay robust to environment drift.
-  spawnSync(process.execPath, [CLI_ENTRY, ...args], { stdio: 'ignore' });
+  // machine, but the bench must stay robust to environment drift. The status
+  // is RETURNED rather than swallowed so a caller whose row depends on
+  // reaching a specific code path can assert it (see expectExit below);
+  // callers that only need "a real cold process ran" ignore it.
+  return spawnSync(process.execPath, [CLI_ENTRY, ...args], { stdio: 'ignore' }).status;
+}
+
+/**
+ * Assert a `runCli` row actually reached the code path it claims to measure.
+ *
+ * Without this, a row is only ever "a cold node process ran": if the argv
+ * intercept it targets were moved or renamed, commander would take over,
+ * print "unknown command" and exit 1, and the row would keep posting a
+ * plausible number for entirely different work. Same reason coldEval throws.
+ *
+ * Takes a SET of acceptable codes, not one: the intercepted token's exit code
+ * legitimately differs by machine (see the `__secrets-ping` row), and the
+ * property being defended is "the intercept answered", not "it answered with
+ * this specific number".
+ */
+function expectExit(status: number | null, allowed: readonly number[], label: string): void {
+  if (status === null || !allowed.includes(status)) {
+    throw new Error(
+      `${label}: expected exit in {${allowed.join(', ')}}, got ${status} — this row is measuring the wrong path`,
+    );
+  }
 }
 
 describe('registerEagerForRequest / COMMAND_LOADERS — real cold `node dist/index.js <cmd> --help` process spawn (index.ts:1007-1063, 1271-1280)', () => {
@@ -289,7 +319,8 @@ describe('command-registry.ts loaders — warm in-process registration only (mod
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 /** apps/cli of THIS checkout. */
 const CLI_ROOT = path.resolve(__dirname, '../..');
-const DIST_ROOT = path.join(CLI_ROOT, 'dist');
+/** Derived from CLI_ENTRY (declared above) so the two can never disagree. */
+const DIST_ROOT = path.dirname(CLI_ENTRY);
 
 /**
  * A real symlink to the built entry, modelling the npm-global bin shim
@@ -301,10 +332,17 @@ const DIST_ROOT = path.join(CLI_ROOT, 'dist');
  * that prefix is itself a git repo, so every Homebrew-node user was misread as
  * a dev build (dev-build.ts:13-23). A real link, not a fixture: the readlink is
  * a real syscall on a real inode.
+ *
+ * Named per-pid and removed in afterAll: a fixed name races two concurrent
+ * runs of this file into an EEXIST between the rmSync and the symlinkSync
+ * (which, at module scope, kills the whole file), and leaks the link into
+ * tmpdir when the run ends.
  */
-const SHIM_LINK = path.join(os.tmpdir(), 'agents-cli-bench-shim-agents');
-fs.rmSync(SHIM_LINK, { force: true });
-fs.symlinkSync(path.join(DIST_ROOT, 'index.js'), SHIM_LINK);
+const SHIM_LINK = path.join(os.tmpdir(), `agents-cli-bench-shim-agents-${process.pid}`);
+fs.symlinkSync(CLI_ENTRY, SHIM_LINK);
+afterAll(() => {
+  fs.rmSync(SHIM_LINK, { force: true });
+});
 
 /**
  * A real file two levels under a real git repo root — `<repo>/scripts/release.sh`.
@@ -337,7 +375,7 @@ describe('detectDevBuild(process.argv[1], VERSION) — runs unconditionally at i
   });
 
   bench('`node apps/cli/dist/index.js` from this working tree: realpathSync (no link) + ONE existsSync(.git) miss -> false. dirname(dirname(dist/index.js)) is apps/cli, and .git is TWO levels above that, so index.ts:106 case 2 ("running node dist/index.js from a working tree") does not fire in the monorepo layout', () => {
-    detectDevBuild(path.join(DIST_ROOT, 'index.js'), REAL_VERSION);
+    detectDevBuild(CLI_ENTRY, REAL_VERSION);
   });
 
   bench('full path — realpath + existsSync(.git) HIT + existsSync(package.json) HIT + readFileSync + JSON.parse + name compare (dev-build.ts:28-34). The Homebrew-shaped false positive the rewrite rejects', () => {
@@ -354,11 +392,16 @@ describe('detectDevBuild(process.argv[1], VERSION) — runs unconditionally at i
  * the group below spawns the identical shape, so the constant Node floor
  * cancels between rows and (row - FLOOR) is that graph's own load cost.
  *
- * Fails loud on a non-zero exit rather than posting a number for a child that
- * died: a mistyped or moved specifier makes the child exit in less time than
- * the bare-spawn floor, so a swallowed failure would read as the FASTEST row in
- * the table. That is the repo's fail-loud-at-boundaries rule applied to a
- * benchmark — a row that measured nothing must say so.
+ * The throw on a non-zero exit stops a dead child from posting a good number: a
+ * mistyped or moved specifier makes the child exit in LESS time than the
+ * bare-spawn floor, so a swallowed failure would read as the fastest row in the
+ * table. Be precise about how loud that throw actually is, though — measured
+ * under this repo's pinned vitest, a throw inside a `bench` callback does NOT
+ * fail the run: tinybench catches it and the row reports no result (the summary
+ * prints `NaNx faster than …`). So the throw alone buys "no false number", not
+ * "the run fails". `preflightColdImports()` below is what makes it genuinely
+ * loud: it runs each spec list ONCE at module scope, where a throw aborts the
+ * whole bench file before a single sample is taken.
  */
 function coldEval(specs: string[]): void {
   const src = specs.map((s) => `await import(${JSON.stringify(s)});`).join('\n');
@@ -375,21 +418,46 @@ function coldEval(specs: string[]): void {
 const distUrl = (rel: string): string => pathToFileURL(path.join(DIST_ROOT, rel)).href;
 const COLD_OPTS = { time: 3000, iterations: 12 } as const;
 
+const SYNC_COMMANDS_SPEC = distUrl('lib/secrets/sync-commands.js');
+const SECRETS_AGENT_SPEC = distUrl('lib/secrets/agent.js');
+
+/**
+ * Prove every cold-import spec resolves BEFORE any row is timed. Module scope,
+ * not a bench callback, so a bad or moved specifier throws where vitest
+ * actually reports it — the file fails instead of quietly posting `NaN` for
+ * the row that measured nothing.
+ */
+/**
+ * The two exit codes that mean `__secrets-ping` reached the intercept at
+ * index.ts:71-84 and answered: 0 = a live broker replied (darwin, unlocked),
+ * 3 = nothing was listening (agent.ts:1094-1097 returns one or the other).
+ * Anything else — notably commander's unknown-command exit — means the
+ * intercept was missed and the row is timing the wrong path.
+ */
+const PING_EXIT_CODES = [0, 3] as const;
+
+(function preflightColdImports(): void {
+  for (const spec of [SYNC_COMMANDS_SPEC, SECRETS_AGENT_SPEC]) coldEval([spec]);
+  // Same reasoning for the one runCli row whose number is only meaningful if
+  // the index.ts:71-84 intercept was actually reached.
+  expectExit(runCli([SYNC_PING_CMD]), PING_EXIT_CODES, '__secrets-ping preflight');
+})();
+
 describe('the secrets-broker intercept (index.ts:36, 71-84) — what the leaf module buys, measured on both sides', () => {
   bench('FLOOR: bare `node --input-type=module -e ""` — the spawn cost every row below also pays; subtract it', () => {
     coldEval([]);
   }, COLD_OPTS);
 
   bench('lib/secrets/sync-commands.js — the leaf actually imported at index.ts:36. Three exported string constants, zero imports (sync-commands.ts:19-21)', () => {
-    coldEval([distUrl('lib/secrets/sync-commands.js')]);
+    coldEval([SYNC_COMMANDS_SPEC]);
   }, COLD_OPTS);
 
   bench('lib/secrets/agent.js — the graph index.ts:58-61 says binding the tokens from agent.ts would drag in on EVERY invocation. agent.ts:27-44 declares 18 static imports; 17 survive into dist/lib/secrets/agent.js:26-42 (the type-only one at agent.ts:38 is elided), reaching ../state.js, ./install-helper.js, ./session-store.js, ../version.js, ../cli-entry.js, ./lease.js and ./audit.js. NOT on the eager path today; this row is the counterfactual that prices that decision', () => {
-    coldEval([distUrl('lib/secrets/agent.js')]);
+    coldEval([SECRETS_AGENT_SPEC]);
   }, COLD_OPTS);
 
-  bench('the dispatch itself: real cold `node dist/index.js __secrets-ping` (index.ts:71-84). index.ts:44-47 calls this "the hot read path" — readAndResolveBundleEnv is synchronous all the way down, so it cannot await a socket and spawns one of these per read instead, reading the exit code. Off darwin the broker no-ops (agent.ts:23-24) and it exits 3, so this row is the BOOTSTRAP the token dispatch pays before answering, not broker work', () => {
-    runCli([SYNC_PING_CMD]);
+  bench('the dispatch itself: real cold `node dist/index.js __secrets-ping` (index.ts:71-84). index.ts:44-47 calls this "the hot read path" — readAndResolveBundleEnv is synchronous all the way down, so it cannot await a socket and spawns one of these per read instead, reading the exit code. What this row measures is MACHINE-DEPENDENT past the bootstrap: runAgentPingSync (agent.ts:1094-1097) has no darwin gate (the onDarwin check at agent.ts:937-939 is a different function), it just connects — so with no broker listening the connect fails ENOENT, request() resolves null (agent.ts:906-911) and it exits 3 having done no broker work, which is the pure-bootstrap case reported here; on darwin with a live broker the same row exits 0 and additionally carries a real socket round-trip, bounded by SOCKET_PING_TIMEOUT_MS = 700 (agent.ts:113)', () => {
+    expectExit(runCli([SYNC_PING_CMD]), PING_EXIT_CODES, '__secrets-ping');
   }, { time: 4000, iterations: 15 });
 });
 
@@ -410,7 +478,7 @@ describe('root program construction (index.ts:243-251) — commander work every 
 });
 
 describe('whole-invocation anchor — real cold `node dist/index.js --version` (the denominator for every row above)', () => {
-  bench('`agents --version` — pays the full eager module graph (index.ts:10-215, 513-524), detectDevBuild (index.ts:113) and the program chain (index.ts:243-251); skips checkForUpdates + spawnDetachedSync via index.ts:1322 and ensureInitialized + runMigration via index.ts:1377', () => {
+  bench('`agents --version` — pays the full eager module graph (index.ts:10-215, 513-524), detectDevBuild (index.ts:113), the program chain (index.ts:243-251), AND the two migration hops that carry no help/version guard: foldLegacySystemRepo (index.ts:1366-1369) and runMigration (index.ts:1386-1391), both gated only by AGENTS_SKIP_MIGRATION, so `await import("./lib/migrate.js")` is inside this number. It skips only checkForUpdates + spawnDetachedSync (index.ts:1322) and ensureInitialized (index.ts:1373-1378)', () => {
     runCli(['--version']);
   }, { time: 4000, iterations: 15 });
 
