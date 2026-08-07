@@ -1646,39 +1646,17 @@ function parseClaudeOauthPayload(raw: string): ClaudeOauthCredentials | null {
   }
 }
 
-// ── No-ACL cache for Claude's OAuth token (kills the macOS Touch ID storm) ──
+// ── Stale no-ACL Claude OAuth cache eviction (retired subsystem) ──
 //
-// The source item `Claude Code-credentials-<hash>` is ACL-bound to Claude Code's
-// own process, so every read agents-cli makes (via `/usr/bin/security`) pops
-// Touch ID. The Factory watchdog polls `agents view --json` every 60s per agent,
-// and each poll that crosses the 5-minute usage cache fires a background refresh
-// -> loadClaudeOauth -> keychain read -> a biometric prompt. With many agents and
-// accounts that is a prompt every few minutes, per account.
-//
-// Fix: after one real (prompting) read, cache the ACCESS token in a device-local
-// NO-ACL keychain item — the same `set-no-acl` mechanism secrets/session-store.ts
-// uses for unlocked bundles, whose reads never prompt — and serve every later read
-// from it until the token's own `expiresAt`. The ACL read then happens at most once
-// per token lifetime (~a few times a day), shared across every agent process.
-//
-// Security posture: only the short-lived access token is cached, never the refresh
-// token, and the entry dies at the token's expiry (capped below). This mirrors the
-// no-ACL posture session-store.ts already accepts for held bundles.
+// Earlier versions cached Claude's OAuth ACCESS token in a device-local no-ACL
+// keychain item so a read-only usage/probe read wouldn't pop the macOS Touch ID
+// prompt that the ACL-bound source item (`Claude Code-credentials-<hash>`) forces.
+// That cache is retired: read-only probes now authenticate ONLY with a file-based
+// setup-token and never read the interactive login (see loadClaudeOauth), so
+// nothing populates the cache anymore. deleteCachedClaudeOauth remains — a
+// credential rotation still evicts a stale item an earlier version may have
+// written, so an old no-ACL copy of the interactive token can't linger.
 const CLAUDE_OAUTH_CACHE_PREFIX = 'agents-cli.claude-oauth-cache.';
-/** Hard cap so a token with a distant or absent `expiresAt` can't pin a stale entry. */
-const CLAUDE_OAUTH_CACHE_MAX_TTL_MS = 8 * 60 * 60 * 1000;
-
-/** One cached access token, stored as a no-ACL keychain item (prompt-free reads). */
-interface CachedClaudeOauthEntry {
-  accessToken: string;
-  expiresAt?: number | null;
-  scopes?: string[] | null;
-  subscriptionType?: string | null;
-  rateLimitTier?: string | null;
-  organizationUuid?: string | null;
-  /** epoch ms; the entry is dead once Date.now() passes this. */
-  cacheExpiresAt: number;
-}
 
 /** The no-ACL cache item name for a Claude keychain service (hashed to stay tidy). */
 function claudeOauthCacheItem(service: string): string {
@@ -1686,70 +1664,13 @@ function claudeOauthCacheItem(service: string): string {
   return `${CLAUDE_OAUTH_CACHE_PREFIX}${hash}`;
 }
 
-/** Whether the no-ACL cache is meaningful: macOS (where the source read prompts) or
- * whenever a test keychain backend is installed, so the path is exercisable on CI.
- * Off macOS in production the source read is prompt-free, so there is nothing to cache. */
-function claudeOauthCacheActive(): boolean {
-  return process.platform === 'darwin' || isKeychainBackendOverridden();
-}
-
-/** Read the cached access token (prompt-free). Null on miss, or when the cache entry
- * or the token itself has expired — in which case the stale entry is dropped. */
-function readCachedClaudeOauth(service: string): ClaudeOauthCredentials | null {
-  try {
-    // The cache item is written no-ACL (writeCachedClaudeOauth) — its whole purpose is
-    // serving the token prompt-free, so attest that to the raw-read storm guard.
-    const entry = JSON.parse(getKeychainToken(claudeOauthCacheItem(service), { silentNoAcl: true })) as CachedClaudeOauthEntry;
-    if (!entry || typeof entry.accessToken !== 'string' || !entry.accessToken) return null;
-    const now = Date.now();
-    const tokenExpired = typeof entry.expiresAt === 'number' && entry.expiresAt > 0 && now >= entry.expiresAt;
-    if (now >= entry.cacheExpiresAt || tokenExpired) {
-      try {
-        deleteKeychainToken(claudeOauthCacheItem(service));
-      } catch {
-        /* best-effort eviction */
-      }
-      return null;
-    }
-    return {
-      accessToken: entry.accessToken,
-      refreshToken: null,
-      expiresAt: entry.expiresAt ?? null,
-      scopes: entry.scopes ?? null,
-      subscriptionType: entry.subscriptionType ?? null,
-      rateLimitTier: entry.rateLimitTier ?? null,
-      organizationUuid: entry.organizationUuid ?? null,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** Populate the no-ACL cache after a real (prompting) source read. Best-effort — the
- * cache is an optimization, so any failure just means the next read prompts again. */
-function writeCachedClaudeOauth(service: string, creds: ClaudeOauthCredentials): void {
-  if (!creds.accessToken) return;
-  try {
-    const now = Date.now();
-    const cap = now + CLAUDE_OAUTH_CACHE_MAX_TTL_MS;
-    const tokenExp =
-      typeof creds.expiresAt === 'number' && creds.expiresAt > now ? creds.expiresAt : cap;
-    const entry: CachedClaudeOauthEntry = {
-      accessToken: creds.accessToken,
-      expiresAt: creds.expiresAt ?? null,
-      scopes: creds.scopes ?? null,
-      subscriptionType: creds.subscriptionType ?? null,
-      rateLimitTier: creds.rateLimitTier ?? null,
-      organizationUuid: creds.organizationUuid ?? null,
-      cacheExpiresAt: Math.min(tokenExp, cap),
-    };
-    setKeychainToken(claudeOauthCacheItem(service), JSON.stringify(entry), { noAcl: true });
-  } catch {
-    /* best-effort — cache is an optimization */
-  }
-}
-
-/** Evict the no-ACL cache so a source rotation or sign-out is reflected immediately. */
+/**
+ * Evict any no-ACL access-token cache item so a source rotation or sign-out is
+ * reflected immediately. The cache itself is retired — read-only probes no longer
+ * read or write it (loadClaudeOauth returns a file-based setup-token or nothing) —
+ * but this eviction remains so a credential rotation still clears a stale cache
+ * item that an earlier agents-cli version may have written no-ACL.
+ */
 function deleteCachedClaudeOauth(service: string): void {
   try {
     deleteKeychainToken(claudeOauthCacheItem(service));
@@ -1775,29 +1696,30 @@ function deleteCachedClaudeOauth(service: string): void {
  * (run remotely over SSH by `--host`) rendered no usage bars even though the
  * account + plan — read from the plaintext `.claude.json` — showed fine.
  *
- * `opts.accessTokenCache` opts INTO the no-ACL access-token cache (the Touch ID
- * storm fix, see the cache helpers above). It is OFF by default so every caller
- * keeps the full ACL-read credential — the cached copy deliberately omits the
- * refresh token, so callers that refresh (`isClaudeAuthValid` ->
- * `getClaudeAccessToken`) or export the full blob (`readClaudeCredentialsBlob`
- * for Rush Cloud dispatch) must NOT pass it. Only the read-only, high-frequency
- * access-token-only consumers (the usage fetch and the auth-health probe) opt in.
+ * `opts.accessTokenCache` marks a read-only, access-token-only consumer (the
+ * usage fetch and the auth-health probe). Such a caller authenticates ONLY with
+ * a file-based setup-token and, when none is provisioned, gets `null` — it never
+ * reads Claude Code's interactive login (transmitting that ACL-bound OAuth token
+ * to Anthropic's API is what gets it revoked; see the branch body and
+ * docs/design/credential-management.md). It is OFF by default so full-credential
+ * callers that refresh (`isClaudeAuthValid` -> `getClaudeAccessToken`) or export
+ * the full blob (`readClaudeCredentialsBlob` for Rush Cloud dispatch) still read
+ * the interactive login.
  *
- * `opts.fileOnly` (implies access-token-only consumers) skips the ACL keychain
- * read entirely — setup-token, no-ACL cache, and `.credentials.json` only. Used
- * by the daemon usage refresher so a background tick can never pop Touch ID.
+ * `opts.fileOnly` skips the ACL keychain read entirely — setup-token and
+ * `.credentials.json` only. Used by the daemon usage refresher so a background
+ * tick can never pop Touch ID.
  */
 export async function loadClaudeOauth(
   home?: string,
   opts?: { accessTokenCache?: boolean; fileOnly?: boolean }
 ): Promise<ClaudeOauthCredentials | null> {
-  // Read-only usage/probe callers (accessTokenCache) authenticate with a
-  // file-based setup-token when one is provisioned: the usage endpoint accepts
-  // any sk-ant-oat01 bearer, and the token is read from the file-based `auth`
-  // bundle — never Claude Code's ACL-bound keychain item — so it never pops
-  // Touch ID. Transitional: an account with no provisioned setup-token still
-  // falls through to the keychain/file read below (that fallback is removed once
-  // the fleet is fully seeded, per docs/design/credential-management.md).
+  // Read-only usage/probe callers (accessTokenCache) authenticate ONLY with a
+  // file-based setup-token from the `auth` bundle — never Claude Code's
+  // interactive login. The usage endpoint accepts any sk-ant-oat01 bearer, and
+  // the file-based token never pops Touch ID. When no setup-token is provisioned
+  // the probe reports unprovisioned rather than reading the interactive
+  // credential (see below) — that is the whole point of this branch.
   if (opts?.accessTokenCache === true) {
     const setupToken = resolveClaudeSetupToken(home);
     if (setupToken) {
@@ -1807,48 +1729,36 @@ export async function loadClaudeOauth(
       // the source of truth if it has actually been revoked.
       return { accessToken: setupToken };
     }
+    // No provisioned setup-token: a read-only usage/health probe MUST NOT fall
+    // through to Claude Code's interactive login credential. The daemon's usage
+    // (~60s) and auth-health (~3min) warms would otherwise read the ACL-bound
+    // OAuth token and transmit it to api.anthropic.com/api/oauth/usage — an
+    // interactive credential used programmatically, which Anthropic flags and
+    // revokes (the fleet-wide-logout class, RUSH-1822), and which violates the
+    // invariant that the interactive/rotating login is untouchable
+    // (docs/design/credential-management.md). Report unprovisioned (-> probe
+    // token 'missing' -> auth-health 'unconfigured', benign for rotation); seed a
+    // setup-token via the mint-auth path to restore usage/probe for the account.
+    return null;
   }
 
-  // The OS keychain/keyring step is macOS/Linux-only. Windows skips straight
-  // to the .credentials.json fallback — the Claude CLI has no keychain
-  // integration there and stores its OAuth token in that file too. An injected
-  // test backend is the exception: it makes the keychain path exercisable
-  // anywhere, so the platform check must yield to it exactly as the inner
-  // claudeOauthCacheActive() gate does — otherwise this whole block is dead on
-  // a Windows runner and the tests below it read an empty home.
-  //
-  // fileOnly: daemon refresh must never open the ACL-bound item (Touch ID).
-  // It may still read the no-ACL cache item (set-no-acl — prompt-free).
+  // Full-credential callers (isClaudeAuthValid -> getClaudeAccessToken; Rush
+  // Cloud dispatch) legitimately read the interactive login to run/refresh
+  // Claude. The OS keychain/keyring step is macOS/Linux-only; Windows and any
+  // fileOnly caller skip to the .credentials.json read below (the Claude CLI
+  // stores its OAuth token in that file too). An injected test backend makes the
+  // keychain path exercisable anywhere, so the platform check yields to it.
   if (
     !opts?.fileOnly
     && (process.platform === 'darwin' || process.platform === 'linux' || isKeychainBackendOverridden())
   ) {
     const service = getClaudeKeychainService(home);
-    // Serve the no-ACL cache first (opt-in, macOS/test only) so the ACL-gated read
-    // below — the one that pops Touch ID — happens at most once per token lifetime
-    // instead of on every usage refresh. Off unless the caller opts in, because the
-    // cached copy drops the refresh token (see the doc comment above).
-    const cacheActive = opts?.accessTokenCache === true && claudeOauthCacheActive();
-    if (cacheActive) {
-      const cached = readCachedClaudeOauth(service);
-      if (cached) return cached;
-    }
     try {
       const fromKeychain = parseClaudeOauthPayload(getKeychainToken(service));
-      if (fromKeychain) {
-        if (cacheActive) writeCachedClaudeOauth(service, fromKeychain);
-        return fromKeychain;
-      }
+      if (fromKeychain) return fromKeychain;
     } catch {
       // No keychain item, or no reachable keyring (headless Linux) — fall through.
-      // Evict any stale no-ACL cache so a sign-out/deletion isn't masked.
-      if (cacheActive) deleteCachedClaudeOauth(service);
     }
-  } else if (opts?.fileOnly === true && opts?.accessTokenCache === true && claudeOauthCacheActive()) {
-    // fileOnly + accessTokenCache: still allow the no-ACL cache (never Touch ID).
-    const service = getClaudeKeychainService(home);
-    const cached = readCachedClaudeOauth(service);
-    if (cached) return cached;
   }
 
   const credsPath = path.join(home ?? os.homedir(), '.claude', '.credentials.json');
