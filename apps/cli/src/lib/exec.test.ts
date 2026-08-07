@@ -761,3 +761,110 @@ describePosix('tmux env file (no secret VALUE in the process table, RUSH-2100)',
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+// RUSH-2339: `agents run <agent>` on a machine without that harness used to exec a
+// nonexistent binary and die with `sh: 1: exec: cursor-agent: not found` (exit 127),
+// after a "looks logged out" banner that was also wrong. commands/exec.ts probes
+// resolveLaunchBinary before spawning, so this resolver is the whole gate.
+//
+// Driven in a subprocess with a planted temp HOME: the state paths (versions dir,
+// shims dir) are module-eval constants read from process.env.HOME, so an in-process
+// override cannot move them. Same pattern as versions.isolation.integration.test.ts.
+// No mocks — real files on a real PATH.
+describePosix('resolveLaunchBinary — is the harness actually on this machine (RUSH-2339)', () => {
+  let home: string;
+  let pathDir: string;
+
+  /** Plant an executable stub at `file`. */
+  function plantExecutable(file: string): void {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '#!/bin/sh\nexit 0\n');
+    fs.chmodSync(file, 0o755);
+  }
+
+  // Absolute path so the subprocess can be launched with a PATH that deliberately
+  // holds only the planted dir — putting bun's own dir on PATH would smuggle in
+  // whatever else lives beside it.
+  const bunBin = execFileSync('sh', ['-c', 'command -v bun'], { encoding: 'utf-8' }).trim();
+
+  function probe(agent: string, version?: string): string | null {
+    const execPath = path.resolve(process.cwd(), 'src/lib/exec.ts');
+    const script = `
+      import { resolveLaunchBinary } from ${JSON.stringify(execPath)};
+      const r = resolveLaunchBinary(${JSON.stringify(agent)}, ${JSON.stringify(version ?? null)} ?? undefined);
+      console.log('__RESULT__' + JSON.stringify(r));
+    `;
+    const out = execFileSync(bunBin, ['-e', script], {
+      cwd: process.cwd(),
+      env: { ...process.env, HOME: home, PATH: [pathDir, '/usr/bin', '/bin'].join(path.delimiter) },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    }).toString('utf-8');
+    return JSON.parse(out.split('__RESULT__')[1]);
+  }
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'launch-binary-home-'));
+    pathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'launch-binary-path-'));
+    fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+  });
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(pathDir, { recursive: true, force: true });
+  });
+
+  // (a) The managed case: agents-cli owns a version home for this agent.
+  it('resolves the version home binary for a managed install, with nothing on PATH', () => {
+    const binary = path.join(home, '.agents', '.history', 'versions', 'claude', '9.9.9', 'node_modules', '.bin', 'claude');
+    plantExecutable(binary);
+
+    expect(probe('claude', '9.9.9')).toBe(binary);
+  });
+
+  // (b) The self-installed case: Homebrew / `curl | sh` / a distro package put the
+  // harness on PATH and agents-cli manages no version home for it. This is a
+  // SUPPORTED state — a naive `listInstalledVersions(agent).length === 0` guard
+  // would break it, so it must still resolve.
+  it('resolves a manual PATH install that has no version home at all', () => {
+    const binary = path.join(pathDir, 'cursor-agent');
+    plantExecutable(binary);
+    expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'cursor'))).toBe(false);
+
+    expect(probe('cursor')).toBe(binary);
+  });
+
+  // (c) The bug: nothing installed anywhere. Must be null so the caller fails loud
+  // instead of spawning a name that does not resolve and exiting 127.
+  it('returns null when the harness is installed neither as a version home nor on PATH', () => {
+    expect(probe('cursor')).toBeNull();
+    expect(probe('claude')).toBeNull();
+  });
+
+  // (c') A version pinned whose version home is empty is equally not installed —
+  // buildExecCommand would spawn the literal `claude@9.9.9`, which is on no PATH.
+  it('returns null for a pinned version whose version home holds no binary', () => {
+    fs.mkdirSync(path.join(home, '.agents', '.history', 'versions', 'claude', '9.9.9'), { recursive: true });
+
+    expect(probe('claude', '9.9.9')).toBeNull();
+  });
+
+  // (c'') The exact repro shape: the ONLY `cursor-agent` on PATH is our own
+  // dispatcher shim (or a link into the shims dir). A shim is not an install —
+  // counting it would re-create the 127.
+  it('does not count our own dispatcher shim as an install', () => {
+    const shim = path.join(home, '.agents', '.cache', 'shims', 'cursor-agent');
+    plantExecutable(shim);
+    fs.symlinkSync(shim, path.join(pathDir, 'cursor-agent'));
+
+    expect(probe('cursor')).toBeNull();
+  });
+
+  // The version-pinned branch mirrors buildExecCommand, which prefers the
+  // versioned shim over the version home's binary.
+  it('prefers the versioned shim over the version home binary, matching buildExecCommand', () => {
+    const versionedShim = path.join(home, '.agents', '.cache', 'shims', 'claude@9.9.9');
+    plantExecutable(versionedShim);
+    plantExecutable(path.join(home, '.agents', '.history', 'versions', 'claude', '9.9.9', 'node_modules', '.bin', 'claude'));
+
+    expect(probe('claude', '9.9.9')).toBe(versionedShim);
+  });
+});
