@@ -383,6 +383,11 @@ by the session browser, `tab` toggles preview), and a multi-select variant. All
 render a right/bottom **preview pane** built by `buildPreview(session)` in
 `src/commands/sessions-picker.ts` — a header (agent/model/cwd/tokens/ticket/PR) plus
 `formatCompactPreview` (prompt, files/changes, hooks, errors, tests, last response).
+`agents sessions preview <uuid-or-prefix>` uses the same card without the picker.
+ID-shaped selectors go through the indexed fleet resolver, remote cards render on
+their owning peer, and the normalized digest is cached in SQLite against the
+transcript's actual mtime + size. Live status is deliberately outside that durable
+digest and expires after 15 seconds through `session-cache.ts`.
 
 Routing lives in `src/commands/sessions.ts`: `isBareBrowserListing`
 (+`hasNoBrowserDisqualifyingFlags`) gates the bare fleet-wide listing to the rich

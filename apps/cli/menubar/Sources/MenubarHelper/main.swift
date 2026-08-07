@@ -76,6 +76,15 @@ if ProcessInfo.processInfo.environment["MENUBAR_ACTIVE_TEST"] == "1" {
     ActiveSessionSelfTest.run()
 }
 
+// Routine self-test (RUSH-2290): decode the CLI's readiness/failureCode/
+// project-cwd/blocked/skipped fields off a real `routines list --json` row,
+// exercise the pure attention-kind/reason/grouping/action-state helpers those
+// fields drive, and confirm an older payload predating them still decodes.
+// No GUI, no hotkey. See RoutineSelfTest.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_ROUTINE_TEST"] == "1" {
+    RoutineSelfTest.run()
+}
+
 // Everything past here installs the status item and registers the global
 // chords, so it must only run where those chords can actually be serviced.
 // Refuses an ssh-started launch or an unrecognized flag — the two ways a helper

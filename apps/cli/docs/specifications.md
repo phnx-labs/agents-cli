@@ -215,6 +215,13 @@ SSH access (§7); rendering sessions that no harness produced.
   first-prompt `topic`; the picker uses pure regex/heuristic digests
   (`lib/session/digest.ts:1-9`). No preview path may make a network/LLM call or
   block on async I/O.
+
+- **SES-9a (MUST).** `sessions preview <id-or-prefix>` MUST resolve ID-shaped
+  selectors through the SQLite ID index across the selected fleet. A full UUID
+  MAY return on its first exact hit; a short prefix MUST wait for all selected
+  peers and fail closed when any peer is unavailable. Durable preview data MUST
+  be invalidated by the transcript's actual mtime + size. Live status MUST NOT
+  be stored in that durable digest and MUST expire within 15 seconds.
 - **SES-10 (MUST).** A preview string MUST be cleaned of terminal/harness noise
   (OSC titles, CSI/SGR, harness tags, collapsed whitespace) before display
   (`cleanPreview`, `commands/sessions.ts:329-337`), and truncated width-aware
@@ -592,7 +599,7 @@ SSH access (§7); rendering sessions that no harness produced.
   MUST submit the selected row through the same attach/recover decision as
   `sessions focus`. Enter MUST retain its resume behavior. These bindings MUST
   apply to every preview rendered by that browser: ordinary listings, active
-  `--teams`, named `--in-team` lineages (with or without `--teams`), and routine
+  `--teams`, named `--in-team` views (with or without `--teams`), and routine
   listings. The bare grouped `--teams` report MUST remain non-interactive because
   its nested shape is not representable by the flat browser
   (`commands/sessions-browser.ts` `runSessionBrowser`; tests
@@ -664,7 +671,7 @@ SSH access (§7); rendering sessions that no harness produced.
 
 #### 4.1 Command surface
 
-The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
+The command surface (bare `sessions [query]`, `preview`, `tail`, `sync`, `resume`, `focus`,
 `detach`, `attach`, `inject`, `export`, `import`, `migrate`/`relocate`,
 `migrations`, `backfill tools`, `fork`) with flags is the reference in
 [05-sessions.md](05-sessions.md); this spec governs the guarantees behind it.
@@ -2412,15 +2419,83 @@ is not two daemons existing — it is two daemons consuming the **same** input.
   without an owner pin ship with a test that two concurrent fires cannot process
   the same item.
 
+#### 3.2 One daemon per state dir — last-wins takeover, not first-wins refusal
+
+Singularity is scoped to the **state dir** (the daemon dir under `AGENTS_DAEMON_DIR`
+?? `<HOME>/.agents/.cache/helpers/daemon`), NOT the machine: one `HOME` may legitimately
+run many daemons under different state dirs (a developer's daemon, a vitest fixture's
+own `HOME`), and none of them contend. Within ONE state dir, the pid-file claim in
+SING-5 guarantees one scheduler; SING-11/SING-12 fix *which* daemon survives and how the
+loser is torn down, so a second install sharing that state dir can never leave two
+daemons. (RUSH-2352 originally read four `__daemon-run` on one box as four duplicate
+schedulers; adversarial verification refuted that — three ran under separate `HOME`s
+and never shared state. Last-wins is the owner's product decision that a restart replaces
+the previous daemon, deliberately NOT a machine-wide process sweep.)
+
+- **SING-11 (MUST).** At most one daemon MUST be alive per state dir, enforced by
+  **last-wins takeover**: a second `agents __daemon-run` for the same state dir — from
+  ANY install path sharing it, not only the same launch entry — MUST evict the incumbent,
+  never defer to it. The takeover target is the live owner of THIS state dir's pid file
+  (`resolveLiveDaemonPid`) and nothing else — a daemon serving a DIFFERENT state dir
+  (its own `HOME`, a test fixture) MUST be left completely untouched.
+  `claimDaemonInstance` (`lib/daemon.ts`) SIGTERMs the live pid-file owner and MUST
+  wait for it to be provably dead — its graceful `handleShutdown` releasing the
+  browser IPC binding (`await browserIPC.stop()`) and the secrets broker socket
+  (`hostedBroker?.close()`), or a `killTree` escalation (POSITIVE pid, so the kill never
+  reaches the incumbent's detached job children) after the grace window —
+  **before binding any of its own resources**. Binding before the incumbent's
+  release recreates the two-brokers-on-one-socket orphan (`daemon.ts` broker
+  hosting), so the pid file MUST NOT be written until the prior owner is dead.
+  `reapStrayDaemons` (`lib/daemon.ts`) reaps only registrants of THIS state dir's
+  instance registry (`<daemonDir>/instances/`) — because the registry lives inside the
+  daemon dir, a different state dir's daemons register elsewhere and are invisible, so
+  the reaper is state-dir-scoped by construction, never `process.argv[1]`-scoped and
+  never a machine-wide `ps` sweep. This INVERTS the historical first-wins behavior, where
+  the incoming daemon logged `Another daemon already owns the pid file` and exited,
+  leaving the incumbent (however stale) running.
+- **SING-11a (MUST).** In-flight detached routine children (`runner.ts`'s `unref`'d
+  spawns, which run in their own process group and survive daemon death) MUST NOT
+  be killed by takeover — severing a live agent mid-run is worse than a daemon
+  restart. The evicting SIGTERM/`killTree` reaches only the incumbent daemon's pid,
+  never those children, and the new daemon adopts them by construction: its
+  `monitorRunningJobs` (`runner.ts`) reconciles every `running` on-disk run record
+  by pid liveness (`isPidOurs`), never by which daemon spawned it, so a live child
+  is picked back up on the next tick.
+- **SING-12 (MUST).** `stopDaemon` (`lib/daemon.ts`) MUST assert its postcondition,
+  not assume it: after the SIGTERM → grace → `killTree` sequence it MUST verify the
+  browser IPC binding was released, the secrets broker socket was released (a stale
+  socket present on disk but unreachable is the orphan of SING-11 — a still-live
+  standalone broker owning it is a release, not a survivor), and no `__daemon-run`
+  registered for THIS state dir survives — reclaiming any stale socket an ungraceful
+  exit left behind — and it MUST return a structured result naming what released, what
+  survived, and any detached children (which survive deliberately per SING-11a and are
+  reported, never killed). `agents daemon stop` MUST surface that result (human summary
+  plus `--json`) and exit non-zero when a resource could not be released. It MUST NOT
+  report success on an unverified stop (RUSH-2355).
+
 ### 4. Given/When/Then scenarios
 
 - **GIVEN** a session hits its weekly account limit, **WHEN** the daemon watchdog
   tick detects it, **THEN** the daemon alone decides and executes the rotate (or the
   skip) — no UI surface fires a second rotate for the same session.
-- **GIVEN** two daemon processes are alive on one machine, **WHEN** a routine's cron
-  occurrence arrives, **THEN** the pid-file claim ensures exactly one scheduler
-  executes it; the second daemon never runs its own `JobScheduler`
-  (`lib/daemon.ts`).
+- **GIVEN** a daemon already owns the pid file, **WHEN** a second `agents __daemon-run`
+  starts — from the same install or a different one — **THEN** last-wins takeover
+  makes the newcomer the survivor: `claimDaemonInstance` SIGTERMs the incumbent,
+  waits for it to be provably dead (releasing its broker + browser IPC), then binds,
+  so exactly one daemon is ever alive and no two `JobScheduler`s run concurrently
+  (`lib/daemon.ts`, SING-11). The first-wins path where the newcomer exited and left
+  the incumbent running is gone.
+- **GIVEN** the incumbent daemon has an in-flight detached routine child running,
+  **WHEN** takeover evicts that daemon, **THEN** the child survives (a different
+  process in its own group) and the new daemon adopts it via `monitorRunningJobs`
+  pid-liveness reconciliation — takeover never kills a live agent mid-run
+  (SING-11a).
+- **GIVEN** a wedged daemon that ignores SIGTERM, **WHEN** `agents daemon stop` runs,
+  **THEN** stop escalates to `killTree` after the grace window, then VERIFIES the
+  broker socket and browser IPC binding released and no `__daemon-run` survives, and
+  returns a structured result (exit non-zero if any resource could not be released),
+  reporting surviving detached children rather than pretending the tree is clean
+  (SING-12).
 - **GIVEN** a user disables a fleet-affecting capability from the Factory palette,
   **WHEN** the command completes, **THEN** the CLI's config is the state that
   changed (`agents watchdog rotate off`), and the daemon, the menubar, and every

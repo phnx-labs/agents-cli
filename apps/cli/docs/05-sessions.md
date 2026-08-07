@@ -109,6 +109,7 @@ Routine archives (owned by agents-cli, durable):
 
 ```
 agents sessions [query] [--json] [--since 1h] [--all]
+agents sessions preview <uuid-or-8-char-id> [--json] [--local|--device <name>]
            │
            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -132,6 +133,14 @@ agents sessions [query] [--json] [--since 1h] [--all]
 │  4. Emit JSON (--json) or render interactively                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+`sessions preview` performs an indexed ID lookup instead of scanning recent
+history. Full UUIDs may stop on an exact local/remote hit; short prefixes wait
+for every selected peer so collisions are reported. The owning peer renders a
+remote card. Transcript-derived details are stored as normalized JSON in
+`session_preview_cache`, keyed by the source file's mtime and size; live status
+is fetched separately with a 15-second maximum age, so the durable cache cannot
+serve a stale working/waiting state.
 
 Cold run re-parses everything. Warm run is mostly DB-only; a directory whose
 `(mtime, entry_count)` matches the `dir_ledger` is served entirely from the DB
@@ -187,25 +196,56 @@ so an OpenCode row carries the same burn/usage fields as any other harness:
 
 | Field | Source |
 | --- | --- |
-| `input_tokens` · `output_tokens` · `cache_read_tokens` · `cache_write_tokens` · `token_count` | summed from each `message.data`'s `$.tokens.*` (same aggregation the pre-existing `output_tokens` used) |
+| `input_tokens` · `output_tokens` · `cache_read_tokens` · `cache_write_tokens` · `token_count` | summed from each `message.data`'s `$.tokens.*` (same aggregation the pre-existing `output_tokens` used). Newer OpenCode versions also keep `session.tokens_input` / `tokens_output` / `tokens_cache_read` / `tokens_cache_write` rollup columns; on a real database they equal these sums exactly, and the message aggregation is used because it also works on the older schema that predates them |
 | `cost_usd` | the `session.cost` rollup (`0` for a zero-priced provider is a real value) |
 | `model` | `session.model` (JSON `{"id","providerID"}` → the `id`) |
 | `duration_ms` | `session.time_updated − session.time_created` |
-| `tool_call_count` | count of `part` rows whose `$.type = 'tool'` |
+| `tool_call_count` | count of `part` rows whose `$.type = 'tool'` (guarded by `json_valid` — see below) |
 | `recent_directories_touched` | the shared enrichment over `parseOpenCode` events — tool `state.input.filePath` is now preserved (see below) |
 | `todos` | OpenCode's `todo` table, emitted by `parseOpenCode` as one `todo_write` snapshot so the shared `extractTodoProgressFromEvents` derives it uniformly |
 | `worktree_slug` | derived from the session `cwd` (`.agents/worktrees/<slug>/`), same as every harness |
+| `account` | `resolveOpenCodeAccountId` (`agents.ts`) reading `~/.local/share/opencode/auth.json` — the sorted, `+`-joined provider ids that hold a valid credential (`type: 'oauth' \| 'api' \| 'wellknown'` with a non-empty secret field), e.g. `anthropic+muse-spark`. This is the same resolver `agents view`/`agents doctor` use for OpenCode's signed-in state; `auth.json` carries no email, so there is no identity claim to surface beyond the provider list. **Not** `opencode.db`'s `account` / `account_state` / `control_account` tables — on a real, actively-used install (yosemite-s1, 1.16.0, 35 applied migrations) all three are permanently empty, so a lookup against them always returns nothing regardless of login state |
 
 `session.cost` / `session.model` and the `todo` table are newer OpenCode additions —
 the scan probes `PRAGMA table_info(session)` and tolerates a missing `todo` table, so an
 older `opencode.db` still scans (those fields read as null) rather than throwing. The
-tool-part read in `parseOpenCode` truncates **only** `state.output` (via `json_set`),
-not the whole part: the previous `substr(p.data, 1, 2000)` corrupted a large `edit`
-part into invalid JSON and dropped it, losing the tool's `filePath` and leaving
-`recent_directories_touched` empty.
+`todo` read is gated the same way, by a `sqlite_master` probe rather than a catch, so
+"this schema has no `todo` table" is decided by looking, not by catching — a blanket
+catch there reported a locked or corrupt database as an empty checklist. The probe
+counts rows rather than testing an empty `get()` for a sentinel: `node:sqlite` returns
+`undefined` where `bun:sqlite` returns `null`, and both runtimes ship, so a
+sentinel-based probe inverts on one of them and parses every no-`todo` database to zero
+events.
 
-Fields that stay null for OpenCode, by design: `account` (populated only when the local
-`control_account` table holds a signed-in row — empty for a token-less install);
+**The tool-part read is a projection, and it is bounded.** `parseOpenCode` selects a
+tool part down to exactly the fields it consumes — `tool`, `callID`, `state.status`,
+`state.input`, `state.output` — instead of carrying the row whole. Two failure modes it
+has to answer at once:
+
+- *Keep `state.input`.* It holds `filePath` / `command`; losing it is what left
+  `recent_directories_touched` empty when the read truncated the whole part with
+  `substr(p.data, 1, 2000)` (that corrupted large `edit` parts into invalid JSON, so
+  they were dropped entirely).
+- *Stay bounded.* A tool part's weight is **not** in its output. On a real
+  `opencode.db` the largest part is 1,346,068 bytes, of which `state.attachments` — a
+  base64 data URL from `read` — is 1,345,674 and `state.output` is 23. Truncating only
+  `state.output` therefore bounded nothing: one session's loaded tool payload went
+  299,365 → 1,911,209 bytes. The projection drops `attachments` and every other unread
+  key outright, caps `state.output` at 2,000 chars, and collapses a `state.input` over
+  4,000 bytes to just the keys the enrichment reads — `filePath` / `path` for an edit,
+  `cwd` / `workdir` / `working_directory` for a shell, plus `command` / `description`.
+  Above that cap every other input key (an `edit`'s `oldString` / `newString`) is
+  dropped, deliberately: they are recorded nowhere downstream and they are the weight.
+
+**Every `json_extract` is guarded by `json_valid`.** SQLite raises `malformed JSON` on a
+non-JSON value and that aborts the *whole* query, so a single unparseable `part` or
+`message` row anywhere in the shared database would drop **every** OpenCode session from
+the index — silently, since the scanner only reports the error when stderr is a TTY. A
+poisoned row costs that row, not the harness.
+
+Fields that stay null for OpenCode, by design: `account` when `auth.json` is absent or
+holds no valid credential — a genuinely logged-out install, distinguishable from a bug by
+running `agents view opencode` (reports "logged out" from the same resolver);
 `account_key` / `account_org` (Claude-account concepts, `claude-accounts.ts`);
 `cost_usd_nocache` (OpenCode reports one total `cost`, not a per-token no-cache price);
 `git_branch` (not recorded in OpenCode's DB); `ticket_id` (extracted from the raw first

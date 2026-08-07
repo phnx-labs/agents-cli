@@ -158,7 +158,7 @@ describe.skipIf(process.platform === 'win32')('renderSessionPreview --local (RUS
     fs.rmSync(cwd, { recursive: true, force: true });
   });
 
-  it('sanity: `agents sessions --preview <id>` WITHOUT --local still dials the remote-host teammate', async () => {
+  it('an exact local UUID preview does not dial an unrelated remote teammate', async () => {
     const sessionId = crypto.randomUUID();
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'rush2118-preview-cwd-'));
     writeClaudeSession(sessionId, cwd);
@@ -169,7 +169,8 @@ describe.skipIf(process.platform === 'win32')('renderSessionPreview --local (RUS
 
     await renderSessionPreview(sessionId, {});
 
-    expect(sshExecRawMock).toHaveBeenCalled();
+    expect(sshExecMock).not.toHaveBeenCalled();
+    expect(sshExecRawMock).not.toHaveBeenCalled();
     fs.rmSync(cwd, { recursive: true, force: true });
   });
 });

@@ -18,8 +18,10 @@ import { linearIssueUrl } from '../lib/session/linear.js';
 import { extractTodoProgress, WORKTREE_RE } from '../lib/session/state.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { itemPicker } from '../lib/picker.js';
+import { createMemoryCache } from '../lib/memory-cache.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } from '../lib/session/digest.js';
 import { extractArtifacts, extractHooks, extractLinks, extractRepos, extractSkills } from '../lib/session/highlights.js';
+import { getSessionPlugins, readSessionPreviewCache, writeSessionPreviewCache } from '../lib/session/db.js';
 /** A session whose transcript FILE is on another machine (folded in over the
  * live cross-machine fan-out): its `filePath` is on that peer's disk, so the
  * preview can't parse it locally — it shows metadata + a "resume there" note
@@ -123,12 +125,75 @@ export interface SessionPickerConfig {
   linesAbovePrompt?: number;
 }
 
-const previewCache = new Map<string, string>();
+const previewCache = createMemoryCache<string, string>({
+  max: 256,
+  ttlMs: 5 * 60_000,
+});
+
+function previewCacheKey(session: SessionMeta, remote: string | undefined): string {
+  let fileStamp = '';
+  if (!remote && session.filePath) {
+    try {
+      const stat = fs.statSync(session.filePath);
+      fileStamp = `${stat.mtimeMs}:${stat.size}`;
+    } catch {
+      fileStamp = 'missing';
+    }
+  }
+  // The transcript stamp invalidates derived activity. Metadata that can change
+  // independently (label/ticket/PR/live scanner enrichment) also rides the key.
+  return JSON.stringify([
+    remote ?? '', session.id, fileStamp, session.lastActivity, session.label,
+    session.topic, session.ticketId, session.prUrl, session.messageCount,
+    session.tokenCount, session.model, session.todos, session.plan,
+    session.recentDirectoriesTouched, session.skillsUsed,
+  ]);
+}
+
+export function clearPreviewMemoryCacheForTest(): void {
+  previewCache.clear();
+}
+
+export function loadSessionPreviewDigest(session: SessionMeta): {
+  digest?: SessionPreviewDigest;
+  events: SessionEvent[];
+  error?: string;
+} {
+  if (!session.filePath || !fs.existsSync(session.filePath)) return { events: [] };
+  const safe = sanitizeMeta(session);
+  let events: SessionEvent[] = [];
+  let sourceStamp: fs.Stats;
+  try {
+    sourceStamp = fs.statSync(session.filePath);
+  } catch (err: any) {
+    return { events, error: sanitizeForTerminal(err?.message ?? String(err)) };
+  }
+  let digest = readSessionPreviewCache<SessionPreviewDigest>(session.id, {
+    fileMtimeMs: sourceStamp.mtimeMs,
+    fileSize: sourceStamp.size,
+  });
+  if (!digest) {
+    try {
+      events = parseSession(session.filePath, session.agent);
+      digest = buildSessionPreviewDigest(events, safe);
+      writeSessionPreviewCache({
+        id: session.id,
+        fileMtimeMs: sourceStamp.mtimeMs,
+        fileSize: sourceStamp.size,
+        preview: digest,
+      });
+    } catch (err: any) {
+      return { events, error: sanitizeForTerminal(err?.message ?? String(err)) };
+    }
+  }
+  digest.plugins = getSessionPlugins(session.id);
+  return { digest, events };
+}
 
 /** Build a cached multi-line preview string for display in the session picker. */
 export function buildPreview(session: SessionMeta): string {
   const remote = transcriptOnPeerOf(session);
-  const cacheKey = remote ? `${remote}:${session.id}` : session.id;
+  const cacheKey = previewCacheKey(session, remote);
   const cached = previewCache.get(cacheKey);
   if (cached) return cached;
 
@@ -156,18 +221,12 @@ export function buildPreview(session: SessionMeta): string {
     return output;
   }
 
-  let events: SessionEvent[] = [];
-  let parseError: string | undefined;
-  try {
-    events = parseSession(session.filePath, session.agent);
-  } catch (err: any) {
-    parseError = sanitizeForTerminal(err?.message ?? String(err));
-  }
+  const { digest, events, error: parseError } = loadSessionPreviewDigest(session);
 
   const header = formatHeader(safe, events);
   const body = parseError
     ? '  ' + chalk.red(`Failed to parse session: ${parseError}`)
-    : formatCompactPreview(events, safe);
+    : formatCompactPreview(digest!, safe);
   const output = [header, '', body].filter(Boolean).join('\n');
   previewCache.set(cacheKey, output);
   return output;
@@ -406,7 +465,32 @@ const LAST_RESPONSE_MAX_LINES_WITH_TODOS = 8;
 const TODOS_MAX_ITEMS = 5;
 const DIRS_TOUCHED_MAX = 5;
 
-function formatCompactPreview(events: ReturnType<typeof parseSession>, session: SessionMeta): string {
+export interface SessionPreviewDigest {
+  schemaVersion: 1;
+  firstUser: string;
+  lastAssistant: string;
+  filesRead: number;
+  toolCalls: number;
+  planFile: string;
+  todos?: TodoProgress;
+  subAgentCount: number;
+  toolTags: string[];
+  changes: ReturnType<typeof changeCounts>;
+  dirs: string[];
+  repos: string[];
+  artifacts: ReturnType<typeof extractArtifacts>;
+  skills: ReturnType<typeof extractSkills>;
+  plugins: string[];
+  hooks: ReturnType<typeof extractHooks>;
+  links: ReturnType<typeof extractLinks>;
+  errorCount: number;
+  firstError?: string;
+  toolHistogram: ReturnType<typeof toolHistogram>;
+  test: ReturnType<typeof detectTestResult>;
+}
+
+/** Fold a harness-normalized event stream into the stable preview data model. */
+export function buildSessionPreviewDigest(events: SessionEvent[], session: SessionMeta): SessionPreviewDigest {
   let firstUser = '';
   let lastAssistant = '';
   const filesRead = new Set<string>();
@@ -471,9 +555,41 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   // fan-out attached progress but the event stream has no TodoWrite yet.
   const todos: TodoProgress | undefined = latestTodos ?? session.todos;
 
-  // Digest signals folded into the preview: change lifecycle, tool mix, tests.
   const changes = classifyFileChanges(events);
   const chg = changeCounts(changes);
+
+  const errorEvents = events.filter(e => e.type === 'error');
+  return {
+    schemaVersion: 1,
+    firstUser,
+    lastAssistant,
+    filesRead: filesRead.size,
+    toolCalls,
+    planFile,
+    todos,
+    subAgentCount,
+    toolTags: [...toolTags],
+    changes: chg,
+    dirs: directoriesTouched(session, events, changes),
+    repos: extractRepos(events, session.cwd),
+    artifacts: extractArtifacts(changes),
+    skills: extractSkills(events),
+    plugins: getSessionPlugins(session.id),
+    hooks: extractHooks(events),
+    links: extractLinks(events),
+    errorCount: errorEvents.length,
+    firstError: errorEvents[0]?.tool,
+    toolHistogram: toolHistogram(toolCounts, 4),
+    test: detectTestResult(events),
+  };
+}
+
+function formatCompactPreview(digest: SessionPreviewDigest, session: SessionMeta): string {
+  const {
+    firstUser, lastAssistant, filesRead, toolCalls, planFile, todos,
+    subAgentCount, toolTags, changes: chg, dirs, repos, artifacts, skills, plugins,
+    hooks, links, errorCount, firstError, toolHistogram: hist, test,
+  } = digest;
 
   const lines: string[] = [];
   const termWidth = process.stdout.columns || 80;
@@ -501,13 +617,11 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   // Recent activity = directories touched (not raw tool calls). Prefer a
   // parser-supplied dirsTouched when present; else derive from event paths.
   // Width-capped: a long Dirs line used to wrap and swamp the whole pane.
-  const dirs = directoriesTouched(session, events, changes);
   if (dirs.length) {
     lines.push(chalk.cyan('Dirs:    ') + joinWidthCapped(dirs, termWidth - 12));
   }
 
   // Repos worked in (basename of each `.git` root under the touched paths).
-  const repos = extractRepos(events, session.cwd);
   if (repos.length) {
     lines.push(chalk.cyan('Repos:   ') + chalk.white(repos.slice(0, 4).join(chalk.gray(' · '))));
   }
@@ -527,7 +641,7 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
     ].filter(Boolean).join(' ');
     activity.push(`${parts} ${chalk.gray('changed')}`);
   }
-  if (filesRead.size) activity.push(chalk.gray(`${filesRead.size} read`));
+  if (filesRead) activity.push(chalk.gray(`${filesRead} read`));
   if (toolCalls) activity.push(chalk.gray(`${toolCalls} tool${toolCalls === 1 ? '' : 's'}`));
   if (activity.length) {
     lines.push(chalk.cyan('Changes:  ') + activity.join(chalk.gray(' · ')));
@@ -535,7 +649,6 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
 
   // Documents the session produced (`.agents/artifacts|plans|reports`, other
   // *.md/*.html creations) — the files a human browses later, named + clickable.
-  const artifacts = extractArtifacts(changes);
   if (artifacts.length) {
     const shown = artifacts.slice(0, 5).map(a => linkPath(a.path, a.basename));
     const more = artifacts.length > 5 ? chalk.gray(` · +${artifacts.length - 5} more`) : '';
@@ -543,15 +656,17 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   }
 
   // Skills invoked (plugin skills included — they ride the same Skill tool).
-  const skills = extractSkills(events);
   if (skills.length) {
     const shown = skills.slice(0, 5).map(s => chalk.white(s.name) + (s.count > 1 ? chalk.gray(` ×${s.count}`) : ''));
     const more = skills.length > 5 ? chalk.gray(` · +${skills.length - 5} more`) : '';
     lines.push(chalk.cyan('Skills:  ') + shown.join(chalk.gray(' · ')) + more);
   }
 
+  if (plugins.length) {
+    lines.push(chalk.cyan('Plugins: ') + chalk.white(plugins.slice(0, 5).join(chalk.gray(' · '))));
+  }
+
   // Hooks fired (Claude transcripts record firings; other harnesses don't).
-  const hooks = extractHooks(events);
   if (hooks.length) {
     const shown = hooks.slice(0, 4).map(h =>
       chalk.white(h.name) + (h.count > 1 ? chalk.gray(` ×${h.count}`) : '') + (h.failed ? chalk.red(` (${h.failed} failed)`) : ''));
@@ -560,7 +675,6 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   }
 
   // Links mentioned in the conversation — clickable (OSC 8), tracker-classified.
-  const links = extractLinks(events);
   if (links.length) {
     const shown = links.slice(0, 5).map(l => chalk.blue(linkUrl(l.url, l.label)));
     const more = links.length > 5 ? chalk.gray(` · +${links.length - 5} more`) : '';
@@ -568,10 +682,8 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   }
 
   // Error tally, mirroring the full summary's Errors section in one line.
-  const errorEvents = events.filter(e => e.type === 'error');
-  if (errorEvents.length) {
-    const first = errorEvents[0].tool || 'unknown';
-    lines.push(chalk.cyan('Errors:  ') + chalk.red(`${errorEvents.length} failure${errorEvents.length === 1 ? '' : 's'}`) + chalk.gray(` — first: ${first}`));
+  if (errorCount) {
+    lines.push(chalk.cyan('Errors:  ') + chalk.red(`${errorCount} failure${errorCount === 1 ? '' : 's'}`) + chalk.gray(` — first: ${firstError || 'unknown'}`));
   }
 
   const metadata = [
@@ -583,13 +695,11 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   }
 
   // Tool mix (top 4) — what kind of work this was.
-  const hist = toolHistogram(toolCounts, 4);
   if (hist.length) {
     lines.push(chalk.cyan('Tools:    ') + chalk.gray(hist.map(h => `${h.tool} ${h.count}`).join(' · ')));
   }
 
   // Last test/build verdict.
-  const test = detectTestResult(events);
   if (test?.ok) {
     const bits = [
       test.passed !== undefined ? chalk.green(`${test.passed} pass`) : '',

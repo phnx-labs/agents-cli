@@ -22,7 +22,7 @@ import { parseTimeFilter } from './relative-time.js';
 const execFileAsync = promisify(execFile);
 import type { SessionAgentId, SessionEvent, SessionMeta, TodoProgress } from './types.js';
 import type { AgentId } from '../types.js';
-import { AGENTS, agentConfigDirName, getCliVersion } from '../agents.js';
+import { AGENTS, agentConfigDirName, getCliVersion, resolveOpenCodeAccountId } from '../agents.js';
 import { walkForFilesWithStat } from '../fs-walk.js';
 import { hasCommand } from '../cli-resources.js';
 import { execFileShellSpec } from '../platform/exec.js';
@@ -2229,36 +2229,23 @@ const OPENCODE_DB = path.join(HOME, '.local', 'share', 'opencode', 'opencode.db'
 let cachedOpenCodeAccount: string | undefined;
 
 /**
- * Query the active OpenCode account email from its SQLite database.
+ * The active OpenCode account: the provider ids with a valid credential in
+ * `auth.json`, joined (e.g. `"anthropic+muse-spark"`) — see
+ * `resolveOpenCodeAccountId` in `../agents.js`, the single source of truth
+ * `agents view`/`agents doctor` also read.
  *
- * Takes the scan's already-open handle so a scan opens `opencode.db` exactly
- * once (RUSH-2210); opens its own only when called without one.
+ * OpenCode's `opencode.db` also carries `account`/`account_state`/
+ * `control_account` tables that look like the obvious source, but on a real,
+ * actively-used install (yosemite-s1, 1.16.0, 35 applied migrations) all
+ * three are permanently empty — no migration populates them and no session
+ * has ever written a row. Querying them (the pre-fix behavior here) always
+ * returned undefined, credential or not; `auth.json` is what OpenCode
+ * actually reads at runtime.
  */
-function getOpenCodeAccount(handle?: Database.Database): string | undefined {
+function getOpenCodeAccount(): string | undefined {
   if (cachedOpenCodeAccount !== undefined) return cachedOpenCodeAccount || undefined;
-
-  // Read through the node/bun SQLite wrapper (not the `sqlite3` CLI) so this
-  // works on every OS — the CLI is absent on Windows.
-  let owned: Database.Database | undefined;
-  try {
-    const db = handle ?? (fs.existsSync(OPENCODE_DB) ? (owned = new Database(OPENCODE_DB)) : undefined);
-    if (db) {
-      const row = db
-        .prepare('SELECT email FROM control_account WHERE active=1 LIMIT 1;')
-        .get() as { email?: unknown } | undefined;
-      const out = typeof row?.email === 'string' ? row.email.trim() : '';
-      if (out) {
-        cachedOpenCodeAccount = out;
-        return out;
-      }
-    }
-  } catch { /* DB not accessible, sqlite module unavailable, or query failed */ }
-  finally {
-    try { owned?.close(); } catch { /* best-effort close */ }
-  }
-
-  cachedOpenCodeAccount = '';
-  return undefined;
+  cachedOpenCodeAccount = resolveOpenCodeAccountId(HOME) ?? '';
+  return cachedOpenCodeAccount || undefined;
 }
 
 /**
@@ -2350,6 +2337,12 @@ async function scanOpenCodeIncremental(): Promise<void> {
     );
     const costExpr = sessionCols.has('cost') ? 's.cost' : 'NULL';
     const modelExpr = sessionCols.has('model') ? 's.model' : 'NULL';
+    // Every `json_extract` / `json_type` below is guarded by `json_valid`.
+    // SQLite raises "malformed JSON" on a non-JSON value, and that aborts the
+    // WHOLE query — so a single unparseable `part`/`message` row anywhere in the
+    // shared DB would drop EVERY OpenCode session from the index, silently in a
+    // non-TTY run (the handler below only prints when stderr is a TTY). A
+    // poisoned row must cost that row, not the harness.
     const query = `
       SELECT
         s.id AS id,
@@ -2378,7 +2371,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
           session_id,
           MAX(time_created) AS last_part_at,
           SUM(LENGTH(CAST(data AS BLOB))) AS part_bytes,
-          SUM(CASE WHEN json_extract(data, '$.type') = 'tool' THEN 1 ELSE 0 END) AS tool_call_count
+          SUM(CASE WHEN json_valid(data) AND json_extract(data, '$.type') = 'tool' THEN 1 ELSE 0 END) AS tool_call_count
         FROM part
         GROUP BY session_id
       ) parts ON parts.session_id = s.id
@@ -2388,18 +2381,18 @@ async function scanOpenCodeIncremental(): Promise<void> {
           COUNT(*) AS message_count,
           MAX(time_created) AS last_message_at,
           SUM(LENGTH(CAST(data AS BLOB))) AS message_bytes,
-          SUM(
+          SUM(CASE WHEN json_valid(data) THEN
             COALESCE(json_extract(data, '$.tokens.input'), 0) +
             COALESCE(json_extract(data, '$.tokens.output'), 0) +
             COALESCE(json_extract(data, '$.tokens.reasoning'), 0) +
             COALESCE(json_extract(data, '$.tokens.cache.read'), 0) +
             COALESCE(json_extract(data, '$.tokens.cache.write'), 0)
-          ) AS token_count,
-          SUM(COALESCE(json_extract(data, '$.tokens.output'), 0)) AS output_tokens,
-          SUM(COALESCE(json_extract(data, '$.tokens.input'), 0)) AS input_tokens,
-          SUM(COALESCE(json_extract(data, '$.tokens.cache.read'), 0)) AS cache_read_tokens,
-          SUM(COALESCE(json_extract(data, '$.tokens.cache.write'), 0)) AS cache_write_tokens,
-          MAX(CASE WHEN json_type(data, '$.tokens') IS NOT NULL THEN 1 ELSE 0 END) AS has_token_data
+          ELSE 0 END) AS token_count,
+          SUM(CASE WHEN json_valid(data) THEN COALESCE(json_extract(data, '$.tokens.output'), 0) ELSE 0 END) AS output_tokens,
+          SUM(CASE WHEN json_valid(data) THEN COALESCE(json_extract(data, '$.tokens.input'), 0) ELSE 0 END) AS input_tokens,
+          SUM(CASE WHEN json_valid(data) THEN COALESCE(json_extract(data, '$.tokens.cache.read'), 0) ELSE 0 END) AS cache_read_tokens,
+          SUM(CASE WHEN json_valid(data) THEN COALESCE(json_extract(data, '$.tokens.cache.write'), 0) ELSE 0 END) AS cache_write_tokens,
+          MAX(CASE WHEN json_valid(data) AND json_type(data, '$.tokens') IS NOT NULL THEN 1 ELSE 0 END) AS has_token_data
         FROM message
         GROUP BY session_id
       ) stats ON stats.session_id = s.id
@@ -2408,7 +2401,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
       LIMIT 1000;
     `.replace(/\n/g, ' ');
 
-    const account = getOpenCodeAccount(db);
+    const account = getOpenCodeAccount();
     const rows = db.prepare(query).all() as Array<{
       id: unknown;
       title: unknown;

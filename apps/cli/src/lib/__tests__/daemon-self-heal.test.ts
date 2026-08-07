@@ -161,22 +161,30 @@ describe('isDaemonRunning — pid-file/heartbeat desync', () => {
     expect(readDaemonPid()).toBeNull(); // stale pid file cleared, none re-adopted
   });
 
-  it('blocks a second claim when a live daemon lost its pid file (heartbeat still proves it)', () => {
+  it('evicts a live daemon that lost its pid file (heartbeat still proves it) — last-wins (RUSH-2352)', async () => {
     // A real, foreign, live process stands in for the running daemon.
     const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { stdio: 'ignore' });
+    const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
     try {
       expect(child.pid).toBeTruthy();
       // The live daemon's pid file is gone; only its fresh heartbeat remains.
       removeDaemonPid();
       writeHeartbeat(child.pid!);
 
-      // Must refuse — a second claim would run a concurrent JobScheduler and
-      // double-fire every routine.
-      expect(claimDaemonInstance()).toBe(false);
-      // Healed to the live daemon's pid, not this process.
-      expect(readDaemonPid()).toBe(child.pid!);
+      // resolveLiveDaemonPid() must still find it via the heartbeat (so a lost
+      // pid file can't be used to dodge eviction), and claimDaemonInstance()
+      // always wins now: it SIGTERMs the incumbent and claims the pid file for
+      // itself, rather than deferring to it.
+      expect(claimDaemonInstance()).toBe(true);
+      expect(readDaemonPid()).toBe(process.pid);
+      // The evicted incumbent is actually gone, not just out-claimed on paper —
+      // Node's own 'exit' event is the unambiguous signal it is dead.
+      await Promise.race([
+        exited,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('incumbent never exited')), 5000)),
+      ]);
     } finally {
-      child.kill('SIGKILL');
+      try { child.kill('SIGKILL'); } catch { /* already gone */ }
     }
   });
 

@@ -83,6 +83,14 @@ beforeAll(async () => {
   ).run(SESSION_ID, 'finish the thing', 'pending', 'high', 0, T0, T1);
   oc.close();
 
+  // account resolves from auth.json (resolveOpenCodeAccountId), NOT the
+  // control_account table above — that table exists in real installs but is
+  // permanently empty there, so a lookup against it always yields undefined
+  // (RUSH-2358). One valid provider credential proves the real path.
+  const authPath = path.join(tmpHome, '.local', 'share', 'opencode', 'auth.json');
+  fs.mkdirSync(path.dirname(authPath), { recursive: true });
+  fs.writeFileSync(authPath, JSON.stringify({ anthropic: { type: 'api', key: 'sk-test-key' } }));
+
   await discover.discoverSessions({ agent: 'opencode', all: true });
 });
 
@@ -108,6 +116,8 @@ describe('OpenCode field parity (RUSH-2358)', () => {
     expect(s!.model).toBe('claude-x'); // extracted from the JSON model blob
     expect(s!.durationMs).toBe(5000); // time_updated - time_created
     expect(s!.toolCallCount).toBe(2); // two tool parts
+    // account resolves from auth.json's valid credential, not control_account.
+    expect(s!.account).toBe('anthropic');
   });
 
   it('derives Tier-2 fields OpenCode records: recentDirectoriesTouched (survives truncation) and todos', () => {

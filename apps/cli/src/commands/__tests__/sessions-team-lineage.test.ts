@@ -53,7 +53,7 @@ describe('hasNoBrowserDisqualifyingFlags — which views the browser can represe
     }
   });
 
-  it('routes routine previews and a named team lineage through the shared browser', () => {
+  it('routes routine previews and a named team view through the shared browser', () => {
     expect(hasNoBrowserDisqualifyingFlags({ routine: true }, undefined)).toBe(true);
     expect(hasNoBrowserDisqualifyingFlags({ routine: 'nightly-review' }, undefined)).toBe(true);
     expect(hasNoBrowserDisqualifyingFlags({ teams: true, inTeam: 'redesign' }, undefined)).toBe(true);

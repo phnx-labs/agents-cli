@@ -784,7 +784,15 @@ enum IssueSelfTest {
             exitCode: exitCode,
             failureReason: failureReason,
             lastRunStartedAt: "2026-07-20T03:00:00.000Z",
-            lastRunCompletedAt: "2026-07-20T03:00:05.000Z"
+            lastRunCompletedAt: "2026-07-20T03:00:05.000Z",
+            ready: nil,
+            readiness: nil,
+            failureCode: nil,
+            project: nil,
+            requestedCwd: nil,
+            resolvedCwd: nil,
+            skipReason: nil,
+            activeRunId: nil
         )
     }
 }

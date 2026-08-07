@@ -1360,6 +1360,85 @@ export function parseGrok(filePath: string): SessionEvent[] {
   return events;
 }
 
+/**
+ * Byte/char caps for the OpenCode tool-part projection below. Numeric
+ * constants, interpolated into the SQL — never user input.
+ */
+const OPENCODE_OUTPUT_MAX_CHARS = 2000;
+const OPENCODE_INPUT_MAX_BYTES = 4000;
+
+/**
+ * The transcript query {@link parseOpenCode} runs, exported so a test can assert
+ * the projection's real cost against a database instead of re-typing the SQL.
+ *
+ * A tool part is PROJECTED to exactly the fields the `case 'tool'` branch below
+ * reads — `tool`, `callID`, `state.status`, `state.input`, `state.output` —
+ * rather than carried whole. Two things this has to get right at once:
+ *
+ *   - Keep `state.input`. It carries `filePath` / `command`, and losing it is
+ *     what left `recentDirectoriesTouched` empty (RUSH-2358).
+ *   - Stay bounded. A tool part is not bounded by its output: on a real
+ *     `opencode.db` the largest part is 1,346,068 bytes of which
+ *     `state.attachments` (a base64 data URL from `read`) is 1,345,674, while
+ *     `state.output` is 23. Truncating only `state.output` therefore bounded
+ *     nothing — it took one session's loaded tool payload from 299,365 to
+ *     1,911,209 bytes. The projection drops `attachments` (and every other
+ *     unread key) outright, caps `state.output`, and collapses an oversized
+ *     `state.input` to just its addressing fields. Those are the keys the
+ *     enrichment reads — `filePath`/`path` for an edit and `cwd`/`workdir`/
+ *     `working_directory` for a shell (`extractRecentDirectoriesTouched` in
+ *     state.ts), plus `command`/`description`, themselves capped since a command
+ *     can be arbitrarily long. Above the cap every other input key (an `edit`'s
+ *     `oldString`/`newString`) is gone, deliberately — nothing downstream reads
+ *     them, and they are the weight.
+ *
+ * `json_valid` guards every `json_extract`: SQLite raises "malformed JSON" on a
+ * non-JSON value, which aborts the WHOLE query, so one bad `part` row would
+ * otherwise cost the entire transcript. Note the single-argument form is
+ * RFC-8259-strict — it rejects a JSONB blob that `json_extract` would accept.
+ * That is correct for today's schema (`part.data` / `message.data` are TEXT on
+ * a real database); if OpenCode ever migrates them to JSONB, these guards must
+ * move to `json_valid(data, 6)` or they will drop every row.
+ *
+ * The session id is bound as a parameter; the two caps are numeric literals.
+ */
+export const OPENCODE_TRANSCRIPT_QUERY = `
+  SELECT
+    CASE WHEN json_valid(m.data) THEN json_extract(m.data, '$.role') END AS role,
+    CASE WHEN json_valid(p.data) THEN json_extract(p.data, '$.type') END AS part_type,
+    CASE
+      WHEN json_valid(p.data) AND json_extract(p.data, '$.type') = 'tool'
+      THEN json_object(
+        'type', 'tool',
+        'tool', json_extract(p.data, '$.tool'),
+        'callID', json_extract(p.data, '$.callID'),
+        'state', json_object(
+          'status', json_extract(p.data, '$.state.status'),
+          'input', CASE
+            WHEN LENGTH(CAST(COALESCE(json_extract(p.data, '$.state.input'), '') AS BLOB)) > ${OPENCODE_INPUT_MAX_BYTES}
+            THEN json_object(
+              'filePath', json_extract(p.data, '$.state.input.filePath'),
+              'path', json_extract(p.data, '$.state.input.path'),
+              'command', substr(COALESCE(json_extract(p.data, '$.state.input.command'), ''), 1, ${OPENCODE_OUTPUT_MAX_CHARS}),
+              'description', substr(COALESCE(json_extract(p.data, '$.state.input.description'), ''), 1, ${OPENCODE_OUTPUT_MAX_CHARS}),
+              'cwd', json_extract(p.data, '$.state.input.cwd'),
+              'workdir', json_extract(p.data, '$.state.input.workdir'),
+              'working_directory', json_extract(p.data, '$.state.input.working_directory')
+            )
+            ELSE json_extract(p.data, '$.state.input')
+          END,
+          'output', substr(COALESCE(json_extract(p.data, '$.state.output'), ''), 1, ${OPENCODE_OUTPUT_MAX_CHARS})
+        )
+      )
+      ELSE p.data
+    END AS part_data,
+    m.time_created AS time_created
+  FROM message m
+  JOIN part p ON p.message_id = m.id AND p.session_id = m.session_id
+  WHERE m.session_id = ?
+  ORDER BY m.time_created ASC, p.time_created ASC;
+`.replace(/\n/g, ' ');
+
 export function parseOpenCode(filePath: string): SessionEvent[] {
   const { container: dbPath, fragment: sessionId } = splitSessionFilePath(filePath);
   if (!dbPath || !sessionId) return [];
@@ -1376,44 +1455,37 @@ export function parseOpenCode(filePath: string): SessionEvent[] {
   let todoRows: Array<{ content: unknown; status: unknown; time_updated: unknown }> = [];
   let db: Database.Database | undefined;
   try {
-    // Query messages with their parts, ordered chronologically. For tool parts,
-    // truncate ONLY `state.output` (the large blob) via json_set, leaving the
-    // rest of the JSON — crucially `state.input`, which carries `filePath` /
-    // `command` — intact. Truncating the whole part with `substr(p.data,1,2000)`
-    // corrupted large tool parts (e.g. an `edit` with big old/new strings) into
-    // invalid JSON, so they failed to parse and were dropped: the tool's input
-    // path was lost and `recentDirectoriesTouched` could never populate
-    // (RUSH-2358). The session id is bound as a parameter, not interpolated.
-    const query = `
-      SELECT
-        json_extract(m.data, '$.role') AS role,
-        json_extract(p.data, '$.type') AS part_type,
-        CASE
-          WHEN json_extract(p.data, '$.type') = 'tool'
-          THEN json_set(p.data, '$.state.output', substr(COALESCE(json_extract(p.data, '$.state.output'), ''), 1, 2000))
-          ELSE p.data
-        END AS part_data,
-        m.time_created AS time_created
-      FROM message m
-      JOIN part p ON p.message_id = m.id AND p.session_id = m.session_id
-      WHERE m.session_id = ?
-      ORDER BY m.time_created ASC, p.time_created ASC;
-    `.replace(/\n/g, ' ');
-
+    // Messages with their parts, ordered chronologically. The query — and why
+    // the tool part is projected rather than carried whole — is documented on
+    // OPENCODE_TRANSCRIPT_QUERY above.
     db = new Database(dbPath);
-    rows = db.prepare(query).all(sessionId) as Array<{
+    rows = db.prepare(OPENCODE_TRANSCRIPT_QUERY).all(sessionId) as Array<{
       role: unknown;
       part_type: unknown;
       part_data: unknown;
       time_created: unknown;
     }>;
-    // The `todo` table is a newer OpenCode addition; tolerate its absence on an
-    // older schema without failing the whole transcript parse.
-    try {
+    // The `todo` table is a newer OpenCode addition. Probe for it the same way
+    // the scanner probes newer `session` columns, rather than wrapping the read
+    // in a blanket catch — a catch there reported a locked, corrupt, or
+    // permission-denied database as "this session has no todos".
+    //
+    // Row COUNT, not an empty-`get()` sentinel: the two production runtimes
+    // disagree on what `get()` returns for no row — node:sqlite gives
+    // `undefined`, bun:sqlite gives `null` (both ship; see sqlite.ts). A check
+    // written against either sentinel is always-true on the other runtime,
+    // which would run the `todo` SELECT on a schema that has no such table,
+    // throw, and hand the whole transcript to the outer catch — an empty
+    // session, silently, and only in the shipped Bun binary. `.all().length`
+    // cannot express that disagreement.
+    const hasTodoTable = (db
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'todo';`)
+      .all() as unknown[]).length > 0;
+    if (hasTodoTable) {
       todoRows = db
         .prepare('SELECT content, status, time_updated FROM todo WHERE session_id = ? ORDER BY position ASC;')
         .all(sessionId) as Array<{ content: unknown; status: unknown; time_updated: unknown }>;
-    } catch { /* no todo table on this schema version */ }
+    }
   } catch {
     /* DB not accessible, sqlite module unavailable, or query failed */
     return events;

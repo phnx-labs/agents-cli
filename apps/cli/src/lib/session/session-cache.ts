@@ -25,6 +25,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { createMemoryCache } from '../memory-cache.js';
 import { getCacheDir } from '../state.js';
 import type { ActiveSession } from './active.js';
 
@@ -36,15 +37,16 @@ const IMMUTABLE_FILE = '.active-session-immutable.json';
 /**
  * How long a snapshot may be served before a reader re-gathers.
  * Short on purpose: live status (running/idle/waiting) must not go stale.
- * The daemon warm tick uses the same cadence (see {@link SESSION_CACHE_WARM_INTERVAL_MS}).
+ * The daemon warms more frequently than this ceiling so normal readers hit a
+ * fresh snapshot while expiry still forces a live gather after a missed tick.
  */
-export const DEFAULT_ACTIVE_CACHE_MAX_AGE_MS = 4 * 60_000;
+export const DEFAULT_ACTIVE_CACHE_MAX_AGE_MS = 15_000;
 
-/** Daemon warm interval — keep in sync with the setInterval in `lib/daemon.ts`. */
-export const SESSION_CACHE_WARM_INTERVAL_MS = 3 * 60_000;
+/** Daemon warm interval — below the freshness ceiling to avoid an expiry gap. */
+export const SESSION_CACHE_WARM_INTERVAL_MS = 10_000;
 
-/** Kick off the first warm 30s after daemon start (staggered off other ticks). */
-export const SESSION_CACHE_WARM_KICKOFF_MS = 30_000;
+/** Kick off the first warm shortly after daemon start, staggered off bootstrap. */
+export const SESSION_CACHE_WARM_KICKOFF_MS = 5_000;
 
 /** Snapshot scope: this host only, or a fleet-wide merge written by a reader. */
 export type ActiveCacheScope = 'local' | 'fleet';
@@ -63,6 +65,12 @@ interface SnapshotFile {
   version: 1;
   entries: Partial<Record<ActiveCacheScope, ActiveSessionsSnapshot>>;
 }
+
+/** Process-local L1. The atomic snapshot remains the cross-process source. */
+const activeSnapshotMemory = createMemoryCache<ActiveCacheScope, ActiveSessionsSnapshot>({
+  max: 2,
+  ttlMs: DEFAULT_ACTIVE_CACHE_MAX_AGE_MS,
+});
 
 /**
  * Per-session fields that are stable until the transcript changes. Keyed on
@@ -160,7 +168,13 @@ let immutablePathOverride: string | null = null;
 export function setActiveSessionsSnapshotPathForTest(p: string | null): string | null {
   const prev = snapshotPathOverride;
   snapshotPathOverride = p;
+  activeSnapshotMemory.clear();
   return prev;
+}
+
+/** Test seam: isolate process-local entries between fixtures. */
+export function clearActiveSnapshotMemoryForTest(): void {
+  activeSnapshotMemory.clear();
 }
 
 /** Test seam: redirect the immutable-memo file. Returns the previous override. */
@@ -182,11 +196,14 @@ function immutablePath(): string {
 
 /** Read one scope from the snapshot file (best-effort; missing/corrupt → null). */
 export function readActiveSessionsCache(scope: ActiveCacheScope): ActiveSessionsSnapshot | null {
+  const memory = activeSnapshotMemory.get(scope);
+  if (memory) return memory;
   try {
     const parsed = JSON.parse(fs.readFileSync(snapshotPath(), 'utf-8')) as SnapshotFile;
     if (!parsed || parsed.version !== 1 || !parsed.entries) return null;
     const entry = parsed.entries[scope];
     if (!entry || !Array.isArray(entry.sessions) || typeof entry.capturedAt !== 'number') return null;
+    activeSnapshotMemory.set(scope, entry);
     return entry;
   } catch {
     return null;
@@ -225,6 +242,7 @@ export function writeActiveSessionsCache(
     const tmp = `${snapshotPath()}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(body));
     fs.renameSync(tmp, snapshotPath());
+    activeSnapshotMemory.set(scope, snap);
   } catch {
     // best-effort
   }

@@ -17,13 +17,14 @@ import { listJobs as listAllJobs, type JobConfig } from './routines.js';
 import { syncAllProjectRoutines } from './routines-project.js';
 import { JobScheduler } from './scheduler.js';
 import { MonitorEngine } from './monitors/engine.js';
-import { executeJobDetached, monitorRunningJobs } from './runner.js';
+import { executeJobDetached, monitorRunningJobs, listLiveRoutineChildren } from './runner.js';
 import { detectOverdueJobs, notifyOverdue } from './overdue.js';
 import { runCatchup } from './catchup.js';
 import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } from './routine-notify.js';
 import { notifyOwnerRoutineFinish, notifyOwnerRoutineStartFailed } from './routine-notify-owner.js';
 import { BrowserService } from './browser/service.js';
-import { BrowserIPCServer } from './browser/ipc.js';
+import { BrowserIPCServer, getSocketPath as getBrowserIpcSocketPath } from './browser/ipc.js';
+import { secretsBrokerSocketPath, brokerPidAlive } from './secrets/agent.js';
 import { redactSecrets } from './redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
 import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from './device-config.js';
@@ -269,35 +270,78 @@ export function isDaemonRunning(): boolean {
  * writeDaemonPid() unconditionally, clobber a live daemon's recorded PID, and
  * run a second JobScheduler concurrently, so every cron routine fires twice.
  *
- * Returns true and records our PID when no other live daemon owns the pid file;
- * returns false when a live daemon already holds it (the caller must exit
- * without touching any further state). The read-decide-write is serialized
- * behind the same O_EXCL start lock startDaemon() uses, so two _run processes
- * can't both claim in the window between the liveness check and the write.
+ * LAST-WINS takeover (SING-11, RUSH-2352): when a live daemon already owns the
+ * pid file, this does NOT defer to it — it evicts the incumbent and becomes the
+ * survivor, so a second install can never leave two daemons running. Returns true
+ * and records our PID once the incumbent is provably dead (its resources
+ * released). Returns false ONLY when another `__daemon-run` currently holds the
+ * O_EXCL start lock — i.e. a concurrent claimer is mid-takeover and will be the
+ * singleton — in which case the caller must exit without touching further state.
+ * The read-evict-write is serialized behind the same start lock startDaemon()
+ * uses, so two `_run` processes can't both claim in the window between the
+ * liveness check and the write.
  */
 export function claimDaemonInstance(): boolean {
   const release = acquireStartLock();
   // acquireStartLock() returns null only when another __daemon-run currently
   // holds the O_EXCL lock — a dead holder's lock is reclaimed and retried inside
   // acquireStartLock, so null means a *live* claimer is mid-claim. Bail rather
-  // than run the read-decide-write unlocked: otherwise two first-start processes
+  // than run the read-evict-write unlocked: otherwise two first-start processes
   // could each see no pid file (before either writes one) and both claim,
-  // running the concurrent JobScheduler this guard exists to prevent.
+  // running the concurrent JobScheduler this guard exists to prevent. The live
+  // claimer we bailed for becomes the singleton, so last-wins still holds.
   if (!release) return false;
   try {
     // resolveLiveDaemonPid() also consults a fresh heartbeat, so a live daemon
-    // whose pid file was lost still blocks a second claim — otherwise a missing
-    // pid file would let this instance start a concurrent JobScheduler and
-    // double-fire every routine.
+    // whose pid file was lost is still found and evicted — otherwise a missing
+    // pid file would let both this instance AND the orphaned incumbent run a
+    // JobScheduler at once and double-fire every routine.
     const existing = resolveLiveDaemonPid();
     if (existing !== null && existing !== process.pid) {
-      return false; // another live daemon already owns the instance
+      // Evict, and WAIT for the incumbent to be provably dead — its graceful
+      // handleShutdown releasing the browser IPC binding and the secrets broker
+      // socket — before we write our pid and (later, in runDaemon) bind our own.
+      // Binding before the release recreates the two-brokers-on-one-socket orphan
+      // documented at stopDaemon below, so the pid file is not written until the
+      // prior owner is gone.
+      evictIncumbentDaemon(existing);
     }
     writeDaemonPid(process.pid);
     return true;
   } finally {
     release();
   }
+}
+
+/**
+ * SIGTERM a live incumbent daemon and block until it is provably dead, so its
+ * graceful handleShutdown has released the browser IPC binding and the secrets
+ * broker socket BEFORE the newcomer binds anything of its own (SING-11). Escalates
+ * to killTree after the grace window. Passes the POSITIVE pid so the kill reaches
+ * only the incumbent daemon — never its detached routine children, which run in
+ * their own process groups and must survive takeover (SING-11a); the new daemon
+ * re-adopts them via monitorRunningJobs. Synchronous to match claimDaemonInstance's
+ * read-evict-write, which runs under the O_EXCL start lock; mirrors stopDaemon's
+ * grace-then-escalate shape and constants exactly, because the same
+ * proof-of-release requirement applies.
+ */
+function evictIncumbentDaemon(pid: number): void {
+  if (process.platform === 'win32') {
+    // No graceful termination signal on Windows — take the incumbent down and
+    // still wait for the kill to land before the caller binds anything (mirrors
+    // stopDaemon's win32 branch).
+    killTree(pid);
+    waitForExit(pid, STOP_KILL_GRACE_MS);
+    return;
+  }
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    return; // already gone between resolveLiveDaemonPid() and here
+  }
+  if (waitForExit(pid, STOP_GRACE_MS)) return; // graceful release complete
+  killTree(pid); // positive pid: SIGKILL reaches the daemon, not its job children
+  waitForExit(pid, STOP_KILL_GRACE_MS);
 }
 
 /** Directory that registers every live daemon of THIS device (one per daemon dir). */
@@ -490,12 +534,13 @@ export function warnEphemeralDaemonRoot(resolveBin: () => string = getAgentsBinP
 }
 
 export async function runDaemon(): Promise<void> {
-  // Single-instance guard: a direct `agents __daemon-run` (manual, or a
-  // service-manager restart racing a live predecessor) must not clobber a
-  // running daemon's pid file and start a second scheduler.
+  // Single-instance guard (last-wins, SING-11): a direct `agents __daemon-run`
+  // (manual, or a service-manager restart racing a live predecessor) EVICTS the
+  // incumbent and becomes the survivor. claimDaemonInstance returns false only
+  // when a concurrent `__daemon-run` currently holds the start lock — that peer
+  // is mid-takeover and will be the singleton, so this instance stands down.
   if (!claimDaemonInstance()) {
-    const owner = readDaemonPid();
-    log('WARN', `Another daemon already owns the pid file (PID: ${owner}); this instance (PID ${process.pid}) is exiting`);
+    log('WARN', `Another daemon is mid-takeover (holds the start lock); this instance (PID ${process.pid}) is exiting`);
     // Exit cleanly (0) so a service manager treats it as an orderly no-op
     // rather than a failure to restart-flap on.
     process.exit(0);
@@ -1331,9 +1376,68 @@ function waitForPid(timeoutMs: number): number | null {
   return readDaemonPid();
 }
 
-/** Stop the daemon, unloading it from launchd/systemd if applicable. */
-export function stopDaemon(): boolean {
+/**
+ * Structured outcome of {@link stopDaemon} (SING-12, RUSH-2355). `stopDaemon`
+ * asserts its postcondition instead of assuming it: `ok` is true only when every
+ * resource the daemon held is provably released. `surviving` names anything that
+ * did not release (a still-live daemon, or a stale socket that could not be
+ * cleared) and is what drives a non-zero exit; `detachedChildren` are the
+ * in-flight routine children that survive deliberately (SING-11a) and are
+ * reported, never killed.
+ */
+export interface DaemonStopResult {
+  ok: boolean;
+  stoppedPid: number | null;
+  escalated: boolean;
+  released: string[];
+  surviving: string[];
+  detachedChildren: number[];
+}
+
+/**
+ * Live `__daemon-run` processes still registered in THIS state dir's instance
+ * registry, excluding `exclude`. State-dir-scoped by construction: the registry
+ * lives inside this daemon dir, so a daemon serving a DIFFERENT state dir (a test
+ * fixture with its own HOME, a separate install/home) registers elsewhere and is
+ * invisible here — it is never a stop/takeover target. POSIX-only (the registry
+ * and its `ps` liveness probe are); `[]` on Windows.
+ */
+function findSurvivingStateDirDaemons(exclude: Set<number>): number[] {
+  if (process.platform === 'win32') return [];
+  const dir = getDaemonInstancesDir();
+  let entries: string[];
+  try { entries = fs.readdirSync(dir); } catch { return []; }
+  const found: number[] = [];
+  for (const name of entries) {
+    const pid = parseInt(name, 10);
+    if (isNaN(pid) || String(pid) !== name) continue; // not a pid marker
+    if (exclude.has(pid)) continue;
+    if (!isAlive(pid)) continue;            // dead marker — reaper self-heals it
+    if (!isDaemonRunProcess(pid)) continue; // pid reused by an unrelated process
+    found.push(pid);
+  }
+  return found;
+}
+
+/**
+ * Stop the daemon and ASSERT its postcondition (SING-12, RUSH-2355), unloading it
+ * from launchd/systemd if applicable.
+ *
+ * The SIGTERM → grace → killTree sequence is unchanged; what it adds is
+ * verification. After the daemon is gone it checks that the secrets broker socket
+ * and browser IPC binding actually released — a stale socket present on disk but
+ * with no live owner is the orphan that keeps clients holding unlocked bundles
+ * hanging (`daemon.ts` broker-hosting; the two-brokers-on-one-socket bug) — and
+ * that no `__daemon-run` for THIS state dir survives. A killTree escalation exits
+ * without running the daemon's graceful handleShutdown, so those sockets can be
+ * left stale; this reclaims each (the owner is provably dead) and reports it. It
+ * never reports success on an unverified stop.
+ */
+export function stopDaemon(): DaemonStopResult {
   const platform = os.platform();
+  const released: string[] = [];
+  const surviving: string[] = [];
+  let escalated = false;
 
   if (platform === 'darwin') {
     const plistPath = getLaunchdPlistPath();
@@ -1371,6 +1475,7 @@ export function stopDaemon(): boolean {
       // its job/browser child tree in one shot (taskkill /T), so stop doesn't
       // report success while children keep running.
       killTree(pid);
+      escalated = true;
     } else {
       try {
         process.kill(pid, 'SIGTERM');
@@ -1387,13 +1492,67 @@ export function stopDaemon(): boolean {
       // after an install into a second prefix.
       if (!waitForExit(pid, STOP_GRACE_MS)) {
         killTree(pid);
+        escalated = true;
         waitForExit(pid, STOP_KILL_GRACE_MS);
       }
     }
   }
 
   removeDaemonPid();
-  return true;
+
+  // ── Assert the postcondition (SING-12) ────────────────────────────────────
+  // No `__daemon-run` for this state dir may survive the stop.
+  const survivors = findSurvivingStateDirDaemons(new Set([process.pid]));
+  if (pid && process.platform === 'win32' && isAlive(pid) && !survivors.includes(pid)) {
+    survivors.push(pid); // registry is POSIX-only; check the killed pid directly
+  }
+  if (survivors.length > 0) {
+    for (const s of survivors) surviving.push(`__daemon-run pid ${s} still alive`);
+  } else if (pid) {
+    released.push('daemon process');
+  }
+
+  // Browser IPC binding: on POSIX the listening socket is a filesystem object.
+  // A graceful handleShutdown unlinks it; if it survives, the daemon exited
+  // ungracefully (killTree) and left a stale binding — the owner is provably
+  // dead, so reclaim it and report.
+  if (process.platform !== 'win32') {
+    const browserSock = getBrowserIpcSocketPath();
+    if (fs.existsSync(browserSock)) {
+      try { fs.unlinkSync(browserSock); } catch { /* raced with a fresh start */ }
+      if (fs.existsSync(browserSock)) surviving.push('browser IPC socket not released');
+      else released.push('browser IPC socket (reclaimed)');
+    } else {
+      released.push('browser IPC socket');
+    }
+
+    // Secrets broker socket: released when it is gone, or still owned by a
+    // DIFFERENT live broker (a standalone service the daemon never hosted). A
+    // socket present with NO live owner is the orphan — reclaim it.
+    const brokerSock = secretsBrokerSocketPath();
+    if (!fs.existsSync(brokerSock)) {
+      released.push('secrets broker socket');
+    } else if (brokerPidAlive()) {
+      released.push('secrets broker socket (standalone owner)');
+    } else {
+      try { fs.unlinkSync(brokerSock); } catch { /* raced with a fresh bind */ }
+      if (fs.existsSync(brokerSock)) surviving.push('secrets broker socket not released');
+      else released.push('secrets broker socket (reclaimed)');
+    }
+  }
+
+  // In-flight detached routine children survive on purpose (SING-11a) — report,
+  // never kill: severing a live agent mid-run is worse than a daemon restart.
+  const detachedChildren = listLiveRoutineChildren();
+
+  return {
+    ok: surviving.length === 0,
+    stoppedPid: pid,
+    escalated,
+    released,
+    surviving,
+    detachedChildren,
+  };
 }
 
 /** Get current daemon status including running state, PID, and enabled job count. */

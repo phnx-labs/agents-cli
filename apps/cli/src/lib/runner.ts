@@ -1948,6 +1948,47 @@ function finalizeHostRun(meta: RunMeta): void {
   } catch { /* unreachable host or unreadable sidecar — retry next sweep */ }
 }
 
+/**
+ * PIDs of the in-flight detached routine children on THIS device — every local
+ * run record still marked `running` whose spawned process is genuinely alive
+ * (`isPidOurs`, so a dead-and-reused pid does not count). These are the `unref`'d
+ * spawns that survive a daemon exit in their own process group (SING-11a): a
+ * takeover must not kill them and `stopDaemon` reports them rather than pretending
+ * the process tree is clean (SING-12). Scoped to `getRunsDir()`, which is under
+ * this state dir's HOME, so a different state dir's children are invisible here.
+ * `host:`-placed runs have no local pid and are excluded.
+ */
+export function listLiveRoutineChildren(): number[] {
+  const runsDir = getRunsDir();
+  if (!fs.existsSync(runsDir)) return [];
+  const pids: number[] = [];
+  let jobDirs: fs.Dirent[];
+  try {
+    jobDirs = fs.readdirSync(runsDir, { withFileTypes: true }).filter((e) => e.isDirectory());
+  } catch {
+    return pids;
+  }
+  for (const jobDir of jobDirs) {
+    const jobRunsPath = path.join(runsDir, jobDir.name);
+    let runDirs: fs.Dirent[];
+    try {
+      runDirs = fs.readdirSync(jobRunsPath, { withFileTypes: true }).filter((e) => e.isDirectory());
+    } catch {
+      continue;
+    }
+    for (const runDirEntry of runDirs) {
+      const metaPath = path.join(jobRunsPath, runDirEntry.name, 'meta.json');
+      if (!fs.existsSync(metaPath)) continue;
+      try {
+        const meta: RunMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+        if (meta.status !== 'running' || meta.hostTaskId || !meta.pid) continue;
+        if (isPidOurs(meta.pid, meta.spawnedAt)) pids.push(meta.pid);
+      } catch { /* unreadable/partial record — skip */ }
+    }
+  }
+  return pids;
+}
+
 /** Scan all runs marked "running" and finalize any whose process has exited. */
 export function monitorRunningJobs(): void {
   const runsDir = getRunsDir();
