@@ -125,6 +125,21 @@ enum RoutineSelfTest {
         check("a manually paused routine is NOT flagged even if it's also not-ready",
               !routineNeedsAttention(pausedNotReady))
 
+        // The SAME guarantee for the OTHER notReady trigger — a paused
+        // routine whose last (pre-pause) run was blocked must not be flagged
+        // either. Both notReady disjuncts must gate on `enabled` the same way.
+        let pausedBlockedJSON = """
+        {"name":"deploy-web","agent":"codex","schedule":"0 9 * * *","enabled":false,
+         "overdue":false,"lastStatus":"blocked","project":"web",
+         "readiness":{"code":"agent_auth_failed","message":"codex is signed out"}}
+        """
+        guard let pausedBlocked = try? decoder.decode(Routine.self, from: Data(pausedBlockedJSON.utf8)) else {
+            print("FAIL — a paused blocked-status payload failed to decode")
+            exit(1)
+        }
+        check("a manually paused routine is NOT flagged even if its last run was blocked",
+              !routineNeedsAttention(pausedBlocked))
+
         // MARK: Run/Resume gating — RoutineActionState is pure and AppKit-free.
         check("Run is disabled when ready is explicitly false",
               !routineActionState(notReady).runEnabled)
@@ -171,10 +186,30 @@ enum RoutineSelfTest {
         let groups = groupedByAttentionCause([sameCauseA, sameCauseB, failed])
         check("two routines sharing a readiness code collapse into one group",
               groups.contains { $0.0 == "agent_auth_failed" && $0.1.count == 2 })
-        check("a routine with a distinct cause keeps its own group",
-              groups.contains { $0.0 == "failed" && $0.1.count == 1 })
+        // `failed` has no readiness at all, so its cause falls back to its
+        // failureCode ("auth_failed") — a DIFFERENT string from the readiness
+        // code above ("agent_auth_failed") purely by coincidence of this
+        // fixture's naming, so it must still land in its own group, not
+        // silently merge with the readiness-code group.
+        check("a routine with a distinct cause (its own failureCode) keeps its own group",
+              groups.contains { $0.0 == "auth_failed" && $0.1.count == 1 })
         check("readableAttentionCause never invents copy for an unknown code",
               readableAttentionCause("agent_auth_failed") == "agent auth failed")
+
+        // Two routines sharing the same lastStatus ("failed") but DIFFERENT
+        // failureCodes must NOT collapse — the grouping must prefer the more
+        // specific failureCode over the generic status, so it never invents a
+        // shared cause across routines failing for genuinely different reasons.
+        let otherFailureJSON = """
+        {"name":"weekly-fleet-retro","agent":"claude","schedule":"0 6 * * 1","enabled":true,
+         "overdue":false,"lastStatus":"failed","exitCode":1,
+         "failureReason":"disk full","failureCode":"disk_full"}
+        """
+        let otherFailure = try! decoder.decode(Routine.self, from: Data(otherFailureJSON.utf8))
+        let distinctFailureGroups = groupedByAttentionCause([failed, otherFailure])
+        check("routines with the SAME lastStatus but DIFFERENT failureCodes never collapse",
+              distinctFailureGroups.count == 2
+                && distinctFailureGroups.allSatisfy { $0.1.count == 1 })
 
         // MARK: bounded lists — NEEDS YOU attention groups and "All routines…"
         // both cap with a named "+N more" remainder rather than an unbounded

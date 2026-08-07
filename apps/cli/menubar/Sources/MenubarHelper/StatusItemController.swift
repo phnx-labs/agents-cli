@@ -1746,7 +1746,10 @@ enum RoutineAttentionKind: Equatable {
 /// repeated at each call site, so a new status can't be added to some checks
 /// and missed in others.
 func routineAttentionKind(_ r: Routine) -> RoutineAttentionKind? {
-    if r.lastStatus == "blocked" || (r.enabled && r.ready == false) { return .notReady }
+    // Both notReady triggers require `enabled` — a manually paused routine
+    // (enabled == false) needs no attention just because its last attempt was
+    // blocked or its next one would be; the operator already parked it.
+    if r.enabled && (r.lastStatus == "blocked" || r.ready == false) { return .notReady }
     if r.lastStatus == "failed" || r.lastStatus == "timeout" { return .failure }
     if r.lastStatus == "missed" || r.lastStatus == "skipped" || r.overdue { return .miss }
     return nil
@@ -1826,7 +1829,11 @@ func groupedByAttentionCause(_ routines: [Routine]) -> [(String, [Routine])] {
     var order: [String] = []
     var byCause: [String: [Routine]] = [:]
     for r in routines {
-        let cause = r.readiness?.code ?? r.lastStatus ?? "failed"
+        // readiness code first (the most specific signal); failureCode next —
+        // two "failed" routines with different failureCodes must NOT collapse
+        // into one row just because they share a lastStatus; lastStatus is the
+        // last resort, for when neither of the more specific signals exists.
+        let cause = r.readiness?.code ?? r.failureCode ?? r.lastStatus ?? "failed"
         if byCause[cause] == nil { order.append(cause) }
         byCause[cause, default: []].append(r)
     }
