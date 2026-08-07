@@ -292,11 +292,21 @@ failed, so the next `teams add` with the same `--worktree` name died on
   (`AgentManager.validateAddPreconditions`), so a duplicate name, an unknown
   dependency, or a cycle never gets as far as making a branch.
 - **Torn down if it fails afterward.** A failure past that point — the harness CLI
-  missing, a launch error, a cloud dispatch failure — removes the worktree *and*
-  its `agents/<name>` branch before the command exits non-zero. Only a worktree
-  that same add created is removed, so a teammate already recorded and waiting on
-  an `--after` dependency is never touched. If the teardown itself fails, the
-  command prints the exact `git worktree remove` / `git branch -D` pair to run.
+  missing, a launch error, a cloud dispatch failure, or a `git worktree add` that
+  created the branch ref but not the checkout — removes the worktree *and* its
+  `agents/<name>` branch before the command exits non-zero.
+
+Teardown is scoped twice, because removing a live teammate's worktree would
+destroy real work rather than protect a retry:
+
+| Guard | Why |
+|---|---|
+| Only a worktree **this add created** | A shared `--use-worktree` checkout and a `--device` teammate's remote worktree are never candidates — this add didn't create either. |
+| Only when **no persisted record claims it** (`AgentManager.hasPersistedWorktree`) | The add can fail *after* the record is durably saved: `spawn()` writes a staged teammate's `meta.json` and only then runs the retention pass, which refreshes every sibling's status and can throw on a distributed one. That teammate exists and is merely pending its `--after` dependency, so it keeps its worktree. |
+
+If we cannot prove a worktree is an orphan, it is left in place and the command
+prints the exact `git worktree remove` / `git branch -D` pair to run — a stranded
+branch is recoverable, a deleted worktree is not.
 
 Either way the add exits non-zero with the real error and never prints a success
 block, and re-running the same command with the same name works.

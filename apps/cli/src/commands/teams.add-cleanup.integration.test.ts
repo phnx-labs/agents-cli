@@ -95,7 +95,21 @@ describe.skipIf(process.platform === 'win32' || !BUN || !WHICH)(
     });
 
     afterEach(() => {
-      fs.rmSync(tmp, { recursive: true, force: true });
+      // A successful add launches a REAL teammate process under this HOME and
+      // the CLI warms its own state there, so files keep appearing under `tmp`
+      // while a recursive delete walks it — a single rmSync loses that race with
+      // ENOTEMPTY (observed on CI). Retry, then give up quietly: this is an OS
+      // temp dir, and failing teardown must never be reported as a failed test.
+      for (let attempt = 0; attempt < 10; attempt++) {
+        try {
+          fs.rmSync(tmp, { recursive: true, force: true });
+          return;
+        } catch {
+          // Busy-wait briefly without async: afterEach must stay synchronous here.
+          const until = Date.now() + 100;
+          while (Date.now() < until) { /* spin */ }
+        }
+      }
     });
 
     function runCli(args: string[]): { status: number; out: string } {
@@ -145,9 +159,11 @@ describe.skipIf(process.platform === 'win32' || !BUN || !WHICH)(
 
       // --- the retry, same name ---------------------------------------------
       // Drop a real `claude` executable in so the add can get past the
-      // availability pre-flight. It only has to survive being launched.
+      // availability pre-flight. It only has to be spawnable — `teams add`
+      // records and launches it, then returns; it deliberately exits at once so
+      // no child outlives the test and races the temp-dir teardown.
       const stub = path.join(binDir, 'claude');
-      fs.writeFileSync(stub, '#!/bin/sh\nsleep 10\n');
+      fs.writeFileSync(stub, '#!/bin/sh\nexit 0\n');
       fs.chmodSync(stub, 0o755);
 
       const retry = runCli([
@@ -180,6 +196,17 @@ describe.skipIf(process.platform === 'win32' || !BUN || !WHICH)(
       expect(rejected.out).toContain("has no teammate named 'nobody'");
       expect(branches()).not.toContain('agents/second');
       expect(fs.existsSync(path.join(repo, '.agents', 'worktrees', 'second'))).toBe(false);
+
+      // The end state above is ALSO what created-then-cleaned-up looks like, so
+      // it alone would not catch validation sliding back inside spawn(). These
+      // two do. The pre-worktree check dies via `add-precondition-failed` with
+      // the raw validation message; a failure from inside spawn() comes back
+      // through the add's own catch, wrapped in `Could not add <agent> to <team>:`.
+      expect(rejected.out).not.toContain('Could not add');
+      // And the branch was never created, not created-and-deleted: a deleted
+      // branch leaves its creation in the repo's reflog, a never-created one
+      // has no reflog at all.
+      expect(() => git(repo, ['reflog', 'show', 'agents/second'])).toThrow();
     }, 120_000);
   },
 );

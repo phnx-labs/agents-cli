@@ -151,3 +151,89 @@ describe('retention never reaps a non-terminal teammate (RUSH-2356)', () => {
     expect(reread?.status).toBe(AgentStatus.PENDING);
   });
 });
+
+/**
+ * The failed-`teams add` teardown must remove an ORPHAN worktree and nothing
+ * else. `spawn()` saves a staged teammate's record and only THEN runs the
+ * retention pass, which refreshes every sibling and can throw on a distributed
+ * one — so a throw out of `spawn()` does not imply "nothing was written". Were
+ * teardown unconditional, that persisted, pending `--after` teammate would lose
+ * its worktree and branch: real work destroyed by the cleanup meant to protect
+ * the retry. `hasPersistedWorktree` is the check that tells the two apart.
+ */
+describe('hasPersistedWorktree distinguishes an orphan worktree from a live teammate (RUSH-2356)', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+  });
+
+  it('true for a PENDING --after teammate that persisted — its worktree is never torn down', async () => {
+    const base = tmpBase();
+    dirs.push(base);
+
+    const staged = new AgentProcess(
+      'staged-1', 'wt-team', 'claude', 'do a thing', null, 'plan',
+      null, AgentStatus.PENDING, new Date(), null, base,
+      null, null, null, null, null, null, null, 'surface', ['first'],
+      null, null, null, null, null, null, 'surface',
+    );
+    await staged.saveMeta();
+    // Guard the fixture itself: a constructor-arg slip would silently make the
+    // assertion below vacuous.
+    expect((await AgentProcess.loadFromDisk('staged-1', base))?.worktreeName).toBe('surface');
+
+    const mgr = new AgentManager(50, base);
+    expect(await mgr.hasPersistedWorktree('wt-team', 'surface')).toBe(true);
+  });
+
+  it('false when no record claims it — a genuine orphan, safe to tear down', async () => {
+    const base = tmpBase();
+    dirs.push(base);
+
+    // A sibling that owns a DIFFERENT worktree, and one in another team that
+    // owns the same name — neither makes 'surface' in 'wt-team' claimed.
+    const other = new AgentProcess(
+      'other-1', 'wt-team', 'claude', 'do a thing', null, 'plan',
+      null, AgentStatus.PENDING, new Date(), null, base,
+      null, null, null, null, null, null, null, 'ui', [],
+      null, null, null, null, null, null, 'ui',
+    );
+    await other.saveMeta();
+    const otherTeam = new AgentProcess(
+      'other-2', 'different-team', 'claude', 'do a thing', null, 'plan',
+      null, AgentStatus.PENDING, new Date(), null, base,
+      null, null, null, null, null, null, null, 'surface', [],
+      null, null, null, null, null, null, 'surface',
+    );
+    await otherTeam.saveMeta();
+
+    const mgr = new AgentManager(50, base);
+    expect(await mgr.hasPersistedWorktree('wt-team', 'surface')).toBe(false);
+  });
+
+  it('reads raw meta.json, so it still answers when a sibling would fail a status refresh', async () => {
+    const base = tmpBase();
+    dirs.push(base);
+
+    const staged = new AgentProcess(
+      'staged-2', 'wt-team', 'claude', 'do a thing', null, 'plan',
+      null, AgentStatus.PENDING, new Date(), null, base,
+      null, null, null, null, null, null, null, 'surface', ['first'],
+      null, null, null, null, null, null, 'surface',
+    );
+    await staged.saveMeta();
+
+    // A record that is not valid JSON — the shape a partial write leaves, and
+    // the shape that makes a listAll()-based check throw. The scan must skip it
+    // and still find the real record.
+    const brokenDir = path.join(base, 'broken-1');
+    fs.mkdirSync(brokenDir, { recursive: true });
+    fs.writeFileSync(path.join(brokenDir, 'meta.json'), '{ "task_name": "wt-t');
+    // ...and a directory with no meta.json at all.
+    fs.mkdirSync(path.join(base, 'empty-1'), { recursive: true });
+
+    const mgr = new AgentManager(50, base);
+    expect(await mgr.hasPersistedWorktree('wt-team', 'surface')).toBe(true);
+    expect(await mgr.hasPersistedWorktree('wt-team', 'nothing-claims-this')).toBe(false);
+  });
+});

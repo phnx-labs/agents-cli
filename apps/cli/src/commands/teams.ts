@@ -363,6 +363,22 @@ function mkManager(): AgentManager {
 }
 
 /**
+ * Tell the user a worktree from a failed `teams add` is still on disk, and give
+ * them the exact commands to remove it. Reached only when we could not remove it
+ * ourselves — a leftover `agents/<name>` branch is what makes the retry fail with
+ * `fatal: a branch ... already exists`, so it must never be silent (RUSH-2356).
+ */
+function warnOrphanWorktree(baseCwd: string, name: string, reason: string): void {
+  process.stderr.write(
+    chalk.yellow(
+      `\nWarning: the worktree '${name}' from this failed add is still on disk — ${reason}.\n` +
+        `  Remove it manually: git -C ${baseCwd} worktree remove --force .agents/worktrees/${name} ` +
+        `&& git -C ${baseCwd} branch -D agents/${name}\n`,
+    ),
+  );
+}
+
+/**
  * Register the generic cloud dispatcher — staged cloud teammates get
  * dispatched when their --after deps resolve, using repo/branch stored on
  * the teammate itself so we don't need the original --cloud CLI args.
@@ -1768,7 +1784,9 @@ export function registerTeamsCommands(program: Command): void {
       // Validate name uniqueness + --after deps BEFORE creating a worktree
       // (RUSH-2356): a rejected add must not leave an orphan `agents/<name>`
       // branch that then breaks the retry with `fatal: a branch ... already
-      // exists`. spawn() re-validates, so this is a fast fail, not the authority.
+      // exists`. spawn() calls the same method, which memoizes this result for
+      // exactly one consumer — so validation still lives in one place without
+      // paying for a second sibling status refresh on the way there.
       try {
         await mgr.validateAddPreconditions(team, opts.name ?? null, after);
       } catch (err) {
@@ -1784,17 +1802,27 @@ export function registerTeamsCommands(program: Command): void {
         if (!createdWorktree) return;
         const { baseCwd, name } = createdWorktree;
         createdWorktree = null;
+
+        // The add can also fail AFTER the record is durably saved — spawn()
+        // writes a staged teammate's meta.json and only then runs the retention
+        // pass, which refreshes every sibling's status and can throw on a
+        // distributed one. That teammate EXISTS and is merely pending its
+        // `--after` dependency, so removing its worktree would destroy real
+        // work. Only tear down when no persisted record claims this worktree.
+        try {
+          if (await mgr.hasPersistedWorktree(team, name)) return;
+        } catch {
+          // Can't prove it's an orphan. Deleting a live teammate's worktree is
+          // unrecoverable; a leftover branch is not — so leave it and print the
+          // manual removal below rather than guess.
+          warnOrphanWorktree(baseCwd, name, 'the teammate record could not be read');
+          return;
+        }
+
         try {
           await removeWorktree(baseCwd, name);
         } catch (cleanupErr) {
-          process.stderr.write(
-            chalk.yellow(
-              `\nWarning: could not remove the orphaned worktree '${name}' after the failed add: ` +
-                `${(cleanupErr as Error).message}\n` +
-                `  Remove it manually: git -C ${baseCwd} worktree remove --force .agents/worktrees/${name} ` +
-                `&& git -C ${baseCwd} branch -D agents/${name}\n`,
-            ),
-          );
+          warnOrphanWorktree(baseCwd, name, (cleanupErr as Error).message);
         }
       };
 
@@ -1849,6 +1877,16 @@ export function registerTeamsCommands(program: Command): void {
           worktreePath = await createWorktree(baseCwd, worktreeName);
           createdWorktree = { baseCwd, name: worktreeName };
         } catch (err) {
+          // `git worktree add -b` can fail PART WAY — the branch ref created,
+          // the checkout not — which strands `agents/<name>` in exactly the way
+          // that breaks the retry. Nothing is recorded yet at this point, so a
+          // best-effort teardown here is unambiguously safe.
+          try {
+            await removeWorktree(baseCwd, opts.worktree);
+          } catch {
+            // Nothing to remove (the common case: the add failed before git
+            // wrote anything), or we can't. Either way the real error below wins.
+          }
           dieFriction('teams', 'worktree-create-failed', `Failed to create worktree '${opts.worktree}': ${(err as Error).message}`);
         }
       } else if (opts.worktree) {
@@ -1893,16 +1931,21 @@ export function registerTeamsCommands(program: Command): void {
       if (cloudProviderId && !isStaged) {
         // Ready to run now: dispatch to the cloud provider before registering
         // the teammate so we have the remote session id up front.
-        const prov = resolveProvider(cloudProviderId);
-        const dispatchOpts: DispatchOptions = {
-          prompt: effectiveTask,
-          agent,
-          repo: opts.repo,
-          branch: opts.branch,
-          model: opts.model,
-          env: shareRuntimeEnv(),
-        };
+        //
+        // resolveProvider() and shareRuntimeEnv() are INSIDE the try on purpose:
+        // both read config (the cloud registry; `agents.yaml`'s share block) and
+        // both throw on a malformed one, and by this point the worktree already
+        // exists — leaving them outside stranded the branch with no catch at all.
         try {
+          const prov = resolveProvider(cloudProviderId);
+          const dispatchOpts: DispatchOptions = {
+            prompt: effectiveTask,
+            agent,
+            repo: opts.repo,
+            branch: opts.branch,
+            model: opts.model,
+            env: shareRuntimeEnv(),
+          };
           const cloudTask = await prov.dispatch(dispatchOpts);
           cloudSessionId = cloudTask.id;
         } catch (err) {

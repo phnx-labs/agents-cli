@@ -330,8 +330,10 @@ export function registerMessageCommand(program: Command): void {
           // task through an SSH reroute that can only fail, instead of
           // reporting it finished here.
           const onDisk = resolveTaskRef(target);
-          const healed = onDisk ? (reconcileRunningTasks([onDisk])[0] ?? onDisk) : null;
-          const hostRoute = decideHostTaskRoute(healed, target);
+          const hostRoute = decideHostTaskRoute(
+            onDisk ? reconcileRunningTasks([onDisk])[0] : null,
+            target,
+          );
           if (hostRoute.kind === 'reroute') {
             await deliverViaHostReroute(hostRoute, text, opts);
             return;

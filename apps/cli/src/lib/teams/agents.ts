@@ -1544,6 +1544,14 @@ export class AgentManager {
 
   private constructorAgentsDir: string | null = null;
 
+  /**
+   * One-shot memo of the last `validateAddPreconditions` result, so the
+   * command-layer pre-worktree call and spawn()'s own call don't each pay a
+   * full `listAll()` status refresh (a round of SSH probes on a `--device`
+   * team). Consumed by the first matching call — see that method.
+   */
+  private validatedAdd: { key: string; cleanAfter: string[] } | null = null;
+
   constructor(
     maxAgents: number = 50,
     agentsDir: string | null = null,
@@ -1717,6 +1725,15 @@ export class AgentManager {
    * worktree — a rejected add must not leave an orphan `agents/<name>` branch
    * that then breaks the retry with `fatal: a branch ... already exists`
    * (RUSH-2356). spawn() calls it too, so validation lives in exactly one place.
+   *
+   * The result is cached for exactly ONE subsequent call with the same
+   * arguments, which spawn() then consumes. `listByTask()` → `listAll()`
+   * refreshes every sibling's status, and on a `--device` team that is a full
+   * round of SSH liveness probes — running it twice per `teams add` would
+   * double that cost for no gain, since the second pass reads the same snapshot
+   * and cannot catch anything the first missed. The cache is single-use so any
+   * later spawn (a `teams start --watch` supervisor launching staged teammates)
+   * still validates against fresh state and still rejects a duplicate name.
    */
   async validateAddPreconditions(
     taskName: string,
@@ -1724,6 +1741,12 @@ export class AgentManager {
     after: string[],
   ): Promise<string[]> {
     await this.initialize();
+    const key = JSON.stringify([taskName, name, after]);
+    if (this.validatedAdd?.key === key) {
+      const cached = this.validatedAdd.cleanAfter;
+      this.validatedAdd = null; // single use
+      return cached;
+    }
     const siblings = await this.listByTask(taskName);
     if (name && siblings.some((a) => a.name === name)) {
       throw new Error(
@@ -1758,7 +1781,42 @@ export class AgentManager {
         }
       }
     }
+    this.validatedAdd = { key, cleanAfter };
     return cleanAfter;
+  }
+
+  /**
+   * Does a durably-persisted record for `taskName` already claim `worktreeName`?
+   *
+   * A RAW disk scan — no status probing, no cache, no `listAll()`. The caller is
+   * the `teams add` failure path, where the manager's own status refresh can be
+   * the very thing that threw (`cleanupOldAgents()` → `listAll()` →
+   * `updateStatusFromProcess()` runs AFTER the staged record is saved), so any
+   * check that re-enters that machinery would throw again and answer nothing.
+   *
+   * `teams add` uses it to tell the two failure shapes apart before removing
+   * anything: no record → the worktree is a genuine ORPHAN and is torn down;
+   * a record → the teammate DID persist (it is merely pending on an `--after`
+   * dependency) and its worktree must never be touched (RUSH-2356).
+   */
+  async hasPersistedWorktree(taskName: string, worktreeName: string): Promise<boolean> {
+    const base = this.agentsDir ?? (await getAgentsDir());
+    let entries: string[];
+    try {
+      entries = await fs.readdir(base);
+    } catch {
+      return false; // no agents dir at all → nothing persisted
+    }
+    for (const entry of entries) {
+      try {
+        const raw = await fs.readFile(path.join(base, entry, 'meta.json'), 'utf-8');
+        const meta = JSON.parse(raw);
+        if (meta?.task_name === taskName && meta?.worktree_name === worktreeName) return true;
+      } catch {
+        continue; // unreadable/partial record — not proof of anything
+      }
+    }
+    return false;
   }
 
   async spawn(
