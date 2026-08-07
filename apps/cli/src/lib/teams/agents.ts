@@ -1324,6 +1324,14 @@ export class AgentProcess {
       // "RUNNING without a PID is impossible" fail path below.
       if (this.hostName) {
         if (opts.skipRemote) return;
+        // Staged (--after) distributed teammates also have hostName set but no
+        // PID yet (RUSH-2356 sibling bug): without this guard the `!== RUNNING`
+        // fallback below stamps a completedAt on a teammate that hasn't even
+        // launched, which the age-based reap in loadExistingAgents() would
+        // later delete outright once it aged past cleanupAgeDays. Leave it
+        // alone until startReady() launches it — matches the local-only guard
+        // further below.
+        if (this.status === AgentStatus.PENDING) return;
         await this.readNewEvents();
         if (this.status !== AgentStatus.RUNNING && !this.completedAt) {
           this.completedAt = this.getLatestEventTime() || this.startedAt || new Date();
@@ -1337,6 +1345,9 @@ export class AgentProcess {
       // Cloud-backed teammates have no local PID by design; their lifecycle
       // is driven by the remote provider instead of a local process.
       if (this.cloudProvider) {
+        // Same staged-teammate guard as the hostName branch above — a staged
+        // cloud teammate is PENDING with no PID until its deps resolve.
+        if (this.status === AgentStatus.PENDING) return;
         if (!this.completedAt && this.status !== AgentStatus.RUNNING) {
           const fallbackCompletion =
             this.getLatestEventTime() || this.startedAt || new Date();
@@ -1658,7 +1669,13 @@ export class AgentManager {
       const agent = await AgentProcess.loadFromDisk(agentId, this.agentsDir);
       if (!agent) continue;
 
-      if (agent.completedAt && agent.completedAt < cutoffDate) {
+      // Age-based reap is a SECOND retention mechanism, independent of
+      // cleanupOldAgents()'s cap-based one — and must obey the same invariant
+      // (RUSH-2356): a non-terminal teammate is never a reap candidate,
+      // however old its (possibly spuriously stamped) completedAt is. Belt and
+      // suspenders alongside the PENDING guards above that stop completedAt
+      // from getting set on a staged teammate in the first place.
+      if (agent.completedAt && agent.completedAt < cutoffDate && isTerminalStatus(agent.status)) {
         try {
           await fs.rm(agentDir, { recursive: true });
           cleanedOld++;

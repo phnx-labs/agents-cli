@@ -113,4 +113,41 @@ describe('retention never reaps a non-terminal teammate (RUSH-2356)', () => {
     const all = await mgr.listAll();
     expect(all.filter((a) => a.status === AgentStatus.COMPLETED)).toHaveLength(50);
   });
+
+  it('the age-based reap (loadExistingAgents) also never deletes a non-terminal record, even a stale one', async () => {
+    const base = tmpBase();
+    dirs.push(base);
+
+    // A staged --after teammate that has sat PENDING for 30 days — well past
+    // the default 7-day cleanupAgeDays window — with a completedAt that
+    // should never have been set on a non-terminal record in the first place
+    // (the sibling bug updateStatusFromProcess's PENDING guards fix), but
+    // this reap must be independently safe even if one somehow got stamped.
+    const stalePending = new AgentProcess(
+      'stale-pending', 'age-team', 'claude', 'do a thing', null, 'plan',
+      null, AgentStatus.PENDING, new Date(Date.now() - 30 * 86_400_000),
+      new Date(Date.now() - 30 * 86_400_000), base,
+      null, null, null, null, null, null, null, 'staged', ['someone'],
+    );
+    await stalePending.saveMeta();
+
+    // A genuinely old COMPLETED record — this one SHOULD be reaped.
+    const staleCompleted = new AgentProcess(
+      'stale-completed', 'age-team', 'claude', 'do a thing', null, 'plan',
+      null, AgentStatus.COMPLETED, new Date(Date.now() - 30 * 86_400_000),
+      new Date(Date.now() - 30 * 86_400_000), base,
+    );
+    await staleCompleted.saveMeta();
+
+    // Constructing the manager runs loadExistingAgents(), which performs the
+    // age-based reap synchronously before this call resolves.
+    const mgr = new AgentManager(50, base, undefined, undefined, 7);
+    await mgr.listAll();
+
+    expect(fs.existsSync(path.join(base, 'stale-pending'))).toBe(true);
+    expect(fs.existsSync(path.join(base, 'stale-completed'))).toBe(false);
+
+    const reread = await AgentProcess.loadFromDisk('stale-pending', base);
+    expect(reread?.status).toBe(AgentStatus.PENDING);
+  });
 });

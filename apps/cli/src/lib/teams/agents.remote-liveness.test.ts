@@ -142,4 +142,38 @@ describe('remote GONE detection — a killed --device teammate resolves terminal
 
     expect(all[0].status).toBe(AgentStatus.RUNNING);
   });
+
+  // RUSH-2356 sibling bug: a staged (--after) DISTRIBUTED teammate has
+  // hostName set but no PID (it hasn't launched yet). Without an explicit
+  // PENDING guard, updateStatusFromProcess's `!== RUNNING` fallback stamped a
+  // completedAt on it — which the age-based reap in loadExistingAgents() would
+  // later use to delete it outright, once it aged past cleanupAgeDays, despite
+  // never having started. The mirror-local guard (`if PENDING return`) that
+  // already protected a local staged teammate now protects the remote one too.
+  it('a staged (--after) distributed teammate is left untouched — no ssh call, no completedAt stamped', async () => {
+    const base = tmpBase();
+    dirs.push(base);
+    const id = 'remote-staged';
+    const agent = new AgentProcess(
+      id, 'dist-team', 'claude', 'do a thing',
+      null, 'plan', null, AgentStatus.PENDING, new Date(), null, base,
+      null, null, null, null, null, null, null, 'staged', ['someone-else'],
+    );
+    agent.hostName = 'yosemite-s0';
+    agent.hostTarget = 'yosemite-s0.tail1a85a1.ts.net';
+    agent.remotePid = null as unknown as number; // never launched — no remote pid yet
+    await agent.saveMeta();
+
+    const mgr = new AgentManager(50, base);
+    const all = await mgr.listAll();
+
+    expect(all[0].status).toBe(AgentStatus.PENDING);
+    expect(all[0].completedAt).toBeNull();
+    expect(sshExecMock).not.toHaveBeenCalled();
+    expect(sshExecRawMock).not.toHaveBeenCalled();
+
+    const reread = await AgentProcess.loadFromDisk(id, base);
+    expect(reread?.status).toBe(AgentStatus.PENDING);
+    expect(reread?.completedAt).toBeNull();
+  });
 });
