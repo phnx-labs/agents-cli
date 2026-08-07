@@ -2826,6 +2826,28 @@ export function registerRunCommand(program: Command): void {
         }
       }
 
+      // The harness may simply not be on this machine. The self-heal above only
+      // runs when a managed version resolved, so with nothing installed we used
+      // to fall through and spawn the bare `cliCommand`, which dies as
+      // `exec: cursor-agent: not found` (exit 127) after a misleading
+      // "looks logged out" banner (RUSH-2339). Probe the executable
+      // buildExecCommand will actually spawn and fail loud instead.
+      //
+      // This is an EXISTENCE probe, not "does agents-cli manage a version". A
+      // harness the user installed themselves (Homebrew, a vendor `curl | sh`, a
+      // distro package) has no version home and MUST still launch — the PATH
+      // branch of resolveLaunchBinary is what keeps that working.
+      {
+        const { resolveLaunchBinary } = await import('../lib/exec.js');
+        const launchVersion = version ?? resolveVersion(agent, cwd) ?? undefined;
+        if (!resolveLaunchBinary(agent, launchVersion)) {
+          const target = launchVersion ? `${agent}@${launchVersion}` : agent;
+          console.error(chalk.red(`agents: ${target} is not installed on this machine.`));
+          console.error(chalk.yellow(`Install it with: agents add ${launchVersion ? target : agent}`));
+          process.exit(1);
+        }
+      }
+
       const defaultVersion = version ?? resolveVersion(agent, cwd);
 
       // Re-apply the active rules preset before every launch (issue: preset

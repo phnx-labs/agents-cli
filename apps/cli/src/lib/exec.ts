@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId, Mode } from './types.js';
 import { ALL_MODES } from './types.js';
-import { AGENTS } from './agents.js';
+import { AGENTS, findInPath } from './agents.js';
 import { parseTimeout } from './routines.js';
 import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled, resolveVersion } from './versions.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
@@ -892,6 +892,38 @@ export function nativeResume(agent: AgentId, version?: string): boolean {
  */
 export function codexWritableRootsConfig(dir: string): string {
   return `sandbox_workspace_write.writable_roots=[${JSON.stringify(dir)}]`;
+}
+
+/**
+ * Resolve the executable `buildExecCommand` will put in `cmd[0]`, or null when
+ * that resolution finds nothing on disk.
+ *
+ * This is an EXISTENCE probe, not an "is it managed by us" check. A harness the
+ * user installed themselves (Homebrew, a vendor `curl | sh`, a distro package)
+ * has no version home at all, and running it is a supported state — so with no
+ * version pinned we answer with a PATH lookup of the bare launch command, the
+ * same thing `spawnAgent` would resolve. `findInPath` skips our own shims dir,
+ * so a dispatcher shim we planted for an absent harness is not mistaken for an
+ * install.
+ *
+ * The version-pinned branch mirrors buildExecCommand exactly: versioned shim
+ * first, then the version home's real binary. It deliberately does NOT fall back
+ * to PATH — with a version pinned, buildExecCommand spawns the literal
+ * `<cli>@<version>`, which is not on PATH, so a PATH hit here would be a lie
+ * that still exits 127.
+ */
+export function resolveLaunchBinary(agent: AgentId, version?: string): string | null {
+  const command = AGENT_COMMANDS[agent].base[0];
+  if (version) {
+    const versionedShim = path.join(getShimsDir(), `${command}@${version}`);
+    if (process.platform === 'win32' && fs.existsSync(versionedShim + '.cmd')) {
+      return versionedShim + '.cmd';
+    }
+    if (fs.existsSync(versionedShim)) return versionedShim;
+    const binary = getBinaryPath(agent, version);
+    return binary && fs.existsSync(binary) ? binary : null;
+  }
+  return findInPath(command);
 }
 
 /** Assemble the full CLI argument array for an agent invocation. */
