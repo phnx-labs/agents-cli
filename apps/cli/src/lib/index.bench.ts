@@ -89,7 +89,14 @@ import {
   findAgentsCliInstalls,
   resolveRunningPackageRoot,
 } from './self-update.js';
-import { getUpdateCheckPath, readMeta } from './state.js';
+import {
+  getAgentsDir,
+  getLegacySystemAgentsDir,
+  getMigratedSentinelPath,
+  getUpdateCheckPath,
+  readMeta,
+} from './state.js';
+import { isGitRepo } from './git.js';
 import { installMenubarLaunchAgentOnUpgrade } from './menubar/install-menubar.js';
 import {
   resolveBrandName,
@@ -107,6 +114,10 @@ import { loadDoctor, loadVersions, loadPrune, loadSessions } from './startup/com
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPDATE_CHECK_FILE = getUpdateCheckPath();
 const REAL_PATH = process.env.PATH || '';
+const SYSTEM_DIR = getAgentsDir();
+const LEGACY_SYSTEM_DIR = getLegacySystemAgentsDir();
+const MIGRATED_SENTINEL_FILE = getMigratedSentinelPath();
+const MIGRATION_SENTINEL_VALUE = 'v17';
 
 describe('checkForUpdates — maybeWarnMultiInstall (index.ts:535-575): the PATH + known-install-root scan', () => {
   bench('resolveRunningPackageRoot(__dirname) — real path math, no fs walk when not a bunfs virtual path (self-update.ts:177)', () => {
@@ -437,10 +448,24 @@ const COLD_OPTS = { time: 3000, iterations: 12 } as const;
 
 const SYNC_COMMANDS_SPEC = distUrl('lib/secrets/sync-commands.js');
 const SECRETS_AGENT_SPEC = distUrl('lib/secrets/agent.js');
+const DEV_BUILD_SPEC = distUrl('lib/startup/dev-build.js');
+const SELF_UPDATE_SPEC = distUrl('lib/self-update.js');
+const COMMAND_REGISTRY_SPEC = distUrl('lib/startup/command-registry.js');
+const HELP_SPEC = distUrl('lib/help.js');
+const WHATS_NEW_SPEC = distUrl('lib/whats-new.js');
+const PLATFORM_SPEC = distUrl('lib/platform/index.js');
+const CLI_ENTRY_SPEC = distUrl('lib/cli-entry.js');
+const EVENTS_SPEC = distUrl('lib/events.js');
+const EVENT_PROVENANCE_SPEC = distUrl('lib/event-provenance.js');
+const FORMAT_SPEC = distUrl('lib/format.js');
+const VIEW_COMMAND_SPEC = distUrl('commands/view.js');
+const DOCTOR_COMMAND_SPEC = distUrl('commands/doctor.js');
+const SESSIONS_COMMAND_SPEC = distUrl('commands/sessions.js');
 const MENUBAR_INSTALL_SPEC = distUrl('lib/menubar/install-menubar.js');
 const BRAND_SPEC = distUrl('lib/brand.js');
 const AGENTS_REGISTRY_SPEC = distUrl('lib/agents.js');
 const VERSIONS_SPEC = distUrl('lib/versions.js');
+const PRIMITIVES_SPEC = distUrl('lib/agent-spec/primitives.js');
 const STATE_SPEC = distUrl('lib/state.js');
 const TYPES_SPEC = distUrl('lib/types.js');
 
@@ -453,19 +478,19 @@ const TYPES_SPEC = distUrl('lib/types.js');
  * is excluded here (it gets its own row in the group above instead).
  */
 const EAGER_MINUS_BRAND = [
-  'startup/dev-build.js',
-  'secrets/sync-commands.js',
-  'self-update.js',
-  'startup/command-registry.js',
-  'help.js',
-  'whats-new.js',
-  'platform/index.js',
-  'cli-entry.js',
-  'events.js',
-  'event-provenance.js',
-  'format.js',
-  'state.js',
-].map((p) => distUrl(`lib/${p}`));
+  DEV_BUILD_SPEC,
+  SYNC_COMMANDS_SPEC,
+  SELF_UPDATE_SPEC,
+  COMMAND_REGISTRY_SPEC,
+  HELP_SPEC,
+  WHATS_NEW_SPEC,
+  PLATFORM_SPEC,
+  CLI_ENTRY_SPEC,
+  EVENTS_SPEC,
+  EVENT_PROVENANCE_SPEC,
+  FORMAT_SPEC,
+  STATE_SPEC,
+];
 const EAGER_WITH_BRAND = [...EAGER_MINUS_BRAND, BRAND_SPEC];
 
 /**
@@ -489,10 +514,24 @@ const PING_EXIT_CODES = [0, 3] as const;
   for (const spec of [
     SYNC_COMMANDS_SPEC,
     SECRETS_AGENT_SPEC,
+    DEV_BUILD_SPEC,
+    SELF_UPDATE_SPEC,
+    COMMAND_REGISTRY_SPEC,
+    HELP_SPEC,
+    WHATS_NEW_SPEC,
+    PLATFORM_SPEC,
+    CLI_ENTRY_SPEC,
+    EVENTS_SPEC,
+    EVENT_PROVENANCE_SPEC,
+    FORMAT_SPEC,
+    VIEW_COMMAND_SPEC,
+    DOCTOR_COMMAND_SPEC,
+    SESSIONS_COMMAND_SPEC,
     MENUBAR_INSTALL_SPEC,
     BRAND_SPEC,
     AGENTS_REGISTRY_SPEC,
     VERSIONS_SPEC,
+    PRIMITIVES_SPEC,
     STATE_SPEC,
     TYPES_SPEC,
   ])
@@ -502,9 +541,12 @@ const PING_EXIT_CODES = [0, 3] as const;
   // spec at a time.
   coldEval(EAGER_MINUS_BRAND);
   coldEval(EAGER_WITH_BRAND);
+  coldEval([EVENTS_SPEC, EVENT_PROVENANCE_SPEC, FORMAT_SPEC]);
+  coldEval([...EAGER_WITH_BRAND, VIEW_COMMAND_SPEC]);
   // Same reasoning for the one runCli row whose number is only meaningful if
   // the index.ts:71-84 intercept was actually reached.
   expectExit(runCli([SYNC_PING_CMD]), PING_EXIT_CODES, '__secrets-ping preflight');
+  expectExit(runCli(['--version']), [0], '--version preflight');
 })();
 
 describe('the secrets-broker intercept (index.ts:36, 71-84) — what the leaf module buys, measured on both sides', () => {
@@ -811,4 +853,139 @@ describe('resolveBrandName() / disabledCommandsForActiveBrand() — warm in-proc
   bench('readMeta() alone, warm — the exact hop the branded row above pays (state.ts:1124), isolated from brand.ts\'s own dispatch so its warm cache-hit cost (state.ts:1127-1134) can be read on its own', () => {
     readMeta();
   });
+});
+
+/**
+ * Startup package metadata (index.ts:30-34). These top-level statements run
+ * before either argv intercept can exit. The in-process rows decompose the real
+ * read and parse; the existing cold `__secrets-ping` and `--version` rows above
+ * are the end-to-end process anchors, and both assert their child exit status.
+ */
+const PACKAGE_JSON_PATH = path.join(CLI_ROOT, 'package.json');
+const PACKAGE_JSON_RAW = fs.readFileSync(PACKAGE_JSON_PATH, 'utf-8');
+
+describe('startup package.json read + parse (index.ts:30-34)', () => {
+  bench('fs.readFileSync(packageJsonPath, "utf-8") — the real apps/cli/package.json', () => {
+    fs.readFileSync(PACKAGE_JSON_PATH, 'utf-8');
+  });
+
+  bench('JSON.parse(already-read package.json) — parse cost without the filesystem read', () => {
+    JSON.parse(PACKAGE_JSON_RAW);
+  });
+
+  bench('readFileSync + JSON.parse + .version — the complete top-level metadata statement', () => {
+    const pkg = JSON.parse(fs.readFileSync(PACKAGE_JSON_PATH, 'utf-8')) as { version?: unknown };
+    void pkg.version;
+  });
+});
+
+/**
+ * The settled-install work represented by index.ts:1394-1446, without invoking
+ * either mutating entry point. Calling foldLegacySystemRepo() could rename or
+ * remove the live legacy tree; calling ensureInitialized() can prompt, exit, or
+ * run setup. The rows therefore execute only the exact non-mutating probes those
+ * functions use on the steady path, against paths from state.ts.
+ */
+function probeLegacySystemRepo(): void {
+  try {
+    fs.lstatSync(LEGACY_SYSTEM_DIR);
+  } catch {
+    // An absent legacy directory is the normal post-fold state.
+  }
+}
+
+function probeMigrationSentinel(): void {
+  if (
+    fs.existsSync(MIGRATED_SENTINEL_FILE) &&
+    fs.readFileSync(MIGRATED_SENTINEL_FILE, 'utf-8').trim() === MIGRATION_SENTINEL_VALUE
+  ) {
+    // needRun = false; the mutating migration sweep stays outside this bench.
+  }
+}
+
+describe('settled init/migration probes (index.ts:1394-1446) — non-mutating startup work', () => {
+  bench('legacy fold probe — lstat(getLegacySystemAgentsDir()) + ENOENT catch (index.ts:1401-1405)', () => {
+    probeLegacySystemRepo();
+  });
+
+  bench('system-repo readiness probe — isGitRepo(getAgentsDir()), the settled branch used before setup (index.ts:1408-1416)', () => {
+    isGitRepo(SYSTEM_DIR);
+  });
+
+  bench('v17 migration sentinel gate — existsSync + readFileSync + trim, without runMigration (index.ts:1424-1446)', () => {
+    probeMigrationSentinel();
+  });
+
+  bench('all settled probes — legacy lstat + system-repo existsSync + v17 sentinel read', () => {
+    probeLegacySystemRepo();
+    isGitRepo(SYSTEM_DIR);
+    probeMigrationSentinel();
+  });
+});
+
+/**
+ * Individual eager imports complement EAGER_MINUS_BRAND/EAGER_WITH_BRAND above.
+ * Every row uses coldEval, so a fresh Node process pays real module evaluation;
+ * every spec is also exercised once by preflightColdImports at module scope.
+ */
+describe('eager startup module graph — selected cold import contributors', () => {
+  bench('FLOOR: bare Node ESM process', () => {
+    coldEval([]);
+  }, COLD_OPTS);
+
+  bench('startup/dev-build.js — index.ts:16', () => {
+    coldEval([DEV_BUILD_SPEC]);
+  }, COLD_OPTS);
+
+  bench('startup/command-registry.js — index.ts eager loader table', () => {
+    coldEval([COMMAND_REGISTRY_SPEC]);
+  }, COLD_OPTS);
+
+  bench('events.js + event-provenance.js + format.js — eager hook support graph', () => {
+    coldEval([EVENTS_SPEC, EVENT_PROVENANCE_SPEC, FORMAT_SPEC]);
+  }, COLD_OPTS);
+
+  bench('commands/view.js — representative command module after eager bootstrap', () => {
+    coldEval([VIEW_COMMAND_SPEC]);
+  }, COLD_OPTS);
+
+  bench('commands/doctor.js — representative diagnostics module after eager bootstrap', () => {
+    coldEval([DOCTOR_COMMAND_SPEC]);
+  }, COLD_OPTS);
+
+  bench('commands/sessions.js — representative SQLite-backed command module', () => {
+    coldEval([SESSIONS_COMMAND_SPEC]);
+  }, COLD_OPTS);
+
+  bench('eager graph then commands/view.js — real shared-cache shape for one command', () => {
+    coldEval([...EAGER_WITH_BRAND, VIEW_COMMAND_SPEC]);
+  }, COLD_OPTS);
+});
+
+/**
+ * self-update.js is a static index.ts import. Its compareVersions dependency is
+ * owned by the zero-dependency agent-spec/primitives.js leaf but can also arrive
+ * through versions.js. These rows price the real built graphs; they do not
+ * infer a production refactor or duplicate a child-process helper.
+ */
+describe('eager self-update import graph — cold module evaluation', () => {
+  bench('FLOOR: bare Node ESM process', () => {
+    coldEval([]);
+  }, COLD_OPTS);
+
+  bench('agent-spec/primitives.js — compareVersions owner', () => {
+    coldEval([PRIMITIVES_SPEC]);
+  }, COLD_OPTS);
+
+  bench('platform/index.js — self-update platform dependency', () => {
+    coldEval([PLATFORM_SPEC]);
+  }, COLD_OPTS);
+
+  bench('self-update.js — exact eager module imported by index.ts', () => {
+    coldEval([SELF_UPDATE_SPEC]);
+  }, COLD_OPTS);
+
+  bench('versions.js — heavy comparison graph reached by the legacy re-export edge', () => {
+    coldEval([VERSIONS_SPEC]);
+  }, COLD_OPTS);
 });
