@@ -979,10 +979,11 @@ await (async function preflightAuditDispatch(): Promise<void> {
   await HOOKED_PROGRAM.parseAsync(['node', 'agents', 'sessions', 'list']);
   await HOOKED_PROGRAM.parseAsync(['node', 'agents', 'events', 'emit']);
   await UNHOOKED_PROGRAM.parseAsync(['node', 'agents', 'noop']);
+  await UNHOOKED_PROGRAM.parseAsync(['node', 'agents', 'events', 'emit']);
   await ONE_APPEND_PROGRAM.parseAsync(['node', 'agents', 'noop']);
-  if (dispatchCount !== before + 5) {
+  if (dispatchCount !== before + 6) {
     throw new Error(
-      `audit dispatch preflight: expected 5 actions to fire, got ${dispatchCount - before} — these rows are measuring the wrong path`,
+      `audit dispatch preflight: expected 6 actions to fire, got ${dispatchCount - before} — these rows are measuring the wrong path`,
     );
   }
   if (!fs.existsSync(AUDIT_SINK)) {
@@ -1076,7 +1077,7 @@ describe('the real per-invocation audit tax — `program.parseAsync` through com
 });
 
 describe('whole-invocation anchor — real cold `node dist/index.js --version` (the denominator for every row above)', () => {
-  bench('`agents --version` — pays the full eager module graph (index.ts:10-215, 513-524), detectDevBuild (index.ts:113), the program chain + audit hooks (index.ts:262-371), AND the two migration hops that carry no help/version guard: foldLegacySystemRepo (index.ts:1366-1369) and runMigration (index.ts:1389-1391), both gated only by AGENTS_SKIP_MIGRATION, so `await import("./lib/migrate.js")` is inside this number. It skips only checkForUpdates + spawnDetachedSync (index.ts:1322) and ensureInitialized (index.ts:1373-1381)', () => {
+  bench('`agents --version` — pays the full eager module graph (index.ts:10-218), detectDevBuild (index.ts:113), the program chain + audit hooks (index.ts:262-371), AND the two migration hops that carry no help/version guard: foldLegacySystemRepo (index.ts:1406-1411, called at 1409) and runMigration (index.ts:1429-1445, called at 1445), both gated only by AGENTS_SKIP_MIGRATION, so `await import("./lib/migrate.js")` is inside this number. It skips only checkForUpdates + spawnDetachedSync (guarded by !helpOrVersionRequested at index.ts:1362) and ensureInitialized (index.ts:1413-1421, called at 1420)', () => {
     expectExit(runCli(['--version']), [0], '--version');
   }, { time: 4000, iterations: 15 });
 
