@@ -251,10 +251,14 @@ One rule shapes the menu: **attention floats up, context groups down.**
   `● running now · started 4m ago` when a run is in flight (server-verified, not a
   stale flag), else the last outcome (`✓ completed · ran 45s · 2h ago`,
   `✕ failed exit 1 · yesterday`, `⦸ missed`) — then the failure reason when there
-  is one, then the next fire, above Run now / Pause / Logs. Logs opens the concise
-  routine summary in a text viewer. All of it is read from the routine fields the
-  snapshot already carries (`lastStatus`/`exitCode`/`lastRunStartedAt`/`CompletedAt`),
-  so opening a submenu never shells a fresh fetch.
+  is one, then the next fire, above Run now / Pause / Logs. An **overdue** routine
+  is tagged `⚠ overdue` on that line even when its previous run succeeded (overdue
+  is independent of the last outcome — the daemon missed the next fire), so the
+  submenu never contradicts the `overdue` flag shown up in NEEDS YOU. Logs opens
+  the concise routine summary in a text viewer. All of it is read from the routine
+  fields the snapshot already carries
+  (`lastStatus`/`exitCode`/`overdue`/`lastRunStartedAt`/`CompletedAt`), so opening
+  a submenu never shells a fresh fetch.
   When routines carry a `projectGroup` field (from `agents routines list --json`),
   both the inline rows and the "All routines…" submenu are grouped by that label.
   Routines with no `projectGroup` (cross-project or unassigned) appear last,

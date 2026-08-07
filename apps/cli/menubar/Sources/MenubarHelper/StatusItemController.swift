@@ -1347,6 +1347,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // submenu. `running` is server-verified (the CLI pid-checks it before emitting
     // the field), so "● running now" is trustworthy, not a stale marker.
     private func routineRunStatusLine(_ r: Routine) -> String? {
+        // `overdue` is INDEPENDENT of the last run's outcome — it means the daemon
+        // missed the NEXT scheduled fire (laptop off / daemon crash) — so it must
+        // surface even when the last run completed, matching the guarantee the old
+        // routineFailureDetail (`lastRunFailed || overdue`) gave. A run in flight
+        // now is catching up, not missed, so it is the one status we don't tag.
+        let overdueTag = r.overdue ? "  ·  ⚠ overdue" : ""
         guard let status = r.lastStatus else {
             return r.overdue ? "⚠ overdue" : nil
         }
@@ -1360,16 +1366,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             var line = "✓ completed"
             if let dur = routineRunDuration(r) { line += " · ran \(dur)" }
             line += " · \(shortWhen(r.lastRunCompletedAt))"
-            return line
+            return line + overdueTag
         case "failed", "timeout":
             var line = status == "timeout" ? "✕ timed out" : "✕ failed"
             if let code = r.exitCode { line += " exit \(code)" }
             line += " · \(shortWhen(r.lastRunCompletedAt))"
-            return line
+            return line + overdueTag
         case "missed":
-            return "⦸ missed · \(shortWhen(r.lastRunCompletedAt))"
+            return "⦸ missed · \(shortWhen(r.lastRunCompletedAt))" + overdueTag
         default:
-            return "\(status) · \(shortWhen(r.lastRunCompletedAt))"
+            return "\(status) · \(shortWhen(r.lastRunCompletedAt))" + overdueTag
         }
     }
 
