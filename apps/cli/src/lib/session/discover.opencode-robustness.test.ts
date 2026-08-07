@@ -137,12 +137,33 @@ describe('OpenCode scan survives a malformed row (RUSH-2358 follow-up)', () => {
 describe('OpenCode tool-part read stays bounded (RUSH-2358 follow-up)', () => {
   const parsed = () => parse.parseOpenCode(`${OPENCODE_DB}#${SESSION_ID}`);
 
-  it('does not load a huge state.attachments payload into the events', () => {
-    const events = parsed();
-    const serialized = JSON.stringify(events);
-    // The DB row alone is >1 MB. Truncating only `state.output` left it whole.
-    expect(serialized.length).toBeLessThan(50_000);
-    expect(serialized).not.toContain('data:image/png;base64');
+  // The cost being pinned is what the QUERY loads, not what reaches the events:
+  // `state.attachments` never reached an event even before the fix, because the
+  // `case 'tool'` branch only copies `state.input` / `state.output`. The 1 MB
+  // was paid in the result set, which is why asserting on events alone would
+  // pass against the pre-fix code. Run the real query (imported, not re-typed)
+  // and measure its `part_data`.
+  const projectedBytes = (): { total: number; max: number } => {
+    const oc = new (Database as any)(OPENCODE_DB);
+    try {
+      const rows = oc.prepare(parse.OPENCODE_TRANSCRIPT_QUERY).all(SESSION_ID) as Array<{ part_data: unknown }>;
+      const sizes = rows.map(r => (typeof r.part_data === 'string' ? Buffer.byteLength(r.part_data) : 0));
+      return { total: sizes.reduce((a, b) => a + b, 0), max: Math.max(0, ...sizes) };
+    } finally {
+      try { oc.close(); } catch { /* best-effort */ }
+    }
+  };
+
+  it('does not load the huge state.attachments payload out of the database', () => {
+    const { total, max } = projectedBytes();
+    // The `read` row alone is >1 MB in the DB. Truncating only `state.output`
+    // shrank it by zero bytes; the projection has to drop `attachments`.
+    expect(max).toBeLessThan(10_000);
+    expect(total).toBeLessThan(20_000);
+  });
+
+  it('never carries an attachment data URL into the parsed events', () => {
+    expect(JSON.stringify(parsed())).not.toContain('data:image/png;base64');
   });
 
   it('keeps the addressing fields the enrichment needs, for both tools', () => {
@@ -160,5 +181,39 @@ describe('OpenCode tool-part read stays bounded (RUSH-2358 follow-up)', () => {
     const events = parsed();
     expect(events.length).toBeGreaterThan(0);
     expect(events.some(e => e.type === 'tool_use')).toBe(true);
+  });
+});
+
+describe('OpenCode transcript parses on a schema with no todo table', () => {
+  // The `todo` probe must not cost the transcript when the table is absent. The
+  // hazard is runtime-specific: node:sqlite returns `undefined` for an empty
+  // `get()` and bun:sqlite returns `null`, so a sentinel-based probe silently
+  // inverts on the shipped Bun binary and every no-todo database parses to
+  // zero events. The probe counts rows instead, which is why this holds under
+  // both runtimes — vitest only exercises the node one.
+  const OLD_DB = path.join(tmpHome, 'old', 'opencode.db');
+  const OLD_SESSION = 'ses_notodo000000000000000000';
+
+  beforeAll(() => {
+    fs.mkdirSync(path.dirname(OLD_DB), { recursive: true });
+    const oc = new (Database as any)(OLD_DB);
+    oc.exec(`
+      CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, title TEXT, directory TEXT, version TEXT, time_created INTEGER, time_updated INTEGER);
+      CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER);
+      CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT, time_created INTEGER);
+    `);
+    oc.prepare('INSERT INTO session (id, parent_id, title, directory, version, time_created, time_updated) VALUES (?, NULL, ?, ?, ?, ?, ?)')
+      .run(OLD_SESSION, 'old schema', CWD, '0.3.0', T0, T1);
+    oc.prepare('INSERT INTO message (id, session_id, data, time_created) VALUES (?, ?, ?, ?)')
+      .run(`${OLD_SESSION}-m0`, OLD_SESSION, JSON.stringify({ role: 'assistant' }), T0);
+    oc.prepare('INSERT INTO part (id, message_id, session_id, data, time_created) VALUES (?, ?, ?, ?, ?)')
+      .run(`${OLD_SESSION}-p0`, `${OLD_SESSION}-m0`, OLD_SESSION, JSON.stringify({ type: 'text', text: 'hello world' }), T0);
+    oc.close();
+  });
+
+  it('returns the transcript instead of an empty session', () => {
+    const events = parse.parseOpenCode(`${OLD_DB}#${OLD_SESSION}`);
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.some(e => e.type === 'message' && (e as any).content === 'hello world')).toBe(true);
   });
 });

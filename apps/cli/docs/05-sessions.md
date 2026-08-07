@@ -199,8 +199,13 @@ so an OpenCode row carries the same burn/usage fields as any other harness:
 `session.cost` / `session.model` and the `todo` table are newer OpenCode additions —
 the scan probes `PRAGMA table_info(session)` and tolerates a missing `todo` table, so an
 older `opencode.db` still scans (those fields read as null) rather than throwing. The
-`todo` read is gated the same way, by a `sqlite_master` probe rather than a catch, so a
-locked or corrupt database surfaces as an error instead of "this session has no todos".
+`todo` read is gated the same way, by a `sqlite_master` probe rather than a catch, so
+"this schema has no `todo` table" is decided by looking, not by catching — a blanket
+catch there reported a locked or corrupt database as an empty checklist. The probe
+counts rows rather than testing an empty `get()` for a sentinel: `node:sqlite` returns
+`undefined` where `bun:sqlite` returns `null`, and both runtimes ship, so a
+sentinel-based probe inverts on one of them and parses every no-`todo` database to zero
+events.
 
 **The tool-part read is a projection, and it is bounded.** `parseOpenCode` selects a
 tool part down to exactly the fields it consumes — `tool`, `callID`, `state.status`,
