@@ -33,12 +33,48 @@ function versionDir(label: string): string {
   return path.join(home, '.agents', '.history', 'versions', 'claude', label);
 }
 
-/** A real, launchable stand-in for a vendor binary: prints a version and exits 0. */
+const IS_WIN = process.platform === 'win32';
+
+/**
+ * A real, launchable stand-in for a vendor binary: prints a version and exits 0.
+ *
+ * Windows gets the `.cmd` wrapper alongside, because that is what the launch
+ * probe actually runs there (`verifyBinaryLaunches`) — writing only the
+ * extensionless file made every probe on Windows report a vacuous pass, so the
+ * three tests that assert a FAILED launch never saw one.
+ */
 function writeLaunchableBinary(binDir: string, release: string): void {
   fs.mkdirSync(binDir, { recursive: true });
   const file = path.join(binDir, 'claude');
   fs.writeFileSync(file, `#!/bin/sh\necho ${release}\n`);
   fs.chmodSync(file, 0o755);
+  if (IS_WIN) fs.writeFileSync(`${file}.cmd`, `@echo off\r\necho ${release}\r\n`);
+}
+
+/**
+ * A release that is present but cannot start — the gutted-install case.
+ *
+ * POSIX: no launch target at all, which the probe reports as "binary not found".
+ * Windows: the `.cmd` wrapper survives a gutted install and is what emits the
+ * "is not recognized" message the probe matches, so reproduce that rather than
+ * deleting the wrapper (a missing `.cmd` is treated as healthy by design).
+ */
+function writeUnlaunchableBinary(binDir: string): void {
+  fs.mkdirSync(binDir, { recursive: true });
+  if (IS_WIN) {
+    fs.writeFileSync(
+      path.join(binDir, 'claude.cmd'),
+      '@echo off\r\necho \'claude.exe\' is not recognized as an internal or external command\r\nexit /b 1\r\n'
+    );
+  }
+}
+
+/** Remove the live launch target the way a broken install would leave it. */
+function breakLiveBinary(label: string): void {
+  const binDir = path.join(versionDir(label), 'node_modules', '.bin');
+  fs.rmSync(path.join(binDir, 'claude'), { force: true });
+  fs.rmSync(path.join(binDir, 'claude.cmd'), { force: true });
+  writeUnlaunchableBinary(binDir);
 }
 
 /** Lay down an installed release the way the npm strategy's swap expects it. */
@@ -68,7 +104,7 @@ function fileStrategy(
       fs.mkdirSync(stagingDir, { recursive: true });
       fs.writeFileSync(path.join(stagingDir, 'package.json'), JSON.stringify({ name: 'staged', target }));
       if (opts.launchable) writeLaunchableBinary(path.join(stagingDir, 'node_modules', '.bin'), target);
-      else fs.mkdirSync(path.join(stagingDir, 'node_modules', '.bin'), { recursive: true });
+      else writeUnlaunchableBinary(path.join(stagingDir, 'node_modules', '.bin'));
       return {
         release: target,
         binary: path.join(stagingDir, 'node_modules', '.bin', 'claude'),
@@ -170,7 +206,7 @@ describe('updateInstallation', () => {
     // swap — the real "release installed but broken on disk" failure.
     const sabotagingCommit: UpdateStrategy['commit'] = async (ctx, staged): Promise<CommitHandles> => {
       const handles = await realCommit(ctx, staged);
-      fs.rmSync(path.join(versionDir(ctx.installation.label), 'node_modules', '.bin', 'claude'), { force: true });
+      breakLiveBinary(ctx.installation.label);
       return handles;
     };
 
@@ -199,7 +235,7 @@ describe('updateInstallation', () => {
     const realCommit = strategies.selectUpdateStrategy('claude').commit;
     const sabotagingCommit: UpdateStrategy['commit'] = async (ctx, staged) => {
       const handles = await realCommit(ctx, staged);
-      fs.rmSync(path.join(versionDir(ctx.installation.label), 'node_modules', '.bin', 'claude'), { force: true });
+      breakLiveBinary(ctx.installation.label);
       return handles;
     };
     const nonTransactional: UpdateStrategy = {
