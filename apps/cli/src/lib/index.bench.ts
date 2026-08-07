@@ -89,9 +89,14 @@ import {
   findAgentsCliInstalls,
   resolveRunningPackageRoot,
 } from './self-update.js';
-import { getUpdateCheckPath } from './state.js';
+import { getUpdateCheckPath, readMeta } from './state.js';
 import { installMenubarLaunchAgentOnUpgrade } from './menubar/install-menubar.js';
-import { resolveBrandName, disabledCommandsForActiveBrand } from './brand.js';
+import {
+  resolveBrandName,
+  activeBrandName,
+  isBranded,
+  disabledCommandsForActiveBrand,
+} from './brand.js';
 // Real built artifact (see docblock above) -- NOT './auto-pull.js', which
 // would resolve to the unbuilt TS source and always miss the worker script.
 // dist/lib/auto-pull.d.ts exists (tsconfig.json declaration:true), so this
@@ -436,6 +441,32 @@ const MENUBAR_INSTALL_SPEC = distUrl('lib/menubar/install-menubar.js');
 const BRAND_SPEC = distUrl('lib/brand.js');
 const AGENTS_REGISTRY_SPEC = distUrl('lib/agents.js');
 const VERSIONS_SPEC = distUrl('lib/versions.js');
+const STATE_SPEC = distUrl('lib/state.js');
+const TYPES_SPEC = distUrl('lib/types.js');
+
+/**
+ * index.ts's own eager local-module imports, EXCLUDING brand.js — by line:
+ * dev-build (16), sync-commands (36), self-update (86), command-registry
+ * (124), help (208), whats-new (209), platform/index (211), cli-entry (212),
+ * events (213), event-provenance (214), format (215), state (513). types.js
+ * (210) is type-only and erased at compile, so it is not a runtime edge and
+ * is excluded here (it gets its own row in the group above instead).
+ */
+const EAGER_MINUS_BRAND = [
+  'startup/dev-build.js',
+  'secrets/sync-commands.js',
+  'self-update.js',
+  'startup/command-registry.js',
+  'help.js',
+  'whats-new.js',
+  'platform/index.js',
+  'cli-entry.js',
+  'events.js',
+  'event-provenance.js',
+  'format.js',
+  'state.js',
+].map((p) => distUrl(`lib/${p}`));
+const EAGER_WITH_BRAND = [...EAGER_MINUS_BRAND, BRAND_SPEC];
 
 /**
  * The two exit codes that mean `__secrets-ping` reached the intercept at
@@ -462,8 +493,15 @@ const PING_EXIT_CODES = [0, 3] as const;
     BRAND_SPEC,
     AGENTS_REGISTRY_SPEC,
     VERSIONS_SPEC,
+    STATE_SPEC,
+    TYPES_SPEC,
   ])
     coldEval([spec]);
+  // The multi-spec rows (EAGER_MINUS_BRAND / EAGER_WITH_BRAND) get their own
+  // preflight since coldEval takes the whole list per sample there, not one
+  // spec at a time.
+  coldEval(EAGER_MINUS_BRAND);
+  coldEval(EAGER_WITH_BRAND);
   // Same reasoning for the one runCli row whose number is only meaningful if
   // the index.ts:71-84 intercept was actually reached.
   expectExit(runCli([SYNC_PING_CMD]), PING_EXIT_CODES, '__secrets-ping preflight');
@@ -615,10 +653,10 @@ describe('installMenubarLaunchAgentOnUpgrade() — warm in-process call on THIS 
  * pulls in at load time is paid before `resolveBrandName()` can tell you which
  * case you are in.
  *
- * brand.ts:19 imports `{ ALL_AGENT_IDS, AGENTS }` from `./agents.js` (3290
+ * brand.ts:20 imports `{ ALL_AGENT_IDS, AGENTS }` from `./agents.js` (3290
  * lines, verified: `wc -l src/lib/agents.ts`) for exactly two functions,
  * `reservedBrandNames()` (brand.ts:52-56) and `validateBrandName()`
- * (brand.ts:59-66) — both reachable only from `agents mine init <name>` /
+ * (brand.ts:59-67) — both reachable only from `agents mine init <name>` /
  * `agents setup mine`, never from `resolveBrandName()` or
  * `disabledCommandsForActiveBrand()`. Grepping the earlier eager imports in
  * index.ts (commander, chalk, fs/os/path/url, dev-build.js, secrets/sync-
@@ -659,21 +697,62 @@ describe('brand.js eager import (index.ts:514) — cold module import, the graph
     coldEval([BRAND_SPEC]);
   }, COLD_OPTS);
 
-  bench('lib/agents.js alone — the graph brand.ts:19 imports `{ ALL_AGENT_IDS, AGENTS }` from, for reservedBrandNames()/validateBrandName() (brand.ts:52-66), functions the unbranded fast path never calls. agents.ts is 3290 lines and itself imports versions.ts, capabilities.ts, fs-walk.ts, fuzzy.ts (agents.ts:12-27)', () => {
+  bench('lib/agents.js alone — the graph brand.ts:20 imports `{ ALL_AGENT_IDS, AGENTS }` from, for reservedBrandNames()/validateBrandName() (brand.ts:52-67), functions the unbranded fast path never calls. agents.ts is 3290 lines and itself imports versions.ts, capabilities.ts, fs-walk.ts, fuzzy.ts (agents.ts:12-27)', () => {
     coldEval([AGENTS_REGISTRY_SPEC]);
   }, COLD_OPTS);
 
   bench('lib/versions.js alone — the graph agents.ts:26 imports back from (circular with agents.ts, versions.ts:35), 3738 lines, the largest static-import fan-out in this package: resources.ts, resource-profiles.ts, permissions.ts, mcp.ts, convert.ts, import.ts, subagents.ts, workflows.ts, hooks.ts, capabilities.ts, plugins.ts, rules/compose.ts, staleness/*, memory.ts, project-resources.ts, @inquirer/prompts (versions.ts:17-68)', () => {
     coldEval([VERSIONS_SPEC]);
   }, COLD_OPTS);
+
+  bench('lib/state.js alone — brand.ts\'s other real import (types.js is type-only, erased at compile). Already paid separately at index.ts:513 regardless of the brand edge, so this row is the baseline the marginal-cost group below needs', () => {
+    coldEval([STATE_SPEC]);
+  }, COLD_OPTS);
+
+  bench('lib/types.js alone — the third brand.ts import (brand.ts:21 `import type { BrandConfig } from \'./types.js\'`), erased at compile so this row prices only its OWN static value imports, not a type-only reference', () => {
+    coldEval([TYPES_SPEC]);
+  }, COLD_OPTS);
+});
+
+/**
+ * The rows above measure each module ISOLATED — a fresh process importing
+ * ONLY that one specifier. That answers "how much does brand.js cost on its
+ * own", but not "how much does brand.js cost ON TOP OF what a real `agents`
+ * invocation already loaded by the time it reaches index.ts:514" — and those
+ * two numbers are very different, because self-update.js (index.ts:86-95,
+ * BEFORE brand.js) already imports versions.js (self-update.ts:20), which
+ * pulls in agents.js via the versions.ts<->agents.ts circular pair verified
+ * above. By the time index.ts:514's `import ... from './lib/brand.js'`
+ * evaluates, agents.js may already be warm in the SAME process's module
+ * cache from self-update.js's own import — cold-import isolation cannot see
+ * that sharing, because each isolated row above starts from a bare process
+ * with nothing preloaded.
+ *
+ * This group measures the two real invocation shapes back to back in the
+ * SAME kind of fresh process: index.ts's 12 other eager local-module imports
+ * (dev-build, sync-commands, self-update, command-registry, help, whats-new,
+ * platform/index, cli-entry, events, event-provenance, format, state — every
+ * eager local import EXCEPT brand.js) with and without brand.js appended.
+ * The delta between the two rows is brand.js's TRUE marginal cost inside a
+ * real invocation, net of whatever self-update.js already shared with it —
+ * which the isolated numbers above cannot show.
+ */
+describe('brand.js MARGINAL cost on top of the rest of the eager graph — does self-update.js already pay for what brand.js needs?', () => {
+  bench('EAGER_MINUS_BRAND: the 12 other index.ts eager local imports (index.ts:16,36,86-95,124,208,209,211-215,513), no brand.js edge', () => {
+    coldEval(EAGER_MINUS_BRAND);
+  }, COLD_OPTS);
+
+  bench('EAGER_WITH_BRAND: same 12 + lib/brand.js (index.ts:514) — the delta vs the row above is brand.js\'s real marginal startup cost once self-update.js\'s own versions.js->agents.js edge has already run in this process', () => {
+    coldEval(EAGER_WITH_BRAND);
+  }, COLD_OPTS);
 });
 
 /**
  * The call-time cost, warm in-process, on THIS real machine's real
  * ~/.agents/agents.yaml — contrasted against the import-time cost measured
- * above. resolveBrandName() (brand.ts:32-35) is one env-var read plus a
- * regex test; disabledCommandsForActiveBrand() (brand.ts:111-114) calls
- * getActiveBrandConfig() (brand.ts:80-86), which short-circuits at
+ * above. resolveBrandName() (brand.ts:34-38) is one env-var read plus a
+ * regex test; disabledCommandsForActiveBrand() (brand.ts:102-105) calls
+ * getActiveBrandConfig() (brand.ts:84-90), which short-circuits at
  * `if (!name) return null` the moment activeBrandName() reports unbranded —
  * so on the unbranded fast path it NEVER calls readMeta() (state.ts:1124),
  * i.e. zero filesystem syscalls. Only when AGENTS_BRAND names something (real
@@ -699,9 +778,19 @@ describe('resolveBrandName() / disabledCommandsForActiveBrand() — warm in-proc
     else process.env.AGENTS_BRAND = ORIGINAL_AGENTS_BRAND;
   });
 
-  bench('resolveBrandName() unbranded (AGENTS_BRAND unset) — index.ts:241, one env read + DEFAULT_CLI_NAME return, no regex test on the unset path (brand.ts:32-35)', () => {
+  bench('resolveBrandName() unbranded (AGENTS_BRAND unset) — index.ts:241, one env read + DEFAULT_CLI_NAME return, no regex test on the unset path (brand.ts:34-38)', () => {
     delete process.env.AGENTS_BRAND;
     resolveBrandName();
+  });
+
+  bench('activeBrandName() unbranded — resolveBrandName() + one string compare, returns null (brand.ts:41-44)', () => {
+    delete process.env.AGENTS_BRAND;
+    activeBrandName();
+  });
+
+  bench('isBranded() unbranded — activeBrandName() + one null check (brand.ts:47-49)', () => {
+    delete process.env.AGENTS_BRAND;
+    isBranded();
   });
 
   bench('disabledCommandsForActiveBrand() unbranded — index.ts:1244, short-circuits at getActiveBrandConfig (brand.ts:86: `if (!name) return null`) BEFORE readMeta() ever runs. This is the real cost every unbranded invocation on this fleet pays today: zero fs syscalls', () => {
@@ -709,8 +798,17 @@ describe('resolveBrandName() / disabledCommandsForActiveBrand() — warm in-proc
     disabledCommandsForActiveBrand();
   });
 
-  bench('disabledCommandsForActiveBrand() with AGENTS_BRAND set to a real-shaped but unconfigured name — the branded-invocation floor: getBrandConfig (brand.ts:70) -> listBrands (brand.ts:66) -> readMeta() (state.ts:1124), a real ~/.agents/agents.yaml stat+read+parse (warm-cached after the first sample; see docblock), even though the brand does not exist in this box\'s real meta.brands and cfg ends up undefined', () => {
+  bench('resolveBrandName() branded — AGENTS_BRAND set to a real-shaped name, regex-validated and returned as-is (brand.ts:36)', () => {
+    process.env.AGENTS_BRAND = 'agents-cli-bench-nonexistent-brand';
+    resolveBrandName();
+  });
+
+  bench('disabledCommandsForActiveBrand() with AGENTS_BRAND set to a real-shaped but unconfigured name — the branded-invocation floor: getBrandConfig (brand.ts:75) -> listBrands (brand.ts:70) -> readMeta() (state.ts:1124), a real ~/.agents/agents.yaml stat+read+parse (warm-cached after the first sample; see docblock), even though the brand does not exist in this box\'s real meta.brands and cfg ends up undefined', () => {
     process.env.AGENTS_BRAND = 'agents-cli-bench-nonexistent-brand';
     disabledCommandsForActiveBrand();
+  });
+
+  bench('readMeta() alone, warm — the exact hop the branded row above pays (state.ts:1124), isolated from brand.ts\'s own dispatch so its warm cache-hit cost (state.ts:1127-1134) can be read on its own', () => {
+    readMeta();
   });
 });
