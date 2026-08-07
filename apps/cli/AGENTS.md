@@ -101,6 +101,14 @@ reliability contract — context resolution, readiness/pause-on-blocker, single-
 (RT-1..RT-11) and §Scheduling & execution singularity (SING-11..SING-13); much of it
 is `[Intended]` (RUSH-2290), and each requirement marks landed vs intended.
 
+Routine execution context is separate from grouping and repository identity.
+Plural `projects` is metadata-only; singular `project` selects one `ProjectDef`
+execution base; `cwd` is resolved on the eventual execution device. A rootless
+Linear project may still use a relative `cwd`, which anchors at that target user's
+home. `repo` remains GitHub/cloud/webhook identity and MUST NOT be used to infer a
+local checkout. Readiness failures save valid definitions paused through device
+activation; they never write mutable activation into routine YAML.
+
 ### 8. Self-updating agents are ONE binary, not fictional version-homes
 
 Some harnesses (droid, grok, antigravity, cursor, hermes, muse, kiro, goose) install

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.22.31
+
+- **`agents secrets unlock --keys` folds in the scoped-hold surface; the `secrets lease`/`leases`/`revoke` commands are deleted (RUSH-2350).** `unlock` now takes `--keys K1,K2` to hold ONLY that subset of a bundle behind its own expiry instead of the whole bundle — the one capability `lease` had that `unlock` did not, now on the command agents already reach for. Without `--keys`, `unlock` behaves exactly as before (whole bundle). An unknown or empty key subset fails closed (`Unknown secret lease key(s): …` / `requires at least one key`), `--keys` scopes exactly one local bundle (rejected with `--all`/`--host`), and `secrets status` now names the held keys of a scoped hold; `secrets lock <name>` releases it. The duplicate `secrets lease`/`secrets leases`/`secrets revoke` trio is gone — it had zero consumers, and its jobs (list holdings, release one) are already `secrets status` and `secrets lock`. No alias or deprecation shim (per the repo's no-unasked-shims rule). The underlying lease model (`src/lib/secrets/lease.ts`) is unchanged — `unlock --keys` reuses it. Source: `apps/cli/src/commands/secrets.ts` (`scopeHeldEnv`, the `unlock`/`status` actions), `apps/cli/src/lib/secrets/{agent,session-store}.ts`, `apps/cli/src/commands/secrets.scope.test.ts`, `apps/cli/src/commands/secrets.flags.test.ts`.
+
+- **Session previews use bookmark and focus as separate actions (RUSH-2373).** The shared interactive browser for ordinary, team, and routine sessions now uses `*` to bookmark the highlighted row, `b` / `--bookmarks` to filter bookmarks, and `f` to focus the highlighted session through the same attach-or-recover flow as `agents sessions focus`. Enter still resumes. The non-TTY surface is now `agents sessions bookmark`; its flag, JSON keys, code symbols, and durable store are bookmark-only, with a one-time migration from `~/.agents/.history/favorites.json` to `bookmarks.json`. The retired favorite command and flag are not aliases. Source: `apps/cli/src/commands/sessions-browser.ts`, `sessions-bookmark.ts`, `focus.ts`, `apps/cli/src/lib/session/bookmarks.ts`, `apps/cli/src/lib/migrate.ts`.
+
 ## 1.22.30
 
 - **`agents secrets import --force` now repairs a bundle whose metadata record is

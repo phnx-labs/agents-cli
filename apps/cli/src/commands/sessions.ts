@@ -55,6 +55,7 @@ import { sessionOwnerDevice, RESUME_PINNED_ENV } from '../lib/session/resume-own
 import { renderMarkdown } from '../lib/markdown.js';
 import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';
 import { getShimsDir } from '../lib/state.js';
+import { listJobs, listJobsWithRuns, listRuns } from '../lib/routines.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
 import { itemPicker } from '../lib/picker.js';
 import { resolveSessionAlias } from '../lib/session/actor-sidecar.js';
@@ -1783,13 +1784,13 @@ export function buildRoutineRunGroups(sessions: SessionMeta[]): RoutineRunGroup[
     .sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : a.runId.localeCompare(b.runId)));
 }
 
-export function buildRoutineChoices(sessions: SessionMeta[]): RoutineChoice[] {
+export function buildRoutineChoices(sessions: SessionMeta[], runOnlyNames: string[] = []): RoutineChoice[] {
   const byName = new Map<string, SessionMeta[]>();
   for (const session of sessions) {
     if (!session.routineName) continue;
     (byName.get(session.routineName) ?? byName.set(session.routineName, []).get(session.routineName)!).push(session);
   }
-  return [...byName.entries()]
+  const choices: RoutineChoice[] = [...byName.entries()]
     .map(([name, rows]) => {
       const runs = buildRoutineRunGroups(rows);
       return {
@@ -1798,12 +1799,28 @@ export function buildRoutineChoices(sessions: SessionMeta[]): RoutineChoice[] {
         runCount: runs.length,
         latestRunSessionCount: runs[0].sessions.length,
       };
-    })
-    .sort((a, b) => (a.lastRunAt < b.lastRunAt ? 1 : a.lastRunAt > b.lastRunAt ? -1 : a.name.localeCompare(b.name)));
+    });
+  // Routines whose only attempts are pre-session (blocked/skipped/failed-before-
+  // spawn) have run records but no transcript. Surface them so the picker is
+  // built from definitions+runs, never only transcripts — otherwise a routine
+  // that has never produced a session reads as "No routines match" (the plan).
+  const seen = new Set(choices.map((c) => c.name));
+  for (const name of runOnlyNames) {
+    if (seen.has(name)) continue;
+    const runs = listRuns(name);
+    const latest = runs[runs.length - 1];
+    choices.push({
+      name,
+      lastRunAt: latest?.startedAt ?? '',
+      runCount: runs.length,
+      latestRunSessionCount: 0,
+    });
+  }
+  return choices.sort((a, b) => (a.lastRunAt < b.lastRunAt ? 1 : a.lastRunAt > b.lastRunAt ? -1 : a.name.localeCompare(b.name)));
 }
 
 async function selectRoutineName(sessions: SessionMeta[]): Promise<string | null> {
-  const choices = buildRoutineChoices(sessions);
+  const choices = buildRoutineChoices(sessions, safeListJobsWithRuns());
   const picked = await itemPicker<RoutineChoice>({
     message: 'Select a routine:',
     items: choices,
@@ -1815,7 +1832,8 @@ async function selectRoutineName(sessions: SessionMeta[]): Promise<string | null
     labelFor: (choice) => {
       const runs = `${choice.runCount} run${choice.runCount === 1 ? '' : 's'}`;
       const sessions = `${choice.latestRunSessionCount} session${choice.latestRunSessionCount === 1 ? '' : 's'} in latest`;
-      return `${choice.name}  ${chalk.gray(`${runs} · ${sessions} · ${formatRelativeTime(choice.lastRunAt)}`)}`;
+      const age = choice.lastRunAt ? ` · ${formatRelativeTime(choice.lastRunAt)}` : '';
+      return `${choice.name}  ${chalk.gray(`${runs} · ${sessions}${age}`)}`;
     },
     shortIdFor: (choice) => choice.name,
     emptyMessage: 'No routines match.',
@@ -1824,14 +1842,24 @@ async function selectRoutineName(sessions: SessionMeta[]): Promise<string | null
   return picked?.item.name ?? null;
 }
 
+/** `listJobsWithRuns` but never throws into the sessions reader (best-effort). */
+function safeListJobsWithRuns(): string[] {
+  try {
+    return [...new Set([...listJobs().map((job) => job.name), ...listJobsWithRuns()])];
+  } catch { return []; }
+}
+
 export async function filterSessionsByRoutine(
   sessions: SessionMeta[],
   routine: boolean | string,
   interactive: boolean,
 ): Promise<SessionMeta[] | null> {
-  const routineNames = [...new Set(
-    sessions.map((session) => session.routineName).filter((name): name is string => !!name),
-  )].sort((a, b) => a.localeCompare(b));
+  // The name universe is transcripts UNION routines that have any run record —
+  // so a routine whose attempts never produced a session still resolves.
+  const routineNames = [...new Set([
+    ...sessions.map((session) => session.routineName).filter((name): name is string => !!name),
+    ...safeListJobsWithRuns(),
+  ])].sort((a, b) => a.localeCompare(b));
   let selectedRoutine: string | null = null;
   if (typeof routine === 'string') {
     selectedRoutine = resolveRoutineName(routine, routineNames);
@@ -1845,9 +1873,9 @@ export async function filterSessionsByRoutine(
     selectedRoutine = await selectRoutineName(sessions);
     if (!selectedRoutine) return null;
   }
-  return selectedRoutine
-    ? sessions.filter((session) => session.routineName === selectedRoutine)
-    : sessions;
+  if (!selectedRoutine) return sessions;
+  const matched = sessions.filter((session) => session.routineName === selectedRoutine);
+  return matched;
 }
 
 /** The canonical `ag sessions …` command for a set of flags — the twin of the
