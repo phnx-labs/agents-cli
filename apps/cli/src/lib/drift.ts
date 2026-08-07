@@ -31,6 +31,8 @@ export interface SyncStatusRow {
    *  (claude/droid). A non-zero value makes the version out-of-sync even when the
    *  manifest reads fresh — the yosemite-s1 blind spot the CI gate must catch. */
   unwiredHooks?: number;
+  /** Generated hooks whose shared runtime wrapper is missing or unusable. */
+  brokenHookRuntime?: number;
 }
 
 export interface OrphanRow {
@@ -90,6 +92,12 @@ export function checkSyncStatus(cwd: string): SyncStatusRow[] {
       // never fires. Surface that for every version, fresh or stale, so overview
       // AND `agents doctor --check` flag it (claude/droid; other agents report unsupported).
       const wiring = checkVersionHookWiring(agent, version);
+      if (wiring.runtimeBroken.length > 0) {
+        row.brokenHookRuntime = wiring.runtimeBroken.length;
+        const names = wiring.runtimeBroken.map((issue) => issue.name);
+        const shown = names.slice(0, 3).join(', ');
+        divergence.push(`hooks       ${names.length} generated wrapper${names.length === 1 ? '' : 's'} broken (${shown}${names.length > 3 ? ', …' : ''})`);
+      }
       if (wiring.supported) {
         const expected = wiring.expected ?? 0;
         if (wiring.settingsMissing && expected > 0) {
@@ -175,11 +183,14 @@ export interface DriftSummary {
   orphanVersionCount: number;
   /** Versions with hooks present on disk but not wired into settings.json. */
   unwiredHookVersions: number;
+  /** Versions with at least one broken generated hook-runtime wrapper. */
+  brokenHookRuntimeVersions: number;
   /** Source layers behind their upstream (reconciled against stale truth). */
   sourceBehind: SourceLayerBehind[];
   /**
    * True when the install is out of sync: any installed version is stale,
-   * never-synced, or carries unwired hooks, OR a source layer is behind origin.
+   * never-synced, carries unwired hooks, or has a broken generated hook runtime,
+   * OR a source layer is behind origin.
    * `agents doctor` surfaces it as "run `agents status`"; `agents doctor --check`
    * maps it to a non-zero exit. Orphans are a `prune` concern, not sync drift, so they do
    * NOT set this flag (mirrors the sync-status engine: an orphan alone never
@@ -199,6 +210,7 @@ export function computeDrift(cwd: string): DriftSummary {
   const staleCount = syncRows.filter((r) => r.status === 'stale').length;
   const neverSyncedCount = syncRows.filter((r) => r.status === 'never-synced').length;
   const unwiredHookVersions = syncRows.filter((r) => (r.unwiredHooks ?? 0) > 0).length;
+  const brokenHookRuntimeVersions = syncRows.filter((r) => (r.brokenHookRuntime ?? 0) > 0).length;
   const sourceBehind = computeSourceBehind();
   return {
     syncRows,
@@ -207,10 +219,12 @@ export function computeDrift(cwd: string): DriftSummary {
     neverSyncedCount,
     orphanVersionCount: orphanRows.length,
     unwiredHookVersions,
+    brokenHookRuntimeVersions,
     sourceBehind,
     hasDrift:
       syncRows.some((r) => r.status !== 'fresh') ||
       unwiredHookVersions > 0 ||
+      brokenHookRuntimeVersions > 0 ||
       sourceBehind.length > 0,
   };
 }

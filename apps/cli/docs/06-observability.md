@@ -537,7 +537,7 @@ agents doctor · zion                                        1.20.81
   a blocked agent to the owner.
 - **WARNING** (`⚠`) — `logout-unprovable`, `missing-resource`, `content-drift`,
   `never-synced`, `stale`, `repo-behind`, `repo-drift`, `version-skew`,
-  `fleet-resource-gap`, `orphan`, `duplicate-hook`, `duplicate-hook-drift`,
+  `fleet-resource-gap`, `hook-runtime-visibility-unavailable`, `orphan`, `duplicate-hook`, `duplicate-hook-drift`,
   `host-cli-missing`, `host-cli-invalid`, `rc-secret-export`, `env-secret-export`, `exec-policy`,
   `stale-cli`. Each is resolvable by a routine sync or cleanup.
 

@@ -28,13 +28,14 @@ import { addHostOption } from '../lib/hosts/option.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
 import { loadDevices, isControlDevice } from '../lib/devices/registry.js';
 import { fanOutDevices, planFleetTargets, remoteFleetTargets, type FanOutDeviceTarget } from '../lib/devices/fleet.js';
-import { enterDoctorOverviewGate, writeDoctorOverviewCache } from '../lib/devices/doctor-overview-cache.js';
+import { enterDoctorOverviewGate, invalidateDoctorOverviewCache, writeDoctorOverviewCache } from '../lib/devices/doctor-overview-cache.js';
 import { fleetDialTarget } from '../lib/devices/connect.js';
-import { compareFleetInventories, type FleetInventory, type FleetVersionSignIn } from '../lib/devices/fleet-divergence.js';
+import { compareFleetInventories, FLEET_HOOK_RUNTIME_STATES, type FleetInventory, type FleetVersionSignIn } from '../lib/devices/fleet-divergence.js';
 import { collectLocalFleetInventory } from '../lib/devices/fleet-inventory.js';
 import {
   buildLocalFindings,
   fleetDivergenceToFindings,
+  hookRuntimeToFindings,
   signInToFindings,
   renderFindings,
   remediationFor,
@@ -66,7 +67,7 @@ import {
   type ResourceDiff,
   type VersionResourceReport,
 } from '../lib/doctor-diff.js';
-import { checkVersionHookWiring, inspectDuplicateVersionHooks, registerHooksToSettings, type DuplicateVersionHook, type HookWiringReport } from '../lib/hooks.js';
+import { checkVersionHookWiring, inspectDuplicateVersionHooks, registerHooksToSettings, repairManagedHookRuntimeArtifacts, type DuplicateVersionHook, type HookRuntimeRepairReport, type HookWiringReport } from '../lib/hooks.js';
 import { isVersionIsolated } from '../lib/versions.js';
 import { computeDrift, checkSyncStatus, countOrphans, computeSourceBehind, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
 import { readAuthHealthCache, summarizeHostAuth } from '../lib/auth-health.js';
@@ -402,7 +403,7 @@ async function probeFleetInventory(target: FleetTarget): Promise<RemoteDoctorPay
  * unvalidated layer, so treat partial validation here as a bug: a field added to
  * the inventory must be checked here in the same change.
  */
-function asFleetInventory(value: unknown): FleetInventory | null {
+export function asFleetInventory(value: unknown): FleetInventory | null {
   // `typeof [] === 'object'`, so a shallow object check is not enough: an array
   // passes it, every `inv.resources[kind] ?? []` then yields empty, and the
   // comparison reports EVERY baseline resource as missing on that device — a
@@ -444,6 +445,29 @@ function asFleetInventory(value: unknown): FleetInventory | null {
       (rows) => Array.isArray(rows) && rows.every(isSignInRow),
     );
     if (!rowsOk) return null;
+  }
+
+  // Hook-runtime state is optional for wire compatibility with older remotes,
+  // but a present field is a closed enum map keyed exactly by the installed
+  // agent/version pairs. The fleet never accepts a remote path or diagnostic
+  // string, so an untrusted box cannot inject shell paths/text into this doctor.
+  if (v.hookRuntime !== undefined) {
+    if (!isMap(v.hookRuntime)) return null;
+    const validStates = new Set<string>(FLEET_HOOK_RUNTIME_STATES);
+    const agentVersions = v.agentVersions as Record<string, string[]>;
+    const hookRuntime = v.hookRuntime as Record<string, Record<string, unknown>>;
+    const expectedAgents = Object.keys(agentVersions);
+    if (Object.keys(hookRuntime).length !== expectedAgents.length) return null;
+    for (const agent of expectedAgents) {
+      if (!ALL_AGENT_IDS.includes(agent as AgentId)) return null;
+      const states = hookRuntime[agent];
+      const versions = agentVersions[agent];
+      if (!isMap(states) || Object.keys(states).length !== versions.length) return null;
+      const expectedVersions = new Set(versions);
+      for (const [version, state] of Object.entries(states)) {
+        if (!expectedVersions.has(version) || typeof state !== 'string' || !validStates.has(state)) return null;
+      }
+    }
   }
   return v as unknown as FleetInventory;
 }
@@ -576,6 +600,11 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
     // rc files and its process environment. Without this the fleet readout
     // reports a leaking box as clean (RUSH-1968).
     if (r.secretFindings?.length) findings.push(...r.secretFindings);
+
+    // Unlike sign-in, the remote's hook-runtime payload is deliberately just a
+    // closed enum state. Rebuild the finding locally so no remote file path or
+    // detector text reaches this host's output.
+    findings.push(...hookRuntimeToFindings(r.name, r.inventory?.hookRuntime));
 
     if (r.inventory?.signIn) {
       findings.push(...signInToFindings(r.name, r.inventory.signIn));
@@ -809,7 +838,7 @@ export interface DoctorVerdict {
 /** Categories `--fix` reconciles (vs. `agents repo pull` for a behind source, or
  *  `agents prune cleanup` for an orphan). Drives the heal footer. */
 const AUTO_FIXABLE_CATEGORIES = new Set([
-  'unwired-hook', 'settings-missing', 'settings-unparseable', 'missing', 'divergent', 'stale', 'never-synced',
+  'hook-runtime-broken', 'unwired-hook', 'settings-missing', 'settings-unparseable', 'missing', 'divergent', 'stale', 'never-synced',
 ]);
 
 export function verdictIsAutoFixable(v: DoctorVerdict): boolean {
@@ -831,6 +860,14 @@ export function computeVerdict(report: VersionResourceReport): DoctorVerdict {
 
   // ── critical: settings.json / unwired hooks (silent breakage) ──
   const w = report.hookWiring;
+  for (const issue of w?.runtimeBroken ?? []) {
+    issues.push({
+      severity: 'critical', category: 'hook-runtime-broken', subject: issue.name,
+      impact: `generated hook wrapper is ${issue.reason}; the hook cannot run`,
+      fix: fixCmd,
+      text: `${issue.name} hook runtime broken`, color: 'red',
+    });
+  }
   if (w?.settingsMissing) {
     const n = w.expected ?? 0;
     issues.push({
@@ -1022,8 +1059,18 @@ export function computeOverviewHealth(
     });
   }
 
-  // critical: unwired hooks / broken settings.json per version
+  // critical: generated hook runtime / unwired hooks / broken settings.json per version
   for (const row of syncRows) {
+    const brokenRuntime = row.brokenHookRuntime ?? 0;
+    if (brokenRuntime > 0) {
+      const label = pretty(row.agent, row.version);
+      issues.push({
+        severity: 'critical', category: 'hook-runtime-broken', subject: label,
+        impact: `${brokenRuntime} generated hook wrapper${brokenRuntime === 1 ? '' : 's'} unusable; affected hooks cannot run`,
+        fix: `agents doctor ${row.agent}@${row.version} --fix`,
+        text: `${label} ${brokenRuntime} hook runtime broken`, color: 'red',
+      });
+    }
     const n = row.unwiredHooks ?? 0;
     if (n <= 0) continue;
     const label = pretty(row.agent, row.version);
@@ -1082,7 +1129,9 @@ export function computeOverviewHealth(
     });
   }
 
-  const reconciled = syncRows.filter((r) => r.status === 'fresh' && (r.unwiredHooks ?? 0) === 0).length;
+  const reconciled = syncRows.filter(
+    (r) => r.status === 'fresh' && (r.unwiredHooks ?? 0) === 0 && (r.brokenHookRuntime ?? 0) === 0,
+  ).length;
   return { healthy: issues.length === 0, issues, reconciled };
 }
 
@@ -1277,6 +1326,25 @@ function renderHookRewireText(rewired: HookRewireResult[]): void {
   }
 }
 
+function runtimeRepairFilter(parsed: ResolvedTarget | null): { agent?: AgentId; version?: string } | undefined {
+  if (!parsed) return undefined;
+  // A concrete target can be narrowed to that version. Broad selectors (@all,
+  // @latest, agent-only) still make one bounded repair pass for that harness.
+  return {
+    agent: parsed.agent,
+    ...(parsed.versionExplicit && parsed.versions.length === 1 ? { version: parsed.versions[0] } : {}),
+  };
+}
+
+function renderHookRuntimeRepairText(repair: HookRuntimeRepairReport): void {
+  for (const fixed of repair.fixed) {
+    console.log(`  ${chalk.green('fixed ')}  ${chalk.gray(fixed)}`);
+  }
+  for (const unresolved of repair.needsAttention) {
+    console.log(`  ${chalk.red('hold  ')}  ${chalk.gray(unresolved)}`);
+  }
+}
+
 async function runFix(parsed: ResolvedTarget | null, opts: DoctorOptions): Promise<void> {
   // Heal targets the global install — project layer is irrelevant, so cwd is
   // left to heal's neutral default rather than process.cwd().
@@ -1292,12 +1360,26 @@ async function runFix(parsed: ResolvedTarget | null, opts: DoctorOptions): Promi
   });
   // Re-wire hooks the diff-driven heal leaves behind (present file, not wired).
   const rewired = rewireUnwiredHooks(parsed);
+  // One inspect→generate→verify pass, after normal resource and native-wiring
+  // repair have settled. This routine never calls sync/register and never
+  // retries; unresolved wrappers remain an explicit non-zero doctor outcome.
+  const hookRuntimeRepair = repairManagedHookRuntimeArtifacts({ filter: runtimeRepairFilter(parsed) });
+  if (
+    healChangedAnything(result) ||
+    rewired.some((entry) => entry.rewired > 0 || entry.remaining > 0) ||
+    hookRuntimeRepair.attempts.length > 0
+  ) {
+    invalidateDoctorOverviewCache();
+  }
   if (opts.json) {
-    console.log(JSON.stringify({ ...result, hookRewire: rewired }, null, 2));
+    console.log(JSON.stringify({ ...result, hookRewire: rewired, hookRuntimeRepair }, null, 2));
+    if (hookRuntimeRepair.needsAttention.length > 0) process.exitCode = 1;
     return;
   }
   renderHealText(result);
   renderHookRewireText(rewired);
+  renderHookRuntimeRepairText(hookRuntimeRepair);
+  if (hookRuntimeRepair.needsAttention.length > 0) process.exitCode = 1;
 }
 
 // ─── CI drift gate (doctor --check) ──────────────────────────────────────────
@@ -1333,6 +1415,7 @@ function runCheckGate(opts: DoctorOptions, cwd: string): void {
       stale: drift.staleCount,
       neverSynced: drift.neverSyncedCount,
       unwiredHookVersions: drift.unwiredHookVersions,
+      brokenHookRuntimeVersions: drift.brokenHookRuntimeVersions,
       orphanVersions: drift.orphanVersionCount,
       sourceBehind: drift.sourceBehind,
       versions: drift.syncRows.map((r) => ({
@@ -1341,6 +1424,7 @@ function runCheckGate(opts: DoctorOptions, cwd: string): void {
         status: r.status,
         isDefault: r.isDefault,
         unwiredHooks: r.unwiredHooks ?? 0,
+        brokenHookRuntime: r.brokenHookRuntime ?? 0,
         divergence: r.divergence ?? [],
       })),
     }, null, 2));
@@ -1370,6 +1454,7 @@ function runCheckGate(opts: DoctorOptions, cwd: string): void {
   if (drift.staleCount > 0) parts.push(`${drift.staleCount} stale`);
   if (drift.neverSyncedCount > 0) parts.push(`${drift.neverSyncedCount} never-synced`);
   if (drift.unwiredHookVersions > 0) parts.push(`${drift.unwiredHookVersions} with unwired hooks`);
+  if (drift.brokenHookRuntimeVersions > 0) parts.push(`${drift.brokenHookRuntimeVersions} with broken hook runtime`);
   if (drift.sourceBehind.length > 0) parts.push(`${drift.sourceBehind.length} source layer(s) behind origin`);
   console.error(`${chalk.gray('check:')} ${chalk.red('drift')} — ${parts.join(', ')} across ${drift.syncRows.length} version(s)`);
 
@@ -1381,10 +1466,11 @@ function runCheckGate(opts: DoctorOptions, cwd: string): void {
     const STATUS_BADGE_WIDTH = 'never-synced'.length + 2;
     for (const row of drift.syncRows) {
       const unwired = (row.unwiredHooks ?? 0) > 0;
-      if (row.status === 'fresh' && !unwired) continue;
+      const brokenRuntime = (row.brokenHookRuntime ?? 0) > 0;
+      if (row.status === 'fresh' && !unwired && !brokenRuntime) continue;
       const tag = row.status === 'stale' ? chalk.yellow('stale'.padEnd(STATUS_BADGE_WIDTH))
         : row.status === 'never-synced' ? chalk.gray('never-synced'.padEnd(STATUS_BADGE_WIDTH))
-        : chalk.red('unwired'.padEnd(STATUS_BADGE_WIDTH)); // fresh but hooks not wired into settings.json
+        : chalk.red((brokenRuntime ? 'hook-runtime' : 'unwired').padEnd(STATUS_BADGE_WIDTH));
       console.error(`  ${tag}${checkLabel(row)}`);
       for (const line of row.divergence ?? []) {
         console.error(chalk.gray(`           ${line}`));
@@ -1394,7 +1480,7 @@ function runCheckGate(opts: DoctorOptions, cwd: string): void {
       console.error(`  ${chalk.red('behind')} source ${b.label}  ${chalk.gray(`${b.behind} commit${b.behind === 1 ? '' : 's'} behind ${b.branch}`)}`);
     }
     const hints: string[] = [];
-    if (drift.staleCount > 0 || drift.neverSyncedCount > 0 || drift.unwiredHookVersions > 0) {
+    if (drift.staleCount > 0 || drift.neverSyncedCount > 0 || drift.unwiredHookVersions > 0 || drift.brokenHookRuntimeVersions > 0) {
       hints.push('`agents doctor --fix` (or `agents doctor <agent>@<version> --fix`)');
     }
     if (drift.sourceBehind.length > 0) hints.push('`agents repo pull <alias>` for a source layer behind origin');

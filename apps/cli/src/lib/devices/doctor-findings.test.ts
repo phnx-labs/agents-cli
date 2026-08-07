@@ -5,6 +5,7 @@ import {
   buildLocalFindings,
   collapseAcrossVersions,
   fleetDivergenceToFindings,
+  hookRuntimeToFindings,
   signInToFindings,
   remediationFor,
   renderFindings,
@@ -16,7 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ALL_AGENT_IDS, supportsAccountInspection } from '../agents.js';
 import type { VersionResourceReport } from '../doctor-diff.js';
-import type { FleetVersionSignIn, FleetDivergence } from './fleet-divergence.js';
+import type { FleetHookRuntimeState, FleetVersionSignIn, FleetDivergence } from './fleet-divergence.js';
 import { stringWidth } from '../session/width.js';
 
 const stripAnsi = (s: string): string => s.replace(/\[[0-9;]*m/g, '');
@@ -121,6 +122,32 @@ describe('severity rubric', () => {
     expect(f?.severity).toBe('critical');
     expect(f?.message).toBe("hook 'git-guard' wired but its generated shim is missing");
     expect(f?.remediation).toBe('agents doctor claude@2.1.0 --fix');
+  });
+
+  it('rebuilds remote hook-runtime findings from closed state without a remote path or reason', () => {
+    const state: Record<string, Record<string, FleetHookRuntimeState>> = {
+      claude: { '2.1.0': 'broken', '2.2.0': 'healthy' },
+    };
+    const findings = hookRuntimeToFindings('remote-box', state);
+    expect(findings).toEqual([expect.objectContaining({
+      severity: 'critical',
+      kind: 'hook-runtime-broken',
+      device: 'remote-box',
+      agent: 'claude',
+      version: '2.1.0',
+      message: 'generated hook wrapper is unusable',
+      remediation: 'agents doctor claude@2.1.0 --fix',
+    })]);
+  });
+
+  it('marks a legacy remote that omits hook-runtime state as visibility unavailable', () => {
+    const [finding] = hookRuntimeToFindings('legacy-box', undefined);
+    expect(finding).toMatchObject({
+      severity: 'warning',
+      kind: 'hook-runtime-visibility-unavailable',
+      device: 'legacy-box',
+      remediation: 'upgrade agents-cli on this device',
+    });
   });
 
   it('a never-synced version collapses its missing resources to ONE warning (not critical)', () => {

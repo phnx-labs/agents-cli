@@ -142,7 +142,7 @@ collapses to the CRITICAL section plus one `▸ <machine>` block. Severity:
 owner-delivery lane can't reach the owner from this box, RUSH-2262); **warning**
 is `logout-unprovable`,
 `missing-resource`, `content-drift`, `never-synced`, `stale`, `repo-behind`,
-`repo-drift`, `version-skew`, `fleet-resource-gap`, `orphan`, `duplicate-hook`,
+`repo-drift`, `version-skew`, `fleet-resource-gap`, `hook-runtime-visibility-unavailable`, `orphan`, `duplicate-hook`,
 `duplicate-hook-drift`, `host-cli-missing`, `host-cli-invalid`,
 `rc-secret-export`, `env-secret-export`, `exec-policy` and `stale-cli`. (RUSH-2162 moved
 `never-synced` and `duplicate-hook-drift` to warning — both are stale-sync states

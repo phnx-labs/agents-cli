@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { wrapLine, computeVerdict, computeOverviewHealth, verdictIsAutoFixable, healthBlockLines, asRemoteSecretFindings, FLEET_INVENTORY_TIMEOUT_MS } from './doctor.js';
+import { wrapLine, computeVerdict, computeOverviewHealth, verdictIsAutoFixable, healthBlockLines, asFleetInventory, asRemoteSecretFindings, FLEET_INVENTORY_TIMEOUT_MS } from './doctor.js';
 import { stripRoutingFlags, HOST_ROUTING_SPECS } from '../lib/hosts/remote-cmd.js';
 import { stringWidth, stripAnsi } from '../lib/session/width.js';
 import type { ResourceDiff, VersionResourceReport } from '../lib/doctor-diff.js';
@@ -72,6 +72,24 @@ describe('computeVerdict (doctor per-version triaged health)', () => {
     expect(issue!.subject).toBe('ask-user-question-guard');
     expect(issue!.impact).toContain('not wired into settings.json');
     expect(issue!.fix).toBe('agents sync claude@2.1.220 --yes');
+  });
+
+  it('classifies a broken generated hook runtime as CRITICAL and auto-fixable', () => {
+    const v = computeVerdict(baseReport({
+      hookWiring: {
+        supported: false,
+        unwired: [],
+        wired: [],
+        runtimeBroken: [{ name: 'git-guard', path: '/private/shim', reason: 'missing' }],
+      },
+    }));
+    const issue = v.issues.find((candidate) => candidate.category === 'hook-runtime-broken');
+    expect(issue).toMatchObject({
+      severity: 'critical',
+      subject: 'git-guard',
+      fix: 'agents doctor claude@2.1.207 --fix',
+    });
+    expect(verdictIsAutoFixable(v)).toBe(true);
   });
 
   it('classifies a missing settings.json as CRITICAL and names the unwired count', () => {
@@ -179,6 +197,16 @@ describe('computeOverviewHealth (bare `agents doctor` triage across versions)', 
     expect(behind.fix).toBe('agents repo pull user');
     expect(v.issues.find((i) => i.category === 'orphan')!.severity).toBe('info');
     // A stale version makes it auto-fixable via `agents doctor --fix`.
+    expect(verdictIsAutoFixable(v)).toBe(true);
+  });
+
+  it('folds a broken generated hook runtime into a critical auto-fixable overview finding', () => {
+    const v = computeOverviewHealth([syncRow({ brokenHookRuntime: 1 })], [], []);
+    const issue = v.issues.find((candidate) => candidate.category === 'hook-runtime-broken');
+    expect(issue).toMatchObject({
+      severity: 'critical',
+      fix: 'agents doctor claude@2.1.220 --fix',
+    });
     expect(verdictIsAutoFixable(v)).toBe(true);
   });
 });
@@ -323,10 +351,70 @@ function runDoctor(...args: string[]): { status: number | null; stdout: string; 
       AGENTS_NO_AUTOPULL: '1',
       AGENTS_NO_UPDATE_CHECK: '1',
       AGENTS_DEVICES_DIR: path.join(testHome, '.agents', '.history', 'devices'),
+      AGENTS_HOOK_SHIMS_DIR: path.join(testHome, 'hook-shims'),
+      AGENTS_HOOK_CACHE_DIR: path.join(testHome, 'hook-cache'),
+      AGENTS_LOGS_DIR: path.join(testHome, 'logs'),
+      AGENTS_PERF_DIR: path.join(testHome, 'perf'),
     },
   });
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
+
+function seedGeneratedRuntimeHook(agent: 'claude' | 'codex', version: string): string {
+  const configDir = agent === 'claude' ? '.claude' : '.codex';
+  const userDir = path.join(testHome, '.agents');
+  const versionDir = path.join(userDir, '.history', 'versions', agent, version);
+  const binDir = path.join(versionDir, 'node_modules', '.bin');
+  const hookPath = path.join(versionDir, 'home', configDir, 'hooks', 'runtime-guard.sh');
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.mkdirSync(path.dirname(hookPath), { recursive: true });
+  fs.writeFileSync(path.join(binDir, agent), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  fs.writeFileSync(hookPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  fs.writeFileSync(
+    path.join(userDir, 'agents.yaml'),
+    `agents:\n  ${agent}: "${version}"\nhooks:\n  runtime-guard:\n    script: runtime-guard.sh\n    events: [PreToolUse]\n    matcher: Bash\n`,
+  );
+  return path.join(testHome, 'hook-shims', 'runtime-guard.sh');
+}
+
+describe('doctor generated hook runtime integration (RUSH-2382)', () => {
+  it('--check reports a missing generated wrapper as drift with structured runtime counts', () => {
+    seedHome(['2.0.0'], '2.0.0');
+    seedGeneratedRuntimeHook('claude', '2.0.0');
+
+    const result = runDoctor('--check', '--json');
+    expect(result.status).toBe(1);
+    const payload = JSON.parse(result.stdout) as {
+      brokenHookRuntimeVersions: number;
+      versions: Array<{ agent: string; version: string; brokenHookRuntime: number }>;
+    };
+    expect(payload.brokenHookRuntimeVersions).toBe(1);
+    expect(payload.versions).toContainEqual({
+      agent: 'claude', version: '2.0.0', status: 'never-synced', isDefault: true,
+      unwiredHooks: 1, brokenHookRuntime: 1, divergence: expect.any(Array),
+    });
+  });
+
+  it('--fix runs one bounded repair and exits nonzero when the wrapper remains unusable', () => {
+    seedHome([], undefined);
+    const shim = seedGeneratedRuntimeHook('codex', '0.130.0');
+    fs.mkdirSync(shim, { recursive: true });
+    const cachePath = path.join(testHome, '.agents', '.cache', '.doctor-overview.json');
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    fs.writeFileSync(cachePath, JSON.stringify({ version: 1, fetchedAt: 1, payload: { stale: true } }));
+
+    const result = runDoctor('--fix', '--json');
+    expect(result.status).toBe(1);
+    const payload = JSON.parse(result.stdout) as {
+      hookRuntimeRepair: { attempts: Array<{ attempted: boolean; repaired: boolean }>; needsAttention: string[] };
+    };
+    expect(payload.hookRuntimeRepair.attempts).toHaveLength(1);
+    expect(payload.hookRuntimeRepair.attempts[0]).toMatchObject({ attempted: true, repaired: false });
+    expect(payload.hookRuntimeRepair.needsAttention).toHaveLength(1);
+    expect(payload.hookRuntimeRepair.needsAttention[0]).toContain('repair failed [EISDIR]');
+    expect(fs.existsSync(cachePath)).toBe(false);
+  });
+});
 
 describe('doctor qualifier resolution via subprocess (issue #2058)', () => {
   it('@latest resolves to the newest installed version, not a literal string', () => {
@@ -510,6 +598,28 @@ describe('asRemoteSecretFindings — a remote box\'s secret hygiene, forwarded (
     expect(asRemoteSecretFindings(undefined, 'm9')).toEqual([]);
     expect(asRemoteSecretFindings({ findings: [] }, 'm9')).toEqual([]);
     expect(asRemoteSecretFindings('nope', 'm9')).toEqual([]);
+  });
+});
+
+describe('asFleetInventory hook-runtime wire contract', () => {
+  const payload = (hookRuntime: unknown) => ({
+    resources: { hooks: [] },
+    agentVersions: { claude: ['2.1.0'] },
+    repos: { agents: null, system: null },
+    ...(hookRuntime === undefined ? {} : { hookRuntime }),
+  });
+
+  it('accepts the closed state map and accepts a missing field from an older remote', () => {
+    expect(asFleetInventory(payload({ claude: { '2.1.0': 'broken' } }))?.hookRuntime)
+      .toEqual({ claude: { '2.1.0': 'broken' } });
+    expect(asFleetInventory(payload(undefined))?.hookRuntime).toBeUndefined();
+  });
+
+  it('rejects remote path/text payloads and incomplete or unknown enum state', () => {
+    expect(asFleetInventory(payload({ claude: { '2.1.0': { state: 'broken', path: '/remote/hook.sh' } } }))).toBeNull();
+    expect(asFleetInventory(payload({ claude: { '2.1.0': 'broken because x' } }))).toBeNull();
+    expect(asFleetInventory(payload({ claude: { '2.1.0': 'healthy', '2.2.0': 'broken' } }))).toBeNull();
+    expect(asFleetInventory(payload({}))).toBeNull();
   });
 });
 
