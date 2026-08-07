@@ -2503,8 +2503,8 @@ readiness/context fields RT-1..RT-8 describe.
   no sandbox — `lib/routines.ts:166`) MAY default to the target `$HOME` when it has no
   anchor or `cwd`: deterministic housekeeping (`git pull`, `npm i -g`, a notify) is
   home-relative by nature. An **`agent`** or **`workflow`** routine MUST NOT — see
-  RT-5. Status: **[Intended]** (the `command` body is Current; the "may default to
-  home" readiness rule is [Intended]).
+  RT-5. Status: **[Intended]** (see RT-GAP-1; the `command` body is Current, the "may
+  default to home" readiness rule is [Intended]).
 
 ### 3. Readiness — a proven blocker saves the routine paused
 
