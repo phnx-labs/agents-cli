@@ -975,10 +975,11 @@ export function claudeUsageAccessTokenNoRefresh(
 /** Fetch Claude usage via the Anthropic OAuth usage API. */
 async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
-    // Opt into the no-ACL access-token cache: this is the every-60s watchdog hot
-    // path and usage needs only the access token, so it kills the Touch ID storm.
-    // Daemon refresh also sets fileOnly so we never fall through to the ACL
-    // keychain item (that path is the Touch ID prompt).
+    // accessTokenCache: this is the every-60s watchdog hot path and usage needs
+    // only the access token, so it reads ONLY the file-based setup-token and never
+    // the interactive login (reading that ACL-bound token and firing it at the
+    // usage API is what got it revoked — RUSH-1822). No setup-token => null =>
+    // "usage pending". fileOnly additionally forbids the ACL keychain path.
     const oauth = await loadClaudeOauth(options?.home, {
       accessTokenCache: true,
       fileOnly: options?.fileOnly === true,
@@ -1352,9 +1353,10 @@ export interface ProviderProbe {
 
 /** Probe Claude's OAuth token against the usage endpoint. Never refreshes — reports `expired` for a near-expiry token; see the comment below (RUSH-1822). */
 export async function probeClaudeStatus(home?: string, cliVersion?: string | null): Promise<ProviderProbe> {
-  // Opt into the no-ACL access-token cache: the daemon warms this probe every ~3
-  // min per account and it never refreshes (access token only), so caching is safe
-  // and stops it from adding to the Touch ID storm.
+  // accessTokenCache: the daemon warms this probe every ~3 min per account, so it
+  // reads ONLY the file-based setup-token and never the interactive login —
+  // transmitting that ACL-bound token to the usage API from a background loop is
+  // what got it revoked (RUSH-1822). No setup-token => token 'missing' below.
   const oauth = await loadClaudeOauth(home, { accessTokenCache: true });
   const accessToken = oauth?.accessToken?.trim();
   if (!accessToken) return { status: null, token: 'missing' };
@@ -1784,8 +1786,8 @@ export async function saveClaudeOauth(
   // Windows not yet supported. An injected test backend is the exception, for
   // the same reason as the loadClaudeOauth guard above: it makes the keychain
   // path exercisable anywhere, and without it this returns before the rotated
-  // credential is written OR the no-ACL cache is evicted — so a cached reader
-  // keeps serving the pre-rotation access token.
+  // credential is written OR a stale no-ACL cache item an earlier version wrote
+  // is evicted (deleteCachedClaudeOauth) — leaving that stale item behind.
   if (process.platform !== 'darwin' && process.platform !== 'linux' && !isKeychainBackendOverridden()) {
     return false;
   }

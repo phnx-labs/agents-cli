@@ -263,8 +263,9 @@ export async function buildLocalUsageAccounts(): Promise<LocalUsageAccount[]> {
         usageKey,
         agentId,
         // fileOnly: never open the ACL-bound keychain item from the daemon —
-        // that path is the Touch ID storm. Usage reads setup-token /
-        // no-ACL cache / .credentials.json only (see loadClaudeOauth).
+        // that path is the Touch ID storm. Usage reads the file-based setup-token
+        // only, never the interactive login (see loadClaudeOauth); no setup-token
+        // reads as "usage pending".
         fetch: () =>
           getUsageInfo(agentId, {
             home: fetchInput.home,
