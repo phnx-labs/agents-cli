@@ -1536,11 +1536,21 @@ async function gatherActiveSessionsLive(
 async function renderActiveSessions(
   asJson: boolean,
   waitingOnly = false,
-  opts: { local?: boolean; hosts?: string[]; bookmarksOnly?: boolean; statuses?: LiveStatusFilter[] } = {},
+  opts: {
+    local?: boolean;
+    hosts?: string[];
+    bookmarksOnly?: boolean;
+    statuses?: LiveStatusFilter[];
+    routine?: boolean | string;
+  } = {},
 ): Promise<void> {
   const self = machineId();
   const gathered = await gatherActiveSessions(opts);
   const { remoteDeviceCount } = gathered;
+  // Backfill agent version, refs, created time, and routine provenance from the
+  // historical index. Routine filtering needs that provenance before it narrows
+  // the live pool; doing it here also enriches both JSON and human output.
+  backfillActiveRowsFromIndex(gathered.sessions);
   // --bookmarks narrows the live view too. Applied HERE, not only in the
   // browser: the browser is skipped for --json, --waiting, a pipe, a multi-host
   // scope, and an SSH-fanout peer, and the flag silently did nothing on every
@@ -1549,20 +1559,14 @@ async function renderActiveSessions(
   const merged = opts.bookmarksOnly
     ? gathered.sessions.filter((s) => !!s.sessionId && listBookmarks().has(s.sessionId))
     : gathered.sessions;
+  const routineFiltered = filterActiveSessionsByRoutine(merged, opts.routine);
 
   // Status flags form a union. --waiting additionally retains its scriptable
   // gate: exit non-zero when the union contains a session awaiting the user.
   const statusFiltered = opts.statuses?.length
-    ? merged.filter((session) => opts.statuses!.some((status) => matchesLiveStatus(session, status)))
-    : merged.filter(isRunningLiveSession);
+    ? routineFiltered.filter((session) => opts.statuses!.some((status) => matchesLiveStatus(session, status)))
+    : routineFiltered.filter(isRunningLiveSession);
   const sessions = statusFiltered;
-
-  // Backfill agent version + ticket/PR/label/created onto the live rows from the
-  // historical index (RUSH-2205) — a running process reports none of these, and
-  // an orphan row usually lacks them. Done before both the JSON and human paths
-  // so every consumer (incl. the SSH fan-out's remote --json) sees enriched rows;
-  // transcripts sync across the fleet, so a remote row resolves from the local DB.
-  backfillActiveRowsFromIndex(sessions);
 
   if (asJson) {
     // Resolve who is watching each local tmux pane before serializing: `viewingIn`
@@ -1609,6 +1613,25 @@ async function renderActiveSessions(
 
   // Scriptable gate: a non-zero exit when anything is waiting on the user.
   if (waitingOnly && sessions.some(isAwaitingUser)) process.exitCode = 1;
+}
+
+/** Apply the routine selector to enriched live rows for every non-browser active view. */
+export function filterActiveSessionsByRoutine(
+  sessions: ActiveSession[],
+  routine: boolean | string | undefined,
+): ActiveSession[] {
+  if (!routine) return sessions;
+  const routineSessions = sessions.filter((session) =>
+    session.origin === 'routine' || !!session.routineName,
+  );
+  if (typeof routine !== 'string') return routineSessions;
+  const names = [...new Set(
+    routineSessions.map((session) => session.routineName).filter((name): name is string => !!name),
+  )];
+  const selected = resolveRoutineName(routine, names);
+  return selected
+    ? routineSessions.filter((session) => session.routineName === selected)
+    : [];
 }
 
 export type LiveStatusFilter =
@@ -2402,6 +2425,7 @@ async function sessionsAction(
       hosts: options.host,
       bookmarksOnly: options.bookmarks === true,
       statuses: liveStatuses,
+      routine: options.routine,
     });
     return;
   }
