@@ -2356,6 +2356,24 @@ nothing but its own view cache.
   Routine definitions MUST NOT carry mutable `enabled:` or `devices:` activation fields. The same
   definition MAY be active on multiple devices when its input is device-local;
   shared-input work still requires the single-executor safeguards in SING-7.
+- **SING-5b (MUST).** Every scheduled occurrence MUST have a deterministic UTC
+  slot identity and MUST be atomically claimed before dispatch. Redelivery of the
+  same `(routine, scheduledFor)` slot MUST resolve to the existing attempt and
+  MUST NOT spawn a second process. Catch-up claims protect missed-fire recovery;
+  they do not replace the ordinary scheduled-slot claim.
+- **SING-5c (MUST).** A routine MUST NOT overlap itself across any entry point,
+  including manual foreground, detached, cron, catch-up, webhook, host, fleet,
+  and cloud execution. A losing request MUST produce an inspectable skipped result
+  linked to the active run and MUST NOT spawn.
+- **SING-5d (MUST).** Routine execution context MUST be resolved on the eventual
+  execution target from the singular project anchor and portable `cwd`. Plural
+  `projects` metadata and external `repo` identity MUST NOT affect the working
+  directory. A proven path, trust, write, authentication, reachability, or
+  placement blocker MUST leave the definition paused rather than defer failure to
+  its next schedule.
+- **SING-5e (MUST).** Run metadata MUST be allocated before pre-spawn work so every
+  blocked, skipped, failed, timed-out, missed, and completed attempt remains
+  inspectable without requiring an archived session transcript.
 - **SING-6 (MUST).** A new fleet-affecting feature MUST be implemented in
   `apps/cli` (daemon routine and/or command) first; the UI PR adds rendering and
   control wiring only. If the feature seemingly requires UI-side execution, SING-3

@@ -1014,23 +1014,29 @@ agents secrets list   # EXPIRING column flags secrets due in the next 30 days
 agents routines add daily-digest \
   --schedule "0 9 * * 1-5" \
   --agent claude \
+  --project-anchor agents-cli \
+  --cwd apps/cli \
   --prompt "Review yesterday's PRs and summarize key changes"
 
 agents routines list                   # All jobs + next run times
 agents routines run daily-digest       # Test it now, ignore the schedule
 agents routines logs daily-digest      # Last execution — status + report (add --full for raw stdout)
+agents routines runs daily-digest      # Every attempt, including blocked/skipped pre-session runs
+agents routines doctor daily-digest    # Project/CWD/trust/write/auth readiness
 agents routines stats                  # Run count, failed, missed, avg/p50/p95 duration — per job or all
 
 # Definitions sync to every device; activation is stored per hostname
 agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
+  --cwd '~' \
   --prompt "Drain the local work queue"
 
-agents routines devices nightly-drain --set yosemite-s0,mac-mini  # enable on both hosts
+agents routines devices nightly-drain --set yosemite-s0           # one schedule owner
 agents routines list --host yosemite-s0                            # query another device
 
 # Signed webhook trigger: Linear issue labeled "agent" fires a routine
 agents routines add agent-labeled-issue --on linear:Issue --action update \
   --team-key RUSH --label agent --agent claude \
+  --cwd '~' \
   --prompt "Work the Linear issue that was just labeled agent"
 agents webhook serve --secrets-bundle webhooks --port 8787          # /hooks/linear, /hooks/github
 agents funnel up yosemite-s0 --local-port 8787 --port 443           # public HTTPS ingress
