@@ -87,6 +87,38 @@ import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/
 /** Shared account identity formatter, re-exported for the view-specific tests. */
 export const accountColumnLabel = accountDisplayLabel;
 
+export interface AccountOrderedVersion {
+  version: string;
+  email: string | null;
+}
+
+/**
+ * Human `agents view` row order: selected default first, then email-bearing
+ * accounts alphabetically, then installs whose account has no email. Version
+ * descending is the deterministic tie-breaker and preserves the old order for
+ * every non-email harness.
+ */
+export function compareAccountOrderedVersions(
+  a: AccountOrderedVersion,
+  b: AccountOrderedVersion,
+  globalDefault: string | null,
+): number {
+  const aIsDefault = a.version === globalDefault;
+  const bIsDefault = b.version === globalDefault;
+  if (aIsDefault !== bIsDefault) return aIsDefault ? -1 : 1;
+
+  const aEmail = a.email?.toLowerCase() ?? null;
+  const bEmail = b.email?.toLowerCase() ?? null;
+  if (aEmail !== null && bEmail === null) return -1;
+  if (aEmail === null && bEmail !== null) return 1;
+  if (aEmail !== null && bEmail !== null) {
+    const emailOrder = aEmail.localeCompare(bEmail);
+    if (emailOrder !== 0) return emailOrder;
+  }
+
+  return compareVersions(b.version, a.version);
+}
+
 /**
  * Overview (`agents view` with no agent filter) caps compact usage windows so
  * multi-meter agents (Antigravity's four model quotas, Droid's three buckets)
@@ -633,12 +665,16 @@ async function showInstalledVersions(
 	        : '';
 	      console.log(`  ${chalk.bold(agentLabel(agentId))}${strategyLabel}${noDefaultLabel}`);
 
-	      // Sort versions with default first, then by semver descending
-      const sortedVersions = [...versions].sort((a, b) => {
-        if (a === globalDefault) return -1;
-        if (b === globalDefault) return 1;
-        return compareVersions(b, a);
-      });
+	      // Account information is already loaded above. Keep the selected default
+	      // first, then make multi-account installs scannable by email. Harnesses
+	      // without email identities retain their prior version-descending order.
+      const sortedVersions = versions
+        .map((version) => ({
+          version,
+          email: infoMap.get(`${agentId}:${version}`)?.email ?? null,
+        }))
+        .sort((a, b) => compareAccountOrderedVersions(a, b, globalDefault))
+        .map(({ version }) => version);
 
       for (const version of sortedVersions) {
         const isDefault = version === globalDefault;
