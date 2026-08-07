@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `upgrade`, `_internal`).
 
-_99 command groups · 571 commands._
+_99 command groups · 568 commands._
 
 ## accounts — Browse and name signed-in harness accounts
 
@@ -780,8 +780,6 @@ agents secrets generate [length]                   Generate a random password
 agents secrets get <item> [key]                    Print one secret value for shell hooks/automation. One arg = a raw keychain item by name; two args = one KEY out of a bundle (`get <bundle> <KEY>`). Cross-platform.
 agents secrets import [bundle]                     Import keys into a bundle from a .env file, a 1Password vault, or legacy iCloud Keychain bundles. The bundle is created if it does not exist. Values are stored in the bundle's backend (keychain by default).
 agents secrets import-keyring                      Migrate agents-cli secrets from the OS keyring / Credential Manager into the encrypted file store (headless-safe). Dry-run by default.
-agents secrets lease <bundle>                      Hold only an explicit subset of a bundle until an independent expiry.
-agents secrets leases                              List active scoped secret leases.
 agents secrets list [query]                        List configured secrets bundles, optionally filtered (use --host/--hosts for other machines over SSH)
 agents secrets lock [names...]                     Wipe bundles from the secrets-agent (forces Touch ID again next read). Default: all.
 agents secrets mcp                                 Run a stdio MCP server exposing get_secret(bundle, key) — hand credentials to an MCP-speaking agent by name at call time, never through the child process environment
@@ -797,7 +795,6 @@ agents secrets rekey                               Replace enumerable keychain s
 agents secrets remote-list                         List bundles currently stored on api.prix.dev for this account.
 agents secrets remove [bundle] [key]               Remove a key from the bundle. Purges the keychain item if the ref was keychain:. Use --keep-secret to retain it.
 agents secrets rename <old> <new>                  Rename a bundle. Moves the metadata and every keychain-backed value to the new name.
-agents secrets revoke <lease-id>                   Revoke one scoped secret lease immediately.
 agents secrets rotate [bundle] [key]               Rotate an existing keychain-backed secret (replaces the value, preserves metadata unless overridden).
 agents secrets rotate-passphrase                   Re-key the encrypted file store under a new machine-local passphrase (atomic, headless-safe). Dry-run by default.
 agents secrets set <item>                          Store a raw keychain item by name (for shell hooks/automation). Cross-platform; no bundle required.
