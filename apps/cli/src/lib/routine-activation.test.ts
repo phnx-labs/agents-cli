@@ -46,6 +46,24 @@ describe('device routine activation', () => {
     expect(activation.enabledRoutineNames()).toEqual(['check-updates']);
   });
 
+  it('adds replacement routines to a materialized manifest exactly once', async () => {
+    vi.doMock('./machine-id.js', () => ({ machineId: () => 'test-host' }));
+    const activation = await load();
+    activation.replaceEnabledRoutines(['existing']);
+
+    expect(activation.addEnabledRoutinesOnUpgrade(['watchdog', 'device-probe'])).toBe(true);
+    expect(activation.enabledRoutineNames()).toEqual(['device-probe', 'existing', 'watchdog']);
+    expect(activation.addEnabledRoutinesOnUpgrade(['watchdog', 'device-probe'])).toBe(false);
+  });
+
+  it('leaves an unmaterialized manifest definition-driven', async () => {
+    vi.doMock('./machine-id.js', () => ({ machineId: () => 'test-host' }));
+    const activation = await load();
+
+    expect(activation.addEnabledRoutinesOnUpgrade(['watchdog'])).toBe(false);
+    expect(activation.enabledRoutineNames()).toBeNull();
+  });
+
   it('reads peer activation without writing peer documents', async () => {
     vi.doMock('./machine-id.js', () => ({ machineId: () => 'self' }));
     const activation = await load();

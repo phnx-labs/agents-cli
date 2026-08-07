@@ -31,6 +31,16 @@ export function replaceEnabledRoutines(names: Iterable<string>): string[] {
   return normalized;
 }
 
+/** Add newly introduced replacements to an already-materialized device manifest. */
+export function addEnabledRoutinesOnUpgrade(names: Iterable<string>): boolean {
+  const current = enabledRoutineNames();
+  if (current === null) return false;
+  const next = normalizeRoutineNames([...current, ...names]);
+  if (next.length === current.length && next.every((name, index) => name === current[index])) return false;
+  replaceEnabledRoutines(next);
+  return true;
+}
+
 /**
  * Add or remove one routine on this machine. `legacyEnabledNames` seeds the
  * manifest the first time an upgraded host changes activation, preserving every

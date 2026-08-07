@@ -192,6 +192,8 @@ export const DAEMON_TICKS: Record<string, () => Promise<void>> = {
   'auto-dispatch': runAutoDispatchTick,
 };
 
+export const DAEMON_TICK_ROUTINE_NAMES = Object.freeze(Object.keys(DAEMON_TICKS));
+
 /** Run one named tick, or throw for an unknown name (fails the routine run loud). */
 export async function runDaemonTick(name: string): Promise<void> {
   const fn = DAEMON_TICKS[name];
