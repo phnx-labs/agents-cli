@@ -1401,8 +1401,16 @@ export interface DaemonStopResult {
  * fixture with its own HOME, a separate install/home) registers elsewhere and is
  * invisible here — it is never a stop/takeover target. POSIX-only (the registry
  * and its `ps` liveness probe are); `[]` on Windows.
+ *
+ * Exported for `agents daemon status`/`doctor`/`services` (RUSH-2368): those
+ * commands previously flagged every `__daemon-run` on the box (a raw `ps` scan)
+ * as a "duplicate" of this daemon, which misreported test fixtures under their
+ * own HOME — and therefore their own state dir and registry — as strays to
+ * kill. This registry read is the same scope the reaper (`reapStrayDaemons`)
+ * and the stop postcondition (`stopDaemon`) already use, so the display and the
+ * reaper agree on what a duplicate is.
  */
-function findSurvivingStateDirDaemons(exclude: Set<number>): number[] {
+export function findSurvivingStateDirDaemons(exclude: Set<number>): number[] {
   if (process.platform === 'win32') return [];
   const dir = getDaemonInstancesDir();
   let entries: string[];

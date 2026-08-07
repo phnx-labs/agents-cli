@@ -7,7 +7,7 @@
  * absent; it is absent no longer.
  */
 import { describe, it, expect } from 'vitest';
-import { spawnSync } from 'child_process';
+import { spawnSync, spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -48,6 +48,34 @@ function run(home: string, args: string[]): ReturnType<typeof spawnSync> {
   });
 }
 
+/**
+ * Spawn a real, long-lived process whose command line ends in `__daemon-run`
+ * (so `isDaemonRunProcess`'s `ps` check accepts it — see
+ * `lib/daemon.test.ts`'s "reaps a live __daemon-run registrant" test, same
+ * technique) and register it in `home`'s OWN instance registry, exactly the
+ * marker `registerDaemonInstance` would write. A real live process, not a
+ * mock — `agents daemon status` reads it through the actual registry +
+ * `ps`-liveness path, the same one the reaper and `stopDaemon`'s postcondition
+ * use.
+ */
+async function spawnFakeRegisteredDaemon(home: string): Promise<ChildProcess> {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'], {
+    stdio: 'ignore',
+  });
+  // Give the exec a moment to land before `ps` (read by the status command's
+  // isDaemonRunProcess check) is asked to see its real argv — mirrors
+  // lib/daemon.test.ts's identical fake-daemon technique.
+  await new Promise((r) => setTimeout(r, 150));
+  const instancesDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'instances');
+  fs.mkdirSync(instancesDir, { recursive: true });
+  fs.writeFileSync(path.join(instancesDir, String(child.pid)), '__daemon-run', 'utf-8');
+  return child;
+}
+
+function killFakeDaemon(child: ChildProcess): void {
+  try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* already gone */ }
+}
+
 describeDaemon('agents daemon', () => {
   it('resolves as a real command — the group daemon-removal.test.ts used to pin absent', () => {
     const res = run(makeHome(), ['--help']);
@@ -67,15 +95,12 @@ describeDaemon('agents daemon', () => {
     const payload = JSON.parse(res.stdout);
     expect(payload.state).toBe('stopped');
     expect(payload.pid).toBeNull();
-    // `duplicates` scans every __daemon-run process on the BOX, not scoped to
-    // this test's isolated HOME (that is the point of the duplicates check —
-    // it must see stray daemons from other installs). On a dev machine with a
-    // real daemon running this is legitimately non-empty; assert the shape,
-    // not host-dependent contents.
-    expect(Array.isArray(payload.duplicates)).toBe(true);
-    for (const d of payload.duplicates) {
-      expect(typeof d.pid).toBe('number');
-    }
+    // `duplicates` is scoped to THIS install's instance registry (RUSH-2368),
+    // which lives inside the isolated AGENTS_DAEMON_DIR this test set. Nothing
+    // has ever registered there, so it is always empty here — whatever else is
+    // running on the dev machine (or on another test's isolated HOME) is a
+    // different registry and never appears, by construction, not by luck.
+    expect(payload.duplicates).toEqual([]);
     expect(payload.daemonEnabled).toBe(true);
     expect(payload.services.secretsBroker).toHaveProperty('reachable', false);
     expect(payload.services.browserIpc).toHaveProperty('bound', false);
@@ -165,10 +190,11 @@ describeDaemon('agents daemon', () => {
   });
 
   it('doctor does not flag "not running" once the daemon is disabled for this device', () => {
-    // Duplicate-process and hosted-service problems can still fire here — the
-    // scan is box-wide (see the status --json test) and this dev machine may
-    // have a real daemon running under a different install. What disabling
-    // controls is specifically the "should be running but isn't" check.
+    // Hosted-service problems can still fire here — the secrets broker/browser
+    // IPC probes are real sockets, not scoped to this install. Duplicate-process
+    // problems cannot: they are scoped to THIS install's instance registry
+    // (RUSH-2368), which is always empty for a fresh isolated HOME. What
+    // disabling controls is specifically the "should be running but isn't" check.
     const home = makeHome();
     run(home, ['disable']);
     const res = run(home, ['doctor']);
@@ -186,4 +212,79 @@ describeDaemon('agents daemon', () => {
     expect(res.status).toBe(0);
     expect(res.stdout).toContain('not running');
   });
+
+  it(
+    'duplicates come from THIS install\'s instance registry — a fixture daemon under a separate ' +
+    'AGENTS_DAEMON_DIR never appears, even though a genuine same-registry duplicate does (RUSH-2368)',
+    async () => {
+      const home = makeHome();
+      const otherHome = makeHome();
+      let ownDuplicate: ChildProcess | undefined;
+      let foreignFixture: ChildProcess | undefined;
+      try {
+        // A real __daemon-run process registered in `home`'s OWN registry — a
+        // genuine duplicate (e.g. a predecessor that crashed without cleanup).
+        ownDuplicate = await spawnFakeRegisteredDaemon(home);
+        // A real __daemon-run process registered in a COMPLETELY SEPARATE
+        // registry (`otherHome`) — standing in for the leaked vitest fixture
+        // this ticket was filed over: same box, different HOME, therefore a
+        // different getDaemonDir() and a different registry. A raw `ps` scan
+        // sees both processes identically; the registry does not.
+        foreignFixture = await spawnFakeRegisteredDaemon(otherHome);
+
+        const res = run(home, ['status', '--json']);
+        expect(res.status).toBe(0);
+        const payload = JSON.parse(res.stdout);
+        const duplicatePids = payload.duplicates.map((d: { pid: number }) => d.pid);
+        expect(duplicatePids).toContain(ownDuplicate.pid);
+        expect(duplicatePids).not.toContain(foreignFixture.pid);
+      } finally {
+        if (ownDuplicate) killFakeDaemon(ownDuplicate);
+        if (foreignFixture) killFakeDaemon(foreignFixture);
+        fs.rmSync(home, { recursive: true, force: true });
+        fs.rmSync(otherHome, { recursive: true, force: true });
+      }
+    },
+    20_000,
+  );
+
+  it(
+    'a subsystem whose last-ok record is stale but is unreachable RIGHT NOW never renders "healthy" (RUSH-2368)',
+    () => {
+      const home = makeHome();
+      try {
+        // Simulate a daemon that hosted the secrets broker earlier in its life
+        // (recordSubsystemOk at startup) and has since gone unreachable — the
+        // exact shape of the real bug: `health.json` still says "last ok" with
+        // zero consecutive failures, while nothing is listening on the socket
+        // right now. Written directly in the persisted format `daemon-health.ts`
+        // itself writes, read back through the real `readSubsystemHealth` path.
+        const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+        fs.mkdirSync(daemonDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(daemonDir, 'health.json'),
+          JSON.stringify({
+            'secrets-broker': {
+              subsystem: 'secrets-broker',
+              lastError: null,
+              lastErrorAt: null,
+              consecutiveFailures: 0,
+              lastOkAt: new Date(Date.now() - 60_000).toISOString(),
+            },
+          }),
+          'utf-8',
+        );
+
+        const res = run(home, ['services']);
+        expect(res.status).toBe(0);
+        // The old bug: a line reading "healthy  secrets broker  (unreachable)".
+        // No daemon is listening on this socket, so the live probe MUST win —
+        // the record's stale zero-failure streak must never render "healthy".
+        expect(res.stdout).not.toMatch(/healthy\s+secrets broker/);
+        expect(res.stdout).toContain('(unreachable)');
+      } finally {
+        fs.rmSync(home, { recursive: true, force: true });
+      }
+    },
+  );
 });
