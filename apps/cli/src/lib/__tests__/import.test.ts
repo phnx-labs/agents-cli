@@ -220,7 +220,7 @@ describe('importInstallScriptBinary', () => {
 
     const result = importInstallScriptBinary(ANTIGRAVITY_SPEC, '1.0.6', binaryPath, versionDir);
     expect(result.success).toBe(true);
-    expect(result.resolvedFromPath).toBe(binaryPath);
+    expect(result.resolvedFromPath).toBe(fs.realpathSync(binaryPath));
 
     const managedBinary = path.join(versionDir, 'node_modules', '.bin', 'agy');
     expect(fs.lstatSync(managedBinary).isSymbolicLink()).toBe(true);
@@ -230,10 +230,31 @@ describe('importInstallScriptBinary', () => {
     const marker = JSON.parse(fs.readFileSync(path.join(versionDir, 'package.json'), 'utf8'));
     expect(marker.imported).toBe(true);
     expect(marker.installScriptBased).toBe(true);
-    expect(marker.from).toBe(binaryPath);
+    expect(marker.from).toBe(fs.realpathSync(binaryPath));
 
     // Isolated home is created.
     expect(fs.existsSync(path.join(versionDir, 'home'))).toBe(true);
+  });
+
+  it('stores the native target instead of a mutable install-script launcher', () => {
+    const nativeDir = path.join(tmp, '.local', 'share', 'agy', 'versions', 'current');
+    const launcherDir = path.join(tmp, '.local', 'bin');
+    fs.mkdirSync(nativeDir, { recursive: true });
+    fs.mkdirSync(launcherDir, { recursive: true });
+    const native = path.join(nativeDir, 'agy');
+    const launcher = path.join(launcherDir, 'agy');
+    fs.writeFileSync(native, '#!/usr/bin/env bash\necho native\n');
+    fs.chmodSync(native, 0o755);
+    fs.symlinkSync(native, launcher);
+
+    const result = importInstallScriptBinary(ANTIGRAVITY_SPEC, '1.0.6', launcher, versionDir);
+    expect(result.success).toBe(true);
+    expect(result.resolvedFromPath).toBe(fs.realpathSync(native));
+
+    const managedBinary = path.join(versionDir, 'node_modules', '.bin', 'agy');
+    fs.rmSync(launcher);
+    fs.symlinkSync(path.join(tmp, 'future-shim'), launcher);
+    expect(fs.realpathSync(managedBinary)).toBe(fs.realpathSync(native));
   });
 
   it('returns skipped=true on a second import of the same version', () => {
@@ -255,6 +276,6 @@ describe('importInstallScriptBinary', () => {
       versionDir
     );
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Binary does not exist/);
+    expect(result.error).toMatch(/does not resolve to a native executable/);
   });
 });

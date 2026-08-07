@@ -252,6 +252,43 @@ describe('repairSelfReferentialBinShims', () => {
     expect(fs.realpathSync(binLink).startsWith(fs.realpathSync(shimsDir) + path.sep)).toBe(false);
   });
 
+  it('repairs an adopted Cursor launcher that reaches the shim through ~/.local/bin', () => {
+    const root = makeTempRoot();
+    const versionsRoot = path.join(root, '.history', 'versions');
+    const historyDir = path.dirname(versionsRoot);
+    const shimsDir = path.join(root, '.cache', 'shims');
+    const localBinDir = path.join(root, '.local', 'bin');
+    const nativeDir = path.join(root, '.local', 'share', 'cursor-agent', 'versions', 'current');
+    fs.mkdirSync(shimsDir, { recursive: true });
+    fs.mkdirSync(localBinDir, { recursive: true });
+    fs.mkdirSync(nativeDir, { recursive: true });
+
+    const shim = path.join(shimsDir, 'cursor-agent');
+    const launcher = path.join(localBinDir, 'cursor-agent');
+    const native = path.join(nativeDir, 'cursor-agent');
+    fs.writeFileSync(shim, '#!/bin/sh\n# dispatcher\n');
+    fs.writeFileSync(native, '#!/bin/sh\necho cursor\n');
+    fs.chmodSync(shim, 0o755);
+    fs.chmodSync(native, 0o755);
+    fs.symlinkSync(shim, launcher);
+
+    const binDir = path.join(versionsRoot, 'cursor', '2026.07.23', 'node_modules', '.bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const binLink = path.join(binDir, 'cursor-agent');
+    fs.symlinkSync(launcher, binLink);
+
+    const recordDir = path.join(historyDir, 'adopted-launchers');
+    fs.mkdirSync(recordDir, { recursive: true });
+    fs.writeFileSync(path.join(recordDir, 'cursor-agent'), `${native}\n${launcher}\n`);
+
+    withPath([localBinDir, shimsDir], () => {
+      repairSelfReferentialBinShims(versionsRoot, shimsDir, historyDir);
+      repairSelfReferentialBinShims(versionsRoot, shimsDir, historyDir);
+    });
+
+    expect(fs.realpathSync(binLink)).toBe(fs.realpathSync(native));
+  });
+
   it('removes the self-referential symlink when no real binary is on PATH', () => {
     const root = makeTempRoot();
     // Unknown agent id -> cli falls back to the dir name; guaranteed absent from PATH.

@@ -353,6 +353,10 @@ describe('AGENTS capability matrix', () => {
       }
     }
   });
+
+  it('allows current Cursor builds to open their prompt-less interactive TUI', () => {
+    expect(AGENTS.cursor.capabilities.interactiveRepl).toBe(true);
+  });
 });
 
 describe('resolveLastActive', () => {

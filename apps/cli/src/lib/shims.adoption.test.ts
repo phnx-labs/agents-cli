@@ -190,4 +190,12 @@ describe('generated shim fall-through', () => {
       droidBranch.indexOf('$HOME/.local/bin/droid'),
     );
   });
+
+  test('generic Cursor shim rejects a managed binary that resolves back to itself', () => {
+    const script = generateShimScript('cursor');
+    const genericBranch = script.slice(script.indexOf('BINARY="$VERSION_DIR/node_modules/.bin/$CLI_COMMAND"'));
+    expect(genericBranch).toContain('RESOLVED_BINARY=$(realpath "$BINARY"');
+    expect(genericBranch).toContain('RESOLVED_SHIM=$(realpath "$AGENTS_USER_DIR/.cache/shims/$CLI_COMMAND"');
+    expect(genericBranch).toContain('BINARY=$(adopted_original_bin || echo "")');
+  });
 });
