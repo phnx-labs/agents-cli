@@ -117,6 +117,18 @@ struct WatchdogCounts: Decodable {
     let skipped: Int
 }
 
+// One registered fleet device from `agents menubar snapshot --json` (sourced
+// from the local device registry — no network probe). Live load% is merged in
+// at render time from the daemon-warmed .fleet-stats.json (LocalState.deviceLoads);
+// online/offline is deliberately NOT carried (the registry's tailscale flag is
+// stale in both directions), so the menu never claims a status it can't back.
+struct Device: Decodable {
+    let name: String
+    let platform: String
+    let interactive: Bool
+    let isLocal: Bool
+}
+
 // `agents menubar snapshot --json` — the single repeating CLI read owned by
 // AGI Menu. Doctor remains a separate 15-minute diagnostic refresh.
 struct MenubarSnapshot: Decodable {
@@ -125,6 +137,10 @@ struct MenubarSnapshot: Decodable {
     let routines: [Routine]
     let recentSessions: [RecentSession]
     let activeSessions: [ActiveSession]
+    // Optional so a snapshot from an older installed `agents` CLI (no devices
+    // field) still decodes — version skew between the helper and the on-PATH CLI
+    // is real (see the multi-install notes in apps/cli/CLAUDE.md).
+    let devices: [Device]?
     let watchdog: MenubarWatchdogSnapshot
 }
 

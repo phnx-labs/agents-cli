@@ -1,18 +1,24 @@
 import AppKit
 
-/// A project header that handles its click inside the menu's tracking session.
-/// An actionable NSMenuItem ends tracking before its action runs, which made the
-/// status menu disappear on every expand/collapse. A custom item view receives
-/// the click without selecting the NSMenuItem, so rows can change in place.
-private final class ProjectAccordionRowView: NSView {
+/// A collapsible section header that handles its click inside the menu's tracking
+/// session. An actionable NSMenuItem ends tracking before its action runs, which
+/// made the status menu disappear on every expand/collapse. A custom item view
+/// receives the click without selecting the NSMenuItem, so rows change in place.
+/// Used by both the ACTIVE project accordion and the DEVICES section.
+private final class AccordionRowView: NSView {
     private let button = NSButton()
     private let summary: String
     private var expanded: Bool
+    private let expandTip: String
+    private let collapseTip: String
     var onToggle: ((Bool) -> Void)?
 
-    init(summary: String, repo: String, sessionCount: Int, expanded: Bool) {
+    init(summary: String, expanded: Bool, accessibilityLabel: String,
+         accessibilityHelp: String, expandTip: String, collapseTip: String) {
         self.summary = summary
         self.expanded = expanded
+        self.expandTip = expandTip
+        self.collapseTip = collapseTip
         let font = NSFont.menuFont(ofSize: 0)
         let textWidth = (summary as NSString).size(withAttributes: [.font: font]).width
         super.init(frame: NSRect(x: 0, y: 0, width: max(320, textWidth + 48), height: 22))
@@ -33,8 +39,8 @@ private final class ProjectAccordionRowView: NSView {
             button.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
 
-        button.setAccessibilityLabel("\(repo) project")
-        button.setAccessibilityHelp("Expand or collapse \(sessionCount) session\(sessionCount == 1 ? "" : "s")")
+        button.setAccessibilityLabel(accessibilityLabel)
+        button.setAccessibilityHelp(accessibilityHelp)
         updateLabel()
     }
 
@@ -48,7 +54,7 @@ private final class ProjectAccordionRowView: NSView {
 
     private func updateLabel() {
         button.title = "  \(expanded ? "▼" : "▶")  \(summary)"
-        button.toolTip = expanded ? "Collapse project" : "Expand project"
+        button.toolTip = expanded ? collapseTip : expandTip
         button.setAccessibilityValue(expanded ? "expanded" : "collapsed")
     }
 }
@@ -118,6 +124,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var cachedActiveSessions: [ActiveSession] = []
     private var activeSessionsLoaded = false
 
+    // The registered fleet-device roster (from `agents menubar snapshot --json`),
+    // rendered as the collapsible DEVICES section near the bottom. Live load% is
+    // merged in at render time from LocalState.deviceLoads() (the warm fleet cache).
+    private var cachedDevices: [Device] = []
+    private var devicesLoaded = false
+
     private var cachedDoctorOverview: DoctorOverview?
     private var doctorLoaded = false
     private var doctorInFlight = false
@@ -137,6 +149,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // not a second accordion level.
     private var expandedProjects = Set<String>()
     private var projectSessionItems: [String: [NSMenuItem]] = [:]
+
+    // The DEVICES section is ONE collapsible block (collapsed by default), so its
+    // state is a single flag + the rows currently shown — not the per-key Set the
+    // project accordion needs. Same in-place insert/remove, no CLI on toggle.
+    private var devicesExpanded = false
+    private var deviceRowItems: [NSMenuItem] = []
+
     /// Same form as CLI `machineId()` so engine-tagged sessions compare as local.
     private lazy var thisMachine: String = ActiveDisplay.thisMachineId()
 
@@ -271,6 +290,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         promptController.updateRecentSessions(snapshot.recentSessions)
         cachedActiveSessions = snapshot.activeSessions
         activeSessionsLoaded = true
+        cachedDevices = snapshot.devices ?? []
+        devicesLoaded = true
         watchdogEnabled = snapshot.watchdog.enabled
         cachedWatchdog = snapshot.watchdog.lastTick
     }
@@ -370,7 +391,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         badgeLoaded = loaded
         rebuild(menu, sessions: sessions, browserTasks: browserTasks,
                 recentSessions: cachedRecentSessions, routines: cachedRoutines,
-                doctor: cachedDoctorOverview, daemonPid: daemonPid, pending: pending, loaded: loaded)
+                doctor: cachedDoctorOverview, daemonPid: daemonPid, pending: pending, loaded: loaded,
+                devices: cachedDevices)
         refreshBadge()
         refreshSnapshot()
         refreshDoctorOverview()
@@ -383,9 +405,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func rebuild(_ menu: NSMenu, sessions: [Session], browserTasks: [BrowserTask],
                          recentSessions: [RecentSession], routines: [Routine],
                          doctor: DoctorOverview?, daemonPid: Int?, pending: [PendingDevice],
-                         loaded: [LoadedDevice]) {
+                         loaded: [LoadedDevice], devices: [Device]) {
         menu.removeAllItems()
         projectSessionItems.removeAll()
+        deviceRowItems.removeAll()
 
         // Prefer the engine's active list once the warm cache has it — full
         // coverage (tmux/IDE/headless), correct running/idle. The cheap
@@ -398,11 +421,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // What needs me now — rendered only when there's something actionable.
         if addNeedsAttention(menu, sessions: sessions, routines: routines,
                              daemonPid: daemonPid, loaded: loaded) {
-            menu.addItem(.separator())
-        }
-
-        // New tailnet devices to approve — only when there are any.
-        if addNewDevices(menu, pending: pending) {
             menu.addItem(.separator())
         }
 
@@ -427,6 +445,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         addRecent(menu, recentSessions: recentSessions)
         menu.addItem(.separator())
+
+        // Devices sit just above the System controls: newly-discovered nodes to
+        // approve first, then the full collapsible roster (folded by default so the
+        // long fleet list never walls the menu).
+        if addNewDevices(menu, pending: pending) {
+            menu.addItem(.separator())
+        }
+        if addDevices(menu, devices: devices) {
+            menu.addItem(.separator())
+        }
 
         addSystem(menu, doctor: doctor)
 
@@ -619,6 +647,93 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return true
     }
 
+    // The full registered-device roster as ONE collapsible block (folded by
+    // default). The fleet is long, so it stays out of the way until asked for.
+    // Rows carry live load% merged from the warm fleet cache; toggling inserts /
+    // removes rows in place with no CLI call, exactly like the project accordion.
+    // Returns true if anything was rendered (caller adds the trailing separator).
+    private func addDevices(_ menu: NSMenu, devices: [Device]) -> Bool {
+        guard !devices.isEmpty else { return false }
+        let title = "DEVICES (\(devices.count))"
+        let header = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let headerView = AccordionRowView(
+            summary: title, expanded: devicesExpanded,
+            accessibilityLabel: "Devices",
+            accessibilityHelp: "Expand or collapse \(devices.count) device\(devices.count == 1 ? "" : "s")",
+            expandTip: "Show devices", collapseTip: "Hide devices")
+        headerView.onToggle = { [weak self, weak menu, weak header] shouldExpand in
+            guard let self, let menu, let header else { return }
+            self.setDevices(expanded: shouldExpand, devices: devices, in: menu, after: header)
+        }
+        header.view = headerView
+        menu.addItem(header)
+        if devicesExpanded {
+            let rows = deviceRows(devices)
+            deviceRowItems = rows
+            for row in rows { menu.addItem(row) }
+        }
+        return true
+    }
+
+    /// In-place expand/collapse of the DEVICES block — mirrors setProject, but the
+    /// section is a single unit so its state is one flag + one row list.
+    private func setDevices(expanded: Bool, devices: [Device], in menu: NSMenu, after header: NSMenuItem) {
+        if expanded {
+            devicesExpanded = true
+            let rows = deviceRows(devices)
+            deviceRowItems = rows
+            let idx = menu.index(of: header)
+            guard idx >= 0 else { return }
+            for (offset, row) in rows.enumerated() {
+                menu.insertItem(row, at: idx + offset + 1)
+            }
+        } else {
+            devicesExpanded = false
+            for row in deviceRowItems { menu.removeItem(row) }
+            deviceRowItems = []
+        }
+        menu.update()
+    }
+
+    /// One row per device: this Mac first, then alphabetical. Load% is shown only
+    /// where the warm fleet cache has a fresh reading — its absence is never
+    /// rendered as "offline" (the roster carries no probed online/offline state).
+    private func deviceRows(_ devices: [Device]) -> [NSMenuItem] {
+        let loads = LocalState.deviceLoads()
+        let ordered = devices.sorted { a, b in
+            if a.isLocal != b.isLocal { return a.isLocal }
+            return a.name < b.name
+        }
+        return ordered.map { d in
+            let load = loads[ActiveDisplay.normalizeHost(d.name)]
+            var line = d.isLocal ? "\(d.name) (this Mac)" : d.name
+            line += " · \(d.platform)"
+            if let l = load { line += " · \(Int(l.load.rounded()))%" }
+            // ◉ marks the configured interactive host, ○ otherwise. Deliberately no
+            // color-coded status dot — the roster does not know online/offline.
+            let row = statusRow(d.interactive ? "◉" : "○", idleC, line)
+            row.submenu = deviceSubmenu(d, load: load)
+            return row
+        }
+    }
+
+    private func deviceSubmenu(_ d: Device, load: (load: Double, mem: Double?)?) -> NSMenu {
+        let sub = NSMenu()
+        if let l = load {
+            var line = "load \(Int(l.load.rounded()))%"
+            if let m = l.mem { line += " · mem \(Int(m.rounded()))%" }
+            sub.addItem(disabled(line))
+        }
+        if d.interactive { sub.addItem(disabled("interactive host")) }
+        if !sub.items.isEmpty { sub.addItem(.separator()) }
+        let ssh = "agents ssh \(d.name)"
+        let copy = NSMenuItem(title: "⧉  Copy  \(ssh)", action: #selector(onCopyText(_:)), keyEquivalent: "")
+        copy.target = self
+        copy.representedObject = ssh
+        sub.addItem(copy)
+        return sub
+    }
+
     // Two ways to start work, most-direct first:
     //   New Task    — the quick-dispatch bar: type it, agents pick it up headless.
     //   New Session — an interactive TUI in the terminal the user works in.
@@ -684,8 +799,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             let summary = ActiveDisplay.projectSummary(repo: repo, statuses: statuses,
                                                        machines: machines)
             let header = NSMenuItem(title: summary, action: nil, keyEquivalent: "")
-            let headerView = ProjectAccordionRowView(summary: summary, repo: repo,
-                                                     sessionCount: group.count, expanded: open)
+            let headerView = AccordionRowView(summary: summary, expanded: open,
+                                              accessibilityLabel: "\(repo) project",
+                                              accessibilityHelp: "Expand or collapse \(group.count) session\(group.count == 1 ? "" : "s")",
+                                              expandTip: "Expand project", collapseTip: "Collapse project")
             headerView.onToggle = { [weak self, weak menu, weak header] shouldExpand in
                 guard let self, let menu, let header else { return }
                 self.setProject(repo, expanded: shouldExpand, sessions: group,
@@ -802,6 +919,21 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func sessionDetailSubmenu(_ s: Session) -> NSMenu {
         let sub = NSMenu()
         let work = s.workTitle
+
+        // ── Primary action ────────────────────────────────────────────────
+        // Land in this session — attaches locally, or SSHes to its owning box
+        // (`agents sessions focus`, the same call Factory's Focus button uses), so
+        // it works whether the session is here or on a fleet peer. First so the one
+        // thing you usually want is under the cursor.
+        if let sid = s.sessionId, !sid.isEmpty {
+            let focus = NSMenuItem(title: "▶  Focus session",
+                                   action: #selector(onFocusSession(_:)), keyEquivalent: "")
+            focus.target = self
+            focus.representedObject = sid
+            focus.toolTip = "Open this session — locally, or over SSH on its owning device"
+            sub.addItem(focus)
+            sub.addItem(.separator())
+        }
 
         // ── What ──────────────────────────────────────────────────────────
         if !work.isEmpty {
@@ -930,6 +1062,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         guard let sid = sender.representedObject as? String else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(sid, forType: .string)
+    }
+
+    @objc private func onCopyText(_ sender: NSMenuItem) {
+        guard let text = sender.representedObject as? String else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     @objc private func onOpenURL(_ sender: NSMenuItem) {
@@ -1160,10 +1298,23 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private func routineSubmenu(_ r: Routine) -> NSMenu {
         let sub = NSMenu()
-        if let failure = routineFailureDetail(r, max: 72) {
-            sub.addItem(disabled(failure))
-            sub.addItem(.separator())
+
+        // Last-run outcome / live status, the failure reason (when there is one),
+        // and the next fire — all from the already-decoded, server-verified routine
+        // fields, so no fresh fetch on open.
+        var addedInfo = false
+        if let status = routineRunStatusLine(r) {
+            sub.addItem(disabled(status)); addedInfo = true
         }
+        if r.lastStatus == "failed" || r.lastStatus == "timeout",
+           let reason = r.failureReason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
+            let clean = reason.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            sub.addItem(disabled("   \(trim(clean, 72))")); addedInfo = true
+        }
+        if r.enabled, r.lastStatus != "running", let next = r.nextRunHuman, next != "-" {
+            sub.addItem(disabled("next \(next)")); addedInfo = true
+        }
+        if addedInfo { sub.addItem(.separator()) }
 
         let run = NSMenuItem(title: "Run now", action: #selector(onRoutineRun(_:)), keyEquivalent: "")
         run.target = self
@@ -1182,6 +1333,48 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         logs.representedObject = r.name
         sub.addItem(logs)
         return sub
+    }
+
+    // One-line "how did the last run go / is one going now" summary for a routine
+    // submenu. `running` is server-verified (the CLI pid-checks it before emitting
+    // the field), so "● running now" is trustworthy, not a stale marker.
+    private func routineRunStatusLine(_ r: Routine) -> String? {
+        guard let status = r.lastStatus else {
+            return r.overdue ? "⚠ overdue" : nil
+        }
+        switch status {
+        case "running":
+            if let started = r.lastRunStartedAt.flatMap(parseIso) {
+                return "● running now · started \(elapsedShort(started.timeIntervalSince1970 * 1000)) ago"
+            }
+            return "● running now"
+        case "completed":
+            var line = "✓ completed"
+            if let dur = routineRunDuration(r) { line += " · ran \(dur)" }
+            line += " · \(shortWhen(r.lastRunCompletedAt))"
+            return line
+        case "failed", "timeout":
+            var line = status == "timeout" ? "✕ timed out" : "✕ failed"
+            if let code = r.exitCode { line += " exit \(code)" }
+            line += " · \(shortWhen(r.lastRunCompletedAt))"
+            return line
+        case "missed":
+            return "⦸ missed · \(shortWhen(r.lastRunCompletedAt))"
+        default:
+            return "\(status) · \(shortWhen(r.lastRunCompletedAt))"
+        }
+    }
+
+    // Human duration of the last run ("45s" / "3m 12s" / "1h 4m"), when both the
+    // start and completion timestamps are present.
+    private func routineRunDuration(_ r: Routine) -> String? {
+        guard let start = r.lastRunStartedAt.flatMap(parseIso),
+              let end = r.lastRunCompletedAt.flatMap(parseIso) else { return nil }
+        let secs = max(0, Int(end.timeIntervalSince(start)))
+        if secs < 60 { return "\(secs)s" }
+        let mins = secs / 60, rem = secs % 60
+        if mins < 60 { return rem == 0 ? "\(mins)m" : "\(mins)m \(rem)s" }
+        return "\(mins / 60)h \(mins % 60)m"
     }
 
     private func allRoutinesSubmenu(_ routines: [Routine]) -> NSMenu {

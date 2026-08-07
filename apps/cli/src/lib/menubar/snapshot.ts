@@ -4,10 +4,28 @@ import * as path from 'path';
 import { buildRoutineListJson } from '../../commands/routines.js';
 import { backfillActiveRowsFromIndex, serializeActiveSessionsForJson, serializeSessionsJson } from '../../commands/sessions.js';
 import { getConfigValue } from '../device-config.js';
+import { loadDevices } from '../devices/registry.js';
+import { machineId } from '../machine-id.js';
 import { querySessions } from '../session/db.js';
 import { readActiveSessionsCache } from '../session/session-cache.js';
 import { getRuntimeStateDir } from '../state.js';
 import type { WatchdogTickResult } from '../watchdog/runner.js';
+
+/**
+ * One registered fleet device, for the menu-bar's collapsible DEVICES section.
+ * Sourced from the local registry read (`loadDevices`) — no network probe — so
+ * it carries only what the registry knows for sure (name, platform, whether it
+ * is the interactive host, whether it is this machine). Live load% is merged in
+ * on the Swift side from the daemon-warmed `.fleet-stats.json`; online/offline
+ * is deliberately NOT claimed here (the registry's cached tailscale flag is
+ * documented as stale in both directions — registry.ts isLikelyOnline).
+ */
+export interface MenubarDevice {
+  name: string;
+  platform: string;
+  interactive: boolean;
+  isLocal: boolean;
+}
 
 export interface MenubarSnapshot {
   version: 1;
@@ -15,10 +33,30 @@ export interface MenubarSnapshot {
   routines: Record<string, unknown>[];
   recentSessions: Record<string, unknown>[];
   activeSessions: Record<string, unknown>[];
+  devices: MenubarDevice[];
   watchdog: {
     enabled: boolean;
     lastTick: Pick<WatchdogTickResult, 'didNudge' | 'counts'> | null;
   };
+}
+
+/**
+ * The full registered-device roster for the menu bar, from the local registry
+ * file only (no ssh, no stats probe) — as cheap as `buildRoutineListJson()`, so
+ * it rides the same 3-minute snapshot poll instead of a second timer.
+ */
+async function buildMenubarDevices(): Promise<MenubarDevice[]> {
+  const reg = await loadDevices();
+  const interactiveHost = getConfigValue('interactive.host').value as string | undefined;
+  const self = machineId();
+  return Object.keys(reg)
+    .sort()
+    .map((name) => ({
+      name,
+      platform: reg[name].platform,
+      interactive: name === interactiveHost,
+      isLocal: name === self,
+    }));
 }
 
 export function readLastWatchdogTick(
@@ -33,9 +71,10 @@ export function readLastWatchdogTick(
 
 /** One-process read model for AGI Menu's repeating three-minute refresh. */
 export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
-  const [routines, recent] = await Promise.all([
+  const [routines, recent, devices] = await Promise.all([
     Promise.resolve(buildRoutineListJson()),
     Promise.resolve(querySessions({ limit: 40, skipExistenceCheck: true })),
+    buildMenubarDevices(),
   ]);
   const active = readActiveSessionsCache('local');
   const activeSessions = active?.sessions ?? [];
@@ -46,6 +85,7 @@ export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
     routines,
     recentSessions: JSON.parse(serializeSessionsJson(recent)) as Record<string, unknown>[],
     activeSessions: serializeActiveSessionsForJson(activeSessions) as Record<string, unknown>[],
+    devices,
     watchdog: {
       enabled: getConfigValue('watchdog.enabled').value === true,
       lastTick: (() => {

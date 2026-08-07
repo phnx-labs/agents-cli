@@ -368,6 +368,34 @@ enum LocalState {
         }
     }
 
+    // Per-host load for the collapsible DEVICES section — EVERY reachable + fresh
+    // peer from the warm .fleet-stats.json (not just the ≥75% ones loadedDevices
+    // keeps), plus this Mac probed natively. Keyed by normalized fleet id so it
+    // merges onto the device roster by name. A device absent here simply renders
+    // with no load number — we never claim an online/offline it can't back.
+    static func deviceLoads(now: Double = LocalState.nowMs()) -> [String: (load: Double, mem: Double?)] {
+        var out: [String: (load: Double, mem: Double?)] = [:]
+        let ncpu = max(1, ProcessInfo.processInfo.activeProcessorCount)
+        out[ActiveDisplay.normalizeHost(localMachineName())] = (localLoadAvg1() / Double(ncpu) * 100, localMemPercent())
+
+        let path = "\(home)/.agents/.cache/.fleet-stats.json"
+        if let data = fm.contents(atPath: path),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let entries = root["entries"] as? [String: Any] {
+            let aliases = selfAliases()
+            for (host, raw) in entries {
+                let key = ActiveDisplay.normalizeHost(host)
+                guard !aliases.contains(key),
+                      let row = raw as? [String: Any],
+                      (row["reachable"] as? Bool) == true,
+                      let fetchedAt = double(row["fetchedAt"]), now - fetchedAt <= fleetStatFreshMs,
+                      let loadPct = double(row["loadPercent"]) else { continue }
+                out[key] = (loadPct, double(row["memPercent"]))
+            }
+        }
+        return out
+    }
+
     // The fleet id for THIS box, matching how `agents devices` labels it (env
     // override, else POSIX gethostname() == `hostname`/os.hostname(), e.g. "zion").
     // Swift's ProcessInfo.hostName returns the mDNS name ("mac.local") which does

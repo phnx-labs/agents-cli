@@ -180,6 +180,12 @@ One rule shapes the menu: **attention floats up, context groups down.**
  ├────────────────────────────────────────────────┤
  │ RECENT TICKETS / RECENT                       │   dedicated, glanceable
  ├────────────────────────────────────────────────┤
+ │ ◆ NEW DEVICES (2)                             │   pending tailnet nodes to approve
+ │   ◆ ci-runner-fsn1 · linux                  ›  │   Register / Ignore
+ ├────────────────────────────────────────────────┤
+ │ ▶ DEVICES (12)                                │   full fleet roster, folded by default
+ │   ◉ zion (this Mac) · macos · 14%           ›  │   ◉ = interactive host; load% when known
+ ├────────────────────────────────────────────────┤
  │ System    all set · auto-nudge off          ›  │   setup + watchdog collapsed
  ├────────────────────────────────────────────────┤
  │ Stop scheduler · Settings · Quit          ⌘Q  │
@@ -213,25 +219,46 @@ One rule shapes the menu: **attention floats up, context groups down.**
   The project header is an embedded menu control, so expanding or collapsing
   mutates only that project's rows inside the current menu tracking session; it
   does not dismiss and synthetically reopen the dropdown.
-  Focusing an agent row opens a **side submenu (›)** with richer detail and
-  **linkable actions**: work title (and open URL if the title contains one),
-  local/remote + surface, clickable cwd, Linear ticket, GitHub PR, duration,
-  copy session id, optional preview snippet. Chips on the agent row itself
-  (`🎫 RUSH-…`, `⌥ PR#N`) surface links at a glance. All of that comes from the
-  warm `sessions --active --local` cache; expand never shells the CLI or
+  Focusing an agent row opens a **side submenu (›)** whose first item is
+  **▶ Focus session** — it lands you in that session, attaching locally or SSHing
+  to the box that owns it (`agents sessions focus`, the same call Factory's Focus
+  button makes), so it works for a session here or on any fleet peer. Below it,
+  richer detail and **linkable actions**: work title (and open URL if the title
+  contains one), local/remote + surface, clickable cwd, Linear ticket, GitHub PR,
+  duration, copy session id, optional preview snippet. Chips on the agent row
+  itself (`🎫 RUSH-…`, `⌥ PR#N`) surface links at a glance. All of that comes from
+  the warm `sessions --active --local` cache; expand never shells the CLI or
   re-indexes transcripts. Work titles prefer the session `topic` over a bare
   agent name.
 - **ROUTINES** — kept glanceable: the next few upcoming plus any failed, timed-out,
-  or overdue routine inline. Failed and timed-out routines include the latest
-  failure reason when available; overdue routines are labeled `overdue` even when
-  their previous run succeeded. Each submenu has Run now / Pause / Logs, and Logs
-  opens the concise routine summary in a text viewer.
+  or overdue routine inline. Each submenu leads with a **last-run line** — a live
+  `● running now · started 4m ago` when a run is in flight (server-verified, not a
+  stale flag), else the last outcome (`✓ completed · ran 45s · 2h ago`,
+  `✕ failed exit 1 · yesterday`, `⦸ missed`) — then the failure reason when there
+  is one, then the next fire, above Run now / Pause / Logs. Logs opens the concise
+  routine summary in a text viewer. All of it is read from the routine fields the
+  snapshot already carries (`lastStatus`/`exitCode`/`lastRunStartedAt`/`CompletedAt`),
+  so opening a submenu never shells a fresh fetch.
   When routines carry a `projectGroup` field (from `agents routines list --json`),
   both the inline rows and the "All routines…" submenu are grouped by that label.
   Routines with no `projectGroup` (cross-project or unassigned) appear last,
   ungrouped.
 - **RECENT TICKETS / RECENT** — tickets filed via quick dispatch and recent
   sessions, unchanged dedicated sections.
+- **NEW DEVICES** — newly-discovered tailnet nodes awaiting approval, each with a
+  Register / Ignore submenu. Shown only when there are pending nodes, and it now
+  sits just above the DEVICES roster at the bottom (previously it floated up under
+  NEEDS YOU).
+- **DEVICES** — the full registered-fleet roster as **one collapsible block,
+  folded by default** (the fleet is long, so `▶ DEVICES (N)` stays out of the way
+  until you open it — same in-place accordion as ACTIVE, no CLI on toggle). Each
+  row is `<name> · <platform>` — this Mac first, then alphabetical — with live
+  **load%** merged in when the daemon-warmed fleet cache has a fresh reading; a
+  row with no number is simply un-probed, never labelled offline (the roster
+  carries no online/offline state, so the menu never claims one). `◉` marks the
+  configured interactive host. The `›` submenu shows load/mem when known and a
+  **Copy `agents ssh <name>`** action. The roster comes from the same 3-minute
+  `menubar snapshot --json` poll (a cheap local registry read), not a new timer.
 - **System** — setup staleness + the auto-nudge watchdog collapsed into one row;
   the submenu keeps the doctor items and the auto-nudge toggle.
 
@@ -323,7 +350,7 @@ command every three minutes; the 10-second badge/liveness checks stay local:
 | Source | Path | Gives |
 |---|---|---|
 | Terminals | `~/.agents/.cache/terminals/live-terminals.json` | extension-registered terminals (agent, cwd, pid, label) — cold start + 10s badge poll |
-| Menu snapshot | `agents menubar snapshot --json` every three minutes | routines, 40 indexed recent sessions, daemon-warmed local active sessions with the exact `sessions --active` lifecycle status, and persisted watchdog status in one subprocess |
+| Menu snapshot | `agents menubar snapshot --json` every three minutes | routines, 40 indexed recent sessions, daemon-warmed local active sessions with the exact `sessions --active` lifecycle status, the registered fleet-device roster (a cheap local registry read), and persisted watchdog status in one subprocess |
 | Doctor | `agents doctor --json` every 15 minutes | install and configuration health; kept separate because it is substantially heavier |
 | Teams | `~/.agents/.history/teams/agents/<id>/meta.json` | running teammate agents |
 | Cloud | `~/.agents/.cache/cloud/tasks.db` (SQLite) | cloud tasks, incl. `input_required` or `needs_review` → "awaiting input" |
