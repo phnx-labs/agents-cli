@@ -639,6 +639,18 @@ else
   BINARY="$VERSION_DIR/node_modules/.bin/$CLI_COMMAND"
 fi
 
+# A managed binary must never resolve back into this dispatcher. This can
+# happen when an install-script launcher was imported before adoption and was
+# later repointed at the agents shim. Use the durable native target recorded by
+# adoption instead of recursively exec-ing this script.
+if [ -x "$BINARY" ]; then
+  RESOLVED_BINARY=$(realpath "$BINARY" 2>/dev/null || readlink -f "$BINARY" 2>/dev/null || echo "")
+  RESOLVED_SHIM=$(realpath "$AGENTS_USER_DIR/.cache/shims/$CLI_COMMAND" 2>/dev/null || readlink -f "$AGENTS_USER_DIR/.cache/shims/$CLI_COMMAND" 2>/dev/null || echo "")
+  if [ -n "$RESOLVED_BINARY" ] && [ "$RESOLVED_BINARY" = "$RESOLVED_SHIM" ]; then
+    BINARY=$(adopted_original_bin || echo "")
+  fi
+fi
+
 # Auto-install if not present
 if [ ! -x "$BINARY" ]; then
   if [ "$VERSION_SOURCE" = "project" ]; then

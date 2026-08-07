@@ -759,7 +759,8 @@ function repairAgentConfigSymlinks(): void {
  */
 export function repairSelfReferentialBinShims(
   versionsRoot: string = path.join(HISTORY_DIR, 'versions'),
-  shimsDir: string = path.resolve(CACHE_DIR, 'shims')
+  shimsDir: string = path.resolve(CACHE_DIR, 'shims'),
+  historyDir: string = path.dirname(versionsRoot),
 ): void {
   // Normalize the shims dir through realpath so the prefix check below survives
   // a symlinked ~/.agents (or macOS's /tmp -> /private/tmp): fs.realpathSync on
@@ -815,7 +816,7 @@ export function repairSelfReferentialBinShims(
       // Self-referential: the link resolves back into our own shims dir.
       // findInPath does a pure-Node PATH scan (no subprocess) and already
       // skips our shims dir, so it returns the genuine install if one exists.
-      const realBinary = findInPath(cli);
+      const realBinary = findInPath(cli, { shimsDir, historyDir });
       try {
         fs.unlinkSync(binLink);
         // createLink: a real symlink where the OS allows it (POSIX, and Windows
