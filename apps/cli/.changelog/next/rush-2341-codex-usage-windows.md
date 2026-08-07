@@ -1,0 +1,1 @@
+- Fix `agents view` and `agents usage` labeling Codex's weekly or monthly quota as session usage when the native CLI publishes the long-duration limit in its `primary` rate-limit window. Codex windows are now labeled from their reported duration (`S`, `W`, or `M`) instead of their primary/secondary position.
