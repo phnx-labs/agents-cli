@@ -195,6 +195,7 @@ so an OpenCode row carries the same burn/usage fields as any other harness:
 | `recent_directories_touched` | the shared enrichment over `parseOpenCode` events — tool `state.input.filePath` is now preserved (see below) |
 | `todos` | OpenCode's `todo` table, emitted by `parseOpenCode` as one `todo_write` snapshot so the shared `extractTodoProgressFromEvents` derives it uniformly |
 | `worktree_slug` | derived from the session `cwd` (`.agents/worktrees/<slug>/`), same as every harness |
+| `account` | `resolveOpenCodeAccountId` (`agents.ts`) reading `~/.local/share/opencode/auth.json` — the sorted, `+`-joined provider ids that hold a valid credential (`type: 'oauth' \| 'api' \| 'wellknown'` with a non-empty secret field), e.g. `anthropic+muse-spark`. This is the same resolver `agents view`/`agents doctor` use for OpenCode's signed-in state; `auth.json` carries no email, so there is no identity claim to surface beyond the provider list. **Not** `opencode.db`'s `account` / `account_state` / `control_account` tables — on a real, actively-used install (yosemite-s1, 1.16.0, 35 applied migrations) all three are permanently empty, so a lookup against them always returns nothing regardless of login state |
 
 `session.cost` / `session.model` and the `todo` table are newer OpenCode additions —
 the scan probes `PRAGMA table_info(session)` and tolerates a missing `todo` table, so an
@@ -233,8 +234,9 @@ non-JSON value and that aborts the *whole* query, so a single unparseable `part`
 the index — silently, since the scanner only reports the error when stderr is a TTY. A
 poisoned row costs that row, not the harness.
 
-Fields that stay null for OpenCode, by design: `account` (populated only when the local
-`control_account` table holds a signed-in row — empty for a token-less install);
+Fields that stay null for OpenCode, by design: `account` when `auth.json` is absent or
+holds no valid credential — a genuinely logged-out install, distinguishable from a bug by
+running `agents view opencode` (reports "logged out" from the same resolver);
 `account_key` / `account_org` (Claude-account concepts, `claude-accounts.ts`);
 `cost_usd_nocache` (OpenCode reports one total `cost`, not a per-token no-cache price);
 `git_branch` (not recorded in OpenCode's DB); `ticket_id` (extracted from the raw first

@@ -1778,6 +1778,41 @@ function isValidOpenCodeCredential(value: unknown): boolean {
 }
 
 /**
+ * OpenCode's account identity: the sorted, "+"-joined list of provider ids
+ * that hold a valid credential in `auth.json` (e.g. `"anthropic+muse-spark"`).
+ * `auth.json` carries no email/identity claim (see `isValidOpenCodeCredential`),
+ * so this join is the closest thing to "which account is this" available — the
+ * same value `agents view`/`agents doctor` show for OpenCode's signed-in state.
+ *
+ * This is the ONLY correct source for an OpenCode "account". OpenCode's SQLite
+ * `opencode.db` also carries `account`/`account_state`/`control_account` tables,
+ * but on a real, actively-used install (yosemite-s1, 1.16.0, 35 applied
+ * migrations) all three are permanently empty — no migration ever populates
+ * them, and no session has ever written a row. Reading from them instead of
+ * `auth.json` always yields `undefined`, credential or not; `session/discover.ts`
+ * uses this function rather than duplicating a sqlite lookup against those
+ * dead tables.
+ *
+ * Sync (`fs.readFileSync`), no network. Returns undefined when `auth.json` is
+ * missing, unreadable, or carries no valid credential.
+ */
+export function resolveOpenCodeAccountId(base: string): string | undefined {
+  const authPath = resolveOpenCodeAuthPath(base);
+  if (!authPath) return undefined;
+  try {
+    const data = JSON.parse(fs.readFileSync(authPath, 'utf-8'));
+    if (!data || typeof data !== 'object') return undefined;
+    const providers = Object.entries(data as Record<string, unknown>)
+      .filter(([, cred]) => isValidOpenCodeCredential(cred))
+      .map(([id]) => id)
+      .sort();
+    return providers.length ? providers.join('+') : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Whether a Muse Code `~/.config/muse/auth.json` document holds any usable
  * access token. Live shape from `muse login` (device OAuth, Muse Code 0.1.0):
  *   { schema_version: 1, providers: { meta: { access_token, api_key, user_email, … } } }
@@ -2230,19 +2265,10 @@ export async function getAccountInfo(
         // themselves. The user's complaint was the row read "not signed in"
         // despite a live login; a valid provider entry now shows e.g.
         // "id:muse-spark" so they can see exactly which provider is configured.
-        const authPath = resolveOpenCodeAuthPath(base);
-        if (!authPath) return { ...empty, lastActive };
-        const data = JSON.parse(await fs.promises.readFile(authPath, 'utf-8'));
-        if (!data || typeof data !== 'object') return { ...empty, lastActive };
-        const providers = Object.entries(data as Record<string, unknown>)
-          .filter(([, cred]) => isValidOpenCodeCredential(cred))
-          .map(([id]) => id)
-          .sort();
-        if (providers.length === 0) return { ...empty, lastActive };
-        // Provider ids are config keys (e.g. "anthropic", "muse-spark"), not
-        // secrets. Join them into a stable, human-readable account label +
-        // identity key for usage dedup.
-        const accountId = providers.join('+');
+        // resolveOpenCodeAccountId is the single source of truth for this join —
+        // session/discover.ts reuses it for the indexed `account` field.
+        const accountId = resolveOpenCodeAccountId(base);
+        if (!accountId) return { ...empty, lastActive };
         const accountKey = buildIdentityKey(agentId, [['providers', accountId]]);
         return { ...empty, signedIn: true, accountId, accountKey, lastActive };
       }

@@ -53,8 +53,12 @@ function openFixture() {
 
 /**
  * Build an opencode.db with the tables the scanner and parser read: `session`
- * (one row per session), `message`/`part` (the transcript parseOpenCode walks),
- * and `control_account` (the active account email).
+ * (one row per session) and `message`/`part` (the transcript parseOpenCode
+ * walks). `control_account` is also created — real OpenCode installs carry it
+ * — but it stays unused by design: the real account source is `auth.json`
+ * (see `seedAuthJson`), which `resolveOpenCodeAccountId` reads. On a real,
+ * actively-used install `control_account` is permanently empty, so reading it
+ * would always yield `undefined` (RUSH-2358).
  */
 function seedFixture(): void {
   fs.mkdirSync(path.dirname(OPENCODE_DB), { recursive: true });
@@ -85,6 +89,17 @@ function seedFixture(): void {
     addMessage(oc, id, `${id}-m0`, t, `first turn of ${i}`);
   }
   oc.close();
+}
+
+/**
+ * Write the auth.json `resolveOpenCodeAccountId` actually reads — the real
+ * OpenCode account source (RUSH-2358). One valid `api`-type credential for
+ * provider `anthropic`.
+ */
+function seedAuthJson(): void {
+  const authPath = path.join(tmpHome, '.local', 'share', 'opencode', 'auth.json');
+  fs.mkdirSync(path.dirname(authPath), { recursive: true });
+  fs.writeFileSync(authPath, JSON.stringify({ anthropic: { type: 'api', key: 'sk-test-key' } }));
 }
 
 /** Append one user message + its text part to a session. */
@@ -161,6 +176,7 @@ beforeAll(async () => {
   discover = await import('./discover.js');
   db.getDB(); // create schema
   seedFixture();
+  seedAuthJson();
 });
 
 beforeEach(() => {
@@ -182,7 +198,9 @@ describe('OpenCode per-session scan ledger (RUSH-2210)', () => {
     const sessions = await scan();
     expect(sessions.length).toBe(SESSION_COUNT);
     expect(sessions.every(s => s.agent === 'opencode')).toBe(true);
-    expect(sessions.every(s => s.account === 'dev@example.com')).toBe(true);
+    // account comes from auth.json's valid credential (provider ids joined),
+    // never the always-empty control_account table (RUSH-2358).
+    expect(sessions.every(s => s.account === 'anthropic')).toBe(true);
   });
 
   it('re-emits ONLY the changed session when the shared DB is written', async () => {
