@@ -229,7 +229,7 @@ describe('generated shim fall-through', () => {
 
     const output = execFileSync('bash', [shim, '--version'], {
       cwd: root,
-      env: { ...process.env, HOME: root, AGENTS_USER_DIR: userDir },
+      env: { ...process.env, HOME: root, PWD: root, AGENTS_USER_DIR: userDir },
       encoding: 'utf-8',
       timeout: 5_000,
     });
