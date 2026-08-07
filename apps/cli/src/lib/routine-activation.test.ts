@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { spawn } from 'child_process';
 
 let home: string;
 
@@ -63,6 +64,32 @@ describe('device routine activation', () => {
     expect(activation.addEnabledRoutinesOnUpgrade(['watchdog'])).toBe(false);
     expect(activation.enabledRoutineNames()).toBeNull();
   });
+
+  it('preserves every concurrent upgrade addition', async () => {
+    vi.doMock('./machine-id.js', () => ({ machineId: () => 'test-host' }));
+    const activation = await load();
+    activation.replaceEnabledRoutines(['existing']);
+    const names = Array.from({ length: 8 }, (_, index) => `replacement-${index}`);
+
+    await Promise.all(names.map((name) => new Promise<void>((resolve, reject) => {
+      const child = spawn(process.execPath, [
+        '--import', 'tsx', '--input-type=module', '-e',
+        `const m = await import('./src/lib/routine-activation.ts'); m.addEnabledRoutinesOnUpgrade([${JSON.stringify(name)}]);`,
+      ], {
+        cwd: process.cwd(),
+        env: { ...process.env, HOME: home, AGENTS_SYNC_MACHINE_ID: 'test-host' },
+        stdio: 'pipe',
+      });
+      let stderr = '';
+      child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+      child.on('error', reject);
+      child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`child exited ${code}: ${stderr}`)));
+    })));
+
+    vi.resetModules();
+    const reloaded = await import('./routine-activation.js');
+    expect(reloaded.enabledRoutineNames()).toEqual(['existing', ...names].sort());
+  }, 30_000);
 
   it('reads peer activation without writing peer documents', async () => {
     vi.doMock('./machine-id.js', () => ({ machineId: () => 'self' }));
