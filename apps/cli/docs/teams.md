@@ -281,6 +281,26 @@ teammate's own worktree — e.g. one agent orchestrating another — still place
 new worktree as a sibling under the main repo, never nested inside the caller's
 worktree.
 
+**A failed `teams add` leaves nothing behind.** The branch is the shared resource
+here, so a half-finished add used to poison every retry: the worktree was created
+before the teammate record was written, and nothing removed it when the add
+failed, so the next `teams add` with the same `--worktree` name died on
+`fatal: a branch named 'agents/<name>' already exists`. Two guarantees now hold:
+
+- **Rejected before anything is created.** Name uniqueness and the `--after`
+  dependency graph are validated *before* `createWorktree` runs
+  (`AgentManager.validateAddPreconditions`), so a duplicate name, an unknown
+  dependency, or a cycle never gets as far as making a branch.
+- **Torn down if it fails afterward.** A failure past that point — the harness CLI
+  missing, a launch error, a cloud dispatch failure — removes the worktree *and*
+  its `agents/<name>` branch before the command exits non-zero. Only a worktree
+  that same add created is removed, so a teammate already recorded and waiting on
+  an `--after` dependency is never touched. If the teardown itself fails, the
+  command prints the exact `git worktree remove` / `git branch -D` pair to run.
+
+Either way the add exits non-zero with the real error and never prints a success
+block, and re-running the same command with the same name works.
+
 ## Distributed teams
 
 Teammates can run on **different machines** across your fleet, not just the box
