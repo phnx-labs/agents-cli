@@ -286,7 +286,7 @@ One rule shapes the menu: **attention floats up, context groups down.**
   [`Models.swift`](../menubar/Sources/MenubarHelper/Models.swift)); it's
   followed by `auto-nudge on/off` from the watchdog toggle. The submenu lists
   up to 5 findings, in the order doctor emits them (already prioritized), each
-  as two lines: `<severity> · <device> · <agent>@<version>` (or
+  as two lines: `<severity> · <device> · <agent> @<version>` (or
   `<agent> (N versions)` when a finding collapses several versions) then
   `<message> → <remediation>` truncated to 96 chars. A
   `+N more — run \`agents doctor\`` row appears when more than 5 findings are
@@ -295,8 +295,8 @@ One rule shapes the menu: **attention floats up, context groups down.**
   then falls back to the pre-findings behavior: the summary counts
   not-installed / stale / never-synced agents (or `all set`), and the submenu
   lists "Not installed" / "Resources" sections instead of findings rows. Either
-  way the submenu ends with the auto-nudge toggle, Run agents doctor, and Open
-  ~/.agents.
+  way the submenu ends with Run agents doctor, Open ~/.agents, and the
+  auto-nudge toggle.
 
 The icon badges **red `!`** when anything needs you, **red `⏻`** when the
 scheduler has been unreachable for ~30s (see
