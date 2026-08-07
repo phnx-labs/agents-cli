@@ -231,17 +231,39 @@ describe('isWorktreeClaimed distinguishes an orphan worktree from a live teammat
     dirs.push(base);
     await makeOwner(base, 'staged-2', 'wt-team', 'surface', AgentStatus.PENDING);
 
-    // A record that is not valid JSON — the shape a partial write leaves, and
-    // the shape that makes a listAll()-based check throw. The scan must skip it
-    // and still find the real record.
-    const brokenDir = path.join(base, 'broken-1');
-    fs.mkdirSync(brokenDir, { recursive: true });
-    fs.writeFileSync(path.join(brokenDir, 'meta.json'), '{ "worktree_name": "surf');
-    // ...and a directory with no meta.json at all.
+    // A directory with no meta.json at all is not a record — ENOENT proves it
+    // claims nothing, so the scan skips it and still finds the real record.
     fs.mkdirSync(path.join(base, 'empty-1'), { recursive: true });
 
     const mgr = new AgentManager(50, base);
     expect(await mgr.isWorktreeClaimed('surface')).toBe(true);
     expect(await mgr.isWorktreeClaimed('nothing-claims-this')).toBe(false);
+  });
+
+  // The guard protects a `git worktree remove --force`, so its two errors are
+  // not symmetric: a false "claimed" strands an orphan branch a human can
+  // delete, a false "unclaimed" destroys a live agent's uncommitted work. An
+  // unreadable record may BE the one claiming this worktree and we cannot tell,
+  // so it must answer "claimed".
+  it('fails CLOSED on an unreadable record rather than reporting the worktree free', async () => {
+    const base = tmpBase();
+    dirs.push(base);
+
+    // Not valid JSON — the shape a partial write leaves.
+    const brokenDir = path.join(base, 'broken-1');
+    fs.mkdirSync(brokenDir, { recursive: true });
+    fs.writeFileSync(path.join(brokenDir, 'meta.json'), '{ "worktree_name": "surf');
+
+    const mgr = new AgentManager(50, base);
+    expect(await mgr.isWorktreeClaimed('nothing-claims-this')).toBe(true);
+  });
+
+  it('answers unclaimed when the records directory is genuinely absent (ENOENT)', async () => {
+    const base = tmpBase();
+    dirs.push(base);
+    fs.rmSync(base, { recursive: true, force: true });
+
+    const mgr = new AgentManager(50, base);
+    expect(await mgr.isWorktreeClaimed('anything')).toBe(false);
   });
 });

@@ -1804,14 +1804,28 @@ export class AgentManager {
    *   worktree was already cleaned up at `teams stop`, and its record lingers
    *   until retention reaps it — counting those would leave a genuine orphan
    *   branch stranded forever, which is the bug this all exists to fix.
+   * - **Fails CLOSED.** This guards a `git worktree remove --force`, so the two
+   *   errors are not symmetric: a false "claimed" strands an orphan branch that
+   *   a human can delete, while a false "unclaimed" deletes a live agent's
+   *   checkout and its uncommitted work. Only `ENOENT` proves absence — no
+   *   agents dir means no records, and a record with no `meta.json` is not a
+   *   record. Any other failure (EACCES, EIO, half-written or invalid JSON,
+   *   a race with a writer) means we could not READ the records, which is not
+   *   the same as there being none, so it answers `true`. This is deliberate
+   *   asymmetry, not defensive coding: the caller acts destructively on `false`.
    */
   async isWorktreeClaimed(worktreeName: string): Promise<boolean> {
     const base = this.agentsDir ?? (await getAgentsDir());
     let entries: string[];
     try {
       entries = await fs.readdir(base);
-    } catch {
-      return false; // no agents dir at all → nothing claims anything
+    } catch (err) {
+      // ENOENT is the only error that PROVES nothing claims the worktree: there
+      // are no records at all. Every other failure (EACCES, EIO, a transient
+      // races with a writer) means we could not read the records, which is not
+      // the same as there being none — fail closed.
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return false;
+      return true;
     }
     for (const entry of entries) {
       try {
@@ -1819,8 +1833,12 @@ export class AgentManager {
         const meta = JSON.parse(raw);
         if (meta?.worktree_name !== worktreeName) continue;
         if (!isTerminalStatus(meta?.status as AgentStatus)) return true;
-      } catch {
-        continue; // unreadable/partial record — not proof of anything
+      } catch (err) {
+        // A record without a meta.json is not a record — skip it. Anything else
+        // (unreadable, half-written, invalid JSON) may be the very record that
+        // claims this worktree, and we cannot tell. Fail closed.
+        if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') continue;
+        return true;
       }
     }
     return false;
