@@ -15,8 +15,9 @@ import type { AgentId } from './types.js';
 import { machineId } from './machine-id.js';
 import { AGENTS, agentConfigDirName, findInPath } from './agents.js';
 import { createLink } from './platform/index.js';
-import { migrateLegacyRoutineActivation, setJobEnabled } from './routines.js';
-import { addEnabledRoutinesOnUpgrade } from './routine-activation.js';
+import { migrateLegacyRoutineActivation, setJobEnabled, listJobs, validateJob } from './routines.js';
+import { addEnabledRoutinesOnUpgrade, enabledRoutineNames, replaceEnabledRoutines } from './routine-activation.js';
+import { evaluateActivationReadiness } from './routine-readiness.js';
 import { DAEMON_TICK_ROUTINE_NAMES } from './daemon-ticks.js';
 
 const HOME = process.env.HOME ?? os.homedir();
@@ -1846,6 +1847,107 @@ export function migrateRoutineDeviceToDevices(routinesDir?: string): void {
 }
 
 /**
+ * Fold the legacy host-placement `remoteCwd` field into the canonical portable
+ * `cwd` (RUSH-2290). Host dispatch used to read `remoteCwd` while a local run
+ * inferred its cwd from `repo` — two path semantics for one concept. The runner
+ * now resolves every placement from `cwd`, so this idempotently rewrites the
+ * field:
+ *
+ * - `remoteCwd` present, no `cwd`  → rename to `cwd`.
+ * - both present and equal          → drop the duplicate `remoteCwd`.
+ * - both present and DIFFERENT       → conflict: leave BOTH fields untouched so
+ *   the migration never silently chooses one; `validateJob`/`doctor` then flag the
+ *   pair and the routine stays paused rather than running against a guessed path.
+ *
+ * Idempotent: a file with only `cwd` (already migrated) is skipped.
+ */
+export function migrateRoutineRemoteCwdToCwd(routinesDir?: string): void {
+  const dir = routinesDir ?? path.join(USER_DIR, 'routines');
+  if (!fs.existsSync(dir)) return;
+
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
+
+  let migrated = 0;
+  let conflicts = 0;
+  for (const file of files) {
+    const filePath = path.join(dir, file);
+    const raw = fs.readFileSync(filePath, 'utf-8');
+
+    let doc: Record<string, unknown>;
+    try {
+      doc = yaml.parse(raw) as Record<string, unknown>;
+      if (!doc || typeof doc !== 'object') continue;
+    } catch { continue; }
+
+    if (!('remoteCwd' in doc)) continue;
+    const remote = doc.remoteCwd;
+    if (typeof remote !== 'string' || !remote.trim()) {
+      // A malformed legacy value is not something to fold — drop it and move on.
+      delete doc.remoteCwd;
+      atomicWriteFileSync(filePath, yaml.stringify(doc));
+      continue;
+    }
+
+    if ('cwd' in doc) {
+      if (doc.cwd === remote) {
+        delete doc.remoteCwd; // duplicate — dedupe to the canonical field
+        atomicWriteFileSync(filePath, yaml.stringify(doc));
+        migrated++;
+      } else {
+        conflicts++; // leave both fields; validateJob/doctor pause the conflict
+      }
+      continue;
+    }
+
+    delete doc.remoteCwd;
+    doc.cwd = remote;
+    atomicWriteFileSync(filePath, yaml.stringify(doc));
+    migrated++;
+  }
+
+  if (migrated > 0) {
+    console.error(`Migrated ${migrated} routine${migrated === 1 ? '' : 's'}: remoteCwd → cwd`);
+  }
+  if (conflicts > 0) {
+    console.error(`${conflicts} routine${conflicts === 1 ? '' : 's'} have conflicting remoteCwd/cwd — left paused for manual repair (migration_conflict)`);
+  }
+}
+
+/**
+ * Pause every currently-active routine whose execution context no longer
+ * resolves ready (RUSH-2290). An agent/workflow routine with no project/cwd, a
+ * missing directory, or a non-portable path used to fire and fail every tick —
+ * the mass auth_failed / untrusted-home storm this ticket exists to stop. After
+ * the fold, such a routine is deactivated on THIS device (only), preventing it
+ * from being scheduled until `agents routines doctor --all --fix` (or a repair +
+ * `resume`) makes it ready. Never materializes a device manifest that does not
+ * yet exist, and never touches command routines (they run in the target home).
+ */
+export function pauseUnreadyEnabledRoutines(): void {
+  const enabled = enabledRoutineNames();
+  if (enabled === null) return; // no manifest yet — nothing activated to pause
+  const enabledSet = new Set(enabled);
+  const paused: string[] = [];
+  for (const job of listJobs()) {
+    if (!enabledSet.has(job.name)) continue;
+    let ready = true;
+    try {
+      ready = validateJob(job).length === 0 && evaluateActivationReadiness(job).ready;
+    } catch {
+      ready = true; // never pause a routine because readiness itself threw
+    }
+    if (!ready) paused.push(job.name);
+  }
+  if (paused.length === 0) return;
+  const pausedSet = new Set(paused);
+  replaceEnabledRoutines(enabled.filter((name) => !pausedSet.has(name)));
+  console.error(
+    `Paused ${paused.length} routine${paused.length === 1 ? '' : 's'} with an unresolved execution context ` +
+    `(run 'agents routines doctor --all' to see why): ${paused.join(', ')}`,
+  );
+}
+
+/**
  * Fold the legacy watchdog enable sentinel into the watchdog routine.
  *
  * The always-on watchdog used to be gated by a presence sentinel at
@@ -2064,6 +2166,8 @@ export async function runMigration(): Promise<void> {
 
   // Rewrite routine YAML files: singular `device:` -> plural `devices: []`.
   migrateRoutineDeviceToDevices();
+  // Fold legacy host-placement `remoteCwd` into the canonical portable `cwd`.
+  migrateRoutineRemoteCwdToCwd();
   migrateLegacyRoutineActivation();
   // These routines replace daemon timers that were always active. Devices with
   // an existing activation manifest must retain that behavior after upgrade.
@@ -2073,6 +2177,11 @@ export async function runMigration(): Promise<void> {
   // who opted in under the old build stays opted in after upgrading. After the
   // routine rewrites above so the routines dir is in its canonical shape.
   migrateWatchdogSentinelToRoutine();
+  // Deactivate any routine whose execution context no longer resolves ready, so
+  // an anchor-less agent/workflow routine cannot keep firing-and-failing after the
+  // fold (RUSH-2290). Runs AFTER the tick/watchdog routines are added so those
+  // (command/home) routines are evaluated in their final shape.
+  pauseUnreadyEnabledRoutines();
 
   // Symlink repair runs LAST so it can find the post-move version homes.
   repairAgentConfigSymlinks();

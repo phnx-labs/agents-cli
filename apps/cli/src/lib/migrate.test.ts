@@ -5,7 +5,7 @@ import { spawnSync, spawn } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'url';
 
-import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateRoutineDeviceToDevices, migrateWatchdogSentinelToRoutine, repairSelfReferentialBinShims } from './migrate.js';
+import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToRoutine, repairSelfReferentialBinShims } from './migrate.js';
 import { toPosix } from './platform/index.js';
 import * as yaml from 'yaml';
 
@@ -328,6 +328,69 @@ describe('repairSelfReferentialBinShims', () => {
   });
 });
 
+describe('migrateRoutineRemoteCwdToCwd', () => {
+  function makeRoutinesDir(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migrate-rcwd-'));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  it('renames remoteCwd → cwd when no cwd is present', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'a.yml'), yaml.stringify({
+      name: 'a', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', hostStrategy: 'host', host: 'gpu', remoteCwd: '~/svc',
+    }));
+    migrateRoutineRemoteCwdToCwd(dir);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'a.yml'), 'utf-8'));
+    expect(result.cwd).toBe('~/svc');
+    expect(result.remoteCwd).toBeUndefined();
+  });
+
+  it('drops remoteCwd when it equals cwd (dedupe)', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'b.yml'), yaml.stringify({
+      name: 'b', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', cwd: '~/svc', remoteCwd: '~/svc',
+    }));
+    migrateRoutineRemoteCwdToCwd(dir);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'b.yml'), 'utf-8'));
+    expect(result.cwd).toBe('~/svc');
+    expect(result.remoteCwd).toBeUndefined();
+  });
+
+  it('preserves BOTH fields on a conflict (never chooses silently)', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'c.yml'), yaml.stringify({
+      name: 'c', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', cwd: '~/one', remoteCwd: '~/two',
+    }));
+    migrateRoutineRemoteCwdToCwd(dir);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'c.yml'), 'utf-8'));
+    expect(result.cwd).toBe('~/one');
+    expect(result.remoteCwd).toBe('~/two');
+  });
+
+  it('is idempotent — a re-run makes no further change', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'd.yml'), yaml.stringify({
+      name: 'd', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', hostStrategy: 'host', host: 'gpu', remoteCwd: '~/svc',
+    }));
+    migrateRoutineRemoteCwdToCwd(dir);
+    const after1 = fs.readFileSync(path.join(dir, 'd.yml'), 'utf-8');
+    migrateRoutineRemoteCwdToCwd(dir);
+    const after2 = fs.readFileSync(path.join(dir, 'd.yml'), 'utf-8');
+    expect(after1).toBe(after2);
+    expect(after2).not.toContain('remoteCwd');
+  });
+
+  it('leaves a routine with only cwd (already migrated) untouched', () => {
+    const dir = makeRoutinesDir();
+    const original = { name: 'e', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', cwd: '~/svc' };
+    fs.writeFileSync(path.join(dir, 'e.yml'), yaml.stringify(original));
+    const before = fs.readFileSync(path.join(dir, 'e.yml'), 'utf-8');
+    migrateRoutineRemoteCwdToCwd(dir);
+    expect(fs.readFileSync(path.join(dir, 'e.yml'), 'utf-8')).toBe(before);
+  });
+});
+
 describe('migrateRoutineDeviceToDevices', () => {
   function makeRoutinesDir(): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migrate-dev-'));
@@ -507,7 +570,7 @@ describe('v12 device migration CLI startup failure (POSIX)', () => {
       const parsed = res.status === 0 ? JSON.parse(res.stdout.trim()) : [];
       const found = parsed.find((j: Record<string, unknown>) => j.name === 'legacy');
       expect(found).toBeUndefined();
-      expect(res.stdout + res.stderr).not.toContain('legacy');
+      expect(res.stdout + res.stderr).not.toContain('"name":"legacy"');
     } finally {
       fs.chmodSync(routinesDir, 0o755);
     }

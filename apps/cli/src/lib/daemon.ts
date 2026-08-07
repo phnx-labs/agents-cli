@@ -612,7 +612,7 @@ export async function runDaemon(): Promise<void> {
     }
   }
 
-  const triggerJob = async (config: JobConfig) => {
+  const triggerJob = async (config: JobConfig, ctx?: { scheduledFor?: Date }) => {
     const jobLabel = config.command
       ? 'command'
       : config.workflow
@@ -640,7 +640,7 @@ export async function runDaemon(): Promise<void> {
             })
             .catch(() => { /* best-effort */ });
         },
-      });
+      }, { kind: 'schedule', scheduledFor: ctx?.scheduledFor });
       log('INFO', `Job '${config.name}' spawned (run: ${meta.runId}, PID: ${meta.pid})`);
     } catch (err) {
       const message = (err as Error).message;

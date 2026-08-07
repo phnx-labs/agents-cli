@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `upgrade`, `_internal`).
 
-_98 command groups · 566 commands._
+_98 command groups · 567 commands._
 
 ## accounts — Browse and name signed-in harness accounts
 
@@ -721,7 +721,8 @@ agents routines catchup                 Run any routines that missed their last 
 agents routines cleanup                 Remove expired one-shot routines that already fired and still have a user-layer YAML file.
 agents routines devices [name]          View or change the devices where a routine is enabled. Without flags, opens an interactive picker (requires a TTY).
 agents routines disable-project [path]  Remove a project from the project-routines allowlist. Use --remove-synced to also delete the user-layer copies.
-agents routines edit [name]             Open a routine in $EDITOR. Creates a new YAML template if the routine does not exist.
+agents routines doctor [name]           Check a routine's execution-context and harness readiness. Bare or --all checks every routine; --fix applies safe activation repairs (activate a now-ready paused routine; pause a broken active one).
+agents routines edit [name]             Edit a prefilled routine transactionally; invalid YAML never replaces the live definition.
 agents routines enable-project [path]   Opt a project's .agents/routines/*.yml into daemon firing. Requires explicit approval — project routines never auto-fire from a cloned repo. Materialises copies into ~/.agents/routines/ with source provenance.
 agents routines list                    See all scheduled jobs, when they run next, and their last execution status
 agents routines logs [name]             Show a run’s concise summary — status + extracted report. --full for the raw stdout stream; --run for a specific past run.

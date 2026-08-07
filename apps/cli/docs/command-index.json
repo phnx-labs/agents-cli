@@ -1,7 +1,7 @@
 {
   "command": "agents",
   "groups": 98,
-  "commands": 566,
+  "commands": 567,
   "tree": [
     {
       "name": "accounts",
@@ -8238,6 +8238,14 @@
               "description": "Associate this routine with all defined projects (sets projects: [\"*\"])"
             },
             {
+              "flags": "--project-anchor <name>",
+              "description": "Singular EXECUTION anchor: the named project whose base directory the run lands in (distinct from --project, which is grouping metadata). Rootless (Linear-imported) projects anchor a relative --cwd at the target home."
+            },
+            {
+              "flags": "--cwd <path>",
+              "description": "Portable execution directory. Relative values resolve under --project-anchor when usable, otherwise under the execution target $HOME. Supersedes --run-cwd/remoteCwd."
+            },
+            {
               "flags": "--json",
               "description": "Emit machine-readable JSON with the created routine id and status"
             },
@@ -8421,10 +8429,10 @@
           "subcommands": []
         },
         {
-          "name": "edit",
-          "path": "routines edit",
+          "name": "doctor",
+          "path": "routines doctor",
           "aliases": [],
-          "description": "Open a routine in $EDITOR. Creates a new YAML template if the routine does not exist.",
+          "description": "Check a routine's execution-context and harness readiness. Bare or --all checks every routine; --fix applies safe activation repairs (activate a now-ready paused routine; pause a broken active one).",
           "args": [
             {
               "name": "name",
@@ -8433,6 +8441,58 @@
             }
           ],
           "options": [
+            {
+              "flags": "--all",
+              "description": "Check every routine (the default when no name is given)"
+            },
+            {
+              "flags": "--fix",
+              "description": "Apply safe, deterministic activation repairs"
+            },
+            {
+              "flags": "--json",
+              "description": "Machine-readable output"
+            },
+            {
+              "flags": "-H, --host <name>",
+              "description": "Run this command on another machine over SSH instead of locally — a device, a registered host, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`."
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Alias of --host: run this command on a registered device (from `agents devices`), or `all` to run it across the whole fleet."
+            },
+            {
+              "flags": "--remote-cwd <dir>",
+              "description": "Working directory on the host for --host runs. Resolves on the REMOTE host — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'."
+            },
+            {
+              "flags": "--no-tty",
+              "description": "Force non-interactive output for --host runs even from a terminal."
+            },
+            {
+              "flags": "--any",
+              "description": "With --host <cap> (a capability tag), pick any matching host instead of erroring when several match."
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "edit",
+          "path": "routines edit",
+          "aliases": [],
+          "description": "Edit a prefilled routine transactionally; invalid YAML never replaces the live definition.",
+          "args": [
+            {
+              "name": "name",
+              "required": false,
+              "variadic": false
+            }
+          ],
+          "options": [
+            {
+              "flags": "--yaml",
+              "description": "Open the raw YAML in $EDITOR (the current edit surface)"
+            },
             {
               "flags": "--state-to <name>",
               "description": "Update the Linear current-state filter before opening the editor"
