@@ -1819,21 +1819,40 @@ func routineFailureDetail(_ r: Routine, max: Int) -> String? {
     return routineFailureSummary(r, max: max)
 }
 
-/// Groups routines needing attention by a shared cause signature — the
-/// readiness code when one is blocking, else the raw last-run status — so N
+/// Groups routines needing attention by a shared cause signature — so N
 /// routines hitting the IDENTICAL cause collapse into one row instead of N
 /// nearly-identical ones. Never invents a shared cause: two routines that
-/// fail for different reasons (or carry no readiness code at all) each keep
-/// their own group. Preserves the order causes first appear in `routines`.
+/// fail for different reasons each keep their own group. Preserves the order
+/// causes first appear in `routines`.
+///
+/// The signal picked for "cause" follows `routineAttentionKind`, not a flat
+/// readiness-first/failureCode-next/lastStatus-last chain — a routine can
+/// carry a `readiness` block that describes its NEXT run (RUSH-2290's
+/// `ready`/`readiness` pair is independent of `lastStatus`) while its
+/// attention kind is actually `.failure` from a run that already happened
+/// (`lastStatus == "failed"`); grouping such a routine by its stale/unrelated
+/// readiness code would silently merge it with routines that are genuinely
+/// blocked for a different reason. Keying by kind first keeps each cause
+/// scoped to the signal that's actually driving THAT routine's attention:
+///   - `.notReady`: the readiness code (the "can't run" reason), or a literal
+///     fallback when a routine is `ready == false`/`blocked` with no
+///     `readiness` object attached at all.
+///   - `.failure`: the failureCode (the specific execution error), falling
+///     back to the bare lastStatus only when no failureCode is present.
+///   - `.miss`: why the daemon skipped this fire, or the bare lastStatus.
 func groupedByAttentionCause(_ routines: [Routine]) -> [(String, [Routine])] {
     var order: [String] = []
     var byCause: [String: [Routine]] = [:]
     for r in routines {
-        // readiness code first (the most specific signal); failureCode next —
-        // two "failed" routines with different failureCodes must NOT collapse
-        // into one row just because they share a lastStatus; lastStatus is the
-        // last resort, for when neither of the more specific signals exists.
-        let cause = r.readiness?.code ?? r.failureCode ?? r.lastStatus ?? "failed"
+        let cause: String
+        switch routineAttentionKind(r) {
+        case .notReady:
+            cause = r.readiness?.code ?? "not_ready"
+        case .failure:
+            cause = r.failureCode ?? r.lastStatus ?? "failed"
+        case .miss, .none:
+            cause = r.skipReason ?? r.lastStatus ?? "overdue"
+        }
         if byCause[cause] == nil { order.append(cause) }
         byCause[cause, default: []].append(r)
     }

@@ -211,6 +211,31 @@ enum RoutineSelfTest {
               distinctFailureGroups.count == 2
                 && distinctFailureGroups.allSatisfy { $0.1.count == 1 })
 
+        // Regression: a routine whose LAST run failed (kind == .failure) can
+        // still carry a `readiness` block describing its NEXT run — `ready`/
+        // `readiness` is independent of `lastStatus` (see the notReady fixture
+        // above, which is `completed` yet still not-ready). The cause key must
+        // follow the routine's ACTUAL attention kind (.failure -> failureCode),
+        // not fall back to a readiness-first chain that would silently key
+        // this routine by a readiness code belonging to a different concern.
+        let failedWithStaleReadinessJSON = """
+        {"name":"crm-pipeline-brief-2","agent":"claude","schedule":"0 7 * * *","enabled":true,
+         "overdue":false,"lastStatus":"failed","exitCode":1,
+         "failureReason":"Please run /login","failureCode":"auth_failed",
+         "readiness":{"code":"project_path_missing","message":"stale from a prior check"}}
+        """
+        guard let failedWithStaleReadiness = try? decoder.decode(Routine.self, from: Data(failedWithStaleReadinessJSON.utf8)) else {
+            print("FAIL — a failed routine carrying a readiness block failed to decode")
+            exit(1)
+        }
+        check("a routine with lastStatus:failed still classifies as .failure even carrying a readiness block",
+              routineAttentionKind(failedWithStaleReadiness) == .failure)
+        let staleReadinessGroups = groupedByAttentionCause([failed, failedWithStaleReadiness, notReady])
+        check("a .failure routine's cause is its failureCode, NOT its unrelated readiness.code — it merges with the other auth_failed failure",
+              staleReadinessGroups.contains { $0.0 == "auth_failed" && $0.1.count == 2 })
+        check("the genuinely .notReady routine (readiness code project_path_missing) is NOT pulled into the failure group",
+              staleReadinessGroups.contains { $0.0 == "project_path_missing" && $0.1.count == 1 })
+
         // MARK: bounded lists — NEEDS YOU attention groups and "All routines…"
         // both cap with a named "+N more" remainder rather than an unbounded
         // scroll (the constants StatusItemController's menu builders read).
