@@ -187,11 +187,11 @@ so an OpenCode row carries the same burn/usage fields as any other harness:
 
 | Field | Source |
 | --- | --- |
-| `input_tokens` · `output_tokens` · `cache_read_tokens` · `cache_write_tokens` · `token_count` | summed from each `message.data`'s `$.tokens.*` (same aggregation the pre-existing `output_tokens` used) |
+| `input_tokens` · `output_tokens` · `cache_read_tokens` · `cache_write_tokens` · `token_count` | summed from each `message.data`'s `$.tokens.*` (same aggregation the pre-existing `output_tokens` used). Newer OpenCode versions also keep `session.tokens_input` / `tokens_output` / `tokens_cache_read` / `tokens_cache_write` rollup columns; on a real database they equal these sums exactly, and the message aggregation is used because it also works on the older schema that predates them |
 | `cost_usd` | the `session.cost` rollup (`0` for a zero-priced provider is a real value) |
 | `model` | `session.model` (JSON `{"id","providerID"}` → the `id`) |
 | `duration_ms` | `session.time_updated − session.time_created` |
-| `tool_call_count` | count of `part` rows whose `$.type = 'tool'` |
+| `tool_call_count` | count of `part` rows whose `$.type = 'tool'` (guarded by `json_valid` — see below) |
 | `recent_directories_touched` | the shared enrichment over `parseOpenCode` events — tool `state.input.filePath` is now preserved (see below) |
 | `todos` | OpenCode's `todo` table, emitted by `parseOpenCode` as one `todo_write` snapshot so the shared `extractTodoProgressFromEvents` derives it uniformly |
 | `worktree_slug` | derived from the session `cwd` (`.agents/worktrees/<slug>/`), same as every harness |
@@ -199,10 +199,32 @@ so an OpenCode row carries the same burn/usage fields as any other harness:
 `session.cost` / `session.model` and the `todo` table are newer OpenCode additions —
 the scan probes `PRAGMA table_info(session)` and tolerates a missing `todo` table, so an
 older `opencode.db` still scans (those fields read as null) rather than throwing. The
-tool-part read in `parseOpenCode` truncates **only** `state.output` (via `json_set`),
-not the whole part: the previous `substr(p.data, 1, 2000)` corrupted a large `edit`
-part into invalid JSON and dropped it, losing the tool's `filePath` and leaving
-`recent_directories_touched` empty.
+`todo` read is gated the same way, by a `sqlite_master` probe rather than a catch, so a
+locked or corrupt database surfaces as an error instead of "this session has no todos".
+
+**The tool-part read is a projection, and it is bounded.** `parseOpenCode` selects a
+tool part down to exactly the fields it consumes — `tool`, `callID`, `state.status`,
+`state.input`, `state.output` — instead of carrying the row whole. Two failure modes it
+has to answer at once:
+
+- *Keep `state.input`.* It holds `filePath` / `command`; losing it is what left
+  `recent_directories_touched` empty when the read truncated the whole part with
+  `substr(p.data, 1, 2000)` (that corrupted large `edit` parts into invalid JSON, so
+  they were dropped entirely).
+- *Stay bounded.* A tool part's weight is **not** in its output. On a real
+  `opencode.db` the largest part is 1,346,068 bytes, of which `state.attachments` — a
+  base64 data URL from `read` — is 1,345,674 and `state.output` is 23. Truncating only
+  `state.output` therefore bounded nothing: one session's loaded tool payload went
+  299,365 → 1,911,209 bytes. The projection drops `attachments` and every other unread
+  key outright, caps `state.output` at 2,000 chars, and collapses a `state.input` over
+  4,000 bytes to just its addressing fields (`filePath`, `path`, `command`,
+  `description`).
+
+**Every `json_extract` is guarded by `json_valid`.** SQLite raises `malformed JSON` on a
+non-JSON value and that aborts the *whole* query, so a single unparseable `part` or
+`message` row anywhere in the shared database would drop **every** OpenCode session from
+the index — silently, since the scanner only reports the error when stderr is a TTY. A
+poisoned row costs that row, not the harness.
 
 Fields that stay null for OpenCode, by design: `account` (populated only when the local
 `control_account` table holds a signed-in row — empty for a token-less install);
