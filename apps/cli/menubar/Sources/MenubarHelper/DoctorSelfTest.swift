@@ -85,8 +85,10 @@ enum DoctorSelfTest {
 
         // MARK: exact poll argv — the 15-minute refresh must keep requesting
         // the fleet-aware doctor JSON; a silent flag drift breaks the contract.
-        check("doctor poll requests the fleet-aware JSON",
-              AgentsCLI.doctorOverviewArgs() == ["doctor", "--devices", "--json"])
+        // NOT `--devices`: measured 265s warm on mac-mini (2026-08-07) against
+        // the poll's 180s deadline — the refresh would never complete.
+        check("doctor poll requests the bounded fleet-aware JSON",
+              AgentsCLI.doctorOverviewArgs() == ["doctor", "--json"])
 
         print(pass ? "ALL PASS" : "SOME FAILED")
         exit(pass ? 0 : 1)
