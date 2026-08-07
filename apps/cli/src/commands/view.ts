@@ -87,6 +87,38 @@ import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/
 /** Shared account identity formatter, re-exported for the view-specific tests. */
 export const accountColumnLabel = accountDisplayLabel;
 
+export interface AccountOrderedVersion {
+  version: string;
+  email: string | null;
+}
+
+/**
+ * Human `agents view` row order: selected default first, then email-bearing
+ * accounts alphabetically, then installs whose account has no email. Version
+ * descending is the deterministic tie-breaker and preserves the old order for
+ * every non-email harness.
+ */
+export function compareAccountOrderedVersions(
+  a: AccountOrderedVersion,
+  b: AccountOrderedVersion,
+  globalDefault: string | null,
+): number {
+  const aIsDefault = a.version === globalDefault;
+  const bIsDefault = b.version === globalDefault;
+  if (aIsDefault !== bIsDefault) return aIsDefault ? -1 : 1;
+
+  const aEmail = a.email?.toLowerCase() ?? null;
+  const bEmail = b.email?.toLowerCase() ?? null;
+  if (aEmail !== null && bEmail === null) return -1;
+  if (aEmail === null && bEmail !== null) return 1;
+  if (aEmail !== null && bEmail !== null) {
+    const emailOrder = aEmail.localeCompare(bEmail);
+    if (emailOrder !== 0) return emailOrder;
+  }
+
+  return compareVersions(b.version, a.version);
+}
+
 /**
  * Overview (`agents view` with no agent filter) caps compact usage windows so
  * multi-meter agents (Antigravity's four model quotas, Droid's three buckets)
@@ -112,15 +144,12 @@ export function joinViewColumns(cols: string[]): string {
 }
 
 /**
- * Custom harnesses (the `~/.agents/profiles/*.yml` bundles), sorted by name and
- * optionally narrowed to the ones that run on one host agent. YAMLs that fail
- * validation are silently skipped by `listProfiles`, so this never throws on a
- * malformed file.
+ * Custom harnesses (the `~/.agents/profiles/*.yml` bundles), sorted by name.
+ * YAMLs that fail validation are silently skipped by `listProfiles`, so this
+ * never throws on a malformed file.
  */
-function getHarnesses(filterAgentId?: AgentId): ProfileSummary[] {
-  return listProfiles()
-    .filter((profile) => !filterAgentId || profile.host.agent === filterAgentId)
-    .map(profileSummary);
+function getHarnesses(): ProfileSummary[] {
+  return listProfiles().map(profileSummary);
 }
 
 /** Version-first label: "<version> (forked from <host>[, tracks default])" */
@@ -400,7 +429,9 @@ async function showInstalledVersions(
     )
   ) as Partial<Record<AgentId, CliState>>;
   const showPaths = !!filterAgentId;
-  const harnesses = getHarnesses(filterAgentId);
+  // A filtered native view is about that native harness's installed versions.
+  // Custom forks are standalone agent types and only belong in the overview.
+  const harnesses = filterAgentId ? [] : getHarnesses();
 
   // Auto-heal stale versioned aliases. Pre-v2 aliases (e.g. pre-CLAUDE_CONFIG_DIR
   // claude shims) silently route login through the default version's symlinked
@@ -633,12 +664,16 @@ async function showInstalledVersions(
 	        : '';
 	      console.log(`  ${chalk.bold(agentLabel(agentId))}${strategyLabel}${noDefaultLabel}`);
 
-	      // Sort versions with default first, then by semver descending
-      const sortedVersions = [...versions].sort((a, b) => {
-        if (a === globalDefault) return -1;
-        if (b === globalDefault) return 1;
-        return compareVersions(b, a);
-      });
+	      // Account information is already loaded above. Keep the selected default
+	      // first, then make multi-account installs scannable by email. Harnesses
+	      // without email identities retain their prior version-descending order.
+      const sortedVersions = versions
+        .map((version) => ({
+          version,
+          email: infoMap.get(`${agentId}:${version}`)?.email ?? null,
+        }))
+        .sort((a, b) => compareAccountOrderedVersions(a, b, globalDefault))
+        .map(({ version }) => version);
 
       for (const version of sortedVersions) {
         const isDefault = version === globalDefault;
@@ -1547,7 +1582,9 @@ export async function collectAgentsJson(filterAgentId?: AgentId, resourceSection
     else byAgent.set(agentId, [entry]);
   }
 
-  const harnesses = getHarnesses(filterAgentId);
+  // Keep filtered native JSON consistent with the text view: custom forks are
+  // not children of the native harness they execute through.
+  const harnesses = filterAgentId ? [] : getHarnesses();
   const out: ViewJsonAgent[] = [];
   for (const agentId of agentsToShow) {
     const versions = byAgent.get(agentId) ?? [];
@@ -1878,19 +1915,20 @@ export async function viewAction(
   const parts = agentArg.split('@');
   const agentName = parts[0];
 
-  const agentId = resolveAgentName(agentName);
-  if (!agentId) {
-    // A custom harness is an agent type here, not an unknown name: `agents run
-    // <name>` launches it, so `agents view <name>` describes it.
-    if (profileExists(agentName)) {
-      const harness = profileSummary(readProfile(agentName));
-      if (json) {
-        console.log(JSON.stringify(harness, null, 2));
-        return;
-      }
-      renderHarnessDetail(agentName);
+  // Match run resolution: an exact custom harness name wins over a native id or
+  // alias with the same spelling, so every fork remains independently viewable.
+  if (profileExists(agentName)) {
+    const harness = profileSummary(readProfile(agentName));
+    if (json) {
+      console.log(JSON.stringify(harness, null, 2));
       return;
     }
+    renderHarnessDetail(agentName);
+    return;
+  }
+
+  const agentId = resolveAgentName(agentName);
+  if (!agentId) {
     if (json) {
       console.log(JSON.stringify({ error: formatAgentError(agentName) }));
       process.exit(1);

@@ -924,18 +924,38 @@ export function renderExpiringCol(b: SecretsBundle, now: number = Date.now()): s
  * new one with the requested backend. Refuses to silently downgrade a
  * keychain-backed bundle to `file` — shared by every `import` source so the
  * guard can't drift between them.
+ *
+ * `force` additionally recreates a bundle whose METADATA RECORD is present but
+ * undecryptable — a file store whose key was lost or rotated out from under it.
+ * That is precisely the state provisioning exists to repair (import is how a box
+ * gets its bundles back), and without this the import dies on `readBundle` and
+ * the only route left is deleting the record by hand on an already-degraded
+ * store. It is gated on `--force` on purpose: recreating unconditionally would
+ * destroy a perfectly healthy bundle for someone who merely forgot to set
+ * `AGENTS_SECRETS_PASSPHRASE`, which is the hazard `readBundleIfDecryptable`
+ * exists to describe. `--force` already means "overwrite what is there".
  */
-function resolveImportBundle(name: string, backendOpt: string | undefined, synced = false): SecretsBundle {
+export function resolveImportBundle(
+  name: string,
+  backendOpt: string | undefined,
+  synced = false,
+  force = false,
+): SecretsBundle {
   const requestedBackend = synced ? 'vault' : resolveBackendOpt(backendOpt);
   if (bundleExists(name)) {
-    const bundle = readBundle(name);
-    if (requestedBackend !== 'keychain' && bundle.backend !== requestedBackend) {
-      throw new Error(
-        `Bundle '${name}' already exists with a different backend; ` +
-        `delete it first to recreate it as ${requestedBackend === 'vault' ? 'synced' : `${requestedBackend}-backed`}.`
-      );
+    // readBundleIfDecryptable nulls ONLY on BundleUndecryptableError; a locked
+    // keychain or logged-out vault still throws, so a recoverable state can
+    // never be mistaken for a lost key and silently overwritten.
+    const bundle = force ? readBundleIfDecryptable(name) : readBundle(name);
+    if (bundle) {
+      if (requestedBackend !== 'keychain' && bundle.backend !== requestedBackend) {
+        throw new Error(
+          `Bundle '${name}' already exists with a different backend; ` +
+          `delete it first to recreate it as ${requestedBackend === 'vault' ? 'synced' : `${requestedBackend}-backed`}.`
+        );
+      }
+      return bundle;
     }
-    return bundle;
   }
   return { name, backend: requestedBackend === 'keychain' ? undefined : requestedBackend, vars: {} };
 }
@@ -2113,7 +2133,7 @@ Examples:
           }
           const env = importBundleFromFile(opts.fromFile, passphrase);
           const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
-          const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced);
+          const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced, opts.force);
           const { added, skipped } = applyEnvToBundle(bundle, env, opts);
           emitSecretAudit({ event: 'secrets.import', bundle: bundle.name, operation: 'import --from-file', source: 'file', status: 'success', keyCount: added });
           console.log(chalk.green(`Imported ${added} key(s) from file${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
@@ -2128,7 +2148,7 @@ Examples:
           const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
           const target = await resolveHostSshTarget(opts.host);
           const env = await remoteResolveEnv(target, resolvedBundleName, { osLookupName: opts.host });
-          const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced);
+          const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced, opts.force);
           const { added, skipped } = applyEnvToBundle(bundle, env, opts);
           emitSecretAudit({ event: 'secrets.import', bundle: bundle.name, operation: 'import --from-ssh', source: 'ssh', host: opts.host, status: 'success', keyCount: added });
           console.log(chalk.green(`Imported ${added} key(s) from ${opts.host}${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
@@ -2159,7 +2179,7 @@ Examples:
         // to downgrade keychain -> file) or creates it with the requested backend
         // so a single `import --backend file` works (what `export --host ...
         // --remote-backend file` drives on the remote).
-        const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced);
+        const bundle = resolveImportBundle(resolvedBundleName, opts.backend, opts.synced, opts.force);
 
         if (source.kind === '1password') {
           assertOpAvailable();
@@ -2583,15 +2603,15 @@ Examples:
     .command('lease <bundle>')
     .description('Hold only an explicit subset of a bundle until an independent expiry.')
     .requiredOption('--keys <keys>', 'Comma-separated key subset')
-    .requiredOption('--for <duration>', 'Lease duration, for example 30m or 8h')
+    .requiredOption('--ttl <duration>', 'How long to hold it (e.g. 30m, 8h, 3d)')
     .option('--agent <agent>', 'Narrow the lease to one harness; default is global')
     .option('--durable', 'Keep the lease across sleep as well as broker restart')
-    .action(async (name: string, opts: { keys: string; for: string; agent?: string; durable?: boolean }) => {
+    .action(async (name: string, opts: { keys: string; ttl: string; agent?: string; durable?: boolean }) => {
       if (process.platform !== 'darwin') {
         throw new Error('Scoped lease brokering is not available on this platform yet.');
       }
-      const seconds = parseDuration(opts.for);
-      if (seconds === null) throw new Error(`Invalid lease duration '${opts.for}'.`);
+      const seconds = parseDuration(opts.ttl);
+      if (seconds === null) throw new Error(`Invalid lease duration '${opts.ttl}'.`);
       const ttlMs = seconds * 1000;
       const harness = opts.agent || GLOBAL_HARNESS;
       const { bundle, env } = readAndResolveBundleEnv(name, {
@@ -2668,10 +2688,10 @@ Examples:
     .option('--ttl <duration>', 'How long to hold it (e.g. 30m, 8h, 3d). Default 7d.')
     .option('--until <date>', 'Hold until this absolute date or timestamp (for example 2026-08-06T12:00:00Z). Mutually exclusive with --ttl.')
     .option('--durable', 'Keep the unlock across sleep + reboot too (default: survives upgrade/restart but re-locks on sleep). Set secrets.agent.durable in agents.yaml to make this the default.')
-    .option('--for <agent>', 'Narrow the unlock to ONE harness type (for example claude, codex, or kimi). Default: the grant is global — every harness and a plain shell can read it, so one Touch ID covers them all.')
+    .option('--agent <agent>', 'Narrow the unlock to ONE harness type (for example claude, codex, or kimi). Default: the grant is global — every harness and a plain shell can read it, so one Touch ID covers them all.')
     .option('--all', 'Unlock every configured bundle')
     .option('--host <target>', 'Unlock the bundle(s) on this remote machine over SSH instead of locally (file-backed bundles only — the remote\'s passphrase prompt surfaces on your terminal over a -tt session). Single-valued (NOT variadic) so it never swallows the bundle name: `unlock <name> --host <machine>`.')
-    .action(async (names: string[], opts: { ttl?: string; until?: string; durable?: boolean; all?: boolean; host?: string; for?: string }) => {
+    .action(async (names: string[], opts: { ttl?: string; until?: string; durable?: boolean; all?: boolean; host?: string; agent?: string }) => {
       if (opts.ttl && opts.until) {
         console.error(chalk.red('--ttl and --until are mutually exclusive.'));
         process.exit(1);
@@ -2748,12 +2768,12 @@ Examples:
       // (single-instance start lock, #414) and best-effort — never blocks unlock.
       ensureDaemonStarted();
       let loaded = 0;
-      // An unlock is a deliberate act, so it grants GLOBALLY unless `--for`
+      // An unlock is a deliberate act, so it grants GLOBALLY unless `--agent`
       // narrows it to one harness. It must NOT inherit the ambient
       // AGENTS_AGENT_NAME: that silently scoped a terminal unlock to whichever
       // agent happened to launch the shell, leaving the grant unreadable to
       // every other reader for its whole TTL.
-      const harness = opts.for || GLOBAL_HARNESS;
+      const harness = opts.agent || GLOBAL_HARNESS;
       for (const name of targets) {
         try {
           // noAgent: read the real keychain (one Touch ID) rather than the

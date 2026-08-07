@@ -15,7 +15,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import {
   generateLaunchdPlist,
@@ -36,7 +36,11 @@ import {
   describeEphemeralDaemonRoot,
   warnEphemeralDaemonRoot,
   validateDaemonBinary,
+  registerDaemonInstance,
+  unregisterDaemonInstance,
+  reapStrayDaemons,
 } from './daemon.js';
+import { getDaemonDir } from './state.js';
 import { ipcEndpoint } from './platform/index.js';
 
 const systemdQuote = (value: string): string =>
@@ -835,3 +839,91 @@ describe('schedulerGateTransition (scheduler.enabled re-evaluated on SIGHUP)', (
     expect(schedulerGateTransition(false, false)).toBe('none');
   });
 });
+
+// The instance registry + reaper are POSIX-only (a no-op on Windows), and these
+// tests spawn real child processes — so the whole block is macOS/Linux.
+describe.skipIf(process.platform === 'win32')(
+  'daemon instance registry — one daemon per device, whatever the launch entry',
+  () => {
+    const instancesDir = (): string => path.join(getDaemonDir(), 'instances');
+    const isChildAlive = (pid: number): boolean => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const spawned: Array<ReturnType<typeof spawn>> = [];
+
+    afterEach(() => {
+      for (const c of spawned) {
+        try {
+          c.kill('SIGKILL');
+        } catch {
+          /* already gone */
+        }
+      }
+      spawned.length = 0;
+      try {
+        fs.rmSync(instancesDir(), { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+    });
+
+    it('registerDaemonInstance writes a pid marker; unregister removes it', () => {
+      registerDaemonInstance(4242);
+      expect(fs.existsSync(path.join(instancesDir(), '4242'))).toBe(true);
+      unregisterDaemonInstance(4242);
+      expect(fs.existsSync(path.join(instancesDir(), '4242'))).toBe(false);
+    });
+
+    it('reaps a live __daemon-run registrant that is neither self nor the pid-file owner', async () => {
+      // A daemon spawned from a DIFFERENT launch entry (here: a bare `node`,
+      // not the argv[1] path the old reaper matched on) still registers under
+      // the shared device daemon dir, so the reaper finds and kills it.
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'], {
+        stdio: 'ignore',
+      });
+      spawned.push(child);
+      await new Promise((r) => setTimeout(r, 150));
+      expect(child.pid).toBeDefined();
+      registerDaemonInstance(child.pid!);
+
+      const result = reapStrayDaemons();
+      expect(result.reaped).toBe(1);
+      expect(fs.existsSync(path.join(instancesDir(), String(child.pid)))).toBe(false);
+      await new Promise((r) => setTimeout(r, 250));
+      expect(isChildAlive(child.pid!)).toBe(false);
+    });
+
+    it('never kills a live pid that is NOT a daemon (pid-reuse guard); only drops the stale marker', async () => {
+      const child = spawn('sleep', ['30'], { stdio: 'ignore' });
+      spawned.push(child);
+      await new Promise((r) => setTimeout(r, 150));
+      registerDaemonInstance(child.pid!);
+
+      const result = reapStrayDaemons();
+      expect(result.reaped).toBe(0);
+      expect(fs.existsSync(path.join(instancesDir(), String(child.pid)))).toBe(false);
+      expect(isChildAlive(child.pid!)).toBe(true); // the innocent process is untouched
+    });
+
+    it('garbage-collects a marker whose pid is dead, reaping nothing', () => {
+      const deadPid = 2147483000 + (process.pid % 1000);
+      registerDaemonInstance(deadPid);
+      const result = reapStrayDaemons();
+      expect(result.reaped).toBe(0);
+      expect(fs.existsSync(path.join(instancesDir(), String(deadPid)))).toBe(false);
+    });
+
+    it('never reaps this process, even when it is registered', () => {
+      registerDaemonInstance(process.pid);
+      const result = reapStrayDaemons();
+      expect(result.details.some((d) => d.includes(String(process.pid)))).toBe(false);
+      expect(isChildAlive(process.pid)).toBe(true);
+      unregisterDaemonInstance(process.pid);
+    });
+  },
+);

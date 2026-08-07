@@ -166,6 +166,22 @@ tool-backfill byte budget and `toolCallsForBackfill` as the 16 MiB in-memory par
 message + part byte total is the honest parse cost, where this column previously held
 the whole database's size for every OpenCode row.
 
+**A composite `file_path` is resolved to its container before any filesystem check.**
+The `opencode.db#<id>` form names a row *inside* a shared file, not a filesystem entry
+of its own, so every gate that stats a transcript first strips the `#<id>` fragment and
+tests the container file — `sessionFilePathContainer` /
+`splitSessionFilePath` ([`src/lib/session/parse.ts`](../src/lib/session/parse.ts)) are
+the single source of that mapping, used by the staleness gate (`findMissingFilePaths`),
+the top-by-cost liveness filter, and the resource-backfill stamp. A composite session
+is stale only when its container `.db` is gone. Before this, dirname/basename split the
+composite string and looked `opencode.db#ses_…` up as a directory entry, which never
+matched, so **every** OpenCode row was classified as a deleted file and dropped from all
+queries (RUSH-2357). For the same reason a composite row is treated as **managed** by
+the managed-scope filter (`isManagedSessionFile`): a single shared DB read from one fixed
+location is the one canonical store, not a per-install dotfile, so there is no
+"unmanaged own copy" to hide. Both behaviors key off the composite FORM, never a harness
+name, so any future single-shared-DB harness inherits them.
+
 Cursor is installed outside agents-cli's version homes. Once any managed agent
 version exists, the default managed scope excludes Cursor transcripts; pass
 `--unmanaged` (for example, `agents sessions --agent cursor --unmanaged`) to list
@@ -648,6 +664,10 @@ agents sessions --json --all --since 1h --limit 20
 # Filter by agent (and optional version)
 agents sessions --agent claude
 agents sessions --agent codex@0.116.0
+agents sessions --agent codex --version 0.116.0
+
+# An installed agent@version also routes positionally to the same filter
+agents sessions codex@0.116.0
 
 # FTS5 search (BM25 ranked, labels weighted highest)
 agents sessions "auth refactor"
@@ -705,6 +725,13 @@ agents sessions tail c07ec355
 # Opt in to raw JSONL when piping the live stream
 agents sessions tail c07ec355 --json | jq 'select(.type == "user")'
 ```
+
+The positional `agent@version` form becomes a structured filter only when that
+exact version is installed on the machine answering the query. Otherwise it
+remains ordinary free text, preserving searches such as `project@2026` and
+historical text that merely resembles a version selector. An explicit
+`--agent <agent@version>` can still filter indexed history after that installed
+version has been removed.
 
 `agents sessions tail` and `agents logs -f <id>` render compact live lines by
 default, even when stdout is piped. They show messages, tool calls, elided tool

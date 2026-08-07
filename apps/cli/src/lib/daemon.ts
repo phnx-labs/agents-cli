@@ -26,9 +26,10 @@ import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
 import { redactSecrets } from './redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
-import { getConfigValue, isSchedulerEnabled, assertSchedulerEnabled } from './device-config.js';
+import { getConfigValue, isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from './device-config.js';
 import { reapTerminalRoutineProcesses } from './routine-process-cleanup.js';
 import { runWatchdogPass } from './watchdog/service.js';
+import { recordSubsystemOk, recordSubsystemError, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC } from './daemon-health.js';
 
 const PID_FILE = 'daemon.pid';
 const LOCK_FILE = 'daemon.lock';
@@ -301,51 +302,109 @@ export function claimDaemonInstance(): boolean {
   }
 }
 
+/** Directory that registers every live daemon of THIS device (one per daemon dir). */
+function getDaemonInstancesDir(): string {
+  return path.join(getDaemonDirRoot(), 'instances');
+}
+
 /**
- * Reap stray duplicate daemon processes — a `__daemon-run` of THIS install that
- * isn't this process and isn't the pid-file owner. Mirrors the browser orphan
- * reaper (below): a predecessor that was SIGKILLed/OOM-ed without cleaning up,
- * or a duplicate that lost the pid-file write race, would otherwise keep a
- * second scheduler alive and double-fire jobs even after claimDaemonInstance()
- * hands the pid file to the survivor.
- *
- * Scoped to our own launch entry (process.argv[1]) so it only ever targets
- * daemons of the same installation — a daemon from a different install / home
- * (e.g. a side-by-side dev build, or a test fixture) is a legitimately separate
- * instance and is left untouched. POSIX-only (uses `ps`); a no-op on Windows.
+ * Record this daemon in the device's instance registry — a marker file named by
+ * pid under `<daemonDir>/instances/`. The registry, not a process scan, is how
+ * the reaper enumerates the device singleton: because the dir lives INSIDE the
+ * daemon dir (`AGENTS_DAEMON_DIR` ?? `<HOME>/.agents/.cache/helpers/daemon`), every
+ * daemon of one device — however it was launched — registers in the same place,
+ * while a genuinely separate install/home or a test fixture registers under its
+ * own daemon dir and is invisible here. This is what fixes the two-entry pile-up:
+ * the compiled `dist/bin/agents` binary and the `node <shim>` JS entry have
+ * different `process.argv[1]`, so the old launch-entry-scoped `ps` match never
+ * reaped across them and duplicates accumulated (78 observed on one box), every
+ * routine double-firing. Best-effort — the reaper self-heals a missing/stale
+ * marker, and reading another process's ENV to key on the daemon dir directly is
+ * not portable (hardened macOS hides it from `ps`), so identity rides the shared
+ * on-disk registry instead. No-op on Windows (POSIX-only reaper).
+ */
+export function registerDaemonInstance(pid: number = process.pid): void {
+  if (process.platform === 'win32') return;
+  try {
+    const dir = getDaemonInstancesDir();
+    fs.mkdirSync(dir, { recursive: true });
+    // The command line is stored for diagnostics; the filename (pid) is identity.
+    fs.writeFileSync(path.join(dir, String(pid)), process.argv.slice(1).join(' '), 'utf-8');
+  } catch { /* best effort — the reaper self-heals a missing marker */ }
+}
+
+/** Remove this daemon's registry marker on graceful shutdown. */
+export function unregisterDaemonInstance(pid: number = process.pid): void {
+  if (process.platform === 'win32') return;
+  try { fs.rmSync(path.join(getDaemonInstancesDir(), String(pid)), { force: true }); } catch { /* ignore */ }
+}
+
+/**
+ * Reap stray duplicate daemons of THIS device — every registrant in the instance
+ * registry that is a live `agents __daemon-run` and is neither this process nor
+ * the current pid-file owner. A predecessor SIGKILLed/OOM-ed without cleanup, or a
+ * duplicate that lost the pid-file write race, would otherwise keep a second
+ * scheduler alive and double-fire jobs even after claimDaemonInstance() hands the
+ * pid file to the survivor. Also garbage-collects markers whose pid is dead or was
+ * reused by an unrelated process. No-op on Windows (POSIX-only).
  */
 export function reapStrayDaemons(keepPid: number = process.pid): { reaped: number; details: string[] } {
   const details: string[] = [];
   let reaped = 0;
   if (process.platform === 'win32') return { reaped, details };
 
-  const selfEntry = process.argv[1];
-  if (!selfEntry) return { reaped, details };
-
-  let out: string;
+  const dir = getDaemonInstancesDir();
+  let entries: string[];
   try {
-    out = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+    entries = fs.readdirSync(dir);
   } catch {
-    return { reaped, details }; // no `ps` — best effort
+    return { reaped, details }; // no registry yet — nothing to reap
   }
 
   const ownerPid = readDaemonPid();
-  for (const line of out.split('\n')) {
-    const m = line.trim().match(/^(\d+)\s+(.*)$/);
-    if (!m) continue;
-    const pid = parseInt(m[1], 10);
-    const args = m[2];
-    if (isNaN(pid) || pid === keepPid || pid === process.pid || pid === ownerPid) continue;
-    // Same install (same launch entry) AND a `__daemon-run` command line.
-    if (!args.includes(selfEntry)) continue;
-    if (!/\b__daemon-run\b/.test(args)) continue;
+  const dropMarker = (name: string): void => {
+    try { fs.rmSync(path.join(dir, name), { force: true }); } catch { /* ignore */ }
+  };
+
+  for (const name of entries) {
+    const pid = parseInt(name, 10);
+    if (isNaN(pid) || String(pid) !== name) continue; // not a pid marker
+    if (pid === keepPid || pid === process.pid || pid === ownerPid) continue;
+
+    // Dead registrant → stale marker.
+    if (!isAlive(pid)) { dropMarker(name); continue; }
+
+    // Live pid, but guard against pid reuse: only a real `__daemon-run` is ours.
+    // Process ARGS are readable cross-platform (unlike ENV on hardened macOS).
+    if (!isDaemonRunProcess(pid)) { dropMarker(name); continue; }
+
     try {
       process.kill(pid, 'SIGTERM');
       reaped++;
       details.push(`reaped stray daemon pid ${pid}`);
-    } catch { /* already gone */ }
+    } catch { /* already gone between the alive check and the signal */ }
+    dropMarker(name);
   }
   return { reaped, details };
+}
+
+/**
+ * Whether `pid` is a live `agents __daemon-run` process. Reads the process's
+ * command line (`ps -p <pid> -o command=`), which — unlike its environment — is
+ * visible cross-platform, including on hardened macOS. Guards the reaper against
+ * killing an unrelated process that reused a dead registrant's pid.
+ */
+function isDaemonRunProcess(pid: number): boolean {
+  if (process.platform === 'win32') return false;
+  try {
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return /\b__daemon-run\b/.test(out);
+  } catch {
+    return false;
+  }
 }
 
 function rotateLogsIfNeeded(logPath: string): void {
@@ -456,8 +515,11 @@ export async function runDaemon(): Promise<void> {
   // skipped up front by the auth-health preflight (runner.ts) with a re-login
   // hint, rather than papered over by an injected fallback token.
 
-  // Reap any stray duplicate daemon of this install that slipped past the start
-  // lock or was orphaned by a hard-crash — before it can double-fire jobs.
+  // Register this daemon in the device instance registry, then reap any stray
+  // duplicate that slipped past the start lock or was orphaned by a hard-crash —
+  // before it can double-fire jobs. Registration comes first so a racing peer's
+  // reaper can see this pid, and so this reaper never mistakes itself for a stray.
+  registerDaemonInstance();
   try {
     const strays = reapStrayDaemons();
     if (strays.reaped > 0) {
@@ -484,8 +546,11 @@ export async function runDaemon(): Promise<void> {
       hostedBroker = await startHostedBroker();
       if (hostedBroker) log('INFO', 'Secrets broker hosted in daemon (socket-first)');
     }
+    recordSubsystemOk(SUBSYSTEM_SECRETS_BROKER);
   } catch (err) {
-    log('WARN', `Secrets broker host skipped: ${(err as Error).message}`);
+    const message = (err as Error).message;
+    log('WARN', `Secrets broker host skipped: ${message}`);
+    recordSubsystemError(SUBSYSTEM_SECRETS_BROKER, message);
   }
 
   // scheduler.enabled=false in this machine's device doc means NO routines fire
@@ -715,8 +780,11 @@ export async function runDaemon(): Promise<void> {
   try {
     await browserIPC.start();
     log('INFO', 'Browser IPC server started');
+    recordSubsystemOk(SUBSYSTEM_BROWSER_IPC);
   } catch (err) {
-    log('ERROR', `Browser IPC failed to start: ${(err as Error).message}`);
+    const message = (err as Error).message;
+    log('ERROR', `Browser IPC failed to start: ${message}`);
+    recordSubsystemError(SUBSYSTEM_BROWSER_IPC, message);
   }
 
   writeHeartbeat();
@@ -1111,6 +1179,7 @@ export async function runDaemon(): Promise<void> {
     hostedBroker?.close();
     removeDaemonPid();
     removeHeartbeat();
+    unregisterDaemonInstance();
     process.exit(0);
   };
 
@@ -1287,6 +1356,11 @@ export function startDaemon(agentsBin?: string): { pid: number | null; method: s
  * happened to bring it up. See issue #415.
  */
 export function ensureDaemonStarted(): { pid: number | null; method: string } | null {
+  // RUSH-2354: honor daemon.enabled — a background-adjacent caller (secrets
+  // unlock, browser start, ...) must not resurrect a daemon the owner
+  // explicitly turned off. `agents daemon start` is the deliberate override
+  // and calls startDaemon() directly instead of going through this helper.
+  if (!isDaemonEnabled()) return null;
   try {
     return startDaemon();
   } catch {
