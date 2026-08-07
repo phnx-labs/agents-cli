@@ -77,16 +77,24 @@ enum AgentsCLI {
         return try? JSONDecoder().decode(MenubarSnapshot.self, from: data)
     }
 
-    // The heaviest call the helper makes: `doctor --devices --json` probes every
-    // installed version of every harness and asks reachable fleet devices for
-    // their health. Seconds on a healthy box, so it gets the longest deadline —
-    // but it does get one. An unbounded doctor is what consumed 13 of 18 cores on
-    // a real machine.
+    // The heaviest call the helper makes: `doctor --json` probes every installed
+    // version of every harness with its own subprocess. Seconds on a healthy box,
+    // so it gets the longest deadline — but it does get one. An unbounded doctor
+    // is what consumed 13 of 18 cores on a real machine.
+    //
+    // Deliberately NOT `--devices`: the fleet fan-out measured 265s on mac-mini
+    // (2026-08-07, warm cache) against this poll's 180s deadline — every refresh
+    // would be group-killed mid-flight and the System row would read
+    // "unavailable" forever. The bare overview is already the fleet-aware
+    // payload (RUSH-2027 `fleet` inventory) and carries the prioritized
+    // `findings` (RUSH-2069) this helper renders; it is also singleflight-cached
+    // CLI-side (RUSH-2153), which is what makes a 15-minute poller viable at
+    // all. The fleet-wide readout stays one click away via "Run agents doctor".
     //
     // The argv is a pure builder (mirrors routineHistoryArgs) so the headless
     // self-test can pin the exact request — this poll is the only reader of the
-    // fleet findings contract, and a silent flag drift would break it.
-    static func doctorOverviewArgs() -> [String] { ["doctor", "--devices", "--json"] }
+    // findings contract, and a silent flag drift would break it.
+    static func doctorOverviewArgs() -> [String] { ["doctor", "--json"] }
 
     static func doctorOverview() -> DoctorOverview? {
         guard let data = capture(argv(doctorOverviewArgs()), timeout: ChildProcess.doctorTimeout) else { return nil }
@@ -180,10 +188,12 @@ enum AgentsCLI {
         runDetached(argv(["focus", sessionId]))
     }
 
-    // Surface CLI health in a terminal — the menu's health row is fleet-aware, so
-    // the interactive command must show the same scope.
+    // Surface CLI health in a terminal — `agents doctor` is interactive output.
+    // Plain `doctor`, matching the poll's scope (see doctorOverviewArgs): the
+    // `--devices` fan-out costs minutes and belongs to an explicit terminal run,
+    // which the operator can widen themselves.
     static func runDoctor() {
-        let cmd = "\(shellQuote(binary)) doctor --devices"
+        let cmd = "\(shellQuote(binary)) doctor"
         let script = "tell application \"Terminal\"\nactivate\ndo script \"\(cmd)\"\nend tell"
         runDetached(["/usr/bin/osascript", "-e", script])
     }
