@@ -56,6 +56,7 @@ guarantee, the reference for the mechanism.
 - [Secrets](#secrets) — `agents secrets`: storage & materialization boundaries, sharing, no-noise
 - [Agent execution](#agent-execution) — `agents run`: the one execution engine, env, isolation, fallback, dispatch
 - [Scheduling & execution singularity](#scheduling--execution-singularity) — one scheduler, one executor for anything fleet-affecting; UIs are thin wrappers
+- [Routine execution & readiness](#routine-execution--readiness) — `agents routines`: context resolution on the target, readiness/pause, single-fire, run history
 - [Watchdog](#watchdog) — `agents watchdog`: detect idle agents, decide nudge/skip, deliver to the exact split
 
 ## Coverage inventory
@@ -71,8 +72,8 @@ row its surface sits in.
 
 | Coverage | Surfaces | What that means |
 |---|---|---|
-| **Specified here** | `sessions`, `secrets`, `run`, the scheduling/executor singularity, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
-| **Governed in part** | `routines`, `monitors`, `doctor`, `daemon` | One requirement reaches them, no command contract does. `routines`/`monitors` are bound by [§Scheduling & execution singularity](#scheduling--execution-singularity) (SING-5, SING-8, SING-9) — who may schedule and execute them. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. `daemon` is bound by SING-1 (it IS the singular scheduler/executor) and SING-4a (the `daemon.enabled` kill switch); its status/health rendering (`agents daemon status`/`services`/`doctor`) carries no requirement of its own. Everything else these commands do is unspecified. |
+| **Specified here** | `sessions`, `secrets`, `run`, the scheduling/executor singularity, **routine execution & readiness**, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
+| **Governed in part** | `monitors`, `doctor`, `daemon` | One requirement reaches them, no command contract does. `monitors` is bound by [§Scheduling & execution singularity](#scheduling--execution-singularity) (SING-5, SING-8, SING-9) — who may schedule and execute it. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. `daemon` is bound by SING-1 (it IS the singular scheduler/executor) and SING-4a (the `daemon.enabled` kill switch); its status/health rendering (`agents daemon status`/`services`/`doctor`) carries no requirement of its own. Everything else these commands do is unspecified. |
 | **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `pty`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | A design doc describes the mechanism — [hosts.md](hosts.md), [teams.md](teams.md), [cloud.md](cloud.md), [02-resource-sync.md](02-resource-sync.md), [01-version-management.md](01-version-management.md), … — but states **no** requirements. Verified: `hosts.md`, `teams.md` and `cloud.md` contain **zero capitalized RFC-2119 keywords**. `hosts.md` and `teams.md` do use lowercase "must" in prose ("the remote run must be bounded", `hosts.md:124`; "you must declare what each one owns", `teams.md:207`) — which reads normative but is not, per this document's own capitalization rule. That is exactly the trap: treat those docs as explanation, never as a contract. |
 | **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `worktree`, `webhook`, `funnel`, `lease`, `mailboxes`, `feed`, `message`/`send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
 
@@ -2329,6 +2330,30 @@ nothing but its own view cache.
   election with lease handoff for any remaining UI-side coordination protocol
   (apps/factory `src/monitor/leader.ts` — presence fan-out only, not task
   execution), and idempotent effects so a redelivery is a no-op.
+- **SING-11 (MUST).** A single scheduled fire MUST launch a routine at most once,
+  even when the same UTC occurrence is evaluated by more than one timer callback,
+  a restart replays `loadAll()` (`lib/scheduler.ts`), or a manual `catchup` overlaps
+  the daemon pass. Uniqueness MUST be a structural claim on the occurrence identity
+  `(routine, scheduledFor)`, not a soft in-memory guard. The **landed** precedent is
+  the catch-up path: `claimMissedFire` (`lib/catchup.ts`) creates the run directory
+  with a non-recursive `mkdir` — an atomic test-and-set — so the losing caller reports
+  `already claimed by the scheduler` and never spawns a second agent
+  (`docs/03-routines.md` §Catching up a missed fire). Status: **Current** for the
+  catch-up/overlap path (the `missed`-record claim), **[Intended]** for the primary
+  scheduled dispatch path (see SING-GAP-3): today the forward-timer dispatch has no
+  durable per-slot claim of its own, so two live schedulers evaluating one occurrence
+  is prevented by the pid-file singleton (SING-5), not by an occurrence claim.
+- **SING-12 (MUST).** The slot claim (SING-11 — "may this occurrence dispatch?") and
+  the active-run claim (SING-13 — "is an instance of this routine already running?")
+  MUST be distinct guards: a routine that overlaps itself (a long run still executing
+  when the next slot arrives) is a different condition from one occurrence firing
+  twice, and collapsing them into one lock makes each failure mode mask the other.
+  Status: **[Intended]** (see SING-GAP-3).
+- **SING-13 (MUST).** A routine MUST NOT overlap itself: while one run of a routine is
+  in a non-terminal state (`running`), a newly-arriving occurrence MUST record a
+  terminal `skipped` run linked to the active run (its `activeRunId`) rather than
+  spawning a concurrent second instance, across every placement (`local`, `host`,
+  `fleet`, `cloud`). Status: **[Intended]** (see SING-GAP-3).
 
 #### 3.1 Multi-device — parallel daemons are fine, shared queues are not
 
@@ -2406,6 +2431,186 @@ is not two daemons existing — it is two daemons consuming the **same** input.
   it is a second coordination fabric where the daemon's presence tracking
   (`lib/session/presence.ts`) would be the singular home. Informative; a future
   consolidation SHOULD retire it in the daemon's favor.
+- **SING-GAP-3 (RUSH-2290).** The primary scheduled-dispatch path has no durable
+  per-occurrence claim of its own (SING-11 [Intended]), the slot claim and the
+  active-run claim are not yet separated (SING-12 [Intended]), and self-overlap does
+  not yet record a `skipped` run (SING-13 [Intended]). The catch-up path's atomic
+  `mkdir` claim (`lib/catchup.ts`) already makes a *missed* fire at-most-once, and the
+  daemon pid singleton (SING-5) prevents two schedulers, but a single scheduler that
+  evaluates one occurrence through two timer callbacks — or dispatches a new slot while
+  the prior run is still live — is guarded only in memory. The reliability plan
+  (RUSH-2290) moves the claim into a unified transaction on `(routine, scheduledFor)`
+  and adds the `skipped`-run overlap record; the run-status contract for that record is
+  RT-6/RT-7 below.
+
+---
+
+## Routine execution & readiness
+
+The normative contract for **how a routine resolves its execution context, proves it
+is runnable, and records what happened** — the reliability half of routines, distinct
+from the scheduling-singularity half above (who may fire them). The how-it-works
+companion is [03-routines.md](03-routines.md). Requirement keywords
+**MUST / MUST NOT / SHOULD / MAY** are per RFC 2119; scenarios are Given/When/Then.
+
+Most of this section is the target contract from the routine reliability plan
+(RUSH-2290) and is marked **[Intended]** with a `-GAP-` reference; the landed
+guarantees are marked **Current**. A routine's YAML today carries `agent`/`workflow`/
+`command`, `schedule`/`trigger`, `projects` (grouping), `devices` (activation),
+`source` (provenance), and `catchup` (`lib/routines.ts:151` `JobConfig`); it does
+**not** yet carry a singular `project` anchor or a routine-level `cwd`, and `RunMeta`
+(`lib/routines.ts:411`) does not yet carry `blocked`/`skipped` statuses or the
+readiness/context fields RT-1..RT-8 describe.
+
+### 1. Grouping vs anchor — two different `project` concepts
+
+- **RT-1 (MUST).** `projects` (plural) is **grouping metadata only**: it organises a
+  routine under a project group in `agents routines list` and the menu bar and MUST
+  NOT affect scheduling or execution — the special value `["*"]` means "all defined
+  projects" (`lib/routines.ts` `normalizeProjects`; `docs/03-routines.md` §Project
+  tagging, "Tagging is **metadata-only**"). `projects[]` MUST NOT be silently promoted
+  into an execution context. Status: **Current**.
+- **RT-2 (MUST, [Intended]).** A routine's **execution anchor** is a distinct singular
+  concept — a `project` field (one named `agents projects` entry) resolved to a base
+  directory on the execution target, surfaced on the CLI as `--project-anchor <name>`
+  so it can never be confused with the repeatable grouping flag `--project`. The
+  plural grouping list and the singular anchor MUST remain separate fields with
+  separate flags. Status: **[Intended]** (see RT-GAP-1); today only the `projects`
+  grouping list and `--project`/`--all-projects` exist (`commands/routines.ts` `add`).
+
+### 2. Context resolution happens on the execution target
+
+- **RT-3 (MUST, [Intended]).** The working directory a routine's body runs in MUST be
+  resolved **on the device that will execute it**, never from the daemon that fired it
+  — a `fleet`/`host`/`cloud`-placed run resolves against the *target's* filesystem and
+  `$HOME`, so a path that exists on the firing box but not the target is caught as a
+  readiness blocker, not a silent wrong-directory launch. Resolution MUST follow this
+  table, and a configuration with no usable directory MUST pause rather than fall back
+  to an implicit home for an agent/workflow body (RT-5):
+
+  | Configuration | Resolved directory | Readiness |
+  |---|---|---|
+  | `project` anchor with a usable base, no `cwd` | project base path | continue |
+  | `project` anchor + relative `cwd` | base joined with `cwd`, if inside the base | continue |
+  | Rootless `project` (e.g. a Linear-imported project with no local checkout) + relative `cwd` | target `$HOME` joined with `cwd`, if it exists | continue |
+  | No `project` + relative `cwd` | target `$HOME` joined with `cwd`, if it exists | continue |
+  | Absolute `cwd` outside `$HOME` | — | **pause** (`cwd_not_portable`) for portability |
+
+  Status: **[Intended]** (see RT-GAP-1). The landed shape today is `remoteCwd` for
+  `host`/`fleet` body placement only (`lib/routines.ts:238`, validated at
+  `lib/routines.ts:1055`), with no anchor/readiness resolver.
+- **RT-4 (MUST, [Intended]).** A **`command`** routine (a plain shell body, no agent,
+  no sandbox — `lib/routines.ts:166`) MAY default to the target `$HOME` when it has no
+  anchor or `cwd`: deterministic housekeeping (`git pull`, `npm i -g`, a notify) is
+  home-relative by nature. An **`agent`** or **`workflow`** routine MUST NOT — see
+  RT-5. Status: **[Intended]** (the `command` body is Current; the "may default to
+  home" readiness rule is [Intended]).
+
+### 3. Readiness — a proven blocker saves the routine paused
+
+- **RT-5 (MUST, [Intended]).** `agents routines add` and `edit` MUST verify readiness
+  before activating a routine, and a **proven** blocker MUST save the definition in the
+  **paused** state carrying the exact failing check, rather than activating a routine
+  that will fail at fire time. Readiness codes MUST be machine-readable and stable —
+  at minimum `project_not_found`, `project_path_missing`, `cwd_missing`,
+  `cwd_not_portable`, `codex_workspace_untrusted`, `agent_auth_failed`, and
+  `execution_context_missing` (an `agent`/`workflow` routine with no anchor and no
+  `cwd`). Auth readiness MUST be a real headless authenticated smoke, not a cache read
+  (the cache-only check is why a dead account passed add-time and failed at fire —
+  RUSH-2290 findings). A readiness check MUST NOT introduce a sandbox bypass or an
+  automatic login. Status: **[Intended]** (see RT-GAP-1). Landed today: activation is
+  already separate from the definition (a paused state is representable — SING-5a,
+  device-manifest membership), and `--disabled` creates a routine paused
+  (`commands/routines.ts` `add`); the readiness *verification* and the pause-on-blocker
+  behaviour are not yet implemented.
+- **RT-9 (MUST, [Intended]).** `agents routines resume <name>` MUST re-run the readiness
+  checks and refuse to activate a routine whose blocker is still present — resume MUST
+  NOT be a way to bypass readiness. Status: **[Intended]** (see RT-GAP-1); the `resume`
+  command exists (`commands/routines.ts` `resume`) but performs no readiness recheck.
+- **RT-10 (MUST, [Intended]).** A raw edit of the routine YAML (hand-editing the file,
+  or `agents routines edit`) MUST be atomic against the live definition: parse and
+  validate a temporary copy, then atomically replace, so an invalid edit leaves the
+  prior bytes untouched and a valid-but-unready edit replaces the definition **and**
+  pauses it. Status: **[Intended]** (see RT-GAP-1).
+
+### 4. Run history owns attempts; statuses distinguish outcomes
+
+- **RT-6 (MUST).** Every routine attempt MUST be recorded as a `RunMeta` under
+  `.history/runs/<routine>/<run>/` (`lib/routines.ts` `writeRunMeta`), and that run
+  history — not the session transcript index — MUST be the canonical record of what a
+  routine did. Sessions, logs, reports, and artifacts are **optional linked children**
+  of a run: a routine that failed before any agent session started (bad placement,
+  untrusted sandbox, dead account, dispatch failure) still owns a terminal run that is
+  visible in `agents routines runs`, even though it has no session. Status: **Current**
+  for run-first history (`missed`/`failed` runs exist with no session,
+  `docs/03-routines.md` §Run State Machine); **[Intended]** for the pre-session
+  readiness-failure runs (RT-5) and the menu History surface that renders them.
+- **RT-7 (MUST, [Intended]).** `RunMeta.status` MUST distinguish, at minimum:
+  `running`, `completed`, `failed` (the body ran and errored), `timeout`, `missed`
+  (a scheduled fire the daemon never got to — SING-11), `blocked` (readiness failed,
+  no body ran — RT-5), and `skipped` (the routine was already running, self-overlap —
+  SING-13). `blocked` and `failed` MUST NOT be collapsed: a routine that never ran
+  because its account was dead is a different operational state from one whose body
+  ran and threw. Status: **Current** for `running`/`completed`/`failed`/`timeout`/
+  `missed` (`lib/routines.ts:440`); **[Intended]** for `blocked` and `skipped` (see
+  RT-GAP-1).
+- **RT-8 (MUST).** `repo` on a routine is an **external identity** — the GitHub
+  `owner/repo` a webhook trigger filters on (`JobConfig.repo`, `lib/routines.ts:174`)
+  and the origin remote recorded as provenance when a routine is materialised from a
+  project (`JobSource.repo`, `lib/routines.ts:57`) — and MUST NOT be treated as a local
+  working directory. The local execution directory is the anchor/`cwd` of RT-3; the
+  Git/cloud/webhook `repo` identity is separate and MUST stay separate. Status:
+  **Current**.
+
+### 5. Menu bar stays read-only for scheduling
+
+- **RT-11 (MUST).** The menu-bar helper MUST consume routine and run state as JSON for
+  display only and MUST NOT own any scheduling: it renders `agents routines`/run
+  history and MAY offer a control that *requests* an immediate run or a pause
+  (a user click invoking the CLI), but it MUST NOT hold a cron, countdown, or
+  readiness loop of its own. This is SING-2/SING-5 applied to the menu bar; the timer
+  bound in the helper is a cached *refresher* of read-only views, never an executor
+  (`apps/cli/menubar/…` `ChildProcess` cached refreshers; `apps/cli/CLAUDE.md`
+  §menu-bar). Status: **Current**.
+
+### 6. Given/When/Then scenarios
+
+- **GIVEN** a routine tagged `projects: [myapp, billing]` and no `project` anchor,
+  **WHEN** it fires, **THEN** the grouping list changes nothing about where it runs
+  (RT-1) — placement follows `devices`/`hostStrategy`/anchor, never the grouping tags.
+- **GIVEN** a Linear-imported (rootless) project anchor plus a relative `cwd` of
+  `checkouts/app`, **WHEN** the routine is added on a target whose `$HOME/checkouts/app`
+  exists, **THEN** readiness resolves the cwd under the target `$HOME` and activates;
+  **WHEN** that directory does not exist, **THEN** add saves the routine **paused** with
+  `cwd_missing` (RT-3, RT-5).
+- **GIVEN** an `agent` routine with neither a `project` anchor nor a `cwd`, **WHEN** it
+  is added, **THEN** it saves **paused** with `execution_context_missing` — there is no
+  implicit home launch for an agent body (RT-4, RT-5). **GIVEN** the same shape as a
+  `command` routine, **THEN** it activates and runs from the target `$HOME` (RT-4).
+- **GIVEN** a routine whose pinned account is dead, **WHEN** it is added, **THEN** the
+  headless auth smoke fails and it saves **paused** with `agent_auth_failed`, and a
+  terminal `blocked` run is visible in `agents routines runs` before any session exists
+  (RT-5, RT-6, RT-7).
+- **GIVEN** a routine still executing when its next slot arrives, **WHEN** the slot
+  fires, **THEN** exactly one instance runs and the new occurrence records a `skipped`
+  run linked to the active run — not a second concurrent launch (SING-13, RT-7).
+- **GIVEN** a hand-edit that makes the YAML invalid, **WHEN** it is written, **THEN**
+  the prior definition bytes are untouched (RT-10); **GIVEN** a valid edit that
+  introduces a blocker, **THEN** the definition is replaced and paused (RT-10, RT-5).
+
+### 7. Known gaps
+
+- **RT-GAP-1 (RUSH-2290).** The execution-context resolver (RT-2, RT-3), the readiness
+  model and pause-on-blocker (RT-4, RT-5), resume recheck (RT-9), atomic raw edit
+  (RT-10), and the `blocked`/`skipped` run statuses with their pre-session runs and
+  menu History (RT-6 [Intended] half, RT-7 [Intended] half) are the routine reliability
+  plan's target contract and are **not yet implemented** on `main`. Today: `remoteCwd`
+  covers only `host`/`fleet` body placement (`lib/routines.ts:238`); `RunMeta.status`
+  stops at `missed` (`lib/routines.ts:440`); there is no singular `project` anchor,
+  `--project-anchor`, `routines doctor`, readiness code, or `cwd` field. The landed
+  guarantees this section already pins are RT-1, RT-6 (run-first history), RT-8, and
+  RT-11. A change that lands any [Intended] requirement MUST flip its `Status:` to
+  **Current** in the same PR and MUST NOT widen this gap.
 
 ---
 
