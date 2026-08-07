@@ -133,6 +133,68 @@ export enum AgentStatus {
   STOPPED = 'stopped',
 }
 
+/**
+ * The statuses a teammate can never leave — its process has run and finished
+ * (or been stopped). Everything else (pending, running) is still live work.
+ *
+ * This is the ONLY set that retention (cleanupOldAgents) may reap: a `pending`
+ * teammate has not launched yet and a `running` one is doing work, so deleting
+ * either is data loss. Treating "not running" as "completed" was the RUSH-2356
+ * bug — it swept live `pending` `--after` teammates past the 50-record cap.
+ */
+export const TERMINAL_STATUSES: ReadonlySet<AgentStatus> = new Set([
+  AgentStatus.COMPLETED,
+  AgentStatus.FAILED,
+  AgentStatus.STOPPED,
+]);
+
+/** True when a teammate has reached a terminal (completed/failed/stopped) status. */
+export function isTerminalStatus(status: AgentStatus): boolean {
+  return TERMINAL_STATUSES.has(status);
+}
+
+/**
+ * One remote teammate's liveness, resolved by a single host probe. Three states,
+ * kept distinct on purpose (RUSH-2366):
+ *   - alive=true                                → process still running.
+ *   - exitFilePresent=true                      → the `.exit` sentinel exists;
+ *     `exit` is its (possibly empty, mid-write) contents.
+ *   - alive=false && !exitFilePresent  ("GONE") → the process is gone AND the
+ *     wrapper never recorded a sentinel — it was killed / the box died. There is
+ *     no exit code coming, so this MUST resolve terminal instead of "running
+ *     forever". Collapsing GONE into the empty-`.exit` case is exactly the bug
+ *     that left a dead `--device` teammate RUNNING indefinitely.
+ */
+export interface RemoteLivenessSnapshot {
+  alive: boolean;
+  exit: string | null;
+  exitFilePresent: boolean;
+}
+
+/**
+ * The per-teammate shell that emits `<id> <ALIVE|EXITED|GONE> <codeOrEmpty>`.
+ * Shared by the batched prefetch (many teammates, one round-trip) and the
+ * direct single-teammate probe, so both classify liveness identically.
+ * `exitFile` is interpolated UNQUOTED so `$HOME` in the dispatch path expands on
+ * the remote shell (shellQuote would defeat the `[ -f ]` test).
+ */
+export function remoteLivenessSnippet(id: string, exitFile: string, pid: number): string {
+  return (
+    `printf '%s ' ${shellQuote(id)}; ` +
+    `if [ -f ${exitFile} ]; then printf 'EXITED '; cat ${exitFile} 2>/dev/null | tr -d '\\n'; printf '\\n'; ` +
+    `elif kill -0 ${pid} 2>/dev/null; then printf 'ALIVE\\n'; ` +
+    `else printf 'GONE\\n'; fi`
+  );
+}
+
+/** Parse one `<STATE> <codeOrEmpty>` reading into a snapshot. */
+export function parseRemoteLivenessState(state: string, code: string | undefined): RemoteLivenessSnapshot {
+  if (state === 'ALIVE') return { alive: true, exit: null, exitFilePresent: false };
+  if (state === 'EXITED') return { alive: false, exit: code ?? '', exitFilePresent: true };
+  // GONE (or an unrecognised token): process not alive, no sentinel recorded.
+  return { alive: false, exit: null, exitFilePresent: false };
+}
+
 /** Task type label for Software Factory workflows. Drives planner fan-out. Optional — teammates without a task_type work exactly as before. */
 export type TaskType = 'plan' | 'implement' | 'test' | 'review' | 'bugfix' | 'docs';
 export const VALID_TASK_TYPES: readonly TaskType[] = [
@@ -577,7 +639,7 @@ export class AgentProcess {
   // scan + the supervisor's listByTask) yet never carries into the next wave. Null
   // outside a batched wave (e.g. a bare `teams status`), where a direct per-teammate
   // SSH probe is the correctness fallback.
-  remotePollSnapshot: { alive: boolean; exit: string | null } | null = null;
+  remotePollSnapshot: RemoteLivenessSnapshot | null = null;
   private eventsCache: any[] = [];
   private lastReadPos: number = 0;
   private baseDir: string | null = null;
@@ -829,34 +891,56 @@ export class AgentProcess {
       }
     }
 
-    // Resolve terminal status from the remote `.exit` sentinel (mirror
-    // reapProcess). Prefer this wave's batched snapshot; else fetch the exit file
-    // directly. The snapshot is left in place (refreshed each wave by prefetch),
-    // so a second poll pass within the same wave reuses it.
-    let exit: string | null = null;
-    const snap = this.remotePollSnapshot;
-    if (snap) {
-      exit = snap.exit;
-    } else if (this.remoteExit) {
-      // UNQUOTED so `$HOME` in the dispatch exit path expands on the remote shell.
-      const res = sshExec(this.hostTarget, `cat ${this.remoteExit} 2>/dev/null`, {
-        timeoutMs: 8000,
-        multiplex: true,
-        extraSshArgs: this.hostIdentityFile ? ['-i', this.hostIdentityFile, '-o', 'IdentitiesOnly=yes'] : [],
-      });
-      exit = res.code === 0 && res.stdout.trim() !== '' ? res.stdout.trim() : null;
-    }
+    // Resolve terminal status from the host. Prefer this wave's batched snapshot;
+    // else probe this teammate directly. The snapshot is left in place (refreshed
+    // each wave by prefetch), so a second poll pass within the same wave reuses it.
+    const snap = this.remotePollSnapshot ?? (await this.probeRemoteLiveness());
+    if (!snap) return; // transient ssh failure — leave RUNNING, retry next poll
+
     // Only latch terminal on a PARSEABLE exit code. A `.exit` that exists but is
     // momentarily empty (created, not yet written) or garbage must NOT force a
     // spurious FAILED — leave the teammate RUNNING and let the next poll resolve
-    // it once the code lands. Matches the direct-cat guard above.
-    if (exit !== null && exit.trim() !== '' && this.status === AgentStatus.RUNNING) {
-      const code = Number.parseInt(exit.trim(), 10);
+    // it once the code lands.
+    if (snap.exit !== null && snap.exit.trim() !== '' && this.status === AgentStatus.RUNNING) {
+      const code = Number.parseInt(snap.exit.trim(), 10);
       if (Number.isFinite(code)) {
         this.status = code === 0 ? AgentStatus.COMPLETED : AgentStatus.FAILED;
         if (!this.completedAt) this.completedAt = new Date();
+        return;
       }
     }
+
+    // No exit code resolved it. If the remote process is GONE with NO sentinel at
+    // all, the wrapper died before recording `$?` (killed, box lost, OOM) — it can
+    // never write a code, so this teammate is FAILED, not "running forever"
+    // (RUSH-2366). This is the remote analog of reapProcess()'s "sentinel absent
+    // -> 1 -> FAILED". An EXITED-but-empty `.exit` (wrapper mid-write) is left
+    // RUNNING above precisely so this branch does not misfire on that race.
+    if (this.status === AgentStatus.RUNNING && !snap.alive && !snap.exitFilePresent) {
+      this.status = AgentStatus.FAILED;
+      if (!this.completedAt) this.completedAt = this.getLatestEventTime() || this.startedAt || new Date();
+    }
+  }
+
+  /**
+   * One-shot direct liveness probe for a single remote teammate — the fallback
+   * used outside a batched supervisor wave (a bare `teams status`, `mgr.get()`
+   * for `teams resume`). Returns null on a transient ssh failure so the caller
+   * leaves the teammate RUNNING rather than reaping it on a dropped connection.
+   */
+  private async probeRemoteLiveness(): Promise<RemoteLivenessSnapshot | null> {
+    if (!this.hostTarget || !this.remotePid || !this.remoteExit) return null;
+    const res = sshExec(this.hostTarget, remoteLivenessSnippet(this.agentId, this.remoteExit, this.remotePid), {
+      timeoutMs: 8000,
+      multiplex: true,
+      extraSshArgs: this.hostIdentityFile ? ['-i', this.hostIdentityFile, '-o', 'IdentitiesOnly=yes'] : [],
+    });
+    if (res.code === null) return null; // transient ssh failure — don't reap early
+    const trimmed = res.stdout.trim();
+    if (!trimmed) return null;
+    const [, state, code] = trimmed.split(/\s+/);
+    if (!state) return null;
+    return parseRemoteLivenessState(state, code);
   }
 
   /** Reset the local stdout cursor for a newly truncated resume log. */
@@ -1177,11 +1261,61 @@ export class AgentProcess {
   }
 
   /**
+   * Read just the persisted status + completion time from meta.json, without
+   * reconstructing the whole teammate. Returns null when there is no readable
+   * record on disk. Used to detect that ANOTHER process (a `teams stop`, a
+   * sibling supervisor) has already moved this teammate to a terminal status.
+   */
+  private async readDiskStatus(): Promise<{ status: AgentStatus; completedAt: Date | null } | null> {
+    let raw: string;
+    try {
+      raw = await fs.readFile(await this.getMetaPath(), 'utf-8');
+    } catch {
+      return null;
+    }
+    try {
+      const meta = JSON.parse(raw);
+      const validStatuses = Object.values(AgentStatus);
+      const status = validStatuses.includes(meta.status as AgentStatus)
+        ? (meta.status as AgentStatus)
+        : AgentStatus.RUNNING;
+      const completedAt = meta.completed_at ? new Date(meta.completed_at) : null;
+      return { status, completedAt };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * If this in-memory teammate is still non-terminal but disk already shows a
+   * terminal status, adopt the disk state. Returns true when it did.
+   *
+   * This is the guard against the stale-manager race (RUSH-2366): a long-lived
+   * supervisor holding a teammate as `running` must never re-persist that stale
+   * `running` over a `stopped`/`failed`/`completed` another process just wrote
+   * (e.g. an explicit `teams stop` in a separate CLI invocation). A terminal
+   * status is a one-way latch, so disk-terminal always wins over memory-running.
+   */
+  private async adoptDiskTerminalIfNewer(): Promise<boolean> {
+    if (isTerminalStatus(this.status)) return false;
+    const disk = await this.readDiskStatus();
+    if (!disk || !isTerminalStatus(disk.status)) return false;
+    this.status = disk.status;
+    this.completedAt = disk.completedAt ?? this.completedAt ?? new Date();
+    return true;
+  }
+
+  /**
    * @param opts.skipRemote A `--local` caller (RUSH-2118): a distributed
    *   teammate is never dialed — its in-memory state (already loaded from
    *   meta.json) stands as-is, no ssh, no re-save.
    */
   async updateStatusFromProcess(opts: { skipRemote?: boolean } = {}): Promise<void> {
+    // Stale-manager guard (RUSH-2366): if disk has already latched this teammate
+    // terminal, adopt that and stop — a poll of a process that no longer exists
+    // must not re-persist `running` over the newer on-disk terminal status.
+    if (await this.adoptDiskTerminalIfNewer()) return;
+
     if (!this.pid) {
       // Distributed (remote-host) teammates have no local PID by design; their
       // lifecycle lives on the host. readNewEvents() mirrors the remote log and
@@ -1458,8 +1592,12 @@ export class AgentManager {
    * manager is alive — the supervisor loop calls this each wave so
    * dynamically-added teammates get picked up.
    *
-   * Does not modify or re-load agents already in the cache; that path is
-   * covered by updateStatusFromProcess() which re-reads stdout.log.
+   * For a teammate ALREADY cached, refreshes it only when disk has latched it
+   * terminal while the cache still holds it non-terminal — the case where
+   * another process (e.g. `agents teams stop` in a separate CLI invocation)
+   * moved it to `stopped`/`failed` and this long-lived manager would otherwise
+   * never see it and re-persist a stale `running` (RUSH-2366). A still-live
+   * cached teammate is left untouched; updateStatusFromProcess() owns that path.
    */
   async rescanFromDisk(): Promise<number> {
     await this.initialize();
@@ -1471,10 +1609,24 @@ export class AgentManager {
     const entries = await fs.readdir(this.agentsDir);
     let added = 0;
     for (const entry of entries) {
-      if (this.agents.has(entry)) continue;
       const agentDir = path.join(this.agentsDir, entry);
       const stat = await fs.stat(agentDir).catch(() => null);
       if (!stat || !stat.isDirectory()) continue;
+
+      const cached = this.agents.get(entry);
+      if (cached) {
+        // Adopt a disk-terminal status the cache hasn't seen; never overwrite a
+        // cached teammate that is still live with a stale disk read. Terminal is
+        // a one-way latch, so this can only move a teammate forward.
+        if (!isTerminalStatus(cached.status)) {
+          const fresh = await AgentProcess.loadFromDisk(entry, this.agentsDir);
+          if (fresh && isTerminalStatus(fresh.status)) {
+            this.agents.set(entry, fresh);
+          }
+        }
+        continue;
+      }
+
       const agent = await AgentProcess.loadFromDisk(entry, this.agentsDir);
       if (!agent) continue;
       if (this.filterByCwd !== null && agent.cwd !== this.filterByCwd) continue;
@@ -1731,6 +1883,21 @@ export class AgentManager {
     }
 
     await this.cleanupOldAgents();
+
+    // Postcondition: the teammate MUST be durably on disk before we report
+    // success. saveMeta() ran above and cleanupOldAgents() can no longer reap a
+    // non-terminal record, but a failed write (full disk, permissions) or any
+    // future retention regression would otherwise let `teams add` print a full
+    // success block for a teammate that does not exist — the RUSH-2356
+    // silent-success class. Assert the outcome, not the exit code.
+    const persisted = await AgentProcess.loadFromDisk(agentId, this.agentsDir);
+    if (!persisted) {
+      this.agents.delete(agentId);
+      throw new Error(
+        `Teammate '${name ?? agentId}' was not durably persisted to disk after add ` +
+          `(no meta.json under ${this.agentsDir}/${agentId}). The add did not take effect.`,
+      );
+    }
     return agent;
   }
 
@@ -2221,22 +2388,12 @@ export class AgentManager {
     }
 
     for (const { target, agents } of byTarget.values()) {
-      // Emit one line per teammate: "<agentId> ALIVE|DEAD <exitOrEmpty>". A single
-      // round-trip over the multiplexed socket, regardless of teammate count.
-      const parts = agents.map((a) => {
-        const id = a.agentId;
-        // remoteExit is a dispatch `$HOME/.agents/.cache/hosts/<hex>.exit` path —
-        // interpolate UNQUOTED so `$HOME` expands (shellQuote would make `[ -f ]`
-        // always miss, so a finished teammate would never resolve terminal).
-        const exitFile = a.remoteExit!;
-        // exit code (if the sentinel exists) OR empty, then liveness.
-        return (
-          `printf '%s ' ${shellQuote(id)}; ` +
-          `if [ -f ${exitFile} ]; then printf 'DEAD '; cat ${exitFile} 2>/dev/null | tr -d '\\n'; printf '\\n'; ` +
-          `elif kill -0 ${a.remotePid} 2>/dev/null; then printf 'ALIVE\\n'; ` +
-          `else printf 'DEAD\\n'; fi`
-        );
-      });
+      // Emit one line per teammate: "<agentId> <ALIVE|EXITED|GONE> <codeOrEmpty>".
+      // A single round-trip over the multiplexed socket, regardless of teammate
+      // count. GONE (process gone, no `.exit`) is kept distinct from EXITED so a
+      // teammate killed without recording `$?` resolves terminal instead of
+      // reporting RUNNING forever (RUSH-2366).
+      const parts = agents.map((a) => remoteLivenessSnippet(a.agentId, a.remoteExit!, a.remotePid!));
       const identityFile = agents[0]?.hostIdentityFile;
       const res = sshExec(target, parts.join('; '), {
         timeoutMs: 12000,
@@ -2244,16 +2401,13 @@ export class AgentManager {
         extraSshArgs: identityFile ? ['-i', identityFile, '-o', 'IdentitiesOnly=yes'] : [],
       });
       if (res.code === null) continue; // transient ssh failure — skip this wave, no snapshot
-      const snapshots = new Map<string, { alive: boolean; exit: string | null }>();
+      const snapshots = new Map<string, RemoteLivenessSnapshot>();
       for (const line of res.stdout.split('\n')) {
         const trimmed = line.trim();
         if (!trimmed) continue;
-        const [id, state, exit] = trimmed.split(/\s+/);
-        if (!id) continue;
-        snapshots.set(id, {
-          alive: state === 'ALIVE',
-          exit: state === 'DEAD' ? (exit ?? '') : null,
-        });
+        const [id, state, code] = trimmed.split(/\s+/);
+        if (!id || !state) continue;
+        snapshots.set(id, parseRemoteLivenessState(state, code));
       }
       for (const a of agents) {
         const snap = snapshots.get(a.agentId);
@@ -2506,9 +2660,16 @@ export class AgentManager {
     return all.filter(a => a.status === AgentStatus.RUNNING);
   }
 
+  /**
+   * Teammates that have reached a terminal status (completed/failed/stopped) —
+   * the ONLY records retention may reap. A `pending` teammate has not launched
+   * and a `running` one is working, so neither is "completed"; classifying them
+   * as such let cleanupOldAgents sweep live `pending` `--after` teammates past
+   * the cap (RUSH-2356). Filter on `isTerminalStatus`, never `!== RUNNING`.
+   */
   async listCompleted(): Promise<AgentProcess[]> {
     const all = await this.listAll();
-    return all.filter(a => a.status !== AgentStatus.RUNNING);
+    return all.filter(a => isTerminalStatus(a.status));
   }
 
   async listByTask(taskName: string): Promise<AgentProcess[]> {
@@ -2615,6 +2776,10 @@ export class AgentManager {
   }
 
   private async cleanupOldAgents(): Promise<void> {
+    // listCompleted() is terminal-only (isTerminalStatus), so a pending or
+    // running teammate is never a reap candidate — retention can only delete a
+    // record whose process has finished. (RUSH-2356: the old `!== RUNNING`
+    // filter reaped live `pending` `--after` teammates.)
     const completed = await this.listCompleted();
     if (completed.length > this.maxAgents) {
       completed.sort((a, b) => {
