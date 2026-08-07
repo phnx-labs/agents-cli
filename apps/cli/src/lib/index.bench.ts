@@ -585,7 +585,7 @@ describe('root program construction (index.ts:243-251) — commander work every 
 
 describe('whole-invocation anchor — real cold `node dist/index.js --version` (the denominator for every row above)', () => {
   bench('`agents --version` — pays the full eager module graph (index.ts:10-215, 513-524), detectDevBuild (index.ts:113), the program chain (index.ts:243-251), AND the two migration hops that carry no help/version guard: foldLegacySystemRepo (index.ts:1366-1369) and runMigration (index.ts:1389-1391), both gated only by AGENTS_SKIP_MIGRATION, so `await import("./lib/migrate.js")` is inside this number. It skips only checkForUpdates + spawnDetachedSync (index.ts:1322) and ensureInitialized (index.ts:1373-1381)', () => {
-    runCli(['--version']);
+    expectExit(runCli(['--version']), [0], '--version');
   }, { time: 4000, iterations: 15 });
 
   bench('FLOOR: bare `node --input-type=module -e ""` — same Node startup, no CLI. The gap is everything agents-cli adds to `--version`', () => {
