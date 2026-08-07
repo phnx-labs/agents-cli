@@ -654,6 +654,78 @@ field appear under the **Operations** group.
 Pass `--group-by device` to switch to the device/placement grouping, or `--flat`
 for a single unordered table.
 
+> **Grouping (`projects`) is not the execution anchor.** The `projects:` list above
+> only organises the routine in listings — it never decides *where* the body runs.
+> The execution directory comes from placement (`devices` / `hostStrategy` / the
+> planned singular `project` anchor below), not from these tags. See
+> [Execution context and readiness](#execution-context-and-readiness).
+
+### Execution context and readiness
+
+> **Status: planned (RUSH-2290).** The singular `project` anchor, the routine-level
+> `cwd`, the readiness/pause behaviour, and the `blocked`/`skipped` run statuses
+> described here are the routine reliability contract and are **not yet on `main`**.
+> They are specified normatively in
+> [specifications.md §Routine execution & readiness](specifications.md#routine-execution--readiness)
+> (RT-1..RT-11, RT-GAP-1). Today a routine carries only the `projects` grouping list
+> and `remoteCwd` for `host`/`fleet` body placement. This section documents the target
+> so hand-authored YAML and downstream tools can align now.
+
+An **agent** or **workflow** routine needs a working directory to run in. Two fields
+set it, and they are deliberately separate from the `projects` grouping tags:
+
+```yaml
+project: myapp          # singular: the ONE execution anchor (an `agents projects` entry).
+                        #   CLI: --project-anchor myapp  (distinct from the repeatable --project grouping flag)
+cwd: services/api       # optional: a directory RELATIVE to the resolved anchor/home
+```
+
+The directory is resolved **on the device that will run the body** — not on the
+daemon that fired it — so a `fleet`/`host`/`cloud` run is checked against the
+*target's* filesystem, and a path that only exists on the firing box is caught as a
+blocker instead of launching in the wrong place:
+
+| Configuration | Resolved directory | Result |
+| --- | --- | --- |
+| `project` anchor with a usable base, no `cwd` | the project's base path | runs there |
+| `project` anchor + relative `cwd` | base joined with `cwd` (must stay inside the base) | runs there |
+| Rootless `project` (e.g. a Linear-imported project with no local checkout) + relative `cwd` | the target's `$HOME` joined with `cwd` (if it exists) | runs there |
+| No `project` + relative `cwd` | the target's `$HOME` joined with `cwd` (if it exists) | runs there |
+| Absolute `cwd` outside `$HOME` | — | **paused** — not portable across devices |
+
+A **`command`** routine (a plain shell body, no agent, no sandbox) may run from the
+target `$HOME` when it has no anchor or `cwd` — housekeeping like `git pull` or
+`npm i -g` is home-relative by nature. An **agent**/**workflow** routine may not:
+with no anchor and no `cwd` it is saved **paused** with `execution_context_missing`
+rather than launched in an arbitrary home.
+
+**Readiness is checked at `add` and `edit`, and a proven blocker saves the routine
+paused** — carrying the exact failing check — instead of activating a routine that
+would fail at fire time. The codes are stable and machine-readable:
+
+| Readiness code | Meaning |
+| --- | --- |
+| `project_not_found` | the named `project` anchor is not in `agents projects` |
+| `project_path_missing` | the anchor has no usable local base path on the target |
+| `cwd_missing` | the resolved `cwd` does not exist on the target |
+| `cwd_not_portable` | an absolute `cwd` outside `$HOME` — would not resolve on another device |
+| `codex_workspace_untrusted` | the Codex workspace-trust check failed for the resolved directory |
+| `agent_auth_failed` | a real headless authenticated smoke failed (a dead/expired account) — not a cache read |
+| `execution_context_missing` | an agent/workflow routine with no anchor and no `cwd` |
+
+`agents routines resume <name>` re-runs these checks and refuses to activate a
+routine whose blocker is still present — resume is not a way to bypass readiness. A
+raw edit of the YAML (or `agents routines edit`) is atomic: the change is parsed and
+validated on a temporary copy and only then replaces the live definition, so an
+invalid edit leaves the prior bytes untouched, and a valid-but-unready edit replaces
+the definition **and** pauses it.
+
+`repo` on a routine is an **external identity**, never the working directory: it is
+the GitHub `owner/repo` a webhook trigger filters on, and the origin remote recorded
+as provenance under `source:` when a routine is materialised from a project. The
+local execution directory is the anchor/`cwd` above; the Git/cloud/webhook `repo`
+identity is separate.
+
 ### Remote Routing
 
 `--host <device>` (alias: `--device`) routes any `routines` subcommand to a remote
@@ -918,6 +990,42 @@ lands at the right point in `agents routines runs <name>`.
 Without it a miss left no trace at all, and the listing kept showing the previous
 run's `completed` as though it were current.
 
+### `blocked` and `skipped` — planned attempt records (RUSH-2290)
+
+> **Status: planned.** These two statuses and the pre-session attempt records they
+> describe are the routine reliability contract, not yet on `main` (today the status
+> set stops at `missed`). Specified in
+> [specifications.md §Routine execution & readiness](specifications.md#routine-execution--readiness)
+> (RT-6, RT-7) and [§Scheduling & execution singularity](specifications.md#scheduling--execution-singularity) (SING-13).
+
+Two operational states are today invisible because no process spawns for them, and
+the reliability plan makes each its own terminal run so it shows up in
+`agents routines runs` before any session exists:
+
+- **`blocked`** — a **readiness** check failed at fire time (a dead account, an
+  untrusted Codex workspace, a missing anchor/cwd), so the body never ran. Distinct
+  from `failed`, where the body ran and errored: a routine that never launched because
+  its account was dead is a different problem from one that threw mid-run, and
+  collapsing them hides which one you have.
+- **`skipped`** — the routine was **already running** when its next slot arrived
+  (self-overlap). Rather than launch a second concurrent instance, the new occurrence
+  records a `skipped` run linked to the still-active run.
+
+Run history is the canonical record of what a routine did — a session transcript,
+log, report, or artifact is an *optional child* of a run, not the record itself. That
+is why a `missed`, `blocked`, or `skipped` attempt is fully visible with no session
+attached.
+
+### One fire launches once
+
+A single scheduled occurrence launches a routine **at most once**, even if the same
+UTC slot is evaluated by two timer callbacks or replayed on a daemon restart. The
+landed guarantee for the catch-up path is the atomic `mkdir` claim below (a `missed`
+record's run directory is a test-and-set). The reliability plan (RUSH-2290) extends
+the same idea to the primary scheduled path: one atomic claim on the occupancy
+identity `(routine, scheduledFor)` before dispatch, kept separate from the
+active-run claim that prevents self-overlap (`SING-11`, `SING-12`, `SING-13`).
+
 ## Catching up a missed fire
 
 Fires are in-process croner timers, and croner only schedules forward from "now".
@@ -1166,6 +1274,14 @@ agents routines stop                  # Stop the scheduler
 agents routines status                # Show scheduler status + upcoming runs
 agents routines scheduler-logs        # Read scheduler log output
 ```
+
+> **Planned (RUSH-2290), not yet on `main`:** the readiness contract above adds an
+> execution anchor and a diagnose/repair command —
+> `agents routines add|edit <name> --project-anchor <name> --cwd <dir>` to set the
+> singular anchor and working directory, and `agents routines doctor [name] [--fix]`
+> to re-check readiness and repair blockers. `--project-anchor` is deliberately
+> distinct from the existing repeatable `--project` grouping flag. See
+> [Execution context and readiness](#execution-context-and-readiness).
 
 ### Non-Interactive Usage
 

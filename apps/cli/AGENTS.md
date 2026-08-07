@@ -85,7 +85,21 @@ when. Whether it runs on one host is membership in that host's top-level
 `devices/<hostname>/agents.yaml` `routines:` list. Pause/resume and setup MUST
 write only the target host's device file; they MUST NOT rewrite a definition with
 `enabled`, `devices`, or runtime metadata. Run history belongs in
-`.history/runs/<routine>/<run>/`.
+`.history/runs/<routine>/<run>/`, and that run history — not the session index — is
+the canonical record of an attempt; sessions/logs/reports are optional children of a
+run (so a `missed`/`blocked`/`skipped` attempt is visible with no session).
+
+**`projects` (plural) is grouping metadata only; the singular `project` anchor is a
+separate concept.** The plural list organises a routine in `list`/the menu bar and
+MUST NOT affect execution; the (planned) singular `project`/`--project-anchor` plus a
+routine-level `cwd` is the execution anchor, resolved on the *execution target*. A
+routine's `repo` is an external Git/cloud/webhook identity, never a local cwd. The
+reliability contract — context resolution, readiness/pause-on-blocker, single-fire
+`(routine, scheduledFor)` claim distinct from the active-run claim, and the
+`blocked`/`skipped` run statuses — is normative in
+[`docs/specifications.md` §Routine execution & readiness](docs/specifications.md#routine-execution--readiness)
+(RT-1..RT-11) and §Scheduling & execution singularity (SING-11..SING-13); much of it
+is `[Intended]` (RUSH-2290), and each requirement marks landed vs intended.
 
 ### 8. Self-updating agents are ONE binary, not fictional version-homes
 

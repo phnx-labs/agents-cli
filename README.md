@@ -1033,6 +1033,12 @@ agents funnel up yosemite-s0 --local-port 8787 --port 443           # public HTT
 ```
 
 Jobs run sandboxed -- agents only see directories and tools you explicitly allow.
+`--project` tags a routine into a project **group** for listings only -- it never
+decides where the body runs. The reliability contract (execution anchor + `--cwd`,
+readiness that saves a blocked routine paused, and the `blocked`/`skipped` run
+statuses) is specified in
+[docs/specifications.md §Routine execution & readiness](apps/cli/docs/specifications.md#routine-execution--readiness);
+some of it is planned (RUSH-2290), and the section marks what is landed vs intended.
 
 ### Daemon
 
