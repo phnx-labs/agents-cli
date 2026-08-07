@@ -238,8 +238,12 @@ describe.skipIf(process.platform === 'win32' || !BUN || !WHICH)(
       fs.writeFileSync(precious, 'PRECIOUS UNCOMMITTED WORK\n');
 
       // Stopping the team leaves the dirty worktree in place and the record
-      // terminal — the exact state that defeats a record-based guard.
-      runCli(['teams', 'stop', 'dirty-team', '--yes']);
+      // terminal — the exact state that defeats a record-based guard. Assert on
+      // the KEEP message, not just on the directory still being there: a `teams
+      // stop` that errored out early would also leave the directory, and this
+      // whole case would then be testing nothing.
+      const stopped = runCli(['teams', 'stop', 'dirty-team', 'alpha']);
+      expect(stopped.out).toContain("Worktree 'shared-name' has uncommitted changes. Keeping it at");
       expect(fs.existsSync(wt)).toBe(true);
 
       // A NEW teammate reusing that worktree name. The create must fail on the
