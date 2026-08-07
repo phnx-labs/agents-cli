@@ -430,7 +430,7 @@ export function handleAgentRequest(
       // the broker is running pre-upgrade code and should be restarted.
       return { ok: true, cmd: 'ping', version: PROTOCOL_VERSION, cliVersion: getCliVersion() };
     case 'get': {
-      // Walk own-harness → global so a `--for` grant wins over a global one and
+      // Walk own-harness → global so an `--agent` grant wins over a global one and
       // an unscoped unlock serves every harness (bundleScopeChain).
       for (const scope of bundleScopeChain(req.harness)) {
         const key = scopedBundleKey(req.name, scope);
