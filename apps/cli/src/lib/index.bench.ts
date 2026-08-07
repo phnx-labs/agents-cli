@@ -91,6 +91,7 @@ import {
 } from './self-update.js';
 import { getUpdateCheckPath } from './state.js';
 import { installMenubarLaunchAgentOnUpgrade } from './menubar/install-menubar.js';
+import { resolveBrandName, disabledCommandsForActiveBrand } from './brand.js';
 // Real built artifact (see docblock above) -- NOT './auto-pull.js', which
 // would resolve to the unbuilt TS source and always miss the worker script.
 // dist/lib/auto-pull.d.ts exists (tsconfig.json declaration:true), so this
@@ -432,6 +433,9 @@ const COLD_OPTS = { time: 3000, iterations: 12 } as const;
 const SYNC_COMMANDS_SPEC = distUrl('lib/secrets/sync-commands.js');
 const SECRETS_AGENT_SPEC = distUrl('lib/secrets/agent.js');
 const MENUBAR_INSTALL_SPEC = distUrl('lib/menubar/install-menubar.js');
+const BRAND_SPEC = distUrl('lib/brand.js');
+const AGENTS_REGISTRY_SPEC = distUrl('lib/agents.js');
+const VERSIONS_SPEC = distUrl('lib/versions.js');
 
 /**
  * The two exit codes that mean `__secrets-ping` reached the intercept at
@@ -451,7 +455,15 @@ const PING_EXIT_CODES = [0, 3] as const;
  * one layer down; they stop a false number, this is what makes it loud.
  */
 (function preflightColdImports(): void {
-  for (const spec of [SYNC_COMMANDS_SPEC, SECRETS_AGENT_SPEC, MENUBAR_INSTALL_SPEC]) coldEval([spec]);
+  for (const spec of [
+    SYNC_COMMANDS_SPEC,
+    SECRETS_AGENT_SPEC,
+    MENUBAR_INSTALL_SPEC,
+    BRAND_SPEC,
+    AGENTS_REGISTRY_SPEC,
+    VERSIONS_SPEC,
+  ])
+    coldEval([spec]);
   // Same reasoning for the one runCli row whose number is only meaningful if
   // the index.ts:71-84 intercept was actually reached.
   expectExit(runCli([SYNC_PING_CMD]), PING_EXIT_CODES, '__secrets-ping preflight');
@@ -582,5 +594,123 @@ describe('menu-bar startup self-heal (index.ts:1421-1425) — cold module import
 describe('installMenubarLaunchAgentOnUpgrade() — warm in-process call on THIS Linux box (install-menubar.ts:630-658)', () => {
   bench('real call on Linux: returns at the `!onDarwin()` guard (install-menubar.ts:632) after one process.platform read — NOT representative of the darwin decision path (menubarServiceInstalled/menubarSetupStale/mayHealMenubar fs checks), which is unverified on this box; see docblock above', () => {
     installMenubarLaunchAgentOnUpgrade();
+  });
+});
+
+/**
+ * ============================================================================
+ * White-label bootstrap: `resolveBrandName()` (index.ts:241) and
+ * `disabledCommandsForActiveBrand()` (index.ts:1244), both from
+ * `./lib/brand.js` (statically imported at index.ts:514). Unlike every other
+ * group above, this import is a plain top-level `import { ... } from
+ * './lib/brand.js'` — ESM hoists it, so it is evaluated at module-load time
+ * regardless of where the line sits textually, and it runs on EVERY
+ * invocation: `resolveBrandName()` at index.ts:241 fires unconditionally
+ * before `program = new Command()`, and `disabledCommandsForActiveBrand()` at
+ * index.ts:1244 fires unconditionally before command registration, gated by
+ * neither `--help`/`--version` nor a `requestedCommand` check. This includes
+ * the plain, unbranded `agents` CLI — brand.ts's docblock says brands make
+ * "everything below ... byte-identical to before" for the unbranded case, but
+ * that claim is about *behavior*, not *import cost*: the module graph brand.ts
+ * pulls in at load time is paid before `resolveBrandName()` can tell you which
+ * case you are in.
+ *
+ * brand.ts:19 imports `{ ALL_AGENT_IDS, AGENTS }` from `./agents.js` (3290
+ * lines, verified: `wc -l src/lib/agents.ts`) for exactly two functions,
+ * `reservedBrandNames()` (brand.ts:52-56) and `validateBrandName()`
+ * (brand.ts:59-66) — both reachable only from `agents mine init <name>` /
+ * `agents setup mine`, never from `resolveBrandName()` or
+ * `disabledCommandsForActiveBrand()`. Grepping the earlier eager imports in
+ * index.ts (commander, chalk, fs/os/path/url, dev-build.js, secrets/sync-
+ * commands.js, self-update.js, startup/command-registry.js, help.js, whats-
+ * new.js, types.js, platform/index.js, cli-entry.js, events.js, event-
+ * provenance.js, format.js, state.js — everything above index.ts:514) for
+ * `from '../agents.js'` / `from './agents.js'` and their own static import
+ * lists turns up none of them importing agents.js, so brand.js is genuinely
+ * the FIRST thing on the eager path that drags it in — nothing upstream of
+ * index.ts:514 already paid this cost.
+ *
+ * agents.ts:26 in turn imports `{ resolveVersion, getVersionHomePath,
+ * getBinaryPath }` from `./versions.js` — a 3738-line file (`wc -l
+ * src/lib/versions.ts`) that is itself the single largest static-import
+ * fan-out in this package: resources.ts, resource-profiles.ts, permissions.ts,
+ * mcp.ts, convert.ts, import.ts, subagents.ts, workflows.ts, hooks.ts,
+ * capabilities.ts, plugins.ts, rules/compose.ts, staleness/index.ts,
+ * staleness/registry.ts, memory.ts, project-resources.ts, and
+ * `@inquirer/prompts` (versions.ts:17-68) — AND versions.ts:35 imports back
+ * from `./agents.js`, so agents.ts <-> versions.ts is a circular pair; Node's
+ * ESM loader still evaluates the whole reachable graph once, cycle or not.
+ * The three rows below decompose exactly how much of brand.js's real cost is
+ * "load brand.ts's own 134 lines" versus "drag in agents.js" versus "drag in
+ * versions.js and everything under it" — each row's (row - FLOOR) isolates
+ * one layer, since FLOOR cancels identically in every row (same coldEval
+ * spawn shape, see the coldEval docblock above).
+ *
+ * No mocking: every row spawns a real cold `node --input-type=module`
+ * process and imports the real built dist/lib/*.js artifact — the same files
+ * `node dist/index.js` loads on a real invocation.
+ */
+describe('brand.js eager import (index.ts:514) — cold module import, the graph paid before resolveBrandName()/disabledCommandsForActiveBrand() can even run, on EVERY invocation incl. the unbranded fast path', () => {
+  bench('FLOOR: bare `node --input-type=module -e ""` — same spawn cost every row below also pays; subtract it', () => {
+    coldEval([]);
+  }, COLD_OPTS);
+
+  bench('lib/brand.js alone — the exact specifier statically imported at index.ts:514 (brand.ts is 134 lines; this row is dominated by its own static imports, not its own body)', () => {
+    coldEval([BRAND_SPEC]);
+  }, COLD_OPTS);
+
+  bench('lib/agents.js alone — the graph brand.ts:19 imports `{ ALL_AGENT_IDS, AGENTS }` from, for reservedBrandNames()/validateBrandName() (brand.ts:52-66), functions the unbranded fast path never calls. agents.ts is 3290 lines and itself imports versions.ts, capabilities.ts, fs-walk.ts, fuzzy.ts (agents.ts:12-27)', () => {
+    coldEval([AGENTS_REGISTRY_SPEC]);
+  }, COLD_OPTS);
+
+  bench('lib/versions.js alone — the graph agents.ts:26 imports back from (circular with agents.ts, versions.ts:35), 3738 lines, the largest static-import fan-out in this package: resources.ts, resource-profiles.ts, permissions.ts, mcp.ts, convert.ts, import.ts, subagents.ts, workflows.ts, hooks.ts, capabilities.ts, plugins.ts, rules/compose.ts, staleness/*, memory.ts, project-resources.ts, @inquirer/prompts (versions.ts:17-68)', () => {
+    coldEval([VERSIONS_SPEC]);
+  }, COLD_OPTS);
+});
+
+/**
+ * The call-time cost, warm in-process, on THIS real machine's real
+ * ~/.agents/agents.yaml — contrasted against the import-time cost measured
+ * above. resolveBrandName() (brand.ts:32-35) is one env-var read plus a
+ * regex test; disabledCommandsForActiveBrand() (brand.ts:111-114) calls
+ * getActiveBrandConfig() (brand.ts:80-86), which short-circuits at
+ * `if (!name) return null` the moment activeBrandName() reports unbranded —
+ * so on the unbranded fast path it NEVER calls readMeta() (state.ts:1124),
+ * i.e. zero filesystem syscalls. Only when AGENTS_BRAND names something (real
+ * or not) does getBrandConfig() -> listBrands() -> readMeta() actually touch
+ * disk. readMeta() caches its parsed result keyed to a file-content stamp
+ * (state.ts:1127-1134: "reduces N readMeta calls per CLI invocation to ~2 stat
+ * syscalls"), so after the very first sample in a bench loop every further
+ * iteration measures that warm 2-stat cache-hit path, not a genuinely cold
+ * single-process disk read — an honest caveat, not a claim of a cold read.
+ * This box's real ~/.agents/agents.yaml (verified: `ls -la ~/.agents/agents.yaml`)
+ * has no `brands:` key configured, so the third row exercises a real,
+ * unconfigured brand name rather than a fabricated meta.brands entry.
+ *
+ * The point these rows make together with the group above: on the unbranded
+ * fast path, the CALL is free (no readMeta) but the IMPORT is not — the
+ * entire cost this file's brand.js group measures is paid at module-load
+ * time regardless of which branch resolveBrandName() ends up reporting.
+ */
+describe('resolveBrandName() / disabledCommandsForActiveBrand() — warm in-process calls (index.ts:241, 1244), real ~/.agents/agents.yaml on this box', () => {
+  const ORIGINAL_AGENTS_BRAND = process.env.AGENTS_BRAND;
+  afterAll(() => {
+    if (ORIGINAL_AGENTS_BRAND === undefined) delete process.env.AGENTS_BRAND;
+    else process.env.AGENTS_BRAND = ORIGINAL_AGENTS_BRAND;
+  });
+
+  bench('resolveBrandName() unbranded (AGENTS_BRAND unset) — index.ts:241, one env read + DEFAULT_CLI_NAME return, no regex test on the unset path (brand.ts:32-35)', () => {
+    delete process.env.AGENTS_BRAND;
+    resolveBrandName();
+  });
+
+  bench('disabledCommandsForActiveBrand() unbranded — index.ts:1244, short-circuits at getActiveBrandConfig (brand.ts:86: `if (!name) return null`) BEFORE readMeta() ever runs. This is the real cost every unbranded invocation on this fleet pays today: zero fs syscalls', () => {
+    delete process.env.AGENTS_BRAND;
+    disabledCommandsForActiveBrand();
+  });
+
+  bench('disabledCommandsForActiveBrand() with AGENTS_BRAND set to a real-shaped but unconfigured name — the branded-invocation floor: getBrandConfig (brand.ts:70) -> listBrands (brand.ts:66) -> readMeta() (state.ts:1124), a real ~/.agents/agents.yaml stat+read+parse (warm-cached after the first sample; see docblock), even though the brand does not exist in this box\'s real meta.brands and cfg ends up undefined', () => {
+    process.env.AGENTS_BRAND = 'agents-cli-bench-nonexistent-brand';
+    disabledCommandsForActiveBrand();
   });
 });
