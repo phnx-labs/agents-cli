@@ -1,7 +1,7 @@
 {
   "command": "agents",
-  "groups": 96,
-  "commands": 552,
+  "groups": 97,
+  "commands": 563,
   "tree": [
     {
       "name": "add",
@@ -2503,6 +2503,147 @@
         }
       ],
       "subcommands": []
+    },
+    {
+      "name": "daemon",
+      "path": "daemon",
+      "aliases": [],
+      "description": "The always-on daemon: secrets broker, browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.",
+      "args": [],
+      "options": [
+        {
+          "flags": "--json",
+          "description": "Emit as JSON"
+        }
+      ],
+      "subcommands": [
+        {
+          "name": "disable",
+          "path": "daemon disable",
+          "aliases": [],
+          "description": "Persist daemon.enabled: false — nothing auto-starts the daemon until re-enabled. Does not stop a running daemon.",
+          "args": [],
+          "options": [],
+          "subcommands": []
+        },
+        {
+          "name": "doctor",
+          "path": "daemon doctor",
+          "aliases": [],
+          "description": "One-shot health check: identity, duplicates, hosted services, scheduler. Non-zero exit on problems.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit as JSON"
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "enable",
+          "path": "daemon enable",
+          "aliases": [],
+          "description": "Clear the daemon.enabled kill switch. Does not start the daemon by itself.",
+          "args": [],
+          "options": [],
+          "subcommands": []
+        },
+        {
+          "name": "logs",
+          "path": "daemon logs",
+          "aliases": [],
+          "description": "Read the daemon's own log (lifecycle + subsystem errors — not routine run output).",
+          "args": [],
+          "options": [
+            {
+              "flags": "-n, --lines <number>",
+              "description": "Show this many recent lines"
+            },
+            {
+              "flags": "-f, --follow",
+              "description": "Stream new lines as they are written (like tail -f)"
+            },
+            {
+              "flags": "--level <level>",
+              "description": "Minimum level to show: info | warn | error"
+            },
+            {
+              "flags": "--since <dur>",
+              "description": "Only lines newer than this (e.g. 1h, 30m)"
+            },
+            {
+              "flags": "--json",
+              "description": "Emit each line as JSON"
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "reload",
+          "path": "daemon reload",
+          "aliases": [],
+          "description": "Send SIGHUP to reload jobs and re-evaluate the scheduler.enabled gate, without a restart.",
+          "args": [],
+          "options": [],
+          "subcommands": []
+        },
+        {
+          "name": "restart",
+          "path": "daemon restart",
+          "aliases": [],
+          "description": "Stop then start the daemon.",
+          "args": [],
+          "options": [],
+          "subcommands": []
+        },
+        {
+          "name": "services",
+          "path": "daemon services",
+          "aliases": [],
+          "description": "The two hosted services (secrets broker, browser IPC): bound state, socket path, and health.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit as JSON"
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "start",
+          "path": "daemon start",
+          "aliases": [],
+          "description": "Start the daemon. Bypasses daemon.enabled — this is the deliberate override.",
+          "args": [],
+          "options": [],
+          "subcommands": []
+        },
+        {
+          "name": "status",
+          "path": "daemon status",
+          "aliases": [],
+          "description": "Identity (state/pid/uptime/binary), duplicate daemon processes, and per-service health.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit as JSON"
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "stop",
+          "path": "daemon stop",
+          "aliases": [],
+          "description": "Stop the daemon.",
+          "args": [],
+          "options": [],
+          "subcommands": []
+        }
+      ]
     },
     {
       "name": "defaults",
@@ -9743,8 +9884,8 @@
               "description": "Comma-separated key subset"
             },
             {
-              "flags": "--for <duration>",
-              "description": "Lease duration, for example 30m or 8h"
+              "flags": "--ttl <duration>",
+              "description": "How long to hold it (e.g. 30m, 8h, 3d)"
             },
             {
               "flags": "--agent <agent>",
@@ -10275,7 +10416,7 @@
               "description": "Keep the unlock across sleep + reboot too (default: survives upgrade/restart but re-locks on sleep). Set secrets.agent.durable in agents.yaml to make this the default."
             },
             {
-              "flags": "--for <agent>",
+              "flags": "--agent <agent>",
               "description": "Narrow the unlock to ONE harness type (for example claude, codex, or kimi). Default: the grant is global — every harness and a plain shell can read it, so one Touch ID covers them all."
             },
             {
