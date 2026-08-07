@@ -32,7 +32,6 @@ import {
 } from '../lib/daemon.js';
 import { getConfigValue, setConfigValue, isDaemonEnabled } from '../lib/device-config.js';
 import {
-  readAllSubsystemHealth,
   readSubsystemHealth,
   SUBSYSTEM_SECRETS_BROKER,
   SUBSYSTEM_BROWSER_IPC,
@@ -54,10 +53,35 @@ interface DaemonProcess {
   version: string | null;
 }
 
-/** Walk up from `entryPath` looking for the nearest `package.json` and read its version. */
-function resolveVersionNear(entryPath: string): string | null {
+/**
+ * Resolve the working directory a live process was started from, or null if
+ * unavailable. Linux only (`/proc/<pid>/cwd`) — there is no equivalent
+ * zero-dependency primitive on macOS/BSD.
+ */
+function processCwd(pid: number): string | null {
+  try { return fs.realpathSync(`/proc/${pid}/cwd`); } catch { return null; }
+}
+
+/**
+ * Walk up from `entryPath` looking for the nearest `package.json` and read its
+ * version. A relative `entryPath` (the common shape for a dev `node --import
+ * tsx <entry> __daemon-run` invocation) is meaningless resolved against the
+ * CALLING process's cwd — it must be anchored to the OWNING process's own cwd
+ * instead, via `processCwd(pid)`. Getting this wrong silently reports another
+ * process's version as this one's (observed live: a relative `src/index.ts`
+ * resolved against the caller's cwd instead of the stray daemon's actual
+ * ephemeral `/tmp` cwd, reporting a version that process was not running).
+ * Absolute entries (every production launch — `getAgentsBinPath()` always
+ * returns one) need no anchoring and resolve the same either way.
+ */
+function resolveVersionNear(entryPath: string, pid: number): string | null {
   let resolved = entryPath;
-  try { resolved = fs.realpathSync(entryPath); } catch { /* shim/symlink may be broken or entry may not exist locally */ }
+  if (!path.isAbsolute(resolved)) {
+    const cwd = processCwd(pid);
+    if (!cwd) return null; // cannot anchor a relative entry — do not guess
+    resolved = path.join(cwd, resolved);
+  }
+  try { resolved = fs.realpathSync(resolved); } catch { /* shim/symlink may be broken or entry may not exist locally */ }
   let dir = path.dirname(resolved);
   for (let i = 0; i < 6; i++) {
     const candidate = path.join(dir, 'package.json');
@@ -116,7 +140,7 @@ function scanDaemonProcesses(): DaemonProcess[] {
     const pid = parseInt(m[1], 10);
     if (isNaN(pid)) continue;
     const entry = entryFromTokens(tokens);
-    const version = entry ? resolveVersionNear(entry) : null;
+    const version = entry ? resolveVersionNear(entry, pid) : null;
     found.push({ pid, entry, version });
   }
   return found;
@@ -396,7 +420,7 @@ async function runLogs(opts: { lines?: string; follow?: boolean; level?: string;
 
 // ─── Doctor ──────────────────────────────────────────────────────────────
 
-async function runDoctor(): Promise<void> {
+async function runDoctor(opts: { json?: boolean }): Promise<void> {
   const status = getDaemonStatus();
   const enabled = isDaemonEnabled();
   const problems: string[] = [];
@@ -424,6 +448,12 @@ async function runDoctor(): Promise<void> {
   const scheduler = schedulerSummary();
   if (scheduler.failingCount > 0) {
     problems.push(`${scheduler.failingCount} routine(s) failing their last run. See: agents routines stats`);
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify({ healthy: problems.length === 0, problems }));
+    if (problems.length > 0) process.exitCode = 1;
+    return;
   }
 
   if (problems.length === 0) {
@@ -577,7 +607,8 @@ export function registerDaemonCommand(program: Command): void {
 
   cmd.command('doctor')
     .description('One-shot health check: identity, duplicates, hosted services, scheduler. Non-zero exit on problems.')
-    .action(async () => {
-      await runDoctor();
+    .option('--json', 'Emit as JSON')
+    .action(async (opts, command) => {
+      await runDoctor({ json: command.optsWithGlobals().json === true });
     });
 }

@@ -1521,10 +1521,14 @@ export function registerRoutinesCommands(program: Command): void {
       // uses). Keep the daemon alive so each run's meta.json is finalized —
       // unless daemon.enabled is off, in which case this auto-start is
       // skipped with a stated reason.
-      if (!isDaemonRunning() && isDaemonEnabled()) {
-        const started = startDaemon();
-        if (started.pid) {
-          console.log(chalk.gray(`Started scheduler (PID: ${started.pid}) so webhook runs are monitored.`));
+      if (!isDaemonRunning()) {
+        if (!isDaemonEnabled()) {
+          console.log(chalk.yellow(`Daemon is disabled (daemon.enabled=false) — run(s) below fire but are not monitored. Re-enable with: agents daemon enable`));
+        } else {
+          const started = startDaemon();
+          if (started.pid) {
+            console.log(chalk.gray(`Started scheduler (PID: ${started.pid}) so webhook runs are monitored.`));
+          }
         }
       }
 
