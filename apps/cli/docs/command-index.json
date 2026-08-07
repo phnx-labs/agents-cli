@@ -1,7 +1,7 @@
 {
   "command": "agents",
   "groups": 98,
-  "commands": 568,
+  "commands": 569,
   "tree": [
     {
       "name": "accounts",
@@ -11630,6 +11630,46 @@
             {
               "flags": "--json",
               "description": "Emit machine-readable JSON"
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "preview",
+          "path": "sessions preview",
+          "aliases": [],
+          "description": "Show one rich session card without rendering the full transcript",
+          "args": [
+            {
+              "name": "id",
+              "required": true,
+              "variadic": false
+            }
+          ],
+          "options": [
+            {
+              "flags": "-a, --agent <agent>",
+              "description": "Narrow the ID to one agent type/version"
+            },
+            {
+              "flags": "-p, --project <name>",
+              "description": "Narrow the ID to one project"
+            },
+            {
+              "flags": "--local",
+              "description": "Only this machine; do not resolve the ID across the fleet"
+            },
+            {
+              "flags": "-H, --host <target...>",
+              "description": "Resolve only on the named device(s)"
+            },
+            {
+              "flags": "--device <target...>",
+              "description": "Alias for --host"
+            },
+            {
+              "flags": "--json",
+              "description": "Output the session preview as JSON"
             }
           ],
           "subcommands": []

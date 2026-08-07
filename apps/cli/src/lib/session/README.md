@@ -69,8 +69,12 @@ There are two distinct renders. Do not confuse them.
 - **Preview panel** — `buildPreview` (`sessions-picker.ts:114`) -> `formatHeader`
   (`sessions-picker.ts:167`) + `formatCompactPreview` (`sessions-picker.ts:310`).
   This is what the interactive browser shows on `tab`, and what the non-interactive
-  `--preview` flag prints (`sessions.ts:1085`). It takes a `SessionMeta` plus, when
-  available, the parsed `SessionEvent[]`.
+  `--preview` flag prints (`sessions.ts:1085`). `agents sessions preview <id>` uses
+  the same normalized preview digest after resolving full or displayed eight-character
+  IDs across the selected fleet. It takes a `SessionMeta` plus, when available, the
+  parsed `SessionEvent[]`. Transcript-derived facts are cached durably by the actual
+  transcript mtime and size; live status is joined separately from the bounded 15-second
+  active-session snapshot so a durable preview can never keep a stale running state.
 - **Full summary** — `renderSession` summary mode (`sessions.ts:1769`) ->
   `renderSummaryHeader` (`render.ts:288`) + `renderSummary` (`render.ts:586`).
   This is `agents sessions <id>`. It already renders a **Subagents (N)** section

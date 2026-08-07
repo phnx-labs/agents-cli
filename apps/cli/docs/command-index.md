@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `upgrade`, `_internal`).
 
-_98 command groups · 568 commands._
+_98 command groups · 569 commands._
 
 ## accounts — Browse and name signed-in harness accounts
 
@@ -851,6 +851,7 @@ agents sessions insights tools-per-session  Mix recipe: tools-per-session
 agents sessions migrate [session-id]        Relocate a running session onto another machine (fleet worker, device, or ephemeral box), then stop the source here.
 agents sessions migrations                  Show the migration ledger — sessions handed off to/from other machines.
 agents sessions optimize                    Compact the session search index (FTS5), reclaiming bloat from repeated re-indexing
+agents sessions preview <id>                Show one rich session card without rendering the full transcript
 agents sessions reconnect [session-id]      Re-enter a dropped agent terminal: attach the live pane if it survived, else resume the session
 agents sessions render <selectors...>       Render one or more sessions as readable, redacted Markdown for review or sharing.
 agents sessions resume [query]              Reopen one session by canonical identity, or multi-select history into terminal tabs/splits.

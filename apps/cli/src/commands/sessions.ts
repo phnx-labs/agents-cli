@@ -65,6 +65,7 @@ import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import {
   sessionPicker,
   buildPreview,
+  loadSessionPreviewDigest,
   formatTodoCompact,
   githubRepoUrlFromCwd,
   type PickedSession,
@@ -1863,27 +1864,111 @@ function canonicalSessionsCommand(query: string | undefined, options: SessionsOp
  * Backs `--preview` — the fast path for the "peek before resume" hot loop. */
 export async function renderSessionPreview(
   query: string,
-  scope: { agent?: string; project?: string; local?: boolean },
+  scope: { agent?: string; project?: string; local?: boolean; hosts?: string[]; json?: boolean },
 ): Promise<void> {
-  const discovered = await discoverSessions({ all: true, cwd: process.cwd(), limit: 5000 });
-  const pool = applyScopeFilters(discovered, scope);
-  const { matches, completeId } = resolveSessionQuery(pool, query);
-  const session = matches[0];
-  if (!session) {
-    // A complete id that missed is not "no match for this text" — say which, and
-    // give the same fleet pointer the render paths give.
-    if (completeId) notFoundByIdMessage(query).forEach(l => console.log(l));
-    else console.log(chalk.gray(`No session matches "${query}".`));
+  let outcome = await resolveSessionMetadataValue(query, scope);
+  // A just-created transcript may not have reached the incremental index yet.
+  // Keep the indexed path hot, but repair a local cold miss once before saying
+  // it does not exist. This also preserves Claude history-alias discovery.
+  if (outcome.kind !== 'resolved'
+    && (!scope.hosts?.length || shouldIncludeLocal(scope.hosts, machineId()))) {
+    const discovered = applyScopeFilters(
+      await discoverSessions({ all: true, cwd: process.cwd(), limit: 5000 }),
+      scope,
+    );
+    const localMatches = resolveSessionQuery(discovered, query, { indexFallback: false }).matches
+      .map(session => ({ ...session, machine: session.machine || machineId() }));
+    const exact = localMatches.find(session => selectorAllowsEarlyExit(query)
+      && session.id.toLowerCase() === query.trim().toLowerCase());
+    if (exact) outcome = { kind: 'resolved', session: exact };
+    else if (outcome.kind === 'not-found' && localMatches.length > 0) {
+      outcome = metadataResolveOutcome(localMatches, { sessions: [], unreachable: [] }, query);
+    }
+  }
+  if (outcome.kind === 'partial') {
+    console.error(chalk.red(`Partial session resolution: ${outcome.failedPeers.join(', ')} did not answer.`));
+    console.error(chalk.gray('No preview was rendered because the short ID may be ambiguous on an unreachable peer.'));
+    process.exitCode = 2;
     return;
   }
+  if (outcome.kind === 'not-found') {
+    notFoundByIdMessage(query).forEach(l => console.error(l));
+    process.exitCode = 1;
+    return;
+  }
+  if (outcome.kind === 'ambiguous') {
+    console.error(chalk.red(`Multiple sessions match "${query}" across the fleet:`));
+    for (const candidate of outcome.candidates) {
+      const match = candidate.hits[0].session;
+      const machines = candidate.hits.map(hit => hit.machine).join(', ');
+      console.error(chalk.cyan(`  ${match.shortId}  ${match.id}`) + chalk.gray(`  ${machines}  ${match.agent}${match.version ? ` ${match.version}` : ''}`));
+    }
+    console.error(chalk.gray('Pass the full session ID to narrow it down.'));
+    process.exitCode = 1;
+    return;
+  }
+
+  const session = outcome.session;
+  if (session._remote && session.machine && session.machine !== machineId()) {
+    const args = ['sessions', 'preview', session.id, '--local'];
+    if (scope.json) args.push('--json');
+    const rendered = await runOnPeer(args, session.machine);
+    if (rendered === 'no-target') {
+      console.error(chalk.red(`Session ${session.id} is on ${session.machine}, but that device is not reachable.`));
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   // Lead with the live status when the session is still running, so the preview
   // says working / waiting / idle up front — not just the historical transcript.
-  // `--local --preview` is freely combinable with `--local` (RUSH-2118): thread
-  // it through so this probe never dials a remote-host teammate either.
+  // The shared snapshot is accepted for at most 15 seconds. The durable preview
+  // below contains no live status, so a long-lived process can never keep a
+  // stale working/waiting headline in its transcript cache.
   let live: ActiveSession | undefined;
   try {
-    live = indexActiveBySessionId(await getActiveSessions({ localOnly: scope.local === true })).get(session.id);
+    const loaded = await loadLocalActiveSessions();
+    live = indexActiveBySessionId(loaded.sessions).get(session.id);
   } catch { /* plain preview on any probe failure */ }
+  if (scope.json) {
+    const { digest, error } = loadSessionPreviewDigest(session);
+    console.log(JSON.stringify({
+      schemaVersion: 1,
+      session: {
+        id: session.id,
+        shortId: session.shortId,
+        agent: session.agent,
+        version: session.version,
+        model: session.model,
+        account: session.account,
+        machine: session.machine ?? machineId(),
+        cwd: session.cwd,
+        project: session.project,
+        gitBranch: session.gitBranch,
+        createdAt: session.timestamp,
+        lastActivity: session.lastActivity,
+        durationMs: session.durationMs,
+        messageCount: session.messageCount,
+        tokenCount: session.tokenCount,
+        costUsd: session.costUsd,
+        label: session.label,
+        ticketId: session.ticketId,
+        prUrl: session.prUrl,
+      },
+      active: live ? {
+        status: live.status,
+        activity: live.activity,
+        awaitingReason: live.awaitingReason,
+        lastActivityMs: live.lastActivityMs,
+        startedAtMs: live.startedAtMs,
+        pid: live.pid,
+        host: live.host,
+      } : null,
+      preview: digest ?? null,
+      error: error ?? null,
+    }));
+    return;
+  }
   const headline = formatLiveStatusHeadline(live, isFavorite(session.id));
   if (headline) console.log(headline);
   console.log(buildPreview(session));
@@ -2264,7 +2349,7 @@ async function sessionsAction(
       console.error(chalk.red('--preview requires a session id or query.'));
       process.exit(1);
     }
-    await renderSessionPreview(query, { agent: options.agent, project: options.project, local: options.local });
+    await renderSessionPreview(query, { agent: options.agent, project: options.project, local: options.local, hosts: options.host });
     return;
   }
 
@@ -2394,6 +2479,13 @@ async function sessionsAction(
       options.artifact,
       artifactLookupScope(options.agent, options.project, options.routine),
     );
+    return;
+  }
+
+  // A supplied ID is already the lookup key. Resolve it directly from SQLite
+  // and, when needed, the peer indexes before any broad transcript discovery.
+  if (!toolEvidenceMode && searchQuery && looksLikeSessionId(searchQuery)) {
+    await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, routine: options.routine, filter: filterOpts, redact: options.redact, local: options.local, hosts: options.host });
     return;
   }
 
@@ -4413,6 +4505,50 @@ async function renderOneSession(
   mode: ViewMode,
   scope: { agent?: string; project?: string; routine?: boolean | string; filter: FilterOptions; redact?: boolean; local?: boolean; hosts?: string[] },
 ): Promise<void> {
+  if (looksLikeSessionId(query)) {
+    const outcome = await resolveSessionMetadataValue(query, scope);
+    if (outcome.kind === 'partial') {
+      console.error(chalk.red(`Partial session resolution: ${outcome.failedPeers.join(', ')} did not answer.`));
+      process.exit(2);
+    }
+    // An index miss can be a transcript created since the last incremental
+    // scan, or a Claude history alias. Fall through to the established
+    // discovery/history resolver below only on that cold miss.
+    if (outcome.kind === 'ambiguous') {
+      console.error(chalk.red(`Multiple sessions match "${query}" across the fleet:`));
+      for (const candidate of outcome.candidates) {
+        const match = candidate.hits[0].session;
+        const machines = candidate.hits.map(hit => hit.machine).join(', ');
+        console.error(chalk.cyan(`  ${match.shortId}  ${match.id}`) + chalk.gray(`  ${machines}  ${match.agent}${match.version ? ` ${match.version}` : ''}`));
+      }
+      console.error(chalk.gray('Pass the full session ID to narrow it down.'));
+      process.exit(1);
+    }
+
+    if (outcome.kind === 'resolved') {
+      const resolved = outcome.session;
+      if (resolved._remote && resolved.machine && resolved.machine !== machineId()) {
+      const args = ['sessions', resolved.id, '--local'];
+      const flag = modeFlag(mode);
+      if (flag) args.push(flag);
+      if (scope.filter.include?.length) args.push('--include', scope.filter.include.join(','));
+      if (scope.filter.exclude?.length) args.push('--exclude', scope.filter.exclude.join(','));
+      if (scope.filter.first !== undefined) args.push('--first', String(scope.filter.first));
+      if (scope.filter.last !== undefined) args.push('--last', String(scope.filter.last));
+      if (scope.redact === false) args.push('--no-redact');
+      const rendered = await runOnPeer(args, resolved.machine);
+      if (rendered === 'no-target') {
+        console.error(chalk.red(`Session ${resolved.id} is on ${resolved.machine}, but that device is not reachable.`));
+        process.exit(1);
+      }
+        return;
+      }
+
+      await renderSession(resolved, mode, scope.filter, { redact: scope.redact });
+      return;
+    }
+  }
+
   const spinner = ora().start();
   const tracker = createScanProgressTracker(FIND_VERBS, 'session', spinner);
 
@@ -4647,6 +4783,20 @@ function resolveIndexedMetadataRows(indexed: SessionMeta[], selector: string): S
   return resolveSessionQuery(indexed, selector, { indexFallback: false }).matches;
 }
 
+/**
+ * ID-shaped selectors go straight to SQLite's primary-key/short-id lookup.
+ * Keyword and label selectors still need the broader metadata pool.
+ */
+function indexedRowsForSelector(
+  selector: string,
+  scope: { agent?: string; project?: string },
+): SessionMeta[] {
+  const indexed = looksLikeSessionId(selector)
+    ? findSessionsById(selector)
+    : querySessions();
+  return applyScopeFilters(indexed, scope);
+}
+
 /** Fixed peer argv for the metadata resolver. Scope flags compose identically on
  * every host; `--all` removes the SSH login cwd/time window, not agent/project filters. */
 export function metadataResolveForwardedArgs(
@@ -4707,7 +4857,7 @@ export async function resolveSessionMetadataValue(
 ): Promise<MetadataResolveOutcome> {
   const localMachine = machineId();
   const includeLocal = !scope.hosts?.length || shouldIncludeLocal(scope.hosts, localMachine);
-  const indexed = includeLocal ? applyScopeFilters(querySessions(), scope) : [];
+  const indexed = includeLocal ? indexedRowsForSelector(selector, scope) : [];
   const localMatches = resolveIndexedMetadataRows(indexed, selector)
     .map(session => ({ ...session, machine: session.machine || localMachine }));
 
@@ -4753,7 +4903,7 @@ async function resolveSessionMetadata(
 ): Promise<void> {
   const localMachine = machineId();
   const includeLocal = !scope.hosts?.length || shouldIncludeLocal(scope.hosts, localMachine);
-  const indexed = includeLocal ? applyScopeFilters(querySessions(), scope) : [];
+  const indexed = includeLocal ? indexedRowsForSelector(selector, scope) : [];
   const localMatches = resolveIndexedMetadataRows(indexed, selector)
     .map(session => ({ ...session, machine: session.machine || localMachine }));
 
@@ -5067,6 +5217,55 @@ export function registerSessionsCommands(program: Command): void {
       return;
     }
     await sessionsAction(query, options, command.getOptionValueSource('limit'));
+  });
+
+  const previewCmd = sessionsCmd
+    .command('preview')
+    .argument('<id>', 'Full session ID or displayed 8-character short ID')
+    .description('Show one rich session card without rendering the full transcript')
+    .option('-a, --agent <agent>', 'Narrow the ID to one agent type/version')
+    .option('-p, --project <name>', 'Narrow the ID to one project')
+    .option('--local', 'Only this machine; do not resolve the ID across the fleet')
+    .option('-H, --host <target...>', 'Resolve only on the named device(s)')
+    .option('--device <target...>', 'Alias for --host')
+    .option('--json', 'Output the session preview as JSON');
+
+  setHelpSections(previewCmd, {
+    examples: `
+      # Preview by the 8-character ID shown in agents sessions
+      agents sessions preview 407b8dd5
+
+      # A full UUID resolves on the first device that owns it
+      agents sessions preview c70ecdea-6210-4039-9845-246a3a7a9942
+
+      # Stay on this machine or restrict the authoritative lookup to one peer
+      agents sessions preview 407b8dd5 --local
+      agents sessions preview 407b8dd5 --device zion
+    `,
+    notes: `
+      - Full UUIDs are globally unique and may stop the fleet lookup at the first exact hit.
+      - Short IDs wait for every selected device so ambiguity is never hidden.
+      - Active status is refreshed through the bounded live-state TTL; transcript-derived details use the durable session index.
+    `,
+  });
+
+  previewCmd.action(async (id: string) => {
+    const options = previewCmd.optsWithGlobals() as {
+    agent?: string;
+    project?: string;
+    local?: boolean;
+    host?: string[];
+    device?: string[];
+    json?: boolean;
+    };
+    const hosts = [...(options.host ?? []), ...(options.device ?? [])];
+    await renderSessionPreview(id, {
+      agent: options.agent,
+      project: options.project,
+      local: options.local,
+      hosts: hosts.length > 0 ? hosts : undefined,
+      json: options.json,
+    });
   });
 
   registerSessionsTailCommand(sessionsCmd);

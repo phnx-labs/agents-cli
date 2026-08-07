@@ -109,6 +109,7 @@ Routine archives (owned by agents-cli, durable):
 
 ```
 agents sessions [query] [--json] [--since 1h] [--all]
+agents sessions preview <uuid-or-8-char-id> [--json] [--local|--device <name>]
            │
            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -132,6 +133,14 @@ agents sessions [query] [--json] [--since 1h] [--all]
 │  4. Emit JSON (--json) or render interactively                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+`sessions preview` performs an indexed ID lookup instead of scanning recent
+history. Full UUIDs may stop on an exact local/remote hit; short prefixes wait
+for every selected peer so collisions are reported. The owning peer renders a
+remote card. Transcript-derived details are stored as normalized JSON in
+`session_preview_cache`, keyed by the source file's mtime and size; live status
+is fetched separately with a 15-second maximum age, so the durable cache cannot
+serve a stale working/waiting state.
 
 Cold run re-parses everything. Warm run is mostly DB-only; a directory whose
 `(mtime, entry_count)` matches the `dir_ledger` is served entirely from the DB

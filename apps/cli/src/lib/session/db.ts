@@ -312,6 +312,18 @@ CREATE TABLE IF NOT EXISTS session_insights (
   computed_at INTEGER NOT NULL,
   facets TEXT NOT NULL
 );
+
+-- Normalized data behind sessions preview. Like session_insights this is a
+-- lazy, stamp-validated cache: opening one session parses only that transcript,
+-- while subsequent processes reuse the derived preview until its bytes change.
+CREATE TABLE IF NOT EXISTS session_preview_cache (
+  session_id TEXT PRIMARY KEY,
+  file_mtime_ms INTEGER,
+  file_size INTEGER,
+  extractor_version INTEGER NOT NULL,
+  computed_at INTEGER NOT NULL,
+  preview_json TEXT NOT NULL
+);
 `;
 
 /**
@@ -322,6 +334,7 @@ CREATE TABLE IF NOT EXISTS session_insights (
  */
 /** Bump when facet extraction changes so cached rows recompute (stalls-by-model v6). */
 export const INSIGHTS_EXTRACTOR_VERSION = 6;
+export const PREVIEW_EXTRACTOR_VERSION = 1;
 
 /** Raw row shape returned from the sessions table. */
 export interface SessionRow {
@@ -2813,6 +2826,70 @@ export function writeSessionInsights<T>(
 /** Drop every cached facet row. Backs `agents insights --refresh`. */
 export function clearSessionInsights(): void {
   getDB().exec(`DELETE FROM session_insights`);
+}
+
+/** Read one derived preview only when it matches the transcript bytes on disk. */
+export function readSessionPreviewCache<T>(
+  id: string,
+  sourceStamp: { fileMtimeMs: number | null; fileSize: number | null },
+): T | undefined {
+  const row = getDB().prepare(`
+    SELECT pc.preview_json AS previewJson
+    FROM session_preview_cache pc
+    WHERE pc.session_id = ?
+      AND pc.extractor_version = ?
+      AND pc.file_mtime_ms IS ?
+      AND pc.file_size IS ?
+  `).get(
+    id,
+    PREVIEW_EXTRACTOR_VERSION,
+    sourceStamp.fileMtimeMs,
+    sourceStamp.fileSize,
+  ) as { previewJson: string } | undefined;
+  if (!row) return undefined;
+  try {
+    return JSON.parse(row.previewJson) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Persist normalized preview data against the exact transcript bytes parsed. */
+export function writeSessionPreviewCache<T>(entry: {
+  id: string;
+  fileMtimeMs: number | null;
+  fileSize: number | null;
+  preview: T;
+}): void {
+  getDB().prepare(`
+    INSERT INTO session_preview_cache
+      (session_id, file_mtime_ms, file_size, extractor_version, computed_at, preview_json)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(session_id) DO UPDATE SET
+      file_mtime_ms = excluded.file_mtime_ms,
+      file_size = excluded.file_size,
+      extractor_version = excluded.extractor_version,
+      computed_at = excluded.computed_at,
+      preview_json = excluded.preview_json
+  `).run(
+    entry.id,
+    entry.fileMtimeMs,
+    entry.fileSize,
+    PREVIEW_EXTRACTOR_VERSION,
+    Date.now(),
+    JSON.stringify(entry.preview),
+  );
+}
+
+/** Plugin provenance already indexed for resources used by one session. */
+export function getSessionPlugins(id: string): string[] {
+  const rows = getDB().prepare(`
+    SELECT DISTINCT plugin
+    FROM session_resource_usage
+    WHERE session_id = ? AND plugin IS NOT NULL AND plugin <> ''
+    ORDER BY plugin COLLATE NOCASE
+  `).all(id) as Array<{ plugin: string }>;
+  return rows.map(row => row.plugin);
 }
 
 export type UsageRollupGroup = 'agent' | 'project' | 'day' | 'account';
