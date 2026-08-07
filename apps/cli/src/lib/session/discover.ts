@@ -2350,6 +2350,12 @@ async function scanOpenCodeIncremental(): Promise<void> {
     );
     const costExpr = sessionCols.has('cost') ? 's.cost' : 'NULL';
     const modelExpr = sessionCols.has('model') ? 's.model' : 'NULL';
+    // Every `json_extract` / `json_type` below is guarded by `json_valid`.
+    // SQLite raises "malformed JSON" on a non-JSON value, and that aborts the
+    // WHOLE query — so a single unparseable `part`/`message` row anywhere in the
+    // shared DB would drop EVERY OpenCode session from the index, silently in a
+    // non-TTY run (the handler below only prints when stderr is a TTY). A
+    // poisoned row must cost that row, not the harness.
     const query = `
       SELECT
         s.id AS id,
@@ -2378,7 +2384,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
           session_id,
           MAX(time_created) AS last_part_at,
           SUM(LENGTH(CAST(data AS BLOB))) AS part_bytes,
-          SUM(CASE WHEN json_extract(data, '$.type') = 'tool' THEN 1 ELSE 0 END) AS tool_call_count
+          SUM(CASE WHEN json_valid(data) AND json_extract(data, '$.type') = 'tool' THEN 1 ELSE 0 END) AS tool_call_count
         FROM part
         GROUP BY session_id
       ) parts ON parts.session_id = s.id
@@ -2388,18 +2394,18 @@ async function scanOpenCodeIncremental(): Promise<void> {
           COUNT(*) AS message_count,
           MAX(time_created) AS last_message_at,
           SUM(LENGTH(CAST(data AS BLOB))) AS message_bytes,
-          SUM(
+          SUM(CASE WHEN json_valid(data) THEN
             COALESCE(json_extract(data, '$.tokens.input'), 0) +
             COALESCE(json_extract(data, '$.tokens.output'), 0) +
             COALESCE(json_extract(data, '$.tokens.reasoning'), 0) +
             COALESCE(json_extract(data, '$.tokens.cache.read'), 0) +
             COALESCE(json_extract(data, '$.tokens.cache.write'), 0)
-          ) AS token_count,
-          SUM(COALESCE(json_extract(data, '$.tokens.output'), 0)) AS output_tokens,
-          SUM(COALESCE(json_extract(data, '$.tokens.input'), 0)) AS input_tokens,
-          SUM(COALESCE(json_extract(data, '$.tokens.cache.read'), 0)) AS cache_read_tokens,
-          SUM(COALESCE(json_extract(data, '$.tokens.cache.write'), 0)) AS cache_write_tokens,
-          MAX(CASE WHEN json_type(data, '$.tokens') IS NOT NULL THEN 1 ELSE 0 END) AS has_token_data
+          ELSE 0 END) AS token_count,
+          SUM(CASE WHEN json_valid(data) THEN COALESCE(json_extract(data, '$.tokens.output'), 0) ELSE 0 END) AS output_tokens,
+          SUM(CASE WHEN json_valid(data) THEN COALESCE(json_extract(data, '$.tokens.input'), 0) ELSE 0 END) AS input_tokens,
+          SUM(CASE WHEN json_valid(data) THEN COALESCE(json_extract(data, '$.tokens.cache.read'), 0) ELSE 0 END) AS cache_read_tokens,
+          SUM(CASE WHEN json_valid(data) THEN COALESCE(json_extract(data, '$.tokens.cache.write'), 0) ELSE 0 END) AS cache_write_tokens,
+          MAX(CASE WHEN json_valid(data) AND json_type(data, '$.tokens') IS NOT NULL THEN 1 ELSE 0 END) AS has_token_data
         FROM message
         GROUP BY session_id
       ) stats ON stats.session_id = s.id
