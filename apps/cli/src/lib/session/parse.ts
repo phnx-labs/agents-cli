@@ -1369,18 +1369,28 @@ export function parseOpenCode(filePath: string): SessionEvent[] {
   // Read through the node/bun SQLite wrapper (not the `sqlite3` CLI) so this
   // works on every OS — the CLI is absent on Windows.
   let rows: Array<{ role: unknown; part_type: unknown; part_data: unknown; time_created: unknown }>;
+  // OpenCode stores the session's checklist in its own `todo` table (the current
+  // snapshot, not a history). Emitted below as one `todo_write` tool_use event so
+  // the shared enrichment (`extractTodoProgressFromEvents`) computes `todos`
+  // uniformly with every other harness (RUSH-2358).
+  let todoRows: Array<{ content: unknown; status: unknown; time_updated: unknown }> = [];
   let db: Database.Database | undefined;
   try {
-    // Query messages with their parts, ordered chronologically. Tool parts are
-    // truncated to keep large tool outputs from bloating memory; the session id
-    // is bound as a parameter rather than interpolated.
+    // Query messages with their parts, ordered chronologically. For tool parts,
+    // truncate ONLY `state.output` (the large blob) via json_set, leaving the
+    // rest of the JSON — crucially `state.input`, which carries `filePath` /
+    // `command` — intact. Truncating the whole part with `substr(p.data,1,2000)`
+    // corrupted large tool parts (e.g. an `edit` with big old/new strings) into
+    // invalid JSON, so they failed to parse and were dropped: the tool's input
+    // path was lost and `recentDirectoriesTouched` could never populate
+    // (RUSH-2358). The session id is bound as a parameter, not interpolated.
     const query = `
       SELECT
         json_extract(m.data, '$.role') AS role,
         json_extract(p.data, '$.type') AS part_type,
         CASE
           WHEN json_extract(p.data, '$.type') = 'tool'
-          THEN substr(p.data, 1, 2000)
+          THEN json_set(p.data, '$.state.output', substr(COALESCE(json_extract(p.data, '$.state.output'), ''), 1, 2000))
           ELSE p.data
         END AS part_data,
         m.time_created AS time_created
@@ -1397,6 +1407,13 @@ export function parseOpenCode(filePath: string): SessionEvent[] {
       part_data: unknown;
       time_created: unknown;
     }>;
+    // The `todo` table is a newer OpenCode addition; tolerate its absence on an
+    // older schema without failing the whole transcript parse.
+    try {
+      todoRows = db
+        .prepare('SELECT content, status, time_updated FROM todo WHERE session_id = ? ORDER BY position ASC;')
+        .all(sessionId) as Array<{ content: unknown; status: unknown; time_updated: unknown }>;
+    } catch { /* no todo table on this schema version */ }
   } catch {
     /* DB not accessible, sqlite module unavailable, or query failed */
     return events;
@@ -1488,6 +1505,30 @@ export function parseOpenCode(filePath: string): SessionEvent[] {
     }
   } catch {
     /* malformed row payload — return what we parsed so far */
+  }
+
+  // Emit the OpenCode `todo` table as one `todo_write` snapshot so the shared
+  // enrichment layer derives `todos` the same way it does for every harness that
+  // records a checklist tool. `todo_write` is in SNAPSHOT_TODO_TOOLS, and the
+  // enrichment reads `args.todos`, so the shape matches without special-casing.
+  const todos = todoRows
+    .map(t => ({
+      content: typeof t.content === 'string' ? t.content : '',
+      status: typeof t.status === 'string' ? t.status : 'pending',
+    }))
+    .filter(t => t.content.trim());
+  if (todos.length) {
+    const lastTodoMs = todoRows.reduce((max, t) => {
+      const ms = typeof t.time_updated === 'number' ? t.time_updated : parseInt(String(t.time_updated), 10);
+      return Number.isFinite(ms) && ms > max ? ms : max;
+    }, 0);
+    events.push({
+      type: 'tool_use',
+      agent: 'opencode',
+      timestamp: lastTodoMs > 0 ? new Date(lastTodoMs).toISOString() : new Date().toISOString(),
+      tool: 'todo_write',
+      args: { todos },
+    });
   }
 
   return events;

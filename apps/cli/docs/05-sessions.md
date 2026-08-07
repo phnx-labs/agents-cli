@@ -182,6 +182,38 @@ location is the one canonical store, not a per-install dotfile, so there is no
 "unmanaged own copy" to hide. Both behaviors key off the composite FORM, never a harness
 name, so any future single-shared-DB harness inherits them.
 
+**OpenCode field coverage (RUSH-2358).** The scan reads what OpenCode's own DB records,
+so an OpenCode row carries the same burn/usage fields as any other harness:
+
+| Field | Source |
+| --- | --- |
+| `input_tokens` · `output_tokens` · `cache_read_tokens` · `cache_write_tokens` · `token_count` | summed from each `message.data`'s `$.tokens.*` (same aggregation the pre-existing `output_tokens` used) |
+| `cost_usd` | the `session.cost` rollup (`0` for a zero-priced provider is a real value) |
+| `model` | `session.model` (JSON `{"id","providerID"}` → the `id`) |
+| `duration_ms` | `session.time_updated − session.time_created` |
+| `tool_call_count` | count of `part` rows whose `$.type = 'tool'` |
+| `recent_directories_touched` | the shared enrichment over `parseOpenCode` events — tool `state.input.filePath` is now preserved (see below) |
+| `todos` | OpenCode's `todo` table, emitted by `parseOpenCode` as one `todo_write` snapshot so the shared `extractTodoProgressFromEvents` derives it uniformly |
+| `worktree_slug` | derived from the session `cwd` (`.agents/worktrees/<slug>/`), same as every harness |
+
+`session.cost` / `session.model` and the `todo` table are newer OpenCode additions —
+the scan probes `PRAGMA table_info(session)` and tolerates a missing `todo` table, so an
+older `opencode.db` still scans (those fields read as null) rather than throwing. The
+tool-part read in `parseOpenCode` truncates **only** `state.output` (via `json_set`),
+not the whole part: the previous `substr(p.data, 1, 2000)` corrupted a large `edit`
+part into invalid JSON and dropped it, losing the tool's `filePath` and leaving
+`recent_directories_touched` empty.
+
+Fields that stay null for OpenCode, by design: `account` (populated only when the local
+`control_account` table holds a signed-in row — empty for a token-less install);
+`account_key` / `account_org` (Claude-account concepts, `claude-accounts.ts`);
+`cost_usd_nocache` (OpenCode reports one total `cost`, not a per-token no-cache price);
+`git_branch` (not recorded in OpenCode's DB); `ticket_id` (extracted from the raw first
+prompt, which the scan does not carry); and `actor` / `initiated_by` / `is_team_origin`
+(agents-cli orchestration provenance stamped from the spawn env / actor sidecar — set
+only for OpenCode sessions launched *through* agents-cli, null for externally-run ones,
+exactly as for any other harness).
+
 Cursor is installed outside agents-cli's version homes. Once any managed agent
 version exists, the default managed scope excludes Cursor transcripts; pass
 `--unmanaged` (for example, `agents sessions --agent cursor --unmanaged`) to list

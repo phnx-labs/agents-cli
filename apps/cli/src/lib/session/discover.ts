@@ -2340,12 +2340,24 @@ async function scanOpenCodeIncremental(): Promise<void> {
   // works on every OS — the CLI is absent on Windows.
   let db: Database.Database | undefined;
   try {
+    db = new Database(OPENCODE_DB);
+    // OpenCode's `session` schema varies by version: `cost` and `model` are newer
+    // columns. Probe once and select NULL where absent, so an older opencode.db
+    // still scans instead of throwing "no such column" and dropping every session.
+    const sessionCols = new Set(
+      (db.prepare('PRAGMA table_info(session);').all() as Array<{ name?: unknown }>)
+        .map(c => (typeof c.name === 'string' ? c.name : '')),
+    );
+    const costExpr = sessionCols.has('cost') ? 's.cost' : 'NULL';
+    const modelExpr = sessionCols.has('model') ? 's.model' : 'NULL';
     const query = `
       SELECT
         s.id AS id,
         s.title AS title,
         s.directory AS directory,
         s.version AS version,
+        ${costExpr} AS cost,
+        ${modelExpr} AS model,
         s.time_created AS time_created,
         s.time_updated AS time_updated,
         COALESCE(stats.message_count, 0) AS message_count,
@@ -2353,15 +2365,20 @@ async function scanOpenCodeIncremental(): Promise<void> {
         COALESCE(stats.message_bytes, 0) AS message_bytes,
         COALESCE(parts.last_part_at, 0) AS last_part_at,
         COALESCE(parts.part_bytes, 0) AS part_bytes,
+        COALESCE(parts.tool_call_count, 0) AS tool_call_count,
         stats.token_count AS token_count,
         stats.output_tokens AS output_tokens,
+        stats.input_tokens AS input_tokens,
+        stats.cache_read_tokens AS cache_read_tokens,
+        stats.cache_write_tokens AS cache_write_tokens,
         COALESCE(stats.has_token_data, 0) AS has_token_data
       FROM session s
       LEFT JOIN (
         SELECT
           session_id,
           MAX(time_created) AS last_part_at,
-          SUM(LENGTH(CAST(data AS BLOB))) AS part_bytes
+          SUM(LENGTH(CAST(data AS BLOB))) AS part_bytes,
+          SUM(CASE WHEN json_extract(data, '$.type') = 'tool' THEN 1 ELSE 0 END) AS tool_call_count
         FROM part
         GROUP BY session_id
       ) parts ON parts.session_id = s.id
@@ -2379,6 +2396,9 @@ async function scanOpenCodeIncremental(): Promise<void> {
             COALESCE(json_extract(data, '$.tokens.cache.write'), 0)
           ) AS token_count,
           SUM(COALESCE(json_extract(data, '$.tokens.output'), 0)) AS output_tokens,
+          SUM(COALESCE(json_extract(data, '$.tokens.input'), 0)) AS input_tokens,
+          SUM(COALESCE(json_extract(data, '$.tokens.cache.read'), 0)) AS cache_read_tokens,
+          SUM(COALESCE(json_extract(data, '$.tokens.cache.write'), 0)) AS cache_write_tokens,
           MAX(CASE WHEN json_type(data, '$.tokens') IS NOT NULL THEN 1 ELSE 0 END) AS has_token_data
         FROM message
         GROUP BY session_id
@@ -2388,13 +2408,14 @@ async function scanOpenCodeIncremental(): Promise<void> {
       LIMIT 1000;
     `.replace(/\n/g, ' ');
 
-    db = new Database(OPENCODE_DB);
     const account = getOpenCodeAccount(db);
     const rows = db.prepare(query).all() as Array<{
       id: unknown;
       title: unknown;
       directory: unknown;
       version: unknown;
+      cost: unknown;
+      model: unknown;
       time_created: unknown;
       time_updated: unknown;
       message_count: unknown;
@@ -2402,8 +2423,12 @@ async function scanOpenCodeIncremental(): Promise<void> {
       message_bytes: unknown;
       last_part_at: unknown;
       part_bytes: unknown;
+      tool_call_count: unknown;
       token_count: unknown;
       output_tokens: unknown;
+      input_tokens: unknown;
+      cache_read_tokens: unknown;
+      cache_write_tokens: unknown;
       has_token_data: unknown;
     }>;
 
@@ -2452,13 +2477,41 @@ async function scanOpenCodeIncremental(): Promise<void> {
       const messageCount = asInt(row.message_count);
       const tokenCount = asInt(row.token_count);
       const outputTokens = asInt(row.output_tokens);
+      const inputTokens = asInt(row.input_tokens);
+      const cacheReadTokens = asInt(row.cache_read_tokens);
+      const cacheWriteTokens = asInt(row.cache_write_tokens);
       const hasTokenData = asInt(row.has_token_data) === 1;
+      const toolCallCount = asInt(row.tool_call_count);
       const timestamp = isNaN(timeCreated) ? new Date().toISOString() : new Date(timeCreated).toISOString();
       // OpenCode is one shared DB, not one file per session — its row carries a
       // per-session updated time. Set lastActivity explicitly (falling back to
       // creation, never the whole-DB mtime the ScanStamp would otherwise supply).
       const lastActivity = Number.isNaN(timeUpdated) ? timestamp : new Date(timeUpdated).toISOString();
       const topic = title || undefined;
+
+      // Duration is the session-row span; a missing/degenerate pair yields no value
+      // rather than a negative or NaN.
+      const durationMs =
+        Number.isFinite(timeCreated) && Number.isFinite(timeUpdated) && timeUpdated > timeCreated
+          ? timeUpdated - timeCreated
+          : undefined;
+      // OpenCode stores the model as JSON (`{"id":"…","providerID":"…"}`); the
+      // index tracks the model id.
+      let model: string | undefined;
+      if (typeof row.model === 'string' && row.model.trim()) {
+        try {
+          const parsed = JSON.parse(row.model) as { id?: unknown };
+          if (typeof parsed?.id === 'string' && parsed.id.trim()) model = parsed.id;
+        } catch { /* non-JSON model string — leave unset */ }
+      }
+      // `cost` is a REAL rollup OpenCode maintains on the session row (0 for a
+      // zero-priced provider, which is a real value, not "unknown").
+      const costUsd = typeof row.cost === 'number' ? row.cost : undefined;
+
+      // Worktree slug is a pure function of cwd (`.agents/worktrees/<slug>/`),
+      // so it derives for OpenCode exactly as it does for every other harness.
+      const cwd = directory ? normalizeCwd(directory) : undefined;
+      const worktreeSlug = detectWorktree(cwd)?.slug;
 
       const meta: SessionMeta = {
         id,
@@ -2467,14 +2520,22 @@ async function scanOpenCodeIncremental(): Promise<void> {
         timestamp,
         lastActivity,
         project: directory ? path.basename(directory) : undefined,
-        cwd: directory ? normalizeCwd(directory) : undefined,
+        cwd,
         filePath,
         version: resolveSessionVersion('opencode', OPENCODE_DB, version || undefined, currentVersion),
         account,
         topic,
+        model,
+        costUsd,
+        durationMs,
+        worktreeSlug,
+        toolCallCount: Number.isNaN(toolCallCount) ? undefined : toolCallCount,
         messageCount: Number.isNaN(messageCount) ? undefined : messageCount,
         tokenCount: hasTokenData && !Number.isNaN(tokenCount) ? tokenCount : undefined,
         outputTokens: hasTokenData && !Number.isNaN(outputTokens) ? outputTokens : undefined,
+        inputTokens: hasTokenData && !Number.isNaN(inputTokens) ? inputTokens : undefined,
+        cacheReadTokens: hasTokenData && !Number.isNaN(cacheReadTokens) ? cacheReadTokens : undefined,
+        cacheWriteTokens: hasTokenData && !Number.isNaN(cacheWriteTokens) ? cacheWriteTokens : undefined,
       };
 
       entries.push({ meta, content: topic || '', scan });
