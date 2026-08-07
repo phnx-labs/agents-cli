@@ -503,17 +503,19 @@ describe('cost tier on a profile run is discarded, not resolved against the host
  * "does agents-cli manage a version" check.
  */
 describe.skipIf(process.platform === 'win32')('agents run — harness not installed (RUSH-2339)', () => {
-  const bunBin = execFileSync('sh', ['-c', 'command -v bun'], { encoding: 'utf-8' }).trim();
+  // Resolved lazily: the describe factory body runs even when skipIf skips the
+  // block, so an eager lookup would fail collection on a box without bun.
+  const bunBin = () => execFileSync('sh', ['-c', 'command -v bun'], { encoding: 'utf-8' }).trim();
   // Anchor on this file, not process.cwd() — vitest inherits the invoking shell's
   // cwd, so a run started from the repo root would not find src/index.ts.
   const appRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
 
   function runAgentsRun(home: string, pathDir: string) {
-    return spawnSync(bunBin, [path.join(appRoot, 'src', 'index.ts'), 'run', 'cursor', 'hi', '--mode', 'plan', '--quiet'], {
+    return spawnSync(bunBin(), [path.join(appRoot, 'src', 'index.ts'), 'run', 'cursor', 'hi', '--mode', 'plan', '--quiet'], {
       cwd: appRoot,
       env: { ...process.env, HOME: home, PATH: [pathDir, '/usr/bin', '/bin'].join(path.delimiter) },
       encoding: 'utf-8',
-      timeout: 180_000,
+      timeout: 60_000,
     });
   }
 

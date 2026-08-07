@@ -2839,11 +2839,13 @@ export function registerRunCommand(program: Command): void {
       // branch of resolveLaunchBinary is what keeps that working.
       {
         const { resolveLaunchBinary } = await import('../lib/exec.js');
-        const launchVersion = version ?? resolveVersion(agent, cwd) ?? undefined;
-        if (!resolveLaunchBinary(agent, launchVersion)) {
-          const target = launchVersion ? `${agent}@${launchVersion}` : agent;
+        // `version` already carries the self-heal's resolution above (it assigns
+        // `version = healed` whenever a version resolved at all), so re-deriving
+        // it with resolveVersion here would be dead.
+        if (!resolveLaunchBinary(agent, version)) {
+          const target = version ? `${agent}@${version}` : agent;
           console.error(chalk.red(`agents: ${target} is not installed on this machine.`));
-          console.error(chalk.yellow(`Install it with: agents add ${launchVersion ? target : agent}`));
+          console.error(chalk.yellow(`Install it with: agents add ${target}`));
           process.exit(1);
         }
       }

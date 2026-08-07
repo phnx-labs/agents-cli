@@ -852,14 +852,29 @@ describePosix('resolveLaunchBinary — is the harness actually on this machine (
   });
 
   // (c'') The exact repro shape: the ONLY `cursor-agent` on PATH is our own
-  // dispatcher shim (or a link into the shims dir). A shim is not an install —
-  // counting it would re-create the 127.
-  it('does not count our own dispatcher shim as an install', () => {
+  // dispatcher shim (or a link into the shims dir), and agents-cli owns no
+  // version of the agent. That shim is a dead end — counting it re-creates the 127.
+  it('does not count our own dispatcher shim as an install when no version is managed', () => {
     const shim = path.join(home, '.agents', '.cache', 'shims', 'cursor-agent');
     plantExecutable(shim);
     fs.symlinkSync(shim, path.join(pathDir, 'cursor-agent'));
 
     expect(probe('cursor')).toBeNull();
+  });
+
+  // The other half of that rule, and a regression this fix originally introduced:
+  // a managed version exists but no default is PINNED, so resolveVersion returns
+  // null. The shim launches fine here — it resolves the version itself and prints
+  // its own `no default set … agents use` guidance — so calling this "not
+  // installed" would name the wrong fix (`agents add`) on a machine that already
+  // has the harness.
+  it('counts the shim as an install when a managed version exists but none is pinned', () => {
+    const shim = path.join(home, '.agents', '.cache', 'shims', 'opencode');
+    plantExecutable(shim);
+    fs.symlinkSync(shim, path.join(pathDir, 'opencode'));
+    plantExecutable(path.join(home, '.agents', '.history', 'versions', 'opencode', '1.16.0', 'node_modules', '.bin', 'opencode'));
+
+    expect(probe('opencode')).toBe(shim);
   });
 
   // The version-pinned branch mirrors buildExecCommand, which prefers the

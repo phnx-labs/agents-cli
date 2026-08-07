@@ -12,7 +12,7 @@ import type { AgentId, Mode } from './types.js';
 import { ALL_MODES } from './types.js';
 import { AGENTS, findInPath } from './agents.js';
 import { parseTimeout } from './routines.js';
-import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled, resolveVersion } from './versions.js';
+import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled, listInstalledVersions, resolveVersion } from './versions.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { isTierToken, resolveTier } from './model-tiers.js';
 import { emitStart, createTimer, redactPrompt, redactArgs } from './events.js';
@@ -902,9 +902,17 @@ export function codexWritableRootsConfig(dir: string): string {
  * user installed themselves (Homebrew, a vendor `curl | sh`, a distro package)
  * has no version home at all, and running it is a supported state — so with no
  * version pinned we answer with a PATH lookup of the bare launch command, the
- * same thing `spawnAgent` would resolve. `findInPath` skips our own shims dir,
- * so a dispatcher shim we planted for an absent harness is not mistaken for an
- * install.
+ * same thing `spawnAgent` would resolve.
+ *
+ * `findInPath` deliberately excludes our own shims dir, because a shim is a
+ * dispatcher rather than an install. That exclusion alone is too strong here:
+ * the shim DOES launch whenever agents-cli owns at least one version of the
+ * agent — it resolves the version itself, and when no default is pinned it
+ * prints its own accurate `no default set … agents use <agent> <version>`
+ * guidance. Pre-empting that with "not installed" would name the wrong fix
+ * (`agents add`) for a machine that already has the harness. So the shim counts
+ * only when a managed version exists; with zero managed versions it is the dead
+ * end this probe was written to catch (RUSH-2339).
  *
  * The version-pinned branch mirrors buildExecCommand exactly: versioned shim
  * first, then the version home's real binary. It deliberately does NOT fall back
@@ -923,7 +931,12 @@ export function resolveLaunchBinary(agent: AgentId, version?: string): string | 
     const binary = getBinaryPath(agent, version);
     return binary && fs.existsSync(binary) ? binary : null;
   }
-  return findInPath(command);
+  const native = findInPath(command);
+  if (native) return native;
+  if (listInstalledVersions(agent).length === 0) return null;
+  // Re-scan PATH accepting the shim: point findInPath's exclusion at a path that
+  // matches nothing, so the real shims dir participates like any other PATH entry.
+  return findInPath(command, { shimsDir: path.join(getShimsDir(), '.no-such-dir') });
 }
 
 /** Assemble the full CLI argument array for an agent invocation. */
