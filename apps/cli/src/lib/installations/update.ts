@@ -103,7 +103,10 @@ export async function updateInstallation(
       options.onProgress?.(
         `${AGENTS[agent].name}@${installation.label} is already on release ${staged.release}; nothing to update.`
       );
-      await strategy.commit(ctx, staged).then((h) => h.finalize());
+      // Deliberately NOT committed: there is no new release to make live, and
+      // for a strategy that swaps the version dir a commit here would displace
+      // a working tree, discard its rollback material, and skip the live probe —
+      // all while reporting that nothing changed. The `finally` clears staging.
       return {
         installation,
         strategy: strategy.id,
