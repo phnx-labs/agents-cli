@@ -43,6 +43,7 @@ import {
   isRunningLiveSession,
   matchesLiveStatus,
   parseAgentFilter,
+  resolveRoutineName,
   type LiveStatusFilter,
   type PickerColumns,
 } from './sessions.js';
@@ -74,8 +75,8 @@ export interface BrowserFilter {
   project?: string;
   /** upper time bound from --until. */
   until?: string;
-  /** retain only routine-origin sessions. */
-  routine: boolean;
+  /** retain only routine-origin sessions, optionally narrowed to one routine. */
+  routine: boolean | string;
   /** indexed resource filters shared by the flag and focus surfaces. */
   skill?: string;
   plugin?: string;
@@ -204,7 +205,10 @@ export function browserFilterToArgv(f: BrowserFilter, query = ''): string[] {
   if (f.window) a.push('--since', f.window);
   if (f.until) a.push('--until', f.until);
   if (f.project) a.push('--project', f.project);
-  if (f.routine) a.push('--routine');
+  if (f.routine) {
+    a.push('--routine');
+    if (typeof f.routine === 'string') a.push(f.routine);
+  }
   if (f.skill) a.push('--skill', f.skill);
   if (f.plugin) a.push('--plugin', f.plugin);
   if (f.unmanaged) a.push('--unmanaged');
@@ -236,11 +240,13 @@ export function activeBrowserSeed(opts: {
   since?: string;
   all?: boolean;
   bookmarks?: boolean;
+  routine?: boolean | string;
 }): Partial<BrowserFilter> {
   return {
     running: true,
     teams: !!opts.teams,
     bookmarks: !!opts.bookmarks,
+    routine: opts.routine ?? false,
     agent: opts.agent,
     projectScope: 'all',
     device: normalizeDeviceSeed(opts.host?.[0]),
@@ -266,6 +272,7 @@ export function bareBrowserSeed(opts: {
   host?: string[];
   inTeam?: string;
   bookmarks?: boolean;
+  routine?: boolean | string;
 }): Partial<BrowserFilter> {
   // An explicit --device scopes the pool to a peer, whose cwds live under that
   // machine's home — none of them can be under OUR process.cwd(), so the default
@@ -282,6 +289,7 @@ export function bareBrowserSeed(opts: {
   return {
     teams: !!opts.teams,
     bookmarks: !!opts.bookmarks,
+    routine: opts.routine ?? false,
     agent: opts.agent,
     // The filter carries one device; seed it only when the scope names exactly
     // one, so a two-device scope isn't narrowed to the first of them.
@@ -415,7 +423,10 @@ export function remotePoolArgs(f: BrowserFilter, fixedFilters: boolean): string[
   if (f.window) forwarded.push('--since', f.window);
   if (f.until) forwarded.push('--until', f.until);
   if (f.project) forwarded.push('--project', f.project);
-  if (f.routine) forwarded.push('--routine');
+  if (f.routine) {
+    forwarded.push('--routine');
+    if (typeof f.routine === 'string') forwarded.push(f.routine);
+  }
   if (f.skill) forwarded.push('--skill', f.skill);
   if (f.plugin) forwarded.push('--plugin', f.plugin);
   if (f.unmanaged) forwarded.push('--unmanaged');
@@ -487,6 +498,8 @@ export function liveSessionToMeta(a: ActiveSession, self: string): SessionMeta {
     prNumber: a.pr?.number,
     ticketId: a.ticket?.id,
     worktreeSlug: a.worktree?.slug,
+    origin: a.origin,
+    routineName: a.routineName,
   };
 }
 
@@ -545,6 +558,14 @@ export function applyFilters(
   // A bookmark is always keyed by a real session id — so an id-less row can
   // never be bookmarked and correctly drops out here.
   if (f.bookmarks) out = out.filter((r) => bookmarks.has(r.id));
+  if (f.routine) {
+    out = out.filter((r) => r.origin === 'routine' || !!r.routineName);
+    if (typeof f.routine === 'string') {
+      const routineNames = distinct(out.map((r) => r.routineName));
+      const selected = resolveRoutineName(f.routine, routineNames);
+      out = selected ? out.filter((r) => r.routineName === selected) : [];
+    }
+  }
   if (f.agent) {
     const { agent, version: rawVersion } = parseAgentFilter(f.agent);
     const localVersion = agent && agent in AGENTS
@@ -633,6 +654,7 @@ function headerFor(f: BrowserFilter): string {
   ];
   if (f.running) bits.push('running');
   if (f.teams) bits.push('teams');
+  if (f.routine) bits.push(`routine:${typeof f.routine === 'string' ? f.routine : 'all'}`);
   if (f.bookmarks) bits.push('bookmarks');
   return bits.join(' · ');
 }

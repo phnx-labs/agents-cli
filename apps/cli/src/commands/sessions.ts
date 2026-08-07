@@ -1689,7 +1689,9 @@ export function hasNoBrowserDisqualifyingFlags(
 ): boolean {
   return (
     !query &&
-    !options.routine &&
+    // A named team lineage is a flat selectable pool; the bare --teams report
+    // stays grouped and printed because the browser cannot preserve its shape.
+    (!options.teams || !!options.inTeam) &&
     !options.flat &&
     !options.tree &&
     !options.markdown &&
@@ -2301,6 +2303,7 @@ async function sessionsAction(
           since: options.since,
           all: options.all,
           bookmarks: options.bookmarks,
+          routine: options.routine,
         }),
         { local: options.local === true, hosts: options.host },
       );
@@ -2329,12 +2332,10 @@ async function sessionsAction(
   // printed/render paths (agents and scripts unaffected). An explicit --since seeds
   // the browser's window so the flag is honored, not swallowed.
   //
-  // `--teams` diverts to the printed team-grouped report (printTeamsView, below):
-  // grouping teammates under their team is a shape the flat fuzzy picker cannot
-  // represent, so like --tree it is a printed listing, not an interactive pick.
-  // --teams --flat/--tree keep their inline table rendering; a search query keeps
-  // the picker so `<term> --teams` still searches.
-  if (isBareBrowserListing(options, query) && !options.teams) {
+  // Bare `--teams` still diverts to the printed team-grouped report because the
+  // flat picker cannot preserve that shape. `--in-team <name> --teams` is one
+  // flat lineage, so it qualifies through hasNoBrowserDisqualifyingFlags.
+  if (isBareBrowserListing(options, query)) {
     const { runSessionBrowser, bareBrowserSeed } = await import('./sessions-browser.js');
     await runSessionBrowser(
       bareBrowserSeed({
@@ -2345,6 +2346,7 @@ async function sessionsAction(
         host: options.host,
         inTeam: options.inTeam,
         bookmarks: options.bookmarks,
+        routine: options.routine,
       }),
       { local: options.local === true, hosts: options.host },
     );

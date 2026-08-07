@@ -254,6 +254,62 @@ describe('dynamicPicker submit keys', () => {
       action: 'focus',
     });
   });
+
+  it('treats the submit-key letter as query text while search mode is active', async () => {
+    const pickerUrl = pathToFileURL(path.resolve('src/lib/picker.ts')).href;
+    const program = `
+      import { dynamicPicker } from ${JSON.stringify(pickerUrl)};
+      const result = await dynamicPicker({
+        message: 'Sessions',
+        initialFilter: { legacyFilter: false },
+        load: async () => [{ id: 'focus-result' }],
+        keyFor: (item) => item.id,
+        labelFor: () => 'Focus result',
+        matches: (item, query) => item.id.includes(query),
+        submitKeys: { f: 'focus' },
+      });
+      process.stdout.write('RESULT ' + JSON.stringify(result));
+    `;
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', program], {
+      cols: 120,
+      rows: 30,
+      cwd: process.cwd(),
+      env: { ...process.env, TERM: 'xterm-256color' },
+    });
+
+    const output = await new Promise<string>((resolve, reject) => {
+      let captured = '';
+      let stage = 0;
+      const timeout = setTimeout(() => {
+        child.kill();
+        reject(new Error(`dynamic picker did not preserve search-mode input:\n${stripVTControlCharacters(captured)}`));
+      }, 10_000);
+      child.onData((data) => {
+        captured += data;
+        const clean = stripVTControlCharacters(captured);
+        if (stage === 0 && clean.includes('Focus result')) {
+          stage = 1;
+          child.write('s');
+        } else if (stage === 1 && clean.includes('/ (type to filter)')) {
+          stage = 2;
+          child.write('f');
+        } else if (stage === 2 && clean.includes('/f')) {
+          stage = 3;
+          child.write('\r');
+        }
+        if (!clean.includes('RESULT ')) return;
+        clearTimeout(timeout);
+        resolve(captured);
+      });
+    });
+
+    const clean = stripVTControlCharacters(output);
+    const result = JSON.parse(clean.slice(clean.lastIndexOf('RESULT ') + 'RESULT '.length));
+    expect(result).toEqual({
+      item: { id: 'focus-result' },
+      filter: { legacyFilter: false },
+    });
+  });
 });
 
 /**

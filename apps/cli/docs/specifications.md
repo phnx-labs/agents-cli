@@ -591,9 +591,13 @@ SSH access (§7); rendering sessions that no harness produced.
   the selected row's bookmark, `b` MUST toggle the bookmark-only filter, and `f`
   MUST submit the selected row through the same attach/recover decision as
   `sessions focus`. Enter MUST retain its resume behavior. These bindings MUST
-  apply to ordinary, team, and routine previews because all three route through
-  `commands/sessions-browser.ts` `runSessionBrowser` (tests
-  `lib/picker.test.ts`, `commands/sessions-browser.test.ts`).
+  apply to every preview rendered by that browser: ordinary listings, active
+  `--teams`, named `--in-team` lineages (with or without `--teams`), and routine
+  listings. The bare grouped `--teams` report MUST remain non-interactive because
+  its nested shape is not representable by the flat browser
+  (`commands/sessions-browser.ts` `runSessionBrowser`; tests
+  `lib/picker.test.ts`, `commands/sessions-browser.test.ts`,
+  `commands/__tests__/sessions-team-lineage.test.ts`).
 - **SES-39 (MUST).** Focus MUST query tmux `#{pane_dead}` immediately before
   attach. A dead or missing pane MUST NOT attach. Session recovery MUST run on
   the origin device and MUST choose native resume only for the exact healthy

@@ -104,6 +104,13 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
     ]);
   });
 
+  it('round-trips all-routine and named-routine filters', () => {
+    expect(browserFilterToArgv({ ...base, routine: true })).toEqual(['sessions', '--routine']);
+    expect(browserFilterToArgv({ ...base, routine: 'nightly-review' })).toEqual([
+      'sessions', '--routine', 'nightly-review',
+    ]);
+  });
+
   it('appends a search query as a quoted positional', () => {
     expect(browserFilterToArgv({ ...base, agent: 'codex' }, 'auth bug')).toEqual([
       'sessions',
@@ -137,9 +144,43 @@ describe('remotePoolArgs — per-device version aliases', () => {
     expect(remotePoolArgs({ ...base, agent: 'claude' }, true)).toContain('claude');
     expect(remotePoolArgs({ ...base, agent: 'claude' }, false)).not.toContain('claude');
   });
+
+  it('preserves a named routine on the peer query', () => {
+    expect(remotePoolArgs({ ...base, routine: 'nightly-review' }, false)).toContain('nightly-review');
+  });
 });
 
 describe('applyFilters — shared browser/focus selection', () => {
+  it('keeps only routine rows for the all-routines filter', () => {
+    const rows = [
+      row({ id: 'nightly', origin: 'routine', routineName: 'nightly-review' }),
+      row({ id: 'manual', origin: 'cli' }),
+    ];
+    const result = applyFilters(
+      rows,
+      new Map(),
+      { ...base, routine: true, projectScope: 'all' },
+      'zion',
+      new Set(),
+    );
+    expect(result.map((session) => session.id)).toEqual(['nightly']);
+  });
+
+  it('narrows a named routine with the same fuzzy resolver as the flag path', () => {
+    const rows = [
+      row({ id: 'nightly', origin: 'routine', routineName: 'nightly-review' }),
+      row({ id: 'release', origin: 'routine', routineName: 'release-notes' }),
+    ];
+    const result = applyFilters(
+      rows,
+      new Map(),
+      { ...base, routine: 'nightly', projectScope: 'all' },
+      'zion',
+      new Set(),
+    );
+    expect(result.map((session) => session.id)).toEqual(['nightly']);
+  });
+
   it('filters historical versions even when that version is no longer installed', () => {
     const rows = [row({ id: 'old', version: '2.1.187' }), row({ id: 'new', version: '2.1.218' })];
     const result = applyFilters(
@@ -311,6 +352,12 @@ describe('bareBrowserSeed — an explicit --device scope', () => {
   it('seeds the team filter from --in-team', () => {
     expect(bareBrowserSeed({ inTeam: 'redesign' }).team).toBe('redesign');
     expect(bareBrowserSeed({}).team).toBeUndefined();
+  });
+
+  it('carries routine filters into the shared browser', () => {
+    expect(bareBrowserSeed({ routine: true }).routine).toBe(true);
+    expect(bareBrowserSeed({ routine: 'nightly-review' }).routine).toBe('nightly-review');
+    expect(activeBrowserSeed({ routine: 'nightly-review' }).routine).toBe('nightly-review');
   });
 
   it('widens scope and window for --in-team, since a team outlives both defaults', () => {
@@ -506,6 +553,15 @@ describe('liveSessionToMeta — the projected row', () => {
     expect(meta.project).toBe('app');
     expect(meta.prNumber).toBe(12);
     expect(meta.ticketId).toBe('RUSH-1');
+  });
+
+  it('carries routine provenance so an unindexed live row obeys routine filters', () => {
+    const meta = liveSessionToMeta(
+      live({ origin: 'routine', routineName: 'nightly-review' }),
+      'zion',
+    );
+    expect(meta.origin).toBe('routine');
+    expect(meta.routineName).toBe('nightly-review');
   });
 
   it('keeps an untracked agent kind off the typed agent field', () => {
