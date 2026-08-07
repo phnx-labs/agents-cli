@@ -96,6 +96,24 @@ export async function updateInstallation(
       );
     }
 
+    // The installer may have reported a release the installation already has
+    // (a self-updating binary that was already current). Recording it would
+    // claim a change that did not happen and append a bogus history entry.
+    if (staged.release === installation.releaseVersion) {
+      options.onProgress?.(
+        `${AGENTS[agent].name}@${installation.label} is already on release ${staged.release}; nothing to update.`
+      );
+      await strategy.commit(ctx, staged).then((h) => h.finalize());
+      return {
+        installation,
+        strategy: strategy.id,
+        fromRelease: installation.releaseVersion,
+        toRelease: staged.release,
+        unchanged: true,
+        alsoUpdated: [],
+      };
+    }
+
     const handles = await strategy.commit(ctx, staged);
     try {
       // Probe what will actually execute — `getBinaryPath` is the same resolver
@@ -109,11 +127,18 @@ export async function updateInstallation(
         );
       }
     } catch (err) {
-      if (strategy.transactional) {
-        handles.undo();
-        throw new Error(`${(err as Error).message} Rolled back to ${installation.releaseVersion}.`);
-      }
-      throw err;
+      // Undo unconditionally. `transactional` describes whether the VENDOR
+      // artifact can be put back, not whether this directory can — gating the
+      // undo on it left an installer-driven harness with the broken tree live
+      // AND the previous one orphaned in rollback material nothing deletes.
+      // A strategy with nothing to restore returns a no-op undo.
+      handles.undo();
+      throw new Error(
+        strategy.transactional
+          ? `${(err as Error).message} Rolled back to ${installation.releaseVersion}.`
+          : `${(err as Error).message} The version directory was restored, but ${AGENTS[agent].name}'s installer `
+            + `had already replaced the binary it manages globally — repair it with: agents add ${agent}@latest`
+      );
     }
     handles.finalize();
 

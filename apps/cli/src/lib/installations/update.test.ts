@@ -187,6 +187,66 @@ describe('updateInstallation', () => {
     expect(fs.readdirSync(versionDir('2.0.65')).filter((e) => e.startsWith('.rollback'))).toEqual([]);
   });
 
+  it('restores the version directory even when the strategy is not transactional', async () => {
+    // An installer-driven harness cannot put the VENDOR binary back, but it
+    // still displaced this installation's own tree — gating the undo on
+    // `transactional` left the broken release live and orphaned the working one
+    // in rollback material nothing ever deleted.
+    const { update, store, strategies } = await load();
+    writeLiveRelease('2.0.65', '2.0.65');
+    const before = store.createInstallation('claude', '2.0.65', '2.0.65');
+
+    const realCommit = strategies.selectUpdateStrategy('claude').commit;
+    const sabotagingCommit: UpdateStrategy['commit'] = async (ctx, staged) => {
+      const handles = await realCommit(ctx, staged);
+      fs.rmSync(path.join(versionDir(ctx.installation.label), 'node_modules', '.bin', 'claude'), { force: true });
+      return handles;
+    };
+    const nonTransactional: UpdateStrategy = {
+      ...fileStrategy('2.1.220', { launchable: true, commit: sabotagingCommit }),
+      transactional: false,
+    };
+
+    await expect(update.updateInstallation(before, { to: '2.1.220', strategy: nonTransactional }))
+      .rejects.toThrow(/repair it with: agents add claude@latest/);
+
+    expect(fs.readFileSync(path.join(versionDir('2.0.65'), 'node_modules', '.bin', 'claude'), 'utf-8'))
+      .toContain('echo 2.0.65');
+    expect(store.readInstallation('claude', '2.0.65')?.releaseVersion).toBe('2.0.65');
+    // No orphaned rollback material.
+    expect(fs.readdirSync(versionDir('2.0.65')).filter((e) => e.startsWith('.rollback'))).toEqual([]);
+  });
+
+  it('reports no change when the installer lands on the release already installed', async () => {
+    // A self-updating binary that was already current: the strategy cannot know
+    // the release until after it runs, so the equality check has to happen after
+    // staging. Recording it would claim a change and append a bogus history row.
+    const { update, store } = await load();
+    writeLiveRelease('2.0.65', '2.0.65');
+    const before = store.createInstallation('claude', '2.0.65', '2.0.65');
+
+    const alreadyCurrent: UpdateStrategy = {
+      id: 'global-binary',
+      transactional: false,
+      sharedBinary: true,
+      async resolveTarget() { return 'latest'; },
+      async stage(ctx) {
+        return {
+          release: '2.0.65',
+          binary: path.join(versionDir(ctx.installation.label), 'node_modules', '.bin', 'claude'),
+          home: path.join(versionDir(ctx.installation.label), 'home'),
+          stagingDir: null,
+        };
+      },
+      async commit() { return { undo: () => {}, finalize: () => {} }; },
+    };
+
+    const outcome = await update.updateInstallation(before, { to: 'latest', strategy: alreadyCurrent });
+    expect(outcome.unchanged).toBe(true);
+    expect(outcome.toRelease).toBe('2.0.65');
+    expect(store.readInstallation('claude', '2.0.65')?.history).toHaveLength(1);
+  });
+
   it('does nothing when the installation already carries the requested release', async () => {
     const { update, store, strategies } = await load();
     writeLiveRelease('2.0.65', '2.0.65');

@@ -1779,6 +1779,10 @@ export async function installVersion(
   // `-`) is never passed as a standalone npm CLI flag.
   const packageSpec = `${agentConfig.npmPackage}@${version}`;
 
+  // Set once the install has passed its integrity gate; read after the try so
+  // the success path's bookkeeping sits outside the catch's cleanup.
+  let healthyVersion: string;
+
   try {
     // Check npm is available
     const winShell = process.platform === 'win32';
@@ -1868,10 +1872,10 @@ export async function installVersion(
       };
     }
 
-    // Freeze this installation's identity (see the installScript branch above).
-    createInstallation(agent, installedVersion, installedVersion);
-    emit('version.install', { agent, version: installedVersion });
-    return { success: true, installedVersion };
+    // The install is healthy from here. Identity is frozen AFTER the try (see
+    // below) so a bookkeeping write failure cannot fall into the catch and wipe
+    // a working install.
+    healthyVersion = installedVersion;
   } catch (err) {
     // Clean up on failure — preserve `home/` in case a prior install left
     // conversation history behind that we must not wipe on a failed reinstall.
@@ -1881,6 +1885,11 @@ export async function installVersion(
     emit('version.install', { agent, version, error: (err as Error).message });
     return { success: false, installedVersion: version, error: (err as Error).message };
   }
+
+  // Freeze this installation's identity (see the installScript branch above).
+  createInstallation(agent, healthyVersion, healthyVersion);
+  emit('version.install', { agent, version: healthyVersion });
+  return { success: true, installedVersion: healthyVersion };
 }
 
 // Version-dir entries that are STATE, not install output, and so must survive a

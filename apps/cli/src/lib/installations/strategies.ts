@@ -62,10 +62,15 @@ export interface CommitHandles {
 export interface UpdateStrategy {
   readonly id: UpdateStrategyId;
   /**
-   * False when the vendor artifact this strategy replaces is shared by every
-   * installation of the agent, so the swap cannot be staged out-of-band and
-   * `undo` cannot restore the previous release. Reported to the user rather than
-   * papered over.
+   * True only when `undo` can restore the PREVIOUS RELEASE in full — i.e. the
+   * vendor artifact lives inside this installation's own directory and was
+   * fetched without mutating anything global.
+   *
+   * It is not a switch for whether the orchestrator rolls back: `undo` always
+   * runs on a post-commit failure, because every strategy that displaces
+   * something must put it back. What this flag changes is what the user is
+   * told, since for an installer-driven harness the global binary the vendor
+   * replaced is not ours to restore.
    */
   readonly transactional: boolean;
   /** True when several installations of this agent share one binary on disk. */
@@ -300,6 +305,10 @@ const installScriptStrategy: UpdateStrategy = {
         `${config.name} installer finished but ${config.cliCommand} is not on PATH — the install did not complete.`
       );
     }
+    // On Windows there is no `.cmd` wrapper beside an imported install-script
+    // binary, so the staged launch probe cannot run and reports healthy. The
+    // gate is therefore weaker here than on POSIX; the unconditional undo in
+    // update.ts is what keeps a bad swap recoverable.
 
     const release = target === 'latest'
       ? (await getLiveVersion(ctx.agent)) ?? target
@@ -308,12 +317,19 @@ const installScriptStrategy: UpdateStrategy = {
     const dir = installationDir(ctx.agent, ctx.installation.label);
     const stagingDir = path.join(dir, `.staging-${runId()}`);
     fs.mkdirSync(stagingDir, { recursive: true });
-    importInstallScriptBinary(
+    const imported = importInstallScriptBinary(
       { agentId: ctx.agent, npmPackage: config.npmPackage, cliCommand: config.cliCommand },
       ctx.installation.label,
       installed,
       stagingDir
     );
+    if (!imported.success) {
+      // Swallowing this reported the launch probe's generic "binary not found"
+      // instead of the real reason the import failed.
+      throw new Error(
+        `${config.name} ${release} was installed but could not be linked into the version directory: ${imported.error ?? 'unknown error'}`
+      );
+    }
 
     return {
       release,
