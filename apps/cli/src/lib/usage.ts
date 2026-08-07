@@ -1559,26 +1559,19 @@ async function readLatestCodexRateLimits(filePath: string): Promise<CodexRateLim
 
 /** Normalize Codex rate-limit windows into the common UsageWindow shape. */
 function normalizeCodexWindows(rateLimits: CodexRateLimits): UsageWindow[] {
-  const windows: UsageWindow[] = [];
-
-  const primary = normalizeCodexWindow(rateLimits.primary, 'session', 'Current session', 'S');
-  if (primary) windows.push(primary);
-
-  const secondary = normalizeCodexWindow(rateLimits.secondary, 'week', 'Current week', 'W');
-  if (secondary) windows.push(secondary);
-
-  return windows;
+  return [rateLimits.primary, rateLimits.secondary]
+    .map(normalizeCodexWindow)
+    .filter((window): window is UsageWindow => window !== null)
+    .sort((a, b) => (a.windowMinutes ?? 0) - (b.windowMinutes ?? 0));
 }
 
 /** Normalize a single Codex rate-limit window. */
-function normalizeCodexWindow(
-  window: CodexRateLimitWindow | null | undefined,
-  key: UsageWindowKey,
-  label: string,
-  shortLabel: string
-): UsageWindow | null {
+function normalizeCodexWindow(window: CodexRateLimitWindow | null | undefined): UsageWindow | null {
   const usedPercent = normalizePercent(window?.used_percent);
   if (usedPercent === null) return null;
+
+  const windowMinutes = normalizeWindowMinutes(window?.window_minutes);
+  const { key, label, shortLabel } = classifyCodexWindow(windowMinutes);
 
   return {
     key,
@@ -1586,8 +1579,19 @@ function normalizeCodexWindow(
     shortLabel,
     usedPercent,
     resetsAt: parseDateValue(window?.resets_at),
-    windowMinutes: normalizeWindowMinutes(window?.window_minutes),
+    windowMinutes,
   };
+}
+
+/** Codex assigns quota windows to primary/secondary by plan, so duration carries their meaning. */
+function classifyCodexWindow(windowMinutes: number | null): Pick<UsageWindow, 'key' | 'label' | 'shortLabel'> {
+  if (windowMinutes !== null && windowMinutes >= 28 * 24 * 60) {
+    return { key: 'month', label: 'Current month', shortLabel: 'M' };
+  }
+  if (windowMinutes !== null && windowMinutes >= 7 * 24 * 60) {
+    return { key: 'week', label: 'Current week', shortLabel: 'W' };
+  }
+  return { key: 'session', label: 'Current session', shortLabel: 'S' };
 }
 
 /** Normalize Claude API usage windows into the common UsageWindow shape. */
