@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RotateCandidate } from '../lib/rotate.js';
 import type { UsageSnapshot, UsageWindowKey } from '../lib/usage.js';
-import { buildRunAccountChoices, formatAccountLimits } from './run-account-picker.js';
+import { buildRunAccountChoices, formatAccountLimits, pickSignInLaunchVersion } from './run-account-picker.js';
 
 function snapshot(windows: Array<[UsageWindowKey, number]>, plan: string | null = null): UsageSnapshot {
   return {
@@ -72,8 +72,29 @@ describe('buildRunAccountChoices', () => {
     expect(choices[0].name).toContain('logged in');
     expect(choices[0].name).toContain('Max');
     expect(choices[0].name).toContain('Session 75% left');
-    expect(choices[1]).toMatchObject({ ready: false, disabled: 'logged out' });
+    expect(choices[1]).toMatchObject({ ready: false, signInRequired: true });
+    expect(choices[1].disabled).toBeUndefined();
     expect(choices[1].name).toContain('logged out');
+  });
+
+  it('keeps a logged-out account SELECTABLE so the launch can carry you into the login (RUSH-2334)', () => {
+    const [choice] = buildRunAccountChoices([
+      candidate({ signedIn: false, usageSnapshot: null }),
+    ], null);
+    // Disabling this row is what left a fully logged-out harness unreachable.
+    expect(choice.disabled).toBeUndefined();
+    expect(choice).toMatchObject({ ready: false, signInRequired: true });
+    expect(choice.name).toContain('launch to sign in');
+  });
+
+  it('orders ready > needs-sign-in > throttled, so the actionable row beats the hopeless one', () => {
+    const choices = buildRunAccountChoices([
+      candidate({ version: '1.0.0', usageSnapshot: snapshot([['session', 100], ['week', 100]]) }),
+      candidate({ version: '2.0.0', signedIn: false, usageSnapshot: null }),
+      candidate({ version: '3.0.0' }),
+    ], null);
+    expect(choices.map((c) => c.value)).toEqual(['3.0.0', '2.0.0', '1.0.0']);
+    expect(choices.map((c) => !!c.disabled)).toEqual([false, false, true]);
   });
 
   it('disables exhausted accounts with the exact blocking windows', () => {
@@ -88,11 +109,14 @@ describe('buildRunAccountChoices', () => {
     expect(choice.name).toContain('Week exhausted');
   });
 
-  it('disables a server-revoked account (token rejected) with a re-login reason, even at full quota', () => {
+  it('marks a server-revoked account (token rejected) as needing re-login, but keeps it pickable', () => {
     const [choice] = buildRunAccountChoices([
       candidate({ authVerdict: 'revoked', usageSnapshot: snapshot([['session', 0], ['week', 0]]) }),
     ], null);
-    expect(choice).toMatchObject({ ready: false, disabled: 'needs re-login' });
+    expect(choice).toMatchObject({ ready: false, signInRequired: true });
+    expect(choice.disabled).toBeUndefined();
+    expect(choice.name).toContain('needs re-login');
+    expect(choice.name).toContain('launch to re-authenticate');
   });
 
   it('keeps a signed-in account selectable when quota data is unavailable', () => {
@@ -117,5 +141,55 @@ describe('buildRunAccountChoices', () => {
       candidate({ plan: null, usageSnapshot: snapshot([['session', 10]], 'Team') }),
     ], null);
     expect(choice.name).toContain('Team');
+  });
+});
+
+describe('pickSignInLaunchVersion (RUSH-2334)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function captureStderr(): { lines: () => string } {
+    const chunks: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      chunks.push(String(chunk));
+      return true;
+    });
+    return { lines: () => chunks.join('') };
+  }
+
+  it('a single logged-out account launches WITHOUT a prompt — a one-item picker decides nothing', async () => {
+    const stderr = captureStderr();
+    const version = await pickSignInLaunchVersion(
+      'claude',
+      [candidate({ version: '2.1.0', signedIn: false, usageSnapshot: null })],
+    );
+    expect(version).toBe('2.1.0');
+    expect(stderr.lines()).toContain('launching claude@2.1.0 so you can sign in');
+    // The message must name the actual login command, not just say "logged out".
+    expect(stderr.lines()).toContain('claude, then /login');
+  });
+
+  it('a single revoked account says the token was rejected, not that you are logged out', async () => {
+    const stderr = captureStderr();
+    const version = await pickSignInLaunchVersion(
+      'claude',
+      [candidate({ version: '2.1.0', authVerdict: 'revoked' })],
+    );
+    expect(version).toBe('2.1.0');
+    expect(stderr.lines()).toContain('the server rejected its token');
+  });
+
+  it('--quiet launches the same version but prints nothing', async () => {
+    const stderr = captureStderr();
+    const version = await pickSignInLaunchVersion(
+      'claude',
+      [candidate({ version: '2.1.0', signedIn: false, usageSnapshot: null })],
+      true,
+    );
+    expect(version).toBe('2.1.0');
+    expect(stderr.lines()).toBe('');
+  });
+
+  it('no recoverable candidate returns null so the caller falls back to failing loud', async () => {
+    expect(await pickSignInLaunchVersion('claude', [])).toBeNull();
   });
 });

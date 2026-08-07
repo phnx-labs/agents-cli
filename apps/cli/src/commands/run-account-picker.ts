@@ -1,9 +1,13 @@
 import { select } from '@inquirer/prompts';
+import chalk from 'chalk';
 import type { AgentId } from '../lib/types.js';
 import { agentLabel } from '../lib/agents.js';
+import { loginHint } from '../lib/signin-badge.js';
 import {
   collectRunCandidates,
   readinessFromCandidate,
+  isSignInRecoverable,
+  type AccountReadiness,
   type RotateCandidate,
 } from '../lib/rotate.js';
 import { compareVersions, getGlobalDefault } from '../lib/versions.js';
@@ -15,7 +19,13 @@ export interface RunAccountChoice {
   name: string;
   value: string;
   disabled?: string;
+  /** Can serve a run right now: signed in, authenticated, and under quota. */
   ready: boolean;
+  /**
+   * Selectable, but picking it launches the harness so you can authenticate
+   * first (RUSH-2334). Mutually exclusive with `ready`; never `disabled`.
+   */
+  signInRequired: boolean;
 }
 
 const WINDOW_ORDER = ['session', 'week', 'sonnet_week', 'month'] as const;
@@ -47,11 +57,19 @@ export function formatAccountLimits(candidate: RotateCandidate): string {
     .join(' · ');
 }
 
-function disabledReason(candidate: RotateCandidate): string | undefined {
-  const readiness = readinessFromCandidate(candidate);
+/**
+ * Why a row cannot be picked. Only a THROTTLE disables a row: the account is
+ * signed in and out of capacity, so launching it just hammers an exhausted
+ * account (RUSH-2132) and nothing the user does at this prompt helps.
+ *
+ * An AUTH exclusion (`signed_out` / `revoked`) is deliberately NOT disabled —
+ * the harness's own TUI is the login surface, so picking that row and launching
+ * is the only way to sign in through agents-cli. Disabling it left a fully
+ * logged-out harness with no reachable account at all (RUSH-2334).
+ */
+function disabledReason(candidate: RotateCandidate, readiness: AccountReadiness): string | undefined {
   if (readiness.ready) return undefined;
-  if (readiness.reason === 'signed_out') return 'logged out';
-  if (readiness.reason === 'revoked') return 'needs re-login';
+  if (isSignInRecoverable(readiness)) return undefined;
   if (readiness.reason === 'out_of_credits') return 'out of credits';
 
   const windows = candidate.usageSnapshot?.windows ?? [];
@@ -71,24 +89,45 @@ export function buildRunAccountChoices(
   globalDefault: string | null,
 ): RunAccountChoice[] {
   const rows = candidates.map((candidate) => {
-    const disabled = disabledReason(candidate);
+    const readiness = readinessFromCandidate(candidate);
+    const disabled = disabledReason(candidate, readiness);
+    const signInRequired = isSignInRecoverable(readiness);
     const version = candidate.version === globalDefault
       ? `${candidate.version} (default)`
       : candidate.version;
+    // `revoked` is signed-in-but-rejected, so it reads as a re-login rather
+    // than "logged out"; every throttle is still a signed-in account.
+    const authReason = readiness.ready ? null : readiness.reason;
+    const status = authReason === 'revoked'
+      ? 'needs re-login'
+      : authReason === 'signed_out'
+        ? 'logged out'
+        : 'logged in';
     return {
       candidate,
       account: candidate.accountLabel || 'account unavailable',
       version,
-      status: candidate.signedIn ? 'logged in' : 'logged out',
+      status,
       plan: candidate.usageSnapshot?.plan ?? candidate.plan ?? 'plan unavailable',
-      limits: formatAccountLimits(candidate),
+      // An auth-blocked row shows what picking it DOES; its quota is moot until
+      // there is a credential to spend it with.
+      limits: authReason === 'revoked'
+        ? 'launch to re-authenticate'
+        : authReason === 'signed_out'
+          ? 'launch to sign in'
+          : formatAccountLimits(candidate),
       disabled,
-      ready: disabled === undefined,
+      ready: readiness.ready,
+      signInRequired,
     };
   });
 
+  // Ready accounts first, then the ones a login would unlock (actionable), then
+  // the throttled rows the user can do nothing about at this prompt.
+  const rank = (row: { ready: boolean; signInRequired: boolean }): number =>
+    row.ready ? 0 : row.signInRequired ? 1 : 2;
   rows.sort((a, b) => {
-    if (a.ready !== b.ready) return a.ready ? -1 : 1;
+    if (rank(a) !== rank(b)) return rank(a) - rank(b);
     const aDefault = a.candidate.version === globalDefault;
     const bDefault = b.candidate.version === globalDefault;
     if (aDefault !== bDefault) return aDefault ? -1 : 1;
@@ -111,7 +150,47 @@ export function buildRunAccountChoices(
     value: row.candidate.version,
     disabled: row.disabled,
     ready: row.ready,
+    signInRequired: row.signInRequired,
   }));
+}
+
+/**
+ * Choose which installed version to launch so the user can authenticate, when a
+ * strategy found zero healthy accounts but at least one is merely signed out
+ * (RUSH-2334). Returns the version to launch, or null if the user cancelled.
+ *
+ * A single candidate does NOT prompt — a one-item picker is pure noise, and the
+ * only thing to decide has one answer. Several candidates fall through to the
+ * normal account picker, which shows every account with its state so the choice
+ * is informed (throttled rows stay disabled there).
+ *
+ * Callers MUST have already confirmed an interactive terminal: off a TTY there
+ * is nobody to complete the login, and the run should fail loud instead.
+ */
+export async function pickSignInLaunchVersion(
+  agent: AgentId,
+  recoverable: RotateCandidate[],
+  quiet = false,
+): Promise<string | null> {
+  if (recoverable.length === 0) return null;
+
+  if (recoverable.length > 1) {
+    const selected = await pickRunAccountCandidate(agent);
+    return selected?.version ?? null;
+  }
+
+  const [only] = recoverable;
+  if (!quiet) {
+    const readiness = readinessFromCandidate(only);
+    const why = !readiness.ready && readiness.reason === 'revoked'
+      ? 'has no valid credential (the server rejected its token)'
+      : 'has no signed-in account';
+    process.stderr.write(chalk.yellow(
+      `${agentLabel(agent)} ${why} — launching ${agent}@${only.version} so you can sign in.\n`,
+    ));
+    process.stderr.write(chalk.gray(`Sign in with: ${loginHint(agent)}\n`));
+  }
+  return only.version;
 }
 
 /** Prompt for one safe installed account/version. A cancelled picker launches nothing. */
@@ -129,9 +208,16 @@ export async function pickRunAccountCandidate(agent: AgentId): Promise<RotateCan
   }
 
   const choices = buildRunAccountChoices(candidates, getGlobalDefault(agent));
-  const hasReadyAccount = choices.some((choice) => choice.ready);
-  const promptChoices = choices.map(({ ready: _ready, ...choice }) => choice);
-  if (!hasReadyAccount) {
+  // "Selectable" is broader than "ready": an auth-blocked row is pickable so the
+  // launch can carry you into the harness's login (RUSH-2334). Only offer the
+  // bail-out row when literally nothing can be chosen — i.e. every account is
+  // throttled, which no amount of signing in fixes.
+  const hasSelectableAccount = choices.some((choice) => !choice.disabled);
+  const needsSignIn = choices.some((choice) => choice.signInRequired);
+  const promptChoices = choices.map(
+    ({ ready: _ready, signInRequired: _signInRequired, ...choice }) => choice,
+  );
+  if (!hasSelectableAccount) {
     promptChoices.push({
       name: 'No usable accounts — cancel',
       value: CANCEL_SELECTION,
@@ -140,7 +226,9 @@ export async function pickRunAccountCandidate(agent: AgentId): Promise<RotateCan
 
   try {
     const version = await select({
-      message: `Select a ${agentLabel(agent)} account for this run:`,
+      message: needsSignIn
+        ? `Select a ${agentLabel(agent)} account for this run (pick a logged-out one to sign in):`
+        : `Select a ${agentLabel(agent)} account for this run:`,
       choices: promptChoices,
       loop: false,
     });

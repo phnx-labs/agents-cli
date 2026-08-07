@@ -269,6 +269,34 @@ export function readinessFromCandidate(candidate: RotateCandidate): AccountReadi
 }
 
 /**
+ * Whether a human sitting at a terminal can clear this exclusion by launching
+ * the agent and signing in. The two unhealthy classes are opposites, and the
+ * zero-healthy callers MUST NOT treat them alike:
+ *
+ * - `signed_out` / `revoked` — recoverable. There is no credential (or the
+ *   server rejected it), and the harness's own TUI is the login surface, so
+ *   launching it is exactly the fix. Refusing to launch strands the user with
+ *   no way to authenticate through agents-cli at all (RUSH-2334).
+ * - `rate_limited` / `out_of_credits` — NOT recoverable. The account is signed
+ *   in and throttled; launching it just hammers an exhausted account, which is
+ *   precisely the loop RUSH-2132's fail-loud guard exists to stop. Only a
+ *   window reset clears these.
+ */
+export function isSignInRecoverable(readiness: AccountReadiness): boolean {
+  return !readiness.ready && (readiness.reason === 'signed_out' || readiness.reason === 'revoked');
+}
+
+/**
+ * The subset of an `exhausted` set whose exclusion a sign-in would clear, so an
+ * interactive caller can offer the login instead of dead-ending. Empty means
+ * every account is throttled — nothing a human can fix right now, so the caller
+ * keeps failing loud.
+ */
+export function signInRecoverableCandidates(candidates: RotateCandidate[]): RotateCandidate[] {
+  return candidates.filter((c) => isSignInRecoverable(readinessFromCandidate(c)));
+}
+
+/**
  * Readiness for a specific installed (agent, version). Returns `{ ready: true }`
  * when the version isn't among the collected candidates — absence is the
  * caller's `isVersionInstalled` concern, not ours; don't cry wolf. Only

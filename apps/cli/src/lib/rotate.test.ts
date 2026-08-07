@@ -15,6 +15,8 @@ import {
   formatNoHealthyHarnessError,
   earliestResetAcross,
   readinessFromCandidate,
+  isSignInRecoverable,
+  signInRecoverableCandidates,
   matchAccountVersion,
   isUsageVerified,
   isLaunchableSignedIn,
@@ -418,6 +420,39 @@ describe('readinessFromCandidate (pre-flight warning for version-pinned teammate
     expect(
       readinessFromCandidate(candidate({ version: '1.0.0', signedIn: false })),
     ).toEqual({ ready: false, reason: 'signed_out', email: '1.0.0@example.com' });
+  });
+});
+
+describe('isSignInRecoverable / signInRecoverableCandidates (RUSH-2334)', () => {
+  it('an auth exclusion is recoverable — a login clears it', () => {
+    expect(isSignInRecoverable({ ready: false, reason: 'signed_out', email: null })).toBe(true);
+    expect(isSignInRecoverable({ ready: false, reason: 'revoked', email: null })).toBe(true);
+  });
+
+  it('a throttle exclusion is NOT recoverable — launching it hammers an exhausted account (RUSH-2132)', () => {
+    expect(isSignInRecoverable({ ready: false, reason: 'rate_limited', email: null })).toBe(false);
+    expect(isSignInRecoverable({ ready: false, reason: 'out_of_credits', email: null })).toBe(false);
+  });
+
+  it('a ready account is not "recoverable" — there is nothing to recover', () => {
+    expect(isSignInRecoverable({ ready: true })).toBe(false);
+  });
+
+  it('selects only the auth-excluded accounts out of a mixed exhausted set', () => {
+    const signedOut = candidate({ version: '1.0.0', signedIn: false });
+    const revoked = candidate({ version: '2.0.0', authVerdict: 'revoked' });
+    const limited = candidate({ version: '3.0.0', usageStatus: 'rate_limited' });
+    const broke = candidate({ version: '4.0.0', usageStatus: 'out_of_credits' });
+
+    expect(signInRecoverableCandidates([signedOut, revoked, limited, broke]).map((c) => c.version))
+      .toEqual(['1.0.0', '2.0.0']);
+  });
+
+  it('an all-throttled exhausted set yields nothing, so the caller still fails loud', () => {
+    expect(signInRecoverableCandidates([
+      candidate({ version: '1.0.0', usageStatus: 'rate_limited' }),
+      candidate({ version: '2.0.0', usageStatus: 'out_of_credits' }),
+    ])).toEqual([]);
   });
 });
 

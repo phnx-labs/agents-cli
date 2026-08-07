@@ -2158,7 +2158,7 @@ export function registerRunCommand(program: Command): void {
         { profileExists, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
         { splitBundleRef, resolveHostSshTarget, remoteResolveEnv },
-        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES, collectHarnessCandidates, pickHarnessWeighted, classifyHarnessCandidates, formatHarnessPickBanner, formatNoHealthyHarnessError, formatNoHealthyAccountError },
+        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES, collectHarnessCandidates, pickHarnessWeighted, classifyHarnessCandidates, formatHarnessPickBanner, formatNoHealthyHarnessError, formatNoHealthyAccountError, signInRecoverableCandidates },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
         { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents, ensureSubagentDispatchTool },
@@ -2690,6 +2690,9 @@ export function registerRunCommand(program: Command): void {
       // synthesize a same-agent fallback chain from the other healthy accounts
       // (issue #348). Stays null unless a non-pinned strategy actually rotated.
       let rotationResult: import('../lib/rotate.js').RotateResult | null = null;
+      // Set when the zero-healthy path already announced a deliberate
+      // launch-to-sign-in, so the login preflight below does not repeat it.
+      let signInLaunch = false;
       if (options.strategy && !explicitStrategy) {
         console.error(chalk.red(`Invalid strategy: ${options.strategy}. Use ${RUN_STRATEGIES.join(', ')}.`));
         process.exit(1);
@@ -2715,15 +2718,46 @@ export function registerRunCommand(program: Command): void {
           try {
             const resolved = await resolveRunVersion(agent, strategy, cwd);
             if (resolved.exhausted) {
-              // Fail loud (RUSH-2132): the old behavior warned "found no
-              // usable version; falling back to defaults" and launched the
-              // pinned default anyway — the exact move that loops a rotate
-              // into an exhausted account. The message text is a contract
-              // the Factory watchdog tail-detects; do not reword it.
-              console.error(chalk.red(formatNoHealthyAccountError(agent, strategy, resolved.exhausted)));
-              process.exit(1);
-            }
-            if (resolved.version) {
+              // Zero healthy accounts splits two ways, and conflating them is what
+              // stranded a logged-out harness with no way in at all (RUSH-2334):
+              //
+              // - THROTTLED (rate_limited / out_of_credits) -> fail loud (RUSH-2132).
+              //   The old behavior warned "found no usable version; falling back to
+              //   defaults" and launched the pinned default anyway — the exact move
+              //   that loops a rotate into an exhausted account. Only a window reset
+              //   clears it. The message text is a contract the Factory watchdog
+              //   tail-detects; do not reword it.
+              // - NEEDS A SIGN-IN (signed_out / revoked) -> launching IS the fix,
+              //   because the harness's own TUI is the login surface. So on a TTY we
+              //   carry the user into that login instead of erroring. Exiting here
+              //   made `agents run <agent>`, `agents run <agent>@`, and `agents use`
+              //   all dead-end with no reachable way to authenticate.
+              const recoverable = signInRecoverableCandidates(resolved.exhausted);
+              if (recoverable.length > 0 && isInteractiveTerminal()) {
+                const { pickSignInLaunchVersion } = await import('./run-account-picker.js');
+                const signInVersion = await pickSignInLaunchVersion(agent, recoverable, !!options.quiet);
+                // A cancelled prompt launches nothing — same contract as the
+                // trailing-@ account picker above.
+                if (!signInVersion) return;
+                version = signInVersion;
+                // We just told the user this account is logged out and why we're
+                // launching it, so suppress the downstream login preflight — it
+                // would print a second, near-identical "looks logged out" warning.
+                signInLaunch = true;
+              } else {
+                console.error(chalk.red(formatNoHealthyAccountError(agent, strategy, resolved.exhausted)));
+                if (recoverable.length > 0) {
+                  // Off a TTY nobody can complete a login, so we still exit — but
+                  // name the actual fix rather than only offering --strategy pinned,
+                  // which would just pin the same unauthenticated account.
+                  const { loginHint } = await import('../lib/signin-badge.js');
+                  console.error(chalk.gray(
+                    `To sign in: ${loginHint(agent)} — or run \`agents run ${agent}\` from a terminal.`,
+                  ));
+                }
+                process.exit(1);
+              }
+            } else if (resolved.version) {
               version = resolved.version;
               rotationResult = resolved.rotation;
               if (resolved.rotation && !options.quiet) {
@@ -2823,7 +2857,10 @@ export function registerRunCommand(program: Command): void {
           json: options.json,
           quiet: options.quiet,
           authCheckDisabled: options.authCheck === false || process.env.AGENTS_NO_AUTH_CHECK === '1',
-          rotated: !!rotationResult || accountPickerRequested,
+          // `signInLaunch` means the zero-healthy path already reported this exact
+          // account as logged out and named the login command, so re-probing here
+          // only prints a second, near-identical warning.
+          rotated: !!rotationResult || accountPickerRequested || signInLaunch,
         });
         if (preflight) {
           try {
