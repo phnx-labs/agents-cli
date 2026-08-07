@@ -6,6 +6,7 @@ import {
   rollupSessionsByProject,
   isDeadStatus,
   liveDeadSplit,
+  formatDeadSummary,
   enrichProjectSignals,
   sortProjectMembers,
   formatProjectMembers,
@@ -130,6 +131,21 @@ describe('liveDeadSplit', () => {
 
   it('ignores zero counts rather than emitting empty buckets', () => {
     expect(liveDeadSplit({ running: 2, crashed: 0 }).deadByStatus).toEqual([]);
+  });
+});
+
+describe('formatDeadSummary', () => {
+  const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
+
+  it('names the status directly when every dead session shares one', () => {
+    expect(strip(formatDeadSummary(liveDeadSplit({ running: 1, crashed: 41 })))).toBe('41 crashed');
+    expect(strip(formatDeadSummary(liveDeadSplit({ closed: 5 })))).toBe('5 closed');
+  });
+
+  it('keeps the generic phrase + breakdown only when statuses differ', () => {
+    expect(strip(formatDeadSummary(liveDeadSplit({ crashed: 19, closed: 3 })))).toBe(
+      '22 finished or lost (19 crashed, 3 closed)',
+    );
   });
 });
 

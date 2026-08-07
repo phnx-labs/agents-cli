@@ -207,6 +207,22 @@ export function liveDeadSplit(byStatus: Partial<Record<ActiveStatus, number>>): 
 }
 
 /**
+ * The `dead` row body: `41 crashed` when every dead session shares one status,
+ * else `12 finished or lost (8 crashed, 4 closed)`. The generic "finished or
+ * lost" only earns its keep when the statuses actually differ — with a single
+ * status it just hides which one behind a parenthetical that repeats the count.
+ * Pure — chalk styling only; the caller adds the `dead` label. Assumes
+ * `split.dead > 0` (the caller gates on it).
+ */
+export function formatDeadSummary(split: LiveDeadSplit): string {
+  if (split.deadByStatus.length === 1) {
+    return chalk.yellow(`${split.dead} ${split.deadByStatus[0].status}`);
+  }
+  const detail = split.deadByStatus.map((d) => `${d.n} ${d.status}`).join(', ');
+  return `${chalk.yellow(`${split.dead} finished or lost`)} ${chalk.dim(`(${detail})`)}`;
+}
+
+/**
  * Display order for the members line: the states a human scans for first
  * (running, then idle, then need-input, then queued), everything else after,
  * status name then agent name ascending within a state.

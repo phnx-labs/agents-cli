@@ -5,6 +5,7 @@ import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { stripAnsi } from './session/width.js';
 import {
+  formatFleetSummary,
   formatFleetWorkspaces,
   workspaceWarnings,
   formatWorkspaceLine,
@@ -261,5 +262,107 @@ describe('workspaceWarnings', () => {
       { host: 'zion', path: '~/src/x', present: true, behind: 2, upstream: 'origin/main' },
     ]);
     expect(w[0].severity).toBe('continue');
+  });
+
+  it('groups several behind hosts into ONE warning with ONE remediation, worst first', () => {
+    const w = workspaceWarnings([
+      { host: 'yosemite-m1', path: '~/src/x', present: true, behind: 8, upstream: 'origin/main' },
+      { host: 'mac-mini', path: '~/src/x', present: true, behind: 172, upstream: 'origin/main' },
+      { host: 'yosemite-m2', path: '~/src/x', present: true, behind: 217, upstream: 'origin/main' },
+    ]);
+    expect(w).toHaveLength(1);
+    expect(stripAnsi(w[0].text)).toBe(
+      '3 hosts behind origin/main (~/src/x) — yosemite-m2 ↓217, mac-mini ↓172, yosemite-m1 ↓8',
+    );
+    // ANY host ≥10 behind makes the whole group critical.
+    expect(w[0].severity).toBe('critical');
+    expect(w[0].remediation).toBe('pull (or rebase) before agents on these hosts open PRs against a stale base');
+  });
+
+  it('keeps a behind group continue when every host is <10 behind', () => {
+    const w = workspaceWarnings([
+      { host: 'a', path: '~/src/x', present: true, behind: 3, upstream: 'origin/main' },
+      { host: 'b', path: '~/src/x', present: true, behind: 9, upstream: 'origin/main' },
+    ]);
+    expect(w).toHaveLength(1);
+    expect(w[0].severity).toBe('continue');
+    expect(stripAnsi(w[0].text)).toBe('2 hosts behind origin/main (~/src/x) — b ↓9, a ↓3');
+  });
+
+  it('falls back to "upstream" when the behind hosts do not share one', () => {
+    const w = workspaceWarnings([
+      { host: 'a', path: '~/src/x', present: true, behind: 5, upstream: 'origin/main' },
+      { host: 'b', path: '~/src/x', present: true, behind: 4, upstream: 'origin/dev' },
+    ]);
+    expect(stripAnsi(w[0].text)).toBe('2 hosts behind upstream (~/src/x) — a ↓5, b ↓4');
+  });
+
+  it('groups several dirty hosts into one continue warning, most changes first', () => {
+    const w = workspaceWarnings([
+      { host: 'zion', path: '~/src/x', present: true, dirty: 1, branch: 'main' },
+      { host: 'pinnacles', path: '~/src/x', present: true, dirty: 16, branch: 'main' },
+    ]);
+    expect(w).toHaveLength(1);
+    expect(w[0].severity).toBe('continue');
+    expect(stripAnsi(w[0].text)).toBe('2 hosts with uncommitted changes (~/src/x) — pinnacles 16, zion 1');
+    expect(w[0].remediation).toBeUndefined();
+  });
+
+  it('groups several missing checkouts into one critical warning', () => {
+    const w = workspaceWarnings([
+      { host: 'win-mini', path: '~/src/x', present: false },
+      { host: 'winbox', path: '~/src/x', present: false },
+    ]);
+    expect(w).toHaveLength(1);
+    expect(w[0].severity).toBe('critical');
+    expect(stripAnsi(w[0].text)).toBe('2 hosts missing checkout (~/src/x) — win-mini, winbox');
+  });
+
+  it('keeps a lone behind/dirty/missing host as its full sentence (not a group of one)', () => {
+    const behind = workspaceWarnings([
+      { host: 'mac-mini', path: '~/src/x', present: true, behind: 172, upstream: 'origin/main' },
+    ]);
+    expect(stripAnsi(behind[0].text)).toBe('mac-mini is 172 commits behind origin/main (~/src/x)');
+    const missing = workspaceWarnings([{ host: 'win-mini', path: '~/src/x', present: false }]);
+    expect(stripAnsi(missing[0].text)).toBe('win-mini: checkout missing (~/src/x)');
+  });
+
+  it('groups per path so two different repos never merge into one count', () => {
+    const w = workspaceWarnings([
+      { host: 'a', path: '~/src/x', present: true, behind: 12, upstream: 'origin/main' },
+      { host: 'b', path: '~/src/y', present: true, behind: 15, upstream: 'origin/main' },
+    ]);
+    // One behind warning per path, not one merged "2 hosts behind".
+    expect(w).toHaveLength(2);
+    expect(w.map((x) => stripAnsi(x.text)).sort()).toEqual([
+      'a is 12 commits behind origin/main (~/src/x)',
+      'b is 15 commits behind origin/main (~/src/y)',
+    ]);
+  });
+});
+
+describe('formatFleetSummary', () => {
+  it('counts clean vs behind/dirty/missing and omits zero buckets', () => {
+    const s = formatFleetSummary([
+      { host: 'a', path: '~/x', present: true, behind: 0, dirty: 0, branch: 'main' },
+      { host: 'b', path: '~/x', present: true, behind: 172, dirty: 0, branch: 'main' },
+      { host: 'c', path: '~/x', present: true, behind: 0, dirty: 3, branch: 'main' },
+      { host: 'd', path: '~/x', present: false },
+    ]);
+    expect(stripAnsi(s)).toBe('1/4 clean · 1 behind · 1 dirty · 1 missing');
+  });
+
+  it('counts a host that is both behind and dirty in both buckets', () => {
+    const s = formatFleetSummary([
+      { host: 'a', path: '~/x', present: true, behind: 5, dirty: 2, branch: 'main' },
+    ]);
+    expect(stripAnsi(s)).toBe('0/1 clean · 1 behind · 1 dirty');
+  });
+
+  it('counts ahead-only as clean', () => {
+    const s = formatFleetSummary([
+      { host: 'a', path: '~/x', present: true, ahead: 3, behind: 0, dirty: 0, branch: 'main' },
+    ]);
+    expect(stripAnsi(s)).toBe('1/1 clean');
   });
 });

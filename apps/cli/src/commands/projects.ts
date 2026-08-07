@@ -24,6 +24,7 @@ import { getActiveSessions } from '../lib/session/active.js';
 import { gatherRemoteActive } from '../lib/session/remote-active.js';
 import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
 import {
+  formatFleetSummary,
   formatFleetWorkspaces,
   parseRemoteProbe,
   probeProjectWorkspaces,
@@ -47,6 +48,7 @@ import {
   rollupSessionsByProject,
   withDefaultMachine,
   isDeadStatus,
+  formatDeadSummary,
   liveDeadSplit,
   enrichProjectSignals,
   formatProjectMembersByHost,
@@ -374,8 +376,7 @@ function renderCard(
   if (split.dead > 0) {
     // Wreckage is worth a number of its own — 19 crashed sessions is a thing to
     // go fix, not a throughput signal to fold into the headline.
-    const deadDetail = split.deadByStatus.map((d) => `${d.n} ${d.status}`).join(', ');
-    console.log(`  ${chalk.dim('dead')}     ${chalk.yellow(`${split.dead} finished or lost`)} ${chalk.dim(`(${deadDetail})`)}`);
+    console.log(`  ${chalk.dim('dead')}     ${formatDeadSummary(split)}`);
   }
   // Live only, grouped by host when machine stamps exist so "who is on which
   // box" is visible. Flat collapse hid that when harness×status matched across hosts.
@@ -395,7 +396,10 @@ function renderCard(
   if (remote?.latestRelease) ships.push(remote.latestRelease.tag);
   if (ships.length) console.log(`  ${chalk.dim('ships')}    ${ships.join(' · ')}`);
   if (linear) {
-    console.log(`  ${chalk.dim('linear')}   ${linear.done}/${linear.total}${linear.truncated ? '+' : ''} done · ${linear.inProgress} in progress`);
+    const pct = linear.total > 0 ? ` ${chalk.dim(`(${Math.round((linear.done / linear.total) * 100)}%)`)}` : '';
+    console.log(
+      `  ${chalk.dim('linear')}   ${linear.done}/${linear.total}${linear.truncated ? '+' : ''} done${pct} · ${linear.inProgress} in progress`,
+    );
   }
   for (const line of formatMilestoneLines(linear?.milestones ?? [], linear?.nextMilestone, nowMs, milestoneLimit)) {
     console.log(line);
@@ -414,13 +418,17 @@ function renderCard(
     console.log(`  ${chalk.dim('tickets')}  ${r.tickets.slice(0, 8).join(' · ')}${r.tickets.length > 8 ? ' …' : ''}`);
   }
   if (fleet) {
-    const lines = formatFleetWorkspaces(fleet);
-    if (lines.length === 0) {
+    const table = formatFleetWorkspaces(fleet);
+    if (table.length === 0) {
       console.log(`  ${chalk.dim('fleet')}    ${chalk.gray('no workspace paths (set root or repos[].path)')}`);
+    } else {
+      // A compact health line first (scan without reading every host), then the
+      // full per-host table under it. The grouped footer carries the actionable
+      // subset; this line + the table carry the whole picture.
+      [formatFleetSummary(fleet), ...table].forEach((line, i) => {
+        console.log(`  ${chalk.dim((i === 0 ? 'fleet' : '').padEnd(5))}    ${line}`);
+      });
     }
-    lines.forEach((line, i) => {
-      console.log(`  ${chalk.dim((i === 0 ? 'fleet' : '').padEnd(5))}    ${line}`);
-    });
   }
   if (remote?.artifacts) {
     const last = remote.lastArtifact ? `  ${chalk.dim(`· last: ${remote.lastArtifact}`)}` : '';
@@ -747,6 +755,15 @@ export function registerProjectsCommands(program: Command): void {
 
     // Compact rollup shows the next milestone; `view` shows every declared one.
     const milestoneLimit = detail ? Number.POSITIVE_INFINITY : 1;
+    // Stamp the fleet-wide rollup with when it was taken, so a scrollback isn't
+    // mistaken for a live snapshot. A single named `view` skips it (one card, and
+    // its own detail makes the freshness obvious).
+    if (!detail) {
+      const t = new Date(nowMs);
+      const hhmm = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+      console.log(chalk.dim(`fleet snapshot · as of ${hhmm}`));
+      console.log('');
+    }
     for (const d of defs) {
       renderCard(
         d,

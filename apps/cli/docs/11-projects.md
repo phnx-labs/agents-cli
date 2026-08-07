@@ -131,20 +131,28 @@ home layout, so a peer session whose path uses a different home root may not
 attribute. Full home-relative matching across homes remains deferred (see below):
 
 ```
+fleet snapshot · as of 18:40                     # when this fleet-wide rollup was taken (status only)
+
 rush  ·  23 live
   live     14 running · 6 idle · 3 need-input     # LIVE sessions by lifecycle state
-  dead     4 finished or lost (3 crashed, 1 closed)
+  dead     4 finished or lost (3 crashed, 1 closed)  # a single dead status reads directly: "dead  41 crashed"
   agents   @zion        claude · running · RUSH-2107  ·  claude · running ×8
            @mac-mini    codex · idle  ·  claude · idle ×2
            @yosemite-s0 claude · running ×5  ·  +6 more
   ships    4 merged (7d) · 2 open PRs · 3 worktrees · v1.20.91  # gh counts + latest release tag
-  linear   12/30 done · 5 in progress           # Linear issue counts (needs linear.projectId)
+  linear   12/30 done (40%) · 5 in progress      # Linear issue counts (needs linear.projectId)
   next     Beta cut  ·  3/8  ·  due in 6 days     # the next unfinished Linear milestone
            +2 more milestones — agents projects view <name>
   tickets  RUSH-1201 · RUSH-1198 · …              # tickets worked or created
+  fleet    6/13 clean · 4 behind · 4 dirty · 1 missing   # health summary, then the per-host table
+           mac-mini: ⚠ ↓172 · main  ·  zion: ✓ clean · main  ·  win-mini: ✗ missing  ·  …
   proof    11 artifacts (7d) · last: plan-x.html  # artifact.created milestones by cwd
   repos    phnx-labs/rush · rush-infra
   context  apps/web · packages/api
+  🔴  4 hosts behind origin/main — yosemite-m2 ↓217, mac-mini ↓172, yosemite-s0 ↓93, yosemite-m1 ↓8
+      pull (or rebase) before agents on these hosts open PRs against a stale base
+  🔴  win-mini: checkout missing
+  ⚠️  4 hosts with uncommitted changes — pinnacles 16, yosemite-s0 3, yosemite-m2 1, zion 1
 ```
 
 - **`live`, `agents`, `plan`, open PRs, `tickets`, `worktrees`** come straight from the
@@ -188,16 +196,19 @@ rush  ·  23 live
 
 ### Fleet workspace drift (default)
 
-Projects are natively multi-device, so `status` adds a `fleet` line per project
+Projects are natively multi-device, so `status` adds a `fleet` block per project
 by default, showing the state of its workspace repos on every fleet device —
 present or missing, on which branch, ahead/behind the upstream, and uncommitted
-changes:
+changes. A one-line **health summary** (`N/M clean · behind · dirty · missing`)
+sits above the per-host table so the block scans without reading every cell; the
+table keeps the branch and per-host drift detail:
 
 ```
 rush  ·  3 agents
   live     2 running · 1 idle
   ships    4 merged (7d)
-  fleet    zion: ✓ clean · main  ·  mac-mini: ⚠ 12 dirty · ↑3 · feature/x  ·  gpu-box: ✗ missing
+  fleet    1/3 clean · 1 dirty · 1 missing
+           zion: ✓ clean · main  ·  mac-mini: ⚠ 12 dirty · ↑3 · feature/x  ·  gpu-box: ✗ missing
 ```
 
 - **What it dials.** One parallel SSH call per online device (the canonical
@@ -231,6 +242,14 @@ Anything that needs attention lands at the **bottom** of the card, not mid-strea
 | --- | --- | --- |
 | 🔴 | critical | missing checkout, ≥10 commits behind, repo slug mismatch, large crash pile |
 | ⚠️ | continue | dirty tree, small behind, schedule not measurable |
+
+**Grouped by root cause.** Workspace warnings collapse per class so a fleet where
+eight hosts drift is a few lines, not sixteen: all behind hosts become one warning
+listing each host with its count (`4 hosts behind origin/main — mac-mini ↓172, …`)
+under **one** shared remediation, and dirty/missing collapse the same way. A lone
+host keeps its full sentence. Grouping is **per probed path**, so two different
+repos never merge into one count. A behind group is critical when **any** host is
+≥10 behind. (`workspaceWarnings` in `lib/project-probe.ts`.)
 
 A local workspace probe always feeds this footer (cheap, no SSH). The full per-host
 `fleet` table is shown by default — scope it with `--device`/`--devices`.

@@ -185,6 +185,44 @@ export function formatFleetWorkspaces(statuses: HostWorkspaceStatus[]): string[]
   });
 }
 
+/**
+ * One-line fleet health summary — `6/13 clean · 4 behind · 4 dirty · 1 missing`.
+ * Sits ABOVE the per-host {@link formatFleetWorkspaces} table so the card is
+ * scannable without reading every host cell; the table keeps the per-host branch
+ * and drift detail. Zero buckets are omitted. `behind` colours red when any host
+ * is ≥10 behind (matching the footer's critical threshold), else yellow; a host
+ * that is both behind and dirty counts in both. Each host×path row is one unit,
+ * the same unit the table renders. Pure — chalk styling only.
+ */
+export function formatFleetSummary(statuses: HostWorkspaceStatus[]): string {
+  const total = statuses.length;
+  let clean = 0;
+  let behind = 0;
+  let dirty = 0;
+  let missing = 0;
+  let hardBehind = false;
+  for (const s of statuses) {
+    if (!s.present) {
+      missing++;
+      continue;
+    }
+    if (s.error) continue; // unreadable — neither clean nor a drift bucket (surfaced in the footer)
+    const isBehind = s.behind !== undefined && s.behind > 0;
+    const isDirty = s.dirty !== undefined && s.dirty > 0;
+    if (isBehind) {
+      behind++;
+      if (s.behind! >= 10) hardBehind = true;
+    }
+    if (isDirty) dirty++;
+    if (!isBehind && !isDirty) clean++;
+  }
+  const parts = [chalk.green(`${clean}/${total} clean`)];
+  if (behind) parts.push((hardBehind ? chalk.red : chalk.yellow)(`${behind} behind`));
+  if (dirty) parts.push(chalk.yellow(`${dirty} dirty`));
+  if (missing) parts.push(chalk.red(`${missing} missing`));
+  return parts.join(chalk.dim(' · '));
+}
+
 /** Severity for a workspace/repo warning on the project card. */
 export type WorkspaceWarningSeverity = 'critical' | 'continue';
 
@@ -195,46 +233,91 @@ export interface WorkspaceWarning {
 }
 
 /**
- * Turn probed workspace rows into card-footer warnings.
+ * Turn probed workspace rows into card-footer warnings, GROUPED by root cause so
+ * a fleet where eight hosts drift is a few lines, not sixteen (each with its own
+ * repeated remediation).
  *
  * - missing / unreadable git → critical (agents there cannot share a tree)
- * - behind upstream → critical when ≥10 commits, continue otherwise
+ * - behind upstream → critical when ANY host is ≥10 commits behind, else continue
  * - dirty tree → continue (local work is fine; just note it)
  * - ahead-only is not a warning (that is progress waiting to push)
  *
- * Pure. Caller decides whether the rows came from `--fleet` or a local probe.
+ * Within one probed path, all behind hosts collapse to one warning listing each
+ * host with its count (`4 hosts behind origin/main — mac-mini ↓172, …`) plus one
+ * shared remediation; a lone host keeps its full sentence. Missing and dirty
+ * collapse the same way. `error` stays per-host (each message is distinct).
+ * Grouping is per path so two different repos never merge into one count. Unlike
+ * doctor's `emitGroup`, the list names EVERY host, not the first two — each
+ * host's drift count differs and is individually actionable. Pure — chalk only.
+ * Caller decides whether the rows came from `--fleet` or a local probe.
  */
 export function workspaceWarnings(statuses: HostWorkspaceStatus[]): WorkspaceWarning[] {
   const out: WorkspaceWarning[] = [];
-  for (const s of [...statuses].sort((a, b) => a.host.localeCompare(b.host) || a.path.localeCompare(b.path))) {
-    const where = s.host ? `${s.host}` : 'local';
-    const pathBit = s.path ? ` (${s.path})` : '';
-    if (!s.present) {
+  const where = (s: HostWorkspaceStatus): string => (s.host ? s.host : 'local');
+  const paths = [...new Set(statuses.map((s) => s.path))].sort((a, b) => a.localeCompare(b));
+  for (const path of paths) {
+    const pathBit = path ? ` (${path})` : '';
+    const rows = statuses.filter((s) => s.path === path);
+    const present = rows.filter((s) => s.present && !s.error);
+
+    // Missing checkout — grouped critical, a lone host keeps its full sentence.
+    const missing = rows.filter((s) => !s.present).sort((a, b) => where(a).localeCompare(where(b)));
+    if (missing.length === 1) {
       out.push({
         severity: 'critical',
-        text: `${where}: checkout missing${pathBit}`,
+        text: `${where(missing[0])}: checkout missing${pathBit}`,
         remediation: 'clone or sync the project root on that host before landing agents there',
       });
-      continue;
-    }
-    if (s.error) {
+    } else if (missing.length > 1) {
       out.push({
         severity: 'critical',
-        text: `${where}: ${s.error}${pathBit}`,
+        text: `${missing.length} hosts missing checkout${pathBit} — ${missing.map(where).join(', ')}`,
+        remediation: 'clone or sync the project root on those hosts before landing agents there',
       });
-      continue;
     }
-    if (s.behind !== undefined && s.behind > 0) {
+
+    // Unreadable git — one per host, since each error message is distinct.
+    for (const s of rows.filter((s) => s.present && s.error).sort((a, b) => where(a).localeCompare(where(b)))) {
+      out.push({ severity: 'critical', text: `${where(s)}: ${s.error}${pathBit}` });
+    }
+
+    // Behind upstream — grouped, worst count first, one shared remediation.
+    const behind = present
+      .filter((s) => s.behind !== undefined && s.behind > 0)
+      .sort((a, b) => (b.behind ?? 0) - (a.behind ?? 0) || where(a).localeCompare(where(b)));
+    if (behind.length === 1) {
+      const s = behind[0];
       out.push({
-        severity: s.behind >= 10 ? 'critical' : 'continue',
-        text: `${where} is ${s.behind} commit${s.behind === 1 ? '' : 's'} behind ${s.upstream ?? 'upstream'}${pathBit}`,
+        severity: (s.behind ?? 0) >= 10 ? 'critical' : 'continue',
+        text: `${where(s)} is ${s.behind} commit${s.behind === 1 ? '' : 's'} behind ${s.upstream ?? 'upstream'}${pathBit}`,
         remediation: 'pull (or rebase) before agents on this host open PRs against a stale base',
       });
+    } else if (behind.length > 1) {
+      const upstreams = new Set(behind.map((s) => s.upstream ?? 'upstream'));
+      const upstream = upstreams.size === 1 ? [...upstreams][0] : 'upstream';
+      const list = behind.map((s) => `${where(s)} ↓${s.behind}`).join(', ');
+      out.push({
+        severity: behind.some((s) => (s.behind ?? 0) >= 10) ? 'critical' : 'continue',
+        text: `${behind.length} hosts behind ${upstream}${pathBit} — ${list}`,
+        remediation: 'pull (or rebase) before agents on these hosts open PRs against a stale base',
+      });
     }
-    if (s.dirty !== undefined && s.dirty > 0) {
+
+    // Dirty tree — grouped, most changes first, no remediation (local work is fine).
+    const dirty = present
+      .filter((s) => s.dirty !== undefined && s.dirty > 0)
+      .sort((a, b) => (b.dirty ?? 0) - (a.dirty ?? 0) || where(a).localeCompare(where(b)));
+    if (dirty.length === 1) {
+      const s = dirty[0];
       out.push({
         severity: 'continue',
-        text: `${where} has ${s.dirty} uncommitted change${s.dirty === 1 ? '' : 's'}${pathBit}`,
+        text: `${where(s)} has ${s.dirty} uncommitted change${s.dirty === 1 ? '' : 's'}${pathBit}`,
+      });
+    } else if (dirty.length > 1) {
+      const list = dirty.map((s) => `${where(s)} ${s.dirty}`).join(', ');
+      out.push({
+        severity: 'continue',
+        text: `${dirty.length} hosts with uncommitted changes${pathBit} — ${list}`,
       });
     }
   }
