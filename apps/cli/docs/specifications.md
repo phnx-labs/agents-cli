@@ -2315,7 +2315,9 @@ nothing but its own view cache.
   `routines:` list at `~/.agents/devices/<hostname>/agents.yaml`; membership means
   enabled and absence means disabled. A host MUST mutate only its own manifest,
   and fleet controls MUST execute the mutation on the target host. Definitions
-  MUST NOT carry mutable `enabled:` or `devices:` activation fields. The same
+  introduced as replacements for previously always-on daemon work MUST be added
+  once to an existing device activation manifest during the upgrade migration.
+  Routine definitions MUST NOT carry mutable `enabled:` or `devices:` activation fields. The same
   definition MAY be active on multiple devices when its input is device-local;
   shared-input work still requires the single-executor safeguards in SING-7.
 - **SING-6 (MUST).** A new fleet-affecting feature MUST be implemented in

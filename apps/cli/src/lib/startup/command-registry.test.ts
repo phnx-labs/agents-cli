@@ -6,31 +6,16 @@
  * command tree the CLI actually registers — the real modules, no mocks.
  */
 import { describe, it, expect } from 'vitest';
-import { Command } from 'commander';
 import {
-  COMMAND_LOADERS,
   LAZY_COMMAND_NAMES,
   KNOWN_TOP_LEVEL_COMMANDS,
   isKnownTopLevelCommand,
+  buildFullCommandTree,
 } from './command-registry.js';
-
-/** Register every module in the loader table onto one fresh program. */
-async function registerEverything(): Promise<Command> {
-  const program = new Command();
-  const done = new Set<unknown>();
-  for (const loaders of Object.values(COMMAND_LOADERS)) {
-    for (const loader of loaders) {
-      if (done.has(loader)) continue;
-      done.add(loader);
-      (await loader())(program);
-    }
-  }
-  return program;
-}
 
 describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
   it('covers every top-level name and alias the real command modules register', async () => {
-    const program = await registerEverything();
+    const program = await buildFullCommandTree();
     const registered = program.commands.flatMap((c) => [c.name(), ...c.aliases()]);
     expect(registered.length).toBeGreaterThan(50); // the tree really did load
     const missing = registered.filter((name) => !KNOWN_TOP_LEVEL_COMMANDS.has(name));

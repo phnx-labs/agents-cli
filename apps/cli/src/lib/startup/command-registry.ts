@@ -18,7 +18,7 @@
  * versions (which creates `prune <specs...>`) and prune.js (which attaches the
  * `cleanup` subcommand to it), in that order — see commands/prune.ts.
  */
-import type { Command } from 'commander';
+import { Command } from 'commander';
 
 /** A function that registers one or more commands onto the root program. */
 export type Registrar = (program: Command) => void;
@@ -313,4 +313,28 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
 /** Whether `name` is a top-level command this CLI registers. See {@link KNOWN_TOP_LEVEL_COMMANDS}. */
 export function isKnownTopLevelCommand(name: string): boolean {
   return KNOWN_TOP_LEVEL_COMMANDS.has(name);
+}
+
+/**
+ * Register every module in {@link COMMAND_LOADERS} onto one fresh program and
+ * return it — the full public command tree, deduped by loader identity so a
+ * loader mapped to several names (e.g. `add`/`use`/`list` -> versions) runs once.
+ *
+ * Off the hot path only: the command-index generator (`scripts/gen-command-index.ts`)
+ * and the tests build the tree from this. Startup never calls it — src/index.ts
+ * registers just the one requested command via `registerEagerForRequest`. The
+ * inline aliases/tombstones ({@link INLINE_COMMAND_NAMES}) are NOT included: they
+ * are closures over entry-point state that src/index.ts registers directly.
+ */
+export async function buildFullCommandTree(): Promise<Command> {
+  const program = new Command();
+  const done = new Set<ModuleLoader>();
+  for (const loaders of Object.values(COMMAND_LOADERS)) {
+    for (const loader of loaders) {
+      if (done.has(loader)) continue;
+      done.add(loader);
+      (await loader())(program);
+    }
+  }
+  return program;
 }

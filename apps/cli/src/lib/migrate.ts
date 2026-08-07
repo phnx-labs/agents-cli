@@ -16,6 +16,8 @@ import { machineId } from './machine-id.js';
 import { AGENTS, agentConfigDirName, findInPath } from './agents.js';
 import { createLink } from './platform/index.js';
 import { migrateLegacyRoutineActivation, setJobEnabled } from './routines.js';
+import { addEnabledRoutinesOnUpgrade } from './routine-activation.js';
+import { DAEMON_TICK_ROUTINE_NAMES } from './daemon-ticks.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 const USER_DIR = path.join(HOME, '.agents');
@@ -2053,6 +2055,9 @@ export async function runMigration(): Promise<void> {
   // Rewrite routine YAML files: singular `device:` -> plural `devices: []`.
   migrateRoutineDeviceToDevices();
   migrateLegacyRoutineActivation();
+  // These routines replace daemon timers that were always active. Devices with
+  // an existing activation manifest must retain that behavior after upgrade.
+  addEnabledRoutinesOnUpgrade(DAEMON_TICK_ROUTINE_NAMES);
 
   // Fold the legacy watchdog enable sentinel into the watchdog routine so a user
   // who opted in under the old build stays opted in after upgrading. After the
