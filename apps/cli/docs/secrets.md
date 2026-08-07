@@ -61,13 +61,13 @@ or write of the item clears the back-off. Source: `src/lib/secrets/index.ts`
 
 **An unlock is global unless you narrow it.** `agents secrets unlock prod` grants
 every harness and a plain shell access for the whole TTL — one Touch ID covers all
-of them. `--for claude` narrows the grant to that harness alone, and other
+of them. `--agent claude` narrows the grant to that harness alone, and other
 harnesses then need their own approval. A reader resolves its own harness scope
 first and falls back to the global grant, so a narrow grant always wins where it
 applies. `--ttl` changes the duration; `--durable` keeps the grant across sleep and
 reboot.
 
-Grants are keyed by scope (`*` for global, the harness id for a `--for` grant) in
+Grants are keyed by scope (`*` for global, the harness id for an `--agent` grant) in
 both the broker's memory and the durable session store, and both resolve through
 the same chain — so an unlock behaves identically before and after a daemon
 restart. Before this was unified, an unlock typed in a terminal was stored under
@@ -411,7 +411,7 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets unlock <name> --ttl <dur>` | Hold for a custom lifetime (default 7d) | `agents secrets unlock prod --ttl 30m` |
 | `secrets unlock <name> --until <date>` | Hold until an absolute date or timestamp | `agents secrets unlock prod --until 2026-08-06T12:00:00Z` |
 | `secrets unlock <name> --durable` | Also survive sleep + reboot (default: survives upgrade/restart, re-locks on sleep) | `agents secrets unlock prod --durable` |
-| `secrets lease <name> --keys K1,K2 --for <dur>` | Hold only the named keys under their own lease id and expiry (macOS) | `agents secrets lease prod --keys API_KEY --for 8h` |
+| `secrets lease <name> --keys K1,K2 --ttl <dur>` | Hold only the named keys under their own lease id and expiry (macOS) | `agents secrets lease prod --keys API_KEY --ttl 8h` |
 | `secrets leases` / `secrets revoke <lease-id>` | List active scoped leases or wipe one immediately | `agents secrets revoke 4f21…` |
 | `secrets lock [names...]` | Wipe held bundles from the agent (default: all) — next read re-prompts | `agents secrets lock` |
 | `secrets status` | Show which bundles the agent holds and when they lock, and suggest unlocking any you keep getting prompted for | `agents secrets status` |

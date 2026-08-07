@@ -141,14 +141,14 @@ describe.each([
     expect(got?.harness).toBe('*');
   });
 
-  it('resolveSession prefers a --for grant over the global one', () => {
+  it('resolveSession prefers an --agent grant over the global one', () => {
     saveSession('prod', entry('prod', FAR + Date.now(), false));
     saveSession('prod', { ...entry('prod', FAR + Date.now(), false), env: { TOKEN: 'narrow' }, harness: 'claude' });
     expect(resolveSession('prod', Date.now(), 'claude')?.entry.env.TOKEN).toBe('narrow');
     expect(resolveSession('prod', Date.now(), 'codex')?.entry.env.TOKEN).toBe('secret-prod');
   });
 
-  it('resolveSession does not leak a --for grant to another harness', () => {
+  it('resolveSession does not leak an --agent grant to another harness', () => {
     saveSession('prod', { ...entry('prod', FAR + Date.now(), false), harness: 'claude' });
     expect(resolveSession('prod', Date.now(), 'codex')).toBeNull();
   });

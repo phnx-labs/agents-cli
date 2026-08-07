@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, saveClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, getUsageInfoForIdentity, writeClaudeUsageCache, setClaudeUsageCachePathForTest, deriveUsageHeadroom, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError, probeClaudeStatus, probeKimiStatus, type UsageSnapshot } from './usage.js';
+import { claudeAccessTokenNeedsRefresh, claudeUsageAccessTokenNoRefresh, loadClaudeOauth, getClaudeKeychainService, swrWindowMsFor, getUsageInfo, getUsageInfoForIdentity, writeClaudeUsageCache, setClaudeUsageCachePathForTest, deriveUsageHeadroom, formatUsageSummary, usageNoCredentialError, usageExpiredCredentialError, usageRejectedError, probeClaudeStatus, probeKimiStatus, type UsageSnapshot } from './usage.js';
 import type { AccountInfo } from './agents.js';
 import { noteUsageRateLimited, setUsageBackoffDirForTest } from './usage-backoff.js';
 import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from './secrets/index.js';
@@ -71,19 +71,19 @@ describe('claudeUsageAccessTokenNoRefresh', () => {
 });
 
 /**
- * The Touch ID storm fix: `loadClaudeOauth` reads Claude's ACL-bound keychain item
- * (one prompt per read on macOS). We cache the access token in a no-ACL item so the
- * source read happens at most once per token lifetime, shared across processes.
- * Here the in-memory keychain backend (the sanctioned test seam) counts source reads
- * by payload shape — the source item wraps `claudeAiOauth`, the cache item does not.
+ * Read-only usage/probe callers (accessTokenCache) authenticate ONLY with a
+ * file-based setup-token and NEVER read Claude Code's interactive login. Reading
+ * that ACL-bound OAuth token and transmitting it to Anthropic's usage API from
+ * the daemon's warm loop is what got it revoked (the fleet-wide-logout class,
+ * RUSH-1822). Here the in-memory keychain backend (the sanctioned test seam)
+ * counts reads of the source item — the interactive login wraps `claudeAiOauth`.
  */
-describe('loadClaudeOauth no-ACL access-token cache', () => {
-  /** Counting backend: tracks reads of the source (ACL) item and no-ACL cache writes,
+describe('loadClaudeOauth accessTokenCache never reads the interactive login', () => {
+  /** Counting backend: tracks reads of the source (ACL/interactive) item,
    *  identified by value shape so the test is agnostic to keychain name hashing. */
   class CountingBackend implements KeychainBackend {
     store = new Map<string, string>();
     sourceReads = 0;
-    noAclCacheWrites = 0;
     has(item: string) { return this.store.has(item); }
     get(item: string) {
       const v = this.store.get(item);
@@ -91,10 +91,7 @@ describe('loadClaudeOauth no-ACL access-token cache', () => {
       if (v.includes('"claudeAiOauth"')) this.sourceReads += 1;
       return v;
     }
-    set(item: string, value: string, opts?: { noAcl?: boolean }) {
-      if (opts?.noAcl && value.includes('"cacheExpiresAt"')) this.noAclCacheWrites += 1;
-      this.store.set(item, value);
-    }
+    set(item: string, value: string) { this.store.set(item, value); }
     delete(item: string) { return this.store.delete(item); }
     list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
   }
@@ -110,91 +107,43 @@ describe('loadClaudeOauth no-ACL access-token cache', () => {
       })
     );
 
-  it('reads the ACL source once, then serves the no-ACL cache (no repeat prompt)', async () => {
+  it('returns null and never reads the interactive login when no setup-token is provisioned', async () => {
+    // The revocation fix: with no file-based setup-token, a probe/usage caller
+    // (accessTokenCache) must report unprovisioned rather than fall through to the
+    // interactive OAuth credential. Before the fix this read the source item and
+    // handed it to the usage probe, which fired it at api.anthropic.com.
     const mem = new CountingBackend();
     const prev = setKeychainBackendForTest(mem);
     try {
-      seedSource(Date.now() + 60 * 60 * 1000); // fresh: 1h out
+      seedSource(Date.now() + 60 * 60 * 1000); // a live interactive login IS present
 
-      const first = await loadClaudeOauth(HOME, { accessTokenCache: true });
-      const second = await loadClaudeOauth(HOME, { accessTokenCache: true });
+      const oauth = await loadClaudeOauth(HOME, { accessTokenCache: true });
 
-      expect(first?.accessToken).toBe('tok-live');
-      expect(second?.accessToken).toBe('tok-live');
-      // The source (prompting) item is read exactly once across both loads.
-      expect(mem.sourceReads).toBe(1);
-      // The cache was populated via the no-ACL write path.
-      expect(mem.noAclCacheWrites).toBe(1);
-      // The cache deliberately omits the refresh token (minimal no-ACL exposure);
-      // the first read comes straight from source and still carries it.
-      expect(first?.refreshToken).toBe('refresh-secret');
-      expect(second?.refreshToken).toBeNull();
+      expect(oauth).toBeNull();
+      // The interactive (ACL/prompting) login was never read.
+      expect(mem.sourceReads).toBe(0);
     } finally {
       setKeychainBackendForTest(prev);
     }
   });
 
-  it('re-reads the source when the cached token has expired (never serves a stale token)', async () => {
-    const mem = new CountingBackend();
-    const prev = setKeychainBackendForTest(mem);
-    try {
-      seedSource(Date.now() - 60 * 1000); // already expired
-
-      await loadClaudeOauth(HOME, { accessTokenCache: true });
-      await loadClaudeOauth(HOME, { accessTokenCache: true });
-
-      // Every load evicts the expired cache entry and reads the source again.
-      expect(mem.sourceReads).toBe(2);
-    } finally {
-      setKeychainBackendForTest(prev);
-    }
-  });
-
-  it('without the opt-in, returns the full credential and never caches (cloud-export contract)', async () => {
+  it('without the opt-in, returns the full interactive credential with its refresh token (run/cloud-export contract)', async () => {
     // readClaudeCredentialsBlob / isClaudeAuthValid call loadClaudeOauth WITHOUT
-    // the cache flag: they must always get the ACL-read credential WITH the refresh
-    // token. Regression guard for the Rush Cloud token-export path.
+    // accessTokenCache: they legitimately read the interactive credential WITH the
+    // refresh token to run/refresh Claude. Regression guard for that path.
     const mem = new CountingBackend();
     const prev = setKeychainBackendForTest(mem);
     try {
       seedSource(Date.now() + 60 * 60 * 1000);
 
-      const first = await loadClaudeOauth(HOME); // default: no cache
+      const first = await loadClaudeOauth(HOME); // default: full-credential caller
       const second = await loadClaudeOauth(HOME);
 
       // Full refresh token every time — never dropped.
       expect(first?.refreshToken).toBe('refresh-secret');
       expect(second?.refreshToken).toBe('refresh-secret');
-      // No no-ACL cache is ever written on the default path.
-      expect(mem.noAclCacheWrites).toBe(0);
-      // Every default read goes to the ACL source (no cache short-circuit).
+      // Each read goes to the interactive source (no probe short-circuit here).
       expect(mem.sourceReads).toBe(2);
-    } finally {
-      setKeychainBackendForTest(prev);
-    }
-  });
-
-  it('evicts the no-ACL cache when the source credential is rotated', async () => {
-    // A refresh (getClaudeAccessToken -> saveClaudeOauth) writes a new source token.
-    // The cache must be invalidated so the next cached caller sees the rotated token,
-    // not the stale cached access token.
-    const mem = new CountingBackend();
-    const prev = setKeychainBackendForTest(mem);
-    try {
-      seedSource(Date.now() + 60 * 60 * 1000);
-
-      const first = await loadClaudeOauth(HOME, { accessTokenCache: true });
-      expect(first?.accessToken).toBe('tok-live');
-
-      await saveClaudeOauth(HOME, {
-        accessToken: 'tok-rotated',
-        refreshToken: 'refresh-secret',
-        expiresAt: Date.now() + 60 * 60 * 1000,
-        scopes: ['user:inference'],
-      });
-
-      const second = await loadClaudeOauth(HOME, { accessTokenCache: true });
-      expect(second?.accessToken).toBe('tok-rotated');
     } finally {
       setKeychainBackendForTest(prev);
     }
@@ -268,16 +217,19 @@ describe('loadClaudeOauth — file-based `auth` setup-token (Touch-ID-free usage
     expect(oauth).toBeNull();
   });
 
-  it('fileOnly never opens the ACL keychain even without a setup-token', async () => {
-    // Strip the email so resolveClaudeSetupToken cannot map home -> setup-token KEY.
+  it('an accessTokenCache caller with no setup-token reads NEITHER the keychain NOR .credentials.json', async () => {
+    // Strip the email so resolveClaudeSetupToken cannot map home -> setup-token KEY,
+    // and drop an interactive token in .credentials.json. A probe/usage caller
+    // (accessTokenCache) must still report unprovisioned — the interactive login is
+    // untouchable, whether it lives in the keychain or the file (the RUSH-1822 fix).
     fs.writeFileSync(path.join(home, '.claude', '.claude.json'), JSON.stringify({}));
     fs.writeFileSync(
       path.join(home, '.claude', '.credentials.json'),
-      JSON.stringify({ claudeAiOauth: { accessToken: 'file-only-token', expiresAt: Date.now() + 3_600_000 } }),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'interactive-file-token', expiresAt: Date.now() + 3_600_000 } }),
     );
-    // makeThrowingKeychain is installed — if fileOnly fell through to ACL keychain, this throws.
+    // makeThrowingKeychain is installed — reaching the ACL keychain would throw.
     const oauth = await loadClaudeOauth(home, { accessTokenCache: true, fileOnly: true });
-    expect(oauth?.accessToken).toBe('file-only-token');
+    expect(oauth).toBeNull();
   });
 });
 
@@ -473,9 +425,12 @@ describe('a Claude usage read reports WHY it produced no snapshot', () => {
     expect(usage.error).toBe(usageNoCredentialError('Claude'));
   });
 
-  it('names an expired credential — the state a usage read can never heal', async () => {
-    // A usage read never refreshes (RUSH-1822), so this account stays unreadable
-    // until a real claude run rotates the token. Saying so is the whole point.
+  it('reports unprovisioned even when an interactive login is present — the probe never reads it', async () => {
+    // A usage read authenticates only with a file-based setup-token and never
+    // touches Claude Code's interactive login (reading it and firing it at
+    // api.anthropic.com is what got the token revoked — RUSH-1822). So an account
+    // with only an interactive credential (here an expired one) reads the same as
+    // an empty home: no usable PROBE credential, unprovisioned.
     setKeychainToken(
       getClaudeKeychainService(home),
       JSON.stringify({
@@ -486,7 +441,7 @@ describe('a Claude usage read reports WHY it produced no snapshot', () => {
     const usage = await getUsageInfo('claude', { home });
 
     expect(usage.snapshot).toBeNull();
-    expect(usage.error).toBe(usageExpiredCredentialError('Claude'));
+    expect(usage.error).toBe(usageNoCredentialError('Claude'));
   });
 });
 
@@ -618,19 +573,28 @@ describe('a recorded Retry-After actually suppresses the read', () => {
   });
 
   it('short-circuits the usage read while the window is open', async () => {
-    // A HEALTHY, unexpired credential — this is the case that matters. The
-    // credential checks ahead of the guard make no request, so they run first
-    // and correctly win for a home that has none; the guard exists to stop the
-    // request that a good credential would otherwise make into a live penalty.
-    const mem = new MemBackend();
-    const prevBackend = setKeychainBackendForTest(mem);
+    // A HEALTHY probe credential — this is the case that matters. The credential
+    // checks ahead of the guard make no request, so they run first and correctly
+    // win for a home that has none; the guard exists to stop the request that a
+    // good credential would otherwise make into a live penalty. The probe reads
+    // only a file-based setup-token (never the interactive login — RUSH-1822), so
+    // provision one here.
+    const EMAIL = 'throttle@trp.so';
+    const KEY = 'CLAUDE_CODE_OAUTH_TOKEN_THROTTLE_AT_TRP_DOT_SO';
+    const PASS = 'throttle-setup-token-pass';
+    const fileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'throttle-fstore-'));
+    const prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+    process.env.AGENTS_SECRETS_NO_AGENT = '1';
+    process.env.AGENTS_SECRETS_PASSPHRASE = PASS;
+    _resetFileStoreForTest({ fileDir, passphrase: PASS });
+    bundleItemStore('file').set(secretsKeychainItem('auth', KEY), 'sk-ant-oat01-throttle-tok-xyz');
+    writeBundle({ name: 'auth', backend: 'file', vars: { [KEY]: keychainRef(KEY) } });
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.claude', '.claude.json'),
+      JSON.stringify({ oauthAccount: { emailAddress: EMAIL } }),
+    );
     try {
-      setKeychainToken(
-        getClaudeKeychainService(home),
-        JSON.stringify({
-          claudeAiOauth: { accessToken: 'tok-fresh', refreshToken: 'r', expiresAt: Date.now() + 60 * 60 * 1000 },
-        })
-      );
       // The exact header the endpoint sent on yosemite-s1.
       noteUsageRateLimited('claude', '2678');
 
@@ -640,7 +604,11 @@ describe('a recorded Retry-After actually suppresses the read', () => {
       expect(usage.error).toContain('rate-limited this machine');
       expect(usage.error).toContain('not retrying');
     } finally {
-      setKeychainBackendForTest(prevBackend);
+      _resetFileStoreForTest({});
+      delete process.env.AGENTS_SECRETS_PASSPHRASE;
+      if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
+      else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
+      fs.rmSync(fileDir, { recursive: true, force: true });
     }
   });
 

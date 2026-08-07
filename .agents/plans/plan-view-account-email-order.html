@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Sort agents view accounts by email</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-implementing">implementing</span></div>
+<h1>Sort agents view accounts by email</h1>
+<p class="summary">Keep the selected default account first, then make the remaining managed agent accounts scannable by sorting email-bearing rows alphabetically. Preserve the existing machine-readable JSON order.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">The current human renderer sorts non-default rows by semantic version descending.<span class="meta-sep" aria-hidden="true">·</span>Account information is already loaded before the renderer sorts rows.</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fix/view-account-email-order</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">trivial fix — no ticket</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex /root</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">zion</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">unavailable</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-07</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#proposed-changes"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p>When a user runs <code>agents view claude</code>, the selected default stays at the top, but every other account currently follows version order. The same shared renderer controls all managed native agents, so the fix belongs in that renderer rather than in Claude-specific code.</p>
+<div class="artifact-callout"><strong>Behavior:</strong> default first; email-bearing accounts A–Z; rows without email last in version-descending order.</div><figure>
+<svg viewBox="0 0 920 280" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title id="sort-title">Account row ordering flow</title>
+  <desc id="sort-desc">A flowchart showing default precedence, email ordering, and version fallback.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#a3e635"></path>
+    </marker>
+  </defs>
+  <ellipse cx="100" cy="140" rx="72" ry="34" fill="#171717" stroke="#a3e635" stroke-width="3"></ellipse>
+  <text x="100" y="145" text-anchor="middle" fill="#f5f5f5" font-family="Inter, sans-serif" font-size="17">Compare rows</text>
+  <path d="M172 140 H246" stroke="#a3e635" stroke-width="3" marker-end="url(#arrow)"></path>
+  <polygon points="330,80 414,140 330,200 246,140" fill="#171717" stroke="#56b4e9" stroke-width="3"></polygon>
+  <text x="330" y="136" text-anchor="middle" fill="#f5f5f5" font-family="Inter, sans-serif" font-size="16">Default?</text>
+  <text x="330" y="156" text-anchor="middle" fill="#f5f5f5" font-family="Inter, sans-serif" font-size="13">yes → first</text>
+  <path d="M414 140 H490" stroke="#a3e635" stroke-width="3" marker-end="url(#arrow)"></path>
+  <text x="452" y="126" text-anchor="middle" fill="#d4d4d4" font-family="Inter, sans-serif" font-size="13">neither</text>
+  <polygon points="575,80 660,140 575,200 490,140" fill="#171717" stroke="#e69f00" stroke-width="3"></polygon>
+  <text x="575" y="136" text-anchor="middle" fill="#f5f5f5" font-family="Inter, sans-serif" font-size="16">Email?</text>
+  <text x="575" y="156" text-anchor="middle" fill="#f5f5f5" font-family="Inter, sans-serif" font-size="13">one → email first</text>
+  <path d="M660 115 H742" stroke="#a3e635" stroke-width="3" marker-end="url(#arrow)"></path>
+  <text x="700" y="100" text-anchor="middle" fill="#d4d4d4" font-family="Inter, sans-serif" font-size="13">both</text>
+  <rect x="742" y="73" width="150" height="66" rx="4" fill="#171717" stroke="#a3e635" stroke-width="3"></rect>
+  <text x="817" y="101" text-anchor="middle" fill="#f5f5f5" font-family="Inter, sans-serif" font-size="16">Email A–Z</text>
+  <text x="817" y="122" text-anchor="middle" fill="#d4d4d4" font-family="Inter, sans-serif" font-size="13">case-insensitive</text>
+  <path d="M660 165 H742" stroke="#a3e635" stroke-width="3" marker-end="url(#arrow)"></path>
+  <text x="700" y="187" text-anchor="middle" fill="#d4d4d4" font-family="Inter, sans-serif" font-size="13">neither / tie</text>
+  <rect x="742" y="151" width="150" height="66" rx="4" fill="#171717" stroke="#56b4e9" stroke-width="3"></rect>
+  <text x="817" y="179" text-anchor="middle" fill="#f5f5f5" font-family="Inter, sans-serif" font-size="16">Version newest</text>
+  <text x="817" y="200" text-anchor="middle" fill="#d4d4d4" font-family="Inter, sans-serif" font-size="13">deterministic fallback</text>
+  <g transform="translate(28 245)">
+    <line x1="0" y1="0" x2="30" y2="0" stroke="#a3e635" stroke-width="3"></line><text x="38" y="5" fill="#d4d4d4" font-family="Inter, sans-serif" font-size="13">comparison flow</text>
+    <rect x="190" y="-10" width="20" height="20" fill="#171717" stroke="#56b4e9" stroke-width="3"></rect><text x="220" y="5" fill="#d4d4d4" font-family="Inter, sans-serif" font-size="13">precedence / fallback</text>
+    <rect x="400" y="-10" width="20" height="20" fill="#171717" stroke="#e69f00" stroke-width="3"></rect><text x="430" y="5" fill="#d4d4d4" font-family="Inter, sans-serif" font-size="13">email availability</text>
+  </g>
+</svg>
+<figcaption>One comparator serves every managed native agent in the human-readable view.</figcaption>
+</figure><h2 id="proposed-changes">Proposed Changes</h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Change</th>
+<th>Compatibility</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Human renderer</td>
+<td>Add a pure comparator and sort after account data is loaded</td>
+<td>Changes only row order</td>
+</tr>
+<tr>
+<td>JSON renderer</td>
+<td>Keep default-then-version sorting</td>
+<td>No machine-output change</td>
+</tr>
+<tr>
+<td>Tests</td>
+<td>Cover precedence, email order, missing emails, and the real CLI</td>
+<td>Prevents regression</td>
+</tr>
+<tr>
+<td>Release notes</td>
+<td>Add a CHANGELOG entry</td>
+<td>Ships on the existing release train</td>
+</tr>
+</tbody></table>
+<h2 id="public-interface">Public Interface</h2>
+<p>No flags, configuration keys, or types change. These commands gain the new human ordering:</p>
+<pre><code>agents view
+agents view claude
+agents view codex
+</code></pre>
+<p><code>agents view &lt;agent&gt; --json</code> retains its current order.</p>
+<h2 id="validation">Validation</h2>
+<p>Run the focused unit and integration cases, the canonical remote CLI suite, then install the development build and inspect the real command output:</p>
+<pre><code>bunx vitest run src/commands/view.account.test.ts tests/non-interactive.test.ts
+bun run test:remote
+./scripts/install.sh
+agents view claude
+</code></pre>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Handling</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Default account moves</td>
+<td>Default precedence is the comparator's first rule</td>
+</tr>
+<tr>
+<td>Harness has no email</td>
+<td>Place it after email rows and retain version-descending order</td>
+</tr>
+<tr>
+<td>Duplicate/case-varied emails</td>
+<td>Compare normalized email, then use version as a stable tie-breaker</td>
+</tr>
+<tr>
+<td>Automation depends on JSON array order</td>
+<td>Do not change the JSON comparator</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2>
+<p>This is a trivial presentation fix with no matching open GitHub issue. The plan, implementation, tests, and CHANGELOG entry travel in one pull request.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6IFNvcnQgYWdlbnRzIHZpZXcgYWNjb3VudHMgYnkgZW1haWwKc3VtbWFyeTogS2VlcCB0aGUgc2VsZWN0ZWQgZGVmYXVsdCBhY2NvdW50IGZpcnN0LCB0aGVuIG1ha2UgdGhlIHJlbWFpbmluZyBtYW5hZ2VkIGFnZW50IGFjY291bnRzIHNjYW5uYWJsZSBieSBzb3J0aW5nIGVtYWlsLWJlYXJpbmcgcm93cyBhbHBoYWJldGljYWxseS4gUHJlc2VydmUgdGhlIGV4aXN0aW5nIG1hY2hpbmUtcmVhZGFibGUgSlNPTiBvcmRlci4Kc3RhdHVzOiBpbXBsZW1lbnRpbmcKdHJhY2tpbmc6ICJ0cml2aWFsIGZpeCDigJQgbm8gdGlja2V0Igpwcm9qZWN0OiBhZ2VudHMtY2xpCnJlcG9zaXRvcnk6IHBobngtbGFicy9hZ2VudHMtY2xpCmhhcm5lc3M6IENvZGV4CmFnZW50OiAvcm9vdApob3N0OiB6aW9uCnNlc3Npb246IHVuYXZhaWxhYmxlCmRhdGU6IDIwMjYtMDgtMDcKZmFjdHM6CiAgLSBUaGUgY3VycmVudCBodW1hbiByZW5kZXJlciBzb3J0cyBub24tZGVmYXVsdCByb3dzIGJ5IHNlbWFudGljIHZlcnNpb24gZGVzY2VuZGluZy4KICAtIEFjY291bnQgaW5mb3JtYXRpb24gaXMgYWxyZWFkeSBsb2FkZWQgYmVmb3JlIHRoZSByZW5kZXJlciBzb3J0cyByb3dzLgotLS0KCiMjIFB1cnBvc2UKCldoZW4gYSB1c2VyIHJ1bnMgYGFnZW50cyB2aWV3IGNsYXVkZWAsIHRoZSBzZWxlY3RlZCBkZWZhdWx0IHN0YXlzIGF0IHRoZSB0b3AsIGJ1dCBldmVyeSBvdGhlciBhY2NvdW50IGN1cnJlbnRseSBmb2xsb3dzIHZlcnNpb24gb3JkZXIuIFRoZSBzYW1lIHNoYXJlZCByZW5kZXJlciBjb250cm9scyBhbGwgbWFuYWdlZCBuYXRpdmUgYWdlbnRzLCBzbyB0aGUgZml4IGJlbG9uZ3MgaW4gdGhhdCByZW5kZXJlciByYXRoZXIgdGhhbiBpbiBDbGF1ZGUtc3BlY2lmaWMgY29kZS4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiPjxzdHJvbmc+QmVoYXZpb3I6PC9zdHJvbmc+IGRlZmF1bHQgZmlyc3Q7IGVtYWlsLWJlYXJpbmcgYWNjb3VudHMgQeKAk1o7IHJvd3Mgd2l0aG91dCBlbWFpbCBsYXN0IGluIHZlcnNpb24tZGVzY2VuZGluZyBvcmRlci48L2Rpdj4KCjxmaWd1cmU+Cjxzdmcgdmlld0JveD0iMCAwIDkyMCAyODAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbGxlZGJ5PSJzb3J0LXRpdGxlIHNvcnQtZGVzYyIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8dGl0bGUgaWQ9InNvcnQtdGl0bGUiPkFjY291bnQgcm93IG9yZGVyaW5nIGZsb3c8L3RpdGxlPgogIDxkZXNjIGlkPSJzb3J0LWRlc2MiPkEgZmxvd2NoYXJ0IHNob3dpbmcgZGVmYXVsdCBwcmVjZWRlbmNlLCBlbWFpbCBvcmRlcmluZywgYW5kIHZlcnNpb24gZmFsbGJhY2suPC9kZXNjPgogIDxkZWZzPgogICAgPG1hcmtlciBpZD0iYXJyb3ciIHZpZXdCb3g9IjAgMCAxMCAxMCIgcmVmWD0iOSIgcmVmWT0iNSIgbWFya2VyV2lkdGg9IjciIG1hcmtlckhlaWdodD0iNyIgb3JpZW50PSJhdXRvLXN0YXJ0LXJldmVyc2UiPgogICAgICA8cGF0aCBkPSJNIDAgMCBMIDEwIDUgTCAwIDEwIHoiIGZpbGw9IiNhM2U2MzUiLz4KICAgIDwvbWFya2VyPgogIDwvZGVmcz4KICA8ZWxsaXBzZSBjeD0iMTAwIiBjeT0iMTQwIiByeD0iNzIiIHJ5PSIzNCIgZmlsbD0iIzE3MTcxNyIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjMiLz4KICA8dGV4dCB4PSIxMDAiIHk9IjE0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Y1ZjVmNSIgZm9udC1mYW1pbHk9IkludGVyLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE3Ij5Db21wYXJlIHJvd3M8L3RleHQ+CiAgPHBhdGggZD0iTTE3MiAxNDAgSDI0NiIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjMiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIi8+CiAgPHBvbHlnb24gcG9pbnRzPSIzMzAsODAgNDE0LDE0MCAzMzAsMjAwIDI0NiwxNDAiIGZpbGw9IiMxNzE3MTciIHN0cm9rZT0iIzU2YjRlOSIgc3Ryb2tlLXdpZHRoPSIzIi8+CiAgPHRleHQgeD0iMzMwIiB5PSIxMzYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmNWY1ZjUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNiI+RGVmYXVsdD88L3RleHQ+CiAgPHRleHQgeD0iMzMwIiB5PSIxNTYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmNWY1ZjUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyI+eWVzIOKGkiBmaXJzdDwvdGV4dD4KICA8cGF0aCBkPSJNNDE0IDE0MCBINDkwIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMyIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz4KICA8dGV4dCB4PSI0NTIiIHk9IjEyNiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Q0ZDRkNCIgZm9udC1mYW1pbHk9IkludGVyLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIj5uZWl0aGVyPC90ZXh0PgogIDxwb2x5Z29uIHBvaW50cz0iNTc1LDgwIDY2MCwxNDAgNTc1LDIwMCA0OTAsMTQwIiBmaWxsPSIjMTcxNzE3IiBzdHJva2U9IiNlNjlmMDAiIHN0cm9rZS13aWR0aD0iMyIvPgogIDx0ZXh0IHg9IjU3NSIgeT0iMTM2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZjVmNWY1IiBmb250LWZhbWlseT0iSW50ZXIsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTYiPkVtYWlsPzwvdGV4dD4KICA8dGV4dCB4PSI1NzUiIHk9IjE1NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Y1ZjVmNSIgZm9udC1mYW1pbHk9IkludGVyLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIj5vbmUg4oaSIGVtYWlsIGZpcnN0PC90ZXh0PgogIDxwYXRoIGQ9Ik02NjAgMTE1IEg3NDIiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIzIiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPgogIDx0ZXh0IHg9IjcwMCIgeT0iMTAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZDRkNGQ0IiBmb250LWZhbWlseT0iSW50ZXIsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiPmJvdGg8L3RleHQ+CiAgPHJlY3QgeD0iNzQyIiB5PSI3MyIgd2lkdGg9IjE1MCIgaGVpZ2h0PSI2NiIgcng9IjQiIGZpbGw9IiMxNzE3MTciIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIzIi8+CiAgPHRleHQgeD0iODE3IiB5PSIxMDEiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmNWY1ZjUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNiI+RW1haWwgQeKAk1o8L3RleHQ+CiAgPHRleHQgeD0iODE3IiB5PSIxMjIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNkNGQ0ZDQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyI+Y2FzZS1pbnNlbnNpdGl2ZTwvdGV4dD4KICA8cGF0aCBkPSJNNjYwIDE2NSBINzQyIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMyIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz4KICA8dGV4dCB4PSI3MDAiIHk9IjE4NyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Q0ZDRkNCIgZm9udC1mYW1pbHk9IkludGVyLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIj5uZWl0aGVyIC8gdGllPC90ZXh0PgogIDxyZWN0IHg9Ijc0MiIgeT0iMTUxIiB3aWR0aD0iMTUwIiBoZWlnaHQ9IjY2IiByeD0iNCIgZmlsbD0iIzE3MTcxNyIgc3Ryb2tlPSIjNTZiNGU5IiBzdHJva2Utd2lkdGg9IjMiLz4KICA8dGV4dCB4PSI4MTciIHk9IjE3OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Y1ZjVmNSIgZm9udC1mYW1pbHk9IkludGVyLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE2Ij5WZXJzaW9uIG5ld2VzdDwvdGV4dD4KICA8dGV4dCB4PSI4MTciIHk9IjIwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Q0ZDRkNCIgZm9udC1mYW1pbHk9IkludGVyLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIj5kZXRlcm1pbmlzdGljIGZhbGxiYWNrPC90ZXh0PgogIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDI4IDI0NSkiPgogICAgPGxpbmUgeDE9IjAiIHkxPSIwIiB4Mj0iMzAiIHkyPSIwIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMyIvPjx0ZXh0IHg9IjM4IiB5PSI1IiBmaWxsPSIjZDRkNGQ0IiBmb250LWZhbWlseT0iSW50ZXIsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiPmNvbXBhcmlzb24gZmxvdzwvdGV4dD4KICAgIDxyZWN0IHg9IjE5MCIgeT0iLTEwIiB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIGZpbGw9IiMxNzE3MTciIHN0cm9rZT0iIzU2YjRlOSIgc3Ryb2tlLXdpZHRoPSIzIi8+PHRleHQgeD0iMjIwIiB5PSI1IiBmaWxsPSIjZDRkNGQ0IiBmb250LWZhbWlseT0iSW50ZXIsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiPnByZWNlZGVuY2UgLyBmYWxsYmFjazwvdGV4dD4KICAgIDxyZWN0IHg9IjQwMCIgeT0iLTEwIiB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIGZpbGw9IiMxNzE3MTciIHN0cm9rZT0iI2U2OWYwMCIgc3Ryb2tlLXdpZHRoPSIzIi8+PHRleHQgeD0iNDMwIiB5PSI1IiBmaWxsPSIjZDRkNGQ0IiBmb250LWZhbWlseT0iSW50ZXIsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiPmVtYWlsIGF2YWlsYWJpbGl0eTwvdGV4dD4KICA8L2c+Cjwvc3ZnPgo8ZmlnY2FwdGlvbj5PbmUgY29tcGFyYXRvciBzZXJ2ZXMgZXZlcnkgbWFuYWdlZCBuYXRpdmUgYWdlbnQgaW4gdGhlIGh1bWFuLXJlYWRhYmxlIHZpZXcuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIFByb3Bvc2VkIENoYW5nZXMKCnwgQXJlYSB8IENoYW5nZSB8IENvbXBhdGliaWxpdHkgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgSHVtYW4gcmVuZGVyZXIgfCBBZGQgYSBwdXJlIGNvbXBhcmF0b3IgYW5kIHNvcnQgYWZ0ZXIgYWNjb3VudCBkYXRhIGlzIGxvYWRlZCB8IENoYW5nZXMgb25seSByb3cgb3JkZXIgfAp8IEpTT04gcmVuZGVyZXIgfCBLZWVwIGRlZmF1bHQtdGhlbi12ZXJzaW9uIHNvcnRpbmcgfCBObyBtYWNoaW5lLW91dHB1dCBjaGFuZ2UgfAp8IFRlc3RzIHwgQ292ZXIgcHJlY2VkZW5jZSwgZW1haWwgb3JkZXIsIG1pc3NpbmcgZW1haWxzLCBhbmQgdGhlIHJlYWwgQ0xJIHwgUHJldmVudHMgcmVncmVzc2lvbiB8CnwgUmVsZWFzZSBub3RlcyB8IEFkZCBhIENIQU5HRUxPRyBlbnRyeSB8IFNoaXBzIG9uIHRoZSBleGlzdGluZyByZWxlYXNlIHRyYWluIHwKCiMjIFB1YmxpYyBJbnRlcmZhY2UKCk5vIGZsYWdzLCBjb25maWd1cmF0aW9uIGtleXMsIG9yIHR5cGVzIGNoYW5nZS4gVGhlc2UgY29tbWFuZHMgZ2FpbiB0aGUgbmV3IGh1bWFuIG9yZGVyaW5nOgoKYGBgY29uc29sZQphZ2VudHMgdmlldwphZ2VudHMgdmlldyBjbGF1ZGUKYWdlbnRzIHZpZXcgY29kZXgKYGBgCgpgYWdlbnRzIHZpZXcgPGFnZW50PiAtLWpzb25gIHJldGFpbnMgaXRzIGN1cnJlbnQgb3JkZXIuCgojIyBWYWxpZGF0aW9uCgpSdW4gdGhlIGZvY3VzZWQgdW5pdCBhbmQgaW50ZWdyYXRpb24gY2FzZXMsIHRoZSBjYW5vbmljYWwgcmVtb3RlIENMSSBzdWl0ZSwgdGhlbiBpbnN0YWxsIHRoZSBkZXZlbG9wbWVudCBidWlsZCBhbmQgaW5zcGVjdCB0aGUgcmVhbCBjb21tYW5kIG91dHB1dDoKCmBgYGNvbnNvbGUKYnVueCB2aXRlc3QgcnVuIHNyYy9jb21tYW5kcy92aWV3LmFjY291bnQudGVzdC50cyB0ZXN0cy9ub24taW50ZXJhY3RpdmUudGVzdC50cwpidW4gcnVuIHRlc3Q6cmVtb3RlCi4vc2NyaXB0cy9pbnN0YWxsLnNoCmFnZW50cyB2aWV3IGNsYXVkZQpgYGAKCiMjIFJpc2tzCgp8IFJpc2sgfCBIYW5kbGluZyB8CnwgLS0tIHwgLS0tIHwKfCBEZWZhdWx0IGFjY291bnQgbW92ZXMgfCBEZWZhdWx0IHByZWNlZGVuY2UgaXMgdGhlIGNvbXBhcmF0b3IncyBmaXJzdCBydWxlIHwKfCBIYXJuZXNzIGhhcyBubyBlbWFpbCB8IFBsYWNlIGl0IGFmdGVyIGVtYWlsIHJvd3MgYW5kIHJldGFpbiB2ZXJzaW9uLWRlc2NlbmRpbmcgb3JkZXIgfAp8IER1cGxpY2F0ZS9jYXNlLXZhcmllZCBlbWFpbHMgfCBDb21wYXJlIG5vcm1hbGl6ZWQgZW1haWwsIHRoZW4gdXNlIHZlcnNpb24gYXMgYSBzdGFibGUgdGllLWJyZWFrZXIgfAp8IEF1dG9tYXRpb24gZGVwZW5kcyBvbiBKU09OIGFycmF5IG9yZGVyIHwgRG8gbm90IGNoYW5nZSB0aGUgSlNPTiBjb21wYXJhdG9yIHwKCiMjIFRyYWNraW5nCgpUaGlzIGlzIGEgdHJpdmlhbCBwcmVzZW50YXRpb24gZml4IHdpdGggbm8gbWF0Y2hpbmcgb3BlbiBHaXRIdWIgaXNzdWUuIFRoZSBwbGFuLCBpbXBsZW1lbnRhdGlvbiwgdGVzdHMsIGFuZCBDSEFOR0VMT0cgZW50cnkgdHJhdmVsIGluIG9uZSBwdWxsIHJlcXVlc3QuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

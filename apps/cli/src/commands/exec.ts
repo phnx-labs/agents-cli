@@ -637,17 +637,18 @@ async function handleTerminalHandoff(
   // the whole Kimi/DeepSeek/Qwen/GLM path — for `--terminal` runs only.
   const rawTarget = parseRunAccountPickerRequest(agentSpec).normalizedAgentSpec.split('@')[0];
   const knownAgent = resolveAgentName(rawTarget);
-  if (knownAgent && isAgentHardDeprecated(knownAgent)) {
+  const [{ profileExists }, { resolveWorkflowRef }] = await Promise.all([
+    import('../lib/profiles.js'),
+    import('../lib/workflows.js'),
+  ]);
+  const hasProfile = profileExists(rawTarget);
+  if (knownAgent && !hasProfile && isAgentHardDeprecated(knownAgent)) {
     console.error(chalk.red(hardDeprecationError(knownAgent)));
     process.exit(1);
   }
   if (!knownAgent) {
-    const [{ profileExists }, { resolveWorkflowRef }] = await Promise.all([
-      import('../lib/profiles.js'),
-      import('../lib/workflows.js'),
-    ]);
     const probeCwd = options.cwd ?? process.cwd();
-    if (!profileExists(rawTarget) && !resolveWorkflowRef(rawTarget, probeCwd)) {
+    if (!hasProfile && !resolveWorkflowRef(rawTarget, probeCwd)) {
       console.error(chalk.red(
         `Unknown agent, profile, or workflow: ${rawTarget}. See \`agents list\` for the installed harnesses.`,
       ));
@@ -1118,8 +1119,10 @@ export function registerRunCommand(program: Command): void {
       }
 
       // Hard-deprecated harnesses cannot be run — point the user at the successor.
-      const runBaseAgentId = resolveAgentName(normalizedAgentSpec.split('@')[0]);
-      if (runBaseAgentId && isAgentHardDeprecated(runBaseAgentId)) {
+      const runBaseAgentName = normalizedAgentSpec.split('@')[0];
+      const runBaseAgentId = resolveAgentName(runBaseAgentName);
+      const { profileExists: runProfileExists } = await import('../lib/profiles.js');
+      if (runBaseAgentId && !runProfileExists(runBaseAgentName) && isAgentHardDeprecated(runBaseAgentId)) {
         console.error(chalk.red(hardDeprecationError(runBaseAgentId)));
         process.exit(1);
       }
@@ -2213,13 +2216,13 @@ export function registerRunCommand(program: Command): void {
       let workflowHasSubagents = false;
       const cwd = options.cwd ?? process.cwd();
 
+      if (accountPickerRequested && profileExists(rawAgent)) {
+        console.error(chalk.red(
+          `Account selection is not available for custom harness '${rawAgent}'. Run its concrete host agent with @ instead.`,
+        ));
+        process.exit(1);
+      }
       if (accountPickerRequested && !isValidAgent(rawAgent)) {
-        if (profileExists(rawAgent)) {
-          console.error(chalk.red(
-            `Account selection is not available for custom harness '${rawAgent}'. Run its concrete host agent with @ instead.`,
-          ));
-          process.exit(1);
-        }
         if (resolveWorkflowRef(rawAgent, cwd)) {
           console.error(chalk.red(
             `Account selection is not available for workflow '${rawAgent}'. Run a concrete agent with @ instead.`,
@@ -2264,13 +2267,11 @@ export function registerRunCommand(program: Command): void {
         if (options.sessionId && agent !== 'claude' && !options.quiet) {
           process.stderr.write(chalk.yellow(`[agents] --session-id ignored: auto picked ${agent} (only claude accepts a forced session id)\n`));
         }
-      } else if (isValidAgent(rawAgent)) {
-        agent = rawAgent;
       } else if (profileExists(rawAgent)) {
-        // Not a known agent id, but a profile by this name exists. Profiles
-        // bind (host agent, version, env overrides, keychain-backed auth)
-        // so Chinese models (Kimi, DeepSeek, Qwen, GLM) can run inside
-        // Claude Code without a local proxy.
+        // A profile by this exact name exists. Profiles bind (host agent,
+        // version, env overrides, keychain-backed auth) so Chinese models
+        // (Kimi, DeepSeek, Qwen, GLM) can run inside Claude Code without a
+        // local proxy, including when the profile name matches a native id.
         try {
           const resolved = resolveProfileForRun(rawAgent, options.model);
           agent = resolved.agent;
@@ -2299,6 +2300,8 @@ export function registerRunCommand(program: Command): void {
           console.error(chalk.red((err as Error).message));
           process.exit(1);
         }
+      } else if (isValidAgent(rawAgent)) {
+        agent = rawAgent;
       } else if (resolveWorkflowRef(rawAgent, cwd)) {
         // Workflow: explicit directory, project .agents/workflows/<name>, user, system, or extra repo.
         // Resolution follows resource precedence: direct path, then project > user > system > extras.

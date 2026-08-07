@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { accountColumnLabel, joinViewColumns, pruneGroupKey } from './view.js';
+import {
+  accountColumnLabel,
+  compareAccountOrderedVersions,
+  joinViewColumns,
+  pruneGroupKey,
+  type AccountOrderedVersion,
+} from './view.js';
 import { padToWidth, stringWidth } from '../lib/session/width.js';
 
 describe('joinViewColumns — fixed multi-agent layout', () => {
@@ -125,6 +131,42 @@ describe('accountColumnLabel — organization suffix', () => {
       organizationType: null,
       organizationName: null,
     })).toBe('');
+  });
+});
+
+describe('compareAccountOrderedVersions — human view ordering', () => {
+  const sort = (rows: AccountOrderedVersion[], globalDefault: string | null): string[] =>
+    [...rows]
+      .sort((a, b) => compareAccountOrderedVersions(a, b, globalDefault))
+      .map(({ version }) => version);
+
+  it('keeps the global default first, then sorts emails case-insensitively', () => {
+    const rows: AccountOrderedVersion[] = [
+      { version: '2.1.300', email: 'beta@example.com' },
+      { version: '2.1.100', email: 'zeta@example.com' },
+      { version: '2.1.200', email: 'Alpha@example.com' },
+    ];
+
+    expect(sort(rows, '2.1.100')).toEqual(['2.1.100', '2.1.200', '2.1.300']);
+  });
+
+  it('places non-email rows last and keeps them version-descending', () => {
+    const rows: AccountOrderedVersion[] = [
+      { version: '3.0.0', email: null },
+      { version: '1.0.0', email: 'alpha@example.com' },
+      { version: '4.0.0', email: null },
+    ];
+
+    expect(sort(rows, null)).toEqual(['1.0.0', '4.0.0', '3.0.0']);
+  });
+
+  it('uses version-descending order when normalized emails match', () => {
+    const rows: AccountOrderedVersion[] = [
+      { version: '1.0.0', email: 'same@example.com' },
+      { version: '2.0.0', email: 'SAME@example.com' },
+    ];
+
+    expect(sort(rows, null)).toEqual(['2.0.0', '1.0.0']);
   });
 });
 

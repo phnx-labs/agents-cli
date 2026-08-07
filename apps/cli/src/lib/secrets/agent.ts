@@ -236,6 +236,11 @@ function socketPath(): string {
   return path.join(agentDir(), 'agent.sock');
 }
 
+/** Public accessor for the broker's socket path — `agents daemon status`/`services` reads it for display. */
+export function secretsBrokerSocketPath(): string {
+  return socketPath();
+}
+
 function pidPath(): string {
   return path.join(agentDir(), 'agent.pid');
 }
@@ -430,7 +435,7 @@ export function handleAgentRequest(
       // the broker is running pre-upgrade code and should be restarted.
       return { ok: true, cmd: 'ping', version: PROTOCOL_VERSION, cliVersion: getCliVersion() };
     case 'get': {
-      // Walk own-harness → global so a `--for` grant wins over a global one and
+      // Walk own-harness → global so an `--agent` grant wins over a global one and
       // an unscoped unlock serves every harness (bundleScopeChain).
       for (const scope of bundleScopeChain(req.harness)) {
         const key = scopedBundleKey(req.name, scope);

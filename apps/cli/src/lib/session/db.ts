@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Database from '../sqlite.js';
 import type { SessionAgentId, SessionEvent, SessionMeta, SessionRunMode } from './types.js';
-import { parseSession } from './parse.js';
+import { parseSession, sessionFilePathContainer } from './parse.js';
 import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
 import { getSessionsDir, getSessionsDbPath } from '../state.js';
 import { query as queryEvents, queryToolUsageForSessions } from '../events.js';
@@ -2585,19 +2585,36 @@ function clearSessionExistenceCache(): void {
 }
 
 function findMissingFilePaths(filePaths: string[]): Set<string> {
-  const byDir = new Map<string, Set<string>>();
+  // Existence is decided on the CONTAINER file, never the raw stored path. A
+  // composite `file_path` (`<container>#<id>`, e.g. OpenCode's `opencode.db#ses_…`)
+  // names a row INSIDE a shared file — its basename is never a directory entry,
+  // so a dirname/basename membership check on the composite string classified
+  // every such row as deleted and pruned it (RUSH-2357). Group the original
+  // paths under the container we actually stat, and map the verdict back so the
+  // returned set still holds the original `file_path` strings the caller keys on.
+  const byDir = new Map<string, Map<string, string[]>>();
   for (const p of filePaths) {
-    const dir = path.dirname(p);
-    let basenames = byDir.get(dir);
-    if (!basenames) {
-      basenames = new Set();
-      byDir.set(dir, basenames);
+    const container = sessionFilePathContainer(p);
+    const dir = path.dirname(container);
+    const base = path.basename(container);
+    let bases = byDir.get(dir);
+    if (!bases) {
+      bases = new Map();
+      byDir.set(dir, bases);
     }
-    basenames.add(path.basename(p));
+    let originals = bases.get(base);
+    if (!originals) {
+      originals = [];
+      bases.set(base, originals);
+    }
+    originals.push(p);
   }
 
   const missing = new Set<string>();
-  for (const [dir, basenames] of byDir) {
+  const markMissing = (originals: string[]) => {
+    for (const original of originals) missing.add(original);
+  };
+  for (const [dir, bases] of byDir) {
     let entries: Set<string>;
     try {
       const stat = fs.statSync(dir);
@@ -2617,15 +2634,14 @@ function findMissingFilePaths(filePaths: string[]): Set<string> {
       // Directory itself is gone (or unreadable) — every file in it is missing.
       // Also covers the race where readdir loses to a concurrent delete: fall
       // back to a direct stat rather than assuming existence.
-      for (const base of basenames) {
+      for (const [base, originals] of bases) {
         const filePath = path.join(dir, base);
-        if (!fs.existsSync(filePath)) missing.add(filePath);
+        if (!fs.existsSync(filePath)) markMissing(originals);
       }
       continue;
     }
-    for (const base of basenames) {
-      const filePath = path.join(dir, base);
-      if (!entries.has(base)) missing.add(filePath);
+    for (const [base, originals] of bases) {
+      if (!entries.has(base)) markMissing(originals);
     }
   }
   return missing;
@@ -3133,7 +3149,9 @@ export function backfillResourceUsage(
     result.scanned++;
     let stamp: { fileMtimeMs: number; fileSize: number };
     try {
-      const st = fs.statSync(meta.filePath);
+      // Composite rows (`<container>#<id>`) stat their container file — the
+      // per-session bytes/mtime stamp is derived during discovery, not here.
+      const st = fs.statSync(sessionFilePathContainer(meta.filePath));
       stamp = { fileMtimeMs: st.mtimeMs, fileSize: st.size };
     } catch {
       result.failed++;
@@ -3229,7 +3247,7 @@ export function topSessionsByCost(
   // Over-fetch a small buffer to survive the on-disk liveness filter below.
   const sql = `SELECT * FROM sessions ${whereCost} ORDER BY cost_usd DESC, timestamp DESC LIMIT ${limit + 16}`;
   const rows = db.prepare(sql).all(...params) as SessionRow[];
-  const live = rows.filter(r => !r.file_path || fs.existsSync(r.file_path));
+  const live = rows.filter(r => !r.file_path || fs.existsSync(sessionFilePathContainer(r.file_path)));
   return live.slice(0, limit).map(r => ({
     meta: rowToMeta(r),
     costUsd: r.cost_usd ?? 0,

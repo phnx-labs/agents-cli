@@ -29,6 +29,7 @@ import {
   isRunningLiveSession,
   resolveSessionAgentName,
   requestedLiveStatuses,
+  parseInstalledAgentVersionQuery,
 } from './sessions.js';
 import { remoteAgentsJsonCommand } from '../lib/remote-agents-json.js';
 import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
@@ -53,6 +54,22 @@ describe('session harness name resolution', () => {
     expect(resolveSessionAgentName('cladue')).toBe('claude');
     expect(resolveSessionAgentName('GROK')).toBe('grok');
     expect(resolveSessionAgentName('not-a-harness')).toBeNull();
+  });
+});
+
+describe('positional installed agent version filters', () => {
+  const installed = (agent: string) => agent === 'claude' ? ['2.1.181'] : ['0.146.0'];
+
+  it('recognizes an exact installed agent@version pair', () => {
+    expect(parseInstalledAgentVersionQuery('claude@2.1.181', installed)).toBe('claude@2.1.181');
+    expect(parseInstalledAgentVersionQuery('CODEX@0.146.0', installed)).toBe('codex@0.146.0');
+  });
+
+  it('leaves unknown, uninstalled, and prose queries on the free-text path', () => {
+    expect(parseInstalledAgentVersionQuery('claude@9.9.9', installed)).toBeUndefined();
+    expect(parseInstalledAgentVersionQuery('cladue@2.1.181', installed)).toBeUndefined();
+    expect(parseInstalledAgentVersionQuery('project@2026', installed)).toBeUndefined();
+    expect(parseInstalledAgentVersionQuery('claude@2.1.181 notes', installed)).toBeUndefined();
   });
 });
 
@@ -1405,6 +1422,59 @@ describe('agents sessions', () => {
       expect(output).toContain('codex');
       expect(output).toContain('Show codex versions in the session list');
       expect(output).toContain('abababab');
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('combines --agent and --version into one structured session filter', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-agent-version-flags-'));
+    try {
+      writeUpdateCache(tempHome);
+      const projectDir = path.join(tempHome, 'work', 'agents-cli');
+      writeCodexSession(tempHome, 'acacacac-acac-4cac-8cac-acacacacacac', projectDir,
+        'Filter this exact Codex version', '2026-04-17T19:43:30.000Z');
+
+      const match = runAgents(
+        ['sessions', '--agent', 'codex', '--version', '0.113.0', '--all', '--no-interactive'],
+        projectDir, tempHome,
+      );
+      expect(match.status, match.stderr).toBe(0);
+      expect(outputOf(match)).toContain('Filter this exact Codex version');
+
+      const miss = runAgents(
+        ['sessions', '--agent', 'codex', '--version', '9.9.9', '--all', '--no-interactive'],
+        projectDir, tempHome,
+      );
+      expect(miss.status, miss.stderr).toBe(0);
+      expect(outputOf(miss)).not.toContain('Filter this exact Codex version');
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects --version without an agent instead of silently ignoring it', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-version-without-agent-'));
+    try {
+      writeUpdateCache(tempHome);
+      const result = runAgents(['sessions', '--version', '2.1.181', '--no-interactive'], tempHome, tempHome);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('--version requires --agent');
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    [['sessions', '--version']],
+    [['sessions', '--agent', 'claude', '--version', '--no-interactive']],
+  ])('rejects a sessions --version flag with no value: %j', (args) => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-version-without-value-'));
+    try {
+      writeUpdateCache(tempHome);
+      const result = runAgents(args, tempHome, tempHome);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("option '--version <version>' argument missing");
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }

@@ -100,7 +100,7 @@ Both flows drive one shared step engine ([`src/commands/harness-wizard.ts`](../s
     deepseek/deepseek-chat-v3        openrouter stored  via claude
 ```
 
-The row carries the pinned model, the account/auth state, and `via <host>` — the native harness that actually runs it, with its version when the harness pins one. A harness whose host CLI has no install is flagged `(host <id> not installed)` rather than listed as runnable. `agents view <name>` describes one harness (host, model, provider, auth, lineage, YAML path), and `agents view <name> --json` emits its summary. In `agents view <agent> --json`, the harnesses hosted by that agent are under the `harnesses` key.
+The row carries the pinned model, the account/auth state, and `via <host>` — the native harness that actually runs it, with its version when the harness pins one. A harness whose host CLI has no install is flagged `(host <id> not installed)` rather than listed as runnable. `agents view <name>` describes one harness (host, model, provider, auth, lineage, YAML path), and `agents view <name> --json` emits its summary. A native-specific `agents view <agent>` shows only that native harness's versions; it does not include custom harnesses that execute through it. The exact custom name also wins in `agents run`, before native ids and hard-deprecated aliases, so the fork remains runnable through its configured host. The unfiltered `agents view --json` inventory keeps hosted summaries under the `harnesses` key for machine consumers.
 
 ## Top-level resource profiles
 

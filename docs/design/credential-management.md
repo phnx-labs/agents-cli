@@ -135,6 +135,13 @@ endpoint takes any `sk-ant-oat01-` bearer, `usage.ts:624,957`):
 1. Daemon holds nothing (done, #1583).
 2. **Claude usage/probe read the file-based setup-token, not the keychain** → kills
    the Touch ID storm. Self-mint + store the setup-token per account file-based.
+   **Enforcement landed:** `loadClaudeOauth`'s `accessTokenCache` path
+   (`usage.ts`) now returns `null` when no setup-token is provisioned instead of
+   falling through to the interactive keychain / `.credentials.json` — so the
+   daemon's usage (~60s) and auth-health (~3min) warms can never read or transmit
+   the interactive OAuth login (the transitional fallback + its no-ACL cache are
+   removed). An unprovisioned account reads as `unconfigured` (benign for
+   rotation) and shows "usage pending"; seed a setup-token to restore usage.
 3. `apply` stops copying rotating login files (Gap B).
 4. Reserved file-based `auth` bundle + fleet sync (via `vault.age`/`secrets
    push-pull`, not `apply`) — onboarding + headless.

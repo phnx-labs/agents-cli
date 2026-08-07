@@ -730,7 +730,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     expect(combined).toContain('agents run test-proxy');
   }, 30_000);
 
-  it('filters profiles to the requested harness in `agents view claude`', () => {
+  it('keeps custom harnesses out of a native-specific `agents view claude`', () => {
     const home = makeTempHome();
     tempHomes.push(home);
     writeFakeManagedVersion(home, 'claude', '2.1.143', 'claude');
@@ -748,11 +748,11 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     const combined = `${result.stdout}\n${result.stderr}`;
 
     expect(result.status, combined).toBe(0);
-    expect(combined).toContain('test-proxy');
+    expect(combined).not.toContain('test-proxy');
     expect(combined).not.toContain('ollama');
   }, 30_000);
 
-  it('includes profile summaries in `agents view <agent> --json`', () => {
+  it('does not attach custom harnesses to a native-specific `agents view --json`', () => {
     const home = makeTempHome();
     tempHomes.push(home);
     writeFakeManagedVersion(home, 'claude', '2.1.143', 'claude');
@@ -773,13 +773,87 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
       harnesses: Array<{ name: string; agent: string; model: string; provider: string }>;
     };
     expect(claudeEntry.agent).toBe('claude');
-    expect(claudeEntry.harnesses).toEqual([
-      expect.objectContaining({
-        name: 'test-proxy',
-        agent: 'claude',
-        model: 'truefoundry/qwen3-coder',
-        provider: 'truefoundry',
-      }),
+    expect(claudeEntry.harnesses).toEqual([]);
+  }, 30_000);
+
+  it('views an exact custom harness before a native harness with the same name', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+    writeFakeManagedVersion(home, 'claude', '2.1.143', 'claude');
+    writeProfileYaml(home, 'claude', {
+      agent: 'opencode',
+      provider: 'openrouter',
+      env: { OPENCODE_MODEL: 'deepseek/deepseek-v3.2' },
+    });
+
+    const result = runAgents(home, ['view', 'claude'], { AGENTS_CLI_DISABLE_AUTO_UPDATE: '1' });
+    const combined = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status, combined).toBe(0);
+    expect(combined).toContain('custom harness');
+    expect(combined).toContain('Host:     opencode');
+    expect(combined).toContain('deepseek/deepseek-v3.2');
+    expect(combined).not.toContain('2.1.143');
+  }, 30_000);
+
+  it('sorts human view accounts by email after the default while keeping JSON version order', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+
+    const accounts = [
+      { version: '2.1.400', email: null },
+      { version: '2.1.300', email: 'beta@example.com' },
+      { version: '2.1.200', email: 'Alpha@example.com' },
+      { version: '2.1.100', email: 'zeta@example.com' },
+    ];
+    for (const { version, email } of accounts) {
+      writeFakeManagedVersion(home, 'claude', version, 'claude');
+      if (email) {
+        const configDir = path.join(
+          home,
+          '.agents',
+          '.history',
+          'versions',
+          'claude',
+          version,
+          'home',
+          '.claude',
+        );
+        fs.mkdirSync(configDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(configDir, '.claude.json'),
+          JSON.stringify({ oauthAccount: { emailAddress: email } }),
+        );
+      }
+    }
+    fs.mkdirSync(path.dirname(devicePinsPath(home)), { recursive: true });
+    fs.writeFileSync(devicePinsPath(home), 'agents:\n  claude: 2.1.100\n');
+
+    const human = runAgents(home, ['view', 'claude'], {
+      AGENTS_CLI_DISABLE_AUTO_UPDATE: '1',
+      FORCE_COLOR: '0',
+    });
+    expect(human.status, `${human.stdout}\n${human.stderr}`).toBe(0);
+    const humanRows = human.stdout
+      .split('\n')
+      .filter((line) => line.includes('@example.com') || line.includes('(logged out'));
+    expect(humanRows.map((line) => line.match(/2\.1\.\d+/)?.[0])).toEqual([
+      '2.1.100',
+      '2.1.200',
+      '2.1.300',
+      '2.1.400',
+    ]);
+
+    const json = runAgents(home, ['view', 'claude', '--json'], {
+      AGENTS_CLI_DISABLE_AUTO_UPDATE: '1',
+    });
+    expect(json.status, `${json.stdout}\n${json.stderr}`).toBe(0);
+    const payload = JSON.parse(json.stdout) as { versions: Array<{ version: string }> };
+    expect(payload.versions.map(({ version }) => version)).toEqual([
+      '2.1.100',
+      '2.1.400',
+      '2.1.300',
+      '2.1.200',
     ]);
   }, 30_000);
 });

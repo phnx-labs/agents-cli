@@ -138,7 +138,7 @@ describe('handleAgentRequest', () => {
     if (r.ok && r.cmd === 'get' && r.hit) expect(r.env.NPM_TOKEN).toBe('t');
   });
 
-  it('a --for grant stays private to that harness', () => {
+  it('an --agent grant stays private to that harness', () => {
     const store = freshStore();
     handleAgentRequest(store, { ...loadReq('prod', { K: '1' }, 60_000), harness: 'claude' }, 0);
     const mine = handleAgentRequest(store, { cmd: 'get', name: 'prod', harness: 'claude' }, 0);

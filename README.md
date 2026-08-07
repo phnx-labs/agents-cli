@@ -1034,6 +1034,35 @@ agents funnel up yosemite-s0 --local-port 8787 --port 443           # public HTT
 
 Jobs run sandboxed -- agents only see directories and tools you explicitly allow.
 
+### Daemon
+
+Routines, the secrets broker, browser IPC, and the watchdog pass all run inside
+one always-on daemon per device. `agents daemon` is its runtime surface:
+
+```bash
+agents daemon                # identity + duplicates + per-service health (same as status)
+agents daemon status --json  # machine-readable, for scripts / Factory
+
+agents daemon start          # start it (bypasses daemon.enabled -- the deliberate override)
+agents daemon stop           # stop it
+agents daemon restart        # stop then start
+
+agents daemon disable        # persist daemon.enabled: false -- nothing auto-starts it
+agents daemon enable         # clear the kill switch
+
+agents daemon reload         # SIGHUP -- reload jobs, re-evaluate scheduler.enabled, no restart
+agents daemon services       # just the two hosted services (secrets broker, browser IPC)
+agents daemon logs -f --level warn --since 1h
+agents daemon doctor         # one-shot health check; non-zero exit on problems
+```
+
+There is no `agents daemon jobs` -- scheduled work is always `agents routines`
+(see `agents routines stats` for per-routine failure detail). `disable` is a
+device-local kill switch: with it set, `routines add`/`routines start`/
+`routines catchup`/webhook triggers stop auto-starting the daemon, mirroring
+`systemctl disable` -- `agents daemon start` still works as the explicit
+override.
+
 ---
 
 ## Monitors
