@@ -26,6 +26,7 @@ import { getTaskById, updateTaskStatus } from '../lib/cloud/store.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
 import { mailboxDir, enqueue } from '../lib/mailbox.js';
 import { getAgentsInvocation } from '../lib/daemon.js';
+import { resolveTaskRef, type HostTask } from '../lib/hosts/tasks.js';
 import { resolveMessageTarget, mailboxIdForActiveSession } from '../lib/mailbox-target.js';
 import {
   blockIdForSession,
@@ -163,6 +164,49 @@ async function deliverViaResume(route: AnswerRoute, mailboxId: string): Promise<
 }
 
 /**
+ * Reroute a message to a detached `agents run --device <host> --no-follow`
+ * dispatch (RUSH-2366 follow-up). `getActiveSessions()` never sees these: the
+ * live process is on `task.host`, not this machine, so the local session
+ * resolver in `resolveMessageTarget` reports "no running agent" even while
+ * `agents hosts ps` shows the same dispatch running with a live remote pid —
+ * the only recovery was kill-and-redispatch, losing all context.
+ *
+ * Prefer the remote agent's OWN identity over the local dispatch-record id: the
+ * live process there registers itself under its session id (Claude) or its
+ * `--name` handle, never under the LOCAL `hosts` cache id the user typed here.
+ * Re-spawns `agents message <remoteRef> <text> --host <task.host>` through
+ * `getAgentsInvocation`, so it re-enters via the SAME `--host` REMOTE_PASSTHROUGH
+ * choke point (`lib/hosts/passthrough.ts`) any explicit `--host` caller uses,
+ * and resolves against the remote box's own active sessions.
+ */
+async function deliverViaHostReroute(
+  task: HostTask,
+  target: string,
+  text: string,
+  opts: { from?: string; as?: string; surface?: string; ttl?: string },
+): Promise<void> {
+  const remoteRef = task.sessionId ?? task.name ?? target;
+  const argv = ['message', remoteRef, text, '--host', task.host];
+  if (opts.from) argv.push('--from', opts.from);
+  if (opts.as) argv.push('--as', opts.as);
+  if (opts.surface) argv.push('--surface', opts.surface);
+  if (opts.ttl) argv.push('--ttl', opts.ttl);
+
+  const inv = getAgentsInvocation(argv);
+  const child = spawn(inv.command, inv.args, { stdio: 'inherit', env: process.env });
+  const code: number = await new Promise((resolve) => {
+    child.on('exit', (c) => resolve(c ?? 1));
+    child.on('error', () => resolve(1));
+  });
+  if (code !== 0) {
+    die(
+      `Delivery to '${remoteRef}' on host '${task.host}' exited with code ${code}. ` +
+        `Tried: agents ${argv.join(' ')}`,
+    );
+  }
+}
+
+/**
  * `message` is the agent-control plane (RUSH-2123): the answer/keystroke/
  * injected input a running agent consumes, never a notification a human reads.
  * Mirrors SHARED_NOTES in commands/send.ts so an agent reading either --help
@@ -269,8 +313,25 @@ export function registerMessageCommand(program: Command): void {
           die(`"${target}" matches ${res.candidates.length} running agents:\n${lines}\nRe-run with a full id.`);
           return;
         }
-        case 'none':
-          die(`No running agent or cloud task matches "${target}". List targets with \`agents sessions --active\`.`);
+        case 'none': {
+          // Not a local/cloud session — check whether it's a detached
+          // `--device ... --no-follow` dispatch, which `getActiveSessions()`
+          // never sees (its live process is on another host). Same records
+          // `agents hosts ps` reads, so the two commands never disagree.
+          const task = resolveTaskRef(target);
+          if (task && task.status === 'running') {
+            await deliverViaHostReroute(task, target, text, opts);
+            return;
+          }
+          if (task) {
+            die(
+              `Task '${target}' on host '${task.host}' already ${task.status}` +
+                (task.exitCode !== undefined ? ` (exit ${task.exitCode})` : '') +
+                `. Nothing to message. View its output: \`agents hosts logs ${target}\`.`,
+            );
+          }
+          die(`No running agent or cloud task matches "${target}". List targets with \`agents sessions --active\` or \`agents hosts ps\`.`);
+        }
       }
     });
 }

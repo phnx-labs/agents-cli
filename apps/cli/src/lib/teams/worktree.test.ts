@@ -112,4 +112,33 @@ describe('createWorktree base freshness', () => {
   it('rejects invalid worktree names', async () => {
     await expect(createWorktree(clone, '../evil')).rejects.toThrow(/Invalid worktree name/);
   });
+
+  // RUSH-2366 follow-up: a real incident nested a teammate's worktree inside a
+  // SIBLING teammate's own worktree — `.../worktrees/opencode-parity/.agents/
+  // worktrees/teams-reliability` — because the caller's ambient cwd was already
+  // inside worktree A when it created worktree B. `git rev-parse --show-toplevel`
+  // from inside a linked worktree returns THAT worktree's own root, not the main
+  // checkout's, so passing it straight through as the placement root nests B
+  // under A. createWorktree must resolve the MAIN repo root regardless of which
+  // worktree the caller is standing in.
+  it('never nests a new worktree inside another worktree, even when cwd is already inside one', async () => {
+    const wtA = await createWorktree(clone, 'teammate-a');
+    try {
+      // Simulate a caller (e.g. an orchestrator agent) whose own cwd is teammate
+      // A's worktree — exactly the observed incident path — creating a SECOND,
+      // sibling teammate worktree from there.
+      const wtB = await createWorktree(wtA, 'teammate-b');
+      try {
+        // Must land as a sibling under the MAIN repo's .agents/worktrees/, never
+        // nested under A's own .agents/worktrees/.
+        expect(wtB).toBe(path.join(clone, '.agents', 'worktrees', 'teammate-b'));
+        expect(wtB.startsWith(wtA)).toBe(false);
+        expect(fs.existsSync(path.join(wtA, '.agents', 'worktrees', 'teammate-b'))).toBe(false);
+      } finally {
+        await removeWorktree(clone, 'teammate-b');
+      }
+    } finally {
+      await removeWorktree(clone, 'teammate-a');
+    }
+  });
 });
