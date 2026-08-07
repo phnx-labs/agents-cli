@@ -1808,9 +1808,9 @@ export function registerTeamsCommands(program: Command): void {
         // pass, which refreshes every sibling's status and can throw on a
         // distributed one. That teammate EXISTS and is merely pending its
         // `--after` dependency, so removing its worktree would destroy real
-        // work. Only tear down when no persisted record claims this worktree.
+        // work. Only tear down when no LIVE teammate claims this worktree.
         try {
-          if (await mgr.hasPersistedWorktree(team, name)) return;
+          if (await mgr.isWorktreeClaimed(name)) return;
         } catch {
           // Can't prove it's an orphan. Deleting a live teammate's worktree is
           // unrecoverable; a leftover branch is not — so leave it and print the
@@ -1879,13 +1879,18 @@ export function registerTeamsCommands(program: Command): void {
         } catch (err) {
           // `git worktree add -b` can fail PART WAY — the branch ref created,
           // the checkout not — which strands `agents/<name>` in exactly the way
-          // that breaks the retry. Nothing is recorded yet at this point, so a
-          // best-effort teardown here is unambiguously safe.
+          // that breaks the retry. But the most common failure here is the
+          // OPPOSITE: `fatal: a branch named 'agents/<name>' already exists`
+          // because a live teammate (this team or another) already owns that
+          // worktree. Removing it then would destroy their checkout, so the
+          // same claim check gates this teardown too.
           try {
-            await removeWorktree(baseCwd, opts.worktree);
+            if (!(await mgr.isWorktreeClaimed(opts.worktree))) {
+              await removeWorktree(baseCwd, opts.worktree);
+            }
           } catch {
-            // Nothing to remove (the common case: the add failed before git
-            // wrote anything), or we can't. Either way the real error below wins.
+            // Nothing to remove (the add failed before git wrote anything), or
+            // we can't tell. Either way the real error below is what matters.
           }
           dieFriction('teams', 'worktree-create-failed', `Failed to create worktree '${opts.worktree}': ${(err as Error).message}`);
         }

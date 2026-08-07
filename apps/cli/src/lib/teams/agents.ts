@@ -1786,32 +1786,39 @@ export class AgentManager {
   }
 
   /**
-   * Does a durably-persisted record for `taskName` already claim `worktreeName`?
+   * Does any LIVE teammate — in any team — already own `worktreeName`?
    *
-   * A RAW disk scan — no status probing, no cache, no `listAll()`. The caller is
+   * A RAW disk scan: no status probing, no cache, no `listAll()`. The caller is
    * the `teams add` failure path, where the manager's own status refresh can be
    * the very thing that threw (`cleanupOldAgents()` → `listAll()` →
-   * `updateStatusFromProcess()` runs AFTER the staged record is saved), so any
-   * check that re-enters that machinery would throw again and answer nothing.
+   * `updateStatusFromProcess()` runs AFTER the staged record is saved), so a
+   * check that re-entered that machinery would throw again and answer nothing.
    *
-   * `teams add` uses it to tell the two failure shapes apart before removing
-   * anything: no record → the worktree is a genuine ORPHAN and is torn down;
-   * a record → the teammate DID persist (it is merely pending on an `--after`
-   * dependency) and its worktree must never be touched (RUSH-2356).
+   * `teams add` asks this before removing a worktree, to tell an ORPHAN from
+   * someone's live checkout (RUSH-2356). Two deliberate scoping choices:
+   *
+   * - **Any team, not just the one being added to.** Worktree names are global
+   *   to the repo but records are per-team, so a same-named worktree owned by
+   *   another team's teammate must also block the removal.
+   * - **Non-terminal records only.** A completed/failed/stopped teammate's
+   *   worktree was already cleaned up at `teams stop`, and its record lingers
+   *   until retention reaps it — counting those would leave a genuine orphan
+   *   branch stranded forever, which is the bug this all exists to fix.
    */
-  async hasPersistedWorktree(taskName: string, worktreeName: string): Promise<boolean> {
+  async isWorktreeClaimed(worktreeName: string): Promise<boolean> {
     const base = this.agentsDir ?? (await getAgentsDir());
     let entries: string[];
     try {
       entries = await fs.readdir(base);
     } catch {
-      return false; // no agents dir at all → nothing persisted
+      return false; // no agents dir at all → nothing claims anything
     }
     for (const entry of entries) {
       try {
         const raw = await fs.readFile(path.join(base, entry, 'meta.json'), 'utf-8');
         const meta = JSON.parse(raw);
-        if (meta?.task_name === taskName && meta?.worktree_name === worktreeName) return true;
+        if (meta?.worktree_name !== worktreeName) continue;
+        if (!isTerminalStatus(meta?.status as AgentStatus)) return true;
       } catch {
         continue; // unreadable/partial record — not proof of anything
       }

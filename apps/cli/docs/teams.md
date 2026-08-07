@@ -302,7 +302,7 @@ destroy real work rather than protect a retry:
 | Guard | Why |
 |---|---|
 | Only a worktree **this add created** | A shared `--use-worktree` checkout and a `--device` teammate's remote worktree are never candidates — this add didn't create either. |
-| Only when **no persisted record claims it** (`AgentManager.hasPersistedWorktree`) | The add can fail *after* the record is durably saved: `spawn()` writes a staged teammate's `meta.json` and only then runs the retention pass, which refreshes every sibling's status and can throw on a distributed one. That teammate exists and is merely pending its `--after` dependency, so it keeps its worktree. |
+| Only when **no live teammate claims it** (`AgentManager.isWorktreeClaimed`) | The add can fail *after* the record is durably saved: `spawn()` writes a staged teammate's `meta.json` and only then runs the retention pass, which refreshes every sibling's status and can throw on a distributed one. That teammate exists and is merely pending its `--after` dependency, so it keeps its worktree. The check spans **every team**, since worktree names are global to the repo while records are per-team, and counts only **non-terminal** records — a stopped teammate's worktree is already gone, so its lingering record must not strand the branch. |
 
 If we cannot prove a worktree is an orphan, it is left in place and the command
 prints the exact `git worktree remove` / `git branch -D` pair to run — a stranded

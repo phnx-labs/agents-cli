@@ -161,79 +161,87 @@ describe('retention never reaps a non-terminal teammate (RUSH-2356)', () => {
  * its worktree and branch: real work destroyed by the cleanup meant to protect
  * the retry. `hasPersistedWorktree` is the check that tells the two apart.
  */
-describe('hasPersistedWorktree distinguishes an orphan worktree from a live teammate (RUSH-2356)', () => {
+describe('isWorktreeClaimed distinguishes an orphan worktree from a live teammate (RUSH-2356)', () => {
   const dirs: string[] = [];
   afterEach(() => {
     for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true });
   });
 
+  /** A teammate owning `worktree`, saved straight to disk at `status`. */
+  async function makeOwner(
+    base: string, id: string, task: string, worktree: string, status: AgentStatus,
+  ): Promise<void> {
+    const agent = new AgentProcess(
+      id, task, 'claude', 'do a thing', null, 'plan',
+      null, status, new Date(), status === AgentStatus.PENDING ? null : new Date(), base,
+      null, null, null, null, null, null, null, worktree, [],
+      null, null, null, null, null, null, worktree,
+    );
+    await agent.saveMeta();
+    // Guard the fixture itself: a constructor-arg slip would silently make
+    // every assertion below vacuous.
+    expect((await AgentProcess.loadFromDisk(id, base))?.worktreeName).toBe(worktree);
+  }
+
   it('true for a PENDING --after teammate that persisted — its worktree is never torn down', async () => {
     const base = tmpBase();
     dirs.push(base);
-
-    const staged = new AgentProcess(
-      'staged-1', 'wt-team', 'claude', 'do a thing', null, 'plan',
-      null, AgentStatus.PENDING, new Date(), null, base,
-      null, null, null, null, null, null, null, 'surface', ['first'],
-      null, null, null, null, null, null, 'surface',
-    );
-    await staged.saveMeta();
-    // Guard the fixture itself: a constructor-arg slip would silently make the
-    // assertion below vacuous.
-    expect((await AgentProcess.loadFromDisk('staged-1', base))?.worktreeName).toBe('surface');
+    await makeOwner(base, 'staged-1', 'wt-team', 'surface', AgentStatus.PENDING);
 
     const mgr = new AgentManager(50, base);
-    expect(await mgr.hasPersistedWorktree('wt-team', 'surface')).toBe(true);
+    expect(await mgr.isWorktreeClaimed('surface')).toBe(true);
   });
 
-  it('false when no record claims it — a genuine orphan, safe to tear down', async () => {
+  it('true across TEAMS — worktree names are global to the repo, records are per-team', async () => {
     const base = tmpBase();
     dirs.push(base);
-
-    // A sibling that owns a DIFFERENT worktree, and one in another team that
-    // owns the same name — neither makes 'surface' in 'wt-team' claimed.
-    const other = new AgentProcess(
-      'other-1', 'wt-team', 'claude', 'do a thing', null, 'plan',
-      null, AgentStatus.PENDING, new Date(), null, base,
-      null, null, null, null, null, null, null, 'ui', [],
-      null, null, null, null, null, null, 'ui',
-    );
-    await other.saveMeta();
-    const otherTeam = new AgentProcess(
-      'other-2', 'different-team', 'claude', 'do a thing', null, 'plan',
-      null, AgentStatus.PENDING, new Date(), null, base,
-      null, null, null, null, null, null, null, 'surface', [],
-      null, null, null, null, null, null, 'surface',
-    );
-    await otherTeam.saveMeta();
+    // A live teammate in a DIFFERENT team owns it. Tearing it down because the
+    // add's own team has no record would destroy that teammate's checkout.
+    await makeOwner(base, 'other-1', 'different-team', 'surface', AgentStatus.PENDING);
 
     const mgr = new AgentManager(50, base);
-    expect(await mgr.hasPersistedWorktree('wt-team', 'surface')).toBe(false);
+    expect(await mgr.isWorktreeClaimed('surface')).toBe(true);
+  });
+
+  it('false for a TERMINAL owner — its worktree is already gone, so the branch is a real orphan', async () => {
+    const base = tmpBase();
+    dirs.push(base);
+    // `teams stop` removed this teammate's worktree; the record lingers until
+    // retention reaps it. Counting it would strand the orphan branch forever —
+    // exactly the bug the teardown exists to fix.
+    await makeOwner(base, 'done-1', 'wt-team', 'surface', AgentStatus.COMPLETED);
+    await makeOwner(base, 'dead-1', 'wt-team', 'surface2', AgentStatus.FAILED);
+
+    const mgr = new AgentManager(50, base);
+    expect(await mgr.isWorktreeClaimed('surface')).toBe(false);
+    expect(await mgr.isWorktreeClaimed('surface2')).toBe(false);
+  });
+
+  it('false when nothing claims the name at all', async () => {
+    const base = tmpBase();
+    dirs.push(base);
+    await makeOwner(base, 'other-2', 'wt-team', 'ui', AgentStatus.PENDING);
+
+    const mgr = new AgentManager(50, base);
+    expect(await mgr.isWorktreeClaimed('surface')).toBe(false);
   });
 
   it('reads raw meta.json, so it still answers when a sibling would fail a status refresh', async () => {
     const base = tmpBase();
     dirs.push(base);
-
-    const staged = new AgentProcess(
-      'staged-2', 'wt-team', 'claude', 'do a thing', null, 'plan',
-      null, AgentStatus.PENDING, new Date(), null, base,
-      null, null, null, null, null, null, null, 'surface', ['first'],
-      null, null, null, null, null, null, 'surface',
-    );
-    await staged.saveMeta();
+    await makeOwner(base, 'staged-2', 'wt-team', 'surface', AgentStatus.PENDING);
 
     // A record that is not valid JSON — the shape a partial write leaves, and
     // the shape that makes a listAll()-based check throw. The scan must skip it
     // and still find the real record.
     const brokenDir = path.join(base, 'broken-1');
     fs.mkdirSync(brokenDir, { recursive: true });
-    fs.writeFileSync(path.join(brokenDir, 'meta.json'), '{ "task_name": "wt-t');
+    fs.writeFileSync(path.join(brokenDir, 'meta.json'), '{ "worktree_name": "surf');
     // ...and a directory with no meta.json at all.
     fs.mkdirSync(path.join(base, 'empty-1'), { recursive: true });
 
     const mgr = new AgentManager(50, base);
-    expect(await mgr.hasPersistedWorktree('wt-team', 'surface')).toBe(true);
-    expect(await mgr.hasPersistedWorktree('wt-team', 'nothing-claims-this')).toBe(false);
+    expect(await mgr.isWorktreeClaimed('surface')).toBe(true);
+    expect(await mgr.isWorktreeClaimed('nothing-claims-this')).toBe(false);
   });
 });
