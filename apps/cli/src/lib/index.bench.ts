@@ -90,6 +90,7 @@ import {
   resolveRunningPackageRoot,
 } from './self-update.js';
 import { getUpdateCheckPath } from './state.js';
+import { installMenubarLaunchAgentOnUpgrade } from './menubar/install-menubar.js';
 // Real built artifact (see docblock above) -- NOT './auto-pull.js', which
 // would resolve to the unbuilt TS source and always miss the worker script.
 // dist/lib/auto-pull.d.ts exists (tsconfig.json declaration:true), so this
@@ -430,6 +431,7 @@ const COLD_OPTS = { time: 3000, iterations: 12 } as const;
 
 const SYNC_COMMANDS_SPEC = distUrl('lib/secrets/sync-commands.js');
 const SECRETS_AGENT_SPEC = distUrl('lib/secrets/agent.js');
+const MENUBAR_INSTALL_SPEC = distUrl('lib/menubar/install-menubar.js');
 
 /**
  * The two exit codes that mean `__secrets-ping` reached the intercept at
@@ -449,7 +451,7 @@ const PING_EXIT_CODES = [0, 3] as const;
  * one layer down; they stop a false number, this is what makes it loud.
  */
 (function preflightColdImports(): void {
-  for (const spec of [SYNC_COMMANDS_SPEC, SECRETS_AGENT_SPEC]) coldEval([spec]);
+  for (const spec of [SYNC_COMMANDS_SPEC, SECRETS_AGENT_SPEC, MENUBAR_INSTALL_SPEC]) coldEval([spec]);
   // Same reasoning for the one runCli row whose number is only meaningful if
   // the index.ts:71-84 intercept was actually reached.
   expectExit(runCli([SYNC_PING_CMD]), PING_EXIT_CODES, '__secrets-ping preflight');
@@ -497,4 +499,88 @@ describe('whole-invocation anchor — real cold `node dist/index.js --version` (
   bench('FLOOR: bare `node --input-type=module -e ""` — same Node startup, no CLI. The gap is everything agents-cli adds to `--version`', () => {
     coldEval([]);
   }, { time: 4000, iterations: 15 });
+});
+
+/**
+ * ============================================================================
+ * The menu-bar startup self-heal (index.ts:1421-1425):
+ *
+ *   if (process.platform === 'darwin' && process.env.AGENTS_SKIP_MIGRATION !== '1') {
+ *     try {
+ *       const { installMenubarLaunchAgentOnUpgrade } = await import('./lib/menubar/install-menubar.js');
+ *       installMenubarLaunchAgentOnUpgrade();
+ *     } catch { }
+ *   }
+ *
+ * Unlike checkForUpdates/spawnDetachedSync (index.ts:1322, guarded by
+ * `!helpOrVersionRequested`) this block has NO help/version guard, so on
+ * darwin it runs on every `agents <cmd>`, `agents --help`, and
+ * `agents --version` alike -- it sits between the migration triad
+ * (index.ts:1389-1411, benched in PR #2277) and the bare-invocation help
+ * branch (index.ts:1433).
+ *
+ * THIS BOX IS LINUX (yosemite-s1), so `process.platform === 'darwin'` is
+ * false and in real production this whole block -- import included -- never
+ * executes here. Two things are still truthfully measurable on Linux and are
+ * benched below; nothing about the macOS decision path is inferred or
+ * invented from them:
+ *
+ *   1. THE MODULE IMPORT ITSELF (index.ts:1423) is plain ESM module
+ *      resolution/evaluation with no platform branch at module scope in
+ *      install-menubar.ts or any of its static imports (fs-atomic.ts,
+ *      state.ts, version.ts, app-bundle-install.ts, agent-spec/primitives.ts
+ *      -- verified by reading each for `^import`/`process.platform` before
+ *      writing this bench). The bytes evaluated and the syscalls issued to
+ *      resolve them are the same on darwin and Linux; only wall-clock speed
+ *      differs by machine, which is why this whole file is dispatched on a
+ *      fixed box rather than compared across boxes. So a cold-process import
+ *      of dist/lib/menubar/install-menubar.js on this box IS the real cost
+ *      index.ts:1423 pays before installMenubarLaunchAgentOnUpgrade() can
+ *      even be called, on any platform.
+ *   2. CALLING installMenubarLaunchAgentOnUpgrade() ITSELF, in-process, on
+ *      this real Linux box. install-menubar.ts:630-632:
+ *
+ *        export function installMenubarLaunchAgentOnUpgrade(): void {
+ *          try {
+ *            if (!onDarwin()) return;
+ *
+ *      `onDarwin()` (install-menubar.ts:49-51) is `process.platform ===
+ *      'darwin'`, so on THIS box the call returns after one property read --
+ *      that is what the row below actually measures, honestly, for Linux.
+ *
+ * What is explicitly NOT benched, because it cannot be invoked truthfully on
+ * a non-darwin box (the task's own instruction): everything past the
+ * `!onDarwin()` guard -- menubarDisabledByUser() (existsSync on
+ * disabledSentinelPath), menubarServiceInstalled() (existsSync on
+ * servicePlistPath), menubarSetupStale() (existsSync + readFileSync on the
+ * installed version marker), menubarSetupNeedsRepoint() (readFileSync +
+ * regex match on the plist XML), installedNeedsDevIdHeal() (existsSync +
+ * codesign spawnSync via hasDeveloperIdSignature), and mayHealMenubar()'s
+ * cooldown read (install-menubar.ts:633-654). Those are the "two existsSync
+ * checks then return" the index.ts:1418 comment describes, and the docblock
+ * at install-menubar.ts:616-628 names them as running "on every darwin CLI
+ * invocation" -- but on Linux `onDarwin()` returns before a single one of
+ * them executes, so their real filesystem cost is UNVERIFIED here. No
+ * darwin timings are invented for them; the pure decision functions among
+ * them (isMenubarStale, menubarPlistNeedsRepoint, mayInstallMenubarHelper)
+ * are unit-tested in install-menubar.test.ts, not benched, since they take
+ * no I/O and are not where the described cost lives.
+ *
+ * No mocking: both groups run the real built dist/lib/menubar/install-
+ * menubar.js and the real exported installMenubarLaunchAgentOnUpgrade().
+ */
+describe('menu-bar startup self-heal (index.ts:1421-1425) — cold module import, the real cost paid before the darwin gate can even run', () => {
+  bench('FLOOR: bare `node --input-type=module -e ""` — same spawn cost every row below also pays; subtract it', () => {
+    coldEval([]);
+  }, COLD_OPTS);
+
+  bench('lib/menubar/install-menubar.js — the exact specifier dynamically imported at index.ts:1423, its static graph incl. state.js (1382 lines), version.js, app-bundle-install.js, fs-atomic.js, agent-spec/primitives.js', () => {
+    coldEval([MENUBAR_INSTALL_SPEC]);
+  }, COLD_OPTS);
+});
+
+describe('installMenubarLaunchAgentOnUpgrade() — warm in-process call on THIS Linux box (install-menubar.ts:630-658)', () => {
+  bench('real call on Linux: returns at the `!onDarwin()` guard (install-menubar.ts:632) after one process.platform read — NOT representative of the darwin decision path (menubarServiceInstalled/menubarSetupStale/mayHealMenubar fs checks), which is unverified on this box; see docblock above', () => {
+    installMenubarLaunchAgentOnUpgrade();
+  });
 });
