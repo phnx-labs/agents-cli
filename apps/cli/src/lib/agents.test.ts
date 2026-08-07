@@ -20,6 +20,7 @@ import {
   hardDeprecationNotice,
   isClaudeCredentialFileBlank,
   resolveAgentName,
+  resolveNativeBinaryPath,
   resolveLastActive,
   supportsAccountInspection,
   warnAgentDeprecated,
@@ -356,6 +357,16 @@ describe('AGENTS capability matrix', () => {
 
   it('allows current Cursor builds to open their prompt-less interactive TUI', () => {
     expect(AGENTS.cursor.capabilities.interactiveRepl).toBe(true);
+  });
+});
+
+describe('resolveNativeBinaryPath', () => {
+  it('accepts a native executable before the agents shims directory exists', () => {
+    const root = makeTempDir();
+    expect(resolveNativeBinaryPath('sh', '/bin/sh', {
+      shimsDir: path.join(root, 'missing-shims'),
+      historyDir: path.join(root, 'missing-history'),
+    })).toBe(fs.realpathSync('/bin/sh'));
   });
 });
 

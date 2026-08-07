@@ -192,10 +192,47 @@ describe('generated shim fall-through', () => {
   });
 
   test('generic Cursor shim rejects a managed binary that resolves back to itself', () => {
-    const script = generateShimScript('cursor');
-    const genericBranch = script.slice(script.indexOf('BINARY="$VERSION_DIR/node_modules/.bin/$CLI_COMMAND"'));
-    expect(genericBranch).toContain('RESOLVED_BINARY=$(realpath "$BINARY"');
-    expect(genericBranch).toContain('RESOLVED_SHIM=$(realpath "$AGENTS_USER_DIR/.cache/shims/$CLI_COMMAND"');
-    expect(genericBranch).toContain('BINARY=$(adopted_original_bin || echo "")');
+    const root = tmp();
+    const userDir = path.join(root, '.agents');
+    const shimsDir = path.join(userDir, '.cache', 'shims');
+    const historyDir = path.join(userDir, '.history');
+    const version = '2026.08.04';
+    const nativeDir = path.join(root, '.local', 'share', 'cursor-agent', 'versions', version);
+    const launcherDir = path.join(root, '.local', 'bin');
+    fs.mkdirSync(shimsDir, { recursive: true });
+    fs.mkdirSync(nativeDir, { recursive: true });
+    fs.mkdirSync(launcherDir, { recursive: true });
+
+    const native = path.join(nativeDir, 'cursor-agent');
+    fs.writeFileSync(native, '#!/bin/bash\nprintf "native:%s\\n" "$*"\n');
+    fs.chmodSync(native, 0o755);
+
+    const shim = path.join(shimsDir, 'cursor-agent');
+    fs.writeFileSync(shim, generateShimScript('cursor'));
+    fs.chmodSync(shim, 0o755);
+
+    const launcher = path.join(launcherDir, 'cursor-agent');
+    fs.symlinkSync(shim, launcher);
+    const managedDir = path.join(historyDir, 'versions', 'cursor', version, 'node_modules', '.bin');
+    fs.mkdirSync(managedDir, { recursive: true });
+    fs.symlinkSync(launcher, path.join(managedDir, 'cursor-agent'));
+
+    const recordDir = path.join(historyDir, 'adopted-launchers');
+    fs.mkdirSync(recordDir, { recursive: true });
+    fs.writeFileSync(path.join(recordDir, 'cursor-agent'), `${native}\n${launcher}\n`);
+    fs.writeFileSync(path.join(userDir, 'agents.yaml'), `agents:\n  cursor: ${version}\n`);
+
+    const projectSlug = root.replaceAll('/', '_').replaceAll(' ', '_');
+    const sentinelDir = path.join(userDir, '.cache', 'launch-sync');
+    fs.mkdirSync(sentinelDir, { recursive: true });
+    fs.writeFileSync(path.join(sentinelDir, `cursor@${version}@${projectSlug}`), 'ok');
+
+    const output = execFileSync('bash', [shim, '--version'], {
+      cwd: root,
+      env: { ...process.env, HOME: root, AGENTS_USER_DIR: userDir },
+      encoding: 'utf-8',
+      timeout: 5_000,
+    });
+    expect(output.trim()).toBe('native:--version');
   });
 });
