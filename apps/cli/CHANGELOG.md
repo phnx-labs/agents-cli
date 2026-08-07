@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.22.29
+
+- **Menu bar: collapsible DEVICES roster, a Focus action on sessions, and richer routine submenus.** The dropdown now has a **DEVICES** section near the bottom — the full registered fleet as one accordion, folded by default so the long list never walls the menu, each row `<name> · <platform>` with live load% merged from the warm fleet cache (never a faked online/offline) and a Copy `agents ssh <name>` action; **NEW DEVICES** moved to sit just above it. Each live-session `›` submenu leads with **▶ Focus session** (attaches locally or SSHes to the owning box via `agents sessions focus`). Each routine submenu now leads with a last-run line — `● running now` (server-verified), `✓ completed · ran 45s · 2h ago`, or `✕ failed exit 1` — plus the next fire. The device roster rides the existing 3-minute `menubar snapshot --json` poll (a cheap local registry read, `MenubarSnapshot.devices`); everything else renders from fields the snapshot already carried, so no new timer and no per-open shell-out. Source: `apps/cli/src/lib/menubar/snapshot.ts`, `apps/cli/menubar/Sources/MenubarHelper/{StatusItemController,Models,LocalState}.swift`.
+
+- Fix `agents view` and `agents usage` labeling Codex's weekly or monthly quota as session usage when the native CLI publishes the long-duration limit in its `primary` rate-limit window. Codex windows are now labeled from their reported duration (`S`, `W`, or `M`) instead of their primary/secondary position.
+
 ## 1.22.28
 
 - **`agents run` / `agents teams` `--device`/`--host`: fail loud when a pinned harness version is not installed on the target (RUSH-2313).** A concrete pin like `codex@0.145.0` is checked against the remote `agents view --json` listing during `ensureHostReady` *before* the run is marked dispatched. Missing pins exit non-zero naming the box, the pin, what is installed there, and `agents ssh <box> -- agents add <agent>@<ver>` — so detached fleet drains no longer print `Dispatched` and then die only in the remote log. Aliases (`@latest` / …) still resolve on the remote; a bare agent name still only warns. Source: `apps/cli/src/lib/hosts/ready.ts`, `dispatch.ts`, `teams/agents.ts`.
