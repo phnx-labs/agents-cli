@@ -5,7 +5,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { describe, it, expect } from 'vitest';
 import type { SecretsBundle } from './bundles.js';
-import { handleAgentRequest, isRequestAuthorized, makeConnectionHandler, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, secretsAgentServiceInstalled, retireLegacySecretsAgentService, clampHoldMs, syncClientLaunch, lastLine, runAgentLockSync, SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD, DEFAULT_TTL_MS, MIN_HOLD_MS, MAX_HOLD_MS, META_CACHE_PREFIX, type StoredBundle, type Response, type Request } from './agent.js';
+import { handleAgentRequest, isRequestAuthorized, makeConnectionHandler, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, shouldClientEvictSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, secretsAgentServiceInstalled, retireLegacySecretsAgentService, clampHoldMs, syncClientLaunch, lastLine, runAgentLockSync, SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD, DEFAULT_TTL_MS, MIN_HOLD_MS, MAX_HOLD_MS, META_CACHE_PREFIX, type StoredBundle, type Response, type Request } from './agent.js';
 
 /**
  * These tests target the broker's store semantics — the part with real bug
@@ -557,6 +557,29 @@ describe('shouldTeardownVersionSkewedBroker (client-side #435 twin: never wipe a
 
   it('tears down an empty version-skewed broker so it relaunches on new code', () => {
     expect(shouldTeardownVersionSkewedBroker(0)).toBe(true);
+  });
+});
+
+describe('shouldClientEvictSkewedBroker (never evict a daemon-hosted broker)', () => {
+  it('NEVER evicts when the always-on daemon is running, even at zero held bundles', () => {
+    // The regression: teardownStaleBroker() only knows the standalone pidPath()
+    // claim, so evicting a daemon-hosted broker unlinks its socket without
+    // stopping the daemon; the daemon then refuses to re-host (shouldTakeOverBroker
+    // isHosting guard) and is orphaned, and every reader falls onto cold one-off
+    // brokers that re-prompt Touch ID. Deferring to the live daemon is the fix —
+    // its version upgrades are handled by postinstall.js's restart, not by a
+    // client tearing its broker out from under it.
+    expect(shouldClientEvictSkewedBroker(true, 0)).toBe(false);
+    expect(shouldClientEvictSkewedBroker(true, 5)).toBe(false);
+  });
+
+  it('falls back to the zero-held-bundles teardown when no daemon owns the broker', () => {
+    // Churning dev installs with a dead/absent daemon — the case the #435 client
+    // twin was built for — behave exactly as before: keep a hot broker, tear down
+    // an empty one so it relaunches on current code.
+    expect(shouldClientEvictSkewedBroker(false, 0)).toBe(true);
+    expect(shouldClientEvictSkewedBroker(false, 1)).toBe(false);
+    expect(shouldClientEvictSkewedBroker(false, 5)).toBe(false);
   });
 });
 

@@ -159,6 +159,30 @@ export function shouldTeardownVersionSkewedBroker(realHeldBundles: number): bool
   return realHeldBundles === 0;
 }
 
+/**
+ * Whether a version-skewed client may evict the reachable broker at all. The
+ * held-bundle gate above is necessary but not sufficient: a broker the always-on
+ * daemon is hosting must NEVER be client-evicted, even when it holds zero
+ * unlocks. teardownStaleBroker() recognizes only the standalone broker's
+ * pidPath() O_EXCL claim (the daemon writes ownerPath(), never pidPath()), so
+ * evicting a daemon-hosted broker unlinks its socket WITHOUT stopping the daemon;
+ * the daemon then keeps hostedBroker != null and shouldTakeOverBroker() refuses
+ * to re-host, orphaning its broker until the daemon restarts while every reader
+ * falls onto cold one-off brokers that re-prompt Touch ID — the storm. Deferring
+ * is safe: daemon code-version upgrades are handled by postinstall.js restarting
+ * it, and agentPing() already gated on PROTOCOL_VERSION, so a code-skewed daemon
+ * broker is still wire-compatible. Only when NO daemon owns the broker (churning
+ * dev installs with a dead/absent daemon — the case #435's client twin was built
+ * for) does the zero-held-bundles teardown apply, exactly as before.
+ */
+export function shouldClientEvictSkewedBroker(
+  daemonRunning: boolean,
+  realHeldBundles: number,
+): boolean {
+  if (daemonRunning) return false;
+  return shouldTeardownVersionSkewedBroker(realHeldBundles);
+}
+
 export interface StoredBundle {
   bundle: SecretsBundle;
   env: Record<string, string>;
@@ -1367,7 +1391,12 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
   const ping = await agentPing();
   if (ping.reachable) {
     if (ping.cliVersion === undefined || ping.cliVersion === getCliVersionFresh()) return true;
-    if (!shouldTeardownVersionSkewedBroker((await agentStatus()).length)) return true;
+    // A reachable but version-skewed broker: tear it down ONLY when no daemon
+    // hosts it and it holds no unlocks. Evicting a daemon-hosted broker orphans
+    // the daemon's socket and starts the Touch ID storm — see
+    // shouldClientEvictSkewedBroker.
+    const { isDaemonRunning } = await import('../daemon.js');
+    if (!shouldClientEvictSkewedBroker(isDaemonRunning(), (await agentStatus()).length)) return true;
     await teardownStaleBroker();
   }
 
