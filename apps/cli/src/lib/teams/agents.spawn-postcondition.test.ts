@@ -9,6 +9,13 @@
  * agent process (isStaged short-circuits to just saveMeta()) — exercises the
  * real AgentManager.spawn()/AgentProcess.loadFromDisk() path against a temp
  * meta.json dir. No mocking.
+ *
+ * Passes a cloudProvider so spawn()'s pre-flight checkCliAvailable() call is
+ * skipped — that check runs unconditionally for any non-cloud/non-remote
+ * spawn (staged or not), and CI intentionally has no coding-agent CLI
+ * installed (matches scripts/sandbox.sh's own test-mode comment). What's
+ * under test here is the postcondition assertion, not CLI detection, which
+ * already has its own dedicated coverage in agents.cli-detection.test.ts.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
@@ -43,6 +50,7 @@ describe('spawn() postcondition — never reports success for a record that is n
     const agent = await mgr.spawn(
       'post-team', 'claude', 'second half', null, null, 'medium',
       null, null, null, 'second', ['first'],
+      null, null, null, 'rush', // cloudProvider — skips the CLI-availability pre-flight
     );
 
     expect(agent.status).toBe(AgentStatus.PENDING);
