@@ -539,7 +539,9 @@ agents doctor · zion                                        1.20.81
   `never-synced`, `stale`, `repo-behind`, `repo-drift`, `version-skew`,
   `fleet-resource-gap`, `hook-runtime-visibility-unavailable`, `orphan`, `duplicate-hook`, `duplicate-hook-drift`,
   `host-cli-missing`, `host-cli-invalid`, `rc-secret-export`, `env-secret-export`, `exec-policy`,
-  `stale-cli`. Each is resolvable by a routine sync or cleanup.
+  `stale-cli`. Most are resolvable by a routine sync or cleanup;
+  `hook-runtime-visibility-unavailable` requires upgrading agents-cli on the
+  reporting device.
 
 RUSH-2162 moved `never-synced` and `duplicate-hook-drift` from critical to
 warning: both are stale-sync states one `agents sync` resolves, not "needs you

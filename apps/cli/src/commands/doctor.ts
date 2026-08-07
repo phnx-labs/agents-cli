@@ -1278,6 +1278,8 @@ interface HookRewireResult {
   rewired: number;
   /** Hooks still unwired after re-registering (source/home mismatch). */
   remaining: number;
+  /** Stable failure class; never expose a generated temporary shim pathname. */
+  failure?: 'register-failed';
 }
 
 /**
@@ -1306,10 +1308,21 @@ function rewireUnwiredHooks(parsed: ResolvedTarget | null): HookRewireResult[] {
       if (!before.supported) continue;
       const need = before.unwired.length + (before.settingsMissing ? (before.expected ?? 0) : 0);
       if (need === 0) continue;
-      registerHooksToSettings(agent, getVersionHomePath(agent, version));
-      const after = checkVersionHookWiring(agent, version);
-      const remaining = after.unwired.length + (after.settingsMissing ? (after.expected ?? 0) : 0);
-      out.push({ agent, version, rewired: Math.max(0, need - remaining), remaining });
+      try {
+        const registration = registerHooksToSettings(agent, getVersionHomePath(agent, version));
+        if (registration.errors.length > 0) {
+          out.push({ agent, version, rewired: 0, remaining: need, failure: 'register-failed' });
+          continue;
+        }
+        const after = checkVersionHookWiring(agent, version);
+        const remaining = after.unwired.length + (after.settingsMissing ? (after.expected ?? 0) : 0);
+        out.push({ agent, version, rewired: Math.max(0, need - remaining), remaining });
+      } catch {
+        // A shim write can fail before the native config writer gets to return
+        // its own errors. Record the same stable class and keep doctor --fix
+        // moving to the one bounded runtime repair pass below.
+        out.push({ agent, version, rewired: 0, remaining: need, failure: 'register-failed' });
+      }
     }
   }
   return out;
@@ -1318,7 +1331,9 @@ function rewireUnwiredHooks(parsed: ResolvedTarget | null): HookRewireResult[] {
 function renderHookRewireText(rewired: HookRewireResult[]): void {
   for (const r of rewired) {
     const label = `${AGENT_NAMES[r.agent] || r.agent}@${r.version}`;
-    if (r.remaining === 0) {
+    if (r.failure) {
+      console.log(`  ${chalk.red('hold  ')} ${label}  ${chalk.gray('native hook wiring could not be updated')}`);
+    } else if (r.remaining === 0) {
       console.log(`  ${chalk.green('rewired')} ${label}  ${chalk.gray(`${r.rewired} hook${r.rewired === 1 ? '' : 's'} wired into settings.json`)}`);
     } else {
       console.log(`  ${chalk.yellow('hold  ')} ${label}  ${chalk.gray(`${r.remaining} hook${r.remaining === 1 ? '' : 's'} still unwired — run \`agents sync ${r.agent}@${r.version} --yes\``)}`);
@@ -1364,22 +1379,23 @@ async function runFix(parsed: ResolvedTarget | null, opts: DoctorOptions): Promi
   // repair have settled. This routine never calls sync/register and never
   // retries; unresolved wrappers remain an explicit non-zero doctor outcome.
   const hookRuntimeRepair = repairManagedHookRuntimeArtifacts({ filter: runtimeRepairFilter(parsed) });
+  const rewireFailed = rewired.some((entry) => entry.failure !== undefined);
   if (
     healChangedAnything(result) ||
-    rewired.some((entry) => entry.rewired > 0 || entry.remaining > 0) ||
+    rewired.some((entry) => entry.rewired > 0 || entry.remaining > 0 || entry.failure !== undefined) ||
     hookRuntimeRepair.attempts.length > 0
   ) {
     invalidateDoctorOverviewCache();
   }
   if (opts.json) {
     console.log(JSON.stringify({ ...result, hookRewire: rewired, hookRuntimeRepair }, null, 2));
-    if (hookRuntimeRepair.needsAttention.length > 0) process.exitCode = 1;
+    if (rewireFailed || hookRuntimeRepair.needsAttention.length > 0) process.exitCode = 1;
     return;
   }
   renderHealText(result);
   renderHookRewireText(rewired);
   renderHookRuntimeRepairText(hookRuntimeRepair);
-  if (hookRuntimeRepair.needsAttention.length > 0) process.exitCode = 1;
+  if (rewireFailed || hookRuntimeRepair.needsAttention.length > 0) process.exitCode = 1;
 }
 
 // ─── CI drift gate (doctor --check) ──────────────────────────────────────────

@@ -414,6 +414,32 @@ describe('doctor generated hook runtime integration (RUSH-2382)', () => {
     expect(payload.hookRuntimeRepair.needsAttention[0]).toContain('repair failed [EISDIR]');
     expect(fs.existsSync(cachePath)).toBe(false);
   });
+
+  it('--fix records a Claude rewire failure, then still runs one bounded runtime repair', () => {
+    seedHome(['2.0.0'], '2.0.0');
+    const shim = seedGeneratedRuntimeHook('claude', '2.0.0');
+    fs.mkdirSync(shim, { recursive: true });
+    const cachePath = path.join(testHome, '.agents', '.cache', '.doctor-overview.json');
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    fs.writeFileSync(cachePath, JSON.stringify({ version: 1, fetchedAt: 1, payload: { stale: true } }));
+
+    const result = runDoctor('--fix', '--json');
+    expect(result.status).toBe(1);
+    const payload = JSON.parse(result.stdout) as {
+      hookRewire: Array<{ agent: string; version: string; rewired: number; remaining: number; failure?: string }>;
+      hookRuntimeRepair: { attempts: Array<{ attempted: boolean; repaired: boolean }>; needsAttention: string[] };
+    };
+    expect(payload.hookRewire).toEqual([{
+      agent: 'claude', version: '2.0.0', rewired: 0, remaining: 1, failure: 'register-failed',
+    }]);
+    expect(JSON.stringify(payload.hookRewire)).not.toContain('.tmp.');
+    expect(payload.hookRuntimeRepair.attempts).toHaveLength(1);
+    expect(payload.hookRuntimeRepair.attempts[0]).toMatchObject({ attempted: true, repaired: false });
+    expect(payload.hookRuntimeRepair.needsAttention).toHaveLength(1);
+    expect(payload.hookRuntimeRepair.needsAttention[0]).toContain('repair failed [EISDIR]');
+    expect(payload.hookRuntimeRepair.needsAttention[0]).not.toContain('.tmp.');
+    expect(fs.existsSync(cachePath)).toBe(false);
+  });
 });
 
 describe('doctor qualifier resolution via subprocess (issue #2058)', () => {
