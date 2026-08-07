@@ -3,8 +3,9 @@
  *
  * `index.ts:213-214` imports `{ emit, emitFriction, redactArgs }` from
  * `./lib/events.js` and `{ stampProvenance }` from `./lib/event-provenance.js`
- * EAGERLY — top-level, before commander parses argv (`program.parse()` at
- * index.ts:71 is reached only after all module evaluation). Every `agents`
+ * EAGERLY — top-level, before commander parses argv (`program.parseAsync()` at
+ * index.ts:1440 is reached only after all module evaluation; index.ts:71 is the
+ * separate `__secrets-ping`/`__secrets-get` fast-path intercept). Every `agents`
  * process pays the module-graph evaluation cost, including the `--version` /
  * `--help` fast paths that never emit an event. The `emit`/`redactArgs`/
  * `stampProvenance` RUNTIME cost is then paid on every real command: the root
@@ -165,7 +166,11 @@ const END_PAYLOAD = { module: 'run', command: 'run claude', durationMs: 1234 } a
 // Prime the sink (prune marker + provenance/chmod caches) so timed emits are steady state.
 for (let i = 0; i < 8; i++) emit('command.start', START_PAYLOAD);
 
-/** Bounded so the sink cannot cross the 10 MiB gzip-rotation threshold (events.ts:107) mid-run and skew the number. */
+/**
+ * Time-bounded (300ms) so the cumulative sink stays well under the 10 MiB
+ * gzip-rotation threshold (events.ts:107) and no rotation skews a sample —
+ * verified empirically: no `events.*.jsonl.gz` archive is created across runs.
+ */
 const EMIT_OPTS = { time: 300, iterations: 20, warmupTime: 100 } as const;
 
 describe('redactArgs — index.ts:298, preAction on every command. Real regex passes over a realistic 22-arg `agents run` line, incl. the >200-char --prompt sha256 branch', () => {
