@@ -89,6 +89,17 @@ function printInstallations(agent: AgentId, json: boolean): void {
   }
 }
 
+/**
+ * Surface a failure as one red line, not a stack trace. Everything this command
+ * can fail on — an unknown agent, an ambiguous selector, an unpinnable harness,
+ * a release that would not launch — is a message the user acts on, and a
+ * commander async action rejection otherwise reaches the user as a raw Node dump.
+ */
+function fail(err: unknown): void {
+  console.error(chalk.red((err as Error).message));
+  process.exitCode = 1;
+}
+
 export function registerUpdateCommand(program: Command): void {
   const update = program
     .command('update [target]')
@@ -97,36 +108,40 @@ export function registerUpdateCommand(program: Command): void {
     .option('--account <label>', 'Disambiguate by signed-in account when several installations match')
     .option('--json', 'Machine-readable result')
     .action(async (target: string | undefined, options: UpdateOptions) => {
-      if (!target) {
-        throw new Error('Which agent? Use: agents update <agent>[@<installed-version>]');
-      }
-      const { agent, selector } = parseTarget(target);
+      try {
+        if (!target) {
+          throw new Error('Which agent? Use: agents update <agent>[@<installed-version>]');
+        }
+        const { agent, selector } = parseTarget(target);
 
-      if (options.to && options.to !== 'latest' && !supportsPinnedUpdate(agent)) {
-        // Fail loud at the boundary rather than installing the current release
-        // and reporting it as the pin that was asked for.
-        throw new Error(
-          `${agent} is a single self-updating binary with no pinnable releases — drop --to, or pass --to latest.`
-        );
-      }
+        if (options.to && options.to !== 'latest' && !supportsPinnedUpdate(agent)) {
+          // Fail loud at the boundary rather than installing the current release
+          // and reporting it as the pin that was asked for.
+          throw new Error(
+            `${agent} is a single self-updating binary with no pinnable releases — drop --to, or pass --to latest.`
+          );
+        }
 
-      const installation = await resolveInstallation(agent, selector, { account: options.account });
-      const strategy = selectUpdateStrategy(agent);
-      if (!options.json && !strategy.transactional) {
-        console.log(chalk.yellow(
-          `${agent} installs one vendor-managed binary, so this update cannot be staged or rolled back; `
-          + `a failure leaves whatever its installer wrote.`
-        ));
-      }
-      if (!options.json) {
-        console.log(chalk.gray(`Updating ${agent}@${describeInstallation(installation)} via the ${strategy.id} strategy...`));
-      }
+        const installation = await resolveInstallation(agent, selector, { account: options.account });
+        const strategy = selectUpdateStrategy(agent);
+        if (!options.json && !strategy.transactional) {
+          console.log(chalk.yellow(
+            `${agent} installs one vendor-managed binary, so this update cannot be staged or rolled back; `
+            + `a failure leaves whatever its installer wrote.`
+          ));
+        }
+        if (!options.json) {
+          console.log(chalk.gray(`Updating ${agent}@${describeInstallation(installation)} via the ${strategy.id} strategy...`));
+        }
 
-      const outcome = await updateInstallation(installation, {
-        to: options.to,
-        onProgress: options.json ? undefined : (message) => console.log(chalk.gray(`  ${message}`)),
-      });
-      printOutcome(outcome, !!options.json);
+        const outcome = await updateInstallation(installation, {
+          to: options.to,
+          onProgress: options.json ? undefined : (message) => console.log(chalk.gray(`  ${message}`)),
+        });
+        printOutcome(outcome, !!options.json);
+      } catch (err) {
+        fail(err);
+      }
     });
 
   update
@@ -137,9 +152,13 @@ export function registerUpdateCommand(program: Command): void {
     // binds a flag the parent also declares to the PARENT's option store — so
     // reading this subcommand's own opts alone silently drops it. Merge them.
     .action((rawAgent: string, _options: { json?: boolean }, command: Command) => {
-      const agent = resolveAgentName(rawAgent);
-      if (!agent) throw new Error(formatAgentError(rawAgent));
-      printInstallations(agent, !!command.optsWithGlobals().json);
+      try {
+        const agent = resolveAgentName(rawAgent);
+        if (!agent) throw new Error(formatAgentError(rawAgent));
+        printInstallations(agent, !!command.optsWithGlobals().json);
+      } catch (err) {
+        fail(err);
+      }
     });
 
   setHelpSections(update, {
