@@ -21,7 +21,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { AgentId } from './types.js';
-import { AGENTS } from './agents.js';
+import { AGENTS, resolveNativeBinaryPath } from './agents.js';
 import { getUserAgentsDir, getVersionsDir } from './state.js';
 import { setGlobalDefault } from './versions.js';
 import { createShim, createVersionedAlias, ensureShimCurrent, switchHomeFileSymlinks, assertIsolationBoundary } from './shims.js';
@@ -262,8 +262,9 @@ export function importInstallScriptBinary(
     return { success: false, skipped: true, error: `${version} already installed`, resolvedFromPath: binaryPath };
   }
 
-  if (!fs.existsSync(binaryPath)) {
-    return { success: false, error: `Binary does not exist: ${binaryPath}` };
+  const nativeBinary = resolveNativeBinaryPath(spec.cliCommand, binaryPath);
+  if (!nativeBinary) {
+    return { success: false, error: `Binary does not resolve to a native executable: ${binaryPath}` };
   }
 
   try {
@@ -273,15 +274,15 @@ export function importInstallScriptBinary(
     fs.writeFileSync(
       path.join(versionDir, 'package.json'),
       JSON.stringify(
-        { name: `agents-${spec.agentId}-${version}`, version: '1.0.0', private: true, imported: true, from: binaryPath, installScriptBased: true },
+        { name: `agents-${spec.agentId}-${version}`, version: '1.0.0', private: true, imported: true, from: nativeBinary, installScriptBased: true },
         null,
         2
       )
     );
 
-    fs.symlinkSync(binaryPath, binaryLink);
+    fs.symlinkSync(nativeBinary, binaryLink);
 
-    return { success: true, resolvedFromPath: binaryPath };
+    return { success: true, resolvedFromPath: nativeBinary };
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }

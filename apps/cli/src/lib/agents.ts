@@ -22,7 +22,7 @@ import type { AgentConfig, AgentId } from './types.js';
 import { execFileShellSpec } from './platform/index.js';
 import { latestFileMtimeMs } from './fs-walk.js';
 import { damerauLevenshtein } from './fuzzy.js';
-import { getCacheDir, getVersionsDir, getShimsDir, getCliVersionCachePath } from './state.js';
+import { getCacheDir, getVersionsDir, getShimsDir, getHistoryDir, getCliVersionCachePath } from './state.js';
 import { resolveVersion, getVersionHomePath, getBinaryPath } from './versions.js';
 import { supports } from './capabilities.js';
 
@@ -89,10 +89,60 @@ function saveCliVersionCache(): void {
  * dispatcher) showed up under `agents view`'s "Not Managed by Agents CLI"
  * section, even though the user had nothing to import.
  */
-export function findInPath(command: string): string | null {
+interface NativeBinaryResolutionOptions {
+  shimsDir?: string;
+  historyDir?: string;
+}
+
+function pathIsWithin(candidate: string, directory: string): boolean {
+  const relative = path.relative(directory, candidate);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+/**
+ * Resolve a PATH candidate to the immutable native executable agents-cli may
+ * safely register. An adopted launcher can live outside the shims directory
+ * while resolving back into it; in that case its durable adoption record is
+ * the source of truth for the original executable.
+ */
+export function resolveNativeBinaryPath(
+  command: string,
+  candidate: string,
+  options: NativeBinaryResolutionOptions = {},
+): string | null {
+  const shimsDir = options.shimsDir ?? getShimsDir();
+  const historyDir = options.historyDir ?? getHistoryDir();
+
+  let canonicalCandidate: string;
+  let canonicalShimsDir: string;
+  try {
+    canonicalCandidate = fs.realpathSync(candidate);
+    canonicalShimsDir = fs.realpathSync(shimsDir);
+  } catch {
+    return null;
+  }
+
+  if (!pathIsWithin(canonicalCandidate, canonicalShimsDir)) return canonicalCandidate;
+
+  const recordPath = path.join(historyDir, 'adopted-launchers', command);
+  try {
+    const [original] = fs.readFileSync(recordPath, 'utf-8').split(/\r?\n/, 1);
+    if (!original) return null;
+    const canonicalOriginal = fs.realpathSync(original);
+    if (pathIsWithin(canonicalOriginal, canonicalShimsDir)) return null;
+    const stat = fs.statSync(canonicalOriginal);
+    if (!stat.isFile()) return null;
+    fs.accessSync(canonicalOriginal, fs.constants.X_OK);
+    return canonicalOriginal;
+  } catch {
+    return null;
+  }
+}
+
+export function findInPath(command: string, options: NativeBinaryResolutionOptions = {}): string | null {
   const pathEnv = process.env.PATH || '';
   const pathExt = process.platform === 'win32' ? (process.env.PATHEXT || '').split(';') : [''];
-  const shimsDir = getShimsDir();
+  const shimsDir = options.shimsDir ?? getShimsDir();
   for (const dir of pathEnv.split(path.delimiter)) {
     if (!dir) continue;
     if (path.resolve(dir) === path.resolve(shimsDir)) continue;
@@ -100,7 +150,9 @@ export function findInPath(command: string): string | null {
       const full = path.join(dir, command + ext);
       try {
         const stat = fs.statSync(full);
-        if (stat.isFile()) return full;
+        if (!stat.isFile()) continue;
+        const native = resolveNativeBinaryPath(command, full, options);
+        if (native) return native;
       } catch {
         /* not in this dir */
       }
@@ -327,9 +379,8 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     // + warns for pre-2.4 installs); the direct `subagents add --agents cursor` path
     // writes unconditionally, same as the other since-gated agents.
     // See transformSubagentForCursor / https://cursor.com/docs/subagents.
-    // interactiveRepl: false — cursor-agent exits immediately with no argv. It requires a
-    // prompt to do anything useful; a bare invocation is not a REPL (RUSH-2185, EXEC-23a).
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '2026.1.22' }, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'], interactiveRepl: false }, // allowlist: ~/.cursor/cli-config.json
+    // Current cursor-agent builds open their interactive TUI with no argv.
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '2026.1.22' }, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'], interactiveRepl: true }, // allowlist: ~/.cursor/cli-config.json
   },
   opencode: {
     id: 'opencode',
