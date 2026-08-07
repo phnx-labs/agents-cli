@@ -117,7 +117,7 @@ const REAL_PATH = process.env.PATH || '';
 const SYSTEM_DIR = getAgentsDir();
 const LEGACY_SYSTEM_DIR = getLegacySystemAgentsDir();
 const MIGRATED_SENTINEL_FILE = getMigratedSentinelPath();
-const MIGRATION_SENTINEL_VALUE = 'v17';
+const MIGRATION_SENTINEL_VALUE = 'v18';
 
 describe('checkForUpdates — maybeWarnMultiInstall (index.ts:535-575): the PATH + known-install-root scan', () => {
   bench('resolveRunningPackageRoot(__dirname) — real path math, no fs walk when not a bunfs virtual path (self-update.ts:177)', () => {
@@ -912,11 +912,11 @@ describe('settled init/migration probes (index.ts:1394-1446) — non-mutating st
     isGitRepo(SYSTEM_DIR);
   });
 
-  bench('v17 migration sentinel gate — existsSync + readFileSync + trim, without runMigration (index.ts:1424-1446)', () => {
+  bench('v18 migration sentinel gate — existsSync + readFileSync + trim, without runMigration (index.ts:1424-1446)', () => {
     probeMigrationSentinel();
   });
 
-  bench('all settled probes — legacy lstat + system-repo existsSync + v17 sentinel read', () => {
+  bench('all settled probes — legacy lstat + system-repo existsSync + v18 sentinel read', () => {
     probeLegacySystemRepo();
     isGitRepo(SYSTEM_DIR);
     probeMigrationSentinel();

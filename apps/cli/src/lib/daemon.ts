@@ -910,6 +910,33 @@ export async function runDaemon(): Promise<void> {
   };
   const keychainReapInterval = setInterval(() => { void runKeychainReap(); }, 5 * 60_000);
 
+  // RUSH-2367: self-terminate if this daemon's own state dir has been removed
+  // out from under it — the shape of a leaked test-fixture daemon whose /tmp
+  // HOME was deleted by its test's own cleanup while the process itself
+  // somehow survived (lost the SIGTERM/SIGKILL race, or outlived a killed
+  // test runner before its `finally` ever ran). Nothing else can reach a
+  // daemon in that state: no `agents daemon` command targets it, since a
+  // different HOME resolves a different getDaemonDir() and therefore a
+  // different instance registry — without this it runs forever. Reads
+  // getDaemonDirRoot() directly, never the local getDaemonDir() wrapper,
+  // which recreates the directory as a side effect and would defeat the very
+  // check it exists to perform.
+  let checkingStateDir = false;
+  const runStateDirSelfCheck = (): void => {
+    if (checkingStateDir) return;
+    checkingStateDir = true;
+    try {
+      if (!fs.existsSync(getDaemonDirRoot())) {
+        log('WARN', `Daemon state dir ${getDaemonDirRoot()} no longer exists; exiting (self-terminate guard)`);
+        void handleShutdown();
+      }
+    } finally {
+      checkingStateDir = false;
+    }
+  };
+  const stateDirCheckMs = Number(process.env.AGENTS_DAEMON_STATE_DIR_CHECK_MS) || 60_000;
+  const stateDirCheckInterval = setInterval(runStateDirSelfCheck, stateDirCheckMs);
+
   const handleReload = () => {
     log('INFO', 'Reloading jobs (SIGHUP)');
     // Refresh user-layer copies of opted-in project routines BEFORE the
@@ -957,6 +984,7 @@ export async function runDaemon(): Promise<void> {
     clearTimeout(healKickoff);
     clearInterval(brokerSelfHealInterval);
     clearInterval(keychainReapInterval);
+    clearInterval(stateDirCheckInterval);
     hostedBroker?.close();
     removeDaemonPid();
     removeHeartbeat();
@@ -1401,8 +1429,16 @@ export interface DaemonStopResult {
  * fixture with its own HOME, a separate install/home) registers elsewhere and is
  * invisible here — it is never a stop/takeover target. POSIX-only (the registry
  * and its `ps` liveness probe are); `[]` on Windows.
+ *
+ * Exported for `agents daemon status`/`doctor`/`services` (RUSH-2368): those
+ * commands previously flagged every `__daemon-run` on the box (a raw `ps` scan)
+ * as a "duplicate" of this daemon, which misreported test fixtures under their
+ * own HOME — and therefore their own state dir and registry — as strays to
+ * kill. This registry read is the same scope the reaper (`reapStrayDaemons`)
+ * and the stop postcondition (`stopDaemon`) already use, so the display and the
+ * reaper agree on what a duplicate is.
  */
-function findSurvivingStateDirDaemons(exclude: Set<number>): number[] {
+export function findSurvivingStateDirDaemons(exclude: Set<number>): number[] {
   if (process.platform === 'win32') return [];
   const dir = getDaemonInstancesDir();
   let entries: string[];

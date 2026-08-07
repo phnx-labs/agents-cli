@@ -705,6 +705,73 @@ describe('daemon single-instance (#414)', () => {
 });
 
 /**
+ * Self-terminate guard (RUSH-2367). A real daemon whose own state dir
+ * disappears out from under it — the exact shape of a leaked test fixture
+ * whose /tmp HOME got removed while the process itself somehow survived — has
+ * no other way to be reached: a different HOME resolves a different
+ * getDaemonDir() and therefore a different instance registry, so no `agents
+ * daemon` command, reaper, or takeover can ever see it. Real path: spawns the
+ * actual built CLI, deletes its HOME while it is running, and asserts the
+ * process exits on its own within a bounded time — no mocking of the check.
+ */
+describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () => {
+  it.skipIf(process.platform === 'win32')(
+    'exits on its own once its state dir is deleted, well inside the check interval',
+    async () => {
+      if (!fs.existsSync(DIST_ENTRY)) {
+        execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
+      }
+
+      const tmpHome = fs.mkdtempSync(path.join('/tmp', 'agd-selfterm-'));
+      const systemDir = path.join(tmpHome, '.agents', '.system');
+      fs.mkdirSync(systemDir, { recursive: true });
+      execFileSync('git', ['init', '-q', systemDir]);
+
+      const pidFile = path.join(tmpHome, '.agents', '.cache', 'helpers', 'daemon', 'daemon.pid');
+      const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+      const readPid = () => (fs.existsSync(pidFile) ? parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10) : null);
+      const waitFor = async (cond: () => boolean, timeoutMs: number) => {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+          if (cond()) return true;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        return cond();
+      };
+
+      const childEnv = {
+        ...process.env,
+        HOME: tmpHome,
+        // Poll every 300ms instead of the 60s production default so the test
+        // does not need to wait a full minute for the guard to fire.
+        AGENTS_DAEMON_STATE_DIR_CHECK_MS: '300',
+      };
+      delete childEnv.CLAUDE_CODE_OAUTH_TOKEN;
+
+      let pid: number | null = null;
+      try {
+        pid = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHome, 'daemon.log'), env: childEnv }).pid!;
+        expect(pid).toBeTruthy();
+        expect(await waitFor(() => readPid() === pid, 20_000)).toBe(true);
+        expect(alive(pid)).toBe(true);
+
+        // Delete the whole HOME while the daemon is still running — the
+        // real-world shape of a test's cleanup racing (and losing to) its own
+        // kill signal, or a killed test runner whose `finally` never ran.
+        fs.rmSync(tmpHome, { recursive: true, force: true });
+
+        // The guard polls every 300ms above; give it several cycles of margin.
+        expect(await waitFor(() => !alive(pid!), 10_000)).toBe(true);
+      } finally {
+        if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+        try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* already gone */ }
+      }
+    },
+    30_000,
+  );
+});
+
+/**
  * stopDaemon postcondition assertion (RUSH-2355 / SING-12). Real path, no
  * mocking: a genuine `__daemon-run` (or a real SIGTERM-ignoring process) is
  * stopped through the actual `agents daemon stop` command in a subprocess under

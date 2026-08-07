@@ -938,6 +938,15 @@ function migrateRuntimeToHistory(): void {
   }
 }
 
+/** Rename the session marker store after the product vocabulary changed from
+ * favorite to bookmark. The destination wins if a newer CLI already wrote it. */
+function migrateLegacySessionMarkersToBookmarks(): void {
+  moveFileOnce(
+    path.join(HISTORY_DIR, 'favorites.json'),
+    path.join(HISTORY_DIR, 'bookmarks.json'),
+  );
+}
+
 /**
  * Restore plugins from the cache bucket back to the user-root.
  *
@@ -2023,6 +2032,7 @@ export async function runMigration(): Promise<void> {
   migrateSplitDeviceLocalMeta();
   // Bucket moves: collapse runtime state into ~/.agents/.history and ~/.agents/.cache.
   migrateRuntimeToHistory();
+  migrateLegacySessionMarkersToBookmarks();
   migrateRuntimeToCache();
   // Restore plugins (user-authored) from cache back to user-root. Runs AFTER
   // migrateRuntimeToCache so any legacy plugins/ still at the user-root from

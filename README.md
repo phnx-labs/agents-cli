@@ -338,8 +338,9 @@ On a terminal, `agents sessions --active` (and a bare `agents sessions`) open th
 |---|---|---|
 | `s` | search text | `--query` / positional |
 | `r` | running only | `--active` |
-| `f` | favorites only | `--favorites` |
-| `*` | star / unstar the highlighted session | `agents sessions favorite <id>` |
+| `b` | bookmarks only | `--bookmarks` |
+| `*` | bookmark / unbookmark the highlighted session | `agents sessions bookmark <id>` |
+| `f` | focus the highlighted session | `agents sessions focus <id>` |
 | `c` | team sessions | `--team` (alias: `--teams`) |
 | `a` | agent (cycles) | `-a` |
 | `d` | device (cycles) | `--device` |
@@ -349,7 +350,7 @@ On a terminal, `agents sessions --active` (and a bare `agents sessions`) open th
 | `⏎` | resume / attach | `resume` / `focus` |
 | `y` | copy the equivalent command | `--print-cmd` |
 
-**Star the sessions you keep coming back to.** `*` marks the highlighted row (a `★` shows in the listing), `f` narrows to the starred ones, and `agents sessions favorite <id>` / `--favorites` do the same outside a TTY. Stars live in `~/.agents/.history/favorites.json` keyed by session id, so they survive a reindex of the session cache. They're per-machine — session sync carries transcripts, not this file.
+**Bookmark the sessions you keep coming back to.** `*` marks the highlighted row (a `★` shows in the listing), `b` narrows to bookmarks, and `agents sessions bookmark <id>` / `--bookmarks` do the same outside a TTY. Press `f` to focus the highlighted row through the same attach-or-recover flow as `agents sessions focus <id>`; Enter keeps its existing resume behavior. Bookmarks live in `~/.agents/.history/bookmarks.json` keyed by session id, so they survive a reindex of the session cache. They're per-machine — session sync carries transcripts, not this file.
 
 **A session that lost its host says so.** When an editor window or an SSH connection goes down hard, the agent it owned used to simply disappear from `--active`; when an agent outlived its window in tmux, it reported a plain `idle`. Both now carry their own status: `✗ crashed` (the host went down and took the agent with it) and `◍ orphan` (still alive, but no client is attached — nothing is showing it). Read from tmux's attached-client count and the editor window's registry heartbeat, so a deliberate `agents sessions detach` is never mistaken for one, and a session that is still *working* headlessly is left alone.
 
@@ -359,7 +360,7 @@ Filters **stack** (they AND together), the active set shows in the header, and t
 | --- | --- |
 | ![sessions browser, preview hidden](assets/demos/sessions-preview-before.png) | ![sessions browser, preview open with a links line](assets/demos/sessions-preview-after.png) |
 
-Each live session resolves to `working`, `waiting_input` (with why -- a question, a plan review, or a permission prompt), `idle`, or a lifecycle state such as `orphaned`, `crashed`, `closed`, `abandoned`, `queued`, or `unknown`. Pass the matching flag (`--working`, `--idle`, `--waiting`, `--orphan`, `--crashed`, `--closed`, `--abandoned`, `--queued`, `--unknown`) directly; each implies `--active`, and several flags form a union. The fleet fan-out is already the default; `--local` opts out. `--all` instead widens historical directory and time scope. Rows also carry badges for the PR, worktree, and ticket. `agents sessions focus [selector]` accepts the same agent/version, device, time, team, project, skill/plugin, favorite, and live-state filters as the session browser. A unique id focuses directly; an agent/version or text selector always opens the preview picker. Immediately before attach it checks the tmux pane process: a living pane is joined in place, while a dead/missing pane enters recovery instead of showing tmux's `Pane is dead` screen.
+Each live session resolves to `working`, `waiting_input` (with why -- a question, a plan review, or a permission prompt), `idle`, or a lifecycle state such as `orphaned`, `crashed`, `closed`, `abandoned`, `queued`, or `unknown`. Pass the matching flag (`--working`, `--idle`, `--waiting`, `--orphan`, `--crashed`, `--closed`, `--abandoned`, `--queued`, `--unknown`) directly; each implies `--active`, and several flags form a union. The fleet fan-out is already the default; `--local` opts out. `--all` instead widens historical directory and time scope. Rows also carry badges for the PR, worktree, and ticket. `agents sessions focus [selector]` accepts the same agent/version, device, time, team, project, skill/plugin, bookmark, and live-state filters as the session browser. A unique id focuses directly; an agent/version or text selector always opens the preview picker. Immediately before attach it checks the tmux pane process: a living pane is joined in place, while a dead/missing pane enters recovery instead of showing tmux's `Pane is dead` screen.
 
 Landing on a session cold? `agents sessions <id>` prints a catch-up digest: an inferred title, files changed grouped by directory (created / modified / deleted), a histogram of which tools did the work (including parsed Bash commands -- `git`, `npm`, `ffmpeg`, `ssh`, and so on), and the last test verdict -- the signals to reload a task in seconds.
 

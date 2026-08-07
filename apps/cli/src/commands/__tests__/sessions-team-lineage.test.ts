@@ -46,12 +46,21 @@ describe('hasNoBrowserDisqualifyingFlags — which views the browser can represe
       { until: '2026-01-01' },
       { project: 'agents-cli' },
       { sort: 'cost' },
-      { routine: true },
       { artifacts: true },
       { artifact: 'x' },
     ]) {
       expect(hasNoBrowserDisqualifyingFlags(opts, undefined)).toBe(false);
     }
+  });
+
+  it('routes routine previews and a named team view through the shared browser', () => {
+    expect(hasNoBrowserDisqualifyingFlags({ routine: true }, undefined)).toBe(true);
+    expect(hasNoBrowserDisqualifyingFlags({ routine: 'nightly-review' }, undefined)).toBe(true);
+    expect(hasNoBrowserDisqualifyingFlags({ teams: true, inTeam: 'redesign' }, undefined)).toBe(true);
+  });
+
+  it('keeps the bare grouped --teams report out of the flat browser', () => {
+    expect(hasNoBrowserDisqualifyingFlags({ teams: true }, undefined)).toBe(false);
   });
 
   it('--cloud disqualifies: it lists provider tasks and has no host scope', () => {
