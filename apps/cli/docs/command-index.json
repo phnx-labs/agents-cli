@@ -1,7 +1,7 @@
 {
   "command": "agents",
   "groups": 98,
-  "commands": 569,
+  "commands": 566,
   "tree": [
     {
       "name": "accounts",
@@ -9960,47 +9960,6 @@
           "subcommands": []
         },
         {
-          "name": "lease",
-          "path": "secrets lease",
-          "aliases": [],
-          "description": "Hold only an explicit subset of a bundle until an independent expiry.",
-          "args": [
-            {
-              "name": "bundle",
-              "required": true,
-              "variadic": false
-            }
-          ],
-          "options": [
-            {
-              "flags": "--keys <keys>",
-              "description": "Comma-separated key subset"
-            },
-            {
-              "flags": "--ttl <duration>",
-              "description": "How long to hold it (e.g. 30m, 8h, 3d)"
-            },
-            {
-              "flags": "--agent <agent>",
-              "description": "Narrow the lease to one harness; default is global"
-            },
-            {
-              "flags": "--durable",
-              "description": "Keep the lease across sleep as well as broker restart"
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "leases",
-          "path": "secrets leases",
-          "aliases": [],
-          "description": "List active scoped secret leases.",
-          "args": [],
-          "options": [],
-          "subcommands": []
-        },
-        {
           "name": "list",
           "path": "secrets list",
           "aliases": [
@@ -10351,21 +10310,6 @@
           "subcommands": []
         },
         {
-          "name": "revoke",
-          "path": "secrets revoke",
-          "aliases": [],
-          "description": "Revoke one scoped secret lease immediately.",
-          "args": [
-            {
-              "name": "lease-id",
-              "required": true,
-              "variadic": false
-            }
-          ],
-          "options": [],
-          "subcommands": []
-        },
-        {
           "name": "rotate",
           "path": "secrets rotate",
           "aliases": [],
@@ -10511,6 +10455,10 @@
             {
               "flags": "--agent <agent>",
               "description": "Narrow the unlock to ONE harness type (for example claude, codex, or kimi). Default: the grant is global — every harness and a plain shell can read it, so one Touch ID covers them all."
+            },
+            {
+              "flags": "--keys <keys>",
+              "description": "Hold ONLY this comma-separated subset of the bundle's keys instead of the whole bundle. Scopes exactly one bundle; fails closed on an unknown key. `secrets status` shows which keys a scoped hold covers."
             },
             {
               "flags": "--all",
