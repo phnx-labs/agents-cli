@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Repair Cursor launcher recursion</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-implementing">implementing</span></div>
+<h1>Repair Cursor launcher recursion</h1>
+<p class="summary">Cursor itself is healthy, but agents-cli imported a mutable launcher that adoption later redirected into the agents shim. The repair stores and restores the canonical native executable so both CLI and Factory launches open Cursor's interactive TUI.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">The native Cursor 2026.08.04-aaa8809 executable opens a prompt-less TUI.<span class="meta-sep" aria-hidden="true">·</span>The broken managed path resolved back into the agents cursor-agent shim.</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fix-cursor-launcher-loop</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">RUSH-2345</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex root</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">zion</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">current</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-06</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#proposed-changes"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p>Running <code>agents run cursor</code> or launching Cursor from Factory must display Cursor's interactive prompt instead of a blank terminal.</p>
+<div class="artifact-callout"><strong>Root cause:</strong> the managed version linked to <code>~/.local/bin/cursor-agent</code>; launcher adoption later redirected that path to the agents shim, creating an execution cycle.</div><figure>
+<svg viewBox="0 0 900 250" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title id="flow-title">Cursor launcher repair flow</title>
+  <desc id="flow-desc">Before, the managed binary and agents shim formed a cycle. After, the managed binary points directly at the native Cursor executable.</desc>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#a3e635"></path></marker></defs>
+  <text x="25" y="30" fill="currentColor" font-size="18" font-weight="700">Before: recursive dispatch</text>
+  <rect x="25" y="55" width="190" height="56" rx="8" fill="#252525" stroke="#f97316"></rect><text x="45" y="89" fill="#fff">managed Cursor</text>
+  <rect x="270" y="55" width="190" height="56" rx="8" fill="#252525" stroke="#f97316"></rect><text x="290" y="89" fill="#fff">local launcher</text>
+  <rect x="515" y="55" width="190" height="56" rx="8" fill="#252525" stroke="#f97316"></rect><text x="535" y="89" fill="#fff">agents shim</text>
+  <path d="M215 83 H265 M460 83 H510 M610 115 C610 155 120 155 120 116" fill="none" stroke="#f97316" stroke-width="3" marker-end="url(#arrow)"></path>
+  <text x="25" y="195" fill="currentColor" font-size="18" font-weight="700">After: canonical native target</text>
+  <rect x="270" y="205" width="190" height="36" rx="8" fill="#252525" stroke="#a3e635"></rect><text x="289" y="229" fill="#fff">managed Cursor</text>
+  <rect x="560" y="205" width="250" height="36" rx="8" fill="#252525" stroke="#a3e635"></rect><text x="579" y="229" fill="#fff">native Cursor executable</text>
+  <path d="M460 223 H555" fill="none" stroke="#a3e635" stroke-width="3" marker-end="url(#arrow)"></path>
+</svg>
+<figcaption>Launcher identity is resolved before registration; the durable adoption record repairs existing installations.</figcaption>
+</figure><h2 id="proposed-changes">Proposed Changes</h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Change</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Launcher discovery</td>
+<td>Resolve symlink targets and reject candidates inside the agents shim directory</td>
+<td>PATH discovery returns the native executable</td>
+</tr>
+<tr>
+<td>Import and migration</td>
+<td>Store the canonical target and rerun schema migration v16</td>
+<td>Existing and future Cursor installs avoid the cycle</td>
+</tr>
+<tr>
+<td>Generated shim</td>
+<td>Refuse to execute a managed target that resolves to the shim</td>
+<td>Corrupt state fails over to the recorded native executable</td>
+</tr>
+<tr>
+<td>Capability registry</td>
+<td>Mark current Cursor builds as prompt-less interactive</td>
+<td><code>agents run auto</code> and explicit Cursor launches match live behavior</td>
+</tr>
+</tbody></table>
+<h2 id="public-interface">Public Interface</h2>
+<p>No flags or configuration change. The repaired commands remain:</p>
+<pre><code>agents run cursor --interactive --strategy balanced --mode auto
+</code></pre>
+<p>Factory continues to call the same command through its shared launch engine.</p>
+<h2 id="validation">Validation</h2>
+<ul>
+<li>Reproduce the two-hop symlink topology in migration tests and verify idempotent repair.</li>
+<li>Verify imports retain the native target after the mutable launcher is redirected.</li>
+<li>Verify generated Cursor shims contain the self-recursion guard.</li>
+<li>Install the development CLI and visibly open Cursor through <code>agents run cursor</code>.</li>
+<li>Run the scripted build, focused regression tests, CI, and an independent review.</li>
+</ul>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Control</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A forged adoption record points back to the shim</td>
+<td>Canonicalize and reject targets inside the shim directory</td>
+</tr>
+<tr>
+<td>Migration repeatedly rewrites correct installations</td>
+<td>Leave native links untouched and test the second run</td>
+</tr>
+<tr>
+<td>Factory gains harness-specific behavior</td>
+<td>Make no Factory code change; repair the shared CLI boundary</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2>
+<ul>
+<li><a href="https://linear.app/getrush/issue/RUSH-2345/fix-cursor-blank-terminal-caused-by-self-referential-launcher-shim">RUSH-2345</a></li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6IFJlcGFpciBDdXJzb3IgbGF1bmNoZXIgcmVjdXJzaW9uCnN1bW1hcnk6IEN1cnNvciBpdHNlbGYgaXMgaGVhbHRoeSwgYnV0IGFnZW50cy1jbGkgaW1wb3J0ZWQgYSBtdXRhYmxlIGxhdW5jaGVyIHRoYXQgYWRvcHRpb24gbGF0ZXIgcmVkaXJlY3RlZCBpbnRvIHRoZSBhZ2VudHMgc2hpbS4gVGhlIHJlcGFpciBzdG9yZXMgYW5kIHJlc3RvcmVzIHRoZSBjYW5vbmljYWwgbmF0aXZlIGV4ZWN1dGFibGUgc28gYm90aCBDTEkgYW5kIEZhY3RvcnkgbGF1bmNoZXMgb3BlbiBDdXJzb3IncyBpbnRlcmFjdGl2ZSBUVUkuCnN0YXR1czogaW1wbGVtZW50aW5nCnRyYWNraW5nOiBSVVNILTIzNDUKcHJvamVjdDogYWdlbnRzLWNsaQpyZXBvc2l0b3J5OiBwaG54LWxhYnMvYWdlbnRzLWNsaQpoYXJuZXNzOiBDb2RleAphZ2VudDogcm9vdApob3N0OiB6aW9uCnNlc3Npb246IGN1cnJlbnQKZGF0ZTogMjAyNi0wOC0wNgpmYWN0czoKICAtIFRoZSBuYXRpdmUgQ3Vyc29yIDIwMjYuMDguMDQtYWFhODgwOSBleGVjdXRhYmxlIG9wZW5zIGEgcHJvbXB0LWxlc3MgVFVJLgogIC0gVGhlIGJyb2tlbiBtYW5hZ2VkIHBhdGggcmVzb2x2ZWQgYmFjayBpbnRvIHRoZSBhZ2VudHMgY3Vyc29yLWFnZW50IHNoaW0uCi0tLQoKIyMgUHVycG9zZQoKUnVubmluZyBgYWdlbnRzIHJ1biBjdXJzb3JgIG9yIGxhdW5jaGluZyBDdXJzb3IgZnJvbSBGYWN0b3J5IG11c3QgZGlzcGxheSBDdXJzb3IncyBpbnRlcmFjdGl2ZSBwcm9tcHQgaW5zdGVhZCBvZiBhIGJsYW5rIHRlcm1pbmFsLgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+PHN0cm9uZz5Sb290IGNhdXNlOjwvc3Ryb25nPiB0aGUgbWFuYWdlZCB2ZXJzaW9uIGxpbmtlZCB0byA8Y29kZT5+Ly5sb2NhbC9iaW4vY3Vyc29yLWFnZW50PC9jb2RlPjsgbGF1bmNoZXIgYWRvcHRpb24gbGF0ZXIgcmVkaXJlY3RlZCB0aGF0IHBhdGggdG8gdGhlIGFnZW50cyBzaGltLCBjcmVhdGluZyBhbiBleGVjdXRpb24gY3ljbGUuPC9kaXY+Cgo8ZmlndXJlPgo8c3ZnIHZpZXdCb3g9IjAgMCA5MDAgMjUwIiByb2xlPSJpbWciIGFyaWEtbGFiZWxsZWRieT0iZmxvdy10aXRsZSBmbG93LWRlc2MiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPHRpdGxlIGlkPSJmbG93LXRpdGxlIj5DdXJzb3IgbGF1bmNoZXIgcmVwYWlyIGZsb3c8L3RpdGxlPgogIDxkZXNjIGlkPSJmbG93LWRlc2MiPkJlZm9yZSwgdGhlIG1hbmFnZWQgYmluYXJ5IGFuZCBhZ2VudHMgc2hpbSBmb3JtZWQgYSBjeWNsZS4gQWZ0ZXIsIHRoZSBtYW5hZ2VkIGJpbmFyeSBwb2ludHMgZGlyZWN0bHkgYXQgdGhlIG5hdGl2ZSBDdXJzb3IgZXhlY3V0YWJsZS48L2Rlc2M+CiAgPGRlZnM+PG1hcmtlciBpZD0iYXJyb3ciIG1hcmtlcldpZHRoPSIxMCIgbWFya2VySGVpZ2h0PSIxMCIgcmVmWD0iOSIgcmVmWT0iMyIgb3JpZW50PSJhdXRvIj48cGF0aCBkPSJNMCwwIEwwLDYgTDksMyB6IiBmaWxsPSIjYTNlNjM1Ii8+PC9tYXJrZXI+PC9kZWZzPgogIDx0ZXh0IHg9IjI1IiB5PSIzMCIgZmlsbD0iY3VycmVudENvbG9yIiBmb250LXNpemU9IjE4IiBmb250LXdlaWdodD0iNzAwIj5CZWZvcmU6IHJlY3Vyc2l2ZSBkaXNwYXRjaDwvdGV4dD4KICA8cmVjdCB4PSIyNSIgeT0iNTUiIHdpZHRoPSIxOTAiIGhlaWdodD0iNTYiIHJ4PSI4IiBmaWxsPSIjMjUyNTI1IiBzdHJva2U9IiNmOTczMTYiLz48dGV4dCB4PSI0NSIgeT0iODkiIGZpbGw9IiNmZmYiPm1hbmFnZWQgQ3Vyc29yPC90ZXh0PgogIDxyZWN0IHg9IjI3MCIgeT0iNTUiIHdpZHRoPSIxOTAiIGhlaWdodD0iNTYiIHJ4PSI4IiBmaWxsPSIjMjUyNTI1IiBzdHJva2U9IiNmOTczMTYiLz48dGV4dCB4PSIyOTAiIHk9Ijg5IiBmaWxsPSIjZmZmIj5sb2NhbCBsYXVuY2hlcjwvdGV4dD4KICA8cmVjdCB4PSI1MTUiIHk9IjU1IiB3aWR0aD0iMTkwIiBoZWlnaHQ9IjU2IiByeD0iOCIgZmlsbD0iIzI1MjUyNSIgc3Ryb2tlPSIjZjk3MzE2Ii8+PHRleHQgeD0iNTM1IiB5PSI4OSIgZmlsbD0iI2ZmZiI+YWdlbnRzIHNoaW08L3RleHQ+CiAgPHBhdGggZD0iTTIxNSA4MyBIMjY1IE00NjAgODMgSDUxMCBNNjEwIDExNSBDNjEwIDE1NSAxMjAgMTU1IDEyMCAxMTYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2Y5NzMxNiIgc3Ryb2tlLXdpZHRoPSIzIiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPgogIDx0ZXh0IHg9IjI1IiB5PSIxOTUiIGZpbGw9ImN1cnJlbnRDb2xvciIgZm9udC1zaXplPSIxOCIgZm9udC13ZWlnaHQ9IjcwMCI+QWZ0ZXI6IGNhbm9uaWNhbCBuYXRpdmUgdGFyZ2V0PC90ZXh0PgogIDxyZWN0IHg9IjI3MCIgeT0iMjA1IiB3aWR0aD0iMTkwIiBoZWlnaHQ9IjM2IiByeD0iOCIgZmlsbD0iIzI1MjUyNSIgc3Ryb2tlPSIjYTNlNjM1Ii8+PHRleHQgeD0iMjg5IiB5PSIyMjkiIGZpbGw9IiNmZmYiPm1hbmFnZWQgQ3Vyc29yPC90ZXh0PgogIDxyZWN0IHg9IjU2MCIgeT0iMjA1IiB3aWR0aD0iMjUwIiBoZWlnaHQ9IjM2IiByeD0iOCIgZmlsbD0iIzI1MjUyNSIgc3Ryb2tlPSIjYTNlNjM1Ii8+PHRleHQgeD0iNTc5IiB5PSIyMjkiIGZpbGw9IiNmZmYiPm5hdGl2ZSBDdXJzb3IgZXhlY3V0YWJsZTwvdGV4dD4KICA8cGF0aCBkPSJNNDYwIDIyMyBINTU1IiBmaWxsPSJub25lIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMyIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz4KPC9zdmc+CjxmaWdjYXB0aW9uPkxhdW5jaGVyIGlkZW50aXR5IGlzIHJlc29sdmVkIGJlZm9yZSByZWdpc3RyYXRpb247IHRoZSBkdXJhYmxlIGFkb3B0aW9uIHJlY29yZCByZXBhaXJzIGV4aXN0aW5nIGluc3RhbGxhdGlvbnMuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIFByb3Bvc2VkIENoYW5nZXMKCnwgQXJlYSB8IENoYW5nZSB8IFJlc3VsdCB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCBMYXVuY2hlciBkaXNjb3ZlcnkgfCBSZXNvbHZlIHN5bWxpbmsgdGFyZ2V0cyBhbmQgcmVqZWN0IGNhbmRpZGF0ZXMgaW5zaWRlIHRoZSBhZ2VudHMgc2hpbSBkaXJlY3RvcnkgfCBQQVRIIGRpc2NvdmVyeSByZXR1cm5zIHRoZSBuYXRpdmUgZXhlY3V0YWJsZSB8CnwgSW1wb3J0IGFuZCBtaWdyYXRpb24gfCBTdG9yZSB0aGUgY2Fub25pY2FsIHRhcmdldCBhbmQgcmVydW4gc2NoZW1hIG1pZ3JhdGlvbiB2MTYgfCBFeGlzdGluZyBhbmQgZnV0dXJlIEN1cnNvciBpbnN0YWxscyBhdm9pZCB0aGUgY3ljbGUgfAp8IEdlbmVyYXRlZCBzaGltIHwgUmVmdXNlIHRvIGV4ZWN1dGUgYSBtYW5hZ2VkIHRhcmdldCB0aGF0IHJlc29sdmVzIHRvIHRoZSBzaGltIHwgQ29ycnVwdCBzdGF0ZSBmYWlscyBvdmVyIHRvIHRoZSByZWNvcmRlZCBuYXRpdmUgZXhlY3V0YWJsZSB8CnwgQ2FwYWJpbGl0eSByZWdpc3RyeSB8IE1hcmsgY3VycmVudCBDdXJzb3IgYnVpbGRzIGFzIHByb21wdC1sZXNzIGludGVyYWN0aXZlIHwgYGFnZW50cyBydW4gYXV0b2AgYW5kIGV4cGxpY2l0IEN1cnNvciBsYXVuY2hlcyBtYXRjaCBsaXZlIGJlaGF2aW9yIHwKCiMjIFB1YmxpYyBJbnRlcmZhY2UKCk5vIGZsYWdzIG9yIGNvbmZpZ3VyYXRpb24gY2hhbmdlLiBUaGUgcmVwYWlyZWQgY29tbWFuZHMgcmVtYWluOgoKYGBgc2gKYWdlbnRzIHJ1biBjdXJzb3IgLS1pbnRlcmFjdGl2ZSAtLXN0cmF0ZWd5IGJhbGFuY2VkIC0tbW9kZSBhdXRvCmBgYAoKRmFjdG9yeSBjb250aW51ZXMgdG8gY2FsbCB0aGUgc2FtZSBjb21tYW5kIHRocm91Z2ggaXRzIHNoYXJlZCBsYXVuY2ggZW5naW5lLgoKIyMgVmFsaWRhdGlvbgoKLSBSZXByb2R1Y2UgdGhlIHR3by1ob3Agc3ltbGluayB0b3BvbG9neSBpbiBtaWdyYXRpb24gdGVzdHMgYW5kIHZlcmlmeSBpZGVtcG90ZW50IHJlcGFpci4KLSBWZXJpZnkgaW1wb3J0cyByZXRhaW4gdGhlIG5hdGl2ZSB0YXJnZXQgYWZ0ZXIgdGhlIG11dGFibGUgbGF1bmNoZXIgaXMgcmVkaXJlY3RlZC4KLSBWZXJpZnkgZ2VuZXJhdGVkIEN1cnNvciBzaGltcyBjb250YWluIHRoZSBzZWxmLXJlY3Vyc2lvbiBndWFyZC4KLSBJbnN0YWxsIHRoZSBkZXZlbG9wbWVudCBDTEkgYW5kIHZpc2libHkgb3BlbiBDdXJzb3IgdGhyb3VnaCBgYWdlbnRzIHJ1biBjdXJzb3JgLgotIFJ1biB0aGUgc2NyaXB0ZWQgYnVpbGQsIGZvY3VzZWQgcmVncmVzc2lvbiB0ZXN0cywgQ0ksIGFuZCBhbiBpbmRlcGVuZGVudCByZXZpZXcuCgojIyBSaXNrcwoKfCBSaXNrIHwgQ29udHJvbCB8CnwgLS0tIHwgLS0tIHwKfCBBIGZvcmdlZCBhZG9wdGlvbiByZWNvcmQgcG9pbnRzIGJhY2sgdG8gdGhlIHNoaW0gfCBDYW5vbmljYWxpemUgYW5kIHJlamVjdCB0YXJnZXRzIGluc2lkZSB0aGUgc2hpbSBkaXJlY3RvcnkgfAp8IE1pZ3JhdGlvbiByZXBlYXRlZGx5IHJld3JpdGVzIGNvcnJlY3QgaW5zdGFsbGF0aW9ucyB8IExlYXZlIG5hdGl2ZSBsaW5rcyB1bnRvdWNoZWQgYW5kIHRlc3QgdGhlIHNlY29uZCBydW4gfAp8IEZhY3RvcnkgZ2FpbnMgaGFybmVzcy1zcGVjaWZpYyBiZWhhdmlvciB8IE1ha2Ugbm8gRmFjdG9yeSBjb2RlIGNoYW5nZTsgcmVwYWlyIHRoZSBzaGFyZWQgQ0xJIGJvdW5kYXJ5IHwKCiMjIFRyYWNraW5nCgotIFtSVVNILTIzNDVdKGh0dHBzOi8vbGluZWFyLmFwcC9nZXRydXNoL2lzc3VlL1JVU0gtMjM0NS9maXgtY3Vyc29yLWJsYW5rLXRlcm1pbmFsLWNhdXNlZC1ieS1zZWxmLXJlZmVyZW50aWFsLWxhdW5jaGVyLXNoaW0pCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
