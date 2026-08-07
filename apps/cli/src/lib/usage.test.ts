@@ -782,7 +782,7 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
     fs.utimesSync(p, t, t);
   }
 
-  function writeSession(mtimeMs: number, usedPercent: number): void {
+  function writeSession(mtimeMs: number, usedPercent: number, windowMinutes = 300): void {
     const dir = path.join(home, '.codex', 'sessions', '2026', '08', '05');
     fs.mkdirSync(dir, { recursive: true });
     const p = path.join(dir, `rollout-${mtimeMs}.jsonl`);
@@ -793,7 +793,7 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
         type: 'event_msg',
         payload: {
           type: 'token_count',
-          rate_limits: { primary: { used_percent: usedPercent, window_minutes: 300 } },
+          rate_limits: { primary: { used_percent: usedPercent, window_minutes: windowMinutes } },
         },
       }) + '\n'
     );
@@ -819,6 +819,28 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
     const info = await getUsageInfo('codex', { home });
     const session = info.snapshot?.windows.find((w) => w.key === 'session');
     expect(session?.usedPercent).toBe(42);
+  });
+
+  it('labels a primary 7-day quota as weekly usage', async () => {
+    writeAuth(NOW);
+    writeSession(NOW + HOUR, 54, 10_080);
+
+    const info = await getUsageInfo('codex', { home });
+    expect(info.snapshot?.windows).toEqual([
+      expect.objectContaining({ key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 54 }),
+    ]);
+    expect(formatUsageSummary(null, info.snapshot)).toContain('W:');
+  });
+
+  it('labels a primary 30-day quota as monthly usage', async () => {
+    writeAuth(NOW);
+    writeSession(NOW + HOUR, 21, 43_200);
+
+    const info = await getUsageInfo('codex', { home });
+    expect(info.snapshot?.windows).toEqual([
+      expect.objectContaining({ key: 'month', label: 'Current month', shortLabel: 'M', usedPercent: 21 }),
+    ]);
+    expect(formatUsageSummary(null, info.snapshot)).toContain('M:');
   });
 
   it('prefers the current account session over a stale pre-login one', async () => {
