@@ -833,7 +833,7 @@ describePosix('resolveLaunchBinary — is the harness actually on this machine (
     plantExecutable(binary);
     expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'cursor'))).toBe(false);
 
-    expect(probe('cursor')).toBe(binary);
+    expect(probe('cursor')).toBe(fs.realpathSync(binary));
   });
 
   // (c) The bug: nothing installed anywhere. Must be null so the caller fails loud
@@ -874,7 +874,7 @@ describePosix('resolveLaunchBinary — is the harness actually on this machine (
     fs.symlinkSync(shim, path.join(pathDir, 'opencode'));
     plantExecutable(path.join(home, '.agents', '.history', 'versions', 'opencode', '1.16.0', 'node_modules', '.bin', 'opencode'));
 
-    expect(probe('opencode')).toBe(shim);
+    expect(probe('opencode')).toBe(fs.realpathSync(shim));
   });
 
   // The version-pinned branch mirrors buildExecCommand, which prefers the
