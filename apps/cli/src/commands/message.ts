@@ -32,6 +32,7 @@ import { resolveProvider } from '../lib/cloud/registry.js';
 import { mailboxDir, enqueue } from '../lib/mailbox.js';
 import { getAgentsInvocation } from '../lib/daemon.js';
 import { resolveTaskRef } from '../lib/hosts/tasks.js';
+import { reconcileRunningTasks } from '../lib/hosts/reconcile.js';
 import {
   resolveMessageTarget,
   mailboxIdForActiveSession,
@@ -323,7 +324,14 @@ export function registerMessageCommand(program: Command): void {
           // `--device ... --no-follow` dispatch, which `getActiveSessions()`
           // never sees (its live process is on another host). Same records
           // `agents hosts ps` reads, so the two commands never disagree.
-          const hostRoute = decideHostTaskRoute(resolveTaskRef(target), target);
+          // Heal first, exactly as `hosts stop`/`hosts ps` do: a detached
+          // dispatch record never self-updates, so a finished run is still
+          // stamped `status:'running'` on disk. Without this we'd route a dead
+          // task through an SSH reroute that can only fail, instead of
+          // reporting it finished here.
+          const onDisk = resolveTaskRef(target);
+          const healed = onDisk ? (reconcileRunningTasks([onDisk])[0] ?? onDisk) : null;
+          const hostRoute = decideHostTaskRoute(healed, target);
           if (hostRoute.kind === 'reroute') {
             await deliverViaHostReroute(hostRoute, text, opts);
             return;

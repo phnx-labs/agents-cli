@@ -64,4 +64,59 @@ describe('spawn() postcondition — never reports success for a record that is n
     expect(reread?.after).toEqual(['first']);
     expect(reread?.status).toBe(AgentStatus.PENDING);
   });
+
+  it('spawn() THROWS (never returns a success) when the record is not on disk afterward', async () => {
+    const base = tmpBase();
+    dirs.push(base);
+
+    const sibling = new AgentProcess(
+      'sibling-2', 'post-team', 'claude', 'first half', null, 'plan',
+      null, AgentStatus.COMPLETED, new Date(Date.now() - 60_000), new Date(), base,
+      null, null, null, null, null, null, null, 'first',
+    );
+    await sibling.saveMeta();
+
+    const mgr = new AgentManager(50, base);
+
+    // Fault injection at the REAL seam, not a mock: the only way a record
+    // vanishes between saveMeta() and the postcondition read is something
+    // deleting it in between, and historically that something was the
+    // retention pass spawn() runs right there (the RUSH-2356 regression:
+    // cleanupOldAgents treated `pending` as reapable). Reproduce that effect
+    // with a real `fs.rm` of the record it just wrote. saveMeta(),
+    // loadFromDisk(), the manager and the filesystem are all the real thing —
+    // only the fault is injected, and it is injected exactly where the bug was.
+    const realCleanup = (mgr as unknown as { cleanupOldAgents(): Promise<void> }).cleanupOldAgents;
+    (mgr as unknown as { cleanupOldAgents(): Promise<void> }).cleanupOldAgents = async function reapEverything() {
+      await realCleanup.call(mgr);
+      for (const entry of await fs.promises.readdir(base)) {
+        await fs.promises.rm(path.join(base, entry), { recursive: true, force: true });
+      }
+    };
+
+    let spawned: AgentProcess | null = null;
+    let thrown: Error | null = null;
+    try {
+      spawned = await mgr.spawn(
+        'post-team', 'claude', 'second half', null, null, 'medium',
+        null, null, null, 'second', ['first'],
+        null, null, null, 'rush', // cloudProvider — skips the CLI-availability pre-flight
+      );
+    } catch (err) {
+      thrown = err as Error;
+    }
+
+    // Fail loud: the add reports the failure instead of printing a success
+    // block for a teammate that does not exist.
+    expect(spawned).toBeNull();
+    expect(thrown).not.toBeNull();
+    expect(thrown?.message).toMatch(/was not durably persisted to disk after add/);
+    expect(thrown?.message).toContain('second');
+
+    // And the half-created teammate is not left behind in the manager's
+    // in-memory cache either — `teams status` must not list a record that
+    // isn't on disk.
+    const all = await mgr.listAll();
+    expect(all.map((a) => a.name)).not.toContain('second');
+  });
 });
