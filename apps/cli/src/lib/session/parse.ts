@@ -1384,8 +1384,13 @@ const OPENCODE_INPUT_MAX_BYTES = 4000;
  *     nothing — it took one session's loaded tool payload from 299,365 to
  *     1,911,209 bytes. The projection drops `attachments` (and every other
  *     unread key) outright, caps `state.output`, and collapses an oversized
- *     `state.input` to just its addressing fields. Above that cap the other
- *     input keys (an `edit`'s `oldString`/`newString`) are gone, deliberately.
+ *     `state.input` to just its addressing fields. Those are the keys the
+ *     enrichment reads — `filePath`/`path` for an edit and `cwd`/`workdir`/
+ *     `working_directory` for a shell (`extractRecentDirectoriesTouched` in
+ *     state.ts), plus `command`/`description`, themselves capped since a command
+ *     can be arbitrarily long. Above the cap every other input key (an `edit`'s
+ *     `oldString`/`newString`) is gone, deliberately — nothing downstream reads
+ *     them, and they are the weight.
  *
  * `json_valid` guards every `json_extract`: SQLite raises "malformed JSON" on a
  * non-JSON value, which aborts the WHOLE query, so one bad `part` row would
@@ -1414,8 +1419,11 @@ export const OPENCODE_TRANSCRIPT_QUERY = `
             THEN json_object(
               'filePath', json_extract(p.data, '$.state.input.filePath'),
               'path', json_extract(p.data, '$.state.input.path'),
-              'command', json_extract(p.data, '$.state.input.command'),
-              'description', json_extract(p.data, '$.state.input.description')
+              'command', substr(COALESCE(json_extract(p.data, '$.state.input.command'), ''), 1, ${OPENCODE_OUTPUT_MAX_CHARS}),
+              'description', substr(COALESCE(json_extract(p.data, '$.state.input.description'), ''), 1, ${OPENCODE_OUTPUT_MAX_CHARS}),
+              'cwd', json_extract(p.data, '$.state.input.cwd'),
+              'workdir', json_extract(p.data, '$.state.input.workdir'),
+              'working_directory', json_extract(p.data, '$.state.input.working_directory')
             )
             ELSE json_extract(p.data, '$.state.input')
           END,

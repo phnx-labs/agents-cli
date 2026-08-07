@@ -25,6 +25,7 @@ const OPENCODE_DB = path.join(tmpHome, '.local', 'share', 'opencode', 'opencode.
 const CWD = path.join(tmpHome, 'repo');
 const READ_FILE = path.join(CWD, 'src', 'huge-image-holder.ts');
 const EDIT_FILE = path.join(CWD, 'src', 'edited.ts');
+const SHELL_CWD = path.join(CWD, 'packages', 'runner');
 
 type Discover = typeof import('./discover.js');
 type DB = typeof import('./db.js');
@@ -93,7 +94,15 @@ beforeAll(async () => {
       state: { status: 'completed', input: { filePath: EDIT_FILE, oldString: BIG_STRING, newString: BIG_STRING }, output: 'ok' },
     }), T0 + 1);
 
-  // (3) Poisoned rows: a non-JSON part and a non-JSON message in the SAME shared DB.
+  // (3) A `shell` whose input is oversized: the collapse must keep `cwd`, which is
+  // the key `extractRecentDirectoriesTouched` reads for shell tools (state.ts).
+  insPart.run(`${SESSION_ID}-p3`, `${SESSION_ID}-m0`, SESSION_ID,
+    JSON.stringify({
+      type: 'tool', tool: 'shell', callID: 'c3',
+      state: { status: 'completed', input: { command: `echo ${BIG_STRING}`, cwd: SHELL_CWD }, output: 'ok' },
+    }), T0 + 4);
+
+  // (4) Poisoned rows: a non-JSON part and a non-JSON message in the SAME shared DB.
   insPart.run(`${SESSION_ID}-p2`, `${SESSION_ID}-m0`, SESSION_ID, 'not json at all', T0 + 2);
   insMsg.run(`${SESSION_ID}-m1`, SESSION_ID, '<<< truncated write >>>', T0 + 3);
 
@@ -121,7 +130,7 @@ describe('OpenCode scan survives a malformed row (RUSH-2358 follow-up)', () => {
 
   it('counts only the valid tool parts, ignoring the poisoned row', () => {
     const s = db.getSessionById(SESSION_ID);
-    expect(s!.toolCallCount).toBe(2);
+    expect(s!.toolCallCount).toBe(3); // read + edit + shell; the non-JSON row is skipped
   });
 
   it('still aggregates tokens across the valid messages', () => {
@@ -175,6 +184,14 @@ describe('OpenCode tool-part read stays bounded (RUSH-2358 follow-up)', () => {
     // `edit`'s oversized input collapses to its addressing fields — filePath survives.
     expect(toolUses.find(e => e.tool === 'edit')?.path).toBe(EDIT_FILE);
     expect(JSON.stringify(toolUses.find(e => e.tool === 'edit')?.args)).not.toContain(BIG_STRING);
+  });
+
+  it('keeps a shell tool cwd through the oversized-input collapse', () => {
+    const shell = (parsed().filter(e => e.type === 'tool_use') as Array<any>).find(e => e.tool === 'shell');
+    // `extractRecentDirectoriesTouched` reads args.cwd for shell tools; dropping it
+    // would silently degrade the session's directories to the session cwd.
+    expect(shell?.args?.cwd).toBe(SHELL_CWD);
+    expect(JSON.stringify(shell?.args)).not.toContain(BIG_STRING);
   });
 
   it('drops the non-JSON part without losing the rest of the transcript', () => {

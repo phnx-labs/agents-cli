@@ -222,8 +222,10 @@ has to answer at once:
   `state.output` therefore bounded nothing: one session's loaded tool payload went
   299,365 → 1,911,209 bytes. The projection drops `attachments` and every other unread
   key outright, caps `state.output` at 2,000 chars, and collapses a `state.input` over
-  4,000 bytes to just its addressing fields (`filePath`, `path`, `command`,
-  `description`).
+  4,000 bytes to just the keys the enrichment reads — `filePath` / `path` for an edit,
+  `cwd` / `workdir` / `working_directory` for a shell, plus `command` / `description`.
+  Above that cap every other input key (an `edit`'s `oldString` / `newString`) is
+  dropped, deliberately: they are recorded nowhere downstream and they are the weight.
 
 **Every `json_extract` is guarded by `json_valid`.** SQLite raises `malformed JSON` on a
 non-JSON value and that aborts the *whole* query, so a single unparseable `part` or
