@@ -66,6 +66,18 @@ function isHidden(cmd: Command): boolean {
   return (cmd as unknown as { _hidden?: boolean })._hidden === true;
 }
 
+/**
+ * Deterministic, locale-independent name sort. `localeCompare` orders by the
+ * platform's ICU, which differs between macOS (dev) and Linux (CI) — it reordered
+ * the committed index and the CI gate caught the drift. UTF-16 codepoint order
+ * (`<`/`>`) is identical on every platform.
+ */
+function byName(a: Command, b: Command): number {
+  const x = a.name();
+  const y = b.name();
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
 /** Convert one Commander command (and its whole subtree) into a plain CommandNode. */
 export function toNode(cmd: Command, parentPath: string): CommandNode {
   const name = cmd.name();
@@ -80,7 +92,7 @@ export function toNode(cmd: Command, parentPath: string): CommandNode {
     .map((o) => ({ flags: o.flags, description: (o.description ?? '').trim() }));
   const subcommands = cmd.commands
     .filter((c) => !isHidden(c))
-    .sort((a, b) => a.name().localeCompare(b.name()))
+    .sort(byName)
     .map((c) => toNode(c, path));
   // Commander's summary() is the short one-liner when set; fall back to description().
   const summary = typeof cmd.summary === 'function' ? cmd.summary() : '';
@@ -99,7 +111,7 @@ export function toNode(cmd: Command, parentPath: string): CommandNode {
 export function walk(program: Command): CommandNode[] {
   return program.commands
     .filter((c) => !isHidden(c))
-    .sort((a, b) => a.name().localeCompare(b.name()))
+    .sort(byName)
     .map((c) => toNode(c, ''));
 }
 
@@ -160,8 +172,8 @@ export function renderJson(nodes: CommandNode[]): string {
 
 // CLI entry — only when executed directly (bun sets import.meta.main; under
 // vitest/node it is falsy, so importing the pure helpers has no side effect).
-// GEN_COMMAND_INDEX_OUT_DIR overrides the output dir (verify-docs.sh regenerates
-// into a temp dir to diff against the committed files); defaults to ./docs.
+// GEN_COMMAND_INDEX_OUT_DIR overrides the output dir (verify-command-index.sh
+// regenerates into a temp dir to diff against the committed files); defaults to ./docs.
 if ((import.meta as { main?: boolean }).main) {
   const program = await buildFullCommandTree();
   const nodes = walk(program);

@@ -21,6 +21,8 @@ rc=0
 for f in command-index.md command-index.json; do
   if ! diff -q "docs/$f" "$TMP/$f" >/dev/null 2>&1; then
     printf '✗ docs/%s is stale — run `npm run gen:index` and commit the result\n' "$f" >&2
+    # Show the first lines of the drift so the failure is diagnosable in CI logs.
+    diff -u "docs/$f" "$TMP/$f" 2>/dev/null | head -30 >&2 || true
     rc=1
   fi
 done
