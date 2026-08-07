@@ -509,7 +509,7 @@ export function multiItemPicker<T>(config: MultiPickerConfig<T>): Promise<T[] | 
 }
 
 /** Configuration for the dynamic (async-refetch) picker prompt. */
-export interface DynamicPickerConfig<T, F> {
+export interface DynamicPickerConfig<T, F, A = never> {
   message: string;
   /** The initial filter state. Changing it (via a keybinding) re-runs {@link load}. */
   initialFilter: F;
@@ -530,6 +530,8 @@ export interface DynamicPickerConfig<T, F> {
    * SAME reference is a no-op; a new object triggers a reload.
    */
   keyBindings?: Record<string, (filter: F) => F>;
+  /** Keys that submit the highlighted row with an alternate typed action. */
+  submitKeys?: Record<string, A>;
   /**
    * Side-effecting keys that don't change the filter (e.g. `y` copies a command).
    * Receives the live search `query` so the effect can be search-aware. Return a
@@ -578,9 +580,10 @@ export function hotkeyToken(key: { name?: string; sequence?: string; ctrl?: bool
 }
 
 /** The result returned when the user selects a row: the item plus the live filter. */
-export interface DynamicPicked<T, F> {
+export interface DynamicPicked<T, F, A = never> {
   item: T;
   filter: F;
+  action?: A;
 }
 
 /**
@@ -593,8 +596,8 @@ export interface DynamicPicked<T, F> {
  * Same render/pagination/preview machinery as the static pickers — only the data
  * source and keymap are dynamic.
  */
-export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<DynamicPicked<T, F> | null> {
-  const prompt = createPrompt<DynamicPicked<T, F> | null, DynamicPickerConfig<T, F>>((cfg, done) => {
+export function dynamicPicker<T, F, A = never>(config: DynamicPickerConfig<T, F, A>): Promise<DynamicPicked<T, F, A> | null> {
+  const prompt = createPrompt<DynamicPicked<T, F, A> | null, DynamicPickerConfig<T, F, A>>((cfg, done) => {
     const theme = makeTheme({});
     const [status, setStatus] = useState<'idle' | 'done'>('idle');
     const [filter, setFilter] = useState<F>(() => cfg.initialFilter);
@@ -671,10 +674,10 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
 
     const selected = results[active];
 
-    const finish = (): void => {
+    const finish = (action?: A): void => {
       if (!selected) return;
       setStatus('done');
-      done({ item: selected.value, filter });
+      done({ item: selected.value, filter, ...(action === undefined ? {} : { action }) });
     };
 
     useKeypress((key, rl) => {
@@ -753,6 +756,11 @@ export function dynamicPicker<T, F>(config: DynamicPickerConfig<T, F>): Promise<
       // existing single-letter hotkey: `R`/`C`/`A` used to reach their bindings
       // via `key.name`, and keying on the character alone would silently retire
       // them for anyone with caps lock on.
+      const submitAction = cfg.submitKeys?.[token] ?? cfg.submitKeys?.[key.name ?? ''];
+      if (submitAction !== undefined) {
+        finish(submitAction);
+        return;
+      }
       const binding = cfg.keyBindings?.[token] ?? cfg.keyBindings?.[key.name ?? ''];
       if (binding) {
         const next = binding(filter);

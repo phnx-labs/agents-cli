@@ -98,22 +98,20 @@ import {
   type OpVault,
 } from '../lib/onepassword.js';
 import { GLOBAL_HARNESS } from '../lib/secrets/scope.js';
-import { createSecretLease, selectLeasedEnv } from '../lib/secrets/lease.js';
+import { createSecretLease, selectLeasedEnv, type SecretLease } from '../lib/secrets/lease.js';
 import {
   secretsHoldMs,
   secretsAgentDurable,
   agentLoad,
   agentLock,
   agentPing,
-  agentSocketExists,
   agentStatus,
-  agentRevoke,
   ensureAgentRunning,
   runAgentLoadFromStdin,
   runSecretsAgent,
   uninstallSecretsAgentService,
 } from '../lib/secrets/agent.js';
-import { activeLeaseSessions, saveSession, deleteBundleSessions, deleteAllSessions, deleteLeaseSession } from '../lib/secrets/session-store.js';
+import { saveSession, deleteBundleSessions, deleteAllSessions } from '../lib/secrets/session-store.js';
 import { getCliVersionFresh } from '../lib/version.js';
 import { readMeta } from '../lib/state.js';
 import { parseDuration } from '../lib/hooks/cache.js';
@@ -399,6 +397,37 @@ export function resolveUnlockTtlMs(ttl: string | undefined, until: string | unde
     return secs * 1000;
   }
   return secretsHoldMs();
+}
+
+/**
+ * Decide what an `unlock` holds: the whole bundle env, or — with --keys — only
+ * the resolved subset behind a lease that scopes the broker entry (agent.ts
+ * re-selects on load) and its own expiry. Fails closed: createSecretLease throws
+ * on an unknown or empty key subset. The unlock action's single scoping seam,
+ * exported so the whole-bundle vs scoped-subset decision is unit-testable without
+ * a live broker.
+ */
+export function scopeHeldEnv(input: {
+  bundle: string;
+  env: Record<string, string>;
+  keys: string | null;
+  ttlMs: number;
+  harness: string;
+  sleepPersist: boolean;
+}): { heldEnv: Record<string, string>; lease?: SecretLease } {
+  // null = no --keys → hold the whole bundle. An empty-string --keys is a
+  // deliberate (if empty) scope request and falls through to createSecretLease,
+  // which fails closed ('requires at least one key') rather than holding it all.
+  if (input.keys === null) return { heldEnv: input.env };
+  const lease = createSecretLease({
+    bundle: input.bundle,
+    keys: input.keys.split(','),
+    availableKeys: Object.keys(input.env),
+    ttlMs: input.ttlMs,
+    harness: input.harness,
+    sleepPersist: input.sleepPersist,
+  });
+  return { heldEnv: selectLeasedEnv(lease, input.env), lease };
 }
 
 export function buildRemoteUnlockArgs(names: string[], opts: { all?: boolean; ttl?: string; until?: string; durable?: boolean }): string[] {
@@ -2600,101 +2629,32 @@ Examples:
     });
 
   cmd
-    .command('lease <bundle>')
-    .description('Hold only an explicit subset of a bundle until an independent expiry.')
-    .requiredOption('--keys <keys>', 'Comma-separated key subset')
-    .requiredOption('--ttl <duration>', 'How long to hold it (e.g. 30m, 8h, 3d)')
-    .option('--agent <agent>', 'Narrow the lease to one harness; default is global')
-    .option('--durable', 'Keep the lease across sleep as well as broker restart')
-    .action(async (name: string, opts: { keys: string; ttl: string; agent?: string; durable?: boolean }) => {
-      if (process.platform !== 'darwin') {
-        throw new Error('Scoped lease brokering is not available on this platform yet.');
-      }
-      const seconds = parseDuration(opts.ttl);
-      if (seconds === null) throw new Error(`Invalid lease duration '${opts.ttl}'.`);
-      const ttlMs = seconds * 1000;
-      const harness = opts.agent || GLOBAL_HARNESS;
-      const { bundle, env } = readAndResolveBundleEnv(name, {
-        noAgent: true,
-        interactiveUnlock: true,
-        caller: 'lease secrets',
-        agent: harness,
-        keyMode: 'storage',
-      });
-      const lease = createSecretLease({
-        bundle: name,
-        keys: opts.keys.split(','),
-        availableKeys: Object.keys(env),
-        ttlMs,
-        harness,
-        sleepPersist: opts.durable,
-      });
-      const leasedEnv = selectLeasedEnv(lease, env);
-      if (!(await ensureAgentRunning()) || !(await agentLoad(name, bundle, leasedEnv, ttlMs, harness, lease))) {
-        throw new Error('Could not load the scoped lease into the secrets broker.');
-      }
-      ensureDaemonStarted();
-      saveSession(name, {
-        bundle,
-        env: leasedEnv,
-        expiresAt: lease.expiresAt,
-        sleepPersist: lease.sleepPersist,
-        harness,
-        lease,
-      });
-      emitSecretAudit({
-        event: 'secrets.unlocked', bundle: name, operation: 'lease', source: lease.sleepPersist ? 'broker+durable' : 'broker',
-        status: 'success', keys: lease.keys, keyCount: lease.keys.length, agent: harness, ttlMs: lease.expiresAt - lease.createdAt,
-      });
-      console.log(`${chalk.green('leased')} ${chalk.cyan(lease.id)} ${chalk.gray(`(${name}: ${lease.keys.join(', ')}, ${humanRemaining(lease.expiresAt)})`)}`);
-    });
-
-  cmd
-    .command('leases')
-    .description('List active scoped secret leases.')
-    .action(async () => {
-      const brokerLeases = (await agentStatus()).filter((entry) => entry.leaseId);
-      const byId = new Map(brokerLeases.map((entry) => [entry.leaseId!, entry]));
-      for (const { name, lease } of activeLeaseSessions()) {
-        if (!byId.has(lease.id)) byId.set(lease.id, { name, expiresAt: lease.expiresAt, keyCount: lease.keys.length, harness: lease.harness, leaseId: lease.id, keys: lease.keys });
-      }
-      const leases = [...byId.values()];
-      if (leases.length === 0) {
-        console.log(chalk.gray('No active secret leases.'));
-        return;
-      }
-      console.log(`${'ID'.padEnd(24)} ${'BUNDLE'.padEnd(24)} ${'KEYS'.padEnd(24)} EXPIRES IN`);
-      for (const lease of leases) {
-        console.log(`${lease.leaseId!.padEnd(24)} ${lease.name.padEnd(24)} ${(lease.keys ?? []).join(',').padEnd(24)} ${humanRemaining(lease.expiresAt)}`);
-      }
-    });
-
-  cmd
-    .command('revoke <lease-id>')
-    .description('Revoke one scoped secret lease immediately.')
-    .action(async (leaseId: string) => {
-      if (agentSocketExists() && !(await agentPing()).reachable) {
-        throw new Error('Cannot revoke while the secrets broker is using an incompatible protocol. Restart the broker and retry.');
-      }
-      const persisted = deleteLeaseSession(leaseId);
-      const wiped = await agentRevoke(leaseId);
-      if (wiped + persisted === 0) throw new Error(`Secret lease '${leaseId}' is not active.`);
-      console.log(chalk.green(`Revoked secret lease ${leaseId}.`));
-    });
-
-  cmd
     .command('unlock [names...]')
     .description('Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS). With --host, unlock FILE-backed bundle(s) on a remote (the passphrase prompt surfaces over the SSH TTY); keychain/biometry bundles are GUI-only and can\'t be remote-unlocked.')
     .option('--ttl <duration>', 'How long to hold it (e.g. 30m, 8h, 3d). Default 7d.')
     .option('--until <date>', 'Hold until this absolute date or timestamp (for example 2026-08-06T12:00:00Z). Mutually exclusive with --ttl.')
     .option('--durable', 'Keep the unlock across sleep + reboot too (default: survives upgrade/restart but re-locks on sleep). Set secrets.agent.durable in agents.yaml to make this the default.')
     .option('--agent <agent>', 'Narrow the unlock to ONE harness type (for example claude, codex, or kimi). Default: the grant is global — every harness and a plain shell can read it, so one Touch ID covers them all.')
+    .option('--keys <keys>', 'Hold ONLY this comma-separated subset of the bundle\'s keys instead of the whole bundle. Scopes exactly one bundle; fails closed on an unknown key. `secrets status` shows which keys a scoped hold covers.')
     .option('--all', 'Unlock every configured bundle')
     .option('--host <target>', 'Unlock the bundle(s) on this remote machine over SSH instead of locally (file-backed bundles only — the remote\'s passphrase prompt surfaces on your terminal over a -tt session). Single-valued (NOT variadic) so it never swallows the bundle name: `unlock <name> --host <machine>`.')
-    .action(async (names: string[], opts: { ttl?: string; until?: string; durable?: boolean; all?: boolean; host?: string; agent?: string }) => {
+    .action(async (names: string[], opts: { ttl?: string; until?: string; durable?: boolean; all?: boolean; host?: string; agent?: string; keys?: string }) => {
       if (opts.ttl && opts.until) {
         console.error(chalk.red('--ttl and --until are mutually exclusive.'));
         process.exit(1);
+      }
+      if (opts.keys !== undefined) {
+        // --keys scopes ONE bundle to an explicit subset. It is local-only (a
+        // remote --host unlock holds the whole file-backed bundle) and cannot
+        // combine with --all, which would hold every bundle whole.
+        if (opts.host) {
+          console.error(chalk.red('--keys is local-only; a remote (--host) unlock holds the whole file-backed bundle.'));
+          process.exit(1);
+        }
+        if (opts.all || !names || names.length !== 1) {
+          console.error(chalk.red('--keys scopes ONE bundle to a subset of its keys: name exactly one bundle (not --all).'));
+          process.exit(1);
+        }
       }
       // Single-valued (not variadic): a variadic --host greedily consumes the
       // positional bundle name (`unlock --host mac wztest` -> host=[mac,wztest],
@@ -2774,6 +2734,7 @@ Examples:
       // agent happened to launch the shell, leaving the grant unreadable to
       // every other reader for its whole TTL.
       const harness = opts.agent || GLOBAL_HARNESS;
+      const durable = opts.durable ?? secretsAgentDurable();
       for (const name of targets) {
         try {
           // noAgent: read the real keychain (one Touch ID) rather than the
@@ -2790,17 +2751,23 @@ Examples:
           // ACL heal can rewrite that already-read value without another read.
           maybeAutoRekey();
           healKeychainBundleMetadataAclOnce(new Map([[bundle.name, JSON.stringify(bundle)]]));
-          if (await agentLoad(name, bundle, env, ttlMs, harness)) {
+          // With --keys, hold ONLY the resolved subset behind a lease that scopes
+          // the broker entry and its own expiry; without it, the whole bundle is
+          // held exactly as before. scopeHeldEnv fails closed on an unknown key.
+          const { heldEnv, lease } = scopeHeldEnv({ bundle: name, env, keys: opts.keys ?? null, ttlMs, harness, sleepPersist: durable });
+          const heldExpiresAt = lease ? lease.expiresAt : expiresAt;
+          if (await agentLoad(name, bundle, heldEnv, ttlMs, harness, lease)) {
             loaded++;
             // Persist a durable session snapshot so the unlock survives a daemon
             // restart / upgrade (and sleep too, with --durable). session-store.ts.
-            const durable = opts.durable ?? secretsAgentDurable();
+            // A scoped hold persists its lease so it rehydrates scoped.
             saveSession(name, {
               bundle,
-              env,
-              expiresAt,
+              env: heldEnv,
+              expiresAt: heldExpiresAt,
               sleepPersist: durable,
               harness,
+              lease,
             });
             // Audit the GRANT itself — the broker + durable session now serve this
             // bundle prompt-free for the whole TTL, to every reader in `harness`
@@ -2812,12 +2779,13 @@ Examples:
               operation: 'unlock',
               source: durable ? 'broker+durable' : 'broker',
               status: 'success',
-              keyCount: Object.keys(env).length,
-              keys: Object.keys(env).sort(),
+              keyCount: Object.keys(heldEnv).length,
+              keys: Object.keys(heldEnv).sort(),
               agent: harness,
               ttlMs,
             });
-            console.log(`${chalk.green('unlocked')} ${chalk.cyan(name)} ${chalk.gray(`(${Object.keys(env).length} keys, ${humanRemaining(expiresAt)})`)}`);
+            const scoped = lease ? chalk.gray(` scoped to ${lease.keys.join(', ')}`) : '';
+            console.log(`${chalk.green('unlocked')} ${chalk.cyan(name)} ${chalk.gray(`(${Object.keys(heldEnv).length} keys, ${humanRemaining(heldExpiresAt)})`)}${scoped}`);
           } else {
             console.error(chalk.red(`Failed to load '${name}' into the agent.`));
           }
@@ -2893,7 +2861,10 @@ Examples:
       } else {
         console.log(chalk.bold(`${'BUNDLE'.padEnd(24)} ${'KEYS'.padEnd(5)} LOCKS IN`));
         for (const e of entries) {
-          console.log(`${chalk.cyan(e.name.padEnd(24))} ${String(e.keyCount).padEnd(5)} ${humanRemaining(e.expiresAt)}`);
+          // A scoped hold (unlock --keys) carries the held key names, so name them
+          // rather than leave the bundle looking whole.
+          const scoped = e.keys?.length ? chalk.gray(`  scoped: ${e.keys.join(', ')}`) : '';
+          console.log(`${chalk.cyan(e.name.padEnd(24))} ${String(e.keyCount).padEnd(5)} ${humanRemaining(e.expiresAt)}${scoped}`);
         }
         console.log(chalk.gray('Reads of held bundles are silent; any bundle not listed prompts once on its next read.'));
       }

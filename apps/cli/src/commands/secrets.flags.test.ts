@@ -42,12 +42,15 @@ describe('agents secrets — duration is --ttl, harness is --agent', () => {
     expect(flags).toContain('--until');
   });
 
-  it('lease bounds duration with --ttl, matching unlock', () => {
-    expect(longFlags(sub('lease'))).toContain('--ttl');
+  it('unlock scopes a key subset with --keys (folded in from the deleted lease command)', () => {
+    expect(longFlags(sub('unlock'))).toContain('--keys');
   });
 
-  it('lease narrows harness with --agent, matching unlock', () => {
-    expect(longFlags(sub('lease'))).toContain('--agent');
+  it('the lease/leases/revoke subcommands are gone — folded into unlock', () => {
+    const names = secretsGroup().commands.map((c) => c.name());
+    expect(names).not.toContain('lease');
+    expect(names).not.toContain('leases');
+    expect(names).not.toContain('revoke');
   });
 
   it('NO subcommand under secrets exposes --for — it meant two different things', () => {
