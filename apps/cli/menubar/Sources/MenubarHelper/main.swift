@@ -68,6 +68,14 @@ if ProcessInfo.processInfo.environment["MENUBAR_LOAD_TEST"] == "1" {
     LoadedDeviceSelfTest.run()
 }
 
+// Active-session self-test (RUSH-2336): decode the CLI's pid/pidAlive/
+// cloudProvider/cloudTaskId fields off a real `--active --json` payload and
+// assert the machine:pid / provider · taskId locator they drive. See
+// ActiveSessionSelfTest.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_ACTIVE_TEST"] == "1" {
+    ActiveSessionSelfTest.run()
+}
+
 // Everything past here installs the status item and registers the global
 // chords, so it must only run where those chords can actually be serviced.
 // Refuses an ssh-started launch or an unrecognized flag — the two ways a helper

@@ -70,6 +70,59 @@ describe('renderActiveRowLines', () => {
     const s = active({ topic: undefined, label: undefined, cwd: undefined, status: 'idle' });
     expect(renderActiveRowLines(s, '  ', 120)).toHaveLength(1);
   });
+
+  // RUSH-2336: every process-backed row now surfaces its exact machine + pid
+  // handle; a cloud row surfaces its provider + task id instead of a pid.
+  it('shows a machine:pid locator for a process row', () => {
+    const s = active({ context: 'terminal', machine: 'yosemite-s0', pid: 48213, cwd: undefined, topic: undefined, label: undefined });
+    const lines = renderActiveRowLines(s, '  ', 120);
+    expect(lines.join('\n')).toContain('yosemite-s0:pid 48213');
+  });
+
+  it('shows a provider · task-id locator for a cloud row, never a fabricated pid', () => {
+    const s = active({
+      context: 'cloud',
+      cloudProvider: 'rush',
+      cloudTaskId: 'task-abcdef1234567890',
+      cwd: undefined,
+      topic: undefined,
+      label: undefined,
+    });
+    const lines = renderActiveRowLines(s, '  ', 120);
+    expect(lines.join('\n')).toContain('rush · task-abcdef1');
+    expect(lines.join('\n')).not.toMatch(/pid \d/);
+  });
+
+  it('keeps the machine:pid / provider · task-id locator width-safe at every common terminal width', () => {
+    const now = Date.now();
+    const process_ = active({
+      context: 'terminal',
+      version: '2.1.207',
+      machine: 'yosemite-s0',
+      pid: 48213,
+      startedAtMs: now - 6 * DAY,
+      lastActivityMs: now - 3 * DAY,
+      ticket: { id: 'RUSH-2198' },
+      pr: { url: 'https://github.com/phnx-labs/agents-cli/pull/2091', number: 2091 },
+      topic: 'a very long topic '.repeat(20).trim(),
+    });
+    const cloud = active({
+      context: 'cloud',
+      cloudProvider: 'rush',
+      cloudTaskId: 'task-abcdef1234567890',
+      version: '2.1.207',
+      startedAtMs: now - 6 * DAY,
+      lastActivityMs: now - 3 * DAY,
+      topic: 'a very long topic '.repeat(20).trim(),
+    });
+    for (const s of [process_, cloud]) {
+      for (const termW of [40, 60, 80, 120]) {
+        for (const line of renderActiveRowLines(s, '  ', termW)) {
+          expect(stringWidth(line), `width ${termW} overflow: <${line}>`).toBeLessThanOrEqual(termW);
+        }
+      }
+    }
+  });
 });
 
 function meta(over: Partial<SessionMeta> = {}): SessionMeta {

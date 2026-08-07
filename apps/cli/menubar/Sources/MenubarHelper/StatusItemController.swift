@@ -827,6 +827,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if let surface = s.surface, !surface.isEmpty { whereLine += " · \(surface)" }
         sub.addItem(disabled(whereLine))
 
+        // RUSH-2336: the exact process/provider handle — machine:pid for a real
+        // OS process, provider · taskId for a cloud row with no local pid.
+        let locator = ActiveDisplay.locator(machine: s.machine, pid: s.pid,
+                                            cloudProvider: s.cloudProvider, cloudTaskId: s.cloudTaskId)
+        if !locator.isEmpty {
+            sub.addItem(disabled("Process  \(locator)"))
+        }
+
         if !s.repo.isEmpty {
             sub.addItem(disabled("📁  \(s.repo)"))
         }

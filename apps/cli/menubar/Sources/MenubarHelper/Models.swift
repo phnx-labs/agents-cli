@@ -154,10 +154,21 @@ struct ActiveSession: Decodable {
     let cwd: String?
     let status: String       // running | idle | queued | …
     let context: String?
-    /// Host that owns the process (e.g. zion, yosemite-m0).
+    /// Host that owns the process (e.g. zion, yosemite-m0). Always present on a
+    /// bare-active row (RUSH-2336): a process row without a known machine never
+    /// clears the CLI's canonical `isRunningLiveSession` selector.
     let machine: String?
     /// Surface on that machine: tmux, codium, terminal, …
     let host: String?
+    /// OS process id (terminal/tmux/headless/team rows only — absent for cloud).
+    let pid: Int?
+    /// Whether `pid` was POSITIVELY verified alive at scan time — never merely
+    /// "not known dead". Absent for cloud rows and older-peer payloads.
+    let pidAlive: Bool?
+    /// Cloud provider (e.g. "rush") for a `context == "cloud"` row — no local pid.
+    let cloudProvider: String?
+    /// Cloud provider's own task id for a `context == "cloud"` row.
+    let cloudTaskId: String?
     /// First-prompt / assigned task — best "what is it doing" signal.
     let topic: String?
     /// Latest-turn snippet (can be long; UI trims).

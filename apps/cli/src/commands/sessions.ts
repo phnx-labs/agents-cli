@@ -503,9 +503,9 @@ export function formatActiveRowDescription(s: ActiveSession): string {
   if (todo) parts.push(todo);
 
   // Latest-turn snippet — avoid repeating label/topic when already used as identity.
-  if (s.context === 'cloud') {
-    pushText(s.preview || `${s.cloudProvider ?? ''}${s.cloudTaskId ? ` · ${s.cloudTaskId.slice(0, 12)}` : ''}`);
-  } else if (s.preview) {
+  // A cloud row with no preview yet says nothing here; its provider + task id
+  // ride the locator badge instead (RUSH-2336), not duplicated on this line.
+  if (s.preview) {
     pushText(s.preview);
   } else if (!s.label && s.topic) {
     pushText(s.topic);
@@ -684,17 +684,38 @@ export function isAwaitingUser(s: ActiveSession): boolean {
 }
 
 /**
- * Whether a row belongs in an unqualified `--active` view.
+ * Whether a row belongs in an unqualified `--active` view (RUSH-2336) — the
+ * ONE canonical selector every bare-active surface shares: the CLI's grouped
+ * table and `--json` (`renderActiveSessions`), the interactive browser's
+ * `--active` filter ({@link applyFilters} in `sessions-browser.ts`), `focus`'s
+ * attach gate (`isAttachableLiveSession`), and the menubar snapshot
+ * ({@link computeMenubarSnapshot}).
  *
- * The live registry deliberately retains terminally-dead rows long enough for
- * `--closed` / `--crashed` and recovery to find them. Presence in that registry
- * therefore is not, by itself, evidence that a session is still active.
- * Explicit lifecycle filters bypass this predicate and select those retained
- * rows through {@link matchesLiveStatus} instead.
+ * The live registry deliberately retains terminally-dead AND not-yet-started
+ * rows long enough for `--closed` / `--crashed` / `--queued` and recovery to
+ * find them. Presence in that registry therefore is not, by itself, evidence
+ * that a session is CURRENTLY active. Explicit lifecycle filters bypass this
+ * predicate and select those retained rows through {@link matchesLiveStatus}
+ * instead — this function only decides the unqualified default.
+ *
+ *   - `queued` / `closed` / `crashed` are never active here: queued hasn't
+ *     started yet, closed/crashed are unconditionally dead. All three stay
+ *     reachable through their explicit filter.
+ *   - A cloud row carries no local pid at all — it is active on the
+ *     provider's own word (`cloudProvider` + `cloudTaskId`), never a
+ *     fabricated pid.
+ *   - Every other row is a real OS process (terminal/tmux/headless/team). It
+ *     is active only when the row names the machine it runs on, carries a
+ *     positive pid, AND has POSITIVELY verified that pid is alive
+ *     (`pidAlive === true` — not merely "not known dead"). A live orphaned
+ *     row, or a live-but-stuck abandoned row, still qualifies this way since
+ *     both carry a genuinely alive pid; unknown liveness (an older peer's
+ *     row, or a pid that could never be resolved) does not.
  */
 export function isRunningLiveSession(s: ActiveSession): boolean {
-  if (s.status === 'closed' || s.status === 'crashed') return false;
-  return s.pidAlive !== false;
+  if (s.status === 'queued' || s.status === 'closed' || s.status === 'crashed') return false;
+  if (s.context === 'cloud') return Boolean(s.cloudProvider) && Boolean(s.cloudTaskId);
+  return Boolean(s.machine) && typeof s.pid === 'number' && s.pid > 0 && s.pidAlive === true;
 }
 
 /** Width of the live status column — `crashed` is the longest word it renders. */
@@ -794,6 +815,11 @@ function signalBadges(s: Pick<ActiveSession, 'awaitingReason' | 'pr' | 'worktree
  * (a real `tmux attach -t <session:window>` target) over the raw `%pane` id. For
  * a local Ghostty session we know the tab, show `tab N`. Local, unlocatable
  * sessions add nothing (the common case).
+ *
+ * RUSH-2336: every row also carries its raw process/provider handle — a
+ * `machine:pid` for a real OS process (terminal/tmux/headless/team), or
+ * `provider · taskId` for a cloud row with no local pid — so the human view
+ * exposes the same locator `--json` now guarantees on every active row.
  */
 function locatorBadge(s: ActiveSession): string {
   const p = s.provenance;
@@ -812,6 +838,12 @@ function locatorBadge(s: ActiveSession): string {
     parts.push(chalk.green('screen'));
   }
   if (s.ghosttyTab != null) parts.push(chalk.green(`tab ${s.ghosttyTab}`));
+  if (s.context === 'cloud') {
+    const bits = [s.cloudProvider, s.cloudTaskId ? s.cloudTaskId.slice(0, 12) : undefined].filter(Boolean);
+    if (bits.length) parts.push(chalk.dim(bits.join(' · ')));
+  } else if (typeof s.pid === 'number' && s.pid > 0) {
+    parts.push(chalk.dim(`${s.machine ? `${s.machine}:` : ''}pid ${s.pid}`));
+  }
   return parts.join(' ');
 }
 

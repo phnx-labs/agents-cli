@@ -39,6 +39,19 @@ struct Session {
     /// Surface on the host (tmux, codium, …).
     let surface: String?
     let sessionId: String?
+    // `var`, not `let`: a default-valued `let` is excluded from Swift's
+    // synthesized memberwise init entirely (immutable once defaulted), so the
+    // cheap local sources (teams meta.json, cloud tasks.db, live terminals)
+    // that build a `Session` directly can keep omitting these four while
+    // `sessions(fromActive:)` still passes them explicitly.
+    /// OS process id for a real process row (terminal/tmux/headless/team). Nil
+    /// for a cloud row — see `cloudProvider`/`cloudTaskId` instead.
+    var pid: Int? = nil
+    /// Positively-verified liveness of `pid` at scan time (RUSH-2336). Nil for
+    /// a cloud row or an older-peer payload — never treated as "alive".
+    var pidAlive: Bool? = nil
+    var cloudProvider: String? = nil
+    var cloudTaskId: String? = nil
     let ticketId: String?
     let prLink: String?
     let startedAtMs: Double?
@@ -144,6 +157,22 @@ enum ActiveDisplay {
         let m = normalizeHost(machine)
         if m == thisMachine || m == "localhost" || m == "unknown" { return "local" }
         return "remote · \(m)"
+    }
+
+    /// RUSH-2336: the exact process/provider handle behind a session, mirroring
+    /// the CLI's `--active` row locator — `machine:pid` for a real OS process
+    /// (never fabricated: nil unless a positive pid is present), or
+    /// `provider · taskId` (first 12 chars, matching the CLI's truncation) for
+    /// a cloud row with no local pid at all. Returns "" when neither is known.
+    static func locator(machine: String?, pid: Int?,
+                        cloudProvider: String?, cloudTaskId: String?) -> String {
+        if let provider = cloudProvider, !provider.isEmpty {
+            let taskBit = cloudTaskId.map { String($0.prefix(12)) } ?? ""
+            return taskBit.isEmpty ? provider : "\(provider) · \(taskBit)"
+        }
+        guard let pid, pid > 0 else { return "" }
+        let host = machine.flatMap { $0.isEmpty ? nil : $0 }
+        return host.map { "\($0):pid \(pid)" } ?? "pid \(pid)"
     }
 
     /// Collapsed project row includes every lifecycle state reported by the CLI.
@@ -473,6 +502,8 @@ enum LocalState {
                                question: mark?.text ?? "",
                                attentionSinceMs: status == .inputRequired ? mark?.sinceMs : nil,
                                machine: a.machine, surface: a.host, sessionId: a.sessionId,
+                               pid: a.pid, pidAlive: a.pidAlive,
+                               cloudProvider: a.cloudProvider, cloudTaskId: a.cloudTaskId,
                                ticketId: a.ticketId, prLink: a.prLink,
                                startedAtMs: a.startedAtMs, lastActivityMs: a.lastActivityMs,
                                preview: a.preview, owner: a.owner,

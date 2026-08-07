@@ -83,11 +83,26 @@ describeLive('live session status flags', () => {
   });
 
   it('distinguishes active rows from dead rows retained for recovery filters', () => {
-    expect(isRunningLiveSession(row({ status: 'running', pidAlive: true }))).toBe(true);
-    expect(isRunningLiveSession(row({ status: 'orphaned' }))).toBe(true);
-    expect(isRunningLiveSession(row({ status: 'closed', pidAlive: false }))).toBe(false);
-    expect(isRunningLiveSession(row({ status: 'crashed' }))).toBe(false);
-    expect(isRunningLiveSession(row({ status: 'abandoned', pidAlive: false }))).toBe(false);
+    // A real OS process is active only once it's positively located: a
+    // machine, a positive pid, AND verified liveness (RUSH-2336).
+    expect(isRunningLiveSession(row({ status: 'running', machine: 'zion', pid: 111, pidAlive: true }))).toBe(true);
+    expect(isRunningLiveSession(row({ status: 'orphaned', machine: 'zion', pid: 111, pidAlive: true }))).toBe(true);
+    // A live-but-stuck abandoned row still qualifies — the pid is genuinely alive.
+    expect(isRunningLiveSession(row({ status: 'abandoned', machine: 'zion', pid: 111, pidAlive: true }))).toBe(true);
+    expect(isRunningLiveSession(row({ status: 'closed', machine: 'zion', pid: 111, pidAlive: false }))).toBe(false);
+    expect(isRunningLiveSession(row({ status: 'crashed', machine: 'zion', pid: 111, pidAlive: true }))).toBe(false);
+    expect(isRunningLiveSession(row({ status: 'abandoned', machine: 'zion', pid: 111, pidAlive: false }))).toBe(false);
+    // Dispatched but not yet started — only the explicit --queued view shows it.
+    expect(isRunningLiveSession(row({ status: 'queued', machine: 'zion', pid: 111, pidAlive: true }))).toBe(false);
+    // Unverified liveness (unknown pidAlive, no machine, or no pid at all) never
+    // counts as active, even when the status itself reads "running".
+    expect(isRunningLiveSession(row({ status: 'running', machine: 'zion', pid: 111 }))).toBe(false);
+    expect(isRunningLiveSession(row({ status: 'running', pid: 111, pidAlive: true }))).toBe(false);
+    expect(isRunningLiveSession(row({ status: 'running', machine: 'zion', pidAlive: true }))).toBe(false);
+    // A cloud row has no local pid at all — it's active on the provider's word.
+    expect(isRunningLiveSession(row({ context: 'cloud', status: 'running', cloudProvider: 'rush', cloudTaskId: 't1' }))).toBe(true);
+    expect(isRunningLiveSession(row({ context: 'cloud', status: 'queued', cloudProvider: 'rush', cloudTaskId: 't1' }))).toBe(false);
+    expect(isRunningLiveSession(row({ context: 'cloud', status: 'running', cloudProvider: 'rush' }))).toBe(false);
   });
 
   it('routes aliases, unions, and the waiting exit gate through the real CLI', () => {

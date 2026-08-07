@@ -609,6 +609,42 @@ SSH access (§7); rendering sessions that no harness produced.
   the detach record or stopping its headless PID, because both are local to the
   origin (`lib/hosts/session-index.ts`; `commands/attach.ts`; `commands/exec.ts`;
   tests `lib/hosts/session-index.test.ts`, `commands/attach.test.ts`).
+- **SES-43 (MUST, RUSH-2336).** Every bare-active surface — the CLI's grouped
+  table and `--json` (`renderActiveSessions`), the interactive browser's
+  `--active` filter (`applyFilters`), `focus`'s attach gate
+  (`isAttachableLiveSession`), and the menubar snapshot
+  (`computeMenubarSnapshot`) — MUST share ONE canonical selector
+  (`isRunningLiveSession`, `commands/sessions.ts`), refining SES-38's
+  "terminally-dead rows" exclusion:
+  - `queued`, `closed`, and `crashed` rows MUST be excluded — queued has not
+    started, closed/crashed are unconditionally dead — reachable only through
+    the explicit `--queued`/`--closed`/`--crashed` filter (`matchesLiveStatus`).
+  - A `context: 'cloud'` row MUST be selected on the provider's own word alone
+    (`cloudProvider` AND `cloudTaskId` both present), asserting no local `pid`.
+  - Every other row (terminal/tmux/headless/team) MUST be selected only when it
+    names its owning `machine`, carries a positive `pid`, AND has
+    `pidAlive === true` — POSITIVELY verified liveness, not merely "not known
+    dead". A live `orphaned` row and a live-but-stuck `abandoned` row remain
+    selected under this rule (both carry a genuinely alive pid); a row of
+    unknown liveness (an older peer's payload, or an unresolved pid) MUST NOT.
+  - Every process-backed row the bare `--active` JSON emits MUST therefore
+    carry `machine`, a positive `pid`, and `pidAlive: true`; the human CLI row
+    MUST render a matching `machine:pid` locator (`locatorBadge`), or
+    `provider · taskId` for a cloud row — width-safe at every terminal width.
+  - The menubar snapshot reads the RAW active-session cache, which is never
+    filtered at write time (it retains queued/dead rows for the CLI's explicit
+    filters) and whose daemon warm-tick gather does not stamp `machine` on a
+    local row; `computeMenubarSnapshot` MUST self-stamp `machine` (this scope
+    IS the local machine by construction) before applying the selector, so a
+    real local process is never dropped for a field only the CLI's own gather
+    normally fills in.
+
+  (`commands/sessions.ts` `isRunningLiveSession`, `locatorBadge`,
+  `renderActiveRowLines`; `commands/sessions-browser.ts` `applyFilters`;
+  `commands/focus.ts` `isAttachableLiveSession`; `lib/menubar/snapshot.ts`
+  `computeMenubarSnapshot`; tests `commands/sessions.test.ts`,
+  `commands/sessions-browser.test.ts`, `commands/focus.test.ts`,
+  `commands/sessions.active-row.test.ts`, `lib/menubar/snapshot.test.ts`).
 
 ---
 
