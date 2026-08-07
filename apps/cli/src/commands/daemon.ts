@@ -539,21 +539,42 @@ export function registerDaemonCommand(program: Command): void {
 
   cmd.command('stop')
     .description('Stop the daemon.')
-    .action(() => {
+    .option('--json', 'Emit the structured stop result (released/surviving resources, detached children).')
+    .action((_opts, command) => {
+      const asJson = command.optsWithGlobals().json === true;
       if (!isDaemonRunning()) {
-        console.log(chalk.yellow('Daemon is not running'));
+        if (asJson) {
+          console.log(JSON.stringify(
+            { ok: true, stoppedPid: null, escalated: false, released: [], surviving: [], detachedChildren: [] },
+            null, 2));
+        } else {
+          console.log(chalk.yellow('Daemon is not running'));
+        }
         return;
       }
-      stopDaemon();
-      console.log(chalk.green('Daemon stopped'));
+      // SING-12 / RUSH-2355: stop asserts its postcondition and returns what
+      // released vs survived — surface it and exit non-zero on an unclean stop.
+      const result = stopDaemon();
+      if (asJson) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(result.ok ? chalk.green('Daemon stopped') : chalk.red('Daemon stop incomplete'));
+        for (const r of result.released) console.log(chalk.gray(`  released: ${r}`));
+        for (const s of result.surviving) console.log(chalk.red(`  surviving: ${s}`));
+        if (result.detachedChildren.length > 0) {
+          console.log(chalk.gray(`  detached routine children left running (adopted on next daemon start): ${result.detachedChildren.join(', ')}`));
+        }
+      }
+      if (!result.ok) process.exitCode = 1;
     });
 
   cmd.command('restart')
     .description('Stop then start the daemon.')
     .action(() => {
       if (isDaemonRunning()) {
-        stopDaemon();
-        console.log(chalk.gray('Daemon stopped'));
+        const stop = stopDaemon();
+        console.log(stop.ok ? chalk.gray('Daemon stopped') : chalk.red('Daemon stop incomplete'));
+        for (const s of stop.surviving) console.log(chalk.red(`  surviving: ${s}`));
       }
       const result = startDaemon();
       if (result.pid) console.log(chalk.green(`Daemon started (PID: ${result.pid}, ${result.method})`));
