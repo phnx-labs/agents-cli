@@ -782,4 +782,65 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
       }),
     ]);
   }, 30_000);
+
+  it('sorts human view accounts by email after the default while keeping JSON version order', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+
+    const accounts = [
+      { version: '2.1.400', email: null },
+      { version: '2.1.300', email: 'beta@example.com' },
+      { version: '2.1.200', email: 'Alpha@example.com' },
+      { version: '2.1.100', email: 'zeta@example.com' },
+    ];
+    for (const { version, email } of accounts) {
+      writeFakeManagedVersion(home, 'claude', version, 'claude');
+      if (email) {
+        const configDir = path.join(
+          home,
+          '.agents',
+          '.history',
+          'versions',
+          'claude',
+          version,
+          'home',
+          '.claude',
+        );
+        fs.mkdirSync(configDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(configDir, '.claude.json'),
+          JSON.stringify({ oauthAccount: { emailAddress: email } }),
+        );
+      }
+    }
+    fs.mkdirSync(path.dirname(devicePinsPath(home)), { recursive: true });
+    fs.writeFileSync(devicePinsPath(home), 'agents:\n  claude: 2.1.100\n');
+
+    const human = runAgents(home, ['view', 'claude'], {
+      AGENTS_CLI_DISABLE_AUTO_UPDATE: '1',
+      FORCE_COLOR: '0',
+    });
+    expect(human.status, `${human.stdout}\n${human.stderr}`).toBe(0);
+    const humanRows = human.stdout
+      .split('\n')
+      .filter((line) => line.includes('@example.com') || line.includes('(logged out'));
+    expect(humanRows.map((line) => line.match(/2\.1\.\d+/)?.[0])).toEqual([
+      '2.1.100',
+      '2.1.200',
+      '2.1.300',
+      '2.1.400',
+    ]);
+
+    const json = runAgents(home, ['view', 'claude', '--json'], {
+      AGENTS_CLI_DISABLE_AUTO_UPDATE: '1',
+    });
+    expect(json.status, `${json.stdout}\n${json.stderr}`).toBe(0);
+    const payload = JSON.parse(json.stdout) as { versions: Array<{ version: string }> };
+    expect(payload.versions.map(({ version }) => version)).toEqual([
+      '2.1.100',
+      '2.1.400',
+      '2.1.300',
+      '2.1.200',
+    ]);
+  }, 30_000);
 });
