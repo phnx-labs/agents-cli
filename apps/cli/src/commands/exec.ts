@@ -2733,7 +2733,13 @@ export function registerRunCommand(program: Command): void {
               //   made `agents run <agent>`, `agents run <agent>@`, and `agents use`
               //   all dead-end with no reachable way to authenticate.
               const recoverable = signInRecoverableCandidates(resolved.exhausted);
-              if (recoverable.length > 0 && isInteractiveTerminal()) {
+              const { signInLaunchDecision } = await import('./run-account-picker.js');
+              const decision = signInLaunchDecision({
+                recoverable: recoverable.length,
+                tty: isInteractiveTerminal(),
+                json: options.json === true,
+              });
+              if (decision === 'launch') {
                 const { pickSignInLaunchVersion } = await import('./run-account-picker.js');
                 const signInVersion = await pickSignInLaunchVersion(agent, recoverable, !!options.quiet);
                 // A cancelled prompt launches nothing — same contract as the

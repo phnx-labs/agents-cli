@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RotateCandidate } from '../lib/rotate.js';
 import type { UsageSnapshot, UsageWindowKey } from '../lib/usage.js';
-import { buildRunAccountChoices, formatAccountLimits, pickSignInLaunchVersion } from './run-account-picker.js';
+import { buildRunAccountChoices, formatAccountLimits, pickSignInLaunchVersion, signInLaunchDecision } from './run-account-picker.js';
 
 function snapshot(windows: Array<[UsageWindowKey, number]>, plan: string | null = null): UsageSnapshot {
   return {
@@ -191,5 +191,25 @@ describe('pickSignInLaunchVersion (RUSH-2334)', () => {
 
   it('no recoverable candidate returns null so the caller falls back to failing loud', async () => {
     expect(await pickSignInLaunchVersion('claude', [])).toBeNull();
+  });
+});
+
+describe('signInLaunchDecision (RUSH-2334)', () => {
+  const base = { recoverable: 1, tty: true, json: false };
+
+  it('launches when a human is present and an account only needs a login', () => {
+    expect(signInLaunchDecision(base)).toBe('launch');
+  });
+
+  it('--json NEVER launches, even on a real terminal — a machine consumer must not get a picker or a TUI', () => {
+    expect(signInLaunchDecision({ ...base, json: true })).toBe('fail-loud');
+  });
+
+  it('off a TTY it fails loud — nobody is there to complete a login', () => {
+    expect(signInLaunchDecision({ ...base, tty: false })).toBe('fail-loud');
+  });
+
+  it('an all-throttled exhausted set fails loud even for a present human (RUSH-2132)', () => {
+    expect(signInLaunchDecision({ ...base, recoverable: 0 })).toBe('fail-loud');
   });
 });

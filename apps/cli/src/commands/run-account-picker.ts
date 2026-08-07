@@ -155,6 +155,25 @@ export function buildRunAccountChoices(
 }
 
 /**
+ * Whether a zero-healthy run may recover by launching for a login, or must keep
+ * failing loud. Three inputs, all of which have to hold:
+ *
+ * - `recoverable` — at least one excluded account is only auth-blocked. An
+ *   all-throttled set is never launched (RUSH-2132): only a window reset clears it.
+ * - `tty` — a login needs a human present; off a TTY nobody can complete one.
+ * - `json` — `--json` marks a MACHINE consumer, which must never be handed a
+ *   picker or dropped into a login TUI. This mirrors the canonical
+ *   `Surface.interactive = tty && !json` in `commands/utils.ts`; a `--json` caller
+ *   gets the parseable fail-loud error instead.
+ */
+export function signInLaunchDecision(
+  input: { recoverable: number; tty: boolean; json: boolean },
+): 'launch' | 'fail-loud' {
+  const humanPresent = input.tty && !input.json;
+  return input.recoverable > 0 && humanPresent ? 'launch' : 'fail-loud';
+}
+
+/**
  * Choose which installed version to launch so the user can authenticate, when a
  * strategy found zero healthy accounts but at least one is merely signed out
  * (RUSH-2334). Returns the version to launch, or null if the user cancelled.
