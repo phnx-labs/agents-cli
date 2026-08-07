@@ -61,6 +61,7 @@ import {
   isGitRepo,
   hasUncommittedChanges,
   removeWorktree,
+  worktreeCheckoutExists,
   worktreeExists,
 } from '../lib/teams/worktree.js';
 import { resolveHost } from '../lib/hosts/registry.js';
@@ -1887,9 +1888,14 @@ export function registerTeamsCommands(program: Command): void {
         } catch (err) {
           // `git worktree add -b` can also fail PART WAY — branch ref created,
           // checkout not — stranding `agents/<name>` in exactly the way that
-          // breaks the retry. Nothing was here before, so whatever is here now
-          // is ours to remove.
-          if (!preexisting) {
+          // breaks the retry. Clean that up only when nothing was here before
+          // AND there is still no checkout now: all that can be left is a
+          // dangling branch ref, so this can never delete anyone's files. The
+          // second half matters because a concurrent add can create a real
+          // worktree under this name during our `git fetch`, long after the
+          // pre-flight probe answered.
+          const checkoutNow = await worktreeCheckoutExists(baseCwd, opts.worktree).catch(() => true);
+          if (!preexisting && !checkoutNow) {
             try {
               await removeWorktree(baseCwd, opts.worktree);
             } catch {
@@ -1897,7 +1903,12 @@ export function registerTeamsCommands(program: Command): void {
               // we can't. Either way the real error below is what matters.
             }
           }
-          dieFriction('teams', 'worktree-create-failed', `Failed to create worktree '${opts.worktree}': ${(err as Error).message}`);
+          const detail = (err as Error).message;
+          const hint = /already exists/.test(detail)
+            ? `\n  Another teammate already owns the worktree '${opts.worktree}'. Pick a different --worktree name,` +
+              ` or free this one: agents teams status ${team}`
+            : '';
+          dieFriction('teams', 'worktree-create-failed', `Failed to create worktree '${opts.worktree}': ${detail}${hint}`);
         }
       } else if (opts.worktree) {
         dieFriction('teams', 'worktree-requires-enable-worktrees', `--worktree requires --enable-worktrees on the team. Recreate the team with: agents teams create ${team} --enable-worktrees`);

@@ -224,6 +224,25 @@ export function getWorktreeBranch(worktreeName: string): string {
 }
 
 /**
+ * Does the CHECKOUT DIRECTORY for this worktree name exist?
+ *
+ * Narrower than {@link worktreeExists}, and the difference is load-bearing:
+ * `teams add` only ever cleans up after a failed create when there is NO
+ * checkout — i.e. when all that can be left is a dangling `agents/<name>`
+ * branch ref. That keeps the cleanup incapable of deleting anybody's files,
+ * including a concurrent add's freshly-created worktree, whatever the
+ * pre-flight probe saw a `git fetch` ago. (RUSH-2356)
+ */
+export async function worktreeCheckoutExists(repoDir: string, worktreeName: string): Promise<boolean> {
+  if (!WORKTREE_NAME_RE.test(worktreeName)) {
+    throw new Error(`Invalid worktree name: ${worktreeName}`);
+  }
+  const gitRoot = await getMainRepoRoot(repoDir);
+  const dir = safeJoin(path.join(gitRoot, '.agents', 'worktrees'), worktreeName);
+  return fs.stat(dir).then(() => true).catch(() => false);
+}
+
+/**
  * Does anything already exist under this worktree name — the checkout directory
  * or its `agents/<name>` branch?
  *
@@ -235,12 +254,8 @@ export function getWorktreeBranch(worktreeName: string): string {
  * terminal by then, so no record-based check can protect it). (RUSH-2356)
  */
 export async function worktreeExists(repoDir: string, worktreeName: string): Promise<boolean> {
-  if (!WORKTREE_NAME_RE.test(worktreeName)) {
-    throw new Error(`Invalid worktree name: ${worktreeName}`);
-  }
+  if (await worktreeCheckoutExists(repoDir, worktreeName)) return true;
   const gitRoot = await getMainRepoRoot(repoDir);
-  const dir = safeJoin(path.join(gitRoot, '.agents', 'worktrees'), worktreeName);
-  if (await fs.stat(dir).then(() => true).catch(() => false)) return true;
   try {
     await execFileAsync(
       'git',

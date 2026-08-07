@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createWorktree, localDefaultBranch, removeWorktree, worktreeExists } from './worktree.js';
+import { createWorktree, localDefaultBranch, removeWorktree, worktreeCheckoutExists, worktreeExists } from './worktree.js';
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', ['-c', 'user.email=t@t.dev', '-c', 'user.name=t', ...args], {
@@ -165,6 +165,20 @@ describe('createWorktree base freshness', () => {
       git(clone, ['branch', 'agents/probe-b']);
       expect(fs.existsSync(path.join(clone, '.agents', 'worktrees', 'probe-b'))).toBe(false);
       expect(await worktreeExists(clone, 'probe-b')).toBe(true);
+      // ...and the narrower probe says NO checkout, which is what licenses the
+      // failed-create cleanup to drop that dangling ref without deleting files.
+      expect(await worktreeCheckoutExists(clone, 'probe-b')).toBe(false);
+    });
+
+    it('worktreeCheckoutExists tracks only the directory, never the branch', async () => {
+      expect(await worktreeCheckoutExists(clone, 'probe-d')).toBe(false);
+      await createWorktree(clone, 'probe-d');
+      try {
+        expect(await worktreeCheckoutExists(clone, 'probe-d')).toBe(true);
+      } finally {
+        await removeWorktree(clone, 'probe-d');
+      }
+      expect(await worktreeCheckoutExists(clone, 'probe-d')).toBe(false);
     });
 
     it('answers for the MAIN repo from inside another worktree', async () => {

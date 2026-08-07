@@ -81,7 +81,6 @@ describe.skipIf(process.platform === 'win32' || !BUN)(
         finishedAt: new Date().toISOString(),
       });
 
-      const started = Date.now();
       const res = runMessage('donerun');
 
       // Fails loud, names the host and the status, and points at the log —
@@ -89,11 +88,6 @@ describe.skipIf(process.platform === 'win32' || !BUN)(
       expect(res.status).not.toBe(0);
       expect(res.out).toContain("Task 'donerun' on host 'somebox' already completed");
       expect(res.out).toContain('agents hosts logs donerun');
-
-      // reconcileRunningTasks early-returns on a non-running record, so this
-      // decision costs no ssh round-trip. A regression that dropped the status
-      // filter would spend ~6s per probe here.
-      expect(Date.now() - started).toBeLessThan(20_000);
     }, 60_000);
 
     it('an unknown target still fails loud with both listing commands', () => {

@@ -198,15 +198,61 @@ describe.skipIf(process.platform === 'win32' || !BUN || !WHICH)(
       expect(fs.existsSync(path.join(repo, '.agents', 'worktrees', 'second'))).toBe(false);
 
       // The end state above is ALSO what created-then-cleaned-up looks like, so
-      // it alone would not catch validation sliding back inside spawn(). These
-      // two do. The pre-worktree check dies via `add-precondition-failed` with
-      // the raw validation message; a failure from inside spawn() comes back
+      // it alone would not catch validation sliding back inside spawn(). This
+      // does: the pre-worktree check dies via `add-precondition-failed` with the
+      // raw validation message, while a failure from inside spawn() comes back
       // through the add's own catch, wrapped in `Could not add <agent> to <team>:`.
+      // (A reflog probe does NOT discriminate — `git branch -D` deletes the ref's
+      // reflog with it, so created-then-deleted looks identical to never-created.)
       expect(rejected.out).not.toContain('Could not add');
-      // And the branch was never created, not created-and-deleted: a deleted
-      // branch leaves its creation in the repo's reflog, a never-created one
-      // has no reflog at all.
-      expect(() => git(repo, ['reflog', 'show', 'agents/second'])).toThrow();
+    }, 120_000);
+
+    // The most dangerous path in this fix, and the one it nearly got wrong:
+    // `teams stop` deliberately KEEPS a worktree holding uncommitted changes
+    // (`Worktree '<n>' has uncommitted changes. Keeping it at: …`) while that
+    // teammate's record goes TERMINAL. So no record-based check can protect it —
+    // a terminal owner reads as "not claimed", which is correct for reaping an
+    // orphan branch and catastrophic here. A later add reusing the worktree name
+    // fails with `fatal: a branch named 'agents/<name>' already exists`, and an
+    // ungated teardown would `git worktree remove --force` that checkout and
+    // destroy the uncommitted work. The failed-create cleanup is gated on
+    // pre-existence instead, which is why this survives.
+    it('a failed add never destroys a kept dirty worktree it collided with', () => {
+      expect(runCli(['teams', 'create', 'dirty-team', '--enable-worktrees']).status).toBe(0);
+
+      // A `claude` that exists, so the first add really lands.
+      const stub = path.join(binDir, 'claude');
+      fs.writeFileSync(stub, '#!/bin/sh\nexit 0\n');
+      fs.chmodSync(stub, 0o755);
+
+      const first = runCli([
+        'teams', 'add', 'dirty-team', 'claude', 'do a thing',
+        '--name', 'alpha', '--worktree', 'shared-name',
+      ]);
+      expect(first.status).toBe(0);
+
+      // Uncommitted work in that teammate's checkout.
+      const wt = path.join(repo, '.agents', 'worktrees', 'shared-name');
+      expect(fs.existsSync(wt)).toBe(true);
+      const precious = path.join(wt, 'important.txt');
+      fs.writeFileSync(precious, 'PRECIOUS UNCOMMITTED WORK\n');
+
+      // Stopping the team leaves the dirty worktree in place and the record
+      // terminal — the exact state that defeats a record-based guard.
+      runCli(['teams', 'stop', 'dirty-team', '--yes']);
+      expect(fs.existsSync(wt)).toBe(true);
+
+      // A NEW teammate reusing that worktree name. The create must fail on the
+      // existing branch, and must not touch the checkout on its way out.
+      const collide = runCli([
+        'teams', 'add', 'dirty-team', 'claude', 'do another thing',
+        '--name', 'beta', '--worktree', 'shared-name',
+      ]);
+
+      expect(collide.status).not.toBe(0);
+      expect(fs.existsSync(precious)).toBe(true);
+      expect(fs.readFileSync(precious, 'utf8')).toBe('PRECIOUS UNCOMMITTED WORK\n');
+      expect(branches()).toContain('agents/shared-name');
     }, 120_000);
   },
 );
