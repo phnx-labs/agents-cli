@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Routine Reliability — execution context, readiness, single-fire, history</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-approved">approved</span></div>
+<h1>Routine Reliability — execution context, readiness, single-fire, history</h1>
+<p class="summary">Make routines resolve where they run on the execution target, prove they are runnable before activating, fire each scheduled slot at most once, and record every attempt as inspectable history.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Ticket: RUSH-2290<span class="meta-sep" aria-hidden="true">·</span>Scope: routines execution + readiness + single-fire + history<span class="meta-sep" aria-hidden="true">·</span>Runtime change: none in this docs track</p><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/getrush/issue/RUSH-2290" target="_blank" rel="noopener">RUSH-2290</a></span></li><li class="chip"><span class="chip-value"><img class="chip-favicon" src="https://www.google.com/s2/favicons?domain=share.agents-cli.sh&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><a href="https://share.agents-cli.sh/muqsitnawaz/agents-cli-routine-reliability-5975559096b19ff4" target="_blank" rel="noopener">agents-cli-routine-reliability-597555…</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agents-cli/blob/main/apps/cli/docs/specifications.md" target="_blank" rel="noopener">specifications.md</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">agents/routine-docs-contract</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">RUSH-2290</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude opus-4-8</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">1ecea584</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-07</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#proposed-changes"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p>Unattended routines fail silently. A swarm on 2026-08-06 found the live fleet was not
+stable: dead accounts produced <code>auth_failed: Please run /login</code>, stopped schedulers
+left routines overdue, and a single scheduled slot could launch <strong>9–10</strong> times because
+no durable per-occurrence claim existed. The common thread is that a routine activates
+without proving it can run, resolves its working directory from the wrong machine, and
+records nothing when it fails before an agent session starts — so the failure is
+invisible until someone looks.</p>
+<p>This plan makes a routine (1) resolve <strong>where it runs</strong> on the execution target, (2)
+<strong>prove it is runnable</strong> before activating (else save paused with a stable code), (3)
+fire each scheduled slot <strong>at most once</strong>, and (4) record <strong>every attempt</strong> as history
+that owns its optional session/log/report children.</p>
+<h2 id="proposed-changes">Proposed Changes</h2>
+<p>The reliability model is a gate the routine passes through before any agent body runs,
+and an attempt record written for every outcome — including the outcomes that never
+spawn a process today.</p>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+  <svg class="artifact-diagram" viewBox="0 0 940 300" role="img" aria-label="Routine reliability pipeline: context resolution, readiness gate, single-fire slot claim, run history">
+    <rect x="20" y="40" width="180" height="70" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+    <text x="110" y="70" text-anchor="middle" fill="#e8e8e8" font-family="Inter, system-ui, sans-serif" font-size="14">1. Context</text>
+    <text x="110" y="90" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono, monospace" font-size="10.5">anchor + cwd on target</text>
+    <line x1="200" y1="75" x2="250" y2="75" stroke="#38bdf8" stroke-width="2"></line>
+    <rect x="250" y="40" width="180" height="70" rx="8" fill="#0a1016" stroke="#38bdf8" stroke-width="1.5"></rect>
+    <text x="340" y="70" text-anchor="middle" fill="#e8e8e8" font-family="Inter, system-ui, sans-serif" font-size="14">2. Readiness</text>
+    <text x="340" y="90" text-anchor="middle" fill="#38bdf8" font-family="JetBrains Mono, monospace" font-size="10.5">auth/trust/path smoke</text>
+    <line x1="430" y1="75" x2="480" y2="75" stroke="#38bdf8" stroke-width="2"></line>
+    <rect x="480" y="40" width="180" height="70" rx="8" fill="#0a1016" stroke="#38bdf8" stroke-width="1.5"></rect>
+    <text x="570" y="70" text-anchor="middle" fill="#e8e8e8" font-family="Inter, system-ui, sans-serif" font-size="14">3. Slot claim</text>
+    <text x="570" y="90" text-anchor="middle" fill="#38bdf8" font-family="JetBrains Mono, monospace" font-size="10.5">(routine, scheduledFor)</text>
+    <line x1="660" y1="75" x2="710" y2="75" stroke="#a3e635" stroke-width="2"></line>
+    <rect x="710" y="40" width="200" height="70" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+    <text x="810" y="70" text-anchor="middle" fill="#e8e8e8" font-family="Inter, system-ui, sans-serif" font-size="14">4. Run history</text>
+    <text x="810" y="90" text-anchor="middle" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="10.5">.history/runs/&lt;r&gt;/&lt;run&gt;</text>
+    
+    <line x1="340" y1="110" x2="340" y2="170" stroke="#ef4444" stroke-width="2" stroke-dasharray="4 3"></line>
+    <rect x="250" y="170" width="180" height="52" rx="8" fill="#160a0a" stroke="#ef4444" stroke-width="1.5"></rect>
+    <text x="340" y="192" text-anchor="middle" fill="#e8e8e8" font-family="Inter, system-ui, sans-serif" font-size="13">blocker →</text>
+    <text x="340" y="210" text-anchor="middle" fill="#ef4444" font-family="JetBrains Mono, monospace" font-size="10.5">paused + blocked run</text>
+    
+    <line x1="570" y1="110" x2="570" y2="170" stroke="#f59e0b" stroke-width="2" stroke-dasharray="4 3"></line>
+    <rect x="480" y="170" width="180" height="52" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+    <text x="570" y="192" text-anchor="middle" fill="#e8e8e8" font-family="Inter, system-ui, sans-serif" font-size="13">already running →</text>
+    <text x="570" y="210" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono, monospace" font-size="10.5">skipped run (linked)</text>
+    <text x="470" y="270" text-anchor="middle" fill="#8a8a8a" font-family="Inter, system-ui, sans-serif" font-size="12">Every path — blocked, skipped, missed, failed, completed — writes one terminal run; a session is an optional child.</text>
+  </svg>
+  <figcaption><b>Figure 1.</b> The reliability pipeline. A proven blocker pauses the routine and records a <code>blocked</code> run before any agent starts; a slot arriving while a prior run is live records a <code>skipped</code> run instead of a second launch.</figcaption>
+</figure><p><strong>Grouping vs anchor.</strong> <code>projects</code> (plural) stays grouping-only metadata for listings;
+a singular <code>project</code> (CLI <code>--project-anchor</code>) plus a routine-level <code>cwd</code> is the
+execution anchor, resolved <strong>on the execution target</strong>. A rootless Linear-imported
+project, or a bare relative <code>cwd</code>, anchors at the target <code>$HOME</code>.</p>
+<p><strong>Readiness saves paused.</strong> <code>add</code>/<code>edit</code> verify readiness (a real headless auth smoke,
+not a cache read) and save a proven blocker paused with a stable code
+(<code>project_not_found</code>, <code>cwd_missing</code>, <code>codex_workspace_untrusted</code>, <code>agent_auth_failed</code>,
+<code>execution_context_missing</code>, …). <code>resume</code> rechecks; a raw YAML edit is atomic
+(temp → parse → validate → replace, paused-when-blocked). An agent/workflow routine
+with no context saves paused; a <code>command</code> routine may default to the target <code>$HOME</code>.</p>
+<p><strong>Single-fire.</strong> One atomic claim on <code>(routine, scheduledFor)</code> before dispatch, kept
+separate from the active-run claim that prevents self-overlap. <code>repo</code> is an external
+Git/cloud/webhook identity, never a local cwd. The menu bar stays read-only for
+scheduling.</p>
+<h2 id="public-interface">Public Interface</h2>
+<pre><code># Execution anchor + working directory (planned)
+agents routines add nightly --project-anchor myapp --cwd services/api \
+  --schedule "0 3 * * *" --agent claude --prompt "..."
+
+# Diagnose + repair readiness (planned)
+agents routines doctor            # re-check every routine's readiness
+agents routines doctor nightly --fix
+
+# Already landed
+agents routines resume nightly    # (planned) rechecks readiness before activating
+agents routines runs nightly      # attempt history, including blocked/skipped/missed
+</code></pre>
+<p>Run statuses distinguish <code>running | completed | failed | timeout | missed | blocked | skipped</code>.
+<code>blocked</code> (readiness failed, no body ran) and <code>skipped</code> (self-overlap) are the two new
+terminal states.</p>
+<h2 id="validation">Validation</h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Expected result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Context resolver</td>
+<td>project base / project+relative / rootless+home / no-project+home resolve; absolute-outside-home + traversal rejected; resolves against the target's filesystem</td>
+</tr>
+<tr>
+<td>Add / edit / resume</td>
+<td>ready activates; missing path/trust/write/auth saves paused; resume cannot bypass readiness</td>
+</tr>
+<tr>
+<td>Atomic edit</td>
+<td>invalid YAML leaves prior bytes untouched; valid-but-unready replaces and pauses</td>
+</tr>
+<tr>
+<td>Scheduler</td>
+<td>two callbacks for one UTC slot → one launch; restart replays no launch</td>
+</tr>
+<tr>
+<td>Overlap</td>
+<td>scheduled/manual/foreground/detached across host/fleet/cloud launch at most one</td>
+</tr>
+<tr>
+<td>Attempt history</td>
+<td>placement, sandbox, account, trust, auth, dispatch failures each write one terminal run; overlap links the active run</td>
+</tr>
+</tbody></table>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>projects[]</code> grouping silently promoted to execution context</td>
+<td>Anchor is a separate singular field + <code>--project-anchor</code>; grouping never affects placement (RT-1)</td>
+</tr>
+<tr>
+<td>Readiness smoke becomes an implicit auto-login or sandbox bypass</td>
+<td>Contract forbids it (RT-5); no login, no bypass introduced</td>
+</tr>
+<tr>
+<td>Documenting planned behavior as if it were live</td>
+<td>Every unlanded requirement is marked <code>[Intended]</code> with a <code>-GAP-</code>; docs mark landed vs planned throughout</td>
+</tr>
+<tr>
+<td>Backward compatibility of the repeatable <code>--project</code> flag</td>
+<td>Preserved; the singular anchor is a distinct flag name</td>
+</tr>
+</tbody></table>
+<aside class="artifact-callout"><strong>Load-bearing takeaway:</strong> ready means active; any proven blocker means paused and visible. A routine never overlaps itself, and one scheduled slot launches at most once.</aside><h2 id="tracking">Tracking</h2>
+<p>This docs track (RUSH-2290) lands the normative contract only — no runtime change:</p>
+<ul>
+<li><code>apps/cli/docs/specifications.md</code> — new §Routine execution &amp; readiness (RT-1..RT-11, RT-GAP-1); SING-11..SING-13 + SING-GAP-3.</li>
+<li><code>apps/cli/docs/03-routines.md</code> — user-facing execution-context/readiness/status docs.</li>
+<li><code>README.md</code> §Routines, <code>apps/cli/AGENTS.md</code> invariant #7, <code>apps/cli/.changelog/next/RUSH-2290.md</code>.</li>
+<li>Companion <code>phnx-labs/.agents-system</code> audited: no consumer teaches a contradicted shape (no change needed).</li>
+</ul>
+<p>The runtime tracks (context/readiness resolver, fire/history) land separately and flip
+each <code>[Intended]</code> requirement to <code>Current</code> as they ship.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGVtcGxhdGU6IHBsYW4udjEKdGl0bGU6IFJvdXRpbmUgUmVsaWFiaWxpdHkg4oCUIGV4ZWN1dGlvbiBjb250ZXh0LCByZWFkaW5lc3MsIHNpbmdsZS1maXJlLCBoaXN0b3J5CnN1bW1hcnk6IE1ha2Ugcm91dGluZXMgcmVzb2x2ZSB3aGVyZSB0aGV5IHJ1biBvbiB0aGUgZXhlY3V0aW9uIHRhcmdldCwgcHJvdmUgdGhleSBhcmUgcnVubmFibGUgYmVmb3JlIGFjdGl2YXRpbmcsIGZpcmUgZWFjaCBzY2hlZHVsZWQgc2xvdCBhdCBtb3N0IG9uY2UsIGFuZCByZWNvcmQgZXZlcnkgYXR0ZW1wdCBhcyBpbnNwZWN0YWJsZSBoaXN0b3J5Lgpwcm9qZWN0OiBhZ2VudHMtY2xpCmNvbnRleHQ6IGFwcHMvY2xpIHJvdXRpbmVzIHN1YnN5c3RlbQp0cmFja2luZzogUlVTSC0yMjkwCnN0YXR1czogYXBwcm92ZWQKcmVwb3NpdG9yeTogcGhueC1sYWJzL2FnZW50cy1jbGkKYnJhbmNoOiBhZ2VudHMvcm91dGluZS1kb2NzLWNvbnRyYWN0Cmhhcm5lc3M6IGNsYXVkZQphZ2VudDogY2xhdWRlLW9wdXMtNC04Cmhvc3Q6IHlvc2VtaXRlLXMwCmRhdGU6IDIwMjYtMDgtMDcKZmFjdHM6CiAgLSAnVGlja2V0OiBSVVNILTIyOTAnCiAgLSAnU2NvcGU6IHJvdXRpbmVzIGV4ZWN1dGlvbiArIHJlYWRpbmVzcyArIHNpbmdsZS1maXJlICsgaGlzdG9yeScKICAtICdSdW50aW1lIGNoYW5nZTogbm9uZSBpbiB0aGlzIGRvY3MgdHJhY2snCmxpbmtzOgogIC0gaHR0cHM6Ly9saW5lYXIuYXBwL2dldHJ1c2gvaXNzdWUvUlVTSC0yMjkwCiAgLSBodHRwczovL3NoYXJlLmFnZW50cy1jbGkuc2gvbXVxc2l0bmF3YXovYWdlbnRzLWNsaS1yb3V0aW5lLXJlbGlhYmlsaXR5LTU5NzU1NTkwOTZiMTlmZjQKICAtIGh0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdlbnRzLWNsaS9ibG9iL21haW4vYXBwcy9jbGkvZG9jcy9zcGVjaWZpY2F0aW9ucy5tZAotLS0KCiMjIFB1cnBvc2UKClVuYXR0ZW5kZWQgcm91dGluZXMgZmFpbCBzaWxlbnRseS4gQSBzd2FybSBvbiAyMDI2LTA4LTA2IGZvdW5kIHRoZSBsaXZlIGZsZWV0IHdhcyBub3QKc3RhYmxlOiBkZWFkIGFjY291bnRzIHByb2R1Y2VkIGBhdXRoX2ZhaWxlZDogUGxlYXNlIHJ1biAvbG9naW5gLCBzdG9wcGVkIHNjaGVkdWxlcnMKbGVmdCByb3V0aW5lcyBvdmVyZHVlLCBhbmQgYSBzaW5nbGUgc2NoZWR1bGVkIHNsb3QgY291bGQgbGF1bmNoICoqOeKAkzEwKiogdGltZXMgYmVjYXVzZQpubyBkdXJhYmxlIHBlci1vY2N1cnJlbmNlIGNsYWltIGV4aXN0ZWQuIFRoZSBjb21tb24gdGhyZWFkIGlzIHRoYXQgYSByb3V0aW5lIGFjdGl2YXRlcwp3aXRob3V0IHByb3ZpbmcgaXQgY2FuIHJ1biwgcmVzb2x2ZXMgaXRzIHdvcmtpbmcgZGlyZWN0b3J5IGZyb20gdGhlIHdyb25nIG1hY2hpbmUsIGFuZApyZWNvcmRzIG5vdGhpbmcgd2hlbiBpdCBmYWlscyBiZWZvcmUgYW4gYWdlbnQgc2Vzc2lvbiBzdGFydHMg4oCUIHNvIHRoZSBmYWlsdXJlIGlzCmludmlzaWJsZSB1bnRpbCBzb21lb25lIGxvb2tzLgoKVGhpcyBwbGFuIG1ha2VzIGEgcm91dGluZSAoMSkgcmVzb2x2ZSAqKndoZXJlIGl0IHJ1bnMqKiBvbiB0aGUgZXhlY3V0aW9uIHRhcmdldCwgKDIpCioqcHJvdmUgaXQgaXMgcnVubmFibGUqKiBiZWZvcmUgYWN0aXZhdGluZyAoZWxzZSBzYXZlIHBhdXNlZCB3aXRoIGEgc3RhYmxlIGNvZGUpLCAoMykKZmlyZSBlYWNoIHNjaGVkdWxlZCBzbG90ICoqYXQgbW9zdCBvbmNlKiosIGFuZCAoNCkgcmVjb3JkICoqZXZlcnkgYXR0ZW1wdCoqIGFzIGhpc3RvcnkKdGhhdCBvd25zIGl0cyBvcHRpb25hbCBzZXNzaW9uL2xvZy9yZXBvcnQgY2hpbGRyZW4uCgojIyBQcm9wb3NlZCBDaGFuZ2VzCgpUaGUgcmVsaWFiaWxpdHkgbW9kZWwgaXMgYSBnYXRlIHRoZSByb3V0aW5lIHBhc3NlcyB0aHJvdWdoIGJlZm9yZSBhbnkgYWdlbnQgYm9keSBydW5zLAphbmQgYW4gYXR0ZW1wdCByZWNvcmQgd3JpdHRlbiBmb3IgZXZlcnkgb3V0Y29tZSDigJQgaW5jbHVkaW5nIHRoZSBvdXRjb21lcyB0aGF0IG5ldmVyCnNwYXduIGEgcHJvY2VzcyB0b2RheS4KCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZSBhcnRpZmFjdC1maWd1cmUtZGlhZ3JhbSBhcnRpZmFjdC1maWd1cmUtd2lkZSI+CiAgPHN2ZyBjbGFzcz0iYXJ0aWZhY3QtZGlhZ3JhbSIgdmlld0JveD0iMCAwIDk0MCAzMDAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iUm91dGluZSByZWxpYWJpbGl0eSBwaXBlbGluZTogY29udGV4dCByZXNvbHV0aW9uLCByZWFkaW5lc3MgZ2F0ZSwgc2luZ2xlLWZpcmUgc2xvdCBjbGFpbSwgcnVuIGhpc3RvcnkiPgogICAgPHJlY3QgeD0iMjAiIHk9IjQwIiB3aWR0aD0iMTgwIiBoZWlnaHQ9IjcwIiByeD0iOCIgZmlsbD0iIzE2MTIwYSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIgLz4KICAgIDx0ZXh0IHg9IjExMCIgeT0iNzAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNlOGU4ZTgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0Ij4xLiBDb250ZXh0PC90ZXh0PgogICAgPHRleHQgeD0iMTEwIiB5PSI5MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Y1OWUwYiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAuNSI+YW5jaG9yICsgY3dkIG9uIHRhcmdldDwvdGV4dD4KICAgIDxsaW5lIHgxPSIyMDAiIHkxPSI3NSIgeDI9IjI1MCIgeTI9Ijc1IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMiIgLz4KICAgIDxyZWN0IHg9IjI1MCIgeT0iNDAiIHdpZHRoPSIxODAiIGhlaWdodD0iNzAiIHJ4PSI4IiBmaWxsPSIjMGExMDE2IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iMzQwIiB5PSI3MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiPjIuIFJlYWRpbmVzczwvdGV4dD4KICAgIDx0ZXh0IHg9IjM0MCIgeT0iOTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMzOGJkZjgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwLjUiPmF1dGgvdHJ1c3QvcGF0aCBzbW9rZTwvdGV4dD4KICAgIDxsaW5lIHgxPSI0MzAiIHkxPSI3NSIgeDI9IjQ4MCIgeTI9Ijc1IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMiIgLz4KICAgIDxyZWN0IHg9IjQ4MCIgeT0iNDAiIHdpZHRoPSIxODAiIGhlaWdodD0iNzAiIHJ4PSI4IiBmaWxsPSIjMGExMDE2IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iNTcwIiB5PSI3MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiPjMuIFNsb3QgY2xhaW08L3RleHQ+CiAgICA8dGV4dCB4PSI1NzAiIHk9IjkwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMzhiZGY4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMC41Ij4ocm91dGluZSwgc2NoZWR1bGVkRm9yKTwvdGV4dD4KICAgIDxsaW5lIHgxPSI2NjAiIHkxPSI3NSIgeDI9IjcxMCIgeTI9Ijc1IiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMiIgLz4KICAgIDxyZWN0IHg9IjcxMCIgeT0iNDAiIHdpZHRoPSIyMDAiIGhlaWdodD0iNzAiIHJ4PSI4IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iODEwIiB5PSI3MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiPjQuIFJ1biBoaXN0b3J5PC90ZXh0PgogICAgPHRleHQgeD0iODEwIiB5PSI5MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAuNSI+Lmhpc3RvcnkvcnVucy8mbHQ7ciZndDsvJmx0O3J1biZndDs8L3RleHQ+CiAgICA8IS0tIGJsb2NrZWQgYnJhbmNoIC0tPgogICAgPGxpbmUgeDE9IjM0MCIgeTE9IjExMCIgeDI9IjM0MCIgeTI9IjE3MCIgc3Ryb2tlPSIjZWY0NDQ0IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1kYXNoYXJyYXk9IjQgMyIgLz4KICAgIDxyZWN0IHg9IjI1MCIgeT0iMTcwIiB3aWR0aD0iMTgwIiBoZWlnaHQ9IjUyIiByeD0iOCIgZmlsbD0iIzE2MGEwYSIgc3Ryb2tlPSIjZWY0NDQ0IiBzdHJva2Utd2lkdGg9IjEuNSIgLz4KICAgIDx0ZXh0IHg9IjM0MCIgeT0iMTkyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyI+YmxvY2tlciDihpI8L3RleHQ+CiAgICA8dGV4dCB4PSIzNDAiIHk9IjIxMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2VmNDQ0NCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAuNSI+cGF1c2VkICsgYmxvY2tlZCBydW48L3RleHQ+CiAgICA8IS0tIHNraXBwZWQgYnJhbmNoIC0tPgogICAgPGxpbmUgeDE9IjU3MCIgeTE9IjExMCIgeDI9IjU3MCIgeTI9IjE3MCIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1kYXNoYXJyYXk9IjQgMyIgLz4KICAgIDxyZWN0IHg9IjQ4MCIgeT0iMTcwIiB3aWR0aD0iMTgwIiBoZWlnaHQ9IjUyIiByeD0iOCIgZmlsbD0iIzE2MTIwYSIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utd2lkdGg9IjEuNSIgLz4KICAgIDx0ZXh0IHg9IjU3MCIgeT0iMTkyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyI+YWxyZWFkeSBydW5uaW5nIOKGkjwvdGV4dD4KICAgIDx0ZXh0IHg9IjU3MCIgeT0iMjEwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZjU5ZTBiIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMC41Ij5za2lwcGVkIHJ1biAobGlua2VkKTwvdGV4dD4KICAgIDx0ZXh0IHg9IjQ3MCIgeT0iMjcwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOGE4YThhIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiI+RXZlcnkgcGF0aCDigJQgYmxvY2tlZCwgc2tpcHBlZCwgbWlzc2VkLCBmYWlsZWQsIGNvbXBsZXRlZCDigJQgd3JpdGVzIG9uZSB0ZXJtaW5hbCBydW47IGEgc2Vzc2lvbiBpcyBhbiBvcHRpb25hbCBjaGlsZC48L3RleHQ+CiAgPC9zdmc+CiAgPGZpZ2NhcHRpb24+PGI+RmlndXJlIDEuPC9iPiBUaGUgcmVsaWFiaWxpdHkgcGlwZWxpbmUuIEEgcHJvdmVuIGJsb2NrZXIgcGF1c2VzIHRoZSByb3V0aW5lIGFuZCByZWNvcmRzIGEgPGNvZGU+YmxvY2tlZDwvY29kZT4gcnVuIGJlZm9yZSBhbnkgYWdlbnQgc3RhcnRzOyBhIHNsb3QgYXJyaXZpbmcgd2hpbGUgYSBwcmlvciBydW4gaXMgbGl2ZSByZWNvcmRzIGEgPGNvZGU+c2tpcHBlZDwvY29kZT4gcnVuIGluc3RlYWQgb2YgYSBzZWNvbmQgbGF1bmNoLjwvZmlnY2FwdGlvbj4KPC9maWd1cmU+CgoqKkdyb3VwaW5nIHZzIGFuY2hvci4qKiBgcHJvamVjdHNgIChwbHVyYWwpIHN0YXlzIGdyb3VwaW5nLW9ubHkgbWV0YWRhdGEgZm9yIGxpc3RpbmdzOwphIHNpbmd1bGFyIGBwcm9qZWN0YCAoQ0xJIGAtLXByb2plY3QtYW5jaG9yYCkgcGx1cyBhIHJvdXRpbmUtbGV2ZWwgYGN3ZGAgaXMgdGhlCmV4ZWN1dGlvbiBhbmNob3IsIHJlc29sdmVkICoqb24gdGhlIGV4ZWN1dGlvbiB0YXJnZXQqKi4gQSByb290bGVzcyBMaW5lYXItaW1wb3J0ZWQKcHJvamVjdCwgb3IgYSBiYXJlIHJlbGF0aXZlIGBjd2RgLCBhbmNob3JzIGF0IHRoZSB0YXJnZXQgYCRIT01FYC4KCioqUmVhZGluZXNzIHNhdmVzIHBhdXNlZC4qKiBgYWRkYC9gZWRpdGAgdmVyaWZ5IHJlYWRpbmVzcyAoYSByZWFsIGhlYWRsZXNzIGF1dGggc21va2UsCm5vdCBhIGNhY2hlIHJlYWQpIGFuZCBzYXZlIGEgcHJvdmVuIGJsb2NrZXIgcGF1c2VkIHdpdGggYSBzdGFibGUgY29kZQooYHByb2plY3Rfbm90X2ZvdW5kYCwgYGN3ZF9taXNzaW5nYCwgYGNvZGV4X3dvcmtzcGFjZV91bnRydXN0ZWRgLCBgYWdlbnRfYXV0aF9mYWlsZWRgLApgZXhlY3V0aW9uX2NvbnRleHRfbWlzc2luZ2AsIOKApikuIGByZXN1bWVgIHJlY2hlY2tzOyBhIHJhdyBZQU1MIGVkaXQgaXMgYXRvbWljCih0ZW1wIOKGkiBwYXJzZSDihpIgdmFsaWRhdGUg4oaSIHJlcGxhY2UsIHBhdXNlZC13aGVuLWJsb2NrZWQpLiBBbiBhZ2VudC93b3JrZmxvdyByb3V0aW5lCndpdGggbm8gY29udGV4dCBzYXZlcyBwYXVzZWQ7IGEgYGNvbW1hbmRgIHJvdXRpbmUgbWF5IGRlZmF1bHQgdG8gdGhlIHRhcmdldCBgJEhPTUVgLgoKKipTaW5nbGUtZmlyZS4qKiBPbmUgYXRvbWljIGNsYWltIG9uIGAocm91dGluZSwgc2NoZWR1bGVkRm9yKWAgYmVmb3JlIGRpc3BhdGNoLCBrZXB0CnNlcGFyYXRlIGZyb20gdGhlIGFjdGl2ZS1ydW4gY2xhaW0gdGhhdCBwcmV2ZW50cyBzZWxmLW92ZXJsYXAuIGByZXBvYCBpcyBhbiBleHRlcm5hbApHaXQvY2xvdWQvd2ViaG9vayBpZGVudGl0eSwgbmV2ZXIgYSBsb2NhbCBjd2QuIFRoZSBtZW51IGJhciBzdGF5cyByZWFkLW9ubHkgZm9yCnNjaGVkdWxpbmcuCgojIyBQdWJsaWMgSW50ZXJmYWNlCgpgYGBiYXNoCiMgRXhlY3V0aW9uIGFuY2hvciArIHdvcmtpbmcgZGlyZWN0b3J5IChwbGFubmVkKQphZ2VudHMgcm91dGluZXMgYWRkIG5pZ2h0bHkgLS1wcm9qZWN0LWFuY2hvciBteWFwcCAtLWN3ZCBzZXJ2aWNlcy9hcGkgXAogIC0tc2NoZWR1bGUgIjAgMyAqICogKiIgLS1hZ2VudCBjbGF1ZGUgLS1wcm9tcHQgIi4uLiIKCiMgRGlhZ25vc2UgKyByZXBhaXIgcmVhZGluZXNzIChwbGFubmVkKQphZ2VudHMgcm91dGluZXMgZG9jdG9yICAgICAgICAgICAgIyByZS1jaGVjayBldmVyeSByb3V0aW5lJ3MgcmVhZGluZXNzCmFnZW50cyByb3V0aW5lcyBkb2N0b3IgbmlnaHRseSAtLWZpeAoKIyBBbHJlYWR5IGxhbmRlZAphZ2VudHMgcm91dGluZXMgcmVzdW1lIG5pZ2h0bHkgICAgIyAocGxhbm5lZCkgcmVjaGVja3MgcmVhZGluZXNzIGJlZm9yZSBhY3RpdmF0aW5nCmFnZW50cyByb3V0aW5lcyBydW5zIG5pZ2h0bHkgICAgICAjIGF0dGVtcHQgaGlzdG9yeSwgaW5jbHVkaW5nIGJsb2NrZWQvc2tpcHBlZC9taXNzZWQKYGBgCgpSdW4gc3RhdHVzZXMgZGlzdGluZ3Vpc2ggYHJ1bm5pbmcgfCBjb21wbGV0ZWQgfCBmYWlsZWQgfCB0aW1lb3V0IHwgbWlzc2VkIHwgYmxvY2tlZCB8IHNraXBwZWRgLgpgYmxvY2tlZGAgKHJlYWRpbmVzcyBmYWlsZWQsIG5vIGJvZHkgcmFuKSBhbmQgYHNraXBwZWRgIChzZWxmLW92ZXJsYXApIGFyZSB0aGUgdHdvIG5ldwp0ZXJtaW5hbCBzdGF0ZXMuCgojIyBWYWxpZGF0aW9uCgp8IENoZWNrIHwgRXhwZWN0ZWQgcmVzdWx0IHwKfCAtLS0gfCAtLS0gfAp8IENvbnRleHQgcmVzb2x2ZXIgfCBwcm9qZWN0IGJhc2UgLyBwcm9qZWN0K3JlbGF0aXZlIC8gcm9vdGxlc3MraG9tZSAvIG5vLXByb2plY3QraG9tZSByZXNvbHZlOyBhYnNvbHV0ZS1vdXRzaWRlLWhvbWUgKyB0cmF2ZXJzYWwgcmVqZWN0ZWQ7IHJlc29sdmVzIGFnYWluc3QgdGhlIHRhcmdldCdzIGZpbGVzeXN0ZW0gfAp8IEFkZCAvIGVkaXQgLyByZXN1bWUgfCByZWFkeSBhY3RpdmF0ZXM7IG1pc3NpbmcgcGF0aC90cnVzdC93cml0ZS9hdXRoIHNhdmVzIHBhdXNlZDsgcmVzdW1lIGNhbm5vdCBieXBhc3MgcmVhZGluZXNzIHwKfCBBdG9taWMgZWRpdCB8IGludmFsaWQgWUFNTCBsZWF2ZXMgcHJpb3IgYnl0ZXMgdW50b3VjaGVkOyB2YWxpZC1idXQtdW5yZWFkeSByZXBsYWNlcyBhbmQgcGF1c2VzIHwKfCBTY2hlZHVsZXIgfCB0d28gY2FsbGJhY2tzIGZvciBvbmUgVVRDIHNsb3Qg4oaSIG9uZSBsYXVuY2g7IHJlc3RhcnQgcmVwbGF5cyBubyBsYXVuY2ggfAp8IE92ZXJsYXAgfCBzY2hlZHVsZWQvbWFudWFsL2ZvcmVncm91bmQvZGV0YWNoZWQgYWNyb3NzIGhvc3QvZmxlZXQvY2xvdWQgbGF1bmNoIGF0IG1vc3Qgb25lIHwKfCBBdHRlbXB0IGhpc3RvcnkgfCBwbGFjZW1lbnQsIHNhbmRib3gsIGFjY291bnQsIHRydXN0LCBhdXRoLCBkaXNwYXRjaCBmYWlsdXJlcyBlYWNoIHdyaXRlIG9uZSB0ZXJtaW5hbCBydW47IG92ZXJsYXAgbGlua3MgdGhlIGFjdGl2ZSBydW4gfAoKIyMgUmlza3MKCnwgUmlzayB8IE1pdGlnYXRpb24gfAp8IC0tLSB8IC0tLSB8CnwgYHByb2plY3RzW11gIGdyb3VwaW5nIHNpbGVudGx5IHByb21vdGVkIHRvIGV4ZWN1dGlvbiBjb250ZXh0IHwgQW5jaG9yIGlzIGEgc2VwYXJhdGUgc2luZ3VsYXIgZmllbGQgKyBgLS1wcm9qZWN0LWFuY2hvcmA7IGdyb3VwaW5nIG5ldmVyIGFmZmVjdHMgcGxhY2VtZW50IChSVC0xKSB8CnwgUmVhZGluZXNzIHNtb2tlIGJlY29tZXMgYW4gaW1wbGljaXQgYXV0by1sb2dpbiBvciBzYW5kYm94IGJ5cGFzcyB8IENvbnRyYWN0IGZvcmJpZHMgaXQgKFJULTUpOyBubyBsb2dpbiwgbm8gYnlwYXNzIGludHJvZHVjZWQgfAp8IERvY3VtZW50aW5nIHBsYW5uZWQgYmVoYXZpb3IgYXMgaWYgaXQgd2VyZSBsaXZlIHwgRXZlcnkgdW5sYW5kZWQgcmVxdWlyZW1lbnQgaXMgbWFya2VkIGBbSW50ZW5kZWRdYCB3aXRoIGEgYC1HQVAtYDsgZG9jcyBtYXJrIGxhbmRlZCB2cyBwbGFubmVkIHRocm91Z2hvdXQgfAp8IEJhY2t3YXJkIGNvbXBhdGliaWxpdHkgb2YgdGhlIHJlcGVhdGFibGUgYC0tcHJvamVjdGAgZmxhZyB8IFByZXNlcnZlZDsgdGhlIHNpbmd1bGFyIGFuY2hvciBpcyBhIGRpc3RpbmN0IGZsYWcgbmFtZSB8Cgo8YXNpZGUgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiPjxzdHJvbmc+TG9hZC1iZWFyaW5nIHRha2Vhd2F5Ojwvc3Ryb25nPiByZWFkeSBtZWFucyBhY3RpdmU7IGFueSBwcm92ZW4gYmxvY2tlciBtZWFucyBwYXVzZWQgYW5kIHZpc2libGUuIEEgcm91dGluZSBuZXZlciBvdmVybGFwcyBpdHNlbGYsIGFuZCBvbmUgc2NoZWR1bGVkIHNsb3QgbGF1bmNoZXMgYXQgbW9zdCBvbmNlLjwvYXNpZGU+CgojIyBUcmFja2luZwoKVGhpcyBkb2NzIHRyYWNrIChSVVNILTIyOTApIGxhbmRzIHRoZSBub3JtYXRpdmUgY29udHJhY3Qgb25seSDigJQgbm8gcnVudGltZSBjaGFuZ2U6CgotIGBhcHBzL2NsaS9kb2NzL3NwZWNpZmljYXRpb25zLm1kYCDigJQgbmV3IMKnUm91dGluZSBleGVjdXRpb24gJiByZWFkaW5lc3MgKFJULTEuLlJULTExLCBSVC1HQVAtMSk7IFNJTkctMTEuLlNJTkctMTMgKyBTSU5HLUdBUC0zLgotIGBhcHBzL2NsaS9kb2NzLzAzLXJvdXRpbmVzLm1kYCDigJQgdXNlci1mYWNpbmcgZXhlY3V0aW9uLWNvbnRleHQvcmVhZGluZXNzL3N0YXR1cyBkb2NzLgotIGBSRUFETUUubWRgIMKnUm91dGluZXMsIGBhcHBzL2NsaS9BR0VOVFMubWRgIGludmFyaWFudCAjNywgYGFwcHMvY2xpLy5jaGFuZ2Vsb2cvbmV4dC9SVVNILTIyOTAubWRgLgotIENvbXBhbmlvbiBgcGhueC1sYWJzLy5hZ2VudHMtc3lzdGVtYCBhdWRpdGVkOiBubyBjb25zdW1lciB0ZWFjaGVzIGEgY29udHJhZGljdGVkIHNoYXBlIChubyBjaGFuZ2UgbmVlZGVkKS4KClRoZSBydW50aW1lIHRyYWNrcyAoY29udGV4dC9yZWFkaW5lc3MgcmVzb2x2ZXIsIGZpcmUvaGlzdG9yeSkgbGFuZCBzZXBhcmF0ZWx5IGFuZCBmbGlwCmVhY2ggYFtJbnRlbmRlZF1gIHJlcXVpcmVtZW50IHRvIGBDdXJyZW50YCBhcyB0aGV5IHNoaXAuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
