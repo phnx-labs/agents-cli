@@ -172,9 +172,9 @@ describe('applyFilters — shared browser/focus selection', () => {
   it('keeps retained dead rows out of bare --active while explicit lifecycle filters can select them', () => {
     const rows = [row({ id: 'working' }), row({ id: 'closed' }), row({ id: 'crashed' })];
     const live = new Map<string, ActiveSession>([
-      ['working', { context: 'terminal', kind: 'claude', status: 'running', pidAlive: true, sessionId: 'working' } as ActiveSession],
-      ['closed', { context: 'terminal', kind: 'claude', status: 'closed', pidAlive: false, sessionId: 'closed' } as ActiveSession],
-      ['crashed', { context: 'terminal', kind: 'claude', status: 'crashed', pidAlive: false, sessionId: 'crashed' } as ActiveSession],
+      ['working', { context: 'terminal', kind: 'claude', status: 'running', machine: 'zion', pid: 111, pidAlive: true, sessionId: 'working' } as ActiveSession],
+      ['closed', { context: 'terminal', kind: 'claude', status: 'closed', machine: 'zion', pid: 222, pidAlive: false, sessionId: 'closed' } as ActiveSession],
+      ['crashed', { context: 'terminal', kind: 'claude', status: 'crashed', machine: 'zion', pid: 333, pidAlive: false, sessionId: 'crashed' } as ActiveSession],
     ]);
 
     expect(applyFilters(

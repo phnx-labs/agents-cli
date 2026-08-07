@@ -100,12 +100,19 @@ describe('focus resume-in-a-tab command', () => {
 
 describe('isAttachableLiveSession', () => {
   it('rejects retained panes whose process exited', () => {
-    expect(isAttachableLiveSession(s({ pidAlive: false, status: 'closed' }))).toBe(false);
-    expect(isAttachableLiveSession(s({ pidAlive: false, status: 'crashed' }))).toBe(false);
+    expect(isAttachableLiveSession(s({ machine: 'zion', pid: 111, pidAlive: false, status: 'closed' }))).toBe(false);
+    expect(isAttachableLiveSession(s({ machine: 'zion', pid: 111, pidAlive: false, status: 'crashed' }))).toBe(false);
   });
 
   it('accepts a running live pane', () => {
-    expect(isAttachableLiveSession(s({ pidAlive: true, status: 'running' }))).toBe(true);
+    expect(isAttachableLiveSession(s({ machine: 'zion', pid: 111, pidAlive: true, status: 'running' }))).toBe(true);
+  });
+
+  // RUSH-2336: a pane can only be attached once it's positively located — a
+  // machine, a positive pid, and verified liveness, not merely "not dead".
+  it('rejects a pane whose liveness was never positively verified', () => {
+    expect(isAttachableLiveSession(s({ machine: 'zion', pid: 111, status: 'running' }))).toBe(false);
+    expect(isAttachableLiveSession(s({ pid: 111, pidAlive: true, status: 'running' }))).toBe(false);
   });
 });
 

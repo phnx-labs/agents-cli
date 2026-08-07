@@ -74,6 +74,26 @@ default.` (the Factory watchdog tail-detects this text for rotate cooldowns).
 `--session-id` keeps its claude-only semantics — honored when auto picks
 claude, ignored with a stderr note otherwise.
 
+**One carve-out: a missing login is not an exhausted account.** When the only
+thing wrong is that an account is signed out (or its token was revoked), a
+terminal run does NOT fail loud — it launches so you can authenticate, because
+the harness's own TUI is the login surface and there is nowhere else to do it.
+`agents run <agent>` with a single such account launches it directly (naming the
+version and the login command); with several it opens the account picker, where
+an auth-blocked row is selectable and labelled `launch to sign in`. A
+throttled account is never launched this way — only a window reset clears
+`rate_limited` / `out_of_credits`, so those still exit nonzero with the message
+above.
+
+The launch requires a **human-facing** run, which is two conditions, not one: a
+real TTY *and* no `--json`. Off a TTY nothing can complete a login, and `--json`
+marks a machine consumer that must never be handed a picker or dropped into a
+login TUI — so both keep failing loud, with the harness's login command added
+alongside `--strategy pinned`. `--quiet` does not block the launch; it only
+suppresses the explanatory lines. The gate is `signInLaunchDecision` in
+`src/commands/run-account-picker.ts`, mirroring `Surface.interactive` from
+`src/commands/utils.ts`.
+
 
 Pass `all` as the `--host` / `--device` value to fan any fleet-aware command out
 across every registered device. The passthrough runs `agents <cmd> --json` on each

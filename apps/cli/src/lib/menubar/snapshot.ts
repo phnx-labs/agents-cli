@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { buildRoutineListJson } from '../../commands/routines.js';
-import { backfillActiveRowsFromIndex, serializeActiveSessionsForJson, serializeSessionsJson } from '../../commands/sessions.js';
+import { backfillActiveRowsFromIndex, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson } from '../../commands/sessions.js';
 import { getConfigValue } from '../device-config.js';
 import { loadDevices } from '../devices/registry.js';
 import { machineId } from '../machine-id.js';
@@ -77,7 +77,17 @@ export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
     buildMenubarDevices(),
   ]);
   const active = readActiveSessionsCache('local');
-  const activeSessions = active?.sessions ?? [];
+  const rawSessions = active?.sessions ?? [];
+  // The raw cache is never filtered at write time (RUSH-2336) — it retains
+  // queued/closed/crashed rows so `--queued`/`--closed`/`--crashed` can
+  // recover them, and the daemon's warm-tick gather (unlike the CLI's own
+  // local gather) never stamps `machine` on a row. Stamp self here — this IS
+  // the 'local' scope by construction — then apply the ONE canonical
+  // bare-active selector so the menubar never shows a retained dead/queued
+  // row nor a process row of unverified liveness.
+  const self = machineId();
+  for (const s of rawSessions) if (!s.machine) s.machine = self;
+  const activeSessions = rawSessions.filter(isRunningLiveSession);
   backfillActiveRowsFromIndex(activeSessions);
   return {
     version: 1,

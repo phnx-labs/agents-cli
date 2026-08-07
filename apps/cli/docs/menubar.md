@@ -17,9 +17,25 @@ The snapshot carries the same rows and lifecycle status as
 `agents sessions --active --local --json`. After the warm snapshot loads, the
 menu does not infer status again from terminal registries or attention files;
 those cheap files are used only during cold start. The ACTIVE section therefore
-uses the CLI words `working`, `waiting`, `idle`, `queued`, `orphan`, `crashed`,
-`closed`, `abandoned`, and `unknown`, and routine sessions carry
-`routine:<name>` when the indexed name is available.
+uses the CLI words `working`, `waiting`, `idle`, `orphan`, `abandoned`, and
+`unknown`, and routine sessions carry `routine:<name>` when the indexed name is
+available.
+
+**Bare-active parity (RUSH-2336).** The snapshot applies the CLI's canonical
+`isRunningLiveSession` selector before it ever reaches the menu: a `queued`
+(dispatched, not started), `closed`, or `crashed` row the live registry retains
+for `--queued`/`--closed`/`--crashed` recovery never shows in the ACTIVE
+section, and a real OS process row (terminal/tmux/headless/team) surfaces only
+once it is positively located — a known `machine`, a positive `pid`, AND
+verified liveness (`pidAlive === true`, not merely "not known dead"). A cloud
+row surfaces on the provider's own word (`cloudProvider` + `cloudTaskId`)
+instead. Every session's detail submenu (the "Where" section) shows the exact
+handle behind the row — `machine:pid` for a process, `provider · taskId` for
+cloud — the same locator the CLI's own `--active` row renders. Because the raw
+cache the daemon warm-tick writes is never filtered at write time and does not
+stamp `machine` on a local row (unlike the CLI's own local gather), the
+snapshot self-stamps this machine's id before filtering — see
+`computeMenubarSnapshot` in `src/lib/menubar/snapshot.ts`.
 
 macOS only. It is auto-enabled for every user (see [Lifecycle](#lifecycle)); opt
 out with `agents menubar disable`.

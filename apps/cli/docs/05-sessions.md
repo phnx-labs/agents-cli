@@ -752,10 +752,30 @@ unreachable still falls back to any age).
 
 On a TTY it opens the interactive browser seeded to running-only; `--json`,
 `--waiting`, and `--no-interactive` print the static grouped view instead. Both read
-the same gather and the same running predicate, so they always agree on what is live.
-The registry retains terminally-dead rows for recovery, but bare `--active` excludes
-`closed`, `crashed`, and rows whose process is positively dead. Explicit lifecycle
-filters such as `--closed` and `--crashed` select those retained rows instead.
+the same gather and the same running predicate — `isRunningLiveSession`
+(`src/commands/sessions.ts`) — so they always agree on what is live, and it is the ONE
+canonical selector every bare-active surface shares: the CLI table/JSON, the
+interactive browser's `--active` filter, `focus`'s attach gate, and the menubar
+snapshot (`src/lib/menubar/snapshot.ts`).
+
+The registry retains terminally-dead AND not-yet-started rows for recovery, but bare
+`--active` (RUSH-2336) excludes `queued` (dispatched, not started), `closed` and
+`crashed` (unconditionally dead) outright. Explicit lifecycle filters — `--queued`,
+`--closed`, `--crashed` — select those retained rows instead. A cloud row is active on
+the provider's own word alone (`cloudProvider` + `cloudTaskId`, never a fabricated
+pid); every other row (terminal/tmux/headless/team) is active only once it is
+POSITIVELY located — it names its `machine`, carries a positive `pid`, AND has
+verified liveness (`pidAlive === true`, not merely "not known dead"). A live
+`orphaned` row or a live-but-stuck `abandoned` row still qualifies (their pid is
+genuinely alive); a row of unknown liveness — an older peer's payload, or a pid that
+never resolved — does not. Every process-backed row the bare `--active` JSON emits
+therefore always carries `machine`, a positive `pid`, and `pidAlive: true`, and the
+human CLI row renders the matching `machine:pid` (or `provider · taskId` for cloud)
+locator alongside the ssh/tmux/Ghostty jump hints. The menubar reads the same raw,
+never-filtered-at-write cache and applies this selector too, self-stamping `machine`
+on a local row first since the daemon's warm-tick gather (unlike the CLI's own local
+gather) does not stamp it.
+
 Per-device `latest` / `oldest` selectors accept only rows returned by that device's
 version-filtered index query; an unindexed live row with no resolved version does not
 silently widen the picker.
