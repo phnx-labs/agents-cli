@@ -496,6 +496,10 @@ agents add claude@2.0.65     # Install a specific version
 agents add codex@latest       # Install latest
 agents add codex@oldest       # Install the oldest published version
 agents view                   # See everything installed
+agents accounts list         # See logical account labels and local version bindings
+agents accounts label work claude@2.1.220
+agents accounts attach work claude@2.1.219 codex@0.146.0
+agents run claude --account work
 ```
 
 ---

@@ -114,6 +114,28 @@ two `pid → id` writers (the CLI's registry vs the SessionStart hook).
 
 ## Devices & Hosts
 
+### Logical account labels
+
+Installed harness versions keep their own credentials, so the same Claude or
+Codex version can be signed into different identities on different devices.
+`agents accounts` adds an operator-owned name above those local credentials:
+
+```bash
+agents accounts label work claude@2.1.220
+agents accounts attach work claude@2.1.219 codex@0.146.0
+agents accounts list
+agents run claude --account work
+```
+
+The central `~/.agents/accounts.yaml` registry stores only SHA-256 identity
+fingerprints. Intended version assignments live in
+`~/.agents/devices/<device>/accounts.yaml`; credentials remain inside each
+version home and are never copied. A label can contain one identity per harness
+and one identity can be attached to several versions. `attach` verifies the
+version's current identity before changing its binding. `run --account` fails
+when the requested label is absent or mismatched; it never falls back to a
+different account. Vendor-cloud and lease placement do not use local labels.
+
 agents-cli can run commands on **other machines**, not just the local one. Two
 independent registries back this, both using SSH as the only transport (no daemon).
 

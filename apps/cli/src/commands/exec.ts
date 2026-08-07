@@ -71,6 +71,8 @@ interface ExecCommandActionOptions {
   fallback?: string;
   balanced?: boolean;
   strategy?: string;
+  /** Restrict selection to the locally bound logical account label. */
+  account?: string;
   /**
    * @deprecated Hidden alias for `--device auto`. Resolved before host dispatch.
    * Remove after one release.
@@ -781,6 +783,7 @@ export function registerRunCommand(program: Command): void {
       '--strategy <strategy>',
       'Version/account selection strategy: pinned | available | balanced. Defaults to run.<agent>.strategy, then balanced (spreads load across healthy accounts and skips any that are rate-limited). (Legacy `rotate` accepted as alias for `balanced`.)',
     )
+    .option('--account <label>', 'Run the installed version attached to this account label on the current device (never falls back to another identity)')
     .option(
       '--acp',
       'Route through the Agent Client Protocol instead of direct exec. Supported for claude via @zed-industries/claude-code-acp adapter. Unified event stream; emits ndjson when --json.',
@@ -2539,6 +2542,16 @@ export function registerRunCommand(program: Command): void {
 
       version = resolveVersionAlias(agent, version);
 
+      if (options.account) {
+        if (options.cloud || options.provider || options.lease) {
+          console.error(chalk.red('--account selects a local installed identity and cannot be combined with cloud or lease placement.'));
+          process.exit(1);
+        }
+        const { resolveAccountLabel } = await import('../lib/account-labels.js');
+        try { const selected = await resolveAccountLabel(agent, options.account); if (version && version !== selected) throw new Error(`${agent}@${version} is not the verified binding for account label '${options.account}'.`); version ??= selected; }
+        catch (err) { console.error(chalk.red((err as Error).message)); process.exit(1); }
+      }
+
       // --resume: resolve a prior conversation and rewrite the run target to
       // continue it. `version` here is already the alias-resolved candidate-version
       // FILTER (undefined for default/any, concrete for @latest/@oldest/@x.y.z);
@@ -2709,7 +2722,7 @@ export function registerRunCommand(program: Command): void {
       // the bare primary still resolves through the strategy — otherwise every
       // `agents run claude --fallback codex` run lands on the pinned default
       // account and account rotation silently stops (the gh-monitor heal bug).
-      if (!accountPickerRequested && (strategy !== 'pinned' || options.balanced || explicitStrategy)) {
+      if (!accountPickerRequested && !options.account && (strategy !== 'pinned' || options.balanced || explicitStrategy)) {
         if (version) {
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: version ${version} is pinned\n`));
         } else if (fromProfile) {
