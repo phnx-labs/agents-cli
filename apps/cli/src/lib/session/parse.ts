@@ -1187,6 +1187,43 @@ export function parseAntigravity(dbPath: string): SessionEvent[] {
 }
 
 // ---------------------------------------------------------------------------
+// Composite session file paths
+// ---------------------------------------------------------------------------
+
+/**
+ * Separator between a container file and the id it holds inside a *composite*
+ * session `file_path`. Some harnesses keep every session in ONE file (OpenCode's
+ * single `opencode.db`), so the index stores `<container>#<session-id>` rather
+ * than one path per session — e.g.
+ * `/home/u/.local/share/opencode/opencode.db#ses_02410a2c…`.
+ */
+export const SESSION_FILE_PATH_SEP = '#';
+
+/**
+ * Split a stored session `file_path` into its on-disk container and the optional
+ * in-container fragment. For a plain per-session file the container is the path
+ * itself and `fragment` is undefined; for a composite path it is the part before
+ * the first `#` and the id after it.
+ */
+export function splitSessionFilePath(filePath: string): { container: string; fragment: string | undefined } {
+  const hash = filePath.indexOf(SESSION_FILE_PATH_SEP);
+  if (hash < 0) return { container: filePath, fragment: undefined };
+  return { container: filePath.slice(0, hash), fragment: filePath.slice(hash + 1) || undefined };
+}
+
+/**
+ * The filesystem path whose existence/stat decides whether a session row is
+ * stale. For a composite `file_path` this is the CONTAINER file — the row is a
+ * record inside it, never a filesystem entry of its own — so a composite session
+ * is stale only when its container is gone. For a plain path it is the path
+ * itself. Keying off the composite FORM (a `#` fragment), not any harness name,
+ * means any future single-file-DB harness inherits the correct behavior.
+ */
+export function sessionFilePathContainer(filePath: string): string {
+  return splitSessionFilePath(filePath).container;
+}
+
+// ---------------------------------------------------------------------------
 // OpenCode parser
 // ---------------------------------------------------------------------------
 
@@ -1324,7 +1361,7 @@ export function parseGrok(filePath: string): SessionEvent[] {
 }
 
 export function parseOpenCode(filePath: string): SessionEvent[] {
-  const [dbPath, sessionId] = filePath.split('#');
+  const { container: dbPath, fragment: sessionId } = splitSessionFilePath(filePath);
   if (!dbPath || !sessionId) return [];
 
   const events: SessionEvent[] = [];
