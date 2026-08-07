@@ -14,8 +14,8 @@ import type { WatchdogTickResult } from '../watchdog/runner.js';
 /**
  * One registered fleet device, for the menu-bar's collapsible DEVICES section.
  * Sourced from the local registry read (`loadDevices`) — no network probe — so
- * it carries only what the registry knows for sure (name, platform, whether it
- * is the interactive host, whether it is this machine). Live load% is merged in
+ * it carries only local persisted state (name, platform, preferred status,
+ * whether it is the interactive host, whether it is this machine). Live load% is merged in
  * on the Swift side from the daemon-warmed `.fleet-stats.json`; online/offline
  * is deliberately NOT claimed here (the registry's cached tailscale flag is
  * documented as stale in both directions — registry.ts isLikelyOnline).
