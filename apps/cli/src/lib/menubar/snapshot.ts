@@ -4,7 +4,7 @@ import * as path from 'path';
 import { buildRoutineListJson } from '../../commands/routines.js';
 import { backfillActiveRowsFromIndex, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson } from '../../commands/sessions.js';
 import { getConfigValue } from '../device-config.js';
-import { loadDevices } from '../devices/registry.js';
+import { loadAutoLaunchPreferences, loadDevices } from '../devices/registry.js';
 import { machineId } from '../machine-id.js';
 import { querySessions } from '../session/db.js';
 import { readActiveSessionsCache } from '../session/session-cache.js';
@@ -25,6 +25,7 @@ export interface MenubarDevice {
   platform: string;
   interactive: boolean;
   isLocal: boolean;
+  preferred: boolean;
 }
 
 export interface MenubarSnapshot {
@@ -46,7 +47,10 @@ export interface MenubarSnapshot {
  * it rides the same 3-minute snapshot poll instead of a second timer.
  */
 async function buildMenubarDevices(): Promise<MenubarDevice[]> {
-  const reg = await loadDevices();
+  const [reg, prefs] = await Promise.all([
+    loadDevices(),
+    loadAutoLaunchPreferences(),
+  ]);
   const interactiveHost = getConfigValue('interactive.host').value as string | undefined;
   const self = machineId();
   return Object.keys(reg)
@@ -56,6 +60,7 @@ async function buildMenubarDevices(): Promise<MenubarDevice[]> {
       platform: reg[name].platform,
       interactive: name === interactiveHost,
       isLocal: name === self,
+      preferred: prefs[name]?.preferred === true,
     }));
 }
 
