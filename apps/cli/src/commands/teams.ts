@@ -621,29 +621,45 @@ async function reactWithTeammate(
       cwd = baseCwd;
     }
   }
-  const result = await handleSpawn(
-    mgr,
-    team,
-    'claude',
-    prompt,
-    cwd,
-    'edit',
-    'medium',
-    null,
-    cwd,
-    null,
-    name,
-    after,
-    null,
-    null,
-    taskType,
-    null,
-    null,
-    null,
-    null,
-    worktreeName,
-    worktreePath,
-  );
+  let result;
+  try {
+    result = await handleSpawn(
+      mgr,
+      team,
+      'claude',
+      prompt,
+      cwd,
+      'edit',
+      'medium',
+      null,
+      cwd,
+      null,
+      name,
+      after,
+      null,
+      null,
+      taskType,
+      null,
+      null,
+      null,
+      null,
+      worktreeName,
+      worktreePath,
+    );
+  } catch (err) {
+    // The spawn failed after we created this fixer's worktree — tear it down so
+    // the branch `agents/<name>` doesn't block the next wave's retry with
+    // `fatal: a branch ... already exists` (RUSH-2356). Best-effort; the
+    // original failure is what propagates.
+    if (worktreeName) {
+      try {
+        await removeWorktree(baseCwd, worktreeName);
+      } catch (cleanupErr) {
+        debug(`pr-watch: could not remove orphaned worktree ${worktreeName}: ${(cleanupErr as Error).message}`);
+      }
+    }
+    throw err;
+  }
   return result.name ?? shortId(result.agent_id);
 }
 
@@ -1747,6 +1763,41 @@ export function registerTeamsCommands(program: Command): void {
       let worktreeName: string | null = null;
       let worktreePath: string | null = null;
 
+      const mgr = mkManager();
+
+      // Validate name uniqueness + --after deps BEFORE creating a worktree
+      // (RUSH-2356): a rejected add must not leave an orphan `agents/<name>`
+      // branch that then breaks the retry with `fatal: a branch ... already
+      // exists`. spawn() re-validates, so this is a fast fail, not the authority.
+      try {
+        await mgr.validateAddPreconditions(team, opts.name ?? null, after);
+      } catch (err) {
+        dieFriction('teams', 'add-precondition-failed', (err as Error).message);
+      }
+
+      // Track a worktree WE create in this add so a later failure (dep race,
+      // launch error, cloud dispatch) can tear it down instead of stranding the
+      // branch. Only a worktree THIS add created is ever torn down, so a
+      // legitimately-pending teammate's worktree is never touched.
+      let createdWorktree: { baseCwd: string; name: string } | null = null;
+      const tearDownCreatedWorktree = async (): Promise<void> => {
+        if (!createdWorktree) return;
+        const { baseCwd, name } = createdWorktree;
+        createdWorktree = null;
+        try {
+          await removeWorktree(baseCwd, name);
+        } catch (cleanupErr) {
+          process.stderr.write(
+            chalk.yellow(
+              `\nWarning: could not remove the orphaned worktree '${name}' after the failed add: ` +
+                `${(cleanupErr as Error).message}\n` +
+                `  Remove it manually: git -C ${baseCwd} worktree remove --force .agents/worktrees/${name} ` +
+                `&& git -C ${baseCwd} branch -D agents/${name}\n`,
+            ),
+          );
+        }
+      };
+
       if (hostName) {
         // Distributed teammate: the checkout lives on the host, so we NEVER touch
         // the local filesystem here. A shared local worktree makes no sense for a
@@ -1796,6 +1847,7 @@ export function registerTeamsCommands(program: Command): void {
         try {
           worktreeName = opts.worktree;
           worktreePath = await createWorktree(baseCwd, worktreeName);
+          createdWorktree = { baseCwd, name: worktreeName };
         } catch (err) {
           dieFriction('teams', 'worktree-create-failed', `Failed to create worktree '${opts.worktree}': ${(err as Error).message}`);
         }
@@ -1807,7 +1859,6 @@ export function registerTeamsCommands(program: Command): void {
       // host (repoPath / the remote worktree). Local teammates default to the
       // worktree path, then --cwd, then the current directory.
       const cwd = hostName ? null : (worktreePath ?? opts.cwd ?? process.cwd());
-      const mgr = mkManager();
 
       // Factory teammates: prepend the worker-skill preamble to every task
       // prompt so implementers/testers/reviewers know about the Ledger, the
@@ -1855,6 +1906,9 @@ export function registerTeamsCommands(program: Command): void {
           const cloudTask = await prov.dispatch(dispatchOpts);
           cloudSessionId = cloudTask.id;
         } catch (err) {
+          // Same orphan class as a failed spawn: this add already created its
+          // worktree, so a dispatch failure must not strand the branch either.
+          await tearDownCreatedWorktree();
           dieFriction('teams', 'cloud-dispatch-failed', `Cloud dispatch failed: ${(err as Error).message}`);
         }
       }
@@ -1940,6 +1994,10 @@ export function registerTeamsCommands(program: Command): void {
           console.log(chalk.gray(`Check in later:  agents teams status ${team}`));
         }
       } catch (err) {
+        // The add failed after we created its worktree — tear the worktree +
+        // branch down so a retry isn't blocked by `fatal: a branch ... already
+        // exists` (RUSH-2356). Best-effort: report the original failure either way.
+        await tearDownCreatedWorktree();
         dieFriction('teams', 'add-failed', `Could not add ${fullName(agent, version)} to ${team}: ${(err as Error).message}`);
       }
     });

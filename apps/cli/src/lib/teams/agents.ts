@@ -1707,6 +1707,60 @@ export class AgentManager {
     debug(`Loaded ${loadedCount} agents from disk`);
   }
 
+  /**
+   * Validate an add's name uniqueness and `--after` dependency graph, without
+   * any side effects. Throws a user-facing error on: a duplicate name, `--after`
+   * without `--name`, an unknown dependency, or a cycle. Returns the cleaned
+   * (whitespace-filtered) `after` list.
+   *
+   * Extracted from spawn() so the command layer can run it BEFORE creating a
+   * worktree — a rejected add must not leave an orphan `agents/<name>` branch
+   * that then breaks the retry with `fatal: a branch ... already exists`
+   * (RUSH-2356). spawn() calls it too, so validation lives in exactly one place.
+   */
+  async validateAddPreconditions(
+    taskName: string,
+    name: string | null,
+    after: string[],
+  ): Promise<string[]> {
+    await this.initialize();
+    const siblings = await this.listByTask(taskName);
+    if (name && siblings.some((a) => a.name === name)) {
+      throw new Error(
+        `Team '${taskName}' already has a teammate named '${name}'. Pick another name or leave --name off.`,
+      );
+    }
+
+    const cleanAfter = after.filter((s) => s && s.trim());
+    if (cleanAfter.length > 0) {
+      if (!name) {
+        throw new Error(
+          "Can't use --after without --name. Dependencies reference teammates by name.",
+        );
+      }
+      // Every --after entry must resolve to an existing teammate name.
+      const siblingNames = new Set(siblings.map((a) => a.name).filter(Boolean) as string[]);
+      const missing = cleanAfter.filter((dep) => !siblingNames.has(dep));
+      if (missing.length > 0) {
+        throw new Error(
+          `Team '${taskName}' has no teammate named ${missing.map((m) => `'${m}'`).join(', ')} yet.\n` +
+            `  Add them first, then add this one.`,
+        );
+      }
+      // Cycle check: walk the transitive deps of each --after entry; if the
+      // new teammate's own name shows up, we'd create a cycle.
+      const byName = new Map(siblings.filter((a) => a.name).map((a) => [a.name as string, a]));
+      for (const dep of cleanAfter) {
+        if (hasTransitiveDep(byName, dep, name)) {
+          throw new Error(
+            `Adding '${name}' after '${dep}' would create a cycle (${dep} already depends on ${name}).`,
+          );
+        }
+      }
+    }
+    return cleanAfter;
+  }
+
   async spawn(
     taskName: string,
     agentType: AgentType,
@@ -1745,42 +1799,10 @@ export class AgentManager {
       parentSessionId = process.env.AGENTS_SESSION_ID ?? null;
     }
 
-    // Enforce: teammate names are unique within a team.
-    const siblings = await this.listByTask(taskName);
-    if (name && siblings.some((a) => a.name === name)) {
-      throw new Error(
-        `Team '${taskName}' already has a teammate named '${name}'. Pick another name or leave --name off.`
-      );
-    }
-
-    // --- dependency validation ---
-    const cleanAfter = after.filter((s) => s && s.trim());
-    if (cleanAfter.length > 0) {
-      if (!name) {
-        throw new Error(
-          "Can't use --after without --name. Dependencies reference teammates by name."
-        );
-      }
-      // Every --after entry must resolve to an existing teammate name.
-      const siblingNames = new Set(siblings.map((a) => a.name).filter(Boolean) as string[]);
-      const missing = cleanAfter.filter((dep) => !siblingNames.has(dep));
-      if (missing.length > 0) {
-        throw new Error(
-          `Team '${taskName}' has no teammate named ${missing.map((m) => `'${m}'`).join(', ')} yet.\n` +
-            `  Add them first, then add this one.`
-        );
-      }
-      // Cycle check: walk the transitive deps of each --after entry; if the
-      // new teammate's own name shows up, we'd create a cycle.
-      const byName = new Map(siblings.filter((a) => a.name).map((a) => [a.name as string, a]));
-      for (const dep of cleanAfter) {
-        if (hasTransitiveDep(byName, dep, name)) {
-          throw new Error(
-            `Adding '${name}' after '${dep}' would create a cycle (${dep} already depends on ${name}).`
-          );
-        }
-      }
-    }
+    // Validate name uniqueness + --after deps. Throws on any violation. The
+    // command layer calls this BEFORE creating a worktree so a rejected add
+    // never leaves an orphan `agents/<name>` branch behind (RUSH-2356).
+    const cleanAfter = await this.validateAddPreconditions(taskName, name, after);
 
     // Resolve and validate cwd
     let resolvedCwd: string | null = null;
