@@ -278,7 +278,9 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     const meta = await createSession({ name: 'exitcode', cmd: 'sh -c "exit 3"', socket });
     expect(meta.pane).toBeTruthy();
     await wait(400);
-    const exit = await paneExitStatus(meta.pane!, socket);
+    // See waitForExitStatus below: `pane_dead` can flip before `pane_dead_status`
+    // is populated under load, so poll for both together rather than one read.
+    const exit = await waitForExitStatus(meta.pane!, socket);
     expect(exit.dead).toBe(true);
     expect(exit.status).toBe(3);
   });
@@ -301,13 +303,25 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     });
     expect(meta.pane).toBeTruthy();
     await wait(400);
-    const exit = await paneExitStatus(meta.pane!, socket);
+    // tmux can flip `pane_dead` to 1 before `pane_dead_status` is populated —
+    // the same class of async settle race as the capture below, just on a
+    // different field. Poll both together instead of trusting a single read.
+    const exit = await waitForExitStatus(meta.pane!, socket);
     expect(exit.dead).toBe(true);
     expect(exit.status).toBe(1);
     // capture-pane must reach into scrollback (as runInTmux does with -S -200)
     // to recover the crash output — the dead pane's VISIBLE screen is just the
     // "Pane is dead" banner, so a history-less capture would miss the error.
-    const screen = await capturePane({ name: 'fastfail', pane: meta.pane!, socket, lines: 200 });
+    // The pty write of the crash line and tmux's own SIGCHLD-driven pane-dead
+    // transition are two independent async chains; on a loaded runner the
+    // dead-pane banner can render before the crash line has settled into the
+    // pane's screen/scrollback (RUSH-2342 — observed as a bare "Pane is dead"
+    // capture with no ENOENT on the crabbox VM, despite paneExitStatus above
+    // already confirming the process itself was dead+exit 1). Poll the same
+    // real capturePane() until the crash text lands, exactly like waitForPanes
+    // polls for pane teardown below — this still fails for real if the error
+    // text never appears, it just tolerates how long that takes under load.
+    const screen = await waitForCapture({ name: 'fastfail', pane: meta.pane!, socket, lines: 200 }, 'ENOENT');
     expect(screen).toContain('ENOENT');
   });
 
@@ -452,6 +466,51 @@ async function waitForPanes(
     panes = (await runTmux({ socket, args: ['list-panes', '-t', name, '-F', '#{pane_id}:#{pane_dead}'] }))
       .stdout.trim().split('\n').filter(Boolean);
     if (panes.length === expected || Date.now() >= deadline) return panes;
+    await wait(50);
+  }
+}
+
+/**
+ * Poll the real `paneExitStatus()` until it reports a finished exit (both
+ * `dead` AND a defined `status`), or the timeout elapses. `pane_dead` and
+ * `pane_dead_status` are two separate tmux format variables that can settle
+ * at slightly different times under load, so a single read can observe
+ * `dead: true, status: undefined`. Returns the last observed result either
+ * way — a genuine miss still fails the caller's assertions.
+ */
+async function waitForExitStatus(
+  pane: string,
+  socket: string,
+  timeoutMs = 5000,
+): Promise<Awaited<ReturnType<typeof paneExitStatus>>> {
+  const deadline = Date.now() + timeoutMs;
+  let exit: Awaited<ReturnType<typeof paneExitStatus>> = { found: false, dead: false };
+  for (;;) {
+    exit = await paneExitStatus(pane, socket);
+    if ((exit.dead && exit.status !== undefined) || Date.now() >= deadline) return exit;
+    await wait(50);
+  }
+}
+
+/**
+ * Poll the real `capturePane()` until its output contains `needle`, or the
+ * timeout elapses. Same rationale as `waitForPanes`: a dead pane's screen
+ * content settles asynchronously relative to tmux's own dead/exit-status
+ * bookkeeping, and a fixed sleep that is fine locally can be too tight on a
+ * loaded CI runner. Returns the last observed capture either way, so a
+ * genuine miss (the text never appears) still fails the caller's assertion —
+ * this only removes timing flakiness, it does not weaken what is checked.
+ */
+async function waitForCapture(
+  opts: Parameters<typeof capturePane>[0],
+  needle: string,
+  timeoutMs = 5000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let screen = '';
+  for (;;) {
+    screen = await capturePane(opts);
+    if (screen.includes(needle) || Date.now() >= deadline) return screen;
     await wait(50);
   }
 }
