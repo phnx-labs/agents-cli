@@ -1045,12 +1045,18 @@ if ! $MAIN_AT_TARGET; then
   PR_BODY="$(printf '## %s\n\n%s' "$TARGET" "$NOTES")"
   green "Folded .changelog/next/* -> .changelog/$TARGET.md; regenerated CHANGELOG.md"
 
+  # Regenerate the command index (docs/command-index.{md,json}) from the CLI's own
+  # command tree so the shipped docs always match the shipped surface. Deterministic
+  # introspection, no LLM; folded into the release commit below.
+  bun scripts/gen-command-index.ts
+  green "Regenerated docs/command-index.{md,json}"
+
   # Build the release commit from the index WITHOUT moving HEAD. The signed +
   # notarized macOS apps under bin/ are untracked, so we must build + publish
   # from THIS checkout; a worktree off origin/main would fail prepack. write-tree
   # is safe because the working tree is clean apart from our package.json +
   # CHANGELOG edits (enforced by the clean-tree preflight).
-  git add -A package.json CHANGELOG.md .changelog
+  git add -A package.json CHANGELOG.md .changelog docs/command-index.md docs/command-index.json
   BRANCH_TREE="$(git write-tree)"
   RELEASE_COMMIT="$(git commit-tree "$BRANCH_TREE" -p "$BASE_SHA" -m "chore(release): $TARGET")"
 

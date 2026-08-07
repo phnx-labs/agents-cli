@@ -10,6 +10,7 @@ Reference documentation for every feature `agents` ships.
 | **[`AGENT-CHEATSHEET.md`](AGENT-CHEATSHEET.md)** | The dozen concepts agents repeatedly need, on one page. Start here if you are an agent touching the codebase. |
 | [`00-concepts.md`](00-concepts.md) | DotAgents repos, resource kinds, and the layered resolution model that everything else builds on. |
 | [`architecture.md`](architecture.md) | How the CLI and Factory extension layer, and the two meanings of "session". |
+| [`command-index.md`](command-index.md) | Every `agents` command and subcommand with its arguments and one-line description — the whole surface on one scannable page. Generated (`npm run gen:index`); machine-readable tree in [`command-index.json`](command-index.json). |
 
 Source-grounded: every command, flag, and YAML field is sourced from `src/`. If you spot a mismatch, the code wins — please file an issue.
 
