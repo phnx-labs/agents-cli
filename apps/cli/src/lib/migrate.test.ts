@@ -252,7 +252,7 @@ describe('repairSelfReferentialBinShims', () => {
     expect(fs.realpathSync(binLink).startsWith(fs.realpathSync(shimsDir) + path.sep)).toBe(false);
   });
 
-  it('repairs an adopted Cursor launcher that reaches the shim through ~/.local/bin', () => {
+  it.skipIf(process.platform === 'win32')('repairs an adopted Cursor launcher that reaches the shim through ~/.local/bin', () => {
     const root = makeTempRoot();
     const versionsRoot = path.join(root, '.history', 'versions');
     const historyDir = path.dirname(versionsRoot);

@@ -363,10 +363,10 @@ describe('AGENTS capability matrix', () => {
 describe('resolveNativeBinaryPath', () => {
   it('accepts a native executable before the agents shims directory exists', () => {
     const root = makeTempDir();
-    expect(resolveNativeBinaryPath('sh', '/bin/sh', {
+    expect(resolveNativeBinaryPath('node', process.execPath, {
       shimsDir: path.join(root, 'missing-shims'),
       historyDir: path.join(root, 'missing-history'),
-    })).toBe(fs.realpathSync('/bin/sh'));
+    })).toBe(fs.realpathSync(process.execPath));
   });
 });
 

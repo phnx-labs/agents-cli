@@ -191,7 +191,7 @@ describe('generated shim fall-through', () => {
     );
   });
 
-  test('generic Cursor shim rejects a managed binary that resolves back to itself', () => {
+  test.skipIf(process.platform === 'win32')('generic Cursor shim rejects a managed binary that resolves back to itself', () => {
     const root = tmp();
     const userDir = path.join(root, '.agents');
     const shimsDir = path.join(userDir, '.cache', 'shims');
