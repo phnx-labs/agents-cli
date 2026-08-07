@@ -71,7 +71,7 @@ interface ExecCommandActionOptions {
   fallback?: string;
   balanced?: boolean;
   strategy?: string;
-  /** Restrict selection to the locally bound logical account label. */
+  /** Restrict selection to a named provider account discovered from live version homes. */
   account?: string;
   /**
    * @deprecated Hidden alias for `--device auto`. Resolved before host dispatch.
@@ -783,7 +783,7 @@ export function registerRunCommand(program: Command): void {
       '--strategy <strategy>',
       'Version/account selection strategy: pinned | available | balanced. Defaults to run.<agent>.strategy, then balanced (spreads load across healthy accounts and skips any that are rate-limited). (Legacy `rotate` accepted as alias for `balanced`.)',
     )
-    .option('--account <label>', 'Run the installed version attached to this account label on the current device (never falls back to another identity)')
+    .option('--account <label>', 'Run a healthy installed version currently signed into this named account (never falls back to another identity)')
     .option(
       '--acp',
       'Route through the Agent Client Protocol instead of direct exec. Supported for claude via @zed-industries/claude-code-acp adapter. Unified event stream; emits ndjson when --json.',
@@ -2548,7 +2548,7 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         const { resolveAccountLabel } = await import('../lib/account-labels.js');
-        try { const selected = await resolveAccountLabel(agent, options.account); if (version && version !== selected) throw new Error(`${agent}@${version} is not the verified binding for account label '${options.account}'.`); version ??= selected; }
+        try { const selected = await resolveAccountLabel(agent, options.account); if (version && version !== selected) throw new Error(`${agent}@${version} is not a healthy match for account '${options.account}'.`); version ??= selected; }
         catch (err) { console.error(chalk.red((err as Error).message)); process.exit(1); }
       }
 

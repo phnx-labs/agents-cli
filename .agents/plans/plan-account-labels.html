@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Account labels across devices and harness versions</title>
+<title>Name provider accounts and discover versions automatically</title>
 <style>
 :root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
 @page{margin:24px}
@@ -23,18 +23,18 @@
 <header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
 <section class="hero">
 <div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-implemented">implemented</span></div>
-<h1>Account labels across devices and harness versions</h1>
+<h1>Name provider accounts and discover versions automatically</h1>
 
 <div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">agents/account-labels</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">019fdbdf</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-07</span></p></div>
 </section>
-<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#public-interface"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#proposed-changes"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h1>Account labels across devices and harness versions</h1>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#public-interface"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#proposed-changes"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#validation"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#tracking"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h1>Name provider accounts and discover versions automatically</h1>
 <p>When an installed Claude or Codex version is signed into an identity, the user
-can name that identity once, attach the name to several versions, and select it
+can name that provider account once, discover every matching version, and select it
 for a run without copying credentials. Issue: <a href="https://github.com/phnx-labs/agents-cli/issues/2300">#2300</a>.</p>
 <h2 id="purpose">Purpose</h2>
 <p>Make account identity stable and human-readable across devices without moving
 or centrally storing any harness credential.</p>
-<div class="artifact-callout">A label names an identity; a device binding names where that identity is currently installed.</div><h2 id="public-interface">Public Interface</h2>
+<div class="artifact-callout">A label names one provider account. Installed versions are discovered, never attached.</div><h2 id="public-interface">Public Interface</h2>
 <table>
 <thead>
 <tr>
@@ -43,24 +43,24 @@ or centrally storing any harness credential.</p>
 </tr>
 </thead>
 <tbody><tr>
-<td><code>accounts label work claude@2.1.220</code></td>
-<td>Fingerprints the live identity and creates <code>work</code></td>
+<td><code>accounts</code></td>
+<td>Discovers distinct signed-in accounts and their matching versions</td>
 </tr>
 <tr>
-<td><code>accounts attach work claude@2.1.219</code></td>
-<td>Verifies the current login before binding</td>
+<td><code>accounts name work</code></td>
+<td>Opens a picker and names one provider account</td>
 </tr>
 <tr>
-<td><code>accounts attach work codex@0.146.0</code></td>
-<td>Adds the Codex identity to the same logical label</td>
+<td><code>accounts name work --from claude@2.1.220</code></td>
+<td>Names the live identity non-interactively</td>
 </tr>
 <tr>
 <td><code>run claude --account work</code></td>
-<td>Uses only a locally bound <code>work</code> version</td>
+<td>Picks a healthy version currently signed into <code>work</code></td>
 </tr>
 </tbody></table>
-<pre><code>agents accounts label work claude@2.1.220
-agents accounts attach work claude@2.1.219 codex@0.146.0
+<pre><code>agents accounts
+agents accounts name work
 agents run claude --account work
 </code></pre>
 <h2 id="proposed-changes">Proposed Changes</h2>
@@ -70,10 +70,10 @@ agents run claude --account work
   <text x="134" y="148" fill="#ffffff" text-anchor="middle" font-size="16">local credential</text>
   <rect x="340" y="28" width="240" height="92" rx="14" fill="#161b22" stroke="#58a6ff" stroke-width="3"></rect>
   <text x="460" y="66" fill="#58a6ff" text-anchor="middle" font-size="19">accounts.yaml</text>
-  <text x="460" y="94" fill="#ffffff" text-anchor="middle" font-size="15">label → fingerprints</text>
+  <text x="460" y="94" fill="#ffffff" text-anchor="middle" font-size="15">label → provider fingerprint</text>
   <rect x="340" y="164" width="240" height="92" rx="14" fill="#161b22" stroke="#d2a8ff" stroke-width="3"></rect>
-  <text x="460" y="202" fill="#d2a8ff" text-anchor="middle" font-size="19">device/accounts.yaml</text>
-  <text x="460" y="230" fill="#ffffff" text-anchor="middle" font-size="15">version → label</text>
+  <text x="460" y="202" fill="#d2a8ff" text-anchor="middle" font-size="19">live discovery</text>
+  <text x="460" y="230" fill="#ffffff" text-anchor="middle" font-size="15">matching version homes</text>
   <rect x="680" y="78" width="196" height="110" rx="14" fill="#161b22" stroke="#a3e635" stroke-width="3"></rect>
   <text x="778" y="116" fill="#a3e635" text-anchor="middle" font-size="20">agents run</text>
   <text x="778" y="148" fill="#ffffff" text-anchor="middle" font-size="16">fail-closed pick</text>
@@ -83,13 +83,13 @@ agents run claude --account work
   <path d="M580 207 L680 156" stroke="#8b949e" stroke-width="3" marker-end="url(#arrow)"></path>
   <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#8b949e"></path></marker></defs>
 </svg><p>Credentials remain local. Only a deterministic SHA-256 fingerprint crosses the
-device boundary, and a binding is written only after the live identity matches.</p>
+device boundary. Version membership is derived from live identity matches.</p>
 <h2 id="validation">Validation</h2>
 <ul>
-<li>One logical label holds one identity per harness.</li>
-<li>One identity may back several installed versions.</li>
-<li>One harness identity cannot belong to two labels.</li>
-<li>Missing, generic, or mismatched identities fail without changing bindings.</li>
+<li>One label names exactly one provider account.</li>
+<li>Every matching installed version is discovered automatically.</li>
+<li>One provider account cannot have two labels.</li>
+<li>Missing, generic, or mismatched identities fail without storing a label.</li>
 <li>Local account labels are rejected for vendor-cloud and lease placement.</li>
 <li>CLI help, concepts, execution specification, README, tests, and changelog agree.</li>
 </ul>
@@ -103,7 +103,7 @@ device boundary, and a binding is written only after the live identity matches.<
 </thead>
 <tbody><tr>
 <td>A version is signed into another identity</td>
-<td>Attach verifies the live fingerprint before writing</td>
+<td>Live discovery excludes it from the named account</td>
 </tr>
 <tr>
 <td>Rotation silently chooses another account</td>
@@ -121,7 +121,7 @@ device boundary, and a binding is written only after the live identity matches.<
 </article>
 
 </main>
-<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6IEFjY291bnQgbGFiZWxzIGFjcm9zcyBkZXZpY2VzIGFuZCBoYXJuZXNzIHZlcnNpb25zCnN0YXR1czogaW1wbGVtZW50ZWQKLS0tCgojIEFjY291bnQgbGFiZWxzIGFjcm9zcyBkZXZpY2VzIGFuZCBoYXJuZXNzIHZlcnNpb25zCgpXaGVuIGFuIGluc3RhbGxlZCBDbGF1ZGUgb3IgQ29kZXggdmVyc2lvbiBpcyBzaWduZWQgaW50byBhbiBpZGVudGl0eSwgdGhlIHVzZXIKY2FuIG5hbWUgdGhhdCBpZGVudGl0eSBvbmNlLCBhdHRhY2ggdGhlIG5hbWUgdG8gc2V2ZXJhbCB2ZXJzaW9ucywgYW5kIHNlbGVjdCBpdApmb3IgYSBydW4gd2l0aG91dCBjb3B5aW5nIGNyZWRlbnRpYWxzLiBJc3N1ZTogWyMyMzAwXShodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnZW50cy1jbGkvaXNzdWVzLzIzMDApLgoKIyMgUHVycG9zZQoKTWFrZSBhY2NvdW50IGlkZW50aXR5IHN0YWJsZSBhbmQgaHVtYW4tcmVhZGFibGUgYWNyb3NzIGRldmljZXMgd2l0aG91dCBtb3ZpbmcKb3IgY2VudHJhbGx5IHN0b3JpbmcgYW55IGhhcm5lc3MgY3JlZGVudGlhbC4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiPkEgbGFiZWwgbmFtZXMgYW4gaWRlbnRpdHk7IGEgZGV2aWNlIGJpbmRpbmcgbmFtZXMgd2hlcmUgdGhhdCBpZGVudGl0eSBpcyBjdXJyZW50bHkgaW5zdGFsbGVkLjwvZGl2PgoKIyMgUHVibGljIEludGVyZmFjZQoKfCBBY3Rpb24gfCBSZXN1bHQgfAp8IC0tLSB8IC0tLSB8CnwgYGFjY291bnRzIGxhYmVsIHdvcmsgY2xhdWRlQDIuMS4yMjBgIHwgRmluZ2VycHJpbnRzIHRoZSBsaXZlIGlkZW50aXR5IGFuZCBjcmVhdGVzIGB3b3JrYCB8CnwgYGFjY291bnRzIGF0dGFjaCB3b3JrIGNsYXVkZUAyLjEuMjE5YCB8IFZlcmlmaWVzIHRoZSBjdXJyZW50IGxvZ2luIGJlZm9yZSBiaW5kaW5nIHwKfCBgYWNjb3VudHMgYXR0YWNoIHdvcmsgY29kZXhAMC4xNDYuMGAgfCBBZGRzIHRoZSBDb2RleCBpZGVudGl0eSB0byB0aGUgc2FtZSBsb2dpY2FsIGxhYmVsIHwKfCBgcnVuIGNsYXVkZSAtLWFjY291bnQgd29ya2AgfCBVc2VzIG9ubHkgYSBsb2NhbGx5IGJvdW5kIGB3b3JrYCB2ZXJzaW9uIHwKCmBgYGJhc2gKYWdlbnRzIGFjY291bnRzIGxhYmVsIHdvcmsgY2xhdWRlQDIuMS4yMjAKYWdlbnRzIGFjY291bnRzIGF0dGFjaCB3b3JrIGNsYXVkZUAyLjEuMjE5IGNvZGV4QDAuMTQ2LjAKYWdlbnRzIHJ1biBjbGF1ZGUgLS1hY2NvdW50IHdvcmsKYGBgCgojIyBQcm9wb3NlZCBDaGFuZ2VzCgo8c3ZnIHZpZXdCb3g9IjAgMCA5MDAgMjgwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkFjY291bnQgbGFiZWwgZGF0YSBmbG93IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxyZWN0IHg9IjI0IiB5PSI3OCIgd2lkdGg9IjIyMCIgaGVpZ2h0PSIxMTAiIHJ4PSIxNCIgZmlsbD0iIzE2MWIyMiIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjMiLz4KICA8dGV4dCB4PSIxMzQiIHk9IjExNSIgZmlsbD0iI2EzZTYzNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIyMCI+VmVyc2lvbiBob21lPC90ZXh0PgogIDx0ZXh0IHg9IjEzNCIgeT0iMTQ4IiBmaWxsPSIjZmZmZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjE2Ij5sb2NhbCBjcmVkZW50aWFsPC90ZXh0PgogIDxyZWN0IHg9IjM0MCIgeT0iMjgiIHdpZHRoPSIyNDAiIGhlaWdodD0iOTIiIHJ4PSIxNCIgZmlsbD0iIzE2MWIyMiIgc3Ryb2tlPSIjNThhNmZmIiBzdHJva2Utd2lkdGg9IjMiLz4KICA8dGV4dCB4PSI0NjAiIHk9IjY2IiBmaWxsPSIjNThhNmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjE5Ij5hY2NvdW50cy55YW1sPC90ZXh0PgogIDx0ZXh0IHg9IjQ2MCIgeT0iOTQiIGZpbGw9IiNmZmZmZmYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTUiPmxhYmVsIOKGkiBmaW5nZXJwcmludHM8L3RleHQ+CiAgPHJlY3QgeD0iMzQwIiB5PSIxNjQiIHdpZHRoPSIyNDAiIGhlaWdodD0iOTIiIHJ4PSIxNCIgZmlsbD0iIzE2MWIyMiIgc3Ryb2tlPSIjZDJhOGZmIiBzdHJva2Utd2lkdGg9IjMiLz4KICA8dGV4dCB4PSI0NjAiIHk9IjIwMiIgZmlsbD0iI2QyYThmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIxOSI+ZGV2aWNlL2FjY291bnRzLnlhbWw8L3RleHQ+CiAgPHRleHQgeD0iNDYwIiB5PSIyMzAiIGZpbGw9IiNmZmZmZmYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTUiPnZlcnNpb24g4oaSIGxhYmVsPC90ZXh0PgogIDxyZWN0IHg9IjY4MCIgeT0iNzgiIHdpZHRoPSIxOTYiIGhlaWdodD0iMTEwIiByeD0iMTQiIGZpbGw9IiMxNjFiMjIiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIzIi8+CiAgPHRleHQgeD0iNzc4IiB5PSIxMTYiIGZpbGw9IiNhM2U2MzUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMjAiPmFnZW50cyBydW48L3RleHQ+CiAgPHRleHQgeD0iNzc4IiB5PSIxNDgiIGZpbGw9IiNmZmZmZmYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTYiPmZhaWwtY2xvc2VkIHBpY2s8L3RleHQ+CiAgPHBhdGggZD0iTTI0NCAxMTAgTDM0MCA3NSIgc3Ryb2tlPSIjOGI5NDllIiBzdHJva2Utd2lkdGg9IjMiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIi8+CiAgPHBhdGggZD0iTTI0NCAxNTYgTDM0MCAyMDciIHN0cm9rZT0iIzhiOTQ5ZSIgc3Ryb2tlLXdpZHRoPSIzIiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPgogIDxwYXRoIGQ9Ik01ODAgNzUgTDY4MCAxMTAiIHN0cm9rZT0iIzhiOTQ5ZSIgc3Ryb2tlLXdpZHRoPSIzIiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPgogIDxwYXRoIGQ9Ik01ODAgMjA3IEw2ODAgMTU2IiBzdHJva2U9IiM4Yjk0OWUiIHN0cm9rZS13aWR0aD0iMyIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz4KICA8ZGVmcz48bWFya2VyIGlkPSJhcnJvdyIgbWFya2VyV2lkdGg9IjEwIiBtYXJrZXJIZWlnaHQ9IjEwIiByZWZYPSI4IiByZWZZPSIzIiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0wLDAgTDAsNiBMOSwzIHoiIGZpbGw9IiM4Yjk0OWUiLz48L21hcmtlcj48L2RlZnM+Cjwvc3ZnPgoKQ3JlZGVudGlhbHMgcmVtYWluIGxvY2FsLiBPbmx5IGEgZGV0ZXJtaW5pc3RpYyBTSEEtMjU2IGZpbmdlcnByaW50IGNyb3NzZXMgdGhlCmRldmljZSBib3VuZGFyeSwgYW5kIGEgYmluZGluZyBpcyB3cml0dGVuIG9ubHkgYWZ0ZXIgdGhlIGxpdmUgaWRlbnRpdHkgbWF0Y2hlcy4KCiMjIFZhbGlkYXRpb24KCi0gT25lIGxvZ2ljYWwgbGFiZWwgaG9sZHMgb25lIGlkZW50aXR5IHBlciBoYXJuZXNzLgotIE9uZSBpZGVudGl0eSBtYXkgYmFjayBzZXZlcmFsIGluc3RhbGxlZCB2ZXJzaW9ucy4KLSBPbmUgaGFybmVzcyBpZGVudGl0eSBjYW5ub3QgYmVsb25nIHRvIHR3byBsYWJlbHMuCi0gTWlzc2luZywgZ2VuZXJpYywgb3IgbWlzbWF0Y2hlZCBpZGVudGl0aWVzIGZhaWwgd2l0aG91dCBjaGFuZ2luZyBiaW5kaW5ncy4KLSBMb2NhbCBhY2NvdW50IGxhYmVscyBhcmUgcmVqZWN0ZWQgZm9yIHZlbmRvci1jbG91ZCBhbmQgbGVhc2UgcGxhY2VtZW50LgotIENMSSBoZWxwLCBjb25jZXB0cywgZXhlY3V0aW9uIHNwZWNpZmljYXRpb24sIFJFQURNRSwgdGVzdHMsIGFuZCBjaGFuZ2Vsb2cgYWdyZWUuCgojIyBSaXNrcwoKfCBSaXNrIHwgQ29udHJvbCB8CnwgLS0tIHwgLS0tIHwKfCBBIHZlcnNpb24gaXMgc2lnbmVkIGludG8gYW5vdGhlciBpZGVudGl0eSB8IEF0dGFjaCB2ZXJpZmllcyB0aGUgbGl2ZSBmaW5nZXJwcmludCBiZWZvcmUgd3JpdGluZyB8CnwgUm90YXRpb24gc2lsZW50bHkgY2hvb3NlcyBhbm90aGVyIGFjY291bnQgfCBgLS1hY2NvdW50YCBieXBhc3NlcyByb3RhdGlvbiBhbmQgZmFpbHMgY2xvc2VkIHwKfCBTeW5jZWQgY29uZmlndXJhdGlvbiBleHBvc2VzIGlkZW50aXR5IGRhdGEgfCBUaGUgY2VudHJhbCByZWdpc3RyeSBjb250YWlucyBvbmx5IFNIQS0yNTYgZmluZ2VycHJpbnRzIHwKCiMjIFRyYWNraW5nCgotIFtHaXRIdWIgaXNzdWUgIzIzMDBdKGh0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdlbnRzLWNsaS9pc3N1ZXMvMjMwMCkK"}</script>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6IE5hbWUgcHJvdmlkZXIgYWNjb3VudHMgYW5kIGRpc2NvdmVyIHZlcnNpb25zIGF1dG9tYXRpY2FsbHkKc3RhdHVzOiBpbXBsZW1lbnRlZAotLS0KCiMgTmFtZSBwcm92aWRlciBhY2NvdW50cyBhbmQgZGlzY292ZXIgdmVyc2lvbnMgYXV0b21hdGljYWxseQoKV2hlbiBhbiBpbnN0YWxsZWQgQ2xhdWRlIG9yIENvZGV4IHZlcnNpb24gaXMgc2lnbmVkIGludG8gYW4gaWRlbnRpdHksIHRoZSB1c2VyCmNhbiBuYW1lIHRoYXQgcHJvdmlkZXIgYWNjb3VudCBvbmNlLCBkaXNjb3ZlciBldmVyeSBtYXRjaGluZyB2ZXJzaW9uLCBhbmQgc2VsZWN0IGl0CmZvciBhIHJ1biB3aXRob3V0IGNvcHlpbmcgY3JlZGVudGlhbHMuIElzc3VlOiBbIzIzMDBdKGh0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdlbnRzLWNsaS9pc3N1ZXMvMjMwMCkuCgojIyBQdXJwb3NlCgpNYWtlIGFjY291bnQgaWRlbnRpdHkgc3RhYmxlIGFuZCBodW1hbi1yZWFkYWJsZSBhY3Jvc3MgZGV2aWNlcyB3aXRob3V0IG1vdmluZwpvciBjZW50cmFsbHkgc3RvcmluZyBhbnkgaGFybmVzcyBjcmVkZW50aWFsLgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+QSBsYWJlbCBuYW1lcyBvbmUgcHJvdmlkZXIgYWNjb3VudC4gSW5zdGFsbGVkIHZlcnNpb25zIGFyZSBkaXNjb3ZlcmVkLCBuZXZlciBhdHRhY2hlZC48L2Rpdj4KCiMjIFB1YmxpYyBJbnRlcmZhY2UKCnwgQWN0aW9uIHwgUmVzdWx0IHwKfCAtLS0gfCAtLS0gfAp8IGBhY2NvdW50c2AgfCBEaXNjb3ZlcnMgZGlzdGluY3Qgc2lnbmVkLWluIGFjY291bnRzIGFuZCB0aGVpciBtYXRjaGluZyB2ZXJzaW9ucyB8CnwgYGFjY291bnRzIG5hbWUgd29ya2AgfCBPcGVucyBhIHBpY2tlciBhbmQgbmFtZXMgb25lIHByb3ZpZGVyIGFjY291bnQgfAp8IGBhY2NvdW50cyBuYW1lIHdvcmsgLS1mcm9tIGNsYXVkZUAyLjEuMjIwYCB8IE5hbWVzIHRoZSBsaXZlIGlkZW50aXR5IG5vbi1pbnRlcmFjdGl2ZWx5IHwKfCBgcnVuIGNsYXVkZSAtLWFjY291bnQgd29ya2AgfCBQaWNrcyBhIGhlYWx0aHkgdmVyc2lvbiBjdXJyZW50bHkgc2lnbmVkIGludG8gYHdvcmtgIHwKCmBgYGJhc2gKYWdlbnRzIGFjY291bnRzCmFnZW50cyBhY2NvdW50cyBuYW1lIHdvcmsKYWdlbnRzIHJ1biBjbGF1ZGUgLS1hY2NvdW50IHdvcmsKYGBgCgojIyBQcm9wb3NlZCBDaGFuZ2VzCgo8c3ZnIHZpZXdCb3g9IjAgMCA5MDAgMjgwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkFjY291bnQgbGFiZWwgZGF0YSBmbG93IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxyZWN0IHg9IjI0IiB5PSI3OCIgd2lkdGg9IjIyMCIgaGVpZ2h0PSIxMTAiIHJ4PSIxNCIgZmlsbD0iIzE2MWIyMiIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjMiLz4KICA8dGV4dCB4PSIxMzQiIHk9IjExNSIgZmlsbD0iI2EzZTYzNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIyMCI+VmVyc2lvbiBob21lPC90ZXh0PgogIDx0ZXh0IHg9IjEzNCIgeT0iMTQ4IiBmaWxsPSIjZmZmZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjE2Ij5sb2NhbCBjcmVkZW50aWFsPC90ZXh0PgogIDxyZWN0IHg9IjM0MCIgeT0iMjgiIHdpZHRoPSIyNDAiIGhlaWdodD0iOTIiIHJ4PSIxNCIgZmlsbD0iIzE2MWIyMiIgc3Ryb2tlPSIjNThhNmZmIiBzdHJva2Utd2lkdGg9IjMiLz4KICA8dGV4dCB4PSI0NjAiIHk9IjY2IiBmaWxsPSIjNThhNmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjE5Ij5hY2NvdW50cy55YW1sPC90ZXh0PgogIDx0ZXh0IHg9IjQ2MCIgeT0iOTQiIGZpbGw9IiNmZmZmZmYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTUiPmxhYmVsIOKGkiBwcm92aWRlciBmaW5nZXJwcmludDwvdGV4dD4KICA8cmVjdCB4PSIzNDAiIHk9IjE2NCIgd2lkdGg9IjI0MCIgaGVpZ2h0PSI5MiIgcng9IjE0IiBmaWxsPSIjMTYxYjIyIiBzdHJva2U9IiNkMmE4ZmYiIHN0cm9rZS13aWR0aD0iMyIvPgogIDx0ZXh0IHg9IjQ2MCIgeT0iMjAyIiBmaWxsPSIjZDJhOGZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjE5Ij5saXZlIGRpc2NvdmVyeTwvdGV4dD4KICA8dGV4dCB4PSI0NjAiIHk9IjIzMCIgZmlsbD0iI2ZmZmZmZiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIxNSI+bWF0Y2hpbmcgdmVyc2lvbiBob21lczwvdGV4dD4KICA8cmVjdCB4PSI2ODAiIHk9Ijc4IiB3aWR0aD0iMTk2IiBoZWlnaHQ9IjExMCIgcng9IjE0IiBmaWxsPSIjMTYxYjIyIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMyIvPgogIDx0ZXh0IHg9Ijc3OCIgeT0iMTE2IiBmaWxsPSIjYTNlNjM1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjIwIj5hZ2VudHMgcnVuPC90ZXh0PgogIDx0ZXh0IHg9Ijc3OCIgeT0iMTQ4IiBmaWxsPSIjZmZmZmZmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjE2Ij5mYWlsLWNsb3NlZCBwaWNrPC90ZXh0PgogIDxwYXRoIGQ9Ik0yNDQgMTEwIEwzNDAgNzUiIHN0cm9rZT0iIzhiOTQ5ZSIgc3Ryb2tlLXdpZHRoPSIzIiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIvPgogIDxwYXRoIGQ9Ik0yNDQgMTU2IEwzNDAgMjA3IiBzdHJva2U9IiM4Yjk0OWUiIHN0cm9rZS13aWR0aD0iMyIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz4KICA8cGF0aCBkPSJNNTgwIDc1IEw2ODAgMTEwIiBzdHJva2U9IiM4Yjk0OWUiIHN0cm9rZS13aWR0aD0iMyIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiLz4KICA8cGF0aCBkPSJNNTgwIDIwNyBMNjgwIDE1NiIgc3Ryb2tlPSIjOGI5NDllIiBzdHJva2Utd2lkdGg9IjMiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIi8+CiAgPGRlZnM+PG1hcmtlciBpZD0iYXJyb3ciIG1hcmtlcldpZHRoPSIxMCIgbWFya2VySGVpZ2h0PSIxMCIgcmVmWD0iOCIgcmVmWT0iMyIgb3JpZW50PSJhdXRvIj48cGF0aCBkPSJNMCwwIEwwLDYgTDksMyB6IiBmaWxsPSIjOGI5NDllIi8+PC9tYXJrZXI+PC9kZWZzPgo8L3N2Zz4KCkNyZWRlbnRpYWxzIHJlbWFpbiBsb2NhbC4gT25seSBhIGRldGVybWluaXN0aWMgU0hBLTI1NiBmaW5nZXJwcmludCBjcm9zc2VzIHRoZQpkZXZpY2UgYm91bmRhcnkuIFZlcnNpb24gbWVtYmVyc2hpcCBpcyBkZXJpdmVkIGZyb20gbGl2ZSBpZGVudGl0eSBtYXRjaGVzLgoKIyMgVmFsaWRhdGlvbgoKLSBPbmUgbGFiZWwgbmFtZXMgZXhhY3RseSBvbmUgcHJvdmlkZXIgYWNjb3VudC4KLSBFdmVyeSBtYXRjaGluZyBpbnN0YWxsZWQgdmVyc2lvbiBpcyBkaXNjb3ZlcmVkIGF1dG9tYXRpY2FsbHkuCi0gT25lIHByb3ZpZGVyIGFjY291bnQgY2Fubm90IGhhdmUgdHdvIGxhYmVscy4KLSBNaXNzaW5nLCBnZW5lcmljLCBvciBtaXNtYXRjaGVkIGlkZW50aXRpZXMgZmFpbCB3aXRob3V0IHN0b3JpbmcgYSBsYWJlbC4KLSBMb2NhbCBhY2NvdW50IGxhYmVscyBhcmUgcmVqZWN0ZWQgZm9yIHZlbmRvci1jbG91ZCBhbmQgbGVhc2UgcGxhY2VtZW50LgotIENMSSBoZWxwLCBjb25jZXB0cywgZXhlY3V0aW9uIHNwZWNpZmljYXRpb24sIFJFQURNRSwgdGVzdHMsIGFuZCBjaGFuZ2Vsb2cgYWdyZWUuCgojIyBSaXNrcwoKfCBSaXNrIHwgQ29udHJvbCB8CnwgLS0tIHwgLS0tIHwKfCBBIHZlcnNpb24gaXMgc2lnbmVkIGludG8gYW5vdGhlciBpZGVudGl0eSB8IExpdmUgZGlzY292ZXJ5IGV4Y2x1ZGVzIGl0IGZyb20gdGhlIG5hbWVkIGFjY291bnQgfAp8IFJvdGF0aW9uIHNpbGVudGx5IGNob29zZXMgYW5vdGhlciBhY2NvdW50IHwgYC0tYWNjb3VudGAgYnlwYXNzZXMgcm90YXRpb24gYW5kIGZhaWxzIGNsb3NlZCB8CnwgU3luY2VkIGNvbmZpZ3VyYXRpb24gZXhwb3NlcyBpZGVudGl0eSBkYXRhIHwgVGhlIGNlbnRyYWwgcmVnaXN0cnkgY29udGFpbnMgb25seSBTSEEtMjU2IGZpbmdlcnByaW50cyB8CgojIyBUcmFja2luZwoKLSBbR2l0SHViIGlzc3VlICMyMzAwXShodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnZW50cy1jbGkvaXNzdWVzLzIzMDApCg=="}</script>
 <script>
 (() => {
   const root = document.documentElement;

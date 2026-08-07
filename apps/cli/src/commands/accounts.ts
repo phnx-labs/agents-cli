@@ -1,44 +1,22 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { machineId } from '../lib/machine-id.js';
+import { select } from '@inquirer/prompts';
 import { resolveAgentName, formatAgentError, getAccountInfo } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { getVersionHomePath, listInstalledVersions } from '../lib/versions.js';
-import { bindAccount, identityFingerprint, readAccountBindings, readAccountLabels, removeAccountLabel, renameAccountLabel, setAccountLabel, unbindAccount } from '../lib/account-labels.js';
+import { discoverAccounts, identityFingerprint, nameAccount, readAccountLabels, removeAccountLabel, renameAccountLabel } from '../lib/account-labels.js';
 import { setHelpSections } from '../lib/help.js';
 
-function parseTarget(raw: string): { agent: AgentId; version: string } {
-  const at = raw.lastIndexOf('@'); if (at < 1 || at === raw.length - 1) throw new Error(`Expected <agent>@<version>, got '${raw}'.`);
-  const name = raw.slice(0, at); const agent = resolveAgentName(name); if (!agent) throw new Error(formatAgentError(name));
-  return { agent, version: raw.slice(at + 1) };
-}
-async function liveFingerprint(raw: string): Promise<{ agent: AgentId; fingerprint: string }> {
-  const { agent, version } = parseTarget(raw); if (!listInstalledVersions(agent).includes(version)) throw new Error(`${raw} is not installed.`);
-  const info = await getAccountInfo(agent, getVersionHomePath(agent, version));
-  if (!info.signedIn || !info.accountKey) throw new Error(`${raw} has no stable signed-in identity. Sign in normally, then retry.`);
-  return { agent, fingerprint: identityFingerprint(agent, info.accountKey) };
-}
+function parseSource(raw: string): { agent: AgentId; version: string } { const at = raw.lastIndexOf('@'); if (at < 1 || at === raw.length - 1) throw new Error(`Expected <agent>@<version>, got '${raw}'.`); const name = raw.slice(0, at); const agent = resolveAgentName(name); if (!agent) throw new Error(formatAgentError(name)); return { agent, version: raw.slice(at + 1) }; }
+async function fingerprintFromSource(raw: string): Promise<{ agent: AgentId; fingerprint: string; versions: string[] }> { const { agent, version } = parseSource(raw); if (!listInstalledVersions(agent).includes(version)) throw new Error(`${raw} is not installed.`); const info = await getAccountInfo(agent, getVersionHomePath(agent, version)); if (!info.signedIn || !info.accountKey) throw new Error(`${raw} has no stable signed-in account. Run it and complete its normal login first.`); const fingerprint = identityFingerprint(agent, info.accountKey); const matches = (await discoverAccounts([agent])).find(account => account.fingerprint === fingerprint)?.versions ?? [version]; return { agent, fingerprint, versions: matches }; }
+async function printAccounts(json: boolean): Promise<void> { const accounts = await discoverAccounts(); if (json) return console.log(JSON.stringify(accounts, null, 2)); if (!accounts.length) return console.log(chalk.gray('No signed-in accounts found. Run an installed agent and complete its normal login first.')); console.log(chalk.bold('Signed-in accounts\n')); for (const account of accounts) console.log(`  ${account.label ? chalk.cyan(account.label) : chalk.gray('(unnamed)')}  ${account.agent}  ${account.display}\n    ${account.versions.length} installed version${account.versions.length === 1 ? '' : 's'}: ${account.versions.join(', ')}`); }
+async function chooseAccount() { const accounts = await discoverAccounts(); if (!accounts.length) throw new Error('No signed-in accounts found. Run an installed agent and complete its normal login first.'); return select({ message: 'Which signed-in account do you want to name?', choices: accounts.map(account => ({ name: `${account.agent}  ${account.display}  (${account.versions.length} version${account.versions.length === 1 ? '' : 's'})${account.label ? `  currently “${account.label}”` : ''}`, value: account })) }); }
+
 export function registerAccountsCommand(program: Command): void {
-  const accounts = program.command('accounts').description('Name signed-in identities and bind them to installed harness versions');
-  accounts.command('list').option('--json').option('--device <name>', 'Device bindings to show', machineId()).action((o: {json?: boolean; device: string}) => {
-    const value = { ...readAccountLabels(), device: o.device, ...readAccountBindings(o.device) };
-    if (o.json) return console.log(JSON.stringify(value, null, 2));
-    const rows = Object.entries(value.labels); if (!rows.length) return console.log(chalk.gray('No account labels configured.'));
-    for (const [name, label] of rows) console.log(`${chalk.cyan(name)}  ${Object.keys(label.identities).join(', ')}  ${Object.entries(value.bindings).filter(([, b]) => b.label === name).map(([t]) => t).join(', ')}`);
-  });
-  accounts.command('label <label> <target>').option('--device <name>', 'Device to bind', machineId()).action(async (label: string, target: string, o: {device: string}) => {
-    const { agent } = parseTarget(target); const { fingerprint } = await liveFingerprint(target); const { version } = parseTarget(target);
-    const info = await getAccountInfo(agent, getVersionHomePath(agent, version)); const stored = setAccountLabel(label, agent, info.accountKey!); bindAccount(o.device, target, label, stored);
-    console.log(chalk.green(`Labeled and attached ${target} as '${label}' on ${o.device}.`));
-  });
-  accounts.command('attach <label> <targets...>').option('--device <name>', 'Device to bind', machineId()).action(async (label: string, targets: string[], o: {device: string}) => {
-    const identities = readAccountLabels().labels[label]?.identities; if (!identities) throw new Error(`Unknown account label '${label}'.`);
-    const verified = [] as Array<{ target: string; fingerprint: string }>;
-    for (const target of targets) { const { agent, fingerprint } = await liveFingerprint(target); if (identities[agent]?.fingerprint !== fingerprint) throw new Error(`${target} is signed into a different identity than '${label}'. No binding was changed.`); verified.push({ target, fingerprint }); }
-    for (const item of verified) { bindAccount(o.device, item.target, label, item.fingerprint); console.log(chalk.green(`Attached ${item.target} to '${label}' on ${o.device}.`)); }
-  });
-  accounts.command('detach <targets...>').option('--device <name>', 'Device to change', machineId()).action((targets: string[], o: {device: string}) => { for (const target of targets) unbindAccount(o.device, target); });
+  const accounts = program.command('accounts').description('Browse and name signed-in harness accounts').option('--json', 'Machine-readable discovered accounts').action(async (o: {json?: boolean}) => printAccounts(!!o.json));
+  accounts.command('list').description('Alias for accounts').option('--json').action((o: {json?: boolean}) => printAccounts(!!o.json));
+  accounts.command('name <label>').description('Name one signed-in account; matching installed versions are found automatically').option('--from <agent@version>', 'Non-interactive identity source').action(async (label: string, o: {from?: string}) => { const picked = o.from ? await fingerprintFromSource(o.from) : await chooseAccount(); nameAccount(label, picked.agent, picked.fingerprint); console.log(chalk.green(`Named the ${picked.agent} account '${label}'.`)); console.log(chalk.gray(`Found it in ${picked.versions.length} installed version${picked.versions.length === 1 ? '' : 's'}: ${picked.versions.join(', ')}`)); });
   accounts.command('rename <old> <new>').action((oldLabel: string, newLabel: string) => renameAccountLabel(oldLabel, newLabel));
   accounts.command('remove <label>').action((label: string) => removeAccountLabel(label));
-  setHelpSections(accounts, { examples: `agents accounts label work claude@2.1.220\nagents accounts attach work claude@2.1.219 codex@0.146.0\nagents accounts list --json\nagents run claude --account work`, notes: 'Only identity fingerprints and intended bindings are stored. Credentials remain in each version home. Attach verifies the live identity before writing.' });
+  setHelpSections(accounts, { examples: `agents accounts\nagents accounts name work\nagents accounts name work --from claude@2.1.220\nagents run claude --account work`, notes: 'First run the harness and complete its normal login. A label names one provider account; every matching installed version is discovered automatically. OAuth credentials are never copied or shared.' });
 }
