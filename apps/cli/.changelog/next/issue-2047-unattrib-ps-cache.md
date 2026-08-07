@@ -1,1 +1,0 @@
-- perf(sessions): throttle headless `ps`/`lsof` scan + memoize process table across an active-session poll (#2047)

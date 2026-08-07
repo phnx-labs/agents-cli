@@ -1,1 +1,0 @@
-- **Detached agent dispatch now runs on Windows OpenSSH hosts (RUSH-2267).** Headless `agents run … --host <windows>` launches through a hidden PowerShell process, preserves actor/session/env context, and uses durable Windows-native log, follow, reconcile, stop, and cleanup operations.
