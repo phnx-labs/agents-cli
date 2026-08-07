@@ -1509,6 +1509,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private func setupSummary(_ doctor: DoctorOverview?) -> String {
         guard let doctor else { return doctorLoaded ? "unavailable" : "checking…" }
+        // Findings are the fleet-aware, prioritized health contract. Fall back
+        // only when an older CLI did not emit the additive field at all.
+        if let summary = DoctorHealth.summary(doctor.findings) { return summary }
         let sync = desiredSyncStates(doctor)
         let stale = sync.filter { $0.status == "stale" }.count
         let never = sync.filter { $0.status == "never-synced" }.count
@@ -1526,6 +1529,32 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             sub.addItem(disabled(doctorLoaded ? "Doctor unavailable" : "Checking resources…"))
             return sub
         }
+        if let findings = doctor.findings {
+            let visible = DoctorHealth.visible(findings)
+            if visible.isEmpty {
+                sub.addItem(disabled("Health — all clear"))
+            } else {
+                sub.addItem(disabled("Health"))
+                for finding in visible {
+                    sub.addItem(disabled("  \(DoctorHealth.context(finding))"))
+                    sub.addItem(disabled("    \(trim(finding.message, 96))"))
+                }
+                let remainder = DoctorHealth.remainderCount(findings)
+                if remainder > 0 {
+                    sub.addItem(disabled("+\(remainder) more — run agents doctor --devices"))
+                }
+            }
+            sub.addItem(.separator())
+            let doctorItem = NSMenuItem(title: "Run agents doctor --devices", action: #selector(onRunDoctor), keyEquivalent: "")
+            doctorItem.target = self
+            sub.addItem(doctorItem)
+            let open = NSMenuItem(title: "Open ~/.agents", action: #selector(onOpenAgentsHome), keyEquivalent: "")
+            open.target = self
+            sub.addItem(open)
+            return sub
+        }
+
+        // Legacy fallback for an installed CLI that predates `findings`.
         let notInstalled = LocalState.desiredAgents.filter { doctor.clis?[$0.id]?.installed == false }
         if !notInstalled.isEmpty {
             sub.addItem(disabled("Not installed"))
@@ -1546,7 +1575,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             sub.addItem(disabled("All agents installed & synced"))
         }
         sub.addItem(.separator())
-        let doctorItem = NSMenuItem(title: "Run agents doctor", action: #selector(onRunDoctor), keyEquivalent: "")
+        let doctorItem = NSMenuItem(title: "Run agents doctor --devices", action: #selector(onRunDoctor), keyEquivalent: "")
         doctorItem.target = self
         sub.addItem(doctorItem)
         let open = NSMenuItem(title: "Open ~/.agents", action: #selector(onOpenAgentsHome), keyEquivalent: "")

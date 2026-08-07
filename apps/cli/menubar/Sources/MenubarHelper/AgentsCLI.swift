@@ -77,12 +77,13 @@ enum AgentsCLI {
         return try? JSONDecoder().decode(MenubarSnapshot.self, from: data)
     }
 
-    // The heaviest call the helper makes: `doctor --json` probes every installed
-    // version of every harness with its own subprocess. Seconds on a healthy box,
-    // so it gets the longest deadline — but it does get one. An unbounded doctor
-    // is what consumed 13 of 18 cores on a real machine.
+    // The heaviest call the helper makes: `doctor --devices --json` probes every
+    // installed version of every harness and asks reachable fleet devices for
+    // their health. Seconds on a healthy box, so it gets the longest deadline —
+    // but it does get one. An unbounded doctor is what consumed 13 of 18 cores on
+    // a real machine.
     static func doctorOverview() -> DoctorOverview? {
-        guard let data = capture(argv(["doctor", "--json"]), timeout: ChildProcess.doctorTimeout) else { return nil }
+        guard let data = capture(argv(["doctor", "--devices", "--json"]), timeout: ChildProcess.doctorTimeout) else { return nil }
         return try? JSONDecoder().decode(DoctorOverview.self, from: data)
     }
 
@@ -173,9 +174,10 @@ enum AgentsCLI {
         runDetached(argv(["focus", sessionId]))
     }
 
-    // Surface CLI health in a terminal — `agents doctor` is interactive output.
+    // Surface CLI health in a terminal — the menu's health row is fleet-aware, so
+    // the interactive command must show the same scope.
     static func runDoctor() {
-        let cmd = "\(shellQuote(binary)) doctor"
+        let cmd = "\(shellQuote(binary)) doctor --devices"
         let script = "tell application \"Terminal\"\nactivate\ndo script \"\(cmd)\"\nend tell"
         runDetached(["/usr/bin/osascript", "-e", script])
     }

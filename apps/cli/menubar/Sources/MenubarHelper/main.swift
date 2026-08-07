@@ -85,6 +85,13 @@ if ProcessInfo.processInfo.environment["MENUBAR_ROUTINE_TEST"] == "1" {
     RoutineSelfTest.run()
 }
 
+// Doctor overview self-test (RUSH-2382): decode the additive fleet findings
+// contract and exercise the bounded, doctor-ordered health presentation without
+// constructing an AppKit menu. See DoctorSelfTest.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_DOCTOR_TEST"] == "1" {
+    DoctorSelfTest.run()
+}
+
 // Everything past here installs the status item and registers the global
 // chords, so it must only run where those chords can actually be serviced.
 // Refuses an ssh-started launch or an unrecognized flag — the two ways a helper
