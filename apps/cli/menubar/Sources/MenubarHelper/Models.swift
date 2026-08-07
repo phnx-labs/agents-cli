@@ -2,6 +2,14 @@ import Foundation
 
 // Shape of `agents routines list --json` (added in src/commands/routines.ts).
 // Routines are secondary in the menu bar — fetched only when the menu opens.
+//
+// RUSH-2290 (routine reliability): `ready`/`readiness`/`failureCode`/
+// `project`/`requestedCwd`/`resolvedCwd`/`skipReason`/`activeRunId` are all
+// optional additions from the runtime-core track. Every one of them must
+// decode as nil against a payload from an older installed CLI that predates
+// them — the menu bar and the CLI release independently, so version skew
+// between this helper and the on-PATH `agents` binary is routine, not an
+// edge case. Do NOT make any of them non-optional.
 struct Routine: Decodable {
     let name: String
     let agent: String?
@@ -16,11 +24,42 @@ struct Routine: Decodable {
     let overdue: Bool
     let nextRun: String?
     let nextRunHuman: String?
-    let lastStatus: String?            // completed | failed | timeout | running | missed | null
+    // completed | failed | timeout | running | missed | blocked | skipped | null.
+    // `blocked` / `skipped` are new outcomes (a readiness gate refused the run, or
+    // the daemon deliberately skipped a duplicate/overlapping fire) — every switch
+    // over this field must have a default arm rather than an exhaustive one.
+    let lastStatus: String?
     let exitCode: Int?
     let failureReason: String?
     let lastRunStartedAt: String?
     let lastRunCompletedAt: String?
+
+    // Explicit readiness verdict for the NEXT run, independent of how the last
+    // one went. `nil` (an older CLI, or a routine the readiness check never
+    // covers) must behave exactly like `true` — only an explicit `false` gates
+    // Run/Resume in the UI.
+    let ready: Bool?
+    let readiness: RoutineReadiness?
+    // A short machine code alongside `failureReason`'s free text (e.g. "auth_failed").
+    let failureCode: String?
+    // Execution target, for naming WHERE a failure/block happened.
+    let project: String?
+    let requestedCwd: String?
+    let resolvedCwd: String?
+    // Present when lastStatus == "skipped": why the daemon skipped this fire
+    // (duplicate_slot | active_run | wrong_owner).
+    let skipReason: String?
+    // The run this one was skipped in favor of, when skipReason == "active_run".
+    let activeRunId: String?
+}
+
+// `readiness` on `Routine`: why the daemon would refuse to start the next run
+// right now. `code` is a stable machine token (e.g. "project_path_missing"),
+// `message` is the human-readable reason, `repair` is an optional suggested fix.
+struct RoutineReadiness: Decodable {
+    let code: String
+    let message: String
+    let repair: String?
 }
 
 struct MenuAgent {

@@ -135,6 +135,23 @@ enum AgentsCLI {
         }
     }
 
+    // The CLI verb behind the routine submenu's "History…" (`agents routines
+    // runs <name>`): run ids, outcomes, and start times for the last runs of
+    // one routine — read-only, distinct from `logs` (raw process output of the
+    // most recent fire). A pure argv builder so it's testable without spawning.
+    static func routineHistoryArgs(_ name: String) -> [String] { ["routines", "runs", name] }
+
+    static func routineHistory(_ name: String) {
+        runMonitored(argv(routineHistoryArgs(name))) { text, ok in
+            let safeName = name.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "-", options: .regularExpression)
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("agents-routine-\(safeName)-history.txt")
+            let body = ok ? text : (text.isEmpty ? "Unable to load history for routine '\(name)'.\n" : text)
+            try? body.write(to: url, atomically: true, encoding: .utf8)
+            runDetached(["/usr/bin/open", url.path])
+        }
+    }
+
     static func openPath(_ path: String) { runDetached(["/usr/bin/open", path]) }
 
     static func startScheduler() { runDetached(argv(["routines", "start"])) }

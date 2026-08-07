@@ -108,6 +108,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// debounce absorbs that blip instead of paging the user for a non-event.
     private static let daemonDownTickThreshold = 3
 
+    // Routine list bounds (RUSH-2290). A fleet can accumulate far more routines
+    // than a dropdown can show — cap the NEEDS YOU attention-cause groups and the
+    // "All routines…" submenu so a bad week never turns the menu into a
+    // multi-screen scroll; each cap ends in a "+N more" row rather than silently
+    // truncating with no signal. Not `private` — RoutineSelfTest asserts against
+    // these directly rather than duplicating the numbers.
+    static let maxAttentionGroups = 6
+    static let maxAllRoutinesRows = 40
+
     // These three reads shell the CLI or touch the sessions DB. They are kept
     // off the click path and rendered from warm caches when the menu opens.
     private var cachedRoutines: [Routine] = []
@@ -571,12 +580,34 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             rows.append(("⚠", wait, "Scheduler stopped — routines won’t run", sub))
         }
 
+        // Failing routines are surfaced HERE ONLY — the ROUTINES section below
+        // renders upcoming runs and "All routines…", never a second copy of the
+        // same failure inline, so a bad routine never shows twice in one menu.
+        // Routines sharing an identical cause (same readiness code, or the same
+        // lastStatus with no readiness) collapse into one row instead of one
+        // per routine — never inventing a shared cause across routines that
+        // fail for genuinely different reasons. Capped so a bad week doesn't
+        // turn NEEDS YOU into its own scroll.
         let bad = routines.filter { routineNeedsAttention($0) }
-        if bad.count == 1, let r = bad.first {
-            let why = r.overdue ? "overdue" : (r.lastStatus ?? "failed")
-            rows.append(("✕", fail, "Routine \(r.name) \(why)", allRoutinesSubmenu(bad)))
-        } else if bad.count > 1 {
-            rows.append(("✕", fail, "\(bad.count) routines failing", allRoutinesSubmenu(bad)))
+        if !bad.isEmpty {
+            let groups = groupedByAttentionCause(bad)
+            let capped = Array(groups.prefix(Self.maxAttentionGroups))
+            for (cause, group) in capped {
+                if group.count == 1, let r = group.first {
+                    let why = routineFailureSummary(r, max: 48)
+                    let (glyph, color) = attentionGlyph(r)
+                    rows.append((glyph, color, "Routine \(r.name) \(why)", allRoutinesSubmenu(group)))
+                } else {
+                    let label = readableAttentionCause(cause)
+                    rows.append(("✕", fail, "\(group.count) routines \(label)", allRoutinesSubmenu(group)))
+                }
+            }
+            if groups.count > capped.count {
+                let remaining = groups.count - capped.count
+                rows.append(("✕", fail,
+                             "+\(remaining) more routine issue\(remaining == 1 ? "" : "s") — see All routines…",
+                             nil))
+            }
         }
 
         if rows.isEmpty { return false }
@@ -1151,6 +1182,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         addSectionTitle(menu, "ROUTINES · \(summary)", color: .secondaryLabelColor)
+        // A routine needing attention is surfaced ONCE, in NEEDS YOU (above) —
+        // this section shows only what's upcoming, plus "All routines…" for the
+        // rest, so the same failure never renders twice in one menu.
         let failing = routines.filter { routineNeedsAttention($0) }
         let upcoming = routines
             .filter { r in r.enabled && !failing.contains(where: { $0.name == r.name }) && r.nextRun != nil }
@@ -1159,7 +1193,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         let hasGroups = routines.contains { $0.projectGroup != nil }
         if hasGroups {
-            let (grouped, ungrouped) = groupedRoutines(Array(upcoming) + failing)
+            let (grouped, ungrouped) = groupedRoutines(Array(upcoming))
             for (label, group) in grouped {
                 menu.addItem(disabled("  \(label)"))
                 for r in group { menu.addItem(inlineRoutineRow(r)) }
@@ -1171,29 +1205,40 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 row.submenu = routineSubmenu(r)
                 menu.addItem(row)
             }
-            for r in failing {
-                let why = routineFailureSummary(r, max: 48)
-                let row = statusRow(routineIsMiss(r) ? "⃠" : "✕", routineIsMiss(r) ? wait : fail, "\(r.name)  \(why)")
-                row.submenu = routineSubmenu(r)
-                menu.addItem(row)
-            }
         }
         let all = NSMenuItem(title: "  All routines…", action: nil, keyEquivalent: "")
         all.submenu = allRoutinesSubmenu(routines)
         menu.addItem(all)
     }
 
-    // One colored inline row for the ROUTINES section (upcoming or failing).
+    // One colored inline row for the ROUTINES section. Only ever called with an
+    // upcoming (non-attention) routine now — see the comment on addRoutines —
+    // but keeps the attention styling for defensiveness rather than assuming a
+    // caller never changes.
     private func inlineRoutineRow(_ r: Routine) -> NSMenuItem {
         let row: NSMenuItem
         if routineNeedsAttention(r) {
             let why = routineFailureSummary(r, max: 48)
-            row = statusRow(routineIsMiss(r) ? "⃠" : "✕", routineIsMiss(r) ? wait : fail, "\(r.name)  \(why)")
+            let (glyph, color) = attentionGlyph(r)
+            row = statusRow(glyph, color, "\(r.name)  \(why)")
         } else {
             row = statusRow("◔", idleC, "\(r.name)  \(r.nextRunHuman ?? r.schedule)")
         }
         row.submenu = routineSubmenu(r)
         return row
+    }
+
+    // Glyph/color for a routine currently needing attention — distinguishes a
+    // readiness block (can't run at all: paused-not-ready) from an infra miss
+    // (a scheduled fire never happened) from a real execution failure. Pure
+    // classification lives in `routineAttentionKind`; this only maps it to the
+    // menu's status palette.
+    private func attentionGlyph(_ r: Routine) -> (String, NSColor) {
+        switch routineAttentionKind(r) ?? .failure {
+        case .notReady: return ("⏸", wait)
+        case .miss: return ("⃠", wait)
+        case .failure: return ("✕", fail)
+        }
     }
 
     // Setup + watchdog collapsed into one System row — the health noise lives in
@@ -1307,34 +1352,61 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func routineSubmenu(_ r: Routine) -> NSMenu {
         let sub = NSMenu()
 
-        // Last-run outcome / live status, the failure reason (when there is one),
-        // and the next fire — all from the already-decoded, server-verified routine
-        // fields, so no fresh fetch on open.
+        // Last-run outcome / live status, a dedicated "can't run right now" line
+        // when readiness explicitly blocks it (independent of how the LAST run
+        // went — a routine can have completed fine and still be blocked for the
+        // NEXT fire), the concrete failure/skip reason, and the next fire — all
+        // from the already-decoded, server-verified routine fields, so no fresh
+        // fetch on open.
         var addedInfo = false
+        if r.enabled, r.ready == false {
+            var text = "⏸ \(r.readiness?.message ?? "not ready to run")"
+            if let target = r.project ?? r.resolvedCwd ?? r.requestedCwd, !target.isEmpty { text += " · \(target)" }
+            sub.addItem(disabled(trim(text, 80))); addedInfo = true
+        }
         if let status = routineRunStatusLine(r) {
             sub.addItem(disabled(status)); addedInfo = true
         }
-        if r.lastStatus == "failed" || r.lastStatus == "timeout",
-           let reason = r.failureReason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
-            let clean = reason.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            sub.addItem(disabled("   \(trim(clean, 72))")); addedInfo = true
+        // The readiness line above already carries the reason when the routine
+        // is blocked for its NEXT run — this is the reason for the LAST run's
+        // outcome, so it's skipped for `.notReady` to avoid restating the same
+        // sentence twice in one submenu.
+        if routineAttentionKind(r) != .notReady, let reason = routineFailureDetail(r, max: 72) {
+            sub.addItem(disabled("   \(reason)")); addedInfo = true
         }
         if r.enabled, r.lastStatus != "running", let next = r.nextRunHuman, next != "-" {
             sub.addItem(disabled("next \(next)")); addedInfo = true
         }
         if addedInfo { sub.addItem(.separator()) }
 
+        // Run/Resume are disabled (never hidden — the operator can still see
+        // and reach the routine) when readiness explicitly says the next fire
+        // can't start; an older CLI with no `ready` field, or one that never
+        // computed it for this routine, behaves exactly as before (enabled).
+        let state = routineActionState(r)
+
         let run = NSMenuItem(title: "Run now", action: #selector(onRoutineRun(_:)), keyEquivalent: "")
         run.target = self
         run.representedObject = r.name
+        run.isEnabled = state.runEnabled
         sub.addItem(run)
 
-        let pauseResume = NSMenuItem(title: r.enabled ? "Pause" : "Resume",
+        let pauseResume = NSMenuItem(title: state.pauseResumeTitle,
                                      action: r.enabled ? #selector(onRoutinePause(_:)) : #selector(onRoutineResume(_:)),
                                      keyEquivalent: "")
         pauseResume.target = self
         pauseResume.representedObject = r.name
+        pauseResume.isEnabled = state.pauseResumeEnabled
         sub.addItem(pauseResume)
+
+        // History… beside Logs: Logs tails the raw process output of the last
+        // fire, History lists past run ids/outcomes/timestamps (`agents routines
+        // runs <name>`) — same read-only-CLI-data pattern as Logs, just a
+        // different CLI verb.
+        let history = NSMenuItem(title: "History…", action: #selector(onRoutineHistory(_:)), keyEquivalent: "")
+        history.target = self
+        history.representedObject = r.name
+        sub.addItem(history)
 
         let logs = NSMenuItem(title: "Logs", action: #selector(onRoutineLogs(_:)), keyEquivalent: "")
         logs.target = self
@@ -1374,6 +1446,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             return line + overdueTag
         case "missed":
             return "⦸ missed · \(shortWhen(r.lastRunCompletedAt))" + overdueTag
+        case "blocked":
+            return "⏸ blocked · \(shortWhen(r.lastRunCompletedAt))" + overdueTag
+        case "skipped":
+            let reason = r.skipReason.map { " (\($0.replacingOccurrences(of: "_", with: " ")))" } ?? ""
+            return "⦸ skipped\(reason) · \(shortWhen(r.lastRunCompletedAt))" + overdueTag
         default:
             return "\(status) · \(shortWhen(r.lastRunCompletedAt))" + overdueTag
         }
@@ -1391,11 +1468,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return "\(mins / 60)h \(mins % 60)m"
     }
 
+    // Bounded to `maxAllRoutinesRows` — a trailing "+N more" row names what was
+    // dropped rather than truncating silently (see the class-level comment on
+    // the cap constants).
     private func allRoutinesSubmenu(_ routines: [Routine]) -> NSMenu {
         let sub = NSMenu()
-        let hasGroups = routines.contains { $0.projectGroup != nil }
+        let capped = Array(routines.prefix(Self.maxAllRoutinesRows))
+        let hasGroups = capped.contains { $0.projectGroup != nil }
         if hasGroups {
-            let (grouped, ungrouped) = groupedRoutines(routines)
+            let (grouped, ungrouped) = groupedRoutines(capped)
             for i in grouped.indices {
                 if i > 0 { sub.addItem(.separator()) }
                 let (label, group) = grouped[i]
@@ -1407,7 +1488,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 for r in ungrouped { sub.addItem(routineListRow(r)) }
             }
         } else {
-            for r in routines { sub.addItem(routineListRow(r)) }
+            for r in capped { sub.addItem(routineListRow(r)) }
+        }
+        if routines.count > capped.count {
+            sub.addItem(.separator())
+            sub.addItem(disabled("+\(routines.count - capped.count) more — see `agents routines list`"))
         }
         return sub
     }
@@ -1512,6 +1597,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func onRoutinePause(_ s: NSMenuItem) { withName(s, AgentsCLI.routinePause) }
     @objc private func onRoutineResume(_ s: NSMenuItem) { withName(s, AgentsCLI.routineResume) }
     @objc private func onRoutineLogs(_ s: NSMenuItem) { withName(s, AgentsCLI.routineLogs) }
+    @objc private func onRoutineHistory(_ s: NSMenuItem) { withName(s, AgentsCLI.routineHistory) }
     @objc private func onOpenPath(_ s: NSMenuItem) {
         if let p = s.representedObject as? String { AgentsCLI.openPath(p) }
     }
@@ -1636,35 +1722,152 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 }
 
-/// A routine the operator should look at: it failed, timed out, never ran when
-/// it was due (`missed`), or is overdue. One predicate rather than the same
-/// disjunction repeated at each call site, so a new status cannot be added to
-/// four of five checks.
-func routineNeedsAttention(_ r: Routine) -> Bool {
-    r.lastStatus == "failed" || r.lastStatus == "timeout" || r.lastStatus == "missed" || r.overdue
+/// Why a routine needs the operator's attention, in three DISTINCT flavors
+/// (RUSH-2290) — the plan's "distinguish paused-not-ready from execution
+/// failure": readiness explicitly refusing the next run is not the same
+/// situation as a run that started and then failed, and neither is the same
+/// as a scheduled fire that simply never happened.
+enum RoutineAttentionKind: Equatable {
+    /// Can't run at all right now — readiness blocked the last attempt
+    /// (`lastStatus == "blocked"`) or explicitly blocks the next one
+    /// (`enabled && ready == false`). Distinct from a manually paused routine
+    /// (`enabled == false`), which needs no attention on its own.
+    case notReady
+    /// Infrastructure, not a task failure: the scheduled fire never started
+    /// (`missed`), the daemon deliberately skipped an overlapping fire
+    /// (`skipped`), or the next fire is overdue with no worse outcome.
+    case miss
+    /// The run itself started and did not complete cleanly.
+    case failure
 }
+
+/// Single source of truth for "does this routine need a look", classified
+/// into the three kinds above. One function rather than the same disjunction
+/// repeated at each call site, so a new status can't be added to some checks
+/// and missed in others.
+func routineAttentionKind(_ r: Routine) -> RoutineAttentionKind? {
+    if r.lastStatus == "blocked" || (r.enabled && r.ready == false) { return .notReady }
+    if r.lastStatus == "failed" || r.lastStatus == "timeout" { return .failure }
+    if r.lastStatus == "missed" || r.lastStatus == "skipped" || r.overdue { return .miss }
+    return nil
+}
+
+/// A routine the operator should look at, in ANY of the three attention kinds.
+func routineNeedsAttention(_ r: Routine) -> Bool { routineAttentionKind(r) != nil }
 
 /// `missed` means the run never started — infrastructure, not a task failure —
-/// so it reads as a warning rather than a red error.
-func routineIsMiss(_ r: Routine) -> Bool {
-    r.lastStatus == "missed" || (r.overdue && r.lastStatus != "failed" && r.lastStatus != "timeout")
+/// so it reads as a warning rather than a red error. `skipped` (the daemon
+/// deliberately stood a fire down for a duplicate/overlapping run) is the
+/// same flavor of "nothing went wrong with the task itself".
+func routineIsMiss(_ r: Routine) -> Bool { routineAttentionKind(r) == .miss }
+
+/// True when the routine is enabled but explicitly blocked from its next run
+/// by a readiness check — the `.notReady` attention kind. Absent `ready`
+/// (an older CLI, or a routine readiness never covers) is NOT not-ready.
+func routineIsNotReady(_ r: Routine) -> Bool { routineAttentionKind(r) == .notReady }
+
+/// The concrete, specific reason behind an attention kind — a readiness
+/// message, a free-text failure reason (optionally tagged with its short
+/// `failureCode`), why a fire was skipped, or a bare exit code. Returns nil
+/// when there is nothing more specific to say than the bare status itself
+/// (e.g. a `missed` run with no other detail) — never invents text.
+func routineConcreteReason(_ r: Routine, max: Int) -> String? {
+    if (r.lastStatus == "blocked" || (r.enabled && r.ready == false)),
+       let readiness = r.readiness, !readiness.message.isEmpty {
+        var text = readiness.message
+        if let target = r.project ?? r.resolvedCwd ?? r.requestedCwd, !target.isEmpty {
+            text += " · \(target)"
+        }
+        return trimText(text, max)
+    }
+    if r.lastStatus == "skipped" {
+        let reason = r.skipReason.map { $0.replacingOccurrences(of: "_", with: " ") } ?? "overlapping run"
+        return trimText("skipped · \(reason)", max)
+    }
+    if r.lastStatus == "failed" || r.lastStatus == "timeout" {
+        if let reason = r.failureReason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
+            var text = reason.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            if let code = r.failureCode, !code.isEmpty, !text.contains(code) { text = "\(code): \(text)" }
+            if let target = r.project ?? r.resolvedCwd, !target.isEmpty { text += " · \(target)" }
+            return trimText(text, max)
+        }
+        if let code = r.exitCode { return "exit \(code)" }
+    }
+    return nil
 }
 
+/// Always returns SOME text for a routine needing attention — falls back to
+/// naming the attention kind itself when there's no more concrete reason.
 func routineFailureSummary(_ r: Routine, max: Int) -> String {
-    if let detail = routineFailureDetail(r, max: max) { return detail }
-    return r.overdue ? "overdue" : (r.lastStatus ?? "failed")
+    if let reason = routineConcreteReason(r, max: max) { return reason }
+    switch routineAttentionKind(r) {
+    case .notReady: return "not ready"
+    case .miss: return r.lastStatus == "skipped" ? "skipped" : (r.overdue ? "overdue" : (r.lastStatus ?? "missed"))
+    case .failure: return r.lastStatus ?? "failed"
+    case .none: return r.overdue ? "overdue" : (r.lastStatus ?? "failed")
+    }
 }
 
+/// Same as `routineFailureSummary`, but nil when the routine needs no
+/// attention at all — the form call sites use to fall back to a neutral
+/// "next run" / "paused" line instead of restating a non-issue.
 func routineFailureDetail(_ r: Routine, max: Int) -> String? {
-    let lastRunFailed = r.lastStatus == "failed" || r.lastStatus == "timeout" || r.lastStatus == "missed"
-    guard lastRunFailed || r.overdue else { return nil }
-    if let reason = r.failureReason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
-        return trimText(reason.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression), max)
+    guard routineNeedsAttention(r) else { return nil }
+    return routineFailureSummary(r, max: max)
+}
+
+/// Groups routines needing attention by a shared cause signature — the
+/// readiness code when one is blocking, else the raw last-run status — so N
+/// routines hitting the IDENTICAL cause collapse into one row instead of N
+/// nearly-identical ones. Never invents a shared cause: two routines that
+/// fail for different reasons (or carry no readiness code at all) each keep
+/// their own group. Preserves the order causes first appear in `routines`.
+func groupedByAttentionCause(_ routines: [Routine]) -> [(String, [Routine])] {
+    var order: [String] = []
+    var byCause: [String: [Routine]] = [:]
+    for r in routines {
+        let cause = r.readiness?.code ?? r.lastStatus ?? "failed"
+        if byCause[cause] == nil { order.append(cause) }
+        byCause[cause, default: []].append(r)
     }
-    if lastRunFailed, let code = r.exitCode {
-        return "exit \(code)"
+    return order.map { ($0, byCause[$0]!) }
+}
+
+/// Human phrasing for a grouped cause signature — a readiness code
+/// ("project_path_missing" -> "project path missing") or a raw lastStatus.
+/// Falls back to the literal string with underscores turned to spaces rather
+/// than inventing new copy for a code this doesn't recognize.
+func readableAttentionCause(_ cause: String) -> String {
+    switch cause {
+    case "failed": return "failing"
+    case "timeout": return "timing out"
+    case "missed": return "missing runs"
+    case "skipped": return "being skipped"
+    case "blocked": return "blocked"
+    default: return cause.replacingOccurrences(of: "_", with: " ")
     }
-    return r.overdue ? "overdue" : (r.lastStatus ?? "failed")
+}
+
+/// What the routine submenu's Run-now / Pause-Resume actions should allow.
+/// Pure and AppKit-free so it's directly testable: Run is disabled only when
+/// readiness EXPLICITLY refuses the next run (`ready == false`); an absent
+/// `ready` (older CLI, or a routine readiness never covers) behaves exactly
+/// as before — enabled. Resume inherits the same gate (re-enabling a routine
+/// that can't run would just fail again); Pause is always allowed.
+struct RoutineActionState: Equatable {
+    let runEnabled: Bool
+    let pauseResumeTitle: String
+    let pauseResumeEnabled: Bool
+}
+
+func routineActionState(_ r: Routine) -> RoutineActionState {
+    let ready = r.ready != false
+    let isResume = !r.enabled
+    return RoutineActionState(
+        runEnabled: ready,
+        pauseResumeTitle: isResume ? "Resume" : "Pause",
+        pauseResumeEnabled: isResume ? ready : true
+    )
 }
 
 private func trimText(_ value: String, _ max: Int) -> String {
