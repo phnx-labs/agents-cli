@@ -2724,7 +2724,12 @@
           "aliases": [],
           "description": "Stop the daemon.",
           "args": [],
-          "options": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit the structured stop result (released/surviving resources, detached children)."
+            }
+          ],
           "subcommands": []
         }
       ]
