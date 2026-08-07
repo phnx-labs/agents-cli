@@ -213,6 +213,9 @@ describe('generated shim fall-through', () => {
 
     const launcher = path.join(launcherDir, 'cursor-agent');
     fs.symlinkSync(shim, launcher);
+    const agentsBin = path.join(launcherDir, 'agents');
+    fs.writeFileSync(agentsBin, '#!/bin/bash\nexit 99\n');
+    fs.chmodSync(agentsBin, 0o755);
     const managedDir = path.join(historyDir, 'versions', 'cursor', version, 'node_modules', '.bin');
     fs.mkdirSync(managedDir, { recursive: true });
     fs.symlinkSync(launcher, path.join(managedDir, 'cursor-agent'));
@@ -229,7 +232,13 @@ describe('generated shim fall-through', () => {
 
     const output = execFileSync('bash', [shim, '--version'], {
       cwd: root,
-      env: { ...process.env, HOME: root, PWD: root, AGENTS_USER_DIR: userDir },
+      env: {
+        ...process.env,
+        HOME: root,
+        PWD: root,
+        PATH: `${launcherDir}:${process.env.PATH ?? ''}`,
+        AGENTS_USER_DIR: userDir,
+      },
       encoding: 'utf-8',
       timeout: 5_000,
     });
