@@ -40,8 +40,8 @@ enum DoctorSelfTest {
         check("visible findings cap is five", DoctorHealth.visible(overview.findings).count == DoctorHealth.maxVisibleFindings)
         check("remainder names the sixth finding", DoctorHealth.remainderCount(overview.findings) == 1)
         check("visible findings preserve doctor order", DoctorHealth.visible(overview.findings).map(\.device) == ["yosemite-m4", "zion", "pinnacles", "mac-mini", "win-mini"])
-        check("context includes device and agent version", DoctorHealth.context(DoctorHealth.visible(overview.findings)[0]) == "critical · yosemite-m4 · claude@1.2.3")
-        check("context falls back to collapsed-version agent", DoctorHealth.context(DoctorHealth.visible(overview.findings)[3]) == "critical · mac-mini · grok@a")
+        check("context includes device and agent version", DoctorHealth.context(DoctorHealth.visible(overview.findings)[0]) == "critical · yosemite-m4 · claude @1.2.3")
+        check("context marks a collapsed row with its version count", DoctorHealth.context(DoctorHealth.visible(overview.findings)[3]) == "critical · mac-mini · grok (2 versions)")
 
         // MARK: actionable detail — the row carries doctor's exact fix so the
         // finding is actionable from the menu (display-only; never run).
