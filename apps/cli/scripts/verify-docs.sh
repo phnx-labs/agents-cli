@@ -62,30 +62,6 @@ while IFS= read -r file; do
   done < <(grep -oE '\[[^]]+\]\([^)]+\)' "$file")
 done < <(find docs -name '*.md')
 
-# --- 4. The generated command index is up to date ---
-# docs/command-index.{md,json} are generated from the CLI's own command tree
-# (scripts/gen-command-index.ts). Regenerate into a temp dir and diff, so a PR
-# that adds/renames a command but forgets to run `npm run gen:index` fails here.
-# Skipped when bun is unavailable (a bare local run without the toolchain).
-if command -v bun >/dev/null 2>&1; then
-  TMP_INDEX="$(mktemp -d)"
-  trap 'rm -rf "$TMP_INDEX"' EXIT
-  if GEN_COMMAND_INDEX_OUT_DIR="$TMP_INDEX" bun scripts/gen-command-index.ts >/dev/null 2>&1; then
-    stale=0
-    for f in command-index.md command-index.json; do
-      if ! diff -q "docs/$f" "$TMP_INDEX/$f" >/dev/null 2>&1; then
-        fail "docs/$f is stale — run 'npm run gen:index' and commit the result"
-        stale=1
-      fi
-    done
-    [[ $stale -eq 0 ]] && log "✓ command index (docs/command-index.{md,json}) is up to date"
-  else
-    fail "gen-command-index.ts failed to run — cannot verify the command index"
-  fi
-else
-  log "• skipping command-index freshness check (bun not on PATH)"
-fi
-
 if [[ $ERRORS -eq 0 ]]; then
   log "✓ Docs verification passed"
   exit 0

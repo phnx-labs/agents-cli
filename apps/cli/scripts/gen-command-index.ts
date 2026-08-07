@@ -6,7 +6,8 @@
 //
 // Both are GENERATED artifacts — never hand-edit them. Run `npm run gen:index`
 // (or `bun scripts/gen-command-index.ts`); release.sh regenerates them so the
-// committed index always matches the shipped command surface. `verify-docs.sh`
+// committed index always matches the shipped command surface. `npm run verify:index`
+// (scripts/verify-command-index.sh, run in CI's cli-preflight + cli-docs jobs)
 // fails if the committed files are stale.
 //
 // The source of truth is the CLI's own lazy loader table: `buildFullCommandTree`
@@ -125,8 +126,9 @@ what \`agents\` actually registers.
 - Full option lists live in the machine-readable [\`command-index.json\`](command-index.json).
 - \`agents <group> --help\` shows the workflow-first help (examples + notes) for a group.
 
-Excluded: the deprecated aliases and internal tombstones
-(\`perms\`, \`exec\`, \`jobs\`, \`cron\`, \`check\`, \`resources\`, \`hq\`, \`upgrade\`, \`_internal\`).
+Excluded (same as \`agents --help\`): commands Commander marks hidden (e.g. \`remove\`/\`rm\`/\`purge\`
+and internal subcommands), plus the deprecated aliases and tombstones registered inline in
+src/index.ts (\`perms\`, \`exec\`, \`jobs\`, \`cron\`, \`check\`, \`resources\`, \`hq\`, \`upgrade\`, \`_internal\`).
 `;
 
 /** Render the grouped, human-scannable Markdown index. */
