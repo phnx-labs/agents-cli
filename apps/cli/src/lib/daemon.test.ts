@@ -15,7 +15,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
 import * as path from 'path';
-import { execFileSync, spawn } from 'child_process';
+import { execFileSync, spawn, spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import {
   generateLaunchdPlist,
@@ -547,14 +547,14 @@ describe('daemon single-instance (#414)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('refuses a second concurrent daemon: it exits without clobbering the live pid file', async () => {
+  it('last-wins takeover (RUSH-2352): a second daemon evicts the incumbent and becomes the sole owner', async () => {
     // CI builds before tests; self-heal for a bare `vitest` run.
     if (!fs.existsSync(DIST_ENTRY)) {
       execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
     }
 
     // Short POSIX base keeps the daemon's AF_UNIX browser socket under the
-    // 104-byte sun_path cap (see the integration test above for the rationale).
+    // 104-byte sun_path cap.
     const tmpRoot = process.platform === 'win32' ? os.tmpdir() : '/tmp';
     const tmpHome = fs.mkdtempSync(path.join(tmpRoot, 'agd-si-'));
     // Satisfy the setup gate (`ensureInitialized`): ~/.agents/.system must be a repo.
@@ -585,17 +585,18 @@ describe('daemon single-instance (#414)', () => {
       expect(pidA).toBeTruthy();
       expect(await waitFor(() => readPid() === pidA, 20_000)).toBe(true);
 
-      // Daemon B — a second concurrent `__daemon-run` — must detect A and exit.
+      // Daemon B — a second `__daemon-run` — must EVICT A (last-wins), not defer.
+      // claimDaemonInstance SIGTERMs A, waits for its graceful shutdown to
+      // release its broker socket + browser IPC, then binds and writes its own
+      // pid. Exactly one daemon is ever alive.
       pidB = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHome, 'b.log'), env: childEnv }).pid!;
       expect(pidB).toBeTruthy();
       expect(pidB).not.toBe(pidA);
 
-      // B exits on its own (claimDaemonInstance() returned false → process.exit(0)).
-      expect(await waitFor(() => !alive(pidB!), 20_000)).toBe(true);
-
-      // A never lost ownership of the pid file and is still running.
-      expect(readPid()).toBe(pidA);
-      expect(alive(pidA)).toBe(true);
+      // A is evicted and gone; B owns the pid file and keeps running.
+      expect(await waitFor(() => !alive(pidA!), 20_000)).toBe(true);
+      expect(await waitFor(() => readPid() === pidB, 20_000)).toBe(true);
+      expect(alive(pidB)).toBe(true);
     } finally {
       for (const p of [pidA, pidB]) { try { if (p) process.kill(p, 'SIGKILL'); } catch { /* already gone */ } }
       // SIGKILL is async: the kernel delivers it but the daemon can still be
@@ -612,6 +613,239 @@ describe('daemon single-instance (#414)', () => {
       }
     }
   }, 60_000);
+
+  // THE CRITICAL REGRESSION TEST (RUSH-2352 correction). The refuted premise of
+  // this ticket's original version was that several `__daemon-run` processes on
+  // one box proved cross-install duplicate schedulers — when in fact three of the
+  // four ran under separate HOMEs (leaked vitest fixtures) and never shared state.
+  // A last-wins takeover that widened its blast radius to "every daemon on the
+  // box" would make that misreading real: it would start SIGTERMing genuinely
+  // separate daemons. This proves the opposite — a daemon serving its OWN state
+  // dir is never a takeover or reap target, no matter what else runs on the box.
+  it.skipIf(process.platform === 'win32')(
+    'DIFFERENT STATE DIR (the regression this correction exists to prevent): a daemon serving its own HOME survives another pair\'s last-wins takeover completely untouched',
+    async () => {
+      if (!fs.existsSync(DIST_ENTRY)) {
+        execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
+      }
+
+      const tmpRoot = '/tmp';
+      const tmpHomeAB = fs.mkdtempSync(path.join(tmpRoot, 'agd-ds-ab-'));
+      const tmpHomeC = fs.mkdtempSync(path.join(tmpRoot, 'agd-ds-c-'));
+      for (const home of [tmpHomeAB, tmpHomeC]) {
+        const systemDir = path.join(home, '.agents', '.system');
+        fs.mkdirSync(systemDir, { recursive: true });
+        execFileSync('git', ['init', '-q', systemDir]);
+      }
+
+      const pidFileFor = (home: string) => path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'daemon.pid');
+      const envFor = (home: string) => {
+        const env = { ...process.env, HOME: home };
+        delete env.CLAUDE_CODE_OAUTH_TOKEN;
+        return env;
+      };
+      const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+      const readPid = (home: string) => {
+        const p = pidFileFor(home);
+        return fs.existsSync(p) ? parseInt(fs.readFileSync(p, 'utf-8').trim(), 10) : null;
+      };
+      const waitFor = async (cond: () => boolean, timeoutMs: number) => {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+          if (cond()) return true;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        return cond();
+      };
+
+      let pidA: number | null = null;
+      let pidB: number | null = null;
+      let pidC: number | null = null;
+      try {
+        // Daemon C — a completely separate state dir, standing in for a
+        // developer's own live daemon or another test's leaked fixture (the real
+        // shape behind the refuted premise). Started first and ticking through
+        // the whole A/B takeover below.
+        pidC = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHomeC, 'c.log'), env: envFor(tmpHomeC) }).pid!;
+        expect(pidC).toBeTruthy();
+        expect(await waitFor(() => readPid(tmpHomeC) === pidC, 20_000)).toBe(true);
+
+        // Daemon A, then B — last-wins takeover within their OWN (different from
+        // C's) state dir, exactly like the LAST-WINS test above.
+        pidA = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHomeAB, 'a.log'), env: envFor(tmpHomeAB) }).pid!;
+        expect(pidA).toBeTruthy();
+        expect(await waitFor(() => readPid(tmpHomeAB) === pidA, 20_000)).toBe(true);
+
+        pidB = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHomeAB, 'b.log'), env: envFor(tmpHomeAB) }).pid!;
+        expect(pidB).toBeTruthy();
+        expect(await waitFor(() => !alive(pidA!), 20_000)).toBe(true);
+        expect(await waitFor(() => readPid(tmpHomeAB) === pidB, 20_000)).toBe(true);
+
+        // C — a different state dir entirely — was never a candidate for either
+        // claimDaemonInstance's eviction or B's post-claim reapStrayDaemons()
+        // sweep: its pid file and its process are both intact throughout.
+        expect(readPid(tmpHomeC)).toBe(pidC);
+        expect(alive(pidC)).toBe(true);
+      } finally {
+        for (const p of [pidA, pidB, pidC]) { try { if (p) process.kill(p, 'SIGKILL'); } catch { /* already gone */ } }
+        for (const p of [pidA, pidB, pidC]) { if (p) await waitFor(() => !alive(p), 5_000); }
+        for (const home of [tmpHomeAB, tmpHomeC]) {
+          for (let attempt = 0; ; attempt++) {
+            try { fs.rmSync(home, { recursive: true, force: true }); break; }
+            catch (err) {
+              if (attempt >= 10) throw err;
+              await new Promise((r) => setTimeout(r, 100));
+            }
+          }
+        }
+      }
+    },
+    90_000,
+  );
+});
+
+/**
+ * stopDaemon postcondition assertion (RUSH-2355 / SING-12). Real path, no
+ * mocking: a genuine `__daemon-run` (or a real SIGTERM-ignoring process) is
+ * stopped through the actual `agents daemon stop` command in a subprocess under
+ * its OWN HOME, so every path constant (pid file, instance registry, browser
+ * socket, broker socket, runs dir) resolves inside the temp state dir and the
+ * test can never touch a live daemon on the dev machine.
+ */
+describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const waitFor = async (cond: () => boolean, timeoutMs: number) => {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (cond()) return true;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return cond();
+  };
+  const mkHome = () => {
+    const home = fs.mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'agd-stop-'));
+    const systemDir = path.join(home, '.agents', '.system');
+    fs.mkdirSync(systemDir, { recursive: true });
+    execFileSync('git', ['init', '-q', systemDir]);
+    return home;
+  };
+  const daemonPidFile = (home: string) => path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'daemon.pid');
+  const readDaemonPidOf = (home: string) => {
+    const p = daemonPidFile(home);
+    return fs.existsSync(p) ? parseInt(fs.readFileSync(p, 'utf-8').trim(), 10) : null;
+  };
+  const envFor = (home: string) => {
+    const env = { ...process.env, HOME: home };
+    delete env.CLAUDE_CODE_OAUTH_TOKEN;
+    delete env.AGENTS_DAEMON_DIR; // let it derive from HOME
+    return env;
+  };
+  const runStop = (home: string) => {
+    const r = spawnSync(process.execPath, [DIST_ENTRY, 'daemon', 'stop', '--json'], {
+      env: envFor(home), encoding: 'utf-8',
+    });
+    // The --json action prints only the result object to stdout; be tolerant of
+    // any leading banner by slicing to the JSON braces.
+    const out = r.stdout || '';
+    const first = out.indexOf('{');
+    const last = out.lastIndexOf('}');
+    const parsed = first >= 0 && last > first ? JSON.parse(out.slice(first, last + 1)) : null;
+    return { status: r.status, result: parsed, stdout: out, stderr: r.stderr || '' };
+  };
+  const rmHome = async (home: string) => {
+    for (let attempt = 0; ; attempt++) {
+      try { fs.rmSync(home, { recursive: true, force: true }); break; }
+      catch (err) { if (attempt >= 10) throw err; await new Promise((r) => setTimeout(r, 100)); }
+    }
+  };
+
+  it.skipIf(process.platform === 'win32')(
+    'clean stop: releases the daemon, exits 0, and REPORTS an in-flight detached child rather than killing it',
+    async () => {
+      if (!fs.existsSync(DIST_ENTRY)) execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
+      const home = mkHome();
+      let daemonPid: number | null = null;
+      // A real detached routine child in its OWN process group — survives the
+      // daemon's death and must be reported, never killed (SING-11a).
+      const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { detached: true, stdio: 'ignore' });
+      child.unref();
+      try {
+        expect(child.pid).toBeTruthy();
+        daemonPid = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(home, 'd.log'), env: envFor(home) }).pid!;
+        expect(await waitFor(() => readDaemonPidOf(home) === daemonPid, 20_000)).toBe(true);
+
+        // Seed a `running` run record pointing at the live detached child, under
+        // this HOME's runs dir, so the stop's postcondition enumerates it.
+        const runDir = path.join(home, '.agents', '.history', 'runs', 'testjob', 'run-1');
+        fs.mkdirSync(runDir, { recursive: true });
+        fs.writeFileSync(path.join(runDir, 'meta.json'), JSON.stringify({
+          status: 'running', pid: child.pid, agent: 'claude',
+          startedAt: new Date().toISOString(), spawnedAt: Date.now(),
+        }));
+
+        const { status, result } = runStop(home);
+        expect(result).toBeTruthy();
+        expect(result.ok).toBe(true);            // every resource released
+        expect(status).toBe(0);                  // clean stop exits 0
+        expect(result.stoppedPid).toBe(daemonPid);
+        expect(result.surviving).toEqual([]);
+        expect(result.released).toContain('daemon process');
+        expect(result.detachedChildren).toContain(child.pid);
+
+        // The daemon is gone; the detached child was reported, NOT killed.
+        expect(await waitFor(() => !alive(daemonPid!), 10_000)).toBe(true);
+        expect(alive(child.pid!)).toBe(true);
+      } finally {
+        try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* gone */ }
+        try { if (daemonPid) process.kill(daemonPid, 'SIGKILL'); } catch { /* gone */ }
+        for (const p of [child.pid, daemonPid]) { if (p) await waitFor(() => !alive(p), 5_000); }
+        await rmHome(home);
+      }
+    },
+    60_000,
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'wedged daemon: escalates past the grace window to killTree, then still verifies nothing survives',
+    async () => {
+      const home = mkHome();
+      // A real process that IGNORES SIGTERM and reads as a `__daemon-run` (its
+      // argv carries the token, so isDaemonRunProcess matches it) — the wedge the
+      // grace→killTree escalation exists for.
+      const wedge = spawn(
+        process.execPath,
+        ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);", '__daemon-run'],
+        { detached: true, stdio: 'ignore' },
+      );
+      wedge.unref();
+      try {
+        expect(wedge.pid).toBeTruthy();
+        // Register the wedge as this state dir's daemon (pid file + instance
+        // marker), the way a real daemon would, so stop targets it.
+        const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+        fs.mkdirSync(path.join(daemonDir, 'instances'), { recursive: true });
+        fs.writeFileSync(daemonPidFile(home), String(wedge.pid));
+        fs.writeFileSync(path.join(daemonDir, 'instances', String(wedge.pid)), 'node -e ... __daemon-run');
+
+        const started = Date.now();
+        const { status, result } = runStop(home);
+        const elapsed = Date.now() - started;
+
+        expect(result).toBeTruthy();
+        expect(result.escalated).toBe(true);           // SIGTERM ignored → killTree
+        expect(elapsed).toBeGreaterThan(4000);         // it waited out the grace window
+        expect(result.ok).toBe(true);                  // killTree got it; nothing survives
+        expect(result.surviving).toEqual([]);
+        expect(status).toBe(0);
+        expect(await waitFor(() => !alive(wedge.pid!), 5_000)).toBe(true);
+      } finally {
+        try { if (wedge.pid) process.kill(wedge.pid, 'SIGKILL'); } catch { /* gone */ }
+        if (wedge.pid) await waitFor(() => !alive(wedge.pid!), 5_000);
+        await rmHome(home);
+      }
+    },
+    60_000,
+  );
 });
 
 /**
