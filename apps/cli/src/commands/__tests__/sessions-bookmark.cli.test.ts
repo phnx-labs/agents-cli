@@ -16,7 +16,13 @@ let home: string;
 function run(args: string[]) {
   return spawnSync(process.execPath, [tsxBin, cliEntry, ...args], {
     cwd: home,
-    env: { ...process.env, HOME: home, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' },
+    env: {
+      ...process.env,
+      HOME: home,
+      AGENTS_SKIP_MIGRATION: '1',
+      AGENTS_SESSIONS_FORCE_REFRESH: '1',
+      NODE_NO_WARNINGS: '1',
+    },
     encoding: 'utf-8',
   });
 }
@@ -104,6 +110,94 @@ describe('agents sessions bookmark (real CLI parse)', () => {
 
     // Leave the store clean for the other cases in this file.
     run(['sessions', 'bookmark', bookmarked, '--remove']);
+    fs.rmSync(registry, { force: true });
+  });
+
+  it('narrows real --active JSON output to all or one named routine', () => {
+    const routineName = 'nightly-review';
+    const routineId = 'dddddddd-0000-0000-0000-000000000004';
+    const manualId = 'eeeeeeee-0000-0000-0000-000000000005';
+    const project = path.join(home, 'routine-project');
+    fs.mkdirSync(project, { recursive: true });
+    const archiveDir = path.join(
+      home,
+      '.agents',
+      '.history',
+      'runs',
+      routineName,
+      '2026-08-07T00-00-00-000Z',
+      'sessions',
+      'claude',
+      'projects',
+      '-routine-project',
+    );
+    fs.mkdirSync(archiveDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(archiveDir, `${routineId}.jsonl`),
+      [
+        {
+          type: 'user',
+          timestamp: '2026-08-07T00:00:00.000Z',
+          cwd: project,
+          version: '2.1.0',
+          entrypoint: 'cli',
+          message: { role: 'user', content: 'run nightly review' },
+        },
+        {
+          type: 'assistant',
+          timestamp: '2026-08-07T00:01:00.000Z',
+          uuid: `${routineId}-a1`,
+          message: {
+            id: `${routineId}-m1`,
+            model: 'claude-sonnet-4-5',
+            content: [{ type: 'text', text: 'done' }],
+            usage: { input_tokens: 10, output_tokens: 5 },
+          },
+        },
+      ].map((entry) => JSON.stringify(entry)).join('\n') + '\n',
+      'utf-8',
+    );
+
+    // Drive discovery through the public command so the archive becomes real
+    // indexed routine metadata before the active renderer joins against it.
+    const indexed = run(['sessions', '--routine', routineName, '--all', '--local', '--json']);
+    expect(indexed.status, indexed.stderr).toBe(0);
+
+    const registry = path.join(home, '.agents', '.cache', 'terminals', 'live-terminals.json');
+    fs.mkdirSync(path.dirname(registry), { recursive: true });
+    fs.writeFileSync(
+      registry,
+      JSON.stringify({
+        w: {
+          at: new Date().toISOString(),
+          entries: [routineId, manualId].map((sessionId) => ({
+            sessionId,
+            pid: process.pid,
+            kind: 'claude',
+            cwd: project,
+            startedAtMs: Date.now(),
+          })),
+        },
+      }),
+    );
+
+    const all = JSON.parse(run(['sessions', '--active', '--local', '--json']).stdout) as {
+      sessionId?: string;
+    }[];
+    expect(all.filter((row) => row.sessionId === routineId || row.sessionId === manualId)).toHaveLength(2);
+
+    const routines = JSON.parse(run(['sessions', '--active', '--routine', '--local', '--json']).stdout) as {
+      sessionId?: string;
+      routineName?: string;
+    }[];
+    expect(routines.map((row) => row.sessionId)).toEqual([routineId]);
+    expect(routines[0].routineName).toBe(routineName);
+
+    const named = JSON.parse(run([
+      'sessions', '--active', '--routine', 'nightly', '--local', '--json',
+    ]).stdout) as { sessionId?: string }[];
+    expect(named.map((row) => row.sessionId)).toEqual([routineId]);
+
     fs.rmSync(registry, { force: true });
   });
 
