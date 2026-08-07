@@ -182,7 +182,6 @@ One rule shapes the menu: **attention floats up, context groups down.**
  ├────────────────────────────────────────────────┤
  │ System    all set · auto-nudge off          ›  │   setup + watchdog collapsed
  ├────────────────────────────────────────────────┤
- │ Density: Auto                                 │   Auto → Rich → Compact
  │ Stop scheduler · Settings · Quit          ⌘Q  │
  └────────────────────────────────────────────────┘
 ```
@@ -230,15 +229,11 @@ One rule shapes the menu: **attention floats up, context groups down.**
   When routines carry a `projectGroup` field (from `agents routines list --json`),
   both the inline rows and the "All routines…" submenu are grouped by that label.
   Routines with no `projectGroup` (cross-project or unassigned) appear last,
-  ungrouped. Compact mode remains one summary row regardless of grouping.
+  ungrouped.
 - **RECENT TICKETS / RECENT** — tickets filed via quick dispatch and recent
   sessions, unchanged dedicated sections.
 - **System** — setup staleness + the auto-nudge watchdog collapsed into one row;
   the submenu keeps the doctor items and the auto-nudge toggle.
-- **Density** — cycles Auto → Rich → Compact (persisted as `menubarDensity` in
-  UserDefaults; `MENUBAR_DENSITY` env overrides for probes). Compact folds rows
-  to one-liners and tucks Routines / Recent behind submenus. Auto is rich while
-  something needs you, compact on a calm machine.
 
 The icon badges **red `!`** when anything needs you, **red `⏻`** when the
 scheduler has been unreachable for ~30s (see

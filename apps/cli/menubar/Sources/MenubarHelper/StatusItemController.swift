@@ -131,20 +131,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var snapshotFetchedAt: Date?
     private static let snapshotRefreshInterval: TimeInterval = 3 * 60
 
-    // Density: rich rows carry the session title / question / routine schedule
-    // inline; compact folds them to one-liners. `auto` (the default) is rich
-    // while something needs the user and compact on a calm machine.
-    private enum Density: String, CaseIterable {
-        case auto, rich, compact
-        var label: String {
-            switch self {
-            case .auto: return "Auto"
-            case .rich: return "Rich"
-            case .compact: return "Compact"
-            }
-        }
-    }
-
     // ACTIVE project accordion — projects collapsed by default. In-memory only
     // (resets on helper restart). Toggling rebuilds from the warm active-session
     // cache with NO extra CLI calls. Session *detail* lives in a side submenu (›),
@@ -153,24 +139,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var projectSessionItems: [String: [NSMenuItem]] = [:]
     /// Same form as CLI `machineId()` so engine-tagged sessions compare as local.
     private lazy var thisMachine: String = ActiveDisplay.thisMachineId()
-
-    private var densitySetting: Density {
-        get {
-            // Env override so dump mode can probe a fixed density.
-            if let env = ProcessInfo.processInfo.environment["MENUBAR_DENSITY"],
-               let d = Density(rawValue: env) { return d }
-            return Density(rawValue: UserDefaults.standard.string(forKey: "menubarDensity") ?? "") ?? .auto
-        }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "menubarDensity") }
-    }
-
-    private func isRich(attention: Int) -> Bool {
-        switch densitySetting {
-        case .rich: return true
-        case .compact: return false
-        case .auto: return attention > 0
-        }
-    }
 
     func install() {
         if let button = statusItem.button {
@@ -424,22 +392,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // live-terminals view (`sessions` param) covers the cold start.
         let sessions = merged(sessions)
 
-        // Auto density keys off the FULL needs-you set — blocked sessions plus
-        // failing/overdue routines and a stopped scheduler — so the menu is rich
-        // whenever the triage strip has anything to say, not only when a session
-        // is blocked.
-        let attention = sessions.filter { $0.status == .inputRequired }.count
-        let routinesFailing = routines.contains { routineNeedsAttention($0) }
-        let schedulerStopped = daemonPid == nil && !routines.isEmpty
-        let needsYou = attention + loaded.count + (routinesFailing ? 1 : 0) + (schedulerStopped ? 1 : 0)
-        let rich = isRich(attention: needsYou)
-
         addHeader(menu, sessions: sessions, plusNeeds: loaded.count)
         menu.addItem(.separator())
 
         // What needs me now — rendered only when there's something actionable.
         if addNeedsAttention(menu, sessions: sessions, routines: routines,
-                             daemonPid: daemonPid, loaded: loaded, rich: rich) {
+                             daemonPid: daemonPid, loaded: loaded) {
             menu.addItem(.separator())
         }
 
@@ -455,11 +413,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // not here. Skipped entirely on a calm, idle machine.
         let live = sessions.filter { $0.status != .inputRequired }
         if !live.isEmpty || !browserTasks.isEmpty {
-            addActive(menu, live: live, browserTasks: browserTasks, rich: rich)
+            addActive(menu, live: live, browserTasks: browserTasks)
             menu.addItem(.separator())
         }
 
-        addRoutines(menu, routines: routines, rich: rich)
+        addRoutines(menu, routines: routines)
         menu.addItem(.separator())
 
         // Tickets filed via the quick-issue bar (Cmd-Shift-O), clickable → open.
@@ -467,7 +425,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
-        addRecent(menu, recentSessions: recentSessions, rich: rich)
+        addRecent(menu, recentSessions: recentSessions)
         menu.addItem(.separator())
 
         addSystem(menu, doctor: doctor)
@@ -531,7 +489,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // follow.
     private func addNeedsAttention(_ menu: NSMenu, sessions: [Session],
                                    routines: [Routine], daemonPid: Int?,
-                                   loaded: [LoadedDevice], rich: Bool) -> Bool {
+                                   loaded: [LoadedDevice]) -> Bool {
         var rows: [(String, NSColor, String, NSMenu?)] = []   // glyph, color, text, submenu
 
         let blocked = sessions.filter { $0.status == .inputRequired }
@@ -551,7 +509,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 // Inline: skip the generic filler when the hook wrote no message.
                 var text = "\(agentLabel) · \(repo)"
                 if !first.question.isEmpty {
-                    text += " — \(trim(first.question, rich ? 48 : 34))"
+                    text += " — \(trim(first.question, 48))"
                 }
                 if let since = first.attentionSinceMs { text += "  ·  \(elapsedShort(since))" }
                 rows.append(("⚠", wait, text, blockedSubmenu(sessionId: first.sessionId, cwd: first.cwd)))
@@ -691,7 +649,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // Project expand is an accordion (▶/▼). Session detail is a native side
     // submenu so linkable actions and multi-line context don't wall the main menu.
     // Expand rebuilds from the warm cache only — no CLI, no re-index.
-    private func addActive(_ menu: NSMenu, live: [Session], browserTasks: [BrowserTask], rich: Bool) {
+    private func addActive(_ menu: NSMenu, live: [Session], browserTasks: [BrowserTask]) {
         let totalRun = live.filter { $0.status == .running }.count
         let totalIdle = live.filter { $0.status == .idle }.count
         let projectCount = Set(live.map { $0.repo.isEmpty ? "other" : $0.repo }).count
@@ -731,7 +689,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             headerView.onToggle = { [weak self, weak menu, weak header] shouldExpand in
                 guard let self, let menu, let header else { return }
                 self.setProject(repo, expanded: shouldExpand, sessions: group,
-                                rich: rich, in: menu, after: header)
+                                in: menu, after: header)
             }
             header.view = headerView
             menu.addItem(header)
@@ -739,7 +697,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             guard open else { continue }
 
             let sessions = orderedProjectSessions(group)
-            let rows = sessions.map { makeSessionRow(session: $0, rich: rich) }
+            let rows = sessions.map { makeSessionRow(session: $0) }
             projectSessionItems[repo] = rows
             for row in rows { menu.addItem(row) }
         }
@@ -757,7 +715,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     /// Agent summary under an expanded project. Detail lives in the › submenu
     /// (linkable ticket/PR/cwd, locality, duration) — not a second accordion.
-    private func makeSessionRow(session s: Session, rich: Bool) -> NSMenuItem {
+    private func makeSessionRow(session s: Session) -> NSMenuItem {
         let glyph = ActiveDisplay.statusGlyph(s.status)
         let color = s.status == .running ? run : (s.status == .inputRequired ? wait : idleC)
         let agent = LocalState.agentLabel(s.agent)
@@ -778,7 +736,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if let surface = s.surface, !surface.isEmpty { line += " · \(surface)" }
         if !age.isEmpty { line += " · \(age)" }
         if !chips.isEmpty { line += "  " + chips.joined(separator: " ") }
-        if rich && !work.isEmpty { line += " — \(trim(work, 32))" }
+        if !work.isEmpty { line += " — \(trim(work, 32))" }
 
         let row = statusRow("", color, line)
         row.title = "    \(line)"
@@ -791,11 +749,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     /// Mutate only the rows under the clicked project. The enclosing status menu
     /// remains in the same tracking session and no cache refresh or CLI call runs.
     private func setProject(_ repo: String, expanded: Bool, sessions: [Session],
-                            rich: Bool, in menu: NSMenu, after header: NSMenuItem) {
+                            in menu: NSMenu, after header: NSMenuItem) {
         if expanded {
             expandedProjects.insert(repo)
             let ordered = orderedProjectSessions(sessions)
-            let rows = ordered.map { makeSessionRow(session: $0, rich: rich) }
+            let rows = ordered.map { makeSessionRow(session: $0) }
             projectSessionItems[repo] = rows
             let headerIndex = menu.index(of: header)
             guard headerIndex >= 0 else { return }
@@ -986,27 +944,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
-    private func addRecent(_ menu: NSMenu, recentSessions: [RecentSession], rich: Bool) {
+    private func addRecent(_ menu: NSMenu, recentSessions: [RecentSession]) {
         let visible = Array(recentSessions.filter {
             let id = LocalState.normalizeAgent($0.agent)
             return LocalState.desiredAgents.contains { $0.id == id }
         }.prefix(3))
-        // Compact: the long tail folds behind one row instead of three.
-        if !rich {
-            let item = NSMenuItem(title: pad("Recent") + (visible.isEmpty ? "none" : "\(visible.count) sessions"),
-                                  action: nil, keyEquivalent: "")
-            if !visible.isEmpty {
-                let sub = NSMenu()
-                for session in visible {
-                    let it = NSMenuItem(title: recentSessionTitle(session), action: nil, keyEquivalent: "")
-                    it.submenu = recentSessionSubmenu(session)
-                    sub.addItem(it)
-                }
-                item.submenu = sub
-            }
-            menu.addItem(item)
-            return
-        }
         addSectionTitle(menu, "RECENT", color: .secondaryLabelColor)
         if visible.isEmpty {
             menu.addItem(disabled(recentSessionsLoaded ? "  No recent sessions" : "  Recent sessions checking…"))
@@ -1040,12 +982,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return true
     }
 
-    // Routines stay a dedicated, glanceable section. Compact: one summary row
-    // (submenu = all). Rich: a section with the next few upcoming + any failing
-    // routine inline, then "All routines…" for the rest.
+    // Routines stay a dedicated, glanceable section: the next few upcoming + any
+    // failing routine inline, then "All routines…" for the rest.
     // When any routine carries a `projectGroup`, both the inline rows and the
     // "All routines…" submenu are grouped by that label (ungrouped routines last).
-    private func addRoutines(_ menu: NSMenu, routines: [Routine], rich: Bool) {
+    private func addRoutines(_ menu: NSMenu, routines: [Routine]) {
         let summary: String
         if routines.isEmpty {
             summary = routinesLoaded ? "none" : "checking…"
@@ -1057,9 +998,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             summary = parts.joined(separator: " · ")
         }
 
-        if !rich || routines.isEmpty {
+        if routines.isEmpty {
             let item = NSMenuItem(title: "\(pad("Routines"))\(summary)", action: nil, keyEquivalent: "")
-            if !routines.isEmpty { item.submenu = allRoutinesSubmenu(routines) }
             menu.addItem(item)
             return
         }
@@ -1136,11 +1076,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func addFooter(_ menu: NSMenu, daemonPid: Int?) {
-        let density = NSMenuItem(title: "Density: \(densitySetting.label)",
-                                 action: #selector(onCycleDensity), keyEquivalent: "")
-        density.target = self
-        menu.addItem(density)
-
         if daemonPid != nil {
             let stop = NSMenuItem(title: "Stop scheduler", action: #selector(onStopScheduler), keyEquivalent: "")
             stop.target = self
@@ -1365,12 +1300,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func onToggleWatchdog() {
         watchdogEnabled.toggle()
         AgentsCLI.watchdogSetEnabled(watchdogEnabled)
-    }
-    // Cycle auto → rich → compact; the next menu open renders at the new density.
-    @objc private func onCycleDensity() {
-        let all = Density.allCases
-        let idx = all.firstIndex(of: densitySetting) ?? 0
-        densitySetting = all[(idx + 1) % all.count]
     }
     @objc private func onRoutineRun(_ s: NSMenuItem) { withName(s, AgentsCLI.routineRun) }
     @objc private func onRoutinePause(_ s: NSMenuItem) { withName(s, AgentsCLI.routinePause) }
