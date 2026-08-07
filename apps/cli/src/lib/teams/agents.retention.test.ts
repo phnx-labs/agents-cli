@@ -159,7 +159,7 @@ describe('retention never reaps a non-terminal teammate (RUSH-2356)', () => {
  * one — so a throw out of `spawn()` does not imply "nothing was written". Were
  * teardown unconditional, that persisted, pending `--after` teammate would lose
  * its worktree and branch: real work destroyed by the cleanup meant to protect
- * the retry. `hasPersistedWorktree` is the check that tells the two apart.
+ * the retry. `isWorktreeClaimed` is the check that tells the two apart.
  */
 describe('isWorktreeClaimed distinguishes an orphan worktree from a live teammate (RUSH-2356)', () => {
   const dirs: string[] = [];
