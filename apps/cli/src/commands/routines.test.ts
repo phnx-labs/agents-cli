@@ -5,8 +5,8 @@
  * against an isolated mkdtemp HOME — no live ~/.agents state, no mocks, no
  * imported writeJob/readJob. Modeled on `routines-webhook.test.ts`.
  */
-import { describe, it, expect } from 'vitest';
-import { spawnSync, spawn } from 'child_process';
+import { describe, it, expect, afterAll } from 'vitest';
+import { spawnSync, spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -142,6 +142,17 @@ function readDaemonPid(home: string): number | null {
   return isNaN(pid) ? null : pid;
 }
 
+/**
+ * Every daemon pid spawned via `startIsolatedDaemon` in this file, live for as
+ * long as `stopIsolatedDaemon` has not yet reaped it. Backstops the per-test
+ * try/finally: this file's `afterAll` (below) asserts the set is empty and
+ * force-kills + fails the suite on anything left in it — a leaked real daemon
+ * process is exactly the RUSH-2367 bug (three left running for up to 3.5 days
+ * on a fleet box, invisible to `agents daemon` because each served its own
+ * fixture HOME/registry).
+ */
+const trackedDaemonPids = new Set<number>();
+
 /** Start the real scheduler foreground process against an isolated HOME. */
 function startIsolatedDaemon(home: string): { child: ReturnType<typeof spawn>; pidPromise: Promise<number | null> } {
   const child = spawn('node', ['--import', 'tsx', 'src/index.ts', '__daemon-run'], {
@@ -155,6 +166,7 @@ function startIsolatedDaemon(home: string): { child: ReturnType<typeof spawn>; p
     detached: true,
     stdio: 'ignore',
   });
+  if (child.pid) trackedDaemonPids.add(child.pid);
 
   const pidPromise = new Promise<number | null>((resolve) => {
     const deadline = Date.now() + 15_000;
@@ -186,36 +198,114 @@ function isProcessAlive(pid: number): boolean {
 
 /** Terminate a daemon process started by startIsolatedDaemon and wait for it to exit. */
 async function stopIsolatedDaemon(child: ReturnType<typeof spawn>): Promise<void> {
-  if (!child.pid) return;
+  const pid = child.pid;
+  try {
+    if (!pid) return;
 
-  const closePromise = new Promise<void>((resolve) => {
-    if (child.exitCode !== null || child.signalCode !== null) {
-      resolve();
-      return;
-    }
-    child.on('close', () => resolve());
-  });
-
-  if (child.exitCode !== null || child.signalCode !== null) return;
-
-  const signalProcessGroup = process.platform !== 'win32';
-  const signal = (sig: NodeJS.Signals) => {
-    try {
-      if (signalProcessGroup) {
-        process.kill(-child.pid!, sig);
-      } else {
-        child.kill(sig);
+    const closePromise = new Promise<void>((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        resolve();
+        return;
       }
-    } catch {
-      // already gone
-    }
+      child.on('close', () => resolve());
+    });
+
+    if (child.exitCode !== null || child.signalCode !== null) return;
+
+    const signalProcessGroup = process.platform !== 'win32';
+    const signal = (sig: NodeJS.Signals) => {
+      try {
+        if (signalProcessGroup) {
+          process.kill(-pid, sig);
+        } else {
+          child.kill(sig);
+        }
+      } catch {
+        // already gone
+      }
+    };
+
+    signal('SIGTERM');
+    const timer = setTimeout(() => signal('SIGKILL'), 3_000);
+    await closePromise;
+    clearTimeout(timer);
+  } finally {
+    if (pid) trackedDaemonPids.delete(pid);
+  }
+}
+
+/**
+ * Suite-level leak detector (RUSH-2367). Every per-test try/finally above
+ * already reaps its own daemon on success, failure, or a thrown assertion —
+ * but nothing in JS runs if the whole vitest worker is killed externally
+ * before reaching `finally`, which is what actually produced three real
+ * orphaned daemons found alive on a fleet box for up to 3.5 days: their
+ * fixture HOME dirs still existed (the `finally`'s `fs.rmSync` never ran
+ * either), so no amount of in-test cleanup logic would have caught it. This
+ * is the second line of defense, not a substitute for the self-terminate
+ * guard in the daemon itself (`runDaemon`'s state-dir check).
+ *
+ * Two checks, after every test in this file has run:
+ *  1. Always: nothing THIS run spawned via `startIsolatedDaemon` may still be
+ *     alive — `trackedDaemonPids` is only ever non-empty here if a bug (not
+ *     an external kill) let one slip past its own test's `finally`.
+ *  2. CI only (no concurrent developer session could produce a false
+ *     positive there): sweep for any OTHER live `__daemon-run` process whose
+ *     HOME sits under this file's own fixture prefix — a leak from a
+ *     previous interrupted run of this same suite. POSIX-only (`/proc`);
+ *     best-effort and skipped where `/proc` is unavailable (macOS CI legs).
+ *
+ * Either check force-kills what it finds and fails the suite — a silent
+ * "still running, we'll get it next time" is exactly how the original three
+ * accumulated.
+ */
+afterAll(() => {
+  const leaks: string[] = [];
+  const killDaemon = (pid: number): void => {
+    try { process.kill(-pid, 'SIGKILL'); } catch { /* already gone, or never its own group leader */ }
+    try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
   };
 
-  signal('SIGTERM');
-  const timer = setTimeout(() => signal('SIGKILL'), 3_000);
-  await closePromise;
-  clearTimeout(timer);
-}
+  for (const pid of trackedDaemonPids) {
+    if (isProcessAlive(pid)) {
+      leaks.push(`pid ${pid} (spawned by this test run, never reaped by its own test)`);
+      killDaemon(pid);
+    }
+  }
+  trackedDaemonPids.clear();
+
+  if (process.env.CI && process.platform !== 'win32') {
+    const prefix = path.join(os.tmpdir(), 'agents-routines-test-');
+    let psOut = '';
+    try {
+      psOut = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch { /* ps unavailable — nothing to sweep */ }
+    for (const line of psOut.split('\n')) {
+      const m = line.trim().match(/^(\d+)\s+(.*)$/);
+      if (!m) continue;
+      const tokens = m[2].trim().split(/\s+/);
+      if (tokens[tokens.length - 1] !== '__daemon-run') continue;
+      const pid = parseInt(m[1], 10);
+      if (isNaN(pid)) continue;
+      let home: string | null = null;
+      try {
+        const environ = fs.readFileSync(`/proc/${pid}/environ`, 'utf-8');
+        const homeVar = environ.split('\0').find((v) => v.startsWith('HOME='));
+        home = homeVar ? homeVar.slice(5) : null;
+      } catch { continue; } // /proc unreadable (macOS, permissions) — best-effort only
+      if (!home || !home.startsWith(prefix)) continue;
+      leaks.push(`pid ${pid} HOME=${home} (leaked from a previous interrupted run of this suite)`);
+      killDaemon(pid);
+    }
+  }
+
+  if (leaks.length > 0) {
+    throw new Error(
+      `RUSH-2367 leak detector: ${leaks.length} __daemon-run process(es) survived this test file, ` +
+      `now force-killed: ${leaks.join('; ')}`,
+    );
+  }
+});
 
 const baseJob = {
   name: 'test-job',
