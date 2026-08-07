@@ -10834,8 +10834,8 @@
           "description": "Show sessions whose live state cannot be determined (implies --active)"
         },
         {
-          "flags": "--favorites",
-          "description": "Show only favorited sessions — favorite them with `*` in the browser or `agents sessions favorite <id>`"
+          "flags": "--bookmarks",
+          "description": "Show only bookmarked sessions — bookmark them with `*` in the browser or `agents sessions bookmark <id>`"
         },
         {
           "flags": "--tree",
@@ -10931,6 +10931,34 @@
           ]
         },
         {
+          "name": "bookmark",
+          "path": "sessions bookmark",
+          "aliases": [],
+          "description": "Bookmark sessions so they are easy to find again — list them with --bookmarks, or `b` in the browser.",
+          "args": [
+            {
+              "name": "ids",
+              "required": false,
+              "variadic": true
+            }
+          ],
+          "options": [
+            {
+              "flags": "--remove",
+              "description": "Remove the given sessions from bookmarks instead of adding them"
+            },
+            {
+              "flags": "--list",
+              "description": "List the bookmarked sessions (the default when no ids are given)"
+            },
+            {
+              "flags": "--json",
+              "description": "Output JSON"
+            }
+          ],
+          "subcommands": []
+        },
+        {
           "name": "detach",
           "path": "sessions detach",
           "aliases": [],
@@ -10974,34 +11002,6 @@
             {
               "flags": "--encrypt",
               "description": "Seal each transcript body with AES-256-GCM before writing"
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "favorite",
-          "path": "sessions favorite",
-          "aliases": [],
-          "description": "Favorite sessions so they are easy to find again — list them with --favorites, or `f` in the browser.",
-          "args": [
-            {
-              "name": "ids",
-              "required": false,
-              "variadic": true
-            }
-          ],
-          "options": [
-            {
-              "flags": "--remove",
-              "description": "Remove the given sessions from favorites instead of adding them"
-            },
-            {
-              "flags": "--list",
-              "description": "List the favorited sessions (the default when no ids are given)"
-            },
-            {
-              "flags": "--json",
-              "description": "Output JSON"
             }
           ],
           "subcommands": []
@@ -11108,8 +11108,8 @@
               "description": "Maximum candidates to load"
             },
             {
-              "flags": "--favorites",
-              "description": "Only favorited sessions"
+              "flags": "--bookmarks",
+              "description": "Only bookmarked sessions"
             },
             {
               "flags": "--unmanaged",

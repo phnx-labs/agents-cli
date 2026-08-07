@@ -36,7 +36,7 @@ const row = (over: Partial<SessionMeta> = {}): SessionMeta =>
 const base: BrowserFilter = {
   running: false,
   teams: false,
-  favorites: false,
+  bookmarks: false,
   agent: undefined,
   device: undefined,
   projectScope: 'repo',
@@ -54,8 +54,8 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
     expect(browserFilterToArgv(base)).toEqual(['sessions']);
   });
 
-  it('favorites-only maps to --favorites, so `y` round-trips a starred view', () => {
-    expect(browserFilterToArgv({ ...base, favorites: true })).toEqual(['sessions', '--favorites']);
+  it('bookmarks-only maps to --bookmarks, so `y` round-trips a bookmarked view', () => {
+    expect(browserFilterToArgv({ ...base, bookmarks: true })).toEqual(['sessions', '--bookmarks']);
   });
 
   it('running-only maps to --active', () => {
@@ -77,7 +77,7 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
       window: '7d',
       statuses: [],
       routine: false,
-      favorites: false,
+      bookmarks: false,
       limit: 500,
       unmanaged: false,
       sort: 'timestamp',
@@ -577,19 +577,19 @@ describe('shouldShowHostColumn — live-only, gated on the filter not the cache'
  * just opens without that filter. `team` was lost exactly this way. So each new
  * field earns an assertion that it survives the copy, in both directions.
  */
-describe('favorites survives the seed → filter copy', () => {
-  it('carries a seeded favorites flag into the live filter', () => {
-    expect(buildInitialFilter({ favorites: true }).favorites).toBe(true);
+describe('bookmarks survives the seed → filter copy', () => {
+  it('carries a seeded bookmarks flag into the live filter', () => {
+    expect(buildInitialFilter({ bookmarks: true }).bookmarks).toBe(true);
   });
 
   it('defaults to off, never undefined', () => {
-    expect(buildInitialFilter({}).favorites).toBe(false);
+    expect(buildInitialFilter({}).bookmarks).toBe(false);
   });
 
   it('is reachable from both entry points\u0027 seeds', () => {
-    expect(bareBrowserSeed({ favorites: true }).favorites).toBe(true);
-    expect(activeBrowserSeed({ favorites: true }).favorites).toBe(true);
-    expect(bareBrowserSeed({}).favorites).toBe(false);
-    expect(activeBrowserSeed({}).favorites).toBe(false);
+    expect(bareBrowserSeed({ bookmarks: true }).bookmarks).toBe(true);
+    expect(activeBrowserSeed({ bookmarks: true }).bookmarks).toBe(true);
+    expect(bareBrowserSeed({}).bookmarks).toBe(false);
+    expect(activeBrowserSeed({}).bookmarks).toBe(false);
   });
 });
