@@ -112,6 +112,17 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     description: 'Whether the routines scheduler (daemon) may fire on this device.',
   },
   {
+    name: 'daemon.enabled',
+    yamlKey: 'daemonEnabled',
+    scope: 'device',
+    type: 'bool',
+    description:
+      'Whether the daemon may run on this device at all (secrets broker, browser IPC, watchdog, and the ' +
+      'routines scheduler). Disabling is the top-level kill switch: nothing auto-starts the daemon while it ' +
+      'is set, including `routines add`/`routines start`/`routines catchup`/webhook triggers. ' +
+      '`agents daemon start` still starts it explicitly.',
+  },
+  {
     name: 'watchdog.enabled',
     yamlKey: 'watchdogEnabled',
     scope: 'device',
@@ -351,6 +362,26 @@ export function assertSchedulerEnabled(): void {
   throw new Error(
     `The routines scheduler is disabled on this device (scheduler.enabled=false in ~/.agents/devices/${machineId()}/agents.yaml). ` +
       `Re-enable with: agents devices configure ${machineId()} --scheduler on`,
+  );
+}
+
+/** True unless this machine's device doc disables the daemon outright (top-level kill switch). */
+export function isDaemonEnabled(): boolean {
+  return getConfigValue('daemon.enabled').value !== false;
+}
+
+/**
+ * Throw when the daemon is disabled on this machine, naming the setting and
+ * the fix. Every AUTO-start surface (routines add/start/catchup/webhook,
+ * `ensureDaemonStarted`) refuses with this before calling `startDaemon()`.
+ * `agents daemon start` is the deliberate override and does NOT call this —
+ * disable only blocks auto-start, mirroring `systemctl disable`.
+ */
+export function assertDaemonEnabled(): void {
+  if (isDaemonEnabled()) return;
+  throw new Error(
+    `The daemon is disabled on this device (daemon.enabled=false in ~/.agents/devices/${machineId()}/agents.yaml). ` +
+      `Re-enable with: agents daemon enable`,
   );
 }
 

@@ -144,6 +144,7 @@ import {
   loadExport,
   loadPackages,
   loadRoutines,
+  loadDaemon,
   loadMonitors,
   loadProjects,
   loadRun,
@@ -422,6 +423,7 @@ Run and dispatch:
   defaults                        Configure run defaults by agent/version selector
   teams                           Coordinate multiple agents on shared work
   routines                        Run agents on a cron schedule (scheduler auto-starts)
+  daemon                          Runtime status/control for the always-on daemon (secrets broker, browser IPC, scheduler)
   webhook                         Receive signed GitHub/Linear webhooks for trigger routines
   funnel                          Expose a webhook receiver through Tailscale Funnel
   sessions                        Browse, search, and replay past runs (live-search in TTY; grouped by workspace)
@@ -1094,6 +1096,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadExport);
   await reg(loadPackages);
   await reg(loadRoutines);
+  await reg(loadDaemon);
   await reg(loadMonitors);
   await reg(loadProjects);
   await reg(loadRun);

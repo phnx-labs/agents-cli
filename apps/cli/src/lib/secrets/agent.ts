@@ -236,6 +236,11 @@ function socketPath(): string {
   return path.join(agentDir(), 'agent.sock');
 }
 
+/** Public accessor for the broker's socket path — `agents daemon status`/`services` reads it for display. */
+export function secretsBrokerSocketPath(): string {
+  return socketPath();
+}
+
 function pidPath(): string {
   return path.join(agentDir(), 'agent.pid');
 }

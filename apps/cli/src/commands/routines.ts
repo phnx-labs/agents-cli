@@ -23,7 +23,7 @@ import {
   readDaemonLog,
   getDaemonStatus,
 } from '../lib/daemon.js';
-import { assertSchedulerEnabled } from '../lib/device-config.js';
+import { assertSchedulerEnabled, assertDaemonEnabled, isDaemonEnabled } from '../lib/device-config.js';
 import { resolveAgentName, isAgentHardDeprecated, hardDeprecationError, ROUTINE_AGENT_IDS } from '../lib/agents.js';
 import { humanizeCron, humanizeNextRun, formatRepoLink, REPO_DISPLAY_MAX } from '../lib/routines-format.js';
 import {
@@ -429,6 +429,7 @@ function parseRoutineTrigger(options: Record<string, unknown>): JobTrigger | und
 function ensureSchedulerRunning(opts: { quiet?: boolean; stderr?: boolean } = {}): void {
   const log = opts.stderr ? console.error : console.log;
   try {
+    assertDaemonEnabled();
     assertSchedulerEnabled();
   } catch (err) {
     // Loud stated skip, on stderr so --json stdout stays clean.
@@ -1421,11 +1422,17 @@ export function registerRoutinesCommands(program: Command): void {
       }
 
       // Need the daemon alive so spawned jobs are monitored and meta.json is
-      // finalized. Start it if it isn't already running.
+      // finalized. Start it if it isn't already running — unless daemon.enabled
+      // is off, in which case this auto-start is skipped with a stated reason.
       if (!options.dryRun && !isDaemonRunning()) {
-        const started = startDaemon();
-        if (started.pid) {
-          console.log(chalk.gray(`\nStarted scheduler (PID: ${started.pid}) so catchup runs are monitored.`));
+        try {
+          assertDaemonEnabled();
+          const started = startDaemon();
+          if (started.pid) {
+            console.log(chalk.gray(`\nStarted scheduler (PID: ${started.pid}) so catchup runs are monitored.`));
+          }
+        } catch (err) {
+          console.log(chalk.yellow(`\n${(err as Error).message}`));
         }
       }
 
@@ -1511,8 +1518,10 @@ export function registerRoutinesCommands(program: Command): void {
       }
 
       // Fired jobs run detached via executeJobDetached (the same path cron
-      // uses). Keep the daemon alive so each run's meta.json is finalized.
-      if (!isDaemonRunning()) {
+      // uses). Keep the daemon alive so each run's meta.json is finalized —
+      // unless daemon.enabled is off, in which case this auto-start is
+      // skipped with a stated reason.
+      if (!isDaemonRunning() && isDaemonEnabled()) {
         const started = startDaemon();
         if (started.pid) {
           console.log(chalk.gray(`Started scheduler (PID: ${started.pid}) so webhook runs are monitored.`));
@@ -1809,8 +1818,11 @@ export function registerRoutinesCommands(program: Command): void {
     .description('Start the background scheduler. Usually unnecessary — it auto-starts when you add your first routine.')
     .action(() => {
       try {
-        // A manual start on a scheduler-disabled device refuses with the same
-        // message the auto-start surfaces give.
+        // A manual start on a disabled device refuses with the same message the
+        // auto-start surfaces give — `agents routines start` is a convenience
+        // wrapper around the daemon, not the deliberate override. Use
+        // `agents daemon start` to bypass daemon.enabled explicitly.
+        assertDaemonEnabled();
         assertSchedulerEnabled();
       } catch (err) {
         console.error(chalk.red((err as Error).message));

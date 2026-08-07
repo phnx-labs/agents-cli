@@ -201,6 +201,7 @@ describe('listConfig', () => {
       'agents.max-concurrent',
       'browser.profile',
       'browser.remote-control',
+      'daemon.enabled',
       'interactive.host',
       'notes',
       'scheduler.enabled',
