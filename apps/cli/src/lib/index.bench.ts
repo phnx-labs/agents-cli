@@ -73,7 +73,7 @@
  * src/index.bench.ts silently sat outside that glob and shipped a stale
  * `@ts-expect-error` (TS2578, unused directive) that no gate caught.
  */
-import { describe, bench, beforeAll, afterAll } from 'vitest';
+import { describe, bench, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -624,10 +624,12 @@ describe('the secrets-broker intercept (index.ts:36, 71-84) — what the leaf mo
  * index.ts:71 sit BELOW the import block, which ESM hoists and evaluates first),
  * so `--version`, `--help`, `__secrets-ping` and every real command pay it.
  *
- * commander 15.0.0 is pure ESM and index.js re-exports six lib modules —
- * command.js (87647 B), help.js (20812 B), option.js (10237 B),
- * suggestSimilar.js (2735 B), argument.js (3134 B), error.js (1089 B) — so this
- * row prices ~126 KB of third-party JS parsed + evaluated per invocation.
+ * commander 15.0.0 is pure ESM. Its index.js imports five lib modules directly
+ * (index.js:1-5: argument.js, command.js, error.js, help.js, option.js) and
+ * reaches a sixth, suggestSimilar.js, transitively through command.js:12. Byte
+ * sizes: command.js 87647, help.js 20812, option.js 10237, argument.js 3134,
+ * suggestSimilar.js 2735, error.js 1089 — so this row prices ~126 KB of
+ * third-party JS parsed + evaluated per invocation.
  */
 describe('commander module load (index.ts:10) — the third-party eager edge no first-party spec list covers', () => {
   bench('FLOOR: bare `node --input-type=module -e ""` — the spawn cost the row below also pays; subtract it', () => {
@@ -678,26 +680,34 @@ describe('commander module load (index.ts:10) — the third-party eager edge no 
  *      src/lib/ and index.ts in src/. Same modules.
  *
  * WHAT IS AND IS NOT INSIDE A SAMPLE. The postAction spool branch
- * (index.ts:363-370) is `void import(...).then(...)` — fire-and-forget, never
+ * (index.ts:351-367) is `void import(...).then(...)` — fire-and-forget, never
  * awaited by the hook. Its module import and `recordSample` write therefore
- * settle on a later microtask/IO turn, OUTSIDE the timed body; what the rows
- * below capture from it is the synchronous `stampProvenance()` (index.ts:359,
- * which IS awaited-in-line) plus the dynamic-import initiation. The same holds
- * for the `parts[0] === 'run'` usage-db branch (index.ts:350-357), which none of
- * the benched command paths reach anyway. Rows are labelled accordingly; this is
- * stated, not glossed, because a reader could otherwise take the composed number
- * as including a real perf-spool append.
+ * settle on a later turn, OUTSIDE the timed body; what the rows below capture
+ * from it is the synchronous `stampProvenance()` (index.ts:356, which runs
+ * in-line) plus the dynamic-import initiation. Be precise about what "outside"
+ * buys, though: `recordSample` ends in a synchronous `fs.appendFileSync`
+ * (perf/spool.ts:78, inside recordSample at perf/spool.ts:49), so on a bench that dispatches thousands of times per
+ * second that write lands BETWEEN samples on the same thread — it is excluded
+ * from the sample, not from the machine. It is present identically in the
+ * hooked and the one-append rows, so it cancels in the delta those rows are
+ * read for. The `parts[0] === 'run'` usage-db branch (index.ts:338-349) is
+ * never reached by the benched command paths. This is stated, not glossed,
+ * because a reader could otherwise take the composed number as including a
+ * real perf-spool append.
  *
  * NO MOCKING. The hook bodies call the REAL `redactArgs` / `emit` /
  * `stampProvenance` from events.ts / event-provenance.ts against a real temp
  * events sink (proper-lockfile lock + appendFileSync + rotate/prune checks), the
  * REAL commander dispatch (`_chainOrCallHooks`, command.js:1511-1531, invoked at
  * command.js:1614 and 1623), and real `parseAsync` runs over registered
- * commands. events.bench.ts:194-213 owns the isolated `emit`/`redactArgs`/
- * `stampProvenance` timings; what is measured here and NOWHERE else is the
- * commander-side wiring — hook registration, `_chainOrCallHooks`'s
- * ancestor-walk + filter + array build per dispatch, `auditCommandPath`'s own
- * walk, and the exempt-gate — plus the composed per-invocation delta.
+ * commands. events.bench.ts owns the ISOLATED function timings —
+ * `redactArgs` (events.bench.ts:177-179), `stampProvenance`
+ * (events.bench.ts:183-191), `emit` (events.bench.ts:195-205) and the
+ * hand-composed envelope (events.bench.ts:209-213). What is measured here and
+ * NOWHERE else is the commander-side wiring — hook registration,
+ * `_chainOrCallHooks`'s ancestor-walk + filter + array build per dispatch,
+ * `auditCommandPath`'s own walk, and the exempt gate — plus the composed
+ * per-invocation delta as commander actually dispatches it.
  */
 const BENCH_BRAND = 'agents';
 
@@ -820,16 +830,25 @@ function registerBenchCommands(program: Command): Command {
 }
 
 /**
- * COUNTERFACTUAL, not the shipped path: the same two hooks with the preAction
- * `emit('command.start', …)` (index.ts:316) removed, so one record is appended
- * per invocation instead of two. It prices the single change the measured
- * numbers point at — everything else about the wiring, the path walk, the
- * exempt gate, the WeakMap and the postAction record is byte-identical to
- * `attachAuditHooks`. Same role as the `lib/secrets/agent.js` row above: a row
- * that prices a decision the source has not taken.
+ * COUNTERFACTUAL, not the shipped path: the preAction `emit('command.start', …)`
+ * (index.ts:311-319) is FOLDED INTO the postAction record rather than deleted,
+ * so one record is appended per invocation instead of two and no audited field
+ * is lost. It prices the single change the measured numbers point at.
+ * Same role as the `lib/secrets/agent.js` row above: a row that prices a
+ * decision the source has not taken.
  *
- * `redactArgs(process.argv.slice(2, 22))` (index.ts:313) goes with it, since it
- * exists only to build that record's `args` field.
+ * Exactly two differences from `attachAuditHooks`, and no others — the wiring,
+ * the path walk, the exempt gate, the WeakMap stamp, the spool branch and the
+ * `run` branch are all carried over unchanged:
+ *
+ *   1. preAction keeps `auditStarts.set` (index.ts:310) and drops the `emit`
+ *      (index.ts:311-319).
+ *   2. postAction's `command.end` record (index.ts:333-337) gains the two
+ *      fields that record carried — `args: redactArgs(process.argv.slice(2, 22))`
+ *      (index.ts:317) and `cwd` (index.ts:318).
+ *
+ * So `redactArgs` is NOT dropped: it moves. That matters for reading the row —
+ * the saving this prices is one full lock/append cycle, not the redaction work.
  */
 function attachPostActionOnlyAuditHook(program: Command): Command {
   program.hook('preAction', (_thisCommand, actionCommand) => {
@@ -858,6 +877,18 @@ function attachPostActionOnlyAuditHook(program: Command): Command {
         cwd: process.cwd(),
         ...(durationMs !== undefined ? { durationMs } : {}),
       });
+      if (parts[0] === 'run') {
+        const agentName = actionCommand.args?.[0] ? String(actionCommand.args[0]).split('@')[0] : 'run';
+        void import('./analytics/usage-db.js').then(({ recordUsage }) => {
+          recordUsage({
+            kind: 'agent',
+            name: agentName || 'run',
+            event: 'invoke',
+            source: 'cli',
+            meta: durationMs !== undefined ? { durationMs } : undefined,
+          });
+        }).catch(() => { /* fail soft */ });
+      }
       if (durationMs !== undefined && parts[0] !== 'perf') {
         const { sessionId, agent } = stampProvenance();
         void import('./perf/spool.js').then(({ recordSample }) => {
@@ -887,19 +918,50 @@ const ONE_APPEND_PROGRAM = registerBenchCommands(attachPostActionOnlyAuditHook(b
 
 /**
  * Real temp events sink so the hooks' `emit()` takes the real proper-lockfile
- * lock and appends to a real file. Same seam events.bench.ts:135-137 and
+ * lock and appends to a real file. Same seam events.bench.ts:137 and
  * events.test.ts:42 use. The perf spool is redirected too: the postAction
- * branch at index.ts:363-370 writes through `getPerfDir()`, which reads
- * AGENTS_PERF_DIR at call time, so without this a bench run would append
- * samples into the user's real ~/.agents/.cache. Set at module scope so the
- * cold-spawn rows elsewhere in this file inherit the same redirect.
+ * branch at index.ts:351-367 writes through `getPerfDir()`, which reads
+ * AGENTS_PERF_DIR at call time (state.ts:654-656), so without this a bench run
+ * would append samples into the user's real ~/.agents/.cache. Set at module
+ * scope so the cold-spawn rows elsewhere in this file inherit the same
+ * redirect.
  */
 const AUDIT_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-audit-bench-'));
 const AUDIT_SINK = path.join(AUDIT_TMP, 'events.jsonl');
 process.env.AGENTS_PERF_DIR = path.join(AUDIT_TMP, 'perf');
 _resetForTest(AUDIT_SINK);
 
+/**
+ * The hook bodies read `process.argv.slice(2, 22)` verbatim (index.ts:317).
+ * Under vitest that is the worker's argv, whose `slice(2)` is EMPTY — so
+ * without this swap every hooked row would redact and serialize nothing, and
+ * the measured tax would be for a record with `args: []` rather than a real
+ * command line. The realistic shape below matches events.bench.ts:145-158 (a
+ * >200-char prompt hitting the sha256 marker branch at events.ts:557/582, a
+ * session id, a device, a path), so the redaction branches exercised here are
+ * the ones a real `agents` invocation takes.
+ *
+ * THIS MUST BE MODULE SCOPE, NOT A SUITE `beforeAll`. Verified against this
+ * repo's pinned vitest 4.1.9: in BENCH mode `runBenchmarkSuite` recurses into
+ * nested suites itself and never dispatches `callSuiteHook(..., 'beforeAll')`,
+ * so a `beforeAll` inside a `describe` silently never fires — an earlier
+ * revision of this file put the swap there and every hooked row measured the
+ * empty worker argv. Only FILE-level hooks run, which is why the `afterAll`
+ * restore below does work. argv[0]/argv[1] are preserved; nothing else in this
+ * file reads `process.argv`.
+ */
+const REAL_ARGV = process.argv;
+process.argv = [
+  process.argv[0], process.argv[1],
+  'sessions', 'list', '--json', '--limit', '50',
+  '--query', 'benchmark the commander root bootstrap and audit hooks in apps/cli/src/index.ts, read the call path end to end, commit a vitest bench beside the source, and propose optimizations from the measured numbers only',
+  '--session', 'ce1e00cb-61dc-4c62-b30e-f053ef6ce990',
+  '--device', 'yosemite-s1',
+  '--cwd', '/home/muqsit/src/github.com/muqsitnawaz/agents-cli',
+];
+
 afterAll(() => {
+  process.argv = REAL_ARGV;
   _resetForTest();
   try { fs.rmSync(AUDIT_TMP, { recursive: true, force: true }); } catch { /* best effort */ }
 });
@@ -926,12 +988,30 @@ await (async function preflightAuditDispatch(): Promise<void> {
   if (!fs.existsSync(AUDIT_SINK)) {
     throw new Error(`audit dispatch preflight: the hooks never wrote ${AUDIT_SINK} — emit() is not on this path`);
   }
+  // The argv swap above is the whole difference between measuring a real
+  // command line and measuring an empty one, and it is invisible in the row
+  // output — so assert the record the hooks actually wrote carries the redacted
+  // args, not `[]`. Without this the file would silently regress to the bug a
+  // suite-level `beforeAll` introduced.
+  const starts = fs.readFileSync(AUDIT_SINK, 'utf-8').trimEnd().split('\n')
+    .map((line) => JSON.parse(line) as { event?: string; args?: unknown })
+    .filter((rec) => rec.event === 'command.start');
+  if (starts.length === 0) {
+    throw new Error(`audit dispatch preflight: no command.start record in ${AUDIT_SINK} — the preAction hook did not emit`);
+  }
+  for (const rec of starts) {
+    if (!Array.isArray(rec.args) || rec.args.length === 0) {
+      throw new Error(
+        `audit dispatch preflight: a command.start record carries args=${JSON.stringify(rec.args)} — the process.argv swap did not take, so every hooked row would measure an empty command line`,
+      );
+    }
+  }
 })();
 
 /**
  * Time-bounded so the cumulative sink stays far below the 10 MiB gzip-rotation
  * threshold (events.ts:107) and no rotation skews a sample — the same bound and
- * the same reason as events.bench.ts:170-174.
+ * the same reason as events.bench.ts:169-174.
  */
 const PARSE_OPTS = { time: 400, iterations: 20, warmupTime: 100 } as const;
 
@@ -954,7 +1034,7 @@ describe('root program construction (index.ts:262-270) — commander work every 
   });
 });
 
-describe('audit-hook body pieces (index.ts:280-288, 308-309) — the per-dispatch work that runs BEFORE emit(), measured nowhere else', () => {
+describe('audit-hook body pieces (index.ts:280-288, 309) — the per-dispatch work that runs BEFORE emit(), measured nowhere else', () => {
   bench('auditCommandPath(depth-1 action command) — one loop turn + one unshift, then the BRAND compare stops at the root (index.ts:283-286)', () => {
     auditCommandPath(HOOKED_PROGRAM.commands[0]);
   });
@@ -963,44 +1043,26 @@ describe('audit-hook body pieces (index.ts:280-288, 308-309) — the per-dispatc
     auditCommandPath(HOOKED_PROGRAM.commands[1].commands[0]);
   });
 
-  bench('the exempt gate as written: parts.join(" ") + AUDIT_EXEMPT_COMMANDS.has(...) on a depth-2 path (index.ts:309). preAction and postAction each run this, and postAction joins a THIRD time at index.ts:335', () => {
+  bench('the exempt gate as written: parts.join(" ") + AUDIT_EXEMPT_COMMANDS.has(...) on a depth-2 path (index.ts:309). preAction and postAction each run this, and postAction joins a THIRD time at index.ts:332', () => {
     const parts = ['sessions', 'list'];
     AUDIT_EXEMPT_COMMANDS.has(parts.join(' '));
   });
 });
 
 describe('the real per-invocation audit tax — `program.parseAsync` through commander\'s hook dispatch (command.js:1614, 1623), hooks attached vs not', () => {
-  /**
-   * The hook bodies read `process.argv.slice(2, 22)` verbatim (index.ts:313).
-   * Under vitest that is the worker's argv, not a CLI one, so it is swapped for
-   * a realistic `agents run` line for this suite only and restored after —
-   * suites run sequentially, so no other group in this file sees it. The shape
-   * matches events.bench.ts:149-158 (a >200-char --prompt hitting the sha256
-   * marker branch, a session id, a device, a path) so the redaction branches
-   * exercised here are the real ones.
-   */
-  const REAL_ARGV = process.argv;
-  beforeAll(() => {
-    process.argv = [
-      process.argv[0], process.argv[1],
-      'sessions', 'list', '--json', '--limit', '50',
-      '--query', 'benchmark the commander root bootstrap and audit hooks in apps/cli/src/index.ts, read the call path end to end, commit a vitest bench beside the source, and propose optimizations from the measured numbers only',
-      '--session', 'ce1e00cb-61dc-4c62-b30e-f053ef6ce990',
-      '--device', 'yosemite-s1',
-      '--cwd', '/home/muqsit/src/github.com/muqsitnawaz/agents-cli',
-    ];
-  });
-  afterAll(() => { process.argv = REAL_ARGV; });
-
   bench('BASELINE `agents noop`: NO hooks attached. Pure commander dispatch — argv parse, _processArguments, _chainOrCall(action). `_chainOrCallHooks` still runs twice but finds nothing (command.js:1511-1531)', async () => {
     await UNHOOKED_PROGRAM.parseAsync(['node', 'agents', 'noop']);
+  }, PARSE_OPTS);
+
+  bench('BASELINE `agents events emit`: NO hooks, depth-2. The depth-matched control for the exempt row below — commander descends one more subcommand level (_dispatchSubcommand), which the depth-1 baseline does not pay', async () => {
+    await UNHOOKED_PROGRAM.parseAsync(['node', 'agents', 'events', 'emit']);
   }, PARSE_OPTS);
 
   bench('`agents noop` WITH both audit hooks: the same dispatch plus the real preAction+postAction — auditCommandPath ×2, join ×3, WeakMap set/get, redactArgs, TWO real emit() appends, stampProvenance. Delta vs the baseline above IS the audit tax per invocation', async () => {
     await HOOKED_PROGRAM.parseAsync(['node', 'agents', 'noop']);
   }, PARSE_OPTS);
 
-  bench('`agents events emit` WITH both hooks — AUDIT_EXEMPT_COMMANDS hit (index.ts:301, 309/329), so both bodies return before emit. Delta vs the baseline isolates the WIRING alone: commander\'s per-dispatch hook assembly + the path walk + the join/Set gate, with zero fs work', async () => {
+  bench('`agents events emit` WITH both hooks — AUDIT_EXEMPT_COMMANDS hit (index.ts:301, 309/329), so both bodies return before emit. Read against the DEPTH-MATCHED unhooked `events emit` row above, not the depth-1 one: that delta isolates the WIRING alone — commander\'s per-dispatch hook assembly + the path walk + the join/Set gate, with zero fs work', async () => {
     await HOOKED_PROGRAM.parseAsync(['node', 'agents', 'events', 'emit']);
   }, PARSE_OPTS);
 
@@ -1008,7 +1070,7 @@ describe('the real per-invocation audit tax — `program.parseAsync` through com
     await HOOKED_PROGRAM.parseAsync(['node', 'agents', 'sessions', 'list']);
   }, PARSE_OPTS);
 
-  bench('COUNTERFACTUAL `agents noop` with ONE append: same wiring, preAction\'s emit(command.start) (index.ts:316) folded into the postAction record. Not the shipped path — this row prices dropping one of the two synchronous appends', async () => {
+  bench('COUNTERFACTUAL `agents noop` with ONE append: same wiring, preAction\'s emit(command.start) (index.ts:311-319) folded into the postAction record. Not the shipped path — this row prices dropping one of the two synchronous appends', async () => {
     await ONE_APPEND_PROGRAM.parseAsync(['node', 'agents', 'noop']);
   }, PARSE_OPTS);
 });
