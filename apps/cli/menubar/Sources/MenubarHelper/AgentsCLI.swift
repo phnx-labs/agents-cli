@@ -82,8 +82,14 @@ enum AgentsCLI {
     // their health. Seconds on a healthy box, so it gets the longest deadline —
     // but it does get one. An unbounded doctor is what consumed 13 of 18 cores on
     // a real machine.
+    //
+    // The argv is a pure builder (mirrors routineHistoryArgs) so the headless
+    // self-test can pin the exact request — this poll is the only reader of the
+    // fleet findings contract, and a silent flag drift would break it.
+    static func doctorOverviewArgs() -> [String] { ["doctor", "--devices", "--json"] }
+
     static func doctorOverview() -> DoctorOverview? {
-        guard let data = capture(argv(["doctor", "--devices", "--json"]), timeout: ChildProcess.doctorTimeout) else { return nil }
+        guard let data = capture(argv(doctorOverviewArgs()), timeout: ChildProcess.doctorTimeout) else { return nil }
         return try? JSONDecoder().decode(DoctorOverview.self, from: data)
     }
 

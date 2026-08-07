@@ -1537,7 +1537,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 sub.addItem(disabled("Health"))
                 for finding in visible {
                     sub.addItem(disabled("  \(DoctorHealth.context(finding))"))
-                    sub.addItem(disabled("    \(trim(finding.message, 96))"))
+                    sub.addItem(disabled("    \(DoctorHealth.detail(finding))"))
                 }
                 let remainder = DoctorHealth.remainderCount(findings)
                 if remainder > 0 {

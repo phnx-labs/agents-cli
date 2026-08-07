@@ -43,6 +43,51 @@ enum DoctorSelfTest {
         check("context includes device and agent version", DoctorHealth.context(DoctorHealth.visible(overview.findings)[0]) == "critical · yosemite-m4 · claude@1.2.3")
         check("context falls back to collapsed-version agent", DoctorHealth.context(DoctorHealth.visible(overview.findings)[3]) == "critical · mac-mini · grok@a")
 
+        // MARK: actionable detail — the row carries doctor's exact fix so the
+        // finding is actionable from the menu (display-only; never run).
+        check("detail appends the remediation",
+              DoctorHealth.detail(DoctorHealth.visible(overview.findings)[0])
+                == "Missing hook runtime: main-branch-guard → agents doctor --fix")
+        let noFixJSON = """
+        {"severity":"warning","kind":"stale-cli","device":"pinnacles","message":"older agents-cli"}
+        """
+        guard let noFix = try? decoder.decode(DoctorFinding.self, from: Data(noFixJSON.utf8)) else {
+            print("FAIL — a finding without remediation did not decode")
+            exit(1)
+        }
+        check("a finding without remediation decodes it as nil", noFix.remediation == nil)
+        check("detail without remediation is the bare message",
+              DoctorHealth.detail(noFix) == "older agents-cli")
+        let longMessage = String(repeating: "x", count: 200)
+        let longJSON = """
+        {"severity":"critical","kind":"unwired-hook","device":"mac-mini","message":"\(longMessage)","remediation":"agents doctor --fix"}
+        """
+        let longFinding = try! decoder.decode(DoctorFinding.self, from: Data(longJSON.utf8))
+        check("detail stays bounded for a long message",
+              DoctorHealth.detail(longFinding).count == 96
+                && DoctorHealth.detail(longFinding).hasSuffix("…"))
+
+        // MARK: severity filter — only critical/warning are actionable; an
+        // unknown future severity is hidden rather than mis-bucketed.
+        let futureJSON = """
+        {"findings":[
+          {"severity":"info","kind":"some-future-kind","device":"zion","message":"FYI"},
+          {"severity":"critical","kind":"cli-missing","device":"zion","agent":"grok","message":"binary gone"}
+        ]}
+        """
+        let future = try! decoder.decode(DoctorOverview.self, from: Data(futureJSON.utf8))
+        check("unknown severities are not actionable",
+              DoctorHealth.visible(future.findings).count == 1)
+        check("summary ignores unknown severities",
+              DoctorHealth.summary(future.findings) == "1 critical")
+        check("an empty findings array reads healthy, not legacy",
+              DoctorHealth.summary([]) == "all set")
+
+        // MARK: exact poll argv — the 15-minute refresh must keep requesting
+        // the fleet-aware doctor JSON; a silent flag drift breaks the contract.
+        check("doctor poll requests the fleet-aware JSON",
+              AgentsCLI.doctorOverviewArgs() == ["doctor", "--devices", "--json"])
+
         print(pass ? "ALL PASS" : "SOME FAILED")
         exit(pass ? 0 : 1)
     }
