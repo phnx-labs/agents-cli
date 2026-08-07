@@ -14,7 +14,17 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `upgrade`, `_internal`).
 
-_97 command groups · 563 commands._
+_98 command groups · 568 commands._
+
+## accounts — Browse and name signed-in harness accounts
+
+```
+agents accounts                     Browse and name signed-in harness accounts
+agents accounts list                Alias for accounts
+agents accounts name <label>        Name one signed-in account; matching installed versions are found automatically
+agents accounts remove <label>
+agents accounts rename <old> <new>
+```
 
 ## add — Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
 
@@ -820,7 +830,7 @@ agents sessions backfill resources          Derive historical skill/slash-comman
 agents sessions backfill tools              Parse historical tool calls once into the local SQLite index.
 agents sessions detach <id>                 Send a live agent to the background — stop its terminal, keep it working headless
 agents sessions export [selectors...]       Bundle sessions (by id, query, or the parent selection flags like --since/-a) into a portable archive.
-agents sessions favorite [ids...]           Star sessions so they are easy to find again — list them with --favorites, or `f` in the browser.
+agents sessions favorite [ids...]           Favorite sessions so they are easy to find again — list them with --favorites, or `f` in the browser.
 agents sessions focus [selector]            Focus sessions by id, harness/version, topic, device, or live state; attach living panes and recover ended ones
 agents sessions fork <session>              Branch a session into a new, independent copy you can continue separately. The original is untouched.
 agents sessions go [id]                     Deprecated alias for `sessions focus --attach-only`
