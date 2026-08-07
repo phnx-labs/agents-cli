@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createWorktree, localDefaultBranch, removeWorktree } from './worktree.js';
+import { createWorktree, localDefaultBranch, removeWorktree, worktreeExists } from './worktree.js';
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', ['-c', 'user.email=t@t.dev', '-c', 'user.name=t', ...args], {
@@ -140,5 +140,47 @@ describe('createWorktree base freshness', () => {
     } finally {
       await removeWorktree(clone, 'teammate-a');
     }
+  });
+
+  // RUSH-2356: `teams add` cleans up a worktree it half-created when the create
+  // fails, but must NEVER remove one that was already there — the usual reason
+  // a create fails is `fatal: a branch named 'agents/<name>' already exists`,
+  // and `teams stop` deliberately keeps a worktree holding uncommitted changes.
+  // This is the pre-flight that tells the two apart.
+  describe('worktreeExists', () => {
+    it('false before anything is created, true once it is', async () => {
+      expect(await worktreeExists(clone, 'probe-a')).toBe(false);
+      await createWorktree(clone, 'probe-a');
+      try {
+        expect(await worktreeExists(clone, 'probe-a')).toBe(true);
+      } finally {
+        await removeWorktree(clone, 'probe-a');
+      }
+      expect(await worktreeExists(clone, 'probe-a')).toBe(false);
+    });
+
+    it('true for a branch with no checkout — the half-created state it exists to catch', async () => {
+      // `git worktree add -b` creating the ref and then failing the checkout
+      // leaves exactly this: the branch, no directory.
+      git(clone, ['branch', 'agents/probe-b']);
+      expect(fs.existsSync(path.join(clone, '.agents', 'worktrees', 'probe-b'))).toBe(false);
+      expect(await worktreeExists(clone, 'probe-b')).toBe(true);
+    });
+
+    it('answers for the MAIN repo from inside another worktree', async () => {
+      const wt = await createWorktree(clone, 'probe-c');
+      try {
+        // Same getMainRepoRoot resolution as createWorktree/removeWorktree, so a
+        // caller standing in a sibling worktree gets the main checkout's answer.
+        expect(await worktreeExists(wt, 'probe-c')).toBe(true);
+        expect(await worktreeExists(wt, 'probe-none')).toBe(false);
+      } finally {
+        await removeWorktree(clone, 'probe-c');
+      }
+    });
+
+    it('rejects invalid worktree names', async () => {
+      await expect(worktreeExists(clone, '../evil')).rejects.toThrow(/Invalid worktree name/);
+    });
   });
 });

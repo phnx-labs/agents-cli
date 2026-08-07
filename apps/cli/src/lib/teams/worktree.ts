@@ -222,3 +222,33 @@ export function getWorktreePath(gitRoot: string, worktreeName: string): string {
 export function getWorktreeBranch(worktreeName: string): string {
   return `agents/${worktreeName}`;
 }
+
+/**
+ * Does anything already exist under this worktree name — the checkout directory
+ * or its `agents/<name>` branch?
+ *
+ * Answered from git and the filesystem, never from teammate records: it is asked
+ * by `teams add` immediately BEFORE {@link createWorktree}, so that if the create
+ * fails the command can tell "the branch ref I half-created" (safe to remove)
+ * from "something that was already here" (never remove — `teams stop` deliberately
+ * KEEPS a worktree holding uncommitted changes, and its teammate record is
+ * terminal by then, so no record-based check can protect it). (RUSH-2356)
+ */
+export async function worktreeExists(repoDir: string, worktreeName: string): Promise<boolean> {
+  if (!WORKTREE_NAME_RE.test(worktreeName)) {
+    throw new Error(`Invalid worktree name: ${worktreeName}`);
+  }
+  const gitRoot = await getMainRepoRoot(repoDir);
+  const dir = safeJoin(path.join(gitRoot, '.agents', 'worktrees'), worktreeName);
+  if (await fs.stat(dir).then(() => true).catch(() => false)) return true;
+  try {
+    await execFileAsync(
+      'git',
+      ['rev-parse', '--verify', '--quiet', `refs/heads/${getWorktreeBranch(worktreeName)}`],
+      { cwd: gitRoot },
+    );
+    return true;
+  } catch {
+    return false; // `--verify` exits non-zero when the ref doesn't exist
+  }
+}

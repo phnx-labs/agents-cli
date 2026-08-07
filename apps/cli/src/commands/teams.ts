@@ -61,6 +61,7 @@ import {
   isGitRepo,
   hasUncommittedChanges,
   removeWorktree,
+  worktreeExists,
 } from '../lib/teams/worktree.js';
 import { resolveHost } from '../lib/hosts/registry.js';
 import { isDeviceAuto, resolveDeviceAuto } from '../lib/smart-launch.js';
@@ -1872,25 +1873,29 @@ export function registerTeamsCommands(program: Command): void {
         if (!(await isGitRepo(baseCwd))) {
           dieFriction('teams', 'worktree-needs-repo', `Worktrees require a git repository. ${baseCwd} is not inside a git repo.`);
         }
+        // Was anything under this name already here BEFORE we tried? That is
+        // the only sound basis for cleaning up a failed create: the common
+        // failure is `fatal: a branch named 'agents/<name>' already exists`,
+        // and removing a checkout we did not make can destroy uncommitted work
+        // (`teams stop` deliberately KEEPS a dirty worktree, and that teammate's
+        // record is terminal by then, so no record-based check protects it).
+        const preexisting = await worktreeExists(baseCwd, opts.worktree).catch(() => true);
         try {
           worktreeName = opts.worktree;
           worktreePath = await createWorktree(baseCwd, worktreeName);
           createdWorktree = { baseCwd, name: worktreeName };
         } catch (err) {
-          // `git worktree add -b` can fail PART WAY — the branch ref created,
-          // the checkout not — which strands `agents/<name>` in exactly the way
-          // that breaks the retry. But the most common failure here is the
-          // OPPOSITE: `fatal: a branch named 'agents/<name>' already exists`
-          // because a live teammate (this team or another) already owns that
-          // worktree. Removing it then would destroy their checkout, so the
-          // same claim check gates this teardown too.
-          try {
-            if (!(await mgr.isWorktreeClaimed(opts.worktree))) {
+          // `git worktree add -b` can also fail PART WAY — branch ref created,
+          // checkout not — stranding `agents/<name>` in exactly the way that
+          // breaks the retry. Nothing was here before, so whatever is here now
+          // is ours to remove.
+          if (!preexisting) {
+            try {
               await removeWorktree(baseCwd, opts.worktree);
+            } catch {
+              // Nothing to remove (the add died before git wrote anything), or
+              // we can't. Either way the real error below is what matters.
             }
-          } catch {
-            // Nothing to remove (the add failed before git wrote anything), or
-            // we can't tell. Either way the real error below is what matters.
           }
           dieFriction('teams', 'worktree-create-failed', `Failed to create worktree '${opts.worktree}': ${(err as Error).message}`);
         }
