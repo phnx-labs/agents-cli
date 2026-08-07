@@ -10747,7 +10747,7 @@
         },
         {
           "flags": "--favorites",
-          "description": "Show only favorited (starred) sessions — star them with `*` in the browser or `agents sessions favorite <id>`"
+          "description": "Show only favorited sessions — favorite them with `*` in the browser or `agents sessions favorite <id>`"
         },
         {
           "flags": "--tree",
@@ -10894,7 +10894,7 @@
           "name": "favorite",
           "path": "sessions favorite",
           "aliases": [],
-          "description": "Star sessions so they are easy to find again — list them with --favorites, or `f` in the browser.",
+          "description": "Favorite sessions so they are easy to find again — list them with --favorites, or `f` in the browser.",
           "args": [
             {
               "name": "ids",
@@ -10905,11 +10905,11 @@
           "options": [
             {
               "flags": "--remove",
-              "description": "Unstar the given sessions instead of starring them"
+              "description": "Remove the given sessions from favorites instead of adding them"
             },
             {
               "flags": "--list",
-              "description": "List the starred sessions (the default when no ids are given)"
+              "description": "List the favorited sessions (the default when no ids are given)"
             },
             {
               "flags": "--json",

@@ -820,7 +820,7 @@ agents sessions backfill resources          Derive historical skill/slash-comman
 agents sessions backfill tools              Parse historical tool calls once into the local SQLite index.
 agents sessions detach <id>                 Send a live agent to the background — stop its terminal, keep it working headless
 agents sessions export [selectors...]       Bundle sessions (by id, query, or the parent selection flags like --since/-a) into a portable archive.
-agents sessions favorite [ids...]           Star sessions so they are easy to find again — list them with --favorites, or `f` in the browser.
+agents sessions favorite [ids...]           Favorite sessions so they are easy to find again — list them with --favorites, or `f` in the browser.
 agents sessions focus [selector]            Focus sessions by id, harness/version, topic, device, or live state; attach living panes and recover ended ones
 agents sessions fork <session>              Branch a session into a new, independent copy you can continue separately. The original is untouched.
 agents sessions go [id]                     Deprecated alias for `sessions focus --attach-only`
