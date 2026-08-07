@@ -87,9 +87,12 @@ enum AgentsCLI {
     // would be group-killed mid-flight and the System row would read
     // "unavailable" forever. The bare overview is already the fleet-aware
     // payload (RUSH-2027 `fleet` inventory) and carries the prioritized
-    // `findings` (RUSH-2069) this helper renders; it is also singleflight-cached
-    // CLI-side (RUSH-2153), which is what makes a 15-minute poller viable at
-    // all. The fleet-wide readout stays one click away via "Run agents doctor".
+    // `findings` (RUSH-2069) this helper renders, at 83s warm on the same box —
+    // inside the bound. It is also singleflight-gated CLI-side (RUSH-2153): the
+    // 90s freshness TTL means this 15-minute poll nearly always computes fresh,
+    // but a helper relaunch or a second poller can never stack a concurrent
+    // compute. The fleet-wide readout stays one click away via "Run agents
+    // doctor".
     //
     // The argv is a pure builder (mirrors routineHistoryArgs) so the headless
     // self-test can pin the exact request — this poll is the only reader of the

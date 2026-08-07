@@ -179,8 +179,14 @@ enum DoctorHealth {
         var parts = [finding.severity]
         if let device = finding.device, !device.isEmpty { parts.append(device) }
         if let agent = finding.agent, !agent.isEmpty {
-            let version = finding.version ?? finding.versions?.first
-            parts.append(version.map { "\(agent)@\($0)" } ?? agent)
+            // Mirror the CLI's subjectLabel (doctor-findings.ts): a collapsed row
+            // reads `agent (N versions)`, a single-version row `agent @version`.
+            if let versions = finding.versions, versions.count > 1 {
+                parts.append("\(agent) (\(versions.count) versions)")
+            } else {
+                let version = finding.version ?? finding.versions?.first
+                parts.append(version.map { "\(agent) @\($0)" } ?? agent)
+            }
         }
         return parts.joined(separator: " · ")
     }
