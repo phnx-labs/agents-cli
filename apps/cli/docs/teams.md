@@ -272,6 +272,15 @@ which case the worktree is kept and reported.
 So the pre-flight for a **local** worktree team is: fast-forward your checkout to
 the default branch first. A remote team handles this itself.
 
+**Where a local worktree lands.** A new teammate worktree always resolves to
+`<main-repo-root>/.agents/worktrees/<name>` — the MAIN checkout's root, never
+wherever `--worktree` happened to be invoked from. `createWorktree` resolves the
+placement root via `getMainRepoRoot` (a `git rev-parse --git-common-dir` lookup,
+not `--show-toplevel`), so running `agents teams add` from inside a *different*
+teammate's own worktree — e.g. one agent orchestrating another — still places the
+new worktree as a sibling under the main repo, never nested inside the caller's
+worktree.
+
 ## Distributed teams
 
 Teammates can run on **different machines** across your fleet, not just the box
@@ -384,6 +393,11 @@ agents teams add pricing-page claude \
 # Watch mode — supervisor fires QA when backend AND frontend complete
 agents teams start pricing-page --watch
 ```
+
+A staged (`--after`) teammate is durable while it waits: retention only ever
+reaps a teammate that has actually **finished** (completed/failed/stopped), so a
+`pending` teammate parked on an unmet dependency is never cleaned up, however
+deep the machine's history of past runs goes.
 
 ### 3. Cloud dispatch for one teammate
 

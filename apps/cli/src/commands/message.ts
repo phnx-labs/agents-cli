@@ -9,7 +9,12 @@
  *
  * Cross-host is handled one layer up: `--host <h>` routes the whole command over
  * ssh via `REMOTE_PASSTHROUGH` (see src/lib/hosts/passthrough.ts), so the box is
- * written on the host that actually owns the agent.
+ * written on the host that actually owns the agent. A caller who doesn't already
+ * know the host (a detached `agents run --device <h> --no-follow` dispatch) is
+ * still resolved automatically: a `target` matching no local/cloud session falls
+ * through to the `~/.agents/.cache/hosts/` records `agents hosts ps` reads
+ * (RUSH-2366 follow-up — see decideHostTaskRoute in lib/mailbox-target.ts), and
+ * the message is rerouted there.
  *
  * For local agents, the message is tied to the agent's current open feed block
  * (if any). The first answer to a block wins: a second concurrent answer is
