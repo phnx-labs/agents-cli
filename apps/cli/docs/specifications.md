@@ -1629,8 +1629,11 @@ Logical account selection adds three requirements to that funnel:
   (`commands/accounts.ts`; `lib/account-labels.ts`).
 - **EXEC-ACCOUNT-3 (MUST).** `agents run --account <label>` MUST select only a
   healthy installed version whose live identity matches that provider account,
-  and MUST fail instead of using another identity (`commands/exec.ts`). Local
-  labels MUST be rejected for cloud and lease placement.
+  and MUST fail instead of using another identity (`commands/exec.ts`). Routines
+  with `account:` MUST use the same fail-closed resolver (`lib/runner.ts`). Host
+  dispatch MUST forward the label and resolve it against the remote host's live
+  version homes (`lib/hosts/dispatch.ts`; `lib/hosts/run-target.ts`). Local labels
+  MUST be rejected for cloud and lease placement.
 
 Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are used per
 [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119). Every requirement cites the

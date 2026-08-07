@@ -674,4 +674,20 @@ describeSpawn('resolveRoutineLaunch — zero-healthy accounts fail the routine l
     expect(plan.chain[0]).toEqual({ agent: 'claude', version: '2.1.207' });
     expect(plan.rotation).toBeNull();
   });
+
+  it('fails closed when a routine label names a different harness', async () => {
+    let strategyCalled = false;
+    const err = await resolveRoutineLaunch({ ...baseConfig(), agent: 'codex', account: 'work' }, process.cwd(), {
+      readAccountLabels: () => ({ labels: { work: { agent: 'claude', fingerprint: 'abc' } } }),
+      resolveAccountLabel: async (agent, label) => {
+        throw new Error(`Account label '${label}' names a claude account, not ${agent}.`);
+      },
+      resolveRunVersion: async () => {
+        strategyCalled = true;
+        return { version: '0.1.0', rotation: null };
+      },
+    }).then(() => null, (error: unknown) => error as Error);
+    expect(err?.message).toBe("Account label 'work' names a claude account, not codex.");
+    expect(strategyCalled).toBe(false);
+  });
 });

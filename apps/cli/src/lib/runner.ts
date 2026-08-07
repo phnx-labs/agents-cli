@@ -565,7 +565,11 @@ export interface RoutineLaunchPlan {
 export async function resolveRoutineLaunch(
   config: JobConfig,
   cwd: string = process.cwd(),
-  deps: { resolveRunVersion?: typeof resolveRunVersion } = {},
+  deps: {
+    resolveRunVersion?: typeof resolveRunVersion;
+    readAccountLabels?: () => { labels: Record<string, { agent: AgentId; fingerprint: string }> };
+    resolveAccountLabel?: (agent: AgentId, label: string) => Promise<string>;
+  } = {},
 ): Promise<RoutineLaunchPlan> {
   if (config.workflow) {
     return { chain: [], rotation: null, pinned: false };
@@ -595,8 +599,8 @@ export async function resolveRoutineLaunch(
   // is not signed in on this box, with a loud warning rather than a silent stall.
   if (config.account) {
     const { readAccountLabels, resolveAccountLabel } = await import('./account-labels.js');
-    if (readAccountLabels().labels[config.account]?.agent === agent) {
-      const version = await resolveAccountLabel(agent, config.account);
+    if ((deps.readAccountLabels ?? readAccountLabels)().labels[config.account]) {
+      const version = await (deps.resolveAccountLabel ?? resolveAccountLabel)(agent, config.account);
       return { chain: [{ agent, version }], rotation: null, pinned: true };
     }
     const version = await resolveAccountVersion(agent, config.account);

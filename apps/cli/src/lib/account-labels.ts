@@ -4,9 +4,8 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import { getUserAgentsDir } from './state.js';
-import { ACCOUNT_INSPECTION_AGENT_IDS, accountDisplayLabel, getAccountInfo } from './agents.js';
+import { ACCOUNT_INSPECTION_AGENT_IDS } from './agents.js';
 import type { AgentId } from './types.js';
-import { getVersionHomePath, listInstalledVersions } from './versions.js';
 import { collectRunCandidates, pickBalancedCandidate } from './rotate.js';
 
 export interface AccountLabel { agent: AgentId; fingerprint: string }
@@ -36,11 +35,13 @@ export function labelForFingerprint(agent: AgentId, fingerprint: string, doc = r
 
 export async function discoverAccounts(agentIds: readonly AgentId[] = ACCOUNT_INSPECTION_AGENT_IDS): Promise<DiscoveredAccount[]> {
   const labels = readAccountLabels(); const grouped = new Map<string, DiscoveredAccount>();
-  await Promise.all(agentIds.map(async agent => Promise.all(listInstalledVersions(agent).map(async version => {
-    const info = await getAccountInfo(agent, getVersionHomePath(agent, version)); if (!info.signedIn || !info.accountKey) return;
-    const fingerprint = identityFingerprint(agent, info.accountKey); const key = `${agent}:${fingerprint}`; const existing = grouped.get(key);
-    if (existing) existing.versions.push(version); else grouped.set(key, { agent, fingerprint, display: accountDisplayLabel(info) || 'signed-in account', versions: [version], label: labelForFingerprint(agent, fingerprint, labels) });
-  }))));
+  await Promise.all(agentIds.map(async agent => {
+    for (const candidate of await collectRunCandidates(agent)) {
+      if (!candidate.signedIn || !candidate.accountKey) continue;
+      const fingerprint = identityFingerprint(agent, candidate.accountKey); const key = `${agent}:${fingerprint}`; const existing = grouped.get(key);
+      if (existing) existing.versions.push(candidate.version); else grouped.set(key, { agent, fingerprint, display: candidate.accountLabel || 'signed-in account', versions: [candidate.version], label: labelForFingerprint(agent, fingerprint, labels) });
+    }
+  }));
   return [...grouped.values()].sort((a, b) => a.agent.localeCompare(b.agent) || a.display.localeCompare(b.display));
 }
 

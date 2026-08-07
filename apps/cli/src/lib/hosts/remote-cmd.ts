@@ -97,6 +97,7 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   fallback: 'forward',
   balanced: 'forward',
   strategy: 'forward',
+  account: 'forward',
   loop: 'forward',
   maxIterations: 'forward',
   budget: 'forward',

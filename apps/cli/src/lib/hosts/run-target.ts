@@ -85,6 +85,7 @@ export interface HostPromptRun {
   addDir?: string[];
   timeout?: string;
   strategy?: string;
+  account?: string;
   balanced?: boolean;
   fallback?: string;
   loop?: boolean;
@@ -156,6 +157,7 @@ export async function dispatchPromptToHost(host: Host, opts: HostPromptRun): Pro
     addDir: opts.addDir,
     timeout: opts.timeout,
     strategy: opts.strategy,
+    account: opts.account,
     balanced: opts.balanced,
     fallback: opts.fallback,
     loop: opts.loop,

@@ -439,6 +439,8 @@ export interface DispatchOptions {
   version?: string;
   /** Run strategy (e.g. "balanced") — the remote picks among ITS signed-in accounts. */
   strategy?: string;
+  /** Named provider account — the remote resolves it against ITS signed-in versions. */
+  account?: string;
   balanced?: boolean;
   fallback?: string;
   mode?: string;
@@ -519,6 +521,7 @@ export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   for (const dir of opts.addDir ?? []) args.push('--add-dir', dir);
   if (opts.timeout) args.push('--timeout', opts.timeout);
   if (opts.strategy) args.push('--strategy', opts.strategy);
+  if (opts.account) args.push('--account', opts.account);
   if (opts.balanced) args.push('--balanced');
   if (opts.fallback) args.push('--fallback', opts.fallback);
   if (opts.loop) args.push('--loop');
@@ -545,6 +548,8 @@ export interface InteractiveDispatchOptions {
   version?: string;
   /** Explicit run strategy (e.g. "balanced") to forward as `--strategy <strategy>`. */
   strategy?: string;
+  /** Named provider account to resolve on the remote host. */
+  account?: string;
   /** Optional prompt — forwarded only when the caller explicitly forced interactive mode. */
   prompt?: string;
   mode?: string;
@@ -601,6 +606,7 @@ export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOption
   for (const dir of opts.addDir ?? []) args.push('--add-dir', dir);
   if (opts.timeout) args.push('--timeout', opts.timeout);
   if (opts.strategy) args.push('--strategy', opts.strategy);
+  if (opts.account) args.push('--account', opts.account);
   if (opts.balanced) args.push('--balanced');
   if (opts.fallback) args.push('--fallback', opts.fallback);
   if (opts.json) args.push('--json');

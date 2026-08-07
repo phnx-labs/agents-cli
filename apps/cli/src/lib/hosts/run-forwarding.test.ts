@@ -64,6 +64,7 @@ describe('buildRunForwardedArgs — forwarded options land in the remote argv', 
       addDir: ['/data'],
       timeout: '30m',
       strategy: 'balanced',
+      account: 'work',
       fallback: 'codex,gemini',
       loop: true,
       maxIterations: '5',
@@ -85,6 +86,7 @@ describe('buildRunForwardedArgs — forwarded options land in the remote argv', 
       '--add-dir', '/data',
       '--timeout', '30m',
       '--strategy', 'balanced',
+      '--account', 'work',
       '--fallback', 'codex,gemini',
       '--loop',
       '--max-iterations', '5',
@@ -113,9 +115,10 @@ describe('buildRunForwardedArgs — forwarded options land in the remote argv', 
     const args = buildInteractiveRunForwardedArgs({
       agent: 'claude',
       effort: 'high',
+      account: 'work',
       env: ['X=1'],
       passthroughArgs: ['--flag'],
     });
-    expect(args).toEqual(['run', 'claude', '--effort', 'high', '--env', 'X=1', '--', '--flag']);
+    expect(args).toEqual(['run', 'claude', '--effort', 'high', '--env', 'X=1', '--account', 'work', '--', '--flag']);
   });
 });
