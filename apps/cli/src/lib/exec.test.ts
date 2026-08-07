@@ -786,16 +786,20 @@ describePosix('resolveLaunchBinary — is the harness actually on this machine (
   // holds only the planted dir — putting bun's own dir on PATH would smuggle in
   // whatever else lives beside it.
   const bunBin = execFileSync('sh', ['-c', 'command -v bun'], { encoding: 'utf-8' }).trim();
+  // Anchor on this file, not process.cwd() — vitest inherits the invoking shell's
+  // cwd, so a run started from the repo root would resolve neither path.
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  const appRoot = path.resolve(here, '..', '..');
 
   function probe(agent: string, version?: string): string | null {
-    const execPath = path.resolve(process.cwd(), 'src/lib/exec.ts');
+    const execPath = path.join(here, 'exec.ts');
     const script = `
       import { resolveLaunchBinary } from ${JSON.stringify(execPath)};
       const r = resolveLaunchBinary(${JSON.stringify(agent)}, ${JSON.stringify(version ?? null)} ?? undefined);
       console.log('__RESULT__' + JSON.stringify(r));
     `;
     const out = execFileSync(bunBin, ['-e', script], {
-      cwd: process.cwd(),
+      cwd: appRoot,
       env: { ...process.env, HOME: home, PATH: [pathDir, '/usr/bin', '/bin'].join(path.delimiter) },
       stdio: ['ignore', 'pipe', 'inherit'],
     }).toString('utf-8');
