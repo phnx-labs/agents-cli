@@ -165,7 +165,7 @@ interface SessionsOptions extends SessionFilterOptions {
   abandoned?: boolean;
   queued?: boolean;
   unknown?: boolean;
-  /** Show only favorited (starred) sessions — the `f` key's flag twin. */
+  /** Show only favorited sessions — the `f` key's flag twin. */
   favorites?: boolean;
   /** Enrich the listing with live glyphs/preview for running rows. Default on;
    * `--no-live` sets this false. Commander's `--no-` convention. */
@@ -4938,7 +4938,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--abandoned', 'Show sessions with no transcript progress for the abandonment window (implies --active)')
     .option('--queued', 'Show queued sessions that have not started running (implies --active)')
     .option('--unknown', 'Show sessions whose live state cannot be determined (implies --active)')
-    .option('--favorites', 'Show only favorited (starred) sessions — star them with `*` in the browser or `agents sessions favorite <id>`')
+    .option('--favorites', 'Show only favorited sessions — favorite them with `*` in the browser or `agents sessions favorite <id>`')
     .option('--tree', 'Group the listing by directory; drops the id/version columns for readability')
     .option('--flat', 'Plain flat table (one row per session) instead of the grouped project overview')
     .option('--no-live', 'Do not enrich the listing with live status/preview for running sessions')

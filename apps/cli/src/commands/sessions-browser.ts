@@ -641,7 +641,7 @@ function helpFor(_f: BrowserFilter, mode: 'nav' | 'search'): string {
   if (mode === 'search') {
     return 'type to filter · ↑↓ navigate · esc exit search · ⏎ resume';
   }
-  return 's search · r running · f favorites · * star · c teams · t team · a agent · d device · p project · w window · tab preview · y copy-cmd · ⏎ resume · esc quit';
+  return 's search · r running · f favorites · * favorite · c teams · t team · a agent · d device · p project · w window · tab preview · y copy-cmd · ⏎ resume · esc quit';
 }
 
 /**
@@ -675,8 +675,8 @@ export async function runSessionBrowser(
   // needs it — fetch it once, lazily, the first time running is toggled on.
   let liveCache: Map<string, ActiveSession> | null = null;
   // Re-read every load (it's an mtime-memoized parse of one small file), so the
-  // `*` key's reload picks up the star it just wrote — and so does a favorite
-  // starred by another session on this machine.
+  // `*` key's reload picks up the favorite it just wrote — and so does one
+  // favorited by another session on this machine.
   let favorites = new Set<string>();
   // Generation guard: two quick keypresses can start overlapping loads whose
   // SSH fan-outs settle out of order. dynamicPicker's own gen ref guards which
@@ -795,11 +795,11 @@ export async function runSessionBrowser(
     },
     onKey: (name, f, active, query) => {
       if (name === '*') {
-        // Only a row with a real session id can be starred: a projected live row
+        // Only a row with a real session id can be favorited: a projected live row
         // with no id is keyed by pid, which is gone the moment the process is.
-        if (!active || active.id.startsWith(LIVE_ROW_PREFIX)) return 'nothing to star on this row';
+        if (!active || active.id.startsWith(LIVE_ROW_PREFIX)) return 'nothing to favorite on this row';
         const on = toggleFavorite(active.id);
-        // reload so the row's star is repainted — labels are memoized per row.
+        // reload so the row's favorite glyph is repainted — labels are memoized per row.
         return { flash: on ? `★ favorited ${active.shortId}` : `☆ unfavorited ${active.shortId}`, reload: true };
       }
       // Both cases: `hotkeyToken` hands `onKey` the literal character, and this

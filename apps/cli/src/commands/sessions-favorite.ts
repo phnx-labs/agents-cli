@@ -1,10 +1,10 @@
 /**
- * `agents sessions favorite` — the non-TTY half of the star.
+ * `agents sessions favorite` — the non-TTY half of the favorite hotkey.
  *
- * The `*` hotkey in the interactive browser is how a human stars a session; this
- * is how a script, an agent, or a machine without a TTY does the same thing, and
- * it is what makes the feature testable end to end without driving a terminal UI.
- * Both write the one store in `lib/session/favorites.ts`.
+ * The `*` hotkey in the interactive browser is how a human favorites a session;
+ * this is how a script, an agent, or a machine without a TTY does the same thing,
+ * and it is what makes the feature testable end to end without driving a terminal
+ * UI. Both write the one store in `lib/session/favorites.ts`.
  */
 
 import chalk from 'chalk';
@@ -21,15 +21,15 @@ interface FavoriteOptions {
 
 /**
  * Resolve one user-typed id (usually the 8-char short id the listing prints) to
- * a full session id. Ambiguity is an ERROR, not a silent first-match: starring
- * the wrong session is invisible until the user wonders where their star went.
+ * a full session id. Ambiguity is an ERROR, not a silent first-match: favoriting
+ * the wrong session is invisible until the user wonders where their favorite went.
  */
 export function resolveFavoriteTarget(idQuery: string): { id: string } | { error: string } {
   const matches = findSessionsById(idQuery);
   // A COMPLETE id needs no index entry: the id is the key the store is built on,
   // and requiring a transcript row would refuse exactly the newest sessions — a
-  // live one that has not been indexed yet. The browser's `*` stars those from
-  // the live row, so demanding a DB hit here would make the two disagree.
+  // live one that has not been indexed yet. The browser's `*` favorites those
+  // from the live row, so demanding a DB hit here would make the two disagree.
   if (matches.length === 0) {
     return isCompleteSessionId(idQuery.trim())
       ? { id: idQuery.trim() }
@@ -45,31 +45,31 @@ export function resolveFavoriteTarget(idQuery: string): { id: string } | { error
 export function registerSessionsFavoriteCommand(sessionsCmd: Command): void {
   const cmd = sessionsCmd
     .command('favorite')
-    .argument('[ids...]', 'Session ids to star (full or short id prefix)')
-    .description('Star sessions so they are easy to find again — list them with --favorites, or `f` in the browser.')
-    .option('--remove', 'Unstar the given sessions instead of starring them')
-    .option('--list', 'List the starred sessions (the default when no ids are given)')
+    .argument('[ids...]', 'Session ids to favorite (full or short id prefix)')
+    .description('Favorite sessions so they are easy to find again — list them with --favorites, or `f` in the browser.')
+    .option('--remove', 'Remove the given sessions from favorites instead of adding them')
+    .option('--list', 'List the favorited sessions (the default when no ids are given)')
     .option('--json', 'Output JSON');
 
   setHelpSections(cmd, {
     examples: `
-      # Star a session by its short id (the 8 chars the listing prints)
+      # Favorite a session by its short id (the 8 chars the listing prints)
       agents sessions favorite 26c27162
 
-      # See what is starred
+      # See what is favorited
       agents sessions favorite --list
 
-      # Browse only the starred ones
+      # Browse only the favorited ones
       agents sessions --favorites
 
-      # Unstar it again
+      # Remove it from favorites again
       agents sessions favorite 26c27162 --remove
     `,
     notes: `
-      In the interactive browser (\`agents sessions\`), \`*\` stars the highlighted
-      session and \`f\` filters the list down to the starred ones.
+      In the interactive browser (\`agents sessions\`), \`*\` favorites the highlighted
+      session and \`f\` filters the list down to the favorited ones.
 
-      Stars live in ~/.agents/.history/favorites.json, keyed by session id, so
+      Favorites live in ~/.agents/.history/favorites.json, keyed by session id, so
       they survive a reindex of the session cache. They are per-machine: session
       sync carries transcripts, not this file.
     `,
@@ -85,17 +85,17 @@ export function registerSessionsFavoriteCommand(sessionsCmd: Command): void {
     // owns; it is still declared on this command so `--help` documents it.
     const json = (self.optsWithGlobals() as { json?: boolean }).json === true;
     if (options.list || ids.length === 0) {
-      const starred = [...listFavorites()].sort();
+      const favorited = [...listFavorites()].sort();
       if (json) {
-        process.stdout.write(JSON.stringify({ favorites: starred }, null, 2) + '\n');
+        process.stdout.write(JSON.stringify({ favorites: favorited }, null, 2) + '\n');
         return;
       }
-      if (starred.length === 0) {
-        console.log(chalk.gray('No favorited sessions. Star one with `agents sessions favorite <id>`.'));
+      if (favorited.length === 0) {
+        console.log(chalk.gray('No favorited sessions. Favorite one with `agents sessions favorite <id>`.'));
         return;
       }
-      for (const id of starred) console.log(`${chalk.yellow('★')} ${id}`);
-      console.log(chalk.gray(`\n${starred.length} favorite${starred.length === 1 ? '' : 's'}.`));
+      for (const id of favorited) console.log(`${chalk.yellow('★')} ${id}`);
+      console.log(chalk.gray(`\n${favorited.length} favorite${favorited.length === 1 ? '' : 's'}.`));
       return;
     }
 
@@ -107,8 +107,8 @@ export function registerSessionsFavoriteCommand(sessionsCmd: Command): void {
         results.push({ query: idQuery, error: resolved.error });
         continue;
       }
-      // Unstarring something that was never starred, or starring it twice, is a
-      // no-op the store already short-circuits — report the resulting state.
+      // Unfavoriting something that was never favorited, or favoriting it twice,
+      // is a no-op the store already short-circuits — report the resulting state.
       setFavorite(resolved.id, on);
       results.push({ query: idQuery, id: resolved.id, favorite: isFavorite(resolved.id) });
     }
@@ -121,8 +121,8 @@ export function registerSessionsFavoriteCommand(sessionsCmd: Command): void {
         else console.log(`${r.favorite ? chalk.yellow('★ favorited') : chalk.gray('☆ unfavorited')} ${r.id}`);
       }
     }
-    // A failed lookup is a failed command — a script must not read "starred" from
-    // a zero exit when nothing was starred.
+    // A failed lookup is a failed command — a script must not read "favorited"
+    // from a zero exit when nothing was favorited.
     if (results.some((r) => r.error)) process.exitCode = 1;
   });
 }

@@ -26,9 +26,8 @@ import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
 import { redactSecrets } from './redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
-import { getConfigValue, isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from './device-config.js';
+import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from './device-config.js';
 import { reapTerminalRoutineProcesses } from './routine-process-cleanup.js';
-import { runWatchdogPass } from './watchdog/service.js';
 import { recordSubsystemOk, recordSubsystemError, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC } from './daemon-health.js';
 
 const PID_FILE = 'daemon.pid';
@@ -40,7 +39,6 @@ const LOG_ROTATE_COUNT = 3;
 const PLIST_NAME = 'com.phnx-labs.agents-daemon';
 const SYSTEMD_UNIT = 'agents-daemon.service';
 const MONITOR_TICK_MS = 60_000;
-const WATCHDOG_TICK_MS = 3 * 60_000;
 /**
  * How often to re-scan for missed fires. Deliberately slower than the monitor
  * tick: detection walks a week of cron occurrences per routine
@@ -663,24 +661,13 @@ export async function runDaemon(): Promise<void> {
 
   if (schedulerEnabledAtBoot) bootScheduler();
 
-  let watchdogInFlight = false;
-  const runDaemonWatchdog = async () => {
-    if (watchdogInFlight || getConfigValue('watchdog.enabled').value !== true) return;
-    watchdogInFlight = true;
-    try {
-      const result = await runWatchdogPass({ nudge: true });
-      log(
-        'INFO',
-        `watchdog: ${result.counts.total} live, ${result.counts.stalled} stalled, ${result.counts.nudged} nudged`,
-      );
-    } catch (err) {
-      log('ERROR', `watchdog tick failed: ${(err as Error).message}`);
-    } finally {
-      watchdogInFlight = false;
-    }
-  };
-  const watchdogInterval = setInterval(() => { void runDaemonWatchdog(); }, WATCHDOG_TICK_MS);
-  const watchdogKickoff = setTimeout(() => { void runDaemonWatchdog(); }, 30_000);
+  // watchdog, device-probe, tmux-reconcile, launch-health, fleet-cache-warm,
+  // session-cache-warm, usage-refresh, and auto-dispatch used to be hardcoded
+  // setInterval ticks here (RUSH-2353). They are now shipped system routines
+  // (gh:phnx-labs/.agents-system routines/*.yml), invoked one-shot via
+  // `agents __daemon-tick <name>` (see daemon-ticks.ts) and fired by the
+  // JobScheduler above like any other routine — declared, listed, run-tracked,
+  // pausable, and device-pinnable, instead of a second unowned scheduling path.
 
   // Monitor engine: event-triggered watchers, beside the cron scheduler. Same
   // daemon, same dispatch seam — a monitor is a routine whose trigger is a
@@ -827,241 +814,6 @@ export async function runDaemon(): Promise<void> {
   const healInterval = setInterval(() => { void runHealCheck(); }, 6 * 60 * 60_000);
   const healKickoff = setTimeout(() => { void runHealCheck(); }, 30_000);
 
-  // Auto-dispatch: for any managed project that has opted in (autoDispatch:true +
-  // maxAgents>0 in ~/.agents/factory/projects.json), pick up Linear tickets that
-  // are delegated to an agent and still in Todo, and DISPATCH each through
-  // agents-cli's own cloud-provider layer (resolveProvider().dispatch(), same as
-  // `agents cloud run`) — then mark it Doing so it isn't re-picked. Capped at
-  // maxAgents concurrent per project. No hidden Prix dependency: Rush is one
-  // provider among rush/codex/factory, pinned per-project via `provider`. OFF
-  // unless a project opts in; no opted-in project or no LINEAR_API_KEY is a clean
-  // no-op. Overlap-guarded like the probes above. ~every 3 min.
-  let autoDispatching = false;
-  const runAutoDispatch = async () => {
-    if (autoDispatching) return;
-    autoDispatching = true;
-    try {
-      const { readAutoDispatchProjects, isEligible, autoDispatchTick } = await import('./auto-dispatch.js');
-      const projects = readAutoDispatchProjects();
-      if (!projects.some(isEligible)) return; // opt-in: nothing enabled → skip
-      const { createLinearGateway } = await import('./auto-dispatch-linear.js');
-      const linear = createLinearGateway();
-      if (!linear) return; // no LINEAR_API_KEY configured → skip
-      const { createProviderDispatcher } = await import('./auto-dispatch-provider.js');
-      const dispatcher = createProviderDispatcher();
-      const dispatched = await autoDispatchTick({ projects, linear, dispatcher, log: (lvl, m) => log(lvl, m) });
-      if (dispatched.length) {
-        log('INFO', `auto-dispatch: started ${dispatched.length} delegated ticket(s): ${dispatched.map((d) => d.identifier).join(', ')}`);
-      }
-    } catch (err) {
-      log('ERROR', `auto-dispatch failed: ${(err as Error).message}`);
-    } finally {
-      autoDispatching = false;
-    }
-  };
-  const autoDispatchInterval = setInterval(() => { void runAutoDispatch(); }, 3 * 60_000);
-  const autoDispatchKickoff = setTimeout(() => { void runAutoDispatch(); }, 45_000);
-
-  // Device probe: refresh registered devices' reachability and detect newly
-  // appeared tailnet nodes, dropping a sentinel per pending device so the
-  // menu-bar helper can surface "NEW DEVICES → Register / Ignore". Refresh mode
-  // never auto-registers a newcomer. Soft + overlap-guarded like session sync;
-  // a machine without tailscale is a clean no-op. ~every 3 min.
-  let probingDevices = false;
-  const runDeviceProbe = async () => {
-    if (probingDevices) return;
-    probingDevices = true;
-    try {
-      const { runDeviceSync } = await import('./devices/sync.js');
-      const { reconcilePendingSentinels } = await import('./devices/pending.js');
-      const dev = await runDeviceSync({ soft: true, mode: 'refresh' });
-      if (dev.ok) {
-        reconcilePendingSentinels(dev.pending);
-        if (dev.pending.length) {
-          log('INFO', `devices: ${dev.pending.length} new pending (${dev.pending.map((p) => p.name).join(', ')})`);
-        }
-      }
-    } catch (err) {
-      log('ERROR', `device probe failed: ${(err as Error).message}`);
-    } finally {
-      probingDevices = false;
-    }
-  };
-  const deviceProbeInterval = setInterval(() => { void runDeviceProbe(); }, 3 * 60_000);
-  const deviceProbeKickoff = setTimeout(() => { void runDeviceProbe(); }, 15_000);
-
-  // tmux hook reconcile: retrofit the guarded `pane-died` hook onto managed
-  // `agents run` sessions a pre-fix binary left with the old unconditional hook
-  // (which detached the whole client — kicking the user out of the view — when
-  // they exited a split they'd opened). Non-destructive: set-hook only, never a
-  // kill or detach. A per-session schema marker makes steady-state a no-op, so
-  // this stays cheap at ~every 5 min, plus once ~20s after startup so a
-  // just-upgraded daemon heals still-running sessions without waiting for them to
-  // cycle or the shared server to be recycled.
-  let reconcilingTmux = false;
-  const runTmuxReconcile = async () => {
-    if (reconcilingTmux) return;
-    reconcilingTmux = true;
-    try {
-      const { isTmuxInstalled } = await import('./tmux/binary.js');
-      if (!isTmuxInstalled()) return;
-      const { reconcileSessionHooks } = await import('./tmux/session.js');
-      const r = await reconcileSessionHooks();
-      if (r.reconciled > 0) log('INFO', `tmux: retrofitted pane-died hook on ${r.reconciled} session(s)`);
-    } catch (err) {
-      log('ERROR', `tmux reconcile failed: ${(err as Error).message}`);
-    } finally {
-      reconcilingTmux = false;
-    }
-  };
-  const tmuxReconcileInterval = setInterval(() => { void runTmuxReconcile(); }, 5 * 60_000);
-  const tmuxReconcileKickoff = setTimeout(() => { void runTmuxReconcile(); }, 20_000);
-
-  // Launch-health self-heal: probe that each agent's DEFAULT version actually
-  // LAUNCHES (not just that its files exist), and repair a gutted install — the
-  // JS wrapper present but its native binary renamed/missing (a vendor
-  // auto-update that never landed its replacement, or a partially-extracted
-  // tarball) — BEFORE the user's next `agents run` dies with a raw ENOENT. This
-  // is the proactive companion to the run-time heal (ensureAgentRunnable), which
-  // only fires once a run is already starting. Cheap steady-state: one
-  // `--version` probe per default version; a clean reinstall runs only on a real
-  // launch failure. ~every 6h, plus once ~90s after startup (staggered off launch).
-  let checkingLaunchHealth = false;
-  const runLaunchHealthCheck = async () => {
-    if (checkingLaunchHealth) return;
-    checkingLaunchHealth = true;
-    try {
-      const { healBrokenDefaultLaunches } = await import('./versions.js');
-      // Unattended pass: repair the current default in place, but NEVER repoint
-      // the global default (allowDefaultSwitch: false). A background default
-      // switch installs a fresh version home → a fresh empty Claude credential
-      // scope, i.e. a silent logout uncorrelated with anything the user did.
-      const { repaired, unhealed } = await healBrokenDefaultLaunches(
-        (m) => log('INFO', `launch-health: ${m}`),
-        { allowDefaultSwitch: false },
-      );
-      if (repaired.length) log('INFO', `launch-health: repaired ${repaired.join(', ')}`);
-      if (unhealed.length) {
-        log('WARN', `launch-health: ${unhealed.join(', ')} won't launch and will not be auto-switched — choose a version with \`agents use <agent> <version>\` or \`agents add <agent>@latest\``);
-      }
-    } catch (err) {
-      log('ERROR', `launch-health check failed: ${(err as Error).message}`);
-    } finally {
-      checkingLaunchHealth = false;
-    }
-  };
-  const launchHealthInterval = setInterval(() => { void runLaunchHealthCheck(); }, 6 * 60 * 60_000);
-  const launchHealthKickoff = setTimeout(() => { void runLaunchHealthCheck(); }, 90_000);
-
-  // Fleet cache warm: publish THIS host's row for the caches `agents fleet
-  // status` / `agents devices list` read. PUBLISH-OWN / READ-UNION (RUSH-2061):
-  // each daemon probes only ITSELF and never SSHes another box, so the fleet no
-  // longer pays N² SSH resource probes every 3 minutes (N daemons × N devices) —
-  // the source of the fan-out storm AND the orphaned-probe pile-up. Two cheap
-  // self-only refreshes: (1) this host's auth-health verdicts (also feeds the
-  // `doctor --json` Auth rollup other hosts read), and (2) its fleet-status row
-  // (local resource probe + live-agent workload). Cross-host rows are unioned on
-  // demand by the reader (`agents fleet status`), not pushed by every daemon.
-  // Best-effort + overlap-guarded like the probes above; ~every 3 min, once ~60s
-  // after startup.
-  let warmingFleetCache = false;
-  const runFleetCacheWarm = async () => {
-    if (warmingFleetCache) return;
-    warmingFleetCache = true;
-    try {
-      const { machineId } = await import('./machine-id.js');
-      const self = machineId();
-      const { probeLocalFleetAuth, writeFleetAuthRows } = await import('./auth-health.js');
-      const { getCliVersion } = await import('./version.js');
-      const authRows = await probeLocalFleetAuth({ cliVersion: getCliVersion() });
-      writeFleetAuthRows(self, authRows);
-
-      const { publishLocalFleetStatus } = await import('./fleet-status.js');
-      const row = await publishLocalFleetStatus(self);
-      log('INFO', `fleet cache warm: ${authRows.length} auth row(s), ${row.agents.running} running agent(s) on ${self}`);
-    } catch (err) {
-      log('ERROR', `fleet cache warm failed: ${(err as Error).message}`);
-    } finally {
-      warmingFleetCache = false;
-    }
-  };
-  const fleetCacheInterval = setInterval(() => { void runFleetCacheWarm(); }, 3 * 60_000);
-  const fleetCacheKickoff = setTimeout(() => { void runFleetCacheWarm(); }, 60_000);
-
-  // Session-status cache warm (RUSH-2062): publish THIS host's local active
-  // sessions so menubar / Factory / watchdog / CLI share one warm snapshot
-  // instead of each re-running a full ~9s / ~170MB gather. Publish-own only
-  // (no cross-host SSH — same N² lesson as RUSH-2061). Short interval keeps
-  // live status fresh; forceRefresh still re-gathers. Additive sibling of
-  // fleetCacheInterval — does not touch the reaper tick.
-  let warmingSessionCache = false;
-  // Import once so the interval/kickoff constants stay the single source of truth
-  // (SESSION_CACHE_WARM_* in session-cache.ts). Dynamic import of the warm fn
-  // itself stays inside the tick so a cold daemon boot does not pay the load.
-  const sessionCacheWarmTiming = import('./session/session-cache.js').then((m) => ({
-    intervalMs: m.SESSION_CACHE_WARM_INTERVAL_MS,
-    kickoffMs: m.SESSION_CACHE_WARM_KICKOFF_MS,
-    publish: m.publishLocalActiveSessions,
-  }));
-  const runSessionCacheWarm = async () => {
-    if (warmingSessionCache) return;
-    warmingSessionCache = true;
-    try {
-      const { publish } = await sessionCacheWarmTiming;
-      const r = await publish();
-      log('INFO', `session cache warm: ${r.sessions.length} local session(s)`);
-    } catch (err) {
-      log('ERROR', `session cache warm failed: ${(err as Error).message}`);
-    } finally {
-      warmingSessionCache = false;
-    }
-  };
-  // Intervals resolved from the module constants (fallback matches the defaults
-  // if the import is still pending — the first tick uses the live import).
-  let sessionCacheInterval: ReturnType<typeof setInterval> | undefined;
-  let sessionCacheKickoff: ReturnType<typeof setTimeout> | undefined;
-  void sessionCacheWarmTiming.then(({ intervalMs, kickoffMs }) => {
-    sessionCacheInterval = setInterval(() => { void runSessionCacheWarm(); }, intervalMs);
-    sessionCacheKickoff = setTimeout(() => { void runSessionCacheWarm(); }, kickoffMs);
-  });
-
-  // Usage refresh: keep the usage cache the `agents run` router reads
-  // (RUSH-2061, readOnly hot path) fresh, WITHOUT the hot path ever fetching.
-  // This host is the sole writer for its own local accounts. The tick wakes
-  // every 60s (USAGE_REFRESH_TICK_MS) to consider due accounts; each account
-  // is scheduled at a fixed 5-minute cadence (REFRESH_INTERVAL_MS), capped at
-  // ~12 provider calls/account/hour, skipped under 429 backoff, and fetched
-  // with fileOnly credentials so a background tick never pops macOS Touch ID.
-  // Overlap-guarded: a slow pass cannot stack concurrent refresh loops.
-  let refreshingUsage = false;
-  const runUsageRefreshTick = async () => {
-    if (refreshingUsage) return;
-    refreshingUsage = true;
-    try {
-      const { runUsageRefresh, buildLocalUsageAccounts } = await import('./usage-refresh.js');
-      const { writeClaudeUsageCache } = await import('./usage.js');
-      const { usageRateLimitedUntil } = await import('./usage-backoff.js');
-      const r = await runUsageRefresh({
-        listAccounts: buildLocalUsageAccounts,
-        writeUsageCache: writeClaudeUsageCache,
-        backoffUntil: usageRateLimitedUntil,
-      });
-      // Always log a compact summary so "is refresh working?" is greppable even
-      // when every account was not-due (proves the tick ran).
-      log(
-        'INFO',
-        `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped`,
-      );
-    } catch (err) {
-      log('ERROR', `usage refresh failed: ${(err as Error).message}`);
-    } finally {
-      refreshingUsage = false;
-    }
-  };
-  // 60s wake matches USAGE_REFRESH_TICK_MS in usage-refresh.ts (keep in sync).
-  const usageRefreshInterval = setInterval(() => { void runUsageRefreshTick(); }, 60_000);
-  const usageRefreshKickoff = setTimeout(() => { void runUsageRefreshTick(); }, 30_000);
-
   // RUSH-1817: the startup host decision above is one-shot. If a standalone
   // broker answered agentPing() at daemon start, the daemon declined to host —
   // but should that standalone later die or crash-loop, nothing takes over and
@@ -1156,24 +908,8 @@ export async function runDaemon(): Promise<void> {
     monitorEngine.stop();
     await browserIPC.stop();
     clearInterval(monitorInterval);
-    clearInterval(watchdogInterval);
-    clearTimeout(watchdogKickoff);
     clearInterval(healInterval);
     clearTimeout(healKickoff);
-    clearInterval(autoDispatchInterval);
-    clearTimeout(autoDispatchKickoff);
-    clearInterval(deviceProbeInterval);
-    clearTimeout(deviceProbeKickoff);
-    clearInterval(tmuxReconcileInterval);
-    clearTimeout(tmuxReconcileKickoff);
-    clearInterval(launchHealthInterval);
-    clearTimeout(launchHealthKickoff);
-    clearInterval(fleetCacheInterval);
-    clearTimeout(fleetCacheKickoff);
-    if (sessionCacheInterval) clearInterval(sessionCacheInterval);
-    if (sessionCacheKickoff) clearTimeout(sessionCacheKickoff);
-    clearInterval(usageRefreshInterval);
-    clearTimeout(usageRefreshKickoff);
     clearInterval(brokerSelfHealInterval);
     clearInterval(keychainReapInterval);
     hostedBroker?.close();

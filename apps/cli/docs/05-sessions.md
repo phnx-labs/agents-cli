@@ -1162,28 +1162,28 @@ gated exactly like `showHost`): it previously showed which terminal a session ra
 never what it was doing, so a session that had lost its host was indistinguishable from a
 healthy one in the row list.
 
-## Favorites (starred sessions)
+## Favorites
 
-`*` in the interactive browser stars the highlighted session; `f` filters the list to
-the starred ones. Outside a TTY, `agents sessions favorite <id>` (`--remove`, `--list`,
+`*` in the interactive browser favorites the highlighted session; `f` filters the list to
+the favorited ones. Outside a TTY, `agents sessions favorite <id>` (`--remove`, `--list`,
 `--json`) does the same, and `agents sessions --favorites` is the flag twin of `f` — so
-the `y` copy-cmd round-trips a starred view into a command.
+the `y` copy-cmd round-trips a favorited view into a command.
 
-Stars live in `~/.agents/.history/favorites.json` keyed by session id, **not** in
+Favorites live in `~/.agents/.history/favorites.json` keyed by session id, **not** in
 `sessions.db`. The index is a rebuildable cache — a reindex re-derives every row from
 the transcripts on disk — and a favorite is not derivable from a transcript, so a column
-there would be silently lost on the next rebuild. `.history` is never pruned, so a star
+there would be silently lost on the next rebuild. `.history` is never pruned, so a favorite
 survives that rebuild.
 
 Favorites are **per-machine**. Session sync carries `.history/backups/`
-(`lib/session/sync/agents.ts`), not this file, so a session starred on one box is not
-starred on another — even though the session id itself is fleet-wide. Carrying them
+(`lib/session/sync/agents.ts`), not this file, so a session favorited on one box is not
+favorited on another — even though the session id itself is fleet-wide. Carrying them
 would mean adding the file to the sync manifest.
 
 That store is per-machine but the FILTER is not scoped to one: `--favorites` applies to
-every row in the merged fleet view, so a peer's session you starred from here still
+every row in the merged fleet view, so a peer's session you favorited from here still
 shows. This is why the live `--active` path filters after the remote fan-out rather than
-forwarding the flag to each peer — a peer has its own (different) star list.
+forwarding the flag to each peer — a peer has its own (different) favorites list.
 
 ## Export / Import (portable bundles)
 

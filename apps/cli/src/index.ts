@@ -237,6 +237,22 @@ if (process.argv[2] === '__daemon-run') {
   process.exit(process.exitCode ?? 0);
 }
 
+// One-shot invocation of a migrated daemon housekeeping tick (RUSH-2353). The
+// shipped system routines (`watchdog`, `device-probe`, `fleet-cache-warm`, ...)
+// run this as their `command:` instead of the daemon holding a setInterval —
+// same tick body, now scheduled/tracked/pinnable through the routines system.
+if (process.argv[2] === '__daemon-tick') {
+  const name = process.argv[3] || '';
+  const { runDaemonTick } = await import('./lib/daemon-ticks.js');
+  try {
+    await runDaemonTick(name);
+    process.exit(0);
+  } catch (err) {
+    process.stderr.write(`[agents] daemon tick '${name}' failed: ${(err as Error).message}\n`);
+    process.exit(1);
+  }
+}
+
 // White-label: the shim for a brand (e.g. `jack`) exports AGENTS_BRAND, so the
 // CLI presents its own name/help/errors as the brand. Unbranded (AGENTS_BRAND
 // unset) resolves to 'agents' and everything below is byte-identical to before.

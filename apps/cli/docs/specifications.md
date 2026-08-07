@@ -2281,11 +2281,21 @@ nothing but its own view cache.
 - **SING-1 (MUST).** Every fleet-affecting capability MUST have exactly one scheduler
   and one executor: the agents-cli daemon (`agents __daemon-run`,
   `apps/cli/src/lib/daemon.ts`) or a CLI command the daemon or the user drives.
-  Status: **Current** for routines (`lib/scheduler.ts`), the daemon-native watchdog
-  (`lib/daemon.ts`, WD-1), and rotate (`lib/watchdog/rotate.ts`). `agents daemon` is
-  the user-facing runtime surface for this singular process (`start`/`stop`/
-  `restart`/`reload`/`status`/`services`/`logs`/`doctor`, `commands/daemon.ts`) —
-  it observes and controls the one daemon SING-1 requires, never a second one.
+  Status: **Current** for routines (`lib/scheduler.ts`) and rotate
+  (`lib/watchdog/rotate.ts`). `agents daemon` is the user-facing runtime
+  surface for this singular process (`start`/`stop`/`restart`/`reload`/
+  `status`/`services`/`logs`/`doctor`, `commands/daemon.ts`) — it observes and
+  controls the one daemon SING-1 requires, never a second one. The watchdog,
+  device-probe, tmux-reconcile, launch-health, fleet-cache-warm,
+  session-cache-warm, usage-refresh, and auto-dispatch ticks (RUSH-2353) were
+  formerly hardcoded `setInterval`s inside `runDaemon()` — a second, unowned
+  scheduling path duplicating what routines already provide (declaration, run
+  history, pause, device pin). They are now shipped system routines
+  (`gh:phnx-labs/.agents-system` `routines/*.yml`) whose `command:` invokes
+  the migrated tick body (`lib/daemon-ticks.ts`) via `agents __daemon-tick
+  <name>`, fired by the same pid-claimed `JobScheduler` as every other
+  routine — one scheduler, one executor, same as before, minus the duplicate
+  concept.
 - **SING-2 (MUST NOT).** A UI surface (apps/factory, the menubar app, the iOS app)
   MUST NOT own a timer, watcher, or loop that detects a condition and performs a
   fleet-affecting action. Detection and decision MUST live in the CLI, which holds
@@ -2397,6 +2407,13 @@ is not two daemons existing — it is two daemons consuming the **same** input.
 
 ### 5. Known gaps
 
+- **SING-GAP-2 (resolved, RUSH-2353).** `auto-dispatch` — the tick that polls Linear
+  for delegated tickets and dispatches an agent — was a hardcoded daemon
+  `setInterval` with no `devices` allowlist, so it violated SING-9: every daemon on
+  a fleet running the same opted-in project independently polled and could dispatch
+  the same ticket. It is now the shipped `auto-dispatch` system routine, which
+  satisfies SING-9(a) via an owner pin: `agents routines devices auto-dispatch --set
+  <device>`.
 - **SING-GAP-1.** The Factory monitor leader/follower protocol
   (apps/factory `src/monitor/`) still coordinates presence fan-out inside the
   extension with its own election. It performs no fleet-affecting action today
@@ -2429,6 +2446,10 @@ not the watchdog's.
 - **WD-1 (MUST).** The agents daemon MUST be the sole automatic watchdog scheduler and
   executor. When device-local `watchdog.enabled` is true it MUST run one bounded,
   non-overlapping pass every three minutes. UI surfaces MUST only render persisted state.
+  As of RUSH-2353 the daemon fires this pass through the routine scheduler (the shipped
+  `watchdog` system routine, `command: agents __daemon-tick watchdog` ->
+  `runWatchdogTick` in `lib/daemon-ticks.ts`, still gated on `watchdog.enabled`) rather
+  than a bare `setInterval` — the daemon remains the sole scheduler/executor either way.
 - **WD-2 (MUST).** Delivery MUST occur only when `--nudge` is set; without it a tick is a
   dry run that reports "would nudge" and delivers nothing (`lib/watchdog/runner.ts`).
 - **WD-3 (MUST).** `on`/`off` MUST write the typed device-local `watchdog.enabled`

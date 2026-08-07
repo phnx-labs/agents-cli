@@ -1,6 +1,6 @@
 /**
- * Favorited (starred) sessions — the durable "keep this one handy" mark a human
- * puts on a session, deliberately kept OUT of the session index.
+ * Favorited sessions — the durable "keep this one handy" mark a human puts on a
+ * session, deliberately kept OUT of the session index.
  *
  * `sessions.db` is a rebuildable CACHE: a reindex or a schema bump throws its
  * rows away and re-derives them from the transcripts on disk. A favorite is not
