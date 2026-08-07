@@ -193,6 +193,28 @@ describe('resolveRoutineExecutionContext', () => {
     expect(res.absoluteCwd).toBe('/home/remoteuser/projects/svc');
   });
 
+  it('builds the target path with the TARGET machine separator, not this host\'s', () => {
+    // The target home belongs to whichever box runs the routine. Joining with the
+    // local separator built `\home\remoteuser\...` for a POSIX target when the
+    // scheduler ran on Windows (and the mirror image the other way), so the
+    // separator is inferred from the home itself. Both directions are asserted
+    // here, so the case that is cross-platform on THIS runner is still covered.
+    const posixTarget = resolveRoutineExecutionContext({
+      name: 'r', kind: 'agent', mode: 'host',
+      targetHome: '/home/remoteuser', cwd: 'projects/svc', probe: undefined,
+    });
+    expect(posixTarget.absoluteCwd).toBe('/home/remoteuser/projects/svc');
+
+    const windowsTarget = resolveRoutineExecutionContext({
+      name: 'r', kind: 'agent', mode: 'host',
+      targetHome: 'C:\\Users\\remoteuser', cwd: 'projects/svc', probe: undefined,
+    });
+    expect(windowsTarget.absoluteCwd).toBe('C:\\Users\\remoteuser\\projects\\svc');
+    // The portable form stays POSIX-shaped whatever the target — it is the wire
+    // format, not a filesystem path.
+    expect(windowsTarget.resolvedCwd).toBe('~/projects/svc');
+  });
+
   it('cloud placement with a bare cwd (no project binding) pauses with cloud_context_unsupported', () => {
     const res = resolveRoutineExecutionContext(inputs({ cwd: 'work', mode: 'cloud', probe: undefined }));
     expect(res.ready).toBe(false);
@@ -214,6 +236,10 @@ describe('resolveRoutineExecutionContext', () => {
 
   it('an unwritable directory pauses with workspace_not_writable', () => {
     if (process.getuid && process.getuid() === 0) return; // root bypasses W_OK
+    // Windows ignores the mode bits chmod sets, so W_OK still succeeds and there
+    // is no unwritable directory to detect. Same reason as the root guard above:
+    // the platform cannot produce the precondition, not that the check is wrong.
+    if (process.platform === 'win32') return;
     const dir = path.join(home, 'ro');
     fs.mkdirSync(dir);
     fs.chmodSync(dir, 0o500);

@@ -124,19 +124,35 @@ export interface ResolvedExecutionContext {
 // --- target-aware path helpers (do NOT use project-root.ts's local-HOME-bound
 // forms: resolution must root at the execution target's home, not this box's) ---
 
+/**
+ * Path flavour of the EXECUTION TARGET, inferred from its own home string.
+ *
+ * The target home belongs to whichever machine will run the routine, which need
+ * not be this one — a Windows box can schedule onto a Linux target. Joining with
+ * the LOCAL separator therefore built `\home\user\svc` for a POSIX target (and
+ * would build `C:/Users/x/svc` the other way), so these helpers key off the home
+ * path's shape instead of `process.platform`. Same-platform behaviour is
+ * unchanged; only the cross-platform case is fixed.
+ */
+function targetPath(home: string): typeof path.posix {
+  return /^[A-Za-z]:[\\/]/.test(home) || home.includes('\\') ? path.win32 : path.posix;
+}
+
 /** Expand a leading `~`/`$HOME` against the target home; pass other values through. */
 export function expandTargetHome(home: string, p: string): string {
   if (p === '~' || p === '$HOME') return home;
-  if (p.startsWith('~/')) return path.join(home, p.slice(2));
-  if (p.startsWith('$HOME/')) return path.join(home, p.slice('$HOME/'.length));
+  const tp = targetPath(home);
+  if (p.startsWith('~/')) return tp.join(home, p.slice(2));
+  if (p.startsWith('$HOME/')) return tp.join(home, p.slice('$HOME/'.length));
   return p;
 }
 
 /** Rewrite an absolute path under the target home to its portable `~/…` form; pass others through. */
 export function toTargetPortable(home: string, abs: string): string {
-  const rel = path.relative(home, abs);
+  const tp = targetPath(home);
+  const rel = tp.relative(home, abs);
   if (rel === '') return '~';
-  if (!rel.startsWith('..') && !path.isAbsolute(rel)) return '~/' + rel.split(path.sep).join('/');
+  if (!rel.startsWith('..') && !tp.isAbsolute(rel)) return '~/' + rel.split(tp.sep).join('/');
   return abs;
 }
 
@@ -145,10 +161,17 @@ export function isBareRelative(p: string): boolean {
   return !path.isAbsolute(p) && !p.startsWith('~') && !p.startsWith('$HOME');
 }
 
-/** True when `child` is `base` or strictly beneath it (no `..` escape). */
+/**
+ * True when `child` is `base` or strictly beneath it (no `..` escape).
+ *
+ * Compares in the BASE's own path flavour (see {@link targetPath}) — both
+ * arguments are target-side paths, and comparing a POSIX pair with Windows
+ * semantics (or the reverse) answers about the wrong filesystem.
+ */
 function isInside(baseAbs: string, childAbs: string): boolean {
-  const rel = path.relative(baseAbs, childAbs);
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  const tp = targetPath(baseAbs);
+  const rel = tp.relative(baseAbs, childAbs);
+  return rel === '' || (!rel.startsWith('..') && !tp.isAbsolute(rel));
 }
 
 function pause(
@@ -230,7 +253,10 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
       }
       if (isBareRelative(cwd)) {
         const baseAbs = expandTargetHome(targetHome, projBase);
-        const joinedAbs = path.resolve(baseAbs, cwd);
+        // Target-side join: `path.resolve` would use this host's separator and,
+        // for a target home this host does not consider absolute, prepend the
+        // local process cwd.
+        const joinedAbs = targetPath(targetHome).resolve(baseAbs, cwd);
         if (!isInside(baseAbs, joinedAbs)) {
           return pause(base, {
             code: 'cwd_not_portable',
@@ -275,8 +301,9 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
         message: `absolute cwd '${cwd}' is outside the target home and cannot travel to ${mode} placement — use a home-relative path`,
       });
     }
-    // Bare relative cwd (no usable project base): anchor at the target home.
-    return finalize(toTargetPortable(targetHome, path.resolve(targetHome, cwd)), 'cwd_missing');
+    // Bare relative cwd (no usable project base): anchor at the target home,
+    // in the target's own path flavour (see the joinedAbs note above).
+    return finalize(toTargetPortable(targetHome, targetPath(targetHome).resolve(targetHome, cwd)), 'cwd_missing');
   }
 
   // 3. Neither field.
