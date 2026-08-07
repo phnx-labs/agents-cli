@@ -1465,6 +1465,21 @@ describe('agents sessions', () => {
     }
   });
 
+  it.each([
+    [['sessions', '--version']],
+    [['sessions', '--agent', 'claude', '--version', '--no-interactive']],
+  ])('rejects a sessions --version flag with no value: %j', (args) => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-version-without-value-'));
+    try {
+      writeUpdateCache(tempHome);
+      const result = runAgents(args, tempHome, tempHome);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("option '--version <version>' argument missing");
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it('lists Gemini sessions from a managed version home', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-gemini-version-'));
 

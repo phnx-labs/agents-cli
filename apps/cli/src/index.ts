@@ -1235,7 +1235,12 @@ const passedArgs = process.argv.slice(2);
 // other command retain the root documentation flag unchanged.
 if (passedArgs[0] === 'sessions') {
   const nestedVersionIndex = passedArgs.indexOf('--version', 1);
-  if (nestedVersionIndex >= 0 && nestedVersionIndex + 1 < passedArgs.length) {
+  if (nestedVersionIndex >= 0) {
+    const nestedVersion = passedArgs[nestedVersionIndex + 1];
+    if (!nestedVersion || nestedVersion.startsWith('-')) {
+      console.error("error: option '--version <version>' argument missing");
+      process.exit(1);
+    }
     passedArgs[nestedVersionIndex] = '--session-version';
     process.argv[nestedVersionIndex + 2] = '--session-version';
   }
