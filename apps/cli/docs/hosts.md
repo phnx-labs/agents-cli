@@ -83,8 +83,16 @@ version and the login command); with several it opens the account picker, where
 an auth-blocked row is selectable and labelled `launch to sign in`. A
 throttled account is never launched this way — only a window reset clears
 `rate_limited` / `out_of_credits`, so those still exit nonzero with the message
-above. Off a TTY nothing can complete a login, so both classes fail loud there;
-the error adds the harness's login command alongside `--strategy pinned`.
+above.
+
+The launch requires a **human-facing** run, which is two conditions, not one: a
+real TTY *and* no `--json`. Off a TTY nothing can complete a login, and `--json`
+marks a machine consumer that must never be handed a picker or dropped into a
+login TUI — so both keep failing loud, with the harness's login command added
+alongside `--strategy pinned`. `--quiet` does not block the launch; it only
+suppresses the explanatory lines. The gate is `signInLaunchDecision` in
+`src/commands/run-account-picker.ts`, mirroring `Surface.interactive` from
+`src/commands/utils.ts`.
 
 
 Pass `all` as the `--host` / `--device` value to fan any fleet-aware command out
