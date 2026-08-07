@@ -114,12 +114,17 @@ export function resolveNativeBinaryPath(
   const historyDir = options.historyDir ?? getHistoryDir();
 
   let canonicalCandidate: string;
-  let canonicalShimsDir: string;
   try {
     canonicalCandidate = fs.realpathSync(candidate);
-    canonicalShimsDir = fs.realpathSync(shimsDir);
   } catch {
     return null;
+  }
+
+  let canonicalShimsDir = path.resolve(shimsDir);
+  try {
+    canonicalShimsDir = fs.realpathSync(shimsDir);
+  } catch {
+    /* An absent shims dir cannot make an existing native binary invalid. */
   }
 
   if (!pathIsWithin(canonicalCandidate, canonicalShimsDir)) return canonicalCandidate;
