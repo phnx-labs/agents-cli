@@ -2401,15 +2401,68 @@ is not two daemons existing — it is two daemons consuming the **same** input.
   without an owner pin ship with a test that two concurrent fires cannot process
   the same item.
 
+#### 3.2 One daemon per machine — last-wins takeover, not first-wins refusal
+
+The pid-file claim in SING-5 guarantees one scheduler; SING-11/SING-12 fix *which*
+daemon survives and how the loser is torn down, so a second install can never leave
+two daemons — the double-fire root cause (RUSH-2352: four `__daemon-run` processes
+from four installs — homebrew, `.local` dev, nvm, npx — observed live on one box).
+
+- **SING-11 (MUST).** At most one daemon MUST be alive per machine, enforced by
+  **last-wins takeover**: a second `agents __daemon-run` — from ANY install, not
+  only the same launch entry — MUST evict the incumbent, never defer to it.
+  `claimDaemonInstance` (`lib/daemon.ts`) SIGTERMs the live pid-file owner and MUST
+  wait for it to be provably dead — its graceful `handleShutdown` releasing the
+  browser IPC binding (`await browserIPC.stop()`) and the secrets broker socket
+  (`hostedBroker?.close()`), or a `killTree` escalation after the grace window —
+  **before binding any of its own resources**. Binding before the incumbent's
+  release recreates the two-brokers-on-one-socket orphan (`daemon.ts` broker
+  hosting), so the pid file MUST NOT be written until the prior owner is dead.
+  `reapStrayDaemons` (`lib/daemon.ts`) MUST NOT scope its reap to `process.argv[1]`
+  — any `__daemon-run` on the box is a reap target regardless of install. This
+  INVERTS the historical first-wins behavior, where the incoming daemon logged
+  `Another daemon already owns the pid file` and exited, leaving the incumbent
+  (however stale, however many installs deep) running.
+- **SING-11a (MUST).** In-flight detached routine children (`runner.ts`'s `unref`'d
+  spawns, which run in their own process group and survive daemon death) MUST NOT
+  be killed by takeover — severing a live agent mid-run is worse than a daemon
+  restart. The evicting SIGTERM/`killTree` reaches only the incumbent daemon's pid,
+  never those children, and the new daemon adopts them by construction: its
+  `monitorRunningJobs` (`runner.ts`) reconciles every `running` on-disk run record
+  by pid liveness (`isPidOurs`), never by which daemon spawned it, so a live child
+  is picked back up on the next tick.
+- **SING-12 (MUST).** `stopDaemon` (`lib/daemon.ts`) MUST assert its postcondition,
+  not assume it: after the SIGTERM → grace → `killTree` sequence it MUST verify the
+  browser IPC binding was released, the secrets broker socket was released (a stale
+  socket present on disk but unreachable is the orphan of SING-11), and no
+  `__daemon-run` (any install) survives — and it MUST return a structured result
+  naming what released, what survived, and any detached children (which survive
+  deliberately per SING-11a and are reported, never killed). It MUST NOT report
+  success on an unverified stop (RUSH-2355).
+
 ### 4. Given/When/Then scenarios
 
 - **GIVEN** a session hits its weekly account limit, **WHEN** the daemon watchdog
   tick detects it, **THEN** the daemon alone decides and executes the rotate (or the
   skip) — no UI surface fires a second rotate for the same session.
-- **GIVEN** two daemon processes are alive on one machine, **WHEN** a routine's cron
-  occurrence arrives, **THEN** the pid-file claim ensures exactly one scheduler
-  executes it; the second daemon never runs its own `JobScheduler`
-  (`lib/daemon.ts`).
+- **GIVEN** a daemon already owns the pid file, **WHEN** a second `agents __daemon-run`
+  starts — from the same install or a different one — **THEN** last-wins takeover
+  makes the newcomer the survivor: `claimDaemonInstance` SIGTERMs the incumbent,
+  waits for it to be provably dead (releasing its broker + browser IPC), then binds,
+  so exactly one daemon is ever alive and no two `JobScheduler`s run concurrently
+  (`lib/daemon.ts`, SING-11). The first-wins path where the newcomer exited and left
+  the incumbent running is gone.
+- **GIVEN** the incumbent daemon has an in-flight detached routine child running,
+  **WHEN** takeover evicts that daemon, **THEN** the child survives (a different
+  process in its own group) and the new daemon adopts it via `monitorRunningJobs`
+  pid-liveness reconciliation — takeover never kills a live agent mid-run
+  (SING-11a).
+- **GIVEN** a wedged daemon that ignores SIGTERM, **WHEN** `agents daemon stop` runs,
+  **THEN** stop escalates to `killTree` after the grace window, then VERIFIES the
+  broker socket and browser IPC binding released and no `__daemon-run` survives, and
+  returns a structured result (exit non-zero if any resource could not be released),
+  reporting surviving detached children rather than pretending the tree is clean
+  (SING-12).
 - **GIVEN** a user disables a fleet-affecting capability from the Factory palette,
   **WHEN** the command completes, **THEN** the CLI's config is the state that
   changed (`agents watchdog rotate off`), and the daemon, the menubar, and every
