@@ -1369,7 +1369,8 @@ a stable per-account key:
   surfaces an email when one is readable, else a stable account id, else a bare
   `signed in`.
 - **Usage bars** — a separate network pass ([`src/lib/usage.ts`](../src/lib/usage.ts))
-  fetches live quota and renders `S:`/`W:` bars + plan. It's **stale-while-revalidate**
+  fetches live quota and renders `S:`/`W:`/`M:` bars + plan, according to each
+  provider's reported window duration. It's **stale-while-revalidate**
   (on-disk cache under `~/.agents/.cache/`, keyed per account: 2-min fresh, 24-h
   block) so `agents view` stays off the network on the hot path.
 - **Routing reads the same cache, CACHE-ONLY — never on the hot path's network
