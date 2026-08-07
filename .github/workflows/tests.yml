@@ -59,6 +59,8 @@ jobs:
         with:
           node-version: 24
       - run: bun install --frozen-lockfile
+      - name: Verify the command index is up to date
+        run: bash scripts/verify-command-index.sh
       - name: Type-check and build
         run: bun run build
       - name: Build the standalone binary
@@ -102,7 +104,11 @@ jobs:
         working-directory: apps/cli
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - run: bun install --frozen-lockfile
       - run: bash scripts/verify-docs.sh
+      - name: Verify the command index is up to date
+        run: bash scripts/verify-command-index.sh
 
   factory:
     needs: scope
