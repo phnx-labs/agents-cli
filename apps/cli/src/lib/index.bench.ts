@@ -176,12 +176,12 @@ describe('spawnDetachedSync — real detached child_process.spawn against the bu
  *      (commander prints help and exits 0) without touching stdin. `--help`
  *      does skip checkForUpdates/spawnDetachedSync (benched above, guarded by
  *      `!helpOrVersionRequested` at index.ts:1322) and ensureInitialized
- *      (index.ts:1373-1378, the only member of the migration triad that
+ *      (index.ts:1373-1381, the only member of the migration triad that
  *      carries that guard -- the sibling migration-triad bench in PR #2277
  *      covers that path), so this isolates the registration/import cost from
  *      those pieces instead of conflating them. It does NOT skip
  *      foldLegacySystemRepo (index.ts:1366-1369) or runMigration
- *      (index.ts:1386-1391): both are gated only by the AGENTS_SKIP_MIGRATION
+ *      (index.ts:1389-1391): both are gated only by the AGENTS_SKIP_MIGRATION
  *      env var, so a `--help` row still pays their `await import(
  *      './lib/migrate.js')`. An earlier revision of this docblock claimed
  *      runMigration was skipped too; it is not.
@@ -333,12 +333,22 @@ const DIST_ROOT = path.dirname(CLI_ENTRY);
  * a dev build (dev-build.ts:13-23). A real link, not a fixture: the readlink is
  * a real syscall on a real inode.
  *
- * Named per-pid and removed in afterAll: a fixed name races two concurrent
- * runs of this file into an EEXIST between the rmSync and the symlinkSync
- * (which, at module scope, kills the whole file), and leaks the link into
- * tmpdir when the run ends.
+ * Three things keep the link from becoming a hazard, and they are
+ * complementary rather than alternatives:
+ *   - Named per-pid, so two concurrent runs of this file (two worktrees on one
+ *     box, or CI beside a local run) cannot collide on the same path. A fixed
+ *     name raced them into an EEXIST at MODULE scope, which kills the whole
+ *     file rather than one row.
+ *   - Removed in afterAll, so a normal run leaves nothing in tmpdir.
+ *   - Unlinked before creation anyway, because afterAll does NOT run when a
+ *     module-scope throw happens after it is registered (verified in review:
+ *     the hook is skipped and the file exits 1). A leaked link would then make
+ *     `symlinkSync` throw EEXIST for whichever later worker lands on that pid,
+ *     killing that run at module scope for an unrelated reason. `force: true`
+ *     unlinks the link itself without following it, and is a no-op when absent.
  */
 const SHIM_LINK = path.join(os.tmpdir(), `agents-cli-bench-shim-agents-${process.pid}`);
+fs.rmSync(SHIM_LINK, { force: true });
 fs.symlinkSync(CLI_ENTRY, SHIM_LINK);
 afterAll(() => {
   fs.rmSync(SHIM_LINK, { force: true });
@@ -422,12 +432,6 @@ const SYNC_COMMANDS_SPEC = distUrl('lib/secrets/sync-commands.js');
 const SECRETS_AGENT_SPEC = distUrl('lib/secrets/agent.js');
 
 /**
- * Prove every cold-import spec resolves BEFORE any row is timed. Module scope,
- * not a bench callback, so a bad or moved specifier throws where vitest
- * actually reports it — the file fails instead of quietly posting `NaN` for
- * the row that measured nothing.
- */
-/**
  * The two exit codes that mean `__secrets-ping` reached the intercept at
  * index.ts:71-84 and answered: 0 = a live broker replied (darwin, unlocked),
  * 3 = nothing was listening (agent.ts:1094-1097 returns one or the other).
@@ -436,6 +440,14 @@ const SECRETS_AGENT_SPEC = distUrl('lib/secrets/agent.js');
  */
 const PING_EXIT_CODES = [0, 3] as const;
 
+/**
+ * Prove every cold-import spec resolves, and that the token intercept still
+ * answers, BEFORE any row is timed. Module scope, not a bench callback, so a
+ * bad or moved specifier throws where vitest actually reports it — the file
+ * fails (exit 1, a real Failed Suite) instead of quietly posting `NaN` for the
+ * row that measured nothing. The in-row checks below are the same assertions
+ * one layer down; they stop a false number, this is what makes it loud.
+ */
 (function preflightColdImports(): void {
   for (const spec of [SYNC_COMMANDS_SPEC, SECRETS_AGENT_SPEC]) coldEval([spec]);
   // Same reasoning for the one runCli row whose number is only meaningful if
@@ -478,7 +490,7 @@ describe('root program construction (index.ts:243-251) — commander work every 
 });
 
 describe('whole-invocation anchor — real cold `node dist/index.js --version` (the denominator for every row above)', () => {
-  bench('`agents --version` — pays the full eager module graph (index.ts:10-215, 513-524), detectDevBuild (index.ts:113), the program chain (index.ts:243-251), AND the two migration hops that carry no help/version guard: foldLegacySystemRepo (index.ts:1366-1369) and runMigration (index.ts:1386-1391), both gated only by AGENTS_SKIP_MIGRATION, so `await import("./lib/migrate.js")` is inside this number. It skips only checkForUpdates + spawnDetachedSync (index.ts:1322) and ensureInitialized (index.ts:1373-1378)', () => {
+  bench('`agents --version` — pays the full eager module graph (index.ts:10-215, 513-524), detectDevBuild (index.ts:113), the program chain (index.ts:243-251), AND the two migration hops that carry no help/version guard: foldLegacySystemRepo (index.ts:1366-1369) and runMigration (index.ts:1389-1391), both gated only by AGENTS_SKIP_MIGRATION, so `await import("./lib/migrate.js")` is inside this number. It skips only checkForUpdates + spawnDetachedSync (index.ts:1322) and ensureInitialized (index.ts:1373-1381)', () => {
     runCli(['--version']);
   }, { time: 4000, iterations: 15 });
 
