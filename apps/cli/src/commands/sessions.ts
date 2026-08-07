@@ -58,7 +58,7 @@ import { getShimsDir } from '../lib/state.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
 import { itemPicker } from '../lib/picker.js';
 import { resolveSessionAlias } from '../lib/session/actor-sidecar.js';
-import { resolveVersionAliasLoose } from '../lib/versions.js';
+import { listInstalledVersions, resolveVersionAliasLoose } from '../lib/versions.js';
 import { getAgentsInvocation } from '../lib/daemon.js';
 import { sessionRecoveryRunArgs } from '../lib/session/recovery.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
@@ -112,6 +112,9 @@ function collectQueryClause(value: string, previous: string[]): string[] {
 
 interface SessionFilterOptions {
   agent?: string;
+  version?: string;
+  /** Internal Commander spelling after index.ts disambiguates root --version. */
+  sessionVersion?: string;
   project?: string;
   all?: boolean;
   teams?: boolean;
@@ -217,6 +220,52 @@ function applyAgentShorthands(options: SessionsOptions): void {
   if (options.agent) return;
   const hit = AGENT_SHORTHANDS.find((name) => (options as Record<string, unknown>)[name] === true);
   if (hit) options.agent = hit;
+}
+
+type InstalledVersionsForAgent = (agent: SessionAgentId) => string[];
+
+/**
+ * Treat a positional `agent@version` as a structured filter only when it names
+ * a real installed version. Everything else remains ordinary free-text search.
+ */
+export function parseInstalledAgentVersionQuery(
+  query: string | undefined,
+  installedVersions: InstalledVersionsForAgent = (agent) => (
+    agent in AGENTS ? listInstalledVersions(agent as AgentId) : []
+  ),
+): string | undefined {
+  const trimmed = query?.trim();
+  if (!trimmed) return undefined;
+  const at = trimmed.indexOf('@');
+  if (at <= 0 || at !== trimmed.lastIndexOf('@') || at === trimmed.length - 1) return undefined;
+
+  const agentName = trimmed.slice(0, at).toLowerCase();
+  if (!SESSION_AGENTS.includes(agentName as SessionAgentId)) return undefined;
+  const agent = agentName as SessionAgentId;
+  const version = trimmed.slice(at + 1);
+  return installedVersions(agent).includes(version) ? `${agent}@${version}` : undefined;
+}
+
+function applyVersionFilters(query: string | undefined, options: SessionsOptions): string | undefined {
+  const explicitVersion = options.version ?? options.sessionVersion;
+  if (explicitVersion) {
+    if (!options.agent) {
+      throw new Error('--version requires --agent (for example: --agent claude --version 2.1.181).');
+    }
+    if (options.agent.includes('@')) {
+      throw new Error('Pass the version either in --agent <agent@version> or with --version, not both.');
+    }
+    options.agent = `${options.agent}@${explicitVersion}`;
+  }
+
+  if (!options.agent) {
+    const positionalFilter = parseInstalledAgentVersionQuery(query);
+    if (positionalFilter) {
+      options.agent = positionalFilter;
+      return undefined;
+    }
+  }
+  return query;
 }
 
 interface ClaudeHistoryEntry {
@@ -2096,6 +2145,13 @@ async function sessionsAction(
   // shorthands fold into --agent, and --device is an alias for --host (both
   // resolve against the same device registry).
   applyAgentShorthands(options);
+  try {
+    query = applyVersionFilters(query, options);
+  } catch (error) {
+    console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+    process.exitCode = 1;
+    return;
+  }
   // --device / --devices both alias --host. A bare `all` / `fleet` sentinel means
   // "search every peer" — which is already the default — so it resolves to no
   // explicit host set rather than erroring on a device literally named "all".
@@ -4162,6 +4218,12 @@ export function filterSessionsByQuery(
   const trimmed = query?.trim().toLowerCase() || '';
   if (!trimmed) return sessions;
 
+  const installedAgentVersion = parseInstalledAgentVersionQuery(trimmed);
+  if (installedAgentVersion) {
+    const { agent, version } = parseAgentFilter(installedAgentVersion);
+    return sessions.filter((session) => session.agent === agent && session.version === version);
+  }
+
   const terms = trimmed.split(/\s+/).filter(Boolean);
   const contentIndex = searchContentIndex(sessions, trimmed);
 
@@ -4832,6 +4894,10 @@ export function registerSessionsCommands(program: Command): void {
       'Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active` (alias: `agents roster`).',
     )
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
+    .addOption(
+      new Option('--session-version <version>', 'Internal spelling for the public sessions --version filter')
+        .hideHelp(),
+    )
     .option('--claude', 'Shorthand for --agent claude')
     .option('--codex', 'Shorthand for --agent codex')
     .option('--kimi', 'Shorthand for --agent kimi')
@@ -4926,6 +4992,10 @@ export function registerSessionsCommands(program: Command): void {
       # Search across every directory, not just this project
       agents sessions "topic" --all
 
+      # Filter one installed harness version (equivalent forms)
+      agents sessions claude@2.1.181
+      agents sessions --agent claude --version 2.1.181
+
       # Team-spawned sessions, grouped by team (spawner + spawn time per team,
       # teammate mode/handle per row; team-flagged spawns with no team record
       # in a trailing (no team) bucket)
@@ -4973,6 +5043,7 @@ export function registerSessionsCommands(program: Command): void {
         resume [query]          multi-select history → open tabs (or run --resume <id>)
       - The interactive listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local.
       - --all is not a device flag: it widens historical directory and time filters. Fleet collection is already the default. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.
+      - --version <version> requires --agent and is equivalent to --agent <agent@version>.
       - --host runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.
       - --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.
       - --include and --exclude are mutually exclusive.

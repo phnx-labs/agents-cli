@@ -169,11 +169,38 @@ be mistaken for a gutted install. This asymmetry is intentional — a false
 | Cost | One `--version` spawn per local run for npm agents (fast for a healthy binary). A repair triggers a real `npm install`. |
 | Repair vs. fallback | In-place repair re-fetches the whole tarball; if a specific version is un-fetchable (yanked/offline), self-heal falls back to another installed version rather than blocking the run. `home/` (conversation history) is always preserved across a clean reinstall. |
 
+## Nothing to heal — the harness is not installed at all
+
+Self-heal only runs when a version resolved. With no version, `agents run` used to
+fall through and spawn the bare `cliCommand`, dying as
+`sh: 1: exec: cursor-agent: not found` behind a `⚠ <agent> looks logged out`
+banner that was also wrong — the harness was absent, not signed out (RUSH-2339).
+
+`agents run` now probes the executable it is about to spawn (`resolveLaunchBinary`,
+[`src/lib/exec.ts`](../src/lib/exec.ts)) and exits `1` before any spawn:
+
+```
+agents: cursor is not installed on this machine.
+Install it with: agents add cursor
+```
+
+The probe answers **does this executable exist**, never "does agents-cli manage a
+version" — those are different questions, and two supported states depend on the
+difference:
+
+| State | Resolves to | Why |
+|---|---|---|
+| Managed version home | the versioned shim, else the version home binary | mirrors what `buildExecCommand` puts in `cmd[0]` |
+| Self-installed (Homebrew, vendor `curl \| sh`, distro package) — no version home | the PATH binary | a supported install; keying on `listInstalledVersions().length` would break it |
+| Managed version(s) installed, none pinned as default | the dispatcher shim | the shim resolves the version itself and prints its own `agents use <agent> <version>` guidance — accurate, so it is not pre-empted |
+| Nothing installed; only a leftover dispatcher shim on PATH | `null` → fail loud | the shim is a dead end here; this is the RUSH-2339 case |
+
 ## Source map
 
 | Piece | Location |
 |---|---|
 | `ensureAgentRunnable()` — the self-heal engine | [`src/lib/versions.ts`](../src/lib/versions.ts) |
+| `resolveLaunchBinary()` — the not-installed probe | [`src/lib/exec.ts`](../src/lib/exec.ts) |
 | `verifyInstalledBinaryLaunches()` — the launch probe | [`src/lib/versions.ts`](../src/lib/versions.ts) |
 | `isMissingBinarySignature()` — the "broken" classifier | [`src/lib/versions.ts`](../src/lib/versions.ts) |
 | `installVersion(..., { clean })` — Layer 1 gate + wipe-then-reinstall | [`src/lib/versions.ts`](../src/lib/versions.ts) |

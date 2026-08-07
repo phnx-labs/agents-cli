@@ -144,6 +144,7 @@ import {
   loadExport,
   loadPackages,
   loadRoutines,
+  loadDaemon,
   loadMonitors,
   loadProjects,
   loadRun,
@@ -233,6 +234,22 @@ if (process.argv[2] === '__daemon-run') {
   const { runDaemon } = await import('./lib/daemon.js');
   await runDaemon();
   process.exit(process.exitCode ?? 0);
+}
+
+// One-shot invocation of a migrated daemon housekeeping tick (RUSH-2353). The
+// shipped system routines (`watchdog`, `device-probe`, `fleet-cache-warm`, ...)
+// run this as their `command:` instead of the daemon holding a setInterval —
+// same tick body, now scheduled/tracked/pinnable through the routines system.
+if (process.argv[2] === '__daemon-tick') {
+  const name = process.argv[3] || '';
+  const { runDaemonTick } = await import('./lib/daemon-ticks.js');
+  try {
+    await runDaemonTick(name);
+    process.exit(0);
+  } catch (err) {
+    process.stderr.write(`[agents] daemon tick '${name}' failed: ${(err as Error).message}\n`);
+    process.exit(1);
+  }
 }
 
 // White-label: the shim for a brand (e.g. `jack`) exports AGENTS_BRAND, so the
@@ -422,6 +439,7 @@ Run and dispatch:
   defaults                        Configure run defaults by agent/version selector
   teams                           Coordinate multiple agents on shared work
   routines                        Run agents on a cron schedule (scheduler auto-starts)
+  daemon                          Runtime status/control for the always-on daemon (secrets broker, browser IPC, scheduler)
   webhook                         Receive signed GitHub/Linear webhooks for trigger routines
   funnel                          Expose a webhook receiver through Tailscale Funnel
   sessions                        Browse, search, and replay past runs (live-search in TTY; grouped by workspace)
@@ -1094,6 +1112,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadExport);
   await reg(loadPackages);
   await reg(loadRoutines);
+  await reg(loadDaemon);
   await reg(loadMonitors);
   await reg(loadProjects);
   await reg(loadRun);
@@ -1229,6 +1248,22 @@ program.on('command:*', (operands) => {
 // and the doc flags (--version/--help/-h) drive both the registration strategy
 // and whether the update check + background sync run at all.
 const passedArgs = process.argv.slice(2);
+// Commander owns `--version` on the root command and otherwise intercepts it
+// even after `sessions`, before the subcommand can parse its version filter.
+// Rewrite only that value-taking nested form; bare `agents --version` and every
+// other command retain the root documentation flag unchanged.
+if (passedArgs[0] === 'sessions') {
+  const nestedVersionIndex = passedArgs.indexOf('--version', 1);
+  if (nestedVersionIndex >= 0) {
+    const nestedVersion = passedArgs[nestedVersionIndex + 1];
+    if (!nestedVersion || nestedVersion.startsWith('-')) {
+      console.error("error: option '--version <version>' argument missing");
+      process.exit(1);
+    }
+    passedArgs[nestedVersionIndex] = '--session-version';
+    process.argv[nestedVersionIndex + 2] = '--session-version';
+  }
+}
 const requestedCommand = passedArgs.find((arg) => !arg.startsWith('-'));
 const verboseStartup = passedArgs.includes('--verbose');
 // Help and version output are pure documentation — they must never gate on

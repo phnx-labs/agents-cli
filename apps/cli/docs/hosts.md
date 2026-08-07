@@ -659,6 +659,20 @@ sync substrate, so the precondition is thin and mostly one-time/cached:
    never prints `Dispatched` for a pin the box cannot run (RUSH-2313). Aliases
    (`@latest` / `@oldest` / `@pinned`) still resolve on the remote. A bare agent
    name (no pin) keeps the soft warning.
+
+   The dispatched `agents run` on the box is the backstop for that soft warning:
+   it probes the executable it is about to spawn and exits `1` with
+   `agents: <agent> is not installed on this machine.` plus the
+   `agents add <agent>` fix. Before RUSH-2339 it execed the bare `cliCommand`
+   instead and died as `sh: 1: exec: cursor-agent: not found` (exit 127), behind
+   a `⚠ <agent> looks logged out` banner that was also wrong — the harness was
+   absent, not signed out. The probe is **existence**, not "does agents-cli
+   manage a version" (`resolveLaunchBinary`, [`src/lib/exec.ts`](../src/lib/exec.ts)):
+   a harness the user installed themselves (Homebrew, a vendor `curl | sh`, a
+   distro package) has no version home on the box and still launches, resolved
+   through PATH exactly as `spawnAgent` would. The PATH lookup skips the
+   agents-cli shims dir, so a dispatcher shim planted for an absent harness is
+   never mistaken for an install.
 4. **Codebase present** — the target repo/branch is checked out at the run cwd
    (`git fetch` + checkout; no working-tree copy in Phase 1).
 

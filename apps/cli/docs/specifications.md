@@ -72,7 +72,7 @@ row its surface sits in.
 | Coverage | Surfaces | What that means |
 |---|---|---|
 | **Specified here** | `sessions`, `secrets`, `run`, the scheduling/executor singularity, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
-| **Governed in part** | `routines`, `monitors`, `doctor` | One requirement reaches them, no command contract does. `routines`/`monitors` are bound by [§Scheduling & execution singularity](#scheduling--execution-singularity) (SING-5, SING-8, SING-9) — who may schedule and execute them. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. Everything else these commands do is unspecified. |
+| **Governed in part** | `routines`, `monitors`, `doctor`, `daemon` | One requirement reaches them, no command contract does. `routines`/`monitors` are bound by [§Scheduling & execution singularity](#scheduling--execution-singularity) (SING-5, SING-8, SING-9) — who may schedule and execute them. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. `daemon` is bound by SING-1 (it IS the singular scheduler/executor) and SING-4a (the `daemon.enabled` kill switch); its status/health rendering (`agents daemon status`/`services`/`doctor`) carries no requirement of its own. Everything else these commands do is unspecified. |
 | **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `pty`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | A design doc describes the mechanism — [hosts.md](hosts.md), [teams.md](teams.md), [cloud.md](cloud.md), [02-resource-sync.md](02-resource-sync.md), [01-version-management.md](01-version-management.md), … — but states **no** requirements. Verified: `hosts.md`, `teams.md` and `cloud.md` contain **zero capitalized RFC-2119 keywords**. `hosts.md` and `teams.md` do use lowercase "must" in prose ("the remote run must be bounded", `hosts.md:124`; "you must declare what each one owns", `teams.md:207`) — which reads normative but is not, per this document's own capitalization rule. That is exactly the trap: treat those docs as explanation, never as a contract. |
 | **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `worktree`, `webhook`, `funnel`, `lease`, `mailboxes`, `feed`, `message`/`send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
 
@@ -693,6 +693,13 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   `metadataResolveForwardedArgs`; tests
   `commands/sessions.test.ts`,
   `lib/session/remote-list.test.ts`).
+- **SES-IF-2b (MUST).** A positional query that exactly names an installed
+  `<agent>@<version>` MUST route to the same structured agent/version filter as
+  `--agent <agent@version>`. An uninstalled, unknown, or malformed pair MUST
+  remain ordinary free text. `--agent <agent> --version <version>` MUST be
+  equivalent to `--agent <agent@version>`; `--version` without `--agent` MUST
+  fail loudly (`commands/sessions.ts` `parseInstalledAgentVersionQuery`,
+  `applyVersionFilters`; test `commands/sessions.test.ts`).
 - **SES-IF-3 (MUST).** The export **bundle format** is NDJSON, `kind`
   `agents-session-bundle`, `version` 1; parse MUST reject a wrong kind/version;
   per-record `hash`/`size` are always over **plaintext** for byte-exact dedup;
@@ -2257,8 +2264,21 @@ nothing but its own view cache.
 - **SING-1 (MUST).** Every fleet-affecting capability MUST have exactly one scheduler
   and one executor: the agents-cli daemon (`agents __daemon-run`,
   `apps/cli/src/lib/daemon.ts`) or a CLI command the daemon or the user drives.
-  Status: **Current** for routines (`lib/scheduler.ts`), the daemon-native watchdog
-  (`lib/daemon.ts`, WD-1), and rotate (`lib/watchdog/rotate.ts`).
+  Status: **Current** for routines (`lib/scheduler.ts`) and rotate
+  (`lib/watchdog/rotate.ts`). `agents daemon` is the user-facing runtime
+  surface for this singular process (`start`/`stop`/`restart`/`reload`/
+  `status`/`services`/`logs`/`doctor`, `commands/daemon.ts`) — it observes and
+  controls the one daemon SING-1 requires, never a second one. The watchdog,
+  device-probe, tmux-reconcile, launch-health, fleet-cache-warm,
+  session-cache-warm, usage-refresh, and auto-dispatch ticks (RUSH-2353) were
+  formerly hardcoded `setInterval`s inside `runDaemon()` — a second, unowned
+  scheduling path duplicating what routines already provide (declaration, run
+  history, pause, device pin). They are now shipped system routines
+  (`gh:phnx-labs/.agents-system` `routines/*.yml`) whose `command:` invokes
+  the migrated tick body (`lib/daemon-ticks.ts`) via `agents __daemon-tick
+  <name>`, fired by the same pid-claimed `JobScheduler` as every other
+  routine — one scheduler, one executor, same as before, minus the duplicate
+  concept.
 - **SING-2 (MUST NOT).** A UI surface (apps/factory, the menubar app, the iOS app)
   MUST NOT own a timer, watcher, or loop that detects a condition and performs a
   fleet-affecting action. Detection and decision MUST live in the CLI, which holds
@@ -2274,6 +2294,17 @@ nothing but its own view cache.
   or off MUST flip the CLI's own state (`agents watchdog on|off|rotate`,
   `agents routines`), so every surface observes one truth. A UI-local toggle that
   gates only the UI's view of an action MUST NOT exist.
+- **SING-4a (MUST).** A device-local `daemon.enabled: false` (`lib/device-config.ts`,
+  `agents daemon disable`) MUST prevent every AUTO-start surface from bringing the
+  daemon up — `ensureDaemonStarted` (`lib/daemon.ts`) and every `routines`
+  auto-start call site (`add`, `start`, `catchup`, webhook triggers,
+  `commands/routines.ts`). It MUST NOT stop an already-running daemon and MUST NOT
+  block the explicit override (`agents daemon start`), mirroring `systemctl
+  disable` — a disabled unit still starts on a direct `systemctl start`. This is
+  the daemon-wide sibling of `scheduler.enabled`: `scheduler.enabled` gates only
+  the routines `JobScheduler` inside a running daemon (SING-5), while
+  `daemon.enabled` gates whether the daemon itself may be auto-started at all
+  (the secrets broker, browser IPC, and watchdog with it).
 - **SING-5 (MUST).** Routines MUST fire only from the daemon's pid-claimed
   `JobScheduler` (`lib/daemon.ts` — the pid-file claim exists precisely so a second
   scheduler cannot double-fire). A UI MAY request an immediate run
@@ -2359,6 +2390,13 @@ is not two daemons existing — it is two daemons consuming the **same** input.
 
 ### 5. Known gaps
 
+- **SING-GAP-2 (resolved, RUSH-2353).** `auto-dispatch` — the tick that polls Linear
+  for delegated tickets and dispatches an agent — was a hardcoded daemon
+  `setInterval` with no `devices` allowlist, so it violated SING-9: every daemon on
+  a fleet running the same opted-in project independently polled and could dispatch
+  the same ticket. It is now the shipped `auto-dispatch` system routine, which
+  satisfies SING-9(a) via an owner pin: `agents routines devices auto-dispatch --set
+  <device>`.
 - **SING-GAP-1.** The Factory monitor leader/follower protocol
   (apps/factory `src/monitor/`) still coordinates presence fan-out inside the
   extension with its own election. It performs no fleet-affecting action today
@@ -2391,6 +2429,10 @@ not the watchdog's.
 - **WD-1 (MUST).** The agents daemon MUST be the sole automatic watchdog scheduler and
   executor. When device-local `watchdog.enabled` is true it MUST run one bounded,
   non-overlapping pass every three minutes. UI surfaces MUST only render persisted state.
+  As of RUSH-2353 the daemon fires this pass through the routine scheduler (the shipped
+  `watchdog` system routine, `command: agents __daemon-tick watchdog` ->
+  `runWatchdogTick` in `lib/daemon-ticks.ts`, still gated on `watchdog.enabled`) rather
+  than a bare `setInterval` — the daemon remains the sole scheduler/executor either way.
 - **WD-2 (MUST).** Delivery MUST occur only when `--nudge` is set; without it a tick is a
   dry run that reports "would nudge" and delivers nothing (`lib/watchdog/runner.ts`).
 - **WD-3 (MUST).** `on`/`off` MUST write the typed device-local `watchdog.enabled`

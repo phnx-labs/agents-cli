@@ -15,6 +15,48 @@ Scheduled agent execution with sandboxed permissions and scheduler-driven cron e
 
 Each job is a YAML file in `~/.agents/routines/`. A background scheduler parses cron expressions with [croner](https://github.com/hucsm/croner), spawns agent processes at trigger time, and captures output.
 
+### Daemon runtime — `agents daemon`
+
+The scheduler above is one job the daemon runs; the daemon itself also hosts the
+secrets broker, browser IPC, and the watchdog pass (RUSH-2354). `agents routines
+start`/`stop`/`status`/`scheduler-logs` remain as scheduler-scoped convenience
+wrappers, but the daemon's own runtime surface is `agents daemon`:
+
+```bash
+agents daemon                # identity, duplicate __daemon-run processes, per-service health
+agents daemon status --json  # same, machine-readable
+
+agents daemon start | stop | restart
+agents daemon enable | disable   # persisted device kill switch — see below
+agents daemon reload             # SIGHUP: reload routines + re-evaluate scheduler.enabled
+agents daemon services           # secrets broker + browser IPC only
+agents daemon logs -f --level warn --since 1h
+agents daemon doctor             # one-shot check, non-zero exit on problems
+```
+
+There is no `agents daemon jobs` — scheduled work is always `agents routines`;
+`agents daemon status`/`doctor` point at `agents routines stats` for per-routine
+failure detail instead of duplicating it.
+
+**Two independent gates control whether routines fire on a device**, and they are
+not the same thing:
+
+- `scheduler.enabled` (device config) gates only the routines `JobScheduler`
+  inside an already-running daemon — the secrets broker, browser IPC, and
+  watchdog keep running when it is off.
+- `daemon.enabled` (device config, new) is the daemon-wide kill switch. With it
+  `false`, nothing **auto-starts** the daemon — not `routines add`, not
+  `routines start`, not `routines catchup`, not a webhook trigger. `agents daemon
+  start` still starts it explicitly, the same way `systemctl start` works on a
+  disabled unit.
+
+A per-subsystem health record (`{subsystem, lastError, lastErrorAt,
+consecutiveFailures, lastOkAt}`, persisted at
+`~/.agents/.cache/helpers/daemon/health.json`) backs `agents daemon status` and
+`services`: the secrets broker and browser IPC record a success/failure on every
+(re)start attempt, so a failure survives past whatever line of the daemon log it
+would otherwise scroll out of.
+
 ### Project routines (opt-in daemon firing)
 
 `agents routines list` and `agents routines view <name>` also discover routines in `<project>/.agents/routines/` when invoked from inside a project — project routines shadow user routines of the same name in those views.

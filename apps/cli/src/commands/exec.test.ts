@@ -487,3 +487,174 @@ describe('cost tier on a profile run is discarded, not resolved against the host
     }
   });
 });
+
+describe('custom harness names take precedence over native agent ids', () => {
+  it('runs a custom harness named after a native id through its configured host', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'exec-profile-native-name-'));
+    const binDir = path.join(root, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', 'profiles'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), 'agents: {}\n');
+    fs.writeFileSync(
+      path.join(root, '.agents', 'profiles', 'claude.yml'),
+      [
+        'name: claude',
+        'host:',
+        '  agent: opencode',
+        'provider: openrouter',
+        'env:',
+        '  OPENCODE_MODEL: deepseek/deepseek-v3.2',
+        '',
+      ].join('\n'),
+    );
+    const opencode = path.join(binDir, process.platform === 'win32' ? 'opencode.cmd' : 'opencode');
+    fs.writeFileSync(
+      opencode,
+      process.platform === 'win32'
+        ? '@echo OK\r\n'
+        : '#!/bin/sh\nprintf "OK\\n"\n',
+      { mode: 0o755 },
+    );
+    try {
+      const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+      const result = spawnSync(
+        'node',
+        ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'claude', 'probe', '--mode', 'plan', '--quiet', '--cwd', root],
+        {
+          cwd: path.resolve(import.meta.dirname, '..', '..'),
+          env: { ...process.env, HOME: root, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` },
+          encoding: 'utf8',
+        },
+      );
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(result.stderr).toContain("Resolved custom harness 'claude' -> opencode");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('runs a custom harness named after a hard-deprecated native id', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'exec-profile-deprecated-name-'));
+    const binDir = path.join(root, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', 'profiles'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), 'agents: {}\n');
+    fs.writeFileSync(
+      path.join(root, '.agents', 'profiles', 'gemini.yml'),
+      [
+        'name: gemini',
+        'host:',
+        '  agent: opencode',
+        'provider: openrouter',
+        'env:',
+        '  OPENCODE_MODEL: deepseek/deepseek-v3.2',
+        '',
+      ].join('\n'),
+    );
+    const opencode = path.join(binDir, process.platform === 'win32' ? 'opencode.cmd' : 'opencode');
+    fs.writeFileSync(
+      opencode,
+      process.platform === 'win32'
+        ? '@echo OK\r\n'
+        : '#!/bin/sh\nprintf "OK\\n"\n',
+      { mode: 0o755 },
+    );
+    try {
+      const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+      const result = spawnSync(
+        'node',
+        ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'gemini', 'probe', '--mode', 'plan', '--quiet', '--cwd', root],
+        {
+          cwd: path.resolve(import.meta.dirname, '..', '..'),
+          env: { ...process.env, HOME: root, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` },
+          encoding: 'utf8',
+        },
+      );
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(result.stderr).toContain("Resolved custom harness 'gemini' -> opencode");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * RUSH-2339 — `agents run <agent>` on a machine without that harness.
+ *
+ * Before the fix the launch fell through to the bare `cliCommand` and died as
+ * `sh: 1: exec: cursor-agent: not found` (exit 127), after a `⚠ cursor looks
+ * logged out` banner that was also wrong — it is not logged out, it is absent.
+ *
+ * These drive the REAL `agents run` command in a subprocess against a planted
+ * HOME (`.agents/.system` git-inited so `ensureInitialized` passes) and a PATH
+ * holding only what the test plants. No mocks: the second case genuinely
+ * launches the harness stub, which is the whole point — a self-installed
+ * harness with no version home MUST still run, so the guard cannot be a
+ * "does agents-cli manage a version" check.
+ */
+describe.skipIf(process.platform === 'win32')('agents run — harness not installed (RUSH-2339)', () => {
+  // Resolved lazily: the describe factory body runs even when skipIf skips the
+  // block, so an eager lookup would fail collection on a box without bun.
+  const bunBin = () => execFileSync('sh', ['-c', 'command -v bun'], { encoding: 'utf-8' }).trim();
+  // Anchor on this file, not process.cwd() — vitest inherits the invoking shell's
+  // cwd, so a run started from the repo root would not find src/index.ts.
+  const appRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
+
+  function runAgentsRun(home: string, pathDir: string) {
+    return spawnSync(bunBin(), [path.join(appRoot, 'src', 'index.ts'), 'run', 'cursor', 'hi', '--mode', 'plan', '--quiet'], {
+      cwd: appRoot,
+      env: { ...process.env, HOME: home, PATH: [pathDir, '/usr/bin', '/bin'].join(path.delimiter) },
+      encoding: 'utf-8',
+      timeout: 60_000,
+    });
+  }
+
+  function plantHome(): { home: string; pathDir: string } {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'run-not-installed-home-'));
+    const pathDir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-not-installed-path-'));
+    fs.mkdirSync(path.join(home, '.agents', '.system'), { recursive: true });
+    execFileSync('git', ['-C', path.join(home, '.agents', '.system'), 'init', '-q']);
+    return { home, pathDir };
+  }
+
+  it('fails loud with an actionable message instead of exiting 127', () => {
+    const { home, pathDir } = plantHome();
+    try {
+      const res = runAgentsRun(home, pathDir);
+      const out = `${res.stdout}${res.stderr}`;
+
+      expect(res.status).toBe(1);
+      expect(res.status).not.toBe(127);
+      expect(out).toContain('cursor is not installed on this machine');
+      expect(out).toContain('agents add cursor');
+      // The two wrong messages the bug produced must be gone.
+      expect(out).not.toContain('looks logged out');
+      expect(out).not.toContain('not found');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(pathDir, { recursive: true, force: true });
+    }
+  });
+
+  it('still launches a harness installed manually on PATH with no version home', () => {
+    const { home, pathDir } = plantHome();
+    try {
+      const stub = path.join(pathDir, 'cursor-agent');
+      fs.writeFileSync(stub, '#!/bin/sh\necho STUB_CURSOR_RAN\nexit 0\n');
+      fs.chmodSync(stub, 0o755);
+      expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'cursor'))).toBe(false);
+
+      const res = runAgentsRun(home, pathDir);
+      const out = `${res.stdout}${res.stderr}`;
+
+      expect(out).toContain('STUB_CURSOR_RAN');
+      expect(out).not.toContain('is not installed on this machine');
+      expect(res.status).toBe(0);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(pathDir, { recursive: true, force: true });
+    }
+  });
+});

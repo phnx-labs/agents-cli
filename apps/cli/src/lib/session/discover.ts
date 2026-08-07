@@ -32,7 +32,7 @@ import { deriveShortId } from './short-id.js';
 import { buildClaudeAccountIndex, resolveClaudeAccount, type ClaudeAccountIndex } from './claude-accounts.js';
 import { extractSessionTopic, extractSlashCommandName, extractSlashCommandFromToolInput } from './prompt.js';
 import { isSkillInvocation, extractSkills, extractSlashCommands } from './highlights.js';
-import { parseAntigravity, parseCursor } from './parse.js';
+import { parseAntigravity, parseCursor, splitSessionFilePath } from './parse.js';
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket, extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
 import { costOfUsage, costOfUsageNoCache } from '../pricing/index.js';
 import { machineId } from './sync/config.js';
@@ -542,6 +542,15 @@ export function isManagedSessionFile(filePath: string): boolean {
   // transcript to classify. They are produced BY agents-cli rather than read out of
   // someone's dotfile dir, so scoping must not silently swallow them.
   if (!filePath || !path.isAbsolute(filePath)) return true;
+
+  // A composite file_path (`<container>#<id>`) names a row inside a single shared
+  // DB the scanner reads from one fixed location (OpenCode's `opencode.db`) — that
+  // store is never a per-install dotfile under a version home, so the managed-vs-
+  // unmanaged split does not apply: there is exactly one store, not a "your own"
+  // copy to hide. Classifying it as unmanaged hid every OpenCode row from default
+  // listings once any agent was managed (RUSH-2357). Keyed off the composite FORM,
+  // so any future single-DB harness inherits this.
+  if (splitSessionFilePath(filePath).fragment !== undefined) return true;
 
   const roots = [
     ...VERSIONS_ROOTS.map((root) => path.join(root, 'versions')),

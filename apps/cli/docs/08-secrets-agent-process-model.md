@@ -177,3 +177,19 @@ Both signals are now required before a socket is reclaimed:
    broker and destroyed the ownership record the check above depends on, so the
    successor saw an ownerless socket and reclaimed it regardless. Both now wait
    for the process to stop serving first.
+
+4. **A version-skewed client never evicts a daemon-hosted broker.** The
+   version-skew teardown (`shouldTeardownVersionSkewedBroker`) exists for
+   churning dev installs where no daemon owns the broker. But when the always-on
+   daemon hosts it, `teardownStaleBroker` recognizes only the standalone
+   broker's `pidPath()` claim — the daemon writes `ownerPath()`, not `pidPath()` —
+   so eviction unlinks the daemon's socket *without* stopping the daemon, which
+   then keeps `hostedBroker != null` and `shouldTakeOverBroker` refuses to
+   re-host (point 3's asymmetry), orphaning the broker until the daemon restarts
+   while every reader cold-starts a one-off broker and re-prompts Touch ID.
+   `ensureAgentRunning` now gates the teardown on `shouldClientEvictSkewedBroker`,
+   which defers to a live daemon (`isDaemonRunning()`): a daemon-hosted broker is
+   never client-evicted. Daemon code-version upgrades are handled by the
+   `postinstall.js` daemon restart, and `agentPing()` already gates reachability
+   on `PROTOCOL_VERSION`, so a code-skewed daemon broker stays wire-compatible —
+   deferring to it is safe.
