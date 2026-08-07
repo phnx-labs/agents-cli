@@ -648,6 +648,10 @@ agents sessions --json --all --since 1h --limit 20
 # Filter by agent (and optional version)
 agents sessions --agent claude
 agents sessions --agent codex@0.116.0
+agents sessions --agent codex --version 0.116.0
+
+# An installed agent@version also routes positionally to the same filter
+agents sessions codex@0.116.0
 
 # FTS5 search (BM25 ranked, labels weighted highest)
 agents sessions "auth refactor"
@@ -705,6 +709,13 @@ agents sessions tail c07ec355
 # Opt in to raw JSONL when piping the live stream
 agents sessions tail c07ec355 --json | jq 'select(.type == "user")'
 ```
+
+The positional `agent@version` form becomes a structured filter only when that
+exact version is installed on the machine answering the query. Otherwise it
+remains ordinary free text, preserving searches such as `project@2026` and
+historical text that merely resembles a version selector. An explicit
+`--agent <agent@version>` can still filter indexed history after that installed
+version has been removed.
 
 `agents sessions tail` and `agents logs -f <id>` render compact live lines by
 default, even when stdout is piped. They show messages, tool calls, elided tool

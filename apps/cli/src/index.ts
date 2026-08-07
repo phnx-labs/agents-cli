@@ -1229,6 +1229,17 @@ program.on('command:*', (operands) => {
 // and the doc flags (--version/--help/-h) drive both the registration strategy
 // and whether the update check + background sync run at all.
 const passedArgs = process.argv.slice(2);
+// Commander owns `--version` on the root command and otherwise intercepts it
+// even after `sessions`, before the subcommand can parse its version filter.
+// Rewrite only that value-taking nested form; bare `agents --version` and every
+// other command retain the root documentation flag unchanged.
+if (passedArgs[0] === 'sessions') {
+  const nestedVersionIndex = passedArgs.indexOf('--version', 1);
+  if (nestedVersionIndex >= 0 && nestedVersionIndex + 1 < passedArgs.length) {
+    passedArgs[nestedVersionIndex] = '--session-version';
+    process.argv[nestedVersionIndex + 2] = '--session-version';
+  }
+}
 const requestedCommand = passedArgs.find((arg) => !arg.startsWith('-'));
 const verboseStartup = passedArgs.includes('--verbose');
 // Help and version output are pure documentation — they must never gate on

@@ -693,6 +693,13 @@ The command surface (bare `sessions [query]`, `tail`, `sync`, `resume`, `focus`,
   `metadataResolveForwardedArgs`; tests
   `commands/sessions.test.ts`,
   `lib/session/remote-list.test.ts`).
+- **SES-IF-2b (MUST).** A positional query that exactly names an installed
+  `<agent>@<version>` MUST route to the same structured agent/version filter as
+  `--agent <agent@version>`. An uninstalled, unknown, or malformed pair MUST
+  remain ordinary free text. `--agent <agent> --version <version>` MUST be
+  equivalent to `--agent <agent@version>`; `--version` without `--agent` MUST
+  fail loudly (`commands/sessions.ts` `parseInstalledAgentVersionQuery`,
+  `applyVersionFilters`; test `commands/sessions.test.ts`).
 - **SES-IF-3 (MUST).** The export **bundle format** is NDJSON, `kind`
   `agents-session-bundle`, `version` 1; parse MUST reject a wrong kind/version;
   per-record `hash`/`size` are always over **plaintext** for byte-exact dedup;
