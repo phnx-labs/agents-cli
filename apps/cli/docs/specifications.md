@@ -2401,28 +2401,40 @@ is not two daemons existing — it is two daemons consuming the **same** input.
   without an owner pin ship with a test that two concurrent fires cannot process
   the same item.
 
-#### 3.2 One daemon per machine — last-wins takeover, not first-wins refusal
+#### 3.2 One daemon per state dir — last-wins takeover, not first-wins refusal
 
-The pid-file claim in SING-5 guarantees one scheduler; SING-11/SING-12 fix *which*
-daemon survives and how the loser is torn down, so a second install can never leave
-two daemons — the double-fire root cause (RUSH-2352: four `__daemon-run` processes
-from four installs — homebrew, `.local` dev, nvm, npx — observed live on one box).
+Singularity is scoped to the **state dir** (the daemon dir under `AGENTS_DAEMON_DIR`
+?? `<HOME>/.agents/.cache/helpers/daemon`), NOT the machine: one `HOME` may legitimately
+run many daemons under different state dirs (a developer's daemon, a vitest fixture's
+own `HOME`), and none of them contend. Within ONE state dir, the pid-file claim in
+SING-5 guarantees one scheduler; SING-11/SING-12 fix *which* daemon survives and how the
+loser is torn down, so a second install sharing that state dir can never leave two
+daemons. (RUSH-2352 originally read four `__daemon-run` on one box as four duplicate
+schedulers; adversarial verification refuted that — three ran under separate `HOME`s
+and never shared state. Last-wins is the owner's product decision that a restart replaces
+the previous daemon, deliberately NOT a machine-wide process sweep.)
 
-- **SING-11 (MUST).** At most one daemon MUST be alive per machine, enforced by
-  **last-wins takeover**: a second `agents __daemon-run` — from ANY install, not
-  only the same launch entry — MUST evict the incumbent, never defer to it.
+- **SING-11 (MUST).** At most one daemon MUST be alive per state dir, enforced by
+  **last-wins takeover**: a second `agents __daemon-run` for the same state dir — from
+  ANY install path sharing it, not only the same launch entry — MUST evict the incumbent,
+  never defer to it. The takeover target is the live owner of THIS state dir's pid file
+  (`resolveLiveDaemonPid`) and nothing else — a daemon serving a DIFFERENT state dir
+  (its own `HOME`, a test fixture) MUST be left completely untouched.
   `claimDaemonInstance` (`lib/daemon.ts`) SIGTERMs the live pid-file owner and MUST
   wait for it to be provably dead — its graceful `handleShutdown` releasing the
   browser IPC binding (`await browserIPC.stop()`) and the secrets broker socket
-  (`hostedBroker?.close()`), or a `killTree` escalation after the grace window —
+  (`hostedBroker?.close()`), or a `killTree` escalation (POSITIVE pid, so the kill never
+  reaches the incumbent's detached job children) after the grace window —
   **before binding any of its own resources**. Binding before the incumbent's
   release recreates the two-brokers-on-one-socket orphan (`daemon.ts` broker
   hosting), so the pid file MUST NOT be written until the prior owner is dead.
-  `reapStrayDaemons` (`lib/daemon.ts`) MUST NOT scope its reap to `process.argv[1]`
-  — any `__daemon-run` on the box is a reap target regardless of install. This
-  INVERTS the historical first-wins behavior, where the incoming daemon logged
-  `Another daemon already owns the pid file` and exited, leaving the incumbent
-  (however stale, however many installs deep) running.
+  `reapStrayDaemons` (`lib/daemon.ts`) reaps only registrants of THIS state dir's
+  instance registry (`<daemonDir>/instances/`) — because the registry lives inside the
+  daemon dir, a different state dir's daemons register elsewhere and are invisible, so
+  the reaper is state-dir-scoped by construction, never `process.argv[1]`-scoped and
+  never a machine-wide `ps` sweep. This INVERTS the historical first-wins behavior, where
+  the incoming daemon logged `Another daemon already owns the pid file` and exited,
+  leaving the incumbent (however stale) running.
 - **SING-11a (MUST).** In-flight detached routine children (`runner.ts`'s `unref`'d
   spawns, which run in their own process group and survive daemon death) MUST NOT
   be killed by takeover — severing a live agent mid-run is worse than a daemon
@@ -2434,11 +2446,14 @@ from four installs — homebrew, `.local` dev, nvm, npx — observed live on one
 - **SING-12 (MUST).** `stopDaemon` (`lib/daemon.ts`) MUST assert its postcondition,
   not assume it: after the SIGTERM → grace → `killTree` sequence it MUST verify the
   browser IPC binding was released, the secrets broker socket was released (a stale
-  socket present on disk but unreachable is the orphan of SING-11), and no
-  `__daemon-run` (any install) survives — and it MUST return a structured result
-  naming what released, what survived, and any detached children (which survive
-  deliberately per SING-11a and are reported, never killed). It MUST NOT report
-  success on an unverified stop (RUSH-2355).
+  socket present on disk but unreachable is the orphan of SING-11 — a still-live
+  standalone broker owning it is a release, not a survivor), and no `__daemon-run`
+  registered for THIS state dir survives — reclaiming any stale socket an ungraceful
+  exit left behind — and it MUST return a structured result naming what released, what
+  survived, and any detached children (which survive deliberately per SING-11a and are
+  reported, never killed). `agents daemon stop` MUST surface that result (human summary
+  plus `--json`) and exit non-zero when a resource could not be released. It MUST NOT
+  report success on an unverified stop (RUSH-2355).
 
 ### 4. Given/When/Then scenarios
 
