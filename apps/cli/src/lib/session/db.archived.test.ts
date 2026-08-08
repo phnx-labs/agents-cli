@@ -136,7 +136,7 @@ describe('RUSH-2436 archived session durability', () => {
     expect(rawArchived).toBeNull();
   });
 
-  it('stamps archived_at only once (sticky) and includes archived rows in the cost rollup', () => {
+  it('stamps archived_at only once (sticky)', () => {
     indexThenDeleteFile('codex-archived-5', 'codex', 'summarize the failing tests');
 
     const first = db.querySessions().find(s => s.id === 'codex-archived-5')!.archivedAt;
@@ -144,5 +144,41 @@ describe('RUSH-2436 archived session durability', () => {
     // A second listing must not move the stamp.
     const second = db.querySessions().find(s => s.id === 'codex-archived-5')!.archivedAt;
     expect(second).toBe(first);
+  });
+
+  it('keeps an archived, content-bearing session in the cost rollup (topSessionsByCost)', () => {
+    const id = 'codex-archived-cost';
+    const dir = fs.mkdtempSync(path.join(testHome, 'codex-'));
+    const filePath = path.join(dir, `${id}.jsonl`);
+    fs.writeFileSync(filePath, '{}\n');
+    const stat = fs.statSync(filePath);
+    const meta = makeMeta(id, 'codex', filePath);
+    meta.costUsd = 4.20; // topSessionsByCost filters cost_usd IS NOT NULL
+    db.upsertSessionsBatch([{ meta, content: 'a pricey session', scan: { fileMtimeMs: stat.mtimeMs, fileSize: stat.size } }]);
+    fs.rmSync(filePath, { force: true });
+
+    const top = db.topSessionsByCost(10);
+    expect(top.map(t => t.meta.id), 'archived expensive session must stay in the cost rollup').toContain(id);
+    expect(top.find(t => t.meta.id === id)!.meta.archived).toBe(true);
+  });
+
+  it('un-archives a session whose file comes back (recoverable-trash restore)', () => {
+    const id = 'codex-resurrect';
+    const dir = fs.mkdtempSync(path.join(testHome, 'codex-'));
+    const filePath = path.join(dir, `${id}.jsonl`);
+    fs.writeFileSync(filePath, '{}\n');
+    const stat = fs.statSync(filePath);
+    db.upsertSessionsBatch([{ meta: makeMeta(id, 'codex', filePath), content: 'restore me', scan: { fileMtimeMs: stat.mtimeMs, fileSize: stat.size } }]);
+
+    fs.rmSync(filePath, { force: true });
+    expect(db.querySessions().find(s => s.id === id)!.archived).toBe(true);
+
+    // The file returns; the next listing must clear the archived flag.
+    fs.writeFileSync(filePath, '{}\n');
+    const back = db.querySessions().find(s => s.id === id);
+    expect(back, 'restored session still lists').toBeDefined();
+    expect(back!.archived).toBeUndefined();
+    const raw = (db.getDB().prepare('SELECT archived_at FROM sessions WHERE id = ?').get(id) as { archived_at: number | null }).archived_at;
+    expect(raw).toBeNull();
   });
 });

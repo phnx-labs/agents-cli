@@ -14,7 +14,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import { truncate, padRight, humanDuration } from '../lib/format.js';
-import { sanitizeForTerminal } from '../lib/redact.js';
+import { sanitizeForTerminal, redactSecrets } from '../lib/redact.js';
 import { resolveProjectKey } from '../lib/project-key.js';
 import { listProjectDefs, resolveProjectNameForCwd, type ProjectDef } from '../lib/projects.js';
 import ora from 'ora';
@@ -3748,10 +3748,17 @@ export async function renderSessionLogJson(session: SessionMeta): Promise<void> 
 function renderArchivedSession(
   session: SessionMeta,
   mode: ViewMode,
-  _options: { redact?: boolean } = {},
+  options: { redact?: boolean } = {},
 ): void {
-  const content = (readSessionContent(session.id) ?? '').trim();
-  const digest = readArchivedSessionPreview<SessionPreviewDigest>(session.id);
+  // Redact by default, mirroring the live render path (render.ts renderConversationMarkdown):
+  // session_text stores raw user text, so masking is render-time. `--no-redact`
+  // opts out, same as the live path.
+  const redact = (text: string): string => options.redact !== false ? redactSecrets(text) : text;
+  const content = redact((readSessionContent(session.id) ?? '').trim());
+  const digestRaw = readArchivedSessionPreview<SessionPreviewDigest>(session.id);
+  const digest = digestRaw
+    ? { ...digestRaw, lastAssistant: redact(digestRaw.lastAssistant ?? '') }
+    : undefined;
   if (mode === 'json') {
     // Minimal machine shape for a file-gone session: the durable user content
     // plus the cached preview digest, tagged archived. Deliberately NOT the full

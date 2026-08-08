@@ -2735,6 +2735,7 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
   // scanOpenClawIncremental) carry an empty file_path and are exempt.
   const missingPaths = findMissingFilePaths(rows.map(r => r.file_path).filter((p): p is string => !!p));
   const missing = rows.filter(r => r.file_path && missingPaths.has(r.file_path));
+  const missingIds = new Set(missing.map(r => r.id));
   const phantomIds = new Set<string>();
   if (missing.length > 0) {
     const readContent = db.prepare(`SELECT content FROM session_text WHERE session_id = ?`);
@@ -2756,6 +2757,21 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
       }
     });
     classify();
+  }
+  // Un-archive a row whose file came back (a recoverable-trash restore, a re-sync):
+  // it is present on disk now, so it must not keep reporting `archived` to a
+  // machine consumer reading the --json listing. Rare, so the write only fires when
+  // such a row actually exists (RUSH-2436).
+  const resurrected = rows.filter(r => r.archived_at != null && !missingIds.has(r.id));
+  if (resurrected.length > 0) {
+    const clearArchived = db.prepare(`UPDATE sessions SET archived_at = NULL WHERE id = ?`);
+    const clear = db.transaction(() => {
+      for (const row of resurrected) {
+        clearArchived.run(row.id);
+        row.archived_at = null;
+      }
+    });
+    clear();
   }
   const live = rows.filter(r => !phantomIds.has(r.id));
   const trimmed = options.limit ? live.slice(0, options.limit) : live;
@@ -3422,15 +3438,26 @@ export function topSessionsByCost(
   // (file gone but user turns still in session_text) — an expensive, real
   // session must not drop out of the cost rollup just because its file was
   // removed (RUSH-2436). A file-gone row with no durable content (a phantom) is
-  // still excluded. archived_at is the persisted signal, stamped by
-  // querySessions; fall back to a live content read for a row not yet listed.
+  // still excluded. archived_at is the persisted signal; stamp it here too (once)
+  // so a session first surfaced through the cost rollup reports `archived`
+  // consistently with the listing path.
   const readContent = db.prepare(`SELECT content FROM session_text WHERE session_id = ?`);
+  const markArchived = db.prepare(`UPDATE sessions SET archived_at = ? WHERE id = ? AND archived_at IS NULL`);
+  const now = Date.now();
+  const toStamp: SessionRow[] = [];
   const live = rows.filter(r => {
     if (!r.file_path || fs.existsSync(sessionFilePathContainer(r.file_path))) return true;
     if (r.archived_at != null) return true;
     const content = (readContent.get(r.id) as { content: string } | undefined)?.content;
-    return !!content && content.trim() !== '';
+    if (!!content && content.trim() !== '') { toStamp.push(r); return true; }
+    return false;
   });
+  if (toStamp.length > 0) {
+    const stamp = db.transaction(() => {
+      for (const r of toStamp) { markArchived.run(now, r.id); r.archived_at = now; }
+    });
+    stamp();
+  }
   return live.slice(0, limit).map(r => ({
     meta: rowToMeta(r),
     costUsd: r.cost_usd ?? 0,
