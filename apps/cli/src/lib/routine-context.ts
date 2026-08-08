@@ -156,9 +156,16 @@ export function toTargetPortable(home: string, abs: string): string {
   return abs;
 }
 
-/** True for a bare relative path (not absolute, not home-anchored). */
-export function isBareRelative(p: string): boolean {
-  return !path.isAbsolute(p) && !p.startsWith('~') && !p.startsWith('$HOME');
+/**
+ * True for a bare relative path (not absolute, not home-anchored) ON THE TARGET.
+ *
+ * `isAbsolute` is evaluated in the TARGET's own path flavour (see
+ * {@link targetPath}), not this process's platform — a Windows-shaped absolute
+ * cwd (`C:\Users\x\override`) dispatched from a POSIX daemon must still be
+ * recognized as absolute, or it is misread as project-relative.
+ */
+export function isBareRelative(home: string, p: string): boolean {
+  return !targetPath(home).isAbsolute(p) && !p.startsWith('~') && !p.startsWith('$HOME');
 }
 
 /**
@@ -251,7 +258,7 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
       if (cwd === undefined) {
         return finalize(projBase, 'project_path_missing');
       }
-      if (isBareRelative(cwd)) {
+      if (isBareRelative(targetHome, cwd)) {
         const baseAbs = expandTargetHome(targetHome, projBase);
         // Target-side join: `path.resolve` would use this host's separator and,
         // for a target home this host does not consider absolute, prepend the

@@ -234,6 +234,48 @@ describe('resolveRoutineExecutionContext', () => {
     expect(res.ready).toBe(true);
   });
 
+  it('an absolute Windows-shaped cwd overrides a project base instead of being misread as project-relative (RUSH-2393)', () => {
+    // isBareRelative used to check `path.isAbsolute` with the HOST's default
+    // path module. A POSIX daemon dispatching to a Windows target saw
+    // `path.isAbsolute('C:\\Users\\remoteuser\\override')` return false (posix
+    // doesn't recognize a drive letter), so the cwd was misclassified as
+    // project-relative: joined against the project base, found to escape it,
+    // and paused with cwd_not_portable — even though it is a legitimate
+    // absolute override under the target's own home.
+    const res = resolveRoutineExecutionContext({
+      name: 'r',
+      kind: 'agent',
+      mode: 'host',
+      targetHome: 'C:\\Users\\remoteuser',
+      project: 'mono',
+      cwd: 'C:\\Users\\remoteuser\\override',
+      projectResolution: { defined: true, base: '~/mono' },
+      probe: undefined,
+    });
+    expect(res.readiness?.code).not.toBe('cwd_not_portable');
+    expect(res.ready).toBe(true);
+    expect(res.resolvedCwd).toBe('~/override');
+  });
+
+  it('an absolute POSIX cwd overrides a project base the same way (regression guard, other direction)', () => {
+    // Mirrors the Windows-target case above with a POSIX target home, so a fix
+    // that swapped the posix/win32 selection (or hardcoded one flavour) would
+    // fail this the same way it would have failed the Windows case.
+    const res = resolveRoutineExecutionContext({
+      name: 'r',
+      kind: 'agent',
+      mode: 'host',
+      targetHome: '/home/remoteuser',
+      project: 'mono',
+      cwd: '/home/remoteuser/override',
+      projectResolution: { defined: true, base: '~/mono' },
+      probe: undefined,
+    });
+    expect(res.readiness?.code).not.toBe('cwd_not_portable');
+    expect(res.ready).toBe(true);
+    expect(res.resolvedCwd).toBe('~/override');
+  });
+
   it('an unwritable directory pauses with workspace_not_writable', () => {
     if (process.getuid && process.getuid() === 0) return; // root bypasses W_OK
     // Windows ignores the mode bits chmod sets, so W_OK still succeeds and there
