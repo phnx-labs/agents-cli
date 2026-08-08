@@ -55,6 +55,7 @@ import { supports, explainSkip, capableAgents } from './capabilities.js';
 import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills, marketplaceSpecForName } from './plugins.js';
 import { composeRulesFromState } from './rules/compose.js';
 import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale } from './staleness/index.js';
+import { pruneRemovedResources, type PrunableKind } from './staleness/prune.js';
 import { emit } from './events.js';
 import { safeJoin } from './paths.js';
 import {
@@ -2686,6 +2687,12 @@ export interface SyncResult {
    * sync — never one line per file from down here.
    */
   projectSkipped: string[];
+  /**
+   * Resources removed from the version home because they were deleted from
+   * source since the last sync (RUSH-2438), per kind. Populated only on a
+   * repo-scope reconcile that ran the prune pass; empty otherwise.
+   */
+  pruned: Record<PrunableKind, string[]>;
 }
 
 /**
@@ -2822,9 +2829,9 @@ export function mergeRepoScopedSelections(repos: string[], cwd: string = process
  *
  * For Gemini: commands are converted from markdown to TOML.
  */
-export function syncResourcesToVersion(agent: AgentId, version: string, selection?: ResourceSelection, options: { projectDir?: string; cwd?: string; force?: boolean; available?: AvailableResources } = {}): SyncResult {
+export function syncResourcesToVersion(agent: AgentId, version: string, selection?: ResourceSelection, options: { projectDir?: string; cwd?: string; force?: boolean; available?: AvailableResources; prune?: boolean } = {}): SyncResult {
   if (isAgentHardDeprecated(agent)) {
-    return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [] };
+    return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [], pruned: { commands: [], skills: [], hooks: [] } };
   }
 
   const agentConfig = AGENTS[agent];
@@ -2837,7 +2844,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // "full sync; persist the staleness manifest after."
   const userPassedSelection = selection !== undefined;
 
-  const result: SyncResult = { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [] };
+  const result: SyncResult = { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [], pruned: { commands: [], skills: [], hooks: [] } };
   const cwd = options.cwd || process.cwd();
   const projectAgentsDir = options.projectDir || getProjectAgentsDir(cwd);
   const userAgentsDir = getUserAgentsDir();
@@ -3306,6 +3313,37 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // into capable agent version homes on every full or partial sync.
   if (supports(agent, 'memory', version).ok) {
     syncMemoryToVersionHome(agent, versionHome, cwd);
+  }
+
+  // Prune resources deleted from source (RUSH-2438). Runs only on a repo-scope
+  // reconcile (`options.prune`) with a caller selection — a full sync
+  // (`!userPassedSelection`) already sweeps orphans above, and an additive
+  // interactive/`agents add` selection must not delete anything. The prune is
+  // manifest-bounded: only names the last full sync recorded are candidates,
+  // and only when they are gone from ALL source layers — so a user-authored
+  // file the sync never placed, or a same-named resource still provided by
+  // another layer, is never removed. No manifest → fail loud (delete nothing).
+  if (options.prune && userPassedSelection) {
+    const previousManifest = loadManifest(agent, version);
+    const outcome = pruneRemovedResources({
+      agent,
+      version,
+      versionHome,
+      cwd,
+      previousManifest,
+      sourceNames: {
+        commands: available.commands,
+        skills: available.skills,
+        hooks: available.hooks,
+      },
+    });
+    result.pruned = outcome.pruned;
+    if (outcome.skippedNoManifest) {
+      console.warn(
+        `agents: prune skipped for ${agent}@${version} — no sync manifest yet, so no removed resources were pruned. ` +
+        `Run 'agents sync ${agent}@${version}' (a full sync) to establish the baseline.`,
+      );
+    }
   }
 
   // Write manifest after a full sync (no user-passed selection) so the next

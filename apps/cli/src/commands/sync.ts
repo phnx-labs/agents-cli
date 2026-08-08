@@ -283,7 +283,7 @@ async function runInteractiveReconcile(
   for (const agentId of agents) {
     const version = resolveVersion(agentId, cwd) || listInstalledVersions(agentId).slice(-1)[0];
     if (!version) continue;
-    const result = syncResourcesToVersion(agentId, version, selection, { cwd });
+    const result = syncResourcesToVersion(agentId, version, selection, { cwd, prune: true });
     printSyncDetail(result, agentId, version, cwd);
     if (result.hooks && hookCapable.has(agentId) && Object.keys(hookManifest).length > 0) {
       registerHooksToSettings(agentId, getVersionHomePath(agentId, version), hookManifest);
@@ -509,7 +509,11 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     if (!json) outLog(chalk.cyan(`Syncing ${installed.length} ${agentLabel(agentId)} version(s)${scopeLabel}.`));
     const versions: Array<{ version: string; result: SyncResult }> = [];
     for (const v of installed) {
-      const result = syncResourcesToVersion(agentId, v, selection, { projectDir, cwd, force });
+      // A repo scope makes @all a full reconcile of that repo → prune resources
+      // it no longer provides. Bare @all (no repo) leaves selection undefined
+      // and falls through to the full-sync orphan sweep, so prune is a no-op
+      // there (it requires a caller selection).
+      const result = syncResourcesToVersion(agentId, v, selection, { projectDir, cwd, force, prune: !!repoScope });
       versions.push({ version: v, result });
       if (!quiet && !json) printSyncDetail(result, agentId, v, cwd);
     }
@@ -530,6 +534,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
           subagents: result.subagents,
           plugins: result.plugins,
           workflows: result.workflows,
+          pruned: result.pruned,
         })),
       });
     }
@@ -624,7 +629,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
       }
       return;
     }
-    const result = syncResourcesToVersion(agentId, version, scoped, { projectDir, cwd, force });
+    const result = syncResourcesToVersion(agentId, version, scoped, { projectDir, cwd, force, prune: true });
     if (json) {
       emitJson(agentSyncJson(agentId, version, result, repoScope));
     } else if (!quiet) {
@@ -747,6 +752,7 @@ function agentSyncJson(
     plugins: result.plugins,
     workflows: result.workflows,
     projectSkipped: result.projectSkipped,
+    pruned: result.pruned,
   };
 }
 
@@ -777,23 +783,40 @@ function printSyncDetail(result: SyncResult, agent: AgentId, version: string, cw
 
   const kept = formatKeptProjectResources(result.projectSkipped);
 
-  if (lines.length === 0) {
+  // Removals from source-deleted resources (RUSH-2438). Rendered even when
+  // nothing was added, so a reconcile that only pruned still reports it.
+  const prunedLines = (Object.entries(result.pruned) as Array<[string, string[]]>)
+    .filter(([, names]) => names.length > 0)
+    .map(([kind, names]) => ({ kind, items: names }));
+
+  if (lines.length === 0 && prunedLines.length === 0) {
     console.log(chalk.gray(`Already in sync — ${agentLabel(agent)}@${version}`));
     if (kept) console.log(chalk.gray(kept));
     return;
   }
 
-  console.log(chalk.green(`Synced to ${agentLabel(agent)}@${version}:`));
-  const kindWidth = Math.max(...lines.map(l => l.kind.length));
   const PREVIEW = 5;
-  for (const { kind, items } of lines) {
-    const padded = kind.padEnd(kindWidth);
+  const printKindLine = (label: string, items: string[], width: number, color: (s: string) => string) => {
+    const padded = label.padEnd(width);
     const sorted = [...items].sort((a, b) => a.localeCompare(b));
     const preview = sorted.slice(0, PREVIEW).join(', ');
     const more = sorted.length > PREVIEW ? chalk.gray(`, +${sorted.length - PREVIEW} more`) : '';
-    const count = chalk.cyan(`(${sorted.length})`.padStart(5));
+    const count = color(`(${sorted.length})`.padStart(5));
     console.log(`  ${chalk.bold(padded)}  ${count}  ${chalk.gray(preview)}${more}`);
+  };
+
+  if (lines.length > 0) {
+    console.log(chalk.green(`Synced to ${agentLabel(agent)}@${version}:`));
+    const kindWidth = Math.max(...lines.map(l => l.kind.length));
+    for (const { kind, items } of lines) printKindLine(kind, items, kindWidth, chalk.cyan);
   }
+
+  if (prunedLines.length > 0) {
+    console.log(chalk.yellow(`Pruned from ${agentLabel(agent)}@${version} (removed from source):`));
+    const kindWidth = Math.max(...prunedLines.map(l => l.kind.length));
+    for (const { kind, items } of prunedLines) printKindLine(kind, items, kindWidth, chalk.yellow);
+  }
+
   if (kept) console.log(chalk.gray(kept));
 }
 
