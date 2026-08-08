@@ -139,7 +139,8 @@ export async function runShareList(
   // A known-stale template can't have the listing route — say so before any network
   // call. 'unknown' (provisioned before templateHash tracking) is attempted, then
   // caught by the response checks below if the route turns out to be absent.
-  if (shareTemplateStatus(cfg) === 'outdated') {
+  const templateStatus = shareTemplateStatus(cfg);
+  if (templateStatus === 'outdated') {
     throw new Error(OUTDATED_TEMPLATE_HINT);
   }
 
@@ -149,8 +150,16 @@ export async function runShareList(
   const res = await fetchListing(listUrl);
 
   if (res.status === 404) {
-    // The single-segment path with no listing route falls through to an object
-    // GET, which 404s — i.e. the endpoint predates this feature.
+    // A single-segment path 404s either because the namespace is genuinely empty
+    // (current template — the listing route gates on the namespace holding objects,
+    // so a namespace with nothing falls through to an object GET) OR because the
+    // endpoint predates the listing route entirely. The recorded templateHash
+    // disambiguates: a 'current' template HAS the route, so its 404 means an empty
+    // namespace ("nothing published"); otherwise the route may be absent, so point
+    // at `agents share update`.
+    if (templateStatus === 'current') {
+      return { user, count: 0, objects: [] };
+    }
     throw new Error(OUTDATED_TEMPLATE_HINT);
   }
   if (res.status !== 200) {

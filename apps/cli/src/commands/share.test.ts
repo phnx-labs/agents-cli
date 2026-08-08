@@ -541,6 +541,17 @@ describe('runShareList', () => {
     expect(fetched).toBe(false);
   });
 
+  it('reads a 404 on a CURRENT template as an empty namespace (nothing published), not an outdated route', async () => {
+    const { share } = await freshShareModules();
+    const config = await currentConfig(share);
+    const result = await share.runShareList({
+      githubUser: 'octocat',
+      config,
+      fetchListing: async () => ({ status: 404, contentType: 'text/plain', body: 'not found' }),
+    });
+    expect(result).toEqual({ user: 'octocat', count: 0, objects: [] });
+  });
+
   it('maps a 404 (route absent on an old, hash-unknown endpoint) to the outdated-template hint', async () => {
     const { share } = await freshShareModules();
     await expect(
