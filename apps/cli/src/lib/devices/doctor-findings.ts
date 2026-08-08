@@ -223,8 +223,10 @@ function sortedAgentIds(ids: string[]): string[] {
  * The exact remediation for a finding. Login fixes are harness-native
  * (`loginHint`); a per-version login is offered ONLY for agents that isolate the
  * credential per home (`agents run <agent>@<version>` then log in) — for
- * gemini/antigravity/droid/cursor the login is shared, so we say so instead of
- * faking a per-version fix. Every other kind maps to its canonical command.
+ * gemini/antigravity/droid the login is shared, so we say so instead of
+ * faking a per-version fix. (Cursor now isolates its token per version home via
+ * XDG_CONFIG_HOME — see buildExecEnv — so it gets the per-version run.) Every
+ * other kind maps to its canonical command.
  */
 export function remediationFor(finding: DoctorFinding): string {
   const { kind, agent, version } = finding;

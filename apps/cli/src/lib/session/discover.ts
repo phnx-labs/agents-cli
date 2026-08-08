@@ -660,6 +660,18 @@ function normalizeCwd(cwd?: string): string {
   if (process.platform === 'win32' && /^\//.test(cwd) && !/^[a-zA-Z]:/.test(cwd)) {
     return stripTrailingSep(path.posix.normalize(cwd));
   }
+  // The mirror case (RUSH-2358): a Windows-rooted path (`C:\...`, `C:/...`, or a
+  // UNC `\\server\share\...`) read on POSIX belongs to another machine too, but
+  // `path.isAbsolute()` here uses POSIX rules and doesn't recognize a drive
+  // letter — without this branch such a cwd falls into the `path.resolve()` arm
+  // below and gets silently prefixed with THIS process's own cwd, corrupting the
+  // path (and, via WORKTREE_RE, can misattribute the worktree slug to whatever
+  // worktree the reading process happens to be running in). Normalize with
+  // win32 rules so separators survive; never realpath it, for the same
+  // cross-drive reason as the mirror branch above.
+  if (process.platform !== 'win32' && /^([a-zA-Z]:[\\/]|\\\\)/.test(cwd)) {
+    return stripTrailingSep(path.win32.normalize(cwd));
+  }
   const normalized = path.isAbsolute(cwd) ? stripTrailingSep(path.normalize(cwd)) : path.resolve(cwd);
   return safeRealpathSync(normalized) || normalized;
 }

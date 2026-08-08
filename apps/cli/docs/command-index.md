@@ -12,9 +12,9 @@ what `agents` actually registers.
 
 Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remove`/`rm`/`purge`
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
-src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `upgrade`, `_internal`).
+src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_99 command groups · 569 commands._
+_100 command groups · 571 commands._
 
 ## accounts — Browse and name signed-in harness accounts
 
@@ -22,8 +22,8 @@ _99 command groups · 569 commands._
 agents accounts                     Browse and name signed-in harness accounts
 agents accounts list                Alias for accounts
 agents accounts name <label>        Name one signed-in account; matching installed versions are found automatically
-agents accounts remove <label>
-agents accounts rename <old> <new>
+agents accounts remove <label>      Remove a saved account label
+agents accounts rename <old> <new>  Rename a saved account label
 ```
 
 ## add — Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
@@ -1012,6 +1012,12 @@ agents update [target]      Move a frozen agent installation to a new release, k
 agents update list <agent>  Show every frozen installation of an agent and the release each carries
 ```
 
+## upgrade — Upgrade agents-cli to the latest version (or a specific [version])
+
+```
+agents upgrade [version]  Upgrade agents-cli to the latest version (or a specific [version])
+```
+
 ## usage — Show rate-limit / quota usage per agent
 
 ```
@@ -1045,6 +1051,7 @@ agents wallet show <id>                   Reveal a card. Touch ID required. Argu
 
 ```
 agents watchdog                              Auto-nudge stalled agent terminals: detect stalls, resolve the exact split, inject "Continue." — no menu-bar needed.
+agents watchdog history [sessionId]          Show persisted Watchdog decisions and actions, newest first.
 agents watchdog off                          Disable the daemon watchdog pass on this device.
 agents watchdog on                           Enable the daemon watchdog pass on this device.
 agents watchdog policy <sessionId> <policy>  Set per-session policy: off (ignore) | keep (default) | handsoff (detect + flag, never inject).
