@@ -140,14 +140,33 @@ describe('worker JSON listing route (GET /<user>?format=json)', () => {
     expect(payload.objects[0].expiresAt).toBe('2099-01-01T00:00:00.000Z');
   });
 
-  it('returns an empty list (200, not 404) for a namespace with nothing published', async () => {
+  it('serves a legacy flat-slug page even with ?format=json — never a fake empty listing (regression)', async () => {
+    // A legacy flat slug (pre per-user namespaces) is an object at a bare
+    // single-segment key. GET /<slug>?format=json must serve the real page, not
+    // hijack it into an empty JSON listing — the `?format=json` branch must gate
+    // on the same "namespace has objects" check as the gallery. (publish.test.ts
+    // covers the plain legacy GET; this adds the ?format=json query param.)
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'legacy-plan-a1b2', '<h1>legacy page</h1>');
+
+    const res = await worker.default.fetch(new Request('https://share.test/legacy-plan-a1b2?format=json'), env);
+    expect(res.status).toBe(200);
+    // The real HTML page, NOT a JSON listing.
+    expect(res.headers.get('content-type')).toMatch(/text\/html/);
+    const text = await res.text();
+    expect(text).toContain('legacy page');
+    expect(text).not.toContain('"count"');
+  });
+
+  it('404s a single-segment path with nothing under it (empty/nonexistent namespace)', async () => {
+    // With no objects under `nobody/` and no legacy object at the bare key, the
+    // path falls through to a 404 — the CLI reads this (on a current template) as
+    // "nothing published", not a missing route.
     const worker = await loadWorker();
     const { env } = makeEnv();
     const res = await worker.default.fetch(new Request('https://share.test/nobody?format=json'), env);
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toMatch(/application\/json/);
-    const payload = await res.json();
-    expect(payload).toEqual({ user: 'nobody', count: 0, objects: [] });
+    expect(res.status).toBe(404);
   });
 
   it('answers HEAD with JSON content type and no body', async () => {

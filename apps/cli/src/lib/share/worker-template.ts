@@ -10,9 +10,9 @@
 //   - GET  /<username>         — public gallery of that user's shares (HTML).
 //   - GET  /<username>?format=json — public machine-readable listing of that user's
 //     ACTIVE shares (`agents share list`). Same single-segment path as the HTML
-//     gallery, disambiguated by the `?format=json` discriminator so the human view
-//     is untouched; unlike the gallery it returns an empty list (not a 404) for a
-//     namespace with nothing in it.
+//     gallery and gated on the SAME "does <username>/ hold any object" check, so it
+//     only intercepts a genuine namespace — a legacy flat slug with ?format=json
+//     still serves its real content, never a fake empty listing.
 //   - GET  /<slug>             — backward-compat flat slug (legacy shares before
 //     per-user namespaces).
 //
@@ -50,20 +50,26 @@ export default {
     }
 
     if (request.method === 'GET' || request.method === 'HEAD') {
-      // Single-segment path may be a user gallery OR a legacy flat slug.
+      // Single-segment path may be a user gallery/listing OR a legacy flat slug.
+      // The disambiguator is whether the <seg>/ prefix holds any object: only a
+      // genuine per-user namespace does. BOTH the HTML gallery and the
+      // machine-readable listing gate on it, so ?format=json on a legacy flat
+      // slug (an object stored at the bare key, before per-user namespaces) does
+      // NOT hijack it into a fake empty listing — it falls through to the object
+      // GET below and serves its real content, exactly as before.
       const segments = path.split('/').filter(Boolean);
       if (segments.length === 1) {
-        // Machine-readable namespace listing: GET /<user>?format=json. Distinct
-        // from the HTML gallery (same path, no discriminator) so the human view
-        // is untouched, and it returns an empty list — not a 404 — for a user
-        // with nothing published, so 'agents share list' can answer "nothing".
-        if (url.searchParams.get('format') === 'json') {
-          return renderListing(env.BUCKET, url.origin, segments[0], request.method);
-        }
         const list = await env.BUCKET.list({ prefix: segments[0] + '/', limit: 1 });
-        if (list.objects && list.objects.length > 0) {
-          return renderGallery(env.BUCKET, url.origin, segments[0], request.method);
+        const isNamespace = list.objects && list.objects.length > 0;
+        if (isNamespace) {
+          return url.searchParams.get('format') === 'json'
+            ? renderListing(env.BUCKET, url.origin, segments[0], request.method)
+            : renderGallery(env.BUCKET, url.origin, segments[0], request.method);
         }
+        // Not a namespace: fall through. A legacy flat-slug object resolves to its
+        // real content; anything else 404s (an empty/nonexistent namespace, which
+        // agents share list reads as "nothing published" via the template-hash
+        // signal rather than a missing route).
       }
 
       const obj = await env.BUCKET.get(path);
