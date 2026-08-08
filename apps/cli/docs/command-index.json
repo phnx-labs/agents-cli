@@ -7284,7 +7284,7 @@
           "name": "update",
           "path": "devices update",
           "aliases": [],
-          "description": "Roll out agents-cli to every online registered device (`agents upgrade --yes` on each). Offline devices are skipped.",
+          "description": "Roll out agents-cli to every online registered device (`agents upgrade --yes` on each), then verify each box actually runs the new version. Offline devices are skipped.",
           "args": [
             {
               "name": "version",

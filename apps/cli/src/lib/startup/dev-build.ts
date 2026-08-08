@@ -22,8 +22,21 @@ import * as path from 'path';
  * actually be the agents-cli package (its package.json `name`), not some
  * unrelated ancestor that happens to be version-controlled.
  */
+/**
+ * Whether a version string is the `0.0.0-dev.<sha>[-dirty]` stamp
+ * `scripts/install.sh` writes for a side-by-side dev install (`install.sh:61`).
+ *
+ * Split out from {@link detectDevBuild} because a caller holding only a version
+ * string — a fleet rollout reading `agents --version` off a remote box — cannot
+ * run signal 2 (it needs that machine's filesystem), and must not re-spell the
+ * stamp prefix.
+ */
+export function isDevVersionStamp(version: string): boolean {
+  return version.startsWith('0.0.0-dev');
+}
+
 export function detectDevBuild(argv1: string, version: string): boolean {
-  if (version.startsWith('0.0.0-dev')) return true;
+  if (isDevVersionStamp(version)) return true;
   try {
     const cliPath = fs.realpathSync(argv1 || '');
     const repoRoot = path.dirname(path.dirname(cliPath));

@@ -249,7 +249,7 @@ agents devices status                  Fleet health at a glance: online/offline 
 agents devices sync                    Ingest `tailscale status --json` into device profiles. In a terminal, opens a checkbox to register/unregister nodes; with --yes, registers every non-ignored node.
 agents devices unignore <name>         Undo `ignore`: allow a node to be discovered and registered again.
 agents devices unprefer <name>         Remove the auto-launch preference boost from a device.
-agents devices update [version]        Roll out agents-cli to every online registered device (`agents upgrade --yes` on each). Offline devices are skipped.
+agents devices update [version]        Roll out agents-cli to every online registered device (`agents upgrade --yes` on each), then verify each box actually runs the new version. Offline devices are skipped.
 ```
 
 ## doctor — Diagnose CLI availability, sync status, and resource divergence (optionally for a specific agent[@version]).

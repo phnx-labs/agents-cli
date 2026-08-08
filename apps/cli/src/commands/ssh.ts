@@ -76,6 +76,11 @@ import {
   type FleetRunResult,
 } from '../lib/devices/fleet.js';
 import {
+  isRolloutSuccess,
+  verifyFleetRollout,
+  type RolloutVerification,
+} from '../lib/devices/rollout-verify.js';
+import {
   fleetCapacity,
   fmtBytes,
   headroom,
@@ -404,30 +409,56 @@ async function runInteractiveDeviceSync(): Promise<void> {
   console.log(parts.join(chalk.gray(' · ')));
 }
 
-/** Print a per-device result table for fleet update/run. */
-function printFleetResults(results: FleetRunResult[]): void {
+/**
+ * Print a per-device result table for fleet update/run.
+ *
+ * `verifications` is supplied only by the rollout (`agents fleet update`), which
+ * re-probes what `agents` resolves to on each upgraded box. A box that upgraded
+ * with `exit 0` but still resolves to another copy — the dev-install shadow of
+ * RUSH-2446 — is rendered `stale` / `unverified`, counted as **not upgraded**,
+ * and makes the command exit non-zero. An `exit 0` alone never reads as `ok` on
+ * a rollout again.
+ */
+function printFleetResults(
+  results: FleetRunResult[],
+  verifications?: Map<string, RolloutVerification>,
+): void {
   const nameW = Math.max(8, ...results.map((r) => r.name.length));
   console.log(
     chalk.bold('DEVICE'.padEnd(nameW)) + '  ' +
-    chalk.bold('STATUS'.padEnd(8)) + '  ' +
+    chalk.bold('STATUS'.padEnd(10)) + '  ' +
     chalk.bold('DETAIL'),
   );
+  let notUpgraded = 0;
   for (const r of results) {
-    const status =
-      r.status === 'ok' ? chalk.green('ok'.padEnd(8)) :
-      r.status === 'skipped' ? chalk.gray('skipped'.padEnd(8)) :
-      chalk.red('failed'.padEnd(8));
+    const verified = r.status === 'ok' ? verifications?.get(r.name) : undefined;
+    if (verified && !isRolloutSuccess(verified.verdict)) notUpgraded++;
+    const label =
+      r.status === 'skipped' ? chalk.gray('skipped'.padEnd(10)) :
+      r.status === 'failed' ? chalk.red('failed'.padEnd(10)) :
+      verified === undefined ? chalk.green('ok'.padEnd(10)) :
+      verified.verdict === 'on-target' ? chalk.green('ok'.padEnd(10)) :
+      verified.verdict === 'unverified' ? chalk.yellow('unverified'.padEnd(10)) :
+      chalk.red('stale'.padEnd(10));
     const detail =
       r.status === 'skipped' ? chalk.gray(skipLabel(r.reason as 'offline' | 'no-address')) :
       r.status === 'failed' ? chalk.red(r.detail || `exit ${r.code ?? '?'}`) :
-      chalk.gray(r.code === 0 ? 'exit 0' : '');
-    console.log(`${r.name.padEnd(nameW)}  ${status}  ${detail}`);
+      verified === undefined ? chalk.gray(r.code === 0 ? 'exit 0' : '') :
+      verified.verdict === 'on-target' ? chalk.gray(verified.detail) :
+      verified.verdict === 'unverified' ? chalk.yellow(verified.detail) :
+      chalk.red(verified.detail);
+    console.log(`${r.name.padEnd(nameW)}  ${label}  ${detail}`);
   }
-  const ok = results.filter((r) => r.status === 'ok').length;
   const failed = results.filter((r) => r.status === 'failed').length;
   const skipped = results.filter((r) => r.status === 'skipped').length;
-  console.log(chalk.gray(`${ok} ok · ${failed} failed · ${skipped} skipped`));
-  if (failed > 0) process.exitCode = 1;
+  const ok = results.filter((r) => r.status === 'ok').length - notUpgraded;
+  const parts = [`${ok} ok`, `${failed} failed`, `${skipped} skipped`];
+  if (verifications) parts.splice(1, 0, `${notUpgraded} not upgraded`);
+  console.log(chalk.gray(parts.join(' · ')));
+  if (notUpgraded > 0) {
+    console.log(chalk.yellow('A box that upgraded but still resolves elsewhere runs OLD code — remove the shadowing install (e.g. the `scripts/install.sh` dev build at ~/.local/agents-cli-dev) or reorder PATH.'));
+  }
+  if (failed > 0 || notUpgraded > 0) process.exitCode = 1;
 }
 
 interface RemoteDoctorJson {
@@ -1696,8 +1727,24 @@ email) into a single row. Use \`agents devices harnesses\` for the per-install v
 
   devicesCmd
     .command('update')
-    .description('Roll out agents-cli to every online registered device (`agents upgrade --yes` on each). Offline devices are skipped.')
+    .description('Roll out agents-cli to every online registered device (`agents upgrade --yes` on each), then verify each box actually runs the new version. Offline devices are skipped.')
     .argument('[version]', 'Target version or dist-tag (default: latest)')
+    .addHelpText('after', `
+Examples:
+  agents fleet update                        # roll out latest, then verify each box
+  agents fleet update 1.22.35                # pin the target version
+  agents devices update                      # same command under the devices group
+
+After each upgrade the rollout asks the box what \`agents\` resolves to and what
+version that copy reports. A box that upgraded with exit 0 but still resolves to
+another install — most often the \`scripts/install.sh\` dev build at
+~/.local/agents-cli-dev, which sits earlier on PATH than the npm global — is
+reported \`stale\` with its resolved path, counted as NOT upgraded, and makes the
+command exit non-zero. Remove the shadowing install or reorder PATH on that box.
+
+A box whose probe cannot answer (no POSIX shell, e.g. Windows) is reported
+\`unverified\` rather than counted as a success.
+`)
     .action(async (version: string | undefined) => {
       let cmd: string[];
       try {
@@ -1713,8 +1760,13 @@ email) into a single row. Use \`agents devices harnesses\` for the per-install v
         return;
       }
       console.log(chalk.gray(`Running \`${cmd.join(' ')}\` on ${targets.filter((t) => !t.skip).length} online device(s)…`));
-      const results = runFleet(targets, cmd, { self: machineId() });
-      printFleetResults(results);
+      const self = machineId();
+      const results = runFleet(targets, cmd, { self });
+      // `exit 0` from the upgrade only proves the npm global moved. Ask each box
+      // what `agents` actually resolves to before calling the rollout a success
+      // (RUSH-2446) — a dev install shadowing the global keeps running old code.
+      const verifications = verifyFleetRollout(targets, results, version, { self });
+      printFleetResults(results, verifications);
     });
 
   devicesCmd
