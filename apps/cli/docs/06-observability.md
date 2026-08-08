@@ -997,6 +997,34 @@ Identity resolution order: `--session` → `AGENT_SESSION_ID` /
 `AGENTS_SESSION_ID` / mailbox basename → `AGENT_LAUNCH_ID` match in the pid
 registry or activity index → parent-pid walk through `by-pid/<pid>.json`.
 
+#### `--notify` — also raise a local desktop banner
+
+```bash
+agents feed post --title "Build green" "all checks passed" --notify
+```
+
+`--notify` raises a local desktop banner on **this** machine when the post is
+made — the same `notifyDesktop` banner `agents run --notify` fires, and the same
+one an `agents send --channel desktop` sink delivers. It is a per-post opt-in
+that **adds** the banner on top of whatever `feed.broadcast`/owner delivery
+already runs; it never replaces a configured sink, and it is routed through the
+`desktop` channel provider like any other `channel:` sink, so it shows up in the
+`reportBroadcast` outcomes and the `--json` payload rather than a side channel.
+
+Two properties follow from what it is:
+
+- **It fires at any level.** The banner carries no `minLevel`, so a routine
+  `milestone` post can raise the local banner while an `important`-gated phone
+  sink stays quiet — a heads-up on the box you are at, without buzzing the phone.
+- **It is local.** The banner reaches whoever is at the machine the post was
+  authored on, so a post from a headless box notifies that box (a no-op with a
+  stated reason where no notifier exists), never the operator's Mac. Reaching a
+  phone stays the job of an `important`-level owner/broadcast sink below.
+
+Equivalent to declaring a `channel: desktop` sink in `feed.broadcast` (below),
+but per-invocation and config-free — the same relationship `run --notify` has to
+a standing desktop sink.
+
 #### Broadcasting a post outward (`feed.broadcast`)
 
 A post is durable in the activity log, but an operator away from every terminal

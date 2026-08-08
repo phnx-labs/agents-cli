@@ -497,6 +497,35 @@ export function effectiveBroadcastConfig(
   return { owner: { channel: 'owner' } };
 }
 
+/** Sink name for the ephemeral local banner added by `feed post --notify`. */
+export const DESKTOP_NOTIFY_SINK = 'notify';
+
+/**
+ * Add a local desktop-banner sink when `feed post --notify` is set — the same
+ * `notifyDesktop` banner `run --notify` raises, but for an authored post.
+ *
+ * `--notify` is a per-post opt-in that ADDS the local banner on top of whatever
+ * `feed.broadcast`/owner delivery already runs; it never replaces a configured
+ * sink. It carries no `minLevel`, so it fires for any level — a quiet milestone
+ * banner on this box does not touch the phone the way an `important` post does.
+ * And it routes through the `desktop` channel provider exactly like every other
+ * `channel:` sink, so it appears in the outcomes and the `--json` payload rather
+ * than a parallel code path the reporting cannot see.
+ *
+ * The desktop banner is inherently local — `notifyDesktop` reaches whoever is at
+ * THIS machine — so a post authored on a headless box notifies that box (a no-op
+ * with a stated reason where no notifier exists, per the desktop provider),
+ * never the operator's Mac. That is the same locality `run --notify` has; the
+ * phone hop stays the job of an `important`-level owner/broadcast sink.
+ */
+export function withDesktopNotify(
+  config: FeedBroadcastConfig | undefined,
+  notify: boolean,
+): FeedBroadcastConfig | undefined {
+  if (!notify) return config;
+  return { ...(config ?? {}), [DESKTOP_NOTIFY_SINK]: { channel: 'desktop', to: 'local' } };
+}
+
 function runCommandSink(name: string, argv: string[], timeoutMs: number): SinkOutcome {
   const result = spawnSync(argv[0], argv.slice(1), {
     encoding: 'utf-8',

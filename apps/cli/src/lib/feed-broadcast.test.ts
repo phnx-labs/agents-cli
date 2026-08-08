@@ -11,6 +11,8 @@ import {
   planFeedBroadcast,
   renderSinkArgv,
   runFeedBroadcast,
+  withDesktopNotify,
+  DESKTOP_NOTIFY_SINK,
   type FeedBroadcastConfig,
   type FeedBroadcastContext,
 } from './feed-broadcast.js';
@@ -283,6 +285,45 @@ describe('effectiveBroadcastConfig — the implicit owner fallback', () => {
 
   it('never layers on top of an operator-declared feed.broadcast — the config always wins outright', () => {
     expect(effectiveBroadcastConfig(CONFIG, 'important', ownerMeta)).toBe(CONFIG);
+  });
+});
+
+describe('withDesktopNotify — feed post --notify', () => {
+  const desktopSink = { channel: 'desktop', to: 'local' };
+
+  it('is a no-op when --notify is off — returns the config unchanged, undefined included', () => {
+    expect(withDesktopNotify(undefined, false)).toBeUndefined();
+    expect(withDesktopNotify(CONFIG, false)).toBe(CONFIG);
+  });
+
+  it('adds a desktop sink from nothing when the post has no other broadcast', () => {
+    expect(withDesktopNotify(undefined, true)).toEqual({ [DESKTOP_NOTIFY_SINK]: desktopSink });
+  });
+
+  it('layers the desktop sink ON TOP of configured sinks — never replaces them', () => {
+    const merged = withDesktopNotify(CONFIG, true);
+    expect(merged).toEqual({ ...CONFIG, [DESKTOP_NOTIFY_SINK]: desktopSink });
+    // The operator's own sinks survive intact.
+    expect(merged?.ticket).toEqual(CONFIG.ticket);
+    expect(merged?.message).toEqual(CONFIG.message);
+  });
+
+  it('fires on a milestone post — the desktop banner carries no minLevel, so it plans at any level', () => {
+    const planned = planFeedBroadcast(withDesktopNotify(undefined, true), ctx({ level: 'milestone' }));
+    expect(planned.map((p) => p.name)).toEqual([DESKTOP_NOTIFY_SINK]);
+    expect(planned[0]).toMatchObject({ channel: 'desktop', to: 'local' });
+    expect(planned[0].text).toBe(composeBroadcastMessage(ctx({ level: 'milestone' })));
+  });
+
+  it('banners locally without buzzing the phone on a milestone — the important-gated owner sink stays skipped', () => {
+    // An operator with an important-only phone sink, plus --notify on a milestone.
+    const config = withDesktopNotify(
+      { phone: { channel: 'mailbox', to: 'x', minLevel: 'important' } },
+      true,
+    );
+    const planned = planFeedBroadcast(config, ctx({ level: 'milestone' }));
+    // Only the desktop banner plans; the phone sink is gated out at milestone.
+    expect(planned.map((p) => p.name)).toEqual([DESKTOP_NOTIFY_SINK]);
   });
 });
 
