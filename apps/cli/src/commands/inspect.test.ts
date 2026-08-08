@@ -15,6 +15,7 @@ import {
   hookManifestByScript,
   wrapJoined,
 } from './inspect.js';
+import { listHookEntriesFromDir } from '../lib/hooks.js';
 import type { ManifestHook } from '../lib/types.js';
 import { getUserAgentsDir, getSystemAgentsDir } from '../lib/state.js';
 import { stringWidth } from '../lib/session/width.js';
@@ -133,6 +134,55 @@ describe('collectRepoKind', () => {
     const repo = resolveRepoTarget(root)!;
     // Only the real commands remain — the four doc files are filtered out.
     expect(collectRepoKind(repo, 'commands').map(c => c.name)).toEqual(['plain', 'ship']);
+  });
+
+  it('lists rules from subrules/, not the composed AGENTS.md output', () => {
+    const root = makeProjectRepo();
+    const rulesDir = path.join(root, '.agents', 'rules');
+    fs.mkdirSync(path.join(rulesDir, 'subrules'), { recursive: true });
+    // The composed output + its symlinks + the maintenance doc + the preset file.
+    // None of these is a rule you can drill into by name.
+    fs.writeFileSync(path.join(rulesDir, 'AGENTS.md'), '# Composed ruleset\n');
+    fs.symlinkSync('AGENTS.md', path.join(rulesDir, 'CLAUDE.md'));
+    fs.writeFileSync(path.join(rulesDir, 'README.md'), '# Rules\n');
+    fs.writeFileSync(path.join(rulesDir, 'rules.yaml'), 'presets:\n  default:\n    subrules: []\n');
+    // The addressable fragments.
+    fs.writeFileSync(path.join(rulesDir, 'subrules', 'foundations.md'), '# Foundations\n\nF1.\n');
+    fs.writeFileSync(path.join(rulesDir, 'subrules', 'code-quality.md'), '# Code Quality\n\nTactics.\n');
+    const repo = resolveRepoTarget(root)!;
+    // Before this fix `subrules` came back as a single opaque leaf alongside the
+    // doc files, so `--rule foundations` could never resolve.
+    expect(collectRepoKind(repo, 'rules').map(r => r.name)).toEqual(['code-quality', 'foundations']);
+  });
+
+  it('falls back to the flat rules dir when there is no subrules/', () => {
+    const root = makeProjectRepo();
+    const rulesDir = path.join(root, '.agents', 'rules');
+    fs.mkdirSync(rulesDir, { recursive: true });
+    fs.writeFileSync(path.join(rulesDir, 'house-style.md'), '# House style\n');
+    const repo = resolveRepoTarget(root)!;
+    expect(collectRepoKind(repo, 'rules').map(r => r.name)).toEqual(['house-style']);
+  });
+
+  it('reads hooks through the grouped reader, matching the summary view', () => {
+    const root = makeProjectRepo();
+    const hooksDir = path.join(root, '.agents', 'hooks');
+    // Hooks nest under event directories, and a script pairs with its data
+    // sidecar. A flat readdir returned the event dir itself ('pre-tool-use') and
+    // counted the sidecar separately, so `--hooks` and the summary disagreed.
+    fs.mkdirSync(path.join(hooksDir, 'pre-tool-use'), { recursive: true });
+    fs.writeFileSync(path.join(hooksDir, 'pre-tool-use', 'guard.sh'), '#!/usr/bin/env bash\necho ok\n');
+    fs.writeFileSync(path.join(hooksDir, 'pre-tool-use', 'guard.yaml'), 'matches: {}\n');
+    fs.writeFileSync(path.join(hooksDir, 'README.md'), '# Hooks\n');
+
+    const repo = resolveRepoTarget(root)!;
+    const names = collectRepoKind(repo, 'hooks').map(h => h.name);
+    // The nested script is found, its sidecar collapses into it, and neither the
+    // event directory nor the directory doc is reported as a hook.
+    expect(names).toEqual(['guard']);
+    // The drill and the summary must never report different counts again — both
+    // now go through listHookEntriesFromDir.
+    expect(names).toEqual(listHookEntriesFromDir(hooksDir).map(h => h.name));
   });
 });
 
