@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
   CODEX_EDIT_PROFILE,
   CODEX_PLAN_PROFILE,
+  codexEditWritableRoots,
   codexPermissionProfileConfig,
   codexPolicyArgs,
   modeForRemoteDispatch,
@@ -28,6 +32,39 @@ describe('codexPolicyArgs', () => {
 
   it('keeps skip as the only sandbox and approval bypass', () => {
     expect(codexPolicyArgs('skip')).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
+  });
+});
+
+// Real directories — Codex hardcodes `.agents/` read-only in workspace-write, so
+// naming the repo's existing `.agents` as an explicit writable root is what
+// unblocks a worktree build. Only an EXISTING `.agents` is added.
+describe('codexEditWritableRoots (repo .agents writable root)', () => {
+  let tmp: string;
+  let repo: string;
+  let worktreeCwd: string;
+
+  beforeAll(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-edit-roots-'));
+    repo = path.join(tmp, 'agents-cli');
+    worktreeCwd = path.join(repo, '.agents', 'worktrees', 'slug', 'apps', 'cli');
+    fs.mkdirSync(worktreeCwd, { recursive: true }); // materializes <repo>/.agents/...
+  });
+
+  afterAll(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+
+  it('adds the existing repo .agents dir for a worktree cwd', () => {
+    expect(codexEditWritableRoots(worktreeCwd)).toContain(path.join(repo, '.agents'));
+  });
+
+  it('flows that root into the edit policy workspace_roots', () => {
+    const args = codexPolicyArgs('edit', codexEditWritableRoots(worktreeCwd));
+    expect(args.join(' ')).toContain(`"${path.join(repo, '.agents')}" = true`);
+  });
+
+  it('does not add a repo .agents that does not exist', () => {
+    const plain = path.join(tmp, 'plain');
+    fs.mkdirSync(plain, { recursive: true });
+    expect(codexEditWritableRoots(plain)).not.toContain(path.join(plain, '.agents'));
   });
 });
 

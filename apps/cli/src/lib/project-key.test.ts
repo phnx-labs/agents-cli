@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { projectKeyFromCwd, repoRootForCwd, resolveProjectKey } from './project-key.js';
+import { projectKeyFromCwd, repoAgentsDirForCwd, repoRootForCwd, resolveProjectKey } from './project-key.js';
 import { projectFromCwd } from './activity.js';
 import { overviewProjectKey } from '../commands/sessions.js';
 
@@ -46,6 +46,24 @@ describe('projectKeyFromCwd', () => {
       expect(overviewProjectKey({ cwd })).toBe(projectKeyFromCwd(cwd));
       expect(projectFromCwd(cwd)).toBe(projectKeyFromCwd(cwd));
     }
+  });
+});
+
+describe('repoAgentsDirForCwd (pure worktree fold — no filesystem)', () => {
+  it('folds a worktree cwd to the PRIMARY repo .agents that holds the worktrees', () => {
+    expect(repoAgentsDirForCwd('/Users/m/src/agents-cli/.agents/worktrees/fix-thing'))
+      .toBe('/Users/m/src/agents-cli/.agents');
+  });
+
+  it('folds a subdirectory inside a worktree to the same primary .agents', () => {
+    expect(repoAgentsDirForCwd('/Users/m/src/agents-cli/.agents/worktrees/fix-thing/apps/cli/dist'))
+      .toBe('/Users/m/src/agents-cli/.agents');
+  });
+
+  it('returns undefined for nothing usable', () => {
+    expect(repoAgentsDirForCwd(undefined)).toBeUndefined();
+    expect(repoAgentsDirForCwd('')).toBeUndefined();
+    expect(repoAgentsDirForCwd('   ')).toBeUndefined();
   });
 });
 
@@ -105,6 +123,16 @@ describe('repoRootForCwd / resolveProjectKey (a cwd on this machine)', () => {
     } finally {
       fs.rmSync(dotfiles, { recursive: true, force: true });
     }
+  });
+
+  it('gives repoAgentsDirForCwd the repo .agents from a monorepo subdir', () => {
+    expect(repoAgentsDirForCwd(path.join(repo, 'apps', 'cli', 'src'), home))
+      .toBe(path.join(repo, '.agents'));
+  });
+
+  it('gives repoAgentsDirForCwd the PRIMARY .agents from inside a linked worktree', () => {
+    expect(repoAgentsDirForCwd(path.join(repo, '.agents', 'worktrees', 'fix-thing', 'apps'), home))
+      .toBe(path.join(repo, '.agents'));
   });
 
   it('resolves nothing for a path that does not exist here (another machine)', () => {
