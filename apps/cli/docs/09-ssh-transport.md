@@ -171,9 +171,9 @@ There is **one** resolver behind both surfaces. The caller cwd becomes a portabl
 under the local home has a meaningful remote analogue; anything else mirrors
 nothing and keeps the remote home). For POSIX targets the interactive-login
 builder [`buildInteractiveShellCommand`](../src/lib/devices/connect.ts) reuses the
-same best-effort [`remoteCdPrefix({ mirror: true })`](../src/lib/project-root.ts)
-`--host` runs use — `{ cd "$HOME"/<dir> || cd "$HOME"; } &&` — then `exec "$SHELL"
--l` so prompt, startup files, and login behavior match a plain `ssh <host>`.
+same best-effort [`remoteCdPrefix`](../src/lib/project-root.ts) mirror `--host`
+runs use — `{ cd "$HOME"/<dir> || cd "$HOME"; } &&` — then `exec "$SHELL" -l` so
+prompt, startup files, and login behavior match a plain `ssh <host>`.
 `"$HOME"` stays unquoted so the *remote* shell expands it (the target home may
 differ, `/home/<me>` vs `/Users/<me>`), and the remainder is shell-quoted, so a
 path with spaces or metacharacters is literal and injection-safe. PowerShell
