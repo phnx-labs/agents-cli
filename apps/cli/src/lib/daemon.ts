@@ -1171,10 +1171,21 @@ export function startDaemon(agentsBin?: string): { pid: number | null; method: s
     return { pid, method: 'already-starting' };
   }
 
-  try {
-    return startDaemonLocked(agentsBin ?? getAgentsBinPath());
-  } finally {
+  // Released by startDaemonLocked the moment the launch has been ISSUED, and
+  // again here as the backstop for every path that returned before reaching
+  // that point (a throw, or the platform default branch). Idempotent so the
+  // double call is a no-op rather than unlinking a lock a later claimer owns.
+  let released = false;
+  const releaseOnce = () => {
+    if (released) return;
+    released = true;
     releaseLock();
+  };
+
+  try {
+    return startDaemonLocked(agentsBin ?? getAgentsBinPath(), releaseOnce);
+  } finally {
+    releaseOnce();
   }
 }
 
@@ -1201,8 +1212,33 @@ export function ensureDaemonStarted(): { pid: number | null; method: string } | 
   }
 }
 
-function startDaemonLocked(agentsBin: string): { pid: number | null; method: string } {
+/**
+ * Issue the launch, then wait for the child to record its pid.
+ *
+ * RUSH-2417: the wait phase MUST NOT hold the start lock. `acquireStartLock`
+ * and `claimDaemonInstance` resolve the same `<daemonDir>/daemon.lock`, so a
+ * parent that busy-waits on `waitForPid` while still holding it deterministically
+ * defeats the child it just launched: the child's `claimDaemonInstance` hits
+ * EEXIST, reads a holder pid that IS alive (this process), and exits with the
+ * false "another daemon is mid-takeover" warning — every launchd/systemd start
+ * on a fresh install. The lock's job is to keep two concurrent `startDaemon()`
+ * calls from both launching, and that is done once `launchctl load` /
+ * `systemctl start` / the detached spawn has been issued, so `releaseLock()` is
+ * called there rather than in the caller's `finally`.
+ *
+ * Releasing early cannot produce two daemons: launchd (one plist label) and
+ * systemd (one unit) are singletons that no-op a second start, and the detached
+ * path is covered by `claimDaemonInstance`'s last-wins takeover (SING-11) —
+ * a second claimer evicts the incumbent rather than running beside it.
+ */
+function startDaemonLocked(agentsBin: string, releaseLock: () => void): { pid: number | null; method: string } {
   const platform = os.platform();
+  // Same contract on the fallback path: the spawn IS the launch, so the lock is
+  // dropped before the child exists rather than in a `finally` the child races.
+  const detachedFallback = (): { pid: number | null; method: string } => {
+    releaseLock();
+    return startDetached({ agentsBin });
+  };
 
   if (platform === 'darwin') {
     try {
@@ -1224,13 +1260,15 @@ function startDaemonLocked(agentsBin: string): { pid: number | null; method: str
       // of success. If no pid materializes within the window, give up on
       // launchd and fall through to a plain detached spawn.
       execFileSync('launchctl', ['load', plistPath], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+      // Launch issued — the child needs this lock to claim (RUSH-2417).
+      releaseLock();
       const pid = waitForPid(3000) ?? readServiceManagerPid();
       if (pid) return { pid, method: 'launchd' };
       // launchctl claimed success but nothing ran. Fall through.
     } catch {
       // load threw — fall through to detached spawn
     }
-    return startDetached({ agentsBin });
+    return detachedFallback();
   }
 
   if (platform === 'linux') {
@@ -1248,6 +1286,8 @@ function startDaemonLocked(agentsBin: string): { pid: number | null; method: str
       execFileSync('systemctl', ['--user', 'enable', SYSTEMD_UNIT], { encoding: 'utf-8' });
       execFileSync('systemctl', ['--user', 'start', SYSTEMD_UNIT], { encoding: 'utf-8' });
 
+      // Launch issued — the child needs this lock to claim (RUSH-2417).
+      releaseLock();
       const pid = waitForPid(3000) ?? readServiceManagerPid();
       if (pid) return { pid, method: 'systemd' };
       // systemctl returned success but no PID surfaced — fall through to a
@@ -1255,7 +1295,7 @@ function startDaemonLocked(agentsBin: string): { pid: number | null; method: str
     } catch {
       // start threw — fall through to detached spawn
     }
-    return startDetached({ agentsBin });
+    return detachedFallback();
   }
 
   return startDetached({ agentsBin });
