@@ -1552,6 +1552,20 @@ export function readAndResolveBundleEnv(
   const store = itemStore(backend);
 
   const metaItem = bundleMetaItem(name);
+  const bundleSecretPrefix = `${SECRETS_ITEM_PREFIX}${name}.`;
+  let enumeratedSecretItems: string[] = [];
+  // Agent launches must never enumerate the macOS Keychain: a per-bundle
+  // prefix becomes a broad `agents-cli.` scan after service-name hashing and
+  // macOS evaluates unrelated biometry ACLs during that scan (RUSH-2440).
+  // Interactive reads retain the existing enumeration side of the union so
+  // legacy/aliased items keep their established behavior.
+  if (!opts.agentOnly) {
+    try {
+      enumeratedSecretItems = store.list(bundleSecretPrefix);
+    } catch {
+      enumeratedSecretItems = [];
+    }
+  }
   const reason = opts.caller
     ? `read ${name} secrets (for ${opts.caller})`
     : `read ${name} secrets`;
@@ -1583,18 +1597,23 @@ export function readAndResolveBundleEnv(
     throw new Error(`Bundle '${name}' is malformed.`);
   }
 
-  // Compute secret item storage names from the declared keys in metadata.
-  // No enumeration = no broad Keychain scan = no Touch ID in agent-only mode.
-  const declaredKeys = (parsed.vars && typeof parsed.vars === 'object')
-    ? Object.keys(parsed.vars)
-    : [];
-  const secretItems = declaredKeys.map((key) => secretsKeychainItem(name, key));
+  // Compute exact storage names from declared keychain references. The env key
+  // and stored item name may differ (`TOKEN=keychain:actual-token`), so deriving
+  // item names from Object.keys(vars) would silently read the wrong secret.
+  const declaredSecretItems: string[] = [];
+  if (parsed.vars && typeof parsed.vars === 'object') {
+    for (const raw of Object.values(parsed.vars)) {
+      const value = parseBundleValue(raw);
+      if ('ref' in value && value.ref.provider === 'keychain') {
+        declaredSecretItems.push(secretsKeychainItem(name, value.ref.value));
+      }
+    }
+  }
+  const secretItems = [...new Set([...enumeratedSecretItems, ...declaredSecretItems])];
 
   // Now fetch both metadata and secret values in one batch.
-  // secretItems are storage names derived from declared keys (opaque hashed
-  // names on macOS with #316 hashing active, cleartext elsewhere); metaItem
-  // is cleartext and hashed inside getBatch. Deduped because we only have
-  // declared items, never orphaned.
+  // The interactive path keeps the enumeration + declared-item union; the
+  // agent-only path contains declared items only and therefore never scans.
   const fetched = backend === 'keychain'
     ? getKeychainTokens([...new Set([metaItem, ...secretItems])], {
         agent: opts.agent || process.env.AGENTS_AGENT_NAME || 'Agents CLI',
@@ -1608,7 +1627,7 @@ export function readAndResolveBundleEnv(
         forceDuration: Boolean(opts.duration),
         silentNoAcl: verifiedNoAclBundle,
       })
-    : store.getBatch([...new Set([metaItem, ...secretItems])])
+    : store.getBatch([...new Set([metaItem, ...secretItems])]);
   const bundle: SecretsBundle = {
     name,
     description: parsed.description,
@@ -1648,52 +1667,6 @@ export function readAndResolveBundleEnv(
   }
   const keys = [...selectedKeys].sort();
   keychainKeys.sort();
-
-  // RUSH-2252: complete the read set from the bundle's DECLARED keys, not only
-  // from the enumeration above. `store.list()` derives the batch by enumerating
-  // the bundle's namespace, and that enumeration is lossy by construction — the
-  // macOS helper's `list` omits every biometry-ACL'd item
-  // (`kSecUseAuthenticationUISkip`) and skips the whole data-protection pass when
-  // the keychain is locked, so a `hold`-policy bundle's value items never appear
-  // and a present secret reads as "not found" (RUSH-2248). A declared key whose
-  // item did not enumerate is therefore absent from `fetched`; read those exact
-  // items directly — a point read DOES evaluate the ACL, so it triggers Touch ID
-  // and returns the value the enumeration could not see. The enumeration still
-  // earns its place (it catches hashed/aliased storage names and stale leftovers
-  // not named in the metadata), so this is a UNION, not a replacement.
-  //
-  // One Touch ID sheet is preserved: the items missing from `fetched` are exactly
-  // the ACL'd ones the enumeration dropped, so the first batch (metadata plus any
-  // no-ACL / `never` items) raised no sheet, and this second batch raises the
-  // single sheet that covers all of them. When the enumeration is healthy every
-  // declared item is already in `fetched`, `missingDeclared` is empty, and this
-  // is skipped entirely — zero behavior change and no extra spawn on the hot path.
-  if (backend === 'keychain') {
-    const missingDeclared: string[] = [];
-    for (const key of keychainKeys) {
-      const p = parsedByKey.get(key)!;
-      if (!('ref' in p) || p.ref.provider !== 'keychain') continue;
-      const item = secretsKeychainItem(bundle.name, p.ref.value);
-      if (fetched.get(item) === undefined && fetched.get(keychainServiceAlias(item)) === undefined) {
-        missingDeclared.push(item);
-      }
-    }
-    if (missingDeclared.length > 0) {
-      const declaredFetched = getKeychainTokens([...new Set(missingDeclared)], {
-        agent: opts.agent || process.env.AGENTS_AGENT_NAME || 'Agents CLI',
-        bundle: name,
-        sessionId: process.env.AGENT_SESSION_ID || process.env.AGENTS_SESSION_ID,
-        reason: opts.caller ? `to ${opts.caller}` : reason,
-        duration: opts.duration || humanUnlockDuration(secretsHoldMs()),
-        // The policy is known now (metadata parsed), so the prompt names the real
-        // duration instead of the pre-read default the first batch had to guess.
-        defaultPolicy: bundlePolicy(bundle),
-        forceDuration: Boolean(opts.duration),
-        silentNoAcl: verifiedNoAclBundle,
-      });
-      for (const [k, v] of declaredFetched) fetched.set(k, v);
-    }
-  }
 
   const emitReadAudit = (status: 'success' | 'error', err?: unknown) => {
     emitSecretAudit({
