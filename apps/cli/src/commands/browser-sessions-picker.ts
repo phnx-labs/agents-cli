@@ -87,11 +87,14 @@ function rowLinkSummary(row: BrowserSessionRow): string {
 }
 
 function formatRowLabel(row: BrowserSessionRow): string {
-  const name = row.kind === 'downloads' ? chalk.gray('[downloads]') : (row.task ?? '');
+  // Pad the raw text first, THEN colorize — padEnd on an already-chalked
+  // string counts the ANSI escape bytes as width and misaligns the column.
+  const name = (row.kind === 'downloads' ? '[downloads]' : (row.task ?? '')).padEnd(30);
+  const coloredName = row.kind === 'downloads' ? chalk.gray(name) : name;
   const age = formatRelativeTime(new Date(row.latestMtimeMs).toISOString());
   const counts = formatCounts(row.counts);
   return [
-    name.padEnd(30),
+    coloredName,
     row.profile.padEnd(26),
     age.padEnd(11),
     counts.padEnd(18),
