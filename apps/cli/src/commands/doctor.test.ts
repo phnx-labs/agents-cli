@@ -411,7 +411,10 @@ describe('doctor generated hook runtime integration (RUSH-2382)', () => {
     expect(payload.hookRuntimeRepair.attempts).toHaveLength(1);
     expect(payload.hookRuntimeRepair.attempts[0]).toMatchObject({ attempted: true, repaired: false });
     expect(payload.hookRuntimeRepair.needsAttention).toHaveLength(1);
-    expect(payload.hookRuntimeRepair.needsAttention[0]).toContain('repair failed [EISDIR]');
+    // Replacing a directory reports EISDIR on POSIX and EPERM on Windows.
+    // Both are stable platform-native codes; neither exposes the temp path.
+    const expectedCode = process.platform === 'win32' ? 'EPERM' : 'EISDIR';
+    expect(payload.hookRuntimeRepair.needsAttention[0]).toContain(`repair failed [${expectedCode}]`);
     expect(fs.existsSync(cachePath)).toBe(false);
   });
 
@@ -436,7 +439,10 @@ describe('doctor generated hook runtime integration (RUSH-2382)', () => {
     expect(payload.hookRuntimeRepair.attempts).toHaveLength(1);
     expect(payload.hookRuntimeRepair.attempts[0]).toMatchObject({ attempted: true, repaired: false });
     expect(payload.hookRuntimeRepair.needsAttention).toHaveLength(1);
-    expect(payload.hookRuntimeRepair.needsAttention[0]).toContain('repair failed [EISDIR]');
+    // Replacing a directory reports EISDIR on POSIX and EPERM on Windows.
+    // Both are stable platform-native codes; neither exposes the temp path.
+    const expectedCode = process.platform === 'win32' ? 'EPERM' : 'EISDIR';
+    expect(payload.hookRuntimeRepair.needsAttention[0]).toContain(`repair failed [${expectedCode}]`);
     expect(payload.hookRuntimeRepair.needsAttention[0]).not.toContain('.tmp.');
     expect(fs.existsSync(cachePath)).toBe(false);
   });
