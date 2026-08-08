@@ -159,6 +159,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var expandedProjects = Set<String>()
     private var projectSessionItems: [String: [NSMenuItem]] = [:]
 
+    // ROUTINES project-group accordion — same in-memory, collapsed-by-default
+    // model as the ACTIVE project accordion, keyed by the routine's project-group
+    // display label (the CLI's `projectGroup`: a project name, or one of the
+    // "Operations" / "All projects" / "Cross-project" specials). Toggling rebuilds
+    // from the warm routines cache with no extra CLI calls.
+    private var expandedRoutineGroups = Set<String>()
+    private var routineGroupItems: [String: [NSMenuItem]] = [:]
+
     // The DEVICES section is ONE collapsible block (collapsed by default), so its
     // state is a single flag + the rows currently shown — not the per-key Set the
     // project accordion needs. Same in-place insert/remove, no CLI on toggle.
@@ -1181,34 +1189,83 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             return
         }
 
-        addSectionTitle(menu, "ROUTINES · \(summary)", color: .secondaryLabelColor)
-        // A routine needing attention is surfaced ONCE, in NEEDS YOU (above) —
-        // this section shows only what's upcoming, plus "All routines…" for the
-        // rest, so the same failure never renders twice in one menu.
-        let failing = routines.filter { routineNeedsAttention($0) }
-        let upcoming = routines
-            .filter { r in r.enabled && !failing.contains(where: { $0.name == r.name }) && r.nextRun != nil }
-            .sorted { ($0.nextRun ?? "") < ($1.nextRun ?? "") }
-            .prefix(3)
-
         let hasGroups = routines.contains { $0.projectGroup != nil }
+        addSectionTitle(menu, "ROUTINES · \(summary)\(hasGroups ? " · \(routineGroupCount(routines)) groups" : "")",
+                        color: .secondaryLabelColor)
+
         if hasGroups {
-            let (grouped, ungrouped) = groupedRoutines(Array(upcoming))
+            // One collapsible header per project group (collapsed by default,
+            // like ACTIVE) — expanding folds every routine in that group inline,
+            // so the whole roster lives here instead of a flat "All routines…"
+            // flyout. A routine needing attention still surfaces in NEEDS YOU
+            // above; its group header carries the ✕/⃠ count so a collapsed group
+            // still shows there is something wrong inside it.
+            let (grouped, ungrouped) = groupedRoutines(routines)
             for (label, group) in grouped {
-                menu.addItem(disabled("  \(label)"))
-                for r in group { menu.addItem(inlineRoutineRow(r)) }
+                let open = expandedRoutineGroups.contains(label)
+                let summaryLine = routineGroupSummary(label: label, routines: group)
+                let header = NSMenuItem(title: summaryLine, action: nil, keyEquivalent: "")
+                let headerView = AccordionRowView(
+                    summary: summaryLine, expanded: open,
+                    accessibilityLabel: "\(label) routines",
+                    accessibilityHelp: "Expand or collapse \(group.count) routine\(group.count == 1 ? "" : "s")",
+                    expandTip: "Expand group", collapseTip: "Collapse group")
+                headerView.onToggle = { [weak self, weak menu, weak header] shouldExpand in
+                    guard let self, let menu, let header else { return }
+                    self.setRoutineGroup(label, expanded: shouldExpand, routines: group,
+                                         in: menu, after: header)
+                }
+                header.view = headerView
+                menu.addItem(header)
+
+                guard open else { continue }
+                let rows = orderedGroupRoutines(group).map { inlineRoutineRow($0) }
+                routineGroupItems[label] = rows
+                for row in rows { menu.addItem(row) }
             }
-            for r in ungrouped { menu.addItem(inlineRoutineRow(r)) }
+            // Routines the CLI could not place in a group (older CLI, or a
+            // group label it did not emit) render flat under the accordion.
+            for r in orderedGroupRoutines(ungrouped) { menu.addItem(inlineRoutineRow(r)) }
         } else {
+            // Fallback for a CLI that emits no `projectGroup`: the pre-accordion
+            // view — top upcoming inline, the rest behind "All routines…".
+            let failing = routines.filter { routineNeedsAttention($0) }
+            let upcoming = routines
+                .filter { r in r.enabled && !failing.contains(where: { $0.name == r.name }) && r.nextRun != nil }
+                .sorted { ($0.nextRun ?? "") < ($1.nextRun ?? "") }
+                .prefix(3)
             for r in upcoming {
                 let row = statusRow("◔", idleC, "\(r.name)  \(r.nextRunHuman ?? r.schedule)")
                 row.submenu = routineSubmenu(r)
                 menu.addItem(row)
             }
+            let all = NSMenuItem(title: "  All routines…", action: nil, keyEquivalent: "")
+            all.submenu = allRoutinesSubmenu(routines)
+            menu.addItem(all)
         }
-        let all = NSMenuItem(title: "  All routines…", action: nil, keyEquivalent: "")
-        all.submenu = allRoutinesSubmenu(routines)
-        menu.addItem(all)
+    }
+
+    /// Mutate only the rows under the clicked routine group, in place — the
+    /// enclosing menu stays in its tracking session and no CLI call runs. Mirrors
+    /// `setProject` for the ACTIVE accordion.
+    private func setRoutineGroup(_ label: String, expanded: Bool, routines: [Routine],
+                                 in menu: NSMenu, after header: NSMenuItem) {
+        if expanded {
+            expandedRoutineGroups.insert(label)
+            let rows = orderedGroupRoutines(routines).map { inlineRoutineRow($0) }
+            routineGroupItems[label] = rows
+            let headerIndex = menu.index(of: header)
+            guard headerIndex >= 0 else { return }
+            for (offset, row) in rows.enumerated() {
+                menu.insertItem(row, at: headerIndex + offset + 1)
+            }
+        } else {
+            expandedRoutineGroups.remove(label)
+            for row in routineGroupItems.removeValue(forKey: label) ?? [] {
+                menu.removeItem(row)
+            }
+        }
+        menu.update()
     }
 
     // One colored inline row for the ROUTINES section. Only ever called with an
@@ -1946,4 +2003,53 @@ func groupedRoutines(_ routines: [Routine]) -> (grouped: [(String, [Routine])], 
         }
     }
     return (order.map { ($0, byGroup[$0]!) }, ungrouped)
+}
+
+/// Distinct project-group count for the ROUTINES header (`… · N groups`) — the
+/// named/special groups plus one bucket for any ungrouped tail.
+func routineGroupCount(_ routines: [Routine]) -> Int {
+    let (grouped, ungrouped) = groupedRoutines(routines)
+    return grouped.count + (ungrouped.isEmpty ? 0 : 1)
+}
+
+/// Header line for one routine project group: the label plus per-state glyph
+/// counts (◔ upcoming/ok · ✕ failing · ⃠ missed · ⏸ not-ready) and a paused tail,
+/// mirroring `ActiveDisplay.projectSummary`'s shape for ACTIVE projects. Pure so
+/// the accordion header text is unit-testable without AppKit.
+func routineGroupSummary(label: String, routines: [Routine]) -> String {
+    var ok = 0, failure = 0, miss = 0, notReady = 0, paused = 0
+    for r in routines {
+        if !r.enabled { paused += 1; continue }
+        switch routineAttentionKind(r) {
+        case .some(.failure): failure += 1
+        case .some(.miss): miss += 1
+        case .some(.notReady): notReady += 1
+        case .none: ok += 1
+        }
+    }
+    var chips: [String] = []
+    if ok > 0 { chips.append("◔\(ok)") }
+    if failure > 0 { chips.append("✕\(failure)") }
+    if miss > 0 { chips.append("⃠\(miss)") }
+    if notReady > 0 { chips.append("⏸\(notReady)") }
+    var parts = [label]
+    if !chips.isEmpty { parts.append(chips.joined(separator: " ")) }
+    if paused > 0 { parts.append("\(paused) paused") }
+    return parts.joined(separator: "  ·  ")
+}
+
+/// Triage order within an expanded group: attention first (failing/missed/
+/// not-ready), then enabled by next run, then paused last.
+func orderedGroupRoutines(_ routines: [Routine]) -> [Routine] {
+    routines.sorted { a, b in
+        func rank(_ r: Routine) -> Int {
+            if routineNeedsAttention(r) { return 0 }
+            if r.enabled { return 1 }
+            return 2
+        }
+        let ra = rank(a), rb = rank(b)
+        if ra != rb { return ra < rb }
+        if ra == 1 { return (a.nextRun ?? "~") < (b.nextRun ?? "~") }
+        return a.name < b.name
+    }
 }

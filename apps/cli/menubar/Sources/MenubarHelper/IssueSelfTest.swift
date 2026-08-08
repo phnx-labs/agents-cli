@@ -24,6 +24,7 @@ enum IssueSelfTest {
         testDraftPreservation()
         testRoutineFailureReason()
         testRoutineGrouping()
+        testRoutineGroupAccordion()
         testLinearProjectResolution()
         testLinearTicketRanking()
         testLinearTicketFilter()
@@ -391,6 +392,51 @@ enum IssueSelfTest {
         // Empty input.
         let (g3, u3) = groupedRoutines([])
         check("empty input yields empty output", g3.isEmpty && u3.isEmpty)
+    }
+
+    // The ROUTINES accordion: header summaries carry per-state glyph counts, the
+    // header group count includes an ungrouped tail, and an expanded group orders
+    // attention-first / next-run / paused-last.
+    private static func testRoutineGroupAccordion() {
+        let ok1     = routine(name: "seo-draft", nextRun: "2026-08-07T18:00:00Z")
+        let ok2     = routine(name: "blog-draft", nextRun: "2026-08-07T09:00:00Z")
+        let failing = routine(name: "usage-refresh", lastStatus: "failed", exitCode: 1)
+        let missed  = routine(name: "device-probe", lastStatus: "missed", overdue: true)
+        let paused  = routine(name: "release-train", enabled: false)
+
+        // Summary: label + glyph counts (◔ ok, ✕ failing, ⃠ miss) + paused tail.
+        // Whole-string equality — `⃠` is a combining scalar, so a `.contains("⃠1")`
+        // substring check would split its grapheme cluster and spuriously fail.
+        let summary = routineGroupSummary(label: "Operations",
+                                          routines: [ok1, ok2, failing, missed, paused])
+        check("summary is label + per-state glyph counts + paused tail",
+              summary == "Operations  ·  ◔2 ✕1 ⃠1  ·  1 paused", detail: summary)
+
+        // A clean, all-enabled group shows only the ◔ count, no paused tail.
+        let clean = routineGroupSummary(label: "agents-cli", routines: [ok1])
+        check("a clean single-routine group is just label + ◔1",
+              clean == "agents-cli  ·  ◔1", detail: clean)
+
+        // Header group count: named groups + one bucket for the ungrouped tail.
+        let grouped = [routine(name: "a", projectGroup: "agents-cli"),
+                       routine(name: "b", projectGroup: "rush-app"),
+                       routine(name: "c", projectGroup: nil)]
+        check("group count includes the ungrouped tail as one bucket",
+              routineGroupCount(grouped) == 3, detail: "\(routineGroupCount(grouped))")
+        check("no ungrouped tail is not counted",
+              routineGroupCount([grouped[0], grouped[1]]) == 2)
+
+        // Expanded order: attention first (failing before missed by name), then
+        // enabled by next run (blog 09:00 before seo 18:00), then paused last.
+        let ordered = orderedGroupRoutines([ok1, paused, missed, ok2, failing]).map { $0.name }
+        check("attention routines sort ahead of upcoming and paused",
+              Array(ordered.prefix(2)).sorted() == ["device-probe", "usage-refresh"],
+              detail: ordered.joined(separator: ","))
+        check("upcoming routines sort by next run within the group",
+              ordered[2] == "blog-draft" && ordered[3] == "seo-draft",
+              detail: ordered.joined(separator: ","))
+        check("paused routine sorts to the tail",
+              ordered.last == "release-train", detail: ordered.joined(separator: ","))
     }
 
     // The repo picker drives the ticket scope, so `agents-cli` has to land on the
@@ -764,6 +810,8 @@ enum IssueSelfTest {
         exitCode: Int? = nil,
         failureReason: String? = nil,
         overdue: Bool = false,
+        enabled: Bool = true,
+        nextRun: String? = nil,
         projects: [String]? = nil,
         projectGroup: String? = nil
     ) -> Routine {
@@ -776,9 +824,9 @@ enum IssueSelfTest {
             projectGroup: projectGroup,
             schedule: "0 3 * * *",
             scheduleHuman: nil,
-            enabled: true,
+            enabled: enabled,
             overdue: overdue,
-            nextRun: nil,
+            nextRun: nextRun,
             nextRunHuman: "tomorrow",
             lastStatus: lastStatus,
             exitCode: exitCode,
