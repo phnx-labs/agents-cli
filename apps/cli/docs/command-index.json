@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 100,
-  "commands": 571,
+  "groups": 101,
+  "commands": 573,
   "root": {
     "name": "agents",
     "path": "",
@@ -24999,6 +24999,8 @@
           "negate": false
         }
       ],
+      "examples": "# Publish an HTML file — gets an auto OG cover + a shareable link\n      agents share ./out/plan.html\n\n      # Custom slug, expiring in 30 days\n      agents share ./out/report.html --slug q3-report --expire 30d\n\n      # Delete by full URL — also takes down the sibling OG cover\n      agents share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists\n\n      # One-time setup (or join an existing endpoint)\n      agents share setup\n      agents share join https://share.agents-cli.sh",
+      "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents share delete === agents unshare (same command, different name).",
       "subcommands": [
         {
           "name": "analytics",
@@ -25007,6 +25009,69 @@
           "description": "Show the Cloudflare Web Analytics status for this share endpoint.",
           "args": [],
           "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "delete",
+          "path": "share delete",
+          "aliases": [],
+          "description": "Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Top-level alias: agents unshare.",
+          "args": [
+            {
+              "name": "targets",
+              "required": true,
+              "variadic": true,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--keep-cover",
+              "description": "leave the sibling <slug>.png OG cover in place (default: delete it too)",
+              "long": "--keep-cover",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--if-exists",
+              "description": "treat an already-missing target as a no-op success instead of an error",
+              "long": "--if-exists",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--github-user <user>",
+              "description": "GitHub username for resolving a bare-slug target (default: resolved from gh/git config)",
+              "long": "--github-user",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "emit machine-readable results",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -28560,6 +28625,69 @@
       ],
       "examples": "# Preview everything that would change, without touching anything\n      agents uninstall --dry-run\n\n      # Restore your configs and move ~/.agents aside (recoverable)\n      agents uninstall\n\n      # Same, but hard-delete ~/.agents (no recovery)\n      agents uninstall --purge",
       "notes": "- Restores every ~/.<agent> that agents-cli adopted; a real config it never adopted is left untouched.\n      - Releases adopted launchers and strips the shim directory from your shell PATH.\n      - Without --purge, ~/.agents is moved to ~/.agents.removed-<timestamp> so nothing is lost.\n      - The CLI cannot delete its own running binary; it prints the final 'npm uninstall -g' step for you.",
+      "subcommands": []
+    },
+    {
+      "name": "unshare",
+      "path": "unshare",
+      "aliases": [],
+      "description": "Alias of `agents share delete` — take down a published page (and by default its OG cover).",
+      "args": [
+        {
+          "name": "targets",
+          "required": true,
+          "variadic": true,
+          "description": ""
+        }
+      ],
+      "options": [
+        {
+          "flags": "--keep-cover",
+          "description": "leave the sibling <slug>.png OG cover in place (default: delete it too)",
+          "long": "--keep-cover",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--if-exists",
+          "description": "treat an already-missing target as a no-op success instead of an error",
+          "long": "--if-exists",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--github-user <user>",
+          "description": "GitHub username for resolving a bare-slug target (default: resolved from gh/git config)",
+          "long": "--github-user",
+          "required": true,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--json",
+          "description": "emit machine-readable results",
+          "long": "--json",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "-h, --help",
+          "description": "Show help",
+          "short": "-h",
+          "long": "--help",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        }
+      ],
       "subcommands": []
     },
     {

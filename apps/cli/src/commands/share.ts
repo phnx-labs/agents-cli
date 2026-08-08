@@ -29,9 +29,11 @@ import {
   setWorkerSecret,
 } from '../lib/share/provision.js';
 import { publishFile, type PublishResult } from '../lib/share/publish.js';
+import { deleteShare, type DeleteShareResult } from '../lib/share/delete.js';
 import { renderWorkerScript } from '../lib/share/worker-template.js';
 import { analyticsEnabled } from '../lib/share/analytics.js';
 import { resolveGitHubUsername } from '../lib/git.js';
+import { setHelpSections } from '../lib/help.js';
 
 export function formatSharePublishResult(result: PublishResult, json = false): string {
   if (json) return JSON.stringify(result, null, 2);
@@ -41,6 +43,92 @@ export function formatSharePublishResult(result: PublishResult, json = false): s
   if (result.expiresAt) lines.push(chalk.dim(`  expires ${new Date(result.expiresAt).toLocaleString()}`));
   return lines.join('\n');
 }
+
+export function formatShareDeleteResult(result: DeleteShareResult, json = false): string {
+  if (json) return JSON.stringify(result, null, 2);
+  if (result.skipped) return chalk.dim(`skipped — ${result.url} was already gone`);
+
+  const lines = [chalk.green(`deleted ${result.url}`)];
+  if (result.cover) {
+    lines.push(
+      result.cover.existedBefore
+        ? chalk.dim(`  cover deleted ${result.cover.url}`)
+        : chalk.dim(`  cover (none) ${result.cover.url}`),
+    );
+  }
+  return lines.join('\n');
+}
+
+interface ShareDeleteCliOpts {
+  keepCover?: boolean;
+  ifExists?: boolean;
+  githubUser?: string;
+  json?: boolean;
+}
+
+/** Shared handler for `agents share delete <targets...>` and the top-level
+ * `agents unshare <targets...>` alias. Deletes each target independently and
+ * continues past a failed one (rm-style), reporting all results and exiting
+ * non-zero if any target failed to verify as gone. */
+async function runShareDelete(targets: string[], opts: ShareDeleteCliOpts): Promise<void> {
+  const results: Array<{ target: string; result?: DeleteShareResult; error?: string }> = [];
+  for (const target of targets) {
+    try {
+      const result = await deleteShare(target, {
+        keepCover: opts.keepCover === true,
+        ifExists: opts.ifExists === true,
+        githubUser: opts.githubUser,
+      });
+      results.push({ target, result });
+      if (!opts.json) console.log(formatShareDeleteResult(result));
+    } catch (e) {
+      results.push({ target, error: (e as Error).message });
+      if (!opts.json) console.error(chalk.red(`${target}: ${(e as Error).message}`));
+    }
+  }
+
+  if (opts.json) {
+    console.log(JSON.stringify(results, null, 2));
+  }
+
+  if (results.some((r) => r.error)) {
+    process.exitCode = 1;
+  }
+}
+
+function registerShareDeleteOptions(cmd: Command): Command {
+  return cmd
+    .option('--keep-cover', 'leave the sibling <slug>.png OG cover in place (default: delete it too)')
+    .option('--if-exists', 'treat an already-missing target as a no-op success instead of an error')
+    .option('--github-user <user>', 'GitHub username for resolving a bare-slug target (default: resolved from gh/git config)')
+    .option('--json', 'emit machine-readable results');
+}
+
+const SHARE_DELETE_EXAMPLES = `
+      # Delete by full URL — also takes down the sibling OG cover
+      agents share delete https://share.agents-cli.sh/octocat/my-plan-a1b2
+
+      # Delete by <user>/<slug>, or a bare slug in your own namespace
+      agents share delete octocat/my-plan-a1b2
+      agents unshare my-plan-a1b2
+
+      # Several at once
+      agents unshare my-plan-a1b2 old-report-9f3c
+
+      # Keep the cover image up (rare — you usually want both gone)
+      agents unshare my-plan-a1b2 --keep-cover
+
+      # Don't error if it's already gone
+      agents unshare my-plan-a1b2 --if-exists
+`;
+
+const SHARE_DELETE_NOTES = `
+  A follow-up GET is required to resolve 404 before this reports success — the
+  Worker's DELETE is idempotent and returns {"ok":true} even for a key that was
+  never there, so that response alone is never proof of a takedown.
+
+  agents share delete === agents unshare (same command, different name).
+`;
 
 export function registerShareCommands(program: Command): void {
   const shareCmd = program
@@ -77,6 +165,37 @@ export function registerShareCommands(program: Command): void {
         process.exitCode = 1;
       }
     });
+
+  setHelpSections(shareCmd, {
+    examples: `
+      # Publish an HTML file — gets an auto OG cover + a shareable link
+      agents share ./out/plan.html
+
+      # Custom slug, expiring in 30 days
+      agents share ./out/report.html --slug q3-report --expire 30d
+${SHARE_DELETE_EXAMPLES}
+      # One-time setup (or join an existing endpoint)
+      agents share setup
+      agents share join https://share.agents-cli.sh
+    `,
+    notes: SHARE_DELETE_NOTES,
+  });
+
+  registerShareDeleteOptions(
+    shareCmd
+      .command('delete <targets...>')
+      .description('Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Top-level alias: agents unshare.'),
+  ).action(async (targets: string[], opts: ShareDeleteCliOpts) => {
+    await runShareDelete(targets, opts);
+  });
+
+  registerShareDeleteOptions(
+    program
+      .command('unshare <targets...>')
+      .description('Alias of `agents share delete` — take down a published page (and by default its OG cover).'),
+  ).action(async (targets: string[], opts: ShareDeleteCliOpts) => {
+    await runShareDelete(targets, opts);
+  });
 
   shareCmd
     .command('setup')

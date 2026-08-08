@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_100 command groups · 571 commands._
+_101 command groups · 573 commands._
 
 ## accounts — Browse and name signed-in harness accounts
 
@@ -880,11 +880,12 @@ agents setup watchdog  Choose the devices where the daemon watchdog pass runs.
 ## share — Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).
 
 ```
-agents share [file]          Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).
-agents share analytics       Show the Cloudflare Web Analytics status for this share endpoint.
-agents share join [baseUrl]  Use an existing synced share endpoint and write token (no provisioning).
-agents share setup           One-time: provision an R2 bucket + Worker on your Cloudflare and save the config.
-agents share status          Show the configured share endpoint and namespace.
+agents share [file]               Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).
+agents share analytics            Show the Cloudflare Web Analytics status for this share endpoint.
+agents share delete <targets...>  Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Top-level alias: agents unshare.
+agents share join [baseUrl]       Use an existing synced share endpoint and write token (no provisioning).
+agents share setup                One-time: provision an R2 bucket + Worker on your Cloudflare and save the config.
+agents share status               Show the configured share endpoint and namespace.
 ```
 
 ## skills — Add domain-specific capabilities to agents via packaged SKILL.md files
@@ -1003,6 +1004,12 @@ agents trends tools-per-session  Mix recipe: tools-per-session
 
 ```
 agents uninstall  Completely remove agents-cli and restore your original agent configs. Reverses `agents setup`.
+```
+
+## unshare — Alias of `agents share delete` — take down a published page (and by default its OG cover).
+
+```
+agents unshare <targets...>  Alias of `agents share delete` — take down a published page (and by default its OG cover).
 ```
 
 ## update — Move a frozen agent installation to a new release, keeping its name and every reference to it

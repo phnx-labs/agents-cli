@@ -277,6 +277,9 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   mailbox: [loadMailboxes],
   serve: [loadServe],
   share: [loadShare],
+  // `unshare` is a top-level convenience alias of `share delete` (see
+  // commands/share.ts) — same module, registered as its own program.command().
+  unshare: [loadShare],
   audit: [loadAudit],
   webhook: [loadWebhook],
   funnel: [loadFunnel],

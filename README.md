@@ -1122,6 +1122,7 @@ agents share setup                                  # once: provision bucket + W
 agents share plan.html --slug fleet --expire 30d    # → https://<base>/fleet
 agents share plan.html --json                       # URL object for plan-render hooks
 agents share status                                 # show the endpoint
+agents unshare fleet                                # take a published link (+ its OG cover) down
 ```
 
 `agents share` closes the loop: an agent makes work (a plan, a viz, a report),
@@ -1138,6 +1139,12 @@ publishes through it with a shared write token — `agents share join <baseUrl>`
 existing endpoint with no provisioning. `--expire 30d|12h|<date>` auto-expires a link.
 `--json` emits `{ url, coverUrl, expiresAt }` so plan-render automation can publish the
 rendered HTML and post the returned link without scraping terminal text.
+
+`agents share delete <targets...>` (alias `agents unshare`) takes a page down — pass a
+full URL, `<user>/<slug>`, or a bare slug (resolved against your own namespace); several
+targets at once are fine. It also deletes the sibling `<slug>.png` OG cover by default
+(`--keep-cover` opts out) and verifies the page actually 404s before reporting success —
+the Worker's delete is idempotent, so `{"ok":true}` alone is never proof.
 See [docs/share.md](apps/cli/docs/share.md).
 
 ---
