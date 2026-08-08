@@ -32,7 +32,11 @@ import {
   parseInstalledAgentVersionQuery,
   buildRoutineChoices,
   hasNoBrowserDisqualifyingFlags,
+  executionKind,
+  printRoutineDrilldown,
+  type RoutineDrilldown,
 } from './sessions.js';
+import type { RunMeta } from '../lib/routines.js';
 import { remoteAgentsJsonCommand } from '../lib/remote-agents-json.js';
 import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { parseRemoteList } from '../lib/session/remote-list.js';
@@ -108,6 +112,203 @@ describe('routine session catalog', () => {
         cwd: routineCwd,
         isTeamOrigin: true,
       });
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('routine drilldown — run history + linked sessions (RUSH-2409)', () => {
+  const run = (over: Partial<RunMeta> & { runId: string; status: RunMeta['status'] }): RunMeta => ({
+    jobName: 'r', pid: null, startedAt: '2026-08-08T05:00:00.000Z', completedAt: null, exitCode: null,
+    ...over,
+  });
+  const sess = (over: Partial<SessionMeta> & { id: string }): SessionMeta => ({
+    shortId: over.id.slice(0, 8), agent: 'claude', timestamp: '2026-08-08T05:00:00.000Z',
+    filePath: '/tmp/s.jsonl', ...over,
+  });
+  const capture = (fn: () => void): string => {
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (line = '') => { lines.push(String(line)); };
+    try { fn(); } finally { console.log = orig; }
+    // eslint-disable-next-line no-control-regex
+    return lines.join('\n').replace(/\[[0-9;]*m/g, '');
+  };
+
+  it('classifies execution kind from the run record, not the session', () => {
+    expect(executionKind(run({ runId: 'x', status: 'completed', agent: 'claude' }))).toBe('agent');
+    expect(executionKind(run({ runId: 'x', status: 'completed', workflow: 'wf' }))).toBe('workflow');
+    expect(executionKind(run({ runId: 'x', status: 'skipped', command: 'agents __daemon-tick x' }))).toBe('command');
+  });
+
+  it('renders a command-only routine as run history with no session synthesized', () => {
+    const drill: RoutineDrilldown = {
+      name: 'auto-dispatch',
+      runs: [
+        { meta: run({ runId: '2026-08-08T05-03-00-002Z', status: 'skipped', command: 'agents __daemon-tick auto-dispatch', triggerKind: 'schedule', skipReason: 'wrong_owner', duration: 0 }), sessions: [] },
+        { meta: run({ runId: '2026-08-08T05-00-00-002Z', status: 'completed', command: 'echo hi', triggerKind: 'schedule', duration: 1500, exitCode: 0 }), sessions: [] },
+      ],
+      orphanSessions: [],
+      runRecordCount: 2,
+      linkedSessionCount: 0,
+      isAgentRoutine: false,
+    };
+    const out = capture(() => printRoutineDrilldown(drill));
+    expect(out).toContain('auto-dispatch  2 run records · 0 linked sessions');
+    expect(out).toContain('Command routine — runs execute a shell command; no agent session is produced.');
+    expect(out).toContain('▸ 2026-08-08T05-03-00-002Z');
+    expect(out).toContain('skipped');
+    expect(out).toContain('wrong owner');
+    expect(out).toContain('command · local');
+    expect(out).toContain('completed');
+    // No fake session row — command runs never manufacture a SessionMeta line.
+    expect(out).not.toContain('no agent session archived for this run');
+  });
+
+  it('links an indexed agent session to its run with token/cost/tool metadata', () => {
+    const linked = sess({
+      id: 'aaaa1111-2222-4333-8444-555566667777', agent: 'claude', version: '2.1.181',
+      account: 'dev@x.io', model: 'claude-opus-4-8', outputTokens: 42000, costUsd: 1.23,
+      durationMs: 720000, toolCallCount: 88, routineName: 'nightly', routineRunId: 'run-1',
+      topic: 'nightly review',
+    });
+    const drill: RoutineDrilldown = {
+      name: 'nightly',
+      runs: [{ meta: run({ runId: 'run-1', status: 'completed', agent: 'claude', version: '2.1.181', triggerKind: 'schedule', duration: 720000, exitCode: 0 }), sessions: [linked] }],
+      orphanSessions: [],
+      runRecordCount: 1,
+      linkedSessionCount: 1,
+      isAgentRoutine: true,
+    };
+    const out = capture(() => printRoutineDrilldown(drill));
+    expect(out).toContain('nightly  1 run record · 1 linked session');
+    expect(out).not.toContain('no agent session is produced');
+    expect(out).toContain('claude v2.1.181');
+    expect(out).toContain('dev@x.io');
+    expect(out).toContain('42K out');
+    expect(out).toContain('$1.23');
+    expect(out).toContain('88 tools');
+  });
+
+  it('shows the outcome for failed and blocked runs without a session, never a fake row', () => {
+    const drill: RoutineDrilldown = {
+      name: 'nightly',
+      runs: [
+        { meta: run({ runId: 'run-2', status: 'failed', agent: 'claude', triggerKind: 'schedule', exitCode: 1, errorMessage: 'auth_failed: login required', duration: 3000 }), sessions: [] },
+        { meta: run({ runId: 'run-3', status: 'blocked', agent: 'claude', triggerKind: 'schedule', readiness: { code: 'dead_auth', message: 'account signed out' } }), sessions: [] },
+      ],
+      orphanSessions: [],
+      runRecordCount: 2,
+      linkedSessionCount: 0,
+      isAgentRoutine: true,
+    };
+    const out = capture(() => printRoutineDrilldown(drill));
+    expect(out).toContain('failed');
+    expect(out).toContain('auth_failed: login required');
+    expect(out).toContain('blocked');
+    expect(out).toContain('dead_auth: account signed out');
+    // An agent run that produced no session says so explicitly, never fakes one.
+    expect(out).toContain('no agent session archived for this run');
+  });
+
+  it('surfaces sessions whose run record is on another host as orphans, counted honestly', () => {
+    const orphanSess = sess({ id: 'bbbb1111-2222-4333-8444-555566667777', routineName: 'nightly', routineRunId: 'remote-run', timestamp: '2026-08-08T04:00:00.000Z' });
+    const drill: RoutineDrilldown = {
+      name: 'nightly',
+      runs: [],
+      orphanSessions: [{ runId: 'remote-run', timestamp: '2026-08-08T04:00:00.000Z', sessions: [orphanSess] }],
+      runRecordCount: 0,
+      linkedSessionCount: 1,
+      isAgentRoutine: true,
+    };
+    const out = capture(() => printRoutineDrilldown(drill));
+    expect(out).toContain('nightly  0 run records · 1 linked session');
+    expect(out).toContain('Sessions with no local run record (run archived on another host):');
+    expect(out).toContain('▸ remote-run');
+  });
+});
+
+describeLive('routine drilldown — real CLI flow (RUSH-2409)', () => {
+  function writeRun(tempHome: string, name: string, runId: string, meta: Record<string, unknown>): void {
+    const dir = path.join(tempHome, '.agents', '.history', 'runs', name, runId);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ jobName: name, runId, ...meta }), 'utf-8');
+  }
+
+  it('drills a command-only routine into run history with no session synthesized', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-routine-cmd-'));
+    try {
+      writeUpdateCache(tempHome);
+      const cwd = path.join(tempHome, 'work');
+      fs.mkdirSync(cwd, { recursive: true });
+      writeRun(tempHome, 'auto-dispatch', '2026-08-08T05-03-00-002Z', {
+        command: 'agents __daemon-tick auto-dispatch', triggerKind: 'schedule', pid: null,
+        status: 'skipped', skipReason: 'wrong_owner',
+        startedAt: '2026-08-08T05:03:00.000Z', completedAt: '2026-08-08T05:03:00.000Z', exitCode: null, duration: 0,
+      });
+      writeRun(tempHome, 'auto-dispatch', '2026-08-08T05-00-00-002Z', {
+        command: 'echo hi', triggerKind: 'schedule', pid: 1234,
+        status: 'completed', startedAt: '2026-08-08T05:00:00.000Z', completedAt: '2026-08-08T05:00:01.000Z', exitCode: 0, duration: 1000,
+      });
+
+      const result = runAgents(['sessions', '--routine', 'auto-dispatch', '--local'], cwd, tempHome);
+      expect(result.status, result.stderr).toBe(0);
+      // eslint-disable-next-line no-control-regex
+      const out = result.stdout.replace(/\[[0-9;]*m/g, '');
+      expect(out).toContain('2 run records · 0 linked sessions');
+      expect(out).toContain('Command routine — runs execute a shell command; no agent session is produced.');
+      expect(out).toContain('2026-08-08T05-03-00-002Z');
+      expect(out).toContain('skipped');
+      expect(out).toContain('wrong owner');
+      expect(out).toContain('command · local');
+      // The generic "No sessions found" dead-end must NOT appear for a routine.
+      expect(out).not.toContain('No sessions found');
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it('links an indexed agent session to its run record', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-routine-agent-'));
+    try {
+      writeUpdateCache(tempHome);
+      const cwd = path.join(tempHome, 'work');
+      fs.mkdirSync(cwd, { recursive: true });
+      const routineCwd = path.join(tempHome, 'work', 'scheduled-repo');
+      const runId = '2026-08-08T03-00-00-000Z';
+      const sessionId = 'abcd2409-1111-4222-8333-444455556666';
+      writeRun(tempHome, 'nightly-review', runId, {
+        agent: 'claude', version: '2.1.110', triggerKind: 'schedule', pid: 4321,
+        status: 'completed', startedAt: '2026-08-08T03:00:00.000Z', completedAt: '2026-08-08T03:12:00.000Z', exitCode: 0, duration: 720000,
+      });
+      const archiveDir = path.join(
+        tempHome, '.agents', '.history', 'runs', 'nightly-review', runId,
+        'sessions', 'claude', 'projects', '-scheduled-repo',
+      );
+      fs.mkdirSync(archiveDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(archiveDir, `${sessionId}.jsonl`),
+        JSON.stringify({
+          type: 'user', timestamp: '2026-08-08T03:00:00.000Z', cwd: routineCwd,
+          sessionId, version: '2.1.110', gitBranch: 'main', entrypoint: 'sdk-cli',
+          message: { role: 'user', content: 'inspect the scheduled repository' },
+        }) + '\n',
+        'utf-8',
+      );
+
+      const result = runAgents(['sessions', '--routine', 'nightly-review', '--local'], cwd, tempHome);
+      expect(result.status, result.stderr).toBe(0);
+      // eslint-disable-next-line no-control-regex
+      const out = result.stdout.replace(/\[[0-9;]*m/g, '');
+      expect(out).toContain('1 run record · 1 linked session');
+      expect(out).toContain(runId);
+      expect(out).toContain('completed');
+      expect(out).toContain('agent · 12m · local');
+      // The linked indexed session row + its metadata are present.
+      expect(out).toContain(sessionId.slice(0, 8));
+      expect(out).toContain('claude v2.1.110');
+      expect(out).not.toContain('no agent session archived');
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }

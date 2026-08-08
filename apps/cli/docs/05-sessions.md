@@ -757,14 +757,23 @@ agents sessions --teams   # --team is an alias
 # In the browser, `t` cycles the same filter over the teams in view.
 agents sessions --in-team redesign --teams
 
-# Show routine-run sessions across every working directory, then open one by run id
+# Drill into a routine: its canonical run history first, each run linked to the
+# indexed agent session(s) it produced. Global across every working directory.
 agents sessions --routine
 agents sessions --routine nightly-review
 agents sessions --routines            # alias; pick a routine interactively on a TTY
 agents sessions 2026-07-21T10-30-00-000Z
 
-# The picker shows last-run/run-count/session-count context. After selection,
-# sessions are grouped by routine run id and timestamp.
+# The picker shows last-run/run-count/session-count context. After selection the
+# drilldown lists RUN RECORDS newest-first — run id, trigger, status
+# (completed/failed/blocked/skipped/missed), start/duration, exit/error, execution
+# type (agent/command/workflow), and placement (local/host/cloud) with the run's
+# log + report paths — and under each run its linked session's agent/version/
+# account/model/token/cost/duration/tool metadata. A command-only routine (e.g.
+# auto-dispatch) shows its runs and states plainly that no agent session is
+# produced; blocked/skipped/missed attempts appear with no fabricated session row.
+# Counts distinguish run records from linked sessions. The canonical source is the
+# run history under ~/.agents/.history/runs/<routine>/, not the session index.
 
 # Sort the list by cost or duration (default: recent)
 agents sessions --sort cost --limit 10
