@@ -227,6 +227,34 @@ describe('routine drilldown — run history + linked sessions (RUSH-2409)', () =
     expect(out).toContain('Sessions with no local run record (run archived on another host):');
     expect(out).toContain('▸ remote-run');
   });
+
+  it('keeps the hidden team and unmanaged-session disclosures (every listing path says what it dropped)', () => {
+    const drill: RoutineDrilldown = {
+      name: 'nightly',
+      runs: [{ meta: run({ runId: 'run-1', status: 'completed', agent: 'claude', triggerKind: 'schedule', duration: 1000, exitCode: 0 }), sessions: [] }],
+      orphanSessions: [],
+      runRecordCount: 1,
+      linkedSessionCount: 0,
+      isAgentRoutine: true,
+    };
+    const out = capture(() => printRoutineDrilldown(drill, undefined, { hiddenCount: 2, hiddenUnmanaged: 1 }));
+    expect(out).toContain('2 team sessions hidden');
+    expect(out).toContain('1 session from your own unmanaged installs hidden');
+  });
+
+  it('labels a workflow routine as an agent routine, not a command routine', () => {
+    const drill: RoutineDrilldown = {
+      name: 'wf-routine',
+      runs: [{ meta: run({ runId: 'wf-1', status: 'completed', workflow: 'nightly-wf', triggerKind: 'schedule', duration: 5000, exitCode: 0 }), sessions: [] }],
+      orphanSessions: [],
+      runRecordCount: 1,
+      linkedSessionCount: 0,
+      isAgentRoutine: true,
+    };
+    const out = capture(() => printRoutineDrilldown(drill));
+    expect(out).not.toContain('no agent session is produced');
+    expect(out).toContain('workflow · ');
+  });
 });
 
 describeLive('routine drilldown — real CLI flow (RUSH-2409)', () => {

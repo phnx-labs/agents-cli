@@ -774,6 +774,9 @@ agents sessions 2026-07-21T10-30-00-000Z
 # produced; blocked/skipped/missed attempts appear with no fabricated session row.
 # Counts distinguish run records from linked sessions. The canonical source is the
 # run history under ~/.agents/.history/runs/<routine>/, not the session index.
+# The drilldown is the default routine view; an explicit --flat/--tree or a
+# session id/query keeps the scoped session listing/picker instead
+# (e.g. `agents sessions --routine nightly-review --flat`).
 
 # Sort the list by cost or duration (default: recent)
 agents sessions --sort cost --limit 10

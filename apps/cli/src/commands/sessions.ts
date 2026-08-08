@@ -1980,7 +1980,10 @@ export function buildRoutineDrilldown(name: string, sessions: SessionMeta[]): Ro
     orphanSessions,
     runRecordCount: runs.length,
     linkedSessionCount: forRoutine.length,
-    isAgentRoutine: runs.some((r) => !!r.agent) || forRoutine.length > 0,
+    // "Agent routine" = anything that isn't purely command runs. A workflow run
+    // carries no `agent` field but still expects a session, so key off
+    // executionKind, not `agent` alone.
+    isAgentRoutine: runs.some((r) => executionKind(r) !== 'command') || forRoutine.length > 0,
   };
 }
 
@@ -2023,7 +2026,9 @@ function runOutcomeDetail(meta: RunMeta): string {
   }
   if (meta.status === 'missed') return 'daemon down at fire time';
   if (meta.errorMessage) return meta.errorMessage;
-  if (typeof meta.exitCode === 'number') return `exit ${meta.exitCode}`;
+  // A clean `exit 0` is already implied by the green "completed" status — only a
+  // non-zero code carries information worth a tail clause.
+  if (typeof meta.exitCode === 'number' && meta.exitCode !== 0) return `exit ${meta.exitCode}`;
   return '';
 }
 
@@ -2050,6 +2055,7 @@ function linkedSessionMeta(session: SessionMeta): string {
 export function printRoutineDrilldown(
   drill: RoutineDrilldown,
   liveIndex?: Map<string, ActiveSession>,
+  opts: { hiddenCount?: number; hiddenUnmanaged?: number } = {},
 ): void {
   const runWord = drill.runRecordCount === 1 ? 'run record' : 'run records';
   const sessWord = drill.linkedSessionCount === 1 ? 'linked session' : 'linked sessions';
@@ -2083,12 +2089,14 @@ export function printRoutineDrilldown(
     const outcome = runOutcomeDetail(m);
     if (outcome) detailParts.push(outcome);
     console.log(chalk.gray('    ' + detailParts.join(' · ')));
-    // Log/report access — the run dir always holds stdout.log; report.md is an
-    // agent-written child that may be absent.
+    // Log/report access — both are children of the run dir that a pre-execution
+    // terminal (blocked/skipped/missed) never wrote, so gate each on existence
+    // rather than pointing at a file that isn't there.
     const runDir = getRunDir(drill.name, m.runId);
-    const logHints = [`log: ${path.join(runDir, 'stdout.log')}`];
+    const logHints: string[] = [];
+    if (fs.existsSync(path.join(runDir, 'stdout.log'))) logHints.push(`log: ${path.join(runDir, 'stdout.log')}`);
     if (fs.existsSync(path.join(runDir, 'report.md'))) logHints.push(`report: ${path.join(runDir, 'report.md')}`);
-    console.log(chalk.gray('    ' + logHints.join('  ·  ')));
+    if (logHints.length > 0) console.log(chalk.gray('    ' + logHints.join('  ·  ')));
 
     if (entry.sessions.length > 0) {
       for (const session of entry.sessions) {
@@ -2119,6 +2127,11 @@ export function printRoutineDrilldown(
   }
 
   console.log(chalk.gray(`Run history from .history/runs/${drill.name}/ · resume a session with agents sessions resume <id>.`));
+  // Every listing path must say what it dropped (sessions.ts invariant). Under
+  // --routine team-origin sessions are shown (hiddenCount is 0), but unmanaged
+  // installs may still be hidden — surface both footers when non-zero.
+  if (opts.hiddenCount && opts.hiddenCount > 0) console.log(chalk.gray(formatTeamHiddenFooter(opts.hiddenCount)));
+  if (opts.hiddenUnmanaged && opts.hiddenUnmanaged > 0) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
 }
 
 /** The canonical `ag sessions …` command for a set of flags — the twin of the
@@ -3087,14 +3100,15 @@ async function sessionsAction(
       if (!target) return; // bad --routine <name> or cancelled pick (message printed)
       if (target.name) {
         sessions = sessions.filter((s) => s.routineName === target.name);
-        // A routine browse (no search query) renders the run-first drilldown —
-        // canonical run history plus each run's linked session — instead of
-        // dead-ending a command/pre-session routine into the generic empty copy.
-        // A search query keeps the scoped picker/table so `--routine x <id>` still
+        // A routine browse renders the run-first drilldown — canonical run history
+        // plus each run's linked session — instead of dead-ending a
+        // command/pre-session routine into the generic empty copy. An explicit
+        // --flat/--tree or a search query keeps the scoped session listing/picker,
+        // so `--routine x --flat` prints the plain table and `--routine x <id>`
         // resolves a specific session within the routine.
-        if (!searchQuery) {
+        if (!searchQuery && !options.flat && !options.tree) {
           const liveIndex = await maybeLiveIndex(options);
-          printRoutineDrilldown(buildRoutineDrilldown(target.name, sessions), liveIndex);
+          printRoutineDrilldown(buildRoutineDrilldown(target.name, sessions), liveIndex, { hiddenCount, hiddenUnmanaged });
           return;
         }
       }
@@ -3105,6 +3119,11 @@ async function sessionsAction(
     if (sessions.length === 0) {
       if (pathFilter) {
         console.log(chalk.gray(`No sessions found for ${pathFilter}.`));
+      } else if (options.routine) {
+        // A routine scoped to a flat/tree/query listing with no matching session
+        // (e.g. a command routine has none) — say so in routine terms, not the
+        // generic cwd/--all copy, and point at the run-history drilldown.
+        console.log(chalk.gray('No indexed agent sessions for this routine. Drop --flat/--tree to see its run history.'));
       } else {
         console.log(chalk.gray(formatNoSessionsMessage(options.all, options.project)));
       }
