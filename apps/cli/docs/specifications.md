@@ -2691,9 +2691,9 @@ a machine-wide process sweep.)
   (`daemon.test.ts` covers both the escalated-reclaim case and the live-owner-protection
   case). Both socket teardowns now await the real `net.Server` `'close'` event instead of
   firing and forgetting: the secrets broker via `closeServerBounded`
-  (`lib/secrets/agent.ts:928-941`, `:953-973`, RUSH-2419) and the browser IPC server via
+  (`lib/secrets/agent.ts:928-941`, `:953-973`, RUSH-2421) and the browser IPC server via
   `BrowserIPCServer.stop` (`lib/browser/ipc.ts:284-295`, bounded by
-  `IPC_CLOSE_TIMEOUT_MS = 5_000` at `ipc.ts:84`, RUSH-2421).
+  `IPC_CLOSE_TIMEOUT_MS = 5_000` at `ipc.ts:19`, RUSH-2421).
 - **SING-GAP-6 (resolved, RUSH-2418).** SING-14's restart bound was previously
   unenforced: `generateLaunchdPlist` set `KeepAlive` with no `ThrottleInterval`,
   `generateSystemdUnit` set `Restart=always` with no `StartLimitIntervalSec`/
