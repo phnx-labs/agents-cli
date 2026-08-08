@@ -115,6 +115,32 @@ describe('collectRepoKind', () => {
     expect(collectRepoKind(repo, 'workflows')).toEqual([]);
   });
 
+  it('gives a script no description rather than a line of its code', () => {
+    const root = makeProjectRepo();
+    const hooksDir = path.join(root, '.agents', 'hooks');
+    fs.mkdirSync(hooksDir, { recursive: true });
+    // "First prose line" is a Markdown heuristic. On a script it returned the
+    // shebang with its `#` eaten ("!/usr/bin/env bash") for all 53 hooks here,
+    // and skipping that line only promoted the next one — `set -euo pipefail`.
+    fs.writeFileSync(path.join(hooksDir, 'guard.sh'), '#!/usr/bin/env bash\nset -euo pipefail\necho ok\n');
+    fs.writeFileSync(path.join(hooksDir, 'probe.py'), '#!/usr/bin/env python3\n"""Not a description."""\n');
+    const repo = resolveRepoTarget(root)!;
+    for (const h of collectRepoKind(repo, 'hooks')) {
+      expect(h.description, `${h.name} should have no description`).toBe('');
+    }
+  });
+
+  it('still reads descriptions from markdown resources', () => {
+    // The script fix must not strip prose from the kinds that legitimately
+    // carry it — commands and skills are .md and keep their frontmatter.
+    const root = makeProjectRepo();
+    const repo = resolveRepoTarget(root)!;
+    const ship = collectRepoKind(repo, 'commands').find(c => c.name === 'ship')!;
+    expect(ship.description).toBe('Ship the thing');
+    const plain = collectRepoKind(repo, 'commands').find(c => c.name === 'plain')!;
+    expect(plain.description).toBe('Plain command');
+  });
+
   it('skips build/tooling caches (__pycache__, node_modules)', () => {
     const root = makeProjectRepo();
     fs.mkdirSync(path.join(root, '.agents', 'commands', '__pycache__'));

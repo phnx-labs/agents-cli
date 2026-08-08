@@ -838,10 +838,15 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
     // `[.system]` on every row is 13 columns spent on one bit of information.
     extra2Label: sources.size > 1 ? 'Source' : undefined,
     showSync: false,
-    // Hooks are script names with no prose, so the Description column is empty
-    // and the default 22-char cap would truncate `00-agent-verify-work-complete`
-    // and its `_test` sibling to the same string. Give names the room instead.
-    nameCap: items.some(i => i.description) ? undefined : 40,
+    // inspect's names run long — hook scripts (`00-agent-verify-work-complete`
+    // and its `_test` sibling) and namespaced plugin entries (`/swarm:orchestrate`)
+    // both blow past the 22-char default and truncate to the same string.
+    //
+    // Gate on terminal width, NOT on "do any rows have a description": that
+    // proxy depended on which path built the items — the repo path hardcodes an
+    // empty description so it widened, while the agent path filled one from the
+    // script's shebang so it never did. Same command, two behaviours.
+    nameCap: terminalWidth() >= 120 ? 40 : undefined,
     // Keep names clickable — the pre-picker list wrapped every name in an OSC-8
     // link to its file, and losing that would be a silent capability regression.
     linkFor: row => items.find(i => i.name === row.name)?.linkTarget,
@@ -1629,6 +1634,12 @@ function readFirstProseLine(p: string): string {
     const stat = fs.statSync(p);
     if (stat.isDirectory()) return '';
     if (stat.size > 64 * 1024) return '';
+    // "First prose line" is a Markdown heuristic. Run on a script it returns
+    // code: every one of the 53 hook scripts rendered "!/usr/bin/env bash"
+    // (the `#` strip eating the shebang), and skipping that line only promoted
+    // the next one — `set -euo pipefail`, a Python docstring. A hook has no
+    // description; the Hooks view shows its firing events instead.
+    if (!/\.(md|markdown)$/i.test(p)) return '';
     const text = fs.readFileSync(p, 'utf-8');
     // Skip frontmatter
     let body = text;
