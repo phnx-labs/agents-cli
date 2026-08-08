@@ -13,6 +13,7 @@ import {
   renderJson,
   renderHtml,
   renderMarkdown,
+  rootNode,
   walk,
   type CommandNode,
 } from './gen-command-index';
@@ -72,9 +73,25 @@ describe('command index generation', () => {
   it('excludes the inline aliases/tombstones registered in src/index.ts', async () => {
     const nodes = await tree();
     const names = new Set(nodes.map((n) => n.name));
-    for (const inline of ['perms', 'exec', 'jobs', 'cron', 'check', 'resources', 'hq', 'upgrade', '_internal']) {
+    for (const inline of ['perms', 'exec', 'jobs', 'cron', 'check', 'resources', 'hq', '_internal']) {
       expect(names.has(inline)).toBe(false);
     }
+  });
+
+  it('includes the visible upgrade command registered by the live CLI entry point', async () => {
+    const upgrade = find(await tree(), 'upgrade');
+    expect(upgrade).toBeDefined();
+    expect(invocation(upgrade!)).toBe('upgrade [version]');
+    expect(upgrade!.options.map((option) => option.flags)).toContain('-y, --yes');
+  });
+
+  it('captures the root agents metadata and global options', async () => {
+    const root = rootNode(await buildFullCommandTree());
+    expect(root.name).toBe('agents');
+    expect(root.description).toBe('Environment manager for AI agents');
+    expect(root.options.map((option) => option.long)).toContain('--version');
+    expect(root.options.map((option) => option.long)).toContain('--verbose');
+    expect(root.options.map((option) => option.long)).toContain('--help');
   });
 
   it('captures option flags in the JSON tree', async () => {

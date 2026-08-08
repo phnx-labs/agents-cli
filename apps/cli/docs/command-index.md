@@ -12,9 +12,9 @@ what `agents` actually registers.
 
 Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remove`/`rm`/`purge`
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
-src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `upgrade`, `_internal`).
+src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_99 command groups · 569 commands._
+_100 command groups · 570 commands._
 
 ## accounts — Browse and name signed-in harness accounts
 
@@ -1010,6 +1010,12 @@ agents uninstall  Completely remove agents-cli and restore your original agent c
 ```
 agents update [target]      Move a frozen agent installation to a new release, keeping its name and every reference to it
 agents update list <agent>  Show every frozen installation of an agent and the release each carries
+```
+
+## upgrade — Upgrade agents-cli to the latest version (or a specific [version])
+
+```
+agents upgrade [version]  Upgrade agents-cli to the latest version (or a specific [version])
 ```
 
 ## usage — Show rate-limit / quota usage per agent

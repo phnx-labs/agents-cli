@@ -17,7 +17,7 @@
 // The introspection is deterministic — no LLM, no help-text parsing.
 //
 // Excluded by design: the inline deprecated aliases and tombstones
-// (`perms`/`exec`/`jobs`/`cron`/`check`/`resources`/`hq`/`upgrade`/`_internal`),
+// (`perms`/`exec`/`jobs`/`cron`/`check`/`resources`/`hq`/`_internal`),
 // which src/index.ts registers directly as closures over entry-point state.
 
 import { writeFileSync } from 'node:fs';
@@ -99,15 +99,17 @@ function byName(a: Command, b: Command): number {
 export function toNode(cmd: Command, parentPath: string): CommandNode {
   const name = cmd.name();
   const path = parentPath ? `${parentPath} ${name}` : name;
-  const args: CommandArg[] = cmd.registeredArguments.map((a) => ({
+  const args: CommandArg[] = cmd.registeredArguments
+    .filter((a) => (a as unknown as { hidden?: boolean }).hidden !== true)
+    .map((a) => ({
     name: a.name(),
     required: a.required,
     variadic: a.variadic,
     description: (a.description ?? '').trim(),
     ...(a.defaultValue === undefined ? {} : { defaultValue: a.defaultValue }),
     ...(a.argChoices === undefined ? {} : { choices: [...a.argChoices] }),
-  }));
-  const options: CommandOption[] = cmd.options
+    }));
+  const options: CommandOption[] = cmd.createHelp().visibleOptions(cmd)
     .filter((o) => !o.hidden)
     .map((o) => ({
       flags: o.flags,
@@ -151,6 +153,12 @@ export function walk(program: Command): CommandNode[] {
     .map((c) => toNode(c, ''));
 }
 
+/** Root `agents` metadata and global options, without duplicating its child tree. */
+export function rootNode(program: Command): CommandNode {
+  const root = toNode(program, '');
+  return { ...root, path: '', subcommands: [] };
+}
+
 /** Depth-first flatten of a node subtree into scannable index rows. */
 function* rows(node: CommandNode): Generator<{ invocation: string; description: string }> {
   yield { invocation: invocation(node), description: node.description };
@@ -192,7 +200,7 @@ what \`agents\` actually registers.
 
 Excluded (same as \`agents --help\`): commands Commander marks hidden (e.g. \`remove\`/\`rm\`/\`purge\`
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
-src/index.ts (\`perms\`, \`exec\`, \`jobs\`, \`cron\`, \`check\`, \`resources\`, \`hq\`, \`upgrade\`, \`_internal\`).
+src/index.ts (\`perms\`, \`exec\`, \`jobs\`, \`cron\`, \`check\`, \`resources\`, \`hq\`, \`_internal\`).
 `;
 
 /** Render the grouped, human-scannable Markdown index. */
@@ -218,8 +226,8 @@ export function renderMarkdown(nodes: CommandNode[]): string {
 }
 
 /** Render the structured JSON tree (full option lists included). */
-export function renderJson(nodes: CommandNode[]): string {
-  return JSON.stringify({ schemaVersion: 1, command: 'agents', groups: nodes.length, commands: countCommands(nodes), tree: nodes }, null, 2) + '\n';
+export function renderJson(nodes: CommandNode[], root?: CommandNode): string {
+  return JSON.stringify({ schemaVersion: 1, command: 'agents', groups: nodes.length, commands: countCommands(nodes), ...(root ? { root } : {}), tree: nodes }, null, 2) + '\n';
 }
 
 function escapeHtml(value: unknown): string {
@@ -242,12 +250,13 @@ function flatten(nodes: CommandNode[]): CommandNode[] {
 }
 
 /** Render a standalone, dependency-free reference with instant client-side search. */
-export function renderHtml(nodes: CommandNode[]): string {
-  const commands = flatten(nodes);
+export function renderHtml(nodes: CommandNode[], root?: CommandNode): string {
+  const commands = [...(root ? [root] : []), ...flatten(nodes)];
   const cards = commands.map((node) => {
-    const search = [node.path, node.aliases.join(' '), node.description, ...node.args.map((a) => `${a.name} ${a.description}`), ...node.options.map((o) => `${o.flags} ${o.description}`), node.examples ?? '', node.notes ?? ''].join(' ').toLowerCase();
+    const search = [node.name, node.path, node.aliases.join(' '), node.description, ...node.args.map((a) => `${a.name} ${a.description}`), ...node.options.map((o) => `${o.flags} ${o.description}`), node.examples ?? '', node.notes ?? ''].join(' ').toLowerCase();
     const aliases = node.aliases.length ? `<span class="meta">Aliases: ${escapeHtml(node.aliases.join(', '))}</span>` : '';
-    return `<article id="${escapeHtml(node.path.replaceAll(' ', '-'))}" data-search="${escapeHtml(search)}"><div class="command-head"><h3><code>agents ${escapeHtml(invocation(node))}</code></h3>${aliases}</div><p>${escapeHtml(node.description || 'No description provided.')}</p>${detailRows(node)}${node.examples ? `<h4>Examples</h4><pre><code>${escapeHtml(node.examples)}</code></pre>` : ''}${node.notes ? `<h4>Notes</h4><p class="notes">${escapeHtml(node.notes)}</p>` : ''}</article>`;
+    const commandLine = node.path ? `agents ${invocation(node)}` : 'agents';
+    return `<article id="${escapeHtml(node.path.replaceAll(' ', '-'))}" data-search="${escapeHtml(search)}"><div class="command-head"><h3><code>${escapeHtml(commandLine)}</code></h3>${aliases}</div><p>${escapeHtml(node.description || 'No description provided.')}</p>${detailRows(node)}${node.examples ? `<h4>Examples</h4><pre><code>${escapeHtml(node.examples)}</code></pre>` : ''}${node.notes ? `<h4>Notes</h4><p class="notes">${escapeHtml(node.notes)}</p>` : ''}</article>`;
   }).join('\n');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>agents CLI command reference</title>
@@ -263,13 +272,14 @@ export function renderHtml(nodes: CommandNode[]): string {
 if ((import.meta as { main?: boolean }).main) {
   const program = await buildFullCommandTree();
   const nodes = walk(program);
+  const root = rootNode(program);
   const issues = auditReference(nodes);
   if (issues.length > 0) {
     throw new Error(`Command reference is incomplete:\n${issues.map((issue) => `- agents ${issue.path}: ${issue.detail}`).join('\n')}`);
   }
   const outDir = process.env.GEN_COMMAND_INDEX_OUT_DIR ?? join(dirname(fileURLToPath(import.meta.url)), '..', 'docs');
   writeFileSync(join(outDir, 'command-index.md'), renderMarkdown(nodes));
-  writeFileSync(join(outDir, 'command-index.json'), renderJson(nodes));
-  writeFileSync(join(outDir, 'command-reference.html'), renderHtml(nodes));
+  writeFileSync(join(outDir, 'command-index.json'), renderJson(nodes, root));
+  writeFileSync(join(outDir, 'command-reference.html'), renderHtml(nodes, root));
   console.log(`gen-command-index: wrote command-index.{md,json} and command-reference.html to ${outDir} (${nodes.length} groups, ${countCommands(nodes)} commands)`);
 }
