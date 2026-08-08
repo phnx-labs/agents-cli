@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 100,
-  "commands": 570,
+  "commands": 571,
   "root": {
     "name": "agents",
     "path": "",
@@ -29378,9 +29378,73 @@
           "negate": false
         }
       ],
-      "examples": "# One tick, dry — see what it WOULD nudge and why (safe, no injection)\n      agents watchdog\n\n      # One tick, actually inject \"Continue.\" into stalled+addressable splits\n      agents watchdog --nudge\n\n      # Manual watch loop every 30s, tighter stall threshold (ad-hoc; dry unless --nudge)\n      agents watchdog --watch --nudge --interval 30s --stall 60s --cooldown 5m\n\n      # Machine-readable for the menu-bar\n      agents watchdog --json\n\n      # Turn on the daemon-owned watchdog pass (every three minutes)\n      agents watchdog on\n\n      # Show device enablement, rotate config, and in-flight rotates\n      agents watchdog status\n\n      # Leave one session detected-but-untouched\n      agents watchdog policy <sessionId> handsoff\n\n      # Opt out of in-place rotate only (nudging stays on)\n      agents watchdog rotate off",
+      "examples": "# One tick, dry — see what it WOULD nudge and why (safe, no injection)\n      agents watchdog\n\n      # One tick, actually inject \"Continue.\" into stalled+addressable splits\n      agents watchdog --nudge\n\n      # Manual watch loop every 30s, tighter stall threshold (ad-hoc; dry unless --nudge)\n      agents watchdog --watch --nudge --interval 30s --stall 60s --cooldown 5m\n\n      # Machine-readable for the menu-bar\n      agents watchdog --json\n\n      # Turn on the daemon-owned watchdog pass (every three minutes)\n      agents watchdog on\n\n      # Show device enablement, rotate config, and in-flight rotates\n      agents watchdog status\n\n      # Show what Watchdog decided and acted on during the last day\n      agents watchdog history --since 24h\n\n      # Follow one session's Watchdog decisions\n      agents watchdog history <sessionId>\n\n      # Leave one session detected-but-untouched\n      agents watchdog policy <sessionId> handsoff\n\n      # Opt out of in-place rotate only (nudging stays on)\n      agents watchdog rotate off",
       "notes": "Decision path: a cheap deterministic pre-filter resolves the obvious cases\n      (clearly complete -> skip; a clear promise-without-toolcall -> nudge) and\n      ESCALATES the judgment-heavy cases -- a session parked on a question, or an\n      ambiguous stall -- to a smart brain. The brain drives the agent to finish\n      end-to-end when it asked a needless / already-authorized question or paused\n      with work left, and leaves it for the human on genuine cases (credentials,\n      an irreversible or outward-facing action, a real ambiguous decision, or a\n      completed task). The brain is a customizable 'watchdog' workflow (drop a\n      WORKFLOW.md in project/user workflows/ to override the prompt + model);\n      absent one, the built-in prompt runs via 'agents run --mode plan'. Pass\n      --smart to force every stalled candidate through the brain.\n\n      Delivery (answer-router): a running agent is steered via its mailbox; a\n      parked-on-question agent is answered into its EXACT split -- tmux / iTerm /\n      an IDE integrated terminal (VS Codium / Cursor / VS Code) -- or re-entered\n      via resume when headless. A parked agent with no addressable rail (e.g.\n      Ghostty with no tmux) is flagged for the menu-bar and SKIPPED -- never a\n      guessed or frontmost target.\n\n      Rotate: a stalled session whose tail shows a HARD account limit (\"You've\n      hit your weekly limit - resets ...\") is ROTATED IN PLACE instead of nudged:\n      the tick gates on the same healthy-account selection 'agents run auto'\n      makes (zero healthy -> one skip event per cooldown window, terminal\n      untouched), injects the harness's exit sequence, relaunches\n      'agents run auto --interactive --session-id <uuid>' in the SAME tab, waits\n      (bounded, 60s) for the new TUI, then injects the resume replay for the old\n      session. On timeout the session is flagged and never blind-typed into; the\n      flag says the terminal may sit at a bare shell and needs a manual\n      'agents run auto'. A failed rotate is suppressed for 15m before retry.\n      Default ON; disable with 'agents watchdog rotate off' (writes\n      'watchdog.rotate: off' to ~/.agents/agents.yaml; nudging stays on).\n      State machine: ~/.agents/.cache/state/watchdog/rotate/<sessionId>.json.\n\n      Always-on: 'agents watchdog on' enables one daemon-owned pass every three\n      minutes on this device and reloads the daemon; 'off' disables it here.\n      Defaults OFF. Per-session policy: off (ignore), keep (default), handsoff\n      (detect + flag).\n\n      State (tray-readable): ~/.agents/.cache/state/watchdog/{nudges,flags,last-tick}.json",
       "subcommands": [
+        {
+          "name": "history",
+          "path": "watchdog history",
+          "aliases": [],
+          "description": "Show persisted Watchdog decisions and actions, newest first.",
+          "args": [
+            {
+              "name": "sessionId",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--limit <count>",
+              "description": "Maximum events to show",
+              "long": "--limit",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "50"
+            },
+            {
+              "flags": "--since <duration>",
+              "description": "Only events within a duration such as 2h or 7d",
+              "long": "--since",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--all",
+              "description": "Include heartbeat tick events",
+              "long": "--all",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Emit safe structured history (transcript content is excluded)",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
         {
           "name": "off",
           "path": "watchdog off",

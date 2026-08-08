@@ -165,9 +165,13 @@ import {
   activeMapCacheKey,
   isLocalActiveMapKey,
   needsSessionIdHydrate,
-  resolveSessionIdForTerminal,
   fetchTerminalIdSessionMap,
 } from '../core/sessionIdHydrate';
+import {
+  hydrateRemoteTabTick,
+  planActiveMapHydration,
+  type RemoteAutoLabelHooks,
+} from '../core/remoteAutoLabel';
 import { displayIdentity } from '../core/statusIdentity';
 import { getSessionPathBySessionId, getSessionPreviewInfo, getOpenCodeSessionPreviewInfo, getCursorSessionPreviewInfo } from './sessions.vscode';
 import * as tasksImport from './tasks.vscode';
@@ -2314,6 +2318,15 @@ async function openSingleAgent(
     if (resumeKey) {
       startAutoLabelPollerForTerminal(terminal, context);
     }
+  } else if (targetHost && resumeKey) {
+    // Idless remote runner (e.g. New Codex (Pick Host)): only Claude's id is
+    // minted up front, so a picked-host Codex launches with no session id and
+    // the local SessionStart watcher never fires for it (the agent runs on
+    // <targetHost>). Arm the auto-label lifecycle now anyway: the poller resolves
+    // the canonical id from the shared per-host active map — surviving the
+    // post-launch indexing race via its bounded backoff — then labels, so the tab
+    // goes bare CX -> canonical UUID -> topic title without a refocus (RUSH-2411).
+    startAutoLabelPollerForTerminal(terminal, context, { fast: true });
   }
   if (pinnedVersion) {
     terminals.setVersion(terminal, pinnedVersion);
@@ -4038,16 +4051,85 @@ async function maybeHealDerivedLabel(
   }
 }
 
-function startAutoLabelPollerForTerminal(terminal: vscode.Terminal, context: vscode.ExtensionContext): void {
-  void armAutoLabelPoller(terminal, context);
+// A remote tab that launches idless (picked-host Codex) needs its session id
+// resolved before it can be labeled. Poll the shared per-host active map fast at
+// first so the id lands within seconds of launch (the remote session indexes
+// within a few seconds); the poller's own backoff then stretches the interval,
+// and it stops entirely once a label is set.
+const REMOTE_HYDRATE_POLL_MS = 3_000;
+
+interface AutoLabelPollerOpts {
+  /** Poll fast initially — used for idless remote tabs racing the remote index. */
+  fast?: boolean;
 }
 
-async function armAutoLabelPoller(terminal: vscode.Terminal, context: vscode.ExtensionContext): Promise<void> {
+function startAutoLabelPollerForTerminal(
+  terminal: vscode.Terminal,
+  context: vscode.ExtensionContext,
+  opts: AutoLabelPollerOpts = {},
+): void {
+  void armAutoLabelPoller(terminal, context, opts);
+}
+
+/**
+ * Build the pure-core hooks that let the auto-label poller resolve an idless
+ * remote tab's canonical id from the shared per-host active map and then run the
+ * host-aware label path. `onHydrated` funnels through applyHydratedSessionId, so
+ * the id transition arms labeling for the polled tab and every host sibling
+ * exactly as the local SessionStart watcher does.
+ */
+function remoteAutoLabelHooks(): RemoteAutoLabelHooks {
+  return {
+    fetchMap: (host) => fetchTerminalIdSessionMap(host),
+    needsHydrate: needsSessionIdHydrate,
+    canonical: (raw) => canonicalSessionId(raw) ?? '',
+    siblings: () => terminals.getAllTerminals().map((t) => ({
+      id: t.id,
+      host: t.host,
+      sessionId: t.sessionId,
+    })),
+    onHydrated: (tabId, canonicalId) => {
+      const t = terminals.getById(tabId);
+      if (!t) return;
+      applyHydratedSessionId(t.terminal, t, t.agentConfig?.prefix ?? '', canonicalId);
+    },
+    currentSessionId: (tabId) => terminals.getById(tabId)?.sessionId,
+    fetchLabel: async (tabId) => {
+      const t = terminals.getById(tabId);
+      if (!t) return undefined;
+      return fetchAndSetAutoLabel(t.terminal, t);
+    },
+  };
+}
+
+/**
+ * Arm the auto-label lifecycle for a tab the moment it gains a canonical session
+ * id — the remote-hydration counterpart to the local SessionStart watcher's
+ * onSessionChanged. Idempotent (the underlying poller no-ops when one is already
+ * running or a real label exists), so it is safe to call on every id transition.
+ */
+function armLabelingAfterHydration(terminal: vscode.Terminal, entry: terminals.EditorTerminal): void {
+  if (!entry.agentType || !extensionContext) return;
+  startAutoLabelPollerForTerminal(terminal, extensionContext);
+}
+
+async function armAutoLabelPoller(
+  terminal: vscode.Terminal,
+  context: vscode.ExtensionContext,
+  opts: AutoLabelPollerOpts = {},
+): Promise<void> {
   const display = getDisplayPrefs(context);
   if (!display.autoLabelInTabTitles) return;
 
   const entry = terminals.getByTerminal(terminal);
-  if (!entry || !entry.sessionId || !entry.agentType) return;
+  if (!entry || !entry.agentType) return;
+  // A tab needs an id before it can be labeled. Local tabs already have one
+  // (minted up front / resolved by the SessionStart watcher). A remote offload
+  // may still be idless right after launch — its session is not indexed yet — so
+  // the poller resolves the id first from the shared per-host active map, exactly
+  // as the local watcher resolves it from the state file before arming.
+  const remoteIdless = !!entry.host && needsSessionIdHydrate(entry.sessionId);
+  if (!entry.sessionId && !remoteIdless) return;
 
   // Heal first: if the sticky label is the derived placeholder, drop it so a
   // real name/topic can resolve below.
@@ -4055,8 +4137,23 @@ async function armAutoLabelPoller(terminal: vscode.Terminal, context: vscode.Ext
 
   if (entry.label || entry.autoLabel) return;
 
+  const intervalMs = opts.fast ? REMOTE_HYDRATE_POLL_MS : undefined;
   terminals.startAutoLabelPoller(terminal, async () => {
-    const autoLabel = await fetchAndSetAutoLabel(terminal, entry);
+    const cur = terminals.getByTerminal(terminal);
+    if (!cur) return;
+
+    let autoLabel: string | undefined;
+    if (cur.host && needsSessionIdHydrate(cur.sessionId)) {
+      // Still idless remote: resolve the id (and host siblings') from the shared
+      // active map, then label — bare CX -> canonical UUID -> topic title in one
+      // tick, no refocus. The fetch is coalesced per host, so N tabs never open N
+      // SSH streams.
+      const res = await hydrateRemoteTabTick(cur.id, cur.host, remoteAutoLabelHooks());
+      autoLabel = res.label;
+    } else {
+      autoLabel = await fetchAndSetAutoLabel(terminal, cur);
+    }
+
     if (!autoLabel || vscode.window.activeTerminal !== terminal) return;
     updateStatusBarForTerminal(terminal, context.extensionPath);
     // Refresh the tab title too, not just the status bar — otherwise a label
@@ -4065,16 +4162,16 @@ async function armAutoLabelPoller(terminal: vscode.Terminal, context: vscode.Ext
     // on the terminal already being active (same focus-safe guard as
     // tryFetchLabelOnFocus).
     const display = getDisplayPrefs(context);
-    if (display.showLabelsInTitles && display.autoLabelInTabTitles && entry.agentConfig) {
+    if (display.showLabelsInTitles && display.autoLabelInTabTitles && cur.agentConfig) {
       const newTitle = buildTerminalTitle(
-        entry.agentConfig.title,
+        cur.agentConfig.title,
         autoLabel,
         context,
-        entry.sessionId
+        cur.sessionId
       );
       await terminals.renameTerminal(terminal, newTitle);
     }
-  });
+  }, intervalMs);
 }
 
 // Arm shell-adoption on an SH terminal: poll its descendant process tree for
@@ -4298,6 +4395,13 @@ function applyHydratedSessionId(
   if (!liveId) return;
   if (entry.sessionId !== liveId) {
     terminals.setSessionId(terminal, liveId);
+    // The tab just gained (or corrected to) its canonical id. Arm the auto-label
+    // lifecycle now — the same transition the local SessionStart watcher performs
+    // via onSessionChanged. Without this, a remote-hydrated tab (e.g. picked-host
+    // Codex) kept the bare agent chip because labeling was only ever started when
+    // an id was known up front (RUSH-2411). Idempotent: startAutoLabelPoller
+    // no-ops when a poller is already running or a real label already exists.
+    armLabelingAfterHydration(terminal, entry);
   }
   if (entry.identitySessionId !== liveId) {
     void tryHydrateSessionIdentity(terminal, entry, prefix, liveId);
@@ -4366,23 +4470,24 @@ async function tryHydrateLiveSessionId(
     // (2) Batched CLI active map joined on this tab's AGENT_TERMINAL_ID.
     // One subprocess per host services every tab on that host (15 remote tabs
     // on yosemite-s1 → one `agents sessions --active --json --host yosemite-s1`).
-    const joined = await resolveSessionIdForTerminal(entry.id, entry.host);
-    if (joined) {
-      applyHydratedSessionId(terminal, entry, prefix, joined);
-      // Best-effort: stamp sibling tabs that share this host from the same map
-      // so focusing them does not need another network round-trip inside the TTL.
-      try {
-        const map = await fetchTerminalIdSessionMap(entry.host);
-        for (const other of terminals.getAllTerminals()) {
-          if (other.terminal === terminal) continue;
-          if ((other.host ?? '') !== (entry.host ?? '')) continue;
-          if (!needsSessionIdHydrate(other.sessionId)) continue;
-          const sid = map.get(other.id);
-          if (sid) terminals.setSessionId(other.terminal, sid);
-        }
-      } catch {
-        /* sibling stamp is best-effort */
-      }
+    // The one fetch stamps + arms labeling for this tab AND every host sibling
+    // it resolves, so focusing a sibling needs no extra round-trip and each tab
+    // enters the same auto-label lifecycle as the local watcher (RUSH-2411).
+    const map = await fetchTerminalIdSessionMap(entry.host);
+    const hostTabs = terminals.getAllTerminals()
+      .filter((t) => (t.host ?? '') === (entry.host ?? ''));
+    const plan = planActiveMapHydration(
+      map,
+      hostTabs.map((t) => ({ id: t.id, host: t.host, sessionId: t.sessionId })),
+      { needsHydrate: needsSessionIdHydrate, canonical: (raw) => canonicalSessionId(raw) ?? '' },
+    );
+    for (const step of plan) {
+      const t = terminals.getById(step.id);
+      if (!t) continue;
+      const stampPrefix = t.terminal === terminal ? prefix : (t.agentConfig?.prefix ?? prefix);
+      applyHydratedSessionId(t.terminal, t, stampPrefix, step.canonicalId);
+    }
+    if (plan.some((step) => step.id === entry.id)) {
       return;
     }
 

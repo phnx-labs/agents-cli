@@ -991,7 +991,7 @@ function assertSafeVersion(version: string): void {
  * KEEP IN SYNC with the `managedEnv` switch in `generateVersionedAliasScript`.
  * The colocated test `shims.isolation-capability.test.ts` enforces this.
  */
-export const CONFIG_ENV_ISOLATED_AGENTS: readonly AgentId[] = ['claude', 'codex', 'copilot', 'grok', 'kimi', 'opencode', 'muse'];
+export const CONFIG_ENV_ISOLATED_AGENTS: readonly AgentId[] = ['claude', 'codex', 'copilot', 'cursor', 'grok', 'kimi', 'opencode', 'muse'];
 
 /**
  * Whether an agent supports a clean `--isolated` install — i.e. its config
@@ -1062,7 +1062,14 @@ export KIMI_CODE_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/
 export XDG_CONFIG_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/.config"
 export XDG_DATA_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/.local/share"
 `
-              : '';
+              : agent === 'cursor'
+                ? `
+# Cursor: no config-dir env var. Its OAuth token (the login gate) lives at
+# $XDG_CONFIG_HOME/cursor/auth.json, so pin XDG_CONFIG_HOME at the version home
+# to isolate each account's login for direct aliases (parity with buildExecEnv).
+export XDG_CONFIG_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/.config"
+`
+                : '';
   const launchArgs = agent === 'codex' ? ` ${codexShimLaunchArgs()}` : '';
 
   // Resolve the binary the same way the main shim does (see generateShimScript).
