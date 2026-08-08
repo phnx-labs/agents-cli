@@ -11,9 +11,10 @@
  *
  * Scheduled routines get this for free once migrated onto `agents routines`
  * (their run history already carries success/failure — `agents routines
- * stats`). This module exists for the two subsystems that predate routines
- * and have no run history of their own: the secrets broker and the browser
- * IPC server.
+ * stats`). This module exists for the subsystems that predate routines and have
+ * no run history of their own: the secrets broker and the browser IPC server,
+ * plus the daemon's own startup (`SUBSYSTEM_DAEMON_START`, RUSH-2418) — which
+ * is the one record that also GATES behaviour rather than only reporting it.
  *
  * File-backed (one JSON object keyed by subsystem name) rather than in-memory
  * because `agents daemon status` runs as a SEPARATE process from the daemon —
@@ -108,8 +109,11 @@ export function recordSubsystemError(subsystem: string, error: string, at: strin
  * Exists because a start is counted BEFORE its outcome is known (RUSH-2418):
  * the launcher marks the attempt, then replaces the provisional reason with the
  * real one if it fails outright. Calling `recordSubsystemError` a second time
- * would count one failed start as two. A no-op when the subsystem has never
- * reported, since there is no failure to describe.
+ * would count one failed start as two.
+ *
+ * Describing a failure that was never counted would be a lie in the other
+ * direction — a `lastError` with `consecutiveFailures: 0` — so an unreported
+ * subsystem is left alone rather than given a blank record to decorate.
  */
 export function recordSubsystemErrorReason(subsystem: string, error: string, at: string = new Date().toISOString()): void {
   const all = readAll();
