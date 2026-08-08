@@ -21,6 +21,7 @@ import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { buildPreview } from './sessions-picker.js';
 import {
   runComputerSessions,
+  printComputerSessionRows,
   buildComputerSessionRows,
   matchesComputerSessionRow,
   formatActionCounts,
@@ -37,6 +38,8 @@ export interface ComputerSessionsCommandOpts {
   json?: boolean;
   /** Commander's `--no-interactive` convention: `false` opts out. */
   interactive?: boolean;
+  /** Pre-collected fleet rows. Omitted for the local ledger path. */
+  rows?: ComputerRunRow[];
 }
 
 /** True when the interactive picker should open instead of the printed table:
@@ -52,11 +55,12 @@ export function shouldOpenInteractiveComputerSessions(opts: ComputerSessionsComm
  */
 export async function runComputerSessionsCommand(opts: ComputerSessionsCommandOpts): Promise<void> {
   if (!shouldOpenInteractiveComputerSessions(opts, isInteractiveTerminal())) {
-    runComputerSessions({ machine: opts.machine, limit: opts.limit, json: opts.json });
+    if (opts.rows) printComputerSessionRows(opts.rows, { limit: opts.limit, json: opts.json });
+    else runComputerSessions({ machine: opts.machine, limit: opts.limit, json: opts.json });
     return;
   }
 
-  const rows = buildComputerSessionRows({ machine: opts.machine });
+  const rows = opts.rows ?? buildComputerSessionRows({ machine: opts.machine });
   if (rows.length === 0) {
     console.log(`No computer actions recorded${opts.machine ? ` for machine "${opts.machine}"` : ''}.`);
     return;

@@ -34,6 +34,7 @@ import {
   loadLocalActiveSessions,
 } from '../lib/session/session-cache.js';
 import { gatherRemoteList, gatherRemoteToolProgramCounts, gatherRemoteToolSearch, runOnPeer } from '../lib/session/remote-list.js';
+import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../lib/remote-agents-json.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { inferSessionState } from '../lib/session/state.js';
@@ -96,6 +97,7 @@ import { registerSessionsInsightsCommand } from './insights.js';
 import { registerSessionsOptimizeCommand } from './sessions-optimize.js';
 import { runBrowserSessionsCommand } from './browser-sessions-picker.js';
 import { runComputerSessionsCommand } from './computer-sessions-picker.js';
+import { buildComputerSessionRows, type ComputerRunRow } from '../lib/computer/sessions-list.js';
 import {
   countToolProgramOccurrences,
   parseToolProgramCountClause,
@@ -1269,6 +1271,42 @@ async function runRemoteSessionsJson(hosts: string[]): Promise<void> {
   if (!forwarded.includes('--json')) forwarded.push('--json');
   const { sessions } = await gatherRemoteList(forwarded, hosts);
   process.stdout.write(serializeSessionsJson(sessions));
+}
+
+/** Parse one peer's computer-run array without accepting banners or partial
+ * JSON. The fan-out boundary supplies the machine name when an older peer row
+ * omitted it. */
+export function parseRemoteComputerSessionRows(
+  stdout: string,
+  machine: string,
+): RemoteAgentsJsonParseResult<ComputerRunRow> {
+  try {
+    const value: unknown = JSON.parse(stdout);
+    if (!Array.isArray(value)) return { items: [], valid: false };
+    const items = value
+      .filter((row): row is ComputerRunRow => Boolean(row && typeof row === 'object' && !Array.isArray(row)))
+      .map((row) => ({ ...row, machine: row.machine || machine }));
+    return { items, valid: true };
+  } catch {
+    return { items: [], valid: false };
+  }
+}
+
+/** Collect computer history from named peers, or every automatic peer when
+ * hosts is omitted. Every peer is forced to JSON and receives the recursion
+ * guard through the shared fleet transport. */
+export async function gatherRemoteComputerSessionRows(hosts?: string[]): Promise<ComputerRunRow[]> {
+  const hostSet = new Set(hosts ?? []);
+  const forwarded = buildForwardedArgs(process.argv, hostSet);
+  if (!forwarded.includes('--json')) forwarded.push('--json');
+  if (!forwarded.includes('--no-interactive')) forwarded.push('--no-interactive');
+  const result = await gatherRemoteAgentsJson<ComputerRunRow>({
+    args: forwarded,
+    noFanoutEnv: NO_FANOUT_ENV,
+    hosts,
+    parse: parseRemoteComputerSessionRows,
+  });
+  return result.items;
 }
 
 /**
@@ -5592,13 +5630,20 @@ export function registerSessionsCommands(program: Command): void {
     if ((options as { computer?: boolean }).computer) {
       // Alias for `agents computer sessions`: a machine positional narrows to
       // one machine. `--no-interactive` carries through the same way.
-      const hosts = [...(options.host ?? []), ...(options.device ?? []), ...(options.devices ?? [])]
-        .filter((host) => host.toLowerCase() !== 'all' && host.toLowerCase() !== 'fleet');
-      if (hosts.length > 0) {
-        runRemoteSessions(hosts);
+      const limit = options.limit === undefined ? undefined : Number.parseInt(options.limit, 10);
+      const deviceArgs = [...(options.device ?? []), ...(options.devices ?? [])];
+      const allFleet = deviceArgs.some((host) => ['all', 'fleet'].includes(host.toLowerCase()));
+      const hosts = [...(options.host ?? []), ...deviceArgs]
+        .filter((host) => !['all', 'fleet'].includes(host.toLowerCase()));
+      if (hosts.length > 0 || allFleet) {
+        const remoteRows = await gatherRemoteComputerSessionRows(allFleet ? undefined : hosts);
+        const rows = allFleet
+          ? [...buildComputerSessionRows({ machine: query }), ...remoteRows]
+          : remoteRows;
+        rows.sort((a, b) => b.endMs - a.endMs);
+        await runComputerSessionsCommand({ rows, machine: query, limit, json: options.json, interactive: options.interactive });
         return;
       }
-      const limit = options.limit === undefined ? undefined : Number.parseInt(options.limit, 10);
       await runComputerSessionsCommand({ machine: query, limit, json: options.json, interactive: options.interactive });
       return;
     }

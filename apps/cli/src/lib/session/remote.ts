@@ -60,7 +60,7 @@ export function buildForwardedArgs(argv: string[], hosts: Set<string> = new Set(
   const out: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (a === '--host' || a === '-H' || a === '--device') {
+    if (a === '--host' || a === '-H' || a === '--device' || a === '--devices') {
       // Commander's `<target...>` variadic accepts both `--host a --host b` and
       // `--host a b` — consume every consecutive token that is a known host so
       // the variadic form doesn't leak the extra hosts into the remote argv.
@@ -75,7 +75,7 @@ export function buildForwardedArgs(argv: string[], hosts: Set<string> = new Set(
       }
       continue;
     }
-    if (a.startsWith('--host=') || a.startsWith('-H=') || a.startsWith('--device=')) continue;
+    if (a.startsWith('--host=') || a.startsWith('-H=') || a.startsWith('--device=') || a.startsWith('--devices=')) continue;
     if (/^-H.+/.test(a)) continue; // glued short form: -Hyosemite-s1
     out.push(a);
   }

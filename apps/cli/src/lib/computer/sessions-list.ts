@@ -335,6 +335,15 @@ export function applyRowDisplayLimit(
  */
 export function runComputerSessions(opts: { machine?: string; json?: boolean; limit?: number }): void {
   const rows = buildComputerSessionRows({ machine: opts.machine });
+  printComputerSessionRows(rows, opts);
+}
+
+/** Print already-collected rows. Fleet callers use this after merging local and
+ * remote JSON so text, limits, and JSON keep exactly one renderer. */
+export function printComputerSessionRows(
+  rows: ComputerRunRow[],
+  opts: { json?: boolean; limit?: number },
+): void {
   if (opts.json) {
     console.log(JSON.stringify(rows, null, 2));
     return;

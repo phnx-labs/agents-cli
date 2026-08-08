@@ -34,6 +34,7 @@ import {
   hasNoBrowserDisqualifyingFlags,
   executionKind,
   printRoutineDrilldown,
+  parseRemoteComputerSessionRows,
   type RoutineDrilldown,
 } from './sessions.js';
 import type { RunMeta } from '../lib/routines.js';
@@ -851,6 +852,53 @@ describe('sessions --computer alias', () => {
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
+  });
+
+  it.each([
+    ['--device', 'all'],
+    ['--device', 'fleet'],
+    ['--devices', 'all'],
+    ['--devices', 'fleet'],
+  ])('%s %s keeps local rows and stdout valid JSON', (flag, sentinel) => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-computer-fleet-'));
+    const cwd = path.join(tempHome, 'repo');
+    const eventsPath = path.join(tempHome, 'computer-events.jsonl');
+    fs.mkdirSync(cwd, { recursive: true });
+    writeUpdateCache(tempHome);
+    fs.writeFileSync(eventsPath, JSON.stringify({
+      ts: '2026-08-08T09:01:00.000Z',
+      event: 'computer.action',
+      pid: 11,
+      invocationId: 'local-run',
+      command: 'screenshot',
+      hostname: 'zion',
+    }) + '\n');
+    try {
+      const result = runAgents(
+        ['sessions', '--computer', flag, sentinel, '--json'],
+        cwd,
+        tempHome,
+        { AGENTS_EVENTS_PATH: eventsPath },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      const rows = JSON.parse(result.stdout) as Array<{ invocationId?: string }>;
+      expect(rows.map((row) => row.invocationId)).toEqual(['local-run']);
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('parseRemoteComputerSessionRows', () => {
+  it('accepts a clean peer array and supplies its machine name', () => {
+    const parsed = parseRemoteComputerSessionRows('[{"pid":7,"endMs":9}]', 'yosemite-m0');
+    expect(parsed.valid).toBe(true);
+    expect(parsed.items).toEqual([{ pid: 7, endMs: 9, machine: 'yosemite-m0' }]);
+  });
+
+  it('rejects banner-prefixed multi-host output instead of corrupting JSON', () => {
+    const parsed = parseRemoteComputerSessionRows('── host ──\n[{"pid":7}]', 'yosemite-m0');
+    expect(parsed).toEqual({ items: [], valid: false });
   });
 });
 

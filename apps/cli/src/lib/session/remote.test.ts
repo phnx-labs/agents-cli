@@ -101,6 +101,20 @@ describe('buildForwardedArgs', () => {
     expect(buildForwardedArgs(argv('sessions', '--device=yosemite-s0', 'query'))).toEqual(['sessions', 'query']);
   });
 
+  it('drops plural --devices values so a peer cannot re-fan-out', () => {
+    expect(
+      buildForwardedArgs(
+        argv('sessions', '--computer', '--devices', 'box1', 'box2', '--json'),
+        new Set(['box1', 'box2']),
+      ),
+    ).toEqual(['sessions', '--computer', '--json']);
+  });
+
+  it('drops the --devices=value form', () => {
+    expect(buildForwardedArgs(argv('sessions', '--devices=all', '--computer')))
+      .toEqual(['sessions', '--computer']);
+  });
+
   it('stops consuming at the first token that is not a known host', () => {
     // The scan only swallows consecutive tokens present in the host set; a
     // trailing non-host token ('auth') is preserved rather than over-consumed.
