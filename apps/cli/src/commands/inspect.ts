@@ -50,7 +50,6 @@ import { listHookEntriesFromDir } from '../lib/hooks.js';
 import { getResourceInventory, type ResourceInventory } from '../lib/resource-inventory.js';
 import { listMcpServerConfigs, discoverMcpConfigsFromRepo, type McpYamlConfig } from '../lib/mcp.js';
 import { discoverPlugins, discoverPluginsInDir, pluginResourceGroups, inspectPluginCapabilities, pluginCapabilityLabels, type PluginResourceGroup } from '../lib/plugins.js';
-import { PLUGIN_GROUP_COLORS } from './plugins.js';
 import { showResourceList } from './resource-view.js';
 import { countSessionsInScope } from '../lib/session/discover.js';
 import { isSessionTrackedAgent } from '../lib/session/types.js';
@@ -839,6 +838,13 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
     // `[.system]` on every row is 13 columns spent on one bit of information.
     extra2Label: sources.size > 1 ? 'Source' : undefined,
     showSync: false,
+    // Hooks are script names with no prose, so the Description column is empty
+    // and the default 22-char cap would truncate `00-agent-verify-work-complete`
+    // and its `_test` sibling to the same string. Give names the room instead.
+    nameCap: items.some(i => i.description) ? undefined : 40,
+    // Keep names clickable — the pre-picker list wrapped every name in an OSC-8
+    // link to its file, and losing that would be a silent capability regression.
+    linkFor: row => items.find(i => i.name === row.name)?.linkTarget,
     emptyMessage: `  (none installed)`,
     rows: items.map(item => ({
       name: item.name,
@@ -861,7 +867,10 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
 export function summaryLine(description: string): string {
   if (!description) return '';
   const cutAtTrigger = description.split(/\s*(?:Triggers on|Use this skill when|Invoke when)\b/i)[0];
-  const trimmed = cutAtTrigger.trim();
+  // A description that OPENS with the trigger clause splits to an empty head.
+  // Returning that would blank the row while --json still carried the text —
+  // showing less than we have is worse than showing boilerplate.
+  const trimmed = cutAtTrigger.trim() || description.trim();
   // First sentence, but only when the split leaves something substantial —
   // "e.g." and friends would otherwise chop a description to a fragment.
   const firstSentence = trimmed.match(/^.*?[.!?](?=\s+[A-Z(`])/)?.[0];
@@ -869,7 +878,7 @@ export function summaryLine(description: string): string {
   return candidate.replace(/\s+/g, ' ').trim();
 }
 
-/** `18 KB · 3 files` for a bundle, `413 B` for a single file. */
+/** Compact size for a list row: `18 KB` for a bundle, `413 B` for a single file. */
 function itemSizeLabel(p: string): string {
   if (!p) return '';
   const stat = safeStat(p);
@@ -877,18 +886,6 @@ function itemSizeLabel(p: string): string {
   if (!stat.isDirectory()) return formatBytes(stat.size);
   const { bytes } = pathSize(p);
   return formatBytes(bytes);
-}
-
-/** Print a plugin's resource breakdown as aligned `label  items` rows under a list entry. */
-function printGroupRows(groups: PluginResourceGroup[]): void {
-  if (groups.length === 0) return;
-  const width = Math.max(...groups.map(g => g.label.length));
-  for (const g of groups) {
-    const colorFn = PLUGIN_GROUP_COLORS[g.label] ?? chalk.white;
-    const label = chalk.gray(g.label.padEnd(width));
-    const value = g.items.map((s) => colorFn(s)).join(chalk.gray(', '));
-    console.log(`             ${label}  ${value}`);
-  }
 }
 
 // ─── Detail mode (fuzzy) ─────────────────────────────────────────────────────

@@ -8,7 +8,7 @@
  */
 
 import chalk from 'chalk';
-import { truncate, padVisible } from '../lib/format.js';
+import { truncate, padVisible, termLink } from '../lib/format.js';
 import type { AgentId } from '../lib/types.js';
 import { agentLabel } from '../lib/agents.js';
 import { itemPicker } from '../lib/picker.js';
@@ -53,6 +53,16 @@ export interface ResourceViewOptions {
    * misleading "no installed versions". Set false to drop the column entirely.
    */
   showSync?: boolean;
+  /**
+   * Cap for the Name column. Defaults to NAME_CAP (22), which suits the
+   * central-storage commands. Kinds whose rows have no description — hooks are
+   * all script names and no prose — want a wider cap, otherwise four pairs of
+   * `00-agent-verify-work-complete…` truncate to the same string while the
+   * empty Description column wastes the rest of the terminal.
+   */
+  nameCap?: number;
+  /** Per-row OSC-8 link target, keyed by row name; makes names clickable. */
+  linkFor?: (row: ResourceRow) => string | undefined;
 }
 
 /** Whether the Synced column renders for this view. */
@@ -128,7 +138,12 @@ function filterRows(rows: ResourceRow[], query: string): ResourceRow[] {
 
 /** Row label rendered inside the picker list. */
 function formatPickerRow(row: ResourceRow, opts: ResourceViewOptions): string {
-  const name = chalk.cyan(padVisible(row.name, 22));
+  // Link here, not in the wide table: that renders only when stdout is NOT a
+  // TTY, and termLink is a no-op off-TTY — so a link there could never appear.
+  // The picker is the TTY path, which is where the pre-picker list had one.
+  const linkTarget = opts.linkFor?.(row);
+  const padded = chalk.cyan(padVisible(row.name, opts.nameCap ?? 22));
+  const name = linkTarget ? termLink(padded, linkTarget) : padded;
   const extra = opts.extraLabel
     ? chalk.gray(padVisible(row.extra ?? '-', 10))
     : '';
@@ -193,7 +208,7 @@ function printResourceTable(opts: ResourceViewOptions): void {
   const cols = terminalWidth();
   const syncStrings = opts.rows.map((r) => formatSyncSummary(r.targets, opts));
   const nameW = Math.min(
-    NAME_CAP,
+    opts.nameCap ?? NAME_CAP,
     Math.max('Name'.length, ...opts.rows.map((r) => stringWidth(r.name))),
   );
   const syncMax = syncEnabled(opts)
@@ -247,6 +262,8 @@ function renderResourceWideTable(
   console.log(chalk.gray('─'.repeat(Math.min(contentW, terminalWidth()))));
 
   opts.rows.forEach((row, i) => {
+    // No link here: this path renders only when stdout is not a TTY, where
+    // termLink is a no-op. The picker (formatPickerRow) carries the link.
     const parts = [cell(row.name, L.nameW, chalk.cyan)];
     if (L.extraW) parts.push(cell(row.extra ?? '-', L.extraW));
     if (L.extra2W) parts.push(cell(row.extra2 ?? '-', L.extra2W));

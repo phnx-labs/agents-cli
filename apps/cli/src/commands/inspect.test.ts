@@ -340,6 +340,15 @@ describe('summaryLine', () => {
   it('is empty for an empty description', () => {
     expect(summaryLine('')).toBe('');
   });
+
+  it('never blanks a row when the description OPENS with the trigger clause', () => {
+    // The split yields an empty head here. Returning it would render an empty
+    // cell while --json still carried the full text — showing less than we have.
+    const d = 'Triggers on: reflect, step back, reconsider, recall feedback.';
+    expect(summaryLine(d)).toBe(d);
+    expect(summaryLine('Use this skill when rewriting a draft.'))
+      .toBe('Use this skill when rewriting a draft.');
+  });
 });
 
 describe('summarizeHook', () => {
