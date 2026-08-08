@@ -42,6 +42,7 @@ import {
   registerDaemonInstance,
   unregisterDaemonInstance,
   reapStrayDaemons,
+  stopResidueArtifacts,
 } from './daemon.js';
 import { getDaemonDir } from './state.js';
 import { readSubsystemHealth, recordSubsystemOk, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
@@ -1198,6 +1199,153 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
     },
     60_000,
   );
+
+  // THE regression the awaited close introduced (RUSH-2421 review). A browser
+  // client holds its IPC connection open on purpose — the socket stays warm
+  // between actions — and `net.Server.close()` does not complete while any
+  // connection is open. With the close bounded at the SAME 5s as the daemon's
+  // SIGTERM grace window, `handleShutdown` was still inside `browserIPC.stop()`
+  // when `stopDaemon` gave up waiting and escalated to killTree. Every graceful
+  // stop of a daemon with a browser session attached became a kill, and the
+  // residue reclamation added by that same change quietly papered over it.
+  it.skipIf(process.platform === 'win32')(
+    'graceful stop STAYS graceful when a browser client is holding its IPC connection',
+    async () => {
+      if (!fs.existsSync(DIST_ENTRY)) execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
+      const home = mkHome();
+      let daemonPid: number | null = null;
+      let held: net.Socket | null = null;
+      try {
+        daemonPid = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(home, 'd.log'), env: envFor(home) }).pid!;
+        expect(await waitFor(() => readDaemonPidOf(home) === daemonPid, 20_000)).toBe(true);
+
+        // Wait for the daemon's browser IPC to be accepting, then hold a real
+        // connection open exactly as a warm browser client does.
+        const sock = path.join(home, '.agents', '.cache', 'helpers', 'browser', 'browser.sock');
+        expect(await waitFor(() => fs.existsSync(sock), 20_000)).toBe(true);
+        held = net.createConnection(ipcEndpoint(sock));
+        await new Promise<void>((resolve, reject) => {
+          held!.on('connect', () => resolve());
+          held!.on('error', reject);
+        });
+
+        const started = Date.now();
+        const { status, result } = runStop(home);
+        const elapsed = Date.now() - started;
+
+        // The sharp assertion, and the one that is deterministic: the daemon
+        // must release and exit WELL inside the 5s SIGTERM grace window. Pre-fix
+        // the close waited out its own 5s timeout — the same 5s — so the stop
+        // finished at the boundary and whether it escalated was a coin flip
+        // decided by which timer fired first. Asserting `escalated === false`
+        // alone would therefore pass on the broken code about half the time;
+        // asserting the margin is what actually pins the behaviour.
+        expect(elapsed).toBeLessThan(4000);
+        expect(result.escalated).toBe(false);
+        expect(result.ok).toBe(true);
+        expect(result.surviving).toEqual([]);
+        expect(status).toBe(0);
+        // A graceful exit ran handleShutdown, so there is no residue to reclaim
+        // — every resource is reported plainly, none "(reclaimed)".
+        expect(result.released.filter((r: string) => r.includes('(reclaimed)'))).toEqual([]);
+        expect(await waitFor(() => !alive(daemonPid!), 10_000)).toBe(true);
+      } finally {
+        try { held?.destroy(); } catch { /* already closed */ }
+        try { if (daemonPid) process.kill(daemonPid, 'SIGKILL'); } catch { /* gone */ }
+        if (daemonPid) await waitFor(() => !alive(daemonPid!), 5_000);
+        await rmHome(home);
+      }
+    },
+    60_000,
+  );
+
+});
+
+// The other half of the registry rule (RUSH-2421 review). The marker is named by
+// pid, so it is unambiguously the stopped daemon's — but it is only RESIDUE once
+// that daemon is DEAD. Deleting it while the process still lives erases the very
+// record `findSurvivingStateDirDaemons` enumerates, so the NEXT `agents daemon
+// stop` finds an empty registry and a cleared pid file and reports `ok: true`
+// with the daemon still running.
+//
+// Tested against the enumerator directly rather than through `agents daemon
+// stop`: driving the whole command would require a pid that survives SIGKILL,
+// which nothing does, and pointing it at a live pid we control would SIGTERM the
+// test runner itself.
+describe('stopResidueArtifacts (RUSH-2421: reclaim only what a DEAD owner left)', () => {
+  let dir = '';
+  let prev: string | undefined;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'agd-res-'));
+    prev = process.env.AGENTS_DAEMON_DIR;
+    process.env.AGENTS_DAEMON_DIR = dir;
+  });
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTS_DAEMON_DIR;
+    else process.env.AGENTS_DAEMON_DIR = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const artifact = (pid: number | null, label: string, survivors: number[] = []) =>
+    stopResidueArtifacts(pid, survivors).find((a) => a.label === label)!;
+
+  const seedMarker = (pid: number) => {
+    const markerPath = path.join(dir, 'instances', String(pid));
+    fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+    fs.writeFileSync(markerPath, 'node ... __daemon-run');
+    return markerPath;
+  };
+
+  it.skipIf(process.platform === 'win32')('keeps the entry of a daemon the survivor scan still sees', () => {
+    const markerPath = seedMarker(4242);
+    // The caller's own postcondition scan says this daemon survived the kill.
+    const entry = artifact(4242, 'daemon instance registry entry', [4242]);
+    expect(entry.present).toBe(true);
+    // The fix: a survivor is not residue. Reclaiming here erased the record the
+    // NEXT stop reads, so it reported ok:true with the daemon still running.
+    expect(entry.ownedByLiveOther).toBe(true);
+    expect(fs.existsSync(markerPath)).toBe(true);
+  });
+
+  it.skipIf(process.platform === 'win32')('reclaims the entry of a daemon that did not survive', () => {
+    const markerPath = seedMarker(4242);
+    const entry = artifact(4242, 'daemon instance registry entry', []);
+    expect(entry.present).toBe(true);
+    expect(entry.ownedByLiveOther).toBe(false);
+    entry.reclaim();
+    expect(entry.stillPresent()).toBe(false);
+    expect(fs.existsSync(markerPath)).toBe(false);
+  });
+
+  it.skipIf(process.platform === 'win32')('treats a ZOMBIE stopped daemon as dead, not alive', () => {
+    // A SIGKILLed child stays in the process table until its parent reaps it,
+    // and kill(pid, 0) SUCCEEDS on a zombie — so an isAlive-keyed rule kept the
+    // entry of a daemon that was already gone. The survivor scan, which matches
+    // a live `__daemon-run`, does not include a zombie.
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' });
+    const pid = child.pid!;
+    child.kill('SIGKILL');
+    // Do NOT await 'exit' — that reaps it. Poll until it is a zombie: still
+    // signalable, but no longer a running process.
+    const deadline = Date.now() + 5_000;
+    let zombie = false;
+    while (Date.now() < deadline && !zombie) {
+      try {
+        process.kill(pid, 0);
+        const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf-8');
+        zombie = / Z /.test(stat) || stat.includes(') Z ');
+      } catch { break; }
+    }
+    if (!zombie) return; // /proc unavailable (macOS) — the assertion below is Linux-specific
+    expect(() => process.kill(pid, 0)).not.toThrow(); // isAlive() would say "alive"
+
+    const markerPath = seedMarker(pid);
+    const entry = artifact(pid, 'daemon instance registry entry', []); // survivor scan: empty
+    expect(entry.ownedByLiveOther).toBe(false);
+    entry.reclaim();
+    expect(fs.existsSync(markerPath)).toBe(false);
+  });
 });
 
 /**

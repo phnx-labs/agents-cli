@@ -11,12 +11,22 @@ import type { IPCRequest, IPCResponse, RefNodeJson } from './types.js';
 const SOCKET_NAME = 'browser.sock';
 
 /**
- * How long {@link BrowserIPCServer.stop} waits for the listening socket to
- * actually be released before giving up and unlinking it anyway (RUSH-2421).
- * Long enough for in-flight connections to drain, short enough that a wedged
- * client cannot hold daemon shutdown open indefinitely.
+ * Backstop for {@link BrowserIPCServer.stop} — how long to wait for the socket
+ * to be released before unlinking it anyway (RUSH-2421).
+ *
+ * This MUST stay well under the daemon's SIGTERM grace window
+ * (`STOP_GRACE_MS`, daemon.ts). `handleShutdown` awaits `stop()`, so a close
+ * that takes as long as the grace window means `stopDaemon` gives up waiting
+ * and escalates to `killTree` — turning every graceful stop into a kill. The
+ * first version of this constant was set to exactly 5000, the same value as
+ * `STOP_GRACE_MS`, and did precisely that whenever a browser client held its
+ * (deliberately) long-lived connection open.
+ *
+ * With connections now ended explicitly in `closeServer`, reaching this
+ * timeout at all means a socket refused to die; 1.5s bounds that without
+ * coming near the grace window.
  */
-const IPC_CLOSE_TIMEOUT_MS = 5_000;
+const IPC_CLOSE_TIMEOUT_MS = 1_500;
 
 export interface IPCRequestOptions {
   autoStartDaemon?: boolean;
@@ -183,6 +193,10 @@ export class BrowserIPCConnection {
 export class BrowserIPCServer {
   private server: net.Server | null = null;
   private service: BrowserService;
+  /** Live client connections, so {@link stop} can end them rather than wait. */
+  private connections = new Set<net.Socket>();
+  /** In-flight stop, so a second SIGTERM awaits the same close, never skips it. */
+  private stopping: Promise<void> | null = null;
 
   constructor(service: BrowserService) {
     this.service = service;
@@ -204,6 +218,13 @@ export class BrowserIPCServer {
     }
 
     this.server = net.createServer((socket) => {
+      // `net.Server.close()` stops accepting but does not complete until every
+      // EXISTING connection ends, and clients here hold one open on purpose
+      // ("the process and socket stay warm between actions"). Tracking them is
+      // what lets stop() end them deliberately instead of waiting out a timeout.
+      this.connections.add(socket);
+      socket.on('close', () => this.connections.delete(socket));
+
       let buffer = '';
 
       socket.on('data', async (data) => {
@@ -277,22 +298,25 @@ export class BrowserIPCServer {
    * newcomer could bind before the incumbent's binding was gone, which is the
    * two-servers-on-one-socket orphan the eviction protocol exists to prevent.
    *
-   * Bounded, because a connection that never drains must not wedge shutdown
-   * forever: on timeout we proceed to unlink below, which is what a killed
-   * daemon would have left for `stopDaemon` to reclaim anyway.
+   * The first version of this waited out a timeout instead, and that made every
+   * graceful daemon stop escalate to `killTree`: `close()` does not complete
+   * while a connection is open, browser clients hold one open on purpose, and
+   * the timeout was set equal to the daemon's own SIGTERM grace window
+   * (`STOP_GRACE_MS`) — so `handleShutdown` was still inside `stop()` when
+   * `stopDaemon` gave up waiting and killed it. So we END the connections
+   * rather than wait for them: `close()` stops accepting, destroying the
+   * tracked sockets lets it complete, and the timeout is only a backstop for a
+   * socket that will not die, deliberately far below `STOP_GRACE_MS`.
    */
   async stop(): Promise<void> {
-    if (this.server) {
-      const server = this.server;
-      this.server = null;
-      await new Promise<void>((resolve) => {
-        const done = () => { clearTimeout(timer); resolve(); };
-        const timer = setTimeout(done, IPC_CLOSE_TIMEOUT_MS);
-        // `close()` reports an error when the server was never listening —
-        // nothing to release, so that is a completed close, not a failure.
-        server.close(() => done());
-      });
-    }
+    // A second SIGTERM must await the SAME stop, not skip past it because
+    // `this.server` was already nulled by the first.
+    if (!this.stopping) this.stopping = this.doStop();
+    return this.stopping;
+  }
+
+  private async doStop(): Promise<void> {
+    await this.closeServer();
 
     if (!IS_WINDOWS) {
       const socketPath = getSocketPath();
@@ -302,6 +326,27 @@ export class BrowserIPCServer {
     }
 
     await this.service.shutdown();
+  }
+
+  /** Release the listening binding, resolving only once it is genuinely gone. */
+  private closeServer(): Promise<void> {
+    const server = this.server;
+    this.server = null;
+    if (!server) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const done = () => { clearTimeout(timer); resolve(); };
+      // Backstop only, for a socket that refuses to die. Far below the daemon's
+      // SIGTERM grace window so a slow close can never be what gets the daemon
+      // killed — the whole point is that the graceful path stays graceful.
+      const timer = setTimeout(done, IPC_CLOSE_TIMEOUT_MS);
+      // `close()` reports an error when the server was never listening —
+      // nothing to release, so that is a completed close, not a failure.
+      server.close(() => done());
+      // `close()` waits for existing connections; ending them is what lets it
+      // finish now instead of at the timeout.
+      for (const socket of this.connections) socket.destroy();
+      this.connections.clear();
+    });
   }
 
   private async handleRequest(request: IPCRequest): Promise<IPCResponse> {

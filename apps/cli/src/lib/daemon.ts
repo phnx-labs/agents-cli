@@ -1564,7 +1564,7 @@ function waitForPid(timeoutMs: number): number | null {
  * One piece of daemon state that a graceful `handleShutdown` removes and an
  * escalated kill leaves behind (RUSH-2421).
  */
-interface StopResidueArtifact {
+export interface StopResidueArtifact {
   label: string;
   present: boolean;
   /** The file names a pid that is alive and is NOT the daemon we stopped. */
@@ -1593,7 +1593,7 @@ function claimedPid(read: () => number | null): number | null {
  * above uses for a standalone owner. Everything else is residue from a provably
  * dead owner and is reclaimed.
  */
-function stopResidueArtifacts(stoppedPid: number | null): StopResidueArtifact[] {
+export function stopResidueArtifacts(stoppedPid: number | null, survivors: number[] = []): StopResidueArtifact[] {
   const artifacts: StopResidueArtifact[] = [];
 
   const lifetimePath = path.join(getDaemonDirRoot(), LIFETIME_FILE);
@@ -1629,8 +1629,20 @@ function stopResidueArtifacts(stoppedPid: number | null): StopResidueArtifact[] 
     artifacts.push({
       label: 'daemon instance registry entry',
       present: fs.existsSync(markerPath),
-      // The marker is named by pid, so it can only ever be this daemon's.
-      ownedByLiveOther: false,
+      // The marker is named by pid, so it is unambiguously this daemon's — but
+      // "this daemon" is only residue once it is actually DEAD. If the kill did
+      // not land, deleting the marker erases the very record
+      // `findSurvivingStateDirDaemons` enumerates, so the next `agents daemon
+      // stop` would find an empty registry and a cleared pid file and report
+      // `ok: true` with the daemon still running.
+      //
+      // "Dead" is decided by the caller's OWN survivor scan, not by `isAlive`:
+      // a SIGKILLed child is a zombie until its parent reaps it, and `kill(pid,
+      // 0)` succeeds on a zombie. Keyed off `isAlive` this kept the entry of a
+      // daemon that was already gone, so the stop stopped being able to report
+      // its own state truthfully. The survivor scan matches a live
+      // `__daemon-run`, which a zombie is not.
+      ownedByLiveOther: survivors.includes(stoppedPid),
       reclaim: () => unregisterDaemonInstance(stoppedPid),
       stillPresent: () => fs.existsSync(markerPath),
     });
@@ -1822,7 +1834,7 @@ export function stopDaemon(): DaemonStopResult {
   // consults to re-adopt a "live" daemon, and a leftover registry entry is what
   // `reapStrayDaemons` enumerates. Same shape as the sockets above — reclaim
   // what a provably dead owner left, never touch what a live one owns.
-  for (const artifact of stopResidueArtifacts(pid)) {
+  for (const artifact of stopResidueArtifacts(pid, survivors)) {
     if (!artifact.present) { released.push(artifact.label); continue; }
     if (artifact.ownedByLiveOther) { released.push(`${artifact.label} (owned by a live daemon)`); continue; }
     artifact.reclaim();

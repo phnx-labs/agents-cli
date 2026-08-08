@@ -67,30 +67,56 @@ describe('sendIPCRequest', () => {
 //
 // An open connection is what makes the difference observable: with one held,
 // `close()` cannot complete, so a correct `stop()` must still be pending.
-describe('BrowserIPCServer.stop (awaits the real socket release)', () => {
-  it('does not resolve until the listening socket is actually released', async () => {
+describe('BrowserIPCServer.stop (releases the binding, promptly)', () => {
+  it('ends held connections and resolves with the socket genuinely released', async () => {
     const { BrowserIPCServer } = await import('./ipc.js');
     const { BrowserService } = await import('./service.js');
     const server = new BrowserIPCServer(new BrowserService());
     await server.start();
 
-    // Hold a live connection so close() cannot complete yet.
+    // A warm client connection — the normal case, not an edge case: clients
+    // hold one open between actions on purpose.
     const held = net.createConnection(ipcEndpoint(getSocketPath()));
     await new Promise<void>((resolve, reject) => {
       held.on('connect', () => resolve());
       held.on('error', reject);
     });
+    let clientSawClose = false;
+    held.on('close', () => { clientSawClose = true; });
 
-    let settled = false;
-    const stopping = server.stop().then(() => { settled = true; });
+    // `net.Server.close()` does not complete while a connection is open, so a
+    // stop that WAITS for the client sits there until its timeout. That is what
+    // made every graceful daemon stop escalate to killTree: handleShutdown
+    // awaits this, and the timeout equalled the daemon's SIGTERM grace window.
+    // stop() must therefore END the connection, not wait for it.
+    const started = Date.now();
+    await server.stop();
+    const elapsed = Date.now() - started;
 
-    // Pre-fix this resolved immediately with the connection still open.
-    await new Promise((r) => setTimeout(r, 300));
-    expect(settled).toBe(false);
+    expect(elapsed).toBeLessThan(1_000);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(clientSawClose).toBe(true);
+    // The binding is gone: a fresh connect finds nothing accepting.
+    await expect(new Promise((resolve, reject) => {
+      const probe = net.createConnection(ipcEndpoint(getSocketPath()));
+      probe.on('connect', () => { probe.destroy(); resolve('connected'); });
+      probe.on('error', reject);
+    })).rejects.toThrow();
+  }, 20_000);
 
-    held.destroy();
-    await stopping;
-    expect(settled).toBe(true);
+  it('is idempotent — a second stop awaits the same close instead of skipping it', async () => {
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    const server = new BrowserIPCServer(new BrowserService());
+    await server.start();
+    // A second SIGTERM must not race past the release because `this.server` was
+    // already nulled by the first.
+    await Promise.all([server.stop(), server.stop()]);
+    await expect(new Promise((resolve, reject) => {
+      const probe = net.createConnection(ipcEndpoint(getSocketPath()));
+      probe.on('connect', () => { probe.destroy(); resolve('connected'); });
+      probe.on('error', reject);
+    })).rejects.toThrow();
   }, 20_000);
 });
 
