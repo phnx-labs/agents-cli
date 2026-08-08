@@ -425,6 +425,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                          loaded: [LoadedDevice], devices: [Device]) {
         menu.removeAllItems()
         projectSessionItems.removeAll()
+        routineGroupItems.removeAll()
         deviceRowItems.removeAll()
 
         // Prefer the engine's active list once the warm cache has it — full
@@ -588,9 +589,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             rows.append(("⚠", wait, "Scheduler stopped — routines won’t run", sub))
         }
 
-        // Failing routines are surfaced HERE ONLY — the ROUTINES section below
-        // renders upcoming runs and "All routines…", never a second copy of the
-        // same failure inline, so a bad routine never shows twice in one menu.
+        // Failing routines LEAD the triage strip here — always visible, no click.
+        // The ROUTINES accordion below is the complete grouped roster (successor
+        // to the old "All routines…" flyout, which likewise listed failing rows):
+        // a failing routine also appears, marked ✕/⃠, in its project group's
+        // expanded rows. That is deliberate — the strip is the always-visible
+        // shortcut, the accordion the full per-project roster — not a bug.
         // Routines sharing an identical cause (same readiness code, or the same
         // lastStatus with no readiness) collapse into one row instead of one
         // per routine — never inventing a shared cause across routines that

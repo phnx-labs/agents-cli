@@ -426,8 +426,9 @@ enum IssueSelfTest {
         check("no ungrouped tail is not counted",
               routineGroupCount([grouped[0], grouped[1]]) == 2)
 
-        // Expanded order: attention first (failing before missed by name), then
-        // enabled by next run (blog 09:00 before seo 18:00), then paused last.
+        // Expanded order: attention first (failing + missed, in either order —
+        // the assert sorts them), then enabled by next run (blog 09:00 before
+        // seo 18:00), then paused last.
         let ordered = orderedGroupRoutines([ok1, paused, missed, ok2, failing]).map { $0.name }
         check("attention routines sort ahead of upcoming and paused",
               Array(ordered.prefix(2)).sorted() == ["device-probe", "usage-refresh"],
