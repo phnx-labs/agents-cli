@@ -35,6 +35,8 @@ import {
 } from '../lib/watchdog/runner.js';
 import { isWatchdogRotateEnabled, listRotateStates, setWatchdogRotateEnabled } from '../lib/watchdog/rotate.js';
 import { loadWatchdogSessions, runWatchdogPass } from '../lib/watchdog/service.js';
+import { readWatchdogEvents, WATCHDOG_LOG_PATH } from '../lib/watchdog/log.js';
+import { selectWatchdogHistory } from '../lib/watchdog/history.js';
 
 /** Default state dir the runner and these subcommands share. */
 function stateDir(): string {
@@ -197,6 +199,12 @@ export function registerWatchdogCommand(program: Command): void {
       # Show device enablement, rotate config, and in-flight rotates
       agents watchdog status
 
+      # Show what Watchdog decided and acted on during the last day
+      agents watchdog history --since 24h
+
+      # Follow one session's Watchdog decisions
+      agents watchdog history <sessionId>
+
       # Leave one session detected-but-untouched
       agents watchdog policy <sessionId> handsoff
 
@@ -329,6 +337,47 @@ export function registerWatchdogCommand(program: Command): void {
         console.log(`  ${chalk.magenta(r.phase.padEnd(12))} ${chalk.bold(r.sessionId.slice(0, 8))} → ${r.newSessionId.slice(0, 8)}${r.error ? chalk.red(`  ${r.error}`) : ''}`);
       }
       console.log(`state dir: ${chalk.dim(stateDir())}`);
+      console.log(`history: ${chalk.dim('agents watchdog history')}`);
+    });
+
+  cmd.command('history [sessionId]')
+    .description('Show persisted Watchdog decisions and actions, newest first.')
+    .option('--limit <count>', 'Maximum events to show', '50')
+    .option('--since <duration>', 'Only events within a duration such as 2h or 7d')
+    .option('--all', 'Include heartbeat tick events')
+    .option('--json', 'Emit safe structured history (transcript content is excluded)')
+    .action((sessionId: string | undefined, opts, command) => {
+      const globals = command.optsWithGlobals();
+      const limit = Number.parseInt(opts.limit, 10);
+      if (!Number.isInteger(limit) || limit < 1) {
+        throw new Error('--limit must be a positive integer');
+      }
+      const sinceSeconds = opts.since === undefined ? undefined : parseDuration(opts.since);
+      if (sinceSeconds !== undefined && (sinceSeconds === null || sinceSeconds <= 0)) {
+        throw new Error('--since must be a positive duration such as 2h or 7d');
+      }
+      const sinceMs = sinceSeconds == null ? undefined : sinceSeconds * 1000;
+      const entries = selectWatchdogHistory(readWatchdogEvents(), {
+        limit,
+        sinceMs,
+        sessionId,
+        includeTicks: opts.all === true,
+      });
+      if (globals.json === true) {
+        console.log(JSON.stringify({ logPath: WATCHDOG_LOG_PATH, events: entries }, null, 2));
+        return;
+      }
+      if (entries.length === 0) {
+        console.log(chalk.dim(`No Watchdog events found in ${WATCHDOG_LOG_PATH}`));
+        return;
+      }
+      for (const entry of entries) {
+        const when = new Date(entry.ts).toLocaleString();
+        const session = entry.sessionId ? entry.sessionId.slice(0, 8) : '-';
+        const reason = entry.reason ? ` · ${entry.reason}` : '';
+        console.log(`${chalk.dim(when)}  ${entry.kind.padEnd(8)}  ${chalk.bold(session)}  ${entry.agent ?? '-'}  ${entry.message}${reason}`);
+      }
+      console.log(chalk.dim(`${entries.length} event${entries.length === 1 ? '' : 's'} · ${WATCHDOG_LOG_PATH}`));
     });
 
   // --- per-session policy ----------------------------------------------------

@@ -1174,6 +1174,13 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     ts: nowMs,
     kind: 'tick',
     message: `${counts.total} live · ${counts.stalled} stalled · ${counts.nudged} nudged · ${counts.unaddressable} un-addressable`,
+    inspections: outcomes.map((outcome) => ({
+      terminalId: outcome.sessionId,
+      agentType: outcome.kind,
+      message: outcome.decision,
+      reason: outcome.reason,
+      stalledForMs: outcome.stalledForMs,
+    })),
   });
   appendWatchdogEvents(logEvents, { logPath: opts.logPath });
 

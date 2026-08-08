@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Cursor multi-account — make picking an account actually pick it</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header"><div class="header-label">Spec · RUSH-2400</div><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">Agents CLI</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-draft">draft</span></div>
+<h1>Cursor multi-account — make picking an account actually pick it</h1>
+<p class="summary">agents-cli shows and rotates multiple Cursor accounts, but every Cursor run authenticates as the one live ~/.cursor symlink target. This spec makes the account pick real, per-run and concurrency-safe.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">View shows 2 accounts; exec authenticates as 1 (the default symlink target)<span class="meta-sep" aria-hidden="true">·</span>Cursor exposes no config-dir env var — only CURSOR_API_KEY / CURSOR_API_ENDPOINT<span class="meta-sep" aria-hidden="true">·</span>Isolation must come from per-child HOME + XDG_CONFIG_HOME, not a global symlink swap</p><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/rush/issue/RUSH-2400" target="_blank" rel="noopener">RUSH-2400</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/muqsitnawaz/agents-cli" target="_blank" rel="noopener">muqsitnawaz/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">spec-cursor-multi-account</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">RUSH-2400</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude · opus-4-8</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">e67573e5</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-07</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#purpose"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#behavior-before-and-after"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Behavior — before and after</a><a href="#root-cause-display-and-exec-disagree"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Root cause — display and exec disagree</a><a href="#proposed-changes"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#public-interface"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#empirical-spike-blocks-implementation"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Empirical spike (blocks implementation)</a><a href="#validation"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Validation</a><a href="#risks"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Risks</a><a href="#non-goals"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Non-goals</a><a href="#tracking"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="purpose">Purpose</h2>
+<p>You asked whether "multiple Cursor profiles" shipped. It did not — and the reason is a trap: <code>agents view cursor</code> <em>looks</em> like it works.</p>
+<p>Today it prints two accounts:</p>
+<pre><code>Cursor (balanced)
+  2026.08.04 (default)  muqsitnawaz@gmail.com   (signed in)
+  2026.07.23            (logged out — log in with: cursor-agent)
+</code></pre>
+<p>That display is cosmetic. Cursor is a single self-updating binary with one config location, and agents-cli isolates a harness's accounts by pinning a per-account config dir at exec — a mechanism Cursor never got. So the picker, the <code>@version</code> selector, and balanced rotation all compute an account choice that has <strong>zero effect</strong> on which login actually runs. This spec makes the choice real.</p>
+<h2 id="behavior-before-and-after">Behavior — before and after</h2>
+<p><strong>Before (today).</strong> All three paths silently collapse to the one live login:</p>
+<ul>
+<li><code>agents run cursor@2026.07.23</code> → you expect the logged-out home; you get the <strong>default</strong> account (<code>muqsitnawaz@gmail.com</code>), because the spawned <code>cursor-agent</code> reads <code>~/.cursor</code>, a symlink to whichever version is the current default.</li>
+<li><code>agents run auto</code> with balanced rotation "picks" a Cursor account → same single login runs regardless of the pick.</li>
+<li>Two Cursor runs on two accounts at once → both authenticate as the same account; the "second account" is a display artifact, not a session.</li>
+</ul>
+<p><strong>After (this spec).</strong> The account you name is the account that runs:</p>
+<ul>
+<li><code>agents run cursor@&lt;account&gt;</code> launches <code>cursor-agent</code> authenticated as that account's own login.</li>
+<li><code>agents view cursor</code> reports each account's real signed-in state and usage, verified against that account's own credential file (no blind trust).</li>
+<li>Balanced rotation and the picker route across genuinely distinct Cursor logins.</li>
+<li>Two accounts run <strong>concurrently</strong> without clobbering each other — isolation is per-child-process, not global mutable state.</li>
+</ul>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+  <svg class="artifact-diagram" viewBox="0 0 940 360" role="img" aria-label="Before and after account isolation for Cursor">
+    
+    <text x="30" y="34" fill="#f59e0b" font-family="JetBrains Mono, monospace" font-size="13">BEFORE — pick is cosmetic</text>
+    <rect x="30" y="52" width="180" height="52" rx="6" fill="#16120a" stroke="#f59e0b" stroke-width="1.3"></rect>
+    <text x="120" y="74" text-anchor="middle" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="12">run cursor@08-04</text>
+    <text x="120" y="92" text-anchor="middle" fill="#8a8a8a" font-family="JetBrains Mono, monospace" font-size="10">account A</text>
+    <rect x="30" y="120" width="180" height="52" rx="6" fill="#16120a" stroke="#f59e0b" stroke-width="1.3"></rect>
+    <text x="120" y="142" text-anchor="middle" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="12">run cursor@07-23</text>
+    <text x="120" y="160" text-anchor="middle" fill="#8a8a8a" font-family="JetBrains Mono, monospace" font-size="10">account B</text>
+    <line x1="210" y1="78" x2="330" y2="120" stroke="#6b7280" stroke-width="1.6"></line>
+    <line x1="210" y1="146" x2="330" y2="130" stroke="#6b7280" stroke-width="1.6"></line>
+    <rect x="330" y="104" width="150" height="60" rx="6" fill="#1a1206" stroke="#ef4444" stroke-width="1.5"></rect>
+    <text x="405" y="128" text-anchor="middle" fill="#c8c8c8" font-family="JetBrains Mono, monospace" font-size="11">~/.cursor</text>
+    <text x="405" y="146" text-anchor="middle" fill="#ef4444" font-family="Inter, sans-serif" font-size="10">one symlink → default</text>
+    <text x="405" y="200" text-anchor="middle" fill="#ef4444" font-family="Inter, sans-serif" font-size="11">both runs → account A</text>
+    
+    <line x1="500" y1="40" x2="500" y2="320" stroke="#2a2a2a" stroke-width="1" stroke-dasharray="4 4"></line>
+    
+    <text x="530" y="34" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="13">AFTER — pick is real</text>
+    <rect x="530" y="52" width="180" height="52" rx="6" fill="#0f160a" stroke="#a3e635" stroke-width="1.3"></rect>
+    <text x="620" y="74" text-anchor="middle" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="12">run cursor@A</text>
+    <text x="620" y="92" text-anchor="middle" fill="#8a8a8a" font-family="JetBrains Mono, monospace" font-size="10">HOME=homeA</text>
+    <rect x="530" y="120" width="180" height="52" rx="6" fill="#0f160a" stroke="#a3e635" stroke-width="1.3"></rect>
+    <text x="620" y="142" text-anchor="middle" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="12">run cursor@B</text>
+    <text x="620" y="160" text-anchor="middle" fill="#8a8a8a" font-family="JetBrains Mono, monospace" font-size="10">HOME=homeB</text>
+    <line x1="710" y1="78" x2="800" y2="78" stroke="#a3e635" stroke-width="1.6"></line>
+    <line x1="710" y1="146" x2="800" y2="146" stroke="#a3e635" stroke-width="1.6"></line>
+    <rect x="800" y="52" width="120" height="52" rx="6" fill="#0f160a" stroke="#38bdf8" stroke-width="1.3"></rect>
+    <text x="860" y="78" text-anchor="middle" fill="#38bdf8" font-family="JetBrains Mono, monospace" font-size="10">homeA/.cursor</text>
+    <text x="860" y="94" text-anchor="middle" fill="#8a8a8a" font-family="Inter, sans-serif" font-size="9">login A</text>
+    <rect x="800" y="120" width="120" height="52" rx="6" fill="#0f160a" stroke="#38bdf8" stroke-width="1.3"></rect>
+    <text x="860" y="146" text-anchor="middle" fill="#38bdf8" font-family="JetBrains Mono, monospace" font-size="10">homeB/.cursor</text>
+    <text x="860" y="162" text-anchor="middle" fill="#8a8a8a" font-family="Inter, sans-serif" font-size="9">login B</text>
+    <text x="725" y="210" text-anchor="middle" fill="#a3e635" font-family="Inter, sans-serif" font-size="11">concurrent, no clobber</text>
+  </svg>
+  <figcaption><b>Figure 1.</b> Before: every Cursor run resolves through one <code>~/.cursor</code> symlink, so the account pick is discarded at exec. After: each account owns a credential home and the child process pins <code>HOME</code> + <code>XDG_CONFIG_HOME</code> to it, so two accounts run at once without racing shared state.</figcaption>
+</figure><h2 id="root-cause-display-and-exec-disagree">Root cause — display and exec disagree</h2>
+<p>Two independent facts combine into the illusion (all line refs on <code>origin/main</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>What happens</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Enumeration</td>
+<td><code>listInstalledVersions('cursor')</code> returns both version-homes — cursor has no branch in <code>getBinaryPath</code>, so <code>collapseGlobalBinaryVersions</code> never folds it</td>
+<td><code>versions.ts:1008-1062</code>, <code>:1079</code>, <code>:1283-1286</code></td>
+</tr>
+<tr>
+<td>Display</td>
+<td><code>agents view</code> reads each version-home's own <code>.cursor/cli-config.json</code>; the two differ only as leftover state from <code>switchConfigSymlink</code> default-swaps</td>
+<td><code>commands/view.ts:1493-1497</code>, <code>agents.ts:1426-1433</code>, <code>shims.ts</code></td>
+</tr>
+<tr>
+<td>Exec (the gap)</td>
+<td><code>buildExecEnv</code> sets <strong>no</strong> config-dir var for cursor; it falls into the <code>else</code> that only strips other agents' vars</td>
+<td><code>exec.ts:510-514</code>, <code>docs/specifications.md:1799-1810</code> (EXEC-16)</td>
+</tr>
+<tr>
+<td>Exec (alias)</td>
+<td>The versioned-alias generator also skips cursor; <code>CONFIG_ENV_ISOLATED_AGENTS</code> excludes it</td>
+<td><code>shims.ts:1015-1063</code>, <code>:988</code></td>
+</tr>
+<tr>
+<td>Verification</td>
+<td><code>credentialPresence('cursor')</code> is blind — cursor absent from <code>CREDENTIAL_FILE_SEGMENTS</code>, so <code>signedIn</code> is trusted with no per-account check</td>
+<td><code>agents.ts:1448-1459</code>, <code>:1484-1487</code>, <code>rotate.ts:170-176</code></td>
+</tr>
+</tbody></table>
+<p>Net: the spawned <code>cursor-agent</code> inherits the real <code>$HOME</code>, reads the live <code>~/.cursor</code> symlink (current default), and ignores the version string entirely.</p>
+<h2 id="proposed-changes">Proposed Changes</h2>
+<p><strong>1. A first-class Cursor account home, decoupled from version.</strong> Cursor is one binary; stacking accounts onto "version-homes" is why a stale default-swap leaks as a phantom login. Introduce a real per-account credential home — <code>~/.agents/accounts/cursor/&lt;label&gt;/</code> — each holding its own <code>.cursor/cli-config.json</code> and <code>.config/cursor/auth.json</code>. <code>agents add cursor --account &lt;label&gt;</code> runs <code>cursor-agent login</code> with <code>HOME</code>/<code>XDG_CONFIG_HOME</code> pinned into that home, capturing the login there.</p>
+<p><strong>2. Per-run isolation by env, not by symlink (the mechanism decision).</strong> Cursor has no config-dir env var, so there are two ways to make a run use account X:</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Mechanism</th>
+<th>Concurrency</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A — symlink swap</td>
+<td>Repoint <code>~/.cursor</code> + <code>~/.config/cursor</code> before each spawn (reuse <code>switchConfigSymlink</code>)</td>
+<td><strong>Unsafe</strong> — global mutable state; two concurrent runs race, last writer wins → wrong account</td>
+<td>Reject</td>
+</tr>
+<tr>
+<td>B — per-child env pin</td>
+<td>Set <code>HOME=&lt;accountHome&gt;</code> and <code>XDG_CONFIG_HOME=&lt;accountHome&gt;/.config</code> on the child only</td>
+<td><strong>Safe</strong> — each process sees its own tree</td>
+<td><strong>Recommend</strong></td>
+</tr>
+</tbody></table>
+<p>Concurrency safety is not optional here — running several Cursor accounts at once is the whole point (balanced rotation, teams). Option A reintroduces exactly the shared-state class the fleet already fought (the double-fire lineage). So: give cursor a real arm in <code>buildExecEnv</code> and the alias generator that pins <code>HOME</code> + <code>XDG_CONFIG_HOME</code> to the selected account home, and add cursor to <code>CONFIG_ENV_ISOLATED_AGENTS</code>.</p>
+<p><strong>3. Enumerate accounts, then verify.</strong> <code>collectRunCandidates('cursor')</code> lists account homes (not version dirs) and builds one candidate per account; add <code>cursor: [['.cursor', 'cli-config.json']]</code> to <code>CREDENTIAL_FILE_SEGMENTS</code> so <code>isLaunchableSignedIn</code> verifies each account's real credential instead of trusting <code>signedIn</code>.</p>
+<h2 id="public-interface">Public Interface</h2>
+<pre><code>agents add cursor --account work        # capture a new Cursor login into its own home
+agents run cursor@work "…"              # run authenticated as the 'work' account
+agents view cursor                      # per-account signed-in + usage, verified
+agents run auto                         # balanced rotation across real Cursor accounts
+agents accounts cursor --remove work    # drop an account home
+</code></pre>
+<h2 id="empirical-spike-blocks-implementation">Empirical spike (blocks implementation)</h2>
+<p>One closed-source unknown must be pinned before coding, because the codebase disagrees with itself: <code>agents.ts</code> treats <code>cli-config.json</code> as HOME-relative (<code>~/.cursor/</code>), while <code>sandbox.ts:143-152</code> claims setting <code>XDG_CONFIG_HOME</code> makes cursor read <code>cli-config.json</code> beside <code>auth.json</code>. On this box the real <code>cli-config.json</code> sits at <code>~/.cursor/</code> and <code>~/.config/cursor/</code> has only <code>auth.json</code>.</p>
+<p>Spike: set <code>HOME</code> and <code>XDG_CONFIG_HOME</code> to a scratch home containing a known account's files, run <code>cursor-agent</code>, and confirm which file each var actually relocates. The answer decides whether pinning <code>XDG_CONFIG_HOME</code> alone suffices or <code>HOME</code> must move too (and whether moving <code>HOME</code> drags in unrelated cursor state that needs seeding).</p>
+<h2 id="validation">Validation</h2>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Expected result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents run cursor@A</code> vs <code>@B</code></td>
+<td><code>cursor-agent whoami</code>-equivalent reports A then B (not the default both times)</td>
+</tr>
+<tr>
+<td>Concurrency</td>
+<td>Two simultaneous runs on A and B each stay on their own account through completion</td>
+</tr>
+<tr>
+<td><code>agents view cursor</code></td>
+<td>Each account's signed-in + usage matches that account's own credential file</td>
+</tr>
+<tr>
+<td>Rotation</td>
+<td><code>collectRunCandidates('cursor')</code> returns one candidate per account home; balanced pick lands on the intended login</td>
+</tr>
+<tr>
+<td>Regression</td>
+<td>Single-account users see no behavior change; the phantom stale-symlink row disappears</td>
+</tr>
+</tbody></table>
+<h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>HOME</code> pin drags in unrelated cursor state (chats, rules, hooks)</td>
+<td>Seed the account home by symlinking non-credential dirs back to the shared config; scope the spike to confirm the blast radius</td>
+</tr>
+<tr>
+<td>Cursor changes its auth file layout across self-updates</td>
+<td>Centralize the two paths in one resolver; the <code>CREDENTIAL_FILE_SEGMENTS</code> entry is the single source</td>
+</tr>
+<tr>
+<td>Migration of today's phantom version-home accounts</td>
+<td>One-time: fold each signed-in version-home into an account home; drop logged-out phantoms</td>
+</tr>
+<tr>
+<td>Spec drifts from <code>agents view</code> display parity</td>
+<td>Cover with the completeness test that pins the account model to view + rotate together</td>
+</tr>
+</tbody></table>
+<h2 id="non-goals">Non-goals</h2>
+<ul>
+<li>Cursor Cloud / REST provider accounts (separate surface, already shipped).</li>
+<li>Changing the isolated-agent model for the other single-binary harnesses (droid, grok, antigravity) — this is cursor-scoped, though the env-pin approach is the template they would follow.</li>
+<li>The <code>profiles</code> resource kind (provider bundles) — orthogonal; not how Cursor login works.</li>
+</ul>
+<aside class="artifact-callout"><strong>Load-bearing takeaway:</strong> the pick is discarded at exec, not at display. The fix is a real per-account credential home plus per-child <code>HOME</code>/<code>XDG_CONFIG_HOME</code> pinning — never a global symlink swap, which is unsafe under the concurrent runs this feature exists to enable.</aside><h2 id="tracking">Tracking</h2>
+<ul>
+<li><strong>RUSH-2400</strong> — feat(cursor): make multiple Cursor accounts real — <a href="https://linear.app/rush/issue/RUSH-2400">https://linear.app/rush/issue/RUSH-2400</a></li>
+<li>Spec PR — added on open (this document, committed under <code>.agents/reports/</code>).</li>
+<li>Implementation — follow-up, gated on the empirical spike and your approval of Option B.</li>
+</ul>
+</article>
+<footer class="document-footer">agents-cli · Phoenix Labs</footer>
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGVtcGxhdGU6IHBsYW4udjEKdGl0bGU6ICdDdXJzb3IgbXVsdGktYWNjb3VudCDigJQgbWFrZSBwaWNraW5nIGFuIGFjY291bnQgYWN0dWFsbHkgcGljayBpdCcKc3VtbWFyeTogJ2FnZW50cy1jbGkgc2hvd3MgYW5kIHJvdGF0ZXMgbXVsdGlwbGUgQ3Vyc29yIGFjY291bnRzLCBidXQgZXZlcnkgQ3Vyc29yIHJ1biBhdXRoZW50aWNhdGVzIGFzIHRoZSBvbmUgbGl2ZSB+Ly5jdXJzb3Igc3ltbGluayB0YXJnZXQuIFRoaXMgc3BlYyBtYWtlcyB0aGUgYWNjb3VudCBwaWNrIHJlYWwsIHBlci1ydW4gYW5kIGNvbmN1cnJlbmN5LXNhZmUuJwpoZWFkZXI6ICdTcGVjIMK3IFJVU0gtMjQwMCcKZm9vdGVyOiAnYWdlbnRzLWNsaSDCtyBQaG9lbml4IExhYnMnCnByb2plY3Q6ICdBZ2VudHMgQ0xJJwpjb250ZXh0OiAnYXBwcy9jbGkg4oCUIEN1cnNvciBoYXJuZXNzIGFjY291bnQgbW9kZWwnCnJlcG9zaXRvcnk6ICdtdXFzaXRuYXdhei9hZ2VudHMtY2xpJwpicmFuY2g6ICdzcGVjLWN1cnNvci1tdWx0aS1hY2NvdW50Jwp0cmFja2luZzogJ1JVU0gtMjQwMCcKc3RhdHVzOiBkcmFmdApoYXJuZXNzOiAnY2xhdWRlJwphZ2VudDogJ2NsYXVkZSDCtyBvcHVzLTQtOCcKaHVtYW46ICdNdXFzaXQnCmhvc3Q6ICd5b3NlbWl0ZS1zMCcKc2Vzc2lvbjogJ2U2NzU3M2U1JwpkYXRlOiAnMjAyNi0wOC0wNycKZmFjdHM6CiAgLSAnVmlldyBzaG93cyAyIGFjY291bnRzOyBleGVjIGF1dGhlbnRpY2F0ZXMgYXMgMSAodGhlIGRlZmF1bHQgc3ltbGluayB0YXJnZXQpJwogIC0gJ0N1cnNvciBleHBvc2VzIG5vIGNvbmZpZy1kaXIgZW52IHZhciDigJQgb25seSBDVVJTT1JfQVBJX0tFWSAvIENVUlNPUl9BUElfRU5EUE9JTlQnCiAgLSAnSXNvbGF0aW9uIG11c3QgY29tZSBmcm9tIHBlci1jaGlsZCBIT01FICsgWERHX0NPTkZJR19IT01FLCBub3QgYSBnbG9iYWwgc3ltbGluayBzd2FwJwpsaW5rczoKICAtICdodHRwczovL2xpbmVhci5hcHAvcnVzaC9pc3N1ZS9SVVNILTI0MDAnCmFzc2V0czogW10KLS0tCgojIyBQdXJwb3NlCgpZb3UgYXNrZWQgd2hldGhlciAibXVsdGlwbGUgQ3Vyc29yIHByb2ZpbGVzIiBzaGlwcGVkLiBJdCBkaWQgbm90IOKAlCBhbmQgdGhlIHJlYXNvbiBpcyBhIHRyYXA6IGBhZ2VudHMgdmlldyBjdXJzb3JgICpsb29rcyogbGlrZSBpdCB3b3Jrcy4KClRvZGF5IGl0IHByaW50cyB0d28gYWNjb3VudHM6CgpgYGAKQ3Vyc29yIChiYWxhbmNlZCkKICAyMDI2LjA4LjA0IChkZWZhdWx0KSAgbXVxc2l0bmF3YXpAZ21haWwuY29tICAgKHNpZ25lZCBpbikKICAyMDI2LjA3LjIzICAgICAgICAgICAgKGxvZ2dlZCBvdXQg4oCUIGxvZyBpbiB3aXRoOiBjdXJzb3ItYWdlbnQpCmBgYAoKVGhhdCBkaXNwbGF5IGlzIGNvc21ldGljLiBDdXJzb3IgaXMgYSBzaW5nbGUgc2VsZi11cGRhdGluZyBiaW5hcnkgd2l0aCBvbmUgY29uZmlnIGxvY2F0aW9uLCBhbmQgYWdlbnRzLWNsaSBpc29sYXRlcyBhIGhhcm5lc3MncyBhY2NvdW50cyBieSBwaW5uaW5nIGEgcGVyLWFjY291bnQgY29uZmlnIGRpciBhdCBleGVjIOKAlCBhIG1lY2hhbmlzbSBDdXJzb3IgbmV2ZXIgZ290LiBTbyB0aGUgcGlja2VyLCB0aGUgYEB2ZXJzaW9uYCBzZWxlY3RvciwgYW5kIGJhbGFuY2VkIHJvdGF0aW9uIGFsbCBjb21wdXRlIGFuIGFjY291bnQgY2hvaWNlIHRoYXQgaGFzICoqemVybyBlZmZlY3QqKiBvbiB3aGljaCBsb2dpbiBhY3R1YWxseSBydW5zLiBUaGlzIHNwZWMgbWFrZXMgdGhlIGNob2ljZSByZWFsLgoKIyMgQmVoYXZpb3Ig4oCUIGJlZm9yZSBhbmQgYWZ0ZXIKCioqQmVmb3JlICh0b2RheSkuKiogQWxsIHRocmVlIHBhdGhzIHNpbGVudGx5IGNvbGxhcHNlIHRvIHRoZSBvbmUgbGl2ZSBsb2dpbjoKCi0gYGFnZW50cyBydW4gY3Vyc29yQDIwMjYuMDcuMjNgIOKGkiB5b3UgZXhwZWN0IHRoZSBsb2dnZWQtb3V0IGhvbWU7IHlvdSBnZXQgdGhlICoqZGVmYXVsdCoqIGFjY291bnQgKGBtdXFzaXRuYXdhekBnbWFpbC5jb21gKSwgYmVjYXVzZSB0aGUgc3Bhd25lZCBgY3Vyc29yLWFnZW50YCByZWFkcyBgfi8uY3Vyc29yYCwgYSBzeW1saW5rIHRvIHdoaWNoZXZlciB2ZXJzaW9uIGlzIHRoZSBjdXJyZW50IGRlZmF1bHQuCi0gYGFnZW50cyBydW4gYXV0b2Agd2l0aCBiYWxhbmNlZCByb3RhdGlvbiAicGlja3MiIGEgQ3Vyc29yIGFjY291bnQg4oaSIHNhbWUgc2luZ2xlIGxvZ2luIHJ1bnMgcmVnYXJkbGVzcyBvZiB0aGUgcGljay4KLSBUd28gQ3Vyc29yIHJ1bnMgb24gdHdvIGFjY291bnRzIGF0IG9uY2Ug4oaSIGJvdGggYXV0aGVudGljYXRlIGFzIHRoZSBzYW1lIGFjY291bnQ7IHRoZSAic2Vjb25kIGFjY291bnQiIGlzIGEgZGlzcGxheSBhcnRpZmFjdCwgbm90IGEgc2Vzc2lvbi4KCioqQWZ0ZXIgKHRoaXMgc3BlYykuKiogVGhlIGFjY291bnQgeW91IG5hbWUgaXMgdGhlIGFjY291bnQgdGhhdCBydW5zOgoKLSBgYWdlbnRzIHJ1biBjdXJzb3JAPGFjY291bnQ+YCBsYXVuY2hlcyBgY3Vyc29yLWFnZW50YCBhdXRoZW50aWNhdGVkIGFzIHRoYXQgYWNjb3VudCdzIG93biBsb2dpbi4KLSBgYWdlbnRzIHZpZXcgY3Vyc29yYCByZXBvcnRzIGVhY2ggYWNjb3VudCdzIHJlYWwgc2lnbmVkLWluIHN0YXRlIGFuZCB1c2FnZSwgdmVyaWZpZWQgYWdhaW5zdCB0aGF0IGFjY291bnQncyBvd24gY3JlZGVudGlhbCBmaWxlIChubyBibGluZCB0cnVzdCkuCi0gQmFsYW5jZWQgcm90YXRpb24gYW5kIHRoZSBwaWNrZXIgcm91dGUgYWNyb3NzIGdlbnVpbmVseSBkaXN0aW5jdCBDdXJzb3IgbG9naW5zLgotIFR3byBhY2NvdW50cyBydW4gKipjb25jdXJyZW50bHkqKiB3aXRob3V0IGNsb2JiZXJpbmcgZWFjaCBvdGhlciDigJQgaXNvbGF0aW9uIGlzIHBlci1jaGlsZC1wcm9jZXNzLCBub3QgZ2xvYmFsIG11dGFibGUgc3RhdGUuCgo8ZmlndXJlIGNsYXNzPSJhcnRpZmFjdC1maWd1cmUgYXJ0aWZhY3QtZmlndXJlLWRpYWdyYW0gYXJ0aWZhY3QtZmlndXJlLXdpZGUiPgogIDxzdmcgY2xhc3M9ImFydGlmYWN0LWRpYWdyYW0iIHZpZXdCb3g9IjAgMCA5NDAgMzYwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkJlZm9yZSBhbmQgYWZ0ZXIgYWNjb3VudCBpc29sYXRpb24gZm9yIEN1cnNvciI+CiAgICA8IS0tIEJFRk9SRSAtLT4KICAgIDx0ZXh0IHg9IjMwIiB5PSIzNCIgZmlsbD0iI2Y1OWUwYiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPkJFRk9SRSDigJQgcGljayBpcyBjb3NtZXRpYzwvdGV4dD4KICAgIDxyZWN0IHg9IjMwIiB5PSI1MiIgd2lkdGg9IjE4MCIgaGVpZ2h0PSI1MiIgcng9IjYiIGZpbGw9IiMxNjEyMGEiIHN0cm9rZT0iI2Y1OWUwYiIgc3Ryb2tlLXdpZHRoPSIxLjMiIC8+CiAgICA8dGV4dCB4PSIxMjAiIHk9Ijc0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYzhjOGM4IiBmb250LWZhbWlseT0iSW50ZXIsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiPnJ1biBjdXJzb3JAMDgtMDQ8L3RleHQ+CiAgICA8dGV4dCB4PSIxMjAiIHk9IjkyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOGE4YThhIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCI+YWNjb3VudCBBPC90ZXh0PgogICAgPHJlY3QgeD0iMzAiIHk9IjEyMCIgd2lkdGg9IjE4MCIgaGVpZ2h0PSI1MiIgcng9IjYiIGZpbGw9IiMxNjEyMGEiIHN0cm9rZT0iI2Y1OWUwYiIgc3Ryb2tlLXdpZHRoPSIxLjMiIC8+CiAgICA8dGV4dCB4PSIxMjAiIHk9IjE0MiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2M4YzhjOCIgZm9udC1mYW1pbHk9IkludGVyLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIj5ydW4gY3Vyc29yQDA3LTIzPC90ZXh0PgogICAgPHRleHQgeD0iMTIwIiB5PSIxNjAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM4YThhOGEiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5hY2NvdW50IEI8L3RleHQ+CiAgICA8bGluZSB4MT0iMjEwIiB5MT0iNzgiIHgyPSIzMzAiIHkyPSIxMjAiIHN0cm9rZT0iIzZiNzI4MCIgc3Ryb2tlLXdpZHRoPSIxLjYiIC8+CiAgICA8bGluZSB4MT0iMjEwIiB5MT0iMTQ2IiB4Mj0iMzMwIiB5Mj0iMTMwIiBzdHJva2U9IiM2YjcyODAiIHN0cm9rZS13aWR0aD0iMS42IiAvPgogICAgPHJlY3QgeD0iMzMwIiB5PSIxMDQiIHdpZHRoPSIxNTAiIGhlaWdodD0iNjAiIHJ4PSI2IiBmaWxsPSIjMWExMjA2IiBzdHJva2U9IiNlZjQ0NDQiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iNDA1IiB5PSIxMjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNjOGM4YzgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj5+Ly5jdXJzb3I8L3RleHQ+CiAgICA8dGV4dCB4PSI0MDUiIHk9IjE0NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2VmNDQ0NCIgZm9udC1mYW1pbHk9IkludGVyLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIj5vbmUgc3ltbGluayDihpIgZGVmYXVsdDwvdGV4dD4KICAgIDx0ZXh0IHg9IjQwNSIgeT0iMjAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZWY0NDQ0IiBmb250LWZhbWlseT0iSW50ZXIsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiPmJvdGggcnVucyDihpIgYWNjb3VudCBBPC90ZXh0PgogICAgPCEtLSBkaXZpZGVyIC0tPgogICAgPGxpbmUgeDE9IjUwMCIgeTE9IjQwIiB4Mj0iNTAwIiB5Mj0iMzIwIiBzdHJva2U9IiMyYTJhMmEiIHN0cm9rZS13aWR0aD0iMSIgc3Ryb2tlLWRhc2hhcnJheT0iNCA0IiAvPgogICAgPCEtLSBBRlRFUiAtLT4KICAgIDx0ZXh0IHg9IjUzMCIgeT0iMzQiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEzIj5BRlRFUiDigJQgcGljayBpcyByZWFsPC90ZXh0PgogICAgPHJlY3QgeD0iNTMwIiB5PSI1MiIgd2lkdGg9IjE4MCIgaGVpZ2h0PSI1MiIgcng9IjYiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjMiIC8+CiAgICA8dGV4dCB4PSI2MjAiIHk9Ijc0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYzhjOGM4IiBmb250LWZhbWlseT0iSW50ZXIsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiPnJ1biBjdXJzb3JAQTwvdGV4dD4KICAgIDx0ZXh0IHg9IjYyMCIgeT0iOTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM4YThhOGEiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5IT01FPWhvbWVBPC90ZXh0PgogICAgPHJlY3QgeD0iNTMwIiB5PSIxMjAiIHdpZHRoPSIxODAiIGhlaWdodD0iNTIiIHJ4PSI2IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS4zIiAvPgogICAgPHRleHQgeD0iNjIwIiB5PSIxNDIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNjOGM4YzgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiI+cnVuIGN1cnNvckBCPC90ZXh0PgogICAgPHRleHQgeD0iNjIwIiB5PSIxNjAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM4YThhOGEiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5IT01FPWhvbWVCPC90ZXh0PgogICAgPGxpbmUgeDE9IjcxMCIgeTE9Ijc4IiB4Mj0iODAwIiB5Mj0iNzgiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjYiIC8+CiAgICA8bGluZSB4MT0iNzEwIiB5MT0iMTQ2IiB4Mj0iODAwIiB5Mj0iMTQ2IiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS42IiAvPgogICAgPHJlY3QgeD0iODAwIiB5PSI1MiIgd2lkdGg9IjEyMCIgaGVpZ2h0PSI1MiIgcng9IjYiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iIzM4YmRmOCIgc3Ryb2tlLXdpZHRoPSIxLjMiIC8+CiAgICA8dGV4dCB4PSI4NjAiIHk9Ijc4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMzhiZGY4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCI+aG9tZUEvLmN1cnNvcjwvdGV4dD4KICAgIDx0ZXh0IHg9Ijg2MCIgeT0iOTQiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM4YThhOGEiIGZvbnQtZmFtaWx5PSJJbnRlciwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSI5Ij5sb2dpbiBBPC90ZXh0PgogICAgPHJlY3QgeD0iODAwIiB5PSIxMjAiIHdpZHRoPSIxMjAiIGhlaWdodD0iNTIiIHJ4PSI2IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS4zIiAvPgogICAgPHRleHQgeD0iODYwIiB5PSIxNDYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMzOGJkZjgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5ob21lQi8uY3Vyc29yPC90ZXh0PgogICAgPHRleHQgeD0iODYwIiB5PSIxNjIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM4YThhOGEiIGZvbnQtZmFtaWx5PSJJbnRlciwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSI5Ij5sb2dpbiBCPC90ZXh0PgogICAgPHRleHQgeD0iNzI1IiB5PSIyMTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSI+Y29uY3VycmVudCwgbm8gY2xvYmJlcjwvdGV4dD4KICA8L3N2Zz4KICA8ZmlnY2FwdGlvbj48Yj5GaWd1cmUgMS48L2I+IEJlZm9yZTogZXZlcnkgQ3Vyc29yIHJ1biByZXNvbHZlcyB0aHJvdWdoIG9uZSA8Y29kZT5+Ly5jdXJzb3I8L2NvZGU+IHN5bWxpbmssIHNvIHRoZSBhY2NvdW50IHBpY2sgaXMgZGlzY2FyZGVkIGF0IGV4ZWMuIEFmdGVyOiBlYWNoIGFjY291bnQgb3ducyBhIGNyZWRlbnRpYWwgaG9tZSBhbmQgdGhlIGNoaWxkIHByb2Nlc3MgcGlucyA8Y29kZT5IT01FPC9jb2RlPiArIDxjb2RlPlhER19DT05GSUdfSE9NRTwvY29kZT4gdG8gaXQsIHNvIHR3byBhY2NvdW50cyBydW4gYXQgb25jZSB3aXRob3V0IHJhY2luZyBzaGFyZWQgc3RhdGUuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCiMjIFJvb3QgY2F1c2Ug4oCUIGRpc3BsYXkgYW5kIGV4ZWMgZGlzYWdyZWUKClR3byBpbmRlcGVuZGVudCBmYWN0cyBjb21iaW5lIGludG8gdGhlIGlsbHVzaW9uIChhbGwgbGluZSByZWZzIG9uIGBvcmlnaW4vbWFpbmApOgoKfCBMYXllciB8IFdoYXQgaGFwcGVucyB8IFdoZXJlIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IEVudW1lcmF0aW9uIHwgYGxpc3RJbnN0YWxsZWRWZXJzaW9ucygnY3Vyc29yJylgIHJldHVybnMgYm90aCB2ZXJzaW9uLWhvbWVzIOKAlCBjdXJzb3IgaGFzIG5vIGJyYW5jaCBpbiBgZ2V0QmluYXJ5UGF0aGAsIHNvIGBjb2xsYXBzZUdsb2JhbEJpbmFyeVZlcnNpb25zYCBuZXZlciBmb2xkcyBpdCB8IGB2ZXJzaW9ucy50czoxMDA4LTEwNjJgLCBgOjEwNzlgLCBgOjEyODMtMTI4NmAgfAp8IERpc3BsYXkgfCBgYWdlbnRzIHZpZXdgIHJlYWRzIGVhY2ggdmVyc2lvbi1ob21lJ3Mgb3duIGAuY3Vyc29yL2NsaS1jb25maWcuanNvbmA7IHRoZSB0d28gZGlmZmVyIG9ubHkgYXMgbGVmdG92ZXIgc3RhdGUgZnJvbSBgc3dpdGNoQ29uZmlnU3ltbGlua2AgZGVmYXVsdC1zd2FwcyB8IGBjb21tYW5kcy92aWV3LnRzOjE0OTMtMTQ5N2AsIGBhZ2VudHMudHM6MTQyNi0xNDMzYCwgYHNoaW1zLnRzYCB8CnwgRXhlYyAodGhlIGdhcCkgfCBgYnVpbGRFeGVjRW52YCBzZXRzICoqbm8qKiBjb25maWctZGlyIHZhciBmb3IgY3Vyc29yOyBpdCBmYWxscyBpbnRvIHRoZSBgZWxzZWAgdGhhdCBvbmx5IHN0cmlwcyBvdGhlciBhZ2VudHMnIHZhcnMgfCBgZXhlYy50czo1MTAtNTE0YCwgYGRvY3Mvc3BlY2lmaWNhdGlvbnMubWQ6MTc5OS0xODEwYCAoRVhFQy0xNikgfAp8IEV4ZWMgKGFsaWFzKSB8IFRoZSB2ZXJzaW9uZWQtYWxpYXMgZ2VuZXJhdG9yIGFsc28gc2tpcHMgY3Vyc29yOyBgQ09ORklHX0VOVl9JU09MQVRFRF9BR0VOVFNgIGV4Y2x1ZGVzIGl0IHwgYHNoaW1zLnRzOjEwMTUtMTA2M2AsIGA6OTg4YCB8CnwgVmVyaWZpY2F0aW9uIHwgYGNyZWRlbnRpYWxQcmVzZW5jZSgnY3Vyc29yJylgIGlzIGJsaW5kIOKAlCBjdXJzb3IgYWJzZW50IGZyb20gYENSRURFTlRJQUxfRklMRV9TRUdNRU5UU2AsIHNvIGBzaWduZWRJbmAgaXMgdHJ1c3RlZCB3aXRoIG5vIHBlci1hY2NvdW50IGNoZWNrIHwgYGFnZW50cy50czoxNDQ4LTE0NTlgLCBgOjE0ODQtMTQ4N2AsIGByb3RhdGUudHM6MTcwLTE3NmAgfAoKTmV0OiB0aGUgc3Bhd25lZCBgY3Vyc29yLWFnZW50YCBpbmhlcml0cyB0aGUgcmVhbCBgJEhPTUVgLCByZWFkcyB0aGUgbGl2ZSBgfi8uY3Vyc29yYCBzeW1saW5rIChjdXJyZW50IGRlZmF1bHQpLCBhbmQgaWdub3JlcyB0aGUgdmVyc2lvbiBzdHJpbmcgZW50aXJlbHkuCgojIyBQcm9wb3NlZCBDaGFuZ2VzCgoqKjEuIEEgZmlyc3QtY2xhc3MgQ3Vyc29yIGFjY291bnQgaG9tZSwgZGVjb3VwbGVkIGZyb20gdmVyc2lvbi4qKiBDdXJzb3IgaXMgb25lIGJpbmFyeTsgc3RhY2tpbmcgYWNjb3VudHMgb250byAidmVyc2lvbi1ob21lcyIgaXMgd2h5IGEgc3RhbGUgZGVmYXVsdC1zd2FwIGxlYWtzIGFzIGEgcGhhbnRvbSBsb2dpbi4gSW50cm9kdWNlIGEgcmVhbCBwZXItYWNjb3VudCBjcmVkZW50aWFsIGhvbWUg4oCUIGB+Ly5hZ2VudHMvYWNjb3VudHMvY3Vyc29yLzxsYWJlbD4vYCDigJQgZWFjaCBob2xkaW5nIGl0cyBvd24gYC5jdXJzb3IvY2xpLWNvbmZpZy5qc29uYCBhbmQgYC5jb25maWcvY3Vyc29yL2F1dGguanNvbmAuIGBhZ2VudHMgYWRkIGN1cnNvciAtLWFjY291bnQgPGxhYmVsPmAgcnVucyBgY3Vyc29yLWFnZW50IGxvZ2luYCB3aXRoIGBIT01FYC9gWERHX0NPTkZJR19IT01FYCBwaW5uZWQgaW50byB0aGF0IGhvbWUsIGNhcHR1cmluZyB0aGUgbG9naW4gdGhlcmUuCgoqKjIuIFBlci1ydW4gaXNvbGF0aW9uIGJ5IGVudiwgbm90IGJ5IHN5bWxpbmsgKHRoZSBtZWNoYW5pc20gZGVjaXNpb24pLioqIEN1cnNvciBoYXMgbm8gY29uZmlnLWRpciBlbnYgdmFyLCBzbyB0aGVyZSBhcmUgdHdvIHdheXMgdG8gbWFrZSBhIHJ1biB1c2UgYWNjb3VudCBYOgoKfCBPcHRpb24gfCBNZWNoYW5pc20gfCBDb25jdXJyZW5jeSB8IFZlcmRpY3QgfAp8IC0tLSB8IC0tLSB8IC0tLSB8IC0tLSB8CnwgQSDigJQgc3ltbGluayBzd2FwIHwgUmVwb2ludCBgfi8uY3Vyc29yYCArIGB+Ly5jb25maWcvY3Vyc29yYCBiZWZvcmUgZWFjaCBzcGF3biAocmV1c2UgYHN3aXRjaENvbmZpZ1N5bWxpbmtgKSB8ICoqVW5zYWZlKiog4oCUIGdsb2JhbCBtdXRhYmxlIHN0YXRlOyB0d28gY29uY3VycmVudCBydW5zIHJhY2UsIGxhc3Qgd3JpdGVyIHdpbnMg4oaSIHdyb25nIGFjY291bnQgfCBSZWplY3QgfAp8IEIg4oCUIHBlci1jaGlsZCBlbnYgcGluIHwgU2V0IGBIT01FPTxhY2NvdW50SG9tZT5gIGFuZCBgWERHX0NPTkZJR19IT01FPTxhY2NvdW50SG9tZT4vLmNvbmZpZ2Agb24gdGhlIGNoaWxkIG9ubHkgfCAqKlNhZmUqKiDigJQgZWFjaCBwcm9jZXNzIHNlZXMgaXRzIG93biB0cmVlIHwgKipSZWNvbW1lbmQqKiB8CgpDb25jdXJyZW5jeSBzYWZldHkgaXMgbm90IG9wdGlvbmFsIGhlcmUg4oCUIHJ1bm5pbmcgc2V2ZXJhbCBDdXJzb3IgYWNjb3VudHMgYXQgb25jZSBpcyB0aGUgd2hvbGUgcG9pbnQgKGJhbGFuY2VkIHJvdGF0aW9uLCB0ZWFtcykuIE9wdGlvbiBBIHJlaW50cm9kdWNlcyBleGFjdGx5IHRoZSBzaGFyZWQtc3RhdGUgY2xhc3MgdGhlIGZsZWV0IGFscmVhZHkgZm91Z2h0ICh0aGUgZG91YmxlLWZpcmUgbGluZWFnZSkuIFNvOiBnaXZlIGN1cnNvciBhIHJlYWwgYXJtIGluIGBidWlsZEV4ZWNFbnZgIGFuZCB0aGUgYWxpYXMgZ2VuZXJhdG9yIHRoYXQgcGlucyBgSE9NRWAgKyBgWERHX0NPTkZJR19IT01FYCB0byB0aGUgc2VsZWN0ZWQgYWNjb3VudCBob21lLCBhbmQgYWRkIGN1cnNvciB0byBgQ09ORklHX0VOVl9JU09MQVRFRF9BR0VOVFNgLgoKKiozLiBFbnVtZXJhdGUgYWNjb3VudHMsIHRoZW4gdmVyaWZ5LioqIGBjb2xsZWN0UnVuQ2FuZGlkYXRlcygnY3Vyc29yJylgIGxpc3RzIGFjY291bnQgaG9tZXMgKG5vdCB2ZXJzaW9uIGRpcnMpIGFuZCBidWlsZHMgb25lIGNhbmRpZGF0ZSBwZXIgYWNjb3VudDsgYWRkIGBjdXJzb3I6IFtbJy5jdXJzb3InLCAnY2xpLWNvbmZpZy5qc29uJ11dYCB0byBgQ1JFREVOVElBTF9GSUxFX1NFR01FTlRTYCBzbyBgaXNMYXVuY2hhYmxlU2lnbmVkSW5gIHZlcmlmaWVzIGVhY2ggYWNjb3VudCdzIHJlYWwgY3JlZGVudGlhbCBpbnN0ZWFkIG9mIHRydXN0aW5nIGBzaWduZWRJbmAuCgojIyBQdWJsaWMgSW50ZXJmYWNlCgpgYGBiYXNoCmFnZW50cyBhZGQgY3Vyc29yIC0tYWNjb3VudCB3b3JrICAgICAgICAjIGNhcHR1cmUgYSBuZXcgQ3Vyc29yIGxvZ2luIGludG8gaXRzIG93biBob21lCmFnZW50cyBydW4gY3Vyc29yQHdvcmsgIuKApiIgICAgICAgICAgICAgICMgcnVuIGF1dGhlbnRpY2F0ZWQgYXMgdGhlICd3b3JrJyBhY2NvdW50CmFnZW50cyB2aWV3IGN1cnNvciAgICAgICAgICAgICAgICAgICAgICAjIHBlci1hY2NvdW50IHNpZ25lZC1pbiArIHVzYWdlLCB2ZXJpZmllZAphZ2VudHMgcnVuIGF1dG8gICAgICAgICAgICAgICAgICAgICAgICAgIyBiYWxhbmNlZCByb3RhdGlvbiBhY3Jvc3MgcmVhbCBDdXJzb3IgYWNjb3VudHMKYWdlbnRzIGFjY291bnRzIGN1cnNvciAtLXJlbW92ZSB3b3JrICAgICMgZHJvcCBhbiBhY2NvdW50IGhvbWUKYGBgCgojIyBFbXBpcmljYWwgc3Bpa2UgKGJsb2NrcyBpbXBsZW1lbnRhdGlvbikKCk9uZSBjbG9zZWQtc291cmNlIHVua25vd24gbXVzdCBiZSBwaW5uZWQgYmVmb3JlIGNvZGluZywgYmVjYXVzZSB0aGUgY29kZWJhc2UgZGlzYWdyZWVzIHdpdGggaXRzZWxmOiBgYWdlbnRzLnRzYCB0cmVhdHMgYGNsaS1jb25maWcuanNvbmAgYXMgSE9NRS1yZWxhdGl2ZSAoYH4vLmN1cnNvci9gKSwgd2hpbGUgYHNhbmRib3gudHM6MTQzLTE1MmAgY2xhaW1zIHNldHRpbmcgYFhER19DT05GSUdfSE9NRWAgbWFrZXMgY3Vyc29yIHJlYWQgYGNsaS1jb25maWcuanNvbmAgYmVzaWRlIGBhdXRoLmpzb25gLiBPbiB0aGlzIGJveCB0aGUgcmVhbCBgY2xpLWNvbmZpZy5qc29uYCBzaXRzIGF0IGB+Ly5jdXJzb3IvYCBhbmQgYH4vLmNvbmZpZy9jdXJzb3IvYCBoYXMgb25seSBgYXV0aC5qc29uYC4KClNwaWtlOiBzZXQgYEhPTUVgIGFuZCBgWERHX0NPTkZJR19IT01FYCB0byBhIHNjcmF0Y2ggaG9tZSBjb250YWluaW5nIGEga25vd24gYWNjb3VudCdzIGZpbGVzLCBydW4gYGN1cnNvci1hZ2VudGAsIGFuZCBjb25maXJtIHdoaWNoIGZpbGUgZWFjaCB2YXIgYWN0dWFsbHkgcmVsb2NhdGVzLiBUaGUgYW5zd2VyIGRlY2lkZXMgd2hldGhlciBwaW5uaW5nIGBYREdfQ09ORklHX0hPTUVgIGFsb25lIHN1ZmZpY2VzIG9yIGBIT01FYCBtdXN0IG1vdmUgdG9vIChhbmQgd2hldGhlciBtb3ZpbmcgYEhPTUVgIGRyYWdzIGluIHVucmVsYXRlZCBjdXJzb3Igc3RhdGUgdGhhdCBuZWVkcyBzZWVkaW5nKS4KCiMjIFZhbGlkYXRpb24KCnwgQ2hlY2sgfCBFeHBlY3RlZCByZXN1bHQgfAp8IC0tLSB8IC0tLSB8CnwgYGFnZW50cyBydW4gY3Vyc29yQEFgIHZzIGBAQmAgfCBgY3Vyc29yLWFnZW50IHdob2FtaWAtZXF1aXZhbGVudCByZXBvcnRzIEEgdGhlbiBCIChub3QgdGhlIGRlZmF1bHQgYm90aCB0aW1lcykgfAp8IENvbmN1cnJlbmN5IHwgVHdvIHNpbXVsdGFuZW91cyBydW5zIG9uIEEgYW5kIEIgZWFjaCBzdGF5IG9uIHRoZWlyIG93biBhY2NvdW50IHRocm91Z2ggY29tcGxldGlvbiB8CnwgYGFnZW50cyB2aWV3IGN1cnNvcmAgfCBFYWNoIGFjY291bnQncyBzaWduZWQtaW4gKyB1c2FnZSBtYXRjaGVzIHRoYXQgYWNjb3VudCdzIG93biBjcmVkZW50aWFsIGZpbGUgfAp8IFJvdGF0aW9uIHwgYGNvbGxlY3RSdW5DYW5kaWRhdGVzKCdjdXJzb3InKWAgcmV0dXJucyBvbmUgY2FuZGlkYXRlIHBlciBhY2NvdW50IGhvbWU7IGJhbGFuY2VkIHBpY2sgbGFuZHMgb24gdGhlIGludGVuZGVkIGxvZ2luIHwKfCBSZWdyZXNzaW9uIHwgU2luZ2xlLWFjY291bnQgdXNlcnMgc2VlIG5vIGJlaGF2aW9yIGNoYW5nZTsgdGhlIHBoYW50b20gc3RhbGUtc3ltbGluayByb3cgZGlzYXBwZWFycyB8CgojIyBSaXNrcwoKfCBSaXNrIHwgTWl0aWdhdGlvbiB8CnwgLS0tIHwgLS0tIHwKfCBgSE9NRWAgcGluIGRyYWdzIGluIHVucmVsYXRlZCBjdXJzb3Igc3RhdGUgKGNoYXRzLCBydWxlcywgaG9va3MpIHwgU2VlZCB0aGUgYWNjb3VudCBob21lIGJ5IHN5bWxpbmtpbmcgbm9uLWNyZWRlbnRpYWwgZGlycyBiYWNrIHRvIHRoZSBzaGFyZWQgY29uZmlnOyBzY29wZSB0aGUgc3Bpa2UgdG8gY29uZmlybSB0aGUgYmxhc3QgcmFkaXVzIHwKfCBDdXJzb3IgY2hhbmdlcyBpdHMgYXV0aCBmaWxlIGxheW91dCBhY3Jvc3Mgc2VsZi11cGRhdGVzIHwgQ2VudHJhbGl6ZSB0aGUgdHdvIHBhdGhzIGluIG9uZSByZXNvbHZlcjsgdGhlIGBDUkVERU5USUFMX0ZJTEVfU0VHTUVOVFNgIGVudHJ5IGlzIHRoZSBzaW5nbGUgc291cmNlIHwKfCBNaWdyYXRpb24gb2YgdG9kYXkncyBwaGFudG9tIHZlcnNpb24taG9tZSBhY2NvdW50cyB8IE9uZS10aW1lOiBmb2xkIGVhY2ggc2lnbmVkLWluIHZlcnNpb24taG9tZSBpbnRvIGFuIGFjY291bnQgaG9tZTsgZHJvcCBsb2dnZWQtb3V0IHBoYW50b21zIHwKfCBTcGVjIGRyaWZ0cyBmcm9tIGBhZ2VudHMgdmlld2AgZGlzcGxheSBwYXJpdHkgfCBDb3ZlciB3aXRoIHRoZSBjb21wbGV0ZW5lc3MgdGVzdCB0aGF0IHBpbnMgdGhlIGFjY291bnQgbW9kZWwgdG8gdmlldyArIHJvdGF0ZSB0b2dldGhlciB8CgojIyBOb24tZ29hbHMKCi0gQ3Vyc29yIENsb3VkIC8gUkVTVCBwcm92aWRlciBhY2NvdW50cyAoc2VwYXJhdGUgc3VyZmFjZSwgYWxyZWFkeSBzaGlwcGVkKS4KLSBDaGFuZ2luZyB0aGUgaXNvbGF0ZWQtYWdlbnQgbW9kZWwgZm9yIHRoZSBvdGhlciBzaW5nbGUtYmluYXJ5IGhhcm5lc3NlcyAoZHJvaWQsIGdyb2ssIGFudGlncmF2aXR5KSDigJQgdGhpcyBpcyBjdXJzb3Itc2NvcGVkLCB0aG91Z2ggdGhlIGVudi1waW4gYXBwcm9hY2ggaXMgdGhlIHRlbXBsYXRlIHRoZXkgd291bGQgZm9sbG93LgotIFRoZSBgcHJvZmlsZXNgIHJlc291cmNlIGtpbmQgKHByb3ZpZGVyIGJ1bmRsZXMpIOKAlCBvcnRob2dvbmFsOyBub3QgaG93IEN1cnNvciBsb2dpbiB3b3Jrcy4KCjxhc2lkZSBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+PHN0cm9uZz5Mb2FkLWJlYXJpbmcgdGFrZWF3YXk6PC9zdHJvbmc+IHRoZSBwaWNrIGlzIGRpc2NhcmRlZCBhdCBleGVjLCBub3QgYXQgZGlzcGxheS4gVGhlIGZpeCBpcyBhIHJlYWwgcGVyLWFjY291bnQgY3JlZGVudGlhbCBob21lIHBsdXMgcGVyLWNoaWxkIDxjb2RlPkhPTUU8L2NvZGU+Lzxjb2RlPlhER19DT05GSUdfSE9NRTwvY29kZT4gcGlubmluZyDigJQgbmV2ZXIgYSBnbG9iYWwgc3ltbGluayBzd2FwLCB3aGljaCBpcyB1bnNhZmUgdW5kZXIgdGhlIGNvbmN1cnJlbnQgcnVucyB0aGlzIGZlYXR1cmUgZXhpc3RzIHRvIGVuYWJsZS48L2FzaWRlPgoKIyMgVHJhY2tpbmcKCi0gKipSVVNILTI0MDAqKiDigJQgZmVhdChjdXJzb3IpOiBtYWtlIG11bHRpcGxlIEN1cnNvciBhY2NvdW50cyByZWFsIOKAlCA8aHR0cHM6Ly9saW5lYXIuYXBwL3J1c2gvaXNzdWUvUlVTSC0yNDAwPgotIFNwZWMgUFIg4oCUIGFkZGVkIG9uIG9wZW4gKHRoaXMgZG9jdW1lbnQsIGNvbW1pdHRlZCB1bmRlciBgLmFnZW50cy9yZXBvcnRzL2ApLgotIEltcGxlbWVudGF0aW9uIOKAlCBmb2xsb3ctdXAsIGdhdGVkIG9uIHRoZSBlbXBpcmljYWwgc3Bpa2UgYW5kIHlvdXIgYXBwcm92YWwgb2YgT3B0aW9uIEIuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

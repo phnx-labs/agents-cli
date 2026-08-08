@@ -284,6 +284,14 @@ remote_tag_commit() {
   printf '%s' "${peeled:-$direct}"
 }
 
+# Annotated v<version> tag whose message is the folded changelog already on that
+# commit. Delegates to create-annotated-release-tag.sh (extracted so the contract
+# is unit-testable without npm/gh). Optional third arg --force rewrites a local
+# tag (already-published recovery / lightweight-upgrade path).
+create_annotated_release_tag() {
+  scripts/create-annotated-release-tag.sh "$@"
+}
+
 # The internal --home-base-phase entrypoint short-circuits everything else.
 if $HOME_BASE_PHASE; then
   [[ -n "$TARGET" ]] || die "--home-base-phase needs a <version>"
@@ -894,7 +902,7 @@ if $PHNX_TARGET_PUBLISHED; then
     # a lease lost during the npm-view round trip lets two releasers both push a
     # tag for the same version.
     require_lease "pushing the missing tag v$TARGET"
-    git tag -f "v$TARGET" "$(git rev-parse "$TAG_TARGET^{commit}")" >/dev/null
+    create_annotated_release_tag "$TARGET" "$(git rev-parse "$TAG_TARGET^{commit}")" --force
     git push origin "v$TARGET" && green "Pushed missing tag v$TARGET"
   else
     # Already published + tagged: accept any tag that references version TARGET. A
@@ -1160,10 +1168,17 @@ REMOTE_TAG_SHA="$(remote_tag_commit "v$TARGET")"
 if git rev-parse --verify --quiet "refs/tags/v$TARGET" >/dev/null; then
   [[ "$(git rev-parse "refs/tags/v$TARGET^{commit}")" == "$PUBLISH_SHA" ]] \
     || die "local tag v$TARGET does not point at the verified release commit $PUBLISH_SHA"
-  gray "Tag v$TARGET already exists locally at the verified release commit"
+  # A leftover lightweight tag at the right commit would otherwise be pushed as-is
+  # and skip the annotated-notes contract. Upgrade it in place.
+  if [[ "$(git cat-file -t "refs/tags/v$TARGET")" != "tag" ]]; then
+    create_annotated_release_tag "$TARGET" "$PUBLISH_SHA" --force
+    green "Upgraded lightweight local tag v$TARGET to annotated at $(git rev-parse --short "$PUBLISH_SHA")"
+  else
+    gray "Tag v$TARGET already exists locally at the verified release commit"
+  fi
 else
-  git tag "v$TARGET" "$PUBLISH_SHA"
-  green "Created tag v$TARGET at $(git rev-parse --short "$PUBLISH_SHA")"
+  create_annotated_release_tag "$TARGET" "$PUBLISH_SHA"
+  green "Created annotated tag v$TARGET at $(git rev-parse --short "$PUBLISH_SHA")"
 fi
 
 # ----- Push the tag (git, on the trigger box) so the home base can resolve it -----

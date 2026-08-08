@@ -1457,6 +1457,12 @@ const CREDENTIAL_FILE_SEGMENTS: Partial<Record<AgentId, string[][]>> = {
   // Muse Code stores OAuth / API credentials at ~/.config/muse/auth.json
   // (or META_API_KEY in the environment, which is not a file).
   muse: [['.config', 'muse', 'auth.json']],
+  // Cursor's OAuth token — the login gate — is at $XDG_CONFIG_HOME/cursor/auth.json
+  // (~/.config/cursor/auth.json by default). cli-config.json holds only account
+  // metadata; the token file is what a real launch authenticates from, so a
+  // version home with no token of its own is genuinely logged out once runs pin
+  // XDG_CONFIG_HOME per home (see buildExecEnv).
+  cursor: [['.config', 'cursor', 'auth.json']],
 };
 
 /** Whether an agent's credential file exists under a given home. */

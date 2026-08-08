@@ -253,7 +253,7 @@ export function shortenModel(model: string): string {
 }
 
 /** Format a token count as a human-readable string (e.g. 67.5K, 1.2M). */
-function formatTokenCount(n: number): string {
+export function formatTokenCount(n: number): string {
   if (n === 0) return '0';
   if (n < 1000) return String(n);
   if (n < 1_000_000) {

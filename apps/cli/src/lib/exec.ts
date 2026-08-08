@@ -508,6 +508,28 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     delete result.CODEX_HOME;
     delete result.COPILOT_HOME;
     delete result.KIMI_CODE_HOME;
+  } else if (options.agent === 'cursor') {
+    // Cursor has no config-dir env var (only CURSOR_API_KEY / CURSOR_API_ENDPOINT).
+    // Its OAuth token — the login gate — lives at $XDG_CONFIG_HOME/cursor/auth.json
+    // (verified empirically: relocating XDG_CONFIG_HOME relocates the login;
+    // ~/.cursor/cli-config.json holds only account metadata, not the token). Pin
+    // XDG_CONFIG_HOME into the version home so each installed Cursor account
+    // authenticates from its own token, isolated per run — no global ~/.cursor
+    // symlink swap, so concurrent runs on different accounts never clobber one
+    // another. cli-config.json (HOME-relative) has no override and stays on the
+    // shared home; only the token is per-account, which is what gates the login.
+    const cwd = options.cwd || process.cwd();
+    const resolvedVersion = options.version ?? resolveVersion('cursor', cwd);
+    const version = options.version
+      ? resolvedVersion
+      : (resolvedVersion && isVersionInstalled('cursor', resolvedVersion) ? resolvedVersion : null);
+    if (version) {
+      result.XDG_CONFIG_HOME = path.join(getVersionHomePath('cursor', version), '.config');
+    }
+    delete result.CLAUDE_CONFIG_DIR;
+    delete result.CODEX_HOME;
+    delete result.COPILOT_HOME;
+    delete result.KIMI_CODE_HOME;
   } else {
     delete result.CLAUDE_CONFIG_DIR;
     delete result.CODEX_HOME;

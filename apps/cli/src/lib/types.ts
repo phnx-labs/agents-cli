@@ -653,6 +653,13 @@ export interface PluginManifest {
   description: string;
   version: string;
   agents?: AgentId[];
+  /**
+   * Who published the plugin, per the official plugin format. Every plugin.json
+   * in this repo already carries one; it was missing from this interface, so
+   * `loadPluginManifest`'s cast passed it through un-typed and no surface read it.
+   * Accepts the shorthand string form as well as the object form.
+   */
+  author?: string | { name: string; email?: string; url?: string };
   /** Interactive config fields prompted at install time. Values stored in .user-config.json. */
   userConfig?: PluginUserConfigField[];
   /** Other plugin names this plugin depends on. Missing deps produce a warning. */

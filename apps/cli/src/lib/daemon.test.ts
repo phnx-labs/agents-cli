@@ -728,6 +728,8 @@ describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () =>
       execFileSync('git', ['init', '-q', systemDir]);
 
       const pidFile = path.join(tmpHome, '.agents', '.cache', 'helpers', 'daemon', 'daemon.pid');
+      const stateDir = path.dirname(pidFile);
+      const lifetimeFile = path.join(stateDir, 'daemon.lifetime');
       const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
       const readPid = () => (fs.existsSync(pidFile) ? parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10) : null);
       const waitFor = async (cond: () => boolean, timeoutMs: number) => {
@@ -753,21 +755,22 @@ describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () =>
         pid = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHome, 'daemon.log'), env: childEnv }).pid!;
         expect(pid).toBeTruthy();
         expect(await waitFor(() => readPid() === pid, 20_000)).toBe(true);
+        expect(await waitFor(() => fs.existsSync(lifetimeFile), 20_000)).toBe(true);
         expect(alive(pid)).toBe(true);
 
-        // Delete the whole HOME while the daemon is still running — the
-        // real-world shape of a test's cleanup racing (and losing to) its own
-        // kill signal, or a killed test runner whose `finally` never ran.
-        // The live daemon can finish an already-started heartbeat while the
-        // recursive removal walks the tree. Let Node retry transient ENOTEMPTY
-        // races; the assertion below still requires the state tree to remain
-        // absent and the daemon to terminate within the fixed deadline.
-        fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+        // Removing the lifetime marker is the durable effect of deleting and
+        // recreating the state tree, without racing live heartbeat writes during
+        // recursive removal. Keep the canonical directory present so the old
+        // existsSync(dir) guard would stay alive; only the token guard can exit.
+        fs.unlinkSync(lifetimeFile);
+        expect(fs.existsSync(stateDir)).toBe(true);
+        expect(fs.existsSync(lifetimeFile)).toBe(false);
 
         // The guard polls every 300ms above; give it several cycles of margin.
         expect(await waitFor(() => !alive(pid!), 10_000)).toBe(true);
       } finally {
         if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+        if (pid) await waitFor(() => !alive(pid!), 5_000);
         try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* already gone */ }
       }
     },

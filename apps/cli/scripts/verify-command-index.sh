@@ -18,7 +18,7 @@ trap 'rm -rf "$TMP"' EXIT
 GEN_COMMAND_INDEX_OUT_DIR="$TMP" bun scripts/gen-command-index.ts >/dev/null
 
 rc=0
-for f in command-index.md command-index.json; do
+for f in command-index.md command-index.json command-reference.html; do
   if ! diff -q "docs/$f" "$TMP/$f" >/dev/null 2>&1; then
     printf '✗ docs/%s is stale — run `npm run gen:index` and commit the result\n' "$f" >&2
     # Show the first lines of the drift so the failure is diagnosable in CI logs.
@@ -28,6 +28,6 @@ for f in command-index.md command-index.json; do
 done
 
 if [[ $rc -eq 0 ]]; then
-  echo "✓ command index (docs/command-index.{md,json}) is up to date"
+  echo "✓ command reference (docs/command-index.{md,json} + command-reference.html) is up to date"
 fi
 exit $rc

@@ -160,6 +160,20 @@ export interface FilterResult {
 }
 
 /**
+ * Whether a listing scope must retain team-origin sessions.
+ *
+ * A routine owns every session produced during its run, including teammates and
+ * SDK-launched children. Requiring callers to add `--teams` would make a routine
+ * catalog incomplete and can make team-heavy routines appear to have no runs.
+ */
+export function shouldShowTeamSessions(filters: {
+  teams?: boolean;
+  routine?: boolean | string;
+}): boolean {
+  return !!filters.teams || !!filters.routine;
+}
+
+/**
  * Split `sessions` into visible and hidden (team-origin) groups.
  * When `showTeams` is true every session is visible and `teamOrigin` is
  * populated on team sessions for display. When false, team sessions are
