@@ -762,7 +762,16 @@ describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () =>
         // recursive removal walks the tree. Let Node retry transient ENOTEMPTY
         // races; the assertion below still requires the state tree to remain
         // absent and the daemon to terminate within the fixed deadline.
-        fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+        //
+        // The retry budget MUST exceed the guard's poll interval, or the race is
+        // unwinnable rather than transient: the daemon keeps recreating files
+        // until it notices the deletion, which takes up to one full poll. The
+        // original 5 x 50ms = 250ms was SHORTER than the 300ms poll above, so on
+        // a loaded runner rmSync exhausted its retries while the daemon was still
+        // writing and threw `ENOTEMPTY: rmdir '<home>/.agents/.cache'` — observed
+        // failing 2/2 on CI while passing locally in 583ms. 60 x 100ms = 6s is
+        // many poll cycles of margin and still far inside the 30s test timeout.
+        fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 60, retryDelay: 100 });
 
         // The guard polls every 300ms above; give it several cycles of margin.
         expect(await waitFor(() => !alive(pid!), 10_000)).toBe(true);
