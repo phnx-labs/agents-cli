@@ -284,6 +284,33 @@ remote_tag_commit() {
   printf '%s' "${peeled:-$direct}"
 }
 
+# Annotated v<version> tag whose message is the folded changelog already on that
+# commit (apps/cli/.changelog/<version>.md). Agents write fragments under
+# .changelog/next/; release-changelog.ts folds them before the release commit —
+# do not invent a second notes channel at tag time. Optional third arg --force
+# rewrites a local tag (already-published recovery path only).
+create_annotated_release_tag() {
+  local version="$1" commit="$2" force="${3:-}"
+  local notes_path="apps/cli/.changelog/${version}.md" msg notes_body
+  [[ -n "$version" && -n "$commit" ]] || die "create_annotated_release_tag needs <version> <commit>"
+  commit="$(git rev-parse "$commit^{commit}")"
+  if ! notes_body="$(git show "${commit}:${notes_path}" 2>/dev/null)"; then
+    die "refusing to tag v${version}: ${commit:0:9} has no ${notes_path}"
+  fi
+  [[ -n "$notes_body" ]] || die "refusing to tag v${version}: ${notes_path} is empty on ${commit:0:9}"
+  msg="$(mktemp)"
+  {
+    printf 'Release %s\n\n' "$version"
+    printf '%s\n' "$notes_body"
+  } > "$msg"
+  if [[ "$force" == "--force" ]]; then
+    git tag -a -f "v${version}" -F "$msg" "$commit"
+  else
+    git tag -a "v${version}" -F "$msg" "$commit"
+  fi
+  rm -f "$msg"
+}
+
 # The internal --home-base-phase entrypoint short-circuits everything else.
 if $HOME_BASE_PHASE; then
   [[ -n "$TARGET" ]] || die "--home-base-phase needs a <version>"
@@ -894,7 +921,7 @@ if $PHNX_TARGET_PUBLISHED; then
     # a lease lost during the npm-view round trip lets two releasers both push a
     # tag for the same version.
     require_lease "pushing the missing tag v$TARGET"
-    git tag -f "v$TARGET" "$(git rev-parse "$TAG_TARGET^{commit}")" >/dev/null
+    create_annotated_release_tag "$TARGET" "$(git rev-parse "$TAG_TARGET^{commit}")" --force
     git push origin "v$TARGET" && green "Pushed missing tag v$TARGET"
   else
     # Already published + tagged: accept any tag that references version TARGET. A
@@ -1162,8 +1189,8 @@ if git rev-parse --verify --quiet "refs/tags/v$TARGET" >/dev/null; then
     || die "local tag v$TARGET does not point at the verified release commit $PUBLISH_SHA"
   gray "Tag v$TARGET already exists locally at the verified release commit"
 else
-  git tag "v$TARGET" "$PUBLISH_SHA"
-  green "Created tag v$TARGET at $(git rev-parse --short "$PUBLISH_SHA")"
+  create_annotated_release_tag "$TARGET" "$PUBLISH_SHA"
+  green "Created annotated tag v$TARGET at $(git rev-parse --short "$PUBLISH_SHA")"
 fi
 
 # ----- Push the tag (git, on the trigger box) so the home base can resolve it -----
