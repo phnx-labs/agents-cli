@@ -2109,6 +2109,70 @@ function migrateHumans(): void {
  * the home already has its own token, and a no-op for unmanaged Cursor installs
  * (where ~/.cursor is a real dir, not a symlink into a version home).
  */
+/**
+ * Fold the pre-markdown Kimi subagent layout out of every kimi version home.
+ *
+ * agents-cli used to write each Kimi subagent as a `<name>.yaml` +
+ * `<name>.system.md` pair plus a managed `_agents-cli.yaml` index, against the
+ * agentspec of `kimi-cli` — a different product from the `kimi-code` harness we
+ * install, which never read any of it. Those files are inert, but not harmless:
+ * `<name>.system.md` ends in `.md`, so the subagent enumerator would surface it
+ * as a phantom subagent named `<name>.system`, and kimi-code logs
+ * `Missing frontmatter` for it once per session.
+ *
+ * This is the ONE place that knows about the old layout — the registry target
+ * describes only the current `<name>.md` shape. A pair is identified by its
+ * signature (a `<name>.yaml` with a sibling `<name>.system.md`), so a subagent a
+ * user legitimately named e.g. `foo.system` is never touched: it has no
+ * `foo.yaml` beside it. Idempotent; a no-op once the dirs are clean.
+ */
+export function migrateKimiSubagentsToMarkdown(versionsDir?: string): void {
+  const kimiVersions = path.join(versionsDir ?? path.join(HISTORY_DIR, 'versions'), 'kimi');
+  let versions: string[];
+  try {
+    versions = fs.readdirSync(kimiVersions);
+  } catch {
+    return; // no kimi installed
+  }
+
+  let removed = 0;
+  for (const version of versions) {
+    const dir = path.join(kimiVersions, version, 'home', '.kimi-code', 'agents');
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    const present = new Set(entries);
+    const doomed: string[] = [];
+    for (const entry of entries) {
+      if (entry === '_agents-cli.yaml') {
+        doomed.push(entry); // reserved managed index, only ever written by us
+        continue;
+      }
+      if (!entry.endsWith('.yaml')) continue;
+      const base = entry.slice(0, -'.yaml'.length);
+      // Only a genuine legacy pair — a bare .yaml with no sibling prompt is not
+      // ours to delete.
+      if (!present.has(`${base}.system.md`)) continue;
+      doomed.push(entry, `${base}.system.md`);
+    }
+    for (const entry of doomed) {
+      try {
+        fs.rmSync(path.join(dir, entry), { force: true });
+        removed++;
+      } catch {
+        // leave it; the next run retries
+      }
+    }
+  }
+
+  if (removed > 0) {
+    console.error(`Removed ${removed} pre-markdown Kimi subagent file(s); run 'agents sync kimi' to write the new format`);
+  }
+}
+
 export function seedActiveCursorLoginPerVersion(): void {
   const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
   const globalAuth = path.join(realHome, '.config', 'cursor', 'auth.json');
@@ -2150,6 +2214,8 @@ export async function runMigration(): Promise<void> {
   // Cursor runs now isolate the login per version home; preserve the current
   // login by seeding the active home's token from the legacy global copy.
   seedActiveCursorLoginPerVersion();
+  // Drop the pre-markdown Kimi subagent files; the registry now writes <name>.md.
+  migrateKimiSubagentsToMarkdown();
   migrateRunsIntoRoutines();
   migrateTrashToHidden();
   migrateBackupsToHidden();

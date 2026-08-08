@@ -12,8 +12,11 @@
   Source: `apps/cli/src/lib/subagents-registry.ts`, `apps/cli/src/lib/agents.ts`.
 
   Homes synced before this fix carry stale `<name>.yaml`, `<name>.system.md`, and
-  `_agents-cli.yaml` files in `~/.kimi-code/agents/`. The next `agents sync kimi` deletes them:
-  `agents prune cleanup` could never reach them (the two `.yaml` files match no enumerator), and
-  the leftover `<name>.system.md` would otherwise be listed as a phantom subagent named
-  `<name>.system` and warned about by kimi-code once per session, since it ends in `.md` and
-  carries no frontmatter.
+  `_agents-cli.yaml` files in `~/.kimi-code/agents/`. A one-shot migration
+  (`migrateKimiSubagentsToMarkdown`) removes them from every kimi version home on first run —
+  not `agents prune cleanup`, which could never reach the two `.yaml` files because they match
+  no subagent enumerator. Without it the leftover `<name>.system.md` would be listed as a
+  phantom subagent named `<name>.system` and warned about by kimi-code once per session, since
+  it ends in `.md` and carries no frontmatter. A legacy pair is matched by its signature (a
+  `<name>.yaml` with a sibling `<name>.system.md`), so a subagent you named `<x>.system`
+  yourself is left alone.

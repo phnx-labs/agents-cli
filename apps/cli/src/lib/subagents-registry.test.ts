@@ -156,43 +156,23 @@ describe('Kimi subagents are Claude-shaped agent markdown', () => {
   });
 
   /**
-   * A home synced before the format fix still holds `<name>.yaml`,
-   * `<name>.system.md`, and the managed `_agents-cli.yaml`. The legacy prompt
-   * file ends in `.md`, so a plain `.md` enumerator reports a phantom subagent
-   * named `<name>.system` -- and the two `.yaml` files are invisible to every
-   * enumerator, so `agents prune cleanup` can never reach them.
+   * The target must describe ONLY the current shape. Folding the pre-markdown
+   * layout is `migrateKimiSubagentsToMarkdown`'s job (lib/migrate.ts), so a
+   * write here must not reach for files it did not create -- doing so made the
+   * project-sync collision check veto its own write, and made an orphaned
+   * `<name>.system.md` unreachable by `agents prune cleanup`.
    */
-  it('clears the pre-markdown files on write and never lists <name>.system', () => {
+  it('writes only <name>.md and leaves unrelated files in the dir alone', () => {
     const home = mkTemp();
     const dir = path.join(home, '.kimi-code', 'agents');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'code-reviewer.yaml'), 'version: 1\nagent:\n  name: code-reviewer\n');
-    fs.writeFileSync(path.join(dir, 'code-reviewer.system.md'), 'legacy prompt body, no frontmatter');
-    fs.writeFileSync(path.join(dir, '_agents-cli.yaml'), 'version: 1\nagent:\n  name: agents-cli\n');
+    fs.writeFileSync(path.join(dir, 'handwritten.md'), '---\nname: handwritten\ndescription: mine\n---\n\nbody');
 
-    // A phantom would appear here without the `.system` filter.
     writeSubagentToHome('kimi', home, { name: 'code-reviewer', path: makeSubagentDir('code-reviewer') });
 
     expect(fs.existsSync(path.join(dir, 'code-reviewer.md'))).toBe(true);
-    expect(fs.existsSync(path.join(dir, 'code-reviewer.yaml'))).toBe(false);
-    expect(fs.existsSync(path.join(dir, 'code-reviewer.system.md'))).toBe(false);
-    expect(fs.existsSync(path.join(dir, '_agents-cli.yaml'))).toBe(false);
-    expect(listInstalledSubagentNames('kimi', home)).toEqual(['code-reviewer']);
-    expect(listInstalledSubagentsRich('kimi', home).map((s) => s.name)).toEqual(['code-reviewer']);
-  });
-
-  it('takes the legacy pair with the subagent when it is removed', () => {
-    const home = mkTemp();
-    writeSubagentToHome('kimi', home, { name: 'code-reviewer', path: makeSubagentDir('code-reviewer') });
-    const dir = path.join(home, '.kimi-code', 'agents');
-    // Re-create the legacy pair as if it were never swept (e.g. a home that
-    // upgraded but has not re-synced this subagent).
-    fs.writeFileSync(path.join(dir, 'code-reviewer.yaml'), 'version: 1\n');
-    fs.writeFileSync(path.join(dir, 'code-reviewer.system.md'), 'legacy prompt body');
-
-    const r = removeSubagentFromHome('kimi', home, 'code-reviewer');
-    expect(r.success).toBe(true);
-    expect(fs.readdirSync(dir)).toEqual([]);
+    expect(fs.existsSync(path.join(dir, 'handwritten.md'))).toBe(true);
+    expect(listInstalledSubagentNames('kimi', home).sort()).toEqual(['code-reviewer', 'handwritten']);
   });
 });
 

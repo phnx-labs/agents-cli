@@ -314,11 +314,7 @@ function syncProjectSubagents(
     }
     try {
       target.write(dir, sub);
-      // Record only what the write actually produced. `occupied` may name
-      // paths a target claims for removal but never creates (Kimi's legacy
-      // pre-markdown files), and the manifest must not list absent files.
-      const written = occupied.filter((entry) => pathExists(entry.path));
-      record('subagents', sub.name, written.map((entry) => path.relative(agentRoot, entry.path)), result, manifestPaths);
+      record('subagents', sub.name, occupied.map((entry) => path.relative(agentRoot, entry.path)), result, manifestPaths);
     } catch {
       // Malformed source or unsupported transform; skip this item.
     }
