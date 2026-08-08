@@ -2565,19 +2565,25 @@ a machine-wide process sweep.)
   socket, the daemon pid registration, the lifetime marker file, the heartbeat file,
   and the daemon's instance-registry entry. The shutdown postcondition MUST name any
   survivor and MUST NOT report success merely because the daemon process exited. The
-  graceful path already attempts all six releases in `handleShutdown`
-  (`lib/daemon.ts:996-1016`); Status: **[Intended]** for `stopDaemon` independently
-  verifying the full inventory (RUSH-2421, SING-GAP-5).
+  graceful path attempts all six releases in `handleShutdown`
+  (`lib/daemon.ts:1033-1054`); `stopDaemon` independently verifies the full
+  six-resource inventory: the daemon process, browser IPC socket, and secrets broker
+  socket (`lib/daemon.ts:1707-1813`), then the lifetime marker, heartbeat, and
+  instance-registry entry via `stopResidueArtifacts` (`lib/daemon.ts:1596-1640`,
+  invoked at `lib/daemon.ts:1825-1831`) — each reclaimed only from a provably-dead
+  owner and reported as `surviving` if reclaim fails (RUSH-2421, closes SING-GAP-5).
 - **SING-14 (MUST).** Supervised daemon restart MUST be bounded. A permanently failing
   daemon start MUST NOT cycle through unbounded rapid retries: the service manager MUST
   enforce a restart interval and burst limit, and `ensureDaemonStarted` MUST stop
   initiating starts after a bounded number of consecutive failures until the circuit
-  breaker resets. The current unbounded surfaces are launchd `KeepAlive`
-  (`lib/daemon.ts:1060-1090`), systemd `Restart=always` (`lib/daemon.ts:1106-1124`),
-  and the best-effort `ensureDaemonStarted` path (`lib/daemon.ts:1181-1202`). Status:
-  **[Intended]**: RUSH-2418 adds `ThrottleInterval`/`StartLimitBurst` service-manager
-  limits and a `consecutiveFailures` circuit breaker in `ensureDaemonStarted`
-  (SING-GAP-6).
+  breaker resets. launchd's plist sets `KeepAlive` with a `ThrottleInterval` of
+  `DAEMON_THROTTLE_SECONDS` (30s) (`lib/daemon.ts:1097-1130`, constant at
+  `lib/daemon.ts:72`); systemd's unit sets `Restart=always` bounded by
+  `StartLimitIntervalSec`/`StartLimitBurst` (`lib/daemon.ts:1145-1166`, constants at
+  `lib/daemon.ts:73-74`); and `ensureDaemonStarted` stops initiating starts once
+  `isDaemonAutostartCircuitOpen()` reads `consecutiveFailures >=
+  DAEMON_AUTOSTART_FAILURE_LIMIT` (5) (`lib/daemon.ts:1252-1262`, refusal at
+  `lib/daemon.ts:1293-1299`) (RUSH-2418, closes SING-GAP-6).
 
 ### 4. Given/When/Then scenarios
 
@@ -2676,23 +2682,34 @@ a machine-wide process sweep.)
   fingerprint. The live-daemon exclusion is re-asserted on that path
   (`lib/secrets/reaper.ts:170-172`), so auto-lock-on-sleep for a running daemon is
   untouched; `lib/secrets/reaper.test.ts:347-354` covers the predicate.
-- **SING-GAP-5 (RUSH-2421).** SING-12a's shutdown postcondition is `[Intended]`:
-  `stopDaemon` (`lib/daemon.ts:1496-1617`) today verifies only the browser IPC socket,
-  the secrets broker socket, and pid registration — not the lifetime marker, heartbeat
-  file, or instance-registry entry, which `handleShutdown`'s graceful path releases but
-  the escalated (`killTree`) path leaves stale with no postcondition check. RUSH-2421
-  extends the postcondition to the full six-resource inventory. The secrets-broker socket
-  teardown now awaits the real `net.Server` `'close'` event with a bounded 2s timeout
-  (`closeServerBounded`, `lib/secrets/agent.ts:928-941`, `:953-973`) instead of firing and
-  forgetting; the browser IPC teardown (`BrowserIPCServer.stop`, `lib/browser/ipc.ts:259-273`)
-  still calls `server.close()` fire-and-forget and remains to be converted.
-- **SING-GAP-6 (RUSH-2418).** SING-14's restart bound is `[Intended]`: `generateLaunchdPlist`
-  (`lib/daemon.ts:1060-1090`) sets `KeepAlive` with no `ThrottleInterval`, `generateSystemdUnit`
-  (`lib/daemon.ts:1106-1124`) sets `Restart=always` with no `StartLimitIntervalSec`/
-  `StartLimitBurst`, and `ensureDaemonStarted` (`lib/daemon.ts:1181-1202`) has no
-  circuit breaker reading the `consecutiveFailures` `daemon-health.ts` already tracks —
-  so a daemon that fails on every startup restarts in an unbounded ~10s cycle. RUSH-2418
-  adds the service-manager limits and wires the circuit breaker.
+- **SING-GAP-5 (resolved, RUSH-2421).** SING-12a's shutdown postcondition was
+  `[Intended]`: `stopDaemon` used to verify only the browser IPC socket, the secrets
+  broker socket, and pid registration — not the lifetime marker, heartbeat file, or
+  instance-registry entry, which `handleShutdown`'s graceful path releases
+  (`lib/daemon.ts:1033-1054`) but the escalated (`killTree`) path left stale with no
+  postcondition check. RUSH-2421 closed both halves: `stopDaemon` now verifies the
+  full six-resource inventory via `stopResidueArtifacts`
+  (`lib/daemon.ts:1596-1640`, invoked at `lib/daemon.ts:1825-1831`), reclaiming the
+  lifetime marker, heartbeat, and instance-registry entry from a provably-dead owner;
+  and both socket teardowns now await the real `net.Server` `'close'` event with a
+  bounded timeout instead of firing and forgetting — the secrets broker socket via
+  `closeServerBounded` (`lib/secrets/agent.ts:928-941`, `:953-973`) and the browser
+  IPC socket via `BrowserIPCServer.stop`'s own bounded await
+  (`lib/browser/ipc.ts:267-295`).
+- **SING-GAP-6 (resolved, RUSH-2418).** SING-14's restart bound was `[Intended]`:
+  `generateLaunchdPlist` used to set `KeepAlive` with no `ThrottleInterval`,
+  `generateSystemdUnit` used to set `Restart=always` with no
+  `StartLimitIntervalSec`/`StartLimitBurst`, and `ensureDaemonStarted` had no circuit
+  breaker reading the `consecutiveFailures` `daemon-health.ts` already tracked — so a
+  daemon that failed on every startup restarted in an unbounded ~10s cycle. RUSH-2418
+  landed the service-manager limits — launchd `ThrottleInterval` from
+  `DAEMON_THROTTLE_SECONDS` (`lib/daemon.ts:1117-1118`), systemd
+  `StartLimitIntervalSec`/`StartLimitBurst` from `DAEMON_START_LIMIT_INTERVAL_SECONDS`/
+  `DAEMON_START_LIMIT_BURST` (`lib/daemon.ts:1154-1155`), constants declared at
+  `lib/daemon.ts:72-74` — and wired the `isDaemonAutostartCircuitOpen()` circuit
+  breaker (`lib/daemon.ts:1252-1262`) into `ensureDaemonStarted`'s refusal path
+  (`lib/daemon.ts:1293-1299`), gated on `DAEMON_AUTOSTART_FAILURE_LIMIT`
+  (`lib/daemon.ts:82`).
 
 ---
 
