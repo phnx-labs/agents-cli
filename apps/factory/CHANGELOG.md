@@ -6,6 +6,25 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Picked-host Codex tabs auto-label after remote ID hydration (RUSH-2411).** A
+  `New Codex (Pick Host)` tab launches idless — only Claude's session id is minted
+  up front — so its canonical UUID arrived later through the shared
+  `agents sessions --active --host <device>` join, but the auto-label lifecycle was
+  never started and the tab kept the bare `CX` chip. The moment a tab gains its
+  canonical id (from the remote join or the local SessionStart watcher) it now arms
+  the same auto-label lifecycle, so a remote Codex goes bare `CX` -> canonical UUID
+  -> topic-derived title without a refocus. The id is resolved through the existing
+  coalesced per-host active map (no per-tab SSH poll), and every hydrated sibling
+  tab on that host enters labeling from the one fetch. Local Codex and Claude tabs
+  are unchanged.
+
+## [0.9.314] - 2026-08-07
+
+- **`Agents: Fork (Recap)` now recaps the active tab without asking for a session.**
+  The command starts a fresh sibling on the active session's host with the same
+  harness and balanced account selection, queues `/recap <full-id>`, and records
+  fork lineage. `Agents: Fork (Pick Session)` remains the explicit session browser.
+
 ## [0.9.313] - 2026-08-05
 
 - **Resume delegates session lifecycle to agents-cli.** The picker keeps its

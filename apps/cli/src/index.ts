@@ -14,6 +14,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { detectDevBuild } from './lib/startup/dev-build.js';
+import { configureRootCommand } from './lib/startup/root-command.js';
 // `ora`, `@inquirer/prompts`, `./commands/utils.js`, and the agents/versions/shims
 // modules are imported dynamically at their use sites: they are needed only on
 // interactive / update / shim-repair paths, never for fast commands like
@@ -93,6 +94,7 @@ import {
   refreshAliasShims,
   downloadVerifiedTarball,
 } from './lib/self-update.js';
+import { registerUpgradeCommand, type UpgradeOptions } from './commands/upgrade.js';
 
 interface NpmPackageMetadata {
   version: string;
@@ -259,15 +261,7 @@ if (process.argv[2] === '__daemon-tick') {
 // unset) resolves to 'agents' and everything below is byte-identical to before.
 const BRAND = resolveBrandName();
 
-const program = new Command();
-
-program
-  .name(BRAND)
-  .description('Environment manager for AI agents')
-  .version(VERSION)
-  .option('--verbose', 'Show startup self-heal details on stderr')
-  .helpOption('-h, --help', 'Show help')
-  .addHelpCommand(false);
+const program = configureRootCommand(new Command(), BRAND, VERSION);
 
 // ─── Audit backbone ────────────────────────────────────────────────────────────
 // One choke point logs every `agents <module> <cmd>` invocation to the structured
@@ -968,13 +962,8 @@ function registerInternalCommand(p: Command): void {
     });
 }
 
-/** Self-upgrade command (`agents upgrade [version]`). */
-function registerUpgradeCommand(p: Command): void {
-  p.command('upgrade')
-    .description('Upgrade agents-cli to the latest version (or a specific [version])')
-    .argument('[version]', 'Target version or dist-tag to install (default: latest)')
-    .option('-y, --yes', 'Install without an interactive confirmation prompt')
-    .action(async (version: string | undefined, options: { yes?: boolean }) => {
+/** Runtime action for the shared `agents upgrade [version]` command definition. */
+async function runUpgrade(version: string | undefined, options: UpgradeOptions): Promise<void> {
       const { default: ora } = await import('ora');
       const { confirm } = await import('@inquirer/prompts');
       const { isInteractiveTerminal, isPromptCancelled } = await import('./commands/utils.js');
@@ -1022,7 +1011,10 @@ function registerUpgradeCommand(p: Command): void {
         spinner.fail(`Upgrade failed: ${err instanceof Error ? err.message : String(err)}`);
         console.log(chalk.gray(`Run manually: agents upgrade ${version ? version + ' ' : ''}--yes`));
       }
-    });
+}
+
+function registerUpgradeRuntimeCommand(p: Command): void {
+  registerUpgradeCommand(p, runUpgrade);
 }
 
 // --- Lazy registration orchestration -----------------------------------------
@@ -1073,7 +1065,7 @@ async function registerEagerForRequest(name: string): Promise<boolean> {
       registerInternalCommand(program);
       return true;
     case 'upgrade':
-      registerUpgradeCommand(program);
+      registerUpgradeRuntimeCommand(program);
       return true;
   }
 
@@ -1176,7 +1168,7 @@ async function registerAllEagerCommands(): Promise<void> {
   registerJobsCronAliasCommand(program, 'jobs');
   registerJobsCronAliasCommand(program, 'cron');
   registerInternalCommand(program);
-  registerUpgradeCommand(program);
+  registerUpgradeRuntimeCommand(program);
   await reg(loadPull);
   await reg(loadPush);
   await reg(loadRepo);

@@ -7,6 +7,7 @@ import {
   classifyTeamSession,
   enrichTeamOrigins,
   filterTeamSessions,
+  shouldShowTeamSessions,
   groupSessionsByTeam,
   teamRowKind,
   NO_TEAM_GROUP_KEY,
@@ -24,6 +25,15 @@ function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
     ...overrides,
   };
 }
+
+describe('shouldShowTeamSessions', () => {
+  it('retains team-origin rows for explicit team and routine scopes', () => {
+    expect(shouldShowTeamSessions({})).toBe(false);
+    expect(shouldShowTeamSessions({ teams: true })).toBe(true);
+    expect(shouldShowTeamSessions({ routine: true })).toBe(true);
+    expect(shouldShowTeamSessions({ routine: 'nightly-review' })).toBe(true);
+  });
+});
 
 describe('classifyTeamSession', () => {
   let tmpDir: string;

@@ -411,7 +411,9 @@ describe('doctor generated hook runtime integration (RUSH-2382)', () => {
     expect(payload.hookRuntimeRepair.attempts).toHaveLength(1);
     expect(payload.hookRuntimeRepair.attempts[0]).toMatchObject({ attempted: true, repaired: false });
     expect(payload.hookRuntimeRepair.needsAttention).toHaveLength(1);
-    expect(payload.hookRuntimeRepair.needsAttention[0]).toContain('repair failed [EISDIR]');
+    // Repairing a shim that is a directory fails with a platform errno: EISDIR
+    // on POSIX, EPERM ("not a regular file") on Windows. Accept either.
+    expect(payload.hookRuntimeRepair.needsAttention[0]).toMatch(/repair failed \[(EISDIR|EPERM)\]/);
     expect(fs.existsSync(cachePath)).toBe(false);
   });
 
@@ -436,7 +438,9 @@ describe('doctor generated hook runtime integration (RUSH-2382)', () => {
     expect(payload.hookRuntimeRepair.attempts).toHaveLength(1);
     expect(payload.hookRuntimeRepair.attempts[0]).toMatchObject({ attempted: true, repaired: false });
     expect(payload.hookRuntimeRepair.needsAttention).toHaveLength(1);
-    expect(payload.hookRuntimeRepair.needsAttention[0]).toContain('repair failed [EISDIR]');
+    // Repairing a shim that is a directory fails with a platform errno: EISDIR
+    // on POSIX, EPERM ("not a regular file") on Windows. Accept either.
+    expect(payload.hookRuntimeRepair.needsAttention[0]).toMatch(/repair failed \[(EISDIR|EPERM)\]/);
     expect(payload.hookRuntimeRepair.needsAttention[0]).not.toContain('.tmp.');
     expect(fs.existsSync(cachePath)).toBe(false);
   });

@@ -21,7 +21,7 @@ import { gatherRemoteList } from '../lib/session/remote-list.js';
 import { resolveVersionAliasLoose } from '../lib/versions.js';
 import { AGENTS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
-import { enrichTeamOrigins, safeTeamText } from '../lib/session/team-filter.js';
+import { enrichTeamOrigins, safeTeamText, shouldShowTeamSessions } from '../lib/session/team-filter.js';
 import { listBookmarks, toggleBookmark } from '../lib/session/bookmarks.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { buildPreview } from './sessions-picker.js';
@@ -360,7 +360,7 @@ async function fetchRawPool(
         origin: f.routine ? 'routine' : undefined,
         skill: f.skill,
         plugin: f.plugin,
-        excludeTeamOrigin: !f.teams,
+        excludeTeamOrigin: !shouldShowTeamSessions(f),
         // A team filter reaches back past the usual browse window, so the pool it
         // draws from has to as well — otherwise the newest 500 rows decide which
         // teams exist.

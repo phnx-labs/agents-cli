@@ -1796,10 +1796,10 @@ schema (`--json` passes through each agent's native stream format).
   (`lib/shims.ts:280-330`), a separate code path from `buildExecEnv`, and even
   there no literal `HOME=` assignment exists (verified: no `HOME="` writer in
   `lib/shims.ts` — only `AGENTS_USER_DIR`/`GROK_DOWNLOADS` etc. *read* `$HOME`).
-- **EXEC-16.** The other 12 registered agents
-  (gemini, cursor, opencode, openclaw, amp, kiro, goose, antigravity, grok,
-  droid, hermes, pi — the 16 in `AgentId`, `lib/types.ts:13`, minus the four
-  EXEC-14 isolates) get **no** per-version config-dir var from
+- **EXEC-16.** The remaining registered agents
+  (gemini, opencode, openclaw, amp, kiro, goose, antigravity, grok,
+  droid, hermes, pi — the 16 in `AgentId`, `lib/types.ts:13`, minus the
+  EXEC-14 isolates and the XDG-isolated agents below) get **no** per-version config-dir var from
   `buildExecEnv` itself — its per-agent branch has no arm for them
   (`buildExecEnv`'s per-agent branch, `lib/exec.ts:402-490`; the `else` at `:485-489` only deletes the four known vars).
   A separate mechanism — the generated default-name bash shim
@@ -1818,6 +1818,24 @@ schema (`--json` passes through each agent's native stream format).
 
   Status: `[Drift]` — a named deviation from EXEC-13's per-version isolation
   contract, scoped (with the two ways to close it) in EXEC-GAP-1.
+- **EXEC-16a (MUST).** Muse and Cursor have no dedicated config-dir env var, so
+  `buildExecEnv` isolates them via XDG instead: it pins `XDG_CONFIG_HOME`
+  (and `XDG_DATA_HOME` for muse) at the version home (`lib/exec.ts`, the muse
+  and cursor arms). For Cursor this is what makes multiple accounts real: the
+  OAuth token that gates login lives at `$XDG_CONFIG_HOME/cursor/auth.json`
+  (verified empirically — relocating `XDG_CONFIG_HOME` relocates the login;
+  `~/.cursor/cli-config.json` is only account metadata), so each version home is
+  a distinct Cursor account, authenticated from its own token, isolated per run
+  (no global `~/.cursor` symlink swap — concurrent runs on different accounts do
+  not clobber one another). `CREDENTIAL_FILE_SEGMENTS.cursor`
+  (`lib/agents.ts`) verifies signed-in per home against that token, and
+  `seedActiveCursorLoginPerVersion` (`lib/migrate.ts`) migrates the legacy
+  global token into the active account's home on upgrade. The versioned-alias
+  shim mirrors the same `XDG_CONFIG_HOME` export (`CONFIG_ENV_ISOLATED_AGENTS`
+  includes cursor). Cursor's HOME-relative `~/.cursor` (cli-config.json,
+  chats) has no env override and stays on the shared home; the routine overlay
+  path (`buildRoutineSpawnEnv`) is unchanged and still seeds from the active
+  login by design.
 - **EXEC-17 (MUST).** The Windows `.cmd` shim delegate
   (`execShimPassthrough`) MUST route its env through the same `buildExecEnv`
   `agents run` uses (`lib/exec.ts:1059`) — so on Windows the isolated-agent
@@ -2818,13 +2836,20 @@ not the watchdog's.
 - **WD-16 (MUST).** When no addressable split exists, the tick MUST fall back (mailbox or
   headless `--resume`) or refuse-and-flag — it MUST NOT silently claim delivery.
 - **WD-17 (MUST).** Every decision MUST be appended to `watchdog.log` in the Factory event
-  shape (`lib/watchdog/log.ts`).
+  shape, with persisted transcript context bounded so it cannot consume the audit window
+  (`lib/watchdog/log.ts`).
 
 #### 2.5 Per-session policy
 
 - **WD-18 (MUST).** `agents watchdog policy <id> off|keep|handsoff` MUST be honored:
   `off` excludes the session; `handsoff` detects+flags but never delivers; `keep` is the
   default path (`readPolicySentinel`/`writePolicySentinel`, `lib/watchdog/runner.ts`).
+
+#### 2.6 Audit history
+
+- **WD-19 (MUST).** `agents watchdog history [sessionId]` MUST expose the persisted audit
+  trail newest-first, including non-action session inspections, MUST support machine-readable output, and MUST NOT return raw
+  transcript `tailLines` or message excerpts (`lib/watchdog/history.ts`, `commands/watchdog.ts`).
 
 ### 3. Given/When/Then scenarios
 
@@ -2852,6 +2877,13 @@ Given a running session whose transcript lives under an earlier version home whi
 `~/.claude` points at a newer version; When the tick classifies it; Then the transcript is
 found via `getAgentSessionDirs` and the session is evaluated, not skipped as "no activity
 timestamp" (WD-8).
+
+**GWT-W6 — Audit history is useful without disclosing transcript content.**
+Given persisted decisions and heartbeat ticks; When an operator runs
+`agents watchdog history <sessionId> --json`; Then matching decisions are returned newest
+first alongside compact inspection results, without raw transcript tails or message excerpts,
+and heartbeat rows appear only with `--all`
+(WD-19).
 
 ### 4. Known gaps
 

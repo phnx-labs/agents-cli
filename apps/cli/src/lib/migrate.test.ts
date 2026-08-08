@@ -5,7 +5,7 @@ import { spawnSync, spawn } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'url';
 
-import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToRoutine, repairSelfReferentialBinShims } from './migrate.js';
+import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToRoutine, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
 import { toPosix } from './platform/index.js';
 import * as yaml from 'yaml';
 
@@ -791,5 +791,61 @@ describe('migrateCliDirToClis', () => {
     expect(fs.existsSync(path.join(dir1, 'clis'))).toBe(true);
     expect(fs.existsSync(path.join(dir1, 'cli'))).toBe(false);
     expect(fs.existsSync(path.join(dir2, 'clis'))).toBe(false);
+  });
+});
+
+describe('seedActiveCursorLoginPerVersion', () => {
+  const cleanup: string[] = [];
+  afterEach(() => {
+    for (const d of cleanup) fs.rmSync(d, { recursive: true, force: true });
+    cleanup.length = 0;
+    delete process.env.AGENTS_REAL_HOME;
+  });
+
+  function fakeHome(): string {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-cursor-seed-'));
+    cleanup.push(home);
+    return home;
+  }
+
+  it('copies the global Cursor token into the active version home, and is idempotent', () => {
+    const home = fakeHome();
+    // Legacy global token, shared across homes.
+    fs.mkdirSync(path.join(home, '.config', 'cursor'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.config', 'cursor', 'auth.json'), JSON.stringify({ accessToken: 'global-tok' }));
+    // Active account's version home + the ~/.cursor symlink that points at it.
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'cursor', '2026.08.04', 'home');
+    fs.mkdirSync(path.join(versionHome, '.cursor'), { recursive: true });
+    fs.symlinkSync(path.join(versionHome, '.cursor'), path.join(home, '.cursor'));
+    process.env.AGENTS_REAL_HOME = home;
+
+    seedActiveCursorLoginPerVersion();
+    const seeded = path.join(versionHome, '.config', 'cursor', 'auth.json');
+    expect(fs.existsSync(seeded)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(seeded, 'utf-8')).accessToken).toBe('global-tok');
+
+    // Idempotent: a home that already has its own token is never overwritten.
+    fs.writeFileSync(seeded, JSON.stringify({ accessToken: 'own-tok' }));
+    seedActiveCursorLoginPerVersion();
+    expect(JSON.parse(fs.readFileSync(seeded, 'utf-8')).accessToken).toBe('own-tok');
+  });
+
+  it('is a no-op when ~/.cursor is a real dir (unmanaged install), not a symlink', () => {
+    const home = fakeHome();
+    fs.mkdirSync(path.join(home, '.config', 'cursor'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.config', 'cursor', 'auth.json'), JSON.stringify({ accessToken: 'tok' }));
+    fs.mkdirSync(path.join(home, '.cursor'), { recursive: true }); // real dir, not a symlink
+    process.env.AGENTS_REAL_HOME = home;
+    expect(() => seedActiveCursorLoginPerVersion()).not.toThrow();
+  });
+
+  it('is a no-op when there is no global token to seed', () => {
+    const home = fakeHome();
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'cursor', '2026.08.04', 'home');
+    fs.mkdirSync(path.join(versionHome, '.cursor'), { recursive: true });
+    fs.symlinkSync(path.join(versionHome, '.cursor'), path.join(home, '.cursor'));
+    process.env.AGENTS_REAL_HOME = home;
+    seedActiveCursorLoginPerVersion();
+    expect(fs.existsSync(path.join(versionHome, '.config', 'cursor', 'auth.json'))).toBe(false);
   });
 });

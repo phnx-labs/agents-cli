@@ -21,6 +21,10 @@ const CONFIG_ENV_BY_AGENT: Record<(typeof CONFIG_ENV_ISOLATED_AGENTS)[number], s
   // Muse has no dedicated config env; isolation is XDG (proved: empty
   // XDG_CONFIG_HOME works; adopt symlink at ~/.config/muse fails SymlinkOrReparse).
   muse: 'XDG_CONFIG_HOME',
+  // Cursor has no dedicated config env either; its OAuth token (the login gate)
+  // is at $XDG_CONFIG_HOME/cursor/auth.json, so pinning XDG_CONFIG_HOME per
+  // version home isolates each account's login (proved empirically).
+  cursor: 'XDG_CONFIG_HOME',
 };
 const ALL_CONFIG_ENVS = Object.values(CONFIG_ENV_BY_AGENT);
 

@@ -32,6 +32,7 @@ import { reapTerminalRoutineProcesses } from './routine-process-cleanup.js';
 import { recordSubsystemOk, recordSubsystemError, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC } from './daemon-health.js';
 
 const PID_FILE = 'daemon.pid';
+const LIFETIME_FILE = 'daemon.lifetime';
 const LOCK_FILE = 'daemon.lock';
 const LOG_FILE = 'logs.jsonl';
 const HEARTBEAT_FILE = 'heartbeat.json';
@@ -545,6 +546,12 @@ export async function runDaemon(): Promise<void> {
     // rather than a failure to restart-flap on.
     process.exit(0);
   }
+  // Unlike the pid and heartbeat files, this marker is written exactly once
+  // for this daemon lifetime. Status probes deliberately repair those other
+  // files, so they cannot prove that the original state tree still exists.
+  const lifetimePath = path.join(getDaemonDirRoot(), LIFETIME_FILE);
+  const lifetimeToken = `${process.pid}:${Date.now()}`;
+  fs.writeFileSync(lifetimePath, lifetimeToken, 'utf-8');
   log('INFO', `Daemon started (PID: ${process.pid})`);
 
   anchorDaemonCwd();
@@ -923,15 +930,22 @@ export async function runDaemon(): Promise<void> {
   // daemon in that state: no `agents daemon` command targets it, since a
   // different HOME resolves a different getDaemonDir() and therefore a
   // different instance registry — without this it runs forever. Reads
-  // getDaemonDirRoot() directly, never the local getDaemonDir() wrapper,
-  // which recreates the directory as a side effect and would defeat the very
-  // check it exists to perform.
+  // Reads the lifetime marker directly, never the local getDaemonDir() wrapper,
+  // which recreates the directory as a side effect and would defeat the check.
+  // Heartbeat/status paths may recreate the directory and pid file after a
+  // deletion; they never recreate this per-lifetime token.
   let checkingStateDir = false;
   const runStateDirSelfCheck = (): void => {
     if (checkingStateDir) return;
     checkingStateDir = true;
     try {
-      if (!fs.existsSync(getDaemonDirRoot())) {
+      let markerMatches = false;
+      try {
+        markerMatches = fs.readFileSync(lifetimePath, 'utf-8') === lifetimeToken;
+      } catch {
+        // A missing state tree or marker is the condition this guard detects.
+      }
+      if (!markerMatches) {
         log('WARN', `Daemon state dir ${getDaemonDirRoot()} no longer exists; exiting (self-terminate guard)`);
         void handleShutdown();
       }
@@ -990,6 +1004,11 @@ export async function runDaemon(): Promise<void> {
     clearInterval(brokerSelfHealInterval);
     clearInterval(keychainReapInterval);
     clearInterval(stateDirCheckInterval);
+    try {
+      if (fs.readFileSync(lifetimePath, 'utf-8') === lifetimeToken) fs.unlinkSync(lifetimePath);
+    } catch {
+      // Already removed with the state tree, or replaced by a newer owner.
+    }
     hostedBroker?.close();
     removeDaemonPid();
     removeHeartbeat();

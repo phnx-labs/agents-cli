@@ -23,9 +23,9 @@ async function chooseAccount() { const accounts = await discoverAccounts(); if (
 
 export function registerAccountsCommand(program: Command): void {
   const accounts = program.command('accounts').description('Browse and name signed-in harness accounts').option('--json', 'Machine-readable discovered accounts').action(async (o: {json?: boolean}) => printAccounts(!!o.json));
-  accounts.command('list').description('Alias for accounts').option('--json').action((o: {json?: boolean}) => printAccounts(!!o.json));
+  accounts.command('list').description('Alias for accounts').option('--json', 'Machine-readable discovered accounts').action((o: {json?: boolean}) => printAccounts(!!o.json));
   accounts.command('name <label>').description('Name one signed-in account; matching installed versions are found automatically').option('--from <agent@version>', 'Non-interactive identity source').action(async (label: string, o: {from?: string}) => { const picked = o.from ? await fingerprintFromSource(o.from) : await chooseAccount(); nameAccount(label, picked.agent, picked.fingerprint); console.log(chalk.green(`Named the ${picked.agent} account '${label}'.`)); console.log(chalk.gray(`Found it in ${picked.versions.length} installed version${picked.versions.length === 1 ? '' : 's'}: ${picked.versions.join(', ')}`)); });
-  accounts.command('rename <old> <new>').action((oldLabel: string, newLabel: string) => renameAccountLabel(oldLabel, newLabel));
-  accounts.command('remove <label>').action((label: string) => removeAccountLabel(label));
+  accounts.command('rename <old> <new>').description('Rename a saved account label').action((oldLabel: string, newLabel: string) => renameAccountLabel(oldLabel, newLabel));
+  accounts.command('remove <label>').description('Remove a saved account label').action((label: string) => removeAccountLabel(label));
   setHelpSections(accounts, { examples: `agents accounts\nagents accounts name work\nagents accounts name work --from claude@2.1.220\nagents run claude --account work`, notes: 'First run the harness and complete its normal login. A label names one provider account; every matching installed version is discovered automatically. OAuth credentials are never copied or shared.' });
 }

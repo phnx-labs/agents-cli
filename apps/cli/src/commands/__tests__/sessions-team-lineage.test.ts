@@ -8,8 +8,8 @@
  * or falls back to the legacy per-host SSH stream.
  */
 
-import { describe, it, expect, vi } from 'vitest';
-import { applyScopeFilters, artifactLookupScope, buildRoutineChoices, buildRoutineRunGroups, filterSessionsByRoutine, formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, printRoutineRunOverview, resolveRoutineName, teamBadge } from '../sessions.js';
+import { describe, it, expect } from 'vitest';
+import { applyScopeFilters, artifactLookupScope, buildRoutineChoices, buildRoutineRunGroups, filterSessionsByRoutine, formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, resolveRoutineName, teamBadge } from '../sessions.js';
 import { resolveSessionById } from '../../lib/session/discover.js';
 import { formatTeamLineage } from '../sessions-picker.js';
 import type { SessionMeta } from '../../lib/session/types.js';
@@ -53,9 +53,9 @@ describe('hasNoBrowserDisqualifyingFlags — which views the browser can represe
     }
   });
 
-  it('routes routine previews and a named team view through the shared browser', () => {
-    expect(hasNoBrowserDisqualifyingFlags({ routine: true }, undefined)).toBe(true);
-    expect(hasNoBrowserDisqualifyingFlags({ routine: 'nightly-review' }, undefined)).toBe(true);
+  it('keeps routine views grouped while routing a named team view through the shared browser', () => {
+    expect(hasNoBrowserDisqualifyingFlags({ routine: true }, undefined)).toBe(false);
+    expect(hasNoBrowserDisqualifyingFlags({ routine: 'nightly-review' }, undefined)).toBe(false);
     expect(hasNoBrowserDisqualifyingFlags({ teams: true, inTeam: 'redesign' }, undefined)).toBe(true);
   });
 
@@ -139,18 +139,6 @@ describe('routine picker and run grouping', () => {
     ]);
   });
 
-  it('keeps the hidden team and unmanaged-session disclosures', () => {
-    const lines: string[] = [];
-    const log = vi.spyOn(console, 'log').mockImplementation((line = '') => lines.push(String(line)));
-    try {
-      printRoutineRunOverview(sessions.slice(0, 3), undefined, { hiddenCount: 2, hiddenUnmanaged: 1 });
-    } finally {
-      log.mockRestore();
-    }
-    const output = lines.join('\n');
-    expect(output).toContain('2 team sessions hidden');
-    expect(output).toContain('1 session from your own unmanaged installs hidden');
-  });
 });
 
 describe('matchesTeam — --in-team spans both ends of the lineage', () => {
