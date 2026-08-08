@@ -26,7 +26,7 @@ export function registerCommandGroups(parent: Command, groups: readonly CommandG
 }
 
 /** Examples + Notes blocks attached to a command via setHelpSections. */
-interface HelpSections {
+export interface HelpSections {
   examples?: string;
   notes?: string;
 }
@@ -43,6 +43,11 @@ const helpSectionRegistry = new WeakMap<Command, HelpSections>();
  */
 export function setHelpSections(cmd: Command, sections: HelpSections): void {
   helpSectionRegistry.set(cmd, sections);
+}
+
+/** Read the workflow-first sections attached to a command for generated references. */
+export function getHelpSections(cmd: Command): Readonly<HelpSections> {
+  return helpSectionRegistry.get(cmd) ?? {};
 }
 
 /** Strip a uniform leading indent from a block and trim surrounding blank lines. */

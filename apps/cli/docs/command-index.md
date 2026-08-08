@@ -22,8 +22,8 @@ _99 command groups · 569 commands._
 agents accounts                     Browse and name signed-in harness accounts
 agents accounts list                Alias for accounts
 agents accounts name <label>        Name one signed-in account; matching installed versions are found automatically
-agents accounts remove <label>
-agents accounts rename <old> <new>
+agents accounts remove <label>      Remove a saved account label
+agents accounts rename <old> <new>  Rename a saved account label
 ```
 
 ## add — Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
