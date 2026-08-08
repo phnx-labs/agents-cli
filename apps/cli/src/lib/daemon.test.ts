@@ -1100,6 +1100,104 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
     },
     60_000,
   );
+
+  // RUSH-2421: the postcondition covered the two sockets and the process, but
+  // not the three state files a graceful handleShutdown removes — the lifetime
+  // marker, the heartbeat, and this pid's instance-registry entry. On the
+  // ESCALATED path handleShutdown never runs, so all three outlived the daemon
+  // while the stop still reported `ok: true`. They are not cosmetic: a leftover
+  // heartbeat is what resolveLiveDaemonPid consults to re-adopt a daemon whose
+  // pid file is gone, so a dead daemon can read as running.
+  it.skipIf(process.platform === 'win32')(
+    'killTree path: reclaims the lifetime marker, heartbeat and registry entry the dead daemon left',
+    async () => {
+      const home = mkHome();
+      const wedge = spawn(
+        process.execPath,
+        ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);", '__daemon-run'],
+        { detached: true, stdio: 'ignore' },
+      );
+      wedge.unref();
+      try {
+        expect(wedge.pid).toBeTruthy();
+        const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+        fs.mkdirSync(path.join(daemonDir, 'instances'), { recursive: true });
+        fs.writeFileSync(daemonPidFile(home), String(wedge.pid));
+        fs.writeFileSync(path.join(daemonDir, 'instances', String(wedge.pid)), 'node -e ... __daemon-run');
+        // Exactly what a live daemon writes: `<pid>:<epochMs>` and a fresh
+        // heartbeat naming the same pid.
+        const lifetimePath = path.join(daemonDir, 'daemon.lifetime');
+        const heartbeatPath = path.join(daemonDir, 'heartbeat.json');
+        fs.writeFileSync(lifetimePath, `${wedge.pid}:${Date.now()}`);
+        fs.writeFileSync(heartbeatPath, JSON.stringify({ lastTick: new Date().toISOString(), pid: wedge.pid }));
+
+        const { result } = runStop(home);
+
+        expect(result.escalated).toBe(true);   // SIGTERM ignored → killTree, no handleShutdown
+        expect(result.ok).toBe(true);
+        expect(result.surviving).toEqual([]);
+        // Every one of the three is reported AND actually gone from disk.
+        expect(result.released).toContain('daemon lifetime marker (reclaimed)');
+        expect(result.released).toContain('daemon heartbeat (reclaimed)');
+        expect(result.released).toContain('daemon instance registry entry (reclaimed)');
+        expect(fs.existsSync(lifetimePath)).toBe(false);
+        expect(fs.existsSync(heartbeatPath)).toBe(false);
+        expect(fs.existsSync(path.join(daemonDir, 'instances', String(wedge.pid)))).toBe(false);
+      } finally {
+        try { if (wedge.pid) process.kill(wedge.pid, 'SIGKILL'); } catch { /* gone */ }
+        if (wedge.pid) await waitFor(() => !alive(wedge.pid!), 5_000);
+        await rmHome(home);
+      }
+    },
+    60_000,
+  );
+
+  // The other half of the same rule: reclaim only what a provably DEAD owner
+  // left. A successor daemon that started during the stop owns a lifetime marker
+  // and heartbeat naming ITS live pid, and deleting those would break it — the
+  // same reasoning the broker-socket branch uses for a standalone owner.
+  it.skipIf(process.platform === 'win32')(
+    'never reclaims a lifetime marker or heartbeat owned by a LIVE daemon',
+    async () => {
+      const home = mkHome();
+      // The daemon being stopped: a wedge that ignores SIGTERM.
+      const wedge = spawn(
+        process.execPath,
+        ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);", '__daemon-run'],
+        { detached: true, stdio: 'ignore' },
+      );
+      wedge.unref();
+      // A different, genuinely live process standing in for a successor. It is
+      // NOT a __daemon-run, so it is not a "surviving daemon" — only the owner
+      // recorded in the two state files.
+      const successor = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { detached: true, stdio: 'ignore' });
+      successor.unref();
+      try {
+        const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+        fs.mkdirSync(path.join(daemonDir, 'instances'), { recursive: true });
+        fs.writeFileSync(daemonPidFile(home), String(wedge.pid));
+        const lifetimePath = path.join(daemonDir, 'daemon.lifetime');
+        const heartbeatPath = path.join(daemonDir, 'heartbeat.json');
+        fs.writeFileSync(lifetimePath, `${successor.pid}:${Date.now()}`);
+        fs.writeFileSync(heartbeatPath, JSON.stringify({ lastTick: new Date().toISOString(), pid: successor.pid }));
+
+        const { result } = runStop(home);
+
+        expect(result.released).toContain('daemon lifetime marker (owned by a live daemon)');
+        expect(result.released).toContain('daemon heartbeat (owned by a live daemon)');
+        // The live owner's state is untouched — reclaiming it would be the bug.
+        expect(fs.existsSync(lifetimePath)).toBe(true);
+        expect(fs.existsSync(heartbeatPath)).toBe(true);
+      } finally {
+        for (const p of [wedge.pid, successor.pid]) {
+          try { if (p) process.kill(p, 'SIGKILL'); } catch { /* gone */ }
+        }
+        for (const p of [wedge.pid, successor.pid]) { if (p) await waitFor(() => !alive(p), 5_000); }
+        await rmHome(home);
+      }
+    },
+    60_000,
+  );
 });
 
 /**

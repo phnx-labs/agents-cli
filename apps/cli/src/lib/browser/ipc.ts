@@ -10,6 +10,14 @@ import type { IPCRequest, IPCResponse, RefNodeJson } from './types.js';
 
 const SOCKET_NAME = 'browser.sock';
 
+/**
+ * How long {@link BrowserIPCServer.stop} waits for the listening socket to
+ * actually be released before giving up and unlinking it anyway (RUSH-2421).
+ * Long enough for in-flight connections to drain, short enough that a wedged
+ * client cannot hold daemon shutdown open indefinitely.
+ */
+const IPC_CLOSE_TIMEOUT_MS = 5_000;
+
 export interface IPCRequestOptions {
   autoStartDaemon?: boolean;
 }
@@ -256,10 +264,34 @@ export class BrowserIPCServer {
     });
   }
 
+  /**
+   * Stop accepting, release the binding, and only then resolve.
+   *
+   * RUSH-2421: this used to call `server.close()` and move on. `close()` is
+   * asynchronous — it stops accepting immediately but the binding is not
+   * actually released until the `'close'` event fires — so `stop()` resolved
+   * while the socket (or named pipe) was still held. The daemon's
+   * `handleShutdown` awaits this before it exits, and a successor's
+   * `claimDaemonInstance` waits for that exit as its proof the predecessor's
+   * resources are free (SING-11). Resolving early made that proof false: the
+   * newcomer could bind before the incumbent's binding was gone, which is the
+   * two-servers-on-one-socket orphan the eviction protocol exists to prevent.
+   *
+   * Bounded, because a connection that never drains must not wedge shutdown
+   * forever: on timeout we proceed to unlink below, which is what a killed
+   * daemon would have left for `stopDaemon` to reclaim anyway.
+   */
   async stop(): Promise<void> {
     if (this.server) {
-      this.server.close();
+      const server = this.server;
       this.server = null;
+      await new Promise<void>((resolve) => {
+        const done = () => { clearTimeout(timer); resolve(); };
+        const timer = setTimeout(done, IPC_CLOSE_TIMEOUT_MS);
+        // `close()` reports an error when the server was never listening —
+        // nothing to release, so that is a completed close, not a failure.
+        server.close(() => done());
+      });
     }
 
     if (!IS_WINDOWS) {

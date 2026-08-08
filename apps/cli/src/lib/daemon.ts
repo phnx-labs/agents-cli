@@ -1561,6 +1561,85 @@ function waitForPid(timeoutMs: number): number | null {
 }
 
 /**
+ * One piece of daemon state that a graceful `handleShutdown` removes and an
+ * escalated kill leaves behind (RUSH-2421).
+ */
+interface StopResidueArtifact {
+  label: string;
+  present: boolean;
+  /** The file names a pid that is alive and is NOT the daemon we stopped. */
+  ownedByLiveOther: boolean;
+  reclaim: () => void;
+  stillPresent: () => boolean;
+}
+
+/**
+ * Read the pid a state file claims, or null when it is absent/unreadable/not
+ * pid-shaped. The lifetime marker stores `<pid>:<epochMs>`; the heartbeat
+ * stores JSON with a `pid`.
+ */
+function claimedPid(read: () => number | null): number | null {
+  try { return read(); } catch { return null; }
+}
+
+/**
+ * The lifetime marker, heartbeat, and instance-registry entry, described so
+ * {@link stopDaemon} can assert them the same way it asserts the two sockets.
+ *
+ * Ownership, not mere presence, decides: a file naming a pid that is alive and
+ * is not the daemon we just stopped belongs to a DIFFERENT daemon (a successor
+ * that started during the stop, or a peer serving this state dir), and deleting
+ * it would break that live daemon — the same reasoning the broker-socket branch
+ * above uses for a standalone owner. Everything else is residue from a provably
+ * dead owner and is reclaimed.
+ */
+function stopResidueArtifacts(stoppedPid: number | null): StopResidueArtifact[] {
+  const artifacts: StopResidueArtifact[] = [];
+
+  const lifetimePath = path.join(getDaemonDirRoot(), LIFETIME_FILE);
+  const lifetimeOwner = claimedPid(() => {
+    const raw = fs.readFileSync(lifetimePath, 'utf-8').split(':')[0];
+    const n = parseInt(raw, 10);
+    return isNaN(n) ? null : n;
+  });
+  artifacts.push({
+    label: 'daemon lifetime marker',
+    present: fs.existsSync(lifetimePath),
+    ownedByLiveOther: lifetimeOwner !== null && lifetimeOwner !== stoppedPid && isAlive(lifetimeOwner),
+    reclaim: () => { try { fs.unlinkSync(lifetimePath); } catch { /* raced with a fresh start */ } },
+    stillPresent: () => fs.existsSync(lifetimePath),
+  });
+
+  const heartbeatPath = getHeartbeatPath();
+  const hb = readHeartbeat();
+  artifacts.push({
+    label: 'daemon heartbeat',
+    present: fs.existsSync(heartbeatPath),
+    // A stale heartbeat is not cosmetic: resolveLiveDaemonPid() trusts a FRESH
+    // one to re-adopt a daemon whose pid file was lost, so leaving one behind
+    // can make a dead daemon read as running.
+    ownedByLiveOther: hb !== null && hb.pid !== stoppedPid && isAlive(hb.pid),
+    reclaim: () => removeHeartbeat(),
+    stillPresent: () => fs.existsSync(heartbeatPath),
+  });
+
+  // POSIX-only, matching registerDaemonInstance/unregisterDaemonInstance.
+  if (process.platform !== 'win32' && stoppedPid !== null) {
+    const markerPath = path.join(getDaemonInstancesDir(), String(stoppedPid));
+    artifacts.push({
+      label: 'daemon instance registry entry',
+      present: fs.existsSync(markerPath),
+      // The marker is named by pid, so it can only ever be this daemon's.
+      ownedByLiveOther: false,
+      reclaim: () => unregisterDaemonInstance(stoppedPid),
+      stillPresent: () => fs.existsSync(markerPath),
+    });
+  }
+
+  return artifacts;
+}
+
+/**
  * Structured outcome of {@link stopDaemon} (SING-12, RUSH-2355). `stopDaemon`
  * asserts its postcondition instead of assuming it: `ok` is true only when every
  * resource the daemon held is provably released. `surviving` names anything that
@@ -1731,6 +1810,24 @@ export function stopDaemon(): DaemonStopResult {
       if (fs.existsSync(brokerSock)) surviving.push('secrets broker socket not released');
       else released.push('secrets broker socket (reclaimed)');
     }
+  }
+
+  // ── The state files a killed daemon cannot clean up itself (RUSH-2421) ─────
+  // handleShutdown removes the lifetime marker, the heartbeat and this pid's
+  // instance-registry entry — but it only runs on the GRACEFUL path. Every
+  // escalation above (killTree, and the whole win32 branch) skips it, so those
+  // three outlive the daemon and the stop reported `ok: true` while its state
+  // dir still described a daemon that no longer exists. Each is stale metadata
+  // with real consequences: a leftover heartbeat is what `resolveLiveDaemonPid`
+  // consults to re-adopt a "live" daemon, and a leftover registry entry is what
+  // `reapStrayDaemons` enumerates. Same shape as the sockets above — reclaim
+  // what a provably dead owner left, never touch what a live one owns.
+  for (const artifact of stopResidueArtifacts(pid)) {
+    if (!artifact.present) { released.push(artifact.label); continue; }
+    if (artifact.ownedByLiveOther) { released.push(`${artifact.label} (owned by a live daemon)`); continue; }
+    artifact.reclaim();
+    if (artifact.stillPresent()) surviving.push(`${artifact.label} not released`);
+    else released.push(`${artifact.label} (reclaimed)`);
   }
 
   // In-flight detached routine children survive on purpose (SING-11a) — report,
