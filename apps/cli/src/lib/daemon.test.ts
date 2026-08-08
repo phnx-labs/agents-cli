@@ -760,14 +760,18 @@ describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () =>
         // Atomically move the daemon state tree out of its canonical path while
         // the process is live. A recursive delete races heartbeat writes and can
         // fail with ENOTEMPTY before the guard gets to observe anything; rename
-        // makes the disappearance indivisible while still allowing heartbeat
-        // repair to recreate the canonical directory without its lifetime token.
+        // makes the disappearance indivisible. Recreate the canonical directory
+        // without its lifetime token before the first 300ms check: the obsolete
+        // existsSync(dir) guard would stay alive, while the token guard must exit.
         fs.renameSync(stateDir, removedStateDir);
+        fs.mkdirSync(stateDir, { recursive: true });
+        expect(fs.existsSync(stateDir)).toBe(true);
 
         // The guard polls every 300ms above; give it several cycles of margin.
         expect(await waitFor(() => !alive(pid!), 10_000)).toBe(true);
       } finally {
         if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+        if (pid) await waitFor(() => !alive(pid!), 5_000);
         try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* already gone */ }
       }
     },
