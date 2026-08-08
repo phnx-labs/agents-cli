@@ -1479,11 +1479,17 @@ normative — a change that widens or narrows a cell is a spec change.
 - **SEC-GAP-2.** The `env:`-ref allowlist control exists (`envAllowlist` on
   `ResolveOptions`, `lib/secrets/index.ts` ~`:1392,1411`) but no command wires it
   up — `env:` refs are effectively unrestricted today. Either wire it or remove it.
-- **SEC-GAP-3.** No reserved `auth` bundle exists in code, despite a design note
-  describing one for setup-tokens. The only reserved concept is
-  `RESERVED_ENV_NAMES` (env keys, not bundle names,
-  `lib/secrets/bundles.ts:273-277`). If the convention is intended, it is
-  unimplemented; until then, `auth` is an ordinary bundle name.
+- **SEC-GAP-3 (partially closed).** `auth` IS reserved in code now, but only by
+  the consumer, not by the secrets layer: `claude-account-token.ts:17` pins
+  `AUTH_BUNDLE = 'auth'` and reads it for Claude setup-tokens (EXEC-2a), and it
+  is honored ONLY when file-backed — a keychain- or vault-backed bundle of the
+  same name is ignored rather than rejected (`claude-account-token.ts:98`). The
+  secrets layer itself still has no reserved-bundle-name concept; the only
+  reserved concept there remains `RESERVED_ENV_NAMES` (env keys, not bundle
+  names, `lib/secrets/bundles.ts:273-277`). So `agents secrets create auth` with
+  the wrong backend still succeeds and silently does nothing for auth. Remaining
+  work: either reserve the name in the secrets layer (and fail loud on a
+  non-file backend) or drop the convention.
 - **SEC-GAP-4.** The broker's per-request capability-token auth (SEC-18) is not
   reflected in `secrets.md` / `08-secrets-agent-process-model.md`, which still
   describe only the same-UID/socket-permission model.
@@ -1727,6 +1733,23 @@ schema (`--json` passes through each agent's native stream format).
   `COPILOT_HOME` / `KIMI_CODE_HOME`) and MUST delete the other three agents'
   vars on every branch, so a config pointer from a different agent's shell
   never leaks into this invocation (`buildExecEnv`'s per-agent branch, `lib/exec.ts:402-490`).
+- **EXEC-2a (MUST).** For claude, `buildExecEnv` MUST inject the reserved `auth`
+  bundle's per-account setup-token into `CLAUDE_CODE_OAUTH_TOKEN` ONLY when the
+  run resolves **headless** (`resolveInteractive(options) === false`,
+  `lib/exec.ts:425-453`). That token exists so a run with no human present
+  authenticates without the Touch-ID-gated login item
+  (`lib/claude-account-token.ts:8-16`); an interactive run has a human at the
+  TTY and MUST be left on its per-version login, which is also the only
+  credential carrying the `user:profile` scope usage reads require (RUSH-2392).
+  An interactive run MUST additionally delete an INHERITED
+  `CLAUDE_CODE_OAUTH_TOKEN` whose value equals that same resolved setup-token
+  (`lib/exec.ts:444-446`), so an interactive launch from inside a headless
+  agent's shell does not keep authenticating as it; a value the caller set
+  itself MUST survive, and `options.env` still overrides last (EXEC-5).
+  Note this MUST NOT be read as "an interactive run never carries a token" — no
+  requirement yet strips an ambient value when NO per-account token resolves,
+  which is the routines path's behavior (`lib/runner.ts:1018-1021`) and is
+  tracked as RUSH-2360.
 - **EXEC-3 (MUST).** `buildExecEnv` MUST set `AGENTS_MAILBOX_DIR` +
   `AGENT_SESSION_ID` + `AGENTS_SESSION_ID` when a valid session id is present
   (`lib/exec.ts:444-449`), `AGENTS_RUNTIME` to `terminal`/`headless` from
