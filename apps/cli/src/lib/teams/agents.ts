@@ -375,6 +375,24 @@ function extractTimestamp(raw: any): Date | null {
   return null;
 }
 
+/**
+ * Atomic JSON write: writes to a unique sibling tmp file then renames over the
+ * target. rename(2) is atomic on POSIX, so a process killed mid-write leaves
+ * either the previous valid meta.json or the new one, never a torn,
+ * unparseable file (RUSH-2429). Mirrors the identical pattern already used by
+ * `teams/registry.ts`'s `atomicWriteJson`.
+ */
+async function atomicWriteJson(p: string, data: unknown): Promise<void> {
+  const tmp = `${p}.tmp.${process.pid}.${randomUUID()}`;
+  await fs.writeFile(tmp, JSON.stringify(data, null, 2));
+  try {
+    await fs.rename(tmp, p);
+  } catch (err) {
+    await fs.unlink(tmp).catch(() => {});
+    throw err;
+  }
+}
+
 /** Resolve a mode string to a validated Mode, falling back to the given default. */
 export function resolveMode(
   requestedMode: string | null | undefined,
@@ -1121,7 +1139,40 @@ export class AgentProcess {
       remote_log_offset: this.remoteLogOffset,
     };
     const metaPath = await this.getMetaPath();
-    await fs.writeFile(metaPath, JSON.stringify(meta, null, 2));
+    await atomicWriteJson(metaPath, meta);
+  }
+
+  /**
+   * Rename an unreadable meta.json out of the way so it stops silently
+   * masquerading as "no record" (RUSH-2429). Before saveMeta() wrote atomically,
+   * a process killed mid-write left a truncated, unparseable meta.json that
+   * loadFromDisk() returned null for -- indistinguishable from ENOENT -- so
+   * retention (loadExistingAgents/rescanFromDisk) never reaped it and
+   * isWorktreeClaimed() (which reads meta.json directly, not through this
+   * method) failed CLOSED on it forever: it scans every record and answers
+   * "claimed" for every worktree name in every team the first time it cannot
+   * read one. Quarantining removes meta.json so the NEXT read of this record
+   * sees ENOENT (genuinely absent) instead of "unreadable" -- that is what lets
+   * isWorktreeClaimed's fail-closed guard recover once the corrupt record is
+   * gone, without weakening the guard itself for a record that is still
+   * present-but-unreadable at decision time.
+   *
+   * Best-effort: if the rename itself fails (e.g. EACCES on the directory),
+   * the record is left in place and the fail-closed guard keeps protecting
+   * worktree removal -- quarantine only ever ADDS a recovery path.
+   */
+  private static async quarantineCorruptMeta(metaPath: string, cause: unknown): Promise<void> {
+    const quarantinePath = `${metaPath}.corrupt`;
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    try {
+      await fs.rename(metaPath, quarantinePath);
+      console.warn(`[teams] quarantined unreadable meta.json (${reason}): ${metaPath} -> ${quarantinePath}`);
+    } catch (renameErr) {
+      console.warn(
+        `[teams] found unreadable meta.json but could not quarantine it (${reason}): ${metaPath}: ` +
+          `${(renameErr as Error)?.message ?? renameErr}`,
+      );
+    }
   }
 
   static async loadFromDisk(agentId: string, baseDir: string | null = null): Promise<AgentProcess | null> {
@@ -1129,14 +1180,21 @@ export class AgentProcess {
     const agentDir = path.join(base, agentId);
     const metaPath = path.join(agentDir, 'meta.json');
 
+    let metaContent: string;
     try {
-      await fs.access(metaPath);
-    } catch {
+      metaContent = await fs.readFile(metaPath, 'utf-8');
+    } catch (err) {
+      // ENOENT is the only outcome that proves the record is genuinely ABSENT
+      // (never written, or already cleaned up). Anything else -- EACCES, EIO,
+      // a transient race -- means the file exists but could not be read; treat
+      // it like the parse failure below so it gets quarantined instead of
+      // silently vanishing forever.
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
+      await AgentProcess.quarantineCorruptMeta(metaPath, err);
       return null;
     }
 
     try {
-      const metaContent = await fs.readFile(metaPath, 'utf-8');
       const meta = JSON.parse(metaContent);
 
       // Legacy teammates may have mode='ralph', 'cloud', or 'full' from before
@@ -1210,7 +1268,11 @@ export class AgentProcess {
       agent.remoteExit = meta.remote_exit || null;
       agent.remoteLogOffset = typeof meta.remote_log_offset === 'number' ? meta.remote_log_offset : 0;
       return agent;
-    } catch {
+    } catch (err) {
+      // The file exists but is not valid JSON (or fails a constructor
+      // invariant) -- most likely a torn write from before saveMeta() became
+      // atomic. Quarantine it; see quarantineCorruptMeta() above.
+      await AgentProcess.quarantineCorruptMeta(metaPath, err);
       return null;
     }
   }

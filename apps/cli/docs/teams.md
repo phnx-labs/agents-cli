@@ -308,6 +308,15 @@ If we cannot prove a worktree is an orphan, it is left in place and the command
 prints the exact `git worktree remove` / `git branch -D` pair to run — a stranded
 branch is recoverable, a deleted worktree is not.
 
+An unreadable `meta.json` is what makes the check fail closed in the first place,
+so it must not be a *permanent* state. `saveMeta()` writes via a sibling tmp file
++ `fs.rename`, atomic on POSIX, so a process killed mid-write can never leave a
+torn record. If an unreadable `meta.json` is found anyway (e.g. one written before
+this fix), `loadFromDisk()` quarantines it — renaming it to `meta.json.corrupt`
+with a warning — so it stops being mistaken for "no record" and a later
+`isWorktreeClaimed` scan sees genuine absence instead of failing closed on it
+forever (RUSH-2429).
+
 Either way the add exits non-zero with the real error and never prints a success
 block, and re-running the same command with the same name works.
 

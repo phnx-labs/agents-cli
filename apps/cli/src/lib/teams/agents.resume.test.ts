@@ -194,19 +194,32 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
     fs.writeFileSync(path.join(dir, 'prior-turn.log'), 'preserve me');
     const stdoutPath = path.join(dir, 'stdout.log');
     fs.writeFileSync(stdoutPath, 'prior stdout');
-    const metaPath = path.join(dir, 'meta.json');
-    const metaTarget = path.join(dir, 'meta-original.json');
-    fs.renameSync(metaPath, metaTarget);
-    fs.chmodSync(metaTarget, 0o400);
-    fs.symlinkSync(path.basename(metaTarget), metaPath);
 
     const mgr = new AgentManager(50, base);
     try {
-      // The real local launcher reaches spawn, then saveMeta follows the
-      // read-only symlink and fails. The transactional catch must terminate the
+      // Poison the CACHED AgentProcess's envOverrides with a circular value.
+      // saveMeta() now writes via tmp-file + rename (RUSH-2429), so the old
+      // "chmod a read-only symlink at meta.json" trick no longer fails the
+      // write: rename(2) replaces a symlink's directory entry outright and
+      // never even looks at — let alone respects the permissions of — the
+      // file it points to. A circular value survives everywhere ELSE on this
+      // path (a plain object spread in buildTeammateSpawnEnv, and a bare
+      // string-coercion when node builds the child's real env) but makes
+      // JSON.stringify() inside saveMeta() throw synchronously, before
+      // atomicWriteJson ever touches the filesystem — so it fails BOTH the
+      // launch save (after the real child is spawned) and the restore save
+      // that follows it, exactly like the write failure this test exercises.
+      const preloaded = await mgr.get(id);
+      expect(preloaded).not.toBeNull();
+      const poison: Record<string, unknown> = {};
+      poison.self = poison;
+      (preloaded as unknown as { envOverrides: unknown }).envOverrides = { POISON: poison };
+
+      // The real local launcher reaches spawn, then saveMeta hits the poisoned
+      // envOverrides and fails. The transactional catch must terminate the
       // detached process before resumeTeammate restores the original lifecycle.
-      // The restore's own saveMeta ALSO fails against the read-only symlink, so
-      // the wrapper must preserve the ORIGINAL launch error via `{ cause }` — a
+      // The restore's own saveMeta ALSO fails (same poisoned object), so the
+      // wrapper must preserve the ORIGINAL launch error via `{ cause }` — a
       // bare restore-write error would erase the informative failure.
       const rejection = await mgr.resumeTeammate(id, marker).then(
         () => { throw new Error('expected resumeTeammate to reject'); },
@@ -215,8 +228,9 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
       expect(rejection.message).toMatch(/restoring stopped state also failed/);
       const originalErr = rejection.cause as Error | undefined;
       expect(originalErr).toBeDefined();
-      // The original launch failure was the read-only-symlink saveMeta write,
-      // not the restore write — its message must survive on the cause chain.
+      // The original launch failure was the poisoned-envOverrides saveMeta
+      // write, not the restore write — its message must survive on the cause
+      // chain.
       expect(originalErr!.message).not.toMatch(/restoring stopped state also failed/);
 
       const retained = (mgr as any).agents.get(id) as AgentProcess | undefined;
@@ -228,13 +242,15 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
       expect(retained!.startTime).toBeNull();
       expect(fs.readFileSync(path.join(dir, 'prior-turn.log'), 'utf-8')).toBe('preserve me');
       expect(fs.readFileSync(stdoutPath, 'utf-8')).toBe('prior stdout');
+      // Neither the launch nor the restore write ever reached the filesystem
+      // (JSON.stringify threw before atomicWriteJson's first fs call), so the
+      // on-disk record is still exactly the original save from above.
       const restored = await AgentProcess.loadFromDisk(id, base);
       expect(restored).not.toBeNull();
       expect(restored!.status).toBe(AgentStatus.COMPLETED);
       expect(restored!.completedAt?.toISOString()).toBe(completedAt.toISOString());
       expect(() => execFileSync('pgrep', ['-f', marker], { stdio: 'ignore' })).toThrow();
     } finally {
-      if (fs.existsSync(metaTarget)) fs.chmodSync(metaTarget, 0o600);
       fs.rmSync(base, { recursive: true, force: true });
     }
   });
