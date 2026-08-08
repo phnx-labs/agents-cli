@@ -165,5 +165,15 @@ describe('OpenCode field parity (RUSH-2358)', () => {
     expect(posix!.worktreeSlug).toBe(POSIX_SLUG);
     const win = db.getSessionById(SESSION_ID_WIN);
     expect(win!.worktreeSlug).toBe(WIN_SLUG);
+
+    // The slug assertions above do NOT discriminate a fixed normalizeCwd from a
+    // broken one: WORKTREE_RE matches `[\\/]` anywhere in the string, and the
+    // pre-fix `path.resolve()` only PREFIXES the reading process's cwd, leaving
+    // the `\.agents\worktrees\win-feature` substring intact for the regex to
+    // find by coincidence. The stored cwd is what actually regresses, so assert
+    // that directly — this is the assertion that fails without the fix.
+    expect(win!.cwd).toBe(WIN_CWD);
+    expect(win!.cwd).not.toContain(process.cwd());
+    expect(posix!.cwd).toBe(POSIX_CWD);
   });
 });
