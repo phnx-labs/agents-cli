@@ -895,9 +895,9 @@ function renderItemDetail(header: string, jsonHead: Record<string, unknown>, kin
     // plugin would show 4. Before the detail view wrapped at all, the terminal
     // soft-wrapped these in full, so truncating here would lose information the
     // old output had.
-    // String(v) is load-bearing, not defensive habit: row values reach here from
-    // uncontrolled plugin.json fields, and a bare `version: 1` used to throw
-    // `v.split is not a function` and kill the whole render.
+    // String(v) is belt-and-braces: pluginToItem now coerces every manifest field
+    // through manifestText, so nothing non-string should reach here. Kept because
+    // this is the choke point every future row kind flows through.
     printWrappedJoined(`     ${chalk.gray(k.padEnd(10))} `, String(v).split(', '), ', ');
   }
 
@@ -1023,43 +1023,55 @@ function pluginItems(): ResourceItem[] {
 /**
  * Map a discovered plugin to a resource item, surfacing the manifest description
  * and the bundle's nested resources (skills, commands, hooks, ...) as detail rows.
- */
-/**
- * Every field here comes from an uncontrolled `plugin.json`: `loadPluginManifest`
- * casts parsed JSON straight to `PluginManifest` and validates only name/version
- * (`lib/plugins.ts`), so the declared types are a hope, not a guarantee. A row
- * value that is not a string crashes the renderer, and `pluginToItem` runs while
- * BUILDING THE LIST — so one malformed manifest anywhere takes down `inspect .`,
- * `--plugins`, `--json`, and even a query for a different, valid plugin.
- * Coerce or drop; never trust the annotation.
+ *
+ * EVERY field read here comes from an uncontrolled `plugin.json`:
+ * `loadPluginManifest` casts parsed JSON straight to `PluginManifest` and
+ * validates only name/version (`lib/plugins.ts`), so the declared types are a
+ * hope, not a guarantee. A non-string reaching a renderer throws on `.split` /
+ * `.replace`, and `pluginToItem` runs while BUILDING THE LIST — so one malformed
+ * manifest anywhere takes down `inspect .`, `--plugins`, `--json`, and even a
+ * query for a different, valid plugin. Coerce every field through `manifestText`;
+ * never trust the annotation.
  */
 function pluginToItem(plugin: DiscoveredPlugin, source: string): ResourceItem {
   const extra: Array<[string, string]> = [];
-  const version = plugin.manifest.version;
-  if (version) extra.push(['version', String(version)]);
+  const version = manifestText(plugin.manifest.version);
+  if (version) extra.push(['version', version]);
   // Which execution surfaces the bundle actually carries. Detection already
   // exists for the plugin picker; the detail view simply never asked for it.
   const surfaces = pluginCapabilityLabels(inspectPluginCapabilities(plugin.root));
   if (surfaces.length > 0) extra.push(['surfaces', surfaces.join(', ')]);
   const author = plugin.manifest.author;
-  const authorLabel = typeof author === 'string' ? author : author?.name;
-  if (authorLabel) extra.push(['author', String(authorLabel)]);
+  const authorLabel = manifestText(typeof author === 'object' && author !== null ? author.name : author);
+  if (authorLabel) extra.push(['author', authorLabel]);
   // `.length` is truthy for a bare string too, and a string has no `.join`.
   const deps = plugin.manifest.dependencies;
-  if (Array.isArray(deps) && deps.length > 0) {
-    extra.push(['depends on', deps.map(String).join(', ')]);
-  } else if (typeof deps === 'string' && deps) {
-    extra.push(['depends on', deps]);
-  }
+  const depsLabel = Array.isArray(deps)
+    ? deps.map(manifestText).filter(Boolean).join(', ')
+    : manifestText(deps);
+  if (depsLabel) extra.push(['depends on', depsLabel]);
   return {
     name: plugin.name,
     source,
     path: plugin.root,
     linkTarget: linkTarget(plugin.root),
-    description: plugin.manifest.description ?? '',
+    // `?? ''` catches only null/undefined — a numeric or array description used
+    // to reach truncateToWidth/`.split` and kill the render for every plugin.
+    description: manifestText(plugin.manifest.description),
     extra,
     groups: pluginResourceGroups(plugin),
   };
+}
+
+/**
+ * Render one uncontrolled manifest value as display text. Objects and arrays
+ * carry no sensible one-line form, so they become '' (the row is then dropped)
+ * rather than `[object Object]`; everything else stringifies.
+ */
+function manifestText(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') return '';
+  return String(v);
 }
 
 function entriesFromAgentResources(agent: AgentId, versionHome: string, kind: 'commands' | 'hooks' | 'workflows'): ResourceItem[] {

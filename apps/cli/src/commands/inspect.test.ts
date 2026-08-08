@@ -196,7 +196,6 @@ describe('collectRepoKind', () => {
     for (const [, v] of plugin.extra ?? []) expect(typeof v).toBe('string');
   });
 
-
   it('reads a dir-form subrule description from rule.md', () => {
     const root = makeProjectRepo();
     const dir = path.join(root, '.agents', 'rules', 'subrules', 'gh-merge-guard');

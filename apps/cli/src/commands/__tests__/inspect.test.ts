@@ -210,9 +210,13 @@ describe('agents inspect', () => {
     for (const n of names) writeFile(path.join(many, 'commands', `${n}.md`), `---\ndescription: ${n}.\n---\n\nb\n`);
     // Types that contradict the declared PluginManifest — loadPluginManifest
     // validates only name/version, so these reach the renderer as-is.
+    // Every field the view reads, each with a type the interface forbids. The
+    // first cut of this test only had version/dependencies and only exercised
+    // `--plugins`, which is exactly how a non-string `description` (crashing
+    // BOTH list and detail mode) survived a review.
     const bad = path.join(proj, '.agents', 'plugins', 'wrongtypes');
     writeFile(path.join(bad, '.claude-plugin', 'plugin.json'),
-      JSON.stringify({ name: 'wrongtypes', description: 'Bad types.', version: 2, dependencies: 'some-plugin' }));
+      JSON.stringify({ name: 'wrongtypes', description: 42, version: 2, dependencies: 'some-plugin', author: ['a'] }));
 
     // Narrow terminal: this is where the truncating renderer dropped items.
     const narrow = { ...process.env, COLUMNS: '60' };
@@ -231,6 +235,16 @@ describe('agents inspect', () => {
     expect(list.status).toBe(0);
     expect(list.stdout).toContain('many');
     expect(list.stdout).toContain('wrongtypes');
+
+    // Detail mode on the malformed plugin itself, and the JSON path. Detail mode
+    // reaches renderers list mode does not (description .split), so asserting
+    // only the list leaves half the surface untested.
+    for (const args of [['--plugin', 'wrongtypes'], ['--plugin', 'wrongtypes', '--json'], ['--plugins', '--json']]) {
+      const r2 = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, ...args], {
+        cwd: proj, env: { ...narrow, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' }, encoding: 'utf-8',
+      });
+      expect(r2.status, `inspect ${args.join(' ')} exited ${r2.status}: ${r2.stderr}`).toBe(0);
+    }
   });
 
   it('--skills <typo> resolves via fuzzy match; bogus query exits 1 with suggestions', () => {
