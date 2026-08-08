@@ -854,21 +854,30 @@ there's nothing for this mechanism to copy out.
 
 ### Claude auth for routines
 
-A routine authenticates exactly like an interactive `agents run claude` on the
-same device: through the pinned account's own on-disk login.
-`buildRoutineSpawnEnv` sets `CLAUDE_CONFIG_DIR` to the account's per-version home
-(`runner.ts`), so even under the sandbox overlay — which gives the spawn a clean
-`HOME` — Claude Code reads its credential from `CLAUDE_CONFIG_DIR/.credentials.json`,
-the real interactive login. That access token is short-lived but refreshes itself
-per-device, so a box that runs at least once inside the refresh window stays
-signed in on its own.
+A routine is pinned to one account's per-version home:
+`buildRoutineSpawnEnv` sets `CLAUDE_CONFIG_DIR` to that home (`runner.ts`), so even
+under the sandbox overlay — which gives the spawn a clean `HOME` — Claude Code
+resolves its credential from `CLAUDE_CONFIG_DIR` rather than the ambient one.
 
-The daemon holds **no** Claude token and injects nothing — no ambient
-`CLAUDE_CODE_OAUTH_TOKEN`, no per-account variant. A shared or injected token was
-the *cause* of the fleet-wide rotation logout, not the fix (see "Pinning an
-account" below). If a routine's pinned account login has gone dead, the auth-health
-preflight (`runner.ts`) skips the run up front with a `re-login required` message
-rather than firing a doomed run.
+**A routine does NOT authenticate the same way an interactive `agents run claude`
+does — the two deliberately diverge.** A routine is headless, so it authenticates
+with that account's long-lived `claude setup-token` from the reserved file-backed
+`auth` bundle, which `runner.ts` resolves and asserts explicitly
+(`resolveClaudeSetupToken` → `out.CLAUDE_CODE_OAUTH_TOKEN`). An **interactive** run
+is left on the home's own on-disk/Keychain login and is never handed that token
+(EXEC-2a in [`specifications.md`](specifications.md)). The split is the point: a
+setup-token never rotates, so a scheduled run cannot land on a sibling home's
+just-rotated-out credential, while a human at a TTY keeps the login they
+established — which is also the only credential carrying the `user:profile` scope
+that usage reads need (RUSH-2392).
+
+What the daemon does **not** hold or forward is an *ambient, shared* Claude token:
+`runner.ts` strips an inherited `CLAUDE_CODE_OAUTH_TOKEN` and re-asserts only the
+per-account setup-token keyed to the pinned home, distinguishing the two by value.
+A shared token was the *cause* of the fleet-wide rotation logout, not the fix (see
+"Pinning an account" below). If a routine's pinned account login has gone dead, the
+auth-health preflight (`runner.ts`) skips the run up front with a `re-login required`
+message rather than firing a doomed run.
 
 To bring a signed-out box back, log in on that box once — `agents run claude` (or
 `claude` directly) drives the interactive login and writes the credential the
