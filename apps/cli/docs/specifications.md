@@ -2572,12 +2572,14 @@ a machine-wide process sweep.)
   daemon start MUST NOT cycle through unbounded rapid retries: the service manager MUST
   enforce a restart interval and burst limit, and `ensureDaemonStarted` MUST stop
   initiating starts after a bounded number of consecutive failures until the circuit
-  breaker resets. The current unbounded surfaces are launchd `KeepAlive`
-  (`lib/daemon.ts:1060-1090`), systemd `Restart=always` (`lib/daemon.ts:1106-1124`),
-  and the best-effort `ensureDaemonStarted` path (`lib/daemon.ts:1181-1202`). Status:
-  **[Intended]**: RUSH-2418 adds `ThrottleInterval`/`StartLimitBurst` service-manager
-  limits and a `consecutiveFailures` circuit breaker in `ensureDaemonStarted`
-  (SING-GAP-6).
+  breaker resets. Enforced at all three restart layers (RUSH-2418): `generateLaunchdPlist`
+  pairs `KeepAlive` with a 30s `ThrottleInterval` (`lib/daemon.ts:1115-1118`);
+  `generateSystemdUnit` caps respawns with `StartLimitIntervalSec=300`/`StartLimitBurst=5`
+  in its `[Unit]` section alongside `Restart=always` (`lib/daemon.ts:1154-1160`); and the
+  application-level auto-start path `ensureDaemonStarted` (`lib/daemon.ts:1274-1299`)
+  refuses to launch once `isDaemonAutostartCircuitOpen` (`lib/daemon.ts:1259-1262`) reads
+  `DAEMON_AUTOSTART_FAILURE_LIMIT` (5) consecutive failed starts from the persisted
+  `daemon-health.ts` record, pointing the operator at `agents daemon doctor` (SING-GAP-6).
 
 ### 4. Given/When/Then scenarios
 
@@ -2686,13 +2688,22 @@ a machine-wide process sweep.)
   (`closeServerBounded`, `lib/secrets/agent.ts:928-941`, `:953-973`) instead of firing and
   forgetting; the browser IPC teardown (`BrowserIPCServer.stop`, `lib/browser/ipc.ts:259-273`)
   still calls `server.close()` fire-and-forget and remains to be converted.
-- **SING-GAP-6 (RUSH-2418).** SING-14's restart bound is `[Intended]`: `generateLaunchdPlist`
-  (`lib/daemon.ts:1060-1090`) sets `KeepAlive` with no `ThrottleInterval`, `generateSystemdUnit`
-  (`lib/daemon.ts:1106-1124`) sets `Restart=always` with no `StartLimitIntervalSec`/
-  `StartLimitBurst`, and `ensureDaemonStarted` (`lib/daemon.ts:1181-1202`) has no
-  circuit breaker reading the `consecutiveFailures` `daemon-health.ts` already tracks —
-  so a daemon that fails on every startup restarts in an unbounded ~10s cycle. RUSH-2418
-  adds the service-manager limits and wires the circuit breaker.
+- **SING-GAP-6 (resolved, RUSH-2418).** SING-14's restart bound was `[Intended]`:
+  `generateLaunchdPlist` set `KeepAlive` with no `ThrottleInterval`, `generateSystemdUnit`
+  set `Restart=always` with no `StartLimitIntervalSec`/`StartLimitBurst`, and
+  `ensureDaemonStarted` had no circuit breaker reading the `consecutiveFailures`
+  `daemon-health.ts` already tracks — so a daemon that failed on every startup restarted
+  in an unbounded ~10s cycle. All three layers are now bounded: launchd carries a 30s
+  `ThrottleInterval` (`generateLaunchdPlist`, `lib/daemon.ts:1117-1118`), the systemd unit
+  carries `StartLimitIntervalSec=300`/`StartLimitBurst=5` in its `[Unit]` section
+  (`generateSystemdUnit`, `lib/daemon.ts:1154-1155`), and `ensureDaemonStarted`
+  (`lib/daemon.ts:1274-1299`) refuses to relaunch once `isDaemonAutostartCircuitOpen`
+  (`lib/daemon.ts:1259-1262`) sees `DAEMON_AUTOSTART_FAILURE_LIMIT` consecutive failed
+  starts — the application-level loop the OS supervisor's throttle cannot see, because
+  each attempt is a fresh service start rather than a respawn. Covered by
+  `lib/daemon.test.ts:167` (launchd `ThrottleInterval`), `:185`/`:199` (systemd
+  `StartLimitBurst` in `[Unit]`), and the `daemon auto-start circuit breaker (RUSH-2418)`
+  suite (`lib/daemon.test.ts:1254-1393`).
 
 ---
 
