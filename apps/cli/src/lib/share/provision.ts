@@ -4,6 +4,8 @@
 // enables the free `*.workers.dev` subdomain, and — when the token owns the zone —
 // maps a custom domain.
 
+import { createHash } from 'node:crypto';
+
 const CF_API = 'https://api.cloudflare.com/client/v4';
 export const SHARE_LIFECYCLE_RULE_ID = 'agents-share-expire-objects';
 export const SHARE_LIFECYCLE_RETENTION_DAYS = 366;
@@ -171,6 +173,64 @@ export async function deployWorker(
     pathname: `/accounts/${accountId}/workers/scripts/${workerName}`,
     form,
   });
+}
+
+/** sha256 of the rendered Worker script, so a deployed endpoint can be compared
+ * against the current `worker-template.ts` without redeploying to find out. */
+export function hashWorkerScript(script: string): string {
+  return createHash('sha256').update(script, 'utf8').digest('hex');
+}
+
+export interface UpdateWorkerResult {
+  /** sha256 of `script` (the hash the endpoint now matches, whether or not this
+   * call actually redeployed). */
+  templateHash: string;
+  /** True when the upload was skipped because `previousHash` already matched. */
+  skipped: boolean;
+}
+
+/**
+ * Re-deploy the Worker script against an ALREADY-provisioned endpoint (same
+ * account/worker/bucket `deployWorker` was first called with) and idempotently
+ * no-op when the template hasn't changed.
+ *
+ * Cloudflare's script-upload endpoint (`deployWorker`, above) replaces the
+ * Worker's bindings/secrets wholesale on every call — there is no documented,
+ * reliable way to tell it "keep the existing secret" (the `keep_bindings`
+ * metadata field some third-party guides mention is absent from Cloudflare's
+ * current Multipart upload metadata reference, and the community has reported
+ * it not preventing binding loss even when present:
+ * https://developers.cloudflare.com/workers/configuration/multipart-upload-metadata/,
+ * https://community.cloudflare.com/t/upload-worker-module-endpoint-removes-existing-bindings-despite-keep-bindings/766447).
+ * So instead this immediately re-applies WRITE_TOKEN via the documented Secrets
+ * API right after the upload — the same two-call sequence first-time
+ * provisioning already uses (`deployWorker` then `setWorkerSecret`), except
+ * `writeToken` here is the caller's EXISTING token, never a freshly generated
+ * one. Cloudflare's own docs describe exactly this "secrets survive a
+ * subsequent write" contract for the sibling `wrangler versions upload
+ * --secrets-file` flow ("Secrets not included in the file are preserved from
+ * the previous version" —
+ * https://developers.cloudflare.com/workers/configuration/secrets/#upload-secrets-alongside-code);
+ * re-setting the secret to its own value after every deploy gets the same
+ * outcome without depending on an unverified upload-time flag.
+ */
+export async function updateWorker(
+  apiToken: string,
+  accountId: string,
+  workerName: string,
+  bucketName: string,
+  script: string,
+  writeToken: string,
+  previousHash: string | undefined,
+  opts: ProvisionOptions & { force?: boolean } = {},
+): Promise<UpdateWorkerResult> {
+  const templateHash = hashWorkerScript(script);
+  if (!opts.force && previousHash === templateHash) {
+    return { templateHash, skipped: true };
+  }
+  await deployWorker(apiToken, accountId, workerName, script, bucketName, opts);
+  await setWorkerSecret(apiToken, accountId, workerName, writeToken, opts);
+  return { templateHash, skipped: false };
 }
 
 /** Add/update the WRITE_TOKEN binding using Cloudflare's Workers Secrets API. */

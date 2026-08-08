@@ -1054,6 +1054,10 @@ export interface Meta {
     domain?: string;
     /** Cloudflare Web Analytics token injected into published HTML pages. */
     analyticsToken?: string;
+    /** sha256 of the Worker script deployed at the last provision/update, so
+     * `agents share status` can tell current vs outdated vs unknown (a config
+     * from before this field existed has no hash — always "unknown"). */
+    templateHash?: string;
   };
   /**
    * Owner/channel notification config for `agents send` / `agents notify`.

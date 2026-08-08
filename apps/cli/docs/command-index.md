@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_102 command groups · 576 commands._
+_102 command groups · 577 commands._
 
 ## accounts — Browse and name signed-in harness accounts
 
@@ -894,6 +894,7 @@ agents share delete <targets...>  Take down a published page (and by default its
 agents share join [baseUrl]       Use an existing synced share endpoint and write token (no provisioning).
 agents share setup                One-time: provision an R2 bucket + Worker on your Cloudflare and save the config.
 agents share status               Show the configured share endpoint and namespace.
+agents share update               Re-deploy the Worker script to the current template on an already-provisioned endpoint (idempotent).
 ```
 
 ## skills — Add domain-specific capabilities to agents via packaged SKILL.md files

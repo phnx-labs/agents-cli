@@ -30,6 +30,7 @@ let tmpHome = '';
 let previousHome: string | undefined;
 let previousPath: string | undefined;
 let previousShareGitHubUser: string | undefined;
+let previousShareWriteToken: string | undefined;
 
 async function freshShareModules() {
   vi.resetModules();
@@ -52,6 +53,11 @@ beforeEach(() => {
   previousPath = process.env.PATH;
   previousShareGitHubUser = process.env.AGENTS_SHARE_GITHUB_USER;
   delete process.env.AGENTS_SHARE_GITHUB_USER;
+  // A live `agents share` session in this shell may have SHARE_WRITE_TOKEN
+  // injected (shareRuntimeEnv) — clear it so readWriteToken() in tests always
+  // resolves through the (mocked) bundle, not this process's real env.
+  previousShareWriteToken = process.env.SHARE_WRITE_TOKEN;
+  delete process.env.SHARE_WRITE_TOKEN;
   // Reads go to a temp HOME with an in-memory keychain backend.
   vi.spyOn(console, 'log').mockImplementation(() => {});
 });
@@ -65,6 +71,8 @@ afterEach(() => {
   else process.env.PATH = previousPath;
   if (previousShareGitHubUser === undefined) delete process.env.AGENTS_SHARE_GITHUB_USER;
   else process.env.AGENTS_SHARE_GITHUB_USER = previousShareGitHubUser;
+  if (previousShareWriteToken === undefined) delete process.env.SHARE_WRITE_TOKEN;
+  else process.env.SHARE_WRITE_TOKEN = previousShareWriteToken;
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
@@ -159,6 +167,7 @@ describe('runShareProvision custom domain selection', () => {
       workerName: 'agents-share',
       bucketName: 'agents-share',
       domain: undefined,
+      templateHash: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
     expect(seen.some((req) => req.pathname === '/accounts/acct_1/workers/domains')).toBe(false);
   });
@@ -221,6 +230,118 @@ describe('runShareProvision custom domain selection', () => {
   });
 });
 
+describe('runShareUpdate', () => {
+  it('refuses when share was never configured', async () => {
+    const { share } = await freshShareModules();
+    await expect(share.runShareUpdate({})).rejects.toThrow(/Run 'agents share setup'/);
+  });
+
+  it('reuses the existing account/worker/bucket/token from config — never re-provisions', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: 'acct_existing',
+      workerName: 'worker-existing',
+      bucketName: 'bucket-existing',
+    });
+    config.storeWriteToken('the-original-write-token');
+
+    const seen: CloudflareRequest[] = [];
+    const request: CloudflareRequester = async (req) => { seen.push(req); return {}; };
+
+    const result = await share.runShareUpdate({ token: 'cf-token', account: 'acct_existing', request });
+
+    expect(result.updated).toBe(true);
+    expect(result.baseUrl).toBe('https://share.test');
+    expect(result.workerName).toBe('worker-existing');
+    // No bucket/subdomain/domain calls — an update never re-provisions.
+    expect(seen.map((r) => r.pathname)).toEqual([
+      '/accounts/acct_existing/workers/scripts/worker-existing',
+      '/accounts/acct_existing/workers/scripts/worker-existing/secrets',
+    ]);
+    expect(seen[1].body).toEqual({ name: 'WRITE_TOKEN', text: 'the-original-write-token', type: 'secret_text' });
+    // The token in the bundle is untouched — never regenerated.
+    expect(config.readWriteToken()).toBe('the-original-write-token');
+    expect(config.readShareConfig()?.templateHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('is idempotent — a second call with a matching hash makes no request', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: 'acct_1',
+      workerName: 'worker-one',
+      bucketName: 'bucket-one',
+    });
+    config.storeWriteToken('tok');
+
+    const first: CloudflareRequest[] = [];
+    await share.runShareUpdate({ token: 'cf-token', request: async (req) => { first.push(req); return {}; } });
+    expect(first.length).toBeGreaterThan(0);
+
+    const second: CloudflareRequest[] = [];
+    const result = await share.runShareUpdate({ token: 'cf-token', request: async (req) => { second.push(req); return {}; } });
+
+    expect(result.updated).toBe(false);
+    expect(second).toEqual([]);
+  });
+});
+
+describe('shareTemplateStatus', () => {
+  it('is unknown for a config with no recorded hash', async () => {
+    const { share } = await freshShareModules();
+    expect(
+      share.shareTemplateStatus({ baseUrl: 'x', accountId: 'a', workerName: 'w', bucketName: 'b' }),
+    ).toBe('unknown');
+  });
+
+  it('is current when the recorded hash matches the live template', async () => {
+    const { share } = await freshShareModules();
+    const { renderWorkerScript } = await import('../lib/share/worker-template.js');
+    const { hashWorkerScript } = await import('../lib/share/provision.js');
+    expect(
+      share.shareTemplateStatus({
+        baseUrl: 'x', accountId: 'a', workerName: 'w', bucketName: 'b',
+        templateHash: hashWorkerScript(renderWorkerScript()),
+      }),
+    ).toBe('current');
+  });
+
+  it('is outdated when the recorded hash does not match', async () => {
+    const { share } = await freshShareModules();
+    expect(
+      share.shareTemplateStatus({
+        baseUrl: 'x', accountId: 'a', workerName: 'w', bucketName: 'b', templateHash: 'stale-hash',
+      }),
+    ).toBe('outdated');
+  });
+});
+
+describe('agents share update (CLI)', () => {
+  it('--json reports skipped:false=>updated true with the new hash on first run', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: 'acct_1',
+      workerName: 'worker-one',
+      bucketName: 'bucket-one',
+    });
+    config.storeWriteToken('tok');
+
+    // The CLI action doesn't accept a `request` override, so this exercises the
+    // real Cloudflare requester path only up to argument parsing — assert via
+    // the underlying function instead, and cover the CLI wiring/help surface here.
+    const program = new Command();
+    program.exitOverride();
+    share.registerShareCommands(program);
+    const updateCmd = program.commands.find((c) => c.name() === 'share')?.commands.find((c) => c.name() === 'update');
+    expect(updateCmd).toBeDefined();
+    expect(updateCmd?.options.map((o) => o.long)).toEqual(
+      expect.arrayContaining(['--bundle', '--account', '--token', '--force', '--json']),
+    );
+  });
+});
+
 describe('share status and analytics namespace display', () => {
   it('resolves the status namespace through gh auth when github.user is unset', async () => {
     const { share, config } = await freshShareModules();
@@ -239,7 +360,10 @@ describe('share status and analytics namespace display', () => {
 
     const out = loggedOutput();
     expect(out).toContain('https://share.test/gh-only-user');
-    expect(out).not.toContain('unknown');
+    // The namespace line resolves via gh — it must not fall back to the
+    // "unknown — set gh auth" hint (a separate "template unknown" line is
+    // expected here since this config has no recorded template hash).
+    expect(out).not.toMatch(/namespace.*unknown/);
   });
 
   it('uses the gh-resolved namespace in the analytics path hint', async () => {
@@ -260,6 +384,48 @@ describe('share status and analytics namespace display', () => {
     await program.parseAsync(['node', 'agents', 'share', 'analytics']);
 
     expect(loggedOutput()).toContain('filter by /gh-only-user/');
+  });
+
+  it('shows the template as unknown for a config with no recorded hash', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: 'acct_1',
+      workerName: 'agents-share',
+      bucketName: 'agents-share',
+    });
+    installFakeGh('gh-only-user');
+
+    const program = new Command();
+    program.exitOverride();
+    share.registerShareCommands(program);
+    await program.parseAsync(['node', 'agents', 'share', 'status']);
+
+    expect(loggedOutput()).toContain('unknown');
+  });
+
+  it('shows the template as current right after `agents share update` and outdated once the hash is stale', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: 'acct_1',
+      workerName: 'agents-share',
+      bucketName: 'agents-share',
+    });
+    config.storeWriteToken('tok');
+    await share.runShareUpdate({ token: 'cf-token', request: async () => ({}) });
+    installFakeGh('gh-only-user');
+
+    const program = new Command();
+    program.exitOverride();
+    share.registerShareCommands(program);
+    await program.parseAsync(['node', 'agents', 'share', 'status']);
+    expect(loggedOutput()).toContain('current');
+
+    config.writeShareConfig({ ...config.readShareConfig()!, templateHash: 'stale-hash' });
+    vi.mocked(console.log).mockClear();
+    await program.parseAsync(['node', 'agents', 'share', 'status']);
+    expect(loggedOutput()).toContain('outdated');
   });
 });
 

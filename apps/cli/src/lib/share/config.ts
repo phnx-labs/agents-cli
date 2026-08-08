@@ -32,6 +32,10 @@ export interface ShareConfig {
   domain?: string;
   /** Cloudflare Web Analytics token injected into published HTML pages. */
   analyticsToken?: string;
+  /** sha256 of the Worker script deployed at the last provision/update. Absent
+   * on any config written before this field existed — treat that as "unknown",
+   * never as "outdated" (there is nothing to compare against). */
+  templateHash?: string;
 }
 
 export const SHARE_BUNDLE = 'share';
@@ -59,6 +63,7 @@ export function readShareConfig(): ShareConfig | null {
     bucketName: s.bucketName,
     domain: s.domain,
     analyticsToken: s.analyticsToken,
+    templateHash: s.templateHash,
   };
 }
 

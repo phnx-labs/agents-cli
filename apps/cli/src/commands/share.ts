@@ -13,6 +13,7 @@ import {
   generateWriteToken,
   readCloudflareCreds,
   readShareConfig,
+  readWriteToken,
   readWriteTokenEnv,
   readWriteTokenFromBundle,
   storeWriteToken,
@@ -25,6 +26,8 @@ import {
   deployWorker,
   enableWorkersDev,
   findZoneId,
+  hashWorkerScript,
+  updateWorker,
   type CloudflareRequester,
   setWorkerSecret,
 } from '../lib/share/provision.js';
@@ -42,6 +45,15 @@ export function formatSharePublishResult(result: PublishResult, json = false): s
   if (result.coverUrl) lines.push(chalk.dim(`  cover ${result.coverUrl}`));
   if (result.expiresAt) lines.push(chalk.dim(`  expires ${new Date(result.expiresAt).toLocaleString()}`));
   return lines.join('\n');
+}
+
+/** Compare the configured endpoint's last-deployed template hash against the
+ * hash of the CURRENT `worker-template.ts` render. A config with no recorded
+ * hash (every endpoint provisioned before this field existed) is "unknown" —
+ * never "current" or "outdated", since there is nothing to compare against. */
+export function shareTemplateStatus(cfg: ShareConfig): 'current' | 'outdated' | 'unknown' {
+  if (!cfg.templateHash) return 'unknown';
+  return cfg.templateHash === hashWorkerScript(renderWorkerScript()) ? 'current' : 'outdated';
 }
 
 export function formatShareDeleteResult(result: DeleteShareResult, json = false): string {
@@ -185,6 +197,9 @@ ${SHARE_DELETE_EXAMPLES}
       # One-time setup (or join an existing endpoint)
       agents share setup
       agents share join https://share.agents-cli.sh
+
+      # Push a worker-template.ts change out to an already-provisioned endpoint
+      agents share update
     `,
     notes: SHARE_DELETE_NOTES,
   });
@@ -242,6 +257,47 @@ ${SHARE_DELETE_EXAMPLES}
       }
     });
 
+  const shareUpdateCmd = shareCmd
+    .command('update')
+    .description('Re-deploy the Worker script to the current template on an already-provisioned endpoint (idempotent).')
+    .option('--bundle <name>', 'secrets bundle holding the Cloudflare API token', DEFAULT_CF_BUNDLE)
+    .option('--account <id>', 'Cloudflare account id override (default: the configured endpoint\'s account)')
+    .option('--token <t>', 'Cloudflare API token (else read from --bundle)')
+    .option('--force', 're-deploy even if the deployed template already matches')
+    .option('--json', 'emit a machine-readable result')
+    .action(async (opts: { bundle: string; account?: string; token?: string; force?: boolean; json?: boolean }) => {
+      try {
+        const result = await runShareUpdate(opts);
+        if (opts.json) {
+          console.log(JSON.stringify(result, null, 2));
+          return;
+        }
+        if (result.updated) {
+          console.log(chalk.green(`Worker '${result.workerName}' updated → template ${result.templateHash.slice(0, 12)}…`));
+        } else {
+          console.log(chalk.dim(`Worker '${result.workerName}' already matches the current template — no-op.`));
+        }
+      } catch (e) {
+        console.error(chalk.red((e as Error).message));
+        process.exitCode = 1;
+      }
+    });
+
+  setHelpSections(shareUpdateCmd, {
+    examples: `
+      # Push a worker-template.ts change out to your already-provisioned endpoint
+      agents share update
+
+      # Force a re-deploy even though the template hash already matches
+      agents share update --force
+    `,
+    notes: `
+  Reuses the existing account/worker/bucket from 'agents share status' and the
+  existing write token — it never re-provisions a bucket, touches routes, or
+  regenerates the token. See 'agents share status' for whether an update is due.
+    `,
+  });
+
   shareCmd
     .command('status')
     .description('Show the configured share endpoint and namespace.')
@@ -256,6 +312,14 @@ ${SHARE_DELETE_EXAMPLES}
       const user = await resolveGitHubUsername();
       console.log(`${chalk.bold('namespace')} ${user ? chalk.cyan(`${cfg.baseUrl}/${user}`) : chalk.yellow('unknown — set gh auth or github.user')}`);
       console.log(`${chalk.bold('analytics')} ${analyticsEnabled(cfg) ? chalk.green('enabled') : chalk.dim('not configured')}`);
+      const templateStatus = shareTemplateStatus(cfg);
+      const templateLabel =
+        templateStatus === 'current'
+          ? chalk.green('current')
+          : templateStatus === 'outdated'
+            ? chalk.yellow('outdated — run `agents share update`')
+            : chalk.dim("unknown — provisioned before version tracking; run `agents share update` to adopt it");
+      console.log(`${chalk.bold('template')}  ${templateLabel}`);
     });
 
   shareCmd
@@ -313,6 +377,7 @@ export async function runShareProvision(opts: {
   const bucketName = opts.bucket;
   const token = generateWriteToken();
   const requestedDomain = cleanHostname(opts.domain) ?? DEFAULT_SHARE_DOMAIN;
+  const script = renderWorkerScript();
 
   const spin = ora('Provisioning on Cloudflare…').start();
   try {
@@ -321,7 +386,7 @@ export async function runShareProvision(opts: {
     spin.text = `R2 bucket '${bucketName}' ready`;
     await configureBucketLifecycle(apiToken, accountId, bucketName, provisionOpts);
     spin.text = `R2 bucket '${bucketName}' lifecycle ready`;
-    await deployWorker(apiToken, accountId, workerName, renderWorkerScript(), bucketName, provisionOpts);
+    await deployWorker(apiToken, accountId, workerName, script, bucketName, provisionOpts);
     spin.text = `Worker '${workerName}' deployed`;
     await setWorkerSecret(apiToken, accountId, workerName, token, provisionOpts);
     spin.text = `Worker '${workerName}' write token set`;
@@ -342,7 +407,15 @@ export async function runShareProvision(opts: {
     }
     spin.succeed('Provisioned');
 
-    const cfg: ShareConfig = { baseUrl, accountId, workerName, bucketName, domain, analyticsToken: opts.analyticsToken };
+    const cfg: ShareConfig = {
+      baseUrl,
+      accountId,
+      workerName,
+      bucketName,
+      domain,
+      analyticsToken: opts.analyticsToken,
+      templateHash: hashWorkerScript(script),
+    };
     writeShareConfig(cfg);
     storeWriteToken(token);
 
@@ -357,6 +430,59 @@ export async function runShareProvision(opts: {
     spin.fail('Provisioning failed');
     throw e;
   }
+}
+
+export interface ShareUpdateResult {
+  updated: boolean;
+  templateHash: string;
+  baseUrl: string;
+  workerName: string;
+}
+
+/** Re-deploy the Worker script on an ALREADY-provisioned endpoint to match the
+ * current `worker-template.ts`. Reuses the existing account/worker/bucket and
+ * write token from `readShareConfig()`/the `share` bundle — never creates a
+ * bucket, touches routes/domains, or regenerates the token (see
+ * `updateWorker` in `lib/share/provision.ts` for how the token survives the
+ * re-upload). Idempotent: no-ops when the deployed hash already matches
+ * unless `force`. */
+export async function runShareUpdate(opts: {
+  bundle?: string;
+  account?: string;
+  token?: string;
+  force?: boolean;
+  request?: CloudflareRequester;
+} = {}): Promise<ShareUpdateResult> {
+  const cfg = readShareConfig();
+  if (!cfg) {
+    throw new Error("Not configured. Run 'agents share setup' (to provision) or 'agents share join' first.");
+  }
+
+  const { apiToken, accountId: acctFromBundle } = readCloudflareCreds(opts.bundle ?? DEFAULT_CF_BUNDLE, {
+    apiToken: opts.token,
+    accountId: opts.account,
+  });
+  const accountId = opts.account || acctFromBundle || cfg.accountId;
+  const writeToken = readWriteToken();
+  const script = renderWorkerScript();
+  const provisionOpts = { ...(opts.request ? { request: opts.request } : {}), force: opts.force };
+
+  const result = await updateWorker(
+    apiToken,
+    accountId,
+    cfg.workerName,
+    cfg.bucketName,
+    script,
+    writeToken,
+    cfg.templateHash,
+    provisionOpts,
+  );
+
+  if (!result.skipped) {
+    writeShareConfig({ ...cfg, templateHash: result.templateHash });
+  }
+
+  return { updated: !result.skipped, templateHash: result.templateHash, baseUrl: cfg.baseUrl, workerName: cfg.workerName };
 }
 
 function cleanHostname(domain: string | undefined): string | undefined {

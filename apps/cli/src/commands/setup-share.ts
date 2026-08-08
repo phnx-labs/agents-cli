@@ -15,7 +15,7 @@ import {
   DEFAULT_WORKER_NAME,
   readShareConfig,
 } from '../lib/share/config.js';
-import { runShareProvision, runShareJoin } from './share.js';
+import { runShareProvision, runShareJoin, runShareUpdate, shareTemplateStatus } from './share.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 
 /**
@@ -40,12 +40,44 @@ export async function runShareWizard(): Promise<boolean> {
     console.log(
       chalk.dim(`  worker ${existing.workerName} · bucket ${existing.bucketName} · account ${existing.accountId}`),
     );
-    const { confirm } = await import('@inquirer/prompts');
-    const reconfigure = await confirm({ message: 'Reconfigure the share endpoint?', default: false });
-    if (!reconfigure) {
+    const templateStatus = shareTemplateStatus(existing);
+    console.log(chalk.dim(`  template ${templateStatus}`));
+
+    const { select } = await import('@inquirer/prompts');
+    const action = await select({
+      message: 'Share is already configured. What do you want to do?',
+      choices: [
+        { name: 'Keep as is', value: 'keep' as const },
+        {
+          name: 'Update the deployed Worker to the latest template',
+          value: 'update' as const,
+          description:
+            templateStatus === 'current'
+              ? 'Already current — this re-deploys anyway and refreshes the token in place.'
+              : 'Re-deploys the Worker script on your existing endpoint (same account/worker/bucket, same write token).',
+        },
+        {
+          name: 'Reconfigure from scratch (provision or join again)',
+          value: 'reconfigure' as const,
+        },
+      ],
+      default: templateStatus === 'outdated' || templateStatus === 'unknown' ? ('update' as const) : ('keep' as const),
+    });
+
+    if (action === 'keep') {
       console.log(chalk.dim('Keeping the current endpoint.'));
       return true;
     }
+    if (action === 'update') {
+      const result = await runShareUpdate({});
+      console.log(
+        result.updated
+          ? chalk.green(`Worker '${result.workerName}' updated → template ${result.templateHash.slice(0, 12)}…`)
+          : chalk.dim(`Worker '${result.workerName}' already matches the current template — no-op.`),
+      );
+      return true;
+    }
+    // action === 'reconfigure' — fall through to the provision/join flow below.
   }
 
   const { select } = await import('@inquirer/prompts');

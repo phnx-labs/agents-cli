@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 102,
-  "commands": 576,
+  "commands": 577,
   "root": {
     "name": "agents",
     "path": "",
@@ -25188,7 +25188,7 @@
           "negate": false
         }
       ],
-      "examples": "# Publish an HTML file — gets an auto OG cover + a shareable link\n      agents share ./out/plan.html\n\n      # Custom slug, expiring in 30 days\n      agents share ./out/report.html --slug q3-report --expire 30d\n\n      # Delete by full URL — also takes down the sibling OG cover\n      agents share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists\n\n      # One-time setup (or join an existing endpoint)\n      agents share setup\n      agents share join https://share.agents-cli.sh",
+      "examples": "# Publish an HTML file — gets an auto OG cover + a shareable link\n      agents share ./out/plan.html\n\n      # Custom slug, expiring in 30 days\n      agents share ./out/report.html --slug q3-report --expire 30d\n\n      # Delete by full URL — also takes down the sibling OG cover\n      agents share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists\n\n      # One-time setup (or join an existing endpoint)\n      agents share setup\n      agents share join https://share.agents-cli.sh\n\n      # Push a worker-template.ts change out to an already-provisioned endpoint\n      agents share update",
       "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents share delete === agents unshare (same command, different name).",
       "subcommands": [
         {
@@ -25416,6 +25416,74 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "update",
+          "path": "share update",
+          "aliases": [],
+          "description": "Re-deploy the Worker script to the current template on an already-provisioned endpoint (idempotent).",
+          "args": [],
+          "options": [
+            {
+              "flags": "--bundle <name>",
+              "description": "secrets bundle holding the Cloudflare API token",
+              "long": "--bundle",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "cloudflare"
+            },
+            {
+              "flags": "--account <id>",
+              "description": "Cloudflare account id override (default: the configured endpoint's account)",
+              "long": "--account",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--token <t>",
+              "description": "Cloudflare API token (else read from --bundle)",
+              "long": "--token",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--force",
+              "description": "re-deploy even if the deployed template already matches",
+              "long": "--force",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "emit a machine-readable result",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Push a worker-template.ts change out to your already-provisioned endpoint\n      agents share update\n\n      # Force a re-deploy even though the template hash already matches\n      agents share update --force",
+          "notes": "Reuses the existing account/worker/bucket from 'agents share status' and the\n  existing write token — it never re-provisions a bucket, touches routes, or\n  regenerates the token. See 'agents share status' for whether an update is due.",
           "subcommands": []
         }
       ]

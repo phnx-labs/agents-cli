@@ -11,8 +11,9 @@ and you open the link to see if it worked.
 agents share setup --analytics-token <cf-token>   # once: provision on your Cloudflare
 agents share plan.html --slug fleet --expire 30d  # → https://<base>/<user>/fleet
 agents share plan.html --json                     # machine-readable URL for hooks
-agents share status                               # show endpoint, namespace, analytics
+agents share status                               # show endpoint, namespace, analytics, template
 agents share analytics                            # link to the Web Analytics dashboard
+agents share update                               # re-deploy the Worker to the latest template
 agents unshare fleet                              # take the link (+ its OG cover) down
 ```
 
@@ -22,7 +23,10 @@ the `WRITE_TOKEN` Worker secret, and enables the free
 `*.workers.dev` subdomain. It maps `share.agents-cli.sh` when the token owns the
 `agents-cli.sh` zone; otherwise it keeps the `*.workers.dev` endpoint. Pass
 `--domain share.example.com` to use a different visible zone. Then `agents share <file>`
-does an authed `PUT` and prints the link.
+does an authed `PUT` and prints the link. Re-running `agents setup share` interactively
+against an already-configured endpoint offers to update the deployed Worker in place
+instead of only "keep" or "reconfigure from scratch" — see
+[Updating the deployed Worker](#updating-the-deployed-worker).
 
 ## Architecture
 
@@ -87,10 +91,32 @@ agent makes plan.html
   treat anything you `agents share` as publicly discoverable. Pass `--slug` for a stable,
   exact name under your GitHub-username namespace.
 
+## Updating the deployed Worker
+
+`worker-template.ts` is the source of truth for the Worker's behavior, but `setup` only
+ever writes it out during first provisioning — an endpoint provisioned last month is
+stuck on last month's template until you push the current one out:
+
+```bash
+agents share status   # → template current | outdated | unknown
+agents share update   # re-deploy the current template to your EXISTING endpoint
+```
+
+`update` reuses the account, Worker name, and bucket already in your config — it never
+creates a bucket, touches routes/custom domains/`*.workers.dev`, and never regenerates
+`WRITE_TOKEN`. It's idempotent: re-running it when the deployed template already matches
+is a no-op (`--force` to redeploy anyway). A config from before this existed has no
+recorded hash and reads as `unknown` in `status` — running `update` once establishes it.
+
+Cloudflare's script-upload API replaces a Worker's bindings and secrets wholesale on
+every upload; `update` re-applies the existing `WRITE_TOKEN` via the Secrets API
+immediately after the script upload so it survives (see `updateWorker` in
+`lib/share/provision.ts` for the full reasoning and links to Cloudflare's docs).
+
 ## Where things live
 
 ```
-agents.yaml            share:                         # baseUrl / accountId / worker / bucket / domain / analyticsToken
+agents.yaml            share:                         # baseUrl / accountId / worker / bucket / domain / analyticsToken / templateHash
   (Meta.share)                                        # syncs fleet-wide via `agents repo push/pull`
 secrets bundle `share` WRITE_TOKEN                    # the raw write token — keychain-backed, never in config
 ```
@@ -109,8 +135,9 @@ synced config exists and the token is already available.
 | `agents share delete <targets...>` / `agents unshare <targets...>` | Take a published page down (see [Deleting a share](#deleting-a-share) below). |
 | `agents share setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h] [--analytics-token token]` | Provision an R2 bucket + Worker on your Cloudflare, map `share.agents-cli.sh` when visible (or `--domain h`), optionally configure a CF Web Analytics token, and save the config. |
 | `agents share join [baseUrl] [--token t]` | Use an existing endpoint, no provisioning. With no URL, consumes synced `share:` config plus `SHARE_WRITE_TOKEN` / the local `share` bundle. |
-| `agents share status` | Show the configured endpoint, namespace, and analytics state. |
+| `agents share status` | Show the configured endpoint, namespace, analytics state, and whether the deployed Worker matches the current template. |
 | `agents share analytics` | Show the Web Analytics status and dashboard link. |
+| `agents share update [--bundle b] [--account id] [--token t] [--force] [--json]` | Re-deploy the Worker script to your existing endpoint (same account/worker/bucket, same write token). No-op when the deployed template already matches unless `--force`. |
 
 ## Deleting a share
 
