@@ -45,9 +45,6 @@ import {
   transformSubagentForKiro,
   transformSubagentForOpenCode,
   transformSubagentForAntigravity,
-  writeKimiSubagentFiles,
-  buildKimiSubagentsParentYaml,
-  KIMI_SUBAGENTS_PARENT_FILE,
 } from './subagents.js';
 
 /** A path an installed subagent occupies, tagged for removal/trash handling. */
@@ -77,12 +74,8 @@ export interface SubagentTarget {
   names(dir: string): string[];
   /** On-disk paths subagent `name` occupies (for removal / soft-delete). */
   occupied(dir: string, name: string): OccupiedEntry[];
-  /** Cross-item files this target owns outside any one subagent's occupied paths. */
-  finalizeOccupied?(dir: string): OccupiedEntry[];
   /** Rich metadata for `name`; `null` skips it from the listing. */
   read(dir: string, name: string): SubagentMeta | null;
-  /** Optional post-sync pass over the just-synced subagents (Kimi's parent index). */
-  finalize?(dir: string, synced: Array<{ name: string; path: string }>): void;
 }
 
 // ── metadata readers (the per-format escape hatch) ───────────────────────────
@@ -263,60 +256,6 @@ function dirCopy(opts: {
   };
 }
 
-/**
- * Kimi (genuinely bespoke): each subagent is a `<name>.yaml` + sibling
- * `<name>.system.md`, and a managed `_agents-cli.yaml` parent lists them all for
- * `kimi --agent-file`. The parent index is a cross-item concern, so it is built
- * in `finalize`, not per-item.
- */
-const kimiTarget: SubagentTarget = {
-  dir: (home) => path.join(home, '.kimi-code', 'agents'),
-  write(dir, sub) {
-    writeKimiSubagentFiles(dir, sub.path, sub.name);
-  },
-  names(dir) {
-    if (!fs.existsSync(dir)) return [];
-    // The parent is `_agents-cli.yaml` (underscore-prefixed, reserved).
-    return fs
-      .readdirSync(dir)
-      .filter((f) => f.endsWith('.yaml') && !f.startsWith('_'))
-      .map((f) => f.slice(0, -'.yaml'.length));
-  },
-  occupied(dir, name) {
-    return [
-      { path: safeJoin(dir, `${name}.yaml`), kind: 'file' },
-      { path: safeJoin(dir, `${name}.system.md`), kind: 'file' },
-    ];
-  },
-  finalizeOccupied(dir) {
-    return [{ path: safeJoin(dir, KIMI_SUBAGENTS_PARENT_FILE), kind: 'file' }];
-  },
-  read(dir, name) {
-    const yamlPath = path.join(dir, `${name}.yaml`);
-    if (!fs.existsSync(yamlPath) || !fs.statSync(yamlPath).isFile()) return null;
-    let description = '';
-    try {
-      const parsed = yaml.parse(fs.readFileSync(yamlPath, 'utf-8')) as {
-        agent?: { description?: string; name?: string };
-      } | null;
-      description = parsed?.agent?.description ?? '';
-    } catch {
-      /* leave description empty */
-    }
-    const files = [`${name}.yaml`];
-    const promptFile = `${name}.system.md`;
-    if (fs.existsSync(path.join(dir, promptFile))) files.push(promptFile);
-    return { frontmatter: { name, description }, files, path: yamlPath };
-  },
-  finalize(dir, synced) {
-    const entries = synced.map((sub) => {
-      const fm = parseSubagentFrontmatter(path.join(sub.path, 'AGENT.md'));
-      return { name: sub.name, description: fm?.description ?? sub.name, relativePath: `./${sub.name}.yaml` };
-    });
-    fs.writeFileSync(safeJoin(dir, KIMI_SUBAGENTS_PARENT_FILE), buildKimiSubagentsParentYaml(entries));
-  },
-};
-
 // ── the registry ─────────────────────────────────────────────────────────────
 
 /**
@@ -371,8 +310,10 @@ export const SUBAGENT_TARGETS: Partial<Record<AgentId, SubagentTarget>> = {
     transform: transformSubagentForAntigravity,
   }),
   openclaw: dirCopy({ subdir: ['.openclaw'], marker: 'AGENTS.md', rename: { 'AGENT.md': 'AGENTS.md' } }),
-  // Bespoke multi-file + parent index.
-  kimi: kimiTarget,
+  // Kimi discovers Claude-shaped agent markdown from its brand home's `agents/`
+  // dir (`USER_BRAND_DIRS = ["agents"]`, kimi-code >= 0.29.0). Frontmatter
+  // name/description + body, kebab-case name -- the same shape as claude/grok.
+  kimi: flatFile({ subdir: ['.kimi-code', 'agents'], ext: '.md', transform: transformSubagentForClaude, readMeta: metaFrontmatterFallback }),
 };
 
 /** The registry entry for `agent`, or undefined if it stores no subagents. */

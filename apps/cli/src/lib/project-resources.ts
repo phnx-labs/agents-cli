@@ -305,8 +305,6 @@ function syncProjectSubagents(
   if (!target) return;
   const all = readProjectSubagents(projectAgentsDir);
   const dir = target.dir(projectRoot);
-  const targetDirRel = toPosixRel(path.relative(agentRoot, dir));
-  const hadManagedTarget = manifest?.paths.some((rel) => rel === targetDirRel || rel.startsWith(targetDirRel + '/')) ?? false;
 
   for (const sub of all.values()) {
     const occupied = target.occupied(dir, sub.name);
@@ -323,20 +321,6 @@ function syncProjectSubagents(
     }
   }
 
-  const syncedNames = result.synced
-    .filter((name) => name.startsWith('subagents/'))
-    .map((name) => name.slice('subagents/'.length))
-    .filter((name) => all.has(name))
-    .map((name) => all.get(name)!);
-  if (target.finalize && (syncedNames.length > 0 || hadManagedTarget)) {
-    target.finalize(dir, syncedNames);
-    for (const entry of target.finalizeOccupied?.(dir) ?? []) {
-      // Same normalization as record(): this is the one manifest write that
-      // doesn't funnel through it (the parent subagent index, e.g. Kimi's
-      // agents/_agents-cli.yaml).
-      manifestPaths.add(toPosixRel(path.relative(agentRoot, entry.path)));
-    }
-  }
 }
 
 function workflowManagedRelPaths(agent: AgentId, projectRoot: string, name: string, workflowDir: string): string[] {
