@@ -65,4 +65,17 @@ describe('normalizeCwd', () => {
     const once = normalizeCwd(foreign);
     expect(normalizeCwd(once)).toBe(once);
   });
+
+  it('never rebases a foreign Windows-rooted path onto this process cwd (RUSH-2358)', () => {
+    // The mirror regression: on POSIX, path.isAbsolute() doesn't recognize a
+    // drive letter, so a Windows-recorded cwd used to fall through to
+    // path.resolve() and come back prefixed with THIS process's own cwd —
+    // silently grafting an unrelated local directory onto a synced session
+    // (and, via WORKTREE_RE, capable of misattributing its worktree slug to
+    // whatever worktree this process happens to be running in).
+    const foreign = 'C:\\Users\\dev\\repo\\.agents\\worktrees\\my-feature';
+    const out = normalizeCwd(foreign);
+    expect(out).not.toContain(process.cwd());
+    expect(out.replace(/\//g, '\\')).toBe(foreign);
+  });
 });
