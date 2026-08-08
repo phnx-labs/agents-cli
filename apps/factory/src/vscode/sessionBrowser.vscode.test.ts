@@ -5,7 +5,6 @@ import {
   LatestSessionBrowserRequest,
   handleForkPickedSession,
   loadBrowsableSessions,
-  registerForkRecapCommand,
   registerForkPickSessionCommand,
   runPickedSessionFork,
   runSessionBrowserPicker,
@@ -81,66 +80,6 @@ describe('session browser extension-host seam', () => {
     });
   });
 
-  test('Agents: Fork (Recap) queues only a context recap in a new remote sibling', async () => {
-    const historicalId = '51a57597-3e08-40fc-9d2b-ca623458dc55';
-    const row: SessionBrowserSessionRow = {
-      kind: 'session',
-      session: {
-        id: historicalId,
-        shortId: '51a57597',
-        agent: 'claude',
-        cwd: '/srv/exact repo',
-        timestamp: '2026-08-03T00:00:00Z',
-      },
-      machine: 'yosemite-s0',
-      remote: true,
-      current: false,
-      label: historicalId,
-      description: '',
-      detail: '',
-    };
-    let registeredId = '';
-    let registered!: () => Promise<void>;
-    let queued = '';
-    registerForkRecapCommand((id, callback) => {
-      registeredId = id;
-      registered = callback;
-      return {};
-    }, () => handleForkPickedSession({
-      intent: 'recap',
-      currentSession: () => ({ sessionId: 'different-current-id', device: 'zion' }),
-      pickSession: async () => row,
-      localMachine: 'zion',
-      resolveAgentConfig: agentKey => ({ agentKey }),
-      launchQueued: async (_config, request) => {
-        const launch = buildAgentLaunchCommand(
-          request.agentKey,
-          'new-sibling-id',
-          undefined,
-          undefined,
-          undefined,
-          request.strategy,
-          undefined,
-          { host: request.host, local: request.local, remoteCwd: request.remoteCwd },
-        );
-        queued = `${launch} && queue ${request.prompt}`;
-      },
-      showError: message => { throw new Error(message); },
-      showStatus: () => {},
-    }));
-
-    await registered();
-
-    const [launch, prompt] = queued.split(' && queue ');
-    expect(registeredId).toBe('agents.forkRecap');
-    expect(launch).toContain("--host 'yosemite-s0' --remote-cwd '/srv/exact repo'");
-    expect(launch).toContain('--session-id new-sibling-id');
-    expect(launch).not.toContain(historicalId);
-    expect(launch).not.toContain('--resume');
-    expect(prompt).toBe(`/recap ${historicalId}`);
-    expect(prompt).not.toContain('/continue');
-  });
-
   test('only the latest overlapping picker load may publish items or clear busy', async () => {
     const requests = new LatestSessionBrowserRequest();
     const published: string[] = [];
@@ -195,26 +134,6 @@ describe('session browser extension-host seam', () => {
     await Bun.sleep(0);
     expect(quickPick.busy).toBe(false);
     expect(quickPick.items).toEqual([{ label: 'reloaded local session' }]);
-    quickPick.hide();
-    expect(await picker).toBeNull();
-  });
-
-  test('labels the shared picker for the recap intent', async () => {
-    const quickPick = new FakeQuickPick<{ label: string }, 'switch' | 'reload'>();
-    const picker = runSessionBrowserPicker({
-      quickPick,
-      title: 'Agents: Fork (Recap)',
-      switchButton: 'switch',
-      reloadButton: 'reload',
-      localMachine: 'zion',
-      loadItems: async () => [],
-      chooseDevice: async () => ({ cancelled: true }),
-      emptyItem: () => ({ label: 'empty' }),
-      errorItem: message => ({ label: message }),
-    });
-
-    await Bun.sleep(0);
-    expect(quickPick.title).toBe('Agents: Fork (Recap) · zion');
     quickPick.hide();
     expect(await picker).toBeNull();
   });

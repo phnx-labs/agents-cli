@@ -6,6 +6,11 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **`Agents: Fork (Recap)` now recaps the active tab without asking for a session.**
+  The command starts a fresh sibling on the active session's host with the same
+  harness and balanced account selection, queues `/recap <full-id>`, and records
+  fork lineage. `Agents: Fork (Pick Session)` remains the explicit session browser.
+
 ## [0.9.313] - 2026-08-05
 
 - **Resume delegates session lifecycle to agents-cli.** The picker keeps its

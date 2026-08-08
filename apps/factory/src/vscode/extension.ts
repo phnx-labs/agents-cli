@@ -95,7 +95,7 @@ import {
   sortHostPickerDevices,
   type HostPickerCache,
 } from '../core/hostPickerCache';
-import { buildForkSessionRequest } from '../core/forkSession';
+import { buildForkSessionRequest, type ForkSessionIntent } from '../core/forkSession';
 import { handleForkPickHost, registerForkPickHostCommand, remoteForkSessionId, resolveForkSessionId } from './forkCommands.vscode';
 import { FORK_LINEAGE_KEY, recordForkEdge, type ForkEdge } from '../core/forkLineage';
 import {
@@ -109,9 +109,7 @@ import {
   handleForkPickedSession,
   loadBrowsableSessions,
   registerForkPickSessionCommand,
-  registerForkRecapCommand,
   runSessionBrowserPicker,
-  type PickedSessionIntent,
 } from './sessionBrowser.vscode';
 import type { RemoteSession, RawActiveSession } from '../core/remoteSessions';
 import {
@@ -1763,7 +1761,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    registerForkRecapCommand(vscode.commands.registerCommand, () => forkPickedSession(context, 'recap'))
+    vscode.commands.registerCommand('agents.forkRecap', () => forkCurrentSession(context, { intent: 'recap' }))
   );
 
   context.subscriptions.push(
@@ -4906,7 +4904,7 @@ async function spawnWithContext(context: vscode.ExtensionContext): Promise<void>
  */
 async function forkCurrentSession(
   context: vscode.ExtensionContext,
-  opts: { pickHost?: boolean } = {},
+  opts: { pickHost?: boolean; intent?: ForkSessionIntent } = {},
 ): Promise<void> {
   const activeTerminal = vscode.window.activeTerminal;
   if (!activeTerminal) {
@@ -4958,7 +4956,7 @@ async function forkCurrentSession(
   }
 
   // The standard command keeps the source session on its own host.
-  const request = buildForkSessionRequest(source);
+  const request = buildForkSessionRequest(source, undefined, opts.intent);
   if (!request.ok) {
     showForkRejection(request.reason);
     return;
@@ -4986,7 +4984,9 @@ async function forkCurrentSession(
 
   const where = request.host ?? 'this Mac';
   vscode.window.setStatusBarMessage(
-    request.moved
+    opts.intent === 'recap'
+      ? `Started recap from ${shortSessionId(request.sessionId)} on ${where}`
+      : request.moved
       ? `Forked ${shortSessionId(request.sessionId)} onto ${where} — it reads the transcript from ${request.sourceHost ?? LOCAL_MACHINE_ID}`
       : `Forked ${shortSessionId(request.sessionId)} on ${where}`,
     5000,
@@ -5141,7 +5141,6 @@ async function pickSessionToFork(
   context: vscode.ExtensionContext,
   currentSessionId: string | null,
   currentSessionDevice?: string,
-  intent: PickedSessionIntent = 'continue',
 ): Promise<SessionBrowserSessionRow | null> {
   const quickPick = vscode.window.createQuickPick<SessionBrowserItem>();
   const switchDevice: vscode.QuickInputButton = {
@@ -5152,9 +5151,7 @@ async function pickSessionToFork(
     iconPath: new vscode.ThemeIcon('refresh'),
     tooltip: 'Reload sessions',
   };
-  quickPick.placeholder = intent === 'recap'
-    ? 'Pick a session to recap — filter by topic, project, harness or id'
-    : 'Pick a session to fork — filter by topic, project, harness or id';
+  quickPick.placeholder = 'Pick a session to fork — filter by topic, project, harness or id';
   quickPick.matchOnDescription = true;
   quickPick.matchOnDetail = true;
   quickPick.buttons = [switchDevice, reload];
@@ -5162,7 +5159,7 @@ async function pickSessionToFork(
   try {
     return await runSessionBrowserPicker({
       quickPick,
-      title: intent === 'recap' ? 'Agents: Fork (Recap)' : 'Agents: Fork (Pick Session)',
+      title: 'Agents: Fork (Pick Session)',
       switchButton: switchDevice,
       reloadButton: reload,
       localMachine: LOCAL_MACHINE_ID,
@@ -5184,20 +5181,16 @@ async function pickSessionToFork(
   }
 }
 
-/** Browse sessions once, then either continue one or seed a new sibling with its recap. */
-async function forkPickedSession(
-  context: vscode.ExtensionContext,
-  intent: PickedSessionIntent = 'continue',
-): Promise<void> {
+/** Browse sessions once, then fork the selected session. */
+async function forkPickedSession(context: vscode.ExtensionContext): Promise<void> {
   await handleForkPickedSession({
     localMachine: LOCAL_MACHINE_ID,
-    intent,
     currentSession: () => {
       const activeTerminal = vscode.window.activeTerminal;
       const entry = activeTerminal ? terminals.getByTerminal(activeTerminal) : null;
       return { sessionId: entry?.sessionId ?? null, device: entry?.host };
     },
-    pickSession: (sessionId, device) => pickSessionToFork(context, sessionId, device, intent),
+    pickSession: (sessionId, device) => pickSessionToFork(context, sessionId, device),
     showError: message => { void vscode.window.showErrorMessage(message); },
     resolveAgentConfig: agentKey => {
       const builtIn = BUILT_IN_AGENTS.find(a => a.key === agentKey);
