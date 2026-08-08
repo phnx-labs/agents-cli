@@ -914,7 +914,7 @@ describe('settled init/migration probes (index.ts:1394-1446) — non-mutating st
     isGitRepo(SYSTEM_DIR);
   });
 
-  bench('v18 migration sentinel gate — existsSync + readFileSync + trim, without runMigration (index.ts:1424-1446)', () => {
+  bench('v19 migration sentinel gate — existsSync + readFileSync + trim, without runMigration (index.ts:1421-1443)', () => {
     probeMigrationSentinel();
   });
 
