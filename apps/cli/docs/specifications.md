@@ -1796,10 +1796,10 @@ schema (`--json` passes through each agent's native stream format).
   (`lib/shims.ts:280-330`), a separate code path from `buildExecEnv`, and even
   there no literal `HOME=` assignment exists (verified: no `HOME="` writer in
   `lib/shims.ts` — only `AGENTS_USER_DIR`/`GROK_DOWNLOADS` etc. *read* `$HOME`).
-- **EXEC-16.** The other 12 registered agents
-  (gemini, cursor, opencode, openclaw, amp, kiro, goose, antigravity, grok,
-  droid, hermes, pi — the 16 in `AgentId`, `lib/types.ts:13`, minus the four
-  EXEC-14 isolates) get **no** per-version config-dir var from
+- **EXEC-16.** The remaining registered agents
+  (gemini, opencode, openclaw, amp, kiro, goose, antigravity, grok,
+  droid, hermes, pi — the 16 in `AgentId`, `lib/types.ts:13`, minus the
+  EXEC-14 isolates and the XDG-isolated agents below) get **no** per-version config-dir var from
   `buildExecEnv` itself — its per-agent branch has no arm for them
   (`buildExecEnv`'s per-agent branch, `lib/exec.ts:402-490`; the `else` at `:485-489` only deletes the four known vars).
   A separate mechanism — the generated default-name bash shim
@@ -1818,6 +1818,24 @@ schema (`--json` passes through each agent's native stream format).
 
   Status: `[Drift]` — a named deviation from EXEC-13's per-version isolation
   contract, scoped (with the two ways to close it) in EXEC-GAP-1.
+- **EXEC-16a (MUST).** Muse and Cursor have no dedicated config-dir env var, so
+  `buildExecEnv` isolates them via XDG instead: it pins `XDG_CONFIG_HOME`
+  (and `XDG_DATA_HOME` for muse) at the version home (`lib/exec.ts`, the muse
+  and cursor arms). For Cursor this is what makes multiple accounts real: the
+  OAuth token that gates login lives at `$XDG_CONFIG_HOME/cursor/auth.json`
+  (verified empirically — relocating `XDG_CONFIG_HOME` relocates the login;
+  `~/.cursor/cli-config.json` is only account metadata), so each version home is
+  a distinct Cursor account, authenticated from its own token, isolated per run
+  (no global `~/.cursor` symlink swap — concurrent runs on different accounts do
+  not clobber one another). `CREDENTIAL_FILE_SEGMENTS.cursor`
+  (`lib/agents.ts`) verifies signed-in per home against that token, and
+  `seedActiveCursorLoginPerVersion` (`lib/migrate.ts`) migrates the legacy
+  global token into the active account's home on upgrade. The versioned-alias
+  shim mirrors the same `XDG_CONFIG_HOME` export (`CONFIG_ENV_ISOLATED_AGENTS`
+  includes cursor). Cursor's HOME-relative `~/.cursor` (cli-config.json,
+  chats) has no env override and stays on the shared home; the routine overlay
+  path (`buildRoutineSpawnEnv`) is unchanged and still seeds from the active
+  login by design.
 - **EXEC-17 (MUST).** The Windows `.cmd` shim delegate
   (`execShimPassthrough`) MUST route its env through the same `buildExecEnv`
   `agents run` uses (`lib/exec.ts:1059`) — so on Windows the isolated-agent
