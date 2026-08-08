@@ -1700,19 +1700,19 @@ schema (`--json` passes through each agent's native stream format).
 
 - **`ExecOptions`** — the typed input to the engine: agent, version, prompt,
   mode, effort, cwd, env overrides, secrets, session id, etc.
-  (`lib/exec.ts:167-244`).
+  (`lib/exec.ts:211-294`).
 - **Version home** — the isolated config directory for one installed agent
   version, `getVersionHomePath(agent, version)` = `<versionDir>/home`
   (`lib/versions.ts:1054-1056`).
 - **Chain / fallback entry** — one `{ agent, version?, envOverride? }` in a
   `--fallback` sequence tried in order on rate-limit failure
-  (`lib/exec.ts:1793-1820`).
+  (`lib/exec.ts:1804-1818`).
 - **Actor** — the human or agent identity credited for a run, resolved by
   `resolveActor()` and exported via `actorEnv()` (`lib/actor.ts`).
 - **Launch id** — `AGENT_LAUNCH_ID`, the correlation key that joins a spawned
   pid to the exact session its SessionStart hook records, and that a
   `--host` launcher forwards across the SSH hop to resolve a remote-coined
-  session id (`lib/exec.ts:331-349`).
+  session id (`lib/exec.ts:396-399`).
 - **Governance chokepoint** — `recordDispatchedRun`, the one audit call every
   finalized run path makes (`commands/exec.ts:1571,2470,2628,2683`).
 
@@ -1726,17 +1726,17 @@ schema (`--json` passes through each agent's native stream format).
   `sanitizeProcessEnv(process.env)` — the ambient env with dynamic-loader /
   interpreter-hijack vars stripped (`LD_*`, `DYLD_*`, `NODE_OPTIONS`,
   `PYTHONPATH`, `PYTHONSTARTUP`, `BASH_ENV`, `ENV`, `PERL5OPT`, `RUBYOPT`,
-  `PROMPT_COMMAND`, `IFS`, `CDPATH`) (`lib/exec.ts:358`;
+  `PROMPT_COMMAND`, `IFS`, `CDPATH`) (`lib/exec.ts:408`;
   `lib/secrets/bundles.ts:292-318`).
 - **EXEC-2 (MUST).** `buildExecEnv` MUST pin a per-version config-dir var for
   claude/codex/copilot/kimi ONLY (`CLAUDE_CONFIG_DIR` / `CODEX_HOME` /
   `COPILOT_HOME` / `KIMI_CODE_HOME`) and MUST delete the other three agents'
   vars on every branch, so a config pointer from a different agent's shell
-  never leaks into this invocation (`buildExecEnv`'s per-agent branch, `lib/exec.ts:402-490`).
+  never leaks into this invocation (`buildExecEnv`'s per-agent branch, `lib/exec.ts:407-564`).
 - **EXEC-2a (MUST).** For claude, `buildExecEnv` MUST inject the reserved `auth`
   bundle's per-account setup-token into `CLAUDE_CODE_OAUTH_TOKEN` ONLY when the
   run resolves **headless** (`resolveInteractive(options) === false`,
-  `lib/exec.ts:425-453`). That token exists so an unattended run authenticates
+  `lib/exec.ts:425-455`). That token exists so an unattended run authenticates
   without the Touch-ID-gated login item (`lib/claude-account-token.ts:9-16`); an
   interactive run MUST be left on its per-version login, which is also the only
   credential carrying the `user:profile` scope usage reads require (RUSH-2392).
@@ -1753,7 +1753,7 @@ schema (`--json` passes through each agent's native stream format).
   a function of DEVICE ROLE rather than run mode is tracked in RUSH-2395.
   An interactive run MUST additionally delete an INHERITED
   `CLAUDE_CODE_OAUTH_TOKEN` whose value equals that same resolved setup-token
-  (`lib/exec.ts:444-446`), so an interactive launch from inside a headless
+  (`lib/exec.ts:448-449`), so an interactive launch from inside a headless
   agent's shell does not keep authenticating as it; a value the caller set
   itself MUST survive, and `options.env` still overrides last (EXEC-5).
   Note this MUST NOT be read as "an interactive run never carries a token" — no
@@ -1762,19 +1762,19 @@ schema (`--json` passes through each agent's native stream format).
   tracked as RUSH-2360.
 - **EXEC-3 (MUST).** `buildExecEnv` MUST set `AGENTS_MAILBOX_DIR` +
   `AGENT_SESSION_ID` + `AGENTS_SESSION_ID` when a valid session id is present
-  (`lib/exec.ts:444-449`), `AGENTS_RUNTIME` to `terminal`/`headless` from
-  `resolveInteractive` (`lib/exec.ts:450`), `AGENTS_AGENT_NAME`
-  (`lib/exec.ts:452-454`), `AGENTS_CWD` when a cwd is given
-  (`lib/exec.ts:455-457`), and `AGENT_SESSION_NAME` when `--name` is given
-  (`lib/exec.ts:462-464`).
+  (`lib/exec.ts:572-575`), `AGENTS_RUNTIME` to `terminal`/`headless` from
+  `resolveInteractive` (`lib/exec.ts:587`), `AGENTS_AGENT_NAME`
+  (`lib/exec.ts:602`), `AGENTS_CWD` when a cwd is given
+  (`lib/exec.ts:605`), and `AGENT_SESSION_NAME` when `--name` is given
+  (`lib/exec.ts:612`).
 - **EXEC-4 (MUST).** `buildExecEnv` MUST assign actor-provenance env
   (`AGENTS_ACTOR`, `_KIND`, and when known `_NAME`/`_EMAIL`/`_GITHUB`, plus
   `GIT_AUTHOR_*`/`GIT_COMMITTER_*` for a resolved human) from
-  `actorEnv(resolveActor())` (`lib/exec.ts:470`; `lib/actor.ts:180-196`), so
+  `actorEnv(resolveActor())` (`lib/exec.ts:619`; `lib/actor.ts:180-196`), so
   the agent's own `git commit` credits the person, not the shared account.
 - **EXEC-5 (MUST).** `buildExecEnv` MUST apply `options.env` LAST, overriding
   every var set above — the single caller-override seam:
-  `return { ...result, ...options.env }` (`lib/exec.ts:472-475`).
+  `return { ...result, ...options.env }` (`lib/exec.ts:621-624`).
 - **EXEC-6 (MUST).** At the command layer, `agents run`'s `--secrets`/`--env`
   handling MUST compose `options.env` in the fixed order **profile env <
   auto-share token < secrets bundles < `--env K=V`**, later wins
@@ -1819,7 +1819,7 @@ schema (`--json` passes through each agent's native stream format).
 - **EXEC-14 (MUST, scoped).** `buildExecEnv` realizes that isolation ONLY for
   claude/codex/copilot/kimi, by pinning `CLAUDE_CONFIG_DIR` /
   `resolveCodexHome(...)` / `COPILOT_HOME` / `KIMI_CODE_HOME` at
-  `<versionHome>/<configDir>` (`lib/exec.ts:419,451,466,480` — the four assignments inside `buildExecEnv` (`:402`)).
+  `<versionHome>/<configDir>` (`lib/exec.ts:424,482,497,511` — the four assignments inside `buildExecEnv` (`:407`)).
 - **EXEC-15 (clarifying note).** `buildExecEnv` MUST NOT set the raw `HOME`
   var for any agent — no `result.HOME = …` exists anywhere in `lib/exec.ts`.
   Isolation is realized purely through the agent-specific config-dir vars in
@@ -1834,7 +1834,7 @@ schema (`--json` passes through each agent's native stream format).
   droid, hermes, pi — the 16 in `AgentId`, `lib/types.ts:13`, minus the
   EXEC-14 isolates and the XDG-isolated agents below) get **no** per-version config-dir var from
   `buildExecEnv` itself — its per-agent branch has no arm for them
-  (`buildExecEnv`'s per-agent branch, `lib/exec.ts:402-490`; the `else` at `:485-489` only deletes the four known vars).
+  (`buildExecEnv`'s per-agent branch, `lib/exec.ts:407-564`; the `else` at `:559-564` only deletes the four known vars).
   A separate mechanism — the generated default-name bash shim
   (`generateShimScript`, `lib/shims.ts:271-330`) and the generated
   version-pinned alias shim (`lib/shims.ts:940-1010`) — additionally exports
@@ -1842,7 +1842,7 @@ schema (`--json` passes through each agent's native stream format).
   (opencode, `lib/shims.ts:322,989`) inline in bash, but only when the spawn
   target actually resolves to one of those shim scripts;
   `buildExecCommand`'s own version-resolution fallback
-  (`lib/exec.ts:770-778`) can instead resolve straight to the real npm
+  (`lib/exec.ts:971-988`) can instead resolve straight to the real npm
   binary, bypassing that isolation entirely. Antigravity workflows and
   OpenCode auth are separately, explicitly documented as account-global —
   not per-version — by design (`apps/cli/AGENTS.md:150`;
@@ -1871,15 +1871,15 @@ schema (`--json` passes through each agent's native stream format).
   login by design.
 - **EXEC-17 (MUST).** The Windows `.cmd` shim delegate
   (`execShimPassthrough`) MUST route its env through the same `buildExecEnv`
-  `agents run` uses (`lib/exec.ts:1059`) — so on Windows the isolated-agent
+  `agents run` uses (`lib/exec.ts:1348`) — so on Windows the isolated-agent
   set is identical to, never broader than, `agents run`'s (EXEC-14).
 
 #### 3.3 The single execution engine
 
 - **EXEC-18 (MUST).** Every non-ACP `agents run` invocation MUST resolve to
-  `buildExecCommand` (argv, `lib/exec.ts:725-983`) + `buildExecEnv` (env) +
-  `spawn`, reached via `execAgent` (single-shot, `lib/exec.ts:986-989`) or
-  `runWithFallback` (chain, `lib/exec.ts:1874-1969`) — the plain path
+  `buildExecCommand` (argv, `lib/exec.ts:991-1301`) + `buildExecEnv` (env) +
+  `spawn`, reached via `execAgent` (single-shot, `lib/exec.ts:1304-1307`) or
+  `runWithFallback` (chain, `lib/exec.ts:2352-2455`) — the plain path
   (`commands/exec.ts:2657-2687`) and the `--loop` path
   (`commands/exec.ts:2591-2637`) both terminate in one of those two calls; a
   `--host` run re-execs `agents run` itself on the remote box (§3.5), so it
@@ -1907,7 +1907,7 @@ schema (`--json` passes through each agent's native stream format).
   chokepoint (#347)"*).
 - **EXEC-22 (MUST).** `buildExecCommand` MUST resolve the requested `Mode`
   against the target agent's declared capabilities before building flags:
-  `resolveMode`/`resolveHeadlessMode` (`lib/exec.ts:103-146`) — `auto`
+  `resolveMode`/`resolveHeadlessMode` (`lib/exec.ts:108-177`) — `auto`
   degrades to `edit` when unsupported; `plan` degrades to
   `capabilities.modes[0]`, or (headless-only, e.g. kimi/grok) to `auto` with
   a stderr warning when the agent's plan mode is known to stall headless;
@@ -1927,7 +1927,7 @@ schema (`--json` passes through each agent's native stream format).
   be replaced by the intrinsic Codex default.
 - **EXEC-23 (MUST).** A prompt-less run inferred as interactive at a
   non-TTY MUST be refused before spawn rather than hang on dead stdin
-  (`inferredInteractiveWithoutTty`, `lib/exec.ts:270-276`; enforced
+  (`inferredInteractiveWithoutTty`, `lib/exec.ts:320-326`; enforced
   `commands/exec.ts:2645-2655`).
 - **EXEC-23a (MUST).** An interactive tmux-wrapped run MUST either attach
   a confirmed-live pane to the user's terminal OR surface a legible failure
@@ -1955,7 +1955,7 @@ schema (`--json` passes through each agent's native stream format).
 - **EXEC-24 (MUST).** A slash-command prompt run headless under the
   implicit default `plan` mode MUST be refused before spawn — it would hang
   forever at `ExitPlanMode` with no TTY to approve it
-  (`headlessPlanStallCommand`, `lib/exec.ts:72-85`; enforced
+  (`headlessPlanStallCommand`, `lib/exec.ts:77-90`; enforced
   `commands/exec.ts:2205-2222`).
 
 #### 3.4 Fallback & retry
@@ -1963,7 +1963,7 @@ schema (`--json` passes through each agent's native stream format).
 - **EXEC-25 (MUST).** `runWithFallback` MUST run the primary first with the
   original prompt, and MUST cascade to the next chain entry ONLY when
   `detectRateLimit` matches the failed attempt's stderr OR its captured
-  stdout tail (`lib/exec.ts:1950-1957`); every other failure (auth failure,
+  stdout tail (`lib/exec.ts:1977-1986`); every other failure (auth failure,
   compile error, missing flag) MUST bubble up from whichever entry produced
   it, untouched — `runWithFallback` never inspects auth-failure detectors at
   all (`isAuthFailureFromLog` is not called from the cascade path).
@@ -1973,19 +1973,19 @@ schema (`--json` passes through each agent's native stream format).
   rewrite it via `buildFallbackPrompt` — `/continue <id>` when the next
   agent is claude with a known prior session id, else an explicit
   retry-with-context note pointing at `agents sessions <id>`
-  (`lib/exec.ts:1832-1936`).
+  (`lib/exec.ts:2310-2336`).
 - **EXEC-27 (MUST).** Workflow tool/MCP scoping (`--tools`/`--mcp-config`/
   `--strict-mcp-config`) is enforced on claude only; `runWithFallback` MUST
   warn loudly on stderr when scoping is active and the chain contains a
   non-claude agent, since a rate-limit handoff would otherwise run that
-  fallback silently unscoped (`lib/exec.ts:1887-1898`).
+  fallback silently unscoped (`lib/exec.ts:2360-2376`).
 - **EXEC-28 (SHOULD).** A non-primary (`i>0`) chain entry that fails to
   spawn with `ENOENT` MUST be skipped, not fatal, so an uninstalled fallback
-  agent doesn't kill the whole chain (`lib/exec.ts:1942-1948`).
+  agent doesn't kill the whole chain (`lib/exec.ts:2429-2432`).
 - **EXEC-29 (MUST).** The caller-supplied `dispatchSink` out-param MUST be
   updated to the agent+version actually attempted on every chain step, so
   the audit record (EXEC-21) reflects the fallback that really ran, not
-  always the primary (`lib/exec.ts:1807-1819,1904`).
+  always the primary (`lib/exec.ts:1804-1818,2053`).
 
 #### 3.5 `--host` SSH dispatch
 
@@ -2072,23 +2072,23 @@ themselves are normative in [§Secrets](#secrets) — SEC-6..SEC-14 govern.)
 
 - **EXEC-40 (MUST).** On POSIX, `spawnAgent` MUST exec the resolved binary
   directly with `shell:false` — no shell interposition
-  (`lib/exec.ts:1468-1478`, `useShell` gate).
+  (`lib/exec.ts:1935-1944`, `useShell` gate).
 - **EXEC-41 (MUST).** On Windows, when the target is a `.cmd` wrapper or a
   non-absolute name, `spawnAgent` MUST compose ONE fully-quoted command
   line via `composeWin32CommandLine` and pass an EMPTY args array, so Node
   never concatenates the caller-controlled args array — which carries the
   raw prompt — into the shell line unescaped: a DEP0190 +
-  command-injection guard (`lib/exec.ts:1468-1478`; the same rule mirrored
-  for shim dispatch by `resolveShimSpawn`, `lib/exec.ts:1001-1020`).
+  command-injection guard (`lib/exec.ts:1935-1944`; the same rule mirrored
+  for shim dispatch by `resolveShimSpawn`, `lib/exec.ts:1319-1338`).
 - **EXEC-42 (MUST).** The interactive tmux spawn-wrap MUST be POSIX-only —
   Windows always uses the bare/shell spawn path
-  (`shouldWrapInTmux`, `lib/exec.ts:1135-1143`, `platform === 'win32'`
+  (`shouldWrapInTmux`, `lib/exec.ts:1502-1510`, `platform === 'win32'`
   excluded outright).
 - **EXEC-43 (MUST).** A persisted tmux `SessionMeta.cmd`
   (`buildTmuxAgentCommand`) MUST redact env VALUES (`<redacted>`) while the
   live launched command keeps the real values, so a resolved secret never
   lands on disk via the informational `cmd` field
-  (`lib/exec.ts:1155-1175`, RUSH-1758).
+  (`lib/exec.ts:1530-1558`, RUSH-1758).
 
 #### 3.8 Rules preset auto-apply
 
@@ -2150,20 +2150,20 @@ and host/lease dispatch (`--host`/`--device`/`--remote-cwd`/`--no-follow`/
 | Plain run / fallback chain | the child's own exit code, verbatim | `commands/exec.ts:2687` |
 | `--acp` | `runAcpHeadless`'s own exit code, verbatim | `commands/exec.ts:2473` |
 | `--loop` | `loopExitCode(stoppedBy)`: `condition-met`/`max`→0, `budget`→7, `signal`→130, `stalled`/`error`→1 | `commands/exec.ts:373-387` |
-| Live budget hard-cap kill (non-loop) | 7 (`BUDGET_KILL_EXIT_CODE`) | `lib/exec.ts:1571,1584` |
+| Live budget hard-cap kill (non-loop) | 7 (`BUDGET_KILL_EXIT_CODE`) | `lib/exec.ts:2061,2048` |
 | `--host`, followed to completion | the remote's own exit code (read from the sidecar `.exit` file), or 1 if unknown | `commands/exec.ts:1484-1485` |
 | `--host`, `--no-follow` or follow window closed | 0 locally; the remote run continues untethered | `commands/exec.ts:1469-1485` |
 
 - **EXEC-IF-1 (MUST).** Exit code 7 MUST mean "budget-killed," never overloaded
   for any other failure — shared between the live watcher's hard-cap kill
   and a loop's budget stop, so CI/headless callers can tell it apart from an
-  ordinary failure (`lib/exec.ts:1584`; `commands/exec.ts:379`, comment:
+  ordinary failure (`lib/exec.ts:2048`; `commands/exec.ts:379`, comment:
   *"mirrors BUDGET_KILL_EXIT_CODE."*).
 - **EXEC-IF-2 (MUST).** Fallback/retry/handoff banners MUST print to stderr,
   never stdout, so a piped `agents run … | jq` stays parseable
-  (`lib/exec.ts:1932-1937,1963`).
+  (`lib/exec.ts:2438-2443`).
 - **EXEC-IF-3 (SHOULD).** `--json` streams the underlying agent's own event
-  format per `AGENT_COMMANDS[agent].jsonFlags` (`lib/exec.ts:511-713`) — the
+  format per `AGENT_COMMANDS[agent].jsonFlags` (`lib/exec.ts:663-921`) — the
   run layer does not normalize a single cross-agent JSON schema (contrast
   [Sessions](#sessions) EXEC-IF-1..4, which do normalize their own output).
 
@@ -2185,17 +2185,17 @@ and host/lease dispatch (`--host`/`--device`/`--remote-cwd`/`--no-follow`/
 
 - **EXEC-COMPAT-1 (MUST).** `AGENT_COMMANDS[agent].modeFlags` keys MUST agree
   with `AGENTS[agent].capabilities.modes` — a test asserts this
-  (`lib/exec.ts:508-510`); `buildExecCommand` throws an "Internal error" as
-  defense-in-depth if they ever drift (`lib/exec.ts:804-811`).
+  (`lib/exec.ts:660-661`); `buildExecCommand` throws an "Internal error" as
+  defense-in-depth if they ever drift (`lib/exec.ts:1108`).
 - **EXEC-COMPAT-2 (MUST).** `AGENT_LAUNCH_ID`, once minted or adopted, MUST stay
   the stable join key threaded through `options.env` for the lifetime of one
   launch — the pid-registry / hook-session-index reconciliation depends on
-  it never changing mid-launch (`lib/exec.ts:331-349,1407-1409`).
+  it never changing mid-launch (`lib/exec.ts:396-399,1407-1409`).
 - **EXEC-COMPAT-3 (MUST).** The `full` mode spelling MUST continue to be accepted
   as a permanent silent alias for `skip` (`normalizeMode`,
-  `lib/exec.ts:45-53`) — not a deprecation to remove.
+  `lib/exec.ts:50-58`) — not a deprecation to remove.
 - **EXEC-COMPAT-4 (MUST).** `BUDGET_KILL_EXIT_CODE` (7) MUST stay in sync with
-  `loopExitCode`'s `budget` mapping (`commands/exec.ts:379`; `lib/exec.ts:1584`)
+  `loopExitCode`'s `budget` mapping (`commands/exec.ts:379`; `lib/exec.ts:2048`)
   — EXEC-IF-1 depends on the two never diverging.
 
 ---
@@ -2225,7 +2225,7 @@ and host/lease dispatch (`--host`/`--device`/`--remote-cwd`/`--no-follow`/
   `lib/agents.ts:1410-1425`) — a deliberate, named exception to "isolated
   version home" — but `buildExecEnv`'s own doc comment only claims
   "Pins CLAUDE_CONFIG_DIR for Claude, CODEX_HOME for Codex, and
-  COPILOT_HOME for GitHub Copilot" (`lib/exec.ts:352-355`), silent on Kimi
+  COPILOT_HOME for GitHub Copilot" (`lib/exec.ts:403-405`), silent on Kimi
   (which it also handles) and silent on the 12 agents it doesn't.
 - **EXEC-GAP-4.** A detached (`--no-follow`) `--host` run skips the local
   `recordDispatchedRun` audit funnel entirely — no call site records it
@@ -2243,21 +2243,21 @@ Given a profile that sets `MODEL=x` and a `--secrets prod` bundle that also
 sets `MODEL=y`, plus `--env MODEL=z`; When `agents run claude "..." --secrets
 prod --env MODEL=z` runs; Then the child sees `MODEL=z` — `--env` is applied
 last in both the command-layer merge (`commands/exec.ts:2296-2304`) and
-`buildExecEnv`'s own final spread (`lib/exec.ts:472-475`).
+`buildExecEnv`'s own final spread (`lib/exec.ts:621-624`).
 
 **GWT-E2 — Version-home isolation holds for claude.**
 Given claude versions `2.1.90` and `2.1.196` both installed; When
 `agents run claude@2.1.90 "..."` then `agents run claude@2.1.196 "..."` run
 back to back; Then each sees a distinct `CLAUDE_CONFIG_DIR` pointing at its
-own `<versionDir>/home/.claude` (`lib/exec.ts:373`) — no config bleed between
+own `<versionDir>/home/.claude` (`lib/exec.ts:424`) — no config bleed between
 versions.
 
 **GWT-E3 — The same isolation does NOT hold for grok via `agents run`.**
 Given grok versions `1.0.0` and `1.1.0` both installed with no version-pinned
 alias shim materialized on disk; When `agents run grok@1.0.0 "..."` runs;
 Then `buildExecEnv` sets no `GROK_HOME` (its per-agent branch has no grok
-arm, `buildExecEnv`, `lib/exec.ts:402-490`) and `buildExecCommand` resolves the spawn target
-straight to the real npm binary (`lib/exec.ts:770-778`) — the run is not
+arm, `buildExecEnv`, `lib/exec.ts:407-564`) and `buildExecCommand` resolves the spawn target
+straight to the real npm binary (`lib/exec.ts:971-988`) — the run is not
 version-isolated the way EXEC-2 promises for claude (EXEC-GAP-1).
 
 **GWT-E4 — Single engine, one named exception.**
@@ -2273,7 +2273,7 @@ Given `--fallback codex` and a primary claude run that exits 1 with "Invalid
 authentication credentials" on stderr; When `runWithFallback` evaluates the
 result; Then it returns claude's exit code directly without ever spawning
 codex, because `detectRateLimit` does not match auth-failure text
-(`lib/exec.ts:1950-1957,1698-1706`) — contrast a "5-hour limit" stderr, which
+(`lib/exec.ts:1977-1986,1698-1706`) — contrast a "5-hour limit" stderr, which
 does cascade.
 
 **GWT-E6 — `--host` forwards actor env, refuses `--secrets`.**
@@ -2288,14 +2288,14 @@ shell exports ahead of the remote `agents run` invocation (EXEC-31).
 Given a prompt containing `"; rm -rf /` and a Windows `.cmd`-wrapped agent;
 When `spawnAgent` builds the child process; Then it calls
 `composeWin32CommandLine(executable, args)` and passes an EMPTY `args[]` to
-`child_process.spawn` (`lib/exec.ts:1468-1478`) — the prompt is embedded in
+`child_process.spawn` (`lib/exec.ts:1935-1944`) — the prompt is embedded in
 the single quoted command line, never concatenated by Node into an
 already-open shell invocation.
 
 **GWT-E8 — Budget kill and loop-budget-stop share one exit code.**
 Given a `--budget 1000` run whose live stream-json usage crosses the cap
 mid-run; When the watcher fires; Then `spawnAgent` sends `SIGTERM`/`SIGKILL`
-and resolves exit code 7 (`lib/exec.ts:1571,1584`); given instead a `--loop
+and resolves exit code 7 (`lib/exec.ts:2061,2048`); given instead a `--loop
 --budget 1000` run whose cumulative iteration spend crosses the same cap;
 Then the driver stops with `stoppedBy: 'budget'` and `loopExitCode` maps it
 to the same 7 (`commands/exec.ts:379`) — a CI caller can `if exit==7` for
