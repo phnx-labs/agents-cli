@@ -1,14 +1,14 @@
 /**
- * R2 credential resolution + this machine's stable identity. The only field
- * `agents sessions export --encrypt` / `import` actually consume is the
- * shared `R2_SYNC_ENC_KEY` transcript key (`resolveSyncEncKey`); the other R2
- * fields (account/bucket/access keys) are validated here as a presence gate —
- * no `r2.backups` bundle configured means no shared key, so export/import
- * fall back to an ephemeral one. There is no R2 network client in this
- * codebase today (it moved with the rest of the R2/CRDT background sync this
- * bundle used to back — see git history for `./r2.ts`); a future R2-backed
- * feature (an export destination, a fleet cache) would add one where it's
- * actually wired. Credentials come from the `r2.backups` secrets bundle (OS
+ * R2 credential resolution + this machine's stable identity. Two consumers read
+ * these fields: `agents sessions export --encrypt` / `import` use only the shared
+ * `R2_SYNC_ENC_KEY` transcript key (`resolveSyncEncKey`), falling back to an
+ * ephemeral key when no bundle is configured; and the off-box backup target
+ * (`agents sessions export --to-r2` / `import --from-r2`, RUSH-2437) uses the full
+ * credential set (account/bucket/access keys/endpoint) to talk to R2 through the
+ * network client in `./r2.ts`. The `--to-r2`/`--from-r2` paths gate on
+ * `isSyncConfigured()` and fail loud when the bundle is absent (no silent
+ * fallback). This is a pure on-demand backup target, NOT the retired R2/CRDT
+ * background sync. Credentials come from the `r2.backups` secrets bundle (OS
  * keychain on macOS, libsecret on Linux) — never from env or disk.
  */
 

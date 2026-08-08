@@ -103,27 +103,24 @@ interface GlobalSelection {
 async function runExport(selectors: string[], command: Command): Promise<void> {
   const g = command.optsWithGlobals() as GlobalSelection;
 
+  // --to-r2 preflight: reject the impossible --host combo and fail loud when the
+  // backup target is not configured, rather than silently producing a local file.
+  // isSyncConfigured() is consulted only on the --to-r2 path (it reads the keychain).
+  if (g.toR2) {
+    const gateErr = r2ExportGateError(g, isSyncConfigured());
+    if (gateErr) {
+      process.stderr.write(chalk.red(gateErr + '\n'));
+      process.exit(1);
+    }
+  }
+
   // --host: export sessions that live on remote peer(s) — run export there and
   // stream the bundle back over the existing SSH transport (RUSH-1712).
   if (g.host && g.host.length > 0) {
-    if (g.toR2) {
-      process.stderr.write(chalk.red('--to-r2 backs up THIS machine\'s sessions; it cannot be combined with --host.\n'));
-      process.exit(1);
-    }
     await runRemoteExport(g, selectors, command);
     return;
   }
 
-  // --to-r2: fail loud at the boundary if the backup target is not configured,
-  // rather than silently producing a local file the user did not ask for.
-  if (g.toR2 && !isSyncConfigured()) {
-    process.stderr.write(chalk.red(
-      'R2 backup is not configured: the r2.backups secrets bundle is missing or locked.\n' +
-      'Add it with: agents secrets add r2.backups R2_ACCOUNT_ID R2_BUCKET_NAME R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY\n' +
-      '(optionally R2_SYNC_ENC_KEY for client-side encryption).\n',
-    ));
-    process.exit(1);
-  }
   if (g.toR2 && (g.output || g.stdout)) {
     process.stderr.write(chalk.yellow('Note: --to-r2 uploads to R2; -o/--stdout are ignored.\n'));
   }
@@ -224,7 +221,32 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
  * path as a local bundle. Fails loud on the first upload error (no silent
  * partial-success).
  */
-async function uploadToR2(header: BundleHeader, records: BundleRecord[]): Promise<void> {
+/**
+ * `--to-r2` preflight as a pure, unit-testable function: the impossible-combo +
+ * not-configured gate. Returns the message to fail loud with, or null when the
+ * export may proceed. Only meaningful when `g.toR2` is set (the caller gates on
+ * that). Kept pure — no process.exit, no keychain read — so both the command and
+ * its test drive the exact same decision.
+ */
+export function r2ExportGateError(
+  g: Pick<GlobalSelection, 'toR2' | 'host'>,
+  isConfigured: boolean,
+): string | null {
+  if (!g.toR2) return null;
+  if (g.host && g.host.length > 0) {
+    return "--to-r2 backs up THIS machine's sessions; it cannot be combined with --host.";
+  }
+  if (!isConfigured) {
+    return (
+      'R2 backup is not configured: the r2.backups secrets bundle is missing or locked.\n' +
+      'Add it with: agents secrets add r2.backups R2_ACCOUNT_ID R2_BUCKET_NAME R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY\n' +
+      '(optionally R2_SYNC_ENC_KEY for client-side encryption).'
+    );
+  }
+  return null;
+}
+
+export async function uploadToR2(header: BundleHeader, records: BundleRecord[]): Promise<void> {
   let client: R2Client;
   try {
     client = new R2Client(loadR2Config());
@@ -257,7 +279,7 @@ async function uploadToR2(header: BundleHeader, records: BundleRecord[]): Promis
 }
 
 /** R2 object key for one record — dir-shaped agents key by relKey, file-shaped by session. */
-function r2KeyForRecord(rec: BundleRecord): string {
+export function r2KeyForRecord(rec: BundleRecord): string {
   const spec = specForAgent(rec.agent);
   const relKey = spec?.dirShaped ? rec.relKey : undefined;
   return objectKey(rec.machine, rec.agent, rec.sessionId, relKey);
@@ -270,7 +292,7 @@ function r2KeyForRecord(rec: BundleRecord): string {
  * decrypt), so a missing key means the objects go up unencrypted (R2 server-side
  * encryption only) with a loud warning — never a silent weaker default.
  */
-function resolveR2BackupKey(): Buffer | null {
+export function resolveR2BackupKey(): Buffer | null {
   const key = resolveSyncEncKey(loadR2Config());
   if (key) return key;
   process.stderr.write(chalk.yellow(

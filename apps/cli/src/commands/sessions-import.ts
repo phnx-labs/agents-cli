@@ -87,11 +87,9 @@ async function runImport(
   // 1. Obtain the bundle — from R2, remote peer(s), stdin, or a file.
   let bundle: ParsedBundle;
   if (options.fromR2) {
-    if (!isSyncConfigured()) {
-      process.stderr.write(chalk.red(
-        'R2 restore is not configured: the r2.backups secrets bundle is missing or locked.\n' +
-        'Add it with: agents secrets add r2.backups R2_ACCOUNT_ID R2_BUCKET_NAME R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY\n',
-      ));
+    const gateErr = r2ImportGateError(true, isSyncConfigured());
+    if (gateErr) {
+      process.stderr.write(chalk.red(gateErr + '\n'));
       process.exit(1);
     }
     bundle = await pullFromR2();
@@ -207,7 +205,23 @@ async function pullForImport(
  * plaintext transcript from the retired sync) is skipped with a count, never
  * silently swallowed. Fails loud when the bucket holds no restorable backups.
  */
-async function pullFromR2(): Promise<ParsedBundle> {
+/**
+ * `--from-r2` preflight as a pure, unit-testable function: fail loud when the
+ * backup target is not configured. Returns the message to fail loud with, or null
+ * when the restore may proceed. Kept pure (no process.exit, no keychain read) so
+ * the command and its test drive the same decision.
+ */
+export function r2ImportGateError(fromR2: boolean, isConfigured: boolean): string | null {
+  if (fromR2 && !isConfigured) {
+    return (
+      'R2 restore is not configured: the r2.backups secrets bundle is missing or locked.\n' +
+      'Add it with: agents secrets add r2.backups R2_ACCOUNT_ID R2_BUCKET_NAME R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY'
+    );
+  }
+  return null;
+}
+
+export async function pullFromR2(): Promise<ParsedBundle> {
   let client: R2Client;
   let bucket: string;
   try {

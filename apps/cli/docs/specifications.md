@@ -435,16 +435,29 @@ SSH access (§7); rendering sessions that no harness produced.
   `R2_SYNC_ENC_KEY` from the `r2.backups` bundle when that bundle is configured
   (so any machine holding it can decrypt), else an ephemeral key MUST be minted
   and printed once and MUST NOT be persisted anywhere
-  (`commands/sessions-export.ts:309-322`). `agents sessions import` MUST accept
+  (`commands/sessions-export.ts:431-444`). `agents sessions import` MUST accept
   either the bundle key or an explicit `--decrypt <key>` for an ephemeral one
-  (`commands/sessions-import.ts:186-207`).
+  (`commands/sessions-import.ts:294-315`).
 - **SES-26 (MUST).** Peer-controlled paths in a bundle MUST be
   containment-checked so a crafted `relKey`/machine name cannot escape the
   mirror root via `../` (`lib/session/sync/agents.ts:213-221`, shared by export
   and the mirror-placement path).
 - **SES-27 (MUST).** The `R2_SYNC_ENC_KEY` / R2 credentials used by export and
   import MUST come only from the `r2.backups` keychain bundle, never env/disk
-  (`lib/session/sync/config.ts:11,45`).
+  (`lib/session/sync/config.ts:12,53`).
+- **SES-27a (MUST).** The optional off-box backup target
+  (`agents sessions export --to-r2` / `import --from-r2`, RUSH-2437) MUST be a
+  pure on-demand backup — it MUST NOT revive the retired CRDT/background sync and
+  MUST NOT run on a daemon cycle. It MUST fail loud (clear error, non-zero exit)
+  when the `r2.backups` bundle is absent or locked, never a silent no-op
+  (`commands/sessions-export.ts:r2ExportGateError`,
+  `commands/sessions-import.ts:r2ImportGateError`). Each session file MUST be
+  stored as its own object under the shared key layout
+  (`sessions/<machine>/<agent>/<sessionId>.jsonl`, or `.../<sessionId>/<relKey>`
+  for dir-shaped agents) via `objectKey` (`lib/session/sync/agents.ts:236-239`),
+  with the body sealed per SES-24 when `R2_SYNC_ENC_KEY` is present; restore MUST
+  route through the same placement/decrypt path as a local bundle
+  (`commands/sessions-import.ts:pullFromR2` → `planImport`/`writeImport`).
 
 #### 3.6 Index / DB
 
@@ -916,9 +929,9 @@ Given a machine with `R2_SYNC_ENC_KEY` set in its `r2.backups` bundle; When it
 runs `agents sessions export --encrypt -o b.bundle`; Then every record body is
 an AES-256-GCM envelope, and a peer holding the same `r2.backups` bundle can
 `agents sessions import b.bundle` and decrypt without passing `--decrypt`
-(`sessions-export.ts:309-322`; `bundle.ts:124`; `transcript-crypto.ts:82-96`).
+(`sessions-export.ts:431-444`; `bundle.ts:124`; `transcript-crypto.ts:82-96`).
 A peer without that bundle must pass the printed ephemeral key explicitly
-(`sessions-import.ts:186-207`).
+(`sessions-import.ts:294-315`).
 
 **GWT-9 — Remote fan-out degrades, never blanks.**
 Given 3 fleet hosts, one unreachable (ssh 255) and one slow past budget; When
