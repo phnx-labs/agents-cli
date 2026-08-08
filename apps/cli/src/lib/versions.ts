@@ -3344,6 +3344,17 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
         `Run 'agents sync ${agent}@${version}' (a full sync) to establish the baseline.`,
       );
     }
+    // Reconcile the native hook registration after a hook prune. The in-write
+    // hooks sweep + registerHooksToSettings only run when hooksToSync > 0, so
+    // pruning the LAST hook to zero (hooksToSync === 0) would delete the hook
+    // script but leave its settings.json entry pointing at the now-missing
+    // file — a dead hook that errors on every tool call. `reconcileEmpty` forces
+    // the per-agent managed-prefix GC even when no hooks remain (RUSH-2438).
+    if (outcome.pruned.hooks.length > 0) {
+      try {
+        registerHooksToSettings(agent, versionHome, undefined, undefined, { reconcileEmpty: true });
+      } catch { /* best-effort settings GC — the hook file is already removed */ }
+    }
   }
 
   // Write manifest after a full sync (no user-passed selection) so the next

@@ -262,6 +262,47 @@ describe('agents sync prune (RUSH-2438)', () => {
     expect(result.after).not.toContain('solo');       // hook file removed by the prune pass
   });
 
+  it('(hook-settings) pruning the last hook GCs its dead settings.json entry (gap-2)', () => {
+    // A registered hook removed to zero: the in-write sweep + registerHooksToSettings
+    // are gated on hooksToSync>0, so without the prune-path reconcile the hook's
+    // settings.json command would survive, pointing at a now-deleted script — a
+    // dead hook that fires (and errors) on every tool call.
+    const result = runInTempHome(`
+      writeSystemHook('solo');
+      fs.writeFileSync(path.join(systemDir, 'agents.yaml'),
+        ['hooks:', '  solo:', '    script: solo', '    events: [PreToolUse]', ''].join('\\n'));
+
+      fullSync();                                     // installs hook + registers in .claude/settings.json
+      const settingsPath = path.join(userDir, '.history', 'versions', 'claude', version, 'home', '.claude', 'settings.json');
+      const hookCmds = () => {
+        if (!fs.existsSync(settingsPath)) return [];
+        let cfg;
+        try { cfg = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')); } catch { return []; }
+        const out = [];
+        for (const groups of Object.values(cfg.hooks || {})) {
+          for (const g of (groups || [])) for (const h of (g.hooks || [])) out.push(h.command);
+        }
+        return out;
+      };
+      const registeredBefore = hookCmds().filter((c) => String(c).includes('solo'));
+
+      // Remove the hook entirely — script AND manifest entry — so hooksToSync=0.
+      fs.rmSync(path.join(systemDir, 'hooks', 'solo'));
+      fs.writeFileSync(path.join(systemDir, 'agents.yaml'), 'hooks: {}\\n');
+
+      const r = scopedPrune();
+      console.log(JSON.stringify({
+        registeredBefore,
+        prunedHooks: r.pruned.hooks,
+        registeredAfter: hookCmds().filter((c) => String(c).includes('solo')),
+      }));
+    `) as { registeredBefore: string[]; prunedHooks: string[]; registeredAfter: string[] };
+
+    expect(result.registeredBefore.length).toBeGreaterThan(0);  // the hook was live in settings.json
+    expect(result.prunedHooks).toEqual(['solo']);               // prune removed the script
+    expect(result.registeredAfter).toEqual([]);                 // and GC'd its dead settings.json entry
+  });
+
   it('(guard) a skill prune must NOT destroy a same-named command-skill', () => {
     // The guard at writers/skills.ts remove() skips a dir that is currently a
     // command-skill (agents_command marker). Construct the collision: a name that
