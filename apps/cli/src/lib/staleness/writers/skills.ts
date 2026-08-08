@@ -10,7 +10,8 @@ import type { AgentId } from '../../types.js';
 import { AGENTS, agentConfigDirName } from '../../agents.js';
 import { capableAgents } from '../../capabilities.js';
 import { safeJoin } from '../../paths.js';
-import type { ResourceWriter, WriteArgs, WriteResult } from './types.js';
+import { listCommandSkillsInVersion } from '../../command-skills.js';
+import type { ResourceWriter, WriteArgs, WriteResult, RemoveArgs, RemoveResult } from './types.js';
 import { resolveSkillSource } from './sources.js';
 import { lazyAgentMap } from './lazy-map.js';
 
@@ -64,6 +65,23 @@ function buildSkillsWriter(agent: AgentId): ResourceWriter<string[]> {
         synced.push(skill);
       }
       return { synced };
+    },
+    remove({ versionHome, name }: RemoveArgs): RemoveResult {
+      const agentDir = path.join(versionHome, agentConfigDirName(agent));
+      // A command-installed-as-skill lives in the same skills/ dir but is owned
+      // by the commands writer's prune — never delete it from here, or a
+      // still-live converted command would vanish under a skill prune.
+      if (listCommandSkillsInVersion(agentDir).includes(name)) {
+        return { removed: false };
+      }
+      const destDir = safeJoin(path.join(agentDir, 'skills'), name);
+      try {
+        if (fs.existsSync(destDir) && fs.lstatSync(destDir).isDirectory()) {
+          removePath(destDir);
+          return { removed: true };
+        }
+      } catch { /* already gone / inaccessible */ }
+      return { removed: false };
     },
   };
 }
