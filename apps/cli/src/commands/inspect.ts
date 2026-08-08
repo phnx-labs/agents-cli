@@ -49,7 +49,7 @@ import {
 import { listHookEntriesFromDir } from '../lib/hooks.js';
 import { getResourceInventory, type ResourceInventory } from '../lib/resource-inventory.js';
 import { listMcpServerConfigs, discoverMcpConfigsFromRepo, type McpYamlConfig } from '../lib/mcp.js';
-import { discoverPlugins, discoverPluginsInDir, pluginResourceGroups, type PluginResourceGroup } from '../lib/plugins.js';
+import { discoverPlugins, discoverPluginsInDir, pluginResourceGroups, inspectPluginCapabilities, pluginCapabilityLabels, type PluginResourceGroup } from '../lib/plugins.js';
 import { PLUGIN_GROUP_COLORS } from './plugins.js';
 import { countSessionsInScope } from '../lib/session/discover.js';
 import { isSessionTrackedAgent } from '../lib/session/types.js';
@@ -374,7 +374,32 @@ export function collectRepoKind(repo: RepoTarget, kind: DrillableKind): Resource
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  const dir = path.join(repo.root, kind);
+  // Hooks live nested under event directories (`hooks/pre-tool-use/…`), and a
+  // script pairs with its data sidecar. repoHookItems already reads them that
+  // way for the summary view; a flat readdir here returned the event dirs
+  // themselves plus README/test scaffolding, so `--hooks` and the summary
+  // reported different counts for the same repo.
+  if (kind === 'hooks') return repoHookItems(repo);
+
+  // A repo's `rules/` holds the COMPOSED output (AGENTS.md plus its CLAUDE.md /
+  // GEMINI.md symlinks) alongside a `subrules/` dir of the individually named
+  // fragments. The fragments are what `--rule <name>` resolves and what a reader
+  // means by "a rule"; the composed file is a build artifact. Without this,
+  // `subrules` listed as a single opaque leaf and every real rule was unreachable.
+  if (kind === 'rules') {
+    const subrulesDir = path.join(repo.root, kind, 'subrules');
+    if (fs.existsSync(subrulesDir)) return readResourceDir(subrulesDir, kind, repo.label);
+  }
+
+  return readResourceDir(path.join(repo.root, kind), kind, repo.label);
+}
+
+/**
+ * Enumerate one directory of resources of `kind`, skipping dotfiles, build caches,
+ * and directory docs. Shared so the rules `subrules/` branch and the default
+ * `<repo>/<kind>/` branch cannot drift apart.
+ */
+function readResourceDir(dir: string, kind: Exclude<DrillableKind, 'plugins'>, source: string): ResourceItem[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -393,7 +418,7 @@ export function collectRepoKind(repo: RepoTarget, kind: DrillableKind): Resource
     const p = path.join(dir, entry.name);
     items.push({
       name,
-      source: repo.label,
+      source,
       path: p,
       linkTarget: linkTarget(p),
       description: readDescription(p),
@@ -855,10 +880,16 @@ function renderItemDetail(header: string, jsonHead: Record<string, unknown>, kin
   const matchTag = best.matchKind === 'exact' ? 'exact' : best.matchKind === 'substring' ? 'substring' : `~${best.distance}`;
   console.log(`  ${chalk.green('✓')}  ${termLink(chalk.bold.cyan(best.item.name), best.item.linkTarget)}  ${chalk.gray(`[${matchTag}, ${best.item.source}]`)}`);
   if (best.item.description) {
-    console.log(`     ${chalk.gray(truncate(best.item.description, 100))}`);
+    // Wrap to the real terminal width. This used to be truncate(desc, 100): a
+    // character count blind to the window, so a long description lost its
+    // sentence at 80 columns AND wasted the space at 200.
+    for (const line of wrapJoined('     ', best.item.description.split(/\s+/), ' ', terminalWidth())) {
+      console.log(chalk.gray(line));
+    }
   }
   for (const [k, v] of buildDetailRows(best.item, kind)) {
-    console.log(`     ${chalk.gray(k.padEnd(10))} ${v}`);
+    const prefix = `     ${k.padEnd(10)} `;
+    console.log(`     ${chalk.gray(k.padEnd(10))} ${truncateValueForPrefix(prefix, v)}`);
   }
 
   if (others.length > 0) {
@@ -987,6 +1018,15 @@ function pluginItems(): ResourceItem[] {
 function pluginToItem(plugin: DiscoveredPlugin, source: string): ResourceItem {
   const extra: Array<[string, string]> = [];
   if (plugin.manifest.version) extra.push(['version', plugin.manifest.version]);
+  // Which execution surfaces the bundle actually carries. Detection already
+  // exists for the plugin picker; the detail view simply never asked for it.
+  const surfaces = pluginCapabilityLabels(inspectPluginCapabilities(plugin.root));
+  if (surfaces.length > 0) extra.push(['surfaces', surfaces.join(', ')]);
+  const author = plugin.manifest.author;
+  if (author) extra.push(['author', typeof author === 'string' ? author : author.name]);
+  if (plugin.manifest.dependencies?.length) {
+    extra.push(['depends on', plugin.manifest.dependencies.join(', ')]);
+  }
   return {
     name: plugin.name,
     source,
@@ -1050,7 +1090,16 @@ function buildDetailRows(item: ResourceItem, kind: DrillableKind): Array<[string
   const rows: Array<[string, string]> = [];
   if (item.path && kind !== 'mcp') {
     const stat = safeStat(item.path);
-    if (stat) rows.push(['size', stat.isDirectory() ? '(bundle)' : `${stat.size} bytes`]);
+    // A bundle reports its real recursive weight. `(bundle)` carried no
+    // information, and pathSize/formatBytes already back the summary view.
+    if (stat) {
+      if (stat.isDirectory()) {
+        const { bytes, files } = pathSize(item.path);
+        rows.push(['size', `${formatBytes(bytes)} · ${files} files`]);
+      } else {
+        rows.push(['size', formatBytes(stat.size)]);
+      }
+    }
   }
   // Kind-specific fields
   if (kind === 'skills' || kind === 'commands' || kind === 'subagents') {
