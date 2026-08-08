@@ -201,6 +201,32 @@ describe('agents inspect', () => {
     expect(demo?.path).toMatch(/skills[\\/]demo-skill$/);
   });
 
+  it('piped list output stays a plain table — never the interactive picker', () => {
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-piped-' + crypto.randomBytes(4).toString('hex') + '-'));
+    for (const n of ['alpha', 'bravo', 'charlie']) {
+      // Quoted: the description itself contains a colon ("Triggers on:"), which
+      // unquoted would make the frontmatter ambiguous YAML and silently fall
+      // back to the first body line.
+      writeFile(path.join(proj, '.agents', 'skills', n, 'SKILL.md'),
+        `---\nname: ${n}\ndescription: "Does the ${n} thing. Triggers on: ${n}, ${n}-alt."\n---\n\nBody.\n`);
+    }
+
+    // spawnSync gives the child a pipe, not a TTY — the branch every script and
+    // CI job takes. A picker here would hang the caller forever.
+    const r = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, '--skills'], {
+      cwd: proj, env: { ...process.env, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1', COLUMNS: '120' }, encoding: 'utf-8',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/Name\s+Size\s+Description/);
+    for (const n of ['alpha', 'bravo', 'charlie']) expect(r.stdout).toContain(n);
+    // The row shows the purpose, not the trigger keywords.
+    expect(r.stdout).toContain('Does the alpha thing.');
+    expect(r.stdout).not.toContain('Triggers on:');
+    // Picker chrome must never reach a pipe.
+    expect(r.stdout).not.toContain('Search skills');
+    expect(r.stdout).not.toContain('navigate');
+  });
+
   it('renders every item of a long detail row, and survives a malformed manifest', () => {
     const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-rows-' + crypto.randomBytes(4).toString('hex') + '-'));
     const names = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet'];

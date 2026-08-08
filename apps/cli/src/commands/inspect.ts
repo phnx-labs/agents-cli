@@ -51,6 +51,7 @@ import { getResourceInventory, type ResourceInventory } from '../lib/resource-in
 import { listMcpServerConfigs, discoverMcpConfigsFromRepo, type McpYamlConfig } from '../lib/mcp.js';
 import { discoverPlugins, discoverPluginsInDir, pluginResourceGroups, inspectPluginCapabilities, pluginCapabilityLabels, type PluginResourceGroup } from '../lib/plugins.js';
 import { PLUGIN_GROUP_COLORS } from './plugins.js';
+import { showResourceList } from './resource-view.js';
 import { countSessionsInScope } from '../lib/session/discover.js';
 import { isSessionTrackedAgent } from '../lib/session/types.js';
 import { damerauLevenshtein } from '../lib/fuzzy.js';
@@ -353,7 +354,7 @@ export async function inspectRepo(repo: RepoTarget, options: InspectOptions): Pr
   if (drill) {
     const items = collectRepoKind(repo, drill.kind);
     if (drill.query === true || drill.query === undefined) {
-      renderItemList(repo.label, jsonHead, drill.kind, items, options);
+      await renderItemList(repo.label, jsonHead, drill.kind, items, options);
     } else {
       renderItemDetail(repo.label, jsonHead, drill.kind, String(drill.query), items, options);
     }
@@ -602,15 +603,20 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
   }
 
   if (!options.brief) {
-    console.log(`  ${'size'.padEnd(10)} ${formatBytes(totalBytes)} ${chalk.gray('·')} ${totalFiles} files`);
+    console.log(`  ${'size'.padEnd(10)} ${formatBytes(totalBytes)} ${chalk.gray('·')} ${totalFiles} ${totalFiles === 1 ? 'file' : 'files'}`);
 
     console.log('\n' + chalk.bold('Resources'));
     for (const kind of SIMPLE_KINDS) {
       const { items, size } = kindData[kind];
       const count = String(items.length).padStart(4);
       const sz = items.length > 0 ? formatBytes(size.bytes).padStart(8) : ''.padEnd(8);
-      const preview = items.length > 0 ? chalk.gray(truncate(previewNames(items, 4), 60)) : '';
-      console.log(`  ${kind.padEnd(10)} ${count}  ${sz}  ${preview}`.trimEnd());
+      // Width-aware, not a fixed 60: the old cap cut its own "…(+16)" tail off
+      // the rules row identically at 80, 100 and 160 columns.
+      const prefix = `  ${kind.padEnd(10)} ${count}  ${sz}  `;
+      const preview = items.length > 0
+        ? chalk.gray(truncateToWidth(previewNames(items, 4), Math.max(12, terminalWidth() - stringWidth(prefix))))
+        : '';
+      console.log(`${prefix}${preview}`.trimEnd());
     }
 
     printExpandedSection('Hooks', hookRows(kindData.hooks.items, repoHookByScript));
@@ -794,10 +800,10 @@ async function renderSummary(agent: AgentId, version: string, versionHome: strin
 
 async function renderList(agent: AgentId, version: string, versionHome: string, kind: DrillableKind, options: InspectOptions): Promise<void> {
   const items = collectKind(agent, versionHome, kind);
-  renderItemList(`${agent}@${version}`, { agent, version }, kind, items, options);
+  await renderItemList(`${agent}@${version}`, { agent, version }, kind, items, options);
 }
 
-function renderItemList(header: string, jsonHead: Record<string, unknown>, kind: DrillableKind, items: ResourceItem[], options: InspectOptions): void {
+async function renderItemList(header: string, jsonHead: Record<string, unknown>, kind: DrillableKind, items: ResourceItem[], options: InspectOptions): Promise<void> {
   if (options.json) {
     console.log(JSON.stringify({
       ...jsonHead,
@@ -816,16 +822,61 @@ function renderItemList(header: string, jsonHead: Record<string, unknown>, kind:
     return;
   }
 
-  for (const item of items) {
-    const tag = chalk.gray(`[${item.source}]`.padEnd(10));
-    console.log(`  ${tag} ${termLink(chalk.cyan(item.name), item.linkTarget)}`);
-    if (item.description) {
-      const prefix = '             ';
-      console.log(prefix + chalk.gray(truncateToWidth(item.description, Math.max(1, terminalWidth() - stringWidth(prefix)))));
-    }
-    if (item.groups) printGroupRows(item.groups);
-  }
-  console.log('');
+  // Route through the shared resource view: an interactive picker with a live
+  // preview in a TTY, a plain aligned table when piped. This is the same
+  // renderer `agents skills list`, `agents commands` and four others already
+  // use — inspect was the last drill-down printing its own two-line-per-entry
+  // dump with a `[source]` tag repeated on every row.
+  //
+  // Sync targets are deliberately off: for a repo the resources ARE the source,
+  // so the column would read "no installed versions" for every row.
+  const sources = new Set(items.map(i => i.source));
+  await showResourceList({
+    resourcePlural: kind,
+    resourceSingular: kind.replace(/s$/, ''),
+    extraLabel: 'Size',
+    // Only carry a source column when the rows actually differ; a uniform
+    // `[.system]` on every row is 13 columns spent on one bit of information.
+    extra2Label: sources.size > 1 ? 'Source' : undefined,
+    showSync: false,
+    emptyMessage: `  (none installed)`,
+    rows: items.map(item => ({
+      name: item.name,
+      description: summaryLine(item.description),
+      extra: itemSizeLabel(item.path),
+      extra2: sources.size > 1 ? item.source : undefined,
+      targets: [],
+      buildDetail: () => previewFor(kind, item),
+    })),
+  });
+}
+
+/**
+ * The scannable half of a description: everything before the trigger clause, and
+ * only the first sentence of that. 15 of 20 skills in .system lead with their
+ * purpose and then append "Triggers on: …" — in a one-line row that boilerplate
+ * is what survives truncation, so the row says nothing. The full text still
+ * renders in the preview pane.
+ */
+export function summaryLine(description: string): string {
+  if (!description) return '';
+  const cutAtTrigger = description.split(/\s*(?:Triggers on|Use this skill when|Invoke when)\b/i)[0];
+  const trimmed = cutAtTrigger.trim();
+  // First sentence, but only when the split leaves something substantial —
+  // "e.g." and friends would otherwise chop a description to a fragment.
+  const firstSentence = trimmed.match(/^.*?[.!?](?=\s+[A-Z(`])/)?.[0];
+  const candidate = firstSentence && firstSentence.length >= 40 ? firstSentence : trimmed;
+  return candidate.replace(/\s+/g, ' ').trim();
+}
+
+/** `18 KB · 3 files` for a bundle, `413 B` for a single file. */
+function itemSizeLabel(p: string): string {
+  if (!p) return '';
+  const stat = safeStat(p);
+  if (!stat) return '';
+  if (!stat.isDirectory()) return formatBytes(stat.size);
+  const { bytes } = pathSize(p);
+  return formatBytes(bytes);
 }
 
 /** Print a plugin's resource breakdown as aligned `label  items` rows under a list entry. */
@@ -1135,6 +1186,88 @@ function buildDetail(item: ResourceItem, kind: DrillableKind): Record<string, un
   return out;
 }
 
+/**
+ * The preview pane for one row, refreshed as the selection moves.
+ *
+ * Adaptive on purpose — the sessions picker sets the precedent: a Cursor
+ * session shows Dirs/Repos/Artifacts, a Codex one shows a different set, and
+ * empty fields simply do not render. A hook's useful metadata (what fires it,
+ * whether it is wired) has nothing in common with a skill's (what invokes it,
+ * where it is synced), so each kind contributes its own rows and blanks drop out.
+ */
+export function previewFor(kind: DrillableKind, item: ResourceItem): string {
+  const out: string[] = [];
+  const label = (k: string, v: string) => `  ${chalk.gray(k.padEnd(11))}${v}`;
+
+  out.push(chalk.bold.cyan(item.name) + '  ' + chalk.gray(`${kind.replace(/s$/, '')} · ${item.source}`));
+
+  if (item.description) {
+    out.push('');
+    for (const line of wrapJoined('  ', item.description.split(/\s+/), ' ', terminalWidth())) {
+      out.push(chalk.white(line));
+    }
+  }
+
+  const rows: Array<[string, string]> = [];
+
+  // A hook's identity is when it fires — the summary view has always shown this
+  // while the drill-down showed only a size.
+  if (kind === 'hooks') {
+    const hook = hookManifestByScript(loadCentralHookManifest()).get(item.name);
+    if (hook) {
+      rows.push(['fires', chalk.yellow(summarizeHook(hook))]);
+      rows.push(['wired', chalk.green('yes') + chalk.gray(' · agents.yaml')]);
+    } else {
+      rows.push(['wired', chalk.gray('no — on disk but not registered')]);
+    }
+  }
+
+  if (kind === 'skills' || kind === 'commands' || kind === 'subagents') {
+    const fm = readFrontmatter(item.path);
+    if (fm) {
+      const triggers = manifestList(fm.triggers).join(', ');
+      if (triggers) rows.push(['triggers', triggers]);
+      const model = manifestText(fm.model);
+      if (model) rows.push(['model', model]);
+      const tools = manifestList(fm.tools).join(', ');
+      if (tools) rows.push(['tools', tools]);
+    }
+  }
+
+  if (item.extra) rows.push(...item.extra);
+
+  const size = itemSizeDetail(item.path);
+  if (size) rows.push(['size', size]);
+  if (item.path) rows.push(['path', chalk.blue(item.path)]);
+
+  if (rows.length > 0) {
+    out.push('');
+    for (const [k, v] of rows) out.push(label(k, v));
+  }
+
+  // A plugin's bundled resources, each on its own line rather than a comma run.
+  if (item.groups?.length) {
+    for (const g of item.groups) {
+      out.push('');
+      out.push('  ' + chalk.bold(`${g.label} (${g.items.length})`));
+      for (const entry of g.items.slice(0, 8)) out.push('    ' + chalk.green(entry));
+      if (g.items.length > 8) out.push('    ' + chalk.gray(`…${g.items.length - 8} more`));
+    }
+  }
+
+  return out.join('\n');
+}
+
+/** `18 KB · 3 files` for a bundle, `413 B` for a single file. */
+function itemSizeDetail(p: string): string {
+  if (!p) return '';
+  const stat = safeStat(p);
+  if (!stat) return '';
+  if (!stat.isDirectory()) return formatBytes(stat.size);
+  const { bytes, files } = pathSize(p);
+  return `${formatBytes(bytes)} · ${files} ${files === 1 ? 'file' : 'files'}`;
+}
+
 function buildDetailRows(item: ResourceItem, kind: DrillableKind): Array<[string, string]> {
   const rows: Array<[string, string]> = [];
   if (item.path && kind !== 'mcp') {
@@ -1144,7 +1277,7 @@ function buildDetailRows(item: ResourceItem, kind: DrillableKind): Array<[string
     if (stat) {
       if (stat.isDirectory()) {
         const { bytes, files } = pathSize(item.path);
-        rows.push(['size', `${formatBytes(bytes)} · ${files} files`]);
+        rows.push(['size', `${formatBytes(bytes)} · ${files} ${files === 1 ? 'file' : 'files'}`]);
       } else {
         rows.push(['size', formatBytes(stat.size)]);
       }
@@ -1307,7 +1440,16 @@ export function hookManifestByScript(manifest: Record<string, ManifestHook>): Ma
 
 /** Build hook rows by enriching the installed hook items with manifest events/predicates. */
 function hookRows(items: ResourceItem[], byScript: Map<string, ManifestHook>): RichRow[] {
-  return items.map(item => {
+  // The section shows only the first handful before a `…(+N)` tail, so order
+  // matters: wired hooks first. Alphabetically `00-…_test` sorts next to the
+  // hook it tests, so half the visible rows were test scaffolding with a blank
+  // event column while real registered hooks hid behind the tail.
+  const ordered = [...items].sort((a, b) => {
+    const aw = byScript.has(a.name) ? 0 : 1;
+    const bw = byScript.has(b.name) ? 0 : 1;
+    return aw !== bw ? aw - bw : a.name.localeCompare(b.name);
+  });
+  return ordered.map(item => {
     const hook = byScript.get(item.name);
     return {
       source: item.source,

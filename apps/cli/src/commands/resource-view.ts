@@ -46,6 +46,18 @@ export interface ResourceViewOptions {
   filterVersion?: string;
   /** Emit machine-readable JSON instead of the picker/table (for agents/scripts). */
   json?: boolean;
+  /**
+   * Show the "Synced" column. Default true — the central-storage commands all
+   * answer "which agent versions have this?". `agents inspect <repo>` does not:
+   * there the repo IS the source, and empty `targets` would render the
+   * misleading "no installed versions". Set false to drop the column entirely.
+   */
+  showSync?: boolean;
+}
+
+/** Whether the Synced column renders for this view. */
+function syncEnabled(opts: ResourceViewOptions): boolean {
+  return opts.showSync !== false;
 }
 
 /** Display a resource list: interactive picker in TTY mode, plain table otherwise. */
@@ -124,6 +136,10 @@ function formatPickerRow(row: ResourceRow, opts: ResourceViewOptions): string {
     ? chalk.gray(padVisible(row.extra2 ?? '-', 16))
     : '';
   const descRaw = row.description ? truncate(row.description, 40) : '';
+  if (!syncEnabled(opts)) {
+    // No sync column: give the reclaimed width back to the description.
+    return `${name} ${extra}${extra2}${chalk.gray(row.description ? truncate(row.description, 84) : '')}`;
+  }
   const desc = padVisible(chalk.gray(descRaw), 42);
   const sync = formatSyncSummary(row.targets, opts);
   return `${name} ${extra}${extra2}${desc} ${sync}`;
@@ -156,7 +172,9 @@ export function resourceLayout(
   const extraW = o.hasExtra ? 10 : 0;
   const extra2W = o.hasExtra2 ? 16 : 0;
   // Cap Sync so a long "missing on …" tail can't starve the description.
-  const syncW = Math.min(o.syncW, Math.max(14, Math.floor(cols * 0.32)));
+  // syncW 0 means the caller dropped the column — keep it 0 rather than
+  // floor it to 14, which would reserve width for a column we never draw.
+  const syncW = o.syncW === 0 ? 0 : Math.min(o.syncW, Math.max(14, Math.floor(cols * 0.32)));
   const fixed =
     o.nameW + 1 + (extraW ? extraW + 1 : 0) + (extra2W ? extra2W + 1 : 0) + 1 + syncW;
   const descW = cols - fixed;
@@ -178,7 +196,9 @@ function printResourceTable(opts: ResourceViewOptions): void {
     NAME_CAP,
     Math.max('Name'.length, ...opts.rows.map((r) => stringWidth(r.name))),
   );
-  const syncMax = Math.max('Synced'.length, ...syncStrings.map((s) => stringWidth(s)));
+  const syncMax = syncEnabled(opts)
+    ? Math.max('Synced'.length, ...syncStrings.map((s) => stringWidth(s)))
+    : 0;
   const layout = resourceLayout(cols, {
     hasExtra: Boolean(opts.extraLabel),
     hasExtra2: Boolean(opts.extra2Label),
@@ -219,11 +239,11 @@ function renderResourceWideTable(
   if (L.extraW) headerParts.push(cell(opts.extraLabel ?? '', L.extraW, chalk.bold));
   if (L.extra2W) headerParts.push(cell(opts.extra2Label ?? '', L.extra2W, chalk.bold));
   headerParts.push(cell('Description', L.descW, chalk.bold));
-  headerParts.push(chalk.bold('Synced'));
-  console.log(headerParts.join(' '));
+  if (L.syncW) headerParts.push(chalk.bold('Synced'));
+  console.log(headerParts.join(' ').trimEnd());
 
   const contentW =
-    L.nameW + 1 + (L.extraW ? L.extraW + 1 : 0) + (L.extra2W ? L.extra2W + 1 : 0) + L.descW + 1 + L.syncW;
+    L.nameW + 1 + (L.extraW ? L.extraW + 1 : 0) + (L.extra2W ? L.extra2W + 1 : 0) + L.descW + (L.syncW ? 1 + L.syncW : 0);
   console.log(chalk.gray('─'.repeat(Math.min(contentW, terminalWidth()))));
 
   opts.rows.forEach((row, i) => {
@@ -231,10 +251,12 @@ function renderResourceWideTable(
     if (L.extraW) parts.push(cell(row.extra ?? '-', L.extraW));
     if (L.extra2W) parts.push(cell(row.extra2 ?? '-', L.extra2W));
     parts.push(cell(row.description ?? '-', L.descW, chalk.gray));
-    let sync = syncStrings[i] ?? '';
-    if (stringWidth(sync) > L.syncW) sync = chalk.gray(truncateToWidth(sync, L.syncW));
-    parts.push(sync);
-    console.log(parts.join(' '));
+    if (L.syncW) {
+      let sync = syncStrings[i] ?? '';
+      if (stringWidth(sync) > L.syncW) sync = chalk.gray(truncateToWidth(sync, L.syncW));
+      parts.push(sync);
+    }
+    console.log(parts.join(' ').trimEnd());
   });
 }
 
@@ -245,7 +267,7 @@ function renderResourceCards(
   syncStrings: string[],
 ): void {
   opts.rows.forEach((row, i) => {
-    const meta = [row.extra, row.extra2, stripAnsi(syncStrings[i] ?? '')]
+    const meta = [row.extra, row.extra2, syncEnabled(opts) ? stripAnsi(syncStrings[i] ?? '') : '']
       .filter((s): s is string => Boolean(s && s.trim()))
       .join(' · ');
     const metaBudget = Math.max(8, cols - stringWidth(row.name) - 2);

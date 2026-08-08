@@ -14,6 +14,7 @@ import {
   summarizeMcp,
   hookManifestByScript,
   wrapJoined,
+  summaryLine,
 } from './inspect.js';
 import { listHookEntriesFromDir } from '../lib/hooks.js';
 import type { ManifestHook } from '../lib/types.js';
@@ -308,6 +309,36 @@ describe('wrapJoined', () => {
     expect(wrapJoined('  run       ', ['claude:balanced', 'codex:pinned'], ' · ', 80)).toEqual([
       '  run       claude:balanced · codex:pinned',
     ]);
+  });
+});
+
+describe('summaryLine', () => {
+  it('drops the trigger clause so the row says what the thing does', () => {
+    // 15 of 20 skills in .system append "Triggers on: …" to their description.
+    // In a one-line row that clause is what survived truncation, so the row
+    // showed trigger keywords instead of the purpose.
+    expect(summaryLine(
+      "Manage AI coding agent CLIs with agents-cli. Triggers on: 'agents add', 'agents use', installing agent versions",
+    )).toBe('Manage AI coding agent CLIs with agents-cli.');
+
+    expect(summaryLine(
+      'Drive a browser to automate websites — fill forms, click buttons. Use this skill when automating a site.',
+    )).toBe('Drive a browser to automate websites — fill forms, click buttons.');
+  });
+
+  it('keeps the whole text when there is no trigger clause and no sentence break', () => {
+    expect(summaryLine('Write documentation — user-facing, technical, runbooks'))
+      .toBe('Write documentation — user-facing, technical, runbooks');
+  });
+
+  it('does not chop a description to a fragment on an early abbreviation', () => {
+    // A naive first-sentence split would cut at "e.g." and leave three words.
+    const d = 'Publish artifacts, e.g. Plans and reports, to a shareable link on your own storage.';
+    expect(summaryLine(d)).toBe(d);
+  });
+
+  it('is empty for an empty description', () => {
+    expect(summaryLine('')).toBe('');
   });
 });
 
