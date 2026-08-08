@@ -1042,11 +1042,20 @@ export function describeBundle(bundle: SecretsBundle): BundleEntryInfo[] {
   return out;
 }
 
-// Bump `bundle.last_used` and persist the bundle, but no more than once per
-// throttle window so we don't pay a keychain write on every agent run. Failures
-// are swallowed — usage tracking is never allowed to break secret resolution.
+// Bump `last_used` and persist it, but no more than once per throttle window
+// so we don't pay a keychain write on every agent run. Failures are swallowed —
+// usage tracking is never allowed to break secret resolution.
 // Set AGENTS_NO_USAGE_TRACK=1 to disable the stamp entirely (used by tests).
-function stampLastUsed(bundle: SecretsBundle): void {
+//
+// The passed bundle is often the BROKER'S snapshot (this fires on every broker
+// hit), which can be stale — a detached auto-load captured before a mutating
+// write can land after its eviction. Persisting that snapshot wholesale used to
+// write its whole `vars` map back over the authoritative store, resurrecting
+// removed keys (or, for a since-deleted bundle, the bundle itself). The stamp
+// is telemetry: it re-reads the store's own current copy (bundle metadata is a
+// silent no-ACL read) and writes ONLY the timestamp onto that.
+// Exported for regression coverage, like shouldEvictAfterBundleWrite.
+export function stampLastUsed(bundle: SecretsBundle): void {
   if (process.env.AGENTS_NO_USAGE_TRACK) return;
   const nowMs = Date.now();
   if (bundle.last_used) {
@@ -1054,10 +1063,14 @@ function stampLastUsed(bundle: SecretsBundle): void {
     if (Number.isFinite(prev) && nowMs - prev < LAST_USED_THROTTLE_MS) return;
   }
   try {
-    bundle.last_used = new Date(nowMs).toISOString();
+    const fresh = readBundle(bundle.name); // throws if the bundle is gone — swallowed below
+    const stamp = new Date(nowMs).toISOString();
+    fresh.last_used = stamp;
+    // Keep the caller's (possibly broker-held) copy throttling correctly.
+    bundle.last_used = stamp;
     // skipBrokerEviction: this stamp fires on every broker HIT; letting it
     // evict would make the cache destroy itself on first use.
-    writeBundle(bundle, { skipBrokerEviction: true });
+    writeBundle(fresh, { skipBrokerEviction: true });
   } catch {
     // Swallow — telemetry must never block secret resolution.
   }
@@ -1516,6 +1529,10 @@ export function readAndResolveBundleEnv(
       // `agents secrets status` is honest. Re-warm under the scope the grant was
       // MADE in (resolved.harness), never the asking scope — re-warming a global
       // grant as `claude` would silently narrow it for every other harness.
+      // No snapshotAt: the session's bundle was read at unlock time, not now —
+      // claiming freshness here would defeat the broker's eviction tombstones.
+      // An undated load is accepted (legacy behavior); the durable-session
+      // staleness window itself is a known, separate concern.
       agentAutoLoadSync(name, session.bundle, session.env, Math.max(1, session.expiresAt - Date.now()), resolved.harness, session.lease);
       emitSecretAudit({
         event: 'secrets.get',
@@ -1568,6 +1585,10 @@ export function readAndResolveBundleEnv(
   // with #316 hashing active, cleartext elsewhere); metaItem is cleartext and
   // hashed inside getBatch. Deduped because the hashed enumeration spans the
   // bundle's whole namespace.
+  // Captured BEFORE the value fetch: if a mutating write evicts this bundle
+  // while the read is in flight, the broker's tombstone must beat this
+  // snapshot, so the conservative (earliest) timestamp is the correct one.
+  const snapshotAt = Date.now();
   const fetched = backend === 'keychain'
     ? getKeychainTokens([...new Set([metaItem, ...secretItems])], {
         agent: opts.agent || process.env.AGENTS_AGENT_NAME || 'Agents CLI',
@@ -1722,7 +1743,7 @@ export function readAndResolveBundleEnv(
       secretsAgentAutoEnabled() &&
       canCacheResolvedEnv(bundle, selectedKeys, opts.keyMode)
     ) {
-      agentAutoLoadSync(name, bundle, env, secretsHoldMs(), opts.agent || process.env.AGENTS_AGENT_NAME || GLOBAL_HARNESS);
+      agentAutoLoadSync(name, bundle, env, secretsHoldMs(), opts.agent || process.env.AGENTS_AGENT_NAME || GLOBAL_HARNESS, undefined, snapshotAt);
     }
     return { bundle, env };
   } catch (err) {

@@ -2002,7 +2002,20 @@ Examples:
         delete bundle.vars[resolvedKey];
         writeBundle(bundle);
         if (willPurge) {
-          const item = secretsKeychainItem(resolvedBundleName, raw.slice('keychain:'.length));
+          const shortId = raw.slice('keychain:'.length);
+          // Purge only the removed key's own storage slot. A corrupted ref
+          // (e.g. a stale manifest write-back leaving OPENAI_API_KEY pointing
+          // at keychain:LINEAR_API_KEY) must never destroy another key's item —
+          // the ref is gone from the bundle either way; the stray item is the
+          // recoverable side of that trade.
+          if (shortId !== resolvedKey) {
+            console.log(chalk.yellow(
+              `Removed ${resolvedBundleName}.${resolvedKey}, but its ref pointed at '${shortId}' — ` +
+              `left that keychain item untouched (it belongs to a different key).`,
+            ));
+            return;
+          }
+          const item = secretsKeychainItem(resolvedBundleName, shortId);
           const removed = bundleItemStore(bundle.backend).delete(item);
           if (removed) {
             const where = bundle.backend === 'file'
@@ -2738,7 +2751,10 @@ Examples:
       for (const name of targets) {
         try {
           // noAgent: read the real keychain (one Touch ID) rather than the
-          // agent we're about to populate.
+          // agent we're about to populate. Snapshot time is captured BEFORE the
+          // read so a concurrent eviction always beats this load (broker
+          // tombstones reject snapshots that predate an eviction).
+          const snapshotAt = Date.now();
           const { bundle, env } = readAndResolveBundleEnv(name, {
             noAgent: true,
             caller: 'unlock secrets',
@@ -2756,7 +2772,7 @@ Examples:
           // held exactly as before. scopeHeldEnv fails closed on an unknown key.
           const { heldEnv, lease } = scopeHeldEnv({ bundle: name, env, keys: opts.keys ?? null, ttlMs, harness, sleepPersist: durable });
           const heldExpiresAt = lease ? lease.expiresAt : expiresAt;
-          if (await agentLoad(name, bundle, heldEnv, ttlMs, harness, lease)) {
+          if (await agentLoad(name, bundle, heldEnv, ttlMs, harness, lease, snapshotAt)) {
             loaded++;
             // Persist a durable session snapshot so the unlock survives a daemon
             // restart / upgrade (and sleep too, with --durable). session-store.ts.

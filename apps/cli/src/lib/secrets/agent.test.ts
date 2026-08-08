@@ -79,6 +79,51 @@ describe('handleAgentRequest', () => {
     expect(r).toEqual({ ok: true, cmd: 'lock', wiped: 0 });
   });
 
+  // Eviction tombstones: a mutating write (remove/rotate/…) evicts by name, but
+  // a detached auto-load whose bundle snapshot was captured BEFORE that write
+  // can land AFTER it — re-populating the broker with a pre-mutation snapshot
+  // that later resurrects removed keys via the last-used stamp. The broker must
+  // reject any load whose snapshot predates the eviction.
+  describe('eviction tombstones', () => {
+    it('rejects a load whose snapshot predates a by-name lock', () => {
+      const store = freshStore();
+      const evictedAt = new Map<string, number>();
+      handleAgentRequest(store, loadReq('prod', { K: 'old' }, 60_000), 1_000, evictedAt);
+      handleAgentRequest(store, { cmd: 'lock', name: 'prod' }, 5_000, evictedAt);
+      // The stale loader captured its snapshot at t=4000, before the lock.
+      const r = handleAgentRequest(store, { ...loadReq('prod', { K: 'old' }, 60_000), snapshotAt: 4_000 }, 9_000, evictedAt);
+      expect(r.ok).toBe(false);
+      expect(handleAgentRequest(store, { cmd: 'get', name: 'prod' }, 9_500, evictedAt)).toMatchObject({ hit: false });
+    });
+
+    it('accepts a load whose snapshot postdates the eviction', () => {
+      const store = freshStore();
+      const evictedAt = new Map<string, number>();
+      handleAgentRequest(store, { cmd: 'lock', name: 'prod' }, 5_000, evictedAt);
+      const r = handleAgentRequest(store, { ...loadReq('prod', { K: 'fresh' }, 60_000), snapshotAt: 6_000 }, 7_000, evictedAt);
+      expect(r).toEqual({ ok: true, cmd: 'load' });
+      expect(handleAgentRequest(store, { cmd: 'get', name: 'prod' }, 8_000, evictedAt)).toMatchObject({ hit: true, env: { K: 'fresh' } });
+    });
+
+    it('accepts a legacy load carrying no snapshot timestamp', () => {
+      const store = freshStore();
+      const evictedAt = new Map<string, number>();
+      handleAgentRequest(store, { cmd: 'lock', name: 'prod' }, 5_000, evictedAt);
+      const r = handleAgentRequest(store, loadReq('prod', { K: 'v' }, 60_000), 9_000, evictedAt);
+      expect(r).toEqual({ ok: true, cmd: 'load' });
+    });
+
+    it('lock-all tombstones every bundle it wiped', () => {
+      const store = freshStore();
+      const evictedAt = new Map<string, number>();
+      handleAgentRequest(store, loadReq('a', { K: '1' }, 60_000), 0, evictedAt);
+      handleAgentRequest(store, loadReq('b', { K: '2' }, 60_000), 0, evictedAt);
+      handleAgentRequest(store, { cmd: 'lock' }, 5_000, evictedAt);
+      const stale = handleAgentRequest(store, { ...loadReq('b', { K: '2' }, 60_000), snapshotAt: 4_000 }, 9_000, evictedAt);
+      expect(stale.ok).toBe(false);
+    });
+  });
+
   it('status lists live bundles with key counts and hides expired ones', () => {
     const store = freshStore();
     handleAgentRequest(store, loadReq('live', { A: '1', B: '2' }, 10_000), 0); // expiresAt 10000

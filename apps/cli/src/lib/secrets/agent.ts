@@ -382,7 +382,7 @@ export async function uninstallSecretsAgentService(): Promise<void> {
 export type Request =
   | { cmd: 'ping' }
   | { cmd: 'get'; name: string; harness?: string; token?: string }
-  | { cmd: 'load'; name: string; harness?: string; bundle: SecretsBundle; env: Record<string, string>; ttlMs: number; lease?: SecretLease; token?: string }
+  | { cmd: 'load'; name: string; harness?: string; bundle: SecretsBundle; env: Record<string, string>; ttlMs: number; lease?: SecretLease; token?: string; snapshotAt?: number }
   | { cmd: 'lock'; name?: string; token?: string }
   | { cmd: 'revoke'; leaseId: string; token?: string }
   | { cmd: 'status'; token?: string };
@@ -426,6 +426,11 @@ export function handleAgentRequest(
   store: Map<string, StoredBundle>,
   req: Request,
   now: number = Date.now(),
+  // Eviction tombstones: `lock` records when each bundle was wiped so a load
+  // whose snapshot predates the eviction (a detached auto-load that raced a
+  // mutating write) is rejected instead of re-populating the store with a
+  // pre-mutation copy. Broker-lifetime state, owned by the caller like `store`.
+  evictedAt: Map<string, number> = new Map(),
 ): Response {
   switch (req.cmd) {
     case 'ping':
@@ -454,6 +459,13 @@ export function handleAgentRequest(
       return { ok: true, cmd: 'get', hit: false };
     }
     case 'load': {
+      const evictedTs = evictedAt.get(req.name);
+      if (evictedTs !== undefined && req.snapshotAt !== undefined && req.snapshotAt <= evictedTs) {
+        // The loader captured its bundle/env before a mutating write evicted
+        // this name; accepting it would serve (and later re-persist) stale
+        // state. A load with no snapshotAt (older client) is accepted as before.
+        return { ok: false, error: `stale load for '${req.name}': snapshot predates an eviction` };
+      }
       const harness = req.harness || GLOBAL_HARNESS;
       let env = req.env;
       if (req.lease) {
@@ -467,9 +479,11 @@ export function handleAgentRequest(
       if (req.name) {
         let wiped = 0;
         for (const [key, entry] of store) if (entry.bundle.name === req.name && store.delete(key)) wiped++;
+        evictedAt.set(req.name, now);
         return { ok: true, cmd: 'lock', wiped };
       }
       const wiped = store.size;
+      for (const entry of store.values()) evictedAt.set(entry.bundle.name, now);
       store.clear();
       return { ok: true, cmd: 'lock', wiped };
     }
@@ -766,8 +780,9 @@ export async function runSecretsAgent(
     }
   };
 
+  const evictedAt = new Map<string, number>();
   const handle = (req: Request): Response => {
-    const resp = handleAgentRequest(store, req);
+    const resp = handleAgentRequest(store, req, Date.now(), evictedAt);
     if (realBundleCount(store) > 0) emptySince = Date.now();
     return resp;
   };
@@ -877,7 +892,8 @@ export async function startHostedBroker(): Promise<{ close(): void } | null> {
   const store = rehydrateStore();
   const sock = socketPath(); // agentDir() creates the 0700 dir as a side effect
 
-  const handle = (req: Request): Response => handleAgentRequest(store, req);
+  const evictedAt = new Map<string, number>();
+  const handle = (req: Request): Response => handleAgentRequest(store, req, Date.now(), evictedAt);
   const onConn = makeConnectionHandler(handle, readAgentToken);
 
   const server = await bindBrokerSocket(sock, onConn);
@@ -1258,9 +1274,12 @@ export function agentAutoLoadSync(
   ttlMs: number,
   harness: string = GLOBAL_HARNESS,
   lease?: SecretLease,
+  // When the caller read the bundle from the keychain — lets the broker
+  // reject this load if an eviction lands in between (tombstones, above).
+  snapshotAt?: number,
 ): void {
   if (!onDarwin()) return;
-  const payload = JSON.stringify({ name, bundle, env, ttlMs, harness, lease });
+  const payload = JSON.stringify({ name, bundle, env, ttlMs, harness, lease, snapshotAt });
   // Broker actually LISTENING → deterministic synchronous warm (bounded; the read
   // already paid a Touch ID, so <1s here is invisible). We gate on a real liveness
   // ping, NOT mere socket-file existence: a broker that died leaving its socket
@@ -1305,7 +1324,7 @@ export async function runAgentLoadFromStdin(): Promise<void> {
   if (!onDarwin()) return;
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-  let payload: { name?: string; bundle?: SecretsBundle; env?: Record<string, string>; ttlMs?: number; harness?: string; lease?: SecretLease };
+  let payload: { name?: string; bundle?: SecretsBundle; env?: Record<string, string>; ttlMs?: number; harness?: string; lease?: SecretLease; snapshotAt?: number };
   try {
     payload = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
   } catch {
@@ -1322,7 +1341,7 @@ export async function runAgentLoadFromStdin(): Promise<void> {
     process.exitCode = 1; // broker couldn't be brought up — did NOT load
     return;
   }
-  const loaded = await agentLoad(payload.name, payload.bundle, payload.env, payload.ttlMs ?? DEFAULT_TTL_MS, payload.harness ?? GLOBAL_HARNESS, payload.lease);
+  const loaded = await agentLoad(payload.name, payload.bundle, payload.env, payload.ttlMs ?? DEFAULT_TTL_MS, payload.harness ?? GLOBAL_HARNESS, payload.lease, payload.snapshotAt);
   if (!loaded) process.exitCode = 1; // transport failed — did NOT load
 }
 
@@ -1334,8 +1353,9 @@ export async function agentLoad(
   ttlMs: number,
   harness: string = GLOBAL_HARNESS,
   lease?: SecretLease,
+  snapshotAt?: number,
 ): Promise<boolean> {
-  const r = await request({ cmd: 'load', name, bundle, env, ttlMs, harness, lease });
+  const r = await request({ cmd: 'load', name, bundle, env, ttlMs, harness, lease, snapshotAt });
   return r?.ok === true && r.cmd === 'load';
 }
 
