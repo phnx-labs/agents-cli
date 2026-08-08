@@ -227,6 +227,28 @@ describe('agents inspect', () => {
     expect(r.stdout).not.toContain('navigate');
   });
 
+  it('keeps each plugin\'s bundled resources on the piped path', () => {
+    // The pre-picker output printed these lines under every row with no TTY
+    // check. A table alone would silently drop what a plugin actually ships
+    // from `agents inspect . --plugins | grep`, while --json still carried it.
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-groups-' + crypto.randomBytes(4).toString('hex') + '-'));
+    const p = path.join(proj, '.agents', 'plugins', 'toolkit');
+    writeFile(path.join(p, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'toolkit', version: '1.0.0', description: 'A toolkit.' }));
+    for (const n of ['alpha', 'bravo', 'charlie']) {
+      writeFile(path.join(p, 'commands', `${n}.md`), `---\ndescription: ${n}\n---\n\nBody.\n`);
+    }
+
+    const r = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, '--plugins'], {
+      cwd: proj, env: { ...process.env, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1', COLUMNS: '140' }, encoding: 'utf-8',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/Name\s+Size\s+Description/);
+    // Every bundled command, not a truncated prefix of them.
+    for (const n of ['alpha', 'bravo', 'charlie']) expect(r.stdout).toContain(`/toolkit:${n}`);
+    expect(r.stdout).toContain('commands');
+  });
+
   it('shows a hook what fires it, never a line of its own shell', () => {
     // The AGENT path specifically. The repo path already hardcodes an empty
     // description ("hooks are shell scripts with no human description"), so a

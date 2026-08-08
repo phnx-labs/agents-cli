@@ -51,6 +51,8 @@ import { getResourceInventory, type ResourceInventory } from '../lib/resource-in
 import { listMcpServerConfigs, discoverMcpConfigsFromRepo, type McpYamlConfig } from '../lib/mcp.js';
 import { discoverPlugins, discoverPluginsInDir, pluginResourceGroups, inspectPluginCapabilities, pluginCapabilityLabels, type PluginResourceGroup } from '../lib/plugins.js';
 import { showResourceList } from './resource-view.js';
+import { PLUGIN_GROUP_COLORS } from './plugins.js';
+import { isInteractiveTerminal } from './utils.js';
 import { countSessionsInScope } from '../lib/session/discover.js';
 import { isSessionTrackedAgent } from '../lib/session/types.js';
 import { damerauLevenshtein } from '../lib/fuzzy.js';
@@ -871,9 +873,31 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
       extra: itemSizeLabel(item.path),
       extra2: sources.size > 1 ? item.source : undefined,
       targets: [],
-      buildDetail: () => previewFor(kind, item),
+      // Pass the resolved manifest: the picker rebuilds this on every arrow
+      // key, so re-reading ~11 KB of YAML per keystroke is wasted work on top
+      // of being the wrong manifest for a repo target.
+      buildDetail: () => previewFor(kind, item, hookEvents ?? undefined),
     })),
   });
+
+  // On a TTY the picker's preview pane carries each plugin's bundled skills and
+  // commands. Piped, there is no pane — and the pre-picker output printed those
+  // lines under every row, so a table alone would silently drop what a plugin
+  // actually ships from `agents inspect . --plugins | grep`.
+  if (!isInteractiveTerminal() && items.some(i => i.groups?.length)) {
+    for (const item of items) {
+      if (!item.groups?.length) continue;
+      console.log('\n' + chalk.cyan(item.name));
+      const width = Math.max(...item.groups.map(g => g.label.length));
+      for (const g of item.groups) {
+        const colorFn = PLUGIN_GROUP_COLORS[g.label] ?? chalk.white;
+        // Wrapped, not truncated: routing these through a truncating helper is
+        // what once showed 4 of a 10-command plugin at 80 columns.
+        printWrappedJoined(`  ${chalk.gray(g.label.padEnd(width))}  `, g.items.map(s => colorFn(s)), ', ');
+      }
+    }
+    console.log('');
+  }
 }
 
 /**
@@ -1162,7 +1186,13 @@ function entriesFromAgentResources(agent: AgentId, versionHome: string, kind: 'c
     source: e.scope,
     path: e.path,
     linkTarget: linkTarget(e.path),
-    description: readDescription(e.path),
+    // A hook is a shell/Python script with no human description, so the prose
+    // fallback returned code: all 53 under an agent home read "!/usr/bin/env
+    // bash" (the `#` strip eating the shebang), and skipping that line only
+    // promoted `set -euo pipefail`. repoHookItems already hardcodes '' for the
+    // repo path; this makes the agent path agree instead of guessing. The
+    // Hooks view shows firing events in that column.
+    description: kind === 'hooks' ? '' : readDescription(e.path),
   }));
 }
 
@@ -1211,7 +1241,7 @@ function buildDetail(item: ResourceItem, kind: DrillableKind): Record<string, un
  * whether it is wired) has nothing in common with a skill's (what invokes it,
  * where it is synced), so each kind contributes its own rows and blanks drop out.
  */
-export function previewFor(kind: DrillableKind, item: ResourceItem): string {
+export function previewFor(kind: DrillableKind, item: ResourceItem, hookManifest?: Map<string, ManifestHook>): string {
   const out: string[] = [];
   const label = (k: string, v: string) => `  ${chalk.gray(k.padEnd(11))}${v}`;
 
@@ -1229,7 +1259,13 @@ export function previewFor(kind: DrillableKind, item: ResourceItem): string {
   // A hook's identity is when it fires — the summary view has always shown this
   // while the drill-down showed only a size.
   if (kind === 'hooks') {
-    const hook = hookManifestByScript(loadCentralHookManifest()).get(item.name);
+    // Use the manifest the caller already resolved. Re-resolving the CENTRAL
+    // one here made the preview contradict its own row: a repo hook wired by
+    // that repo's agents.yaml showed `PreToolUse(Bash)` in the table and
+    // "not registered" in the pane below it, and the mirror case credited a
+    // central registration to the repo.
+    const manifest = hookManifest ?? hookManifestByScript(loadCentralHookManifest());
+    const hook = manifest.get(item.name);
     if (hook) {
       rows.push(['fires', chalk.yellow(summarizeHook(hook))]);
       rows.push(['wired', chalk.green('yes') + chalk.gray(' · agents.yaml')]);
@@ -1497,7 +1533,7 @@ function mcpRows(items: ResourceItem[], configs: Map<string, McpYamlConfig>): Ri
 }
 
 /** Read a repo/agents.yaml `hooks:` section into a name→ManifestHook map (best-effort). */
-function hookManifestFromFile(agentsYamlPath: string): Record<string, ManifestHook> {
+export function hookManifestFromFile(agentsYamlPath: string): Record<string, ManifestHook> {
   try {
     const meta = yaml.parse(fs.readFileSync(agentsYamlPath, 'utf-8')) as { hooks?: Record<string, ManifestHook> } | null;
     return meta?.hooks ?? {};
@@ -1648,12 +1684,6 @@ function readFirstProseLine(p: string): string {
     const stat = fs.statSync(p);
     if (stat.isDirectory()) return '';
     if (stat.size > 64 * 1024) return '';
-    // "First prose line" is a Markdown heuristic. Run on a script it returns
-    // code: every one of the 53 hook scripts rendered "!/usr/bin/env bash"
-    // (the `#` strip eating the shebang), and skipping that line only promoted
-    // the next one — `set -euo pipefail`, a Python docstring. A hook has no
-    // description; the Hooks view shows its firing events instead.
-    if (!/\.(md|markdown)$/i.test(p)) return '';
     const text = fs.readFileSync(p, 'utf-8');
     // Skip frontmatter
     let body = text;

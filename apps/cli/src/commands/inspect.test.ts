@@ -13,9 +13,12 @@ import {
   summarizeHook,
   summarizeMcp,
   hookManifestByScript,
+  hookManifestFromFile,
+  previewFor,
   wrapJoined,
   summaryLine,
 } from './inspect.js';
+import { stripAnsi } from '../lib/session/width.js';
 import { listHookEntriesFromDir } from '../lib/hooks.js';
 import type { ManifestHook } from '../lib/types.js';
 import { getUserAgentsDir, getSystemAgentsDir } from '../lib/state.js';
@@ -115,30 +118,45 @@ describe('collectRepoKind', () => {
     expect(collectRepoKind(repo, 'workflows')).toEqual([]);
   });
 
-  it('gives a script no description rather than a line of its code', () => {
+  it('keeps the first-line description for non-Markdown resources', () => {
+    // Guarding the shebang inside readFirstProseLine was the wrong layer: it is
+    // shared by every kind, and readResourceDir enumerates .yaml/.yml/.toml/
+    // .json too, so an extension test blanked all of them. A `# comment` on
+    // line 1 of an mcp yaml is a real description and must survive.
     const root = makeProjectRepo();
-    const hooksDir = path.join(root, '.agents', 'hooks');
-    fs.mkdirSync(hooksDir, { recursive: true });
-    // "First prose line" is a Markdown heuristic. On a script it returned the
-    // shebang with its `#` eaten ("!/usr/bin/env bash") for all 53 hooks here,
-    // and skipping that line only promoted the next one — `set -euo pipefail`.
-    fs.writeFileSync(path.join(hooksDir, 'guard.sh'), '#!/usr/bin/env bash\nset -euo pipefail\necho ok\n');
-    fs.writeFileSync(path.join(hooksDir, 'probe.py'), '#!/usr/bin/env python3\n"""Not a description."""\n');
+    const mcpDir = path.join(root, '.agents', 'mcp');
+    fs.mkdirSync(mcpDir, { recursive: true });
+    fs.writeFileSync(path.join(mcpDir, 'linear.yaml'), '# Linear issue tracker over http\nurl: https://x\n');
     const repo = resolveRepoTarget(root)!;
-    for (const h of collectRepoKind(repo, 'hooks')) {
-      expect(h.description, `${h.name} should have no description`).toBe('');
-    }
-  });
+    const linear = collectRepoKind(repo, 'mcp').find(m => m.name === 'linear')!;
+    expect(linear.description).toBe('Linear issue tracker over http');
 
-  it('still reads descriptions from markdown resources', () => {
-    // The script fix must not strip prose from the kinds that legitimately
-    // carry it — commands and skills are .md and keep their frontmatter.
-    const root = makeProjectRepo();
-    const repo = resolveRepoTarget(root)!;
+    // Markdown resources keep their frontmatter description.
     const ship = collectRepoKind(repo, 'commands').find(c => c.name === 'ship')!;
     expect(ship.description).toBe('Ship the thing');
-    const plain = collectRepoKind(repo, 'commands').find(c => c.name === 'plain')!;
-    expect(plain.description).toBe('Plain command');
+  });
+
+  it('agrees with its own row about whether a repo hook is wired', () => {
+    // The row read the repo's agents.yaml while the preview re-resolved the
+    // CENTRAL one, so a hook the repo wires showed "PreToolUse(Bash)" in the
+    // table and "not registered" in the pane directly below it.
+    const root = makeProjectRepo();
+    fs.mkdirSync(path.join(root, '.agents', 'hooks'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', 'hooks', 'guard.sh'), '#!/usr/bin/env bash\nexit 0\n');
+    fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'),
+      'hooks:\n  my-guard:\n    script: guard.sh\n    events:\n      - PreToolUse\n    matcher: Bash\n');
+
+    const repo = resolveRepoTarget(root)!;
+    const guard = collectRepoKind(repo, 'hooks').find(h => h.name === 'guard')!;
+    const manifest = hookManifestByScript(hookManifestFromFile(path.join(repo.root, 'agents.yaml')));
+
+    // What the row shows.
+    const hook = manifest.get('guard')!;
+    expect(summarizeHook(hook)).toBe('PreToolUse(Bash)');
+    // What the pane shows, given the same manifest.
+    const pane = stripAnsi(previewFor('hooks', guard, manifest));
+    expect(pane).toContain('PreToolUse(Bash)');
+    expect(pane).not.toContain('not registered');
   });
 
   it('skips build/tooling caches (__pycache__, node_modules)', () => {
