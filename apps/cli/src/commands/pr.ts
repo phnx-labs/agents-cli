@@ -107,26 +107,11 @@ export async function hasNonAuthorApproval(prUrl: string): Promise<boolean> {
   return isNonAuthorApproved(reviews, author);
 }
 
-/**
- * Fetch CI checks without losing failed rows when `gh pr checks` exits non-zero.
- * A non-empty JSON payload is authoritative even when the command reports red CI;
- * an unreadable response fails closed instead of becoming an empty green list.
- */
-export async function fetchLandingChecks(prUrl: string): Promise<PrCheck[]> {
-  let stdout = '';
-  try {
-    ({ stdout } = await execFileAsync(
-      'gh',
-      ['pr', 'checks', prUrl, '--json', 'name,state,link,workflow'],
-      { maxBuffer: 8 * 1024 * 1024 }
-    ));
-  } catch (err) {
-    stdout = String((err as Error & { stdout?: string }).stdout ?? '');
-    if (!stdout.trim()) {
-      throw new Error(`Cannot read CI checks: ${(err as Error).message}`);
-    }
+/** Convert the exact `gh pr checks` process outcome into checks, failing closed. */
+export function parseLandingChecksResult(stdout: string, commandError: Error | null): PrCheck[] {
+  if (commandError && !stdout.trim()) {
+    throw new Error(`Cannot read CI checks: ${commandError.message}`);
   }
-
   try {
     const raw = JSON.parse(stdout) as Array<Record<string, unknown>>;
     return raw.map((check) => ({
@@ -138,6 +123,27 @@ export async function fetchLandingChecks(prUrl: string): Promise<PrCheck[]> {
   } catch (err) {
     throw new Error(`Cannot parse CI checks: ${(err as Error).message}`);
   }
+}
+
+/**
+ * Fetch CI checks without losing failed rows when `gh pr checks` exits non-zero.
+ * A non-empty JSON payload is authoritative even when the command reports red CI;
+ * an unreadable response fails closed instead of becoming an empty green list.
+ */
+export async function fetchLandingChecks(prUrl: string): Promise<PrCheck[]> {
+  let stdout = '';
+  let commandError: Error | null = null;
+  try {
+    ({ stdout } = await execFileAsync(
+      'gh',
+      ['pr', 'checks', prUrl, '--json', 'name,state,link,workflow'],
+      { maxBuffer: 8 * 1024 * 1024 }
+    ));
+  } catch (err) {
+    stdout = String((err as Error & { stdout?: string }).stdout ?? '');
+    commandError = err as Error;
+  }
+  return parseLandingChecksResult(stdout, commandError);
 }
 
 /** The CI state of a PR: green (all done and passing), pending (still running), or the first failed check. */

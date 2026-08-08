@@ -5,7 +5,12 @@
  * same production helper used by `hasNonAuthorApproval`.
  */
 import { describe, it, expect } from 'vitest';
-import { classifyCiState, isNonAuthorApproved, type PrReview } from './pr.js';
+import {
+  classifyCiState,
+  isNonAuthorApproved,
+  parseLandingChecksResult,
+  type PrReview,
+} from './pr.js';
 import type { PrCheck } from '../lib/teams/pr-watch.js';
 
 // ---------------------------------------------------------------------------
@@ -78,6 +83,24 @@ describe('classifyCiState', () => {
     expect(lower.kind).toBe('failed');
     const mixed = classifyCiState([{ name: 'x', state: 'Success' }]);
     expect(mixed.kind).toBe('green');
+  });
+});
+
+describe('parseLandingChecksResult', () => {
+  it('preserves failing checks when gh rejects because CI is red', () => {
+    const checks = parseLandingChecksResult(
+      JSON.stringify([{ name: 'test', state: 'FAILURE', link: 'https://example.test/run' }]),
+      new Error('gh exited 1')
+    );
+    expect(classifyCiState(checks)).toEqual({
+      kind: 'failed',
+      check: { name: 'test', state: 'FAILURE', link: 'https://example.test/run' },
+    });
+  });
+
+  it('fails closed when gh rejects without a readable check payload', () => {
+    expect(() => parseLandingChecksResult('', new Error('authentication failed')))
+      .toThrow('Cannot read CI checks: authentication failed');
   });
 });
 
