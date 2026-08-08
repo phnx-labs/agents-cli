@@ -370,6 +370,46 @@ function mkManager(): AgentManager {
  * ourselves — a leftover `agents/<name>` branch is what makes the retry fail with
  * `fatal: a branch ... already exists`, so it must never be silent (RUSH-2356).
  */
+/**
+ * Tear down a worktree a failed operation left behind — but ONLY if it is a
+ * genuine orphan.
+ *
+ * Extracted because this guard was hand-duplicated at two call sites (`teams
+ * add` and the pr-watch fixer) and the copy at the fixer path was written
+ * WITHOUT it, which is RUSH-2356 reoccurring at the one site that skipped the
+ * check. One implementation, one place to get it right.
+ *
+ * The two errors here are not symmetric, so the guard deliberately fails
+ * CLOSED: a spurious "claimed" strands a branch a human can delete, while a
+ * spurious "unclaimed" runs `git worktree remove --force` over a live
+ * teammate's checkout and destroys uncommitted work. So an unreadable record
+ * means "leave it alone and tell the user", never "assume it is free".
+ *
+ * A staged teammate is exactly the case that makes this necessary: `spawn()`
+ * persists its meta.json and only THEN runs the retention pass, which refreshes
+ * every sibling and can throw on a distributed one — so a failure can land here
+ * with a live, durably-recorded, merely-pending `--after` teammate already
+ * owning this worktree.
+ */
+export async function tearDownOrphanWorktree(
+  mgr: AgentManager,
+  baseCwd: string,
+  name: string,
+): Promise<void> {
+  try {
+    if (await mgr.isWorktreeClaimed(name)) return;
+  } catch {
+    warnOrphanWorktree(baseCwd, name, 'the teammate record could not be read');
+    return;
+  }
+
+  try {
+    await removeWorktree(baseCwd, name);
+  } catch (cleanupErr) {
+    warnOrphanWorktree(baseCwd, name, (cleanupErr as Error).message);
+  }
+}
+
 function warnOrphanWorktree(baseCwd: string, name: string, reason: string): void {
   process.stderr.write(
     chalk.yellow(
@@ -677,24 +717,7 @@ async function reactWithTeammate(
     // it follows a source teammate, so a throw there lands here with a LIVE,
     // durably-recorded, merely-pending teammate already owning this worktree —
     // and removing it would destroy real work. Only tear down a genuine orphan.
-    if (worktreeName) {
-      let claimed: boolean;
-      try {
-        claimed = await mgr.isWorktreeClaimed(worktreeName);
-      } catch {
-        // Can't prove it's an orphan. Deleting a live teammate's worktree is
-        // unrecoverable; a leftover branch is not — leave it and say so.
-        warnOrphanWorktree(baseCwd, worktreeName, 'the teammate record could not be read');
-        throw err;
-      }
-      if (claimed) throw err;
-
-      try {
-        await removeWorktree(baseCwd, worktreeName);
-      } catch (cleanupErr) {
-        debug(`pr-watch: could not remove orphaned worktree ${worktreeName}: ${(cleanupErr as Error).message}`);
-      }
-    }
+    if (worktreeName) await tearDownOrphanWorktree(mgr, baseCwd, worktreeName);
     throw err;
   }
   return result.name ?? shortId(result.agent_id);
@@ -1824,27 +1847,7 @@ export function registerTeamsCommands(program: Command): void {
         const { baseCwd, name } = createdWorktree;
         createdWorktree = null;
 
-        // The add can also fail AFTER the record is durably saved — spawn()
-        // writes a staged teammate's meta.json and only then runs the retention
-        // pass, which refreshes every sibling's status and can throw on a
-        // distributed one. That teammate EXISTS and is merely pending its
-        // `--after` dependency, so removing its worktree would destroy real
-        // work. Only tear down when no LIVE teammate claims this worktree.
-        try {
-          if (await mgr.isWorktreeClaimed(name)) return;
-        } catch {
-          // Can't prove it's an orphan. Deleting a live teammate's worktree is
-          // unrecoverable; a leftover branch is not — so leave it and print the
-          // manual removal below rather than guess.
-          warnOrphanWorktree(baseCwd, name, 'the teammate record could not be read');
-          return;
-        }
-
-        try {
-          await removeWorktree(baseCwd, name);
-        } catch (cleanupErr) {
-          warnOrphanWorktree(baseCwd, name, (cleanupErr as Error).message);
-        }
+        await tearDownOrphanWorktree(mgr, baseCwd, name);
       };
 
       if (hostName) {
