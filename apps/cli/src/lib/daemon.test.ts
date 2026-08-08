@@ -24,6 +24,7 @@ import {
   getAgentsInvocation,
   getAgentsBinPath,
   startDetached,
+  startDaemon,
   writeOwnerOnlyServiceManifest,
   ensureDaemonStarted,
   isDaemonRunning,
@@ -528,6 +529,132 @@ describe('startDetached (integration: daemon stays alive)', () => {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
   }, 30_000);
+});
+
+// RUSH-2417: `agents daemon start` self-contended on its own lock file.
+// `startDaemon` (daemon.ts) and the freshly-launched child's
+// `claimDaemonInstance` both resolve `getLockPath()` -> `<daemonDir>/daemon.lock`,
+// and the launchd/systemd branches busy-waited on `waitForPid(3000)` while STILL
+// holding it (release only happened in startDaemon's outer `finally`). The child
+// therefore always hit EEXIST against a holder that was alive — the parent CLI —
+// and exited with the false "another daemon is mid-takeover" warning, defeating
+// the service-manager fast-start path on every fresh install.
+//
+// The existing last-wins takeover test above calls `startDetached` directly and
+// never opens this window, which is why the bug survived it. These drive the REAL
+// `startDaemon()` sequence with `systemctl` / `launchctl` shims on PATH: the shim
+// launches a stand-in daemon that records whether the start lock was present when
+// it went to claim, then writes the pid file the parent is waiting on.
+describe('startDaemon (RUSH-2417: the start lock is released before the child-pid wait)', () => {
+  let tmpHome = '';
+  const saved: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'agd-2417-'));
+    for (const k of ['HOME', 'PATH', 'AGENTS_DAEMON_DIR']) saved[k] = process.env[k];
+  });
+
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    if (tmpHome) fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'a launchd/systemd-shaped start leaves the lock free, so the launched daemon can claim',
+    async () => {
+      const daemonDir = path.join(tmpHome, 'daemon');
+      const shimDir = path.join(tmpHome, 'bin');
+      fs.mkdirSync(daemonDir, { recursive: true });
+      fs.mkdirSync(shimDir, { recursive: true });
+
+      const lockPath = path.join(daemonDir, 'daemon.lock');
+      const pidPath = path.join(daemonDir, 'daemon.pid');
+      const resultPath = path.join(tmpHome, 'claim.json');
+      const childPath = path.join(tmpHome, 'fake-daemon.mjs');
+
+      // The stand-in daemon: waits well inside the parent's 3s pid wait, records
+      // what `claimDaemonInstance` would have seen, then records its pid.
+      fs.writeFileSync(childPath, [
+        `import fs from 'fs';`,
+        `setTimeout(() => {`,
+        `  fs.writeFileSync(process.env.AGD_RESULT, JSON.stringify({ lockPresent: fs.existsSync(process.env.AGD_LOCK) }));`,
+        `  fs.writeFileSync(process.env.AGD_PID, String(process.pid));`,
+        `  setTimeout(() => {}, 3000);`,
+        `}, 400);`,
+      ].join('\n'), 'utf-8');
+
+      // One shim serves both managers: launch on the arg that actually starts the
+      // service (`systemctl --user start`, `launchctl load`), no-op on the rest
+      // (`daemon-reload`, `enable`, `unload`), always exit 0.
+      const shim = [
+        '#!/bin/sh',
+        'for a in "$@"; do',
+        '  if [ "$a" = "start" ] || [ "$a" = "load" ]; then',
+        `    "${process.execPath}" "${childPath}" >/dev/null 2>&1 &`,
+        '  fi',
+        'done',
+        'exit 0',
+      ].join('\n');
+      for (const name of ['systemctl', 'launchctl']) {
+        const p = path.join(shimDir, name);
+        fs.writeFileSync(p, shim, 'utf-8');
+        fs.chmodSync(p, 0o755);
+      }
+
+      process.env.HOME = tmpHome;
+      process.env.AGENTS_DAEMON_DIR = daemonDir;
+      process.env.PATH = `${shimDir}${path.delimiter}${saved.PATH ?? ''}`;
+      process.env.AGD_LOCK = lockPath;
+      process.env.AGD_PID = pidPath;
+      process.env.AGD_RESULT = resultPath;
+
+      try {
+        const res = startDaemon(DIST_ENTRY);
+        expect(res.method).toBe(process.platform === 'darwin' ? 'launchd' : 'systemd');
+        expect(res.pid).toBeTruthy();
+
+        // The assertion this test exists for: the child saw NO lock file, so its
+        // claim would have succeeded. Pre-fix this read `true`.
+        const recorded = JSON.parse(fs.readFileSync(resultPath, 'utf-8'));
+        expect(recorded.lockPresent).toBe(false);
+
+        // ...and the parent left nothing behind for the next start to trip over.
+        expect(fs.existsSync(lockPath)).toBe(false);
+      } finally {
+        for (const k of ['AGD_LOCK', 'AGD_PID', 'AGD_RESULT']) delete process.env[k];
+        const pid = fs.existsSync(pidPath) ? parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10) : NaN;
+        if (!isNaN(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+      }
+    },
+    30_000,
+  );
+
+  // The early release must not reintroduce the race it guards: two concurrent
+  // `agents daemon start` invocations must still not both launch. The entry gate
+  // is unchanged — a lock held by a LIVE holder still turns the second caller
+  // into a waiter rather than a second launcher.
+  it.skipIf(process.platform === 'win32')(
+    'a concurrent start still defers instead of launching a second daemon',
+    () => {
+      const daemonDir = path.join(tmpHome, 'daemon');
+      fs.mkdirSync(daemonDir, { recursive: true });
+      process.env.HOME = tmpHome;
+      process.env.AGENTS_DAEMON_DIR = daemonDir;
+      // A live holder: this very process, so the stale-lock reclaim can't fire.
+      fs.writeFileSync(path.join(daemonDir, 'daemon.lock'), String(process.pid), 'utf-8');
+
+      // No shim on PATH and no service manifest written: reaching a launch at all
+      // would be the regression. `already-starting` proves it did not.
+      const res = startDaemon(DIST_ENTRY);
+      expect(res.method).toBe('already-starting');
+      expect(res.pid).toBeNull();
+      expect(fs.existsSync(path.join(daemonDir, 'daemon.pid'))).toBe(false);
+    },
+    15_000,
+  );
 });
 
 // #414: enforce a single daemon instance and never report a null PID.
