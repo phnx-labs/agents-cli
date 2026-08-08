@@ -5,7 +5,8 @@ import * as path from 'node:path';
 import { Command } from 'commander';
 import type { KeychainBackend } from '../lib/secrets/index.js';
 import type { CloudflareRequest, CloudflareRequester } from '../lib/share/provision.js';
-import { formatSharePublishResult } from './share.js';
+import { formatSharePublishResult, formatShareDeleteResult, runShareDelete } from './share.js';
+import type { DeleteShareResult } from '../lib/share/delete.js';
 
 interface StoredItem { value: string }
 
@@ -286,5 +287,116 @@ describe('formatSharePublishResult', () => {
     const text = formatSharePublishResult({ url: 'https://share.example/plan' });
 
     expect(text.split('\n')[0]).toBe('https://share.example/plan');
+  });
+});
+
+describe('formatShareDeleteResult', () => {
+  it('emits stable JSON with the cover result nested', () => {
+    const result: DeleteShareResult = {
+      key: 'octocat/plan',
+      url: 'https://share.example/octocat/plan',
+      existedBefore: true,
+      verified404: true,
+      cover: {
+        key: 'octocat/plan.png',
+        url: 'https://share.example/octocat/plan.png',
+        existedBefore: true,
+        verified404: true,
+      },
+    };
+    expect(JSON.parse(formatShareDeleteResult(result, true))).toEqual(result);
+  });
+
+  it('reports a skipped (--if-exists) target distinctly from a real delete', () => {
+    const skipped: DeleteShareResult = {
+      key: 'octocat/gone',
+      url: 'https://share.example/octocat/gone',
+      existedBefore: false,
+      verified404: true,
+      skipped: true,
+    };
+    expect(formatShareDeleteResult(skipped)).toMatch(/skipped/i);
+  });
+});
+
+describe('runShareDelete (CLI-layer multi-target handler)', () => {
+  const okResult = (target: string): DeleteShareResult => ({
+    key: target,
+    url: `https://share.example/${target}`,
+    existedBefore: true,
+    verified404: true,
+  });
+
+  it('continues past a failed target and deletes the rest (rm-style)', async () => {
+    const attempted: string[] = [];
+    const fakeDelete = async (target: string) => {
+      attempted.push(target);
+      if (target === 'octocat/bad') throw new Error('takedown NOT verified');
+      return okResult(target);
+    };
+    await runShareDelete(['octocat/good-1', 'octocat/bad', 'octocat/good-2'], {}, fakeDelete as never);
+    expect(attempted).toEqual(['octocat/good-1', 'octocat/bad', 'octocat/good-2']);
+  });
+
+  it('sets a non-zero exitCode when any target failed', async () => {
+    const prevExitCode = process.exitCode;
+    try {
+      const fakeDelete = async (target: string) => {
+        if (target === 'octocat/bad') throw new Error('boom');
+        return okResult(target);
+      };
+      process.exitCode = 0;
+      await runShareDelete(['octocat/good', 'octocat/bad'], {}, fakeDelete as never);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = prevExitCode;
+    }
+  });
+
+  it('leaves exitCode untouched when every target succeeds', async () => {
+    const prevExitCode = process.exitCode;
+    try {
+      process.exitCode = 0;
+      await runShareDelete(['octocat/a', 'octocat/b'], {}, (async (t: string) => okResult(t)) as never);
+      expect(process.exitCode).toBe(0);
+    } finally {
+      process.exitCode = prevExitCode;
+    }
+  });
+
+  it('a --if-exists skip does not count as a failure', async () => {
+    const prevExitCode = process.exitCode;
+    try {
+      process.exitCode = 0;
+      const skipped: DeleteShareResult = { key: 'octocat/gone', url: 'x', existedBefore: false, verified404: true, skipped: true };
+      await runShareDelete(['octocat/gone'], { ifExists: true }, (async () => skipped) as never);
+      expect(process.exitCode).toBe(0);
+    } finally {
+      process.exitCode = prevExitCode;
+    }
+  });
+
+  it('--json emits one array covering every target, success and failure alike', async () => {
+    const logs: string[] = [];
+    const errors: string[] = [];
+    const logSpy = vi.spyOn(console, 'log').mockImplementation((s: string) => { logs.push(s); });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation((s: string) => { errors.push(s); });
+    try {
+      const fakeDelete = async (target: string) => {
+        if (target === 'octocat/bad') throw new Error('takedown NOT verified');
+        return okResult(target);
+      };
+      await runShareDelete(['octocat/good', 'octocat/bad'], { json: true }, fakeDelete as never);
+      // JSON mode suppresses the per-target console lines — only the final array prints.
+      expect(errors).toEqual([]);
+      expect(logs.length).toBe(1);
+      const parsed = JSON.parse(logs[0]);
+      expect(parsed).toHaveLength(2);
+      expect(parsed[0]).toMatchObject({ target: 'octocat/good', result: { key: 'octocat/good' } });
+      expect(parsed[1]).toMatchObject({ target: 'octocat/bad', error: expect.stringContaining('takedown NOT verified') });
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+    }
   });
 });

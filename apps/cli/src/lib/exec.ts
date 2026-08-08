@@ -1115,7 +1115,7 @@ export function buildExecCommand(options: ExecOptions): string[] {
   }
   if (options.agent === 'codex') {
     const policyMode = resolvedMode === 'plan' || resolvedMode === 'skip' ? resolvedMode : 'edit';
-    const writableRoots = [...codexEditWritableRoots(), ...(options.addDirs ?? [])];
+    const writableRoots = [...codexEditWritableRoots(options.cwd ?? process.cwd()), ...(options.addDirs ?? [])];
     cmd.push(...codexPolicyArgs(policyMode, writableRoots));
   } else if (resumeSpec && 'subcommand' in resumeSpec) {
     if (resolvedMode === 'skip') {
@@ -1367,7 +1367,7 @@ export async function execShimPassthrough(
   // Match the POSIX shim: direct Codex launches default to the safe writable
   // profile, while later user arguments can still override native settings.
   const launchArgs = agent === 'codex'
-    ? ['-c', 'check_for_update_on_startup=false', ...codexPolicyArgs('edit')]
+    ? ['-c', 'check_for_update_on_startup=false', ...codexPolicyArgs('edit', codexEditWritableRoots(cwd))]
     : [];
   // Mint a launch id and export it as AGENT_LAUNCH_ID so the agent's SessionStart
   // hook records the same id — the join key that maps this launch to its exact
