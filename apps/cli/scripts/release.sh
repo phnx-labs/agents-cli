@@ -285,30 +285,11 @@ remote_tag_commit() {
 }
 
 # Annotated v<version> tag whose message is the folded changelog already on that
-# commit (apps/cli/.changelog/<version>.md). Agents write fragments under
-# .changelog/next/; release-changelog.ts folds them before the release commit —
-# do not invent a second notes channel at tag time. Optional third arg --force
-# rewrites a local tag (already-published recovery path only).
+# commit. Delegates to create-annotated-release-tag.sh (extracted so the contract
+# is unit-testable without npm/gh). Optional third arg --force rewrites a local
+# tag (already-published recovery / lightweight-upgrade path).
 create_annotated_release_tag() {
-  local version="$1" commit="$2" force="${3:-}"
-  local notes_path="apps/cli/.changelog/${version}.md" msg notes_body
-  [[ -n "$version" && -n "$commit" ]] || die "create_annotated_release_tag needs <version> <commit>"
-  commit="$(git rev-parse "$commit^{commit}")"
-  if ! notes_body="$(git show "${commit}:${notes_path}" 2>/dev/null)"; then
-    die "refusing to tag v${version}: ${commit:0:9} has no ${notes_path}"
-  fi
-  [[ -n "$notes_body" ]] || die "refusing to tag v${version}: ${notes_path} is empty on ${commit:0:9}"
-  msg="$(mktemp)"
-  {
-    printf 'Release %s\n\n' "$version"
-    printf '%s\n' "$notes_body"
-  } > "$msg"
-  if [[ "$force" == "--force" ]]; then
-    git tag -a -f "v${version}" -F "$msg" "$commit"
-  else
-    git tag -a "v${version}" -F "$msg" "$commit"
-  fi
-  rm -f "$msg"
+  scripts/create-annotated-release-tag.sh "$@"
 }
 
 # The internal --home-base-phase entrypoint short-circuits everything else.
@@ -1187,7 +1168,14 @@ REMOTE_TAG_SHA="$(remote_tag_commit "v$TARGET")"
 if git rev-parse --verify --quiet "refs/tags/v$TARGET" >/dev/null; then
   [[ "$(git rev-parse "refs/tags/v$TARGET^{commit}")" == "$PUBLISH_SHA" ]] \
     || die "local tag v$TARGET does not point at the verified release commit $PUBLISH_SHA"
-  gray "Tag v$TARGET already exists locally at the verified release commit"
+  # A leftover lightweight tag at the right commit would otherwise be pushed as-is
+  # and skip the annotated-notes contract. Upgrade it in place.
+  if [[ "$(git cat-file -t "refs/tags/v$TARGET")" != "tag" ]]; then
+    create_annotated_release_tag "$TARGET" "$PUBLISH_SHA" --force
+    green "Upgraded lightweight local tag v$TARGET to annotated at $(git rev-parse --short "$PUBLISH_SHA")"
+  else
+    gray "Tag v$TARGET already exists locally at the verified release commit"
+  fi
 else
   create_annotated_release_tag "$TARGET" "$PUBLISH_SHA"
   green "Created annotated tag v$TARGET at $(git rev-parse --short "$PUBLISH_SHA")"
