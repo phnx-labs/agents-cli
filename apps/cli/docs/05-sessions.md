@@ -757,10 +757,10 @@ agents sessions --teams   # --team is an alias
 # In the browser, `t` cycles the same filter over the teams in view.
 agents sessions --in-team redesign --teams
 
-# Show routine-run sessions, then open one by routine run id
-agents sessions --routine --all
-agents sessions --routine nightly-review --all
-agents sessions --routines --all      # alias; pick a routine interactively on a TTY
+# Show routine-run sessions across every working directory, then open one by run id
+agents sessions --routine
+agents sessions --routine nightly-review
+agents sessions --routines            # alias; pick a routine interactively on a TTY
 agents sessions 2026-07-21T10-30-00-000Z
 
 # The picker shows last-run/run-count/session-count context. After selection,

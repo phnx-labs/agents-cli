@@ -6,6 +6,8 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.314] - 2026-08-07
+
 - **`Agents: Fork (Recap)` now recaps the active tab without asking for a session.**
   The command starts a fresh sibling on the active session's host with the same
   harness and balanced account selection, queues `/recap <full-id>`, and records
