@@ -128,6 +128,11 @@ export function shouldTakeOverBroker(isHosting: boolean, brokerReachable: boolea
  */
 export type SchedulerGateTransition = 'reload' | 'stop' | 'boot' | 'none';
 
+export function schedulerGateTransition(running: boolean, enabled: boolean): SchedulerGateTransition {
+  if (running) return enabled ? 'reload' : 'stop';
+  return enabled ? 'boot' : 'none';
+}
+
 /**
  * Wrap an async routine so it runs AT MOST ONCE, however many callers fire it.
  *
@@ -141,6 +146,11 @@ export type SchedulerGateTransition = 'reload' | 'stop' | 'boot' | 'none';
  *
  * The flag is set synchronously before the first `await`, which is what makes
  * this safe: two callers in the same tick cannot both get past it.
+ *
+ * A rejected `fn` leaves the guard SET — one attempt is all there is, and the
+ * rejection propagates to the caller that made it. That is right for shutdown
+ * (a failed shutdown must not be silently retried by the next signal) but is
+ * the thing to re-examine before giving this a second consumer.
  */
 export function singleShot(fn: () => Promise<void>): () => Promise<void> {
   let ran = false;
@@ -149,11 +159,6 @@ export function singleShot(fn: () => Promise<void>): () => Promise<void> {
     ran = true;
     await fn();
   };
-}
-
-export function schedulerGateTransition(running: boolean, enabled: boolean): SchedulerGateTransition {
-  if (running) return enabled ? 'reload' : 'stop';
-  return enabled ? 'boot' : 'none';
 }
 
 function ensureDaemonDir(): string {
