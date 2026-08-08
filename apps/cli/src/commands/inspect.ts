@@ -895,7 +895,10 @@ function renderItemDetail(header: string, jsonHead: Record<string, unknown>, kin
     // plugin would show 4. Before the detail view wrapped at all, the terminal
     // soft-wrapped these in full, so truncating here would lose information the
     // old output had.
-    printWrappedJoined(`     ${chalk.gray(k.padEnd(10))} `, v.split(', '), ', ');
+    // String(v) is load-bearing, not defensive habit: row values reach here from
+    // uncontrolled plugin.json fields, and a bare `version: 1` used to throw
+    // `v.split is not a function` and kill the whole render.
+    printWrappedJoined(`     ${chalk.gray(k.padEnd(10))} `, String(v).split(', '), ', ');
   }
 
   if (others.length > 0) {
@@ -1021,21 +1024,32 @@ function pluginItems(): ResourceItem[] {
  * Map a discovered plugin to a resource item, surfacing the manifest description
  * and the bundle's nested resources (skills, commands, hooks, ...) as detail rows.
  */
+/**
+ * Every field here comes from an uncontrolled `plugin.json`: `loadPluginManifest`
+ * casts parsed JSON straight to `PluginManifest` and validates only name/version
+ * (`lib/plugins.ts`), so the declared types are a hope, not a guarantee. A row
+ * value that is not a string crashes the renderer, and `pluginToItem` runs while
+ * BUILDING THE LIST — so one malformed manifest anywhere takes down `inspect .`,
+ * `--plugins`, `--json`, and even a query for a different, valid plugin.
+ * Coerce or drop; never trust the annotation.
+ */
 function pluginToItem(plugin: DiscoveredPlugin, source: string): ResourceItem {
   const extra: Array<[string, string]> = [];
-  if (plugin.manifest.version) extra.push(['version', plugin.manifest.version]);
+  const version = plugin.manifest.version;
+  if (version) extra.push(['version', String(version)]);
   // Which execution surfaces the bundle actually carries. Detection already
   // exists for the plugin picker; the detail view simply never asked for it.
   const surfaces = pluginCapabilityLabels(inspectPluginCapabilities(plugin.root));
   if (surfaces.length > 0) extra.push(['surfaces', surfaces.join(', ')]);
-  // `author.name` is typed required but never validated — loadPluginManifest is a
-  // bare JSON cast — so an `{ "email": … }` manifest would push undefined here and
-  // crash the row renderer. Resolve to a label first and only emit a real one.
   const author = plugin.manifest.author;
   const authorLabel = typeof author === 'string' ? author : author?.name;
-  if (authorLabel) extra.push(['author', authorLabel]);
-  if (plugin.manifest.dependencies?.length) {
-    extra.push(['depends on', plugin.manifest.dependencies.join(', ')]);
+  if (authorLabel) extra.push(['author', String(authorLabel)]);
+  // `.length` is truthy for a bare string too, and a string has no `.join`.
+  const deps = plugin.manifest.dependencies;
+  if (Array.isArray(deps) && deps.length > 0) {
+    extra.push(['depends on', deps.map(String).join(', ')]);
+  } else if (typeof deps === 'string' && deps) {
+    extra.push(['depends on', deps]);
   }
   return {
     name: plugin.name,

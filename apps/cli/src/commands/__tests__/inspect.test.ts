@@ -201,6 +201,38 @@ describe('agents inspect', () => {
     expect(demo?.path).toMatch(/skills[\\/]demo-skill$/);
   });
 
+  it('renders every item of a long detail row, and survives a malformed manifest', () => {
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-rows-' + crypto.randomBytes(4).toString('hex') + '-'));
+    const names = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet'];
+    const many = path.join(proj, '.agents', 'plugins', 'many');
+    writeFile(path.join(many, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'many', description: 'Many commands.', version: '1.0.0' }));
+    for (const n of names) writeFile(path.join(many, 'commands', `${n}.md`), `---\ndescription: ${n}.\n---\n\nb\n`);
+    // Types that contradict the declared PluginManifest — loadPluginManifest
+    // validates only name/version, so these reach the renderer as-is.
+    const bad = path.join(proj, '.agents', 'plugins', 'wrongtypes');
+    writeFile(path.join(bad, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'wrongtypes', description: 'Bad types.', version: 2, dependencies: 'some-plugin' }));
+
+    // Narrow terminal: this is where the truncating renderer dropped items.
+    const narrow = { ...process.env, COLUMNS: '60' };
+    const r = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, '--plugin', 'many'], {
+      cwd: proj, env: { ...narrow, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' }, encoding: 'utf-8',
+    });
+    expect(r.status).toBe(0);
+    // Every command must appear. A width-truncating row renderer showed 4 of 10.
+    for (const n of names) expect(r.stdout).toContain(`/many:${n}`);
+
+    // A malformed sibling must not take down the list — pluginToItem runs while
+    // BUILDING it, so one bad manifest used to break every plugin query.
+    const list = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, '--plugins'], {
+      cwd: proj, env: { ...narrow, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' }, encoding: 'utf-8',
+    });
+    expect(list.status).toBe(0);
+    expect(list.stdout).toContain('many');
+    expect(list.stdout).toContain('wrongtypes');
+  });
+
   it('--skills <typo> resolves via fuzzy match; bogus query exits 1 with suggestions', () => {
     // Substring match still wins for "rele" → "release".
     const ok = run(fixtureHome, ['inspect', 'claude', '--skills', 'rele', '--json']);

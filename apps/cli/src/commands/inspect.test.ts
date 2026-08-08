@@ -173,6 +173,30 @@ describe('collectRepoKind', () => {
     for (const [, v] of plugin.extra ?? []) expect(typeof v).toBe('string');
   });
 
+  it('survives manifest fields whose JSON type contradicts the declared type', () => {
+    const root = makeProjectRepo();
+    const dir = path.join(root, '.agents', 'plugins', 'wrongtypes', '.claude-plugin');
+    fs.mkdirSync(dir, { recursive: true });
+    // loadPluginManifest validates only name/version, so every other field is
+    // whatever the JSON says. `dependencies` as a bare string is the sharp one:
+    // `.length` is truthy on a string and `.join` does not exist, which threw
+    // inside pluginToItem — i.e. while BUILDING THE LIST, taking down `inspect .`,
+    // `--plugins`, and even a query for a different, valid plugin.
+    fs.writeFileSync(path.join(dir, 'plugin.json'), JSON.stringify({
+      name: 'wrongtypes', version: 2, description: 'd', dependencies: 'some-plugin',
+    }));
+    const repo = resolveRepoTarget(root)!;
+    const items = collectRepoKind(repo, 'plugins');
+    expect(items.map(i => i.name)).toContain('wrongtypes');
+    const plugin = items.find(i => i.name === 'wrongtypes')!;
+    // A non-array `dependencies` still renders, and a numeric version coerces.
+    expect(plugin.extra).toEqual(
+      expect.arrayContaining([['version', '2'], ['depends on', 'some-plugin']]),
+    );
+    for (const [, v] of plugin.extra ?? []) expect(typeof v).toBe('string');
+  });
+
+
   it('reads a dir-form subrule description from rule.md', () => {
     const root = makeProjectRepo();
     const dir = path.join(root, '.agents', 'rules', 'subrules', 'gh-merge-guard');
