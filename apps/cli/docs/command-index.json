@@ -25083,6 +25083,8 @@
               "negate": false
             }
           ],
+          "examples": "# Delete by full URL — also takes down the sibling OG cover\n      agents share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists",
+          "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents share delete === agents unshare (same command, different name).",
           "subcommands": []
         },
         {
@@ -28688,6 +28690,8 @@
           "negate": false
         }
       ],
+      "examples": "# Delete by full URL — also takes down the sibling OG cover\n      agents share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists",
+      "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  agents share delete === agents unshare (same command, different name).",
       "subcommands": []
     },
     {

@@ -69,12 +69,20 @@ interface ShareDeleteCliOpts {
 /** Shared handler for `agents share delete <targets...>` and the top-level
  * `agents unshare <targets...>` alias. Deletes each target independently and
  * continues past a failed one (rm-style), reporting all results and exiting
- * non-zero if any target failed to verify as gone. */
-async function runShareDelete(targets: string[], opts: ShareDeleteCliOpts): Promise<void> {
+ * non-zero if any target failed to verify as gone.
+ *
+ * `deleteFn` is a DI seam for tests (defaults to the real `deleteShare`) — it is
+ * never exposed as a CLI flag, only used to inject a fake config/checker/deleter
+ * without touching the keychain or a live endpoint. */
+export async function runShareDelete(
+  targets: string[],
+  opts: ShareDeleteCliOpts,
+  deleteFn: typeof deleteShare = deleteShare,
+): Promise<void> {
   const results: Array<{ target: string; result?: DeleteShareResult; error?: string }> = [];
   for (const target of targets) {
     try {
-      const result = await deleteShare(target, {
+      const result = await deleteFn(target, {
         keepCover: opts.keepCover === true,
         ifExists: opts.ifExists === true,
         githubUser: opts.githubUser,
@@ -181,19 +189,23 @@ ${SHARE_DELETE_EXAMPLES}
     notes: SHARE_DELETE_NOTES,
   });
 
-  registerShareDeleteOptions(
+  const shareDeleteCmd = registerShareDeleteOptions(
     shareCmd
       .command('delete <targets...>')
       .description('Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Top-level alias: agents unshare.'),
-  ).action(async (targets: string[], opts: ShareDeleteCliOpts) => {
+  );
+  setHelpSections(shareDeleteCmd, { examples: SHARE_DELETE_EXAMPLES, notes: SHARE_DELETE_NOTES });
+  shareDeleteCmd.action(async (targets: string[], opts: ShareDeleteCliOpts) => {
     await runShareDelete(targets, opts);
   });
 
-  registerShareDeleteOptions(
+  const unshareCmd = registerShareDeleteOptions(
     program
       .command('unshare <targets...>')
       .description('Alias of `agents share delete` — take down a published page (and by default its OG cover).'),
-  ).action(async (targets: string[], opts: ShareDeleteCliOpts) => {
+  );
+  setHelpSections(unshareCmd, { examples: SHARE_DELETE_EXAMPLES, notes: SHARE_DELETE_NOTES });
+  unshareCmd.action(async (targets: string[], opts: ShareDeleteCliOpts) => {
     await runShareDelete(targets, opts);
   });
 
