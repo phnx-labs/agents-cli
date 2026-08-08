@@ -140,6 +140,7 @@ import {
   loadWorkflows,
   loadWorktree,
   loadVersions,
+  loadUpdate,
   loadImport,
   loadExport,
   loadPackages,
@@ -413,6 +414,7 @@ Quick start:
 Agent versions:
   add <agent>[@version]           Install an agent CLI (e.g. agents add grok or agents add codex)
   import <agent>                  Adopt an existing global install (npm/homebrew) into agents-cli
+  update <agent>[@version]        Move an installed agent to a new release, keeping its name (agents-cli itself is 'agents upgrade')
   prune <agent>[@version]         Uninstall a version
   remove <agent>[@version]        Alias for prune
   use <agent>@<version>           Set the default version
@@ -1109,6 +1111,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadWorkflows);
   await reg(loadWorktree);
   await reg(loadVersions);
+  await reg(loadUpdate);
   await reg(loadImport);
   await reg(loadExport);
   await reg(loadPackages);
@@ -1431,7 +1434,7 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1') {
     // Bumping the suffix re-runs migrations for every user; binary releases that
     // don't change the schema must NOT re-run (they would destroy user content
     // when migration steps overlap with user-authored paths). See issue #20.
-    const sentinelValue = 'v17';
+    const sentinelValue = 'v18';
     let needRun = true;
     try {
       if (fs.existsSync(sentinel) && fs.readFileSync(sentinel, 'utf-8').trim() === sentinelValue) {

@@ -268,8 +268,15 @@ function collapseVersionHookEntries<T extends { command: string }>(
   });
 }
 
-import { getEffectiveHome, getVersionHomePath, listInstalledVersions, resolveVersion } from './versions.js';
-import type { AgentId, InstalledHook, ManifestHook } from './types.js';
+import {
+  getEffectiveHome,
+  getGlobalDefault,
+  getVersionHomePath,
+  isVersionIsolated,
+  listInstalledVersions,
+  resolveVersion,
+} from './versions.js';
+import type { AgentId, HookCacheConfig, HookMatches, InstalledHook, ManifestHook } from './types.js';
 import { generateHookShim, getHookShimPath, isValidHookShimName, parseCacheConfig, removeHookShim } from './hooks/cache.js';
 import { getHookShimsDir } from './state.js';
 
@@ -870,6 +877,30 @@ export interface HookWiringIssue {
   command: string;
 }
 
+/** A generated, agents-managed hook wrapper and the inputs needed to recreate it. */
+export interface ManagedHookRuntimeArtifact {
+  agent: AgentId;
+  version: string;
+  name: string;
+  scriptPath: string;
+  shimPath: string;
+  cache: HookCacheConfig | null;
+  matches?: HookMatches;
+}
+
+/** A generated hook wrapper that is referenced by managed configuration but cannot run. */
+export interface BrokenManagedHookRuntimeArtifact extends ManagedHookRuntimeArtifact {
+  /** Stable, human-readable filesystem failure; the hook is never executed to find it. */
+  reason: string;
+}
+
+/** Public, doctor-safe shape for a broken generated hook wrapper. */
+export interface HookRuntimeIssue {
+  name: string;
+  path: string;
+  reason: string;
+}
+
 export interface HookWiringReport {
   /** Whether this agent's hook config format is understood by the inspector. */
   supported: boolean;
@@ -888,6 +919,350 @@ export interface HookWiringReport {
    *  Empty whenever wiring cannot be verified (unsupported family, missing or
    *  unparseable settings). */
   wired: HookWiringIssue[];
+  /** Generated agents-managed wrappers that are absent or unusable. This is
+   * independent of whether the native config format itself is understood. */
+  runtimeBroken: HookRuntimeIssue[];
+}
+
+/**
+ * Check the filesystem properties a shell hook needs without invoking it. A
+ * dangling symlink is deliberately distinguished from an absent file because
+ * the repair/remediation is the same but the diagnostic is materially clearer.
+ */
+function shellQuoteForHookShim(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function hookRuntimeProblem(
+  artifact: ManagedHookRuntimeArtifact,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  const { shimPath } = artifact;
+  let link: fs.Stats;
+  try {
+    link = fs.lstatSync(shimPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return 'missing';
+    // Stable: errno code only — never absolute path text (fleet/menu aggregation).
+    return `cannot inspect (${code || 'error'})`;
+  }
+
+  let target: fs.Stats;
+  try {
+    target = link.isSymbolicLink() ? fs.statSync(shimPath) : link;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return 'broken symlink';
+    return `cannot inspect (${code || 'error'})`;
+  }
+  if (!target.isFile()) return 'not a regular file';
+  // Generation always writes non-empty content; an empty placeholder is broken.
+  if (target.size === 0) return 'broken (empty)';
+  // Windows does not use a POSIX executable bit; requiring it there would
+  // continuously rewrite healthy .sh files on Windows hosts.
+  if (platform !== 'win32' && (target.mode & 0o111) === 0) return 'not executable';
+  try {
+    const body = fs.readFileSync(shimPath, 'utf-8');
+    // The global shim must name the selected live version-home script. A
+    // wrapper can remain executable while its SOURCE points to an older or
+    // deleted version; detect that without running either script.
+    if (!body.includes(`SOURCE=${shellQuoteForHookShim(artifact.scriptPath)}`)) {
+      return 'source mismatch';
+    }
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return `cannot inspect (${code || 'error'})`;
+  }
+  return null;
+}
+
+/**
+ * Gather managed generated-shim expectations for one installed version. The
+ * script must resolve inside that version home (or be an existing absolute
+ * subrule), matching the registrar's selection rules. This function never
+ * creates a shim or runs a hook.
+ */
+function managedHookRuntimeArtifactsForVersion(agent: AgentId, version: string): ManagedHookRuntimeArtifact[] {
+  if (!AGENTS[agent].supportsHooks) return [];
+  const localHooksDir = getVersionHooksDir(agent, version);
+  const resolveScript = (script: string): string | null => {
+    if (path.isAbsolute(script) && fs.existsSync(script)) return script;
+    return resolveContainedHookPath(localHooksDir, script);
+  };
+  const artifacts: ManagedHookRuntimeArtifact[] = [];
+  for (const [name, hookDef] of Object.entries(parseHookManifest({ warn: false }))) {
+    if (!hookDef.events || hookDef.events.length === 0 || !isValidHookShimName(name)) continue;
+    const scriptPath = resolveScript(hookDef.script);
+    if (!scriptPath) continue;
+    const cache = parseCacheConfig(hookDef.cache);
+    const hasMatches = hookDef.matches != null && Object.keys(hookDef.matches).length > 0;
+    if (!cache && !hasMatches && !hookDef.matcher) continue;
+    artifacts.push({
+      agent,
+      version,
+      name,
+      scriptPath,
+      shimPath: getHookShimPath(name),
+      cache,
+      matches: hookDef.matches,
+    });
+  }
+  return artifacts;
+}
+
+/** Inspect managed generated hook wrappers without executing user hook code. */
+export function inspectBrokenManagedHookRuntimeArtifacts(
+  filter?: { agent?: AgentId; version?: string },
+  platform: NodeJS.Platform = process.platform,
+): BrokenManagedHookRuntimeArtifact[] {
+  // Generated destinations are shared across every harness. Always select the
+  // owner from the global population first; an agent-scoped doctor call may
+  // restrict which shim names are relevant, but must not change the expected
+  // SOURCE for a shared wrapper.
+  const versions = iterHooksCapableVersions();
+  if (
+    filter?.agent &&
+    filter.version &&
+    !versions.some((v) => v.agent === filter.agent && v.version === filter.version)
+  ) {
+    versions.push({ agent: filter.agent, version: filter.version });
+  }
+  const artifacts: ManagedHookRuntimeArtifact[] = [];
+  for (const { agent, version } of versions) {
+    artifacts.push(...managedHookRuntimeArtifactsForVersion(agent, version));
+  }
+
+  const requestedArtifacts = filter?.agent
+    ? artifacts.filter((artifact) =>
+      artifact.agent === filter.agent &&
+      (!filter.version || artifact.version === filter.version),
+    )
+    : undefined;
+  const relevantShimPaths = requestedArtifacts
+    ? new Set(eligibleHookRuntimeArtifacts(requestedArtifacts).map((artifact) => artifact.shimPath))
+    : undefined;
+
+  const broken: BrokenManagedHookRuntimeArtifact[] = [];
+  for (const artifact of selectCanonicalHookRuntimeArtifacts(artifacts)) {
+    if (relevantShimPaths && !relevantShimPaths.has(artifact.shimPath)) continue;
+    const reason = hookRuntimeProblem(artifact, platform);
+    if (reason) broken.push({ ...artifact, reason });
+  }
+  return broken.sort((a, b) =>
+    a.shimPath.localeCompare(b.shimPath) ||
+    `${a.agent}@${a.version}/${a.name}`.localeCompare(`${b.agent}@${b.version}/${b.name}`),
+  );
+}
+
+/** Outcome of one generation attempt for a unique shim path. */
+export interface HookRuntimeRepairAttempt {
+  name: string;
+  path: string;
+  reasonBefore: string;
+  /** True when generateHookShim ran for this path in this pass. */
+  attempted: boolean;
+  repaired: boolean;
+  /** Stable failure text when not repaired after an attempt (or dry-run skip). */
+  reason?: string;
+}
+
+/**
+ * Result of one bounded repair pass over agents-managed generated hook shims.
+ * Shared by self-heal and doctor --fix; additive types for the doctor track.
+ */
+export interface HookRuntimeRepairReport {
+  /** Broken artifacts found before any write (inspect-only snapshot). */
+  brokenBefore: BrokenManagedHookRuntimeArtifact[];
+  /** Unique shim paths considered for generation in this pass. */
+  attemptedPaths: string[];
+  attempts: HookRuntimeRepairAttempt[];
+  /** Human-readable lines for CheckResult.fixed (includes dry-run would-fix). */
+  fixed: string[];
+  /** Human-readable lines for CheckResult.needsAttention — stable wording. */
+  needsAttention: string[];
+}
+
+export interface RepairManagedHookRuntimeOptions {
+  /** Detect only — never write. Default false. */
+  dryRun?: boolean;
+  filter?: { agent?: AgentId; version?: string };
+  platform?: NodeJS.Platform;
+}
+
+/**
+ * Prefer the agent's global default when it appears in the candidate set;
+ * otherwise the newest non-isolated version. Shared shim paths embed a single
+ * SOURCE script — picking the wrong version permanently points every harness
+ * at a stale or dead path.
+ */
+function pickCanonicalHookRuntimeArtifact<T extends ManagedHookRuntimeArtifact>(
+  candidates: T[],
+): T {
+  if (candidates.length === 1) return candidates[0];
+  const agents = Array.from(new Set(candidates.map((c) => c.agent))).sort();
+  for (const agent of agents) {
+    const defaultVersion = getGlobalDefault(agent);
+    if (!defaultVersion || isVersionIsolated(agent, defaultVersion)) continue;
+    const active = candidates.find((c) => c.agent === agent && c.version === defaultVersion);
+    if (active) return active;
+  }
+  // listInstalledVersions is the canonical semver ordering. Scan backward
+  // rather than inventing another version comparator at this call site.
+  for (const agent of agents) {
+    for (const version of [...listInstalledVersions(agent)].reverse()) {
+      const newest = candidates.find((c) => c.agent === agent && c.version === version);
+      if (newest) return newest;
+    }
+  }
+  return candidates[0];
+}
+
+/**
+ * One repair target per unique shim path. Generated shims are global, so both
+ * unattended and explicit repair leave isolated/private version homes out.
+ */
+function selectCanonicalHookRuntimeArtifacts<T extends ManagedHookRuntimeArtifact>(
+  artifacts: T[],
+): T[] {
+  // No hook runtime exists for a version that does not support hooks. Isolated
+  // versions never own a global generated shim, even when a caller names one:
+  // selecting it would repoint every harness at a private version home.
+  const pool = eligibleHookRuntimeArtifacts(artifacts);
+
+  const byPath = new Map<string, T[]>();
+  for (const artifact of pool) {
+    const list = byPath.get(artifact.shimPath) ?? [];
+    list.push(artifact);
+    byPath.set(artifact.shimPath, list);
+  }
+  const selected: T[] = [];
+  for (const group of byPath.values()) {
+    selected.push(pickCanonicalHookRuntimeArtifact(group));
+  }
+  return selected;
+}
+
+/** Versions that may own — and therefore diagnose — a shared generated shim. */
+function eligibleHookRuntimeArtifacts<T extends ManagedHookRuntimeArtifact>(
+  artifacts: T[],
+): T[] {
+  return artifacts.filter(
+    (artifact) =>
+      supports(artifact.agent, 'hooks', artifact.version).ok &&
+      !isVersionIsolated(artifact.agent, artifact.version),
+  );
+}
+
+/**
+ * Stable failure text: errno code + detector reason only.
+ * Never include absolute paths or randomized atomic-temp basenames — those
+ * break cross-device / menu-bar aggregation of identical failures. The hook
+ * name is attached by the caller (`hook shim <name>: …`).
+ */
+function stableHookRuntimeRepairFailure(
+  before: string,
+  err: unknown,
+): string {
+  const code = (err as NodeJS.ErrnoException)?.code;
+  return `repair failed [${code || 'UNKNOWN'}]: ${before}`;
+}
+
+/**
+ * Regenerate one known-broken wrapper and prove the result is usable. Callers
+ * provide a snapshot from inspectBrokenManagedHookRuntimeArtifacts; this never
+ * loops or retries and returns a stable error for the current pass.
+ *
+ * Generation is delegated to generateHookShim (idempotent — preserves mtime when
+ * content already matches). This path never calls registerHooksToSettings,
+ * installHooks, or any sync routine.
+ */
+export function repairManagedHookRuntimeArtifact(
+  artifact: ManagedHookRuntimeArtifact,
+  platform: NodeJS.Platform = process.platform,
+): { repaired: boolean; reason?: string } {
+  const before = hookRuntimeProblem(artifact, platform);
+  // Already healthy (e.g. race with another pass) — no-op, no needsAttention.
+  if (!before) return { repaired: false };
+  try {
+    generateHookShim({
+      name: artifact.name,
+      scriptPath: artifact.scriptPath,
+      cache: artifact.cache,
+      matches: artifact.matches,
+    });
+  } catch (err) {
+    return { repaired: false, reason: stableHookRuntimeRepairFailure(before, err) };
+  }
+  // Post-repair reinspection — prove the artifact is usable without executing it.
+  const after = hookRuntimeProblem(artifact, platform);
+  return after
+    ? { repaired: false, reason: `${before}; repair did not produce a usable shim (${after})` }
+    : { repaired: true };
+}
+
+/**
+ * Bounded repair of all broken agents-managed generated hook shims.
+ *
+ * - Inspect first (read-only, no hook execution).
+ * - One generation attempt per unique shim path per call (no retry, no timer).
+ * - Canonical owner per shared path: global default, else newest non-isolated.
+ * - Post-repair reinspection; unresolved findings become stable needsAttention.
+ * - Never recurses into resource sync / registerHooksToSettings.
+ *
+ * This is the shared routine used by the self-heal `hook-runtime` check and
+ * exported for the doctor track.
+ */
+export function repairManagedHookRuntimeArtifacts(
+  opts: RepairManagedHookRuntimeOptions = {},
+): HookRuntimeRepairReport {
+  const platform = opts.platform ?? process.platform;
+  const dryRun = opts.dryRun ?? false;
+  const brokenBefore = inspectBrokenManagedHookRuntimeArtifacts(opts.filter, platform);
+  const targets = selectCanonicalHookRuntimeArtifacts(brokenBefore);
+
+  const attemptedPaths: string[] = [];
+  const attempts: HookRuntimeRepairAttempt[] = [];
+  const fixed: string[] = [];
+  const needsAttention: string[] = [];
+
+  for (const artifact of targets) {
+    attemptedPaths.push(artifact.shimPath);
+
+    if (dryRun) {
+      // Would-fix: same shape as a real fix so doctor dry-run and daemon previews
+      // stay consistent with other HealChecks.
+      attempts.push({
+        name: artifact.name,
+        path: artifact.shimPath,
+        reasonBefore: artifact.reason,
+        attempted: false,
+        repaired: false,
+      });
+      fixed.push(`hook shim ${artifact.name}`);
+      continue;
+    }
+
+    const result = repairManagedHookRuntimeArtifact(artifact, platform);
+    attempts.push({
+      name: artifact.name,
+      path: artifact.shimPath,
+      reasonBefore: artifact.reason,
+      attempted: true,
+      repaired: result.repaired,
+      reason: result.reason,
+    });
+
+    if (result.repaired) {
+      fixed.push(`hook shim ${artifact.name}`);
+    } else if (result.reason) {
+      // Stable needs-attention wording for aggregation across devices / menubar.
+      // No reason means already-healthy no-op (race) — do not emit attention noise.
+      needsAttention.push(`hook shim ${artifact.name}: ${result.reason}`);
+    }
+  }
+
+  return { brokenBefore, attemptedPaths, attempts, fixed, needsAttention };
 }
 
 /**
@@ -905,13 +1280,18 @@ export interface HookWiringReport {
  * resolveHookCommand performs, so it never mutates the version home.
  */
 export function checkVersionHookWiring(agent: AgentId, version: string): HookWiringReport {
+  // Runtime verification does not rely on parsing a native settings format.
+  // That lets doctor catch a deleted generated shim for every hooks-capable
+  // harness, including families whose wiring schema is intentionally unsupported.
+  const runtimeBroken = inspectBrokenManagedHookRuntimeArtifacts({ agent, version })
+    .map(({ name, shimPath, reason }) => ({ name, path: shimPath, reason }));
   if (
     !AGENTS[agent].supportsHooks ||
     (!SETTINGS_JSON_HOOK_FAMILY.includes(agent) &&
       !HOOKS_JSON_HOOK_FAMILY.includes(agent) &&
       !TOML_ARRAY_HOOK_FAMILY.includes(agent))
   ) {
-    return { supported: false, unwired: [], wired: [] };
+    return { supported: false, unwired: [], wired: [], runtimeBroken };
   }
 
   const versionHome = getVersionHomePath(agent, version);
@@ -972,6 +1352,7 @@ export function checkVersionHookWiring(agent: AgentId, version: string): HookWir
       settingsMissing: expected.length > 0,
       unwired: [],
       wired: [],
+      runtimeBroken,
     };
   }
   let config: Record<string, unknown>;
@@ -988,6 +1369,7 @@ export function checkVersionHookWiring(agent: AgentId, version: string): HookWir
       settingsUnparseable: true,
       unwired: [],
       wired: [],
+      runtimeBroken,
     };
   }
 
@@ -1029,7 +1411,7 @@ export function checkVersionHookWiring(agent: AgentId, version: string): HookWir
     wiredByGroup.get(groupKey(entry.event, entry.matcher))?.has(entry.command) ?? false;
   const unwired = expected.filter((entry) => !isWired(entry));
   const wired = expected.filter(isWired);
-  return { supported: true, settingsPath, expected: expected.length, unwired, wired };
+  return { supported: true, settingsPath, expected: expected.length, unwired, wired, runtimeBroken };
 }
 
 /**

@@ -1346,11 +1346,6 @@ export async function agentLock(name?: string): Promise<number> {
   return r?.ok === true && r.cmd === 'lock' ? r.wiped : 0;
 }
 
-export async function agentRevoke(leaseId: string): Promise<number> {
-  const r = await request({ cmd: 'revoke', leaseId });
-  return r?.ok === true && r.cmd === 'revoke' ? r.wiped : 0;
-}
-
 /** List currently-unlocked bundles, or [] when no broker is running. The
  * internal `secrets list` metadata-cache entry is filtered out here as well as
  * server-side: during a rollout a NEW client can talk to an OLD broker that

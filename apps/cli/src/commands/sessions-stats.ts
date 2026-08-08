@@ -155,7 +155,7 @@ async function statsAction(cmd: Command): Promise<void> {
   // The parent `sessions` command owns --agent/--project/--plugin/--since/--json
   // and keeps parsing them past the subcommand name (it has a positional
   // [query]), binding them to the PARENT — so read the merged view, not the
-  // action's own options. Same reason sessions-favorite.ts uses optsWithGlobals.
+  // action's own options. Same reason sessions-bookmark.ts uses optsWithGlobals.
   const opts = cmd.optsWithGlobals() as StatsOpts;
 
   const kind = normalizeKind(opts.kind);

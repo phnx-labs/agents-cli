@@ -58,6 +58,7 @@ import {
 } from '../lib/routines.js';
 import type { JobConfig, JobTrigger, LinearTriggerEvent, RunMeta, HostStrategy } from '../lib/routines.js';
 import { listProjectDefs, isSafeProjectName } from '../lib/projects.js';
+import { evaluateActivationReadinessLive } from '../lib/routine-readiness.js';
 import {
   discoverProjectRoutinesAt,
   enableProjectRoutines,
@@ -827,6 +828,8 @@ export function registerRoutinesCommands(program: Command): void {
     .option('--resume <sessionId>', 'At fire time, resume this existing session id (via `agents run <agent> --resume`) instead of starting fresh — the actual session reopens with full context and the prompt becomes its next turn. Powers self-scheduled wake-ups (e.g. /hibernate). Requires --agent claude or codex; runs un-sandboxed (the session store lives in the real home, not the job overlay).')
     .option('--project <name>', 'Associate with a named project (repeatable; use --all-projects for all)', collectProject, [] as string[])
     .option('--all-projects', 'Associate this routine with all defined projects (sets projects: ["*"])')
+    .option('--project-anchor <name>', 'Singular EXECUTION anchor: the named project whose base directory the run lands in (distinct from --project, which is grouping metadata). Rootless (Linear-imported) projects anchor a relative --cwd at the target home.')
+    .option('--cwd <path>', 'Portable execution directory. Relative values resolve under --project-anchor when usable, otherwise under the execution target $HOME. Supersedes --run-cwd/remoteCwd.')
     .option('--json', 'Emit machine-readable JSON with the created routine id and status')
     .action(async (nameOrPath: string | undefined, options) => {
       // Check if inline mode (has flags) or file mode
@@ -965,6 +968,8 @@ export function registerRoutinesCommands(program: Command): void {
           ...(options.runOn ? { host: options.runOn } : {}),
           ...(hostStrategy ? { hostStrategy } : {}),
           ...(options.runCwd ? { remoteCwd: options.runCwd } : {}),
+          ...(options.projectAnchor ? { project: options.projectAnchor } : {}),
+          ...(options.cwd ? { cwd: options.cwd } : {}),
           ...(runOnce ? { runOnce: true } : {}),
           ...(options.catchup === false ? { catchup: false } : {}),
           ...(options.endAt ? { endAt: options.endAt } : {}),
@@ -982,7 +987,22 @@ export function registerRoutinesCommands(program: Command): void {
         }
 
         writeJob(config);
-        setJobEnabled(config.name, config.enabled && (!devices || devices.map(normalizeHost).includes(normalizeHost(machineId()))));
+        // Readiness gate: a routine only activates when its execution context
+        // resolves and the harness is available. A proven blocker saves the
+        // definition PAUSED with a stable code + repair, so a broken routine can
+        // never fire (and storm) — the plan's save-paused contract.
+        const deviceMatch = !devices || devices.map(normalizeHost).includes(normalizeHost(machineId()));
+        const readiness = await evaluateActivationReadinessLive(config);
+        const activate = config.enabled && deviceMatch && readiness.ready;
+        setJobEnabled(config.name, activate);
+        if (config.enabled && deviceMatch && !readiness.ready) {
+          const r = readiness.readiness!;
+          if (!options.json) {
+            console.log(chalk.yellow(`Saved paused — not ready to activate: ${r.code}`));
+            console.log(chalk.gray(`  ${r.message}`));
+            if (r.repair) console.log(chalk.gray(`  repair: ${r.repair}`));
+          }
+        }
         if (options.json) {
           writeJson({
             ok: true,
@@ -990,8 +1010,11 @@ export function registerRoutinesCommands(program: Command): void {
             job: config,
             jobId: config.name,
             name: config.name,
-            status: 'added',
+            status: activate ? 'added' : 'added_paused',
             enabled: config.enabled,
+            activated: activate,
+            ready: readiness.ready,
+            ...(readiness.readiness ? { readiness: readiness.readiness } : {}),
             schedule: config.schedule ?? null,
             trigger: config.trigger ?? null,
           });
@@ -1055,7 +1078,16 @@ export function registerRoutinesCommands(program: Command): void {
         }
 
         writeJob(config);
-        setJobEnabled(config.name, config.enabled && (!config.devices || config.devices.map(normalizeHost).includes(normalizeHost(machineId()))));
+        const deviceMatch = !config.devices || config.devices.map(normalizeHost).includes(normalizeHost(machineId()));
+        const readiness = await evaluateActivationReadinessLive(config);
+        const activate = config.enabled && deviceMatch && readiness.ready;
+        setJobEnabled(config.name, activate);
+        if (config.enabled && deviceMatch && !readiness.ready && !options.json) {
+          const r = readiness.readiness!;
+          console.log(chalk.yellow(`Saved paused — not ready to activate: ${r.code}`));
+          console.log(chalk.gray(`  ${r.message}`));
+          if (r.repair) console.log(chalk.gray(`  repair: ${r.repair}`));
+        }
         if (options.json) {
           writeJson({
             ok: true,
@@ -1063,8 +1095,11 @@ export function registerRoutinesCommands(program: Command): void {
             job: config,
             jobId: config.name,
             name: config.name,
-            status: 'added',
+            status: activate ? 'added' : 'added_paused',
             enabled: config.enabled,
+            activated: activate,
+            ready: readiness.ready,
+            ...(readiness.readiness ? { readiness: readiness.readiness } : {}),
             schedule: config.schedule ?? null,
             trigger: config.trigger ?? null,
           });
@@ -1158,7 +1193,8 @@ export function registerRoutinesCommands(program: Command): void {
 
   routinesCmd
     .command('edit [name]')
-    .description('Open a routine in $EDITOR. Creates a new YAML template if the routine does not exist.')
+    .description('Edit a prefilled routine transactionally; invalid YAML never replaces the live definition.')
+    .option('--yaml', 'Open the raw YAML in $EDITOR (the current edit surface)')
     .option('--state-to <name>', 'Update the Linear current-state filter before opening the editor')
     .option('--state-from <name>', 'Update the Linear previous-state filter before opening the editor')
     .action(async (name: string | undefined, options: { stateTo?: string; stateFrom?: string }) => {
@@ -1175,56 +1211,55 @@ export function registerRoutinesCommands(program: Command): void {
         }
         if (options.stateTo !== undefined) existing.trigger.stateTo = options.stateTo || undefined;
         if (options.stateFrom !== undefined) existing.trigger.stateFrom = options.stateFrom || undefined;
-        writeJob(existing);
       }
 
       const jobPath = getJobPath(name);
-      if (!jobPath) {
-        // Job doesn't exist - create a new one
-        const cronDir = getRoutinesDir();
-        const newPath = safeJoin(cronDir, `${name}.yml`);
-
-        // Create template
-        const template = yaml.stringify({
+      const cronDir = getRoutinesDir();
+      fs.mkdirSync(cronDir, { recursive: true });
+      const targetPath = jobPath || safeJoin(cronDir, `${name}.yml`);
+      const editPath = safeJoin(cronDir, `.${name}.edit-${process.pid}.yml`);
+      const initial = existing
+        ? yaml.stringify(existing)
+        : yaml.stringify({
           name,
           schedule: '0 9 * * *',
           agent: 'claude',
           prompt: 'Your prompt here',
         });
-        fs.writeFileSync(newPath, template, 'utf-8');
-        console.log(chalk.gray(`Created new job file: ${newPath}`));
-      }
+      fs.writeFileSync(editPath, initial, { encoding: 'utf-8', mode: 0o600 });
 
-      const targetPath = jobPath || path.join(getRoutinesDir(), `${name}.yml`);
       const editor = process.env.EDITOR || process.env.VISUAL || (IS_WINDOWS ? 'notepad' : 'vi');
       const editorParts = editor.split(/\s+/).filter(Boolean);
       const editorBin = editorParts[0];
-      const editorArgs = [...editorParts.slice(1), targetPath];
+      const editorArgs = [...editorParts.slice(1), editPath];
 
       const { spawn: spawnSync } = await import('child_process');
       const child = spawnSync(editorBin, editorArgs, {
         stdio: 'inherit',
       });
 
-      child.on('close', (code) => {
-        if (code === 0) {
-          // Validate the edited file
-          const job = readJob(name!);
-          if (job) {
-            const errors = validateJob(job);
-            if (errors.length > 0) {
-              console.log(chalk.yellow('\nWarning: Job has validation errors:'));
-              for (const err of errors) {
-                console.log(chalk.yellow(`  - ${err}`));
-              }
-            } else {
-              console.log(chalk.green(`\nJob '${name}' saved`));
-              if (isDaemonRunning()) {
-                signalDaemonReload();
-                console.log(chalk.gray('Daemon reloaded'));
-              }
-            }
+      child.on('close', async (code) => {
+        if (code !== 0) {
+          fs.rmSync(editPath, { force: true });
+          return;
+        }
+        try {
+          const raw = fs.readFileSync(editPath, 'utf-8');
+          const job = yaml.parse(raw) as JobConfig;
+          const errors = validateJob(job);
+          if (errors.length > 0) throw new Error(errors.join('\n'));
+          const readiness = await evaluateActivationReadinessLive(job);
+          fs.renameSync(editPath, targetPath);
+          if (!readiness.ready) setJobEnabled(job.name, false);
+          console.log(chalk.green(`\nJob '${name}' saved${readiness.ready ? '' : ' paused (not ready)'}`));
+          if (isDaemonRunning()) {
+            signalDaemonReload();
+            console.log(chalk.gray('Daemon reloaded'));
           }
+        } catch (err) {
+          fs.rmSync(editPath, { force: true });
+          console.error(chalk.red(`\nRoutine not saved: ${(err as Error).message}`));
+          process.exitCode = 1;
         }
       });
     });
@@ -1647,6 +1682,69 @@ export function registerRoutinesCommands(program: Command): void {
     });
 
   routinesCmd
+    .command('doctor [name]')
+    .description('Check a routine\'s execution-context and harness readiness. Bare or --all checks every routine; --fix applies safe activation repairs (activate a now-ready paused routine; pause a broken active one).')
+    .option('--all', 'Check every routine (the default when no name is given)')
+    .option('--fix', 'Apply safe, deterministic activation repairs')
+    .option('--json', 'Machine-readable output')
+    .action(async (name: string | undefined, options: { all?: boolean; fix?: boolean; json?: boolean }) => {
+      const all = options.all || !name;
+      let targets: JobConfig[];
+      if (all) {
+        targets = listAllJobs();
+      } else {
+        const job = readJob(name!);
+        if (!job) {
+          if (options.json) { writeJson({ ok: false, error: `routine '${name}' not found` }); return; }
+          console.error(chalk.red(`Routine '${name}' not found`));
+          process.exit(1);
+        }
+        targets = [job!];
+      }
+
+      const thisDevice = normalizeHost(machineId());
+      const results = await Promise.all(targets.map(async (job) => {
+        const deviceMatch = !job.devices || job.devices.map(normalizeHost).includes(thisDevice);
+        const readiness = await evaluateActivationReadinessLive(job);
+        // `job.enabled` reflects THIS device's activation state (applyDeviceActivation).
+        let action: 'activated' | 'paused' | undefined;
+        if (options.fix && deviceMatch) {
+          if (readiness.ready && !job.enabled) { setJobEnabled(job.name, true); action = 'activated'; }
+          else if (!readiness.ready && job.enabled) { setJobEnabled(job.name, false); action = 'paused'; }
+        }
+        return {
+          name: job.name,
+          ready: readiness.ready,
+          active: job.enabled,
+          deviceScoped: deviceMatch,
+          ...(readiness.readiness ? { readiness: readiness.readiness } : {}),
+          ...(action ? { action } : {}),
+        };
+      }));
+
+      if (options.fix && results.some((r) => r.action) && isDaemonRunning()) {
+        signalDaemonReload();
+      }
+
+      if (options.json) { writeJson({ ok: true, results }); return; }
+
+      const blocked = results.filter((r) => !r.ready);
+      for (const r of results) {
+        if (r.ready) {
+          console.log(`${chalk.green('✓')} ${r.name}${r.action === 'activated' ? chalk.gray(' (activated)') : ''}`);
+        } else {
+          const rd = r.readiness!;
+          console.log(`${chalk.red('✗')} ${r.name} — ${chalk.yellow(rd.code)}${r.action === 'paused' ? chalk.gray(' (paused)') : ''}`);
+          console.log(chalk.gray(`    ${rd.message}`));
+          if (rd.repair) console.log(chalk.gray(`    repair: ${rd.repair}`));
+        }
+      }
+      if (blocked.length > 0 && !options.fix) {
+        console.log(chalk.gray(`\n${blocked.length} routine${blocked.length === 1 ? '' : 's'} blocked — re-run with --fix to pause them, or apply each repair above.`));
+      }
+    });
+
+  routinesCmd
     .command('resume [name]')
     .description('Re-enable a paused routine so the daemon schedules it again')
     .action(async (name: string | undefined) => {
@@ -1657,6 +1755,20 @@ export function registerRoutinesCommands(program: Command): void {
       }
 
       try {
+        // Resume re-runs readiness — it can never bypass a proven blocker (the
+        // plan: "resume cannot bypass readiness"). A blocked routine stays paused.
+        const job = readJob(name);
+        if (job) {
+          const readiness = await evaluateActivationReadinessLive(job);
+          if (!readiness.ready) {
+            const r = readiness.readiness!;
+            console.log(chalk.red(`Cannot resume '${name}' — not ready: ${r.code}`));
+            console.log(chalk.gray(`  ${r.message}`));
+            if (r.repair) console.log(chalk.gray(`  repair: ${r.repair}`));
+            console.log(chalk.gray(`  fix it, then: agents routines doctor ${name} --fix`));
+            process.exit(1);
+          }
+        }
         setJobEnabled(name, true);
         console.log(chalk.green(`Job '${name}' resumed`));
         if (isDaemonRunning()) {

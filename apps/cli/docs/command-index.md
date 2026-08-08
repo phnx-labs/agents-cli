@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `upgrade`, `_internal`).
 
-_98 command groups · 569 commands._
+_99 command groups · 569 commands._
 
 ## accounts — Browse and name signed-in harness accounts
 
@@ -721,7 +721,8 @@ agents routines catchup                 Run any routines that missed their last 
 agents routines cleanup                 Remove expired one-shot routines that already fired and still have a user-layer YAML file.
 agents routines devices [name]          View or change the devices where a routine is enabled. Without flags, opens an interactive picker (requires a TTY).
 agents routines disable-project [path]  Remove a project from the project-routines allowlist. Use --remove-synced to also delete the user-layer copies.
-agents routines edit [name]             Open a routine in $EDITOR. Creates a new YAML template if the routine does not exist.
+agents routines doctor [name]           Check a routine's execution-context and harness readiness. Bare or --all checks every routine; --fix applies safe activation repairs (activate a now-ready paused routine; pause a broken active one).
+agents routines edit [name]             Edit a prefilled routine transactionally; invalid YAML never replaces the live definition.
 agents routines enable-project [path]   Opt a project's .agents/routines/*.yml into daemon firing. Requires explicit approval — project routines never auto-fire from a cloned repo. Materialises copies into ~/.agents/routines/ with source provenance.
 agents routines list                    See all scheduled jobs, when they run next, and their last execution status
 agents routines logs [name]             Show a run’s concise summary — status + extracted report. --full for the raw stdout stream; --run for a specific past run.
@@ -780,8 +781,6 @@ agents secrets generate [length]                   Generate a random password
 agents secrets get <item> [key]                    Print one secret value for shell hooks/automation. One arg = a raw keychain item by name; two args = one KEY out of a bundle (`get <bundle> <KEY>`). Cross-platform.
 agents secrets import [bundle]                     Import keys into a bundle from a .env file, a 1Password vault, or legacy iCloud Keychain bundles. The bundle is created if it does not exist. Values are stored in the bundle's backend (keychain by default).
 agents secrets import-keyring                      Migrate agents-cli secrets from the OS keyring / Credential Manager into the encrypted file store (headless-safe). Dry-run by default.
-agents secrets lease <bundle>                      Hold only an explicit subset of a bundle until an independent expiry.
-agents secrets leases                              List active scoped secret leases.
 agents secrets list [query]                        List configured secrets bundles, optionally filtered (use --host/--hosts for other machines over SSH)
 agents secrets lock [names...]                     Wipe bundles from the secrets-agent (forces Touch ID again next read). Default: all.
 agents secrets mcp                                 Run a stdio MCP server exposing get_secret(bundle, key) — hand credentials to an MCP-speaking agent by name at call time, never through the child process environment
@@ -797,7 +796,6 @@ agents secrets rekey                               Replace enumerable keychain s
 agents secrets remote-list                         List bundles currently stored on api.prix.dev for this account.
 agents secrets remove [bundle] [key]               Remove a key from the bundle. Purges the keychain item if the ref was keychain:. Use --keep-secret to retain it.
 agents secrets rename <old> <new>                  Rename a bundle. Moves the metadata and every keychain-backed value to the new name.
-agents secrets revoke <lease-id>                   Revoke one scoped secret lease immediately.
 agents secrets rotate [bundle] [key]               Rotate an existing keychain-backed secret (replaces the value, preserves metadata unless overridden).
 agents secrets rotate-passphrase                   Re-key the encrypted file store under a new machine-local passphrase (atomic, headless-safe). Dry-run by default.
 agents secrets set <item>                          Store a raw keychain item by name (for shell hooks/automation). Cross-platform; no bundle required.
@@ -828,9 +826,9 @@ agents sessions attach <id>                 Bring a backgrounded agent to the fo
 agents sessions backfill                    Populate derived session data explicitly.
 agents sessions backfill resources          Derive historical skill/slash-command usage once into the local SQLite index.
 agents sessions backfill tools              Parse historical tool calls once into the local SQLite index.
+agents sessions bookmark [ids...]           Bookmark sessions so they are easy to find again — list them with --bookmarks, or `b` in the browser.
 agents sessions detach <id>                 Send a live agent to the background — stop its terminal, keep it working headless
 agents sessions export [selectors...]       Bundle sessions (by id, query, or the parent selection flags like --since/-a) into a portable archive.
-agents sessions favorite [ids...]           Favorite sessions so they are easy to find again — list them with --favorites, or `f` in the browser.
 agents sessions focus [selector]            Focus sessions by id, harness/version, topic, device, or live state; attach living panes and recover ended ones
 agents sessions fork <session>              Branch a session into a new, independent copy you can continue separately. The original is untouched.
 agents sessions go [id]                     Deprecated alias for `sessions focus --attach-only`
@@ -1005,6 +1003,13 @@ agents trends tools-per-session  Mix recipe: tools-per-session
 
 ```
 agents uninstall  Completely remove agents-cli and restore your original agent configs. Reverses `agents setup`.
+```
+
+## update — Move a frozen agent installation to a new release, keeping its name and every reference to it
+
+```
+agents update [target]      Move a frozen agent installation to a new release, keeping its name and every reference to it
+agents update list <agent>  Show every frozen installation of an agent and the release each carries
 ```
 
 ## usage — Show rate-limit / quota usage per agent

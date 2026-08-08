@@ -30,6 +30,7 @@ import {
   resolveSessionAgentName,
   requestedLiveStatuses,
   parseInstalledAgentVersionQuery,
+  buildRoutineChoices,
 } from './sessions.js';
 import { remoteAgentsJsonCommand } from '../lib/remote-agents-json.js';
 import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
@@ -54,6 +55,14 @@ describe('session harness name resolution', () => {
     expect(resolveSessionAgentName('cladue')).toBe('claude');
     expect(resolveSessionAgentName('GROK')).toBe('grok');
     expect(resolveSessionAgentName('not-a-harness')).toBeNull();
+  });
+});
+
+describe('routine session catalog', () => {
+  it('keeps a defined routine visible before it has a run or transcript', () => {
+    expect(buildRoutineChoices([], ['never-ran'])).toEqual([
+      { name: 'never-ran', lastRunAt: '', runCount: 0, latestRunSessionCount: 0 },
+    ]);
   });
 });
 

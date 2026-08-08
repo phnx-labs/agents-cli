@@ -75,7 +75,7 @@ export interface FocusOptions {
   since?: string;
   until?: string;
   limit?: string;
-  favorites?: boolean;
+  bookmarks?: boolean;
   unmanaged?: boolean;
   sort?: string;
   working?: boolean;
@@ -94,7 +94,7 @@ const INHERITED_FOCUS_OPTIONS: Array<keyof FocusOptions> = [
   'local', 'host', 'device', 'active', 'agent',
   'claude', 'codex', 'kimi', 'antigravity', 'grok', 'opencode',
   'all', 'teams', 'inTeam', 'routine', 'project', 'skill', 'plugin',
-  'since', 'until', 'limit', 'favorites', 'unmanaged', 'sort',
+  'since', 'until', 'limit', 'bookmarks', 'unmanaged', 'sort',
   'working', 'idle', 'waiting', 'orphan', 'orphaned', 'crashed',
   'closed', 'abandoned', 'queued', 'unknown',
 ];
@@ -158,7 +158,7 @@ export function registerFocusCommand(program: Command): void {
     .option('--since <time>', 'Only sessions newer than this (for example 7d)')
     .option('--until <time>', 'Only sessions older than this timestamp')
     .option('-n, --limit <n>', 'Maximum candidates to load', '500')
-    .option('--favorites', 'Only favorited sessions')
+    .option('--bookmarks', 'Only bookmarked sessions')
     .option('--unmanaged', 'Also include native-home sessions outside managed versions')
     .option('--sort <field>', 'Order candidates by recent, cost, or duration', 'recent')
     .option('--working', 'Only live sessions currently doing work')
@@ -254,7 +254,7 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
       agent: agentSelector ?? focusOptionAgent(opts),
       teams: opts.teams === true,
       team: opts.inTeam,
-      favorites: opts.favorites === true,
+      bookmarks: opts.bookmarks === true,
       projectScope: opts.all || hosts.length > 0 || !!opts.project || idLookup ? 'all' : 'repo',
       project: opts.project,
       window: opts.since ?? (opts.all || idLookup ? undefined : '30d'),
@@ -391,7 +391,7 @@ function hasFocusFilters(opts: FocusOptions, statuses: LiveStatusFilter[]): bool
   return statuses.length > 0 || !!(
     opts.active || opts.local || opts.host?.length || opts.device?.length || focusOptionAgent(opts) ||
     opts.all || opts.teams || opts.inTeam || opts.routine || opts.project || opts.skill || opts.plugin ||
-    opts.since || opts.until || opts.favorites || opts.unmanaged || (opts.sort && opts.sort !== 'recent')
+    opts.since || opts.until || opts.bookmarks || opts.unmanaged || (opts.sort && opts.sort !== 'recent')
   );
 }
 
@@ -475,6 +475,26 @@ async function focusResolvedSession(
     return;
   }
   await resumeSessionInPlace(meta);
+}
+
+/** Focus one row selected by the shared session browser through the same
+ * attach/recover decision as `agents sessions focus <id>`. */
+export async function focusSelectedSession(
+  meta: SessionMeta,
+  active: ActiveSession | undefined,
+  self: string,
+): Promise<void> {
+  if (active && !active.sessionId) {
+    if (isAttachableLiveSession(active)) {
+      await jumpTo(active, self, resumeInNewTab);
+      return;
+    }
+    console.log(chalk.yellow('This live session has no session id or living attach rail to focus.'));
+    process.exitCode = 1;
+    return;
+  }
+  const liveById = active ? new Map([[meta.id, active]]) : new Map<string, ActiveSession>();
+  await focusResolvedSession(meta, liveById, self, resumeInNewTab, false);
 }
 
 function activeFromMeta(meta: SessionMeta): ActiveSession {

@@ -127,6 +127,79 @@ struct DoctorOverview: Decodable {
     let clis: [String: DoctorCli]?
     let sync: [DoctorSync]?
     let orphans: [DoctorOrphan]?
+    // Additive in agents doctor JSON. Nil, rather than an empty list, means the
+    // installed CLI predates prioritized findings and the menu must retain its
+    // legacy install/sync summary.
+    let findings: [DoctorFinding]?
+}
+
+/// One doctor health finding. Keep every field optional except the stable core
+/// emitted by current agents-cli: the menu bar and CLI release independently,
+/// and a newer remote device must never make the whole overview undecodable.
+struct DoctorFinding: Decodable {
+    let severity: String
+    let kind: String
+    let device: String?
+    let agent: String?
+    let version: String?
+    let versions: [String]?
+    let message: String
+    let remediation: String?
+}
+
+/// Pure presentation policy for doctor findings. Keeping it out of AppKit makes
+/// the cap, ordering and version-skew fallback executable in a headless test.
+enum DoctorHealth {
+    static let maxVisibleFindings = 5
+
+    static func actionable(_ findings: [DoctorFinding]?) -> [DoctorFinding]? {
+        findings.map { $0.filter { $0.severity == "critical" || $0.severity == "warning" } }
+    }
+
+    static func summary(_ findings: [DoctorFinding]?) -> String? {
+        guard let findings = actionable(findings) else { return nil }
+        let critical = findings.filter { $0.severity == "critical" }.count
+        let warning = findings.filter { $0.severity == "warning" }.count
+        var parts: [String] = []
+        if critical > 0 { parts.append("\(critical) critical") }
+        if warning > 0 { parts.append("\(warning) warning\(warning == 1 ? "" : "s")") }
+        return parts.isEmpty ? "all set" : parts.joined(separator: " · ")
+    }
+
+    /// Keeps doctor-provided order; the CLI is the canonical prioritizer.
+    static func visible(_ findings: [DoctorFinding]?) -> [DoctorFinding] {
+        Array((actionable(findings) ?? []).prefix(maxVisibleFindings))
+    }
+
+    static func remainderCount(_ findings: [DoctorFinding]?) -> Int {
+        max(0, (actionable(findings) ?? []).count - maxVisibleFindings)
+    }
+
+    static func context(_ finding: DoctorFinding) -> String {
+        var parts = [finding.severity]
+        if let device = finding.device, !device.isEmpty { parts.append(device) }
+        if let agent = finding.agent, !agent.isEmpty {
+            // Mirror the CLI's subjectLabel (doctor-findings.ts): a collapsed row
+            // reads `agent (N versions)`, a single-version row `agent @version`.
+            if let versions = finding.versions, versions.count > 1 {
+                parts.append("\(agent) (\(versions.count) versions)")
+            } else {
+                let version = finding.version ?? finding.versions?.first
+                parts.append(version.map { "\(agent) @\($0)" } ?? agent)
+            }
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The second display row: the problem plus the exact fix doctor computed,
+    /// so a finding is actionable from the menu itself. Display-only — the menu
+    /// never runs the remediation. Pure so the headless self-test can pin it.
+    static func detail(_ finding: DoctorFinding, max: Int = 96) -> String {
+        let fix = finding.remediation ?? ""
+        let full = fix.isEmpty ? finding.message : "\(finding.message) → \(fix)"
+        if full.count <= max { return full }
+        return String(full.prefix(max - 1)) + "…"
+    }
 }
 
 struct DoctorCli: Decodable {

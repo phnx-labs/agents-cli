@@ -36,7 +36,7 @@ const row = (over: Partial<SessionMeta> = {}): SessionMeta =>
 const base: BrowserFilter = {
   running: false,
   teams: false,
-  favorites: false,
+  bookmarks: false,
   agent: undefined,
   device: undefined,
   projectScope: 'repo',
@@ -54,8 +54,8 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
     expect(browserFilterToArgv(base)).toEqual(['sessions']);
   });
 
-  it('favorites-only maps to --favorites, so `y` round-trips a starred view', () => {
-    expect(browserFilterToArgv({ ...base, favorites: true })).toEqual(['sessions', '--favorites']);
+  it('bookmarks-only maps to --bookmarks, so `y` round-trips a bookmarked view', () => {
+    expect(browserFilterToArgv({ ...base, bookmarks: true })).toEqual(['sessions', '--bookmarks']);
   });
 
   it('running-only maps to --active', () => {
@@ -77,7 +77,7 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
       window: '7d',
       statuses: [],
       routine: false,
-      favorites: false,
+      bookmarks: false,
       limit: 500,
       unmanaged: false,
       sort: 'timestamp',
@@ -101,6 +101,13 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
       'sessions',
       '--in-team',
       'redesign',
+    ]);
+  });
+
+  it('round-trips all-routine and named-routine filters', () => {
+    expect(browserFilterToArgv({ ...base, routine: true })).toEqual(['sessions', '--routine']);
+    expect(browserFilterToArgv({ ...base, routine: 'nightly-review' })).toEqual([
+      'sessions', '--routine', 'nightly-review',
     ]);
   });
 
@@ -137,9 +144,43 @@ describe('remotePoolArgs — per-device version aliases', () => {
     expect(remotePoolArgs({ ...base, agent: 'claude' }, true)).toContain('claude');
     expect(remotePoolArgs({ ...base, agent: 'claude' }, false)).not.toContain('claude');
   });
+
+  it('preserves a named routine on the peer query', () => {
+    expect(remotePoolArgs({ ...base, routine: 'nightly-review' }, false)).toContain('nightly-review');
+  });
 });
 
 describe('applyFilters — shared browser/focus selection', () => {
+  it('keeps only routine rows for the all-routines filter', () => {
+    const rows = [
+      row({ id: 'nightly', origin: 'routine', routineName: 'nightly-review' }),
+      row({ id: 'manual', origin: 'cli' }),
+    ];
+    const result = applyFilters(
+      rows,
+      new Map(),
+      { ...base, routine: true, projectScope: 'all' },
+      'zion',
+      new Set(),
+    );
+    expect(result.map((session) => session.id)).toEqual(['nightly']);
+  });
+
+  it('narrows a named routine with the same fuzzy resolver as the flag path', () => {
+    const rows = [
+      row({ id: 'nightly', origin: 'routine', routineName: 'nightly-review' }),
+      row({ id: 'release', origin: 'routine', routineName: 'release-notes' }),
+    ];
+    const result = applyFilters(
+      rows,
+      new Map(),
+      { ...base, routine: 'nightly', projectScope: 'all' },
+      'zion',
+      new Set(),
+    );
+    expect(result.map((session) => session.id)).toEqual(['nightly']);
+  });
+
   it('filters historical versions even when that version is no longer installed', () => {
     const rows = [row({ id: 'old', version: '2.1.187' }), row({ id: 'new', version: '2.1.218' })];
     const result = applyFilters(
@@ -311,6 +352,12 @@ describe('bareBrowserSeed — an explicit --device scope', () => {
   it('seeds the team filter from --in-team', () => {
     expect(bareBrowserSeed({ inTeam: 'redesign' }).team).toBe('redesign');
     expect(bareBrowserSeed({}).team).toBeUndefined();
+  });
+
+  it('carries routine filters into the shared browser', () => {
+    expect(bareBrowserSeed({ routine: true }).routine).toBe(true);
+    expect(bareBrowserSeed({ routine: 'nightly-review' }).routine).toBe('nightly-review');
+    expect(activeBrowserSeed({ routine: 'nightly-review' }).routine).toBe('nightly-review');
   });
 
   it('widens scope and window for --in-team, since a team outlives both defaults', () => {
@@ -508,6 +555,15 @@ describe('liveSessionToMeta — the projected row', () => {
     expect(meta.ticketId).toBe('RUSH-1');
   });
 
+  it('carries routine provenance so an unindexed live row obeys routine filters', () => {
+    const meta = liveSessionToMeta(
+      live({ origin: 'routine', routineName: 'nightly-review' }),
+      'zion',
+    );
+    expect(meta.origin).toBe('routine');
+    expect(meta.routineName).toBe('nightly-review');
+  });
+
   it('keeps an untracked agent kind off the typed agent field', () => {
     expect(liveSessionToMeta(live({ kind: 'cursor-agent' }), 'zion').agent).toBe('claude');
   });
@@ -577,19 +633,19 @@ describe('shouldShowHostColumn — live-only, gated on the filter not the cache'
  * just opens without that filter. `team` was lost exactly this way. So each new
  * field earns an assertion that it survives the copy, in both directions.
  */
-describe('favorites survives the seed → filter copy', () => {
-  it('carries a seeded favorites flag into the live filter', () => {
-    expect(buildInitialFilter({ favorites: true }).favorites).toBe(true);
+describe('bookmarks survives the seed → filter copy', () => {
+  it('carries a seeded bookmarks flag into the live filter', () => {
+    expect(buildInitialFilter({ bookmarks: true }).bookmarks).toBe(true);
   });
 
   it('defaults to off, never undefined', () => {
-    expect(buildInitialFilter({}).favorites).toBe(false);
+    expect(buildInitialFilter({}).bookmarks).toBe(false);
   });
 
   it('is reachable from both entry points\u0027 seeds', () => {
-    expect(bareBrowserSeed({ favorites: true }).favorites).toBe(true);
-    expect(activeBrowserSeed({ favorites: true }).favorites).toBe(true);
-    expect(bareBrowserSeed({}).favorites).toBe(false);
-    expect(activeBrowserSeed({}).favorites).toBe(false);
+    expect(bareBrowserSeed({ bookmarks: true }).bookmarks).toBe(true);
+    expect(activeBrowserSeed({ bookmarks: true }).bookmarks).toBe(true);
+    expect(bareBrowserSeed({}).bookmarks).toBe(false);
+    expect(activeBrowserSeed({}).bookmarks).toBe(false);
   });
 });

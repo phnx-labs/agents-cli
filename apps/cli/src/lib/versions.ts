@@ -45,6 +45,8 @@ import {
   assertIsolationBoundary,
 } from './shims.js';
 import { importInstallScriptBinary } from './import.js';
+import { createInstallation } from './installations/store.js';
+import { INSTALLATION_RECORD_FILE } from './installations/types.js';
 import { IS_WINDOWS, composeWin32CommandLine } from './platform/index.js';
 import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenclaw } from './subagents.js';
 import { listInstalledWorkflows, syncWorkflowToVersion } from './workflows.js';
@@ -1712,6 +1714,10 @@ export async function installVersion(
     }
 
     createVersionedAlias(agent, installedVersion);
+    // Freeze this installation's identity. The dir name is its stable label from
+    // here on; the release it carries is recorded separately so `agents update`
+    // can move the release without invalidating any reference to the label.
+    createInstallation(agent, installedVersion, installedVersion);
     // The self-updating binary just changed on disk — drop the cached
     // `--version` so `agents view` reflects the freshly-installed release.
     invalidateLiveVersionCache(agent);
@@ -1772,6 +1778,10 @@ export async function installVersion(
   // load-bearing: it ensures `version` (which VERSION_RE permits to start with
   // `-`) is never passed as a standalone npm CLI flag.
   const packageSpec = `${agentConfig.npmPackage}@${version}`;
+
+  // Set once the install has passed its integrity gate; read after the try so
+  // the success path's bookkeeping sits outside the catch's cleanup.
+  let healthyVersion: string;
 
   try {
     // Check npm is available
@@ -1862,8 +1872,10 @@ export async function installVersion(
       };
     }
 
-    emit('version.install', { agent, version: installedVersion });
-    return { success: true, installedVersion };
+    // The install is healthy from here. Identity is frozen AFTER the try (see
+    // below) so a bookkeeping write failure cannot fall into the catch and wipe
+    // a working install.
+    healthyVersion = installedVersion;
   } catch (err) {
     // Clean up on failure — preserve `home/` in case a prior install left
     // conversation history behind that we must not wipe on a failed reinstall.
@@ -1873,14 +1885,22 @@ export async function installVersion(
     emit('version.install', { agent, version, error: (err as Error).message });
     return { success: false, installedVersion: version, error: (err as Error).message };
   }
+
+  // Freeze this installation's identity (see the installScript branch above).
+  createInstallation(agent, healthyVersion, healthyVersion);
+  emit('version.install', { agent, version: healthyVersion });
+  return { success: true, installedVersion: healthyVersion };
 }
 
 // Version-dir entries that are STATE, not install output, and so must survive a
-// clean reinstall: `home/`, and the `.isolated` marker that is the single source
-// of truth for "this copy is walled off". Losing the marker would silently demote
+// clean reinstall: `home/`, the `.isolated` marker that is the single source
+// of truth for "this copy is walled off", and `installation.json`, which carries
+// this installation's frozen identity. Losing the marker would silently demote
 // an isolated copy to a normal one on its first repair — after which shim
-// self-heal would hand it a bare `<agent>` shim and a PATH entry.
-const PRESERVED_ON_CLEAN_REINSTALL = new Set(['home', '.isolated']);
+// self-heal would hand it a bare `<agent>` shim and a PATH entry. Losing the
+// installation record would mint a NEW id for the same install on its first
+// repair, discarding its release history.
+const PRESERVED_ON_CLEAN_REINSTALL = new Set(['home', '.isolated', INSTALLATION_RECORD_FILE]);
 
 /**
  * Remove install artifacts from a version directory, preserving `home/` which
@@ -2402,16 +2422,35 @@ export async function verifyInstalledBinaryLaunches(
   agent: AgentId,
   version: string,
 ): Promise<{ ok: boolean; detail?: string }> {
-  // The real launch target differs by platform, so probe whatever `agents run`
-  // actually execs. On Windows that's the npm `.cmd` wrapper (exec.ts uses
-  // `absPath + '.cmd'`), which chains to the native `.exe`; a gutted install
-  // (renamed/missing `.exe`) makes that wrapper emit "is not recognized" — the
-  // exact win-mini failure a vendor auto-update leaves behind. Probing the
-  // extensionless `.bin/<cli>` instead would ENOENT even on a HEALTHY Windows
-  // install, so we DON'T. On POSIX the `.bin/<cli>` binary is the launch target
-  // and is probed directly.
+  return verifyBinaryLaunches(getBinaryPath(agent, version), getVersionHomePath(agent, version));
+}
+
+/**
+ * The launch probe itself, addressed by PATH rather than by installed version.
+ *
+ * `verifyInstalledBinaryLaunches` is this function applied to a version dir that
+ * is already live. `agents update` needs the identical check applied to a release
+ * that is still STAGED — probing it before the swap is what makes the update
+ * transactional, since a staged release that cannot launch is discarded instead
+ * of replacing a working one. Both callers must agree byte-for-byte on what
+ * "launches" means, hence one implementation.
+ *
+ * `posixBinary` is the extensionless launch target. The real launch target
+ * differs by platform, so we probe whatever `agents run` actually execs: on
+ * Windows that is the npm `.cmd` wrapper beside it (exec.ts uses
+ * `absPath + '.cmd'`), which chains to the native `.exe`; a gutted install
+ * (renamed/missing `.exe`) makes that wrapper emit "is not recognized" — the
+ * exact win-mini failure a vendor auto-update leaves behind. Probing the
+ * extensionless `.bin/<cli>` instead would ENOENT even on a HEALTHY Windows
+ * install, so we DON'T. On POSIX the `.bin/<cli>` binary is the launch target
+ * and is probed directly.
+ */
+export async function verifyBinaryLaunches(
+  posixBinary: string,
+  home: string,
+): Promise<{ ok: boolean; detail?: string }> {
   const isWin = process.platform === 'win32';
-  const binary = isWin ? getBinaryPath(agent, version) + '.cmd' : getBinaryPath(agent, version);
+  const binary = isWin ? posixBinary + '.cmd' : posixBinary;
   if (!fs.existsSync(binary)) {
     // Windows: a missing `.cmd` means a non-npm/global agent (droid.exe) we can't
     // safely probe — treat as healthy (isVersionInstalled validates presence).
@@ -2428,7 +2467,7 @@ export async function verifyInstalledBinaryLaunches(
     await execFileAsync(spec.command, spec.args, {
       timeout: 15000,
       shell: spec.shell,
-      env: { ...process.env, HOME: getVersionHomePath(agent, version) },
+      env: { ...process.env, HOME: home },
     });
     return { ok: true };
   } catch (err: any) {

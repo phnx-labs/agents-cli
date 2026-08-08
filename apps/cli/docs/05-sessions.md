@@ -40,7 +40,7 @@ session is *joined* (a second client, no fork), local or remote over SSH; a sess
 with no attach rail enters recovery in the tab, reported never silently dropped.
 Any selector or filter switches to the shared sessions-browser candidate pipeline:
 agent/version (`claude@2.1.187`, `claude@latest`), device/host/local, project/time,
-team/routine, skill/plugin, favorites, and the complete live-state union. A unique
+team/routine, skill/plugin, bookmarks, and the complete live-state union. A unique
 id focuses directly; agent/version and text selectors always show the rich preview
 picker, even for one result. `latest` and `oldest` resolve independently on each
 queried device. A full tmux name such as `ag-codex-c1f3d813` and a unique alias
@@ -1234,28 +1234,30 @@ gated exactly like `showHost`): it previously showed which terminal a session ra
 never what it was doing, so a session that had lost its host was indistinguishable from a
 healthy one in the row list.
 
-## Favorites
+## Bookmarks
 
-`*` in the interactive browser favorites the highlighted session; `f` filters the list to
-the favorited ones. Outside a TTY, `agents sessions favorite <id>` (`--remove`, `--list`,
-`--json`) does the same, and `agents sessions --favorites` is the flag twin of `f` — so
-the `y` copy-cmd round-trips a favorited view into a command.
+`*` in the interactive browser bookmarks the highlighted session; `b` filters the list to
+the bookmarked ones. Outside a TTY, `agents sessions bookmark <id>` (`--remove`, `--list`,
+`--json`) does the same, and `agents sessions --bookmarks` is the flag twin of `b` — so
+the `y` copy-cmd round-trips a bookmarked view into a command. `f` focuses the highlighted
+session through the same attach-or-recover decision as `agents sessions focus <id>`;
+Enter keeps its existing resume behavior.
 
-Favorites live in `~/.agents/.history/favorites.json` keyed by session id, **not** in
+Bookmarks live in `~/.agents/.history/bookmarks.json` keyed by session id, **not** in
 `sessions.db`. The index is a rebuildable cache — a reindex re-derives every row from
-the transcripts on disk — and a favorite is not derivable from a transcript, so a column
-there would be silently lost on the next rebuild. `.history` is never pruned, so a favorite
+the transcripts on disk — and a bookmark is not derivable from a transcript, so a column
+there would be silently lost on the next rebuild. `.history` is never pruned, so a bookmark
 survives that rebuild.
 
-Favorites are **per-machine**. Session sync carries `.history/backups/`
-(`lib/session/sync/agents.ts`), not this file, so a session favorited on one box is not
-favorited on another — even though the session id itself is fleet-wide. Carrying them
+Bookmarks are **per-machine**. Session sync carries `.history/backups/`
+(`lib/session/sync/agents.ts`), not this file, so a session bookmarked on one box is not
+bookmarked on another — even though the session id itself is fleet-wide. Carrying them
 would mean adding the file to the sync manifest.
 
-That store is per-machine but the FILTER is not scoped to one: `--favorites` applies to
-every row in the merged fleet view, so a peer's session you favorited from here still
+That store is per-machine but the FILTER is not scoped to one: `--bookmarks` applies to
+every row in the merged fleet view, so a peer's session you bookmarked from here still
 shows. This is why the live `--active` path filters after the remote fan-out rather than
-forwarding the flag to each peer — a peer has its own (different) favorites list.
+forwarding the flag to each peer — a peer has its own (different) bookmarks list.
 
 ## Export / Import (portable bundles)
 

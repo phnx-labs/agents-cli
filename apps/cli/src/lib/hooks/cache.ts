@@ -18,6 +18,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import type { HookCache, HookCacheConfig, HookCacheKey, HookCachePrefetch, HookMatches } from '../types.js';
 import { getHookCacheDir, getHookShimsDir, getLogsDir, getPerfDir } from '../state.js';
 
@@ -146,7 +147,24 @@ export function generateHookShim(args: {
     try { existing = fs.readFileSync(shimPath, 'utf-8'); } catch { /* rewrite */ }
   }
   if (existing !== content) {
-    fs.writeFileSync(shimPath, content, { mode: 0o755 });
+    // A hook may fire while a background self-heal repairs another stale shim.
+    // Write in the destination directory and rename only after its mode and
+    // complete contents are ready, so observers see either the old complete
+    // wrapper or the new complete wrapper — never a truncated shell script.
+    const tempPath = path.join(
+      shimsDir,
+      `.${path.basename(shimPath)}.${process.pid}.${crypto.randomUUID()}.tmp`,
+    );
+    try {
+      fs.writeFileSync(tempPath, content, { mode: 0o755 });
+      fs.chmodSync(tempPath, 0o755);
+      fs.renameSync(tempPath, shimPath);
+    } finally {
+      // Rename removes the temp path on success. On a failed write/rename this
+      // best-effort cleanup prevents a bounded repair failure from leaving
+      // growing debris behind for every periodic pass.
+      try { fs.unlinkSync(tempPath); } catch { /* already renamed or unavailable */ }
+    }
   } else {
     // Ensure exec bit even when content unchanged (file mode can drift).
     try { fs.chmodSync(shimPath, 0o755); } catch { /* best effort */ }

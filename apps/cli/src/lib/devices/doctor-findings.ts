@@ -18,11 +18,13 @@
  * with. Keep this list exhaustive; a kind missing from it is a doc that lies.
  *   CRITICAL — logged-out (provable) · missing-hook · missing-plugin ·
  *              unwired-hook (a hook on disk that settings.json never fires) ·
- *              cli-missing · ssh-key-enrollment · owner-sink-unreachable (the feed/notify owner lane
+ *              hook-runtime-broken (a wired hook's generated shim wrapper is
+ *              missing or unusable) · cli-missing · ssh-key-enrollment ·
+ *              owner-sink-unreachable (the feed/notify owner lane
  *              cannot reach the owner from this box).
  *   WARNING  — logout-unprovable (hedged) · missing-resource · content-drift ·
  *              never-synced · stale · repo-behind · repo-drift · version-skew ·
- *              fleet-resource-gap · orphan · duplicate-hook ·
+ *              fleet-resource-gap · hook-runtime-visibility-unavailable · orphan · duplicate-hook ·
  *              duplicate-hook-drift · host-cli-missing · host-cli-invalid ·
  *              rc-secret-export · env-secret-export · exec-policy · stale-cli.
  *   (RUSH-2162 moved never-synced and duplicate-hook-drift to WARNING: both are
@@ -50,6 +52,7 @@ import type { FetchStatusMarker } from '../auto-pull.js';
 import type { VersionResourceReport } from '../doctor-diff.js';
 import type {
   FleetDivergence,
+  FleetHookRuntimeState,
   FleetVersionSignIn,
 } from './fleet-divergence.js';
 
@@ -103,6 +106,8 @@ export const ALL_FINDING_KINDS = [
   'missing-hook',        // a declared hook absent from a version home
   'missing-plugin',      // a declared plugin absent from a version home
   'unwired-hook',        // hook present on disk but not wired into settings.json
+  'hook-runtime-broken', // a wired hook's generated shim wrapper is missing/unusable
+  'hook-runtime-visibility-unavailable', // remote CLI cannot report generated wrapper health
   'cli-missing',         // a managed agent whose binary won't resolve
   'missing-resource',    // a missing command/skill/rule/mcp/permission/subagent
   'content-drift',       // a resource diverged from source
@@ -142,6 +147,7 @@ export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
   'missing-hook': 'critical',
   'missing-plugin': 'critical',
   'unwired-hook': 'critical',
+  'hook-runtime-broken': 'critical',
   'cli-missing': 'critical',
   // A factory that cannot escalate a blocked agent to the owner is not healthy,
   // and the failure is otherwise silent until a block is filed (RUSH-2262/2258).
@@ -150,6 +156,7 @@ export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
   // the harness right now. RUSH-2162 moved never-synced and duplicate-hook-drift
   // here: both are stale-sync states that one `agents sync` resolves.
   'logout-unprovable': 'warning',
+  'hook-runtime-visibility-unavailable': 'warning',
   'missing-resource': 'warning',
   'content-drift': 'warning',
   'never-synced': 'warning',
@@ -253,10 +260,13 @@ export function remediationFor(finding: DoctorFinding): string {
     case 'missing-hook':
     case 'missing-plugin':
     case 'unwired-hook':
+    case 'hook-runtime-broken':
     case 'missing-resource':
     case 'content-drift':
     case 'stale':
       return idLabel ? `agents doctor ${idLabel} --fix` : 'agents doctor --fix';
+    case 'hook-runtime-visibility-unavailable':
+      return 'upgrade agents-cli on this device';
     case 'never-synced':
       // A bare `agents sync <agent>` targets only the default/sole installed
       // version (`commands/sync.ts:8`), so a row collapsed across versions must
@@ -477,6 +487,15 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
           }));
         }
       }
+    }
+    // Generated shim wrapper missing/unusable for a wired hook — independent of
+    // whether the native settings format itself is understood, so this fires
+    // even for harnesses `w.supported` is false for (RUSH-2382).
+    for (const issue of w?.runtimeBroken ?? []) {
+      out.push(finding({
+        severity: FINDING_SEVERITY['hook-runtime-broken'], kind: 'hook-runtime-broken', device, agent, version,
+        message: `hook '${issue.name}' wired but its generated shim is ${issue.reason}`,
+      }));
     }
     // A never-synced version has EVERY declared resource "missing" — that's one
     // root cause (never synced), not one emergency per hook. Collapse it to a
@@ -892,6 +911,42 @@ export function signInToFindings(
           message: 'could not verify sign-in',
         }));
       }
+    }
+  }
+  return out;
+}
+
+/**
+ * Rebuild remote generated-wrapper findings from the closed enum inventory
+ * state. Remote paths and detector messages never cross the fleet boundary.
+ */
+export function hookRuntimeToFindings(
+  device: string,
+  hookRuntime: Record<string, Record<string, FleetHookRuntimeState>> | undefined,
+): DoctorFinding[] {
+  if (!hookRuntime) {
+    return [finding({
+      severity: FINDING_SEVERITY['hook-runtime-visibility-unavailable'],
+      kind: 'hook-runtime-visibility-unavailable',
+      device,
+      message: "older agents-cli — can't report generated hook-wrapper health",
+    })];
+  }
+
+  const out: DoctorFinding[] = [];
+  for (const agent of ALL_AGENT_IDS) {
+    const versions = hookRuntime[agent];
+    if (!versions) continue;
+    for (const [version, state] of Object.entries(versions)) {
+      if (state !== 'broken') continue;
+      out.push(finding({
+        severity: FINDING_SEVERITY['hook-runtime-broken'],
+        kind: 'hook-runtime-broken',
+        device,
+        agent,
+        version,
+        message: 'generated hook wrapper is unusable',
+      }));
     }
   }
   return out;

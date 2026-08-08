@@ -29,6 +29,7 @@ import {
   startDaemon,
   stopDaemon,
   signalDaemonReload,
+  findSurvivingStateDirDaemons,
 } from '../lib/daemon.js';
 import { getConfigValue, setConfigValue, isDaemonEnabled } from '../lib/device-config.js';
 import {
@@ -111,8 +112,8 @@ function entryFromTokens(tokens: string[]): string | null {
 
 /**
  * Every live `__daemon-run` process on this box, regardless of which install
- * launched it. POSIX-only (uses `ps`), mirroring `reapStrayDaemons`'s scope —
- * a no-op on Windows.
+ * launched it or which state dir it serves. POSIX-only (uses `ps`); a no-op on
+ * Windows.
  *
  * `getDaemonLaunch` always spawns `<node> <entry> __daemon-run` with nothing
  * after it — the ONLY argv `__daemon-run` ever appears in for a real daemon.
@@ -121,6 +122,14 @@ function entryFromTokens(tokens: string[]): string | null {
  * literal text `__daemon-run` (this ticket's own brief does) matches that test
  * too, and was observed producing false "duplicate daemon" rows. Requiring it
  * to be the LAST whitespace-delimited token is the actual invariant.
+ *
+ * This raw box-wide scan is deliberately NOT the duplicate-detection scope
+ * (RUSH-2368): a `__daemon-run` under a different HOME serves a different
+ * `getDaemonDir()` and is not a duplicate of THIS device's daemon, however
+ * `ps` sees it — a leaked vitest fixture under its own `/tmp` HOME matched
+ * this scan and was reported as a stray to `kill`. It is used only to attach
+ * display metadata (entry/version) to pids the registry-scoped
+ * `findSurvivingStateDirDaemons` has already confirmed as real duplicates.
  */
 function scanDaemonProcesses(): DaemonProcess[] {
   if (process.platform === 'win32') return [];
@@ -144,6 +153,22 @@ function scanDaemonProcesses(): DaemonProcess[] {
     found.push({ pid, entry, version });
   }
   return found;
+}
+
+/**
+ * Duplicates of THIS device's daemon, scoped to the same instance registry the
+ * reaper and the stop postcondition use (RUSH-2368) — never a raw `ps` match.
+ * `processes` (from `scanDaemonProcesses`) supplies display metadata
+ * (entry/version); `findSurvivingStateDirDaemons` supplies the actual scope, so
+ * a `__daemon-run` under a different HOME (a different `getDaemonDir()`) —
+ * whether a leaked test fixture or a genuinely separate install — never shows
+ * up here even though it is visible to the box-wide `ps` scan.
+ */
+function registryScopedDuplicates(processes: DaemonProcess[], ownerPid: number | null): DaemonProcess[] {
+  const exclude = new Set<number>();
+  if (ownerPid) exclude.add(ownerPid);
+  const registered = new Set(findSurvivingStateDirDaemons(exclude));
+  return processes.filter((p) => registered.has(p.pid));
 }
 
 /** Elapsed wall-clock seconds since `pid` started, or null if unavailable (best-effort, POSIX only). */
@@ -233,12 +258,28 @@ function schedulerSummary(): SchedulerSummary {
 
 // ─── Rendering ────────────────────────────────────────────────────────────
 
-function healthLine(label: string, record: SubsystemHealth | null): string {
-  if (!record || record.consecutiveFailures === 0) {
+/**
+ * Render one service's health line. `live` is the verdict — a probe run RIGHT
+ * NOW against the actual socket/binding — and is the only thing allowed to say
+ * `healthy` (RUSH-2368). `record` is the daemon's persisted last-ok/last-error
+ * history: supporting context, never the verdict. Before this fix the verdict
+ * came from `record.consecutiveFailures`, which the daemon only updates at its
+ * own startup (`recordSubsystemOk`/`recordSubsystemError` in daemon.ts) — a
+ * broker that went unreachable hours into a still-running daemon rendered
+ * `healthy (unreachable)` on one line, a contradiction that is exactly the
+ * silent-success pattern this command exists to remove.
+ */
+function healthLine(label: string, live: boolean, record: SubsystemHealth | null): string {
+  if (live) {
     const ok = record?.lastOkAt ? chalk.gray(`(last ok ${record.lastOkAt})`) : '';
     return `  ${chalk.green('healthy')}  ${label} ${ok}`;
   }
-  return `  ${chalk.red(`${record.consecutiveFailures} consecutive failure(s)`)}  ${label} ${chalk.gray(`— ${record.lastError}`)}`;
+  const detail = record && record.consecutiveFailures > 0
+    ? chalk.gray(`— ${record.lastError}`)
+    : record?.lastOkAt
+      ? chalk.gray(`(last ok ${record.lastOkAt})`)
+      : '';
+  return `  ${chalk.red('down')}  ${label} ${detail}`;
 }
 
 async function runStatus(opts: { json?: boolean }): Promise<void> {
@@ -252,7 +293,7 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
 
   const processes = scanDaemonProcesses();
   const owner = pid ? processes.find((p) => p.pid === pid) : undefined;
-  const duplicates = processes.filter((p) => p.pid !== pid);
+  const duplicates = registryScopedDuplicates(processes, pid ?? null);
 
   const [secrets, browserIpc] = await Promise.all([probeSecretsBroker(), probeBrowserIPC()]);
   const scheduler = schedulerSummary();
@@ -318,8 +359,8 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
   }
 
   console.log(chalk.bold('\nHealth\n'));
-  console.log(healthLine(`secrets broker  ${secrets.reachable ? `(${secrets.socketPath}, ${secrets.heldBundles} bundle(s) held)` : '(unreachable)'}`, secrets.record));
-  console.log(healthLine(`browser IPC     ${browserIpc.bound ? `(${browserIpc.socketPath}, ${browserIpc.sessionCount} session(s))` : '(unbound)'}`, browserIpc.record));
+  console.log(healthLine(`secrets broker  ${secrets.reachable ? `(${secrets.socketPath}, ${secrets.heldBundles} bundle(s) held)` : '(unreachable)'}`, secrets.reachable, secrets.record));
+  console.log(healthLine(`browser IPC     ${browserIpc.bound ? `(${browserIpc.socketPath}, ${browserIpc.sessionCount} session(s))` : '(unbound)'}`, browserIpc.bound, browserIpc.record));
 
   const schedulerEnabled = getConfigValue('scheduler.enabled').value !== false;
   console.log(`  ${schedulerEnabled ? chalk.green('enabled') : chalk.yellow('disabled')}  scheduler — ${scheduler.enabledCount}/${scheduler.routineCount} routine(s) enabled` +
@@ -343,8 +384,8 @@ async function runServices(opts: { json?: boolean }): Promise<void> {
     return;
   }
   console.log(chalk.bold('Hosted services\n'));
-  console.log(healthLine(`secrets broker  ${secrets.reachable ? `(${secrets.socketPath}, ${secrets.heldBundles} bundle(s) held)` : '(unreachable)'}`, secrets.record));
-  console.log(healthLine(`browser IPC     ${browserIpc.bound ? `(${browserIpc.socketPath}, ${browserIpc.sessionCount} session(s))` : '(unbound)'}`, browserIpc.record));
+  console.log(healthLine(`secrets broker  ${secrets.reachable ? `(${secrets.socketPath}, ${secrets.heldBundles} bundle(s) held)` : '(unreachable)'}`, secrets.reachable, secrets.record));
+  console.log(healthLine(`browser IPC     ${browserIpc.bound ? `(${browserIpc.socketPath}, ${browserIpc.sessionCount} session(s))` : '(unbound)'}`, browserIpc.bound, browserIpc.record));
   console.log(chalk.gray('\nScheduled routines run through `agents routines` — see: agents routines stats'));
 }
 
@@ -428,7 +469,7 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
   if (!status.running && enabled) problems.push('Daemon is not running. Start it: agents daemon start');
   if (status.running && isDaemonWedged()) problems.push('Daemon is wedged (heartbeat stale). Restart: agents daemon restart');
 
-  const duplicates = scanDaemonProcesses().filter((p) => p.pid !== status.pid);
+  const duplicates = registryScopedDuplicates(scanDaemonProcesses(), status.pid);
   if (duplicates.length > 0) {
     problems.push(`${duplicates.length} duplicate daemon process(es) running: ${duplicates.map((d) => d.pid).join(', ')}. Stop the stray(s).`);
   }

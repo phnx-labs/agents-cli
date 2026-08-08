@@ -29,7 +29,13 @@ import {
   jobRunsOnThisDevice,
   checkJobDeviceEligibility,
   finalizeRunMeta,
+  resolveJobExecutionContext,
+  slotRunId,
+  claimRunSlot,
+  readRunMeta,
+  resolveHostStrategy,
 } from './routines.js';
+import type { ResolvedExecutionContext, PlacementMode } from './routine-context.js';
 import { getRunsDir, getUserAgentsDir } from './state.js';
 import type { AgentId } from './types.js';
 import { shortCodexHome } from './codex-home.js';
@@ -72,7 +78,6 @@ import {
 import { readAuthHealth, isDeadVerdict } from './auth-health.js';
 import { machineId } from './machine-id.js';
 import { isSelfUpdatingAgent, ROUTINE_AGENT_COMMANDS as AGENT_COMMANDS, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from './agents.js';
-import { expandLocalHome, getProjectRoot } from './project-root.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -106,7 +111,28 @@ function activeRoutineRun(config: Pick<JobConfig, 'name' | 'timeout'>): RunMeta 
   return null;
 }
 
-async function withRoutineLaunchClaim<T>(config: JobConfig, launch: () => Promise<T>): Promise<T> {
+/** How a routine attempt was triggered, plus the schedule slot it belongs to. */
+export interface RoutineTrigger {
+  kind: NonNullable<RunMeta['triggerKind']>;
+  /** UTC fire time for a schedule/catchup attempt; keys the single-fire slot claim. */
+  scheduledFor?: Date | string;
+}
+
+/** A claimed attempt: the run id to use, plus the RunMeta fields to stamp on it. */
+interface RoutineAttempt {
+  runId: string;
+  stamp: Partial<Pick<RunMeta, 'triggerKind' | 'scheduledFor' | 'project' | 'requestedCwd' | 'resolvedCwd'>>;
+}
+
+type AttemptAllocation =
+  | { proceed: true; attempt: RoutineAttempt }
+  /** No agent process is spawned; a terminal record (blocked/skipped) is already written. */
+  | { proceed: false; terminal: RunMeta };
+
+/** Serialize concurrent launches of one routine on this box (the on-disk claim
+ *  primitive `claimRunSlot` is what holds across processes; this lock only makes
+ *  the allocate→spawn window atomic within this process's launch paths). */
+async function withRoutineLock<T>(config: JobConfig, launch: () => Promise<T>): Promise<T> {
   const target = path.join(getJobRunsDir(config.name), '.launch-claim');
   ensureLockTarget(target, '', 0o700);
   const release = await lockfile.lock(target, {
@@ -119,11 +145,246 @@ async function withRoutineLaunchClaim<T>(config: JobConfig, launch: () => Promis
     },
   });
   try {
-    const active = activeRoutineRun(config);
-    if (active) throw new RoutineAlreadyRunningError(config.name, active.runId);
     return await launch();
   } finally {
     await release();
+  }
+}
+
+/**
+ * Reject placement/body combinations the runner cannot execute — before the
+ * attempt is allocated, so an invalid config (host+workflow, cloud+command, …)
+ * throws cleanly rather than allocating a run record it can never satisfy. These
+ * mirror the defensive guards inside `executeJobOnHost`/`executeJobOnCloud`;
+ * `validateJob` already rejects the same combinations at add/edit time.
+ */
+function assertRunnablePlacement(config: JobConfig): void {
+  const strategy = resolveHostStrategy(config);
+  if (strategy === 'host' || strategy === 'fleet') {
+    if (config.workflow) throw new Error(`Routine '${config.name}' runs a workflow bundle, which can't execute on a host yet — remove 'host:' or 'workflow:'.`);
+    if (config.loop) throw new Error(`Routine '${config.name}' uses 'loop:', which can't execute on a host yet — remove 'host:' or 'loop:'.`);
+    if (config.command) throw new Error(`Routine '${config.name}' uses 'command:', which can't execute on a host yet — remove 'host:' or 'command:'.`);
+  }
+  if (strategy === 'cloud') {
+    if (config.workflow) throw new Error(`Routine '${config.name}' runs a workflow bundle, which can't execute in the cloud yet — remove 'hostStrategy: cloud' or 'workflow:'.`);
+    if (config.loop) throw new Error(`Routine '${config.name}' uses 'loop:', which can't execute in the cloud yet — remove 'hostStrategy: cloud' or 'loop:'.`);
+    if (config.command) throw new Error(`Routine '${config.name}' uses 'command:', which can't execute in the cloud yet — remove 'hostStrategy: cloud' or 'command:'.`);
+  }
+}
+
+/** Write a pre-execution terminal record (blocked/skipped) that spawns nothing. */
+function writeTerminalRecord(
+  config: JobConfig,
+  runId: string,
+  status: RunMeta['status'],
+  trigger: RoutineTrigger,
+  extra: Partial<RunMeta>,
+): RunMeta {
+  fs.mkdirSync(getRunDir(config.name, runId), { recursive: true });
+  const now = new Date().toISOString();
+  const scheduledForIso = trigger.scheduledFor
+    ? (typeof trigger.scheduledFor === 'string' ? trigger.scheduledFor : trigger.scheduledFor.toISOString())
+    : undefined;
+  const meta: RunMeta = {
+    jobName: config.name,
+    runId,
+    ...runProvenance(config),
+    ...(config.workflow ? { workflow: config.workflow } : config.command ? { command: config.command } : config.agent ? { agent: config.agent } : {}),
+    triggerKind: trigger.kind,
+    ...(scheduledForIso ? { scheduledFor: scheduledForIso } : {}),
+    pid: null,
+    spawnedAt: Date.now(),
+    status,
+    startedAt: now,
+    completedAt: now,
+    exitCode: null,
+    duration: 0,
+    ...extra,
+  };
+  writeRunMeta(meta);
+  return meta;
+}
+
+/** Persist the cross-entry-point active claim before releasing the launch lock. */
+function writeActiveClaim(config: JobConfig, attempt: RoutineAttempt): RunMeta {
+  const now = new Date().toISOString();
+  const meta: RunMeta = {
+    jobName: config.name,
+    runId: attempt.runId,
+    ...runProvenance(config),
+    ...attempt.stamp,
+    ...(config.workflow ? { workflow: config.workflow } : config.command ? { command: config.command } : config.agent ? { agent: config.agent } : {}),
+    // The launcher owns this provisional claim until the command/agent child
+    // replaces it with its own pid. Recording the owner makes a crash between
+    // lock release and child spawn recoverable instead of wedging the routine
+    // for its full configured timeout.
+    pid: process.pid,
+    // `isPidOurs` compares this value with the OS process birth time. The
+    // daemon may have been alive for days before claiming a routine, so the
+    // claim must carry the launcher's birth, not the claim timestamp.
+    spawnedAt: Date.now() - process.uptime() * 1000,
+    status: 'running',
+    startedAt: now,
+    completedAt: null,
+    exitCode: null,
+    timeoutMs: parseTimeout(config.timeout) || 10 * 60 * 1000,
+  };
+  writeRunMeta(meta);
+  return meta;
+}
+
+/**
+ * Allocate a routine attempt BEFORE any placement / version / sandbox / preflight
+ * / dispatch work, so every rejected, skipped, or blocked fire leaves exactly one
+ * visible terminal record. Runs inside {@link withRoutineLock}. Enforces, in order:
+ *
+ *  1. single-fire — a scheduled slot atomically claims its (routine, UTC) run
+ *     directory; a duplicate cron delivery for the same slot returns the original
+ *     attempt and spawns nothing.
+ *  2. non-overlap — a prior run of this routine that is still active makes this
+ *     attempt a `skipped`/`active_run` record linking the live run.
+ *  3. readiness — an unresolved/blocked execution context (bad cwd, non-portable
+ *     path, missing project base, …) makes this a `blocked` record.
+ */
+function allocateRoutineAttempt(config: JobConfig, trigger: RoutineTrigger): AttemptAllocation {
+  const scheduledForIso = trigger.scheduledFor
+    ? (typeof trigger.scheduledFor === 'string' ? trigger.scheduledFor : trigger.scheduledFor.toISOString())
+    : undefined;
+
+  // 1. Slot claim (schedule/catchup). Manual/webhook/event fires get a fresh id.
+  let runId: string;
+  if (scheduledForIso) {
+    runId = slotRunId(scheduledForIso);
+    if (!claimRunSlot(config.name, runId)) {
+      const existing = readRunMeta(config.name, runId);
+      if (existing) return { proceed: false, terminal: existing };
+      return {
+        proceed: false,
+        terminal: writeTerminalRecord(config, generateRunId(), 'skipped', trigger, {
+          skipReason: 'duplicate_slot',
+          activeRunId: runId,
+          errorMessage: 'duplicate schedule-slot delivery — the slot is already claimed',
+        }),
+      };
+    }
+  } else {
+    runId = generateRunId();
+    fs.mkdirSync(getRunDir(config.name, runId), { recursive: true });
+  }
+
+  // 2. Non-overlap: a prior run of THIS routine is still live.
+  const active = activeRoutineRun(config);
+  if (active && active.runId !== runId) {
+    return {
+      proceed: false,
+      terminal: writeTerminalRecord(config, runId, 'skipped', trigger, {
+        skipReason: 'active_run',
+        activeRunId: active.runId,
+        errorMessage: `skipped — '${config.name}' already has an active run (${active.runId})`,
+      }),
+    };
+  }
+
+  const eligibility = checkJobDeviceEligibility(config);
+  if (eligibility) {
+    return {
+      proceed: false,
+      terminal: writeTerminalRecord(config, runId, 'skipped', trigger, {
+        skipReason: 'wrong_owner',
+        errorMessage: eligibility.message,
+      }),
+    };
+  }
+
+  if (!config.workflow && config.agent && ROUTINE_AGENT_IDS.includes(config.agent) && isAgentHardDeprecated(config.agent)) {
+    const reason = hardDeprecationError(config.agent);
+    return {
+      proceed: false,
+      terminal: writeTerminalRecord(config, runId, 'blocked', trigger, {
+        readiness: { code: 'agent_unavailable', message: reason },
+        errorMessage: reason,
+      }),
+    };
+  }
+
+  try {
+    assertRunnablePlacement(config);
+  } catch (err) {
+    const message = (err as Error).message;
+    return {
+      proceed: false,
+      terminal: writeTerminalRecord(config, runId, 'blocked', trigger, {
+        readiness: { code: 'placement_unsupported', message },
+        errorMessage: message,
+      }),
+    };
+  }
+
+  // 3. Readiness: resolve the execution context for the routine's placement.
+  //    Local placement inspects this box's filesystem; host/fleet/cloud defer
+  //    existence (the remote fs is unreachable here) and enforce portability only.
+  const mode: PlacementMode = resolveHostStrategy(config);
+  const ctx = resolveJobExecutionContext(config, {
+    mode,
+    probe: mode === 'local' ? undefined : null,
+  });
+  const stamp: RoutineAttempt['stamp'] = {
+    triggerKind: trigger.kind,
+    ...(scheduledForIso ? { scheduledFor: scheduledForIso } : {}),
+    ...(config.project ? { project: config.project } : {}),
+    ...(config.cwd ? { requestedCwd: config.cwd } : {}),
+    ...(ctx.resolvedCwd ? { resolvedCwd: ctx.resolvedCwd } : {}),
+  };
+  if (!ctx.ready) {
+    return {
+      proceed: false,
+      terminal: writeTerminalRecord(config, runId, 'blocked', trigger, {
+        ...stamp,
+        readiness: ctx.readiness,
+        errorMessage: `blocked: ${ctx.readiness?.code ?? 'not_ready'}${ctx.readiness?.message ? ` — ${ctx.readiness.message}` : ''}`,
+      }),
+    };
+  }
+
+  return { proceed: true, attempt: { runId, stamp } };
+}
+
+/**
+ * Claim one routine attempt under the short launch lock, then execute after
+ * releasing it. The persisted `running` claim makes a concurrent entry point
+ * skip immediately instead of waiting for a foreground run to finish. `run` is
+ * the placement/command/agent dispatch, invoked only when the attempt proceeds;
+ * `wrapTerminal` adapts a pre-spawn terminal record into the caller's return type.
+ */
+async function runWithAttempt<T>(
+  config: JobConfig,
+  trigger: RoutineTrigger,
+  run: (attempt: RoutineAttempt) => Promise<T>,
+  wrapTerminal: (meta: RunMeta) => T,
+): Promise<T> {
+  const claimed: { terminal: RunMeta } | { attempt: RoutineAttempt } = await withRoutineLock(config, async () => {
+    const alloc = allocateRoutineAttempt(config, trigger);
+    if (!alloc.proceed) return { terminal: alloc.terminal };
+    writeActiveClaim(config, alloc.attempt);
+    return { attempt: alloc.attempt };
+  });
+  if ('terminal' in claimed) return wrapTerminal(claimed.terminal);
+
+  try {
+    return await run(claimed.attempt);
+  } catch (err) {
+    const message = (err as Error).message;
+    const existing = readRunMeta(config.name, claimed.attempt.runId);
+    if (existing) {
+      finalizeRunMeta(existing, 'failed', 1, { errorMessage: message });
+      writeRunMeta(existing);
+      return wrapTerminal(existing);
+    }
+    return wrapTerminal(writeTerminalRecord(config, claimed.attempt.runId, 'blocked', trigger, {
+      ...claimed.attempt.stamp,
+      readiness: { code: 'target_unreachable', message },
+      errorMessage: message,
+    }));
   }
 }
 
@@ -171,18 +432,20 @@ const ROUTINE_TRANSCRIPT_SPECS: Partial<Record<AgentId, Array<{ root: string[]; 
   muse: [{ root: ['.local', 'share', 'muse', 'sessions'], ext: '.jsonl' }],
 };
 
-/** Stable working directory for routine children, independent of the daemon's launch cwd. */
+/**
+ * Working directory for a routine's LOCAL child, resolved from its explicit
+ * `project`/`cwd` execution anchor via {@link resolveJobExecutionContext} — never
+ * inferred from `repo` (which is external repository identity only) and never the
+ * daemon's launch cwd. A command routine with neither field lands in `$HOME`
+ * (housekeeping); an unresolved/blocked agent context also falls back to `$HOME`
+ * so a caller that reaches this (past the readiness gate) has a valid directory,
+ * but the gate should have paused such a routine before it ever spawned.
+ */
 export function routineSpawnCwd(
-  config: Pick<JobConfig, 'repo'>,
-  configuredRoot: string | undefined = getProjectRoot(),
+  config: Pick<JobConfig, 'name' | 'project' | 'cwd' | 'agent' | 'workflow' | 'command'>,
 ): string {
-  if (!config.repo) return os.homedir();
-  const [owner, repo] = config.repo.split('/');
-  if (configuredRoot) {
-    const root = path.resolve(expandLocalHome(configuredRoot));
-    if (path.basename(root) === owner) return path.join(root, repo);
-  }
-  return path.join(os.homedir(), 'src', 'github.com', owner, repo);
+  const ctx = resolveJobExecutionContext(config, { mode: 'local' });
+  return ctx.absoluteCwd ?? os.homedir();
 }
 
 /** Build the full CLI argv for executing a job, applying mode, model, and permission flags. */
@@ -892,56 +1155,23 @@ function injectRoutineActor(env: Record<string, string>, config: JobConfig): Rec
   return env;
 }
 
-/**
- * `routines add`/`routines edit` refuse to create a routine pinned to a
- * hard-deprecated harness (commands/routines.ts), but that check runs only at
- * CLI-write time. A routine YAML written before the harness was deprecated, or
- * edited directly on disk / synced from another device, has no equivalent gate
- * at fire time — the daemon would happily build and spawn `gemini …` against a
- * backend Google retired. Fail loud here, before any version/account
- * resolution or sandbox prep, so a legacy routine skips with the same message
- * every other entry point (`sync`, `exec`, `import`, `run-cloud`, `versions`)
- * already shows instead of a doomed, confusing spawn failure.
- */
-function hardDeprecationRunFailure(config: JobConfig, agent: AgentId): RunMeta {
-  const runId = generateRunId();
-  const runDir = getRunDir(config.name, runId);
-  fs.mkdirSync(runDir, { recursive: true });
-  const reason = hardDeprecationError(agent);
-  const meta: RunMeta = {
-    jobName: config.name,
-    runId,
-    ...runProvenance(config),
-    agent,
-    pid: null,
-    spawnedAt: Date.now(),
-    status: 'running',
-    startedAt: new Date().toISOString(),
-    completedAt: null,
-    exitCode: null,
-  };
-  writeRunMeta(meta);
-  process.stderr.write(`[agents] routine ${config.name}: ${reason}\n`);
-  finalizeRunMeta(meta, 'failed', 1, { errorMessage: reason });
-  writeRunMeta(meta);
-  return meta;
+export async function executeJob(
+  config: JobConfig,
+  deps?: LoopDeps,
+  trigger: RoutineTrigger = { kind: 'manual' },
+): Promise<RunResult> {
+  // Unified attempt: allocate + persist the run record (or a terminal blocked/
+  // skipped record) BEFORE placement, version selection, sandbox, or preflight —
+  // and hold the active-run claim so a manual run cannot overlap a scheduled one.
+  return runWithAttempt(
+    config,
+    trigger,
+    (attempt) => executeJobPlaced(config, deps, attempt),
+    (meta) => ({ meta, reportPath: null }),
+  );
 }
 
-export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<RunResult> {
-  const eligibility = checkJobDeviceEligibility(config);
-  if (eligibility) {
-    throw new Error(eligibility.message);
-  }
-
-  // Hard-deprecated harness (e.g. gemini): fail loud before placement, version/
-  // account resolution, or sandbox prep — local, host, AND cloud placement all
-  // share this one gate (a hard-deprecated agent has no `cloudProvider` entry,
-  // so cloud placement would otherwise silently fall back to the default
-  // provider instead of refusing). See hardDeprecationRunFailure.
-  if (!config.workflow && config.agent && ROUTINE_AGENT_IDS.includes(config.agent) && isAgentHardDeprecated(config.agent)) {
-    return { meta: hardDeprecationRunFailure(config, config.agent), reportPath: null };
-  }
-
+async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, attempt: RoutineAttempt): Promise<RunResult> {
   // Placement (hostStrategy / bare host:) — body may run on another machine
   // over SSH or in the cloud; local version selection / sandbox / spawn then
   // do not apply. Sync callers (manual `routines run`, catchup) follow the
@@ -950,10 +1180,10 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     const { resolvePlacementTarget } = await import('./routines-placement.js');
     const target = resolvePlacementTarget(config);
     if (target.mode === 'host') {
-      return executeJobOnHost({ ...config, host: target.host }, { detached: false });
+      return executeJobOnHost({ ...config, host: target.host }, { detached: false }, attempt);
     }
     if (target.mode === 'cloud') {
-      return executeJobOnCloud(config, { detached: false });
+      return executeJobOnCloud(config, { detached: false }, attempt);
     }
   }
 
@@ -961,7 +1191,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   // no pinning, no sandbox overlay). Reuses the run-record machinery so
   // list/runs/overdue keep working.
   if (config.command) {
-    return executeCommandJobForeground(config);
+    return executeCommandJobForeground(config, attempt);
   }
 
   const launch = await resolveRoutineLaunch(config);
@@ -985,7 +1215,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   const useSandbox = config.sandbox !== false && !config.resume;
   const overlayHome = useSandbox ? prepareJobHome(config) : undefined;
 
-  const runId = generateRunId();
+  const runId = attempt.runId;
   const runDir = getRunDir(config.name, runId);
   fs.mkdirSync(runDir, { recursive: true });
 
@@ -1005,6 +1235,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     jobName: config.name,
     runId,
     ...runProvenance(config),
+    ...attempt.stamp,
     agent: effectiveAgent,
     version: primaryVersion,
     ...(config.workflow ? { workflow: config.workflow } : {}),
@@ -1241,7 +1472,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
  * default). Writes a local run record with `cloudTaskId` so list/runs still
  * work; does not wait for cloud completion on the detached path.
  */
-async function executeJobOnCloud(config: JobConfig, opts: { detached: boolean }): Promise<RunResult> {
+async function executeJobOnCloud(config: JobConfig, opts: { detached: boolean }, attempt: RoutineAttempt): Promise<RunResult> {
   if (config.workflow) {
     throw new Error(`Routine '${config.name}' runs a workflow bundle, which can't execute in the cloud yet — remove 'hostStrategy: cloud' or 'workflow:'.`);
   }
@@ -1268,7 +1499,7 @@ async function executeJobOnCloud(config: JobConfig, opts: { detached: boolean })
     schedule: config.schedule,
   });
 
-  const runId = generateRunId();
+  const runId = attempt.runId;
   const runDir = getRunDir(config.name, runId);
   fs.mkdirSync(runDir, { recursive: true });
 
@@ -1276,6 +1507,7 @@ async function executeJobOnCloud(config: JobConfig, opts: { detached: boolean })
     jobName: config.name,
     runId,
     ...runProvenance(config),
+    ...attempt.stamp,
     agent: config.agent,
     pid: null,
     spawnedAt: Date.now(),
@@ -1319,7 +1551,7 @@ async function executeJobOnCloud(config: JobConfig, opts: { detached: boolean })
   }
 }
 
-async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }): Promise<RunResult> {
+async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }, attempt: RoutineAttempt): Promise<RunResult> {
   if (config.workflow) {
     throw new Error(`Routine '${config.name}' runs a workflow bundle, which can't execute on a host yet — remove 'host:' or 'workflow:'.`);
   }
@@ -1331,6 +1563,10 @@ async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }):
   }
   const { resolveHostRunTarget, dispatchPromptToHost } = await import('./hosts/run-target.js');
   const host = await resolveHostRunTarget(config.host!);
+  const { evaluateHostActivationReadiness } = await import('./routine-readiness.js');
+  const readiness = await evaluateHostActivationReadiness(config);
+  if (!readiness.ready) throw new Error(`${readiness.readiness?.code ?? 'not_ready'}: ${readiness.readiness?.message ?? 'target is not ready'}`);
+  const remoteCwd = readiness.context.resolvedCwd;
 
   const timer = createTimer('agent.run', {
     agent: config.agent,
@@ -1341,7 +1577,7 @@ async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }):
     schedule: config.schedule,
   });
 
-  const runId = generateRunId();
+  const runId = attempt.runId;
   const runDir = getRunDir(config.name, runId);
   fs.mkdirSync(runDir, { recursive: true });
 
@@ -1349,6 +1585,7 @@ async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }):
     jobName: config.name,
     runId,
     ...runProvenance(config),
+    ...attempt.stamp,
     agent: config.agent,
     pid: null, // no local process — the run lives on the host
     spawnedAt: Date.now(),
@@ -1367,7 +1604,7 @@ async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }):
     effort: config.effort,
     model: config.config?.model as string | undefined,
     timeout: config.timeout, // enforced by the REMOTE agents run
-    remoteCwd: config.remoteCwd,
+    remoteCwd,
     name: config.name,
     cwd: runDir,
     follow: !opts.detached,
@@ -1386,14 +1623,14 @@ async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }):
 
 /** Spawn a job as a detached process and return immediately with run metadata. */
 
-async function executeCommandJobForeground(config: JobConfig): Promise<RunResult> {
+async function executeCommandJobForeground(config: JobConfig, attempt: RoutineAttempt): Promise<RunResult> {
   const timer = createTimer('agent.run', {
     jobName: config.name,
     mode: config.mode,
     schedule: config.schedule,
   });
 
-  const runId = generateRunId();
+  const runId = attempt.runId;
   const runDir = getRunDir(config.name, runId);
   fs.mkdirSync(runDir, { recursive: true });
 
@@ -1404,6 +1641,7 @@ async function executeCommandJobForeground(config: JobConfig): Promise<RunResult
     jobName: config.name,
     runId,
     ...runProvenance(config),
+    ...attempt.stamp,
     command: config.command,
     pid: null,
     spawnedAt: Date.now(),
@@ -1501,25 +1739,20 @@ function safeHook(fn: (() => void) | undefined): void {
 }
 
 /** Spawn a job as a detached process and return immediately with run metadata. */
-export async function executeJobDetached(config: JobConfig, hooks?: RoutineHooks): Promise<RunMeta> {
-  const eligibility = checkJobDeviceEligibility(config);
-  if (eligibility) {
-    process.stderr.write(`[agents] daemon: skipping '${config.name}' — ${eligibility.message}\n`);
-    throw new Error(eligibility.message);
-  }
-  return withRoutineLaunchClaim(config, () => executeJobDetachedClaimed(config, hooks));
+export async function executeJobDetached(
+  config: JobConfig,
+  hooks?: RoutineHooks,
+  trigger: RoutineTrigger = { kind: 'manual' },
+): Promise<RunMeta> {
+  return runWithAttempt(
+    config,
+    trigger,
+    (attempt) => executeJobDetachedClaimed(config, attempt, hooks),
+    (meta) => meta,
+  );
 }
 
-async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks): Promise<RunMeta> {
-  // Hard-deprecated harness (e.g. gemini): fail loud before placement, version/
-  // account resolution, or sandbox prep — local, host, AND cloud placement all
-  // share this one gate (a hard-deprecated agent has no `cloudProvider` entry,
-  // so cloud placement would otherwise silently fall back to the default
-  // provider instead of refusing). See hardDeprecationRunFailure.
-  if (!config.workflow && config.agent && ROUTINE_AGENT_IDS.includes(config.agent) && isAgentHardDeprecated(config.agent)) {
-    return hardDeprecationRunFailure(config, config.agent);
-  }
-
+async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAttempt, hooks?: RoutineHooks): Promise<RunMeta> {
   // Placement (hostStrategy / bare host:) — dispatch off-box and return; the
   // monitor finalizes host: runs, cloud runs stay terminal when dispatch ends.
   // Either way the in-process onFinish hook does not fire for off-box routines
@@ -1529,11 +1762,11 @@ async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks
     const { resolvePlacementTarget } = await import('./routines-placement.js');
     const target = resolvePlacementTarget(config);
     if (target.mode === 'host') {
-      const { meta } = await executeJobOnHost({ ...config, host: target.host }, { detached: true });
+      const { meta } = await executeJobOnHost({ ...config, host: target.host }, { detached: true }, attempt);
       return meta;
     }
     if (target.mode === 'cloud') {
-      const { meta } = await executeJobOnCloud(config, { detached: true });
+      const { meta } = await executeJobOnCloud(config, { detached: true }, attempt);
       return meta;
     }
   }
@@ -1542,7 +1775,7 @@ async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks
   // no pinning, no sandbox overlay). Still writes a run record so the daemon,
   // list/runs, and overdue tracking keep working.
   if (config.command) {
-    return executeCommandJobDetached(config, hooks);
+    return executeCommandJobDetached(config, attempt, hooks);
   }
 
   // Pre-flight: pick a healthy version/account so the daemon does not launch
@@ -1575,7 +1808,7 @@ async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks
   const useSandbox = config.sandbox !== false && !config.resume;
   const overlayHome = useSandbox ? prepareJobHome(config) : undefined;
 
-  const runId = generateRunId();
+  const runId = attempt.runId;
   const runDir = getRunDir(config.name, runId);
   fs.mkdirSync(runDir, { recursive: true });
 
@@ -1603,6 +1836,7 @@ async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks
     jobName: config.name,
     runId,
     ...runProvenance(config),
+    ...attempt.stamp,
     agent: effectiveAgent,
     version,
     ...(config.workflow ? { workflow: config.workflow } : {}),
@@ -1711,14 +1945,14 @@ async function executeJobDetachedClaimed(config: JobConfig, hooks?: RoutineHooks
  * un-sandboxed, unref, then record the pid. The daemon does not wait for exit;
  * `monitorRunningJobs` reaps the record on the next tick.
  */
-function executeCommandJobDetached(config: JobConfig, hooks?: RoutineHooks): RunMeta {
+function executeCommandJobDetached(config: JobConfig, attempt: RoutineAttempt, hooks?: RoutineHooks): RunMeta {
   const timer = createTimer('agent.run', {
     jobName: config.name,
     mode: config.mode,
     schedule: config.schedule,
   });
 
-  const runId = generateRunId();
+  const runId = attempt.runId;
   const runDir = getRunDir(config.name, runId);
   fs.mkdirSync(runDir, { recursive: true });
 
@@ -1743,6 +1977,7 @@ function executeCommandJobDetached(config: JobConfig, hooks?: RoutineHooks): Run
     jobName: config.name,
     runId,
     ...runProvenance(config),
+    ...attempt.stamp,
     command: config.command,
     pid: null,
     spawnedAt: Date.now(),
@@ -1999,8 +2234,16 @@ export function monitorRunningJobs(): void {
 
   for (const jobDir of jobDirs) {
     const jobRunsPath = path.join(runsDir, jobDir.name);
-    const runDirs = fs.readdirSync(jobRunsPath, { withFileTypes: true })
-      .filter((e) => e.isDirectory());
+    let runDirs: fs.Dirent[];
+    try {
+      runDirs = fs.readdirSync(jobRunsPath, { withFileTypes: true })
+        .filter((e) => e.isDirectory());
+    } catch (err) {
+      // A retention/cleanup pass may remove a job directory after the root
+      // snapshot. The next monitor sweep observes the remaining state.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw err;
+    }
 
     for (const runDirEntry of runDirs) {
       const metaPath = path.join(jobRunsPath, runDirEntry.name, 'meta.json');

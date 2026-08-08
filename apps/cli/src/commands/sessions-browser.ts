@@ -22,7 +22,7 @@ import { resolveVersionAliasLoose } from '../lib/versions.js';
 import { AGENTS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { enrichTeamOrigins, safeTeamText } from '../lib/session/team-filter.js';
-import { listFavorites, toggleFavorite } from '../lib/session/favorites.js';
+import { listBookmarks, toggleBookmark } from '../lib/session/bookmarks.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { buildPreview } from './sessions-picker.js';
 import {
@@ -43,6 +43,7 @@ import {
   isRunningLiveSession,
   matchesLiveStatus,
   parseAgentFilter,
+  resolveRoutineName,
   type LiveStatusFilter,
   type PickerColumns,
 } from './sessions.js';
@@ -62,8 +63,8 @@ export interface BrowserFilter {
   device?: string;
   /** filter to one team's lineage, or all — the `T` key / `--in-team`. */
   team?: string;
-  /** favorited-only — the `f` key / `--favorites`. */
-  favorites: boolean;
+  /** bookmarked-only — the `b` key / `--bookmarks`. */
+  bookmarks: boolean;
   /** this-repo subtree vs every directory — the `P` key / `--all`. */
   projectScope: 'repo' | 'all';
   /** time window (undefined = all time) — the `W` key / `--since`. */
@@ -74,8 +75,8 @@ export interface BrowserFilter {
   project?: string;
   /** upper time bound from --until. */
   until?: string;
-  /** retain only routine-origin sessions. */
-  routine: boolean;
+  /** retain only routine-origin sessions, optionally narrowed to one routine. */
+  routine: boolean | string;
   /** indexed resource filters shared by the flag and focus surfaces. */
   skill?: string;
   plugin?: string;
@@ -104,7 +105,7 @@ export function buildInitialFilter(initial: Partial<BrowserFilter>): BrowserFilt
   return {
     running: initial.running ?? false,
     teams: initial.teams ?? false,
-    favorites: initial.favorites ?? false,
+    bookmarks: initial.bookmarks ?? false,
     agent: initial.agent,
     device: initial.device,
     team: initial.team,
@@ -196,7 +197,7 @@ export function browserFilterToArgv(f: BrowserFilter, query = ''): string[] {
   if (f.statuses.length === 0 && f.running) a.push('--active');
   for (const status of f.statuses) a.push(`--${status === 'orphaned' ? 'orphan' : status}`);
   if (f.teams) a.push('--teams');
-  if (f.favorites) a.push('--favorites');
+  if (f.bookmarks) a.push('--bookmarks');
   if (f.agent) a.push('-a', f.agent);
   if (f.device) a.push('--device', f.device);
   if (f.team) a.push('--in-team', f.team);
@@ -204,7 +205,10 @@ export function browserFilterToArgv(f: BrowserFilter, query = ''): string[] {
   if (f.window) a.push('--since', f.window);
   if (f.until) a.push('--until', f.until);
   if (f.project) a.push('--project', f.project);
-  if (f.routine) a.push('--routine');
+  if (f.routine) {
+    a.push('--routine');
+    if (typeof f.routine === 'string') a.push(f.routine);
+  }
   if (f.skill) a.push('--skill', f.skill);
   if (f.plugin) a.push('--plugin', f.plugin);
   if (f.unmanaged) a.push('--unmanaged');
@@ -235,12 +239,14 @@ export function activeBrowserSeed(opts: {
   host?: string[];
   since?: string;
   all?: boolean;
-  favorites?: boolean;
+  bookmarks?: boolean;
+  routine?: boolean | string;
 }): Partial<BrowserFilter> {
   return {
     running: true,
     teams: !!opts.teams,
-    favorites: !!opts.favorites,
+    bookmarks: !!opts.bookmarks,
+    routine: opts.routine ?? false,
     agent: opts.agent,
     projectScope: 'all',
     device: normalizeDeviceSeed(opts.host?.[0]),
@@ -265,7 +271,8 @@ export function bareBrowserSeed(opts: {
   since?: string;
   host?: string[];
   inTeam?: string;
-  favorites?: boolean;
+  bookmarks?: boolean;
+  routine?: boolean | string;
 }): Partial<BrowserFilter> {
   // An explicit --device scopes the pool to a peer, whose cwds live under that
   // machine's home — none of them can be under OUR process.cwd(), so the default
@@ -281,7 +288,8 @@ export function bareBrowserSeed(opts: {
   const wholeTeam = !!opts.inTeam;
   return {
     teams: !!opts.teams,
-    favorites: !!opts.favorites,
+    bookmarks: !!opts.bookmarks,
+    routine: opts.routine ?? false,
     agent: opts.agent,
     // The filter carries one device; seed it only when the scope names exactly
     // one, so a two-device scope isn't narrowed to the first of them.
@@ -415,7 +423,10 @@ export function remotePoolArgs(f: BrowserFilter, fixedFilters: boolean): string[
   if (f.window) forwarded.push('--since', f.window);
   if (f.until) forwarded.push('--until', f.until);
   if (f.project) forwarded.push('--project', f.project);
-  if (f.routine) forwarded.push('--routine');
+  if (f.routine) {
+    forwarded.push('--routine');
+    if (typeof f.routine === 'string') forwarded.push(f.routine);
+  }
   if (f.skill) forwarded.push('--skill', f.skill);
   if (f.plugin) forwarded.push('--plugin', f.plugin);
   if (f.unmanaged) forwarded.push('--unmanaged');
@@ -487,6 +498,8 @@ export function liveSessionToMeta(a: ActiveSession, self: string): SessionMeta {
     prNumber: a.pr?.number,
     ticketId: a.ticket?.id,
     worktreeSlug: a.worktree?.slug,
+    origin: a.origin,
+    routineName: a.routineName,
   };
 }
 
@@ -532,19 +545,27 @@ export function shouldShowHostColumn(
   return rows.some((r) => liveHostLabel(live.get(r.id)) !== '');
 }
 
-/** Apply the cheap in-memory filters (agent / device / project / running / favorites). */
+/** Apply the cheap in-memory filters (agent / device / project / running / bookmarks). */
 export function applyFilters(
   rows: SessionMeta[],
   live: Map<string, ActiveSession>,
   f: BrowserFilter,
   self: string,
-  favorites: Set<string>,
+  bookmarks: Set<string>,
 ): SessionMeta[] {
   let out = rows;
   // A projected live row is keyed by pid/task when it has no session id, and a
-  // favorite is always keyed by a real session id — so an id-less row can never
-  // be favorited and correctly drops out here.
-  if (f.favorites) out = out.filter((r) => favorites.has(r.id));
+  // A bookmark is always keyed by a real session id — so an id-less row can
+  // never be bookmarked and correctly drops out here.
+  if (f.bookmarks) out = out.filter((r) => bookmarks.has(r.id));
+  if (f.routine) {
+    out = out.filter((r) => r.origin === 'routine' || !!r.routineName);
+    if (typeof f.routine === 'string') {
+      const routineNames = distinct(out.map((r) => r.routineName));
+      const selected = resolveRoutineName(f.routine, routineNames);
+      out = selected ? out.filter((r) => r.routineName === selected) : [];
+    }
+  }
   if (f.agent) {
     const { agent, version: rawVersion } = parseAgentFilter(f.agent);
     const localVersion = agent && agent in AGENTS
@@ -609,7 +630,7 @@ export async function collectSessionCandidates(
   const rows = filter.running || opts.includeLive
     ? mergeLiveIntoPool(pool.rows, liveById, self, includeUnindexedLive)
     : pool.rows;
-  const sessions = applyFilters(rows, liveById, filter, self, listFavorites());
+  const sessions = applyFilters(rows, liveById, filter, self, listBookmarks());
   return { sessions, liveById, self, unreachable: pool.unreachable };
 }
 
@@ -633,7 +654,8 @@ function headerFor(f: BrowserFilter): string {
   ];
   if (f.running) bits.push('running');
   if (f.teams) bits.push('teams');
-  if (f.favorites) bits.push('favorites');
+  if (f.routine) bits.push(`routine:${typeof f.routine === 'string' ? f.routine : 'all'}`);
+  if (f.bookmarks) bits.push('bookmarks');
   return bits.join(' · ');
 }
 
@@ -641,7 +663,7 @@ function helpFor(_f: BrowserFilter, mode: 'nav' | 'search'): string {
   if (mode === 'search') {
     return 'type to filter · ↑↓ navigate · esc exit search · ⏎ resume';
   }
-  return 's search · r running · f favorites · * favorite · c teams · t team · a agent · d device · p project · w window · tab preview · y copy-cmd · ⏎ resume · esc quit';
+  return 's search · r running · b bookmarks · * bookmark · f focus · c teams · t team · a agent · d device · p project · w window · tab preview · y copy-cmd · ⏎ resume · esc quit';
 }
 
 /**
@@ -674,10 +696,11 @@ export async function runSessionBrowser(
   // The live index is slow (a full ps/tmux scan) and only the running filter
   // needs it — fetch it once, lazily, the first time running is toggled on.
   let liveCache: Map<string, ActiveSession> | null = null;
+  const liveFor = (id: string): ActiveSession | undefined => liveCache?.get(id);
   // Re-read every load (it's an mtime-memoized parse of one small file), so the
-  // `*` key's reload picks up the favorite it just wrote — and so does one
-  // favorited by another session on this machine.
-  let favorites = new Set<string>();
+  // `*` key's reload picks up the bookmark it just wrote — and so does one
+  // bookmarked by another session on this machine.
+  let bookmarks = new Set<string>();
   // Generation guard: two quick keypresses can start overlapping loads whose
   // SSH fan-outs settle out of order. dynamicPicker's own gen ref guards which
   // rows become `items`, but the shared closure state below (cols / cycle pools /
@@ -736,8 +759,8 @@ export async function runSessionBrowser(
       ...rows.map((r) => safeTeamText(r.spawnedTeam)),
       ...rows.map((r) => safeTeamText(r.teamOrigin?.team)),
     ]);
-    favorites = listFavorites();
-    const filtered = applyFilters(rows, live ?? new Map(), f, self, favorites);
+    bookmarks = listBookmarks();
+    const filtered = applyFilters(rows, live ?? new Map(), f, self, bookmarks);
     cols = pickerColumnsFor(filtered);
     cols.showHost = shouldShowHostColumn(f, live, filtered);
     // Status rides the same gate as the host column: both come from the live
@@ -747,7 +770,7 @@ export async function runSessionBrowser(
     return filtered;
   };
 
-  const picked = await dynamicPicker<SessionMeta, BrowserFilter>({
+  const picked = await dynamicPicker<SessionMeta, BrowserFilter, 'focus'>({
     message: 'Sessions',
     initialFilter,
     load,
@@ -759,7 +782,7 @@ export async function runSessionBrowser(
         cols,
         sshOriginTagFor(liveCache, s.id),
         liveHostLabel(liveCache?.get(s.id)),
-        favorites.has(s.id),
+        bookmarks.has(s.id),
         liveCache?.get(s.id),
       ),
     matches: sessionMatchesQuery,
@@ -768,7 +791,7 @@ export async function runSessionBrowser(
     // memoized per session, so the volatile live half is prepended here rather
     // than baked into the cached body.
     buildPreview: (s) => {
-      const headline = formatLiveStatusHeadline(liveCache?.get(s.id), favorites.has(s.id));
+      const headline = formatLiveStatusHeadline(liveCache?.get(s.id), bookmarks.has(s.id));
       const body = buildPreview(s);
       return headline ? `${headline}\n${body}` : body;
     },
@@ -780,9 +803,10 @@ export async function runSessionBrowser(
     enterHint: 'resume',
     emptyMessage: 'No sessions match this filter.',
     loadingMessage: local ? 'Loading…' : 'Loading (reaching other machines)…',
+    submitKeys: { f: 'focus' },
     keyBindings: {
       r: (f) => ({ ...f, running: !f.running }),
-      f: (f) => ({ ...f, favorites: !f.favorites }),
+      b: (f) => ({ ...f, bookmarks: !f.bookmarks }),
       c: (f) => ({ ...f, teams: !f.teams }),
       a: (f) => ({ ...f, agent: cycle(f.agent, agentsInPool) }),
       d: (f) => ({ ...f, device: cycle(f.device, devicesInPool) }),
@@ -795,12 +819,12 @@ export async function runSessionBrowser(
     },
     onKey: (name, f, active, query) => {
       if (name === '*') {
-        // Only a row with a real session id can be favorited: a projected live row
+        // Only a row with a real session id can be bookmarked: a projected live row
         // with no id is keyed by pid, which is gone the moment the process is.
-        if (!active || active.id.startsWith(LIVE_ROW_PREFIX)) return 'nothing to favorite on this row';
-        const on = toggleFavorite(active.id);
-        // reload so the row's favorite glyph is repainted — labels are memoized per row.
-        return { flash: on ? `★ favorited ${active.shortId}` : `☆ unfavorited ${active.shortId}`, reload: true };
+        if (!active || active.id.startsWith(LIVE_ROW_PREFIX)) return 'nothing to bookmark on this row';
+        const on = toggleBookmark(active.id);
+        // Reload so the row's bookmark glyph is repainted — labels are memoized per row.
+        return { flash: on ? `★ bookmarked ${active.shortId}` : `☆ unbookmarked ${active.shortId}`, reload: true };
       }
       // Both cases: `hotkeyToken` hands `onKey` the literal character, and this
       // key worked with caps lock on before it existed.
@@ -816,5 +840,12 @@ export async function runSessionBrowser(
   });
 
   if (!picked) return;
+  if (picked.action === 'focus') {
+    // `focus.ts` consumes this browser for its selector path, so import only
+    // after selection to keep the shared picker/focus dependency acyclic.
+    const { focusSelectedSession } = await import('./focus.js');
+    await focusSelectedSession(picked.item, liveFor(picked.item.id), self);
+    return;
+  }
   await handlePickedSession({ session: picked.item, action: 'resume' });
 }

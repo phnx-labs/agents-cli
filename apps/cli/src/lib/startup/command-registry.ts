@@ -45,6 +45,7 @@ export const loadPlugins: ModuleLoader = async () => (await import('../../comman
 export const loadWorkflows: ModuleLoader = async () => (await import('../../commands/workflows.js')).registerWorkflowsCommands;
 export const loadWorktree: ModuleLoader = async () => (await import('../../commands/worktree.js')).registerWorktreeCommands;
 export const loadVersions: ModuleLoader = async () => (await import('../../commands/versions.js')).registerVersionsCommands;
+export const loadUpdate: ModuleLoader = async () => (await import('../../commands/update.js')).registerUpdateCommand;
 export const loadImport: ModuleLoader = async () => (await import('../../commands/import.js')).registerImportCommand;
 export const loadExport: ModuleLoader = async () => (await import('../../commands/export.js')).registerExportCommand;
 export const loadPackages: ModuleLoader = async () => (await import('../../commands/packages.js')).registerPackagesCommands;
@@ -177,6 +178,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   remove: [loadVersions],
   rm: [loadVersions],
   purge: [loadVersions],
+  update: [loadUpdate],
   prune: [loadVersions, loadPrune],
   import: [loadImport],
   export: [loadExport],

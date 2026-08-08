@@ -101,6 +101,14 @@ reliability contract — context resolution, readiness/pause-on-blocker, single-
 (RT-1..RT-11) and §Scheduling & execution singularity (SING-11..SING-13); much of it
 is `[Intended]` (RUSH-2290), and each requirement marks landed vs intended.
 
+Routine execution context is separate from grouping and repository identity.
+Plural `projects` is metadata-only; singular `project` selects one `ProjectDef`
+execution base; `cwd` is resolved on the eventual execution device. A rootless
+Linear project may still use a relative `cwd`, which anchors at that target user's
+home. `repo` remains GitHub/cloud/webhook identity and MUST NOT be used to infer a
+local checkout. Readiness failures save valid definitions paused through device
+activation; they never write mutable activation into routine YAML.
+
 ### 8. Self-updating agents are ONE binary, not fictional version-homes
 
 Some harnesses (droid, grok, antigravity, cursor, hermes, muse, kiro, goose) install
@@ -138,11 +146,11 @@ gives each device its warnings plus a compact accounts/versions line (every
 installed version + its account, provable ✓ / ✗). Single-machine `agents doctor`
 collapses to the CRITICAL section plus one `▸ <machine>` block. Severity:
 **critical** is `logged-out` (provable), `missing-hook`, `missing-plugin`,
-`unwired-hook`, `cli-missing`, `ssh-key-enrollment` and `owner-sink-unreachable` (the feed/notify
+`unwired-hook`, `hook-runtime-broken`, `cli-missing`, `ssh-key-enrollment` and `owner-sink-unreachable` (the feed/notify
 owner-delivery lane can't reach the owner from this box, RUSH-2262); **warning**
 is `logout-unprovable`,
 `missing-resource`, `content-drift`, `never-synced`, `stale`, `repo-behind`,
-`repo-drift`, `version-skew`, `fleet-resource-gap`, `orphan`, `duplicate-hook`,
+`repo-drift`, `version-skew`, `fleet-resource-gap`, `hook-runtime-visibility-unavailable`, `orphan`, `duplicate-hook`,
 `duplicate-hook-drift`, `host-cli-missing`, `host-cli-invalid`,
 `rc-secret-export`, `env-secret-export`, `exec-policy` and `stale-cli`. (RUSH-2162 moved
 `never-synced` and `duplicate-hook-drift` to warning — both are stale-sync states

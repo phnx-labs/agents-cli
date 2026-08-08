@@ -103,6 +103,21 @@ export function writeDoctorOverviewCache(payload: unknown, deps: DoctorOverviewC
 }
 
 /**
+ * Drop the cached overview after a doctor repair attempt changes (or fails to
+ * change) live health. Best-effort and deliberately narrow: it never touches
+ * the singleflight lock, so an in-progress overview compute remains owned by
+ * its holder and no repair can create a retry loop.
+ */
+export function invalidateDoctorOverviewCache(deps: DoctorOverviewCacheDeps = {}): void {
+  const dir = deps.dir ?? getCacheDir();
+  try {
+    fs.unlinkSync(cachePath(dir));
+  } catch {
+    // Missing/unlinkable cache is already equivalent to invalidated.
+  }
+}
+
+/**
  * Result of {@link enterDoctorOverviewGate}.
  *  - `cached` non-null → the caller MUST print this string and return; no compute.
  *  - `cached` null     → the caller holds the singleflight lock: compute the

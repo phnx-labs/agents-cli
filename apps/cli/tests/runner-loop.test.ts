@@ -58,6 +58,7 @@ function makeConfig(overrides: Partial<JobConfig> = {}): JobConfig {
     timeout: '10m',
     enabled: true,
     prompt: 'iterate over the task',
+    cwd: hoistedState.TEST_DIR,
     sandbox: false,  // skip HOME overlay so tests need no real filesystem setup
     ...overrides,
   };
@@ -115,11 +116,10 @@ describe('executeJob — loop driver (issue #400)', () => {
     const deps = makeLoopDeps(calls);
 
     // No loop field — should go to the single-shot spawn path.
-    // Use a sentinel agent which buildJobCommand rejects immediately (unsupported),
-    // so executeJob throws without ever reaching a real spawn or the loop driver.
-    await expect(
-      executeJob(makeConfig({ agent: 'no-such-agent' as any }), deps),
-    ).rejects.toThrow('Unsupported agent for daemon jobs');
+    // Use a sentinel agent which command construction rejects before a real spawn.
+    const result = await executeJob(makeConfig({ agent: 'no-such-agent' as any }), deps);
+    expect(result.meta.status).toBe('failed');
+    expect(result.meta.errorMessage).toContain('Unsupported agent for daemon jobs');
 
     // Loop driver must not have been invoked.
     expect(calls.length).toBe(0);

@@ -75,7 +75,7 @@ row its surface sits in.
 | **Specified here** | `sessions`, `secrets`, `run`, the scheduling/executor singularity, **routine execution & readiness**, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
 | **Governed in part** | `monitors`, `doctor`, `daemon` | One requirement reaches them, no command contract does. `monitors` is bound by [§Scheduling & execution singularity](#scheduling--execution-singularity) (SING-5, SING-8, SING-9) — who may schedule and execute it. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. `daemon` is bound by SING-1 (it IS the singular scheduler/executor) and SING-4a (the `daemon.enabled` kill switch); its status/health rendering (`agents daemon status`/`services`/`doctor`) carries no requirement of its own. Everything else these commands do is unspecified. |
 | **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `pty`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | A design doc describes the mechanism — [hosts.md](hosts.md), [teams.md](teams.md), [cloud.md](cloud.md), [02-resource-sync.md](02-resource-sync.md), [01-version-management.md](01-version-management.md), … — but states **no** requirements. Verified: `hosts.md`, `teams.md` and `cloud.md` contain **zero capitalized RFC-2119 keywords**. `hosts.md` and `teams.md` do use lowercase "must" in prose ("the remote run must be bounded", `hosts.md:124`; "you must declare what each one owns", `teams.md:207`) — which reads normative but is not, per this document's own capitalization rule. That is exactly the trap: treat those docs as explanation, never as a contract. |
-| **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `worktree`, `webhook`, `funnel`, `lease`, `mailboxes`, `feed`, `message`/`send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
+| **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `worktree`, `webhook`, `funnel`, `mailboxes`, `feed`, `message`/`send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
 
 **Where the absence bites hardest.** These act on other machines, hold durable
 state, or sit next to credentials, and have no normative contract today:
@@ -352,12 +352,12 @@ SSH access (§7); rendering sessions that no harness produced.
   falling through to a stale `activity` — the `--waiting` filter reads the
   never-rewritten activity via `isAwaitingUser`, and the `--active` tally carries
   a bucket per status (test `active.hostlink.test.ts`).
-- **SES-18b (MUST).** A favorite MUST be stored outside `sessions.db`
-  (`~/.agents/.history/favorites.json`, keyed by session id;
-  `lib/session/favorites.ts`), because the index is a rebuildable cache and a
-  favorite is not derivable from a transcript. A malformed or absent store MUST
-  degrade to "nothing is favorited", never throw into the listing path (test
-  `favorites.test.ts`). Favorites are per-machine: the store is NOT carried in
+- **SES-18b (MUST).** A bookmark MUST be stored outside `sessions.db`
+  (`~/.agents/.history/bookmarks.json`, keyed by session id;
+  `lib/session/bookmarks.ts`), because the index is a rebuildable cache and a
+  bookmark is not derivable from a transcript. A malformed or absent store MUST
+  degrade to "nothing is bookmarked", never throw into the listing path (test
+  `bookmarks.test.ts`). Bookmarks are per-machine: the store is NOT carried in
   an export bundle or the import mirror (`lib/session/sync/agents.ts` defines
   the `.history/backups/` layout those write into), and any doc claiming
   otherwise is drift.
@@ -585,7 +585,7 @@ SSH access (§7); rendering sessions that no harness produced.
   prefix MAY focus directly; an agent/version or text selector MUST show the
   preview picker even when exactly one row matches. Agent version aliases
   `latest` and `oldest` MUST resolve on each queried device, not on the caller.
-  Device, project/time, team/routine, skill/plugin, favorites, and live-state
+  Device, project/time, team/routine, skill/plugin, bookmarks, and live-state
   flags MUST compose, and several live states MUST form the same OR-union as
   `sessions --active` (`commands/sessions-browser.ts` `BrowserFilter`,
   `collectSessionCandidates`, `applyFilters`; `commands/focus.ts` `focusAction`;
@@ -594,6 +594,17 @@ SSH access (§7); rendering sessions that no harness produced.
   explicit `--closed` / `--crashed` filters MUST remain able to select those rows.
   A per-device `latest` / `oldest` query MUST NOT admit an unindexed live row whose
   version was not part of the peer's filtered result.
+- **SES-38a (MUST).** In the shared interactive session browser, `*` MUST toggle
+  the selected row's bookmark, `b` MUST toggle the bookmark-only filter, and `f`
+  MUST submit the selected row through the same attach/recover decision as
+  `sessions focus`. Enter MUST retain its resume behavior. These bindings MUST
+  apply to every preview rendered by that browser: ordinary listings, active
+  `--teams`, named `--in-team` views (with or without `--teams`), and routine
+  listings. The bare grouped `--teams` report MUST remain non-interactive because
+  its nested shape is not representable by the flat browser
+  (`commands/sessions-browser.ts` `runSessionBrowser`; tests
+  `lib/picker.test.ts`, `commands/sessions-browser.test.ts`,
+  `commands/__tests__/sessions-team-lineage.test.ts`).
 - **SES-39 (MUST).** Focus MUST query tmux `#{pane_dead}` immediately before
   attach. A dead or missing pane MUST NOT attach. Session recovery MUST run on
   the origin device and MUST choose native resume only for the exact healthy
@@ -2345,6 +2356,24 @@ nothing but its own view cache.
   Routine definitions MUST NOT carry mutable `enabled:` or `devices:` activation fields. The same
   definition MAY be active on multiple devices when its input is device-local;
   shared-input work still requires the single-executor safeguards in SING-7.
+- **SING-5b (MUST).** Every scheduled occurrence MUST have a deterministic UTC
+  slot identity and MUST be atomically claimed before dispatch. Redelivery of the
+  same `(routine, scheduledFor)` slot MUST resolve to the existing attempt and
+  MUST NOT spawn a second process. Catch-up claims protect missed-fire recovery;
+  they do not replace the ordinary scheduled-slot claim.
+- **SING-5c (MUST).** A routine MUST NOT overlap itself across any entry point,
+  including manual foreground, detached, cron, catch-up, webhook, host, fleet,
+  and cloud execution. A losing request MUST produce an inspectable skipped result
+  linked to the active run and MUST NOT spawn.
+- **SING-5d (MUST).** Routine execution context MUST be resolved on the eventual
+  execution target from the singular project anchor and portable `cwd`. Plural
+  `projects` metadata and external `repo` identity MUST NOT affect the working
+  directory. A proven path, trust, write, authentication, reachability, or
+  placement blocker MUST leave the definition paused rather than defer failure to
+  its next schedule.
+- **SING-5e (MUST).** Run metadata MUST be allocated before pre-spawn work so every
+  blocked, skipped, failed, timed-out, missed, and completed attempt remains
+  inspectable without requiring an archived session transcript.
 - **SING-6 (MUST).** A new fleet-affecting feature MUST be implemented in
   `apps/cli` (daemon routine and/or command) first; the UI PR adds rendering and
   control wiring only. If the feature seemingly requires UI-side execution, SING-3

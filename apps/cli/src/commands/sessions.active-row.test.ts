@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { renderActiveRowLines, backfillActiveRowsFromMeta } from './sessions.js';
+import {
+  renderActiveRowLines,
+  backfillActiveRowsFromMeta,
+  filterActiveSessionsByRoutine,
+} from './sessions.js';
 import { stringWidth } from '../lib/session/width.js';
 import type { ActiveSession } from '../lib/session/active.js';
 import type { SessionMeta } from '../lib/session/types.js';
@@ -176,5 +180,27 @@ describe('backfillActiveRowsFromMeta', () => {
     const s = active({ sessionId: 'sid-3', version: undefined });
     backfillActiveRowsFromMeta([s], new Map());
     expect(s.version).toBeUndefined();
+  });
+});
+
+describe('filterActiveSessionsByRoutine', () => {
+  const sessions = [
+    active({ sessionId: 'nightly', origin: 'routine', routineName: 'nightly-review' }),
+    active({ sessionId: 'release', origin: 'routine', routineName: 'release-notes' }),
+    active({ sessionId: 'manual', origin: 'cli', routineName: undefined }),
+  ];
+
+  it('keeps every routine and excludes manually-launched rows for --routine', () => {
+    expect(filterActiveSessionsByRoutine(sessions, true).map((session) => session.sessionId))
+      .toEqual(['nightly', 'release']);
+  });
+
+  it('fuzzy-resolves a named routine for non-browser active output', () => {
+    expect(filterActiveSessionsByRoutine(sessions, 'nightly').map((session) => session.sessionId))
+      .toEqual(['nightly']);
+  });
+
+  it('leaves active output unchanged when no routine filter was requested', () => {
+    expect(filterActiveSessionsByRoutine(sessions, undefined)).toBe(sessions);
   });
 });
