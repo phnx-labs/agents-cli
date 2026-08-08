@@ -1552,38 +1552,21 @@ export function readAndResolveBundleEnv(
   const store = itemStore(backend);
 
   const metaItem = bundleMetaItem(name);
-  const bundleSecretPrefix = `${SECRETS_ITEM_PREFIX}${name}.`;
-  let secretItems: string[];
-  try {
-    secretItems = store.list(bundleSecretPrefix);
-  } catch {
-    secretItems = [];
-  }
-
   const reason = opts.caller
     ? `read ${name} secrets (for ${opts.caller})`
     : `read ${name} secrets`;
 
-  // secretItems are storage names as enumerated (opaque hashed names on macOS
-  // with #316 hashing active, cleartext elsewhere); metaItem is cleartext and
-  // hashed inside getBatch. Deduped because the hashed enumeration spans the
-  // bundle's whole namespace.
-  const fetched = backend === 'keychain'
-    ? getKeychainTokens([...new Set([metaItem, ...secretItems])], {
-        agent: opts.agent || process.env.AGENTS_AGENT_NAME || 'Agents CLI',
-        bundle: name,
-        // The session that triggered the read, so a Touch ID prompt is
-        // attributable when several agents run at once. Exported by exec.ts.
-        sessionId: process.env.AGENT_SESSION_ID || process.env.AGENTS_SESSION_ID,
-        reason: opts.caller ? `to ${opts.caller}` : reason,
-        duration: opts.duration || humanUnlockDuration(secretsHoldMs()),
-        defaultPolicy: secretsDefaultPolicy(),
-        forceDuration: Boolean(opts.duration),
-        silentNoAcl: verifiedNoAclBundle,
-      })
-    : store.getBatch([...new Set([metaItem, ...secretItems])]);
+  // Fetch metadata first (it's always no-ACL), then derive secret item names
+  // from its declared keys instead of enumerating. This eliminates the broad
+  // Keychain scan that triggered Touch ID on every run (RUSH-2440). The
+  // metadata is authoritative for declared keys; undeclared keys (union with
+  // legacy/orphaned items) are not supported in agent-only mode and would
+  // fail the agentOnly gate anyway.
+  const metaFetched = backend === 'keychain'
+    ? getKeychainTokens([metaItem], { silentNoAcl: true })
+    : store.getBatch([metaItem]);
 
-  const json = fetched.get(metaItem);
+  const json = metaFetched.get(metaItem);
   if (json === undefined) {
     if (vaultExists() && !getVaultSession().loggedIn) {
       throw new Error(`Synced secrets are locked. Run: agents login`);
@@ -1599,6 +1582,33 @@ export function readAndResolveBundleEnv(
   if (!parsed || typeof parsed !== 'object') {
     throw new Error(`Bundle '${name}' is malformed.`);
   }
+
+  // Compute secret item storage names from the declared keys in metadata.
+  // No enumeration = no broad Keychain scan = no Touch ID in agent-only mode.
+  const declaredKeys = (parsed.vars && typeof parsed.vars === 'object')
+    ? Object.keys(parsed.vars)
+    : [];
+  const secretItems = declaredKeys.map((key) => secretsKeychainItem(name, key));
+
+  // Now fetch both metadata and secret values in one batch.
+  // secretItems are storage names derived from declared keys (opaque hashed
+  // names on macOS with #316 hashing active, cleartext elsewhere); metaItem
+  // is cleartext and hashed inside getBatch. Deduped because we only have
+  // declared items, never orphaned.
+  const fetched = backend === 'keychain'
+    ? getKeychainTokens([...new Set([metaItem, ...secretItems])], {
+        agent: opts.agent || process.env.AGENTS_AGENT_NAME || 'Agents CLI',
+        bundle: name,
+        // The session that triggered the read, so a Touch ID prompt is
+        // attributable when several agents run at once. Exported by exec.ts.
+        sessionId: process.env.AGENT_SESSION_ID || process.env.AGENTS_SESSION_ID,
+        reason: opts.caller ? `to ${opts.caller}` : reason,
+        duration: opts.duration || humanUnlockDuration(secretsHoldMs()),
+        defaultPolicy: secretsDefaultPolicy(),
+        forceDuration: Boolean(opts.duration),
+        silentNoAcl: verifiedNoAclBundle,
+      })
+    : store.getBatch([...new Set([metaItem, ...secretItems])])
   const bundle: SecretsBundle = {
     name,
     description: parsed.description,

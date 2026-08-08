@@ -397,6 +397,29 @@ describe('bundles under hashed service names (#316)', () => {
     expect(env).toEqual({ API_KEY: 'sk-1', DB_URL: 'postgres://x' });
   });
 
+  it('readAndResolveBundleEnv does NOT call store.list() (RUSH-2440 regression test)', () => {
+    // RUSH-2440: store.list() on the Keychain was doing a broad agents-cli. scan
+    // that triggered Touch ID on every run. The fix: read metadata first, derive
+    // declared keys from it, compute the exact storage item names — no enumeration.
+    // This test verifies that store.list() is never called during the read.
+    let listCallCount = 0;
+    const origList = mem.list.bind(mem);
+    mem.list = (prefix: string) => {
+      listCallCount++;
+      return origList(prefix);
+    };
+
+    createBundle('prod', { API_KEY: 'sk-1', DB_URL: 'postgres://x' });
+    const { env } = readAndResolveBundleEnv('prod', { caller: 'test' });
+
+    // The fix must NOT call store.list() at all
+    expect(listCallCount).toBe(0);
+    // But the values must still resolve correctly
+    expect(env).toEqual({ API_KEY: 'sk-1', DB_URL: 'postgres://x' });
+
+    mem.list = origList;
+  });
+
   it('listBundles recovers display names from the persisted metadata JSON', () => {
     createBundle('prod', { API_KEY: 'sk-1' });
     createBundle('hetzner.com', { HCLOUD_TOKEN: 'hc-1' });
