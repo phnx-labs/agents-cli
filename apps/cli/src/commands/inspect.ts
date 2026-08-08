@@ -386,6 +386,11 @@ export function collectRepoKind(repo: RepoTarget, kind: DrillableKind): Resource
   // fragments. The fragments are what `--rule <name>` resolves and what a reader
   // means by "a rule"; the composed file is a build artifact. Without this,
   // `subrules` listed as a single opaque leaf and every real rule was unreachable.
+  // Deliberately exclusive: once `subrules/` exists it is the sole home for
+  // rules (composeRules only ever resolves names under it — lib/rules/compose.ts),
+  // so loose top-level `.md` files are not listed. A repo mid-migration to the
+  // subrules convention would see those legacy files disappear from `--rules`;
+  // that is the correct signal, since composeRules would not load them either.
   if (kind === 'rules') {
     const subrulesDir = path.join(repo.root, kind, 'subrules');
     if (fs.existsSync(subrulesDir)) return readResourceDir(subrulesDir, kind, repo.label);
@@ -1304,6 +1309,11 @@ function loadCentralHookManifest(): Record<string, ManifestHook> {
  * data file collapsed into one entry, non-hook files like promptcuts.yaml or
  * README.md filtered out) rather than a naive readdir, so names are clean and
  * join cleanly against the manifest by script basename.
+ *
+ * `description` is intentionally blank: a hook is a script, and the only text a
+ * readdir-based reader could scrape from one is its shebang (the old flat path
+ * surfaced `!/usr/bin/env bash` as a description). The Hooks section shows firing
+ * events via summarizeHook instead, which is the useful signal.
  */
 function repoHookItems(repo: RepoTarget): ResourceItem[] {
   return listHookEntriesFromDir(path.join(repo.root, 'hooks')).map(h => ({
