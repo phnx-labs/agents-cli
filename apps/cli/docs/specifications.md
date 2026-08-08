@@ -2512,7 +2512,7 @@ a machine-wide process sweep.)
   (`lib/daemon.ts:800-815`), and the keychain helper reaper's pid/start-time identity
   checks (`lib/secrets/reaper.ts:20-40`, `lib/secrets/reaper.ts:68-101`). Status:
   **[Intended]** end to end; those recovery layers are current, while RUSH-2419 closes
-  the remaining long-lived `watch-lock` watcher leak.
+  the remaining long-lived `watch-lock` watcher leak (SING-GAP-4).
 - **SING-12 (MUST).** `stopDaemon` (`lib/daemon.ts`) MUST assert its postcondition,
   not assume it: after the SIGTERM → grace → `killTree` sequence it MUST verify the
   browser IPC binding was released, the secrets broker socket was released (a stale
@@ -2530,8 +2530,8 @@ a machine-wide process sweep.)
   and the daemon's instance-registry entry. The shutdown postcondition MUST name any
   survivor and MUST NOT report success merely because the daemon process exited. The
   graceful path already attempts all six releases in `handleShutdown`
-  (`lib/daemon.ts:996-1016`); status: **[Intended]** for `stopDaemon` independently
-  verifying the full inventory (RUSH-2421).
+  (`lib/daemon.ts:996-1016`); Status: **[Intended]** for `stopDaemon` independently
+  verifying the full inventory (RUSH-2421, SING-GAP-5).
 - **SING-14 (MUST).** Supervised daemon restart MUST be bounded. A permanently failing
   daemon start MUST NOT cycle through unbounded rapid retries: the service manager MUST
   enforce a restart interval and burst limit, and `ensureDaemonStarted` MUST stop
@@ -2540,7 +2540,8 @@ a machine-wide process sweep.)
   (`lib/daemon.ts:1060-1090`), systemd `Restart=always` (`lib/daemon.ts:1106-1124`),
   and the best-effort `ensureDaemonStarted` path (`lib/daemon.ts:1181-1202`). Status:
   **[Intended]**: RUSH-2418 adds `ThrottleInterval`/`StartLimitBurst` service-manager
-  limits and a `consecutiveFailures` circuit breaker in `ensureDaemonStarted`.
+  limits and a `consecutiveFailures` circuit breaker in `ensureDaemonStarted`
+  (SING-GAP-6).
 
 ### 4. Given/When/Then scenarios
 
@@ -2626,6 +2627,30 @@ a machine-wide process sweep.)
   (RUSH-2290) moves the claim into a unified transaction on `(routine, scheduledFor)`
   and adds the `skipped`-run overlap record; the run-status contract for that record is
   RT-6/RT-7 below.
+- **SING-GAP-4 (RUSH-2419).** SING-11b's leak-freedom guarantee is current for every
+  recovery layer except the keychain `watch-lock` watcher (`lib/secrets/agent.ts:830`,
+  `:906`): `isReapableHelperCommand` (`lib/secrets/reaper.ts:209-214`) explicitly and
+  permanently excludes it from the periodic keychain reaper, so an OOM-kill, a raw
+  SIGKILL, or the daemon's own `killTree` escalation of a wedged daemon leaves it
+  orphaned with no automatic recovery. RUSH-2419 adds a narrow reaper path scoped to a
+  provably-dead owning daemon, distinct from the existing exclusion (which must still
+  hold for a live daemon).
+- **SING-GAP-5 (RUSH-2421).** SING-12a's shutdown postcondition is `[Intended]`:
+  `stopDaemon` (`lib/daemon.ts:1496-1617`) today verifies only the browser IPC socket,
+  the secrets broker socket, and pid registration — not the lifetime marker, heartbeat
+  file, or instance-registry entry, which `handleShutdown`'s graceful path releases but
+  the escalated (`killTree`) path leaves stale with no postcondition check. RUSH-2421
+  extends the postcondition to the full six-resource inventory and awaits the real
+  `net.Server` `'close'` event in the browser IPC and secrets-broker socket teardown
+  (`lib/browser/ipc.ts:259-273`, `lib/secrets/agent.ts:919-928`) instead of firing and
+  forgetting.
+- **SING-GAP-6 (RUSH-2418).** SING-14's restart bound is `[Intended]`: `generateLaunchdPlist`
+  (`lib/daemon.ts:1060-1090`) sets `KeepAlive` with no `ThrottleInterval`, `generateSystemdUnit`
+  (`lib/daemon.ts:1106-1124`) sets `Restart=always` with no `StartLimitIntervalSec`/
+  `StartLimitBurst`, and `ensureDaemonStarted` (`lib/daemon.ts:1181-1202`) has no
+  circuit breaker reading the `consecutiveFailures` `daemon-health.ts` already tracks —
+  so a daemon that fails on every startup restarts in an unbounded ~10s cycle. RUSH-2418
+  adds the service-manager limits and wires the circuit breaker.
 
 ---
 
