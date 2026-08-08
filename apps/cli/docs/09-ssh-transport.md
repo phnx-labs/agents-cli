@@ -157,6 +157,35 @@ fallbacks they permit. Because the address always comes from the live registry,
 `agents devices sync` takes effect without re-enrolling, and a password-auth
 device can't be made dispatchable by shadowing it with an inline entry.
 
+### 2d. Interactive login mirrors the caller's project directory (RUSH-2412)
+
+`agents ssh <device>` with **no command** lands you in the same home-relative
+directory you launched from, when that checkout exists on the target — the same
+portable-cwd rule `agents run --host` already applies. From
+`~/src/app` on the laptop, `agents ssh yosemite-s0` starts the remote login shell
+in `~/src/app` on yosemite-s0; when that path is absent it falls back to the
+remote home, and the login always succeeds.
+
+There is **one** resolver behind both surfaces. The caller cwd becomes a portable
+`~/…` path with [`deriveMirroredCwd`](../src/lib/project-root.ts) (only a path
+under the local home has a meaningful remote analogue; anything else mirrors
+nothing and keeps the remote home). For POSIX targets the interactive-login
+builder [`buildInteractiveShellCommand`](../src/lib/devices/connect.ts) reuses the
+same best-effort [`remoteCdPrefix({ mirror: true })`](../src/lib/project-root.ts)
+`--host` runs use — `{ cd "$HOME"/<dir> || cd "$HOME"; } &&` — then `exec "$SHELL"
+-l` so prompt, startup files, and login behavior match a plain `ssh <host>`.
+`"$HOME"` stays unquoted so the *remote* shell expands it (the target home may
+differ, `/home/<me>` vs `/Users/<me>`), and the remainder is shell-quoted, so a
+path with spaces or metacharacters is literal and injection-safe. PowerShell
+targets get a profile-loading interactive shell (`-NoExit`) that `Set-Location`s
+into the mirrored dir when `Test-Path` confirms it, with the path carried through
+`-EncodedCommand`. The `-tt` forced tty that makes an interactive login work is
+allocated whether or not a mirror command is injected.
+
+An **explicit** `agents ssh <device> <cmd…>` is unchanged: the command keeps the
+remote home and its cwd is never silently rewritten — mirroring is interactive-
+login-only.
+
 ### 3. The follow loop: one persistent stream (P1)
 
 The original loop made two calls per cycle — `tail -c +offset` for new log bytes,
