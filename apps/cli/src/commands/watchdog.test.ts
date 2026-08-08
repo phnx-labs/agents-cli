@@ -51,3 +51,10 @@ describe('watchdog status --json', () => {
     expect(() => JSON.parse(lines[0])).toThrow();
   });
 });
+
+describe('watchdog history', () => {
+  it('rejects an invalid duration instead of silently returning no history', async () => {
+    await expect(runWatchdog(['history', '--since', 'eventually']))
+      .rejects.toThrow('--since must be a positive duration');
+  });
+});

@@ -2818,13 +2818,20 @@ not the watchdog's.
 - **WD-16 (MUST).** When no addressable split exists, the tick MUST fall back (mailbox or
   headless `--resume`) or refuse-and-flag — it MUST NOT silently claim delivery.
 - **WD-17 (MUST).** Every decision MUST be appended to `watchdog.log` in the Factory event
-  shape (`lib/watchdog/log.ts`).
+  shape, with persisted transcript context bounded so it cannot consume the audit window
+  (`lib/watchdog/log.ts`).
 
 #### 2.5 Per-session policy
 
 - **WD-18 (MUST).** `agents watchdog policy <id> off|keep|handsoff` MUST be honored:
   `off` excludes the session; `handsoff` detects+flags but never delivers; `keep` is the
   default path (`readPolicySentinel`/`writePolicySentinel`, `lib/watchdog/runner.ts`).
+
+#### 2.6 Audit history
+
+- **WD-19 (MUST).** `agents watchdog history [sessionId]` MUST expose the persisted audit
+  trail newest-first, including non-action session inspections, MUST support machine-readable output, and MUST NOT return raw
+  transcript `tailLines` or message excerpts (`lib/watchdog/history.ts`, `commands/watchdog.ts`).
 
 ### 3. Given/When/Then scenarios
 
@@ -2852,6 +2859,13 @@ Given a running session whose transcript lives under an earlier version home whi
 `~/.claude` points at a newer version; When the tick classifies it; Then the transcript is
 found via `getAgentSessionDirs` and the session is evaluated, not skipped as "no activity
 timestamp" (WD-8).
+
+**GWT-W6 — Audit history is useful without disclosing transcript content.**
+Given persisted decisions and heartbeat ticks; When an operator runs
+`agents watchdog history <sessionId> --json`; Then matching decisions are returned newest
+first alongside compact inspection results, without raw transcript tails or message excerpts,
+and heartbeat rows appear only with `--all`
+(WD-19).
 
 ### 4. Known gaps
 
