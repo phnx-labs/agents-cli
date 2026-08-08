@@ -83,7 +83,9 @@ function elapsedLabel(atMs: number, eventMs: number): string {
 }
 
 function isAttentionOutcome(outcome: SessionOutcome): boolean {
-  return outcome.stall === 'stalled'
+  return !outcome.sessionId
+    || outcome.lastActivityMs === undefined
+    || outcome.stall === 'stalled'
     || outcome.decision !== 'skip'
     || outcome.injected === true
     || outcome.addressable === false

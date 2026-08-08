@@ -100,4 +100,28 @@ describe('watchdog tick output', () => {
   it('shows every session with verbose output', () => {
     expect(formatWatchdogTickLines(result, false, true).join('\n')).toContain('healthy-');
   });
+
+  it('keeps sessions with missing identity or activity visible by default', () => {
+    const diagnosticResult: WatchdogTickResult = {
+      ...result,
+      counts: { ...result.counts, total: 2, stalled: 0 },
+      outcomes: [
+        {
+          kind: 'claude', host: 'tmux', policy: 'keep', stall: 'active', decision: 'skip',
+          reason: 'no session id (cannot address or track)',
+        },
+        {
+          sessionId: 'missing-activity', kind: 'codex', host: 'tmux', policy: 'keep',
+          stall: 'active', decision: 'skip',
+          reason: 'no activity timestamp (no transcript / start time)',
+        },
+      ],
+    };
+
+    const text = formatWatchdogTickLines(diagnosticResult, false).join('\n');
+    expect(text).toContain('no session id (cannot address or track)');
+    expect(text).toContain('skip        missing-');
+    expect(text).toContain('no activity timestamp (no transcript / start time)');
+    expect(text).not.toContain('healthy/non-actionable');
+  });
 });
