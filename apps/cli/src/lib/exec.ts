@@ -1372,10 +1372,14 @@ export async function execShimPassthrough(
   // attribution path on Windows (no lsof), so the launchId join matters most here.
   const launchId = randomUUID();
   // mode/effort are required by ExecOptions but do not affect the env buildExecEnv
-  // derives; pass the agent's default to satisfy the type. Passing no prompt is
-  // meaningful, not incidental: this is the user invoking the harness binary
-  // directly through its shim, so the launch resolves INTERACTIVE and authenticates
-  // from their own per-version login rather than the headless `auth` setup-token.
+  // derives; pass the agent's default to satisfy the type. Passing no prompt makes
+  // this resolve INTERACTIVE, so the launch authenticates from the per-version
+  // login rather than the headless `auth` setup-token (EXEC-2a) — right for the
+  // common case, someone invoking the harness binary directly. Known limit: we do
+  // not parse `rawArgs`, so a `-p "task"` passthrough is headless in fact and
+  // interactive by this classification, and loses the token. Windows-only in
+  // practice (POSIX uses the bash shim, which execs the binary and never reaches
+  // buildExecEnv — `shims.ts:749`, `shims.ts:761-764`).
   const env = buildExecEnv({ agent, version, cwd, mode: defaultModeFor(agent), effort: 'auto', env: { AGENT_LAUNCH_ID: launchId } });
   const { command, args, shell } = resolveShimSpawn(process.platform, binary, [...launchArgs, ...rawArgs]);
 

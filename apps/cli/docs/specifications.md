@@ -1736,11 +1736,21 @@ schema (`--json` passes through each agent's native stream format).
 - **EXEC-2a (MUST).** For claude, `buildExecEnv` MUST inject the reserved `auth`
   bundle's per-account setup-token into `CLAUDE_CODE_OAUTH_TOKEN` ONLY when the
   run resolves **headless** (`resolveInteractive(options) === false`,
-  `lib/exec.ts:425-453`). That token exists so a run with no human present
-  authenticates without the Touch-ID-gated login item
-  (`lib/claude-account-token.ts:8-16`); an interactive run has a human at the
-  TTY and MUST be left on its per-version login, which is also the only
+  `lib/exec.ts:425-453`). That token exists so an unattended run authenticates
+  without the Touch-ID-gated login item (`lib/claude-account-token.ts:9-16`); an
+  interactive run MUST be left on its per-version login, which is also the only
   credential carrying the `user:profile` scope usage reads require (RUSH-2392).
+  **`resolveInteractive` means "this run opens a TUI", NOT "a human is present"**
+  — do not read the requirement as the latter. `watchdog/rotate.ts:195` builds
+  `agents run auto --interactive` and `watchdog/runner.ts:901-903` injects it
+  into a tab unattended, so the watchdog's rotate-relaunch resolves interactive
+  and is deliberately NOT given the setup-token. That is the pre-existing
+  contract, not a new gap: the injection dates only to #1719 (2026-08-02), and
+  every interactive run — the watchdog's included — authenticated from its
+  per-version login before it. Where that relaunch lands on a home whose login
+  has gone dead, the defect is rotation treating "email present" as `authValid`
+  (`agents.ts:1871-1872`), which the token merely masked. Making the credential
+  a function of DEVICE ROLE rather than run mode is tracked in RUSH-2395.
   An interactive run MUST additionally delete an INHERITED
   `CLAUDE_CODE_OAUTH_TOKEN` whose value equals that same resolved setup-token
   (`lib/exec.ts:444-446`), so an interactive launch from inside a headless
