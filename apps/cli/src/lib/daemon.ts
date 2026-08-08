@@ -128,6 +128,29 @@ export function shouldTakeOverBroker(isHosting: boolean, brokerReachable: boolea
  */
 export type SchedulerGateTransition = 'reload' | 'stop' | 'boot' | 'none';
 
+/**
+ * Wrap an async routine so it runs AT MOST ONCE, however many callers fire it.
+ *
+ * Extracted rather than left as a `let shuttingDown = false` inside runDaemon so
+ * the property can actually be tested (RUSH-2423). The daemon's shutdown is
+ * reachable from SIGTERM, SIGINT, and the state-dir self-check, but a real
+ * shutdown completes in ~26ms, so the re-entrant window is not reachable from
+ * outside the process — an end-to-end "send three signals" test passes with the
+ * guard removed and proves nothing. The mechanism is what is testable, so the
+ * mechanism is what is separated out.
+ *
+ * The flag is set synchronously before the first `await`, which is what makes
+ * this safe: two callers in the same tick cannot both get past it.
+ */
+export function singleShot(fn: () => Promise<void>): () => Promise<void> {
+  let ran = false;
+  return async () => {
+    if (ran) return;
+    ran = true;
+    await fn();
+  };
+}
+
 export function schedulerGateTransition(running: boolean, enabled: boolean): SchedulerGateTransition {
   if (running) return enabled ? 'reload' : 'stop';
   return enabled ? 'boot' : 'none';
@@ -1093,15 +1116,13 @@ export async function runDaemon(): Promise<void> {
   };
 
   // Structurally single-shot (RUSH-2423). Shutdown is reachable from SIGTERM,
-  // SIGINT, and the state-dir self-check, and two of those can arrive together —
-  // a service manager that SIGTERMs a daemon whose state dir was just removed.
-  // It was only INCIDENTALLY safe before (every step inside happens to be
-  // idempotent); the guard makes single-shot a property of the function rather
-  // than one the next step added has to re-earn.
-  let shuttingDown = false;
-  const handleShutdown = async () => {
-    if (shuttingDown) return;
-    shuttingDown = true;
+  // SIGINT, and the state-dir self-check's independent `void handleShutdown()`,
+  // and two of those can arrive together — a service manager that SIGTERMs a
+  // daemon whose state dir was just removed. It was only INCIDENTALLY safe
+  // before (every step inside happens to be idempotent); the guard makes
+  // single-shot a property of the function rather than one that every step
+  // added later has to re-earn.
+  const handleShutdown = singleShot(async () => {
     log('INFO', 'Daemon shutting down');
     stopScheduler();
     monitorEngine.stop();
@@ -1122,7 +1143,7 @@ export async function runDaemon(): Promise<void> {
     removeHeartbeat();
     unregisterDaemonInstance();
     process.exit(0);
-  };
+  });
 
   process.on('SIGHUP', handleReload);
   process.on('SIGTERM', () => handleShutdown());

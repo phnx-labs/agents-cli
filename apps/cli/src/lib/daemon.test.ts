@@ -42,6 +42,7 @@ import {
   registerDaemonInstance,
   unregisterDaemonInstance,
   reapStrayDaemons,
+  singleShot,
   stopResidueArtifacts,
 } from './daemon.js';
 import { getDaemonDir } from './state.js';
@@ -959,60 +960,45 @@ describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () =>
   );
 });
 
-// RUSH-2423: shutdown is reachable from SIGTERM, SIGINT, and the state-dir
-// self-check, and two can arrive together (a service manager SIGTERMing a daemon
-// whose state dir was just removed). handleShutdown was only INCIDENTALLY safe
-// against that — every step inside happens to be idempotent — which is a property
-// the next step added would silently have to re-earn.
-describe('handleShutdown is structurally single-shot (RUSH-2423)', () => {
-  it.skipIf(process.platform === 'win32')('runs once when repeated SIGTERMs arrive during shutdown', async () => {
-    if (!fs.existsSync(DIST_ENTRY)) execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
-    const home = fs.mkdtempSync(path.join('/tmp', 'agd-dbl-'));
-    const systemDir = path.join(home, '.agents', '.system');
-    fs.mkdirSync(systemDir, { recursive: true });
-    execFileSync('git', ['init', '-q', systemDir]);
-    const env = { ...process.env, HOME: home };
-    delete env.CLAUDE_CODE_OAUTH_TOKEN;
-    const daemonLog = path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'logs.jsonl');
-    const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-    const waitFor = async (cond: () => boolean, ms: number) => {
-      const end = Date.now() + ms;
-      while (Date.now() < end) { if (cond()) return true; await new Promise((r) => setTimeout(r, 50)); }
-      return cond();
-    };
+// RUSH-2423: the daemon's shutdown must run at most once — it is reachable from
+// SIGTERM, SIGINT, and the state-dir self-check's independent
+// `void handleShutdown()`, and two can arrive together (a service manager
+// SIGTERMing a daemon whose state dir was just removed). Before this it was only
+// INCIDENTALLY safe: every step inside happens to be idempotent, a property each
+// newly added step would silently have to re-earn.
+//
+// Tested at the MECHANISM, not end-to-end, and that is deliberate. A real
+// shutdown completes in ~26ms, so a second signal lands on a dead process and is
+// swallowed as ESRCH — an e2e "send three SIGTERMs and count the log lines" test
+// passes with the guard REMOVED (verified: 3/3 runs, and across 2/5/10/20/50ms
+// spacings). That test would have been ceremony, so it is gone; this asserts the
+// thing that can actually fail.
+describe('singleShot (RUSH-2423: shutdown runs at most once)', () => {
+  it('runs the body once no matter how many callers fire it', async () => {
+    let runs = 0;
+    const once = singleShot(async () => { runs++; });
+    await once();
+    await once();
+    await once();
+    expect(runs).toBe(1);
+  });
 
-    let pid: number | null = null;
-    try {
-      pid = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(home, 'd.log'), env }).pid!;
-      expect(await waitFor(() => fs.existsSync(daemonLog)
-        && fs.readFileSync(daemonLog, 'utf-8').includes('Browser IPC server started'), 20_000)).toBe(true);
+  it('excludes a caller that arrives in the SAME tick, before the first await', async () => {
+    // The real shape: two signal handlers firing back to back. The flag has to be
+    // set synchronously, or both get past it and the body runs twice.
+    let runs = 0;
+    const once = singleShot(async () => {
+      runs++;
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    await Promise.all([once(), once(), once()]);
+    expect(runs).toBe(1);
+  });
 
-      // Repeated SIGTERMs while the first shutdown is still in flight — a service
-      // manager escalating, or a second `agents daemon stop`.
-      //
-      // Deliberately SPACED rather than simultaneous: two signals delivered in
-      // the same tick kill the daemon outright before any handler logs, which
-      // reproduces identically on a build WITHOUT this guard, so asserting on it
-      // would test node's signal delivery rather than this code.
-      for (let i = 0; i < 3; i++) {
-        try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
-        await new Promise((r) => setTimeout(r, 50));
-      }
-      expect(await waitFor(() => !alive(pid!), 15_000)).toBe(true);
-
-      // Exactly one shutdown, not three.
-      const shutdownLines = fs.readFileSync(daemonLog, 'utf-8')
-        .split('\n').filter((l) => l.includes('Daemon shutting down'));
-      expect(shutdownLines.length).toBe(1);
-    } finally {
-      try { if (pid) process.kill(pid, 'SIGKILL'); } catch { /* gone */ }
-      if (pid) await waitFor(() => !alive(pid!), 5_000);
-      for (let a = 0; ; a++) {
-        try { fs.rmSync(home, { recursive: true, force: true }); break; }
-        catch (err) { if (a >= 10) throw err; await new Promise((r) => setTimeout(r, 100)); }
-      }
-    }
-  }, 60_000);
+  it('does not swallow the first caller\'s failure', async () => {
+    const once = singleShot(async () => { throw new Error('shutdown blew up'); });
+    await expect(once()).rejects.toThrow('shutdown blew up');
+  });
 });
 
 // KNOWN GAP (RUSH-2423): the `skipIf(process.platform === 'win32')` blocks in this
