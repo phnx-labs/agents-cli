@@ -1184,13 +1184,16 @@ export class AgentProcess {
     try {
       metaContent = await fs.readFile(metaPath, 'utf-8');
     } catch (err) {
-      // ENOENT is the only outcome that proves the record is genuinely ABSENT
-      // (never written, or already cleaned up). Anything else -- EACCES, EIO,
-      // a transient race -- means the file exists but could not be read; treat
-      // it like the parse failure below so it gets quarantined instead of
-      // silently vanishing forever.
-      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
-      await AgentProcess.quarantineCorruptMeta(metaPath, err);
+      // A READ error is not a corrupt record. ENOENT proves the record is
+      // genuinely ABSENT; anything else -- EACCES, EIO, a transient EMFILE
+      // under fd pressure -- means the file exists and could not be read THIS
+      // time, but its contents are intact. We MUST NOT quarantine (rename) it:
+      // renaming a valid record away is exactly the fail-open that RUSH-2429
+      // forbids -- isWorktreeClaimed() reads meta.json directly and fails
+      // CLOSED on the same read error (safe), but a rename here would delete
+      // the record it relies on and turn a live teammate's worktree into
+      // "unclaimed", re-arming `git worktree remove --force` over uncommitted
+      // work. Return null (skip this scan); the file stays for the next read.
       return null;
     }
 

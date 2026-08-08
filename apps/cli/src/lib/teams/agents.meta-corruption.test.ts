@@ -17,17 +17,23 @@
  *  1. saveMeta() writes via a sibling tmp file + rename, so a write that dies
  *     partway through can never leave a torn meta.json — the target is either
  *     the previous valid record or the new one.
- *  2. loadFromDisk() distinguishes ABSENT (ENOENT) from UNREADABLE (parse or
- *     other read failure) and quarantines an unreadable record by renaming it
- *     to meta.json.corrupt, so it stops masquerading as "no record" and a
+ *  2. loadFromDisk() quarantines a record whose CONTENT is corrupt (a torn or
+ *     unparseable meta.json — the JSON.parse failure) by renaming it to
+ *     meta.json.corrupt, so it stops masquerading as "no record" and a
  *     subsequent isWorktreeClaimed() scan sees genuine absence (ENOENT) for
- *     that entry instead of failing closed on it forever.
+ *     that entry instead of failing closed on it forever. A plain READ error
+ *     (EACCES/EIO/EMFILE) is NOT corruption — the file is intact and simply
+ *     could not be read this time — so loadFromDisk() returns null WITHOUT
+ *     renaming it, preserving the valid record for the next read.
  *
  * isWorktreeClaimed()'s fail-closed behavior for a record that is genuinely
  * present-but-unreadable AT DECISION TIME is a deliberate, separately-tested
  * invariant (agents.retention.test.ts, "fails CLOSED on an unreadable
  * record") and is untouched here — these tests only prove that a corrupt
- * record stops being PERMANENT.
+ * record stops being PERMANENT. Quarantining only on a parse failure (never on
+ * a transient read error) is what keeps that guard's protection intact: a valid
+ * record is never renamed away, so a live teammate's worktree can never be
+ * misread as unclaimed.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
@@ -142,6 +148,31 @@ describe('loadFromDisk() quarantines an unreadable meta.json instead of treating
     const result = await AgentProcess.loadFromDisk('empty-1', base);
     expect(result).toBeNull();
     expect(fs.existsSync(path.join(base, 'empty-1', 'meta.json.corrupt'))).toBe(false);
+  });
+
+  it('a READ error (not corruption) returns null WITHOUT quarantining — the intact record is preserved for the guard', async () => {
+    // A read failure that is not ENOENT (here EISDIR: meta.json exists but is a
+    // directory, so fs.readFile throws) must NOT be treated as corrupt content.
+    // Renaming it away would be the fail-open RUSH-2429 forbids: it would strip
+    // the record isWorktreeClaimed() relies on and let a live worktree read as
+    // unclaimed. loadFromDisk() must return null and leave the entry untouched.
+    const base = tmpBase();
+    dirs.push(base);
+    const agentDir = path.join(base, 'readerr-1');
+    const metaPath = path.join(agentDir, 'meta.json');
+    fs.mkdirSync(metaPath, { recursive: true }); // meta.json is a directory -> EISDIR on read
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const result = await AgentProcess.loadFromDisk('readerr-1', base);
+      expect(result).toBeNull();
+      // The record was NOT quarantined: no .corrupt sibling, meta.json still there.
+      expect(fs.existsSync(`${metaPath}.corrupt`)).toBe(false);
+      expect(fs.existsSync(metaPath)).toBe(true);
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('an unparseable meta.json is renamed to meta.json.corrupt, warns, and loadFromDisk returns null', async () => {
