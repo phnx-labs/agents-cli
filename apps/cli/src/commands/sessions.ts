@@ -3762,9 +3762,18 @@ function renderArchivedSession(
   if (mode === 'json') {
     // Minimal machine shape for a file-gone session: the durable user content
     // plus the cached preview digest, tagged archived. Deliberately NOT the full
-    // { session, events } contract — there are no events to parse.
+    // { session, events } contract — there are no events to parse. Redact the
+    // first-message-excerpt meta fields (topic/label/plan) too, matching the live
+    // single-session --json (render.ts redactJson), so `--json` masks them unless
+    // --no-redact is passed.
     console.log(JSON.stringify({
-      session: { ...session, archived: true },
+      session: {
+        ...session,
+        topic: session.topic != null ? redact(session.topic) : session.topic,
+        label: session.label != null ? redact(session.label) : session.label,
+        plan: session.plan != null ? redact(session.plan) : session.plan,
+        archived: true,
+      },
       archived: true,
       userContent: content,
       preview: digest ?? null,
