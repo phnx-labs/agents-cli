@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 102,
-  "commands": 577,
+  "commands": 578,
   "root": {
     "name": "agents",
     "path": "",
@@ -25319,6 +25319,46 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "list",
+          "path": "share list",
+          "aliases": [],
+          "description": "List the pages you've published to your share namespace (human table; --json for scripts).",
+          "args": [],
+          "options": [
+            {
+              "flags": "--github-user <user>",
+              "description": "GitHub username whose namespace to list (default: resolved from gh/git config)",
+              "long": "--github-user",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt)",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Everything you've published, newest first\n      agents share list\n\n      # Machine-readable — e.g. pull every still-public URL with jq\n      agents share list --json | jq -r '.objects[].url'\n\n      # List another namespace\n      agents share list --github-user octocat",
+          "notes": "Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG\n  covers are omitted (it mirrors the public gallery). It reads the endpoint's JSON\n  listing route, which ships with the current Worker template. If your deployed\n  Worker predates this feature the command says so and points you at 'agents share\n  update' (RUSH-2449) rather than returning a wrong or empty result — see 'agents\n  share status' for whether an update is due.",
           "subcommands": []
         },
         {
