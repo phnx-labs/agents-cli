@@ -1706,7 +1706,7 @@ schema (`--json` passes through each agent's native stream format).
   (`lib/versions.ts:1054-1056`).
 - **Chain / fallback entry** — one `{ agent, version?, envOverride? }` in a
   `--fallback` sequence tried in order on rate-limit failure
-  (`lib/exec.ts:1804-1818`).
+  (`lib/exec.ts:2272-2281`).
 - **Actor** — the human or agent identity credited for a run, resolved by
   `resolveActor()` and exported via `actorEnv()` (`lib/actor.ts`).
 - **Launch id** — `AGENT_LAUNCH_ID`, the correlation key that joins a spawned
@@ -1963,7 +1963,7 @@ schema (`--json` passes through each agent's native stream format).
 - **EXEC-25 (MUST).** `runWithFallback` MUST run the primary first with the
   original prompt, and MUST cascade to the next chain entry ONLY when
   `detectRateLimit` matches the failed attempt's stderr OR its captured
-  stdout tail (`lib/exec.ts:1977-1986`); every other failure (auth failure,
+  stdout tail (`lib/exec.ts:1977-1986`), cascading only when `detectRateLimit` matches (`lib/exec.ts:2441`); every other failure (auth failure,
   compile error, missing flag) MUST bubble up from whichever entry produced
   it, untouched — `runWithFallback` never inspects auth-failure detectors at
   all (`isAuthFailureFromLog` is not called from the cascade path).
@@ -1985,7 +1985,7 @@ schema (`--json` passes through each agent's native stream format).
 - **EXEC-29 (MUST).** The caller-supplied `dispatchSink` out-param MUST be
   updated to the agent+version actually attempted on every chain step, so
   the audit record (EXEC-21) reflects the fallback that really ran, not
-  always the primary (`lib/exec.ts:1804-1818,2053`).
+  always the primary (`lib/exec.ts:2379,2389`).
 
 #### 3.5 `--host` SSH dispatch
 
@@ -2161,7 +2161,7 @@ and host/lease dispatch (`--host`/`--device`/`--remote-cwd`/`--no-follow`/
   *"mirrors BUDGET_KILL_EXIT_CODE."*).
 - **EXEC-IF-2 (MUST).** Fallback/retry/handoff banners MUST print to stderr,
   never stdout, so a piped `agents run … | jq` stays parseable
-  (`lib/exec.ts:2438-2443`).
+  (`lib/exec.ts:2370,2423,2449`).
 - **EXEC-IF-3 (SHOULD).** `--json` streams the underlying agent's own event
   format per `AGENT_COMMANDS[agent].jsonFlags` (`lib/exec.ts:663-921`) — the
   run layer does not normalize a single cross-agent JSON schema (contrast
