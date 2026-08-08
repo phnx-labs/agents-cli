@@ -29,7 +29,7 @@ import { redactSecrets } from './redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
 import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from './device-config.js';
 import { reapTerminalRoutineProcesses } from './routine-process-cleanup.js';
-import { recordSubsystemOk, recordSubsystemError, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC } from './daemon-health.js';
+import { recordSubsystemOk, recordSubsystemError, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
 
 const PID_FILE = 'daemon.pid';
 const LIFETIME_FILE = 'daemon.lifetime';
@@ -50,6 +50,36 @@ const MONITOR_TICK_MS = 60_000;
  */
 const CATCHUP_TICK_MS = 5 * 60_000;
 const WEDGE_THRESHOLD_TICKS = 3;
+
+/**
+ * Crash-loop prevention (RUSH-2418). Three layers, because none of them alone
+ * bounds a daemon that dies during startup:
+ *
+ * 1. **The OS supervisor paces the respawn.** `KeepAlive` with no
+ *    `ThrottleInterval` lets launchd relaunch on its ~10s default, so a daemon
+ *    that dies while booting is restarted six times a minute forever — the exact
+ *    failure the menu-bar helper hit (`menubar/install-menubar.ts`: 38 orphaned
+ *    `agents doctor` children, load average 490). systemd's `Restart=always`
+ *    with no `StartLimit*` is the same uncapped loop.
+ * 2. **`StartLimitBurst` gives systemd a real cap** — after this many starts
+ *    inside the interval the unit is put in `failed` and stops respawning, so a
+ *    genuinely broken install stops burning the box and `systemctl --user status`
+ *    names it. launchd has no burst equivalent; the throttle is its whole answer.
+ * 3. **The application-level circuit breaker** below stops *auto*-starts from
+ *    re-entering the loop from the other direction — a foreground command that
+ *    calls `ensureDaemonStarted()` on every invocation.
+ */
+const DAEMON_THROTTLE_SECONDS = 30;
+const DAEMON_START_LIMIT_INTERVAL_SECONDS = 300;
+const DAEMON_START_LIMIT_BURST = 5;
+
+/**
+ * How many consecutive failed daemon starts disable the *implicit* auto-start
+ * (`ensureDaemonStarted`). Matches `DAEMON_START_LIMIT_BURST` so the two layers
+ * give up together rather than one silently masking the other. `agents daemon
+ * start` is the deliberate override and is never gated by this.
+ */
+export const DAEMON_AUTOSTART_FAILURE_LIMIT = 5;
 
 /**
  * RUSH-1817: decide whether the daemon should (re)take over hosting the secrets
@@ -552,6 +582,11 @@ export async function runDaemon(): Promise<void> {
   const lifetimePath = path.join(getDaemonDirRoot(), LIFETIME_FILE);
   const lifetimeToken = `${process.pid}:${Date.now()}`;
   fs.writeFileSync(lifetimePath, lifetimeToken, 'utf-8');
+  // RUSH-2418: only a daemon that reached this point — claimed, and about to
+  // serve — clears the auto-start failure streak. Recording success at launch
+  // time instead would reset the breaker for a process that dies moments later,
+  // which is precisely the crash loop it exists to stop.
+  recordSubsystemOk(SUBSYSTEM_DAEMON_START);
   log('INFO', `Daemon started (PID: ${process.pid})`);
 
   anchorDaemonCwd();
@@ -1077,6 +1112,8 @@ ${[launch.command, ...launch.args].map((arg) => `    <string>${xmlEscape(arg)}</
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>${DAEMON_THROTTLE_SECONDS}</integer>
   <key>StandardOutPath</key>
   <string>${logPath}</string>
   <key>StandardErrorPath</key>
@@ -1112,12 +1149,14 @@ export function generateSystemdUnit(
   return `[Unit]
 Description=Agents Daemon - Scheduled Job Runner
 After=network.target
+StartLimitIntervalSec=${DAEMON_START_LIMIT_INTERVAL_SECONDS}
+StartLimitBurst=${DAEMON_START_LIMIT_BURST}
 
 [Service]
 Type=simple
 ExecStart=${execStart}
 Restart=always
-RestartSec=10
+RestartSec=${DAEMON_THROTTLE_SECONDS}
 Environment=PATH=${daemonPathValue(agentsBin, ['/usr/local/bin', '/usr/bin', '/bin'])}
 
 [Install]
@@ -1183,10 +1222,32 @@ export function startDaemon(agentsBin?: string): { pid: number | null; method: s
   };
 
   try {
-    return startDaemonLocked(agentsBin ?? getAgentsBinPath(), releaseOnce);
+    const result = startDaemonLocked(agentsBin ?? getAgentsBinPath(), releaseOnce);
+    // RUSH-2418: record the start OUTCOME, not the attempt. A launch that
+    // produced no pid is the crash-loop signal `ensureDaemonStarted` reads —
+    // the daemon itself records the success side once it has claimed, so a
+    // process that started and then died on boot never clears the streak.
+    if (result.pid === null) {
+      recordSubsystemError(SUBSYSTEM_DAEMON_START, `start via ${result.method} produced no daemon pid`);
+    }
+    return result;
+  } catch (err: any) {
+    recordSubsystemError(SUBSYSTEM_DAEMON_START, `start threw: ${err?.message ?? String(err)}`);
+    throw err;
   } finally {
     releaseOnce();
   }
+}
+
+/**
+ * Is the auto-start circuit breaker open (RUSH-2418)? True once
+ * {@link DAEMON_AUTOSTART_FAILURE_LIMIT} consecutive starts have failed to
+ * produce a live daemon. Pure read of the persisted health record, so `agents
+ * daemon status`/`doctor` and the gate agree on one number.
+ */
+export function isDaemonAutostartCircuitOpen(): boolean {
+  const health = readSubsystemHealth(SUBSYSTEM_DAEMON_START);
+  return (health?.consecutiveFailures ?? 0) >= DAEMON_AUTOSTART_FAILURE_LIMIT;
 }
 
 /**
@@ -1205,6 +1266,26 @@ export function ensureDaemonStarted(): { pid: number | null; method: string } | 
   // explicitly turned off. `agents daemon start` is the deliberate override
   // and calls startDaemon() directly instead of going through this helper.
   if (!isDaemonEnabled()) return null;
+  // A live daemon is the answer whatever the failure history says — the breaker
+  // gates LAUNCHING one, never reporting one that is already up. Checked first
+  // so a stale failure streak can't make a healthy daemon read as absent to
+  // callers that branch on this return (e.g. secrets/agent.ts).
+  if (isDaemonRunning()) return startDaemon();
+  // RUSH-2418: the auto-start circuit breaker. A daemon that dies during
+  // startup would otherwise be relaunched by EVERY foreground command that
+  // wants one (secrets unlock, browser start, watchdog, ...) — an
+  // application-level crash loop the OS supervisor's throttle cannot see,
+  // because each attempt is a fresh service start rather than a respawn. After
+  // DAEMON_AUTOSTART_FAILURE_LIMIT consecutive failures, refuse and say why.
+  // Deliberately NOT applied in startDaemon(): `agents daemon start` is the
+  // operator's override and must always be able to retry.
+  if (isDaemonAutostartCircuitOpen()) {
+    process.stderr.write(
+      `[agents] daemon auto-start disabled after ${DAEMON_AUTOSTART_FAILURE_LIMIT} consecutive failed starts. ` +
+      `Run 'agents daemon doctor' to diagnose, or 'agents daemon start' to retry anyway.\n`,
+    );
+    return null;
+  }
   try {
     return startDaemon();
   } catch {

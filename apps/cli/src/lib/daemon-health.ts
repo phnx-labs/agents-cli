@@ -28,6 +28,15 @@ const HEALTH_FILE = 'health.json';
 /** Stable subsystem identifiers shared by the daemon (writer) and `agents daemon` (reader). */
 export const SUBSYSTEM_SECRETS_BROKER = 'secrets-broker';
 export const SUBSYSTEM_BROWSER_IPC = 'browser-ipc';
+/**
+ * Daemon startup itself (RUSH-2418). Unlike the two above, this record is
+ * written from BOTH sides: the launching CLI records a start that produced no
+ * live daemon, and the daemon records its own successful claim. Its
+ * `consecutiveFailures` is what `ensureDaemonStarted` reads to open the
+ * auto-start circuit breaker, so a daemon dying on boot stops being relaunched
+ * by every foreground command that happens to want one.
+ */
+export const SUBSYSTEM_DAEMON_START = 'daemon-start';
 
 /** One subsystem's health as of the last time it reported in. */
 export interface SubsystemHealth {

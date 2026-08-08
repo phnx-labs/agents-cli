@@ -235,8 +235,31 @@ if (process.argv[2] === '__shim') {
 }
 
 if (process.argv[2] === '__daemon-run') {
-  const { runDaemon } = await import('./lib/daemon.js');
-  await runDaemon();
+  const { runDaemon, log: daemonLog } = await import('./lib/daemon.js');
+
+  // RUSH-2418: the daemon is the one always-on process here, and it ran with no
+  // top-level handler of any kind — an uncaught throw or a rejected promise from
+  // any of its background ticks died on Node's default handler, printing a raw
+  // stack to whatever the service manager had wired to stdout and never reaching
+  // the daemon's own structured log. Route both into log() so the failure is in
+  // logs.jsonl where `agents daemon logs` reads it, then exit non-zero and
+  // DELIBERATELY let the supervisor restart us — now paced by the plist's
+  // ThrottleInterval / the unit's StartLimitBurst. Swallowing here would be the
+  // worse failure: a daemon left alive with a dead subsystem.
+  const crash = (kind: string) => (err: unknown) => {
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    try { daemonLog('ERROR', `${kind}: ${detail}`); } catch { /* log path unwritable — stderr below still carries it */ }
+    process.stderr.write(`[agents] daemon ${kind}: ${detail}\n`);
+    process.exit(1);
+  };
+  process.on('uncaughtException', crash('uncaughtException'));
+  process.on('unhandledRejection', crash('unhandledRejection'));
+
+  try {
+    await runDaemon();
+  } catch (err) {
+    crash('startup failure')(err);
+  }
   process.exit(process.exitCode ?? 0);
 }
 
