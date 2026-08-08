@@ -19,11 +19,11 @@
  * so `querySessions`'s existence check (findMissingFilePaths, db.ts:2562) does
  * its REAL `readdirSync` over the ~735 distinct transcript directories those
  * rows point at on this disk. The snapshot (not the live db) is used for two
- * reasons: (1) `querySessions({})` runs a purge WRITE transaction
- * (db.ts:2635 `db.transaction(() => purgeToolCalls(...))`) for every row whose
- * `file_path` has vanished, and 443 of 6,513 local transcripts on this box are
- * already gone, so running it against the live index would delete real
- * tool_call evidence; (2) it avoids WAL contention with the live daemon writer.
+ * reasons: (1) `querySessions({})` runs a WRITE transaction for every file-gone
+ * row — it stamps `archived_at` on a content-bearing row (RUSH-2436; the
+ * destructive `purgeToolCalls` on that branch was removed) — and 443 of 6,513
+ * local transcripts on this box are already gone, so it should not write against
+ * the live index; (2) it avoids WAL contention with the live daemon writer.
  * That 443/6,513-stale state is real and is exactly why the WITH-existence-check
  * listing is the dominant cost measured below.
  *

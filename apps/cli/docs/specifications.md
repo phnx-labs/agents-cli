@@ -490,8 +490,10 @@ SSH access (§7); rendering sessions that no harness produced.
   a metadata-only note. A file-gone row with **no** cached content is a phantom (a
   stale/moved `file_path`) and MUST stay suppressed. Merely listing a file-gone
   session MUST NOT delete its redacted tool-call evidence — the destructive
-  purge-on-read from the missing-file branch is removed; only directory-scoped
-  cleanup (`purgeMissingToolCallsInDirectory`) prunes evidence
+  purge-on-read from the `querySessions` missing-file branch is removed. (The
+  tool-index backfill still purges a session whose source file is gone mid-backfill,
+  `tool-index.ts` `ensureToolIndex`; sparing an archived session there is out of the
+  Layer-1 read-path scope, tracked as SES-GAP-9.)
   (`lib/session/db.ts` `querySessions`/`topSessionsByCost`/`readSessionContent`/`readArchivedSessionPreview`;
   `commands/sessions.ts` `renderArchivedSession`; `commands/sessions-picker.ts` `buildPreview`/`loadSessionPreviewDigest`).
   Because a moved-file phantom that a scan forgot to rewrite still carries content,
@@ -909,6 +911,10 @@ normative — a change that widens/narrows a cell is a spec change.
   row), but a synthetic harness that keys the id off the filename would surface a
   renamed session's old id as an archived duplicate. Closing it needs a
   supersession signal from the scanner (out of the Layer-1 read-path scope).
+  Relatedly, the tool-index **backfill** path still purges an archived session's
+  evidence when its source file is gone mid-backfill (`tool-index.ts`
+  `ensureToolIndex` on a `statSync` throw, reached via `agents sessions backfill`);
+  SES-40 removed the purge only from the `querySessions` read path.
 ---
 
 ### 8. Given/When/Then scenarios
