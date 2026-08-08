@@ -292,7 +292,9 @@ case "$PWD" in
   */.agents/worktrees/*) _repo_agents="\${PWD%%/.agents/worktrees/*}/.agents" ;;
   *)
     _d="$PWD"
-    while [ -n "$_d" ] && [ "$_d" != "/" ]; do
+    # Stop before $HOME so a dotfiles repo at $HOME is not treated as the project
+    # root (mirrors repoRootForCwd's home exclusion in project-key.ts).
+    while [ -n "$_d" ] && [ "$_d" != "/" ] && [ "$_d" != "$HOME" ]; do
       if [ -e "$_d/.git" ]; then _repo_agents="$_d/.agents"; break; fi
       _d=$(dirname "$_d")
     done
