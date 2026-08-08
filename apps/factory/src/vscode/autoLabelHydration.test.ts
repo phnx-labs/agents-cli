@@ -38,7 +38,7 @@ describe('RUSH-2411 auto-label-after-remote-hydration wiring', () => {
     // The remote-idless branch of the poller resolves the id (and host siblings)
     // from the shared active map and labels — one tick, no per-tab SSH stream.
     expect(extensionSource).toMatch(
-      /needsSessionIdHydrate\(cur\.sessionId\)[\s\S]*?hydrateRemoteTabTick\(cur\.id, cur\.host, remoteAutoLabelHooks\(\)\)/,
+      /needsSessionIdHydrate\(cur\.sessionId\)[\s\S]*?hydrateRemoteTabTick\(cur\.id, cur\.host, remoteAutoLabelHooks\(labelsEnabled\)\)/,
     );
   });
 
@@ -77,5 +77,19 @@ describe('RUSH-2430 clean-but-stale session id reconciliation', () => {
       'if (entry.sessionId && !needsSessionIdHydrate(entry.sessionId))',
     );
     expect(beforeAuthoritativeLookup).not.toContain('return;');
+  });
+
+  test('picked-host identity hydration runs when automatic tab labels are disabled', () => {
+    const start = extensionSource.indexOf('async function armAutoLabelPoller(');
+    const remoteIdless = extensionSource.indexOf('const remoteIdless =', start);
+    const labelsEnabled = extensionSource.indexOf('const labelsEnabled = display.autoLabelInTabTitles;', start);
+    const disabledGuard = extensionSource.indexOf('if (!labelsEnabled && !remoteIdless) return;', start);
+    const hydrate = extensionSource.indexOf('hydrateRemoteTabTick(', start);
+    const status = extensionSource.indexOf('updateStatusBarForTerminal(terminal, context.extensionPath);', hydrate);
+    expect(remoteIdless).toBeGreaterThan(start);
+    expect(labelsEnabled).toBeGreaterThan(remoteIdless);
+    expect(disabledGuard).toBeGreaterThan(labelsEnabled);
+    expect(hydrate).toBeGreaterThan(disabledGuard);
+    expect(status).toBeGreaterThan(hydrate);
   });
 });

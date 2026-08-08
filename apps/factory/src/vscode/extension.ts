@@ -4078,7 +4078,7 @@ function startAutoLabelPollerForTerminal(
  * the id transition arms labeling for the polled tab and every host sibling
  * exactly as the local SessionStart watcher does.
  */
-function remoteAutoLabelHooks(): RemoteAutoLabelHooks {
+function remoteAutoLabelHooks(labelsEnabled = true): RemoteAutoLabelHooks {
   return {
     fetchMap: (host) => fetchTerminalIdSessionMap(host),
     needsHydrate: needsSessionIdHydrate,
@@ -4095,6 +4095,7 @@ function remoteAutoLabelHooks(): RemoteAutoLabelHooks {
     },
     currentSessionId: (tabId) => terminals.getById(tabId)?.sessionId,
     fetchLabel: async (tabId) => {
+      if (!labelsEnabled) return undefined;
       const t = terminals.getById(tabId);
       if (!t) return undefined;
       return fetchAndSetAutoLabel(t.terminal, t);
@@ -4118,9 +4119,6 @@ async function armAutoLabelPoller(
   context: vscode.ExtensionContext,
   opts: AutoLabelPollerOpts = {},
 ): Promise<void> {
-  const display = getDisplayPrefs(context);
-  if (!display.autoLabelInTabTitles) return;
-
   const entry = terminals.getByTerminal(terminal);
   if (!entry || !entry.agentType) return;
   // A tab needs an id before it can be labeled. Local tabs already have one
@@ -4130,12 +4128,17 @@ async function armAutoLabelPoller(
   // as the local watcher resolves it from the state file before arming.
   const remoteIdless = !!entry.host && needsSessionIdHydrate(entry.sessionId);
   if (!entry.sessionId && !remoteIdless) return;
+  const display = getDisplayPrefs(context);
+  const labelsEnabled = display.autoLabelInTabTitles;
+  // Session identity is required by the status bar, table, fork, and resume
+  // surfaces. It must hydrate even when optional automatic tab labels are off.
+  if (!labelsEnabled && !remoteIdless) return;
 
   // Heal first: if the sticky label is the derived placeholder, drop it so a
   // real name/topic can resolve below.
   await maybeHealDerivedLabel(terminal, entry, context);
 
-  if (entry.label || entry.autoLabel) return;
+  if ((entry.label || entry.autoLabel) && !remoteIdless) return;
 
   const intervalMs = opts.fast ? REMOTE_HYDRATE_POLL_MS : undefined;
   terminals.startAutoLabelPoller(terminal, async () => {
@@ -4148,9 +4151,20 @@ async function armAutoLabelPoller(
       // active map, then label — bare CX -> canonical UUID -> topic title in one
       // tick, no refocus. The fetch is coalesced per host, so N tabs never open N
       // SSH streams.
-      const res = await hydrateRemoteTabTick(cur.id, cur.host, remoteAutoLabelHooks());
+      const res = await hydrateRemoteTabTick(cur.id, cur.host, remoteAutoLabelHooks(labelsEnabled));
       autoLabel = res.label;
+      if (res.hydratedIds.includes(cur.id) && vscode.window.activeTerminal === terminal) {
+        updateStatusBarForTerminal(terminal, context.extensionPath);
+      }
+      if (!labelsEnabled && res.hydratedIds.includes(cur.id)) {
+        terminals.stopAutoLabelPoller(terminal);
+        return;
+      }
     } else {
+      if (!labelsEnabled) {
+        terminals.stopAutoLabelPoller(terminal);
+        return;
+      }
       autoLabel = await fetchAndSetAutoLabel(terminal, cur);
     }
 

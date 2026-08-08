@@ -6,7 +6,7 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
-- **Factory no longer maps a new Codex tab to an older same-folder session (RUSH-2430).** Newly-created tabs wait for their own rollout across managed Codex version homes, restored tabs retain recovery, and local or picked-host tabs replace a stored UUID when that device's live `AGENT_TERMINAL_ID` map proves it stale.
+- **Factory no longer maps a new Codex tab to an older same-folder session (RUSH-2430).** Newly-created tabs wait for their own rollout across managed Codex version homes, restored tabs retain recovery, and local or picked-host tabs replace a stored UUID when that device's live `AGENT_TERMINAL_ID` map proves it stale. Picked-host identity hydration now runs even when automatic tab labels are disabled.
 
 - **Picked-host Codex tabs auto-label after remote ID hydration (RUSH-2411).** A
   `New Codex (Pick Host)` tab launches idless — only Claude's session id is minted
