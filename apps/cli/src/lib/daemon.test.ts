@@ -959,14 +959,6 @@ describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () =>
   );
 });
 
-/**
- * stopDaemon postcondition assertion (RUSH-2355 / SING-12). Real path, no
- * mocking: a genuine `__daemon-run` (or a real SIGTERM-ignoring process) is
- * stopped through the actual `agents daemon stop` command in a subprocess under
- * its OWN HOME, so every path constant (pid file, instance registry, browser
- * socket, broker socket, runs dir) resolves inside the temp state dir and the
- * test can never touch a live daemon on the dev machine.
- */
 // RUSH-2423: shutdown is reachable from SIGTERM, SIGINT, and the state-dir
 // self-check, and two can arrive together (a service manager SIGTERMing a daemon
 // whose state dir was just removed). handleShutdown was only INCIDENTALLY safe
@@ -1030,6 +1022,14 @@ describe('handleShutdown is structurally single-shot (RUSH-2423)', () => {
 // POSIX signals, or AF_UNIX sockets, none of which exist on Windows), so closing
 // this needs Windows-shaped equivalents plus a Windows CI runner, not an un-skip.
 // Tracked in RUSH-2423; deliberately not attempted here.
+/**
+ * stopDaemon postcondition assertion (RUSH-2355 / SING-12). Real path, no
+ * mocking: a genuine `__daemon-run` (or a real SIGTERM-ignoring process) is
+ * stopped through the actual `agents daemon stop` command in a subprocess under
+ * its OWN HOME, so every path constant (pid file, instance registry, browser
+ * socket, broker socket, runs dir) resolves inside the temp state dir and the
+ * test can never touch a live daemon on the dev machine.
+ */
 describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
   const waitFor = async (cond: () => boolean, timeoutMs: number) => {
