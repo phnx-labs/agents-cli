@@ -51,13 +51,14 @@ describe('projectKeyFromCwd', () => {
 
 describe('repoAgentsDirForCwd (pure worktree fold — no filesystem)', () => {
   it('folds a worktree cwd to the PRIMARY repo .agents that holds the worktrees', () => {
+    // path.join so the expected separator matches the platform (backslash on Windows).
     expect(repoAgentsDirForCwd('/Users/m/src/agents-cli/.agents/worktrees/fix-thing'))
-      .toBe('/Users/m/src/agents-cli/.agents');
+      .toBe(path.join('/Users/m/src/agents-cli', '.agents'));
   });
 
   it('folds a subdirectory inside a worktree to the same primary .agents', () => {
     expect(repoAgentsDirForCwd('/Users/m/src/agents-cli/.agents/worktrees/fix-thing/apps/cli/dist'))
-      .toBe('/Users/m/src/agents-cli/.agents');
+      .toBe(path.join('/Users/m/src/agents-cli', '.agents'));
   });
 
   it('returns undefined for nothing usable', () => {

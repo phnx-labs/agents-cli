@@ -58,7 +58,9 @@ describe('codexEditWritableRoots (repo .agents writable root)', () => {
 
   it('flows that root into the edit policy workspace_roots', () => {
     const args = codexPolicyArgs('edit', codexEditWritableRoots(worktreeCwd));
-    expect(args.join(' ')).toContain(`"${path.join(repo, '.agents')}" = true`);
+    // The emitted TOML quotes each root with JSON.stringify, so match that form —
+    // on Windows a backslash path is escaped (\\), which a raw path.join would miss.
+    expect(args.join(' ')).toContain(`${JSON.stringify(path.join(repo, '.agents'))} = true`);
   });
 
   it('does not add a repo .agents that does not exist', () => {
