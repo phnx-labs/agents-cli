@@ -353,7 +353,13 @@ export async function inspectRepo(repo: RepoTarget, options: InspectOptions): Pr
   if (drill) {
     const items = collectRepoKind(repo, drill.kind);
     if (drill.query === true || drill.query === undefined) {
-      await renderItemList(repo.label, jsonHead, drill.kind, items, options);
+      // A repo's hooks are wired by its OWN agents.yaml, not by whatever this
+      // machine has installed centrally — the same manifest the repo overview
+      // reads at collectRepoKind.
+      await renderItemList(repo.label, jsonHead, drill.kind, items, options,
+        drill.kind === 'hooks'
+          ? hookManifestByScript(hookManifestFromFile(path.join(repo.root, 'agents.yaml')))
+          : undefined);
     } else {
       renderItemDetail(repo.label, jsonHead, drill.kind, String(drill.query), items, options);
     }
@@ -802,7 +808,7 @@ async function renderList(agent: AgentId, version: string, versionHome: string, 
   await renderItemList(`${agent}@${version}`, { agent, version }, kind, items, options);
 }
 
-async function renderItemList(header: string, jsonHead: Record<string, unknown>, kind: DrillableKind, items: ResourceItem[], options: InspectOptions): Promise<void> {
+async function renderItemList(header: string, jsonHead: Record<string, unknown>, kind: DrillableKind, items: ResourceItem[], options: InspectOptions, hookManifest?: Map<string, ManifestHook>): Promise<void> {
   if (options.json) {
     console.log(JSON.stringify({
       ...jsonHead,
@@ -830,6 +836,10 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
   // Sync targets are deliberately off: for a repo the resources ARE the source,
   // so the column would read "no installed versions" for every row.
   const sources = new Set(items.map(i => i.source));
+  // A hook has no prose description — it is a script. Leaving the column blank
+  // is honest but useless, so it carries what the Hooks view is actually for:
+  // the events that fire it. Same string the overview prints.
+  const hookEvents = kind !== 'hooks' ? null : (hookManifest ?? hookManifestByScript(loadCentralHookManifest()));
   await showResourceList({
     resourcePlural: kind,
     resourceSingular: kind.replace(/s$/, ''),
@@ -853,7 +863,11 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
     emptyMessage: `  (none installed)`,
     rows: items.map(item => ({
       name: item.name,
-      description: summaryLine(item.description),
+      description: (() => {
+        const hook = hookEvents?.get(item.name);
+        if (hook) return summarizeHook(hook);
+        return summaryLine(item.description);
+      })(),
       extra: itemSizeLabel(item.path),
       extra2: sources.size > 1 ? item.source : undefined,
       targets: [],

@@ -227,6 +227,30 @@ describe('agents inspect', () => {
     expect(r.stdout).not.toContain('navigate');
   });
 
+  it('shows a hook what fires it, never a line of its own shell', () => {
+    // The AGENT path specifically. The repo path already hardcodes an empty
+    // description ("hooks are shell scripts with no human description"), so a
+    // repo fixture cannot reproduce this — the two paths disagreed, which is
+    // the whole bug: every one of the 53 hooks under an agent home rendered
+    // "!/usr/bin/env bash" as its description.
+    const hooksDir = path.join(fixtureHome, '.agents', '.history', 'versions', 'claude', '9.9.9', 'home', '.claude', 'hooks');
+    writeFile(path.join(hooksDir, 'guard.sh'), '#!/usr/bin/env bash\nset -euo pipefail\necho ok\n');
+    writeFile(path.join(hooksDir, 'guard_test.sh'), '#!/usr/bin/env bash\nset -euo pipefail\n');
+
+    const r = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', 'claude', '--hooks'], {
+      env: { ...process.env, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1', COLUMNS: '140' }, encoding: 'utf-8',
+    });
+    expect(r.status, r.stderr).toBe(0);
+    // "First prose line" is a Markdown heuristic; on a script it returned the
+    // shebang with its leading '#' eaten. Skipping '#!' only promoted the next
+    // line, so the fallback is restricted to Markdown instead.
+    expect(r.stdout).not.toContain('!/usr/bin/env bash');
+    expect(r.stdout).not.toContain('set -euo pipefail');
+    // Both names present and distinguishable from each other.
+    expect(r.stdout).toContain('guard');
+    expect(r.stdout).toContain('guard_test');
+  });
+
   it('renders every item of a long detail row, and survives a malformed manifest', () => {
     const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-rows-' + crypto.randomBytes(4).toString('hex') + '-'));
     const names = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet'];
