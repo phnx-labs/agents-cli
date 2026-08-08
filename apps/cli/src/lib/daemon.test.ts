@@ -758,20 +758,28 @@ describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () =>
         // Delete the whole HOME while the daemon is still running — the
         // real-world shape of a test's cleanup racing (and losing to) its own
         // kill signal, or a killed test runner whose `finally` never ran.
-        // The live daemon can finish an already-started heartbeat while the
-        // recursive removal walks the tree. Let Node retry transient ENOTEMPTY
-        // races; the assertion below still requires the state tree to remain
-        // absent and the daemon to terminate within the fixed deadline.
+        // Delete the tree with the daemon SUSPENDED, then resume it.
         //
-        // The retry budget MUST exceed the guard's poll interval, or the race is
-        // unwinnable rather than transient: the daemon keeps recreating files
-        // until it notices the deletion, which takes up to one full poll. The
-        // original 5 x 50ms = 250ms was SHORTER than the 300ms poll above, so on
-        // a loaded runner rmSync exhausted its retries while the daemon was still
-        // writing and threw `ENOTEMPTY: rmdir '<home>/.agents/.cache'` — observed
-        // failing 2/2 on CI while passing locally in 583ms. 60 x 100ms = 6s is
-        // many poll cycles of margin and still far inside the 30s test timeout.
-        fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 60, retryDelay: 100 });
+        // A plain rmSync here is not a race the test can win by retrying: the
+        // daemon's heartbeat recreates the state tree while the recursive removal
+        // walks it, and the guard only fires once the daemon OBSERVES the dir
+        // missing — which it never does while its own writes keep recreating it.
+        // So the removal and the guard deadlock each other under load. Retrying
+        // just moves the error up a level; measured on CI, 5 x 50ms failed at
+        // `<home>/.agents/.cache` and 60 x 100ms (6s) failed at `<home>/.agents`,
+        // while both passed locally in <600ms.
+        //
+        // SIGSTOP makes it deterministic: the daemon cannot write while stopped,
+        // so the removal completes exactly once, and SIGCONT then resumes it into
+        // a world where its state dir is genuinely gone. That is precisely the
+        // condition under test — the guard must notice and exit — and it is now
+        // reached without depending on which side wins a filesystem race.
+        process.kill(pid, 'SIGSTOP');
+        try {
+          fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+        } finally {
+          process.kill(pid, 'SIGCONT');
+        }
 
         // The guard polls every 300ms above; give it several cycles of margin.
         expect(await waitFor(() => !alive(pid!), 10_000)).toBe(true);
