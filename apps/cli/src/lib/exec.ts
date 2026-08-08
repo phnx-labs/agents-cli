@@ -419,42 +419,15 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     const version = options.version
       ? resolvedVersion
       : (resolvedVersion && isVersionInstalled('claude', resolvedVersion) ? resolvedVersion : null);
-    if (version) {
-      const versionHome = getVersionHomePath('claude', version);
+    // The per-account `claude setup-token` only resolves when there is a version
+    // home to key it to; version===null (claude unresolved / not installed) yields
+    // null, exactly as the routines path treats it (`runner.ts:1017-1021`). The
+    // token decision below runs even then, so an ambient inherited value is stripped
+    // on the routines/provisioned path regardless of whether a version resolved.
+    const versionHome = version ? getVersionHomePath('claude', version) : null;
+    const setupToken = versionHome ? resolveClaudeSetupToken(versionHome) : null;
+    if (versionHome) {
       result.CLAUDE_CONFIG_DIR = path.join(versionHome, '.claude');
-      const setupToken = resolveClaudeSetupToken(versionHome);
-      if (setupToken) {
-        // The `auth` bundle's setup-token exists so a run with NO human present
-        // authenticates without the Touch-ID-gated login item — usage probes,
-        // routines, dispatched runs (claude-account-token.ts). An interactive run
-        // has a human at the TTY, and their own per-version login is the credential
-        // they established and expect; overriding it made `/status` report
-        // `Auth token: CLAUDE_CODE_OAUTH_TOKEN` on a personal machine and took every
-        // hand-driven session off that login. macOS cannot cheaply confirm a home's
-        // login first (probing the Keychain raises an authorization sheet per
-        // installed version on the `agents run` hot path — agents.ts
-        // `isClaudeCredentialFileBlank`), so interactive simply defers to Claude
-        // Code, which prompts a present human to log in if the login is missing.
-        if (resolveInteractive(options)) {
-          // Drop an INHERITED copy of the same token too: an interactive launch from
-          // inside a headless agent's shell inherits that agent's injected value via
-          // sanitizeProcessEnv(process.env) and would keep authenticating as it.
-          // Matched by VALUE, so a token the user exported deliberately is a
-          // different string and is left alone. This is NARROWER than the routines
-          // path, which overwrites-or-deletes unconditionally and never inspects the
-          // inherited value (`runner.ts:1020-1021`) — the gap between the two is
-          // what RUSH-2360 tracks, including a DIFFERENT account's inherited token,
-          // which this equality check lets through.
-          if (result.CLAUDE_CODE_OAUTH_TOKEN === setupToken) {
-            delete result.CLAUDE_CODE_OAUTH_TOKEN;
-          }
-        } else {
-          // A token keyed to this version home's own account replaces any ambient
-          // shared value inherited from the launcher. options.env still wins below
-          // for explicit caller overrides.
-          result.CLAUDE_CODE_OAUTH_TOKEN = setupToken;
-        }
-      }
       // A managed pin lives in a per-version dir; Claude Code's own background
       // auto-updater would rewrite that pinned binary in place (and has left it
       // half-swapped and broken). Disable it so a pin stays a pin. Honor an
@@ -462,6 +435,48 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
       // options.env (spread over result below).
       if (result.DISABLE_AUTOUPDATER === undefined) {
         result.DISABLE_AUTOUPDATER = '1';
+      }
+    }
+    // The `auth` bundle's setup-token exists so a run with NO human present
+    // authenticates without the Touch-ID-gated login item — usage probes,
+    // routines, dispatched runs (claude-account-token.ts). An interactive run
+    // has a human at the TTY, and their own per-version login is the credential
+    // they established and expect; overriding it made `/status` report
+    // `Auth token: CLAUDE_CODE_OAUTH_TOKEN` on a personal machine and took every
+    // hand-driven session off that login. macOS cannot cheaply confirm a home's
+    // login first (probing the Keychain raises an authorization sheet per
+    // installed version on the `agents run` hot path — agents.ts
+    // `isClaudeCredentialFileBlank`), so interactive simply defers to Claude
+    // Code, which prompts a present human to log in if the login is missing.
+    if (resolveInteractive(options)) {
+      // Drop an INHERITED copy of OUR OWN setup-token: an interactive launch from
+      // inside a headless agent's shell inherits that agent's injected value via
+      // sanitizeProcessEnv(process.env) and would keep authenticating as it.
+      // Matched by VALUE, so a token the user exported deliberately is a different
+      // string and is left alone (#2383). This is NARROWER than the non-interactive
+      // path below, which overwrites-or-deletes unconditionally and never inspects
+      // the inherited value — a DIFFERENT account's inherited setup-token passing
+      // through this equality check is the adjacent hole RUSH-2360 leaves as
+      // follow-up (it does not silently run on a *shared, rotating* token, which is
+      // what caused the RUSH-1822 logout storm).
+      if (setupToken && result.CLAUDE_CODE_OAUTH_TOKEN === setupToken) {
+        delete result.CLAUDE_CODE_OAUTH_TOKEN;
+      }
+    } else {
+      // Non-interactive (routines, dispatched, provisioned box): mirror the routines
+      // path (`runner.ts:1017-1021`) UNCONDITIONALLY. Inject the per-account
+      // setup-token when one resolves — it replaces any ambient shared value
+      // inherited from the launcher. When NONE resolves, STRIP the ambient
+      // CLAUDE_CODE_OAUTH_TOKEN so a run on a provisioned box can never silently
+      // authenticate as the shared, rotating token an earlier version of this path
+      // let through — the RUSH-1822 fleet-wide-logout hazard, tracked by RUSH-2360.
+      // A missing login then fails loud (401) against this home's own credential
+      // instead of quietly borrowing another's. options.env still wins below for an
+      // explicit caller override.
+      if (setupToken) {
+        result.CLAUDE_CODE_OAUTH_TOKEN = setupToken;
+      } else {
+        delete result.CLAUDE_CODE_OAUTH_TOKEN;
       }
     }
     delete result.CODEX_HOME;

@@ -7,6 +7,10 @@ import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, bui
 import type { ExecOptions } from './exec.js';
 import { mailboxDir } from './mailbox.js';
 import { getVersionHomePath } from './versions.js';
+import { bundleItemStore, keychainRef, writeBundle, type SecretsBundle } from './secrets/bundles.js';
+import { _resetFileStoreForTest } from './secrets/filestore.js';
+import { secretsKeychainItem } from './secrets/index.js';
+import { claudeAccountTokenKey } from './claude-account-token.js';
 
 // RUSH-2215: do not skip the whole file on win32 — Windows-specific suites
 // (e.g. resolveShimSpawn .cmd) and pure string/auth detectors must run.
@@ -909,5 +913,86 @@ describePosix('resolveLaunchBinary — is the harness actually on this machine (
     plantExecutable(path.join(home, '.agents', '.history', 'versions', 'claude', '9.9.9', 'node_modules', '.bin', 'claude'));
 
     expect(probe('claude', '9.9.9')).toBe(versionedShim);
+  });
+});
+
+describe('buildExecEnv — Claude ambient CLAUDE_CODE_OAUTH_TOKEN handling (RUSH-2360)', () => {
+  const PASS = 'exec-oauth-token-test-pass';
+  let fileDir: string;
+  let versionDirs: string[] = [];
+  let prevNoAgent: string | undefined;
+  let prevPassphrase: string | undefined;
+  let prevClaudeToken: string | undefined;
+
+  beforeEach(() => {
+    fileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'exec-oauth-token-store-'));
+    versionDirs = [];
+    prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+    prevPassphrase = process.env.AGENTS_SECRETS_PASSPHRASE;
+    prevClaudeToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    process.env.AGENTS_SECRETS_NO_AGENT = '1';
+    process.env.AGENTS_SECRETS_PASSPHRASE = PASS;
+    _resetFileStoreForTest({ fileDir, passphrase: PASS });
+  });
+
+  afterEach(() => {
+    _resetFileStoreForTest({});
+    if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
+    else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
+    if (prevPassphrase === undefined) delete process.env.AGENTS_SECRETS_PASSPHRASE;
+    else process.env.AGENTS_SECRETS_PASSPHRASE = prevPassphrase;
+    if (prevClaudeToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    else process.env.CLAUDE_CODE_OAUTH_TOKEN = prevClaudeToken;
+    for (const dir of versionDirs) fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(fileDir, { recursive: true, force: true });
+  });
+
+  /** A version home signed into `email`, without any `auth` bundle so no setup-token resolves. */
+  function makeVersionHome(email: string): { version: string; configDir: string } {
+    const version = `rush-2360-exec-test-${process.pid}-${versionDirs.length}`;
+    const versionHome = getVersionHomePath('claude', version);
+    versionDirs.push(path.dirname(versionHome));
+    const configDir = path.join(versionHome, '.claude');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, '.claude.json'),
+      JSON.stringify({ oauthAccount: { emailAddress: email } }),
+    );
+    return { version, configDir };
+  }
+
+  function writeAuthBundle(values: Record<string, string>): void {
+    const bundle: SecretsBundle = { name: 'auth', backend: 'file', vars: {} };
+    for (const [key, value] of Object.entries(values)) {
+      bundleItemStore('file').set(secretsKeychainItem('auth', key), value);
+      bundle.vars[key] = keychainRef(key);
+    }
+    writeBundle(bundle);
+  }
+
+  it('strips an ambient inherited CLAUDE_CODE_OAUTH_TOKEN when NO setup-token resolves (the provisioned-box leak)', () => {
+    // A provisioned box's launcher exports a shared, rotating CLAUDE_CODE_OAUTH_TOKEN;
+    // `agents run claude "<prompt>"` inherits it via sanitizeProcessEnv(process.env).
+    // No `auth` bundle is written, so no per-account setup-token resolves — the token
+    // MUST be stripped so the run authenticates against this home's own login, not the
+    // shared token that caused the RUSH-1822 fleet-wide logout.
+    const { version } = makeVersionHome('alpha@example.com');
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-shared-rotating-must-be-stripped';
+
+    const env = buildExecEnv(execOpts({ agent: 'claude', version, prompt: 'do the thing' }));
+
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  it('still injects a resolved per-account setup-token on a non-interactive run (no regression)', () => {
+    // When the `auth` bundle DOES carry this account's setup-token, it is injected and
+    // wins over the ambient shared value — the existing behavior the strip must not break.
+    const { version } = makeVersionHome('alpha@example.com');
+    writeAuthBundle({ [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha' });
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-shared-must-not-win';
+
+    const env = buildExecEnv(execOpts({ agent: 'claude', version, prompt: 'do the thing' }));
+
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-alpha');
   });
 });
