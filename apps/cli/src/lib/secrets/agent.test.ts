@@ -5,7 +5,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { describe, it, expect } from 'vitest';
 import type { SecretsBundle } from './bundles.js';
-import { handleAgentRequest, isRequestAuthorized, makeConnectionHandler, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, shouldClientEvictSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, secretsAgentServiceInstalled, retireLegacySecretsAgentService, clampHoldMs, syncClientLaunch, lastLine, runAgentLockSync, SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD, DEFAULT_TTL_MS, MIN_HOLD_MS, MAX_HOLD_MS, META_CACHE_PREFIX, type StoredBundle, type Response, type Request } from './agent.js';
+import { handleAgentRequest, isRequestAuthorized, makeConnectionHandler, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, shouldClientEvictSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, secretsAgentServiceInstalled, retireLegacySecretsAgentService, clampHoldMs, syncClientLaunch, lastLine, runAgentLockSync, closeServerBounded, SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD, DEFAULT_TTL_MS, MIN_HOLD_MS, MAX_HOLD_MS, META_CACHE_PREFIX, type StoredBundle, type Response, type Request } from './agent.js';
 
 /**
  * These tests target the broker's store semantics — the part with real bug
@@ -394,13 +394,41 @@ describe.skipIf(process.platform !== 'darwin')('retireLegacySecretsAgentService 
   });
 });
 
+describe('closeServerBounded (RUSH-2421)', () => {
+  it('resolves after the server emits close', async () => {
+    const server = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => resolve());
+    });
+    const started = Date.now();
+    await closeServerBounded(server, 2_000);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    // A second close on an already-closed server must still settle (no hang).
+    await closeServerBounded(server, 200);
+  });
+
+  it('resolves on timeout when close never fires', async () => {
+    // A server object that never emits 'close' on close() — force the timeout path.
+    const fake = {
+      close(cb?: () => void) {
+        // Intentionally never call cb — simulates a stuck close.
+        void cb;
+      },
+    } as unknown as net.Server;
+    const started = Date.now();
+    await closeServerBounded(fake, 50);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(40);
+  });
+});
+
 describe.skipIf(process.platform !== 'darwin')('startHostedBroker (#416: broker hosted in the daemon)', () => {
   it('binds the socket, answers agentPing over the wire, and close() tears it down', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hosted-broker-'));
     const prevDir = process.env.AGENTS_SECRETS_AGENT_DIR;
     process.env.AGENTS_SECRETS_AGENT_DIR = dir;
     const sock = path.join(dir, 'agent.sock');
-    let broker: { close(): void } | null = null;
+    let broker: { close(): void | Promise<void> } | null = null;
     try {
       broker = await startHostedBroker();
       // Real socket bound on the isolated temp dir — same wire protocol as the
@@ -409,13 +437,14 @@ describe.skipIf(process.platform !== 'darwin')('startHostedBroker (#416: broker 
       expect(fs.existsSync(sock)).toBe(true);
       expect((await agentPing()).reachable).toBe(true);
 
-      // Daemon-safe teardown: no process.exit — close() just releases the socket.
-      broker!.close();
+      // Daemon-safe teardown: no process.exit — close() awaits server release
+      // (RUSH-2421) then unlinks the socket.
+      await broker!.close();
       broker = null;
       expect(fs.existsSync(sock)).toBe(false);
       expect((await agentPing()).reachable).toBe(false);
     } finally {
-      broker?.close();
+      await broker?.close();
       if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
       else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
       fs.rmSync(dir, { recursive: true, force: true });
@@ -426,7 +455,7 @@ describe.skipIf(process.platform !== 'darwin')('startHostedBroker (#416: broker 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hosted-broker2-'));
     const prevDir = process.env.AGENTS_SECRETS_AGENT_DIR;
     process.env.AGENTS_SECRETS_AGENT_DIR = dir;
-    let first: { close(): void } | null = null;
+    let first: { close(): void | Promise<void> } | null = null;
     try {
       first = await startHostedBroker();
       expect(first).not.toBeNull();
@@ -438,7 +467,7 @@ describe.skipIf(process.platform !== 'darwin')('startHostedBroker (#416: broker 
       // The first broker is still serving — not orphaned.
       expect((await agentPing()).reachable).toBe(true);
     } finally {
-      first?.close();
+      await first?.close();
       if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
       else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
       fs.rmSync(dir, { recursive: true, force: true });
@@ -451,8 +480,8 @@ describe.skipIf(process.platform !== 'darwin')('startHostedBroker (#416: broker 
     process.env.AGENTS_SECRETS_AGENT_DIR = dir;
     const sock = path.join(dir, 'agent.sock');
     const pid = path.join(dir, 'agent.pid');
-    let hosted: { close(): void } | null = null;
-    let standalone: { close(): void } | null = null;
+    let hosted: { close(): void | Promise<void> } | null = null;
+    let standalone: { close(): void | Promise<void> } | null = null;
     try {
       hosted = await startHostedBroker();
       expect(hosted).not.toBeNull();
@@ -476,9 +505,9 @@ describe.skipIf(process.platform !== 'darwin')('startHostedBroker (#416: broker 
 
       // If the daemon owner stops, the quiescent service becomes the broker
       // instead of leaving the socket unavailable until launchd retries it.
-      hosted.close();
+      await hosted.close();
       hosted = null;
-      standalone = await new Promise<{ close(): void } | null>((resolve, reject) => {
+      standalone = await new Promise<{ close(): void | Promise<void> } | null>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('standalone takeover timed out')), 3000);
         starting.then((handle) => {
           clearTimeout(timer);
@@ -488,8 +517,8 @@ describe.skipIf(process.platform !== 'darwin')('startHostedBroker (#416: broker 
       expect(standalone).not.toBeNull();
       expect((await agentPing()).reachable).toBe(true);
     } finally {
-      standalone?.close();
-      hosted?.close();
+      await standalone?.close();
+      await hosted?.close();
       if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
       else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
       fs.rmSync(dir, { recursive: true, force: true });
@@ -501,7 +530,7 @@ describe.skipIf(process.platform !== 'darwin')('startHostedBroker (#416: broker 
     const prevDir = process.env.AGENTS_SECRETS_AGENT_DIR;
     process.env.AGENTS_SECRETS_AGENT_DIR = dir;
     const pid = path.join(dir, 'agent.pid');
-    let hosted: { close(): void } | null = null;
+    let hosted: { close(): void | Promise<void> } | null = null;
     let child: ReturnType<typeof spawn> | null = null;
     let stderr = '';
     try {
@@ -538,7 +567,7 @@ describe.skipIf(process.platform !== 'darwin')('startHostedBroker (#416: broker 
       expect(fs.existsSync(pid)).toBe(false);
     } finally {
       if (child?.exitCode === null) child.kill('SIGKILL');
-      hosted?.close();
+      await hosted?.close();
       if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
       else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
       fs.rmSync(dir, { recursive: true, force: true });
