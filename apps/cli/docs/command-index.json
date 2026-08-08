@@ -7898,6 +7898,15 @@
               "negate": false
             },
             {
+              "flags": "--notify",
+              "description": "Also raise a local desktop banner on THIS machine (the same notifier as `run --notify`), on top of any configured broadcast. Fires at any level.",
+              "long": "--notify",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--json",
               "description": "Emit the written event as JSON",
               "long": "--json",
