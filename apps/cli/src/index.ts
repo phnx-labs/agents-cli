@@ -1473,7 +1473,15 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1') {
 // a lightweight startup self-heal (two existsSync checks then return) rather
 // than a migration-sentinel bump, so it covers fresh installs AND upgrades
 // without re-running the full migration for the whole user base (issue #20).
-if (process.platform === 'darwin' && process.env.AGENTS_SKIP_MIGRATION !== '1') {
+// Skipped for --help/--version: those are pure documentation paths, so they
+// pay neither the dynamic import (child_process, the version/layout resolver,
+// the bundle installer) nor the self-heal's filesystem checks — same gate the
+// update check, background sync, and ensureInitialized above already use.
+if (
+  process.platform === 'darwin' &&
+  process.env.AGENTS_SKIP_MIGRATION !== '1' &&
+  !helpOrVersionRequested
+) {
   try {
     const { installMenubarLaunchAgentOnUpgrade } = await import('./lib/menubar/install-menubar.js');
     installMenubarLaunchAgentOnUpgrade();
