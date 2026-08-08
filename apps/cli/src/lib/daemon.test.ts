@@ -728,6 +728,8 @@ describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () =>
       execFileSync('git', ['init', '-q', systemDir]);
 
       const pidFile = path.join(tmpHome, '.agents', '.cache', 'helpers', 'daemon', 'daemon.pid');
+      const stateDir = path.dirname(pidFile);
+      const removedStateDir = `${stateDir}.removed`;
       const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
       const readPid = () => (fs.existsSync(pidFile) ? parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10) : null);
       const waitFor = async (cond: () => boolean, timeoutMs: number) => {
@@ -755,14 +757,12 @@ describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () =>
         expect(await waitFor(() => readPid() === pid, 20_000)).toBe(true);
         expect(alive(pid)).toBe(true);
 
-        // Delete the whole HOME while the daemon is still running — the
-        // real-world shape of a test's cleanup racing (and losing to) its own
-        // kill signal, or a killed test runner whose `finally` never ran.
-        // The live daemon can finish an already-started heartbeat while the
-        // recursive removal walks the tree. Let Node retry transient ENOTEMPTY
-        // races; the assertion below still requires the state tree to remain
-        // absent and the daemon to terminate within the fixed deadline.
-        fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+        // Atomically move the daemon state tree out of its canonical path while
+        // the process is live. A recursive delete races heartbeat writes and can
+        // fail with ENOTEMPTY before the guard gets to observe anything; rename
+        // makes the disappearance indivisible while still allowing heartbeat
+        // repair to recreate the canonical directory without its lifetime token.
+        fs.renameSync(stateDir, removedStateDir);
 
         // The guard polls every 300ms above; give it several cycles of margin.
         expect(await waitFor(() => !alive(pid!), 10_000)).toBe(true);
