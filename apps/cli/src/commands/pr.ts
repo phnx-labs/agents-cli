@@ -63,6 +63,11 @@ export interface PrReview {
   user: string;
 }
 
+/** Evaluate already-fetched reviews against the PR author. */
+export function isNonAuthorApproved(reviews: PrReview[], author: string | null): boolean {
+  return reviews.some((review) => review.state === 'APPROVED' && review.user !== (author ?? ''));
+}
+
 /** Fetch submitted reviews for a PR via REST. Returns [] on error. */
 export async function fetchPrReviews(prUrl: string): Promise<PrReview[]> {
   const parsed = parsePrUrl(prUrl);
@@ -92,7 +97,7 @@ export async function fetchPrReviews(prUrl: string): Promise<PrReview[]> {
  */
 export async function hasNonAuthorApproval(prUrl: string): Promise<boolean> {
   const [author, reviews] = await Promise.all([fetchPrAuthor(prUrl), fetchPrReviews(prUrl)]);
-  return reviews.some((r) => r.state === 'APPROVED' && r.user !== (author ?? ''));
+  return isNonAuthorApproved(reviews, author);
 }
 
 /** The CI state of a PR: green (all done and passing), pending (still running), or the first failed check. */
@@ -193,10 +198,6 @@ export function registerPrCommands(program: Command): void {
 
       const log = (msg: string) => {
         if (!json) console.log(msg);
-      };
-
-      const warn = (msg: string) => {
-        if (!json) console.error(msg);
       };
 
       // 1. Resolve PR URL

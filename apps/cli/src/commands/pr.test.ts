@@ -1,10 +1,11 @@
 /**
  * Tests for `agents pr land` logic — the pure helper functions only.
  * No network: check lists are injected directly into `classifyCiState`.
- * `hasNonAuthorApproval` and `resolvePrUrl` call `gh` and are not tested here.
+ * Network-bound wrappers are excluded; approval policy is tested through the
+ * same production helper used by `hasNonAuthorApproval`.
  */
 import { describe, it, expect } from 'vitest';
-import { classifyCiState, type PrReview } from './pr.js';
+import { classifyCiState, isNonAuthorApproved, type PrReview } from './pr.js';
 import type { PrCheck } from '../lib/teams/pr-watch.js';
 
 // ---------------------------------------------------------------------------
@@ -81,47 +82,39 @@ describe('classifyCiState', () => {
 });
 
 // ---------------------------------------------------------------------------
-// hasNonAuthorApproval logic (pure subset, without gh calls)
+// hasNonAuthorApproval policy
 // ---------------------------------------------------------------------------
-
-/**
- * Inline the approval-check logic so we can test it without calling `gh`.
- * Mirrors the logic in hasNonAuthorApproval.
- */
-function checkApproval(reviews: PrReview[], author: string | null): boolean {
-  return reviews.some((r) => r.state === 'APPROVED' && r.user !== (author ?? ''));
-}
 
 describe('non-author approval check', () => {
   it('returns true when a non-author has APPROVED', () => {
     const reviews: PrReview[] = [
       { state: 'APPROVED', user: 'reviewer1' },
     ];
-    expect(checkApproval(reviews, 'author')).toBe(true);
+    expect(isNonAuthorApproved(reviews, 'author')).toBe(true);
   });
 
   it('returns false when only the author has APPROVED (self-approval)', () => {
     const reviews: PrReview[] = [
       { state: 'APPROVED', user: 'author' },
     ];
-    expect(checkApproval(reviews, 'author')).toBe(false);
+    expect(isNonAuthorApproved(reviews, 'author')).toBe(false);
   });
 
   it('returns false when no one has APPROVED', () => {
     const reviews: PrReview[] = [
       { state: 'CHANGES_REQUESTED', user: 'reviewer1' },
     ];
-    expect(checkApproval(reviews, 'author')).toBe(false);
+    expect(isNonAuthorApproved(reviews, 'author')).toBe(false);
   });
 
   it('returns false when reviews list is empty', () => {
-    expect(checkApproval([], 'author')).toBe(false);
+    expect(isNonAuthorApproved([], 'author')).toBe(false);
   });
 
   it('returns true when author is null (unknown) and reviewer approved', () => {
     // When we cannot determine the author, treat any approval as non-author
     const reviews: PrReview[] = [{ state: 'APPROVED', user: 'reviewer1' }];
-    expect(checkApproval(reviews, null)).toBe(true);
+    expect(isNonAuthorApproved(reviews, null)).toBe(true);
   });
 
   it('returns true when multiple reviewers, one of whom approved', () => {
@@ -129,13 +122,13 @@ describe('non-author approval check', () => {
       { state: 'CHANGES_REQUESTED', user: 'reviewer1' },
       { state: 'APPROVED', user: 'reviewer2' },
     ];
-    expect(checkApproval(reviews, 'author')).toBe(true);
+    expect(isNonAuthorApproved(reviews, 'author')).toBe(true);
   });
 
   it('treats automated reviewer (prix-cloud) as a valid non-author approver', () => {
     const reviews: PrReview[] = [
       { state: 'APPROVED', user: 'prix-cloud' },
     ];
-    expect(checkApproval(reviews, 'author-bot')).toBe(true);
+    expect(isNonAuthorApproved(reviews, 'author-bot')).toBe(true);
   });
 });
