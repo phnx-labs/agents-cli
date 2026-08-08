@@ -308,6 +308,14 @@ describe('withDesktopNotify — feed post --notify', () => {
     expect(merged?.message).toEqual(CONFIG.message);
   });
 
+  it('never clobbers an operator sink that shares the reserved name — both fire', () => {
+    const operatorNotify = { command: ['my-notifier', '{message}'] };
+    const merged = withDesktopNotify({ [DESKTOP_NOTIFY_SINK]: operatorNotify }, true);
+    // The operator's `notify` sink is untouched; the banner lands under `notify-2`.
+    expect(merged?.[DESKTOP_NOTIFY_SINK]).toEqual(operatorNotify);
+    expect(merged?.[`${DESKTOP_NOTIFY_SINK}-2`]).toEqual(desktopSink);
+  });
+
   it('fires on a milestone post — the desktop banner carries no minLevel, so it plans at any level', () => {
     const planned = planFeedBroadcast(withDesktopNotify(undefined, true), ctx({ level: 'milestone' }));
     expect(planned.map((p) => p.name)).toEqual([DESKTOP_NOTIFY_SINK]);

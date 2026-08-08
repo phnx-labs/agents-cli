@@ -517,13 +517,20 @@ export const DESKTOP_NOTIFY_SINK = 'notify';
  * with a stated reason where no notifier exists, per the desktop provider),
  * never the operator's Mac. That is the same locality `run --notify` has; the
  * phone hop stays the job of an `important`-level owner/broadcast sink.
+ *
+ * The banner is added under `DESKTOP_NOTIFY_SINK`, or the first free
+ * `notify-2`/`notify-3`/… when the operator already declared a sink by that
+ * name — so `--notify` can never silently overwrite a configured sink; both fire.
  */
 export function withDesktopNotify(
   config: FeedBroadcastConfig | undefined,
   notify: boolean,
 ): FeedBroadcastConfig | undefined {
   if (!notify) return config;
-  return { ...(config ?? {}), [DESKTOP_NOTIFY_SINK]: { channel: 'desktop', to: 'local' } };
+  const base = config ?? {};
+  let name = DESKTOP_NOTIFY_SINK;
+  for (let i = 2; name in base; i++) name = `${DESKTOP_NOTIFY_SINK}-${i}`;
+  return { ...base, [name]: { channel: 'desktop', to: 'local' } };
 }
 
 function runCommandSink(name: string, argv: string[], timeoutMs: number): SinkOutcome {

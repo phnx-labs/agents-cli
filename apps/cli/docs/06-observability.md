@@ -1023,7 +1023,9 @@ Two properties follow from what it is:
 
 Equivalent to declaring a `channel: desktop` sink in `feed.broadcast` (below),
 but per-invocation and config-free — the same relationship `run --notify` has to
-a standing desktop sink.
+a standing desktop sink. The banner is added under a reserved `notify` sink name
+(or the first free `notify-2`/… if you already declared one), so `--notify` never
+overwrites a configured sink.
 
 #### Broadcasting a post outward (`feed.broadcast`)
 
