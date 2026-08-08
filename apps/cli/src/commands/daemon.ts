@@ -43,7 +43,6 @@ import {
 } from '../lib/daemon-health.js';
 import { listJobs, getLatestRun } from '../lib/routines.js';
 import { JobScheduler } from '../lib/scheduler.js';
-import { getDaemonDir } from '../lib/state.js';
 import { followFile } from '../lib/log-follow.js';
 import { parseDuration } from '../lib/hooks/cache.js';
 
