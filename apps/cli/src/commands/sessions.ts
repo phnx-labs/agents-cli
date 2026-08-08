@@ -92,7 +92,7 @@ import { registerSessionsBackfillCommand } from './sessions-backfill.js';
 import { registerSessionsStatsCommand } from './sessions-stats.js';
 import { registerSessionsInsightsCommand } from './insights.js';
 import { registerSessionsOptimizeCommand } from './sessions-optimize.js';
-import { runBrowserSessions } from '../lib/browser/sessions-list.js';
+import { runBrowserSessionsCommand } from './browser-sessions-picker.js';
 import {
   countToolProgramOccurrences,
   parseToolProgramCountClause,
@@ -5277,8 +5277,10 @@ export function registerSessionsCommands(program: Command): void {
 
   sessionsCmd.action(async (query: string | undefined, options: SessionsOptions, command: Command) => {
     if ((options as { browser?: boolean }).browser) {
-      // Alias for `agents browser sessions`: a profile positional narrows to one profile.
-      runBrowserSessions({ profile: query, json: options.json });
+      // Alias for `agents browser sessions`: a profile positional narrows to one
+      // profile. `--no-interactive` is already a top-level sessionsCmd option
+      // (options.interactive), so it carries through for free.
+      await runBrowserSessionsCommand({ profile: query, json: options.json, interactive: options.interactive });
       return;
     }
     await sessionsAction(query, options, command.getOptionValueSource('limit'));

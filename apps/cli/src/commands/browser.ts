@@ -35,7 +35,7 @@ import {
   listAllProfileSnapshots,
 } from '../lib/browser/runtime-state.js';
 import { DEFAULT_VIEWPORT } from '../lib/browser/devices.js';
-import { runBrowserSessions } from '../lib/browser/sessions-list.js';
+import { runBrowserSessionsCommand } from './browser-sessions-picker.js';
 import { discoverBrowserWsUrl, verifyBrowserIdentity } from '../lib/browser/cdp.js';
 import { parseTargetFilter } from '../lib/browser/service.js';
 import {
@@ -91,6 +91,7 @@ const BROWSER_HELP_GROUPS = [
     title: 'Capture evidence',
     names: ['console', 'errors', 'requests', 'responsebody', 'record', 'pdf', 'logs'],
   },
+  { title: 'History and discovery', names: ['sessions', 'history', 'refs'] },
 ] as const;
 
 export function registerBrowserCommand(program: Command): void {
@@ -121,6 +122,9 @@ export function registerBrowserCommand(program: Command): void {
 
       # Drive another machine's browser (needs its consent — see remote-control)
       agents browser start --host zion
+
+      # Browse a task-heavy profile's captures: one row per task, not per file
+      agents browser sessions
 
       # Allow / deny other fleet machines driving THIS machine's browser
       agents browser remote-control on
@@ -2158,12 +2162,13 @@ function registerTaskCommands(browser: Command): void {
 
   browser
     .command('sessions')
-    .description('List a profile\'s captured screenshots, PDFs, recordings, and downloads')
+    .description('Browse a profile\'s captured screenshots, PDFs, recordings, and downloads, grouped by task')
     .option('--profile <name>', 'Only this profile (default: all profiles with captures)')
     .option('--open [selector]', "Open a capture in the OS default app: 'latest' or a filename")
     .option('--json', 'Emit machine-readable JSON')
-    .action((opts) => {
-      runBrowserSessions({ profile: opts.profile, open: opts.open, json: opts.json });
+    .option('--no-interactive', 'Print the flat listing instead of opening the interactive task browser')
+    .action(async (opts) => {
+      await runBrowserSessionsCommand({ profile: opts.profile, open: opts.open, json: opts.json, interactive: opts.interactive });
     });
 
   // ─── Recording ─────────────────────────────────────────────────────────────

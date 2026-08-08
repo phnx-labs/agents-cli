@@ -833,6 +833,16 @@ machine consumers.
 
 ## Live sessions (`--active`) and the interactive browser
 
+**`--browser` switches to a different pool entirely.** `agents sessions --browser`
+(alias `agents browser sessions`) lists a browser profile's captured screenshots,
+PDFs, recordings, and downloads (`agents browser start` / `screenshot` / `pdf` /
+`record`) instead of agent transcripts. On a TTY it opens its own task-first
+interactive view (RUSH-2407) — one row per browser task, newest first, linking to
+the agent session that ran it when the task's `launchId` still resolves. See
+[`browser.md` §History and discovery](browser.md) for the full picker behavior;
+`--no-interactive`/`--json` print the flat per-artifact table this section's
+`--no-interactive` convention otherwise governs for the transcript pool below.
+
 `agents sessions --active` answers "what is running right now, everywhere". It sweeps
 the local machine (`getActiveSessions`) and, unless `--local`, every registered online
 device over SSH, through one shared gather — `gatherActiveSessions` in

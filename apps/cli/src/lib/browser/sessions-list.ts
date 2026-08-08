@@ -4,12 +4,26 @@
  * Reads straight from `.cache/browser/<profile>/`, so it works whether or not the
  * browser daemon is running. Backs both `agents browser sessions` and the
  * `agents sessions --browser` alias.
+ *
+ * Also owns the task-first grouping (RUSH-2407): browser captures are per-task
+ * (`sessions/<task>/`), and a task persists `owner`/`launchId` in `tasks.json`
+ * while it is live (see service.ts `resolveTaskIdentity`). This module groups
+ * artifacts by task and, when a launchId is available, resolves it to the
+ * agent session that ran it — reusing the session index (`getSessionById`) and
+ * the same launchId join keys the rest of the CLI already uses for this exact
+ * problem (pid registry, the SessionStart hook index, the activity log; see
+ * `feed-post.ts` `resolvePostIdentity`), never a second parser.
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { getBrowserRuntimeDir, getProfileRuntimeDir } from './profiles.js';
 import { formatRelativeTime } from '../session/relative-time.js';
+import type { SessionMeta } from '../session/types.js';
+import { getSessionById } from '../session/db.js';
+import { listPidSessionEntries } from '../session/pid-registry.js';
+import { loadHookSessionIndex } from '../session/hook-sessions.js';
+import { readRecentActivity } from '../activity.js';
 
 export type ArtifactKind = 'screenshot' | 'pdf' | 'recording' | 'download';
 
@@ -105,7 +119,7 @@ export function listBrowserSessions(only?: string): ProfileArtifacts[] {
     .filter((r) => !!only || r.artifacts.length > 0);
 }
 
-function formatBytes(n: number): string {
+export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   const units = ['KB', 'MB', 'GB'];
   let val = n / 1024;
@@ -114,13 +128,20 @@ function formatBytes(n: number): string {
   return `${val < 10 ? val.toFixed(1) : Math.round(val)} ${units[i]}`;
 }
 
+/** Per-kind counts over a flat artifact list — shared by the printed table and
+ *  the interactive row labels. */
+export function countByKind(artifacts: BrowserArtifact[]): Record<ArtifactKind, number> {
+  const counts = { screenshot: 0, pdf: 0, recording: 0, download: 0 } as Record<ArtifactKind, number>;
+  for (const a of artifacts) counts[a.kind]++;
+  return counts;
+}
+
 /** Human table for the CLI. Returns lines (no trailing newline). */
 export function renderBrowserSessions(groups: ProfileArtifacts[]): string {
   if (groups.length === 0) return 'No browser profiles found.';
   const lines: string[] = [];
   for (const g of groups) {
-    const counts = { screenshot: 0, pdf: 0, recording: 0, download: 0 } as Record<ArtifactKind, number>;
-    for (const a of g.artifacts) counts[a.kind]++;
+    const counts = countByKind(g.artifacts);
     lines.push(
       `${g.profile}  ` +
       `screenshots ${counts.screenshot}  pdfs ${counts.pdf}  recordings ${counts.recording}  downloads ${counts.download}`
@@ -162,6 +183,199 @@ export function openArtifact(filePath: string): boolean {
     if (spawnSync(cmd, args, { stdio: 'ignore' }).status === 0) return true;
   }
   return false;
+}
+
+// ─── Task-first grouping (RUSH-2407) ───────────────────────────────────────
+
+/** The identity fields this module cares about from a profile's `tasks.json`. */
+export interface TaskIdentity {
+  owner?: string;
+  launchId?: string;
+}
+
+/**
+ * Read a profile's `tasks.json` for the identity of its CURRENTLY LIVE tasks,
+ * keyed by task name. A task's entry is deleted on `agents browser stop` (see
+ * service.ts `saveTaskState`), so a task whose run has already ended is absent
+ * here even though its captures remain on disk — that is exactly the
+ * "unlinked legacy task" case {@link groupIntoRows} reports. Same read-straight-
+ * from-disk approach as the rest of this module: works whether or not the
+ * browser daemon is running.
+ */
+export function loadTaskIdentities(profile: string): Map<string, TaskIdentity> {
+  const out = new Map<string, TaskIdentity>();
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(getProfileRuntimeDir(profile), 'tasks.json'), 'utf8');
+  } catch {
+    return out;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return out;
+  }
+  if (!parsed || typeof parsed !== 'object') return out;
+  for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object') continue;
+    const t = value as Record<string, unknown>;
+    out.set(name, {
+      owner: typeof t.owner === 'string' ? t.owner : undefined,
+      launchId: typeof t.launchId === 'string' ? t.launchId : undefined,
+    });
+  }
+  return out;
+}
+
+/** launchId -> indexed session id, built once from every source that records
+ *  this join, so a task-heavy profile resolves without re-scanning per task. */
+export interface LaunchSessionIndex {
+  byLaunchId: Map<string, string>;
+}
+
+/**
+ * Build the launchId -> sessionId index from the same three sources
+ * `feed-post.ts` `resolvePostIdentity` already uses for this exact problem —
+ * a browser task's `launchId` IS the `AGENT_LAUNCH_ID` of the CLI run that
+ * called `agents browser start` (see service.ts `resolveTaskIdentity`), so
+ * resolving "which session ran this launch" is the same join, not a new one.
+ * Lowest-confidence source first so a later, more specific source overwrites
+ * it on a collision:
+ *  1. the activity log (durable, but least specific — read last)
+ *  2. the SessionStart hook's live-session index (kept for parity with
+ *     `hook-sessions.ts`; empty on this fleet today, harmless when so)
+ *  3. the per-pid launch registry (`ag run`, launch-scoped, most authoritative)
+ * Computed once per interactive session, not per row.
+ */
+export function buildLaunchSessionIndex(): LaunchSessionIndex {
+  const byLaunchId = new Map<string, string>();
+  for (const ev of readRecentActivity({ maxBytesPerSession: 64 * 1024 })) {
+    if (ev.launchId && ev.sessionId) byLaunchId.set(ev.launchId, ev.sessionId);
+  }
+  for (const [launchId, rec] of loadHookSessionIndex().byLaunchId) {
+    if (rec.session_id) byLaunchId.set(launchId, rec.session_id);
+  }
+  for (const entry of listPidSessionEntries()) {
+    if (entry.launchId && entry.sessionId) byLaunchId.set(entry.launchId, entry.sessionId);
+  }
+  return { byLaunchId };
+}
+
+/** Resolve one launchId through the index to its canonical `SessionMeta`, or
+ *  `null` when the join has no hit or the resolved session isn't indexed here. */
+export function resolveLaunchSession(index: LaunchSessionIndex, launchId: string): SessionMeta | null {
+  const sessionId = index.byLaunchId.get(launchId);
+  return sessionId ? getSessionById(sessionId) : null;
+}
+
+/** Why a row carries no session digest: `linked` resolved one, `unresolved`
+ *  has a launchId but no matching indexed session, `unlinked` has no launchId
+ *  at all (a legacy task, or one whose owning run already stopped). */
+export type BrowserSessionLinkStatus = 'linked' | 'unresolved' | 'unlinked';
+
+/** One task-first row: every capture for one browser task (or, for
+ *  `kind: 'downloads'`, one profile's downloads bucket), plus the agent
+ *  session it links to when resolvable. */
+export interface BrowserSessionRow {
+  kind: 'task' | 'downloads';
+  profile: string;
+  /** Task name; undefined for the downloads row. */
+  task?: string;
+  owner?: string;
+  launchId?: string;
+  linkStatus: BrowserSessionLinkStatus;
+  linkedSession?: SessionMeta;
+  /** Newest first. */
+  artifacts: BrowserArtifact[];
+  counts: Record<ArtifactKind, number>;
+  /** Most recent capture's mtime — the row's sort/age key. */
+  latestMtimeMs: number;
+}
+
+/**
+ * Group flat per-profile artifacts into task-first rows, newest first. Pure:
+ * identities and the launch resolver are passed in, so this has no filesystem
+ * or session-index dependency and is unit-testable with synthetic data (see
+ * {@link buildBrowserSessionRows} for the impure disk/index-reading caller).
+ */
+export function groupIntoRows(
+  groups: ProfileArtifacts[],
+  taskIdentities: Map<string, Map<string, TaskIdentity>>,
+  resolveLaunch?: (launchId: string) => SessionMeta | null,
+): BrowserSessionRow[] {
+  const rows: BrowserSessionRow[] = [];
+  for (const g of groups) {
+    const identities = taskIdentities.get(g.profile) ?? new Map<string, TaskIdentity>();
+    const byTask = new Map<string, BrowserArtifact[]>();
+    const downloads: BrowserArtifact[] = [];
+    for (const a of g.artifacts) {
+      if (a.kind === 'download' || !a.task) {
+        downloads.push(a);
+        continue;
+      }
+      const list = byTask.get(a.task) ?? [];
+      list.push(a);
+      byTask.set(a.task, list);
+    }
+    for (const [task, artifacts] of byTask) {
+      artifacts.sort((a, b) => b.mtimeMs - a.mtimeMs);
+      const identity = identities.get(task);
+      const linkedSession = identity?.launchId ? resolveLaunch?.(identity.launchId) ?? null : null;
+      rows.push({
+        kind: 'task',
+        profile: g.profile,
+        task,
+        owner: identity?.owner,
+        launchId: identity?.launchId,
+        linkStatus: linkedSession ? 'linked' : identity?.launchId ? 'unresolved' : 'unlinked',
+        linkedSession: linkedSession ?? undefined,
+        artifacts,
+        counts: countByKind(artifacts),
+        latestMtimeMs: artifacts[0]?.mtimeMs ?? 0,
+      });
+    }
+    if (downloads.length > 0) {
+      downloads.sort((a, b) => b.mtimeMs - a.mtimeMs);
+      rows.push({
+        kind: 'downloads',
+        profile: g.profile,
+        linkStatus: 'unlinked',
+        artifacts: downloads,
+        counts: countByKind(downloads),
+        latestMtimeMs: downloads[0]?.mtimeMs ?? 0,
+      });
+    }
+  }
+  rows.sort((a, b) => b.latestMtimeMs - a.latestMtimeMs);
+  return rows;
+}
+
+/** Build task-first rows for one profile (or every profile with captures),
+ *  reading `tasks.json` and resolving launchIds against the live indexes.
+ *  The interactive picker's data source. */
+export function buildBrowserSessionRows(profile?: string): BrowserSessionRow[] {
+  const groups = listBrowserSessions(profile);
+  const taskIdentities = new Map(groups.map((g) => [g.profile, loadTaskIdentities(g.profile)]));
+  const index = buildLaunchSessionIndex();
+  return groupIntoRows(groups, taskIdentities, (launchId) => resolveLaunchSession(index, launchId));
+}
+
+/**
+ * Search predicate for the interactive picker: task name, profile, the linked
+ * session's agent/topic/label, and any artifact filename in the row.
+ */
+export function matchesBrowserSessionRow(row: BrowserSessionRow, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  if (row.task?.toLowerCase().includes(q)) return true;
+  if (row.profile.toLowerCase().includes(q)) return true;
+  if (row.kind === 'downloads' && 'downloads'.includes(q)) return true;
+  const s = row.linkedSession;
+  if (s && (s.agent.toLowerCase().includes(q) || s.topic?.toLowerCase().includes(q) || s.label?.toLowerCase().includes(q))) {
+    return true;
+  }
+  return row.artifacts.some((a) => a.name.toLowerCase().includes(q));
 }
 
 /**
