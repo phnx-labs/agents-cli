@@ -340,6 +340,15 @@ describe('summarizeHook', () => {
     } as unknown as ManifestHook)).toBe('Stop');
     expect(summarizeHook({ script: 'x.sh', events: {} } as unknown as ManifestHook))
       .toBe('(no event)');
+    // `cache: 5` has no `.ttl` and `{ttl: {…}}` has a non-scalar one; both used
+    // to render a tail reading `(undefined cache)` / `([object Object] cache)`.
+    for (const cache of [5, [1, 2], { ttl: { a: 1 } }, {}]) {
+      expect(summarizeHook({ script: 'x.sh', events: ['Stop'], cache } as unknown as ManifestHook))
+        .toBe('Stop');
+    }
+    // A well-formed ttl still renders.
+    expect(summarizeHook({ script: 'x.sh', events: ['Stop'], cache: { ttl: '5m' } } as unknown as ManifestHook))
+      .toBe('Stop (5m cache)');
   });
 
   it('puts the matcher in parens after the events', () => {

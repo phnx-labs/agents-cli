@@ -1244,7 +1244,10 @@ function summarizeMatches(m?: HookMatches): string {
 function hookCacheTtl(cache?: HookCache): string | null {
   if (cache === undefined || cache === null) return null;
   if (typeof cache === 'string') return cache.replace(/-bg$/, '');
-  return String(cache.ttl);
+  // A bare `cache: 5` has no `.ttl`, and `cache: {ttl: {…}}` has a non-scalar
+  // one — String() on either rendered `(undefined cache)` / `([object Object]
+  // cache)`. No ttl to show means no cache tail.
+  return manifestText((cache as { ttl?: unknown }).ttl) || null;
 }
 
 /** Compact one-liner for an MCP server: padded transport + the url (http) or command line (stdio). */
