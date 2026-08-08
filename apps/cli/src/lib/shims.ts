@@ -269,6 +269,43 @@ function codexShimLaunchArgs(): string {
   ].map(shellQuote).join(' ');
 }
 
+/**
+ * The `exec` tail for a generated shim. For most agents this is a plain
+ * `exec "$BINARY"<launchArgs> "$@"`.
+ *
+ * Codex is special: its `workspace-write` sandbox hardcodes any `.agents/` (and
+ * `.codex/`) directory read-only, but agents-cli keeps every worktree at
+ * `<repo>/.agents/worktrees/<slug>`, so an in-repo build under a static
+ * shim would hit `EROFS`. The `agents run codex` path fixes this by adding
+ * `<repo>/.agents` to the profile's `workspace_roots` (see codexEditWritableRoots
+ * / repoAgentsDirForCwd), but a static shim has no cwd at generation time. So the
+ * shim resolves the repo's `.agents` from `$PWD` at RUN time — worktree-aware,
+ * mirroring repoAgentsDirForCwd — and passes it via Codex's own `--add-dir`
+ * (verified to compose with the `agents-edit` profile). The resolution is inline
+ * bash because the shim is the launch hot path and must not spawn Node to compute
+ * one directory. `--add-dir` is added only when the resolved `.agents` exists.
+ */
+function shimExecTail(agent: AgentId, launchArgs: string): string {
+  if (agent !== 'codex') return `exec "$BINARY"${launchArgs} "$@"`;
+  return `_repo_agents=""
+case "$PWD" in
+  */.agents/worktrees/*) _repo_agents="\${PWD%%/.agents/worktrees/*}/.agents" ;;
+  *)
+    _d="$PWD"
+    # Stop before $HOME so a dotfiles repo at $HOME is not treated as the project
+    # root (mirrors repoRootForCwd's home exclusion in project-key.ts).
+    while [ -n "$_d" ] && [ "$_d" != "/" ] && [ "$_d" != "$HOME" ]; do
+      if [ -e "$_d/.git" ]; then _repo_agents="$_d/.agents"; break; fi
+      _d=$(dirname "$_d")
+    done
+    ;;
+esac
+if [ -n "$_repo_agents" ] && [ -d "$_repo_agents" ]; then
+  exec "$BINARY"${launchArgs} --add-dir "$_repo_agents" "$@"
+fi
+exec "$BINARY"${launchArgs} "$@"`;
+}
+
 function getAgentsBinForGeneratedShim(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'index.js');
 }
@@ -746,7 +783,7 @@ if [ "\$LAUNCH_SKIP" = "0" ]; then
   "\$AGENTS_BIN" sync --agent "\$AGENT" --agent-version "\$VERSION" --launch --cwd "\$PWD" --quiet 2>/dev/null || true
 fi
 
-exec "$BINARY"${launchArgs} "$@"
+${shimExecTail(agent, launchArgs)}
 `;
 }
 
@@ -991,7 +1028,7 @@ function assertSafeVersion(version: string): void {
  * KEEP IN SYNC with the `managedEnv` switch in `generateVersionedAliasScript`.
  * The colocated test `shims.isolation-capability.test.ts` enforces this.
  */
-export const CONFIG_ENV_ISOLATED_AGENTS: readonly AgentId[] = ['claude', 'codex', 'copilot', 'grok', 'kimi', 'opencode', 'muse'];
+export const CONFIG_ENV_ISOLATED_AGENTS: readonly AgentId[] = ['claude', 'codex', 'copilot', 'cursor', 'grok', 'kimi', 'opencode', 'muse'];
 
 /**
  * Whether an agent supports a clean `--isolated` install — i.e. its config
@@ -1062,7 +1099,14 @@ export KIMI_CODE_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/
 export XDG_CONFIG_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/.config"
 export XDG_DATA_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/.local/share"
 `
-              : '';
+              : agent === 'cursor'
+                ? `
+# Cursor: no config-dir env var. Its OAuth token (the login gate) lives at
+# $XDG_CONFIG_HOME/cursor/auth.json, so pin XDG_CONFIG_HOME at the version home
+# to isolate each account's login for direct aliases (parity with buildExecEnv).
+export XDG_CONFIG_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/.config"
+`
+                : '';
   const launchArgs = agent === 'codex' ? ` ${codexShimLaunchArgs()}` : '';
 
   // Resolve the binary the same way the main shim does (see generateShimScript).
@@ -1153,7 +1197,7 @@ if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
 fi
 ${managedEnv}
 
-exec "$BINARY"${launchArgs} "$@"
+${shimExecTail(agent, launchArgs)}
 `;
 }
 

@@ -444,18 +444,23 @@ function maybeRegisterWithSessionTracker(
   terminal: vscode.Terminal,
   agentType: SessionAgentType | undefined,
   sessionId: string | undefined,
+  adoptExistingSession = false,
 ): void {
   if (agentType !== 'claude' && agentType !== 'codex' && agentType !== 'gemini' && agentType !== 'opencode') return;
   const workspacePath = vscode.workspace?.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspacePath) return;
   try {
-    registerSessionTracker(terminal, agentType, workspacePath, sessionId);
+    registerSessionTracker(terminal, agentType, workspacePath, sessionId, adoptExistingSession);
   } catch (err) {
     console.error('[TERMINALS] sessionTracker.registerTerminal failed', err);
   }
 }
 
-export function setAgentType(terminal: vscode.Terminal, agentType: SessionAgentType): void {
+export function setAgentType(
+  terminal: vscode.Terminal,
+  agentType: SessionAgentType,
+  adoptExistingSession = false,
+): void {
   const entry = getByTerminal(terminal);
   if (entry) {
     entry.agentType = agentType;
@@ -466,7 +471,7 @@ export function setAgentType(terminal: vscode.Terminal, agentType: SessionAgentT
     // Register with sessionTracker even without a sessionId so the fs watcher
     // can adopt one when the agent CLI writes a fresh rollout/jsonl file.
     // Critical for Codex 0.124+ which dropped session id from its TUI banner.
-    maybeRegisterWithSessionTracker(terminal, agentType, entry.sessionId);
+    maybeRegisterWithSessionTracker(terminal, agentType, entry.sessionId, adoptExistingSession);
   } else {
     console.error(`[TERMINALS] FAILED to set agentType - terminal "${terminal.name}" not found in registry.`);
   }
@@ -695,7 +700,7 @@ export async function scanExisting(
     if (agentType) {
       // Register agent type even when session id is unknown so sessionTracker
       // can adopt new Codex/Claude session files later.
-      setAgentType(terminal, agentType);
+      setAgentType(terminal, agentType, true);
     }
     let sessionId = identOpts.sessionId;
 

@@ -40,4 +40,19 @@ describe('collectLocalFleetInventory populates signIn (RUSH-2069)', () => {
       expect(rows.length).toBe(versions.length);
     }
   });
+
+  it('emits one closed hook-runtime state for every installed version', async () => {
+    const inv = await collectLocalFleetInventory(process.cwd());
+    expect(inv.hookRuntime).toBeDefined();
+    const allowed = new Set(['healthy', 'broken', 'not-applicable']);
+
+    for (const [agent, versions] of Object.entries(inv.agentVersions)) {
+      const states = inv.hookRuntime![agent];
+      expect(states, `hookRuntime should carry ${agent}`).toBeDefined();
+      expect(Object.keys(states).sort()).toEqual([...versions].sort());
+      for (const state of Object.values(states)) {
+        expect(allowed.has(state)).toBe(true);
+      }
+    }
+  });
 });

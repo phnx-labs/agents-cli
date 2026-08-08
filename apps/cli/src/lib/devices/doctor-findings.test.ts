@@ -5,6 +5,7 @@ import {
   buildLocalFindings,
   collapseAcrossVersions,
   fleetDivergenceToFindings,
+  hookRuntimeToFindings,
   signInToFindings,
   remediationFor,
   renderFindings,
@@ -16,7 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ALL_AGENT_IDS, supportsAccountInspection } from '../agents.js';
 import type { VersionResourceReport } from '../doctor-diff.js';
-import type { FleetVersionSignIn, FleetDivergence } from './fleet-divergence.js';
+import type { FleetHookRuntimeState, FleetVersionSignIn, FleetDivergence } from './fleet-divergence.js';
 import { stringWidth } from '../session/width.js';
 
 const stripAnsi = (s: string): string => s.replace(/\[[0-9;]*m/g, '');
@@ -108,6 +109,45 @@ describe('severity rubric', () => {
     const f = findings.find((x) => x.kind === 'unwired-hook');
     expect(f?.severity).toBe('critical');
     expect(f?.message).toContain("hook 'rm-guard'");
+  });
+
+  it('a wired hook with a broken generated shim is CRITICAL, even when wiring itself is unsupported', () => {
+    const findings = buildLocalFindings(localInput({
+      reports: [report('claude', '2.1.0', {}, {
+        supported: false, unwired: [], wired: [],
+        runtimeBroken: [{ name: 'git-guard', path: '/h/shims/hooks/git-guard.sh', reason: 'missing' }],
+      } as any)],
+    }));
+    const f = findings.find((x) => x.kind === 'hook-runtime-broken');
+    expect(f?.severity).toBe('critical');
+    expect(f?.message).toBe("hook 'git-guard' wired but its generated shim is missing");
+    expect(f?.remediation).toBe('agents doctor claude@2.1.0 --fix');
+  });
+
+  it('rebuilds remote hook-runtime findings from closed state without a remote path or reason', () => {
+    const state: Record<string, Record<string, FleetHookRuntimeState>> = {
+      claude: { '2.1.0': 'broken', '2.2.0': 'healthy' },
+    };
+    const findings = hookRuntimeToFindings('remote-box', state);
+    expect(findings).toEqual([expect.objectContaining({
+      severity: 'critical',
+      kind: 'hook-runtime-broken',
+      device: 'remote-box',
+      agent: 'claude',
+      version: '2.1.0',
+      message: 'generated hook wrapper is unusable',
+      remediation: 'agents doctor claude@2.1.0 --fix',
+    })]);
+  });
+
+  it('marks a legacy remote that omits hook-runtime state as visibility unavailable', () => {
+    const [finding] = hookRuntimeToFindings('legacy-box', undefined);
+    expect(finding).toMatchObject({
+      severity: 'warning',
+      kind: 'hook-runtime-visibility-unavailable',
+      device: 'legacy-box',
+      remediation: 'upgrade agents-cli on this device',
+    });
   });
 
   it('a never-synced version collapses its missing resources to ONE warning (not critical)', () => {
@@ -652,7 +692,7 @@ describe('remediationFor', () => {
       .toBe('agents run kimi@0.19.2');
   });
 
-  it.each(['gemini', 'antigravity', 'droid', 'cursor'] as const)(
+  it.each(['gemini', 'antigravity', 'droid'] as const)(
     '%s has NO per-version isolation → shared login (no fake per-version fix)',
     (agent) => {
       const r = remediationFor({ ...base, kind: 'logged-out', agent, version: '9.9.9' });
@@ -660,6 +700,15 @@ describe('remediationFor', () => {
       expect(r).toContain('shared across all');
     },
   );
+
+  it('cursor now isolates its token per version home → version-targeted run (RUSH-2400)', () => {
+    // Cursor's login used to be shared; it now pins XDG_CONFIG_HOME per version
+    // home (buildExecEnv), so each account authenticates from its own token and
+    // the remediation must target the specific version, not claim a shared login.
+    const r = remediationFor({ ...base, kind: 'logged-out', agent: 'cursor', version: '9.9.9' });
+    expect(r).toBe('agents run cursor@9.9.9');
+    expect(r).not.toContain('shared across all');
+  });
 
   it('opencode uses `auth login`, forwarded into the version home', () => {
     const r = remediationFor({ ...base, kind: 'logged-out', agent: 'opencode', version: '1.0.0' });

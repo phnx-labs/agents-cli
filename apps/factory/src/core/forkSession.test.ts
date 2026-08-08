@@ -63,6 +63,22 @@ describe('buildForkSessionRequest', () => {
   test('rejects a terminal without a recognized agent harness', () => {
     expect(buildForkSessionRequest({ sessionId: 'session-123' })).toEqual({ ok: false, reason: 'no_agent' });
   });
+
+  test('builds an active-tab recap as a fresh sibling context prompt', () => {
+    expect(buildForkSessionRequest(
+      { sessionId: 'session-123', agentKey: 'claude', host: 'yosemite-s0' },
+      undefined,
+      'recap',
+    )).toMatchObject({
+      ok: true,
+      sessionId: 'session-123',
+      agentKey: 'claude',
+      host: 'yosemite-s0',
+      local: false,
+      strategy: 'balanced',
+      prompt: '/recap session-123',
+    });
+  });
 });
 
 describe('buildForkSessionRequest with a picked device', () => {

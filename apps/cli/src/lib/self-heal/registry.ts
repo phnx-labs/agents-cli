@@ -14,16 +14,19 @@ import type {
   CheckReport,
 } from './types.js';
 import { resourcesCheck } from './checks/resources.js';
+import { hookRuntimeCheck } from './checks/hook-runtime.js';
 import { shimsCheck } from './checks/shims.js';
 import { shadowingCheck } from './checks/shadowing.js';
 import { pathCheck } from './checks/path.js';
 
-// Order matters: cheap structural fixes (shims, shadow adoption, PATH) before the
-// heavier resource reconciliation, so a freshly-repaired shim is in place first.
+// Order matters: cheap structural fixes (shims, shadow adoption, PATH, generated
+// hook wrappers) before the heavier resource reconciliation, so a freshly-
+// repaired shim is in place first.
 export const HEAL_CHECKS: HealCheck[] = [
   shimsCheck,
   shadowingCheck,
   pathCheck,
+  hookRuntimeCheck,
   resourcesCheck,
 ];
 

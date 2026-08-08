@@ -9,7 +9,12 @@
  *
  * Cross-host is handled one layer up: `--host <h>` routes the whole command over
  * ssh via `REMOTE_PASSTHROUGH` (see src/lib/hosts/passthrough.ts), so the box is
- * written on the host that actually owns the agent.
+ * written on the host that actually owns the agent. A caller who doesn't already
+ * know the host (a detached `agents run --device <h> --no-follow` dispatch) is
+ * still resolved automatically: a `target` matching no local/cloud session falls
+ * through to the `~/.agents/.cache/hosts/` records `agents hosts ps` reads
+ * (RUSH-2366 follow-up — see decideHostTaskRoute in lib/mailbox-target.ts), and
+ * the message is rerouted there.
  *
  * For local agents, the message is tied to the agent's current open feed block
  * (if any). The first answer to a block wins: a second concurrent answer is
@@ -26,7 +31,14 @@ import { getTaskById, updateTaskStatus } from '../lib/cloud/store.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
 import { mailboxDir, enqueue } from '../lib/mailbox.js';
 import { getAgentsInvocation } from '../lib/daemon.js';
-import { resolveMessageTarget, mailboxIdForActiveSession } from '../lib/mailbox-target.js';
+import { resolveTaskRef } from '../lib/hosts/tasks.js';
+import { reconcileRunningTasks } from '../lib/hosts/reconcile.js';
+import {
+  resolveMessageTarget,
+  mailboxIdForActiveSession,
+  decideHostTaskRoute,
+  type HostTaskRoute,
+} from '../lib/mailbox-target.js';
 import {
   blockIdForSession,
   listBlocks,
@@ -163,6 +175,44 @@ async function deliverViaResume(route: AnswerRoute, mailboxId: string): Promise<
 }
 
 /**
+ * Reroute a message to a detached `agents run --device <host> --no-follow`
+ * dispatch (RUSH-2366 follow-up). `getActiveSessions()` never sees these: the
+ * live process is on the dispatch's host, not this machine, so the local
+ * session resolver in `resolveMessageTarget` reports "no running agent" even
+ * while `agents hosts ps` shows the same dispatch running with a live remote
+ * pid — the only recovery was kill-and-redispatch, losing all context.
+ *
+ * Re-spawns `agents message <remoteRef> <text> --host <host>` through
+ * `getAgentsInvocation`, so it re-enters via the SAME `--host` REMOTE_PASSTHROUGH
+ * choke point (`lib/hosts/passthrough.ts`) any explicit `--host` caller uses,
+ * and resolves against the remote box's own active sessions.
+ */
+async function deliverViaHostReroute(
+  route: Extract<HostTaskRoute, { kind: 'reroute' }>,
+  text: string,
+  opts: { from?: string; as?: string; surface?: string; ttl?: string },
+): Promise<void> {
+  const argv = ['message', route.remoteRef, text, '--host', route.host];
+  if (opts.from) argv.push('--from', opts.from);
+  if (opts.as) argv.push('--as', opts.as);
+  if (opts.surface) argv.push('--surface', opts.surface);
+  if (opts.ttl) argv.push('--ttl', opts.ttl);
+
+  const inv = getAgentsInvocation(argv);
+  const child = spawn(inv.command, inv.args, { stdio: 'inherit', env: process.env });
+  const code: number = await new Promise((resolve) => {
+    child.on('exit', (c) => resolve(c ?? 1));
+    child.on('error', () => resolve(1));
+  });
+  if (code !== 0) {
+    die(
+      `Delivery to '${route.remoteRef}' on host '${route.host}' exited with code ${code}. ` +
+        `Tried: agents ${argv.join(' ')}`,
+    );
+  }
+}
+
+/**
  * `message` is the agent-control plane (RUSH-2123): the answer/keystroke/
  * injected input a running agent consumes, never a notification a human reads.
  * Mirrors SHARED_NOTES in commands/send.ts so an agent reading either --help
@@ -269,8 +319,34 @@ export function registerMessageCommand(program: Command): void {
           die(`"${target}" matches ${res.candidates.length} running agents:\n${lines}\nRe-run with a full id.`);
           return;
         }
-        case 'none':
-          die(`No running agent or cloud task matches "${target}". List targets with \`agents sessions --active\`.`);
+        case 'none': {
+          // Not a local/cloud session — check whether it's a detached
+          // `--device ... --no-follow` dispatch, which `getActiveSessions()`
+          // never sees (its live process is on another host). Same records
+          // `agents hosts ps` reads, so the two commands never disagree.
+          // Heal first, exactly as `hosts stop`/`hosts ps` do: a detached
+          // dispatch record never self-updates, so a finished run is still
+          // stamped `status:'running'` on disk. Without this we'd route a dead
+          // task through an SSH reroute that can only fail, instead of
+          // reporting it finished here.
+          const onDisk = resolveTaskRef(target);
+          const hostRoute = decideHostTaskRoute(
+            onDisk ? reconcileRunningTasks([onDisk])[0] : null,
+            target,
+          );
+          if (hostRoute.kind === 'reroute') {
+            await deliverViaHostReroute(hostRoute, text, opts);
+            return;
+          }
+          if (hostRoute.kind === 'finished') {
+            die(
+              `Task '${target}' on host '${hostRoute.host}' already ${hostRoute.status}` +
+                (hostRoute.exitCode !== undefined ? ` (exit ${hostRoute.exitCode})` : '') +
+                `. Nothing to message. View its output: \`agents hosts logs ${target}\`.`,
+            );
+          }
+          die(`No running agent or cloud task matches "${target}". List targets with \`agents sessions --active\` or \`agents hosts ps\`.`);
+        }
       }
     });
 }

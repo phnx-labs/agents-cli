@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { mailboxDir } from './mailbox.js';
+import { getVersionHomePath } from './versions.js';
 
 // RUSH-2215: do not skip the whole file on win32 — Windows-specific suites
 // (e.g. resolveShimSpawn .cmd) and pure string/auth detectors must run.
@@ -225,6 +226,29 @@ describe('buildExecEnv — Claude Code auto-updater suppression for pinned manag
   it('leaves codex untouched — no DISABLE_AUTOUPDATER injected', () => {
     const env = buildExecEnv(execOpts({ agent: 'codex', version: '0.20.0' }));
     expect(env.DISABLE_AUTOUPDATER).toBeUndefined();
+  });
+});
+
+describe('buildExecEnv — Cursor per-account login isolation (XDG_CONFIG_HOME)', () => {
+  it('pins XDG_CONFIG_HOME at the version home so each Cursor account uses its own token', () => {
+    // Cursor has no config-dir env var; its OAuth token (the login gate) is at
+    // $XDG_CONFIG_HOME/cursor/auth.json. Pinning XDG_CONFIG_HOME per version home
+    // is what makes `agents run cursor@<v>` authenticate as that account.
+    const env = buildExecEnv(execOpts({ agent: 'cursor', version: '2026.08.04' }));
+    expect(env.XDG_CONFIG_HOME).toBe(path.join(getVersionHomePath('cursor', '2026.08.04'), '.config'));
+  });
+
+  it('a different pinned Cursor version resolves to a different config home (real multi-account)', () => {
+    const a = buildExecEnv(execOpts({ agent: 'cursor', version: '2026.08.04' }));
+    const b = buildExecEnv(execOpts({ agent: 'cursor', version: '2026.07.23' }));
+    expect(a.XDG_CONFIG_HOME).not.toBe(b.XDG_CONFIG_HOME);
+    expect(a.XDG_CONFIG_HOME).toContain(path.join('cursor', '2026.08.04'));
+    expect(b.XDG_CONFIG_HOME).toContain(path.join('cursor', '2026.07.23'));
+  });
+
+  it('a caller-provided XDG_CONFIG_HOME override still wins', () => {
+    const env = buildExecEnv(execOpts({ agent: 'cursor', version: '2026.08.04', env: { XDG_CONFIG_HOME: '/custom/xdg' } }));
+    expect(env.XDG_CONFIG_HOME).toBe('/custom/xdg');
   });
 });
 

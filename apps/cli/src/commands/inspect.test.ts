@@ -15,6 +15,7 @@ import {
   hookManifestByScript,
   wrapJoined,
 } from './inspect.js';
+import { listHookEntriesFromDir } from '../lib/hooks.js';
 import type { ManifestHook } from '../lib/types.js';
 import { getUserAgentsDir, getSystemAgentsDir } from '../lib/state.js';
 import { stringWidth } from '../lib/session/width.js';
@@ -120,6 +121,122 @@ describe('collectRepoKind', () => {
     const repo = resolveRepoTarget(root)!;
     expect(collectRepoKind(repo, 'commands').map(c => c.name)).toEqual(['plain', 'ship']);
   });
+
+  it('skips directory-doc files (README/AGENTS/CLAUDE/GEMINI), including symlinks', () => {
+    const root = makeProjectRepo();
+    const commandsDir = path.join(root, '.agents', 'commands');
+    // Every resource dir carries README.md + AGENTS.md by convention, with
+    // CLAUDE.md/GEMINI.md symlinked to AGENTS.md. None is a command.
+    fs.writeFileSync(path.join(commandsDir, 'README.md'), '# Commands\n');
+    fs.writeFileSync(path.join(commandsDir, 'AGENTS.md'), '# Maintenance\n');
+    fs.symlinkSync('AGENTS.md', path.join(commandsDir, 'CLAUDE.md'));
+    fs.symlinkSync('AGENTS.md', path.join(commandsDir, 'GEMINI.md'));
+    const repo = resolveRepoTarget(root)!;
+    // Only the real commands remain — the four doc files are filtered out.
+    expect(collectRepoKind(repo, 'commands').map(c => c.name)).toEqual(['plain', 'ship']);
+  });
+
+  it('lists rules from subrules/, not the composed AGENTS.md output', () => {
+    const root = makeProjectRepo();
+    const rulesDir = path.join(root, '.agents', 'rules');
+    fs.mkdirSync(path.join(rulesDir, 'subrules'), { recursive: true });
+    // The composed output + its symlinks + the maintenance doc + the preset file.
+    // None of these is a rule you can drill into by name.
+    fs.writeFileSync(path.join(rulesDir, 'AGENTS.md'), '# Composed ruleset\n');
+    fs.symlinkSync('AGENTS.md', path.join(rulesDir, 'CLAUDE.md'));
+    fs.writeFileSync(path.join(rulesDir, 'README.md'), '# Rules\n');
+    fs.writeFileSync(path.join(rulesDir, 'rules.yaml'), 'presets:\n  default:\n    subrules: []\n');
+    // The addressable fragments.
+    fs.writeFileSync(path.join(rulesDir, 'subrules', 'foundations.md'), '# Foundations\n\nF1.\n');
+    fs.writeFileSync(path.join(rulesDir, 'subrules', 'code-quality.md'), '# Code Quality\n\nTactics.\n');
+    const repo = resolveRepoTarget(root)!;
+    // Before this fix `subrules` came back as a single opaque leaf alongside the
+    // doc files, so `--rule foundations` could never resolve.
+    expect(collectRepoKind(repo, 'rules').map(r => r.name)).toEqual(['code-quality', 'foundations']);
+  });
+
+  it('omits the author row when the manifest author has no name', () => {
+    const root = makeProjectRepo();
+    const dir = path.join(root, '.agents', 'plugins', 'noauthor', '.claude-plugin');
+    fs.mkdirSync(dir, { recursive: true });
+    // loadPluginManifest is a bare JSON cast, so `author.name` is typed required
+    // but never validated. An author object without a name used to push
+    // `undefined` into the row list and crash the renderer on stripAnsi.
+    fs.writeFileSync(path.join(dir, 'plugin.json'), JSON.stringify({
+      name: 'noauthor', version: '1.0.0', description: 'no author name', author: { email: 'x@y.z' },
+    }));
+    const repo = resolveRepoTarget(root)!;
+    const [plugin] = collectRepoKind(repo, 'plugins');
+    expect(plugin.name).toBe('noauthor');
+    expect(plugin.extra?.map(([k]) => k)).not.toContain('author');
+    // Every emitted value must be a string — the crash was an undefined here.
+    for (const [, v] of plugin.extra ?? []) expect(typeof v).toBe('string');
+  });
+
+  it('survives manifest fields whose JSON type contradicts the declared type', () => {
+    const root = makeProjectRepo();
+    const dir = path.join(root, '.agents', 'plugins', 'wrongtypes', '.claude-plugin');
+    fs.mkdirSync(dir, { recursive: true });
+    // loadPluginManifest validates only name/version, so every other field is
+    // whatever the JSON says. `dependencies` as a bare string is the sharp one:
+    // `.length` is truthy on a string and `.join` does not exist, which threw
+    // inside pluginToItem — i.e. while BUILDING THE LIST, taking down `inspect .`,
+    // `--plugins`, and even a query for a different, valid plugin.
+    fs.writeFileSync(path.join(dir, 'plugin.json'), JSON.stringify({
+      name: 'wrongtypes', version: 2, description: 'd', dependencies: 'some-plugin',
+    }));
+    const repo = resolveRepoTarget(root)!;
+    const items = collectRepoKind(repo, 'plugins');
+    expect(items.map(i => i.name)).toContain('wrongtypes');
+    const plugin = items.find(i => i.name === 'wrongtypes')!;
+    // A non-array `dependencies` still renders, and a numeric version coerces.
+    expect(plugin.extra).toEqual(
+      expect.arrayContaining([['version', '2'], ['depends on', 'some-plugin']]),
+    );
+    for (const [, v] of plugin.extra ?? []) expect(typeof v).toBe('string');
+  });
+
+  it('reads a dir-form subrule description from rule.md', () => {
+    const root = makeProjectRepo();
+    const dir = path.join(root, '.agents', 'rules', 'subrules', 'gh-merge-guard');
+    fs.mkdirSync(dir, { recursive: true });
+    // The directory form documented in lib/rules/compose.ts (SUBRULE_RULE_FILE).
+    fs.writeFileSync(path.join(dir, 'rule.md'), '# Merge & Admin-Bypass Guard\n\nNever bypass.\n');
+    const repo = resolveRepoTarget(root)!;
+    const [rule] = collectRepoKind(repo, 'rules');
+    expect(rule.name).toBe('gh-merge-guard');
+    expect(rule.description).toBe('Merge & Admin-Bypass Guard');
+  });
+
+  it('falls back to the flat rules dir when there is no subrules/', () => {
+    const root = makeProjectRepo();
+    const rulesDir = path.join(root, '.agents', 'rules');
+    fs.mkdirSync(rulesDir, { recursive: true });
+    fs.writeFileSync(path.join(rulesDir, 'house-style.md'), '# House style\n');
+    const repo = resolveRepoTarget(root)!;
+    expect(collectRepoKind(repo, 'rules').map(r => r.name)).toEqual(['house-style']);
+  });
+
+  it('reads hooks through the grouped reader, matching the summary view', () => {
+    const root = makeProjectRepo();
+    const hooksDir = path.join(root, '.agents', 'hooks');
+    // Hooks nest under event directories, and a script pairs with its data
+    // sidecar. A flat readdir returned the event dir itself ('pre-tool-use') and
+    // counted the sidecar separately, so `--hooks` and the summary disagreed.
+    fs.mkdirSync(path.join(hooksDir, 'pre-tool-use'), { recursive: true });
+    fs.writeFileSync(path.join(hooksDir, 'pre-tool-use', 'guard.sh'), '#!/usr/bin/env bash\necho ok\n');
+    fs.writeFileSync(path.join(hooksDir, 'pre-tool-use', 'guard.yaml'), 'matches: {}\n');
+    fs.writeFileSync(path.join(hooksDir, 'README.md'), '# Hooks\n');
+
+    const repo = resolveRepoTarget(root)!;
+    const names = collectRepoKind(repo, 'hooks').map(h => h.name);
+    // The nested script is found, its sidecar collapses into it, and neither the
+    // event directory nor the directory doc is reported as a hook.
+    expect(names).toEqual(['guard']);
+    // The drill and the summary must never report different counts again — both
+    // now go through listHookEntriesFromDir.
+    expect(names).toEqual(listHookEntriesFromDir(hooksDir).map(h => h.name));
+  });
 });
 
 describe('repoManifestSummary', () => {
@@ -202,6 +319,36 @@ describe('summarizeHook', () => {
   it('joins multiple events with a slash', () => {
     expect(summarizeHook({ script: 'x.sh', events: ['PreToolUse', 'PostToolUse'] }))
       .toBe('PreToolUse/PostToolUse');
+  });
+
+  it('survives agents.yaml values whose YAML type contradicts the declared type', () => {
+    // A hook entry is an unvalidated yaml.parse cast. `events` as a scalar is
+    // neither null nor an array, so `(hook.events ?? []).join()` threw — killing
+    // bare `agents inspect <repo>`, and via the central manifest every box's
+    // `agents inspect <agent>`. Renders the scalar rather than dropping it.
+    expect(summarizeHook({ script: 'x.sh', events: 'PreToolUse' } as unknown as ManifestHook))
+      .toBe('PreToolUse');
+    // Predicates reach `truncate`, which calls `.slice`.
+    expect(summarizeHook({
+      script: 'x.sh',
+      events: ['Stop'],
+      matches: { prompt_contains: 12345, cwd_includes: 99 },
+    } as unknown as ManifestHook)).toBe('Stop · prompt~"12345" · cwd~99');
+    // An object carries no one-line form: dropped, never `[object Object]`.
+    expect(summarizeHook({
+      script: 'x.sh', events: [{ a: 1 }, 'Stop'],
+    } as unknown as ManifestHook)).toBe('Stop');
+    expect(summarizeHook({ script: 'x.sh', events: {} } as unknown as ManifestHook))
+      .toBe('(no event)');
+    // `cache: 5` has no `.ttl` and `{ttl: {…}}` has a non-scalar one; both used
+    // to render a tail reading `(undefined cache)` / `([object Object] cache)`.
+    for (const cache of [5, [1, 2], { ttl: { a: 1 } }, {}]) {
+      expect(summarizeHook({ script: 'x.sh', events: ['Stop'], cache } as unknown as ManifestHook))
+        .toBe('Stop');
+    }
+    // A well-formed ttl still renders.
+    expect(summarizeHook({ script: 'x.sh', events: ['Stop'], cache: { ttl: '5m' } } as unknown as ManifestHook))
+      .toBe('Stop (5m cache)');
   });
 
   it('puts the matcher in parens after the events', () => {

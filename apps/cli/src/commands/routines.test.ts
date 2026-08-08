@@ -124,6 +124,26 @@ describeRoutines('routines add help', () => {
   });
 });
 
+describeRoutines('routines edit transaction', () => {
+  it('leaves the live definition and activation unchanged when edited YAML is invalid', () => {
+    const home = makeHome({
+      jobs: [{ name: 'atomic-edit', schedule: '0 3 * * *', command: 'true', enabled: true }],
+    });
+    const routinePath = path.join(home, '.agents', 'routines', 'atomic-edit.yml');
+    const before = fs.readFileSync(routinePath, 'utf-8');
+    const editor = path.join(home, 'invalid-editor.sh');
+    fs.writeFileSync(editor, '#!/bin/sh\nprintf "name: [invalid" > "$1"\n', { mode: 0o755 });
+    try {
+      const result = run(home, ['edit', 'atomic-edit', '--yaml'], { EDITOR: editor });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('Routine not saved');
+      expect(fs.readFileSync(routinePath, 'utf-8')).toBe(before);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 function writeRunMeta(home: string, jobName: string, runId: string, meta: Record<string, unknown>): void {
   const runDir = path.join(home, '.agents', '.history', 'runs', jobName, runId);
   fs.mkdirSync(runDir, { recursive: true });
@@ -312,6 +332,9 @@ const baseJob = {
   schedule: '0 3 * * *',
   agent: 'claude',
   prompt: 'noop',
+  // Agent routines now need an execution anchor to activate (RUSH-2290); home
+  // is a valid one and keeps these device/eligibility fixtures ready.
+  cwd: '~',
   // Legacy fixture state: tests that specifically cover the new manifest model
   // materialize a device document below.
   enabled: true,
@@ -1281,6 +1304,7 @@ describeRoutines('routines add --devices empty/whitespace fails closed', () => {
         '--schedule', '0 3 * * *',
         '--agent', 'claude',
         '--prompt', 'hi',
+        '--cwd', '~',
         '--devices', 'yosemite-s0',
       ], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
       expect(res.status).toBe(0);
@@ -1467,6 +1491,77 @@ describeRoutines('routines run --json', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it('two independent CLI processes do not serialize overlapping foreground runs', async () => {
+    const home = makeHome({
+      jobs: [{
+        name: 'overlap-job',
+        schedule: '0 3 * * *',
+        // Source-mode CLI startup under CI can take several seconds. Keep the
+        // first process alive long enough for a second independent source-mode
+        // invocation to reach the claim while it is genuinely active.
+        command: 'sleep 10',
+        mode: 'auto',
+        effort: 'auto',
+        timeout: '10m',
+        enabled: true,
+        prompt: '',
+      }],
+      registry,
+    });
+    const childEnv = {
+      ...process.env,
+      HOME: home,
+      USERPROFILE: home,
+      AGENTS_DEVICES_DIR: path.join(home, '.agents', '.history', 'devices'),
+      AGENTS_SKIP_MIGRATION: '1',
+    };
+    try {
+      const first = spawn('node', ['--import', TSX_IMPORT, CLI_ENTRYPOINT, 'routines', 'run', 'overlap-job', '--json'], {
+        cwd: REPO_ROOT,
+        env: childEnv,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let firstStdout = '';
+      let firstStderr = '';
+      first.stdout.setEncoding('utf8');
+      first.stderr.setEncoding('utf8');
+      first.stdout.on('data', (chunk) => { firstStdout += chunk; });
+      first.stderr.on('data', (chunk) => { firstStderr += chunk; });
+
+      const runsDir = path.join(home, '.agents', '.history', 'runs', 'overlap-job');
+      const deadline = Date.now() + 10_000;
+      let observedRunning = false;
+      while (Date.now() < deadline) {
+        const runIds = fs.existsSync(runsDir) ? fs.readdirSync(runsDir).filter((entry) => !entry.startsWith('.')) : [];
+        if (runIds.some((runId) => {
+          const metaPath = path.join(runsDir, runId, 'meta.json');
+          return fs.existsSync(metaPath) && JSON.parse(fs.readFileSync(metaPath, 'utf8')).status === 'running';
+        })) {
+          observedRunning = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(observedRunning).toBe(true);
+
+      const second = run(home, ['run', 'overlap-job', '--json']);
+      expect(second.status, second.stderr).toBe(1);
+      expect(JSON.parse(second.stdout.trim())).toMatchObject({
+        jobName: 'overlap-job',
+        status: 'skipped',
+      });
+
+      const firstExit = await new Promise<number | null>((resolve) => first.once('close', resolve));
+      expect(firstExit, firstStderr).toBe(0);
+      expect(JSON.parse(firstStdout.trim())).toMatchObject({
+        jobName: 'overlap-job',
+        status: 'completed',
+      });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  }, 20_000);
 });
 
 describeRoutines('buildRunsJson', () => {

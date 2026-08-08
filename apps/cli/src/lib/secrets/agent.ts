@@ -663,7 +663,7 @@ async function bindBrokerSocket(
  */
 export async function runSecretsAgent(
   opts: { service?: boolean } = {},
-): Promise<{ close(): void } | null> {
+): Promise<{ close(): void | Promise<void> } | null> {
   if (!onDarwin()) return null; // nothing to broker without biometry prompts
   // When launchd keeps us alive as a persistent service, never idle-exit:
   // exiting would just make launchd cold-start us again, reintroducing the
@@ -806,6 +806,9 @@ export async function runSecretsAgent(
 
   let watcher: ChildProcess | null = null;
   let sweepTimer: NodeJS.Timeout | null = null;
+  // Sync cleanup for SIGTERM/SIGINT → process.exit: we cannot await the
+  // server's 'close' event before exit, so fire-and-forget close + unlink.
+  // The public close() path below awaits with a bounded timeout (RUSH-2421).
   cleanupActive = () => {
     store.clear();
     if (sweepTimer) clearInterval(sweepTimer);
@@ -844,11 +847,17 @@ export async function runSecretsAgent(
   }
 
   return {
-    close() {
+    async close() {
       if (shuttingDown) return;
       shuttingDown = true;
       detachSignals();
-      cleanupActive?.();
+      store.clear();
+      if (sweepTimer) clearInterval(sweepTimer);
+      try { watcher?.kill(); } catch { /* already gone */ }
+      await closeServerBounded(server);
+      try { fs.unlinkSync(sock); } catch { /* gone */ }
+      releaseBrokerPid();
+      releasePid();
     },
   };
 }
@@ -871,7 +880,7 @@ export async function runSecretsAgent(
  * stale socket is reclaimed. Returns a handle the daemon closes on shutdown,
  * or null off-darwin (nothing to broker without biometry).
  */
-export async function startHostedBroker(): Promise<{ close(): void } | null> {
+export async function startHostedBroker(): Promise<{ close(): void | Promise<void> } | null> {
   if (!onDarwin()) return null;
 
   const store = rehydrateStore();
@@ -917,15 +926,50 @@ export async function startHostedBroker(): Promise<{ close(): void } | null> {
   }
 
   return {
-    close() {
+    // RUSH-2421: await net.Server's 'close' (bounded) so a caller relying on
+    // close() cannot proceed past a socket that is not actually released yet.
+    // The daemon may fire-and-forget this promise; tests and any awaiter get
+    // the real release boundary.
+    async close() {
       store.clear();
       clearInterval(sweepTimer);
       try { watcher?.kill(); } catch { /* already gone */ }
-      try { server.close(); } catch { /* not listening */ }
+      await closeServerBounded(server);
       try { fs.unlinkSync(sock); } catch { /* gone */ }
       releaseBrokerPid();
     },
   };
+}
+
+/** How long to wait for net.Server.close()'s 'close' event before giving up. */
+const SERVER_CLOSE_TIMEOUT_MS = 2_000;
+
+/**
+ * Call Node's net.Server.close() and wait for the 'close' event (or a bounded
+ * timeout). Without this, close() returned while the listen socket could still
+ * be held — a successor bind could race EADDRINUSE against a half-closed server
+ * (RUSH-2421). Pure side-effect helper; never throws.
+ */
+export function closeServerBounded(
+  server: net.Server,
+  timeoutMs: number = SERVER_CLOSE_TIMEOUT_MS,
+): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    try {
+      server.close(() => finish());
+    } catch {
+      // Already closed / not listening — treat as released.
+      finish();
+    }
+  });
 }
 
 // ─── Client ──────────────────────────────────────────────────────────────────

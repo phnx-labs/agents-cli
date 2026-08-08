@@ -294,6 +294,26 @@ elsewhere is refused with a message naming how to enable it, until the owner run
 | `agents browser history` | Recent task history; `--limit <n>` |
 | `agents browser refs --all` | Include non-interactive elements; `--limit <n>` |
 | `agents browser wait` | Wait for a condition: `--time`, `--selector`, `--url`, `--fn`, `--state` |
+| `agents browser sessions` | Browse captured screenshots, PDFs, recordings, and downloads, grouped by task. `agents sessions --browser` is the same view. |
+
+`agents browser sessions` flags: `--profile <name>` (default: every profile with
+captures), `--open [selector]` (open `latest` or a filename match in the OS
+default app), `--json`, `--no-interactive`.
+
+On a real terminal (no `--json`/`--open`/`--no-interactive`), `sessions` opens an
+interactive, **task-first** browser: one row per browser task, newest first —
+not one row per screenshot. A task started with a caller identity (`owner`,
+`launchId` — see `--task`/`AGENT_LAUNCH_ID`) links to the agent session that ran
+it while that task is still live in `tasks.json`; the preview pane then shows
+the same digest as `agents sessions` (prompt, changes, tests, last response),
+followed by that task's captures newest-first with filename/age/size. A task
+whose owning run already stopped shows as **unlinked** — its captures are still
+listed and openable, there's just no session to attribute them to. Downloads sit
+in their own row, separate from any task. Search matches task name, profile, the
+linked session's agent/topic, or an artifact filename; `enter` opens the
+highlighted capture directly (or drills into a capture list first when a task
+holds more than one). `--no-interactive` prints the flat per-artifact table
+instead — the stable, scriptable surface `--json` also uses.
 
 ## Profile Schema
 

@@ -14,6 +14,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { detectDevBuild } from './lib/startup/dev-build.js';
+import { configureRootCommand } from './lib/startup/root-command.js';
 // `ora`, `@inquirer/prompts`, `./commands/utils.js`, and the agents/versions/shims
 // modules are imported dynamically at their use sites: they are needed only on
 // interactive / update / shim-repair paths, never for fast commands like
@@ -93,6 +94,7 @@ import {
   refreshAliasShims,
   downloadVerifiedTarball,
 } from './lib/self-update.js';
+import { registerUpgradeCommand, type UpgradeOptions } from './commands/upgrade.js';
 
 interface NpmPackageMetadata {
   version: string;
@@ -140,6 +142,7 @@ import {
   loadWorkflows,
   loadWorktree,
   loadVersions,
+  loadUpdate,
   loadImport,
   loadExport,
   loadPackages,
@@ -232,8 +235,31 @@ if (process.argv[2] === '__shim') {
 }
 
 if (process.argv[2] === '__daemon-run') {
-  const { runDaemon } = await import('./lib/daemon.js');
-  await runDaemon();
+  const { runDaemon, log: daemonLog } = await import('./lib/daemon.js');
+
+  // RUSH-2418: the daemon is the one always-on process here, and it ran with no
+  // top-level handler of any kind — an uncaught throw or a rejected promise from
+  // any of its background ticks died on Node's default handler, printing a raw
+  // stack to whatever the service manager had wired to stdout and never reaching
+  // the daemon's own structured log. Route both into log() so the failure is in
+  // logs.jsonl where `agents daemon logs` reads it, then exit non-zero and
+  // DELIBERATELY let the supervisor restart us — now paced by the plist's
+  // ThrottleInterval / the unit's StartLimitBurst. Swallowing here would be the
+  // worse failure: a daemon left alive with a dead subsystem.
+  const crash = (kind: string) => (err: unknown) => {
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    try { daemonLog('ERROR', `${kind}: ${detail}`); } catch { /* log path unwritable — stderr below still carries it */ }
+    process.stderr.write(`[agents] daemon ${kind}: ${detail}\n`);
+    process.exit(1);
+  };
+  process.on('uncaughtException', crash('uncaughtException'));
+  process.on('unhandledRejection', crash('unhandledRejection'));
+
+  try {
+    await runDaemon();
+  } catch (err) {
+    crash('startup failure')(err);
+  }
   process.exit(process.exitCode ?? 0);
 }
 
@@ -258,15 +284,7 @@ if (process.argv[2] === '__daemon-tick') {
 // unset) resolves to 'agents' and everything below is byte-identical to before.
 const BRAND = resolveBrandName();
 
-const program = new Command();
-
-program
-  .name(BRAND)
-  .description('Environment manager for AI agents')
-  .version(VERSION)
-  .option('--verbose', 'Show startup self-heal details on stderr')
-  .helpOption('-h, --help', 'Show help')
-  .addHelpCommand(false);
+const program = configureRootCommand(new Command(), BRAND, VERSION);
 
 // ─── Audit backbone ────────────────────────────────────────────────────────────
 // One choke point logs every `agents <module> <cmd>` invocation to the structured
@@ -413,6 +431,7 @@ Quick start:
 Agent versions:
   add <agent>[@version]           Install an agent CLI (e.g. agents add grok or agents add codex)
   import <agent>                  Adopt an existing global install (npm/homebrew) into agents-cli
+  update <agent>[@version]        Move an installed agent to a new release, keeping its name (agents-cli itself is 'agents upgrade')
   prune <agent>[@version]         Uninstall a version
   remove <agent>[@version]        Alias for prune
   use <agent>@<version>           Set the default version
@@ -966,13 +985,8 @@ function registerInternalCommand(p: Command): void {
     });
 }
 
-/** Self-upgrade command (`agents upgrade [version]`). */
-function registerUpgradeCommand(p: Command): void {
-  p.command('upgrade')
-    .description('Upgrade agents-cli to the latest version (or a specific [version])')
-    .argument('[version]', 'Target version or dist-tag to install (default: latest)')
-    .option('-y, --yes', 'Install without an interactive confirmation prompt')
-    .action(async (version: string | undefined, options: { yes?: boolean }) => {
+/** Runtime action for the shared `agents upgrade [version]` command definition. */
+async function runUpgrade(version: string | undefined, options: UpgradeOptions): Promise<void> {
       const { default: ora } = await import('ora');
       const { confirm } = await import('@inquirer/prompts');
       const { isInteractiveTerminal, isPromptCancelled } = await import('./commands/utils.js');
@@ -1020,7 +1034,10 @@ function registerUpgradeCommand(p: Command): void {
         spinner.fail(`Upgrade failed: ${err instanceof Error ? err.message : String(err)}`);
         console.log(chalk.gray(`Run manually: agents upgrade ${version ? version + ' ' : ''}--yes`));
       }
-    });
+}
+
+function registerUpgradeRuntimeCommand(p: Command): void {
+  registerUpgradeCommand(p, runUpgrade);
 }
 
 // --- Lazy registration orchestration -----------------------------------------
@@ -1071,7 +1088,7 @@ async function registerEagerForRequest(name: string): Promise<boolean> {
       registerInternalCommand(program);
       return true;
     case 'upgrade':
-      registerUpgradeCommand(program);
+      registerUpgradeRuntimeCommand(program);
       return true;
   }
 
@@ -1109,6 +1126,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadWorkflows);
   await reg(loadWorktree);
   await reg(loadVersions);
+  await reg(loadUpdate);
   await reg(loadImport);
   await reg(loadExport);
   await reg(loadPackages);
@@ -1173,7 +1191,7 @@ async function registerAllEagerCommands(): Promise<void> {
   registerJobsCronAliasCommand(program, 'jobs');
   registerJobsCronAliasCommand(program, 'cron');
   registerInternalCommand(program);
-  registerUpgradeCommand(program);
+  registerUpgradeRuntimeCommand(program);
   await reg(loadPull);
   await reg(loadPush);
   await reg(loadRepo);
@@ -1431,7 +1449,7 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1') {
     // Bumping the suffix re-runs migrations for every user; binary releases that
     // don't change the schema must NOT re-run (they would destroy user content
     // when migration steps overlap with user-authored paths). See issue #20.
-    const sentinelValue = 'v18';
+    const sentinelValue = 'v19';
     let needRun = true;
     try {
       if (fs.existsSync(sentinel) && fs.readFileSync(sentinel, 'utf-8').trim() === sentinelValue) {

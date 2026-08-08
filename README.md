@@ -54,7 +54,7 @@ agents run claude "explain this repo"  # run any agent on your existing subscrip
 
 Full path -- installing harnesses, logging in, smoke-testing `agents teams`, and setting up your own fleet: [`apps/cli/docs/QUICKSTART.md`](apps/cli/docs/QUICKSTART.md).
 
-Already installed? `agents upgrade` updates agents-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt). The command is `upgrade` on every platform -- there is no `agents update` (on macOS, `agents helper update` is a different command that reinstalls the keychain helper, not agents-cli).
+Already installed? `agents upgrade` updates agents-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt). The command is `upgrade` on every platform -- do not reach for `agents update`, which updates an installed **agent harness**, not agents-cli (and on macOS, `agents helper update` is a third thing: it reinstalls the keychain helper).
 
 Source: [github.com/phnx-labs/agents-cli](https://github.com/phnx-labs/agents-cli)
 
@@ -428,11 +428,12 @@ Top-level questions and waiting notifications publish one atomic open-block reco
 
 ```bash
 agents watchdog            # one tick, dry run — reports what it WOULD nudge and why
+agents watchdog --verbose  # include healthy/non-actionable session inspections
 agents watchdog --nudge    # actually inject "Continue." into the stalled split
 agents watchdog --watch    # daemon loop: a tick every --interval
 ```
 
-`agents watchdog` detects a stalled session, resolves the *exact* terminal split it lives in (tmux, iTerm, VSCodium, or a raw pty), and injects a nudge -- `Continue.` by default, or set `--text`. It's dry by default; `--nudge` acts on a single tick. `agents watchdog on|off` controls the device-local daemon pass, which runs once every three minutes. Steer a single run with `agents watchdog policy <id> off | keep | handsoff`.
+`agents watchdog` detects a stalled session, resolves the *exact* terminal split it lives in (tmux, iTerm, VSCodium, or a raw pty), and injects a nudge -- `Continue.` by default, or set `--text`. Its timestamped default output shows attention-worthy sessions with their agent, host app, machine, project, activity, age, path, latest preview, and decision reason; `--verbose` restores healthy/non-actionable inspections. It's dry by default; `--nudge` acts on a single tick. `agents watchdog on|off` controls the device-local daemon pass, which runs once every three minutes. Steer a single run with `agents watchdog policy <id> off | keep | handsoff`.
 
 A stalled session whose tail shows a hard account limit ("You've hit your weekly limit · resets …") is **rotated in place** instead of nudged: the watchdog gates on the same healthy-account selection `agents run auto` makes (zero healthy → one skip event per cooldown window, terminal untouched), injects the harness's exit sequence, relaunches `agents run auto --interactive --session-id <uuid>` in the *same* tab, then replays the old session's resume once the new TUI is live. Default on; `agents watchdog rotate off` disables it (nudging stays on).
 
@@ -679,6 +680,20 @@ agents teams status auth-feature    # Who's working, what they changed, what the
 Teammates run detached -- close your terminal, they keep working. Check in with `teams status`, glance at a teammate's summary with `teams logs <name>` (add `--full` for the raw output), clean up with `teams disband`.
 
 Team state is observable via `agents teams list --json` / `agents teams status --json` (compact by default; add `--verbose` for the full per-teammate shape). External tools join it with `sessions --json` (teammates get `isTeamOrigin: true`) and `cloud list --json` (for `--cloud` teammates) to build a unified fleet view. See [docs/06-observability.md](apps/cli/docs/06-observability.md).
+
+---
+
+### Land a pull request
+
+`agents pr land <number>` watches one pull request until CI passes and a
+non-author approval exists, then rebase-merges it without bypassing branch
+protection. It exits on red CI or a merge conflict; `--skip-review` is an
+explicit opt-out for repositories that do not require independent review.
+
+```bash
+agents pr land 1234
+agents pr land 1234 --interval 60
+```
 
 ---
 
@@ -1014,23 +1029,29 @@ agents secrets list   # EXPIRING column flags secrets due in the next 30 days
 agents routines add daily-digest \
   --schedule "0 9 * * 1-5" \
   --agent claude \
+  --project-anchor agents-cli \
+  --cwd apps/cli \
   --prompt "Review yesterday's PRs and summarize key changes"
 
 agents routines list                   # All jobs + next run times
 agents routines run daily-digest       # Test it now, ignore the schedule
 agents routines logs daily-digest      # Last execution — status + report (add --full for raw stdout)
+agents routines runs daily-digest      # Every attempt, including blocked/skipped pre-session runs
+agents routines doctor daily-digest    # Project/CWD/trust/write/auth readiness
 agents routines stats                  # Run count, failed, missed, avg/p50/p95 duration — per job or all
 
 # Definitions sync to every device; activation is stored per hostname
 agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
+  --cwd '~' \
   --prompt "Drain the local work queue"
 
-agents routines devices nightly-drain --set yosemite-s0,mac-mini  # enable on both hosts
+agents routines devices nightly-drain --set yosemite-s0           # one schedule owner
 agents routines list --host yosemite-s0                            # query another device
 
 # Signed webhook trigger: Linear issue labeled "agent" fires a routine
 agents routines add agent-labeled-issue --on linear:Issue --action update \
   --team-key RUSH --label agent --agent claude \
+  --cwd '~' \
   --prompt "Work the Linear issue that was just labeled agent"
 agents webhook serve --secrets-bundle webhooks --port 8787          # /hooks/linear, /hooks/github
 agents funnel up yosemite-s0 --local-port 8787 --port 443           # public HTTPS ingress
@@ -1115,6 +1136,7 @@ agents share setup                                  # once: provision bucket + W
 agents share plan.html --slug fleet --expire 30d    # → https://<base>/fleet
 agents share plan.html --json                       # URL object for plan-render hooks
 agents share status                                 # show the endpoint
+agents unshare fleet                                # take a published link (+ its OG cover) down
 ```
 
 `agents share` closes the loop: an agent makes work (a plan, a viz, a report),
@@ -1131,6 +1153,12 @@ publishes through it with a shared write token — `agents share join <baseUrl>`
 existing endpoint with no provisioning. `--expire 30d|12h|<date>` auto-expires a link.
 `--json` emits `{ url, coverUrl, expiresAt }` so plan-render automation can publish the
 rendered HTML and post the returned link without scraping terminal text.
+
+`agents share delete <targets...>` (alias `agents unshare`) takes a page down — pass a
+full URL, `<user>/<slug>`, or a bare slug (resolved against your own namespace); several
+targets at once are fine. It also deletes the sibling `<slug>.png` OG cover by default
+(`--keep-cover` opts out) and verifies the page actually 404s before reporting success —
+the Worker's delete is idempotent, so `{"ok":true}` alone is never proof.
 See [docs/share.md](apps/cli/docs/share.md).
 
 ---

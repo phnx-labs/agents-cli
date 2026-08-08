@@ -197,6 +197,7 @@ describe('executeJobDetached — spawn error handling', () => {
       timeout: '10m',
       enabled: true,
       prompt: 'test prompt',
+      cwd: '~', // agent routines now need an execution anchor; home is a valid one
       sandbox: false,
     };
 

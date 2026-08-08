@@ -52,7 +52,7 @@ export function syncProjectResourcesToAgent(
 
   syncProjectCommands(agent, version, projectAgentsDir, agentRoot, result, next);
   syncProjectSkills(agent, version, projectAgentsDir, agentRoot, result, next);
-  syncProjectSubagents(agent, version, projectAgentsDir, projectRoot, agentRoot, manifest, result, next);
+  syncProjectSubagents(agent, version, projectAgentsDir, projectRoot, agentRoot, result, next);
   syncProjectWorkflows(agent, version, projectAgentsDir, projectRoot, agentRoot, result, next);
 
   if (next.size > 0 || manifest) {
@@ -296,7 +296,6 @@ function syncProjectSubagents(
   projectAgentsDir: string,
   projectRoot: string,
   agentRoot: string,
-  manifest: ProjectManagedManifest | null,
   result: ProjectResourceSyncResult,
   manifestPaths: Set<string>,
 ): void {
@@ -305,8 +304,6 @@ function syncProjectSubagents(
   if (!target) return;
   const all = readProjectSubagents(projectAgentsDir);
   const dir = target.dir(projectRoot);
-  const targetDirRel = toPosixRel(path.relative(agentRoot, dir));
-  const hadManagedTarget = manifest?.paths.some((rel) => rel === targetDirRel || rel.startsWith(targetDirRel + '/')) ?? false;
 
   for (const sub of all.values()) {
     const occupied = target.occupied(dir, sub.name);
@@ -320,21 +317,6 @@ function syncProjectSubagents(
       record('subagents', sub.name, occupied.map((entry) => path.relative(agentRoot, entry.path)), result, manifestPaths);
     } catch {
       // Malformed source or unsupported transform; skip this item.
-    }
-  }
-
-  const syncedNames = result.synced
-    .filter((name) => name.startsWith('subagents/'))
-    .map((name) => name.slice('subagents/'.length))
-    .filter((name) => all.has(name))
-    .map((name) => all.get(name)!);
-  if (target.finalize && (syncedNames.length > 0 || hadManagedTarget)) {
-    target.finalize(dir, syncedNames);
-    for (const entry of target.finalizeOccupied?.(dir) ?? []) {
-      // Same normalization as record(): this is the one manifest write that
-      // doesn't funnel through it (the parent subagent index, e.g. Kimi's
-      // agents/_agents-cli.yaml).
-      manifestPaths.add(toPosixRel(path.relative(agentRoot, entry.path)));
     }
   }
 }

@@ -62,6 +62,31 @@ export function repoRootForCwd(dir: string, home: string = os.homedir()): string
 }
 
 /**
+ * The main-repo `.agents` directory for a cwd, or `undefined` when the cwd is
+ * not inside a repo.
+ *
+ * For a worktree cwd (`…/<repo>/.agents/worktrees/<slug>[/sub]`) this resolves
+ * to the PRIMARY repo's `.agents` — the directory that actually holds the
+ * worktrees — so a run started anywhere in the repo can write into any worktree.
+ * For any other in-repo cwd it is `<repo-root>/.agents`.
+ *
+ * The single caller is Codex's `edit`-mode writable-root list: Codex's
+ * `workspace-write` sandbox hardcodes `.agents/` (and `.codex/`) as read-only,
+ * but naming the `.agents` directory itself as an explicit writable root
+ * overrides that — so an in-repo build/test never hits EROFS on a path under
+ * `.agents/worktrees/`. Filesystem-only (no `git` process): reuses the same
+ * worktree-segment fold as {@link projectKeyFromCwd}.
+ */
+export function repoAgentsDirForCwd(cwd?: string | null, home?: string): string | undefined {
+  if (!cwd) return undefined;
+  const norm = cwd.replace(/\\/g, '/').replace(/\/+$/, '').trim();
+  if (!norm) return undefined;
+  const wtIdx = norm.indexOf(WORKTREE_SEGMENT);
+  const repoRoot = wtIdx > 0 ? norm.slice(0, wtIdx) : repoRootForCwd(norm, home);
+  return repoRoot ? path.join(repoRoot, '.agents') : undefined;
+}
+
+/**
  * Resolve the project key for a cwd **on this machine**: the repository it
  * belongs to when there is one (so a monorepo subdir like `<repo>/apps/cli`
  * groups under `<repo>`, not `cli`), else the directory itself.

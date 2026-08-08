@@ -306,7 +306,10 @@ const TICKET_BRANCH_RE = /(?:^|[/_-])([a-z]{2,6})-(\d{2,6})(?=[/_-]|$)/;
 const TICKET_DENYLIST = new Set(['UTF', 'SHA', 'ISO', 'RFC', 'IPV', 'X86', 'ARM', 'MP', 'H']);
 
 const PR_URL_RE = /https:\/\/github\.com\/[^\s"'()<>]+\/pull\/(\d+)/;
-export const WORKTREE_RE = /\/\.agents\/worktrees\/([^/]+)/;
+// Either separator: a Windows session cwd is `…\.agents\worktrees\<slug>`, and a
+// forward-slash-only pattern silently derived no slug there (the RUSH-2358
+// worktree_slug parity test is red on the Windows CI leg for exactly this).
+export const WORKTREE_RE = /[\\/]\.agents[\\/]worktrees[\\/]([^\\/]+)/;
 /** gh invocations that create/open a PR. */
 const GH_PR_CREATE_RE = /\bgh\s+pr\s+(?:create|new)\b/;
 /** gh invocation that opens an issue — the created number is read from its result. */

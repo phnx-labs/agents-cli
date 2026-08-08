@@ -12,9 +12,9 @@ what `agents` actually registers.
 
 Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remove`/`rm`/`purge`
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
-src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `upgrade`, `_internal`).
+src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_98 command groups · 566 commands._
+_102 command groups · 575 commands._
 
 ## accounts — Browse and name signed-in harness accounts
 
@@ -22,8 +22,8 @@ _98 command groups · 566 commands._
 agents accounts                     Browse and name signed-in harness accounts
 agents accounts list                Alias for accounts
 agents accounts name <label>        Name one signed-in account; matching installed versions are found automatically
-agents accounts remove <label>
-agents accounts rename <old> <new>
+agents accounts remove <label>      Remove a saved account label
+agents accounts rename <old> <new>  Rename a saved account label
 ```
 
 ## add — Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
@@ -108,7 +108,7 @@ agents browser requests                       Read captured network requests. --
 agents browser responsebody <url-pattern>     Wait for and read a response body by URL pattern
 agents browser screenshot                     Take a screenshot — auto-saved per task; --output only needed when you want a specific path
 agents browser scroll                         Scroll the page by pixel amount (negatives scroll up/left)
-agents browser sessions                       List a profile's captured screenshots, PDFs, recordings, and downloads
+agents browser sessions                       Browse a profile's captured screenshots, PDFs, recordings, and downloads, grouped by task
 agents browser set                            Set browser emulation options
 agents browser set device <device-name>       Emulate a device (iPhone 14, iPad, MacBook Pro)
 agents browser set viewport <width> <height>  Set viewport size
@@ -574,6 +574,13 @@ agents plugins sync <name> [agent]            Apply a plugin to an agent. Syncs 
 agents plugins update [name]                  Re-pull a plugin from its original source and re-sync to all versions
 ```
 
+## pr — Standalone PR lifecycle commands (land, …).
+
+```
+agents pr            Standalone PR lifecycle commands (land, …).
+agents pr land <pr>  Watch a PR through CI and a non-author review, then rebase-merge on green. Fails loud on red CI or conflict; never uses --admin.
+```
+
 ## profile — Activate top-level resource profiles across commands, skills, hooks, rules, MCP, permissions, and secrets.
 
 ```
@@ -721,7 +728,8 @@ agents routines catchup                 Run any routines that missed their last 
 agents routines cleanup                 Remove expired one-shot routines that already fired and still have a user-layer YAML file.
 agents routines devices [name]          View or change the devices where a routine is enabled. Without flags, opens an interactive picker (requires a TTY).
 agents routines disable-project [path]  Remove a project from the project-routines allowlist. Use --remove-synced to also delete the user-layer copies.
-agents routines edit [name]             Open a routine in $EDITOR. Creates a new YAML template if the routine does not exist.
+agents routines doctor [name]           Check a routine's execution-context and harness readiness. Bare or --all checks every routine; --fix applies safe activation repairs (activate a now-ready paused routine; pause a broken active one).
+agents routines edit [name]             Edit a prefilled routine transactionally; invalid YAML never replaces the live definition.
 agents routines enable-project [path]   Opt a project's .agents/routines/*.yml into daemon firing. Requires explicit approval — project routines never auto-fire from a cloned repo. Materialises copies into ~/.agents/routines/ with source provenance.
 agents routines list                    See all scheduled jobs, when they run next, and their last execution status
 agents routines logs [name]             Show a run’s concise summary — status + extracted report. --full for the raw stdout stream; --run for a specific past run.
@@ -879,11 +887,12 @@ agents setup watchdog  Choose the devices where the daemon watchdog pass runs.
 ## share — Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).
 
 ```
-agents share [file]          Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).
-agents share analytics       Show the Cloudflare Web Analytics status for this share endpoint.
-agents share join [baseUrl]  Use an existing synced share endpoint and write token (no provisioning).
-agents share setup           One-time: provision an R2 bucket + Worker on your Cloudflare and save the config.
-agents share status          Show the configured share endpoint and namespace.
+agents share [file]               Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).
+agents share analytics            Show the Cloudflare Web Analytics status for this share endpoint.
+agents share delete <targets...>  Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Top-level alias: agents unshare.
+agents share join [baseUrl]       Use an existing synced share endpoint and write token (no provisioning).
+agents share setup                One-time: provision an R2 bucket + Worker on your Cloudflare and save the config.
+agents share status               Show the configured share endpoint and namespace.
 ```
 
 ## skills — Add domain-specific capabilities to agents via packaged SKILL.md files
@@ -1004,6 +1013,25 @@ agents trends tools-per-session  Mix recipe: tools-per-session
 agents uninstall  Completely remove agents-cli and restore your original agent configs. Reverses `agents setup`.
 ```
 
+## unshare — Alias of `agents share delete` — take down a published page (and by default its OG cover).
+
+```
+agents unshare <targets...>  Alias of `agents share delete` — take down a published page (and by default its OG cover).
+```
+
+## update — Move a frozen agent installation to a new release, keeping its name and every reference to it
+
+```
+agents update [target]      Move a frozen agent installation to a new release, keeping its name and every reference to it
+agents update list <agent>  Show every frozen installation of an agent and the release each carries
+```
+
+## upgrade — Upgrade agents-cli to the latest version (or a specific [version])
+
+```
+agents upgrade [version]  Upgrade agents-cli to the latest version (or a specific [version])
+```
+
 ## usage — Show rate-limit / quota usage per agent
 
 ```
@@ -1037,6 +1065,7 @@ agents wallet show <id>                   Reveal a card. Touch ID required. Argu
 
 ```
 agents watchdog                              Auto-nudge stalled agent terminals: detect stalls, resolve the exact split, inject "Continue." — no menu-bar needed.
+agents watchdog history [sessionId]          Show persisted Watchdog decisions and actions, newest first.
 agents watchdog off                          Disable the daemon watchdog pass on this device.
 agents watchdog on                           Enable the daemon watchdog pass on this device.
 agents watchdog policy <sessionId> <policy>  Set per-session policy: off (ignore) | keep (default) | handsoff (detect + flag, never inject).

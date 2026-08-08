@@ -24,7 +24,7 @@ import {
   localCliVersion,
 } from '../lib/hosts/ready.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
-import { listTasks, loadTask, findTaskByName, findTaskBySessionId } from '../lib/hosts/tasks.js';
+import { listTasks, loadTask, findTaskByName, findTaskBySessionId, resolveTaskRef } from '../lib/hosts/tasks.js';
 import { reconcileRunningTasks } from '../lib/hosts/reconcile.js';
 import { showHostTaskLog } from '../lib/hosts/logs.js';
 import { stopDispatchedTask } from '../lib/hosts/dispatch.js';
@@ -268,11 +268,6 @@ async function doLogs(ref: string, follow: boolean, full: boolean): Promise<void
     return;
   }
   if (res.exitCode !== undefined) process.exitCode = res.exitCode;
-}
-
-/** Resolve a host-task ref (id, --name handle, or session id) or null. */
-function resolveTaskRef(ref: string) {
-  return loadTask(ref) ?? findTaskByName(ref) ?? findTaskBySessionId(ref);
 }
 
 async function doStop(ref: string): Promise<void> {

@@ -18,6 +18,7 @@ import * as path from 'path';
 import { assertValidSshTarget, shellQuote } from '../ssh-exec.js';
 import { getCliLaunch } from '../cli-entry.js';
 import { encodePwshBase64 } from '../pwsh.js';
+import { homeRemainder, remoteCdPrefix } from '../project-root.js';
 import { getCacheDir } from '../state.js';
 import { hostKeyCheckingOpts } from './known-hosts.js';
 import { hostNameFor } from './ssh-config.js';
@@ -86,6 +87,53 @@ export function wrapRemoteCommand(device: DeviceProfile, cmd: string[]): string 
   return joined;
 }
 
+/**
+ * Build the remote command that starts an INTERACTIVE LOGIN shell inside a
+ * mirrored project directory, falling back to the remote home when that
+ * directory is absent. Returns undefined when there is nothing to mirror
+ * (`mirrorCwd` is undefined, or resolves to the home root itself) so the caller
+ * keeps the plain no-command interactive login.
+ *
+ * This is the interactive analogue of `agents run --host`'s cwd mirroring, and
+ * it reuses the SAME machinery so there is no second resolver: the portable
+ * `mirrorCwd` comes from `deriveMirroredCwd`, and — for POSIX — the best-effort
+ * `cd` comes from `remoteCdPrefix({ mirror: true })`, whose `|| cd "$HOME"`
+ * guarantees a missing checkout never fails the login (acceptance #2). It then
+ * replaces the wrapper with a login shell (`exec "$SHELL" -l`); running under
+ * the forced tty (`-tt`, see {@link buildSshInvocation}) makes that login shell
+ * interactive, so prompt, startup files, and login behavior match a plain
+ * `ssh <host>` (acceptance #1).
+ *
+ * PowerShell hosts get a profile-loading interactive shell (`-NoExit`, and
+ * deliberately NOT `-NoProfile` so the user's profile still runs) that
+ * `Set-Location`s into the mirrored dir when it exists. The path is carried
+ * through `-EncodedCommand` (base64 UTF-16LE), so it is literal and
+ * injection-safe regardless of spaces or shell metacharacters (acceptance #3).
+ */
+export function buildInteractiveShellCommand(
+  device: DeviceProfile,
+  mirrorCwd: string | undefined,
+): string | undefined {
+  if (!mirrorCwd) return undefined;
+  const rest = homeRemainder(mirrorCwd);
+  // Only a real sub-path of the home dir is worth mirroring; the home root
+  // itself (rest === '') is where a plain login already lands, and a
+  // non-home-anchored path (rest === null) has no meaningful remote analogue.
+  if (rest === null || rest === '') return undefined;
+
+  if (device.shell === 'powershell') {
+    // Single-quoted PowerShell literal: the only escape inside '…' is '' for a
+    // literal quote, so this is injection-safe for any path.
+    const literal = rest.replace(/'/g, "''");
+    const script =
+      `$d = Join-Path -Path $HOME -ChildPath '${literal}'; ` +
+      `if (Test-Path -LiteralPath $d) { Set-Location -LiteralPath $d }`;
+    return `powershell -NoLogo -NoExit -EncodedCommand ${encodePwshBase64(script)}`;
+  }
+
+  return `${remoteCdPrefix(mirrorCwd, { mirror: true })}exec "$SHELL" -l`;
+}
+
 /** Host-key posture for {@link buildSshInvocation}. */
 export interface SshHostKeyOptions {
   /**
@@ -120,16 +168,30 @@ export function deviceIdentityArgs(device: DeviceProfile): string[] {
  * `opts.agentOnly` marks the connection as a read-only probe: for password auth
  * it sets {@link ASKPASS_AGENT_ONLY_ENV} in the overlay so the askpass resolve
  * stays broker-only and never pops a foreground biometric (RUSH-1970).
+ *
+ * `opts.interactiveCwd` is the portable (`~/…`) directory to mirror on an
+ * interactive login (no `cmd`) — from `deriveMirroredCwd(process.cwd())`. When
+ * it names a real home-relative sub-path, the login starts there via
+ * {@link buildInteractiveShellCommand} (best-effort — a missing dir falls back
+ * to the remote home), matching `agents run --host`. It is ignored when a `cmd`
+ * is given: an explicit command keeps its current cwd (the remote home) and its
+ * behavior unchanged (RUSH-2412).
  */
 export function buildSshInvocation(
   device: DeviceProfile,
   cmd: string[],
   askpassShimPath: string,
   hostKey: SshHostKeyOptions = {},
-  opts: { agentOnly?: boolean } = {},
+  opts: { agentOnly?: boolean; interactiveCwd?: string } = {},
 ): { args: string[]; env: Record<string, string> } {
   const target = sshTargetFor(device);
-  const remote = wrapRemoteCommand(device, cmd);
+  // No cmd ⇒ interactive login. It may still carry a derived cd+login-shell
+  // wrapper (interactiveCwd), which is an interactive login too and still needs
+  // a real tty below.
+  const interactive = cmd.length === 0;
+  const remote = interactive
+    ? buildInteractiveShellCommand(device, opts.interactiveCwd)
+    : wrapRemoteCommand(device, cmd);
   const env: Record<string, string> = {};
   const args: string[] = [
     ...hostKeyCheckingOpts(hostKey.pinned ?? false, hostKey.knownHostsFile),
@@ -151,8 +213,9 @@ export function buildSshInvocation(
     args.push(...deviceIdentityArgs(device));
   }
 
-  // An interactive login (no remote command) needs a real tty.
-  if (!remote) args.push('-tt');
+  // An interactive login needs a real tty — whether it starts a bare login
+  // shell (no remote command) or the derived cd+login-shell mirror.
+  if (interactive) args.push('-tt');
   args.push(target);
   if (remote) args.push(remote);
   return { args, env };
