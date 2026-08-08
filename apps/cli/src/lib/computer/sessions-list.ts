@@ -30,12 +30,14 @@
  * deliberate exception to (not a bypass of) the automatic prompt-redaction
  * path in `events.ts` `sanitizePayload`.
  *
- * Grouping key: a `computer.action` event's own `pid` field is the emitting
+ * Grouping key: `emitComputerAction()` stamps one random `invocationId` for
+ * the lifetime of the emitting CLI process. The event's own `pid` field is the emitting
  * CLI PROCESS's pid, never the target app's (that's `targetPid` — see
  * `computer-actions.ts` `emitComputerAction`, and its `#11` test guarding
  * this). One `agents computer <verb>` invocation is one process, and
  * `computer run`'s whole embedded observe/act/verify loop is ALSO one
- * process — so grouping by `pid` gives exactly one row per CLI invocation: a
+ * process. Grouping by `invocationId` gives exactly one row per CLI invocation without
+ * conflating unrelated processes when the OS later reuses a pid: a
  * single explicit verb collapses to a one-action row, and a `run --task`
  * loop collapses to one row holding every verb the model drove. That row is
  * the "run" a task-first view groups by.
@@ -79,6 +81,8 @@ export interface ComputerAction {
   tsMs: number;
   /** The emitting CLI process's own pid — the run/task grouping key. */
   pid: number;
+  /** Unique for the emitting CLI process; absent only on legacy ledger rows. */
+  invocationId?: string;
   /** The driven app's pid, when resolved. */
   targetPid?: number;
   bundle?: string;
@@ -102,6 +106,7 @@ function recordToAction(r: EventRecord): ComputerAction | null {
     ts: r.ts,
     tsMs,
     pid: r.pid,
+    invocationId: typeof r.invocationId === 'string' ? r.invocationId : undefined,
     targetPid: typeof r.targetPid === 'number' ? r.targetPid : undefined,
     bundle: typeof r.bundle === 'string' ? r.bundle : undefined,
     host: typeof r.host === 'string' ? r.host : undefined,
@@ -139,6 +144,7 @@ export type ComputerRunLinkStatus = 'linked' | 'unresolved' | 'unlinked';
  *  it links to when resolvable. */
 export interface ComputerRunRow {
   pid: number;
+  invocationId?: string;
   /** Truncated task description — present only for a `computer run --task`
    *  invocation; a bare verb call has none. */
   task?: string;
@@ -176,15 +182,19 @@ export function groupIntoComputerRuns(
   resolveSession?: (sessionId: string) => SessionMeta | null,
   resolveLaunch?: (launchId: string) => SessionMeta | null,
 ): ComputerRunRow[] {
-  const byPid = new Map<number, ComputerAction[]>();
-  for (const a of actions) {
-    const list = byPid.get(a.pid) ?? [];
+  const byInvocation = new Map<string, ComputerAction[]>();
+  for (const [index, a] of actions.entries()) {
+    // Legacy rows have no trustworthy process identity. Pids are recyclable,
+    // so preserve each event separately instead of inventing a relationship.
+    const key = a.invocationId ?? `legacy:${a.pid}:${a.tsMs}:${index}`;
+    const list = byInvocation.get(key) ?? [];
     list.push(a);
-    byPid.set(a.pid, list);
+    byInvocation.set(key, list);
   }
 
   const rows: ComputerRunRow[] = [];
-  for (const [pid, group] of byPid) {
+  for (const group of byInvocation.values()) {
+    const pid = group[0].pid;
     group.sort((a, b) => b.tsMs - a.tsMs); // newest first
 
     const marker = group.find((a) => a.verb === 'run');
@@ -205,6 +215,7 @@ export function groupIntoComputerRuns(
     const times = group.map((a) => a.tsMs);
     rows.push({
       pid,
+      invocationId: group[0].invocationId,
       task: marker?.task,
       machine,
       machineId,

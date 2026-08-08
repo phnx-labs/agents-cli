@@ -826,6 +826,34 @@ function runAgents(args: string[], cwd: string, home: string, envOverrides: Reco
   });
 }
 
+describe('sessions --computer alias', () => {
+  it('forwards --limit through the real CLI route', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-computer-'));
+    const cwd = path.join(tempHome, 'repo');
+    const eventsPath = path.join(tempHome, 'computer-events.jsonl');
+    fs.mkdirSync(cwd, { recursive: true });
+    writeUpdateCache(tempHome);
+    fs.writeFileSync(eventsPath, [
+      { ts: '2026-08-08T09:00:00.000Z', event: 'computer.action', pid: 10, invocationId: 'one', command: 'click', hostname: 'zion' },
+      { ts: '2026-08-08T09:01:00.000Z', event: 'computer.action', pid: 11, invocationId: 'two', command: 'screenshot', hostname: 'zion' },
+    ].map((record) => JSON.stringify(record)).join('\n') + '\n');
+    try {
+      const result = runAgents(
+        ['sessions', '--computer', '--limit', '1', '--no-interactive'],
+        cwd,
+        tempHome,
+        { AGENTS_EVENTS_PATH: eventsPath },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain('screenshot 1');
+      expect(result.stdout).not.toContain('click 1');
+      expect(result.stdout).toContain('… (1 more; --limit 2 or --json to see all');
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+});
+
 interface SessionResolverSshPeer {
   target: string;
   fixture: ChildProcess;

@@ -31,11 +31,15 @@ function makeSession(overrides: Partial<SessionMeta> = {}): SessionMeta {
 }
 
 function action(overrides: Partial<ComputerAction> = {}): ComputerAction {
+  const invocationId = Object.prototype.hasOwnProperty.call(overrides, 'invocationId')
+    ? overrides.invocationId
+    : `invocation-${overrides.pid ?? 100}`;
   return {
     verb: 'click',
     ts: new Date(1000).toISOString(),
     tsMs: 1000,
     pid: 100,
+    invocationId,
     ...overrides,
   };
 }
@@ -70,6 +74,23 @@ describe('groupIntoComputerRuns', () => {
     ];
     const rows = groupIntoComputerRuns(actions);
     expect(rows.map((r) => r.pid)).toEqual([2, 1]);
+  });
+
+  it('separates unrelated invocations when the OS reuses a pid', () => {
+    const rows = groupIntoComputerRuns([
+      action({ pid: 44, invocationId: 'old-process', tsMs: 1_000, bundle: 'app.old' }),
+      action({ pid: 44, invocationId: 'new-process', tsMs: 604_801_000, bundle: 'app.new' }),
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.bundle)).toEqual(['app.new', 'app.old']);
+  });
+
+  it('never merges legacy events that lack an invocation identity', () => {
+    const rows = groupIntoComputerRuns([
+      action({ pid: 44, invocationId: undefined, tsMs: 1_000 }),
+      action({ pid: 44, invocationId: undefined, tsMs: 2_000 }),
+    ]);
+    expect(rows).toHaveLength(2);
   });
 
   it('pulls the task label from the run marker and excludes it from the driving action counts', () => {
@@ -263,9 +284,9 @@ describe('listComputerActions + buildComputerSessionRows (real event log)', () =
     for (const k of ENV_KEYS) delete process.env[k];
     _resetForTest(eventsPath());
 
-    emit('computer.action', { command: 'run', bundle: 'com.apple.notes', task: 'open Notes and write a haiku' });
-    emit('computer.action', { command: 'describe', targetPid: 4242, bundle: 'com.apple.notes' });
-    emit('computer.action', { command: 'click', targetPid: 4242, bundle: 'com.apple.notes', id: '@e3' });
+    emit('computer.action', { command: 'run', invocationId: 'real-run', bundle: 'com.apple.notes', task: 'open Notes and write a haiku' });
+    emit('computer.action', { command: 'describe', invocationId: 'real-run', targetPid: 4242, bundle: 'com.apple.notes' });
+    emit('computer.action', { command: 'click', invocationId: 'real-run', targetPid: 4242, bundle: 'com.apple.notes', id: '@e3' });
 
     const actions = listComputerActions();
     expect(actions).toHaveLength(3);

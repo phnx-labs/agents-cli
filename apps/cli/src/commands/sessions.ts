@@ -5592,7 +5592,14 @@ export function registerSessionsCommands(program: Command): void {
     if ((options as { computer?: boolean }).computer) {
       // Alias for `agents computer sessions`: a machine positional narrows to
       // one machine. `--no-interactive` carries through the same way.
-      await runComputerSessionsCommand({ machine: query, json: options.json, interactive: options.interactive });
+      const hosts = [...(options.host ?? []), ...(options.device ?? []), ...(options.devices ?? [])]
+        .filter((host) => host.toLowerCase() !== 'all' && host.toLowerCase() !== 'fleet');
+      if (hosts.length > 0) {
+        runRemoteSessions(hosts);
+        return;
+      }
+      const limit = options.limit === undefined ? undefined : Number.parseInt(options.limit, 10);
+      await runComputerSessionsCommand({ machine: query, limit, json: options.json, interactive: options.interactive });
       return;
     }
     await sessionsAction(query, options, command.getOptionValueSource('limit'));

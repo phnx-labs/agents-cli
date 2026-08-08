@@ -123,6 +123,8 @@ describe('emitComputerRunTaskMarker — computer.action run marker (RUSH-2432)',
     expect(recs[0].bundle).toBe('com.apple.notes');
     expect(recs[0].host).toBe('win-mini');
     expect(recs[0].task).toBe('open Notes and write a haiku');
+    expect(recs[0].invocationId).toEqual(expect.any(String));
+    expect((recs[0].invocationId as string).length).toBeGreaterThan(0);
   });
 
   it('bounds the task text to TASK_PREVIEW_MAX_CHARS — never the raw unbounded --task string', () => {
