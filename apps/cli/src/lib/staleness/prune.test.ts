@@ -77,6 +77,31 @@ function runInTempHome(scriptBody: string): Record<string, unknown> {
         { cwd: projectRoot, force: true, prune: true },
       );
 
+      // ---- skills (claude .claude/skills/<name>/) ----
+      const writeSystemSkill = (name, body) => {
+        const d = path.join(systemDir, 'skills', name);
+        fs.mkdirSync(d, { recursive: true });
+        fs.writeFileSync(path.join(d, 'SKILL.md'),
+          ['---', 'name: ' + name, 'description: ' + name, '---', '', body].join('\\n'));
+      };
+      const skillDir = path.join(userDir, '.history', 'versions', 'claude', version, 'home', '.claude', 'skills');
+      const skillDirs = () => (fs.existsSync(skillDir)
+        ? fs.readdirSync(skillDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort()
+        : []);
+
+      // ---- hooks (claude .claude/hooks/<name>) ----
+      const writeSystemHook = (name) => {
+        const d = path.join(systemDir, 'hooks');
+        fs.mkdirSync(d, { recursive: true });
+        const p = path.join(d, name);
+        fs.writeFileSync(p, '#!/bin/sh\\necho ' + name);
+        fs.chmodSync(p, 0o755);
+      };
+      const hookDir = path.join(userDir, '.history', 'versions', 'claude', version, 'home', '.claude', 'hooks');
+      const hookFiles = () => (fs.existsSync(hookDir)
+        ? fs.readdirSync(hookDir).filter((f) => !f.startsWith('.')).sort()
+        : []);
+
       ${scriptBody}
     `;
     const out = execFileSync('bun', ['--eval', script], {
@@ -199,6 +224,75 @@ describe('agents sync prune (RUSH-2438)', () => {
     expect(result.prunedCommands).toEqual(['beta']);
     expect(result.afterSkills).toContain('alpha');
     expect(result.afterSkills).not.toContain('beta');           // command-skill dir gone
+  });
+
+  it('(skill) prunes a skill deleted from source on a repo-scoped reconcile', () => {
+    const result = runInTempHome(`
+      writeSystemSkill('alpha', 'alpha skill');
+      writeSystemSkill('beta', 'beta skill');
+
+      fullSync();                                     // installs both skill dirs + manifest
+      const before = skillDirs();
+
+      fs.rmSync(path.join(systemDir, 'skills', 'beta'), { recursive: true });
+      const r = scopedPrune();
+
+      console.log(JSON.stringify({ before, after: skillDirs(), prunedSkills: r.pruned.skills }));
+    `) as { before: string[]; after: string[]; prunedSkills: string[] };
+
+    expect(result.before).toEqual(['alpha', 'beta']);
+    expect(result.prunedSkills).toEqual(['beta']);
+    expect(result.after).toEqual(['alpha']);          // beta skill dir removed, alpha kept
+  });
+
+  it('(hook) prunes a hook deleted from source (last hook → my prune, not the in-write sweep)', () => {
+    const result = runInTempHome(`
+      writeSystemHook('solo');
+      fullSync();                                     // installs the hook script + manifest
+      const before = hookFiles();
+
+      fs.rmSync(path.join(systemDir, 'hooks', 'solo'));   // last hook gone → hooksToSync=0, in-write sweep skipped
+      const r = scopedPrune();
+
+      console.log(JSON.stringify({ before, after: hookFiles(), prunedHooks: r.pruned.hooks }));
+    `) as { before: string[]; after: string[]; prunedHooks: string[] };
+
+    expect(result.before).toContain('solo');
+    expect(result.prunedHooks).toEqual(['solo']);
+    expect(result.after).not.toContain('solo');       // hook file removed by the prune pass
+  });
+
+  it('(guard) a skill prune must NOT destroy a same-named command-skill', () => {
+    // The guard at writers/skills.ts remove() skips a dir that is currently a
+    // command-skill (agents_command marker). Construct the collision: a name that
+    // WAS a real skill (so the manifest records it under skills) but is now a
+    // command-installed-as-skill in the home. A skill prune considers it (gone
+    // from skill source, still materialized) and MUST leave it alone — deleting it
+    // would destroy a live command. If the guard were removed, this test fails.
+    const result = runInTempHome(`
+      writeSystemSkill('foo', 'foo skill');
+      writeSystemSkill('keep', 'keep skill');
+      fullSyncCodex();                                // manifest.skills = {foo, keep}
+
+      // foo stops being a skill and becomes a command → installs as .codex/skills/foo (command-skill).
+      fs.rmSync(path.join(systemDir, 'skills', 'foo'), { recursive: true });
+      writeSystemCmd('foo', 'foo command body');
+
+      const r = scopedPruneCodex();
+      const fooSkillMd = path.join(codexSkillsDir, 'foo', 'SKILL.md');
+      const fooStillPresent = fs.existsSync(fooSkillMd);
+      const fooIsCommandSkill = fooStillPresent && fs.readFileSync(fooSkillMd, 'utf-8').includes('agents_command');
+      console.log(JSON.stringify({
+        skills: codexCmdSkills(),
+        fooStillPresent,
+        fooIsCommandSkill,
+        prunedSkills: r.pruned.skills,
+      }));
+    `) as { skills: string[]; fooStillPresent: boolean; fooIsCommandSkill: boolean; prunedSkills: string[] };
+
+    expect(result.prunedSkills).not.toContain('foo');  // skill prune left it alone
+    expect(result.fooStillPresent).toBe(true);         // command-skill dir survives
+    expect(result.fooIsCommandSkill).toBe(true);       // and is still the live command
   });
 
   it('every writer for a PRUNABLE_KIND implements remove() (harness parity)', () => {
