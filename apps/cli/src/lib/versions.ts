@@ -2831,7 +2831,7 @@ export function mergeRepoScopedSelections(repos: string[], cwd: string = process
  */
 export function syncResourcesToVersion(agent: AgentId, version: string, selection?: ResourceSelection, options: { projectDir?: string; cwd?: string; force?: boolean; available?: AvailableResources; prune?: boolean } = {}): SyncResult {
   if (isAgentHardDeprecated(agent)) {
-    return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [], pruned: { commands: [], skills: [], hooks: [] } };
+    return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [], pruned: { commands: [], skills: [] } };
   }
 
   const agentConfig = AGENTS[agent];
@@ -2844,7 +2844,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // "full sync; persist the staleness manifest after."
   const userPassedSelection = selection !== undefined;
 
-  const result: SyncResult = { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [], pruned: { commands: [], skills: [], hooks: [] } };
+  const result: SyncResult = { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [], pruned: { commands: [], skills: [] } };
   const cwd = options.cwd || process.cwd();
   const projectAgentsDir = options.projectDir || getProjectAgentsDir(cwd);
   const userAgentsDir = getUserAgentsDir();
@@ -3334,7 +3334,6 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
       sourceNames: {
         commands: available.commands,
         skills: available.skills,
-        hooks: available.hooks,
       },
     });
     result.pruned = outcome.pruned;
@@ -3343,17 +3342,6 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
         `agents: prune skipped for ${agent}@${version} — no sync manifest yet, so no removed resources were pruned. ` +
         `Run 'agents sync ${agent}@${version}' (a full sync) to establish the baseline.`,
       );
-    }
-    // Reconcile the native hook registration after a hook prune. The in-write
-    // hooks sweep + registerHooksToSettings only run when hooksToSync > 0, so
-    // pruning the LAST hook to zero (hooksToSync === 0) would delete the hook
-    // script but leave its settings.json entry pointing at the now-missing
-    // file — a dead hook that errors on every tool call. `reconcileEmpty` forces
-    // the per-agent managed-prefix GC even when no hooks remain (RUSH-2438).
-    if (outcome.pruned.hooks.length > 0) {
-      try {
-        registerHooksToSettings(agent, versionHome, undefined, undefined, { reconcileEmpty: true });
-      } catch { /* best-effort settings GC — the hook file is already removed */ }
     }
   }
 

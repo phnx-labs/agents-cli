@@ -41,6 +41,13 @@ import { getWriter, getDetector } from './registry.js';
 /**
  * Kinds prune reconciles. Restricted to the name-keyed file/dir resources whose
  * writer implements `remove()`. Deliberately excluded, each with a reason:
+ *   - hooks — a version-home hook script is coupled to a settings.json /
+ *     hooks.json REGISTRATION. Pruning the last hook to zero would delete the
+ *     script but must also GC its registration in the same pass, and that lands
+ *     in `src/lib/hooks.ts` — a Windows-portable-path surface the CI windows leg
+ *     gates on. Split to RUSH-2456 so this PR stays Linux-only-green; hook FILES
+ *     are still reconciled by the in-write orphan sweep (versions.ts, gated on
+ *     `hooksToSync > 0`).
  *   - rules / permissions — synced as a wholesale rewrite (one composed file /
  *     the full allowlist), so a removed rule or group already drops out.
  *   - plugins — carry their own reconciliation via `cleanOrphanedPluginSkills`.
@@ -48,7 +55,7 @@ import { getWriter, getDetector } from './registry.js';
  *   - subagents / workflows — no clean per-name inverse yet (multi-agent index
  *     finalize; native workflow trees); tracked for a follow-up.
  */
-export const PRUNABLE_KINDS = ['commands', 'skills', 'hooks'] as const;
+export const PRUNABLE_KINDS = ['commands', 'skills'] as const;
 export type PrunableKind = typeof PRUNABLE_KINDS[number];
 
 export interface PruneInput {
@@ -90,12 +97,11 @@ function manifestNames(manifest: SyncManifest, kind: PrunableKind): string[] {
       return [...names];
     }
     case 'skills': return Object.keys(manifest.skills ?? {});
-    case 'hooks':  return Object.keys(manifest.hooks ?? {});
   }
 }
 
 function emptyPruned(): Record<PrunableKind, string[]> {
-  return { commands: [], skills: [], hooks: [] };
+  return { commands: [], skills: [] };
 }
 
 /**

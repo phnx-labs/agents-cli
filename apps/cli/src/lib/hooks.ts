@@ -1994,19 +1994,13 @@ export function registerHooksToSettings(
   agentId: AgentId,
   versionHome: string,
   hookManifest?: Record<string, ManifestHook>,
-  agentsDirOverride?: string,
-  opts?: { reconcileEmpty?: boolean }
+  agentsDirOverride?: string
 ): { registered: string[]; errors: string[] } {
   if (isAgentHardDeprecated(agentId)) {
     return { registered: [], errors: [] };
   }
   const manifest = hookManifest || parseHookManifest();
-  // Empty manifest normally means "nothing to register" and returns early. But
-  // when `reconcileEmpty` is set (the prune path pruned the LAST hook to zero),
-  // we must still run the per-agent registrar so its managed-prefix GC removes
-  // the now-orphaned settings.json entry — otherwise a dead hook command
-  // pointing at a deleted script fires on every tool call (RUSH-2438).
-  if (Object.keys(manifest).length === 0 && !opts?.reconcileEmpty) {
+  if (Object.keys(manifest).length === 0) {
     if (agentId === 'opencode') {
       const pluginPath = path.join(versionHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts');
       try {

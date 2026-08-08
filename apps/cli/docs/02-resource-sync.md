@@ -127,7 +127,7 @@ reconcile every installed agent. `--json` emits a single JSON object on stdout
 
 ## Pruning: resources removed from source disappear from version homes
 
-A reconcile deletes as well as installs. When a command, skill, or hook is
+A reconcile deletes as well as installs. When a **command** or **skill** is
 **removed from a DotAgent repo**, `agents sync` removes its stale copy from each
 version home — so a deleted resource disappears from the `/` menu the same way an
 added one appears, without hand-deleting files. This runs on the repo-scope and
@@ -139,8 +139,8 @@ agents sync claude system       # same, one version
 ```
 
 A pruned resource is reported under a `Pruned from claude@<version> (removed from
-source)` block, and the `--json` payload carries a `pruned: { commands, skills,
-hooks }` field.
+source)` block, and the `--json` payload carries a `pruned: { commands, skills }`
+field.
 
 Pruning is **manifest-bounded**, so it never over-deletes:
 
@@ -160,8 +160,11 @@ Every harness prunes: a native command file (Claude, Grok, Cursor), a
 command-as-skill dir (Codex ≥ 0.117, Kimi), and a Goose recipe are each removed
 through the same writer that installed them. Kinds synced as a wholesale rewrite
 (rules, permissions) or with their own reconciliation (plugins, via
-`cleanOrphanedPluginSkills`) do not need this pass. See
-[`src/lib/staleness/prune.ts`](../src/lib/staleness/prune.ts).
+`cleanOrphanedPluginSkills`) do not need this pass. **Hooks are out of scope
+here** — pruning a hook must also GC its `settings.json`/`hooks.json`
+registration (a Windows-portable-path surface), tracked in **RUSH-2456**; hook
+files stay reconciled by the in-write orphan sweep (`versions.ts`, gated on
+`hooksToSync > 0`). See [`src/lib/staleness/prune.ts`](../src/lib/staleness/prune.ts).
 
 ## MCP Servers: Per-Agent JSON Write
 
