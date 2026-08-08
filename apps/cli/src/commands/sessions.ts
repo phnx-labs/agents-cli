@@ -41,6 +41,7 @@ import { discoverSessions, queryIndexedSessions, countSessionsInScope, resolveSe
 import { findSessionsById, querySessions, getSessionById } from '../lib/session/db.js';
 import {
   filterTeamSessions,
+  shouldShowTeamSessions,
   safeTeamText,
   groupSessionsByTeam,
   NO_TEAM_GROUP_KEY,
@@ -1729,6 +1730,11 @@ export function hasNoBrowserDisqualifyingFlags(
     !options.skill &&
     !options.plugin &&
     !options.sort &&
+    // --routine without a name owns a two-stage picker (routine -> run ->
+    // session), and a named routine owns the run-grouped overview. The generic
+    // browser can only flatten routine sessions into its ordinary row list, so
+    // routing this flag there silently bypasses both routine-specific views.
+    !options.routine &&
     !options.artifacts &&
     options.artifact === undefined &&
     // --cloud lists a provider's tasks, not the transcript index, and
@@ -2562,6 +2568,11 @@ async function sessionsAction(
   // silently returns nothing for any team older than that — so the flag widens its
   // own scope, the way --all does, unless the caller set an explicit --limit.
   const wantsWholeTeam = !!options.inTeam;
+  // A routine is not tied to the shell's cwd: its archived sessions retain the
+  // working directory in which the scheduled agent actually ran. Scope the
+  // routine catalog across directories so invoking it from ~/.agents/.system,
+  // a project repo, or $HOME yields the same routine history.
+  const wantsWholeRoutine = !!options.routine;
   // `--limit` has a commander default, so an untouched flag still arrives as a
   // string and truthiness can't tell it from a typed one. Commander records where
   // each value came from, which is the only signal that distinguishes an explicit
@@ -2571,7 +2582,7 @@ async function sessionsAction(
   const limit = wantsOverview
     ? OVERVIEW_POOL_LIMIT
     : parseInt(
-        userSetLimit ? options.limit! : wantsWholeTeam ? String(WHOLE_TEAM_POOL_LIMIT) : DEFAULT_LIMIT,
+        userSetLimit ? options.limit! : wantsWholeTeam || wantsWholeRoutine ? String(WHOLE_TEAM_POOL_LIMIT) : DEFAULT_LIMIT,
         10
       );
   if (toolEvidenceMode && (!Number.isSafeInteger(limit) || limit < 1 || limit > TOOL_QUERY_MAX_RESULT_SESSIONS)) {
@@ -2583,7 +2594,7 @@ async function sessionsAction(
   // --since still narrows. Non-overview keeps the prior interactive-30d default.
   const since = wantsOverview
     ? options.since
-    : (options.since ?? (isInteractive && !options.all && !wantsWholeTeam ? '30d' : undefined));
+    : (options.since ?? (isInteractive && !options.all && !wantsWholeTeam && !wantsWholeRoutine ? '30d' : undefined));
   const toolSpansDevices = toolEvidenceMode
     && (options.fleet || (options.host?.length ?? 0) > 0);
   const toolSortError = toolSearchFleetSortError(options.sort, toolSpansDevices);
@@ -2610,12 +2621,12 @@ async function sessionsAction(
       // --in-team spans directories by construction: a team's teammates run in
       // their own worktrees, so scoping to the current cwd hides most of the
       // lineage the flag exists to show.
-      all: pathFilter ? undefined : options.all || wantsWholeTeam || toolSpansDevices,
+      all: pathFilter ? undefined : options.all || wantsWholeTeam || wantsWholeRoutine || toolSpansDevices,
       cwd: process.cwd(),
       // Default overview scopes to the current repo SUBTREE (prefix match), so a
       // monorepo shows its sub-projects grouped instead of collapsing to the one
       // exact-cwd project. `--all` clears the prefix and spans the whole index.
-      cwdPrefix: pathFilter ?? (wantsOverview && !options.all && !wantsWholeTeam && !toolSpansDevices ? process.cwd() : undefined),
+      cwdPrefix: pathFilter ?? (wantsOverview && !options.all && !wantsWholeTeam && !wantsWholeRoutine && !toolSpansDevices ? process.cwd() : undefined),
       project: options.project,
       since,
       until: options.until,
@@ -2651,7 +2662,7 @@ async function sessionsAction(
       const readOptions: DiscoverOptions = {
         ...scope,
         limit,
-        excludeTeamOrigin: !options.teams,
+        excludeTeamOrigin: !shouldShowTeamSessions(options),
         onProgress: tracker.onProgress,
         includeUnmanaged: options.unmanaged,
         onHiddenUnmanaged: (n) => { hiddenUnmanaged = n; },
@@ -2670,7 +2681,7 @@ async function sessionsAction(
     // meta.json in ~/.agents/teams/agents whose is_team_origin flag was
     // never set (legacy rows). Keep the in-memory pass so those are still
     // enriched/hidden.
-    const { visible: visibleSessions } = filterTeamSessions(sessions, !!options.teams);
+    const { visible: visibleSessions } = filterTeamSessions(sessions, shouldShowTeamSessions(options));
     sessions = visibleSessions;
 
     // --in-team spans both ends of the lineage, so it can't be one SQL predicate:
@@ -2753,7 +2764,7 @@ async function sessionsAction(
 
     // Under --in-team the visible list is one team, so the whole-index team-origin
     // count would be a non-sequitur next to it.
-    const hiddenCount = options.teams || options.inTeam
+    const hiddenCount = shouldShowTeamSessions(options) || options.inTeam
       ? 0
       : countSessionsInScope({ ...scope, onlyTeamOrigin: true });
 
@@ -5209,9 +5220,9 @@ export function registerSessionsCommands(program: Command): void {
       # teammate row [<team>/<handle>]. --in-team narrows to one team's lineage.
       agents sessions --in-team redesign --teams
 
-      # Show routine-run sessions and open one by routine run id
-      agents sessions --routine --all
-      agents sessions --routine nightly-review --all
+      # Pick a routine across every directory, then open one of its run sessions
+      agents sessions --routine
+      agents sessions --routine nightly-review
       agents sessions 2026-07-21T10-30-00-000Z
 
       # Export for analysis
@@ -5259,7 +5270,7 @@ export function registerSessionsCommands(program: Command): void {
       - --first and --last are mutually exclusive.
       - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.
       - --cloud sources from Rush Cloud captured runs instead of local disk.
-      - --routine [name] shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.
+      - --routine [name] spans every directory and shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.
       - Without --teams, team-spawned sessions are hidden by default.
     `,
   });

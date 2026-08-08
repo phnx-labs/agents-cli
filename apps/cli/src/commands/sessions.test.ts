@@ -31,6 +31,7 @@ import {
   requestedLiveStatuses,
   parseInstalledAgentVersionQuery,
   buildRoutineChoices,
+  hasNoBrowserDisqualifyingFlags,
 } from './sessions.js';
 import { remoteAgentsJsonCommand } from '../lib/remote-agents-json.js';
 import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
@@ -63,6 +64,53 @@ describe('routine session catalog', () => {
     expect(buildRoutineChoices([], ['never-ran'])).toEqual([
       { name: 'never-ran', lastRunAt: '', runCount: 0, latestRunSessionCount: 0 },
     ]);
+  });
+
+  it('keeps --routines on the routine-specific picker instead of the generic browser', () => {
+    expect(hasNoBrowserDisqualifyingFlags({ routine: true }, undefined)).toBe(false);
+    expect(hasNoBrowserDisqualifyingFlags({ routine: 'nightly-review' }, undefined)).toBe(false);
+  });
+
+  it('finds a named routine archive outside the invoking directory without --all', () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-routine-cross-cwd-'));
+    try {
+      writeUpdateCache(tempHome);
+      const invokingCwd = path.join(tempHome, 'work', 'unrelated-repo');
+      const routineCwd = path.join(tempHome, 'work', 'scheduled-repo');
+      const sessionId = 'face2403-1111-4222-8333-444455556666';
+      const runId = '2026-08-08T03-00-00-000Z';
+      fs.mkdirSync(invokingCwd, { recursive: true });
+      const archiveDir = path.join(
+        tempHome, '.agents', '.history', 'runs', 'nightly-review', runId,
+        'sessions', 'claude', 'projects', '-scheduled-repo',
+      );
+      fs.mkdirSync(archiveDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(archiveDir, `${sessionId}.jsonl`),
+        JSON.stringify({
+          type: 'user', timestamp: '2026-08-08T03:00:00.000Z', cwd: routineCwd,
+          sessionId, version: '2.1.110', gitBranch: 'main', entrypoint: 'sdk-cli',
+          message: { role: 'user', content: 'inspect the scheduled repository' },
+        }) + '\n',
+        'utf-8',
+      );
+
+      const result = runAgents(
+        ['sessions', '--routine', 'nightly-review', '--json', '--local'],
+        invokingCwd,
+        tempHome,
+      );
+      expect(result.status, result.stderr).toBe(0);
+      const rows = JSON.parse(result.stdout) as SessionMeta[];
+      expect(rows.map((row) => row.id)).toEqual([sessionId]);
+      expect(rows[0]).toMatchObject({
+        origin: 'routine', routineName: 'nightly-review', routineRunId: runId,
+        cwd: routineCwd,
+        isTeamOrigin: true,
+      });
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
   });
 });
 
