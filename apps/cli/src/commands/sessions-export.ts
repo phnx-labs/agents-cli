@@ -124,6 +124,9 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
     ));
     process.exit(1);
   }
+  if (g.toR2 && (g.output || g.stdout)) {
+    process.stderr.write(chalk.yellow('Note: --to-r2 uploads to R2; -o/--stdout are ignored.\n'));
+  }
 
   const explicitLimit = command.parent?.getOptionValueSource?.('limit') === 'cli';
   const limit = explicitLimit ? Math.max(1, parseInt(String(g.limit), 10) || DEFAULT_LIMIT) : DEFAULT_LIMIT;
