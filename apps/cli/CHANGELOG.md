@@ -1,5 +1,71 @@
 # Changelog
 
+## 1.22.32
+
+- **Routines validate execution context before activation and fire once per schedule slot (RUSH-2290).** A routine selects one execution `project` plus a portable `cwd`; add/edit save proven blockers paused, durable slot and active-run claims prevent duplicate or overlapping launches, and every blocked/skipped/pre-spawn attempt remains visible without requiring a session transcript. Source: `apps/cli/src/lib/routine-context.ts`, `apps/cli/src/lib/routine-readiness.ts`, `apps/cli/src/lib/runner.ts`.
+
+- **Daemon: self-terminates if its own state dir disappears; the routines test suite reaps
+  leaked daemons instead of letting them run for days (RUSH-2367).** Three real daemon
+  processes were found alive on a fleet box for up to 3.5 days, each spawned by a
+  vitest fixture under its own `/tmp` `HOME` and invisible to every `agents daemon`
+  guard, since a different `HOME` resolves a different state dir and instance registry.
+  The daemon now polls (`AGENTS_DAEMON_STATE_DIR_CHECK_MS`, default 60s) for a
+  per-lifetime marker and exits gracefully if it disappears — unlike the pid and
+  heartbeat files, status repair cannot recreate that marker after deleting the state
+  tree. This is the only defense
+  that survives the whole test runner being killed externally before any in-test cleanup
+  can run. The routines test suite also gained a leak detector that fails the run and
+  force-kills anything it spawned (or, on CI, any daemon it finds under its own fixture
+  prefix from a previous interrupted run) that survived past its own test. Source:
+  `apps/cli/src/lib/daemon.ts`, `apps/cli/src/commands/routines.test.ts`.
+
+- **Daemon: `status`/`doctor`/`services` no longer misreport test fixtures as duplicate
+  daemons to kill, and no longer render `healthy` for an unreachable service (RUSH-2368).**
+  Duplicate detection used to scan every `__daemon-run` process on the box, so a fixture
+  daemon under its own `HOME` (and therefore its own `getDaemonDir()`/instance registry) —
+  a separate install, or a leaked test process — showed up as a stray for the reader to
+  `kill`, contradicting the reaper (`reapStrayDaemons`) and `stop`'s postcondition, which
+  already scope by the instance registry. Duplicates are now read from that same registry
+  (`findSurvivingStateDirDaemons`), never a raw `ps` match. Separately, the secrets-broker
+  and browser-IPC health lines derived their `healthy`/`down` verdict from the daemon's
+  persisted last-ok record, which is only updated at the daemon's own startup — a broker
+  that went unreachable hours into a still-running daemon rendered `healthy (unreachable)`
+  on one line. The verdict now comes from the live probe; the persisted record supplies
+  only supporting last-ok/last-error context. Source: `apps/cli/src/commands/daemon.ts`,
+  `apps/cli/src/lib/daemon.ts`.
+
+- **Agent installations are frozen, and `agents update <agent>@<installed-version>` moves the release inside one (RUSH-2372).** An installation used to be identified only by its version-dir name, so the vendor release *was* the identity: moving to a new release meant a new directory, which dangled every default, project pin, routine `version:`, and profile that named the old one — and two installations of the same release could not coexist at all. Each install now carries an `installation.json` with a stable opaque id plus the release currently on disk; the name is frozen for life and only the release moves, so every reference keeps resolving. Pre-existing version dirs migrate on first read. `agents update` takes `--to <release>` (`latest` by default), `--account <label>` to disambiguate when several installations match, `--json`, `agents update list <agent>`, and routes through `--host` to update a peer's installation. The target release is fetched into a sibling directory and launched there *before* it replaces the working one, so a release that cannot start is discarded rather than installed; a post-swap failure restores the previous one. Update strategies are chosen from the agent registry's declared capabilities, so every harness `agents add` manages is covered (npm package, shared self-updating binary, install script) — and a harness whose binary lives outside the directory being swapped is refused with the reason instead of being recorded as updated. Not to be confused with `agents upgrade`, which updates agents-cli itself. Source: `apps/cli/src/lib/installations/*`, `apps/cli/src/commands/update.ts`, `apps/cli/src/lib/versions.ts`.
+
+- **`agents doctor` detects and self-heals a hook whose generated shim wrapper is
+  missing or broken, and the menu bar shows it (RUSH-2382).** A native hook command
+  could read as wired when its generated `~/.agents/.cache/shims/hooks/<name>.sh`
+  target was absent, a dangling symlink, empty, or non-executable — the harness
+  silently never ran the hook. `agents doctor` now emits a `hook-runtime-broken`
+  critical finding for every hooks-capable harness (not just the settings formats
+  the wiring inspector understands), and the daemon's safe self-heal regenerates
+  one broken shim per unique path per pass with post-repair verification, never
+  retrying or recursing into resource sync within the same pass. The macOS menu
+  bar System row now reads `N critical · M warnings` (or `all set`) from
+  `agents doctor --json`'s `findings` on the existing 15-minute poll, and the
+  submenu lists up to 5 actionable findings with remediation (any kind, not just
+  this one), with a `+N more — run agents doctor` row past the cap. Source:
+  `apps/cli/src/lib/hooks.ts`, `apps/cli/src/lib/self-heal/checks/hook-runtime.ts`,
+  `apps/cli/src/lib/devices/doctor-findings.ts`,
+  `apps/cli/menubar/Sources/MenubarHelper/{Models,StatusItemController,AgentsCLI}.swift`.
+
+- **Menu bar: the ROUTINES section is now a collapsible project-group accordion.**
+  Routines render the same way ACTIVE sessions do — one collapsible header per
+  project group (a project name, or the `Operations` / `All projects` /
+  `Cross-project` specials the CLI derives from each routine's `projects:` field),
+  collapsed by default, click `▶` to fold every routine in that group inline. Each
+  header carries per-state glyph counts (`◔` upcoming, `✕` failing, `⃠` missed,
+  `⏸` not-ready) and a paused tail, so a collapsed group still shows what is inside
+  it; the header row also names the group count (`ROUTINES · … · N groups`).
+  Expanding a group orders it attention-first, then by next run, then paused last.
+  This replaces the flat group labels plus the single "All routines…" flyout for a
+  CLI that emits `projectGroup`; an older CLI falls back to the previous view.
+  Source: `apps/cli/menubar/Sources/MenubarHelper/StatusItemController.swift`.
+
 ## 1.22.31
 
 - **`agents secrets unlock --keys` folds in the scoped-hold surface; the `secrets lease`/`leases`/`revoke` commands are deleted (RUSH-2350).** `unlock` now takes `--keys K1,K2` to hold ONLY that subset of a bundle behind its own expiry instead of the whole bundle — the one capability `lease` had that `unlock` did not, now on the command agents already reach for. Without `--keys`, `unlock` behaves exactly as before (whole bundle). An unknown or empty key subset fails closed (`Unknown secret lease key(s): …` / `requires at least one key`), `--keys` scopes exactly one local bundle (rejected with `--all`/`--host`), and `secrets status` now names the held keys of a scoped hold; `secrets lock <name>` releases it. The duplicate `secrets lease`/`secrets leases`/`secrets revoke` trio is gone — it had zero consumers, and its jobs (list holdings, release one) are already `secrets status` and `secrets lock`. No alias or deprecation shim (per the repo's no-unasked-shims rule). The underlying lease model (`src/lib/secrets/lease.ts`) is unchanged — `unlock --keys` reuses it. Source: `apps/cli/src/commands/secrets.ts` (`scopeHeldEnv`, the `unlock`/`status` actions), `apps/cli/src/lib/secrets/{agent,session-store}.ts`, `apps/cli/src/commands/secrets.scope.test.ts`, `apps/cli/src/commands/secrets.flags.test.ts`.
