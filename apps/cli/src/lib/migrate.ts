@@ -2109,6 +2109,29 @@ function migrateHumans(): void {
  * the home already has its own token, and a no-op for unmanaged Cursor installs
  * (where ~/.cursor is a real dir, not a symlink into a version home).
  */
+export function seedActiveCursorLoginPerVersion(): void {
+  const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
+  const globalAuth = path.join(realHome, '.config', 'cursor', 'auth.json');
+  let versionHome: string;
+  try {
+    if (!fs.existsSync(globalAuth)) return;
+    // ~/.cursor -> .../versions/cursor/<version>/home/.cursor ; the version home
+    // is that link's parent directory.
+    const link = fs.readlinkSync(path.join(realHome, '.cursor'));
+    const resolved = path.isAbsolute(link) ? link : path.resolve(realHome, link);
+    versionHome = path.dirname(resolved);
+  } catch {
+    return; // not a symlink (unmanaged install) or unreadable — nothing to seed
+  }
+  if (!versionHome.includes(path.join('versions', 'cursor'))) return;
+  const dest = path.join(versionHome, '.config', 'cursor', 'auth.json');
+  try {
+    if (fs.existsSync(dest)) return;
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(globalAuth, dest);
+  } catch { /* best-effort — a failed seed just means one re-login */ }
+}
+
 /**
  * Fold the pre-markdown Kimi subagent layout out of every kimi version home.
  *
@@ -2171,29 +2194,6 @@ export function migrateKimiSubagentsToMarkdown(versionsDir?: string): void {
   if (removed > 0) {
     console.error(`Removed ${removed} pre-markdown Kimi subagent file(s); run 'agents sync kimi' to write the new format`);
   }
-}
-
-export function seedActiveCursorLoginPerVersion(): void {
-  const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
-  const globalAuth = path.join(realHome, '.config', 'cursor', 'auth.json');
-  let versionHome: string;
-  try {
-    if (!fs.existsSync(globalAuth)) return;
-    // ~/.cursor -> .../versions/cursor/<version>/home/.cursor ; the version home
-    // is that link's parent directory.
-    const link = fs.readlinkSync(path.join(realHome, '.cursor'));
-    const resolved = path.isAbsolute(link) ? link : path.resolve(realHome, link);
-    versionHome = path.dirname(resolved);
-  } catch {
-    return; // not a symlink (unmanaged install) or unreadable — nothing to seed
-  }
-  if (!versionHome.includes(path.join('versions', 'cursor'))) return;
-  const dest = path.join(versionHome, '.config', 'cursor', 'auth.json');
-  try {
-    if (fs.existsSync(dest)) return;
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.copyFileSync(globalAuth, dest);
-  } catch { /* best-effort — a failed seed just means one re-login */ }
 }
 
 /** Run all idempotent migrations. Safe to call multiple times. */

@@ -13,7 +13,8 @@
 
   Homes synced before this fix carry stale `<name>.yaml`, `<name>.system.md`, and
   `_agents-cli.yaml` files in `~/.kimi-code/agents/`. A one-shot migration
-  (`migrateKimiSubagentsToMarkdown`) removes them from every kimi version home on first run —
+  (`migrateKimiSubagentsToMarkdown`, migration schema `v19`) removes them from every kimi
+  version home on the first run after upgrading —
   not `agents prune cleanup`, which could never reach the two `.yaml` files because they match
   no subagent enumerator. Without it the leftover `<name>.system.md` would be listed as a
   phantom subagent named `<name>.system` and warned about by kimi-code once per session, since

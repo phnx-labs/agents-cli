@@ -117,7 +117,9 @@ const REAL_PATH = process.env.PATH || '';
 const SYSTEM_DIR = getAgentsDir();
 const LEGACY_SYSTEM_DIR = getLegacySystemAgentsDir();
 const MIGRATED_SENTINEL_FILE = getMigratedSentinelPath();
-const MIGRATION_SENTINEL_VALUE = 'v18';
+// Mirrors `sentinelValue` in index.ts — keep in sync or the bench measures the
+// non-short-circuiting path that a real (already-migrated) install never takes.
+const MIGRATION_SENTINEL_VALUE = 'v19';
 
 describe('checkForUpdates — maybeWarnMultiInstall (index.ts:535-575): the PATH + known-install-root scan', () => {
   bench('resolveRunningPackageRoot(__dirname) — real path math, no fs walk when not a bunfs virtual path (self-update.ts:177)', () => {

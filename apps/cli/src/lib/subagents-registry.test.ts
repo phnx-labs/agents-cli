@@ -162,17 +162,24 @@ describe('Kimi subagents are Claude-shaped agent markdown', () => {
    * project-sync collision check veto its own write, and made an orphaned
    * `<name>.system.md` unreachable by `agents prune cleanup`.
    */
-  it('writes only <name>.md and leaves unrelated files in the dir alone', () => {
+  it('claims only the file it writes', () => {
+    // Widening `occupied` to the legacy pair made project sync's collision
+    // check veto its own write over a stray `<name>.yaml`.
+    const dir = path.join(mkTemp(), '.kimi-code', 'agents');
+    expect(SUBAGENT_TARGETS.kimi!.occupied(dir, 'x').map((e) => path.basename(e.path))).toEqual(['x.md']);
+  });
+
+  it('enumerates a stale <name>.system.md so the orphan diff can still reach it', () => {
+    // Filtering `.system` out of `names` hid an abandoned legacy prompt file
+    // from `agents prune cleanup` -- the migrator sweeps it, but until that
+    // runs it must stay visible rather than silently linger.
     const home = mkTemp();
     const dir = path.join(home, '.kimi-code', 'agents');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'handwritten.md'), '---\nname: handwritten\ndescription: mine\n---\n\nbody');
+    fs.writeFileSync(path.join(dir, 'x.yaml'), 'version: 1\n');
+    fs.writeFileSync(path.join(dir, 'x.system.md'), 'legacy prompt body');
 
-    writeSubagentToHome('kimi', home, { name: 'code-reviewer', path: makeSubagentDir('code-reviewer') });
-
-    expect(fs.existsSync(path.join(dir, 'code-reviewer.md'))).toBe(true);
-    expect(fs.existsSync(path.join(dir, 'handwritten.md'))).toBe(true);
-    expect(listInstalledSubagentNames('kimi', home).sort()).toEqual(['code-reviewer', 'handwritten']);
+    expect(listInstalledSubagentNames('kimi', home)).toEqual(['x.system']);
   });
 });
 
