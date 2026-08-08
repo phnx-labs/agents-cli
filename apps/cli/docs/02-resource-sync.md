@@ -125,6 +125,44 @@ reconcile every installed agent. `--json` emits a single JSON object on stdout
 (and forces non-interactive mode); the fleet fan-out path (`--host all` /
 `--device all`) injects `--json` on each peer so the roster can parse results.
 
+## Pruning: resources removed from source disappear from version homes
+
+A reconcile deletes as well as installs. When a command, skill, or hook is
+**removed from a DotAgent repo**, `agents sync` removes its stale copy from each
+version home — so a deleted resource disappears from the `/` menu the same way an
+added one appears, without hand-deleting files. This runs on the repo-scope and
+`@all` reconcile forms:
+
+```bash
+agents sync claude@all system   # reconcile system repo into every claude — prunes what system no longer ships
+agents sync claude system       # same, one version
+```
+
+A pruned resource is reported under a `Pruned from claude@<version> (removed from
+source)` block, and the `--json` payload carries a `pruned: { commands, skills,
+hooks }` field.
+
+Pruning is **manifest-bounded**, so it never over-deletes:
+
+- **Only agents-installed resources are candidates.** The prune set is
+  `(names the last full sync recorded in the manifest) − (names still in source
+  across ALL layers)`, intersected with what is currently in the home. A file you
+  hand-authored into `~/.claude/…` was never recorded, so it is never touched.
+- **No cross-layer deletion.** The "still in source" set spans every layer, so a
+  system command removed from `~/.agents/.system` while a same-named **user**
+  command still exists is kept — it is still provided by a layer.
+- **No manifest → no deletion (fail loud).** With no sync manifest yet (no prior
+  full sync established a baseline), the reconcile prints a one-line notice and
+  prunes nothing rather than guessing. A later `agents sync <agent>` full sync
+  writes the baseline, after which prune works.
+
+Every harness prunes: a native command file (Claude, Grok, Cursor), a
+command-as-skill dir (Codex ≥ 0.117, Kimi), and a Goose recipe are each removed
+through the same writer that installed them. Kinds synced as a wholesale rewrite
+(rules, permissions) or with their own reconciliation (plugins, via
+`cleanOrphanedPluginSkills`) do not need this pass. See
+[`src/lib/staleness/prune.ts`](../src/lib/staleness/prune.ts).
+
 ## MCP Servers: Per-Agent JSON Write
 
 MCP is the one resource that isn't symlinked. Each agent stores MCP server
@@ -338,6 +376,7 @@ Behavior rules, per `src/lib/plugins.ts:379` and `src/lib/plugin-marketplace.ts`
 | `getActuallySyncedResources()` | versions.ts | Check what's synced to version |
 | `getNewResources()` | versions.ts | Diff available vs synced |
 | `syncResourcesToVersion()` | versions.ts | Create symlinks in version home |
+| `pruneRemovedResources()` | staleness/prune.ts | Remove version-home resources deleted from source (manifest-bounded) |
 | `markdownToToml()` | convert.ts | Legacy command TOML conversion helper |
 | `syncWorkflowToGooseRecipe()` | workflows.ts | Convert workflows into Goose recipes and subrecipes |
 | `transformWorkflowForOpenClaw()` | workflows.ts | Convert workflows into Lobster `.lobster` files |
