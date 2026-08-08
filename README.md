@@ -428,11 +428,12 @@ Top-level questions and waiting notifications publish one atomic open-block reco
 
 ```bash
 agents watchdog            # one tick, dry run — reports what it WOULD nudge and why
+agents watchdog --verbose  # include healthy/non-actionable session inspections
 agents watchdog --nudge    # actually inject "Continue." into the stalled split
 agents watchdog --watch    # daemon loop: a tick every --interval
 ```
 
-`agents watchdog` detects a stalled session, resolves the *exact* terminal split it lives in (tmux, iTerm, VSCodium, or a raw pty), and injects a nudge -- `Continue.` by default, or set `--text`. It's dry by default; `--nudge` acts on a single tick. `agents watchdog on|off` controls the device-local daemon pass, which runs once every three minutes. Steer a single run with `agents watchdog policy <id> off | keep | handsoff`.
+`agents watchdog` detects a stalled session, resolves the *exact* terminal split it lives in (tmux, iTerm, VSCodium, or a raw pty), and injects a nudge -- `Continue.` by default, or set `--text`. Its timestamped default output shows attention-worthy sessions with their agent, host app, machine, project, activity, age, path, latest preview, and decision reason; `--verbose` restores healthy/non-actionable inspections. It's dry by default; `--nudge` acts on a single tick. `agents watchdog on|off` controls the device-local daemon pass, which runs once every three minutes. Steer a single run with `agents watchdog policy <id> off | keep | handsoff`.
 
 A stalled session whose tail shows a hard account limit ("You've hit your weekly limit · resets …") is **rotated in place** instead of nudged: the watchdog gates on the same healthy-account selection `agents run auto` makes (zero healthy → one skip event per cooldown window, terminal untouched), injects the harness's exit sequence, relaunches `agents run auto --interactive --session-id <uuid>` in the *same* tab, then replays the old session's resume once the new TUI is live. Default on; `agents watchdog rotate off` disables it (nudging stays on).
 

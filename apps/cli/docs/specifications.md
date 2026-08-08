@@ -2850,6 +2850,11 @@ not the watchdog's.
 - **WD-19 (MUST).** `agents watchdog history [sessionId]` MUST expose the persisted audit
   trail newest-first, including non-action session inspections, MUST support machine-readable output, and MUST NOT return raw
   transcript `tailLines` or message excerpts (`lib/watchdog/history.ts`, `commands/watchdog.ts`).
+- **WD-20 (MUST).** The human one-shot tick output MUST show the tick timestamp and
+  actionable session identity/location/activity metadata already present in the active
+  snapshot. It MUST summarize healthy/non-actionable inspections by default and restore
+  every row with `--verbose`, without performing another session scan
+  (`lib/watchdog/runner.ts`, `commands/watchdog.ts`).
 
 ### 3. Given/When/Then scenarios
 
@@ -2884,6 +2889,12 @@ Given persisted decisions and heartbeat ticks; When an operator runs
 first alongside compact inspection results, without raw transcript tails or message excerpts,
 and heartbeat rows appear only with `--all`
 (WD-19).
+
+**GWT-W7 — A dry tick explains what needs attention.**
+Given a tick containing stalled and healthy sessions; When an operator runs `agents watchdog`;
+Then the output names when the tick ran and identifies every actionable session with its
+location/activity context, while healthy rows are summarized until `--verbose` is passed
+(WD-20).
 
 ### 4. Known gaps
 

@@ -70,39 +70,74 @@ function humanMs(ms: number): string {
   return `${Math.round(ms / 1000)}s`;
 }
 
-function colorForOutcome(o: SessionOutcome): (s: string) => string {
-  if (o.injected) return chalk.green;
-  if (o.decision === 'rotate') return chalk.magenta;
-  if (o.addressable === false) return chalk.yellow;
-  if (o.stall === 'stalled' && o.decision === 'nudge') return chalk.cyan;
-  return chalk.dim;
+/** Render one tick's outcomes as a human status block. */
+function elapsedLabel(atMs: number, eventMs: number): string {
+  const seconds = Math.max(0, Math.round((atMs - eventMs) / 1000));
+  if (seconds < 60) return `${seconds} second${seconds === 1 ? '' : 's'} ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
 }
 
-/** Render one tick's outcomes as a human status block. */
-function printTick(result: WatchdogTickResult, willInject: boolean): void {
+function isAttentionOutcome(outcome: SessionOutcome): boolean {
+  return outcome.stall === 'stalled'
+    || outcome.decision !== 'skip'
+    || outcome.injected === true
+    || outcome.addressable === false
+    || outcome.rotatePhase === 'failed';
+}
+
+export function formatWatchdogTickLines(
+  result: WatchdogTickResult,
+  willInject: boolean,
+  verbose = false,
+): string[] {
   const { counts } = result;
-  const mode = willInject ? chalk.green('nudge') : chalk.dim('dry');
-  console.log(
-    `${chalk.bold('watchdog')} ${mode}  ` +
+  const mode = willInject ? 'nudge' : 'dry';
+  const lines = [
+    `watchdog ${mode} · checked ${new Date(result.atMs).toLocaleString()} · ` +
       `${counts.total} live · ${counts.stalled} stalled · ` +
-      `${chalk.green(String(counts.nudged))} nudged · ` +
-      `${chalk.yellow(String(counts.unaddressable))} un-addressable` +
-      (counts.rotating > 0 ? ` · ${chalk.magenta(String(counts.rotating))} rotating` : ''),
-  );
-  for (const o of result.outcomes) {
+      `${counts.nudged} nudged · ${counts.unaddressable} un-addressable` +
+      (counts.rotating > 0 ? ` · ${counts.rotating} rotating` : ''),
+  ];
+  const visible = verbose ? result.outcomes : result.outcomes.filter(isAttentionOutcome);
+  for (const o of visible) {
     const tag =
       o.injected ? 'NUDGED'
       : o.decision === 'rotate' ? (o.rotatePhase === 'failed' ? 'ROTATE-FAIL' : 'ROTATE')
       : o.addressable === false ? 'FLAGGED'
       : o.decision === 'nudge' ? 'WOULD-NUDGE'
       : 'skip';
-    const c = colorForOutcome(o);
-    const who = o.label || o.sessionId?.slice(0, 8) || o.kind;
-    const where = o.host ? chalk.dim(`[${o.host}]`) : '';
-    const rail = o.rail ? chalk.dim(`→${o.rail}`) : '';
-    console.log(`  ${c(tag.padEnd(11))} ${chalk.bold(who)} ${where} ${rail}`);
-    console.log(`    ${chalk.dim(o.reason)}`);
+    const id = o.sessionId?.slice(0, 8) ?? 'no-session-id';
+    const title = o.label || o.name || o.topic;
+    lines.push(`  ${tag.padEnd(11)} ${id}${title ? ` · ${title}` : ''}`);
+    const metadata = [
+      o.kind,
+      o.host,
+      o.machine ?? 'local',
+      o.project ?? (o.cwd ? path.basename(o.cwd) : undefined),
+      o.activity ?? o.status,
+      o.origin === 'routine' ? `routine ${o.routineName ?? 'unknown'}` : undefined,
+      o.owner ? `owner ${o.owner}` : undefined,
+      o.startedAtMs ? `started ${elapsedLabel(result.atMs, o.startedAtMs)}` : undefined,
+      o.lastActivityMs ? `activity ${elapsedLabel(result.atMs, o.lastActivityMs)}` : undefined,
+      o.rail ? `rail ${o.rail}` : undefined,
+    ].filter((value): value is string => Boolean(value));
+    lines.push(`    ${metadata.join(' · ')}`);
+    if (o.cwd) lines.push(`    cwd ${o.cwd}`);
+    if (o.preview) lines.push(`    latest ${o.preview.replace(/\s+/g, ' ').slice(0, 140)}`);
+    lines.push(`    reason ${o.reason}`);
   }
+  const omitted = result.outcomes.length - visible.length;
+  if (omitted > 0) lines.push(`  ${omitted} healthy/non-actionable session${omitted === 1 ? '' : 's'} omitted · use --verbose or --json to inspect all`);
+  return lines;
+}
+
+function printTick(result: WatchdogTickResult, willInject: boolean, verbose: boolean): void {
+  for (const line of formatWatchdogTickLines(result, willInject, verbose)) console.log(line);
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -124,6 +159,7 @@ export function registerWatchdogCommand(program: Command): void {
     .option('--smart', 'Use the LLM decider (agents run) instead of the deterministic path (non-reproducible)')
     .option('--smart-agent <agent>', 'Agent the --smart decider runs as', 'claude')
     .option('--allow-ghostty-focus', 'Permit the coarse, focus-stealing Ghostty path (off by default)')
+    .option('--verbose', 'Show healthy and non-actionable session inspections too')
     .option('--json', 'Emit the tick result as JSON (for the menu-bar / scripts)')
     .action(async (opts) => {
       const thresholds: WatchdogThresholds = {
@@ -155,7 +191,7 @@ export function registerWatchdogCommand(program: Command): void {
         const sessions = await loadWatchdogSessions();
         const result = await tickOnce(willInject, sessions);
         if (opts.json) console.log(JSON.stringify(result, null, 2));
-        else printTick(result, willInject);
+        else printTick(result, willInject, opts.verbose === true);
         return;
       }
 
@@ -174,7 +210,7 @@ export function registerWatchdogCommand(program: Command): void {
         const sessions = await loadWatchdogSessions();
         const result = await tickOnce(willInject, sessions);
         if (opts.json) console.log(JSON.stringify(result));
-        else printTick(result, willInject);
+        else printTick(result, willInject, opts.verbose === true);
         await sleep(intervalMs);
       }
     });

@@ -350,6 +350,37 @@ describe('runWatchdogTick — active / not-yet-stalled', () => {
     expect(DEFAULT_THRESHOLDS.stallMs).toBe(300_000);
   });
 
+  it('preserves the cached session metadata needed by diagnostic output', async () => {
+    const s = tmuxSession({
+      startedAtMs: NOW - 60_000,
+      lastActivityMs: NOW - 5_000,
+      project: 'agents-cli',
+      name: 'watchdog-check',
+      topic: 'Explain a stalled routine',
+      preview: 'Reading the session tail',
+      activity: 'working',
+      origin: 'routine',
+      routineName: 'session-health',
+      machine: 'zion',
+      owner: 'muqsit@example.com',
+    });
+    const result = await run({ sessions: [s], nowMs: NOW, nudge: false, stateDir });
+    expect(result.outcomes[0]).toMatchObject({
+      project: 'agents-cli',
+      name: 'watchdog-check',
+      topic: 'Explain a stalled routine',
+      preview: 'Reading the session tail',
+      activity: 'working',
+      status: 'idle',
+      startedAtMs: NOW - 60_000,
+      lastActivityMs: NOW - 5_000,
+      origin: 'routine',
+      routineName: 'session-health',
+      machine: 'zion',
+      owner: 'muqsit@example.com',
+    });
+  });
+
   it('SKIPS a session with no session id (cannot address or track)', async () => {
     const s = tmuxSession({ sessionId: undefined });
     const result = await run({

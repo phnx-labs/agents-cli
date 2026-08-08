@@ -204,7 +204,19 @@ export interface SessionOutcome {
   kind: string;
   host?: string;
   cwd?: string;
+  project?: string | null;
   label?: string;
+  name?: string;
+  topic?: string;
+  preview?: string;
+  activity?: ActiveSession['activity'];
+  status?: ActiveSession['status'];
+  startedAtMs?: number;
+  lastActivityMs?: number;
+  origin?: ActiveSession['origin'];
+  routineName?: string;
+  machine?: string;
+  owner?: string;
   /** classifyTerminal's verdict for this session. */
   stall: StallStatus['kind'];
   /** stalled duration (ms), when stalled. */
@@ -695,7 +707,19 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       kind: session.kind,
       host: session.host,
       cwd: session.cwd,
+      project: session.project,
       label: session.label,
+      name: session.name,
+      topic: session.topic,
+      preview: session.preview,
+      activity: session.activity,
+      status: session.status,
+      startedAtMs: session.startedAtMs,
+      lastActivityMs: session.lastActivityMs,
+      origin: session.origin,
+      routineName: session.routineName,
+      machine: session.machine ?? session.provenance?.host,
+      owner: session.owner,
       policy,
       stall: 'active',
       decision: 'skip',
@@ -717,6 +741,7 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
     }
 
     const lastActivityMs = lastActivityFor(session);
+    base.lastActivityMs = session.lastActivityMs ?? lastActivityMs;
     if (lastActivityMs === undefined) {
       outcomes.push({ ...base, reason: 'no activity timestamp (no transcript / start time)' });
       continue;

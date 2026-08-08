@@ -29359,6 +29359,15 @@
           "negate": false
         },
         {
+          "flags": "--verbose",
+          "description": "Show healthy and non-actionable session inspections too",
+          "long": "--verbose",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
           "flags": "--json",
           "description": "Emit the tick result as JSON (for the menu-bar / scripts)",
           "long": "--json",

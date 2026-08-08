@@ -28,6 +28,11 @@ The watchdog is owned by the agents daemon, not a UI poller or cron routine. Whe
 `watchdog.enabled` is true in this device's config, the daemon runs one bounded pass
 every three minutes. `agents watchdog --nudge` remains the explicit one-shot command:
 
+The human tick view is timestamped and attention-first. Each stalled/actionable row names
+the session id and label/topic, agent, host app, machine, project, activity, start/activity
+ages, cwd, latest preview, and decision reason. Healthy/non-actionable inspections are
+summarized; pass `--verbose` to render every row or `--json` for the complete tick object.
+
 1. **Detect idle.** Enumerate active sessions, classify each by transcript freshness and
    inferred activity (`lib/watchdog/read.ts`, `lib/session/state.ts`). A candidate is a
    session that is stalled (idle past `WATCHDOG_STALL_MS`, before `WATCHDOG_DORMANT_MS`,
@@ -166,7 +171,7 @@ persisted result and never executes a pass.
 | `lib/watchdog/watchdogTail.ts` | Summarize a tail into last-user / last-assistant for the brain + log. |
 | `lib/watchdog/rotate.ts` | In-place rotate: limit detection, exit-sequence table, state machine, health gate. |
 | `lib/watchdog/log.ts`, `history.ts` | Persist, parse, and safely select the Watchdog audit history. |
-| `commands/watchdog.ts` | `agents watchdog` — `on`/`off`/`status`/`history`/`policy`/`--nudge`/`--watch`. |
+| `commands/watchdog.ts` | `agents watchdog` — timestamped attention view, `--verbose`, `on`/`off`/`status`/`history`/`policy`/`--nudge`/`--watch`. |
 | `lib/session/state.ts`, `active.ts` | Status inference (`working`/`waiting_input`/`idle`) the watchdog reads. |
 | `lib/terminal/resolve.ts`, `inject.ts` | Resolve the exact split and deliver the nudge. |
 
