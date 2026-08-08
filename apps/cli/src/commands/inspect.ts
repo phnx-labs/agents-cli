@@ -41,6 +41,7 @@ import { getVersionHomePath,
 import { getShimsDir, getVersionedAliasPath } from '../lib/shims.js';
 import {
   getAgentResources,
+  isDirectoryDoc,
   listResources,
   type ResourceEntry,
   type SkillResourceEntry,
@@ -384,9 +385,14 @@ export function collectRepoKind(repo: RepoTarget, kind: DrillableKind): Resource
     if (entry.name.startsWith('.')) continue;
     // Build/tooling caches are never resources — they only inflate counts.
     if (entry.name === '__pycache__' || entry.name === 'node_modules') continue;
+    const name = entry.name.replace(/\.(md|yaml|yml|toml|json)$/, '');
+    // README/AGENTS/CLAUDE/GEMINI describe the directory, not resources of this
+    // kind. CLAUDE.md/GEMINI.md are symlinks to AGENTS.md, so a Dirent reports
+    // isFile() === false — use !isDirectory() to catch them (mirrors resources.ts).
+    if (!entry.isDirectory() && isDirectoryDoc(kind, name)) continue;
     const p = path.join(dir, entry.name);
     items.push({
-      name: entry.name.replace(/\.(md|yaml|yml|toml|json)$/, ''),
+      name,
       source: repo.label,
       path: p,
       linkTarget: linkTarget(p),

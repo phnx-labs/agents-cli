@@ -120,6 +120,20 @@ describe('collectRepoKind', () => {
     const repo = resolveRepoTarget(root)!;
     expect(collectRepoKind(repo, 'commands').map(c => c.name)).toEqual(['plain', 'ship']);
   });
+
+  it('skips directory-doc files (README/AGENTS/CLAUDE/GEMINI), including symlinks', () => {
+    const root = makeProjectRepo();
+    const commandsDir = path.join(root, '.agents', 'commands');
+    // Every resource dir carries README.md + AGENTS.md by convention, with
+    // CLAUDE.md/GEMINI.md symlinked to AGENTS.md. None is a command.
+    fs.writeFileSync(path.join(commandsDir, 'README.md'), '# Commands\n');
+    fs.writeFileSync(path.join(commandsDir, 'AGENTS.md'), '# Maintenance\n');
+    fs.symlinkSync('AGENTS.md', path.join(commandsDir, 'CLAUDE.md'));
+    fs.symlinkSync('AGENTS.md', path.join(commandsDir, 'GEMINI.md'));
+    const repo = resolveRepoTarget(root)!;
+    // Only the real commands remain — the four doc files are filtered out.
+    expect(collectRepoKind(repo, 'commands').map(c => c.name)).toEqual(['plain', 'ship']);
+  });
 });
 
 describe('repoManifestSummary', () => {
