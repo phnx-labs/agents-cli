@@ -482,7 +482,12 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
       `Daemon auto-start is disabled after ${startHealth?.consecutiveFailures ?? 0} consecutive starts that never reported healthy: ` +
       `${startHealth?.lastError ?? 'no reason recorded'}. Fix the cause, then retry with: agents daemon start`,
     );
-  } else if (startHealth && startHealth.consecutiveFailures > 0) {
+  } else if (!status.running && startHealth && startHealth.consecutiveFailures > 0) {
+    // Only while the daemon is DOWN. A start is marked as failed the moment it
+    // is issued and cleared once the daemon finishes booting, so a running
+    // daemon with a non-zero streak is just the boot window (or a daemon
+    // launched outside startDaemon) — reporting it there is a false alarm that
+    // clears itself a second later.
     problems.push(`Daemon start has ${startHealth.consecutiveFailures} consecutive failure(s): ${startHealth.lastError}`);
   }
 
