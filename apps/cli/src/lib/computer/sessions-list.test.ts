@@ -10,8 +10,11 @@ import {
   formatActionCounts,
   renderComputerSessionRows,
   buildComputerSessionRows,
+  applyRowDisplayLimit,
   TASK_PREVIEW_MAX_CHARS,
+  DEFAULT_ROW_DISPLAY_LIMIT,
   type ComputerAction,
+  type ComputerRunRow,
 } from './sessions-list.js';
 import { emit, query, truncate, _resetForTest } from '../events.js';
 import type { SessionMeta } from '../session/types.js';
@@ -189,6 +192,38 @@ describe('renderComputerSessionRows', () => {
     expect(out).toContain('write a haiku');
     expect(out).toContain('unlinked');
     expect(out).toContain('type 1');
+  });
+});
+
+describe('applyRowDisplayLimit', () => {
+  const manyRows = (n: number): ComputerRunRow[] =>
+    groupIntoComputerRuns(Array.from({ length: n }, (_, i) => action({ pid: i, tsMs: i })));
+
+  it('shows every row and reports zero more when under the cap', () => {
+    const { shown, more } = applyRowDisplayLimit(manyRows(3), 50);
+    expect(shown).toHaveLength(3);
+    expect(more).toBe(0);
+  });
+
+  it('caps at the given limit and reports the exact remainder — the real-history explosion (RUSH-2432 demo finding)', () => {
+    // A real machine's history is mostly one standalone verb per CLI
+    // invocation (one pid = one row), not `run --task` loops — an unbounded
+    // flat dump against it prints hundreds of one-action rows. This pins the
+    // fix found while demonstrating the feature against real history.
+    const { shown, more } = applyRowDisplayLimit(manyRows(237), 50);
+    expect(shown).toHaveLength(50);
+    expect(more).toBe(187);
+  });
+
+  it('defaults to DEFAULT_ROW_DISPLAY_LIMIT when no limit is given', () => {
+    const { shown } = applyRowDisplayLimit(manyRows(DEFAULT_ROW_DISPLAY_LIMIT + 10));
+    expect(shown).toHaveLength(DEFAULT_ROW_DISPLAY_LIMIT);
+  });
+
+  it('keeps the newest rows — grouping already sorts newest-run-first', () => {
+    const rows = manyRows(5); // pids 0..4, tsMs 0..4 -> newest (pid 4) first
+    const { shown } = applyRowDisplayLimit(rows, 2);
+    expect(shown.map((r) => r.pid)).toEqual([4, 3]);
   });
 });
 

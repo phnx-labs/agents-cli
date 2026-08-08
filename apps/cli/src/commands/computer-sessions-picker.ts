@@ -31,6 +31,9 @@ import { formatRelativeTime } from '../lib/session/relative-time.js';
 
 export interface ComputerSessionsCommandOpts {
   machine?: string;
+  /** Row cap for the flat table only — the interactive picker is searchable
+   *  and shows every row regardless (see `runComputerSessions`). */
+  limit?: number;
   json?: boolean;
   /** Commander's `--no-interactive` convention: `false` opts out. */
   interactive?: boolean;
@@ -49,7 +52,7 @@ export function shouldOpenInteractiveComputerSessions(opts: ComputerSessionsComm
  */
 export async function runComputerSessionsCommand(opts: ComputerSessionsCommandOpts): Promise<void> {
   if (!shouldOpenInteractiveComputerSessions(opts, isInteractiveTerminal())) {
-    runComputerSessions({ machine: opts.machine, json: opts.json });
+    runComputerSessions({ machine: opts.machine, limit: opts.limit, json: opts.json });
     return;
   }
 

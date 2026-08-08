@@ -4941,6 +4941,15 @@
               "negate": false
             },
             {
+              "flags": "--limit <n>",
+              "description": "Cap the flat/--no-interactive table at this many rows (default 50; --json is unbounded)",
+              "long": "--limit",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--json",
               "description": "Emit machine-readable JSON",
               "long": "--json",

@@ -296,6 +296,26 @@ export function renderComputerSessionRows(rows: ComputerRunRow[]): string {
   return lines.join('\n');
 }
 
+/** Default row cap for the flat/non-interactive table. A computer row is
+ *  much finer-grained than a browser task — real usage is mostly one
+ *  standalone verb per CLI invocation, not a `run --task` loop, so an
+ *  unbounded flat dump against real history reads as hundreds of one-action
+ *  rows (confirmed against a real machine's history while building this).
+ *  The interactive picker has no such cap (it's searchable); only the
+ *  static table needs one. `--limit` overrides. */
+export const DEFAULT_ROW_DISPLAY_LIMIT = 50;
+
+/** Slice `rows` to at most `limit` (newest first, rows are already sorted),
+ *  and report how many were dropped — pure, so the cap arithmetic and the
+ *  trailer condition are unit-testable without a console spy. */
+export function applyRowDisplayLimit(
+  rows: ComputerRunRow[],
+  limit: number = DEFAULT_ROW_DISPLAY_LIMIT,
+): { shown: ComputerRunRow[]; more: number } {
+  const shown = rows.slice(0, limit);
+  return { shown, more: rows.length - shown.length };
+}
+
 /**
  * Shared CLI action for `agents computer sessions` and `agents sessions
  * --computer`. Non-interactive by design (the interactive routing decision
@@ -303,10 +323,12 @@ export function renderComputerSessionRows(rows: ComputerRunRow[]): string {
  * `runBrowserSessions`/`runBrowserSessionsCommand`'s split).
  */
 export function runComputerSessions(opts: { machine?: string; json?: boolean; limit?: number }): void {
-  const rows = buildComputerSessionRows({ machine: opts.machine, limit: opts.limit });
+  const rows = buildComputerSessionRows({ machine: opts.machine });
   if (opts.json) {
     console.log(JSON.stringify(rows, null, 2));
     return;
   }
-  console.log(renderComputerSessionRows(rows));
+  const { shown, more } = applyRowDisplayLimit(rows, opts.limit ?? DEFAULT_ROW_DISPLAY_LIMIT);
+  console.log(renderComputerSessionRows(shown));
+  if (more > 0) console.log(`\n… (${more} more; --limit ${rows.length} or --json to see all, --machine to narrow)`);
 }

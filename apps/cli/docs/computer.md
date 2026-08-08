@@ -224,7 +224,9 @@ agents computer type-text --bundle <id> --text "..." --require-frontmost
 | `agents computer sessions` | Browse computer-driving history, grouped by run. `agents sessions --computer` is the same view. |
 
 `agents computer sessions` flags: `--machine <name>` (only rows on/driving a
-matching hostname, machineId, or `--host` device), `--json`, `--no-interactive`.
+matching hostname, machineId, or `--host` device), `--limit <n>` (cap the flat
+table at this many rows — default 50; the interactive picker and `--json` are
+unbounded), `--json`, `--no-interactive`.
 
 There is no capture directory the way `agents browser sessions` has one per
 task — a computer action drives a live GUI in place and leaves no file behind.

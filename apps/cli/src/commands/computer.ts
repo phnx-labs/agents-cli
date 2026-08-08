@@ -388,10 +388,11 @@ function registerSessionsCommand(program: Command): void {
     .command('sessions')
     .description('Browse computer-driving history, grouped by run — one row per `agents computer` invocation')
     .option('--machine <name>', 'Only rows invoked from/driving this machine (hostname, machineId, or --host device)')
+    .option('--limit <n>', 'Cap the flat/--no-interactive table at this many rows (default 50; --json is unbounded)', (v) => parseInt(v, 10))
     .option('--json', 'Emit machine-readable JSON')
     .option('--no-interactive', 'Print the flat listing instead of opening the interactive run browser')
-    .action(async (opts: { machine?: string; json?: boolean; interactive?: boolean }) => {
-      await runComputerSessionsCommand({ machine: opts.machine, json: opts.json, interactive: opts.interactive });
+    .action(async (opts: { machine?: string; limit?: number; json?: boolean; interactive?: boolean }) => {
+      await runComputerSessionsCommand({ machine: opts.machine, limit: opts.limit, json: opts.json, interactive: opts.interactive });
     });
 }
 
