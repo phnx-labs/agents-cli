@@ -59,3 +59,23 @@ describe('RUSH-2411 auto-label-after-remote-hydration wiring', () => {
     expect(extensionSource).toMatch(/fetchLabel:[\s\S]*?fetchAndSetAutoLabel\(t\.terminal, t\)/);
   });
 });
+
+describe('RUSH-2430 clean-but-stale session id reconciliation', () => {
+  test('a clean UUID does not bypass the authoritative live-id paths', () => {
+    const start = extensionSource.indexOf('async function tryHydrateLiveSessionId(');
+    const cleanUuidGuard = extensionSource.indexOf(
+      'if (entry.sessionId && !needsSessionIdHydrate(entry.sessionId))',
+      start,
+    );
+    const authoritativeMap = extensionSource.indexOf('const mapKey = activeMapCacheKey(entry.host);', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(cleanUuidGuard).toBeGreaterThan(start);
+    expect(authoritativeMap).toBeGreaterThan(start);
+
+    const beforeAuthoritativeLookup = extensionSource.slice(cleanUuidGuard, authoritativeMap);
+    expect(beforeAuthoritativeLookup).toContain(
+      'if (entry.sessionId && !needsSessionIdHydrate(entry.sessionId))',
+    );
+    expect(beforeAuthoritativeLookup).not.toContain('return;');
+  });
+});

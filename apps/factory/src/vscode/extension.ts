@@ -4443,13 +4443,16 @@ async function tryHydrateLiveSessionId(
   liveSessionInFlight.add(inflightKey);
 
   try {
-    // Already have a clean id — still fix a dirty rollout stem if present.
+    // Canonicalize a dirty rollout stem, but do not return merely because the
+    // entry already contains a clean UUID. A fresh Codex tab can provisionally
+    // adopt an older same-cwd rollout before its own SessionStart row appears;
+    // the pid state / AGENT_TERMINAL_ID map below is authoritative and must be
+    // allowed to replace that syntactically-valid but wrong id (RUSH-2430).
     if (entry.sessionId && !needsSessionIdHydrate(entry.sessionId)) {
       const cleaned = canonicalSessionId(entry.sessionId);
       if (cleaned && cleaned !== entry.sessionId) {
         applyHydratedSessionId(terminal, entry, prefix, cleaned);
       }
-      return;
     }
 
     const mapKey = activeMapCacheKey(entry.host);

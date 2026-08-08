@@ -36,6 +36,13 @@ interface TrackedTerminal {
   // single `ps`. Lets kill/restart correlation pick the newest dormant terminal
   // without spawning pgrep + ps per session-file event (#97).
   startTimeMs?: number;
+  /**
+   * Restored editor terminals may recover a session from a rollout that already
+   * exists. Newly-created terminals must wait for a rollout created after their
+   * registration, otherwise another same-workspace Codex session is adopted.
+   */
+  acceptExistingSessions: boolean;
+  registeredAtMs: number;
 }
 
 interface SharedWatcher {
@@ -139,21 +146,38 @@ function claudeRootsFor(workspacePath: string): string[] {
   return roots;
 }
 
-function codexRootToday(): string {
-  const now = new Date();
-  const y = String(now.getFullYear());
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return path.join(homeDir(), '.codex', 'sessions', y, m, d);
+function codexSessionBases(home = homeDir()): string[] {
+  const bases = [path.join(home, '.codex', 'sessions')];
+  const versionsDir = path.join(home, '.agents', '.history', 'versions', 'codex');
+  try {
+    for (const entry of fs.readdirSync(versionsDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      bases.push(path.join(versionsDir, entry.name, 'home', '.codex', 'sessions'));
+    }
+  } catch {
+    /* no managed Codex versions */
+  }
+  return [...new Set(bases.map(base => {
+    try {
+      return fs.realpathSync(base);
+    } catch {
+      return base;
+    }
+  }))];
 }
 
-function codexRootYesterday(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  const y = String(d.getFullYear());
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return path.join(homeDir(), '.codex', 'sessions', y, m, day);
+function codexRootsForDate(date: Date): string[] {
+  const y = String(date.getFullYear());
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return codexSessionBases().map(base => path.join(base, y, m, d));
+}
+
+function codexCurrentRoots(): string[] {
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  return [...codexRootsForDate(today), ...codexRootsForDate(yesterday)];
 }
 
 function geminiRootsFor(workspacePath: string): string[] {
@@ -249,7 +273,7 @@ function rootsFor(t: TrackedTerminal): string[] {
     case 'claude':
       return claudeRootsFor(t.workspacePath);
     case 'codex':
-      return [codexRootToday(), codexRootYesterday()];
+      return codexCurrentRoots();
     case 'gemini':
       return geminiRootsFor(t.workspacePath);
     case 'opencode':
@@ -376,8 +400,20 @@ async function applyParsedCorrelation(
   if (agentType === 'codex') {
     const candidates = [...tracked.values()].filter(t => t.agentType === 'codex');
     if (parsed.codexCwd) {
+      let createdAtMs: number;
+      if ('birthtimeMs' in parsed) {
+        createdAtMs = parsed.birthtimeMs;
+      } else {
+        try {
+          createdAtMs = (await fs.promises.stat(file)).birthtimeMs;
+        } catch {
+          return;
+        }
+      }
       const match = candidates.find(
-        t => t.workspacePath === parsed.codexCwd && (!t.sessionId || t.sessionId === newId)
+        t => t.workspacePath === parsed.codexCwd
+          && (!t.sessionId || t.sessionId === newId)
+          && (t.acceptExistingSessions || createdAtMs >= t.registeredAtMs)
       );
       if (match) {
         applyChange(match, newId, file);
@@ -747,8 +783,7 @@ export function initSessionTracker(context: vscode.ExtensionContext): void {
   const rearmCodex = (): void => {
     const activeCodex = [...tracked.values()].filter(t => t.agentType === 'codex');
     if (activeCodex.length > 0) {
-      mountWatcher(codexRootToday(), 'codex');
-      mountWatcher(codexRootYesterday(), 'codex');
+      for (const root of codexCurrentRoots()) mountWatcher(root, 'codex');
     }
     midnightTimer = setTimeout(rearmCodex, msUntilNextMidnight());
   };
@@ -789,10 +824,16 @@ export function registerTerminal(
   agentType: TrackedAgentType,
   workspacePath: string,
   currentSessionId?: string,
+  adoptExistingSession = false,
 ): void {
   const existing = tracked.get(terminal);
   if (existing) {
     if (currentSessionId) existing.sessionId = currentSessionId;
+    if (adoptExistingSession && agentType !== 'claude' && !existing.sessionId) {
+      existing.acceptExistingSessions = true;
+      void adoptExistingSessionForTerminal(existing);
+      scheduleAdoptionRetry(terminal, existing);
+    }
     return;
   }
   const entry: TrackedTerminal = {
@@ -800,6 +841,8 @@ export function registerTerminal(
     agentType,
     workspacePath,
     sessionId: currentSessionId,
+    acceptExistingSessions: adoptExistingSession,
+    registeredAtMs: Date.now(),
   };
   tracked.set(terminal, entry);
   void captureStartTime(entry);
@@ -809,10 +852,13 @@ export function registerTerminal(
     mountWatcher(root, agentType);
   }
 
-  // VS Code may restore terminals without AGENT_SESSION_ID in env.
-  // Recover immediately by scanning existing session files for this workspace
-  // instead of waiting only for brand-new file events.
-  if ((agentType === 'claude' && currentSessionId) || (agentType !== 'claude' && !currentSessionId)) {
+  // Claude forks must inspect existing files because the fork file can be
+  // written before this registration runs. Non-Claude terminals only inspect
+  // existing files when the caller is restoring an existing VS Code terminal.
+  // A newly-created Codex terminal has no id yet; binding it to the newest old
+  // same-workspace rollout here gives the new tab a stale session id before its
+  // own rollout is created.
+  if ((agentType === 'claude' && currentSessionId) || (adoptExistingSession && agentType !== 'claude' && !currentSessionId)) {
     void adoptExistingSessionForTerminal(entry);
     // Fallback for environments where fs.watch may miss/deny create events.
     scheduleAdoptionRetry(terminal, entry);
@@ -898,23 +944,30 @@ export function __testGetStartTime(terminal: vscode.Terminal): number | undefine
   return tracked.get(terminal)?.startTimeMs;
 }
 
+export function __testCodexSessionBases(home: string): string[] {
+  return codexSessionBases(home);
+}
+
 export function __testRegister(
   terminal: vscode.Terminal,
   agentType: TrackedAgentType,
   rootDirs: string[],
   currentSessionId?: string,
   workspacePath: string = '/__test__',
+  adoptExistingSession = true,
 ): void {
   const entry: TrackedTerminal = {
     terminal,
     agentType,
     workspacePath,
     sessionId: currentSessionId,
+    acceptExistingSessions: adoptExistingSession,
+    registeredAtMs: Date.now(),
   };
   tracked.set(terminal, entry);
   entry.mountedRoots = [...rootDirs];
   for (const root of rootDirs) mountWatcher(root, agentType);
-  if ((agentType === 'claude' && currentSessionId) || (agentType !== 'claude' && !currentSessionId)) {
+  if ((agentType === 'claude' && currentSessionId) || (adoptExistingSession && agentType !== 'claude' && !currentSessionId)) {
     void adoptExistingSessionForTerminal(entry, rootDirs);
     scheduleAdoptionRetry(terminal, entry, rootDirs);
   }
