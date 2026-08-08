@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>verify-work-complete — seven-day effectiveness audit</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:flex;flex-wrap:wrap;gap:6px 16px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-complete">complete</span></div>
+<h1>verify-work-complete — seven-day effectiveness audit</h1>
+<p class="summary">A transcript-grounded audit of observable blocking interventions, agent reactions, context mismatches, and installation state.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">390 logical interventions after deduplication<span class="meta-sep" aria-hidden="true">·</span>25 of 28 reviewed objections were context or ownership misfires<span class="meta-sep" aria-hidden="true">·</span>53 duplicate feedback records</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">analyze-verify-work-complete</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">RUSH-2113</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex GPT-5</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">019fdf1d</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-07</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a href="#findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a href="#scorecard"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Scorecard</a><a href="#what-the-objections-showed"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>What the objections showed</a><a href="#the-browser-only-failure"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>The browser-only failure</a><a href="#evidence"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Evidence</a><a href="#harness-coverage"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Harness coverage</a><a href="#installation-audit"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Installation audit</a><a href="#recommendations"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Recommendations</a><a href="#reproduce"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Reproduce</a></nav><article class="artifact-body"><h1>The completion hook acts often, but cannot reliably tell a delivery from browser work</h1>
+<h2 id="summary">Summary</h2>
+<p>From 2026-08-01 through 2026-08-08, the audit found <strong>390 logical blocking interventions</strong> across <strong>167 sessions</strong>. Agents ran a tool after 327 interventions (83.8%); their immediate response pushed back after 25 (6.4%).</p>
+<div class="artifact-callout"><strong>Primary finding.</strong> The deterministic scan found 22 delivery-gate interventions with no PR, commit, push, merge, edit, or patch activity in the active user-turn chain. A focused read of all 28 objection/unclear reactions confirmed that 25 were context or ownership misfires; three were useful ownership or self-audit prompts.</div><figure>
+<svg viewBox="0 0 820 230" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title id="flow-title">Observed stop-hook reaction flow</title>
+  <desc id="flow-desc">A stop attempt reaches the hook, then either causes action, evidence-backed pushback, or repetition before the next user turn.</desc>
+  <defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0,0 L9,4.5 L0,9 z" fill="currentColor"></path></marker></defs>
+  <g fill="none" stroke="currentColor" stroke-width="2" opacity=".55">
+    <path d="M190 112 H300"></path><path d="M470 112 H565"></path><path d="M470 112 C515 112 515 38 565 38"></path><path d="M470 112 C515 112 515 188 565 188"></path>
+  </g>
+  <g>
+    <rect x="24" y="76" width="166" height="72" rx="14" fill="#a3e635" opacity=".18" stroke="#a3e635"></rect>
+    <text x="107" y="106" font-size="16" font-weight="700">Agent stops</text><text x="107" y="129" font-size="13">completion wording</text>
+    <rect x="300" y="76" width="170" height="72" rx="14" fill="#f59e0b" opacity=".16" stroke="#f59e0b"></rect>
+    <text x="385" y="106" font-size="16" font-weight="700">Hook blocks</text><text x="385" y="129" font-size="13">390 logical events</text>
+    <rect x="565" y="8" width="224" height="60" rx="14" fill="#22c55e" opacity=".15" stroke="#22c55e"></rect>
+    <text x="677" y="34" font-size="15" font-weight="700">Acts with tools</text><text x="677" y="54" font-size="13">327</text>
+    <rect x="565" y="82" width="224" height="60" rx="14" fill="#60a5fa" opacity=".15" stroke="#60a5fa"></rect>
+    <text x="677" y="108" font-size="15" font-weight="700">Pushes back</text><text x="677" y="128" font-size="13">25</text>
+    <rect x="565" y="158" width="224" height="60" rx="14" fill="#ef4444" opacity=".14" stroke="#ef4444"></rect>
+    <text x="677" y="184" font-size="15" font-weight="700">Repeats before user</text><text x="677" y="204" font-size="13">99</text>
+  </g>
+</svg>
+<figcaption>Observed response paths. Counts describe association after a gate, not proof that the gate caused the eventual action.</figcaption>
+</figure><h2 id="findings">Findings</h2>
+<h2 id="scorecard">Scorecard</h2>
+<table>
+<thead>
+<tr>
+<th>Measure</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Raw feedback records</td>
+<td>443</td>
+</tr>
+<tr>
+<td>Logical interventions</td>
+<td>390</td>
+</tr>
+<tr>
+<td>Duplicate records removed</td>
+<td>53</td>
+</tr>
+<tr>
+<td>Sessions with an intervention</td>
+<td>167</td>
+</tr>
+<tr>
+<td>Repeated before the next genuine user turn</td>
+<td>99</td>
+</tr>
+<tr>
+<td>Automated delivery-context mismatch candidates</td>
+<td>22</td>
+</tr>
+<tr>
+<td>Manually confirmed misfires among objection/unclear reactions</td>
+<td>25 / 28</td>
+</tr>
+</tbody></table>
+<h3>Gate distribution</h3>
+<table>
+<thead>
+<tr>
+<th>Gate</th>
+<th>Logical interventions</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>open-pr</td>
+<td>220</td>
+</tr>
+<tr>
+<td>delivery</td>
+<td>101</td>
+</tr>
+<tr>
+<td>handback</td>
+<td>39</td>
+</tr>
+<tr>
+<td>self-audit</td>
+<td>28</td>
+</tr>
+<tr>
+<td>swarm</td>
+<td>2</td>
+</tr>
+</tbody></table>
+<h3>Agent reaction</h3>
+<table>
+<thead>
+<tr>
+<th>Reaction</th>
+<th>Logical interventions</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>productive-action</td>
+<td>318</td>
+</tr>
+<tr>
+<td>blocker-or-handoff</td>
+<td>29</td>
+</tr>
+<tr>
+<td>substantiated-pushback</td>
+<td>13</td>
+</tr>
+<tr>
+<td>unsupported-pushback</td>
+<td>12</td>
+</tr>
+<tr>
+<td>verbal-compliance</td>
+<td>12</td>
+</tr>
+<tr>
+<td>no-assistant-reaction</td>
+<td>3</td>
+</tr>
+<tr>
+<td>other</td>
+<td>3</td>
+</tr>
+</tbody></table>
+<p>“Productive action” means at least one tool call followed the intervention before the next genuine user message. “Substantiated pushback” means the agent disputed the gate and cited a URL, screenshot, metric, test, or verification result. Tool activity and immediate reaction are independent: an agent can object first and then keep working.</p>
+<h2 id="what-the-objections-showed">What the objections showed</h2>
+<p>The 25 confirmed misfires clustered into five concrete patterns:</p>
+<table>
+<thead>
+<tr>
+<th>Pattern</th>
+<th>What the hook got wrong</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Browser/external-app work</td>
+<td>Completion wording inside a Git cwd became a supposed code delivery with a missing PR, docs, and CHANGELOG.</td>
+</tr>
+<tr>
+<td>Diagnostic or research answers</td>
+<td>A verified read-only finding was treated as a shipped change.</td>
+</tr>
+<tr>
+<td>Ticket/spec creation</td>
+<td>Open implementation tickets were the requested deliverable, but the gate demanded that they be closed.</td>
+</tr>
+<tr>
+<td>Review-only sessions</td>
+<td>Reading or commenting on another author's PR was treated as ownership of its merge.</td>
+</tr>
+<tr>
+<td>Unrelated ticket mentions</td>
+<td>Ticket IDs cited as context were treated as this session's unfinished delivery.</td>
+</tr>
+</tbody></table>
+<p>The three useful prompts asked for an explicit PR owner or a complete goal-by-goal audit. They did not rely on the false assumption that a browser or research task had produced code.</p>
+<h2 id="the-browser-only-failure">The browser-only failure</h2>
+<p>The delivery chain is entered whenever the final message matches a generic completion phrase. It does not require a PR or Git delivery command. Once entered, the helper falls back to the terminal's current Git repository and classifies the original request with broad words such as “new,” “feature,” “API,” or “behavior.” A browser task can therefore become a supposed code delivery solely because the shell was opened inside a repository.</p>
+<p>The supplied Lovable session demonstrates the full failure <strong>three times</strong>. The agent first submitted the prompt, then verified the finished app with a live screenshot and concrete imported-record counts, and later completed another browser-only submission. Each stop produced the same demand for docs and a CHANGELOG “in the PR,” even though the session changed no files and opened no PR.</p>
+<h2 id="evidence">Evidence</h2>
+<h2 id="harness-coverage">Harness coverage</h2>
+<table>
+<thead>
+<tr>
+<th>Harness</th>
+<th>Sessions inspected</th>
+<th>Observable blocking interventions</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>antigravity</td>
+<td>5</td>
+<td>0</td>
+</tr>
+<tr>
+<td>claude</td>
+<td>1,242</td>
+<td>390</td>
+</tr>
+<tr>
+<td>codex</td>
+<td>82</td>
+<td>0</td>
+</tr>
+<tr>
+<td>cursor</td>
+<td>48</td>
+<td>0</td>
+</tr>
+<tr>
+<td>droid</td>
+<td>20</td>
+<td>0</td>
+</tr>
+<tr>
+<td>grok</td>
+<td>18</td>
+<td>0</td>
+</tr>
+<tr>
+<td>kimi</td>
+<td>49</td>
+<td>0</td>
+</tr>
+<tr>
+<td>muse</td>
+<td>1</td>
+<td>0</td>
+</tr>
+<tr>
+<td>opencode</td>
+<td>1</td>
+<td>0</td>
+</tr>
+</tbody></table>
+<div class="artifact-callout"><strong>Coverage limit.</strong> Claude persists blocking Stop-hook feedback in transcripts. Codex and most other harnesses currently do not persist equivalent hook-firing records, so zero observable interventions is not evidence that the hook never ran.</div><h2 id="installation-audit">Installation audit</h2>
+<p>The canonical source is <strong>gh:phnx-labs/.agents-system</strong>. Manifest registration and the central script are present.</p>
+<table>
+<thead>
+<tr>
+<th>Harness</th>
+<th>Active copy</th>
+<th>Native registrations</th>
+<th>Managed copies matching central source</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>claude</td>
+<td>present</td>
+<td>1</td>
+<td>10 / 10</td>
+</tr>
+<tr>
+<td>codex</td>
+<td>present</td>
+<td>1</td>
+<td>2 / 2</td>
+</tr>
+</tbody></table>
+<p>This separates “installed” from “observable”: Codex has a native Stop registration, but its transcript format does not retain the feedback needed to reconstruct reactions.</p>
+<h2 id="recommendations">Recommendations</h2>
+<ol>
+<li>Require delivery evidence before running code-delivery checks: a responsible PR, repository mutation, or explicit ship/release request. Generic “done” wording alone is insufficient.</li>
+<li>Keep outcome-evidence coaching separate from docs/CHANGELOG enforcement. Browser and external-app work can require screenshots or live verification without inventing a PR.</li>
+<li>Stop treating any mentioned ticket or reviewed PR as owned work. Attribute responsibility from write/author actions and the active goal.</li>
+<li>Emit structured hook telemetry with hook name, gate, goal key, attempt number, and result for every harness. Transcript prose should not be the only measurement source.</li>
+<li>Treat repeated substantiated pushback as a classifier defect signal. Re-running the same instruction after the agent proves the gate is out of context adds cost without improving completion.</li>
+</ol>
+<h2 id="reproduce">Reproduce</h2>
+<pre><code>bun .agents/reports/analyze-verify-work-complete.ts \
+  --since 7d \
+  --json-out /tmp/verify-work-complete-events-2026-08-07.json \
+  --markdown-out /tmp/verify-work-complete-effectiveness-2026-08-07.md
+</code></pre>
+<p>The detailed JSON is local and redacted. It contains bounded context windows for review and must not be committed or published because session transcripts are confidential.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0aXRsZTogdmVyaWZ5LXdvcmstY29tcGxldGUg4oCUIHNldmVuLWRheSBlZmZlY3RpdmVuZXNzIGF1ZGl0CnN1bW1hcnk6IEEgdHJhbnNjcmlwdC1ncm91bmRlZCBhdWRpdCBvZiBvYnNlcnZhYmxlIGJsb2NraW5nIGludGVydmVudGlvbnMsIGFnZW50IHJlYWN0aW9ucywgY29udGV4dCBtaXNtYXRjaGVzLCBhbmQgaW5zdGFsbGF0aW9uIHN0YXRlLgpzdGF0dXM6IGNvbXBsZXRlCnRyYWNraW5nOiBSVVNILTIxMTMKcHJvamVjdDogYWdlbnRzLWNsaQpyZXBvc2l0b3J5OiBwaG54LWxhYnMvYWdlbnRzLWNsaQpoYXJuZXNzOiBDb2RleAphZ2VudDogR1BULTUKaG9zdDogeW9zZW1pdGUtczAKc2Vzc2lvbjogMDE5ZmRmMWQKZGF0ZTogMjAyNi0wOC0wNwpmYWN0czoKICAtIDM5MCBsb2dpY2FsIGludGVydmVudGlvbnMgYWZ0ZXIgZGVkdXBsaWNhdGlvbgogIC0gMjUgb2YgMjggcmV2aWV3ZWQgb2JqZWN0aW9ucyB3ZXJlIGNvbnRleHQgb3Igb3duZXJzaGlwIG1pc2ZpcmVzCiAgLSA1MyBkdXBsaWNhdGUgZmVlZGJhY2sgcmVjb3JkcwotLS0KCiMgVGhlIGNvbXBsZXRpb24gaG9vayBhY3RzIG9mdGVuLCBidXQgY2Fubm90IHJlbGlhYmx5IHRlbGwgYSBkZWxpdmVyeSBmcm9tIGJyb3dzZXIgd29yawoKIyMgU3VtbWFyeQoKRnJvbSAyMDI2LTA4LTAxIHRocm91Z2ggMjAyNi0wOC0wOCwgdGhlIGF1ZGl0IGZvdW5kICoqMzkwIGxvZ2ljYWwgYmxvY2tpbmcgaW50ZXJ2ZW50aW9ucyoqIGFjcm9zcyAqKjE2NyBzZXNzaW9ucyoqLiBBZ2VudHMgcmFuIGEgdG9vbCBhZnRlciAzMjcgaW50ZXJ2ZW50aW9ucyAoODMuOCUpOyB0aGVpciBpbW1lZGlhdGUgcmVzcG9uc2UgcHVzaGVkIGJhY2sgYWZ0ZXIgMjUgKDYuNCUpLgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+PHN0cm9uZz5QcmltYXJ5IGZpbmRpbmcuPC9zdHJvbmc+IFRoZSBkZXRlcm1pbmlzdGljIHNjYW4gZm91bmQgMjIgZGVsaXZlcnktZ2F0ZSBpbnRlcnZlbnRpb25zIHdpdGggbm8gUFIsIGNvbW1pdCwgcHVzaCwgbWVyZ2UsIGVkaXQsIG9yIHBhdGNoIGFjdGl2aXR5IGluIHRoZSBhY3RpdmUgdXNlci10dXJuIGNoYWluLiBBIGZvY3VzZWQgcmVhZCBvZiBhbGwgMjggb2JqZWN0aW9uL3VuY2xlYXIgcmVhY3Rpb25zIGNvbmZpcm1lZCB0aGF0IDI1IHdlcmUgY29udGV4dCBvciBvd25lcnNoaXAgbWlzZmlyZXM7IHRocmVlIHdlcmUgdXNlZnVsIG93bmVyc2hpcCBvciBzZWxmLWF1ZGl0IHByb21wdHMuPC9kaXY+Cgo8ZmlndXJlPgo8c3ZnIHZpZXdCb3g9IjAgMCA4MjAgMjMwIiByb2xlPSJpbWciIGFyaWEtbGFiZWxsZWRieT0iZmxvdy10aXRsZSBmbG93LWRlc2MiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPHRpdGxlIGlkPSJmbG93LXRpdGxlIj5PYnNlcnZlZCBzdG9wLWhvb2sgcmVhY3Rpb24gZmxvdzwvdGl0bGU+CiAgPGRlc2MgaWQ9ImZsb3ctZGVzYyI+QSBzdG9wIGF0dGVtcHQgcmVhY2hlcyB0aGUgaG9vaywgdGhlbiBlaXRoZXIgY2F1c2VzIGFjdGlvbiwgZXZpZGVuY2UtYmFja2VkIHB1c2hiYWNrLCBvciByZXBldGl0aW9uIGJlZm9yZSB0aGUgbmV4dCB1c2VyIHR1cm4uPC9kZXNjPgogIDxkZWZzPjxtYXJrZXIgaWQ9ImFycm93IiBtYXJrZXJXaWR0aD0iOSIgbWFya2VySGVpZ2h0PSI5IiByZWZYPSI4IiByZWZZPSI0LjUiIG9yaWVudD0iYXV0byI+PHBhdGggZD0iTTAsMCBMOSw0LjUgTDAsOSB6IiBmaWxsPSJjdXJyZW50Q29sb3IiLz48L21hcmtlcj48L2RlZnM+CiAgPGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS13aWR0aD0iMiIgb3BhY2l0eT0iLjU1IiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSI+CiAgICA8cGF0aCBkPSJNMTkwIDExMiBIMzAwIi8+PHBhdGggZD0iTTQ3MCAxMTIgSDU2NSIvPjxwYXRoIGQ9Ik00NzAgMTEyIEM1MTUgMTEyIDUxNSAzOCA1NjUgMzgiLz48cGF0aCBkPSJNNDcwIDExMiBDNTE1IDExMiA1MTUgMTg4IDU2NSAxODgiLz4KICA8L2c+CiAgPGcgZm9udC1mYW1pbHk9IkludGVyLHN5c3RlbS11aSxzYW5zLXNlcmlmIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj4KICAgIDxyZWN0IHg9IjI0IiB5PSI3NiIgd2lkdGg9IjE2NiIgaGVpZ2h0PSI3MiIgcng9IjE0IiBmaWxsPSIjYTNlNjM1IiBvcGFjaXR5PSIuMTgiIHN0cm9rZT0iI2EzZTYzNSIvPgogICAgPHRleHQgeD0iMTA3IiB5PSIxMDYiIGZvbnQtc2l6ZT0iMTYiIGZvbnQtd2VpZ2h0PSI3MDAiPkFnZW50IHN0b3BzPC90ZXh0Pjx0ZXh0IHg9IjEwNyIgeT0iMTI5IiBmb250LXNpemU9IjEzIj5jb21wbGV0aW9uIHdvcmRpbmc8L3RleHQ+CiAgICA8cmVjdCB4PSIzMDAiIHk9Ijc2IiB3aWR0aD0iMTcwIiBoZWlnaHQ9IjcyIiByeD0iMTQiIGZpbGw9IiNmNTllMGIiIG9wYWNpdHk9Ii4xNiIgc3Ryb2tlPSIjZjU5ZTBiIi8+CiAgICA8dGV4dCB4PSIzODUiIHk9IjEwNiIgZm9udC1zaXplPSIxNiIgZm9udC13ZWlnaHQ9IjcwMCI+SG9vayBibG9ja3M8L3RleHQ+PHRleHQgeD0iMzg1IiB5PSIxMjkiIGZvbnQtc2l6ZT0iMTMiPjM5MCBsb2dpY2FsIGV2ZW50czwvdGV4dD4KICAgIDxyZWN0IHg9IjU2NSIgeT0iOCIgd2lkdGg9IjIyNCIgaGVpZ2h0PSI2MCIgcng9IjE0IiBmaWxsPSIjMjJjNTVlIiBvcGFjaXR5PSIuMTUiIHN0cm9rZT0iIzIyYzU1ZSIvPgogICAgPHRleHQgeD0iNjc3IiB5PSIzNCIgZm9udC1zaXplPSIxNSIgZm9udC13ZWlnaHQ9IjcwMCI+QWN0cyB3aXRoIHRvb2xzPC90ZXh0Pjx0ZXh0IHg9IjY3NyIgeT0iNTQiIGZvbnQtc2l6ZT0iMTMiPjMyNzwvdGV4dD4KICAgIDxyZWN0IHg9IjU2NSIgeT0iODIiIHdpZHRoPSIyMjQiIGhlaWdodD0iNjAiIHJ4PSIxNCIgZmlsbD0iIzYwYTVmYSIgb3BhY2l0eT0iLjE1IiBzdHJva2U9IiM2MGE1ZmEiLz4KICAgIDx0ZXh0IHg9IjY3NyIgeT0iMTA4IiBmb250LXNpemU9IjE1IiBmb250LXdlaWdodD0iNzAwIj5QdXNoZXMgYmFjazwvdGV4dD48dGV4dCB4PSI2NzciIHk9IjEyOCIgZm9udC1zaXplPSIxMyI+MjU8L3RleHQ+CiAgICA8cmVjdCB4PSI1NjUiIHk9IjE1OCIgd2lkdGg9IjIyNCIgaGVpZ2h0PSI2MCIgcng9IjE0IiBmaWxsPSIjZWY0NDQ0IiBvcGFjaXR5PSIuMTQiIHN0cm9rZT0iI2VmNDQ0NCIvPgogICAgPHRleHQgeD0iNjc3IiB5PSIxODQiIGZvbnQtc2l6ZT0iMTUiIGZvbnQtd2VpZ2h0PSI3MDAiPlJlcGVhdHMgYmVmb3JlIHVzZXI8L3RleHQ+PHRleHQgeD0iNjc3IiB5PSIyMDQiIGZvbnQtc2l6ZT0iMTMiPjk5PC90ZXh0PgogIDwvZz4KPC9zdmc+CjxmaWdjYXB0aW9uPk9ic2VydmVkIHJlc3BvbnNlIHBhdGhzLiBDb3VudHMgZGVzY3JpYmUgYXNzb2NpYXRpb24gYWZ0ZXIgYSBnYXRlLCBub3QgcHJvb2YgdGhhdCB0aGUgZ2F0ZSBjYXVzZWQgdGhlIGV2ZW50dWFsIGFjdGlvbi48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKIyMgRmluZGluZ3MKCiMjIFNjb3JlY2FyZAoKfCBNZWFzdXJlIHwgUmVzdWx0IHwKfC0tLXwtLS06fAp8IFJhdyBmZWVkYmFjayByZWNvcmRzIHwgNDQzIHwKfCBMb2dpY2FsIGludGVydmVudGlvbnMgfCAzOTAgfAp8IER1cGxpY2F0ZSByZWNvcmRzIHJlbW92ZWQgfCA1MyB8CnwgU2Vzc2lvbnMgd2l0aCBhbiBpbnRlcnZlbnRpb24gfCAxNjcgfAp8IFJlcGVhdGVkIGJlZm9yZSB0aGUgbmV4dCBnZW51aW5lIHVzZXIgdHVybiB8IDk5IHwKfCBBdXRvbWF0ZWQgZGVsaXZlcnktY29udGV4dCBtaXNtYXRjaCBjYW5kaWRhdGVzIHwgMjIgfAp8IE1hbnVhbGx5IGNvbmZpcm1lZCBtaXNmaXJlcyBhbW9uZyBvYmplY3Rpb24vdW5jbGVhciByZWFjdGlvbnMgfCAyNSAvIDI4IHwKCiMjIyBHYXRlIGRpc3RyaWJ1dGlvbgoKfCBHYXRlIHwgTG9naWNhbCBpbnRlcnZlbnRpb25zIHwKfC0tLXwtLS06fAp8IG9wZW4tcHIgfCAyMjAgfAp8IGRlbGl2ZXJ5IHwgMTAxIHwKfCBoYW5kYmFjayB8IDM5IHwKfCBzZWxmLWF1ZGl0IHwgMjggfAp8IHN3YXJtIHwgMiB8CgojIyMgQWdlbnQgcmVhY3Rpb24KCnwgUmVhY3Rpb24gfCBMb2dpY2FsIGludGVydmVudGlvbnMgfAp8LS0tfC0tLTp8CnwgcHJvZHVjdGl2ZS1hY3Rpb24gfCAzMTggfAp8IGJsb2NrZXItb3ItaGFuZG9mZiB8IDI5IHwKfCBzdWJzdGFudGlhdGVkLXB1c2hiYWNrIHwgMTMgfAp8IHVuc3VwcG9ydGVkLXB1c2hiYWNrIHwgMTIgfAp8IHZlcmJhbC1jb21wbGlhbmNlIHwgMTIgfAp8IG5vLWFzc2lzdGFudC1yZWFjdGlvbiB8IDMgfAp8IG90aGVyIHwgMyB8CgrigJxQcm9kdWN0aXZlIGFjdGlvbuKAnSBtZWFucyBhdCBsZWFzdCBvbmUgdG9vbCBjYWxsIGZvbGxvd2VkIHRoZSBpbnRlcnZlbnRpb24gYmVmb3JlIHRoZSBuZXh0IGdlbnVpbmUgdXNlciBtZXNzYWdlLiDigJxTdWJzdGFudGlhdGVkIHB1c2hiYWNr4oCdIG1lYW5zIHRoZSBhZ2VudCBkaXNwdXRlZCB0aGUgZ2F0ZSBhbmQgY2l0ZWQgYSBVUkwsIHNjcmVlbnNob3QsIG1ldHJpYywgdGVzdCwgb3IgdmVyaWZpY2F0aW9uIHJlc3VsdC4gVG9vbCBhY3Rpdml0eSBhbmQgaW1tZWRpYXRlIHJlYWN0aW9uIGFyZSBpbmRlcGVuZGVudDogYW4gYWdlbnQgY2FuIG9iamVjdCBmaXJzdCBhbmQgdGhlbiBrZWVwIHdvcmtpbmcuCgojIyBXaGF0IHRoZSBvYmplY3Rpb25zIHNob3dlZAoKVGhlIDI1IGNvbmZpcm1lZCBtaXNmaXJlcyBjbHVzdGVyZWQgaW50byBmaXZlIGNvbmNyZXRlIHBhdHRlcm5zOgoKfCBQYXR0ZXJuIHwgV2hhdCB0aGUgaG9vayBnb3Qgd3JvbmcgfAp8LS0tfC0tLXwKfCBCcm93c2VyL2V4dGVybmFsLWFwcCB3b3JrIHwgQ29tcGxldGlvbiB3b3JkaW5nIGluc2lkZSBhIEdpdCBjd2QgYmVjYW1lIGEgc3VwcG9zZWQgY29kZSBkZWxpdmVyeSB3aXRoIGEgbWlzc2luZyBQUiwgZG9jcywgYW5kIENIQU5HRUxPRy4gfAp8IERpYWdub3N0aWMgb3IgcmVzZWFyY2ggYW5zd2VycyB8IEEgdmVyaWZpZWQgcmVhZC1vbmx5IGZpbmRpbmcgd2FzIHRyZWF0ZWQgYXMgYSBzaGlwcGVkIGNoYW5nZS4gfAp8IFRpY2tldC9zcGVjIGNyZWF0aW9uIHwgT3BlbiBpbXBsZW1lbnRhdGlvbiB0aWNrZXRzIHdlcmUgdGhlIHJlcXVlc3RlZCBkZWxpdmVyYWJsZSwgYnV0IHRoZSBnYXRlIGRlbWFuZGVkIHRoYXQgdGhleSBiZSBjbG9zZWQuIHwKfCBSZXZpZXctb25seSBzZXNzaW9ucyB8IFJlYWRpbmcgb3IgY29tbWVudGluZyBvbiBhbm90aGVyIGF1dGhvcidzIFBSIHdhcyB0cmVhdGVkIGFzIG93bmVyc2hpcCBvZiBpdHMgbWVyZ2UuIHwKfCBVbnJlbGF0ZWQgdGlja2V0IG1lbnRpb25zIHwgVGlja2V0IElEcyBjaXRlZCBhcyBjb250ZXh0IHdlcmUgdHJlYXRlZCBhcyB0aGlzIHNlc3Npb24ncyB1bmZpbmlzaGVkIGRlbGl2ZXJ5LiB8CgpUaGUgdGhyZWUgdXNlZnVsIHByb21wdHMgYXNrZWQgZm9yIGFuIGV4cGxpY2l0IFBSIG93bmVyIG9yIGEgY29tcGxldGUgZ29hbC1ieS1nb2FsIGF1ZGl0LiBUaGV5IGRpZCBub3QgcmVseSBvbiB0aGUgZmFsc2UgYXNzdW1wdGlvbiB0aGF0IGEgYnJvd3NlciBvciByZXNlYXJjaCB0YXNrIGhhZCBwcm9kdWNlZCBjb2RlLgoKIyMgVGhlIGJyb3dzZXItb25seSBmYWlsdXJlCgpUaGUgZGVsaXZlcnkgY2hhaW4gaXMgZW50ZXJlZCB3aGVuZXZlciB0aGUgZmluYWwgbWVzc2FnZSBtYXRjaGVzIGEgZ2VuZXJpYyBjb21wbGV0aW9uIHBocmFzZS4gSXQgZG9lcyBub3QgcmVxdWlyZSBhIFBSIG9yIEdpdCBkZWxpdmVyeSBjb21tYW5kLiBPbmNlIGVudGVyZWQsIHRoZSBoZWxwZXIgZmFsbHMgYmFjayB0byB0aGUgdGVybWluYWwncyBjdXJyZW50IEdpdCByZXBvc2l0b3J5IGFuZCBjbGFzc2lmaWVzIHRoZSBvcmlnaW5hbCByZXF1ZXN0IHdpdGggYnJvYWQgd29yZHMgc3VjaCBhcyDigJxuZXcs4oCdIOKAnGZlYXR1cmUs4oCdIOKAnEFQSSzigJ0gb3Ig4oCcYmVoYXZpb3Iu4oCdIEEgYnJvd3NlciB0YXNrIGNhbiB0aGVyZWZvcmUgYmVjb21lIGEgc3VwcG9zZWQgY29kZSBkZWxpdmVyeSBzb2xlbHkgYmVjYXVzZSB0aGUgc2hlbGwgd2FzIG9wZW5lZCBpbnNpZGUgYSByZXBvc2l0b3J5LgoKVGhlIHN1cHBsaWVkIExvdmFibGUgc2Vzc2lvbiBkZW1vbnN0cmF0ZXMgdGhlIGZ1bGwgZmFpbHVyZSAqKnRocmVlIHRpbWVzKiouIFRoZSBhZ2VudCBmaXJzdCBzdWJtaXR0ZWQgdGhlIHByb21wdCwgdGhlbiB2ZXJpZmllZCB0aGUgZmluaXNoZWQgYXBwIHdpdGggYSBsaXZlIHNjcmVlbnNob3QgYW5kIGNvbmNyZXRlIGltcG9ydGVkLXJlY29yZCBjb3VudHMsIGFuZCBsYXRlciBjb21wbGV0ZWQgYW5vdGhlciBicm93c2VyLW9ubHkgc3VibWlzc2lvbi4gRWFjaCBzdG9wIHByb2R1Y2VkIHRoZSBzYW1lIGRlbWFuZCBmb3IgZG9jcyBhbmQgYSBDSEFOR0VMT0cg4oCcaW4gdGhlIFBSLOKAnSBldmVuIHRob3VnaCB0aGUgc2Vzc2lvbiBjaGFuZ2VkIG5vIGZpbGVzIGFuZCBvcGVuZWQgbm8gUFIuCgojIyBFdmlkZW5jZQoKIyMgSGFybmVzcyBjb3ZlcmFnZQoKfCBIYXJuZXNzIHwgU2Vzc2lvbnMgaW5zcGVjdGVkIHwgT2JzZXJ2YWJsZSBibG9ja2luZyBpbnRlcnZlbnRpb25zIHwKfC0tLXwtLS06fC0tLTp8CnwgYW50aWdyYXZpdHkgfCA1IHwgMCB8CnwgY2xhdWRlIHwgMSwyNDIgfCAzOTAgfAp8IGNvZGV4IHwgODIgfCAwIHwKfCBjdXJzb3IgfCA0OCB8IDAgfAp8IGRyb2lkIHwgMjAgfCAwIHwKfCBncm9rIHwgMTggfCAwIHwKfCBraW1pIHwgNDkgfCAwIHwKfCBtdXNlIHwgMSB8IDAgfAp8IG9wZW5jb2RlIHwgMSB8IDAgfAoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+PHN0cm9uZz5Db3ZlcmFnZSBsaW1pdC48L3N0cm9uZz4gQ2xhdWRlIHBlcnNpc3RzIGJsb2NraW5nIFN0b3AtaG9vayBmZWVkYmFjayBpbiB0cmFuc2NyaXB0cy4gQ29kZXggYW5kIG1vc3Qgb3RoZXIgaGFybmVzc2VzIGN1cnJlbnRseSBkbyBub3QgcGVyc2lzdCBlcXVpdmFsZW50IGhvb2stZmlyaW5nIHJlY29yZHMsIHNvIHplcm8gb2JzZXJ2YWJsZSBpbnRlcnZlbnRpb25zIGlzIG5vdCBldmlkZW5jZSB0aGF0IHRoZSBob29rIG5ldmVyIHJhbi48L2Rpdj4KCiMjIEluc3RhbGxhdGlvbiBhdWRpdAoKVGhlIGNhbm9uaWNhbCBzb3VyY2UgaXMgKipnaDpwaG54LWxhYnMvLmFnZW50cy1zeXN0ZW0qKi4gTWFuaWZlc3QgcmVnaXN0cmF0aW9uIGFuZCB0aGUgY2VudHJhbCBzY3JpcHQgYXJlIHByZXNlbnQuCgp8IEhhcm5lc3MgfCBBY3RpdmUgY29weSB8IE5hdGl2ZSByZWdpc3RyYXRpb25zIHwgTWFuYWdlZCBjb3BpZXMgbWF0Y2hpbmcgY2VudHJhbCBzb3VyY2UgfAp8LS0tfC0tLXwtLS06fC0tLTp8CnwgY2xhdWRlIHwgcHJlc2VudCB8IDEgfCAxMCAvIDEwIHwKfCBjb2RleCB8IHByZXNlbnQgfCAxIHwgMiAvIDIgfAoKVGhpcyBzZXBhcmF0ZXMg4oCcaW5zdGFsbGVk4oCdIGZyb20g4oCcb2JzZXJ2YWJsZeKAnTogQ29kZXggaGFzIGEgbmF0aXZlIFN0b3AgcmVnaXN0cmF0aW9uLCBidXQgaXRzIHRyYW5zY3JpcHQgZm9ybWF0IGRvZXMgbm90IHJldGFpbiB0aGUgZmVlZGJhY2sgbmVlZGVkIHRvIHJlY29uc3RydWN0IHJlYWN0aW9ucy4KCiMjIFJlY29tbWVuZGF0aW9ucwoKMS4gUmVxdWlyZSBkZWxpdmVyeSBldmlkZW5jZSBiZWZvcmUgcnVubmluZyBjb2RlLWRlbGl2ZXJ5IGNoZWNrczogYSByZXNwb25zaWJsZSBQUiwgcmVwb3NpdG9yeSBtdXRhdGlvbiwgb3IgZXhwbGljaXQgc2hpcC9yZWxlYXNlIHJlcXVlc3QuIEdlbmVyaWMg4oCcZG9uZeKAnSB3b3JkaW5nIGFsb25lIGlzIGluc3VmZmljaWVudC4KMi4gS2VlcCBvdXRjb21lLWV2aWRlbmNlIGNvYWNoaW5nIHNlcGFyYXRlIGZyb20gZG9jcy9DSEFOR0VMT0cgZW5mb3JjZW1lbnQuIEJyb3dzZXIgYW5kIGV4dGVybmFsLWFwcCB3b3JrIGNhbiByZXF1aXJlIHNjcmVlbnNob3RzIG9yIGxpdmUgdmVyaWZpY2F0aW9uIHdpdGhvdXQgaW52ZW50aW5nIGEgUFIuCjMuIFN0b3AgdHJlYXRpbmcgYW55IG1lbnRpb25lZCB0aWNrZXQgb3IgcmV2aWV3ZWQgUFIgYXMgb3duZWQgd29yay4gQXR0cmlidXRlIHJlc3BvbnNpYmlsaXR5IGZyb20gd3JpdGUvYXV0aG9yIGFjdGlvbnMgYW5kIHRoZSBhY3RpdmUgZ29hbC4KNC4gRW1pdCBzdHJ1Y3R1cmVkIGhvb2sgdGVsZW1ldHJ5IHdpdGggaG9vayBuYW1lLCBnYXRlLCBnb2FsIGtleSwgYXR0ZW1wdCBudW1iZXIsIGFuZCByZXN1bHQgZm9yIGV2ZXJ5IGhhcm5lc3MuIFRyYW5zY3JpcHQgcHJvc2Ugc2hvdWxkIG5vdCBiZSB0aGUgb25seSBtZWFzdXJlbWVudCBzb3VyY2UuCjUuIFRyZWF0IHJlcGVhdGVkIHN1YnN0YW50aWF0ZWQgcHVzaGJhY2sgYXMgYSBjbGFzc2lmaWVyIGRlZmVjdCBzaWduYWwuIFJlLXJ1bm5pbmcgdGhlIHNhbWUgaW5zdHJ1Y3Rpb24gYWZ0ZXIgdGhlIGFnZW50IHByb3ZlcyB0aGUgZ2F0ZSBpcyBvdXQgb2YgY29udGV4dCBhZGRzIGNvc3Qgd2l0aG91dCBpbXByb3ZpbmcgY29tcGxldGlvbi4KCiMjIFJlcHJvZHVjZQoKYGBgYmFzaApidW4gLmFnZW50cy9yZXBvcnRzL2FuYWx5emUtdmVyaWZ5LXdvcmstY29tcGxldGUudHMgXAogIC0tc2luY2UgN2QgXAogIC0tanNvbi1vdXQgL3RtcC92ZXJpZnktd29yay1jb21wbGV0ZS1ldmVudHMtMjAyNi0wOC0wNy5qc29uIFwKICAtLW1hcmtkb3duLW91dCAvdG1wL3ZlcmlmeS13b3JrLWNvbXBsZXRlLWVmZmVjdGl2ZW5lc3MtMjAyNi0wOC0wNy5tZApgYGAKClRoZSBkZXRhaWxlZCBKU09OIGlzIGxvY2FsIGFuZCByZWRhY3RlZC4gSXQgY29udGFpbnMgYm91bmRlZCBjb250ZXh0IHdpbmRvd3MgZm9yIHJldmlldyBhbmQgbXVzdCBub3QgYmUgY29tbWl0dGVkIG9yIHB1Ymxpc2hlZCBiZWNhdXNlIHNlc3Npb24gdHJhbnNjcmlwdHMgYXJlIGNvbmZpZGVudGlhbC4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
