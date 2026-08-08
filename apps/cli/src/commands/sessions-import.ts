@@ -11,14 +11,17 @@
 import * as fs from 'fs';
 import chalk from 'chalk';
 import type { Command } from 'commander';
-import { loadR2Config } from '../lib/session/sync/config.js';
+import { isSyncConfigured, loadR2Config } from '../lib/session/sync/config.js';
 import { resolveSyncEncKey } from '../lib/session/sync/transcript-crypto.js';
+import { R2Client } from '../lib/session/sync/r2.js';
+import { SESSIONS_PREFIX } from '../lib/session/sync/agents.js';
 import {
   parseBundle,
   planImport,
   writeImport,
   mergeRecords,
   makeHeader,
+  type BundleRecord,
   type ImportPlanItem,
   type ParsedBundle,
 } from '../lib/session/bundle.js';
@@ -30,6 +33,7 @@ interface ImportOptions {
   overwrite?: boolean;
   decrypt?: string | boolean; // commander: true when --decrypt bare, string when --decrypt <key>
   fromHost?: string[];
+  fromR2?: boolean;
   agent?: string; // read from the parent `sessions` command via optsWithGlobals
 }
 
@@ -40,7 +44,8 @@ export function registerSessionsImportCommand(sessionsCmd: Command): void {
     .option('--dry-run', 'Show what would be placed without writing anything')
     .option('--overwrite', 'Replace local files that differ from the bundle (default: keep local)')
     .option('--decrypt [key]', 'Decrypt an encrypted bundle (key optional if the r2.backups sync key is configured)')
-    .option('--from-host <target...>', 'Pull sessions live from remote peer(s) over SSH instead of a file (repeatable)');
+    .option('--from-host <target...>', 'Pull sessions live from remote peer(s) over SSH instead of a file (repeatable)')
+    .option('--from-r2', 'Restore session backups from Cloudflare R2 (requires the r2.backups bundle)');
 
   setHelpSections(cmd, {
     examples: `# Preview what a bundle would restore
@@ -53,11 +58,18 @@ agents sessions import week.bundle
 agents sessions import --from-host yosemite-s1 --since 7d
 
 # Or the equivalent raw pipe
-agents ssh boxB 'agents sessions export --since 7d --stdout' | agents sessions import -`,
+agents ssh boxB 'agents sessions export --since 7d --stdout' | agents sessions import -
+
+# Restore everything backed up to R2 (e.g. on a fresh box)
+agents sessions import --from-r2`,
     notes: `Sessions land under the cross-machine mirror keyed by their origin machine, so
 they show up in 'agents sessions' tagged with that machine and never overwrite
 your own local sessions. Byte-exact duplicates are skipped. --from-host reuses
-the same SSH transport as the cross-machine listing (no R2, no daemon).`,
+the same SSH transport as the cross-machine listing (no R2, no daemon).
+
+--from-r2 downloads every session backup in the r2.backups bucket and restores
+it through the same placement, using the shared R2_SYNC_ENC_KEY to decrypt (or
+pass --decrypt <key>). It is the inverse of 'sessions export --to-r2'.`,
   });
 
   cmd.action(async (bundlePath: string | undefined, options: ImportOptions, command: Command) => {
@@ -72,9 +84,18 @@ async function runImport(
   g: { since?: string; all?: boolean; limit?: string },
   command: Command,
 ): Promise<void> {
-  // 1. Obtain the bundle — from remote peer(s), stdin, or a file.
+  // 1. Obtain the bundle — from R2, remote peer(s), stdin, or a file.
   let bundle: ParsedBundle;
-  if (options.fromHost && options.fromHost.length > 0) {
+  if (options.fromR2) {
+    if (!isSyncConfigured()) {
+      process.stderr.write(chalk.red(
+        'R2 restore is not configured: the r2.backups secrets bundle is missing or locked.\n' +
+        'Add it with: agents secrets add r2.backups R2_ACCOUNT_ID R2_BUCKET_NAME R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY\n',
+      ));
+      process.exit(1);
+    }
+    bundle = await pullFromR2();
+  } else if (options.fromHost && options.fromHost.length > 0) {
     bundle = await pullForImport(options.fromHost, bundlePath, g, command);
   } else {
     if (!bundlePath) {
@@ -176,6 +197,79 @@ async function pullForImport(
     records,
   });
   return { header, records };
+}
+
+/**
+ * --from-r2: download every session-backup object from the r2.backups bucket and
+ * assemble them into one bundle for the normal placement path. Each object is a
+ * self-describing one-record bundle written by `export --to-r2`, so it parses
+ * with the same parseBundle. A non-bundle object under the prefix (e.g. a legacy
+ * plaintext transcript from the retired sync) is skipped with a count, never
+ * silently swallowed. Fails loud when the bucket holds no restorable backups.
+ */
+async function pullFromR2(): Promise<ParsedBundle> {
+  let client: R2Client;
+  let bucket: string;
+  try {
+    const cfg = loadR2Config();
+    bucket = cfg.bucket;
+    client = new R2Client(cfg);
+  } catch (err) {
+    process.stderr.write(chalk.red(`R2 restore: ${(err as Error).message}\n`));
+    process.exit(1);
+  }
+
+  let keys: string[];
+  try {
+    keys = await client.list(SESSIONS_PREFIX);
+  } catch (err) {
+    process.stderr.write(chalk.red(`R2 restore: listing failed: ${(err as Error).message}\n`));
+    process.exit(1);
+  }
+
+  const records: BundleRecord[] = [];
+  let encryptedAny = false;
+  let redactedAll = true;
+  let skipped = 0;
+  for (const key of keys) {
+    // The retired sync wrote a per-machine manifest.json; it is not a bundle.
+    if (key.endsWith('/manifest.json')) continue;
+    let body: string | null;
+    try {
+      body = await client.get(key);
+    } catch (err) {
+      process.stderr.write(chalk.red(`R2 restore: fetching ${key} failed: ${(err as Error).message}\n`));
+      process.exit(1);
+    }
+    if (body === null) continue;
+    let parsed: ParsedBundle;
+    try {
+      parsed = parseBundle(body);
+    } catch {
+      skipped++;
+      continue;
+    }
+    records.push(...parsed.records);
+    if (parsed.header.encrypted) encryptedAny = true;
+    if (!parsed.header.redacted) redactedAll = false;
+  }
+
+  if (skipped > 0) {
+    process.stderr.write(chalk.yellow(`Skipped ${skipped} object(s) under ${SESSIONS_PREFIX} that are not session bundles.\n`));
+  }
+  const deduped = mergeRecords([records]);
+  if (deduped.length === 0) {
+    process.stderr.write(chalk.red(`No session backups found in R2 bucket '${bucket}'.\n`));
+    process.exit(1);
+  }
+  const header = makeHeader({
+    origin: `r2:${bucket}`,
+    exportedAt: new Date().toISOString(),
+    encrypted: encryptedAny,
+    redacted: redactedAll,
+    records: deduped,
+  });
+  return { header, records: deduped };
 }
 
 /**

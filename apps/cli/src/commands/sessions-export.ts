@@ -25,11 +25,12 @@ import type { SessionMeta } from '../lib/session/types.js';
 import { discoverSessions, resolveSessionById, looksLikeSessionId } from '../lib/session/discover.js';
 import { findSessionsById } from '../lib/session/db.js';
 import { filterSessionsByQuery, parseAgentFilter } from './sessions.js';
-import { listLocalTranscripts, SYNC_AGENTS, type LocalTranscript } from '../lib/session/sync/agents.js';
+import { listLocalTranscripts, objectKey, SYNC_AGENTS, type LocalTranscript } from '../lib/session/sync/agents.js';
 import { machineId } from '../lib/machine-id.js';
 import { getHistoryDir } from '../lib/state.js';
-import { loadR2Config } from '../lib/session/sync/config.js';
+import { isSyncConfigured, loadR2Config } from '../lib/session/sync/config.js';
 import { resolveSyncEncKey, generateSyncEncKey } from '../lib/session/sync/transcript-crypto.js';
+import { R2Client } from '../lib/session/sync/r2.js';
 import {
   buildRecord,
   makeHeader,
@@ -54,7 +55,8 @@ export function registerSessionsExportCommand(sessionsCmd: Command): void {
     .description('Bundle sessions (by id, query, or the parent selection flags like --since/-a) into a portable archive.')
     .option('-o, --output <path>', 'Write the bundle to this file')
     .option('--stdout', 'Write the bundle to stdout (for piping into `sessions import -`)')
-    .option('--encrypt', 'Seal each transcript body with AES-256-GCM before writing');
+    .option('--encrypt', 'Seal each transcript body with AES-256-GCM before writing')
+    .option('--to-r2', 'Back the selected sessions up to Cloudflare R2 (requires the r2.backups bundle) instead of a local file');
 
   setHelpSections(cmd, {
     examples: `# Bundle the last week of sessions to a file
@@ -64,11 +66,19 @@ agents sessions export --since 7d -o week.bundle
 agents sessions export 4f8a2b1c 9d3e7a55 -o pair.bundle
 
 # Encrypt + pipe straight into another machine over SSH
-agents sessions export --since 7d --stdout --encrypt | agents ssh boxB 'agents sessions import - --decrypt <key>'`,
+agents sessions export --since 7d --stdout --encrypt | agents ssh boxB 'agents sessions import - --decrypt <key>'
+
+# Back the last month up off-box to Cloudflare R2 (encrypted with the shared key)
+agents sessions export --since 30d --to-r2`,
     notes: `Selection uses the same flags as 'agents sessions' (--since, -n/--limit, --all,
 -a/--agent, --no-redact). Bundles are self-describing NDJSON: a header line + one
 line per transcript file. Secrets are redacted by default. Dir-shaped sessions
-(Kimi) carry all their files. Restore with 'agents sessions import'.`,
+(Kimi) carry all their files. Restore with 'agents sessions import'.
+
+--to-r2 uploads each session to the r2.backups bucket instead of a local file,
+one encrypted object per transcript keyed by machine/agent/session. Bodies are
+sealed with the shared R2_SYNC_ENC_KEY when present. Restore on any box on the
+same bundle with 'agents sessions import --from-r2'.`,
   });
 
   cmd.action(async (selectors: string[], _options: unknown, command: Command) => {
@@ -83,6 +93,7 @@ interface GlobalSelection {
   agent?: string;
   redact?: boolean;
   encrypt?: boolean;
+  toR2?: boolean;
   output?: string;
   stdout?: boolean;
   host?: string[];
@@ -95,8 +106,23 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
   // --host: export sessions that live on remote peer(s) — run export there and
   // stream the bundle back over the existing SSH transport (RUSH-1712).
   if (g.host && g.host.length > 0) {
+    if (g.toR2) {
+      process.stderr.write(chalk.red('--to-r2 backs up THIS machine\'s sessions; it cannot be combined with --host.\n'));
+      process.exit(1);
+    }
     await runRemoteExport(g, selectors, command);
     return;
+  }
+
+  // --to-r2: fail loud at the boundary if the backup target is not configured,
+  // rather than silently producing a local file the user did not ask for.
+  if (g.toR2 && !isSyncConfigured()) {
+    process.stderr.write(chalk.red(
+      'R2 backup is not configured: the r2.backups secrets bundle is missing or locked.\n' +
+      'Add it with: agents secrets add r2.backups R2_ACCOUNT_ID R2_BUCKET_NAME R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY\n' +
+      '(optionally R2_SYNC_ENC_KEY for client-side encryption).\n',
+    ));
+    process.exit(1);
   }
 
   const explicitLimit = command.parent?.getOptionValueSource?.('limit') === 'cli';
@@ -151,7 +177,9 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
   }
 
   // 4. Resolve encryption key (opt-in) + redaction (default on via parent --no-redact).
-  const encryptKey = g.encrypt ? resolveExportKey() : null;
+  //    An R2 backup uses the fleet-shared R2_SYNC_ENC_KEY (an ephemeral key would be
+  //    unrecoverable on a fresh box), so it never takes the resolveExportKey path.
+  const encryptKey = g.toR2 ? resolveR2BackupKey() : g.encrypt ? resolveExportKey() : null;
   const redact = g.redact !== false;
   // Value-aware redaction: mask live credential values already in the
   // environment (e.g. an injected secrets bundle) verbatim, whatever their
@@ -178,7 +206,76 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
     redacted: redact,
     records,
   });
+  if (g.toR2) {
+    await uploadToR2(header, records);
+    return;
+  }
   emitBundle(header, records, g);
+}
+
+/**
+ * Upload each record to R2 as its own self-describing one-record bundle, keyed by
+ * the surviving object layout (`sessions/<machine>/<agent>/<sessionId>.jsonl`, or
+ * `.../<sessionId>/<relKey>` for dir-shaped agents). Each object is independently
+ * a valid bundle, so `import --from-r2` restores it through the same parse/place
+ * path as a local bundle. Fails loud on the first upload error (no silent
+ * partial-success).
+ */
+async function uploadToR2(header: BundleHeader, records: BundleRecord[]): Promise<void> {
+  let client: R2Client;
+  try {
+    client = new R2Client(loadR2Config());
+  } catch (err) {
+    process.stderr.write(chalk.red(`R2 backup: ${(err as Error).message}\n`));
+    process.exit(1);
+  }
+  let uploaded = 0;
+  for (const rec of records) {
+    const recHeader = makeHeader({
+      origin: header.origin,
+      exportedAt: header.exportedAt,
+      encrypted: rec.encrypted,
+      redacted: header.redacted,
+      records: [rec],
+    });
+    const key = r2KeyForRecord(rec);
+    try {
+      await client.put(key, serializeBundle(recHeader, [rec]), 'application/json');
+    } catch (err) {
+      process.stderr.write(chalk.red(`R2 backup failed at ${key}: ${(err as Error).message}\n`));
+      process.exit(1);
+    }
+    uploaded++;
+  }
+  process.stderr.write(chalk.green(
+    `Backed up ${header.sessions} session${header.sessions === 1 ? '' : 's'} ` +
+    `(${uploaded} object${uploaded === 1 ? '' : 's'}${header.encrypted ? ', encrypted' : ', UNENCRYPTED'}) → R2.\n`,
+  ));
+}
+
+/** R2 object key for one record — dir-shaped agents key by relKey, file-shaped by session. */
+function r2KeyForRecord(rec: BundleRecord): string {
+  const spec = specForAgent(rec.agent);
+  const relKey = spec?.dirShaped ? rec.relKey : undefined;
+  return objectKey(rec.machine, rec.agent, rec.sessionId, relKey);
+}
+
+/**
+ * Resolve the AES key for an R2 backup: the fleet-shared R2_SYNC_ENC_KEY from the
+ * r2.backups bundle so any box on the bundle can restore. Unlike a local bundle,
+ * an ephemeral key is useless here (it is never stored, so a fresh box could not
+ * decrypt), so a missing key means the objects go up unencrypted (R2 server-side
+ * encryption only) with a loud warning — never a silent weaker default.
+ */
+function resolveR2BackupKey(): Buffer | null {
+  const key = resolveSyncEncKey(loadR2Config());
+  if (key) return key;
+  process.stderr.write(chalk.yellow(
+    'R2_SYNC_ENC_KEY is not set in the r2.backups bundle — objects are stored WITHOUT client-side\n' +
+    'encryption (R2 server-side only). Add a shared key so backups are zero-knowledge:\n' +
+    '  agents secrets add r2.backups R2_SYNC_ENC_KEY   # value: openssl rand -base64 32\n',
+  ));
+  return null;
 }
 
 /**

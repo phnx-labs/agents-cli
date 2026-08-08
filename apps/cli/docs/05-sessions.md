@@ -1335,6 +1335,37 @@ disk is skipped; a file that differs is a conflict, kept local unless `--overwri
 Source: `src/lib/session/bundle.ts`, `src/lib/session/remote-bundle.ts`,
 `src/commands/sessions-export.ts`, `src/commands/sessions-import.ts`.
 
+### Off-box backup to Cloudflare R2 (`--to-r2` / `--from-r2`)
+
+Export/import above protect against losing a transcript *file*; the R2 backup target
+protects against losing the *whole box*. It is an **optional, on-demand** off-box net
+— not the retired multi-writer sync, and not a daemon cycle.
+
+```bash
+# Back the last month up off-box (one encrypted object per transcript)
+agents sessions export --since 30d --to-r2
+
+# Restore everything backed up — e.g. on a freshly reimaged box
+agents sessions import --from-r2
+```
+
+`--to-r2` writes each selected session to the `r2.backups` bucket as its own
+self-describing one-record bundle, keyed by the surviving object layout
+(`sessions/<machine>/<agent>/<sessionId>.jsonl`, or `.../<sessionId>/<relKey>` for
+dir-shaped agents like Kimi). Bodies are sealed client-side with AES-256-GCM under the
+shared `R2_SYNC_ENC_KEY` — Cloudflare only ever stores ciphertext (zero-knowledge). If
+the bundle carries no shared key the objects go up with a loud warning, relying on R2's
+server-side encryption only; an ephemeral key is never used here because a fresh box
+could not recover it. `--from-r2` lists the bucket, fetches each object, and restores it
+through the **same** placement + decrypt path as a local bundle (deduped, local always
+wins); the shared key decrypts, or pass `--decrypt <key>`.
+
+Credentials come from the `r2.backups` secrets bundle only (keychain, never env or
+disk — SES-27). A missing or locked bundle **fails loud** with an actionable
+`agents secrets add r2.backups …` message rather than silently doing nothing.
+Source: `src/lib/session/sync/r2.ts`, `src/lib/session/sync/config.ts`,
+`src/commands/sessions-export.ts`, `src/commands/sessions-import.ts`.
+
 ## Migration (relocate a live session)
 
 `agents sessions migrate` (alias `relocate`) **moves a RUNNING session onto another
