@@ -7,7 +7,12 @@
 //   - GET  /<username>/<slug>  — public; streams the object from R2, 410s (and lazily
 //     deletes) once its expiry has passed. A bucket lifecycle rule is the durable
 //     sweeper; this is the immediate gate.
-//   - GET  /<username>         — public gallery of that user's shares.
+//   - GET  /<username>         — public gallery of that user's shares (HTML).
+//   - GET  /<username>?format=json — public machine-readable listing of that user's
+//     ACTIVE shares (`agents share list`). Same single-segment path as the HTML
+//     gallery, disambiguated by the `?format=json` discriminator so the human view
+//     is untouched; unlike the gallery it returns an empty list (not a 404) for a
+//     namespace with nothing in it.
 //   - GET  /<slug>             — backward-compat flat slug (legacy shares before
 //     per-user namespaces).
 //
@@ -48,6 +53,13 @@ export default {
       // Single-segment path may be a user gallery OR a legacy flat slug.
       const segments = path.split('/').filter(Boolean);
       if (segments.length === 1) {
+        // Machine-readable namespace listing: GET /<user>?format=json. Distinct
+        // from the HTML gallery (same path, no discriminator) so the human view
+        // is untouched, and it returns an empty list — not a 404 — for a user
+        // with nothing published, so 'agents share list' can answer "nothing".
+        if (url.searchParams.get('format') === 'json') {
+          return renderListing(env.BUCKET, url.origin, segments[0], request.method);
+        }
         const list = await env.BUCKET.list({ prefix: segments[0] + '/', limit: 1 });
         if (list.objects && list.objects.length > 0) {
           return renderGallery(env.BUCKET, url.origin, segments[0], request.method);
@@ -123,6 +135,44 @@ async function renderGallery(bucket, origin, user, method) {
     ).join('') +
     '</ul></body></html>';
   return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public, max-age=60' } });
+}
+
+async function renderListing(bucket, origin, user, method) {
+  const objects = [];
+  let cursor;
+  do {
+    const list = await bucket.list({ prefix: user + '/', limit: 1000, cursor, include: ['httpMetadata', 'customMetadata'] });
+    objects.push(...(list.objects || []));
+    cursor = list.truncated ? list.cursor : undefined;
+  } while (cursor);
+
+  const now = Date.now();
+  const items = objects
+    .filter(o => {
+      // Mirror the gallery: hide the sibling .png OG covers and any expired page,
+      // so the listing shows exactly what is actively public under this namespace.
+      if (o.key.endsWith('.png')) return false;
+      const expiresAt = o.customMetadata && o.customMetadata['expires-at'];
+      return !(expiresAt && now > Date.parse(expiresAt));
+    })
+    .map(o => ({
+      slug: o.key.slice(o.key.indexOf('/') + 1),
+      url: origin + '/' + o.key,
+      size: typeof o.size === 'number' ? o.size : 0,
+      contentType: (o.httpMetadata && o.httpMetadata.contentType) || null,
+      publishedAt: new Date(o.uploaded).toISOString(),
+      expiresAt: (o.customMetadata && o.customMetadata['expires-at']) || null,
+    }));
+  // Newest first, so the human table and any script reads the freshest share top.
+  items.sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : a.publishedAt > b.publishedAt ? -1 : 0));
+
+  if (method === 'HEAD') {
+    return new Response(null, { status: 200, headers: { 'content-type': 'application/json; charset=utf-8' } });
+  }
+  return new Response(JSON.stringify({ user, count: items.length, objects: items }), {
+    status: 200,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=30' },
+  });
 }
 
 function escapeHtml(s) {
