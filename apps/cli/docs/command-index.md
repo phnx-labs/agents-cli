@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_100 command groups · 571 commands._
+_101 command groups · 573 commands._
 
 ## accounts — Browse and name signed-in harness accounts
 
@@ -572,6 +572,13 @@ agents plugins marketplaces rm [target]       Redirects to 'agents repo rm' — 
 agents plugins remove [name]                  Unsync a plugin from all agent versions and optionally delete its source directory
 agents plugins sync <name> [agent]            Apply a plugin to an agent. Syncs every installed version (pass agent@version to target one).
 agents plugins update [name]                  Re-pull a plugin from its original source and re-sync to all versions
+```
+
+## pr — Standalone PR lifecycle commands (land, …).
+
+```
+agents pr            Standalone PR lifecycle commands (land, …).
+agents pr land <pr>  Watch a PR through CI and a non-author review, then rebase-merge on green. Fails loud on red CI or conflict; never uses --admin.
 ```
 
 ## profile — Activate top-level resource profiles across commands, skills, hooks, rules, MCP, permissions, and secrets.
