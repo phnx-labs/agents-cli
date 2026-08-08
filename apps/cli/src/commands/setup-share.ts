@@ -69,7 +69,10 @@ export async function runShareWizard(): Promise<boolean> {
       return true;
     }
     if (action === 'update') {
-      const result = await runShareUpdate({});
+      // When the template is already current, the description below promises a
+      // re-deploy anyway — force it, or runShareUpdate's own no-op would silently
+      // contradict what was just said.
+      const result = await runShareUpdate({ force: templateStatus === 'current' });
       console.log(
         result.updated
           ? chalk.green(`Worker '${result.workerName}' updated → template ${result.templateHash.slice(0, 12)}…`)
