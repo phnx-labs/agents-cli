@@ -37,6 +37,7 @@ function fact(over: Partial<SessionFactPayload>): SessionFactPayload {
     agentType: 'claude',
     filePath: '/tmp/unused.jsonl',
     fileSessionId: 'unused',
+    birthtimeMs: Date.now(),
     mtimeMs: 0,
     ...over,
   };

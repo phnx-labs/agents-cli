@@ -9,6 +9,7 @@ import { promisify } from 'util';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { safeJoin } from '../paths.js';
+import { getMainRepoRoot } from '../git.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -115,7 +116,16 @@ export async function localDefaultBranch(gitRoot: string): Promise<string> {
  * code. Matches `createRemoteWorktree` — local and remote isolation share one
  * base policy.
  *
- * @param repoDir - Directory inside the git repository
+ * Resolves the placement root with {@link getMainRepoRoot}, NOT the local
+ * `getGitRoot`/`--show-toplevel`, on purpose: when `repoDir` (the caller's
+ * ambient cwd) is itself inside another teammate's linked worktree,
+ * `--show-toplevel` returns THAT worktree's own root, so the new worktree
+ * lands nested inside it (observed: `.../worktrees/A/.agents/worktrees/B`,
+ * destroyed along with A's cleanup). `getMainRepoRoot` follows
+ * `--git-common-dir`, which always points at the primary checkout's `.git`
+ * regardless of which worktree the caller is standing in.
+ *
+ * @param repoDir - Directory inside the git repository (main checkout or any linked worktree)
  * @param worktreeName - Name for the worktree (used in path and branch)
  * @returns The absolute path to the created worktree
  */
@@ -123,7 +133,7 @@ export async function createWorktree(repoDir: string, worktreeName: string): Pro
   if (!WORKTREE_NAME_RE.test(worktreeName)) {
     throw new Error(`Invalid worktree name: ${worktreeName}`);
   }
-  const gitRoot = await getGitRoot(repoDir);
+  const gitRoot = await getMainRepoRoot(repoDir);
   const worktreePath = safeJoin(path.join(gitRoot, '.agents', 'worktrees'), worktreeName);
   const branchName = `agents/${worktreeName}`;
   const base = await localDefaultBranch(gitRoot);
@@ -156,7 +166,12 @@ export async function createWorktree(repoDir: string, worktreeName: string): Pro
 /**
  * Remove a git worktree and optionally its branch.
  *
- * @param repoDir - Directory inside the main git repository (not the worktree)
+ * Resolves via {@link getMainRepoRoot}, same as {@link createWorktree} — a
+ * caller standing inside a DIFFERENT linked worktree (e.g. a `teams stop`
+ * run from within another teammate's checkout) must still target the main
+ * repo's `.agents/worktrees/<name>`, not `--show-toplevel`'s local answer.
+ *
+ * @param repoDir - Directory inside the git repository (main checkout or any linked worktree)
  * @param worktreeName - Name of the worktree to remove
  * @param deleteBranch - Whether to delete the associated branch
  */
@@ -168,7 +183,7 @@ export async function removeWorktree(
   if (!WORKTREE_NAME_RE.test(worktreeName)) {
     throw new Error(`Invalid worktree name: ${worktreeName}`);
   }
-  const gitRoot = await getGitRoot(repoDir);
+  const gitRoot = await getMainRepoRoot(repoDir);
   const worktreePath = safeJoin(path.join(gitRoot, '.agents', 'worktrees'), worktreeName);
   const branchName = `agents/${worktreeName}`;
 
@@ -206,4 +221,49 @@ export function getWorktreePath(gitRoot: string, worktreeName: string): string {
  */
 export function getWorktreeBranch(worktreeName: string): string {
   return `agents/${worktreeName}`;
+}
+
+/**
+ * Does the CHECKOUT DIRECTORY for this worktree name exist?
+ *
+ * Narrower than {@link worktreeExists}, and the difference is load-bearing:
+ * `teams add` only ever cleans up after a failed create when there is NO
+ * checkout — i.e. when all that can be left is a dangling `agents/<name>`
+ * branch ref. That keeps the cleanup incapable of deleting anybody's files,
+ * including a concurrent add's freshly-created worktree, whatever the
+ * pre-flight probe saw a `git fetch` ago. (RUSH-2356)
+ */
+export async function worktreeCheckoutExists(repoDir: string, worktreeName: string): Promise<boolean> {
+  if (!WORKTREE_NAME_RE.test(worktreeName)) {
+    throw new Error(`Invalid worktree name: ${worktreeName}`);
+  }
+  const gitRoot = await getMainRepoRoot(repoDir);
+  const dir = safeJoin(path.join(gitRoot, '.agents', 'worktrees'), worktreeName);
+  return fs.stat(dir).then(() => true).catch(() => false);
+}
+
+/**
+ * Does anything already exist under this worktree name — the checkout directory
+ * or its `agents/<name>` branch?
+ *
+ * Answered from git and the filesystem, never from teammate records: it is asked
+ * by `teams add` immediately BEFORE {@link createWorktree}, so that if the create
+ * fails the command can tell "the branch ref I half-created" (safe to remove)
+ * from "something that was already here" (never remove — `teams stop` deliberately
+ * KEEPS a worktree holding uncommitted changes, and its teammate record is
+ * terminal by then, so no record-based check can protect it). (RUSH-2356)
+ */
+export async function worktreeExists(repoDir: string, worktreeName: string): Promise<boolean> {
+  if (await worktreeCheckoutExists(repoDir, worktreeName)) return true;
+  const gitRoot = await getMainRepoRoot(repoDir);
+  try {
+    await execFileAsync(
+      'git',
+      ['rev-parse', '--verify', '--quiet', `refs/heads/${getWorktreeBranch(worktreeName)}`],
+      { cwd: gitRoot },
+    );
+    return true;
+  } catch {
+    return false; // `--verify` exits non-zero when the ref doesn't exist
+  }
 }

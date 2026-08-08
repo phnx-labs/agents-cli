@@ -7,10 +7,13 @@ import { describe, expect, it } from 'vitest';
 import { buildFullCommandTree } from '../src/lib/startup/command-registry.js';
 import {
   argToken,
+  auditReference,
   countCommands,
   invocation,
   renderJson,
+  renderHtml,
   renderMarkdown,
+  rootNode,
   walk,
   type CommandNode,
 } from './gen-command-index';
@@ -47,11 +50,15 @@ describe('command index generation', () => {
     expect(countCommands(nodes)).toBeGreaterThan(nodes.length); // groups have subcommands
   });
 
+  it('has descriptions for every visible command and option', async () => {
+    expect(auditReference(await tree())).toEqual([]);
+  });
+
   it('captures a nested command with its required argument (teams create <team>)', async () => {
     const nodes = await tree();
     const create = find(nodes, 'teams create');
     expect(create).toBeDefined();
-    expect(create!.args).toContainEqual({ name: 'team', required: true, variadic: false });
+    expect(create!.args).toContainEqual({ name: 'team', required: true, variadic: false, description: '' });
     expect(invocation(create!)).toBe('teams create <team>');
     expect(create!.description.length).toBeGreaterThan(0);
   });
@@ -66,9 +73,25 @@ describe('command index generation', () => {
   it('excludes the inline aliases/tombstones registered in src/index.ts', async () => {
     const nodes = await tree();
     const names = new Set(nodes.map((n) => n.name));
-    for (const inline of ['perms', 'exec', 'jobs', 'cron', 'check', 'resources', 'hq', 'upgrade', '_internal']) {
+    for (const inline of ['perms', 'exec', 'jobs', 'cron', 'check', 'resources', 'hq', '_internal']) {
       expect(names.has(inline)).toBe(false);
     }
+  });
+
+  it('includes the visible upgrade command registered by the live CLI entry point', async () => {
+    const upgrade = find(await tree(), 'upgrade');
+    expect(upgrade).toBeDefined();
+    expect(invocation(upgrade!)).toBe('upgrade [version]');
+    expect(upgrade!.options.map((option) => option.flags)).toContain('-y, --yes');
+  });
+
+  it('captures the root agents metadata and global options', async () => {
+    const root = rootNode(await buildFullCommandTree());
+    expect(root.name).toBe('agents');
+    expect(root.description).toBe('Environment manager for AI agents');
+    expect(root.options.map((option) => option.long)).toContain('--version');
+    expect(root.options.map((option) => option.long)).toContain('--verbose');
+    expect(root.options.map((option) => option.long)).toContain('--help');
   });
 
   it('captures option flags in the JSON tree', async () => {
@@ -80,7 +103,20 @@ describe('command index generation', () => {
     for (const opt of create!.options) {
       expect(typeof opt.flags).toBe('string');
       expect(opt.flags.length).toBeGreaterThan(0);
+      expect(typeof opt.required).toBe('boolean');
+      expect(typeof opt.optional).toBe('boolean');
+      expect(typeof opt.variadic).toBe('boolean');
     }
+  });
+
+  it('captures nested option variants, choices, defaults, examples, and notes', async () => {
+    const nodes = await tree();
+    const start = find(nodes, 'browser start');
+    expect(start).toBeDefined();
+    expect(start!.options.some((option) => option.long?.startsWith('--'))).toBe(true);
+    const pty = find(nodes, 'pty');
+    expect(pty?.examples).toContain('agents pty');
+    expect(pty?.notes?.length).toBeGreaterThan(0);
   });
 
   it('renders scannable Markdown with a fenced block per group', async () => {
@@ -91,5 +127,14 @@ describe('command index generation', () => {
     expect(md).toContain('agents teams create <team>');
     // Fenced code blocks are balanced (one open + close per group).
     expect((md.match(/^```$/gm) ?? []).length).toBe(nodes.length * 2);
+  });
+
+  it('renders a searchable standalone HTML reference for every command', async () => {
+    const nodes = await tree();
+    const html = renderHtml(nodes);
+    expect(html).toContain('type="search"');
+    expect(html).toContain('agents teams create &lt;team&gt;');
+    expect((html.match(/<article /g) ?? []).length).toBe(countCommands(nodes));
+    expect(html).not.toMatch(/<(script|link)[^>]+(src|href)=/);
   });
 });

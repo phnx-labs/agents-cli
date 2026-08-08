@@ -428,11 +428,12 @@ Top-level questions and waiting notifications publish one atomic open-block reco
 
 ```bash
 agents watchdog            # one tick, dry run — reports what it WOULD nudge and why
+agents watchdog --verbose  # include healthy/non-actionable session inspections
 agents watchdog --nudge    # actually inject "Continue." into the stalled split
 agents watchdog --watch    # daemon loop: a tick every --interval
 ```
 
-`agents watchdog` detects a stalled session, resolves the *exact* terminal split it lives in (tmux, iTerm, VSCodium, or a raw pty), and injects a nudge -- `Continue.` by default, or set `--text`. It's dry by default; `--nudge` acts on a single tick. `agents watchdog on|off` controls the device-local daemon pass, which runs once every three minutes. Steer a single run with `agents watchdog policy <id> off | keep | handsoff`.
+`agents watchdog` detects a stalled session, resolves the *exact* terminal split it lives in (tmux, iTerm, VSCodium, or a raw pty), and injects a nudge -- `Continue.` by default, or set `--text`. Its timestamped default output shows attention-worthy sessions with their agent, host app, machine, project, activity, age, path, latest preview, and decision reason; `--verbose` restores healthy/non-actionable inspections. It's dry by default; `--nudge` acts on a single tick. `agents watchdog on|off` controls the device-local daemon pass, which runs once every three minutes. Steer a single run with `agents watchdog policy <id> off | keep | handsoff`.
 
 A stalled session whose tail shows a hard account limit ("You've hit your weekly limit · resets …") is **rotated in place** instead of nudged: the watchdog gates on the same healthy-account selection `agents run auto` makes (zero healthy → one skip event per cooldown window, terminal untouched), injects the harness's exit sequence, relaunches `agents run auto --interactive --session-id <uuid>` in the *same* tab, then replays the old session's resume once the new TUI is live. Default on; `agents watchdog rotate off` disables it (nudging stays on).
 
@@ -679,6 +680,20 @@ agents teams status auth-feature    # Who's working, what they changed, what the
 Teammates run detached -- close your terminal, they keep working. Check in with `teams status`, glance at a teammate's summary with `teams logs <name>` (add `--full` for the raw output), clean up with `teams disband`.
 
 Team state is observable via `agents teams list --json` / `agents teams status --json` (compact by default; add `--verbose` for the full per-teammate shape). External tools join it with `sessions --json` (teammates get `isTeamOrigin: true`) and `cloud list --json` (for `--cloud` teammates) to build a unified fleet view. See [docs/06-observability.md](apps/cli/docs/06-observability.md).
+
+---
+
+### Land a pull request
+
+`agents pr land <number>` watches one pull request until CI passes and a
+non-author approval exists, then rebase-merges it without bypassing branch
+protection. It exits on red CI or a merge conflict; `--skip-review` is an
+explicit opt-out for repositories that do not require independent review.
+
+```bash
+agents pr land 1234
+agents pr land 1234 --interval 60
+```
 
 ---
 
@@ -1121,6 +1136,7 @@ agents share setup                                  # once: provision bucket + W
 agents share plan.html --slug fleet --expire 30d    # → https://<base>/fleet
 agents share plan.html --json                       # URL object for plan-render hooks
 agents share status                                 # show the endpoint
+agents unshare fleet                                # take a published link (+ its OG cover) down
 ```
 
 `agents share` closes the loop: an agent makes work (a plan, a viz, a report),
@@ -1137,6 +1153,12 @@ publishes through it with a shared write token — `agents share join <baseUrl>`
 existing endpoint with no provisioning. `--expire 30d|12h|<date>` auto-expires a link.
 `--json` emits `{ url, coverUrl, expiresAt }` so plan-render automation can publish the
 rendered HTML and post the returned link without scraping terminal text.
+
+`agents share delete <targets...>` (alias `agents unshare`) takes a page down — pass a
+full URL, `<user>/<slug>`, or a bare slug (resolved against your own namespace); several
+targets at once are fine. It also deletes the sibling `<slug>.png` OG cover by default
+(`--keep-cover` opts out) and verifies the page actually 404s before reporting success —
+the Worker's delete is idempotent, so `{"ok":true}` alone is never proof.
 See [docs/share.md](apps/cli/docs/share.md).
 
 ---

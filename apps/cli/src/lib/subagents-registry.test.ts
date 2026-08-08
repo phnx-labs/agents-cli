@@ -116,29 +116,70 @@ describe('trashSubagentFromHome (soft-delete semantics per layout)', () => {
     expect(fs.existsSync(path.join(trashDir, 'STAMP', 'AGENTS.md'))).toBe(true);
   });
 
-  it('trashes both Kimi files (yaml + system.md) it emits', () => {
+  it('trashes the single Kimi markdown file it emits', () => {
     const home = mkTemp();
     writeSubagentToHome('kimi', home, { name: 'k', path: makeSubagentDir('k') });
     const trashDir = path.join(mkTemp(), 'trash');
 
     const r = trashSubagentFromHome('kimi', home, 'k', trashDir, 'STAMP');
     expect(r.success).toBe(true);
-    expect(fs.existsSync(path.join(trashDir, 'k.yaml.STAMP'))).toBe(true);
-    expect(fs.existsSync(path.join(trashDir, 'k.system.md.STAMP'))).toBe(true);
+    expect(fs.existsSync(path.join(trashDir, 'k.md.STAMP'))).toBe(true);
   });
 });
 
-describe('listInstalledSubagentNames excludes the Kimi parent index', () => {
-  it('does not surface _agents-cli.yaml as a subagent', () => {
+describe('Kimi subagents are Claude-shaped agent markdown', () => {
+  /**
+   * kimi-code >= 0.29.0 discovers agent FILES from its brand home's `agents/`
+   * dir and parses them as markdown with YAML frontmatter (`name` +
+   * `description`, kebab-case name). It has no loader for the `version: 1` /
+   * `agent:` YAML agentspec — that schema belongs to the older, separate
+   * `kimi-cli` product — so a `.yaml` written here is never read by any
+   * kimi-code session. Pin the format so the two cannot drift apart again.
+   */
+  it('writes <name>.md with frontmatter, not a yaml + system.md pair', () => {
+    const home = mkTemp();
+    writeSubagentToHome('kimi', home, { name: 'code-reviewer', path: makeSubagentDir('code-reviewer') });
+
+    const dir = path.join(home, '.kimi-code', 'agents');
+    expect(fs.existsSync(path.join(dir, 'code-reviewer.md'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'code-reviewer.yaml'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'code-reviewer.system.md'))).toBe(false);
+    // No managed parent index: kimi-code enumerates the dir itself.
+    expect(fs.existsSync(path.join(dir, '_agents-cli.yaml'))).toBe(false);
+
+    const body = fs.readFileSync(path.join(dir, 'code-reviewer.md'), 'utf-8');
+    expect(body.startsWith('---\n')).toBe(true);
+    expect(body).toContain('name: code-reviewer');
+
+    expect(listInstalledSubagentNames('kimi', home)).toEqual(['code-reviewer']);
+    expect(listInstalledSubagentsRich('kimi', home).map((s) => s.name)).toEqual(['code-reviewer']);
+  });
+
+  /**
+   * The target must describe ONLY the current shape. Folding the pre-markdown
+   * layout is `migrateKimiSubagentsToMarkdown`'s job (lib/migrate.ts), so a
+   * write here must not reach for files it did not create -- doing so made the
+   * project-sync collision check veto its own write, and made an orphaned
+   * `<name>.system.md` unreachable by `agents prune cleanup`.
+   */
+  it('claims only the file it writes', () => {
+    // Widening `occupied` to the legacy pair made project sync's collision
+    // check veto its own write over a stray `<name>.yaml`.
+    const dir = path.join(mkTemp(), '.kimi-code', 'agents');
+    expect(SUBAGENT_TARGETS.kimi!.occupied(dir, 'x').map((e) => path.basename(e.path))).toEqual(['x.md']);
+  });
+
+  it('enumerates a stale <name>.system.md so the orphan diff can still reach it', () => {
+    // Filtering `.system` out of `names` hid an abandoned legacy prompt file
+    // from `agents prune cleanup` -- the migrator sweeps it, but until that
+    // runs it must stay visible rather than silently linger.
     const home = mkTemp();
     const dir = path.join(home, '.kimi-code', 'agents');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'real.yaml'), 'version: 1\nagent: { name: real }\n');
-    fs.writeFileSync(path.join(dir, '_agents-cli.yaml'), 'version: 1\n');
+    fs.writeFileSync(path.join(dir, 'x.yaml'), 'version: 1\n');
+    fs.writeFileSync(path.join(dir, 'x.system.md'), 'legacy prompt body');
 
-    expect(listInstalledSubagentNames('kimi', home)).toEqual(['real']);
-    // The rich lister agrees.
-    expect(listInstalledSubagentsRich('kimi', home).map((s) => s.name)).toEqual(['real']);
+    expect(listInstalledSubagentNames('kimi', home)).toEqual(['x.system']);
   });
 });
 

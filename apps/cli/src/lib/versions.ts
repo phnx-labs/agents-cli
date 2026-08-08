@@ -34,7 +34,7 @@ import { activeRulesPreset, filterNamesForActiveResourceProfile } from './resour
 import { VERSION_RE, compareVersions } from './agent-spec/primitives.js';
 import { AGENTS, agentConfigDirName, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName, formatAgentError, findInPath, isSelfUpdatingAgent, isAgentHardDeprecated, hardDeprecationError } from './agents.js';
 import { getDefaultPermissionSet, applyPermissionsToVersion as applyPermsToVersion, discoverPermissionGroups, getTotalPermissionRuleCount, buildPermissionsFromGroups, CODEX_RULES_FILENAME, getActivePermissionPresetName, readPermissionPresetRecipe, PERMISSION_PRESET_ENV_VAR } from './permissions.js';
-import { installMcpServers, parseMcpServerConfig, isProjectMcpTrusted } from './mcp.js';
+import { installMcpServers, parseMcpConfigForScan, isProjectMcpTrusted } from './mcp.js';
 import { markdownToToml } from './convert.js';
 import {
   createVersionedAlias,
@@ -152,7 +152,7 @@ function getScopedMcpResources(cwd: string): ScopedMcpResource[] {
     const files = fs.readdirSync(mcpDir)
       .filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
     for (const file of files) {
-      const config = parseMcpServerConfig(path.join(mcpDir, file));
+      const config = parseMcpConfigForScan(path.join(mcpDir, file));
       if (config?.name && !resources.has(config.name)) {
         resources.set(config.name, { name: config.name, scope });
       }

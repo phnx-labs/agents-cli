@@ -21,71 +21,19 @@ import { saveTask, updateTask, terminalPatch, type HostTask } from './tasks.js';
 import { followHostTask } from './progress.js';
 import { wrapHostCommandWithCredentials, type HostCredentials } from './credentials.js';
 import { hostKeyCheckingOpts } from '../devices/known-hosts.js';
-import { toRemotePortable } from '../project-root.js';
+import { deriveMirroredCwd, homeRemainder, remoteCdPrefix } from '../project-root.js';
 import { RUN_AUTO_KEYWORD, RUN_AUTO_HOST_RESOLVED_ENV } from '../types.js';
+
+// The home-relative portability helpers live in project-root.js (the canonical
+// home-relative conversion home), reused by the interactive `agents ssh` login
+// shell builder (devices/connect.ts) as well as this dispatch layer. Re-exported
+// here so existing `hosts/dispatch.js` importers and tests keep resolving them.
+export { deriveMirroredCwd, homeRemainder, remoteCdPrefix };
 
 // Use $HOME (not ~) so the path is correct whether or not it's quoted and
 // regardless of the run's cwd. Task ids are 8 hex chars, so these paths are
 // injection-safe to interpolate unquoted into remote commands.
 const REMOTE_DIR = '$HOME/.agents/.cache/hosts';
-
-/**
- * If `p` is anchored at the home dir — a leading `~` or `$HOME` — return the
- * remainder (no leading slash), else null. Callers that want a local-home
- * absolute (`/Users/<me>/x`, from a shell-expanded `--cwd ~/x`) re-rooted at the
- * remote home normalize it to `~/x` first (`toRemotePortable`); explicit
- * `--remote-cwd` is left literal and so is never re-rooted here.
- */
-function homeRemainder(p: string): string | null {
-  if (p === '~' || p === '$HOME') return '';
-  if (p.startsWith('~/')) return p.slice(2);
-  if (p.startsWith('$HOME/')) return p.slice(6);
-  return null;
-}
-
-/**
- * Derive the remote directory to mirror from the local cwd, for a host run the
- * caller gave no `--cwd`/`--remote-cwd`.
- *
- * Without this a `--host` run lands in the remote `$HOME`, so an agent launched
- * from a repo starts with no project context and the user has to `cd` by hand.
- * Only a cwd under the LOCAL home is mirrored — that is the part with a
- * meaningful remote analogue (`~/src/x` re-roots onto the remote home). A path
- * outside home returns undefined: `/opt/thing` on this box says nothing about
- * the target's filesystem, so the run keeps the remote home.
- */
-export function deriveMirroredCwd(localCwd: string): string | undefined {
-  const portable = toRemotePortable(localCwd);
-  return homeRemainder(portable) === null ? undefined : portable;
-}
-
-/**
- * Build a `cd <dir> && ` prefix that resolves on the REMOTE host.
- *
- * A `~`/`$HOME`-anchored path must resolve against the REMOTE user's home, not
- * the local one (`/home/<me>` vs `/Users/<me>`). We emit an unquoted `"$HOME"`
- * for that segment — the remote login shell expands it — and shell-quote the
- * remainder. Any other path (absolute or relative) is quoted verbatim.
- *
- * `mirror` marks a directory the caller DERIVED from the local cwd rather than
- * one the user asked for (see `deriveMirroredCwd`). The same repo checked out at
- * the same home-relative path on both boxes is the common fleet layout, so
- * mirroring lands the remote agent in the project instead of `$HOME`. It is a
- * best-effort mirror by definition — the host may simply not have that checkout
- * — so a missing directory falls back to the remote home instead of failing the
- * run. An explicit `--cwd`/`--remote-cwd` is never mirrored: the user named that
- * directory, so a missing one must surface as a `cd` error.
- */
-export function remoteCdPrefix(remoteCwd?: string, opts: { mirror?: boolean } = {}): string {
-  if (!remoteCwd) return '';
-  const rest = homeRemainder(remoteCwd);
-  if (rest === '') return 'cd "$HOME" && ';
-  if (rest !== null) {
-    const dir = `"$HOME"/${shellQuote(rest)}`;
-    return opts.mirror ? `{ cd ${dir} || cd "$HOME"; } && ` : `cd ${dir} && `;
-  }
-  return `cd ${shellQuote(remoteCwd)} && `;
-}
 
 /**
  * Merge the resolved actor's provenance env UNDER a caller-supplied env, so every

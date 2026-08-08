@@ -13,6 +13,7 @@ agents share plan.html --slug fleet --expire 30d  # → https://<base>/<user>/fl
 agents share plan.html --json                     # machine-readable URL for hooks
 agents share status                               # show endpoint, namespace, analytics
 agents share analytics                            # link to the Web Analytics dashboard
+agents unshare fleet                              # take the link (+ its OG cover) down
 ```
 
 `setup` reads a Cloudflare API token from your `cloudflare` secrets bundle (or pass
@@ -105,10 +106,39 @@ synced config exists and the token is already available.
 | Command | What it does |
 |---|---|
 | `agents share <file> [--slug s] [--github-user u] [--expire spec] [--no-cover] [--no-analytics] [--json]` | Publish `<file>` under your GitHub-username namespace; print the link, or emit `{ url, coverUrl, expiresAt }` for plan-render hooks with `--json`. HTML pages get an auto OG cover unless `--no-cover` and a CF Web Analytics beacon unless `--no-analytics`. |
+| `agents share delete <targets...>` / `agents unshare <targets...>` | Take a published page down (see [Deleting a share](#deleting-a-share) below). |
 | `agents share setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h] [--analytics-token token]` | Provision an R2 bucket + Worker on your Cloudflare, map `share.agents-cli.sh` when visible (or `--domain h`), optionally configure a CF Web Analytics token, and save the config. |
 | `agents share join [baseUrl] [--token t]` | Use an existing endpoint, no provisioning. With no URL, consumes synced `share:` config plus `SHARE_WRITE_TOKEN` / the local `share` bundle. |
 | `agents share status` | Show the configured endpoint, namespace, and analytics state. |
 | `agents share analytics` | Show the Web Analytics status and dashboard link. |
+
+## Deleting a share
+
+`agents share delete <targets...>` (alias `agents unshare`) takes a published page down.
+It accepts several targets at once, in any of the three forms `agents share <file>` can
+produce or that you'd copy off a link:
+
+```bash
+agents unshare https://share.agents-cli.sh/octocat/fleet-status-9f3c   # full URL
+agents unshare octocat/fleet-status-9f3c                               # <user>/<slug>
+agents unshare fleet-status-9f3c                                       # bare slug — resolved
+                                                                        # against YOUR namespace,
+                                                                        # the same way publish does
+agents unshare fleet-status-9f3c old-report --if-exists                # several at once
+```
+
+By default it also deletes the sibling `<slug>.png` OG cover — a republish over a slug
+replaces the page but leaves the *old* cover screenshot public, so leaving it up looks
+like a takedown from the page side while the cover keeps serving. Pass `--keep-cover`
+to leave it. An already-missing target is an error (say so plainly) unless `--if-exists`
+is passed, matching SQL's `DROP ... IF EXISTS` — a no-op success instead of a crash or a
+silent no-op either way.
+
+The Worker's `DELETE` is idempotent (R2 delete succeeds even on a key that was never
+there), so `{"ok":true}` from the Worker is never treated as proof a page came down: the
+command always issues a follow-up check and only reports success once that resolves 404
+for both the page and (unless `--keep-cover`) the cover. `--json` emits an array of
+per-target results for scripting.
 
 ## Security
 
@@ -129,6 +159,11 @@ the link can read the content, and the Worker serves it to them.
 - **Use `--expire` for sensitive content.** There is no default expiry. `--expire 30d`
   (or `12h`, or an absolute `2026-08-01`) bounds the window in which a leaked link is
   live; the Worker `410`s and lazily deletes past that instant. Shorter is safer.
+- **A page can be taken down manually with `agents unshare`.** For anything published
+  without `--expire` that needs to come down before then (or immediately, on an
+  accidental publish of sensitive content), `agents unshare <link>` deletes the page and
+  its OG cover and verifies both 404 before reporting success — see
+  [Deleting a share](#deleting-a-share).
 - **A true auth-gated read is a future option, not shipped.** For content that must be
   genuinely private rather than merely unlisted, the intended path is an opt-in,
   auth-gated read — a bearer token or a signed, short-lived link required to _view_ (not
@@ -140,5 +175,5 @@ client sends it from the `share` bundle). The Worker's constant-time-ish compare
 leaking the token by timing. The token is a 32-byte random hex; rotate by re-running
 `setup` (mints a new one) — old links keep serving until they expire.
 
-Source: `src/commands/share.ts`, `src/lib/share/{worker-template,provision,publish,config,analytics}.ts`,
+Source: `src/commands/share.ts`, `src/lib/share/{worker-template,provision,publish,delete,config,analytics}.ts`,
 `Meta.share` in `src/lib/types.ts`.

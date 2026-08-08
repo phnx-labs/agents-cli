@@ -13,7 +13,7 @@ import * as path from 'path';
 import { spawn, type ChildProcess } from 'child_process';
 import { Option, type Command } from 'commander';
 import chalk from 'chalk';
-import { truncate, padRight } from '../lib/format.js';
+import { truncate, padRight, humanDuration } from '../lib/format.js';
 import { sanitizeForTerminal } from '../lib/redact.js';
 import { resolveProjectKey } from '../lib/project-key.js';
 import { listProjectDefs, resolveProjectNameForCwd, type ProjectDef } from '../lib/projects.js';
@@ -41,6 +41,7 @@ import { discoverSessions, queryIndexedSessions, countSessionsInScope, resolveSe
 import { findSessionsById, querySessions, getSessionById } from '../lib/session/db.js';
 import {
   filterTeamSessions,
+  shouldShowTeamSessions,
   safeTeamText,
   groupSessionsByTeam,
   NO_TEAM_GROUP_KEY,
@@ -49,13 +50,14 @@ import {
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
 import { formatRelativeTime, formatCompactAge, sessionAgeParts, type SessionAgeParts } from '../lib/session/relative-time.js';
-import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkPath, linkUrl, shortenModel, type FilterOptions } from '../lib/session/render.js';
+import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkPath, linkUrl, shortenModel, formatTokenCount, type FilterOptions } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
 import { sessionOwnerDevice, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';
 import { getShimsDir } from '../lib/state.js';
-import { listJobs, listJobsWithRuns, listRuns } from '../lib/routines.js';
+import { listJobs, listJobsWithRuns, listRuns, getRunDir, type RunMeta } from '../lib/routines.js';
+import { formatUsd } from '../lib/pricing/cost.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
 import { itemPicker } from '../lib/picker.js';
 import { resolveSessionAlias } from '../lib/session/actor-sidecar.js';
@@ -91,7 +93,7 @@ import { registerSessionsBackfillCommand } from './sessions-backfill.js';
 import { registerSessionsStatsCommand } from './sessions-stats.js';
 import { registerSessionsInsightsCommand } from './insights.js';
 import { registerSessionsOptimizeCommand } from './sessions-optimize.js';
-import { runBrowserSessions } from '../lib/browser/sessions-list.js';
+import { runBrowserSessionsCommand } from './browser-sessions-picker.js';
 import {
   countToolProgramOccurrences,
   parseToolProgramCountClause,
@@ -1729,6 +1731,11 @@ export function hasNoBrowserDisqualifyingFlags(
     !options.skill &&
     !options.plugin &&
     !options.sort &&
+    // --routine without a name owns a two-stage picker (routine -> run ->
+    // session), and a named routine owns the run-grouped overview. The generic
+    // browser can only flatten routine sessions into its ordinary row list, so
+    // routing this flag there silently bypasses both routine-specific views.
+    !options.routine &&
     !options.artifacts &&
     options.artifact === undefined &&
     // --cloud lists a provider's tasks, not the transcript index, and
@@ -1849,33 +1856,282 @@ function safeListJobsWithRuns(): string[] {
   } catch { return []; }
 }
 
-export async function filterSessionsByRoutine(
+/**
+ * Resolve which routine the user is targeting for `--routine`. Returns `null` to
+ * ABORT the command (a bad `--routine <name>` printed an error, or the user
+ * cancelled the interactive pick). `{ name: null }` means "no routine was
+ * selected, don't filter" — the degenerate bare `--routine` piped to a
+ * non-interactive sink. `{ name }` is a chosen routine.
+ *
+ * The name universe is transcripts UNION every routine with a definition or a
+ * run record (`safeListJobsWithRuns`), so a command-only or never-ran routine —
+ * which produces no `SessionMeta` — still resolves and drills down.
+ */
+export async function selectRoutineTarget(
   sessions: SessionMeta[],
   routine: boolean | string,
   interactive: boolean,
-): Promise<SessionMeta[] | null> {
-  // The name universe is transcripts UNION routines that have any run record —
-  // so a routine whose attempts never produced a session still resolves.
+): Promise<{ name: string | null } | null> {
   const routineNames = [...new Set([
     ...sessions.map((session) => session.routineName).filter((name): name is string => !!name),
     ...safeListJobsWithRuns(),
   ])].sort((a, b) => a.localeCompare(b));
-  let selectedRoutine: string | null = null;
   if (typeof routine === 'string') {
-    selectedRoutine = resolveRoutineName(routine, routineNames);
-    if (!selectedRoutine) {
+    const resolved = resolveRoutineName(routine, routineNames);
+    if (!resolved) {
       console.error(chalk.red(`No routine matches "${routine}".`));
       if (routineNames.length > 0) console.error(chalk.gray(`Available routines: ${routineNames.join(', ')}`));
       process.exitCode = 1;
       return null;
     }
-  } else if (interactive) {
-    selectedRoutine = await selectRoutineName(sessions);
-    if (!selectedRoutine) return null;
+    return { name: resolved };
   }
-  if (!selectedRoutine) return sessions;
-  const matched = sessions.filter((session) => session.routineName === selectedRoutine);
-  return matched;
+  if (interactive) {
+    const picked = await selectRoutineName(sessions);
+    if (!picked) return null;
+    return { name: picked };
+  }
+  return { name: null };
+}
+
+export async function filterSessionsByRoutine(
+  sessions: SessionMeta[],
+  routine: boolean | string,
+  interactive: boolean,
+): Promise<SessionMeta[] | null> {
+  const target = await selectRoutineTarget(sessions, routine, interactive);
+  if (!target) return null;
+  return target.name
+    ? sessions.filter((session) => session.routineName === target.name)
+    : sessions;
+}
+
+// ── Routine drilldown ────────────────────────────────────────────────────────
+// The run/session seam: a routine's canonical history is its run records
+// (`.history/runs/<name>/<runId>/`, read by `listRuns`), NOT the session index.
+// Command/blocked/skipped/missed attempts produce a run record with no
+// transcript, so a picker built only from `SessionMeta` dead-ends on them. The
+// drilldown renders run records first and links each to the indexed agent
+// sessions archived under the same `routineRunId` — never synthesizing a fake
+// session row for an attempt that produced none.
+
+/** How a run executed — decides whether an agent session is even expected. */
+export type RoutineExecutionKind = 'agent' | 'command' | 'workflow';
+
+export function executionKind(meta: RunMeta): RoutineExecutionKind {
+  if (meta.workflow) return 'workflow';
+  if (meta.agent) return 'agent';
+  return 'command';
+}
+
+/** One canonical run record plus the indexed sessions linked to it by run id. */
+export interface RoutineRunEntry {
+  meta: RunMeta;
+  sessions: SessionMeta[];
+}
+
+export interface RoutineDrilldown {
+  name: string;
+  /** Canonical run records (newest first), each with its linked sessions. */
+  runs: RoutineRunEntry[];
+  /** Sessions whose `routineRunId` matches no local run record — e.g. archived
+   *  on another host whose run dir this box has not synced. Grouped by run id so
+   *  they are still shown, honestly separated from the canonical run history. */
+  orphanSessions: RoutineRunGroup[];
+  /** Count of canonical run records (any status, incl. missed/blocked/skipped). */
+  runRecordCount: number;
+  /** Count of linked indexed sessions across all runs (+ orphans). */
+  linkedSessionCount: number;
+  /** True when any run ran an agent or any session is linked — i.e. an agent
+   *  routine. False for a pure command routine, where no session is expected. */
+  isAgentRoutine: boolean;
+}
+
+/**
+ * Reconcile a routine's canonical run records (`listRuns`, local disk) with the
+ * indexed sessions for that routine (fleet-wide, keyed by `routineRunId`).
+ */
+export function buildRoutineDrilldown(name: string, sessions: SessionMeta[]): RoutineDrilldown {
+  const runs = listRuns(name);
+  const forRoutine = sessions.filter((s) => s.routineName === name);
+  const byRun = new Map<string, SessionMeta[]>();
+  for (const s of forRoutine) {
+    const rid = s.routineRunId ?? s.timestamp;
+    (byRun.get(rid) ?? byRun.set(rid, []).get(rid)!).push(s);
+  }
+  const runIds = new Set(runs.map((r) => r.runId));
+  const entries: RoutineRunEntry[] = runs
+    .map((meta) => ({
+      meta,
+      sessions: (byRun.get(meta.runId) ?? []).sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)),
+    }))
+    // Newest run first: `startedAt`, then run id (an ISO-derived slot) as a tie-break.
+    .sort((a, b) => {
+      const at = a.meta.startedAt || a.meta.runId;
+      const bt = b.meta.startedAt || b.meta.runId;
+      return at < bt ? 1 : at > bt ? -1 : b.meta.runId.localeCompare(a.meta.runId);
+    });
+  const orphanSessions = buildRoutineRunGroups(
+    forRoutine.filter((s) => !runIds.has(s.routineRunId ?? s.timestamp)),
+  );
+  return {
+    name,
+    runs: entries,
+    orphanSessions,
+    runRecordCount: runs.length,
+    linkedSessionCount: forRoutine.length,
+    // "Agent routine" = anything that isn't purely command runs. A workflow run
+    // carries no `agent` field but still expects a session, so key off
+    // executionKind, not `agent` alone.
+    isAgentRoutine: runs.some((r) => executionKind(r) !== 'command') || forRoutine.length > 0,
+  };
+}
+
+/** Glyph + word for a run's terminal status. */
+function runStatusCell(status: RunMeta['status']): string {
+  switch (status) {
+    case 'completed': return `${chalk.green('✓')} ${chalk.green('completed')}`;
+    case 'running': return `${chalk.cyan('◍')} ${chalk.cyan('running')}`;
+    case 'failed': return `${chalk.red('✗')} ${chalk.red('failed')}`;
+    case 'timeout': return `${chalk.red('✗')} ${chalk.red('timeout')}`;
+    case 'blocked': return `${chalk.yellow('⚠')} ${chalk.yellow('blocked')}`;
+    case 'skipped': return `${chalk.gray('↷')} ${chalk.gray('skipped')}`;
+    case 'missed': return `${chalk.gray('·')} ${chalk.gray('missed')}`;
+    default: return chalk.gray(status);
+  }
+}
+
+/** Where a run's body executed: a host, a cloud provider, or this machine. */
+function runPlacement(meta: RunMeta): string {
+  if (meta.host) return `host:${meta.host}`;
+  if (meta.cloudProvider) return `cloud:${meta.cloudProvider}`;
+  return 'local';
+}
+
+/** The trigger clause: kind + who triggered it (dropping the noisy UNRESOLVED). */
+function runTrigger(meta: RunMeta): string {
+  const kind = meta.triggerKind ?? 'schedule';
+  const who = meta.triggeredBy && !meta.triggeredBy.startsWith('UNRESOLVED') ? ` by ${meta.triggeredBy}` : '';
+  return `${kind}${who}`;
+}
+
+/** The tail clause explaining a run's outcome (exit code / error / skip reason). */
+function runOutcomeDetail(meta: RunMeta): string {
+  if (meta.status === 'skipped' && meta.skipReason) {
+    const ref = meta.activeRunId ? ` → ${meta.activeRunId}` : '';
+    return `${meta.skipReason.replace(/_/g, ' ')}${ref}`;
+  }
+  if (meta.status === 'blocked') {
+    return meta.readiness ? `${meta.readiness.code}: ${meta.readiness.message}` : (meta.errorMessage ?? 'not ready');
+  }
+  if (meta.status === 'missed') return 'daemon down at fire time';
+  if (meta.errorMessage) return meta.errorMessage;
+  // A clean `exit 0` is already implied by the green "completed" status — only a
+  // non-zero code carries information worth a tail clause.
+  if (typeof meta.exitCode === 'number' && meta.exitCode !== 0) return `exit ${meta.exitCode}`;
+  return '';
+}
+
+/** Compact per-session metadata line under a linked session row. */
+function linkedSessionMeta(session: SessionMeta): string {
+  const parts: string[] = [];
+  parts.push(session.version ? `${session.agent} v${session.version}` : session.agent);
+  if (session.account) parts.push(session.account);
+  if (session.model) parts.push(shortenModel(session.model));
+  if (typeof session.outputTokens === 'number') parts.push(`${formatTokenCount(session.outputTokens)} out`);
+  else if (typeof session.tokenCount === 'number') parts.push(`${formatTokenCount(session.tokenCount)} tok`);
+  if (typeof session.costUsd === 'number' && session.costUsd > 0) parts.push(formatUsd(session.costUsd));
+  if (typeof session.durationMs === 'number' && session.durationMs > 0) parts.push(humanDuration(session.durationMs));
+  if (typeof session.toolCallCount === 'number') parts.push(`${session.toolCallCount} tools`);
+  return chalk.gray('      ' + parts.join(' · '));
+}
+
+/**
+ * Render the routine drilldown: canonical run history first, each run linked to
+ * its indexed agent session(s). This is the run/session seam made visible — a
+ * command routine shows its runs and states plainly that no session is expected;
+ * an agent routine shows the same runs plus each run's session metadata.
+ */
+export function printRoutineDrilldown(
+  drill: RoutineDrilldown,
+  liveIndex?: Map<string, ActiveSession>,
+  opts: { hiddenCount?: number; hiddenUnmanaged?: number } = {},
+): void {
+  const runWord = drill.runRecordCount === 1 ? 'run record' : 'run records';
+  const sessWord = drill.linkedSessionCount === 1 ? 'linked session' : 'linked sessions';
+  console.log(
+    `${chalk.cyan.bold(drill.name)}  ` +
+    chalk.gray(`${drill.runRecordCount} ${runWord} · ${drill.linkedSessionCount} ${sessWord}`),
+  );
+  // A routine with no session ever produced is a command routine — say so up
+  // front so the empty session column reads as expected, not as missing data.
+  if (!drill.isAgentRoutine) {
+    console.log(chalk.gray('Command routine — runs execute a shell command; no agent session is produced.'));
+  }
+  console.log();
+
+  if (drill.runs.length === 0 && drill.orphanSessions.length === 0) {
+    console.log(chalk.gray('No run records yet for this routine.'));
+    return;
+  }
+
+  for (const entry of drill.runs) {
+    const m = entry.meta;
+    console.log(
+      `${chalk.cyan('▸')} ${chalk.cyan.bold(m.runId)}  ` +
+      `${runStatusCell(m.status)}  ` +
+      chalk.gray(`${runTrigger(m)} · ${formatRelativeTime(m.startedAt)}`),
+    );
+    const kind = executionKind(m);
+    const detailParts: string[] = [kind];
+    if (typeof m.duration === 'number' && m.duration > 0) detailParts.push(humanDuration(m.duration));
+    detailParts.push(runPlacement(m));
+    const outcome = runOutcomeDetail(m);
+    if (outcome) detailParts.push(outcome);
+    console.log(chalk.gray('    ' + detailParts.join(' · ')));
+    // Log/report access — both are children of the run dir that a pre-execution
+    // terminal (blocked/skipped/missed) never wrote, so gate each on existence
+    // rather than pointing at a file that isn't there.
+    const runDir = getRunDir(drill.name, m.runId);
+    const logHints: string[] = [];
+    if (fs.existsSync(path.join(runDir, 'stdout.log'))) logHints.push(`log: ${path.join(runDir, 'stdout.log')}`);
+    if (fs.existsSync(path.join(runDir, 'report.md'))) logHints.push(`report: ${path.join(runDir, 'report.md')}`);
+    if (logHints.length > 0) console.log(chalk.gray('    ' + logHints.join('  ·  ')));
+
+    if (entry.sessions.length > 0) {
+      for (const session of entry.sessions) {
+        console.log(treeSessionRow(session, liveIndex?.get(session.id)));
+        console.log(linkedSessionMeta(session));
+      }
+    } else if (kind !== 'command') {
+      // An agent run that produced no session — say why (the run terminal
+      // explains it), never fake a session row.
+      console.log(chalk.gray('      no agent session archived for this run'));
+    }
+    console.log();
+  }
+
+  if (drill.orphanSessions.length > 0) {
+    console.log(chalk.gray('Sessions with no local run record (run archived on another host):'));
+    for (const group of drill.orphanSessions) {
+      console.log(
+        `${chalk.cyan('▸')} ${chalk.cyan.bold(group.runId)}  ` +
+        chalk.gray(`${group.sessions.length} session${group.sessions.length === 1 ? '' : 's'} · ${formatRelativeTime(group.timestamp)}`),
+      );
+      for (const session of group.sessions) {
+        console.log(treeSessionRow(session, liveIndex?.get(session.id)));
+        console.log(linkedSessionMeta(session));
+      }
+      console.log();
+    }
+  }
+
+  console.log(chalk.gray(`Run history from .history/runs/${drill.name}/ · resume a session with agents sessions resume <id>.`));
+  // Every listing path must say what it dropped (sessions.ts invariant). Under
+  // --routine team-origin sessions are shown (hiddenCount is 0), but unmanaged
+  // installs may still be hidden — surface both footers when non-zero.
+  if (opts.hiddenCount && opts.hiddenCount > 0) console.log(chalk.gray(formatTeamHiddenFooter(opts.hiddenCount)));
+  if (opts.hiddenUnmanaged && opts.hiddenUnmanaged > 0) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
 }
 
 /** The canonical `ag sessions …` command for a set of flags — the twin of the
@@ -2562,6 +2818,11 @@ async function sessionsAction(
   // silently returns nothing for any team older than that — so the flag widens its
   // own scope, the way --all does, unless the caller set an explicit --limit.
   const wantsWholeTeam = !!options.inTeam;
+  // A routine is not tied to the shell's cwd: its archived sessions retain the
+  // working directory in which the scheduled agent actually ran. Scope the
+  // routine catalog across directories so invoking it from ~/.agents/.system,
+  // a project repo, or $HOME yields the same routine history.
+  const wantsWholeRoutine = !!options.routine;
   // `--limit` has a commander default, so an untouched flag still arrives as a
   // string and truthiness can't tell it from a typed one. Commander records where
   // each value came from, which is the only signal that distinguishes an explicit
@@ -2571,7 +2832,7 @@ async function sessionsAction(
   const limit = wantsOverview
     ? OVERVIEW_POOL_LIMIT
     : parseInt(
-        userSetLimit ? options.limit! : wantsWholeTeam ? String(WHOLE_TEAM_POOL_LIMIT) : DEFAULT_LIMIT,
+        userSetLimit ? options.limit! : wantsWholeTeam || wantsWholeRoutine ? String(WHOLE_TEAM_POOL_LIMIT) : DEFAULT_LIMIT,
         10
       );
   if (toolEvidenceMode && (!Number.isSafeInteger(limit) || limit < 1 || limit > TOOL_QUERY_MAX_RESULT_SESSIONS)) {
@@ -2583,7 +2844,7 @@ async function sessionsAction(
   // --since still narrows. Non-overview keeps the prior interactive-30d default.
   const since = wantsOverview
     ? options.since
-    : (options.since ?? (isInteractive && !options.all && !wantsWholeTeam ? '30d' : undefined));
+    : (options.since ?? (isInteractive && !options.all && !wantsWholeTeam && !wantsWholeRoutine ? '30d' : undefined));
   const toolSpansDevices = toolEvidenceMode
     && (options.fleet || (options.host?.length ?? 0) > 0);
   const toolSortError = toolSearchFleetSortError(options.sort, toolSpansDevices);
@@ -2610,12 +2871,12 @@ async function sessionsAction(
       // --in-team spans directories by construction: a team's teammates run in
       // their own worktrees, so scoping to the current cwd hides most of the
       // lineage the flag exists to show.
-      all: pathFilter ? undefined : options.all || wantsWholeTeam || toolSpansDevices,
+      all: pathFilter ? undefined : options.all || wantsWholeTeam || wantsWholeRoutine || toolSpansDevices,
       cwd: process.cwd(),
       // Default overview scopes to the current repo SUBTREE (prefix match), so a
       // monorepo shows its sub-projects grouped instead of collapsing to the one
       // exact-cwd project. `--all` clears the prefix and spans the whole index.
-      cwdPrefix: pathFilter ?? (wantsOverview && !options.all && !wantsWholeTeam && !toolSpansDevices ? process.cwd() : undefined),
+      cwdPrefix: pathFilter ?? (wantsOverview && !options.all && !wantsWholeTeam && !wantsWholeRoutine && !toolSpansDevices ? process.cwd() : undefined),
       project: options.project,
       since,
       until: options.until,
@@ -2651,7 +2912,7 @@ async function sessionsAction(
       const readOptions: DiscoverOptions = {
         ...scope,
         limit,
-        excludeTeamOrigin: !options.teams,
+        excludeTeamOrigin: !shouldShowTeamSessions(options),
         onProgress: tracker.onProgress,
         includeUnmanaged: options.unmanaged,
         onHiddenUnmanaged: (n) => { hiddenUnmanaged = n; },
@@ -2670,7 +2931,7 @@ async function sessionsAction(
     // meta.json in ~/.agents/teams/agents whose is_team_origin flag was
     // never set (legacy rows). Keep the in-memory pass so those are still
     // enriched/hidden.
-    const { visible: visibleSessions } = filterTeamSessions(sessions, !!options.teams);
+    const { visible: visibleSessions } = filterTeamSessions(sessions, shouldShowTeamSessions(options));
     sessions = visibleSessions;
 
     // --in-team spans both ends of the lineage, so it can't be one SQL predicate:
@@ -2753,7 +3014,7 @@ async function sessionsAction(
 
     // Under --in-team the visible list is one team, so the whole-index team-origin
     // count would be a non-sequitur next to it.
-    const hiddenCount = options.teams || options.inTeam
+    const hiddenCount = shouldShowTeamSessions(options) || options.inTeam
       ? 0
       : countSessionsInScope({ ...scope, onlyTeamOrigin: true });
 
@@ -2835,14 +3096,34 @@ async function sessionsAction(
     }
 
     if (options.routine) {
-      const filteredByRoutine = await filterSessionsByRoutine(sessions, options.routine, isInteractive);
-      if (!filteredByRoutine) return;
-      sessions = filteredByRoutine;
+      const target = await selectRoutineTarget(sessions, options.routine, isInteractive);
+      if (!target) return; // bad --routine <name> or cancelled pick (message printed)
+      if (target.name) {
+        sessions = sessions.filter((s) => s.routineName === target.name);
+        // A routine browse renders the run-first drilldown — canonical run history
+        // plus each run's linked session — instead of dead-ending a
+        // command/pre-session routine into the generic empty copy. An explicit
+        // --flat/--tree or a search query keeps the scoped session listing/picker,
+        // so `--routine x --flat` prints the plain table and `--routine x <id>`
+        // resolves a specific session within the routine.
+        if (!searchQuery && !options.flat && !options.tree) {
+          const liveIndex = await maybeLiveIndex(options);
+          printRoutineDrilldown(buildRoutineDrilldown(target.name, sessions), liveIndex, { hiddenCount, hiddenUnmanaged });
+          return;
+        }
+      }
+      // target.name === null: bare `--routine` piped to a non-interactive sink —
+      // no routine chosen, fall through to the normal listing unfiltered.
     }
 
     if (sessions.length === 0) {
       if (pathFilter) {
         console.log(chalk.gray(`No sessions found for ${pathFilter}.`));
+      } else if (options.routine) {
+        // A routine scoped to a flat/tree/query listing with no matching session
+        // (e.g. a command routine has none) — say so in routine terms, not the
+        // generic cwd/--all copy, and point at the run-history drilldown.
+        console.log(chalk.gray('No indexed agent sessions for this routine. Drop --flat/--tree to see its run history.'));
       } else {
         console.log(chalk.gray(formatNoSessionsMessage(options.all, options.project)));
       }
@@ -2870,10 +3151,6 @@ async function sessionsAction(
     // Interact/resume via `agents sessions <project>` or `agents sessions resume`.
     if (wantsOverview) {
       const liveIndex = await maybeLiveIndex(options);
-      if (options.routine) {
-        printRoutineRunOverview(sessions, liveIndex, { hiddenCount, hiddenUnmanaged });
-        return;
-      }
       // Per-project row cap is fixed (--limit carries a default of 50 and drives
       // the fetch pool, not the display); `--all` expands every group instead.
       printSessionOverview(sessions, hiddenCount, liveIndex, { perProjectCap: OVERVIEW_ROWS_PER_PROJECT, expand: !!options.all, hiddenUnmanaged });
@@ -3229,28 +3506,6 @@ function printSessionOverview(
   parts.push(chalk.gray('agents sessions --all spans every project on disk · <project> to drill in · --flat for the plain list'));
   console.log(parts.join(chalk.gray('  ·  ')));
   if (hiddenCount > 0) console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
-  if (opts.hiddenUnmanaged) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
-}
-
-export function printRoutineRunOverview(
-  sessions: SessionMeta[],
-  liveIndex: Map<string, ActiveSession> | undefined,
-  opts: { hiddenCount?: number; hiddenUnmanaged?: number } = {},
-): void {
-  const groups = buildRoutineRunGroups(sessions);
-  console.log(chalk.gray(`${sessions.length} session${sessions.length === 1 ? '' : 's'} · ${groups.length} routine run${groups.length === 1 ? '' : 's'} · newest run first\n`));
-  let first = true;
-  for (const group of groups) {
-    if (!first) console.log();
-    first = false;
-    console.log(
-      `${chalk.cyan('▸')} ${chalk.cyan.bold(group.runId)}  ` +
-      `${chalk.gray(`${group.sessions.length} session${group.sessions.length === 1 ? '' : 's'} · ${formatRelativeTime(group.timestamp)}`)}`,
-    );
-    for (const session of group.sessions) console.log(treeSessionRow(session, liveIndex?.get(session.id)));
-  }
-  console.log(chalk.gray('\nGrouped by routine run id and timestamp.'));
-  if (opts.hiddenCount) console.log(chalk.gray(formatTeamHiddenFooter(opts.hiddenCount)));
   if (opts.hiddenUnmanaged) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
 }
 
@@ -5209,9 +5464,9 @@ export function registerSessionsCommands(program: Command): void {
       # teammate row [<team>/<handle>]. --in-team narrows to one team's lineage.
       agents sessions --in-team redesign --teams
 
-      # Show routine-run sessions and open one by routine run id
-      agents sessions --routine --all
-      agents sessions --routine nightly-review --all
+      # Pick a routine across every directory, then open one of its run sessions
+      agents sessions --routine
+      agents sessions --routine nightly-review
       agents sessions 2026-07-21T10-30-00-000Z
 
       # Export for analysis
@@ -5259,15 +5514,17 @@ export function registerSessionsCommands(program: Command): void {
       - --first and --last are mutually exclusive.
       - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.
       - --cloud sources from Rush Cloud captured runs instead of local disk.
-      - --routine [name] shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.
+      - --routine [name] spans every directory and shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.
       - Without --teams, team-spawned sessions are hidden by default.
     `,
   });
 
   sessionsCmd.action(async (query: string | undefined, options: SessionsOptions, command: Command) => {
     if ((options as { browser?: boolean }).browser) {
-      // Alias for `agents browser sessions`: a profile positional narrows to one profile.
-      runBrowserSessions({ profile: query, json: options.json });
+      // Alias for `agents browser sessions`: a profile positional narrows to one
+      // profile. `--no-interactive` is already a top-level sessionsCmd option
+      // (options.interactive), so it carries through for free.
+      await runBrowserSessionsCommand({ profile: query, json: options.json, interactive: options.interactive });
       return;
     }
     await sessionsAction(query, options, command.getOptionValueSource('limit'));

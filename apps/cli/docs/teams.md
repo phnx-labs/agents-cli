@@ -272,6 +272,45 @@ which case the worktree is kept and reported.
 So the pre-flight for a **local** worktree team is: fast-forward your checkout to
 the default branch first. A remote team handles this itself.
 
+**Where a local worktree lands.** A new teammate worktree always resolves to
+`<main-repo-root>/.agents/worktrees/<name>` — the MAIN checkout's root, never
+wherever `--worktree` happened to be invoked from. `createWorktree` resolves the
+placement root via `getMainRepoRoot` (a `git rev-parse --git-common-dir` lookup,
+not `--show-toplevel`), so running `agents teams add` from inside a *different*
+teammate's own worktree — e.g. one agent orchestrating another — still places the
+new worktree as a sibling under the main repo, never nested inside the caller's
+worktree.
+
+**A failed `teams add` leaves nothing behind.** The branch is the shared resource
+here, so a half-finished add used to poison every retry: the worktree was created
+before the teammate record was written, and nothing removed it when the add
+failed, so the next `teams add` with the same `--worktree` name died on
+`fatal: a branch named 'agents/<name>' already exists`. Two guarantees now hold:
+
+- **Rejected before anything is created.** Name uniqueness and the `--after`
+  dependency graph are validated *before* `createWorktree` runs
+  (`AgentManager.validateAddPreconditions`), so a duplicate name, an unknown
+  dependency, or a cycle never gets as far as making a branch.
+- **Torn down if it fails afterward.** A failure past that point — the harness CLI
+  missing, a launch error, a cloud dispatch failure, or a `git worktree add` that
+  created the branch ref but not the checkout — removes the worktree *and* its
+  `agents/<name>` branch before the command exits non-zero.
+
+Teardown is scoped twice, because removing a live teammate's worktree would
+destroy real work rather than protect a retry:
+
+| Guard | Why |
+|---|---|
+| Only a worktree **this add created** | A shared `--use-worktree` checkout and a `--device` teammate's remote worktree are never candidates — this add didn't create either. |
+| Only when **no live teammate claims it** (`AgentManager.isWorktreeClaimed`) | The add can fail *after* the record is durably saved: `spawn()` writes a staged teammate's `meta.json` and only then runs the retention pass, which refreshes every sibling's status and can throw on a distributed one. That teammate exists and is merely pending its `--after` dependency, so it keeps its worktree. The check spans **every team**, since worktree names are global to the repo while records are per-team, and counts only **non-terminal** records — a stopped teammate's worktree is already gone, so its lingering record must not strand the branch. |
+
+If we cannot prove a worktree is an orphan, it is left in place and the command
+prints the exact `git worktree remove` / `git branch -D` pair to run — a stranded
+branch is recoverable, a deleted worktree is not.
+
+Either way the add exits non-zero with the real error and never prints a success
+block, and re-running the same command with the same name works.
+
 ## Distributed teams
 
 Teammates can run on **different machines** across your fleet, not just the box
@@ -384,6 +423,11 @@ agents teams add pricing-page claude \
 # Watch mode — supervisor fires QA when backend AND frontend complete
 agents teams start pricing-page --watch
 ```
+
+A staged (`--after`) teammate is durable while it waits: retention only ever
+reaps a teammate that has actually **finished** (completed/failed/stopped), so a
+`pending` teammate parked on an unmet dependency is never cleaned up, however
+deep the machine's history of past runs goes.
 
 ### 3. Cloud dispatch for one teammate
 

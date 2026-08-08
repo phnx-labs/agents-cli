@@ -84,6 +84,14 @@ export interface FleetVersionSignIn {
 }
 
 /**
+ * A deliberately closed summary of one version's generated hook-wrapper
+ * runtime. Fleet payloads carry only this state — never the remote wrapper
+ * path, embedded source path, or detector text.
+ */
+export const FLEET_HOOK_RUNTIME_STATES = ['healthy', 'broken', 'not-applicable'] as const;
+export type FleetHookRuntimeState = typeof FLEET_HOOK_RUNTIME_STATES[number];
+
+/**
  * The self-reported harness inventory a single device emits in `doctor --json`.
  * Comparable device-to-device with no further probing.
  */
@@ -103,6 +111,10 @@ export interface FleetInventory {
    *  predates this field omits it, and the caller degrades to a warning
    *  ("older agents-cli — can't report per-version sign-in"). */
   signIn?: Record<string, FleetVersionSignIn[]>;
+  /** Generated hook-wrapper health per installed agent/version. Optional for
+   *  wire compatibility with older remotes; a present value is fully validated
+   *  before it is used by fleet doctor. */
+  hookRuntime?: Record<string, Record<string, FleetHookRuntimeState>>;
 }
 
 /** A device's inventory paired with its name (and reachability). A device that

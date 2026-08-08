@@ -261,7 +261,7 @@ export function listMcpServerConfigs(
       if (!entry.name.endsWith('.yaml') && !entry.name.endsWith('.yml')) continue;
 
       const filePath = path.join(dir, entry.name);
-      const config = parseMcpServerConfig(filePath);
+      const config = parseMcpConfigForScan(filePath);
       if (config && !results.has(config.name)) {
         results.set(config.name, {
           name: config.name,
@@ -274,6 +274,25 @@ export function listMcpServerConfigs(
   }
 
   return Array.from(results.values());
+}
+
+/**
+ * Parse one config during a directory SCAN. `validateMcpYamlConfig` returns null
+ * for some malformed shapes but *throws* for others (`args` not a string array,
+ * `command`/`env` of the wrong type), and a scan must not be all-or-nothing: a
+ * single bad file under `<repo>/mcp/` took down the whole of
+ * `agents inspect <repo>` with an unhandled stack trace. Skip the file and name
+ * it, exactly as a null return is already skipped. Explicit single-file
+ * operations call `parseMcpServerConfig` directly and still throw loudly.
+ */
+export function parseMcpConfigForScan(filePath: string): McpYamlConfig | null {
+  try {
+    return parseMcpServerConfig(filePath);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error(`agents-cli: skipping ${filePath} — ${reason}`);
+    return null;
+  }
 }
 
 /**
@@ -290,7 +309,7 @@ export function discoverMcpConfigsFromRepo(repoPath: string): InstalledMcpServer
     if (!entry.name.endsWith('.yaml') && !entry.name.endsWith('.yml')) continue;
 
     const filePath = path.join(dir, entry.name);
-    const config = parseMcpServerConfig(filePath);
+    const config = parseMcpConfigForScan(filePath);
     if (config) {
       results.push({ name: config.name, path: filePath, config, scope: 'user' });
     }

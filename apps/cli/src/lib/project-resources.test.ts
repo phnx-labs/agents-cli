@@ -139,7 +139,7 @@ describe('syncProjectResourcesToAgent', () => {
     expect(second.skipped).toEqual([]);
   });
 
-  it('clears the Kimi parent subagent index when the last project subagent is removed', () => {
+  it('removes the Kimi subagent markdown when the last project subagent is removed', () => {
     const project = makeTempProject();
     const projectAgentsDir = path.join(project, '.agents');
     const subagentDir = path.join(projectAgentsDir, 'subagents', 'reviewer');
@@ -150,26 +150,22 @@ describe('syncProjectResourcesToAgent', () => {
       'utf-8',
     );
 
-    const first = syncProjectResourcesToAgent('kimi', '0.1.0', projectAgentsDir);
+    const first = syncProjectResourcesToAgent('kimi', '0.29.0', projectAgentsDir);
 
     const agentsDir = path.join(project, '.kimi-code', 'agents');
-    const parentPath = path.join(agentsDir, '_agents-cli.yaml');
     expect(first.synced).toContain('subagents/reviewer');
-    expect(fs.existsSync(path.join(agentsDir, 'reviewer.yaml'))).toBe(true);
-    expect(fs.existsSync(path.join(agentsDir, 'reviewer.system.md'))).toBe(true);
-    let parent = yaml.parse(fs.readFileSync(parentPath, 'utf-8')) as { agent?: { subagents?: Record<string, unknown> } };
-    expect(parent.agent?.subagents?.reviewer).toBeDefined();
+    // One Claude-shaped markdown file; no yaml pair and no parent index.
+    expect(fs.existsSync(path.join(agentsDir, 'reviewer.md'))).toBe(true);
+    expect(fs.existsSync(path.join(agentsDir, 'reviewer.yaml'))).toBe(false);
+    expect(fs.existsSync(path.join(agentsDir, '_agents-cli.yaml'))).toBe(false);
 
     fs.rmSync(subagentDir, { recursive: true, force: true });
-    const second = syncProjectResourcesToAgent('kimi', '0.1.0', projectAgentsDir);
+    const second = syncProjectResourcesToAgent('kimi', '0.29.0', projectAgentsDir);
 
     expect(second.synced).toEqual([]);
-    expect(fs.existsSync(path.join(agentsDir, 'reviewer.yaml'))).toBe(false);
-    expect(fs.existsSync(path.join(agentsDir, 'reviewer.system.md'))).toBe(false);
-    parent = yaml.parse(fs.readFileSync(parentPath, 'utf-8')) as { agent?: { subagents?: Record<string, unknown> } };
-    expect(parent.agent?.subagents).toEqual({});
+    expect(fs.existsSync(path.join(agentsDir, 'reviewer.md'))).toBe(false);
     const manifest = JSON.parse(fs.readFileSync(path.join(project, '.kimi-code', '.agents-managed.json'), 'utf-8')) as { paths: string[] };
-    expect(manifest.paths).toEqual(['agents/_agents-cli.yaml']);
+    expect(manifest.paths).toEqual([]);
   });
 
   it('reports files it left alone in the result, without printing one warning per file', () => {

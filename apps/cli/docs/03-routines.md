@@ -57,6 +57,20 @@ consecutiveFailures, lastOkAt}`, persisted at
 (re)start attempt, so a failure survives past whatever line of the daemon log it
 would otherwise scroll out of.
 
+A third subsystem, `daemon-start`, records the daemon's own startup and is the
+one record that also **gates** behaviour rather than just reporting. It is
+written from both sides: the launching CLI marks every start it issues as a
+failure up front, and only a daemon that has finished booting — scheduler,
+browser IPC, broker decision and every background tick up — clears it. A daemon
+that spawns and then dies therefore leaves the streak growing, which a check on
+the launch's own return value could never see (the spawn succeeded). After five
+consecutive such starts the **implicit** auto-start refuses: the background
+callers that opportunistically bring the daemon up (`secrets unlock`, `browser
+start`, the watchdog) stop relaunching a daemon that never lives, and point at
+`agents daemon doctor`, which reports the streak and the recorded cause. An
+already-running daemon is still reported, and `agents daemon start` — the
+explicit override — is never gated.
+
 ### Project routines (opt-in daemon firing)
 
 `agents routines list` and `agents routines view <name>` also discover routines in `<project>/.agents/routines/` when invoked from inside a project — project routines shadow user routines of the same name in those views.
@@ -836,9 +850,11 @@ run metadata:
 ```
 
 Those archives are indexed by `agents sessions` with `origin: "routine"`,
-`routineName`, and `routineRunId`. Use `agents sessions --routine --all` (or the
+`routineName`, and `routineRunId`. Use `agents sessions --routine` (or the
 `--routines` alias) to pick a routine interactively, or pass a fuzzy name such
-as `agents sessions --routine nightly-review --all`, to list them. The picker
+as `agents sessions --routine nightly-review`, to list them. Routine discovery
+spans every working directory because a scheduled run is not tied to the shell
+where its history is inspected. The picker
 includes last-run and session-count context, and the selected view groups sessions
 by run ID and timestamp. Use `agents sessions <run-id>` to render the existing session summary view
 for a specific routine run.
@@ -852,21 +868,31 @@ there's nothing for this mechanism to copy out.
 
 ### Claude auth for routines
 
-A routine authenticates exactly like an interactive `agents run claude` on the
-same device: through the pinned account's own on-disk login.
-`buildRoutineSpawnEnv` sets `CLAUDE_CONFIG_DIR` to the account's per-version home
-(`runner.ts`), so even under the sandbox overlay — which gives the spawn a clean
-`HOME` — Claude Code reads its credential from `CLAUDE_CONFIG_DIR/.credentials.json`,
-the real interactive login. That access token is short-lived but refreshes itself
-per-device, so a box that runs at least once inside the refresh window stays
-signed in on its own.
+A routine is pinned to one account's per-version home:
+`buildRoutineSpawnEnv` sets `CLAUDE_CONFIG_DIR` to that home (`runner.ts`), so even
+under the sandbox overlay — which gives the spawn a clean `HOME` — Claude Code
+resolves its credential from `CLAUDE_CONFIG_DIR` rather than the ambient one.
 
-The daemon holds **no** Claude token and injects nothing — no ambient
-`CLAUDE_CODE_OAUTH_TOKEN`, no per-account variant. A shared or injected token was
-the *cause* of the fleet-wide rotation logout, not the fix (see "Pinning an
-account" below). If a routine's pinned account login has gone dead, the auth-health
-preflight (`runner.ts`) skips the run up front with a `re-login required` message
-rather than firing a doomed run.
+**A routine does NOT authenticate the same way an interactive `agents run claude`
+does — the two deliberately diverge.** A routine is headless, so it authenticates
+with that account's long-lived `claude setup-token` from the reserved file-backed
+`auth` bundle, which `runner.ts` resolves and asserts explicitly
+(`resolveClaudeSetupToken` → `out.CLAUDE_CODE_OAUTH_TOKEN`). An **interactive** run
+is left on the home's own on-disk/Keychain login and is never handed that token
+(EXEC-2a in [`specifications.md`](specifications.md)). The split is the point: a
+setup-token never rotates, so a scheduled run cannot land on a sibling home's
+just-rotated-out credential, while a human at a TTY keeps the login they
+established — which is also the only credential carrying the `user:profile` scope
+that usage reads need (RUSH-2392).
+
+What the daemon does **not** hold or forward is an *ambient, shared* Claude token:
+`runner.ts` overwrites `CLAUDE_CODE_OAUTH_TOKEN` with the per-account setup-token
+keyed to the pinned home, and deletes the variable outright when no such token
+resolves — so an inherited value never survives into a routine either way.
+A shared token was the *cause* of the fleet-wide rotation logout, not the fix (see
+"Pinning an account" below). If a routine's pinned account login has gone dead, the
+auth-health preflight (`runner.ts`) skips the run up front with a `re-login required`
+message rather than firing a doomed run.
 
 To bring a signed-out box back, log in on that box once — `agents run claude` (or
 `claude` directly) drives the interactive login and writes the credential the

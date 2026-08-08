@@ -9,12 +9,9 @@ import { capableAgents, supports } from '../src/lib/capabilities.js';
 import {
   transformSubagentForDroid,
   transformSubagentForCodex,
-  transformSubagentForKimi,
-  buildKimiSubagentsParentYaml,
   installSubagentToAgent,
   listSubagentsForAgent,
   transformSubagentForOpenCode,
-  KIMI_SUBAGENTS_PARENT_FILE,
 } from '../src/lib/subagents.js';
 
 describe('capableAgents("commands")', () => {
@@ -380,48 +377,24 @@ describe('codex subagents (TOML custom agents)', () => {
   });
 });
 
-describe('kimi subagents (YAML agent files)', () => {
-  it('is capable of subagents', () => {
+describe('kimi subagents (Claude-shaped agent markdown)', () => {
+  /**
+   * kimi-code discovers agent FILES from its brand home's `agents/` dir and
+   * parses them as markdown with YAML frontmatter. It has no loader for the
+   * `version: 1` / `agent:` YAML agentspec (that schema belongs to the older,
+   * separate `kimi-cli` product), so a `.yaml` written here is read by nothing.
+   * Discovery landed in kimi-code 0.29.0 — before that, the four agent profiles
+   * are compiled into the bundle with no filesystem loader at all.
+   */
+  it('is capable of subagents only from 0.29.0', () => {
     expect(capableAgents('subagents')).toContain('kimi');
-    expect(supports('kimi', 'subagents').ok).toBe(true);
+    expect(supports('kimi', 'subagents', '0.29.0').ok).toBe(true);
+    expect(supports('kimi', 'subagents', '0.34.0').ok).toBe(true);
+    expect(supports('kimi', 'subagents', '0.28.0').ok).toBe(false);
+    expect(supports('kimi', 'subagents', '0.19.2').ok).toBe(false);
   });
 
-  it('transformSubagentForKimi emits system_prompt_path (not inline system_prompt)', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-kimi-sub-'));
-    try {
-      fs.writeFileSync(
-        path.join(dir, 'AGENT.md'),
-        `---\nname: reviewer\ndescription: Reviews diffs\nmodel: kimi-k2\n---\n\nYou review code.\n`
-      );
-      const out = transformSubagentForKimi(dir, 'reviewer');
-      expect(out.yaml).toContain('version: 1');
-      expect(out.yaml).toContain('name: reviewer');
-      expect(out.yaml).toContain('description: Reviews diffs');
-      expect(out.yaml).toContain('model: kimi-k2');
-      expect(out.yaml).toContain('extend: default');
-      expect(out.yaml).toContain('system_prompt_path: ./reviewer.system.md');
-      expect(out.yaml).not.toContain('system_prompt:');
-      expect(out.systemPromptFileName).toBe('reviewer.system.md');
-      expect(out.systemPrompt).toContain('You review code.');
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('buildKimiSubagentsParentYaml lists subagents for --agent-file', () => {
-    expect(KIMI_SUBAGENTS_PARENT_FILE).toBe('_agents-cli.yaml');
-    const out = buildKimiSubagentsParentYaml([
-      { name: 'reviewer', description: 'Reviews diffs', relativePath: './reviewer.yaml' },
-      { name: 'explorer', description: 'Explores', relativePath: './explorer.yaml' },
-    ]);
-    expect(out).toContain('name: agents-cli');
-    expect(out).toContain('subagents:');
-    expect(out).toContain('reviewer:');
-    expect(out).toContain('path: ./reviewer.yaml');
-    expect(out).toContain('explorer:');
-  });
-
-  it('installSubagentToAgent writes yaml + sibling system prompt md', () => {
+  it('installSubagentToAgent writes one <name>.md, no yaml pair or parent index', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-kimi-inst-'));
     try {
       const subDir = path.join(root, 'sub');
@@ -433,18 +406,28 @@ describe('kimi subagents (YAML agent files)', () => {
       const home = path.join(root, 'home');
       const r = installSubagentToAgent(subDir, 'explorer', 'kimi', home);
       expect(r.success).toBe(true);
-      const dest = path.join(home, '.kimi-code', 'agents', 'explorer.yaml');
-      const prompt = path.join(home, '.kimi-code', 'agents', 'explorer.system.md');
+
+      const agentsDir = path.join(home, '.kimi-code', 'agents');
+      const dest = path.join(agentsDir, 'explorer.md');
       expect(fs.existsSync(dest)).toBe(true);
-      expect(fs.existsSync(prompt)).toBe(true);
-      expect(fs.readFileSync(dest, 'utf-8')).toContain('system_prompt_path: ./explorer.system.md');
-      expect(fs.readFileSync(prompt, 'utf-8')).toContain('Explore.');
+      expect(fs.existsSync(path.join(agentsDir, 'explorer.yaml'))).toBe(false);
+      expect(fs.existsSync(path.join(agentsDir, 'explorer.system.md'))).toBe(false);
+      expect(fs.existsSync(path.join(agentsDir, '_agents-cli.yaml'))).toBe(false);
+
+      const body = fs.readFileSync(dest, 'utf-8');
+      expect(body.startsWith('---\n')).toBe(true);
+      expect(body).toContain('name: explorer');
+      expect(body).toContain('description: Explores code');
+      expect(body).toContain('Explore.');
+      // The dead agentspec keys must never come back.
+      expect(body).not.toContain('system_prompt_path');
+      expect(body).not.toContain('extend: default');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
 
-  it('listSubagentsForAgent finds installed kimi yaml (excludes managed parent)', () => {
+  it('listSubagentsForAgent finds the installed kimi markdown', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-kimi-list-'));
     try {
       const subDir = path.join(root, 'sub');
@@ -455,15 +438,10 @@ describe('kimi subagents (YAML agent files)', () => {
       );
       const home = path.join(root, 'home');
       expect(installSubagentToAgent(subDir, 'explorer', 'kimi', home).success).toBe(true);
-      // managed parent must not show as an installed subagent
-      fs.writeFileSync(
-        path.join(home, '.kimi-code', 'agents', KIMI_SUBAGENTS_PARENT_FILE),
-        'version: 1\nagent:\n  name: agents-cli\n'
-      );
+
       const listed = listSubagentsForAgent('kimi', home);
       expect(listed.map(s => s.name)).toEqual(['explorer']);
-      expect(listed[0].files).toContain('explorer.yaml');
-      expect(listed[0].files).toContain('explorer.system.md');
+      expect(listed[0].files).toContain('explorer.md');
       expect(listed[0].frontmatter.description).toBe('Explores code');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
