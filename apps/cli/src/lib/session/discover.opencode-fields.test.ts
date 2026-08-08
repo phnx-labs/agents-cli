@@ -30,6 +30,19 @@ const SESSION_ID = 'ses_fields0000000000000000';
 const T0 = Date.UTC(2026, 7, 1, 0, 0, 0);
 const T1 = T0 + 5000; // duration 5000ms
 
+// Session transcripts sync across the fleet, so a cwd recorded on ONE platform is
+// parsed on every other (RUSH-2358). These two rows hardcode literal separators
+// instead of going through `path.join` (which would only ever produce this host's
+// native separator), so the assertions below hold no matter which OS runs the
+// suite — a forward-slash cwd recorded on Linux/macOS, and a backslash cwd
+// recorded on Windows, both read correctly everywhere.
+const SESSION_ID_POSIX = 'ses_fieldsposix000000000000';
+const POSIX_SLUG = 'posix-feature';
+const POSIX_CWD = '/home/dev/repo/.agents/worktrees/posix-feature';
+const SESSION_ID_WIN = 'ses_fieldswin00000000000000';
+const WIN_SLUG = 'win-feature';
+const WIN_CWD = 'C:\\Users\\dev\\repo\\.agents\\worktrees\\win-feature';
+
 beforeAll(async () => {
   db = await import('./db.js');
   discover = await import('./discover.js');
@@ -81,6 +94,19 @@ beforeAll(async () => {
   oc.prepare(
     'INSERT INTO todo (session_id, content, status, priority, position, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?)',
   ).run(SESSION_ID, 'finish the thing', 'pending', 'high', 0, T0, T1);
+
+  // Two more sessions with hardcoded, literal-separator cwds (RUSH-2358) — see
+  // the constants' comment above for why these don't go through `path.join`.
+  oc.prepare(
+    `INSERT INTO session (id, parent_id, title, directory, version, cost, model, time_created, time_updated)
+     VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(SESSION_ID_POSIX, 'posix session', POSIX_CWD, '1.16.0', 0,
+        JSON.stringify({ id: 'claude-x', providerID: 'anthropic' }), T0, T1);
+  oc.prepare(
+    `INSERT INTO session (id, parent_id, title, directory, version, cost, model, time_created, time_updated)
+     VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(SESSION_ID_WIN, 'windows session', WIN_CWD, '1.16.0', 0,
+        JSON.stringify({ id: 'claude-x', providerID: 'anthropic' }), T0, T1);
   oc.close();
 
   // account resolves from auth.json (resolveOpenCodeAccountId), NOT the
@@ -132,5 +158,12 @@ describe('OpenCode field parity (RUSH-2358)', () => {
   it('derives worktree_slug from the session cwd', () => {
     const s = db.getSessionById(SESSION_ID);
     expect(s!.worktreeSlug).toBe(SLUG);
+  });
+
+  it('derives worktree_slug from a cwd recorded with EITHER separator (RUSH-2358) — a transcript synced from another platform must not silently lose its worktree attribution', () => {
+    const posix = db.getSessionById(SESSION_ID_POSIX);
+    expect(posix!.worktreeSlug).toBe(POSIX_SLUG);
+    const win = db.getSessionById(SESSION_ID_WIN);
+    expect(win!.worktreeSlug).toBe(WIN_SLUG);
   });
 });
