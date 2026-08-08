@@ -269,6 +269,41 @@ function codexShimLaunchArgs(): string {
   ].map(shellQuote).join(' ');
 }
 
+/**
+ * The `exec` tail for a generated shim. For most agents this is a plain
+ * `exec "$BINARY"<launchArgs> "$@"`.
+ *
+ * Codex is special: its `workspace-write` sandbox hardcodes any `.agents/` (and
+ * `.codex/`) directory read-only, but agents-cli keeps every worktree at
+ * `<repo>/.agents/worktrees/<slug>`, so an in-repo build under a static
+ * shim would hit `EROFS`. The `agents run codex` path fixes this by adding
+ * `<repo>/.agents` to the profile's `workspace_roots` (see codexEditWritableRoots
+ * / repoAgentsDirForCwd), but a static shim has no cwd at generation time. So the
+ * shim resolves the repo's `.agents` from `$PWD` at RUN time — worktree-aware,
+ * mirroring repoAgentsDirForCwd — and passes it via Codex's own `--add-dir`
+ * (verified to compose with the `agents-edit` profile). The resolution is inline
+ * bash because the shim is the launch hot path and must not spawn Node to compute
+ * one directory. `--add-dir` is added only when the resolved `.agents` exists.
+ */
+function shimExecTail(agent: AgentId, launchArgs: string): string {
+  if (agent !== 'codex') return `exec "$BINARY"${launchArgs} "$@"`;
+  return `_repo_agents=""
+case "$PWD" in
+  */.agents/worktrees/*) _repo_agents="\${PWD%%/.agents/worktrees/*}/.agents" ;;
+  *)
+    _d="$PWD"
+    while [ -n "$_d" ] && [ "$_d" != "/" ]; do
+      if [ -e "$_d/.git" ]; then _repo_agents="$_d/.agents"; break; fi
+      _d=$(dirname "$_d")
+    done
+    ;;
+esac
+if [ -n "$_repo_agents" ] && [ -d "$_repo_agents" ]; then
+  exec "$BINARY"${launchArgs} --add-dir "$_repo_agents" "$@"
+fi
+exec "$BINARY"${launchArgs} "$@"`;
+}
+
 function getAgentsBinForGeneratedShim(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'index.js');
 }
@@ -746,7 +781,7 @@ if [ "\$LAUNCH_SKIP" = "0" ]; then
   "\$AGENTS_BIN" sync --agent "\$AGENT" --agent-version "\$VERSION" --launch --cwd "\$PWD" --quiet 2>/dev/null || true
 fi
 
-exec "$BINARY"${launchArgs} "$@"
+${shimExecTail(agent, launchArgs)}
 `;
 }
 
@@ -1160,7 +1195,7 @@ if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
 fi
 ${managedEnv}
 
-exec "$BINARY"${launchArgs} "$@"
+${shimExecTail(agent, launchArgs)}
 `;
 }
 
