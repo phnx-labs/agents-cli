@@ -53,9 +53,9 @@ describe('hasNoBrowserDisqualifyingFlags — which views the browser can represe
     }
   });
 
-  it('routes routine previews and a named team view through the shared browser', () => {
-    expect(hasNoBrowserDisqualifyingFlags({ routine: true }, undefined)).toBe(true);
-    expect(hasNoBrowserDisqualifyingFlags({ routine: 'nightly-review' }, undefined)).toBe(true);
+  it('keeps routine views grouped while routing a named team view through the shared browser', () => {
+    expect(hasNoBrowserDisqualifyingFlags({ routine: true }, undefined)).toBe(false);
+    expect(hasNoBrowserDisqualifyingFlags({ routine: 'nightly-review' }, undefined)).toBe(false);
     expect(hasNoBrowserDisqualifyingFlags({ teams: true, inTeam: 'redesign' }, undefined)).toBe(true);
   });
 
