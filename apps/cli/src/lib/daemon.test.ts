@@ -729,7 +729,7 @@ describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () =>
 
       const pidFile = path.join(tmpHome, '.agents', '.cache', 'helpers', 'daemon', 'daemon.pid');
       const stateDir = path.dirname(pidFile);
-      const removedStateDir = `${stateDir}.removed`;
+      const lifetimeFile = path.join(stateDir, 'daemon.lifetime');
       const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
       const readPid = () => (fs.existsSync(pidFile) ? parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10) : null);
       const waitFor = async (cond: () => boolean, timeoutMs: number) => {
@@ -755,17 +755,16 @@ describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () =>
         pid = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHome, 'daemon.log'), env: childEnv }).pid!;
         expect(pid).toBeTruthy();
         expect(await waitFor(() => readPid() === pid, 20_000)).toBe(true);
+        expect(await waitFor(() => fs.existsSync(lifetimeFile), 20_000)).toBe(true);
         expect(alive(pid)).toBe(true);
 
-        // Atomically move the daemon state tree out of its canonical path while
-        // the process is live. A recursive delete races heartbeat writes and can
-        // fail with ENOTEMPTY before the guard gets to observe anything; rename
-        // makes the disappearance indivisible. Recreate the canonical directory
-        // without its lifetime token before the first 300ms check: the obsolete
-        // existsSync(dir) guard would stay alive, while the token guard must exit.
-        fs.renameSync(stateDir, removedStateDir);
-        fs.mkdirSync(stateDir, { recursive: true });
+        // Removing the lifetime marker is the durable effect of deleting and
+        // recreating the state tree, without racing live heartbeat writes during
+        // recursive removal. Keep the canonical directory present so the old
+        // existsSync(dir) guard would stay alive; only the token guard can exit.
+        fs.unlinkSync(lifetimeFile);
         expect(fs.existsSync(stateDir)).toBe(true);
+        expect(fs.existsSync(lifetimeFile)).toBe(false);
 
         // The guard polls every 300ms above; give it several cycles of margin.
         expect(await waitFor(() => !alive(pid!), 10_000)).toBe(true);
