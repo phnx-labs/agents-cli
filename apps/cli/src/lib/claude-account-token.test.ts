@@ -206,10 +206,91 @@ describe('resolveClaudeSetupToken', () => {
       version,
       mode: 'plan',
       effort: 'auto',
+      prompt: 'do the thing',
     });
 
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-alpha');
     expect(env.CLAUDE_CONFIG_DIR).toBe(configDir);
+  });
+
+  it('buildExecEnv leaves an interactive run on its own login instead of the setup-token', () => {
+    // The `auth` setup-token is the credential for runs with NO human present. An
+    // interactive run has one, and overriding their per-version login made
+    // `/status` report `Auth token: CLAUDE_CODE_OAUTH_TOKEN` on a personal machine.
+    const version = `interactive-token-test-${process.pid}`;
+    const versionHome = getVersionHomePath('claude', version);
+    versionDirs.push(path.dirname(versionHome));
+    const configDir = path.join(versionHome, '.claude');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, '.claude.json'),
+      JSON.stringify({ oauthAccount: { emailAddress: 'alpha@example.com' } }),
+    );
+    writeAuthBundle({
+      [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha',
+    });
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+    // No prompt at all -> inferred interactive (the `agents run claude` TUI).
+    const inferred = buildExecEnv({ agent: 'claude', version, mode: 'plan', effort: 'auto' });
+    expect(inferred.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(inferred.CLAUDE_CONFIG_DIR).toBe(configDir);
+
+    // An explicit --interactive wins even when a prompt is present.
+    const explicit = buildExecEnv({
+      agent: 'claude',
+      version,
+      mode: 'plan',
+      effort: 'auto',
+      prompt: 'do the thing',
+      interactive: true,
+    });
+    expect(explicit.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  it('buildExecEnv strips an INHERITED copy of our own setup-token on an interactive run', () => {
+    // An interactive launch from inside a headless agent's shell inherits that
+    // agent's injected token through process.env and would keep authenticating as
+    // it — the nested case a gate on injection alone does not cover.
+    const version = `interactive-inherited-test-${process.pid}`;
+    const versionHome = getVersionHomePath('claude', version);
+    versionDirs.push(path.dirname(versionHome));
+    const configDir = path.join(versionHome, '.claude');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, '.claude.json'),
+      JSON.stringify({ oauthAccount: { emailAddress: 'alpha@example.com' } }),
+    );
+    writeAuthBundle({
+      [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha',
+    });
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-alpha';
+
+    const env = buildExecEnv({ agent: 'claude', version, mode: 'plan', effort: 'auto' });
+
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  it('buildExecEnv keeps a token the user exported themselves on an interactive run', () => {
+    // Only OUR value is dropped. A deliberately exported token is a different
+    // string and must survive, so this is not a blanket env strip.
+    const version = `interactive-user-token-test-${process.pid}`;
+    const versionHome = getVersionHomePath('claude', version);
+    versionDirs.push(path.dirname(versionHome));
+    const configDir = path.join(versionHome, '.claude');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(configDir, '.claude.json'),
+      JSON.stringify({ oauthAccount: { emailAddress: 'alpha@example.com' } }),
+    );
+    writeAuthBundle({
+      [claudeAccountTokenKey('alpha@example.com')]: 'sk-ant-oat01-alpha',
+    });
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-user-exported';
+
+    const env = buildExecEnv({ agent: 'claude', version, mode: 'plan', effort: 'auto' });
+
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-user-exported');
   });
 });
 

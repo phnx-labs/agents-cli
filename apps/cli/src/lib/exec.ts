@@ -424,10 +424,32 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
       result.CLAUDE_CONFIG_DIR = path.join(versionHome, '.claude');
       const setupToken = resolveClaudeSetupToken(versionHome);
       if (setupToken) {
-        // A token keyed to this version home's own account replaces any ambient
-        // shared value inherited from the launcher. options.env still wins below
-        // for explicit caller overrides.
-        result.CLAUDE_CODE_OAUTH_TOKEN = setupToken;
+        // The `auth` bundle's setup-token exists so a run with NO human present
+        // authenticates without the Touch-ID-gated login item — usage probes,
+        // routines, dispatched runs (claude-account-token.ts). An interactive run
+        // has a human at the TTY, and their own per-version login is the credential
+        // they established and expect; overriding it made `/status` report
+        // `Auth token: CLAUDE_CODE_OAUTH_TOKEN` on a personal machine and took every
+        // hand-driven session off that login. macOS cannot cheaply confirm a home's
+        // login first (probing the Keychain raises an authorization sheet per
+        // installed version on the `agents run` hot path — agents.ts
+        // `isClaudeCredentialFileBlank`), so interactive simply defers to Claude
+        // Code, which prompts a present human to log in if the login is missing.
+        if (resolveInteractive(options)) {
+          // Drop an INHERITED copy of the same token too: an interactive launch from
+          // inside a headless agent's shell inherits that agent's injected value via
+          // sanitizeProcessEnv(process.env) and would keep authenticating as it.
+          // Matched by VALUE (as runner.ts does), so a token the user exported
+          // deliberately is a different string and is left alone.
+          if (result.CLAUDE_CODE_OAUTH_TOKEN === setupToken) {
+            delete result.CLAUDE_CODE_OAUTH_TOKEN;
+          }
+        } else {
+          // A token keyed to this version home's own account replaces any ambient
+          // shared value inherited from the launcher. options.env still wins below
+          // for explicit caller overrides.
+          result.CLAUDE_CODE_OAUTH_TOKEN = setupToken;
+        }
       }
       // A managed pin lives in a per-version dir; Claude Code's own background
       // auto-updater would rewrite that pinned binary in place (and has left it
@@ -1349,8 +1371,11 @@ export async function execShimPassthrough(
   // a shell, while the hook runs under the agent descendant. This is the primary
   // attribution path on Windows (no lsof), so the launchId join matters most here.
   const launchId = randomUUID();
-  // mode/effort are required by ExecOptions but unused by buildExecEnv (which only
-  // derives the per-version config-dir env); pass the agent's default to satisfy the type.
+  // mode/effort are required by ExecOptions but do not affect the env buildExecEnv
+  // derives; pass the agent's default to satisfy the type. Passing no prompt is
+  // meaningful, not incidental: this is the user invoking the harness binary
+  // directly through its shim, so the launch resolves INTERACTIVE and authenticates
+  // from their own per-version login rather than the headless `auth` setup-token.
   const env = buildExecEnv({ agent, version, cwd, mode: defaultModeFor(agent), effort: 'auto', env: { AGENT_LAUNCH_ID: launchId } });
   const { command, args, shell } = resolveShimSpawn(process.platform, binary, [...launchArgs, ...rawArgs]);
 
