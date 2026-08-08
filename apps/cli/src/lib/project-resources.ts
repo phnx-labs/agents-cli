@@ -52,7 +52,7 @@ export function syncProjectResourcesToAgent(
 
   syncProjectCommands(agent, version, projectAgentsDir, agentRoot, result, next);
   syncProjectSkills(agent, version, projectAgentsDir, agentRoot, result, next);
-  syncProjectSubagents(agent, version, projectAgentsDir, projectRoot, agentRoot, manifest, result, next);
+  syncProjectSubagents(agent, version, projectAgentsDir, projectRoot, agentRoot, result, next);
   syncProjectWorkflows(agent, version, projectAgentsDir, projectRoot, agentRoot, result, next);
 
   if (next.size > 0 || manifest) {
@@ -296,7 +296,6 @@ function syncProjectSubagents(
   projectAgentsDir: string,
   projectRoot: string,
   agentRoot: string,
-  manifest: ProjectManagedManifest | null,
   result: ProjectResourceSyncResult,
   manifestPaths: Set<string>,
 ): void {
@@ -315,12 +314,15 @@ function syncProjectSubagents(
     }
     try {
       target.write(dir, sub);
-      record('subagents', sub.name, occupied.map((entry) => path.relative(agentRoot, entry.path)), result, manifestPaths);
+      // Record only what the write actually produced. `occupied` may name
+      // paths a target claims for removal but never creates (Kimi's legacy
+      // pre-markdown files), and the manifest must not list absent files.
+      const written = occupied.filter((entry) => pathExists(entry.path));
+      record('subagents', sub.name, written.map((entry) => path.relative(agentRoot, entry.path)), result, manifestPaths);
     } catch {
       // Malformed source or unsupported transform; skip this item.
     }
   }
-
 }
 
 function workflowManagedRelPaths(agent: AgentId, projectRoot: string, name: string, workflowDir: string): string[] {

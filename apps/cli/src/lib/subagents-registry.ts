@@ -14,16 +14,15 @@
  * every current agent, so most entries are a single call:
  *
  *   - `flatFile`  one `<name><ext>` file, body from a `transform` fn.
- *                 (claude, grok, droid, codex, opencode, copilot,
- *                  cursor, kiro, goose)
+ *                 (claude, grok, pi, droid, codex, opencode, copilot,
+ *                  cursor, kiro, goose, kimi)
  *   - `dirFile`   a `<name>/` directory holding one generated `<file>`.
  *                 (antigravity: `<name>/agent.md`)
  *   - `dirCopy`   copy the whole source directory to `<name>/`, applying
  *                 renames, detected by a `marker` file. (openclaw)
  *
- * Genuinely-bespoke agents keep an explicit handler in the same table -- Kimi
- * writes two files per subagent plus a managed parent index, so it is a hand
- * -written `SubagentTarget` rather than a builder call.
+ * Every agent now uses a builder. Kimi wraps `flatFile` to also clear the
+ * pre-markdown files agents-cli used to write into its dir (`kimiTarget`).
  *
  * The per-agent `transform`/metadata parsers are the escape hatch: they live in
  * `subagents.ts` and are referenced by the table, so the generic engine has zero
@@ -256,6 +255,57 @@ function dirCopy(opts: {
   };
 }
 
+/**
+ * Kimi: Claude-shaped `<name>.md`, plus cleanup of the format this replaced.
+ *
+ * agents-cli used to write a `<name>.yaml` + `<name>.system.md` pair and a
+ * managed `_agents-cli.yaml` index here, against a schema kimi-code never
+ * read. Those files are still on disk in every home synced before that fix,
+ * and they cannot simply be ignored:
+ *
+ *   - `<name>.system.md` ends in `.md`, so the plain `flatFile` enumerator
+ *     surfaced it as a phantom subagent called `<name>.system`, and kimi-code
+ *     logs `Missing frontmatter` for it once per session.
+ *   - `<name>.yaml` and `_agents-cli.yaml` are not `.md`, so nothing ever
+ *     enumerated them and `agents prune cleanup` could not reach them.
+ *
+ * So `names` filters the legacy prompt file out, `occupied` claims the legacy
+ * pair so removal/trash take them with the subagent, and `write` deletes both
+ * them and the managed index -- one `agents sync kimi` leaves a clean dir.
+ */
+const kimiTarget: SubagentTarget = (() => {
+  const base = flatFile({
+    subdir: ['.kimi-code', 'agents'],
+    ext: '.md',
+    transform: transformSubagentForClaude,
+    readMeta: metaFrontmatterFallback,
+  });
+  /** Managed parent index written by the pre-markdown format. Reserved name. */
+  const LEGACY_INDEX = '_agents-cli.yaml';
+  const legacyPaths = (dir: string, name: string): string[] => [
+    safeJoin(dir, `${name}.yaml`),
+    safeJoin(dir, `${name}.system.md`),
+  ];
+  return {
+    ...base,
+    write(dir, sub) {
+      base.write(dir, sub);
+      for (const p of [...legacyPaths(dir, sub.name), safeJoin(dir, LEGACY_INDEX)]) {
+        fs.rmSync(p, { force: true });
+      }
+    },
+    names(dir) {
+      return base.names(dir).filter((n) => !n.endsWith('.system'));
+    },
+    occupied(dir, name) {
+      return [
+        ...base.occupied(dir, name),
+        ...legacyPaths(dir, name).map((p): OccupiedEntry => ({ path: p, kind: 'file' })),
+      ];
+    },
+  };
+})();
+
 // ── the registry ─────────────────────────────────────────────────────────────
 
 /**
@@ -312,8 +362,9 @@ export const SUBAGENT_TARGETS: Partial<Record<AgentId, SubagentTarget>> = {
   openclaw: dirCopy({ subdir: ['.openclaw'], marker: 'AGENTS.md', rename: { 'AGENT.md': 'AGENTS.md' } }),
   // Kimi discovers Claude-shaped agent markdown from its brand home's `agents/`
   // dir (`USER_BRAND_DIRS = ["agents"]`, kimi-code >= 0.29.0). Frontmatter
-  // name/description + body, kebab-case name -- the same shape as claude/grok.
-  kimi: flatFile({ subdir: ['.kimi-code', 'agents'], ext: '.md', transform: transformSubagentForClaude, readMeta: metaFrontmatterFallback }),
+  // name/description + body, kebab-case name -- the same shape as claude/grok,
+  // wrapped to clean up the pre-markdown files (see kimiTarget above).
+  kimi: kimiTarget,
 };
 
 /** The registry entry for `agent`, or undefined if it stores no subagents. */

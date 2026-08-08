@@ -39,7 +39,7 @@ Central storage (project > user > system):
     .config/goose/agents/<name>.yaml    flat-file (Goose recipe)         [Tier 3]
     .gemini/config/agents/<name>/agent.md   dir-file (Antigravity)       [Tier 3]
     .openclaw/<name>/AGENTS.md       dir-copy   (AGENT.md → AGENTS.md)    [Tier 2]
-    .kimi-code/agents/<name>.yaml + <name>.system.md   bespoke (+parent index) [Tier 3]
+    .kimi-code/agents/<name>.md      flat-file  (Kimi, kimi-code >= 0.29.0)  [Tier 3]
 
                       Parent agent session (Claude example)
                                   │
@@ -59,7 +59,7 @@ identically — the long tail should cost far less than the core.
 |------|--------|-------------------------------------|
 | **Tier 1 — core** | `claude`, `codex`, `cursor` | First-class. Full support; bespoke transform/format work where the native format demands it. New subagent capabilities land here first. |
 | **Tier 2 — established** | `openclaw`, `grok`, `droid`, `copilot`, `kiro`, `opencode` | Supported, ride the generic registry path. A bespoke `transform` only where the on-disk format differs — never bespoke install/list/remove logic. |
-| **Tier 3 — long-tail** | `goose`, `antigravity`, `kimi` | Config-only; spend the minimum. A new one is a single `SUBAGENT_TARGETS` entry. `kimi` is the sole current entry that still needs a bespoke handler (two files per subagent + a managed parent index). |
+| **Tier 3 — long-tail** | `goose`, `antigravity`, `kimi` | Config-only; spend the minimum. A new one is a single `SUBAGENT_TARGETS` entry. `kimi` wraps `flatFile` only to delete the pre-0.29.0 files agents-cli used to write (a `<name>.yaml` + `<name>.system.md` pair and an `_agents-cli.yaml` index) — its write format is the plain Claude-shaped `<name>.md`. |
 
 **Adding a standard integration (Tier 2/3) is one entry, not six edits.** Give the
 agent a `subagents` gate in `src/lib/agents.ts`, add one entry to `SUBAGENT_TARGETS`

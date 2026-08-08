@@ -11,5 +11,9 @@
   `--agent no-such-agent` reports `Available profiles: plan, agent, coder, explore, code-reviewer`.
   Source: `apps/cli/src/lib/subagents-registry.ts`, `apps/cli/src/lib/agents.ts`.
 
-  Existing installs carry stale `<name>.yaml`, `<name>.system.md`, and `_agents-cli.yaml` files in
-  `~/.kimi-code/agents/`; they are inert and `agents prune cleanup --all` removes them.
+  Homes synced before this fix carry stale `<name>.yaml`, `<name>.system.md`, and
+  `_agents-cli.yaml` files in `~/.kimi-code/agents/`. The next `agents sync kimi` deletes them:
+  `agents prune cleanup` could never reach them (the two `.yaml` files match no enumerator), and
+  the leftover `<name>.system.md` would otherwise be listed as a phantom subagent named
+  `<name>.system` and warned about by kimi-code once per session, since it ends in `.md` and
+  carries no frontmatter.
