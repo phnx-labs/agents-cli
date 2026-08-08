@@ -57,6 +57,20 @@ consecutiveFailures, lastOkAt}`, persisted at
 (re)start attempt, so a failure survives past whatever line of the daemon log it
 would otherwise scroll out of.
 
+A third subsystem, `daemon-start`, records the daemon's own startup and is the
+one record that also **gates** behaviour rather than just reporting. It is
+written from both sides: the launching CLI marks every start it issues as a
+failure up front, and only a daemon that has finished booting — scheduler,
+browser IPC, broker decision and every background tick up — clears it. A daemon
+that spawns and then dies therefore leaves the streak growing, which a check on
+the launch's own return value could never see (the spawn succeeded). After five
+consecutive such starts the **implicit** auto-start refuses: the background
+callers that opportunistically bring the daemon up (`secrets unlock`, `browser
+start`, the watchdog) stop relaunching a daemon that never lives, and point at
+`agents daemon doctor`, which reports the streak and the recorded cause. An
+already-running daemon is still reported, and `agents daemon start` — the
+explicit override — is never gated.
+
 ### Project routines (opt-in daemon firing)
 
 `agents routines list` and `agents routines view <name>` also discover routines in `<project>/.agents/routines/` when invoked from inside a project — project routines shadow user routines of the same name in those views.

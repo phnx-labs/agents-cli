@@ -1187,6 +1187,30 @@ describe('daemon auto-start circuit breaker (RUSH-2418)', () => {
     if (tmpHome) fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
+  // THE case this breaker exists for, and the one an outcome-shaped check
+  // cannot see: a daemon binary that SPAWNS FINE and then dies. `startDetached`
+  // returns a real `child.pid`, so the launcher has no error to observe — the
+  // first version of this fix counted only unspawnable binaries and let ten
+  // consecutive crash-loop starts through with the breaker still closed.
+  it.skipIf(process.platform === 'win32')(
+    'counts a daemon that spawns successfully and then dies — not just an unspawnable binary',
+    () => {
+      // Exits 0 immediately: a perfectly spawnable binary that never becomes a
+      // daemon, i.e. exactly a startup crash loop.
+      const dyingBin = path.join(tmpHome, 'dying-daemon.js');
+      fs.writeFileSync(dyingBin, 'process.exit(0);\n', 'utf-8');
+
+      for (let i = 1; i <= DAEMON_AUTOSTART_FAILURE_LIMIT; i++) {
+        const res = startDaemon(dyingBin);
+        expect(res.pid).toBeTruthy(); // the spawn SUCCEEDS — nothing to catch
+        expect(readSubsystemHealth(SUBSYSTEM_DAEMON_START)?.consecutiveFailures).toBe(i);
+      }
+      expect(isDaemonAutostartCircuitOpen()).toBe(true);
+      expect(ensureDaemonStarted()).toBeNull();
+    },
+    30_000,
+  );
+
   it.skipIf(process.platform === 'win32')(
     'opens after N consecutive failed starts, and the explicit override is still allowed',
     () => {

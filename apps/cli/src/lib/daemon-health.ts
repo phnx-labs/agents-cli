@@ -102,6 +102,23 @@ export function recordSubsystemError(subsystem: string, error: string, at: strin
   writeAll(all);
 }
 
+/**
+ * Refine the reason on an already-counted failure, without bumping the streak.
+ *
+ * Exists because a start is counted BEFORE its outcome is known (RUSH-2418):
+ * the launcher marks the attempt, then replaces the provisional reason with the
+ * real one if it fails outright. Calling `recordSubsystemError` a second time
+ * would count one failed start as two. A no-op when the subsystem has never
+ * reported, since there is no failure to describe.
+ */
+export function recordSubsystemErrorReason(subsystem: string, error: string, at: string = new Date().toISOString()): void {
+  const all = readAll();
+  const existing = all[subsystem];
+  if (!existing) return;
+  all[subsystem] = { ...existing, lastError: error, lastErrorAt: at };
+  writeAll(all);
+}
+
 /** Read one subsystem's health record, or null if it has never reported in. */
 export function readSubsystemHealth(subsystem: string): SubsystemHealth | null {
   return readAll()[subsystem] ?? null;

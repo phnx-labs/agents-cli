@@ -29,7 +29,7 @@ import { redactSecrets } from './redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
 import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from './device-config.js';
 import { reapTerminalRoutineProcesses } from './routine-process-cleanup.js';
-import { recordSubsystemOk, recordSubsystemError, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
+import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
 
 const PID_FILE = 'daemon.pid';
 const LIFETIME_FILE = 'daemon.lifetime';
@@ -582,11 +582,6 @@ export async function runDaemon(): Promise<void> {
   const lifetimePath = path.join(getDaemonDirRoot(), LIFETIME_FILE);
   const lifetimeToken = `${process.pid}:${Date.now()}`;
   fs.writeFileSync(lifetimePath, lifetimeToken, 'utf-8');
-  // RUSH-2418: only a daemon that reached this point — claimed, and about to
-  // serve — clears the auto-start failure streak. Recording success at launch
-  // time instead would reset the breaker for a process that dies moments later,
-  // which is precisely the crash loop it exists to stop.
-  recordSubsystemOk(SUBSYSTEM_DAEMON_START);
   log('INFO', `Daemon started (PID: ${process.pid})`);
 
   anchorDaemonCwd();
@@ -991,6 +986,13 @@ export async function runDaemon(): Promise<void> {
   const stateDirCheckMs = Number(process.env.AGENTS_DAEMON_STATE_DIR_CHECK_MS) || 60_000;
   const stateDirCheckInterval = setInterval(runStateDirSelfCheck, stateDirCheckMs);
 
+  // RUSH-2418: startup is over — the scheduler, browser IPC, broker decision,
+  // monitor engine and every background tick are up. Only NOW does this daemon
+  // clear the auto-start failure streak `ensureDaemonStarted` reads. Clearing it
+  // at claim time instead would reset the breaker for a process that dies while
+  // initializing a subsystem, which is exactly the crash loop it exists to stop.
+  recordSubsystemOk(SUBSYSTEM_DAEMON_START);
+
   const handleReload = () => {
     log('INFO', 'Reloading jobs (SIGHUP)');
     // Refresh user-layer copies of opted-in project routines BEFORE the
@@ -1221,18 +1223,26 @@ export function startDaemon(agentsBin?: string): { pid: number | null; method: s
     releaseLock();
   };
 
+  // RUSH-2418: count starts PESSIMISTICALLY, and let a daemon that reaches
+  // steady state clear the streak itself (`recordSubsystemOk` at the end of
+  // runDaemon's startup). Recording a failure only on an observable error would
+  // miss the crash loop entirely: a daemon that spawns and then dies returns a
+  // perfectly real `child.pid`, so the launcher has no error to see. Every path
+  // out of startDaemonLocked is either pid-truthy or a throw, so an
+  // outcome-shaped check here can only ever catch an unspawnable binary — not
+  // the failure this breaker exists for. Marking the attempt up front and
+  // clearing on proven health inverts that: the streak grows exactly when
+  // starts stop producing a daemon that lives.
+  //
+  // The no-launch returns above (`already-running`, `already-starting`) return
+  // before this point on purpose — they attempted nothing, so they count nothing.
+  recordSubsystemError(SUBSYSTEM_DAEMON_START, 'start issued; no daemon has reported healthy since');
   try {
-    const result = startDaemonLocked(agentsBin ?? getAgentsBinPath(), releaseOnce);
-    // RUSH-2418: record the start OUTCOME, not the attempt. A launch that
-    // produced no pid is the crash-loop signal `ensureDaemonStarted` reads —
-    // the daemon itself records the success side once it has claimed, so a
-    // process that started and then died on boot never clears the streak.
-    if (result.pid === null) {
-      recordSubsystemError(SUBSYSTEM_DAEMON_START, `start via ${result.method} produced no daemon pid`);
-    }
-    return result;
+    return startDaemonLocked(agentsBin ?? getAgentsBinPath(), releaseOnce);
   } catch (err: any) {
-    recordSubsystemError(SUBSYSTEM_DAEMON_START, `start threw: ${err?.message ?? String(err)}`);
+    // Replace the provisional reason with the real one — the streak is already
+    // counted, this just makes `agents daemon doctor` name the actual cause.
+    recordSubsystemErrorReason(SUBSYSTEM_DAEMON_START, `start failed: ${err?.message ?? String(err)}`);
     throw err;
   } finally {
     releaseOnce();
@@ -1242,8 +1252,9 @@ export function startDaemon(agentsBin?: string): { pid: number | null; method: s
 /**
  * Is the auto-start circuit breaker open (RUSH-2418)? True once
  * {@link DAEMON_AUTOSTART_FAILURE_LIMIT} consecutive starts have failed to
- * produce a live daemon. Pure read of the persisted health record, so `agents
- * daemon status`/`doctor` and the gate agree on one number.
+ * produce a daemon that reported healthy. Pure read of the persisted health
+ * record, and `agents daemon doctor` reports the same record — the message the
+ * breaker prints has to lead somewhere that can explain it.
  */
 export function isDaemonAutostartCircuitOpen(): boolean {
   const health = readSubsystemHealth(SUBSYSTEM_DAEMON_START);
