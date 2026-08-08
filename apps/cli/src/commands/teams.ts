@@ -669,7 +669,26 @@ async function reactWithTeammate(
     // the branch `agents/<name>` doesn't block the next wave's retry with
     // `fatal: a branch ... already exists` (RUSH-2356). Best-effort; the
     // original failure is what propagates.
+    //
+    // Guarded exactly like the `teams add` teardown, and for the same reason:
+    // handleSpawn -> manager.spawn() persists a staged teammate's meta.json and
+    // only THEN runs the retention pass, which refreshes every sibling and can
+    // throw on a distributed one. A fixer teammate is staged with `--after` when
+    // it follows a source teammate, so a throw there lands here with a LIVE,
+    // durably-recorded, merely-pending teammate already owning this worktree —
+    // and removing it would destroy real work. Only tear down a genuine orphan.
     if (worktreeName) {
+      let claimed: boolean;
+      try {
+        claimed = await mgr.isWorktreeClaimed(worktreeName);
+      } catch {
+        // Can't prove it's an orphan. Deleting a live teammate's worktree is
+        // unrecoverable; a leftover branch is not — leave it and say so.
+        warnOrphanWorktree(baseCwd, worktreeName, 'the teammate record could not be read');
+        throw err;
+      }
+      if (claimed) throw err;
+
       try {
         await removeWorktree(baseCwd, worktreeName);
       } catch (cleanupErr) {
