@@ -504,7 +504,6 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
   const kindData = {} as Record<DrillableKind, { items: ResourceItem[]; size: { bytes: number; files: number } }>;
   let totalBytes = 0, totalFiles = 0;
   let repoHookByScript: Map<string, ManifestHook> = new Map();
-  let repoHookItemList: ResourceItem[] = [];
   let repoMcpConfigs: Map<string, McpYamlConfig> = new Map();
   if (!options.brief) {
     for (const kind of DRILLABLE_KINDS) {
@@ -514,7 +513,6 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
       totalBytes += size.bytes; totalFiles += size.files;
     }
     repoHookByScript = hookManifestByScript(hookManifestFromFile(path.join(repo.root, 'agents.yaml')));
-    repoHookItemList = repoHookItems(repo);
     repoMcpConfigs = new Map(discoverMcpConfigsFromRepo(repo.root).map(s => [s.name, s.config]));
   }
 
@@ -529,8 +527,7 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
       resources: options.brief ? null : Object.fromEntries(
         DRILLABLE_KINDS.map(kind => {
           const size = kindData[kind].size;
-          // Hooks use the grouped reader (clean names) instead of the raw readdir.
-          const items = kind === 'hooks' ? repoHookItemList : kindData[kind].items;
+          const items = kindData[kind].items;
           const base = {
             count: items.length,
             bytes: size.bytes,
@@ -611,7 +608,7 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
       console.log(`  ${kind.padEnd(10)} ${count}  ${sz}  ${preview}`.trimEnd());
     }
 
-    printExpandedSection('Hooks', hookRows(repoHookItemList, repoHookByScript));
+    printExpandedSection('Hooks', hookRows(kindData.hooks.items, repoHookByScript));
     printExpandedSection('Plugins', pluginRows(kindData.plugins.items));
     printExpandedSection('MCP', mcpRows(kindData.mcp.items, repoMcpConfigs));
   }
@@ -888,8 +885,12 @@ function renderItemDetail(header: string, jsonHead: Record<string, unknown>, kin
     }
   }
   for (const [k, v] of buildDetailRows(best.item, kind)) {
-    const prefix = `     ${k.padEnd(10)} `;
-    console.log(`     ${chalk.gray(k.padEnd(10))} ${truncateValueForPrefix(prefix, v)}`);
+    // Wrap, never truncate. These values are `, `-joined lists (commands,
+    // skills, triggers, tools) and cutting them hides real entries — a 9-command
+    // plugin would show 4. Before the detail view wrapped at all, the terminal
+    // soft-wrapped these in full, so truncating here would lose information the
+    // old output had.
+    printWrappedJoined(`     ${chalk.gray(k.padEnd(10))} `, v.split(', '), ', ');
   }
 
   if (others.length > 0) {
@@ -1022,8 +1023,12 @@ function pluginToItem(plugin: DiscoveredPlugin, source: string): ResourceItem {
   // exists for the plugin picker; the detail view simply never asked for it.
   const surfaces = pluginCapabilityLabels(inspectPluginCapabilities(plugin.root));
   if (surfaces.length > 0) extra.push(['surfaces', surfaces.join(', ')]);
+  // `author.name` is typed required but never validated — loadPluginManifest is a
+  // bare JSON cast — so an `{ "email": … }` manifest would push undefined here and
+  // crash the row renderer. Resolve to a label first and only emit a real one.
   const author = plugin.manifest.author;
-  if (author) extra.push(['author', typeof author === 'string' ? author : author.name]);
+  const authorLabel = typeof author === 'string' ? author : author?.name;
+  if (authorLabel) extra.push(['author', authorLabel]);
   if (plugin.manifest.dependencies?.length) {
     extra.push(['depends on', plugin.manifest.dependencies.join(', ')]);
   }
@@ -1366,7 +1371,10 @@ function readDescription(p: string): string {
   let filePath = p;
   try {
     if (fs.statSync(p).isDirectory()) {
-      for (const marker of ['SKILL.md', 'WORKFLOW.md', 'AGENT.md', 'README.md']) {
+      // `rule.md` is the directory form of a subrule (SUBRULE_RULE_FILE in
+      // lib/rules/compose.ts); without it the four dir-form subrules on disk
+      // drill in with a blank preview.
+      for (const marker of ['SKILL.md', 'WORKFLOW.md', 'AGENT.md', 'rule.md', 'README.md']) {
         const c = path.join(p, marker);
         if (fs.existsSync(c)) { filePath = c; break; }
       }

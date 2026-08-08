@@ -155,6 +155,36 @@ describe('collectRepoKind', () => {
     expect(collectRepoKind(repo, 'rules').map(r => r.name)).toEqual(['code-quality', 'foundations']);
   });
 
+  it('omits the author row when the manifest author has no name', () => {
+    const root = makeProjectRepo();
+    const dir = path.join(root, '.agents', 'plugins', 'noauthor', '.claude-plugin');
+    fs.mkdirSync(dir, { recursive: true });
+    // loadPluginManifest is a bare JSON cast, so `author.name` is typed required
+    // but never validated. An author object without a name used to push
+    // `undefined` into the row list and crash the renderer on stripAnsi.
+    fs.writeFileSync(path.join(dir, 'plugin.json'), JSON.stringify({
+      name: 'noauthor', version: '1.0.0', description: 'no author name', author: { email: 'x@y.z' },
+    }));
+    const repo = resolveRepoTarget(root)!;
+    const [plugin] = collectRepoKind(repo, 'plugins');
+    expect(plugin.name).toBe('noauthor');
+    expect(plugin.extra?.map(([k]) => k)).not.toContain('author');
+    // Every emitted value must be a string — the crash was an undefined here.
+    for (const [, v] of plugin.extra ?? []) expect(typeof v).toBe('string');
+  });
+
+  it('reads a dir-form subrule description from rule.md', () => {
+    const root = makeProjectRepo();
+    const dir = path.join(root, '.agents', 'rules', 'subrules', 'gh-merge-guard');
+    fs.mkdirSync(dir, { recursive: true });
+    // The directory form documented in lib/rules/compose.ts (SUBRULE_RULE_FILE).
+    fs.writeFileSync(path.join(dir, 'rule.md'), '# Merge & Admin-Bypass Guard\n\nNever bypass.\n');
+    const repo = resolveRepoTarget(root)!;
+    const [rule] = collectRepoKind(repo, 'rules');
+    expect(rule.name).toBe('gh-merge-guard');
+    expect(rule.description).toBe('Merge & Admin-Bypass Guard');
+  });
+
   it('falls back to the flat rules dir when there is no subrules/', () => {
     const root = makeProjectRepo();
     const rulesDir = path.join(root, '.agents', 'rules');
