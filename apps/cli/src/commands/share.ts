@@ -31,7 +31,7 @@ import {
   type CloudflareRequester,
   setWorkerSecret,
 } from '../lib/share/provision.js';
-import { publishFile, type PublishResult } from '../lib/share/publish.js';
+import { publishFile, resolveShareUsername, type PublishResult } from '../lib/share/publish.js';
 import { deleteShare, type DeleteShareResult } from '../lib/share/delete.js';
 import { renderWorkerScript } from '../lib/share/worker-template.js';
 import { analyticsEnabled } from '../lib/share/analytics.js';
@@ -54,6 +54,145 @@ export function formatSharePublishResult(result: PublishResult, json = false): s
 export function shareTemplateStatus(cfg: ShareConfig): 'current' | 'outdated' | 'unknown' {
   if (!cfg.templateHash) return 'unknown';
   return cfg.templateHash === hashWorkerScript(renderWorkerScript()) ? 'current' : 'outdated';
+}
+
+/** One published object as reported by the Worker's `?format=json` listing route. */
+export interface ShareListItem {
+  slug: string;
+  url: string;
+  /** Object size in bytes. */
+  size: number;
+  /** Stored content type, or null if the Worker had none recorded. */
+  contentType: string | null;
+  /** ISO timestamp the object was last written (R2 `uploaded`). */
+  publishedAt: string;
+  /** ISO auto-expire timestamp, or null for a permanent share. */
+  expiresAt: string | null;
+}
+
+export interface ShareListResult {
+  /** The namespace listed. */
+  user: string;
+  count: number;
+  objects: ShareListItem[];
+}
+
+/** DI seam for tests — override the real HTTP GET of the JSON listing route. */
+export type ListingFetchFn = (url: string) => Promise<{ status: number; contentType: string; body: string }>;
+
+/** Shown whenever the deployed Worker has no `?format=json` listing route — an
+ * endpoint provisioned before this feature. Points at the RUSH-2449 update path
+ * (`agents share update`) instead of letting the caller hit a 404 or an HTML body
+ * and get a confusing parse error. */
+const OUTDATED_TEMPLATE_HINT =
+  'Your deployed share Worker has no machine-readable listing route — it predates `agents share list`. ' +
+  'Run `agents share update` to deploy the current Worker template, then retry (`agents share status` shows whether an update is due).';
+
+async function defaultListingFetch(url: string): Promise<{ status: number; contentType: string; body: string }> {
+  const res = await fetch(url, { headers: { accept: 'application/json' } });
+  return { status: res.status, contentType: res.headers.get('content-type') ?? '', body: await res.text() };
+}
+
+/** Parse the Worker's listing JSON into a validated result, failing loud (with the
+ * outdated-template hint) on any body that isn't the expected shape — an old Worker
+ * serves the HTML gallery for a non-empty namespace, which must not be silently
+ * accepted as "you have published nothing". */
+export function parseShareListing(user: string, body: string): ShareListResult {
+  let data: unknown;
+  try {
+    data = JSON.parse(body);
+  } catch {
+    throw new Error(OUTDATED_TEMPLATE_HINT);
+  }
+  const objectsRaw = (data as { objects?: unknown } | null)?.objects;
+  if (!data || typeof data !== 'object' || !Array.isArray(objectsRaw)) {
+    throw new Error(OUTDATED_TEMPLATE_HINT);
+  }
+  const objects: ShareListItem[] = objectsRaw.map((o) => {
+    const item = o as Record<string, unknown>;
+    return {
+      slug: String(item.slug ?? ''),
+      url: String(item.url ?? ''),
+      size: typeof item.size === 'number' ? item.size : 0,
+      contentType: item.contentType == null ? null : String(item.contentType),
+      publishedAt: String(item.publishedAt ?? ''),
+      expiresAt: item.expiresAt == null ? null : String(item.expiresAt),
+    };
+  });
+  return { user, count: objects.length, objects };
+}
+
+/** Fetch and parse the machine-readable listing of the caller's namespace from the
+ * Worker's `?format=json` route. Fails loud when share was never configured, when
+ * the deployed template is known-outdated (RUSH-2449 templateHash), or when the
+ * live response proves the route is absent (404 or a non-JSON 200 = the old HTML
+ * gallery) — never a silent empty/wrong result. */
+export async function runShareList(
+  opts: { githubUser?: string; config?: ShareConfig; fetchListing?: ListingFetchFn } = {},
+): Promise<ShareListResult> {
+  const cfg = opts.config ?? readShareConfig();
+  if (!cfg) {
+    throw new Error(
+      "Not set up yet. Run 'agents share setup' (provision your own endpoint) or 'agents share join' (use an existing one).",
+    );
+  }
+  // A known-stale template can't have the listing route — say so before any network
+  // call. 'unknown' (provisioned before templateHash tracking) is attempted, then
+  // caught by the response checks below if the route turns out to be absent.
+  if (shareTemplateStatus(cfg) === 'outdated') {
+    throw new Error(OUTDATED_TEMPLATE_HINT);
+  }
+
+  const user = await resolveShareUsername({ githubUser: opts.githubUser });
+  const listUrl = `${cfg.baseUrl.replace(/\/+$/, '')}/${encodeURIComponent(user)}?format=json`;
+  const fetchListing = opts.fetchListing ?? defaultListingFetch;
+  const res = await fetchListing(listUrl);
+
+  if (res.status === 404) {
+    // The single-segment path with no listing route falls through to an object
+    // GET, which 404s — i.e. the endpoint predates this feature.
+    throw new Error(OUTDATED_TEMPLATE_HINT);
+  }
+  if (res.status !== 200) {
+    throw new Error(
+      `Listing failed (${res.status}) for ${listUrl}. Check the endpoint is reachable, or that 'agents share setup' completed.`,
+    );
+  }
+  if (!/application\/json/i.test(res.contentType)) {
+    // A 200 that isn't JSON means the old Worker ignored ?format=json and served
+    // the HTML gallery — the deployed template is outdated.
+    throw new Error(OUTDATED_TEMPLATE_HINT);
+  }
+  return parseShareListing(user, res.body);
+}
+
+/** Human-readable bytes, e.g. `1.2 KB`, `640 B`. */
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let value = n / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
+export function formatShareList(result: ShareListResult, json = false): string {
+  if (json) return JSON.stringify(result, null, 2);
+  if (result.count === 0) {
+    return chalk.dim(`No active pages published under @${result.user}.`);
+  }
+  const header =
+    chalk.bold(`@${result.user}`) +
+    chalk.dim(`  ${result.count} published ${result.count === 1 ? 'page' : 'pages'}`);
+  const rows = result.objects.map((o) => {
+    const when = o.publishedAt ? o.publishedAt.slice(0, 10) : 'unknown';
+    const meta = `${when} · ${formatBytes(o.size)}${o.expiresAt ? ` · expires ${o.expiresAt.slice(0, 10)}` : ''}`;
+    return `${chalk.cyan(o.slug)}  ${chalk.dim(meta)}\n  ${chalk.green(o.url)}`;
+  });
+  return [header, ...rows].join('\n');
 }
 
 export function formatShareDeleteResult(result: DeleteShareResult, json = false): string {
@@ -321,6 +460,42 @@ ${SHARE_DELETE_EXAMPLES}
             : chalk.dim("unknown — provisioned before version tracking; run `agents share update` to adopt it");
       console.log(`${chalk.bold('template')}  ${templateLabel}`);
     });
+
+  const shareListCmd = shareCmd
+    .command('list')
+    .description("List the pages you've published to your share namespace (human table; --json for scripts).")
+    .option('--github-user <user>', 'GitHub username whose namespace to list (default: resolved from gh/git config)')
+    .option('--json', 'emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt)')
+    .action(async (opts: { githubUser?: string; json?: boolean }) => {
+      try {
+        const result = await runShareList({ githubUser: opts.githubUser });
+        console.log(formatShareList(result, Boolean(opts.json)));
+      } catch (e) {
+        console.error(chalk.red((e as Error).message));
+        process.exitCode = 1;
+      }
+    });
+
+  setHelpSections(shareListCmd, {
+    examples: `
+      # Everything you've published, newest first
+      agents share list
+
+      # Machine-readable — e.g. pull every still-public URL with jq
+      agents share list --json | jq -r '.objects[].url'
+
+      # List another namespace
+      agents share list --github-user octocat
+    `,
+    notes: `
+  Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG
+  covers are omitted (it mirrors the public gallery). It reads the endpoint's JSON
+  listing route, which ships with the current Worker template. If your deployed
+  Worker predates this feature the command says so and points you at 'agents share
+  update' (RUSH-2449) rather than returning a wrong or empty result — see 'agents
+  share status' for whether an update is due.
+    `,
+  });
 
   shareCmd
     .command('analytics')

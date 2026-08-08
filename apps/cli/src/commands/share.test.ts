@@ -431,6 +431,156 @@ describe('share status and analytics namespace display', () => {
 
 
 
+describe('parseShareListing', () => {
+  it('validates and normalizes the Worker listing payload', async () => {
+    const { share } = await freshShareModules();
+    const body = JSON.stringify({
+      user: 'octocat',
+      count: 2,
+      objects: [
+        { slug: 'a', url: 'https://s/octocat/a', size: 10, contentType: 'text/html; charset=utf-8', publishedAt: '2026-08-08T00:00:00.000Z', expiresAt: null },
+        { slug: 'b', url: 'https://s/octocat/b', size: 20, contentType: null, publishedAt: '2026-08-07T00:00:00.000Z', expiresAt: '2099-01-01T00:00:00.000Z' },
+      ],
+    });
+    const result = share.parseShareListing('octocat', body);
+    expect(result.user).toBe('octocat');
+    expect(result.count).toBe(2);
+    expect(result.objects[0]).toEqual({
+      slug: 'a', url: 'https://s/octocat/a', size: 10, contentType: 'text/html; charset=utf-8', publishedAt: '2026-08-08T00:00:00.000Z', expiresAt: null,
+    });
+    expect(result.objects[1].contentType).toBeNull();
+    expect(result.objects[1].expiresAt).toBe('2099-01-01T00:00:00.000Z');
+  });
+
+  it('fails loud with the outdated-template hint when the body is HTML (old Worker gallery)', async () => {
+    const { share } = await freshShareModules();
+    expect(() => share.parseShareListing('octocat', '<!doctype html><h1>@octocat</h1>')).toThrow(/agents share update/);
+  });
+
+  it('fails loud when the JSON has no objects array', async () => {
+    const { share } = await freshShareModules();
+    expect(() => share.parseShareListing('octocat', JSON.stringify({ user: 'octocat' }))).toThrow(/agents share update/);
+  });
+});
+
+describe('formatShareList', () => {
+  const result = {
+    user: 'octocat',
+    count: 2,
+    objects: [
+      { slug: 'plan-a', url: 'https://s/octocat/plan-a', size: 2048, contentType: 'text/html; charset=utf-8', publishedAt: '2026-08-08T12:00:00.000Z', expiresAt: null },
+      { slug: 'report-b', url: 'https://s/octocat/report-b', size: 640, contentType: 'text/html; charset=utf-8', publishedAt: '2026-08-07T12:00:00.000Z', expiresAt: '2026-09-01T00:00:00.000Z' },
+    ],
+  };
+
+  it('--json emits the raw stable result', async () => {
+    const { share } = await freshShareModules();
+    expect(JSON.parse(share.formatShareList(result, true))).toEqual(result);
+  });
+
+  it('renders a human table with slug, date, size, url, and expiry', async () => {
+    const { share } = await freshShareModules();
+    const text = share.formatShareList(result);
+    expect(text).toContain('@octocat');
+    expect(text).toContain('2 published pages');
+    expect(text).toContain('plan-a');
+    expect(text).toContain('2026-08-08');
+    expect(text).toContain('2.0 KB');
+    expect(text).toContain('640 B');
+    expect(text).toContain('https://s/octocat/plan-a');
+    expect(text).toContain('expires 2026-09-01');
+  });
+
+  it('says nothing is published for an empty namespace', async () => {
+    const { share } = await freshShareModules();
+    expect(share.formatShareList({ user: 'octocat', count: 0, objects: [] })).toMatch(/No active pages/i);
+  });
+});
+
+describe('runShareList', () => {
+  async function currentConfig(share: typeof import('./share.js')): Promise<{ baseUrl: string; accountId: string; workerName: string; bucketName: string; templateHash: string }> {
+    const { renderWorkerScript } = await import('../lib/share/worker-template.js');
+    const { hashWorkerScript } = await import('../lib/share/provision.js');
+    return {
+      baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b',
+      templateHash: hashWorkerScript(renderWorkerScript()),
+    };
+  }
+
+  it('fetches, parses, and returns the listing when the template is current', async () => {
+    const { share } = await freshShareModules();
+    const config = await currentConfig(share);
+    const seen: string[] = [];
+    const result = await share.runShareList({
+      githubUser: 'octocat',
+      config,
+      fetchListing: async (url: string) => {
+        seen.push(url);
+        return {
+          status: 200,
+          contentType: 'application/json; charset=utf-8',
+          body: JSON.stringify({ user: 'octocat', count: 1, objects: [{ slug: 'a', url: 'https://share.test/octocat/a', size: 5, contentType: 'text/html', publishedAt: '2026-08-08T00:00:00.000Z', expiresAt: null }] }),
+        };
+      },
+    });
+    expect(seen).toEqual(['https://share.test/octocat?format=json']);
+    expect(result.count).toBe(1);
+    expect(result.objects[0].slug).toBe('a');
+  });
+
+  it('throws the outdated-template hint up front (no network) when the recorded hash is stale', async () => {
+    const { share } = await freshShareModules();
+    let fetched = false;
+    await expect(
+      share.runShareList({
+        githubUser: 'octocat',
+        config: { baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b', templateHash: 'stale-hash' },
+        fetchListing: async () => { fetched = true; return { status: 200, contentType: 'application/json', body: '{}' }; },
+      }),
+    ).rejects.toThrow(/agents share update/);
+    expect(fetched).toBe(false);
+  });
+
+  it('maps a 404 (route absent on an old, hash-unknown endpoint) to the outdated-template hint', async () => {
+    const { share } = await freshShareModules();
+    await expect(
+      share.runShareList({
+        githubUser: 'octocat',
+        config: { baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b' },
+        fetchListing: async () => ({ status: 404, contentType: 'text/plain', body: 'not found' }),
+      }),
+    ).rejects.toThrow(/agents share update/);
+  });
+
+  it('maps a non-JSON 200 (old Worker served the HTML gallery) to the outdated-template hint', async () => {
+    const { share } = await freshShareModules();
+    await expect(
+      share.runShareList({
+        githubUser: 'octocat',
+        config: { baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b' },
+        fetchListing: async () => ({ status: 200, contentType: 'text/html; charset=utf-8', body: '<h1>@octocat</h1>' }),
+      }),
+    ).rejects.toThrow(/agents share update/);
+  });
+
+  it('refuses when share was never configured', async () => {
+    const { share } = await freshShareModules();
+    await expect(share.runShareList({ githubUser: 'octocat' })).rejects.toThrow(/Not set up yet/);
+  });
+});
+
+describe('agents share list (CLI)', () => {
+  it('registers the list command with --json and --github-user', async () => {
+    const { share } = await freshShareModules();
+    const program = new Command();
+    program.exitOverride();
+    share.registerShareCommands(program);
+    const listCmd = program.commands.find((c) => c.name() === 'share')?.commands.find((c) => c.name() === 'list');
+    expect(listCmd).toBeDefined();
+    expect(listCmd?.options.map((o) => o.long)).toEqual(expect.arrayContaining(['--json', '--github-user']));
+  });
+});
+
 describe('formatSharePublishResult', () => {
   it('emits stable JSON for plan-render hooks and scripts', () => {
     const text = formatSharePublishResult(
