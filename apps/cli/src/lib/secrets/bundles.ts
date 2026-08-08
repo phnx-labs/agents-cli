@@ -1559,7 +1559,7 @@ export function readAndResolveBundleEnv(
   // macOS evaluates unrelated biometry ACLs during that scan (RUSH-2440).
   // Interactive reads retain the existing enumeration side of the union so
   // legacy/aliased items keep their established behavior.
-  if (!opts.agentOnly) {
+  if (backend !== 'keychain' || !opts.agentOnly) {
     try {
       enumeratedSecretItems = store.list(bundleSecretPrefix);
     } catch {
@@ -1578,7 +1578,7 @@ export function readAndResolveBundleEnv(
   // fail the agentOnly gate anyway.
   const metaFetched = backend === 'keychain'
     ? getKeychainTokens([metaItem], { silentNoAcl: true })
-    : store.getBatch([metaItem]);
+    : store.getBatch([...new Set([metaItem, ...enumeratedSecretItems])]);
 
   const json = metaFetched.get(metaItem);
   if (json === undefined) {
@@ -1627,7 +1627,10 @@ export function readAndResolveBundleEnv(
         forceDuration: Boolean(opts.duration),
         silentNoAcl: verifiedNoAclBundle,
       })
-    : store.getBatch([...new Set([metaItem, ...secretItems])]);
+    // File/vault enumeration is complete and prompt-free. Reuse its initial
+    // batch so metadata-first Keychain safety does not double-decrypt every
+    // file-backed credential read.
+    : metaFetched;
   const bundle: SecretsBundle = {
     name,
     description: parsed.description,
