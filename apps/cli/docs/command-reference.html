@@ -2330,27 +2330,43 @@ Use `agents devices accounts` for the same data grouped by account.</p></article
       they survive a reindex of the session cache. They are per-machine: session
       sync carries transcripts, not this file.</p></article>
 <article id="sessions-detach" data-search="detach sessions detach  send a live agent to the background — stop its terminal, keep it working headless id short or full id of the live session to background --local only this machine (skip the cross-host sweep) -h, --help show help  "><div class="command-head"><h3><code>agents sessions detach &lt;id&gt;</code></h3></div><p>Send a live agent to the background — stop its terminal, keep it working headless</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;id&gt;</code></td><td>Short or full id of the live session to background</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--local</code></td><td>Only this machine (skip the cross-host sweep)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
-<article id="sessions-export" data-search="export sessions export  bundle sessions (by id, query, or the parent selection flags like --since/-a) into a portable archive. selectors  -o, --output &lt;path&gt; write the bundle to this file --stdout write the bundle to stdout (for piping into `sessions import -`) --encrypt seal each transcript body with aes-256-gcm before writing -h, --help show help # bundle the last week of sessions to a file
+<article id="sessions-export" data-search="export sessions export  bundle sessions (by id, query, or the parent selection flags like --since/-a) into a portable archive. selectors  -o, --output &lt;path&gt; write the bundle to this file --stdout write the bundle to stdout (for piping into `sessions import -`) --encrypt seal each transcript body with aes-256-gcm before writing --to-r2 back the selected sessions up to cloudflare r2 (requires the r2.backups bundle) instead of a local file -h, --help show help # bundle the last week of sessions to a file
 agents sessions export --since 7d -o week.bundle
 
 # bundle two specific sessions
 agents sessions export 4f8a2b1c 9d3e7a55 -o pair.bundle
 
 # encrypt + pipe straight into another machine over ssh
-agents sessions export --since 7d --stdout --encrypt | agents ssh boxb &#39;agents sessions import - --decrypt &lt;key&gt;&#39; selection uses the same flags as &#39;agents sessions&#39; (--since, -n/--limit, --all,
+agents sessions export --since 7d --stdout --encrypt | agents ssh boxb &#39;agents sessions import - --decrypt &lt;key&gt;&#39;
+
+# back the last month up off-box to cloudflare r2 (encrypted with the shared key)
+agents sessions export --since 30d --to-r2 selection uses the same flags as &#39;agents sessions&#39; (--since, -n/--limit, --all,
 -a/--agent, --no-redact). bundles are self-describing ndjson: a header line + one
 line per transcript file. secrets are redacted by default. dir-shaped sessions
-(kimi) carry all their files. restore with &#39;agents sessions import&#39;."><div class="command-head"><h3><code>agents sessions export [selectors...]</code></h3></div><p>Bundle sessions (by id, query, or the parent selection flags like --since/-a) into a portable archive.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[selectors...]</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-o, --output &lt;path&gt;</code></td><td>Write the bundle to this file</td><td></td><td></td></tr><tr><td><code>--stdout</code></td><td>Write the bundle to stdout (for piping into `sessions import -`)</td><td></td><td></td></tr><tr><td><code>--encrypt</code></td><td>Seal each transcript body with AES-256-GCM before writing</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Bundle the last week of sessions to a file
+(kimi) carry all their files. restore with &#39;agents sessions import&#39;.
+
+--to-r2 uploads each session to the r2.backups bucket instead of a local file,
+one encrypted object per transcript keyed by machine/agent/session. bodies are
+sealed with the shared r2_sync_enc_key when present. restore on any box on the
+same bundle with &#39;agents sessions import --from-r2&#39;."><div class="command-head"><h3><code>agents sessions export [selectors...]</code></h3></div><p>Bundle sessions (by id, query, or the parent selection flags like --since/-a) into a portable archive.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[selectors...]</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-o, --output &lt;path&gt;</code></td><td>Write the bundle to this file</td><td></td><td></td></tr><tr><td><code>--stdout</code></td><td>Write the bundle to stdout (for piping into `sessions import -`)</td><td></td><td></td></tr><tr><td><code>--encrypt</code></td><td>Seal each transcript body with AES-256-GCM before writing</td><td></td><td></td></tr><tr><td><code>--to-r2</code></td><td>Back the selected sessions up to Cloudflare R2 (requires the r2.backups bundle) instead of a local file</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Bundle the last week of sessions to a file
 agents sessions export --since 7d -o week.bundle
 
 # Bundle two specific sessions
 agents sessions export 4f8a2b1c 9d3e7a55 -o pair.bundle
 
 # Encrypt + pipe straight into another machine over SSH
-agents sessions export --since 7d --stdout --encrypt | agents ssh boxB &#39;agents sessions import - --decrypt &lt;key&gt;&#39;</code></pre><h4>Notes</h4><p class="notes">Selection uses the same flags as &#39;agents sessions&#39; (--since, -n/--limit, --all,
+agents sessions export --since 7d --stdout --encrypt | agents ssh boxB &#39;agents sessions import - --decrypt &lt;key&gt;&#39;
+
+# Back the last month up off-box to Cloudflare R2 (encrypted with the shared key)
+agents sessions export --since 30d --to-r2</code></pre><h4>Notes</h4><p class="notes">Selection uses the same flags as &#39;agents sessions&#39; (--since, -n/--limit, --all,
 -a/--agent, --no-redact). Bundles are self-describing NDJSON: a header line + one
 line per transcript file. Secrets are redacted by default. Dir-shaped sessions
-(Kimi) carry all their files. Restore with &#39;agents sessions import&#39;.</p></article>
+(Kimi) carry all their files. Restore with &#39;agents sessions import&#39;.
+
+--to-r2 uploads each session to the r2.backups bucket instead of a local file,
+one encrypted object per transcript keyed by machine/agent/session. Bodies are
+sealed with the shared R2_SYNC_ENC_KEY when present. Restore on any box on the
+same bundle with &#39;agents sessions import --from-r2&#39;.</p></article>
 <article id="sessions-focus" data-search="focus sessions focus  focus sessions by id, harness/version, topic, device, or live state; attach living panes and recover ended ones selector session id/prefix, agent@version, or topic/path search --local only this machine (skip the cross-host sweep) --attach-only attach only — never open a new tab / resume a copy (the old `go` behavior) -h, --host &lt;target...&gt; scope the picker to live sessions on these devices (host alias or user@host; repeatable) --device &lt;target...&gt; alias for --host (device alias from `agents devices`; repeatable) --active only sessions present in the live roster -a, --agent &lt;agent&gt; filter by harness and recorded version (for example claude@latest) --claude shorthand for --agent claude --codex shorthand for --agent codex --kimi shorthand for --agent kimi --antigravity shorthand for --agent antigravity --grok shorthand for --agent grok --opencode shorthand for --agent opencode --all include every directory and all time --teams include team-spawned sessions --in-team &lt;name&gt; only one team lineage --routine only routine-run sessions -p, --project &lt;name&gt; only a named project --skill &lt;name&gt; only sessions that invoked this skill --plugin &lt;name&gt; only sessions that used this plugin --since &lt;time&gt; only sessions newer than this (for example 7d) --until &lt;time&gt; only sessions older than this timestamp -n, --limit &lt;n&gt; maximum candidates to load --bookmarks only bookmarked sessions --unmanaged also include native-home sessions outside managed versions --sort &lt;field&gt; order candidates by recent, cost, or duration --working only live sessions currently doing work --idle only live sessions that have stopped between turns --waiting only live sessions waiting on your input --orphan only sessions whose process outlived its terminal client --orphaned alias for --orphan --crashed only sessions whose terminal disappeared with the process --closed only recently observed sessions whose process exited normally --abandoned only sessions with no transcript progress for the abandonment window --queued only queued sessions that have not started running --unknown only sessions whose live state cannot be determined -h, --help show help # focus a session directly (attach a living pane, otherwise recover it)
       agents sessions focus a1b2c3d4
 
@@ -2422,7 +2438,7 @@ line per transcript file. Secrets are redacted by default. Dir-shaped sessions
     - Native copy currently supports: claude. For other harnesses, branch by
       starting a fresh agent and seeding it with &#39;/continue &lt;id&gt;&#39; — the source stays put.</p></article>
 <article id="sessions-go" data-search="go sessions go  deprecated alias for `sessions focus --attach-only` id short/full session id to jump to; omit for an interactive picker --local only this machine (skip the cross-host sweep) -h, --help show help  "><div class="command-head"><h3><code>agents sessions go [id]</code></h3></div><p>Deprecated alias for `sessions focus --attach-only`</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[id]</code></td><td>Short/full session id to jump to; omit for an interactive picker</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--local</code></td><td>Only this machine (skip the cross-host sweep)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
-<article id="sessions-import" data-search="import sessions import  restore an export bundle (file, - for stdin, or --from-host &lt;h&gt;) into the local session store, deduping against what you already have. bundle  --dry-run show what would be placed without writing anything --overwrite replace local files that differ from the bundle (default: keep local) --decrypt [key] decrypt an encrypted bundle (key optional if the r2.backups sync key is configured) --from-host &lt;target...&gt; pull sessions live from remote peer(s) over ssh instead of a file (repeatable) -h, --help show help # preview what a bundle would restore
+<article id="sessions-import" data-search="import sessions import  restore an export bundle (file, - for stdin, or --from-host &lt;h&gt;) into the local session store, deduping against what you already have. bundle  --dry-run show what would be placed without writing anything --overwrite replace local files that differ from the bundle (default: keep local) --decrypt [key] decrypt an encrypted bundle (key optional if the r2.backups sync key is configured) --from-host &lt;target...&gt; pull sessions live from remote peer(s) over ssh instead of a file (repeatable) --from-r2 restore session backups from cloudflare r2 (requires the r2.backups bundle) -h, --help show help # preview what a bundle would restore
 agents sessions import week.bundle --dry-run
 
 # restore it
@@ -2432,10 +2448,17 @@ agents sessions import week.bundle
 agents sessions import --from-host yosemite-s1 --since 7d
 
 # or the equivalent raw pipe
-agents ssh boxb &#39;agents sessions export --since 7d --stdout&#39; | agents sessions import - sessions land under the cross-machine mirror keyed by their origin machine, so
+agents ssh boxb &#39;agents sessions export --since 7d --stdout&#39; | agents sessions import -
+
+# restore everything backed up to r2 (e.g. on a fresh box)
+agents sessions import --from-r2 sessions land under the cross-machine mirror keyed by their origin machine, so
 they show up in &#39;agents sessions&#39; tagged with that machine and never overwrite
 your own local sessions. byte-exact duplicates are skipped. --from-host reuses
-the same ssh transport as the cross-machine listing (no r2, no daemon)."><div class="command-head"><h3><code>agents sessions import [bundle]</code></h3></div><p>Restore an export bundle (file, - for stdin, or --from-host &lt;h&gt;) into the local session store, deduping against what you already have.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[bundle]</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--dry-run</code></td><td>Show what would be placed without writing anything</td><td></td><td></td></tr><tr><td><code>--overwrite</code></td><td>Replace local files that differ from the bundle (default: keep local)</td><td></td><td></td></tr><tr><td><code>--decrypt [key]</code></td><td>Decrypt an encrypted bundle (key optional if the r2.backups sync key is configured)</td><td></td><td></td></tr><tr><td><code>--from-host &lt;target...&gt;</code></td><td>Pull sessions live from remote peer(s) over SSH instead of a file (repeatable)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Preview what a bundle would restore
+the same ssh transport as the cross-machine listing (no r2, no daemon).
+
+--from-r2 downloads every session backup in the r2.backups bucket and restores
+it through the same placement, using the shared r2_sync_enc_key to decrypt (or
+pass --decrypt &lt;key&gt;). it is the inverse of &#39;sessions export --to-r2&#39;."><div class="command-head"><h3><code>agents sessions import [bundle]</code></h3></div><p>Restore an export bundle (file, - for stdin, or --from-host &lt;h&gt;) into the local session store, deduping against what you already have.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[bundle]</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--dry-run</code></td><td>Show what would be placed without writing anything</td><td></td><td></td></tr><tr><td><code>--overwrite</code></td><td>Replace local files that differ from the bundle (default: keep local)</td><td></td><td></td></tr><tr><td><code>--decrypt [key]</code></td><td>Decrypt an encrypted bundle (key optional if the r2.backups sync key is configured)</td><td></td><td></td></tr><tr><td><code>--from-host &lt;target...&gt;</code></td><td>Pull sessions live from remote peer(s) over SSH instead of a file (repeatable)</td><td></td><td></td></tr><tr><td><code>--from-r2</code></td><td>Restore session backups from Cloudflare R2 (requires the r2.backups bundle)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Preview what a bundle would restore
 agents sessions import week.bundle --dry-run
 
 # Restore it
@@ -2445,10 +2468,17 @@ agents sessions import week.bundle
 agents sessions import --from-host yosemite-s1 --since 7d
 
 # Or the equivalent raw pipe
-agents ssh boxB &#39;agents sessions export --since 7d --stdout&#39; | agents sessions import -</code></pre><h4>Notes</h4><p class="notes">Sessions land under the cross-machine mirror keyed by their origin machine, so
+agents ssh boxB &#39;agents sessions export --since 7d --stdout&#39; | agents sessions import -
+
+# Restore everything backed up to R2 (e.g. on a fresh box)
+agents sessions import --from-r2</code></pre><h4>Notes</h4><p class="notes">Sessions land under the cross-machine mirror keyed by their origin machine, so
 they show up in &#39;agents sessions&#39; tagged with that machine and never overwrite
 your own local sessions. Byte-exact duplicates are skipped. --from-host reuses
-the same SSH transport as the cross-machine listing (no R2, no daemon).</p></article>
+the same SSH transport as the cross-machine listing (no R2, no daemon).
+
+--from-r2 downloads every session backup in the r2.backups bucket and restores
+it through the same placement, using the shared R2_SYNC_ENC_KEY to decrypt (or
+pass --decrypt &lt;key&gt;). It is the inverse of &#39;sessions export --to-r2&#39;.</p></article>
 <article id="sessions-inject" data-search="inject sessions inject  deliver text (+ enter) into the terminal a running session lives in — nudge a stalled agent. sessionid  text  --pane &lt;id&gt; target a tmux pane id directly (e.g. %3), skipping session lookup --pty &lt;id&gt; target an agents-pty session id directly, skipping session lookup --socket &lt;path&gt; tmux socket path (defaults to the session/shared socket) --host &lt;target&gt; deliver on a remote host over ssh (tmux/applescript backends) --no-enter send only the text, without a trailing enter --combined fuse text + enter into one write (default: two writes, ink-tui safe) --json output the injectresult as json -h, --help show help # nudge a stalled agent by session id (resolves its tmux pane)
       agents sessions inject a1b2c3d4 &quot;continue&quot;
 

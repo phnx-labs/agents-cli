@@ -22693,6 +22693,15 @@
               "negate": false
             },
             {
+              "flags": "--to-r2",
+              "description": "Back the selected sessions up to Cloudflare R2 (requires the r2.backups bundle) instead of a local file",
+              "long": "--to-r2",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-h, --help",
               "description": "Show help",
               "short": "-h",
@@ -22703,8 +22712,8 @@
               "negate": false
             }
           ],
-          "examples": "# Bundle the last week of sessions to a file\nagents sessions export --since 7d -o week.bundle\n\n# Bundle two specific sessions\nagents sessions export 4f8a2b1c 9d3e7a55 -o pair.bundle\n\n# Encrypt + pipe straight into another machine over SSH\nagents sessions export --since 7d --stdout --encrypt | agents ssh boxB 'agents sessions import - --decrypt <key>'",
-          "notes": "Selection uses the same flags as 'agents sessions' (--since, -n/--limit, --all,\n-a/--agent, --no-redact). Bundles are self-describing NDJSON: a header line + one\nline per transcript file. Secrets are redacted by default. Dir-shaped sessions\n(Kimi) carry all their files. Restore with 'agents sessions import'.",
+          "examples": "# Bundle the last week of sessions to a file\nagents sessions export --since 7d -o week.bundle\n\n# Bundle two specific sessions\nagents sessions export 4f8a2b1c 9d3e7a55 -o pair.bundle\n\n# Encrypt + pipe straight into another machine over SSH\nagents sessions export --since 7d --stdout --encrypt | agents ssh boxB 'agents sessions import - --decrypt <key>'\n\n# Back the last month up off-box to Cloudflare R2 (encrypted with the shared key)\nagents sessions export --since 30d --to-r2",
+          "notes": "Selection uses the same flags as 'agents sessions' (--since, -n/--limit, --all,\n-a/--agent, --no-redact). Bundles are self-describing NDJSON: a header line + one\nline per transcript file. Secrets are redacted by default. Dir-shaped sessions\n(Kimi) carry all their files. Restore with 'agents sessions import'.\n\n--to-r2 uploads each session to the r2.backups bucket instead of a local file,\none encrypted object per transcript keyed by machine/agent/session. Bodies are\nsealed with the shared R2_SYNC_ENC_KEY when present. Restore on any box on the\nsame bundle with 'agents sessions import --from-r2'.",
           "subcommands": []
         },
         {
@@ -23182,6 +23191,15 @@
               "negate": false
             },
             {
+              "flags": "--from-r2",
+              "description": "Restore session backups from Cloudflare R2 (requires the r2.backups bundle)",
+              "long": "--from-r2",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-h, --help",
               "description": "Show help",
               "short": "-h",
@@ -23192,8 +23210,8 @@
               "negate": false
             }
           ],
-          "examples": "# Preview what a bundle would restore\nagents sessions import week.bundle --dry-run\n\n# Restore it\nagents sessions import week.bundle\n\n# Pull straight off another machine (one command, over SSH)\nagents sessions import --from-host yosemite-s1 --since 7d\n\n# Or the equivalent raw pipe\nagents ssh boxB 'agents sessions export --since 7d --stdout' | agents sessions import -",
-          "notes": "Sessions land under the cross-machine mirror keyed by their origin machine, so\nthey show up in 'agents sessions' tagged with that machine and never overwrite\nyour own local sessions. Byte-exact duplicates are skipped. --from-host reuses\nthe same SSH transport as the cross-machine listing (no R2, no daemon).",
+          "examples": "# Preview what a bundle would restore\nagents sessions import week.bundle --dry-run\n\n# Restore it\nagents sessions import week.bundle\n\n# Pull straight off another machine (one command, over SSH)\nagents sessions import --from-host yosemite-s1 --since 7d\n\n# Or the equivalent raw pipe\nagents ssh boxB 'agents sessions export --since 7d --stdout' | agents sessions import -\n\n# Restore everything backed up to R2 (e.g. on a fresh box)\nagents sessions import --from-r2",
+          "notes": "Sessions land under the cross-machine mirror keyed by their origin machine, so\nthey show up in 'agents sessions' tagged with that machine and never overwrite\nyour own local sessions. Byte-exact duplicates are skipped. --from-host reuses\nthe same SSH transport as the cross-machine listing (no R2, no daemon).\n\n--from-r2 downloads every session backup in the r2.backups bucket and restores\nit through the same placement, using the shared R2_SYNC_ENC_KEY to decrypt (or\npass --decrypt <key>). It is the inverse of 'sessions export --to-r2'.",
           "subcommands": []
         },
         {
