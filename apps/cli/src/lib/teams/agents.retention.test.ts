@@ -258,12 +258,15 @@ describe('isWorktreeClaimed distinguishes an orphan worktree from a live teammat
     expect(await mgr.isWorktreeClaimed('nothing-claims-this')).toBe(true);
   });
 
-  it('answers unclaimed when the records directory is genuinely absent (ENOENT)', async () => {
-    const base = tmpBase();
-    dirs.push(base);
-    fs.rmSync(base, { recursive: true, force: true });
-
-    const mgr = new AgentManager(50, base);
-    expect(await mgr.isWorktreeClaimed('anything')).toBe(false);
-  });
+  // The readdir-ENOENT branch of isWorktreeClaimed ("no records dir at all →
+  // nothing claims anything") is deliberately NOT unit-tested here. It cannot be
+  // reached through AgentManager without mocking, which this repo forbids:
+  // doInitialize() runs `fs.mkdir(agentsDir, { recursive: true })`, so the
+  // directory always exists by the time readdir runs, and a test that deletes it
+  // first passes through the empty-directory path instead — asserting the right
+  // answer for the wrong reason. Deleting it also races doInitialize (which is
+  // fire-and-forget) and surfaced as an unhandled
+  // `ENOENT: scandir '/tmp/agents-retention-*'` that failed the CI shard while
+  // every test in it passed. The per-record ENOENT branch IS covered, by the
+  // no-meta.json case in the test above.
 });
