@@ -144,9 +144,11 @@ export class SessionWatcher {
     filePath: string,
     agentType: SessionFactPayload['agentType'],
   ): Promise<void> {
+    let birthtimeMs = 0;
     let mtimeMs = Date.now();
     try {
       const stat = await fs.promises.stat(filePath);
+      birthtimeMs = stat.birthtimeMs;
       mtimeMs = stat.mtimeMs;
     } catch {
       return; // file vanished between event and parse
@@ -157,6 +159,7 @@ export class SessionWatcher {
       agentType,
       filePath,
       fileSessionId: sessionIdFromFile(filePath),
+      birthtimeMs,
       mtimeMs,
       forkedFromId: parsed.forkedFromId,
       codexCwd: parsed.codexCwd,

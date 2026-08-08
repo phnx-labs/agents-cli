@@ -46,12 +46,13 @@ export interface HydratePlanDeps {
 /**
  * Plan which tabs a single active-map fetch can hydrate.
  *
- * Only tabs that still need hydration AND whose AGENT_TERMINAL_ID the map
- * resolves to a usable canonical id are included. An empty / partial map (the
- * post-launch indexing race, where the remote session is not indexed yet) plans
- * nothing — the caller retries on the next poll tick. All tabs sharing one host
- * resolve from the one map, so every sibling enters the plan from a single
- * fetch (no per-tab SSH stream).
+ * Tabs whose stored id differs from the authoritative AGENT_TERMINAL_ID mapping
+ * are included even when the stale value is already a clean UUID. This repairs
+ * a fresh Codex tab that provisionally adopted an older same-cwd rollout before
+ * its own rollout was indexed. An empty / partial map plans nothing — the caller
+ * retries on the next poll tick. All tabs sharing one host resolve from the one
+ * map, so every sibling enters the plan from a single fetch (no per-tab SSH
+ * stream).
  */
 export function planActiveMapHydration(
   map: Map<string, string>,
@@ -60,11 +61,12 @@ export function planActiveMapHydration(
 ): HydratePlanEntry[] {
   const plan: HydratePlanEntry[] = [];
   for (const tab of tabs) {
-    if (!deps.needsHydrate(tab.sessionId)) continue;
     const raw = map.get(tab.id);
     if (!raw) continue;
     const canonicalId = deps.canonical(raw);
     if (!canonicalId) continue;
+    const currentCanonicalId = tab.sessionId ? deps.canonical(tab.sessionId) : '';
+    if (!deps.needsHydrate(tab.sessionId) && currentCanonicalId === canonicalId) continue;
     plan.push({ id: tab.id, canonicalId });
   }
   return plan;

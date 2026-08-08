@@ -49,6 +49,13 @@ describe('planActiveMapHydration', () => {
     expect(planActiveMapHydration(new Map([['CX1', UUID]]), tabs, deps)).toEqual([]);
   });
 
+  test('a clean but stale UUID is replaced by the terminal-id map', () => {
+    const tabs: RemoteAutoLabelTab[] = [{ id: 'CX1', host: 'yosemite-m1', sessionId: UUID }];
+    expect(planActiveMapHydration(new Map([['CX1', UUID_B]]), tabs, deps)).toEqual([
+      { id: 'CX1', canonicalId: UUID_B },
+    ]);
+  });
+
   test('a dirty Codex rollout stem is canonicalized to its UUID', () => {
     const stem = `rollout-2026-08-07T10-00-00-${UUID}.jsonl`;
     const tabs: RemoteAutoLabelTab[] = [{ id: 'CX1', host: 'yosemite-m1', sessionId: stem }];

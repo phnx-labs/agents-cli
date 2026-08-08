@@ -25,6 +25,8 @@ import {
   getAgentsBinPath,
   startDetached,
   startDaemon,
+  isDaemonAutostartCircuitOpen,
+  DAEMON_AUTOSTART_FAILURE_LIMIT,
   writeOwnerOnlyServiceManifest,
   ensureDaemonStarted,
   isDaemonRunning,
@@ -42,6 +44,7 @@ import {
   reapStrayDaemons,
 } from './daemon.js';
 import { getDaemonDir } from './state.js';
+import { readSubsystemHealth, recordSubsystemOk, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
 import { ipcEndpoint } from './platform/index.js';
 
 const systemdQuote = (value: string): string =>
@@ -150,6 +153,56 @@ describe('generateLaunchdPlist', () => {
     const plist = generateLaunchdPlist();
     expect(plist).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
     expect(plist).not.toContain('sk-ant-oat01-abc123');
+  });
+});
+
+// RUSH-2418: crash-loop prevention had no application-level guarantee at all —
+// only the OS supervisor's retry, uncapped. `KeepAlive` with no
+// `ThrottleInterval` lets launchd relaunch on its ~10s default, so a daemon that
+// dies while booting is restarted six times a minute forever. This is the same
+// defect the menu-bar helper already fixed (`menubar/install-menubar.ts:308`,
+// pinned by install-menubar.test.ts's "sets a ThrottleInterval so a startup
+// crash-loop cannot respawn every 10s"), applied to the daemon's own plist.
+describe('generateLaunchdPlist — crash-loop throttle (RUSH-2418)', () => {
+  it('sets a ThrottleInterval so a startup crash-loop cannot respawn every 10s', () => {
+    const plist = generateLaunchdPlist();
+    expect(plist).toContain('<key>ThrottleInterval</key>');
+    const seconds = Number(/<key>ThrottleInterval<\/key>\s*<integer>(\d+)<\/integer>/.exec(plist)?.[1]);
+    expect(seconds).toBeGreaterThanOrEqual(30);
+  });
+
+  it('still keeps the daemon alive and starts it at load', () => {
+    const plist = generateLaunchdPlist();
+    expect(plist).toContain('<key>KeepAlive</key>');
+    expect(plist).toContain('<key>RunAtLoad</key>');
+  });
+});
+
+// The systemd half of the same guarantee. `Restart=always` with no `StartLimit*`
+// is an uncapped loop; the burst limit is what lets systemd give up and put the
+// unit in `failed` instead of respawning a broken install forever.
+describe.skipIf(process.platform === 'win32')('generateSystemdUnit — crash-loop limits (RUSH-2418)', () => {
+  it('caps restarts with StartLimitIntervalSec/StartLimitBurst', () => {
+    const unit = generateSystemdUnit();
+    const interval = Number(/StartLimitIntervalSec=(\d+)/.exec(unit)?.[1]);
+    const burst = Number(/StartLimitBurst=(\d+)/.exec(unit)?.[1]);
+    expect(interval).toBeGreaterThan(0);
+    expect(burst).toBeGreaterThan(0);
+    // A cap only caps if the window is long enough to contain the bursts: burst
+    // restarts paced by RestartSec must fit inside the interval, else the
+    // counter resets before the limit is reached and nothing is bounded.
+    const restartSec = Number(/RestartSec=(\d+)/.exec(unit)?.[1]);
+    expect(burst * restartSec).toBeLessThanOrEqual(interval);
+  });
+
+  it('declares the limits in [Unit], where systemd reads them', () => {
+    // StartLimitIntervalSec/StartLimitBurst moved from [Service] to [Unit] in
+    // systemd 229. Left in [Service] they are ignored on every modern system —
+    // a cap that reads correct and does nothing.
+    const unit = generateSystemdUnit();
+    const unitSection = unit.slice(unit.indexOf('[Unit]'), unit.indexOf('[Service]'));
+    expect(unitSection).toContain('StartLimitIntervalSec=');
+    expect(unitSection).toContain('StartLimitBurst=');
   });
 });
 
@@ -1047,6 +1100,104 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
     },
     60_000,
   );
+
+  // RUSH-2421: the postcondition covered the two sockets and the process, but
+  // not the three state files a graceful handleShutdown removes — the lifetime
+  // marker, the heartbeat, and this pid's instance-registry entry. On the
+  // ESCALATED path handleShutdown never runs, so all three outlived the daemon
+  // while the stop still reported `ok: true`. They are not cosmetic: a leftover
+  // heartbeat is what resolveLiveDaemonPid consults to re-adopt a daemon whose
+  // pid file is gone, so a dead daemon can read as running.
+  it.skipIf(process.platform === 'win32')(
+    'killTree path: reclaims the lifetime marker, heartbeat and registry entry the dead daemon left',
+    async () => {
+      const home = mkHome();
+      const wedge = spawn(
+        process.execPath,
+        ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);", '__daemon-run'],
+        { detached: true, stdio: 'ignore' },
+      );
+      wedge.unref();
+      try {
+        expect(wedge.pid).toBeTruthy();
+        const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+        fs.mkdirSync(path.join(daemonDir, 'instances'), { recursive: true });
+        fs.writeFileSync(daemonPidFile(home), String(wedge.pid));
+        fs.writeFileSync(path.join(daemonDir, 'instances', String(wedge.pid)), 'node -e ... __daemon-run');
+        // Exactly what a live daemon writes: `<pid>:<epochMs>` and a fresh
+        // heartbeat naming the same pid.
+        const lifetimePath = path.join(daemonDir, 'daemon.lifetime');
+        const heartbeatPath = path.join(daemonDir, 'heartbeat.json');
+        fs.writeFileSync(lifetimePath, `${wedge.pid}:${Date.now()}`);
+        fs.writeFileSync(heartbeatPath, JSON.stringify({ lastTick: new Date().toISOString(), pid: wedge.pid }));
+
+        const { result } = runStop(home);
+
+        expect(result.escalated).toBe(true);   // SIGTERM ignored → killTree, no handleShutdown
+        expect(result.ok).toBe(true);
+        expect(result.surviving).toEqual([]);
+        // Every one of the three is reported AND actually gone from disk.
+        expect(result.released).toContain('daemon lifetime marker (reclaimed)');
+        expect(result.released).toContain('daemon heartbeat (reclaimed)');
+        expect(result.released).toContain('daemon instance registry entry (reclaimed)');
+        expect(fs.existsSync(lifetimePath)).toBe(false);
+        expect(fs.existsSync(heartbeatPath)).toBe(false);
+        expect(fs.existsSync(path.join(daemonDir, 'instances', String(wedge.pid)))).toBe(false);
+      } finally {
+        try { if (wedge.pid) process.kill(wedge.pid, 'SIGKILL'); } catch { /* gone */ }
+        if (wedge.pid) await waitFor(() => !alive(wedge.pid!), 5_000);
+        await rmHome(home);
+      }
+    },
+    60_000,
+  );
+
+  // The other half of the same rule: reclaim only what a provably DEAD owner
+  // left. A successor daemon that started during the stop owns a lifetime marker
+  // and heartbeat naming ITS live pid, and deleting those would break it — the
+  // same reasoning the broker-socket branch uses for a standalone owner.
+  it.skipIf(process.platform === 'win32')(
+    'never reclaims a lifetime marker or heartbeat owned by a LIVE daemon',
+    async () => {
+      const home = mkHome();
+      // The daemon being stopped: a wedge that ignores SIGTERM.
+      const wedge = spawn(
+        process.execPath,
+        ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);", '__daemon-run'],
+        { detached: true, stdio: 'ignore' },
+      );
+      wedge.unref();
+      // A different, genuinely live process standing in for a successor. It is
+      // NOT a __daemon-run, so it is not a "surviving daemon" — only the owner
+      // recorded in the two state files.
+      const successor = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { detached: true, stdio: 'ignore' });
+      successor.unref();
+      try {
+        const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+        fs.mkdirSync(path.join(daemonDir, 'instances'), { recursive: true });
+        fs.writeFileSync(daemonPidFile(home), String(wedge.pid));
+        const lifetimePath = path.join(daemonDir, 'daemon.lifetime');
+        const heartbeatPath = path.join(daemonDir, 'heartbeat.json');
+        fs.writeFileSync(lifetimePath, `${successor.pid}:${Date.now()}`);
+        fs.writeFileSync(heartbeatPath, JSON.stringify({ lastTick: new Date().toISOString(), pid: successor.pid }));
+
+        const { result } = runStop(home);
+
+        expect(result.released).toContain('daemon lifetime marker (owned by a live daemon)');
+        expect(result.released).toContain('daemon heartbeat (owned by a live daemon)');
+        // The live owner's state is untouched — reclaiming it would be the bug.
+        expect(fs.existsSync(lifetimePath)).toBe(true);
+        expect(fs.existsSync(heartbeatPath)).toBe(true);
+      } finally {
+        for (const p of [wedge.pid, successor.pid]) {
+          try { if (p) process.kill(p, 'SIGKILL'); } catch { /* gone */ }
+        }
+        for (const p of [wedge.pid, successor.pid]) { if (p) await waitFor(() => !alive(p), 5_000); }
+        await rmHome(home);
+      }
+    },
+    60_000,
+  );
 });
 
 /**
@@ -1088,6 +1239,157 @@ describe('ensureDaemonStarted (#415: always-on beyond routines)', () => {
     // The pid file still points at the single owning process throughout.
     expect(readDaemonPid()).toBe(process.pid);
   });
+});
+
+// RUSH-2418: `daemon-health.ts`'s `consecutiveFailures` was write-only telemetry
+// — recorded, surfaced by `agents daemon status`, and consulted by nothing. So a
+// daemon that died on boot was relaunched by EVERY foreground command that
+// wanted one (secrets unlock, browser start, watchdog, ...): an application-level
+// crash loop the OS supervisor's throttle cannot even see, because each attempt
+// is a fresh service start rather than a respawn.
+//
+// This drives the REAL failure path — an unspawnable daemon binary, five times —
+// and asserts the sixth AUTO-start refuses while the explicit override still
+// runs.
+describe('daemon auto-start circuit breaker (RUSH-2418)', () => {
+  let tmpHome = '';
+  const saved: Record<string, string | undefined> = {};
+  const BAD_BIN = '/nonexistent/agents-cli-does-not-exist';
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'agd-2418-'));
+    for (const k of ['HOME', 'PATH', 'AGENTS_DAEMON_DIR']) saved[k] = process.env[k];
+
+    // A service-manager shim that always fails, so every start deterministically
+    // falls through to the detached spawn — which then fails on the missing
+    // binary. No real launchd/systemd unit is ever touched.
+    const shimDir = path.join(tmpHome, 'bin');
+    fs.mkdirSync(shimDir, { recursive: true });
+    for (const name of ['systemctl', 'launchctl']) {
+      const p = path.join(shimDir, name);
+      fs.writeFileSync(p, '#!/bin/sh\nexit 1\n', 'utf-8');
+      fs.chmodSync(p, 0o755);
+    }
+
+    process.env.HOME = tmpHome;
+    process.env.AGENTS_DAEMON_DIR = path.join(tmpHome, 'daemon');
+    process.env.PATH = `${shimDir}${path.delimiter}${saved.PATH ?? ''}`;
+    fs.mkdirSync(process.env.AGENTS_DAEMON_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    if (tmpHome) fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  // THE case this breaker exists for, and the one an outcome-shaped check
+  // cannot see: a daemon binary that SPAWNS FINE and then dies. `startDetached`
+  // returns a real `child.pid`, so the launcher has no error to observe — the
+  // first version of this fix counted only unspawnable binaries and let ten
+  // consecutive crash-loop starts through with the breaker still closed.
+  it.skipIf(process.platform === 'win32')(
+    'counts a daemon that spawns successfully and then dies — not just an unspawnable binary',
+    () => {
+      // Exits 0 immediately: a perfectly spawnable binary that never becomes a
+      // daemon, i.e. exactly a startup crash loop.
+      const dyingBin = path.join(tmpHome, 'dying-daemon.js');
+      fs.writeFileSync(dyingBin, 'process.exit(0);\n', 'utf-8');
+
+      for (let i = 1; i <= DAEMON_AUTOSTART_FAILURE_LIMIT; i++) {
+        const res = startDaemon(dyingBin);
+        expect(res.pid).toBeTruthy(); // the spawn SUCCEEDS — nothing to catch
+        expect(readSubsystemHealth(SUBSYSTEM_DAEMON_START)?.consecutiveFailures).toBe(i);
+      }
+      expect(isDaemonAutostartCircuitOpen()).toBe(true);
+      expect(ensureDaemonStarted()).toBeNull();
+    },
+    30_000,
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'opens after N consecutive failed starts, and the explicit override is still allowed',
+    () => {
+      // Nothing recorded yet — the breaker must start closed, or a healthy box
+      // would never auto-start at all. (Asserted on the predicate rather than by
+      // calling ensureDaemonStarted, which would spawn a real daemon here.)
+      expect(isDaemonAutostartCircuitOpen()).toBe(false);
+
+      // Each failed start bumps the streak. Loop from 1 so the assertion below
+      // proves the counter tracks attempts rather than merely being non-zero.
+      for (let i = 1; i <= DAEMON_AUTOSTART_FAILURE_LIMIT; i++) {
+        expect(() => startDaemon(BAD_BIN)).toThrow(/no PID/i);
+        expect(readSubsystemHealth(SUBSYSTEM_DAEMON_START)?.consecutiveFailures).toBe(i);
+      }
+      expect(isDaemonAutostartCircuitOpen()).toBe(true);
+
+      // The point of the ticket: the next AUTO-start refuses instead of
+      // re-entering the loop, and says where to look.
+      const warnings: string[] = [];
+      const realWrite = process.stderr.write.bind(process.stderr);
+      process.stderr.write = ((chunk: any, ...rest: any[]) => {
+        warnings.push(String(chunk));
+        return (realWrite as any)(chunk, ...rest);
+      }) as typeof process.stderr.write;
+      try {
+        expect(ensureDaemonStarted()).toBeNull();
+      } finally {
+        process.stderr.write = realWrite;
+      }
+      expect(warnings.join('')).toMatch(/agents daemon doctor/);
+
+      // ...while `agents daemon start` — the operator's deliberate override —
+      // is NOT gated: it still attempts, and still fails loudly on the real
+      // cause rather than on the breaker.
+      expect(() => startDaemon(BAD_BIN)).toThrow(/no PID/i);
+
+      // An already-live daemon is still reported while the breaker is open — it
+      // gates launching one, not answering "is one up?". Without this ordering a
+      // stale streak would make a healthy daemon read as absent to every caller
+      // that branches on the return value.
+      writeDaemonPid(process.pid);
+      expect(ensureDaemonStarted()?.method).toBe('already-running');
+      removeDaemonPid();
+
+      // A daemon that actually comes up clears the streak — runDaemon records
+      // the success side only once it has claimed — so the breaker closes again.
+      recordSubsystemOk(SUBSYSTEM_DAEMON_START);
+      expect(isDaemonAutostartCircuitOpen()).toBe(false);
+    },
+    30_000,
+  );
+
+  // The third layer (RUSH-2418): `src/index.ts` awaited runDaemon() with no
+  // try/catch and there was no `uncaughtException`/`unhandledRejection` handler
+  // anywhere in apps/cli/src, so a startup throw died on Node's default handler
+  // — a raw stack to whatever the service manager had on stdout, nothing in
+  // logs.jsonl, and an exit code that depended on how it died. Drive the real
+  // `__daemon-run` entrypoint into a startup failure and assert it now exits
+  // non-zero deterministically with a named reason.
+  it.skipIf(process.platform === 'win32')(
+    'a startup failure exits non-zero with a named reason instead of a raw stack',
+    async () => {
+      if (!fs.existsSync(DIST_ENTRY)) {
+        execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
+      }
+      // A daemon dir that is a FILE: getDaemonDir()'s mkdirSync throws on the
+      // first thing runDaemon does (claimDaemonInstance -> getLockPath).
+      const notADir = path.join(tmpHome, 'daemon-dir-is-a-file');
+      fs.writeFileSync(notADir, 'not a directory', 'utf-8');
+
+      const env = { ...process.env, HOME: tmpHome, AGENTS_DAEMON_DIR: notADir };
+      delete env.CLAUDE_CODE_OAUTH_TOKEN;
+      const run = spawnSync(process.execPath, [DIST_ENTRY, '__daemon-run'], {
+        env, encoding: 'utf-8', timeout: 30_000,
+      });
+
+      expect(run.status).toBe(1);
+      expect(`${run.stderr}${run.stdout}`).toMatch(/daemon (startup failure|uncaughtException)/);
+    },
+    45_000,
+  );
 });
 
 describe('shouldTakeOverBroker (RUSH-1817: daemon self-heals a dead standalone)', () => {

@@ -189,6 +189,65 @@ describeDaemon('agents daemon', () => {
     expect(res.stdout).toContain('Daemon is not running');
   });
 
+  // RUSH-2418: the auto-start circuit breaker tells the operator to "Run
+  // 'agents daemon doctor'", so doctor has to be able to answer them. Before
+  // this, `runDoctor` read only the secrets-broker and browser-IPC health
+  // records, so following that instruction produced "Daemon is not running.
+  // Start it: agents daemon start" — the exact action the breaker had just
+  // refused, with no mention of a breaker, a streak, or the cause.
+  it('doctor reports an open auto-start circuit breaker, with the recorded cause', () => {
+    const home = makeHome();
+    const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+    fs.mkdirSync(daemonDir, { recursive: true });
+    // The record a run of failed starts leaves behind, written in the same shape
+    // recordSubsystemError produces.
+    fs.writeFileSync(path.join(daemonDir, 'health.json'), JSON.stringify({
+      'daemon-start': {
+        subsystem: 'daemon-start',
+        lastError: 'start issued; no daemon has reported healthy since',
+        lastErrorAt: new Date().toISOString(),
+        consecutiveFailures: 5,
+        lastOkAt: null,
+      },
+    }), 'utf-8');
+
+    const res = run(home, ['doctor', '--json']);
+    expect(res.status).toBe(1);
+    const problems: string[] = JSON.parse(res.stdout).problems;
+    const breaker = problems.find((p) => p.includes('auto-start is disabled'));
+    expect(breaker).toBeDefined();
+    expect(breaker).toContain('5 consecutive');
+    expect(breaker).toContain('start issued; no daemon has reported healthy since');
+  });
+
+  // A start is marked failed the moment it is issued and cleared once the daemon
+  // finishes booting, so a sub-threshold streak on a LIVE daemon is just the boot
+  // window — reporting it would be a false alarm that clears itself a second
+  // later. The open breaker is still reported unconditionally; only the
+  // sub-threshold warning is scoped to a daemon that is actually down.
+  it('doctor does not report a sub-threshold start streak while the daemon is running', () => {
+    const home = makeHome();
+    const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+    fs.mkdirSync(daemonDir, { recursive: true });
+    fs.writeFileSync(path.join(daemonDir, 'health.json'), JSON.stringify({
+      'daemon-start': {
+        subsystem: 'daemon-start',
+        lastError: 'start issued; no daemon has reported healthy since',
+        lastErrorAt: new Date().toISOString(),
+        consecutiveFailures: 1,
+        lastOkAt: null,
+      },
+    }), 'utf-8');
+    // A live "daemon": this test process, recorded as the pid-file owner, so
+    // getDaemonStatus() reports running against a real live pid.
+    fs.writeFileSync(path.join(daemonDir, 'daemon.pid'), String(process.pid), 'utf-8');
+
+    const res = run(home, ['doctor', '--json']);
+    const problems: string[] = JSON.parse(res.stdout).problems;
+    expect(problems.some((p) => p.includes('consecutive failure'))).toBe(false);
+    expect(problems.some((p) => p.includes('Daemon is not running'))).toBe(false);
+  });
+
   it('doctor does not flag "not running" once the daemon is disabled for this device', () => {
     // Hosted-service problems can still fire here — the secrets broker/browser
     // IPC probes are real sockets, not scoped to this install. Duplicate-process

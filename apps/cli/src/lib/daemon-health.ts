@@ -11,9 +11,10 @@
  *
  * Scheduled routines get this for free once migrated onto `agents routines`
  * (their run history already carries success/failure — `agents routines
- * stats`). This module exists for the two subsystems that predate routines
- * and have no run history of their own: the secrets broker and the browser
- * IPC server.
+ * stats`). This module exists for the subsystems that predate routines and have
+ * no run history of their own: the secrets broker and the browser IPC server,
+ * plus the daemon's own startup (`SUBSYSTEM_DAEMON_START`, RUSH-2418) — which
+ * is the one record that also GATES behaviour rather than only reporting it.
  *
  * File-backed (one JSON object keyed by subsystem name) rather than in-memory
  * because `agents daemon status` runs as a SEPARATE process from the daemon —
@@ -28,6 +29,15 @@ const HEALTH_FILE = 'health.json';
 /** Stable subsystem identifiers shared by the daemon (writer) and `agents daemon` (reader). */
 export const SUBSYSTEM_SECRETS_BROKER = 'secrets-broker';
 export const SUBSYSTEM_BROWSER_IPC = 'browser-ipc';
+/**
+ * Daemon startup itself (RUSH-2418). Unlike the two above, this record is
+ * written from BOTH sides: the launching CLI records a start that produced no
+ * live daemon, and the daemon records its own successful claim. Its
+ * `consecutiveFailures` is what `ensureDaemonStarted` reads to open the
+ * auto-start circuit breaker, so a daemon dying on boot stops being relaunched
+ * by every foreground command that happens to want one.
+ */
+export const SUBSYSTEM_DAEMON_START = 'daemon-start';
 
 /** One subsystem's health as of the last time it reported in. */
 export interface SubsystemHealth {
@@ -90,6 +100,26 @@ export function recordSubsystemError(subsystem: string, error: string, at: strin
     lastErrorAt: at,
     consecutiveFailures: existing.consecutiveFailures + 1,
   };
+  writeAll(all);
+}
+
+/**
+ * Refine the reason on an already-counted failure, without bumping the streak.
+ *
+ * Exists because a start is counted BEFORE its outcome is known (RUSH-2418):
+ * the launcher marks the attempt, then replaces the provisional reason with the
+ * real one if it fails outright. Calling `recordSubsystemError` a second time
+ * would count one failed start as two.
+ *
+ * Describing a failure that was never counted would be a lie in the other
+ * direction — a `lastError` with `consecutiveFailures: 0` — so an unreported
+ * subsystem is left alone rather than given a blank record to decorate.
+ */
+export function recordSubsystemErrorReason(subsystem: string, error: string, at: string = new Date().toISOString()): void {
+  const all = readAll();
+  const existing = all[subsystem];
+  if (!existing) return;
+  all[subsystem] = { ...existing, lastError: error, lastErrorAt: at };
   writeAll(all);
 }
 

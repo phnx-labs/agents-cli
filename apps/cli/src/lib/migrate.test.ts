@@ -5,7 +5,7 @@ import { spawnSync, spawn } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'url';
 
-import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToRoutine, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
+import { migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateKimiSubagentsToMarkdown, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToRoutine, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
 import { toPosix } from './platform/index.js';
 import * as yaml from 'yaml';
 
@@ -847,5 +847,59 @@ describe('seedActiveCursorLoginPerVersion', () => {
     process.env.AGENTS_REAL_HOME = home;
     seedActiveCursorLoginPerVersion();
     expect(fs.existsSync(path.join(versionHome, '.config', 'cursor', 'auth.json'))).toBe(false);
+  });
+});
+
+describe('migrateKimiSubagentsToMarkdown', () => {
+  /**
+   * Seed a kimi version home's agents dir with `files` and return its path.
+   */
+  function seedKimiHome(versionsDir: string, version: string, files: Record<string, string>): string {
+    const dir = path.join(versionsDir, 'kimi', version, 'home', '.kimi-code', 'agents');
+    fs.mkdirSync(dir, { recursive: true });
+    for (const [name, body] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), body);
+    return dir;
+  }
+
+  it('removes the legacy pair and the managed index, across every version home', () => {
+    const versions = makeTempHistoryDir();
+    const a = seedKimiHome(versions, '0.29.0', {
+      'code-reviewer.yaml': 'version: 1\n',
+      'code-reviewer.system.md': 'legacy prompt body',
+      '_agents-cli.yaml': 'version: 1\n',
+      'code-reviewer.md': '---\nname: code-reviewer\ndescription: x\n---\n\nbody',
+    });
+    const b = seedKimiHome(versions, '0.34.0', {
+      'planner.yaml': 'version: 1\n',
+      'planner.system.md': 'legacy prompt body',
+    });
+
+    migrateKimiSubagentsToMarkdown(versions);
+
+    expect(fs.readdirSync(a)).toEqual(['code-reviewer.md']);
+    expect(fs.readdirSync(b)).toEqual([]);
+  });
+
+  it('leaves a subagent legitimately named <x>.system alone (no sibling .yaml)', () => {
+    const versions = makeTempHistoryDir();
+    const dir = seedKimiHome(versions, '0.29.0', {
+      'foo.system.md': '---\nname: foo.system\ndescription: mine\n---\n\nbody',
+      'keeper.yaml': 'version: 1\n',
+    });
+
+    migrateKimiSubagentsToMarkdown(versions);
+
+    // `foo.system.md` has no `foo.yaml` beside it, so it is not a legacy pair;
+    // `keeper.yaml` has no sibling prompt, so it is not ours to delete either.
+    expect(fs.readdirSync(dir).sort()).toEqual(['foo.system.md', 'keeper.yaml']);
+  });
+
+  it('is idempotent and a no-op with no kimi installed', () => {
+    const versions = makeTempHistoryDir();
+    expect(() => migrateKimiSubagentsToMarkdown(versions)).not.toThrow();
+    const dir = seedKimiHome(versions, '0.29.0', { 'x.yaml': 'v: 1\n', 'x.system.md': 'p' });
+    migrateKimiSubagentsToMarkdown(versions);
+    migrateKimiSubagentsToMarkdown(versions);
+    expect(fs.readdirSync(dir)).toEqual([]);
   });
 });

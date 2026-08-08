@@ -181,6 +181,8 @@ export interface SessionFactPayload {
   filePath: string;
   /** session id derived from the filename. */
   fileSessionId: string;
+  /** File creation time; distinguishes a new tab's rollout from old same-cwd files. */
+  birthtimeMs: number;
   mtimeMs: number;
   forkedFromId?: string;
   codexCwd?: string;

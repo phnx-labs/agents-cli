@@ -124,6 +124,7 @@ export const loadFunnel: ModuleLoader = async () => (await import('../../command
 export const loadHumans: ModuleLoader = async () => (await import('../../commands/humans.js')).registerHumansCommands;
 export const loadAccounts: ModuleLoader = async () => (await import('../../commands/accounts.js')).registerAccountsCommand;
 export const loadDaemon: ModuleLoader = async () => (await import('../../commands/daemon.js')).registerDaemonCommand;
+export const loadPr: ModuleLoader = async () => (await import('../../commands/pr.js')).registerPrCommands;
 
 /**
  * Commands whose modules pull in the SQLite-backed session/cloud stack. They are
@@ -277,11 +278,15 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   mailbox: [loadMailboxes],
   serve: [loadServe],
   share: [loadShare],
+  // `unshare` is a top-level convenience alias of `share delete` (see
+  // commands/share.ts) — same module, registered as its own program.command().
+  unshare: [loadShare],
   audit: [loadAudit],
   webhook: [loadWebhook],
   funnel: [loadFunnel],
   humans: [loadHumans],
   daemon: [loadDaemon],
+  pr: [loadPr],
 };
 
 /**

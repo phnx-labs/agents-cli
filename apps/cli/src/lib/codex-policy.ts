@@ -1,5 +1,7 @@
+import * as fs from 'fs';
 import { getUserAgentsDir } from './state.js';
 import { codexDefaultWritableRoots } from './permissions.js';
+import { repoAgentsDirForCwd } from './project-key.js';
 
 export type CodexPolicyMode = 'plan' | 'edit' | 'skip';
 
@@ -10,8 +12,21 @@ function unique(values: string[]): string[] {
   return [...new Set(values)];
 }
 
-export function codexEditWritableRoots(): string[] {
-  return unique([getUserAgentsDir(), ...codexDefaultWritableRoots()]);
+/**
+ * Writable roots for Codex's `edit` profile: the managed user `.agents` dir, the
+ * baseline toolchain caches, and — when `cwd` is inside a repo — that repo's
+ * `.agents` directory. The last entry is what lets an in-repo build write under
+ * `.agents/worktrees/`; Codex's `workspace-write` sandbox hardcodes `.agents/`
+ * read-only, and naming the directory as an explicit writable root is the only
+ * thing that overrides it (a nested sub-path does not — bwrap refuses the mount).
+ */
+export function codexEditWritableRoots(cwd?: string): string[] {
+  const repoAgents = repoAgentsDirForCwd(cwd);
+  // Only widen the sandbox for a `.agents` that actually exists — most repos
+  // have none, and there is no point naming a directory that isn't there. (Codex
+  // tolerates a missing writable root, so this is tidiness, not a hard guard.)
+  const repoRoots = repoAgents && fs.existsSync(repoAgents) ? [repoAgents] : [];
+  return unique([getUserAgentsDir(), ...codexDefaultWritableRoots(), ...repoRoots]);
 }
 
 function inlineWorkspaceRoots(roots: string[]): string {

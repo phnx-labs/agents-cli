@@ -694,7 +694,12 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       skills: true,
       commands: false,
       plugins: true,
-      subagents: true, // YAML agent files under ~/.kimi-code/agents/ (see transformSubagentForKimi)
+      // Claude-shaped agent markdown under ~/.kimi-code/agents/. kimi-code
+      // discovers that dir from `USER_BRAND_DIRS = ["agents"]` (agent-file
+      // discovery, added in 0.29.0); 0.28.x and older compile their four agent
+      // profiles into the bundle with no filesystem loader at all, so a synced
+      // file there is never read.
+      subagents: { since: '0.29.0' },
       rules: { file: 'AGENTS.md' },
       workflows: true,
       memory: false,

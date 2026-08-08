@@ -29,7 +29,7 @@ import { redactSecrets } from './redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from './cli-entry.js';
 import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from './device-config.js';
 import { reapTerminalRoutineProcesses } from './routine-process-cleanup.js';
-import { recordSubsystemOk, recordSubsystemError, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC } from './daemon-health.js';
+import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from './daemon-health.js';
 
 const PID_FILE = 'daemon.pid';
 const LIFETIME_FILE = 'daemon.lifetime';
@@ -50,6 +50,36 @@ const MONITOR_TICK_MS = 60_000;
  */
 const CATCHUP_TICK_MS = 5 * 60_000;
 const WEDGE_THRESHOLD_TICKS = 3;
+
+/**
+ * Crash-loop prevention (RUSH-2418). Three layers, because none of them alone
+ * bounds a daemon that dies during startup:
+ *
+ * 1. **The OS supervisor paces the respawn.** `KeepAlive` with no
+ *    `ThrottleInterval` lets launchd relaunch on its ~10s default, so a daemon
+ *    that dies while booting is restarted six times a minute forever — the exact
+ *    failure the menu-bar helper hit (`menubar/install-menubar.ts`: 38 orphaned
+ *    `agents doctor` children, load average 490). systemd's `Restart=always`
+ *    with no `StartLimit*` is the same uncapped loop.
+ * 2. **`StartLimitBurst` gives systemd a real cap** — after this many starts
+ *    inside the interval the unit is put in `failed` and stops respawning, so a
+ *    genuinely broken install stops burning the box and `systemctl --user status`
+ *    names it. launchd has no burst equivalent; the throttle is its whole answer.
+ * 3. **The application-level circuit breaker** below stops *auto*-starts from
+ *    re-entering the loop from the other direction — a foreground command that
+ *    calls `ensureDaemonStarted()` on every invocation.
+ */
+const DAEMON_THROTTLE_SECONDS = 30;
+const DAEMON_START_LIMIT_INTERVAL_SECONDS = 300;
+const DAEMON_START_LIMIT_BURST = 5;
+
+/**
+ * How many consecutive failed daemon starts disable the *implicit* auto-start
+ * (`ensureDaemonStarted`). Matches `DAEMON_START_LIMIT_BURST` so the two layers
+ * give up together rather than one silently masking the other. `agents daemon
+ * start` is the deliberate override and is never gated by this.
+ */
+export const DAEMON_AUTOSTART_FAILURE_LIMIT = 5;
 
 /**
  * RUSH-1817: decide whether the daemon should (re)take over hosting the secrets
@@ -956,6 +986,13 @@ export async function runDaemon(): Promise<void> {
   const stateDirCheckMs = Number(process.env.AGENTS_DAEMON_STATE_DIR_CHECK_MS) || 60_000;
   const stateDirCheckInterval = setInterval(runStateDirSelfCheck, stateDirCheckMs);
 
+  // RUSH-2418: startup is over — the scheduler, browser IPC, broker decision,
+  // monitor engine and every background tick are up. Only NOW does this daemon
+  // clear the auto-start failure streak `ensureDaemonStarted` reads. Clearing it
+  // at claim time instead would reset the breaker for a process that dies while
+  // initializing a subsystem, which is exactly the crash loop it exists to stop.
+  recordSubsystemOk(SUBSYSTEM_DAEMON_START);
+
   const handleReload = () => {
     log('INFO', 'Reloading jobs (SIGHUP)');
     // Refresh user-layer copies of opted-in project routines BEFORE the
@@ -1077,6 +1114,8 @@ ${[launch.command, ...launch.args].map((arg) => `    <string>${xmlEscape(arg)}</
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>${DAEMON_THROTTLE_SECONDS}</integer>
   <key>StandardOutPath</key>
   <string>${logPath}</string>
   <key>StandardErrorPath</key>
@@ -1112,12 +1151,14 @@ export function generateSystemdUnit(
   return `[Unit]
 Description=Agents Daemon - Scheduled Job Runner
 After=network.target
+StartLimitIntervalSec=${DAEMON_START_LIMIT_INTERVAL_SECONDS}
+StartLimitBurst=${DAEMON_START_LIMIT_BURST}
 
 [Service]
 Type=simple
 ExecStart=${execStart}
 Restart=always
-RestartSec=10
+RestartSec=${DAEMON_THROTTLE_SECONDS}
 Environment=PATH=${daemonPathValue(agentsBin, ['/usr/local/bin', '/usr/bin', '/bin'])}
 
 [Install]
@@ -1182,11 +1223,42 @@ export function startDaemon(agentsBin?: string): { pid: number | null; method: s
     releaseLock();
   };
 
+  // RUSH-2418: count starts PESSIMISTICALLY, and let a daemon that reaches
+  // steady state clear the streak itself (`recordSubsystemOk` at the end of
+  // runDaemon's startup). Recording a failure only on an observable error would
+  // miss the crash loop entirely: a daemon that spawns and then dies returns a
+  // perfectly real `child.pid`, so the launcher has no error to see. Every path
+  // out of startDaemonLocked is either pid-truthy or a throw, so an
+  // outcome-shaped check here can only ever catch an unspawnable binary — not
+  // the failure this breaker exists for. Marking the attempt up front and
+  // clearing on proven health inverts that: the streak grows exactly when
+  // starts stop producing a daemon that lives.
+  //
+  // The no-launch returns above (`already-running`, `already-starting`) return
+  // before this point on purpose — they attempted nothing, so they count nothing.
+  recordSubsystemError(SUBSYSTEM_DAEMON_START, 'start issued; no daemon has reported healthy since');
   try {
     return startDaemonLocked(agentsBin ?? getAgentsBinPath(), releaseOnce);
+  } catch (err: any) {
+    // Replace the provisional reason with the real one — the streak is already
+    // counted, this just makes `agents daemon doctor` name the actual cause.
+    recordSubsystemErrorReason(SUBSYSTEM_DAEMON_START, `start failed: ${err?.message ?? String(err)}`);
+    throw err;
   } finally {
     releaseOnce();
   }
+}
+
+/**
+ * Is the auto-start circuit breaker open (RUSH-2418)? True once
+ * {@link DAEMON_AUTOSTART_FAILURE_LIMIT} consecutive starts have failed to
+ * produce a daemon that reported healthy. Pure read of the persisted health
+ * record, and `agents daemon doctor` reports the same record — the message the
+ * breaker prints has to lead somewhere that can explain it.
+ */
+export function isDaemonAutostartCircuitOpen(): boolean {
+  const health = readSubsystemHealth(SUBSYSTEM_DAEMON_START);
+  return (health?.consecutiveFailures ?? 0) >= DAEMON_AUTOSTART_FAILURE_LIMIT;
 }
 
 /**
@@ -1205,6 +1277,26 @@ export function ensureDaemonStarted(): { pid: number | null; method: string } | 
   // explicitly turned off. `agents daemon start` is the deliberate override
   // and calls startDaemon() directly instead of going through this helper.
   if (!isDaemonEnabled()) return null;
+  // A live daemon is the answer whatever the failure history says — the breaker
+  // gates LAUNCHING one, never reporting one that is already up. Checked first
+  // so a stale failure streak can't make a healthy daemon read as absent to
+  // callers that branch on this return (e.g. secrets/agent.ts).
+  if (isDaemonRunning()) return startDaemon();
+  // RUSH-2418: the auto-start circuit breaker. A daemon that dies during
+  // startup would otherwise be relaunched by EVERY foreground command that
+  // wants one (secrets unlock, browser start, watchdog, ...) — an
+  // application-level crash loop the OS supervisor's throttle cannot see,
+  // because each attempt is a fresh service start rather than a respawn. After
+  // DAEMON_AUTOSTART_FAILURE_LIMIT consecutive failures, refuse and say why.
+  // Deliberately NOT applied in startDaemon(): `agents daemon start` is the
+  // operator's override and must always be able to retry.
+  if (isDaemonAutostartCircuitOpen()) {
+    process.stderr.write(
+      `[agents] daemon auto-start disabled after ${DAEMON_AUTOSTART_FAILURE_LIMIT} consecutive failed starts. ` +
+      `Run 'agents daemon doctor' to diagnose, or 'agents daemon start' to retry anyway.\n`,
+    );
+    return null;
+  }
   try {
     return startDaemon();
   } catch {
@@ -1469,6 +1561,85 @@ function waitForPid(timeoutMs: number): number | null {
 }
 
 /**
+ * One piece of daemon state that a graceful `handleShutdown` removes and an
+ * escalated kill leaves behind (RUSH-2421).
+ */
+interface StopResidueArtifact {
+  label: string;
+  present: boolean;
+  /** The file names a pid that is alive and is NOT the daemon we stopped. */
+  ownedByLiveOther: boolean;
+  reclaim: () => void;
+  stillPresent: () => boolean;
+}
+
+/**
+ * Read the pid a state file claims, or null when it is absent/unreadable/not
+ * pid-shaped. The lifetime marker stores `<pid>:<epochMs>`; the heartbeat
+ * stores JSON with a `pid`.
+ */
+function claimedPid(read: () => number | null): number | null {
+  try { return read(); } catch { return null; }
+}
+
+/**
+ * The lifetime marker, heartbeat, and instance-registry entry, described so
+ * {@link stopDaemon} can assert them the same way it asserts the two sockets.
+ *
+ * Ownership, not mere presence, decides: a file naming a pid that is alive and
+ * is not the daemon we just stopped belongs to a DIFFERENT daemon (a successor
+ * that started during the stop, or a peer serving this state dir), and deleting
+ * it would break that live daemon — the same reasoning the broker-socket branch
+ * above uses for a standalone owner. Everything else is residue from a provably
+ * dead owner and is reclaimed.
+ */
+function stopResidueArtifacts(stoppedPid: number | null): StopResidueArtifact[] {
+  const artifacts: StopResidueArtifact[] = [];
+
+  const lifetimePath = path.join(getDaemonDirRoot(), LIFETIME_FILE);
+  const lifetimeOwner = claimedPid(() => {
+    const raw = fs.readFileSync(lifetimePath, 'utf-8').split(':')[0];
+    const n = parseInt(raw, 10);
+    return isNaN(n) ? null : n;
+  });
+  artifacts.push({
+    label: 'daemon lifetime marker',
+    present: fs.existsSync(lifetimePath),
+    ownedByLiveOther: lifetimeOwner !== null && lifetimeOwner !== stoppedPid && isAlive(lifetimeOwner),
+    reclaim: () => { try { fs.unlinkSync(lifetimePath); } catch { /* raced with a fresh start */ } },
+    stillPresent: () => fs.existsSync(lifetimePath),
+  });
+
+  const heartbeatPath = getHeartbeatPath();
+  const hb = readHeartbeat();
+  artifacts.push({
+    label: 'daemon heartbeat',
+    present: fs.existsSync(heartbeatPath),
+    // A stale heartbeat is not cosmetic: resolveLiveDaemonPid() trusts a FRESH
+    // one to re-adopt a daemon whose pid file was lost, so leaving one behind
+    // can make a dead daemon read as running.
+    ownedByLiveOther: hb !== null && hb.pid !== stoppedPid && isAlive(hb.pid),
+    reclaim: () => removeHeartbeat(),
+    stillPresent: () => fs.existsSync(heartbeatPath),
+  });
+
+  // POSIX-only, matching registerDaemonInstance/unregisterDaemonInstance.
+  if (process.platform !== 'win32' && stoppedPid !== null) {
+    const markerPath = path.join(getDaemonInstancesDir(), String(stoppedPid));
+    artifacts.push({
+      label: 'daemon instance registry entry',
+      present: fs.existsSync(markerPath),
+      // The marker is named by pid, so it can only ever be this daemon's.
+      ownedByLiveOther: false,
+      reclaim: () => unregisterDaemonInstance(stoppedPid),
+      stillPresent: () => fs.existsSync(markerPath),
+    });
+  }
+
+  return artifacts;
+}
+
+/**
  * Structured outcome of {@link stopDaemon} (SING-12, RUSH-2355). `stopDaemon`
  * asserts its postcondition instead of assuming it: `ok` is true only when every
  * resource the daemon held is provably released. `surviving` names anything that
@@ -1639,6 +1810,24 @@ export function stopDaemon(): DaemonStopResult {
       if (fs.existsSync(brokerSock)) surviving.push('secrets broker socket not released');
       else released.push('secrets broker socket (reclaimed)');
     }
+  }
+
+  // ── The state files a killed daemon cannot clean up itself (RUSH-2421) ─────
+  // handleShutdown removes the lifetime marker, the heartbeat and this pid's
+  // instance-registry entry — but it only runs on the GRACEFUL path. Every
+  // escalation above (killTree, and the whole win32 branch) skips it, so those
+  // three outlive the daemon and the stop reported `ok: true` while its state
+  // dir still described a daemon that no longer exists. Each is stale metadata
+  // with real consequences: a leftover heartbeat is what `resolveLiveDaemonPid`
+  // consults to re-adopt a "live" daemon, and a leftover registry entry is what
+  // `reapStrayDaemons` enumerates. Same shape as the sockets above — reclaim
+  // what a provably dead owner left, never touch what a live one owns.
+  for (const artifact of stopResidueArtifacts(pid)) {
+    if (!artifact.present) { released.push(artifact.label); continue; }
+    if (artifact.ownedByLiveOther) { released.push(`${artifact.label} (owned by a live daemon)`); continue; }
+    artifact.reclaim();
+    if (artifact.stillPresent()) surviving.push(`${artifact.label} not released`);
+    else released.push(`${artifact.label} (reclaimed)`);
   }
 
   // In-flight detached routine children survive on purpose (SING-11a) — report,

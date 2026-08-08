@@ -14,6 +14,7 @@ mock.module('vscode', () => ({
 const {
   __reset,
   __testRegister,
+  __testCodexSessionBases,
   __testGetStartTime,
   onSessionChanged,
   registerTerminal,
@@ -107,7 +108,19 @@ describe('sessionTracker — Claude fork detection', () => {
 });
 
 describe('sessionTracker — Codex rollout adoption (no prior sessionId)', () => {
-  test('adopts existing rollout file on register when cwd matches', async () => {
+  test('discovers managed Codex version homes instead of only the ~/.codex symlink', () => {
+    const defaultSessions = path.join(tmpDir, '.codex', 'sessions');
+    const managedSessions = path.join(
+      tmpDir, '.agents', '.history', 'versions', 'codex', '0.145.0', 'home', '.codex', 'sessions',
+    );
+    fs.mkdirSync(defaultSessions, { recursive: true });
+    fs.mkdirSync(managedSessions, { recursive: true });
+
+    expect(__testCodexSessionBases(tmpDir)).toContain(fs.realpathSync(defaultSessions));
+    expect(__testCodexSessionBases(tmpDir)).toContain(fs.realpathSync(managedSessions));
+  });
+
+  test('does not bind a new terminal to an old same-cwd rollout', async () => {
     const existingSessionId = '019dcbf2-eeee-7fe1-aa30-1eede3d9e796';
     const term = fakeTerminal('CX-existing');
 
@@ -127,15 +140,34 @@ describe('sessionTracker — Codex rollout adoption (no prior sessionId)', () =>
         cli_version: '0.124.0',
       },
     }) + '\n');
+    await waitMs(20);
 
-    // Register after file already exists — verifies proactive backfill.
-    __testRegister(term, 'codex', [tmpDir], undefined);
+    // Register after the file already exists: a fresh terminal must ignore it.
+    __testRegister(term, 'codex', [tmpDir], undefined, '/__test__', false);
 
     await waitMs(600);
 
-    expect(events.length).toBe(1);
-    expect(events[0].oldId).toBeUndefined();
-    expect(events[0].newId).toBe(existingSessionId);
+    expect(events).toEqual([]);
+
+    unregisterTerminal(term);
+  });
+
+  test('adopts an existing same-cwd rollout when restoring a terminal', async () => {
+    const existingSessionId = '019dcbf2-eeee-7fe1-aa30-1eede3d9e796';
+    const term = fakeTerminal('CX-restored');
+    const events: Array<{ oldId: string | undefined; newId: string }> = [];
+    onSessionChanged((_t, oldId, newId) => events.push({ oldId, newId }));
+
+    const rollout = path.join(tmpDir, `rollout-2026-04-26T00-00-00-${existingSessionId}.jsonl`);
+    fs.writeFileSync(rollout, JSON.stringify({
+      type: 'session_meta',
+      payload: { id: existingSessionId, cwd: '/__test__', originator: 'codex-tui' },
+    }) + '\n');
+
+    __testRegister(term, 'codex', [tmpDir], undefined);
+    await waitMs(600);
+
+    expect(events).toEqual([{ oldId: undefined, newId: existingSessionId }]);
 
     unregisterTerminal(term);
   });

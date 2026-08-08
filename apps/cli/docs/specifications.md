@@ -2539,13 +2539,16 @@ a machine-wide process sweep.)
   machine restart. A later daemon invocation MUST either prove the recorded pid is
   still the intended live process and adopt it, or reap the dangling daemon, browser,
   tunnel, or keychain-helper process without targeting an unrelated or detached routine
-  process. The current recovery layers are the state-directory lifetime self-check
+  process. The recovery layers are the state-directory lifetime self-check
   (`lib/daemon.ts:925-957`), the state-directory-scoped daemon registry and
   `reapStrayDaemons` (`lib/daemon.ts:348-394`), browser/tunnel orphan reaping
-  (`lib/daemon.ts:800-815`), and the keychain helper reaper's pid/start-time identity
-  checks (`lib/secrets/reaper.ts:20-40`, `lib/secrets/reaper.ts:68-101`). Status:
-  **[Intended]** end to end; those recovery layers are current, while RUSH-2419 closes
-  the remaining long-lived `watch-lock` watcher leak (SING-GAP-4).
+  (`lib/daemon.ts:800-815`), the keychain helper reaper's pid/start-time identity
+  checks (`lib/secrets/reaper.ts:20-40`, `lib/secrets/reaper.ts:68-101`), and the
+  orphaned-`watch-lock` reaper (RUSH-2419) that recovers the one deliberately
+  long-lived helper when its owning daemon is provably dead
+  (`lib/secrets/reaper.ts:156-180`, wired into the reap tick at `lib/daemon.ts:911`).
+  Every daemon-owned process class — daemon, browser, tunnel, and keychain helper
+  including the `watch-lock` watcher — has a recovery layer.
 - **SING-12 (MUST).** `stopDaemon` (`lib/daemon.ts`) MUST assert its postcondition,
   not assume it: after the SIGTERM → grace → `killTree` sequence it MUST verify the
   browser IPC binding was released, the secrets broker socket was released (a stale
@@ -2660,23 +2663,29 @@ a machine-wide process sweep.)
   (RUSH-2290) moves the claim into a unified transaction on `(routine, scheduledFor)`
   and adds the `skipped`-run overlap record; the run-status contract for that record is
   RT-6/RT-7 below.
-- **SING-GAP-4 (RUSH-2419).** SING-11b's leak-freedom guarantee is current for every
-  recovery layer except the keychain `watch-lock` watcher (`lib/secrets/agent.ts:830`,
-  `:906`): `isReapableHelperCommand` (`lib/secrets/reaper.ts:209-214`) explicitly and
-  permanently excludes it from the periodic keychain reaper, so an OOM-kill, a raw
-  SIGKILL, or the daemon's own `killTree` escalation of a wedged daemon leaves it
-  orphaned with no automatic recovery. RUSH-2419 adds a narrow reaper path scoped to a
-  provably-dead owning daemon, distinct from the existing exclusion (which must still
-  hold for a live daemon).
+- **SING-GAP-4 (resolved, RUSH-2419).** SING-11b's leak-freedom guarantee once held for
+  every recovery layer except the keychain `watch-lock` watcher (`lib/secrets/agent.ts:833`,
+  `:915`): `isReapableHelperCommand` (`lib/secrets/reaper.ts:249-254`) permanently excludes
+  it from the periodic keychain reaper, so an OOM-kill, a raw SIGKILL, or the daemon's own
+  `killTree` escalation of a wedged daemon left it orphaned with no automatic recovery. The
+  daemon now runs a separate orphaned-`watch-lock` reaper path (`planKeychainReap`,
+  `lib/secrets/reaper.ts:156-180`, wired into the reap tick at `lib/daemon.ts:911`), gated
+  by `isWatchLockHelperCommand` (`lib/secrets/reaper.ts:262`): it kills a `watch-lock` only
+  when the owning daemon is provably absent from the `ps` snapshot (`ppid === 1`, or the
+  parent pid missing), behind the `ORPHAN_GRACE_SEC` grace and a fail-closed start-time
+  fingerprint. The live-daemon exclusion is re-asserted on that path
+  (`lib/secrets/reaper.ts:170-172`), so auto-lock-on-sleep for a running daemon is
+  untouched; `lib/secrets/reaper.test.ts:347-354` covers the predicate.
 - **SING-GAP-5 (RUSH-2421).** SING-12a's shutdown postcondition is `[Intended]`:
   `stopDaemon` (`lib/daemon.ts:1496-1617`) today verifies only the browser IPC socket,
   the secrets broker socket, and pid registration — not the lifetime marker, heartbeat
   file, or instance-registry entry, which `handleShutdown`'s graceful path releases but
   the escalated (`killTree`) path leaves stale with no postcondition check. RUSH-2421
-  extends the postcondition to the full six-resource inventory and awaits the real
-  `net.Server` `'close'` event in the browser IPC and secrets-broker socket teardown
-  (`lib/browser/ipc.ts:259-273`, `lib/secrets/agent.ts:919-928`) instead of firing and
-  forgetting.
+  extends the postcondition to the full six-resource inventory. The secrets-broker socket
+  teardown now awaits the real `net.Server` `'close'` event with a bounded 2s timeout
+  (`closeServerBounded`, `lib/secrets/agent.ts:928-941`, `:953-973`) instead of firing and
+  forgetting; the browser IPC teardown (`BrowserIPCServer.stop`, `lib/browser/ipc.ts:259-273`)
+  still calls `server.close()` fire-and-forget and remains to be converted.
 - **SING-GAP-6 (RUSH-2418).** SING-14's restart bound is `[Intended]`: `generateLaunchdPlist`
   (`lib/daemon.ts:1060-1090`) sets `KeepAlive` with no `ThrottleInterval`, `generateSystemdUnit`
   (`lib/daemon.ts:1106-1124`) sets `Restart=always` with no `StartLimitIntervalSec`/
