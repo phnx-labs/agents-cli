@@ -111,12 +111,6 @@ describe('non-author approval check', () => {
     expect(isNonAuthorApproved([], 'author')).toBe(false);
   });
 
-  it('returns true when author is null (unknown) and reviewer approved', () => {
-    // When we cannot determine the author, treat any approval as non-author
-    const reviews: PrReview[] = [{ state: 'APPROVED', user: 'reviewer1' }];
-    expect(isNonAuthorApproved(reviews, null)).toBe(true);
-  });
-
   it('returns true when multiple reviewers, one of whom approved', () => {
     const reviews: PrReview[] = [
       { state: 'CHANGES_REQUESTED', user: 'reviewer1' },
@@ -130,5 +124,21 @@ describe('non-author approval check', () => {
       { state: 'APPROVED', user: 'prix-cloud' },
     ];
     expect(isNonAuthorApproved(reviews, 'author-bot')).toBe(true);
+  });
+
+  it('uses a reviewer latest decisive state and rejects a revoked approval', () => {
+    const reviews: PrReview[] = [
+      { state: 'APPROVED', user: 'reviewer1' },
+      { state: 'CHANGES_REQUESTED', user: 'reviewer1' },
+    ];
+    expect(isNonAuthorApproved(reviews, 'author')).toBe(false);
+  });
+
+  it('does not let a later comment erase an approval', () => {
+    const reviews: PrReview[] = [
+      { state: 'APPROVED', user: 'reviewer1' },
+      { state: 'COMMENTED', user: 'reviewer1' },
+    ];
+    expect(isNonAuthorApproved(reviews, 'author')).toBe(true);
   });
 });

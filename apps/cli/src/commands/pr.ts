@@ -13,7 +13,6 @@ import { promisify } from 'util';
 import { die } from '../lib/format.js';
 import { setHelpSections } from '../lib/help.js';
 import {
-  pollPrSnapshot,
   parsePrUrl,
   isFailedCheck,
   type PrCheck,
@@ -43,18 +42,20 @@ export async function resolvePrUrl(prNumberOrUrl: string): Promise<string> {
 }
 
 /** Fetch the author login for a PR via REST. */
-export async function fetchPrAuthor(prUrl: string): Promise<string | null> {
+export async function fetchPrAuthor(prUrl: string): Promise<string> {
   const parsed = parsePrUrl(prUrl);
-  if (!parsed) return null;
+  if (!parsed) throw new Error(`Cannot parse PR URL: ${prUrl}`);
   try {
     const { stdout } = await execFileAsync(
       'gh',
       ['api', `repos/${parsed.owner}/${parsed.repo}/pulls/${parsed.number}`, '--jq', '.user.login'],
       { maxBuffer: 512 * 1024 }
     );
-    return stdout.trim() || null;
-  } catch {
-    return null;
+    const author = stdout.trim();
+    if (!author) throw new Error('GitHub returned an empty PR author');
+    return author;
+  } catch (err) {
+    throw new Error(`Cannot read PR author: ${(err as Error).message}`);
   }
 }
 
@@ -64,14 +65,20 @@ export interface PrReview {
 }
 
 /** Evaluate already-fetched reviews against the PR author. */
-export function isNonAuthorApproved(reviews: PrReview[], author: string | null): boolean {
-  return reviews.some((review) => review.state === 'APPROVED' && review.user !== (author ?? ''));
+export function isNonAuthorApproved(reviews: PrReview[], author: string): boolean {
+  const latestByReviewer = new Map<string, string>();
+  for (const review of reviews) {
+    if (review.user && review.state !== 'COMMENTED') {
+      latestByReviewer.set(review.user, review.state);
+    }
+  }
+  return [...latestByReviewer].some(([user, state]) => user !== author && state === 'APPROVED');
 }
 
-/** Fetch submitted reviews for a PR via REST. Returns [] on error. */
+/** Fetch submitted reviews for a PR via REST. */
 export async function fetchPrReviews(prUrl: string): Promise<PrReview[]> {
   const parsed = parsePrUrl(prUrl);
-  if (!parsed) return [];
+  if (!parsed) throw new Error(`Cannot parse PR URL: ${prUrl}`);
   try {
     const { stdout } = await execFileAsync(
       'gh',
@@ -86,8 +93,8 @@ export async function fetchPrReviews(prUrl: string): Promise<PrReview[]> {
           ? String((r.user as Record<string, unknown>).login ?? '')
           : '',
     }));
-  } catch {
-    return [];
+  } catch (err) {
+    throw new Error(`Cannot read PR reviews: ${(err as Error).message}`);
   }
 }
 
@@ -98,6 +105,39 @@ export async function fetchPrReviews(prUrl: string): Promise<PrReview[]> {
 export async function hasNonAuthorApproval(prUrl: string): Promise<boolean> {
   const [author, reviews] = await Promise.all([fetchPrAuthor(prUrl), fetchPrReviews(prUrl)]);
   return isNonAuthorApproved(reviews, author);
+}
+
+/**
+ * Fetch CI checks without losing failed rows when `gh pr checks` exits non-zero.
+ * A non-empty JSON payload is authoritative even when the command reports red CI;
+ * an unreadable response fails closed instead of becoming an empty green list.
+ */
+export async function fetchLandingChecks(prUrl: string): Promise<PrCheck[]> {
+  let stdout = '';
+  try {
+    ({ stdout } = await execFileAsync(
+      'gh',
+      ['pr', 'checks', prUrl, '--json', 'name,state,link,workflow'],
+      { maxBuffer: 8 * 1024 * 1024 }
+    ));
+  } catch (err) {
+    stdout = String((err as Error & { stdout?: string }).stdout ?? '');
+    if (!stdout.trim()) {
+      throw new Error(`Cannot read CI checks: ${(err as Error).message}`);
+    }
+  }
+
+  try {
+    const raw = JSON.parse(stdout) as Array<Record<string, unknown>>;
+    return raw.map((check) => ({
+      name: String(check.name ?? ''),
+      state: String(check.state ?? ''),
+      link: check.link ? String(check.link) : undefined,
+      workflow: check.workflow ? String(check.workflow) : undefined,
+    }));
+  } catch (err) {
+    throw new Error(`Cannot parse CI checks: ${(err as Error).message}`);
+  }
 }
 
 /** The CI state of a PR: green (all done and passing), pending (still running), or the first failed check. */
@@ -230,12 +270,12 @@ export function registerPrCommands(program: Command): void {
           }
 
           // 2. Snapshot the PR
-          const snapshot = await pollPrSnapshot(prUrl, null);
+          const checks = await fetchLandingChecks(prUrl);
           polls++;
 
           // 3. Classify CI
-          const ci = classifyCiState(snapshot.checks);
-          emit({ type: 'poll', polls, ciKind: ci.kind, checks: snapshot.checks.length });
+          const ci = classifyCiState(checks);
+          emit({ type: 'poll', polls, ciKind: ci.kind, checks: checks.length });
 
           if (ci.kind === 'failed') {
             log(
@@ -252,13 +292,13 @@ export function registerPrCommands(program: Command): void {
           }
 
           if (ci.kind === 'pending') {
-            const pending = snapshot.checks.filter((c) => !PASSED_STATES.has((c.state ?? '').toUpperCase()));
+            const pending = checks.filter((c) => !PASSED_STATES.has((c.state ?? '').toUpperCase()));
             const names = pending.map((c) => c.name).join(', ');
             log(`[${ts()}] ${chalk.blue('CI pending')} — waiting on: ${names}`);
             emit({ type: 'pending', pending: pending.map((c) => c.name) });
           } else {
             // ci.kind === 'green'
-            const checkCount = snapshot.checks.length;
+            const checkCount = checks.length;
             log(
               `[${ts()}] ${chalk.green('CI green')}` +
               (checkCount > 0 ? ` (${checkCount} check${checkCount === 1 ? '' : 's'} passed)` : ' (no checks configured)')
