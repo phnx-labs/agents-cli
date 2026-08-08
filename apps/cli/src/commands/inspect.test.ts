@@ -321,6 +321,27 @@ describe('summarizeHook', () => {
       .toBe('PreToolUse/PostToolUse');
   });
 
+  it('survives agents.yaml values whose YAML type contradicts the declared type', () => {
+    // A hook entry is an unvalidated yaml.parse cast. `events` as a scalar is
+    // neither null nor an array, so `(hook.events ?? []).join()` threw — killing
+    // bare `agents inspect <repo>`, and via the central manifest every box's
+    // `agents inspect <agent>`. Renders the scalar rather than dropping it.
+    expect(summarizeHook({ script: 'x.sh', events: 'PreToolUse' } as unknown as ManifestHook))
+      .toBe('PreToolUse');
+    // Predicates reach `truncate`, which calls `.slice`.
+    expect(summarizeHook({
+      script: 'x.sh',
+      events: ['Stop'],
+      matches: { prompt_contains: 12345, cwd_includes: 99 },
+    } as unknown as ManifestHook)).toBe('Stop · prompt~"12345" · cwd~99');
+    // An object carries no one-line form: dropped, never `[object Object]`.
+    expect(summarizeHook({
+      script: 'x.sh', events: [{ a: 1 }, 'Stop'],
+    } as unknown as ManifestHook)).toBe('Stop');
+    expect(summarizeHook({ script: 'x.sh', events: {} } as unknown as ManifestHook))
+      .toBe('(no event)');
+  });
+
   it('puts the matcher in parens after the events', () => {
     expect(summarizeHook({ script: 'x.sh', events: ['PreToolUse'], matcher: 'Bash' }))
       .toBe('PreToolUse(Bash)');

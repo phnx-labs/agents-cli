@@ -247,6 +247,23 @@ describe('agents inspect', () => {
     }
   });
 
+  it('bare `inspect <repo>` survives an agents.yaml whose hook field types are wrong', () => {
+    const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-hookfx-' + crypto.randomBytes(4).toString('hex') + '-'));
+    writeFile(path.join(proj, '.agents', 'hooks', '10-demo.sh'), '#!/usr/bin/env bash\nexit 0\n');
+    // `events` as a scalar and numeric predicates: both threw in summarizeHook,
+    // which only the DEFAULT render path reaches. --json and --hooks stayed
+    // green, which is exactly how this class kept surviving review.
+    writeFile(path.join(proj, '.agents', 'agents.yaml'),
+      'hooks:\n  demo:\n    script: 10-demo.sh\n    events: PreToolUse\n    matches:\n      prompt_contains: 12345\n      cwd_includes: 99\n');
+
+    for (const args of [[], ['--json'], ['--hooks'], ['--brief']]) {
+      const r = spawnSync(process.execPath, [tsxBin, cliEntry, 'inspect', proj, ...args], {
+        cwd: proj, env: { ...process.env, HOME: fixtureHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' }, encoding: 'utf-8',
+      });
+      expect(r.status, `inspect ${args.join(' ')} exited ${r.status}: ${r.stderr}`).toBe(0);
+    }
+  });
+
   it('--skills <typo> resolves via fuzzy match; bogus query exits 1 with suggestions', () => {
     // Substring match still wins for "rele" → "release".
     const ok = run(fixtureHome, ['inspect', 'claude', '--skills', 'rele', '--json']);

@@ -1074,6 +1074,19 @@ function manifestText(v: unknown): string {
   return String(v);
 }
 
+/**
+ * Render one uncontrolled value as a list of display strings. A scalar becomes a
+ * one-element list — the case `?? []` and `Array.isArray` both miss, and the one
+ * that threw on `.join`. Object entries drop out rather than becoming
+ * `[object Object]`.
+ */
+function manifestList(v: unknown): string[] {
+  if (v === null || v === undefined) return [];
+  if (Array.isArray(v)) return v.map(manifestText).filter(Boolean);
+  const single = manifestText(v);
+  return single ? [single] : [];
+}
+
 function entriesFromAgentResources(agent: AgentId, versionHome: string, kind: 'commands' | 'hooks' | 'workflows'): ResourceItem[] {
   const res = getAgentResources(agent, { home: versionHome });
   const list = res[kind] as ResourceEntry[];
@@ -1145,9 +1158,15 @@ function buildDetailRows(item: ResourceItem, kind: DrillableKind): Array<[string
       if (typeof fm.description === 'string' && fm.description.trim() !== item.description.trim()) {
         rows.push(['description', truncate(fm.description, 120)]);
       }
-      if (Array.isArray(fm.triggers)) rows.push(['triggers', fm.triggers.join(', ')]);
-      if (typeof fm.model === 'string') rows.push(['model', fm.model]);
-      if (Array.isArray(fm.tools)) rows.push(['tools', fm.tools.join(', ')]);
+      // Frontmatter is uncontrolled YAML too. These were type-guarded against a
+      // crash but still rendered `[object Object]` for an entry that is a map,
+      // and dropped a scalar `triggers: foo` entirely.
+      const triggers = manifestList(fm.triggers).join(', ');
+      if (triggers) rows.push(['triggers', triggers]);
+      const model = manifestText(fm.model);
+      if (model) rows.push(['model', model]);
+      const tools = manifestList(fm.tools).join(', ');
+      if (tools) rows.push(['tools', tools]);
     }
   }
   // Plugin bundles surface their nested resources (skills, commands, …) plus
@@ -1180,11 +1199,14 @@ function abbrevSource(s: string): string {
  * an optional cache tail. Plain text — the caller applies color.
  */
 export function summarizeHook(hook: ManifestHook): string {
-  const events = (hook.events ?? []).join('/') || '(no event)';
-  let matcher = hook.matcher;
+  // `hook` is an unvalidated YAML cast from agents.yaml, so `??` is not enough:
+  // a scalar `events: PreToolUse` is neither null nor an array, and `.join` threw
+  // — taking down bare `agents inspect <repo>`, and via the central manifest
+  // `agents inspect <agent>` on every box. Same shape as the plugin.json bug.
+  const events = manifestList(hook.events).join('/') || '(no event)';
+  let matcher = manifestText(hook.matcher);
   if (!matcher && hook.matches?.tool_name) {
-    const tn = hook.matches.tool_name;
-    matcher = Array.isArray(tn) ? tn.join('|') : tn;
+    matcher = manifestList(hook.matches.tool_name).join('|');
   }
   const head = matcher ? `${events}(${matcher})` : events;
 
@@ -1201,16 +1223,20 @@ export function summarizeHook(hook: ManifestHook): string {
 /** `·`-separated predicate summary from a hook's `matches:` block (tool_name omitted — shown in the matcher parens). */
 function summarizeMatches(m?: HookMatches): string {
   if (!m) return '';
+  // Every predicate is raw YAML. `truncate` calls `.slice`, so a numeric
+  // `prompt_contains: 12345` threw here just like the events case above.
   const bits: string[] = [];
   if (m.git_dirty) bits.push('git_dirty');
-  if (m.prompt_contains) bits.push(`prompt~"${truncate(m.prompt_contains, 24)}"`);
-  if (m.prompt_matches) bits.push(`prompt=/${truncate(m.prompt_matches, 24)}/`);
-  if (m.tool_args_match) bits.push(`args=/${truncate(m.tool_args_match, 20)}/`);
-  if (m.cwd_includes) {
-    const c = Array.isArray(m.cwd_includes) ? m.cwd_includes.join('|') : m.cwd_includes;
-    bits.push(`cwd~${truncate(c, 24)}`);
-  }
-  if (m.project_has) bits.push(`has ${m.project_has}`);
+  const promptContains = manifestText(m.prompt_contains);
+  if (promptContains) bits.push(`prompt~"${truncate(promptContains, 24)}"`);
+  const promptMatches = manifestText(m.prompt_matches);
+  if (promptMatches) bits.push(`prompt=/${truncate(promptMatches, 24)}/`);
+  const argsMatch = manifestText(m.tool_args_match);
+  if (argsMatch) bits.push(`args=/${truncate(argsMatch, 20)}/`);
+  const cwd = manifestList(m.cwd_includes).join('|');
+  if (cwd) bits.push(`cwd~${truncate(cwd, 24)}`);
+  const projectHas = manifestText(m.project_has);
+  if (projectHas) bits.push(`has ${projectHas}`);
   return bits.join(' · ');
 }
 
