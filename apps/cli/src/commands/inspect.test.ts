@@ -142,21 +142,30 @@ describe('collectRepoKind', () => {
     // table and "not registered" in the pane directly below it.
     const root = makeProjectRepo();
     fs.mkdirSync(path.join(root, '.agents', 'hooks'), { recursive: true });
-    fs.writeFileSync(path.join(root, '.agents', 'hooks', 'guard.sh'), '#!/usr/bin/env bash\nexit 0\n');
+    // A name no central manifest would plausibly carry: with a plain `guard`,
+    // a developer whose own ~/.agents/agents.yaml registered a guard.sh would
+    // see the reverted code pass, and the test would prove nothing.
+    fs.writeFileSync(path.join(root, '.agents', 'hooks', 'repo-only-guard.sh'), '#!/usr/bin/env bash\nexit 0\n');
     fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'),
-      'hooks:\n  my-guard:\n    script: guard.sh\n    events:\n      - PreToolUse\n    matcher: Bash\n');
+      'hooks:\n  my-guard:\n    script: repo-only-guard.sh\n    events:\n      - PreToolUse\n    matcher: Bash\n');
 
     const repo = resolveRepoTarget(root)!;
-    const guard = collectRepoKind(repo, 'hooks').find(h => h.name === 'guard')!;
+    const guard = collectRepoKind(repo, 'hooks').find(h => h.name === 'repo-only-guard')!;
     const manifest = hookManifestByScript(hookManifestFromFile(path.join(repo.root, 'agents.yaml')));
 
     // What the row shows.
-    const hook = manifest.get('guard')!;
+    const hook = manifest.get('repo-only-guard')!;
     expect(summarizeHook(hook)).toBe('PreToolUse(Bash)');
     // What the pane shows, given the same manifest.
     const pane = stripAnsi(previewFor('hooks', guard, manifest));
     expect(pane).toContain('PreToolUse(Bash)');
     expect(pane).not.toContain('not registered');
+
+    // And the mirror: a hook absent from this repo's manifest must not be
+    // credited a central registration.
+    fs.writeFileSync(path.join(root, '.agents', 'hooks', 'orphan.sh'), '#!/usr/bin/env bash\nexit 0\n');
+    const orphan = collectRepoKind(repo, 'hooks').find(h => h.name === 'orphan')!;
+    expect(stripAnsi(previewFor('hooks', orphan, manifest))).toContain('not registered');
   });
 
   it('skips build/tooling caches (__pycache__, node_modules)', () => {

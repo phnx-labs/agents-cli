@@ -876,7 +876,7 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
       // Pass the resolved manifest: the picker rebuilds this on every arrow
       // key, so re-reading ~11 KB of YAML per keystroke is wasted work on top
       // of being the wrong manifest for a repo target.
-      buildDetail: () => previewFor(kind, item, hookEvents ?? undefined),
+      buildDetail: () => previewFor(kind, item, hookEvents ?? new Map()),
     })),
   });
 
@@ -1241,7 +1241,7 @@ function buildDetail(item: ResourceItem, kind: DrillableKind): Record<string, un
  * whether it is wired) has nothing in common with a skill's (what invokes it,
  * where it is synced), so each kind contributes its own rows and blanks drop out.
  */
-export function previewFor(kind: DrillableKind, item: ResourceItem, hookManifest?: Map<string, ManifestHook>): string {
+export function previewFor(kind: DrillableKind, item: ResourceItem, hookManifest: Map<string, ManifestHook>): string {
   const out: string[] = [];
   const label = (k: string, v: string) => `  ${chalk.gray(k.padEnd(11))}${v}`;
 
@@ -1263,9 +1263,10 @@ export function previewFor(kind: DrillableKind, item: ResourceItem, hookManifest
     // one here made the preview contradict its own row: a repo hook wired by
     // that repo's agents.yaml showed `PreToolUse(Bash)` in the table and
     // "not registered" in the pane below it, and the mirror case credited a
-    // central registration to the repo.
-    const manifest = hookManifest ?? hookManifestByScript(loadCentralHookManifest());
-    const hook = manifest.get(item.name);
+    // central registration to the repo. No `?? loadCentralHookManifest()`
+    // fallback: it would be dead in production and would silently reinstate
+    // exactly that bug the next time a caller forgot the argument.
+    const hook = hookManifest.get(item.name);
     if (hook) {
       rows.push(['fires', chalk.yellow(summarizeHook(hook))]);
       rows.push(['wired', chalk.green('yes') + chalk.gray(' · agents.yaml')]);
