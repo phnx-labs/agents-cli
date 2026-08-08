@@ -1,5 +1,16 @@
-import { describe, expect, it } from 'vitest';
-import { buildRestartTaskScript, detectImageFormat, reconcileScreenshotExt, shouldBlockOffPlatform } from './computer.js';
+import { describe, expect, it, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import {
+  buildRestartTaskScript,
+  detectImageFormat,
+  reconcileScreenshotExt,
+  shouldBlockOffPlatform,
+  emitComputerRunTaskMarker,
+} from './computer.js';
+import { query, _resetForTest } from '../lib/events.js';
+import { TASK_PREVIEW_MAX_CHARS } from '../lib/computer/sessions-list.js';
 
 // Real leading magic bytes, matching what each helper actually encodes.
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // Windows helper (ImageFormat.Png)
@@ -85,5 +96,49 @@ describe('buildRestartTaskScript', () => {
 
   it('starts the LOGON scheduled task that owns the daemon lifecycle', () => {
     expect(script).toContain(`Start-ScheduledTask -TaskName 'AgentsComputerHelper'`);
+  });
+});
+
+describe('emitComputerRunTaskMarker — computer.action run marker (RUSH-2432)', () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    _resetForTest();
+    for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function eventsPath(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-computer-run-marker-'));
+    tempDirs.push(dir);
+    return path.join(dir, 'events.jsonl');
+  }
+
+  it('records the run verb, bundle, and host against the real event log', () => {
+    _resetForTest(eventsPath());
+    emitComputerRunTaskMarker({ task: 'open Notes and write a haiku', bundle: 'com.apple.notes', host: 'win-mini' });
+
+    const recs = query({ eventTypes: ['computer.action'] });
+    expect(recs).toHaveLength(1);
+    expect(recs[0].command).toBe('run');
+    expect(recs[0].bundle).toBe('com.apple.notes');
+    expect(recs[0].host).toBe('win-mini');
+    expect(recs[0].task).toBe('open Notes and write a haiku');
+  });
+
+  it('bounds the task text to TASK_PREVIEW_MAX_CHARS — never the raw unbounded --task string', () => {
+    _resetForTest(eventsPath());
+    const longTask = 'describe every window in exhaustive detail '.repeat(20);
+    expect(longTask.length).toBeGreaterThan(TASK_PREVIEW_MAX_CHARS);
+    emitComputerRunTaskMarker({ task: longTask });
+
+    const rec = query({ eventTypes: ['computer.action'] })[0];
+    expect((rec.task as string).length).toBeLessThanOrEqual(TASK_PREVIEW_MAX_CHARS);
+    expect(JSON.stringify(rec)).not.toContain(longTask);
+  });
+
+  it('carries no target pid — the marker fires before any window is resolved', () => {
+    _resetForTest(eventsPath());
+    emitComputerRunTaskMarker({ task: 'x' });
+    expect(query({ eventTypes: ['computer.action'] })[0].targetPid).toBeUndefined();
   });
 });

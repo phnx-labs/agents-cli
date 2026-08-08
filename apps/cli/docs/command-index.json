@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 100,
-  "commands": 571,
+  "commands": 572,
   "root": {
     "name": "agents",
     "path": "",
@@ -4910,6 +4910,53 @@
               "optional": false,
               "variadic": false,
               "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "sessions",
+          "path": "computer sessions",
+          "aliases": [],
+          "description": "Browse computer-driving history, grouped by run — one row per `agents computer` invocation",
+          "args": [],
+          "options": [
+            {
+              "flags": "--machine <name>",
+              "description": "Only rows invoked from/driving this machine (hostname, machineId, or --host device)",
+              "long": "--machine",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Emit machine-readable JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-interactive",
+              "description": "Print the flat listing instead of opening the interactive run browser",
+              "long": "--no-interactive",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
             },
             {
               "flags": "-h, --help",
@@ -22420,6 +22467,15 @@
           "flags": "--browser",
           "description": "List browser-profile captures (screenshots, PDFs, recordings, downloads) instead of agent transcripts — alias of `agents browser sessions`",
           "long": "--browser",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--computer",
+          "description": "List computer-driving history, grouped by run, instead of agent transcripts — alias of `agents computer sessions`",
+          "long": "--computer",
           "required": false,
           "optional": false,
           "variadic": false,

@@ -855,6 +855,17 @@ the agent session that ran it when the task's `launchId` still resolves. See
 `--no-interactive`/`--json` print the flat per-artifact table this section's
 `--no-interactive` convention otherwise governs for the transcript pool below.
 
+**`--computer` is the same switch for the native-desktop pool.** `agents
+sessions --computer` (alias `agents computer sessions`) lists computer-driving
+history — `agents computer <verb>` / `run --task` invocations — grouped by
+run (one CLI process = one row) instead of agent transcripts. On a TTY it
+opens the analogous task-first interactive view (RUSH-2432): one row per run,
+newest first, linking to the agent session that ran it when the run's
+`sessionId`/`launchId` still resolves; a run with no agent-session identity at
+all shows unlinked, one with an identity nothing here can index shows
+unresolved. See [`computer.md` §History and discovery](computer.md) for the
+full picker behavior and the retention/privacy note.
+
 `agents sessions --active` answers "what is running right now, everywhere". It sweeps
 the local machine (`getActiveSessions`) and, unless `--local`, every registered online
 device over SSH, through one shared gather — `gatherActiveSessions` in

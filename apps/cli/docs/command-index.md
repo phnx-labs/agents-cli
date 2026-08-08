@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_100 command groups · 571 commands._
+_100 command groups · 572 commands._
 
 ## accounts — Browse and name signed-in harness accounts
 
@@ -175,6 +175,7 @@ agents computer right-click  Right-click (context menu) an element or coordinate
 agents computer run          Autonomously drive an app from a natural-language task (embedded model loop over the computer verbs)
 agents computer screenshot   Capture a window (default: largest), enumerate windows (--list), or the whole display (--display)
 agents computer scroll       Scroll by a pixel delta at an element or coordinate
+agents computer sessions     Browse computer-driving history, grouped by run — one row per `agents computer` invocation
 agents computer setup        Install the helper — locally to /Applications/ (macOS), or to a remote Windows host with --host
 agents computer start        Activate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --host
 agents computer status       Report install state, daemon state, and Accessibility trust — or a remote Windows daemon with --host

@@ -94,6 +94,7 @@ import { registerSessionsStatsCommand } from './sessions-stats.js';
 import { registerSessionsInsightsCommand } from './insights.js';
 import { registerSessionsOptimizeCommand } from './sessions-optimize.js';
 import { runBrowserSessionsCommand } from './browser-sessions-picker.js';
+import { runComputerSessionsCommand } from './computer-sessions-picker.js';
 import {
   countToolProgramOccurrences,
   parseToolProgramCountClause,
@@ -5408,6 +5409,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--fleet', 'With --include tools: query every registered online compute device and merge compact matches')
     .option('--count', 'With one program:<name> tool query: count static occurrences, containing calls, and sessions')
     .option('--browser', 'List browser-profile captures (screenshots, PDFs, recordings, downloads) instead of agent transcripts — alias of `agents browser sessions`')
+    .option('--computer', 'List computer-driving history, grouped by run, instead of agent transcripts — alias of `agents computer sessions`')
     .option('--no-interactive', 'Print the listing instead of opening the interactive browser (default on a TTY for the bare listing and --active)')
     .option('--print-cmd', 'Print the canonical `ag sessions …` command for the given flags and exit (the twin of the browser’s `y` hotkey)')
     .option('--preview', 'With a session id/query: print a compact preview and exit (no pager)');
@@ -5525,6 +5527,12 @@ export function registerSessionsCommands(program: Command): void {
       // profile. `--no-interactive` is already a top-level sessionsCmd option
       // (options.interactive), so it carries through for free.
       await runBrowserSessionsCommand({ profile: query, json: options.json, interactive: options.interactive });
+      return;
+    }
+    if ((options as { computer?: boolean }).computer) {
+      // Alias for `agents computer sessions`: a machine positional narrows to
+      // one machine. `--no-interactive` carries through the same way.
+      await runComputerSessionsCommand({ machine: query, json: options.json, interactive: options.interactive });
       return;
     }
     await sessionsAction(query, options, command.getOptionValueSource('limit'));
