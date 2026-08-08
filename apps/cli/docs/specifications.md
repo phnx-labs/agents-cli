@@ -2458,15 +2458,19 @@ is not two daemons existing — it is two daemons consuming the **same** input.
 #### 3.2 One daemon per state dir — last-wins takeover, not first-wins refusal
 
 Singularity is scoped to the **state dir** (the daemon dir under `AGENTS_DAEMON_DIR`
-?? `<HOME>/.agents/.cache/helpers/daemon`), NOT the machine: one `HOME` may legitimately
+or `<HOME>/.agents/.cache/helpers/daemon`), NOT the machine: one `HOME` may legitimately
 run many daemons under different state dirs (a developer's daemon, a vitest fixture's
-own `HOME`), and none of them contend. Within ONE state dir, the pid-file claim in
-SING-5 guarantees one scheduler; SING-11/SING-12 fix *which* daemon survives and how the
-loser is torn down, so a second install sharing that state dir can never leave two
-daemons. (RUSH-2352 originally read four `__daemon-run` on one box as four duplicate
-schedulers; adversarial verification refuted that — three ran under separate `HOME`s
-and never shared state. Last-wins is the owner's product decision that a restart replaces
-the previous daemon, deliberately NOT a machine-wide process sweep.)
+own `HOME`), and none of them contend. One state dir maps 1:1 to one logical daemon for
+one user/configuration. Consequently, the casual product phrase "one daemon per device"
+means one daemon for the state dir a human normally uses on that device, not literally
+one `__daemon-run` process across every user, installation, or test fixture on the
+machine. Within ONE state dir, the pid-file claim in SING-5 guarantees one scheduler;
+SING-11/SING-12 fix *which* daemon survives and how the loser is torn down, so a second
+install sharing that state dir can never leave two daemons. (RUSH-2352 originally read
+four `__daemon-run` on one box as four duplicate schedulers; adversarial verification
+refuted that — three ran under separate `HOME`s and never shared state. Last-wins is the
+owner's product decision that a restart replaces the previous daemon, deliberately NOT
+a machine-wide process sweep.)
 
 - **SING-11 (MUST).** At most one daemon MUST be alive per state dir, enforced by
   **last-wins takeover**: a second `agents __daemon-run` for the same state dir — from
@@ -2497,6 +2501,18 @@ the previous daemon, deliberately NOT a machine-wide process sweep.)
   `monitorRunningJobs` (`runner.ts`) reconciles every `running` on-disk run record
   by pid liveness (`isPidOurs`), never by which daemon spawned it, so a live child
   is picked back up on the next tick.
+- **SING-11b (MUST).** Every daemon-owned process MUST be leak-free across every
+  daemon death mode, including graceful shutdown, takeover, SIGKILL, OOM-kill, and
+  machine restart. A later daemon invocation MUST either prove the recorded pid is
+  still the intended live process and adopt it, or reap the dangling daemon, browser,
+  tunnel, or keychain-helper process without targeting an unrelated or detached routine
+  process. The current recovery layers are the state-directory lifetime self-check
+  (`lib/daemon.ts:925-957`), the state-directory-scoped daemon registry and
+  `reapStrayDaemons` (`lib/daemon.ts:348-394`), browser/tunnel orphan reaping
+  (`lib/daemon.ts:800-815`), and the keychain helper reaper's pid/start-time identity
+  checks (`lib/secrets/reaper.ts:20-40`, `lib/secrets/reaper.ts:68-101`). Status:
+  **[Intended]** end to end; those recovery layers are current, while RUSH-2419 closes
+  the remaining long-lived `watch-lock` watcher leak.
 - **SING-12 (MUST).** `stopDaemon` (`lib/daemon.ts`) MUST assert its postcondition,
   not assume it: after the SIGTERM → grace → `killTree` sequence it MUST verify the
   browser IPC binding was released, the secrets broker socket was released (a stale
@@ -2508,6 +2524,23 @@ the previous daemon, deliberately NOT a machine-wide process sweep.)
   reported, never killed). `agents daemon stop` MUST surface that result (human summary
   plus `--json`) and exit non-zero when a resource could not be released. It MUST NOT
   report success on an unverified stop (RUSH-2355).
+- **SING-12a (MUST).** A clean daemon shutdown MUST enumerate and release the full
+  state-directory resource inventory: the browser IPC socket, the secrets broker
+  socket, the daemon pid registration, the lifetime marker file, the heartbeat file,
+  and the daemon's instance-registry entry. The shutdown postcondition MUST name any
+  survivor and MUST NOT report success merely because the daemon process exited. The
+  graceful path already attempts all six releases in `handleShutdown`
+  (`lib/daemon.ts:996-1016`); status: **[Intended]** for `stopDaemon` independently
+  verifying the full inventory (RUSH-2421).
+- **SING-14 (MUST).** Supervised daemon restart MUST be bounded. A permanently failing
+  daemon start MUST NOT cycle through unbounded rapid retries: the service manager MUST
+  enforce a restart interval and burst limit, and `ensureDaemonStarted` MUST stop
+  initiating starts after a bounded number of consecutive failures until the circuit
+  breaker resets. The current unbounded surfaces are launchd `KeepAlive`
+  (`lib/daemon.ts:1060-1090`), systemd `Restart=always` (`lib/daemon.ts:1106-1124`),
+  and the best-effort `ensureDaemonStarted` path (`lib/daemon.ts:1181-1202`). Status:
+  **[Intended]**: RUSH-2418 adds `ThrottleInterval`/`StartLimitBurst` service-manager
+  limits and a `consecutiveFailures` circuit breaker in `ensureDaemonStarted`.
 
 ### 4. Given/When/Then scenarios
 
@@ -2526,12 +2559,24 @@ the previous daemon, deliberately NOT a machine-wide process sweep.)
   process in its own group) and the new daemon adopts it via `monitorRunningJobs`
   pid-liveness reconciliation — takeover never kills a live agent mid-run
   (SING-11a).
+- **GIVEN** a daemon is killed by SIGKILL or the OOM killer, or its machine restarts,
+  **WHEN** the next daemon invocation starts, **THEN** SING-11b requires it to adopt
+  live intended children and reap stale daemon, browser, tunnel, and keychain-helper
+  processes by recorded identity, leaving no dangling pid or orphaned process.
 - **GIVEN** a wedged daemon that ignores SIGTERM, **WHEN** `agents daemon stop` runs,
   **THEN** stop escalates to `killTree` after the grace window, then VERIFIES the
   broker socket and browser IPC binding released and no `__daemon-run` survives, and
   returns a structured result (exit non-zero if any resource could not be released),
   reporting surviving detached children rather than pretending the tree is clean
   (SING-12).
+- **GIVEN** a daemon owns all six state-directory resources, **WHEN** graceful shutdown
+  completes, **THEN** the browser IPC socket, secrets broker socket, pid registration,
+  lifetime marker, heartbeat, and instance-registry entry are all absent or released;
+  any survivor is named and makes the stop fail (SING-12a).
+- **GIVEN** the daemon exits immediately on every supervised start, **WHEN** launchd,
+  systemd, or a background-adjacent caller attempts to restart it, **THEN** the
+  service-manager burst limit and `ensureDaemonStarted` circuit breaker stop rapid
+  retries after a bounded number of consecutive failures (SING-14).
 - **GIVEN** a user disables a fleet-affecting capability from the Factory palette,
   **WHEN** the command completes, **THEN** the CLI's config is the state that
   changed (`agents watchdog rotate off`), and the daemon, the menubar, and every
