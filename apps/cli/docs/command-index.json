@@ -1114,7 +1114,7 @@
           "name": "sessions",
           "path": "browser sessions",
           "aliases": [],
-          "description": "List a profile's captured screenshots, PDFs, recordings, and downloads",
+          "description": "Browse a profile's captured screenshots, PDFs, recordings, and downloads, grouped by task",
           "args": [],
           "options": [
             {
@@ -1128,6 +1128,10 @@
             {
               "flags": "--json",
               "description": "Emit machine-readable JSON"
+            },
+            {
+              "flags": "--no-interactive",
+              "description": "Print the flat listing instead of opening the interactive task browser"
             }
           ],
           "subcommands": []

@@ -108,7 +108,7 @@ agents browser requests                       Read captured network requests. --
 agents browser responsebody <url-pattern>     Wait for and read a response body by URL pattern
 agents browser screenshot                     Take a screenshot — auto-saved per task; --output only needed when you want a specific path
 agents browser scroll                         Scroll the page by pixel amount (negatives scroll up/left)
-agents browser sessions                       List a profile's captured screenshots, PDFs, recordings, and downloads
+agents browser sessions                       Browse a profile's captured screenshots, PDFs, recordings, and downloads, grouped by task
 agents browser set                            Set browser emulation options
 agents browser set device <device-name>       Emulate a device (iPhone 14, iPad, MacBook Pro)
 agents browser set viewport <width> <height>  Set viewport size
