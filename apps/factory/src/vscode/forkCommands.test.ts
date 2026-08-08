@@ -18,6 +18,7 @@ import {
  */
 const factoryRoot = path.resolve(import.meta.dir, '../..');
 const manifest = JSON.parse(fs.readFileSync(path.join(factoryRoot, 'package.json'), 'utf8'));
+const extensionSource = fs.readFileSync(path.join(factoryRoot, 'src/vscode/extension.ts'), 'utf8');
 
 const contributed = (id: string) =>
   (manifest.contributes.commands as Array<{ command: string; title: string }>).find(c => c.command === id);
@@ -29,6 +30,13 @@ describe('fork command contributions', () => {
 
   test('Agents: Fork (Recap) is contributed under its stable command id', () => {
     expect(contributed('agents.forkRecap')?.title).toBe('Agents: Fork (Recap)');
+  });
+
+  test('Agents: Fork (Recap) forks the active tab instead of opening the session browser', () => {
+    expect(extensionSource).toContain(
+      "vscode.commands.registerCommand('agents.forkRecap', () => forkCurrentSession(context, { intent: 'recap' }))",
+    );
+    expect(extensionSource).not.toContain("forkPickedSession(context, 'recap')");
   });
 
   test('registered Agents: Fork (Pick Host) creates a sibling on the picked host', async () => {

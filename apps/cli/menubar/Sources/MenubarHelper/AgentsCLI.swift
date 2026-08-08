@@ -81,8 +81,26 @@ enum AgentsCLI {
     // version of every harness with its own subprocess. Seconds on a healthy box,
     // so it gets the longest deadline — but it does get one. An unbounded doctor
     // is what consumed 13 of 18 cores on a real machine.
+    //
+    // Deliberately NOT `--devices`: the fleet fan-out measured 265s on mac-mini
+    // (2026-08-07, warm cache) against this poll's 180s deadline — every refresh
+    // would be group-killed mid-flight and the System row would read
+    // "unavailable" forever. The bare overview is already the fleet-aware
+    // payload (RUSH-2027 `fleet` inventory) and carries the prioritized
+    // `findings` (RUSH-2069) this helper renders, at 83s warm on the same box —
+    // inside the bound. It is also singleflight-gated CLI-side (RUSH-2153): the
+    // 90s freshness TTL means this 15-minute poll nearly always computes fresh,
+    // but a helper relaunch or a second poller can never stack a concurrent
+    // compute. The fleet-wide readout stays one click away via "Run agents
+    // doctor".
+    //
+    // The argv is a pure builder (mirrors routineHistoryArgs) so the headless
+    // self-test can pin the exact request — this poll is the only reader of the
+    // findings contract, and a silent flag drift would break it.
+    static func doctorOverviewArgs() -> [String] { ["doctor", "--json"] }
+
     static func doctorOverview() -> DoctorOverview? {
-        guard let data = capture(argv(["doctor", "--json"]), timeout: ChildProcess.doctorTimeout) else { return nil }
+        guard let data = capture(argv(doctorOverviewArgs()), timeout: ChildProcess.doctorTimeout) else { return nil }
         return try? JSONDecoder().decode(DoctorOverview.self, from: data)
     }
 
@@ -174,6 +192,9 @@ enum AgentsCLI {
     }
 
     // Surface CLI health in a terminal — `agents doctor` is interactive output.
+    // Plain `doctor`, matching the poll's scope (see doctorOverviewArgs): the
+    // `--devices` fan-out costs minutes and belongs to an explicit terminal run,
+    // which the operator can widen themselves.
     static func runDoctor() {
         let cmd = "\(shellQuote(binary)) doctor"
         let script = "tell application \"Terminal\"\nactivate\ndo script \"\(cmd)\"\nend tell"

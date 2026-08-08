@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { appendWatchdogEvents, trimToLast, formatEvent, type WatchdogEvent } from './log.js';
+import { appendWatchdogEvents, boundTailLines, parseWatchdogEvents, trimToLast, formatEvent, WATCHDOG_TAIL_MAX_CHARS, type WatchdogEvent } from './log.js';
 
 const KNOWN_KINDS = new Set(['tick', 'decision', 'nudge', 'rotate', 'error']);
 
@@ -62,13 +62,51 @@ describe('appendWatchdogEvents', () => {
     expect(lines.map((l) => l.message)).toEqual(['t6', 't7', 't8', 't9']);
   });
 
+  it('bounds transcript context while preserving its newest content', () => {
+    const old = 'a'.repeat(WATCHDOG_TAIL_MAX_CHARS);
+    const newest = 'NEWEST';
+    appendWatchdogEvents([
+      { ts: 1, kind: 'decision', message: 'bounded', tailLines: [old, newest] },
+    ], { logPath });
+    const tail = readLines()[0].tailLines as string[];
+    expect(tail.join('').length).toBe(WATCHDOG_TAIL_MAX_CHARS);
+    expect(tail.at(-1)).toBe(newest);
+  });
+
   it('is a no-op for an empty event list', () => {
     appendWatchdogEvents([], { logPath });
     expect(fs.existsSync(logPath)).toBe(false);
   });
+
+  it('sanitizes malformed optional fields instead of leaking unsafe values', () => {
+    const [event] = parseWatchdogEvents(JSON.stringify({
+      ts: 1,
+      kind: 'decision',
+      message: 'valid',
+      terminalId: 7,
+      tailLines: ['safe', 8],
+      inspections: [{ terminalId: 9, agentType: 'claude', message: 'skip', reason: 'working' }],
+    }));
+    expect(event.terminalId).toBeUndefined();
+    expect(event.tailLines).toEqual(['safe']);
+    expect(event.inspections).toEqual([{
+      terminalId: undefined,
+      agentType: 'claude',
+      message: 'skip',
+      reason: 'working',
+      stalledForMs: undefined,
+    }]);
+  });
+
+  it('rejects non-finite timestamps', () => {
+    expect(parseWatchdogEvents('{"ts":1e400,"kind":"tick","message":"bad"}')).toEqual([]);
+  });
 });
 
 describe('trimToLast / formatEvent', () => {
+  it('boundTailLines retains all short tails unchanged', () => {
+    expect(boundTailLines(['one', 'two'])).toEqual(['one', 'two']);
+  });
   it('formatEvent emits compact single-line JSON', () => {
     const line = formatEvent({ ts: 1, kind: 'tick', message: 'hi' });
     expect(line).toBe('{"ts":1,"kind":"tick","message":"hi"}');

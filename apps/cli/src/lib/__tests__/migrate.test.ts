@@ -39,6 +39,38 @@ function devicePinsFile(): string {
 }
 
 describe('runMigration', () => {
+  it('renames the legacy favorites store to bookmarks without losing ids', () => {
+    const historyDir = path.join(userDir, '.history');
+    fs.mkdirSync(historyDir, { recursive: true });
+    fs.writeFileSync(path.join(historyDir, 'favorites.json'), JSON.stringify({
+      version: 1,
+      sessionIds: ['session-a', 'session-b'],
+    }));
+
+    runRealMigration();
+
+    expect(JSON.parse(fs.readFileSync(path.join(historyDir, 'bookmarks.json'), 'utf-8'))).toEqual({
+      version: 1,
+      sessionIds: ['session-a', 'session-b'],
+    });
+    expect(fs.existsSync(path.join(historyDir, 'favorites.json'))).toBe(false);
+  });
+
+  it('keeps the canonical bookmarks store when both marker stores exist', () => {
+    const historyDir = path.join(userDir, '.history');
+    fs.mkdirSync(historyDir, { recursive: true });
+    fs.writeFileSync(path.join(historyDir, 'favorites.json'), JSON.stringify({ version: 1, sessionIds: ['legacy'] }));
+    fs.writeFileSync(path.join(historyDir, 'bookmarks.json'), JSON.stringify({ version: 1, sessionIds: ['canonical'] }));
+
+    runRealMigration();
+
+    expect(JSON.parse(fs.readFileSync(path.join(historyDir, 'bookmarks.json'), 'utf-8'))).toEqual({
+      version: 1,
+      sessionIds: ['canonical'],
+    });
+    expect(fs.existsSync(path.join(historyDir, 'favorites.json'))).toBe(false);
+  });
+
   it('moves legacy files into the user repo and deletes dead files', () => {
     fs.writeFileSync(path.join(systemDir, 'agents.yaml'), 'agents:\n  claude: "1.0.0"\n');
     fs.writeFileSync(path.join(systemDir, 'prompts.json'), '{}');

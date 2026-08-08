@@ -8,8 +8,8 @@
  * or falls back to the legacy per-host SSH stream.
  */
 
-import { describe, it, expect, vi } from 'vitest';
-import { applyScopeFilters, artifactLookupScope, buildRoutineChoices, buildRoutineRunGroups, filterSessionsByRoutine, formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, printRoutineRunOverview, resolveRoutineName, teamBadge } from '../sessions.js';
+import { describe, it, expect } from 'vitest';
+import { applyScopeFilters, artifactLookupScope, buildRoutineChoices, buildRoutineRunGroups, filterSessionsByRoutine, formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, resolveRoutineName, teamBadge } from '../sessions.js';
 import { resolveSessionById } from '../../lib/session/discover.js';
 import { formatTeamLineage } from '../sessions-picker.js';
 import type { SessionMeta } from '../../lib/session/types.js';
@@ -46,12 +46,21 @@ describe('hasNoBrowserDisqualifyingFlags — which views the browser can represe
       { until: '2026-01-01' },
       { project: 'agents-cli' },
       { sort: 'cost' },
-      { routine: true },
       { artifacts: true },
       { artifact: 'x' },
     ]) {
       expect(hasNoBrowserDisqualifyingFlags(opts, undefined)).toBe(false);
     }
+  });
+
+  it('keeps routine views grouped while routing a named team view through the shared browser', () => {
+    expect(hasNoBrowserDisqualifyingFlags({ routine: true }, undefined)).toBe(false);
+    expect(hasNoBrowserDisqualifyingFlags({ routine: 'nightly-review' }, undefined)).toBe(false);
+    expect(hasNoBrowserDisqualifyingFlags({ teams: true, inTeam: 'redesign' }, undefined)).toBe(true);
+  });
+
+  it('keeps the bare grouped --teams report out of the flat browser', () => {
+    expect(hasNoBrowserDisqualifyingFlags({ teams: true }, undefined)).toBe(false);
   });
 
   it('--cloud disqualifies: it lists provider tasks and has no host scope', () => {
@@ -130,18 +139,6 @@ describe('routine picker and run grouping', () => {
     ]);
   });
 
-  it('keeps the hidden team and unmanaged-session disclosures', () => {
-    const lines: string[] = [];
-    const log = vi.spyOn(console, 'log').mockImplementation((line = '') => lines.push(String(line)));
-    try {
-      printRoutineRunOverview(sessions.slice(0, 3), undefined, { hiddenCount: 2, hiddenUnmanaged: 1 });
-    } finally {
-      log.mockRestore();
-    }
-    const output = lines.join('\n');
-    expect(output).toContain('2 team sessions hidden');
-    expect(output).toContain('1 session from your own unmanaged installs hidden');
-  });
 });
 
 describe('matchesTeam — --in-team spans both ends of the lineage', () => {

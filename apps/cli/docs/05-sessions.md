@@ -40,7 +40,7 @@ session is *joined* (a second client, no fork), local or remote over SSH; a sess
 with no attach rail enters recovery in the tab, reported never silently dropped.
 Any selector or filter switches to the shared sessions-browser candidate pipeline:
 agent/version (`claude@2.1.187`, `claude@latest`), device/host/local, project/time,
-team/routine, skill/plugin, favorites, and the complete live-state union. A unique
+team/routine, skill/plugin, bookmarks, and the complete live-state union. A unique
 id focuses directly; agent/version and text selectors always show the rich preview
 picker, even for one result. `latest` and `oldest` resolve independently on each
 queried device. A full tmux name such as `ag-codex-c1f3d813` and a unique alias
@@ -757,14 +757,26 @@ agents sessions --teams   # --team is an alias
 # In the browser, `t` cycles the same filter over the teams in view.
 agents sessions --in-team redesign --teams
 
-# Show routine-run sessions, then open one by routine run id
-agents sessions --routine --all
-agents sessions --routine nightly-review --all
-agents sessions --routines --all      # alias; pick a routine interactively on a TTY
+# Drill into a routine: its canonical run history first, each run linked to the
+# indexed agent session(s) it produced. Global across every working directory.
+agents sessions --routine
+agents sessions --routine nightly-review
+agents sessions --routines            # alias; pick a routine interactively on a TTY
 agents sessions 2026-07-21T10-30-00-000Z
 
-# The picker shows last-run/run-count/session-count context. After selection,
-# sessions are grouped by routine run id and timestamp.
+# The picker shows last-run/run-count/session-count context. After selection the
+# drilldown lists RUN RECORDS newest-first — run id, trigger, status
+# (completed/failed/blocked/skipped/missed), start/duration, exit/error, execution
+# type (agent/command/workflow), and placement (local/host/cloud) with the run's
+# log + report paths — and under each run its linked session's agent/version/
+# account/model/token/cost/duration/tool metadata. A command-only routine (e.g.
+# auto-dispatch) shows its runs and states plainly that no agent session is
+# produced; blocked/skipped/missed attempts appear with no fabricated session row.
+# Counts distinguish run records from linked sessions. The canonical source is the
+# run history under ~/.agents/.history/runs/<routine>/, not the session index.
+# The drilldown is the default routine view; an explicit --flat/--tree or a
+# session id/query keeps the scoped session listing/picker instead
+# (e.g. `agents sessions --routine nightly-review --flat`).
 
 # Sort the list by cost or duration (default: recent)
 agents sessions --sort cost --limit 10
@@ -832,6 +844,16 @@ selected ids, harnesses, redaction/reasoning settings, and Markdown strings for
 machine consumers.
 
 ## Live sessions (`--active`) and the interactive browser
+
+**`--browser` switches to a different pool entirely.** `agents sessions --browser`
+(alias `agents browser sessions`) lists a browser profile's captured screenshots,
+PDFs, recordings, and downloads (`agents browser start` / `screenshot` / `pdf` /
+`record`) instead of agent transcripts. On a TTY it opens its own task-first
+interactive view (RUSH-2407) — one row per browser task, newest first, linking to
+the agent session that ran it when the task's `launchId` still resolves. See
+[`browser.md` §History and discovery](browser.md) for the full picker behavior;
+`--no-interactive`/`--json` print the flat per-artifact table this section's
+`--no-interactive` convention otherwise governs for the transcript pool below.
 
 `agents sessions --active` answers "what is running right now, everywhere". It sweeps
 the local machine (`getActiveSessions`) and, unless `--local`, every registered online
@@ -1234,28 +1256,30 @@ gated exactly like `showHost`): it previously showed which terminal a session ra
 never what it was doing, so a session that had lost its host was indistinguishable from a
 healthy one in the row list.
 
-## Favorites
+## Bookmarks
 
-`*` in the interactive browser favorites the highlighted session; `f` filters the list to
-the favorited ones. Outside a TTY, `agents sessions favorite <id>` (`--remove`, `--list`,
-`--json`) does the same, and `agents sessions --favorites` is the flag twin of `f` — so
-the `y` copy-cmd round-trips a favorited view into a command.
+`*` in the interactive browser bookmarks the highlighted session; `b` filters the list to
+the bookmarked ones. Outside a TTY, `agents sessions bookmark <id>` (`--remove`, `--list`,
+`--json`) does the same, and `agents sessions --bookmarks` is the flag twin of `b` — so
+the `y` copy-cmd round-trips a bookmarked view into a command. `f` focuses the highlighted
+session through the same attach-or-recover decision as `agents sessions focus <id>`;
+Enter keeps its existing resume behavior.
 
-Favorites live in `~/.agents/.history/favorites.json` keyed by session id, **not** in
+Bookmarks live in `~/.agents/.history/bookmarks.json` keyed by session id, **not** in
 `sessions.db`. The index is a rebuildable cache — a reindex re-derives every row from
-the transcripts on disk — and a favorite is not derivable from a transcript, so a column
-there would be silently lost on the next rebuild. `.history` is never pruned, so a favorite
+the transcripts on disk — and a bookmark is not derivable from a transcript, so a column
+there would be silently lost on the next rebuild. `.history` is never pruned, so a bookmark
 survives that rebuild.
 
-Favorites are **per-machine**. Session sync carries `.history/backups/`
-(`lib/session/sync/agents.ts`), not this file, so a session favorited on one box is not
-favorited on another — even though the session id itself is fleet-wide. Carrying them
+Bookmarks are **per-machine**. Session sync carries `.history/backups/`
+(`lib/session/sync/agents.ts`), not this file, so a session bookmarked on one box is not
+bookmarked on another — even though the session id itself is fleet-wide. Carrying them
 would mean adding the file to the sync manifest.
 
-That store is per-machine but the FILTER is not scoped to one: `--favorites` applies to
-every row in the merged fleet view, so a peer's session you favorited from here still
+That store is per-machine but the FILTER is not scoped to one: `--bookmarks` applies to
+every row in the merged fleet view, so a peer's session you bookmarked from here still
 shows. This is why the live `--active` path filters after the remote fan-out rather than
-forwarding the flag to each peer — a peer has its own (different) favorites list.
+forwarding the flag to each peer — a peer has its own (different) bookmarks list.
 
 ## Export / Import (portable bundles)
 

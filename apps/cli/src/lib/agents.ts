@@ -694,7 +694,12 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       skills: true,
       commands: false,
       plugins: true,
-      subagents: true, // YAML agent files under ~/.kimi-code/agents/ (see transformSubagentForKimi)
+      // Claude-shaped agent markdown under ~/.kimi-code/agents/. kimi-code
+      // discovers that dir from `USER_BRAND_DIRS = ["agents"]` (agent-file
+      // discovery, added in 0.29.0); 0.28.x and older compile their four agent
+      // profiles into the bundle with no filesystem loader at all, so a synced
+      // file there is never read.
+      subagents: { since: '0.29.0' },
       rules: { file: 'AGENTS.md' },
       workflows: true,
       memory: false,
@@ -1457,6 +1462,12 @@ const CREDENTIAL_FILE_SEGMENTS: Partial<Record<AgentId, string[][]>> = {
   // Muse Code stores OAuth / API credentials at ~/.config/muse/auth.json
   // (or META_API_KEY in the environment, which is not a file).
   muse: [['.config', 'muse', 'auth.json']],
+  // Cursor's OAuth token — the login gate — is at $XDG_CONFIG_HOME/cursor/auth.json
+  // (~/.config/cursor/auth.json by default). cli-config.json holds only account
+  // metadata; the token file is what a real launch authenticates from, so a
+  // version home with no token of its own is genuinely logged out once runs pin
+  // XDG_CONFIG_HOME per home (see buildExecEnv).
+  cursor: [['.config', 'cursor', 'auth.json']],
 };
 
 /** Whether an agent's credential file exists under a given home. */

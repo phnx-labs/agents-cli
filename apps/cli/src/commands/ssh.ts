@@ -49,6 +49,7 @@ import {
 } from '../lib/devices/tailscale.js';
 import { defaultPickerChecked, localLoginUser, planDeviceReconciliation, runDeviceSync, withDefaultUser } from '../lib/devices/sync.js';
 import { resolveDeviceTarget, splitUserHost } from '../lib/devices/resolve-target.js';
+import { deriveMirroredCwd } from '../lib/project-root.js';
 import { clearPendingSentinel } from '../lib/devices/pending.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { hostNameFor, renderSshConfig } from '../lib/devices/ssh-config.js';
@@ -1745,15 +1746,21 @@ function registerSshWrapper(program: Command): void {
     .allowUnknownOption()
     .addHelpText('after', `
 Examples:
-  agents ssh win-mini                       # interactive login
-  agents ssh win-mini hostname              # run a command (PowerShell on Windows)
-  agents ssh yosemite-s0 uptime             # run a command (POSIX)
-  agents ssh auto                           # affinity-pick a device (same engine as 'agents run --device auto')
+  agents ssh yosemite-s0                     # interactive login (mirrors your project dir)
+  agents ssh win-mini                        # interactive login
+  agents ssh win-mini hostname               # run a command (PowerShell on Windows)
+  agents ssh yosemite-s0 uptime              # run a command (POSIX)
+  agents ssh auto                            # affinity-pick a device (same engine as 'agents run --device auto')
 
 Devices come from 'agents devices'. Password auth pulls the secret from a
 secrets bundle via an askpass shim — the password never touches argv.
 'auto' picks a remote device by 14-day usage; a pick landing on this machine
 is refused with a clear message instead of self-dialing.
+
+An interactive login with no command mirrors the home-relative directory you
+launched from — 'agents ssh yosemite-s0' from ~/src/app lands in ~/src/app on
+the target when it exists, else the remote home. Same portable-cwd rule as
+'agents run --host'. Passing a command keeps the remote home.
 `)
     .action(async (name: string, cmd: string[]) => {
       // Hidden askpass bridge: ssh execs the shim, which re-invokes us here.
@@ -1813,7 +1820,12 @@ is refused with a clear message instead of self-dialing.
         ensureManagedKnownHostsDir();
         const addr = hostNameFor(device);
         const pinned = addr ? isHostPinned(addr) : false;
-        const { args, env } = buildSshInvocation(device, cmd, shim, { pinned });
+        // Interactive login (no cmd): mirror the caller's project directory on
+        // the target when the same home-relative checkout exists there, matching
+        // `agents run --host` (deriveMirroredCwd). Best-effort — a missing dir
+        // falls back to the remote home. An explicit `cmd` keeps its cwd (RUSH-2412).
+        const mirrorCwd = cmd.length === 0 ? deriveMirroredCwd(process.cwd()) : undefined;
+        const { args, env } = buildSshInvocation(device, cmd, shim, { pinned }, { interactiveCwd: mirrorCwd });
 
         // Interactive login: make the local terminal's terminfo (e.g.
         // xterm-ghostty) available on the remote so backspace/colors/clear work.

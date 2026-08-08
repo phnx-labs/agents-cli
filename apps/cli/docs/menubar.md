@@ -202,7 +202,7 @@ One rule shapes the menu: **attention floats up, context groups down.**
  │ ▶ DEVICES (12)                                │   full fleet roster, folded by default
  │   ◉ zion (this Mac) · macos · 14%           ›  │   ◉ = interactive host; load% when known
  ├────────────────────────────────────────────────┤
- │ System    all set · auto-nudge off          ›  │   setup + watchdog collapsed
+ │ System    2 critical · 1 warning · auto-nudge off ›│  doctor findings + watchdog
  ├────────────────────────────────────────────────┤
  │ Stop scheduler · Settings · Quit          ⌘Q  │
  └────────────────────────────────────────────────┘
@@ -279,8 +279,24 @@ One rule shapes the menu: **attention floats up, context groups down.**
   configured interactive host. The `›` submenu shows load/mem when known and a
   **Copy `agents ssh <name>`** action. The roster comes from the same 3-minute
   `menubar snapshot --json` poll (a cheap local registry read), not a new timer.
-- **System** — setup staleness + the auto-nudge watchdog collapsed into one row;
-  the submenu keeps the doctor items and the auto-nudge toggle.
+- **System** — setup health + the auto-nudge watchdog collapsed into one row.
+  The health half of the summary is the doctor findings count, `N critical ·
+  M warnings` (bare `all set` when there are none), sourced from `agents doctor
+  --json`'s `findings` field on the 15-minute poll (`DoctorHealth.summary`,
+  [`Models.swift`](../menubar/Sources/MenubarHelper/Models.swift)); it's
+  followed by `auto-nudge on/off` from the watchdog toggle. The submenu lists
+  up to 5 findings, in the order doctor emits them (already prioritized), each
+  as two lines: `<severity> · <device> · <agent> @<version>` (or
+  `<agent> (N versions)` when a finding collapses several versions) then
+  `<message> → <remediation>` truncated to 96 chars. A
+  `+N more — run \`agents doctor\`` row appears when more than 5 findings are
+  actionable. **Legacy fallback (RUSH-2382):** an installed CLI older than the
+  `findings` field returns `findings: null`, not an empty list — the menu bar
+  then falls back to the pre-findings behavior: the summary counts
+  not-installed / stale / never-synced agents (or `all set`), and the submenu
+  lists "Not installed" / "Resources" sections instead of findings rows. Either
+  way the submenu ends with Run agents doctor, Open ~/.agents, and the
+  auto-nudge toggle.
 
 The icon badges **red `!`** when anything needs you, **red `⏻`** when the
 scheduler has been unreachable for ~30s (see

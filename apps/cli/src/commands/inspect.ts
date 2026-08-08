@@ -41,6 +41,7 @@ import { getVersionHomePath,
 import { getShimsDir, getVersionedAliasPath } from '../lib/shims.js';
 import {
   getAgentResources,
+  isDirectoryDoc,
   listResources,
   type ResourceEntry,
   type SkillResourceEntry,
@@ -48,7 +49,7 @@ import {
 import { listHookEntriesFromDir } from '../lib/hooks.js';
 import { getResourceInventory, type ResourceInventory } from '../lib/resource-inventory.js';
 import { listMcpServerConfigs, discoverMcpConfigsFromRepo, type McpYamlConfig } from '../lib/mcp.js';
-import { discoverPlugins, discoverPluginsInDir, pluginResourceGroups, type PluginResourceGroup } from '../lib/plugins.js';
+import { discoverPlugins, discoverPluginsInDir, pluginResourceGroups, inspectPluginCapabilities, pluginCapabilityLabels, type PluginResourceGroup } from '../lib/plugins.js';
 import { PLUGIN_GROUP_COLORS } from './plugins.js';
 import { countSessionsInScope } from '../lib/session/discover.js';
 import { isSessionTrackedAgent } from '../lib/session/types.js';
@@ -373,7 +374,37 @@ export function collectRepoKind(repo: RepoTarget, kind: DrillableKind): Resource
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  const dir = path.join(repo.root, kind);
+  // Hooks live nested under event directories (`hooks/pre-tool-use/…`), and a
+  // script pairs with its data sidecar. repoHookItems already reads them that
+  // way for the summary view; a flat readdir here returned the event dirs
+  // themselves plus README/test scaffolding, so `--hooks` and the summary
+  // reported different counts for the same repo.
+  if (kind === 'hooks') return repoHookItems(repo);
+
+  // A repo's `rules/` holds the COMPOSED output (AGENTS.md plus its CLAUDE.md /
+  // GEMINI.md symlinks) alongside a `subrules/` dir of the individually named
+  // fragments. The fragments are what `--rule <name>` resolves and what a reader
+  // means by "a rule"; the composed file is a build artifact. Without this,
+  // `subrules` listed as a single opaque leaf and every real rule was unreachable.
+  // Deliberately exclusive: once `subrules/` exists it is the sole home for
+  // rules (composeRules only ever resolves names under it — lib/rules/compose.ts),
+  // so loose top-level `.md` files are not listed. A repo mid-migration to the
+  // subrules convention would see those legacy files disappear from `--rules`;
+  // that is the correct signal, since composeRules would not load them either.
+  if (kind === 'rules') {
+    const subrulesDir = path.join(repo.root, kind, 'subrules');
+    if (fs.existsSync(subrulesDir)) return readResourceDir(subrulesDir, kind, repo.label);
+  }
+
+  return readResourceDir(path.join(repo.root, kind), kind, repo.label);
+}
+
+/**
+ * Enumerate one directory of resources of `kind`, skipping dotfiles, build caches,
+ * and directory docs. Shared so the rules `subrules/` branch and the default
+ * `<repo>/<kind>/` branch cannot drift apart.
+ */
+function readResourceDir(dir: string, kind: Exclude<DrillableKind, 'plugins'>, source: string): ResourceItem[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -384,10 +415,15 @@ export function collectRepoKind(repo: RepoTarget, kind: DrillableKind): Resource
     if (entry.name.startsWith('.')) continue;
     // Build/tooling caches are never resources — they only inflate counts.
     if (entry.name === '__pycache__' || entry.name === 'node_modules') continue;
+    const name = entry.name.replace(/\.(md|yaml|yml|toml|json)$/, '');
+    // README/AGENTS/CLAUDE/GEMINI describe the directory, not resources of this
+    // kind. CLAUDE.md/GEMINI.md are symlinks to AGENTS.md, so a Dirent reports
+    // isFile() === false — use !isDirectory() to catch them (mirrors resources.ts).
+    if (!entry.isDirectory() && isDirectoryDoc(kind, name)) continue;
     const p = path.join(dir, entry.name);
     items.push({
-      name: entry.name.replace(/\.(md|yaml|yml|toml|json)$/, ''),
-      source: repo.label,
+      name,
+      source,
       path: p,
       linkTarget: linkTarget(p),
       description: readDescription(p),
@@ -473,7 +509,6 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
   const kindData = {} as Record<DrillableKind, { items: ResourceItem[]; size: { bytes: number; files: number } }>;
   let totalBytes = 0, totalFiles = 0;
   let repoHookByScript: Map<string, ManifestHook> = new Map();
-  let repoHookItemList: ResourceItem[] = [];
   let repoMcpConfigs: Map<string, McpYamlConfig> = new Map();
   if (!options.brief) {
     for (const kind of DRILLABLE_KINDS) {
@@ -483,7 +518,6 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
       totalBytes += size.bytes; totalFiles += size.files;
     }
     repoHookByScript = hookManifestByScript(hookManifestFromFile(path.join(repo.root, 'agents.yaml')));
-    repoHookItemList = repoHookItems(repo);
     repoMcpConfigs = new Map(discoverMcpConfigsFromRepo(repo.root).map(s => [s.name, s.config]));
   }
 
@@ -498,8 +532,7 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
       resources: options.brief ? null : Object.fromEntries(
         DRILLABLE_KINDS.map(kind => {
           const size = kindData[kind].size;
-          // Hooks use the grouped reader (clean names) instead of the raw readdir.
-          const items = kind === 'hooks' ? repoHookItemList : kindData[kind].items;
+          const items = kindData[kind].items;
           const base = {
             count: items.length,
             bytes: size.bytes,
@@ -580,7 +613,7 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
       console.log(`  ${kind.padEnd(10)} ${count}  ${sz}  ${preview}`.trimEnd());
     }
 
-    printExpandedSection('Hooks', hookRows(repoHookItemList, repoHookByScript));
+    printExpandedSection('Hooks', hookRows(kindData.hooks.items, repoHookByScript));
     printExpandedSection('Plugins', pluginRows(kindData.plugins.items));
     printExpandedSection('MCP', mcpRows(kindData.mcp.items, repoMcpConfigs));
   }
@@ -849,10 +882,23 @@ function renderItemDetail(header: string, jsonHead: Record<string, unknown>, kin
   const matchTag = best.matchKind === 'exact' ? 'exact' : best.matchKind === 'substring' ? 'substring' : `~${best.distance}`;
   console.log(`  ${chalk.green('✓')}  ${termLink(chalk.bold.cyan(best.item.name), best.item.linkTarget)}  ${chalk.gray(`[${matchTag}, ${best.item.source}]`)}`);
   if (best.item.description) {
-    console.log(`     ${chalk.gray(truncate(best.item.description, 100))}`);
+    // Wrap to the real terminal width. This used to be truncate(desc, 100): a
+    // character count blind to the window, so a long description lost its
+    // sentence at 80 columns AND wasted the space at 200.
+    for (const line of wrapJoined('     ', best.item.description.split(/\s+/), ' ', terminalWidth())) {
+      console.log(chalk.gray(line));
+    }
   }
   for (const [k, v] of buildDetailRows(best.item, kind)) {
-    console.log(`     ${chalk.gray(k.padEnd(10))} ${v}`);
+    // Wrap, never truncate. These values are `, `-joined lists (commands,
+    // skills, triggers, tools) and cutting them hides real entries — a 9-command
+    // plugin would show 4. Before the detail view wrapped at all, the terminal
+    // soft-wrapped these in full, so truncating here would lose information the
+    // old output had.
+    // String(v) is belt-and-braces: pluginToItem now coerces every manifest field
+    // through manifestText, so nothing non-string should reach here. Kept because
+    // this is the choke point every future row kind flows through.
+    printWrappedJoined(`     ${chalk.gray(k.padEnd(10))} `, String(v).split(', '), ', ');
   }
 
   if (others.length > 0) {
@@ -977,19 +1023,68 @@ function pluginItems(): ResourceItem[] {
 /**
  * Map a discovered plugin to a resource item, surfacing the manifest description
  * and the bundle's nested resources (skills, commands, hooks, ...) as detail rows.
+ *
+ * EVERY field read here comes from an uncontrolled `plugin.json`:
+ * `loadPluginManifest` casts parsed JSON straight to `PluginManifest` and
+ * validates only name/version (`lib/plugins.ts`), so the declared types are a
+ * hope, not a guarantee. A non-string reaching a renderer throws on `.split` /
+ * `.replace`, and `pluginToItem` runs while BUILDING THE LIST — so one malformed
+ * manifest anywhere takes down `inspect .`, `--plugins`, `--json`, and even a
+ * query for a different, valid plugin. Coerce every field through `manifestText`;
+ * never trust the annotation.
  */
 function pluginToItem(plugin: DiscoveredPlugin, source: string): ResourceItem {
   const extra: Array<[string, string]> = [];
-  if (plugin.manifest.version) extra.push(['version', plugin.manifest.version]);
+  const version = manifestText(plugin.manifest.version);
+  if (version) extra.push(['version', version]);
+  // Which execution surfaces the bundle actually carries. Detection already
+  // exists for the plugin picker; the detail view simply never asked for it.
+  const surfaces = pluginCapabilityLabels(inspectPluginCapabilities(plugin.root));
+  if (surfaces.length > 0) extra.push(['surfaces', surfaces.join(', ')]);
+  const author = plugin.manifest.author;
+  const authorLabel = manifestText(typeof author === 'object' && author !== null ? author.name : author);
+  if (authorLabel) extra.push(['author', authorLabel]);
+  // `.length` is truthy for a bare string too, and a string has no `.join`.
+  const deps = plugin.manifest.dependencies;
+  const depsLabel = Array.isArray(deps)
+    ? deps.map(manifestText).filter(Boolean).join(', ')
+    : manifestText(deps);
+  if (depsLabel) extra.push(['depends on', depsLabel]);
   return {
     name: plugin.name,
     source,
     path: plugin.root,
     linkTarget: linkTarget(plugin.root),
-    description: plugin.manifest.description ?? '',
+    // `?? ''` catches only null/undefined — a numeric or array description used
+    // to reach truncateToWidth/`.split` and kill the render for every plugin.
+    description: manifestText(plugin.manifest.description),
     extra,
     groups: pluginResourceGroups(plugin),
   };
+}
+
+/**
+ * Render one uncontrolled manifest value as display text. Objects and arrays
+ * carry no sensible one-line form, so they become '' (the row is then dropped)
+ * rather than `[object Object]`; everything else stringifies.
+ */
+function manifestText(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') return '';
+  return String(v);
+}
+
+/**
+ * Render one uncontrolled value as a list of display strings. A scalar becomes a
+ * one-element list — the case `?? []` and `Array.isArray` both miss, and the one
+ * that threw on `.join`. Object entries drop out rather than becoming
+ * `[object Object]`.
+ */
+function manifestList(v: unknown): string[] {
+  if (v === null || v === undefined) return [];
+  if (Array.isArray(v)) return v.map(manifestText).filter(Boolean);
+  const single = manifestText(v);
+  return single ? [single] : [];
 }
 
 function entriesFromAgentResources(agent: AgentId, versionHome: string, kind: 'commands' | 'hooks' | 'workflows'): ResourceItem[] {
@@ -1044,7 +1139,16 @@ function buildDetailRows(item: ResourceItem, kind: DrillableKind): Array<[string
   const rows: Array<[string, string]> = [];
   if (item.path && kind !== 'mcp') {
     const stat = safeStat(item.path);
-    if (stat) rows.push(['size', stat.isDirectory() ? '(bundle)' : `${stat.size} bytes`]);
+    // A bundle reports its real recursive weight. `(bundle)` carried no
+    // information, and pathSize/formatBytes already back the summary view.
+    if (stat) {
+      if (stat.isDirectory()) {
+        const { bytes, files } = pathSize(item.path);
+        rows.push(['size', `${formatBytes(bytes)} · ${files} files`]);
+      } else {
+        rows.push(['size', formatBytes(stat.size)]);
+      }
+    }
   }
   // Kind-specific fields
   if (kind === 'skills' || kind === 'commands' || kind === 'subagents') {
@@ -1054,9 +1158,15 @@ function buildDetailRows(item: ResourceItem, kind: DrillableKind): Array<[string
       if (typeof fm.description === 'string' && fm.description.trim() !== item.description.trim()) {
         rows.push(['description', truncate(fm.description, 120)]);
       }
-      if (Array.isArray(fm.triggers)) rows.push(['triggers', fm.triggers.join(', ')]);
-      if (typeof fm.model === 'string') rows.push(['model', fm.model]);
-      if (Array.isArray(fm.tools)) rows.push(['tools', fm.tools.join(', ')]);
+      // Frontmatter is uncontrolled YAML too. These were type-guarded against a
+      // crash but still rendered `[object Object]` for an entry that is a map,
+      // and dropped a scalar `triggers: foo` entirely.
+      const triggers = manifestList(fm.triggers).join(', ');
+      if (triggers) rows.push(['triggers', triggers]);
+      const model = manifestText(fm.model);
+      if (model) rows.push(['model', model]);
+      const tools = manifestList(fm.tools).join(', ');
+      if (tools) rows.push(['tools', tools]);
     }
   }
   // Plugin bundles surface their nested resources (skills, commands, …) plus
@@ -1089,11 +1199,14 @@ function abbrevSource(s: string): string {
  * an optional cache tail. Plain text — the caller applies color.
  */
 export function summarizeHook(hook: ManifestHook): string {
-  const events = (hook.events ?? []).join('/') || '(no event)';
-  let matcher = hook.matcher;
+  // `hook` is an unvalidated YAML cast from agents.yaml, so `??` is not enough:
+  // a scalar `events: PreToolUse` is neither null nor an array, and `.join` threw
+  // — taking down bare `agents inspect <repo>`, and via the central manifest
+  // `agents inspect <agent>` on every box. Same shape as the plugin.json bug.
+  const events = manifestList(hook.events).join('/') || '(no event)';
+  let matcher = manifestText(hook.matcher);
   if (!matcher && hook.matches?.tool_name) {
-    const tn = hook.matches.tool_name;
-    matcher = Array.isArray(tn) ? tn.join('|') : tn;
+    matcher = manifestList(hook.matches.tool_name).join('|');
   }
   const head = matcher ? `${events}(${matcher})` : events;
 
@@ -1110,16 +1223,20 @@ export function summarizeHook(hook: ManifestHook): string {
 /** `·`-separated predicate summary from a hook's `matches:` block (tool_name omitted — shown in the matcher parens). */
 function summarizeMatches(m?: HookMatches): string {
   if (!m) return '';
+  // Every predicate is raw YAML. `truncate` calls `.slice`, so a numeric
+  // `prompt_contains: 12345` threw here just like the events case above.
   const bits: string[] = [];
   if (m.git_dirty) bits.push('git_dirty');
-  if (m.prompt_contains) bits.push(`prompt~"${truncate(m.prompt_contains, 24)}"`);
-  if (m.prompt_matches) bits.push(`prompt=/${truncate(m.prompt_matches, 24)}/`);
-  if (m.tool_args_match) bits.push(`args=/${truncate(m.tool_args_match, 20)}/`);
-  if (m.cwd_includes) {
-    const c = Array.isArray(m.cwd_includes) ? m.cwd_includes.join('|') : m.cwd_includes;
-    bits.push(`cwd~${truncate(c, 24)}`);
-  }
-  if (m.project_has) bits.push(`has ${m.project_has}`);
+  const promptContains = manifestText(m.prompt_contains);
+  if (promptContains) bits.push(`prompt~"${truncate(promptContains, 24)}"`);
+  const promptMatches = manifestText(m.prompt_matches);
+  if (promptMatches) bits.push(`prompt=/${truncate(promptMatches, 24)}/`);
+  const argsMatch = manifestText(m.tool_args_match);
+  if (argsMatch) bits.push(`args=/${truncate(argsMatch, 20)}/`);
+  const cwd = manifestList(m.cwd_includes).join('|');
+  if (cwd) bits.push(`cwd~${truncate(cwd, 24)}`);
+  const projectHas = manifestText(m.project_has);
+  if (projectHas) bits.push(`has ${projectHas}`);
   return bits.join(' · ');
 }
 
@@ -1127,7 +1244,10 @@ function summarizeMatches(m?: HookMatches): string {
 function hookCacheTtl(cache?: HookCache): string | null {
   if (cache === undefined || cache === null) return null;
   if (typeof cache === 'string') return cache.replace(/-bg$/, '');
-  return String(cache.ttl);
+  // A bare `cache: 5` has no `.ttl`, and `cache: {ttl: {…}}` has a non-scalar
+  // one — String() on either rendered `(undefined cache)` / `([object Object]
+  // cache)`. No ttl to show means no cache tail.
+  return manifestText((cache as { ttl?: unknown }).ttl) || null;
 }
 
 /** Compact one-liner for an MCP server: padded transport + the url (http) or command line (stdio). */
@@ -1244,6 +1364,11 @@ function loadCentralHookManifest(): Record<string, ManifestHook> {
  * data file collapsed into one entry, non-hook files like promptcuts.yaml or
  * README.md filtered out) rather than a naive readdir, so names are clean and
  * join cleanly against the manifest by script basename.
+ *
+ * `description` is intentionally blank: a hook is a script, and the only text a
+ * readdir-based reader could scrape from one is its shebang (the old flat path
+ * surfaced `!/usr/bin/env bash` as a description). The Hooks section shows firing
+ * events via summarizeHook instead, which is the useful signal.
  */
 function repoHookItems(repo: RepoTarget): ResourceItem[] {
   return listHookEntriesFromDir(path.join(repo.root, 'hooks')).map(h => ({
@@ -1311,7 +1436,10 @@ function readDescription(p: string): string {
   let filePath = p;
   try {
     if (fs.statSync(p).isDirectory()) {
-      for (const marker of ['SKILL.md', 'WORKFLOW.md', 'AGENT.md', 'README.md']) {
+      // `rule.md` is the directory form of a subrule (SUBRULE_RULE_FILE in
+      // lib/rules/compose.ts); without it the four dir-form subrules on disk
+      // drill in with a blank preview.
+      for (const marker of ['SKILL.md', 'WORKFLOW.md', 'AGENT.md', 'rule.md', 'README.md']) {
         const c = path.join(p, marker);
         if (fs.existsSync(c)) { filePath = c; break; }
       }

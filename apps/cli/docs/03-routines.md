@@ -57,6 +57,20 @@ consecutiveFailures, lastOkAt}`, persisted at
 (re)start attempt, so a failure survives past whatever line of the daemon log it
 would otherwise scroll out of.
 
+A third subsystem, `daemon-start`, records the daemon's own startup and is the
+one record that also **gates** behaviour rather than just reporting. It is
+written from both sides: the launching CLI marks every start it issues as a
+failure up front, and only a daemon that has finished booting — scheduler,
+browser IPC, broker decision and every background tick up — clears it. A daemon
+that spawns and then dies therefore leaves the streak growing, which a check on
+the launch's own return value could never see (the spawn succeeded). After five
+consecutive such starts the **implicit** auto-start refuses: the background
+callers that opportunistically bring the daemon up (`secrets unlock`, `browser
+start`, the watchdog) stop relaunching a daemon that never lives, and point at
+`agents daemon doctor`, which reports the streak and the recorded cause. An
+already-running daemon is still reported, and `agents daemon start` — the
+explicit override — is never gated.
+
 ### Project routines (opt-in daemon firing)
 
 `agents routines list` and `agents routines view <name>` also discover routines in `<project>/.agents/routines/` when invoked from inside a project — project routines shadow user routines of the same name in those views.
@@ -157,6 +171,8 @@ devices:                      # optional: the ONE device that owns this routine
   - yosemite-s0               # omit entirely (or --clear) to run on every device
 projects:                     # optional: organises the routine under a project group in `list`
   - myapp                     # single name → "myapp" group; ["*"] → All projects
+project: myapp                # optional: singular execution anchor from `agents projects`
+cwd: apps/api                 # optional: portable execution directory (see below)
 # source:                     # set by `agents routines enable-project` / sync
 #   kind: project
 #   projectPath: /path/to/repo
@@ -175,6 +191,64 @@ allow:
     - Read
     - Grep
 ```
+
+### Execution project and working directory
+
+`projects` and `project` are intentionally different:
+
+- `projects` is a repeatable grouping tag. It affects list/menu organization only.
+- `project` is a singular execution anchor. The CLI resolves its
+  `defaultPath`, falling back to `root`, on the device that will execute the
+  routine.
+- `cwd` selects the execution directory. A relative value is joined to the
+  execution project's base. When the project was imported from Linear without a
+  local `root`/`defaultPath`, or no project is selected, a relative `cwd` is
+  joined to the execution device user's home directory.
+
+The daemon process's own current directory is never an execution default. `repo`
+identifies the external GitHub/cloud/webhook repository and does not determine a
+local checkout path.
+
+```yaml
+# A Linear-imported project may have tracker identity but no checkout binding.
+# This still runs from $HOME/src/github.com/acme/app on the selected device.
+project: acme-app
+cwd: src/github.com/acme/app
+```
+
+For agent and workflow routines, omitting both `project` and `cwd` is incomplete
+setup. The definition is saved but remains paused. Command routines may use the
+target user's home because device-local housekeeping commands commonly operate
+there. Absolute paths outside the user's home are local-device-only; host, fleet,
+and cloud placement rejects them as non-portable.
+
+Creation, edit, and resume all run the same readiness entry point. Every placement
+gets structural project/CWD and portability checks. Local agent routines also
+check the local directory, installed harness, live authentication, and Codex
+workspace trust. An explicit host placement additionally resolves the target's
+HOME/project catalog, proves reachability and real write access there, and probes
+the target harness. Fleet and cloud placement cannot prove a selected target at
+definition time, so target-dependent checks are deferred to the run path and any
+failure remains recorded in attempt history. Workflow and command routines receive
+the structural checks that apply to their execution path. A syntactically valid
+definition with a proven blocker is saved paused with a stable finding and repair
+command. `resume` reruns readiness and does not bypass it.
+
+```bash
+agents routines add morning-briefing \
+  --project-anchor acme-app \
+  --cwd src/github.com/acme/app \
+  --schedule "0 8 * * 1-5" \
+  --agent claude \
+  --prompt "Summarize the pipeline"
+
+agents routines doctor morning-briefing --fix
+agents routines resume morning-briefing
+```
+
+Raw YAML editing is transactional: `agents routines edit <name> --yaml` edits a
+temporary copy, then parses and validates it before replacing the live definition.
+Invalid YAML leaves the prior definition and activation untouched.
 
 ### One-Shot Jobs
 
@@ -776,9 +850,11 @@ run metadata:
 ```
 
 Those archives are indexed by `agents sessions` with `origin: "routine"`,
-`routineName`, and `routineRunId`. Use `agents sessions --routine --all` (or the
+`routineName`, and `routineRunId`. Use `agents sessions --routine` (or the
 `--routines` alias) to pick a routine interactively, or pass a fuzzy name such
-as `agents sessions --routine nightly-review --all`, to list them. The picker
+as `agents sessions --routine nightly-review`, to list them. Routine discovery
+spans every working directory because a scheduled run is not tied to the shell
+where its history is inspected. The picker
 includes last-run and session-count context, and the selected view groups sessions
 by run ID and timestamp. Use `agents sessions <run-id>` to render the existing session summary view
 for a specific routine run.
@@ -792,21 +868,31 @@ there's nothing for this mechanism to copy out.
 
 ### Claude auth for routines
 
-A routine authenticates exactly like an interactive `agents run claude` on the
-same device: through the pinned account's own on-disk login.
-`buildRoutineSpawnEnv` sets `CLAUDE_CONFIG_DIR` to the account's per-version home
-(`runner.ts`), so even under the sandbox overlay — which gives the spawn a clean
-`HOME` — Claude Code reads its credential from `CLAUDE_CONFIG_DIR/.credentials.json`,
-the real interactive login. That access token is short-lived but refreshes itself
-per-device, so a box that runs at least once inside the refresh window stays
-signed in on its own.
+A routine is pinned to one account's per-version home:
+`buildRoutineSpawnEnv` sets `CLAUDE_CONFIG_DIR` to that home (`runner.ts`), so even
+under the sandbox overlay — which gives the spawn a clean `HOME` — Claude Code
+resolves its credential from `CLAUDE_CONFIG_DIR` rather than the ambient one.
 
-The daemon holds **no** Claude token and injects nothing — no ambient
-`CLAUDE_CODE_OAUTH_TOKEN`, no per-account variant. A shared or injected token was
-the *cause* of the fleet-wide rotation logout, not the fix (see "Pinning an
-account" below). If a routine's pinned account login has gone dead, the auth-health
-preflight (`runner.ts`) skips the run up front with a `re-login required` message
-rather than firing a doomed run.
+**A routine does NOT authenticate the same way an interactive `agents run claude`
+does — the two deliberately diverge.** A routine is headless, so it authenticates
+with that account's long-lived `claude setup-token` from the reserved file-backed
+`auth` bundle, which `runner.ts` resolves and asserts explicitly
+(`resolveClaudeSetupToken` → `out.CLAUDE_CODE_OAUTH_TOKEN`). An **interactive** run
+is left on the home's own on-disk/Keychain login and is never handed that token
+(EXEC-2a in [`specifications.md`](specifications.md)). The split is the point: a
+setup-token never rotates, so a scheduled run cannot land on a sibling home's
+just-rotated-out credential, while a human at a TTY keeps the login they
+established — which is also the only credential carrying the `user:profile` scope
+that usage reads need (RUSH-2392).
+
+What the daemon does **not** hold or forward is an *ambient, shared* Claude token:
+`runner.ts` overwrites `CLAUDE_CODE_OAUTH_TOKEN` with the per-account setup-token
+keyed to the pinned home, and deletes the variable outright when no such token
+resolves — so an inherited value never survives into a routine either way.
+A shared token was the *cause* of the fleet-wide rotation logout, not the fix (see
+"Pinning an account" below). If a routine's pinned account login has gone dead, the
+auth-health preflight (`runner.ts`) skips the run up front with a `re-login required`
+message rather than firing a doomed run.
 
 To bring a signed-out box back, log in on that box once — `agents run claude` (or
 `claude` directly) drives the interactive login and writes the credential the
@@ -1239,15 +1325,20 @@ agents routines add <name> --schedule "0 9 * * *" --agent claude --prompt "..." 
 agents routines add <name> --devices yosemite-s0 --schedule "0 3 * * *" \
   --agent claude --prompt "..."       # Add with device allowlist
 agents routines add <name> --project myapp --schedule "0 9 * * *" \
-  --agent claude --prompt "..."       # Tag to a named project (repeatable)
+  --agent claude --prompt "..."       # Group under a named project (repeatable metadata)
+agents routines add <name> --project-anchor myapp --cwd apps/api \
+  --schedule "0 9 * * *" --agent claude --prompt "..."  # Execution context
 agents routines add <name> --all-projects --schedule "0 9 * * *" \
   --agent claude --prompt "..."       # Tag to all defined projects
 agents routines add <path.yml>        # Add from YAML file
 agents routines add <name> --at "14:30" --agent claude --prompt "..."            # One-shot
-agents routines edit <name>           # Open job in $EDITOR
+agents routines edit <name>           # Transactional temporary-YAML editor
+agents routines edit <name> --yaml    # Same editor; explicit compatibility flag
 agents routines remove <name>         # Delete a job
 agents routines pause <name>          # Disable a job
 agents routines resume <name>         # Re-enable a paused job
+agents routines doctor <name>         # Check execution context + harness readiness
+agents routines doctor --all --fix    # Apply safe deterministic readiness repairs
 
 # Device allowlist management
 agents routines devices <name>                         # Interactive multi-select picker
@@ -1258,7 +1349,7 @@ agents routines devices <name> --clear                 # Disable on every regist
 agents routines run <name>            # Run immediately in foreground
 agents routines run <name> --host yosemite-s0  # Run on a specific remote device
 agents routines view <name>           # Show job config
-agents routines runs <name>           # View execution history (last 10)
+agents routines runs <name>           # Attempt history (session optional)
 agents routines stats                 # Run count/failed/missed/avg/p50/p95 duration, every job
 agents routines stats <name>          # Same rollup, scoped to one job
 agents routines logs <name>           # Show concise summary from latest run
@@ -1311,10 +1402,22 @@ agents routines status    # Check health, PID, binary, heartbeat, and upcoming r
 
 The scheduler **auto-starts on the first `agents routines add`**, so in most cases you never invoke `start` manually. When you `add`, `remove`, `pause`, or `resume` a job, it auto-reloads -- no manual restart needed.
 
-Scheduled fires are single-flight per routine. If the previous execution is still
-running, the next cron, catchup, or monitor fire exits without spawning another
-process. The claim is shared across CLI processes, so two simultaneous dispatchers
-cannot both pass the running-run check.
+Scheduled fires use two independent guards. An atomic slot claim keyed by routine
+name and the intended UTC schedule time ensures a delivered slot launches once,
+including across daemon reloads. A separate active-run claim prevents a routine
+from overlapping itself across scheduled, catch-up, webhook, detached, and manual
+foreground paths. A later slot while work is active writes a `skipped` attempt
+linked to the active run and spawns no process.
+
+Every requested attempt receives run metadata before placement, account selection,
+sandbox construction, readiness, or dispatch. `blocked` means the readiness gate
+prevented entry into placement; `failed` means placement, dispatch, or execution
+failed after the run path began;
+`skipped` means another slot/active/owner claim won. Routine history is therefore
+complete even when no transcript was created. `agents sessions --routines` builds
+its routine picker from definitions and run directories so zero-session routines
+remain selectable, but its result rows are archived sessions. Use `agents routines
+runs <name>` for canonical attempt history, including attempts with no transcript.
 
 `agents routines status` reports the scheduler as `running`, `wedged`, or `stopped`. A live PID whose heartbeat is more than three monitor ticks old is `wedged`; the status output includes the restart command. Both `routines list` and `routines status` also finalize orphaned `running` records before rendering. Run metadata records process birth time to reject recycled PIDs and persists the configured execution deadline. Detached children are killed when that deadline expires, including after a scheduler restart.
 

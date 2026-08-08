@@ -352,12 +352,12 @@ SSH access (§7); rendering sessions that no harness produced.
   falling through to a stale `activity` — the `--waiting` filter reads the
   never-rewritten activity via `isAwaitingUser`, and the `--active` tally carries
   a bucket per status (test `active.hostlink.test.ts`).
-- **SES-18b (MUST).** A favorite MUST be stored outside `sessions.db`
-  (`~/.agents/.history/favorites.json`, keyed by session id;
-  `lib/session/favorites.ts`), because the index is a rebuildable cache and a
-  favorite is not derivable from a transcript. A malformed or absent store MUST
-  degrade to "nothing is favorited", never throw into the listing path (test
-  `favorites.test.ts`). Favorites are per-machine: the store is NOT carried in
+- **SES-18b (MUST).** A bookmark MUST be stored outside `sessions.db`
+  (`~/.agents/.history/bookmarks.json`, keyed by session id;
+  `lib/session/bookmarks.ts`), because the index is a rebuildable cache and a
+  bookmark is not derivable from a transcript. A malformed or absent store MUST
+  degrade to "nothing is bookmarked", never throw into the listing path (test
+  `bookmarks.test.ts`). Bookmarks are per-machine: the store is NOT carried in
   an export bundle or the import mirror (`lib/session/sync/agents.ts` defines
   the `.history/backups/` layout those write into), and any doc claiming
   otherwise is drift.
@@ -585,7 +585,7 @@ SSH access (§7); rendering sessions that no harness produced.
   prefix MAY focus directly; an agent/version or text selector MUST show the
   preview picker even when exactly one row matches. Agent version aliases
   `latest` and `oldest` MUST resolve on each queried device, not on the caller.
-  Device, project/time, team/routine, skill/plugin, favorites, and live-state
+  Device, project/time, team/routine, skill/plugin, bookmarks, and live-state
   flags MUST compose, and several live states MUST form the same OR-union as
   `sessions --active` (`commands/sessions-browser.ts` `BrowserFilter`,
   `collectSessionCandidates`, `applyFilters`; `commands/focus.ts` `focusAction`;
@@ -594,6 +594,17 @@ SSH access (§7); rendering sessions that no harness produced.
   explicit `--closed` / `--crashed` filters MUST remain able to select those rows.
   A per-device `latest` / `oldest` query MUST NOT admit an unindexed live row whose
   version was not part of the peer's filtered result.
+- **SES-38a (MUST).** In the shared interactive session browser, `*` MUST toggle
+  the selected row's bookmark, `b` MUST toggle the bookmark-only filter, and `f`
+  MUST submit the selected row through the same attach/recover decision as
+  `sessions focus`. Enter MUST retain its resume behavior. These bindings MUST
+  apply to every preview rendered by that browser: ordinary listings, active
+  `--teams`, named `--in-team` views (with or without `--teams`), and routine
+  listings. The bare grouped `--teams` report MUST remain non-interactive because
+  its nested shape is not representable by the flat browser
+  (`commands/sessions-browser.ts` `runSessionBrowser`; tests
+  `lib/picker.test.ts`, `commands/sessions-browser.test.ts`,
+  `commands/__tests__/sessions-team-lineage.test.ts`).
 - **SES-39 (MUST).** Focus MUST query tmux `#{pane_dead}` immediately before
   attach. A dead or missing pane MUST NOT attach. Session recovery MUST run on
   the origin device and MUST choose native resume only for the exact healthy
@@ -1468,11 +1479,17 @@ normative — a change that widens or narrows a cell is a spec change.
 - **SEC-GAP-2.** The `env:`-ref allowlist control exists (`envAllowlist` on
   `ResolveOptions`, `lib/secrets/index.ts` ~`:1392,1411`) but no command wires it
   up — `env:` refs are effectively unrestricted today. Either wire it or remove it.
-- **SEC-GAP-3.** No reserved `auth` bundle exists in code, despite a design note
-  describing one for setup-tokens. The only reserved concept is
-  `RESERVED_ENV_NAMES` (env keys, not bundle names,
-  `lib/secrets/bundles.ts:273-277`). If the convention is intended, it is
-  unimplemented; until then, `auth` is an ordinary bundle name.
+- **SEC-GAP-3 (partially closed).** `auth` IS reserved in code now, but only by
+  the consumer, not by the secrets layer: `claude-account-token.ts:17` pins
+  `AUTH_BUNDLE = 'auth'` and reads it for Claude setup-tokens (EXEC-2a), and it
+  is honored ONLY when file-backed — a keychain- or vault-backed bundle of the
+  same name is ignored rather than rejected (`claude-account-token.ts:98`). The
+  secrets layer itself still has no reserved-bundle-name concept; the only
+  reserved concept there remains `RESERVED_ENV_NAMES` (env keys, not bundle
+  names, `lib/secrets/bundles.ts:273-277`). So `agents secrets create auth` with
+  the wrong backend still succeeds and silently does nothing for auth. Remaining
+  work: either reserve the name in the secrets layer (and fail loud on a
+  non-file backend) or drop the convention.
 - **SEC-GAP-4.** The broker's per-request capability-token auth (SEC-18) is not
   reflected in `secrets.md` / `08-secrets-agent-process-model.md`, which still
   describe only the same-UID/socket-permission model.
@@ -1716,6 +1733,33 @@ schema (`--json` passes through each agent's native stream format).
   `COPILOT_HOME` / `KIMI_CODE_HOME`) and MUST delete the other three agents'
   vars on every branch, so a config pointer from a different agent's shell
   never leaks into this invocation (`buildExecEnv`'s per-agent branch, `lib/exec.ts:402-490`).
+- **EXEC-2a (MUST).** For claude, `buildExecEnv` MUST inject the reserved `auth`
+  bundle's per-account setup-token into `CLAUDE_CODE_OAUTH_TOKEN` ONLY when the
+  run resolves **headless** (`resolveInteractive(options) === false`,
+  `lib/exec.ts:425-453`). That token exists so an unattended run authenticates
+  without the Touch-ID-gated login item (`lib/claude-account-token.ts:9-16`); an
+  interactive run MUST be left on its per-version login, which is also the only
+  credential carrying the `user:profile` scope usage reads require (RUSH-2392).
+  **`resolveInteractive` means "this run opens a TUI", NOT "a human is present"**
+  — do not read the requirement as the latter. `watchdog/rotate.ts:195` builds
+  `agents run auto --interactive` and `watchdog/runner.ts:901-903` injects it
+  into a tab unattended, so the watchdog's rotate-relaunch resolves interactive
+  and is deliberately NOT given the setup-token. That is the pre-existing
+  contract, not a new gap: the injection dates only to #1719 (2026-08-02), and
+  every interactive run — the watchdog's included — authenticated from its
+  per-version login before it. Where that relaunch lands on a home whose login
+  has gone dead, the defect is rotation treating "email present" as `authValid`
+  (`agents.ts:1871-1872`), which the token merely masked. Making the credential
+  a function of DEVICE ROLE rather than run mode is tracked in RUSH-2395.
+  An interactive run MUST additionally delete an INHERITED
+  `CLAUDE_CODE_OAUTH_TOKEN` whose value equals that same resolved setup-token
+  (`lib/exec.ts:444-446`), so an interactive launch from inside a headless
+  agent's shell does not keep authenticating as it; a value the caller set
+  itself MUST survive, and `options.env` still overrides last (EXEC-5).
+  Note this MUST NOT be read as "an interactive run never carries a token" — no
+  requirement yet strips an ambient value when NO per-account token resolves,
+  which is the routines path's behavior (`lib/runner.ts:1018-1021`) and is
+  tracked as RUSH-2360.
 - **EXEC-3 (MUST).** `buildExecEnv` MUST set `AGENTS_MAILBOX_DIR` +
   `AGENT_SESSION_ID` + `AGENTS_SESSION_ID` when a valid session id is present
   (`lib/exec.ts:444-449`), `AGENTS_RUNTIME` to `terminal`/`headless` from
@@ -1785,10 +1829,10 @@ schema (`--json` passes through each agent's native stream format).
   (`lib/shims.ts:280-330`), a separate code path from `buildExecEnv`, and even
   there no literal `HOME=` assignment exists (verified: no `HOME="` writer in
   `lib/shims.ts` — only `AGENTS_USER_DIR`/`GROK_DOWNLOADS` etc. *read* `$HOME`).
-- **EXEC-16.** The other 12 registered agents
-  (gemini, cursor, opencode, openclaw, amp, kiro, goose, antigravity, grok,
-  droid, hermes, pi — the 16 in `AgentId`, `lib/types.ts:13`, minus the four
-  EXEC-14 isolates) get **no** per-version config-dir var from
+- **EXEC-16.** The remaining registered agents
+  (gemini, opencode, openclaw, amp, kiro, goose, antigravity, grok,
+  droid, hermes, pi — the 16 in `AgentId`, `lib/types.ts:13`, minus the
+  EXEC-14 isolates and the XDG-isolated agents below) get **no** per-version config-dir var from
   `buildExecEnv` itself — its per-agent branch has no arm for them
   (`buildExecEnv`'s per-agent branch, `lib/exec.ts:402-490`; the `else` at `:485-489` only deletes the four known vars).
   A separate mechanism — the generated default-name bash shim
@@ -1807,6 +1851,24 @@ schema (`--json` passes through each agent's native stream format).
 
   Status: `[Drift]` — a named deviation from EXEC-13's per-version isolation
   contract, scoped (with the two ways to close it) in EXEC-GAP-1.
+- **EXEC-16a (MUST).** Muse and Cursor have no dedicated config-dir env var, so
+  `buildExecEnv` isolates them via XDG instead: it pins `XDG_CONFIG_HOME`
+  (and `XDG_DATA_HOME` for muse) at the version home (`lib/exec.ts`, the muse
+  and cursor arms). For Cursor this is what makes multiple accounts real: the
+  OAuth token that gates login lives at `$XDG_CONFIG_HOME/cursor/auth.json`
+  (verified empirically — relocating `XDG_CONFIG_HOME` relocates the login;
+  `~/.cursor/cli-config.json` is only account metadata), so each version home is
+  a distinct Cursor account, authenticated from its own token, isolated per run
+  (no global `~/.cursor` symlink swap — concurrent runs on different accounts do
+  not clobber one another). `CREDENTIAL_FILE_SEGMENTS.cursor`
+  (`lib/agents.ts`) verifies signed-in per home against that token, and
+  `seedActiveCursorLoginPerVersion` (`lib/migrate.ts`) migrates the legacy
+  global token into the active account's home on upgrade. The versioned-alias
+  shim mirrors the same `XDG_CONFIG_HOME` export (`CONFIG_ENV_ISOLATED_AGENTS`
+  includes cursor). Cursor's HOME-relative `~/.cursor` (cli-config.json,
+  chats) has no env override and stays on the shared home; the routine overlay
+  path (`buildRoutineSpawnEnv`) is unchanged and still seeds from the active
+  login by design.
 - **EXEC-17 (MUST).** The Windows `.cmd` shim delegate
   (`execShimPassthrough`) MUST route its env through the same `buildExecEnv`
   `agents run` uses (`lib/exec.ts:1059`) — so on Windows the isolated-agent
@@ -2345,6 +2407,24 @@ nothing but its own view cache.
   Routine definitions MUST NOT carry mutable `enabled:` or `devices:` activation fields. The same
   definition MAY be active on multiple devices when its input is device-local;
   shared-input work still requires the single-executor safeguards in SING-7.
+- **SING-5b (MUST).** Every scheduled occurrence MUST have a deterministic UTC
+  slot identity and MUST be atomically claimed before dispatch. Redelivery of the
+  same `(routine, scheduledFor)` slot MUST resolve to the existing attempt and
+  MUST NOT spawn a second process. Catch-up claims protect missed-fire recovery;
+  they do not replace the ordinary scheduled-slot claim.
+- **SING-5c (MUST).** A routine MUST NOT overlap itself across any entry point,
+  including manual foreground, detached, cron, catch-up, webhook, host, fleet,
+  and cloud execution. A losing request MUST produce an inspectable skipped result
+  linked to the active run and MUST NOT spawn.
+- **SING-5d (MUST).** Routine execution context MUST be resolved on the eventual
+  execution target from the singular project anchor and portable `cwd`. Plural
+  `projects` metadata and external `repo` identity MUST NOT affect the working
+  directory. A proven path, trust, write, authentication, reachability, or
+  placement blocker MUST leave the definition paused rather than defer failure to
+  its next schedule.
+- **SING-5e (MUST).** Run metadata MUST be allocated before pre-spawn work so every
+  blocked, skipped, failed, timed-out, missed, and completed attempt remains
+  inspectable without requiring an archived session transcript.
 - **SING-6 (MUST).** A new fleet-affecting feature MUST be implemented in
   `apps/cli` (daemon routine and/or command) first; the UI PR adds rendering and
   control wiring only. If the feature seemingly requires UI-side execution, SING-3
@@ -2411,15 +2491,19 @@ is not two daemons existing — it is two daemons consuming the **same** input.
 #### 3.2 One daemon per state dir — last-wins takeover, not first-wins refusal
 
 Singularity is scoped to the **state dir** (the daemon dir under `AGENTS_DAEMON_DIR`
-?? `<HOME>/.agents/.cache/helpers/daemon`), NOT the machine: one `HOME` may legitimately
+or `<HOME>/.agents/.cache/helpers/daemon`), NOT the machine: one `HOME` may legitimately
 run many daemons under different state dirs (a developer's daemon, a vitest fixture's
-own `HOME`), and none of them contend. Within ONE state dir, the pid-file claim in
-SING-5 guarantees one scheduler; SING-11/SING-12 fix *which* daemon survives and how the
-loser is torn down, so a second install sharing that state dir can never leave two
-daemons. (RUSH-2352 originally read four `__daemon-run` on one box as four duplicate
-schedulers; adversarial verification refuted that — three ran under separate `HOME`s
-and never shared state. Last-wins is the owner's product decision that a restart replaces
-the previous daemon, deliberately NOT a machine-wide process sweep.)
+own `HOME`), and none of them contend. One state dir maps 1:1 to one logical daemon for
+one user/configuration. Consequently, the casual product phrase "one daemon per device"
+means one daemon for the state dir a human normally uses on that device, not literally
+one `__daemon-run` process across every user, installation, or test fixture on the
+machine. Within ONE state dir, the pid-file claim in SING-5 guarantees one scheduler;
+SING-11/SING-12 fix *which* daemon survives and how the loser is torn down, so a second
+install sharing that state dir can never leave two daemons. (RUSH-2352 originally read
+four `__daemon-run` on one box as four duplicate schedulers; adversarial verification
+refuted that — three ran under separate `HOME`s and never shared state. Last-wins is the
+owner's product decision that a restart replaces the previous daemon, deliberately NOT
+a machine-wide process sweep.)
 
 - **SING-11 (MUST).** At most one daemon MUST be alive per state dir, enforced by
   **last-wins takeover**: a second `agents __daemon-run` for the same state dir — from
@@ -2450,6 +2534,21 @@ the previous daemon, deliberately NOT a machine-wide process sweep.)
   `monitorRunningJobs` (`runner.ts`) reconciles every `running` on-disk run record
   by pid liveness (`isPidOurs`), never by which daemon spawned it, so a live child
   is picked back up on the next tick.
+- **SING-11b (MUST).** Every daemon-owned process MUST be leak-free across every
+  daemon death mode, including graceful shutdown, takeover, SIGKILL, OOM-kill, and
+  machine restart. A later daemon invocation MUST either prove the recorded pid is
+  still the intended live process and adopt it, or reap the dangling daemon, browser,
+  tunnel, or keychain-helper process without targeting an unrelated or detached routine
+  process. The recovery layers are the state-directory lifetime self-check
+  (`lib/daemon.ts:925-957`), the state-directory-scoped daemon registry and
+  `reapStrayDaemons` (`lib/daemon.ts:348-394`), browser/tunnel orphan reaping
+  (`lib/daemon.ts:800-815`), the keychain helper reaper's pid/start-time identity
+  checks (`lib/secrets/reaper.ts:20-40`, `lib/secrets/reaper.ts:68-101`), and the
+  orphaned-`watch-lock` reaper (RUSH-2419) that recovers the one deliberately
+  long-lived helper when its owning daemon is provably dead
+  (`lib/secrets/reaper.ts:156-180`, wired into the reap tick at `lib/daemon.ts:911`).
+  Every daemon-owned process class — daemon, browser, tunnel, and keychain helper
+  including the `watch-lock` watcher — has a recovery layer.
 - **SING-12 (MUST).** `stopDaemon` (`lib/daemon.ts`) MUST assert its postcondition,
   not assume it: after the SIGTERM → grace → `killTree` sequence it MUST verify the
   browser IPC binding was released, the secrets broker socket was released (a stale
@@ -2461,6 +2560,29 @@ the previous daemon, deliberately NOT a machine-wide process sweep.)
   reported, never killed). `agents daemon stop` MUST surface that result (human summary
   plus `--json`) and exit non-zero when a resource could not be released. It MUST NOT
   report success on an unverified stop (RUSH-2355).
+- **SING-12a (MUST).** A clean daemon shutdown MUST enumerate and release the full
+  state-directory resource inventory: the browser IPC socket, the secrets broker
+  socket, the daemon pid registration, the lifetime marker file, the heartbeat file,
+  and the daemon's instance-registry entry. The shutdown postcondition MUST name any
+  survivor and MUST NOT report success merely because the daemon process exited. The
+  graceful path already attempts all six releases in `handleShutdown`
+  (`lib/daemon.ts:996-1016`); `stopDaemon` independently verifies the full inventory
+  via `stopResidueArtifacts` (`lib/daemon.ts:1596-1640`), consumed at
+  `lib/daemon.ts:1825-1831` on both the graceful and escalated `killTree` paths, and
+  distinguishes residue from a provably dead owner (reclaimed) from state belonging to
+  a live successor (left untouched) the same way the broker-socket branch above does
+  (RUSH-2421, SING-GAP-5 resolved).
+- **SING-14 (MUST).** Supervised daemon restart MUST be bounded. A permanently failing
+  daemon start MUST NOT cycle through unbounded rapid retries: the service manager MUST
+  enforce a restart interval and burst limit, and `ensureDaemonStarted` MUST stop
+  initiating starts after a bounded number of consecutive failures until the circuit
+  breaker resets. `generateLaunchdPlist` sets `ThrottleInterval` (`lib/daemon.ts:1117`)
+  and `generateSystemdUnit` sets `StartLimitIntervalSec`/`StartLimitBurst`
+  (`lib/daemon.ts:1154-1155`); `isDaemonAutostartCircuitOpen` (`lib/daemon.ts:1253-1261`)
+  is the `consecutiveFailures`-driven circuit breaker `ensureDaemonStarted` consults,
+  and `index.ts:255-256` adds top-level `uncaughtException`/`unhandledRejection`
+  handlers so a startup crash always reaches the now-throttled supervisor rather than
+  hanging (RUSH-2418, SING-GAP-6 resolved).
 
 ### 4. Given/When/Then scenarios
 
@@ -2479,12 +2601,24 @@ the previous daemon, deliberately NOT a machine-wide process sweep.)
   process in its own group) and the new daemon adopts it via `monitorRunningJobs`
   pid-liveness reconciliation — takeover never kills a live agent mid-run
   (SING-11a).
+- **GIVEN** a daemon is killed by SIGKILL or the OOM killer, or its machine restarts,
+  **WHEN** the next daemon invocation starts, **THEN** SING-11b requires it to adopt
+  live intended children and reap stale daemon, browser, tunnel, and keychain-helper
+  processes by recorded identity, leaving no dangling pid or orphaned process.
 - **GIVEN** a wedged daemon that ignores SIGTERM, **WHEN** `agents daemon stop` runs,
   **THEN** stop escalates to `killTree` after the grace window, then VERIFIES the
   broker socket and browser IPC binding released and no `__daemon-run` survives, and
   returns a structured result (exit non-zero if any resource could not be released),
   reporting surviving detached children rather than pretending the tree is clean
   (SING-12).
+- **GIVEN** a daemon owns all six state-directory resources, **WHEN** graceful shutdown
+  completes, **THEN** the browser IPC socket, secrets broker socket, pid registration,
+  lifetime marker, heartbeat, and instance-registry entry are all absent or released;
+  any survivor is named and makes the stop fail (SING-12a).
+- **GIVEN** the daemon exits immediately on every supervised start, **WHEN** launchd,
+  systemd, or a background-adjacent caller attempts to restart it, **THEN** the
+  service-manager burst limit and `ensureDaemonStarted` circuit breaker stop rapid
+  retries after a bounded number of consecutive failures (SING-14).
 - **GIVEN** a user disables a fleet-affecting capability from the Factory palette,
   **WHEN** the command completes, **THEN** the CLI's config is the state that
   changed (`agents watchdog rotate off`), and the daemon, the menubar, and every
@@ -2534,6 +2668,45 @@ the previous daemon, deliberately NOT a machine-wide process sweep.)
   (RUSH-2290) moves the claim into a unified transaction on `(routine, scheduledFor)`
   and adds the `skipped`-run overlap record; the run-status contract for that record is
   RT-6/RT-7 below.
+- **SING-GAP-4 (resolved, RUSH-2419).** SING-11b's leak-freedom guarantee once held for
+  every recovery layer except the keychain `watch-lock` watcher (`lib/secrets/agent.ts:833`,
+  `:915`): `isReapableHelperCommand` (`lib/secrets/reaper.ts:249-254`) permanently excludes
+  it from the periodic keychain reaper, so an OOM-kill, a raw SIGKILL, or the daemon's own
+  `killTree` escalation of a wedged daemon left it orphaned with no automatic recovery. The
+  daemon now runs a separate orphaned-`watch-lock` reaper path (`planKeychainReap`,
+  `lib/secrets/reaper.ts:156-180`, wired into the reap tick at `lib/daemon.ts:911`), gated
+  by `isWatchLockHelperCommand` (`lib/secrets/reaper.ts:262`): it kills a `watch-lock` only
+  when the owning daemon is provably absent from the `ps` snapshot (`ppid === 1`, or the
+  parent pid missing), behind the `ORPHAN_GRACE_SEC` grace and a fail-closed start-time
+  fingerprint. The live-daemon exclusion is re-asserted on that path
+  (`lib/secrets/reaper.ts:170-172`), so auto-lock-on-sleep for a running daemon is
+  untouched; `lib/secrets/reaper.test.ts:347-354` covers the predicate.
+- **SING-GAP-5 (resolved, RUSH-2421).** SING-12a's shutdown postcondition once verified
+  only the browser IPC socket, the secrets broker socket, and pid registration — not the
+  lifetime marker, heartbeat file, or instance-registry entry, which `handleShutdown`'s
+  graceful path releases but the escalated (`killTree`) path left stale with no
+  postcondition check. `stopDaemon` now runs `stopResidueArtifacts`
+  (`lib/daemon.ts:1596-1640`) unconditionally on both paths, reclaiming residue from a
+  provably dead owner and leaving alone anything a live successor owns
+  (`daemon.test.ts` covers both the escalated-reclaim case and the live-owner-protection
+  case). Both socket teardowns now await the real `net.Server` `'close'` event instead of
+  firing and forgetting: the secrets broker via `closeServerBounded`
+  (`lib/secrets/agent.ts:928-941`, `:953-973`, RUSH-2419) and the browser IPC server via
+  `BrowserIPCServer.stop` (`lib/browser/ipc.ts:284-295`, bounded by
+  `IPC_CLOSE_TIMEOUT_MS = 5_000` at `ipc.ts:84`, RUSH-2421).
+- **SING-GAP-6 (resolved, RUSH-2418).** SING-14's restart bound was previously
+  unenforced: `generateLaunchdPlist` set `KeepAlive` with no `ThrottleInterval`,
+  `generateSystemdUnit` set `Restart=always` with no `StartLimitIntervalSec`/
+  `StartLimitBurst`, and `ensureDaemonStarted` had no circuit breaker reading
+  `consecutiveFailures` — so a daemon that failed on every startup restarted in an
+  unbounded ~10s cycle. `generateLaunchdPlist` now sets `ThrottleInterval`
+  (`lib/daemon.ts:1117`), `generateSystemdUnit` sets `StartLimitIntervalSec`/
+  `StartLimitBurst` (`lib/daemon.ts:1154-1155`), and `isDaemonAutostartCircuitOpen`
+  (`lib/daemon.ts:1253-1261`) gates further auto-starts once
+  `DAEMON_AUTOSTART_FAILURE_LIMIT` consecutive claims have failed, reported by
+  `agents daemon doctor`/`status`. `index.ts:255-256` adds top-level
+  `uncaughtException`/`unhandledRejection` handlers so a crash during startup always
+  exits deterministically into the now-throttled supervisor instead of hanging.
 
 ---
 
@@ -2789,13 +2962,25 @@ not the watchdog's.
 - **WD-16 (MUST).** When no addressable split exists, the tick MUST fall back (mailbox or
   headless `--resume`) or refuse-and-flag — it MUST NOT silently claim delivery.
 - **WD-17 (MUST).** Every decision MUST be appended to `watchdog.log` in the Factory event
-  shape (`lib/watchdog/log.ts`).
+  shape, with persisted transcript context bounded so it cannot consume the audit window
+  (`lib/watchdog/log.ts`).
 
 #### 2.5 Per-session policy
 
 - **WD-18 (MUST).** `agents watchdog policy <id> off|keep|handsoff` MUST be honored:
   `off` excludes the session; `handsoff` detects+flags but never delivers; `keep` is the
   default path (`readPolicySentinel`/`writePolicySentinel`, `lib/watchdog/runner.ts`).
+
+#### 2.6 Audit history
+
+- **WD-19 (MUST).** `agents watchdog history [sessionId]` MUST expose the persisted audit
+  trail newest-first, including non-action session inspections, MUST support machine-readable output, and MUST NOT return raw
+  transcript `tailLines` or message excerpts (`lib/watchdog/history.ts`, `commands/watchdog.ts`).
+- **WD-20 (MUST).** The human one-shot tick output MUST show the tick timestamp and
+  actionable session identity/location/activity metadata already present in the active
+  snapshot. It MUST summarize healthy/non-actionable inspections by default and restore
+  every row with `--verbose`, without performing another session scan
+  (`lib/watchdog/runner.ts`, `commands/watchdog.ts`).
 
 ### 3. Given/When/Then scenarios
 
@@ -2823,6 +3008,19 @@ Given a running session whose transcript lives under an earlier version home whi
 `~/.claude` points at a newer version; When the tick classifies it; Then the transcript is
 found via `getAgentSessionDirs` and the session is evaluated, not skipped as "no activity
 timestamp" (WD-8).
+
+**GWT-W6 — Audit history is useful without disclosing transcript content.**
+Given persisted decisions and heartbeat ticks; When an operator runs
+`agents watchdog history <sessionId> --json`; Then matching decisions are returned newest
+first alongside compact inspection results, without raw transcript tails or message excerpts,
+and heartbeat rows appear only with `--all`
+(WD-19).
+
+**GWT-W7 — A dry tick explains what needs attention.**
+Given a tick containing stalled and healthy sessions; When an operator runs `agents watchdog`;
+Then the output names when the tick ran and identifies every actionable session with its
+location/activity context, while healthy rows are summarized until `--verbose` is passed
+(WD-20).
 
 ### 4. Known gaps
 

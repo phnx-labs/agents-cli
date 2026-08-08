@@ -106,15 +106,6 @@ export function registerForkPickSessionCommand<Disposable>(
   return register('agents.forkPickSession', run);
 }
 
-export function registerForkRecapCommand<Disposable>(
-  register: (command: string, callback: () => Promise<void>) => Disposable,
-  run: () => Promise<void>,
-): Disposable {
-  return register('agents.forkRecap', run);
-}
-
-export type PickedSessionIntent = 'continue' | 'recap';
-
 export async function runSessionBrowserPicker<Item extends { row?: SessionBrowserSessionRow }, Button>(opts: {
   quickPick: SessionBrowserQuickPick<Item, Button>;
   title?: string;
@@ -186,7 +177,6 @@ export async function runSessionBrowserPicker<Item extends { row?: SessionBrowse
 export async function runPickedSessionFork(opts: {
   row: SessionBrowserSessionRow;
   localMachine: string;
-  intent?: PickedSessionIntent;
   launch: (request: {
     agentKey: string;
     prompt: string;
@@ -212,7 +202,7 @@ export async function runPickedSessionFork(opts: {
 
   return opts.launch({
     agentKey: request.agentKey,
-    prompt: opts.intent === 'recap' ? `/recap ${request.sessionId}` : request.prompt,
+    prompt: request.prompt,
     strategy: request.strategy,
     host: request.host,
     local: request.local,
@@ -225,7 +215,6 @@ export async function handleForkPickedSession<AgentConfig>(opts: {
   currentSession: () => { sessionId: string | null; device?: string };
   pickSession: (sessionId: string | null, device?: string) => Promise<SessionBrowserSessionRow | null>;
   localMachine: string;
-  intent?: PickedSessionIntent;
   resolveAgentConfig: (agentKey: string) => AgentConfig | undefined;
   launchQueued: (config: AgentConfig, request: {
     agentKey: string;
@@ -246,7 +235,6 @@ export async function handleForkPickedSession<AgentConfig>(opts: {
   const launched = await runPickedSessionFork({
     row,
     localMachine: opts.localMachine,
-    intent: opts.intent,
     showError: opts.showError,
     launch: async request => {
       const config = opts.resolveAgentConfig(request.agentKey);
@@ -259,7 +247,6 @@ export async function handleForkPickedSession<AgentConfig>(opts: {
     },
   });
   if (launched) {
-    const action = opts.intent === 'recap' ? 'Starting recap from' : 'Forking';
-    opts.showStatus(`${action} ${row.session.shortId}${row.remote ? ` on ${row.machine}` : ''}`);
+    opts.showStatus(`Forking ${row.session.shortId}${row.remote ? ` on ${row.machine}` : ''}`);
   }
 }

@@ -12,8 +12,17 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { Cron } from 'croner';
 import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir, getProjectRoutinesDir } from './state.js';
+import * as os from 'os';
 import { safeJoin, isSafeSegmentName } from './paths.js';
-import { isSafeProjectName } from './projects.js';
+import { isSafeProjectName, loadProjectDef, projectBasePath } from './projects.js';
+import {
+  resolveRoutineExecutionContext,
+  type ResolvedExecutionContext,
+  type ProjectResolution,
+  type PlacementMode,
+  type RoutineKind,
+  type ContextFsProbe,
+} from './routine-context.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS, ROUTINE_AGENT_IDS } from './agents.js';
@@ -172,6 +181,32 @@ export interface JobConfig {
   prompt: string;
   timezone?: string;
   repo?: string;
+  /**
+   * Singular execution anchor: the named project (`agents projects`) whose base
+   * directory the routine's run lands in. Optional. Metadata-only `projects[]`
+   * (below) is NEVER used for execution — this field is. Resolution happens on
+   * the execution TARGET (`resolveRoutineExecutionContext`, routine-context.ts),
+   * never from the daemon's own cwd: a project with a usable `defaultPath`/`root`
+   * gives the base directory; a rootless Linear-imported project gives no base,
+   * so a bare relative `cwd` then anchors at the target user's `$HOME`.
+   *
+   * CLI flag is `--project-anchor` (not `--project`, which is the repeatable
+   * grouping-metadata flag that writes `projects[]`). The YAML key is the shorter
+   * singular `project` because it is unambiguous there.
+   */
+  project?: string;
+  /**
+   * Portable execution directory for the routine's run. Optional. A relative
+   * value resolves under the `project` base when that base is usable, otherwise
+   * under the execution target's `$HOME` (so a Linear-imported rootless project
+   * can still name `cwd: src/github.com/acme/app`). A `~/`-anchored value is the
+   * target's home-relative path; an absolute path under the target home is
+   * normalized to the portable `~/…` form on save. An absolute path outside the
+   * home is only allowed for local-pinned routines — host/fleet/cloud placement
+   * pauses it as non-portable. Supersedes the legacy `remoteCwd`, which the
+   * one-shot migration folds into this field.
+   */
+  cwd?: string;
   /**
    * Fleet allowlist — restrict this routine to specific devices. When omitted
    * or empty, the routine is unrestricted and fires on every device running the
@@ -407,6 +442,58 @@ export function computeProjectGroup(
   return projectGroupTitle(computeProjectGroupKind(projects, knownProjectNames));
 }
 
+/** A real-filesystem {@link ContextFsProbe} for readiness checks on this machine. */
+export function realFsProbe(): ContextFsProbe {
+  return {
+    exists: (p) => fs.existsSync(p),
+    isDirectory: (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } },
+    isWritable: (p) => { try { fs.accessSync(p, fs.constants.W_OK); return true; } catch { return false; } },
+  };
+}
+
+/** Classify a routine by its body kind — governs the execution-context fallback rules. */
+export function jobRoutineKind(config: Pick<JobConfig, 'agent' | 'workflow' | 'command'>): RoutineKind {
+  if (config.command) return 'command';
+  if (config.workflow) return 'workflow';
+  return 'agent';
+}
+
+/**
+ * Resolve a routine's execution context (working directory + structural/fs
+ * readiness) by bridging its `project`/`cwd` fields into the pure
+ * {@link resolveRoutineExecutionContext} resolver. Local placement resolves
+ * against this machine's `$HOME` with a real filesystem probe; a caller may
+ * inject a different target home / probe (e.g. `null` to defer existence for a
+ * remote target).
+ */
+export function resolveJobExecutionContext(
+  config: Pick<JobConfig, 'name' | 'project' | 'cwd' | 'agent' | 'workflow' | 'command'>,
+  opts: { targetHome?: string; mode?: PlacementMode; probe?: ContextFsProbe | null; projectResolution?: ProjectResolution } = {},
+): ResolvedExecutionContext {
+  const targetHome = opts.targetHome ?? os.homedir();
+  const mode = opts.mode ?? 'local';
+  const probe = opts.probe === null
+    ? undefined
+    : (opts.probe ?? (mode === 'local' ? realFsProbe() : undefined));
+  let projectResolution: ProjectResolution | undefined = opts.projectResolution;
+  if (config.project !== undefined && projectResolution === undefined) {
+    const def = loadProjectDef(config.project);
+    projectResolution = def
+      ? { defined: true, base: projectBasePath(def, true) } // portable (~/) base form
+      : { defined: false };
+  }
+  return resolveRoutineExecutionContext({
+    name: config.name,
+    project: config.project,
+    cwd: config.cwd,
+    kind: jobRoutineKind(config),
+    mode,
+    targetHome,
+    projectResolution,
+    probe,
+  });
+}
+
 /** Metadata for a single job execution, persisted as JSON in the run directory. */
 export interface RunMeta {
   jobName: string;
@@ -436,8 +523,37 @@ export interface RunMeta {
    * due). Without it a miss leaves no trace at all and the listing keeps
    * showing the previous run's status as if it were current. Written by
    * `claimMissedFire` (catchup.ts), never by the runner.
+   *
+   * `blocked` and `skipped` are pre-execution terminals that leave a visible
+   * record even though no agent process ran (the plan's history contract):
+   * - `blocked` — a fire-time readiness rejection (bad context, dead auth,
+   *   untrusted workspace). No agent process was spawned. Distinct from `failed`,
+   *   which means a process started and failed.
+   * - `skipped` — the attempt lost a claim (`skipReason`): a duplicate schedule
+   *   slot, an already-active run it would overlap, or a wrong device owner.
    */
-  status: 'running' | 'completed' | 'failed' | 'timeout' | 'missed';
+  status: 'running' | 'completed' | 'failed' | 'timeout' | 'missed' | 'blocked' | 'skipped';
+  /**
+   * How this attempt was triggered. Answers "why did this run exist" for a
+   * record that may have no transcript (a blocked/skipped attempt).
+   */
+  triggerKind?: 'schedule' | 'catchup' | 'manual' | 'webhook' | 'event';
+  /**
+   * The scheduler's intended UTC fire time (ISO), for a `schedule`/`catchup`
+   * attempt. The atomic single-fire claim keys on (routine, scheduledFor): a
+   * duplicate cron delivery for the same slot resolves to this same run rather
+   * than launching a second time.
+   */
+  scheduledFor?: string;
+  /** Resolved execution context (routine-context.ts), recorded before preflight. */
+  project?: string;
+  requestedCwd?: string;
+  resolvedCwd?: string;
+  readiness?: { code: string; message: string; repair?: string };
+  /** Why a `skipped` attempt launched nothing. */
+  skipReason?: 'duplicate_slot' | 'active_run' | 'wrong_owner';
+  /** The run this attempt deferred to (the winning duplicate slot / active run). */
+  activeRunId?: string;
   startedAt: string;
   completedAt: string | null;
   exitCode: number | null;
@@ -1055,6 +1171,18 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   if (config.remoteCwd !== undefined && strategy !== 'host' && strategy !== 'fleet') {
     errors.push('remoteCwd only applies to host/fleet-placed routines — set hostStrategy: host|fleet, or drop it');
   }
+  if (config.project !== undefined && (typeof config.project !== 'string' || config.project.trim() === '')) {
+    errors.push('project (the singular execution anchor) must be a non-empty project name');
+  }
+  if (config.cwd !== undefined && (typeof config.cwd !== 'string' || config.cwd.trim() === '')) {
+    errors.push('cwd (the portable execution directory) must be a non-empty path string');
+  }
+  // `remoteCwd` is the legacy host-placement path; `cwd` is its canonical
+  // replacement. The two split path semantics, so they must never coexist — the
+  // one-shot migration folds remoteCwd into cwd, and a conflicting pair pauses.
+  if (config.cwd !== undefined && config.remoteCwd !== undefined) {
+    errors.push('cwd and remoteCwd both set — remoteCwd is the legacy form of cwd; keep only cwd');
+  }
   if (config.source !== undefined) {
     if (!config.source || typeof config.source !== 'object') {
       errors.push('source must be an object');
@@ -1585,6 +1713,39 @@ export function getJobRunsDir(jobName: string): string {
 /** Get the filesystem path for a specific run's directory. */
 export function getRunDir(jobName: string, runId: string): string {
   return path.join(getJobRunsDir(jobName), runId);
+}
+
+/**
+ * The run id a scheduled fire is recorded under — derived from its intended UTC
+ * fire time so the SAME slot always maps to the SAME run directory. This is what
+ * makes the single-fire claim meaningful: a duplicate cron delivery for one slot
+ * computes the same id and loses the atomic `mkdir` claim. Shares the derivation
+ * with `missedRunId` (catchup.ts) so a missed-then-caught-up fire and a live fire
+ * for the same UTC slot are one record.
+ */
+export function slotRunId(scheduledFor: Date | string): string {
+  const iso = typeof scheduledFor === 'string' ? scheduledFor : scheduledFor.toISOString();
+  return iso.replace(/[:.]/g, '-');
+}
+
+/**
+ * Atomically CLAIM a run directory. Returns true on a successful claim, false
+ * when the directory already exists (another caller — even in a separate process
+ * — owns this (routine, slot) pair). The non-recursive `mkdir` is a single
+ * filesystem test-and-set on every POSIX filesystem, the same primitive
+ * `claimMissedFire` relies on; it holds across processes where an in-process flag
+ * or a released lock cannot.
+ */
+export function claimRunSlot(jobName: string, runId: string): boolean {
+  const runDir = getRunDir(jobName, runId);
+  fs.mkdirSync(path.dirname(runDir), { recursive: true });
+  try {
+    fs.mkdirSync(runDir); // non-recursive: throws EEXIST if already claimed
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
+    throw err;
+  }
 }
 
 /** Discover routine YAML files in a repository's routines/ directory. */

@@ -13,7 +13,7 @@ import * as path from 'path';
 import { spawn, type ChildProcess } from 'child_process';
 import { Option, type Command } from 'commander';
 import chalk from 'chalk';
-import { truncate, padRight } from '../lib/format.js';
+import { truncate, padRight, humanDuration } from '../lib/format.js';
 import { sanitizeForTerminal } from '../lib/redact.js';
 import { resolveProjectKey } from '../lib/project-key.js';
 import { listProjectDefs, resolveProjectNameForCwd, type ProjectDef } from '../lib/projects.js';
@@ -41,6 +41,7 @@ import { discoverSessions, queryIndexedSessions, countSessionsInScope, resolveSe
 import { findSessionsById, querySessions, getSessionById } from '../lib/session/db.js';
 import {
   filterTeamSessions,
+  shouldShowTeamSessions,
   safeTeamText,
   groupSessionsByTeam,
   NO_TEAM_GROUP_KEY,
@@ -49,12 +50,14 @@ import {
 import { parseSession } from '../lib/session/parse.js';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
 import { formatRelativeTime, formatCompactAge, sessionAgeParts, type SessionAgeParts } from '../lib/session/relative-time.js';
-import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkPath, linkUrl, shortenModel, type FilterOptions } from '../lib/session/render.js';
+import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkPath, linkUrl, shortenModel, formatTokenCount, type FilterOptions } from '../lib/session/render.js';
 import { linearIssueUrl } from '../lib/session/linear.js';
 import { sessionOwnerDevice, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';
 import { getShimsDir } from '../lib/state.js';
+import { listJobs, listJobsWithRuns, listRuns, getRunDir, type RunMeta } from '../lib/routines.js';
+import { formatUsd } from '../lib/pricing/cost.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
 import { itemPicker } from '../lib/picker.js';
 import { resolveSessionAlias } from '../lib/session/actor-sidecar.js';
@@ -74,8 +77,8 @@ import { setHelpSections } from '../lib/help.js';
 import { registerSessionsTailCommand } from './sessions-tail.js';
 import { registerSessionsResumeCommand } from './sessions-resume.js';
 import { registerSessionsForkCommand } from './fork.js';
-import { registerSessionsFavoriteCommand } from './sessions-favorite.js';
-import { isFavorite, listFavorites } from '../lib/session/favorites.js';
+import { registerSessionsBookmarkCommand } from './sessions-bookmark.js';
+import { isBookmarked, listBookmarks } from '../lib/session/bookmarks.js';
 import { registerGoCommand } from './go.js';
 import { registerFocusCommand } from './focus.js';
 import { registerReconnectCommand } from './reconnect.js';
@@ -90,7 +93,7 @@ import { registerSessionsBackfillCommand } from './sessions-backfill.js';
 import { registerSessionsStatsCommand } from './sessions-stats.js';
 import { registerSessionsInsightsCommand } from './insights.js';
 import { registerSessionsOptimizeCommand } from './sessions-optimize.js';
-import { runBrowserSessions } from '../lib/browser/sessions-list.js';
+import { runBrowserSessionsCommand } from './browser-sessions-picker.js';
 import {
   countToolProgramOccurrences,
   parseToolProgramCountClause,
@@ -166,8 +169,8 @@ interface SessionsOptions extends SessionFilterOptions {
   abandoned?: boolean;
   queued?: boolean;
   unknown?: boolean;
-  /** Show only favorited sessions — the `f` key's flag twin. */
-  favorites?: boolean;
+  /** Show only bookmarked sessions — the `b` key's flag twin. */
+  bookmarks?: boolean;
   /** Enrich the listing with live glyphs/preview for running rows. Default on;
    * `--no-live` sets this false. Commander's `--no-` convention. */
   live?: boolean;
@@ -1536,33 +1539,37 @@ async function gatherActiveSessionsLive(
 async function renderActiveSessions(
   asJson: boolean,
   waitingOnly = false,
-  opts: { local?: boolean; hosts?: string[]; favoritesOnly?: boolean; statuses?: LiveStatusFilter[] } = {},
+  opts: {
+    local?: boolean;
+    hosts?: string[];
+    bookmarksOnly?: boolean;
+    statuses?: LiveStatusFilter[];
+    routine?: boolean | string;
+  } = {},
 ): Promise<void> {
   const self = machineId();
   const gathered = await gatherActiveSessions(opts);
   const { remoteDeviceCount } = gathered;
-  // --favorites narrows the live view too. Applied HERE, not only in the
+  // Backfill agent version, refs, created time, and routine provenance from the
+  // historical index. Routine filtering needs that provenance before it narrows
+  // the live pool; doing it here also enriches both JSON and human output.
+  backfillActiveRowsFromIndex(gathered.sessions);
+  // --bookmarks narrows the live view too. Applied HERE, not only in the
   // browser: the browser is skipped for --json, --waiting, a pipe, a multi-host
   // scope, and an SSH-fanout peer, and the flag silently did nothing on every
-  // one of those paths — including `--active --favorites --json`, which is
+  // one of those paths — including `--active --bookmarks --json`, which is
   // exactly what the browser's own `y` copy-cmd hands to an agent.
-  const merged = opts.favoritesOnly
-    ? gathered.sessions.filter((s) => !!s.sessionId && listFavorites().has(s.sessionId))
+  const merged = opts.bookmarksOnly
+    ? gathered.sessions.filter((s) => !!s.sessionId && listBookmarks().has(s.sessionId))
     : gathered.sessions;
+  const routineFiltered = filterActiveSessionsByRoutine(merged, opts.routine);
 
   // Status flags form a union. --waiting additionally retains its scriptable
   // gate: exit non-zero when the union contains a session awaiting the user.
   const statusFiltered = opts.statuses?.length
-    ? merged.filter((session) => opts.statuses!.some((status) => matchesLiveStatus(session, status)))
-    : merged.filter(isRunningLiveSession);
+    ? routineFiltered.filter((session) => opts.statuses!.some((status) => matchesLiveStatus(session, status)))
+    : routineFiltered.filter(isRunningLiveSession);
   const sessions = statusFiltered;
-
-  // Backfill agent version + ticket/PR/label/created onto the live rows from the
-  // historical index (RUSH-2205) — a running process reports none of these, and
-  // an orphan row usually lacks them. Done before both the JSON and human paths
-  // so every consumer (incl. the SSH fan-out's remote --json) sees enriched rows;
-  // transcripts sync across the fleet, so a remote row resolves from the local DB.
-  backfillActiveRowsFromIndex(sessions);
 
   if (asJson) {
     // Resolve who is watching each local tmux pane before serializing: `viewingIn`
@@ -1609,6 +1616,25 @@ async function renderActiveSessions(
 
   // Scriptable gate: a non-zero exit when anything is waiting on the user.
   if (waitingOnly && sessions.some(isAwaitingUser)) process.exitCode = 1;
+}
+
+/** Apply the routine selector to enriched live rows for every non-browser active view. */
+export function filterActiveSessionsByRoutine(
+  sessions: ActiveSession[],
+  routine: boolean | string | undefined,
+): ActiveSession[] {
+  if (!routine) return sessions;
+  const routineSessions = sessions.filter((session) =>
+    session.origin === 'routine' || !!session.routineName,
+  );
+  if (typeof routine !== 'string') return routineSessions;
+  const names = [...new Set(
+    routineSessions.map((session) => session.routineName).filter((name): name is string => !!name),
+  )];
+  const selected = resolveRoutineName(routine, names);
+  return selected
+    ? routineSessions.filter((session) => session.routineName === selected)
+    : [];
 }
 
 export type LiveStatusFilter =
@@ -1690,7 +1716,9 @@ export function hasNoBrowserDisqualifyingFlags(
 ): boolean {
   return (
     !query &&
-    !options.routine &&
+    // A named team view is a flat selectable pool; the bare --teams report
+    // stays grouped and printed because the browser cannot preserve its shape.
+    (!options.teams || !!options.inTeam) &&
     !options.flat &&
     !options.tree &&
     !options.markdown &&
@@ -1703,6 +1731,11 @@ export function hasNoBrowserDisqualifyingFlags(
     !options.skill &&
     !options.plugin &&
     !options.sort &&
+    // --routine without a name owns a two-stage picker (routine -> run ->
+    // session), and a named routine owns the run-grouped overview. The generic
+    // browser can only flatten routine sessions into its ordinary row list, so
+    // routing this flag there silently bypasses both routine-specific views.
+    !options.routine &&
     !options.artifacts &&
     options.artifact === undefined &&
     // --cloud lists a provider's tasks, not the transcript index, and
@@ -1758,13 +1791,13 @@ export function buildRoutineRunGroups(sessions: SessionMeta[]): RoutineRunGroup[
     .sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : a.runId.localeCompare(b.runId)));
 }
 
-export function buildRoutineChoices(sessions: SessionMeta[]): RoutineChoice[] {
+export function buildRoutineChoices(sessions: SessionMeta[], runOnlyNames: string[] = []): RoutineChoice[] {
   const byName = new Map<string, SessionMeta[]>();
   for (const session of sessions) {
     if (!session.routineName) continue;
     (byName.get(session.routineName) ?? byName.set(session.routineName, []).get(session.routineName)!).push(session);
   }
-  return [...byName.entries()]
+  const choices: RoutineChoice[] = [...byName.entries()]
     .map(([name, rows]) => {
       const runs = buildRoutineRunGroups(rows);
       return {
@@ -1773,12 +1806,28 @@ export function buildRoutineChoices(sessions: SessionMeta[]): RoutineChoice[] {
         runCount: runs.length,
         latestRunSessionCount: runs[0].sessions.length,
       };
-    })
-    .sort((a, b) => (a.lastRunAt < b.lastRunAt ? 1 : a.lastRunAt > b.lastRunAt ? -1 : a.name.localeCompare(b.name)));
+    });
+  // Routines whose only attempts are pre-session (blocked/skipped/failed-before-
+  // spawn) have run records but no transcript. Surface them so the picker is
+  // built from definitions+runs, never only transcripts — otherwise a routine
+  // that has never produced a session reads as "No routines match" (the plan).
+  const seen = new Set(choices.map((c) => c.name));
+  for (const name of runOnlyNames) {
+    if (seen.has(name)) continue;
+    const runs = listRuns(name);
+    const latest = runs[runs.length - 1];
+    choices.push({
+      name,
+      lastRunAt: latest?.startedAt ?? '',
+      runCount: runs.length,
+      latestRunSessionCount: 0,
+    });
+  }
+  return choices.sort((a, b) => (a.lastRunAt < b.lastRunAt ? 1 : a.lastRunAt > b.lastRunAt ? -1 : a.name.localeCompare(b.name)));
 }
 
 async function selectRoutineName(sessions: SessionMeta[]): Promise<string | null> {
-  const choices = buildRoutineChoices(sessions);
+  const choices = buildRoutineChoices(sessions, safeListJobsWithRuns());
   const picked = await itemPicker<RoutineChoice>({
     message: 'Select a routine:',
     items: choices,
@@ -1790,7 +1839,8 @@ async function selectRoutineName(sessions: SessionMeta[]): Promise<string | null
     labelFor: (choice) => {
       const runs = `${choice.runCount} run${choice.runCount === 1 ? '' : 's'}`;
       const sessions = `${choice.latestRunSessionCount} session${choice.latestRunSessionCount === 1 ? '' : 's'} in latest`;
-      return `${choice.name}  ${chalk.gray(`${runs} · ${sessions} · ${formatRelativeTime(choice.lastRunAt)}`)}`;
+      const age = choice.lastRunAt ? ` · ${formatRelativeTime(choice.lastRunAt)}` : '';
+      return `${choice.name}  ${chalk.gray(`${runs} · ${sessions}${age}`)}`;
     },
     shortIdFor: (choice) => choice.name,
     emptyMessage: 'No routines match.',
@@ -1799,30 +1849,289 @@ async function selectRoutineName(sessions: SessionMeta[]): Promise<string | null
   return picked?.item.name ?? null;
 }
 
-export async function filterSessionsByRoutine(
+/** `listJobsWithRuns` but never throws into the sessions reader (best-effort). */
+function safeListJobsWithRuns(): string[] {
+  try {
+    return [...new Set([...listJobs().map((job) => job.name), ...listJobsWithRuns()])];
+  } catch { return []; }
+}
+
+/**
+ * Resolve which routine the user is targeting for `--routine`. Returns `null` to
+ * ABORT the command (a bad `--routine <name>` printed an error, or the user
+ * cancelled the interactive pick). `{ name: null }` means "no routine was
+ * selected, don't filter" — the degenerate bare `--routine` piped to a
+ * non-interactive sink. `{ name }` is a chosen routine.
+ *
+ * The name universe is transcripts UNION every routine with a definition or a
+ * run record (`safeListJobsWithRuns`), so a command-only or never-ran routine —
+ * which produces no `SessionMeta` — still resolves and drills down.
+ */
+export async function selectRoutineTarget(
   sessions: SessionMeta[],
   routine: boolean | string,
   interactive: boolean,
-): Promise<SessionMeta[] | null> {
-  const routineNames = [...new Set(
-    sessions.map((session) => session.routineName).filter((name): name is string => !!name),
-  )].sort((a, b) => a.localeCompare(b));
-  let selectedRoutine: string | null = null;
+): Promise<{ name: string | null } | null> {
+  const routineNames = [...new Set([
+    ...sessions.map((session) => session.routineName).filter((name): name is string => !!name),
+    ...safeListJobsWithRuns(),
+  ])].sort((a, b) => a.localeCompare(b));
   if (typeof routine === 'string') {
-    selectedRoutine = resolveRoutineName(routine, routineNames);
-    if (!selectedRoutine) {
+    const resolved = resolveRoutineName(routine, routineNames);
+    if (!resolved) {
       console.error(chalk.red(`No routine matches "${routine}".`));
       if (routineNames.length > 0) console.error(chalk.gray(`Available routines: ${routineNames.join(', ')}`));
       process.exitCode = 1;
       return null;
     }
-  } else if (interactive) {
-    selectedRoutine = await selectRoutineName(sessions);
-    if (!selectedRoutine) return null;
+    return { name: resolved };
   }
-  return selectedRoutine
-    ? sessions.filter((session) => session.routineName === selectedRoutine)
+  if (interactive) {
+    const picked = await selectRoutineName(sessions);
+    if (!picked) return null;
+    return { name: picked };
+  }
+  return { name: null };
+}
+
+export async function filterSessionsByRoutine(
+  sessions: SessionMeta[],
+  routine: boolean | string,
+  interactive: boolean,
+): Promise<SessionMeta[] | null> {
+  const target = await selectRoutineTarget(sessions, routine, interactive);
+  if (!target) return null;
+  return target.name
+    ? sessions.filter((session) => session.routineName === target.name)
     : sessions;
+}
+
+// ── Routine drilldown ────────────────────────────────────────────────────────
+// The run/session seam: a routine's canonical history is its run records
+// (`.history/runs/<name>/<runId>/`, read by `listRuns`), NOT the session index.
+// Command/blocked/skipped/missed attempts produce a run record with no
+// transcript, so a picker built only from `SessionMeta` dead-ends on them. The
+// drilldown renders run records first and links each to the indexed agent
+// sessions archived under the same `routineRunId` — never synthesizing a fake
+// session row for an attempt that produced none.
+
+/** How a run executed — decides whether an agent session is even expected. */
+export type RoutineExecutionKind = 'agent' | 'command' | 'workflow';
+
+export function executionKind(meta: RunMeta): RoutineExecutionKind {
+  if (meta.workflow) return 'workflow';
+  if (meta.agent) return 'agent';
+  return 'command';
+}
+
+/** One canonical run record plus the indexed sessions linked to it by run id. */
+export interface RoutineRunEntry {
+  meta: RunMeta;
+  sessions: SessionMeta[];
+}
+
+export interface RoutineDrilldown {
+  name: string;
+  /** Canonical run records (newest first), each with its linked sessions. */
+  runs: RoutineRunEntry[];
+  /** Sessions whose `routineRunId` matches no local run record — e.g. archived
+   *  on another host whose run dir this box has not synced. Grouped by run id so
+   *  they are still shown, honestly separated from the canonical run history. */
+  orphanSessions: RoutineRunGroup[];
+  /** Count of canonical run records (any status, incl. missed/blocked/skipped). */
+  runRecordCount: number;
+  /** Count of linked indexed sessions across all runs (+ orphans). */
+  linkedSessionCount: number;
+  /** True when any run ran an agent or any session is linked — i.e. an agent
+   *  routine. False for a pure command routine, where no session is expected. */
+  isAgentRoutine: boolean;
+}
+
+/**
+ * Reconcile a routine's canonical run records (`listRuns`, local disk) with the
+ * indexed sessions for that routine (fleet-wide, keyed by `routineRunId`).
+ */
+export function buildRoutineDrilldown(name: string, sessions: SessionMeta[]): RoutineDrilldown {
+  const runs = listRuns(name);
+  const forRoutine = sessions.filter((s) => s.routineName === name);
+  const byRun = new Map<string, SessionMeta[]>();
+  for (const s of forRoutine) {
+    const rid = s.routineRunId ?? s.timestamp;
+    (byRun.get(rid) ?? byRun.set(rid, []).get(rid)!).push(s);
+  }
+  const runIds = new Set(runs.map((r) => r.runId));
+  const entries: RoutineRunEntry[] = runs
+    .map((meta) => ({
+      meta,
+      sessions: (byRun.get(meta.runId) ?? []).sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1)),
+    }))
+    // Newest run first: `startedAt`, then run id (an ISO-derived slot) as a tie-break.
+    .sort((a, b) => {
+      const at = a.meta.startedAt || a.meta.runId;
+      const bt = b.meta.startedAt || b.meta.runId;
+      return at < bt ? 1 : at > bt ? -1 : b.meta.runId.localeCompare(a.meta.runId);
+    });
+  const orphanSessions = buildRoutineRunGroups(
+    forRoutine.filter((s) => !runIds.has(s.routineRunId ?? s.timestamp)),
+  );
+  return {
+    name,
+    runs: entries,
+    orphanSessions,
+    runRecordCount: runs.length,
+    linkedSessionCount: forRoutine.length,
+    // "Agent routine" = anything that isn't purely command runs. A workflow run
+    // carries no `agent` field but still expects a session, so key off
+    // executionKind, not `agent` alone.
+    isAgentRoutine: runs.some((r) => executionKind(r) !== 'command') || forRoutine.length > 0,
+  };
+}
+
+/** Glyph + word for a run's terminal status. */
+function runStatusCell(status: RunMeta['status']): string {
+  switch (status) {
+    case 'completed': return `${chalk.green('✓')} ${chalk.green('completed')}`;
+    case 'running': return `${chalk.cyan('◍')} ${chalk.cyan('running')}`;
+    case 'failed': return `${chalk.red('✗')} ${chalk.red('failed')}`;
+    case 'timeout': return `${chalk.red('✗')} ${chalk.red('timeout')}`;
+    case 'blocked': return `${chalk.yellow('⚠')} ${chalk.yellow('blocked')}`;
+    case 'skipped': return `${chalk.gray('↷')} ${chalk.gray('skipped')}`;
+    case 'missed': return `${chalk.gray('·')} ${chalk.gray('missed')}`;
+    default: return chalk.gray(status);
+  }
+}
+
+/** Where a run's body executed: a host, a cloud provider, or this machine. */
+function runPlacement(meta: RunMeta): string {
+  if (meta.host) return `host:${meta.host}`;
+  if (meta.cloudProvider) return `cloud:${meta.cloudProvider}`;
+  return 'local';
+}
+
+/** The trigger clause: kind + who triggered it (dropping the noisy UNRESOLVED). */
+function runTrigger(meta: RunMeta): string {
+  const kind = meta.triggerKind ?? 'schedule';
+  const who = meta.triggeredBy && !meta.triggeredBy.startsWith('UNRESOLVED') ? ` by ${meta.triggeredBy}` : '';
+  return `${kind}${who}`;
+}
+
+/** The tail clause explaining a run's outcome (exit code / error / skip reason). */
+function runOutcomeDetail(meta: RunMeta): string {
+  if (meta.status === 'skipped' && meta.skipReason) {
+    const ref = meta.activeRunId ? ` → ${meta.activeRunId}` : '';
+    return `${meta.skipReason.replace(/_/g, ' ')}${ref}`;
+  }
+  if (meta.status === 'blocked') {
+    return meta.readiness ? `${meta.readiness.code}: ${meta.readiness.message}` : (meta.errorMessage ?? 'not ready');
+  }
+  if (meta.status === 'missed') return 'daemon down at fire time';
+  if (meta.errorMessage) return meta.errorMessage;
+  // A clean `exit 0` is already implied by the green "completed" status — only a
+  // non-zero code carries information worth a tail clause.
+  if (typeof meta.exitCode === 'number' && meta.exitCode !== 0) return `exit ${meta.exitCode}`;
+  return '';
+}
+
+/** Compact per-session metadata line under a linked session row. */
+function linkedSessionMeta(session: SessionMeta): string {
+  const parts: string[] = [];
+  parts.push(session.version ? `${session.agent} v${session.version}` : session.agent);
+  if (session.account) parts.push(session.account);
+  if (session.model) parts.push(shortenModel(session.model));
+  if (typeof session.outputTokens === 'number') parts.push(`${formatTokenCount(session.outputTokens)} out`);
+  else if (typeof session.tokenCount === 'number') parts.push(`${formatTokenCount(session.tokenCount)} tok`);
+  if (typeof session.costUsd === 'number' && session.costUsd > 0) parts.push(formatUsd(session.costUsd));
+  if (typeof session.durationMs === 'number' && session.durationMs > 0) parts.push(humanDuration(session.durationMs));
+  if (typeof session.toolCallCount === 'number') parts.push(`${session.toolCallCount} tools`);
+  return chalk.gray('      ' + parts.join(' · '));
+}
+
+/**
+ * Render the routine drilldown: canonical run history first, each run linked to
+ * its indexed agent session(s). This is the run/session seam made visible — a
+ * command routine shows its runs and states plainly that no session is expected;
+ * an agent routine shows the same runs plus each run's session metadata.
+ */
+export function printRoutineDrilldown(
+  drill: RoutineDrilldown,
+  liveIndex?: Map<string, ActiveSession>,
+  opts: { hiddenCount?: number; hiddenUnmanaged?: number } = {},
+): void {
+  const runWord = drill.runRecordCount === 1 ? 'run record' : 'run records';
+  const sessWord = drill.linkedSessionCount === 1 ? 'linked session' : 'linked sessions';
+  console.log(
+    `${chalk.cyan.bold(drill.name)}  ` +
+    chalk.gray(`${drill.runRecordCount} ${runWord} · ${drill.linkedSessionCount} ${sessWord}`),
+  );
+  // A routine with no session ever produced is a command routine — say so up
+  // front so the empty session column reads as expected, not as missing data.
+  if (!drill.isAgentRoutine) {
+    console.log(chalk.gray('Command routine — runs execute a shell command; no agent session is produced.'));
+  }
+  console.log();
+
+  if (drill.runs.length === 0 && drill.orphanSessions.length === 0) {
+    console.log(chalk.gray('No run records yet for this routine.'));
+    return;
+  }
+
+  for (const entry of drill.runs) {
+    const m = entry.meta;
+    console.log(
+      `${chalk.cyan('▸')} ${chalk.cyan.bold(m.runId)}  ` +
+      `${runStatusCell(m.status)}  ` +
+      chalk.gray(`${runTrigger(m)} · ${formatRelativeTime(m.startedAt)}`),
+    );
+    const kind = executionKind(m);
+    const detailParts: string[] = [kind];
+    if (typeof m.duration === 'number' && m.duration > 0) detailParts.push(humanDuration(m.duration));
+    detailParts.push(runPlacement(m));
+    const outcome = runOutcomeDetail(m);
+    if (outcome) detailParts.push(outcome);
+    console.log(chalk.gray('    ' + detailParts.join(' · ')));
+    // Log/report access — both are children of the run dir that a pre-execution
+    // terminal (blocked/skipped/missed) never wrote, so gate each on existence
+    // rather than pointing at a file that isn't there.
+    const runDir = getRunDir(drill.name, m.runId);
+    const logHints: string[] = [];
+    if (fs.existsSync(path.join(runDir, 'stdout.log'))) logHints.push(`log: ${path.join(runDir, 'stdout.log')}`);
+    if (fs.existsSync(path.join(runDir, 'report.md'))) logHints.push(`report: ${path.join(runDir, 'report.md')}`);
+    if (logHints.length > 0) console.log(chalk.gray('    ' + logHints.join('  ·  ')));
+
+    if (entry.sessions.length > 0) {
+      for (const session of entry.sessions) {
+        console.log(treeSessionRow(session, liveIndex?.get(session.id)));
+        console.log(linkedSessionMeta(session));
+      }
+    } else if (kind !== 'command') {
+      // An agent run that produced no session — say why (the run terminal
+      // explains it), never fake a session row.
+      console.log(chalk.gray('      no agent session archived for this run'));
+    }
+    console.log();
+  }
+
+  if (drill.orphanSessions.length > 0) {
+    console.log(chalk.gray('Sessions with no local run record (run archived on another host):'));
+    for (const group of drill.orphanSessions) {
+      console.log(
+        `${chalk.cyan('▸')} ${chalk.cyan.bold(group.runId)}  ` +
+        chalk.gray(`${group.sessions.length} session${group.sessions.length === 1 ? '' : 's'} · ${formatRelativeTime(group.timestamp)}`),
+      );
+      for (const session of group.sessions) {
+        console.log(treeSessionRow(session, liveIndex?.get(session.id)));
+        console.log(linkedSessionMeta(session));
+      }
+      console.log();
+    }
+  }
+
+  console.log(chalk.gray(`Run history from .history/runs/${drill.name}/ · resume a session with agents sessions resume <id>.`));
+  // Every listing path must say what it dropped (sessions.ts invariant). Under
+  // --routine team-origin sessions are shown (hiddenCount is 0), but unmanaged
+  // installs may still be hidden — surface both footers when non-zero.
+  if (opts.hiddenCount && opts.hiddenCount > 0) console.log(chalk.gray(formatTeamHiddenFooter(opts.hiddenCount)));
+  if (opts.hiddenUnmanaged && opts.hiddenUnmanaged > 0) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
 }
 
 /** The canonical `ag sessions …` command for a set of flags — the twin of the
@@ -1854,7 +2163,7 @@ function canonicalSessionsCommand(query: string | undefined, options: SessionsOp
   if (options.until) a.push('--until', options.until);
   if (options.local) a.push('--local');
   if (options.waiting) a.push('--waiting');
-  if (options.favorites) a.push('--favorites');
+  if (options.bookmarks) a.push('--bookmarks');
   const q = (query ?? '').trim();
   if (q) a.push(JSON.stringify(q));
   return 'ag ' + a.join(' ');
@@ -1969,7 +2278,7 @@ export async function renderSessionPreview(
     }));
     return;
   }
-  const headline = formatLiveStatusHeadline(live, isFavorite(session.id));
+  const headline = formatLiveStatusHeadline(live, isBookmarked(session.id));
   if (headline) console.log(headline);
   console.log(buildPreview(session));
 }
@@ -1984,11 +2293,11 @@ export async function renderSessionPreview(
  * reads "orphan" and knows it means "still running in tmux with no window
  * attached", so those two spell it out.
  */
-export function formatLiveStatusHeadline(live: ActiveSession | undefined, favorite = false): string {
-  const star = favorite ? chalk.yellow('★ ') : '';
+export function formatLiveStatusHeadline(live: ActiveSession | undefined, bookmarked = false): string {
+  const star = bookmarked ? chalk.yellow('★ ') : '';
   // With no live row there is no status to lead with, so the star has to say
   // what it means on its own — a bare `★` above a preview reads as noise.
-  if (!live) return favorite ? chalk.yellow('★ favorited') : '';
+  if (!live) return bookmarked ? chalk.yellow('★ bookmarked') : '';
   const { glyph } = liveGlyphAndPreview(live);
   const word = liveStatusWord(live) || live.status;
   // One definition, shared with `--waiting`. A second local copy drifted: the
@@ -2385,7 +2694,8 @@ async function sessionsAction(
           host: options.host,
           since: options.since,
           all: options.all,
-          favorites: options.favorites,
+          bookmarks: options.bookmarks,
+          routine: options.routine,
         }),
         { local: options.local === true, hosts: options.host },
       );
@@ -2397,8 +2707,9 @@ async function sessionsAction(
     await renderActiveSessions(options.json === true, options.waiting === true, {
       local: forceLocal,
       hosts: options.host,
-      favoritesOnly: options.favorites === true,
+      bookmarksOnly: options.bookmarks === true,
       statuses: liveStatuses,
+      routine: options.routine,
     });
     return;
   }
@@ -2414,12 +2725,10 @@ async function sessionsAction(
   // printed/render paths (agents and scripts unaffected). An explicit --since seeds
   // the browser's window so the flag is honored, not swallowed.
   //
-  // `--teams` diverts to the printed team-grouped report (printTeamsView, below):
-  // grouping teammates under their team is a shape the flat fuzzy picker cannot
-  // represent, so like --tree it is a printed listing, not an interactive pick.
-  // --teams --flat/--tree keep their inline table rendering; a search query keeps
-  // the picker so `<term> --teams` still searches.
-  if (isBareBrowserListing(options, query) && !options.teams) {
+  // Bare `--teams` still diverts to the printed team-grouped report because the
+  // flat picker cannot preserve that shape. `--in-team <name> --teams` is one
+  // flat lineage, so it qualifies through hasNoBrowserDisqualifyingFlags.
+  if (isBareBrowserListing(options, query)) {
     const { runSessionBrowser, bareBrowserSeed } = await import('./sessions-browser.js');
     await runSessionBrowser(
       bareBrowserSeed({
@@ -2429,7 +2738,8 @@ async function sessionsAction(
         since: options.since,
         host: options.host,
         inTeam: options.inTeam,
-        favorites: options.favorites,
+        bookmarks: options.bookmarks,
+        routine: options.routine,
       }),
       { local: options.local === true, hosts: options.host },
     );
@@ -2508,6 +2818,11 @@ async function sessionsAction(
   // silently returns nothing for any team older than that — so the flag widens its
   // own scope, the way --all does, unless the caller set an explicit --limit.
   const wantsWholeTeam = !!options.inTeam;
+  // A routine is not tied to the shell's cwd: its archived sessions retain the
+  // working directory in which the scheduled agent actually ran. Scope the
+  // routine catalog across directories so invoking it from ~/.agents/.system,
+  // a project repo, or $HOME yields the same routine history.
+  const wantsWholeRoutine = !!options.routine;
   // `--limit` has a commander default, so an untouched flag still arrives as a
   // string and truthiness can't tell it from a typed one. Commander records where
   // each value came from, which is the only signal that distinguishes an explicit
@@ -2517,7 +2832,7 @@ async function sessionsAction(
   const limit = wantsOverview
     ? OVERVIEW_POOL_LIMIT
     : parseInt(
-        userSetLimit ? options.limit! : wantsWholeTeam ? String(WHOLE_TEAM_POOL_LIMIT) : DEFAULT_LIMIT,
+        userSetLimit ? options.limit! : wantsWholeTeam || wantsWholeRoutine ? String(WHOLE_TEAM_POOL_LIMIT) : DEFAULT_LIMIT,
         10
       );
   if (toolEvidenceMode && (!Number.isSafeInteger(limit) || limit < 1 || limit > TOOL_QUERY_MAX_RESULT_SESSIONS)) {
@@ -2529,7 +2844,7 @@ async function sessionsAction(
   // --since still narrows. Non-overview keeps the prior interactive-30d default.
   const since = wantsOverview
     ? options.since
-    : (options.since ?? (isInteractive && !options.all && !wantsWholeTeam ? '30d' : undefined));
+    : (options.since ?? (isInteractive && !options.all && !wantsWholeTeam && !wantsWholeRoutine ? '30d' : undefined));
   const toolSpansDevices = toolEvidenceMode
     && (options.fleet || (options.host?.length ?? 0) > 0);
   const toolSortError = toolSearchFleetSortError(options.sort, toolSpansDevices);
@@ -2556,12 +2871,12 @@ async function sessionsAction(
       // --in-team spans directories by construction: a team's teammates run in
       // their own worktrees, so scoping to the current cwd hides most of the
       // lineage the flag exists to show.
-      all: pathFilter ? undefined : options.all || wantsWholeTeam || toolSpansDevices,
+      all: pathFilter ? undefined : options.all || wantsWholeTeam || wantsWholeRoutine || toolSpansDevices,
       cwd: process.cwd(),
       // Default overview scopes to the current repo SUBTREE (prefix match), so a
       // monorepo shows its sub-projects grouped instead of collapsing to the one
       // exact-cwd project. `--all` clears the prefix and spans the whole index.
-      cwdPrefix: pathFilter ?? (wantsOverview && !options.all && !wantsWholeTeam && !toolSpansDevices ? process.cwd() : undefined),
+      cwdPrefix: pathFilter ?? (wantsOverview && !options.all && !wantsWholeTeam && !wantsWholeRoutine && !toolSpansDevices ? process.cwd() : undefined),
       project: options.project,
       since,
       until: options.until,
@@ -2597,7 +2912,7 @@ async function sessionsAction(
       const readOptions: DiscoverOptions = {
         ...scope,
         limit,
-        excludeTeamOrigin: !options.teams,
+        excludeTeamOrigin: !shouldShowTeamSessions(options),
         onProgress: tracker.onProgress,
         includeUnmanaged: options.unmanaged,
         onHiddenUnmanaged: (n) => { hiddenUnmanaged = n; },
@@ -2616,7 +2931,7 @@ async function sessionsAction(
     // meta.json in ~/.agents/teams/agents whose is_team_origin flag was
     // never set (legacy rows). Keep the in-memory pass so those are still
     // enriched/hidden.
-    const { visible: visibleSessions } = filterTeamSessions(sessions, !!options.teams);
+    const { visible: visibleSessions } = filterTeamSessions(sessions, shouldShowTeamSessions(options));
     sessions = visibleSessions;
 
     // --in-team spans both ends of the lineage, so it can't be one SQL predicate:
@@ -2625,11 +2940,11 @@ async function sessionsAction(
     // read. Match either, after that pass has populated `teamOrigin`.
     if (options.inTeam) sessions = sessions.filter((s) => matchesTeam(s, options.inTeam!));
 
-    // --favorites narrows to the starred set. Applied here, before the JSON
-    // emit, so `--favorites --json` is the machine-readable twin of the `f` key.
-    if (options.favorites) {
-      const starred = listFavorites();
-      sessions = sessions.filter((s) => starred.has(s.id));
+    // --bookmarks narrows to the bookmarked set. Applied here, before the JSON
+    // emit, so `--bookmarks --json` is the machine-readable twin of the `b` key.
+    if (options.bookmarks) {
+      const bookmarks = listBookmarks();
+      sessions = sessions.filter((s) => bookmarks.has(s.id));
     }
 
     if (toolEvidenceMode) {
@@ -2699,7 +3014,7 @@ async function sessionsAction(
 
     // Under --in-team the visible list is one team, so the whole-index team-origin
     // count would be a non-sequitur next to it.
-    const hiddenCount = options.teams || options.inTeam
+    const hiddenCount = shouldShowTeamSessions(options) || options.inTeam
       ? 0
       : countSessionsInScope({ ...scope, onlyTeamOrigin: true });
 
@@ -2781,14 +3096,34 @@ async function sessionsAction(
     }
 
     if (options.routine) {
-      const filteredByRoutine = await filterSessionsByRoutine(sessions, options.routine, isInteractive);
-      if (!filteredByRoutine) return;
-      sessions = filteredByRoutine;
+      const target = await selectRoutineTarget(sessions, options.routine, isInteractive);
+      if (!target) return; // bad --routine <name> or cancelled pick (message printed)
+      if (target.name) {
+        sessions = sessions.filter((s) => s.routineName === target.name);
+        // A routine browse renders the run-first drilldown — canonical run history
+        // plus each run's linked session — instead of dead-ending a
+        // command/pre-session routine into the generic empty copy. An explicit
+        // --flat/--tree or a search query keeps the scoped session listing/picker,
+        // so `--routine x --flat` prints the plain table and `--routine x <id>`
+        // resolves a specific session within the routine.
+        if (!searchQuery && !options.flat && !options.tree) {
+          const liveIndex = await maybeLiveIndex(options);
+          printRoutineDrilldown(buildRoutineDrilldown(target.name, sessions), liveIndex, { hiddenCount, hiddenUnmanaged });
+          return;
+        }
+      }
+      // target.name === null: bare `--routine` piped to a non-interactive sink —
+      // no routine chosen, fall through to the normal listing unfiltered.
     }
 
     if (sessions.length === 0) {
       if (pathFilter) {
         console.log(chalk.gray(`No sessions found for ${pathFilter}.`));
+      } else if (options.routine) {
+        // A routine scoped to a flat/tree/query listing with no matching session
+        // (e.g. a command routine has none) — say so in routine terms, not the
+        // generic cwd/--all copy, and point at the run-history drilldown.
+        console.log(chalk.gray('No indexed agent sessions for this routine. Drop --flat/--tree to see its run history.'));
       } else {
         console.log(chalk.gray(formatNoSessionsMessage(options.all, options.project)));
       }
@@ -2816,10 +3151,6 @@ async function sessionsAction(
     // Interact/resume via `agents sessions <project>` or `agents sessions resume`.
     if (wantsOverview) {
       const liveIndex = await maybeLiveIndex(options);
-      if (options.routine) {
-        printRoutineRunOverview(sessions, liveIndex, { hiddenCount, hiddenUnmanaged });
-        return;
-      }
       // Per-project row cap is fixed (--limit carries a default of 50 and drives
       // the fetch pool, not the display); `--all` expands every group instead.
       printSessionOverview(sessions, hiddenCount, liveIndex, { perProjectCap: OVERVIEW_ROWS_PER_PROJECT, expand: !!options.all, hiddenUnmanaged });
@@ -2959,7 +3290,7 @@ export function flatSessionRow(
   live?: ActiveSession,
   showTicket = false,
   cols: PickerColumns = {},
-  favorite = false,
+  bookmarked = false,
 ): string {
   const agentColor = colorAgent(session.agent);
   const age = sessionAgeParts(session.timestamp, session.lastActivity);
@@ -2999,11 +3330,11 @@ export function flatSessionRow(
   const width = terminalWidth();
   const requestedModelW = cols.showModel ? (cols.modelWidth ?? PICKER_MODEL_MAX) : 0;
   // Same conditional 2 cells as the picker's marker, for the same reason.
-  const favW = cols.showFavorite ? 2 : 0;
-  const favCell = cols.showFavorite ? (favorite ? chalk.yellow('★ ') : '  ') : '';
+  const bookmarkW = cols.showBookmark ? 2 : 0;
+  const bookmarkCell = cols.showBookmark ? (bookmarked ? chalk.yellow('★ ') : '  ') : '';
   // Sized against the last-activity label alone, so the creation field is an
   // additive decision the row makes only once it knows what space is left.
-  const fixedW = favW + (10 + 9 + 8 + 16) + glyphW + statusW + machineW + ticketW + wtW + team.width + stringWidth(age.last) + 1;
+  const fixedW = bookmarkW + (10 + 9 + 8 + 16) + glyphW + statusW + machineW + ticketW + wtW + team.width + stringWidth(age.last) + 1;
   const modelSlack = width - fixedW - MIN_TOPIC_W;
   const modelW = requestedModelW <= modelSlack
     ? requestedModelW
@@ -3012,7 +3343,7 @@ export function flatSessionRow(
   const topicW = Math.max(MIN_TOPIC_W, width - fixedW - modelW - when.extraW);
 
   return (
-    favCell +
+    bookmarkCell +
     chalk.white(padToWidth(truncateToWidth(session.shortId, 9), 10)) +
     agentColor(padToWidth(truncateToWidth(session.agent, 8), 9)) +
     chalk.yellow(padToWidth(truncateToWidth(session.version || '-', 7), 8)) +
@@ -3178,28 +3509,6 @@ function printSessionOverview(
   if (opts.hiddenUnmanaged) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
 }
 
-export function printRoutineRunOverview(
-  sessions: SessionMeta[],
-  liveIndex: Map<string, ActiveSession> | undefined,
-  opts: { hiddenCount?: number; hiddenUnmanaged?: number } = {},
-): void {
-  const groups = buildRoutineRunGroups(sessions);
-  console.log(chalk.gray(`${sessions.length} session${sessions.length === 1 ? '' : 's'} · ${groups.length} routine run${groups.length === 1 ? '' : 's'} · newest run first\n`));
-  let first = true;
-  for (const group of groups) {
-    if (!first) console.log();
-    first = false;
-    console.log(
-      `${chalk.cyan('▸')} ${chalk.cyan.bold(group.runId)}  ` +
-      `${chalk.gray(`${group.sessions.length} session${group.sessions.length === 1 ? '' : 's'} · ${formatRelativeTime(group.timestamp)}`)}`,
-    );
-    for (const session of group.sessions) console.log(treeSessionRow(session, liveIndex?.get(session.id)));
-  }
-  console.log(chalk.gray('\nGrouped by routine run id and timestamp.'));
-  if (opts.hiddenCount) console.log(chalk.gray(formatTeamHiddenFooter(opts.hiddenCount)));
-  if (opts.hiddenUnmanaged) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
-}
-
 function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = false, liveIndex?: Map<string, ActiveSession>): void {
   if (tree) {
     // Group by directory; drop the id/version columns from view. The short id
@@ -3234,9 +3543,9 @@ function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = fals
   // column (and its compact labels) is computed the same way the picker does it.
   const showTicket = sessions.some((s) => ticketLabel(s) !== '');
   const cols = pickerColumnsFor(sessions);
-  const favorites = listFavorites();
+  const bookmarks = listBookmarks();
   for (const session of sessions) {
-    console.log(flatSessionRow(session, liveIndex?.get(session.id), showTicket, cols, favorites.has(session.id)));
+    console.log(flatSessionRow(session, liveIndex?.get(session.id), showTicket, cols, bookmarks.has(session.id)));
   }
 
   const countLine = `${sessions.length} session${sessions.length === 1 ? '' : 's'}.`;
@@ -3581,11 +3890,11 @@ export interface PickerColumns {
    */
   showHost?: boolean;
   /**
-   * Render the favorite marker column. Like every other conditional column here,
+   * Render the bookmark marker column. Like every other conditional column here,
    * it earns its 2 cells only when some row in the pool is actually starred — a
-   * user who has never favorited anything pays nothing for the feature.
+   * user who has never bookmarked anything pays nothing for the feature.
    */
-  showFavorite?: boolean;
+  showBookmark?: boolean;
   /**
    * Render the live status column (`working` / `waiting` / `orphan` / `crashed`).
    * Live-only, gated the same way as {@link showHost}: it comes from the
@@ -3661,10 +3970,10 @@ export function pickerColumnsFor(sessions: SessionMeta[]): PickerColumns {
     showModel: sessions.some((s) => !!s.model),
     modelWidth: modelColumnWidth(sessions),
     showTicket: sessions.some((s) => ticketLabel(s) !== ''),
-    showFavorite: (() => {
+    showBookmark: (() => {
       // One read of the store per pool, not one per row.
-      const starred = listFavorites();
-      return starred.size > 0 && sessions.some((s) => starred.has(s.id));
+      const bookmarks = listBookmarks();
+      return bookmarks.size > 0 && sessions.some((s) => bookmarks.has(s.id));
     })(),
   };
 }
@@ -3692,7 +4001,7 @@ export function formatPickerLabel(
   cols: PickerColumns = {},
   ssh?: SshOriginTag,
   host = '',
-  favorite = false,
+  bookmarked = false,
   live?: ActiveSession,
 ): string {
   const agentColor = colorAgent(s.agent);
@@ -3740,11 +4049,11 @@ export function formatPickerLabel(
   const ticketW = cols.showTicket ? TICKET_W + 1 : 0;
   const hostW = cols.showHost ? PICKER_HOST_W : 0;
   const wtW = wt ? stringWidth(wt) + 1 : 0;
-  // Within a pool that HAS starred rows the marker holds its 2 cells whether this
-  // row is starred or not, so the columns after it never jog; a pool with none
-  // drops the column entirely (`showFavorite`) and costs nothing.
-  const favW = cols.showFavorite ? 2 : 0;
-  const favCell = cols.showFavorite ? (favorite ? chalk.yellow('★ ') : '  ') : '';
+  // Within a pool that HAS bookmarked rows the marker holds its 2 cells whether
+  // this row is bookmarked or not, so the columns after it never jog; a pool
+  // with none drops the column entirely (`showBookmark`) and costs nothing.
+  const bookmarkW = cols.showBookmark ? 2 : 0;
+  const bookmarkCell = cols.showBookmark ? (bookmarked ? chalk.yellow('★ ') : '  ') : '';
   // The same status word the flat listing shows, so a session that is `orphan`
   // or `crashed` reads that way in the browser too — not only in its preview.
   // Constant width whenever the column is on. `liveStatusCell` already pads its
@@ -3757,12 +4066,12 @@ export function formatPickerLabel(
   // Sized against the last-activity label alone; the creation field is then an
   // additive decision made against whatever width is left (see the flat listing).
   const baseTopicW =
-    terminalWidth() - gutter - favW - statusW - (10 + 9 + 8 + 16) - machineColW - hostW - ticketW - wtW - sshW - team.width - stringWidth(age.last) - 1;
+    terminalWidth() - gutter - bookmarkW - statusW - (10 + 9 + 8 + 16) - machineColW - hostW - ticketW - wtW - sshW - team.width - stringWidth(age.last) - 1;
   const when = timeCell(age, baseTopicW);
   const topicW = Math.max(MIN_TOPIC_W, baseTopicW - when.extraW);
 
   return (
-    favCell +
+    bookmarkCell +
     // Truncated, not just padded: an indexed shortId is always 8 chars, but a
     // live row with no session id is named by its pid or cloud task, which can
     // run past the column and shunt every later column out of alignment.
@@ -5055,6 +5364,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--grok', 'Shorthand for --agent grok')
     .option('--opencode', 'Shorthand for --agent opencode')
     .option('--all', 'Widen every non-status filter to "all": every directory (not just this project) and all time (no window cap). Status filters like --active still compose; -a/--device/--since still narrow their axis.')
+    .option('--bookmarks', 'Show only bookmarked sessions — bookmark them with `*` in the browser or `agents sessions bookmark <id>`')
     .option('--unmanaged', "Also show sessions from your own ~/.<agent> installs (hidden once agents-cli manages that agent)")
     .option('--team, --teams', 'Show team-spawned sessions (hidden by default), grouped by team — each team names its spawner and spawn time, teammates show their mode + handle, and team-flagged spawns with no teammate record sink into a (no team) bucket. --flat/--tree keep the plain inline table')
     .option('--in-team <name>', "Only this team: the session that spawned it plus (with --teams) its teammates. Spans every directory and all time, since a team's worktrees and history sit outside the default window.")
@@ -5088,7 +5398,6 @@ export function registerSessionsCommands(program: Command): void {
     .option('--abandoned', 'Show sessions with no transcript progress for the abandonment window (implies --active)')
     .option('--queued', 'Show queued sessions that have not started running (implies --active)')
     .option('--unknown', 'Show sessions whose live state cannot be determined (implies --active)')
-    .option('--favorites', 'Show only favorited sessions — favorite them with `*` in the browser or `agents sessions favorite <id>`')
     .option('--tree', 'Group the listing by directory; drops the id/version columns for readability')
     .option('--flat', 'Plain flat table (one row per session) instead of the grouped project overview')
     .option('--no-live', 'Do not enrich the listing with live status/preview for running sessions')
@@ -5155,9 +5464,9 @@ export function registerSessionsCommands(program: Command): void {
       # teammate row [<team>/<handle>]. --in-team narrows to one team's lineage.
       agents sessions --in-team redesign --teams
 
-      # Show routine-run sessions and open one by routine run id
-      agents sessions --routine --all
-      agents sessions --routine nightly-review --all
+      # Pick a routine across every directory, then open one of its run sessions
+      agents sessions --routine
+      agents sessions --routine nightly-review
       agents sessions 2026-07-21T10-30-00-000Z
 
       # Export for analysis
@@ -5205,15 +5514,17 @@ export function registerSessionsCommands(program: Command): void {
       - --first and --last are mutually exclusive.
       - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.
       - --cloud sources from Rush Cloud captured runs instead of local disk.
-      - --routine [name] shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.
+      - --routine [name] spans every directory and shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.
       - Without --teams, team-spawned sessions are hidden by default.
     `,
   });
 
   sessionsCmd.action(async (query: string | undefined, options: SessionsOptions, command: Command) => {
     if ((options as { browser?: boolean }).browser) {
-      // Alias for `agents browser sessions`: a profile positional narrows to one profile.
-      runBrowserSessions({ profile: query, json: options.json });
+      // Alias for `agents browser sessions`: a profile positional narrows to one
+      // profile. `--no-interactive` is already a top-level sessionsCmd option
+      // (options.interactive), so it carries through for free.
+      await runBrowserSessionsCommand({ profile: query, json: options.json, interactive: options.interactive });
       return;
     }
     await sessionsAction(query, options, command.getOptionValueSource('limit'));
@@ -5271,7 +5582,7 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsTailCommand(sessionsCmd);
   registerSessionsResumeCommand(sessionsCmd);
   registerSessionsForkCommand(sessionsCmd);
-  registerSessionsFavoriteCommand(sessionsCmd);
+  registerSessionsBookmarkCommand(sessionsCmd);
   registerGoCommand(sessionsCmd);
   registerFocusCommand(sessionsCmd);
   registerReconnectCommand(sessionsCmd);

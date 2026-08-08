@@ -15,7 +15,8 @@ agents --version
 Bun works too (`bun install -g @phnx-labs/agents-cli`). Every command also
 answers to the shorter alias `ag` — `ag view` and `agents view` are the same
 call. Already installed? `agents upgrade` updates the CLI itself (`-y` to
-skip the confirm prompt; there is no `agents update`).
+skip the confirm prompt). `agents update` is a different command — it moves an
+installed agent harness to a new release, not agents-cli.
 
 ## 2. Run first-time setup
 

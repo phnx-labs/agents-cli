@@ -178,7 +178,10 @@ export async function runCatchup(opts: CatchupOptions = {}): Promise<CatchupOutc
     }
 
     try {
-      const meta = await executeJobDetached(config);
+      // No `scheduledFor` here on purpose: the missed slot is already claimed by
+      // `claimMissedFire` above (its atomic mkdir IS the catch-up single-fire), so
+      // the late run gets a fresh id rather than colliding with the missed record.
+      const meta = await executeJobDetached(config, undefined, { kind: 'catchup' });
       outcomes.push({
         name: entry.name,
         expectedAt: entry.expectedAt,

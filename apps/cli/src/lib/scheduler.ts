@@ -27,12 +27,19 @@ interface ScheduledJob {
   cron: Cron;
 }
 
+/** How a fire was triggered, carrying the scheduler's intended UTC slot time. */
+export interface TriggerContext {
+  /** The cron slot this callback fires for (croner `currentRun()`), for the
+   *  single-fire claim keyed on (routine, scheduledFor). */
+  scheduledFor?: Date;
+}
+
 /** In-memory cron scheduler that triggers a callback when jobs fire. */
 export class JobScheduler {
   private jobs = new Map<string, ScheduledJob>();
-  private onTrigger: (config: JobConfig) => Promise<void>;
+  private onTrigger: (config: JobConfig, ctx?: TriggerContext) => Promise<void>;
 
-  constructor(onTrigger: (config: JobConfig) => Promise<void>) {
+  constructor(onTrigger: (config: JobConfig, ctx?: TriggerContext) => Promise<void>) {
     this.onTrigger = onTrigger;
   }
 
@@ -80,7 +87,7 @@ export class JobScheduler {
     const cronOptions: Record<string, unknown> = { catch: true };
     if (config.timezone) cronOptions.timezone = config.timezone;
 
-    const cron = new Cron(config.schedule, cronOptions, async () => {
+    const cron = new Cron(config.schedule, cronOptions, async (self: Cron) => {
       // endAt: once the configured end time has passed, auto-disable and stop
       // firing. We persist enabled=false to disk so the next daemon reload
       // doesn't re-schedule, and unschedule in-memory so this cron stops.
@@ -96,7 +103,10 @@ export class JobScheduler {
       }
 
       try {
-        await this.onTrigger(config);
+        // croner hands the callback its own Cron instance; `currentRun()` is the
+        // UTC time THIS invocation was scheduled for — the single-fire slot key.
+        // A duplicate delivery for the same slot resolves to one run downstream.
+        await this.onTrigger(config, { scheduledFor: self.currentRun() ?? undefined });
       } catch (err) {
         console.error(`Job '${config.name}' failed:`, (err as Error).message);
       }

@@ -144,3 +144,13 @@ export function findTaskByName(name: string): HostTask | null {
   }
   return null;
 }
+
+/**
+ * Resolve a host-task reference the way `agents hosts ps/logs/stop` do: a raw
+ * dispatch id first, then a `--name` handle, then the remote agent/session id.
+ * Shared so any other caller resolving "does this ref name a detached --device
+ * dispatch?" (e.g. `agents message`) uses the identical three-way lookup.
+ */
+export function resolveTaskRef(ref: string): HostTask | null {
+  return loadTask(ref) ?? findTaskByName(ref) ?? findTaskBySessionId(ref);
+}

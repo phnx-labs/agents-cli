@@ -28,7 +28,9 @@ never touch the same lines — the changelog can't become a merge hot-spot.
 `scripts/release.sh` (via `scripts/release-changelog.ts`) folds every fragment in
 `.changelog/next/` into `.changelog/<version>.md`, deletes the fragments, and
 regenerates `CHANGELOG.md` (released versions only, newest first). A release with
-an empty queue fails closed — a release must document itself.
+an empty queue fails closed — a release must document itself. The same folded
+notes become the annotated `v<version>` git tag message (no separate notes
+channel at tag time).
 
 ## Regenerating the aggregate locally
 

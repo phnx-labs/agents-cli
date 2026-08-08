@@ -100,6 +100,9 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   profiles: {},
   defaults: {},
   alias: {},
+  // Installations are per-machine, so updating one on a peer means running it
+  // there — the same local/remote shape `add` would need.
+  update: {},
   // lifecycle
   teams: {},
   message: {},

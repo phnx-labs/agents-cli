@@ -15,8 +15,9 @@ import type { AgentId } from './types.js';
 import { machineId } from './machine-id.js';
 import { AGENTS, agentConfigDirName, findInPath } from './agents.js';
 import { createLink } from './platform/index.js';
-import { migrateLegacyRoutineActivation, setJobEnabled } from './routines.js';
-import { addEnabledRoutinesOnUpgrade } from './routine-activation.js';
+import { migrateLegacyRoutineActivation, setJobEnabled, listJobs, validateJob } from './routines.js';
+import { addEnabledRoutinesOnUpgrade, enabledRoutineNames, replaceEnabledRoutines } from './routine-activation.js';
+import { evaluateActivationReadiness } from './routine-readiness.js';
 import { DAEMON_TICK_ROUTINE_NAMES } from './daemon-ticks.js';
 
 const HOME = process.env.HOME ?? os.homedir();
@@ -938,6 +939,15 @@ function migrateRuntimeToHistory(): void {
   }
 }
 
+/** Rename the session marker store after the product vocabulary changed from
+ * favorite to bookmark. The destination wins if a newer CLI already wrote it. */
+function migrateLegacySessionMarkersToBookmarks(): void {
+  moveFileOnce(
+    path.join(HISTORY_DIR, 'favorites.json'),
+    path.join(HISTORY_DIR, 'bookmarks.json'),
+  );
+}
+
 /**
  * Restore plugins from the cache bucket back to the user-root.
  *
@@ -1837,6 +1847,107 @@ export function migrateRoutineDeviceToDevices(routinesDir?: string): void {
 }
 
 /**
+ * Fold the legacy host-placement `remoteCwd` field into the canonical portable
+ * `cwd` (RUSH-2290). Host dispatch used to read `remoteCwd` while a local run
+ * inferred its cwd from `repo` — two path semantics for one concept. The runner
+ * now resolves every placement from `cwd`, so this idempotently rewrites the
+ * field:
+ *
+ * - `remoteCwd` present, no `cwd`  → rename to `cwd`.
+ * - both present and equal          → drop the duplicate `remoteCwd`.
+ * - both present and DIFFERENT       → conflict: leave BOTH fields untouched so
+ *   the migration never silently chooses one; `validateJob`/`doctor` then flag the
+ *   pair and the routine stays paused rather than running against a guessed path.
+ *
+ * Idempotent: a file with only `cwd` (already migrated) is skipped.
+ */
+export function migrateRoutineRemoteCwdToCwd(routinesDir?: string): void {
+  const dir = routinesDir ?? path.join(USER_DIR, 'routines');
+  if (!fs.existsSync(dir)) return;
+
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
+
+  let migrated = 0;
+  let conflicts = 0;
+  for (const file of files) {
+    const filePath = path.join(dir, file);
+    const raw = fs.readFileSync(filePath, 'utf-8');
+
+    let doc: Record<string, unknown>;
+    try {
+      doc = yaml.parse(raw) as Record<string, unknown>;
+      if (!doc || typeof doc !== 'object') continue;
+    } catch { continue; }
+
+    if (!('remoteCwd' in doc)) continue;
+    const remote = doc.remoteCwd;
+    if (typeof remote !== 'string' || !remote.trim()) {
+      // A malformed legacy value is not something to fold — drop it and move on.
+      delete doc.remoteCwd;
+      atomicWriteFileSync(filePath, yaml.stringify(doc));
+      continue;
+    }
+
+    if ('cwd' in doc) {
+      if (doc.cwd === remote) {
+        delete doc.remoteCwd; // duplicate — dedupe to the canonical field
+        atomicWriteFileSync(filePath, yaml.stringify(doc));
+        migrated++;
+      } else {
+        conflicts++; // leave both fields; validateJob/doctor pause the conflict
+      }
+      continue;
+    }
+
+    delete doc.remoteCwd;
+    doc.cwd = remote;
+    atomicWriteFileSync(filePath, yaml.stringify(doc));
+    migrated++;
+  }
+
+  if (migrated > 0) {
+    console.error(`Migrated ${migrated} routine${migrated === 1 ? '' : 's'}: remoteCwd → cwd`);
+  }
+  if (conflicts > 0) {
+    console.error(`${conflicts} routine${conflicts === 1 ? '' : 's'} have conflicting remoteCwd/cwd — left paused for manual repair (migration_conflict)`);
+  }
+}
+
+/**
+ * Pause every currently-active routine whose execution context no longer
+ * resolves ready (RUSH-2290). An agent/workflow routine with no project/cwd, a
+ * missing directory, or a non-portable path used to fire and fail every tick —
+ * the mass auth_failed / untrusted-home storm this ticket exists to stop. After
+ * the fold, such a routine is deactivated on THIS device (only), preventing it
+ * from being scheduled until `agents routines doctor --all --fix` (or a repair +
+ * `resume`) makes it ready. Never materializes a device manifest that does not
+ * yet exist, and never touches command routines (they run in the target home).
+ */
+export function pauseUnreadyEnabledRoutines(): void {
+  const enabled = enabledRoutineNames();
+  if (enabled === null) return; // no manifest yet — nothing activated to pause
+  const enabledSet = new Set(enabled);
+  const paused: string[] = [];
+  for (const job of listJobs()) {
+    if (!enabledSet.has(job.name)) continue;
+    let ready = true;
+    try {
+      ready = validateJob(job).length === 0 && evaluateActivationReadiness(job).ready;
+    } catch {
+      ready = true; // never pause a routine because readiness itself threw
+    }
+    if (!ready) paused.push(job.name);
+  }
+  if (paused.length === 0) return;
+  const pausedSet = new Set(paused);
+  replaceEnabledRoutines(enabled.filter((name) => !pausedSet.has(name)));
+  console.error(
+    `Paused ${paused.length} routine${paused.length === 1 ? '' : 's'} with an unresolved execution context ` +
+    `(run 'agents routines doctor --all' to see why): ${paused.join(', ')}`,
+  );
+}
+
+/**
  * Fold the legacy watchdog enable sentinel into the watchdog routine.
  *
  * The always-on watchdog used to be gated by a presence sentinel at
@@ -1988,6 +2099,103 @@ function migrateHumans(): void {
   }
 }
 
+/**
+ * Cursor's OAuth token historically lived only in the global
+ * ~/.config/cursor/auth.json, shared across every version home. Cursor runs now
+ * pin XDG_CONFIG_HOME per version home (real per-account isolation — see
+ * buildExecEnv), so the current login must be copied into the active account's
+ * version home or it would read as logged out after upgrade. The active account
+ * is the home the ~/.cursor symlink currently targets. Idempotent: skips when
+ * the home already has its own token, and a no-op for unmanaged Cursor installs
+ * (where ~/.cursor is a real dir, not a symlink into a version home).
+ */
+export function seedActiveCursorLoginPerVersion(): void {
+  const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
+  const globalAuth = path.join(realHome, '.config', 'cursor', 'auth.json');
+  let versionHome: string;
+  try {
+    if (!fs.existsSync(globalAuth)) return;
+    // ~/.cursor -> .../versions/cursor/<version>/home/.cursor ; the version home
+    // is that link's parent directory.
+    const link = fs.readlinkSync(path.join(realHome, '.cursor'));
+    const resolved = path.isAbsolute(link) ? link : path.resolve(realHome, link);
+    versionHome = path.dirname(resolved);
+  } catch {
+    return; // not a symlink (unmanaged install) or unreadable — nothing to seed
+  }
+  if (!versionHome.includes(path.join('versions', 'cursor'))) return;
+  const dest = path.join(versionHome, '.config', 'cursor', 'auth.json');
+  try {
+    if (fs.existsSync(dest)) return;
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(globalAuth, dest);
+  } catch { /* best-effort — a failed seed just means one re-login */ }
+}
+
+/**
+ * Fold the pre-markdown Kimi subagent layout out of every kimi version home.
+ *
+ * agents-cli used to write each Kimi subagent as a `<name>.yaml` +
+ * `<name>.system.md` pair plus a managed `_agents-cli.yaml` index, against the
+ * agentspec of `kimi-cli` — a different product from the `kimi-code` harness we
+ * install, which never read any of it. Those files are inert, but not harmless:
+ * `<name>.system.md` ends in `.md`, so the subagent enumerator would surface it
+ * as a phantom subagent named `<name>.system`, and kimi-code logs
+ * `Missing frontmatter` for it once per session.
+ *
+ * This is the ONE place that knows about the old layout — the registry target
+ * describes only the current `<name>.md` shape. A pair is identified by its
+ * signature (a `<name>.yaml` with a sibling `<name>.system.md`), so a subagent a
+ * user legitimately named e.g. `foo.system` is never touched: it has no
+ * `foo.yaml` beside it. Idempotent; a no-op once the dirs are clean.
+ */
+export function migrateKimiSubagentsToMarkdown(versionsDir?: string): void {
+  const kimiVersions = path.join(versionsDir ?? path.join(HISTORY_DIR, 'versions'), 'kimi');
+  let versions: string[];
+  try {
+    versions = fs.readdirSync(kimiVersions);
+  } catch {
+    return; // no kimi installed
+  }
+
+  let removed = 0;
+  for (const version of versions) {
+    const dir = path.join(kimiVersions, version, 'home', '.kimi-code', 'agents');
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    const present = new Set(entries);
+    const doomed: string[] = [];
+    for (const entry of entries) {
+      if (entry === '_agents-cli.yaml') {
+        doomed.push(entry); // reserved managed index, only ever written by us
+        continue;
+      }
+      if (!entry.endsWith('.yaml')) continue;
+      const base = entry.slice(0, -'.yaml'.length);
+      // Only a genuine legacy pair — a bare .yaml with no sibling prompt is not
+      // ours to delete.
+      if (!present.has(`${base}.system.md`)) continue;
+      doomed.push(entry, `${base}.system.md`);
+    }
+    for (const entry of doomed) {
+      try {
+        fs.rmSync(path.join(dir, entry), { force: true });
+        removed++;
+      } catch {
+        // leave it; the next run retries
+      }
+    }
+  }
+
+  if (removed > 0) {
+    console.error(`Removed ${removed} pre-markdown Kimi subagent file(s); run 'agents sync kimi' to write the new format`);
+  }
+}
+
 /** Run all idempotent migrations. Safe to call multiple times. */
 export async function runMigration(): Promise<void> {
   // MUST run first: every other migrator reads SYSTEM_DIR (the new path).
@@ -2003,6 +2211,11 @@ export async function runMigration(): Promise<void> {
   migratePromptcutsIntoHooks();
   migrateSystemVersionsToUser();
   mergeOverlappingVersionHomes();
+  // Cursor runs now isolate the login per version home; preserve the current
+  // login by seeding the active home's token from the legacy global copy.
+  seedActiveCursorLoginPerVersion();
+  // Drop the pre-markdown Kimi subagent files; the registry now writes <name>.md.
+  migrateKimiSubagentsToMarkdown();
   migrateRunsIntoRoutines();
   migrateTrashToHidden();
   migrateBackupsToHidden();
@@ -2023,6 +2236,7 @@ export async function runMigration(): Promise<void> {
   migrateSplitDeviceLocalMeta();
   // Bucket moves: collapse runtime state into ~/.agents/.history and ~/.agents/.cache.
   migrateRuntimeToHistory();
+  migrateLegacySessionMarkersToBookmarks();
   migrateRuntimeToCache();
   // Restore plugins (user-authored) from cache back to user-root. Runs AFTER
   // migrateRuntimeToCache so any legacy plugins/ still at the user-root from
@@ -2054,6 +2268,8 @@ export async function runMigration(): Promise<void> {
 
   // Rewrite routine YAML files: singular `device:` -> plural `devices: []`.
   migrateRoutineDeviceToDevices();
+  // Fold legacy host-placement `remoteCwd` into the canonical portable `cwd`.
+  migrateRoutineRemoteCwdToCwd();
   migrateLegacyRoutineActivation();
   // These routines replace daemon timers that were always active. Devices with
   // an existing activation manifest must retain that behavior after upgrade.
@@ -2063,6 +2279,11 @@ export async function runMigration(): Promise<void> {
   // who opted in under the old build stays opted in after upgrading. After the
   // routine rewrites above so the routines dir is in its canonical shape.
   migrateWatchdogSentinelToRoutine();
+  // Deactivate any routine whose execution context no longer resolves ready, so
+  // an anchor-less agent/workflow routine cannot keep firing-and-failing after the
+  // fold (RUSH-2290). Runs AFTER the tick/watchdog routines are added so those
+  // (command/home) routines are evaluated in their final shape.
+  pauseUnreadyEnabledRoutines();
 
   // Symlink repair runs LAST so it can find the post-move version homes.
   repairAgentConfigSymlinks();

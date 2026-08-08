@@ -6,6 +6,7 @@ import * as path from 'path';
 import {
   readDoctorOverviewCache,
   writeDoctorOverviewCache,
+  invalidateDoctorOverviewCache,
   enterDoctorOverviewGate,
   DOCTOR_OVERVIEW_FRESH_MS,
 } from './doctor-overview-cache.js';
@@ -31,6 +32,19 @@ describe('doctor-overview-cache: read/write roundtrip', () => {
     expect(readDoctorOverviewCache({ dir })).toBeNull();
     fs.writeFileSync(path.join(dir, '.doctor-overview.json'), '{ not json');
     expect(readDoctorOverviewCache({ dir })).toBeNull();
+  });
+
+  it('invalidates only the overview snapshot, leaving the singleflight lock alone', async () => {
+    const dir = tmpDir();
+    writeDoctorOverviewCache({ stale: true }, { dir, now: () => 1000 });
+    const gate = await enterDoctorOverviewGate({ forceRefresh: true }, { dir });
+    expect(gate.release).toBeTypeOf('function');
+
+    invalidateDoctorOverviewCache({ dir });
+
+    expect(readDoctorOverviewCache({ dir })).toBeNull();
+    expect(fs.existsSync(path.join(dir, LOCK))).toBe(true);
+    gate.release!();
   });
 });
 

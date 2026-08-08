@@ -9,7 +9,9 @@
  * into their doctor payload; the comparator then diffs those payloads.
  */
 
-import { getAvailableResources, getVersionHomePath, listInstalledVersions } from '../versions.js';
+import { getAvailableResources, getVersionHomePath, isVersionIsolated, listInstalledVersions } from '../versions.js';
+import { supports } from '../capabilities.js';
+import { checkVersionHookWiring } from '../hooks.js';
 import { getUserAgentsDir, getSystemAgentsDir } from '../state.js';
 import { readRepoState } from '../git.js';
 import {
@@ -22,6 +24,7 @@ import {
 import type { AgentId } from '../types.js';
 import {
   FLEET_RESOURCE_KINDS,
+  type FleetHookRuntimeState,
   type FleetInventory,
   type FleetVersionSignIn,
   type RepoState,
@@ -104,9 +107,20 @@ export async function collectLocalFleetInventory(cwd: string = process.cwd()): P
   }
 
   const agentVersions: Record<string, string[]> = {};
+  const hookRuntime: Record<string, Record<string, FleetHookRuntimeState>> = {};
   for (const agent of ALL_AGENT_IDS) {
     const versions = listInstalledVersions(agent);
-    if (versions.length > 0) agentVersions[agent] = [...versions].sort();
+    if (versions.length > 0) {
+      agentVersions[agent] = [...versions].sort();
+      hookRuntime[agent] = Object.fromEntries(versions.map((version) => {
+        const eligible = supports(agent, 'hooks', version).ok && !isVersionIsolated(agent, version);
+        if (!eligible) return [version, 'not-applicable'];
+        const state: FleetHookRuntimeState = checkVersionHookWiring(agent, version).runtimeBroken.length > 0
+          ? 'broken'
+          : 'healthy';
+        return [version, state];
+      }));
+    }
   }
 
   return {
@@ -117,5 +131,6 @@ export async function collectLocalFleetInventory(cwd: string = process.cwd()): P
       system: toRepoState(readRepoState(getSystemAgentsDir())),
     },
     signIn: await collectLocalFleetSignIn(),
+    hookRuntime,
   };
 }
