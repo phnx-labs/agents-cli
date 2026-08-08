@@ -439,8 +439,12 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
           // Drop an INHERITED copy of the same token too: an interactive launch from
           // inside a headless agent's shell inherits that agent's injected value via
           // sanitizeProcessEnv(process.env) and would keep authenticating as it.
-          // Matched by VALUE (as runner.ts does), so a token the user exported
-          // deliberately is a different string and is left alone.
+          // Matched by VALUE, so a token the user exported deliberately is a
+          // different string and is left alone. This is NARROWER than the routines
+          // path, which overwrites-or-deletes unconditionally and never inspects the
+          // inherited value (`runner.ts:1020-1021`) — the gap between the two is
+          // what RUSH-2360 tracks, including a DIFFERENT account's inherited token,
+          // which this equality check lets through.
           if (result.CLAUDE_CODE_OAUTH_TOKEN === setupToken) {
             delete result.CLAUDE_CODE_OAUTH_TOKEN;
           }

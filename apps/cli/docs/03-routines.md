@@ -872,8 +872,9 @@ established — which is also the only credential carrying the `user:profile` sc
 that usage reads need (RUSH-2392).
 
 What the daemon does **not** hold or forward is an *ambient, shared* Claude token:
-`runner.ts` strips an inherited `CLAUDE_CODE_OAUTH_TOKEN` and re-asserts only the
-per-account setup-token keyed to the pinned home, distinguishing the two by value.
+`runner.ts` overwrites `CLAUDE_CODE_OAUTH_TOKEN` with the per-account setup-token
+keyed to the pinned home, and deletes the variable outright when no such token
+resolves — so an inherited value never survives into a routine either way.
 A shared token was the *cause* of the fleet-wide rotation logout, not the fix (see
 "Pinning an account" below). If a routine's pinned account login has gone dead, the
 auth-health preflight (`runner.ts`) skips the run up front with a `re-login required`
