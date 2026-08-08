@@ -25,7 +25,12 @@ describe('createWorktree base freshness', () => {
   let clone: string;
 
   beforeEach(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-wt-'));
+    // realpath the temp root: on Windows `os.tmpdir()` yields the 8.3 SHORT form
+    // (`C:\Users\RUNNER~1\...`) while git — and therefore every path createWorktree
+    // returns via `rev-parse --git-common-dir` — yields the LONG form
+    // (`C:\Users\runneradmin\...`). Comparing the two spellings of one directory
+    // fails on the Windows runner only. No-op on POSIX.
+    tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-wt-')));
     bare = path.join(tmp, 'remote.git');
     clone = path.join(tmp, 'clone');
 
