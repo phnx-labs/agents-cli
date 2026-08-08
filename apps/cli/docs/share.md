@@ -132,12 +132,48 @@ synced config exists and the token is already available.
 | Command | What it does |
 |---|---|
 | `agents share <file> [--slug s] [--github-user u] [--expire spec] [--no-cover] [--no-analytics] [--json]` | Publish `<file>` under your GitHub-username namespace; print the link, or emit `{ url, coverUrl, expiresAt }` for plan-render hooks with `--json`. HTML pages get an auto OG cover unless `--no-cover` and a CF Web Analytics beacon unless `--no-analytics`. |
+| `agents share list [--github-user u] [--json]` | List the ACTIVE pages in your namespace — human table, or the raw listing with `--json` (see [Listing your shares](#listing-your-shares) below). |
 | `agents share delete <targets...>` / `agents unshare <targets...>` | Take a published page down (see [Deleting a share](#deleting-a-share) below). |
 | `agents share setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h] [--analytics-token token]` | Provision an R2 bucket + Worker on your Cloudflare, map `share.agents-cli.sh` when visible (or `--domain h`), optionally configure a CF Web Analytics token, and save the config. |
 | `agents share join [baseUrl] [--token t]` | Use an existing endpoint, no provisioning. With no URL, consumes synced `share:` config plus `SHARE_WRITE_TOKEN` / the local `share` bundle. |
 | `agents share status` | Show the configured endpoint, namespace, analytics state, and whether the deployed Worker matches the current template. |
 | `agents share analytics` | Show the Web Analytics status and dashboard link. |
 | `agents share update [--bundle b] [--account id] [--token t] [--force] [--json]` | Re-deploy the Worker script to your existing endpoint (same account/worker/bucket, same write token). No-op when the deployed template already matches unless `--force`. |
+
+## Listing your shares
+
+`agents share list` answers "what have I published?" from the CLI. Before it existed,
+the only way to enumerate your public pages after an accidental publish was to fetch the
+gallery HTML and grep it (the RUSH-2428 incident). It reads the Worker's machine-readable
+listing route (`GET /<user>?format=json`) for your namespace and prints a table, newest
+first:
+
+```bash
+agents share list                       # human table for your own namespace
+agents share list --github-user octocat # list another namespace
+agents share list --json                # raw listing for scripts
+agents share list --json | jq -r '.objects[].url'   # every still-public URL
+```
+
+The listing shows the **active** pages only — expired links and the sibling `<slug>.png`
+OG covers are omitted, mirroring the public gallery. Each object carries its `slug`, full
+`url`, `size` (bytes), `contentType`, `publishedAt`, and `expiresAt` (or `null`). The
+`--json` shape is stable:
+
+```json
+{ "user": "octocat", "count": 1,
+  "objects": [ { "slug": "fleet-status-9f3c", "url": "https://share.agents-cli.sh/octocat/fleet-status-9f3c",
+                 "size": 20481, "contentType": "text/html; charset=utf-8",
+                 "publishedAt": "2026-08-08T12:00:00.000Z", "expiresAt": null } ] }
+```
+
+The listing route ships with the current Worker template, so it only reaches you after the
+deployed Worker carries it. An endpoint provisioned before this feature has no such route:
+rather than a confusing 404 or an HTML body, `list` fails loud with
+`Your deployed share Worker has no machine-readable listing route … Run agents share update`.
+`agents share update` (RUSH-2449) pushes the current template out to your existing
+endpoint; `agents share status` tells you whether an update is due (see
+[Updating the deployed Worker](#updating-the-deployed-worker)).
 
 ## Deleting a share
 
