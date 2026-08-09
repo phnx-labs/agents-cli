@@ -197,17 +197,12 @@ describe('spawnDetachedSync — real detached child_process.spawn against the bu
  *      path above, exactly as a user's shell invokes it. `--help` is appended
  *      to every invocation so each run exits fast and deterministically
  *      (commander prints help and exits 0) without touching stdin. `--help`
- *      does skip checkForUpdates/spawnDetachedSync (benched above, guarded by
- *      `!helpOrVersionRequested` at index.ts:1322) and ensureInitialized
- *      (index.ts:1373-1381, the only member of the migration triad that
- *      carries that guard -- the sibling migration-triad bench in PR #2277
- *      covers that path), so this isolates the registration/import cost from
- *      those pieces instead of conflating them. It does NOT skip
- *      foldLegacySystemRepo (index.ts:1366-1369) or runMigration
- *      (index.ts:1389-1391): both are gated only by the AGENTS_SKIP_MIGRATION
- *      env var, so a `--help` row still pays their `await import(
- *      './lib/migrate.js')`. An earlier revision of this docblock claimed
- *      runMigration was skipped too; it is not.
+ *      does skip checkForUpdates/spawnDetachedSync, ensureInitialized, the
+ *      menu-bar self-heal, AND the migration hops (foldLegacySystemRepo via
+ *      migrate-fold.js + runMigration via migrate.js) — all gated by
+ *      `!helpOrVersionRequested` (RUSH-2454). A `--help` row therefore does
+ *      not pay `await import('./lib/migrate.js')`. Registration/import cost
+ *      measured here is isolated from those pieces.
  *   2. WARM IN-PROCESS REGISTRATION (further below): call the real, exported
  *      command-registry.ts loaders directly -- `(await loadX())(new
  *      Command())` -- for a representative subset. Node's ESM loader caches a
@@ -1099,12 +1094,10 @@ describe('whole-invocation anchor — real cold `node dist/index.js --version` (
  *     } catch { }
  *   }
  *
- * Unlike checkForUpdates/spawnDetachedSync (index.ts:1322, guarded by
- * `!helpOrVersionRequested`) this block has NO help/version guard, so on
- * darwin it runs on every `agents <cmd>`, `agents --help`, and
- * `agents --version` alike -- it sits between the migration triad
- * (index.ts:1389-1411, benched in PR #2277) and the bare-invocation help
- * branch (index.ts:1433).
+ * Same `!helpOrVersionRequested` gate as checkForUpdates/spawnDetachedSync
+ * and the migration hops (RUSH-2346 / RUSH-2454): on darwin the self-heal
+ * runs for real commands only, not `--help`/`--version`. It sits between
+ * the migration hops and the bare-invocation help branch.
  *
  * THIS BOX IS LINUX (yosemite-s1), so `process.platform === 'darwin'` is
  * false and in real production this whole block -- import included -- never
