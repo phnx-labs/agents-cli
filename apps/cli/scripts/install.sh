@@ -170,6 +170,49 @@ if [[ -f "$ROOT/scripts/install-helper.js" ]]; then
   node "$ROOT/scripts/install-helper.js" --force || true
 fi
 
+# Bounce a running routines daemon onto this build (RUSH-2442).
+#
+# The npm postinstall hook is the registry-install path that restarts the
+# daemon so the secrets broker (and every other subsystem the daemon hosts)
+# reloads the just-installed code. We strip that hook above so the PATH-nudge
+# and alias-shim flow don't fire for a side-by-side dev prefix — which also
+# skipped the restart, leaving a broker built from the PREVIOUS install
+# still holding sockets. A version skew between broker and on-disk CLI wipes
+# held bundles and re-arms Touch ID prompts on the next secrets read.
+#
+# Match postinstall.js healLongRunningProcesses: only when a daemon is
+# already running (never start one the user didn't want), best-effort and
+# non-fatal, skipped in CI and when AGENTS_NO_HEAL=1. Pin the restart to
+# the just-linked binary so the service manifest records this install, not
+# a registry path that happens to be earlier on PATH.
+if [[ -z "${CI:-}" && "${AGENTS_NO_HEAL:-}" != "1" ]]; then
+  INSTALLED_PKG="$PREFIX/lib/node_modules/$PKG_NAME"
+  if [[ -f "$INSTALLED_PKG/dist/lib/daemon.js" ]]; then
+    dim "  Reloading daemon onto this build (if running)"
+    # Export paths for the node one-shot so shell metacharacters in PREFIX
+    # can't break the import. Use the installed module (not PATH) so we
+    # don't accidentally restart with a different agents binary.
+    AGENTS_INSTALL_DAEMON_MOD="$INSTALLED_PKG/dist/lib/daemon.js" \
+    AGENTS_INSTALL_BIN="$LINKED_PATH" \
+    node --input-type=module -e '
+      import { pathToFileURL } from "node:url";
+      const modPath = process.env.AGENTS_INSTALL_DAEMON_MOD;
+      const bin = process.env.AGENTS_INSTALL_BIN;
+      try {
+        const d = await import(pathToFileURL(modPath).href);
+        if (!d.isDaemonRunning?.()) process.exit(0);
+        d.stopDaemon?.();
+        d.startDaemon?.(bin);
+        console.log("  Restarted the routines daemon onto this version.");
+      } catch (err) {
+        console.error("  Could not restart the daemon (non-fatal):", err && err.message ? err.message : err);
+        console.error("  Run: agents daemon restart");
+        process.exit(0);
+      }
+    ' || true
+  fi
+fi
+
 green "  Ready"
 dim   "  $LINKED_PATH ($LINKED_VER)"
 
