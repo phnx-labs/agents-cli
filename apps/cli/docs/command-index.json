@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 102,
-  "commands": 578,
+  "groups": 103,
+  "commands": 579,
   "root": {
     "name": "agents",
     "path": "",
@@ -5521,6 +5521,51 @@
           "negate": false
         }
       ],
+      "subcommands": []
+    },
+    {
+      "name": "cp",
+      "path": "cp",
+      "aliases": [],
+      "description": "Copy a file or directory between fleet hosts. Either endpoint may be host:path (remote) or an absolute local path.",
+      "args": [
+        {
+          "name": "src",
+          "required": true,
+          "variadic": false,
+          "description": ""
+        },
+        {
+          "name": "dst",
+          "required": true,
+          "variadic": false,
+          "description": ""
+        }
+      ],
+      "options": [
+        {
+          "flags": "-r, --recursive",
+          "description": "Copy directories recursively",
+          "short": "-r",
+          "long": "--recursive",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "-h, --help",
+          "description": "Show help",
+          "short": "-h",
+          "long": "--help",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        }
+      ],
+      "examples": "agents cp yosemite-s0:/abs/data.json /tmp/data.json   # download a file from a fleet host\n      agents cp /tmp/build.tar.gz mac-mini:/abs/deploy/    # upload a local file to a fleet host\n      agents cp -r yosemite-s0:/abs/src/ mac-mini:/abs/dst/ # copy a directory between two fleet hosts\n      agents cp yosemite-s0:~/logs/run.log /tmp/run.log    # ~ is resolved on the remote host",
+      "notes": "Local paths must be absolute (use /abs/path, not ./relative).\n      Remote paths must be absolute after ~ / $HOME expansion.\n      Remote $HOME is resolved on the remote host — never in the local shell.\n      Both local-to-remote and remote-to-local transfers are supported.\n      Remote-to-remote transfers route through the local machine (-3).\n      Devices must be registered: 'agents devices' to list, 'agents devices add' to enroll.",
       "subcommands": []
     },
     {

@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_102 command groups · 578 commands._
+_103 command groups · 579 commands._
 
 ## accounts — Browse and name signed-in harness accounts
 
@@ -189,6 +189,12 @@ agents computer wait         Wait for a duration (--duration) or for an element 
 
 ```
 agents cost  Roll up $ cost and duration across local agent sessions
+```
+
+## cp — Copy a file or directory between fleet hosts. Either endpoint may be host:path (remote) or an absolute local path.
+
+```
+agents cp <src> <dst>  Copy a file or directory between fleet hosts. Either endpoint may be host:path (remote) or an absolute local path.
 ```
 
 ## daemon — The always-on daemon: secrets broker, browser IPC, watchdog, and the routines scheduler. Bare `agents daemon` shows status.

@@ -607,6 +607,8 @@ agents ssh mac-mini                     # hardened SSH: fails fast if offline,
                                         # PowerShell on Windows, password-from-Keychain,
                                         # auto-syncs your terminfo (Ghostty/kitty/…) so
                                         # backspace, colors & clear work on the remote
+agents cp mac-mini:/abs/log.json /tmp/  # fleet file transfer; host:path or abs local
+agents cp -r /tmp/src/ yosemite-s0:~/dst/  # ~ and $HOME expand on the REMOTE, never locally
 agents hosts list                       # devices show up here too (one host pool)
 agents hosts add mac-mini --cap gpu     # tag a device for capability routing (--host gpu)
 
