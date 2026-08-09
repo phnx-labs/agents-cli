@@ -146,6 +146,114 @@ export function shouldPromptUpgrade(cache: UpdateCheckCache | null, currentVersi
 }
 
 /**
+ * Short TTL for the multi-install PATH scan cache (RUSH-2324). The full
+ * `findAgentsCliInstalls` walk over PATH + known roots costs ~1ms on a warm
+ * box and runs on every ordinary CLI invocation via `maybeWarnMultiInstall`.
+ * Same 5-minute window as the detached-sync spawn gate so both bootstrap
+ * savings share one recency policy.
+ */
+export const MULTI_INSTALL_SCAN_TTL_MS = 5 * 60 * 1000;
+
+/** On-disk shape for the multi-install scan cache (beside `.update-check`). */
+export interface MultiInstallScanCache {
+  scannedAt: number;
+  /** Full PATH string at scan time — any change invalidates the cache. */
+  pathEnv: string;
+  runningRoot: string;
+  runningVersion: string;
+  inventory: MultiInstallInventoryEntry[];
+}
+
+/** Read a multi-install scan cache. Returns null if missing or corrupt. */
+export function readMultiInstallScanCache(file: string): MultiInstallScanCache | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as Partial<MultiInstallScanCache>;
+    if (
+      typeof raw.scannedAt !== 'number' ||
+      typeof raw.pathEnv !== 'string' ||
+      typeof raw.runningRoot !== 'string' ||
+      typeof raw.runningVersion !== 'string' ||
+      !Array.isArray(raw.inventory)
+    ) {
+      return null;
+    }
+    return raw as MultiInstallScanCache;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist a multi-install scan result. Best-effort. */
+export function writeMultiInstallScanCache(file: string, cache: MultiInstallScanCache): void {
+  try {
+    const dir = path.dirname(file);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(cache));
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * Whether a multi-install scan cache is still usable for this invocation.
+ * Invalid when missing, past TTL, PATH changed, or the running copy identity
+ * (root / version) changed — those are exactly the cases where a re-scan can
+ * surface a different inventory and re-fire the warning.
+ */
+export function isMultiInstallScanFresh(
+  cache: MultiInstallScanCache | null,
+  pathEnv: string,
+  runningRoot: string,
+  runningVersion: string,
+  now: number = Date.now(),
+  ttlMs: number = MULTI_INSTALL_SCAN_TTL_MS,
+): boolean {
+  if (!cache) return false;
+  if (now - cache.scannedAt >= ttlMs) return false;
+  if (cache.pathEnv !== pathEnv) return false;
+  if (cache.runningRoot !== runningRoot) return false;
+  if (cache.runningVersion !== runningVersion) return false;
+  return true;
+}
+
+/**
+ * Resolve the multi-install inventory, hitting the on-disk scan cache when
+ * fresh. Callers that only need the inventory (the bootstrap multi-install
+ * warning) avoid the ~1ms PATH walk on the warm path (RUSH-2324).
+ */
+export function resolveMultiInstallInventory(
+  runningRoot: string,
+  runningVersion: string,
+  pathEnv: string,
+  cacheFile: string,
+  opts: {
+    now?: number;
+    ttlMs?: number;
+    findOpts?: FindAgentsCliInstallsOptions;
+  } = {},
+): MultiInstallInventoryEntry[] {
+  const now = opts.now ?? Date.now();
+  const ttlMs = opts.ttlMs ?? MULTI_INSTALL_SCAN_TTL_MS;
+  const cached = readMultiInstallScanCache(cacheFile);
+  if (isMultiInstallScanFresh(cached, pathEnv, runningRoot, runningVersion, now, ttlMs)) {
+    return cached!.inventory;
+  }
+  const inventory = buildMultiInstallInventory(
+    runningRoot,
+    runningVersion,
+    findAgentsCliInstalls(pathEnv, opts.findOpts),
+  );
+  writeMultiInstallScanCache(cacheFile, {
+    scannedAt: now,
+    pathEnv,
+    runningRoot,
+    runningVersion,
+    inventory,
+  });
+  return inventory;
+}
+
+/**
  * Whether `p` is Bun's embedded virtual filesystem — where a standalone
  * executable exposes its bundled sources. Nothing there exists on disk: it
  * cannot be stat'd, installed into, or compared against a real install path.

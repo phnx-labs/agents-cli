@@ -2,10 +2,18 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { readRepoBehindMarkers, type FetchStatusMarker } from './auto-pull.js';
+import {
+  readRepoBehindMarkers,
+  shouldSkipDetachedSync,
+  markDetachedSyncComplete,
+  lastSyncStampPath,
+  lockFilePath,
+  SYNC_LOCK_TTL_MS,
+  type FetchStatusMarker,
+} from './auto-pull.js';
 
-// Tests pass an explicit fetchDir to readRepoBehindMarkers() so they never
-// touch the real ~/.agents/.cache/.fetch/ state.
+// Tests pass an explicit fetchDir to readRepoBehindMarkers() / the spawn-gate
+// helpers so they never touch the real ~/.agents/.cache/.fetch/ state.
 
 let fetchDir: string;
 
@@ -99,5 +107,77 @@ describe('readRepoBehindMarkers', () => {
       process.stderr.write = stderrWrite;
     }
     expect(captured).toEqual([]);
+  });
+});
+
+/**
+ * RUSH-2324: parent-side recency gate for spawnDetachedSync. The spawn itself
+ * costs ~7ms mean; the worker is almost always a no-op when a cycle finished
+ * in the last five minutes. These tests exercise the real fs paths against a
+ * temp fetch dir — no mocks.
+ */
+describe('shouldSkipDetachedSync / markDetachedSyncComplete (RUSH-2324)', () => {
+  const NOW = 1_700_000_000_000;
+
+  it('returns false when the fetch dir does not exist', () => {
+    const missing = path.join(fetchDir, 'no-such-dir');
+    expect(shouldSkipDetachedSync(missing, NOW)).toBe(false);
+  });
+
+  it('returns false on an empty fetch dir (no stamp, no locks)', () => {
+    expect(shouldSkipDetachedSync(fetchDir, NOW)).toBe(false);
+  });
+
+  it('returns true after markDetachedSyncComplete within the TTL window', () => {
+    markDetachedSyncComplete(fetchDir);
+    expect(fs.existsSync(lastSyncStampPath(fetchDir))).toBe(true);
+    // Use the real stamp mtime via Date.now()-style now slightly after write.
+    const stampedAt = fs.statSync(lastSyncStampPath(fetchDir)).mtimeMs;
+    expect(shouldSkipDetachedSync(fetchDir, stampedAt + 1_000)).toBe(true);
+    expect(shouldSkipDetachedSync(fetchDir, stampedAt + SYNC_LOCK_TTL_MS - 1)).toBe(true);
+  });
+
+  it('returns false once the last-sync stamp is past the TTL', () => {
+    markDetachedSyncComplete(fetchDir);
+    const stampedAt = fs.statSync(lastSyncStampPath(fetchDir)).mtimeMs;
+    expect(shouldSkipDetachedSync(fetchDir, stampedAt + SYNC_LOCK_TTL_MS)).toBe(false);
+    expect(shouldSkipDetachedSync(fetchDir, stampedAt + SYNC_LOCK_TTL_MS + 1)).toBe(false);
+  });
+
+  it('returns true when every existing *.lock is within the TTL (mid-flight worker)', () => {
+    fs.writeFileSync(lockFilePath('user', fetchDir), '123');
+    fs.writeFileSync(lockFilePath('system', fetchDir), '456');
+    // Fresh locks: touch mtimes to NOW via utimes.
+    const lockUser = lockFilePath('user', fetchDir);
+    const lockSystem = lockFilePath('system', fetchDir);
+    const sec = NOW / 1000;
+    fs.utimesSync(lockUser, sec, sec);
+    fs.utimesSync(lockSystem, sec, sec);
+    expect(shouldSkipDetachedSync(fetchDir, NOW + 1_000)).toBe(true);
+  });
+
+  it('returns false when any lock is stale (even if another is fresh)', () => {
+    const lockUser = lockFilePath('user', fetchDir);
+    const lockSystem = lockFilePath('system', fetchDir);
+    fs.writeFileSync(lockUser, '123');
+    fs.writeFileSync(lockSystem, '456');
+    const freshSec = NOW / 1000;
+    const staleSec = (NOW - SYNC_LOCK_TTL_MS - 1_000) / 1000;
+    fs.utimesSync(lockUser, freshSec, freshSec);
+    fs.utimesSync(lockSystem, staleSec, staleSec);
+    expect(shouldSkipDetachedSync(fetchDir, NOW)).toBe(false);
+  });
+
+  it('prefers a fresh last-sync stamp over a missing/stale lock set', () => {
+    markDetachedSyncComplete(fetchDir);
+    // No locks at all — stamp alone is enough.
+    const stampedAt = fs.statSync(lastSyncStampPath(fetchDir)).mtimeMs;
+    expect(shouldSkipDetachedSync(fetchDir, stampedAt + 500)).toBe(true);
+  });
+
+  it('markDetachedSyncComplete creates the fetch dir when missing', () => {
+    const nested = path.join(fetchDir, 'nested-fetch');
+    markDetachedSyncComplete(nested);
+    expect(fs.existsSync(lastSyncStampPath(nested))).toBe(true);
   });
 });

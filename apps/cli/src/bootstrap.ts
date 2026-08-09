@@ -368,13 +368,16 @@ import {
   saveUpdateCheck,
   dismissUpdateVersion,
   shouldPromptUpgrade,
-  buildMultiInstallInventory,
-  findAgentsCliInstalls,
+  resolveMultiInstallInventory,
   remediateStaleAgentsCliInstalls,
   resolveRunningPackageRoot,
   type UpdateCheckCache,
 } from './lib/self-update.js';
 const UPDATE_CHECK_FILE = getUpdateCheckPath();
+// Beside the existing update-check cache (RUSH-2324): short-TTL memo of the
+// multi-install PATH scan so every ordinary CLI invocation does not re-walk
+// PATH + known install roots (~1ms warm).
+const MULTI_INSTALL_SCAN_FILE = path.join(path.dirname(UPDATE_CHECK_FILE), '.multi-install-scan');
 
 /**
  * Warn once when this machine contains a different agents-cli install than the
@@ -395,10 +398,13 @@ function maybeWarnMultiInstall(): void {
     // "/$bunfs" install. This warning is advisory — stay silent instead.
     return;
   }
-  const inventory = buildMultiInstallInventory(
+  // RUSH-2324: resolve via the short-TTL scan cache beside `.update-check`.
+  // Fresh cache → skip findAgentsCliInstalls (~1ms PATH walk).
+  const inventory = resolveMultiInstallInventory(
     runningRoot,
     VERSION,
-    findAgentsCliInstalls(process.env.PATH || ''),
+    process.env.PATH || '',
+    MULTI_INSTALL_SCAN_FILE,
   );
 
   if (inventory.length < 2) {

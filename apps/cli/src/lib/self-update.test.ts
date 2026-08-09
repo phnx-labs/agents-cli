@@ -16,19 +16,25 @@ import {
   downloadVerifiedTarball,
   findAgentsCliInstalls,
   installPackageIntoPrefix,
+  isMultiInstallScanFresh,
   isNpxCacheInstall,
   isTouchIdStormFixedVersion,
+  MULTI_INSTALL_SCAN_TTL_MS,
   purgeRemovableAgentsCliInstalls,
   readInstalledVersion,
+  readMultiInstallScanCache,
   readUpdateCache,
   remediateStaleAgentsCliInstalls,
+  resolveMultiInstallInventory,
   resolveRunningPackageRoot,
   saveUpdateCheck,
   shouldPromptUpgrade,
   TOUCH_ID_STORM_FIXED_SINCE,
   verifyInstalledVersion,
   verifyTarballIntegrity,
+  writeMultiInstallScanCache,
   type AgentsCliInstall,
+  type MultiInstallScanCache,
 } from './self-update.js';
 
 const tempDirs: string[] = [];
@@ -561,6 +567,130 @@ describe('buildMultiInstallInventory', () => {
       version: '1.20.88',
       note: 'running; unsafe legacy helper installer — remove this copy',
     }]);
+  });
+});
+
+/**
+ * RUSH-2324: short-TTL cache for the multi-install PATH scan that every
+ * ordinary CLI invocation runs via maybeWarnMultiInstall. Real fs only.
+ */
+describe('multi-install scan cache (RUSH-2324)', () => {
+  const NOW = 1_700_000_000_000;
+  const runningRoot = '/prefix/lib/node_modules/@phnx-labs/agents-cli';
+  const inventory = [{
+    packageRoot: runningRoot,
+    version: '1.22.35',
+    note: 'running',
+  }];
+
+  function makeCache(overrides: Partial<MultiInstallScanCache> = {}): MultiInstallScanCache {
+    return {
+      scannedAt: NOW,
+      pathEnv: '/usr/bin:/usr/local/bin',
+      runningRoot,
+      runningVersion: '1.22.35',
+      inventory,
+      ...overrides,
+    };
+  }
+
+  it('isMultiInstallScanFresh is true only when TTL, PATH, root, and version all match', () => {
+    const cache = makeCache();
+    expect(isMultiInstallScanFresh(cache, cache.pathEnv, runningRoot, '1.22.35', NOW + 1_000)).toBe(true);
+    expect(isMultiInstallScanFresh(cache, cache.pathEnv, runningRoot, '1.22.35', NOW + MULTI_INSTALL_SCAN_TTL_MS - 1)).toBe(true);
+    expect(isMultiInstallScanFresh(cache, cache.pathEnv, runningRoot, '1.22.35', NOW + MULTI_INSTALL_SCAN_TTL_MS)).toBe(false);
+    expect(isMultiInstallScanFresh(cache, '/other/path', runningRoot, '1.22.35', NOW + 1_000)).toBe(false);
+    expect(isMultiInstallScanFresh(cache, cache.pathEnv, '/other/root', '1.22.35', NOW + 1_000)).toBe(false);
+    expect(isMultiInstallScanFresh(cache, cache.pathEnv, runningRoot, '9.9.9', NOW + 1_000)).toBe(false);
+    expect(isMultiInstallScanFresh(null, cache.pathEnv, runningRoot, '1.22.35', NOW)).toBe(false);
+  });
+
+  it('read/write round-trip a real cache file beside the update-check path', () => {
+    const dir = makeTempDir('multi-install-cache');
+    const file = path.join(dir, '.multi-install-scan');
+    const cache = makeCache();
+    writeMultiInstallScanCache(file, cache);
+    expect(readMultiInstallScanCache(file)).toEqual(cache);
+  });
+
+  it('readMultiInstallScanCache returns null for missing or corrupt files', () => {
+    const dir = makeTempDir('multi-install-cache-bad');
+    expect(readMultiInstallScanCache(path.join(dir, 'missing'))).toBeNull();
+    const bad = path.join(dir, 'bad.json');
+    fs.writeFileSync(bad, 'not-json');
+    expect(readMultiInstallScanCache(bad)).toBeNull();
+    fs.writeFileSync(bad, JSON.stringify({ scannedAt: 'nope' }));
+    expect(readMultiInstallScanCache(bad)).toBeNull();
+  });
+
+  it('resolveMultiInstallInventory returns the cached inventory without re-scanning when fresh', () => {
+    const dir = makeTempDir('multi-install-resolve');
+    const file = path.join(dir, '.multi-install-scan');
+    // Seed a cache that claims a second install. A re-scan with an empty PATH
+    // and no known roots would produce only the running entry — so if the
+    // cache is honored we get length 2, not 1.
+    const seeded = makeCache({
+      pathEnv: '',
+      inventory: [
+        { packageRoot: runningRoot, version: '1.22.35', note: 'running' },
+        { packageRoot: '/other/lib/node_modules/@phnx-labs/agents-cli', version: '1.20.0', note: 'discovered install' },
+      ],
+    });
+    writeMultiInstallScanCache(file, seeded);
+    const resolved = resolveMultiInstallInventory(
+      runningRoot,
+      '1.22.35',
+      '',
+      file,
+      {
+        now: NOW + 1_000,
+        // Force no known-root discovery so a re-scan cannot invent the second entry.
+        findOpts: {
+          homeDir: path.join(dir, 'no-home'),
+          fnmDir: path.join(dir, 'no-fnm'),
+          npmCacheDir: path.join(dir, 'no-npm-cache'),
+          globalNodeModulesDirs: [],
+        },
+      },
+    );
+    expect(resolved).toEqual(seeded.inventory);
+    expect(resolved).toHaveLength(2);
+  });
+
+  it('resolveMultiInstallInventory re-scans and rewrites the cache when stale', () => {
+    const dir = makeTempDir('multi-install-stale');
+    const file = path.join(dir, '.multi-install-scan');
+    const seeded = makeCache({
+      pathEnv: '',
+      scannedAt: NOW - MULTI_INSTALL_SCAN_TTL_MS - 1,
+      inventory: [
+        { packageRoot: runningRoot, version: '1.22.35', note: 'running' },
+        { packageRoot: '/stale/other', version: '0.0.1', note: 'discovered install' },
+      ],
+    });
+    writeMultiInstallScanCache(file, seeded);
+    const resolved = resolveMultiInstallInventory(
+      runningRoot,
+      '1.22.35',
+      '',
+      file,
+      {
+        now: NOW,
+        findOpts: {
+          homeDir: path.join(dir, 'no-home'),
+          fnmDir: path.join(dir, 'no-fnm'),
+          npmCacheDir: path.join(dir, 'no-npm-cache'),
+          globalNodeModulesDirs: [],
+        },
+      },
+    );
+    // Empty PATH + empty known roots → inventory is just the running copy.
+    expect(resolved).toEqual([
+      { packageRoot: runningRoot, version: '1.22.35', note: 'running' },
+    ]);
+    const rewritten = readMultiInstallScanCache(file);
+    expect(rewritten?.scannedAt).toBe(NOW);
+    expect(rewritten?.inventory).toEqual(resolved);
   });
 });
 

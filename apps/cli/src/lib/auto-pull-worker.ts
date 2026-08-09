@@ -19,9 +19,13 @@ import {
   getEnabledExtraRepos,
   getFetchCacheDir,
 } from './state.js';
-import { lockFilePath, statusFilePath, type FetchStatusMarker } from './auto-pull.js';
-
-const LOCK_TTL_MS = 5 * 60 * 1000;
+import {
+  lockFilePath,
+  statusFilePath,
+  markDetachedSyncComplete,
+  SYNC_LOCK_TTL_MS,
+  type FetchStatusMarker,
+} from './auto-pull.js';
 
 /**
  * Background auto-pull of ~/.agents/.system/ is off by default. When enabled it
@@ -53,7 +57,7 @@ function tryAcquireLock(alias: string): boolean {
   const lock = lockFilePath(alias);
   try {
     const stat = fs.statSync(lock);
-    if (Date.now() - stat.mtimeMs < LOCK_TTL_MS) return false;
+    if (Date.now() - stat.mtimeMs < SYNC_LOCK_TTL_MS) return false;
   } catch {
     /* no lock yet */
   }
@@ -142,6 +146,12 @@ async function main(): Promise<void> {
   }
 
   await Promise.all(targets.map(processTarget));
+
+  // Stamp the cycle so the next foreground CLI invocation can skip the ~7ms
+  // detached spawn for SYNC_LOCK_TTL_MS (RUSH-2324). Written even when every
+  // target was lock-skipped or the target list was empty — "nothing to do"
+  // is still a completed cycle.
+  markDetachedSyncComplete();
 }
 
 main().catch(() => {
