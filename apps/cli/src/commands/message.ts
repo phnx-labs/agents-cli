@@ -26,7 +26,7 @@ import chalk from 'chalk';
 import { spawn } from 'child_process';
 import { die } from '../lib/format.js';
 import { parseDuration } from '../lib/hooks/cache.js';
-import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
+import { getActiveSessions, isSessionIdLiveOnProcessTable, type ActiveSession } from '../lib/session/active.js';
 import { getTaskById, updateTaskStatus } from '../lib/cloud/store.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
 import { mailboxDir, enqueue } from '../lib/mailbox.js';
@@ -320,6 +320,37 @@ export function registerMessageCommand(program: Command): void {
           return;
         }
         case 'none': {
+          // RUSH-2384: a live local process can still advertise `--session-id
+          // <target>` in its argv when getActiveSessions lost the row (empty
+          // by-pid registry, teams status flap, fold into a parent). Mailbox
+          // delivery only needs the id — prove liveness from the process table
+          // before giving up, so a mid-run agent is never unreachable while
+          // its pid is alive.
+          if (await isSessionIdLiveOnProcessTable(target)) {
+            try {
+              const block = findOpenBlockForMailbox(target);
+              const route = resolveAnswerRoute({
+                mailboxId: target,
+                answer: text,
+                block,
+                session: null,
+              });
+              if (route.kind === 'refuse') die(route.reason);
+              claimBlockAnswer(block, opts);
+              if (route.kind === 'mailbox') {
+                await deliverViaMailbox(target, text, block, { from: opts.from, ttlSeconds });
+                return;
+              }
+              die(
+                `Live process carries --session-id ${target} but needs a ${route.kind} rail ` +
+                  `that is unavailable without an active-session row. Retry after the session ` +
+                  `reappears in \`agents sessions --active\`, or inject into its terminal directly.`,
+              );
+            } catch (err) {
+              die((err as Error).message);
+            }
+            return;
+          }
           // Not a local/cloud session — check whether it's a detached
           // `--device ... --no-follow` dispatch, which `getActiveSessions()`
           // never sees (its live process is on another host). Same records

@@ -25,7 +25,14 @@ import { listActiveTasks } from '../cloud/store.js';
 import type { CloudTaskStatus } from '../cloud/types.js';
 import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
-import { readPidSessionEntry, listPidSessionEntries, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
+import {
+  readPidSessionEntry,
+  listPidSessionEntries,
+  prunePidSessionRegistry,
+  sessionIdFromLivePid,
+  isSessionIdShape,
+  type PidSessionEntry,
+} from './pid-registry.js';
 import { readSessionActorRecord, writeSessionAliasRecord } from './actor-sidecar.js';
 import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { buildClaudeLabelMap, getAgentSessionDirs } from './discover.js';
@@ -1557,14 +1564,20 @@ export function readAncestorSessionEntry(
  * as its own headless row. Two exceptions keep their own row: a candidate with
  * its own registry entry — on its pid OR on a wrapper ancestor strictly below
  * the pid it would fold into (the shim's entry lands on the cmd.exe
- * intermediary on Windows) — and a child of a *different* agent kind (claude
- * shelling out to codex is a real second session, not a fork).
+ * intermediary on Windows) — a child whose live argv carries `--session-id`
+ * (RUSH-2384: empty by-pid must not fold a real session into a parent and
+ * drop it from the active set) — and a child of a *different* agent kind
+ * (claude shelling out to codex is a real second session, not a fork).
  * Returns the kept roots plus, per root pid, how many descendants folded in.
+ *
+ * `hasLiveSessionId` defaults to reading `--session-id` from the live process
+ * argv; tests inject a pure predicate so they do not need real agent pids.
  */
 export function foldSubordinateAgents(
   candidates: AgentCandidate[],
   ppidMap: Map<number, number>,
   readEntry: (pid: number) => PidSessionEntry | undefined,
+  hasLiveSessionId: (pid: number) => boolean = (pid) => sessionIdFromLivePid(pid) != null,
 ): { kept: AgentCandidate[]; foldedByRoot: Map<number, number> } {
   const kindByPid = new Map(candidates.map(c => [c.pid, c.kind]));
 
@@ -1582,8 +1595,11 @@ export function foldSubordinateAgents(
   // Own launch identity: a matching-kind registry entry on the candidate or on
   // any wrapper between it and the pid it would fold into (exclusive). Entries
   // above the fold target belong to that ancestor's session, not this one.
+  // A live `--session-id` on argv is also own identity (RUSH-2384) — the
+  // registry is often empty while the process still names its session.
   const hasOwnSession = (c: AgentCandidate, stopPid: number): boolean => {
     if (readEntry(c.pid)?.agent === c.kind) return true;
+    if (hasLiveSessionId(c.pid)) return true;
     let cur = ppidMap.get(c.pid);
     const seen = new Set<number>();
     while (cur && cur > 1 && cur !== stopPid && !seen.has(cur)) {
@@ -1711,11 +1727,13 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<Acti
     // path). Absent entirely (direct launch outside agents-cli) → heuristic.
     const entry = readPidSessionEntry(pid) ?? readAncestorSessionEntry(pid, ppidMap, kind);
     // Exact session id, in priority: (1) the id we recorded at launch (Claude,
-    // known up front via --session-id); (2) the agent's OWN SessionStart hook,
+    // known up front via --session-id); (2) the live process's own argv
+    // `--session-id` (RUSH-2384 — by-pid is often empty mid-run while the
+    // process still advertises the id); (3) the agent's OWN SessionStart hook,
     // authoritative for non-Claude and for agents we didn't launch, joined by
     // launchId/terminalId/pid and kind-guarded against a stale reused-pid file;
-    // (3) the newest-jsonl heuristic (sessionIdFromFile, below).
-    let exactId = entry?.sessionId;
+    // (4) the newest-jsonl heuristic (sessionIdFromFile, below).
+    let exactId = entry?.sessionId ?? sessionIdFromLivePid(pid);
     // The hook record (when we fall to it) also carries the SessionStart `ts` — the
     // real session-start epoch. Capture it so terminal/headless rows get a
     // `startedAtMs` instead of rendering "0s ago" (they set none before this).
@@ -2029,6 +2047,31 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
   foldHostLink(merged);
   annotateOrchestratorLabels(merged);
   return merged;
+}
+
+/**
+ * True when a live agent process on this host carries `--session-id <id>` in
+ * its argv. RUSH-2384 last-resort for `agents message`: getActiveSessions can
+ * still miss a row (teams status flap, attributed-ancestor skip), but the
+ * process table + argv are ground truth for "this session is alive and
+ * mailbox-reachable". Only UUID-shaped ids are accepted so a short prefix
+ * never false-matches.
+ */
+export async function isSessionIdLiveOnProcessTable(
+  sessionId: string,
+  deps: {
+    readTable?: () => Promise<Array<{ pid: number; kind?: string }>>;
+    sessionIdOf?: (pid: number) => string | undefined;
+  } = {},
+): Promise<boolean> {
+  if (!isSessionIdShape(sessionId)) return false;
+  const readTable = deps.readTable ?? (async () => readProcessTable());
+  const sessionIdOf = deps.sessionIdOf ?? sessionIdFromLivePid;
+  for (const row of await readTable()) {
+    if (!row.kind) continue;
+    if (sessionIdOf(row.pid) === sessionId) return true;
+  }
+  return false;
 }
 
 /**

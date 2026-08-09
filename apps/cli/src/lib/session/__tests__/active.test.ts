@@ -37,6 +37,8 @@ describe('parseWin32ProcessCsv', () => {
 
 describe('foldSubordinateAgents', () => {
   const noRegistry = () => undefined;
+  // Pure tests pin argv-session to false so they never depend on real pids.
+  const noLiveId = () => false;
   const entryFor = (pid: number, agent = 'claude'): PidSessionEntry => ({ pid, agent, startedAtMs: 1 });
 
   it('folds same-kind descendants onto the topmost root, transitively', () => {
@@ -49,7 +51,7 @@ describe('foldSubordinateAgents', () => {
       { pid: 900, kind: 'claude' },
     ];
     const ppid = new Map([[100, 1], [200, 100], [250, 200], [300, 250], [900, 7]]);
-    const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, noRegistry);
+    const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, noRegistry, noLiveId);
     expect(kept.map(c => c.pid)).toEqual([100, 900]);
     expect(foldedByRoot.get(100)).toBe(2);
   });
@@ -61,7 +63,7 @@ describe('foldSubordinateAgents', () => {
       { pid: 300, kind: 'claude' },
     ];
     const ppid = new Map([[100, 1], [200, 100], [300, 200]]);
-    const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, p => p === 200 ? entryFor(200) : undefined);
+    const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, p => p === 200 ? entryFor(200) : undefined, noLiveId);
     expect(kept.map(c => c.pid)).toEqual([100, 200]);
     expect(foldedByRoot.get(200)).toBe(1);
     expect(foldedByRoot.has(100)).toBe(false);
@@ -75,7 +77,7 @@ describe('foldSubordinateAgents', () => {
       { pid: 300, kind: 'claude' },
     ];
     const ppid = new Map([[100, 1], [250, 100], [300, 250]]);
-    const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, p => p === 250 ? entryFor(250) : undefined);
+    const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, p => p === 250 ? entryFor(250) : undefined, noLiveId);
     expect(kept.map(c => c.pid)).toEqual([100, 300]);
     expect(foldedByRoot.size).toBe(0);
   });
@@ -87,7 +89,7 @@ describe('foldSubordinateAgents', () => {
       { pid: 300, kind: 'claude' },
     ];
     const ppid = new Map([[100, 1], [250, 100], [300, 250]]);
-    const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, p => p === 250 ? entryFor(250, 'codex') : undefined);
+    const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, p => p === 250 ? entryFor(250, 'codex') : undefined, noLiveId);
     expect(kept.map(c => c.pid)).toEqual([100]);
     expect(foldedByRoot.get(100)).toBe(1);
   });
@@ -98,8 +100,28 @@ describe('foldSubordinateAgents', () => {
       { pid: 200, kind: 'codex' },
     ];
     const ppid = new Map([[100, 1], [200, 100]]);
-    const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, noRegistry);
+    const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, noRegistry, noLiveId);
     expect(kept.map(c => c.pid)).toEqual([100, 200]);
+    expect(foldedByRoot.size).toBe(0);
+  });
+
+  it('keeps a descendant with live --session-id even when the by-pid registry is empty (RUSH-2384)', () => {
+    // Empty registry + empty by-pid was the incident shape: a worktree-cwd
+    // claude child of another claude (or of a teams shell that reparented) was
+    // folded into the parent and lost its session id from the active set.
+    const candidates: AgentCandidate[] = [
+      { pid: 100, kind: 'claude' },
+      { pid: 200, kind: 'claude' },
+    ];
+    const ppid = new Map([[100, 1], [200, 100]]);
+    const liveIds = new Set([200]);
+    const { kept, foldedByRoot } = foldSubordinateAgents(
+      candidates,
+      ppid,
+      noRegistry,
+      (pid) => liveIds.has(pid),
+    );
+    expect(kept.map(c => c.pid).sort((a, b) => a - b)).toEqual([100, 200]);
     expect(foldedByRoot.size).toBe(0);
   });
 

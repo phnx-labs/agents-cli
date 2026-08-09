@@ -1,5 +1,15 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { writePidSessionEntry, readPidSessionEntry, listPidSessionEntries, prunePidSessionRegistry, extractSessionIdArg } from './pid-registry.js';
+import { spawn, type ChildProcess } from 'child_process';
+import {
+  writePidSessionEntry,
+  readPidSessionEntry,
+  listPidSessionEntries,
+  prunePidSessionRegistry,
+  extractSessionIdArg,
+  sessionIdFromLivePid,
+  readProcessArgv,
+  isSessionIdShape,
+} from './pid-registry.js';
 
 // A pid far above any real process on this box, so the test never clobbers a
 // live `ag run` entry and never collides with a real process's registry file.
@@ -89,5 +99,51 @@ describe('extractSessionIdArg', () => {
 
   it('does not match the flag as a prompt substring (only whole args)', () => {
     expect(extractSessionIdArg(['-p', `run with --session-id ${UUID} please`])).toBeUndefined();
+  });
+
+  it('isSessionIdShape accepts only UUID forms', () => {
+    expect(isSessionIdShape(UUID)).toBe(true);
+    expect(isSessionIdShape('not-a-uuid')).toBe(false);
+    expect(isSessionIdShape('e6666574')).toBe(false);
+  });
+});
+
+describe('sessionIdFromLivePid (RUSH-2384)', () => {
+  const UUID = 'f0f6cb6b-3887-4f96-927e-8a929f3da418';
+  const posixOnly = process.platform === 'win32' ? it.skip : it;
+
+  // Spawn a long-lived child whose argv carries --session-id <uuid>, then
+  // recover the id from /proc (or ps) — the exact recovery path when by-pid
+  // is empty and getActiveSessions must still attribute the process.
+  posixOnly('reads --session-id from a live process argv with an empty by-pid registry', async () => {
+    let child: ChildProcess | undefined;
+    try {
+      // node -e '…' -- --session-id <uuid> keeps the flag as a real argv token
+      // after the script (not an option to node itself).
+      child = spawn(
+        process.execPath,
+        ['-e', 'setInterval(() => {}, 60_000)', '--', '--session-id', UUID],
+        { stdio: 'ignore', detached: false },
+      );
+      const pid = child.pid;
+      expect(pid).toBeTruthy();
+      // Brief settle so the process is fully exec'd and /proc is populated.
+      await new Promise((r) => setTimeout(r, 50));
+      expect(readProcessArgv(pid!)).toEqual(
+        expect.arrayContaining(['--session-id', UUID]),
+      );
+      expect(sessionIdFromLivePid(pid!)).toBe(UUID);
+      // Confirm we did NOT lean on the by-pid registry for this recovery.
+      expect(readPidSessionEntry(pid!)).toBeUndefined();
+    } finally {
+      if (child?.pid) {
+        try { process.kill(child.pid, 'SIGKILL'); } catch { /* already gone */ }
+      }
+    }
+  });
+
+  it('returns undefined for a dead pid', () => {
+    expect(sessionIdFromLivePid(2_000_000_000)).toBeUndefined();
+    expect(readProcessArgv(2_000_000_000)).toBeUndefined();
   });
 });

@@ -18,6 +18,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { execFileSync } from 'child_process';
 import { getTerminalsDir } from '../state.js';
 
 export interface PidSessionEntry {
@@ -74,6 +75,9 @@ export interface PidSessionEntry {
  * gets from generating the id itself.
  */
 const SESSION_ID_VALUE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function isSessionIdShape(value: string): boolean {
+  return SESSION_ID_VALUE_RE.test(value);
+}
 export function extractSessionIdArg(args: string[]): string | undefined {
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -86,6 +90,56 @@ export function extractSessionIdArg(args: string[]): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * Read a live process's original argv (best-effort).
+ *
+ * Linux: NUL-separated `/proc/<pid>/cmdline`. Darwin: `ps -ww -o args=` then
+ * whitespace-split (good enough for Claude's `--session-id <uuid>` tokens;
+ * not a full shell-quote parser). Other platforms: undefined.
+ *
+ * RUSH-2384: the by-pid registry is often empty mid-run (launch pid was a
+ * wrapper that exited, prune wiped it, or the agent was not launched via
+ * `agents run`). The live process still carries `--session-id` on its argv —
+ * the same signal the incident used to prove the session was alive — so the
+ * active scan and `agents message` can recover identity without the registry.
+ */
+export function readProcessArgv(pid: number): string[] | undefined {
+  if (!pid || pid < 1) return undefined;
+  if (process.platform === 'linux') {
+    try {
+      const buf = fs.readFileSync(`/proc/${pid}/cmdline`);
+      const parts = buf.toString('utf8').split('\0').filter(Boolean);
+      return parts.length > 0 ? parts : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  if (process.platform === 'darwin') {
+    try {
+      const out = execFileSync('ps', ['-ww', '-p', String(pid), '-o', 'args='], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      if (!out) return undefined;
+      return out.split(/\s+/);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Exact session id a live agent process was launched with, read from its
+ * current argv. Undefined when the process is gone, the platform can't expose
+ * argv, or the vector carries no `--session-id`.
+ */
+export function sessionIdFromLivePid(pid: number): string | undefined {
+  const argv = readProcessArgv(pid);
+  if (!argv) return undefined;
+  return extractSessionIdArg(argv);
 }
 
 function pidRegistryDir(): string {
